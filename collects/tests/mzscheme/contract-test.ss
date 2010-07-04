@@ -3,7 +3,7 @@
 	 (lib "class.ss")
          (lib "etc.ss"))
   
-(SECTION 'contract)
+(Section 'contract)
 
 (parameterize ([error-print-width 200])
 (let ()
@@ -127,6 +127,9 @@
   
   (test/no-error '(listof any/c))
   (test/no-error '(listof (lambda (x) #t)))
+  
+  (test/spec-passed/result 'any/c '(contract any/c 1 'pos 'neg) 1)
+  (test/pos-blame 'none/c '(contract none/c 1 'pos 'neg))
   
   (test/spec-passed
    'contract-arrow-star0a
@@ -531,6 +534,33 @@
               (lambda (x) (values 2 1))
               'pos
               'neg))
+  
+  (test/spec-passed
+   'and/c1
+   '((contract (and/c (-> (<=/c 100) (<=/c 100))
+                      (-> (>=/c -100) (>=/c -100)))
+               (λ (x) x)
+               'pos
+               'neg)
+     1))
+  
+  (test/neg-blame
+   'and/c2
+   '((contract (and/c (-> (<=/c 100) (<=/c 100))
+                      (-> (>=/c -100) (>=/c -100)))
+               (λ (x) x)
+               'pos
+               'neg)
+     200))
+  
+  (test/pos-blame
+   'and/c3
+   '((contract (and/c (-> (<=/c 100) (<=/c 100))
+                      (-> (>=/c -100) (>=/c -100)))
+               (λ (x) 200)
+               'pos
+               'neg)
+     1))
   
   (test/spec-passed
    '->r1
@@ -1108,6 +1138,34 @@
      1))
   
   (test/pos-blame
+   'contract-case->0a
+   '(contract (case->)
+              (lambda (x) x)
+              'pos
+              'neg))
+  
+  (test/pos-blame
+   'contract-case->0b
+   '(contract (case->)
+              (lambda () 1)
+              'pos
+              'neg))
+  
+  (test/pos-blame
+   'contract-case->0c
+   '(contract (case->)
+              1
+              'pos
+              'neg))
+  
+  (test/spec-passed
+   'contract-case->0d
+   '(contract (case->)
+              (case-lambda)
+              'pos
+              'neg))
+  
+  (test/pos-blame
    'contract-case->1
    '(contract (case-> (integer? integer? . -> . integer?) (integer? . -> . integer?))
               (lambda (x) x)
@@ -1308,6 +1366,47 @@
      #f)
    #f)
 
+  (test/spec-passed/result
+   'or/c9
+   '((contract (or/c (-> string?) (-> integer? integer?))
+               (λ () "x")
+               'pos
+               'neg))
+   "x")
+  
+  (test/spec-passed/result
+   'or/c10
+   '((contract (or/c (-> string?) (-> integer? integer?))
+               (λ (x) x)
+               'pos
+               'neg) 
+     1)
+   1)
+  
+  (test/pos-blame
+   'or/c11
+   '(contract (or/c (-> string?) (-> integer? integer?))
+              1
+              'pos
+              'neg))
+  
+  (test/pos-blame
+   'or/c12
+   '((contract (or/c (-> string?) (-> integer? integer?))
+               1
+               'pos
+               'neg)
+     'x))
+  
+  (test 1 'or/c-not-error-early 
+        (begin (or/c (-> integer? integer?) (-> boolean? boolean?))
+               1))
+  (error-test #'(contract (or/c (-> integer? integer?) (-> boolean? boolean?))
+                          (λ (x) x)
+                          'pos
+                          'neg)
+              exn:fail?)
+  
   (test
    '(1 2)
    'or/c-ordering
@@ -1336,6 +1435,20 @@
                'anything
                'pos
                'neg)
+     x))
+  
+  (test
+   (reverse '(1 3 4 2))
+   'ho-and/c-ordering
+   (let ([x '()])
+     ((contract (and/c (-> (lambda (y) (set! x (cons 1 x)) #t)
+                           (lambda (y) (set! x (cons 2 x)) #t))
+                       (-> (lambda (y) (set! x (cons 3 x)) #t)
+                           (lambda (y) (set! x (cons 4 x)) #t)))
+                (λ (x) x)
+                'pos
+                'neg)
+      1)
      x))
   
   (test/spec-passed
@@ -1392,272 +1505,6 @@
                x))
       (eval '(require contract-test-suite-define1))))
   
-  (test/spec-passed
-   'provide/contract1
-   '(let ()
-      (eval '(module contract-test-suite1 mzscheme
-               (require (lib "contract.ss"))
-               (define x 1)
-               (provide/contract (x integer?))))
-      (eval '(require contract-test-suite1))
-      (eval 'x)))
-  
-  (test/spec-passed
-   'provide/contract2
-   '(let ()
-      (eval '(module contract-test-suite2 mzscheme
-               (require (lib "contract.ss"))
-               (provide/contract)))
-      (eval '(require contract-test-suite2))))
-  
-  (test/spec-failed
-   'provide/contract3
-   '(let ()
-      (eval '(module contract-test-suite3 mzscheme
-               (require (lib "contract.ss"))
-               (define x #f)
-               (provide/contract (x integer?))))
-      (eval '(require contract-test-suite3))
-      (eval 'x))
-   "contract-test-suite3")
-  
-  (test/spec-passed
-   'provide/contract4
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module contract-test-suite4 mzscheme
-               (require (lib "contract.ss"))
-               (define-struct s (a))
-               (provide/contract (struct s ((a any/c))))))
-      (eval '(require contract-test-suite4))
-      (eval '(list (make-s 1)
-                   (s-a (make-s 1))
-                   (s? (make-s 1))
-                   (set-s-a! (make-s 1) 2)))))
-  
-  (test/spec-passed/result
-   'provide/contract4-b
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module contract-test-suite4-b mzscheme
-               (require (lib "contract.ss"))
-               (define-struct s (a b))
-               (provide/contract (struct s ((a any/c) (b any/c))))))
-      (eval '(require contract-test-suite4-b))
-      (eval '(let ([an-s (make-s 1 2)])
-               (list (s-a an-s)
-                     (s-b an-s)
-                     (begin (set-s-a! an-s 3)
-                            (s-a an-s))
-                     (begin (set-s-b! an-s 4)
-                            (s-b an-s))))))
-   
-   (list 1 2 3 4))
-  
-  (test/spec-passed
-   'provide/contract5
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module contract-test-suite5 mzscheme
-               (require (lib "contract.ss"))
-               (define-struct s (a))
-               (define-struct t (a))
-               (provide/contract (struct s ((a any/c)))
-                                 (struct t ((a any/c))))))
-      (eval '(require contract-test-suite5))
-      (eval '(list (make-s 1)
-                   (s-a (make-s 1))
-                   (s? (make-s 1))
-                   (set-s-a! (make-s 1) 2)
-                   (make-t 1)
-                   (t-a (make-t 1))
-                   (t? (make-t 1))
-                   (set-t-a! (make-t 1) 2)))))
-  
-  (test/spec-passed
-   'provide/contract6
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module contract-test-suite6 mzscheme
-               (require (lib "contract.ss"))
-               (define-struct s (a))
-               (provide/contract (struct s ((a any/c))))))
-      (eval '(require contract-test-suite6))
-      (eval '(define-struct (t s) ()))))
-  
-  (test/spec-passed
-   'provide/contract6
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module contract-test-suite6 mzscheme
-               (require (lib "contract.ss"))
-               (define-struct s (a))
-               (provide/contract (struct s ((a any/c))))))
-      (eval '(require contract-test-suite6))
-      (eval '(define-struct (t s) ()))))
-  
-  (test/spec-passed
-   'provide/contract6b
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module contract-test-suite6b mzscheme
-               (require (lib "contract.ss"))
-               (define-struct s_ (a))
-               (provide/contract (struct s_ ((a any/c))))))
-      (eval '(require contract-test-suite6b))
-      (eval '(module contract-test-suite6b2 mzscheme
-               (require contract-test-suite6b)
-               (require (lib "contract.ss"))
-               (define-struct (t_ s_) (b))
-               (provide s_-a)
-               (provide/contract (struct (t_ s_) ((a any/c) (b any/c))))))
-      (eval '(require contract-test-suite6b2))
-      (eval '(define-struct (u_ t_) ()))
-      (eval '(s_-a (make-u_ 1 2)))))
-  
-  (test/spec-passed
-   'provide/contract7
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module contract-test-suite7 mzscheme
-               (require (lib "contract.ss"))
-               (define-struct s (a b))
-               (define-struct (t s) (c d))
-               (provide/contract 
-                (struct s ((a any/c) (b any/c)))
-                (struct (t s) ((a any/c) (b any/c) (c any/c) (d any/c))))))
-      (eval '(require contract-test-suite7))
-      (eval '(let ([x (make-t 1 2 3 4)])
-               (s-a x)
-               (s-b x)
-               (t-c x)
-               (t-d x)
-               (void)))))
-  
-  (test/spec-passed
-   'provide/contract8
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module contract-test-suite8 mzscheme
-               (require (lib "contract.ss"))
-               (define-struct i-s (contents))
-               (define (w-f-s? x) #t)
-               (provide/contract 
-                (struct i-s ((contents (flat-named-contract "integer-set-list" w-f-s?)))))))
-      (eval '(require contract-test-suite8))
-      (eval '(i-s-contents (make-i-s 1)))))
-   
-  (test/spec-passed
-   'provide/contract9
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module contract-test-suite9 mzscheme
-               (require (lib "contract.ss"))
-               (define the-internal-name 1)
-               (provide/contract (rename the-internal-name the-external-name integer?))
-               (+ the-internal-name 1)))
-      (eval '(require contract-test-suite9))
-      (eval '(+ the-external-name 1))))
-  
-  (test/spec-passed
-   'provide/contract10
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module m mzscheme
-               (require (lib "contract.ss"))
-               (define-struct s (a b) (make-inspector))
-               (provide/contract (struct s ((a number?) (b number?))))))
-      (eval '(module n mzscheme
-               (require (lib "struct.ss")
-                        m)
-               (print-struct #t)
-               (copy-struct s 
-                            (make-s 1 2)
-                            [s-a 3])))
-      (eval '(require n))))
-  
-  ;; this test is broken, not sure why
-  #|
-  (test/spec-failed
-   'provide/contract11
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module m mzscheme
-               (require (lib "contract.ss"))
-               (define-struct s (a b) (make-inspector))
-               (provide/contract (struct s ((a number?) (b number?))))))
-      (eval '(module n mzscheme
-               (require (lib "struct.ss")
-                        m)
-               (print-struct #t)
-               (copy-struct s 
-                            (make-s 1 2)
-                            [s-a #f])))
-      (eval '(require n)))
-   'n)
-|#
-  
-  (test/spec-passed
-   'provide/contract12
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module m mzscheme
-               (require (lib "contract.ss"))
-               (define-struct (exn2 exn) ())
-               (provide/contract (struct (exn2 exn) ((message any/c) (continuation-marks any/c))))))
-      (eval '(require m))))
-  
-  (test/spec-passed/result
-   'provide/contract13
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module common-msg-structs mzscheme
-               (require (lib "contract.ss" "mzlib"))
-               (define-struct register (name type) (make-inspector))
-               (provide/contract (struct register ([name any/c] [type any/c])))))
-      
-      (eval '(require common-msg-structs))
-      (eval '(require (lib "plt-match.ss")))
-      (eval '(match (make-register 1 2)
-               [(struct register (name type))
-                (list name type)])))
-   (list 1 2))
-  
-  (test/spec-passed
-   'provide/contract14
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module test1 mzscheme
-               (require (lib "contract.ss"))
-               
-               (define-struct type (flags))
-               (define-struct (type:ptr type) (type))
-               
-               (provide/contract
-                (struct type
-                        ([flags (listof string?)]))
-                
-                (struct (type:ptr type)
-                        ([flags (listof string?)] [type type?])))))
-
-      (eval '(module test2 mzscheme
-               (require (lib "plt-match.ss"))
-               (require test1)
-               (match (make-type:ptr '() (make-type '()))
-                 [(struct type:ptr (flags type)) #f])))
-      (eval '(require test2))))
-  
-  
-  ;; provide/contract should signal errors without requiring a reference to the variable
-  ;; this test is bogus, because provide/contract'd variables can be set!'d.
-  #;
-  (test/pos-blame
-   'provide/contract15
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module pos mzscheme
-               (require (lib "contract.ss"))
-               (define i #f)
-               (provide/contract [i integer?])))
-      (eval '(require pos))))
-  
-  ;; this is really a positive violation, but name the module `neg' just for an addl test
-  #;
-  (test/neg-blame
-   'provide/contract16
-   '(parameterize ([current-namespace (make-namespace)])
-      (eval '(module neg mzscheme
-               (require (lib "contract.ss"))
-               (define i #f)
-               (provide/contract [i integer?])))
-      (eval '(require neg))))
-  
-
 
   
 ;                                                                                                     
@@ -3937,6 +3784,7 @@
                       (-> integer? integer? integer?))
              (case-> (->r ((x number?) (y boolean?) (z pair?)) number?)
                      (-> integer? integer? integer?)))
+  (test-name '(case->) (case->))
   
   (test-name '(case-> (-> integer? integer?) (-> integer? integer? integer?))
              (case-> (-> integer? integer?) (-> integer? integer? integer?)))
@@ -3958,6 +3806,7 @@
   (test-name '(and/c number? integer?) (and/c (flat-contract number?)
                                               (flat-contract integer?)))
   (test-name '(and/c number? (-> integer? integer?)) (and/c number? (-> integer? integer?)))
+  (test-name '(and/c (-> boolean? boolean?) (-> integer? integer?)) (and/c (-> boolean? boolean?) (-> integer? integer?)))
 
   (test-name '(not/c integer?) (not/c integer?))
   (test-name '(=/c 5) (=/c 5))
@@ -4123,6 +3972,28 @@
   (test #f contract-stronger? (symbols 'z 'x 'y) (symbols 'x 'y))
   (test #t contract-stronger? (one-of/c (expt 2 100)) (one-of/c (expt 2 100) 12))
   
+  (test #t contract-stronger?
+        (or/c (-> (>=/c 3) (>=/c 3)) (-> string?))
+        (or/c (-> (>=/c 4) (>=/c 3)) (-> string?)))
+  (test #f contract-stronger?
+        (or/c (-> string?) (-> integer? integer?))
+        (or/c (-> string?) (-> any/c integer?)))
+  (test #f contract-stronger?
+        (or/c (-> string?) (-> any/c integer?))
+        (or/c (-> string?) (-> integer? integer?)))
+  (test #t contract-stronger?
+        (or/c (-> string?) (-> integer? integer?) integer? boolean?)
+        (or/c (-> string?) (-> integer? integer?) integer? boolean?))
+  (test #f contract-stronger?
+        (or/c (-> string?) (-> integer? integer?) integer? char?)
+        (or/c (-> string?) (-> integer? integer?) integer? boolean?))
+  (test #f contract-stronger?
+        (or/c (-> string?) (-> integer? integer?) integer?)
+        (or/c (-> string?) (-> integer? integer?) integer? boolean?))
+  (test #f contract-stronger?
+        (or/c (-> string?) (-> integer? integer?) integer?)
+        (or/c (-> integer? integer?) integer?))
+  
   (let ()
     (define-contract-struct couple (hd tl))
     (define (non-zero? x) (not (zero? x)))
@@ -4165,6 +4036,491 @@
     (test #f contract-stronger? (short-sorted-list/less-than 5) (short-sorted-list/less-than 4))
     (test #t contract-stronger? (sorted-list/less-than 4) (sorted-list/less-than 5))
     (test #f contract-stronger? (sorted-list/less-than 5) (sorted-list/less-than 4)))
+  
+  
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;;
+  ;;  first-order tests
+  ;;
+  
+  (test #t contract-first-order-passes? (flat-contract integer?) 1)
+  (test #f contract-first-order-passes? (flat-contract integer?) 'x)
+  (test #t contract-first-order-passes? (flat-contract boolean?) #t)
+  (test #f contract-first-order-passes? (flat-contract boolean?) 'x)
+  (test #t contract-first-order-passes? any/c 1)
+  (test #t contract-first-order-passes? any/c #t)
+  (test #t contract-first-order-passes? (-> integer? integer?) (λ (x) #t))
+  (test #f contract-first-order-passes? (-> integer? integer?) (λ (x y) #t))
+  (test #f contract-first-order-passes? (-> integer? integer?) 'x)
+  (test #t contract-first-order-passes? (-> integer? boolean? integer?) (λ (x y) #t))
+  (test #f contract-first-order-passes? (-> integer? boolean? integer?) (λ (x) #t))
+  (test #f contract-first-order-passes? (-> integer? boolean? integer?) (λ (x y z) #t))
+  
+  (test #t contract-first-order-passes? (->* (integer?) boolean? (char? any/c)) (λ (x . y) #f))
+  (test #f contract-first-order-passes? (->* (integer?) boolean? (char? any/c)) (λ (x y . z) #f))
+  (test #f contract-first-order-passes? (->* (integer?) boolean? (char? any/c)) (λ (x) #f))
+  (test #t contract-first-order-passes? (->* (integer?) boolean? (char? any/c)) (λ x #f))
+  
+  (test #t contract-first-order-passes? (->d integer? boolean? (lambda (x y) char?)) (λ (x y) x))
+  (test #f contract-first-order-passes? (->d integer? boolean? (lambda (x y) char?)) (λ (x) x))
+  (test #f contract-first-order-passes? (->d integer? boolean? (lambda (x y) char?)) (λ (x y z) x))
+
+  (test #t contract-first-order-passes? (list-immutableof integer?) (list-immutable 1))
+  (test #f contract-first-order-passes? (list-immutableof integer?) (list 1))
+  (test #f contract-first-order-passes? (list-immutableof integer?) #f)
+
+  (test #t contract-first-order-passes? (vector-immutableof integer?) (vector->immutable-vector (vector 1)))
+  (test #f contract-first-order-passes? (vector-immutableof integer?) 'x)
+  (test #f contract-first-order-passes? (vector-immutableof integer?) '())
+  
+  (test #t contract-first-order-passes? (promise/c integer?) (delay 1))
+  (test #f contract-first-order-passes? (promise/c integer?) 1)
+  
+  (test #t contract-first-order-passes? (->d* (integer? boolean?) (lambda (x y) char?)) (λ (x y) #t))
+  (test #f contract-first-order-passes? (->d* (integer? boolean?) (lambda (x y) char?)) (λ (x) #t))
+  (test #f contract-first-order-passes? (->d* (integer? boolean?) (lambda (x y) char?)) (λ (x y z) #t))
+
+  (test #t contract-first-order-passes? 
+        (->d* (integer? boolean?) any/c (lambda (x y . z) char?))
+        (λ (x y . z) z))
+  (test #t contract-first-order-passes? 
+        (->d* (integer? boolean?) any/c (lambda (x y . z) char?))
+        (λ (y . z) z))
+  (test #t contract-first-order-passes? 
+        (->d* (integer? boolean?) any/c (lambda (x y . z) char?))
+        (λ z z))
+  (test #f contract-first-order-passes? 
+        (->d* (integer? boolean?) any/c (lambda (x y . z) char?))
+        (λ (x y z . w) 1))
+  (test #f contract-first-order-passes? 
+        (->d* (integer? boolean?) any/c (lambda (x y . z) char?))
+        (λ (x y) 1))
+  
+  (test #t contract-first-order-passes? (->r ((x number?)) number?) (λ (x) 1))
+  (test #f contract-first-order-passes? (->r ((x number?)) number?) (λ (x y) 1))
+  (test #f contract-first-order-passes? (->r ((x number?)) number?) (λ () 1))
+  (test #t contract-first-order-passes? (->r ((x number?)) number?) (λ args 1))
+  
+  (test #t contract-first-order-passes? (->pp ((x number?)) #t number? blech #t) (λ (x) 1))
+  (test #f contract-first-order-passes? (->pp ((x number?)) #t number? blech #t) (λ () 1))
+  (test #t contract-first-order-passes? (->pp ((x number?)) #t number? blech #t) (λ (x . y) 1))
+  
+  (test #f contract-first-order-passes? 
+        (case-> (-> integer? integer?)
+                (-> integer? integer? integer?))
+        (λ () 1))
+  (test #f contract-first-order-passes? 
+        (case-> (-> integer? integer?)
+                (-> integer? integer? integer?))
+        (λ (x) 1))
+  (test #f contract-first-order-passes? 
+        (case-> (-> integer? integer?)
+                (-> integer? integer? integer?))
+        (λ (x y) 1))
+  (test #f contract-first-order-passes? 
+        (case->)
+        1)
+  
+  (test #t contract-first-order-passes? 
+        (case->)
+        (case-lambda))
+  
+  (test #t contract-first-order-passes? 
+        (case-> (-> integer? integer?)
+                (-> integer? integer? integer?))
+        (case-lambda [(x) x] [(x y) x]))
+  (test #t contract-first-order-passes? 
+        (case-> (-> integer? integer?)
+                (-> integer? integer? integer?))
+        (case-lambda [() 1] [(x) x] [(x y) x]))
+  (test #t contract-first-order-passes? 
+        (case-> (-> integer? integer?)
+                (-> integer? integer? integer?))
+        (case-lambda [() 1] [(x) x] [(x y) x] [(x y z) x]))
+  
+  (test #t contract-first-order-passes? (and/c (-> positive? positive?) (-> integer? integer?)) (λ (x) x))
+  (test #t contract-first-order-passes? (and/c (-> positive? positive?) (-> integer? integer?)) values)
+  (test #f contract-first-order-passes? (and/c (-> integer?) (-> integer? integer?)) (λ (x) x))
+  
+  (test #t contract-first-order-passes? 
+        (cons-immutable/c boolean? (-> integer? integer?))
+        (list*-immutable #t (λ (x) x)))
+  (test #t contract-first-order-passes? 
+        (cons-immutable/c boolean? (-> integer? integer?))
+        (list*-immutable 1 2))
+  
+  (test #f contract-first-order-passes? (flat-rec-contract the-name) 1)
+
+  (test #t contract-first-order-passes? 
+        (object-contract (m (-> integer? integer?)))
+        (new object%))
+  (test #t contract-first-order-passes? 
+        (object-contract (m (-> integer? integer?)))
+        1)
+
+  (let ()
+    (define-contract-struct couple (hd tl))
+    (test #t contract-first-order-passes?
+          (couple/c any/c any/c) 
+          (make-couple 1 2))
+    
+    (test #f contract-first-order-passes?
+          (couple/c any/c any/c) 
+          2)
+    
+    (test #t contract-first-order-passes?
+          (couple/dc [hd any/c] [tl any/c]) 
+          (make-couple 1 2))
+    
+    (test #f contract-first-order-passes?
+          (couple/dc [hd any/c] [tl any/c]) 
+          1)
+    
+    (test #t contract-first-order-passes?
+          (couple/dc [hd any/c] [tl (hd) any/c]) 
+          (make-couple 1 2))
+    
+    (test #f contract-first-order-passes?
+          (couple/dc [hd any/c] [tl (hd) any/c]) 
+          1))
+
+  (test #t contract-first-order-passes? (or/c (-> (>=/c 5) (>=/c 5)) boolean?) #t)
+  (test #t contract-first-order-passes? (or/c (-> (>=/c 5) (>=/c 5)) boolean?) (λ (x) x))
+  (test #f contract-first-order-passes? (or/c (-> (>=/c 5) (>=/c 5)) boolean?) 'x)
+
+  (test #t contract-first-order-passes? 
+        (or/c (-> integer? integer? integer?)
+              (-> integer? integer?))
+        (λ (x) x))
+  (test #t contract-first-order-passes? 
+        (or/c (-> integer? integer? integer?)
+              (-> integer? integer?))
+        (λ (x y) x))
+  (test #f contract-first-order-passes? 
+        (or/c (-> integer? integer? integer?)
+              (-> integer? integer?))
+        (λ () x))
+  (test #f contract-first-order-passes? 
+        (or/c (-> integer? integer? integer?)
+              (-> integer? integer?))
+        1)
+  
+  (test-name '(or/c) (or/c))
+  (test-name '(or/c integer? gt0?) (or/c integer? (let ([gt0? (lambda (x) (> x 0))]) gt0?)))
+  (test-name '(or/c integer? boolean?)
+             (or/c (flat-contract integer?)
+                   (flat-contract boolean?)))
+  (test-name '(or/c (-> (>=/c 5) (>=/c 5)) boolean?)
+             (or/c (-> (>=/c 5) (>=/c 5)) boolean?))
+  (test-name '(or/c (-> (>=/c 5) (>=/c 5)) boolean?)
+             (or/c boolean? (-> (>=/c 5) (>=/c 5))))
+  
+
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;;
+  ;; provide/contract tests
+  ;; (at the end, becuase they are slow w/out .zo files)
+  ;;
+  
+    (test/spec-passed
+   'provide/contract1
+   '(let ()
+      (eval '(module contract-test-suite1 mzscheme
+               (require (lib "contract.ss"))
+               (define x 1)
+               (provide/contract (x integer?))))
+      (eval '(require contract-test-suite1))
+      (eval 'x)))
+  
+  (test/spec-passed
+   'provide/contract2
+   '(let ()
+      (eval '(module contract-test-suite2 mzscheme
+               (require (lib "contract.ss"))
+               (provide/contract)))
+      (eval '(require contract-test-suite2))))
+  
+  (test/spec-failed
+   'provide/contract3
+   '(let ()
+      (eval '(module contract-test-suite3 mzscheme
+               (require (lib "contract.ss"))
+               (define x #f)
+               (provide/contract (x integer?))))
+      (eval '(require contract-test-suite3))
+      (eval 'x))
+   "contract-test-suite3")
+  
+  (test/spec-passed
+   'provide/contract4
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module contract-test-suite4 mzscheme
+               (require (lib "contract.ss"))
+               (define-struct s (a))
+               (provide/contract (struct s ((a any/c))))))
+      (eval '(require contract-test-suite4))
+      (eval '(list (make-s 1)
+                   (s-a (make-s 1))
+                   (s? (make-s 1))
+                   (set-s-a! (make-s 1) 2)))))
+  
+  (test/spec-passed/result
+   'provide/contract4-b
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module contract-test-suite4-b mzscheme
+               (require (lib "contract.ss"))
+               (define-struct s (a b))
+               (provide/contract (struct s ((a any/c) (b any/c))))))
+      (eval '(require contract-test-suite4-b))
+      (eval '(let ([an-s (make-s 1 2)])
+               (list (s-a an-s)
+                     (s-b an-s)
+                     (begin (set-s-a! an-s 3)
+                            (s-a an-s))
+                     (begin (set-s-b! an-s 4)
+                            (s-b an-s))))))
+   
+   (list 1 2 3 4))
+  
+  (test/spec-passed
+   'provide/contract5
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module contract-test-suite5 mzscheme
+               (require (lib "contract.ss"))
+               (define-struct s (a))
+               (define-struct t (a))
+               (provide/contract (struct s ((a any/c)))
+                                 (struct t ((a any/c))))))
+      (eval '(require contract-test-suite5))
+      (eval '(list (make-s 1)
+                   (s-a (make-s 1))
+                   (s? (make-s 1))
+                   (set-s-a! (make-s 1) 2)
+                   (make-t 1)
+                   (t-a (make-t 1))
+                   (t? (make-t 1))
+                   (set-t-a! (make-t 1) 2)))))
+  
+  (test/spec-passed
+   'provide/contract6
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module contract-test-suite6 mzscheme
+               (require (lib "contract.ss"))
+               (define-struct s (a))
+               (provide/contract (struct s ((a any/c))))))
+      (eval '(require contract-test-suite6))
+      (eval '(define-struct (t s) ()))))
+  
+  (test/spec-passed
+   'provide/contract6
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module contract-test-suite6 mzscheme
+               (require (lib "contract.ss"))
+               (define-struct s (a))
+               (provide/contract (struct s ((a any/c))))))
+      (eval '(require contract-test-suite6))
+      (eval '(define-struct (t s) ()))))
+  
+  (test/spec-passed
+   'provide/contract6b
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module contract-test-suite6b mzscheme
+               (require (lib "contract.ss"))
+               (define-struct s_ (a))
+               (provide/contract (struct s_ ((a any/c))))))
+      (eval '(require contract-test-suite6b))
+      (eval '(module contract-test-suite6b2 mzscheme
+               (require contract-test-suite6b)
+               (require (lib "contract.ss"))
+               (define-struct (t_ s_) (b))
+               (provide s_-a)
+               (provide/contract (struct (t_ s_) ((a any/c) (b any/c))))))
+      (eval '(require contract-test-suite6b2))
+      (eval '(define-struct (u_ t_) ()))
+      (eval '(s_-a (make-u_ 1 2)))))
+  
+  (test/spec-passed
+   'provide/contract7
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module contract-test-suite7 mzscheme
+               (require (lib "contract.ss"))
+               (define-struct s (a b))
+               (define-struct (t s) (c d))
+               (provide/contract 
+                (struct s ((a any/c) (b any/c)))
+                (struct (t s) ((a any/c) (b any/c) (c any/c) (d any/c))))))
+      (eval '(require contract-test-suite7))
+      (eval '(let ([x (make-t 1 2 3 4)])
+               (s-a x)
+               (s-b x)
+               (t-c x)
+               (t-d x)
+               (void)))))
+  
+  (test/spec-passed
+   'provide/contract8
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module contract-test-suite8 mzscheme
+               (require (lib "contract.ss"))
+               (define-struct i-s (contents))
+               (define (w-f-s? x) #t)
+               (provide/contract 
+                (struct i-s ((contents (flat-named-contract "integer-set-list" w-f-s?)))))))
+      (eval '(require contract-test-suite8))
+      (eval '(i-s-contents (make-i-s 1)))))
+   
+  (test/spec-passed
+   'provide/contract9
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module contract-test-suite9 mzscheme
+               (require (lib "contract.ss"))
+               (define the-internal-name 1)
+               (provide/contract (rename the-internal-name the-external-name integer?))
+               (+ the-internal-name 1)))
+      (eval '(require contract-test-suite9))
+      (eval '(+ the-external-name 1))))
+  
+  (test/spec-passed
+   'provide/contract10
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module m mzscheme
+               (require (lib "contract.ss"))
+               (define-struct s (a b) (make-inspector))
+               (provide/contract (struct s ((a number?) (b number?))))))
+      (eval '(module n mzscheme
+               (require (lib "struct.ss")
+                        m)
+               (print-struct #t)
+               (copy-struct s 
+                            (make-s 1 2)
+                            [s-a 3])))
+      (eval '(require n))))
+  
+  ;; this test is broken, not sure why
+  #|
+  (test/spec-failed
+   'provide/contract11
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module m mzscheme
+               (require (lib "contract.ss"))
+               (define-struct s (a b) (make-inspector))
+               (provide/contract (struct s ((a number?) (b number?))))))
+      (eval '(module n mzscheme
+               (require (lib "struct.ss")
+                        m)
+               (print-struct #t)
+               (copy-struct s 
+                            (make-s 1 2)
+                            [s-a #f])))
+      (eval '(require n)))
+   'n)
+|#
+  
+  (test/spec-passed
+   'provide/contract12
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module m mzscheme
+               (require (lib "contract.ss"))
+               (define-struct (exn2 exn) ())
+               (provide/contract (struct (exn2 exn) ((message any/c) (continuation-marks any/c))))))
+      (eval '(require m))))
+  
+  (test/spec-passed/result
+   'provide/contract13
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module common-msg-structs mzscheme
+               (require (lib "contract.ss" "mzlib"))
+               (define-struct register (name type) (make-inspector))
+               (provide/contract (struct register ([name any/c] [type any/c])))))
+      
+      (eval '(require common-msg-structs))
+      (eval '(require (lib "plt-match.ss")))
+      (eval '(match (make-register 1 2)
+               [(struct register (name type))
+                (list name type)])))
+   (list 1 2))
+  
+  (test/spec-passed
+   'provide/contract14
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module test1 mzscheme
+               (require (lib "contract.ss"))
+               
+               (define-struct type (flags))
+               (define-struct (type:ptr type) (type))
+               
+               (provide/contract
+                (struct type
+                        ([flags (listof string?)]))
+                
+                (struct (type:ptr type)
+                        ([flags (listof string?)] [type type?])))))
+
+      (eval '(module test2 mzscheme
+               (require (lib "plt-match.ss"))
+               (require test1)
+               (match (make-type:ptr '() (make-type '()))
+                 [(struct type:ptr (flags type)) #f])))
+      (eval '(require test2))))
+  
+  ;; make sure unbound identifier exception is raised.
+  (error-test
+   #'(parameterize ([current-namespace (make-namespace)])
+       (eval '(module pos mzscheme
+                (require (lib "contract.ss"))
+                (provide/contract [i any/c]))))
+   exn:fail:syntax?)
+  
+  ;; provide/contract should signal errors without requiring a reference to the variable
+  ;; this test is bogus, because provide/contract'd variables can be set!'d.
+  (test/pos-blame
+   'provide/contract15
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module pos mzscheme
+               (require (lib "contract.ss"))
+               (define i #f)
+               (provide/contract [i integer?])))
+      (eval '(require pos))))
+  
+  ;; this is really a positive violation, but name the module `neg' just for an addl test
+  (test/neg-blame
+   'provide/contract16
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module neg mzscheme
+               (require (lib "contract.ss"))
+               (define i #f)
+               (provide/contract [i integer?])))
+      (eval '(require neg))))
+  
+  ;; this test doesn't pass yet ... waiting for support from define-struct
+  
+  #;
+  (test/neg-blame
+   'provide/contract17
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module pos mzscheme
+               (require (lib "contract.ss"))
+               (define-struct s (a))
+               (provide/contract [struct s ((a integer?))])))
+      (eval '(module neg mzscheme
+               (require pos)
+               (define-struct (t s) ())
+               (make-t #f)))
+      (eval '(require neg))))
+  
+
+  (error-test
+   #'(parameterize ([current-namespace (make-namespace)])
+       (eval '(module bug mzscheme
+                (require (lib "contract.ss"))
+                (define the-defined-variable 'five)
+                (provide/contract [the-defined-variable number?])))
+       (eval '(require bug)))
+   (λ (x)
+     (and (exn? x)
+          (regexp-match #rx"on the-defined-variable" (exn-message x)))))
+  
+
   
 ))
 (report-errs)

@@ -55,8 +55,9 @@ void designate_modified(void *p);
 # define CHECK_USED_AGAINST_MAX(x) /* empty */
 #endif
 
-/* Forward declaration: */
+/* Forward declarations: */
 inline static void *find_cached_pages(size_t len, size_t alignment);
+static void free_actual_pages(void *p, size_t len, int zeroed);
 
 /* the structure of an exception msg and its reply */
 typedef struct rep_msg {
@@ -130,11 +131,18 @@ static void *malloc_pages(size_t len, size_t alignment)
       }
     }
     if(pre_extra < extra) {
-      retval = vm_deallocate(task_self, (vm_address_t)real_r + len, 
-			     extra - pre_extra);
-      if(retval != KERN_SUCCESS) {
-	GCPRINT(GCOUTF, "WARNING: couldn't deallocate post-extra: %s\n",
-	       mach_error_string(retval));
+      if (!pre_extra) {
+	/* Instead of actually unmapping, put it in the cache, and there's
+	   a good chance we can use it next time: */
+	ACTUALLY_ALLOCATING_PAGES(extra);
+	free_actual_pages(real_r + len, extra, 1);
+      } else {
+	retval = vm_deallocate(task_self, (vm_address_t)real_r + len, 
+			       extra - pre_extra);
+	if(retval != KERN_SUCCESS) {
+	  GCPRINT(GCOUTF, "WARNING: couldn't deallocate post-extra: %s\n",
+		  mach_error_string(retval));
+	}
       }
     }
     r = real_r;
@@ -221,7 +229,7 @@ kern_return_t catch_exception_raise(mach_port_t port,
 				    exception_data_t exception_data,
 				    mach_msg_type_number_t data_count)
 {
-#if  GENERATIONS
+#if GENERATIONS
   /* kernel return value is in exception_data[0], faulting address in
      exception_data[1] */
   if(exception_data[0] == KERN_PROTECTION_FAILURE) {

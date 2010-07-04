@@ -180,8 +180,10 @@
                            (lambda (ks kf let-bound)
                              (lambda (sf bv)                           
                                (cond [(ormap (lambda (x)
-                                               (if (stx-equal? #'pt (car x))
-                                                   (cdr x) #f)) bv)
+                                               (if (bound-identifier=? #'pt (car x))
+                                                   (cdr x) 
+                                                   #f)) 
+                                             bv)
                                       => (lambda (bound-exp)
                                            (emit (lambda (exp)
                                                    #`((match-equality-test) #,exp #,(subst-bindings bound-exp let-bound)))
@@ -198,11 +200,7 @@
           
           ;; This recognizes constants such strings
           [pt
-           (let ([pt (syntax-e #'pt)])
-             (or (string? pt)
-                 (boolean? pt)
-                 (char? pt)
-                 (number? pt)))
+           (constant-data? (syntax-e #'pt))
            (list
             (reg-test 
              `(equal? ,(syntax-object->datum ae)

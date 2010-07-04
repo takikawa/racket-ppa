@@ -1,4 +1,22 @@
+
+Version 351, July 2006
+
+Changed the shortcut type for selectable-menu-item<%> to allow
+ key-code symbols
+Added get-shortcut-prefix and set-shortcut-prefix to menu-item
+ to selectable-menu-item<%>, along with corresponding initialization
+ argument to menu-item% and checkable-menu-item%
+Added get-default-shortcut-prefix
+Removed get-x-shortcut-prefix and set-x-shortcut-prefix from
+ selectable-menu-item<%>
+Added get-other-shift-key-code to key-event%
+Added support for "?:" modifier to keymap state strings
+Changed internal handling of keyboard events
+
+----------------------------------------------------------------------
+
 Version 350, June 2006
+
 Default max undo history for an editor<%> is 0; use
  set-max-undo-history to enable undo
 Disabled menu-item shortcuts stay effective (to just beep)
@@ -10,6 +28,7 @@ Added |MrEd:emacsUndo| low-level preference
 ----------------------------------------------------------------------
 
 Version 301, Decmber 2005
+
 Fixed a bug in reading non-text files whose encoding contains
  a byte string longer than 64 bytes
 
@@ -22,6 +41,7 @@ Fixed a bug in reading non-text files whose encoding contains
 ----------------------------------------------------------------------
 
 Version 300, Decmber 2005
+
 Changed editor file format to an ASCII encoding
 Changed measurement of text for post-script-dc%
 Changed label->plain-label to strip parenthesized mneumonics

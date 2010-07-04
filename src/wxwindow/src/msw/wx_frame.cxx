@@ -273,12 +273,22 @@ void wxFrame::GetPosition(int *x, int *y)
   RECT rect;
   wxWindow *parent;
   POINT point;
+  HWND hwnd;
 
   parent = GetParent();
 
-  GetWindowRect(GetHWND(), &rect);
-  point.x = rect.left;
-  point.y = rect.top;
+  hwnd = GetHWND();
+  if (::IsIconic(hwnd)) {
+    WINDOWPLACEMENT wp;
+    wp.length = sizeof(wp);
+    GetWindowPlacement(hwnd, &wp);
+    point.x = wp.rcNormalPosition.left;
+    point.y = wp.rcNormalPosition.top;
+  } else {
+    GetWindowRect(hwnd, &rect);
+    point.x = rect.left;
+    point.y = rect.top;
+  }
 
   // Since we now have the absolute screen coords,
   // if there's a parent we must subtract its top left corner

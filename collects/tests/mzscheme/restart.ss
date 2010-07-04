@@ -3,7 +3,7 @@
 
 (require (lib "restart.ss"))
 
-(SECTION 'restart)
+(Section 'restart)
 
 (test #t restart-mzscheme #("ignore-me") values #("-qmv") void)
 (let ([test-in-out 
@@ -16,9 +16,9 @@
 		   (restart-mzscheme pre values post void)
 		   (get-output-string s)))))])
   (test-in-out #("ignore-me") #("-qm") "(current-command-line-arguments)" "#0()")
-  (test-in-out #("") #("-qm") "'Hello" "hello")
-  (test-in-out #("-g") #("-qm") "'Hello" "Hello")
-  (test-in-out #("") #("-qmg") "'Hello" "Hello"))
+  (test-in-out #("") #("-qm") "'Hello" "Hello")
+  (test-in-out #("-G") #("-qm") "'Hello" "hello")
+  (test-in-out #("") #("-qmG") "'Hello" "hello"))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

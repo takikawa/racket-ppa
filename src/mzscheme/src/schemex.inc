@@ -475,7 +475,6 @@
   scheme_extension_table->scheme_finish_primitive_module = scheme_finish_primitive_module;
   scheme_extension_table->scheme_protect_primitive_provide = scheme_protect_primitive_provide;
   scheme_extension_table->scheme_make_modidx = scheme_make_modidx;
-  scheme_extension_table->scheme_declare_module = scheme_declare_module;
   scheme_extension_table->scheme_apply_for_syntax_in_env = scheme_apply_for_syntax_in_env;
   scheme_extension_table->scheme_dynamic_require = scheme_dynamic_require;
   scheme_extension_table->scheme_intern_symbol = scheme_intern_symbol;
@@ -526,6 +525,7 @@
   scheme_extension_table->scheme_vector_to_list = scheme_vector_to_list;
   scheme_extension_table->scheme_list_to_vector = scheme_list_to_vector;
   scheme_extension_table->scheme_append = scheme_append;
+  scheme_extension_table->scheme_reverse = scheme_reverse;
   scheme_extension_table->scheme_box = scheme_box;
   scheme_extension_table->scheme_unbox = scheme_unbox;
   scheme_extension_table->scheme_set_box = scheme_set_box;

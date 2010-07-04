@@ -430,7 +430,7 @@ mzchar *(*scheme_utf8_decode_to_buffer)(const unsigned char *s, int len,
 mzchar *(*scheme_utf8_decode_to_buffer_len)(const unsigned char *s, int len, 
 						   mzchar *buf, int blen, long *rlen);
 int (*scheme_utf8_decode_count)(const unsigned char *s, int start, int end, 
-				       int *_state, int might_continue, int permissive);
+						      int *_state, int might_continue, int permissive);
 int (*scheme_utf8_encode)(const unsigned int *us, int start, int end, 
 				 unsigned char *s, int dstart,
 				 char utf16);
@@ -703,8 +703,6 @@ void (*scheme_protect_primitive_provide)(Scheme_Env *env, Scheme_Object *name);
 Scheme_Object *(*scheme_make_modidx)(Scheme_Object *path,
 				  Scheme_Object *base,
 				  Scheme_Object *resolved);
-Scheme_Object *(*scheme_declare_module)(Scheme_Object *shape, Scheme_Invoke_Proc ivk,
-				     Scheme_Invoke_Proc sivk, void *data, Scheme_Env *env);
 Scheme_Object *(*scheme_apply_for_syntax_in_env)(Scheme_Object *proc, Scheme_Env *env);
 Scheme_Object *(*scheme_dynamic_require)(int argc, Scheme_Object *argv[]);
 /*========================================================================*/
@@ -784,6 +782,7 @@ Scheme_Object *(*scheme_caddr)(Scheme_Object *pair);
 Scheme_Object *(*scheme_vector_to_list)(Scheme_Object *vec);
 Scheme_Object *(*scheme_list_to_vector)(Scheme_Object *list);
 Scheme_Object *(*scheme_append)(Scheme_Object *lstx, Scheme_Object *lsty);
+Scheme_Object *(*scheme_reverse)(Scheme_Object *l);
 Scheme_Object *(*scheme_box)(Scheme_Object *v);
 Scheme_Object *(*scheme_unbox)(Scheme_Object *obj);
 void (*scheme_set_box)(Scheme_Object *b, Scheme_Object *v);

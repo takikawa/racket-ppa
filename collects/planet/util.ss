@@ -5,7 +5,7 @@
            
            "private/planet-shared.ss"
            "private/linkage.ss"
-
+           (lib "url.ss" "net")
            (lib "pack.ss" "setup")
            (lib "contract.ss")
            (lib "file.ss")
@@ -19,20 +19,20 @@
    current-linkage
    make-planet-archive
    get-installed-planet-archives
+   get-hard-linked-packages
    remove-pkg
-   unlink-all
-   add-hard-link
-   remove-hard-link)
+   unlink-all)
+  
+  (provide/contract
+   [add-hard-link 
+    (-> string? string? natural-number/c natural-number/c path? void?)]
+   [remove-hard-link 
+    (-> string? string? natural-number/c natural-number/c void?)])
 
   ;; current-cache-contents : -> ((string ((string ((nat (nat ...)) ...)) ...)) ...)
   ;; returns the packages installed in the local PLaneT cache
   (define (current-cache-contents)
     (cdr (tree->list (repository-tree))))
-  
-  ;; get-installed-package : string string nat nat -> PKG | #f
-  ;; gets the package associated with this package specification, if any
-  (define (get-installed-package owner name maj min)
-    (lookup-package (make-pkg-spec name maj min min (list owner) #f (version))))
   
   ;; just so it will be provided
   (define unlink-all remove-all-linkage!)
@@ -52,10 +52,16 @@
               (lambda () 
                 (printf "\n============= Removing ~a =============\n" (list owner name maj min))
                 (clean-planet-package path (list owner name '() maj min))))
-             (remove-infodomain-entries path)
+             (erase-metadata p)
              (delete-directory/files path)
-             (trim-directory (CACHE-DIR) path)
-             (remove-linkage-to! p)))))
+             (trim-directory (CACHE-DIR) path)))))
+  
+  ;; erase-metadata : pkg -> void
+  ;; clears out any references to the given package in planet's metadata files
+  ;; (i.e., linkage and info.ss cache; not hard links which are not considered metadata)
+  (define (erase-metadata p)
+    (remove-infodomain-entries (pkg-path p))
+    (remove-linkage-to! p))
     
   ;; this really should go somewhere else. But what should setup's behavior be
   ;; when a package is cleaned? should it clear info-domain entries out? I think
@@ -63,14 +69,15 @@
   ;; remove-infodomain-entries : path -> void
   (define (remove-infodomain-entries path)
     (let* ([pathbytes (path->bytes path)]
-           [cache-file (build-path (PLANET-DIR) "cache.ss")]
-           [cache-lines (with-input-from-file cache-file read)])
-      (with-output-to-file cache-file
-       (lambda ()
-         (if (pair? cache-lines)
-             (write (filter (lambda (line) (not (and (pair? line) (equal? (car line) pathbytes)))) cache-lines))
-             (printf "\n")))
-        'truncate/replace)))
+           [cache-file (build-path (PLANET-DIR) "cache.ss")])
+      (when (file-exists? cache-file)
+        (let ([cache-lines (with-input-from-file cache-file read)])
+          (with-output-to-file cache-file
+            (lambda ()
+              (if (pair? cache-lines)
+                  (write (filter (lambda (line) (not (and (pair? line) (equal? (car line) pathbytes)))) cache-lines))
+                  (printf "\n")))
+            'truncate/replace)))))
   
   ;; listof X * listof X -> nonempty listof X
   ;; returns de-prefixed version of l2 if l1 is a proper prefix of l2; 
@@ -155,6 +162,9 @@
                #f))
        (normalize-path archive-name)]))
   
+  ;; ============================================================
+  ;; HARD LINKS (aka development links)
+  
   ;; add-hard-link : string string num num path -> void
   ;; adds an entry in the hard-links table associating the given
   ;; require spec to the given path
@@ -166,9 +176,17 @@
                    "Warning: directory ~a does not exist\n"
                    (path->string path))))
     (add-hard-link! pkg-name (list owner) maj min path))
-   
+  
   ;; remove-hard-link : string string num num -> void
   ;; removes any development association from the given package spec
   (define (remove-hard-link owner pkg-name maj min)
     (filter-link-table!
-     (lambda (row) (not (points-to? row pkg-name (list owner) maj min))))))
+     (lambda (row) 
+       (not (points-to? row pkg-name (list owner) maj min)))
+     (lambda (row) 
+       (let ([p (row->package row)])
+         (when p
+           (erase-metadata p))))))
+
+  
+  )

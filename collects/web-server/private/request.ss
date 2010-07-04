@@ -46,7 +46,8 @@
             (and (= major 1) (= minor 0))
             (match (headers-assq #"Connection" headers)
               [(struct header (f v))
-               (regexp-match rx v)]
+               (and (regexp-match rx v)
+                    #t)]
               [#f
                #f])
             (msie-from-local-machine? headers client-ip host-ip)))))
@@ -185,7 +186,10 @@
                 (let find-amp ([amp-end (add1 key-end)])
                   (if (or (= amp-end len) (eq? (bytes-ref raw amp-end) (char->integer #\&)))
                       (list* (make-binding:form
-                              (subbytes raw start key-end)
+                              (string->bytes/utf-8
+                               (translate-escapes
+                                (bytes->string/utf-8
+                                 (subbytes raw start key-end))))
                               (string->bytes/utf-8
                                (translate-escapes
                                 (bytes->string/utf-8
@@ -199,7 +203,7 @@
   
   ; mime-part : (listof header?) * (listof bytes?)
   (define-struct mime-part (headers contents))
-  (define CR-NL #"#\return#\newline")
+  (define CR-NL #"\r\n")
   (define (construct-mime-part headers body)
     (make-mime-part
      headers

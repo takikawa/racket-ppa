@@ -13,7 +13,13 @@ mandir = @mandir@
 docdir = @docdir@
 builddir = @builddir@
 
-ALLDIRINFO = "$(bindir)" "$(collectsdir)" "$(docdir)" "$(libdir)" "$(includepltdir)" "$(libpltdir)" "$(mandir)"
+ALLDIRINFO = "$(DESTDIR)$(bindir)" \
+             "$(DESTDIR)$(collectsdir)" \
+             "$(DESTDIR)$(docdir)" \
+             "$(DESTDIR)$(libdir)" \
+             "$(DESTDIR)$(includepltdir)" \
+             "$(DESTDIR)$(libpltdir)" \
+             "$(DESTDIR)$(mandir)"
 
 all:
 	$(MAKE) mz
@@ -28,28 +34,24 @@ mred-stub: @MAKE_MRED@
 
 mred3m-stub: @MAKE_MRED3M@
 
+SETUP_ARGS = -mvqX "$(DESTDIR)$(collectsdir)" -M setup
+
+install:
+	$(MAKE) plain-install
+	"$(DESTDIR)$(bindir)/mzscheme" $(SETUP_ARGS)
+	$(MAKE) fix-paths
 
 plain-install:
 	$(MAKE) install-normal
 
-install:
-	$(MAKE) plain-install
-	$(MAKE) setup-plt
-
 install-normal:
 	mkdir -p $(ALLDIRINFO)
-	if [ ! -d $(prefix) ] ; then mkdir $(prefix) ; fi
 	$(MAKE) mzinstall
-	$(MAKE) mredinstall-stub
 	$(MAKE) copytree-stub
+	$(MAKE) mredinstall-stub
 	$(MAKE) lib-finish
 
-copytree-stub: @MAKE_COPYTREE@
-
 mredinstall-stub: @MAKE_MREDINSTALL@
-
-setup-plt:
-	$(prefix)/bin/mzscheme -mvqM setup
 
 plain-install-3m:
 	$(MAKE) install-normal
@@ -58,14 +60,15 @@ plain-install-3m:
 
 install-3m:
 	$(MAKE) plain-install-3m
-	$(MAKE) setup-plt
+	"$(DESTDIR)$(bindir)/mzscheme3m" $(SETUP_ARGS)
+	$(MAKE) fix-paths
 
 mredinstall3m-stub: @MAKE_MREDINSTALL3M@
 
 
 clean:
 	cd mzscheme; $(MAKE) clean
-	if [ -d mred ] ; then cd mred; $(MAKE) clean; fi
+	if [ -d mred ]; then cd mred; $(MAKE) clean; fi
 
 
 mz:
@@ -93,9 +96,22 @@ mrinstall:
 mrinstall3m:
 	cd mred; $(MAKE) install-3m
 
+
 lib-finish:
-	@LIBFINISH@ "$(prefix)/lib"
+	@LIBFINISH@ "$(libdir)"
+
+copytree-stub: @MAKE_COPYTREE@
 
 copytree:
-	mzscheme/mzscheme -mvqu "$(srcdir)/copytree.ss" \
-          "$(srcdir)/.." $(ALLDIRINFO) @INSTALL_ORIG_TREE@
+	mzscheme/mzscheme -mvxqu \
+          "$(srcdir)/../collects/setup/unixstyle-install.ss" \
+          make-install-copytree "$(srcdir)/.." \
+          $(ALLDIRINFO) "@INSTALL_ORIG_TREE@"
+
+fix-paths:
+	if [ "$(DESTDIR)" != "" ]; then \
+          mzscheme/mzscheme -mvxqu \
+            "$(srcdir)/../collects/setup/unixstyle-install.ss" \
+            make-install-destdir-fix "$(srcdir)/.." \
+            $(ALLDIRINFO) "@INSTALL_ORIG_TREE@"; \
+        fi

@@ -1,4 +1,4 @@
-package draw;
+package geometry;
 
 public class Posn {
   public int x, y;

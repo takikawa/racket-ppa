@@ -37,18 +37,6 @@
 # define SCHEME_NO_GC_PROTO
 #endif
 
-#if defined(mips) || defined(__mips)
-/* Irix SPROCS needs to load some files first, so find out if we're SPROCS. */
-# include "../sconfig.h"
-
-# ifdef MZ_USE_IRIX_SPROCS
-/* Don't include anything else before this */
-#  include "../gc/gc.h"
-#  include "../gc/semaphores.h"
-#  include "../gc/sproc.h"
-# endif
-#endif
-
 #include "schpriv.h"
 #include "schmach.h"
 #include "schgc.h"
@@ -131,6 +119,8 @@ extern void scheme_gmp_tls_snapshot(long *s, long *save);
 extern void scheme_gmp_tls_restore_snapshot(long *s, long *save, int do_free);
 
 extern int scheme_num_read_syntax_objects;
+extern int scheme_hash_request_count;
+extern int scheme_hash_iteration_count;
 
 /*========================================================================*/
 /*                    local variables and prototypes                      */
@@ -6781,6 +6771,10 @@ static Scheme_Object *current_stats(int argc, Scheme_Object *argv[])
     
     switch (SCHEME_VEC_SIZE(v)) {
     default:
+    case 10:
+      SCHEME_VEC_ELS(v)[9] = scheme_make_integer(scheme_hash_iteration_count);
+    case 9:
+      SCHEME_VEC_ELS(v)[8] = scheme_make_integer(scheme_hash_request_count);
     case 8:
       SCHEME_VEC_ELS(v)[7] = scheme_make_integer(scheme_num_read_syntax_objects);
     case 7:

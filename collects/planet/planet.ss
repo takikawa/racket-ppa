@@ -13,9 +13,11 @@ PLANNED FEATURES:
            (lib "string.ss")
            (lib "file.ss")
            (only (lib "list.ss") sort)
+           (lib "url.ss" "net")
            (lib "match.ss")
            
            "config.ss"
+           "private/planet-shared.ss"
            "resolver.ss" ;; the code I need should be pulled out into a common library
            "util.ss") 
   
@@ -85,7 +87,12 @@ PLANNED FEATURES:
        ""
        "Remove any development link associated with the specified package"
        (set! actions (cons (lambda () (remove-hard-link-cmd owner pkg maj min)) actions)))
-           
+      
+      (("--url")
+       owner pkg maj min
+       "Get a URL for the given package"
+       (set! actions (cons (lambda () (get-download-url owner pkg maj min)) actions)))
+                                       
       ;; unimplemented so far:
       #;(("-u" "--unlink")
          module
@@ -122,19 +129,24 @@ PLANNED FEATURES:
 	[_ 
         (fail "Could not find matching package")])))
   
-  
-  (define (install-plt-file filestr owner majstr minstr)
+  ;; params->full-pkg-spec : string string string string -> pkg
+  ;; gets a full package specifier for the given specification
+  (define (params->full-pkg-spec ownerstr pkgstr majstr minstr)
     (let ((maj (string->number majstr))
           (min (string->number minstr)))
       (unless (and (integer? maj) (integer? min) (> maj 0) (>= min 0))
         (fail "Invalid major/minor version"))
-      (unless (file-exists? filestr) (fail "File does not exist: ~a" filestr))
-      (let* ([file (normalize-path filestr)]
-             [name (let-values ([(base name dir?) (split-path file)]) (path->string name))]
-             [spec (list owner name maj min)]
+      (let* ([spec (list ownerstr pkgstr maj min)]
              [fullspec (pkg-spec->full-pkg-spec spec #f)])
-        (unless spec (fail "invalid spec: ~a" spec))
-        (install-pkg fullspec file maj min))))
+        (unless fullspec (fail "invalid spec: ~a" fullspec))
+        fullspec)))
+    
+  (define (install-plt-file filestr owner majstr minstr)
+    (unless (file-exists? filestr) (fail "File does not exist: ~a" filestr))
+    (let* ([file (normalize-path filestr)]
+           [name (let-values ([(base name dir?) (split-path file)]) (path->string name))]
+           [fullspec (params->full-pkg-spec owner name majstr minstr)])
+      (install-pkg fullspec file (pkg-spec-maj fullspec) (pkg-spec-minor-lo fullspec))))
   
   (define (do-archive p)
     (unless (directory-exists? p)
@@ -150,14 +162,44 @@ PLANNED FEATURES:
         (fail "Could not find package"))))
         
   (define (show-installed-packages)
-    (for-each 
-     (lambda (l) (apply printf "  ~a\t~a\t~a ~a\n" l))
-     (sort-by-criteria 
-      (map (lambda (x) (match x [(_ owner pkg _ maj min) (list owner pkg maj min)])) (get-installed-planet-archives))
-      (list string<? string=?)
-      (list string<? string=?)
-      (list < =)
-      (list < =))))
+    (let ([normal-packages (get-installed-planet-archives)]
+          [devel-link-packages (get-hard-linked-packages)])
+      
+      (define (show-normals)
+        (printf "Normally-installed packages:\n")
+        (for-each 
+         (lambda (l) (apply printf "  ~a\t~a\t~a ~a\n" l))
+         (sort-by-criteria 
+          (map (lambda (x) (match x [(_ owner pkg _ maj min) (list owner pkg maj min)])) normal-packages)
+          (list string<? string=?)
+          (list string<? string=?)
+          (list < =)
+          (list < =))))
+      
+      (define (show-devel-links)
+        (printf "Development links:\n")
+        (for-each 
+         (lambda (l) (apply printf "  ~a\t~a\t~a ~a\n    --> ~a\n" l))
+         (sort-by-criteria 
+          (map 
+           (lambda (x) (match x [(dir owner pkg _ maj min) (list owner pkg maj min (path->string dir))]))
+           devel-link-packages)
+          (list string<? string=?)
+          (list string<? string=?)
+          (list < =)
+          (list < =)
+          (list string<? string=?))))
+      
+      (cond
+        [(and (pair? normal-packages) (pair? devel-link-packages))
+         (begin 
+           (show-normals)
+           (newline)
+           (show-devel-links))]
+        [(pair? normal-packages) (show-normals)]
+        [(pair? devel-link-packages) (show-devel-links)]
+        [else (printf "No packages installed.\n")])))
+      
   
   (define (show-linkage)
     (for-each
@@ -173,6 +215,8 @@ PLANNED FEATURES:
     (let* ([maj (read-from-string majstr)]
            [min (read-from-string minstr)]
            [path (string->path pathstr)])
+      (unless (and (integer? maj) (integer? min) (> maj 0) (>= min 0))
+        (fail "Invalid major/minor version"))
       (add-hard-link ownerstr pkgstr maj min path)))
   
   (define (remove-hard-link-cmd ownerstr pkgstr majstr minstr)
@@ -180,6 +224,10 @@ PLANNED FEATURES:
            [min (read-from-string minstr)])
       (remove-hard-link ownerstr pkgstr maj min)))
       
+  (define (get-download-url ownerstr pkgstr majstr minstr)
+    (let ([fps (params->full-pkg-spec ownerstr pkgstr majstr minstr)])
+      (printf "~a\n" (url->string (pkg->download-url fps)))))
+  
   
   ;; ------------------------------------------------------------
   ;; Utility

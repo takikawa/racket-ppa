@@ -83,6 +83,7 @@ static Scheme_Object *local_module_introduce(int argc, Scheme_Object *argv[]);
 static Scheme_Object *local_get_shadower(int argc, Scheme_Object *argv[]);
 static Scheme_Object *local_certify(int argc, Scheme_Object *argv[]);
 static Scheme_Object *local_lift_expr(int argc, Scheme_Object *argv[]);
+static Scheme_Object *local_lift_end_statement(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_introducer(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_set_transformer(int argc, Scheme_Object *argv[]);
 static Scheme_Object *set_transformer_p(int argc, Scheme_Object *argv[]);
@@ -558,6 +559,12 @@ static void make_init_env(void)
 						      1, 1), 
 			     env);
 
+  scheme_add_global_constant("syntax-local-lift-module-end-declaration", 
+			     scheme_make_prim_w_arity(local_lift_end_statement, 
+						      "syntax-local-lift-module-end-declaration",
+						      1, 1), 
+			     env);
+
   {
     Scheme_Object *sym;
     sym = scheme_intern_symbol("mzscheme");
@@ -644,7 +651,7 @@ Scheme_Env *scheme_make_empty_env(void)
 static Scheme_Env *make_env(Scheme_Env *base, int semi, int toplevel_size)
 {
   Scheme_Bucket_Table *toplevel, *syntax;
-  Scheme_Hash_Table *module_registry;
+  Scheme_Hash_Table *module_registry, *export_registry;
   Scheme_Object *modchain;
   Scheme_Env *env;
 
@@ -655,14 +662,17 @@ static Scheme_Env *make_env(Scheme_Env *base, int semi, int toplevel_size)
     syntax = NULL;
     modchain = NULL;
     module_registry = NULL;
+    export_registry = NULL;
   } else {
     syntax = scheme_make_bucket_table(7, SCHEME_hash_ptr);
     if (base) {
       modchain = base->modchain;
       module_registry = base->module_registry;
+      export_registry = base->export_registry;
     } else {
       if (semi < 0) {
 	module_registry = NULL;
+	export_registry = NULL;
 	modchain = NULL;
       } else {
 	Scheme_Hash_Table *modules;
@@ -673,6 +683,8 @@ static Scheme_Env *make_env(Scheme_Env *base, int semi, int toplevel_size)
 
 	module_registry = scheme_make_hash_table(SCHEME_hash_ptr);
 	module_registry->iso.so.type = scheme_module_registry_type;
+	
+	export_registry = scheme_make_hash_table(SCHEME_hash_ptr);
       }
     }
   }
@@ -686,6 +698,7 @@ static Scheme_Env *make_env(Scheme_Env *base, int semi, int toplevel_size)
     env->syntax = syntax;
     env->modchain = modchain;
     env->module_registry = module_registry;
+    env->export_registry = export_registry;
   }
 
   return env;
@@ -725,6 +738,7 @@ void scheme_prepare_exp_env(Scheme_Env *env)
 
     eenv->module = env->module;
     eenv->module_registry = env->module_registry;
+    eenv->export_registry = env->export_registry;
     eenv->insp = env->insp;
 
     modchain = SCHEME_VEC_ELS(env->modchain)[1];
@@ -759,6 +773,7 @@ void scheme_prepare_template_env(Scheme_Env *env)
 
     eenv->module = env->module;
     eenv->module_registry = env->module_registry;
+    eenv->export_registry = env->export_registry;
     eenv->insp = env->insp;
 
     modchain = SCHEME_VEC_ELS(env->modchain)[2];
@@ -789,6 +804,7 @@ Scheme_Env *scheme_clone_module_env(Scheme_Env *menv, Scheme_Env *ns, Scheme_Obj
 
   menv2->module = menv->module;
   menv2->module_registry = ns->module_registry;
+  menv2->export_registry = ns->export_registry;
   menv2->insp = menv->insp;
 
   menv2->syntax = menv->syntax;
@@ -1213,7 +1229,7 @@ scheme_add_compilation_binding(int index, Scheme_Object *val, Scheme_Comp_Env *f
   frame->skip_table = NULL;
 }
 
-void scheme_frame_captures_lifts(Scheme_Comp_Env *env, Scheme_Lift_Capture_Proc cp, Scheme_Object *data)
+void scheme_frame_captures_lifts(Scheme_Comp_Env *env, Scheme_Lift_Capture_Proc cp, Scheme_Object *data, Scheme_Object *end_stmts)
 {
   Scheme_Lift_Capture_Proc *pp;
   Scheme_Object *vec;
@@ -1221,10 +1237,11 @@ void scheme_frame_captures_lifts(Scheme_Comp_Env *env, Scheme_Lift_Capture_Proc 
   pp = (Scheme_Lift_Capture_Proc *)scheme_malloc_atomic(sizeof(Scheme_Lift_Capture_Proc));
   *pp = cp;
 
-  vec = scheme_make_vector(3, NULL);
+  vec = scheme_make_vector(4, NULL);
   SCHEME_VEC_ELS(vec)[0] = scheme_null;
   SCHEME_VEC_ELS(vec)[1] = (Scheme_Object *)pp;
   SCHEME_VEC_ELS(vec)[2] = data;
+  SCHEME_VEC_ELS(vec)[3] = end_stmts;
 
   COMPILE_DATA(env)->lifts = vec;
 }
@@ -1232,6 +1249,11 @@ void scheme_frame_captures_lifts(Scheme_Comp_Env *env, Scheme_Lift_Capture_Proc 
 Scheme_Object *scheme_frame_get_lifts(Scheme_Comp_Env *env)
 {
   return SCHEME_VEC_ELS(COMPILE_DATA(env)->lifts)[0];
+}
+
+Scheme_Object *scheme_frame_get_end_statement_lifts(Scheme_Comp_Env *env)
+{
+  return SCHEME_VEC_ELS(COMPILE_DATA(env)->lifts)[3];
 }
 
 void scheme_add_local_syntax(int cnt, Scheme_Comp_Env *env)
@@ -2322,7 +2344,7 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
 
   if (modidx) {
     /* If it's an access path, resolve it: */
-    modname = scheme_module_resolve(modidx);
+    modname = scheme_module_resolve(modidx, 1);
 
     if (env->genv->module && SAME_OBJ(modname, env->genv->module->modname)) {
       modidx = NULL;
@@ -3760,6 +3782,43 @@ local_lift_expr(int argc, Scheme_Object *argv[])
   id = scheme_add_remove_mark(id, local_mark);
 
   return id;
+}
+
+static Scheme_Object *
+local_lift_end_statement(int argc, Scheme_Object *argv[])
+{
+  Scheme_Comp_Env *env;
+  Scheme_Object *local_mark, *expr, *pr;
+
+  expr = argv[0];
+  if (!SCHEME_STXP(expr))
+    scheme_wrong_type("syntax-local-lift-module-end-declaration", "syntax", 0, argc, argv);
+
+  env = scheme_current_thread->current_local_env;
+  local_mark = scheme_current_thread->current_local_mark;
+
+  if (!env)
+    scheme_raise_exn(MZEXN_FAIL_CONTRACT, 
+		     "syntax-local-lift-module-end-declaration: not currently transforming");
+
+  while (env) {
+    if ((COMPILE_DATA(env)->lifts)
+        && SCHEME_TRUEP(SCHEME_VEC_ELS(COMPILE_DATA(env)->lifts)[3]))
+      break;
+    env = env->next;
+  }
+
+  if (!env)
+    scheme_raise_exn(MZEXN_FAIL_CONTRACT, 
+		     "syntax-local-lift-module-end-declaration: not currently transforming"
+                     " a run-time expression in a module declaration");
+  
+  expr = scheme_add_remove_mark(expr, local_mark);
+
+  pr = scheme_make_pair(expr, SCHEME_VEC_ELS(COMPILE_DATA(env)->lifts)[3]);
+  SCHEME_VEC_ELS(COMPILE_DATA(env)->lifts)[3] = pr;
+  
+  return scheme_void;
 }
 
 static Scheme_Object *

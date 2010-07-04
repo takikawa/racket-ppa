@@ -426,7 +426,6 @@ scheme_primitive_module
 scheme_finish_primitive_module
 scheme_protect_primitive_provide
 scheme_make_modidx
-scheme_declare_module
 scheme_apply_for_syntax_in_env
 scheme_dynamic_require
 scheme_intern_symbol
@@ -474,6 +473,7 @@ scheme_caddr
 scheme_vector_to_list
 scheme_list_to_vector
 scheme_append
+scheme_reverse
 scheme_box
 scheme_unbox
 scheme_set_box

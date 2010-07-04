@@ -77,6 +77,16 @@
 # define FUEL_AUTODECEREMENTS
 #endif
 
+#ifdef SIZEOF_LONG
+# if SIZEOF_LONG == 8
+#  define SIXTY_FOUR_BIT_INTEGERS
+#  ifdef USE_LONG_LONG_FOR_BIGDIG
+     Don ot specify USE_LONG_LONG_FOR_BIGDIG on a platform with
+     64-bit integers
+#  endif
+# endif
+#endif
+
 #ifdef MZ_PRECISE_GC
 # define MZ_HASH_KEY_EX  short keyex;
 # define MZ_OPT_HASH_KEY_EX /**/
@@ -108,6 +118,12 @@ typedef long FILE;
 # define MZ_SIGSET(s, f) signal(s, f)
 #else
 # define MZ_SIGSET(s, f) sigset(s, f)
+#endif
+
+#ifdef MZ_XFORM
+# define XFORM_NONGCING __xform_nongcing__
+#else
+# define XFORM_NONGCING /* empty */
 #endif
 
 #ifdef MZ_XFORM
@@ -602,7 +618,7 @@ typedef struct Scheme_Object *(Scheme_Primitive_Closure_Proc)(int argc, struct S
 
 typedef struct {
   Scheme_Object so;
-  short flags;
+  unsigned short flags;
 } Scheme_Prim_Proc_Header;
 
 typedef struct {
@@ -729,8 +745,9 @@ typedef struct {
 typedef struct Scheme_Hash_Table
 {
   Scheme_Inclhash_Object iso;
-  int size, count, step;
-  Scheme_Object **keys;
+  int size; /* power of 2 */
+  int count;
+    Scheme_Object **keys;
   Scheme_Object **vals;
   void (*make_hash_indices)(void *v, long *h1, long *h2);
   int (*compare)(void *v1, void *v2);
@@ -749,7 +766,8 @@ typedef struct Scheme_Bucket
 typedef struct Scheme_Bucket_Table
 {
   Scheme_Object so;
-  int size, count, step;
+  int size; /* power of 2 */
+  int count;
   Scheme_Bucket **buckets;
   char weak, with_home;
   void (*make_hash_indices)(void *v, long *h1, long *h2);
@@ -970,7 +988,7 @@ typedef struct Scheme_Thread {
     } apply;
     struct {
       Scheme_Object **array;
-      int count;
+      long count;
     } multiple;
     struct {
       void *p1, *p2, *p3, *p4, *p5;
@@ -1407,9 +1425,9 @@ MZ_EXTERN void scheme_jit_setjmp_prepare(mz_jit_jmp_buf b);
 
 /* Allocation */
 #define scheme_alloc_object() \
-   ((Scheme_Object *) scheme_malloc_tagged(sizeof(Scheme_Simple_Object)))
+   ((Scheme_Object *) scheme_malloc_small_tagged(sizeof(Scheme_Simple_Object)))
 #define scheme_alloc_small_object() \
-   ((Scheme_Object *) scheme_malloc_tagged(sizeof(Scheme_Small_Object)))
+   ((Scheme_Object *) scheme_malloc_small_tagged(sizeof(Scheme_Small_Object)))
 #define scheme_alloc_stubborn_object() \
    ((Scheme_Object *) scheme_malloc_stubborn_tagged(sizeof(Scheme_Simple_Object)))
 #define scheme_alloc_stubborn_small_object() \
@@ -1453,6 +1471,7 @@ void *scheme_malloc(size_t size);
 #  include "../gc2/gc2.h"
 # endif
 # define scheme_malloc_tagged GC_malloc_one_tagged
+# define scheme_malloc_small_tagged(s) GC_malloc_one_small_tagged(gcWORDS_TO_BYTES(gcBYTES_TO_WORDS(s)))
 # define scheme_malloc_array_tagged GC_malloc_array_tagged
 # define scheme_malloc_atomic_tagged GC_malloc_atomic_tagged
 # define scheme_malloc_stubborn_tagged GC_malloc_one_tagged
@@ -1466,6 +1485,7 @@ void *scheme_malloc(size_t size);
 # ifdef USE_TAGGED_ALLOCATION
 extern void *scheme_malloc_tagged(size_t);
 #  define scheme_malloc_array_tagged scheme_malloc
+#  define scheme_malloc_small_tagged scheme_malloc
 extern void *scheme_malloc_atomic_tagged(size_t);
 extern void *scheme_malloc_stubborn_tagged(size_t);
 extern void *scheme_malloc_eternal_tagged(size_t);
@@ -1473,6 +1493,7 @@ extern void *scheme_malloc_uncollectable_tagged(size_t);
 extern void *scheme_malloc_envunbox(size_t);
 # else
 #  define scheme_malloc_tagged scheme_malloc
+#  define scheme_malloc_small_tagged scheme_malloc
 #  define scheme_malloc_array_tagged scheme_malloc
 #  define scheme_malloc_atomic_tagged scheme_malloc_atomic
 #  define scheme_malloc_stubborn_tagged scheme_malloc_stubborn

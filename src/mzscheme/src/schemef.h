@@ -524,8 +524,8 @@ MZ_EXTERN mzchar *scheme_utf8_decode_to_buffer(const unsigned char *s, int len,
 					       mzchar *buf, int blen);
 MZ_EXTERN mzchar *scheme_utf8_decode_to_buffer_len(const unsigned char *s, int len, 
 						   mzchar *buf, int blen, long *rlen);
-MZ_EXTERN int scheme_utf8_decode_count(const unsigned char *s, int start, int end, 
-				       int *_state, int might_continue, int permissive);
+XFORM_NONGCING MZ_EXTERN int scheme_utf8_decode_count(const unsigned char *s, int start, int end, 
+						      int *_state, int might_continue, int permissive);
 
 MZ_EXTERN int scheme_utf8_encode(const unsigned int *us, int start, int end, 
 				 unsigned char *s, int dstart,
@@ -852,9 +852,6 @@ MZ_EXTERN Scheme_Object *scheme_make_modidx(Scheme_Object *path,
 				  Scheme_Object *base,
 				  Scheme_Object *resolved);
 
-MZ_EXTERN Scheme_Object *scheme_declare_module(Scheme_Object *shape, Scheme_Invoke_Proc ivk,
-				     Scheme_Invoke_Proc sivk, void *data, Scheme_Env *env);
-
 MZ_EXTERN Scheme_Object *scheme_apply_for_syntax_in_env(Scheme_Object *proc, Scheme_Env *env);
 
 MZ_EXTERN Scheme_Object *scheme_dynamic_require(int argc, Scheme_Object *argv[]);
@@ -918,7 +915,7 @@ MZ_EXTERN Scheme_Object *scheme_make_location(Scheme_Object *src,
 MZ_EXTERN int scheme_is_location(Scheme_Object *o);
 
 MZ_EXTERN Scheme_Object *scheme_make_inspector(Scheme_Object *superior);
-MZ_EXTERN int scheme_is_subinspector(Scheme_Object *i, Scheme_Object *sup);
+XFORM_NONGCING MZ_EXTERN int scheme_is_subinspector(Scheme_Object *i, Scheme_Object *sup);
 
 /*========================================================================*/
 /*                              utilities                                 */
@@ -929,7 +926,7 @@ MZ_EXTERN int scheme_eqv(Scheme_Object *obj1, Scheme_Object *obj2);
 MZ_EXTERN int scheme_equal(Scheme_Object *obj1, Scheme_Object *obj2);
 
 #ifdef MZ_PRECISE_GC
-MZ_EXTERN long scheme_hash_key(Scheme_Object *o);
+XFORM_NONGCING MZ_EXTERN long scheme_hash_key(Scheme_Object *o);
 #endif
 MZ_EXTERN long scheme_equal_hash_key(Scheme_Object *o);
 MZ_EXTERN long scheme_equal_hash_key2(Scheme_Object *o);
@@ -954,6 +951,7 @@ MZ_EXTERN Scheme_Object *scheme_vector_to_list(Scheme_Object *vec);
 MZ_EXTERN Scheme_Object *scheme_list_to_vector(Scheme_Object *list);
 
 MZ_EXTERN Scheme_Object *scheme_append(Scheme_Object *lstx, Scheme_Object *lsty);
+MZ_EXTERN Scheme_Object *scheme_reverse(Scheme_Object *l);
 
 MZ_EXTERN Scheme_Object *scheme_box(Scheme_Object *v);
 MZ_EXTERN Scheme_Object *scheme_unbox(Scheme_Object *obj);

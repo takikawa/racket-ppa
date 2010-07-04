@@ -27,7 +27,6 @@
 
 # define SYSTEM_TYPE_NAME "oskit"
 
-# define STACK_GROWS_DOWN
 # define DO_STACK_CHECK
 # ifndef OSKIT_TEST
 #  define OSKIT_FIXED_STACK_BOUNDS
@@ -83,11 +82,6 @@
 
 # include "uconfig.h"
 
-# define STACK_GROWS_DOWN
-# ifndef i386
-#  define SCHEME_BIG_ENDIAN
-# endif
-
 # define USE_EXPLICT_FP_FORM_CHECK
 # define POW_HANDLES_INF_CORRECTLY
 
@@ -138,8 +132,6 @@
 # include "uconfig.h"
 # undef USE_FCHDIR
 
-# define STACK_GROWS_DOWN
-# define SCHEME_BIG_ENDIAN
 # define UNIX_LIMIT_STACK 33554944
 
 # define SELECT_INCLUDE
@@ -189,11 +181,6 @@
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "unknown-linux"
 # endif
 
-# include <endian.h>
-# if __BYTE_ORDER == __BIG_ENDIAN
-#  define SCHEME_BIG_ENDIAN
-# endif
-
 # include "uconfig.h"
 # undef HAS_STANDARD_IOB
 # ifndef __ELF__
@@ -203,17 +190,6 @@
 # define DIRENT_NO_NAMLEN
 
 # define HAS_LINUX_IOB
-
-# if defined(__alpha) || defined(__x86_64__)
-#  define SIXTY_FOUR_BIT_INTEGERS
-# endif
-
-# if defined(__hppa__)
-#  define STACK_GROWS_UP
-#  define SIXTY_FOUR_BIT_INTEGERS
-# else
-#  define STACK_GROWS_DOWN
-# endif
 
 # define USE_IEEE_FP_PREDS
 # define USE_EXPLICT_FP_FORM_CHECK
@@ -254,8 +230,6 @@
 # undef HAS_STANDARD_IOB
 # define HAS_BSD_IOB
 
-# define STACK_GROWS_DOWN
-
 #ifndef __ELF__
 # define UNDERSCORE_DYNLOAD_SYMBOL_PREFIX
 #endif
@@ -268,7 +242,6 @@
 # define USE_TM_GMTOFF_FIELD
 
 #if defined(__alpha__)
-# define SIXTY_FOUR_BIT_INTEGERS
 # define USE_DIVIDE_MAKE_INFINITY
 #endif
 
@@ -295,8 +268,6 @@
 # undef HAS_STANDARD_IOB
 
 # define HAS_BSD_IOB
-
-# define STACK_GROWS_DOWN
 
 #ifndef __ELF__
 # define UNDERSCORE_DYNLOAD_SYMBOL_PREFIX
@@ -330,8 +301,6 @@
 # undef HAS_STANDARD_IOB
 
 # define HAS_BSD_IOB
-
-# define STACK_GROWS_DOWN
 
 # ifdef FREEBSD_VERSION_2x
 #  define UNDERSCORE_DYNLOAD_SYMBOL_PREFIX
@@ -367,9 +336,6 @@
 
 # include "uconfig.h"
 
-# define STACK_GROWS_DOWN
-# define SCHEME_BIG_ENDIAN
-
 # define DIRENT_NO_NAMLEN
 
 # define BSTRING_INCLUDE
@@ -402,9 +368,6 @@
 
 # define DIRENT_NO_NAMLEN
 
-# define STACK_GROWS_DOWN
-# define SCHEME_BIG_ENDIAN
-
 # define NO_USLEEP
 # define USE_FCNTL_O_NONBLOCK
 
@@ -419,10 +382,6 @@
 # define SCHEME_PLATFORM_LIBRARY_SUBPATH "alpha-osf1"
 
 # include "uconfig.h"
-
-# define STACK_GROWS_DOWN
-
-# define SIXTY_FOUR_BIT_INTEGERS
 
 # define ALPHA_CONTROL_FP
 # define USE_OSF_FP_PREDS
@@ -440,9 +399,6 @@
 # define SCHEME_PLATFORM_LIBRARY_SUBPATH "parisc-hpux"
 
 # include "uconfig.h"
-
-# define STACK_GROWS_UP
-# define SCHEME_BIG_ENDIAN
 
 # define SOME_FDS_ARE_NOT_SELECTABLE
 # define USE_FCNTL_O_NONBLOCK
@@ -479,8 +435,6 @@
 # define DIRENT_NO_NAMLEN
 
 # define HAS_SCO_IOB
-
-# define STACK_GROWS_DOWN
 
 # define USE_SCO_IEEE_FP_PREDS
 # define USE_EXPLICT_FP_FORM_CHECK
@@ -522,7 +476,6 @@
 # define GETENV_FUNCTION
 # define DIR_FUNCTION
 
-# define STACK_GROWS_DOWN
 # define DO_STACK_CHECK
 # define WINDOWS_FIND_STACK_BOUNDS
 
@@ -628,7 +581,6 @@
 
 # define USE_DIVIDE_MAKE_INFINITY
 
-# define STACK_GROWS_DOWN
 # define DO_STACK_CHECK
 # define WINDOWS_FIND_STACK_BOUNDS
 
@@ -670,10 +622,6 @@
 # define SYSTEM_TYPE_NAME "macosx"
 #endif
 
-# define STACK_GROWS_DOWN
-#ifdef __POWERPC__
-# define SCHEME_BIG_ENDIAN
-#endif
 # define USE_MAP_ANON
 
 # define USE_CARBON_FP_PREDS
@@ -713,7 +661,6 @@
 
 # include "uconfig.h"
 
-# define STACK_GROWS_DOWN
 # define USE_MAP_ANON
 
 # define USE_DYNAMIC_FDSET_SIZE
@@ -768,9 +715,6 @@
 # ifndef MZSCHEME_IS_CODEFRAGMENT
 #  define LINK_EXTENSIONS_BY_TABLE
 # endif
-
-# define STACK_GROWS_DOWN
-# define SCHEME_BIG_ENDIAN
 
 # define DO_STACK_CHECK
 # define MACOS_FIND_STACK_BOUNDS
@@ -827,8 +771,6 @@
 # define GETENV_FUNCTION
 # define DIR_FUNCTION
 
-# define STACK_GROWS_DOWN
-
 # define DO_STACK_CHECK
 # define USE_STACKAVAIL
 # define STACK_SAFETY_MARGIN 15000
@@ -862,9 +804,6 @@
 # define NO_STAT_PROC
 # define NO_USER_BREAK_HANDLER
 # define NO_USLEEP
-
-# define STACK_GROWS_DOWN
-# define SCHEME_BIG_ENDIAN
 
 # define DO_STACK_CHECK
 # define PALM_FIND_STACK_BOUNDS
@@ -1234,8 +1173,6 @@
  /* Byte Order and long long */
 /****************************/
 
- /* SCHEME_BIG_ENDIAN indicates that the process is big-endian */
-
  /* INT64_AS_LONG_LONG indicates that long long is not supported, but
     _int64 is */
 
@@ -1248,14 +1185,6 @@
 # define DO_STACK_CHECK
 # define UNIX_FIND_STACK_BOUNDS
 # define STACK_SAFETY_MARGIN 50000
-
- /* STACK_GROWS_UP means that deeper stack values have higher
-     numbered addresses.
-    STACK_GROWS_DOWN means that deeper stack values have lower
-     numbered addresses. This is usually the case (Sparc and
-     Intel platforms, for example, use this).
-    Use only one or none of these. (It's faster if you know which
-     one applies, but it can also be figured it out dynamically.) */
 
  /* DO_STACK_CHECK checks for stack overflow during execution.
      Requires either UNIX_FIND_STACK_BOUNDS, USE_STACKAVAIL,
@@ -1380,10 +1309,8 @@
     be work best one way for Sparc machines, and better the other
     way for x86 machines. */
 
- /* SIXTY_FOUR_BIT_INTEGERS indicates that 'long's are 64-bits wide. */
-
  /* USE_LONG_LONG_FOR_BIGDIG indicates that `long long' is available
-    and 64 bits wide (don't mix with SIXTY_FOUR_BIT_INTEGERS). */
+    and 64 bits wide. (Don't use when `long' is 64 bits wide). */
 
  /* MACOS_UNICODE_SUPPORT and WINDOWS_UNICODE_SUPPORT indicate that
     platform-native functions should be used for string comparisons

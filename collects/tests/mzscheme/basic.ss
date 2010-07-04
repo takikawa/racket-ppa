@@ -17,10 +17,10 @@
 (let ([f (lambda () #&7)])
   (test #t eq? (f) (f)))
 
-(SECTION 2 1);; test that all symbol characters are supported.
+(Section 2 1);; test that all symbol characters are supported.
 '(+ - ... !.. $.+ %.- &.! *.: /:. :+. <-. =. >. ?. ~. _. ^.)
 
-(SECTION 3 4)
+(Section 3 4)
 (define disjoint-type-functions
   (list boolean? char? null? number? pair? procedure? string? symbol? vector?))
 (define type-examples
@@ -41,7 +41,7 @@
 	   t))
        type-examples))
 
-(SECTION 6 1)
+(Section 6 1)
 (test #f not #t)
 (test #f not 3)
 (test #f not (list 3))
@@ -57,7 +57,7 @@
 (test #f boolean? '())
 (arity-test boolean? 1 1)
 
-(SECTION 6 2)
+(Section 6 2)
 (test #t eqv? 'a 'a)
 (test #f eqv? 'a 'b)
 (test #t eqv? 2 2)
@@ -118,7 +118,7 @@
 (arity-test eqv? 2 2)
 (arity-test equal? 2 2)
 
-(SECTION 6 3)
+(Section 6 3)
 (test '(a b c d e) 'dot '(a . (b . (c . (d . (e . ()))))))
 (define x (list 'a 'b 'c))
 (define y x)
@@ -350,7 +350,7 @@
 (test #t immutable? (string->immutable-string "hi"))
 (test #t immutable? (string->immutable-string (string-copy "hi")))
 
-(SECTION 6 4)
+(Section 6 4)
 (test #t symbol? 'foo)
 (test #t symbol? (car '(a b)))
 (test #f symbol? "bar")
@@ -399,7 +399,7 @@
 
 (arity-test symbol? 1 1)
 
-(SECTION 6 6)
+(Section 6 6)
 
 (define (char-tests)
   (test #t eqv? '#\  #\Space)
@@ -649,7 +649,7 @@
 (test-up/down char-upcase 'char-upcase lowers (map cons lowers uppers))
 (test-up/down char-downcase 'char-downcase uppers (map cons uppers lowers))
 
-(SECTION 6 7)
+(Section 6 7)
 (test #t string? "The word \"recursion\\\" has many meanings.")
 (test #t string? "")
 (arity-test string? 1 1)
@@ -1265,7 +1265,7 @@
 (arity-test regexp-replace 3 3)
 (arity-test regexp-replace* 3 3)
 
-(SECTION 6 8)
+(Section 6 8)
 (test #t vector? '#(0 (2 2 2 2) "Anna"))
 (test #t vector? '#())
 (arity-test vector? 1 1)
@@ -1311,7 +1311,7 @@
 (arity-test vector-fill! 2 2)
 (err/rt-test (vector-fill! '(1 2 3) 0))
 
-(SECTION 6 9)
+(Section 6 9)
 (test #t procedure? car)
 (test #f procedure? 'car)
 (test #t procedure? (lambda (x) (* x x)))
@@ -1436,7 +1436,7 @@
 (define (test-cont)
   (newline)
   (display ";testing continuations; ")
-  (SECTION 6 9)
+  (Section 6 9)
   (test #t leaf-eq? '(a (b (c))) '((a) b c))
   (test #f leaf-eq? '(a (b (c))) '((a) b c d))
   '(report-errs))
@@ -1776,7 +1776,7 @@
 
 (newline)
 (display ";testing scheme 4 functions; ")
-(SECTION 6 7)
+(Section 6 7)
 (test '(#\P #\space #\l) string->list "P l")
 (test '() string->list "")
 (test "1\\\"" list->string '(#\1 #\\ #\"))
@@ -1787,7 +1787,7 @@
 (err/rt-test (list->string 'hello))
 (err/rt-test (list->string '(#\h . #\e)))
 (err/rt-test (list->string '(#\h 1 #\e)))
-(SECTION 6 8)
+(Section 6 8)
 (test '(dah dah didah) vector->list '#(dah dah didah))
 (test '() vector->list '#())
 (test '#(dididit dah) list->vector '(dididit dah))
@@ -1811,6 +1811,11 @@
 (let ()
   (define-struct ax (b c)) ; opaque
   (define-struct a (b c) (make-inspector))
+
+  (define save (let ([x null])
+                 (case-lambda 
+                  [() x]
+                  [(a) (set! x (cons a x)) a])))
 	 
   (define an-ax (make-ax 1 2))
 
@@ -1832,11 +1837,7 @@
 		 [l (list 1 2 3)]
 		 [v (vector 5 6 7)]
 		 [a (make-a 1 (make-a 2 3))]
-		 [b (box (list 1 2 3))]
-		 [save (let ([x null])
-			 (case-lambda 
-			  [() x]
-			  [(a) (set! x (cons a x)) a]))])
+		 [b (box (list 1 2 3))])
 
 	     (test 0 hash-table-count h1)
 
@@ -1865,6 +1866,15 @@
 		     (puts1) 
 		     (test 6 hash-table-count h1)
 		     (puts2))))
+
+             (when reorder?
+               ;; Add 1000 things and take them back out in an effort to 
+               ;; trigger GCs that somehow affect hashing:
+               (let loop ([i 0.0])
+                 (unless (= i 1000.0)
+                   (hash-table-put! h1 i #t)
+                   (loop (add1 i))
+                   (hash-table-remove! h1 i))))
 
 	     (test 12 hash-table-count h1)
 	     (test 'list hash-table-get h1 l)
@@ -1908,22 +1918,26 @@
 	     (let ([c 0])
 	       (hash-table-for-each h1 (lambda (k v) (set! c (add1 c))))
 	       (test 11 'count c))
-	     (save) ; prevents gcing of the ht-registered values
 	     ;; return the hash table:
 	     h1))])
 
     (let ([check-tables-equal
-	   (lambda (t1 t2)
+	   (lambda (mode t1 t2)
 	     (test #t equal? t1 t2)
 	     (test (equal-hash-code t1) equal-hash-code t2)
 	     (let ([meta-ht (make-hash-table 'equal)])
-	       (hash-table-put! meta-ht t1 'the-table)
-	       (test 'the-table hash-table-get meta-ht t2 (lambda () #f))))])
+	       (hash-table-put! meta-ht t1 mode)
+	       (test mode hash-table-get meta-ht t2 (lambda () #f)))
+             (test (hash-table-count t1) hash-table-count t2))])
 
-      (check-tables-equal (check-hash-tables null #f)
+      (check-tables-equal 'the-norm-table
+                          (check-hash-tables null #f)
 			  (check-hash-tables null #t))
-      (check-tables-equal (check-hash-tables (list 'weak) #f)
-			  (check-hash-tables (list 'weak) #t)))))
+      (check-tables-equal 'the-weak-table
+                          (check-hash-tables (list 'weak) #f)
+			  (check-hash-tables (list 'weak) #t)))
+
+    (save))) ; prevents gcing of the ht-registered values
 
 (test #f hash-table? 5)
 (test #t hash-table? (make-hash-table))

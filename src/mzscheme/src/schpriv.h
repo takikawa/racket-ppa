@@ -29,7 +29,7 @@
 
 #define _MALLOC_N(x, n, malloc) ((x*)malloc(sizeof(x)*(n)))
 #define MALLOC_ONE(x) _MALLOC_N(x, 1, scheme_malloc)
-#define MALLOC_ONE_TAGGED(x) _MALLOC_N(x, 1, scheme_malloc_tagged)
+#define MALLOC_ONE_TAGGED(x) _MALLOC_N(x, 1, scheme_malloc_small_tagged)
 #define MALLOC_N_TAGGED(x, n) _MALLOC_N(x, n, scheme_malloc_array_tagged)
 #ifdef MZTAG_REQUIRED
 # define scheme_malloc_rt(x) scheme_malloc_tagged(x)
@@ -593,7 +593,8 @@ void scheme_extend_module_rename(Scheme_Object *rn, Scheme_Object *modname,
 void scheme_extend_module_rename_with_kernel(Scheme_Object *rn, Scheme_Object *nominal_src);
 void scheme_save_module_rename_unmarshal(Scheme_Object *rn, Scheme_Object *info);
 void scheme_do_module_rename_unmarshal(Scheme_Object *rn, Scheme_Object *info,
-				       Scheme_Object *modidx_shift_from, Scheme_Object *modidx_shift_to);
+				       Scheme_Object *modidx_shift_from, Scheme_Object *modidx_shift_to,
+				       Scheme_Hash_Table *export_registry);
 void scheme_remove_module_rename(Scheme_Object *mrn,
 				 Scheme_Object *localname);
 void scheme_append_module_rename(Scheme_Object *src, Scheme_Object *dest);
@@ -626,9 +627,11 @@ Scheme_Object *scheme_stx_property(Scheme_Object *_stx,
 				   Scheme_Object *val);
 
 Scheme_Object *scheme_stx_phase_shift(Scheme_Object *stx, long shift,
-				      Scheme_Object *old_midx, Scheme_Object *new_midx);
+				      Scheme_Object *old_midx, Scheme_Object *new_midx,
+				      Scheme_Hash_Table *export_registry);
 Scheme_Object *scheme_stx_phase_shift_as_rename(long shift,
-						Scheme_Object *old_midx, Scheme_Object *new_midx);
+						Scheme_Object *old_midx, Scheme_Object *new_midx,
+						Scheme_Hash_Table *export_registry);
 
 int scheme_stx_list_length(Scheme_Object *list);
 int scheme_stx_proper_list_length(Scheme_Object *list);
@@ -1104,7 +1107,7 @@ typedef struct {
 # define SCHEME_BIGPOS(b) (MZ_OPT_HASH_KEY(&((Scheme_Bignum *)b)->iso) & 0x1)
 # define SCHEME_SET_BIGPOS(b, v) MZ_OPT_HASH_KEY(&((Scheme_Bignum *)b)->iso) = ((v) | SCHEME_BIGINLINE(b))
 # define SCHEME_BIGINLINE(b) (MZ_OPT_HASH_KEY(&((Scheme_Bignum *)b)->iso) & 0x2)
-# define SCHEME_SET_BIGINLINE(b, v) MZ_OPT_HASH_KEY(&((Scheme_Bignum *)b)->iso) = (((v) << 1) | SCHEME_BIGPOS(b))
+# define SCHEME_SET_BIGINLINE(b) MZ_OPT_HASH_KEY(&((Scheme_Bignum *)b)->iso) |= (0x2 | SCHEME_BIGPOS(b))
 #else
 # define SCHEME_BIGPOS(b) MZ_OPT_HASH_KEY(&((Scheme_Bignum *)b)->iso)
 # define SCHEME_SET_BIGPOS(b, v) SCHEME_BIGPOS(b) = v
@@ -1420,7 +1423,7 @@ Scheme_Object *scheme_named_map_1(char *,
 				  Scheme_Object *(*fun)(Scheme_Object*, Scheme_Object *form),
 				  Scheme_Object *lst, Scheme_Object *form);
 
-int scheme_strncmp(const char *a, const char *b, int len);
+XFORM_NONGCING int scheme_strncmp(const char *a, const char *b, int len);
 
 #define _scheme_make_char(ch) scheme_make_character(ch)
 
@@ -1693,8 +1696,9 @@ Scheme_Object *scheme_add_env_renames(Scheme_Object *stx, Scheme_Comp_Env *env,
 Scheme_Object *scheme_env_frame_uid(Scheme_Comp_Env *env);
 
 typedef Scheme_Object *(*Scheme_Lift_Capture_Proc)(Scheme_Object *, Scheme_Object **, Scheme_Object *, Scheme_Comp_Env *);
-void scheme_frame_captures_lifts(Scheme_Comp_Env *env, Scheme_Lift_Capture_Proc cp, Scheme_Object *data);
+void scheme_frame_captures_lifts(Scheme_Comp_Env *env, Scheme_Lift_Capture_Proc cp, Scheme_Object *data, Scheme_Object *end_stmts);
 Scheme_Object *scheme_frame_get_lifts(Scheme_Comp_Env *env);
+Scheme_Object *scheme_frame_get_end_statement_lifts(Scheme_Comp_Env *env);
 
 void scheme_add_local_syntax(int cnt, Scheme_Comp_Env *env);
 void scheme_set_local_syntax(int pos, Scheme_Object *name, Scheme_Object *val,
@@ -2001,6 +2005,7 @@ struct Scheme_Env {
 
   Scheme_Hash_Table *module_registry; /* symbol -> module ; loaded modules,
 					 shared with modules in same space */
+  Scheme_Hash_Table *export_registry; /* symbol -> module-exports */
   Scheme_Object *insp; /* instantiation-time inspector, for granting
 			  protected access and certificates */
 
@@ -2049,9 +2054,9 @@ typedef struct Scheme_Module
 
   Scheme_Object *modname;
 
-  Scheme_Object *et_requires; /* list of module access paths */
-  Scheme_Object *requires;    /* list of module access paths */
-  Scheme_Object *tt_requires; /* list of module access paths */
+  Scheme_Object *et_requires;  /* list of symbol-or-module-path-index */
+  Scheme_Object *requires;     /* list of symbol-or-module-path-index */
+  Scheme_Object *tt_requires;  /* list of symbol-or-module-path-index */
 
   Scheme_Invoke_Proc prim_body;
   Scheme_Invoke_Proc prim_et_body;
@@ -2060,21 +2065,13 @@ typedef struct Scheme_Module
   Scheme_Object *et_body;     /* list of (vector list-of-names expr depth-int resolve-prefix) */
 
   char functional, et_functional, tt_functional, no_cert;
+  
+  struct Scheme_Module_Exports *me;
 
-  Scheme_Object **provides;          /* symbols (extenal names) */
-  Scheme_Object **provide_srcs;      /* module access paths, #f for self */
-  Scheme_Object **provide_src_names; /* symbols (original internal names) */
   char *provide_protects;            /* 1 => protected, 0 => not */
-  int num_provides;
-  int num_var_provides;              /* non-syntax listed first in provides */
-
-  int reprovide_kernel;              /* if true, extend provides with kernel's */
-  Scheme_Object *kernel_exclusion;  /* we allow one exn, but it must be shadowed */
-
   Scheme_Object **indirect_provides; /* symbols (internal names) */
   int num_indirect_provides;
 
-  Scheme_Object *src_modidx;  /* the one used in marshalled syntax */
   Scheme_Object *self_modidx;
 
   Scheme_Hash_Table *accessible;
@@ -2093,6 +2090,26 @@ typedef struct Scheme_Module
 
   Scheme_Object *rn_stx, *et_rn_stx, *tt_rn_stx;
 } Scheme_Module;
+
+typedef struct Scheme_Module_Exports
+{
+  /* Scheme_Module_Exports is separate from Scheme_Module
+     so that we can create a global table mapping export
+     keys to exports. This mapping is used to lazily 
+     unmarshal syntax-object context. */
+  MZTAG_IF_REQUIRED
+
+  Scheme_Object **provides;          /* symbols (extenal names) */
+  Scheme_Object **provide_srcs;      /* module access paths, #f for self */
+  Scheme_Object **provide_src_names; /* symbols (original internal names) */
+  int num_provides;
+  int num_var_provides;              /* non-syntax listed first in provides */
+
+  int reprovide_kernel;              /* if true, extend provides with kernel's */
+  Scheme_Object *kernel_exclusion;  /* we allow one exn, but it must be shadowed */
+
+  Scheme_Object *src_modidx;  /* the one used in marshalled syntax */
+} Scheme_Module_Exports;
 
 typedef struct Scheme_Modidx {
   Scheme_Object so; /* scheme_module_index_type */
@@ -2125,7 +2142,7 @@ Scheme_Object *scheme_sys_wraps(Scheme_Comp_Env *env);
 Scheme_Env *scheme_new_module_env(Scheme_Env *env, Scheme_Module *m, int new_exp_module_tree);
 int scheme_is_module_env(Scheme_Comp_Env *env);
 
-Scheme_Object *scheme_module_resolve(Scheme_Object *modidx);
+Scheme_Object *scheme_module_resolve(Scheme_Object *modidx, int load_it);
 Scheme_Env *scheme_module_access(Scheme_Object *modname, Scheme_Env *env, int rev_mod_phase);
 void scheme_module_force_lazy(Scheme_Env *env, int previous);
 

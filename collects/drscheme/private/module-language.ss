@@ -4,6 +4,7 @@
   (require (lib "unitsig.ss")
            (lib "class.ss")
            (lib "list.ss")
+           (lib "file.ss")
            (lib "mred.ss" "mred")
            (lib "embed.ss" "compiler")
            (lib "launcher.ss" "launcher")
@@ -117,14 +118,27 @@
           (define/override (get-style-delta) module-language-style-delta)
           
           (define/override (front-end/complete-program port settings teachpack-cache)
-            (let ([super-thunk (super front-end/complete-program port settings teachpack-cache)]
-                  [filename (get-filename port)]
-                  [module-name #f])
+            (let* ([super-thunk (super front-end/complete-program port settings teachpack-cache)]
+                   [filename (get-filename port)]
+                   [module-name #f]
+                   [module-name-prefix (get-module-name-prefix filename)]
+                   [get-full-module-name
+                    (λ ()
+                      ;; "clearing out" the module-name via datum->syntax-object ensures
+                      ;; that check syntax doesn't think the original module name
+                      ;; is being used in this require (so it doesn't get turned red)
+                      (datum->syntax-object #'here 
+                                            (string->symbol
+                                             (format "~a~a"
+                                                     (or module-name-prefix "")
+                                                     (syntax-e module-name)))))])
               (λ ()
                 (set! iteration-number (+ iteration-number 1))
-                (let ([super-result (super-thunk)])
-                  (cond
-                    [(= iteration-number 1)
+                (cond
+                  [(= 1 iteration-number)
+                   #`(current-module-name-prefix '#,module-name-prefix)]
+                  [(= 2 iteration-number)
+                   (let ([super-result (super-thunk)])
                      (if (eof-object? super-result)
                          (raise-syntax-error
                           'module-language
@@ -135,29 +149,19 @@
                                         (expand super-result)
                                         super-result)])
                            (set! module-name name)
-                           new-module))]
-                    [(= 2 iteration-number)
+                           new-module)))]
+                  [(= 3 iteration-number)
+                   (let ([super-result (super-thunk)])
                      (if (eof-object? super-result)
-                         (with-syntax ([name 
-                                        ;; "clearing out" the module-name in this fashion ensures
-                                        ;; that check syntax doesn't think the original module name
-                                        ;; is being used in this require (so it doesn't get turned
-                                        ;; red)
-                                        (datum->syntax-object #'here (syntax-object->datum module-name))])
-                           (syntax (require name)))
+                         #`(begin 
+                             (current-module-name-prefix #f)
+                             (eval '(require #,(get-full-module-name)))
+                             (eval '(current-namespace (module->namespace '#,(get-full-module-name)))))
                          (raise-syntax-error
                           'module-language
                           "there can only be one expression in the definitions window"
-                          super-result))]
-                    [(= 3 iteration-number)
-                     (with-syntax ([name 
-                                        ;; "clearing out" the module-name in this fashion ensures
-                                        ;; that check syntax doesn't think the original module name
-                                        ;; is being used in this require (so it doesn't get turned
-                                        ;; red)
-                                        (datum->syntax-object #'here (syntax-object->datum module-name))])
-                       (syntax (current-namespace (module->namespace 'name))))]
-                    [else eof])))))
+                          super-result)))]
+                  [else eof]))))
           
           ;; printer settings are just ignored here.
           (define/override (create-executable setting parent program-filename teachpacks)
@@ -201,7 +205,7 @@
                           (make-launcher (list "-mvqt-" (path->string program-filename))
                                          executable-filename))))))))
           
-          (super-instantiate ()
+          (super-new
             (module '(lib "plt-mred.ss" "lang"))
             (language-position (list (string-constant professional-languages) "(module ...)"))
             (language-numbers (list -1000 1000)))))
@@ -391,7 +395,7 @@
       ;; module-language-style-delta : (instanceof style-delta%)
       (define module-language-style-delta (make-object style-delta% 'change-family 'modern))
       
-      ;; transform-module-to-export-everything : (union #f string) syntax syntax -> syntax
+      ;; transform-module : (union #f string) syntax syntax -> (values symbol[name-of-module] syntax[module])
       ;; in addition to exporting everything, the result module's name
       ;; is the fully expanded name, with a directory prefix, 
       ;; if the file has been saved
@@ -403,18 +407,48 @@
                (check-filename-matches filename
                                        (syntax-object->datum (syntax name)) 
                                        unexpanded-stx))
-             (values v-name stx))]
+             
+             
+             (values v-name
+                     stx)
+             
+             ;; this isn't working ...
+             #;
+             (let ([new-name (if filename 
+                                 (build-name filename)
+                                 v-name)])
+               (values new-name
+                       #`(module #,new-name lang (#%plain-module-begin bodies ...)))))]
           [else
            (raise-syntax-error 'module-language
                                "only module expressions are allowed"
                                unexpanded-stx)]))
-
+      
+      ;; get-module-name-prefix : path -> string
+      ;; returns the symbol that gets passed the current-module-name-prefix
+      ;; while evaluating/expanding the module.
+      (define (get-module-name-prefix path)
+        (and path
+             (let-values ([(base name dir) 
+                           (split-path (normal-case-path (simplify-path (expand-path path) #f)))])
+               (string->symbol (format ",~a" (path->string base))))))
+        
+      ;; build-name : path -> symbol
+      (define (build-name pre-path)
+        (let ([path (normal-case-path (simplify-path (expand-path pre-path) #f))])
+          (let-values ([(base name dir) (split-path path)])
+            (string->symbol (format ",~a" 
+                                    (path->string
+                                     (build-path 
+                                      base
+                                      (remove-suffix (path->string name)))))))))
+      
       ;; get-filename : port -> (union string #f)
       ;; extracts the file the definitions window is being saved in, if any.
       (define (get-filename port)
-        (let ([source #;(port-source port)
-                      #f])
+        (let ([source (object-name port)])
           (cond
+            [(path? source) source]
             [(is-a? source text%)
              (let ([canvas (send source get-canvas)])
                (and canvas
@@ -427,28 +461,30 @@
                              (if (unbox b)
                                  #f
                                  filename))))))]
-            [(string? source) source]
             [else #f])))
       
       ;; check-filename-matches : string datum syntax -> void
-      (define re:check-filename-matches (regexp "^(.*)\\.[^.]*$"))
       (define (check-filename-matches filename datum unexpanded-stx)
         (unless (symbol? datum)
           (raise-syntax-error 'module-language "unexpected object in name position of module" 
                               unexpanded-stx))
         (let-values ([(base name dir?) (split-path filename)])
-          (let* ([m (regexp-match re:check-filename-matches name)]
-                 [matches?
-                  (if m
-                      (equal? (string->symbol (cadr m)) datum)
-                      (equal? (string->symbol name) datum))])
-            (unless matches?
+          (let* ([expected (string->symbol (remove-suffix (path->string name)))])
+            (unless (equal? expected datum)
               (raise-syntax-error
                'module-language
-               (format "module name doesn't match saved filename, ~s and ~e"
+               (format "module name doesn't match saved filename, got ~s and expected ~a"
                        datum
-                       filename)
+                       expected)
                unexpanded-stx)))))
+      
+      (define re:check-filename-matches #rx"^(.*)\\.[^.]*$")
+      (define (remove-suffix str)
+        (let ([m (regexp-match re:check-filename-matches str)])
+          (if m
+              (cadr m)
+              str)))
+        
 
       (define module-language-put-file-mixin
         (mixin (text:basic<%>) ()

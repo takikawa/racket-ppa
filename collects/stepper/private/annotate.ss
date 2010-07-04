@@ -377,13 +377,13 @@
                (let* ([free-vars-captured #f] ; this will be set!'ed
                       ;[dont-care (printf "expr: ~a\nskipto: ~a\n" expr (syntax-property expr 'stepper-skipto))]
                       ; WARNING! I depend on the order of evaluation in application arguments here:
-                      [annotated (skipto-annotate
-                                  (syntax-property exp 'stepper-skipto) 
-                                  exp 
+                      [annotated (skipto/auto
+                                  exp
+                                  'rebuild
                                   (lambda (subterm)
                                     (let*-2vals ([(stx free-vars) (annotate/inner subterm tail-bound pre-break? procedure-name-info offset-counter)])
-                                      (set! free-vars-captured free-vars)
-                                      stx)))])
+                                                (set! free-vars-captured free-vars)
+                                                stx)))])
                  (2vals (wcm-wrap
                          skipto-mark
                          annotated)
@@ -1055,19 +1055,20 @@
           [(require module-name) exp]
           ; the 'dynamic-require' form is used by the actual expander 
           [(let-values ([(done-already?) . rest1])
-                (#%app dynamic-wind
-                 void
-                 (lambda () . rest2)
-                 (lambda () . rest3)))
+             (#%app dynamic-wind
+                    void
+                    (lambda () . rest2)
+                    (lambda () . rest3)))
            exp]
-          [else (begin
-                  (fprintf (current-error-port) "~v\n" (syntax-object->datum exp))
-                  (error `annotate/top-level "unexpected top-level expression: ~a\n" (syntax-object->datum exp)))])))
+          [else
+           #;
+           (error `annotate/top-level "unexpected top-level expression: ~a\n"
+                  (syntax-object->datum exp))
+           (annotate/module-top-level exp)])))
     
     (define/contract annotate/top-level/acl2
       (syntax? . -> . syntax?)
       (lambda (exp)
-        (>>> exp)
         (syntax-case exp (begin define-values #%app)
           [(begin contract-thingy 
                   (begin body (begin)))
@@ -1103,7 +1104,7 @@
                #`(begin #,exp
                         (#,(make-define-struct-break exp)))]
               [(syntax-property exp 'stepper-skipto)
-               (skipto-annotate (syntax-property exp 'stepper-skipto) exp annotate/module-top-level)] 
+               (skipto/auto exp 'rebuild annotate/module-top-level)] 
               [else 
                (syntax-case exp (#%app call-with-values define-values define-syntaxes require require-for-syntax provide begin lambda)
                  [(define-values (new-var ...) e)
@@ -1144,7 +1145,6 @@
                   #;(error `annotate/module-top-level "unexpected module-top-level expression to annotate: ~a\n" (syntax-object->datum exp))])])))
     
     ; body of local
-    #;(printf "input: ~a\n" exp)
     (let* ([annotated-exp (cond 
                             [(string=? language-level-name "ACL2 Beginner (beta 8)")
                              (annotate/top-level/acl2 main-exp)]

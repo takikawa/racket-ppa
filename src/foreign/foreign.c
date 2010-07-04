@@ -78,6 +78,75 @@
 #define TO_PATH(x) (SCHEME_PATHP(x) ? (x) : scheme_char_string_to_path(x))
 
 /*****************************************************************************/
+/* Defining EnumProcessModules for openning `self' as an ffi-lib */
+
+/* We'd like to use EnumProcessModules to find all loaded DLLs, but it's
+   only available in NT 4.0 and later. The alternative, Module32{First,Next},
+   is available *except* for NT 4.0! So we try EnumProcessModules first. */
+
+#ifdef WINDOWS_DYNAMIC_LOAD
+#ifdef MZ_PRECISE_GC
+START_XFORM_SKIP;
+#endif
+
+int epm_tried = 0;
+typedef BOOL (WINAPI *EnumProcessModules_t)(HANDLE hProcess, HMODULE* lphModule,
+                                            DWORD cb, LPDWORD lpcbNeeded);
+EnumProcessModules_t _EnumProcessModules;
+#include <tlhelp32.h>
+
+BOOL mzEnumProcessModules(HANDLE hProcess, HMODULE* lphModule,
+                          DWORD cb, LPDWORD lpcbNeeded)
+{
+  if (!epm_tried) {
+    HMODULE hm;
+    hm = LoadLibrary("psapi.dll");
+    if (hm) {
+      _EnumProcessModules =
+        (EnumProcessModules_t)GetProcAddress(hm, "EnumProcessModules");
+    }
+    epm_tried = 1;
+  }
+
+  if (_EnumProcessModules)
+    return _EnumProcessModules(hProcess, lphModule, cb, lpcbNeeded);
+  else {
+    HANDLE snapshot;
+    MODULEENTRY32 mod;
+    int i, ok;
+
+    snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE,
+                                        GetCurrentProcessId());
+    if (snapshot == INVALID_HANDLE_VALUE)
+      return FALSE;
+
+    for (i = 0; 1; i++) {
+      mod.dwSize = sizeof(mod);
+      if (!i)
+        ok = Module32First(snapshot, &mod);
+      else
+        ok = Module32Next(snapshot, &mod);
+      if (!ok)
+        break;
+      if (cb >= sizeof(HMODULE)) {
+        lphModule[i] = mod.hModule;
+        cb -= sizeof(HMODULE);
+      }
+    }
+
+    CloseHandle(snapshot);
+    *lpcbNeeded = i * sizeof(HMODULE);
+    return GetLastError() == ERROR_NO_MORE_FILES;
+  }
+}
+
+
+#ifdef MZ_PRECISE_GC
+END_XFORM_SKIP;
+#endif
+#endif
+
+/*****************************************************************************/
 /* Library objects */
 
 /* ffi-lib structure definition */
@@ -125,6 +194,7 @@ static Scheme_Object *foreign_ffi_lib(int argc, Scheme_Object *argv[])
   char *name;
   Scheme_Object *path, *hashname;
   void *handle;
+  int null_ok = 0;
   ffi_lib_struct *lib;
   if (!(SCHEME_PATH_STRINGP(argv[0]) || SCHEME_FALSEP(argv[0])))
     scheme_wrong_type(MYNAME, "string-or-false", 0, argc, argv);
@@ -137,11 +207,16 @@ static Scheme_Object *foreign_ffi_lib(int argc, Scheme_Object *argv[])
   if (!lib) {
     Scheme_Hash_Table *ht;
 #ifdef WINDOWS_DYNAMIC_LOAD
-    handle = (name==NULL) ? GetModuleHandle(NULL) : LoadLibrary(name);
+    if (name==NULL) {
+      /* openning the executable is marked by a NULL handle */
+      handle = NULL;
+      null_ok = 1;
+    } else
+      handle = LoadLibrary(name);
 #else
     handle = dlopen(name, RTLD_NOW | RTLD_GLOBAL);
 #endif
-    if (handle == NULL) {
+    if (handle == NULL && !null_ok) {
       if (argc > 1 && SCHEME_TRUEP(argv[1])) return scheme_false;
       else {
 #ifdef WINDOWS_DYNAMIC_LOAD
@@ -237,7 +312,35 @@ static Scheme_Object *foreign_ffi_obj(int argc, Scheme_Object *argv[])
   obj = (ffi_obj_struct*)scheme_hash_get(lib->objects, (Scheme_Object*)dlname);
   if (!obj) {
 #ifdef WINDOWS_DYNAMIC_LOAD
-    dlobj = GetProcAddress(lib->handle, dlname);
+    if (lib->handle) {
+      dlobj = GetProcAddress(lib->handle, dlname);
+    } else {
+      /* this is for the executable-open case, which was marked by a NULL
+       * handle, deal with it by searching all current modules */
+#     define NUM_QUICK_MODS 16
+      HMODULE *mods, me, quick_mods[NUM_QUICK_MODS];
+      DWORD cnt = NUM_QUICK_MODS * sizeof(HMODULE), actual_cnt, i;
+      me = GetCurrentProcess();
+      mods = quick_mods;
+      if (mzEnumProcessModules(me, mods, cnt, &actual_cnt)) {
+        if (actual_cnt > cnt) {
+	  cnt = actual_cnt;
+	  mods = (HMODULE *)scheme_malloc_atomic(cnt);
+	  if (!mzEnumProcessModules(me, mods, cnt, &actual_cnt))
+	    mods = NULL;
+	} else
+	  cnt = actual_cnt;
+      } else
+	mods = NULL;
+      if (mods) {
+	cnt /= sizeof(HMODULE);
+	for (i = 0; i < cnt; i++) {
+	  dlobj = GetProcAddress(mods[i], dlname);
+	  if (dlobj) break;
+	}
+      } else
+	dlobj = NULL;
+    }
     if (!dlobj) {
       long err;
       err = GetLastError();
@@ -963,36 +1066,33 @@ END_XFORM_SKIP;
 /*****************************************************************************/
 /* Scheme<-->C conversions */
 
-static Scheme_Object *c_to_scheme(Scheme_Object *type, void *src
 /* On big endian machines we need to know whether we're pulling a value from an
  * argument location where it always takes a whole word or straight from a
- * memory location */
+ * memory location -- deal with it via a C2SCHEME macro wrapper that is used
+ * for both the function definition and calls */
 #ifdef SCHEME_BIG_ENDIAN
-                                  , int args_loc
-#endif
-                                  )
-#ifdef SCHEME_BIG_ENDIAN
-#define REF_CTYPE(ctype) ((sizeof(ctype)<sizeof(int)) && args_loc \
+#define C2SCHEME(typ,src,argsloc) c_to_scheme(typ,src,argsloc)
+#define REF_CTYPE(ctype) (((sizeof(ctype)<sizeof(int)) && args_loc) \
   ? ((ctype)(((int*)src)[0])) : (((ctype *)src)[0]))
 #else
+#define C2SCHEME(typ,src,argsloc) c_to_scheme(typ,src)
 #define REF_CTYPE(ctype) (((ctype *)src)[0])
 #endif
+
+static Scheme_Object *C2SCHEME(Scheme_Object *type, void *src, int args_loc)
 {
   Scheme_Object *res, *base;
   if (!SCHEME_CTYPEP(type))
     scheme_wrong_type("C->Scheme", "C-type", 0, 1, &type);
   base = CTYPE_BASETYPE(type);
   if (base != NULL) {
-#ifdef SCHEME_BIG_ENDIAN
-    res = c_to_scheme(base, src, args_loc);
-#else
-    res = c_to_scheme(base, src);
-#endif
+    res = C2SCHEME(base, src, args_loc);
     if (SCHEME_FALSEP(CTYPE_USER_C2S(type)))
       return res;
     else
       return _scheme_apply(CTYPE_USER_C2S(type), 1, (Scheme_Object**)(&res));
   } else if (CTYPE_PRIMLABEL(type) == FOREIGN_fpointer) {
+    /* No need for the REF_CTYPE trick for pointers */
     return (Scheme_Object*)src;
   } else switch (CTYPE_PRIMLABEL(type)) {
     case FOREIGN_void: return scheme_void;
@@ -1027,12 +1127,25 @@ static Scheme_Object *c_to_scheme(Scheme_Object *type, void *src
 }
 #undef REF_CTYPE
 
+/* On big endian machines we need to know whether we're pulling a value from an
+ * argument location where it always takes a whole word or straight from a
+ * memory location -- deal with it as above, via a SCHEME2C macro wrapper that
+ * is used for both the function definition and calls, but the actual code in
+ * the function is different: in the relevant cases zero an int and offset the
+ * ptr */
+#ifdef SCHEME_BIG_ENDIAN
+#define SCHEME2C(typ,dst,val,basep,retloc) scheme_to_c(typ,dst,val,basep,retloc)
+#else
+#define SCHEME2C(typ,dst,val,basep,retloc) scheme_to_c(typ,dst,val,basep)
+#endif
+
 /* Usually writes the C object to dst and returns NULL.  When basetype_p is not
  * NULL, then any pointer value (any pointer or a struct) is returned, and the
  * basetype_p is set to the corrsponding number tag.  If basetype_p is NULL,
  * then a struct value will be *copied* into dst. */
-static void* scheme_to_c(Scheme_Object *type, void *dst,
-                         Scheme_Object *val, long *basetype_p)
+static void* SCHEME2C(Scheme_Object *type, void *dst,
+                      Scheme_Object *val, long *basetype_p,
+                      int ret_loc)
 {
   if (!SCHEME_CTYPEP(type))
     scheme_wrong_type("Scheme->C", "C-type", 0, 1, &type);
@@ -1042,6 +1155,7 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
     type = CTYPE_BASETYPE(type);
   }
   if (CTYPE_PRIMLABEL(type) == FOREIGN_fpointer) {
+    /* No need for the SET_CTYPE trick for pointers */
     if (SCHEME_FFICALLBACKP(val))
       ((void**)dst)[0] = ((ffi_callback_struct*)val)->callback;
     else if (SCHEME_CPTRP(val))
@@ -1054,6 +1168,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
     case FOREIGN_void:
       scheme_wrong_type("Scheme->C","non-void-C-type",0,1,&(type));
     case FOREIGN_int8:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(Tsint8)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(Tsint8));
+      }
+#endif
       if (SCHEME_INTP(val)) {
         Tsint8 tmp;
         tmp = (Tsint8)(SCHEME_INT_VAL(val));
@@ -1063,6 +1183,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_uint8:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(Tuint8)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(Tuint8));
+      }
+#endif
       if (SCHEME_INTP(val)) {
         Tuint8 tmp;
         tmp = (Tuint8)(SCHEME_UINT_VAL(val));
@@ -1072,6 +1198,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_int16:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(Tsint16)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(Tsint16));
+      }
+#endif
       if (SCHEME_INTP(val)) {
         Tsint16 tmp;
         tmp = (Tsint16)(SCHEME_INT_VAL(val));
@@ -1081,6 +1213,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_uint16:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(Tuint16)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(Tuint16));
+      }
+#endif
       if (SCHEME_INTP(val)) {
         Tuint16 tmp;
         tmp = (Tuint16)(SCHEME_UINT_VAL(val));
@@ -1102,6 +1240,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
       if (!(scheme_get_unsigned_long_long_val(val,&(((Tuint64*)dst)[0])))) scheme_wrong_type("Scheme->C","uint64",0,1,&(val));
       return NULL;
     case FOREIGN_fixint:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(Tsint32)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(Tsint32));
+      }
+#endif
       if (SCHEME_INTP(val)) {
         Tsint32 tmp;
         tmp = (Tsint32)(SCHEME_INT_VAL(val));
@@ -1111,6 +1255,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_ufixint:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(Tuint32)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(Tuint32));
+      }
+#endif
       if (SCHEME_INTP(val)) {
         Tuint32 tmp;
         tmp = (Tuint32)(SCHEME_UINT_VAL(val));
@@ -1120,6 +1270,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_fixnum:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(long)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(long));
+      }
+#endif
       if (SCHEME_INTP(val)) {
         long tmp;
         tmp = (long)(SCHEME_INT_VAL(val));
@@ -1129,6 +1285,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_ufixnum:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(unsigned long)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(unsigned long));
+      }
+#endif
       if (SCHEME_INTP(val)) {
         unsigned long tmp;
         tmp = (unsigned long)(SCHEME_UINT_VAL(val));
@@ -1138,6 +1300,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_float:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(float)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(float));
+      }
+#endif
       if (SCHEME_FLTP(val)) {
         float tmp;
         tmp = (float)(SCHEME_FLT_VAL(val));
@@ -1147,6 +1315,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_double:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(double)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(double));
+      }
+#endif
       if (SCHEME_DBLP(val)) {
         double tmp;
         tmp = (double)(SCHEME_DBL_VAL(val));
@@ -1156,6 +1330,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_doubleS:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(double)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(double));
+      }
+#endif
       if (SCHEME_REALP(val)) {
         double tmp;
         tmp = (double)(scheme_real_to_double(val));
@@ -1165,6 +1345,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_bool:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(int)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(int));
+      }
+#endif
       if (1) {
         int tmp;
         tmp = (int)(SCHEME_TRUEP(val));
@@ -1174,6 +1360,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_string_ucs_4:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(mzchar*)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(mzchar*));
+      }
+#endif
       if (SCHEME_CHAR_STRINGP(val)) {
         mzchar* tmp;
         tmp = (mzchar*)(SCHEME_CHAR_STR_VAL(val));
@@ -1187,6 +1379,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_string_utf_16:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(unsigned short*)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(unsigned short*));
+      }
+#endif
       if (SCHEME_CHAR_STRINGP(val)) {
         unsigned short* tmp;
         tmp = (unsigned short*)(ucs4_string_to_utf16_pointer(val));
@@ -1200,6 +1398,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_bytes:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(char*)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(char*));
+      }
+#endif
       if (SCHEME_FALSEP(val)||SCHEME_BYTE_STRINGP(val)) {
         char* tmp;
         tmp = (char*)(SCHEME_FALSEP(val)?NULL:SCHEME_BYTE_STR_VAL(val));
@@ -1213,6 +1417,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_path:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(char*)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(char*));
+      }
+#endif
       if (SCHEME_FALSEP(val)||SCHEME_PATH_STRINGP(val)) {
         char* tmp;
         tmp = (char*)(SCHEME_FALSEP(val)?NULL:SCHEME_PATH_VAL(TO_PATH(val)));
@@ -1226,6 +1436,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_symbol:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(char*)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(char*));
+      }
+#endif
       if (SCHEME_SYMBOLP(val)) {
         char* tmp;
         tmp = (char*)(SCHEME_SYM_VAL(val));
@@ -1239,6 +1455,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_pointer:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(void*)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(void*));
+      }
+#endif
       if (SCHEME_FFIANYPTRP(val)) {
         void* tmp;
         tmp = (void*)(SCHEME_FFIANYPTR_VAL(val));
@@ -1252,6 +1474,12 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
         return NULL; /* shush the compiler */
       }
     case FOREIGN_scheme:
+#ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(Scheme_Object*)<sizeof(int) && ret_loc) {
+        ((int*)dst)[0] = 0;
+        dst = dst XFORM_OK_PLUS (sizeof(int)-sizeof(Scheme_Object*));
+      }
+#endif
       if (1) {
         Scheme_Object* tmp;
         tmp = (Scheme_Object*)(val);
@@ -1282,6 +1510,7 @@ static void* scheme_to_c(Scheme_Object *type, void *dst,
   }
   return NULL; /* shush the compiler */
 }
+#undef SET_CTYPE
 
 /*****************************************************************************/
 /* C type information */
@@ -1563,11 +1792,7 @@ static Scheme_Object *foreign_ptr_ref(int argc, Scheme_Object *argv[])
       scheme_wrong_type(MYNAME, "integer", 2, argc, argv);
     ptr = (char*)ptr XFORM_OK_PLUS (size * SCHEME_INT_VAL(argv[2]));
   }
-#ifdef SCHEME_BIG_ENDIAN
-  return c_to_scheme(argv[1], ptr, 0);
-#else
-  return c_to_scheme(argv[1], ptr);
-#endif
+  return C2SCHEME(argv[1], ptr, 0);
 }
 
 /* (ptr-set! cpointer type [['abs] n] value) -> void */
@@ -1617,7 +1842,7 @@ static Scheme_Object *foreign_ptr_set(int argc, Scheme_Object *argv[])
       scheme_wrong_type(MYNAME, "integer", 2, argc, argv);
     ptr = (char*)ptr XFORM_OK_PLUS (size * SCHEME_INT_VAL(argv[2]));
   }
-  scheme_to_c(argv[1], ptr, val, NULL);
+  SCHEME2C(argv[1], ptr, val, NULL, 0);
   return scheme_void;
 }
 
@@ -1753,7 +1978,7 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
   /* iterate on input values and types */
   for (i=0; i<nargs; i++, itypes=SCHEME_CDR(itypes)) {
     /* convert argv[i] according to current itype */
-    p = scheme_to_c(SCHEME_CAR(itypes), &(ivals[i]), argv[i], &basetype);
+    p = SCHEME2C(SCHEME_CAR(itypes), &(ivals[i]), argv[i], &basetype, 0);
     if (p != NULL) {
       avalues[i] = p;
       ivals[i].x_fixnum = basetype; /* remember the base type */
@@ -1800,17 +2025,14 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
     p = newp;
     break;
   default:
+    /* not sure why this code is here, looks fine to remove this case */
     if (CTYPE_PRIMTYPE(base) == &ffi_type_pointer) {
       tmp = ((void**)p)[0];
       p = &tmp;
     }
     break;
   }
-#ifdef SCHEME_BIG_ENDIAN
-  return c_to_scheme(otype, p, 1);
-#else
-  return c_to_scheme(otype, p);
-#endif
+  return C2SCHEME(otype, p, 1);
 }
 
 /* see below */
@@ -1899,15 +2121,11 @@ void ffi_do_callback(ffi_cif* cif, void* resultp, void** args, void *userdata)
   else
     argv = scheme_malloc(argc * sizeof(Scheme_Object*));
   for (i=0, p=data->itypes; i<argc; i++, p=SCHEME_CDR(p)) {
-#ifdef SCHEME_BIG_ENDIAN
-    v = c_to_scheme(SCHEME_CAR(p),args[i],1);
-#else
-    v = c_to_scheme(SCHEME_CAR(p),args[i]);
-#endif
+    v = C2SCHEME(SCHEME_CAR(p), args[i], 0);
     argv[i] = v;
   }
   p = _scheme_apply(data->proc, argc, argv);
-  scheme_to_c(data->otype, resultp, p, NULL);
+  SCHEME2C(data->otype, resultp, p, NULL, 1);
 }
 
 /* see ffi-callback below */

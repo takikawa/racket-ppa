@@ -28,30 +28,45 @@
 #include <ctype.h>
 #include <math.h>
 
+int scheme_hash_request_count;
+int scheme_hash_iteration_count;
+
 #ifdef MZ_PRECISE_GC
-# define PTR_TO_LONG(p) scheme_hash_key(p)
+static short keygen;
+XFORM_NONGCING static 
+#ifndef NO_INLINE_KEYWORD
+MSC_IZE(inline)
+#endif
+long PTR_TO_LONG(Scheme_Object *o)
+{
+  short v;
+
+  if (SCHEME_INTP(o))
+    return (long)o;
+
+  v = o->keyex;
+
+  if (!(v & 0xFFFC)) {
+    if (!keygen)
+      keygen += 4;
+    v |= keygen;
+    o->keyex = v;
+    keygen += 4;
+  }
+
+  return (o->type << 16) | v;
+}
 #else
-# ifdef DOS_MEMORY
-#  include <dos.h>
-#  define PTR_TO_LONG(p) ((FP_SEG(p) << 4) + FP_OFF(p))
-# else
-#  define PTR_TO_LONG(p) ((long)(p))
-# endif
+# define PTR_TO_LONG(p) ((long)(p))
 #endif
 
 #define FILL_FACTOR 1.4
 
-#define MIN_HTABLE_SIZE 7
-
-long scheme_hash_primes[] = 
-{MIN_HTABLE_SIZE, 31, 61, 127, 257, 521, 1031, 2053, 4099, 8209, 16411, 
-   32779, 65543, 131101, 262147, 425329, 1048583, 2097169,
-   4194319, 8388617, 16777259, 33554467, 67108879, 134217757,
-   268435459, 536870923, 1073741827};
+#define MIN_HTABLE_SIZE 8
 
 typedef int (*Hash_Compare_Proc)(void*, void*);
 
-typedef long hash_v_t;
+typedef unsigned long hash_v_t;
 
 /*========================================================================*/
 /*                         hashing functions                              */
@@ -110,7 +125,6 @@ Scheme_Hash_Table *scheme_make_hash_table(int type)
 
   table = MALLOC_ONE_TAGGED(Scheme_Hash_Table);
 
-  table->step = 0;
   table->size = 0;
     
   table->iso.so.type = scheme_hash_table_type;
@@ -135,32 +149,29 @@ static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int 
 {
   Scheme_Object *tkey, **keys;
   hash_v_t h, h2, useme = 0;
-  long size = table->size;
+  unsigned long mask;
 
  rehash_key:
 
+  mask = table->size - 1;
+
   if (table->make_hash_indices) {
-    table->make_hash_indices((void *)key, &h, &h2);
-    h = h % size;
-    h2 = h2 % size;
+    table->make_hash_indices((void *)key, (long *)&h, (long *)&h2);
+    h = h & mask;
+    h2 = h2 & mask;
   } else {
-    long lkey;
-    lkey = PTR_TO_LONG((Scheme_Object *)key);
-    h = (lkey >> 2) % size;
-    h2 = (lkey >> 3) % size;
+    unsigned long lkey;
+    lkey = (unsigned long)PTR_TO_LONG((Scheme_Object *)key);
+    h = (lkey >> 2) & mask;
+    h2 = (lkey >> 3) & mask;
   }
 
-  if (h < 0) h = -h;
-  if (h2 < 0) {
-    h2 = -h2;
-    if (h2 & 0x1)
-      h2++; /* note: table size is never even, so no % needed */
-  } else if (!h2)
-    h2 = 2;
+  h2 |= 1;
 
   keys = table->keys;
   
   if (table->compare) {
+    scheme_hash_request_count++;
     while ((tkey = keys[h])) {
       if (SAME_PTR(tkey, GONE)) {
 	if (set > 1) {
@@ -178,9 +189,11 @@ static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int 
 	} else
 	  return table->vals[h];
       }
-      h = (h + h2) % size;
+      scheme_hash_iteration_count++;
+      h = (h + h2) & mask;
     }
   } else {
+    scheme_hash_request_count++;
     while ((tkey = keys[h])) {
       if (SAME_PTR(tkey, key)) {
 	if (set) {
@@ -198,7 +211,8 @@ static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int 
 	  set = 1;
 	}
       } 
-      h = (h + h2) % size;
+      scheme_hash_iteration_count++;
+      h = (h + h2) & mask;
     }
   }
 
@@ -207,14 +221,14 @@ static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int 
 
   if (set == 1)
     h = useme;
-  else if (table->mcount * FILL_FACTOR >= size) {
+  else if (table->mcount * FILL_FACTOR >= table->size) {
     /* Rehash */
-    int i, oldsize = table->size;
+    int i, oldsize = table->size, size;
     Scheme_Object **oldkeys = table->keys;
     Scheme_Object **oldvals = table->vals;
 
-    table->size = scheme_hash_primes[++table->step];
-    size = table->size;
+    size = oldsize << 1;
+    table->size = size;
     
     {
       Scheme_Object **ba;
@@ -248,7 +262,7 @@ void scheme_hash_set(Scheme_Hash_Table *table, Scheme_Object *key, Scheme_Object
   if (!table->vals) {
     Scheme_Object **ba;
 
-    table->size = scheme_hash_primes[0];
+    table->size = 8;
 
     ba = MALLOC_N(Scheme_Object *, table->size);
     table->vals = ba;
@@ -325,16 +339,15 @@ Scheme_Hash_Table *scheme_clone_hash_table(Scheme_Hash_Table *ht)
 
 void scheme_reset_hash_table(Scheme_Hash_Table *table, int *history)
 {
-  if (!table->step
-      || ((table->count * FILL_FACTOR > (scheme_hash_primes[table->step - 1])))) {
+  if ((table->size <= 8)
+      || (table->count * FILL_FACTOR > (table->size >> 1))) {
     /* Keep same size */
     memset(table->vals, 0, sizeof(Scheme_Object *) * table->size);
     memset(table->keys, 0, sizeof(Scheme_Object *) * table->size);
   } else {
     /* Shrink by one step */
     Scheme_Object **ba;
-    --table->step;
-    table->size = scheme_hash_primes[table->step];
+    table->size >>= 1;
     ba = MALLOC_N(Scheme_Object *, table->size);
     memcpy(ba, table->vals, sizeof(Scheme_Object *) * table->size);
     table->vals = ba;
@@ -358,11 +371,10 @@ scheme_make_bucket_table (int size, int type)
 
   table = MALLOC_ONE_TAGGED(Scheme_Bucket_Table);
 
-  table->step = 0;
-  while (scheme_hash_primes[table->step] < size) {
-    table->step++;
+  table->size = 1;
+  while (table->size < size) {
+    table->size <<= 1;
   }
-  table->size = scheme_hash_primes[table->step];
 
   table->count = 0;
 
@@ -389,7 +401,6 @@ Scheme_Bucket_Table *scheme_clone_bucket_table(Scheme_Bucket_Table *bt)
   table->so.type = scheme_bucket_table_type;
   table->size = bt->size;
   table->count = bt->count;
-  table->step = bt->step;
   table->weak = bt->weak;
   table->with_home = 0;
   table->make_hash_indices = bt->make_hash_indices;
@@ -416,30 +427,27 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
   hash_v_t h, h2;
   Scheme_Bucket *bucket;
   Compare_Proc compare = table->compare;
-
+  unsigned long mask;
 
  rehash_key:
 
+  mask = table->size - 1;
+
   if (table->make_hash_indices) {
-    table->make_hash_indices((void *)key, &h, &h2);
-    h = h % table->size;
-    h2 = h2 % table->size;
+    table->make_hash_indices((void *)key, (long *)&h, (long *)&h2);
+    h = h & mask;
+    h2 = h2 & mask;
   } else {
-    long lkey;
-    lkey = PTR_TO_LONG((Scheme_Object *)key);
-    h = (lkey >> 2) % table->size;
-    h2 = (lkey >> 3) % table->size;
+    unsigned long lkey;
+    lkey = (unsigned long)PTR_TO_LONG((Scheme_Object *)key);
+    h = (lkey >> 2) & mask;
+    h2 = (lkey >> 3) & mask;
   }
 
-  if (h < 0) h = -h;
-  if (h2 < 0) h2 = -h2;
-  
-  if (!h2)
-    h2 = 2;
-  else if (h2 & 0x1)
-    h2++;
+  h2 |= 0x1;
 
   if (table->weak) {
+    scheme_hash_request_count++;
     while ((bucket = table->buckets[h])) {
       if (bucket->key) {
 	void *hk = (void *)HT_EXTRACT_WEAK(bucket->key);
@@ -456,15 +464,18 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
 	  return bucket;
       } else if (add)
 	break;
-      h = (h + h2) % table->size;
+      scheme_hash_iteration_count++;
+      h = (h + h2) & mask;
     }
   } else {
+    scheme_hash_request_count++;
     while ((bucket = table->buckets[h])) {
       if (SAME_PTR(bucket->key, key))
 	return bucket;
       else if (compare && !compare((void *)bucket->key, (void *)key))
 	return bucket;
-      h = (h + h2) % table->size;
+      scheme_hash_iteration_count++;
+      h = (h + h2) & mask;
     }
   }
 
@@ -491,12 +502,12 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
       }
 
       if (actual * FILL_FACTOR < table->count) {
-	/* Decrement step so that the table won't actually grow. */
-	--table->step;
+	/* Decrement size so that the table won't actually grow. */
+	table->size >>= 1;
       }
     }
 
-    table->size = scheme_hash_primes[++table->step];
+    table->size <<= 1;
     
     asize = (size_t)table->size * sizeof(Scheme_Bucket *);
     {
@@ -697,195 +708,14 @@ int scheme_bucket_table_equal(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *t2)
 
 START_XFORM_SKIP;
 
-typedef long (*Hash_Key_Proc)(Scheme_Object *o);
-Hash_Key_Proc hash_key_procs[_scheme_last_normal_type_];
-static short keygen;
-
-static long hash_addr(Scheme_Object *o)
-{
-  return (long)o;
-}
-
-static long hash_general(Scheme_Object *o)
-{
-  if (!(((short *) mzALIAS o)[1] & 0xFFFC)) {
-    if (!keygen)
-      keygen += 4;
-    ((short *) mzALIAS o)[1] |= keygen;
-    keygen += 4;
-  }
-
-  /* Relies on int = two shorts: */
-  return *(int *) mzALIAS o;
-}
-
-static long hash_symbol(Scheme_Object *o)
-{
-  if (!(((short *) mzALIAS o)[1] & 0xFFFC)) {
-    Scheme_Symbol *s = (Scheme_Symbol *) mzALIAS o;
-    if (!(MZ_OPT_HASH_KEY(&s->iso) & 0x1)) {
-      /* Interned. Make key depend only on the content. */
-      int i, h = 0;
-      for (i = s->len; i--; ) {
-	h += (h << 5) + h + s->s[i];
-      }
-      h += (h << 2);
-      if (!(((short)h) & 0xFFFC))
-	h = 0x10;
-      MZ_OPT_HASH_KEY(&s->iso) |= (((short)h) & 0xFFFC);
-    } else
-      return hash_general(o);
-  }
-
-  /* Relies on int = two shorts: */
-  return *(int *) mzALIAS o;
-}
-
-static long hash_prim(Scheme_Object *o)
-{
-  return (long)((Scheme_Primitive_Proc *)o)->prim_val;
-}
-
-static long hash_case(Scheme_Object *o)
-{
-  Scheme_Case_Lambda *cl = (Scheme_Case_Lambda *)o;
-
-  if (cl->count)
-    return scheme_hash_key(cl->array[0]);
-  else
-    return scheme_case_closure_type << 2;
-}
-
-static long hash_bignum(Scheme_Object *o)
-{
-  int i = SCHEME_BIGLEN(o);
-  bigdig *d = SCHEME_BIGDIG(o);
-  bigdig k = 0;
-  
-  while (i--) {
-    k += d[i];
-  }
-  
-  return (long)k;
-}
-
 void scheme_init_hash_key_procs(void)
 {
-#define PROC(t,f) hash_key_procs[t] = f
-  PROC(scheme_prim_type, hash_prim);
-  PROC(scheme_closed_prim_type, hash_prim);
-  PROC(scheme_closure_type, hash_general);
-  PROC(scheme_native_closure_type, hash_general);
-  PROC(scheme_case_closure_type, hash_case);
-  PROC(scheme_cont_type, hash_general);
-  PROC(scheme_escaping_cont_type, hash_general);
-  PROC(scheme_char_type, hash_addr);
-  PROC(scheme_bignum_type, hash_bignum);
-  PROC(scheme_rational_type, hash_general);
-  PROC(scheme_float_type, hash_general);
-  PROC(scheme_double_type, hash_general);
-  PROC(scheme_complex_izi_type, hash_general);
-  PROC(scheme_complex_type, hash_general);
-  PROC(scheme_char_string_type, hash_general);
-  PROC(scheme_byte_string_type, hash_general);
-  PROC(scheme_path_type, hash_general);
-  PROC(scheme_symbol_type, hash_symbol);
-  PROC(scheme_keyword_type, hash_symbol);
-  PROC(scheme_null_type, hash_addr);
-  PROC(scheme_pair_type, hash_general);
-  PROC(scheme_wrap_chunk_type, hash_general);
-  PROC(scheme_vector_type, hash_general);
-  PROC(scheme_input_port_type, hash_general);
-  PROC(scheme_output_port_type, hash_general);
-  PROC(scheme_eof_type, hash_addr);
-  PROC(scheme_true_type, hash_addr);
-  PROC(scheme_false_type, hash_addr);
-  PROC(scheme_void_type, hash_addr);
-  PROC(scheme_undefined_type, hash_addr);
-  PROC(scheme_syntax_compiler_type, hash_general);
-  PROC(scheme_macro_type, hash_general);
-  PROC(scheme_box_type, hash_general);
-  PROC(scheme_thread_type, hash_general);
-  PROC(scheme_thread_set_type, hash_general);
-  PROC(scheme_thread_suspend_type, hash_general);
-  PROC(scheme_thread_resume_type, hash_general);
-  PROC(scheme_thread_dead_type, hash_general);
-  PROC(scheme_structure_type, hash_general);
-  PROC(scheme_proc_struct_type, hash_general);
-  PROC(scheme_cont_mark_set_type, hash_general);
-  PROC(scheme_sema_type, hash_general);
-  PROC(scheme_channel_type, hash_general);
-  PROC(scheme_channel_put_type, hash_general);
-  PROC(scheme_hash_table_type, hash_general);
-  PROC(scheme_module_registry_type, hash_general);
-  PROC(scheme_bucket_table_type, hash_general);
-  PROC(scheme_weak_box_type, hash_general);
-  PROC(scheme_ephemeron_type, hash_general);
-  PROC(scheme_struct_type_type, hash_general);
-  PROC(scheme_set_macro_type, hash_general);
-  PROC(scheme_id_macro_type, hash_general);
-  PROC(scheme_listener_type, hash_general);
-  PROC(scheme_namespace_type, hash_general);
-  PROC(scheme_config_type, hash_general);
-  PROC(scheme_thread_cell_type, hash_general);
-  PROC(scheme_thread_cell_values_type, hash_general);
-  PROC(scheme_global_ref_type, hash_general);
-  PROC(scheme_will_executor_type, hash_general);
-  PROC(scheme_stx_type, hash_general);
-  PROC(scheme_module_index_type, hash_general);
-  PROC(scheme_custodian_type, hash_general);
-  PROC(scheme_random_state_type, hash_general);
-  PROC(scheme_regexp_type, hash_general);
-  PROC(scheme_compilation_top_type, hash_general);
-  PROC(scheme_placeholder_type, hash_general);
-  PROC(scheme_inspector_type, hash_general);
-  PROC(scheme_struct_property_type, hash_general);
-  PROC(scheme_rename_table_type, hash_general);
-  PROC(scheme_module_index_type, hash_general);
-  PROC(scheme_variable_type, hash_general);
-  PROC(scheme_module_variable_type, hash_general);
-  PROC(scheme_security_guard_type, hash_general);
-  PROC(scheme_evt_set_type, hash_general);
-  PROC(scheme_udp_type, hash_general);
-  PROC(scheme_udp_evt_type, hash_general);
-  PROC(scheme_wrap_evt_type, hash_general);
-  PROC(scheme_handle_evt_type, hash_general);
-  PROC(scheme_nack_evt_type, hash_general);
-  PROC(scheme_nack_guard_evt_type, hash_general);
-  PROC(scheme_poll_evt_type, hash_general);
-  PROC(scheme_always_evt_type, hash_general);
-  PROC(scheme_never_evt_type, hash_general);
-  PROC(scheme_progress_evt_type, hash_general);
-  PROC(scheme_write_evt_type, hash_general);
-  PROC(scheme_semaphore_repost_type, hash_general);
-  PROC(scheme_string_converter_type, hash_general);
-  PROC(scheme_alarm_type, hash_general);
-  PROC(scheme_special_comment_type, hash_general);
-  PROC(scheme_readtable_type, hash_general);
-#undef PROC
+  /* No initialization needed anymore. */
 }
 
 long scheme_hash_key(Scheme_Object *o)
 {
-  Scheme_Type t;
-
-  if (SCHEME_INTP(o))
-    return (long)o;
-
-  t = SCHEME_TYPE(o);
-
-  if (t >= _scheme_last_normal_type_) {
-    return hash_general(o);
-  } else {
-#if 0
-    if (!hash_key_procs[t]) {
-      printf("Can't hash %d\n", t);
-      abort();
-    }
-#endif
-    
-    return hash_key_procs[t](o);
-  }
+  return PTR_TO_LONG(o);
 }
 
 END_XFORM_SKIP;

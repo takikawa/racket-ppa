@@ -6,28 +6,6 @@
            (lib "string-constant.ss" "string-constants")
            (lib "contract.ss"))
 
-  (provide/contract
-   [fold-into-web-path ((listof string?) . -> . string?)])
-  
-  (provide get-pref/default
-           get-bool-pref/default
-           put-prefs
-           repos-or-nightly-build?
-           search-height-default
-           search-bg-default
-           search-text-default
-           search-link-default
-           color-highlight
-           color-with
-           collection-doc-link
-           home-page
-           format-collection-message
-           nl
-           plt-version
-           make-javascript
-           redir-javascript
-           onload-redir)
-
   ;; would be nice if this could use version:version from the framework.
   (define (plt-version)
     (let ([mz-version (version)]
@@ -37,9 +15,8 @@
       (if (and stamp-collection (file-exists? (build-path stamp-collection "stamp.ss")))
           (format "~a-svn~a" mz-version (dynamic-require '(lib "stamp.ss" "repos-time-stamp") 'stamp))
           mz-version)))
-  
-  
-  (define home-page 
+
+  (define home-page
     `(A ((HREF "/servlets/home.ss") (TARGET "_top"))
 	,(string-constant plt:hd:home)))
 
@@ -51,7 +28,7 @@
       (if (string=? raw-pref "false") #f #t)))
 
   (define (put-prefs names vals)
-    (put-preferences names vals)) 
+    (put-preferences names vals))
 
   (define search-height-default "85")
   (define search-bg-default "lightsteelblue")
@@ -61,12 +38,12 @@
   (define *the-highlight-color* "forestgreen")
 
   ; string xexpr ... -> xexpr
-  (define (color-with color . s)
+  (define (with-color color . s)
     `(FONT ((COLOR ,color)) ,@s))
 
   ; xexpr ... -> xexpr
   (define (color-highlight . s)
-    (apply color-with *the-highlight-color* s))
+    (apply with-color *the-highlight-color* s))
 
   (define repos-or-nightly-build?
     (let ([helpdir (collection-path "help")])
@@ -75,23 +52,23 @@
             (directory-exists? (build-path helpdir "CVS"))
             (with-handlers ([exn:fail:filesystem? (lambda (x) #f)])
               (collection-path "repos-time-stamp"))))))
-  
+
   ;; can-keep? : byte -> boolean
   ;; source rfc 2396
   (define (can-keep? i)
     (or (<= (char->integer #\a) i (char->integer #\z))
         (<= (char->integer #\A) i (char->integer #\Z))
         (<= (char->integer #\0) i (char->integer #\9))
-        (memq i (map char->integer 
+        (memq i (map char->integer
                      '(#\- #\_ #\; #\. #\! #\~ #\* #\' #\( #\))))))
-  
+
   ; string string -> xexpr
   (define (collection-doc-link coll txt)
     (let ([coll-file (build-path 
 		      (collection-path coll) "doc.txt")])
       (if (file-exists? coll-file)
-	  `(A ((HREF 
-		,(format 
+	  `(A ((HREF
+		,(format
 		  "/servlets/doc-anchor.ss?file=~a&name=~a&caption=Documentation for the ~a collection"
 		  (uri-encode (path->string coll-file))
 		  coll
@@ -138,9 +115,26 @@
     (string-append 
      "setTimeout(\"redir()\","
      (number->string (* secs 1000))
-     ")")))
-
-
-
-
-
+     ")"))
+  
+  (provide/contract
+   [fold-into-web-path ((listof string?) . -> . string?)])
+  
+  (provide get-pref/default
+           get-bool-pref/default
+           put-prefs
+           repos-or-nightly-build?
+           search-height-default
+           search-bg-default
+           search-text-default
+           search-link-default
+           color-highlight
+           with-color
+           collection-doc-link
+           home-page
+           format-collection-message
+           nl
+           plt-version
+           make-javascript
+           redir-javascript
+           onload-redir))

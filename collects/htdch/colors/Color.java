@@ -1,3 +1,3 @@
-package idraw;
+package colors;
 
 public abstract class Color { }

@@ -26,22 +26,18 @@
 
  */
 
-#ifdef __palmos__
-# include <PalmOS.h>
-# define _LINUX_TYPES_H  /* Blocks types.h */
-#endif
 #include <stdlib.h>
 #include <setjmp.h>
 #include <stdio.h>
-#ifndef __palmos__
-# include <memory.h>
-#endif
 #include <string.h>
 #include "../sconfig.h"
+#include "mzconfig.h"
 #include "sgc.h"
 
-#ifdef PALMOS_STUFF
-typedef jmpbuf jmp_buf[1];
+#ifdef SIZEOF_LONG
+# if SIZEOF_LONG == 8
+#  define SIXTY_FOUR_BIT_INTEGERS
+# endif
 #endif
 
 /****************************************************************************/
@@ -193,6 +189,10 @@ typedef jmpbuf jmp_buf[1];
 #define DUMP_SECTOR_MAP 1
 /* GC_dump prints detail information about existing
    sectors. */
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+# undef DUMP_SECTOR_MAP
+# define DUMP_SECTOR_MAP 0
+#endif
 
 #define DUMP_BLOCK_MAPS 1 /* 0 */
 /* GC_dump prints detail information about block and
@@ -283,9 +283,16 @@ typedef jmpbuf jmp_buf[1];
 #endif
 
 /* System-specific alignment of pointers. */
-#define PTR_ALIGNMENT 4
-#define LOG_PTR_SIZE 2
-#define PTR_SIZE (1 << LOG_PTR_SIZE)
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+# define PTR_ALIGNMENT 8
+# define LOG_PTR_SIZE 3
+# define LOW_32_BITS(x) (x & 0xFFFFFFFF)
+#else
+# define PTR_ALIGNMENT 4
+# define LOG_PTR_SIZE 2
+# define LOW_32_BITS(x) x
+#endif
+# define PTR_SIZE (1 << LOG_PTR_SIZE)
 
 #define DOUBLE_SIZE sizeof(double)
 
@@ -293,11 +300,7 @@ typedef jmpbuf jmp_buf[1];
    Since it should be a power of 2, LOG_SECTOR_SEGMENT_SIZE is
    specified directly. A larger block size speeds up GC, but wastes
    more unallocated bytes in same-size buckets. */
-#ifdef __palmos__
-# define LOG_SECTOR_SEGMENT_SIZE 9
-#else
-# define LOG_SECTOR_SEGMENT_SIZE 12
-#endif
+#define LOG_SECTOR_SEGMENT_SIZE 12
 #define SECTOR_SEGMENT_SIZE (1 << LOG_SECTOR_SEGMENT_SIZE)
 #define SECTOR_SEGMENT_MASK (~(SECTOR_SEGMENT_SIZE-1))
 
@@ -311,18 +314,21 @@ typedef jmpbuf jmp_buf[1];
    malloc() to avoid waste when obtaining the proper alignment. */
 #define SECTOR_SEGMENT_GROUP_SIZE 32
 
-/* Number of bits used in first level table for checking existance of
+/* Number of bits used in 32-bit level table for checking existance of
    a sector. Creates a table of (1 << SECTOR_LOOKUP_SHIFT) pointers
    to individual page tables of size SECTOR_LOOKUP_PAGESIZE. */
 #define SECTOR_LOOKUP_PAGESETBITS 12
 
-#define SECTOR_LOOKUP_SHIFT ((PTR_SIZE*8) - SECTOR_LOOKUP_PAGESETBITS)
-#define LOG_SECTOR_LOOKUP_PAGESIZE ((PTR_SIZE*8) - SECTOR_LOOKUP_PAGESETBITS - LOG_SECTOR_SEGMENT_SIZE)
+#define LOG_MAP_PTR_SIZE 2
+#define MAP_PTR_SIZE 4
+
+#define SECTOR_LOOKUP_SHIFT ((MAP_PTR_SIZE*8) - SECTOR_LOOKUP_PAGESETBITS)
+#define LOG_SECTOR_LOOKUP_PAGESIZE ((MAP_PTR_SIZE*8) - SECTOR_LOOKUP_PAGESETBITS - LOG_SECTOR_SEGMENT_SIZE)
 #define SECTOR_LOOKUP_PAGESIZE (1 << LOG_SECTOR_LOOKUP_PAGESIZE)
 #define SECTOR_LOOKUP_PAGEMASK (SECTOR_LOOKUP_PAGESIZE - 1)
 
-#define SECTOR_LOOKUP_PAGETABLE(x) (x >> SECTOR_LOOKUP_SHIFT)
-#define SECTOR_LOOKUP_PAGEPOS(x) ((x >> LOG_SECTOR_SEGMENT_SIZE) & SECTOR_LOOKUP_PAGEMASK)
+#define SECTOR_LOOKUP_PAGETABLE(x) (LOW_32_BITS(x) >> SECTOR_LOOKUP_SHIFT)
+#define SECTOR_LOOKUP_PAGEPOS(x) ((LOW_32_BITS(x) >> LOG_SECTOR_SEGMENT_SIZE) & SECTOR_LOOKUP_PAGEMASK)
 
 #define LOG_SECTOR_PAGEREC_SIZE (LOG_PTR_SIZE + 1)
 
@@ -569,10 +575,8 @@ typedef struct {
                           is deallocated, but 0 => not in any sector */
 } SectorPage;
 
-static SectorPage **sector_pagetables;
-
 #if !RELEASE_UNUSED_SECTORS
-# include "splay.c"
+# include "../utils/splay.c"
 
 typedef struct SectorFreepage {
   long size; 
@@ -807,6 +811,58 @@ static void free_error(const char *msg)
 #endif
 
 /*************************************************************/
+/* Page mapping: */
+
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+static SectorPage ***sector_pagetablesss[1 << 16];
+# define DECL_SECTOR_PAGETABLES SectorPage **sector_pagetables;
+# define GET_SECTOR_PAGETABLES(p) sector_pagetables = create_sector_pagetables(p)
+# define FIND_SECTOR_PAGETABLES(p) sector_pagetables = get_sector_pagetables(p)
+static void *malloc_plain_sector(int count);
+inline static SectorPage **create_sector_pagetables(unsigned long p) {
+  unsigned long pos;
+  SectorPage ***sector_pagetabless, **sector_pagetables;
+  pos = ((unsigned long)p >> 48) & ((1 << 16) - 1);
+  sector_pagetabless = sector_pagetablesss[pos];
+  if (!sector_pagetabless) {
+    int c = (sizeof(SectorPage **) << 16) >> LOG_SECTOR_SEGMENT_SIZE;
+    sector_pagetabless = (SectorPage ***)malloc_plain_sector(c);
+    memset(sector_pagetabless, 0, c << LOG_SECTOR_SEGMENT_SIZE);
+    sector_pagetablesss[pos] = sector_pagetabless;
+    sector_admin_mem_use += (c << LOG_SECTOR_SEGMENT_SIZE);
+  }
+  pos = ((unsigned long)p >> 32) & ((1 << 16) - 1);
+  sector_pagetables = sector_pagetabless[pos];
+  if (!sector_pagetables) {
+    int c = (SECTOR_LOOKUP_PAGESETBITS + LOG_PTR_SIZE) - LOG_SECTOR_SEGMENT_SIZE;
+    if (c < 0)
+      c = 0;
+    c = 1 << c;
+    sector_pagetables = (SectorPage **)malloc_plain_sector(c);
+    memset(sector_pagetables, 0, c << LOG_SECTOR_SEGMENT_SIZE);
+    sector_admin_mem_use += (c << LOG_SECTOR_SEGMENT_SIZE);
+    sector_pagetabless[pos] = sector_pagetables;
+  }
+  return sector_pagetables;
+}
+inline static SectorPage **get_sector_pagetables(unsigned long p) {
+  unsigned long pos;
+  SectorPage ***sector_pagetabless;
+  pos = ((unsigned long)p >> 48) & ((1 << 16) - 1);
+  sector_pagetabless = sector_pagetablesss[pos];
+  if (!sector_pagetabless)
+    return NULL;
+  pos = ((unsigned long)p >> 32) & ((1 << 16) - 1);
+  return sector_pagetabless[pos];
+}
+#else
+static SectorPage **sector_pagetables;
+# define DECL_SECTOR_PAGETABLES /**/
+# define GET_SECTOR_PAGETABLES(p) /**/
+# define FIND_SECTOR_PAGETABLES(p) /**/
+#endif
+
+/*************************************************************/
 
 /* 
    The kinds of allocation:
@@ -970,6 +1026,7 @@ static void register_sector(void *naya, int need, long kind)
   unsigned long ns, orig_ns;
   int pagetableindex, pageindex, i;
   SectorPage *pagetable;
+  DECL_SECTOR_PAGETABLES;
 
   orig_ns = ns = PTR_TO_INT(naya);
   if (!sector_low_plausible || (ns < sector_low_plausible))
@@ -980,21 +1037,20 @@ static void register_sector(void *naya, int need, long kind)
 
   /* Register pages as existing: */
   for (i = need; i--; ns += SECTOR_SEGMENT_SIZE) {
+    GET_SECTOR_PAGETABLES(ns);
     pagetableindex = SECTOR_LOOKUP_PAGETABLE(ns);
     pagetable = sector_pagetables[pagetableindex];
     if (!pagetable) {
-      int c = (LOG_SECTOR_LOOKUP_PAGESIZE + LOG_SECTOR_PAGEREC_SIZE) - LOG_SECTOR_SEGMENT_SIZE;
-      int j;
-      
+      int j, c = (LOG_SECTOR_LOOKUP_PAGESIZE + LOG_SECTOR_PAGEREC_SIZE) - LOG_SECTOR_SEGMENT_SIZE;
       if (c < 0)
-	c = 0;
+        c = 0;
       c = 1 << c;
       pagetable = (SectorPage *)malloc_plain_sector(c);
       sector_pagetables[pagetableindex] = pagetable;
       sector_admin_mem_use += (c << LOG_SECTOR_SEGMENT_SIZE);
       for (j = 0; j < SECTOR_LOOKUP_PAGESIZE; j++) {
-	pagetable[j].start = 0; 
-	pagetable[j].kind = sector_kind_free;
+       pagetable[j].start = 0; 
+       pagetable[j].kind = sector_kind_free;
       }
     }
 
@@ -1006,7 +1062,7 @@ static void register_sector(void *naya, int need, long kind)
 
 static void *malloc_sector(long size, long kind, int no_new)
 {
-  long need, i;
+  long need;
   void *naya;
 #if !RELEASE_UNUSED_SECTORS
   SectorFreepage *fp;
@@ -1021,8 +1077,9 @@ static void *malloc_sector(long size, long kind, int no_new)
 
   num_sector_allocs++;
 
+#ifndef SIXTY_FOUR_BIT_INTEGERS
   if (!sector_pagetables) {
-    int c = (SECTOR_LOOKUP_PAGESETBITS + LOG_PTR_SIZE) - LOG_SECTOR_SEGMENT_SIZE;
+    int i, c = (SECTOR_LOOKUP_PAGESETBITS + LOG_PTR_SIZE) - LOG_SECTOR_SEGMENT_SIZE;
     if (c < 0)
       c = 0;
     c = 1 << c;
@@ -1031,6 +1088,7 @@ static void *malloc_sector(long size, long kind, int no_new)
     for (i = 0; i < (1 << SECTOR_LOOKUP_PAGESETBITS); i++)
       sector_pagetables[i] = NULL;
   }
+#endif
 
   need = (size + SECTOR_SEGMENT_SIZE - 1) >> LOG_SECTOR_SEGMENT_SIZE;
 
@@ -1096,8 +1154,10 @@ static void free_sector(void *p)
   /* Determine the size: */
   t = s;
   while(1) {
+    DECL_SECTOR_PAGETABLES;
     long pagetableindex = SECTOR_LOOKUP_PAGETABLE(t);
     long pageindex = SECTOR_LOOKUP_PAGEPOS(t);
+    GET_SECTOR_PAGETABLES(t);
     if (sector_pagetables[pagetableindex]
 	&& (sector_pagetables[pagetableindex][pageindex].start == s)) {
       sector_pagetables[pagetableindex][pageindex].kind = sector_kind_freed;
@@ -1153,9 +1213,13 @@ static void free_sector(void *p)
 #ifdef WIN32
 static int is_sector_segment(void *p)
 {
+  DECL_SECTOR_PAGETABLES;
   unsigned long s = PTR_TO_INT(p);
   long pagetableindex = SECTOR_LOOKUP_PAGETABLE(s);
   long pageindex = SECTOR_LOOKUP_PAGEPOS(s);
+
+  FIND_SECTOR_PAGETABLES(p);
+  if (!sector_pagetables) return 0;
 
   return (sector_pagetables[pagetableindex]
           && sector_pagetables[pagetableindex][pageindex].start);
@@ -1599,6 +1663,9 @@ static void *find_ptr(void *d, int *_size,
 		      int find_anyway)
 {
   unsigned long p = PTR_TO_INT(d);
+  DECL_SECTOR_PAGETABLES;
+
+  FIND_SECTOR_PAGETABLES(p);
 
   if (!sector_pagetables)
     return NULL;
@@ -4656,7 +4723,7 @@ void GC_gcollect(void)
 {
   long dummy;
 
-  if (!sector_pagetables)
+  if (!sector_mem_use)
     return;
 
   FLUSH_REGISTER_WINDOWS;
@@ -4669,7 +4736,7 @@ int GC_trace_count(int *stack, int *roots, int *uncollectable, int *final)
 #if ALLOW_TRACE_COUNT
   int j;
 
-  if (!sector_pagetables)
+  if (!sector_mem_use)
     return 0;
 
   for (j = 0; j < num_common_sets; j++) {
@@ -4706,7 +4773,7 @@ void GC_trace_path(void)
 #if ALLOW_TRACE_PATH
   int j;
 
-  if (!sector_pagetables)
+  if (!sector_mem_use)
     return;
 
   for (j = 0; j < num_common_sets; j++) {

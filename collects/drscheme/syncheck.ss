@@ -1879,7 +1879,7 @@ If the namespace does not, they are colored the unbound color.
       
       ;; extract-provided-vars : syntax -> (listof syntax[identifier])
       (define (extract-provided-vars stx)
-        (syntax-case stx (rename struct all-from all-from-except)
+        (syntax-case* stx (rename struct all-from all-from-except) symbolic-compare?
           [identifier
            (identifier? (syntax identifier))
            (list (syntax identifier))]
@@ -1898,18 +1898,22 @@ If the namespace does not, they are colored the unbound color.
            null]))
           
       
-       ;; trim-require-prefix : syntax -> syntax
+      ;; trim-require-prefix : syntax -> syntax
       (define (trim-require-prefix require-spec)
-        (syntax-case require-spec (prefix all-except rename only)
+        (syntax-case* require-spec (only prefix all-except prefix-all-except rename) symbolic-compare?
+          [(only module-name identifer ...)
+           (syntax module-name)]
           [(prefix identifier module-name) 
            (syntax module-name)]
           [(all-except module-name identifer ...)
            (syntax module-name)]
-          [(only module-name identifer ...)
+          [(prefix-all-except module-name identifer ...)
            (syntax module-name)]
           [(rename module-name local-identifer exported-identifer)
            (syntax module-name)]
           [_ require-spec]))
+      
+      (define (symbolic-compare? x y) (eq? (syntax-e x) (syntax-e y)))
       
       ;; add-binders : syntax id-set -> void
       ;; transforms an argument list into a bunch of symbols/symbols

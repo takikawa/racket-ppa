@@ -135,8 +135,6 @@ Scheme_Object *scheme_multiple_values;
 
 volatile int scheme_fuel_counter;
 
-int scheme_stack_grows_up;
-
 int scheme_startup_use_jit = 1;
 void scheme_set_startup_use_jit(int v) { scheme_startup_use_jit =  v; }
 
@@ -540,17 +538,17 @@ scheme_handle_stack_overflow(Scheme_Object *(*k)(void))
 void scheme_init_stack_check()
      /* Finds the C stack limit --- platform-specific. */
 {
-  int *v;
+  int *v, stack_grows_up;
   unsigned long deeper;
 #ifdef UNIX_FIND_STACK_BOUNDS
   struct rlimit rl;
 #endif
   
   deeper = scheme_get_deeper_address();
-  scheme_stack_grows_up = (deeper > (unsigned long)&v);
+  stack_grows_up = (deeper > (unsigned long)&v);
 
 #ifdef STACK_GROWS_UP
-  if (!scheme_stack_grows_up) {
+  if (!stack_grows_up) {
     if (scheme_console_printf)
       scheme_console_printf("Stack grows DOWN, not UP.\n");
     else
@@ -559,7 +557,7 @@ void scheme_init_stack_check()
   }
 #endif
 #ifdef STACK_GROWS_DOWN
-  if (scheme_stack_grows_up) {
+  if (stack_grows_up) {
     if (scheme_console_printf)
       scheme_console_printf("Stack grows UP, not DOWN.\n");
     else
@@ -570,7 +568,7 @@ void scheme_init_stack_check()
 
 #ifdef ASSUME_FIXED_STACK_SIZE
   scheme_stack_boundary = scheme_get_stack_base();
-  if (scheme_stack_grows_up)
+  if (stack_grows_up)
     scheme_stack_boundary += (FIXED_STACK_SIZE - STACK_SAFETY_MARGIN);
   else
     scheme_stack_boundary += (STACK_SAFETY_MARGIN - FIXED_STACK_SIZE);
@@ -618,7 +616,7 @@ void scheme_init_stack_check()
       lim = UNIX_STACK_MAXIMUM;
 # endif
 
-    if (scheme_stack_grows_up)
+    if (stack_grows_up)
       bnd += (lim - STACK_SAFETY_MARGIN);
     else
       bnd += (STACK_SAFETY_MARGIN - lim);
@@ -1332,7 +1330,7 @@ static Scheme_Object *link_module_variable(Scheme_Object *modidx,
   Scheme_Env *menv;
 
   /* If it's a name id, resolve the name. */
-  modname = scheme_module_resolve(modidx);
+  modname = scheme_module_resolve(modidx, 1);
 
   if (env->module && SAME_OBJ(env->module->modname, modname)
       && (env->mod_phase == mod_phase))
@@ -3041,8 +3039,9 @@ static void *compile_k(void)
     form = add_renames_unless_module(form, genv);
     if (genv->module) {
       form = scheme_stx_phase_shift(form, 0, 
-				    genv->module->src_modidx, 
-				    genv->module->self_modidx);
+				    genv->module->me->src_modidx, 
+				    genv->module->self_modidx,
+				    genv->export_registry);
     }
   }
 
@@ -3069,7 +3068,7 @@ static void *compile_k(void)
 	 find one, break it up to eval first expression
 	 before the rest. */
       while (1) {
-	scheme_frame_captures_lifts(cenv, scheme_make_lifted_defn, scheme_sys_wraps(cenv));
+	scheme_frame_captures_lifts(cenv, scheme_make_lifted_defn, scheme_sys_wraps(cenv), scheme_false);
 	form = scheme_check_immediate_macro(form, 
 					    cenv, &rec, 0,
 					    0, &gval, NULL, NULL);
@@ -3106,7 +3105,7 @@ static void *compile_k(void)
       Scheme_Object *l, *prev_o = NULL;
 
       while (1) {
-	scheme_frame_captures_lifts(cenv, scheme_make_lifted_defn, scheme_sys_wraps(cenv));
+	scheme_frame_captures_lifts(cenv, scheme_make_lifted_defn, scheme_sys_wraps(cenv), scheme_false);
 
 	scheme_init_compile_recs(&rec, 0, &rec2, 1);
 
@@ -3877,7 +3876,7 @@ static Scheme_Object *check_top(const char *when, Scheme_Object *form, Scheme_Co
       if (modidx) {
 	/* If it's an access path, resolve it: */
 	if (env->genv->module
-	    && SAME_OBJ(scheme_module_resolve(modidx), env->genv->module->modname))
+	    && SAME_OBJ(scheme_module_resolve(modidx, 1), env->genv->module->modname))
 	  bad = 0;
 	else
 	  bad = 1;
@@ -4014,7 +4013,7 @@ compile_expand_expr_lift_to_let(Scheme_Object *form, Scheme_Comp_Env *env,
   ip = MALLOC_N(Scheme_Comp_Env *, 1);
   *ip = inserted;
 
-  scheme_frame_captures_lifts(inserted, pair_lifted, (Scheme_Object *)ip);
+  scheme_frame_captures_lifts(inserted, pair_lifted, (Scheme_Object *)ip, scheme_false);
 
   if (rec[drec].comp) {
     scheme_init_compile_recs(rec, drec, recs, 2);
@@ -6041,7 +6040,7 @@ Scheme_Object *scheme_eval_compiled_stx_string(Scheme_Object *expr, Scheme_Env *
     result = scheme_make_vector(len - 1, NULL);
 
     for (i = 0; i < len - 1; i++) {
-      s = scheme_stx_phase_shift(SCHEME_VEC_ELS(expr)[i], shift, orig, modidx);
+      s = scheme_stx_phase_shift(SCHEME_VEC_ELS(expr)[i], shift, orig, modidx, env->export_registry);
       SCHEME_VEC_ELS(result)[i] = s;
     }
     
@@ -6086,7 +6085,7 @@ static void *expand_k(void)
     erec1.certs = certs;
 
     if (catch_lifts)
-      scheme_frame_captures_lifts(env, scheme_make_lifted_defn, scheme_sys_wraps(env));
+      scheme_frame_captures_lifts(env, scheme_make_lifted_defn, scheme_sys_wraps(env), scheme_false);
   
     if (just_to_top) {
       Scheme_Object *gval;
@@ -6765,7 +6764,8 @@ Scheme_Object **scheme_push_prefix(Scheme_Env *genv, Resolve_Prefix *rp,
 
     if (rp->num_stxes) {
       i = rp->num_toplevels;
-      v = scheme_stx_phase_shift_as_rename(now_phase - src_phase, src_modidx, now_modidx);
+      v = scheme_stx_phase_shift_as_rename(now_phase - src_phase, src_modidx, now_modidx, 
+					   genv ? genv->export_registry : NULL);
       if (v) {
 	/* Put lazy-shift info in a[i]: */
 	v = scheme_make_raw_pair(v, (Scheme_Object *)rp->stxes);

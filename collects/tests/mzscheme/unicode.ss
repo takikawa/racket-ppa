@@ -1,7 +1,7 @@
 
 (load-relative "loadtest.ss")
 
-(SECTION 'unicode)
+(Section 'unicode)
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  UTF-8 boundary tests based on Markus Kuhn's test suite
@@ -1035,6 +1035,8 @@
 
 (test '(#o302 #o251) bytes->list (unicode-vector->bytes (vector 169)))
 (test '(#o304 #o250) bytes->list (unicode-vector->bytes (vector 296)))
+
+(test "a\0b" bytes->string/utf-8 #"a\xFFb" (integer->char 0))
 
 (test '("\uA9") regexp-match #rx"." "\uA9")
 (test '(#"\302") regexp-match #rx#"." #"\302\251")
