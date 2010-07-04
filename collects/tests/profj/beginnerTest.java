@@ -42,10 +42,10 @@ class Car implements Automobile {
     } else {
       if ((2006 - year) > 0) {
         return this.basePrice - (this.basePrice / (2006 - year));
-       else 
+      } else {
         return this.basePrice + (this.basePrice / (year - 2006));
-      
-    
+      }
+    }
   }
   
 }
@@ -106,11 +106,11 @@ class Truck implements Automobile {
   double price( int year ) {
     // Uncomment to test runtime error behavior
     //return this.basePrice - (2 * (this.basePrice / (2006 -year)));
-    if (year == 2006) 
+    if (year == 2006) {
       return this.basePrice;
-     else 
+    } else {
       return this.basePrice - (2 * (this.basePrice / (2006 - year)));
-    
+    }
   }
   
 }

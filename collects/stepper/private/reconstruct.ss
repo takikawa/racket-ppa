@@ -536,7 +536,7 @@
                              lifting-indices)])
              (vector (reconstruct-completed-define exp vars (vals-getter) render-settings) #f))])
         (let ([exp (skipto/auto exp 'discard (lambda (exp) exp))])
-          (cond
+          (cond 
             [(stepper-syntax-property exp 'stepper-define-struct-hint)
              ;; the hint contains the original syntax
              (vector (stepper-syntax-property exp 'stepper-define-struct-hint) #t)]
@@ -547,8 +547,7 @@
              (vector
               (kernel:kernel-syntax-case exp #f
                 [(define-values vars-stx body)
-                 (or (stepper-syntax-property #'body 'stepper-render-completed-as)
-                     (reconstruct-completed-define exp (syntax->list #`vars-stx) (vals-getter) render-settings))]
+                 (reconstruct-completed-define exp (syntax->list #`vars-stx) (vals-getter) render-settings)]
                 [else
                  (let* ([recon-vals (map (lambda (val)
                                            (recon-value val render-settings))
@@ -767,7 +766,7 @@
                                                     'stepper-args-of-call 
                                                     rectified-evaluated))
                                                   (else
-                                                   (error 'recon-inner "bad label (~v) in application mark in expr: ~a" (mark-label (car mark-list)) exp)))))
+                                                   (error 'recon-inner "bad label (~v) in application mark in expr: ~a" (mark-label (car mark-list)) exp))))
                                               exp)]
                                             
                                             ; define-struct 

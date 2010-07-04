@@ -370,7 +370,7 @@
                                   (begin
                                     (set! head (mcdr head))
                                     (loop)))))))]
-             [consumer (proc->signal/dont-gc-unless producer
+             [consumer (proc->signal
                         (lambda ()
                           (let* ([now (current-inexact-milliseconds)]
                                  [new (deep-value-now beh)]

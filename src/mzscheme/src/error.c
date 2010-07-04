@@ -2766,8 +2766,7 @@ static Scheme_Object *variable_field_check(int argc, Scheme_Object **argv)
 
 static Scheme_Object *syntax_field_check(int argc, Scheme_Object **argv)
 {
-  Scheme_Object *l, *first = scheme_null, *last = NULL, *pr, *a[3];
-  int all_imm = 1;
+  Scheme_Object *l;
 
   l = argv[2];
   while (SCHEME_PAIRP(l)) {
@@ -2779,15 +2778,7 @@ static Scheme_Object *syntax_field_check(int argc, Scheme_Object **argv)
   if (!SCHEME_NULLP(l))
     scheme_wrong_field_type(argv[3], "list of syntax objects", argv[2]);
 
-  a[0] = argv[0];
-  a[1] = argv[1];
-
-  if (!all_imm)
-    a[2] = first;
-  else
-    a[2] = argv[2];
-   
-  return scheme_values(3, a);
+  return scheme_values(3, argv);
 }
 
 static Scheme_Object *read_field_check(int argc, Scheme_Object **argv)

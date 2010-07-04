@@ -830,7 +830,7 @@
     (define (statement-c interact?)
       (if (not interact?)
           (choose ((return-s #t)
-                   (if-s statement #f)
+                   (if-s (block #t) #f)
                    (variable-declaration (value+name-type prim-type) expression #f #t "local variable")
                    (block #t)
                    (assignment 
@@ -840,7 +840,7 @@
                     EQUAL)
                    (sequence (stmt-expr SEMI_COLON) id)) "statement")
           (choose ((return-s #t)
-                   (if-s statement #f)
+                   (if-s (block #t) #f)
                    (block #t)) "statement")))
     
     (define statement (statement-c #f))
