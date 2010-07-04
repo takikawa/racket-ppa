@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[style-list% object% ()]{
+@defclass/title[style-list% object% ()]{
 
 A @scheme[style-list%] object contains a set of @scheme[style<%>]
  objects and maintains the hierarchical relationships between them. A

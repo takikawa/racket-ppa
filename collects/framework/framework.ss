@@ -61,8 +61,32 @@
      
   
   (define-values/invoke-unit/infer framework+mred@)
-    
+
   (provide/contract/docs
+   
+   (text:autocomplete-append-after
+    (parameter/c string?)
+    ()
+    "A string that is inserted after a completions is inserted by a"
+    "@ilink text:autocomplete"
+    "instance."
+    ""
+    "Defaults to \"\"")
+   (text:autocomplete-limit
+    (parameter/c (and/c integer? exact? positive?))
+    ()
+    "Controls the number of completions visible at a time in the menu"
+    "produced by"
+    "@ilink text:autocomplete"
+    "instances."
+    ""
+    "Defaults to 15.")
+   (text:get-completions/manuals
+    (-> (listof string?) (listof string?))
+    (manuals)
+    "Returns the list of keywords for the manuals from \\var{manuals}"
+    "by reading them from the \\texttt{keywords}"
+    "files in the corresponding manuals' directories")
    
    (number-snip:make-repeating-decimal-snip
     (number? boolean? . -> . (is-a?/c snip%))
@@ -123,9 +147,16 @@
         (listof any/c)
         any)
     (name-list val-list)
-    "Like \\scheme{put-preferences}, but passes along"
-    "a \\var{locked-proc} that asks the user if they want to"
-    "try again.")
+    "Like \\scheme{put-preferences}, but has more sophisticated"
+    "error handling. In particular, it"
+    "\\begin{itemize}"
+    "\\item waits for three consecutive failures before informing the user"
+    "\\item gives the user the opportunity to ``steal'' the lockfile after the"
+    "third failure, and"
+    "\\item when failures occur, it remembers what its arguments were and"
+    "if any preference save eventually succeeds, all of the past failures are"
+    "also written at that point.")
+
    (preferences:add-panel
     ((or/c string? (cons/c string? (listof string?)))
      ((is-a?/c area-container-window<%>) 
@@ -344,7 +375,7 @@
     (filename)
     "Generates a name for an backup file from \\var{filename}.")
    (finder:dialog-parent-parameter
-    any/c
+    (parameter/c (or/c false/c (is-a?/c dialog%) (is-a?/c frame%)))
     ()
     "This is a parameter (see "
     "\\Mzhyperref{parameters}{mz:parameters} for information about parameters)"
@@ -601,6 +632,29 @@
     (-> (is-a?/c group:%))
     ()
     "This returns the frame group.")
+   
+   (group:on-close-action
+    (-> void?)
+    ()
+    "See also "
+    "@flink group:can-close-check %"
+    "."
+    ""
+    "Call this function from the"
+    "@ilink top-level-window can-close?"
+    "callback of a frame"
+    "in order for the group to properly close the application.")
+   (group:can-close-check
+    (-> boolean?)
+    ()
+    "See also "
+    "@flink group:on-close-action %"
+    "."
+    ""
+    "Call this function from the"
+    "@ilink top-level-window can-close?"
+    "callback of a frame"
+    "in order for the group to properly close the application.")
    
    (handler:handler?
     (any/c . -> . boolean?)

@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[frame% object% (top-level-window<%>)]{
+@defclass/title[frame% object% (top-level-window<%>)]{
 
 A frame is a top-level container window. It has a title bar (which
  displays the frame's label), an optional menu bar, and an optional
@@ -241,7 +241,7 @@ If the event does not correspond to a complete shortcut combination,
 
 }
 
-@defmethod[#:mode 'override 
+@defmethod[#:mode override 
            (on-subwindow-char [receiver (is-a?/c window<%>)]
                               [event (is-a?/c key-event%)])
            boolean?]{

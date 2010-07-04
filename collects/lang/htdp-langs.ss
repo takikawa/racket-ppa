@@ -33,7 +33,8 @@
            ;; and the user's namespace in the teaching languages
            "private/set-result.ss"
            
-           (lib "stepper-language-interface.ss" "stepper"))
+           "stepper-language-interface.ss"
+           "debugger-language-interface.ss")
   
   (provide tool@)
   
@@ -157,11 +158,21 @@
                  (namespace-attach-module drs-namespace 'drscheme-secrets)
                  (namespace-attach-module drs-namespace set-result-module-name)
                  (error-display-handler teaching-languages-error-display-handler)
+                 (error-value->string-handler (λ (x y) (teaching-languages-error-value->string settings x y)))
                  (current-eval (add-annotation (htdp-lang-settings-tracing? settings) (current-eval)))
                  (error-print-source-location #f)
                  (read-decimal-as-inexact #f)
                  (read-accept-dot (get-read-accept-dot)))))
             (super on-execute settings run-in-user-thread))
+          
+          (define/private (teaching-languages-error-value->string settings v len)
+            (let ([sp (open-output-string)])
+              (set-printing-parameters settings (λ () (print v sp)))
+              (flush-output sp)
+              (let ([s (get-output-string sp)])
+                (cond
+                  [(<= (string-length s) len) s]
+                  [else (string-append (substring s 0 (- len 3)) "...")]))))
 
 	  ;; set-printing-parameters : settings ( -> TST) -> TST
 	  ;; is implicitly exposed to the stepper.  watch out!  --  john
@@ -347,8 +358,7 @@
           ;(define/override (get-one-line-summary) one-line-summary)
           (define/public (get-htdp-style-delta) style-delta)
           
-          (super-instantiate ()
-            (language-url "http://www.htdp.org/"))))
+          (super-new [language-url "http://www.htdp.org/"])))
       
       (define (language-extension %)
         (class %
@@ -391,8 +401,10 @@
               (go "." (drscheme:rep:get-welcome-delta))
               (newline port)))
  
+          (define/private (htdp-manuals) (list (get-manual) #"teachpack" #"drscheme" #"help"))
+          
           (define/override (order-manuals x) 
-            (values (list (get-manual) #"teachpack" #"drscheme" #"help") #f))
+            (values (htdp-manuals) #f))
           
           (inherit get-module get-transformer-module get-init-code
                    use-namespace-require/copy?)
@@ -491,38 +503,51 @@
           
           (define/override (front-end/complete-program port settings)
             (let ([state 'init]
-                  ;; state : 'init => 'require => 'done
-                  [reader (get-reader)])
+                  ;; state : 'init => 'require => 'done-or-exn
+                  [reader (get-reader)]
+                  
+                  ;; in state 'done-or-exn, if this is an exn, we raise it
+                  ;; otherwise, we just return eof
+                  [saved-exn #f])
               
               (lambda ()
                 (case state
                   [(init)
                    (set! state 'require)
-                   (let ([body-exps 
-                          (let loop ()
-                            (let ([result (reader (object-name port) port)])
-                              (if (eof-object? result)
-                                  null
-                                  (cons result (loop)))))]
-                         [language-module (get-module)])
-                     (for-each
-                      (λ (tp)
-                        (with-handlers ((exn:fail? (λ (x) (error 'teachpack (missing-tp-message tp)))))
-                          (unless (file-exists? (build-path (apply collection-path (cddr tp))
-                                                            (cadr tp)))
-                            (error))))
-                      (htdp-lang-settings-teachpacks settings))
-                     (rewrite-module
-                      settings
-                      (expand
-                       (datum->syntax-object
-                        #f
-                        `(,#'module #%htdp ,language-module 
-                                    ,@(map (λ (x) `(require ,x))
-                                           (htdp-lang-settings-teachpacks settings))
-                                    ,@body-exps)))))]
+                   (let ([language-module (get-module)])
+                     (with-handlers ([exn:fail?
+                                      (λ (x)
+                                        (set! saved-exn x)
+                                        (expand
+                                         (datum->syntax-object
+                                          #f
+                                          `(,#'module #%htdp ,language-module 
+                                                      ,@(map (λ (x) `(require ,x))
+                                                             (htdp-lang-settings-teachpacks settings))))))])
+                       (let ([body-exps 
+                              (let loop ()
+                                (let ([result (reader (object-name port) port)])
+                                  (if (eof-object? result)
+                                      null
+                                      (cons result (loop)))))])
+                         (for-each
+                          (λ (tp)
+                            (with-handlers ((exn:fail? (λ (x) (error 'teachpack (missing-tp-message tp)))))
+                              (unless (file-exists? (build-path (apply collection-path (cddr tp))
+                                                                (cadr tp)))
+                                (error))))
+                          (htdp-lang-settings-teachpacks settings))
+                         (rewrite-module
+                          settings
+                          (expand
+                           (datum->syntax-object
+                            #f
+                            `(,#'module #%htdp ,language-module 
+                                        ,@(map (λ (x) `(require ,x))
+                                               (htdp-lang-settings-teachpacks settings))
+                                        ,@body-exps)))))))]
                   [(require) 
-                   (set! state 'done)
+                   (set! state 'done-or-exn)
                    (syntax
                     (let ([done-already? #f])
                       (dynamic-wind
@@ -534,7 +559,12 @@
                          (unless done-already?
                            (set! done-already? #t)
                            (current-namespace (module->namespace '#%htdp)))))))]
-                  [(done) eof]))))
+                  [(done-or-exn)
+                   (cond
+                     [saved-exn
+                      (raise saved-exn)]
+                     [else
+                      eof])]))))
           
           (define/private (missing-tp-message x)
             (let* ([m (regexp-match #rx"/([^/]*)$" (cadr x))]
@@ -543,8 +573,13 @@
                              (cadr x))])
               (format "the teachpack '~a' was not found" name)))
 
+          (define keywords #f)
           (define/augment (capability-value key)
             (case key
+              [(drscheme:autocomplete-words)
+               (unless keywords 
+                 (set! keywords (text:get-completions/manuals (map bytes->string/utf-8 (htdp-manuals)))))
+               keywords]
               [(drscheme:teachpack-menu-items) htdp-teachpack-callbacks]
               [(drscheme:special:insert-lambda) #f]
               [else (inner (drscheme:language:get-capability-default key) 
@@ -849,13 +884,29 @@
         
         (send dlg show #t)
         answer)
-      
+
       (define (stepper-settings-language %)
-        (class* % (stepper-language<%>)
-          (init-field stepper:enable-let-lifting)
-          (inherit [dontcare stepper:enable-let-lifting?])
-          (define/override (stepper:enable-let-lifting?) stepper:enable-let-lifting)
-          (super-new)))
+        (if (implementation? % stepper-language<%>)
+            (class* % (stepper-language<%>)
+              (init-field stepper:supported)
+              (init-field stepper:enable-let-lifting)
+	      (init-field stepper:show-lambdas-as-lambdas)
+              (define/override (stepper:supported?) stepper:supported)
+              (define/override (stepper:enable-let-lifting?) stepper:enable-let-lifting)
+              (define/override (stepper:show-lambdas-as-lambdas?) stepper:show-lambdas-as-lambdas)
+              (super-new))
+            (class* % ()
+              (init stepper:supported)
+              (init stepper:enable-let-lifting)
+              (init stepper:show-lambdas-as-lambdas)
+              (super-new))))
+
+      (define (debugger-settings-language %)
+        (if (implementation? % debugger-language<%>)
+            (class* % (debugger-language<%>)
+              (define/override (debugger:supported?) #f)
+              (super-new))
+            %))
 
       ;; rewrite-module : settings syntax -> syntax
       ;; rewrites te module to print out results of non-definitions
@@ -1329,12 +1380,13 @@
       (define (phase2)
         (define htdp-language%
           (stepper-settings-language
-           ((drscheme:language:get-default-mixin)
-            (language-extension
-             (drscheme:language:module-based-language->language-mixin
-              (module-based-language-extension
-               (drscheme:language:simple-module-based-language->module-based-language-mixin
-                simple-htdp-language%)))))))
+           (debugger-settings-language
+            ((drscheme:language:get-default-mixin)
+             (language-extension
+              (drscheme:language:module-based-language->language-mixin
+               (module-based-language-extension
+                (drscheme:language:simple-module-based-language->module-based-language-mixin
+                 simple-htdp-language%))))))))
         
         (add-htdp-language
          (instantiate htdp-language% ()
@@ -1351,7 +1403,9 @@
            (abbreviate-cons-as-list #t)
            (allow-sharing? #t)
            (reader-module '(lib "htdp-advanced-reader.ss" "lang"))
-           (stepper:enable-let-lifting #t)))
+	   (stepper:supported #f)
+	   (stepper:enable-let-lifting #t)
+	   (stepper:show-lambdas-as-lambdas #t)))
         
         (add-htdp-language
          (instantiate htdp-language% ()
@@ -1377,9 +1431,11 @@
            (abbreviate-cons-as-list #t)
            (allow-sharing? #f)
            (reader-module '(lib "htdp-intermediate-lambda-reader.ss" "lang"))
-           (stepper:enable-let-lifting #t)))
+	   (stepper:supported #t)
+           (stepper:enable-let-lifting #t)
+	   (stepper:show-lambdas-as-lambdas #t)))
         
-        (add-htdp-language
+	(add-htdp-language
          (instantiate htdp-language% ()
            (one-line-summary (string-constant intermediate-one-line-summary))
            (module '(lib "htdp-intermediate.ss" "lang"))
@@ -1395,7 +1451,9 @@
            (allow-sharing? #f)
            (use-function-output-syntax? #t)
            (reader-module '(lib "htdp-intermediate-reader.ss" "lang"))
-           (stepper:enable-let-lifting #t)))
+	   (stepper:supported #t)
+           (stepper:enable-let-lifting #t)
+	   (stepper:show-lambdas-as-lambdas #f)))
         
         (add-htdp-language
          (instantiate htdp-language% ()
@@ -1412,7 +1470,9 @@
            (abbreviate-cons-as-list #t)
            (allow-sharing? #f)
            (reader-module '(lib "htdp-beginner-abbr-reader.ss" "lang"))
-           (stepper:enable-let-lifting #t)))
+	   (stepper:supported #t)
+           (stepper:enable-let-lifting #t)
+	   (stepper:show-lambdas-as-lambdas #f)))
         
         (add-htdp-language
          (instantiate htdp-language% ()
@@ -1430,7 +1490,9 @@
            (allow-sharing? #f)
            (accept-quasiquote? #f)
            (reader-module '(lib "htdp-beginner-reader.ss" "lang"))
-           (stepper:enable-let-lifting #t)))
+	   (stepper:supported #t)
+           (stepper:enable-let-lifting #t)
+	   (stepper:show-lambdas-as-lambdas #f)))
         
         (drscheme:get/extend:extend-unit-frame frame-tracing-mixin)
         (drscheme:get/extend:extend-tab tab-tracing-mixin)))))

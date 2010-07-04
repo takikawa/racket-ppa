@@ -35,11 +35,10 @@ because that's the way it is idented the use of @scheme[schemeblock].
 
 Furthermore, @scheme[define] is typeset as a keyword (bold and black)
 and as a hyperlink to @scheme[define]'s definition in the reference
-manual, because this document was built using information about the
-reference manual, and because the lexical binding of @scheme[define]
-(in the source) matches the lexical binding of the definition in the
-reference manual. Similarly, @scheme[not] is a hyperlink to the its
-definition in the reference manual.
+manual, because this document was built using a for-label binding of
+@scheme[define] (in the source) that match the for-label binding of
+the definition in the reference manual. Similarly, @scheme[not] is a
+hyperlink to the its definition in the reference manual.
 
 Use @scheme[unsyntax] to escape back to an expression that produces an
 @scheme[element]. For example,
@@ -57,7 +56,7 @@ produces
 ]
 
 The @scheme[unsyntax] form is regonized via
-@scheme[module-identifier=?], so if you want to typeset code that
+@scheme[free-identifier=?], so if you want to typeset code that
 includes @scheme[unsyntax], you can simply hide the usual binding:
 
 @SCHEMEBLOCK[
@@ -68,8 +67,7 @@ includes @scheme[unsyntax], you can simply hide the usual binding:
 ]
 
 Or use @scheme[SCHEMEBLOCK], whose escape form is @scheme[UNSYNTAX]
-instead of @scheme[unsyntax]. See also @scheme[define-code] from
-@file{scheme.ss}.
+instead of @scheme[unsyntax].
 
 A few other escapes are recognized symbolically:
 
@@ -169,15 +167,21 @@ in a form definition.}
 @; ------------------------------------------------------------------------
 @section{Definition Reference}
 
-@defform[(defproc (id arg-spec ...)
-                  result-contract-expr-datum
-                  pre-flow ...)]{
+@defform/subs[(defproc (id arg-spec ...)
+                       result-contract-expr-datum
+                       pre-flow ...)
+              ([arg-spec (arg-id contract-expr-datum)
+                         (arg-id contract-expr-datum default-expr)
+                         (keyword arg-id contract-expr-datum)
+                         (keyword arg-id contract-expr-datum default-expr)])]{
 
 Produces a sequence of flow elements (encaptured in a @scheme[splice])
 to document a procedure named @scheme[id]. The @scheme[id] is indexed,
 and it also registered so that @scheme[scheme]-typeset uses of the
-identifier (with the same lexical binding) are hyperlinked to this
-documentation.
+identifier (with the same for-label binding) are hyperlinked to this
+documentation. The @scheme[id] should have a for-label binding (as
+introduced by @scheme[require-for-label]) that determines the module
+binding being defined.
 
 Each @scheme[arg-spec] must have one of the following forms:
 
@@ -221,7 +225,13 @@ source layout.}
                    pre-flow ...)]{
 
 Like @scheme[defproc], but for multiple cases with the same
-@scheme[id].  }
+@scheme[id]. 
+
+When an @scheme[id] has multiple calling cases, they must be defined
+with a single @scheme[defproc*], so that a single definition point
+exists for the @scheme[id]. However, multiple distinct @scheme[id]s
+can also be defined by a single @scheme[defproc*], for the case that
+it's best to document a related group of procedures at once.}
 
 
 @defform/subs[(defform maybe-literals (id . datum) pre-flow ...)
@@ -231,8 +241,11 @@ Like @scheme[defproc], but for multiple cases with the same
 Produces a a sequence of flow elements (encaptured in a
 @scheme[splice]) to document a syntatic form named by @scheme[id]. The
 @scheme[id] is indexed, and it is also registered so that
-@scheme[scheme]-typeset uses of the identifier (with the same lexical
-binding) are hyperlinked to this documentation.
+@scheme[scheme]-typeset uses of the identifier (with the same
+for-label binding) are hyperlinked to this documentation.  The
+@scheme[id] should have a for-label binding (as introduced by
+@scheme[require-for-label]) that determines the module binding being
+defined.
 
 The @scheme[pre-flow]s list is parsed as a flow that documents the
 procedure. In this description, a reference to any identifier in
@@ -350,7 +363,7 @@ definition.}
 @defform/subs[(schemegrammar maybe-literals id clause-datum ...+)
               ([maybe-literals code:blank
                                (code:line #:literals (literal-id ...))])]{
-
+ 
 Creates a table to define the grammar of @scheme[id]. Each identifier
 mentioned in a @scheme[clause-datum] is typeset as a non-terminal,
 except for the identifiers listed as @scheme[literal-id]s, which are
@@ -361,6 +374,77 @@ typeset as with @scheme[scheme].}
 
 Like @scheme[schemegrammar], but for typesetting multiple productions
 at once, aligned around the @litchar{=} and @litchar{|}.}
+
+@; ------------------------------------------------------------------------
+@section{Classes and Interfaces}
+
+@defform[(defclass id super-id (intf-id ...) pre-flow ...)]{
+
+Creates documentation for a class @scheme[id] that is a subclass of
+@scheme[super-id] and implements each interface @scheme[intf-id]. Each
+@scheme[super-id] (except @scheme[object%]) and @scheme[intf-id] must
+be documented somewhere via @scheme[defclass] or @scheme[definterface].
+
+The decoding of the @scheme[pre-flow] sequence should start with
+general documentation about the class, followed by constructor
+definition (see @scheme[defconstructor]), and then field and method
+definitions (see @scheme[defmethod]). In rendered form, the
+constructor and method specification are indented to visually group
+them under the class definition.}
+
+@defform[(defclass/title id super-id (intf-id ...) pre-flow ...)]{
+
+Like @scheme[defclass], also includes a @scheme[title] declaration
+with the style @scheme['hidden]. In addition, the constructor and
+methods are not left-indented.
+
+This form is normally used to create a section to be rendered on its
+own HTML. The @scheme['hidden] style is used because the definition
+box serves as a title.}
+
+@defform[(definterface id (intf-id ...) pre-flow ...)]{
+
+Like @scheme[defclass], but for an interfaces. Naturally,
+@scheme[pre-flow] should not generate a constructor declaration.}
+
+@defform[(definterface/title id (intf-id ...) pre-flow ...)]{
+
+Like @scheme[definterface], but for single-page rendering as in
+@scheme[defclass/title].}
+
+@defform/subs[(defconstructor (arg-spec ...) pre-flow ...)
+              ([arg-spec (arg-id contract-expr-datum)
+                         (arg-id contract-expr-datum default-expr)])]{
+
+Like @scheme[defproc], but for a constructor declaration in the body
+of @scheme[defclass], so no return contract is specified. Also, the
+@scheme[new]-style keyword for each @scheme[arg-spec] is implicit from
+the @scheme[arg-id].}
+
+@defform[(defconstructor/make (arg-spec ...) pre-flow ...)]{
+
+Like @scheme[defconstructor], but specifying by-position
+initialization arguments (for use with @scheme[make-object]) instead
+of by-name arguments (for use with @scheme[new]).}
+
+@defform[(defconstructor*/make [(arg-spec ...) ...] pre-flow ...)]{
+
+Like @scheme[defconstructor/make], but with multiple constructor
+patterns analogous @scheme[defproc*].}
+
+@defform[(defmethod (id arg-spec ...)
+                    result-contract-expr-datum
+                    pre-flow ...)]{
+
+Like @scheme[defproc], but for a method within a @scheme[defclass] or
+@scheme[definterface] body.}
+
+@defform[(defmethod* ([(id arg-spec ...)
+                       result-contract-expr-datum] ...)
+                     pre-flow ...)]{
+
+Like @scheme[defproc*], but for a method within a @scheme[defclass] or
+@scheme[definterface] body.}
 
 @; ------------------------------------------------------------------------
 @section{Various String Forms}
@@ -546,5 +630,5 @@ centered table with the @scheme[pre-flow] parsed by
 @defproc[(commandline [pre-content any/c] ...) paragraph?]{Produces
 an inset command-line example (e.g., in typewriter font).}
 
-@defproc[(margin-code [pre-content any/c] ...) paragraph?]{Produces
+@defproc[(margin-note [pre-content any/c] ...) paragraph?]{Produces
 a paragraph to be typeset in the margin instead of inlined.}

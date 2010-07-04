@@ -1,8 +1,9 @@
 
 (module start "slideshow.ss"
   (require "start-param.ss"
+           (lib "config.ss" "planet")
 	   (lib "mred.ss" "mred")
-	   (lib "class.ss"))
+           (lib "class.ss"))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Path utilities
@@ -50,14 +51,15 @@
       (current-security-guard
        (make-security-guard (current-security-guard)
 			    (lambda (who what mode)
-			      (when (memq 'write mode)
-				(unless (sub-path? (normal-path what)
-						   (normal-path (find-system-path 'temp-dir)))
-				  (error 'slideshow
-					 "slide program attempted to write to filesystem: ~e"
-					 what)))
+                              (when (memq 'write mode)
+                                (unless (let ([np-what (normal-path what)])
+                                          (or (sub-path? np-what (normal-path (find-system-path 'temp-dir)))
+                                              (equal? np-what (normal-path (LINKAGE-FILE)))))
+                                  (error 'slideshow
+                                         "slide program attempted to write to filesystem: ~e"
+                                         what)))
 			      (when (memq 'execute mode)
-				(error 'slideshow
+                                (error 'slideshow
 				       "slide program attempted to execute external code: ~e"
 				       what)))
 			    (lambda (who where-name where-port-num mode)

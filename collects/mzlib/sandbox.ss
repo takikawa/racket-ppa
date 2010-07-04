@@ -8,6 +8,7 @@
            sandbox-input
            sandbox-output
            sandbox-error-output
+           sandbox-propagate-breaks
            sandbox-coverage-enabled
            sandbox-namespace-specs
            sandbox-override-collection-paths
@@ -16,6 +17,7 @@
            sandbox-network-guard
            sandbox-eval-limits
            kill-evaluator
+           break-evaluator
            set-eval-limits
            put-input
            get-output
@@ -43,6 +45,7 @@
   (define sandbox-output       (make-parameter #f))
   (define sandbox-error-output (make-parameter current-error-port))
   (define sandbox-eval-limits  (make-parameter '(30 20))) ; 30sec, 20mb
+  (define sandbox-propagate-breaks (make-parameter #t))
   (define sandbox-coverage-enabled (make-parameter #f))
 
   (define sandbox-namespace-specs
@@ -139,6 +142,8 @@
             (map (lambda (b) `(read ,(build-path b "compiled"))) bases)
             (map (lambda (b) `(exists ,b)) bases)))
 
+  (require (only (lib "modhelp.ss" "syntax" "private") module-path-v?))
+
   ;; takes a module-spec list and returns all module paths that are needed
   ;; ==> ignores (lib ...) modules
   (define (module-specs->non-lib-paths mods)
@@ -146,12 +151,22 @@
       (if (module-path-index? x)
         (let-values ([(m base) (module-path-index-split x)]) (lib? m))
         (and (pair? x) (eq? 'lib (car x)))))
-    (let loop ([todo (filter values
-                             (map (lambda (mod)
-                                    (and (not (lib? mod))
-                                         (simplify-path*
-                                          (resolve-module-path mod #f))))
-                                  mods))]
+    ;; turns a module spec to a simple one (except for lib specs)
+    (define (simple-modspec mod)
+      (cond [(and (pair? mod) (eq? 'lib (car mod))) #f]
+            [(module-path-v? mod)
+             (simplify-path* (resolve-module-path mod #f))]
+            [(not (and (pair? mod) (pair? (cdr mod))))
+             ;; don't know what this is, leave as is
+             #f]
+            [(eq? 'only (car mod))
+             (simple-modspec (cadr mod))]
+            [(eq? 'rename (car mod))
+             (simple-modspec (cadr mod))]
+            [(and (eq? 'prefix (car mod)) (pair? (cddr mod)))
+             (simple-modspec (caddr mod))]
+            [else #f]))
+    (let loop ([todo (filter values (map simple-modspec mods))]
                [r '()])
       (cond
         [(null? todo) r]
@@ -177,31 +192,43 @@
   (define memory-accounting? (custodian-memory-accounting-available?))
 
   (define (call-with-limits sec mb thunk)
-    (let ([cust (make-custodian)]
-          [ch   (make-channel)]
-          ;; use this to copy parameter changes from the sub-thread
-          [p    current-preserved-thread-cell-values])
+    (let ([r #f]
+          [c (make-custodian)]
+          ;; used to copy parameter changes from the nested thread
+          [p current-preserved-thread-cell-values])
       (when (and mb memory-accounting?)
-        (custodian-limit-memory cust (* mb 1024 1024) cust))
-      (let* ([work (parameterize ([current-custodian cust])
-                     (thread (lambda ()
-                               (channel-put ch
-                                 (with-handlers ([void (lambda (e)
-                                                         (list (p) raise e))])
-                                   (call-with-values thunk
-                                       (lambda vs (list* (p) values vs))))))))]
-             [watch (thread (lambda ()
-                              (channel-put ch
-                                (if (sync/timeout sec work) 'memory 'time))))]
-             [r (channel-get ch)])
-        (custodian-shutdown-all cust)
-        (kill-thread watch)
-        (if (list? r)
-          ;; apply parameter changes first
-          (begin (p (car r)) (apply (cadr r) (cddr r)))
-          (raise (make-exn:fail:resource (format "with-limit: out of ~a" r)
+        (custodian-limit-memory c (* mb 1024 1024) c))
+      (parameterize ([current-custodian c])
+        ;; The nested-thread can die on a time-out or memory-limit,
+        ;; and never throws an exception, so we never throw an error,
+        ;; just assume the a death means the custodian was shut down
+        ;; due to memory limit.  Note: cannot copy the
+        ;; parameterization in this case.
+        (with-handlers ([exn:fail? (lambda (e)
+                                     (unless r (set! r (cons #f 'memory))))])
+          (call-in-nested-thread
+           (lambda ()
+             (define this (current-thread))
+             (define timer
+               (thread (lambda ()
+                         (sleep sec)
+                         ;; even in this case there are no parameters
+                         ;; to copy, since it is on a different thread
+                         (set! r (cons #f 'time))
+                         (kill-thread this))))
+             (set! r
+               (with-handlers ([void (lambda (e) (list (p) raise e))])
+                 (call-with-values thunk (lambda vs (list* (p) values vs)))))
+             (kill-thread timer))))
+        (custodian-shutdown-all c)
+        (unless r (error 'call-with-limits "internal error"))
+        ;; apply parameter changes first
+        (when (car r) (p (car r)))
+        (if (pair? (cdr r))
+          (apply (cadr r) (cddr r))
+          (raise (make-exn:fail:resource (format "with-limit: out of ~a" (cdr r))
                                          (current-continuation-marks)
-                                         r))))))
+                                         (cdr r)))))))
 
   (define-syntax with-limits
     (syntax-rules ()
@@ -353,10 +380,14 @@
   (define current-eventspace (mz/mr (make-parameter #f) current-eventspace))
   (define make-eventspace    (mz/mr void make-eventspace))
   (define run-in-bg          (mz/mr thread queue-callback))
-  (define bg-run->thread     (mz/mr values eventspace-handler-thread))
+  (define bg-run->thread     (if mred? 
+                                 (lambda (ignored) 
+                                   ((mz/mr void eventspace-handler-thread) (current-eventspace)))
+                                 values))
   (define null-input         (open-input-bytes #""))
 
   (define (kill-evaluator eval)            (eval kill-evaluator))
+  (define (break-evaluator eval)           (eval break-evaluator))
   (define (set-eval-limits eval . args)    ((eval set-eval-limits) args))
   (define (put-input eval . args)          (apply (eval put-input) args))
   (define (get-output eval)                (eval get-output))
@@ -376,13 +407,15 @@
     (define limits        (sandbox-eval-limits))
     (define user-thread   #t) ; set later to the thread
     (define orig-cust (current-custodian))
-    (define (kill-me)
+    (define (user-kill)
       (when user-thread
         (let ([t user-thread])
           (set! user-thread #f)
           (custodian-shutdown-all cust)
           (kill-thread t))) ; just in case
       (void))
+    (define (user-break)
+      (when user-thread (break-thread user-thread)))
     (define (user-process)
       (with-handlers ([void (lambda (exn) (channel-put result-ch exn))])
         ;; first set up the environment
@@ -397,21 +430,29 @@
       ;; finally wait for interaction expressions
       (let loop ([n 1])
         (let ([expr (channel-get input-ch)])
-          (when (eof-object? expr) (channel-put result-ch expr) (kill-me))
-          (let ([code (input->code (list expr) 'eval n)])
-            (with-handlers ([void (lambda (exn)
-                                    (channel-put result-ch (cons 'exn exn)))])
-              (let* ([sec (and limits (car limits))]
-                     [mb  (and limits (cadr limits))]
-                     [run (if (or sec mb)
-                            (lambda () (with-limits sec mb (eval* code)))
-                            (lambda () (eval* code)))])
-                (channel-put result-ch
-                             (cons 'vals (call-with-values run list))))))
+          (when (eof-object? expr) (channel-put result-ch expr) (user-kill))
+          (with-handlers ([void (lambda (exn)
+                                  (channel-put result-ch (cons 'exn exn)))])
+            (let* ([code (input->code (list expr) 'eval n)]
+                   [sec (and limits (car limits))]
+                   [mb  (and limits (cadr limits))]
+                   [run (if (or sec mb)
+                          (lambda () (with-limits sec mb (eval* code)))
+                          (lambda () (eval* code)))])
+              (channel-put result-ch
+                           (cons 'vals (call-with-values run list)))))
           (loop (add1 n)))))
     (define (user-eval expr)
       (let ([r (if user-thread
-                 (begin (channel-put input-ch expr) (channel-get result-ch))
+                 (begin (channel-put input-ch expr)
+                        (let loop ()
+                          (with-handlers ([(lambda (e)
+                                             (and (sandbox-propagate-breaks)
+                                                  (exn:break? e)))
+                                           (lambda (e)
+                                             (user-break)
+                                             (loop))])
+                            (channel-get result-ch))))
                  eof)])
         (cond [(eof-object? r) (error 'evaluator "terminated")]
               [(eq? (car r) 'exn) (raise (cdr r))]
@@ -439,7 +480,8 @@
                      [(eq? arg input-putter) input]
                      [else (error 'put-input "bad input: ~e" arg)])]))
     (define (evaluator expr)
-      (cond [(eq? expr kill-evaluator) (kill-me)]
+      (cond [(eq? expr kill-evaluator)  (user-kill)]
+            [(eq? expr break-evaluator) (user-break)]
             [(eq? expr set-eval-limits) (lambda (args) (set! limits args))]
             [(eq? expr put-input) input-putter]
             [(eq? expr get-output) (output-getter output)]
@@ -494,6 +536,8 @@
                        (current-library-collection-paths))
                   require-perms
                   (sandbox-path-permissions))]
+         ;; general info
+         [current-command-line-arguments '#()]
          ;; restrict the sandbox context from this point
          [current-security-guard (sandbox-security-guard)]
          [exit-handler (lambda x (error 'exit "user code cannot exit"))]
@@ -544,11 +588,7 @@
                     "got more than a single expression")))
          (syntax-case* (car prog) (module) literal-identifier=?
            [(module modname lang body ...)
-            (make-evaluator*
-             void
-             (require-perms (syntax-object->datum #'lang)
-                            (cons 'begin (syntax->list #'(body ...))))
-             (car prog))]
+            (make-evaluator* void '() (car prog))]
            [_else (error 'make-evaluator "expecting a `module' program; got ~e"
                          (syntax-object->datum (car prog)))]))]))
 

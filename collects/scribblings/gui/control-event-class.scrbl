@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[control-event% event% ()]{
+@defclass/title[control-event% event% ()]{
 
 A @scheme[control-event%] object contains information about a
  control event. An instance of @scheme[control-event%] is always

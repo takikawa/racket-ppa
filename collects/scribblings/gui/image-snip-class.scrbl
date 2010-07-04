@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[image-snip% snip% ()]{
+@defclass/title[image-snip% snip% ()]{
 
 An @scheme[image-snip%] is a snip that can display bitmap images
  (usually loaded from a file). When the image file cannot be found, a
@@ -105,7 +105,7 @@ If @scheme[inline?] is not @scheme[#f], the image data will be saved
 
 }
 
-@defmethod[#:mode 'override 
+@defmethod[#:mode override 
            (resize [w (and/c real? (not/c negative?))]
                    [h (and/c real? (not/c negative?))])
            void?]{

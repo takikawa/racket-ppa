@@ -42,23 +42,58 @@ the state transitions / contracts are:
           [prefix frame: framework:frame^])
   (export framework:preferences^)
   
-  (define (put-preferences/gui ps vs)
+  (define past-failure-ps '())
+  (define past-failure-vs '())
+  (define number-of-consecutive-failures 0)
+
+  (define (put-preferences/gui new-ps new-vs)
+    
+    ;; NOTE: old ones must come first in the list, 
+    ;; or else multiple sets to the same preference
+    ;; will save old values, instead of new ones.
+    (define ps (begin0 (append past-failure-ps new-ps)
+                       (set! past-failure-ps '())))
+    (define vs (begin0 (append past-failure-vs new-vs)
+                       (set! past-failure-vs '())))
+    
+    (define failed #f)
+    (define (record-actual-failure)
+      (set! number-of-consecutive-failures (+ number-of-consecutive-failures 1))
+      (set! past-failure-ps ps)
+      (set! past-failure-vs vs)
+      (set! failed #t))
     (define (fail-func path)
-      (let ([mb-ans
-             (message-box/custom
-              (string-constant error-saving-preferences-title)
-              (format (string-constant prefs-file-locked)
-                      (path->string path))
-              (string-constant try-again)
-              (string-constant cancel)
-              #f
-              #f ;;parent
-              '(default=2 caution))])
-        (case mb-ans
-          [(2 #f) (void)]
-          [(1) 
-           (put-preferences ps vs second-fail-func)])))
+      (cond
+        [(= number-of-consecutive-failures 3)
+         (set! number-of-consecutive-failures 0)
+         (let ([mb-ans
+                (message-box/custom
+                 (string-constant error-saving-preferences-title)
+                 (format (string-constant prefs-file-locked)
+                         (path->string path))
+                 (string-constant steal-the-lock-and-retry)
+                 (string-constant cancel)
+                 #f
+                 #f ;;parent
+                 '(default=2 caution))])
+           (case mb-ans
+             [(2 #f) (record-actual-failure)]
+             [(1) 
+              (let ([delete-failed #f])
+                (with-handlers ((exn:fail:filesystem? (λ (x) (set! delete-failed x))))
+                  (delete-file path))
+                (cond
+                  [delete-failed
+                   (record-actual-failure)
+                   (message-box 
+                    (string-constant error-saving-preferences-title)
+                    (exn-message delete-failed))]
+                  [else
+                   (put-preferences ps vs second-fail-func)]))]))]
+        [else 
+         (record-actual-failure)]))
     (define (second-fail-func path)
+      (record-actual-failure)
       (message-box
        (string-constant error-saving-preferences-title)
        (format (string-constant prefs-file-still-locked)
@@ -71,10 +106,10 @@ the state transitions / contracts are:
                         (string-constant drscheme)
                         (format (string-constant error-saving-preferences)
                                 (exn-message x))))))
-      (put-preferences 
-       ps
-       vs
-       fail-func)))
+      (begin0
+        (put-preferences ps vs fail-func)
+        (unless failed
+          (set! number-of-consecutive-failures 0)))))
   
   ;; ppanel-tree = 
   ;;  (union (make-ppanel-leaf string (union #f panel) (panel -> panel))
@@ -150,7 +185,7 @@ the state transitions / contracts are:
   
   (define (hide-dialog)
     (when preferences-dialog
-      (send preferences-dialog show #f)))
+      (send preferences-dialog close)))
   
   (define (show-dialog)
     (if preferences-dialog
@@ -172,18 +207,23 @@ the state transitions / contracts are:
   
   (define (make-preferences-dialog)
     (letrec ([stashed-prefs (preferences:get-prefs-snapshot)]
+             [cancelled? #t]
              [frame-stashed-prefs%
               (class frame:basic%
+                (inherit close)
                 (define/override (on-subwindow-char receiver event)
                   (cond
                     [(eq? 'escape (send event get-key-code))
-                     (cancel-callback)]
+                     (close)]
                     [else 
                      (super on-subwindow-char receiver event)]))
                 (define/augment (on-close)
-                  (cancel-callback))
+                  (when cancelled?
+                    (preferences:restore-prefs-snapshot stashed-prefs)))
                 (define/override (show on?)
                   (when on?
+                    ;; reset the flag and save new prefs when the window becomes visible
+                    (set! cancelled? #t)
                     (set! stashed-prefs (preferences:get-prefs-snapshot)))
                   (super show on?))
                 (super-new))]
@@ -240,10 +280,9 @@ the state transitions / contracts are:
                               (for-each
                                (λ (f) (f))
                                on-close-dialog-callbacks)
-                              (hide-dialog)))]
-             [cancel-callback (λ ()
-                                (hide-dialog)
-                                (preferences:restore-prefs-snapshot stashed-prefs))])
+                              (set! cancelled? #f)
+                              (send frame close)))]
+             [cancel-callback (λ () (send frame close))])
       (new button%
            [label (string-constant revert-to-defaults)]
            [callback

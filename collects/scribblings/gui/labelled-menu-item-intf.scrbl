@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@definterface[labelled-menu-item<%> (menu-item<%>)]{
+@definterface/title[labelled-menu-item<%> (menu-item<%>)]{
 
 A @scheme[labelled-menu-item<%>] object is a @scheme[menu-item<%>] with
  a string label (i.e., any menu item other than a separator).  More

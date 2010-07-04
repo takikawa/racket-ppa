@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@definterface[list-control<%> (control<%>)]{
+@definterface/title[list-control<%> (control<%>)]{
 
 A list control gives the user a list of string items to choose from.
  There are two built-in classes that implement

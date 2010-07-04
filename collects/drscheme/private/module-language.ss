@@ -49,6 +49,12 @@
         (define/override (use-namespace-require/copy?) #t)
         (field [iteration-number 0])
         
+        (define/augment (capability-value key)
+          (cond
+            [(eq? key 'drscheme:autocomplete-words) 
+             (drscheme:language-configuration:get-all-scheme-manual-keywords)]
+            [else (drscheme:language:get-capability-default key)]))
+        
         ;; config-panel : as in super class
         ;; uses drscheme:language:simple-module-based-language-config-panel
         ;; and adds a collection paths configuration to it.
@@ -143,7 +149,7 @@
                         'module-language
                         "the definitions window must contain a module")
                        (let-values ([(name new-module)
-                                     (transform-module filename super-result super-result)])
+                                     (transform-module filename super-result)])
                          (set! module-name name)
                          new-module)))]
                 [(= 3 iteration-number)
@@ -400,19 +406,19 @@
     ;; in addition to exporting everything, the result module's name
     ;; is the fully path-expanded name with a directory prefix, 
     ;; if the file has been saved
-    (define (transform-module filename stx unexpanded-stx)
+    (define (transform-module filename stx)
       (syntax-case stx (module)
         [(module name lang bodies ...)
          (let ([v-name (syntax name)])
            (when filename
              (check-filename-matches filename
                                      (syntax-object->datum (syntax name)) 
-                                     unexpanded-stx))
+                                     stx))
            (values v-name stx))]
         [else
          (raise-syntax-error 'module-language
                              "only module expressions are allowed"
-                             unexpanded-stx)]))
+                             stx)]))
     
     ;; get-module-name-prefix : path -> string
     ;; returns the symbol that gets passed the current-module-name-prefix

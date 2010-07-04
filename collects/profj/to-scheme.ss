@@ -868,7 +868,8 @@
                    ,@(generate-wrapper-fields fields from-dynamic?)
                    
                    ,@(generate-wrapper-methods
-                      (filter (lambda (m) (not (eq? (method-record-rtype m) 'ctor)))
+                      (filter (lambda (m) (and (not (eq? (method-record-rtype m) 'ctor))
+                                               (not (object-method? m))))
                               wrapped-methods) #f from-dynamic?)
                    ,@extra-methods
                    ))))
@@ -995,7 +996,7 @@
     `(c:object-contract ,@(map (lambda (m)
                                `(,(build-identifier (mangle-method-name (method-record-name m)
                                                                         (method-record-atypes m)))
-                                  (c:-> ,@(map (lambda (a) 'c:any/c) (method-record-atypes m)) c:any/c)))
+                                 (c:-> ,@(map (lambda (a) 'c:any/c) (method-record-atypes m)) c:any/c)))
                              methods)))
   
   ;method->check/error: method-record -> sexp
@@ -1418,8 +1419,11 @@
                       ,@(create-static-fields static-field-names (members-field members))
                       ,@(append (generate-wrappers (class-name)
                                                    "Object"
-                                                   (class-record-methods 
-                                                    (send type-recs get-class-record (list (class-name))))
+                                                   (append
+                                                    (class-record-methods 
+                                                     (send type-recs get-class-record (list (class-name))))
+                                                    (class-record-methods
+                                                     (send type-recs get-class-record (list "Object" "java" "lang"))))
                                                    null)
                                 (generate-contract-defs (class-name)))
                       )
@@ -2109,7 +2113,7 @@
       ((symbol? type)
        (case type
          ((int short long byte) 'integer?)
-         ((double float) '(c:and/c number? (c:union inexact? integer?)))
+         ((double float) '(c:and/c number? (c:or/c inexact? integer?)))
          ((boolean) 'boolean?)
          ((char) 'char?)
          ((null) 'null?)
@@ -2122,17 +2126,17 @@
       ((ref-type? type)
        (if (equal? type string-type)
            (type->contract 'string from-dynamic?)
-           `(c:union (c:is-a?/c object%) string?)))
+           `(c:or/c (c:is-a?/c object%) string?)))
       ((unknown-ref? type)
        (if (not (null? stop?))
-           `(c:union (c:is-a?/c object%) string?)
+           `(c:or/c (c:is-a?/c object%) string?)
            (cond
              ((method-contract? (unknown-ref-access type))
               `(c:object-contract (,(string->symbol (java-name->scheme (method-contract-name (unknown-ref-access type))))
-                                    ,(type->contract (unknown-ref-access type) from-dynamic?))))
+                                 ,(type->contract (unknown-ref-access type) from-dynamic?))))
              ((field-contract? (unknown-ref-access type))
               `(c:object-contract (field ,(build-identifier (string-append (field-contract-name (unknown-ref-access type)) "~f"))
-                                         ,(type->contract (field-contract-type (unknown-ref-access type)) from-dynamic?)))))))
+                                       ,(type->contract (field-contract-type (unknown-ref-access type)) from-dynamic?)))))))
       ((method-contract? type)
        `(c:-> ,@(map (lambda (a) (type->contract a from-dynamic?)) (method-contract-args type))
               ,(type->contract (method-contract-return type) from-dynamic? #t)))
@@ -3113,7 +3117,7 @@
     (format "~a~a"
             (cond
               ((name? (type-spec-name t))
-               (id-string (name-id t)))
+               (id-string (name-id (type-spec-name t))))
               ((symbol? (type-spec-name t))
                (type-spec-name t)))
             (if (= 0 (type-spec-dim t))

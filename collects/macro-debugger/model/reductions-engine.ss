@@ -23,6 +23,7 @@
            revappend)
   (provide walk
            walk/foci
+           walk/mono
            stumble
            stumble/E)
 
@@ -65,16 +66,18 @@
   (define (learn-definites ids)
     (current-definites (append ids (current-definites))))
 
+  (define (get-frontier) (or (current-frontier) null))
+  
   (define (add-frontier stxs)
-    (current-frontier (append stxs (current-frontier)))
-    #;(printf "new frontier: ~s~n" (current-frontier)))
-
+    (current-frontier
+     (let ([frontier0 (current-frontier)])
+       (and frontier0 (append stxs frontier0)))))
+  
   (define (blaze-frontier stx)
-    #;(unless (memq stx (current-frontier))
-      (fprintf (current-error-port) "frontier does not contain term: ~s~n" stx)
-      (error 'blaze-frontier))
-    (current-frontier (remq stx (current-frontier)))
-    #;(printf "new frontier (blazed): ~s~n" (current-frontier)))
+    (current-frontier
+     (let ([frontier0 (current-frontier)])
+       (and frontier0
+            (remq stx frontier0)))))
 
   ;; -----------------------------------
 
@@ -211,17 +214,26 @@
 
   (define (rename-frontier from to)
     (current-frontier
-     (apply append (map (make-rename-mapping from to) (current-frontier)))))
-
-  (define (make-rename-mapping from to)
+     (with-handlers ([exn:fail? (lambda _ #f)])
+       (apply append
+              (map (make-rename-mapping from to)
+                   (current-frontier))))))
+  
+  (define (make-rename-mapping from0 to0)
     (define table (make-hash-table))
-    (let loop ([from from] [to to])
+    (let loop ([from from0] [to to0])
       (cond [(syntax? from)
              (hash-table-put! table from (flatten-syntaxes to))
              (loop (syntax-e from) to)]
             [(syntax? to)
              (loop from (syntax-e to))]
             [(pair? from)
+             #;(unless (pair? to)
+               (fprintf (current-error-port)
+                        "from:\n~s\n\n" (syntax-object->datum from0))
+               (fprintf (current-error-port)
+                        "to:\n~s\n\n" (syntax-object->datum to0))
+               (error 'frontier-renaming))
              (loop (car from) (car to))
              (loop (cdr from) (cdr to))]
             [(vector? from)
@@ -255,25 +267,31 @@
   ;; Lifts a local step into a term step.
   (define (walk e1 e2 type)
     (make-step (current-derivation) (big-context) type (context)
-               (current-definites) (current-frontier)
+               (current-definites) (get-frontier)
                (foci e1) (foci e2) e1 e2))
   
   ;; walk/foci : syntaxes syntaxes syntax syntax StepType -> Reduction
   (define (walk/foci foci1 foci2 Ee1 Ee2 type)
     (make-step (current-derivation) (big-context) type (context)
-               (current-definites) (current-frontier)
+               (current-definites) (get-frontier)
                (foci foci1) (foci foci2) Ee1 Ee2))
 
+  ;; walk/mono : syntax StepType -> Reduction
+  (define (walk/mono e1 type)
+    (make-mono (current-derivation) (big-context) type (context)
+               (current-definites) (get-frontier)
+               (foci e1) e1))
+  
   ;; stumble : syntax exception -> Reduction
   (define (stumble stx exn)
     (make-misstep (current-derivation) (big-context) 'error (context)
-                  (current-definites) (current-frontier)
+                  (current-definites) (get-frontier)
                   (foci stx) stx exn))
   
   ;; stumble/E : syntax(s) syntax exn -> Reduction
   (define (stumble/E focus Ee1 exn)
     (make-misstep (current-derivation) (big-context) 'error (context)
-                  (current-definites) (current-frontier)
+                  (current-definites) (get-frontier)
                   (foci focus) Ee1 exn))
   
   ;; ------------------------------------

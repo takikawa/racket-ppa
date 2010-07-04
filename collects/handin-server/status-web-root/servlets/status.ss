@@ -4,7 +4,8 @@
            (lib "string.ss")
            (lib "date.ss")
            (lib "servlet.ss" "web-server")
-           (lib "response-structs.ss" "web-server")
+           (lib "servlet-structs.ss" "web-server" "servlet")
+           (lib "timeouts.ss" "web-server" "managers")
            (lib "uri-codec.ss" "net")
            (lib "md5.ss"    "handin-server" "private")
            (lib "logger.ss" "handin-server" "private")
@@ -26,21 +27,12 @@
     `(html (head (title ,title))
            (body ([bgcolor "white"]) (h1 ((align "center")) ,title) ,@body)))
 
-  (define handin-prefix-re
-    ;; a regexp that turns a full path to a server-dir relative path
-    (regexp
-     (string-append
-      "^" (regexp-quote
-           (regexp-replace
-            #rx"/?$"
-            (if (path? server-dir) (path->string server-dir) server-dir)
-            "/")))))
+  (define (relativize-path p)
+    (path->string (find-relative-path (normalize-path server-dir) p)))
 
   (define (make-k k tag)
     (format "~a~atag=~a" k (if (regexp-match? #rx"^[^#]*[?]" k) "&" "?")
-            (uri-encode (regexp-replace handin-prefix-re
-                                        (if (path? tag) (path->string tag) tag)
-                                        ""))))
+            (uri-encode tag)))
 
   ;; `look-for' can be a username as a string (will find "bar+foo" for "foo"),
   ;; or a regexp that should match the whole directory name (used with
@@ -73,7 +65,7 @@
                     (map (lambda (f)
                            (let ([hi (build-path dir f)])
                              `((br)
-                               (a ([href ,(make-k k hi)]) ,f)
+                               (a ([href ,(make-k k (relativize-path hi))]) ,f)
                                " ("
                                ,(date->string
                                  (seconds->date
@@ -90,7 +82,7 @@
           [none `((i "---"))])
       (cond [(not soln) none]
             [(file-exists? soln)
-             `((a ((href ,(make-k k soln))) "Solution"))]
+             `((a ((href ,(make-k k (relativize-path soln)))) "Solution"))]
             [(directory-exists? soln)
              (parameterize ([current-directory soln])
                (let ([files (sort (map path->string
@@ -100,7 +92,8 @@
                    none
                    (apply append
                           (map (lambda (f)
-                                 `((a ([href ,(make-k k (build-path soln f))])
+                                 `((a ([href ,(make-k k (relativize-path
+                                                         (build-path soln f)))])
                                      (tt ,f))
                                    (br)))
                                files)))))]
@@ -130,7 +123,6 @@
         (all-status-page user)
         (download user tag))))
 
-  (define re:base #rx"^([a-zA-Z]*)([0-9]+)")
   (define (all-status-page user)
     (define (cell  . texts) `(td ([bgcolor "white"]) ,@texts))
     (define (rcell . texts) `(td ([bgcolor "white"] [align "right"]) ,@texts))
@@ -174,30 +166,36 @@
                        [else #f])
                  (loop base (cdr elts)))))))
     (define file (build-path server-dir tag))
-    (with-handlers ([exn:fail? (lambda (exn)
-                                 (make-page "Error" "Illegal file access"))])
+    (with-handlers ([exn:fail?
+                     (lambda (exn)
+                       (log-line "Status exception: ~a" (exn-message exn))
+                       (make-page "Error" "Illegal file access"))])
       ;; Make sure the user is allowed to read the requested file:
       (or (check file `(,who *) #t)
           (check file `(#rx"^solution") #f)
           (check file `(#rx"^solution" *) #f)
-          (error "Boom!"))
+          (error 'download "bad file access for ~s: ~a" who file))
       (log-line "Status file-get: ~s ~a" who file)
       (hook 'status-file-get `([username ,(string->symbol who)] [file ,file]))
       ;; Return the downloaded file
       (let* ([data (with-input-from-file file
                      (lambda () (read-bytes (file-size file))))]
              [html? (regexp-match? #rx"[.]html?$" (string-foldcase tag))]
-             [wxme? (regexp-match? #rx#"^WXME" data)])
+             [wxme? (regexp-match? #rx#"^(?:#reader[(]lib\"read.ss\"\"wxme\"[)])?WXME" data)])
         (make-response/full 200 "Okay" (current-seconds)
           (cond [html? #"text/html"]
                 [wxme? #"application/data"]
                 [else  #"text/plain"])
-          `([Content-Length . ,(number->string (bytes-length data))]
-            [Content-Disposition
-             . ,(format "~a; filename=~s"
-                        (if wxme? "attachment" "inline")
-                        (let-values ([(base name dir?) (split-path file)])
-                          (path->string name)))])
+          (list
+           (make-header #"Content-Length"
+                        (string->bytes/latin-1
+                         (number->string (bytes-length data))))
+           (make-header #"Content-Disposition"
+                        (string->bytes/utf-8
+                         (format "~a; filename=~s"
+                                 (if wxme? "attachment" "inline")
+                                 (let-values ([(base name dir?) (split-path file)])
+                                   (path->string name))))))
           (list data)))))
 
   (define (status-page user for-handin)
@@ -251,8 +249,8 @@
     (parameterize ([current-session (web-counter)])
       (login-page null (aget (request-bindings initial-request) 'handin) #f)))
 
-  (define interface-version 'v2-transitional)
-  (define timeout 600)
+  (define interface-version 'v2)
+  (define name "status")
 
   (define (instance-expiration-handler failed-request)
     (let ([this (servlet-url->url-string/no-continuation
@@ -262,4 +260,9 @@
              (body "Your session has expired, "
                    (a ([href ,this]) "restarting") " in 3 seconds."))))
 
-  (provide interface-version timeout start instance-expiration-handler))
+  (define manager
+    (create-timeout-manager instance-expiration-handler
+                            600 
+                            600))
+
+  (provide interface-version start name manager))

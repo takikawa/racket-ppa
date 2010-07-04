@@ -2,7 +2,14 @@
   (include "head.tinc") }
 
 
-This <code>idraw</code> package provides stateful classes and imperative methods
+<p>Add 
+<pre><code>
+  import idraw.*
+</code></pre>
+at the top of your Definitions Window to import this library. 
+</p>
+
+<p>This <code>idraw</code> package provides stateful classes and imperative methods
 for a visual world. Here is its class diagram of public fields and methods:
 
 <pre>
@@ -18,14 +25,15 @@ import geometry.*;
   | void bigBang(int,int,double)    |       +------------------------------------+
   | World endOfTime(String)         |       | void show()                        |
   | World endOfWorld(String)        |       | void close()                       |
-  | abstract void onTick()          |       | void drawCircle(Posn,int,AColor)   |
-  | abstract void onKeyEvent(String)|       | void drawDisk(Posn,int,AColor)     |
-  | abstract void draw()            |       | void drawRect(Posn,int,int,AColor) |
-  +---------------------------------+       | void drawLine(Posn,Posn,AColor)    |
+  | abstract void onTick()          |       | void drawCircle(Posn,int,IColor)   |
+  | abstract void onKeyEvent(String)|       | void drawDisk(Posn,int,IColor)     |
+  | abstract void draw()            |       | void drawRect(Posn,int,int,IColor) |
+  +---------------------------------+       | void drawLine(Posn,Posn,IColor)    |
                                             | void drawString(Posn,String)       |
                                             +------------------------------------+
 </code>
 </pre>
+</p>
 
 <p>The abstract <code>World</code> class in <code>idraw</code> provides the same
 methods as the <code>World</code> class in <a href="./draw.html#world">the

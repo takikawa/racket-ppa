@@ -237,23 +237,14 @@
     (mixin (basic<%>) (register-group<%>)
       
       (define/augment (can-close?)
-        (let ([number-of-frames 
-               (length (send (group:get-the-frame-group)
-                             get-frames))])
-          (and (inner #t can-close?)
-               (or (not (preferences:get 'framework:exit-when-no-frames))
-                   (exit:exiting?)
-                   (not (= 1 number-of-frames))
-                   (exit:user-oks-exit)))))
+        (and (inner #t can-close?)
+             (group:can-close-check)))
       (define/augment (on-close)
         (send (group:get-the-frame-group)
               remove-frame
               this)
         (inner (void) on-close)
-        (when (preferences:get 'framework:exit-when-no-frames)
-          (unless (exit:exiting?)
-            (when (null? (send (group:get-the-frame-group) get-frames))
-              (exit:exit)))))
+        (group:on-close-action))
       
       (define/override (on-activate on?)
         (super on-activate on?)
@@ -268,6 +259,63 @@
   (define unlocked-message-line1 (string-constant read/write-line1))
   (define unlocked-message-line2 (string-constant read/write-line2))
   
+  (define lock-canvas%
+    (class canvas%
+      (field [locked? #f])
+      (inherit refresh)
+      (define/public (set-locked l)
+        (unless (eq? locked? l)
+          (set! locked? l)
+          (setup-sizes)
+          (refresh)))
+      (inherit get-client-size get-dc)
+      (define/override (on-paint)
+        (let* ([dc (get-dc)]
+               [draw
+                (λ (str1 str2 bg-color bg-style line-color line-style)
+                  (send dc set-font small-control-font)
+                  (let-values ([(w h) (get-client-size)]
+                               [(tw1 th1 _1 _2) (send dc get-text-extent str1)]
+                               [(tw2 th2 _3 _4) (send dc get-text-extent str2)])
+                    (send dc set-pen (send the-pen-list find-or-create-pen line-color 1 line-style))
+                    (send dc set-brush (send the-brush-list find-or-create-brush bg-color bg-style))
+                    (send dc draw-rectangle 0 0 w h)
+                    (cond
+                      [(string=? str2 "")
+                       (send dc draw-text str1
+                             (- (/ w 2) (/ tw1 2))
+                             (- (* h 1/2) (/ th1 2)))]
+                      [else
+                       (send dc draw-text str1
+                             (- (/ w 2) (/ tw1 2))
+                             (- (* h 1/2) th1))
+                       (send dc draw-text str2
+                             (- (/ w 2) (/ tw2 2))
+                             (* h 1/2))])))])
+          (when locked?
+            (draw locked-message-line1 locked-message-line2
+                  "yellow" 'solid "black" 'solid))))
+      
+      (inherit get-parent min-width min-height stretchable-width stretchable-height)
+      (define/private (setup-sizes)
+        (let ([dc (get-dc)])
+          (if locked?
+              (let-values ([(wl1 hl1 _1 _2) (send dc get-text-extent locked-message-line1)]
+                           [(wl2 hl2 _3 _4) (send dc get-text-extent locked-message-line2)])
+                (min-width (inexact->exact (floor (+ 2 (max (+ wl1 2) (+ wl2 2))))))
+                (min-height (inexact->exact (floor (+ 2 hl1 hl2)))))
+              (begin
+                (min-width 0)
+                (min-height 0)))))
+      
+      (super-new [style '(transparent)])
+      
+      (send (get-dc) set-font small-control-font)
+      (setup-sizes)
+      (stretchable-width #f)
+      (stretchable-height #t)))
+  
+  #;
   (define lock-canvas%
     (class canvas%
       (field [locked? #f])
@@ -489,7 +537,7 @@
               ;; need high priority callbacks to ensure ordering wrt other callbacks
               (queue-callback t #t))))
       
-      (super-instantiate ())))
+      (super-new)))
   
   (define info<%> (interface (basic<%>)
                     determine-width
@@ -617,15 +665,11 @@
       
       (define/public (get-info-panel) info-panel)
       (define/public (update-memory-text)
-        (when (and show-memory-text?
-                   memory-canvas)
-          (send memory-text begin-edit-sequence)
-          (send memory-text lock #f)
-          (send memory-text erase)
-          (send memory-text insert (format-number (current-memory-use)))
-          (ensure-enough-width memory-canvas memory-text)
-          (send memory-text lock #t)
-          (send memory-text end-edit-sequence)))
+        (when show-memory-text?
+          (for-each
+           (λ (memory-canvas)
+             (send memory-canvas set-str (format-number (current-memory-use))))
+           memory-canvases)))
       
       (define/private (format-number n)
         (let* ([mbytes (/ n 1024 1024)]
@@ -636,7 +680,8 @@
            "."
            (cond
              [(<= after-decimal 9) (format "0~a" after-decimal)]
-             [else (number->string after-decimal)]))))
+             [else (number->string after-decimal)])
+           " MB")))
       
       (define/private (pad-to-3 n)
         (cond
@@ -648,27 +693,21 @@
       (when show-memory-text?
         (let* ([panel (new horizontal-panel%
                            [parent (get-info-panel)]
-                           [style '(border)]
+                           ;[style '(border)]
                            [stretchable-width #f]
                            [stretchable-height #f])]
-               [button (new button%
-                            [label (string-constant collect-button-label)]
-                            [parent panel]
-                            [callback
-                             (λ x
-                               (collect-garbage)
-                               (update-memory-text))])]
-               [ec (new editor-canvas%
+               [ec (new position-canvas%
                         [parent panel]
-                        [editor memory-text]
-                        [line-count 1]
-                        [style '(no-hscroll no-vscroll)])])
-          (set! memory-canvas ec)
-          (determine-width "99.99" ec memory-text)
+                        [button-up
+                         (λ ()
+                           (collect-garbage)
+                           (update-memory-text))]
+                        [init-width "99.99 MB"])])
+          (set! memory-canvases (cons ec memory-canvases))
           (update-memory-text)
           (set! memory-cleanup
                 (λ ()
-                  (send ec set-editor #f)))
+                  (set! memory-canvases (remq ec memory-canvases))))
           (send panel stretchable-width #f)))
       
       [define lock-canvas (make-object lock-canvas% (get-info-panel))]
@@ -731,6 +770,40 @@
       (let-values ([(cw ch) (send position-canvas get-client-size)])
         (inexact->exact (floor (- cw (unbox wb)))))))
   
+  (define position-canvas%
+    (class canvas%
+      (inherit min-client-height min-client-width get-dc get-client-size refresh)
+      (init init-width)
+      (init-field [button-up #f])
+      (define str "")
+      (define/public (set-str _str)
+        (set! str _str)
+        (update-client-width str)
+        (refresh))
+      (define/private (update-client-width str)
+        (let ([dc (get-dc)])
+          (let-values ([(cw _4) (get-client-size)]
+                       [(tw _1 _2 _3) (send dc get-text-extent str)])
+            (when (< cw tw)
+              (min-client-width (inexact->exact (floor tw)))))))
+      (define/override (on-paint)
+        (let ([dc (get-dc)])
+          (let-values ([(cw ch) (get-client-size)]
+                       [(tw th _1 _2) (send dc get-text-extent str)])
+            (send dc draw-text str 0 (/ (- ch th) 2)))))
+      (define/override (on-event evt)
+        (when button-up
+          (when (send evt button-up?)
+            (let-values ([(cw ch) (get-client-size)])
+              (when (and (<= (send evt get-x) cw)
+                         (<= (send evt get-y) ch))
+                (button-up))))))
+      (super-new (style '(transparent)))
+      (let ([dc (get-dc)])
+        (let-values ([(_1 th _2 _3) (send dc get-text-extent str)])
+          (min-client-height (inexact->exact (floor th)))))
+      (update-client-width init-width)))
+  
   (define text-info<%> (interface (info<%>)
                          set-macro-recording
                          overwrite-status-changed
@@ -766,15 +839,15 @@
         (let* ([edit (get-info-editor)]
                [make-one
                 (λ (pos)
-                  (let* ([line (send edit position-paragraph pos)]
-                         [col (find-col edit line pos)])
-                    (if line-numbers?
+                  (if line-numbers?
+                      (let* ([line (send edit position-paragraph pos)]
+                             [col (find-col edit line pos)])
                         (format "~a:~a"
                                 (add1 line)
                                 (if offset?
                                     (add1 col)
-                                    col))
-                        (format "~a" pos))))])
+                                    col)))
+                      (format "~a" pos)))])
           (cond
             [(not (object? position-canvas))
              (void)]
@@ -790,7 +863,7 @@
                  (set! last-params (list offset? line-numbers?))
                  (set! last-start start)
                  (set! last-end end)
-                 (when (object? position-edit)
+                 (when (object? position-canvas)
                    (change-position-edit-contents
                     (if (= start end)
                         (make-one start)
@@ -902,20 +975,9 @@
                                    [parent (get-info-panel)]
                                    [stretchable-width #f]
                                    [stretchable-height #f]))
-      (define position-canvas (new editor-canvas% 
-                                   [parent position-parent]
-                                   [style '(no-hscroll no-vscroll)]))
-      
-      (define position-edit (new text%))
-      
+      (define position-canvas (new position-canvas% [parent position-parent] [init-width "000:00-000:00"]))
       (define/private (change-position-edit-contents str)
-        (send position-edit begin-edit-sequence)
-        (send position-edit lock #f)
-        (send position-edit erase)
-        (send position-edit insert str)
-        (ensure-enough-width position-canvas position-edit)
-        (send position-edit lock #t)
-        (send position-edit end-edit-sequence))
+        (send position-canvas set-str str))
       
       (send (get-info-panel) change-children
             (λ (l)
@@ -961,17 +1023,7 @@
       (send macro-recording-message show #f)
       (send anchor-message show #f)
       (send overwrite-message show #f)
-      (send* position-canvas
-        (set-line-count 1)
-        (set-editor position-edit)
-        (stretchable-width #f)
-        (stretchable-height #f))
-      (determine-width "000:00-000:00"
-                       position-canvas
-                       position-edit)
-      (editor-position-changed)
-      (send position-edit hide-caret #t)
-      (send position-edit lock #t)))
+      (editor-position-changed)))
   
   (define click-pref-panel%
     (class horizontal-panel%
@@ -1002,7 +1054,7 @@
   (define pasteboard-info<%> (interface (info<%>)))
   (define pasteboard-info-mixin
     (mixin (basic<%>) (pasteboard-info<%>)
-      (super-instantiate ())))
+      (super-new)))
   
   (include "standard-menus.ss")
   
@@ -1663,7 +1715,7 @@
       
       (define/public (get-delegatee) delegatee)
       
-      (super-instantiate ())
+      (super-new)
       
       (define delegatee (instantiate delegatee-text% ()))
       (define delegate-ec (instantiate delegatee-editor-canvas% ()
@@ -2058,7 +2110,7 @@
   (define replace-text%
     (class text:keymap%
       (inherit set-styles-fixed)
-      (super-instantiate ())
+      (super-new)
       (set-styles-fixed #t)))
   
   (define find-edit #f)
@@ -2176,6 +2228,7 @@
              (hide-search)))))
       (define/augment (on-close)
         (remove-callback)
+        (remove-sensitive-pref-callback)
         (let ([close-canvas
                (λ (canvas edit)
                  (send canvas set-editor #f))])
@@ -2306,6 +2359,7 @@
           (send find-edit search #t beep?)))
       
       (define sensitive-check-box #f)
+      (define remove-sensitive-pref-callback void)
       (define search-panel #f)
       (define search-gui-built? #f)
       (define dir-radio #f)
@@ -2388,6 +2442,10 @@
                                             (string-constant find-case-sensitive)
                                             middle-right-panel 
                                             (λ (x y) (send find-edit toggle-case-sensitive))))
+                (set! remove-sensitive-pref-callback
+                      (preferences:add-callback 'framework:case-sensitive-search?
+                                                (λ (k v)
+                                                  (send sensitive-check-box set-value v))))
                 (send sensitive-check-box set-value (get-field case-sensitive? find-edit))))
             
             
@@ -2417,7 +2475,7 @@
             (send replace-canvas set-editor replace-edit))
           (end-container-sequence)))
       
-      (super-instantiate ())
+      (super-new)
       
       (hide-search #t)))
   
@@ -2430,12 +2488,9 @@
         (get-editor))
       (define/override (get-editor<%>) text:searching<%>)
       (define/override (get-editor%) text:searching%)
-      (super-instantiate ())))
+      (super-new)))
   
-  (define memory-text% (class text% (super-new)))
-  (define memory-text (make-object memory-text%))
-  (define memory-canvas #f)
-  (send memory-text hide-caret #t)
+  (define memory-canvases '())
   (define show-memory-text?
     (or (with-handlers ([exn:fail:filesystem?
                          (λ (x) #f)])
@@ -2455,7 +2510,7 @@
            (message-box (string-constant drscheme)
                         (string-constant happy-birthday-matthew))]
           [else (super on-event evt)]))
-      (super-instantiate ())))
+      (super-new)))
   
   (define basic% (register-group-mixin (basic-mixin frame%)))
   (define size-pref% (size-pref-mixin basic%))

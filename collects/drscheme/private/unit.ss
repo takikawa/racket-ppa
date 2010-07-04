@@ -33,8 +33,7 @@ module browser threading seems wrong.
            (lib "mred.ss" "mred")
            (prefix mred: (lib "mred.ss" "mred"))
            
-           (prefix mzlib:file: (lib "file.ss"))
-           (prefix mzlib:date: (lib "date.ss")))
+           (lib "date.ss"))
   
   (provide unit@)
   
@@ -390,7 +389,9 @@ module browser threading seems wrong.
                    (mode:host-text-mixin
                     (text:delegate-mixin
                      (text:foreground-color-mixin
-                      text:info%))))))))])
+                      (drscheme:rep:drs-autocomplete-mixin
+                       (λ (x) x)
+                       text:info%)))))))))])
         (class* definitions-super% (definitions-text<%>)
           (inherit get-top-level-window)
           
@@ -627,7 +628,7 @@ module browser threading seems wrong.
           (inherit get-filename/untitled-name)
           (define/private (get-date-string)
             (string-append
-             (mzlib:date:date->string (seconds->date (current-seconds)))
+             (date->string (seconds->date (current-seconds)))
              " "
              (get-filename/untitled-name)))
           
@@ -1059,7 +1060,7 @@ module browser threading seems wrong.
           (let ([filename (send defs get-filename)])
             (if (and (path? filename)
                      (file-exists? filename))
-                (let-values ([(base _1 _2) (split-path (mzlib:file:normalize-path filename))])
+                (let-values ([(base _1 _2) (split-path (normalize-path filename))])
                   base)
                 #f)))
         (define/public (needs-execution)
@@ -2076,8 +2077,23 @@ module browser threading seems wrong.
           (preferences:set 'drscheme:unit-window-max? (is-maximized?))
           (super on-size w h))
         
+        (define on-move-timer-args #f)
+        (define on-move-timer #f)
         (define/override (on-move x y)
-          (preferences:set 'drscheme:frame:initial-position (cons x y)))
+          (cond
+            [on-move-timer
+             (set! on-move-timer-args (cons x y))]
+            [else
+             (set! on-move-timer-args (cons x y))
+             (set! on-move-timer 
+                   (new timer% 
+                        [notify-callback
+                         (λ () 
+                           (set! on-move-timer #f)
+                           (set! on-move-timer-args #f)
+                           (preferences:set 'drscheme:frame:initial-position on-move-timer-args))]
+                        [interval 1000]
+                        [just-once? #t]))]))
         
         (define/override (get-editor) definitions-text)
         (define/override (get-canvas)
@@ -2165,7 +2181,6 @@ module browser threading seems wrong.
             (for-each (λ (ints-canvas) (send ints-canvas set-editor interactions-text))
                       interactions-canvases)
             
-            (restore-visible-tab-regions)
             (update-save-message)
             (update-save-button)
             (language-changed)
@@ -2174,7 +2189,10 @@ module browser threading seems wrong.
             (send definitions-text set-delegate old-delegate)
             (update-running (send current-tab is-running?))
             (on-tab-change old-tab current-tab)
-            (end-container-sequence)))
+            (end-container-sequence)
+            ;; restore-visible-tab-regions has to be outside the container sequence
+            ;; or else things get moved again during the container sequence end
+            (restore-visible-tab-regions))) 
         
         (define/pubment (on-tab-change from-tab to-tab)
           (let ([old-enabled (send from-tab get-enabled)]
@@ -2237,22 +2255,22 @@ module browser threading seems wrong.
           (change-to-tab (list-ref tabs n)))
         
         (define/private (save-visible-tab-regions)
-          (define (get-visible-regions txt)
-            (map (λ (canvas) 
-                   (let-values ([(x y w h _) (get-visible-region canvas)])
-                     (list x y w h)))
-                 (send txt get-canvases)))
-          
           (send current-tab set-visible-ints
-                (get-visible-regions interactions-text)
+                (get-tab-visible-regions interactions-text)
                 interactions-shown?)
           (send current-tab set-visible-defs 
-                (get-visible-regions definitions-text)
+                (get-tab-visible-regions definitions-text)
                 definitions-shown?)
           (send current-tab set-focus-d/i
                 (if (ormap (λ (x) (send x has-focus?)) interactions-canvases)
                     'ints
                     'defs)))
+        
+        (define/private (get-tab-visible-regions txt)
+          (map (λ (canvas) 
+                 (let-values ([(x y w h _) (get-visible-region canvas)])
+                   (list x y w h)))
+               (send txt get-canvases)))
         
         (define/private (restore-visible-tab-regions)
           (define (set-visible-regions txt regions ints?)
@@ -2281,10 +2299,11 @@ module browser threading seems wrong.
                            (split-definitions (car canvases)))
                        (loop (- i 1) 
                              (cdr canvases))))]))
-              (for-each (λ (c r) (set-visible-region txt c r)) 
+              (for-each (λ (c r)
+                          (set-visible-tab-region txt c r)) 
                         (send txt get-canvases)
                         regions)))
-          (define (set-visible-region txt canvas region)
+          (define (set-visible-tab-region txt canvas region)
             (let ([admin (send txt get-admin)])
               (send admin scroll-to 
                     (first region)
@@ -2304,8 +2323,8 @@ module browser threading seems wrong.
         
         (define/private (pathname-equal? p1 p2)
           (with-handlers ([exn:fail:filesystem? (λ (x) #f)])
-            (string=? (path->string (normalize-path p1))
-                      (path->string (normalize-path p2)))))
+            (string=? (path->string (normal-case-path (normalize-path p1)))
+                      (path->string (normal-case-path (normalize-path p2))))))
         (define/override (make-visible filename)
           (let loop ([tabs tabs])
             (unless (null? tabs)
@@ -2717,6 +2736,18 @@ module browser threading seems wrong.
           (super file-menu:between-print-and-close file-menu))
         
         (define/override (edit-menu:between-find-and-preferences edit-menu)
+          (new menu-item%
+               [label (string-constant complete-word)]
+               [shortcut #\/]
+               [parent edit-menu]
+               [demand-callback
+                (λ (mi)
+                  (send mi enable
+                        (let ([ed (get-edit-target-object)])
+                          (and ed
+                               (is-a? ed text:autocomplete<%>)))))]
+               [callback (λ (x y)
+                           (send (get-edit-target-object) auto-complete))])
           (super edit-menu:between-find-and-preferences edit-menu)
           (add-modes-submenu edit-menu))
         

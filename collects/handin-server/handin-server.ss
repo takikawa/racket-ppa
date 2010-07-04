@@ -13,7 +13,12 @@
            "private/run-status.ss"
            "private/reloadable.ss"
            "private/hooker.ss"
-           "web-status-server.ss")
+           "web-status-server.ss"
+           ;; this sets some global parameter values, and this needs
+           ;; to be done in the main thread, rather than later in a
+           ;; user session thread (that will make the global changes
+           ;; not to be global.)
+           "sandbox.ss")
 
   (install-logger-port)
 
@@ -282,7 +287,9 @@
       (error* "no ~a submission directory for ~a" assignment users))
     (log-line "retrieving assignment for ~a: ~a" users assignment)
     (parameterize ([current-directory submission-dir])
-      (define magics '(#"WXME" #"<<<MULTI-SUBMISSION-FILE>>>"))
+      (define magics '(#"WXME" 
+                       #"<<<MULTI-SUBMISSION-FILE>>>" 
+                       #"#reader(lib\"read.ss\"\"wxme\")WXME"))
       (define mlen (apply max (map bytes-length magics)))
       (define file
         ;; find the newest wxme file
@@ -624,7 +631,9 @@
   (log-line "server started ------------------------------")
   (hook 'server-start `([port ,(get-conf 'port-number)]))
 
-  (define stop-status (serve-status (get-conf 'https-port-number)))
+  (define stop-status
+    (cond [(get-conf 'https-port-number) => serve-status]
+          [else void]))
 
   (define session-count 0)
 

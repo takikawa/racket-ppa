@@ -228,8 +228,15 @@
          (iq-enqueue sig)
          sig))))
     
+  (define ht (make-hash-table 'weak))
+  
   (define (proc->signal thunk . producers)
     (build-signal make-signal thunk producers))
+     
+  (define (proc->signal/dont-gc-unless other-val thunk . producers)
+    (let ([result (build-signal make-signal thunk producers)])
+      (hash-table-put! ht other-val result)
+      result))
      
   (define (proc->signal:unchanged thunk . producers)
     (build-signal make-signal:unchanged thunk producers))
@@ -532,8 +539,6 @@
               (lambda () (heap-empty? heap)))))
   
   (define (schedule-alarm ms beh)
-    (when (> ms 1073741824)
-      (set! ms (- ms 2147483647)))
     (if (eq? (self) man)
         (alarms-enqueue ms beh)
         (! man (make-alarm ms beh))))
@@ -784,7 +789,7 @@
                (receive [after (cond
                                  [(not (iq-empty?)) 0]
                                  [(not (alarms-empty?)) (- (alarms-peak-ms)
-                                                           (current-milliseconds))]
+                                                           (current-inexact-milliseconds))]
                                  [else #f])
                                (void)]
                         [(? signal? b)
@@ -842,7 +847,7 @@
              ;; enqueue expired timers for execution
              (let loop ()
                (unless (or (alarms-empty?)
-                           (< (current-milliseconds)
+                           (< (current-inexact-milliseconds)
                               (alarms-peak-ms)))
                  (let ([beh (alarms-dequeue-beh)])
                    (when (and beh (not (signal-stale? beh)))

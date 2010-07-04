@@ -102,14 +102,15 @@
     (add-info-specified-languages
      get-default-language-settings
      settings-preferences-symbol
-     
+     get-all-scheme-manual-keywords
      add-built-in-languages))
   
   (define-signature drscheme:tools^
     ((struct successful-tool (spec bitmap name url))
      get-successful-tools
      only-in-phase
-     load/invoke-all-tools))
+     load/invoke-all-tools
+     add-prefs-panel))
   
   (define-signature drscheme:get/extend^
     (extend-tab
@@ -176,6 +177,7 @@
      error-delta
      get-welcome-delta 
      get-dark-green-delta
+     drs-autocomplete-mixin
      text%
      text<%>
      context<%>))

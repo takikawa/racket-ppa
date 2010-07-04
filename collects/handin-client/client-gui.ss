@@ -22,7 +22,10 @@
 
   (define handin-name   (#%info-lookup 'name))
   (define web-menu-name (#%info-lookup 'web-menu-name (lambda () #f)))
-  (define web-address   (#%info-lookup 'web-address (lambda () #f)))
+  (define web-address   (#%info-lookup 'web-address   (lambda () #f)))
+
+  (define password-keep-minutes
+    (#%info-lookup 'password-keep-minutes (lambda () #f)))
 
   (define handin-dialog-name (string-append handin-name " Handin"))
   (define button-label/h     (string-append handin-name " Handin"))
@@ -43,6 +46,58 @@
     (preferences:set preference-key user))
 
   (define (connect) (handin-connect server port-no))
+
+  ;; parameter-like procedure that keeps the password cached for a few minutes
+  (define cached-password
+    (let ([passwd #f]
+          [timer #f])
+      (define protect
+        (let ([s (make-semaphore 1)])
+          (lambda (thunk)
+            (dynamic-wind (lambda () (semaphore-wait s))
+                          thunk
+                          (lambda () (semaphore-post s))))))
+      (case-lambda
+        [() passwd]
+        [(new)
+         (protect (lambda ()
+                    (when (and password-keep-minutes
+                               (not (equal? 0 password-keep-minutes))
+                               (not (equal? passwd new)))
+                      (when timer (kill-thread timer))
+                      (set! passwd new)
+                      (set! timer (thread
+                                   (lambda ()
+                                     (sleep (* 60 password-keep-minutes))
+                                     (protect (lambda ()
+                                                (set! passwd #f)
+                                                (set! timer #f)))))))))])))
+  ;; a password entry box that uses the one cached above
+  (define cached-passwd%
+    (class text-field%
+      (define cached (cached-password))
+      ;; use this instead of a cached password -- to avoid copy/pastes
+      ;; of a password, and to hide its length
+      (define fake-value "CACHED PASSWD")
+      (define/override (get-value)
+        (or cached (super get-value)))
+      (define/override (on-focus on?)
+        (if on?
+          ;; got focus -- clear out bogus contents, if any
+          (when cached (send this set-value "") (set! cached #f))
+          ;; lost focus -- remember a new password, or restore it
+          (let ([p (super get-value)])
+            (cond [(and p (not (string=? "" p)))
+                   ;; don't behave as if we have a cache: don't clear
+                   ;; the value now, or if we get the focus later
+                   (set! cached #f)
+                   (cached-password p)]
+                  [(cached-password)
+                   => (lambda (p)
+                        (set! cached p)
+                        (send this set-value fake-value))]))))
+      (super-new [init-value (if cached fake-value "")]
+                 [style '(single password)])))
 
   (provide handin-frame%)
   (define handin-frame%
@@ -67,12 +122,11 @@
 			    [parent this]
 			    [callback (lambda (t e) (activate-ok))]
 			    [stretchable-width #t]))
-      (define passwd (new text-field%
-			  [label "Password:"]
-			  [parent this]
-			  [callback (lambda (t e) (activate-ok))]
-			  [style '(single password)]
-			  [stretchable-width #t]))
+      (define passwd (new cached-passwd%
+                          [label "Password:"]
+                          [parent this]
+                          [callback (lambda (t e) (activate-ok))]
+                          [stretchable-width #t]))
       (define assignment (new choice%
 			      [label "Assignment:"]
 			      [choices null]
@@ -260,21 +314,28 @@
 	(inner (void) on-close)
 	(do-cancel-button))
 
-      (send ok enable #f)
+      (init-comm)
+
+      (send (cond [(string=? "" (send username get-value)) username]
+                  [(string=? "" (send passwd get-value)) passwd]
+                  [else ok])
+            focus)
+      (send ok enable #f) ; disable after focus possibly sent to it
       (send assignment enable #f)
 
-      (init-comm)
-      (send passwd focus)
       (center)
       (show #t)))
 
+  (provide manage-handin-dialog%)
   (define manage-handin-dialog%
-    (class dialog% (init [parent #f] [user-fields #f])
+    (class dialog% (init [parent #f])
 
       (inherit show is-shown? center)
       (super-new [label manage-dialog-name]
                  [alignment '(left center)]
                  [parent parent])
+
+      (define user-fields (get-user-fields parent))
 
       (define status
         (new message%
@@ -340,7 +401,11 @@
       (send old-username set-value (remembered-user))
 
       (define old-passwd
-        (mk-passwd "Old Password:" old-user-box activate-change))
+        (new cached-passwd%
+             [label "Old Password:"]
+             [parent old-user-box]
+             [callback (lambda (t e) (activate-change))]
+             [stretchable-width #t]))
       (define change-user-fields
         (map (lambda (f)
                (mk-txt (string-append f ":") old-user-box activate-change))
@@ -380,8 +445,10 @@
         (map (lambda (f)
                (mk-txt (string-append f ":") new-user-box activate-new))
              (or user-fields '())))
-      (define add-passwd  (mk-passwd "Password:" new-user-box activate-new))
-      (define add-passwd2 (mk-passwd "Password again:" new-user-box activate-new))
+      (define add-passwd
+        (mk-passwd "Password:" new-user-box activate-new))
+      (define add-passwd2
+        (mk-passwd "Password again:" new-user-box activate-new))
       (define new-button (new button%
                               [label "Add User"] [parent new-user-box]
                               [callback (lambda (b e)
@@ -568,13 +635,50 @@
       (center)
       (show #t)))
 
-  (provide manage-handin-account)
-  (define (manage-handin-account parent)
-    (new manage-handin-dialog%
-         [parent parent]
-         [user-fields (cond [(with-handlers ([void (lambda (_) #f)]) (connect))
-                             => retrieve-user-fields]
-                            [else #f])]))
+  ;; A simple dialog during connection, with an option to cancel (used
+  ;; by `get-user-fields' below, since its value is needed to
+  ;; construct the above dialog).
+  (define connection-dialog%
+    (class dialog% (init receiver [parent #f])
+      (inherit show is-shown? center)
+      (super-new [label manage-dialog-name]
+                 [alignment '(right center)]
+                 [parent parent])
+      (define status
+        (new message% [label "Connecting to server..."]
+                      [parent this]
+                      [stretchable-width #t]))
+      (define comm-cust (make-custodian))
+      (define/augment (on-close)
+        (inner (void) on-close)
+        (custodian-shutdown-all comm-cust))
+      (define button
+        (new button% [label "Cancel"] [parent this]
+                     [callback (lambda (b e)
+                                 (custodian-shutdown-all comm-cust)
+                                 (show #f))]
+                     [style '(border)]))
+      (send button focus)
+      (parameterize ([current-custodian comm-cust])
+        (thread
+         (lambda ()
+           (unless (with-handlers ([void (lambda (_) #f)])
+                     (receiver (connect)) #t)
+             (begin (send status set-label "Connection failure!")
+                    ;; (send button enable #f)
+                    (sleep 5)))
+           (queue-callback (lambda () (show #f))))))
+      (center)
+      (show #t)))
+
+  (define cached-user-fields #f)
+  (define (get-user-fields parent)
+    (unless cached-user-fields
+      (new connection-dialog%
+           [receiver (lambda (h)
+                       (set! cached-user-fields (retrieve-user-fields h)))]
+           [parent parent]))
+    cached-user-fields)
 
   (define (scale-by-half file)
     (let* ([bm (make-object bitmap% file 'unknown/mask)]
@@ -644,7 +748,8 @@
             (new menu-item%
               [label (format "Manage ~a Handin Account..." handin-name)]
               [parent file-menu]
-              [callback (lambda (m e) (manage-handin-account this))])
+              [callback (lambda (m e)
+                          (new manage-handin-dialog% [parent this]))])
             (when multifile?
               (new menu-item%
                 [label (format "Submit multiple ~a Files..." handin-name)]

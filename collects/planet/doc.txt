@@ -20,14 +20,13 @@ The structure of user PLaneT invocations is listed below.
 
 PLANET-REQUEST ::= (planet FILE-NAME PKG-SPEC [PATH ...]) 
 FILE-NAME      ::= string
-PKG-SPEC       ::= (FILE-PATH ... PKG-NAME) | (FILE-PATH ... PKG-NAME VER-SPEC)
-VER-SPEC       ::= Nat | (Nat MINOR) 
+PKG-SPEC       ::= (OWNER-NAME PKG-NAME) | (OWNER PKG-NAME . VER-SPEC)
+VER-SPEC       ::= (Nat) | (Nat MINOR) 
 MINOR          ::= Nat       ; the specified revision or above
                  | (Nat Nat) ; a revision between the two specified numbers (inclusive)
                  | (= Nat)   ; exactly the revision specified
                  | (+ Nat)   ; the specified revision or above
                  | (- Nat)   ; the specified revision or below
-FILE-PATH      ::= string    ; the path to the given package in the repository
 PKG-NAME       ::= string
 OWNER-NAME     ::= string
 PATH           ::= string    ; the subdirectory path to the specified file within the package
@@ -167,6 +166,11 @@ files in the given directory and returns that file's name.  If the
 optional filename argument is provided, that filename will be used as
 the output file's name.
 
+> (unpack-planet-archive filename pathname) -> void
+
+Unpacks the PLaneT archive with the given filename, placing its contents
+into the given directory (creating that path if necessary).
+
 > (remove-pkg owner name major-version minor-version) -> void
 
 Removes the specified package from the local planet cache. Owner and
@@ -204,6 +208,23 @@ Returns the file system path to the file specified by the given quoted
 planet require specification. This function downloads and installs the
 specified package if necessary, but does not verify that the actual
 file within it actually exists. 
+
+> (this-package-version)       :: SYNTAX
+> (this-package-version-name)  :: SYNTAX
+> (this-package-version-owner) :: SYNTAX
+> (this-package-version-maj)   :: SYNTAX
+> (this-package-version-min)   :: SYNTAX
+
+Macros that expand into expressions that evaluate to information about
+the name, owner, and version number of the package in which they 
+appear. this-package-version returns a list consisting of a string
+naming the package's owner, a string naming the package, a number
+indicating the package major version and a number indicating the
+package minor version, or #f if the expression appears outside the
+context of a package. The others are just convenience macros that
+select out the relevant field, or return #f if the expression
+appears outside the context of a PLaneT package.
+
 
 _The PLaneT search order_
 -------------------------
@@ -316,6 +337,11 @@ of what development links are.)
 -u, --unassociate <owner> <pkg> <maj> <min>
 
 Remove any development links from the given package specifier.
+
+--unpack <plt-file> <path>
+
+Unpack the given PLaneT archive into the given path, which is 
+created if necessary.
 
 
 _Development links_

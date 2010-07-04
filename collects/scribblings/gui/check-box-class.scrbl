@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[check-box% object% (control<%>)]{
+@defclass/title[check-box% object% (control<%>)]{
 
 A check box is a labeled box which is either checked or unchecked.
 
@@ -53,15 +53,15 @@ Gets the state of the check box: @scheme[#t] if it is checked, @scheme[#f]
 
 }
 
-@defmethod[#:mode 'add 
-           (set-label [label (is-a?/c bitmap%)])
+@defmethod[#:mode override
+           (set-label [label (or/c label-string? (is-a?/c bitmap%))])
            void?]{
 
-Sets the bitmap label for a bitmap check box.
+The same as @xmethod[window<%> set-label] when @scheme[label] is a
+ string.
 
+Otherwise, sets the bitmap label for a bitmap check box.
 @bitmaplabeluseisbm[label] @|bitmapiforiglabel|
-
-
 
 }
 

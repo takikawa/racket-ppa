@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[bitmap% object% ()]{
+@defclass/title[bitmap% object% ()]{
 
 A @scheme[bitmap%] object is a pixel-based image, either
  monochrome or color.

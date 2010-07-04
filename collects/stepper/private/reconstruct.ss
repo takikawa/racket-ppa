@@ -191,7 +191,9 @@
                   [(#%top . id-stx)
                    (varref-skip-step? #`id-stx)]
                   [(#%app . terms)
-                   ; don't halt for proper applications of constructors
+                   (or
+                    (stepper-syntax-property expr 'stepper-dont-show-reduction)
+                    ; don't halt for proper applications of constructors
                    (let ([fun-val (lookup-binding mark-list (get-arg-var 0))])
                      (and (procedure? fun-val)
                           (procedure-arity-includes? 
@@ -205,7 +207,7 @@
                               ;(model-settings:special-function? 'vector fun-val)
                               (and (eq? fun-val void)
                                    (eq? (cdr (syntax->list (syntax terms))) null))
-                              (struct-constructor-procedure? fun-val))))]
+                              (struct-constructor-procedure? fun-val)))))]
                  [else #f])))))
   
   ;; find-special-value finds the value associated with the given name.  Applications of functions
@@ -529,7 +531,7 @@
                              lifting-indices)])
              (vector (reconstruct-completed-define exp vars (vals-getter) render-settings) #f))])
         (let ([exp (skipto/auto exp 'discard (lambda (exp) exp))])
-          (cond 
+          (cond
             [(stepper-syntax-property exp 'stepper-define-struct-hint)
              ;; the hint contains the original syntax
              (vector (stepper-syntax-property exp 'stepper-define-struct-hint) #t)]
@@ -537,7 +539,8 @@
              (vector
               (kernel:kernel-syntax-case exp #f
                 [(define-values vars-stx body)
-                 (reconstruct-completed-define exp (syntax->list #`vars-stx) (vals-getter) render-settings)]
+                 (or (stepper-syntax-property #'body 'stepper-render-completed-as)
+                     (reconstruct-completed-define exp (syntax->list #`vars-stx) (vals-getter) render-settings))]
                 [else
                  (let* ([recon-vals (map (lambda (val)
                                            (recon-value val render-settings))
@@ -730,23 +733,30 @@
                                                      [arg-vals (map (lambda (arg-temp) 
                                                                       (lookup-binding mark-list arg-temp))
                                                                     arg-temps)])
+                                                (let*-2vals ([(evaluated unevaluated) (split-list (lambda (x) (eq? (cadr x) *unevaluated*))
+                                                                                                  (zip sub-exprs arg-vals))]
+                                                             [rectified-evaluated (map (lx (recon-value _ render-settings)) (map cadr evaluated))])
                                                 (case (mark-label (car mark-list))
                                                   ((not-yet-called)
-                                                   (let*-2vals ([(evaluated unevaluated) (split-list (lambda (x) (eq? (cadr x) *unevaluated*))
-                                                                                                     (zip sub-exprs arg-vals))]
-                                                                [rectified-evaluated (map (lx (recon-value _ render-settings)) (map cadr evaluated))])
-                                                               (if (null? unevaluated)
-                                                                   #`(#%app . #,rectified-evaluated)
-                                                                   #`(#%app 
-                                                                      #,@rectified-evaluated
-                                                                      #,so-far 
-                                                                      #,@(map recon-source-current-marks (cdr (map car unevaluated)))))))
+                                                   (if (null? unevaluated)
+                                                       #`(#%app . #,rectified-evaluated)
+                                                       #`(#%app 
+                                                          #,@rectified-evaluated
+                                                          #,so-far 
+                                                          #,@(map recon-source-current-marks (cdr (map car unevaluated))))))
                                                   ((called)
-                                                   (if (eq? so-far nothing-so-far)
-                                                       (datum->syntax-object #'here `(,#'#%app ...)) ; in unannotated code
-                                                       (datum->syntax-object #'here `(,#'#%app ... ,so-far ...))))
+                                                   (unless (null? unevaluated)
+                                                     (error "stepper internal error: unevaluated args in called mark"))
+                                                   (stepper-syntax-property
+                                                    (if (eq? so-far nothing-so-far)
+                                                        (datum->syntax-object #'here `(,#'#%app ...)) ; in unannotated code
+                                                        (datum->syntax-object #'here `(,#'#%app ... ,so-far ...)))
+                                                    'stepper-evaled-args
+                                                    ;; store thunks of recon-values:
+                                                    (map (lx (lambda () (recon-value _ render-settings)))
+                                                         (map cadr evaluated))))
                                                   (else
-                                                   (error 'recon-inner "bad label (~v) in application mark in expr: ~a" (mark-label (car mark-list)) exp))))
+                                                   (error 'recon-inner "bad label (~v) in application mark in expr: ~a" (mark-label (car mark-list)) exp)))))
                                               exp)]
                                             
                                             ; define-struct 

@@ -86,6 +86,10 @@ stepper-hint :
  [ 'from-splice-box ] : expression was expanded from a scheme splice
 		        box (inside an xml box)
  [ 'comes-from-recur ] : expression was expanded from a 'recur'
+ [ 'comes-from-check-expect ] : expression was expanded from a 'check-expect'
+ comes-from-check-within 
+ comes-from-check-error
+ 
 
 stepper-define-type:
  this is attached to the right-hand sides of defines to indicate what
@@ -223,6 +227,20 @@ stepper-fake-exp :
   this expression does not occur directly in the source; reconstruct specially.
   used for begin.
 
+;; wrong name:
+args-of-call [ADDED BY RECONSTRUCTOR] :
+  this reconstructed (...) expression is the result of a call with these args.
+  used by the check-expect unwinder to figure out the expected values.
+
+stepper-no-retval-wrap:
+  don't annotate this with a return-values-wrap
+
+stepper-render-completed-as:
+  use this syntax object to represent the completed expression
+
+stepper-dont-show-reduction:
+  don't show the reduction of this application
+
 STEPPER-HINT COLLISIONS
 
  The major concern with the stepper-hint is that two of them may
@@ -248,3 +266,4 @@ collision can occur.
 2) the intermediate let* expands into the beginner let; both add a
 stepper-hint.  To resolve this, the expansion of let allows an existing
 stepper-hint to stand.
+

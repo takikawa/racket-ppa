@@ -2,6 +2,7 @@
   (require (lib "class.ss")
 	   (lib "class100.ss")
 	   (lib "etc.ss")
+           (lib "string.ss")
 	   (prefix wx: "kernel.ss")
 	   "const.ss"
 	   "check.ss"
@@ -40,11 +41,7 @@
 			 l))
 		   style)
 
-      (let* ([strings (let loop ([s message])
-			(let ([m (regexp-match #rx"([^\n]*)[\n](.*)" s)])
-			  (if m
-			      (cons (cadr m) (loop (caddr m)))
-			      (list s))))]
+      (let* ([strings (regexp-split #rx"\n" message)]
 	     [single? (and (< (length strings) 10) 
 			   (andmap (lambda (s) (< (string-length s) 60)) strings))]
 	     [f (make-object (class100 dialog% ()
@@ -115,7 +112,7 @@
 			[else (let ([p (new horizontal-pane% [parent f] [alignment '(center top)])])
 				(let ([icon-msg (make-object message% icon-id p)]
 				      [msg-pnl (new vertical-pane% [parent p])])
-				  (values (if single?
+				  (values (if (= 1 (length strings))
 					      (new horizontal-pane% 
 						   [parent msg-pnl]
 						   [alignment '(center top)]

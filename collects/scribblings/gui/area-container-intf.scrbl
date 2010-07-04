@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@definterface[area-container<%> (area<%>)]{
+@definterface/title[area-container<%> (area<%>)]{
 
 An @scheme[area-container<%>] is a container @scheme[area<%>].
 

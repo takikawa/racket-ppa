@@ -91,7 +91,7 @@
                               (this "his" "tis" "ths" "thi" "tihs" "thsi")
                               (instanceof "instancef" "instanceo" "intsanceof")
                               (if "fi")
-                              (else "lse" "ese" "els" "eles")
+                              (else "lse" "ese" "els" "eles" "elseif")
                               (return "eturn" "rturn" "reurn" "retrn" "retun" "retur" "reutrn" "retrun" "returns" "raturn")
                               (true "rue" "tue" "tre" "tru" "ture" "treu")
                               (false "flse" "fase" "fale" "fals" "flase" "fasle")
@@ -101,6 +101,7 @@
                                "mplements" "iplements" "impements" "implments" "impleents" "implemnts" "implemets" "implemens"
                                "implement")
                               (void "oid" "vid" "voi" "viod")
+                              (for "fo" "fore" "fro")
                               (super "uper" "sper" "supr" "supe" "supper")
                               (public "ublic" "pblic" "pulic" "pubic" "publc" "publi" "pubilc")
                               (private "rivate" "pivate" "prvate" "priate" "privte" "privae" "privat" "pravite")
@@ -218,10 +219,10 @@
       (choose (public private protected) "access modifier"))
     
     (define (global-mods base-mods)
-      (choice (list base-mods static) "modifier"))
+      (choose (base-mods static) "modifier"))
     
     (define (method-mods base-mods)
-      (choice (list base-mods abstract) "modifier"))
+      (choose (base-mods abstract) "modifier"))
  
     )
     
@@ -265,18 +266,6 @@
     (define (comma-sep term name)
       (sequence (term (repeat (sequence (COMMA term) id))) id (string-append "a list of " name)))
     
-    (define (variable-declaration type expr share-type? name)
-      (let* ([f (choose (IDENTIFIER (sequence ((^ IDENTIFIER) EQUAL expr) id)) (string-append name " declaration"))]
-             [s&e (sequence (type (comma-sep f name) SEMI_COLON) id (string-append name " definition"))]
-             [s (sequence (type (comma-sep IDENTIFIER name) SEMI_COLON) id (string-append name " definition"))]
-             [e (sequence (type (^ IDENTIFIER) EQUAL expr SEMI_COLON) id (string-append name " definition"))]
-             [base (sequence (type (^ IDENTIFIER) SEMI_COLON) id (string-append name " definition"))])
-        (cond
-          [(and expr share-type?) s&e]
-          [share-type? s]
-          [expr (choose (e base) (string-append name " definition"))]
-          [else base])))
-    
     (define name
       (sequence (IDENTIFIER (repeat (sequence (PERIOD IDENTIFIER) id))) id "name"))
     
@@ -289,17 +278,23 @@
     (define name IDENTIFIER)
     (define identifier IDENTIFIER)
     
-    (define (variable-declaration type expr share-type? name)
-      (let* ([f (choose (identifier (sequence ((^ identifier) EQUAL expr) id)) (string-append name " declaration"))]
-             [s&e (sequence (type (comma-sep f name) SEMI_COLON) id (string-append name " definition"))]
-             [s (sequence (type (comma-sep identifier name) SEMI_COLON) id (string-append name " definition"))]
-             [e (sequence (type (^ identifier) EQUAL expr SEMI_COLON) id (string-append name " definition"))]
-             [base (sequence (type (^ identifier) SEMI_COLON) id (string-append name " definition"))])
+    (define (variable-declaration type expr share-type? end? name)
+      (let* ([var-name (string-append name " declaration")]
+             [init (sequence ((^ identifier) EQUAL expr) id var-name)]
+             [f (choose (identifier init) var-name)]
+             [s&e (sequence (type (comma-sep f name)) id var-name)]
+             [s (sequence (type (comma-sep identifier name)) id var-name)]
+             [e (sequence (type init) id var-name)]
+             [base (sequence (type (^ identifier)) id var-name)]
+             [decl
+              (cond
+                [(and expr share-type?) (choose (s&e e base) var-name)]
+                [share-type? s]
+                [expr (choose (e base) var-name)]
+                [else base])])
         (cond
-          [(and expr share-type?) s&e]
-          [share-type? s]
-          [expr (choose (e base) (string-append name " definition"))]
-          [else base])))
+          [end? (sequence (decl SEMI_COLON) id (string-append name " definition"))]
+          [else decl])))
     )
   
   (define-unit expressions@ 
@@ -354,11 +349,11 @@
     (define (array-init-maker contents)
       (sequence (O_BRACE (comma-sep contents "array elements") C_BRACE) id "array initializations"))
     
-    (define (array-init type-name)
-      (letrec ([base-init (array-init-maker expression)]
+    (define array-init 
+      (letrec ([base-init (array-init-maker (eta expression))]
                [simple-init (array-init-maker (choose (expression base-init (eta init)) "array initializations"))]
-               [init (array-init-maker (choose (expression simple-init) "array initializations"))])
-        (sequence (new type-name init) "array initialization")))
+               [init (array-init-maker (choose (expression simple-init) "array initialization"))])
+        init #;(sequence (new type-name init) "array initialization")))
     
     (define (binary-expression-end op)
       (sequence (op expression) id "binary expression"))
@@ -422,8 +417,8 @@
       (cond
         [else?
          (choose ((sequence (ifT O_PAREN expression C_PAREN stmt elseT stmt) id)
-                  (sequence (ifT O_PAREN expression C_PAREN stmt) id)) "if")]
-        [else (sequence (ifT O_PAREN expression C_PAREN stmt elseT stmt) id "if")]))
+                  (sequence (ifT O_PAREN expression C_PAREN stmt) id)) "if statement")]
+        [else (sequence (ifT O_PAREN expression C_PAREN stmt elseT stmt) id "if statement")]))
     
     (define (return-s opt?)
       (cond
@@ -502,13 +497,14 @@
 
     (define (make-field mods type expr share-types?)
       (cond 
-        [mods (sequence ((repeat-greedy mods) (variable-declaration type expr share-types? "field"))
+        [mods (sequence ((repeat-greedy mods) (variable-declaration type expr share-types? #t "field"))
                         id "field definition")]
-        [else (variable-declaration type expr share-types? "field")]))  
+        [else (variable-declaration type expr share-types? #t "field")]))  
     
-    (define arg (sequence ((value+name-type prim-type) identifier) id "argument"))
+    (define (arg type)
+      (sequence (type identifier) id "argument"))
     
-    (define args (comma-sep arg "parameters"))
+    (define (args type) (comma-sep (arg type) "parameters"))
     
     ;method-signature: {U parser #f} [U parser #f] [U parser #f] bool bool parser -> parser
     (define (method-signature m ret a t? n)
@@ -532,10 +528,10 @@
     (define (make-method signature statement)
       (sequence ((^ signature) O_BRACE statement C_BRACE) id "method definition"))
     
-    (define (make-constructor mod body)
+    (define (make-constructor mod body type)
       (let ([ctor (choose
                    ((sequence ((^ identifier) O_PAREN C_PAREN O_BRACE body C_BRACE) id)
-                    (sequence ((^ identifier) O_PAREN args C_PAREN O_BRACE body C_BRACE) id))
+                    (sequence ((^ identifier) O_PAREN (args type) C_PAREN O_BRACE body C_BRACE) id))
                    "constructor definition")])
         (cond 
           [mod (sequence ((repeat mod) ctor) id "constructor definition")]
@@ -602,7 +598,7 @@
     (export top-forms^)
   
     (define (top-member mems)
-      (choice mems "program body"))
+      (choice mems "class or interface"))
     
     ;Note -- should enfore name to be identifier.identifier instead of name
     (define import-dec
@@ -613,12 +609,12 @@
         (sequence (import name SEMI_COLON) id)) "import declaration")))
     
     (define (make-program package import body)
-      (let ([p&i (sequence (package import body) id "program")]
-            [p (sequence (package body) id "program")]
+      (let ([p&i (sequence (package import body) id "package program")]
+            [p (sequence (package body) id "package program")]
             [i (sequence (import body) id "program")])
         (cond
           [(and package import)
-           (choice (list p&i p i body) "program")]
+           (choice (list p&i i ) "program")]
           [package
            (choice (list p body) "program")]
           [import
@@ -662,16 +658,16 @@
       (sequence (unique-base (repeat-greedy unique-end)) id "expression"))
     
     (define statement
-      (choose ((if-s (block #f) #f) (return-s #f)) "statement"))
+      (choose ((return-s #f) (if-s (block #f) #f)) "statement"))
     
     (define field (make-field #f (value+name-type prim-type) expression #f))
     
     (define method-sig
-      (method-signature #f (value+name-type prim-type) args #f identifier))
+      (method-signature #f (value+name-type prim-type) (args (value+name-type prim-type)) #f identifier))
     
     (define method (make-method method-sig statement))
     
-    (define constructor (make-constructor #f (repeat-greedy init)))
+    (define constructor (make-constructor #f (repeat-greedy init) (value+name-type prim-type)))
     
     (define interface (interface-def #f #f 
                                      (repeat-greedy 
@@ -703,7 +699,7 @@
                identifier
                new-class
                simple-method-call
-               (sequence (O_PAREN (eta expression) C_PAREN) id)
+               (sequence (O_PAREN (eta expression) C_PAREN) id "parened expression")
                (sequence (! (eta expression)) id "conditional expression")
                (sequence (MINUS (eta expression)) id "negation expression")
                (cast (value+name-type prim-type))
@@ -722,6 +718,7 @@
     (define stmt-expr
       (choose (#;new-class
                super-call
+               simple-method-call
                (sequence (unique-base (repeat unique-end) method-call-end) id "method call")
                (assignment 
                 (choose (identifier
@@ -731,17 +728,17 @@
     
     (define (statement-c interact?)
       (if interact?
-          (choose ((if-s (block #t) #f)
-                   (return-s #t)
+          (choose ((return-s #t)
+                   (if-s (block #t) #f)
                    (assignment 
                     (choose (identifier
                              (sequence (unique-base (repeat unique-end) field-access-end) id))
                             "assignee") EQUAL)
                     (block #t)) "statement")
-          (choose ((if-s (block #t) #f)
-                   (return-s #t)
+          (choose ((return-s #t)
+                   (if-s (block #t) #f)
                    (block #t)
-                   (variable-declaration (value+name-type prim-type) expression #f "local variable")                   
+                   (variable-declaration (value+name-type prim-type) expression #f #t "local variable")                   
                    (sequence (stmt-expr SEMI_COLON) id)) "statement")))
     
     (define statement (statement-c #f))
@@ -749,9 +746,11 @@
     (define field (make-field #f (value+name-type prim-type) expression #t))
     
     (define method-sig-no-abs
-      (method-signature #f (method-type (value+name-type prim-type)) args #f identifier))
+      (method-signature #f (method-type (value+name-type prim-type)) 
+                        (args (value+name-type prim-type)) #f identifier))
     (define method-sig-abs
-      (method-signature tok:abstract (method-type (value+name-type prim-type)) args #f identifier))
+      (method-signature tok:abstract (method-type (value+name-type prim-type)) 
+                        (args (value+name-type prim-type)) #f identifier))
     
     (define method
       (choose ((make-method method-sig-no-abs (repeat-greedy statement))
@@ -760,7 +759,8 @@
     (define constructor
       (make-constructor #f
                         (choose ((sequence (super-ctor-call (repeat-greedy statement)) id)
-                                 (repeat-greedy statement)) "constructor body")))
+                                 (repeat-greedy statement)) "constructor body")
+                        (value+name-type prim-type)))
     
     (define interface 
       (interface-def
@@ -780,8 +780,8 @@
     
     (define interact
       (choose (field 
-               (if-s (block #t) #f)
                (return-s #t)
+               (if-s (block #t) #f)
                (assignment 
                 (choose (identifier
                          (sequence (unique-base (repeat unique-end) field-access-end) id))
@@ -824,6 +824,7 @@
     (define stmt-expr
       (choose (#;new-class
                super-call
+               simple-method-call
                (sequence (unique-base (repeat unique-end) method-call-end) id "method call")
                (assignment 
                 (choose (identifier
@@ -833,18 +834,18 @@
     
     (define (statement-c interact?)
       (if (not interact?)
-          (choose ((if-s (block #t) #f)
-                   (return-s #t)
-                   (variable-declaration (value+name-type prim-type) expression #f "local variable")
+          (choose ((return-s #t)
+                   (if-s statement #f)
+                   (variable-declaration (value+name-type prim-type) expression #f #t "local variable")
                    (block #t)
-                   (sequence (stmt-expr SEMI_COLON) id)) "statement")
-          (choose ((if-s (block #t) #f)
-                   (return-s #t)
                    (assignment 
                     (choose (identifier
                              (sequence (unique-base (repeat unique-end) field-access-end) id))
                             "assignee")
                     EQUAL)
+                   (sequence (stmt-expr SEMI_COLON) id)) "statement")
+          (choose ((return-s #t)
+                   (if-s statement #f)
                    (block #t)) "statement")))
     
     (define statement (statement-c #f))
@@ -852,20 +853,23 @@
     (define field (make-field access-mods (value+name-type prim-type) expression #t))
         
     (define method-sig-no-abs
-      (method-signature access-mods (method-type (value+name-type prim-type)) args #f identifier))
+      (method-signature access-mods (method-type (value+name-type prim-type)) 
+                        (args (value+name-type prim-type)) #f identifier))
     (define method-sig-abs
       (method-signature (method-mods access-mods) 
-                        (method-type (value+name-type prim-type)) args #f identifier))
+                        (method-type (value+name-type prim-type)) 
+                        (args (value+name-type prim-type)) #f identifier))
         
     (define method
-      (choose ((make-method method-sig-no-abs statement)
+      (choose ((make-method method-sig-no-abs (repeat-greedy statement))
                (method-header method-sig-abs)) "method definition"))
 
     (define constructor
       (make-constructor access-mods
                         (choose ((sequence (super-ctor-call (repeat-greedy statement)) id)
                                  (sequence (this-call (repeat-greedy statement)) id)
-                                 (repeat-greedy statement)) "constructor body")))
+                                 (repeat-greedy statement)) "constructor body")
+                        (value+name-type prim-type)))
     
     (define interface 
       (interface-def
@@ -924,6 +928,7 @@
     (define stmt-expr
       (choose (new-class
                super-call
+               simple-method-call
                (sequence (unique-base (repeat unique-end) method-call-end) id "method call")
                (assignment 
                 (choose (identifier
@@ -938,12 +943,12 @@
     
     (define (statement-c interact?)
       (if interact?
-          (choose ((if-s #t (eta statement))
-                   (return-s #t)
+          (choose ((return-s #t)
+                   (if-s statement #t)
                    (block #t)
-                   (for-l (choose ((variable-declaration (array-type (value+name-type prim-type)) expression #t "for loop variable")
+                   (for-l (choose ((variable-declaration (array-type (value+name-type prim-type)) expression #t #f "for loop variable")
                                    (comma-sep stmt-expr "initializations")) "for loop initialization") 
-                          #t #t
+                          #t #f
                           (comma-sep stmt-expr "for loop increments") #t (block #t))
                    (while-l (block #t))
                    (do-while (block #t))
@@ -956,14 +961,15 @@
                             "asignee")
                     assignment-ops)
                    ) "statement")
-          (choose ((if-s #t (eta statement))
-                   (return-s #t)
-                   (variable-declaration (array-type (value+name-type prim-type)) expression #t "local variable")
+          (choose ((return-s #t)
+                   (if-s statement #t)
+                   (variable-declaration (array-type (value+name-type prim-type)) 
+                                         (choose (expression array-init) "variable initialization") #t #t "local variable")
                    (block #t)
                    (sequence (stmt-expr SEMI_COLON) id)
-                   (for-l (choose ((variable-declaration (array-type (value+name-type prim-type)) expression #t "for loop variable")
+                   (for-l (choose ((variable-declaration (array-type (value+name-type prim-type)) expression #t #f "for loop variable")
                                    (comma-sep stmt-expr "initializations")) "for loop initialization") 
-                          #t #t
+                          #t #f
                           (comma-sep stmt-expr "for loop increments") #t (block #t))
                    (while-l (block #t))
                    (do-while (block #t))
@@ -972,31 +978,37 @@
     
     (define statement (statement-c #f))
     
-    (define field (make-field (global-mods access-mods) (array-type (value+name-type prim-type)) expression #t))
+    (define field (make-field (global-mods access-mods) 
+                              (array-type (value+name-type prim-type)) 
+                              (choose (expression array-init) "field initializer") #t))
     
     (define method-sig-no-abs
       (method-signature (global-mods access-mods) 
-                        (method-type (array-type (value+name-type prim-type))) args #f IDENTIFIER))
+                        (method-type (array-type (value+name-type prim-type))) 
+                        (args (array-type (value+name-type prim-type))) #f IDENTIFIER))
     (define method-sig-abs
-      (method-signature (method-mods (global-mods access-mods)) 
-                        (method-type (array-type (value+name-type prim-type))) args #f IDENTIFIER))
+      (method-signature (method-mods access-mods)
+                        (method-type (array-type (value+name-type prim-type))) 
+                        (args (array-type (value+name-type prim-type))) #f IDENTIFIER))
     
     (define method
-      (choose ((make-method method-sig-no-abs statement)
+      (choose ((make-method method-sig-no-abs (repeat-greedy statement))
                (method-header method-sig-abs)) "method definition"))
     
     (define constructor
       (make-constructor access-mods
                    (choose ((sequence (super-ctor-call (repeat-greedy statement)) id)
                             (sequence (this-call (repeat-greedy statement)) id)
-                            (repeat-greedy statement)) "constructor body")))
+                            (repeat-greedy statement)) "constructor body")
+                   (array-type (value+name-type prim-type))))
     
     (define interface 
       (interface-def
        #f
        (sequence (tok:extends (comma-sep IDENTIFIER "interfaces")) id "extends")
-       (repeat-greedy (choose (method-sig-no-abs
-                        (make-field (global-mods access-mods) (value+name-type prim-type) expression #t))
+       (repeat-greedy (choose ((sequence (method-sig-no-abs SEMI_COLON) id "method header")
+                         (make-field (global-mods access-mods) 
+                                     (array-type (value+name-type prim-type)) expression #t))
                        "interface member definition"))))
     
     (define class
@@ -1007,8 +1019,8 @@
     
     (define program
       (make-program (sequence (tok:package name SEMI_COLON) id "package specification")
-               (repeat-greedy import-dec)
-               (repeat-greedy (top-member (list class interface)))))
+                    (repeat-greedy import-dec)
+                    (repeat-greedy (top-member (list class interface)))))
     
     (define interact 
       (choose (field expression (statement-c #t)) "interactive program"))

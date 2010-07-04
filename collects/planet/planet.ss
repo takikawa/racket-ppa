@@ -105,6 +105,11 @@ PLANNED FEATURES:
        owner pkg maj min
        "Get a URL for the given package"
        (set! actions (cons (lambda () (get-download-url owner pkg maj min)) actions)))
+      
+      (("--unpack")
+       plt-file target
+       "Unpack the contents of the given package into the given directory without installing"
+       (set! actions (cons (lambda () (do-unpack plt-file target)) actions)))
                                        
       ;; unimplemented so far:
       #;(("-u" "--unlink")
@@ -174,16 +179,16 @@ PLANNED FEATURES:
           (min (string->number minstr)))
       (unless (and (integer? maj) (integer? min) (> maj 0) (>= min 0))
         (fail "Invalid major/minor version"))
-      (unless (remove-pkg owner pkg maj min)
-        (fail "Could not find package"))))
+      (with-handlers ([exn:fail:planet? (λ (e) (fail (exn-message e)))]) 
+        (remove-pkg owner pkg maj min))))
   
   (define (erase owner pkg majstr minstr)
     (let ((maj (string->number majstr))
           (min (string->number minstr)))
       (unless (and (integer? maj) (integer? min) (> maj 0) (>= min 0))
         (fail "Invalid major/minor version"))
-      (unless (erase-pkg owner pkg maj min)
-        (fail "Could not find package"))))
+      (with-handlers ([exn:fail:planet? (λ (e) (fail (exn-message e)))])
+        (erase-pkg owner pkg maj min))))
         
   (define (show-installed-packages)
     (let ([normal-packages (get-installed-planet-archives)]
@@ -252,6 +257,11 @@ PLANNED FEATURES:
     (let ([fps (params->full-pkg-spec ownerstr pkgstr majstr minstr)])
       (printf "~a\n" (url->string (pkg->download-url fps)))))
   
+  (define (do-unpack plt-file target)
+    (unless (file-exists? plt-file)
+      (fail (format "The specified file (~a) does not exist" plt-file))) 
+    (let ([file (normalize-path plt-file)])
+      (unpack-planet-archive file target)))
   
   ;; ------------------------------------------------------------
   ;; Utility

@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[menu-item% object% (selectable-menu-item<%>)]{
+@defclass/title[menu-item% object% (selectable-menu-item<%>)]{
 
 A @scheme[menu-item%] is a plain string-labelled menu item. Its
  parent must be a @scheme[menu%] or @scheme[popup-menu%]. When the

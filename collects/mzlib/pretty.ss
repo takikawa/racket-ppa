@@ -231,6 +231,7 @@
    (define pretty-display (make-pretty-print #t))
 
    (define-struct mark (str def))
+   (define-struct hide (val))
 
    (define (make-tentative-output-port pport width esc)
      (let* ([content null]
@@ -641,8 +642,11 @@
 			     (out ")")]))))))))
 	     (out "()")))
 
-       (pre-print pport obj)
-       (if (and depth (negative? depth))
+       (unless (hide? obj)
+         (pre-print pport obj))
+       (if (and depth 
+                (negative? depth)
+                (not (hide? obj)))
 	   (out "...")
 	   
 	   (cond 
@@ -702,9 +706,13 @@
 		    (out (if (hash-table? obj 'equal)
                              "#hash"
                              "#hasheq"))
-		    (wr-lst (hash-table-map obj cons) #f depth)))
+		    (wr-lst (hash-table-map obj (lambda (k v)
+                                                  (cons k (make-hide v))))
+                            #f depth)))
 		 (parameterize ([print-hash-table #f])
 		   ((if display? orig-display orig-write) obj pport)))]
+            [(hide? obj)
+             (wr* pport (hide-val obj) depth display?)]
 	    [(boolean? obj)
 	     (out (if obj "#t" "#f"))]
 	    [(number? obj)
@@ -720,7 +728,8 @@
 	     (out ".")]
 	    [else
 	     ((if display? orig-display orig-write) obj pport)]))
-       (post-print pport obj))
+       (unless (hide? obj)
+         (post-print pport obj)))
 
      ;; ------------------------------------------------------------
      ;; pp: write on (potentially) multiple lines
@@ -976,7 +985,7 @@
 
        (define (pp-let expr extra depth)
 	 (let* ((rest (cdr expr))
-		(named? (and (pair? rest) (symbol? (car rest)))))
+		(named? (and (pair? rest) (symbol? (do-remap (car rest))))))
 	   (pp-general expr extra named? pp-expr-list #f pp-expr depth)))
 
        (define (pp-begin expr extra depth)
@@ -992,7 +1001,7 @@
        (define max-call-head-width 5)
 
        (define (style head)
-	 (case (look-in-style-table head)
+         (case (look-in-style-table head)
 	   ((lambda λ define define-macro define-syntax
 		    syntax-rules
 		    shared
@@ -1040,17 +1049,19 @@
        ((printing-port-print-line pport) #f col width)))
   
   (define (look-in-style-table raw-head)
-    (let ([head 
-           (cond
-             [((pretty-print-remap-stylable) raw-head)
-              => 
-              values]
-             [else raw-head])])
+    (let ([head (do-remap raw-head)])
       (or (hash-table-get (pretty-print-style-table-hash
                            (pretty-print-current-style-table))
                           head
                           #f)
           head)))
+  
+  (define (do-remap raw-head)
+    (cond
+      [((pretty-print-remap-stylable) raw-head)
+       => 
+       values]
+      [else raw-head]))
    
    (define (read-macro? l)
      (define (length1? l) (and (pair? l) (null? (cdr l))))

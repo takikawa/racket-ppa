@@ -153,7 +153,7 @@ wxWindowDC::wxWindowDC(void) : wxDC()
     }
 
     current_background_color->CopyFrom(wxWHITE);
-    current_brush = wxTRANSPARENT_BRUSH;
+    current_brush = wxWHITE_BRUSH;
     current_brush->Lock(1);
     current_pen = wxBLACK_PEN;
     current_pen->Lock(1);
@@ -1153,7 +1153,9 @@ void wxWindowDC::Clear(void)
     r = c->Red();
     g = c->Green();
     b = c->Blue();
-    cairo_set_rgb_color(CAIRO_DEV, r / 255.0, g / 255.0, b / 255.0);    
+    cairo_set_source_rgba(CAIRO_DEV, 
+                          r / 255.0, g / 255.0, b / 255.0,
+                          current_alpha);
 
     cairo_new_path(CAIRO_DEV);
     cairo_move_to(CAIRO_DEV, 0, 0);
@@ -2318,14 +2320,19 @@ void wxWindowDC::DrawText(char *orig_text, double x, double y,
     int xasc;
     int v;
     XftColor col;
+    /* Note: Xft wants colors with pre-multiplied alpha,
+       according to my experiments. */
     col.pixel = current_text_fg->GetPixel();
     v = current_text_fg->Red();
+    v = (int)(v * current_alpha);
     col.color.red = (v << 8) | v;
     v = current_text_fg->Green();
+    v = (int)(v * current_alpha);
     col.color.green = (v << 8) | v;
     v = current_text_fg->Blue();
+    v = (int)(v * current_alpha);
     col.color.blue = (v << 8) | v;
-    col.color.alpha = 0xFFFF;
+    col.color.alpha = (int)(current_alpha * 0xFFFF);
 
     if ((angle == 0.0) && (current_text_bgmode == wxSOLID)) {
       /* For B & W target, XftDrawRect doesn't seem to work right. */
@@ -2335,12 +2342,15 @@ void wxWindowDC::DrawText(char *orig_text, double x, double y,
 	XftColor bg;
 	bg.pixel = current_text_bg->GetPixel();
 	v = current_text_bg->Red();
+	v = (int)(v * current_alpha);
 	bg.color.red = (v << 8) | v;
 	v = current_text_bg->Green();
+	v = (int)(v * current_alpha);
 	bg.color.green = (v << 8) | v;
 	v = current_text_bg->Blue();
+	v = (int)(v * current_alpha);
 	bg.color.blue = (v << 8) | v;
-	bg.color.alpha = 0xFFFF;
+	bg.color.alpha = (int)(current_alpha * 0xFFFF);
 	XftDrawRect(XFTDRAW, &bg, dev_x, dev_y, rw, xfontinfo->ascent + xfontinfo->descent);
       } else {
 	unsigned long pixel;
@@ -3702,6 +3712,7 @@ void wxWindowDC::InitCairoDev()
     cairo_translate(CAIRO_DEV, device_origin_x, device_origin_y);
     cairo_scale(CAIRO_DEV, scale_x, scale_y);
   }
+  
 }
 
 void wxWindowDC::ReleaseCairoDev()
@@ -3732,7 +3743,9 @@ Bool wxWindowDC::SetCairoPen()
     r = c->Red();
     g = c->Green();
     b = c->Blue();
-    cairo_set_rgb_color(CAIRO_DEV, r / 255.0, g / 255.0, b / 255.0);
+    cairo_set_source_rgba(CAIRO_DEV, 
+                          r / 255.0, g / 255.0, b / 255.0,
+                          current_alpha);
 
     pw = current_pen->GetWidthF();
     if (AlignSmoothing()) {
@@ -3800,7 +3813,9 @@ Bool wxWindowDC::SetCairoBrush()
     r = c->Red();
     g = c->Green();
     b = c->Blue();
-    cairo_set_rgb_color(CAIRO_DEV, r / 255.0, g / 255.0, b / 255.0);
+    cairo_set_source_rgba(CAIRO_DEV, 
+                          r / 255.0, g / 255.0, b / 255.0,
+                          current_alpha);
     return TRUE;
   } else
     return FALSE;
@@ -3814,6 +3829,11 @@ void wxWindowDC::SetAntiAlias(int v)
   }
     
   wxDC::SetAntiAlias(v);
+}
+
+void wxWindowDC::SetAlpha(double d)
+{
+  wxDC::SetAlpha(d);
 }
 
 Bool wxWindowDC::AlignSmoothing()

@@ -298,7 +298,7 @@ please adhere to these guidelines:
  (plt:hd:help-desk-about-string
   "Help Desk is a complete source of information about PLT software, including DrScheme, MzScheme, and MrEd.\n\nVersion ~a\nCopyright (c) ~a-~a PLT")
  (plt:hd:help-on-help "Help on Help")
- (plt:hd:help-on-help-details "For help on using Help Desk, follow the `How to use Help Desk' link on Help Desk's home page. (To get to the home page if you're not already there, click the `Home' button at the top of the Help Desk window.)")
+ (plt:hd:help-on-help-details "For help on using Help Desk, follow the first link `Help Desk' on Help Desk's home page. (To get to the home page if you're not already there, click the `Home' button at the top of the Help Desk window.)")
   (reload "Reload") ;; refresh the page in a web browser
   (plt:hd:ask-about-separate-browser
    "You have selected a link to content from the world-wide web. Would you like to view it in the Help Desk browser, or would you like to use a separate browser program to view it?")
@@ -383,6 +383,7 @@ please adhere to these guidelines:
  (preferences "Preferences")
  (error-saving-preferences "Error saving preferences: ~a")
  (error-saving-preferences-title "Error saving preferences")
+ (steal-the-lock-and-retry "Steal the lock && retry") ;; in the preferences error dialog; this happens when the lockfile exists (after 3 pref writes). 
  (error-reading-preferences "Error reading preferences")
  (prefs-file-locked "The preferences file is locked (because the file ~a exists), so your preference change could not be saved. Cancel preference change?")
  (try-again "Try again") ;; button label
@@ -640,6 +641,9 @@ please adhere to these guidelines:
  (replace-and-find-again-info "Replace the current text and search for the same string as before")
  (replace-and-find-again-menu-item "Replace && Find Again")
 
+  (complete-word "Complete Word") ; the complete word menu item in the edit menu
+  (no-completions "... no completions available") ; shows up in the completions menu when there are no completions (in italics)
+  
  (preferences-info "Configure your preferences")
  (preferences-menu-item "Preferences...")
 
@@ -1186,8 +1190,7 @@ please adhere to these guidelines:
  (stepper-program-window-closed "WARNING: The program window is gone.")
 
  (stepper-name "Stepper")
- (stepper-language-level-message
-  "The language level is set to \"~a\". Currently, the stepper works only for the \"~a\" through the \"~a\" language levels.")
+ (stepper-language-level-message "The stepper does not work for language \"~a\".")
  (stepper-button-label "Step")
  (stepper-home "Home")
  (stepper-previous-application "|< Application")

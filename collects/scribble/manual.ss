@@ -8,8 +8,11 @@
            (lib "string.ss")
            (lib "list.ss")
            (lib "class.ss")
-           (lib "stxparam.ss"))
+           (lib "stxparam.ss")
+           (lib "serialize.ss"))
   (require-for-syntax (lib "stxparam.ss"))
+  (require-for-label (lib "lang.ss" "big")
+                     (lib "class.ss"))
 
   (provide (all-from "basic.ss"))
 
@@ -50,10 +53,24 @@
   (define (to-element/id s)
     (make-element "schemesymbol" (list (to-element/no-color s))))
 
-  (define (keep-s-expr ctx s v) 
+  (define-syntax (keep-s-expr stx)
+    (syntax-case stx ()
+      [(_ ctx s srcloc)
+       (let ([sv (syntax-e #'s)])
+         (if (or (number? sv)
+                 (boolean? sv)
+                 (and (pair? sv)
+                      (identifier? (car sv))
+                      (module-identifier=? #'cons (car sv))))
+             ;; We know that the context is irrelvant
+             #'s
+             ;; Context may be relevant:
+             #'(*keep-s-expr s ctx)))]))
+  (define (*keep-s-expr s ctx)
     (if (symbol? s)
         (make-just-context s ctx)
         s))
+
   (define (add-sq-prop s name val)
     (if (eq? name 'paren-shape)
         (make-shaped-parens s val)
@@ -158,9 +175,9 @@
   (define (exec . str)
     (make-element 'tt (decode-content str)))
   (define (Flag . str)
-    (make-element 'tt (cons "-" (decode-content str))))
+    (make-element 'no-break (list (make-element 'tt (cons "-" (decode-content str))))))
   (define (DFlag . str)
-    (make-element 'tt (cons "--" (decode-content str))))
+    (make-element 'no-break (list (make-element 'tt (cons "--" (decode-content str))))))
   (define (envvar . str)
     (make-element 'tt (decode-content str)))
   (define (indexed-envvar . str)
@@ -198,16 +215,19 @@
        (elem (method a b) " in " (scheme a))]))
 
   (define (*method sym id)
-    (let ([tag (format "~a::~a"
-                       (register-scheme-definition id)
-                       sym)])
-      (make-element
-       "schemesymbol"
-       (list (make-link-element
-              "schemevaluelink"
-              (list (symbol->string sym))
-              tag)))))
+    (**method sym (register-scheme-definition id #t)))
 
+  (define (**method sym tag)
+    (make-element
+     "schemesymbol"
+     (list (make-link-element
+            "schemevaluelink"
+            (list (symbol->string sym))
+            (method-tag tag sym)))))
+
+  (define (method-tag vtag sym)
+    (list 'meth
+          (format "~a::~a" (cadr vtag) sym)))
 
   ;; ----------------------------------------
 
@@ -222,7 +242,7 @@
 
   (provide deftech tech techlink)
 
-  (define (*tech make-elem style s)
+  (define (*tech make-elem style doc s)
     (let* ([c (decode-content s)]
            [s (regexp-replace* #px"[-\\s]+" 
                                (regexp-replace 
@@ -235,32 +255,60 @@
                                " ")])
       (make-elem style
                  c
-                 (format "tech-term:~a" s))))
+                 (list 'tech (doc-prefix doc s)))))
 
   (define (deftech . s)
     (let* ([e (apply defterm s)]
-           [t (*tech make-target-element #f (list e))])
+           [t (*tech make-target-element #f #f (list e))])
       (make-index-element #f
                           (list t)
                           (target-element-tag t)
                           (list (element->string e))
                           (list e))))
 
-  (define (tech . s)
-    (*tech make-link-element "techlink" s))
+  (define (tech #:doc [doc #f] . s)
+    (*tech make-link-element "techlink" doc s))
 
-  (define (techlink . s)
-    (*tech make-link-element #f s))
+  (define (techlink #:doc [doc #f] . s)
+    (*tech make-link-element #f doc s))
 
   ;; ----------------------------------------
 
-  (provide defproc defproc* defstruct defthing defparam defboolparam
+  (provide declare-exporting
+           defproc defproc* defstruct defthing defparam defboolparam
            defform defform* defform/subs defform*/subs defform/none
            defidform
            specform specform/subs 
            specsubform specsubform/subs specspecsubform specspecsubform/subs specsubform/inline
            schemegrammar schemegrammar*
            var svar void-const undefined-const)
+
+  (define-syntax declare-exporting
+    (syntax-rules ()
+      [(_ lib ...) (*declare-exporting '(lib ...))]))
+
+  (define (*declare-exporting libs)
+    (make-part-collect-decl
+     (make-collect-element #f
+                           null
+                           (lambda (ri)
+                             (collect-put! ri '(exporting-libraries #f)libs)))))
+
+  (define-syntax (quote-syntax/loc stx)
+    (syntax-case stx ()
+      [(_ id) 
+       (with-syntax ([loc
+                      (let ([s #'id])
+                        (list (syntax-source s)
+                              (syntax-line s)
+                              (syntax-column s)
+                              (syntax-position s)
+                              (syntax-span s)))])
+         #'(let ([s (quote-syntax id)])
+             (datum->syntax-object s
+                                   (syntax-e s)
+                                   'loc
+                                   s)))]))
 
   (define void-const
     (schemeresultfont "#<void>"))
@@ -304,13 +352,13 @@
     (syntax-rules ()
       [(_ (id arg ...) result desc ...)
        (defproc* [[(id arg ...) result]] desc ...)]))
-  (define-syntax defproc* 
+  (define-syntax defproc*
     (syntax-rules ()
       [(_ [[(id arg ...) result] ...] desc ...)
        (defproc* #:mode procedure #:within #f [[(id arg ...) result] ...] desc ...)]
       [(_ #:mode m #:within cl [[(id arg ...) result] ...] desc ...)
-       (*defproc 'm (quote-syntax cl)
-                 (list (quote-syntax id) ...)
+       (*defproc 'm (quote-syntax/loc cl)
+                 (list (quote-syntax/loc id) ...)
                  '[(id arg ...) ...] 
                  (list (list (lambda () (arg-contract arg)) ...) ...)
                  (list (lambda () (schemeblock0 result)) ...)
@@ -328,9 +376,9 @@
   (define-syntax **defstruct
     (syntax-rules ()
       [(_ name ([field field-contract] ...) immutable? transparent? desc ...)
-       (*defstruct (quote-syntax name) 'name 
+       (*defstruct (quote-syntax/loc name) 'name 
                    '([field field-contract] ...) (list (lambda () (schemeblock0 field-contract)) ...)
-                   #t #t (lambda () (list desc ...)))]))
+                   immutable? transparent? (lambda () (list desc ...)))]))
   (define-syntax (defform*/subs stx)
     (syntax-case stx ()
       [(_ #:literals (lit ...) [spec spec1 ...] ([non-term-id non-term-form ...] ...) desc ...)
@@ -347,7 +395,7 @@
                      [spec-id
                       (syntax-case #'spec ()
                         [(name . rest) #'name])])
-         #'(*defforms (quote-syntax spec-id) '(lit ...)
+         #'(*defforms (quote-syntax/loc spec-id) '(lit ...)
                       '(spec spec1 ...) 
                       (list (lambda (x) (schemeblock0 new-spec))
                             (lambda (ignored) (schemeblock0 spec1)) ...)
@@ -381,7 +429,7 @@
   (define-syntax (defidform stx)
     (syntax-case stx ()
       [(_ spec-id desc ...)
-       #'(*defforms (quote-syntax spec-id) null
+       #'(*defforms (quote-syntax/loc spec-id) null
                     '(spec-id)
                     (list (lambda (x) (make-paragraph (list x))))
                     null
@@ -440,7 +488,7 @@
   (define-syntax defthing
     (syntax-rules ()
       [(_ id result desc ...)
-       (*defthing (quote-syntax id) 'id 'result (lambda () (list desc ...)))]))
+       (*defthing (quote-syntax/loc id) 'id (quote-syntax result) (lambda () (list desc ...)))]))
   (define-syntax defparam
     (syntax-rules ()
       [(_ id arg contract desc ...)
@@ -494,6 +542,27 @@
                type-sym)
        ""))))
 
+  (define (annote-exporting-library e)
+    (make-delayed-element
+     (lambda (render p ri)
+       (let ([from (resolve-get/tentative p ri '(exporting-libraries #f))])
+         (if (and from
+                  (pair? from))
+             (list (make-hover-element
+                    #f
+                    (list e)
+                    (string-append
+                     "Provided from: "
+                     (let loop ([from from])
+                       (if (null? (cdr from))
+                           (format "~s" (car from))
+                           (format "~s, ~a"
+                                   (car from)
+                                   (loop (cdr from))))))))
+             (list e))))
+     (lambda () e)
+     (lambda () e)))
+
   (define (*defproc mode within-id
                     stx-ids prototypes arg-contractss result-contracts content-thunk)
     (let ([spacer (hspace 1)]
@@ -508,9 +577,15 @@
                        (cond
                         [(pair? v)
                          (if (keyword? (car v))
-                             (make-element #f (list (to-element (car v))
-                                                    (hspace 1)
-                                                    (to-element (cadr v))))
+                             (if (eq? mode 'new)
+                                 (make-element #f (list (schemeparenfont "[")
+                                                        (schemeidfont (keyword->string (car v)))
+                                                        (hspace 1)
+                                                        (to-element (cadr v))
+                                                        (schemeparenfont "]")))
+                                 (make-element #f (list (to-element (car v))
+                                                        (hspace 1)
+                                                        (to-element (cadr v)))))
                              (to-element (car v)))]
                         [(eq? v '...+)
                          dots1]
@@ -527,7 +602,8 @@
                                     [(symbol? (car s)) (string-length (symbol->string (car s)))]
                                     [(pair? (car s)) 
                                      (if (keyword? (caar s))
-                                         (+ (string-length (keyword->string (caar s)))
+                                         (+ (if (eq? mode 'new) 2 0)
+                                            (string-length (keyword->string (caar s)))
                                             3
                                             (string-length (symbol->string (cadar s))))
                                          (string-length (symbol->string (caar s))))]
@@ -582,34 +658,40 @@
                                                              (hspace 1)
                                                              (if first?
                                                                  (let* ([mname (car prototype)]
-                                                                        [tag (format "~a::~a"
-                                                                                     (register-scheme-definition within-id)
-                                                                                     mname)]
+                                                                        [ctag (register-scheme-definition within-id #t)]
+                                                                        [tag (method-tag ctag mname)]
                                                                         [content (list (*method mname within-id))])
-                                                                   (make-toc-target-element
-                                                                    #f
-                                                                    (list (make-index-element #f
-                                                                                              content
-                                                                                              tag
-                                                                                              (list (symbol->string mname))
-                                                                                              content))
-                                                                    tag))
+                                                                   (if tag
+                                                                       (make-toc-target-element
+                                                                        #f
+                                                                        (list (make-index-element #f
+                                                                                                  content
+                                                                                                  tag
+                                                                                                  (list (symbol->string mname))
+                                                                                                  content))
+                                                                        tag)
+                                                                       (car content)))
                                                                  (*method (car prototype) within-id))))]
                                         [else
                                          (if first?
-                                             (let ([tag (register-scheme-definition stx-id)]
-                                                   [content (list (to-element (make-just-context (car prototype)
-                                                                                                 stx-id)))])
-                                               (make-toc-target-element
-                                                #f
-                                                (list (make-index-element #f
-                                                                          content
-                                                                          tag
-                                                                          (list (symbol->string (car prototype)))
-                                                                          content))
-                                                tag))
-                                             (to-element (make-just-context (car prototype)
-                                                                            stx-id)))])]
+                                             (let ([tag (register-scheme-definition stx-id #t)]
+                                                   [content (list 
+                                                             (annote-exporting-library
+                                                              (to-element (make-just-context (car prototype)
+                                                                                             stx-id))))])
+                                               (if tag
+                                                   (make-toc-target-element
+                                                    #f
+                                                    (list (make-index-element #f
+                                                                              content
+                                                                              tag
+                                                                              (list (symbol->string (car prototype)))
+                                                                              content))
+                                                    tag)
+                                                   (car content)))
+                                             (annote-exporting-library
+                                              (to-element (make-just-context (car prototype)
+                                                                             stx-id))))])]
                              [(flat-size) (+ (prototype-size (cdr prototype) + +)
                                              (element-width tagged))]
                              [(short?) (or (flat-size . < . 40)
@@ -713,7 +795,7 @@
                                                                  (not result-next-line?))
                                                             end
                                                             not-end))
-                                               (loop ((if dots-next? cddr cdr) args) (sub1 req))))))))))))))
+                                                 (loop ((if dots-next? cddr cdr) args) (sub1 req))))))))))))))
                   (if result-next-line?
                       (list (list (make-flow (make-table-if-necessary
                                               "prototype" 
@@ -776,7 +858,14 @@
              prototypes
              arg-contractss
              result-contracts
-             (cons #t (map (lambda (x) #f) (cdr prototypes))))))
+             (let loop ([ps prototypes][accum null])
+               (cond
+                [(null? ps) null]
+                [(ormap (lambda (a) (eq? (caar ps) a)) accum)
+                 (cons #f (loop (cdr ps) accum))]
+                [else
+                 (cons #t (loop (cdr ps)
+                                (cons (caar ps) accum)))])))))
           (content-thunk))))))
 
   (define (make-target-element* inner-make-target-element stx-id content wrappers)
@@ -792,21 +881,30 @@
                  (register-scheme-definition 
                   (datum->syntax-object stx-id
                                         (string->symbol
-                                         name)))])
-           (inner-make-target-element
-            #f
-            (list
-             (make-index-element #f
-                                 (list content)
-                                 tag
-                                 (list name)
-                                 (list (schemeidfont (make-element "schemevaluelink" (list name))))))
-            tag))
+                                         name))
+                  #t)])
+           (if tag
+               (inner-make-target-element
+                #f
+                (list
+                 (make-index-element #f
+                                     (list content)
+                                     tag
+                                     (list name)
+                                     (list (schemeidfont (make-element "schemevaluelink" (list name))))))
+                tag)
+               content))
          (cdr wrappers))))
 
   (define (*defstruct stx-id name fields field-contracts immutable? transparent? content-thunk)
     (define spacer (hspace 1))
     (define to-flow (lambda (e) (make-flow (list (make-paragraph (list e))))))
+    (define (field-name f) (if (pair? (car f))
+                               (caar f)
+                               (car f)))
+    (define (field-view f) (if (pair? (car f))
+                               (make-shaped-parens (car f) #\[)
+                               (car f)))
     (make-splice
      (cons
       (make-table
@@ -819,9 +917,10 @@
                                (make-target-element*
                                 make-toc-target-element
                                 stx-id
-                                (to-element (if (pair? name)
-                                                (make-just-context (car name) stx-id)
-                                                stx-id))
+                                (annote-exporting-library
+                                 (to-element (if (pair? name)
+                                                 (make-just-context (car name) stx-id)
+                                                 stx-id)))
                                 (let ([name (if (pair? name)
                                                 (car name)
                                                 name)])
@@ -830,13 +929,18 @@
                                          (list 'make- name)
                                          (append
                                           (map (lambda (f)
-                                                 (list name '- (car f)))
+                                                 (list name '- (field-name f)))
                                                fields)
                                           (if immutable?
                                               null
-                                              (map (lambda (f)
-                                                     (list 'set- name '- (car f) '!))
-                                                   fields))))))])
+                                              (filter 
+                                               values
+                                               (map (lambda (f)
+                                                      (if (and (pair? (car f))
+                                                               (memq '#:immutable (car f)))
+                                                          #f
+                                                          (list 'set- name '- (field-name f) '!)))
+                                                    fields)))))))])
                           (if (pair? name)
                               (to-element (list just-name
                                                 (make-just-context (cadr name) stx-id)))
@@ -844,12 +948,18 @@
                        [short-width (apply +
                                            (length fields)
                                            8
-                                           (map (lambda (s)
-                                                  (string-length (symbol->string s)))
-                                                (append (if (pair? name)
-                                                            name
-                                                            (list name))
-                                                        (map car fields))))])
+                                           (append
+                                            (map (lambda (s)
+                                                   (string-length (symbol->string s)))
+                                                 (append (if (pair? name)
+                                                             name
+                                                             (list name))
+                                                         (map field-name fields)))
+                                            (map (lambda (f)
+                                                   (if (pair? (car f))
+                                                       (+ 3 2 (string-length (keyword->string (cadar f))))
+                                                       0))
+                                                 fields)))])
                   (if (and (short-width . < . max-proto-width)
                            (not immutable?)
                            (not transparent?))
@@ -858,7 +968,7 @@
                         (to-element
                          `(,(schemeparenfont "struct")
                            ,the-name
-                           ,(map car fields)))))
+                           ,(map field-view fields)))))
                       (make-table
                        #f
                        (append
@@ -874,8 +984,8 @@
                                                                 (schemeparenfont "(")))))
                                (to-flow (if (or (null? fields)
                                                 (short-width . < . max-proto-width))
-                                            (to-element (map car fields))
-                                            (to-element (caar fields))))))
+                                            (to-element (map field-view fields))
+                                            (to-element (field-view (car fields)))))))
                         (if (short-width . < . max-proto-width)
                             null
                             (let loop ([fields fields])
@@ -887,7 +997,7 @@
                                                 (to-flow spacer)
                                                 (to-flow spacer)
                                                 (to-flow
-                                                 (let ([e (to-element (car fld))])
+                                                 (let ([e (to-element (field-view fld))])
                                                    (if (null? (cdr fields))
                                                        (make-element 
                                                         #f 
@@ -949,7 +1059,7 @@
                     #f
                     (list
                      (list (to-flow (hspace 2))
-                           (to-flow (to-element (car v)))
+                           (to-flow (to-element (field-name v)))
                            (to-flow spacer)
                            (to-flow ":")
                            (to-flow spacer)
@@ -968,16 +1078,19 @@
         (list (make-flow 
                (list
                 (make-paragraph
-                 (list (let ([tag (register-scheme-definition stx-id)]
-                             [content (list (to-element (make-just-context name stx-id)))])
-                         (make-toc-target-element
-                          #f
-                          (list (make-index-element #f
-                                                    content
-                                                    tag
-                                                    (list (symbol->string name))
-                                                    content))
-                          tag))
+                 (list (let ([tag (register-scheme-definition stx-id #t)]
+                             [content (list (annote-exporting-library
+                                             (to-element (make-just-context name stx-id))))])
+                         (if tag
+                             (make-toc-target-element
+                              #f
+                              (list (make-index-element #f
+                                                        content
+                                                        tag
+                                                        (list (symbol->string name))
+                                                        content))
+                              tag)
+                             (car content)))
                        spacer ":" spacer
                        (to-element result-contract))))))))
       (content-thunk))))
@@ -1019,25 +1132,32 @@
                            (make-paragraph
                             (list
                              (to-element
-                              `(,x
-                                . ,(cdr form)))))))
+                              `(,x . ,(cdr form)))))))
                      (and kw-id
                           (eq? form (car forms))
-                          (let ([tag (register-scheme-form-definition kw-id)]
-                                [content (list (to-element (make-just-context (if (pair? form)
-                                                                                  (car form) 
-                                                                                  form)
-                                                                              kw-id)))])
-                            (make-toc-target-element
-                             #f
-                             (if kw-id
-                                 (list (make-index-element #f
-                                                           content
-                                                           tag
-                                                           (list (symbol->string (syntax-e kw-id)))
-                                                           content))
-                                 content)
-                             tag))))))))
+                          (let ([tag (register-scheme-definition kw-id #t)]
+                                [stag (register-scheme-form-definition kw-id)]
+                                [content (list (annote-exporting-library
+                                                (to-element (make-just-context (if (pair? form)
+                                                                                   (car form) 
+                                                                                   form)
+                                                                               kw-id))))])
+                            (if tag
+                                (make-target-element
+                                 #f
+                                 (list
+                                  (make-toc-target-element
+                                   #f
+                                   (if kw-id
+                                       (list (make-index-element #f
+                                                                 content
+                                                                 tag
+                                                                 (list (symbol->string (syntax-e kw-id)))
+                                                                 content))
+                                       content)
+                                   stag))
+                                 tag)
+                                (car content)))))))))
                forms form-procs)
           (if (null? sub-procs)
               null
@@ -1149,17 +1269,25 @@
     (make-paragraph (list (hspace 2) (apply tt s))))
            
   (define (elemtag t . body)
-    (make-target-element #f (decode-content body) t))
+    (make-target-element #f (decode-content body) `(elem ,t)))
   (define (elemref t . body)
-    (make-link-element #f (decode-content body) t))
+    (make-link-element #f (decode-content body) `(elem ,t)))
   (provide elemtag elemref)
 
-  (define (secref s)
-    (make-link-element #f null `(part ,s)))
-  (define (seclink tag . s)
-    (make-link-element #f (decode-content s) `(part ,tag)))
+  (define (doc-prefix doc s)
+    (if doc
+        (format "~a:~a" 
+                (module-path-prefix->string doc)
+                s)
+        s))
+
+  (define (secref s #:doc [doc #f])
+    (make-link-element #f null `(part ,(doc-prefix doc s))))
+  (define (seclink tag #:doc [doc #f] . s)
+    (make-link-element #f (decode-content s) `(part ,(doc-prefix doc tag))))
   (define (*schemelink stx-id id . s)
-    (make-link-element #f (decode-content s) (register-scheme-definition stx-id)))
+    (make-link-element #f (decode-content s) (or (register-scheme-definition stx-id)
+                                                 (format "--UNDEFINED:~a--" (syntax-e stx-id)))))
   (define-syntax schemelink
     (syntax-rules ()
       [(_ id . content) (*schemelink (quote-syntax id) 'id . content)]))
@@ -1220,7 +1348,9 @@
   ;; ----------------------------------------
 
   (provide defclass
+           defclass/title
            definterface
+           definterface/title
            defconstructor
            defconstructor/make
            defconstructor*/make
@@ -1229,42 +1359,135 @@
            defmethod*
            methspec
            methimpl
-           this-obj
-           include-class)
+           this-obj)
 
   (define-syntax-parameter current-class #f)
 
-  (define class-decls (make-hash-table 'equal))
-
-  (define-struct decl (name super intfs body))
+  (define-struct decl (name super intfs mk-head body))
   (define-struct constructor (def))
-  (define-struct meth (mode desc def))
+  (define-struct meth (name mode desc def))
   (define-struct spec (def))
   (define-struct impl (def))
 
-  (define (register-class name super intfs body)
-    (let ([key (register-scheme-definition name)])
-      (hash-table-put! class-decls 
-                       key
-                       (make-decl name super intfs body))))
+  (define-serializable-struct cls/intf (name-element super intfs methods))
 
-  (define (*include-class name)
-    (let ([decl (hash-table-get class-decls (register-scheme-definition name))])
-      (make-splice
-       (cons (section (to-element (decl-name decl)))
-             (map (lambda (i)
-                    (cond
-                     [(constructor? i) ((constructor-def i))]
-                     [(meth? i)
-                      ((meth-def i) (meth-desc i))]
-                     [else i]))
-                  (decl-body decl))))))
+  (define (make-inherited-table r d ri decl)
+    (let* ([start (let ([key (register-scheme-definition (decl-name decl))])
+                    (list (cons key (lookup-cls/intf d ri key))))]
+           [supers (cdr
+                    (let loop ([supers start][accum null])
+                      (cond
+                       [(null? supers) (reverse accum)]
+                       [(memq (car supers) accum)
+                        (loop (cdr supers) accum)]
+                       [else
+                        (let ([super (car supers)])
+                          (loop (append (map (lambda (i)
+                                               (cons i (lookup-cls/intf d ri i)))
+                                             (reverse (cls/intf-intfs (cdr super))))
+                                        (let ([s (cls/intf-super (cdr super))])
+                                          (if s
+                                              (list (cons s (lookup-cls/intf d ri s)))
+                                              null))
+                                        (cdr supers))
+                                (cons super accum)))])))]
+           [ht (let ([ht (make-hash-table)])
+                 (for-each (lambda (i)
+                             (when (meth? i) 
+                               (hash-table-put! ht (meth-name i) #t)))
+                           (decl-body decl))
+                 ht)]
+           [inh (apply
+                 append
+                 (map (lambda (super)
+                        (let ([inh (filter
+                                    values
+                                    (map
+                                     (lambda (k)
+                                       (if (hash-table-get ht k #f)
+                                           #f
+                                           (begin
+                                             (hash-table-put! ht k #t)
+                                             (cons (symbol->string k)
+                                                   (**method k (car super))))))
+                                     (cls/intf-methods (cdr super))))])
+                          (if (null? inh)
+                              null
+                              (cons
+                               (make-element #f (list (make-element "inheritedlbl" '("from "))
+                                                      (cls/intf-name-element (cdr super))))
+                               (map cdr (sort inh
+                                              (lambda (a b)
+                                                (string<? (car a) (car b)))))))))
+                      supers))])
+      (if (null? inh)
+          (make-auxiliary-table "inherited" null)
+          (make-auxiliary-table
+           "inherited"
+           (map (lambda (i)
+                  (list (make-flow (list (make-paragraph (list i))))))
+                (cons (make-element "inheritedlbl" '("Inherited methods:")) inh))))))
 
-  (define-syntax include-class
-    (syntax-rules ()
-      [(_ id) (*include-class (quote-syntax id))]))
+  (define (make-decl-collect decl)
+    (make-part-collect-decl
+     (make-collect-element
+      #f null
+      (lambda (ci)
+        (let ([tag (register-scheme-definition (decl-name decl))])
+          (collect-put! ci 
+                        `(cls/intf ,tag)
+                        (make-cls/intf
+                         (make-element
+                          "schemesymbol"
+                          (list (make-link-element
+                                 "schemevaluelink"
+                                 (list (symbol->string (syntax-e (decl-name decl))))
+                                 tag)))
+                         (and (decl-super decl)
+                              (not (module-label-identifier=? #'object% (decl-super decl)))
+                              (register-scheme-definition (decl-super decl)))
+                         (map register-scheme-definition (decl-intfs decl))
+                         (map (lambda (m)
+                                (meth-name m))
+                              (filter meth? (decl-body decl))))))))))
 
-  (define (*defclass stx-id super intfs)
+  (define (build-body decl body)
+    (append
+     (map (lambda (i)
+            (cond
+             [(constructor? i) ((constructor-def i))]
+             [(meth? i)
+              ((meth-def i) (meth-desc i))]
+             [else i]))
+          body)
+     (list
+      (make-delayed-flow-element
+       (lambda (r d ri)
+         (make-inherited-table r d ri decl))))))
+
+  (define (*include-class/title decl)
+    (make-splice
+     (list* (title #:style 'hidden (to-element (decl-name decl)))
+            (make-decl-collect decl)
+            (build-body decl
+                        (append
+                         ((decl-mk-head decl) #t)
+                         (decl-body decl))))))
+
+  (define (*include-class decl)
+    (make-splice
+     (cons
+      (make-decl-collect decl)
+      (append
+       ((decl-mk-head decl) #f)
+       (list
+        (make-blockquote 
+         "leftindent"
+         (flow-paragraphs
+          (decode-flow
+           (build-body decl (decl-body decl))))))))))
+
+  (define (*class-doc stx-id super intfs whole-page?)
     (let ([spacer (hspace 1)])
       (make-table
        'boxed
@@ -1274,15 +1497,21 @@
                 (list
                  (make-paragraph
                   (list (let ([tag (register-scheme-definition stx-id)]
-                              [content (list (to-element stx-id))])
-                          (make-toc-target-element
-                           #f
-                           (list (make-index-element #f
-                                                     content
-                                                     tag
-                                                     (list (symbol->string (syntax-e stx-id)))
-                                                     content))
-                           tag))
+                              [content (list (annote-exporting-library (to-element stx-id)))])
+                          (if tag
+                              ((if whole-page? 
+                                   make-page-target-element
+                                   make-toc-target-element)
+                               #f
+                               (if whole-page?
+                                   content ; title is already an index entry
+                                   (list (make-index-element #f
+                                                             content
+                                                             tag
+                                                             (list (symbol->string (syntax-e stx-id)))
+                                                             content)))
+                               tag)
+                              (car content)))
                         spacer ":" spacer
                         (if super
                             (scheme class?)
@@ -1312,33 +1541,57 @@
                                           (make-flow (list (make-paragraph (list (to-element i)))))))
                                   (cdr intfs)))))))))))))
 
+  (define-syntax *defclass
+    (syntax-rules ()
+      [(_ *include-class name super (intf ...) body ...)
+       (*include-class
+         (syntax-parameterize ([current-class (quote-syntax name)])
+           (make-decl (quote-syntax/loc name)
+                      (quote-syntax/loc super)
+                      (list (quote-syntax/loc intf) ...)
+                      (lambda (whole-page?)
+                        (list
+                         (*class-doc (quote-syntax/loc name)
+                                     (quote-syntax super)
+                                     (list (quote-syntax intf) ...)
+                                     whole-page?)))
+                      (list body ...))))]))
+
   (define-syntax defclass
     (syntax-rules ()
       [(_ name super (intf ...) body ...)
-       (syntax-parameterize ([current-class (quote-syntax name)])
-         (register-class (quote-syntax name)
-                         (quote-syntax super)
-                         (list (quote-syntax intf) ...)
-                         (append
-                          (list
-                           (*defclass (quote-syntax name)
-                                      (quote-syntax super)
-                                      (list (quote-syntax intf) ...)))
-                          (list body ...))))]))
+       (*defclass *include-class name super (intf ...) body ...)]))
 
+  (define-syntax defclass/title
+    (syntax-rules ()
+      [(_ name super (intf ...) body ...)
+       (*defclass *include-class/title name super (intf ...) body ...)]))
+
+  (define-syntax *definterface
+    (syntax-rules ()
+      [(_ *include-class name (intf ...) body ...)
+       (*include-class
+        (syntax-parameterize ([current-class (quote-syntax name)])
+          (make-decl (quote-syntax/loc name)
+                     #f
+                     (list (quote-syntax/loc intf) ...)
+                     (lambda (whole-page?)
+                       (list
+                        (*class-doc (quote-syntax/loc name)
+                                    #f
+                                    (list (quote-syntax intf) ...)
+                                    whole-page?)))
+                     (list body ...))))]))
+  
   (define-syntax definterface
     (syntax-rules ()
       [(_ name (intf ...) body ...)
-       (syntax-parameterize ([current-class (quote-syntax name)])
-         (register-class (quote-syntax name)
-                         #f
-                         (list (quote-syntax intf) ...)
-                         (append
-                          (list
-                           (*defclass (quote-syntax name)
-                                      #f
-                                      (list (quote-syntax intf) ...)))
-                          (list body ...))))]))
+       (*definterface *include-class name (intf ...) body ...)]))
+
+  (define-syntax definterface/title
+    (syntax-rules ()
+      [(_ name (intf ...) body ...)
+       (*definterface *include-class/title name (intf ...) body ...)]))
 
   (define-syntax (defconstructor*/* stx)
     (syntax-case stx ()
@@ -1391,19 +1644,32 @@
   (define-syntax (defmethod* stx)
     (syntax-case stx ()
       [(_ #:mode mode ([(name arg ...) result-type] ...) desc ...)
-       (with-syntax ([cname (syntax-parameter-value #'current-class)])
-         #'(make-meth 'mode
-                      (lambda () (make-splice (apply
-                                               append
-                                               (map (lambda (f)
-                                                      (cond
-                                                       [(impl? f) ((impl-def f))]
-                                                       [(spec? f) ((spec-def f))]
-                                                       [else (list f)]))
-                                                    (list desc ...)))))
-                      (lambda (desc-splice)
-                        (defproc* #:mode send #:within cname ([(name arg ...) result-type] ...)
-                          (desc-splice)))))]
+       (with-syntax ([cname (syntax-parameter-value #'current-class)]
+                     [name1 (car (syntax->list #'(name ...)))])
+         (with-syntax ([(extra ...) (case (syntax-e #'mode)
+                                      [(pubment)
+                                       #'((t "Refine this method with " (scheme augment) "."))]
+                                      [(override extend augment)
+                                       #'((t (case (syntax-e #'mode)
+                                               [(override) "Overrides "]
+                                               [(extend) "Extends "]
+                                               [(augment) "Augments "])
+                                             (*xmethod/super (quote-syntax/loc cname) 'name1) "."))]
+                                      [else
+                                       null])])
+           #'(make-meth 'name1
+                        'mode
+                        (lambda () (make-splice (apply
+                                                 append
+                                                 (map (lambda (f)
+                                                        (cond
+                                                         [(impl? f) ((impl-def f))]
+                                                         [(spec? f) ((spec-def f))]
+                                                         [else (list f)]))
+                                                      (list extra ... desc ...)))))
+                        (lambda (desc-splice)
+                          (defproc* #:mode send #:within cname ([(name arg ...) result-type] ...)
+                            (desc-splice))))))]
       [(_ ([(name arg ...) result-type] ...) desc ...)
        #'(defmethod* #:mode public ([(name arg ...) result-type] ...) desc ...)]))
 
@@ -1430,6 +1696,44 @@
       [(_) 
        (with-syntax ([cname (syntax-parameter-value #'current-class)])
          #'(*this-obj 'cname))]))
+
+  (define (*xmethod/super cname name)
+    (let ([get
+           (lambda (d ri key)
+             (let ([v (lookup-cls/intf d ri key)])
+               (if v
+                   (cons (cls/intf-super v)
+                         (cls/intf-intfs v))
+                   null)))])
+      (make-delayed-element
+       (lambda (r d ri)
+         (let loop ([search (get d ri (register-scheme-definition cname))])
+           (cond
+            [(null? search)
+             (make-element #f "<method not found>")]
+            [(not (car search))
+             (loop (cdr search))]
+            [else
+             (let ([v (lookup-cls/intf d ri (car search))])
+               (if v
+                   (if (member name (cls/intf-methods v))
+                       (list
+                        (make-element #f
+                                      (list (**method name (car search))
+                                            " in " 
+                                            (cls/intf-name-element v))))
+                       (loop (append (cdr search) (get d ri (car search)))))
+                   (loop (cdr search))))])))
+       (lambda () (format "~a in ~a" (syntax-e cname) name))
+       (lambda () (format "~a in ~a" (syntax-e cname) name)))))
+
+  (define (lookup-cls/intf d ri name)
+    (let ([v (resolve-get d ri `(cls/intf ,name))])
+      (or v
+          (make-cls/intf "unknown"
+                         #f
+                         null
+                         null))))
 
   ;; ----------------------------------------
   )

@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[point% object% ()]{
+@defclass/title[point% object% ()]{
 
 A @scheme[point%] is used for certain drawing commands. It
  encapsulates two real numbers.

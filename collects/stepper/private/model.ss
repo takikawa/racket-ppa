@@ -49,7 +49,8 @@
            "macro-unwind.ss"
            "lifting.ss"
            ;; for breakpoint display
-           "display-break-stuff.ss")
+           ;; (commented out to allow nightly testing)
+           #;"display-break-stuff.ss")
 
   (define program-expander-contract
     ((-> void?) ; init
@@ -71,8 +72,8 @@
   ; go starts a stepper instance
   ; see provide stmt for contract
   (define (go program-expander receive-result render-settings
-              track-inferred-names? language-level run-on-drscheme-side)
-
+              show-lambdas-as-lambdas? language-level run-on-drscheme-side)
+    
     ;; finished-exps:
     ;;   (listof (list/c syntax-object? (or/c number? false?)( -> any)))
     ;; because of mutation, these cannot be fixed renderings, but must be
@@ -151,10 +152,20 @@
 
     (define break
       (opt-lambda (mark-set break-kind [returned-value-list #f])
+        
+        #;(if mark-set
+            (printf "mark-list: ~e\nbreak-kind: ~e\nreturned-value-list: ~e\n" (extract-mark-list mark-set) break-kind returned-value-list)
+            (printf "mark-set was false!\n"))
+        
+        (when (store-steps?)
+          (if mark-set
+              (set! stored-steps (append stored-steps (list (list (extract-mark-list mark-set) break-kind returned-value-list))))
+              (set! stored-steps (append stored-steps (list 'mark-set-was-#f)))))
 
         (set! steps-received (+ steps-received 1))
         ;; have to be careful else this won't be looked up right away:
-        (when (getenv "PLTSTEPPERUNSAFE")
+        ;; (commented out to allow nightly tests to proceed, 2007-09-04
+        #;(when (getenv "PLTSTEPPERUNSAFE")
           (let ([steps-received/current steps-received])
             (run-on-drscheme-side
              (lambda ()
@@ -293,7 +304,7 @@
           (lambda (stx dont-care) (list stx))))
 
     (define (step-through-expression expanded expand-next-expression)
-      (let* ([annotated (a:annotate expanded break track-inferred-names?
+      (let* ([annotated (a:annotate expanded break show-lambdas-as-lambdas?
                                     language-level)])
         (eval-syntax annotated)
         (expand-next-expression)))
@@ -306,17 +317,28 @@
                                      message))
           (set! held-exp-list no-sexp))
         (receive-result (make-error-result message))))
+    
 
+    (when (store-steps?) (set! stored-steps null))
+    
     (program-expander
      (lambda ()
        ;; swap these to allow errors to escape (e.g., when debugging)
        (error-display-handler err-display-handler)
-       #;(void)
+       ;;(void)
        )
      (lambda (expanded continue-thunk) ; iter
        (r:reset-special-values)
        (if (eof-object? expanded)
          (begin
            (receive-result (make-finished-stepping)))
-         (step-through-expression expanded continue-thunk))))))
+         (step-through-expression expanded continue-thunk)))))
+  
+  ;; debugging support:
+  
+  (provide stored-steps)
+  (define stored-steps null)
+  (provide store-steps?)
+  (define store-steps? (make-parameter #f))
+)
 

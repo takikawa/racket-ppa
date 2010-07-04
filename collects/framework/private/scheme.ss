@@ -370,10 +370,15 @@
   
   (define init-wordbreak-map
     (λ (map)
-      (let ([v (send map get-map #\-)])
-        (send map set-map 
-              #\-
-              '(line)))))
+      (send map set-map  #\< '(line selection))  ; interfaces e.g.the canvas<%> interface
+      (send map set-map  #\> '(line selection))  ; interfaces, casts e.g. string->path
+      (send map set-map  #\% '(line selection))  ; intefraces, classes
+      (send map set-map  #\? '(line selection))  ; predicates
+      (send map set-map  #\' '(line selection))  ; literal symbols
+      (send map set-map  #\! '(line selection))  ; assignments e.g. set
+      (send map set-map  #\- '(line selection))  ; hyphens
+      (send map set-map  #\: '(line selection)))); valid identifiers with colons
+
   (define wordbreak-map (make-object editor-wordbreak-map%))
   (define (get-wordbreak-map) wordbreak-map)
   (init-wordbreak-map wordbreak-map)
@@ -389,7 +394,7 @@
       (send style-list find-named-style "Matching Parenthesis Style")))
   
   (define text-mixin
-    (mixin (text:basic<%> mode:host-text<%> color:text<%>) (-text<%>)
+    (mixin (text:basic<%> mode:host-text<%> color:text<%> text:autocomplete<%>) (-text<%>)
       (inherit begin-edit-sequence
                delete
                end-edit-sequence
@@ -428,12 +433,34 @@
       (inherit has-focus? find-snip split-snip
                position-location get-dc)
       
+      (define/override (get-word-at current-pos)
+        (let ([no-word ""])
+          (cond
+            [(or (is-stopped?) (is-frozen?))
+             no-word]
+            [else
+             (let ([type (classify-position current-pos)])
+               (cond
+                 [(eq? 'symbol type) 
+                  (get-text (look-for-non-symbol current-pos)
+                            current-pos)]
+                 [else no-word]))])))
+      
+      (define/private (look-for-non-symbol start)
+        (let loop ([i start])
+          (cond
+            [(< i 0) 0]
+            [(eq? (classify-position i) 'symbol)
+             (loop (- i 1))]
+            [else (+ i 1)])))
+
       (public tabify-on-return? tabify
               tabify-all insert-return calc-last-para 
               box-comment-out-selection comment-out-selection uncomment-selection
               flash-forward-sexp 
               flash-backward-sexp backward-sexp find-up-sexp up-sexp find-down-sexp down-sexp
               remove-parens-forward)
+      
       (define/public (get-limit pos) 0)
       
       (define/public (balance-parens key-event)
@@ -1026,6 +1053,23 @@
                      (change-style matching-parenthesis-style pos (+ pos 1))
                      (change-style matching-parenthesis-style (- end 1) end)])))))))
       
+      ;; get-snips/rev: start end -> (listof snip)
+      ;; Returns a list of the snips in reverse order between
+      ;; start and end.
+      (define/private (get-snips/rev start end)
+        (split-snip start)
+        (split-snip end)
+        (let loop ([snips/rev '()]
+                   [a-snip (find-snip start 'after-or-none)])
+          (cond
+            [(or (not a-snip)
+                 (>= (get-snip-position a-snip)
+                     end))
+             snips/rev]
+            [else
+             (loop (cons (send a-snip copy) snips/rev)
+                   (send a-snip next))])))
+
       (define/public (transpose-sexp pos)
         (let ([start-1 (get-backward-sexp pos)])
           (if (not start-1)
@@ -1040,13 +1084,13 @@
                             (if (or (not start-2)
                                     (< start-2 end-1))
                                 (bell)
-                                (let ([text-1 
-                                       (get-text start-1 end-1)]
-                                      [text-2 
-                                       (get-text start-2 end-2)])
+                                (let ([snips-1/rev (get-snips/rev start-1 end-1)]
+                                      [snips-2/rev (get-snips/rev start-2 end-2)])
                                   (begin-edit-sequence)
-                                  (insert text-1 start-2 end-2)
-                                  (insert text-2 start-1 end-1)
+                                  (delete start-2 end-2)
+                                  (for-each (λ (s) (insert s start-2)) snips-1/rev)
+                                  (delete start-1 end-1)
+                                  (for-each (λ (s) (insert s start-1)) snips-2/rev)
                                   (set-position end-2)
                                   (end-edit-sequence)))))))))))
       [define tab-size 8]
@@ -1126,7 +1170,8 @@
            [lam-reg (cadddr pref)])
       (hash-table-get 
        ht
-       (string->symbol text)
+       (with-handlers ((exn:fail:read? (λ (x) #f)))
+         (read (open-input-string text)))
        (λ () 
          (cond
            [(and beg-reg (regexp-match beg-reg text)) 'begin]
@@ -1142,8 +1187,9 @@
   
   (define -text% (set-mode-mixin
                   (text-mixin
-                   (mode:host-text-mixin
-                    color:text%))))
+                   (text:autocomplete-mixin
+                    (mode:host-text-mixin
+                     color:text%)))))
   
   (define text-mode% (text-mode-mixin color:text-mode%))
   
@@ -1626,7 +1672,7 @@
                              (cond
                                [(null? in) (sort out string<=?)]
                                [else (if (eq? wanted (cadr (car in))) 
-                                         (pick-out wanted (cdr in) (cons (symbol->string (car (car in))) out))
+                                         (pick-out wanted (cdr in) (cons (format "~s" (car (car in))) out))
                                          (pick-out wanted (cdr in) out))]))])
           (values  (pick-out 'begin all-keywords null)
                    (pick-out 'define all-keywords null)
@@ -1665,7 +1711,7 @@
       (λ (list-box)
         (λ (button command)
           (let* ([selections (send list-box get-selections)]
-                 [symbols (map (λ (x) (string->symbol (send list-box get-string x))) selections)])
+                 [symbols (map (λ (x) (read (open-input-string (send list-box get-string x)))) selections)])
             (for-each (λ (x) (send list-box delete x)) (reverse selections))
             (let* ([pref (preferences:get 'framework:tabify)]
                    [ht (car pref)])
@@ -1728,16 +1774,15 @@
                    'lambda
                    lambda-keywords
                    (λ (x) (update-pref cdddr x))))
-    (define update-list-boxes
-      (λ (hash-table)
-        (let-values ([(begin-keywords define-keywords lambda-keywords) (get-keywords hash-table)]
-                     [(reset) (λ (list-box keywords)
-                                (send list-box clear)
-                                (for-each (λ (x) (send list-box append x)) keywords))])
-          (reset begin-list-box begin-keywords)
-          (reset define-list-box define-keywords)
-          (reset lambda-list-box lambda-keywords)
-          #t)))
+    (define (update-list-boxes hash-table)
+      (let-values ([(begin-keywords define-keywords lambda-keywords) (get-keywords hash-table)]
+                   [(reset) (λ (list-box keywords)
+                              (send list-box clear)
+                              (for-each (λ (x) (send list-box append x)) keywords))])
+        (reset begin-list-box begin-keywords)
+        (reset define-list-box define-keywords)
+        (reset lambda-list-box lambda-keywords)
+        #t))
     (define update-gui
       (λ (pref)
         (update-list-boxes (car pref))

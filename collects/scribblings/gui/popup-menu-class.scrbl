@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[popup-menu% object% (menu-item-container<%>)]{
+@defclass/title[popup-menu% object% (menu-item-container<%>)]{
 
 A @scheme[popup-menu%] object is created without a parent. Dynamically
  display a @scheme[popup-menu%] with @xmethod[window<%> popup-menu]

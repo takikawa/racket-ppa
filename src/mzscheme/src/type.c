@@ -454,6 +454,8 @@ static void FIXUP_jmpup(Scheme_Jumpup_Buf *buf)
                             new_stack);
 }
 
+#define RUNSTACK_ZERO_VAL NULL
+
 #define MARKS_FOR_TYPE_C
 #include "mzmark.c"
 
@@ -576,6 +578,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_expanded_syntax_type, twoptr_obj);
   GC_REG_TRAV(scheme_module_type, module_val);
   GC_REG_TRAV(scheme_rt_module_exports, module_exports_val);
+  GC_REG_TRAV(scheme_rt_module_phase_exports, module_phase_exports_val);
   GC_REG_TRAV(scheme_module_index_type, modidx_val);
 
   GC_REG_TRAV(scheme_security_guard_type, guard_val);

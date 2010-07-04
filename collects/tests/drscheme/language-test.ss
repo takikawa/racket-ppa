@@ -90,6 +90,7 @@ the settings above should match r5rs
       (test-expression "(define qqq 2) (set! qqq 1)" "")
       (test-expression "(cond [(= 1 2) 3])" "")
       (test-expression "(cons 1 2)" "(1 . 2)")
+      (test-expression "(+ (list 1) 2)" "{bug09.png} +: expects type <number> as 1st argument, given: (1); other arguments were: 2")
       (test-expression "'(1)" "(1)")
       (test-expression "(define shrd (box 1)) (list shrd shrd)"
                        "(#&1 #&1)")
@@ -121,7 +122,9 @@ the settings above should match r5rs
       (test-expression "(list 1)" "(1)")
       (test-expression "(car (list))" "{bug09.png} car: expects argument of type <pair>; given ()")
 
-      (test-expression "argv" "#0()")))
+      (test-expression "argv" "#0()")
+      
+      (test-expression "(define-syntax app syntax-case)" "syntax-case: bad syntax in: syntax-case")))
 
 
                                                         
@@ -186,6 +189,7 @@ the settings above should match r5rs
       (test-expression "(define qqq 2) (set! qqq 1)" "")
       (test-expression "(cond [(= 1 2) 3])" "")
       (test-expression "(cons 1 2)" "(1 . 2)")
+      (test-expression "(+ (list 1) 2)" "{bug09.png} +: expects type <number> as 1st argument, given: (1); other arguments were: 2")
       (test-expression "'(1)" "(1)")
       (test-expression "(define shrd (box 1)) (list shrd shrd)"
                        "(#&1 #&1)")
@@ -217,7 +221,8 @@ the settings above should match r5rs
       (test-expression "(list 1)" "(1)")
       (test-expression "(car (list))" "{bug09.png} car: expects argument of type <pair>; given ()")
       
-      (test-expression "argv" "#0()")))
+      (test-expression "argv" "#0()")
+      (test-expression "(define-syntax app syntax-case)" "syntax-case: bad syntax in: syntax-case")))
 
   
   
@@ -288,6 +293,7 @@ the settings above should match r5rs
       (test-expression "(define qqq 2) (set! qqq 1)" "")
       (test-expression "(cond ((= 1 2) 3))" "")
       (test-expression "(cons 1 2)" "(1 . 2)")
+      (test-expression "(+ (list 1) 2)" "{bug09.png} +: expects type <number> as 1st argument, given: (1); other arguments were: 2")
       (test-expression "'(1)" "(1)")
       (test-expression "(define shrd (cons 1 1)) (list shrd shrd)"
                        "((1 . 1) (1 . 1))")
@@ -320,7 +326,9 @@ the settings above should match r5rs
       (test-expression "(car (list))"
                        "{bug09.png} car: expects argument of type <pair>; given ()")
 
-      (test-expression "argv" "{bug09.png} reference to undefined identifier: argv")))
+      (test-expression "argv" "{bug09.png} reference to undefined identifier: argv")
+      (test-expression "(define-syntax app syntax-case)" 
+                       "compile: bad syntax; reference to top-level identifier is not allowed, because no #%top syntax transformer is bound in: syntax-case")))
                                                         
 ;;                      ;                               
  ;                                                      
@@ -365,10 +373,10 @@ the settings above should match r5rs
 
       (test-expression "class" 
                        "class: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: class")
+                       "reference to an identifier before its definition: class")
       (test-expression "shared"
                        "shared: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: shared")
+                       "reference to an identifier before its definition: shared")
 
       (test-expression "(define (. x y) (* x y))"
                        "read: illegal use of \".\"")
@@ -376,7 +384,7 @@ the settings above should match r5rs
       
       (test-expression "call/cc"
                        "call/cc: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: call/cc")
+                       "reference to an identifier before its definition: call/cc")
       
       (test-expression "(error 'a \"~a\" 1)"
                        "procedure error: expects 2 arguments, given 3: 'a \"~a\" 1")
@@ -385,22 +393,23 @@ the settings above should match r5rs
       
       (test-expression "(time 1)"
                        "time: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: time")
+                       "reference to an identifier before its definition: time")
       
       (test-expression "true" "true")
       (test-expression "mred^" 
                        "mred^: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: mred^")
+                       "reference to an identifier before its definition: mred^")
       (test-expression "(eq? 'a 'A)" "false")
       (test-expression "(set! x 1)"
                        "set!: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: set!")
+                       "reference to an identifier before its definition: set!")
       (test-expression "(define qqq 2) (set! qqq 1)" 
                        "set!: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: set!")
+                       "reference to an identifier before its definition: set!")
 
       (test-expression "(cond [(= 1 2) 3])" "cond: all question results were false")
       (test-expression "(cons 1 2)" "cons: second argument must be of type <list>, given 1 and 2")
+      (test-expression "(+ (list 1) 2)" "+: expects type <number> as 1st argument, given: (cons 1 empty); other arguments were: 2")
       (test-expression "'(1)" "quote: expected a name after a ', found something else")
       (test-expression "(define shrd (list 1)) (list shrd shrd)"
                        "(cons (cons 1 empty) (cons (cons 1 empty) empty))"
@@ -440,7 +449,8 @@ the settings above should match r5rs
 
       (test-expression "argv" 
                        "argv: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: argv")))
+                       "reference to an identifier before its definition: argv")
+      (test-expression "(define-syntax app syntax-case)" "")))
   
 
                                                                
@@ -489,17 +499,17 @@ the settings above should match r5rs
 
       (test-expression "class"
                        "class: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: class")
+                       "reference to an identifier before its definition: class")
       (test-expression "shared"
                        "shared: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: shared")
+                       "reference to an identifier before its definition: shared")
 
       (test-expression "(define (. x y) (* x y))" "read: illegal use of \".\"")
       (test-expression "'(1 . 2)" "read: illegal use of \".\"")
       
       (test-expression "call/cc"
                        "call/cc: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: call/cc")
+                       "reference to an identifier before its definition: call/cc")
       
       (test-expression "(error 'a \"~a\" 1)"
                        "procedure error: expects 2 arguments, given 3: 'a \"~a\" 1")
@@ -508,21 +518,22 @@ the settings above should match r5rs
       
       (test-expression "(time 1)"
 		         "time: name is not defined, not a parameter, and not a primitive name"
-		         "reference to undefined identifier: time")
+		         "reference to an identifier before its definition: time")
       
       (test-expression "true" "true")
       (test-expression "mred^" 
                        "mred^: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: mred^")
+                       "reference to an identifier before its definition: mred^")
       (test-expression "(eq? 'a 'A)" "false")
       (test-expression "(set! x 1)"
                        "set!: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: set!")
+                       "reference to an identifier before its definition: set!")
       (test-expression "(define qqq 2) (set! qqq 1)" 
                        "set!: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: set!")
+                       "reference to an identifier before its definition: set!")
       (test-expression "(cond [(= 1 2) 3])" "cond: all question results were false")
       (test-expression "(cons 1 2)" "cons: second argument must be of type <list>, given 1 and 2")
+      (test-expression "(+ (list 1) 2)" "+: expects type <number> as 1st argument, given: (list 1); other arguments were: 2")
       (test-expression "'(1)" "(list 1)")
       (test-expression "(define shrd (list 1)) (list shrd shrd)"
                        "(list (list 1) (list 1))"
@@ -562,7 +573,10 @@ the settings above should match r5rs
 
       (test-expression "argv" 
                        "argv: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: argv")))
+                       "reference to an identifier before its definition: argv")
+      
+      (test-expression "(define-syntax app syntax-case)" 
+                       "define-syntax: name is not defined, not a parameter, and not a primitive name")))
 
 
                                                                                     
@@ -609,17 +623,17 @@ the settings above should match r5rs
 
       (test-expression "class" 
                        "class: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: class")
+                       "reference to an identifier before its definition: class")
       (test-expression "shared"
                        "shared: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: shared")
+                       "reference to an identifier before its definition: shared")
       
       (test-expression "(define (. x y) (* x y))" "read: illegal use of \".\"")
       (test-expression "'(1 . 2)" "read: illegal use of \".\"")
       
       (test-expression "call/cc"
                        "call/cc: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: call/cc")
+                       "reference to an identifier before its definition: call/cc")
       
       (test-expression "(error 'a \"~a\" 1)"
                        "procedure error: expects 2 arguments, given 3: 'a \"~a\" 1")
@@ -632,16 +646,17 @@ the settings above should match r5rs
       (test-expression "true" "true")
       (test-expression "mred^" 
                        "mred^: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: mred^")
+                       "reference to an identifier before its definition: mred^")
       (test-expression "(eq? 'a 'A)" "false")
       (test-expression "(set! x 1)"
                        "set!: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: set!")
+                       "reference to an identifier before its definition: set!")
       (test-expression "(define qqq 2) (set! qqq 1)" 
                        "set!: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: set!")
+                       "reference to an identifier before its definition: set!")
       (test-expression "(cond [(= 1 2) 3])" "cond: all question results were false")
       (test-expression "(cons 1 2)" "cons: second argument must be of type <list>, given 1 and 2")
+      (test-expression "(+ (list 1) 2)" "+: expects type <number> as 1st argument, given: (list 1); other arguments were: 2")
       (test-expression "'(1)" "(list 1)")
       (test-expression "(define shrd (list 1)) (list shrd shrd)"
                        "(list (list 1) (list 1))"
@@ -674,7 +689,9 @@ the settings above should match r5rs
       (test-expression "(car (list))" "car: expects argument of type <pair>; given empty")
       (test-expression "argv" 
                        "argv: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: argv")))
+                       "reference to an identifier before its definition: argv")
+      (test-expression "(define-syntax app syntax-case)" 
+                       "define-syntax: name is not defined, not a parameter, and not a primitive name")))
 
 
                                                                       
@@ -721,17 +738,17 @@ the settings above should match r5rs
       
       (test-expression "class"
                        "class: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: class")
+                       "reference to an identifier before its definition: class")
       (test-expression "shared" 
                        "shared: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: shared")
+                       "reference to an identifier before its definition: shared")
       
       (test-expression "(define (. x y) (* x y))" "read: illegal use of \".\"")
       (test-expression "'(1 . 2)" "read: illegal use of \".\"")
       
       (test-expression "call/cc"
                        "call/cc: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: call/cc")
+                       "reference to an identifier before its definition: call/cc")
       
       (test-expression "(error 'a \"~a\" 1)"
                        "procedure error: expects 2 arguments, given 3: 'a \"~a\" 1")
@@ -744,16 +761,17 @@ the settings above should match r5rs
       (test-expression "true" "true")
       (test-expression "mred^" 
                        "mred^: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: mred^")
+                       "reference to an identifier before its definition: mred^")
       (test-expression "(eq? 'a 'A)" "false")
       (test-expression "(set! x 1)"
                        "set!: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: set!")
+                       "reference to an identifier before its definition: set!")
       (test-expression "(define qqq 2) (set! qqq 1)" 
                        "set!: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: set!")
+                       "reference to an identifier before its definition: set!")
       (test-expression "(cond [(= 1 2) 3])" "cond: all question results were false")
       (test-expression "(cons 1 2)" "cons: second argument must be of type <list>, given 1 and 2")
+      (test-expression "(+ (list 1) 2)" "+: expects type <number> as 1st argument, given: (list 1); other arguments were: 2")
       (test-expression "'(1)" "(list 1)")
       (test-expression "(define shrd (list 1)) (list shrd shrd)"
                        "(list (list 1) (list 1))"
@@ -786,7 +804,9 @@ the settings above should match r5rs
       (test-expression "(car (list))" "car: expects argument of type <pair>; given empty")
       (test-expression "argv" 
                        "argv: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: argv")))
+                       "reference to an identifier before its definition: argv")
+      (test-expression "(define-syntax app syntax-case)" 
+                       "define-syntax: name is not defined, not a parameter, and not a primitive name")))
   
 
                                                         
@@ -832,7 +852,7 @@ the settings above should match r5rs
 
       (test-expression "class"
                        "class: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: class")
+                       "reference to an identifier before its definition: class")
 
       (test-expression "shared" "shared: found a use of `shared' that does not follow an open parenthesis")
       
@@ -841,7 +861,7 @@ the settings above should match r5rs
       
       (test-expression "call/cc" 
                        "call/cc: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: call/cc")
+                       "reference to an identifier before its definition: call/cc")
       
       (test-expression "(error 'a \"~a\" 1)"
                        "procedure error: expects 2 arguments, given 3: 'a \"~a\" 1")
@@ -854,16 +874,17 @@ the settings above should match r5rs
       (test-expression "true" "true")
       (test-expression "mred^" 
                        "mred^: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: mred^")
+                       "reference to an identifier before its definition: mred^")
       (test-expression "(eq? 'a 'A)" "false")
       (test-expression "(set! x 1)"
                        "x: name is not defined"
-                       "set!: cannot set undefined identifier: x")
+                       "set!: cannot set identifier before its definition: x")
       (test-expression "(define qqq 2) (set! qqq 1)" 
                        "(void)" 
                        "define: cannot redefine name: qqq\n(void)")
       (test-expression "(cond [(= 1 2) 3])" "cond: all question results were false")
       (test-expression "(cons 1 2)" "cons: second argument must be of type <list or cyclic list>, given 1 and 2")
+      (test-expression "(+ (list 1) 2)" "+: expects type <number> as 1st argument, given: (list 1); other arguments were: 2")
       (test-expression "'(1)" "(list 1)")
       (test-expression "(define shrd (list 1)) (list shrd shrd)"
                        "(shared ((-1- (list 1))) (list -1- -1-))"
@@ -896,7 +917,9 @@ the settings above should match r5rs
       (test-expression "(car (list))" "car: expects argument of type <pair>; given empty")
       (test-expression "argv"
                        "argv: name is not defined, not a parameter, and not a primitive name"
-                       "reference to undefined identifier: argv")))
+                       "reference to an identifier before its definition: argv")
+      (test-expression "(define-syntax app syntax-case)" 
+                       "define-syntax: name is not defined, not a parameter, and not a primitive name")))
 
                                                  
                                                  

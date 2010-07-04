@@ -442,6 +442,10 @@
               5)
            5)
 
+(test-comp '(let-values ([() (values)])
+              (lambda () x))
+           '(lambda () x))
+
 (test-comp '(letrec-values ([() (values)])
               5)
            5)
@@ -514,6 +518,27 @@
                      [foo (lambda () goo)])
               15)
            15)
+
+(test-comp '(procedure? add1)
+           #t)
+(test-comp '(procedure? (lambda (x) x))
+           #t)
+(test-comp '(let ([f (lambda (x) x)])
+              (if (procedure? f)
+                  (list f)
+                  88))
+           '(let ([f (lambda (x) x)])
+              (list f)))
+
+(test-comp '(procedure-arity-includes? integer? 1)
+           #t)
+
+(test-comp '(module m mzscheme
+              (define foo integer?)
+              (display (procedure-arity-includes? foo 1)))
+           '(module m mzscheme
+              (define foo integer?)
+              (display #t)))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Check bytecode verification of lifted functions

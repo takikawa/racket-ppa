@@ -118,8 +118,30 @@
                font-weight: bold;
                }
 
+               .inherited {
+                 width: 100%;
+                 margin-top: 1em;
+                 text-align: left;
+                 background-color: #ECF5F5;
+               }
+
+               .inherited td {
+                 padding-left: 1em;
+                 text-indent: -0.8em;
+                 padding-right: 0.2em;
+               }
+
+               .inheritedlbl { 
+                 font-style: italic;
+                 font-size: 85%;
+               }
+
                .indexlink { 
                   text-decoration: none;
+                }
+
+               .nobreak { 
+                  white-space: nowrap;
                 }
 
                .title {

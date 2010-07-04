@@ -7,12 +7,26 @@
            (lib "pconvert.ss")
            (lib "class.ss"))
   
+  (require-for-syntax (only (lib "list.ss") foldr)
+                      (lib "shared.ss" "stepper" "private"))
+  
   (provide 
    check-expect ;; syntax : (check-expect <expression> <expression>)
    check-within ;; syntax : (check-within <expression> <expression> <expression>)
    check-error  ;; syntax : (check-error <expression> <expression>)
    generate-report ;; -> true
    )
+  
+  ;; slap a bunch of syntax-properties related to the stepper on the body 
+  ;; expressions of check-expect forms.
+  (define-for-syntax (add-stepper-properties tag exp)
+    (foldr (lambda (pr exp)
+             (stepper-syntax-property exp (car pr) (cadr pr)))
+           exp
+           `((stepper-hint ,tag)
+             (stepper-no-retval-wrap #t)
+             (stepper-dont-show-reduction #t)
+             (stepper-render-completed-as ,#`(finished-test-case)))))
   
   (define INEXACT-NUMBERS-FMT
     "check-expect cannot compare inexact numbers. Try (check-within test ~a range).")
@@ -27,6 +41,13 @@
     "check-error requires two expressions. Try (check-error test message).")
   (define-for-syntax CHECK-WITHIN-STR
     "check-within requires three expressions. Try (check-within test expected range).")
+  
+  (define-for-syntax CHECK-EXPECT-DEFN-STR
+    "check-expect cannot be used as an expression")
+  (define-for-syntax CHECK-WITHIN-DEFN-STR
+    "check-within cannot be used as an expression")
+  (define-for-syntax CHECK-ERROR-DEFN-STR
+    "check-error cannot be used as an expression")
 
   ;(make-src (U editor file-name) int int int)
   (define-struct src (file line col pos span))
@@ -47,18 +68,26 @@
   (define-syntax (check-expect stx)
     (syntax-case stx ()
       ((_ test actual)
+       (not (eq? (syntax-local-context) 'expression))
        (quasisyntax/loc stx
          (define #,(gensym 'test)
-           (check-values-expected
-            (lambda () test) actual (make-src #,@(list (syntax-source stx)
-                                                       (syntax-line stx)
-                                                       (syntax-column stx)
-                                                       (syntax-position stx)
-                                                       (syntax-span stx)))))))
+           #,(add-stepper-properties
+              'comes-from-check-expect
+              #`(check-values-expected
+                 (lambda () test) actual (make-src #,@(list (syntax-source stx)
+                                                            (syntax-line stx)
+                                                            (syntax-column stx)
+                                                            (syntax-position stx)
+                                                            (syntax-span stx))))))))
       ((_ test)
+       (not (eq? (syntax-local-context) 'expression))
        (raise-syntax-error 'check-expect CHECK-EXPECT-STR stx))
       ((_ test actual extra ...)
-       (raise-syntax-error 'check-expect CHECK-EXPECT-STR stx))))
+       (not (eq? (syntax-local-context) 'expression))
+       (raise-syntax-error 'check-expect CHECK-EXPECT-STR stx))
+      ((_ test ...)
+       (eq? (syntax-local-context) 'expression)
+       (raise-syntax-error 'check-expect CHECK-EXPECT-DEFN-STR stx))))
 
   ;check-values-expected: (-> scheme-val) scheme-val src -> void
   (define (check-values-expected test actual src)
@@ -72,20 +101,29 @@
   (define-syntax (check-within stx)
     (syntax-case stx ()
       ((_ test actual within)
+       (not (eq? (syntax-local-context) 'expression))
        (quasisyntax/loc stx
          (define #,(gensym 'test-within)
-           (check-values-within (lambda () test) actual within
-                                (make-src #,@(list (syntax-source stx)
-                                                   (syntax-line stx)
-                                                   (syntax-column stx)
-                                                   (syntax-position stx)
-                                                   (syntax-span stx)))))))
+           #,(add-stepper-properties
+              `comes-from-check-within
+              #`(check-values-within (lambda () test) actual within
+                                      (make-src #,@(list (syntax-source stx)
+                                                         (syntax-line stx)
+                                                         (syntax-column stx)
+                                                         (syntax-position stx)
+                                                         (syntax-span stx))))))))
       ((_ test actual)
+       (not (eq? (syntax-local-context) 'expression))
        (raise-syntax-error 'check-within CHECK-WITHIN-STR stx))
       ((_ test)
+       (not (eq? (syntax-local-context) 'expression))
        (raise-syntax-error 'check-within CHECK-WITHIN-STR stx))
       ((_ test actual within extra ...)
-       (raise-syntax-error 'check-within CHECK-WITHIN-STR stx))))
+       (not (eq? (syntax-local-context) 'expression))
+       (raise-syntax-error 'check-within CHECK-WITHIN-STR stx))
+      ((_ test ...)
+       (eq? (syntax-local-context) 'expression)
+       (raise-syntax-error 'check-within CHECK-WITHIN-DEFN-STR stx))))
 
   (define (check-values-within test actual within src)
     (error-check number? within CHECK-WITHIN-INEXACT-FMT)
@@ -95,15 +133,22 @@
   (define-syntax (check-error stx)
     (syntax-case stx ()
       ((_ test error)
+       (not (eq? (syntax-local-context) 'expression))
        (quasisyntax/loc stx
          (define #,(gensym 'test-error)
-           (check-values-error (lambda () test) error (make-src #,@(list (syntax-source stx)
-                                                                         (syntax-line stx)
-                                                                         (syntax-column stx)
-                                                                         (syntax-position stx)
-                                                                         (syntax-span stx)))))))
+           #,(add-stepper-properties
+              `comes-from-check-error
+              #`(check-values-error (lambda () test) error (make-src #,@(list (syntax-source stx)
+                                                                              (syntax-line stx)
+                                                                              (syntax-column stx)
+                                                                              (syntax-position stx)
+                                                                              (syntax-span stx))))))))
       ((_ test)
-       (raise-syntax-error 'check-error CHECK-ERROR-STR stx))))
+       (not (eq? (syntax-local-context) 'expression))
+       (raise-syntax-error 'check-error CHECK-ERROR-STR stx))
+      ((_ test ...)
+       (eq? (syntax-local-context) 'expression)
+       (raise-syntax-error 'check-error CHECK-ERROR-DEFN-STR stx))))
 
   (define (check-values-error test error src)
     (error-check string? error CHECK-ERROR-STR-FMT)
@@ -120,6 +165,10 @@
     (unless (pred? actual)
       (raise (make-exn:fail:contract (format fmt actual)
                                      (current-continuation-marks)))))
+  
+  
+
+  
   
   ;run-and-check: (scheme-val scheme-val scheme-val -> boolean) 
   ;               (scheme-val scheme-val scheme-val -> check-fail) 

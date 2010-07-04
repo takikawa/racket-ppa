@@ -68,6 +68,7 @@ wxDC::wxDC(void)
     c = new wxColour(wxBLACK);
     current_text_fg = c;
     anti_alias = 0;
+    current_alpha = 1.0;
 }
 
 wxColour *wxDC::GetBackground(void){
@@ -246,6 +247,17 @@ void wxDC::SetAntiAlias(int v)
   if (Colour)
     anti_alias = v;
 }
+
+void wxDC::SetAlpha(double a)
+{
+  current_alpha = a;
+}
+
+double wxDC::GetAlpha()
+{
+  return current_alpha;
+}
+
 
 //-----------------------------------------------------------------------------
 // wxDC::DrawOpenSpline(wxList *pts), may be virtually overridden by any child

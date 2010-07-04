@@ -198,7 +198,7 @@
  (plt:hd:help-desk-about-string
   "Das Hilfezentrum ist die primäre Quelle für Information über die PLT-Software,insbesondere DrScheme, MzScheme und MrEd.\n\nVersion ~a\nCopyright (c) ~a-~a PLT")
  (plt:hd:help-on-help "Hilfe zur Hilfe")
- (plt:hd:help-on-help-details "Hilfe zum Hilfezentrum finden Sie auf der Hilfezentrum-Hompage unter 'Help Desk'. (Um auf diese Homepage zu gelangen, drücken Sie den 'Home'-Knopf oben im Hilfezentrum.)")
+ (plt:hd:help-on-help-details "Hilfe zum Hilfezentrum befindet sich auf der Homepage des Hilfezentrums unter `Help Desk'.   (Die Homepage des Hilfezentrums ist über den `Home'-Knopf zu erreichen.)")
   (reload "Aktualisieren") ;; refresh the page in a web browser
   (plt:hd:ask-about-separate-browser
    "Sie haben einen Link selektiert, der ins Web zeigt. Wollen Sie die Seite im Hilfe-Browser oder im externen Browser anzeigen?")
@@ -279,6 +279,7 @@
  (preferences "Einstellungen")
  (error-saving-preferences "Fehler beim Speichern der Einstellungen für ~a")
  (error-saving-preferences-title "Fehler beim Speichern der Einstellungen")
+ (steal-the-lock-and-retry "Lock an uns reißen && nochmal versuchen") ;; in the preferences error dialog; this happens when the lockfile exists (after 3 pref writes). 
  (error-reading-preferences "Fehler beim Lesen der Einstellungen")
  (prefs-file-locked "Die Datei mit den Einstellungen ist gesperrt (weil die Datei ~a existiert), weshalb die Änderungen an den Einstellungen nicht gespeichert werden konnten. Änderung an den Einstellungen rückgängig machen?")
  (try-again "Nochmal versuchen") ;; button label
@@ -295,7 +296,7 @@
  (backup-files "Backup-Dateien")
  (map-delete-to-backspace "Entf löscht rückwärts")
  (verify-exit "Bei Verlassen nachfragen")
- (ask-before-changing-format "For Formatänderung beim Speichern nachfragen")
+ (ask-before-changing-format "Vor Formatänderung beim Speichern nachfragen")
  (wrap-words-in-editor-buffers "Worte in Editor-Puffern umbrechen")
  (show-status-line "Status-Zeile anzeigen")
  (count-columns-from-one "Spaltennummern fangen mit 1 an")
@@ -536,6 +537,10 @@
  
  (replace-and-find-again-info "Ersetze den aktuellen Text und suche dann das gleiche nochmal")
  (replace-and-find-again-menu-item "Ersetzen && nochmal suchen")
+
+ (complete-word "Wort vervollständigen") ; the complete word menu item in the edit menu
+ (no-completions "... keine Vervollständigungen verfügbar") ; shows up in the completions menu when there are no completions (in italics)
+  
 
  (preferences-info "Konfiguriere die Einstellungen")
  (preferences-menu-item "Einstellungen...")
@@ -902,7 +907,7 @@
  
  ;; the three string constants are concatenated together and the middle
  ;; one is hyperlinked to the dialog that suggests various languages
- (get-guidance-before "Wählen Sie Sprache auswählen... im Sprache-Menü oder ")
+ (get-guidance-before "Wählen Sie \"Sprache auswählen...\" im \"Sprache\"-Menü oder ")
  (get-guidance-during "Hilfe anfordern")
  (get-guidance-after ".")
 
@@ -1080,7 +1085,7 @@
 
  (stepper-name "Stepper")
  (stepper-language-level-message
-  "Die aktuelle Sprachebene ist \"~a\". Der Stepper funktioniert bisher nur für die Ebenen\"~a\" bis \"~a\".")
+  "Der Stepper unterstützt die Sprachebene \"~a\" nicht.")
  (stepper-button-label "Stepper")
  (stepper-home "Anfang")
  (stepper-previous-application "|< Applikation")

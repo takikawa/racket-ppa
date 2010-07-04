@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[horizontal-panel% panel% ()]{
+@defclass/title[horizontal-panel% panel% ()]{
 
 A horizontal panel arranges its subwindows in a single row. See also
  @scheme[panel%].

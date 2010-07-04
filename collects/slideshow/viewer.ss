@@ -54,7 +54,8 @@
 		       0
 		       1
 		       zero-inset
-		       null))
+		       null
+                       #f))
 
       (define (talk-list-ref n)
 	(if (n . < . slide-count)
@@ -137,7 +138,8 @@
 						(sliderec-page (car (last-pair l)))
 						1 
 						zero-inset 
-						null)))))]
+						null
+                                                #f)))))]
 	 [else (let ([a (car l)]
 		     [b (cadr l)]
 		     [c (caddr l)]
@@ -174,7 +176,8 @@
 			(sliderec-page a)
 			(- (+ (sliderec-page d) (sliderec-page-count d)) (sliderec-page a))
 			zero-inset
-			null)
+			null
+                        (sliderec-timeout a))
 		       (make-quad (list-tail l 4))))]))
 
       ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -316,16 +319,35 @@
 		    [y (send background-f get-y)])
 		(send background-f move (+ x dx) (+ y dy)))))
 	  
-	  (define/private (prev)
+	  (define/public (prev)
 	    (stop-transition)
-	    (set! current-page (max (sub1 current-page)
-				    0))
+	    (set! current-page 
+                  (let loop ([pos (max (sub1 current-page) 0)])
+                    (cond
+                     [(zero? pos) pos]
+                     [(sliderec-timeout (talk-list-ref pos)) (loop (sub1 pos))]
+                     [else pos])))
 	    (refresh-page))
 	  
 	  (define/public (next)
 	    (if (pair? current-transitions)
 		(stop-transition)
-		(change-slide 1)))
+                (if (sliderec-timeout (talk-list-ref current-page))
+                    ;; skip to a slide without a timeout:
+                    (change-slide
+                     (- (let loop ([pos (add1 current-page)])
+                          (cond
+                           [(= pos slide-count) (sub1 slide-count)]
+                           [(sliderec-timeout (talk-list-ref pos)) (loop (add1 pos))]
+                           [else pos]))
+                        current-page))
+                    ;; normal step:
+                    (change-slide 1))))
+
+          (define/public (next-one)
+            (if (pair? current-transitions)
+		(stop-transition)
+                (change-slide 1)))
 
 	  (define/public (slide-changed pos)
 	    (when (or (= pos current-page)
@@ -482,9 +504,11 @@
       (send (new (class editor-canvas% 
 		   (define/override (on-event e)
 		     (super on-event e)
-		     (when (and click-to-advance?
-				(send e button-up?))
-		       (send f next)))
+		     (when click-to-advance?
+                       (when (send e button-up? 'left)
+                         (send f next))
+                       (when (send e button-up? 'right)
+                         (send f prev))))
 		   (super-new))
 		 [parent c-frame] 
 		 [editor commentary] 
@@ -616,9 +640,12 @@
 		(set! clicking #f)
 		(when hit?
 		  ((click-region-thunk c))))]
-	     [(send e button-up?)
+	     [(send e button-up? 'left)
 	      (when click-to-advance?
 		(send (get-top-level-window) next))]
+	     [(send e button-up? 'right)
+	      (when click-to-advance?
+		(send (get-top-level-window) prev))]
 	     [else 
 	      (when (and clicking clicking-hit?)
 		(invert-clicking! #f))
@@ -702,6 +729,23 @@
 	      (set! click-regions null)
 	      (set! clicking #f)
 	      (stop-transition/no-refresh)
+              (when (sliderec-timeout (talk-list-ref current-page))
+                (let ([key (gensym)])
+                  (set! current-timeout-key key)
+                  (new timer%
+                       [interval (inexact->exact
+                                  (floor 
+                                   (* (sliderec-timeout (talk-list-ref current-page))
+                                      1000)))]
+                       [just-once? #t]
+                       [notify-callback 
+                        (lambda ()
+                          (when (eq? current-timeout-key key)
+			    ;; run as low priority:
+			    (queue-callback
+			     (lambda ()
+			       (send c-frame next-one))
+			     #f)))])))
 	      (cond
 	       [config:use-offscreen?
 		(let-values ([(cw ch) (get-client-size)])
@@ -728,7 +772,7 @@
 		(let ([dc (get-dc)])
 		  (send dc clear)
 		  (paint-slide dc))])))
-	  (super-new [style '(no-autoclear)])))
+          (super-new [style '(no-autoclear)])))
 
       (define two-c%
 	(class canvas%
@@ -831,7 +875,9 @@
 	  (let-values ([(cw ch) (send dc get-size)])
 	    (paint-slide dc page 1 1 cw ch config:use-screen-w config:use-screen-h #t))]
 	 [(dc page extra-scale-x extra-scale-y cw ch usw ush to-main?)
-	  (let* ([slide (talk-list-ref page)]
+	  (let* ([slide (if (sliderec? page)
+                            page
+                            (talk-list-ref page))]
 		 [ins (sliderec-inset slide)]
 		 [cw (if to-main?
 			 (+ cw (sinset-l ins) (sinset-r ins))
@@ -960,6 +1006,7 @@
 
       (define current-transitions null)
       (define current-transitions-key #f)
+      (define current-timeout-key #f)
 
       (define (do-transitions transes offscreen)
 	(let ([key (cons 1 2)])
@@ -995,7 +1042,8 @@
       
       (define (stop-transition/no-refresh)
 	(set! current-transitions null)
-	(set! current-transitions-key #f))
+	(set! current-transitions-key #f)
+        (set! current-timeout-key #f))
       
       (define (get-page-from-user)
 	(unless (zero? slide-count)

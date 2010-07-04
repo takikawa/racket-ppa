@@ -10,7 +10,10 @@
            (lib "contract.ss")
 	   (lib "dirs.ss" "setup"))
   
-  (provide doc-collections-changed)
+  (provide doc-collections-changed
+           reset-doc-lists
+           extract-doc-txt
+           load-txt-keywords-into-hash-table)
   (provide/contract
    [do-search
     (string?
@@ -68,7 +71,7 @@
     
     (set! doc-names (append
 		     std-doc-names
-		     (map (lambda (s) (format "the ~a collection" s))
+		     (map (lambda (s) (format "the ~a" s))
 			  txt-doc-names)))
     (set! doc-kinds (append (map (lambda (x) 'html) std-docs) (map (lambda (x) 'text) txt-docs)))
     
@@ -189,10 +192,14 @@
   
   (define re:keyword-line (regexp "\n>"))
   (define text-keywords (make-hash-table 'equal))
+  
   (define (load-txt-keywords doc)
+    (load-txt-keywords-into-hash-table text-keywords doc))
+  
+  (define (load-txt-keywords-into-hash-table ht doc)
     (parse-txt-file
      (apply build-path doc)
-     text-keywords
+     ht
      (λ (p)
        (port-count-lines! p)
        (let loop ()
@@ -476,7 +483,20 @@
                             [(html) (with-handlers ([exn:fail:filesystem? (lambda (x) null)]) 
                                       (map (lambda (x) (build-path doc x)) 
                                            (filter
-                                            (lambda (x) (file-exists? (build-path doc x)))
+                                            (lambda (x) 
+                                              (let ([str (path->string x)])
+                                                (cond
+                                                  [(or (regexp-match "--h\\.idx$" str)
+                                                       (regexp-match "--h\\.ind$" str)
+                                                       (regexp-match "Z-A\\.scm$" str)
+                                                       (regexp-match "Z-L\\.scm$" str)
+                                                       (regexp-match "gif$" str)
+                                                       (regexp-match "png$" str)
+                                                       (regexp-match "hdindex$" str)
+                                                       (regexp-match "keywords$" str))
+                                                   #f]
+                                                  [else 
+                                                   (file-exists? (build-path doc x))])))
                                             (directory-list doc))))]
                             [(text) (list (apply build-path doc))]
                             [else null])])

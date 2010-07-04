@@ -786,7 +786,10 @@
                        (map (lambda (n sc) (get-parent-record n sc iname level type-recs))
                             super-names
                             (header-extends info)))
-                      (object-methods (class-record-methods (send type-recs get-class-record object-type)))
+                      (object-methods 
+                       (filter (lambda (m) 
+                                 (not (eq? 'ctor (method-record-rtype m))))
+                               (class-record-methods (send type-recs get-class-record object-type))))
                       (members (def-members iface))
                       (reqs (map (lambda (name-list)
                                    (if (= (length name-list) 1)

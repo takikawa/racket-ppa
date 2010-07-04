@@ -1,10 +1,10 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
 @define[lbnumnote @elem{List box items are indexed from @scheme[0].}]
 
 
-@defclass[list-box% object% (list-control<%>)]{
+@defclass/title[list-box% object% (list-control<%>)]{
 
 A list box allows the user to select one or more string items from a
  scrolling list. A list box is either a single-selection control (if
@@ -94,16 +94,18 @@ If @scheme[selection] is an integer, it is passed to
 }
 
 
-@defmethod[#:mode 'add 
+@defmethod[#:mode override
            (append [item string]
-                   [data any/c])
+                   [data any/c #f])
            void?]{
 
 Adds a new item to the list box with an associated ``data'' object.
  The @scheme[data] object is not displayed in the list box; it is
- provided merely as a convenience for use with
-@method[list-box% get-data], possibly allowing a programmer to avoid managing a separate
- item-to-data mapping in addition to the list box control.
+ provided merely as a convenience for use with @method[list-box%
+ get-data], possibly allowing a programmer to avoid managing a
+ separate item-to-data mapping in addition to the list box control.
+
+See also @xmethod[list-control<%> append].
 
 }
 

@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@definterface[editor<%> ()]{
+@definterface/title[editor<%> ()]{
 
 The @scheme[editor<%>] interface is implemented by @scheme[text%] and
  @scheme[pasteboard%].
@@ -93,7 +93,7 @@ pasteboard editor, the default cursor is an arrow.
 
 }}
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (after-edit-sequence)
            void?]{
 
@@ -115,7 +115,7 @@ Does nothing.
 
 }
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (after-load-file [success? any/c])
            void?]{
 
@@ -140,7 +140,7 @@ Does nothing.
 }
 }
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (after-save-file [success? any/c])
            void?]{
 
@@ -205,7 +205,7 @@ When an editor contains other editors, using @method[editor<%>
  end-edit-sequence] for the sub-editor.
 
 See also @method[editor<%> refresh-delayed?] and @method[editor<%>
- in-edit-sequence?], and see @secref["mr:editorthreads"] for
+ in-edit-sequence?], and see @secref["editorthreads"] for
  information about edit sequences and refresh requests.
 
 If the @scheme[undoable?] flag is @scheme[#f], then the changes made
@@ -280,7 +280,7 @@ locked, etc.
 
 }}
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (can-load-file? [filename path?]
                            [format (one-of/c 'guess 'standard 'text 'text-force-cr 'same 'copy)])
            boolean?]{
@@ -305,7 +305,7 @@ Returns @scheme[#t].
 
 }}
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (can-save-file? [filename path?]
                            [format (one-of/c 'guess 'standard 'text 'text-force-cr 'same 'copy)])
            boolean?]{
@@ -336,7 +336,7 @@ Returns @scheme[#t].
               void?])]{
 
 Changes the style for @techlink{items} in the editor, either by
-applying a style delta or using a specific style.
+ applying a style delta or using a specific style.
 
 To change a large collection of snips from one style to another style,
  consider providing a @scheme[style<%>] instance rather than a
@@ -1215,7 +1215,7 @@ For @scheme[text%] objects: @|FCA| @|EVD|
 }
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-change)
            void?]{
 
@@ -1289,7 +1289,7 @@ Does nothing. See also @xmethod[text% on-default-event] and
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-display-size)
            void?]{
 
@@ -1322,13 +1322,13 @@ If automatic wrapping is enabled (see @method[editor<%> auto-wrap] )
 Calls @method[editor<%> on-display-size] unless the editor is
  currently in an edit sequence or currently being refreshed. In the
  latter cases, the call to @method[editor<%> on-display-size] is
- delegated to another thread; see @secref["mr:editorthreads"] for more
+ delegated to another thread; see @secref["editorthreads"] for more
  information.
 
 }
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-edit-sequence)
            void?]{
 
@@ -1407,7 +1407,7 @@ Either passes this event on to a caret-owning snip, selects a new
 }
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-load-file [filename path?]
                          [format (one-of/c 'guess 'standard 'text 'text-force-cr 'same 'copy)])
            void?]{
@@ -1566,7 +1566,7 @@ Does nothing.
 
 }}
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-save-file [filename path?]
                          [format (one-of/c 'guess 'standard 'text 'text-force-cr 'same 'copy)])
            void?]{
@@ -1592,7 +1592,7 @@ Does nothing.
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-snip-modified [snip (is-a?/c snip%)]
                              [modified? any/c])
            void?]{
@@ -1853,11 +1853,11 @@ See also @method[editor<%> add-undo].
            void?]{
 
 Repaints a region of the editor, generally called by an editor
- administrator. See @secref["mr:editorthreads"] for information about
- edit sequences and refresh requests.
-  
-The @scheme[x], @scheme[y], @scheme[width], and @scheme[height] arguments specify
- the area that needs repainting in editor coordinates.
+ administrator. The @scheme[x], @scheme[y], @scheme[width], and
+ @scheme[height] arguments specify the area that needs repainting in
+ editor coordinates. The @method[editor-admin% get-dc] method of the
+ editor's administrator (as returned by @method[editor<%> get-admin])
+ supplies the target @scheme[dc<%>] object and offset for drawing.
 
 See @|drawcaretdiscuss| for information about @scheme[draw-caret].
 
@@ -1866,6 +1866,9 @@ The @scheme[background] color corresponds to the background of the
  An editor should use the given background color as its own
  background (or not paint the background of @scheme[background] is
  @scheme[#f]).
+
+See @secref["editorthreads"] for information about edit sequences and
+ refresh requests.
 
 }
 

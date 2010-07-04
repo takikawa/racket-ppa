@@ -1023,6 +1023,10 @@
  /* NEED_RESET_STDOUT_BLOCKING enures that file descriptors 1 and 2
     are reset to blocking mode before exiting. */
 
+ /* USE_TRANSITIONAL_64_FILE_OPS uses fseeko64, lseek64, stat64,
+    etc. for file operations involving sizes (that can require
+    64-bit arithmetic). */
+
  /* USE_ULIMIT uses ulimit instead of getdtablesize (Unix). */
 
  /* USE_DYNAMIC_FDSET_SIZE allocates fd_set records based on the

@@ -1,6 +1,7 @@
 (module tool mzscheme
   (require (lib "tool.ss" "drscheme") (lib "contract.ss")
            (lib "mred.ss" "mred") (lib "framework.ss" "framework")
+           (lib "errortrace-lib.ss" "errortrace")
            (prefix u: (lib "unit.ss")) 
            (lib "file.ss")
            (lib "include-bitmap.ss" "mrlib") (lib "etc.ss")
@@ -275,7 +276,7 @@
         (print-style print-full? allow-check? allow-test? run-tests? coverage? classpath) (make-inspector))
       
       ;ProfJ general language mixin
-      (define (java-lang-mixin level name number one-line dyn?)
+      (define (java-lang-mixin level name number one-line dyn? manual-dirname)
         (when dyn? (dynamic? #t))
         (class* object% (drscheme:language:language<%>)
           (define/public (extra-repl-information settings port) (void))
@@ -284,8 +285,17 @@
           (define/public (metadata->settings m) #f)
           (define/public (get-metadata-lines) #f)
           
+          (define autocomplete-words #f)
+          
           (define/public (capability-value s) 
             (cond
+              [(eq? s 'drscheme:autocomplete-words)
+               (unless autocomplete-words 
+                 (set! autocomplete-words
+                       (if manual-dirname
+                           (text:get-completions/manuals (list manual-dirname))
+                           '())))
+               autocomplete-words]
               [(eq? s 'drscheme:language-menu-title) (string-constant profj-java)]
               [(memq s '(profj:special:java-comment-box 
                          profj:special:java-examples-box 
@@ -817,8 +827,9 @@
                                      (else 
                                       (let-values (((name syn) (get-module-name (expand (car mods)))))
                                         (set! name-to-require name)
-                                        (syntax-as-top (eval (compile syn))
-                                         #;(old-current-eval (compile syn)))
+                                        (syntax-as-top #;(eval (annotate-top (compile syn)))
+                                         (old-current-eval 
+                                          (errortrace-annotate syn)))
                                         (loop (cdr mods) extras #t)))))))))
                           ((parse-java-interactions ex loc)
                            (let ((exp (syntax-object->datum (syntax ex))))
@@ -884,15 +895,19 @@
           (super-instantiate ())))
       
       ;Create the ProfessorJ languages
-      (define dynamic-lang% (java-lang-mixin 'full (string-constant profj-dynamic-lang) 6 (string-constant profj-dynamic-lang-one-summary) #t))
-      (define full-lang% (java-lang-mixin 'full (string-constant profj-full-lang) 5 (string-constant profj-full-lang-one-line-summary) #f))
-      (define advanced-lang% (java-lang-mixin 'advanced (string-constant profj-advanced-lang) 4 (string-constant profj-advanced-lang-one-line-summary) #f))
+      (define dynamic-lang% (java-lang-mixin 'full (string-constant profj-dynamic-lang) 6 (string-constant profj-dynamic-lang-one-summary) #t #f))
+      (define full-lang% (java-lang-mixin 'full (string-constant profj-full-lang) 5 (string-constant profj-full-lang-one-line-summary) #f #f))
+      (define advanced-lang% (java-lang-mixin 'advanced (string-constant profj-advanced-lang) 4 (string-constant profj-advanced-lang-one-line-summary) #f
+                                              "profj-advanced"))
       (define intermediate+access-lang% 
         (java-lang-mixin 'intermediate+access 
-                         (string-constant profj-intermediate-access-lang) 3 (string-constant profj-intermediate-access-lang-one-line-summary) #f))
+                         (string-constant profj-intermediate-access-lang) 3 (string-constant profj-intermediate-access-lang-one-line-summary) #f
+                         "profj-intermediate-access"))
       (define intermediate-lang% 
-        (java-lang-mixin 'intermediate (string-constant profj-intermediate-lang) 2 (string-constant profj-intermediate-lang-one-line-summary) #f))
-      (define beginner-lang% (java-lang-mixin 'beginner (string-constant profj-beginner-lang) 1 (string-constant profj-beginner-lang-one-line-summary) #f))
+        (java-lang-mixin 'intermediate (string-constant profj-intermediate-lang) 2 (string-constant profj-intermediate-lang-one-line-summary) #f
+                         "profj-intermediate"))
+      (define beginner-lang% (java-lang-mixin 'beginner (string-constant profj-beginner-lang) 1 (string-constant profj-beginner-lang-one-line-summary) #f
+                                              "profj-beginner"))
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;

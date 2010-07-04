@@ -13,7 +13,9 @@
            (lib "list.ss")
            (lib "pack.ss" "setup")
            (lib "plt-single-installer.ss" "setup")
-           (lib "getinfo.ss" "setup"))
+           (lib "getinfo.ss" "setup")
+           (lib "unpack.ss" "setup")
+           (lib "etc.ss"))
 
   #| The util collection provides a number of useful functions for interacting with the PLaneT system. |#
   
@@ -22,14 +24,14 @@
    current-cache-contents
    current-linkage
    make-planet-archive
+   unpack-planet-archive
    force-package-building?
    get-installed-planet-archives
    get-hard-linked-packages
-   remove-pkg
    unlink-all
    lookup-package-by-keys
-   
-   resolve-planet-path)
+   resolve-planet-path
+   (struct exn:fail:planet ()))
   
   (provide/contract
    [download/install-pkg
@@ -38,8 +40,10 @@
     (-> string? string? natural-number/c natural-number/c path? void?)]
    [remove-hard-link 
     (-> string? string? natural-number/c natural-number/c void?)]
+   [remove-pkg
+    (-> string? string? natural-number/c natural-number/c void?)]
    [erase-pkg
-    (-> string? string? natural-number/c natural-number/c boolean?)])
+    (-> string? string? natural-number/c natural-number/c void?)])
 
   ;; download/install-pkg : string string nat nat -> pkg | #f
   (define (download/install-pkg owner name maj min)
@@ -63,20 +67,27 @@
   ;;   -- remove relevant infodomain cache entries
   ;;   -- delete files from cache directory
   ;;   -- remove any existing linkage for package
-  ;; returns #t if the removal worked; #f if no package existed.
+  ;; returns void if the removal worked; raises an exception if no package existed.
+  
+  (define-struct (exn:fail:planet exn:fail) ())
+  
   (define (remove-pkg owner name maj min)
     (let ((p (get-installed-package owner name maj min)))
-      (and p
-           (let ((path (pkg-path p)))
-             (with-logging 
-              (LOG-FILE)
-              (lambda () 
-                (printf "\n============= Removing ~a =============\n" (list owner name maj min))
-                (clean-planet-package path (list owner name '() maj min))))
-             (erase-metadata p)
-             (delete-directory/files path)
-             (trim-directory (CACHE-DIR) path)
-             #t))))
+      (unless p
+        (raise (make-exn:fail:planet "Could not find package" (current-continuation-marks))))
+      (unless (normally-installed-pkg? p)
+        (raise (make-exn:fail:planet "Not a normally-installed package, can't remove" (current-continuation-marks))))
+
+      (let ((path (pkg-path p)))
+        (with-logging 
+         (LOG-FILE)
+         (lambda () 
+           (printf "\n============= Removing ~a =============\n" (list owner name maj min))
+           (clean-planet-package path (list owner name '() maj min))))
+        (erase-metadata p)
+        (delete-directory/files path)
+        (trim-directory (CACHE-DIR) path)
+        (void))))
   
   ;; erase-metadata : pkg -> void
   ;; clears out any references to the given package in planet's metadata files
@@ -94,26 +105,55 @@
            [cache-file (build-path (PLANET-DIR) "cache.ss")])
       (when (file-exists? cache-file)
         (let ([cache-lines (with-input-from-file cache-file read)])
-          (with-output-to-file cache-file
-            (lambda ()
+          (call-with-output-file cache-file
+            (λ (op)
               (if (pair? cache-lines)
-                  (write (filter (lambda (line) (not (and (pair? line) (equal? (car line) pathbytes)))) cache-lines))
-                  (printf "\n")))
+                  (write (filter
+                          (λ (line) 
+                            (not 
+                             (and
+                              (pair? line)
+                              (or (not (directory-exists? (bytes->path (car line))))
+                                  (subpath? path (bytes->path (car line)))))))                              
+                          cache-lines)
+                         op)
+                  (fprintf op "\n")))
             'truncate/replace)))))
+  
+  ;; subpath? : path path -> boolean
+  ;; determines if p1 is a subpath of p2. Both paths must actually exist on the filesystem
+  (define (subpath? p1 p2)
+    (let ([full-p1 (explode-path (normalize-path p1))]
+          [full-p2 (explode-path (normalize-path p2))])
+      (sublist? full-p1 full-p2 (o2 bytes=? path->bytes))))
+
+  ;; o2 : (X X -> Y) (Z -> X) -> (Z Z -> Y)
+  ;; "compose-two"
+  (define (o2 a b) (λ (x y) (a (b x) (b y))))
+
+  ;; sublist? : (listof X) (listof X) (X X -> boolean) -> boolean
+  ;; determine if l1 is a sublist of l2, using = as the comparison operator for elements
+  (define (sublist? l1 l2 =)
+    (cond
+      [(null? l1) #t]
+      [(null? l2) #f]
+      [(= (car l1) (car l2)) (sublist? (cdr l1) (cdr l2) =)]
+      [else #f]))
   
   (define (erase-pkg owner name maj min)
     (let* ([uninstalled-pkg-dir
             (build-path (UNINSTALLED-PACKAGE-CACHE) owner name (number->string maj) (number->string min))]
-           [uninstalled-pkg-file (build-path uninstalled-pkg-dir name)])
-      (let ([removed-something? (remove-pkg owner name maj min)]
-            [erased-something?
-             (if (file-exists? uninstalled-pkg-file)
-                 (begin
-                   (delete-file uninstalled-pkg-file)
-                   (trim-directory (UNINSTALLED-PACKAGE-CACHE) uninstalled-pkg-dir)
-                   #t)
-                 #f)])
-        (or removed-something? erased-something?))))
+           [uninstalled-pkg-file (build-path uninstalled-pkg-dir name)]
+           [uninstalled-file-exists? (file-exists? uninstalled-pkg-file)])
+      (when uninstalled-file-exists?
+        (delete-file uninstalled-pkg-file)
+        (trim-directory (UNINSTALLED-PACKAGE-CACHE) uninstalled-pkg-dir))
+      (with-handlers ([exn:fail:planet? 
+                       (λ (e) (if uninstalled-file-exists? 
+                                  ;; not really a failure, just return
+                                  (void)
+                                  (raise e)))])
+        (remove-pkg owner name maj min))))
 
   ;; listof X * listof X -> nonempty listof X
   ;; returns de-prefixed version of l2 if l1 is a proper prefix of l2; 
@@ -231,7 +271,11 @@
             (reverse warnings)))
          
          (normalize-path archive-name))]))
- 
+  
+  (define (unpack-planet-archive plt-file target)
+    (parameterize ([current-directory target])
+      (unpack plt-file)))
+  
   ;; check-info.ss-sanity : path (string -> void) (string -> void) (string -> void) -> void
   ;; gets all the info.ss fields that planet will use (using the info.ss file
   ;; from the current directory) and calls the announce, warn, and fail functions with strings
@@ -402,4 +446,73 @@
      (lambda (row) 
        (let ([p (row->package row)])
          (when p
-           (erase-metadata p)))))))
+           (erase-metadata p))))))
+  
+  ;; ============================================================
+  ;; VERSION INFO
+  
+  (provide this-package-version
+           this-package-version-name
+           this-package-version-owner
+           this-package-version-maj
+           this-package-version-min)
+  
+  (define-syntax (this-package-version stx)
+    (syntax-case stx ()
+      [(_)
+       #`(this-package-version/proc 
+          #,(datum->syntax-object stx `(,#'this-expression-source-directory)))]))
+  
+  (define-syntax define-getters
+    (syntax-rules ()
+      [(define-getters (name position) ...)
+       (begin
+         (define-syntax (name stx)
+           (syntax-case stx ()
+             [(name)
+              #`(let ([p #,(datum->syntax-object stx `(,#'this-package-version))])
+                  (and p (position p)))]))
+         ...)]))
+  
+  (define-getters
+    (this-package-version-name pd->name)
+    (this-package-version-owner pd->owner)
+    (this-package-version-maj pd->maj)
+    (this-package-version-min pd->min))
+  
+  ;; ----------------------------------------
+  
+  (define (this-package-version/proc srcdir)
+    (let* ([package-roots (get-all-planet-packages)]
+           [thepkg (ormap (predicate->projection (contains-dir? srcdir))
+                          package-roots)])
+      (and thepkg (archive-retval->simple-retval thepkg))))
+
+  ;; predicate->projection : #f \not\in X ==> (X -> boolean) -> (X -> X)
+  (define (predicate->projection pred) (λ (x) (if (pred x) x #f)))
+  
+  ;; contains-dir? : path -> pkg -> boolean
+  (define ((contains-dir? srcdir) alleged-superdir-pkg)
+    (let* ([nsrcdir (normalize-path srcdir)]
+           [nsuperdir (normalize-path (car alleged-superdir-pkg))]
+           [nsrclist (explode-path nsrcdir)]
+           [nsuperlist (explode-path nsuperdir)])
+      (list-prefix? nsuperlist nsrclist)))
+  
+  (define (list-prefix? sup sub)
+    (let loop ([sub sub]
+               [sup sup])
+      (cond
+        [(null? sup) #t]
+        [(equal? (car sup) (car sub))
+         (loop (cdr sub) (cdr sup))]
+        [else #f])))
+  
+  (define (archive-retval->simple-retval p)
+    (list-refs p '(1 2 4 5)))
+      
+  (define-values (pd->owner pd->name pd->maj pd->min)
+    (apply values (map (λ (n) (λ (l) (list-ref l n))) '(0 1 2 3))))
+  
+  (define (list-refs p ns)
+    (map (λ (n) (list-ref p n)) ns)))

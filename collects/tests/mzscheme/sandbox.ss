@@ -55,10 +55,52 @@
    x => 1
    (id 1) => 1
    (id (plus1 x)) => 1
+   (define id2 id)
+   (id2 (id x)) => 1
+   blah =err> "before its definition"
+   ;; using a string for an input
+   "1" => 1
+   "(+ 1 2) x (define y 9) y (set! y 99) y" => 99
+   "bad\"string" =err> "expected a closing"
+   "bad(string" =err> "expected a .\\)."
+   "bad)string" =err> "unexpected .\\)."
+   "(set! y 999) (string" =err> "expected a .\\)."
+   y => 99
+   "(set! y 999) (if)" =err> "if: bad syntax"
+   y => 999
+   ;; test limits
    (loop) =err> "out of time"
    --top--
    (when (custodian-memory-accounting-available?)
      (t --eval-- (memory 1000000) =err> "out of memory"))
+   ;; test parameter settings (tricky to get this right since
+   ;; with-limits runs stuff in a different thread)
+   (set-eval-limits ev #f #f)
+   --eval--
+   (define p (make-parameter 0))
+   (p) => 0
+   (p 1)
+   (p) => 1
+   (thread-wait (thread (lambda () (p 100))))
+   (p) => 1
+   --top--
+   (set-eval-limits ev 1 3)
+   --eval--
+   (p) => 1
+   (p 2)
+   (p) => 2
+   (thread-wait (thread (lambda () (p 100))))
+   (p) => 2
+   --top--
+   (set-eval-limits ev #f #f)
+   --eval--
+   (p) => 2
+   ;; breaking
+   --top--
+   (thread (lambda () (sleep 1) (break-evaluator ev)))
+   --eval--
+   (sleep 2) =err> "user break"
+   ;; termination
    --eval--
    (printf "x = ~s\n" x) => (void)
    ,eof =err> "terminated"
@@ -217,13 +259,14 @@
           (directory-list "/tmp") =err> "file access denied"
           --top--
           ;; should work also for module evaluators
-          (set! ev (make-evaluator `(module foo mzscheme
-                                      (require (file ,test-lib)))))
-          --eval--
-          x => 123
-          (length (with-input-from-file ,test-lib read)) => 5
-          ;; the directory is still not kosher
-          (directory-list "/tmp") =err> "file access denied"
+          ;; --> NO!  Shouldn't make user code require whatever it wants
+          ;; (set! ev (make-evaluator `(module foo mzscheme
+          ;;                             (require (file ,test-lib)))))
+          ;; --eval--
+          ;; x => 123
+          ;; (length (with-input-from-file ,test-lib read)) => 5
+          ;; ;; the directory is still not kosher
+          ;; (directory-list "/tmp") =err> "file access denied"
           --top--
           ;; explicitly allow access to /tmp
           (set! ev (let ([rx (if (eq? 'windows (system-type))

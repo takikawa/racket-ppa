@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[string-snip% snip% ()]{
+@defclass/title[string-snip% snip% ()]{
 
 An instance of @scheme[string-snip%] is created automatically when
  text is inserted into a text editor. See also @xmethod[text%

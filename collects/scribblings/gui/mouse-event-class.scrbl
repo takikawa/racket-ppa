@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[mouse-event% event% ()]{
+@defclass/title[mouse-event% event% ()]{
 
 A @scheme[mouse-event%] object encapsulates a mouse event.
  Mouse events are primarily processed by

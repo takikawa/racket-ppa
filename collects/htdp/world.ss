@@ -23,6 +23,7 @@ ones.)
 Matthew
 |#
 
+;; Mon Sep 17 09:40:39 EDT 2007: run-simulation now allows recordings, too
 ;; Mon Aug  6 19:50:30 EDT 2007: exporting both add-line from image.ss and scene+line 
 ;; Fri May  4 18:05:33 EDT 2007: define-run-time-path 
 ;; Thu May  3 22:06:16 EDT 2007: scene # image; pasteboard% for text%
@@ -88,7 +89,7 @@ Matthew
   ;; world manipulation functions: 
   ;; =============================
   (provide      ;; forall(World):
-   big-bang	;; Number Number Number World -> true
+   big-bang	;; Number Number Number World [Boolean] -> true
    end-of-time  ;; String u Symbol -> World
    )
   
@@ -296,14 +297,33 @@ Matthew
 	   (sleep/yield .05)
 	   (run-movie (cdr movie))]))))
   
-  (define (run-simulation width height rate f)
-    (check-pos 'run-simulation width "first")
-    (check-pos 'run-simulation height "second")
-    (check-arg 'run-simulation (number? rate) 'number "third" rate)
-    (check-proc 'run-simulation f 1 "fourth" "one argument")
-    (big-bang width height rate 1)
-    (on-redraw f)
-    (on-tick-event add1))
+  (define run-simulation 
+    (lambda x 
+      (define args (length x))
+      (if (or (= args 5) (= args 4))
+          (apply run-simulation0 x) 
+          (error 'run-simulation msg-run-simulation))))
+  (define msg-run-simulation
+    (string-append
+     "consumes 4 or 5 arguments:\n"
+     "-- (run-simulation <width> <height> <rate> <world-to-world-function>)\n"
+     "-- (run-simulation <width> <height> <rate> <world-to-world-function> <create-animated-gif?>)\n"
+     "see Help Desk."))
+
+
+  (define run-simulation0
+    (case-lambda
+      [(width height rate f record?)
+       (check-pos 'run-simulation width "first")
+       (check-pos 'run-simulation height "second")
+       (check-arg 'run-simulation (number? rate) 'number "third" rate)
+       (check-proc 'run-simulation f 1 "fourth" "one argument")
+       (check-arg 'run-simulation (boolean? record?) 'number "fifth [and optional]" record?)
+       (big-bang width height rate 1 record?)
+       (on-redraw f)
+       (on-tick-event add1)]
+      [(width height rate f)
+       (run-simulation width height rate f #f)]))
   
   ;; ---------------------------------------------------------------------------
   
@@ -384,9 +404,10 @@ Matthew
     (define w (image-width img))  
     (define h (image-height img))
     (cond
-      [(and (<= 0 x0 w) (<= 0 x1 w) (<= 0 y0 w) (<= 0 y1 w)) 
+      [(and (<= 0 x0) (< x0 w) (<= 0 x1) (< x1 w) (<= 0 y0) (< y0 w) (<= 0 y1) (< y1 w))
        (add-line img x0 y0 x1 y1 c)]
       [(= x0 x1) ;; vertical 
+       (printf "vertical\n")
        (if (<= 0 x0 w) (add-line img x0 (app y0 h) x0 (app y1 h) c) img)]
       [(= y0 y1) ;; horizontal 
        (if (<= 0 y0 h) (add-line img (app x0 w) y0 (app x1 w) y0 c) img)]
@@ -418,9 +439,9 @@ Matthew
   ;; y if in [0,h], otherwise the closest boundary
   (define (app y h)
     (cond
-      [(<= 0 y h) y]
+      [(and (<= 0 y) (< y h)) y]
       [(< y 0) 0]
-      [else    h]))
+      [else (- h 1)]))
   
   ;; Nat Nat Nat Nat -> (union 'upper-left 'upper-right 'lower-left 'lower-right)
   ;; how to get to (x1,y1) from (x0,y0)

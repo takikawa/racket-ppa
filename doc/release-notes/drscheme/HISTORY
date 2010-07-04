@@ -1,4 +1,13 @@
 ------------------------------
+        Version 372
+------------------------------
+
+  . added auto-completion (only gets completions from 
+    the documentation, not the lexical context).
+
+  . minor bug fixes
+
+------------------------------
         Version 371
 ------------------------------
 

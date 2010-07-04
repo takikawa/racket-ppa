@@ -156,7 +156,6 @@ the state transitions / contracts are:
            p
            value)]))
      ps values)
-    
     ((preferences:low-level-put-preferences)
      (map add-pref-prefix ps) 
      (map (λ (p value) (marshall-pref p value))
@@ -348,7 +347,7 @@ the state transitions / contracts are:
     "Determines if a value is an unknown preference exn.")
 
    (preferences:low-level-put-preferences
-    any/c
+    (parameter/c (-> (listof symbol?) (listof any/c) any))
     ()
     "This is a parameter (see "
     "\\Mzhyperref{parameters}{mz:parameters} for information about parameters)"

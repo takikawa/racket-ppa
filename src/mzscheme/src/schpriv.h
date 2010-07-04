@@ -235,6 +235,7 @@ void scheme_do_add_global_symbol(Scheme_Env *env, Scheme_Object *sym,
 /*========================================================================*/
 
 extern Scheme_Object *scheme_values_func;
+extern Scheme_Object *scheme_procedure_p_proc;
 extern Scheme_Object *scheme_void_proc;
 extern Scheme_Object *scheme_call_with_values_proc;
 extern Scheme_Object *scheme_make_struct_type_proc;
@@ -541,6 +542,13 @@ Scheme_Object *scheme_make_struct_type_from_string(const char *base,
 						   Scheme_Object *props,
 						   Scheme_Object *guard,
 						   int immutable);
+Scheme_Object *scheme_make_proc_struct_type(Scheme_Object *base,
+                                            Scheme_Object *parent,
+                                            Scheme_Object *inspector,
+                                            int num_fields, int num_uninit,
+                                            Scheme_Object *uninit_val,
+                                            Scheme_Object *proc_attr,
+                                            Scheme_Object *guard);
 
 Scheme_Object *scheme_struct_to_vector(Scheme_Object *_s, Scheme_Object *unknown_val, Scheme_Object *insp);
 
@@ -557,6 +565,8 @@ extern Scheme_Object *scheme_source_property;
 /*========================================================================*/
 /*                         syntax objects                                 */
 /*========================================================================*/
+
+#define MZ_LABEL_PHASE 30000
 
 typedef struct Scheme_Stx_Srcloc {
   MZTAG_IF_REQUIRED
@@ -735,7 +745,7 @@ Scheme_Object *scheme_delayed_rename(Scheme_Object **o, long i);
 
 typedef struct {
   Scheme_Object so;
-  mzshort num_args;
+  mzshort num_args; /* doesn't include rator, so arguments are at args[1]...args[num_args] */
   Scheme_Object *args[1];
   /* After array of f & args, array of chars for eval type */
 } Scheme_App_Rec;
@@ -862,12 +872,6 @@ typedef struct Scheme_Letrec {
   Scheme_Object **procs;
   Scheme_Object *body;
 } Scheme_Letrec;
-
-typedef struct {
-  Scheme_Object so;
-  mzshort num_bindings;
-  Scheme_Object *body;
-} Scheme_Let_Frame_Data;
 
 typedef struct {
   Scheme_Object so;
@@ -1023,7 +1027,9 @@ typedef struct Scheme_Cont {
   Scheme_Thread **runstack_owner;
   Scheme_Cont_Mark *cont_mark_stack_copied;
   Scheme_Thread **cont_mark_stack_owner;
-  long cont_mark_shareable, cont_mark_offset;
+  long cont_mark_total; /* size of the copied array plus cont_mark_offset */
+  long cont_mark_offset; /* after the array, the original mark stack had this much */
+  long cont_mark_nonshare; /* amount to skip for sub-cont sharing */
   void *stack_start;
   Scheme_Object *prompt_id; /* allows direct-jump optimization */
   Scheme_Config *init_config;
@@ -1113,7 +1119,7 @@ typedef struct Scheme_Meta_Continuation {
   /* Cont mark info: */
   MZ_MARK_STACK_TYPE cont_mark_stack;
   MZ_MARK_POS_TYPE cont_mark_pos;
-  long cont_mark_shareable, cont_mark_offset;
+  long cont_mark_total, cont_mark_offset;
   Scheme_Cont_Mark *cont_mark_stack_copied;
   /* Next: */
   struct Scheme_Meta_Continuation *next;
@@ -1771,7 +1777,7 @@ typedef struct Scheme_Closure_Data
   mzshort num_params; /* includes collecting arg if has_rest */
   mzshort max_let_depth;
   mzshort closure_size;
-  mzshort *closure_map; /* actually a Closure_Info* until resolved; if CLOS_HASH_REF_ARGS, followed by bit array */
+  mzshort *closure_map; /* actually a Closure_Info* until resolved; if CLOS_HAS_REF_ARGS, followed by bit array */
   Scheme_Object *code;
   Scheme_Object *name;
 #ifdef MZ_USE_JIT
@@ -1882,9 +1888,11 @@ Scheme_Object *scheme_add_env_renames(Scheme_Object *stx, Scheme_Comp_Env *env,
 Scheme_Object *scheme_env_frame_uid(Scheme_Comp_Env *env);
 
 typedef Scheme_Object *(*Scheme_Lift_Capture_Proc)(Scheme_Object *, Scheme_Object **, Scheme_Object *, Scheme_Comp_Env *);
-void scheme_frame_captures_lifts(Scheme_Comp_Env *env, Scheme_Lift_Capture_Proc cp, Scheme_Object *data, Scheme_Object *end_stmts);
+void scheme_frame_captures_lifts(Scheme_Comp_Env *env, Scheme_Lift_Capture_Proc cp, Scheme_Object *data, 
+                                 Scheme_Object *end_stmts, Scheme_Object *context_key);
 Scheme_Object *scheme_frame_get_lifts(Scheme_Comp_Env *env);
 Scheme_Object *scheme_frame_get_end_statement_lifts(Scheme_Comp_Env *env);
+Scheme_Object *scheme_generate_lifts_key(void);
 
 void scheme_add_local_syntax(int cnt, Scheme_Comp_Env *env);
 void scheme_set_local_syntax(int pos, Scheme_Object *name, Scheme_Object *val,
@@ -2280,6 +2288,7 @@ struct Scheme_Env {
   Scheme_Object *rename;    /* module rename record */
   Scheme_Object *et_rename; /* exp-time rename record */
   Scheme_Object *tt_rename; /* template-time rename record */
+  Scheme_Object *dt_rename; /* template-time rename record */
 
   Scheme_Bucket_Table *syntax;
   struct Scheme_Env *exp_env;
@@ -2290,7 +2299,7 @@ struct Scheme_Env {
   /* Per-instance: */
   long phase, mod_phase;
   Scheme_Object *link_midx;
-  Scheme_Object *require_names, *et_require_names, *tt_require_names; /* resolved */
+  Scheme_Object *require_names, *et_require_names, *tt_require_names, *dt_require_names; /* resolved */
   char running, et_running, tt_running, lazy_syntax, attached;
 
   Scheme_Bucket_Table *toplevel;
@@ -2323,6 +2332,7 @@ typedef struct Scheme_Module
   Scheme_Object *et_requires;  /* list of symbol-or-module-path-index */
   Scheme_Object *requires;     /* list of symbol-or-module-path-index */
   Scheme_Object *tt_requires;  /* list of symbol-or-module-path-index */
+  Scheme_Object *dt_requires;  /* list of symbol-or-module-path-index */
 
   Scheme_Invoke_Proc prim_body;
   Scheme_Invoke_Proc prim_et_body;
@@ -2338,9 +2348,14 @@ typedef struct Scheme_Module
   Scheme_Object **indirect_provides; /* symbols (internal names) */
   int num_indirect_provides;
 
+  char *et_provide_protects;            /* 1 => protected, 0 => not */
+  Scheme_Object **et_indirect_provides; /* symbols (internal names) */
+  int num_indirect_et_provides;
+
   Scheme_Object *self_modidx;
 
   Scheme_Hash_Table *accessible;
+  Scheme_Hash_Table *et_accessible;
   Scheme_Object *insp; /* declaration-time inspector, for creating certificates
 			  and for module instantiation */
 
@@ -2355,8 +2370,23 @@ typedef struct Scheme_Module
 
   Scheme_Env *primitive;
 
-  Scheme_Object *rn_stx, *et_rn_stx, *tt_rn_stx;
+  Scheme_Object *rn_stx, *et_rn_stx, *tt_rn_stx, *dt_rn_stx;
 } Scheme_Module;
+
+typedef struct Scheme_Module_Phase_Exports
+{
+  MZTAG_IF_REQUIRED
+
+  Scheme_Object **provides;          /* symbols (extenal names) */
+  Scheme_Object **provide_srcs;      /* module access paths, #f for self */
+  Scheme_Object **provide_src_names; /* symbols (original internal names) */
+  char *provide_src_phases;          /* NULL, or src phase for for-syntax import */
+  int num_provides;
+  int num_var_provides;              /* non-syntax listed first in provides */
+
+  int reprovide_kernel;              /* if true, extend provides with kernel's */
+  Scheme_Object *kernel_exclusion;  /* we allow one exn, but it must be shadowed */
+} Scheme_Module_Phase_Exports;
 
 typedef struct Scheme_Module_Exports
 {
@@ -2366,14 +2396,7 @@ typedef struct Scheme_Module_Exports
      unmarshal syntax-object context. */
   MZTAG_IF_REQUIRED
 
-  Scheme_Object **provides;          /* symbols (extenal names) */
-  Scheme_Object **provide_srcs;      /* module access paths, #f for self */
-  Scheme_Object **provide_src_names; /* symbols (original internal names) */
-  int num_provides;
-  int num_var_provides;              /* non-syntax listed first in provides */
-
-  int reprovide_kernel;              /* if true, extend provides with kernel's */
-  Scheme_Object *kernel_exclusion;  /* we allow one exn, but it must be shadowed */
+  Scheme_Module_Phase_Exports *rt, *et, *dt;
 
   Scheme_Object *src_modidx;  /* the one used in marshalled syntax */
 } Scheme_Module_Exports;
@@ -2539,6 +2562,18 @@ Scheme_Object *scheme_get_native_arity(Scheme_Object *closure);
 /*========================================================================*/
 /*                         filesystem utilities                           */
 /*========================================================================*/
+
+#ifdef USE_TRANSITIONAL_64_FILE_OPS
+# define BIG_OFF_T_IZE(n) n ## 64
+# define mz_off_t off64_t
+#else
+# define BIG_OFF_T_IZE(n) n
+# if defined(DOS_FILE_SYSTEM)
+#  define mz_off_t mzlonglong
+# else
+#  define mz_off_t off_t
+# endif
+#endif
 
 int scheme_is_relative_path(const char *s, long len, int kind);
 int scheme_is_complete_path(const char *s, long len, int kind);

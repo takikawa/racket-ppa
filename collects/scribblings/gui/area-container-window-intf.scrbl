@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@definterface[area-container-window<%> (area-container<%> window<%>)]{
+@definterface/title[area-container-window<%> (area-container<%> window<%>)]{
 
 Combines two interfaces.
 

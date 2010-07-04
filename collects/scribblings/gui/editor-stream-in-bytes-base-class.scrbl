@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[editor-stream-in-bytes-base% editor-stream-in-base% ()]{
+@defclass/title[editor-stream-in-bytes-base% editor-stream-in-base% ()]{
 
 An @scheme[editor-stream-in-bytes-base%] object can be used to
 read editor data from a byte string.

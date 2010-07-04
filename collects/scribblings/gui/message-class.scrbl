@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[message% object% (control<%>)]{
+@defclass/title[message% object% (control<%>)]{
 
 A message control is a static line of text or a static bitmap. The
  text or bitmap corresponds to the message's label (see
@@ -38,11 +38,14 @@ Creates a string or bitmap message initially showing @scheme[label].
 
 }
 
-@defmethod[#:mode 'add 
-           (set-label [label (is-a?/c bitmap%)])
+@defmethod[#:mode override
+           (set-label [label (or/c label-string? (is-a?/c bitmap%))])
            void?]{
 
-Sets the bitmap label for a bitmap message.
+The same as @xmethod[window<%> set-label] when @scheme[label] is a
+ string.
+
+Otherwise, sets the bitmap label for a bitmap message.
  @bitmaplabeluseisbm[label] @|bitmapiforiglabel|
 
 }}

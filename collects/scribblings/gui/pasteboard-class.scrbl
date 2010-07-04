@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[pasteboard% object% (editor<%>)]{
+@defclass/title[pasteboard% object% (editor<%>)]{
 
 A @scheme[pasteboard%] object is an editor for displaying snips with
  arbitrary @techlink{location}s.
@@ -38,7 +38,7 @@ Selects snips without deselecting other snips. When coordinates are
 }
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (after-delete [snip (is-a?/c snip%)])
            void?]{
 @methspec{
@@ -60,7 +60,7 @@ Does nothing.
 }
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (after-insert [snip (is-a?/c snip%)]
                          [before (or/c (is-a?/c snip%) false/c)]
                          [x real?]
@@ -86,7 +86,7 @@ Does nothing.
 }
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (after-interactive-move [event (is-a?/c mouse-event%)])
            void?]{
 @methspec{
@@ -108,7 +108,7 @@ Does nothing.
 }
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (after-interactive-resize [snip (is-a?/c snip%)])
            void?]{
 @methspec{
@@ -129,7 +129,7 @@ Does nothing.
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (after-move-to [snip (is-a?/c snip%)]
                           [x real?]
                           [y real?]
@@ -159,7 +159,7 @@ Does nothing.
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (after-reorder [snip (is-a?/c snip%)]
                           [to-snip (is-a?/c snip%)]
                           [before? any/c])
@@ -188,7 +188,7 @@ Does nothing.
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (after-resize [snip (is-a?/c snip%)]
                          [w (and/c real? (not/c negative?))]
                          [h (and/c real? (not/c negative?))]
@@ -218,7 +218,7 @@ Does nothing.
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (after-select [snip (is-a?/c snip%)]
                          [on? any/c])
            void?]{
@@ -246,7 +246,7 @@ Does nothing.
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (can-delete? [snip (is-a?/c snip%)])
            boolean?]{
 
@@ -270,7 +270,7 @@ Returns @scheme[#t].
 }
 }
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (can-insert? [snip (is-a?/c snip%)]
                         [before (or/c (is-a?/c snip%) false/c)]
                         [x real?]
@@ -297,7 +297,7 @@ Returns @scheme[#t].
 }
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (can-interactive-move? [event (is-a?/c mouse-event%)])
            boolean?]{
 
@@ -322,7 +322,7 @@ Returns @scheme[#t].
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (can-interactive-resize? [snip (is-a?/c snip%)])
            boolean?]{
 @methspec{
@@ -346,7 +346,7 @@ Returns @scheme[#t].
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (can-move-to? [snip (is-a?/c snip%)]
                          [x real?]
                          [y real?]
@@ -374,7 +374,7 @@ Returns @scheme[#t].
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (can-reorder? [snip (is-a?/c snip%)]
                          [to-snip (is-a?/c snip%)]
                          [before? any/c])
@@ -403,7 +403,7 @@ Returns @scheme[#t].
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (can-resize? [snip (is-a?/c snip%)]
                         [w (and/c real? (not/c negative?))]
                         [h (and/c real? (not/c negative?))])
@@ -427,7 +427,7 @@ Returns @scheme[#t].
 
 }}
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (can-select? [snip (is-a?/c snip%)]
                         [on? any/c])
            boolean?]{
@@ -456,28 +456,29 @@ Returns @scheme[#t].
 }}
 
 
-@defmethod*[#:mode 'add 
+@defmethod*[#:mode override
             ([(change-style [style (or/c (is-a?/c style<%>) false/c)]
                             [snip (or/c (is-a?/c snip%) false/c) #f])
               void?]
              [(change-style [delta (or/c (is-a?/c style-delta%) false/c)]
-                            [snip (is-a?/c snip%)])
+                            [snip (is-a?/c snip%) #f])
               void?])]{
 
 Changes the style of @scheme[style] to a specific style or by applying
  a style delta.  If @scheme[snip] is @scheme[#f], then all currently
- selected snips are changed.
+ selected snips are changed. See also @xmethod[editor<%> change-style].
 
 When a @scheme[style] is provided: @InStyleListNote[]
 
 }
 
 
-@defmethod[#:mode 'auto-super 
+@defmethod[#:mode override
            (copy-self-to [dest (or/c (is-a?/c text%) (is-a?/c pasteboard%))])
            void?]{
 
-The dragability, selection visibility state, and scroll step of
+In addition to the default @xmethod[editor<%> copy-self-to] work, the
+ dragability, selection visibility state, and scroll step of
  @this-obj[] are installed into @scheme[dest].
 
 }
@@ -648,8 +649,10 @@ Returns whether selection dots are drawn around the edge of selected
 }
 
 
-@defmethod*[#:mode 'add 
-            ([(insert [snip (is-a?/c snip%)]
+@defmethod*[#:mode extend
+            ([(insert [snip (is-a?/c snip%)])
+              void?]
+             [(insert [snip (is-a?/c snip%)]
                       [before (or/c (is-a?/c snip%) false/c)]
                       [x real?]
                       [y real?])
@@ -666,7 +669,8 @@ Inserts @scheme[snip] at @techlink{location} @math{(@scheme[x],
  @scheme[y])} just in front of
  @scheme[before]. (@|seesniporderdiscuss|) If @scheme[before] is nor
  provided or is @scheme[#f], then @scheme[snip] is inserted behind all
- other snips.
+ other snips. If @scheme[x] and @scheme[y] are not provided, the snip
+ is added at @math{(0, 0)}.
 
 }
 
@@ -802,7 +806,7 @@ Deselects all selected snips in the editor.
 }
 
 
-@defmethod[#:mode 'override 
+@defmethod[#:mode override 
            (on-default-event [event (is-a?/c mouse-event%)])
            void?]{
 
@@ -831,7 +835,7 @@ object.}
 }
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-delete [snip (is-a?/c snip%)])
            void?]{
 
@@ -865,7 +869,7 @@ If @scheme[snip] accepts events, it is designated as the caret owner
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-insert [snip (is-a?/c snip%)]
                       [before (or/c (is-a?/c snip%) false/c)]
                       [x real?]
@@ -885,7 +889,7 @@ The editor is internally locked for writing when this method is called
 }
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-interactive-move [event (is-a?/c mouse-event%)])
            void?]{
 @methspec{
@@ -908,7 +912,7 @@ Does nothing.
 
 }}
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-interactive-resize [snip (is-a?/c snip%)])
            void?]{
 @methspec{
@@ -930,7 +934,7 @@ Does nothing.
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-move-to [snip (is-a?/c snip%)]
                        [x real?]
                        [y real?]
@@ -960,7 +964,7 @@ Does nothing.
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-reorder [snip (is-a?/c snip%)]
                        [to-snip (is-a?/c snip%)]
                        [before? any/c])
@@ -987,7 +991,7 @@ Does nothing.
 
 }}
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-resize [snip (is-a?/c snip%)]
                       [w (and/c real? (not/c negative?))]
                       [h (and/c real? (not/c negative?))])
@@ -1016,7 +1020,7 @@ Does nothing.
 }}
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (on-select [snip (is-a?/c snip%)]
                       [on? any/c])
            void?]{

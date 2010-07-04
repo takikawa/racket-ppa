@@ -4,7 +4,8 @@
   (require (lib "match.ss")
            (lib "file.ss")
            (lib "list.ss")
-           (lib "dirs.ss" "setup"))
+           (lib "dirs.ss" "setup")
+           "servlets/home.ss")
 
   (define (installer path)
     (create-index-file))
@@ -16,6 +17,7 @@
 
   (define (create-index-file)
     (gen-index servlet-dir)
+    (set! index (append index (generate-index-for-static-pages)))
     (with-output-to-file (build-path dest-dir index-file)
       (lambda ()
         (printf "(\n")
@@ -80,7 +82,7 @@
       (for-each
        (lambda (file)
          (let ([port (open-input-file file)]
-               [title-value file])
+               [title-value #f])
            (let loop ()
              (let ([sexp (with-handlers ([exn:fail:read?
                                           (lambda (x)
@@ -98,9 +100,11 @@
                      [`(title ,(? string? title))
                       (set! title-value title)]
                      [`(a ((name ,(? string? name)) (value ,(? string? value))))
-                      (add-index-entry! value file name title-value)]
+                      (add-index-entry! value file name
+                                        (or title-value (path->string file)))]
                      [_ (when (pair? exp)
                           (begin (loop (car exp))
                                  (loop (cdr exp))))]))
                  (loop))))))
        servlet-files))))
+

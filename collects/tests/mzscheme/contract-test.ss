@@ -464,6 +464,12 @@
    'contract-arrow1
    '(contract (integer? . -> . integer?) (lambda (x) x) 'pos 'neg))
   
+  ;; make sure we skip the optimizations
+  (test/spec-passed
+   'contract-arrow1b
+   '(contract (integer? integer? integer? integer? integer? integer? integer? integer? integer? integer? . -> . integer?) 
+              (lambda (x1 x2 x3 x4 x5 x6 x7 x8 x9 x10) x1) 'pos 'neg))
+  
   (test/pos-blame
    'contract-arrow2
    '(contract (integer? . -> . integer?) (lambda (x y) x) 'pos 'neg))
@@ -4360,6 +4366,8 @@ so that propagation occurs.
   (test-name 'printable/c printable/c)
   (test-name '(symbols 'a 'b 'c) (symbols 'a 'b 'c))
   (test-name '(one-of/c 1 2 3) (one-of/c 1 2 3))
+  (test-name '(one-of/c '() 'x 1 #f #\a (void) (letrec ([x x]) x)) 
+             (one-of/c '() 'x 1 #f #\a (void) (letrec ([x x]) x)))
   
   (test-name '(subclass?/c class:c%) 
              (let ([c% (class object% (super-new))]) (subclass?/c c%)))
@@ -5151,6 +5159,74 @@ so that propagation occurs.
               [struct s ([a number?]
                          [b symbol?])]))))
   
+  (test/spec-passed
+   'provide/contract21
+   '(begin
+      (eval '(module provide/contract21a mzscheme
+               (require (lib "contract.ss"))
+               (provide/contract [f integer?])
+               (define f 1)))
+      (eval '(module provide/contract21b mzscheme
+               (require-for-syntax provide/contract21a) 
+               (define-syntax (unit-body stx)
+                 f f
+                 #'1)))))
+  
+  (test/spec-passed
+   'provide/contract22
+   '(begin
+      (eval '(module provide/contract22a mzscheme
+               (require (lib "contract.ss"))
+               (provide/contract [make-bound-identifier-mapping integer?])
+               (define make-bound-identifier-mapping 1)))
+      (eval '(module provide/contract22b mzscheme
+               (require-for-syntax provide/contract22a)
+               
+               (define-syntax (unit-body stx)
+                 make-bound-identifier-mapping)
+               
+               (define-syntax (f stx)
+                 make-bound-identifier-mapping)))))
+  
+  (test/spec-passed
+   'provide/contract23
+   '(begin
+      (eval '(module provide/contract23a mzscheme
+               (require (lib "contract.ss"))
+               (provide/contract [f integer?])
+               (define f 3)))
+      
+      (eval '(module provide/contract23b mzscheme
+               (require provide/contract23a)
+               (#%expression f)
+               f))
+      
+      (eval '(require provide/contract23b))))
+  
+  (test/spec-passed
+   'provide/contract24
+   '(begin
+      (eval '(module provide/contract24 mzscheme
+               (require (prefix c: (lib "contract.ss")))
+               (c:case-> (c:-> integer? integer?)
+                         (c:-> integer? integer? integer?))))))
+  
+  ;; tests that contracts pick up the #%app from the context
+  ;; instead of always using the mzscheme #%app.
+  (test/spec-passed
+   'provide/contract25
+   '(begin
+      (eval '(module provide/contract25a mzscheme
+               (require (lib "contract.ss"))
+               (provide/contract [seventeen integer?])
+               (define seventeen 17)))
+      (eval '(module provide/contract25b mzscheme
+               (require provide/contract25a)
+               (let-syntax ([#%app (syntax-rules ()
+                                     [(#%app e ...) (list e ...)])])
+                 (seventeen 18))))
+      (eval '(require provide/contract25b))))
+
   (contract-error-test
    #'(begin
        (eval '(module pce1-bug mzscheme

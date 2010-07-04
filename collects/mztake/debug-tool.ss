@@ -17,7 +17,7 @@
            "load-sandbox.ss"
            (lib "framework.ss" "framework")
            (lib "string-constant.ss" "string-constants")
-           )
+           (lib "debugger-language-interface.ss" "lang"))
   
   (provide tool@)
   
@@ -29,19 +29,22 @@
     (unit 
       (import drscheme:tool^)
       (export drscheme:tool-exports^) 
-      (define phase1 void)
+
+      (define (phase1)
+	(drscheme:language:extend-language-interface
+         debugger-language<%>
+         (lambda (superclass)
+           (class* superclass (debugger-language<%>)
+	           (public debugger:supported?)
+		   (define (debugger:supported?) #t)
+                   (super-instantiate ())))))
       (define phase2 void)
       
       (define (extract-language-level settings)
-	(let* ([language (drscheme:language-configuration:language-settings-language settings)])
-	  (car (last-pair (send language get-language-position)))))
+	(drscheme:language-configuration:language-settings-language settings))
       
       (define (debugger-does-not-work-for? lang)
-	(member lang (list (string-constant beginning-student)
-			   (string-constant beginning-student/abbrev)
-			   (string-constant intermediate-student)
-			   (string-constant intermediate-student/lambda)
-			   (string-constant advanced-student))))
+	(not (send lang debugger:supported?)))
       
       (define (robust-syntax-source stx)
         (and (syntax? stx) (syntax-source stx)))
@@ -791,7 +794,9 @@
             (let/ec k
               (let* ([stx (mark-source frame)]
                      [src (syntax-source stx)]
-                     [pos (+ (syntax-position stx) (syntax-span stx) -1)]
+                     [pos (if (not (syntax-position stx))
+                              (k 'invalid)
+                              (+ (syntax-position stx) (syntax-span stx) -1))]
                      [defs (filename->defs src)]
                      [tab (if defs (send defs get-tab) (k (begin #;(printf "no defs for ~a~n" src) 'invalid)))]
                      [bps (send tab get-breakpoints)])
@@ -802,8 +807,9 @@
                  (not (eq? (frame->end-breakpoint-status (first frames)) 'invalid))))
           
           (define (can-step-out? frames status)
-            (or (ormap (lambda (f) (not (eq? (frame->end-breakpoint-status f) 'invalid)))
-                       (rest frames))
+            (or (and (not (empty? frames))
+                     (ormap (lambda (f) (not (eq? (frame->end-breakpoint-status f) 'invalid)))
+                            (rest frames)))
                 (begin
                   #;(printf "cannot step out: stack is ~a~n" frames)
                   #f)))

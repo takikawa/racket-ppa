@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[editor-snip% snip% ()]{
+@defclass/title[editor-snip% snip% ()]{
 
 An @scheme[editor-snip%] object is a @scheme[snip%] object that
  contains and displays an @scheme[editor<%>] object. This snip class
@@ -39,7 +39,7 @@ get-margin] for information about the inset and margin arguments.
 }
 
 
-@defmethod[#:mode 'override 
+@defmethod[#:mode override 
            (adjust-cursor [dc (is-a?/c dc<%>)]
                           [x real?]
                           [y real?]
@@ -84,7 +84,7 @@ Returns the editor contained by the snip, or @scheme[#f] is there is
 
 }
 
-@defmethod[#:mode 'override 
+@defmethod[#:mode override 
            (get-extent [dc (is-a?/c dc<%>)]
                        [x real?]
                        [y real?]
@@ -198,7 +198,7 @@ See also @method[editor-snip% set-tight-text-fit].
 
 }
 
-@defmethod[#:mode 'override 
+@defmethod[#:mode override 
            (resize [w (and/c real? (not/c negative?))]
                    [h (and/c real? (not/c negative?))])
            boolean?]{

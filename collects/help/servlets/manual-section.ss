@@ -1,7 +1,7 @@
 (module manual-section mzscheme
-  (require "../private/manuals.ss"
-           "private/headelts.ss"
-           (lib "servlet.ss" "web-server"))
+  (require (lib "servlet.ss" "web-server")
+           "../private/manuals.ss"
+           "private/html.ss")
   (provide interface-version timeout start)
   (define interface-version 'v1)
   (define timeout +inf.0)
@@ -19,15 +19,13 @@
               [page (with-handlers
                         ([void (lambda _
                                  (send/finish
-                                  `(html
-                                    (head ,hd-css ,@hd-links
-                                          (title "Can't find manual section"))
-                                    (body
-                                     "Error looking up PLT manual section"
-                                     (p)
-                                     "Requested manual: "
-                                     ,manual (br)
-                                     "Requested section: "
-                                     ,section))))])
+                                  (html-page
+                                   #:title "Can't find manual section"
+                                   #:bodies
+                                   `("Error looking up PLT manual section"
+                                     (p "Requested manual: "
+                                        ,manual (br)
+                                        "Requested section: "
+                                        ,section)))))])
                       (finddoc-page-anchor manual section))])
          (send/finish (redirect-to page)))))))

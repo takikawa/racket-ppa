@@ -3,6 +3,7 @@
   (provide cursor?
            cursor:new
            cursor:add-to-end!
+           cursor:remove-current!
 
            cursor:next
            cursor:prev
@@ -17,6 +18,7 @@
            cursor:move-prev
            cursor:move-to-start
            cursor:move-to-end
+           cursor:skip-to
 
            cursor->list
            cursor:prefix->list
@@ -63,6 +65,10 @@
   (define (cursor:add-to-end! c items)
     (let ([suffix (cursor-suffixp c)])
       (set-cursor-suffixp! c (stream-append suffix items))))
+
+  (define (cursor:remove-current! c)
+    (when (cursor:has-next? c)
+      (set-cursor-suffixp! c (stream-cdr (cursor-suffixp c)))))
 
   (define (cursor:next c)
     (let ([suffix (cursor-suffixp c)])
@@ -111,6 +117,11 @@
       (cursor:move-next c)
       (cursor:move-to-end c)))
 
+  (define (cursor:skip-to c i)
+    (unless (or (eq? (cursor:next c) i) (cursor:at-end? c))
+      (cursor:move-next c)
+      (cursor:skip-to c i)))
+  
   (define (cursor->list c)
     (append (cursor:prefix->list c)
             (cursor:suffix->list c)))

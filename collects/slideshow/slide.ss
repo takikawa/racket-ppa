@@ -13,7 +13,7 @@
   ;;       Link Config and Viewer with Core        ;;
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-  ;; The actual config and viewer untis are determined by a parameter
+  ;; The actual config and viewer units are determined by a parameter
   ;;  in "param.ss". This somewhat strange technqiue allows the units
   ;;  to be changed as this module is loaded in a new namespace; see
   ;;  "slides-to-picts.ss". Such namespace games are not necessary if
@@ -100,7 +100,11 @@
 	   enable-click-advance!
 	   title-h get-title-h set-title-h! current-slide-assembler
 	   current-page-number-font current-page-number-color 
-	   set-page-numbers-visible! done-making-slides)
+	   set-page-numbers-visible! done-making-slides
+           slide/timeout
+           slide/title/timeout
+           slide/center/timeout
+           slide/title/center/timeout)
   (provide/contract [clickback 
 		     ((pict? (lambda (x)
 			       (and (procedure? x)

@@ -557,6 +557,19 @@ static inline double approx_dist(double x, double y)
   return ((x < y) ? y : x);
 }
 
+static double my_round(double f)
+/* doesn't have to deal with negtive numbers */
+{
+  double d, frac;
+  
+  frac = modf(f, &d);
+
+  if (frac >= 0.5)  
+    d += 1.0;
+
+  return d;
+}
+
 static void ScaleSection(wxMemoryDC *dest, wxBitmap *src, 
 			 double tx, double ty, double ww2, double hh2,
 			 double fx, double fy, double ww, double hh,
@@ -698,9 +711,9 @@ static void ScaleSection(wxMemoryDC *dest, wxBitmap *src,
 	b = (b * (1 - a)) + ((double)s2[p+3] * a);
       }
 
-      s2[p+1] = (int)r;
-      s2[p+2] = (int)g;
-      s2[p+3] = (int)b;
+      s2[p+1] = (int)my_round(r);
+      s2[p+2] = (int)my_round(g);
+      s2[p+3] = (int)my_round(b);
     }
   }
 
@@ -1107,6 +1120,7 @@ static l_TYPE l_POINT *l_MAKE_ARRAY(Scheme_Object *l, l_INTTYPE *c, char *who)
 
 
 
+
 class os_wxDC : public wxDC {
  public:
 
@@ -1132,6 +1146,49 @@ static Scheme_Object *os_wxDC_interface;
 os_wxDC::~os_wxDC()
 {
     objscheme_destroy(this, (Scheme_Object *) __gc_external);
+}
+
+static Scheme_Object *os_wxDCGetAlpha(int n,  Scheme_Object *p[])
+{
+  WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
+  REMEMBER_VAR_STACK();
+  double r;
+  objscheme_check_valid(os_wxDC_class, "get-alpha in dc<%>", n, p);
+
+  SETUP_VAR_STACK_REMEMBERED(1);
+  VAR_STACK_PUSH(0, p);
+
+  
+
+  
+  r = WITH_VAR_STACK(((wxDC *)((Scheme_Class_Object *)p[0])->primdata)->GetAlpha());
+
+  
+  
+  READY_TO_RETURN;
+  return WITH_REMEMBERED_STACK(scheme_make_double(r));
+}
+
+static Scheme_Object *os_wxDCSetAlpha(int n,  Scheme_Object *p[])
+{
+  WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
+  REMEMBER_VAR_STACK();
+  objscheme_check_valid(os_wxDC_class, "set-alpha in dc<%>", n, p);
+  double x0;
+
+  SETUP_VAR_STACK_REMEMBERED(1);
+  VAR_STACK_PUSH(0, p);
+
+  
+  x0 = WITH_VAR_STACK(objscheme_unbundle_double_in(p[POFFSET+0], 0, 1, "set-alpha in dc<%>"));
+
+  
+  WITH_VAR_STACK(((wxDC *)((Scheme_Class_Object *)p[0])->primdata)->SetAlpha(x0));
+
+  
+  
+  READY_TO_RETURN;
+  return scheme_void;
 }
 
 static Scheme_Object *os_wxDCGlyphAvailable(int n,  Scheme_Object *p[])
@@ -2513,8 +2570,10 @@ void objscheme_setup_wxDC(Scheme_Env *env)
   wxREGGLOB(os_wxDC_class);
   wxREGGLOB(os_wxDC_interface);
 
-  os_wxDC_class = WITH_VAR_STACK(objscheme_def_prim_class(env, "dc%", "object%", NULL, 49));
+  os_wxDC_class = WITH_VAR_STACK(objscheme_def_prim_class(env, "dc%", "object%", NULL, 51));
 
+  WITH_VAR_STACK(scheme_add_method_w_arity(os_wxDC_class, "get-alpha" " method", (Scheme_Method_Prim *)os_wxDCGetAlpha, 0, 0));
+  WITH_VAR_STACK(scheme_add_method_w_arity(os_wxDC_class, "set-alpha" " method", (Scheme_Method_Prim *)os_wxDCSetAlpha, 1, 1));
   WITH_VAR_STACK(scheme_add_method_w_arity(os_wxDC_class, "glyph-exists?" " method", (Scheme_Method_Prim *)os_wxDCGlyphAvailable, 1, 2));
   WITH_VAR_STACK(scheme_add_method_w_arity(os_wxDC_class, "end-page" " method", (Scheme_Method_Prim *)os_wxDCEndPage, 0, 0));
   WITH_VAR_STACK(scheme_add_method_w_arity(os_wxDC_class, "end-doc" " method", (Scheme_Method_Prim *)os_wxDCEndDoc, 0, 0));

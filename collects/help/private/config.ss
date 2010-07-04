@@ -3,11 +3,12 @@
            (lib "web-config-unit.ss" "web-server")
 	   (lib "dirs.ss" "setup")
            (lib "config.ss" "planet")
-           "internal-hp.ss")
+           "internal-hp.ss"
+           (lib "namespace.ss" "web-server" "configuration"))
   
-  (provide config)
+  (provide make-config)
   
-  (define config
+  (define (make-config)
     (let* ([build-normal-path
             (lambda args
               (normalize-path
@@ -43,7 +44,7 @@
                  (mime-types "../../web-server/default-web-root/mime.types")
                  (password-authentication "passwords"))))])
       (configuration-table-sexpr->web-config@
-       `((port ,internal-port)
+       `((port ,(internal-port))
          (max-waiting 40)
          (initial-connection-timeout 30)
          (default-host-table
@@ -54,4 +55,8 @@
 	       `(,virtual-host 
 		 ,(make-host-config dir)))
 	     (cons planet-host (append doc-hosts collects-hosts))
-	     (cons (PLANET-DIR) (append doc-dirs collects-dirs)))))))))
+	     (cons (PLANET-DIR) (append doc-dirs collects-dirs)))))
+       #:make-servlet-namespace
+       (make-make-servlet-namespace
+        #:to-be-copied-module-specs
+        '((lib "options.ss" "help" "private")))))))

@@ -1,13 +1,14 @@
 (module standard-urls mzscheme
-
-  (require "../servlets/private/util.ss"
-           "internal-hp.ss"
-           "get-help-url.ss"
-           (lib "uri-codec.ss" "net")
+  (require (lib "uri-codec.ss" "net")
            (lib "dirs.ss" "setup")
-           (lib "contract.ss"))
+           (lib "contract.ss")
+           (lib "config.ss" "planet")
+           (lib "help-desk-urls.ss" "help")
+           "../servlets/private/util.ss"
+           "internal-hp.ss"
+           "get-help-url.ss")
   
-  (provide home-page-url)
+  (provide home-page-url host+dirs)
   
   (define (search-type? x)
     (member x '("keyword" "keyword-index" "keyword-index-text")))
@@ -27,21 +28,21 @@
     (format "~a/html/~a/index.htm" (base-docs-url) manual-name))
 
   (define (prefix-with-server suffix)
-    (format "http://~a:~a~a" internal-host internal-port suffix))
+    (format "http://~a:~a~a" internal-host (internal-port) suffix))
   
-  (define results-url-prefix (format "http://~a:~a/servlets/results.ss?" internal-host internal-port))
+  (define results-url-prefix (format "http://~a:~a/servlets/results.ss?" internal-host (internal-port)))
   (define flush-manuals-path "/servlets/results.ss?flush=yes")
-  (define flush-manuals-url (format "http://~a:~a~a" internal-host internal-port flush-manuals-path))
+  (define flush-manuals-url (format "http://~a:~a~a" internal-host (internal-port) flush-manuals-path))
   
   
   (define relative-results-url-prefix "/servlets/results.ss?")
 
-  (define home-page-url (format "http://~a:~a/servlets/home.ss" internal-host internal-port))
+  (define home-page-url (format "http://~a:~a/servlets/home.ss" internal-host (internal-port)))
   
   (define (make-missing-manual-url coll name link)
     (format "http://~a:~a/servlets/missing-manual.ss?manual=~a&name=~a&link=~a"
             internal-host
-            internal-port
+            (internal-port)
             coll
             (uri-encode name)
             (uri-encode link)))
@@ -77,10 +78,10 @@
   
   ; sym, string assoc list
   (define hd-locations
-    `((hd-tour ,(get-help-url (build-path (find-doc-dir) "tour")))
-      (release-notes ,(prefix-with-server "/servlets/release/notes.ss"))
-      (plt-license ,(prefix-with-server "/servlets/release/license.ss"))
-      (front-page ,(prefix-with-server "/servlets/home.ss"))))
+    `((hd-tour ,(format "~a/index.html" (get-help-url (build-path (find-doc-dir) "tour"))))
+      (release-notes ,url-helpdesk-release-notes)
+      (plt-license ,url-helpdesk-license)
+      (front-page ,url-helpdesk-home)))
   
   (define hd-location-syms (map car hd-locations))
 
@@ -88,6 +89,24 @@
     ; the assq is guarded by the contract
     (cadr (assq sym hd-locations)))
   
+  ; host+dirs : (list (cons host-string dir-path))
+  ;  association between internal (in normal Helpdesk also virtual) 
+  ;  hosts and their corresponding file root.
+  (define host+dirs
+    (map cons 
+         (append collects-hosts  doc-hosts)
+         (append collects-dirs   doc-dirs)))
+ 
+  (define (host+file->path host file-path)
+    (cond [(assoc host host+dirs)
+           => (lambda (internal-host+path)
+                (let ([path (cdr internal-host+path)])
+                  (build-path path file-path)))]
+          [(equal? host "planet")
+           (build-path (PLANET-DIR) file-path)]
+          [else #f]))
+
+  (provide host+file->path)
   (provide search-type? search-how?)
   (provide/contract 
    (make-relative-results-url (string? 

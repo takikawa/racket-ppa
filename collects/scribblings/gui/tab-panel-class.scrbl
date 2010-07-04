@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[tab-panel% vertical-panel% ()]{
+@defclass/title[tab-panel% vertical-panel% ()]{
 
 A tab panel arranges its subwindows in a single column, but also
  includes a horizontal row of tabs at the top of the panel. See

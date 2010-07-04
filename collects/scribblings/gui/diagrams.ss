@@ -3,12 +3,18 @@
            (lib "struct.ss" "scribble")
            (lib "scheme.ss" "scribble")
            (lib "manual.ss" "scribble"))
+  (require-for-label (lib "mred.ss" "mred"))
 
   (provide diagram->table
            short-windowing-diagram
            windowing-diagram
            event-diagram
-           menu-diagram)
+           menu-diagram
+           editor-diagram
+           snip-diagram
+           style-diagram
+           admin-diagram
+           stream-diagram)
 
   (define (diagram->table d)
     (make-table
@@ -26,7 +32,8 @@
                              [(regexp-match #rx"([^-a-zA-Z0-9]*)([-a-zA-Z0-9<%>]+)(.*)" line)
                               => (lambda (m)
                                    (append (loop (cadr m))
-                                           (list (to-element (string->symbol (caddr m))))
+                                           (list (to-element (make-just-context (string->symbol (caddr m))
+                                                                                #'here)))
                                            (loop (cadddr m))))]
                              [else (list (make-element 'tt (list line)))])))))))
           (regexp-split #rx"[\r\n]+" d))))
@@ -102,5 +109,53 @@ DIAG
             |- selectable-menu-item<%>               
                 |- menu-item%                        
                 |- checkable-menu-item%
+DIAG
+)
+
+  (define editor-diagram
+#<<DIAG
+  editor<%>
+   |- text%                   
+   |- pasteboard%
+DIAG
+)
+
+  (define snip-diagram
+#<<DIAG
+  snip%                   readable-snip<%>
+   |- string-snip%
+   |   |- tab-snip%
+   |- image-snip%
+   |- editor-snip%
+DIAG
+)
+ 
+  (define admin-diagram
+#<<DIAG
+  editor-canvas%       
+
+  editor-admin<%>                   snip-admin%
+   |- editor-snip-editor-admin<%>
+
+  editor-wordbreak-map%   keymap%
+DIAG
+)
+ 
+  (define style-diagram
+#<<DIAG
+  style<%>         style-delta%       add-color<%>
+  style-list%                         mult-color<%>
+DIAG
+)
+
+  (define stream-diagram
+#<<DIAG
+ editor-data%
+ editor-data-class%                     snip-class%
+ editor-data-class-list<%>              snip-class-list<%>
+ 
+ editor-stream-in%                   editor-stream-out%
+ editor-stream-in-base%              editor-stream-out-base%
+  |- editor-stream-in-bytes-base%     |- editor-stream-out-bytes-base%
 DIAG
 ))

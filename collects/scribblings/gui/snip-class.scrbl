@@ -1,7 +1,7 @@
-#reader(lib "defreader.ss" "scribble")
+#reader(lib "docreader.ss" "scribble")
 @require["common.ss"]
 
-@defclass[snip% object% ()]{
+@defclass/title[snip% object% ()]{
 
 A direct instance of @scheme[snip%] is uninteresting. Useful snips are
  defined by instantiating derived subclasses, but this class defines
@@ -117,7 +117,7 @@ The drawing context and snip's @techlink{location}s in drawing context
 }
 
 
-@defmethod[#:mode 'pubment 
+@defmethod[#:mode pubment 
            (can-do-edit-operation? [op (one-of/c 'undo 'redo 'clear 'cut 'copy 
                                                  'paste 'kill 'select-all 
                                                  'insert-text-box 'insert-pasteboard-box 

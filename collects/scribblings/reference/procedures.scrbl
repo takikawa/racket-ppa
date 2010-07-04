@@ -1,7 +1,7 @@
 #reader(lib "docreader.ss" "scribble")
 @require["mz.ss"]
 
-@title[#:tag "mz:procedures"]{Procedures}
+@title[#:tag "procedures"]{Procedures}
 
 @defproc[(procedure? [v any/c]) boolean]{ Returns @scheme[#t] if
 @scheme[v] is a procedure, @scheme[#f] otherwise.}
@@ -9,7 +9,7 @@
 
 @defproc[(apply [proc procedure?] [v any/c] ... [lst list?]) any]{
 
-@guideintro["guide:apply"]{@scheme[apply]}
+@guideintro["apply"]{@scheme[apply]}
 
 Applies @scheme[proc] using the content of @scheme[(list* v ... lst)]
 as the (by-position) arguments. The given @scheme[proc] must accept as
@@ -32,7 +32,7 @@ is called in tail position with respect to the @scheme[apply] call.
                         [lst list?])
          any]{
 
-@guideintro["guide:apply"]{@scheme[keyword-apply]}
+@guideintro["apply"]{@scheme[keyword-apply]}
 
 Like @scheme[apply], but @scheme[kw-lst] and @scheme[kw-val-lst]
 supply by-keyword arguments in addition to the by-position arguments
@@ -54,14 +54,14 @@ and @scheme[lst]; otherwise, the @exnraise[exn:fail:contract].
 ]}
 
 @defproc[(procedure-arity [proc procedure?])
-         (or/c exact-nonnegative-integer?
-               arity-at-least?
-               (listof
-                (or/c exact-nonnegative-integer?
-                      arity-at-least?)))]{
+         arity?]{
 
 Returns information about the number of by-position arguments accepted
-by @scheme[proc]. The result @scheme[_a] is one of the following:
+by @scheme[proc]. See also @scheme[arity?].}
+
+@defproc[(arity? [v any/c]) boolean?]{
+
+A valid arity is one of the following:
 
 @itemize{
 
@@ -89,6 +89,7 @@ by @scheme[proc]. The result @scheme[_a] is one of the following:
 
 @defproc[(procedure-arity-includes? [proc procedure?] [k exact-nonnegative-integer?])
          boolean?]{
+
 Returns @scheme[#t] if the procedure can accept @scheme[k] arguments
 when no keyword arguments are supplied, @scheme[#f] otherwise.
 
@@ -96,6 +97,20 @@ when no keyword arguments are supplied, @scheme[#f] otherwise.
 (procedure-arity-includes? cons 2)
 (procedure-arity-includes? display 3)
 ]}
+
+@defproc[(procedure-reduce-arity [proc procedure?]
+                                 [arity arity?])
+         procedure?]{
+
+Returns a procedure that is the same as @scheme[proc] (including
+the same name returned by @scheme[object-name]), but that accepts
+only arguments consistent with @scheme[arity]. In particular,
+when @scheme[procedure-arity] is applied to the generated
+procedure, it returns a value that is @scheme[equal?] to
+@scheme[arity].
+
+If the @scheme[arity] specification allows arguments that are not
+in @scheme[(procedure-arity proc)], the @exnraise[exn:fail:contract].}
 
 @defproc[(procedure-keywords [proc procedure?])
          (values
@@ -144,8 +159,12 @@ obtains its result frmo @scheme[plain-proc].
 (show #:init 0 1 2 3 #:extra 4)
 ]}
 
+
 @defstruct[arity-at-least ([value nonnegative-exact-integer?])]{
-This structure type is used for the result of @scheme[procedure-arity].}
+
+This structure type is used for the result of @scheme[procedure-arity].
+See also @scheme[arity?].}
+
 
 @defthing[prop:procedure struct-type-property?]{
 

@@ -33,6 +33,17 @@
   (define comparable-type (make-ref-type "Comparable" `("java" "lang")))
   (define cloneable-type (make-ref-type "Cloneable" `("java" "lang")))
   
+  (define (object-method? m-rec)
+    (or 
+     (and (equal? (method-record-name m-rec) "equals")
+          (eq? (method-record-rtype m-rec) 'boolean)
+          (= 1 (length (method-record-atypes m-rec)))
+          (type=? object-type (car (method-record-atypes m-rec))))
+     (and (equal? (method-record-name m-rec) "hashcode")
+          (eq? (method-record-rtype m-rec) 'int)
+          (= 0 (length (method-record-atypes m-rec))))
+     ))
+  
 ;                                                                                                          
 ;                                                                                                          
 ;                                                   ;                       ;         ;                    
@@ -698,7 +709,9 @@
                [ifaces (consolidate-lists sorted-ifaces)])
           #;(printf "iface-depth ~a ~a ~a ~n" elt 
                     iface-trees (map (lambda (i-list) (depth elt 0 i-list)) iface-trees))
-          (apply min (map (lambda (i-list) (depth elt 0 i-list)) ifaces)))))
+          (if (null? ifaces)
+              0
+              (apply min (map (lambda (i-list) (depth elt 0 i-list)) ifaces))))))
   
   ;conversion-steps: type type -> int
   (define (conversion-steps from to type-recs)

@@ -45,6 +45,8 @@
 	 (add-flags '((make-launchers #f)))]
 	[("-i" "--no-install") "Do not call collection-specific pre-installers"
 	 (add-flags '((call-install #f)))]
+	[("-I" "--no-post-install") "Do not call collection-specific post-installers"
+	 (add-flags '((call-post-install #f)))]
 	[("-d" "--no-info-domain") "Do not produce info-domain caches"
 	 (add-flags '((make-info-domain #f)))]
 	[("-e" "--extension") "Produce native code extensions"
