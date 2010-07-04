@@ -1,3 +1,24 @@
+plt-scheme (4.2.4-1) unstable; urgency=low
+
+  [ Ari Pollak ]
+  * Convert to 3.0 (quilt) format, no patches necessary yet
+
+  [ James Vega ]
+  * New upstream version
+  * debian/control:
+    - Add myself to Uploaders.
+    - Change XS-Vcs-* to Vcs-* and correct a typo in the URLs.
+    - Add ${misc:Depends}.
+    - Remove description of ProfessorJ.
+  * debian/rules:
+    - Remove binary-post-install/plt-scheme target since collects/profj
+      no longer exists.
+    - Add -g to CFLAGS.
+  * debian/overrides/plt-scheme: Add an override for the embedded-zlib while
+    working with upstream to find a fix they'll agree to.
+
+ -- James Vega <jamessan@debian.org>  Sun, 07 Feb 2010 21:51:09 -0500
+
 plt-scheme (4.2.1-1) unstable; urgency=low
 
   * New upstream version
