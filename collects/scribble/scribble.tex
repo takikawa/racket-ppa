@@ -3,13 +3,17 @@
 \usepackage{graphicx}
 \usepackage{hyperref}
 \renewcommand{\rmdefault}{ptm}
-\usepackage{longtable}
+\usepackage{stabular}
 \usepackage{relsize}
+\usepackage{wasysym}
+\usepackage{skull}
 \usepackage[htt]{hyphenat}
 \usepackage[usenames,dvipsnames]{color}
 \hypersetup{bookmarks=true,bookmarksopen=true,bookmarksnumbered=true}
 
-\newcommand{\inColor}[2]{{\Scribtexttt{\color{#1}{#2}}}}
+\newcommand{\SColorize}[2]{\color{#1}{#2}}
+
+\newcommand{\inColor}[2]{{\Scribtexttt{\SColorize{#1}{#2}}}}
 \definecolor{CommentColor}{rgb}{0.76,0.45,0.12}
 \definecolor{ParenColor}{rgb}{0.52,0.24,0.14}
 \definecolor{IdentifierColor}{rgb}{0.15,0.15,0.50}
@@ -21,7 +25,7 @@
 
 \newcommand{\Scribtexttt}[1]{{\texttt{#1}}}
 \newcommand{\schemeplain}[1]{\inColor{black}{#1}}
-\newcommand{\schemekeyword}[1]{{\color{black}{\Scribtexttt{\textbf{#1}}}}}
+\newcommand{\schemekeyword}[1]{{\SColorize{black}{\Scribtexttt{\textbf{#1}}}}}
 \newcommand{\schemesyntaxlink}[1]{\schemekeyword{#1}}
 \newcommand{\schemecomment}[1]{\inColor{CommentColor}{#1}}
 \newcommand{\schemeparen}[1]{\inColor{ParenColor}{#1}}
@@ -42,8 +46,6 @@
 \newcommand{\schemeopt}[1]{#1}
 \newcommand{\textsub}[1]{$_{\hbox{\textsmaller{#1}}}$}
 \newcommand{\textsuper}[1]{$^{\hbox{\textsmaller{#1}}}$}
-\newcommand{\refcolumn}[1]{#1}
-\newcommand{\refcontent}[1]{#1}
 \newcommand{\intextcolor}[2]{\textcolor{#1}{#2}}
 \newcommand{\intextrgbcolor}[2]{\textcolor[rgb]{#1}{#2}}
 \newcommand{\incolorbox}[2]{{\fboxrule=0pt\fboxsep=0pt\colorbox{#1}{#2}}}
@@ -58,8 +60,11 @@
 \newcommand{\noborder}[1]{#1}
 \newcommand{\imageleft}[1]{} % drop it
 \renewcommand{\smaller}[1]{\textsmaller{#1}}
-\newcommand{\refpara}[1]{\marginpar{\raggedright \footnotesize #1}}
 \newcommand{\planetName}[1]{PLane\hspace{-0.1ex}T}
+
+\newcommand{\refpara}[1]{\marginpar{\raggedright \footnotesize #1}}
+\newenvironment{refcolumn}{}{}
+\newenvironment{refcontent}{}{}
 
 \newcommand{\titleAndEmptyVersion}[2]{\title{#1}\maketitle}
 \newcommand{\titleAndVersion}[2]{\title{#1\\{\normalsize Version #2}}\maketitle}
@@ -74,9 +79,27 @@
 \newenvironment{leftindent}{\begin{quote}}{\end{quote}}
 \newenvironment{insetpara}{\begin{quote}}{\end{quote}}
 
-\newenvironment{bibentry}[1]{\parbox[t]{0.8\linewidth}{#1}}
+\newcommand{\bibentry}[1]{\parbox[t]{0.8\linewidth}{#1}}
 
-\newenvironment{bigtabular}{\begin{longtable}}{\end{longtable}\vspace{-3ex}}
+% stabular seems to be the lesser of all page-breaking table evironments
+\newenvironment{bigtabular}{\begin{stabular}}{\end{stabular}}
+% used to keep the horizontal line for a definition on the same page:
+\newcommand{\SEndFirstHead}[0]{ \nopagebreak \\ }
+% attempts to correct weirdness when a table is the first thing in
+%  an itemization:
+\newcommand{\bigtableinlinecorrect}[0]{~
+
+\vspace{-\baselineskip}\vspace{\parskip}}
+% used to indent the table correctly in an itemization, since that's
+% one of the things stabular gets wrong
+\newlength{\stabLeft}
+\newcommand{\bigtableleftpad}{\hspace{\stabLeft}}
+\newcommand{\atItemizeStart}[0]{\addtolength{\stabLeft}{\labelsep}
+                                \addtolength{\stabLeft}{\labelwidth}}
+
+\newenvironment{SingleColumn}{\begin{list}{}{\topsep=0pt\partopsep=0pt%
+\listparindent=0pt\itemindent=0pt\labelwidth=0pt\leftmargin=0pt\rightmargin=0pt%
+\itemsep=0pt\parsep=0pt}\item}{\end{list}}
 
 \newenvironment{schemeblock}{}{}
 \newenvironment{defmodule}{}{}
@@ -93,6 +116,8 @@
 \newcommand{\sectionhidden}[1]{\section{#1}}
 \newcommand{\subsectionhidden}[1]{\subsection{#1}}
 \newcommand{\subsubsectionhidden}[1]{\subsubsection{#1}}
+
+\newenvironment{SCentered}{\begin{trivlist}\item \centering}{\end{trivlist}}
 
 % Scribble then generates the following:
 %

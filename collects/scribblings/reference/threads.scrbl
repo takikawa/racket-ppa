@@ -113,7 +113,7 @@ thread has no custodian and @scheme[benefactor] is not supplied, then
 @scheme[benefactor] is supplied, it triggers up to three
 additional actions:
 
-@itemize{
+@itemize[
 
    @item{If @scheme[benefactor] is a thread, whenever it is resumed
    from a suspended state in the future, then @scheme[thd] is also
@@ -137,7 +137,7 @@ additional actions:
    trigger adding the custodians to other threads that were previously
    attached to @scheme[thd] through @scheme[thread-resume].)}
 
-}}
+]}
 
 
 @defproc[(kill-thread [thd thread?]) void?]{
@@ -199,7 +199,9 @@ Returns a @tech{synchronizable event} (see @secref["sync"]) that is
 ready if and only if @scheme[thd] has terminated.  Unlike using
 @scheme[thd] directly, however, a reference to the event does not
 prevent @scheme[thd] from being garbage collected (see
-@secref["gc-model"]).}
+@secref["gc-model"]). For a given @scheme[thd],
+@scheme[thread-dead-evt] always returns the same (i.e., @scheme[eq?])
+result.}
 
 @defproc[(thread-resume-evt [thd thread?]) evt?]{
 

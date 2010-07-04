@@ -4,18 +4,24 @@
           "prim-ops.ss"
           (for-label lang/htdp-advanced))
 
-@(define-syntax-rule (bd intm-define intm-define-struct intm-lambda intm-local intm-letrec intm-let intm-let* intm-time)
+@(define-syntax-rule (bdl intm-define intm-lambda)
+   (begin
+    (require (for-label lang/htdp-intermediate-lambda))
+    (define intm-define (scheme define))
+    (define intm-lambda (scheme lambda))))
+@(bdl intm-define intm-lambda)
+
+@(define-syntax-rule (bd intm-define-struct intm-local intm-letrec intm-let intm-let* intm-time)
    (begin
     (require (for-label lang/htdp-intermediate))
     (define intm-define (scheme define))
     (define intm-define-struct (scheme define-struct))
-    (define intm-lambda (scheme lambda))
     (define intm-local (scheme local))
     (define intm-letrec (scheme letrec))
     (define intm-let (scheme let))
     (define intm-let* (scheme let*))
     (define intm-time (scheme time))))
-@(bd intm-define intm-define-struct intm-lambda intm-local intm-letrec intm-let intm-let* intm-time)
+@(bd intm-define-struct intm-local intm-letrec intm-let intm-let* intm-time)
 
 @(define-syntax-rule (bbd beg-define beg-define-struct beg-cond beg-if beg-and beg-or beg-check-expect beg-require)
    (begin
@@ -36,7 +42,7 @@
 @declare-exporting[lang/htdp-advanced]
 
 @schemegrammar*+qq[
-#:literals (define define-struct lambda cond else if and or empty true false require lib planet
+#:literals (define define-struct lambda λ cond else if and or empty true false require lib planet
             local let let* letrec time begin begin0 set! delay shared recur when case unless
             check-expect check-within check-error)
 (check-expect check-within check-error require)
@@ -53,6 +59,7 @@
       (set! id expr)
       (delay expr)
       (lambda (id ...) expr)
+      (λ (id ...) expr)
       (local [definition ...] expr)
       (letrec ([id expr] ...) expr)
       (shared ([id expr] ...) expr)
@@ -60,7 +67,7 @@
       (let id ([id expr] ...) expr)
       (let* ([id expr] ...) expr)
       (recur id ([id expr] ...) expr)
-      (code:line (expr expr ...) (code:comment #, @seclink["advanced-call"]{function call}))
+      (code:line (expr expr ...) (code:comment @#,seclink["advanced-call"]{function call}))
       (cond [expr expr] ... [expr expr])
       (cond [expr expr] ... [else expr])
       (case expr [(choice choice ...) expr] ... 
@@ -74,17 +81,16 @@
       (or expr expr expr ...)
       (time expr)
       empty
-      (code:line id (code:comment #, @seclink["intermediate-id"]{identifier}))
-      (code:line prim-op (code:comment #, @seclink["intermediate-lambda-prim-op"]{primitive operation}))
-      'id
-      (code:line #, @elem{@schemevalfont{'}@scheme[quoted]} (code:comment #, @seclink["beginner-abbr-quote"]{quoted value}))
-      (code:line #, @elem{@schemevalfont{`}@scheme[quasiquoted]} (code:comment #, @seclink["beginner-abbr-quasiquote"]{quasiquote}))
+      (code:line id (code:comment @#,seclink["intermediate-id"]{identifier}))
+      (code:line prim-op (code:comment @#,seclink["intermediate-lambda-prim-op"]{primitive operation}))
+      (code:line @#,elem{@schemevalfont{'}@scheme[_quoted]} (code:comment @#,seclink["beginner-abbr-quote"]{quoted value}))
+      (code:line @#,elem{@schemevalfont{`}@scheme[_quasiquoted]} (code:comment @#,seclink["beginner-abbr-quasiquote"]{quasiquote}))
       number
       true
       false
       string
       character]
-[choice (code:line id (code:comment #, @t{treated as a symbol}))
+[choice (code:line id (code:comment @#,t{treated as a symbol}))
         number]
 ]
 
@@ -114,19 +120,22 @@ function is allowed to accept zero arguments.}
 The same as Intermediate's @|intm-define-struct|, but defines an
 additional set of operations:
 
-@itemize{
+@itemize[
 
  @item{@schemeidfont{set-}@scheme[structid]@schemeidfont{-}@scheme[fieldid]@schemeidfont{!}
        : takes an instance of the structure and a value, and changes
        the instance's field to the given value.}
 
-}}
+]}
 
 @; ----------------------------------------------------------------------
 
 @section[#:tag "advanced-lambda"]{@scheme[lambda]}
 
-@defform[(lambda (id ...) expr)]{
+@deftogether[(
+@defform[(lambda (id ...) expr)]
+@defform[(λ (id ...) expr)]
+)]{
 
 The same as Intermediate with Lambda's @|intm-lambda|, except that a
 function is allowed to accept zero arguments.}

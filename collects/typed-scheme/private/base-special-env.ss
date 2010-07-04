@@ -16,21 +16,29 @@
 ;; these are all for constructing the types given to variables
 (require (for-syntax
           scheme/base
+          (utils tc-utils)
           (env init-envs)          
-          (except-in (rep effect-rep type-rep) make-arr)
-          "type-effect-convenience.ss"
-          (only-in "type-effect-convenience.ss" [make-arr* make-arr])
-          "union.ss"
+          (except-in (rep filter-rep object-rep type-rep) make-arr)
+          (types convenience union)
+          (only-in (types convenience) [make-arr* make-arr])          
           (typecheck tc-structs)))
 
-(define-for-syntax (initialize-others) 
-  (d-s date 
-       ([second : N] [minute : N] [hour : N] [day : N] [month : N] 
-        [year : N] [weekday : N] [year-day : N] [dst? : B] [time-zone-offset : N])
+(define-for-syntax (initialize-others)
+  (d-s srcloc
+       ([source : Univ]
+        [line : (*Un -Integer (-val #f))]
+        [column : (*Un -Integer (-val #f))]
+        [position : (*Un -Integer (-val #f))]
+        [span : (*Un -Integer (-val #f))])
        ())
-  (d-s exn ([message : -String] [continuation-marks : Univ]) ())
+  (d-s date 
+       ([second : -Number] [minute : -Number] [hour : -Number] [day : -Number] [month : -Number] 
+        [year : -Number] [weekday : -Number] [year-day : -Number] [dst? : -Boolean] [time-zone-offset : -Number])
+       ())
+  (d-s exn ([message : -String] [continuation-marks : -Cont-Mark-Set]) ())
   (d-s (exn:fail exn) () (-String -Cont-Mark-Set))
   (d-s (exn:fail:read exn:fail) ([srclocs : (-lst Univ)]) (-String -Cont-Mark-Set))
+  (d-s (exn:fail:read:eof exn:fail:read) () (-String -Cont-Mark-Set (-lst Univ)))
   )
 
 (provide (for-syntax initial-env/special-case initialize-others initialize-type-env)
@@ -65,7 +73,7 @@
   ;; make-promise
   (-poly (a) (-> (-> a) (-Promise a)))
   ;; language
-  Sym
+  -Symbol
   ;; qq-append
   (-poly (a b) 
          (cl->*

@@ -12,7 +12,7 @@ natural-language character or piece of a character. Technically, a
 scalar value is a simpler notion than the concept called a
 ``character'' in the Unicode standard, but it's an approximation that
 works well for many purposes. For example, any accented Roman letter
-can be represented as a scalar value, as can any Chinese character.
+can be represented as a scalar value, as can any common Chinese character.
 
 Although each Scheme character corresponds to an integer, the
 character datatype is separate from numbers. The
@@ -32,7 +32,7 @@ and linefeed characters print as @scheme[#\space] and
 (integer->char 65)
 (char->integer #\A)
 #\u03BB
-(eval:alts #, @schemevalfont["#\\u03BB"] #\u03BB)
+(eval:alts @#,schemevalfont["#\\u03BB"] #\u03BB)
 (integer->char 17)
 (char->integer #\space)
 ]

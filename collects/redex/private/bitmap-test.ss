@@ -36,6 +36,21 @@
        (extend-reduction-relation red lang (--> 1 2)))
       "extended-reduction-relation.png")
 
+;; this test should fail because it gets the order wrong
+;; for the where/side-conditions
+(define red2
+  (reduction-relation
+   lang
+   (--> (number_a number_b number_c number_d)
+        any_z
+        (where (any_x any_y) (number_a number_b))
+        (side-condition (= (term number_c) 5))
+        (where any_z any_x)
+        (side-condition (= (term number_d) 5)))))
+
+(test (render-reduction-relation red2)
+      "red2.png")
+        
 (define-metafunction lang
   [(S x v e) e])
 
@@ -47,8 +62,9 @@
    1
    (side-condition (not (eq? (term x) (term y))))]
   [(T x x) 
-   n
-   (where n 2)])
+   (any_1 any_2)
+   (where any_1 2)
+   (where any_2 2)])
 
 ;; in this test, the metafunction has 2 clauses 
 ;; with a side-condition on the first clause

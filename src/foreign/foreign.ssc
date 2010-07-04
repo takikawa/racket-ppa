@@ -1224,8 +1224,10 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
     else scheme_signal_error(MYNAME": cannot qualify 'char");
     break;
   case 3: /* void */
-    if (intsize==0) RETSIZE(void);
-    else scheme_signal_error(MYNAME": cannot qualify 'char");
+    if (intsize==0 && stars>0) RETSIZE(void);
+    else if (stars==0)
+      scheme_signal_error(MYNAME": cannot use 'void without a '*");
+    else scheme_signal_error(MYNAME": cannot qualify 'void");
     break;
   case 4: /* float */
     if (intsize==0) RETSIZE(float);
@@ -1735,6 +1737,8 @@ cdefine[register-finalizer 2 3]{
 
 #define MAX_QUICK_ARGS 16
 
+typedef void(*VoidFun)();
+
 Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
 /* data := {name, c-function, itypes, otype, cif} */
 {
@@ -1817,11 +1821,11 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
     /* Otherwise it was a struct pointer, and avalues[i] is already fine. */
     /* Add offset, if any: */
     if (offsets[i] != 0) {
-      ivals[i].x_pointer = (char *)ivals[i].x_pointer + offsets[i]; 
+      ivals[i].x_pointer = (char *)ivals[i].x_pointer + offsets[i];
     }
   }
   /* Finally, call the function */
-  ffi_call(cif, (void *)W_OFFSET(c_func, cfoff), p, avalues);
+  ffi_call(cif, (VoidFun)W_OFFSET(c_func, cfoff), p, avalues);
   if (ivals != stack_ivals) free(ivals);
   ivals = NULL; /* no need now to hold on to this */
   for (i=0; i<nargs; i++) { avalues[i] = NULL; } /* no need for these refs */
@@ -2079,12 +2083,12 @@ void ctype_printer(Scheme_Object *ctype, int dis, Scheme_Print_Params *pp)
 /*****************************************************************************/
 /* Initialization */
 
-void scheme_init_foreign(Scheme_Env *env)
+/* types need to be initialized before places can spawn
+ * types become entries in the GC mark and fixup tables
+ * this function should initialize read-only globals that can be 
+ * shared without locking */
+void scheme_init_foreign_globals()
 {
-  Scheme_Env *menv;
-  ctype_struct *t;
-  Scheme_Object *s;
-  menv = scheme_primitive_module(scheme_intern_symbol("#%foreign"), env);
   @(maplines (lambda (x)
                @list{@(cadr x)_tag = scheme_make_type("<@(car x)>")})
              (reverse (cstructs)))
@@ -2101,6 +2105,14 @@ void scheme_init_foreign(Scheme_Env *env)
                @list{MZ_REGISTER_STATIC(@(cadr sym));
                      @(cadr sym) = scheme_intern_symbol("@(car sym)")})
              (reverse (symbols)))
+}
+
+void scheme_init_foreign(Scheme_Env *env)
+{
+  Scheme_Env *menv;
+  ctype_struct *t;
+  Scheme_Object *s;
+  menv = scheme_primitive_module(scheme_intern_symbol("#%foreign"), env);
   @(maplines
      (lambda (x)
        (define-values (sname cfun min max) (apply values x))

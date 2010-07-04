@@ -4,12 +4,12 @@
 
 (require "type-env.ss" 
 	 "type-name-env.ss"
-	 (rep type-rep effect-rep)
-	 (for-template (rep type-rep effect-rep) 
-		       (private union)
+	 "type-alias-env.ss"
+         (rep type-rep object-rep filter-rep rep-utils)
+	 (for-template (rep type-rep object-rep filter-rep) 
+		       (types union)
 		       mzlib/pconvert mzlib/shared scheme/base)
-	 (private type-effect-convenience union)
-         "type-alias-env.ss"
+	 (types union convenience)         
 	 mzlib/pconvert scheme/match mzlib/shared)
 
 (define (initialize-type-name-env initial-type-names)
@@ -22,19 +22,26 @@
   (define (gen-constructor sym)
     (string->symbol (string-append "make-" (substring (symbol->string sym) 7))))
   (match v
-    [(Union: elems) `(make-Union (list ,@(map sub elems)))]
+    [(Union: elems) `(make-Union (sort (list ,@(map sub elems)) < #:key Type-seq))]
     [(Base: n cnt) `(make-Base ',n (quote-syntax ,cnt))]
     [(Name: stx) `(make-Name (quote-syntax ,stx))]
     [(Struct: name parent flds proc poly? pred-id cert)
      `(make-Struct ,(sub name) ,(sub parent) ,(sub flds) ,(sub proc) ,(sub poly?) (quote-syntax ,pred-id) (syntax-local-certifier))]
     [(App: rator rands stx) `(make-App ,(sub rator) ,(sub rands) (quote-syntax ,stx))]
     [(Opaque: pred cert) `(make-Opaque (quote-syntax ,pred) (syntax-local-certifier))]
+    [(Refinement: parent pred cert) `(make-Refinement ,(sub parent)
+                                                      (quote-syntax ,pred)
+                                                      (syntax-local-certifier))]
     [(Mu-name: n b) `(make-Mu ,(sub n) ,(sub b))]
     [(Poly-names: ns b) `(make-Poly (list ,@(map sub ns)) ,(sub b))]
     [(PolyDots-names: ns b) `(make-PolyDots (list ,@(map sub ns)) ,(sub b))]
-    [(? Type? (app (lambda (v) (vector->list (struct->vector v))) (list-rest tag key seq vals))) 
+    [(? (lambda (e) (or (LatentFilter? e)
+                        (LatentObject? e)
+                        (PathElem? e)))
+        (app (lambda (v) (vector->list (struct->vector v))) (list-rest tag seq vals))) 
      `(,(gen-constructor tag) ,@(map sub vals))]
-    [(? Effect? (app (lambda (v) (vector->list (struct->vector v))) (list-rest tag key seq vals))) 
+    [(? (lambda (e) (or (Type? e)))
+        (app (lambda (v) (vector->list (struct->vector v))) (list-rest tag key seq vals))) 
      `(,(gen-constructor tag) ,@(map sub vals))]
     [_ (basic v)]))
 

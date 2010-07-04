@@ -382,7 +382,7 @@ WARNING: printf is rebound in the body of the unit to always
                   (and (string? color)
                        (send the-color-database find-color color)))
         (error 'highlight-range
-               "expected a color or a string in the the-color-database for the third argument, got ~e" color))
+               "expected a color or a string in the-color-database for the third argument, got ~e" color))
       (unless (memq style '(rectangle hollow-ellipse ellipse dot))
         (error 'highlight-range
                "expected one of 'rectangle, 'ellipse 'hollow-ellipse, or 'dot as the style, got ~e" style))
@@ -877,18 +877,19 @@ WARNING: printf is rebound in the body of the unit to always
             (split-snip (+ start len))
             (let loop ([snip (find-snip start 'after-or-none)])
               (when snip
-                (let ([next (send snip next)])
-                  (when (is-a? snip string-snip%)
-                    (let* ([old (send snip get-text 0 (send snip get-count))]
-                           [new (string-normalize old)])
-                      (unless (equal? new old)
-                        (when ask?
-                          (set! ask? #f)
-                          (unless (ask-normalize?) (abort)))
-                        (let ([snip-pos (get-snip-position snip)])
-                          (delete snip-pos (+ snip-pos (string-length old)))
-                          (insert new snip-pos snip-pos #f)))))
-                  (loop next)))))
+                (let ([pos (get-snip-position snip)])
+                  (when (< pos (+ start len))
+                    (when (is-a? snip string-snip%)
+                      (let* ([old (send snip get-text 0 (send snip get-count))]
+                             [new (string-normalize old)])
+                        (unless (equal? new old)
+                          (when ask?
+                            (set! ask? #f)
+                            (unless (ask-normalize?) (abort)))
+                          (let ([snip-pos (get-snip-position snip)])
+                            (delete snip-pos (+ snip-pos (string-length old)))
+                            (insert new snip-pos snip-pos #f)))))
+                    (loop (send snip next)))))))
           (set! rewriting? #f)))
       (end-edit-sequence)
       (inner (void) after-insert start len))
@@ -1170,7 +1171,11 @@ WARNING: printf is rebound in the body of the unit to always
               (set! clear-yellow void)
               (when (and searching-str (= (string-length searching-str) (- end start)))
                 (when (do-search searching-str start end)
-                  (set! clear-yellow (highlight-range start end "khaki" #f 'low 'ellipse))))
+                  (set! clear-yellow (highlight-range start end
+                                                      (if (preferences:get 'framework:white-on-black?)
+                                                          (make-object color% 50 50 5)
+                                                          "khaki")
+                                                      #f 'low 'ellipse))))
               (end-edit-sequence)]))]
         [else
          (clear-yellow)

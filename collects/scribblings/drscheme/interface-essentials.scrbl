@@ -16,7 +16,7 @@
 The DrScheme window has three parts: a row of buttons at the top, two
 editing panels in the middle, and a status line at the bottom.
 
-@image["example.png"]
+@centerline{@image[#:scale 0.7 "example.png"]}
 
 The top editing panel, called the @deftech{definitions window}, is for
 defining programs. The above figure shows a program that defines the
@@ -93,7 +93,7 @@ Clicking the @as-index{@onscreen{Check Syntax} button} annotates the
 program text in the definitions window.  It add the following
 annotations:
 
-@itemize{
+@itemize[
 
  @item{@bold{Syntactic Highlighting:} Imported variables and locally
         defined variables are highlighted with color
@@ -143,7 +143,7 @@ annotations:
          imported from a module shows the module that it is imported
          from in a status line at the bottom of the frame.}
 
-}
+]
 
 The @as-index{@onscreen{Run} button} evaluates the program in the
 @tech{definitions window} and resets the @tech{interactions window}.
@@ -165,7 +165,7 @@ evaluation immediately.
 DrScheme supports multiple dialects of Scheme, as well as some
 non-Scheme languages. You specify a language in one of two ways:
 
-@itemize{
+@itemize[
 
  @item{Select the @menuitem["Language" "Choose Language..."] menu
        item, and choose a language other than @drlang{Module}. After
@@ -179,7 +179,7 @@ non-Scheme languages. You specify a language in one of two ways:
        specify a specific language as part of the program usually by
        starting the definitions-window content with @hash-lang[].}
 
-}
+]
 
 The latter method, @drlang{Module} with @hash-lang[], is the recommend
 mode, and it is described further in @secref["module"].
@@ -224,7 +224,7 @@ match.  DrScheme also rewrites open square brackets, usually to an
 open parenthesis. There are some exceptions where opening square
 brackets are not automatically changed to parentheses:
 
-@itemize{
+@itemize[
 
  @item{If the square bracket is after @scheme[cond]-like keyword,
        potentially skipping some of the sub-expressions in the
@@ -246,7 +246,7 @@ brackets are not automatically changed to parentheses:
 
  @item{If the square bracket is in the middle of string,
        comment, character, or symbol.}
-}
+]
 
 The upshot of DrScheme's help is that you can always use the
 (presumably unshifted) square brackets on your keyboard to type
@@ -399,12 +399,12 @@ but within special boxes that separate explicit I/O from normal
 expressions and results. For example, evaluating
 
 @schemeblock[
-#, @tt{>} (read)
+@#,tt{>} (read)
 ]
 
 in the interactions window produces a special box for entering input:
 
-@image["io.png"]
+@centerline{@image[#:scale 0.6 "io.png"]}
 
 Type a number into the box and hit Enter, and that number becomes the
 result of the @scheme[(read)] expression. Once text is submitted for
@@ -414,10 +414,10 @@ shows a new prompt, it hides the interaction box. Thus, if you type
 as follows:
 
 @schemeblock[
-#, @tt{>} (read)
-#, @ioinputfont{5}
-#, @schemeresult[5]
-#, @tt{>} #, @tt{_}
+@#,tt{>} (read)
+@#,ioinputfont{5}
+@#,schemeresult[5]
+@#,tt{>} @#,tt{_}
 ]
 
 In this case, the first @ioinputfont{5} is the input, and the second
@@ -440,10 +440,10 @@ and provide the input S-expression @scheme[(1 2)], the interactions
 window ultimately appears as follows:
 
 @schemeblock[
-#, @ioinputfont{(1 2)}
-#, @iooutputfont{(1 2)}
-#, @schemeresult[(1 2)]
-#, @tt{>} #, @tt{_}
+@#,ioinputfont{(1 2)}
+@#,iooutputfont{(1 2)}
+@#,schemeresult[(1 2)]
+@#,tt{>} @#,tt{_}
 ]
 
 In this example, @scheme[display] produces output immediately beneath
@@ -456,13 +456,13 @@ Entering the same program line-by-line in the interactions window
 produces a different-looking result:
 
 @schemeblock[
-#, @tt{>} (define v (read))
-#, @ioinputfont{(1 2)}
-#, @tt{>} (display v)
-#, @iooutputfont{(1 2)}
-#, @tt{>} v
-#, @schemeresult[(1 2)]
-#, @tt{>} #, @tt{_}
+@#,tt{>} (define v (read))
+@#,ioinputfont{(1 2)}
+@#,tt{>} (display v)
+@#,iooutputfont{(1 2)}
+@#,tt{>} v
+@#,schemeresult[(1 2)]
+@#,tt{>} @#,tt{_}
 ]
 
 Depending on the input operation, you may enter more text into an
@@ -473,31 +473,31 @@ interaction, two values are provided in response to the first
 second @scheme[(read)]:
 
 @schemeblock[
-#, @tt{>} (read)
-#, @ioinputfont{5 6}
-#, @schemeresult[5]
-#, @tt{>} (read)
-#, @schemeresult[6]
-#, @tt{>} #, @tt{_}
+@#,tt{>} (read)
+@#,ioinputfont{5 6}
+@#,schemeresult[5]
+@#,tt{>} (read)
+@#,schemeresult[6]
+@#,tt{>} @#,tt{_}
 ]
 
 The following example illustrates that submitting input with Return
 inserts a newline character into the input stream:
 
 @schemeblock[
-#, @tt{>} (read)
-#, @ioinputfont{5}
+@#,tt{>} (read)
+@#,ioinputfont{5}
 
-#, @schemeresult[5]
-#, @tt{>} (read-char)
-#, @schemeresult[#\newline]
-#, @tt{>} #, @tt{_}
+@#,schemeresult[5]
+@#,tt{>} (read-char)
+@#,schemeresult[#\newline]
+@#,tt{>} @#,tt{_}
 ]
 
-Within a @scheme[#, @hash-lang[] #, @schememodname[scheme]] module,
+Within a @scheme[@#,hash-lang[] @#,schememodname[scheme]] module,
 the results of top-level expression print the same as the results of
 an expression entered in the @tech{interactions window}. The reason is
-that @scheme[#, @hash-lang[] #, @schememodname[scheme]] explicitly
+that @scheme[@#,hash-lang[] @#,schememodname[scheme]] explicitly
 prints the results of top-level expressions using
 @scheme[(current-print)], and DrScheme sets @scheme[(current-print)]
 to print values in the same way as for interactions.
@@ -579,7 +579,7 @@ of a green triangle over this expression's left parenthesis.
 
 While execution is paused, several buttons are available:
 
-@itemize{
+@itemize[
 
     @item{The @as-index{@onscreen{Go} button} is enabled
 whenever the program is paused.  It causes the program to resume
@@ -603,7 +603,7 @@ the @onscreen{Over} button, it sets a one-time breakpoint and
 continues execution.  In this case, the program stops upon returning
 to the context or raising an unhandled exception.}
 
-}
+]
 
 If the program is running (not paused), then only the @as-index{Pause}
 button will be enabled.  Clicking it will interrupt execution and
@@ -620,7 +620,7 @@ button, stopped execution cannot be continued.
 When execution is paused, the definitions window supports several
 additional actions:
 
-@itemize{
+@itemize[
 
     @item{Hovering the mouse cursor over a parenthesis may reveal a
 pink circle.  If so, right-clicking or control-clicking (Mac OS X)
@@ -665,7 +665,7 @@ options to @onscreen{Print value of <var> to console} or
 in the interactions window; the latter opens a text box in which to
 enter a new value for the variable.}
 
-}
+]
 
 @subsection{Stack View Pane}
 
@@ -686,7 +686,7 @@ execution is currently paused.  The expression's return value is
 displayed at the left of the button bar, and the value of @scheme[n]
 is displayed in the stack view pane.
 
-@image["debugger1.png"]
+@centerline{@image[#:scale 0.5 "debugger1.png"]}
 
 @subsection{Debugging Multiple Files}
 
@@ -734,7 +734,7 @@ engine, while other languages support only one type or engine.
 
 Each type has advantages and disadvantages:
 
-@itemize{
+@itemize[
 
   @item{A @deftech{launcher executable} uses the latest version of
   your program source file when it starts. It also accesses library
@@ -756,7 +756,7 @@ Each type has advantages and disadvantages:
  unpacked and run on any machine with the same operating system as
  yours.}
 
-}
+]
 
 In general, DrScheme's @drlang{Module} language gives you the most
 options. Most other languages only allow one type of executable. The

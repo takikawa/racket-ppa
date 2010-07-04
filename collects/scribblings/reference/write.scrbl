@@ -66,7 +66,7 @@ Prints formatted output to @scheme[out], where @scheme[form] is a string
 that is printed directly, except for special formatting
 escapes:
 
-@itemize{
+@itemize[
 
   @item{@FmtMark{n} or @FmtMark{%} prints a newline, the same as @litchar{\n}}
 
@@ -108,7 +108,7 @@ escapes:
   @scheme[#\newline], or @scheme[#\return] followed immediately by
   @scheme[#\newline].}
 
-}
+]
 
 The @scheme[form] string must not contain any @litchar{~} that is
 not one of the above escapes, otherwise the
@@ -159,7 +159,9 @@ mutable pairs print using @litchar["{"] and @litchar["}"] instead of
 A parameter that controls printing values that have no
 @scheme[read]able form (using the default reader), including
 structures that have a custom-write procedure (see
-@scheme[prop:custom-write]); defaults to @scheme[#t]. See
+@scheme[prop:custom-write]), but not including @tech{uninterned}
+symbols and @tech{unreadable symbols} (which print the same as
+@tech{interned} symbols); defaults to @scheme[#t]. See
 @secref["printing"] for more information.}
 
 @defboolparam[print-graph on?]{

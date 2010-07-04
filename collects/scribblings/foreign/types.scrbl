@@ -183,7 +183,14 @@ Unicode strings in UTF-16 format. As usual, the types treat
 @defthing[_path ctype?]{
 
 Simple @cpp{char*} strings, corresponding to Scheme's paths. As usual,
-the types treat @scheme[#f] as @cpp{NULL} and vice-versa.}
+the types treat @scheme[#f] as @cpp{NULL} and vice-versa.
+
+Beware that changing the current directory via
+@scheme[current-directory] does not change the OS-level current
+directory as seen by foreign library functions. Paths normally should
+be converted to absolute form using @scheme[path->complete-path]
+(which uses the @scheme[current-directory] parameter) before passing
+them to a foreign function.}
 
 
 @defthing[_symbol ctype?]{
@@ -365,7 +372,7 @@ values: @itemize[
   on to the original function, for example, have a binding for it.
   Note that each function can hold onto one callback value (it is
   stored in a weak hash table), so if you need to use a function in
-  multiple callbacks you will need to use one of the the last two
+  multiple callbacks you will need to use one of the last two
   options below.  (This is the default, as it is fine in most cases.)}
 
 @item{@scheme[#f] means that the callback value is not held.  This may
@@ -482,7 +489,7 @@ of known keys.  Each key interacts with generated wrapper functions in
 a different way, which affects how its corresponding argument is
 treated:
 
-@itemize{
+@itemize[
 
  @item{@scheme[type:] specifies the foreign type that should be used, if it is
    @scheme[#f] then this argument does not participate in the foreign call.}
@@ -506,7 +513,7 @@ treated:
    argument's value.}
 
  @item{@scheme[post:] a similar post-foreign code chunk.}
-}
+]
 
 The @scheme[pre:] and @scheme[post:] bindings can be of the form
 @scheme[(_id => _expr)] to use the existing value.  Note that if the
@@ -551,7 +558,7 @@ Creates a C pointer type, where @scheme[mode] indicates input or
 output pointers (or both).  The @scheme[mode] can be one of the
 following:
 
-@itemize{
+@itemize[
 
  @item{@scheme[i] --- indicates an @italic{input} pointer argument:
   the wrapper arranges for the function call to receive a value that
@@ -576,7 +583,7 @@ following:
   function, and a copy of the return value is made too---which is
   inefficient, but ensures that structs are not modified by C code.)}
 
-}
+]
 
 For example, the @scheme[_ptr] type can be used in output mode to create a
 foreign function wrapper that returns more than a single argument.  The
@@ -684,7 +691,7 @@ must start with @litchar{_}.
 
 The resulting bindings are as follows:
 
-@itemize{
+@itemize[
 
  @item{@scheme[_id] : the new C type for this struct.}
 
@@ -705,7 +712,7 @@ The resulting bindings are as follows:
  @item{@schemeidfont{set-}@schemevarfont{id}@schemeidfont{-}@scheme[field-id]@schemeidfont{!}
   : a mutator function for each @scheme[field-id].}
 
-}
+]
 
 Objects of the new type are actually C pointers, with a type tag that
 is a list that contains the string form of @schemevarfont{id}.  Since
@@ -781,7 +788,7 @@ work:
 (define makeB
   (get-ffi-obj 'makeB "foo.so"
     (_fun -> (_list-struct (_list-struct _int _byte) _int))))
-(makeB) (code:comment #, @t{should return @scheme['((1 2) 3)]})
+(makeB) (code:comment @#,t{should return @scheme['((1 2) 3)]})
 ]
 
 The problem here is that @cpp{makeB} returns a pointer to the struct rather
@@ -801,10 +808,10 @@ define a type for @cpp{A} which makes it possible to use @cpp{makeA}:
 (define-cstruct #,(schemeidfont "_A") ([x _int] [y _byte]))
 (define makeA
   (get-ffi-obj 'makeA "foo.so"
-    (_fun -> #,(schemeidfont "_A-pointer")))) (code:comment #, @t{using @schemeidfont{_A} is a memory-corrupting bug!})
+    (_fun -> #,(schemeidfont "_A-pointer")))) (code:comment @#,t{using @schemeidfont{_A} is a memory-corrupting bug!})
 (define a (makeA))
 (list a (A-x a) (A-y a))
-(code:comment #, @t{produces an @scheme[A] containing @scheme[1] and @scheme[2]})
+(code:comment @#,t{produces an @scheme[A] containing @scheme[1] and @scheme[2]})
 ]
 
 Using @cpp{gety} is also simple:
@@ -813,7 +820,7 @@ Using @cpp{gety} is also simple:
 (define gety
   (get-ffi-obj 'gety "foo.so"
     (_fun #,(schemeidfont "_A-pointer") -> _byte)))
-(gety a) (code:comment #, @t{produces @scheme[2]})
+(gety a) (code:comment @#,t{produces @scheme[2]})
 ]
 
 We now define another C struct for @cpp{B}, and expose @cpp{makeB}

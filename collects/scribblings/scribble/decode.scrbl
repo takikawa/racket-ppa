@@ -11,10 +11,13 @@ stream of strings to produces instances of the
 @schememodname[scribble/struct] datatypes (see @secref["struct"]).}
 
 At the @tech{flow} level, decoding recognizes a blank line as a
-@tech{paragraph} separator. At the @tech{paragraph}-content level,
-decoding makes just a few special text conversions:
+@tech{paragraph} separator. Blocks and paragraphs without blank lines
+in between are collected into a @tech{compound paragraph}.
 
-@itemize{
+At the @tech{paragraph}-content level, decoding makes just a few
+special text conversions:
+
+@itemize[
 
  @item{@litchar{---}: converted to @scheme['mdash], which the HTML render
        outputs as an en-dash surrounded by space (so don't put spaces around
@@ -28,7 +31,7 @@ decoding makes just a few special text conversions:
 
  @item{@litchar{'}: converted to @scheme['rsquo], which is a fancy apostrophe: '}
 
-}
+]
 
 Some functions @deftech{decode} a sequence of @scheme[_pre-flow] or
 @scheme[_pre-content] arguments using @scheme[decode-flow] or
@@ -71,13 +74,21 @@ parsing.
 
 }
 
-@defproc[(decode-flow [lst list?]) (listof flow-element?)]{
+@defproc[(decode-flow [lst list?]) flow?]{
 
 Decodes a flow. A sequence of two or more newlines separated only by
 whitespace counts is parsed as a paragraph separator. In @scheme[lst],
 instances of @scheme[splice] are inlined into the list. Instances of
 @scheme[paragraph] and other flow-element datatypes are used as-is in
 the enclosing flow.
+
+}
+
+@defproc[(decode-compound-paragraph [lst list?]) block?]{
+
+Decodes a compound paragraph. If the compound paragraph contains a
+single block, the block is returned without a
+@scheme[compound-paragraph] wrapper.
 
 }
 
@@ -103,6 +114,7 @@ An alias for @scheme[decode-content].
 Decodes a single string to produce a list of elements.
 
 }
+
 
 @defproc[(whitespace? [s string?]) boolean?]{
 

@@ -68,9 +68,9 @@ according to @scheme[eq?]. Otherwise, the result of @scheme[eq?]
 applied to two numbers is undefined.
 
 Two numbers are @scheme[eqv?] when they are both inexact or both
-exact, and when they are @scheme[=] (except for @scheme[+nan.0], as
-noted above). Two numbers are @scheme[equal?] when they are
-@scheme[eqv?].
+exact, and when they are @scheme[=] (except for @scheme[+nan.0],
+@scheme[+0.0], and @scheme[-0.0], as noted above). Two numbers are
+@scheme[equal?] when they are @scheme[eqv?].
 
 @; ----------------------------------------
 @section{Number Types}
@@ -233,13 +233,13 @@ otherwise.}
 @defproc[(remainder [n integer?] [m integer?]) integer?]{ Returns
  @scheme[q] with the same sign as @scheme[n] such that
 
-@itemize{
+@itemize[
 
  @item{@scheme[(abs q)] is between @scheme[0] (inclusive) and @scheme[(abs m)] (exclusive), and}
 
  @item{@scheme[(+ q (* m (quotient n m)))] equals @scheme[n].}
 
-}
+]
 
 @mz-examples[(remainder 10 3) (remainder -10.0 3) (remainder 10.0 -3) (remainder -10 -3) (remainder +inf.0 3)]}
 
@@ -256,13 +256,13 @@ otherwise.}
 @defproc[(modulo [n integer?] [m integer?]) number?]{  Returns
  @scheme[q] with the same sign as @scheme[m] where
 
-@itemize{
+@itemize[
 
  @item{@scheme[(abs q)] is between @scheme[0] (inclusive) and @scheme[(abs m)] (exclusive), and}
 
  @item{the difference between @scheme[q] and @scheme[(- n (* m (quotient n m)))] is a multiple of @scheme[m].}
 
-}
+]
 
 @mz-examples[(modulo 10 3) (modulo -10.0 3)  (modulo 10.0 -3) (modulo -10 -3) (modulo +inf.0 3)]}
 
@@ -276,14 +276,14 @@ otherwise.}
 
 @mz-examples[(abs 1.0) (abs -1)]}
 
-@defproc[(max [x real?] ...+) boolean?]{ Returns the largest of the
+@defproc[(max [x real?] ...+) real?]{ Returns the largest of the
  @scheme[x]s, or @scheme[+nan.0] if any @scheme[x] is @scheme[+nan.0].
  If any @scheme[x] is inexact, the result is coerced to inexact.
 
 @mz-examples[(max 1 3 2) (max 1 3 2.0)]}
 
 
-@defproc[(min [x real?] ...+) boolean?]{ Returns the smallest of the
+@defproc[(min [x real?] ...+) real?]{ Returns the smallest of the
  @scheme[x]s, or @scheme[+nan.0] if any @scheme[x] is @scheme[+nan.0].
  If any @scheme[x] is inexact, the result is coerced to inexact.
 
@@ -889,6 +889,10 @@ Returns the hyperbolic sine of @scheme[z].}
 @defproc[(cosh [z number?]) number?]{
 
 Returns the hyperbolic cosine of @scheme[z].}
+
+@defproc[(tanh [z number?]) number?]{
+
+Returns the hyperbolic tangent of @scheme[z].}
 
 @; ----------------------------------------------------------------------
 

@@ -14,7 +14,7 @@ general information about continuation marks.
 The list of continuation marks for a key @scheme[_k] and a continuation
 @scheme[_C] that extends @cont[0] is defined as follows:
 
-@itemize{
+@itemize[
 
  @item{If @scheme[_C] is an empty continuation, then the mark list is
  @scheme[null].}
@@ -27,7 +27,7 @@ The list of continuation marks for a key @scheme[_k] and a continuation
  @scheme[_k], then the mark list for @scheme[_C] is the mark list for
  @cont[0].}
 
-}
+]
 
 The @scheme[with-continuation-mark] form installs a mark on the first
 frame of the current continuation (see @secref["wcm"]).  Procedures
@@ -166,7 +166,7 @@ for programmatic use.
 
 A stack trace is extracted from an exception and displayed by the
 default error display handler (see
-@scheme[current-error-display-handler]) for exceptions other than
+@scheme[error-display-handler]) for exceptions other than
 @scheme[exn:fail:user] (see @scheme[raise-user-error] in
 @secref["errorproc"]).}
 
@@ -186,11 +186,11 @@ default error display handler (see
      (extract-current-continuation-marks 'key2))))
 
 (with-continuation-mark 'key 'mark1 
-  (with-continuation-mark 'key 'mark2 (code:comment #, @t{replaces previous mark})
+  (with-continuation-mark 'key 'mark2 (code:comment @#,t{replaces previous mark})
     (extract-current-continuation-marks 'key)))
 
 (with-continuation-mark 'key 'mark1 
-  (list (code:comment #, @t{continuation extended to evaluate the argument})
+  (list (code:comment @#,t{continuation extended to evaluate the argument})
    (with-continuation-mark 'key 'mark2 
       (extract-current-continuation-marks 'key))))
 

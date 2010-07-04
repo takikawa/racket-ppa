@@ -9,7 +9,8 @@ FIXME:
 (require (for-syntax scheme/base
                      syntax/kerncase
                      "private/parse-ref.ss"
-                     scheme/provide-transform))
+                     scheme/provide-transform)
+         "private/no-set.ss")
 
 (provide (rename-out [module-begin #%module-begin]))
 
@@ -232,6 +233,14 @@ FIXME:
                                               orig
                                               ex)])))
                    exs)
+         (add-no-set!-identifiers (apply 
+                                   append
+                                   (map (lambda (ex)
+                                          (syntax-case ex (rename)
+                                            [(rename (id ex-id) ...)
+                                             (syntax->list #'(id ...))]
+                                            [id (list ex)]))
+                                        exs)))
          (with-syntax ([((ex ...) ...)
                         (map (lambda (ex)
                                (syntax-case ex ()

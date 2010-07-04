@@ -176,13 +176,13 @@
 	     (define e 1)
 	     (,here 'e)
 	     (provide e)))
-    (test '(d c b c) values l)
+    (test '(d b c) values l)
     (eval `(module f mzscheme
 	     (,here 'f)
 	     (require 'b 'e)))
-    (test '(d c b d c b c) values l)
+    (test '(d b d b c) values l)
     (eval `(require 'f))
-    (let ([finished '(f b e  a d c b  d c b d c b c)])
+    (let ([finished '(f b e  a d b  d b d b c)])
       (test finished values l)
       (namespace-attach-module n ''f)
       (test finished values l)
@@ -192,7 +192,7 @@
         (namespace-require 'scheme/base)
 	(eval `(require 'a))
 	(eval `(require 'f))
-	(test finished values l)))))
+	(test (list* 'd 'b finished) values l)))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Check redundant import and re-provide
@@ -235,6 +235,23 @@
 
 (require 'p3_cr)
 (test 18 values w_cr)
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Test `require' scoping
+
+
+(module fake-prefix-in scheme
+  (require scheme/require-syntax)
+  (define-require-syntax (pseudo-+ stx)
+    (syntax-case stx ()
+      [(_ id)
+       #'(only-in scheme [+ id])]))
+  (provide pseudo-+))
+
+(require 'fake-prefix-in
+         (pseudo-+ ++))
+(test 12 values (++ 7 5))
+
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Test proper bindings for `#%module-begin'
@@ -437,6 +454,49 @@
           ((current-module-name-resolver) (current-module-declare-name))))
       (test '#(tests/mzscheme/lang/getinfo get-info closure-data)
             module->language-info 'tests/mzscheme/langm))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check shadowing of initial imports:
+
+(let ([m-code '(module m scheme/base (define-syntax-rule (lambda . _) 5) (provide lambda))]
+      [n-code '(module n scheme/base 
+                 (require 'm) 
+                 (define five (lambda (x) x)) 
+                 (define five-stx #'lambda)
+                 (provide five five-stx))]
+      [p-code '(module p scheme/base
+                 (require 'n)
+                 (define same? (free-identifier=? #'lambda five-stx))
+                 (provide same?))])
+  (let ([ns (make-base-namespace)])
+    (eval m-code ns)
+    (eval '(require 'm) ns)
+    (test 5 eval '(lambda (x) x) ns)
+    (let ([m-ns (eval '(module->namespace ''m) ns)])
+      (test 5 eval '(lambda (x) x) m-ns))
+    (eval n-code ns)
+    (eval '(require 'n) ns)
+    (test 5 eval 'five ns)
+    (eval p-code ns)
+    (eval '(require 'p) ns)
+    (test #f eval 'same? ns)
+    (let ([n-ns (eval '(module->namespace ''n) ns)])
+      (test 5 eval '(lambda (x) x) n-ns)))
+  (let ([ns (make-base-namespace)])
+    (eval m-code ns)
+    (let ([n-zo (let ([s (open-output-bytes)])
+                  (parameterize ([current-namespace ns])
+                    (write (compile n-code) s))
+                  (parameterize ([read-accept-compiled #t])
+                    (read (open-input-bytes (get-output-bytes s)))))])
+      (eval n-zo ns)
+      (eval '(require 'n) ns)
+      (test 5 eval 'five ns)
+      (eval p-code ns)
+      (eval '(require 'p) ns)
+      (test #f eval 'same? ns)
+      (let ([n-ns (eval '(module->namespace ''n) ns)])
+        (test 5 eval '(lambda (x) x) n-ns)))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

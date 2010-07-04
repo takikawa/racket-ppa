@@ -35,7 +35,7 @@
 @declare-exporting[lang/htdp-intermediate-lambda]
 
 @schemegrammar*+qq[
-#:literals (define define-struct lambda cond else if and or empty true false require lib planet
+#:literals (define define-struct lambda λ cond else if and or empty true false require lib planet
             local let let* letrec time check-expect check-within check-error)
 (check-expect check-within check-error require)
 [program (code:line def-or-expr ...)]
@@ -47,11 +47,12 @@
             (define id expr)
             (define-struct id (id ...))]
 [expr (lambda (id id ...) expr)
+      (λ (id id ...) expr)
       (local [definition ...] expr)
       (letrec ([id expr] ...) expr)
       (let ([id expr] ...) expr)
       (let* ([id expr] ...) expr)
-      (code:line (expr expr expr ...) (code:comment #, @seclink["intermediate-lambda-call"]{function call}))
+      (code:line (expr expr expr ...) (code:comment @#,seclink["intermediate-lambda-call"]{function call}))
       (cond [expr expr] ... [expr expr])
       (cond [expr expr] ... [else expr])
       (if expr expr expr)
@@ -59,11 +60,10 @@
       (or expr expr expr ...)
       (time expr)
       empty
-      (code:line id (code:comment #, @seclink["intermediate-id"]{identifier}))
-      (code:line prim-op (code:comment #, @seclink["intermediate-lambda-prim-op"]{primitive operation}))
-      'id
-      (code:line #, @elem{@schemevalfont{'}@scheme[quoted]} (code:comment #, @seclink["beginner-abbr-quote"]{quoted value}))
-      (code:line #, @elem{@schemevalfont{`}@scheme[quasiquoted]} (code:comment #, @seclink["beginner-abbr-quasiquote"]{quasiquote}))
+      (code:line id (code:comment @#,seclink["intermediate-id"]{identifier}))
+      (code:line prim-op (code:comment @#,seclink["intermediate-lambda-prim-op"]{primitive operation}))
+      (code:line @#,elem{@schemevalfont{'}@scheme[_quoted]} (code:comment @#,seclink["beginner-abbr-quote"]{quoted value}))
+      (code:line @#,elem{@schemevalfont{`}@scheme[_quasiquoted]} (code:comment @#,seclink["beginner-abbr-quasiquote"]{quasiquote}))
       number
       true
       false
@@ -96,6 +96,10 @@ for @scheme[lambda], since a @scheme[lambda] form is an expression.}
 
 Creates a function that takes as many arguments as given @scheme[id]s,
 and whose body is @scheme[expr].}
+
+@defform[(λ (id id ...) expr)]{
+
+The Greek letter @scheme[λ] is a synonym for @scheme[lambda].}
 
 @; ----------------------------------------------------------------------
 

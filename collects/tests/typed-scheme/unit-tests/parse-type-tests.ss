@@ -3,14 +3,12 @@
 (require (utils tc-utils)
 	 (env type-alias-env type-environments type-name-env init-envs)
 	 (rep type-rep)
-	 (rename-in (private type-comparison parse-type subtype
-                             union type-utils)
-                    [Un t:Un])
-         (schemeunit))
-
-(require (rename-in (private type-effect-convenience) [-> t:->])
+	 (rename-in (types comparison subtype union utils convenience)
+                    [Un t:Un] [-> t:->])
          (private base-types base-types-extra)
-         (for-template (private base-types base-types-extra)))
+         (for-template (private base-types base-types-extra))
+         (private parse-type)
+         (schemeunit))
 
 (provide parse-type-tests)
 
@@ -57,6 +55,10 @@
      (test-suite nm
                  (pt-test elems ...) ...)]))
 
+(define N -Number)
+(define B -Boolean)
+(define Sym -Symbol)
+
 (define (parse-type-tests)  
   (pt-tests
    "parse-type tests" 
@@ -67,7 +69,7 @@
    [(Listof Boolean) (make-Listof  B)]
    [(Vectorof (Listof Symbol)) (make-Vector (make-Listof Sym))]
    [(pred Number) (make-pred-ty N)]
-   [(values Number Boolean Number) (-values (list N B N))]
+   [(-> (values Number Boolean Number)) (t:-> (-values (list N B N)))]
    [(Number -> Number) (t:-> N N)]
    [(Number -> Number) (t:-> N N)]
    [(Number Number Number Boolean -> Number) (N N N B . t:-> . N)]
@@ -80,6 +82,10 @@
    [(All (a ...) (a ... a -> Integer)) (-polydots (a) ( (list) (a a) . ->... . -Integer))]
    [(∀ (a) (Listof a)) (-poly (a) (make-Listof  a))]
    [(∀ (a ...) (a ... a -> Integer)) (-polydots (a) ( (list) (a a) . ->... . -Integer))]
+   [(All (a ...) (a ... -> Number))
+    (-polydots (a) ((list) [a a] . ->... . N))]
+   [(All (a ...) (-> (values a ...)))
+    (-polydots (a) (t:-> (make-ValuesDots (list) a 'a)))]
    [(case-lambda (Number -> Boolean) (Number Number -> Number)) (cl-> [(N) B]
                                                                       [(N N) N])]
    [1 (-val 1)]
@@ -91,9 +97,14 @@
    
    [a (-v a) (extend-env (list 'a) (list (-v a))
                             initial-tvar-env)]
+   [(All (a ...) (a ... -> Number))
+    (-polydots (a) ((list) [a a] . ->... . N))]
+   
+   [(Any -> Boolean : Number) (make-pred-ty -Number)]
    
    ))
 
+;; FIXME - add tests for parse-values-type, parse-tc-results
 
 (define-go
   parse-type-tests)

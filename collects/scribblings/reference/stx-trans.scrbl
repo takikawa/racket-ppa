@@ -16,15 +16,22 @@ expander, otherwise the @exnraise[exn:fail:contract].})
 
 @title[#:tag "stxtrans"]{Syntax Transformers}
 
+@defproc[(set!-transformer? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] is a value created by
+@scheme[make-set!-transformer] or an instance of a structure type with
+the @scheme[prop:set!-transformer] property, @scheme[#f] otherwise.}
+
+
 @defproc[(make-set!-transformer [proc (syntax? . -> . syntax?)])
          set!-transformer?]{
 
-Creates a @tech{syntax transformer} that cooperates with
+Creates an @tech{assignment transformer} that cooperates with
 @scheme[set!]. If the result of @scheme[make-set!-transformer] is
-bound to @scheme[identifier] as a @tech{transformer binding}, then
-@scheme[proc] is applied as a transformer when @scheme[identifier] is
+bound to @scheme[_id] as a @tech{transformer binding}, then
+@scheme[proc] is applied as a transformer when @scheme[_id] is
 used in an expression position, or when it is used as the target of a
-@scheme[set!] assignment as @scheme[(set! identifier _expr)]. When the
+@scheme[set!] assignment as @scheme[(set! _id _expr)]. When the
 identifier appears as a @scheme[set!] target, the entire @scheme[set!]
 expression is provided to the transformer.
 
@@ -35,9 +42,9 @@ expression is provided to the transformer.
   (let-syntax ([x (make-set!-transformer
                     (lambda (stx)
                       (syntax-case stx (set!)
-                        (code:comment #, @t{Redirect mutation of x to y})
+                        (code:comment @#,t{Redirect mutation of x to y})
                         [(set! id v) (syntax (set! y v))]
-                        (code:comment #, @t{Normal use of @scheme[x] really gets @scheme[x]})
+                        (code:comment @#,t{Normal use of @scheme[x] really gets @scheme[x]})
                         [id (identifier? (syntax id)) (syntax x)])))])
     (begin
       (set! x 3)
@@ -45,17 +52,48 @@ expression is provided to the transformer.
 ]}
 
 
-@defproc[(set!-transformer? [v any/c]) boolean?]{
-
-Returns @scheme[#t] if @scheme[v] is a value created by
-@scheme[make-set!-transformer], @scheme[#f] otherwise.}
-
-
 @defproc[(set!-transformer-procedure [transformer set!-transformer?])
          (syntax? . -> . syntax?)]{
 
 Returns the procedure that was passed to
-@scheme[make-set!-transformer] to create @scheme[transformer].}
+@scheme[make-set!-transformer] to create @scheme[transformer] or that
+is identified by the @scheme[prop:set!-transformer] property of
+@scheme[transformer].}
+
+
+@defthing[prop:set!-transformer struct-type-property?]{
+
+A @tech{structure type property} to indentify structure types that act
+as @tech{assignment transformers} like the ones created by
+@scheme[make-set!-transformer].
+
+The property value must be an exact integer or procedure of one
+argument. In the former case, the integer designates a field within
+the structure that should contain a procedure; the integer must be
+between @scheme[0] (inclusive) and the number of non-automatic fields
+in the structure type (exclusive, not counting supertype fields), and
+the designated field must also be specified as immutable.
+
+If the property value is an procedure, then the procedure serves as a
+@tech{syntax transformer} and for @scheme[set!] transformations. If
+the property value is an integer, the target identifier is extracted
+from the structure instance; if the field value is not a procedure of
+one argument, then a procedure that always calls
+@scheme[raise-syntax-error] is used, instead.
+
+If a value has both the @scheme[prop:set!-transformer] and
+@scheme[prop:rename-transformer] properties, then the latter takes
+precedence. If a structure type has the @scheme[prop:set!-transformer]
+and @scheme[prop:procedure] properties, then the former takes
+precedence for the purposes of macro expansion.}
+
+
+@defproc[(rename-transformer? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] is a value created by
+@scheme[make-rename-transformer] or an instance of a structure type
+with the @scheme[prop:rename-transformer] property, @scheme[#f]
+otherwise.}
 
 
 @defproc[(make-rename-transformer [id-stx syntax?]
@@ -64,32 +102,65 @@ Returns the procedure that was passed to
          rename-transformer?]{
 
 Creates a @tech{rename transformer} that, when used as a
-@tech{transformer binding}, acts as a transformer that insert the
+@tech{transformer binding}, acts as a transformer that inserts the
 identifier @scheme[id-stx] in place of whatever identifier binds the
-transformer, including in non-application positions, and in
-@scheme[set!] expressions. Such a transformer could be written
-manually, but the one created by @scheme[make-rename-transformer]
-cooperates specially with @scheme[syntax-local-value] and
+transformer, including in non-application positions, in @scheme[set!]
+expressions.
+
+Such a transformer could be written manually, but the one created by
+@scheme[make-rename-transformer] also causes the parser to install a
+@scheme[free-identifier=?] and @scheme[identifier-binding]
+equivalence, as long as @scheme[id-stx] does not have a true value for
+the @indexed-scheme['not-free-identifier=?] @tech{syntax property}.
+Also, if @scheme[id-stx] has a true value for the
+@indexed-scheme['not-provide-all-defined] @tech{syntax property} and
+it is bound as a module-level transformer, the bound identifier is not
+exported by @scheme[all-defined-out]; the @scheme[provide] form
+otherwise uses a symbol-valued @indexed-scheme['nominal-id] property
+of @scheme[id-stx] to specify the ``nominal source identifier'' of the
+binding. Finally, the rename transformer cooperates specially with
+@scheme[syntax-local-value] and
 @scheme[syntax-local-make-delta-introducer].}
 
 
-@defproc[(rename-transformer? [v any/c]) boolean?]{
-
-Returns @scheme[#t] if @scheme[v] is a value created by
-@scheme[make-rename-transformer], @scheme[#f] otherwise.}
-
-
 @defproc[(rename-transformer-target [transformer rename-transformer?])
-         syntax?]{
+         identifier?]{
 
 Returns the identifier passed to @scheme[make-rename-transformer] to
-create @scheme[transformer].}
+create @scheme[transformer] or as indicated by a
+@scheme[prop:rename-transformer] property on @scheme[transformer].}
+
+
+@defthing[prop:rename-transformer struct-type-property?]{
+
+A @tech{structure type property} to indentify structure types that act
+as @tech{rename transformers} like the ones created by
+@scheme[make-rename-transformer].
+
+The property value must be an exact integer or an identifier
+@tech{syntax object}. In the former case, the integer designates a
+field within the structure that should contain an identifier; the
+integer must be between @scheme[0] (inclusive) and the number of
+non-automatic fields in the structure type (exclusive, not counting
+supertype fields), and the designated field must also be specified as
+immutable.
+
+If the property value is an identifier, the identifier serves as the
+target for renaming, just like the first argument to
+@scheme[make-rename-transformer]. If the property value is an integer,
+the target identifier is extracted from the structure instance; if the
+field value is not an identifier, then an identifier @schemeidfont{?}
+with an empty context is used, instead.}
 
 
 @defproc[(local-expand [stx syntax?]
                        [context-v (or/c 'expression 'top-level 'module 'module-begin list?)]
                        [stop-ids (or/c (listof identifier?) #f)]
-                       [intdef-ctx (or/c internal-definition-context? #f) #f])
+                       [intdef-ctx (or/c internal-definition-context? 
+                                         (and/c pair? 
+                                                (listof internal-definition-context?))
+                                         #f)
+                                   #f])
          syntax?]{
 
 Expands @scheme[stx] in the lexical context of the expression
@@ -109,12 +180,13 @@ instead of a list, then @scheme[stx] is expanded only as long as the
 outermost form of @scheme[stx] is a macro (i.e., expansion does not
 proceed to sub-expressions).
 
-The optional @scheme[intdef-ctx] argument must be either @scheme[#f]
-or the result of @scheme[syntax-local-make-definition-context]. In the
-latter case, lexical information for internal definitions is added to
-@scheme[stx] before it is expanded. The lexical information is also
-added to the expansion result (because the expansion might introduce
-bindings or references to internal-definition bindings).
+The optional @scheme[intdef-ctx] argument must be either @scheme[#f],
+the result of @scheme[syntax-local-make-definition-context], or a list
+of such results. In the latter two cases, lexical information for
+internal definitions is added to @scheme[stx] before it is expanded
+(in reverse order relative to the list). The lexical information is
+also added to the expansion result (because the expansion might
+introduce bindings or references to internal-definition bindings).
 
 Expansion of @scheme[stx] can use certificates for the expression
 already being expanded (see @secref["stxcerts"]) , and @tech{inactive
@@ -126,7 +198,32 @@ was triggered by a use of a module-defined identifier with a
 expanded for the body of a module, then the expansion of @scheme[stx]
 can use any identifier defined by the module.
 
-@transform-time[]}
+@transform-time[]
+
+@examples[#:eval stx-eval
+(define-syntax do-print
+  (syntax-rules ()
+    [(_ x ...) (printf x ...)]))
+
+(define-syntax hello
+  (syntax-rules ()
+    [(_ x) (do-print "hello ~a" x)]))
+
+(define-syntax (show stx)
+  (syntax-case stx ()
+    [(_ x)
+     (with-syntax ([partly-expanded (local-expand #'(hello x)
+						  'expression
+						  (list #'do-print))]
+		   [expanded (local-expand #'(hello x)
+					   'expression
+					   #f)])
+       (printf "partly expanded syntax is ~a\n" (syntax->datum #'partly-expanded))
+       (printf "expanded syntax is ~a\n" (syntax->datum #'expanded))
+       #'expanded)]))
+
+(show 1)
+]}
 
 
 @defproc[(syntax-local-expand-expression [stx syntax?])
@@ -307,6 +404,28 @@ being expanded for the body of a module, then resolving
 @transform-time[]}
 
 
+@defproc[(syntax-local-value/immediate [id-stx syntax?]
+                                       [failure-thunk (or/c (-> any) #f)
+                                                      #f]
+                                       [intdef-ctx (or/c internal-definition-context?
+                                                         #f)
+                                                   #f])
+         any]{
+
+Like @scheme[syntax-local-value], but the result is normally two
+values. If @scheme[id-stx] is bound to a @tech{rename transformer},
+the results are the rename transformer and the identifier in the
+transformer augmented with certificates from @scheme[id-stx]. If
+@scheme[id-stx] is not bound to a @tech{rename transformer}, then the
+results are the value that @scheme[syntax-local-value] would produce
+and @scheme[#f].
+
+If @scheme[id-stx] has no transformer biding, then
+@scheme[failure-thunk] is called (and it can return any number of
+values), or an exception is raised if @scheme[failure-thunk] is
+@scheme[#f].}
+
+
 @defproc[(syntax-local-lift-expression [stx syntax?])
          identifier?]{
 
@@ -331,6 +450,15 @@ Other syntactic forms can capture lifts by using
 
 @transform-time[]}
 
+@defproc[(syntax-local-lift-values-expression [n exact-nonnegative-integer?] [stx syntax?])
+         (listof identifier?)]{
+
+Like @scheme[syntax-local-lift-expression], but binds the result to
+@scheme[n] identifiers, and returns a list of the @scheme[n]
+identifiers.
+
+@transform-time[]}
+
 
 @defproc[(syntax-local-lift-context)
          any/c]{
@@ -350,13 +478,13 @@ for caching lift information to avoid redundant lifts.
 
 Cooperates with the @scheme[module] form to insert @scheme[stx] as
 a top-level declaration at the end of the module currently being
-expanded. If the current expression being transformed is not within a
-@scheme[module] form, or if it is not a run-time expression, then the
-@exnraise[exn:fail:contract]. If the current expression being
+expanded. If the current expression being
 transformed is not in the module top-level, then @scheme[stx] is
 eventually expanded in an expression context.
 
-@transform-time[]}
+@transform-time[] If the current expression being transformed is not
+within a @scheme[module] form, or if it is not a run-time expression,
+then the @exnraise[exn:fail:contract].}
 
 
 @defproc[(syntax-local-lift-require [raw-require-spec any/c][stx syntax?])
@@ -377,6 +505,17 @@ resulting syntax object (assuming that the lexical information of
 @scheme[#%require] is lifted).
 
 @transform-time[]}
+
+@defproc[(syntax-local-lift-provide [raw-provide-spec-stx syntax?])
+         void?]{
+
+Lifts a @scheme[#%provide] form corresponding to
+@scheme[raw-provide-spec-stx] to the top of the module currently being
+expanded.
+
+@transform-time[] If the current expression being transformed is not
+within a @scheme[module] form, or if it is not a run-time expression,
+then the @exnraise[exn:fail:contract]. }
 
 @defproc[(syntax-local-name) (or/c symbol? #f)]{
 
@@ -675,7 +814,7 @@ Returns @scheme[#t] if @scheme[v] has the
 
 A structure representing a single imported identifier:
 
-@itemize{
+@itemize[
 
  @item{@scheme[local-id] --- the identifier to be bound within the
        importing module.}
@@ -698,7 +837,7 @@ A structure representing a single imported identifier:
  @item{@scheme[orig-mode] --- the @tech{phase level} of the
        binding as exported by the exporting module.}
 
-}}
+]}
 
 
 @defstruct[import-source ([mod-path-stx (and/c syntax?
@@ -710,14 +849,14 @@ A structure representing an imported module, which must be
 @tech{instantiate}d or @tech{visit}ed even if no binding is imported
 into a module.
 
-@itemize{
+@itemize[
 
  @item{@scheme[mod-path-stx] --- a @tech{module path} (relative
        to the importing module) for the source of the imported binding.}
 
  @item{@scheme[mode] --- the @tech{phase level} shift the import.}
 
-}}
+]}
 
 
 @defproc[(syntax-local-require-certifier)
@@ -795,7 +934,7 @@ Returns @scheme[#t] if @scheme[v] has the
 
 A structure representing a single imported identifier:
 
-@itemize{
+@itemize[
 
  @item{@scheme[local-id] --- the identifier that is bound within the
        exporting module.}
@@ -811,7 +950,7 @@ A structure representing a single imported identifier:
  @item{@scheme[mode] --- the @tech{phase level} of the binding in the
        exporting module.}
 
-}}
+]}
 
 
 @defproc[(syntax-local-provide-certifier)

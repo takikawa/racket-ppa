@@ -73,6 +73,7 @@ AC_ARG_ENABLE(noopt,   [  --enable-sdk=<path>     use Mac OS X 10.4 SDK director
 AC_ARG_ENABLE(xonx,    [  --enable-xonx           compile X11 (not Quartz) MrEd for Mac OS X])
 AC_ARG_ENABLE(libfw,   [  --enable-libfw          install Mac OS X frameworks to /Library/Frameworks])
 AC_ARG_ENABLE(libfw,   [  --enable-userfw         install Mac OS X frameworks to ~/Library/Frameworks])
+AC_ARG_ENABLE(macprefix, [  --enable-macprefix      allow --prefix with a Mac OS X install])
 
 
 ###### Get OS Type #######
@@ -133,6 +134,17 @@ else
   if test "$OS" = "Darwin" ; then
     enable_quartz=yes
     enable_origtree=yes
+    if test "${prefix}" != "NONE" ; then
+      if test "${enable_macprefix}" != "yes" ; then
+        echo "ERROR: --prefix not allowed for a Mac OS X build, unless either"
+        echo "         --enable-xonx is supplied (to create a Unix-style"
+        echo "           build), or "
+        echo "         --enable-macprefix is supplied (to allow a Mac-style"
+        echo "           installation, even though --prefix is normally used"
+        echo "           for Unix-style installations)"
+        exit 1
+      fi
+    fi
   fi
 fi
 
@@ -349,6 +361,8 @@ CGC_INSTALLED=cgc
 CGC_CAP_INSTALLED=CGC
 MAIN_VARIANT=3m
 
+STRIP_DEBUG=":"
+
 ###### OSKit stuff #######
 
 if test "${enable_oskit}" = "yes" ; then
@@ -519,7 +533,7 @@ case $OS in
     DYN_CFLAGS="-fPIC"
     ;;
   OpenBSD)
-    LIBS="$LIBS -rdynamic"
+    LIBS="$LIBS -rdynamic -Wl,--export-dynamic"
     ;;
   NetBSD)
     LIBS="$LIBS -rdynamic"
@@ -536,6 +550,7 @@ case $OS in
     LIBS="$LIBS -ldl -lm -rdynamic"
     DYN_CFLAGS="-fPIC"
     GC_THREADS_FLAG="-DGC_LINUX_THREADS"
+    STRIP_DEBUG="strip -S"
     # PPC: X11 librares are not found
     case `$UNAME -m` in
       #Required for CentOS 4.6
@@ -606,6 +621,8 @@ case $OS in
     fi
     
     PREFLAGS="$PREFLAGS -DOS_X -D_DARWIN_UNLIMITED_SELECT"
+
+    STRIP_DEBUG="/usr/bin/strip -S"
 
     # zlib comes with the OS
     ZLIB_A=""
@@ -722,9 +739,23 @@ AC_TRY_RUN(
    static inline int foo() { return 0; }
    int main() {
       return foo();
-   }, inline=yes, inline=no, inline=no)
+   }, 
+  inline=yes, inline=no, inline=no)
 if test "$inline" = "no" ; then
   MZOPTIONS="$MZOPTIONS -DNO_INLINE_KEYWORD"
+fi
+AC_MSG_RESULT($inline) 
+
+[ msg="for noinline attribute" ]
+AC_MSG_CHECKING($msg)
+AC_TRY_RUN(
+   static int foo() __attribute__ ((noinline));
+   static int foo() { return 0; }
+   int main() {
+      return foo();
+   }, noinline=yes, noinline=no, noinline=no)
+if test "$noinline" = "yes" ; then
+  AC_DEFINE(MZ_USE_NOINLINE,1,[Have noinline attribute])
 fi
 AC_MSG_RESULT($inline) 
 
@@ -1304,6 +1335,7 @@ AC_SUBST(RANLIB)
 AC_SUBST(AR)
 AC_SUBST(STATIC_AR)
 AC_SUBST(ARFLAGS)
+AC_SUBST(STRIP_DEBUG)
 AC_SUBST(WBUILD)
 AC_SUBST(CC_FOR_BUILD)
 AC_SUBST(REZ)
@@ -1438,9 +1470,13 @@ if test "${enable_mred}" = "yes" ; then
 
   makefiles="$makefiles
              mred/Makefile
-               mred/wxs/Makefile mred/wxme/Makefile
-               mred/gc2/Makefile
+               mred/wxs/Makefile
+               mred/gc2/Makefile"
+
+  if test "${enable_libpng}" != "yes" ; then
+    makefiles="$makefiles 
                wxcommon/libpng/Makefile wxcommon/zlib/Makefile"
+  fi
 
   if test "${enable_quartz}" = "yes" ; then
     makefiles="$makefiles

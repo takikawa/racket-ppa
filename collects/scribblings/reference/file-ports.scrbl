@@ -1,5 +1,38 @@
 #lang scribble/doc
-@(require "mz.ss")
+@(require "mz.ss"
+          scheme/file)
+
+@(begin
+  ;; ignore expressions at the top-level so that they don't print #<void>
+  (define-syntax ignore
+    (syntax-rules ()
+      [(_ expr) (define x expr)]))
+
+  ;; hacky?
+  (define file-eval
+   (lambda ()
+     (let ([the-eval (make-base-eval)])
+       (the-eval '(require (for-syntax scheme/base)
+			   scheme/file))
+       (the-eval '(define some-file (make-temporary-file)))
+       (the-eval '(define some-other-file (make-temporary-file)))
+       the-eval)))
+
+  (define-syntax file-examples
+    (syntax-rules ()
+      [(_ expr ...)
+       (let [(my-eval (file-eval))]
+	 (define (clean)
+	   (my-eval '(for [(i (list some-file some-other-file))]
+			  (when (file-exists? i)
+			    (delete-file i)))))
+	 (clean)
+	 (begin0
+	   (defexamples #:eval my-eval
+			expr ...)
+	   (clean)))]))
+
+  "")
 
 @title[#:tag "file-ports"]{File Ports}
 
@@ -21,7 +54,7 @@ Opens the file specified by @scheme[path] for input. The
 @scheme[mode-flag] argument specifies how the file's bytes are
 translated on input:
 
-@itemize{
+@itemize[
 
  @item{@indexed-scheme['binary] --- bytes are returned from the port
  exactly as they are read from the file.}
@@ -30,7 +63,7 @@ translated on input:
  13) as read from the file are filtered by the port in a platform
  specific manner:
 
-  @itemize{
+  @itemize[
 
   @item{@|AllUnix|: no filtering occurs.}
 
@@ -38,8 +71,8 @@ translated on input:
         by the port as a single linefeed; no filtering occurs for
         return bytes that are not followed by a linefeed, or for a
         linefeed that is not preceded by a return.}
-  }}
-}
+  ]}
+]
 
 Under Windows, @scheme['text] mode works only with regular files;
 attempting to use @scheme['text] with other kinds of files triggers an
@@ -53,13 +86,22 @@ cases, the port is buffered by default.
 The port produced by @scheme[open-input-file] should be explicitly
 closed, either though @scheme[close-input-port] or indirectly via
 @scheme[custodian-shutdown-all], to release the OS-level file
-handle. The input port will not closed automatically if it is
+handle. The input port will not be closed automatically if it is
 otherwise available for garbage collection (see
 @secref["gc-model"]); a @tech{will} could be associated input port
 to close it more automatically (see @secref["willexecutor"]).
 
 A @tech{path} value that is the @tech{cleanse}d version of
-@scheme[path] is used as the name of the opened port.}
+@scheme[path] is used as the name of the opened port.
+
+@file-examples[
+;; put some text in a file
+(with-output-to-file some-file
+  (lambda () (printf "hello world")))
+(define in (open-input-file some-file))
+(read-string 11 in)
+(close-input-port in)
+]}
 
 @defproc[(open-output-file [path path-string?]
                            [#:mode mode-flag (or/c 'binary 'text) 'binary]
@@ -72,7 +114,7 @@ Opens the file specified by @scheme[path] for output. The
 @scheme[mode-flag] argument specifies how bytes written to the port
 are translated when written to the file:
 
-@itemize{
+@itemize[
 
  @item{@scheme['binary] --- bytes are written to the file exactly
  as written to the port.}
@@ -81,7 +123,7 @@ are translated when written to the file:
  to the port is translated to a return-linefeed combination in the
  file; no filtering occurs for returns.}
 
-}
+]
 
 Under Windows, @scheme['text] mode works only with regular files;
 attempting to use @scheme['text] with other kinds of files triggers an
@@ -90,7 +132,7 @@ attempting to use @scheme['text] with other kinds of files triggers an
 The @scheme[exists-flag] argument specifies how to handle/require
 files that already exist:
 
-@itemize{
+@itemize[
 
  @item{@indexed-scheme['error] --- raise @scheme[exn:fail:filesystem]
        if the file exists.}
@@ -123,7 +165,7 @@ files that already exist:
        the file is not required to exist, and the file position is
        immediately set to the end of the file after opening it.}
 
-}
+]
 
 The file specified by @scheme[path] need not be a regular file. It
 might a device that is connected through the filesystem, such as
@@ -134,13 +176,19 @@ terminal, in which case is it line buffered bu default.
 The port produced by @scheme[open-output-port] should be explicitly
 closed, either though @scheme[close-output-port] or indirectly via
 @scheme[custodian-shutdown-all], to release the OS-level file
-handle. The output port will not closed automatically if it is
+handle. The output port will not be closed automatically if it is
 otherwise available for garbage collection (see
 @secref["gc-model"]); a @tech{will} could be associated input port
 to close it more automatically (see @secref["willexecutor"]).
 
 A @tech{path} value that is the @tech{cleanse}d version of
-@scheme[path] is used as the name of the opened port.}
+@scheme[path] is used as the name of the opened port.
+
+@file-examples[
+(define out (open-output-file some-file))
+(write "hello world" out)
+(close-output-port out)
+]}
 
 @defproc[(open-input-output-file [path path-string?]
                            [#:mode mode-flag (or/c 'binary 'text) 'binary]
@@ -167,7 +215,14 @@ Calls @scheme[open-input-file] with the @scheme[path] and
 @scheme[mode-flag] arguments, and passes the resulting port
 to @scheme[proc]. The result of @scheme[proc] is the result of the
 @scheme[call-with-input-file] call, but the newly opened port is closed
-when @scheme[thunk] return.}
+when @scheme[thunk] return.
+
+@file-examples[
+(with-output-to-file some-file
+  (lambda () (printf "text in a file")))
+(call-with-input-file some-file
+  (lambda (in) (read-string 15 in)))
+]}
 
 @defproc[(call-with-output-file [path path-string?]
                                 [proc (output-port? . -> . any)]
@@ -177,14 +232,23 @@ when @scheme[thunk] return.}
          any]{
 Analogous to @scheme[call-with-input-file], but passing @scheme[path],
 @scheme[mode-flag] and @scheme[exists-flag] to
-@scheme[open-output-file].}
+@scheme[open-output-file].
+
+@file-examples[
+(call-with-output-file some-file
+  (lambda (out)
+    (write 'hello out)))
+(call-with-input-file some-file
+  (lambda (in)
+    (read-string 5 in)))
+]}
 
 @defproc[(call-with-input-file* [path path-string?]
                                 [proc (input-port? . -> . any)]
                                 [#:mode mode-flag (or/c 'binary 'text) 'binary])
          any]{
 Like @scheme[call-with-input-file], but the newly opened port is
-closed whenever control escapes the the dynamic extent of the
+closed whenever control escapes the dynamic extent of the
 @scheme[call-with-input-file*] call, whether through @scheme[proc]'s
 return, a continuation application, or a prompt-based abort.}
 
@@ -195,7 +259,7 @@ return, a continuation application, or a prompt-based abort.}
                                                              'replace 'truncate 'truncate/replace) 'error])
          any]{
 Like @scheme[call-with-output-file], but the newly opened port is
-closed whenever control escapes the the dynamic extent of the
+closed whenever control escapes the dynamic extent of the
 @scheme[call-with-output-file*] call, whether through @scheme[proc]'s
 return, a continuation application, or a prompt-based abort.}
 
@@ -206,7 +270,14 @@ return, a continuation application, or a prompt-based abort.}
 Like @scheme[call-with-input-file*], but instead of passing the newly
 opened port to the given procedure argument, the port is installed as
 the current input port (see @scheme[current-input-port]) using
-@scheme[parameterize] around the call to @scheme[thunk].}
+@scheme[parameterize] around the call to @scheme[thunk].
+
+@file-examples[
+(with-output-to-file some-file
+  (lambda () (printf "hello")))
+(with-input-from-file some-file
+  (lambda () (read-string 5)))
+]}
 
 @defproc[(with-output-to-file [path path-string?]
                               [thunk (-> any)]
@@ -217,7 +288,14 @@ the current input port (see @scheme[current-input-port]) using
 Like @scheme[call-with-output-file*], but instead of passing the newly
 opened port to the given procedure argument, the port is installed as
 the current output port (see @scheme[current-output-port]) using
-@scheme[parameterize] around the call to @scheme[thunk].}
+@scheme[parameterize] around the call to @scheme[thunk].
+
+@file-examples[
+(with-output-to-file some-file
+  (lambda () (printf "hello")))
+(with-input-from-file some-file
+  (lambda () (read-string 5)))
+]}
 
 @defproc[(port-file-identity [port file-stream-port?]) any]{
 
@@ -231,4 +309,13 @@ identities (even if the ports actually access the same file)---except
 as can be inferred through relationships with other ports. If
 @scheme[file-stream-port] is closed, the @exnraise[exn:fail].  Under
 Windows 95, 98, and Me, if @scheme[file-stream-port] is connected to a
-pipe instead of a file, the @exnraise[exn:fail:filesystem].}
+pipe instead of a file, the @exnraise[exn:fail:filesystem].
+
+@file-examples[
+(define file1 (open-output-file some-file))
+(define file2 (open-output-file some-other-file))
+(port-file-identity file1)
+(port-file-identity file2)
+(close-output-port file1)
+(close-output-port file2)
+]}

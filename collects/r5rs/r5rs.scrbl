@@ -1,6 +1,7 @@
 #lang scribble/doc
 @(require scribble/manual
-          (for-label r5rs
+          (for-label (only-meta-in 0 r5rs)
+                     (only-in r5rs syntax-rules ...)
                      (only-in mzscheme #%plain-module-begin)
                      (only-in scheme/mpair mmap)
                      (only-in scheme/contract one-of/c)
@@ -44,7 +45,7 @@ includes tools and libraries for running @|r5rs| programs.
 PLT Scheme provides several layers of support for programs written
 according to @|r5rs|:
 
-@itemize{
+@itemize[
 
  @item{DrScheme provides an @onscreen{R5RS} language, which can be
        selected via the @menuitem["Language" "Choose Language..."]
@@ -68,7 +69,7 @@ according to @|r5rs|:
        @|r5rs| read-eval-print loop. See @secref["r5rs/init-mod"]
        (later in this manual) for more information.}
 
-}
+]
 
 @; ----------------------------------------
 

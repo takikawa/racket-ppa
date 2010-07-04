@@ -1752,8 +1752,10 @@ static Scheme_Object *foreign_compiler_sizeof(int argc, Scheme_Object *argv[])
     else scheme_signal_error(MYNAME": cannot qualify 'char");
     break;
   case 3: /* void */
-    if (intsize==0) RETSIZE(void);
-    else scheme_signal_error(MYNAME": cannot qualify 'char");
+    if (intsize==0 && stars>0) RETSIZE(void);
+    else if (stars==0)
+      scheme_signal_error(MYNAME": cannot use 'void without a '*");
+    else scheme_signal_error(MYNAME": cannot qualify 'void");
     break;
   case 4: /* float */
     if (intsize==0) RETSIZE(float);
@@ -2331,6 +2333,8 @@ void do_ptr_finalizer(void *p, void *finalizer)
 
 #define MAX_QUICK_ARGS 16
 
+typedef void(*VoidFun)();
+
 Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
 /* data := {name, c-function, itypes, otype, cif} */
 {
@@ -2417,7 +2421,7 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
     }
   }
   /* Finally, call the function */
-  ffi_call(cif, (void *)W_OFFSET(c_func, cfoff), p, avalues);
+  ffi_call(cif, (VoidFun)W_OFFSET(c_func, cfoff), p, avalues);
   if (ivals != stack_ivals) free(ivals);
   ivals = NULL; /* no need now to hold on to this */
   for (i=0; i<nargs; i++) { avalues[i] = NULL; } /* no need for these refs */
@@ -2685,12 +2689,12 @@ void ctype_printer(Scheme_Object *ctype, int dis, Scheme_Print_Params *pp)
 /*****************************************************************************/
 /* Initialization */
 
-void scheme_init_foreign(Scheme_Env *env)
+/* types need to be initialized before places can spawn
+ * types become entries in the GC mark and fixup tables
+ * this function should initialize read-only globals that can be
+ * shared without locking */
+void scheme_init_foreign_globals()
 {
-  Scheme_Env *menv;
-  ctype_struct *t;
-  Scheme_Object *s;
-  menv = scheme_primitive_module(scheme_intern_symbol("#%foreign"), env);
   ffi_lib_tag = scheme_make_type("<ffi-lib>");
   ffi_obj_tag = scheme_make_type("<ffi-obj>");
   ctype_tag = scheme_make_type("<ctype>");
@@ -2730,6 +2734,14 @@ void scheme_init_foreign(Scheme_Env *env)
   fail_ok_sym = scheme_intern_symbol("fail-ok");
   MZ_REGISTER_STATIC(abs_sym);
   abs_sym = scheme_intern_symbol("abs");
+}
+
+void scheme_init_foreign(Scheme_Env *env)
+{
+  Scheme_Env *menv;
+  ctype_struct *t;
+  Scheme_Object *s;
+  menv = scheme_primitive_module(scheme_intern_symbol("#%foreign"), env);
   scheme_add_global("ffi-lib?",
     scheme_make_prim_w_arity(foreign_ffi_lib_p, "ffi-lib?", 1, 1), menv);
   scheme_add_global("ffi-lib",

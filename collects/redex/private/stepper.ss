@@ -648,6 +648,7 @@ todo:
                          (loop (cdr nodes) (+ y dot-spacing)))])))
                 (loop (+ n 1)))))))
       (super-new)
+      (send this set-flip-labels? #f)
       (inherit set-draw-arrow-heads?)
       (set-draw-arrow-heads? #f)))
 

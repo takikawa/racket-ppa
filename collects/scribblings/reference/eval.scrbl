@@ -43,7 +43,7 @@ If @scheme[top-level-form] is a syntax object whose datum is not a
 compiled form, then its @tech{lexical information} is enriched before
 it is sent to the @tech{evaluation handler}:
 
-@itemize{
+@itemize[
 
  @item{If @scheme[top-level-form] is a pair whose @scheme[car] is a
        symbol or identifier, and if applying
@@ -57,7 +57,7 @@ it is sent to the @tech{evaluation handler}:
        @scheme[namespace-syntax-introduce] is applied to the entire
        syntax object.}
 
-}
+]
 
 For interactive evaluation in the style of
 @scheme[read-eval-print-loop] and @scheme[load], wrap each expression
@@ -104,7 +104,7 @@ of the @scheme[load] call.
 
 If the second argument to the load handler is a symbol, then:
 
-@itemize{
+@itemize[
 
  @item{The @scheme[read-syntax] from the file is additionally
        @scheme[parameterize]d as follows (to provide consistent reading
@@ -136,7 +136,7 @@ If the second argument to the load handler is a symbol, then:
        @scheme[module], so that the form corresponds to a module
        declaration independent of the current namespace's bindings.}
 
-}
+]
 
 If the second argument to the load handler is @scheme[#f], then each
 expression read from the file is wrapped with
@@ -352,13 +352,19 @@ A compiled-form object may contain @tech{uninterned} symbols (see
 via @litchar{#~}, each uninterned symbol in the original form is
 mapped to a new uninterned symbol, where multiple instances of a
 single symbol are consistently mapped to the same new symbol. The
-original and new symbols have the same printed representation.
+original and new symbols have the same printed
+representation. @tech{Unreadable symbols}, which are typically
+generated indirectly during expansion and compilation, are saved and
+restored consistently through @litchar{#~}.
 
-Due to the above restrictions, do not use @scheme[gensym] or
-@scheme[string->uninterned-symbol] to construct an identifier for a
-top-level or module binding. Instead, generate distinct identifiers
-either with @scheme[generate-temporaries] or by applying the result of
-@scheme[make-syntax-introducer] to an existing identifier.}
+Due to the restrictions on @tech{uninterned} symbols in @litchar{#~},
+do not use @scheme[gensym] or @scheme[string->uninterned-symbol] to
+construct an identifier for a top-level or module binding. Instead,
+generate distinct identifiers either with
+@scheme[generate-temporaries] or by applying the result of
+@scheme[make-syntax-introducer] to an existing identifier; those
+functions will lead to top-level and module bindings with
+@tech{unreadable symbol}ic names.}
 
 
 @defproc[(compile [top-level-form any/c]) compiled-expression?]{

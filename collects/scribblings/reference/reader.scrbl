@@ -57,7 +57,7 @@ A delimited sequence that starts with any other character is typically
 parsed as either a symbol or number, but a few non-delimiter
 characters play special roles:
 
-@itemize{
+@itemize[
 
  @item{@litchar{#} has a special meaning as an initial character in a
        delimited sequence; its meaning depends on the characters that
@@ -74,7 +74,7 @@ characters play special roles:
        the folowing character to be included verbatim in a delimited
        sequence.}
 
-}
+]
 
 More precisely, after skipping whitespace, the reader dispatches based
 on the next character or characters in the input stream as follows:
@@ -116,7 +116,7 @@ on the next character or characters in the input stream as follows:
 
   @dispatch[@litchar{#|}]{starts a block comment; see @secref["parse-comment"]}
   @dispatch[@litchar{#;}]{starts an S-expression comment; see @secref["parse-comment"]}
-  @dispatch[@litchar{#,}]{starts a syntax quote; see @secref["parse-quote"]}
+  @dispatch[@litchar{#'}]{starts a syntax quote; see @secref["parse-quote"]}
   @dispatch[@litchar{#! }]{starts a line comment; see @secref["parse-comment"]}
   @dispatch[@litchar{#!/}]{starts a line comment; see @secref["parse-comment"]}
   @dispatch[@litchar{#!}]{may start a reader extension; see @secref["parse-reader"]}
@@ -384,7 +384,7 @@ terminated by another @litchar{"} (that is not escaped by
 Within a string sequence, the following escape sequences are
  recognized:
 
-@itemize{
+@itemize[
 
  @item{@as-index{@litchar{\a}}: alarm (ASCII 7)}
  @item{@as-index{@litchar{\b}}: backspace (ASCII 8)}
@@ -438,7 +438,7 @@ Within a string sequence, the following escape sequences are
        carriage return--linefeed combination. This convetion allows
        single-line strings to span multiple lines in the source.}
 
-}
+]
 
 If the reader encounteres any other use of a backslash in a string
 constant, the @exnraise[exn:fail:read].
@@ -478,8 +478,8 @@ encountered before a terminating line, the @exnraise[exn:fail:read].
 
 @section[#:tag "parse-quote"]{Reading Quotes}
 
-When the reader enounters @as-index{@litchar{'}}, then it recursively
-reads one datum, and it forms a new list containing the symbol
+When the reader enounters @as-index{@litchar{'}}, it recursively
+reads one datum, and forms a new list containing the symbol
 @scheme['quote] and the following datum. This convention is mainly
 useful for reading Scheme code, where @scheme['s] can be used as a
 shorthand for @scheme[(code:quote s)].
@@ -508,19 +508,19 @@ the @scheme[read-accept-quasiquote] @tech{parameter} is set to
 @section[#:tag "parse-comment"]{Reading Comments}
 
 A @as-index{@litchar{;}} starts a line comment. When the reader
-encounters @litchar{;}, then it skips past all characters until the
+encounters @litchar{;}, it skips past all characters until the
 next linefeed (ASCII 10), carriage return (ASCII 13), next-line
 (Unicode @scheme[#x0085]), line-separator (Unicode @scheme[#x2028]),
-or line-separator (Uunicode @scheme[#x2028]) character.
+or line-separator (Unicode @scheme[#x2028]) character.
 
 A @as-index{@litchar{#|}} starts a nestable block comment.  When the
-reader encounters @litchar{#|}, then it skips past all characters
+reader encounters @litchar{#|}, it skips past all characters
 until a closing @litchar{|#}. Pairs of matching @litchar{#|} and
 @litchar{|#} can be nested.
 
-A @as-index{@litchar{#;}} starts an S-expression comment. Then the
+A @as-index{@litchar{#;}} starts an S-expression comment. When the
 reader encounters @litchar{#;}, it recursively reads one datum, and
-then discards the datum (continuing on to the next datum for the read
+then discards it (continuing on to the next datum for the read
 result).
 
 A @as-index{@litchar{#! }} (which is @litchar{#!} followed by a space)
@@ -656,7 +656,7 @@ content is also wraped as a syntax object, and the box is immutable.
 A @as-index{@litchar{#\}} starts a character constant, which has
 one of the following forms:
 
-@itemize{
+@itemize[
 
  @item{ @litchar{#\nul} or @litchar{#\null}: NUL (ASCII 0)@nonalpha[]}
  @item{ @litchar{#\backspace}: backspace  (ASCII 8)@nonalpha[]}
@@ -690,7 +690,7 @@ one of the following forms:
        character after @nonterm{c} is not
        @schemelink[char-alphabetic?]{alphabetic}.}
 
-}
+]
 
 @reader-examples[
 "#\\newline"
@@ -764,7 +764,7 @@ neither defines nor uses graph tags for other top-level forms.
 
 @section[#:tag "parse-reader"]{Reading via an Extension}
 
-When the reader encounters @as-index{@litchar{#reader}}, then it loads
+When the reader encounters @as-index{@litchar{#reader}}, it loads
 an external reader procedure and applies it to the current input
 stream.
 

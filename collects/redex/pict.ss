@@ -12,6 +12,7 @@
   (symbols 'compact-vertical
            'vertical 
            'vertical-overlapping-side-conditions
+           'horizontal-left-align
            'horizontal))
 
 (provide reduction-rule-style/c)
@@ -68,11 +69,15 @@
   (parameter/c reduction-rule-style/c)]
  [arrow-space (parameter/c natural-number/c)]
  [label-space (parameter/c natural-number/c)]
+ [metafunction-cases (parameter/c (or/c #f (and/c pair? (listof (and/c integer? (or/c zero? positive?))))))]
  [metafunction-pict-style 
   (parameter/c (symbols 'left-right
                         'left-right/vertical-side-conditions
+                        'left-right/compact-side-conditions
+                        'left-right/beside-side-conditions
                         'up-down
-                        'up-down/vertical-side-conditions))])
+                        'up-down/vertical-side-conditions
+                        'up-down/compact-side-conditions))])
 
 (provide/contract
  [label-font-size (parameter/c (and/c (between/c 1 255) integer?))]

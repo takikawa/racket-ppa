@@ -38,9 +38,29 @@
       (syntax-case** #f #t stx () free-identifier=?
 	[(_ loc pattern)
 	 (if (if (symbol? (syntax-e #'pattern))
-		 (syntax-mapping? (syntax-local-value #'pattern (lambda () #f)))
+		 (syntax-pattern-variable? (syntax-local-value #'pattern (lambda () #f)))
 		 #f)
 	     (syntax (syntax pattern))
 	     (syntax (relocate loc (syntax pattern))))])))
 
-  (#%provide syntax/loc syntax-case* syntax-case ... _))
+  (-define-syntax quote-syntax/prune
+    (lambda (stx)
+      (syntax-case** #f #t stx () free-identifier=?
+        [(_ id) 
+         (if (symbol? (syntax-e #'id))
+             (datum->syntax #'here
+                            (list (quote-syntax quote-syntax)
+                                  (identifier-prune-lexical-context (syntax id)
+                                                                    (list
+                                                                     (syntax-e (syntax id))
+                                                                     '#%top)))
+                            stx
+                            #f
+                            stx)
+             (raise-syntax-error
+              #f
+              "expected an identifier"
+              stx
+              #'id))])))
+
+  (#%provide syntax/loc quote-syntax/prune syntax-case* syntax-case ... _))

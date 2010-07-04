@@ -50,8 +50,6 @@ offset is always in bytes.}
 
 @section{Unsafe Pointer Operations}
 
-@declare-exporting[scribblings/foreign/unsafe-foreign]
-
 @defproc[(set-ptr-offset! [cptr cpointer?][offset exact-integer?][ctype ctype? _byte]) 
          void?]{
 
@@ -209,19 +207,17 @@ can contain other information).}
 
 @section{Unsafe Memory Management}
 
-@declare-exporting[scribblings/foreign/unsafe-foreign]
-
 For general information on C-level memory management with PLT Scheme,
 see @|InsideMzScheme|.
 
 @defproc[(malloc [bytes-or-type (or/c exact-nonnegative-integer? ctype?)]
-                 [type-or-bytes (or/c exact-nonnegative-integer? ctype?) #, @elem{absent}]
-                 [cptr cpointer? #, @elem{absent}]
+                 [type-or-bytes (or/c exact-nonnegative-integer? ctype?) @#,elem{absent}]
+                 [cptr cpointer? @#,elem{absent}]
                  [mode (one-of/c 'nonatomic 'stubborn 'uncollectable
                                  'eternal 'interior 'atomic-interior
                                  'raw)
-                       #, @elem{absent}]
-                 [fail-mode (one-of/c 'failok) #, @elem{absent}])
+                       @#,elem{absent}]
+                 [fail-mode (one-of/c 'failok) @#,elem{absent}])
          cpointer?]{
 
 Allocates a memory block of a specified size using a specified
@@ -230,7 +226,7 @@ memory.  Although not reflected above, the four arguments can appear in
 any order since they are all different types of Scheme objects; a size
 specification is required at minimum:
 
-@itemize{
+@itemize[
 
  @item{If a C type @scheme[bytes-or-type] is given, its size is used
        to the block allocation size.}
@@ -261,7 +257,7 @@ specification is required at minimum:
   @indexed-scheme['failok] flag is given, then
   @cpp{scheme_malloc_fail_ok} is used to wrap the call.}
 
-}
+]
 
 If no mode is specified, then @scheme['nonatomic] allocation is used
 when the type is any pointer-based type, and @scheme['atomic]
@@ -323,7 +319,7 @@ string that you should free.  Here is an attempt at creating a suitable type:
 @schemeblock[
 (define bytes/free
   (make-ctype _pointer
-              #f (code:comment #, @t{a Scheme bytes can be used as a pointer})
+              #f (code:comment @#,t{a Scheme bytes can be used as a pointer})
               (lambda (x)
                 (let ([b (make-byte-string x)])
                   (register-finalizer x free)
@@ -340,7 +336,7 @@ for debugging:
 @schemeblock[
 (define bytes/free
   (make-ctype _pointer
-              #f (code:comment #, @t{a Scheme bytes can be used as a pointer})
+              #f (code:comment @#,t{a Scheme bytes can be used as a pointer})
               (lambda (x)
                 (let ([b (make-byte-string x)])
                   (register-finalizer b

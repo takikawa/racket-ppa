@@ -42,7 +42,7 @@
              (list? p)
              (andmap pict? p))))
 
-  (define (pin-line sz p 
+  (define (pin-line p 
                     src src-find
                     dest dest-find
                     #:start-angle [sa #f] #:end-angle [ea #f]
@@ -57,7 +57,7 @@
                                          dest dest-find))
                     p lw col under?)
         (pin-curve* #f #f p src src-find dest dest-find
-                    sa ea sp ep sz col lw under? #t)))
+                    sa ea sp ep 0 col lw under? #t)))
 
   (define (pin-arrow-line sz p 
                           src src-find
@@ -89,7 +89,7 @@
                              #:under? [under? #f]
                              #:solid? [solid? #t]
                              #:hide-arrowhead? [hide-arrowhead? #f])
-      (if (not sa ea)
+      (if (not (or sa ea))
           (finish-pin (launder (t:pin-arrows-line sz (ghost p)
                                                   src src-find 
                                                   dest dest-find

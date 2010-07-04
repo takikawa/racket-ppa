@@ -6,7 +6,7 @@
          (env type-alias-env)
          (utils tc-utils)
          (rep type-rep)
-         (private type-utils))
+         (types utils))
 
 (provide register-type-name
          lookup-type-name
@@ -35,7 +35,7 @@
 ;; given an identifier, return the type associated with it
 ;; optional argument is failure continuation - default calls lookup-fail
 ;; identifier (-> error) -> type 
-(define (lookup-type-name id [k (lambda () (lookup-fail (syntax-e id)))])
+(define (lookup-type-name id [k (lambda () (lookup-type-fail id))])
   (begin0
     (module-identifier-mapping-get the-mapping id k)
     (add-type-name-reference id)))
@@ -46,6 +46,6 @@
 (define (type-name-env-map f)
   (module-identifier-mapping-map the-mapping f))
 
-(define (add-alias from to)  
+(define (add-alias from to)
   (when (lookup-type-name to (lambda () #f))
     (register-resolved-type-alias from (make-Name to))))

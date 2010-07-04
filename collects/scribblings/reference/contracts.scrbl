@@ -14,7 +14,7 @@ constraints.
 @deftech{Contracts} come in two forms: those constructed by the
 various operations listed in this section of the manual, and various
 ordinary Scheme values that double as contracts, including 
-@itemize{
+@itemize[
 @item{@tech{symbols}, @tech{booleans}, @tech{characters}, and
 @scheme[null], which are treated as contracts that recognize
 themselves, using @scheme[eq?], }
@@ -32,7 +32,7 @@ predicate. During contract checking, it is applied to the values that
 appear and should return @scheme[#f] to indicate that the contract
 failed, and anything else to indicate it passed.}
 
-}
+]
 
 @note-lib[scheme/contract #:use-sources (scheme/private/contract-ds
                                          scheme/private/contract
@@ -79,10 +79,10 @@ better memory performance, but it also allows multiple results.}
 A @tech{flat contract} that accepts no values.}
 
 
-@defproc[(or/c [contract (or/c contract? (any/c . -> . any/c))] ...)
+@defproc[(or/c [contract contract?] ...)
          contract?]{
 
-Takes any number of predicates and higher-order contracts and returns
+Takes any number of contracts and returns
 a contract that accepts any value that any one of the contracts
 accepts, individually.
 
@@ -301,6 +301,23 @@ type named by @scheme[struct-id], and whose field values match the
 Produces a contract on parameters whose values must match
 @scheme[contract].}
 
+@defproc[(hash/c [key contract?]
+                 [val contract?] 
+                 [#:immutable immutable (or/c #t #f 'dont-care) 'dont-care])
+         contract?]{
+Produces a contract that recognizes @scheme[hash] tables with keys and values
+as specified by the @scheme[key] and @scheme[val] arguments.
+
+If the @scheme[immutable] argument is @scheme[#f] or
+@scheme['dont-care], then the resulting contract is a flat contract,
+and the @scheme[key] and @scheme[val] arguments must also be flat
+contracts. 
+
+If @scheme[immtable] is @scheme[#t], then the other arguments do not
+have to be flat contracts, the result is not a flat contract, and
+checking this contract involves making a copy of the hash-table.
+}
+
 
 @defform[(flat-rec-contract id flat-contract-expr ...)]
 
@@ -414,7 +431,7 @@ invocations of the function).
 
 If @scheme[(values range-expr ...)] is used as the last sub-form of
 @scheme[->], the function must produce a result for each contract, and
-each values must match its respective contract.}
+each value must match its respective contract.}
 
 
 @defform*/subs[#:literals (any values)
@@ -426,7 +443,7 @@ each values must match its respective contract.}
 
 The @scheme[->*] contract combinator produces contracts for
 functions that accept optional arguments (either keyword or
-positional) and or arbitrarily many arguments. The first
+positional) and/or arbitrarily many arguments. The first
 clause of a @scheme[->*] contract describes the mandatory
 arguments, and is similar to the argument description of a
 @scheme[->] contract. The second clause describes the
@@ -760,7 +777,7 @@ blame for positive and negative positions of the contract specified by
 
 If specified, @scheme[contract-source-info], indicates where the
 contract was assumed. Its value must be a either:
-@itemize{
+@itemize[
 @item{a list of two elements: @scheme[srcloc] struct and
 either a string or @scheme[#f]. The srcloc struct inidates
 where the contract was assumed. Its @tt{source} field
@@ -775,7 +792,7 @@ identifier whose contract was assumed.}
 source location of the location where the contract was assumed. If the
 syntax object wraps a symbol, the symbol is used as the name of the
 primitive whose contract was assumed.}
-}
+]
 
 If absent, it defaults to the source location of the
 @scheme[contract] expression with no identifying name.
@@ -1093,14 +1110,14 @@ name @scheme[sexp-name] when signaling a contract violation.}
 This is a parameter that is used when constructing a
 contract violation error. Its value is procedure that
 accepts five arguments: 
-@itemize{
+@itemize[
 @item{the value that the contract applies to,}
 @item{a syntax object representing the source location where
 the contract was established, }
 @item{the name of the party that violated the contract (@scheme[#f] indicates that the party is not known, not that the party's name is @scheme[#f]), }
 @item{an sexpression representing the contract, and }
 @item{a message indicating the kind of violation.
-}}
+}]
 The procedure then
 returns a string that is put into the contract error
 message. Note that the value is often already included in

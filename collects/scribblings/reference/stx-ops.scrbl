@@ -86,7 +86,7 @@ Unwraps the immediate datum structure from a @tech{syntax object},
 leaving nested syntax structure (if any) in place.  The result of
 @scheme[(syntax-e stx)] is one of the following:
 
-    @itemize{
+    @itemize[
 
        @item{a symbol}
 
@@ -105,7 +105,7 @@ leaving nested syntax structure (if any) in place.  The result of
 
        @item{some other kind of datum---usually a number, boolean, or string}
 
-    }
+    ]
 
 A @deftech{syntax pair} is a pair containing a @tech{syntax object} as its
 first element, and either the empty list, a syntax pair, or a syntax
@@ -151,7 +151,8 @@ needed to strip lexical and source-location information recursively.}
                                                (or/c exact-positive-integer? #f)
                                                (or/c exact-nonnegative-integer? #f)
                                                (or/c exact-nonnegative-integer? #f)
-                                               (or/c exact-positive-integer? #f)))]
+                                               (or/c exact-positive-integer? #f)))
+                                #f]
                         [prop (or/c syntax? #f) #f]
                         [cert (or/c syntax? #f) #f])
           syntax?]{
@@ -186,7 +187,7 @@ must be a list or vector of five elements:
 
 @schemeblock[
   (list source-name line column position span)
-  #, @elem{or} (vector source-name line column position span)
+  @#,elem{or} (vector source-name line column position span)
 ]
 
 where @scheme[source-name-v] is an arbitrary value for the source
@@ -223,3 +224,18 @@ in the corresponding generated name, which is useful for debugging
 purposes. The generated identifiers are built with interned symbols
 (not @scheme[gensym]s), so the limitations described with
 @scheme[current-compile] do not apply.}
+
+
+@defproc[(identifier-prune-lexical-context [id-stx identifier?]
+                                           [syms (listof symbol?) (list (syntax-e id-stx))])
+         identifier?]{
+
+Returns an identifier with the same binding as @scheme[id-stx], but
+without lexical information from @scheme[id-stx] that does not apply
+to the symbols in @scheme[syms], where even further extension of the
+lexical information drops information for other symbols. In
+particular, transferring the lexical context via
+@scheme[datum->syntax] from the result of this function to a symbol
+other than one in @scheme[syms] produces a identifier with no binding.
+
+See also @scheme[quote-syntax/prune].}

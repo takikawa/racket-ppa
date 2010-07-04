@@ -44,7 +44,7 @@ WXINC_wx_xt = -I$(PLTSRCDIR)/wxxt/src/AIAI-include -I$(PLTSRCDIR)/wxxt/src
 WXINC_wx_mac = -I$(PLTSRCDIR)/wxmac/include/base -I$(PLTSRCDIR)/wxmac/include/mac -I$(PLTSRCDIR)/wxcommon -I$(PLTSRCDIR)/a-list/c-headers/
 
 WXINC = $(WXINC_@WXVARIANT@)
-NOGCINC = $(WXINC) -I$(PLTSRCDIR)/mred/wxme/ -I$(PLTBUILDDIR)/mzscheme/ -I$(PLTSRCDIR)/mzscheme/include/
+NOGCINC = $(WXINC) -I$(PLTBUILDDIR)/mzscheme/ -I$(PLTSRCDIR)/mzscheme/include/
 INC = -I$(PLTSRCDIR)/mzscheme/$(GCDIRECTORY) $(NOGCINC)
 CXXFLAGS = $(INC) $(XINCLUDE) $(OPTIONS) -D$(WXVARIANT) @COMPFLAGS@ @PROFFLAGS@ @CXXFLAGS@ @PREFLAGS@
 CFLAGS = $(INC) $(XINCLUDE) $(OPTIONS) -D$(WXVARIANT) @COMPFLAGS@ @PROFFLAGS@ @CFLAGS@ @PREFLAGS@
@@ -67,7 +67,7 @@ WXLIBS_wx_xt = ../wxxt/src/libwx_xt.@LIBSFX@ ../wxxt/contrib/xpm/lib/libXpm.@LIB
 MREDX_wx_xt = mredx.@LTO@
 WXLIBS_wx_mac = ../wxmac/src/libwxmac.@LIBSFX@
 MREDX_wx_mac = mredmac.@LTO@ simpledrop.@LTO@
-WXLIBSNORM = mred.@LTO@ $(MREDX_@WXVARIANT@) wxGC.@LTO@ wxJPEG.@LTO@ wxs/libwxscheme.@LIBSFX@ wxme/libwxme.@LIBSFX@ $(WXLIBS_@WXVARIANT@) @JPEG_A@ @PNG_A@ @ZLIB_A@
+WXLIBSNORM = mred.@LTO@ $(MREDX_@WXVARIANT@) wxGC.@LTO@ wxJPEG.@LTO@ wxs/libwxscheme.@LIBSFX@ $(WXLIBS_@WXVARIANT@) @JPEG_A@ @PNG_A@ @ZLIB_A@
 WXLIBSDYN = libmred.@LIBSFX@
 GUILIBS_wx_xt = $(LDLIBS)
 GUILIBS_wx_mac = @LIBS@
@@ -81,7 +81,6 @@ MREDOBJECTS = mrmain.@LTO@
 
 MZSCHEMEDEPS = ../mzscheme/libmzscheme.@LIBSFX@ ../mzscheme/libmzgc.@LIBSFX@
 WXSCHEME = wxs/libwxscheme.@LIBSFX@
-WXME = wxme/libwxme.@LIBSFX@
 
 INSTALLDEST=/home/scheme/plt
 
@@ -113,7 +112,6 @@ cgc:
 	$(MAKE) ext-libs
 	$(MAKE) @WXVARIANT@
 	cd wxs; $(MAKE)
-	cd wxme; $(MAKE)
 	$(MAKE) $(LINKRESULT)
 
 both:
@@ -171,22 +169,22 @@ wx_mac:
 wx_mac-min:
 	cd ../wxmac/src; $(MAKE) min
 
-mred.@LTO@ :  $(srcdir)/mred.cxx $(srcdir)/wxme/wx_media.h $(srcdir)/wxme/wx_medad.h \
+mred.@LTO@ :  $(srcdir)/mred.cxx \
           $(srcdir)/wxs/wxscheme.h $(srcdir)/mred.h \
           $(srcdir)/../mzscheme/include/scheme.h \
           $(srcdir)/wxs/wxsmred.h $(WXINCDEP) $(srcdir)/../wxcommon/wxGC.h \
           $(srcdir)/../wxcommon/wx_list.h
-	$(CXX) $(CXXFLAGS) $(LOCALFLAGS) -c $(srcdir)/mred.cxx -o mred.@LTO@
+	$(CXX) $(LOCALFLAGS) $(CXXFLAGS) -c $(srcdir)/mred.cxx -o mred.@LTO@
 
 DEF_COLLECTS_DIR = -DINITIAL_COLLECTS_DIRECTORY='"'"`cd $(srcdir)/../../collects; pwd`"'"'
 
 mrmain.@LTO@ :  $(srcdir)/mrmain.cxx $(srcdir)/mred.h $(srcdir)/wxs/wxsmred.h \
             $(srcdir)/../mzscheme/cmdline.inc $(srcdir)/../mzscheme/src/stypes.h \
             $(srcdir)/../mzscheme/include/scheme.h
-	$(CXX) $(CXXFLAGS) $(LOCALFLAGS) $(DEF_COLLECTS_DIR) -c $(srcdir)/mrmain.cxx -o mrmain.@LTO@
+	$(CXX) $(LOCALFLAGS) $(CXXFLAGS) $(DEF_COLLECTS_DIR) -c $(srcdir)/mrmain.cxx -o mrmain.@LTO@
 
 mrmain_ee.@LTO@ : mred.@LTO@
-	$(CXX) $(CXXFLAGS) $(LOCALFLAGS) -DSTANDALONE_WITH_EMBEDDED_EXTENSION $(DEF_COLLECTS_DIR) -c $(srcdir)/mrmain.cxx -o mrmain_ee.@LTO@
+	$(CXX) $(LOCALFLAGS) $(CXXFLAGS) -DSTANDALONE_WITH_EMBEDDED_EXTENSION $(DEF_COLLECTS_DIR) -c $(srcdir)/mrmain.cxx -o mrmain_ee.@LTO@
 
 ee-main:
 	$(MAKE) mrmain_ee.@LTO@
@@ -195,28 +193,28 @@ mredx.@LTO@ : $(srcdir)/mredx.cxx $(srcdir)/../mzscheme/include/scheme.h $(srcdi
           $(WXINCDEP) \
           $(srcdir)/../wxcommon/wxGC.h $(srcdir)/../wxcommon/wx_list.h \
           $(srcdir)/../mzscheme/src/stypes.h
-	$(CXX) $(CXXFLAGS) $(LOCALFLAGS) -c $(srcdir)/mredx.cxx -o mredx.@LTO@
+	$(CXX) $(LOCALFLAGS) $(CXXFLAGS) -c $(srcdir)/mredx.cxx -o mredx.@LTO@
 
 mredmac.@LTO@ : $(srcdir)/mredmac.cxx $(srcdir)/../mzscheme/include/scheme.h $(srcdir)/mred.h \
           $(srcdir)/../wxcommon/wxGC.h $(srcdir)/../wxcommon/wx_list.h \
           $(srcdir)/../mzscheme/src/stypes.h
-	$(CXX) $(CXXFLAGS) $(LOCALFLAGS) -c $(srcdir)/mredmac.cxx -o mredmac.@LTO@
+	$(CXX) $(LOCALFLAGS) $(CXXFLAGS) -c $(srcdir)/mredmac.cxx -o mredmac.@LTO@
 
 wxGC.@LTO@ : $(srcdir)/../wxcommon/wxGC.cxx $(srcdir)/../wxcommon/wxGC.h \
          $(srcdir)/../mzscheme/src/stypes.h
-	$(CXX) $(CXXFLAGS) $(LOCALFLAGS) -c $(srcdir)/../wxcommon/wxGC.cxx -o wxGC.@LTO@
+	$(CXX) $(LOCALFLAGS) $(CXXFLAGS) -c $(srcdir)/../wxcommon/wxGC.cxx -o wxGC.@LTO@
 
 wxJPEG.@LTO@ : $(srcdir)/../wxcommon/wxJPEG.cxx $(srcdir)/../wxcommon/wxGC.h
-	$(CXX) $(CXXFLAGS) $(LOCALFLAGS) @JPEG_INC@ @ZLIB_INC@ -c $(srcdir)/../wxcommon/wxJPEG.cxx -o wxJPEG.@LTO@
+	$(CXX) $(LOCALFLAGS) $(CXXFLAGS) @JPEG_INC@ @ZLIB_INC@ -c $(srcdir)/../wxcommon/wxJPEG.cxx -o wxJPEG.@LTO@
 
 dl_stub.@LTO@: $(srcdir)/misc/dl_stub.c
 	$(CC) $(CFLAGS) $(LOCALFLAGS) -c $(srcdir)/misc/dl_stub.c -o dl_stub.@LTO@
 
 simpledrop.@LTO@ : $(srcdir)/../mac/mzscheme/simpledrop.cpp
-	$(CXX) $(CXXFLAGS) $(LOCALFLAGS) -o simpledrop.@LTO@ -c $(srcdir)/../mac/mzscheme/simpledrop.cpp
+	$(CXX) $(LOCALFLAGS) $(CXXFLAGS) -o simpledrop.@LTO@ -c $(srcdir)/../mac/mzscheme/simpledrop.cpp
 
 sgilinkhack.@LTO@:
-	$(CXX) $(CXXFLAGS) $(LOCALFLAGS) -c $(srcdir)/misc/sgilinkhack.cxx -o sgilinkhack.@LTO@
+	$(CXX) $(LOCALFLAGS) $(CXXFLAGS) -c $(srcdir)/misc/sgilinkhack.cxx -o sgilinkhack.@LTO@
 
 $(WXDIR)/libwx_xt.@LIBSFX@:
 	$(MAKE) wx
@@ -238,7 +236,6 @@ clean:
 	rm -f *.@LTO@ *.d core mred mred3m
 	rm -f gc2/*.@LTO@ gc2/xsrc/* gc2/macxsrc/* gc2/*.d gc2/*.dd
 	rm -rf gc2/xform-collects
-	cd wxme; $(MAKE) clean
 	cd wxs; $(MAKE) clean
 	if [ -f ../wxcommon/jpeg/Makefile ] ; then cd ../wxcommon/jpeg; $(MAKE) clean ; fi
 	if [ -f ../wxcommon/libpng/Makefile ] ; then cd ../wxcommon/libpng; $(MAKE) clean ; fi
@@ -353,7 +350,7 @@ install-wx_mac-cgc:
 	$(ICP) -r PLT_MrEd.framework/Versions/$(FWVERSION)/Resources $(MRFWDIR)/Versions/$(FWVERSION)/Resources
 	/usr/bin/install_name_tool -change "@executable_path/../../../PLT_MrEd.framework/Versions/$(FWVERSION)/PLT_MrEd" "@FRAMEWORK_PREFIX@PLT_MrEd.framework/Versions/$(FWVERSION)/PLT_MrEd" "$(prefix)/MrEd@CGC_CAP_INSTALLED@.app/Contents/MacOS/MrEd@CGC_CAP_INSTALLED@"
 	$(MZSCHEME) -cu "$(srcdir)/../mzscheme/collects-path.ss" "$(prefix)/MrEd@CGC_CAP_INSTALLED@.app/Contents/MacOS/MrEd@CGC_CAP_INSTALLED@" ../../../collects
-	/usr/bin/strip -S "$(prefix)/MrEd@CGC_CAP_INSTALLED@.app/Contents/MacOS/MrEd@CGC_CAP_INSTALLED@"
+	@STRIP_DEBUG@ "$(prefix)/MrEd@CGC_CAP_INSTALLED@.app/Contents/MacOS/MrEd@CGC_CAP_INSTALLED@"
 
 install-wx_mac-cgc-final:
 	ln -s Versions/$(FWVERSION)/PLT_MrEd $(MRFWDIR)/
@@ -367,7 +364,7 @@ install-wx_mac-3m:
 	$(ICP) -r "PLT_MrEd.framework/Versions/$(FWVERSION)_3m/Resources" "$(MRFWDIR)/Versions/$(FWVERSION)_3m/Resources"
 	/usr/bin/install_name_tool -change "@executable_path/../../../PLT_MrEd.framework/Versions/$(FWVERSION)_3m/PLT_MrEd" "@FRAMEWORK_PREFIX@PLT_MrEd.framework/Versions/$(FWVERSION)_3m/PLT_MrEd" "$(prefix)/MrEd@MMM_CAP_INSTALLED@.app/Contents/MacOS/MrEd@MMM_CAP_INSTALLED@"
 	$(MZSCHEME) -cu "$(srcdir)/../mzscheme/collects-path.ss" "$(prefix)/MrEd@MMM_CAP_INSTALLED@.app/Contents/MacOS/MrEd@MMM_CAP_INSTALLED@" "../../../collects"
-	/usr/bin/strip -S "$(prefix)/MrEd@MMM_CAP_INSTALLED@.app/Contents/MacOS/MrEd@MMM_CAP_INSTALLED@"
+	@STRIP_DEBUG@ "$(prefix)/MrEd@MMM_CAP_INSTALLED@.app/Contents/MacOS/MrEd@MMM_CAP_INSTALLED@"
 
 install-wx_mac-3m-final:
 	ln -s Versions/$(FWVERSION)_3m/PLT_MrEd $(MRFWDIR)/

@@ -38,7 +38,8 @@ Returns a procedure that composes the given functions, applying the
 last @scheme[proc] first and the first @scheme[proc] last. The
 composed functions can consume and produce any number of values, as
 long as each function produces as many values as the preceding
-function consumes.
+function consumes.  When no @scheme[proc] arguments are given, the
+result is @scheme[values].
 
 @mz-examples[
 ((compose - sqrt) 10)
@@ -103,7 +104,7 @@ by @scheme[proc]. See also @scheme[procedure-arity?].}
 
 A valid arity @scheme[_a] is one of the following:
 
-@itemize{
+@itemize[
 
   @item{An exact non-negative integer, which means that the procedure
         accepts @scheme[_a] arguments, only.}
@@ -116,7 +117,7 @@ A valid arity @scheme[_a] is one of the following:
        instances, which means that the procedure accepts any number of
        arguments that can match one of the elements of @scheme[_a].}
 
-}
+]
 
 @mz-examples[
 (procedure-arity cons)
@@ -236,7 +237,7 @@ must require no more keywords than the ones listed din
 
 @defstruct[arity-at-least ([value exact-nonnegative-integer?])]{
 
-This structure type is used for the result of @scheme[procedure-arity].
+A structure type used for the result of @scheme[procedure-arity].
 See also @scheme[procedure-arity?].}
 
 
@@ -356,7 +357,7 @@ called with a suitable first argument.}
 
 @defthing[prop:arity-string struct-type-property?]{
 
-This property is used for reporting arity-mismatch errors when a
+A @tech{structure type property} that is used for reporting arity-mismatch errors when a
 structure type with the @scheme[prop:procedure] property is applied to
 the wrong number of arguments. The value of the
 @scheme[prop:arity-string] property must be a procedure that takes a
@@ -385,6 +386,35 @@ property is not associated with a procedure structure type.
 
 (pairs 1 2 3 4)
 (pairs 5)]}
+
+
+@defthing[prop:checked-procedure struct-type-property?]{
+
+A @tech{structure type property} that is used with
+@scheme[checked-procedure-check-and-extract], which is a hook to allow
+the compiler to improve the performance of keyword arguments. The
+property can only be attached to a @tech{structure type} without a
+supertype and with at least two fields.}
+
+
+@defproc[(checked-procedure-check-and-extract [type struct-type?]
+                                              [v any/c]
+                                              [proc (any/c any/c any/c . -> . any/c)]
+                                              [v1 any/c]
+                                              [v2 any/c]) any/c]{
+
+Extracts a value from @scheme[v] if it is an instance of
+@scheme[type], which must have the property
+@scheme[prop:checked-procedure]. If @scheme[v] is such an instance,
+then the first field of @scheme[v] is extracted and applied to
+@scheme[v1] and @scheme[v2]; if the result is a true value, the result
+is the value of the second field of @scheme[v].
+
+If @scheme[v] is not an instance of @scheme[type], or if the first
+field of @scheme[v] applied to @scheme[v1] and @scheme[v2] produces
+@scheme[#f], then @scheme[proc] is applied to @scheme[v], @scheme[v1],
+and @scheme[v2], and its result is returned by
+@scheme[checked-procedure-check-and-extract].}
 
 @; ----------------------------------------------------------------------
 
@@ -421,6 +451,15 @@ applied.}
 @note-lib[scheme/function]
 @(define fun-eval (make-base-eval))
 @(interaction-eval #:eval fun-eval (require scheme/function))
+
+@defproc[(const [v any]) procedure?]{
+
+Returns a procedure that accepts any arguments and returns @scheme[v].
+
+@mz-examples[#:eval fun-eval
+((const 'foo) 1 2 3)
+((const 'foo))
+]}
 
 @defproc[(negate [proc procedure?]) procedure?]{
 

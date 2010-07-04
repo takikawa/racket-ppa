@@ -51,6 +51,9 @@
   (define (c-get-info cp)
     ((current-compiler-dynamic-require-wrapper)
      (lambda () (get-info cp))))
+  (define (c-get-info/full cp)
+    ((current-compiler-dynamic-require-wrapper)
+     (lambda () (get-info/full cp))))
 
   (define (make-extension-compiler mode prefix)
     (let ([u (c-dynamic-require 'compiler/private/base 'base@)]
@@ -141,18 +144,31 @@
         (let ([zo (append-zo-suffix b)])
           (compile-to-zo f zo n prefix verbose? mod?)))))
 
-  (define (compile-directory dir info #:verbose [verbose? #t])
+  (define (compile-directory dir info #:verbose [verbose? #t] #:skip-path [orig-skip-path #f])
     (define info* (or info (lambda (key mk-default) (mk-default))))
-    (define omit-paths (omitted-paths dir))
+    (define omit-paths (omitted-paths dir c-get-info/full))
+    (define skip-path (and orig-skip-path (path->bytes 
+                                           (simplify-path (if (string? orig-skip-path)
+                                                              (string->path orig-skip-path)
+                                                              orig-skip-path)
+                                                          #f))))
     (unless (eq? 'all omit-paths)
       (parameterize ([current-directory dir]
                      [current-load-relative-directory dir]
                      ;; Verbose compilation manager:
                      [manager-trace-handler (if verbose?
-                                                (lambda (s) (printf "~a\n" s))
+                                                (let ([op (current-output-port)])
+                                                  (lambda (s) (fprintf op "~a\n" s)))
                                                 (manager-trace-handler))]
                      [manager-compile-notify-handler
-                      (lambda (path) ((compile-notify-handler) path))])
+                      (lambda (path) ((compile-notify-handler) path))]
+                     [manager-skip-file-handler
+                      (lambda (path) (and skip-path
+                                          (let ([b (path->bytes (simplify-path path #f))]
+                                                [len (bytes-length skip-path)])
+                                            (and ((bytes-length b) . > . len)
+                                                 (bytes=? (subbytes b 0 len) skip-path)))
+                                          -inf.0))])
         (let* ([sses (append
                       ;; Find all .ss/.scm files:
                       (filter extract-base-filename/ss (directory-list))
@@ -167,12 +183,13 @@
         (for ([p (directory-list dir)])
           (let ([p* (build-path dir p)])
             (when (and (directory-exists? p*) (not (member p omit-paths)))
-              (compile-directory p* (get-info/full p*))))))))
+              (compile-directory p* (c-get-info/full p*))))))))
 
-  (define (compile-collection-zos collection . cp)
+  (define (compile-collection-zos collection #:skip-path [skip-path #f] . cp)
     (compile-directory (apply collection-path collection cp)
                        (c-get-info (cons collection cp))
-                       #:verbose #f))
+                       #:verbose #f
+                       #:skip-path skip-path))
 
   (define compile-directory-zos compile-directory)
 

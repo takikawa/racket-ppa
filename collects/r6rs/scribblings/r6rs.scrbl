@@ -48,7 +48,7 @@ other modules.
 
 To run a top-level program, either:
 
-@itemize{
+@itemize[
 
  @item{Use the @exec{plt-r6rs} executable, supplying the file that
        contains the program on the command line:
@@ -109,7 +109,7 @@ To run a top-level program, either:
        DrScheme and clicking @onscreen{Run} prints ``hello'' within
        the DrScheme interactions window.}
 
-}
+]
 
 @; ----------------------------------------
 
@@ -178,7 +178,7 @@ are searched in order, and before the installation's collections.
 
 The @schememodname[r6rs] language is usually used in the form
 @schememetafont{#!}@schememodname[r6rs], which is equivalent to
-@scheme[#, @hash-lang[] #, @schememodname[r6rs]] and is also valid
+@scheme[@#,hash-lang[] @#,schememodname[r6rs]] and is also valid
 @|r6rs| syntax.
 
 The @schememodname[r6rs] module language provides only a
@@ -237,7 +237,7 @@ To ensure that all @|r6rs| library names can be converted to a unique
 and distinct library module path, the following conversions are
 applied to each symbol before concatenating them:
 
-@itemize{
+@itemize[
 
  @item{The symbol is encoded using UTF-8, and the resulting bytes are
  treated as Latin-1 encoded characters. ASCII letters, digits,
@@ -254,18 +254,18 @@ applied to each symbol before concatenating them:
  and the implicit @schemeidfont{main} when a library path has a single
  symbol element.}
 
-}
+]
 
 Examples (assuming a typical PLT Scheme installation):
 
 @schemeblock[
-(rnrs io simple (6))  #, @elem{means}  (lib "rnrs/io/simple-6.ss")
-(rnrs)                #, @elem{means}  (lib "rnrs/main-6.ss")
-(rnrs main)           #, @elem{means}  (lib "rnrs/main_.ss")
-(rnrs (6))            #, @elem{means}  (lib "rnrs/main-6.ss")
-(scheme base)         #, @elem{means}  (lib "scheme/base.ss")
-(achtung!)            #, @elem{means}  (lib "achtung%21/main.ss")
-(funco new-λ)         #, @elem{means}  (lib "funco/new-%ce%bb.ss")
+(rnrs io simple (6))  @#,elem{means}  (lib "rnrs/io/simple-6.ss")
+(rnrs)                @#,elem{means}  (lib "rnrs/main-6.ss")
+(rnrs main)           @#,elem{means}  (lib "rnrs/main_.ss")
+(rnrs (6))            @#,elem{means}  (lib "rnrs/main-6.ss")
+(scheme base)         @#,elem{means}  (lib "scheme/base.ss")
+(achtung!)            @#,elem{means}  (lib "achtung%21/main.ss")
+(funco new-λ)         @#,elem{means}  (lib "funco/new-%ce%bb.ss")
 ]
 
 
@@ -359,6 +359,11 @@ several known ways:
        or @scheme[scheme-report-environment] correspond to @|r5rs| bindings
        instead of @|r6rs| bindings. In particular, @scheme[=>], @scheme[else],
        @scheme[_], and @scheme[...] are not bound.}
+
+ @item{Bindings for @schemeidfont{#%datum}, @schemeidfont{#%app},
+       @schemeidfont{#%top}, and @schemeidfont{#%top-interaction} are
+       imported into every library and program, and at every phase
+       level for which the library or program has imports.}
 
 ]
 

@@ -21,8 +21,6 @@
 (provide render-mixin
          render-multi-mixin)
 
-(xml:empty-tag-shorthand xml:html-empty-tags)
-
 (define literal
   (let ([loc (xml:make-location 0 0 0)])
     (lambda strings (xml:make-cdata loc loc (string-append* strings)))))
@@ -230,6 +228,7 @@
   (class %
     (inherit render-content
              render-block
+             render-part
              collect-part
              install-file
              get-dest-directory
@@ -295,6 +294,13 @@
     (define/public (current-part-whole-page? d)
       (eq? d (current-top-part)))
 
+    (define/override (fresh-tag-collect-context? d ci)
+      (current-part-whole-page? d))
+    (define/override (fresh-tag-resolve-context? d ri)
+      (part-whole-page? d ri))
+    (define/override (fresh-tag-render-context? d ri)
+      (part-whole-page? d ri))
+
     (define/override (collect-part-tags d ci number)
       (for ([t (part-tags d)])
         (let ([key (generate-tag t ci)])
@@ -303,7 +309,7 @@
                                      (path->relative (current-output-file)))
                                 (or (part-title-content d) '("???"))
                                 (current-part-whole-page? d)
-                                key)))))
+                                (add-current-tag-prefix key))))))
 
     (define/override (collect-target-element i ci)
       (let ([key (generate-tag (target-element-tag i) ci)])
@@ -320,7 +326,7 @@
                    (if (redirect-target-element? i)
                      (make-literal-anchor
                       (redirect-target-element-alt-anchor i))
-                     key)))))
+                     (add-current-tag-prefix key))))))
 
     (define (dest-path dest)
       (if (vector? dest) ; temporary
@@ -500,6 +506,8 @@
                    (append-map flow-targets (itemization-flows e))]
                   [(blockquote? e)
                    (append-map block-targets (blockquote-paragraphs e))]
+                  [(compound-paragraph? e)
+                   (append-map block-targets (compound-paragraph-blocks e))]
                   [(delayed-block? e) null]))
           (define (para-targets para)
             (let loop ([c (paragraph-content para)])
@@ -556,10 +564,11 @@
                                            ,(format
                                              "#~a"
                                              (anchor-name
-                                              (tag-key (if (part? p)
-                                                         (car (part-tags p))
-                                                         (target-element-tag p))
-                                                       ri)))]
+                                              (add-current-tag-prefix
+                                               (tag-key (if (part? p)
+                                                            (car (part-tags p))
+                                                            (target-element-tag p))
+                                                        ri))))]
                                           [class
                                            ,(cond
                                               [(part? p) "tocsubseclink"]
@@ -607,34 +616,35 @@
           (call-with-input-file* prefix-file
             (lambda (in)
               (copy-port in (current-output-port))))
-          (xml:write-xml/content
-           (xml:xexpr->xml
-            `(html ()
-               (head ()
-                 (meta ([http-equiv "content-type"]
-                        [content "text-html; charset=utf-8"]))
-                 ,title
-                 ,(scribble-css-contents style-file  css-path)
-                 ,@(map (lambda (style-file)
-                          (install-file style-file)
-                          (scribble-css-contents style-file #f))
-                        (append style-extra-files
-                                (extract-part-style-files
-                                 d
-                                 ri
-                                 'css
-                                 (lambda (p) (part-whole-page? p ri)))))
-                 ,(scribble-js-contents  script-file script-path))
-               (body ((id ,(or (extract-part-body-id d ri)
-                               "scribble-plt-scheme-org")))
-                 ,@(render-toc-view d ri)
-                 (div ([class "maincolumn"])
-                   (div ([class "main"])
-                     ,@(parameterize ([current-version (extract-version d)])
-                         (render-version d ri))
-                     ,@(navigation d ri #t)
-                     ,@(render-part d ri)
-                     ,@(navigation d ri #f))))))))))
+          (parameterize ([xml:empty-tag-shorthand xml:html-empty-tags])
+            (xml:write-xml/content
+             (xml:xexpr->xml
+              `(html ()
+                 (head ()
+                   (meta ([http-equiv "content-type"]
+                          [content "text-html; charset=utf-8"]))
+                   ,title
+                   ,(scribble-css-contents style-file  css-path)
+                   ,@(map (lambda (style-file)
+                            (install-file style-file)
+                            (scribble-css-contents style-file #f))
+                          (append style-extra-files
+                                  (extract-part-style-files
+                                   d
+                                   ri
+                                   'css
+                                   (lambda (p) (part-whole-page? p ri)))))
+                   ,(scribble-js-contents  script-file script-path))
+                 (body ((id ,(or (extract-part-body-id d ri)
+                                 "scribble-plt-scheme-org")))
+                   ,@(render-toc-view d ri)
+                   (div ([class "maincolumn"])
+                     (div ([class "main"])
+                       ,@(parameterize ([current-version (extract-version d)])
+                           (render-version d ri))
+                       ,@(navigation d ri #t)
+                       ,@(render-part d ri)
+                       ,@(navigation d ri #f)))))))))))
 
     (define/private (part-parent d ri)
       (collected-info-parent (part-collected-info d ri)))
@@ -795,13 +805,15 @@
                       d
                       ri))))))
 
-    (define/override (render-part d ri)
+    (define/override (render-part-content d ri)
       (let ([number (collected-info-number (part-collected-info d ri))])
         `(,@(cond
               [(and (not (part-title-content d)) (null? number)) null]
               [(part-style? d 'hidden)
                (map (lambda (t)
-                      `(a ((name ,(format "~a" (anchor-name (tag-key t ri)))))))
+                      `(a ((name ,(format "~a" (anchor-name 
+                                                (add-current-tag-prefix
+                                                 (tag-key t ri))))))))
                     (part-tags d))]
               [else `((,(case (length number)
                           [(0) 'h2]
@@ -811,7 +823,8 @@
                        ,@(format-number number '((tt nbsp)))
                        ,@(map (lambda (t)
                                 `(a ([name ,(format "~a" (anchor-name
-                                                          (tag-key t ri)))])))
+                                                          (add-current-tag-prefix
+                                                           (tag-key t ri))))])))
                               (part-tags d))
                        ,@(if (part-title-content d)
                            (render-content (part-title-content d) d ri)
@@ -840,7 +853,7 @@
     (define/override (render-flow p part ri start-inline?)
       (render-flow* p part ri start-inline? #t))
 
-    (define/override (render-paragraph p part ri)
+    (define/private (do-render-paragraph p part ri flatten-unstyled?)
       ;; HACK: for the search, we need to be able to render a `div'
       ;; with an `id' attribute, `p' will probably work fine instead
       ;; of `div' since it's a block element.  Do this for now.
@@ -850,13 +863,25 @@
              [style (if (with-attributes? raw-style)
                         (with-attributes-style raw-style)
                         raw-style)])
-        `((,(if (eq? style 'div) 'div 'p)
-           ,(append
-             (if (string? style)
-                 `([class ,style]) 
-                 `()) 
-             (style->attribs raw-style))
-           ,@contents))))
+        (if (and flatten-unstyled?
+                 (not style))
+            contents
+            `((,(if (eq? style 'div) 'div 'p)
+               ,(append
+                 (if (string? style)
+                     `([class ,style]) 
+                     `()) 
+                 (style->attribs raw-style))
+               ,@contents)))))
+
+    (define/override (render-paragraph p part ri)
+      (do-render-paragraph p part ri #f))
+
+    (define/override (render-intrapara-block p part ri first? last?)
+      `((div ([class "SIntrapara"])
+             ,@(cond
+                [(paragraph? p) (do-render-paragraph p part ri #t)]
+                [else (render-block p part ri #t)]))))
 
     (define/override (render-element e part ri)
       (cond
@@ -875,8 +900,9 @@
                  ;; (commented) hack in scribble-common.js)
                  `(noscript ,@(render-plain-element e part ri))))]
         [(target-element? e)
-         `((a ([name ,(format "~a" (anchor-name (tag-key (target-element-tag e)
-                                                         ri)))]))
+         `((a ([name ,(format "~a" (anchor-name (add-current-tag-prefix
+                                                 (tag-key (target-element-tag e)
+                                                          ri))))]))
            ,@(render-plain-element e part ri))]
         [(and (link-element? e) (not (current-no-links)))
          (parameterize ([current-no-links #t])
@@ -966,6 +992,7 @@
              [(italic) (render* 'i)]
              [(bold) (render* 'b)]
              [(tt) (render* '([class "stt"]))]
+             [(url) (render* '([class "url"]))]
              [(no-break) (render* '([class "nobreak"]))]
              [(sf) `((b ,@(render* '(font ([size "-1"] [face "Helvetica"])))))]
              [(subscript) (render* 'sub)]
@@ -1105,7 +1132,7 @@
                     [(centered) '([align "center"])]
                     [(at-right) '([align "right"])]
                     [(at-left)  '([align "left"])]
-                    [else null])
+                    [else '()])
                 ,@(let ([a (t-style-get 'style)])
                     (if (and a (string? (cadr a))) `([class ,(cadr a)]) null))
                 ,@(if (string? t-style) `([class ,t-style]) null)
@@ -1119,10 +1146,16 @@
 
     (define/override (render-blockquote t part ri)
       `((blockquote ,(if (string? (blockquote-style t))
-                       `([class ,(blockquote-style t)])
+                       `([class ,(regexp-replace #rx"^[\\]" (blockquote-style t) "")])
                        `())
           ,@(append-map (lambda (i) (render-block i part ri #f))
                         (blockquote-paragraphs t)))))
+
+    (define/override (render-compound-paragraph t part ri)
+      `((p ,(if (string? (compound-paragraph-style t))
+                `([class ,(regexp-replace #rx"^[\\]" (compound-paragraph-style t) "")])
+                `())
+           ,@(super render-compound-paragraph t part ri))))
 
     (define/override (render-itemization t part ri)
       (let ([style-str (and (styled-itemization? t)

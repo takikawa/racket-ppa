@@ -27,9 +27,11 @@ This module is used internally to build and load servlets. It may be useful to t
 }
  
 @defproc[(make-stateless.servlet [directory path-string?]
+                                 [stuffer (stuffer/c serializable? bytes?)]
+                                 [manager manager?]
                                  [start (request? . -> . response/c)])
          servlet?]{
- Creates a stateless @schememodname[web-server] servlet that uses @scheme[directory] as its current directory and @scheme[start] as the request handler.
+ Creates a stateless @schememodname[web-server] servlet that uses @scheme[directory] as its current directory, @scheme[stuffer] as its stuffer, and @scheme[manager] as the continuation manager, and @scheme[start] as the request handler.
 }
                   
 @defthing[default-module-specs (listof module-path?)]{
@@ -52,26 +54,6 @@ Equivalent to @scheme[(path? . -> . servlet?)].
          path->servlet/c]{
  Constructs a procedure that loads a servlet from the path in a namespace created with @scheme[make-servlet-namespace],
  using a timeout manager with @scheme[timeouts-default-servlet] as the default timeout (if no manager is given.)
-} 
-                         
 }
 
-@section{Internal Servlet Representation}
-
-@defmodule[web-server/private/servlet]{                                       
- @defstruct[servlet ([custodian custodian?]
-                     [namespace namespace?]
-                     [manager manager?]
-                     [directory path-string?]
-                     [handler (request? . -> . response/c)])
-                    #:mutable]{
-  Instances of this structure hold the necessary parts of a servlet:
-  the @scheme[custodian] responsible for the servlet's resources,
-  the @scheme[namespace] the servlet is executed within,
-  the @scheme[manager] responsible for the servlet's continuations,
-  the current @scheme[directory] of the servlet,
-  and the @scheme[handler] for all requests to the servlet.
- }
 }
-                                       
-

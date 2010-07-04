@@ -347,6 +347,8 @@ int scheme_force_port_closed;
 static int flush_out;
 static int flush_err;
 
+static THREAD_LOCAL Scheme_Custodian *new_port_cust; /* back-door argument */
+
 #if defined(FILES_HAVE_FDS)
 static int external_event_fd, put_external_event_fd;
 #endif
@@ -465,9 +467,6 @@ scheme_init_port (Scheme_Env *env)
 
   exact_symbol = scheme_intern_symbol("exact");
 
-  REGISTER_SO(scheme_orig_stdout_port);
-  REGISTER_SO(scheme_orig_stderr_port);
-  REGISTER_SO(scheme_orig_stdin_port);
 #ifdef MZ_FDS
   REGISTER_SO(fd_input_port_type);
   REGISTER_SO(fd_output_port_type);
@@ -599,6 +598,9 @@ scheme_init_port (Scheme_Env *env)
 
 void scheme_init_port_places(void)
 {
+  REGISTER_SO(scheme_orig_stdout_port);
+  REGISTER_SO(scheme_orig_stderr_port);
+  REGISTER_SO(scheme_orig_stdin_port);
   scheme_orig_stdin_port = (scheme_make_stdin
 			    ? scheme_make_stdin()
 #ifdef USE_OSKIT_CONSOLE
@@ -925,6 +927,35 @@ void scheme_add_fd_eventmask(void *fds, int mask)
 #endif
 }
 
+#if defined(WIN32_FD_HANDLES)
+void WSAEventSelect_plus_check(SOCKET s, WSAEVENT e, long mask)
+{
+  fd_set rd[1], wr[1], ex[1];
+  struct timeval t = {0, 0};
+
+  WSAEventSelect(s, e, mask);
+  
+  /* double-check with select(), because WSAEventSelect only
+     handles new activity (I think) */
+  FD_ZERO(rd);
+  FD_ZERO(wr);
+  FD_ZERO(ex);
+
+  if (mask & FD_READ)
+    FD_SET(s, rd);
+  if (mask & FD_WRITE)
+    FD_SET(s, wr);
+  if (mask & FD_OOB)
+    FD_SET(s, ex);
+
+  if (select(1, rd, wr, ex, &t)) {
+    /* already ready */
+    WSAEventSelect(s, NULL, 0);
+    SetEvent(e);
+  }
+}
+#endif
+
 void scheme_collapse_win_fd(void *fds)
 {
 #if defined(WIN32_FD_HANDLES)
@@ -980,7 +1011,7 @@ void scheme_collapse_win_fd(void *fds)
     for (i = SCHEME_INT_VAL(rfd->added); i--; ) {
       s = rfd->sockets[i];
       if (s != INVALID_SOCKET) {
-	mask = FD_READ | FD_ACCEPT | FD_CONNECT | FD_CLOSE;
+	mask = FD_READ | FD_ACCEPT | FD_CLOSE;
 	
 	for (j = SCHEME_INT_VAL(wfd->added); j--; ) {
 	  if (wfd->sockets[j] == s) {
@@ -998,7 +1029,7 @@ void scheme_collapse_win_fd(void *fds)
 
 	e = WSACreateEvent();
 	wa[p++] = e;
-	WSAEventSelect(s, e, mask);
+	WSAEventSelect_plus_check(s, e, mask);
       }
     }
 
@@ -1024,7 +1055,7 @@ void scheme_collapse_win_fd(void *fds)
 	  
 	  e = WSACreateEvent();
 	  wa[p++] = e;
-	  WSAEventSelect(s, e, mask);
+	  WSAEventSelect_plus_check(s, e, mask);
 	}
       }
     }
@@ -1052,7 +1083,7 @@ void scheme_collapse_win_fd(void *fds)
 	  if (mask) {
 	    e = WSACreateEvent();
 	    wa[p++] = e;
-	    WSAEventSelect(s, e, mask);
+	    WSAEventSelect_plus_check(s, e, mask);
 	  }
 	}
       }
@@ -1247,6 +1278,11 @@ static void init_port_locations(Scheme_Port *ip)
   ip->count_lines = cl;
 }
 
+void scheme_set_next_port_custodian(Scheme_Custodian *c)
+{
+  new_port_cust = c;
+}
+
 Scheme_Input_Port *
 scheme_make_input_port(Scheme_Object *subtype,
 		       void *data,
@@ -1261,6 +1297,9 @@ scheme_make_input_port(Scheme_Object *subtype,
 		       int must_close)
 {
   Scheme_Input_Port *ip;
+  Scheme_Custodian *cust = new_port_cust;
+
+  new_port_cust = NULL;
 
   ip = MALLOC_ONE_TAGGED(Scheme_Input_Port);
   ip->p.so.type = scheme_input_port_type;
@@ -1284,7 +1323,7 @@ scheme_make_input_port(Scheme_Object *subtype,
 
   if (must_close) {
     Scheme_Custodian_Reference *mref;
-    mref = scheme_add_managed(NULL,
+    mref = scheme_add_managed(cust,
 			      (Scheme_Object *)ip,
 			      (Scheme_Close_Custodian_Client *)force_close_input_port,
 			      NULL, must_close);
@@ -1326,6 +1365,9 @@ scheme_make_output_port(Scheme_Object *subtype,
 			int must_close)
 {
   Scheme_Output_Port *op;
+  Scheme_Custodian *cust = new_port_cust;
+
+  new_port_cust = NULL;
 
   op = MALLOC_ONE_TAGGED(Scheme_Output_Port);
   op->p.so.type = scheme_output_port_type;
@@ -1347,7 +1389,7 @@ scheme_make_output_port(Scheme_Object *subtype,
 
   if (must_close) {
     Scheme_Custodian_Reference *mref;
-    mref = scheme_add_managed(NULL,
+    mref = scheme_add_managed(cust,
 			      (Scheme_Object *)op,
 			      (Scheme_Close_Custodian_Client *)force_close_output_port,
 			      NULL, must_close);
@@ -2769,7 +2811,8 @@ static int do_peekc_skip(Scheme_Object *port, Scheme_Object *skip,
 				      NULL);
 
     if (!v) {
-      *unavail = 1;
+      if (unavail)
+        *unavail = 1;
       return 0;
     }
 
@@ -7359,6 +7402,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   Scheme_Object *in, *out, *err;
 #if defined(UNIX_PROCESSES)
   System_Child *sc;
+  int fork_errno = 0;
 #else
   void *sc = 0;
 #endif
@@ -7596,7 +7640,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
       sc->next = scheme_system_children;
       scheme_system_children = sc;
       sc->id = pid;
-    } else {
+    } else if (!pid) {
 #ifdef USE_ITIMER
       /* Turn off the timer. */
       /* SIGPROF is masked at this point due to
@@ -7625,6 +7669,8 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
       }
       END_XFORM_SKIP;
 #endif
+    } else {
+      fork_errno = errno;
     }
 
     scheme_block_child_signals(0);
@@ -7646,7 +7692,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
 	MSC_IZE(close)(err_subprocess[0]);
 	MSC_IZE(close)(err_subprocess[1]);
       }
-      scheme_raise_exn(MZEXN_FAIL, "%s: fork failed", name);
+      scheme_raise_exn(MZEXN_FAIL, "%s: fork failed (%e)", name, fork_errno);
       return scheme_false;
 
     case 0: /* child */
@@ -8014,6 +8060,7 @@ void scheme_release_file_descriptor(void)
 /****************** Windows cleanup  *****************/
 
 #if defined(WIN32_FD_HANDLES)
+
 static void clean_up_wait(long result, OS_SEMAPHORE_TYPE *array,
 			  int *rps, int count)
 {
@@ -8026,6 +8073,21 @@ static void clean_up_wait(long result, OS_SEMAPHORE_TYPE *array,
   /* Clear out break semaphore */
   WaitForSingleObject(scheme_break_semaphore, 0);
 }
+
+static int made_progress;
+static DWORD max_sleep_time;
+
+void scheme_notify_sleep_progress()
+{
+  made_progress = 1;
+}
+
+#else
+
+void scheme_notify_sleep_progress()
+{
+}
+
 #endif
 
 /******************** Main sleep function  *****************/
@@ -8176,21 +8238,58 @@ static void default_sleep(float v, void *fds)
       break_sema = scheme_break_semaphore;
       array[count++] = break_sema;
 
-      /* Wait for HANDLE-based input: */
-      /* Extensions may handle events */
+      /* Extensions may handle events.
+	 If the event queue is empty (as reported by GetQueueStatus),
+	 everything's ok.
+
+	 Otherwise, we have trouble sleeping until an event is ready. We
+	 sometimes leave events on th queue because, say, an eventspace is
+	 not ready. The problem is that MsgWait... only unblocks when a new
+	 event appears. Since extensions may check the queue using a sequence of
+	 PeekMessages, it's possible that an event is added during the
+	 middle of the sequence, but doesn't get handled.
+
+	 To avoid this problem, we don't actually sleep indefinitely if an event
+	 is pending. Instead, we slep 10 ms, then 20 ms, etc. This exponential 
+	 backoff ensures that we eventually handle a pending event, but we don't 
+	 spin and eat CPU cycles. The back-off is reset whenever a thread makes
+	 progress. */
+
+
       if (SCHEME_INT_VAL(((win_extended_fd_set *)fds)->wait_event_mask)
-	  && GetQueueStatus(SCHEME_INT_VAL(((win_extended_fd_set *)fds)->wait_event_mask)))
-	result = WAIT_TIMEOUT; /* doesn't matter... */
-      else {
+	  && GetQueueStatus(SCHEME_INT_VAL(((win_extended_fd_set *)fds)->wait_event_mask))) {
+	if (!made_progress) {
+	  /* Ok, we've gone around at least once. */
+	  if (max_sleep_time < 0x20000000)
+	    max_sleep_time *= 2;
+	} else {
+	  /* Starting back-off mode */
+	  made_progress = 0;
+	  max_sleep_time = 5;
+	}
+      } else {
+	/* Disable back-off mode */
+	made_progress = 1;
+	max_sleep_time = 0;
+      }
+
+      /* Wait for HANDLE-based input: */
+      {
 	DWORD msec;
 	if (v) {
 	  if (v > 100000)
 	    msec = 100000000;
 	  else
 	    msec = (DWORD)(v * 1000);
+	  if (max_sleep_time && (msec > max_sleep_time))
+	    msec = max_sleep_time;
 	} else {
-	  msec = INFINITE;
+	  if (max_sleep_time)
+	    msec = max_sleep_time;
+	  else
+	    msec = INFINITE;
 	}
+
 	result = MsgWaitForMultipleObjects(count, array, FALSE, msec,
 					   SCHEME_INT_VAL(((win_extended_fd_set *)fds)->wait_event_mask));
       }

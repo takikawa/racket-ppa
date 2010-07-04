@@ -44,7 +44,7 @@ identifiers are recognized symbolically (i.e., not by binding).
 
 In more detail, patterns match as follows:
 
-@itemize{
+@itemize[
 
  @item{@scheme[_id], excluding the reserved names @schemeidfont{_},
        @schemeidfont{...}, @schemeidfont{.._},
@@ -350,7 +350,7 @@ In more detail, patterns match as follows:
  @item{@scheme[_derived-pattern] --- matches a pattern defined by a
        macro extension via @scheme[define-match-expander].}
 
-}}
+]}
 
 @; ----------------------------------------------------------------------
 
@@ -442,6 +442,25 @@ A transformer produced by a second @scheme[proc-expr] subexpression is
 A parameter that determines the comparison procedure used to check
 whether multiple uses of an identifier match the ``same'' value. The
 default is @scheme[equal?].}
+
+@; ----------------------------------------------------------------------
+
+@section{Library Extensions}
+
+@defform[(struct* struct-id ([field pat] ...))]{
+ Matches an instance of a structure type named @scheme[struct-id], where the field @scheme[field] in the instance matches the corresponding @scheme[pat].
+                                                
+ Any field of @scheme[struct-id] may be omitted and they may occur in any order.
+ 
+ @defexamples[
+  #:eval match-eval
+  (define-struct tree (val left right))
+  (match (make-tree 0 (make-tree 1 #f #f) #f)
+    [(struct* tree ([val a]
+                    [left (struct* tree ([right #f] [val b]))]))
+     (list a b)])
+ ]
+ }
 
 @; ----------------------------------------------------------------------
 

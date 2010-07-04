@@ -156,7 +156,7 @@ explicitly and install it for the call to eval:
 scheme
 
 (define ns (make-base-namespace))
-(eval '(cons 1 2) ns) (code:comment #, @t{works})
+(eval '(cons 1 2) ns) (code:comment @#,t{works})
 ]
 
 The @scheme[make-base-namespace] function creates a namespace that is
@@ -209,7 +209,7 @@ scheme
 (define x 1)
 (define y 2)
 
-(eval '(cons x y) ns) (code:comment #, @t{produces @schemeresult[(1 . 2)]})
+(eval '(cons x y) ns) (code:comment @#,t{produces @schemeresult[(1 . 2)]})
 ]
 
 
@@ -219,7 +219,7 @@ scheme
 
 A @tech{namespace} encapsulates two pieces of information:
 
-@itemize{
+@itemize[
 
  @item{A mapping from identifiers to bindings. For example, a
        namespace might map the identifier @schemeidfont{lambda} to the
@@ -229,7 +229,7 @@ A @tech{namespace} encapsulates two pieces of information:
  @item{A mapping from module names to module declarations and
        instances.}
 
-}
+]
 
 The first mapping is used for evaluating expressions in a top-level
 context, as in @scheme[(eval '(lambda (x) (+ x 1)))]. The second
@@ -332,7 +332,7 @@ again will create a distinct class datatype:
 (class? object%)
 (class?
  (parameterize ([current-namespace (make-base-empty-namespace)])
-   (namespace-require 'scheme/class) (code:comment #, @t{loads again})
+   (namespace-require 'scheme/class) (code:comment @#,t{loads again})
    (eval 'object%)))
 ]
 
@@ -351,7 +351,7 @@ shared:
                             'scheme/class
                             ns)
    (parameterize ([current-namespace ns])
-     (namespace-require 'scheme/class) (code:comment #, @t{uses attached})
+     (namespace-require 'scheme/class) (code:comment @#,t{uses attached})
      (eval 'object%))))
 ]
 
@@ -376,7 +376,7 @@ scheme/base
       (dynamic-require file 'plug-in%))))
 ]
 
-The anchor bound by @scheme[namespace-attach-module] connects the the
+The anchor bound by @scheme[namespace-attach-module] connects the
 run time of a module with the namespace in which a module is loaded
 (which might differ from the current namespace).  In the above
 example, since the enclosing module requires
