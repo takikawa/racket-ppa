@@ -4,8 +4,8 @@ Fri, 4 Feb 2000 22:10:09 -0700.
 It was downloaded from http://download.plt-scheme.org/drscheme/
 
 Upstream Authors/Copyright:
-	- Main code: PLT Scheme Inc.
-	- Embedded copy of GMP: Free Software Foundation
+	- Main code: © 2000-2010 PLT Scheme Inc.
+	- Embedded copy of GMP: © 1991-2000 Free Software Foundation
 
 Copyright: 
 Everything in this package is licensed under the GNU Lesser General Public
