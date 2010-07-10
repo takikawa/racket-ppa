@@ -1,5 +1,5 @@
 ?package(plt-scheme):needs="x11"					\
-	section="Applications/Programming" title="DrScheme"		\
-  	command="/usr/bin/drscheme"                		\
+	section="Applications/Programming" title="DrRacket"		\
+  	command="/usr/bin/drracket"                		\
 	hints="Development Environment"				\
-	icon="/usr/lib/plt/collects/icons/plt.xpm"
+	icon="/usr/lib/racket/collects/icons/plt.xpm"
