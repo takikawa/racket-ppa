@@ -18,10 +18,10 @@ DEB_MAKE_ENVVARS = CFLAGS="-g" CXXFLAGS=""
 
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
 
-binary-post-install/plt-scheme-doc::
+binary-post-install/racket-doc::
 	# release-notes get installed into plt-scheme
 	rm -rf debian/plt-scheme-doc/usr/share/racket/doc/release-notes
 
-cleanbuilddir/plt-scheme::
+cleanbuilddir/racket::
 	rm -rf build
 	rm -rf include # This got created at build-time
