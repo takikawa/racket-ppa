@@ -19,7 +19,7 @@ DEB_MAKE_ENVVARS = CFLAGS="-g" CXXFLAGS=""
 
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
 
-DEB_DH_INSTALL_ARGS_racket-common = -Xcompiled
+DEB_DH_INSTALL_ARGS_racket-common = -X${RACKET_ARCH}
 
 install/racket::
 	find debian/tmp/usr/lib/racket -type d -name compiled | xargs dh_install -pracket 
