@@ -2,6 +2,7 @@
 
 include /usr/share/cdbs/1/rules/debhelper.mk
 include /usr/share/cdbs/1/class/autotools.mk
+include debian/racket-arch.mk
 
 DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
 DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
@@ -30,3 +31,6 @@ binary-post-install/racket-doc::
 cleanbuilddir/racket::
 	rm -rf build
 	rm -rf include # This got created at build-time
+
+debian/racket-arch.mk: debian/racket-arch.c
+	touch debian/mzconfig.h && cpp -Isrc -Idebian -o $@ debian/racket-arch.c
