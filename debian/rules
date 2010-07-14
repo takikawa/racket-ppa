@@ -23,12 +23,10 @@ DEB_DH_INSTALL_ARGS_racket-common = -X${RACKET_ARCH}
 DEB_DH_INSTALL_ARGS_racket-doc = -Xdoc/release-notes
 
 install/racket::
-	find debian/tmp/usr/lib/racket -type d -name compiled | xargs dh_install -pracket 
-
+	find debian/tmp/usr/lib/racket -type d -name ${RACKET_ARCH} | sed s@debian/tmp/@@ |xargs dh_install -pracket 
 
 cleanbuilddir/racket::
 	rm -rf build
 	rm -rf include # This got created at build-time
-
 debian/racket-arch.mk: debian/racket-arch.c
 	touch debian/mzconfig.h && cpp -Isrc -Idebian -o $@ debian/racket-arch.c
