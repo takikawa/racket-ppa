@@ -1,5 +1,6 @@
 debian/overrides/racket	usr/share/lintian/overrides/
 usr/bin
+usr/lib/racket/mzdyn3m.o
 
 
 
