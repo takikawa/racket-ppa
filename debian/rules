@@ -24,7 +24,7 @@ DEB_DH_INSTALL_ARGS_racket-common = -X${RACKET_ARCH} -Xmzdyn3m.o
 DEB_DH_INSTALL_ARGS_racket-doc = -Xdoc/release-notes
 
 install/racket::
-	find debian/tmp/usr/lib/racket -type d -name ${RACKET_ARCH} | sed s@debian/tmp/@@ |xargs dh_install -pracket 
+	find debian/tmp/usr/share/racket -type d -name ${RACKET_ARCH} | sed s@debian/tmp/usr/share/@@ |xargs -I@ dh_install -pracket /usr/share/@ /usr/lib/@
 
 cleanbuilddir/racket::
 	rm -rf build
