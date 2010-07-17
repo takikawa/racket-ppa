@@ -1,4 +1,4 @@
 usr/include
-usr/lib
+usr/share/racket/collects
 usr/share/man
 usr/share/racket/doc/release-notes
