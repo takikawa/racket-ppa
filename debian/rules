@@ -2,6 +2,8 @@
 
 include /usr/share/cdbs/1/rules/debhelper.mk
 include /usr/share/cdbs/1/class/autotools.mk
+include debian/racket-arch.mk
+include $(wildcard /usr/share/topgit/tg2quilt.mk)
 
 DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
 DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
@@ -18,10 +20,15 @@ DEB_MAKE_ENVVARS = CFLAGS="-g" CXXFLAGS=""
 
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
 
-binary-post-install/plt-scheme-doc::
-	# release-notes get installed into plt-scheme
-	rm -rf debian/plt-scheme-doc/usr/share/racket/doc/release-notes
+DEB_DH_INSTALL_ARGS_racket-common = -X${RACKET_ARCH} -Xmzdyn3m.o
+DEB_DH_INSTALL_ARGS_racket-doc = -Xdoc/release-notes
 
-cleanbuilddir/plt-scheme::
+install/racket::
+	find debian/tmp/usr/share/racket -type d -name ${RACKET_ARCH} | sed s@debian/tmp/usr/share/@@ |xargs -I@ dh_install -pracket /usr/share/@ /usr/lib/@
+	find debian/tmp/usr/share/racket -type d -name ${RACKET_ARCH} | sed s@debian/tmp/usr/share/@@ |xargs -I@ dh_link -pracket /usr/lib/@ /usr/share/@
+
+cleanbuilddir/racket::
 	rm -rf build
 	rm -rf include # This got created at build-time
+debian/racket-arch.mk: debian/racket-arch.c
+	touch debian/mzconfig.h && cpp -Isrc -Idebian -o $@ debian/racket-arch.c

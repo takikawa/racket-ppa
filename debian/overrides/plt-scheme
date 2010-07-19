@@ -1,6 +1,0 @@
-plt-scheme: extra-license-file /usr/share/plt/doc/doc-license.txt
-plt-scheme: extra-license-file /usr/share/plt/doc/release-notes/COPYING.LIB
-plt-scheme: shared-lib-without-dependency-information /usr/lib/plt/collects
-# Ignore this while we talk to upstream about fixing it in a manner they'll
-# accept
-plt-scheme: embedded-zlib
