@@ -1,0 +1,31 @@
+From: David Bremner <bremner@unb.ca>
+Subject: [PATCH] pkg/collects-path
+
+Patch configure script to set collectsdir to /usr/share/racket/collects.
+
+collectsdir is hardcoded to ${libdir}/collects in the configure
+script, but we want to install the collects (which are mostly
+arch-independent) into /usr/share, and symlink the small number of
+exceptions into /usr/lib/racket/collects/$foo
+
+Signed-off-by: David Bremner <bremner@unb.ca>
+
+---
+ src/configure |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/src/configure b/src/configure
+index ed1448b..4ebd366 100755
+--- a/src/configure
++++ b/src/configure
+@@ -2212,7 +2212,7 @@ else
+     prefix="${ac_default_prefix}"
+   fi
+   libpltdir="${libdir}/racket"
+-  collectsdir="${libdir}/racket/collects"
++  collectsdir="${datadir}/racket/collects"
+   includepltdir="${includedir}/racket"
+   docdir="${datadir}/racket/doc"
+   MAKE_COPYTREE=copytree
+-- 
+tg: (1bed6ca..) pkg/collects-path (depends on: upstream)
