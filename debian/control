@@ -16,8 +16,8 @@ Package: racket
 Architecture: any
 Depends: ${misc:Depends}, ${shlibs:Depends}, racket-common (= ${source:Version})
 Recommends: racket-doc (>= ${source:Upstream-Version})
-Conflicts: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
-Replaces: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
+Conflicts: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1), plt-scheme (<<5.0~)
+Replaces: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1), plt-scheme (<<5.0~)
 Description: Racket Programming Environment
  Racket (previously PLT Scheme) is an innovative programming language
  that builds on a rich academic and practical tradition.
@@ -38,8 +38,8 @@ Package: racket-common
 Architecture: all
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Recommends: racket-doc (>= ${source:Upstream-Version})
-Conflicts: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
-Replaces: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
+Conflicts: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1), plt-scheme (<<5.0~)
+Replaces: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1), plt-scheme (<<5.0~)
 Description: Racket Programming Environment (architecture independant files)
  This package includes the architecture independant files for Racket
  (but not the documentation, see racket-doc for that).
