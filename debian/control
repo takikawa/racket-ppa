@@ -49,8 +49,38 @@ Section: doc
 Architecture: all
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Recommends: racket (>= ${source:Upstream-Version})
-Conflicts: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
-Replaces: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
 Enhances: racket
 Description: Racket Documentation
  This package includes all of the documentation for Racket.
+
+Package: plt-scheme
+Architecture: all
+Depends: racket
+Description: Racket Programming Environment (transitional package)
+ Racket (previously PLT Scheme) is an innovative programming language
+ that builds on a rich academic and practical tradition.
+ .
+ It is suitable for implementation tasks ranging from scripting to
+ application development, including GUIs, web services, etc.
+ .
+ It includes the DrRacket programming environment, a virtual machine with
+ a just-in-time compiler, tools for creating stand-alone executables, the
+ PLT Scheme web server, extensive libraries, documentation for both
+ beginners and experts, and more.
+ .
+ It supports the creation of new programming languages through a
+ rich, expressive syntax system. Example languages include Typed Scheme,
+ ACL2, FrTime, and Lazy Scheme.
+ .
+ This is a dummy package to aid in transitioning from the plt-scheme package
+ to the racket package.
+
+Package: plt-scheme-doc
+Section: doc
+Architecture: all
+Depends: racket-doc
+Description: PLT Scheme Documentation (transitional package)
+ This package includes all of the documentation for PLT Scheme.
+ .
+ This is a dummy package to aid in transitioning from the plt-scheme-doc
+ package to the racket-doc package.
