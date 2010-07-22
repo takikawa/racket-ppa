@@ -9,7 +9,7 @@ Build-Depends: cdbs, quilt, debhelper (>= 7.0.0), patchutils,
  xbitmaps, libxft-dev, libgl1-mesa-dev | libgl-dev,
  libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev
 Vcs-Git: git://git.debian.org/git/collab-maint/racket
-Vcs-Browser: http://git.debian.org/?p=collab-maint/syncevolution.git;a=summary
+Vcs-Browser: http://git.debian.org/?p=collab-maint/racket.git;a=summary
 Homepage: http://www.racket-lang.org/
 
 Package: racket
