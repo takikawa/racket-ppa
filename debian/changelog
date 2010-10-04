@@ -1,4 +1,4 @@
-plt-scheme (4.2.1-1+squeeze1) UNRELEASED; urgency=low
+plt-scheme (4.2.1-1+squeeze1) testing-proposed-updates; urgency=low
 
   * Backport patch from upstream to fix mips FTBFS. (Closes: #598615)
     + debian/rules: Pass --enable-cgcdefault to configure to use alternate
@@ -7,7 +7,7 @@ plt-scheme (4.2.1-1+squeeze1) UNRELEASED; urgency=low
     + Add myself to Uploaders.
     + Point Vcs-* to git.
 
- -- James Vega <jamessan@debian.org>  Mon, 04 Oct 2010 00:40:50 -0400
+ -- James Vega <jamessan@debian.org>  Mon, 04 Oct 2010 00:45:31 -0400
 
 plt-scheme (4.2.1-1) unstable; urgency=low
 
