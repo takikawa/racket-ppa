@@ -1,0 +1,198 @@
+From: Matthew Flatt <mflatt@racket-lang.org>
+Date: Mon, 19 Jul 2010 06:07:55 -0600
+Subject: [PATCH] fix MIPS bignum config and implementation
+  --- includes a fix for gmp with long long configuration,
+  but that's now disabled for MIPS to keep things
+  simpler
+ (cherry picked from commit 7a8efb446eec852dcd770a7ab534c0425efb48ea)
+
+Patch is based on the above, but adjusted accordingly as a backport to
+plt-scheme 4.2.1.
+
+Origin: upstream, http://git.racket-lang.org/plt/commitdiff/43bdcc3
+Bug-Debian: http://bugs.debian.org/598615
+---
+
+diff --git a/src/mzscheme/sconfig.h b/src/mzscheme/sconfig.h
+index a7b8e8b..b0fad01 100644
+--- a/src/mzscheme/sconfig.h
++++ b/src/mzscheme/sconfig.h
+@@ -384,10 +384,6 @@
+ 
+ # define USE_TIMEZONE_AND_ALTZONE_VAR
+ 
+-# ifdef _ABIN32
+-#  define USE_LONG_LONG_FOR_BIGDIG
+-# endif
+-
+ # define FLAGS_ALREADY_SET
+ 
+ #endif
+diff --git a/src/mzscheme/src/bignum.c b/src/mzscheme/src/bignum.c
+index 7dacdb0..bd65dcc 100644
+--- a/src/mzscheme/src/bignum.c
++++ b/src/mzscheme/src/bignum.c
+@@ -81,20 +81,23 @@ void scheme_bignum_use_fuel(long n);
+ #endif
+ 
+ #if defined(USE_LONG_LONG_FOR_BIGDIG)
+-# define TOP_BITS_MASK 0xFFFFFFFF00000000
++# define TOP_BITS_MASK ((bigdig)0xFFFFFFFF << 32)
+ # define BOTTOM_BITS_MASK 0x00000000FFFFFFFF
++# define FIRST_BIT_MASK_LL ((bigdig)FIRST_BIT_MASK << 32)
++#else
++# define FIRST_BIT_MASK_LL FIRST_BIT_MASK
+ #endif
+ 
+ #if defined(SIXTY_FOUR_BIT_INTEGERS) || defined(USE_LONG_LONG_FOR_BIGDIG)
+ # define BIG_RADIX 18446744073709551616.0 /* = 0x10000000000000000 */
+-# define ALL_ONES 0xFFFFFFFFFFFFFFFF
+ # define WORD_SIZE 64
+ #else
+ # define BIG_RADIX 4294967296.0 /* = 0x100000000 */
+-# define ALL_ONES 0xFFFFFFFF
+ # define WORD_SIZE 32
+ #endif
+ 
++# define ALL_ONES (~(bigdig)0)
++
+ static Scheme_Object *bignum_one;
+ 
+ #ifdef MZ_PRECISE_GC
+@@ -406,7 +409,7 @@ int scheme_bignum_get_long_long_val(const Scheme_Object *o, mzlonglong *v)
+   } else if (SCHEME_BIGLEN(o) == 0) {
+     *v = 0;
+     return 1;
+-  } else if (SCHEME_BIGDIG(o)[MAX_BN_SIZE_FOR_LL - 1] == FIRST_BIT_MASK 
++  } else if (SCHEME_BIGDIG(o)[MAX_BN_SIZE_FOR_LL - 1] == FIRST_BIT_MASK_LL 
+ # ifndef USE_LONG_LONG_FOR_BIGDIG
+ 	     && !SCHEME_BIGDIG(o)[0]
+ # endif
+@@ -417,7 +420,7 @@ int scheme_bignum_get_long_long_val(const Scheme_Object *o, mzlonglong *v)
+     v2 = (v2 << 63);
+     *v = v2;
+     return 1;
+-  } else if ((SCHEME_BIGDIG(o)[MAX_BN_SIZE_FOR_LL - 1] & FIRST_BIT_MASK) != 0) { /* Won't fit into a signed long long */
++  } else if ((SCHEME_BIGDIG(o)[MAX_BN_SIZE_FOR_LL - 1] & FIRST_BIT_MASK_LL) != 0) { /* Won't fit into a signed long long */
+     return 0;
+   } else {
+     mzlonglong v2;
+@@ -448,7 +451,7 @@ int scheme_bignum_get_unsigned_long_long_val(const Scheme_Object *o, umzlonglong
+   } else {
+     umzlonglong v2;
+     v2 = SCHEME_BIGDIG(o)[0];
+-    if (SCHEME_BIGLEN(o)) {
++    if (SCHEME_BIGLEN(o) > 1) {
+       v2 |= ((umzlonglong)SCHEME_BIGDIG(o)[1]) << 32;
+     }
+     *v = v2;
+diff --git a/src/mzscheme/src/gmp/gmp.c b/src/mzscheme/src/gmp/gmp.c
+index 59d9ad2..cc22a05 100644
+--- a/src/mzscheme/src/gmp/gmp.c
++++ b/src/mzscheme/src/gmp/gmp.c
+@@ -54,7 +54,7 @@ THREAD_LOCAL_DECL(static void *gmp_mem_pool);
+ # define MP_BASES_BIG_BASE_10            CNST_LIMB(0x8ac7230489e80000)
+ # define MP_BASES_BIG_BASE_INVERTED_10   CNST_LIMB(0xd83c94fb6d2ac34a)
+ # define MP_BASES_NORMALIZATION_STEPS_10 0
+-# define GMP_NUMB_MASK 0xFFFFFFFFFFFFFFFF
++# define GMP_NUMB_MASK (~(mp_limb_t)0)
+ #endif
+ 
+ #define MPN_DIVREM_OR_PREINV_DIVREM_1(qp,xsize,ap,size,d,dinv,shift)    \
+diff --git a/src/mzscheme/src/gmp/gmp.h b/src/mzscheme/src/gmp/gmp.h
+index b5dddd4..45628b5 100644
+--- a/src/mzscheme/src/gmp/gmp.h
++++ b/src/mzscheme/src/gmp/gmp.h
+@@ -40,9 +40,15 @@ MA 02111-1307, USA. */
+ # endif
+ #endif
+ 
+-#if defined (__mips) && defined (_ABIN32)
++#if 0
++# if (defined (__mips) || defined(mips)) && defined (_ABIN32)
+ /* Force the use of 64-bit limbs for all 64-bit MIPS CPUs if ABI permits.  */
+-#define _LONG_LONG_LIMB
++# define _LONG_LONG_LIMB
++# endif
++#endif
++
++#ifdef USE_LONG_LONG_FOR_BIGDIG
++# define _LONG_LONG_LIMB
+ #endif
+ 
+ #if (__STDC__-0) || defined (__cplusplus)
+@@ -607,5 +613,13 @@ enum
+ #define gmp_version __gmp_version
+ extern __gmp_const char *gmp_version;
+ 
++/* Test for gcc >= maj.min, as per __GNUC_PREREQ in glibc */
++#if defined (__GNUC__) && defined (__GNUC_MINOR__)
++#define __GMP_GNUC_PREREQ(maj, min) \
++  ((__GNUC__ << 16) + __GNUC_MINOR__ >= ((maj) << 16) + (min))
++#else
++#define __GMP_GNUC_PREREQ(maj, min)  0
++#endif
++
+ #define __GMP_H__
+ #endif /* __GMP_H__ */
+diff --git a/src/mzscheme/src/gmp/gmplonglong.h b/src/mzscheme/src/gmp/gmplonglong.h
+index bca4b77..5199d94 100644
+--- a/src/mzscheme/src/gmp/gmplonglong.h
++++ b/src/mzscheme/src/gmp/gmplonglong.h
+@@ -618,26 +618,45 @@ extern USItype __MPN(udiv_qrnnd) _PROTO ((USItype *, USItype, USItype, USItype))
+ #endif /* __m88000__ */
+ 
+ #if defined (__mips) && W_TYPE_SIZE == 32
+-#if __GNUC__ > 2 || __GNUC_MINOR__ >= 7
++#if __GMP_GNUC_PREREQ (4,4)
++#define umul_ppmm(w1, w0, u, v) \
++  do {                                                                  \
++    UDItype __ll = (UDItype)(u) * (v);                                  \
++    w1 = __ll >> 32;                                                    \
++    w0 = __ll;                                                          \
++  } while (0)
++#endif
++#if !defined (umul_ppmm) && __GMP_GNUC_PREREQ (2,7)
+ #define umul_ppmm(w1, w0, u, v) \
+   __asm__ ("multu %2,%3" : "=l" (w0), "=h" (w1) : "d" (u), "d" (v))
+-#else
++#endif
++#if !defined (umul_ppmm)
+ #define umul_ppmm(w1, w0, u, v) \
+-  __asm__ ("multu %2,%3\n\tmflo %0\n\tmfhi %1"				\
+-	   : "=d" (w0), "=d" (w1) : "d" (u), "d" (v))
++  __asm__ ("multu %2,%3\n\tmflo %0\n\tmfhi %1"                          \
++           : "=d" (w0), "=d" (w1) : "d" (u), "d" (v))
+ #endif
+ #define UMUL_TIME 10
+ #define UDIV_TIME 100
+ #endif /* __mips */
+ 
+ #if (defined (__mips) && __mips >= 3) && W_TYPE_SIZE == 64
+-#if __GNUC__ > 2 || __GNUC_MINOR__ >= 7
++#if __GMP_GNUC_PREREQ (4,4)
++#define umul_ppmm(w1, w0, u, v) \
++  do {                                                                  \
++    typedef unsigned int __ll_UTItype __attribute__((mode(TI)));        \
++    __ll_UTItype __ll = (__ll_UTItype)(u) * (v);                        \
++    w1 = __ll >> 64;                                                    \
++    w0 = __ll;                                                          \
++  } while (0)
++#endif
++#if !defined (umul_ppmm) && __GMP_GNUC_PREREQ (2,7)
+ #define umul_ppmm(w1, w0, u, v) \
+   __asm__ ("dmultu %2,%3" : "=l" (w0), "=h" (w1) : "d" (u), "d" (v))
+-#else
++#endif
++#if !defined (umul_ppmm)
+ #define umul_ppmm(w1, w0, u, v) \
+-  __asm__ ("dmultu %2,%3\n\tmflo %0\n\tmfhi %1"				\
+-	   : "=d" (w0), "=d" (w1) : "d" (u), "d" (v))
++  __asm__ ("dmultu %2,%3\n\tmflo %0\n\tmfhi %1"                         \
++           : "=d" (w0), "=d" (w1) : "d" (u), "d" (v))
+ #endif
+ #define UMUL_TIME 20
+ #define UDIV_TIME 140
+-- 
+1.7.3.1
+
