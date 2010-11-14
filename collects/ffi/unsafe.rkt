@@ -45,42 +45,40 @@
 (define* _uword _uint16)
 (define* _sword _int16)
 
+;; utility for the next few definitions
+(define (sizeof->3ints c-type)
+  (case (compiler-sizeof c-type)
+    [(2) (values _int16 _uint16 _int16)]
+    [(4) (values _int32 _uint32 _int32)]
+    [(8) (values _int64 _uint64 _int64)]
+    [else (error 'foreign "internal error: bad compiler size for `~s'"
+                 c-type)]))
+
 ;; _short etc is a convenient name for whatever is the compiler's `short'
 ;; (_short is signed)
 (provide _short _ushort _sshort)
-(define-values (_short _ushort _sshort)
-  (case (compiler-sizeof 'short)
-    [(2) (values _int16 _uint16 _int16)]
-    [(4) (values _int32 _uint32 _int32)]
-    [else (error 'foreign "internal error: bad compiler size for `short'")]))
+(define-values (_short _ushort _sshort) (sizeof->3ints 'short))
 
 ;; _int etc is a convenient name for whatever is the compiler's `int'
 ;; (_int is signed)
 (provide _int _uint _sint)
-(define-values (_int _uint _sint)
-  (case (compiler-sizeof 'int)
-    [(2) (values _int16 _uint16 _int16)]
-    [(4) (values _int32 _uint32 _int32)]
-    [(8) (values _int64 _uint64 _int64)]
-    [else (error 'foreign "internal error: bad compiler size for `int'")]))
+(define-values (_int _uint _sint) (sizeof->3ints 'int))
 
 ;; _long etc is a convenient name for whatever is the compiler's `long'
 ;; (_long is signed)
 (provide _long _ulong _slong)
-(define-values (_long _ulong _slong)
-  (case (compiler-sizeof 'long)
-    [(4) (values _int32 _uint32 _int32)]
-    [(8) (values _int64 _uint64 _int64)]
-    [else (error 'foreign "internal error: bad compiler size for `long'")]))
+(define-values (_long _ulong _slong) (sizeof->3ints 'long))
 
 ;; _llong etc is a convenient name for whatever is the compiler's `long long'
 ;; (_llong is signed)
 (provide _llong _ullong _sllong)
-(define-values (_llong _ullong _sllong)
-  (case (compiler-sizeof '(long long))
-    [(4) (values _int32 _uint32 _int32)]
-    [(8) (values _int64 _uint64 _int64)]
-    [else (error 'foreign "internal error: bad compiler size for `llong'")]))
+(define-values (_llong _ullong _sllong) (sizeof->3ints '(long long)))
+
+;; _intptr etc is a convenient name for whatever is the integer
+;; equivalent of the compiler's pointer (see `intptr_t') (_intptr is
+;; signed)
+(provide _intptr _uintptr _sintptr)
+(define-values (_intptr _uintptr _sintptr) (sizeof->3ints '(void *)))
 
 ;; ----------------------------------------------------------------------------
 ;; Getting and setting library objects
@@ -432,21 +430,22 @@
 ;; optionally applying a wrapper function to modify the result primitive
 ;; (callouts) or the input procedure (callbacks).
 (define* (_cprocedure itypes otype
-                      #:abi        [abi     #f]
-                      #:wrapper    [wrapper #f]
-                      #:keep       [keep    #f]
-                      #:atomic?    [atomic? #f]
-                      #:save-errno [errno   #f])
-  (_cprocedure* itypes otype abi wrapper keep atomic? errno))
+                      #:abi         [abi     #f]
+                      #:wrapper     [wrapper #f]
+                      #:keep        [keep    #t]
+                      #:atomic?     [atomic? #f]
+                      #:async-apply [async-apply   #f]
+                      #:save-errno  [errno   #f])
+  (_cprocedure* itypes otype abi wrapper keep atomic? async-apply errno))
 
 ;; for internal use
 (define held-callbacks (make-weak-hasheq))
-(define (_cprocedure* itypes otype abi wrapper keep atomic? errno)
+(define (_cprocedure* itypes otype abi wrapper keep atomic? async-apply errno)
   (define-syntax-rule (make-it wrap)
     (make-ctype _fpointer
       (lambda (x)
         (and x
-             (let ([cb (ffi-callback (wrap x) itypes otype abi atomic?)])
+             (let ([cb (ffi-callback (wrap x) itypes otype abi atomic? async-apply)])
                (cond [(eq? keep #t) (hash-set! held-callbacks x cb)]
                      [(box? keep)
                       (let ([x (unbox keep)])
@@ -478,7 +477,7 @@
 
 (provide _fun)
 (define-for-syntax _fun-keywords
-  `([#:abi ,#'#f] [#:keep ,#'#t] [#:atomic? ,#'#f] [#:save-errno ,#'#f]))
+  `([#:abi ,#'#f] [#:keep ,#'#t] [#:atomic? ,#'#f] [#:async-apply ,#'#f] [#:save-errno ,#'#f]))
 (define-syntax (_fun stx)
   (define (err msg . sub) (apply raise-syntax-error '_fun msg stx sub))
   (define xs     #f)
@@ -501,7 +500,7 @@
        (lambda (k)
          (cond [(assq k ks) => cdr]
                [(assq k _fun-keywords) => cadr]
-               [else (error '_fun "internal error: unknown keyword: ~e" k)]))
+               [else (error '_fun "internal error: unknown keyword: ~.s" k)]))
        (lambda (k-stx v [sub k-stx])
          (let ([k (if (syntax? k-stx) (syntax-e k-stx) k-stx)])
            (cond [(assq k ks)
@@ -626,6 +625,7 @@
                              #,wrapper
                              #,(kwd-ref '#:keep)
                              #,(kwd-ref '#:atomic?)
+                             #,(kwd-ref '#:async-apply)
                              #,(kwd-ref '#:save-errno)))])
       (if (or (caddr output) input-names (ormap caddr inputs)
               (ormap (lambda (x) (not (car x))) inputs)
@@ -1129,21 +1129,24 @@
 ;; ----------------------------------------------------------------------------
 ;; Struct wrappers
 
-(define (compute-offsets types)
-  (let loop ([ts types] [cur 0] [r '()])
-    (if (null? ts)
-      (reverse r)
-      (let* ([algn (ctype-alignof (car ts))]
-             [pos  (+ cur (modulo (- (modulo cur algn)) algn))])
-        (loop (cdr ts)
-              (+ pos (ctype-sizeof (car ts)))
-              (cons pos r))))))
+(define (compute-offsets types alignment)
+  (let ([alignment (if (memq alignment '(#f 1 2 4 8 16))
+                       alignment
+                       #f)])
+    (let loop ([ts types] [cur 0] [r '()])
+      (if (null? ts)
+          (reverse r)
+          (let* ([algn (or alignment (ctype-alignof (car ts)))]
+                 [pos  (+ cur (modulo (- (modulo cur algn)) algn))])
+            (loop (cdr ts)
+                  (+ pos (ctype-sizeof (car ts)))
+                  (cons pos r)))))))
 
 ;; Simple structs: call this with a list of types, and get a type that marshals
 ;; C structs to/from Scheme lists.
-(define* (_list-struct . types)
-  (let ([stype   (make-cstruct-type types)]
-        [offsets (compute-offsets types)]
+(define* (_list-struct #:alignment [alignment #f] . types)
+  (let ([stype   (make-cstruct-type types #f alignment)]
+        [offsets (compute-offsets types alignment)]
         [len     (length types)])
     (make-ctype stype
       (lambda (vals)
@@ -1176,7 +1179,7 @@
 ;; type.
 (provide define-cstruct)
 (define-syntax (define-cstruct stx)
-  (define (make-syntax _TYPE-stx has-super? slot-names-stx slot-types-stx)
+  (define (make-syntax _TYPE-stx has-super? slot-names-stx slot-types-stx alignment-stx)
     (define name
       (cadr (regexp-match #rx"^_(.+)$" (symbol->string (syntax-e _TYPE-stx)))))
     (define slot-names (map (lambda (x) (symbol->string (syntax-e x)))
@@ -1218,7 +1221,8 @@
          [(TYPE-SLOT ...)      (ids (lambda (s) `(,name"-",s)))]
          [(set-TYPE-SLOT! ...) (ids (lambda (s) `("set-",name"-",s"!")))]
          [(offset ...) (generate-temporaries
-                               (ids (lambda (s) `(,s"-offset"))))])
+                               (ids (lambda (s) `(,s"-offset"))))]
+         [alignment            alignment-stx])
       (with-syntax ([get-super-info
                      ;; the 1st-type might be a pointer to this type
                      (if (or (safe-id=? 1st-type #'_TYPE-pointer/null)
@@ -1248,12 +1252,13 @@
                 (define _TYPE-pointer/null _TYPE/null)
                 (let*-values ([(stype ...)  (values slot-type ...)]
                               [(types)      (list stype ...)]
-                              [(offsets)    (compute-offsets types)]
+                              [(alignment-v) alignment]
+                              [(offsets)    (compute-offsets types alignment-v)]
                               [(offset ...) (apply values offsets)])
                   (define all-tags (cons TYPE-tag super-tags))
                   (define _TYPE*
                     ;; c->scheme adjusts all tags
-                    (let* ([cst (make-cstruct-type types)]
+                    (let* ([cst (make-cstruct-type types #f alignment-v)]
                            [t (_cpointer TYPE-tag cst)]
                            [c->s (ctype-c->scheme t)])
                       (make-ctype cst (ctype-scheme->c t)
@@ -1350,11 +1355,19 @@
     [(_ _TYPE ([slot slot-type] ...))
      (and (_-identifier? #'_TYPE stx)
           (identifiers? #'(slot ...)))
-     (make-syntax #'_TYPE #f #'(slot ...) #'(slot-type ...))]
+     (make-syntax #'_TYPE #f #'(slot ...) #'(slot-type ...) #'#f)]
+    [(_ _TYPE ([slot slot-type] ...) #:alignment alignment-expr)
+     (and (_-identifier? #'_TYPE stx)
+          (identifiers? #'(slot ...)))
+     (make-syntax #'_TYPE #f #'(slot ...) #'(slot-type ...) #'alignment-expr)]
     [(_ (_TYPE _SUPER) ([slot slot-type] ...))
      (and (_-identifier? #'_TYPE stx) (identifiers? #'(slot ...)))
      (with-syntax ([super (datum->syntax #'_TYPE 'super #'_TYPE)])
-       (make-syntax #'_TYPE #t #'(super slot ...) #'(_SUPER slot-type ...)))]))
+       (make-syntax #'_TYPE #t #'(super slot ...) #'(_SUPER slot-type ...) #'#f))]
+    [(_ (_TYPE _SUPER) ([slot slot-type] ...) #:alignment alignment-expr)
+     (and (_-identifier? #'_TYPE stx) (identifiers? #'(slot ...)))
+     (with-syntax ([super (datum->syntax #'_TYPE 'super #'_TYPE)])
+       (make-syntax #'_TYPE #t #'(super slot ...) #'(_SUPER slot-type ...) #'alignment-expr))]))
 
 ;; helper for the above: keep runtime information on structs
 (define cstruct-info

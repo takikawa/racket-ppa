@@ -5,7 +5,7 @@
   (#%require (for-syntax '#%kernel))
   (#%require "more-scheme.rkt"
              "misc.rkt"
-             (all-except "define.rkt" define)
+             (all-except "define.rkt" define define-syntax define-for-syntax)
              "letstx-scheme.rkt"
              "kw.rkt"
              "define-struct.rkt"
@@ -15,7 +15,9 @@
              "map.rkt" ; shadows #%kernel bindings
              "kernstruct.rkt"
              "norm-arity.rkt"
-             '#%builtin) ; so it's attached
+             '#%builtin  ; so it's attached
+             (for-syntax "kw.rkt"
+                         "norm-define.rkt"))
 
   (define-syntaxes (#%top-interaction)
     (lambda (stx)
@@ -25,13 +27,35 @@
            #f
            "not at top level"
            stx))
-      (datum->syntax stx (cdr (syntax-e stx)) stx stx)))
+      (if (symbol? (syntax-e stx))
+          (raise-syntax-error #f "bad syntax" stx)
+          (datum->syntax stx (cdr (syntax-e stx)) stx stx))))
 
-  (define-values (new-apply)
+  (define-values (new-apply-proc)
     (make-keyword-procedure
      (lambda (kws kw-args proc args . rest)
        (keyword-apply proc kws kw-args (apply list* args rest)))
      apply))
+
+  (define-syntaxes (new-apply)
+    ;; Convert (apply ...) without keyword args to primitive `apply',
+    ;;  so that oher optimizations are available.
+    (lambda (stx)
+      (let-values ([(here) (quote-syntax here)])
+        (if (symbol? (syntax-e stx))
+            (datum->syntax here 'new-apply-proc stx stx)
+            (let-values ([(l) (syntax->list stx)])
+              (let-values ([(app) (if (if l
+                                          (ormap (lambda (x) (keyword? (syntax-e x))) l)
+                                          #t)
+                                      'new-apply-proc
+                                      'apply)])
+                (datum->syntax
+                 stx
+                 (cons (datum->syntax here app (car l) (car l))
+                       (cdr (syntax-e stx)))
+                 stx
+                 stx)))))))
 
   (define-values (new-keyword-apply)
     (make-keyword-procedure
@@ -57,6 +81,28 @@
          (keyword-apply proc kws kw-args (apply list* args rest))))
      keyword-apply))
 
+  (define-syntaxes (new-define-syntax)
+    (lambda (stx)
+      (let-values ([(id rhs)
+                    (normalize-definition stx (quote-syntax new-lambda) #t #t)]
+                   [(def) (quote-syntax define-syntaxes)])
+        (datum->syntax
+         def
+         (list def (list id) rhs)
+         stx
+         stx))))
+
+  (define-syntaxes (new-define-for-syntax)
+    (lambda (stx)
+      (let-values ([(id rhs)
+                    (normalize-definition stx (quote-syntax new-lambda) #t #t)]
+                   [(def) (quote-syntax define-values-for-syntax)])
+        (datum->syntax
+         def
+         (list def (list id) rhs)
+         stx
+         stx))))
+
   (#%provide (all-from-except "more-scheme.rkt" old-case fluid-let)
              (all-from "misc.rkt")
              (all-from "define.rkt")
@@ -64,8 +110,11 @@
              (rename new-lambda lambda)
              (rename new-λ λ)
              (rename new-define define)
+             (rename new-define-syntax define-syntax)
+             (rename new-define-for-syntax define-for-syntax)
              (rename new-app #%app)
              (rename new-apply apply)
+             new-apply-proc ; for access by Typed Racket
              (rename new-prop:procedure prop:procedure)
              (rename #%app #%plain-app)
              (rename lambda #%plain-lambda)
@@ -77,10 +126,11 @@
              (rename new:procedure->method procedure->method)
              (rename new:procedure-rename procedure-rename)
              (rename new:chaperone-procedure chaperone-procedure)
+             (rename new:proxy-procedure proxy-procedure)
              (all-from-except '#%kernel lambda λ #%app #%module-begin apply prop:procedure 
                               procedure-arity procedure-reduce-arity raise-arity-error
                               procedure->method procedure-rename
-                              chaperone-procedure)
+                              chaperone-procedure proxy-procedure)
              (all-from "reqprov.rkt")
              (all-from "for.rkt")
              (all-from "kernstruct.rkt")

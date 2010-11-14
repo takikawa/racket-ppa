@@ -15,7 +15,7 @@
 ;; to open. See also main.rkt.
 (current-command-line-arguments (apply vector files-to-open))
 
-(define-values (texas-independence-day? prince-kuhio-day? kamehameha-day? halloween? weekend?)
+(define-values (texas-independence-day? prince-kuhio-day? kamehameha-day? halloween? valentines-day? weekend?)
   (let* ([date (seconds->date (current-seconds))]
          [month (date-month date)]
          [day (date-day date)]
@@ -24,16 +24,15 @@
             (and (= 3 month) (= 26 day))
             (and (= 6 month) (= 11 day))
             (and (= 10 month) (= 31 day))
+            (and (= 2 month) (= 14 day))
             (or (= dow 6) (= dow 0)))))
 
 (define high-color? ((get-display-depth) . > . 8))
 (define special-state #f)
 (define normal-bitmap #f) ; set by load-magic-images
 
-(define icons-bitmap
-  (let ([icons (collection-path "icons")])
-    (lambda (name)
-      (make-object bitmap% (build-path icons name)))))
+(define (icons-bitmap name)
+  (make-object bitmap% (collection-file-path name "icons")))
 
 (define-struct magic-image (chars filename [bitmap #:mutable]))
 
@@ -98,26 +97,29 @@
 
 (start-splash
  (cond
-   [(or prince-kuhio-day? kamehameha-day?)
-    (set-splash-progress-bar? #f)
+   [(and valentines-day? high-color?)
+    (collection-file-path "heart.png" "icons")]
+   [(and (or prince-kuhio-day? kamehameha-day?) high-color?)
+    (set-splash-progress-bar?! #f)
     (let ([size ((dynamic-require 'drracket/private/palaka 'palaka-pattern-size) 4)])
       (vector (dynamic-require 'drracket/private/honu-logo 'draw-honu) 
               size 
               size))]
    [texas-independence-day?
-    (build-path (collection-path "icons") "texas-plt-bw.gif")]
+    (collection-file-path "texas-plt-bw.gif" "icons")]
    [(and halloween? high-color?)
-    (build-path (collection-path "icons") "PLT-pumpkin.png")]
+    (collection-file-path "PLT-pumpkin.png" "icons")]
    [(and high-color? weekend?)
-    (build-path (collection-path "icons") "plt-logo-red-shiny.png")]
+    (collection-file-path "plt-logo-red-shiny.png" "icons")]
    [high-color?
-    (build-path (collection-path "icons") "plt-logo-red-diffuse.png")]
+    (collection-file-path "plt-logo-red-diffuse.png" "icons")]
    [(= (get-display-depth) 1)
-    (build-path (collection-path "icons") "pltbw.gif")]
+    (collection-file-path "pltbw.gif" "icons")]
    [else
-    (build-path (collection-path "icons") "plt-flat.gif")])
+    (collection-file-path "plt-flat.gif" "icons")])
  "DrRacket"
- 99)
+ 99
+ #:allow-funny? #t)
 
 (when (getenv "PLTDRBREAK")
   (printf "PLTDRBREAK: creating break frame\n") (flush-output)

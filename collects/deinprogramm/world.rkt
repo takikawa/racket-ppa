@@ -14,7 +14,7 @@
    "image.ss"
    (prefix-in beg: lang/htdp-beginner)
    lang/prim
-   deinprogramm/contract/contract-syntax)
+   deinprogramm/signature/signature-syntax)
   
   ;; --- provide ---------------------------------------------------------------
   (provide (all-from-out "image.ss"))
@@ -61,7 +61,7 @@
   (provide mouse-event-kind)
  
   (define mouse-event-kind
-    (contract
+    (signature
      (one-of "enter" "leave" "motion" "left-down" "left-up" "middle-down" "middle-up" "right-down" "right-up")))
   
   ;; ---------------------------------------------------------------------------
@@ -194,7 +194,7 @@
 	  (else #f))))
   
   [define (end-of-time s)
-    (printf "end of time: ~a~n" s)
+    (printf "end of time: ~a\n" s)
     (stop-it)
     the-world]
   

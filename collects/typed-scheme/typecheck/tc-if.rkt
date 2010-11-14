@@ -1,18 +1,17 @@
-#lang scheme/unit
-
-
-(require (rename-in "../utils/utils.rkt" [infer r:infer]))
-(require "signatures.rkt"
+#lang racket/unit
+(require (rename-in "../utils/utils.rkt" [infer r:infer])
+         "signatures.rkt" "check-below.rkt"
          (rep type-rep filter-rep object-rep)
          (rename-in (types convenience subtype union utils comparison remove-intersect abbrev filter-ops)
                     [remove *remove])
-         (env lexical-env type-environments)
+         (env lexical-env type-env-structs)
          (r:infer infer)
 	 (utils tc-utils)
          (typecheck tc-envops tc-metafunctions)
+         (types type-table)
          syntax/kerncase
-         mzlib/trace unstable/debug
-         scheme/match)
+         racket/trace unstable/debug
+         racket/match)
 
 ;; if typechecking   
 (import tc-expr^)
@@ -51,12 +50,31 @@
                     [(tc-results: ts fs2 os2) (with-lexical-env env-thn (tc thn (unbox flag+)))]
                     [(tc-results: us fs3 os3) (with-lexical-env env-els (tc els (unbox flag-)))])
          ;(printf "old props: ~a\n" (env-props (lexical-env)))
-         ;(printf "fs+: ~a~n" fs+)
-         ;(printf "fs-: ~a~n" fs-)
-         ;(printf "thn-props: ~a~n" (env-props env-thn))
-         ;(printf "els-props: ~a~n" (env-props env-els))
-         ;(printf "new-thn-props: ~a~n" new-thn-props)
-         ;(printf "new-els-props: ~a~n" new-els-props)
+         ;(printf "fs+: ~a\n" fs+)
+         ;(printf "fs-: ~a\n" fs-)
+         ;(printf "thn-props: ~a\n" (env-props env-thn))
+         ;(printf "els-props: ~a\n" (env-props env-els))
+         ;(printf "new-thn-props: ~a\n" new-thn-props)
+         ;(printf "new-els-props: ~a\n" new-els-props)
+
+         ;; record reachability
+         ;; since we may typecheck a given piece of code multiple times in different
+         ;; contexts, we need to take previous results into account
+         (cond [(and (not (unbox flag+)) ; maybe contradiction
+                     ;; to be an actual contradiction, we must have either previously
+                     ;; recorded this test as a contradiction, or have never seen it
+                     ;; before
+                     (not (tautology? tst))
+                     (not (neither? tst)))
+                (add-contradiction tst)]
+               [(and (not (unbox flag-)) ; maybe tautology
+                     ;; mirror case
+                     (not (contradiction? tst))
+                     (not (neither? tst)))
+                (add-tautology tst)]
+               [else
+                (add-neither tst)])
+
          ;; if we have the same number of values in both cases
          (cond [(= (length ts) (length us))
                 (let ([r (combine-results

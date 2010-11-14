@@ -366,12 +366,12 @@ dr-extras  :=
 plt-extras :=
 
 ;; Tests definitions
-mz-tests := (tests: "racket/" "info.rkt" "utils/" "match/" "eli-tester.rkt")
+mz-tests := (tests: "racket/" "info.rkt" "utils/" "match/" "eli-tester.rkt" "stress.rkt")
 
 ;; ============================================================================
 ;; Source definitions
 
-mz-src := (+ (- (src: "README" "Makefile.in" "configure" "lt/" "racket/"
+mz-src := (+ (- (src: "README" "Makefile.in" "configure" "lt/" "racket/" "utils/"
                       (cond win => "worksp/{README|mzconfig.h}"
                                    "worksp/{racket|libracket|libmzgc|gc2}/"
                                    "worksp/{mzstart|starters}/"
@@ -389,7 +389,7 @@ mr-src := (src: "gracket/" "mred/" "wxcommon/"
 foreign-src := (src: "foreign/{Makefile.in|README}"
                      "foreign/{foreign.*|rktc-utils.rkt}"
                      (cond win  => "foreign/libffi_msvc"
-                           else => "foreign/gcc"))
+                           else => "foreign/libffi"))
 
 ;; ============================================================================
 ;; Binary definitions (`in-binary-tree' is used with binary trees, these
@@ -660,11 +660,14 @@ plt-extras :+= (package: "deinprogramm/")
                (collects: "teachpack/deinprogramm/")
                (doc: "DMdA-lib")
 
+;; -------------------- data
+mz-extras :+= (package: "data")
+
 ;; -------------------- unstable
 mz-extras :+= (- (package: "unstable")
                  ;; should "gui" mean DrRacket or GRacket? It's not
                  ;; obvious that "framework" is only in DrRacket.
-                 (cond (not dr) => (collects: "unstable/gui")))
+                 (cond (not plt) => (collects: "unstable/gui")))
 
 ;; -------------------- plai
 plt-extras :+= (package: "plai/")
@@ -675,6 +678,9 @@ plt-extras :+= (package: "schemeunit/")
 
 ;; -------------------- racklog (aka schelog)
 plt-extras :+= (package: "racklog/")
+
+;; -------------------- datalog
+plt-extras :+= (package: "datalog/")
 
 ;; ============================================================================
 ;; Readme header

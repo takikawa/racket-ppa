@@ -106,7 +106,7 @@
   (define end-commit (git-push-end-commit log))
   (if (string=? start-commit end-commit)
       (format "http://github.com/plt/racket/commit/~a" end-commit)
-      (format "http://github.com/plt/racket/compare/~a...~a" start-commit end-commit)))
+      (format "http://github.com/plt/racket/compare/~a...~a" (git-push-previous-commit log) end-commit)))
   
 (define (format-commit-msg)
   (define pth (revision-commit-msg (current-rev)))
@@ -116,11 +116,14 @@
   (define bdate/s (timestamp "checkout-done"))
   (define bdate/e (timestamp "integrated"))
   (match (read-cache* pth)
-    [(struct git-push (num author commits))
+    [(and gp (struct git-push (num author commits)))
+     (define start-commit (git-push-start-commit gp))
+     (define end-commit (git-push-end-commit gp))
      `(table ([class "data"])
              (tr ([class "author"]) (td "Author:") (td ,author))
              (tr ([class "date"]) (td "Build Start:") (td ,bdate/s))
              (tr ([class "date"]) (td "Build End:") (td ,bdate/e))
+             (tr ([class "hash"]) (td "Diff:") (td (a ([href ,(log->url gp)]) ,(substring start-commit 0 8) ".." ,(substring end-commit 0 8))))
              ,@(append-map
                 (match-lambda
                   [(struct git-merge (hash author date msg from to))
@@ -165,7 +168,7 @@
                 commits))]
      
     [(struct svn-rev-log (num author date msg changes))
-     (define url (format "http://svn.plt-scheme.org/view?view=rev&revision=~a" num))
+     (define url (format "http://svn.racket-lang.org/view?view=rev&revision=~a" num))
      (define cg-id (symbol->string (gensym 'changes)))
      (define ccss-id (symbol->string (gensym 'changes)))
      `(table ([class "data"])
@@ -203,7 +206,7 @@
                                            path))])
                                changes)))))]
     [else
-     'nbsp]))
+     '" "]))
 
 (define (footer)
   `(div ([id "footer"])
@@ -236,7 +239,7 @@
           (base-path log-pth))
         (define scm-url
           (if ((current-rev) . < . 20000)
-              (format "http://svn.plt-scheme.org/view/trunk/~a?view=markup&pathrev=~a"
+              (format "http://svn.racket-lang.org/view/trunk/~a?view=markup&pathrev=~a"
                       the-base-path
                       (current-rev))
               (local [(define msg (read-cache* (revision-commit-msg (current-rev))))]
@@ -261,10 +264,12 @@
                                               `(span ([class "commandline"]) ,s))
                                             command-line)
                                        " ")))
-                            (tr (td "Duration:") (td ,(format-duration-ms dur)))
+                            (tr (td "Duration:") (td ,(format-duration-ms dur)
+                                                     nbsp (a ([href ,(format "/data~a" (path-add-suffix the-base-path #".timing"))])
+                                                             "(timing data)")))
                             (tr (td "Timeout:") (td ,(if (timeout? log) checkmark-entity "")))
                             (tr (td "Exit Code:") (td ,(if (exit? log) (number->string (exit-code log)) "")))
-                            (tr (td nbsp) (td (a ([href ,scm-url]) "View File"))))
+                            (tr (td " ") (td (a ([href ,scm-url]) "View File"))))
                      ,(if (lc-zero? changed)
                           ""
                           `(div ([class "error"])
@@ -287,14 +292,18 @@
                                                   (img ([src ,png-path])))))])
                         (make-cdata
                          #f #f
-                         (file->string
-                          (path-timing-html (substring (path->string* the-base-path) 1)))))
+                         (local [(define content 
+                                   (file->string
+                                    (path-timing-html (substring (path->string* the-base-path) 1))))]
+                           #;(regexp-replace* #rx"&(?![a-z]+;)" content "\\&amp;\\1")
+                           (regexp-replace* #rx"&gt;" content ">"))
+                         ))
                      ,(footer))))])]))
 
 (define (number->string/zero v)
   (cond 
     [(zero? v)
-     'nbsp]
+     '" "]
     [else
      (number->string v)]))
 
@@ -328,7 +337,7 @@
                         (format-commit-msg)
                         "")
                   ,(local [(define (path->url pth)
-                             (format "http://drdr.plt-scheme.org/~a~a" (current-rev) pth))
+                             (format "http://drdr.racket-lang.org/~a~a" (current-rev) pth))
                            
                            (define responsible->problems
                              (rendering->responsible-ht (current-rev) pth-rendering))
@@ -421,7 +430,7 @@
                                                        ,(if directory?
                                                             (number->string/zero v)
                                                             (if (zero? v)
-                                                                'nbsp
+                                                                '" "
                                                                 checkmark-entity))))
                                                 (list timeout unclean stderr changes))
                                          (td ,responsible-party))])
@@ -444,7 +453,7 @@
                               (td ,(number->string/zero (lc->number tot-unclean)))
                               (td ,(number->string/zero (lc->number tot-stderr)))
                               (td ,(number->string/zero (lc->number tot-changes)))
-                              (td nbsp))))
+                              (td " "))))
                   ,(footer))))]))
 
 (define (show-help req)
@@ -476,7 +485,7 @@
             @h1{How is the push "tested"?}
             @p{Each file's @code{@,PROP:command-line} property is consulted. If it is the empty string, the file is ignored. If it is a string, then a single @code{~s} is replaced with the file's path, @code{racket} and @code{mzc} with their path (for the current push), and @code{gracket} and @code{gracket-text} with @code{gracket-text}'s path (for the current push); then the resulting command-line is executed. 
                (Currently no other executables are allowed, so you can't @code{rm -fr /}.)
-               If there is no property value, the default (@code{mzscheme -t ~s}) is used if the file's suffix is @code{.ss}, @code{.scm}, or @code{.scrbl}.}
+               If there is no property value, the default @code{racket -qt ~s} is used if the file's suffix is @code{.rkt}, @code{.ss}, @code{.scm}, or @code{.scrbl} and @code{racket -f ~s} is used if the file's suffix is @code{.rktl}.}
                     
             @p{The command-line is always executed with a fresh empty current directory which is removed after the run. But all the files share the same home directory and X server, which are both removed after each push's testing is complete.}
             
@@ -517,6 +526,9 @@
                and right of the image move between panes.}
             @p{The legend at the bottom of the graph shows the current pane, as well as the push number and any timing information from that push.}
             @p{Click on the graph to jump to the DrDr page for a specific push.}
+            
+            @h1{What is the timing data format?}
+            @p{The timing files are a list of S-expressions. Their grammar is: @code{(push duration ((cpu real gc) ...))} where @code{push} is an integer, @code{duration} is an inexact millisecond, and @code{cpu}, @code{real}, and @code{gc} are parsed from the @code{time-apply} function.}
 
             @h1{Why are some pushes missing?}
             @p{Some pushes are missing because they only modify branches. Only pushes that change the @code{master} branch are tested.}
@@ -836,6 +848,15 @@
    [("current" (string-arg) ...) show-file/current]
    [((integer-arg) "") show-revision]
    [((integer-arg) (string-arg) ...) show-file]))
+
+#;(define (xml-dispatch req)
+  (define xe (top-dispatch req))
+  (define full
+    (make-xexpr-response xe #:mime-type #"application/xhtml+xml"))
+  (struct-copy response/full full
+               [body (list* 
+                      #"<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\n"
+                      (response/full-body full))]))
 
 (date-display-format 'iso-8601)
 (cache/file-mode 'no-cache)

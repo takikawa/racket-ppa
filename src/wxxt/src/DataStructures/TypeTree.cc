@@ -26,6 +26,7 @@
 
 #ifdef __GNUG__
 #pragma implementation "TypeTree.h"
+#pragma GCC diagnostic ignored "-Wwrite-strings"
 #endif
 
 #define  Uses_wxTypeTree
@@ -160,7 +161,7 @@ char *wxGetTypeName(WXTYPE type)
   wxTypeDef *typ;
 
   if (type == wxTYPE_ANY)
-    return "any";
+    return (char *) "any";
   typ = (wxTypeDef *)wxAllTypes->Get((long)type);
   if (!typ)
     return NULL;

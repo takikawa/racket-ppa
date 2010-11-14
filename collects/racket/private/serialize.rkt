@@ -1,5 +1,6 @@
 (module serialize racket/base
   (require syntax/modcollapse
+           unstable/struct
            "serialize-structs.rkt")
 
   ;; This module implements the core serializer. The syntactic
@@ -130,7 +131,17 @@
 		 (vector? o)
 		 (hash? o))
 	     (not (immutable? o)))
-	(serializable-struct? o)))
+	(serializable-struct? o)
+        (let ([k (prefab-struct-key o)])
+          (and k
+               ;; Check whether all fields are mutable:
+               (pair? k)
+               (let-values ([(si skipped?) (struct-info o)])
+                 (let loop ([si si])
+                   (let*-values ([(name init auto acc mut imms super skipped?) (struct-type-info si)])
+                     (and (null? imms)
+                          (or (not super)
+                              (loop super))))))))))
 
   ;; Finds a mutable object among those that make the
   ;;  current cycle.
@@ -152,8 +163,8 @@
     (+ (hash-count share)
        (hash-count cycle)))
 
-  ;; Traverses v to find cycles and charing. Shared
-  ;;  object go in the `shared' table, and cycle-breakers go in
+  ;; Traverses v to find cycles and sharing. Shared
+  ;;  objects go in the `shared' table, and cycle-breakers go in
   ;;  `cycle'. In each case, the object is mapped to a number that is
   ;;  incremented as shared/cycle objects are discovered, so
   ;;  when the objects are deserialized, build them in reverse
@@ -202,7 +213,7 @@
 	      (for-each loop (vector->list ((serialize-info-vectorizer info) v))))]
            [(and (struct? v)
                  (prefab-struct-key v))
-            (for-each loop (cdr (vector->list (struct->vector v))))]
+            (for-each loop (struct->list v))]
 	   [(or (string? v)
 		(bytes? v)
 		(path-for-some-system? v))
@@ -219,7 +230,7 @@
 	   [(box? v)
 	    (loop (unbox v))]
 	   [(date? v)
-	    (for-each loop (cdr (vector->list (struct->vector v))))]
+	    (for-each loop (struct->list v))]
 	   [(hash? v)
 	    (hash-for-each v (lambda (k v)
                                (loop k)
@@ -272,7 +283,7 @@
              (cons 'f
                    (cons
                     k
-                    (map (serial #t) (cdr (vector->list (struct->vector v)))))))]
+                    (map (serial #t) (struct->list v)))))]
        [(or (string? v)
 	    (bytes? v))
 	(cons 'u v)]
@@ -298,7 +309,8 @@
 	(list* 'h
 	       (if (immutable? v) '- '!)
 	       (append
-		(if (not (hash-eq? v)) '(equal) null)
+		(if (hash-equal? v) '(equal) null)
+		(if (hash-eqv? v) '(eqv) null)
 		(if (hash-weak? v) '(weak) null))
 	       (let ([loop (serial #t)])
 		 (hash-map v (lambda (k v)
@@ -306,7 +318,7 @@
                                      (loop v))))))]
        [(date? v)
 	(cons 'date
-	      (map (serial #t) (cdr (vector->list (struct->vector v)))))]
+	      (map (serial #t) (struct->list v)))]
        [(arity-at-least? v)
 	(cons 'arity-at-least
 	      ((serial #t) (arity-at-least-value v)))]
@@ -331,8 +343,13 @@
       'b]
      [(hash? v)
       (cons 'h (append
-		(if (not (hash-eq? v)) '(equal) null)
-		(if (hash-weak? v) '(weak) null)))]))
+		(if (hash-equal? v) '(equal) null)
+		(if (hash-eqv? v) '(eqv) null)
+		(if (hash-weak? v) '(weak) null)))]
+     [else
+      ;; A mutable prefab
+      (cons 'pf (cons (prefab-struct-key v)
+                      (sub1 (vector-length (struct->vector v)))))]))
 
   (define (serialize v)
     (let ([mod-map (make-hasheq)]
@@ -380,13 +397,19 @@
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
   (define (make-hash/flags v)
-    (cond
-     [(null? v) (make-hasheq)]
-     [(eq? (car v) 'equal)
-      (if (null? (cdr v))
-          (make-hash)
-          (make-weak-hash))]
-     [else (make-weak-hasheq)]))
+    (if (null? v) 
+        (make-hasheq)
+        (case (car v)
+          [(equal)
+           (if (null? (cdr v))
+               (make-hash)
+               (make-weak-hash))]
+          [(eqv)
+           (if (null? (cdr v))
+               (make-hasheqv)
+               (make-weak-hasheqv))]
+          [(weak)
+           (make-weak-hasheq)])))
 
   (define-struct not-ready (shares fixup))
 
@@ -455,7 +478,9 @@
 		       ht)
                      (if (null? (caddr v))
                          (make-immutable-hasheq al)
-                         (make-immutable-hash al))))]
+                         (if (eq? (caaddr v) 'equal)
+                             (make-immutable-hash al)
+                             (make-immutable-hasheqv al)))))]
 	  [(date) (apply make-date (map loop (cdr v)))]
 	  [(arity-at-least) (make-arity-at-least (loop (cdr v)))]
 	  [(mpi) (module-path-index-join (loop (cadr v))
@@ -491,7 +516,22 @@
 				   ht
 				   (lambda (k v)
 				     (hash-set! ht0 k v)))))
-	   ht0)])]
+	   ht0)]
+        [(pf)
+         ;; Prefab
+         (let ([s (apply make-prefab-struct 
+                         (cadr v)
+                         (vector->list (make-vector (cddr v) #f)))])
+           (vector-set! fixup n (lambda (v)
+                                  (let-values ([(si skipped?) (struct-info s)])
+                                    (let loop ([si si])
+                                      (let*-values ([(name init auto acc mut imms super skipped?) (struct-type-info si)])
+                                        (let ([count (+ init auto)])
+                                          (for ([i (in-range 0 count)])
+                                            (mut s i (acc v i)))
+                                          (when super
+                                            (loop super))))))))
+           s)])]
      [else
       (case v
         [(c)

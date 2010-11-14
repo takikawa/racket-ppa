@@ -1,6 +1,7 @@
 #lang scheme
 (require "svn.ss"
          "path-utils.ss"
+         "dirstruct.ss"
          net/url
          scheme/system)
 (provide
@@ -12,6 +13,8 @@
 
 (define git-url-base "http://git.racket-lang.org/plt.git")
 
+(provide/contract
+ [newest-push (-> number?)]) 
 (define (newest-push)
   (string->number (port->string (get-pure-port (string->url (format "~a/push-counter" git-url-base))))))
 
@@ -53,12 +56,20 @@
 (define-syntax-rule (pipe expr exprs ...)
   (pipe/proc (list (lambda () expr) (lambda () exprs) ...)))
 
+(define (close-input-port* p)
+  (when p (close-input-port p)))
+(define (close-output-port* p)
+  (when p (close-output-port p)))
+
 (define (system/output-port #:k k #:stdout [init-stdout #f] . as)
-  (define _ (printf "~S~n" as))
   (define-values (sp stdout stdin stderr)
     (apply subprocess init-stdout #f #f as))
   (begin0 (k stdout)
-          (subprocess-wait sp)))
+          (subprocess-wait sp)
+          (subprocess-kill sp #t)
+          (close-input-port* stdout)
+          (close-output-port* stdin)
+          (close-input-port* stderr)))
 
 (define-struct git-push (num author commits) #:prefab)
 (define-struct git-commit (hash author date msg) #:prefab)
@@ -104,7 +115,7 @@
      empty]
     [(read-commit in-p)
      => (lambda (c) 
-          (printf "~S~n" c)
+          (printf "~S\n" c)
           (list* c (read-commits in-p)))]
     [else
      empty]))
@@ -146,11 +157,19 @@
           [to string?])]
  [get-scm-commit-msg (exact-nonnegative-integer? path-string? . -> . git-push?)])
 
+(define (git-push-previous-commit gp)
+  (define start (git-push-start-commit gp))
+  (parameterize ([current-directory (plt-repository)])
+    (system/output-port 
+     #:k (λ (port) (read-line port))
+     (git-path)
+     "--no-pager" "log" "--format=format:%P" start "-1")))  
 (define (git-push-start-commit gp)
   (git-commit-hash (last (git-push-commits gp))))
 (define (git-push-end-commit gp)
   (git-commit-hash (first (git-push-commits gp))))
 (provide/contract
+ [git-push-previous-commit (git-push? . -> . string?)]
  [git-push-start-commit (git-push? . -> . string?)]
  [git-push-end-commit (git-push? . -> . string?)])
 

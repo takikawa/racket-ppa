@@ -67,6 +67,8 @@
 (test-values '(1 2) (lambda () (with-handlers ([void void])
 				 (values 1 2))))
 
+(test 'c (#%plain-lambda () 'a (define-values (x) 'b) 'c))
+
 (test '(quote a) 'quote (quote 'a))
 (test '(quote a) 'quote ''a)
 (syntax-test #'quote)
@@ -418,6 +420,9 @@
 (test 'twox 'let*-values (let*-values ([() (values)][() (values)]) 'twox))
 (test 'threex 'letrec-values (letrec-values ([() (values)][() (values)]) 'threex))
 
+(letrec ([undef undef])
+  (test (list 1 undef undef) 'no-split-letrec (letrec-values ([(a b c) (values 1 a b)]) (list a b c))))
+
 (test '(10 11) 'letrec-values (letrec-values ([(names kps)
 					       (letrec ([oloop 10])
 						 (values oloop (add1 oloop)))])
@@ -521,12 +526,12 @@
 		       (with-handlers () ,@body)))
 	 (teval `(test ,val 'with-handlers-begin
 		       (with-handlers ([void void]) ,@body)))
-	 (syntax-test (datum->syntax #f `(when (positive? 1) ,@body) #f))
-	 (syntax-test (datum->syntax #f `(unless (positive? -1) ,@body) #f))
-	 (syntax-test (datum->syntax #f `(cond [(positive? 1) ,@body][else #f]) #f))
-	 (syntax-test (datum->syntax #f `(cond [(positive? -1) 0][else ,@body]) #f))
-	 (syntax-test (datum->syntax #f `(case (positive? 1) [(#t) ,@body][else -12]) #f))
-	 (syntax-test (datum->syntax #f `(cond [#t ,@body]) #f))
+	 (teval `(test ,val 'when-begin (when (positive? 1) ,@body)))
+	 (teval `(test ,val 'unless-begin (unless (positive? -1) ,@body)))
+	 (teval `(test ,val 'cons-begin (cond [(positive? 1) ,@body][else #f])))
+	 (teval `(test ,val 'cons-else-begin (cond [(positive? -1) 0][else ,@body])))
+         (teval `(test ,val 'case-begin (case (positive? 1) [(#t) ,@body][else -12])))
+	 (teval `(test ,val 'cond-only-begin (cond [#t ,@body])))
 	 (syntax-test (datum->syntax #f `(do ((x 1)) (#t ,@body) ,@body) #f))
 	 (syntax-test (datum->syntax #f `(begin0 12 ,@body) #f)))])
   (wrap 5 '((begin (define x 5)) x))
@@ -553,7 +558,7 @@
 	  (lambda (v b)
 	    (let* ([args (make-args bg b)]
 		   [expr (cons bg args)])
-	      (printf "~s:~n" expr)
+	      (printf "~s:\n" expr)
 	      (teval `(test ,v (quote ,bg) ,expr))))]
 	 [make-bg
 	  (lambda (b)
@@ -786,7 +791,6 @@
 (syntax-test #'(lambda () (void (define x 2)) 1))
 (syntax-test #'(cond [(< 2 3) (define x 2)] [else 5]))
 (syntax-test #'(cond [else (define x 2)]))
-(syntax-test #'(cond [else (define x 2) 0]))
 
 ;; No good way to test in mzc:
 (error-test #'(define x (values)) exn:application:arity?)
@@ -854,7 +858,8 @@
 
 (syntax-test #'(lambda () (define x 10) (begin)))
 (syntax-test #'(lambda () (define x 10) (begin) (begin)))
-(syntax-test #'(lambda () (define x 10) (begin) (begin x) (begin)))
+(syntax-test #'(lambda () (#%stratified-syntax (define x 10) (begin) (begin x) (begin))))
+(syntax-test #'(lambda () (#%stratified-syntax (define x 10) x (define y 12) y)))
 (syntax-test #'(lambda () (define-values (x) . 10) x))
 (syntax-test #'(lambda () (define-values (x) 10) (begin 1 . 2) x))
 (syntax-test #'(lambda () (begin (define-values (x) 10) . 2) x))
@@ -862,6 +867,11 @@
 (syntax-test #'(lambda () (define-values . 10) x))
 (syntax-test #'(lambda () (define-values x 10) x))
 (syntax-test #'(lambda () (define-values (1) 10) x))
+
+(test '(10 12) apply (lambda () (define x 10) (random 3) (define y 12) (list x y)) null)
+(test 10 apply (lambda () (define x 10) (begin) (begin x) (begin)) null)
+
+(test '(11 18) apply (lambda () (define x 11) (values 1 2 3) (define y 18) (list x y)) null)
 
 (test 87 (lambda () (define x 87) (begin) (begin x)))
 
@@ -1329,6 +1339,21 @@
             (define (a) (m)))
           (m))))
 
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check keyword & optionals for define-syntax 
+;; and define-syntax-for-values:
+
+(test (list 7 #f)
+      'dfs/kw
+      (eval
+       '(begin
+          (define-for-syntax (kw/f #:x a b)
+            `(list ,a ,b))
+          (define-syntax (kw/g stx #:opt [opt #f])
+            (syntax-case stx ()
+              [(_ v) (datum->syntax stx (kw/f #:x #'v opt))]))
+          (kw/g 7))))
+      
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (report-errs)

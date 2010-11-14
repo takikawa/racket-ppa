@@ -37,7 +37,7 @@
                        (mk-dest-bin #t)))
 
 (define (prepare exe src)
-  (printf "Making ~a with ~a...~n" exe src)
+  (printf "Making ~a with ~a...\n" exe src)
   (when (file-exists? exe)
     (delete-file exe)))
 
@@ -234,18 +234,19 @@
    `(,(flags "ne") "(out \"\u7237...\U1D671\n\")"))
   (try-exe dest "\uA9, \u7238, and \U1D670\n\u7237...\U1D671\n" mred?))
 
-(mz-tests #f)
-(mz-tests #t)
+(define (try-basic)
+  (mz-tests #f)
+  (mz-tests #t)
 
-(begin
-  (prepare mr-dest "embed-me5.rkt")
-  (make-embedding-executable 
-   mr-dest #t #f
-   `((#t (lib "embed-me5.rkt" "tests" "racket")))
-   null
-   #f
-   `("-l" "tests/racket/embed-me5.rkt"))
-  (try-exe mr-dest "This is 5: #<class:button%>\n" #t))
+  (begin
+    (prepare mr-dest "embed-me5.rkt")
+    (make-embedding-executable 
+     mr-dest #t #f
+     `((#t (lib "embed-me5.rkt" "tests" "racket")))
+     null
+     #f
+     `("-l" "tests/racket/embed-me5.rkt"))
+    (try-exe mr-dest "This is 5: #<class:button%>\n" #t)))
 
 ;; Try the mzc interface:
 (require setup/dirs
@@ -306,8 +307,9 @@
 
     (void)))
 
-(mzc-tests #f)
-(mzc-tests #t)
+(define (try-mzc)
+  (mzc-tests #f)
+  (mzc-tests #t))
 
 (require dynext/file)
 (define (extension-test mred?)
@@ -364,40 +366,48 @@
              (path->string (build-path (collection-path "tests" "racket") "embed-me10.rkt")))
     (try-exe (mk-dest mred?) "#t\n" mred?)))
 
-(extension-test #f)
-(extension-test #t)
+(define (try-extension)
+  (extension-test #f)
+  (extension-test #t))
 
-;; A GRacket-specific test with mzc:
-(parameterize ([current-directory (find-system-path 'temp-dir)])
-  (system* mzc 
-	   "--gui-exe"
-	   (path->string (mk-dest #t))
-	   (path->string (build-path (collection-path "tests" "racket") "embed-me5.rkt")))
-  (try-exe (mk-dest #t) "This is 5: #<class:button%>\n" #t))
+(define (try-gracket)
+  ;; A GRacket-specific test with mzc:
+  (parameterize ([current-directory (find-system-path 'temp-dir)])
+    (system* mzc 
+             "--gui-exe"
+             (path->string (mk-dest #t))
+             (path->string (build-path (collection-path "tests" "racket") "embed-me5.rkt")))
+    (try-exe (mk-dest #t) "This is 5: #<class:button%>\n" #t))
 
-;; Another GRacket-specific: try embedding plot, which has extra DLLs and font files:
-(parameterize ([current-directory (find-system-path 'temp-dir)])
-  (define direct (build-path (find-system-path 'temp-dir) "direct.ps"))
+  ;; Another GRacket-specific: try embedding plot, which has extra DLLs and font files:
+  (parameterize ([current-directory (find-system-path 'temp-dir)])
+    (define direct (build-path (find-system-path 'temp-dir) "direct.ps"))
 
-  (test #t
-        system* (build-path (find-console-bin-dir) "mred")
-        "-qu"
-        (path->string (build-path (collection-path "tests" "racket") "embed-me7.rkt"))
-        (path->string direct))
+    (test #t
+          system* (build-path (find-console-bin-dir) "mred")
+          "-qu"
+          (path->string (build-path (collection-path "tests" "racket") "embed-me7.rkt"))
+          (path->string direct))
 
-  (system* mzc 
-           "--gui-exe"
-           (path->string (mk-dest #t))
-           (path->string (build-path (collection-path "tests" "racket") "embed-me7.rkt")))
-  (try-exe (mk-dest #t) "plotted\n" #t))
+    (system* mzc 
+             "--gui-exe"
+             (path->string (mk-dest #t))
+             (path->string (build-path (collection-path "tests" "racket") "embed-me7.rkt")))
+    (try-exe (mk-dest #t) "plotted\n" #t)))
 
 ;; Try including source that needs a reader extension
 
-(define (try-reader-test mred?)
+(define (try-reader-test 12? mred? ss-file? ss-reader?)
+  ;; actual "11" files use ".rkt", actual "12" files use ".ss"
   (define dest (mk-dest mred?))
-  (define filename "embed-me11.rkt")
+  (define filename (format (if ss-file?
+                               "embed-me~a.ss"
+                               "embed-me~a.rkt")
+                           (if 12? "12" "11")))
   (define (flags s)
     (string-append "-" s))
+
+  (printf "Trying ~s ~s ~s ~s...\n" (if 12? "12" "11") mred? ss-file? ss-reader?)
 
   (create-embedding-executable 
    dest
@@ -405,11 +415,18 @@
    #:cmdline `(,(flags "l") ,(string-append "tests/racket/" filename))
    #:src-filter (lambda (f)
                   (let-values ([(base name dir?) (split-path f)])
-                    (equal? name (string->path filename))))
+                    (equal? name (path-replace-suffix (string->path filename) 
+                                                      (if 12? #".ss" #".rkt")))))
    #:get-extra-imports (lambda (f code)
                          (let-values ([(base name dir?) (split-path f)])
-                           (if (equal? name (string->path filename))
-                               '((lib "embed-me11-rd.rkt" "tests" "racket"))
+                           (if (equal? name (path-replace-suffix (string->path filename) 
+                                                                 (if 12? #".ss" #".rkt")))
+                               `((lib ,(format (if ss-reader?
+                                                   "embed-me~a-rd.ss"
+                                                   "embed-me~a-rd.rkt")
+                                               (if 12? "12" "11"))
+                                      "tests" 
+                                      "racket"))
                                null)))
    #:mred? mred?)
 
@@ -417,7 +434,65 @@
   (try-exe dest "It goes to eleven!\n" mred?)
   (putenv "ELEVEN" "done"))
 
-(try-reader-test #f)
-(try-reader-test #t)
+(define (try-reader)
+  (for ([12? (in-list '(#f #t))])
+    (try-reader-test 12? #f #f #f)
+    (try-reader-test 12? #t #f #f)
+    (try-reader-test 12? #f #t #f)
+    (try-reader-test 12? #f #f #t)))
+
+;; ----------------------------------------
+
+(define planet (build-path (find-console-bin-dir) (if (eq? 'windows (system-type))
+                                                      "planet.exe"
+                                                      "planet")))
+
+(define (try-planet)
+  (system* planet "link" "racket-tester" "p1.plt" "1" "0"
+           (path->string (collection-path "tests" "racket" "embed-planet-1")))
+  (system* planet "link" "racket-tester" "p2.plt" "2" "2"
+           (path->string (collection-path "tests" "racket" "embed-planet-2")))
+
+  (let ([go (lambda (path expected)
+              (printf "Trying planet ~s...\n" path)
+              (let ([tmp (make-temporary-file)]
+                    [dest (mk-dest #f)])
+                (with-output-to-file tmp
+                  #:exists 'truncate
+                  (lambda ()
+                    (printf "#lang racket/base (require ~s)\n" path)))
+                (system* mzc "--exe" (path->string dest) (path->string tmp))
+                (try-exe dest expected #f)
+
+                (delete-directory/files dest)
+
+                (delete-file tmp)))])
+    (go '(planet racket-tester/p1) "one\n")
+    (go '(planet "racket-tester/p1:1") "one\n")
+    (go '(planet "racket-tester/p1:1:0") "one\n")
+    (go '(planet "racket-tester/p1:1:0/main.ss") "one\n")
+    (go '(planet racket-tester/p2) "two\n")
+
+    (go '(planet racket-tester/p1/alt) "one\nalt\n")
+    (go '(planet racket-tester/p1/other) "two\nother\n")
+    (go '(planet "private/sub.rkt" ("racket-tester" "p2.plt" 2 0)) "two\nsub\n")
+    (go '(planet "private/sub.ss" ("racket-tester" "p2.plt" 2 0)) "two\nsub\n")
+    (go '(planet "main.ss" ("racket-tester" "p2.plt" 2 0)) "two\n")
+
+    (void))
+  
+  (system* planet "unlink" "racket-tester" "p1.plt" "1" "0")
+  (system* planet "unlink" "racket-tester" "p2.plt" "2" "2"))
+
+;; ----------------------------------------
+
+(try-basic)
+(try-mzc)
+(try-extension)
+(try-gracket)
+(try-reader)
+(try-planet)
+
+;; ----------------------------------------
 
 (report-errs)

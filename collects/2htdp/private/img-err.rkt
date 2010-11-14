@@ -1,7 +1,6 @@
-#lang scheme/base
+#lang racket/base
 
 (provide define/chk 
-         to-img 
          x-place?
          y-place?
          mode?
@@ -11,18 +10,15 @@
          pen-style? 
          pen-cap?
          pen-join?
-         image-snip->image
-         bitmap->image
          check-mode/color-combination)
 
 (require htdp/error
-         scheme/class
+         racket/class
          lang/posn
-         scheme/gui/base
+         racket/gui/base
          "../../mrlib/image-core.ss"
-         (prefix-in cis: "../../mrlib/cache-image-snip.ss")
-         (for-syntax scheme/base
-                     scheme/list))
+         (for-syntax racket/base
+                     racket/list))
 
 ;                                                                                                 
 ;                                                                                                 
@@ -118,11 +114,19 @@
      (if (string? arg)
          (string->symbol arg)
          arg)]
-    [(width height radius side-length side-length1 side-length2)
+    [(width height radius radius1 radius2 side-length side-length1 side-length2
+            side-a side-b side-c)
      (check-arg fn-name
                 (and (real? arg)
                      (not (negative? arg)))
-                'non-negative-real-number
+                'non\ negative\ real\ number
+                i arg)
+     arg]
+    [(point-count)
+     (check-arg fn-name
+                (and (integer? arg)
+                     (>= arg 2))
+                'integer\ greater\ than\ 2
                 i arg)
      arg]
     [(dx dy x1 y1 x2 y2 pull1 pull2)
@@ -150,7 +154,7 @@
                 'step-count
                 i arg)
      arg]
-    [(angle angle1 angle2)
+    [(angle angle1 angle2 angle-a angle-b angle-c)
      (check-arg fn-name
                 (angle? arg)
                 'angle\ in\ degrees
@@ -178,6 +182,9 @@
           (if (send the-color-database find-color color-str)
               color-str
               "black"))])]
+    [(color-list)
+     (check-arg fn-name (and (list? arg) (andmap image-color? arg)) 'color-list i arg)
+     arg]
     [(string)
      (check-arg fn-name (string? arg) 'string i arg)
      arg]
@@ -235,15 +242,18 @@
      (if (string? arg)
          (string->symbol arg)
          arg)]
+    [(filename)
+     (check-arg fn-name (path-string? arg) 'path-string i arg)
+     arg]
     [else
      (error 'check "the function ~a has an argument with an unknown name: ~s"
             fn-name
             argname)]))
 
 (define (y-place? arg)
-  (member arg '("top" top "bottom" bottom "middle" middle "center" center "baseline" baseline)))
+  (member arg '("top" top "bottom" bottom "middle" middle "center" center "baseline" baseline "pinhole" pinhole)))
 (define (x-place? arg)
-  (member arg '("left" left "right" right "middle" middle "center" center)))
+  (member arg '("left" left "right" right "middle" middle "center" center "pinhole" pinhole)))
 (define (mode? arg)
   (member arg '(solid outline "solid" "outline")))
 (define (angle? arg)
@@ -265,43 +275,6 @@
 (define (pen-join? arg)
   (member (if (string? arg) (string->symbol arg) arg)
           '(round bevel miter)))
-
-(define (to-img arg)
-  (cond
-    [(is-a? arg image-snip%) (image-snip->image arg)]
-    [(is-a? arg bitmap%) (bitmap->image arg)]
-    [else arg]))
-
-(define (image-snip->image is)
-  (let ([bm (send is get-bitmap)])
-    (cond
-      [(not bm)
-       ;; this might mean we have a cache-image-snip% 
-       ;; or it might mean we have a useless snip.
-       (let-values ([(w h) (if (is-a? is cis:cache-image-snip%)
-                               (send is get-size)
-                               (values 0 0))])
-         (make-image (make-polygon
-                      (list (make-point 0 0)
-                            (make-point w 0)
-                            (make-point w h)
-                            (make-point 0 h))
-                      'solid "black")
-                     (make-bb w h h)
-                     #f))]
-      [else
-       (bitmap->image bm
-                      (or (send is get-bitmap-mask)
-                          (send bm get-loaded-mask)))])))
-
-(define (bitmap->image bm [mask-bm (send bm get-loaded-mask)])
-  (let ([w (send bm get-width)]
-        [h (send bm get-height)])
-    (make-image (make-translate (/ w 2)
-                                (/ h 2)
-                                (make-bitmap bm mask-bm 0 1 1 #f #f))
-                (make-bb w h h)
-                #f)))
 
 
 ;; checks the dependent part of the 'color' specification

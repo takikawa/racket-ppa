@@ -35,7 +35,7 @@ globalen Namen an den Wert von @scheme[exp].}
 @defform[(define-record-procedures t c p (s1 ...))]{
 
 Die @scheme[define-record-procedures]-Form ist eine Definition
-für einen neuen Record-Typ.  Dabei ist @scheme[t] der Name des Record-Vertrags,
+für einen neuen Record-Typ.  Dabei ist @scheme[t] der Name der Record-Signatur,
 @scheme[c] der Name des Konstruktors, @scheme[p]
 der Name des Prädikats, und die @scheme[si] sind die 
 Namen der Selektoren.}
@@ -137,166 +137,116 @@ einer @scheme[#t], ergibt auch der or-Ausdruck @scheme[#t]; wenn alle Operanden 
 ergeben, ergibt auch der @scheme[or]-Ausdruck @scheme[#f].
 }
 
-@section{@scheme[let], @scheme[letrec] und @scheme[let*]}
+@section{Signaturen}
 
-@defform[(let ((id expr) ...) expr)]{
+Signaturen können statt der Verträge aus dem Buch geschrieben werden:
+Während Verträge reine Kommentare sind, überprüft DrRacket Signaturen 
+und meldet etwaige Verletzungen.
 
-Bei einem @scheme[let]-Ausdruck werden zunächst die @scheme[expr]s aus
-den @scheme[(id expr)]-Paaren ausgewertet. Ihre Werte werden dann im
-Rumpf-@scheme[expr] für die Namen @scheme[id] eingesetzt. Dabei können
-sich die Ausdrücke nicht auf die Namen beziehen.
-
-@schemeblock[
-(define a 3)
-(let ((a 16)
-      (b a))
-  (+ b a))
-=> 19]
-
-Das Vorkommen von @scheme[a] in der Bindung von @scheme[b] bezieht
-sich also auf das @scheme[a] aus der Definition, nicht das @scheme[a]
-aus dem @scheme[let]-Ausdruck.
+@subsection{@scheme[signature]}
+@defform[(signature sig)]{
+Diese Form liefert die Signatur mit der Notation @scheme[sig].
 }
 
-@defform[(letrec ((id expr) ...) expr)]{
-Ein @scheme[letrec]-Ausdruck ist
-ähnlich zum entsprechenden @scheme[let]-Ausdruck, mit dem Unterschied, daß sich
-die @scheme[expr]s aus den Bindungen auf die gebundenen Namen beziehen
-dürfen.}
-
-@defform[(let* ((id expr) ...) expr)]{
-Ein @scheme[let*]-Ausdruck ist ähnlich zum entsprechenden
-@scheme[let]-Ausdruck, mit dem Unterschied, daß sich die @scheme[expr]s
-aus den Bindungen auf die Namen beziehen dürfen, die jeweils vor dem
-@scheme[expr] gebunden wurden. Beispiel:
-
-@schemeblock[
-(define a 3)
-(let* ((a 16)
-       (b a))
-  (+ b a))
-=> 32]
-
-Das Vorkommen von @scheme[a] in der Bindung von @scheme[b] bezieht
-sich also auf das @scheme[a] aus dem @scheme[let*]-Ausdruck, nicht das
-@scheme[a] aus der globalen Definition.
+@subsection{Signaturdeklaration}
+@defform[(: id sig)]{
+Diese Form erklärt @scheme[sig] zur gültigen Signatur für @scheme[id].
 }
 
-@section{@scheme[begin]}
-
-@defform[(begin expr expr ...)]{
-Bei der Auswertung eines @scheme[begin]-Ausdrucks werden nacheinander
-die Operanden ausgewertet. Der Wert des letzten Ausdrucks wird der
-Wert des @scheme[begin]-Ausdrucks.
-}
-
-@section{Verträge}
-
-@subsection{@scheme[contract]}
-@defform[(contract contr)]{
-Diese Form liefert den Vertrag mit der Notation @scheme[contr].
-}
-
-@subsection{Vertragserklärung}
-@defform[(: id contr)]{
-Diese Form erklärt @scheme[contr] zum gültigen Vertrag für @scheme[id].
-}
+@subsection{Eingebaute Signaturen}
 
 @defidform[number]{
-Vertrag für beliebige Zahlen.
+Signatur für beliebige Zahlen.
 }
 
 @defidform[real]{
-Vertrag für reelle Zahlen.
+Signatur für reelle Zahlen.
 }
 
 @defidform[rational]{
-Vertrag für rationale Zahlen.
+Signatur für rationale Zahlen.
 }
 
 @defidform[integer]{
-Vertrag für ganze Zahlen.
+Signatur für ganze Zahlen.
 }
 
 @defidform[natural]{
-Vertrag für ganze, nichtnegative Zahlen.
+Signatur für ganze, nichtnegative Zahlen.
 }
 
 @defidform[boolean]{
-Vertrag für boolesche Werte.
+Signatur für boolesche Werte.
 }
 
 @defidform[true]{
-Vertrag für \scheme[#t].
+Signatur für \scheme[#t].
 }
 
 @defidform[false]{
-Vertrag für \scheme[#f].
+Signatur für \scheme[#f].
 }
 
 @defidform[string]{
-Vertrag für Zeichenketten.
+Signatur für Zeichenketten.
 }
 
 @defidform[empty-list]{
-Vertrag für die leere Liste.
+Signatur für die leere Liste.
 }
 
-@defform/none[contract]{
-Vertrag für Verträge.}
+@defidform[any]{
+Signatur, die auf alle Werte gültig ist.}
+
+@defform/none[signature]{
+Signatur für Signaturen.}
 
 @defidform[property]{
-Vertrag für Eigenschaften.}
+Signatur für Eigenschaften.}
 
 @subsection{@scheme[predicate]}
 @defform[(predicate expr)]{
-Bei diesem Vertrag muß @scheme[expr] als Wert ein Prädikat haben, also
+Bei dieser Signatur muß @scheme[expr] als Wert ein Prädikat haben, also
 eine Prozedur, die einen beliebigen Wert akzeptiert und entweder @scheme[#t]
 oder @scheme[#f] zurückgibt.
-Der Vertrag ist dann für einen Wert gültig, wenn das Prädikat, darauf angewendet,
+Die Signatur ist dann für einen Wert gültig, wenn das Prädikat, darauf angewendet,
 @scheme[#t] ergibt.
 }
 
 @subsection{@scheme[one-of]}
 @defform[(one-of expr ...)]{
-Dieser Vertrag ist für einen Wert gültig, wenn er gleich dem Wert eines
+Diese Signatur ist für einen Wert gültig, wenn er gleich dem Wert eines
 der @scheme[expr] ist.
 }
 
 @subsection{@scheme[mixed]}
-@defform[(mixed contr ...)]{
-Dieser Vertrag ist für einen Wert gültig, wenn er für einen der Verträge
-@scheme[contr] gültig ist.
+@defform[(mixed sig ...)]{
+Diese Signatur ist für einen Wert gültig, wenn er für eine der Signaturen
+@scheme[sig] gültig ist.
 }
 
-@subsection[#:tag "proc-contract"]{Prozedur-Vertrag}
+@subsection[#:tag "proc-signature"]{Prozedur-Signatur}
 @defidform[->]{
-@defform/none[(contr ... -> contr)]{
-Dieser Vertrag ist dann für einen Wert gültig, wenn dieser eine
-Prozedur ist.  Er erklärt außerdem, daß die Verträge vor dem @scheme[->]
-für die Argumente der Prozedur gelten und der Vertrag nach dem @scheme[->]
+@defform/none[(sig ... -> sig)]{
+Diese Signatur ist dann für einen Wert gültig, wenn dieser eine
+Prozedur ist.  Er erklärt außerdem, daß die Signaturen vor dem @scheme[->]
+für die Argumente der Prozedur gelten und die Signatur nach dem @scheme[->]
 für den Rückgabewert.
 }}
 }
 
-@subsection{@scheme[list]} 
-@defform[(list contr)]{
-Dieser Vertrag ist dann für einen Wert gültig, wenn dieser eine Liste ist,
-für dessen Elemente @scheme[contr] gültig ist.
-}
-
-@subsection[#:tag "contract-variable"]{Vertrags-Variablen} 
+@subsection[#:tag "signature-variable"]{Signatur-Variablen} 
 @defform/none[%a]
 @defform/none[%b]
 @defform/none[%c]
 @defform/none[...]{
-Dies ist eine Vertragsvariable: sie steht für einen Vertrag, der für jeden Wert gültig ist.
+Dies ist eine Signaturvariable: sie steht für eine Signatur, die für jeden Wert gültig ist.
 }
 
 @subsection{@scheme[combined]}
-@defform[(combined contr ...)]{
-Dieser Vertrag ist für einen Wert gültig, wenn er für alle der Verträge
-@scheme[contr] gültig ist.
+@defform[(combined sig ...)]{
+Diese Signatur ist für einen Wert gültig, wenn sie für alle der Signaturen
+@scheme[sig] gültig ist.
 }
 
 @section{Testfälle}
@@ -339,11 +289,10 @@ Dieser Testfall überprüft experimentell, ob die @tech{Eigenschaft}
 überprüft, ob die Bedingung gilt.
 
 @emph{Wichtig:} @scheme[check-property] funktioniert nur für
-Eigenschaften, bei denen aus den Verträgen sinnvoll Werte generiert
-werden können.  Dies ist für die meisten eingebauten Verträge der
-Fall, aber nicht für Vertragsvariablen und Verträge, die mit @scheme[predicate],
-@scheme[property] oder @scheme[define-record-procedures] definiert
-wurden.  In diesen Fällen erzeugt @scheme[check-property] eine Fehlermeldung.
+Eigenschaften, bei denen aus den Signaturen sinnvoll Werte generiert
+werden können.  Dies ist für die meisten eingebauten Signaturen der
+Fall, aber nicht für Signaturvariablen und Signaturen, die mit @scheme[predicate]
+erzeugt wurden.  In diesen Fällen erzeugt @scheme[check-property] eine Fehlermeldung.
 }
 
 @section{Parametrische Record-Typ-Definitionen}
@@ -352,10 +301,10 @@ wurden.  In diesen Fällen erzeugt @scheme[check-property] eine Fehlermeldung.
 
 Die @scheme[define-record-procedures-parametric] ist wie
 @scheme[define-record-procedures].  Zusäzlich wird der Bezeichner
-@scheme[cc] an einen Vertragskonstruktor gebunden: Dieser akzeptiert
-für jedes Feld einen Feld-Vertrag und liefert einen Vertrag, den nur
+@scheme[cc] an einen Signaturkonstruktor gebunden: Dieser akzeptiert
+für jedes Feld eine Feld-Signatur und liefert eine Signatur, die nur
 Records des Record-Typs @scheme[t] erfüllen, bei dem die Feldinhalte
-die Feld-Verträge erfüllen.
+die Feld-Signaturen erfüllen.
 
 Beispiel:
 
@@ -365,11 +314,11 @@ Beispiel:
   (pare-one pare-two))
 ]
 
-Dann ist @scheme[(pare-of integer string)] der Vertrag für
-@scheme[pare]-Records, bei dem die Feldinhalte die Verträge
+Dann ist @scheme[(pare-of integer string)] die Signatur für
+@scheme[pare]-Records, bei dem die Feldinhalte die Signaturen
 @scheme[integer] bzw. @scheme[string] erfüllen müssen.
 
-Die Verträge für die Feldinhalte werden erst überprüft, wenn ein
+Die Signaturen für die Feldinhalte werden erst überprüft, wenn ein
 Selektor aufgerufen wird.
 }
 
@@ -431,13 +380,13 @@ folgende Eigenschaft gilt immer:
 Es ist auch möglich, in einer Eigenschaft Variablen zu verwenden, für
 die verschiedene Werte eingesetzt werden.  Dafür müssen die Variablen
 gebunden und @deftech{quantifiziert} werden, d.h. es muß festgelegt
-werden, welchen Vertrag die Werte der Variable erfüllen sollen.
+werden, welche Signatur die Werte der Variable erfüllen sollen.
 Eigenschaften mit Variablen werden mit der @scheme[for-all]-Form erzeugt:
 
-@defform[(for-all ((id contr) ...) expr)]{
+@defform[(for-all ((id sig) ...) expr)]{
 Dies bindet die Variablen @scheme[id] in der Eigenschaft
-@scheme[expr].  Zu jeder Variable gehört ein Vertrag
-@scheme[contr], der von den Werten der Variable erfüllt werden
+@scheme[expr].  Zu jeder Variable gehört eine Signatur
+@scheme[sig], der von den Werten der Variable erfüllt werden
 muß.
 
 Beispiel:

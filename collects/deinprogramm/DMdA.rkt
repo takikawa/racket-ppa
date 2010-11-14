@@ -4,19 +4,19 @@
 
 (require test-engine/scheme-tests
 	 (lib "test-info.scm" "test-engine")
+	 test-engine/scheme-tests
 	 scheme/class)
 
-(require deinprogramm/contract/module-begin
-	 deinprogramm/contract/contract
-	 deinprogramm/contract/contract-test-engine
-	 (except-in deinprogramm/contract/contract-syntax property))
+(require deinprogramm/signature/module-begin
+	 (except-in deinprogramm/signature/signature signature-violation)
+	 (except-in deinprogramm/signature/signature-syntax property))
 
 (require (for-syntax scheme/base)
 	 (for-syntax stepper/private/shared))
 
 (require deinprogramm/define-record-procedures)
 
-(require (only-in lang/private/teachprims beginner-equal? beginner-equal~?))
+(require (only-in lang/private/teachprims define-teach teach-equal? beginner-equal~?))
 
 (require (for-syntax deinprogramm/syntax-checkers))
 
@@ -25,19 +25,18 @@
 
 (provide provide lib planet rename-out require #%datum #%module-begin #%top-interaction) ; so we can use this as a language
 
-(provide cons) ; hack, for the stepper
-
 (provide (all-from-out deinprogramm/define-record-procedures))
 (provide (all-from-out test-engine/scheme-tests))
-(provide contract define-contract :
-	 -> mixed one-of predicate combined)
+(provide signature define-contract :
+	 contract ; legacy
+	 -> mixed one-of predicate combined list-of)
 
 (provide number real rational integer natural
 	 boolean true false
 	 string symbol
 	 empty-list
-	 chocolate-cookie
 	 unspecific
+	 any
 	 property)
 
 (define-syntax provide/rename
@@ -245,8 +244,12 @@
   (empty list "die leere Liste")
   (make-pair (%a (list %a) -> (list %a))
 	     "erzeuge ein Paar aus Element und Liste")
+  ((DMdA-cons cons) (%a -> boolean)
+	     "erzeuge ein Paar aus Element und Liste")
   (pair? (%a -> boolean)
 	 "feststellen, ob ein Wert ein Paar ist")	
+  (cons? (%a -> boolean)
+	 "feststellen, ob ein Wert ein Paar ist")
   (empty? (%a -> boolean)
 	  "feststellen, ob ein Wert die leere Liste ist")
   
@@ -273,7 +276,23 @@
   (reverse ((list %a)  -> (list %a))
 	   "Liste in umgekehrte Reihenfolge bringen"))
 
+ ("Computer"
+  (computer signature
+	    "Signatur für Computer")
+  (make-computer (string rational rational -> computer)
+		 "Computer aus Prozessorname, Arbeitsspeicher und Festplattenkapazität konstruieren")
+  (computer? (%a -> boolean)
+	     "feststellen, ob Wert ein Computer ist")
+  (computer-processor (computer -> string)
+		      "Prozessorname aus Computer extrahieren")
+  (computer-ram (computer -> rational)
+		"Arbeitsspeicher aus Computer extrahieren")
+  (computer-hard-drive (computer -> rational)
+		       "Festplattenkapazität aus Computer extrahieren"))
+
  ("Schokokekse"
+  (chocolate-cookie signature
+		    "Signatur für Schokokekse")
   (make-chocolate-cookie (number number -> chocolate-cookie)
 			 "Schokokeks aus Schoko- und Keks-Anteil konstruieren")
   (chocolate-cookie? (%a -> boolean)
@@ -372,29 +391,37 @@
 (define (empty? obj)
   (null? obj))
 
-(define (DMdA-append . args)
-  (let loop ((args args)
-	     (seen-rev '()))
-    (when (not (null? args))
-      (let ((arg (car args)))
-	(when (and (not (null? arg))
-		   (not (pair? arg)))
-	  (raise
-	   (make-exn:fail:contract
-	    (string->immutable-string
-	     (format "Argument zu append keine Liste, sondern ~e; restliche Argumente:~a"
-		     arg
-		     (apply string-append
-			    (map (lambda (arg)
-				   (format " ~e" arg))
-				 (append (reverse seen-rev)
-					 (list '<...>)
-					 (cdr args))))))
-	    (current-continuation-marks))))
-	(loop (cdr args)
-	      (cons arg seen-rev)))))
+(define (cons? obj)
+  (pair? obj))
+
+(define-teach DMdA cons
+  (lambda (f r)
+    (make-pair f r)))
+
+(define-teach DMdA append
+  (lambda args
+    (let loop ((args args)
+	       (seen-rev '()))
+      (when (not (null? args))
+	(let ((arg (car args)))
+	  (when (and (not (null? arg))
+		     (not (pair? arg)))
+	    (raise
+	     (make-exn:fail:contract
+	      (string->immutable-string
+	       (format "Argument zu append keine Liste, sondern ~e; restliche Argumente:~a"
+		       arg
+		       (apply string-append
+			      (map (lambda (arg)
+				     (format " ~e" arg))
+				   (append (reverse seen-rev)
+					   (list '<...>)
+					   (cdr args))))))
+	      (current-continuation-marks))))
+	  (loop (cdr args)
+		(cons arg seen-rev)))))
   
-  (apply append args))
+  (apply append args)))
 
 (define fold
   (lambda (unit combine lis)
@@ -790,9 +817,10 @@
 	 (format "~a: Testresultat ist nicht boolesch: ~e" where b))
 	(current-continuation-marks)))))
 
-(define (DMdA-not b)
-  (verify-boolean b 'not)
-  (not b))
+(define-teach DMdA not
+  (lambda (b)
+    (verify-boolean b 'not)
+    (not b)))
 
 (define (boolean=? a b)
   (verify-boolean a 'boolean=?)
@@ -837,10 +865,11 @@
 	 ;;  that isn't a value.
 	 #'id)]))
 
-(define (DMdA-write-string s)
-  (when (not (string? s))
-    (error "Argument von write-string ist keine Zeichenkette"))
-  (display s))
+(define-teach DMdA write-string
+  (lambda (s)
+    (when (not (string? s))
+      (error "Argument von write-string ist keine Zeichenkette"))
+    (display s)))
 
 (define (write-newline)
   (newline))
@@ -848,6 +877,12 @@
 (define-record-procedures chocolate-cookie
   make-chocolate-cookie chocolate-cookie?
   (chocolate-cookie-chocolate chocolate-cookie-cookie))
+
+(define-record-procedures computer
+  make-computer computer?
+  (computer-processor
+   computer-ram
+   computer-hard-drive))
 
 (define (violation text)
   (error text))
@@ -860,18 +895,18 @@
       ""
       (string-append (car l) (strings-list->string (cdr l)))))
 
-(define integer (contract/arbitrary arbitrary-integer (predicate integer?)))
-(define number (contract/arbitrary arbitrary-real (predicate number?)))
-(define rational (contract/arbitrary arbitrary-rational (predicate rational?)))
-(define real (contract/arbitrary arbitrary-real (predicate real?)))
+(define integer (signature/arbitrary arbitrary-integer (predicate integer?)))
+(define number (signature/arbitrary arbitrary-real (predicate number?)))
+(define rational (signature/arbitrary arbitrary-rational (predicate rational?)))
+(define real (signature/arbitrary arbitrary-real (predicate real?)))
 
 (define (natural? x)
   (and (integer? x)
        (not (negative? x))))
 
-(define natural (contract/arbitrary arbitrary-natural (predicate natural?)))
+(define natural (signature/arbitrary arbitrary-natural (predicate natural?)))
 
-(define boolean (contract/arbitrary arbitrary-boolean (predicate boolean?)))
+(define boolean (signature/arbitrary arbitrary-boolean (predicate boolean?)))
 
 (define (true? x)
   (eq? x #t))
@@ -879,14 +914,15 @@
 (define (false? x)
   (eq? x #f))
 
-(define true (contract (one-of #f)))
-(define false (contract (one-of #f)))
+(define true (signature (one-of #t)))
+(define false (signature (one-of #f)))
 
-(define string (contract/arbitrary arbitrary-printable-ascii-string (predicate string?)))
-(define symbol (contract/arbitrary arbitrary-symbol (predicate symbol?)))
-(define empty-list (contract (one-of empty)))
+(define string (signature/arbitrary arbitrary-printable-ascii-string (predicate string?)))
+(define symbol (signature/arbitrary arbitrary-symbol (predicate symbol?)))
+(define empty-list (signature (one-of empty)))
 
-(define unspecific (contract (predicate (lambda (_) #t))))
+(define unspecific (signature unspecific %unspecific))
+(define any (signature any %any))
 
 ;; aus collects/lang/private/teach.ss
 
@@ -976,12 +1012,12 @@
      (with-syntax ((((?id ?arb) ...)
 		    (map (lambda (pr)
 			   (syntax-case pr ()
-			     ((?id ?contract)
+			     ((?id ?signature)
 			      (identifier? #'?id)
 			      (with-syntax ((?error-call
-					     (syntax/loc #'?contract (error "Vertrag hat keinen Generator"))))
+					     (syntax/loc #'?signature (error "Signatur hat keinen Generator"))))
 				#'(?id
-				   (or (contract-arbitrary (contract ?contract))
+				   (or (signature-arbitrary (signature ?signature))
 				       ?error-call))))
 			     (_
 			      (raise-syntax-error #f "inkorrekte `for-all'-Klausel - sollte die Form (id contr) haben"
@@ -1042,7 +1078,7 @@
 	      #t))))))
 
 (define (expect v1 v2)
-  (quickcheck:property () (beginner-equal? v1 v2)))
+  (quickcheck:property () (teach-equal? v1 v2)))
 
 (define (ensure-real who n val)
   (unless (real? val)
@@ -1067,10 +1103,10 @@
 (define (expect-member-of val . candidates)
   (quickcheck:property () 
 		       (ormap (lambda (cand)
-				(beginner-equal? val cand))
+				(teach-equal? val cand))
 			      candidates)))
 
-(define property (contract (predicate (lambda (x)
+(define property (signature (predicate (lambda (x)
 					(or (boolean? x)
 					    (property? x))))))
 

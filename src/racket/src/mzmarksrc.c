@@ -360,6 +360,8 @@ cont_proc {
   gcMARK2(c->prompt_id, gc);
   gcMARK2(c->prompt_buf, gc);
 
+  gcMARK2(c->escape_cont, gc);
+
   gcMARK2(c->value, gc);
   gcMARK2(c->resume_to, gc);
   gcMARK2(c->use_next_cont, gc);
@@ -546,6 +548,15 @@ vector_obj {
 		    + ((vec->size - 1) * sizeof(Scheme_Object *))));
 }
 
+fxvector_obj {
+  Scheme_Vector *vec = (Scheme_Vector *)p;
+
+ mark:
+ size:
+  gcBYTES_TO_WORDS((sizeof(Scheme_Vector) 
+		    + ((vec->size - 1) * sizeof(Scheme_Object *))));
+}
+
 flvector_obj {
   Scheme_Double_Vector *vec = (Scheme_Double_Vector *)p;
 
@@ -650,6 +661,8 @@ thread_val {
   
   gcMARK2(pr->nester, gc);
   gcMARK2(pr->nestee, gc);
+
+  gcMARK2(pr->current_ft, gc);
   
   gcMARK2(pr->blocker, gc);
   gcMARK2(pr->overflow, gc);
@@ -834,7 +847,6 @@ namespace_val {
 
   gcMARK2(e->module, gc);
   gcMARK2(e->module_registry, gc);
-  gcMARK2(e->export_registry, gc);
   gcMARK2(e->insp, gc);
 
   gcMARK2(e->rename_set, gc);
@@ -866,6 +878,15 @@ namespace_val {
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Env));
+}
+
+module_reg_val {
+ mark:
+  Scheme_Module_Registry *r = (Scheme_Module_Registry *)p;
+  gcMARK2(r->loaded, gc);
+  gcMARK2(r->exports, gc);
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Module_Registry));
 }
 
 random_state_val {
@@ -1315,6 +1336,23 @@ mark_cont_mark_chain {
   gcBYTES_TO_WORDS(sizeof(Scheme_Cont_Mark_Chain));
 }
 
+#ifdef MZ_USE_JIT
+
+mark_lightweight_cont {
+ mark:
+  Scheme_Lightweight_Continuation *lw = (Scheme_Lightweight_Continuation *)p;
+
+  gcMARK2(lw->saved_lwc, gc);
+  gcMARK2(lw->stack_slice, gc);
+  gcMARK2(lw->runstack_slice, gc);
+  gcMARK2(lw->cont_mark_stack_slice, gc);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Lightweight_Continuation));
+}
+
+#endif
+
 END fun;
 
 /**********************************************************************/
@@ -1380,6 +1418,7 @@ place_async_channel_val {
   Scheme_Place_Async_Channel *pac = (Scheme_Place_Async_Channel *)p;
   int i;
   gcMARK2(pac->msgs, gc);
+  gcMARK2(pac->msg_memory, gc);
   for (i = pac->size; i--; )
     gcMARK2(pac->msgs[i], gc);
 
@@ -1536,6 +1575,7 @@ mark_subprocess {
 #ifndef WINDOWS_PROCESSES
   Scheme_Subprocess *sp = (Scheme_Subprocess *)p;
   gcMARK2(sp->handle, gc);
+  gcMARK2(sp->mref, gc);
 #endif
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Subprocess));
@@ -1896,6 +1936,25 @@ END sema;
 
 START struct;
 
+#ifdef MZ_USE_PLACES
+mark_serialized_struct_val {
+  Scheme_Serialized_Structure *s = (Scheme_Serialized_Structure *)p;
+  int num_slots = s->num_slots;
+
+ mark:
+  int i;
+
+  gcMARK2(s->prefab_key, gc);
+  
+  for(i = num_slots; i--; )
+    gcMARK2(s->slots[i], gc);
+
+ size:
+  gcBYTES_TO_WORDS((sizeof(Scheme_Serialized_Structure) 
+		    + ((num_slots - 1) * sizeof(Scheme_Object *))));
+}
+#endif
+
 mark_struct_val {
   Scheme_Structure *s = (Scheme_Structure *)p;
   int num_slots = ((Scheme_Struct_Type *)GC_resolve(s->stype))->num_slots;
@@ -2046,6 +2105,7 @@ mark_read_params {
   gcMARK2(rp->magic_sym, gc);
   gcMARK2(rp->magic_val, gc);
   gcMARK2(rp->delay_load_info, gc);
+  gcMARK2(rp->read_relative_path, gc);
  size:
   gcBYTES_TO_WORDS(sizeof(ReadParams));
 }
@@ -2294,10 +2354,12 @@ future {
   future_t *f = (future_t *)p;
   gcMARK2(f->orig_lambda, gc);
   gcMARK2(f->arg_s0, gc);
+  gcMARK2(f->arg_t0, gc);
   gcMARK2(f->arg_S0, gc);
   gcMARK2(f->arg_b0, gc);
   gcMARK2(f->arg_n0, gc);
   gcMARK2(f->arg_s1, gc);
+  gcMARK2(f->arg_t1, gc);
   gcMARK2(f->arg_S1, gc);
   gcMARK2(f->arg_s2, gc);
   gcMARK2(f->arg_S2, gc);
@@ -2310,6 +2372,8 @@ future {
   gcMARK2(f->prev, gc);
   gcMARK2(f->next, gc);
   gcMARK2(f->next_waiting_atomic, gc);
+  gcMARK2(f->next_waiting_lwc, gc);
+  gcMARK2(f->suspended_lw, gc);
  size:
   gcBYTES_TO_WORDS(sizeof(future_t));
 }

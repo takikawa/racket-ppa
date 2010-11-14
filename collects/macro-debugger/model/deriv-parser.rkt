@@ -1,12 +1,11 @@
-
-#lang scheme/base
-(require (for-syntax scheme/base)
+#lang racket/base
+(require (for-syntax racket/base)
          syntax/stx
-         "yacc-ext.ss"
-         "yacc-interrupted.ss"
-         "deriv.ss"
-         "deriv-util.ss"
-         "deriv-tokens.ss")
+         "yacc-ext.rkt"
+         "yacc-interrupted.rkt"
+         "deriv.rkt"
+         "deriv-util.rkt"
+         "deriv-tokens.rkt")
 (provide parse-derivation)
 
 (define (deriv-error ok? name value start end)
@@ -44,6 +43,7 @@
     enter-check exit-check
     local-post exit-local exit-local/expr
     local-bind enter-bind exit-bind
+    local-value-result
     phase-up module-body
     renames-lambda
     renames-case-lambda
@@ -202,6 +202,24 @@
       (make local-bind $1 $2 $3 #f)]
      [(local-bind rename-list (? BindSyntaxes))
       (make local-bind $1 #f $2 $3)]
+     [(track-origin)
+      (make track-origin (car $1) (cdr $1))]
+     [(local-value ! Resolves local-value-result)
+      (make local-value $1 $2 $3 $4)]
+     [(local-remark)
+      (make local-remark $1)]
+     [(local-artificial-step)
+      (let ([ids (list-ref $1 0)]
+            [before (list-ref $1 1)]
+            [mbefore (list-ref $1 2)]
+            [mafter (list-ref $1 3)]
+            [after (list-ref $1 4)])
+        (make local-expansion
+          before after #f mbefore
+          (make mrule mbefore mafter ids #f
+                before null after #f mafter
+                (make p:stop mafter mafter null #f))
+          #f after #f))]
      ;; -- Not really local actions, but can occur during evaluation
      ;; called 'expand' (not 'local-expand') within transformer
      [(start (? EE)) #f]
@@ -247,7 +265,8 @@
      [((? PrimQuoteSyntax)) ($1 e1 e2 rs)]
      [((? PrimRequire)) ($1 e1 e2 rs)]
      [((? PrimProvide)) ($1 e1 e2 rs)]
-     [((? PrimVarRef)) ($1 e1 e2 rs)])
+     [((? PrimVarRef)) ($1 e1 e2 rs)]
+     [((? PrimStratifiedBody)) ($1 e1 e2 rs)])
 
     (PrimModule
      (#:args e1 e2 rs)
@@ -458,6 +477,10 @@
     (PrimVarRef
      (#:args e1 e2 rs)
      [(prim-varref !) (make p:#%variable-reference e1 e2 rs $2)])
+
+    (PrimStratifiedBody
+     (#:args e1 e2 rs)
+     [(prim-#%stratified-body ! (? EB)) (make p:#%stratified-body e1 e2 rs $2 $3)])
 
     (PrimSet
      (#:args e1 e2 rs)

@@ -1,4 +1,4 @@
-#lang at-exp scheme/base
+#lang at-exp racket/base
 (require scribble/manual
          scribble/core
          scribble/decode
@@ -16,7 +16,7 @@
 (define autobib-style-extras
   (let ([abs (lambda (s)
                (path->main-collects-relative
-                (build-path (collection-path "scriblib") s)))])
+                (collection-file-path s "scriblib")))])
     (list
      (make-css-addition (abs "autobib.css"))
      (make-tex-addition (abs "autobib.tex")))))
@@ -30,16 +30,38 @@
 (define-struct (author-element element) (names cite))
 (define-struct (other-author-element author-element) ())
          
-(define (add-cite group bib-entry which)
+(define (add-cite group bib-entry which with-specific?)
   (hash-set! (bib-group-ht group) bib-entry #t)
   (make-delayed-element
    (lambda (renderer part ri)
      (let ([s (resolve-get part ri `(,which ,(auto-bib-key bib-entry)))])
        (list (make-link-element #f 
-                                (list (or s "???") (auto-bib-specific bib-entry))
+                                (list (or s "???") 
+                                      (if with-specific?
+                                          (auto-bib-specific bib-entry)
+                                          ""))
                                 `(autobib ,(auto-bib-key bib-entry))))))
    (lambda () "(???)")
    (lambda () "(???)")))
+
+(define (add-inline-cite group bib-entries)
+  (for ([i bib-entries]) (hash-set! (bib-group-ht group) i #t))
+  (when (and (pair? (cdr bib-entries)) (not (apply equal? (map auto-bib-author bib-entries))))
+    (error 'citet "citet must be used with identical authors, given ~a" (map auto-bib-author bib-entries)))
+  (make-element 
+   #f
+   (list (add-cite group (car bib-entries) 'autobib-author #f)
+         'nbsp
+         "("
+         (let loop ([keys bib-entries])
+           (if (null? (cdr keys))
+               (add-cite group (car keys) 'autobib-date #t)
+               (make-element
+                #f
+                (list (loop (list (car keys)))
+                      "; "
+                      (loop (cdr keys))))))
+         ")")))
 
 (define (add-cites group bib-entries)
   (make-element
@@ -48,7 +70,12 @@
          "("
          (let loop ([keys bib-entries])
            (if (null? (cdr keys))
-               (add-cite group (car keys) 'autobib-cite)
+               (make-element 
+                #f 
+                (list 
+                 (add-cite group (car keys) 'autobib-author #f)
+                 " "
+                 (add-cite group (car keys) 'autobib-date #t)))
                (make-element
                 #f
                 (list (loop (list (car keys)))
@@ -87,23 +114,17 @@
                          `(autobib ,(auto-bib-key k))))
                   (lambda (ci)
                     (collect-put! ci 
-                                  `(autobib-cite ,(auto-bib-key k))
+                                  `(autobib-author ,(auto-bib-key k))
                                   (make-element
                                    #f
                                    (list
-                                    (author-element-cite (auto-bib-author k))
-                                    " "
-                                    (auto-bib-date k))))
+                                    (author-element-cite (auto-bib-author k)))))
                     (collect-put! ci 
-                                  `(autobib-inline ,(auto-bib-key k))
+                                  `(autobib-date ,(auto-bib-key k))
                                   (make-element
                                    #f
                                    (list
-                                    (author-element-cite (auto-bib-author k))
-                                    'nbsp
-                                    "("
-                                    (auto-bib-date k)
-                                    ")")))))))))
+                                    (auto-bib-date k))))))))))
             bibs)))
      null)))
 
@@ -112,8 +133,8 @@
     (define group (make-bib-group (make-hasheq)))
     (define (~cite bib-entry . bib-entries)
       (add-cites group (cons bib-entry bib-entries)))
-    (define (citet bib-entry)
-      (add-cite group bib-entry 'autobib-inline))
+    (define (citet bib-entry . bib-entries)
+      (add-inline-cite group (cons bib-entry bib-entries)))
     (define (generate-bibliography #:tag [tag "doc-bibliography"])
       (gen-bib tag group))))
 
@@ -171,7 +192,7 @@
   (if (author-element? a)
       a
       (let* ([s (content->string a)]
-             [m (regexp-match #px"^(.*) (\\p{L}+)$" s)])
+             [m (regexp-match #px"^(.*) (([\\-]|\\p{L})+)$" s)])
         (make-author-element
          #f
          (list a)

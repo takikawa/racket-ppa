@@ -1,8 +1,9 @@
-#lang scheme/base
+#lang racket/base
+
 #|
 
 This library is the part of the 2htdp/image 
-teachpack that has to be shared between drscheme
+teachpack that has to be shared between drracket
 and the user's program to make copy and paste
 work right.
 
@@ -26,11 +27,13 @@ has been moved out).
 
 |#
 
-(require scheme/class
-         scheme/gui/base
-         scheme/math
+(require racket/class
+         racket/gui/base
+         racket/math
+         racket/contract
          "private/image-core-bitmap.ss"
-         (for-syntax scheme/base))
+         (prefix-in cis: "cache-image-snip.ss")
+         (for-syntax racket/base))
 
 (define-for-syntax id-constructor-pairs '())
 (define-for-syntax (add-id-constructor-pair a b)
@@ -80,10 +83,10 @@ has been moved out).
 
 
 ;; a image is 
-;;  (make-image shape bb boolean)
+;;  (make-image shape bb boolean (or/c point #f))
 ;; NOTE: the shape field is mutated when normalized, as
 ;;       is the normalized? field.
-(define (make-image shape bb normalized?) (new image% [shape shape] [bb bb] [normalized? normalized?]))
+(define (make-image shape bb normalized? [pinhole #f]) (new image% [shape shape] [bb bb] [normalized? normalized?] [pinhole pinhole]))
 (define (image-shape p) (send p get-shape))
 (define (image-bb p) (send p get-bb))
 (define (image-normalized? p) (send p get-normalized?))
@@ -122,6 +125,7 @@ has been moved out).
 ;;  - polygon
 ;;  - line-segment
 ;;  - curve-segment
+;;  - bitmap
 ;;  - np-atomic-shape
 
 ;; a np-atomic-shape is:
@@ -135,10 +139,22 @@ has been moved out).
 (define-struct/reg-mk text (string angle y-scale color size face family style weight underline) 
   #:omit-define-syntaxes #:transparent)
 ;;
+;;  - flip
+
+;; a bitmap is:
 ;;  - (make-bitmap (is-a?/c bitmap%) angle positive-real (or/c #f (is-a?/c bitmap%)))
 ;;    NOTE: bitmap copying needs to happen in 'write' and 'read' methods
 (define-struct/reg-mk bitmap (raw-bitmap raw-mask angle x-scale y-scale [rendered-bitmap #:mutable] [rendered-mask #:mutable])
-  #:omit-define-syntaxes #:transparent)
+  #:omit-define-syntaxes #:transparent
+  #:property prop:custom-write (λ (x y z) (bitmap-write x y z)))
+
+;; a flip is:
+;;   - (make-flip boolean bitmap)
+;; * the boolean is #t if the bitmap should be flipped vertically (after applying whatever rotation is in there)
+;; * this struct is here to avoid adding a field to bitmaps, so that old save files
+;;   from when the library did not support flipping still load
+;;   (since normalization will add a flip structure if necessary)
+(define-struct/reg-mk flip (flipped? shape) #:transparent)
 
 ;; a polygon is:
 ;;
@@ -164,7 +180,7 @@ has been moved out).
 ;;  - (make-crop (listof points) normalized-shape)
 
 ;; a simple-shape (subtype of shape) is
-;;  - (make-translate dx dy np-atomic-shape))
+;;  - (make-translate dx dy np-atomic-shape)
 ;;  - polygon
 ;;  - line-segment
 ;;  - curve-segment
@@ -203,31 +219,37 @@ has been moved out).
 ;                         ;;;;                      
 
 (define-local-member-name
-  get-shape set-shape get-bb 
+  get-shape set-shape get-bb get-pinhole 
   get-normalized? set-normalized get-normalized-shape)
 
 (define skip-image-equality-fast-path (make-parameter #f))
 
 (define image%
   (class* snip% (equal<%>)
-    (init-field shape bb normalized?)
+    (init-field shape bb normalized? pinhole)
     (define/public (equal-to? that eq-recur)
       (or (eq? this that)
-          (and (is-a? that image%)
-               (same-bb? bb (send that get-bb))
-               (or (and (not (skip-image-equality-fast-path))  ;; this is here to make testing more effective
-                        (equal? (get-normalized-shape) (send that get-normalized-shape)))
-                   (let ([w (+ 1 (round (inexact->exact (bb-right bb))))]    ;; some shapes (ie, rectangles) draw 1 outside the bounding box
-                         [h (+ 1 (round (inexact->exact (bb-bottom bb))))])  ;; so we make the bitmap slightly bigger to accomodate that.
-                     (or (zero? w)
-                         (zero? h)
-                         (let ([bm1 (make-object bitmap% w h)]
-                               [bm2 (make-object bitmap% w h)]
-                               [bytes1 (make-bytes (* w h 4) 0)]
-                               [bytes2 (make-bytes (* w h 4) 0)]
-                               [bdc (make-object bitmap-dc%)])
-                           (and (check-same? bm1 bm2 bytes1 bytes2 bdc "red" that)
-                                (check-same? bm1 bm2 bytes1 bytes2 bdc "green" that)))))))))
+          (let ([that 
+                 (cond
+                   [(is-a? that image-snip%) (image-snip->image that)]
+                   [(is-a? that bitmap%) (bitmap->image that)]
+                   [else that])])
+            (and (is-a? that image%)
+                 (same-bb? bb (send that get-bb))
+                 (equal? pinhole (send that get-pinhole))
+                 (or (and (not (skip-image-equality-fast-path))  ;; this is here to make testing more effective
+                          (equal? (get-normalized-shape) (send that get-normalized-shape)))
+                     (let ([w (+ 1 (round (inexact->exact (bb-right bb))))]    ;; some shapes (ie, rectangles) draw 1 outside the bounding box
+                           [h (+ 1 (round (inexact->exact (bb-bottom bb))))])  ;; so we make the bitmap slightly bigger to accomodate that.
+                       (or (zero? w)
+                           (zero? h)
+                           (let ([bm1 (make-object bitmap% w h)]
+                                 [bm2 (make-object bitmap% w h)]
+                                 [bytes1 (make-bytes (* w h 4) 0)]
+                                 [bytes2 (make-bytes (* w h 4) 0)]
+                                 [bdc (make-object bitmap-dc%)])
+                             (and (check-same? bm1 bm2 bytes1 bytes2 bdc "red" that)
+                                  (check-same? bm1 bm2 bytes1 bytes2 bdc "green" that))))))))))
     
     (define/private (check-same? bm1 bm2 bytes1 bytes2 bdc color that)
       (clear-bitmap/draw/bytes bm1 bdc bytes1 this color)
@@ -248,6 +270,7 @@ has been moved out).
     (define/public (get-shape) shape)
     (define/public (set-shape s) (set! shape s))
     (define/public (get-bb) bb)
+    (define/public (get-pinhole) pinhole)
     (define/public (get-normalized?) normalized?)
     (define/public (set-normalized? n?) (set! normalized? n?))
     
@@ -287,8 +310,8 @@ has been moved out).
     (define/override (find-scroll-step y)
       (calc-scroll-step)
       (inexact->exact (ceiling (/ y scroll-step))))
-               
-    (define/override (copy) (make-image shape bb normalized?))
+
+    (define/override (copy) (make-image shape bb normalized? pinhole))
     (define/override (draw dc x y left top right bottom dx dy draw-caret?)
       (let ([smoothing (send dc get-smoothing)])
         (render-image this dc x y)))
@@ -305,7 +328,7 @@ has been moved out).
         (set-box/f! rspace 0)))
 
     (define/override (write f) 
-      (let ([bytes (string->bytes/utf-8 (format "~s" (list shape bb)))])
+      (let ([bytes (string->bytes/utf-8 (format "~s" (list shape bb pinhole)))])
         (send f put (bytes-length bytes) bytes)))
     
     (super-new)
@@ -317,8 +340,8 @@ has been moved out).
   (and (= (round (bb-right bb1)) (round (bb-right bb2)))
        (= (round (bb-bottom bb1)) (round (bb-bottom bb2)))
        (= (round (bb-baseline bb1)) (round (bb-baseline bb2)))))
-(define scheme/base:read read)
 
+(define racket/base:read read)
 (define image-snipclass% 
   (class snip-class%
     (define/override (read f)
@@ -331,21 +354,31 @@ has been moved out).
               (and str
                    (with-handlers ((exn:fail:read? (λ (x) #f)))
                      (parse 
-                      (scheme/base:read
+                      (racket/base:read
                        (open-input-string
                         str)))))])
-        (if lst
-            (make-image (list-ref lst 0)
-                        (list-ref lst 1)
-                        #f)
-            (make-image (make-ellipse 100 100 0 'solid "black")
-                        (make-bb 100 100 100)
-                        #f))))
+        (cond
+          [(not lst)
+           (make-image (make-ellipse 100 100 0 'solid "black")
+                       (make-bb 100 100 100)
+                       #f
+                       #f)]
+          [(= 2 (length lst))
+           ;; backwards compatibility for saved images that didn't have a pinhole
+           (make-image (list-ref lst 0)
+                       (list-ref lst 1)
+                       #f
+                       #f)]
+          [else
+           (make-image (list-ref lst 0)
+                       (list-ref lst 1)
+                       #f
+                       (list-ref lst 2))])))
     (super-new)))
 
 (provide snip-class) 
 (define snip-class (new image-snipclass%))
-(send snip-class set-classname (format "~s" '(lib "image-core.ss" "2htdp" "private")))
+(send snip-class set-classname (format "~s" '(lib "image-core.ss" "mrlib")))
 (send snip-class set-version 1)
 (send (get-the-snip-class-list) add snip-class)
 
@@ -359,19 +392,64 @@ has been moved out).
         [(vector? sexp)
          (if (= (vector-length sexp) 0)
              (k #f)
-             (let ([constructor (id->constructor (vector-ref sexp 0))]
-                   [args (cdr (vector->list sexp))])
-               (if (and constructor
-                        (procedure-arity-includes? constructor (length args)))
-                   (apply constructor (map loop args))
-                   (k #f))))]
+             (cond
+               [(bytes? (vector-ref sexp 0))
+                ;; bitmaps are vectors with a bytes in the first field
+                (apply bytes->bitmap (vector->list sexp))]
+               [else
+                (let ([constructor (id->constructor (vector-ref sexp 0))]
+                      [args (cdr (vector->list sexp))])
+                  (if (and constructor
+                           (procedure-arity-includes? constructor (length args)))
+                      (apply constructor (map loop args))
+                      (k #f)))]))]
         [else sexp]))))
 
 (define-id->constructor id->constructor)
 
+
+(define (normalized-shape? s)
+  (cond
+    [(overlay? s)
+     (and (normalized-shape? (overlay-top s))
+          (cn-or-simple-shape? (overlay-bottom s)))]
+    [else
+     (cn-or-simple-shape? s)]))
+
+(define (cn-or-simple-shape? s)
+  (cond
+    [(crop? s)
+     (normalized-shape? (crop-shape s))]
+    [else
+     (simple-shape? s)]))
+
+(define (simple-shape? shape)
+  (or (and (translate? shape)
+           (np-atomic-shape? (translate-shape shape)))
+      (polygon? shape)
+      (line-segment? shape)
+      (curve-segment? shape)))
+
+(define (atomic-shape? shape)
+  (or (polygon? shape)
+      (line-segment? shape)
+      (curve-segment? shape)
+      (bitmap? shape)
+      (np-atomic-shape? shape)))
+
+(define (np-atomic-shape? shape)
+  (or (ellipse? shape)
+      (text? shape)
+      (and (flip? shape)
+           (boolean? (flip-flipped? shape))
+           (bitmap? (flip-shape shape)))))
+
 ;; normalize-shape : shape (atomic-shape -> atomic-shape) -> normalized-shape
 ;; normalizes 'shape', calling 'f' on each atomic shape in the normalized shape.
-(define (normalize-shape shape [f values])
+(define/contract (normalize-shape shape [f values])
+  (->* (any/c) ;; should be shape?
+       ((-> any/c any/c))
+       normalized-shape?)
   (let loop ([shape shape]
              [dx 0]
              [dy 0]
@@ -443,50 +521,20 @@ has been moved out).
          (if bottom
              (make-overlay bottom (f this-one))
              (f this-one)))]
-      [(np-atomic-shape? shape)
-       (let ([this-one 
-              (make-translate dx dy (scale-np-atomic x-scale y-scale shape))])
-         (if bottom
-             (make-overlay bottom (f this-one))
-             (f this-one)))]
+      [(or (bitmap? shape) (np-atomic-shape? shape))
+       (let ([shape (if (bitmap? shape) 
+                        (make-flip #f shape)
+                        shape)])
+         (let ([this-one 
+                (make-translate dx dy (scale-np-atomic x-scale y-scale shape))])
+           (if bottom
+               (make-overlay bottom (f this-one))
+               (f this-one))))]
       [else 
        (error 'normalize-shape "unknown shape ~s\n" shape)])))
 
-(define (normalized-shape? s)
-  (cond
-    [(overlay? s)
-     (and (normalized-shape? (overlay-top s))
-          (cn-or-simple-shape? (overlay-bottom s)))]
-    [else
-     (cn-or-simple-shape? s)]))
-
-(define (cn-or-simple-shape? s)
-  (cond
-    [(crop? s)
-     (normalized-shape? (crop-shape s))]
-    [else
-     (simple-shape? s)]))
-
-(define (simple-shape? shape)
-  (or (and (translate? shape)
-           (np-atomic-shape? (translate-shape shape)))
-      (polygon? shape)
-      (line-segment? shape)
-      (curve-segment? shape)))
-
-(define (atomic-shape? shape)
-  (or (polygon? shape)
-      (line-segment? shape)
-      (curve-segment? shape)
-      (np-atomic-shape? shape)))
-
-(define (np-atomic-shape? shape)
-  (or (ellipse? shape)
-      (text? shape)
-      (bitmap? shape)
-      (point? shape)))
-
-(define (scale-np-atomic x-scale y-scale shape)
+(define/contract (scale-np-atomic x-scale y-scale shape)
+  (-> number? number? np-atomic-shape? np-atomic-shape?)
   (cond
     [(ellipse? shape)
      (make-ellipse (* x-scale (ellipse-width shape))
@@ -508,13 +556,19 @@ has been moved out).
                 (text-style shape)
                 (text-weight shape)
                 (text-underline shape))]
-    [(bitmap? shape) 
-     (make-bitmap (bitmap-raw-bitmap shape)
-                  (bitmap-raw-mask shape)
-                  (bitmap-angle shape)
-                  (* x-scale (bitmap-x-scale shape))
-                  (* y-scale (bitmap-y-scale shape))
-                  #f #f)]))
+    [(flip? shape)
+     (cond
+       [(and (= 1 x-scale) (= 1 y-scale))
+        shape]
+       [else
+        (let ([bitmap (flip-shape shape)])
+          (make-flip (flip-flipped? shape)
+                     (make-bitmap (bitmap-raw-bitmap bitmap)
+                                  (bitmap-raw-mask bitmap)
+                                  (bitmap-angle bitmap)
+                                  (* x-scale (bitmap-x-scale bitmap))
+                                  (* y-scale (bitmap-y-scale bitmap))
+                                  #f #f)))])]))
 
 (define (scale-color color x-scale y-scale)
   (cond
@@ -551,13 +605,38 @@ has been moved out).
         [brush (send dc get-brush)]
         [font (send dc get-font)]
         [fg (send dc get-text-foreground)]
-        [smoothing (send dc get-smoothing)])
-    (render-normalized-shape (send image get-normalized-shape) dc dx dy)
+        [smoothing (send dc get-smoothing)]
+        [alpha (send dc get-alpha)])
+    (cond
+      [(is-a? image bitmap%)
+       (send dc draw-bitmap image dx dy)]
+      [(is-a? image image-snip%)
+       (send dc draw-bitmap (send image get-bitmap) dx dy)]
+      [else
+       (render-normalized-shape (send image get-normalized-shape) dc dx dy)
+       (let ([ph (send image get-pinhole)])
+         (when ph
+           (let* ([px (point-x ph)]
+                  [py (point-y ph)]
+                  [bb (image-bb image)]
+                  [w (bb-right bb)]
+                  [h (bb-bottom bb)])
+             (send dc set-alpha (* alpha .5))
+             (send dc set-smoothing 'smoothed)
+             
+             (send dc set-pen "white" 1 'solid)
+             (send dc draw-line (+ dx px .5) (+ dy .5) (+ dx px .5) (+ dy h -.5))
+             (send dc draw-line (+ dx .5) (+ dy py .5) (+ dx w -.5) (+ dy py .5))
+             
+             (send dc set-pen "black" 1 'solid)
+             (send dc draw-line (+ dx px -.5) (+ dy .5) (+ dx px -.5) (+ dy h -.5))
+             (send dc draw-line (+ dx .5) (+ dy py -.5) (+ dx w -.5) (+ dy py -.5)))))])
     (send dc set-pen pen)
     (send dc set-brush brush)
     (send dc set-font font)
     (send dc set-text-foreground fg)
-    (send dc set-smoothing smoothing)))
+    (send dc set-smoothing smoothing)
+    (send dc set-alpha alpha)))
 
 (define (save-image-as-bitmap image filename kind)
   (let* ([bb (send image get-bb)]
@@ -652,15 +731,15 @@ has been moved out).
     [else
      (let ([dx (+ dx (translate-dx simple-shape))]
            [dy (+ dy (translate-dy simple-shape))]
-           [atomic-shape (translate-shape simple-shape)])
+           [np-atomic-shape (translate-shape simple-shape)])
        (cond
-         [(ellipse? atomic-shape)
+         [(ellipse? np-atomic-shape)
           (let* ([path (new dc-path%)]
-                 [ew (ellipse-width atomic-shape)]
-                 [eh (ellipse-height atomic-shape)]
-                 [θ (degrees->radians (ellipse-angle atomic-shape))]
-                 [color (ellipse-color atomic-shape)]
-                 [mode (ellipse-mode atomic-shape)])
+                 [ew (ellipse-width np-atomic-shape)]
+                 [eh (ellipse-height np-atomic-shape)]
+                 [θ (degrees->radians (ellipse-angle np-atomic-shape))]
+                 [color (ellipse-color np-atomic-shape)]
+                 [mode (ellipse-mode np-atomic-shape)])
             (let-values ([(rotated-width rotated-height) (ellipse-rotated-size ew eh θ)])
               (send path ellipse 0 0 ew eh)
               (send path translate (- (/ ew 2)) (- (/ eh 2)))
@@ -669,38 +748,42 @@ has been moved out).
               (send dc set-brush (mode-color->brush mode color))
               (send dc set-smoothing (mode-color->smoothing mode color))
               (send dc draw-path path dx dy)))]
-         [(bitmap? atomic-shape)
-          (let ([bm (get-rendered-bitmap atomic-shape)]) 
+         [(flip? np-atomic-shape) 
+          (let ([bm (get-rendered-bitmap np-atomic-shape)]) 
             (send dc draw-bitmap 
                   bm
                   (- dx (/ (send bm get-width) 2))
                   (- dy (/ (send bm get-height) 2))
                   'solid
                   (send the-color-database find-color "black")
-                  (get-rendered-mask atomic-shape)))]
-         [(text? atomic-shape)
-          (let ([θ (degrees->radians (text-angle atomic-shape))]
+                  (get-rendered-mask np-atomic-shape)))]
+         [(text? np-atomic-shape)
+          (let ([θ (degrees->radians (text-angle np-atomic-shape))]
                 [font (send dc get-font)])
-            (send dc set-font (text->font atomic-shape))
-            (send dc set-text-foreground 
-                  (or (send the-color-database find-color (text-color atomic-shape))
-                      (send the-color-database find-color "black")))
-            (let-values ([(w h _1 _2) (send dc get-text-extent (text-string atomic-shape))])
+            (send dc set-font (text->font np-atomic-shape))
+            (let ([color (get-color-arg (text-color np-atomic-shape))])
+              (send dc set-text-foreground 
+                    (cond
+                      [(string? color)
+                       (or (send the-color-database find-color color)
+                           (send the-color-database find-color "black"))]
+                      [else color])))
+            (let-values ([(w h _1 _2) (send dc get-text-extent (text-string np-atomic-shape))])
               (let ([p (- (make-rectangular dx dy)
                           (* (make-polar 1 (- θ)) (make-rectangular (/ w 2) (/ h 2))))])
-                (send dc draw-text (text-string atomic-shape) 
+                (send dc draw-text (text-string np-atomic-shape) 
                       (real-part p)
                       (imag-part p) 
                       #f 0 θ))))]))]))
 
 (define (polygon-points->path points)
   (let ([path (new dc-path%)])
-    (send path move-to (round (point-x (car points))) (round (point-y (car points))))
+    (send path move-to (point-x (car points)) (point-y (car points)))
     (let loop ([points (cdr points)])
       (unless (null? points)
         (send path line-to 
-              (round (point-x (car points)))
-              (round (point-y (car points))))
+              (point-x (car points))
+              (point-y (car points)))
         (loop (cdr points))))
     (send path close)
     ;(send path line-to (round (point-x (car points))) (round (point-y (car points))))
@@ -741,46 +824,58 @@ the mask bitmap and the original bitmap are all together in a single bytes!
 |#
 
 
-(define (get-rendered-bitmap bitmap)
-  (calc-renered-bitmap bitmap)
-  (bitmap-rendered-bitmap bitmap))
+(define (get-rendered-bitmap flip-bitmap)
+  (calc-rendered-bitmap flip-bitmap)
+  (bitmap-rendered-bitmap (flip-shape flip-bitmap)))
 
-(define (get-rendered-mask bitmap)
-  (calc-renered-bitmap bitmap)
-  (bitmap-rendered-mask bitmap))
+(define (get-rendered-mask flip-bitmap)
+  (calc-rendered-bitmap flip-bitmap)
+  (bitmap-rendered-mask (flip-shape flip-bitmap)))
 
-(define (calc-renered-bitmap bitmap)
-  (unless (bitmap-rendered-bitmap bitmap)
-    ;; fill in the rendered bitmap with the raw bitmaps.
-    (set-bitmap-rendered-bitmap! bitmap (bitmap-raw-bitmap bitmap))
-    (set-bitmap-rendered-mask! bitmap (bitmap-raw-mask bitmap))
-    (cond
-      [(and (= 1 (bitmap-x-scale bitmap))
-            (= 1 (bitmap-y-scale bitmap))
-            (= 0 (bitmap-angle bitmap)))
-       ;; if there's no scaling or rotation, we can just keep that bitmap.
-       (void)]
-      [(<= (* (bitmap-x-scale bitmap) 
-              (bitmap-y-scale bitmap))
-           1)
-       ;; since we prefer to rotate big things, we rotate first
-       (do-rotate bitmap)
-       (do-scale bitmap)]
-      [else
-       ;; since we prefer to rotate big things, we scale first
-       (do-scale bitmap)
-       (do-rotate bitmap)])))
+(define (calc-rendered-bitmap flip-bitmap)
+  (let ([bitmap (flip-shape flip-bitmap)])
+    (unless (bitmap-rendered-bitmap bitmap)
+      (let ([flipped? (flip-flipped? flip-bitmap)])
+        
+        ;; fill in the rendered bitmap with the raw bitmaps.
+        (set-bitmap-rendered-bitmap! bitmap (bitmap-raw-bitmap bitmap))
+        (set-bitmap-rendered-mask! bitmap (bitmap-raw-mask bitmap))
+        (cond
+          [(and (= 1 (bitmap-x-scale bitmap))
+                (= 1 (bitmap-y-scale bitmap))
+                (= 0 (bitmap-angle bitmap))
+                (not flipped?))
+           ;; if there's no scaling, rotation or flipping, we can just keep that bitmap.
+           (void)]
+          [(<= (* (bitmap-x-scale bitmap) 
+                  (bitmap-y-scale bitmap))
+               1)
+           ;; since we prefer to rotate big things, we rotate first
+           (do-rotate bitmap flipped?)
+           (do-scale bitmap)]
+          [else
+           ;; since we prefer to rotate big things, we scale first
+           (do-scale bitmap)
+           (do-rotate bitmap flipped?)])))))
 
-(define (do-rotate bitmap)
-  (let ([θ (degrees->radians (bitmap-angle bitmap))])
-    (let-values ([(bytes w h) (bitmap->bytes (bitmap-rendered-bitmap bitmap) 
-                                             (bitmap-rendered-mask bitmap))])
-      (let-values ([(rotated-bytes rotated-w rotated-h)
-                    (rotate-bytes bytes w h θ)])
-        (let* ([bm (bytes->bitmap rotated-bytes rotated-w rotated-h)]
-               [mask (send bm get-loaded-mask)])
-          (set-bitmap-rendered-bitmap! bitmap bm)
-          (set-bitmap-rendered-mask! bitmap mask))))))
+(define (do-rotate bitmap flip?)
+  (cond
+    [(and (not flip?) (zero? (bitmap-angle bitmap)))
+     ;; don't rotate anything in this case.
+     (void)]
+    [else
+     (let ([θ (degrees->radians (bitmap-angle bitmap))])
+       (let-values ([(bytes w h) (bitmap->bytes (bitmap-rendered-bitmap bitmap) 
+                                                (bitmap-rendered-mask bitmap))])
+         (let-values ([(rotated-bytes rotated-w rotated-h)
+                       (rotate-bytes bytes w h θ)])
+           (let* ([flipped-bytes (if flip?
+                                     (flip-bytes rotated-bytes rotated-w rotated-h)
+                                     rotated-bytes)]
+                  [bm (bytes->bitmap flipped-bytes rotated-w rotated-h)]
+                  [mask (send bm get-loaded-mask)])
+             (set-bitmap-rendered-bitmap! bitmap bm)
+             (set-bitmap-rendered-mask! bitmap mask)))))]))
 
 (define (do-scale bitmap)
   (let* ([bdc (make-object bitmap-dc%)]
@@ -814,10 +909,11 @@ the mask bitmap and the original bitmap are all together in a single bytes!
     (set-bitmap-rendered-mask! bitmap new-mask)))
 
 (define (text->font text)
+  (define adjusted-size (min (max (inexact->exact (round (text-size text))) 1) 255))
   (cond
     [(text-face text)
      (send the-font-list find-or-create-font
-           (text-size text)
+           adjusted-size
            (text-face text)
            (text-family text)
            (text-style text) 
@@ -825,7 +921,7 @@ the mask bitmap and the original bitmap are all together in a single bytes!
            (text-underline text))]
     [else
      (send the-font-list find-or-create-font
-           (text-size text)
+           adjusted-size
            (text-family text)
            (text-style text) 
            (text-weight text)
@@ -887,33 +983,70 @@ the mask bitmap and the original bitmap are all together in a single bytes!
         (color-blue color))))
 
 
-(define pen-ht (make-hash))
-
 (define (pen->pen-obj/cache pen)
-  (cond
-    [(and (equal? 'round (pen-join pen))
-          (equal? 'round (pen-cap pen)))
-     (send the-pen-list find-or-create-pen 
-           (pen-color pen)
-           (pen-width pen)
-           (pen-style pen))]
-    [else
-     (let* ([wb/f (hash-ref pen-ht pen #f)]
-            [pen-obj/f (and (weak-box? wb/f) (weak-box-value wb/f))])
-       (or pen-obj/f
-           (let ([pen-obj (pen->pen-obj pen)])
-             (hash-set! pen-ht pen (make-weak-box pen-obj))
-             pen-obj)))]))
-
-(define (pen->pen-obj pen)
-  (let ([ans (make-object pen% 
-               (pen-color pen)
-               (pen-width pen)
-               (pen-style pen))])
-    (send ans set-cap (pen-cap pen))
-    (send ans set-join (pen-join pen))
-    ans))
+  (send the-pen-list find-or-create-pen 
+        (pen-color pen)
+        (pen-width pen)
+        (pen-style pen)
+        (pen-cap pen)
+        (pen-join pen)))
        
+(define (to-img arg)
+  (cond
+    [(is-a? arg image-snip%) (image-snip->image arg)]
+    [(is-a? arg bitmap%) (bitmap->image arg)]
+    [else arg]))
+
+(define (image-snip->image is)
+  (let ([bm (send is get-bitmap)])
+    (cond
+      [(not bm)
+       ;; this might mean we have a cache-image-snip% 
+       ;; or it might mean we have a useless snip.
+       (let-values ([(w h) (if (is-a? is cis:cache-image-snip%)
+                               (send is get-size)
+                               (values 0 0))])
+         (make-image (make-polygon
+                      (list (make-point 0 0)
+                            (make-point w 0)
+                            (make-point w h)
+                            (make-point 0 h))
+                      'solid "black")
+                     (make-bb w h h)
+                     #f))]
+      [else
+       (bitmap->image bm
+                      (or (send is get-bitmap-mask)
+                          (send bm get-loaded-mask)))])))
+
+(define (bitmap->image bm [mask-bm (send bm get-loaded-mask)])
+  (let ([w (send bm get-width)]
+        [h (send bm get-height)])
+    (make-image (make-translate (/ w 2)
+                                (/ h 2)
+                                (make-bitmap bm mask-bm 0 1 1 #f #f))
+                (make-bb w h h)
+                #f)))
+
+(define (bitmap-write bitmap port mode)
+  (let* ([v (struct->vector bitmap)]
+         [recur (case mode
+                  [(#t) write]
+                  [(#f) display]
+                  [else (lambda (p port) (print p port mode))])]
+         [update 
+          (λ (i)
+            (let ([o (vector-ref v i)])
+              (let ([nv (and o 
+                             (call-with-values (λ () (bitmap->bytes o)) vector))])
+                (vector-set! v i nv))))])
+    (update 1)
+    (update 2)
+    ;; don't save the rendered bitmap (if it is there)
+    (vector-set! v 6 #f)
+    (vector-set! v 7 #f)
+    (recur v port)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -942,6 +1075,8 @@ the mask bitmap and the original bitmap are all together in a single bytes!
          make-bitmap bitmap? bitmap-raw-bitmap bitmap-raw-mask bitmap-angle bitmap-x-scale bitmap-y-scale 
          bitmap-rendered-bitmap bitmap-rendered-mask
 
+         make-flip flip? flip-flipped? flip-shape
+         
          (struct-out color)
          
          degrees->radians
@@ -957,9 +1092,13 @@ the mask bitmap and the original bitmap are all together in a single bytes!
          
          skip-image-equality-fast-path
          
-         scale-np-atomic)
+         scale-np-atomic
+         
+         to-img
+         bitmap->image
+         image-snip->image)
 
 ;; method names
-(provide get-shape get-bb get-normalized? get-normalized-shape)
+(provide get-shape get-bb get-pinhole get-normalized? get-normalized-shape)
 
 (provide np-atomic-shape? atomic-shape? simple-shape? cn-or-simple-shape? normalized-shape?)

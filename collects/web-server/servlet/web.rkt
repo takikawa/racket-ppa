@@ -23,11 +23,12 @@
 ;; determine if this url encodes a continuation and extract the instance id and
 ;; continuation id.
 (define (continuation-url? a-url)
-  (cond 
-    [(extract-param a-url "k")
-     => read/string]
-    [else
-     #f]))
+  (parameterize ([read-accept-dot #t])
+    (cond 
+      [(extract-param a-url "k")
+       => read/string]
+      [else
+       #f])))
 
 (provide/contract
  [continuation-url? (url? . -> . (or/c false/c (list/c number? number? number?)))])
@@ -36,8 +37,8 @@
 
 (provide/contract
  [current-servlet-continuation-expiration-handler (parameter/c expiration-handler/c)]
- [redirect/get (-> request?)]
- [redirect/get/forget (-> request?)]
+ [redirect/get (() (#:headers (listof header?)) . ->* . request?)]
+ [redirect/get/forget (() (#:headers (listof header?)) . ->* . request?)]
  [adjust-timeout! (number? . -> . void?)]
  [clear-continuation-table! (-> void?)]
  [send/back (response/c . -> . void?)]
@@ -139,13 +140,12 @@
 ;; ************************************************************
 ;; HIGHER-LEVEL EXPORTS
 
-(define ((make-redirect/get send/suspend))
-  (send/suspend (lambda (k-url) (redirect-to k-url temporarily))))
+(define ((make-redirect/get send/suspend) #:headers [hs empty])
+  (send/suspend (lambda (k-url) (redirect-to k-url temporarily #:headers hs))))
 
 ; redirect/get : -> request
 (define redirect/get (make-redirect/get send/suspend))
 (define redirect/get/forget (make-redirect/get send/forward))
-
 
 (define (with-errors-to-browser send/finish-or-back thunk)
   (with-handlers ([exn:fail? (lambda (exn)

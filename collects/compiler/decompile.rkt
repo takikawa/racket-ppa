@@ -16,6 +16,7 @@
              (namespace-require ''#%kernel)
              (namespace-require ''#%unsafe)
              (namespace-require ''#%flfxnum)
+             (namespace-require ''#%futures)
              (for/list ([l (namespace-mapped-symbols)])
                (cons l (with-handlers ([exn:fail? (lambda (x) #f)])
                          (compile l))))))]
@@ -159,8 +160,6 @@
      (extract-name name)]
     [(struct closure (lam gen-id))
      (extract-id lam)]
-    [(struct indirect (v))
-     (extract-id v)]
     [else #f]))
 
 (define (extract-ids! body ids)
@@ -176,14 +175,21 @@
     [(struct boxenv (pos body))
      (extract-ids! body ids)]
     [else #f]))
+
+(define (decompile-tl expr globs stack closed no-check?)
+  (match expr
+    [(struct toplevel (depth pos const? ready?))
+     (let ([id (list-ref/protect globs pos 'toplevel)])
+       (if (or no-check? const? ready?)
+           id
+           `(#%checked ,id)))]))
              
 (define (decompile-expr expr globs stack closed)
   (match expr
     [(struct toplevel (depth pos const? ready?))
-     (let ([id (list-ref/protect globs pos 'toplevel)])
-       (if (or const? ready?)
-           id
-           `(#%checked ,id)))]
+     (decompile-tl expr globs stack closed #f)]
+    [(struct varref (tl))
+     `(#%variable-reference ,(decompile-tl tl globs stack closed #t))]
     [(struct topsyntax (depth pos midpt))
      (list-ref/protect globs (+ midpt pos) 'topsyntax)]
     [(struct primval (id))
@@ -221,7 +227,7 @@
        (extract-ids! body ids)
        (let ([vars (for/list ([i (in-range count)]
                               [id (in-vector ids)])
-                     (or id (gensym 'localv)))])
+                     (or id (gensym (if boxes? 'localvb 'localv))))])
          `(let ,(map (lambda (i) `[,i ,(if boxes? `(#%box ?) '?)])
                      vars)
             ,(decompile-expr body globs (append vars stack) closed))))]
@@ -280,15 +286,10 @@
          (begin
            (hash-set! closed gen-id #t)
            `(#%closed ,gen-id ,(decompile-expr lam globs stack closed))))]
-    [(struct indirect (val))
-     (if (closure? val)
-         (decompile-expr val globs stack closed)
-         '???)]
     [else `(quote ,expr)]))
 
 (define (decompile-lam expr globs stack closed)
   (match expr
-    [(struct indirect (val)) (decompile-lam val globs stack closed)]
     [(struct closure (lam gen-id)) (decompile-lam lam globs stack closed)]
     [(struct lam (name flags num-params arg-types rest? closure-map closure-types max-let-depth body))
      (let ([vars (for/list ([i (in-range num-params)]

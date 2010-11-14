@@ -37,8 +37,6 @@ exec racket -qu "$0" ${1+"$@"}
   (define (clean-up-o1 bm)
     (delete-file (format "~a.o1" bm)))
 
-  (define (mk-racket bm) (void))
-  #;
   (define (mk-racket bm)
     (unless (directory-exists? "compiled")
       (make-directory "compiled"))
@@ -51,6 +49,27 @@ exec racket -qu "$0" ${1+"$@"}
   (define (clean-up-zo bm)
     (when (directory-exists? "compiled")
       (delete-directory/files "compiled")))
+
+  (define (mk-typed-racket-non-optimizing bm)
+    (unless (directory-exists? "typed/compiled")
+      (make-directory "typed/compiled"))
+    (parameterize ([current-namespace (make-base-namespace)]
+                   [read-accept-reader #t])
+      (let ([name (format "~a-non-optimizing.rkt" bm)])
+        (compile-file (format "typed/~a" name)
+                      (build-path "typed/compiled" (path-add-suffix name #".zo"))))))
+  (define (mk-typed-racket bm)
+    (unless (directory-exists? "typed/compiled")
+      (make-directory "typed/compiled"))
+    (parameterize ([current-namespace (make-base-namespace)]
+                   [read-accept-reader #t])
+      (let ([name (format "~a-optimizing.rkt" bm)])
+        (compile-file (format "typed/~a" name)
+                      (build-path "typed/compiled" (path-add-suffix name #".zo"))))))
+
+  (define (clean-up-typed bm)
+    (when (directory-exists? "typed/compiled")
+      (delete-directory/files "typed/compiled")))
 
   (define (clean-up-nothing bm)
     (void))
@@ -318,6 +337,7 @@ exec racket -qu "$0" ${1+"$@"}
                                peval
                                scheme
                                sort1))
+  (define racket-specific-progs '(nucleic3 ray))
 
   (define impls
     (list
@@ -360,7 +380,7 @@ exec racket -qu "$0" ${1+"$@"}
                   (system (format "plt-r5rs ~a.scm" bm)))
                 extract-racket-times
                 clean-up-plt-r5rs
-                null)
+                racket-specific-progs)
      (make-impl 'mzc
                 void
                 mk-mzc
@@ -397,69 +417,93 @@ exec racket -qu "$0" ${1+"$@"}
                 clean-up-zo
                 (append '(nucleic2)
                         mutable-pair-progs))
+     (make-impl 'typed-racket-non-optimizing
+                void
+                mk-typed-racket-non-optimizing
+                (lambda (bm)
+                  (system (format "racket -u typed/~a-non-optimizing.rkt" bm)))
+                extract-racket-times
+                clean-up-typed
+                (append mutable-pair-progs
+                        '(dynamic2 earley nboyer nucleic2 sboyer scheme2)))
+     (make-impl 'typed-racket
+                void
+                mk-typed-racket
+                (lambda (bm)
+                  (system (format "racket -u typed/~a-optimizing.rkt" bm)))
+                extract-racket-times
+                clean-up-typed
+                (append mutable-pair-progs
+                        '(dynamic2 earley nboyer nucleic2 sboyer scheme2)))
      (make-impl 'chicken
                 void
                 (run-mk "mk-chicken.rktl")
                 run-exe
                 extract-chicken-times
                 clean-up-bin
-                '(scheme2 takr2))
+                (append '(scheme2 takr2)
+                        racket-specific-progs))
      (make-impl 'bigloo
                 void
                 (run-mk "mk-bigloo.rktl")
                 run-exe
                 extract-bigloo-times
                 clean-up-bin
-                '(cpstack takr2))
+                (append '(cpstack takr2)
+                        racket-specific-progs))
      (make-impl 'gambit
                 void
                 (run-mk "mk-gambit.rktl")
                 run-gambit-exe
                 extract-gambit-times
                 clean-up-o1
-                '(nucleic2))
+                (append '(nucleic2)
+                        racket-specific-progs))
      (make-impl 'larceny
                 setup-larceny
                 mk-larceny
                 run-larceny
                 extract-larceny-times
                 clean-up-fasl
-                '())
+                racket-specific-progs)
      (make-impl 'ikarus
                 setup-ikarus
                 mk-ikarus
                 run-ikarus
                 extract-ikarus-times
                 clean-up-ikarus
-                '(takr))
+                (append '(takr)
+                        racket-specific-progs))
      (make-impl 'mit
                 void
                 mk-mit
                 run-mit
                 extract-mit-times
                 clean-up-mit
-                '(nucleic2 puzzle takr2))
+                (append '(nucleic2 puzzle takr2)
+                        racket-specific-progs))
      (make-impl 'scheme48
                 void
                 void
                 run-scheme48
                 extract-scheme48-times
                 void
-                '())
+                racket-specific-progs)
      (make-impl 'petite
                 void
                 void
                 run-petite
                 extract-petite-times
                 void
-                '())
+                racket-specific-progs)
      (make-impl 'guile
                 void
                 void
                 run-guile
                 extract-guile-times
                 void
-                '(ctak))
+                (append '(ctak)
+                        racket-specific-progs))
 ))
 
   (define obsolte-impls '(racket3m racketcgc racket-j racketcgc-j racketcgc-tl mzc mz-old))
@@ -488,9 +532,11 @@ exec racket -qu "$0" ${1+"$@"}
       nothing
       nqueens
       nucleic2
+      nucleic3
       paraffins
       peval
       puzzle
+      ray
       sboyer
       scheme
       scheme2
@@ -554,7 +600,7 @@ exec racket -qu "$0" ${1+"$@"}
 
   ;; Run benchmarks -------------------------------
 
-  (rprintf "; ~a\n" (date->string (seconds->date (current-seconds)) #t))
+  #;(rprintf "; ~a\n" (date->string (seconds->date (current-seconds)) #t))
 
   (parameterize ([current-directory bm-directory])
     (for-each (lambda (impl)

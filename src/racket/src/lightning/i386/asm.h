@@ -265,6 +265,7 @@ typedef _uc		jit_insn;
 #define	 _qO_r_XB(   OP	    ,R	,MD,MB,MI,MS	)  (	   _qO	    (  OP,R,0,MB),_qr_X(R,MD,MB,MI,MS)		  )
 #define	 _qO_r_Xd(   OP	    ,R	,MD,MB,MI,MS	)  (	   _qOd	    (  OP,R,0,MB),_qr_X(R,MD,MB,MI,MS)		  )
 #define	 _OO_r_X(    OP	    ,R	,MD,MB,MI,MS	)  (	   _OO	    (  OP  ),_r_X(   R	,MD,MB,MI,MS)		  )
+#define	 _qOO_r_X(    OP    ,R	,MD,MB,MI,MS	)  (	   _qOO	    (  OP  ),_r_X(   R	,MD,MB,MI,MS)		  )
 #define	  _O_r_X_B(  OP	    ,R	,MD,MB,MI,MS,B	)  (	    _O	    (  OP  ),_r_X(   R	,MD,MB,MI,MS) ,_jit_B(B)	  )
 #define	  _O_r_X_W(  OP	    ,R	,MD,MB,MI,MS,W	)  (	    _O	    (  OP  ),_r_X(   R	,MD,MB,MI,MS) ,_jit_W(W)	  )
 #define	  _O_r_X_L(  OP	    ,R	,MD,MB,MI,MS,L	)  (	    _O	    (  OP  ),_r_X(   R	,MD,MB,MI,MS) ,_jit_I(L)	  )
@@ -705,6 +706,8 @@ typedef _uc		jit_insn;
 #define MOVSBWmr(MD, MB, MI, MS, RD)	_wOO_r_X	(0x0fbe		     ,_r2(RD)		,MD,MB,MI,MS		)
 #define MOVSWLrr(RS, RD)		_OO_Mrm		(0x0fbf		,_b11,_r1(RD),_r1(RS)				)
 #define MOVSWLmr(MD, MB, MI, MS, RD)	_OO_r_X		(0x0fbf		     ,_r1(RD)		,MD,MB,MI,MS		)
+
+#define MOVSWQmr(MD, MB, MI, MS, RD)	_qOO_r_X	(0x0fbf		     ,_r1(RD)		,MD,MB,MI,MS		)
 
 
 #define MULBr(RS)			_O_Mrm		(0xf6		,_b11,_b100  ,_r1(RS)				)
@@ -1164,7 +1167,11 @@ typedef _uc		jit_insn;
 #define FLDTm(D,B,I,S)		ESCmi(D,B,I,S,035)     /* fld m80real  */
 #define FILDQm(D,B,I,S)		ESCmi(D,B,I,S,075)     /* fild m64int  */
 #define FSTPTm(D,B,I,S)		ESCmi(D,B,I,S,037)     /* fstp m80real */
-#define FISTPQm(D,B,I,S)	ESCmi(D,B,I,S,077)     /* fistp m64int */
+#ifdef JIT_X86_64
+# define FISTPQm(D,B,I,S)	ESCmi(D,B,I,S,077)     /* fistp m64int */
+#else
+# define FISTPQm(D,B,I,S)	FISTPLm(D,B,I,S)
+#endif
 
 #define FADDrr(RS,RD)		ESCrri(RS,RD,000)
 #define FMULrr(RS,RD)		ESCrri(RS,RD,001)

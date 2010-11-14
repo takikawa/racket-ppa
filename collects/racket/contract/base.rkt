@@ -4,7 +4,11 @@
 ;; the PLT code base where appropriate.
 
 (require "private/arrow.rkt"
+         "private/arr-i.rkt"
          "private/base.rkt"
+         "private/box.rkt"
+         "private/hash.rkt"
+         "private/vector.rkt"
          "private/misc.rkt"
          "private/provide.rkt"
          "private/guts.rkt"
@@ -21,7 +25,12 @@
              making-a-method
              procedure-accepts-and-more?
              check-procedure
-             check-procedure/more)
+             check-procedure/more
+             make-contracted-function)
+ (all-from-out "private/arr-i.rkt")
+ (all-from-out "private/box.rkt")
+ (all-from-out "private/hash.rkt")
+ (all-from-out "private/vector.rkt")
  (except-out (all-from-out "private/misc.rkt")
              check-between/c
              check-unary-between/c)

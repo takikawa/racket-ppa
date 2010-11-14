@@ -18,14 +18,16 @@
          "option-sig.rkt"
          compiler/sig
          launcher/launcher-sig
+         dynext/dynext-sig
 
          "unpack.rkt"
          "getinfo.rkt"
          "dirs.rkt"
          "main-collects.rkt"
          "private/path-utils.rkt"
-         "private/omitted-paths.rkt")
-
+         "private/omitted-paths.rkt"
+         "parallel-build.rkt"
+         "collects.rkt")
 (define-namespace-anchor anchor)
 
 ;; read info files using whatever namespace, .zo-use, and compilation
@@ -48,6 +50,7 @@
 (define-unit setup@
   (import setup-option^
           compiler^
+          dynext:file^
           (prefix compiler:option: compiler:option^)
           launcher^)
   (export)
@@ -59,6 +62,15 @@
     (if (compile-mode)
       (build-path "compiled" (compile-mode))
       (build-path "compiled")))
+
+  (unless (make-user)
+    (current-library-collection-paths
+     (if (member main-collects-dir (current-library-collection-paths))
+       (list main-collects-dir)
+       '())))
+
+  (current-library-collection-paths
+   (map simple-form-path (current-library-collection-paths)))
 
   (define (setup-fprintf p task s . args)
     (let ([task (if task (string-append task ": ") "")])
@@ -85,6 +97,8 @@
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
   (define errors null)
+  (define (append-error cc desc exn out err type)
+    (set! errors (cons (list cc desc exn out err type) errors)))
   (define (record-error cc desc go fail-k)
     (with-handlers ([exn:fail?
                      (lambda (x)
@@ -93,7 +107,7 @@
                             (format "~a\n" (exn->string x))
                             x)
                            (fprintf (current-error-port) "~a\n" (exn->string x)))
-                       (set! errors (cons (list cc desc x) errors))
+                       (append-error cc desc x "" "" "error")
                        (fail-k))])
       (go)))
   (define-syntax begin-record-error
@@ -101,10 +115,11 @@
       [(_ cc desc body ...) (record-error cc desc (lambda () body ...) void)]))
   (define (show-errors port)
     (for ([e (reverse errors)])
-      (match-let ([(list cc desc x) e])
-        (setup-fprintf port "error" "during ~a for ~a"
-                       desc (if (cc? cc) (cc-name cc) cc))
-        (setup-fprintf port #f "  ~a" (exn->string x)))))
+      (match-let ([(list cc desc x out err type) e])
+        (setup-fprintf port type "during ~a for ~a" desc (if (cc? cc) (cc-name cc) cc))
+        (when (not (null? x)) (setup-fprintf port #f "  ~a" (exn->string x)))
+        (when (not (zero? (string-length out))) (eprintf "STDOUT:\n~a=====\n" out))
+        (when (not (zero? (string-length err))) (eprintf "STDERR:\n~a=====\n" err)))))
 
   (define (done)
     (setup-printf #f "done")
@@ -145,10 +160,6 @@
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;              Find Collections                 ;;
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-  (define-struct cc
-    (collection path name info root-dir info-path shadowing-policy)
-    #:inspector #f)
 
   (define (make-cc* collection path root-dir info-path shadowing-policy)
     (define info
@@ -271,13 +282,57 @@
             (let loop ([l collections-to-compile])
               (append-map (lambda (cc) (cons cc (loop (get-subs cc)))) l))))
 
+  (define (collection-tree-map collections-to-compile 
+              #:skip-path [orig-skip-path (and (avoid-main-installation) (find-collects-dir))])
+    (define skip-path (and orig-skip-path (path->bytes 
+                                           (simplify-path (if (string? orig-skip-path)
+                                                              (string->path orig-skip-path)
+                                                              orig-skip-path)
+                                                          #f))))
+    (define (skip-path? path)
+      (and skip-path
+           (let ([b (path->bytes (simplify-path path #f))]
+                 [len (bytes-length skip-path)])
+             (and ((bytes-length b) . > . len)
+                  (bytes=? (subbytes b 0 len) skip-path)))
+           path))
+      
+    (define (build-collection-tree cc)
+      (define (make-child-cc parent-cc name) 
+        (collection->cc (append (cc-collection parent-cc) (list name))))
+      (let* ([info (cc-info cc)]
+             [ccp (cc-path cc)]
+             ;; note: omit can be 'all, if this happens then this
+             ;; collection should not have been included, but we might
+             ;; jump in if a command-line argument specified a
+             ;; coll/subcoll
+             [omit (omitted-paths ccp getinfo)])
+          (let-values ([(dirs files)
+             (if (eq? 'all omit)
+                 (values null null)
+                 (partition (lambda (x) (directory-exists? (build-path ccp x)))
+                   (filter (lambda (p) 
+                             (not (or (member p omit)
+                                      (skip-path? p))))
+                           (directory-list ccp))))])
+            (let ([children-ccs (map build-collection-tree (filter-map (lambda (x) (make-child-cc cc x)) dirs))]
+                      
+                  [srcs (append
+                           (filter extract-base-filename/ss files)
+                           (if (make-docs)
+                               (map car (call-info info 'scribblings (lambda () null) (lambda (x) #f)))
+                               null))])
+              (list cc srcs children-ccs)))))
+    (map build-collection-tree collections-to-compile))
+      
+
+    
   (define (plt-collection-closure collections-to-compile)
-    (collection-closure
-     collections-to-compile
-     (lambda (cc subs)
-       (map (lambda (sub)
-              (collection->cc (append (cc-collection cc) (list sub))))
-            subs))))
+    (define (make-children-ccs cc children)
+      (map (lambda (child)
+           (collection->cc (append (cc-collection cc) (list child))))
+           children))
+    (collection-closure collections-to-compile make-children-ccs))
 
   (define (check-again-all given-ccs)
     (define (cc->name cc)
@@ -320,34 +375,42 @@
   (define (sort-collections ccs)
     (sort ccs string<? #:key cc-name))
 
+  (define (sort-collections-tree ccs)
+    (sort ccs string<? #:key (lambda (x) (cc-name (first x)))))
+
+  (define top-level-plt-collects
+    (if no-specific-collections?
+      all-collections
+      (check-again-all
+       (filter-map
+        (lambda (c)
+          (collection->cc (append-map (lambda (s)
+                                        (map string->path
+                                             (regexp-split #rx"/" s)))
+                                      c)))
+        x-specific-collections))))
+
+  (define planet-collects
+    (if (make-planet)
+      (filter-map (lambda (spec) (apply planet->cc spec))
+                  (if no-specific-collections?
+                    (get-all-planet-packages)
+                    (filter-map planet-spec->planet-list
+                                x-specific-planet-dirs)))
+      null))
+  
+  (define planet-dirs-to-compile
+    (sort-collections
+      (collection-closure
+        planet-collects
+        (lambda (cc subs)
+          (map (lambda (p) (planet-cc->sub-cc cc (list (path->bytes p)))) subs)))))
+
   (define ccs-to-compile 
-    (let ([planet-dirs-to-compile
-            (sort-collections
-              (collection-closure
-                (if (make-planet)
-                  (filter-map (lambda (spec) (apply planet->cc spec))
-                              (if no-specific-collections?
-                                (get-all-planet-packages)
-                                (filter-map planet-spec->planet-list
-                                            x-specific-planet-dirs)))
-                  null)
-                (lambda (cc subs)
-                  (map (lambda (p) (planet-cc->sub-cc cc (list (path->bytes p))))
-                       subs))))]
-          [collections-to-compile
-            (sort-collections
-             (plt-collection-closure
-              (if no-specific-collections?
-                all-collections
-                (check-again-all
-                 (filter-map
-                  (lambda (c)
-                    (collection->cc (append-map (lambda (s)
-                                                  (map string->path
-                                                       (regexp-split #rx"/" s)))
-                                                c)))
-                  x-specific-collections)))))])
-    (append collections-to-compile planet-dirs-to-compile)))
+    (append
+      (sort-collections (plt-collection-closure top-level-plt-collects))
+      planet-dirs-to-compile))
+
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;                  Clean                        ;;
@@ -404,8 +467,8 @@
         (for ([path paths])
           (let ([full-path (build-path (cc-path cc) path)])
             (when (or (file-exists? full-path) (directory-exists? full-path))
-              (let ([path (find-relative-path (normalize-path (cc-path cc))
-                                              (normalize-path full-path))])
+              (let ([path (find-relative-path (simple-form-path (cc-path cc))
+                                              (simple-form-path full-path))])
                 (let loop ([path path])
                   (let-values ([(base name dir?) (split-path path)])
                     (cond
@@ -522,7 +585,7 @@
              [doing-path (lambda (path)
                            (unless (verbose)
                              (let ([path (normal-case-path (path-only path))])
-                               (unless (hash-ref dir-table path (lambda () #f))
+                               (unless (hash-ref dir-table path #f)
                                  (hash-set! dir-table path #t)
                                  (print-verbose oop path)))))])
         (parameterize ([current-output-port (if (verbose) (current-output-port) (open-output-nowhere))]
@@ -545,17 +608,6 @@
                          (not (hash-ref ok-zo-files (path-replace-suffix p #".zo") #f)))
                 (setup-fprintf (current-error-port) #f " deleting ~a" (build-path c p))
                 (delete-file (build-path c p)))))))))
-
-  (define (compile-cc cc)
-    (define compile-skip-directory
-      (and (avoid-main-installation)
-           (find-collects-dir)))
-    (let ([dir (cc-path cc)]
-          [info (cc-info cc)])
-      (clean-cc dir info)
-      (compile-directory-zos dir info 
-                             #:skip-path compile-skip-directory 
-                             #:skip-doc-sources? (not (make-docs)))))
 
   (define-syntax-rule (with-specified-mode body ...)
     (let ([thunk (lambda () body ...)])
@@ -585,28 +637,56 @@
                               (thunk)))])
             (thunk))))))
 
+  (define (compile-cc cc gcs)
+    (parameterize ([current-namespace (make-base-empty-namespace)])
+      (begin-record-error cc "making"
+        (setup-printf "making" "~a" (cc-name cc))
+        (control-io
+          (lambda (p where) 
+            (set! gcs 2) 
+            (setup-fprintf p #f " in ~a" (path->name (path->complete-path where (cc-path cc)))))
+          (let ([dir (cc-path cc)]
+                [info (cc-info cc)])
+            (clean-cc dir info)
+            (compile-directory-zos dir info 
+                                   #:skip-path (and (avoid-main-installation) (find-collects-dir))
+                                   #:skip-doc-sources? (not (make-docs)))))))
+    (match gcs
+      [0 0]
+      [else 
+        (collect-garbage)
+        (sub1 gcs)]))
+
   ;; To avoid polluting the compilation with modules that are already loaded,
   ;; create a fresh namespace before calling this function.
   ;; To avoid keeping modules in memory across collections, pass
   ;; `make-base-namespace' as `get-namespace', otherwise use
   ;; `current-namespace' for `get-namespace'.
+  (define (iterate-cct thunk cct)
+    (let loop ([cct cct])
+      (map (lambda (x) (thunk (first x)) (loop (third x))) cct)))
+
   (define (make-zo-step)
+    (define (move-drscheme-to-end cct)
+      (call-with-values (lambda () (partition (lambda (x) (not (string=? (cc-name (car x)) "drscheme"))) cct)) append))
     (setup-printf #f "--- compiling collections ---")
-    (with-specified-mode
-      (let ([gcs 0])
-        (for ([cc ccs-to-compile])
-          (parameterize ([current-namespace (make-base-empty-namespace)])
-            (begin-record-error cc "making"
-              (setup-printf "making" "~a" (cc-name cc))
-              (control-io
-                (lambda (p where) 
-                  (set! gcs 2) 
-                  (setup-fprintf p #f " in ~a" (path->name (path->complete-path where (cc-path cc)))))
-                (compile-cc cc))))
-          (unless (zero? gcs)
-            (set! gcs (sub1 gcs))
-            (collect-garbage))))))
-    
+    (match (parallel-workers)
+      [(? (lambda (x) (x . > . 1)))
+        (compile-cc (collection->cc (list (string->path "racket"))) 0)
+        (managed-compile-zo (build-path main-collects-dir  "setup/parallel-build-worker.rkt"))
+        (with-specified-mode
+          (let ([cct (move-drscheme-to-end (sort-collections-tree (collection-tree-map top-level-plt-collects)))])
+            (iterate-cct (lambda (cc)
+              (let ([dir (cc-path cc)]
+                    [info (cc-info cc)])
+                  (clean-cc dir info))) cct)
+            (parallel-compile (parallel-workers) setup-fprintf append-error cct))
+          (for/fold ([gcs 0]) ([cc planet-dirs-to-compile])
+            (compile-cc cc gcs)))]
+      [else
+        (with-specified-mode
+          (for/fold ([gcs 0]) ([cc ccs-to-compile])
+            (compile-cc cc gcs)))]))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;               Info-Domain Cache               ;;
@@ -655,12 +735,11 @@
                                               (and (if (cc-root-dir cc)
                                                      (relative-path? p)
                                                      (complete-path? p))
-                                                   (file-exists?
-                                                    (build-path
-                                                     (if (cc-root-dir cc)
-                                                       (build-path (cc-root-dir cc) p)
-                                                       p)
-                                                     "info.rkt"))))))
+                                                   (let ([dir (if (cc-root-dir cc)
+                                                                  (build-path (cc-root-dir cc) p)
+                                                                  p)])
+                                                     (or (file-exists? (build-path dir "info.rkt"))
+                                                         (file-exists? (build-path dir "info.ss"))))))))
                                      a)
                                   (list (? symbol? b) ...)
                                   c
@@ -719,6 +798,8 @@
 
   (define (doc:setup-scribblings latex-dest auto-start-doc?)
     (scr:call 'setup-scribblings
+              (parallel-workers)
+              name-str
               (if no-specific-collections? #f (map cc-path ccs-to-compile))
               latex-dest auto-start-doc? (make-user)
               (lambda (what go alt) (record-error what "Building docs" go alt))
@@ -881,15 +962,6 @@
   ;; setup-unit Body                ;;
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-  (unless (make-user)
-    (current-library-collection-paths
-     (if (member main-collects-dir (current-library-collection-paths))
-       (list main-collects-dir)
-       '())))
-
-  (current-library-collection-paths
-   (map simplify-path (current-library-collection-paths)))
-
   (setup-printf "version" "~a [~a]" (version) (system-type 'gc))
   (setup-printf "variants" "~a" (string-join (map symbol->string (available-mzscheme-variants)) ", "))
   (setup-printf "main collects" "~a" (path->string main-collects-dir))
@@ -914,7 +986,7 @@
 
   (when (make-docs)
     ;; Double-check that "setup/scribble" is present.
-    (when (file-exists? (build-path (collection-path "setup") "scribble.rkt"))
+    (when (file-exists? (collection-file-path "scribble.rkt" "setup"))
       (make-docs-step)))
   (when (doc-pdf-dest) (doc-pdf-dest-step))
 

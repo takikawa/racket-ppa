@@ -2,7 +2,7 @@
 (module htdp-intermediate scheme/base
   (require "private/teach.ss"
            "private/teachprims.ss"
-	   "private/contract-forms.ss"
+	   "private/teach-module-begin.ss"
 	   mzlib/etc
 	   mzlib/list
 	   syntax/docprovide
@@ -37,8 +37,6 @@
             [intermediate-unquote-splicing unquote-splicing]
             [intermediate-time time]
             [intermediate-module-begin #%module-begin]
-            ;; [intermediate-contract contract]
-            ;; [intermediate-define-data define-data]
             )
            check-expect
            check-within
@@ -47,7 +45,14 @@
            check-range
 	   #%datum
            #%top-interaction
-	   empty true false)
+	   empty true false
+
+; 	   signature : -> mixed one-of predicate combined
+; 	   Number Real Rational Integer Natural Boolean True False String Symbol Char Empty-list Any
+; 	   cons-of
+; 	   Property 
+; 	   check-property for-all ==> expect expect-within expect-member-of expect-range
+	   )
 
   ;; procedures:
   (provide-and-document

@@ -29,7 +29,17 @@ same line as @hash-lang[], with only whitespace between
   #lang scribble/sigplan @10pt
 }|
 
-The @racket[10pt] and @racket[preprint] options can be
+@defidform[nocopyright]{
+
+Enables the @tt{nocopyright} option. Use @racket[nocopyright] only on the
+same line as @hash-lang[], with only whitespace between
+@racketmodname[scribble/sigplan] and @racket[nocopyright]:
+
+@verbatim[#:indent 2]|{
+  #lang scribble/sigplan @nocopyright
+}|}
+
+The @racket[10pt], @racket[preprint], and @racket[nocopyright] options can be
 used together and may appear in any order.
 }
 
@@ -65,9 +75,9 @@ Declares information that is collected into the copyright region of the paper.}
 @defproc[(category [CR-number pre-content?] 
                    [subcategory pre-content?]
                    [third-level pre-content?]
-                   [fourth-level (or/c #f pre-content?) #f]) block?]
-@defproc[(terms [content pre-content?] ...) block?]
-@defproc[(keywords [content pre-content?] ...) block?]
+                   [fourth-level (or/c #f pre-content?) #f]) content?]
+@defproc[(terms [content pre-content?] ...) content?]
+@defproc[(keywords [content pre-content?] ...) content?]
 )]{
 
 Typesets category, term, and keyword information for the paper, which

@@ -679,12 +679,15 @@ all non-GUI portions of Redex) and also exported by
               ([domain (code:line) (code:line #:domain @#,ttpattern)]
                [main-arrow (code:line) (code:line #:arrow arrow)]
                [reduction-case (--> @#,ttpattern @#,tttterm extras ...)]
-               [extras name
+               [extras rule-name
                        (fresh fresh-clause ...)
                        (side-condition racket-expression)
                        (where tl-pat @#,tttterm)
                        (side-condition/hidden racket-expression)
                        (where/hidden tl-pat @#,tttterm)]
+               [rule-name identifier
+                          string 
+                          (computed-name racket-expression)]
                [fresh-clause var ((var1 ...) (var2 ...))]
                [tl-pat identifier (tl-pat-ele ...)]
                [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
@@ -697,8 +700,25 @@ refers to the @racket[language], and binds variables in the
 
 Following the @|pattern| and @|tterm| can be the name of the
 reduction rule, declarations of some fresh variables, and/or
-some side-conditions. The name can either be a literal
-name (identifier), or a literal string. 
+some side-conditions.
+
+The rule's name (used in @seclink["Typesetting" "typesetting"],
+the @racket[stepper], @racket[traces], and 
+@racket[apply-reduction-relation/tag-with-names]) can be given
+as a literal (an identifier or a string) or as an expression
+that computes a name using the values of the bound pattern
+variables (much like the rule's right-hand side). Some operations
+require literal names, so a rule definition may provide both
+a literal name and a computed name. In particular, only rules that include
+a literal name may be replaced using @racket[extend-reduction-relation],
+used as breakpoints in the @racket[stepper], and selected using
+@racket[render-reduction-relation-rules]. The output of 
+@racket[apply-reduction-relation/tag-with-names], @racket[traces], and
+the @racket[stepper] prefers the computed name, if it exists. Typesetting
+a rule with a computed name shows the expression that computes the name
+only when the rule has no literal name or when it would not typeset in 
+pink due to @racket[with-unquote-rewriter]s in the context; otherwise,
+the literal name (or nothing) is shown.
 
 The fresh variables clause generates variables that do not
 occur in the term being matched. If the @racket[fresh-clause] is a
@@ -821,10 +841,9 @@ arguments would have stepped.
 }
 
 @defproc[(reduction-relation->rule-names [r reduction-relation?])
-         (listof (union false/c symbol?))]{
+         (listof symbol?)]{
 
-Returns the names of all of the reduction relation's clauses
-(or false if there is no name for a given clause).
+Returns the names of the reduction relation's named clauses.
 }
 
 @defform[(compatible-closure reduction-relation lang non-terminal)]{
@@ -875,6 +894,19 @@ sequences that do not repeat, this function will not
 terminate (it does terminate if the only infinite reduction paths are cyclic).
 }
 
+@examples[
+#:eval redex-eval
+       (define-language empty-lang)
+       (define R
+         (reduction-relation
+          empty-lang
+          (--> 0 1)
+          (--> 0 2)
+          (--> 2 3)
+          (--> 3 3)))
+       (apply-reduction-relation R 0)
+       (apply-reduction-relation* R 0)]                        
+                        
 @defidform[-->]{ Recognized specially within
   @racket[reduction-relation]. A @racket[-->] form is an
   error elsewhere.  }
@@ -1209,12 +1241,16 @@ repeating as necessary. The optional keyword argument @racket[retries-expr]
                        (code:line #:source metafunction)
                        (code:line #:source relation-expr)
                        (code:line #:retries retries-expr)
-                       (code:line #:print? print?-expr)])
+                       (code:line #:print? print?-expr)
+                       (code:line #:attempt-size attempt-size-expr)
+                       (code:line #:prepare prepare-expr)])
               #:contracts ([property-expr any/c]
                            [attempts-expr natural-number/c]
                            [relation-expr reduction-relation?]
                            [retries-expr natural-number/c]
-                           [print?-expr any/c])]{
+                           [print?-expr any/c]
+                           [attempt-size-expr (-> natural-number/c natural-number/c)]
+                           [prepare-expr (-> any/c any/c)])]{
 Searches for a counterexample to @racket[property-expr], interpreted
 as a predicate universally quantified over the pattern variables
 bound by @racket[pattern]. @racket[redex-check] constructs and tests 
@@ -1224,8 +1260,11 @@ using the @racket[match-bindings] produced by @racket[match]ing
 @math{t} against @racket[pattern].
 
 @racket[redex-check] generates at most @racket[attempts-expr] (default @racket[1000])
-random terms in its search. The size and complexity of these terms increase with 
-each failed attempt. 
+random terms in its search. The size and complexity of these terms tend to increase 
+with each failed attempt. The @racket[#:attempt-size] keyword determines the rate at which
+terms grow by supplying a function that bounds term size based on the number of failed
+attempts (see @racket[generate-term]'s @racket[#:size] keyword). By default, the bound
+grows logarithmically with failed attempts.
 
 When @racket[print?-expr] produces any non-@racket[#f] value (the default), 
 @racket[redex-check] prints the test outcome on @racket[current-output-port].
@@ -1236,6 +1275,14 @@ nothing, instead
   @item{returning @racket[#t] when all tests pass, or}
   @item{raising a @racket[exn:fail:redex:test] when checking the property raises an exception.}
 ]
+
+The optional @racket[#:prepare] keyword supplies a function that transforms each
+generated example before @racket[redex-check] checks @racket[property-expr].
+This keyword may be useful when @racket[property-expr] takes the form
+of a conditional, and a term chosen freely from the grammar is unlikely to
+satisfy the conditional's hypothesis. In some such cases, the @racket[prepare] 
+keyword  can be used to increase the probability that an example satifies the
+hypothesis.
 
 When passed a metafunction or reduction relation via the optional @racket[#:source]
 argument, @racket[redex-check] distributes its attempts across the left-hand sides
@@ -1280,7 +1327,18 @@ term that does not match @racket[pattern].}
           (Σ number ...)
           (printf "~s\n" (term (number ...)))
           #:attempts 3
-          #:source R))]
+          #:source R))
+                      
+       (redex-check
+        empty-lang
+        number
+        (begin
+          (printf "checking ~s\n" (term number))
+          (positive? (term number)))
+        #:prepare (λ (n)
+                    (printf "preparing ~s; " n)
+                    (add1 (abs n)))
+        #:attempts 3)]
 
 @defstruct[counterexample ([term any/c]) #:inspector #f]{
 Produced by @racket[redex-check], @racket[check-reduction-relation], and 
@@ -1294,10 +1352,16 @@ and the @racket[exn:fail:redex:test-term] component contains the term that induc
 
 @defform/subs[(check-reduction-relation relation property kw-args ...)
               ([kw-arg (code:line #:attempts attempts-expr)
-                       (code:line #:retries retries-expr)])
+                       (code:line #:retries retries-expr)
+                       (code:line #:print? print?-expr)
+                       (code:line #:attempt-size attempt-size-expr)
+                       (code:line #:prepare prepare-expr)])
               #:contracts ([property (-> any/c any/c)]
                            [attempts-expr natural-number/c]
-                           [retries-expr natural-number/c])]{
+                           [retries-expr natural-number/c]
+                           [print?-expr any/c]
+                           [attempt-size-expr (-> natural-number/c natural-number/c)]
+                           [prepare-expr (-> any/c any/c)])]{
 Tests @racket[relation] as follows: for each case of @racket[relation],
 @racket[check-reduction-relation] generates @racket[attempts] random
 terms that match that case's left-hand side and applies @racket[property] 
@@ -1311,13 +1375,20 @@ when @racket[relation] is a relation on @racket[L] with @racket[n] rules.}
 
 @defform/subs[(check-metafunction metafunction property kw-args ...)
               ([kw-arg (code:line #:attempts attempts-expr)
-                       (code:line #:retries retries-expr)])
+                       (code:line #:retries retries-expr)
+                       (code:line #:print? print?-expr)
+                       (code:line #:attempt-size attempt-size-expr)
+                       (code:line #:prepare prepare-expr)])
               #:contracts ([property (-> (listof any/c) any/c)]
                            [attempts-expr natural-number/c]
-                           [retries-expr natural-number/c])]{
+                           [retries-expr natural-number/c]
+                           [print?-expr any/c]
+                           [attempt-size-expr (-> natural-number/c natural-number/c)]
+                           [prepare-expr (-> (listof any/c) (listof any/c))])]{
 Like @racket[check-reduction-relation] but for metafunctions. 
 @racket[check-metafunction] calls @racket[property] with lists
-containing arguments to the metafunction.}
+containing arguments to the metafunction. Similarly, @racket[prepare-expr]
+produces and consumes argument lists.}
 
 @examples[
 #:eval redex-eval
@@ -1343,27 +1414,33 @@ containing arguments to the metafunction.}
 @deftech{Debugging PLT Redex Programs}
 
 It is easy to write grammars and reduction rules that are
-subtly wrong and typically such mistakes result in examples
-that just get stuck when viewed in a @racket[traces] window.
+subtly wrong. Typically such mistakes result in examples
+that get stuck when viewed in a @racket[traces] window.
 
 The best way to debug such programs is to find an expression
-that looks like it should reduce but doesn't and try to find
-out what pattern is failing to match. To do so, use the
-@racket[redex-match] special form, described above.
+that looks like it should reduce, but doesn't, then try to find
+out which pattern is failing to match. To do so, use the
+@racket[redex-match] form.
 
-In particular, first ceck to see if the term matches the
-main non-terminal for your system (typically the expression
-or program nonterminal). If it does not, try to narrow down
-the expression to find which part of the term is failing to
-match and this will hopefully help you find the problem. If
-it does match, figure out which reduction rule should have
-matched, presumably by inspecting the term. Once you have
-that, extract a pattern from the left-hand side of the
-reduction rule and do the same procedure until you find a
-small example that shoudl work but doesn't (but this time
-you might also try simplifying the pattern as well as
-simplifying the expression).
+In particular, first check if the term in question matches the
+your system's main non-terminal (typically the expression
+or program non-terminal). If it does not match, simplify the term
+piece by piece to determine whether the problem is in the
+term or the grammar. 
 
+If the term does match your system's main
+non-terminal, determine by inspection which reduction rules
+should apply. For each such rule, repeat the above term-pattern 
+debugging procedure, this time using the rule's left-hand side 
+pattern instead of the system's main non-terminal. In addition
+to simplifying the term, also consider simplifying the pattern.
+
+If the term matches the left-hand side, but the rule does not 
+apply, then one of the rule's @racket[side-condition] or 
+@racket[where] clauses is not satisfied. Using the bindings
+reported by @racket[redex-match], check each @racket[side-condition]
+expression and each @racket[where] pattern-match to discover which
+clause is preventing the rule's application.
 
 @section{GUI}
 @defmodule[redex/gui]
@@ -1400,8 +1477,8 @@ exploring reduction sequences.
          void?]{
 
 This function opens a new window and inserts each expression
-in expr (if @racket[multiple?] is #t -- if
-@racket[multiple?] is #f, then expr is treated as a single
+in expr (if @racket[multiple?] is @racket[#t] -- if
+@racket[multiple?] is @racket[#f], then expr is treated as a single
 expression). Then, it reduces the terms until at least
 @racket[reduction-steps-cutoff] (see below) different terms are
 found, or no more reductions can occur. It inserts each new
@@ -1538,7 +1615,14 @@ behavior of its third argument in the reduction system
 described by its first two arguments. 
 
 The @racket[pp] argument is the same as to the
-@racket[traces] functions (above).
+@racket[traces] functions (above) but is here for
+backwards compatibility only and
+should not be changed for most uses, but instead adjusted with
+@racket[pretty-print-parameters]. Specifically, the 
+highlighting shown in the stepper window can be wrong if
+@racket[default-pretty-printer] does not print sufficiently similarly
+to how @racket[pretty-print] prints (when adjusted by
+@racket[pretty-print-parameters]'s behavior, of course).
 }
 
 @defproc[(stepper/seed [reductions reduction-relation?]
@@ -1671,11 +1755,24 @@ the color used to fill the arrowhead and the text colors control the
 color used to draw the label on the edge.
 }
 
-@defproc[(default-pretty-printer [v any] [port output-port] [width number] [text (is-a?/c text%)]) void?]{
+@defparam[pretty-print-parameters f (-> (-> any/c) any/c)]{
+  A parameter that is used to set other @racket[pretty-print]
+  parameters. 
+  
+  Specifically, whenever @racket[default-pretty-printer] prints
+  something it calls @racket[f] with a thunk that does the actual
+  printing. Thus, @racket[f] can adjust @racket[pretty-print]'s
+  parameters to adjust how printing happens.
+
+}
+                                                                       
+@defproc[(default-pretty-printer [v any/c] [port output-port?] [width exact-nonnegative-integer?] [text (is-a?/c text%)]) void?]{
 
 This is the default value of @racket[pp] used by @racket[traces] and
 @racket[stepper] and it uses
-@racket[pretty-print].
+@racket[pretty-print]. 
+
+This function uses the value of @racket[pretty-print-parameters] to adjust how it prints.
 
 It sets the @racket[pretty-print-columns] parameter to
 @racket[width], and it sets @racket[pretty-print-size-hook]
@@ -1854,15 +1951,15 @@ This function sets @racket[dc-for-text-size]. See also
 
 @defparam[extend-language-show-union show? boolean?]{
 
-If this is #t, then a language constructed with
+If this is @racket[#t], then a language constructed with
 extend-language is shown as if the language had been
-constructed directly with @racket[language]. If it is #f, then only
+constructed directly with @racket[language]. If it is @racket[#f], then only
 the last extension to the language is shown (with
 four-period ellipses, just like in the concrete syntax).
 
 Defaultly @racket[#f].
 
-Note that the #t variant can look a little bit strange if
+Note that the @racket[#t] variant can look a little bit strange if
 @racket[....] are used and the original version of the language has
 multi-line right-hand sides.
 }
@@ -1941,7 +2038,24 @@ The @racket['left-right/beside-side-conditions] variant is like
 @racket['left-right], except it puts the side-conditions on the 
 same line, instead of on a new line below the case.}
 
-
+@defparam[delimit-ellipsis-arguments? delimit? any/c]{
+This parameter controls the typesetting of metafunction definitions
+and applications. When it is non-@racket[#f] (the default), commas
+precede ellipses that represent argument sequences; when it is 
+@racket[#f] no commas appear in those positions.
+}                                                                            
+                                                                            
+@defparam[linebreaks breaks (or/c #f (listof boolean?))]{
+  This parameter controls which cases in the metafunction 
+  are rendered on two lines and which are rendered on one.
+  
+  If its value is a list, the length of the list must match
+  the number of cases and each boolean indicates if that
+  case has a linebreak or not.
+  
+  This influences the @racket['left/right] styles only.
+}
+                                                                            
 @defparam[metafunction-cases 
           cases
           (or/c #f (and/c (listof (and/c integer?
@@ -1954,6 +2068,8 @@ cases appear. If it is a list of numbers, then only the selected cases appear (c
 
 @deftogether[[
 @defparam[label-style style text-style/c]{}
+@defparam[grammar-style style text-style/c]{}
+@defparam[paren-style style text-style/c]{}
 @defparam[literal-style style text-style/c]{}
 @defparam[metafunction-style style text-style/c]{}
 @defparam[non-terminal-style style text-style/c]{}
@@ -1974,6 +2090,12 @@ names. The @racket[literal-style] is used for names that aren't
 non-terminals that appear in patterns. The
 @racket[metafunction-style] is used for the names of
 metafunctions. 
+The @racket[paren-style] is used for the parentheses 
+(including ``['', ``]'', ``@"{"'', and ``@"}"'',
+as well as ``('' and ``)''), but not for the square brackets used for
+in-hole decompositions, which use the @racket[default-style].
+The @racket[grammar-style] is used for the ``::='' and ``|''
+in grammars.
 
 The @racket[non-terminal-style] is used for the names of non-terminals.
 Two parameters style the text in the (optional) "underscore" component
@@ -1990,7 +2112,7 @@ The
 after the underscore in non-terminal references.
 
 The @racket[default-style] is used for parenthesis, the dot in dotted
-lists, spaces, the separator words in the grammar, the
+lists, spaces, the
 "where" and "fresh" in side-conditions, and other places
 where the other parameters aren't used.
 }
@@ -2016,7 +2138,7 @@ relation. Defaults to 4.
 Controls if the open and close quotes for strings are turned
 into “ and ” or are left as merely ".
 
-Defaults to #t.
+Defaults to @racket[#t].
 }
 
 @defparam[current-text proc (-> string? text-style/c number? pict?)]{
@@ -2026,7 +2148,7 @@ some part of a grammar, reduction relation, or
 metafunction. It defaults to slideshow's @racket[text] function.
 }
 
-@defparam[set-arrow-pict! proc (-> symbol? (-> pict?) void?)]{
+@defproc[(set-arrow-pict! [arrow symbol?] [proc  (-> pict?)]) void?]{
 
 This functions sets the pict for a given reduction-relation
 symbol. When typesetting a reduction relation that uses the
@@ -2039,7 +2161,7 @@ single reduction relation.
 
   This parameter is used when typesetting metafunctions to
   determine how to create the @"\u301a\u301b"
-  characters. Rather than using those characters directory
+  characters. Rather than using those characters directly
   (since glyphs tend not to be available in PostScript
   fonts), they are created by combining two ‘[’ characters
   or two ‘]’ characters together.
@@ -2073,7 +2195,7 @@ single reduction relation.
 
 }
 
-@deftech{Removing the pink background from PLT Redex rendered picts and ps files}
+@section[#:tag "pink"]{Removing the pink background from PLT Redex rendered picts and ps files}
 
 When reduction rules, a metafunction, or a grammar contains
 unquoted Racket code or side-conditions, they are rendered
@@ -2098,7 +2220,9 @@ another @racket[lw] that contains a rewritten version of the
 code.
 }
 
-@defform[(with-atomic-rewriter name-symbol string-or-thunk-returning-pict expression)]{
+@defform[(with-atomic-rewriter name-symbol
+                               string-or-thunk-returning-pict
+                               expression)]{
 
 This extends the current set of atomic-rewriters with one
 new one that rewrites the value of name-symbol to
@@ -2110,7 +2234,9 @@ of string-or-thunk-returning-pict is used whever the symbol
 appears in a pattern.
 }
 
-@defform[(with-compound-rewriter name-symbol proc expression)]{
+@defform[(with-compound-rewriter name-symbol
+                                 proc
+                                 expression)]{
 
 This extends the current set of compound-rewriters with one
 new one that rewrites the value of name-symbol via proc,

@@ -1,17 +1,17 @@
-#lang scheme/base
+#lang racket/base
 
 #|
 This file is for utilities that are of general interest, 
 at least theoretically.
 |#
 
-(require (for-syntax scheme/base syntax/parse scheme/string)
-         scheme/contract scheme/match scheme/require-syntax 
-	 scheme/provide-syntax mzlib/struct scheme/unit
-	 scheme/pretty mzlib/pconvert syntax/parse)
+(require (for-syntax racket/base syntax/parse racket/string)
+         racket/contract racket/require-syntax 
+	 racket/provide-syntax racket/unit
+	 racket/pretty mzlib/pconvert syntax/parse)
 
 ;; to move to unstable
-(provide reverse-begin)
+(provide reverse-begin list-update list-set)
 
 (provide
  ;; optimization
@@ -19,13 +19,15 @@ at least theoretically.
  ;; timing
  start-timing do-time  
  ;; logging
- printf/log
+ printf/log show-input?
  ;; struct printing
  custom-printer define-struct/printer
  ;; provide macros
- rep utils typecheck infer env private)
+ rep utils typecheck infer env private types)
 
-(define optimize? (make-parameter #f))
+(define optimize? (make-parameter #t))
+(define-for-syntax enable-contracts? #f)
+(define show-input? (make-parameter #f))
 
 ;; fancy require syntax
 (define-syntax (define-requirer stx)
@@ -82,6 +84,7 @@ at least theoretically.
 (define-requirer env env-out)
 (define-requirer private private-out)
 (define-requirer types types-out)
+(define-requirer optimizer optimizer-out)
 
 ;; run `h' last, but drop its return value
 (define-syntax-rule (reverse-begin h . forms) (begin0 (begin . forms) h))
@@ -112,7 +115,7 @@ at least theoretically.
             (when (last-time)
               (error #f "Timing already started"))
             (last-time (current-process-milliseconds))
-            (printf "Starting ~a at ~a~n" msg (last-time)))])
+            (printf "Starting ~a at ~a\n" msg (last-time)))])
        (syntax-rules ()
          [(_ msg)
           (begin
@@ -122,7 +125,7 @@ at least theoretically.
                    [old (last-time)]
                    [diff (- t old)])
               (last-time t)
-              (printf "Timing ~a at ~a@~a~n" msg diff t)))]))
+              (printf "Timing ~a at ~a@~a\n" msg diff t)))]))
       (values (lambda _ #'(void)) (lambda _ #'(void)))))
 
 ;; custom printing
@@ -152,13 +155,13 @@ at least theoretically.
   (syntax-parse stx
     [(form name (flds ...) printer:expr)
      #`(define-struct name (flds ...) 
+         #:property prop:custom-print-quotable 'never
          #:property prop:custom-write 
          (lambda (a b c) (if (custom-printer) (printer a b c) (pseudo-printer a b c)))
-         #:inspector #f)]))
+         #:transparent)]))
 
 
 ;; turn contracts on and off - off by default for performance.
-(define-for-syntax enable-contracts? #f)
 (provide (for-syntax enable-contracts?) p/c w/c cnt d-s/c d/c d/c/p)
 
 (define-syntax-rule (d/c/p (name . args) c . body)
@@ -213,3 +216,13 @@ at least theoretically.
      (if enable-contracts?
          (list #'[contracted (nm cnt)])     
          (list #'nm))]))
+
+(define (list-update l i f)
+  (cond [(null? l) (error 'list-update "list not long enough" l i f)]
+        [(zero? i) (cons (f (car l)) (cdr l))]
+        [else (cons (car l) (list-update (cdr l) (sub1 i) f))]))
+
+(define (list-set l k v)
+  (if (zero? k)
+      (cons v (cdr l))
+      (cons (car l) (list-set (cdr l) (sub1 k) v))))

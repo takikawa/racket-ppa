@@ -23,7 +23,7 @@ TODO
 (require racket/class
          racket/path
          racket/pretty
-         scheme/unit
+         racket/unit
          racket/list
          
          string-constants
@@ -42,7 +42,6 @@ TODO
 
 ;; run a thunk, and if an exception is raised, make it possible to cut the
 ;; stack so that the surrounding context is hidden
-(define stack-checkpoint (make-parameter #f))
 (define checkpoints (make-weak-hasheq))
 (define (call-with-stack-checkpoint thunk)
   (define checkpoint #f)
@@ -482,7 +481,7 @@ TODO
   (define file-icon
     (let ([bitmap
            (make-object bitmap%
-             (build-path (collection-path "icons") "file.gif"))])
+             (collection-file-path "file.gif" "icons"))])
       (if (send bitmap ok?)
           (make-object image-snip% bitmap)
           (make-object string-snip% "[open file]"))))
@@ -993,8 +992,22 @@ TODO
             (send key get-control-down)
             (send key get-alt-down)
             (and prompt-position
-                 (only-whitespace-after-insertion-point)
-                 (submit-predicate this prompt-position))))
+                 (let ([lang (drracket:language-configuration:language-settings-language user-language-settings)])
+                   (cond
+                     [(is-a? lang drracket:module-language:module-language<%>)
+                      (let ([pred 
+                             (send lang get-language-info 
+                                   'drracket:submit-predicate
+                                   (λ (port only-whitespace-afterwards?)
+                                     (and only-whitespace-afterwards?
+                                          (submit-predicate this prompt-position))))])
+                        (pred 
+                         ;; no good! giving away the farm here. need to hand over a proxy that is limited to just read access
+                         (open-input-text-editor this prompt-position)
+                         (only-whitespace-after-insertion-point)))]
+                     [else
+                      (and (only-whitespace-after-insertion-point)
+                           (submit-predicate this prompt-position))])))))
       
       (define/private (only-whitespace-after-insertion-point)
         (let ([start (get-start-position)]
@@ -1576,12 +1589,6 @@ TODO
                           (primitive-dispatch-handler eventspace)]))])
              drscheme-event-dispatch-handler))))
       
-      (define/public (new-empty-console)
-        (queue-user/wait
-         (λ () ; =User=, =No-Breaks=
-           (send (drracket:language-configuration:language-settings-language user-language-settings)
-                 first-opened))))
-      
       (define/public (reset-console)
         (when (thread? thread-killed)
           (kill-thread thread-killed))
@@ -1674,10 +1681,28 @@ TODO
         (send context disable-evaluation)
         (reset-console)
         
-        (queue-user/wait
-         (λ () ; =User=, =No-Breaks=
-           (send (drracket:language-configuration:language-settings-language user-language-settings)
-                 first-opened)))
+        (let ([exn-raised #f]
+              [lang (drracket:language-configuration:language-settings-language user-language-settings)])
+          (queue-user/wait
+           (λ () ; =User=, =No-Breaks=
+             (with-handlers ((exn:fail? (λ (x) (set! exn-raised x))))
+               (cond
+                 ;; this is for backwards compatibility; drracket used to
+                 ;; expect this method to be a thunk (but that was a bad decision)
+                 [(object-method-arity-includes? lang 'first-opened 1)
+                  (send lang first-opened
+                        (drracket:language-configuration:language-settings-settings user-language-settings))]
+                 [else
+                  ;; this is the backwards compatible case.
+                  (send lang first-opened)]))))
+          (when exn-raised
+            (let ([sp (open-output-string)])
+              (parameterize ([current-error-port sp])
+                (drracket:init:original-error-display-handler (exn-message exn-raised) exn-raised)) 
+              (message-box (string-constant drscheme)
+                           (format "Exception raised while running the first-opened method of the language ~s:\n~a"
+                                   (send lang get-language-position)
+                                   (get-output-string sp))))))
         
         (insert-prompt)
         (send context enable-evaluation)

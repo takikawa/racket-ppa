@@ -4,7 +4,7 @@
 (require "constants.ss")
 
 ;; example data:
-;; http://drdr.plt-scheme.org/data/collects/tests/mzscheme/benchmarks/common/earley_ss.timing
+;; http://drdr.racket-lang.org/data/collects/tests/mzscheme/benchmarks/common/earley_ss.timing
 
 ;;; ========================================
 
@@ -47,7 +47,7 @@
 #|
    #:argv
    #("-l"
-     "http://drdr.plt-scheme.org/~a/collects/tests/mzscheme/benchmarks/mz/expand-class.scm"
+     "http://drdr.racket-lang.org/~a/collects/tests/mzscheme/benchmarks/mz/expand-class.scm"
      "expand-class_scm.timing" "out" "out.html" )
 |#
    #:once-each
@@ -156,14 +156,13 @@
          (filter
           (λ (x) (<= 2 (length (line-points (car (graph-lines x))))))
           (build-large-graphs data))])
-    (reverse
-     (let loop ([graphs (reverse large-graphs)])
+    (let loop ([graphs (reverse large-graphs)])
        (let-values ([(first rest) (split-out-graph graphs)])
          (cond
            [(null? rest)
             (list first)]
            [else
-            (cons first (loop rest))]))))))
+            (cons first (loop rest))])))))
 
 ;; split-out-graphs : (listof graph) -> (values (listof graph) (listof graph))
 ;; first result is a set of graphs to go into a single image

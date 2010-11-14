@@ -2,7 +2,7 @@
 (module htdp-advanced scheme/base
   (require "private/teach.ss"
 	   "private/teachprims.ss"
-	   "private/contract-forms.ss"
+	   "private/teach-module-begin.ss"
 	   mzlib/etc
 	   mzlib/list
 	   mzlib/pretty
@@ -15,6 +15,7 @@
   (provide (rename-out
             [advanced-define define]
             [advanced-define-struct define-struct]
+            [advanced-define-datatype define-datatype]
             [advanced-lambda lambda]
             [advanced-lambda λ]
             [advanced-app #%app]
@@ -47,10 +48,9 @@
             [advanced-when when]
             [advanced-unless unless]
             [advanced-case case]
+            [advanced-match match]
             [advanced-delay delay]
             [advanced-module-begin #%module-begin]
-            ;; [advanced-contract contract]
-            ;; [advanced-define-data define-data]
             )
            check-expect
            check-within
@@ -59,7 +59,13 @@
            check-range
 	   #%datum
            #%top-interaction
-	   empty true false)
+	   empty true false
+
+	   signature : -> mixed one-of predicate combined
+	   Number Real Rational Integer Natural Boolean True False String Symbol Char Empty-list Any
+	   cons-of
+	   Property
+	   check-property for-all ==> expect expect-within expect-member-of expect-range)
 
   ;; procedures:
   (provide-and-document

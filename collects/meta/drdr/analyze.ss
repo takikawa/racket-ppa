@@ -120,7 +120,7 @@
   (define totals
     (apply format "(timeout ~a) (unclean ~a) (stderr ~a) (changes ~a)" (map number->string nums)))
   (define (path->url pth)
-    (format "http://drdr.plt-scheme.org/~a~a" cur-rev pth))
+    (format "http://drdr.racket-lang.org/~a~a" cur-rev pth))
   (define responsible-ht (statuses->responsible-ht cur-rev timeout unclean stderr changes))
   (define responsibles 
     (for/list ([(responsible ht) (in-hash responsible-ht)]
@@ -168,7 +168,7 @@
                                       cur-rev
                                       (format-duration-ms abs-dur))
                               ""
-                              (format "http://drdr.plt-scheme.org/~a/" 
+                              (format "http://drdr.racket-lang.org/~a/" 
                                       cur-rev)
                               ""
                               (if include-committer?
@@ -200,7 +200,7 @@
                                        ""))))))
   
   (send-mail-message "drdr"
-                     (format "http://drdr.plt-scheme.org/~a/" 
+                     (format "http://drdr.racket-lang.org/~a/" 
                              cur-rev)
                      (list "eli+ircbot@eli.barzilay.org")
                      empty empty
@@ -275,7 +275,7 @@
                   ; XXX maybe mflatt, eli, or tewk
                   (and (regexp-match #rx"/src/" (path->string* log-pth))
                        "jay")
-                  "unknown"))
+                  "nobody"))
             (define lc
               (list (path->bytes log-pth)))
             (make-rendering start end dur 
@@ -324,7 +324,7 @@
                        (with-handlers ([exn:fail? (lambda (x) #f)])
                          (scm-commit-author (read-cache (revision-commit-msg (current-rev))))))
                   (or (path-responsible (trunk-path dir-pth))
-                      "unknown"))
+                      "nobody"))
                  
                  empty)
                 (directory-list* dir-pth))))

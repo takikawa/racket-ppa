@@ -180,6 +180,9 @@ extern "C"
 {
 #endif
 
+/* Allowed by all configurations, currently: */
+#define MZ_CAN_ACCESS_THREAD_LOCAL_DIRECTLY
+
 /*========================================================================*/
 /*                        basic Scheme values                             */
 /*========================================================================*/
@@ -299,8 +302,14 @@ typedef struct Scheme_Vector {
   Scheme_Object *els[1];
 } Scheme_Vector;
 
+#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+# define SHARED_ALLOCATED 0x2
+# define SHARED_ALLOCATEDP(so) (MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)(so)) & SHARED_ALLOCATED)
+# define SHARED_ALLOCATED_SET(so) (MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)(so)) |= SHARED_ALLOCATED)
+#endif
+
 typedef struct Scheme_Double_Vector {
-  Scheme_Object so;
+  Scheme_Inclhash_Object iso; /* & 0x2 indicates allocated in the MASTERGC */
   long size;
   double els[1];
 } Scheme_Double_Vector;
@@ -423,6 +432,7 @@ typedef long (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_data)
 #define SCHEME_IMMUTABLE_VECTORP(obj)  (SCHEME_VECTORP(obj) && SCHEME_IMMUTABLEP(obj))
 
 #define SCHEME_FLVECTORP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_flvector_type)
+#define SCHEME_FXVECTORP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_fxvector_type)
 
 #define SCHEME_STRUCTP(obj) (SAME_TYPE(SCHEME_TYPE(obj), scheme_structure_type) || SAME_TYPE(SCHEME_TYPE(obj), scheme_proc_struct_type))
 #define SCHEME_STRUCT_TYPEP(obj) SAME_TYPE(SCHEME_TYPE(obj), scheme_struct_type_type)
@@ -534,6 +544,9 @@ typedef long (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_data)
 #define SCHEME_FLVEC_SIZE(obj) (((Scheme_Double_Vector *)(obj))->size)
 #define SCHEME_FLVEC_ELS(obj)  (((Scheme_Double_Vector *)(obj))->els)
 
+#define SCHEME_FXVEC_SIZE(obj) SCHEME_VEC_SIZE(obj)
+#define SCHEME_FXVEC_ELS(obj) SCHEME_VEC_ELS(obj)
+
 #define SCHEME_ENVBOX_VAL(obj)  (*((Scheme_Object **)(obj)))
 #define SCHEME_WEAK_BOX_VAL(obj) SCHEME_BOX_VAL(obj)
 
@@ -640,11 +653,16 @@ typedef struct Scheme_Offset_Cptr
 #define SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER   (128 | 256)
 #define SCHEME_PRIM_TYPE_PARAMETER               64
 #define SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER      (64 | 128)
-/* combinations still available: 64|256, 64|128|256 */
+#define SCHEME_PRIM_SOMETIMES_INLINED            (64 | 256)
+/* combination still available: 64|128|256 */
 
 #define SCHEME_PRIM_IS_STRUCT_PROC (SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER | SCHEME_PRIM_IS_STRUCT_PRED | SCHEME_PRIM_IS_STRUCT_OTHER)
 
 #define SCHEME_PRIM_PROC_FLAGS(x) (((Scheme_Prim_Proc_Header *)x)->flags)
+
+#define SCHEME_PRIM_IS_SOMETIMES_INLINED(rator) \
+  (((SCHEME_PRIM_PROC_FLAGS(rator) & SCHEME_PRIM_OTHER_TYPE_MASK) == SCHEME_PRIM_SOMETIMES_INLINED) \
+   || (SCHEME_PRIM_PROC_FLAGS(rator) & (SCHEME_PRIM_IS_UNARY_INLINED | SCHEME_PRIM_IS_BINARY_INLINED)))
 
 typedef struct Scheme_Object *(Scheme_Prim)(int argc, Scheme_Object *argv[]);
 
@@ -874,9 +892,10 @@ typedef struct Scheme_Jumpup_Buf_Holder {
 
 typedef struct Scheme_Continuation_Jump_State {
   struct Scheme_Object *jumping_to_continuation;
+  struct Scheme_Object *alt_full_continuation;
   Scheme_Object *val; /* or **vals */
   mzshort num_vals;
-  short is_kill, is_escape;
+  char is_kill, is_escape, skip_dws;
 } Scheme_Continuation_Jump_State;
 
 /* A mark position is in odd number, so that it can be
@@ -996,6 +1015,8 @@ typedef struct Scheme_Thread {
   Scheme_Object *running_box;   /* contains pointer to thread when it's running */
 
   struct Scheme_Thread *nester, *nestee;
+
+  struct future_t *current_ft;
 
   double sleep_end; /* blocker has starting sleep time */
   int block_descriptor;
@@ -1181,6 +1202,7 @@ enum {
   MZCONFIG_CAN_READ_INFIX_DOT,
   MZCONFIG_CAN_READ_QUASI,
   MZCONFIG_CAN_READ_READER,
+  MZCONFIG_CAN_READ_LANG,
   MZCONFIG_READ_DECIMAL_INEXACT,
   
   MZCONFIG_PRINT_GRAPH,
@@ -1193,6 +1215,7 @@ enum {
   MZCONFIG_PRINT_MPAIR_CURLY,
   MZCONFIG_PRINT_SYNTAX_WIDTH,
   MZCONFIG_PRINT_READER,
+  MZCONFIG_PRINT_LONG_BOOLEAN,
   MZCONFIG_PRINT_AS_QQ,
 
   MZCONFIG_CASE_SENS,
@@ -1249,6 +1272,9 @@ enum {
 
   MZCONFIG_THREAD_SET,
   MZCONFIG_THREAD_INIT_STACK_SIZE,
+
+  MZCONFIG_SUBPROC_CUSTODIAN_MODE,
+  MZCONFIG_SUBPROC_GROUP_ENABLED,
 
   MZCONFIG_LOAD_DELAY_ENABLED,
   MZCONFIG_DELAY_LOAD_INFO,
@@ -1425,19 +1451,23 @@ typedef void (*Scheme_Invoke_Proc)(Scheme_Env *env, long phase_shift,
 
 #define SCHEME_ASSERT(expr,msg) ((expr) ? 1 : (scheme_signal_error(msg), 0))
 
-#ifndef MZ_USE_PLACES
-#define scheme_eval_wait_expr (scheme_current_thread->ku.eval.wait_expr)
-#define scheme_tail_rator (scheme_current_thread->ku.apply.tail_rator)
-#define scheme_tail_num_rands (scheme_current_thread->ku.apply.tail_num_rands)
-#define scheme_tail_rands (scheme_current_thread->ku.apply.tail_rands)
-#define scheme_overflow_reply (scheme_current_thread->overflow_reply)
-
-#define scheme_error_buf *(scheme_current_thread->error_buf)
-#define scheme_jumping_to_continuation (scheme_current_thread->cjs.jumping_to_continuation)
-
-#define scheme_multiple_count (scheme_current_thread->ku.multiple.count)
-#define scheme_multiple_array (scheme_current_thread->ku.multiple.array)
+#ifdef MZ_CAN_ACCESS_THREAD_LOCAL_DIRECTLY
+# define mzSCHEME_CURRENT_THREAD scheme_current_thread
+#else
+# define mzSCHEME_CURRENT_THREAD scheme_get_current_thread()
 #endif
+
+#define scheme_eval_wait_expr (mzSCHEME_CURRENT_THREAD->ku.eval.wait_expr)
+#define scheme_tail_rator (mzSCHEME_CURRENT_THREAD->ku.apply.tail_rator)
+#define scheme_tail_num_rands (mzSCHEME_CURRENT_THREAD->ku.apply.tail_num_rands)
+#define scheme_tail_rands (mzSCHEME_CURRENT_THREAD->ku.apply.tail_rands)
+#define scheme_overflow_reply (mzSCHEME_CURRENT_THREAD->overflow_reply)
+
+#define scheme_error_buf *(mzSCHEME_CURRENT_THREAD->error_buf)
+#define scheme_jumping_to_continuation (mzSCHEME_CURRENT_THREAD->cjs.jumping_to_continuation)
+
+#define scheme_multiple_count (mzSCHEME_CURRENT_THREAD->ku.multiple.count)
+#define scheme_multiple_array (mzSCHEME_CURRENT_THREAD->ku.multiple.array)
 
 #define scheme_setjmpup(b, base, s) scheme_setjmpup_relative(b, base, s, NULL)
 
@@ -1675,6 +1705,8 @@ extern void *scheme_malloc_envunbox(size_t);
 /*                   embedding configuration and hooks                    */
 /*========================================================================*/
 
+typedef void (*Scheme_On_Atomic_Timeout_Proc)(void);
+
 #if SCHEME_DIRECT_EMBEDDED
 
 #if defined(_IBMR2)
@@ -1705,14 +1737,14 @@ MZ_EXTERN void scheme_set_logging(int syslog_level, int stderr_level);
 
 MZ_EXTERN int scheme_get_allow_set_undefined();
 
-#ifndef MZ_USE_PLACES
+#ifdef MZ_CAN_ACCESS_THREAD_LOCAL_DIRECTLY
 THREAD_LOCAL_DECL(MZ_EXTERN Scheme_Thread *scheme_current_thread);
 THREAD_LOCAL_DECL(MZ_EXTERN Scheme_Thread *scheme_first_thread);
 #endif
-MZ_EXTERN Scheme_Thread *scheme_get_current_thread();
-MZ_EXTERN long scheme_get_multiple_count();
-MZ_EXTERN Scheme_Object **scheme_get_multiple_array();
-MZ_EXTERN void scheme_set_current_thread_ran_some();
+XFORM_NONGCING MZ_EXTERN Scheme_Thread *scheme_get_current_thread();
+XFORM_NONGCING MZ_EXTERN long scheme_get_multiple_count();
+XFORM_NONGCING MZ_EXTERN Scheme_Object **scheme_get_multiple_array();
+XFORM_NONGCING MZ_EXTERN void scheme_set_current_thread_ran_some();
 
 
 /* Set these global hooks (optionally): */
@@ -1754,6 +1786,8 @@ MZ_EXTERN Scheme_Object *scheme_set_run_cmd(char *s);
 MZ_EXTERN void scheme_set_collects_path(Scheme_Object *p);
 MZ_EXTERN void scheme_set_original_dir(Scheme_Object *d);
 MZ_EXTERN void scheme_set_addon_dir(Scheme_Object *p);
+MZ_EXTERN void scheme_set_command_line_arguments(Scheme_Object *vec);
+MZ_EXTERN void scheme_set_compiled_file_paths(Scheme_Object *list);
 
 MZ_EXTERN void scheme_init_collection_paths(Scheme_Env *global_env, Scheme_Object *extra_dirs);
 MZ_EXTERN void scheme_init_collection_paths_post(Scheme_Env *global_env, Scheme_Object *extra_dirs, Scheme_Object *extra_post_dirs);
@@ -1799,7 +1833,7 @@ MZ_EXTERN void scheme_register_static(void *ptr, long size);
 # define MZ_REGISTER_STATIC(x) /* empty */
 #endif
 
-MZ_EXTERN void (*scheme_on_atomic_timeout)(void);
+MZ_EXTERN Scheme_On_Atomic_Timeout_Proc scheme_on_atomic_timeout;
 
 MZ_EXTERN void scheme_immediate_exit(int status);
 

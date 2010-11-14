@@ -161,24 +161,28 @@
       null)
 
     (define/private (no-noindent? p ri)
-      (if (delayed-block? p)
-          (no-noindent? (delayed-block-blocks p ri) ri)
-          (or
-           (memq 'never-indents 
-                 (style-properties 
-                  (cond
-                   [(paragraph? p) (paragraph-style p)]
-                   [(compound-paragraph? p) (compound-paragraph-style p)]
-                   [(nested-flow? p) (nested-flow-style p)]
-                   [(table? p) (table-style p)]
-                   [(itemization? p) (itemization-style p)]
-                   [else plain])))
-           (and (nested-flow? p)
-                (pair? (nested-flow-blocks p))
-                (no-noindent? (car (nested-flow-blocks p)) ri))
-           (and (compound-paragraph? p)
-                (pair? (compound-paragraph-blocks p))
-                (no-noindent? (car (compound-paragraph-blocks p)) ri)))))
+      (cond
+       [(delayed-block? p)
+        (no-noindent? (delayed-block-blocks p ri) ri)]
+       [(traverse-block? p)
+        (no-noindent? (traverse-block-block p ri) ri)]
+       [else
+        (or
+         (memq 'never-indents 
+               (style-properties 
+                (cond
+                 [(paragraph? p) (paragraph-style p)]
+                 [(compound-paragraph? p) (compound-paragraph-style p)]
+                 [(nested-flow? p) (nested-flow-style p)]
+                 [(table? p) (table-style p)]
+                 [(itemization? p) (itemization-style p)]
+                 [else plain])))
+         (and (nested-flow? p)
+              (pair? (nested-flow-blocks p))
+              (no-noindent? (car (nested-flow-blocks p)) ri))
+         (and (compound-paragraph? p)
+              (pair? (compound-paragraph-blocks p))
+              (no-noindent? (car (compound-paragraph-blocks p)) ri)))]))
 
     (define/override (render-intrapara-block p part ri first? last? starting-item?)
       (unless first?
@@ -558,11 +562,11 @@
         [(symbol? i)
          (display (case i
                     [(nbsp) "~"]
-                    [(mdash) "---"]
-                    [(ndash) "--"]
-                    [(ldquo) "``"]
-                    [(rdquo) "''"]
-                    [(rsquo) "'"]
+                    [(mdash) "{---}"]
+                    [(ndash) "{--}"]
+                    [(ldquo) "{``}"]
+                    [(rdquo) "{''}"]
+                    [(rsquo) "{'}"]
                     [(prime) "$'$"]
                     [(rarr) "$\\rightarrow$"]
                     [(larr) "$\\leftarrow$"]
@@ -593,6 +597,9 @@
                      [(#\>) (if (rendering-tt) "{\\texttt >}" "$>$")]
                      [(#\<) (if (rendering-tt) "{\\texttt <}" "$<$")]
                      [(#\|) (if (rendering-tt) "{\\texttt |}" "$|$")]
+                     [(#\-) "{-}"] ;; avoid en- or em-dash
+                     [(#\`) "{`}"] ;; avoid double-quotes
+                     [(#\') "{'}"] ;; avoid double-quotes
                      [(#\? #\! #\. #\:)
                       (if (rendering-tt) (format "{\\hbox{\\texttt{~a}}}" c) c)]
                      [(#\~) "$\\sim$"]

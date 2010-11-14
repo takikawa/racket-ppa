@@ -77,6 +77,10 @@
  (negate bytecode-ok?)
  '(let-one (loc 0) 'z))
 
+(test-predicate
+ (negate bytecode-ok?)
+ '(let-one (install-value 0 'x 'y) 'z))
+
 ;; application
 (test-predicate
  bytecode-ok?
@@ -366,6 +370,69 @@
  (negate bytecode-ok?)
  '(let-one 'w (branch 'x (boxenv 0 'y) (loc-clr 0))))
 
+(test-predicate
+ (negate bytecode-ok?)
+ '(let-one 'x (branch (loc-noclr 0) (loc-noclr 0) (loc-clr 0))))
+
+(test-predicate
+ bytecode-ok?
+ '(proc-const (val val val)
+              (branch (loc 0)
+                      (branch (loc 1)
+                              (loc-clr 2)
+                              void)
+                      (application (loc 2)))))
+
+(test-predicate
+ bytecode-ok?
+ '(let-one 'x
+           (branch #f
+                   (let-one (loc-noclr 1) void)
+                   (loc-clr 0))))
+
+(test-predicate
+ (negate bytecode-ok?)
+ '(proc-const (val)
+              (seq
+               (branch (loc 0)
+                       (loc-clr 0)
+                       void)
+               (install-value 0 'x void))))
+
+(test-predicate
+ bytecode-ok?
+ '(proc-const (val)
+              (seq
+               (branch (loc 0)
+                       (let-one 'x
+                                (branch (loc 1)
+                                        (loc-clr 0)
+                                        void))
+                       void)
+               (loc 0))))
+
+(test-predicate
+ bytecode-ok?
+ '(proc-const (val)
+              (branch (loc 0)
+                      (let-void-box 2
+                                    (branch (loc 2)
+                                            (loc-box-clr 1)
+                                            void))
+                      void)))
+
+(test-predicate
+ bytecode-ok?
+ '(proc-const (val)
+              (seq
+               (branch (loc 0)
+                       (let-one 'x
+                                (branch (loc 1)
+                                        (let-one 'x (loc-clr 1))
+                                        void))
+                       void)
+               (loc 0))))
+
 ; let-rec
 (test-predicate
  bytecode-ok?
@@ -385,6 +452,10 @@
 (test-predicate
  (negate bytecode-ok?)
  '(let-void 1 (branch #f (let-rec ((lam () (0) 'x)) 'y) (loc-noclr 0))))
+
+(test-predicate
+ (negate bytecode-ok?)
+ '(let-void 1 (let-rec ((lam () () 'x)) 'y)))
 
 ;; ignored? properly maintained
 (test-predicate
@@ -495,6 +566,14 @@
 (test-predicate
  (negate bytecode-ok?)
  '(let-void-box 1 (application (case-lam (lam (ref) () (loc-box-noclr 0))) (loc-noclr 1))))
+
+(test-predicate
+ (negate bytecode-ok?)
+ '(let-one 42
+           (boxenv 0
+                   (application
+                    (case-lam (lam (ref) () (loc-box 0)))
+                    (loc-box 1)))))
 
 ; literals
 (test-predicate bytecode-ok? #t)

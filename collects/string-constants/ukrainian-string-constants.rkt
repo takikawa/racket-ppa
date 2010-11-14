@@ -1014,7 +1014,7 @@ please adhere to these guidelines:
  (enforce-primitives-group-box-label "Початкові прив'язки")
  (enforce-primitives-check-box-label "Заборонити перевизначення початкових прив'язок")
  (automatically-compile "Заповнити каталоги compiled/ (для більш швидкого завантаження)")
- (preserve-stacktrace-information "Зберегти трасування стеку (відключає деякі JIT-оптимізації")
+ (preserve-stacktrace-information "Зберегти трасування стеку (відключає деякі оптимізації")
  (expression-level-stacktrace "Вираз рівню трасування стеку")
  (function-level-stacktrace "Функція рівню трасування стеку")
 
@@ -1424,17 +1424,17 @@ please adhere to these guidelines:
   ; section header
   (test-engine-check-failures "Помилки тестування:")
   ; section header
-  (test-engine-contract-violations "Порушення домовленості:")
+  (test-engine-signature-violations "Порушення домовленості:")
 
-  ; part of one phrase "contract <at line ...> to blame: procedure <...>
-  (test-engine-contract "домовленість")
+  ; part of one phrase "signature <at line ...> to blame: procedure <...>
+  (test-engine-signature "домовленість")
   (test-engine-to-blame "порушено: процедура")
 
-  (test-engine-no-contract-violations "Немає порушень домовленості.")
-  (test-engine-1-contract-violation "1 порушення домовленості.")
-  (test-engine-n-contract-violations "~a порушень домовленості.")
+  (test-engine-no-signature-violations "Немає порушень домовленості.")
+  (test-engine-1-signature-violation "1 порушення домовленості.")
+  (test-engine-n-signature-violations "~a порушень домовленості.")
 
-  ; as in got <value>, contract <at ...>
+  ; as in got <value>, signature <at ...>
   (test-engine-got "отримано")
   
   (profjWizward-insert-java-class "Вставити клас Java")

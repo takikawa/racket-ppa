@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 
 #|
 
@@ -46,7 +46,7 @@ and they all have good sample contracts. (It is amazing what we can do with kids
 |#
 
 
-(require (except-in "../mrlib/image-core.ss" make-color make-pen)
+(require (except-in "../mrlib/image-core.ss" make-color color make-pen pen)
          "private/image-more.ss"
          "private/img-err.ss"
          (only-in lang/prim provide-primitive provide-primitives define-primitive)
@@ -68,6 +68,8 @@ and they all have good sample contracts. (It is amazing what we can do with kids
          
 	 crop
          rotate
+         flip-horizontal
+         flip-vertical
          frame
          place-image
          place-image/align
@@ -85,7 +87,15 @@ and they all have good sample contracts. (It is amazing what we can do with kids
          polygon
          star
          star-polygon
+         radial-star
          triangle
+         triangle/sss
+         triangle/ssa
+         triangle/sas
+         triangle/ass
+         triangle/aas
+         triangle/asa
+         triangle/saa
          isosceles-triangle
          right-triangle
          line
@@ -95,6 +105,8 @@ and they all have good sample contracts. (It is amazing what we can do with kids
          scene+curve
          text
          text/font
+         image->color-list
+         color-list->bitmap
          
          x-place?
          y-place?
@@ -107,23 +119,32 @@ and they all have good sample contracts. (It is amazing what we can do with kids
          pen-cap?
          pen-join?
          color-red color-blue color-green color? color
-         pen-color pen-width pen-style pen-cap pen-join pen
+         pen-color pen-width pen-style pen-cap pen-join 
 
          image-width
          image-height
          image-baseline
+
+         put-pinhole
+         clear-pinhole
+         center-pinhole
+         pinhole-x
+         pinhole-y
+         overlay/pinhole
+         underlay/pinhole
          
          make-color
-         make-pen
+         make-pen pen
          pen?
          step-count?
          save-image)
 
 (provide bitmap)
 
-
-(define-primitive make-color build-color)
-(define-primitive make-pen build-pen)
+(define-primitive make-color build-color/make-color)
+(define-primitive color build-color/color)
+(define-primitive make-pen build-pen/make-pen)
+(define-primitive pen build-pen/pen)
 
 #;
 (provide (rename-out [build-color make-color])

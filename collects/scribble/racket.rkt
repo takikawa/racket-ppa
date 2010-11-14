@@ -58,26 +58,26 @@
                       (cons 'tt-chars scheme-properties)
                       scheme-properties)))
 
-  (define-on-demand output-color (make-racket-style "ScmOut"))
-  (define-on-demand input-color (make-racket-style "ScmIn"))
-  (define-on-demand input-background-color (make-racket-style "ScmInBG"))
-  (define-on-demand no-color (make-racket-style "ScmPlain"))
-  (define-on-demand reader-color (make-racket-style "ScmRdr"))
-  (define-on-demand result-color (make-racket-style "ScmRes"))
-  (define-on-demand keyword-color (make-racket-style "ScmKw"))
-  (define-on-demand comment-color (make-racket-style "ScmCmt"))
-  (define-on-demand paren-color (make-racket-style "ScmPn"))
-  (define-on-demand meta-color (make-racket-style "ScmMeta"))
-  (define-on-demand value-color (make-racket-style "ScmVal"))
-  (define-on-demand symbol-color (make-racket-style "ScmSym"))
-  (define-on-demand variable-color (make-racket-style "ScmVar"))
-  (define-on-demand opt-color (make-racket-style "ScmOpt"))
-  (define-on-demand error-color (make-racket-style "ScmErr" #:tt? #f))
-  (define-on-demand syntax-link-color (make-racket-style "ScmStxLink"))
-  (define-on-demand value-link-color (make-racket-style "ScmValLink"))
-  (define-on-demand module-color (make-racket-style "ScmMod"))
-  (define-on-demand module-link-color (make-racket-style "ScmModLink"))
-  (define-on-demand block-color (make-racket-style "ScmBlk"))
+  (define-on-demand output-color (make-racket-style "RktOut"))
+  (define-on-demand input-color (make-racket-style "RktIn"))
+  (define-on-demand input-background-color (make-racket-style "RktInBG"))
+  (define-on-demand no-color (make-racket-style "RktPlain"))
+  (define-on-demand reader-color (make-racket-style "RktRdr"))
+  (define-on-demand result-color (make-racket-style "RktRes"))
+  (define-on-demand keyword-color (make-racket-style "RktKw"))
+  (define-on-demand comment-color (make-racket-style "RktCmt"))
+  (define-on-demand paren-color (make-racket-style "RktPn"))
+  (define-on-demand meta-color (make-racket-style "RktMeta"))
+  (define-on-demand value-color (make-racket-style "RktVal"))
+  (define-on-demand symbol-color (make-racket-style "RktSym"))
+  (define-on-demand variable-color (make-racket-style "RktVar"))
+  (define-on-demand opt-color (make-racket-style "RktOpt"))
+  (define-on-demand error-color (make-racket-style "RktErr" #:tt? #f))
+  (define-on-demand syntax-link-color (make-racket-style "RktStxLink"))
+  (define-on-demand value-link-color (make-racket-style "RktValLink"))
+  (define-on-demand module-color (make-racket-style "RktMod"))
+  (define-on-demand module-link-color (make-racket-style "RktModLink"))
+  (define-on-demand block-color (make-racket-style "RktBlk"))
   (define-on-demand highlighted-color (make-racket-style "highlighted" #:tt? #f))
 
   (define current-keyword-list 
@@ -253,7 +253,7 @@
 
   (define omitable (make-style #f '(omitable)))
 
-  (define (gen-typeset c multi-line? prefix1 prefix suffix color? expr?)
+  (define (gen-typeset c multi-line? prefix1 prefix suffix color? expr? elem-wrap)
     (let* ([c (syntax-ize c 0 #:expr? expr?)]
            [content null]
            [docs null]
@@ -309,13 +309,14 @@
                     (out prefix cls))
                   (out " " cls))]
              [else
-              (set! content (cons ((if highlight?
-                                       (lambda (c)
-                                         (make-element highlighted-color c))
-                                       values)
-                                   (if (and color? cls)
-                                       (make-element/cache cls v)
-                                       v))
+              (set! content (cons (elem-wrap
+                                   ((if highlight?
+                                        (lambda (c)
+                                          (make-element highlighted-color c))
+                                        values)
+                                    (if (and color? cls)
+                                        (make-element/cache cls v)
+                                        v)))
                                   content))
               (set! dest-col (+ dest-col len))]))]))
       (define advance
@@ -372,7 +373,7 @@
                                                      (if val? value-color #f)
                                                      (list
                                                       (make-element/cache (if val? value-color paren-color) '". ")
-                                                      (typeset a #f "" "" "" (not val?) expr?)
+                                                      (typeset a #f "" "" "" (not val?) expr? elem-wrap)
                                                       (make-element/cache (if val? value-color paren-color) '" ."))
                                                      (+ (syntax-span a) 4)))
                                                   (list (syntax-source a)
@@ -440,7 +441,7 @@
             (let ([l (syntax->list c)]
                   [h? highlight?])
               (unless (and l (= 2 (length l)))
-                (error "bad code:redex: ~e" (syntax->datum c)))
+                (error "bad code:redex: ~.s" (syntax->datum c)))
               (advance c init-line!)
               (set! src-col (syntax-column (cadr l)))
               (hash-set! next-col-map src-col dest-col)
@@ -603,7 +604,10 @@
                                 [(mpair? (syntax-e c))
                                  (syntax-e c)]
                                 [else c])]
-                            [first-expr? (and expr? (not (struct-proxy? (syntax-e c))) (not no-cons?))]
+                            [first-expr? (and expr? 
+                                              (or (zero? quote-depth)
+                                                  (not (struct-proxy? (syntax-e c))))
+                                              (not no-cons?))]
                             [dotted? #f])
                   (cond
                    [(and (syntax? l)
@@ -798,7 +802,7 @@
               (make-table block-color (map list (reverse docs))))
           (make-sized-element #f (reverse content) dest-col))))
 
-  (define (typeset c multi-line? prefix1 prefix suffix color? expr?)
+  (define (typeset c multi-line? prefix1 prefix suffix color? expr? elem-wrap)
     (let* ([c (syntax-ize c 0 #:expr? expr?)]
            [s (syntax-e c)])
       (if (or multi-line?
@@ -815,31 +819,38 @@
               (struct-proxy? s)
               (and expr? (or (identifier? c)
                            (keyword? (syntax-e c)))))
-          (gen-typeset c multi-line? prefix1 prefix suffix color? expr?)
+          (gen-typeset c multi-line? prefix1 prefix suffix color? expr? elem-wrap)
           (typeset-atom c 
                         (letrec ([mk
                                   (case-lambda 
                                    [(elem color)
                                     (mk elem color (or (syntax-span c) 1))]
                                    [(elem color len)
-                                    (if (and (string? elem)
-                                             (= len (string-length elem)))
-                                        (make-element/cache (and color? color) elem)
-                                        (make-sized-element (and color? color) elem len))])])
+                                    (elem-wrap
+                                     (if (and (string? elem)
+                                              (= len (string-length elem)))
+                                         (make-element/cache (and color? color) elem)
+                                         (make-sized-element (and color? color) elem len)))])])
                           mk)
                         color? 0 expr?))))
   
   (define (to-element c #:expr? [expr? #f])
-    (typeset c #f "" "" "" #t expr?))
+    (typeset c #f "" "" "" #t expr? values))
 
   (define (to-element/no-color c #:expr? [expr? #f])
-    (typeset c #f "" "" "" #f expr?))
+    (typeset c #f "" "" "" #f expr? values))
 
-  (define (to-paragraph c #:expr? [expr? #f])
-    (typeset c #t "" "" "" #t expr?))
+  (define (to-paragraph c 
+                        #:expr? [expr? #f] 
+                        #:color? [color? #t]
+                        #:wrap-elem [elem-wrap (lambda (e) e)])
+    (typeset c #t "" "" "" color? expr? elem-wrap))
 
-  (define ((to-paragraph/prefix pfx1 pfx sfx) c #:expr? [expr? #f])
-    (typeset c #t pfx1 pfx sfx #t expr?))
+  (define ((to-paragraph/prefix pfx1 pfx sfx) c 
+           #:expr? [expr? #f] 
+           #:color? [color? #t]
+           #:wrap-elem [elem-wrap (lambda (e) e)])
+    (typeset c #t pfx1 pfx sfx color? expr? elem-wrap))
 
   (begin-for-syntax 
    (define-struct variable-id (sym) 
@@ -1080,8 +1091,7 @@
                             (list (do-syntax-ize (car v) col line ht #f qq #f)
                                   c)
                             (vector #f line col (+ 1 col)
-                                    (+ 1 
-                                       (if (and qq (zero? qq)) 1 0)
+                                    (+ delta
                                        (syntax-span c))))))]
      [(or (list? v)
           (vector? v)
@@ -1107,10 +1117,10 @@
                         [else 0])]
                [delta (if (and qq (zero? qq))
                           (cond
-                           [(vector? v) 8]
-                           [(struct? v) 1]
-                           [no-cons? 1]
-                           [else 5])
+                           [(vector? v) 8] ; `(vector '
+                           [(struct? v) 1] ; '('
+                           [no-cons? 1]    ; '('
+                           [else 6])       ; `(list '
                           1)]
                [r (let ([l (let loop ([col (+ col delta vec-sz graph-sz)]
                                       [v (cond

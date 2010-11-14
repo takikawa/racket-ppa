@@ -35,6 +35,9 @@
  *
  * This software is provided "as is" without any express or implied warranty.
  */
+#ifdef __GNUC__
+#pragma GCC diagnostic ignored "-Wwrite-strings"
+#endif
 
 #include <stdlib.h>
 #include "wx_image.h"
@@ -105,7 +108,7 @@ int filesize;
 int wxImage::LoadGIF(char *fname, int /* nc */)
 {
   register byte  ch, ch1;
-  register byte *ptr, *ptr1, *picptr;
+  byte *ptr, *ptr1, *picptr;
   register int   i;
   int            npixels, maxpixels;
 

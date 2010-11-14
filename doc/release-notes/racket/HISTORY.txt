@@ -1,3 +1,43 @@
+Version 5.0.2, October 2010
+Changed body of `when', `unless', `cond' clauses, `case'
+ clauses, and `match' clauses to be internal-definition contexts
+Swapped unsafe-vector*-ref with unsafe-vector-ref, etc.
+Added ->i to the contract library, improved ->*, adding #:pre and
+ #:post, as well as making the optional arguments clause optional.
+Added #true and #false, and changed #t/#T and #f/#F to
+ require a delimiter afterward
+Added print-boolean-long-form
+Added read-accept-lang, which is set to #t when 
+ reading a module
+Added flonum?
+Changed continuation-marks to accept a #f argument
+ to produce an empty set of marks
+Added fxvectors
+Added unsafe-{s,u}16-{ref,set!}
+Added prop:proxy-of
+Added proxies to go with chaperones, and renamed chaperone property
+ as proxy property; beware that the word "proxy" will change in
+ a future version, perhaps to "impersonator"
+Added collection-file-path and collection splicing at the file
+ level
+
+Version 5.0.1, July 2010
+Continuation barriers now block only downward continuation jumps
+ and allow escapes through full continuations
+Changed internal-definition handling to allow expressions mixed
+ with definitions
+Added support for subprocesses as new process groups
+Added support for best-effort termination of subprocess by a
+ custodian
+Added flreal-part, flimag-part, make-flrectangular, and unsafe
+ variants
+Added fl->eact-integer, fl->fx, and unsafe-fl->fx
+Added #:async-apply option to _fun
+Added chaperone-evt
+Added identifier-prune-to-source-module
+Changed apply binding to enable lower-level optimizations
+Upgraded to libffi 3.0.9+
+
 Version 5.0, May 2010
 Changed the core executable from mzscheme to racket
 Changed paths like the preferences file to use "racket" instead

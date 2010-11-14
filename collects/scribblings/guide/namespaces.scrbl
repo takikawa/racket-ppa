@@ -16,6 +16,10 @@ time.
 
 @section[#:tag "eval"]{@racket[eval]}
 
+@margin-note{This example will not run properly in DrRacket's definitions window
+             but it will in the interactions window; read on for
+             why (specifically see the end of @secref["namespaces"]).}
+
 The @racket[eval] function takes a ``quoted'' expression or definition
 and evaluates it:
 
@@ -121,9 +125,6 @@ Some functions, such as @racket[eval], accept an optional namespace
 argument. More often, the namespace used by a dynamic operation is the
 @deftech{current namespace} as determined by the
 @racket[current-namespace] @tech{parameter}.
-
-@margin-note{See @secref["parameterize"] for an introduction to
-parameters.}
 
 When @racket[eval] is used in a @tech{REPL}, the current namespace is the one
 that the @tech{REPL} uses for evaluating expressions. That's why the

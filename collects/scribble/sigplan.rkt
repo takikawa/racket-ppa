@@ -1,5 +1,6 @@
 #lang scheme/base
 (require setup/main-collects
+         scheme/contract
          scribble/core
          scribble/base
          scribble/decode
@@ -7,25 +8,49 @@
          scribble/latex-properties
          (for-syntax scheme/base))
 
-(provide preprint 10pt
-         abstract include-abstract
-         authorinfo
-         conferenceinfo copyrightyear copyrightdata
-         category terms keywords)
+(provide/contract
+ [abstract 
+  (->* () () #:rest (listof pre-content?)
+       block?)]
+ [authorinfo
+  (-> pre-content? pre-content? pre-content?
+      block?)]
+ [conferenceinfo
+  (-> pre-content? pre-content?
+      block?)]
+ [copyrightyear
+  (->* () () #:rest (listof pre-content?)
+       block?)]
+ [copyrightdata
+  (->* () () #:rest (listof pre-content?)
+       block?)]
+ [category
+  (->* (pre-content? pre-content? pre-content?)
+       ((or/c false/c pre-content?))
+       content?)]
+ [terms
+  (->* () () #:rest (listof pre-content?)
+       content?)]
+ [keywords
+  (->* () () #:rest (listof pre-content?)
+       content?)])
 
-(define-syntax (preprint stx)
-  (raise-syntax-error #f
-                      "option must appear on the same line as `#lang scribble/sigplan'"
-                      stx))
-(define-syntax (10pt stx)
-  (raise-syntax-error #f
-                      "option must appear on the same line as `#lang scribble/sigplan'"
-                      stx))
+(provide preprint 10pt nocopyright
+         include-abstract)
+
+(define-syntax-rule (defopts name ...)
+  (begin (define-syntax (name stx)
+           (raise-syntax-error #f
+                               "option must appear on the same line as `#lang scribble/sigplan'"
+                               stx))
+         ...
+         (provide name ...)))
+(defopts preprint 10pt nocopyright)
 
 (define sigplan-extras
   (let ([abs (lambda (s)
                (path->main-collects-relative
-                (build-path (collection-path "scribble") "sigplan" s)))])
+                (collection-file-path s "scribble" "sigplan")))])
     (list
      (make-css-addition (abs "sigplan.css"))
      (make-tex-addition (abs "sigplan.tex")))))
@@ -97,11 +122,10 @@
 (define (category sec title sub [more #f])
   (make-multiarg-element
    (make-style (format "SCategory~a" (if more "Plus" "")) sigplan-extras)
-   (append
-    (list
-     (make-element #f (decode-content (list sec)))
-     (make-element #f (decode-content (list title)))
-     (make-element #f (decode-content (list sub))))
+   (list*
+    (make-element #f (decode-content (list sec)))
+    (make-element #f (decode-content (list title)))
+    (make-element #f (decode-content (list sub)))
     (if more
         (list (make-element #f (decode-content (list more))))
         null))))

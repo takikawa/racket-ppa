@@ -662,6 +662,55 @@
                           #:source mf)))
           #rx"no counterexamples"))
   
+  ; Without the #:attempt-size argument, the attempt would use size 0,
+  ; which does not require a non-terminal decision.
+  (test (let/ec k
+          (parameterize ([generation-decisions 
+                          (decisions #:nt (list (λ _ (k #t))))])
+            (redex-check lang d #t #:attempts 1 #:print? #f #:attempt-size add1)
+            #f))
+        #t)
+  
+  (let ([generated '()]
+        [fixed '()]
+        [fix add1])
+    (redex-check lang number (set! fixed (cons (term number) fixed))
+                 #:prepare (λ (n) 
+                             (set! generated (cons n generated))
+                             (fix n))
+                 #:attempts 10
+                 #:print? #f)
+    (test fixed (map fix generated)))
+  (test (parameterize ([generation-decisions 
+                        (decisions #:num (list (λ _ 0)))])
+          (redex-check lang number (= 0 (term number)) 
+                       #:prepare add1
+                       #:print? #f))
+        (counterexample 1))
+  (test (raised-exn-msg
+         exn:fail?
+         (redex-check lang 0 #t #:prepare (λ (_) (error 'fixer)) #:print? #f))
+        #rx"fixing 0")
+  (test (raised-exn-msg 
+         exn:fail:redex?
+         (redex-check lang natural #t #:prepare (compose - add1)))
+        #rx"does not match natural")
+  (test (raised-exn-msg 
+         exn:fail:redex?
+         (redex-check lang natural #t
+                      #:prepare -
+                      #:source (reduction-relation lang (--> 47 1))))
+        #rx"-47 does not match natural")
+  (test (redex-check lang number (= 0 (term number))
+                     #:prepare add1
+                     #:source (reduction-relation lang (--> 0 1))
+                     #:print? #f)
+        (counterexample 1))
+  (test (raised-exn-msg 
+         exn:fail:contract:blame?
+         (redex-check lang natural #t #:prepare (λ () 0)))
+        #rx"rg-test broke the contract")
+  
   (test (raised-exn-msg 
          exn:fail:redex?
          (redex-check lang n #t #:source (reduction-relation lang (--> x 1))))
@@ -697,59 +746,6 @@
       (test-gen-fail
        (--> (side-condition any #f) any impossible)
        #rx"^redex-check: unable to generate LHS of impossible in 42"))))
-
-;; check-metafunction-contract
-(let ()
-  (define-language L
-    (C hole (1 hole)))
-  
-  (define-metafunction L
-    f : (side-condition number_1 (odd? (term number_1))) -> number
-    [(f 1) 1]
-    [(f 3) 'NaN])
-  
-  (define-metafunction L
-    g : (1 1) -> C
-    [(g (in-hole C any)) C])
-  
-  (define-metafunction L
-    h : number -> number
-    [(h any) any])
-  
-  (define-metafunction L
-    [(i any ...) (any ...)])
-  
-  (define-metafunction L
-    j : (side-condition any #f) -> any
-    [(j any ...) (any ...)])
-  
-  ;; Dom(f) < Ctc(f)
-  (test (output 
-         (λ () 
-           (parameterize ([generation-decisions 
-                           (decisions #:num (list (λ _ 2) (λ _ 5)))])
-             (check-metafunction-contract f))))
-        #rx"check-metafunction-contract:.*counterexample found after 1 attempt:\n\\(5\\)\n")
-  ;; Rng(f) > Codom(f)
-  (test (output
-         (λ () 
-           (parameterize ([generation-decisions
-                           (decisions #:num (list (λ _ 3)))])
-             (check-metafunction-contract f))))
-        #rx"counterexample found after 1 attempt:\n\\(3\\)\n")
-  ;; LHS matches multiple ways
-  (test (output (λ () (check-metafunction-contract g)))
-        #rx"counterexample found after 1 attempt:\n\\(\\(1 1\\)\\)\n")
-  ;; OK -- generated from Dom(h)
-  (test (output (λ () (check-metafunction-contract h))) #rx"no counterexamples")
-  ;; OK -- generated from pattern (any ...)
-  (test (output (λ () (check-metafunction-contract i #:attempts 5))) #rx"no counterexamples")
-  
-  ;; Unable to generate domain
-  (test (raised-exn-msg
-         exn:fail:redex:generation-failure?
-         (check-metafunction-contract j #:attempts 1 #:retries 42))
-        #rx"^check-metafunction-contract: unable .* in 42"))
 
 ;; check-reduction-relation
 (let ()
@@ -787,6 +783,59 @@
             generated)
           (reverse '((+ (+)) 0))))
   
+  (test (let* ([generated null]
+               [R (reduction-relation
+                   L
+                   (--> (name t (number_1 number_3))
+                        dontcare
+                        (side-condition (set! generated (cons (term t) generated)))
+                        (where number_1 4)
+                        (where number_2 number_1)
+                        (where number_3 number_2)))])
+          (parameterize ([generation-decisions 
+                          (decisions #:num (list (λ _ 3) (λ _ 4) 
+                                                 (λ _ 4) (λ _ 3)
+                                                 (λ _ 4) (λ _ 4)))])
+            (check-reduction-relation R (λ (_) #t) #:attempts 1 #:print? #f))
+          generated)
+        '((4 4) (4 3) (3 4)))
+  
+  (let ([generated '()]
+        [fixed '()]
+        [fix add1])
+    (check-reduction-relation
+     (reduction-relation L (--> number number))
+     (λ (n) (set! fixed (cons n fixed)))
+     #:prepare (λ (n) 
+                 (set! generated (cons n generated))
+                 (fix n))
+     #:attempts 10
+     #:print? #f)
+    (test fixed (map fix generated)))
+  (test (parameterize ([generation-decisions 
+                        (decisions #:num (list (λ _ 0)))])
+          (check-reduction-relation
+           (reduction-relation L (--> number number))
+           (curry = 0)
+           #:prepare add1
+           #:print? #f))
+        (counterexample 1))
+  (test (raised-exn-msg
+         exn:fail?
+         (check-reduction-relation
+          (reduction-relation L (--> 0 0))
+          (λ (_) #t)
+          #:prepare (λ (_) (error 'fixer))
+          #:print? #f))
+        #rx"fixing 0")
+  (test (raised-exn-msg 
+         exn:fail:contract:blame?
+         (check-reduction-relation 
+          (reduction-relation L (--> 0 0))
+          void
+          #:prepare (λ () 0)))
+        #rx"rg-test broke the contract")
+  
   (let ([S (reduction-relation L (--> 1 2 name) (--> 3 4))])
     (test (output (λ () (check-reduction-relation S (λ (x) #t) #:attempts 1)))
           #rx"check-reduction-relation:.*no counterexamples")
@@ -800,6 +849,15 @@
   (test (output 
          (λ () (check-reduction-relation (reduction-relation L (--> 1 2) (--> 3 4 name)) (curry eq? 1))))
         #px"counterexample found after 1 attempt with name:\n3\n")
+  
+  (test (let/ec k
+          (parameterize ([generation-decisions 
+                          (decisions #:nt (list (λ _ (k #t))))])
+            (check-reduction-relation 
+             (reduction-relation L (--> e e))
+             (λ _ #t) #:attempts 1 #:print? #f #:attempt-size add1)
+            #f))
+        #t)
   
   (let ([T (reduction-relation
             L
@@ -861,6 +919,86 @@
        [(f any) 0])
      (check-metafunction f (λ (_) #t)))
    4)
+  
+  (let ()
+    (define-language L 
+      ((m n) number))
+    (define-metafunction L
+      [(f m_0 m_1 ...)
+       ()
+       (where (n_0 ... n_i ...) (m_0 m_1 ...))
+       (side-condition (null? (term (n_0 ...))))])
+    (test
+     (with-handlers ([exn:fail:redex:generation-failure? (λ (_) #f)])
+       (check-metafunction f (λ (_) #t) #:retries 1 #:print? #f #:attempts 1))
+     #t))
+  
+  (test (let ([generated null])
+          (define-language L)
+          (define-metafunction L
+            [(f (name t (number_1 number_3)))
+             dontcare
+             (side-condition (set! generated (cons (term t) generated)))
+             (where number_1 4)
+             (where number_2 number_1)
+             (where number_3 number_2)])
+          (parameterize ([generation-decisions 
+                          (decisions #:num (list (λ _ 3) (λ _ 4) 
+                                                 (λ _ 4) (λ _ 3)
+                                                 (λ _ 4) (λ _ 4)))])
+            (check-metafunction f (λ (_) #t) #:attempts 1 #:print? #f))
+          generated)
+        '((4 4) (4 3) (3 4)))
+  
+  (test (let/ec k
+          (define-language L (n number))
+          (define-metafunction L
+            [(f n) n])
+          (parameterize ([generation-decisions 
+                          (decisions #:nt (list (λ _ (k #t))))])
+            (check-metafunction f (λ _ #t) #:attempts 1 #:print? #f #:attempt-size add1)
+            #f))
+        #t)
+  
+  (let ([generated '()]
+        [fixed '()]
+        [fix add1])
+    (define-metafunction empty
+      [(f number) number])
+    (check-metafunction
+     f (λ (n) (set! fixed (cons (car n) fixed)))
+     #:prepare (λ (n) 
+                 (set! generated (cons (car n) generated))
+                 (list (fix (car n))))
+     #:attempts 10
+     #:print? #f)
+    (test fixed (map fix generated)))
+  (test (parameterize ([generation-decisions 
+                        (decisions #:num (list (λ _ 0)))])
+          (define-metafunction empty
+            [(f number) number])
+          (check-metafunction
+           f (compose (curry = 0) car)
+           #:prepare (compose list add1 car)
+           #:print? #f))
+        (counterexample '(1)))
+  (test (let ()
+          (define-metafunction empty
+            [(f 0) 0])
+          (raised-exn-msg
+           exn:fail?
+           (check-metafunction
+            f (λ (_) #t)
+            #:prepare (λ (_) (error 'fixer))
+            #:print? #f)))
+        #rx"fixing \\(0\\)")
+  (test (raised-exn-msg
+         exn:fail?
+         (let ()
+           (define-metafunction empty
+             [(f 0) 0])
+           (check-metafunction f void #:prepare car #:print? #f)))
+        #rx"rg-test broke the contract")
   
   (test (output (λ () (check-metafunction m (λ (_) #t)))) #rx"no counterexamples")
   (test (output (λ () (check-metafunction m (curry eq? 1))))

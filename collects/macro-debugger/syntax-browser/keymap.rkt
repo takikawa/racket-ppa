@@ -1,10 +1,9 @@
-#lang scheme/base
-(require scheme/class
-         scheme/gui
-         scheme/pretty
+#lang racket/base
+(require racket/class
+         racket/gui/base
+         racket/pretty
          unstable/gui/notify
-         "interfaces.ss"
-         "partition.ss")
+         "interfaces.rkt")
 (provide syntax-keymap%)
 
 (define keymap/popup%
