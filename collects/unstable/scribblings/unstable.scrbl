@@ -16,7 +16,7 @@ The name @racketmodname[unstable] is intended as a warning that the @bold{interf
 Developers of unstable libraries must follow the guidelines in
 @secref{guidelines}.
 
-@local-table-of-contents[]
+@local-table-of-contents[#:style 'immediate-only]
 
 @;{--------}
 
@@ -72,17 +72,34 @@ Keep documentation and tests up to date.
 }
 
 @include-section["bytes.scrbl"]
+@include-section["class.scrbl"]
 @include-section["contract.scrbl"]
+@include-section["define.scrbl"]
+@include-section["dict.scrbl"]
 @include-section["dirs.scrbl"]
 @include-section["exn.scrbl"]
 @include-section["file.scrbl"]
+@include-section["function.scrbl"]
 @include-section["list.scrbl"]
 @include-section["net.scrbl"]
 @include-section["path.scrbl"]
+@include-section["planet.scrbl"]
+@include-section["port.scrbl"]
+@include-section["pretty.scrbl"]
+@include-section["regexp.scrbl"]
+@include-section["require.scrbl"]
+@include-section["sandbox.scrbl"]
+@include-section["scribble.scrbl"]
+@include-section["set.scrbl"]
+@include-section["sexp-diff.scrbl"]
 @include-section["srcloc.scrbl"]
 @include-section["string.scrbl"]
 @include-section["struct.scrbl"]
 @include-section["syntax.scrbl"]
+@include-section["planet-syntax.scrbl"]
+@include-section["text.scrbl"]
+@include-section["values.scrbl"]
+@include-section["web.scrbl"]
 @include-section["poly-c.scrbl"]
 @include-section["mutated-vars.scrbl"]
 @include-section["find.scrbl"]
@@ -90,12 +107,11 @@ Keep documentation and tests up to date.
 @include-section["sequence.scrbl"]
 @include-section["hash.scrbl"]
 @include-section["match.scrbl"]
-@include-section["skip-list.scrbl"]
-@include-section["interval-map.scrbl"]
 @include-section["generics.scrbl"]
 @include-section["markparam.scrbl"]
 @include-section["debug.scrbl"]
-@include-section["byte-counting-port.scrbl"]
+@include-section["wrapc.scrbl"]
+@include-section["prop-contract.scrbl"]
 
 @;{--------}
 

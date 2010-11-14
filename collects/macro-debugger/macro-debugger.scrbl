@@ -4,6 +4,7 @@
           scribble/eval
           (for-label scheme/base
                      macro-debugger/expand
+                     macro-debugger/emit
                      macro-debugger/stepper
                      macro-debugger/stepper-text
                      macro-debugger/syntax-browser
@@ -61,7 +62,7 @@ user to specify macros whose expansions should be hidden.
 
 Warning: because of limitations in the way macro expansion is
 selectively hidden, the resulting syntax may not evaluate to the same
-thing as the original syntax.
+result as the original syntax.
 
 @defproc[(expand-only [stx any/c] [transparent-macros (listof identifier?)])
          syntax?]{
@@ -99,6 +100,58 @@ thing as the original syntax.
               (expand/show-predicate
                #'(let ([x 1] [y 2]) (or (even? x) (even? y)))
                (lambda (id) (memq (syntax-e id) '(or #%app))))))
+}
+
+
+@section{Macro stepper API for macros}
+
+@defmodule[macro-debugger/emit]
+
+Macros can explicitly send information to a listening macro stepper by
+using the procedures in this module.
+
+@defproc[(emit-remark [fragment (or/c syntax? string?)] ...
+                      [#:unmark? unmark? boolean? #t])
+         void?]{
+
+Emits an event to the macro stepper (if one is listening) containing
+the given strings and syntax objects. The macro stepper displays a
+remark by printing the strings and syntax objects above a rendering of
+the macro's context. The remark is only displayed if the macro that
+emits it is considered transparent by the hiding policy.
+
+By default, syntax objects in remarks have the transformer's mark
+applied (using @scheme[syntax-local-introduce]) so that their
+appearance in the macro stepper matches their appearance after the
+transformer returns. Unmarking is suppressed if @scheme[unmark?] is
+@scheme[#f].
+
+@schemeblock[
+(define-syntax (mymac stx)
+  (syntax-case stx ()
+    [(_ x y)
+     (emit-remark "I got some arguments!"
+                  #'x
+                  "and"
+                  #'y)
+     #'(list 'x 'y)]))
+(mymac 37 (+ 1 2))
+]
+
+(Run the fragment above in the macro stepper.)
+
+}
+
+@defproc[(emit-local-step [before syntax?] [after syntax?]
+                          [#:id id identifier?])
+         void?]{
+
+Emits an event that simulates a local expansion step from
+@scheme[before] to @scheme[after].
+
+The @scheme[id] argument acts as the step's ``macro'' for the purposes
+of macro hiding.
+
 }
 
 @section{Macro stepper text interface}
@@ -245,24 +298,7 @@ selected term are highlighted in yellow.
 The available secondary partitionings are:
 @itemize[
 @item{@scheme[bound-identifier=?]}
-@item{@scheme[module-identifier=?]}
-@item{@scheme[module-or-top-identifier=?]}
-@item{@bold{symbolic-identifier=?}: 
-  Two identifiers are symbolic-identifier=? if discarding all lexical
-  context information yields the same symbol.
-}
-@item{@bold{same marks}: 
-  Two identifiers have the same marks if (barring nonhygienic macros)
-  they were produced by the same macro transformation step.
-}
-@item{@bold{same source module}:
-  The bindings of the two identifiers come from definitions in the
-  same module.
-}
-@item{@bold{same nominal module}:
-  The bindings of the two identifiers were imported into the current
-  context by requiring the same module.
-}
+@item{@scheme[free-identifier=?]}
 ]
 
 @subsection{Properties}

@@ -1,12 +1,11 @@
-#lang scheme/base
-(require scheme/list
-         scheme/class
-         scheme/gui
+#lang racket/base
+(require racket/list
+         racket/class
+         racket/gui/base
          drracket/arrow
          framework/framework
-         unstable/interval-map
-         unstable/gui/notify
-         "interfaces.ss")
+         data/interval-map
+         "interfaces.rkt")
 
 (provide text:hover<%>
          text:hover-drawings<%>
@@ -106,7 +105,7 @@
              invalidate-bitmap-cache)
 
     ;; interval-map of Drawings
-    (define drawings-list (make-numeric-interval-map))
+    (define drawings-list (make-interval-map))
 
     (field [hover-position #f])
 

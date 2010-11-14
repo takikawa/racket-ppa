@@ -576,6 +576,32 @@ package name, major and minor version number. Returns false if no such
 package is available; otherwise returns a package structure for the
 installed package.}
 
+@defproc[(install-pkg [pkg pkg-spec?]
+                      [file path-string?]
+                      [maj natural-number/c]
+                      [min natural-number/c])
+         (or/c pkg? #f)]{
+ Installs the package represented by the arguments, using
+ only the @racket[pkg-spec-path] and @racket[pkg-spec-name]
+ fields of @racket[pkg].
+ 
+ Returns a new @racket[pkg-spec?] corresponding to the package
+ that was actually installed.
+}
+
+@defproc[(get-package-spec [owner string?]
+                           [pkg string?]
+                           [maj (or/c #f natural-number/c) #f]
+                           [min (or/c #f natural-number/c) #f])
+         pkg-spec?]{
+  Builds a @racket[pkg-spec?] corresponding to the package specified by 
+  @racket[owner], @racket[pkg], @racket[maj], and @racket[min].
+}
+
+@defproc[(pkg-spec? [v any/c]) boolean?]{
+  Recognizes the result of @racket[get-package-spec].                                        
+}
+                   
 @defparam[current-cache-contents contents
           (listof
            (list/c string? 
@@ -682,6 +708,15 @@ context of a package. The others are convenience macros that
 select out the relevant field, or return @racket[#f] if the expression
 appears outside the context of a PLaneT package.}
 
+@defproc[(path->package-version [p path?])
+         (or/c (list/c string? string? natural-number/c natural-number/c) #f)]{
+
+Given a path that corresponds to a PLaneT package (or some part of one),
+produces a list corresponding to its name and version, exactly like
+@racket[(this-package-version)].  Given any other path, produces @racket[#f].
+
+}
+
 @defproc[(exn:fail:planet? [val any/c]) boolean?]{
   Returns @racket[#t] if @racket[val] is                                                   
 }
@@ -699,7 +734,7 @@ is saved in the namespace, making the listening and information producing
 namespace-specific.
 
 @defproc[(planet-terse-register
-          [proc (-> (or/c 'download 'install 'finish) string? any/c)]
+          [proc (-> (or/c 'download 'install 'docs-build 'finish) string? any/c)]
           [namespace namespace? (current-namespace)]) void?]{
 Registers @racket[proc] as a function to be called when
 @racket[planet-terse-log] is called with a matching namespace argument.

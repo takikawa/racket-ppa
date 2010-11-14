@@ -3,7 +3,7 @@
          racket/dict
          (for-syntax racket/base))
 
-; list-prefix : list? list? -> boolean?
+; list-prefix? : list? list? -> boolean?
 ; Is l a prefix or r?
 (define (list-prefix? ls rs)
   (or (null? ls)
@@ -11,21 +11,40 @@
            (equal? (car ls) (car rs))
            (list-prefix? (cdr ls) (cdr rs)))))
 
-;; Eli: Is this some `match' obsession syndrom?  The simple definition:
-;;   (define (list-prefix? ls rs)
-;;     (or (null? ls) (and (pair? rs) (equal? (car ls) (car rs))
-;;                         (list-prefix? (cdr ls) (cdr rs)))))
-;;   is shorter, and faster.  As for making this a library function: how
-;;   about a version that removes the equal prefix from two lists and
-;;   returns the tails -- this way you can tell if they're equal, or one
-;;   is a prefix of the other, or if there was any equal prefix at all.
-;;   (Which can be useful for things like making a path relative to
-;;   another path.)  A nice generalization is to make it get two or more
-;;   lists, and return a matching number of values.
-;; ryanc: changed to use Eli's version
+;; Eli: How about a version that removes the equal prefix from two lists
+;; and returns the tails -- this way you can tell if they're equal, or
+;; one is a prefix of the other, or if there was any equal prefix at
+;; all.  (Which can be useful for things like making a path relative to
+;; another path.)  A nice generalization is to make it get two or more
+;; lists, and return a matching number of values.
+
+(define (internal-split-common-prefix as bs same? keep-prefix?)
+  (let loop ([as as] [bs bs])
+    (if (and (pair? as) (pair? bs) (same? (car as) (car bs)))
+        (let-values ([(prefix atail btail) (loop (cdr as) (cdr bs))])
+          (values (and keep-prefix? (cons (car as) prefix)) atail btail))
+        (values null as bs))))
+
+(define (split-common-prefix as bs #:same? [same? equal?])
+  (internal-split-common-prefix as bs same? #t))
+
+(define (take-common-prefix as bs #:same? [same? equal?])
+  (let-values ([(prefix atail btail) (internal-split-common-prefix as bs same? #t)])
+    prefix))
+
+(define (drop-common-prefix as bs #:same? [same? equal?])
+  (let-values ([(atail btail) (internal-split-common-prefix as bs same? #f)])
+    (values atail btail)))
 
 (provide/contract
- [list-prefix? (list? list? . -> . boolean?)])
+ [list-prefix? (list? list? . -> . boolean?)]
+ [split-common-prefix
+  (->* (any/c any/c) (#:same? procedure?) (values list? any/c any/c))]
+ [take-common-prefix
+  (->* (any/c any/c) (#:same? procedure?) list?)]
+ [drop-common-prefix
+  (->* (any/c any/c) (#:same? procedure?) (values any/c any/c))])
+
 
 (define (filter-multiple l . fs)
   (apply values
@@ -86,6 +105,16 @@
                (car items)
                (loop (cdr items) (cons key-item sofar)))))))
 
+;; Eli: Just to have a record of this: my complaint about having this
+;; code separately from `remove-duplicates' still stands.  Specifically,
+;; that function decides when to use a hash table to make things faster,
+;; and this code would benefit from the same.  It would be much better
+;; to extend that function so it can be used for both tasks rather than
+;; a new piece of code that does it (only do it in a worse way, re
+;; performance).  Doing this can also benefit `remove-duplicates' -- for
+;; example, make it accept a container so that users can choose how
+;; when/if to use a hash table.
+
 ;; sam added from carl
 
 (define-syntax (values->list stx)
@@ -112,3 +141,13 @@
 
 (provide map/values)
 
+;; dvanhorn added:
+
+(define (remf f ls)
+  (cond [(null? ls) '()]
+        [(f (car ls)) (cdr ls)]
+        [else 
+         (cons (car ls)
+               (remf f (cdr ls)))]))
+
+(provide/contract [remf (-> procedure? list? list?)])

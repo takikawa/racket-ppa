@@ -1,10 +1,8 @@
-
-#lang scheme/base
-(require scheme/class
+#lang racket/base
+(require racket/class
          parser-tools/lex
-         "deriv-tokens.ss"
-         "deriv-parser.ss"
-         "../syntax-browser.ss")
+         "deriv-tokens.rkt"
+         "../syntax-browser.rkt")
 (provide (all-defined-out))
 
 (define current-expand-observe
@@ -19,7 +17,7 @@
     (define val (cdr sig+val))
     (define t (tokenize sig val pos))
     (send browser add-text
-          (format "Signal: ~s: ~s~n"
+          (format "Signal: ~s: ~s\n"
                   pos
                   (token-name (position-token-token t))))
     (when val

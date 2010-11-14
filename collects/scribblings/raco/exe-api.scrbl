@@ -43,8 +43,8 @@ parameter is true.
 
 @defproc[(create-embedding-executable [dest path-string?]
                                [#:modules mod-list 
-                                          (listof (list/c (or/c symbol? (one-of/c #t #f)) 
-                                                          module-path?))
+                                          (listof (list/c (or/c symbol? #t #f)
+                                                          (or/c path? module-path?)))
                                           null]
                                [#:configure-via-first-module? config-via-first? 
                                                               any/c 
@@ -64,28 +64,31 @@ parameter is true.
                                                   null]
                                [#:gracket? gracket? any/c #f]
                                [#:mred? mred? any/c #f]
-                               [#:variant variant (one-of/c 'cgc '3m)
+                               [#:variant variant (or/c 'cgc '3m)
                                                   (system-type 'gc)]
                                [#:aux aux (listof (cons/c symbol? any/c)) null]
                                [#:collects-path collects-path
-                                                (or/c false/c 
+                                                (or/c #f
                                                       path-string? 
                                                       (listof path-string?))
                                                 #f]
+                               [#:collects-dest collects-dest
+                                                (or/c #f path-string?)
+                                                #f]
                                [#:launcher? launcher? any/c #f]
                                [#:verbose? verbose? any/c #f]
+                               [#:expand-namespace expand-namespace namespace? (current-namespace)]
                                [#:compiler compile-proc (any/c . -> . compiled-expression?) 
                                            (lambda (e)
                                              (parameterize ([current-namespace 
                                                              expand-namespace])
                                                (compile e)))]
-                               [#:expand-namespace expand-namespace namespace? (current-namespace)]
                                [#:src-filter src-filter (path? . -> . any) (lambda (p) #t)]
                                [#:on-extension ext-proc
-                                               (or/c false/c (path-string? boolean? . -> . any))
+                                               (or/c #f (path-string? boolean? . -> . any))
                                                #f]
                                [#:get-extra-imports extras-proc 
-                                                    (path? compiled-module? 
+                                                    (path? compiled-module-expression? 
                                                      . -> . (listof module-path?))
                                                     (lambda (p m) null)])
          void?]{
@@ -156,6 +159,11 @@ below. When a module declares run-time paths via
 path (for use both by immediate execution and for creating a
 distribution that contains the executable).
 
+If @racket[collects-dest] is a path insteda of @racket[#f], then
+instead of embedding collection-based modules into the executable, the
+modules (in compiled form, only) are copied into collections in the
+@racket[collects-dest] directory.
+
 The optional @racket[#:aux] argument is an association list for
 platform-specific options (i.e., it is a list of pairs where the first
 element of the pair is a key symbol and the second element is the
@@ -170,7 +178,7 @@ currently supported keys are as follows:
   @item{@racket['ico] (Windows) : An icon file path (suffix
         @filepath{.ico}) to use for the executable's desktop icon;
         the executable will have 16x16, 32x32, and 48x48 icons at
-        4-bit, 8-bit, and 32-bit (RBBA) depths; the icons are copied
+        4-bit, 8-bit, and 32-bit (RGBA) depths; the icons are copied
         and generated from any 16x16, 32x32, and 48x48 icons in the
         @filepath{.ico} file.}
 
@@ -298,12 +306,15 @@ run-time path declarations in included modules, so that the path
 resolutions can be directed to the current locations (and, ultimately,
 redirected to copies in a distribution).
 
-The @racket[#:src-filter] argument takes a path and returns true if
+The @racket[#:src-filter] @racket[src-filter] argument takes a path and returns true if
 the corresponding file source should be included in the embedding
 executable in source form (instead of compiled form), @racket[#f]
 otherwise. The default returns @racket[#f] for all paths. Beware that
 the current output port may be redirected to the result executable
-when the filter procedure is called.
+when the filter procedure is called. Each path given to
+@racket[src-filter] corresponds to the actual file name (e.g.,
+@filepath{.ss}/@filepath{.rkt} conversions have been applied as needed
+to refer to the existing file).
 
 If the @racket[#:on-extension] argument is a procedure, the procedure
 is called when the traversal of module dependencies arrives at an
@@ -313,7 +324,7 @@ location) to be embedded into the executable. The procedure is called
 with two arguments: a path for the extension, and a @racket[#f] (for
 historical reasons).
   
-The @racket[#:get-extra-imports] argument takes a source pathname and
+The @racket[#:get-extra-imports] @racket[extras-proc] argument takes a source pathname and
 compiled module for each module to be included in the executable. It
 returns a list of quoted module paths (absolute, as opposed to
 relative to the module) for extra modules to be included in the
@@ -321,7 +332,9 @@ executable in addition to the modules that the source module
 @racket[require]s. For example, these modules might correspond to
 reader extensions needed to parse a module that will be included as
 source, as long as the reader is referenced through an absolute module
-path.}
+path. Each path given to @racket[extras-proc] corresponds to the
+actual file name (e.g., @filepath{.ss}/@filepath{.rkt} conversions
+have been applied as needed to refer to the existing file).}
 
 
 @defproc[(make-embedding-executable [dest path-string?]

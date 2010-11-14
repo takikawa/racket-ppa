@@ -3,7 +3,8 @@
 
 (Section 'for)
 
-(require scheme/generator)
+(require scheme/generator
+         racket/mpair)
 
 (define-syntax (test-multi-generator stx)
   (syntax-case stx ()
@@ -105,8 +106,11 @@
 
 (test-generator [(a b c)] '(a b c))
 (test-generator [(a b c)] (in-list '(a b c)))
+(test-generator [(a b c)] (mlist 'a 'b 'c))
+(test-generator [(a b c)] (in-mlist (mlist 'a 'b 'c)))
 (test-generator [(a b c)] #(a b c))
 (test-generator [(a b c)] (in-vector #(a b c)))
+(test-generator [(a b c)] (in-vector (chaperone-vector #(a b c) (lambda (vec i val) val) (lambda (vec i val) val))))
 (test-generator [(b c d)] (in-vector #(a b c d) 1))
 (test-generator [(b c d)] (in-vector #(a b c d e) 1 4))
 (test-generator [(b d f)] (in-vector #(a b c d e f g h) 1 7 2))
@@ -182,6 +186,49 @@
                            (open-input-string "1 2 3\n4 5"))])
     (list i j)))
 
+;; Basic sanity checks.
+(test '#(1 2 3 4) 'for/vector (for/vector ((i (in-range 4))) (+ i 1)))
+(test '#(1 2 3 4) 'for/vector-fast (for/vector #:length 4 ((i (in-range 4))) (+ i 1)))
+
+(test '#(0 0 0 0 1 2 0 2 4) 'for*/vector (for*/vector ((i (in-range 3))
+                                                       (j (in-range 3)))
+                                           (+ i j)
+                                           (* i j)))
+(test '#(0 0 0 0 1 2 0 2 4) 'for*/vector-fast (for*/vector #:length 9 ((i (in-range 3))
+                                                                       (j (in-range 3)))
+                                                (+ i j)
+                                                (* i j)))
+
+;; Test for both length too long and length too short
+(let ((v (make-vector 3)))
+  (vector-set! v 0 0)
+  (vector-set! v 1 1)
+  (let ((w (for/vector #:length 3 ((i (in-range 2))) i)))
+    (test v 'for/vector-short-iter w)))
+
+(let ((v (make-vector 10)))
+  (for* ((i (in-range 3))
+         (j (in-range 3)))
+    (vector-set! v (+ j (* i 3)) (+ i j)))
+  (let ((w (for*/vector #:length 10 ((i (in-range 3)) (j (in-range 3))) (+ i j))))
+    (test v 'for*/vector-short-iter w)))
+
+(test 2 'for/vector-long-iter
+      (vector-length (for/vector #:length 2 ((i (in-range 10))) i)))
+(test 5 'for*/vector-long-iter 
+      (vector-length (for*/vector #:length 5 ((i (in-range 3)) (j (in-range 3))) (+ i j))))
+
+;; Test for many body expressions
+(let* ((v (vector 1.0 2.0 3.0))
+       (v2 (for/vector ((i (in-range 3))) 
+             (vector-set! v i (+ (vector-ref v i) 1.0))
+             (vector-ref v i)))
+       (v3 (for/vector #:length 3 ((i (in-range 3)))
+             (vector-set! v i (+ (vector-ref v i) 1.0))
+             (vector-ref v i))))
+  (test (vector 2.0 3.0 4.0) 'for/vector-many-body v2)
+  (test (vector 3.0 4.0 5.0) 'for/vector-length-many-body v3))
+
 (test #hash((a . 1) (b . 2) (c . 3)) 'mk-hash
       (for/hash ([v (in-naturals)]
                  [k '(a b c)])
@@ -228,6 +275,20 @@
 (test '((1 0) (2 1) (3 2)) 'indexed-generator
       (for/list ([(x i) (in-indexed (in-generator (yield 1) (yield 2) (yield 3)))])
         (list x i)))
+
+;; test multiple values for in-generator
+(test '[(1 2) (3 4)] 'for*-generator
+      (for*/list ([(n after)
+              (in-generator
+                (yield 1 2)
+                (yield 3 4))])
+            (list n after)))
+
+;; test 0-ary yields
+(test '(0 1 2) 'no-bind-in-generator
+   (for/list ([() (in-generator (yield) (yield) (yield))]
+              [i (in-naturals)])
+     i))
 
 (let ([helper (lambda (i)
                 (yield (add1 i)))])
@@ -287,5 +348,114 @@
       (let ([maker (sequence->repeated-generator '(1 2 3))])
         (list (maker) (maker) (maker)
               (maker) (maker) (maker))))
+
+;; New operators
+(require racket/stream)
+
+(test '(0 1 2) 'stream->list (stream->list (in-range 3)))
+(arity-test stream->list 1 1)
+(err/rt-test (stream->list 1))
+
+(test '() 'empty-stream (stream->list empty-stream))
+
+; XXX How do I check rest arity?
+(test '(0 1 2) 'stream-cons (stream->list (stream-cons 0 (in-range 1 3))))
+(test '((0 1)) 'stream-cons 
+      (for/list ([(a b) (stream-cons 0 1 empty-stream)])
+        (list a b)))
+
+(arity-test stream-first 1 1)
+(err/rt-test (stream-first 1))
+(test 0 'stream-first (stream-first (in-naturals)))
+(test #t
+      'stream-first
+      (equal? (list 0 1)
+              (call-with-values
+               (λ ()
+                 (stream-first (stream-cons 0 1 empty-stream)))
+               (λ args args))))
+
+(arity-test stream-rest 1 1)
+(test '(1 2) 'stream-rest (stream->list (stream-rest (in-range 3))))
+
+(arity-test stream-length 1 1)
+(err/rt-test (stream-length 1))
+(test 3 'stream-length (stream-length (in-range 3)))
+(test 3 'stream-length (stream-length #hasheq((1 . 'a) (2 . 'b) (3 . 'c))))
+
+(arity-test stream-ref 2 2)
+(err/rt-test (stream-ref 2 0))
+(err/rt-test (stream-ref (in-naturals) -1) exn:fail?)
+(err/rt-test (stream-ref (in-naturals) 1.0) exn:fail?)
+(test 0 'stream-ref (stream-ref (in-naturals) 0))
+(test 1 'stream-ref (stream-ref (in-naturals) 1))
+(test 25 'stream-ref (stream-ref (in-naturals) 25))
+
+(arity-test stream-tail 2 2)
+(err/rt-test (stream-tail (in-naturals) -1) exn:fail?)
+(err/rt-test (stream-tail (in-naturals) 1.0) exn:fail?)
+(test 4 'stream-ref (stream-ref (stream-tail (in-naturals) 4) 0))
+(test 5 'stream-ref (stream-ref (stream-tail (in-naturals) 4) 1))
+(test 29 'stream-ref (stream-ref (stream-tail (in-naturals) 4) 25))
+
+; XXX Check for rest
+(err/rt-test (stream-append 1) exn:fail?)
+(err/rt-test (stream-append (in-naturals) 1) exn:fail?)
+(test '() 'stream-append (stream->list (stream-append)))
+(test 5 'stream-append (stream-ref (stream-append (in-naturals)) 5))
+(test 5 'stream-append
+      (stream-ref (stream-append (in-range 3) (in-range 3 10)) 5))
+
+(arity-test stream-map 2 2)
+(err/rt-test (stream-map 2 (in-naturals)) exn:fail?)
+(test '(1 2 3) 'stream-map (stream->list (stream-map add1 (in-range 3))))
+(test 3 'stream-map (stream-ref (stream-map add1 (in-naturals)) 2))
+
+(arity-test stream-andmap 2 2)
+(err/rt-test (stream-andmap 2 (in-naturals)))
+(test #t 'stream-andmap (stream-andmap even? (stream-cons 2 empty-stream)))
+(test #f 'stream-andmap (stream-andmap even? (in-naturals)))
+
+(arity-test stream-ormap 2 2)
+(err/rt-test (stream-ormap 2 (in-naturals)))
+(test #t 'stream-ormap (stream-ormap even? (stream-cons 2 empty-stream)))
+(test #f 'stream-ormap (stream-ormap even? (stream-cons 1 empty-stream)))
+(test #t 'stream-ormap (stream-ormap even? (in-naturals)))
+
+(arity-test stream-for-each 2 2)
+(err/rt-test (stream-for-each 2 (in-naturals)))
+(test (vector 0 1 2)
+      'stream-for-each
+      (let ([v (vector #f #f #f)])
+        (stream-for-each (λ (i) (vector-set! v i i)) (in-range 3))
+        v))
+
+(arity-test stream-fold 3 3)
+(err/rt-test (stream-fold 2 (in-naturals) 0))
+(test 6 'stream-fold (stream-fold + 0 (in-range 4)))
+
+(arity-test stream-filter 2 2)
+(err/rt-test (stream-filter 2 (in-naturals)) exn:fail?)
+(test 4 'stream-filter (stream-ref (stream-filter even? (in-naturals)) 2))
+
+(arity-test stream-add-between 2 2)
+(test 0 'stream-add-between
+      (stream-ref (stream-add-between (in-naturals) #t) 0))
+(test #t 'stream-add-between
+      (stream-ref (stream-add-between (in-naturals) #t) 1))
+(test 1 'stream-add-between
+      (stream-ref (stream-add-between (in-naturals) #t) 2))
+(test #t 'stream-add-between
+      (stream-ref (stream-add-between (in-naturals) #t) 3))
+
+(arity-test stream-count 2 2)
+(test 0 'stream-count (stream-count even? empty-stream))
+(test 1 'stream-count (stream-count even? (in-range 1)))
+(test 5 'stream-count (stream-count even? (in-range 10)))
+(let* ([r (random 100)]
+       [a (if (even? r)
+              (/ r 2)
+              (ceiling (/ r 2)))])
+  (test a 'stream-count (stream-count even? (in-range r))))
 
 (report-errs)

@@ -8,6 +8,34 @@ Versin 4.2.5				  [Fri Mar 26 10:02:11 EDT 2010]
 * "release" is no longer a key event; use "release" handler instead 
 
 ------------------------------------------------------------------------
+Version 5.0.2.  			  [Wed Oct 27 18:30:26 EDT 2010]
+
+* fixed stepper-universe interaction (on my side) 
+* record? allows specification of a directory 
+* small bug fixes 
+* small doc fixes 
+
+* batch-io is now in shape to be used (somewhat) in 2e
+
+* robby added pinholes to his image teachpack 
+
+------------------------------------------------------------------------
+Version 5.0.1.  			  [Tue Jul 20 20:52:09 EDT 2010]
+
+* typos in documentation 
+
+------------------------------------------------------------------------
+
+Version 5.0				  [Fri May 28 13:43:21 EDT 2010]
+
+* added to-draw to universe to prepare the switch to the new terminoloy
+
+------------------------------------------------------------------------
+Versin 4.2.5				  [Fri Mar 26 10:02:11 EDT 2010]
+
+* "release" is no longer a key event; use "release" handler instead 
+
+------------------------------------------------------------------------
 Version 4.2.4				  [Thu Jan 28 12:02:01 EST 2010]
 
 * separated 2htdp/universe from htdp/image

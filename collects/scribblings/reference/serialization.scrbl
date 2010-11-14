@@ -1,7 +1,8 @@
 #lang scribble/doc
 @(require "mz.ss"
           racket/serialize
-          (for-label racket/serialize))
+          (for-label racket/serialize
+                     racket/fasl))
 
 @(define ser-eval (make-base-eval))
 @(interaction-eval #:eval ser-eval (require racket/serialize))
@@ -22,12 +23,12 @@ See @scheme[serialize] for an enumeration of serializable values.}
 
 Returns a value that encapsulates the value @scheme[v]. This value
 includes only readable values, so it can be written to a stream with
-@scheme[write], later read from a stream using @scheme[read], and then
-converted to a value like the original using
-@scheme[deserialize]. Serialization followed by deserialization
-produces a value with the same graph structure and mutability as the
-original value, but the serialized value is a plain tree (i.e., no
-sharing).
+@scheme[write] or @racket[s-exp->fasl], later read from a stream using
+@scheme[read] or @racket[fasl->s-exp], and then converted to a value
+like the original using @scheme[deserialize]. Serialization followed
+by deserialization produces a value with the same graph structure and
+mutability as the original value, but the serialized value is a plain
+tree (i.e., no sharing).
 
 The following kinds of values are serializable:
 
@@ -47,7 +48,7 @@ The following kinds of values are serializable:
        @tech{unreadable symbols}, strings, byte strings, paths (for a
        specific convention), @|void-const|, and the empty list;}
 
- @item{pairs, mutable pairs, vectors, boxes, and hash tables;}
+ @item{pairs, mutable pairs, vectors, boxes, hash tables, and sets;}
 
  @item{@scheme[date] and @scheme[arity-at-least] structures; and}
  
@@ -59,6 +60,15 @@ Serialization succeeds for a compound value, such as a pair, only if
 all content of the value is serializable.  If a value given to
 @scheme[serialize] is not completely serializable, the
 @exnraise[exn:fail:contract].
+
+If @racket[v] contains a cycle (i.e., a collection of objects that
+are all reachable from each other), then @racket[v] can be serialized
+only if the cycle includes a mutable value, where a @tech{prefab}
+structure counts as mutable only if all of its fields are mutable.
+
+@margin-note{The @racket[serialize] and @racket[deserialize] functions
+currently do not handle certain cyclic values that @racket[read] and
+@racket[write] can handle, such as @racket['@#,read[(open-input-string "#0=(#0#)")]].}
 
 See @scheme[deserialize] for information on the format of serialized
 data.}

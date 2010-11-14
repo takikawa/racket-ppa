@@ -27,12 +27,16 @@ EXPORTS
  scheme_end_atomic_no_swap
  scheme_start_in_scheduler
  scheme_end_in_scheduler
+ scheme_start_atomic_no_break
+ scheme_end_atomic_can_break
  scheme_out_of_fuel
  scheme_thread
  scheme_thread_w_details
  scheme_kill_thread
  scheme_break_thread
  scheme_break_main_thread
+ scheme_break_main_thread_at
+ scheme_get_main_thread_break_handle
  scheme_set_break_main_target
  scheme_thread_block
  scheme_thread_block_enable_break
@@ -84,6 +88,9 @@ EXPORTS
  scheme_with_stack_freeze
  scheme_frozen_run_some
  scheme_is_in_frozen_stack
+ scheme_abort_continuation_no_dws
+ scheme_call_with_composable_no_dws
+ scheme_set_on_atomic_timeout
  scheme_signal_error
  scheme_raise_exn
  scheme_warning
@@ -212,6 +219,8 @@ EXPORTS
  GC_fixup_self
  scheme_malloc_immobile_box
  scheme_free_immobile_box
+ scheme_add_gc_callback
+ scheme_remove_gc_callback
  scheme_make_bucket_table
  scheme_add_to_table
  scheme_change_in_table
@@ -471,6 +480,7 @@ EXPORTS
  scheme_add_fd_handle
  scheme_add_fd_eventmask
  scheme_collapse_win_fd
+ scheme_set_wakeup_time
  scheme_security_check_file
  scheme_security_check_file_link
  scheme_security_check_network
@@ -539,6 +549,7 @@ EXPORTS
  scheme_eqv
  scheme_equal
  scheme_chaperone_of
+ scheme_proxy_of
  scheme_hash_key
  scheme_equal_hash_key
  scheme_equal_hash_key2
@@ -589,3 +600,6 @@ EXPORTS
  scheme_signal_received_at
  scheme_get_signal_handle
  scheme_char_strlen
+ scheme_stx_extract_marks
+ scheme_get_place_table
+ scheme_register_process_global

@@ -19,6 +19,12 @@
 # ifndef GC_PRIVATE_H
 # define GC_PRIVATE_H
 
+# ifdef __GNUC__
+#  define MAYBE_UNUSED __attribute__((unused))
+# else
+#  define MAYBE_UNUSED
+# endif
+
 # include <stdlib.h>
 # if !(defined( sony_news ) )
 #   include <stddef.h>
@@ -224,9 +230,11 @@ void GC_print_callers(struct callinfo info[NFRAMES]);
 
 #ifdef BSD_TIME
 #   undef CLOCK_TYPE
+#   undef CLOCK_ZERO
 #   undef GET_TIME
 #   undef MS_TIME_DIFF
 #   define CLOCK_TYPE struct timeval
+#   define CLOCK_ZERO {0, 0}
 #   define GET_TIME(x) { struct rusage rusage; \
 			 getrusage (RUSAGE_SELF,  &rusage); \
 			 x = rusage.ru_utime; }
@@ -237,6 +245,7 @@ void GC_print_callers(struct callinfo info[NFRAMES]);
 #   include <windows.h>
 #   include <winbase.h>
 #   define CLOCK_TYPE DWORD
+#   define CLOCK_ZERO 0
 #   define GET_TIME(x) x = GetTickCount()
 #   define MS_TIME_DIFF(a,b) ((long)((a)-(b)))
 # else /* !MSWIN32, !MSWINCE, !BSD_TIME */
@@ -262,6 +271,7 @@ void GC_print_callers(struct callinfo info[NFRAMES]);
  */
 #   endif
 #   define CLOCK_TYPE clock_t
+#   define CLOCK_ZERO 0
 #   define GET_TIME(x) x = clock()
 #   define MS_TIME_DIFF(a,b) ((unsigned long) \
 		(1000.0*(double)((a)-(b))/(double)CLOCKS_PER_SEC))
@@ -1957,7 +1967,7 @@ void GC_err_puts(const char *s);
    This code works correctly (ugliness is to avoid "unused var" warnings) */
 # define GC_STATIC_ASSERT(expr) do { if (0) { char j[(expr)? 1 : -1]; j[0]='\0'; j[0]=j[0]; } } while(0)
 #else
-# define GC_STATIC_ASSERT(expr) sizeof(char[(expr)? 1 : -1])
+# define GC_STATIC_ASSERT(expr) (void) sizeof(char[(expr)? 1 : -1])
 #endif
 
 # if defined(PARALLEL_MARK) || defined(THREAD_LOCAL_ALLOC)

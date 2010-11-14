@@ -40,9 +40,15 @@ MA 02111-1307, USA. */
 # endif
 #endif
 
-#if defined (__mips) && defined (_ABIN32)
+#if 0
+# if (defined (__mips) || defined(mips)) && defined (_ABIN32)
 /* Force the use of 64-bit limbs for all 64-bit MIPS CPUs if ABI permits.  */
-#define _LONG_LONG_LIMB
+# define _LONG_LONG_LIMB
+# endif
+#endif
+
+#ifdef USE_LONG_LONG_FOR_BIGDIG
+# define _LONG_LONG_LIMB
 #endif
 
 #if (__STDC__-0) || defined (__cplusplus)
@@ -60,12 +66,16 @@ MA 02111-1307, USA. */
 #endif
 
 #ifndef _EXTERN_INLINE
-#ifdef __GNUC__
+/* __GNUC__ case disabled to avoid unnecessary compiler dependencies */
+#if defined(__GNUC__) && 0
 #define _EXTERN_INLINE extern __inline__
 #else
-#define _EXTERN_INLINE static
+#define _EXTERN_INLINE static __gmp_inline
 #endif
 #endif
+
+/* To avoid unnecessary compiler dependencies, always defined: */
+#define _FORCE_INLINES
 
 #ifdef _SHORT_LIMB
 typedef unsigned int		mp_limb_t;
@@ -277,8 +287,8 @@ extern __gmp_const int mp_bits_per_limb;
 #if defined (__cplusplus)
 extern "C" {
 #endif
-mp_limb_t mpn_add _PROTO ((mp_ptr, mp_srcptr, mp_size_t, mp_srcptr,mp_size_t));
-mp_limb_t mpn_add_1 _PROTO ((mp_ptr, mp_srcptr, mp_size_t, mp_limb_t));
+_EXTERN_INLINE mp_limb_t mpn_add _PROTO ((mp_ptr, mp_srcptr, mp_size_t, mp_srcptr,mp_size_t));
+_EXTERN_INLINE mp_limb_t mpn_add_1 _PROTO ((mp_ptr, mp_srcptr, mp_size_t, mp_limb_t));
 mp_limb_t mpn_add_n _PROTO ((mp_ptr, mp_srcptr, mp_srcptr, mp_size_t));
 mp_limb_t mpn_add_nc _PROTO ((mp_ptr, mp_srcptr, mp_srcptr, mp_size_t, mp_limb_t));
 
@@ -347,8 +357,8 @@ mp_size_t mpn_set_str _PROTO ((mp_ptr, __gmp_const unsigned char *, size_t, int)
 void mpn_sqr_n _PROTO ((mp_ptr, mp_srcptr, mp_size_t));
 void mpn_sqr_basecase _PROTO ((mp_ptr, mp_srcptr, mp_size_t));
 mp_size_t mpn_sqrtrem _PROTO ((mp_ptr, mp_ptr, mp_srcptr, mp_size_t));
-mp_limb_t mpn_sub _PROTO ((mp_ptr, mp_srcptr, mp_size_t, mp_srcptr,mp_size_t));
-mp_limb_t mpn_sub_1 _PROTO ((mp_ptr, mp_srcptr, mp_size_t, mp_limb_t));
+_EXTERN_INLINE mp_limb_t mpn_sub _PROTO ((mp_ptr, mp_srcptr, mp_size_t, mp_srcptr,mp_size_t));
+_EXTERN_INLINE mp_limb_t mpn_sub_1 _PROTO ((mp_ptr, mp_srcptr, mp_size_t, mp_limb_t));
 mp_limb_t mpn_sub_n _PROTO ((mp_ptr, mp_srcptr, mp_srcptr, mp_size_t));
 mp_limb_t mpn_sub_nc _PROTO ((mp_ptr, mp_srcptr, mp_srcptr, mp_size_t, mp_limb_t));
 mp_limb_t mpn_submul_1 _PROTO ((mp_ptr, mp_srcptr, mp_size_t, mp_limb_t));
@@ -606,6 +616,14 @@ enum
 
 #define gmp_version __gmp_version
 extern __gmp_const char *gmp_version;
+
+/* Test for gcc >= maj.min, as per __GNUC_PREREQ in glibc */
+#if defined (__GNUC__) && defined (__GNUC_MINOR__)
+#define __GMP_GNUC_PREREQ(maj, min) \
+  ((__GNUC__ << 16) + __GNUC_MINOR__ >= ((maj) << 16) + (min))
+#else
+#define __GMP_GNUC_PREREQ(maj, min)  0
+#endif
 
 #define __GMP_H__
 #endif /* __GMP_H__ */

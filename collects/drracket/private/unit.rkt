@@ -12,7 +12,7 @@ module browser threading seems wrong.
 |#
 
   (require racket/contract
-           scheme/unit
+           racket/unit
            racket/class
            racket/path
            racket/port
@@ -33,6 +33,7 @@ module browser threading seems wrong.
            "drsig.rkt"
            "auto-language.rkt"
            "insert-large-letters.rkt"
+           "get-defs.rkt"
            (prefix-in drracket:arrow: "../arrow.rkt")
            
            mred
@@ -61,7 +62,6 @@ module browser threading seems wrong.
             [prefix drracket:get/extend: drracket:get/extend^]
             [prefix drracket:module-overview: drracket:module-overview^]
             [prefix drracket:tools: drracket:tools^]
-            [prefix drracket:eval: drracket:eval^]
             [prefix drracket:init: drracket:init^]
             [prefix drracket:module-language: drracket:module-language^]
             [prefix drracket:module-language-tools: drracket:module-language-tools^]
@@ -356,9 +356,9 @@ module browser threading seems wrong.
                      frame
                      program-filename)))])))
     
-    (define execute-bitmap (make-object bitmap% (build-path (collection-path "icons") "run.png") 'png/mask))
-    (define break-bitmap (make-object bitmap% (build-path (collection-path "icons") "break.png") 'png/mask))
-    (define save-bitmap (make-object bitmap% (build-path (collection-path "icons") "save.png") 'png/mask))
+    (define execute-bitmap (make-object bitmap% (collection-file-path "run.png" "icons") 'png/mask))
+    (define break-bitmap (make-object bitmap% (collection-file-path "break.png" "icons") 'png/mask))
+    (define save-bitmap (make-object bitmap% (collection-file-path "save.png" "icons") 'png/mask))
     
     (define-values (get-program-editor-mixin add-to-program-editor-mixin)
       (let* ([program-editor-mixin
@@ -447,9 +447,99 @@ module browser threading seems wrong.
             (set! definitions-text% (make-definitions-text%)))
           definitions-text%)))
 
+    ;; links two editor's together so they scroll in tandem
+    (define (linked-scroller %)
+      (class %
+        (super-new)
+        (field [linked #f])
+        (init-field [line-numbers? #f])
+
+        (inherit insert line-start-position line-end-position)
+
+        (define/public (link-to! who)
+          (set! linked who))
+
+        #;
+        (define/override (scroll-editor-to . args)
+          (printf "Scroll editor to ~a\n" args))
+
+        #;
+        (define/override (scroll-to-position . args)
+          (printf "Scroll-to-position ~a\n" args))
+
+        (define self (gensym))
+        (define (visible? want-start want-end)
+          (define start (box 0))
+          (define end (box 0))
+          (send this get-visible-line-range start end)
+          #;
+          (printf "Visible line range ~a ~a ~a\n" (unbox start) (unbox end) self)
+          (and (>= want-start (unbox start))
+               (<= want-end (unbox end))))
+
+        (define/public (scroll-to-line start end)
+          #;
+          (printf "Need to scroll to ~a ~a ~a\n" start end self)
+          ;; dont need to scroll unless the range of lines is out of view
+          (when (not (visible? start end))
+            (send this scroll-to-position
+                  (send this line-end-position start)
+                  #f
+                  (send this line-end-position end))))
+
+        (define/augment (after-delete start length)
+          (update-numbers)
+          (inner (void) after-delete start length))
+
+        (define/augment (after-insert start length)
+          (update-numbers)
+          (inner (void) after-insert start length))
+
+        (define/public (update-numbers)
+          (when (and (not line-numbers?) linked)
+            (send linked ensure-length (send this last-line))))
+
+        ;; make sure the set of line numbers is complete
+        (define/public (ensure-length length)
+          (define lines (send this last-line))
+          (when line-numbers?
+            (when (> lines (add1 length))
+              (send this delete
+                    (line-start-position (add1 length))
+                    (line-end-position lines)
+                    #f))
+            (send this begin-edit-sequence)
+            (for ([line (in-range (add1 lines) (add1 (add1 length)))])
+              #;
+              (printf "Insert line ~a\n" line)
+              (insert (format "~a\n" line)))
+            (send this end-edit-sequence)))
+
+        (define/override (on-paint . args)
+          (define start (box 0))
+          (define end (box 0))
+          (define (current-time) (current-inexact-milliseconds))
+          ;; pass #f to avoid getting visible line ranges from multiple sources
+          (send this get-visible-line-range start end #f)
+          #;
+          (printf "text: Repaint at ~a to ~a at ~a!\n" (unbox start) (unbox end) (current-time))
+          ;; update the linked editor when the main widget is redrawn
+          (when (and (not line-numbers?) linked)
+            #;
+            (printf "Send linked scroll to ~a ~a ~a\n" (unbox start) (unbox end) self)
+            (send linked scroll-to-line (unbox start) (unbox end)))
+          (super on-paint . args))
+        ))
+
+    ;; an editor that does not respond to key presses
+    (define (uneditable %)
+      (class %
+             (super-new)
+             (define/override (on-char . stuff) (void))))
+
     (define (make-definitions-text%)
       (let ([definitions-super%
-              ((get-program-editor-mixin)
+              (linked-scroller
                (text:first-line-mixin
                 (drracket:module-language:module-language-put-file-mixin
                  (scheme:text-mixin
@@ -462,6 +552,7 @@ module browser threading seems wrong.
                         (λ (x) x)
                         (text:normalize-paste-mixin
                          text:info%)))))))))))])
+        ((get-program-editor-mixin)
         (class* definitions-super% (definitions-text<%>)
           (inherit get-top-level-window is-locked? lock while-unlocked highlight-first-line)
           
@@ -576,7 +667,7 @@ module browser threading seems wrong.
                                module-language-settings)])
                   (when matching-language
                     (set-next-settings
-                     (drracket:language-configuration:make-language-settings 
+                     (drracket:language-configuration:language-settings 
                       matching-language
                       settings)
                      #f))))
@@ -819,7 +910,7 @@ module browser threading seems wrong.
            (is-a? (drracket:language-configuration:language-settings-language next-settings)
                   drracket:module-language:module-language<%>))
           (inherit set-max-undo-history)
-          (set-max-undo-history 'forever))))
+          (set-max-undo-history 'forever)))))
     
     ;; is-lang-line? : string -> boolean
     ;; given the first line in the editor, this returns #t if it is a #lang line.
@@ -835,17 +926,18 @@ module browser threading seems wrong.
     
     ;; test cases for is-lang-line?
     #;
-    (list (is-lang-line? "#lang x")
-          (is-lang-line? "#lang scheme")
-          (is-lang-line? "#lang scheme ")
-          (not (is-lang-line? "#lang schemeα"))
-          (not (is-lang-line? "#lang scheme/ "))
-          (not (is-lang-line? "#lang /scheme "))
-          (is-lang-line? "#lang sch/eme ")
-          (is-lang-line? "#lang r6rs")
-          (is-lang-line? "#!r6rs")
-          (is-lang-line? "#!r6rs ")
-          (not (is-lang-line? "#!/bin/sh")))
+    (printf "~s\n"
+            (list (is-lang-line? "#lang x")
+                  (is-lang-line? "#lang racket")
+                  (is-lang-line? "#lang racket ")
+                  (not (is-lang-line? "#lang racketα"))
+                  (not (is-lang-line? "#lang racket/ "))
+                  (not (is-lang-line? "#lang /racket "))
+                  (is-lang-line? "#lang rac/ket ")
+                  (is-lang-line? "#lang r6rs")
+                  (is-lang-line? "#!r6rs")
+                  (is-lang-line? "#!r6rs ")
+                  (not (is-lang-line? "#!/bin/sh"))))
     
     (define (get-module-language/settings)
       (let* ([module-language
@@ -1033,122 +1125,7 @@ module browser threading seems wrong.
                    [string-constant-no-full-name-since-not-saved 
                     (string-constant no-full-name-since-not-saved)])))
     
-    ;; defn = (make-defn number string number number)
-    (define-struct defn (indent name start-pos end-pos) #:mutable)
-    
-    ;; get-definitions : boolean text -> (listof defn)
-    (define (get-definitions tag-string indent? text)
-      (let* ([min-indent 0]
-             [defs (let loop ([pos 0])
-                     (let ([defn-pos (send text find-string tag-string 'forward pos 'eof #t #f)])
-                       (cond
-                         [(not defn-pos) null]
-                         [(in-semicolon-comment? text defn-pos)
-                          (loop (+ defn-pos (string-length tag-string)))]
-                         [else
-                          (let ([indent (get-defn-indent text defn-pos)]
-                                [name (get-defn-name text (+ defn-pos (string-length tag-string)))])
-                            (set! min-indent (min indent min-indent))
-                            (cons (make-defn indent name defn-pos defn-pos)
-                                  (loop (+ defn-pos (string-length tag-string)))))])))])
-        
-        ;; update end-pos's based on the start pos of the next defn
-        (unless (null? defs)
-          (let loop ([first (car defs)]
-                     [defs (cdr defs)])
-            (cond
-              [(null? defs) 
-               (set-defn-end-pos! first (send text last-position))]
-              [else (set-defn-end-pos! first (max (- (defn-start-pos (car defs)) 1)
-                                                  (defn-start-pos first)))
-                    (loop (car defs) (cdr defs))])))
-        
-        (when indent?
-          (for-each (λ (defn)
-                      (set-defn-name! defn
-                                      (string-append
-                                       (apply string
-                                              (vector->list
-                                               (make-vector 
-                                                (- (defn-indent defn) min-indent) #\space)))
-                                       (defn-name defn))))
-                    defs))
-        defs))
-    
-    ;; in-semicolon-comment: text number -> boolean
-    ;; returns #t if `define-start-pos' is in a semicolon comment and #f otherwise
-    (define (in-semicolon-comment? text define-start-pos)
-      (let* ([para (send text position-paragraph define-start-pos)]
-             [start (send text paragraph-start-position para)])
-        (let loop ([pos start])
-          (cond
-            [(pos . >= . define-start-pos) #f]
-            [(char=? #\; (send text get-character pos)) #t]
-            [else (loop (+ pos 1))]))))
-    
-    ;; get-defn-indent : text number -> number
-    ;; returns the amount to indent a particular definition
-    (define (get-defn-indent text pos)
-      (let* ([para (send text position-paragraph pos)]
-             [para-start (send text paragraph-start-position para #t)])
-        (let loop ([c-pos para-start]
-                   [offset 0])
-          (if (< c-pos pos)
-              (let ([char (send text get-character c-pos)])
-                (cond
-                  [(char=? char #\tab)
-                   (loop (+ c-pos 1) (+ offset (- 8 (modulo offset 8))))]
-                  [else
-                   (loop (+ c-pos 1) (+ offset 1))]))
-              offset))))
-    
-    ;; skip-to-whitespace/paren : text number -> number
-    ;; skips to the next parenthesis or whitespace after `pos', returns that position.
-    (define (skip-to-whitespace/paren text pos)
-      (let loop ([pos pos])
-        (if (>= pos (send text last-position))
-            (send text last-position)
-            (let ([char (send text get-character pos)])
-              (cond
-                [(or (char=? #\) char)
-                     (char=? #\( char)
-                     (char=? #\] char)
-                     (char=? #\[ char)
-                     (char-whitespace? char))
-                 pos]
-                [else (loop (+ pos 1))])))))
-    
-    ;; skip-whitespace/paren : text number -> number
-    ;; skips past any parenthesis or whitespace
-    (define (skip-whitespace/paren text pos)
-      (let loop ([pos pos])
-        (if (>= pos (send text last-position))
-            (send text last-position)
-            (let ([char (send text get-character pos)])
-              (cond
-                [(or (char=? #\) char)
-                     (char=? #\( char)
-                     (char=? #\] char)
-                     (char=? #\[ char)
-                     (char-whitespace? char))
-                 (loop (+ pos 1))]
-                [else pos])))))
-    
-    ;; get-defn-name : text number -> string
-    ;; returns the name of the definition starting at `define-pos'
-    (define (get-defn-name text define-pos)
-      (if (>= define-pos (send text last-position))
-          (string-constant end-of-buffer-define)
-          (let* ([start-pos (skip-whitespace/paren text (skip-to-whitespace/paren text define-pos))]
-                 [end-pos (skip-to-whitespace/paren text start-pos)])
-            (send text get-text start-pos end-pos))))
-    
     (define (set-box/f! b v) (when (box? b) (set-box! b v)))
-    
-    
-    
-    
-    
 
 ;                                        
 ;                                        
@@ -1471,6 +1448,12 @@ module browser threading seems wrong.
                         (λ (l) (remq execute-warning-panel l)))
                  (send execute-warning-canvas set-message #f))])))
 
+        (define (show-line-numbers?)
+          (preferences:get 'drracket:show-line-numbers?))
+
+        (define/public (show-line-numbers! show)
+          (re-initialize-definitions-canvas show))
+
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ;;
         ;; logging 
@@ -1657,6 +1640,8 @@ module browser threading seems wrong.
                         (format (string-constant planet-downloading) package)]
                        [(install)
                         (format (string-constant planet-installing) package)]
+                       [(docs-build)
+                        (format (string-constant planet-docs-building) package)]
                        [(finish)
                         (format (string-constant planet-finished) package)]
                        [else
@@ -2049,13 +2034,13 @@ module browser threading seems wrong.
                                            (drracket:language-configuration:language-settings-settings settings))
                                      ""
                                      (string-append " " (string-constant custom)))))
-            (when (is-a? scheme-menu menu%)
-              (let ([label (send scheme-menu get-label)]
+            (when (is-a? language-specific-menu menu%)
+              (let ([label (send language-specific-menu get-label)]
                     [new-label (send language capability-value 'drscheme:language-menu-title)])
                 (unless (equal? label new-label)
-                  (send scheme-menu set-label new-label))))))
+                  (send language-specific-menu set-label new-label))))))
         
-        (define/public (get-language-menu) scheme-menu)
+        (define/public (get-language-menu) language-specific-menu)
         
         ;; update-save-message : -> void
         ;; sets the save message. If input is #f, uses the frame's
@@ -2572,6 +2557,16 @@ module browser threading seems wrong.
           (set! interactions-shown? (not interactions-shown?))
           (unless  interactions-shown?
             (set! definitions-shown? #t)))
+
+        (define (immediate-children parent children)
+          (define (immediate child)
+            (let loop ([child child])
+              (define immediate-parent (send child get-parent))
+              (if (eq? immediate-parent parent)
+                child
+                (loop immediate-parent))))
+          (for/list ([child children])
+            (immediate child)))
         
         (define/override (update-shown)
           (super update-shown)
@@ -2600,7 +2595,9 @@ module browser threading seems wrong.
             (send resizable-panel begin-container-sequence)
             
             ;; this might change the unit-window-size-percentage, so save/restore it
-            (send resizable-panel change-children (λ (l) new-children))
+            (send resizable-panel change-children
+                  (λ (old)
+                     (immediate-children resizable-panel new-children)))
             
             (preferences:set 'drracket:unit-window-size-percentage p)
             ;; restore preferred interactions/definitions sizes
@@ -2691,7 +2688,7 @@ module browser threading seems wrong.
                   (let-values ([(module-language module-language-settings) (get-module-language/settings)])
                     (when (and module-language module-language-settings)
                       (send definitions-text set-next-settings 
-                            (drracket:language-configuration:make-language-settings
+                            (drracket:language-configuration:language-settings
                              module-language
                              module-language-settings)))))))
             
@@ -2774,12 +2771,44 @@ module browser threading seems wrong.
         (define/override (get-canvas)
           (initialize-definitions-canvas)
           definitions-canvas)
+
+        (define (create-definitions-canvas line-numbers?)
+          (define (with-line-numbers)
+            (define line-numbers-text (new (linked-scroller (uneditable scheme:text%))
+                                           [line-numbers? #t]))
+            (define shared-pane (new horizontal-panel% [parent resizable-panel]))
+            (define line-canvas (new editor-canvas%
+                                     [parent shared-pane]
+                                     [style '(hide-vscroll hide-hscroll)]
+                                     [editor line-numbers-text]
+                                     [stretchable-width #f]
+                                     [min-width 60]))
+            (send definitions-text link-to! line-numbers-text)
+            (send line-numbers-text link-to! definitions-text)
+            (new (drracket:get/extend:get-definitions-canvas)
+                 [parent shared-pane]
+                 [editor definitions-text]))
+          (define (without-line-numbers)
+            (send definitions-text link-to! #f)
+            (new (drracket:get/extend:get-definitions-canvas)
+                 [parent resizable-panel]
+                 [editor definitions-text]))
+          (if line-numbers?
+            (with-line-numbers)
+            (without-line-numbers)))
+
+        (define/private (re-initialize-definitions-canvas show)
+          (begin-container-sequence)
+          (set! definitions-canvas (create-definitions-canvas show))
+          (set! definitions-canvases (list definitions-canvas))
+          (update-shown)
+          (send (send definitions-canvas get-editor) update-numbers)
+          (end-container-sequence))
+
         (define/private (initialize-definitions-canvas)
           (unless definitions-canvas
-            (set! definitions-canvas
-                  (new (drracket:get/extend:get-definitions-canvas)
-                       (parent resizable-panel)
-                       (editor definitions-text)))))
+            (set! definitions-canvas (create-definitions-canvas
+                                       (show-line-numbers?)))))
         
         (define/override (get-delegated-text) definitions-text)
         (define/override (get-open-here-editor) definitions-text)
@@ -3574,7 +3603,7 @@ module browser threading seems wrong.
             (send new-language capability-value key)))
         
         (define language-menu 'uninited-language-menu)
-        (define scheme-menu 'scheme-menu-not-yet-init)
+        (define language-specific-menu 'language-specific-menu-not-yet-init)
         (define insert-menu 'insert-menu-not-yet-init)
         (define/public (get-insert-menu) insert-menu)
         (define/public (get-special-menu) insert-menu)
@@ -3601,7 +3630,7 @@ module browser threading seems wrong.
                       [update-settings
                        (λ (settings)
                          (send (get-definitions-text) set-next-settings 
-                               (drracket:language-configuration:make-language-settings language settings))
+                               (drracket:language-configuration:language-settings language settings))
                          (send (get-definitions-text) teachpack-changed))])
                  (set! teachpack-items
                        (list*
@@ -3659,10 +3688,10 @@ module browser threading seems wrong.
                                           mb
                                           #f
                                           language-menu-on-demand))]
-                 [_ (set! scheme-menu (new (get-menu%) 
-                                           [label (drracket:language:get-capability-default
-                                                   'drscheme:language-menu-title)]
-                                           [parent mb]))]
+                 [_ (set! language-specific-menu (new (get-menu%) 
+                                                      [label (drracket:language:get-capability-default
+                                                              'drscheme:language-menu-title)]
+                                                      [parent mb]))]
                  [send-method
                   (λ (method)
                     (λ (_1 _2)
@@ -3683,26 +3712,26 @@ module browser threading seems wrong.
             (set! execute-menu-item
                   (make-object menu:can-restore-menu-item%
                     (string-constant execute-menu-item-label)
-                    scheme-menu
+                    language-specific-menu
                     (λ (_1 _2) (execute-callback))
                     #\t
                     (string-constant execute-menu-item-help-string)))
             (make-object menu:can-restore-menu-item%
               (string-constant ask-quit-menu-item-label)
-              scheme-menu
+              language-specific-menu
               (λ (_1 _2) (send current-tab break-callback))
               #\b
               (string-constant ask-quit-menu-item-help-string))
             (make-object menu:can-restore-menu-item%
               (string-constant force-quit-menu-item-label)
-              scheme-menu
+              language-specific-menu
               (λ (_1 _2) (send interactions-text kill-evaluation))
               #\k
               (string-constant force-quit-menu-item-help-string))
             (when (custodian-memory-accounting-available?)
               (new menu-item%
                    [label (string-constant limit-memory-menu-item-label)]
-                   [parent scheme-menu]
+                   [parent language-specific-menu]
                    [callback
                     (λ (item b)
                       (let ([num (get-mbytes this 
@@ -3721,26 +3750,31 @@ module browser threading seems wrong.
                                    (* 1024 1024 num))]))))]))
             (new menu:can-restore-menu-item%
                  (label (string-constant clear-error-highlight-menu-item-label))
-                 (parent scheme-menu)
+                 (parent language-specific-menu)
                  (callback
                   (λ (_1 _2) 
-                    (let ([ints (send (get-current-tab) get-ints)])
-                      (send ints reset-error-ranges))))
+                    (let* ([tab  (get-current-tab)]
+                           [ints (send tab get-ints)]
+                           [defs (send tab get-defs)])
+                      (send ints reset-error-ranges)
+                      (send defs clear-test-coverage))))
                  (help-string (string-constant clear-error-highlight-item-help-string))
                  (demand-callback
                   (λ (item)
-                    (let ([ints (send (get-current-tab) get-ints)])
-                      (send item enable (send ints get-error-ranges))))))
-            (make-object separator-menu-item% scheme-menu)
+                    (let* ([tab (get-current-tab)]
+                           [ints (send tab get-ints)])
+                      (send item enable (or (send ints get-error-ranges)
+                                            (send tab get-test-coverage-info-visible?)))))))
+            (make-object separator-menu-item% language-specific-menu)
             (make-object menu:can-restore-menu-item%
               (string-constant create-executable-menu-item-label)
-              scheme-menu
+              language-specific-menu
               (λ (x y) (create-executable this)))
             (make-object menu:can-restore-menu-item%
               (string-constant module-browser...)
-              scheme-menu
+              language-specific-menu
               (λ (x y) (drracket:module-overview:module-overview this)))
-            (make-object separator-menu-item% scheme-menu)
+            (make-object separator-menu-item% language-specific-menu)
             
             (let ([cap-val
                    (λ ()
@@ -3751,7 +3785,7 @@ module browser threading seems wrong.
                        (send language capability-value 'drscheme:tabify-menu-callback)))])
               (new menu:can-restore-menu-item%
                    [label (string-constant reindent-menu-item-label)]
-                   [parent scheme-menu]
+                   [parent language-specific-menu]
                    [demand-callback (λ (m) (send m enable (cap-val)))]
                    [callback (send-method 
                               (λ (x)
@@ -3763,7 +3797,7 @@ module browser threading seems wrong.
               
               (new menu:can-restore-menu-item%
                    [label (string-constant reindent-all-menu-item-label)]
-                   [parent scheme-menu]
+                   [parent language-specific-menu]
                    [callback 
                     (send-method 
                      (λ (x)
@@ -3775,15 +3809,15 @@ module browser threading seems wrong.
             
             (make-object menu:can-restore-menu-item%
               (string-constant box-comment-out-menu-item-label)
-              scheme-menu
+              language-specific-menu
               (send-method (λ (x) (send x box-comment-out-selection))))
             (make-object menu:can-restore-menu-item%
               (string-constant semicolon-comment-out-menu-item-label)
-              scheme-menu
+              language-specific-menu
               (send-method (λ (x) (send x comment-out-selection))))
             (make-object menu:can-restore-menu-item%
               (string-constant uncomment-menu-item-label)
-              scheme-menu
+              language-specific-menu
               (λ (x y)
                 (let ([text (get-focus-object)])
                   (when (is-a? text text%)
@@ -3876,6 +3910,20 @@ module browser threading seems wrong.
                 #f
                 has-editor-on-demand)
               (register-capability-menu-item 'drscheme:special:insert-lambda insert-menu))
+
+            (new menu:can-restore-menu-item%
+                 [label (if (show-line-numbers?)
+                          (string-constant hide-line-numbers)
+                          (string-constant show-line-numbers))]
+                 [parent (get-show-menu)]
+                 [callback (lambda (self event)
+                             (define value (preferences:get 'drracket:show-line-numbers?))
+                             (send self set-label
+                                   (if value
+                                     (string-constant show-line-numbers)
+                                     (string-constant hide-line-numbers)))
+                             (preferences:set 'drracket:show-line-numbers? (not value))
+                             (show-line-numbers! (not value)))])
             
             (make-object separator-menu-item% (get-show-menu))
             
@@ -4439,7 +4487,7 @@ module browser threading seems wrong.
                              (λ (x y)
                                (send (send frame get-definitions-text)
                                      set-next-settings
-                                     (drracket:language-configuration:make-language-settings
+                                     (drracket:language-configuration:language-settings
                                       lang
                                       settings)))]))))))
              (preferences:get 'drracket:recent-language-names))

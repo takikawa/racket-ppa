@@ -1,11 +1,12 @@
 #lang racket/base
 
 (provide module-language@)
-(require scheme/unit
+(require racket/unit
          racket/class
          racket/list
          racket/path
          racket/contract
+         racket/sandbox
          mred
          compiler/embed
          compiler/cm
@@ -29,7 +30,8 @@
   
   (define module-language<%>
     (interface ()
-      get-users-language-name))
+      get-users-language-name
+      get-language-info))
   
   ;; add-module-language : -> void
   ;; adds the special module-only language to drscheme
@@ -57,6 +59,26 @@
   ;;             -> (implements drracket:language:language<%>)
   (define (module-mixin %)
     (class* % (drracket:language:language<%> module-language<%>)
+      
+      (define language-info #f) ;; a result from module-compiled-language-info
+      (define sandbox #f)       ;; a sandbox for querying the language-info
+      (define/public (get-language-info key default)
+        (init-sandbox)
+        (cond
+          [(and language-info sandbox)
+           (let ([mp (vector-ref language-info 0)]
+                 [name (vector-ref language-info 1)]
+                 [val (vector-ref language-info 2)])
+             (call-in-sandbox-context
+              sandbox
+              (λ ()
+                (parameterize ([current-security-guard drracket:init:system-security-guard])
+                  (((dynamic-require mp name) val) key default)))))]
+          [else default]))
+      (define (init-sandbox)
+        (unless sandbox
+          (when language-info
+            (set! sandbox (make-evaluator 'racket/base)))))
       
       (inherit get-language-name)
       (define/public (get-users-language-name defs-text)
@@ -191,6 +213,12 @@
       
       (define/override (on-execute settings run-in-user-thread)
         (super on-execute settings run-in-user-thread)
+        
+        ;; reset the language info so that if the module is illformed, 
+        ;; we don't save the language info from the last run
+        (set! language-info #f)
+        (set! sandbox #f)
+        
         (run-in-user-thread
          (λ ()
            (current-command-line-arguments
@@ -220,10 +248,15 @@
                          (use-compiled-file-paths)))]))
              
              (current-load/use-compiled (make-compilation-manager-load/use-compiled-handler))
-             (manager-skip-file-handler
-              (λ (p) (file-stamp-in-paths 
-                      p
-                      (cons (CACHE-DIR) (current-library-collection-paths)))))))))
+             (let* ([cd (find-system-path 'collects-dir)]
+                    [no-dirs (list (CACHE-DIR) 
+                                   (if (relative-path? cd)
+                                       (find-executable-path
+                                        (find-system-path 'exec-file)
+                                        cd)
+                                       cd))])
+               (manager-skip-file-handler
+                (λ (p) (file-stamp-in-paths p no-dirs))))))))
       
       (define/override (get-one-line-summary)
         (string-constant module-language-one-line-summary))
@@ -317,12 +350,15 @@
             (call-with-continuation-prompt
              (λ () (with-stack-checkpoint 
                     (begin
-                      (*do-module-specified-configuration modspec)
+                      (*do-module-specified-configuration)
                       (namespace-require modspec))))))
           (current-namespace (module->namespace modspec))
           (check-interactive-language))
-        (define (*do-module-specified-configuration modspec)
+        (define (*do-module-specified-configuration)
           (let ([info (module->language-info modspec #t)])
+            (parameterize ([current-eventspace drracket:init:system-eventspace])
+              (queue-callback
+               (λ () (set! language-info info))))
             (when info
               (let ([get-info
                      ((dynamic-require (vector-ref info 0)
@@ -342,7 +378,8 @@
       
       (define/override (front-end/interaction port settings)
         (λ ()
-          (let ([v (parameterize ([read-accept-reader #t])
+          (let ([v (parameterize ([read-accept-reader #t]
+                                  [read-accept-lang #f])
                      (with-stack-checkpoint
                       ((current-read-interaction) 
                        (object-name port)
@@ -360,9 +397,9 @@
         (let* ([executable-specs (drracket:language:create-executable-gui
                                   parent program-filename #t #t)])
           (when executable-specs
-            (let ([launcher? (eq? 'launcher (car executable-specs))]
-                  [gui? (eq? 'mred (cadr executable-specs))]
-                  [executable-filename (caddr executable-specs)])
+            (let ([executable-type (list-ref executable-specs 0)]
+                  [gui? (eq? 'mred (list-ref executable-specs 1))]
+                  [executable-filename (list-ref executable-specs 2)])
               (with-handlers ([(λ (x) #f) ;exn:fail?
                                (λ (x)
                                  (message-box
@@ -370,33 +407,36 @@
                                   (if (exn? x)
                                       (format "~a" (exn-message x))
                                       (format "uncaught exception: ~s" x))))])
-                (if (not launcher?)
-                    (let ([short-program-name
-                           (let-values ([(base name dir) (split-path program-filename)])
-                             (path-replace-suffix name #""))])
-                      ((if (eq? 'distribution (car executable-specs))
-                           drracket:language:create-distribution-for-executable
-                           (lambda (executable-filename gui? make)
-                             (make executable-filename)))
-                       executable-filename
-                       gui?
-                       (lambda (exe-name)
-                         (create-embedding-executable
-                          exe-name
-                          #:mred? gui?
-                          #:verbose? #f ;; verbose?
-                          #:modules (list (list #f program-filename))
-                          #:configure-via-first-module? #t
-                          #:literal-expression
-                          (begin
+                (let ([call-create-embedding-executable
+                       (λ (exe-name)
+                         (let ([short-program-name
+                                (let-values ([(base name dir) (split-path program-filename)])
+                                  (path-replace-suffix name #""))])
+                           (create-embedding-executable
+                            exe-name
+                            #:gracket? gui?
+                            #:verbose? #f
+                            #:modules (list (list #f program-filename))
+                            #:configure-via-first-module? #t
+                            #:literal-expression
                             (parameterize ([current-namespace (make-base-empty-namespace)])
                               (namespace-require 'racket/base)
-                              (compile 
-                               `(namespace-require '',(string->symbol (path->string short-program-name))))))
-                          #:cmdline '("-U" "--")))))
-                    (let ([make-launcher (if gui? make-mred-launcher make-mzscheme-launcher)])
-                      (make-launcher (list "-qt-" (path->string program-filename))
-                                     executable-filename))))))))
+                              (compile
+                               `(namespace-require '',(string->symbol (path->string short-program-name)))))
+                            #:cmdline '("-U" "--"))))])
+                  
+                  (case executable-type
+                    [(launcher)
+                     (let ([make-launcher (if gui? make-mred-launcher make-mzscheme-launcher)])
+                       (make-launcher (list "-qt-" (path->string program-filename))
+                                      executable-filename))]
+                    [(distribution)
+                     (drracket:language:create-distribution-for-executable
+                      executable-filename
+                      gui?
+                      call-create-embedding-executable)]
+                    [(stand-alone)
+                     (call-create-embedding-executable executable-filename)])))))))
       
       (super-new
        [module #f]
@@ -440,7 +480,7 @@
                       "There must be a valid module in the\n"
                       "definitions window.  Try starting your program with\n"
                       "\n"
-                      "  #lang scheme\n"
+                      "  #lang racket\n"
                       "\n"
                       "and clicking ‘Run’."))
                error-args))))

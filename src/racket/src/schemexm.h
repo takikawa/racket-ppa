@@ -33,12 +33,16 @@
 #define scheme_end_atomic_no_swap (scheme_extension_table->scheme_end_atomic_no_swap)
 #define scheme_start_in_scheduler (scheme_extension_table->scheme_start_in_scheduler)
 #define scheme_end_in_scheduler (scheme_extension_table->scheme_end_in_scheduler)
+#define scheme_start_atomic_no_break (scheme_extension_table->scheme_start_atomic_no_break)
+#define scheme_end_atomic_can_break (scheme_extension_table->scheme_end_atomic_can_break)
 #define scheme_out_of_fuel (scheme_extension_table->scheme_out_of_fuel)
 #define scheme_thread (scheme_extension_table->scheme_thread)
 #define scheme_thread_w_details (scheme_extension_table->scheme_thread_w_details)
 #define scheme_kill_thread (scheme_extension_table->scheme_kill_thread)
 #define scheme_break_thread (scheme_extension_table->scheme_break_thread)
 #define scheme_break_main_thread (scheme_extension_table->scheme_break_main_thread)
+#define scheme_break_main_thread_at (scheme_extension_table->scheme_break_main_thread_at)
+#define scheme_get_main_thread_break_handle (scheme_extension_table->scheme_get_main_thread_break_handle)
 #define scheme_set_break_main_target (scheme_extension_table->scheme_set_break_main_target)
 #define scheme_thread_block (scheme_extension_table->scheme_thread_block)
 #define scheme_thread_block_enable_break (scheme_extension_table->scheme_thread_block_enable_break)
@@ -90,6 +94,9 @@
 #define scheme_with_stack_freeze (scheme_extension_table->scheme_with_stack_freeze)
 #define scheme_frozen_run_some (scheme_extension_table->scheme_frozen_run_some)
 #define scheme_is_in_frozen_stack (scheme_extension_table->scheme_is_in_frozen_stack)
+#define scheme_abort_continuation_no_dws (scheme_extension_table->scheme_abort_continuation_no_dws)
+#define scheme_call_with_composable_no_dws (scheme_extension_table->scheme_call_with_composable_no_dws)
+#define scheme_set_on_atomic_timeout (scheme_extension_table->scheme_set_on_atomic_timeout)
 #define scheme_signal_error (scheme_extension_table->scheme_signal_error)
 #define scheme_raise_exn (scheme_extension_table->scheme_raise_exn)
 #define scheme_warning (scheme_extension_table->scheme_warning)
@@ -245,6 +252,8 @@
 #endif
 #define scheme_malloc_immobile_box (scheme_extension_table->scheme_malloc_immobile_box)
 #define scheme_free_immobile_box (scheme_extension_table->scheme_free_immobile_box)
+#define scheme_add_gc_callback (scheme_extension_table->scheme_add_gc_callback)
+#define scheme_remove_gc_callback (scheme_extension_table->scheme_remove_gc_callback)
 #define scheme_make_bucket_table (scheme_extension_table->scheme_make_bucket_table)
 #define scheme_add_to_table (scheme_extension_table->scheme_add_to_table)
 #define scheme_change_in_table (scheme_extension_table->scheme_change_in_table)
@@ -525,6 +534,7 @@
 #define scheme_add_fd_handle (scheme_extension_table->scheme_add_fd_handle)
 #define scheme_add_fd_eventmask (scheme_extension_table->scheme_add_fd_eventmask)
 #define scheme_collapse_win_fd (scheme_extension_table->scheme_collapse_win_fd)
+#define scheme_set_wakeup_time (scheme_extension_table->scheme_set_wakeup_time)
 #define scheme_security_check_file (scheme_extension_table->scheme_security_check_file)
 #define scheme_security_check_file_link (scheme_extension_table->scheme_security_check_file_link)
 #define scheme_security_check_network (scheme_extension_table->scheme_security_check_network)
@@ -593,6 +603,7 @@
 #define scheme_eqv (scheme_extension_table->scheme_eqv)
 #define scheme_equal (scheme_extension_table->scheme_equal)
 #define scheme_chaperone_of (scheme_extension_table->scheme_chaperone_of)
+#define scheme_proxy_of (scheme_extension_table->scheme_proxy_of)
 #ifdef MZ_PRECISE_GC
 #define scheme_hash_key (scheme_extension_table->scheme_hash_key)
 #endif
@@ -645,6 +656,9 @@
 #define scheme_signal_received_at (scheme_extension_table->scheme_signal_received_at)
 #define scheme_get_signal_handle (scheme_extension_table->scheme_get_signal_handle)
 #define scheme_char_strlen (scheme_extension_table->scheme_char_strlen)
+#define scheme_stx_extract_marks (scheme_extension_table->scheme_stx_extract_marks)
+#define scheme_get_place_table (scheme_extension_table->scheme_get_place_table)
+#define scheme_register_process_global (scheme_extension_table->scheme_register_process_global)
 #ifdef MZ_PRECISE_GC
 #pragma GC_VARIABLE_STACK_THOUGH_TABLE
 #endif

@@ -166,31 +166,43 @@ void scheme_init_flfxnum_numarith(Scheme_Env *env)
   p = scheme_make_folding_prim(fl_plus, "fl+", 2, 2, 1);
   if (scheme_can_inline_fp_op())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
   scheme_add_global_constant("fl+", p, env);
 
   p = scheme_make_folding_prim(fl_minus, "fl-", 2, 2, 1);
   if (scheme_can_inline_fp_op())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
   scheme_add_global_constant("fl-", p, env);
 
   p = scheme_make_folding_prim(fl_mult, "fl*", 2, 2, 1);
   if (scheme_can_inline_fp_op())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
   scheme_add_global_constant("fl*", p, env);
 
   p = scheme_make_folding_prim(fl_div, "fl/", 2, 2, 1);
   if (scheme_can_inline_fp_op())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
   scheme_add_global_constant("fl/", p, env);
 
   p = scheme_make_folding_prim(fl_abs, "flabs", 1, 1, 1);
   if (scheme_can_inline_fp_op())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  else
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
   scheme_add_global_constant("flabs", p, env);
 
   p = scheme_make_folding_prim(fl_sqrt, "flsqrt", 1, 1, 1);
   if (scheme_can_inline_fp_op() && SQRT_MACHINE_CODE_AVAILABLE)
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  else
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
   scheme_add_global_constant("flsqrt", p, env);
 }
 
@@ -237,36 +249,48 @@ void scheme_init_unsafe_numarith(Scheme_Env *env)
   p = scheme_make_folding_prim(unsafe_fl_plus, "unsafe-fl+", 2, 2, 1);
   if (scheme_can_inline_fp_op())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
   scheme_add_global_constant("unsafe-fl+", p, env);
 
   p = scheme_make_folding_prim(unsafe_fl_minus, "unsafe-fl-", 2, 2, 1);
   if (scheme_can_inline_fp_op())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
   scheme_add_global_constant("unsafe-fl-", p, env);
 
   p = scheme_make_folding_prim(unsafe_fl_mult, "unsafe-fl*", 2, 2, 1);
   if (scheme_can_inline_fp_op())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
   scheme_add_global_constant("unsafe-fl*", p, env);
 
   p = scheme_make_folding_prim(unsafe_fl_div, "unsafe-fl/", 2, 2, 1);
   if (scheme_can_inline_fp_op())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
   scheme_add_global_constant("unsafe-fl/", p, env);
 
   p = scheme_make_folding_prim(unsafe_fl_abs, "unsafe-flabs", 1, 1, 1);
   if (scheme_can_inline_fp_op())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  else
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
   scheme_add_global_constant("unsafe-flabs", p, env);
 
   p = scheme_make_folding_prim(unsafe_fl_sqrt, "unsafe-flsqrt", 1, 1, 1);
   if (scheme_can_inline_fp_op() && SQRT_MACHINE_CODE_AVAILABLE)
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  else
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
   scheme_add_global_constant("unsafe-flsqrt", p, env);
 }
@@ -1019,8 +1043,8 @@ UNSAFE_FL1(unsafe_fl_sqrt, sqrt, pos_sqrt)
  static Scheme_Object *name(int argc, Scheme_Object *argv[]) \
  {                                                           \
    double v;                                                 \
-   if (!SCHEME_FLOATP(argv[0])) scheme_wrong_type(sname, "inexact-real", 0, argc, argv); \
-   if (!SCHEME_FLOATP(argv[1])) scheme_wrong_type(sname, "inexact-real", 1, argc, argv); \
+   if (!SCHEME_DBLP(argv[0])) scheme_wrong_type(sname, "flonum", 0, argc, argv); \
+   if (!SCHEME_DBLP(argv[1])) scheme_wrong_type(sname, "flonum", 1, argc, argv); \
    v = SCHEME_DBL_VAL(argv[0]) op SCHEME_DBL_VAL(argv[1]);   \
    return scheme_make_double(v);                             \
  }
@@ -1034,7 +1058,7 @@ SAFE_FL(fl_div, "fl/", /)
  static Scheme_Object *name(int argc, Scheme_Object *argv[])  \
  {                                                            \
    double v;                                                              \
-   if (!SCHEME_FLOATP(argv[0])) scheme_wrong_type(sname, "inexact-real", 0, argc, argv); \
+   if (!SCHEME_DBLP(argv[0])) scheme_wrong_type(sname, "flonum", 0, argc, argv); \
    v = SCHEME_DBL_VAL(argv[0]);                                           \
    v = op(v);                                                             \
    return scheme_make_double(v);                                          \

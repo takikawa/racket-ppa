@@ -7,6 +7,9 @@
  ********************************************/
 
 #include "schpriv.h"
+
+#ifndef DONT_USE_FOREIGN
+
 #include <errno.h>
 
 #ifndef WINDOWS_DYNAMIC_LOAD
@@ -479,8 +482,9 @@ static unsigned short *ucs4_string_to_utf16_pointer(Scheme_Object *ucs)
   long ulen;
   unsigned short *res;
   res = scheme_ucs4_to_utf16
-          (SCHEME_CHAR_STR_VAL(ucs), 0, 1+SCHEME_CHAR_STRLEN_VAL(ucs),
-           NULL, -1, &ulen, 0);
+          (SCHEME_CHAR_STR_VAL(ucs), 0, SCHEME_CHAR_STRLEN_VAL(ucs),
+           NULL, -1, &ulen, 1);
+  res[ulen] = 0;
   return res;
 }
 
@@ -497,7 +501,8 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
   int end;
   if (!utf) return scheme_false;
   for (end=0; utf[end] != 0; end++) { /**/ }
-  res = scheme_utf16_to_ucs4(utf, 0, end, NULL, -1, &ulen, 0);
+  res = scheme_utf16_to_ucs4(utf, 0, end, NULL, -1, &ulen, 1);
+  res[ulen] = 0;
   return scheme_make_sized_char_string(res, ulen, 0);
 }
 
@@ -1010,6 +1015,16 @@ void free_libffi_type(void *ignored, void *p)
   free(p);
 }
 
+void free_libffi_type_with_alignment(void *ignored, void *p)
+{
+  int i;
+
+  for (i = 0; ((ffi_type*)p)->elements[i]; i++) {
+    free(((ffi_type*)p)->elements[i]);
+  }
+  free_libffi_type(ignored, p);
+}
+
 /*****************************************************************************/
 /* ABI spec */
 
@@ -1046,7 +1061,7 @@ ffi_abi sym_to_abi(char *who, Scheme_Object *sym)
 /*****************************************************************************/
 /* cstruct types */
 
-/* (make-cstruct-type types [abi]) -> ctype */
+/* (make-cstruct-type types [abi alignment]) -> ctype */
 /* This creates a new primitive type that is a struct.  This type can be used
  * with cpointer objects, except that the contents is used rather than the
  * pointer value.  Marshaling to lists or whatever should be done in Scheme. */
@@ -1060,11 +1075,24 @@ static Scheme_Object *foreign_make_cstruct_type(int argc, Scheme_Object *argv[])
   GC_CAN_IGNORE ffi_type **elements, *libffi_type, **dummy;
   ctype_struct *type;
   ffi_cif cif;
-  int i, nargs;
+  int i, nargs, with_alignment;
   ffi_abi abi;
   nargs = scheme_proper_list_length(argv[0]);
   if (nargs < 0) scheme_wrong_type(MYNAME, "proper list", 0, argc, argv);
   abi = GET_ABI(MYNAME,1);
+  if (argc > 2) {
+    if (!SCHEME_FALSEP(argv[2])) {
+      if (!SAME_OBJ(argv[2], scheme_make_integer(1))
+          && !SAME_OBJ(argv[2], scheme_make_integer(2))
+          && !SAME_OBJ(argv[2], scheme_make_integer(4))
+          && !SAME_OBJ(argv[2], scheme_make_integer(8))
+          && !SAME_OBJ(argv[2], scheme_make_integer(16)))
+        scheme_wrong_type(MYNAME, "1, 2, 4, 8, 16, or #f", 2, argc, argv);
+      with_alignment = SCHEME_INT_VAL(argv[2]);
+    } else
+      with_alignment = 0;
+  } else
+    with_alignment = 0;
   /* allocate the type elements */
   elements = malloc((nargs+1) * sizeof(ffi_type*));
   elements[nargs] = NULL;
@@ -1074,6 +1102,13 @@ static Scheme_Object *foreign_make_cstruct_type(int argc, Scheme_Object *argv[])
     if (CTYPE_PRIMLABEL(base) == FOREIGN_void)
       scheme_wrong_type(MYNAME, "list-of-non-void-C-types", 0, argc, argv);
     elements[i] = CTYPE_PRIMTYPE(base);
+    if (with_alignment) {
+      /* copy the type to set an alignment: */
+      libffi_type = malloc(sizeof(ffi_type));
+      memcpy(libffi_type, elements[i], sizeof(ffi_type));
+      elements[i] = libffi_type;
+      elements[i]->alignment = with_alignment;
+    }
   }
   /* allocate the new libffi type object */
   libffi_type = malloc(sizeof(ffi_type));
@@ -1090,7 +1125,10 @@ static Scheme_Object *foreign_make_cstruct_type(int argc, Scheme_Object *argv[])
   type->basetype = (argv[0]);
   type->scheme_to_c = ((Scheme_Object*)libffi_type);
   type->c_to_scheme = ((Scheme_Object*)FOREIGN_struct);
-  scheme_register_finalizer(type, free_libffi_type, libffi_type, NULL, NULL);
+  if (with_alignment)
+    scheme_register_finalizer(type, free_libffi_type_with_alignment, libffi_type, NULL, NULL);
+  else
+    scheme_register_finalizer(type, free_libffi_type, libffi_type, NULL, NULL);
   return (Scheme_Object*)type;
 }
 #undef MYNAME
@@ -1106,7 +1144,7 @@ typedef struct ffi_callback_struct {
   Scheme_Object* proc;
   Scheme_Object* itypes;
   Scheme_Object* otype;
-  char call_in_scheduler;
+  Scheme_Object* sync;
 } ffi_callback_struct;
 #define SCHEME_FFICALLBACKP(x) (SCHEME_TYPE(x)==ffi_callback_tag)
 #define MYNAME "ffi-callback?"
@@ -1127,6 +1165,7 @@ int ffi_callback_MARK(void *p) {
   gcMARK(s->proc);
   gcMARK(s->itypes);
   gcMARK(s->otype);
+  gcMARK(s->sync);
   return gcBYTES_TO_WORDS(sizeof(ffi_callback_struct));
 }
 int ffi_callback_FIXUP(void *p) {
@@ -1135,10 +1174,17 @@ int ffi_callback_FIXUP(void *p) {
   gcFIXUP(s->proc);
   gcFIXUP(s->itypes);
   gcFIXUP(s->otype);
+  gcFIXUP(s->sync);
   return gcBYTES_TO_WORDS(sizeof(ffi_callback_struct));
 }
 END_XFORM_SKIP;
 #endif
+
+/* The sync field:
+     NULL => non-atomic mode, no sync proc
+     #t => atomic mode, no sync proc
+     (rcons queue proc) => non-atomic mode, sync proc
+     (box (rcons queue proc)) => atomic mode, sync proc */
 
 /*****************************************************************************/
 /* Pointer objects */
@@ -1164,6 +1210,9 @@ END_XFORM_SKIP;
 
 #define scheme_make_foreign_cpointer(x) \
   ((x==NULL)?scheme_false:scheme_make_cptr(x,NULL))
+
+#define scheme_make_foreign_offset_cpointer(x, delta) \
+  ((delta == 0) ? scheme_make_foreign_cpointer(x) : scheme_make_offset_cptr(x,delta,NULL))
 
 #define scheme_make_foreign_external_cpointer(x) \
   ((x==NULL)?scheme_false:scheme_make_external_cptr(x,NULL))
@@ -1195,6 +1244,10 @@ static Scheme_Object *foreign_set_cpointer_tag_bang(int argc, Scheme_Object *arg
   return scheme_void;
 }
 #undef MYNAME
+
+void *scheme_extract_pointer(Scheme_Object *v) {
+  return SCHEME_FFIANYPTR_VAL(v);
+}
 
 /*****************************************************************************/
 /* Scheme<-->C conversions */
@@ -1255,7 +1308,7 @@ static Scheme_Object *C2SCHEME(Scheme_Object *type, void *src,
     case FOREIGN_scheme: return REF_CTYPE(Scheme_Object*);
     case FOREIGN_fpointer: return (REF_CTYPE(void*));
     case FOREIGN_struct:
-           return scheme_make_foreign_cpointer(W_OFFSET(src, delta));
+           return scheme_make_foreign_offset_cpointer(src, delta);
     default: scheme_signal_error("corrupt foreign type: %V", type);
   }
   return NULL; /* hush the compiler */
@@ -1953,7 +2006,9 @@ static Scheme_Object *foreign_free(int argc, Scheme_Object *argv[])
 #define MYNAME "malloc-immobile-cell"
 static Scheme_Object *foreign_malloc_immobile_cell(int argc, Scheme_Object *argv[])
 {
-  return scheme_make_foreign_external_cpointer(scheme_malloc_immobile_box(argv[0]));
+  void *p;
+  p = scheme_malloc_immobile_box(argv[0]);
+  return scheme_make_foreign_external_cpointer(p); /* <- beware: macro duplicates `p' */
 }
 #undef MYNAME
 
@@ -2603,12 +2658,13 @@ static Scheme_Object *foreign_ffi_call(int argc, Scheme_Object *argv[])
 /*****************************************************************************/
 /* Scheme callbacks */
 
-void ffi_do_callback(ffi_cif* cif, void* resultp, void** args, void *userdata)
+typedef void (*ffi_callback_t)(ffi_cif* cif, void* resultp, void** args, void *userdata);
+
+static ffi_callback_struct *extract_ffi_callback(void *userdata)
+  XFORM_SKIP_PROC
 {
   ffi_callback_struct *data;
-  Scheme_Object *argv_stack[MAX_QUICK_ARGS];
-  int argc = cif->nargs, i;
-  Scheme_Object **argv, *p, *v;
+
 #ifdef MZ_PRECISE_GC
   {
     void *tmp;
@@ -2619,11 +2675,24 @@ void ffi_do_callback(ffi_cif* cif, void* resultp, void** args, void *userdata)
 #else
   data = (ffi_callback_struct*)userdata;
 #endif
+
+  return data;
+}
+
+void ffi_do_callback(ffi_cif* cif, void* resultp, void** args, void *userdata)
+{
+  ffi_callback_struct *data;
+  Scheme_Object *argv_stack[MAX_QUICK_ARGS];
+  int argc = cif->nargs, i;
+  Scheme_Object **argv, *p, *v;
+
+  data = extract_ffi_callback(userdata);
+
   if (argc <= MAX_QUICK_ARGS)
     argv = argv_stack;
   else
     argv = scheme_malloc(argc * sizeof(Scheme_Object*));
-  if (data->call_in_scheduler)
+  if (data->sync && !SCHEME_RPAIRP(data->sync))
     scheme_start_in_scheduler();
   for (i=0, p=data->itypes; i<argc; i++, p=SCHEME_CDR(p)) {
     v = C2SCHEME(SCHEME_CAR(p), args[i], 0, 0);
@@ -2631,8 +2700,135 @@ void ffi_do_callback(ffi_cif* cif, void* resultp, void** args, void *userdata)
   }
   p = _scheme_apply(data->proc, argc, argv);
   SCHEME2C(data->otype, resultp, 0, p, NULL, NULL, 1);
-  if (data->call_in_scheduler)
+  if (data->sync && !SCHEME_RPAIRP(data->sync))
     scheme_end_in_scheduler();
+}
+
+#ifdef MZ_USE_MZRT
+
+/* When OS-level thread support is avaiable, support callbacks
+   in foreign threads that are executed on the main Scheme thread. */
+
+typedef struct Queued_Callback {
+  ffi_cif* cif;
+  void* resultp;
+  void** args;
+  void *userdata;
+  mzrt_sema *sema;
+  int called;
+  struct Queued_Callback *next;
+} Queued_Callback;
+
+typedef struct FFI_Sync_Queue {
+  Queued_Callback *callbacks; /* malloc()ed list */
+  mzrt_mutex *lock;
+  mzrt_thread_id orig_thread;
+  void *sig_hand;
+} FFI_Sync_Queue;
+
+THREAD_LOCAL_DECL(static struct FFI_Sync_Queue *ffi_sync_queue);
+
+static Scheme_Object *callback_thunk(void *_qc, int argc, Scheme_Object *argv[])
+{
+  Queued_Callback *qc = (Queued_Callback *)_qc;
+
+  if (qc->called)
+    scheme_raise_exn(MZEXN_FAIL_CONTRACT,
+                     "callback thunk for synchronization has already been called");
+  qc->called = 1;
+
+  ffi_do_callback(qc->cif, qc->resultp, qc->args, qc->userdata);
+
+  mzrt_sema_post(qc->sema);
+
+  return scheme_void;
+}
+
+void scheme_check_foreign_work(void)
+{
+  GC_CAN_IGNORE Queued_Callback *qc;
+  ffi_callback_struct *data;
+  Scheme_Object *a[1], *proc;
+
+  if (ffi_sync_queue) {
+    do {
+      mzrt_mutex_lock(ffi_sync_queue->lock);
+      qc = ffi_sync_queue->callbacks;
+      if (qc)
+        ffi_sync_queue->callbacks = qc->next;
+      mzrt_mutex_unlock(ffi_sync_queue->lock);
+
+      if (qc) {
+        qc->next = NULL;
+
+        data = extract_ffi_callback(qc->userdata);
+
+        proc = scheme_make_closed_prim_w_arity(callback_thunk, (void *)qc,
+                                               "callback-thunk", 0, 0);
+        a[0] = proc;
+
+        proc = data->sync;
+        if (SCHEME_BOXP(proc)) proc = SCHEME_BOX_VAL(proc);
+        proc = SCHEME_CDR(proc);
+
+        scheme_start_in_scheduler();
+        _scheme_apply(proc, 1, a);
+        scheme_end_in_scheduler();
+      }
+
+    } while (qc);
+  }
+}
+
+#endif
+
+void ffi_queue_callback(ffi_cif* cif, void* resultp, void** args, void *userdata)
+  XFORM_SKIP_PROC
+{
+  ffi_callback_struct *data;
+
+  data = extract_ffi_callback(userdata);
+
+#ifdef MZ_USE_MZRT
+  {
+    FFI_Sync_Queue *queue;
+    Scheme_Object *o;
+
+    o = data->sync;
+    if (SCHEME_BOXP(o)) o = SCHEME_BOX_VAL(o);
+
+    queue = (FFI_Sync_Queue *)SCHEME_CAR(o);
+
+    if (queue->orig_thread != mz_proc_thread_self()) {
+      Queued_Callback *qc;
+      mzrt_sema *sema;
+
+      mzrt_sema_create(&sema, 0);
+
+      qc = (Queued_Callback *)malloc(sizeof(Queued_Callback));
+      qc->cif = cif;
+      qc->resultp = resultp;
+      qc->args = args;
+      qc->userdata = userdata;
+      qc->sema = sema;
+      qc->called = 0;
+
+      mzrt_mutex_lock(queue->lock);
+      qc->next = queue->callbacks;
+      queue->callbacks = qc;
+      mzrt_mutex_unlock(queue->lock);
+      scheme_signal_received_at(queue->sig_hand);
+
+      /* wait for the callback to be invoked in the main thread */
+      mzrt_sema_wait(sema);
+
+      mzrt_sema_destroy(sema);
+      free(qc);
+      return;
+    }
+  }
+#endif
+  ffi_do_callback(cif, resultp, args, userdata);
 }
 
 /* see ffi-callback below */
@@ -2660,97 +2856,125 @@ void free_cl_cif_args(void *ignored, void *p)
   scheme_free_code(p);
 }
 
-/* (ffi-callback scheme-proc in-types out-type [abi]) -> ffi-callback */
+/* (ffi-callback scheme-proc in-types out-type [abi atomic? sync]) -> ffi-callback */
 /* the treatment of in-types and out-types is similar to that in ffi-call */
 /* the real work is done by ffi_do_callback above */
 #define MYNAME "ffi-callback"
 static Scheme_Object *foreign_ffi_callback(int argc, Scheme_Object *argv[])
 {
-  ffi_callback_struct *data;
-  Scheme_Object *itypes = argv[1];
-  Scheme_Object *otype = argv[2];
-  Scheme_Object *p, *base;
-  ffi_abi abi;
-  int nargs, i;
-  /* ffi_closure objects are problematic when used with a moving GC.  The
-   * problem is that memory that is GC-visible can move at any time.  The
-   * solution is to use an immobile-box, which an immobile pointer (in a simple
-   * malloced block), which points to the ffi_callback_struct that contains the
-   * relevant Scheme call details.  Another minor complexity is that an
-   * immobile box serves as a reference for the GC, which means that nothing
-   * will ever get collected: and the solution for this is to stick a weak-box
-   * in the chain.  Users need to be aware of GC issues, and need to keep a
-   * reference to the callback object to avoid releasing the whole thing --
-   * when that reference is lost, the ffi_callback_struct will be GCed, and a
-   * finalizer will free() the malloced memory.  Everything on the malloced
-   * part is allocated in one block, to make it easy to free.  The final layout
-   * of the various objects is:
-   *
-   * <<======malloc======>> : <<===========scheme_malloc===============>>
-   *                        :
-   *    ffi_closure <------------------------\
-   *      |  |              :                |
-   *      |  |              :                |
-   *      |  \--> immobile ----> weak        |
-   *      |         box     :    box         |
-   *      |                 :     |          |
-   *      |                 :     |          |
-   *      |                 :     \--> ffi_callback_struct
-   *      |                 :               |  |
-   *      V                 :               |  \-----> Scheme Closure
-   *     cif ---> atypes    :               |
-   *                        :               \--------> input/output types
-   */
-  GC_CAN_IGNORE ffi_type *rtype, **atypes;
-  GC_CAN_IGNORE ffi_cif *cif;
-  GC_CAN_IGNORE ffi_closure *cl;
-  GC_CAN_IGNORE closure_and_cif *cl_cif_args;
-  if (!SCHEME_PROCP(argv[0]))
-    scheme_wrong_type(MYNAME, "procedure", 0, argc, argv);
-  nargs = scheme_proper_list_length(itypes);
-  if (nargs < 0)
-    scheme_wrong_type(MYNAME, "proper list", 1, argc, argv);
-  if (NULL == (base = get_ctype_base(otype)))
-    scheme_wrong_type(MYNAME, "C-type", 2, argc, argv);
-  rtype = CTYPE_PRIMTYPE(base);
-  abi = GET_ABI(MYNAME,3);
-  /* malloc space for everything needed, so a single free gets rid of this */
-  cl_cif_args = scheme_malloc_code(sizeof(closure_and_cif) + nargs*sizeof(ffi_cif*));
-  cl = &(cl_cif_args->closure); /* cl is the same as cl_cif_args */
-  cif = &(cl_cif_args->cif);
-  atypes = (ffi_type **)(((char*)cl_cif_args) + sizeof(closure_and_cif));
-  for (i=0, p=itypes; i<nargs; i++, p=SCHEME_CDR(p)) {
-    if (NULL == (base = get_ctype_base(SCHEME_CAR(p))))
-      scheme_wrong_type(MYNAME, "list-of-C-types", 1, argc, argv);
-    if (CTYPE_PRIMLABEL(base) == FOREIGN_void)
-      scheme_wrong_type(MYNAME, "list-of-non-void-C-types", 1, argc, argv);
-    atypes[i] = CTYPE_PRIMTYPE(base);
-  }
-  if (ffi_prep_cif(cif, abi, nargs, rtype, atypes) != FFI_OK)
-    scheme_signal_error("internal error: ffi_prep_cif did not return FFI_OK");
-  data = (ffi_callback_struct*)scheme_malloc_tagged(sizeof(ffi_callback_struct));
-  data->so.type = ffi_callback_tag;
-  data->callback = (cl_cif_args);
-  data->proc = (argv[0]);
-  data->itypes = (argv[1]);
-  data->otype = (argv[2]);
-  data->call_in_scheduler = (((argc > 4) && SCHEME_TRUEP(argv[4])));
-# ifdef MZ_PRECISE_GC
-  {
-    /* put data in immobile, weak box */
-    void **tmp;
-    tmp = GC_malloc_immobile_box(GC_malloc_weak_box(data, NULL, 0));
-    cl_cif_args->data = (struct immobile_box*)tmp;
-  }
-# else /* MZ_PRECISE_GC undefined */
-  cl_cif_args->data = (void*)data;
-# endif /* MZ_PRECISE_GC */
-  if (ffi_prep_closure(cl, cif, &ffi_do_callback, (void*)(cl_cif_args->data))
-      != FFI_OK)
-    scheme_signal_error
-      ("internal error: ffi_prep_closure did not return FFI_OK");
-  scheme_register_finalizer(data, free_cl_cif_args, cl_cif_args, NULL, NULL);
-  return (Scheme_Object*)data;
+    ffi_callback_struct *data;
+    Scheme_Object *itypes = argv[1];
+    Scheme_Object *otype = argv[2];
+    Scheme_Object *sync;
+    Scheme_Object *p, *base;
+    ffi_abi abi;
+    int is_atomic;
+    int nargs, i;
+    /* ffi_closure objects are problematic when used with a moving GC.  The
+     * problem is that memory that is GC-visible can move at any time.  The
+     * solution is to use an immobile-box, which an immobile pointer (in a simple
+     * malloced block), which points to the ffi_callback_struct that contains the
+     * relevant Scheme call details.  Another minor complexity is that an
+     * immobile box serves as a reference for the GC, which means that nothing
+     * will ever get collected: and the solution for this is to stick a weak-box
+     * in the chain.  Users need to be aware of GC issues, and need to keep a
+     * reference to the callback object to avoid releasing the whole thing --
+     * when that reference is lost, the ffi_callback_struct will be GCed, and a
+     * finalizer will free() the malloced memory.  Everything on the malloced
+     * part is allocated in one block, to make it easy to free.  The final layout
+     * of the various objects is:
+     *
+     * <<======malloc======>> : <<===========scheme_malloc===============>>
+     *                        :
+     *    ffi_closure <------------------------\
+     *      |  |              :                |
+     *      |  |              :                |
+     *      |  \--> immobile ----> weak        |
+     *      |         box     :    box         |
+     *      |                 :     |          |
+     *      |                 :     |          |
+     *      |                 :     \--> ffi_callback_struct
+     *      |                 :               |  |
+     *      V                 :               |  \-----> Scheme Closure
+     *     cif ---> atypes    :               |
+     *                        :               \--------> input/output types
+     */
+    GC_CAN_IGNORE ffi_type *rtype, **atypes;
+    GC_CAN_IGNORE ffi_cif *cif;
+    GC_CAN_IGNORE ffi_closure *cl;
+    GC_CAN_IGNORE closure_and_cif *cl_cif_args;
+    GC_CAN_IGNORE ffi_callback_t do_callback;
+    if (!SCHEME_PROCP(argv[0]))
+      scheme_wrong_type(MYNAME, "procedure", 0, argc, argv);
+    nargs = scheme_proper_list_length(itypes);
+    if (nargs < 0)
+      scheme_wrong_type(MYNAME, "proper list", 1, argc, argv);
+    if (NULL == (base = get_ctype_base(otype)))
+      scheme_wrong_type(MYNAME, "C-type", 2, argc, argv);
+    rtype = CTYPE_PRIMTYPE(base);
+    abi = GET_ABI(MYNAME,3);
+    is_atomic = ((argc > 4) && SCHEME_TRUEP(argv[4]));
+    sync = (is_atomic ? scheme_true : NULL);
+    if (argc > 5)
+      (void)scheme_check_proc_arity2(MYNAME, 1, 5, argc, argv, 1);
+    if (((argc > 5) && SCHEME_TRUEP(argv[5]))) {
+  #ifdef MZ_USE_MZRT
+      if (!ffi_sync_queue) {
+        mzrt_thread_id tid;
+        void *sig_hand;
+
+        ffi_sync_queue = (FFI_Sync_Queue *)malloc(sizeof(FFI_Sync_Queue));
+        tid = mz_proc_thread_self();
+        ffi_sync_queue->orig_thread = tid;
+        mzrt_mutex_create(&ffi_sync_queue->lock);
+        sig_hand = scheme_get_signal_handle();
+        ffi_sync_queue->sig_hand = sig_hand;
+        ffi_sync_queue->callbacks = NULL;
+      }
+      sync = scheme_make_raw_pair((Scheme_Object *)ffi_sync_queue,
+                                  argv[5]);
+      if (is_atomic) sync = scheme_box(sync);
+  #endif
+      do_callback = ffi_queue_callback;
+    } else
+      do_callback = ffi_do_callback;
+    /* malloc space for everything needed, so a single free gets rid of this */
+    cl_cif_args = scheme_malloc_code(sizeof(closure_and_cif) + nargs*sizeof(ffi_cif*));
+    cl = &(cl_cif_args->closure); /* cl is the same as cl_cif_args */
+    cif = &(cl_cif_args->cif);
+    atypes = (ffi_type **)(((char*)cl_cif_args) + sizeof(closure_and_cif));
+    for (i=0, p=itypes; i<nargs; i++, p=SCHEME_CDR(p)) {
+      if (NULL == (base = get_ctype_base(SCHEME_CAR(p))))
+        scheme_wrong_type(MYNAME, "list-of-C-types", 1, argc, argv);
+      if (CTYPE_PRIMLABEL(base) == FOREIGN_void)
+        scheme_wrong_type(MYNAME, "list-of-non-void-C-types", 1, argc, argv);
+      atypes[i] = CTYPE_PRIMTYPE(base);
+    }
+    if (ffi_prep_cif(cif, abi, nargs, rtype, atypes) != FFI_OK)
+      scheme_signal_error("internal error: ffi_prep_cif did not return FFI_OK");
+    data = (ffi_callback_struct*)scheme_malloc_tagged(sizeof(ffi_callback_struct));
+    data->so.type = ffi_callback_tag;
+    data->callback = (cl_cif_args);
+    data->proc = (argv[0]);
+    data->itypes = (argv[1]);
+    data->otype = (argv[2]);
+    data->sync = (sync);
+#   ifdef MZ_PRECISE_GC
+    {
+      /* put data in immobile, weak box */
+      void **tmp;
+      tmp = GC_malloc_immobile_box(GC_malloc_weak_box(data, NULL, 0));
+      cl_cif_args->data = (struct immobile_box*)tmp;
+    }
+#   else /* MZ_PRECISE_GC undefined */
+    cl_cif_args->data = (void*)data;
+#   endif /* MZ_PRECISE_GC */
+    if (ffi_prep_closure(cl, cif, do_callback, (void*)(cl_cif_args->data))
+        != FFI_OK)
+      scheme_signal_error
+        ("internal error: ffi_prep_closure did not return FFI_OK");
+    scheme_register_finalizer(data, free_cl_cif_args, cl_cif_args, NULL, NULL);
+    return (Scheme_Object*)data;
 }
 #undef MYNAME
 
@@ -2904,7 +3128,7 @@ void scheme_init_foreign(Scheme_Env *env)
   scheme_add_global("make-ctype",
     scheme_make_prim_w_arity(foreign_make_ctype, "make-ctype", 3, 3), menv);
   scheme_add_global("make-cstruct-type",
-    scheme_make_prim_w_arity(foreign_make_cstruct_type, "make-cstruct-type", 1, 2), menv);
+    scheme_make_prim_w_arity(foreign_make_cstruct_type, "make-cstruct-type", 1, 3), menv);
   scheme_add_global("ffi-callback?",
     scheme_make_prim_w_arity(foreign_ffi_callback_p, "ffi-callback?", 1, 1), menv);
   scheme_add_global("cpointer?",
@@ -2960,7 +3184,7 @@ void scheme_init_foreign(Scheme_Env *env)
   scheme_add_global("ffi-call",
     scheme_make_prim_w_arity(foreign_ffi_call, "ffi-call", 3, 5), menv);
   scheme_add_global("ffi-callback",
-    scheme_make_prim_w_arity(foreign_ffi_callback, "ffi-callback", 3, 5), menv);
+    scheme_make_prim_w_arity(foreign_ffi_callback, "ffi-callback", 3, 6), menv);
   scheme_add_global("saved-errno",
     scheme_make_prim_w_arity(foreign_saved_errno, "saved-errno", 0, 0), menv);
   scheme_add_global("lookup-errno",
@@ -3152,3 +3376,145 @@ void scheme_init_foreign(Scheme_Env *env)
 }
 
 /*****************************************************************************/
+
+#else /* DONT_USE_FOREIGN */
+
+static Scheme_Object *unimplemented(int argc, Scheme_Object **argv, Scheme_Object *who)
+{
+  scheme_signal_error("%s: foreign interface not supported for this platform",
+                      ((Scheme_Primitive_Proc *)who)->name);
+  return NULL;
+}
+
+static Scheme_Object *foreign_compiler_sizeof(int argc, Scheme_Object **argv)
+{
+  return scheme_make_integer(4);
+}
+
+static Scheme_Object *foreign_make_ctype(int argc, Scheme_Object **argv)
+{
+  return scheme_false;
+}
+
+void scheme_init_foreign(Scheme_Env *env)
+{
+  /* Create a dummy module. */
+  Scheme_Env *menv;
+  menv = scheme_primitive_module(scheme_intern_symbol("#%foreign"), env);
+  scheme_add_global("ffi-lib?",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ffi-lib?", 1, 1), menv);
+  scheme_add_global("ffi-lib",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ffi-lib", 1, 2), menv);
+  scheme_add_global("ffi-lib-name",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ffi-lib-name", 1, 1), menv);
+  scheme_add_global("ffi-obj?",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ffi-obj?", 1, 1), menv);
+  scheme_add_global("ffi-obj",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ffi-obj", 2, 2), menv);
+  scheme_add_global("ffi-obj-lib",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ffi-obj-lib", 1, 1), menv);
+  scheme_add_global("ffi-obj-name",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ffi-obj-name", 1, 1), menv);
+  scheme_add_global("ctype?",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ctype?", 1, 1), menv);
+  scheme_add_global("ctype-basetype",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ctype-basetype", 1, 1), menv);
+  scheme_add_global("ctype-scheme->c",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ctype-scheme->c", 1, 1), menv);
+  scheme_add_global("ctype-c->scheme",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ctype-c->scheme", 1, 1), menv);
+  scheme_add_global("make-ctype",
+   scheme_make_prim_w_arity((Scheme_Prim *)foreign_make_ctype, "make-ctype", 3, 3), menv);
+  scheme_add_global("make-cstruct-type",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "make-cstruct-type", 1, 3), menv);
+  scheme_add_global("ffi-callback?",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ffi-callback?", 1, 1), menv);
+  scheme_add_global("cpointer?",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "cpointer?", 1, 1), menv);
+  scheme_add_global("cpointer-tag",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "cpointer-tag", 1, 1), menv);
+  scheme_add_global("set-cpointer-tag!",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "set-cpointer-tag!", 2, 2), menv);
+  scheme_add_global("ctype-sizeof",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ctype-sizeof", 1, 1), menv);
+  scheme_add_global("ctype-alignof",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ctype-alignof", 1, 1), menv);
+  scheme_add_global("compiler-sizeof",
+   scheme_make_prim_w_arity((Scheme_Prim *)foreign_compiler_sizeof, "compiler-sizeof", 1, 1), menv);
+  scheme_add_global("malloc",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "malloc", 1, 5), menv);
+  scheme_add_global("end-stubborn-change",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "end-stubborn-change", 1, 1), menv);
+  scheme_add_global("free",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "free", 1, 1), menv);
+  scheme_add_global("malloc-immobile-cell",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "malloc-immobile-cell", 1, 1), menv);
+  scheme_add_global("free-immobile-cell",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "free-immobile-cell", 1, 1), menv);
+  scheme_add_global("ptr-add",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ptr-add", 2, 3), menv);
+  scheme_add_global("ptr-add!",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ptr-add!", 2, 3), menv);
+  scheme_add_global("offset-ptr?",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "offset-ptr?", 1, 1), menv);
+  scheme_add_global("ptr-offset",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ptr-offset", 1, 1), menv);
+  scheme_add_global("set-ptr-offset!",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "set-ptr-offset!", 2, 3), menv);
+  scheme_add_global("vector->cpointer",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "vector->cpointer", 1, 1), menv);
+  scheme_add_global("flvector->cpointer",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "flvector->cpointer", 1, 1), menv);
+  scheme_add_global("memset",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "memset", 3, 5), menv);
+  scheme_add_global("memmove",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "memmove", 3, 6), menv);
+  scheme_add_global("memcpy",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "memcpy", 3, 6), menv);
+  scheme_add_global("ptr-ref",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ptr-ref", 2, 4), menv);
+  scheme_add_global("ptr-set!",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ptr-set!", 3, 5), menv);
+  scheme_add_global("ptr-equal?",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ptr-equal?", 2, 2), menv);
+  scheme_add_global("make-sized-byte-string",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "make-sized-byte-string", 2, 2), menv);
+  scheme_add_global("ffi-call",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ffi-call", 3, 5), menv);
+  scheme_add_global("ffi-callback",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ffi-callback", 3, 6), menv);
+  scheme_add_global("saved-errno",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "saved-errno", 0, 0), menv);
+  scheme_add_global("lookup-errno",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "lookup-errno", 1, 1), menv);
+  scheme_add_global("_void", scheme_false, menv);
+  scheme_add_global("_int8", scheme_false, menv);
+  scheme_add_global("_uint8", scheme_false, menv);
+  scheme_add_global("_int16", scheme_false, menv);
+  scheme_add_global("_uint16", scheme_false, menv);
+  scheme_add_global("_int32", scheme_false, menv);
+  scheme_add_global("_uint32", scheme_false, menv);
+  scheme_add_global("_int64", scheme_false, menv);
+  scheme_add_global("_uint64", scheme_false, menv);
+  scheme_add_global("_fixint", scheme_false, menv);
+  scheme_add_global("_ufixint", scheme_false, menv);
+  scheme_add_global("_fixnum", scheme_false, menv);
+  scheme_add_global("_ufixnum", scheme_false, menv);
+  scheme_add_global("_float", scheme_false, menv);
+  scheme_add_global("_double", scheme_false, menv);
+  scheme_add_global("_double*", scheme_false, menv);
+  scheme_add_global("_bool", scheme_false, menv);
+  scheme_add_global("_string/ucs-4", scheme_false, menv);
+  scheme_add_global("_string/utf-16", scheme_false, menv);
+  scheme_add_global("_bytes", scheme_false, menv);
+  scheme_add_global("_path", scheme_false, menv);
+  scheme_add_global("_symbol", scheme_false, menv);
+  scheme_add_global("_pointer", scheme_false, menv);
+  scheme_add_global("_gcpointer", scheme_false, menv);
+  scheme_add_global("_scheme", scheme_false, menv);
+  scheme_add_global("_fpointer", scheme_false, menv);
+  scheme_finish_primitive_module(menv);
+  scheme_protect_primitive_provide(menv, NULL);
+}
+
+#endif

@@ -1,14 +1,11 @@
-#lang scheme/base
-
-(require (for-syntax scheme/base)
-         scheme/list
-         scheme/contract
-         scheme/match
-         "deriv.ss"
-         "deriv-util.ss"
-         "stx-util.ss"
-         "context.ss"
-         "steps.ss")
+#lang racket/base
+(require (for-syntax racket/base)
+         racket/contract
+         racket/match
+         "deriv-util.rkt"
+         "stx-util.rkt"
+         "context.rkt"
+         "steps.rkt")
 
 (define-syntax-rule (STRICT-CHECKS form ...)
   (when #f
@@ -45,9 +42,6 @@
  [macro-policy (parameter/c (identifier? . -> . any))]
  [subterms-table (parameter/c (or/c subterms-table/c false/c))]
  [hides-flags (list-parameter/c boolean?)]
- [block-syntax-bindings (parameter/c (listof syntaxish?))]
- [block-value-bindings (parameter/c (listof syntaxish?))]
- [block-expressions (parameter/c syntaxish?)]
 
  [learn-binders ((listof identifier?) . -> . any)]
  [learn-definites ((listof identifier?) . -> . any)]
@@ -60,6 +54,9 @@
         [#:foci1 syntaxish? #:foci2 syntaxish?]
         . ->* . step?)]
  [stumble ([syntaxish? exn?] [#:focus syntaxish?] . ->* . misstep?)]
+ [walk/talk
+  (-> (or/c symbol? string?) (listof (or/c syntax? string? 'arrow))
+      remarkstep?)]
 
  [current-pass-hides? (parameterlike/c boolean?)]
 
@@ -111,13 +108,6 @@
 
 ;; hides-flags : (parameterof (listof (boxof boolean)))
 (define hides-flags (make-parameter null))
-
-;; block-syntax-bindings : (parameter/c (listof stx))
-;; block-value-bindings : (parameter/c (listof stx))
-;; block-expressions : (parameter/c (listof stx))
-(define block-value-bindings (make-parameter null))
-(define block-syntax-bindings (make-parameter null))
-(define block-expressions (make-parameter null))
 
 ;; lift params
 (define available-lift-stxs (make-parameter null))
@@ -257,9 +247,9 @@
   (lambda (stx #:allow-nonstx? [allow-nonstx? #f] #:default [default #f])
     (let ([replacement (hash-ref table stx #f)])
       (if replacement
-          (begin #;(printf "  replacing ~s with ~s~n" stx replacement)
+          (begin #;(printf "  replacing ~s with ~s\n" stx replacement)
                  replacement)
-          (begin #;(printf "  not replacing ~s~n" stx)
+          (begin #;(printf "  not replacing ~s\n" stx)
                  default)))))
 
 (define (make-renames-table from0 to0)
@@ -294,11 +284,11 @@
            ;; Only bad effect should be missed subterms (usually at phase1).
            (STRICT-CHECKS
             (fprintf (current-error-port)
-                     "from:\n~e\n\nto:\n~e\n\n"
+                     "from:\n~.s\n\nto:\n~.s\n\n"
                      (stx->datum from)
                      (stx->datum to))
             (fprintf (current-error-port)
-                     "original from:\n~e\n\noriginal to:\n~e\n\n"
+                     "original from:\n~.s\n\noriginal to:\n~.s\n\n"
                      (stx->datum from0)
                      (stx->datum to0))
             (error 'add-to-renames-table))
@@ -342,6 +332,11 @@
   (make misstep 'error
         (current-state-with stx focus)
         exn))
+
+(define (walk/talk type contents)
+  (make remarkstep type
+        (current-state-with #f null)
+        contents))
 
 (define (foci x)
   (cond [(syntax? x)

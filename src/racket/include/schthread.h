@@ -108,6 +108,7 @@ typedef struct Thread_Local_Variables {
   struct NewGC *GC_instance_;
   unsigned long GC_gen0_alloc_page_ptr_;
   unsigned long GC_gen0_alloc_page_end_;
+  int GC_gen0_alloc_only_;
   void *bignum_cache_[BIGNUM_CACHE_SIZE];
   int cache_count_;
   struct Scheme_Hash_Table *toplevels_ht_;
@@ -206,6 +207,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Thread *scheme_main_thread_;
   struct Scheme_Thread *scheme_first_thread_;
   struct Scheme_Thread_Set *scheme_thread_set_top_;
+  struct Scheme_Current_LWC *scheme_current_lwc_;
   int num_running_threads_;
   int swap_no_setjmp_;
   int thread_swap_count_;
@@ -224,11 +226,13 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Object *scheduled_kills_;
   int do_atomic_;
   int missed_context_switch_;
+  int all_breaks_disabled_;
   int have_activity_;
   int scheme_active_but_sleeping_;
   int thread_ended_with_activity_;
   int scheme_no_stack_overflow_;
   int needs_sleep_cancelled_;
+  double needs_sleep_time_end_;
   int tls_pos_;
   struct Scheme_Object *the_nested_exn_handler_;
   struct Scheme_Object *cust_closers_;
@@ -284,7 +288,15 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Bucket_Table *place_local_modpath_table_;
   struct Scheme_Hash_Table *opened_libs_;
   struct mzrt_mutex *jit_lock_;
-/*KPLAKE1*/
+  struct free_list_entry *free_list_;
+  int free_list_bucket_count_;
+  struct Scheme_Bucket_Table *prefab_table_;
+  struct Scheme_Hash_Table *place_local_symbol_table_;
+  struct Scheme_Hash_Table *place_local_keyword_table_;
+  struct Scheme_Hash_Table *place_local_parallel_symbol_table_;
+  struct FFI_Sync_Queue *ffi_sync_queue_;
+  struct Scheme_GC_Pre_Post_Callback_Desc *gc_prepost_callback_descs_;
+  struct Scheme_Hash_Table *place_local_misc_table_;
 } Thread_Local_Variables;
 
 #if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS)
@@ -392,6 +404,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define GC_instance XOA (scheme_get_thread_local_variables()->GC_instance_)
 #define GC_gen0_alloc_page_ptr XOA (scheme_get_thread_local_variables()->GC_gen0_alloc_page_ptr_)
 #define GC_gen0_alloc_page_end XOA (scheme_get_thread_local_variables()->GC_gen0_alloc_page_end_)
+#define GC_gen0_alloc_only XOA (scheme_get_thread_local_variables()->GC_gen0_alloc_only_)
 #define GC_variable_stack XOA (scheme_get_thread_local_variables()->GC_variable_stack_)
 #define bignum_cache XOA (scheme_get_thread_local_variables()->bignum_cache_)
 #define cache_count XOA (scheme_get_thread_local_variables()->cache_count_)
@@ -492,6 +505,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define scheme_main_thread XOA (scheme_get_thread_local_variables()->scheme_main_thread_)
 #define scheme_first_thread XOA (scheme_get_thread_local_variables()->scheme_first_thread_)
 #define scheme_thread_set_top XOA (scheme_get_thread_local_variables()->scheme_thread_set_top_)
+#define scheme_current_lwc XOA (scheme_get_thread_local_variables()->scheme_current_lwc_)
 #define num_running_threads XOA (scheme_get_thread_local_variables()->num_running_threads_)
 #define swap_no_setjmp XOA (scheme_get_thread_local_variables()->swap_no_setjmp_)
 #define thread_swap_count XOA (scheme_get_thread_local_variables()->thread_swap_count_)
@@ -510,11 +524,13 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define scheduled_kills XOA (scheme_get_thread_local_variables()->scheduled_kills_)
 #define do_atomic XOA (scheme_get_thread_local_variables()->do_atomic_)
 #define missed_context_switch XOA (scheme_get_thread_local_variables()->missed_context_switch_)
+#define all_breaks_disabled XOA (scheme_get_thread_local_variables()->all_breaks_disabled_)
 #define have_activity XOA (scheme_get_thread_local_variables()->have_activity_)
 #define scheme_active_but_sleeping XOA (scheme_get_thread_local_variables()->scheme_active_but_sleeping_)
 #define thread_ended_with_activity XOA (scheme_get_thread_local_variables()->thread_ended_with_activity_)
 #define scheme_no_stack_overflow XOA (scheme_get_thread_local_variables()->scheme_no_stack_overflow_)
 #define needs_sleep_cancelled XOA (scheme_get_thread_local_variables()->needs_sleep_cancelled_)
+#define needs_sleep_time_end XOA (scheme_get_thread_local_variables()->needs_sleep_time_end_)
 #define tls_pos XOA (scheme_get_thread_local_variables()->tls_pos_)
 #define the_nested_exn_handler XOA (scheme_get_thread_local_variables()->the_nested_exn_handler_)
 #define cust_closers XOA (scheme_get_thread_local_variables()->cust_closers_)
@@ -570,7 +586,15 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define place_local_modpath_table XOA (scheme_get_thread_local_variables()->place_local_modpath_table_)
 #define opened_libs XOA (scheme_get_thread_local_variables()->opened_libs_)
 #define jit_lock XOA (scheme_get_thread_local_variables()->jit_lock_)
-/*KPLAKE2*/
+#define free_list XOA (scheme_get_thread_local_variables()->free_list_)
+#define free_list_bucket_count XOA (scheme_get_thread_local_variables()->free_list_bucket_count_)
+#define prefab_table XOA (scheme_get_thread_local_variables()->prefab_table_)
+#define place_local_symbol_table XOA (scheme_get_thread_local_variables()->place_local_symbol_table_)
+#define place_local_keyword_table XOA (scheme_get_thread_local_variables()->place_local_keyword_table_)
+#define place_local_parallel_symbol_table XOA (scheme_get_thread_local_variables()->place_local_parallel_symbol_table_)
+#define ffi_sync_queue XOA (scheme_get_thread_local_variables()->ffi_sync_queue_)
+#define gc_prepost_callback_descs XOA (scheme_get_thread_local_variables()->gc_prepost_callback_descs_)
+#define place_local_misc_table XOA (scheme_get_thread_local_variables()->place_local_misc_table_)
 
 /* **************************************** */
 

@@ -1074,6 +1074,22 @@
 (test "x&cy&z" regexp-replace* #rx"a(.)" "xabcyawz" "\\&")
 (test "x\\cy\\z" regexp-replace* #rx"a(.)" "xabcyawz" "\\\\")
 
+;; Test sub-matches with procedure replace (second example by synx)
+(test "myCERVEZA myMI Mi"
+      regexp-replace* "([Mm])i ([a-zA-Z]*)" "mi cerveza Mi Mi Mi"
+      (lambda (all one two)
+        (string-append (string-downcase one) "y"
+                       (string-upcase two))))
+(test #"fox in socks, blue seal. trout in socks, blue fish!"
+      regexp-replace*                                     
+      #rx#"([a-z]+) ([a-z]+)"
+      #"red fox, blue seal. red trout, blue trout!"
+      (lambda (total color what)
+        (cond
+         ((equal? color #"red") (bytes-append what #" in socks"))
+         ((equal? what #"trout") (bytes-append color #" fish"))
+         (else (bytes-append color #" " what)))))
+
 ;; Test weird port offsets:
 (define (test-weird-offset regexp-match regexp-match-positions)
   (test #f regexp-match "e" (open-input-string ""))
@@ -1677,11 +1693,26 @@
 			    (lambda () (k2 12)))))
 			(k0 13))))))
 
+
+  ;; Interaction with exceptions:
+  (test 42 test-call/cc (lambda (k)
+                          (call-with-exception-handler k (lambda () (add1 (raise 42))))))
+
+  (let ([x 0])
+    ;; Make sure inner `k2' doesn't escape using outer `k':
+    (let/cc k (+ 1 (dynamic-wind 
+                       (lambda () (set! x (add1 x)))
+                       (lambda () (let/cc k (k 2))) 
+                       void)))
+    (test 1 values x))
+
   ))
 	      
 
 (test-cc-values call/cc)
 (test-cc-values call/ec)
+
+
 
 (test 'ok
       'ec-cc-exn-combo
@@ -2332,8 +2363,44 @@
   (check-all-bad hash-iterate-key)
   (check-all-bad hash-iterate-value))
 
+(test (list 1 2 3) hash-keys #hasheq((1 . a)(2 . b)(3 . c)))
+(test (list 'a 'b 'c) hash-values #hasheq((1 . a)(2 . b)(3 . c)))
+(test (list (cons 1 'a) (cons 2 'b) (cons 3 'c)) hash->list #hasheq((1 . a)(2 . b)(3 . c)))
+
+(err/rt-test (hash-set*! im-t 1 2) exn:fail?)
+(err/rt-test (hash-set* (make-hasheq null) 1 2) exn:fail?)
+(err/rt-test (hash-set* im-t 1 2 3) exn:fail?)
+(err/rt-test (hash-set*! (make-hasheq null) 1 2 3) exn:fail?)
+
+(test #t equal? (hash-set* (hasheq 1 'a 3 'b)) (hasheq 1 'a 3 'b))
+(test #t equal? (hasheq 1 2 3 4) 
+      (hash-set* (hasheq 1 'a 3 'b)
+                 1 (gensym)
+                 1 2
+                 3 (gensym)
+                 3 4))
+(test #t equal? (make-hasheq (list (cons 1 'a) (cons 3 'b))) 
+      (let ([ht (make-hasheq (list (cons 1 'a) (cons 3 'b)))])
+        (hash-set*! ht)
+        ht))
+(test #t equal? (make-hasheq (list (cons 1 2) (cons 3 'b))) 
+      (let ([ht (make-hasheq (list (cons 1 'a) (cons 3 'b)))])
+        (hash-set*! ht
+                    1 2)
+        ht))
+(test #t equal? (make-hasheq (list (cons 1 2) (cons 3 4))) 
+      (let ([ht (make-hasheq (list (cons 1 'a) (cons 3 'b)))])
+        (hash-set*! ht
+                    1 (gensym)
+                    1 2
+                    3 (gensym)
+                    3 4)
+        ht))
+
 (arity-test make-immutable-hash 1 1)
 (arity-test make-immutable-hasheq 1 1)
+(arity-test hash-keys 1 1)
+(arity-test hash-values 1 1)
 (arity-test hash-count 1 1)
 (arity-test hash-ref 2 3)
 (arity-test hash-set! 3 3)
@@ -2345,6 +2412,62 @@
 (arity-test hash? 1 1)
 (arity-test hash-eq? 1 1)
 (arity-test hash-weak? 1 1)
+
+;; Ensure that hash-table hashing is not sensitive to the
+;; order of key+value additions
+(let ()
+  (define ht (make-hash))
+  (define ht2 (make-hash))
+  (define wht (make-weak-hash))
+  (define wht2 (make-weak-hash))
+  (define keys (make-hash))
+
+  (struct a (x) #:transparent)
+  
+  (define (shuffle c l)
+    (if (zero? c)
+        l
+        (shuffle
+         (sub1 c)
+         (let ([n (quotient (length l) 2)])
+           (let loop ([a (take l n)][b (drop l n)])
+             (cond
+              [(null? a) b]
+              [(null? b) a]
+              [(zero? (random 2))
+               (cons (car a) (loop (cdr a) b))]
+              [else
+               (cons (car b) (loop a (cdr b)))]))))))
+  
+  (define l (for/list ([i (in-range 1000)]) 
+              i))
+  
+  (define l2 (shuffle 7 l))
+
+  (define (reg v)
+    (hash-set! keys v #t)
+    v)
+  
+  (for ([i (in-list l)])
+    (hash-set! ht (a i) (a (a i))))
+  (for ([i (in-list l2)])
+    (hash-set! ht2 (a i) (a (a i))))
+  
+  (for ([i (in-list l)])
+    (hash-set! wht (reg (a i)) (a (a i))))
+  (for ([i (in-list l2)])
+    (hash-set! wht2 (reg (a i)) (a (a i))))
+  
+  (test (equal-hash-code ht) values (equal-hash-code ht2))
+  (test (equal-hash-code wht) values (equal-hash-code wht2))
+  (test (equal-secondary-hash-code ht) values (equal-secondary-hash-code ht2))
+
+  (let ([ht (for/hash ([i (in-list l)])
+              (values (a i) (a (a i))))]
+        [ht2 (for/hash ([i (in-list l2)])
+               (values (a i) (a (a i))))])
+    (test (equal-hash-code ht) values (equal-hash-code ht2))
+    (test (equal-secondary-hash-code ht) values (equal-secondary-hash-code ht2))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Misc

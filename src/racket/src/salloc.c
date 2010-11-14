@@ -94,27 +94,14 @@ SHARED_OK static int use_registered_statics;
 extern MZ_DLLIMPORT void GC_init();
 #endif
 
-struct free_list_entry {
-  long size; /* size of elements in this bucket */
-  void *elems; /* doubly linked list for free blocks */
-  int count; /* number of items in `elems' */
-};
-
-SHARED_OK static struct free_list_entry *free_list;
-SHARED_OK static int free_list_bucket_count;
-#ifdef MZ_USE_PLACES
-SHARED_OK static mzrt_mutex *free_list_mutex;
-#endif
-
-
-void scheme_init_salloc() {
-#ifdef MZ_USE_PLACES
-  mzrt_mutex_create(&free_list_mutex);
-#endif
-}
-
 void scheme_set_stack_base(void *base, int no_auto_statics) XFORM_SKIP_PROC
 {
+#if defined(MZ_PLACES_WAITPID)
+  /* Early, to maximize the chance that no threads have been
+     created that might later receive SIGCHLD */
+  scheme_places_block_child_signal();
+#endif
+
 #ifdef MZ_PRECISE_GC
   GC_init_type_tags(_scheme_last_type_, 
                     scheme_pair_type, scheme_mutable_pair_type, scheme_weak_box_type, 
@@ -334,6 +321,7 @@ void scheme_set_report_out_of_memory(Scheme_Report_Out_Of_Memory_Proc p)
 #include <mach/mach.h>
 # ifdef MZ_PRECISE_GC
 extern void GC_attach_current_thread_exceptions_to_handler();
+extern void GC_detach_current_thread_exceptions_from_handler();
 # endif
 #endif
 
@@ -380,6 +368,18 @@ void scheme_init_os_thread_like(void *other) XFORM_SKIP_PROC
 void scheme_init_os_thread() XFORM_SKIP_PROC
 {
   scheme_init_os_thread_like(NULL);
+}
+
+void scheme_done_os_thread() XFORM_SKIP_PROC
+{
+#if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS) || defined(IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS)
+  free(scheme_get_thread_local_variables());
+#endif
+#ifdef OS_X
+# ifdef MZ_PRECISE_GC
+  GC_detach_current_thread_exceptions_from_handler();
+# endif
+#endif
 }
 
 /************************************************************************/
@@ -526,6 +526,7 @@ Scheme_Object *scheme_make_external_cptr(GC_CAN_IGNORE void *cptr, Scheme_Object
 {
   Scheme_Object *o;
   o = scheme_make_cptr(NULL, typetag);
+  SCHEME_CPTR_FLAGS(o) |= 1;
   SCHEME_CPTR_VAL(o) = cptr;
   return o;
 }
@@ -547,6 +548,7 @@ Scheme_Object *scheme_make_offset_external_cptr(GC_CAN_IGNORE void *cptr, long o
 {
   Scheme_Object *o;
   o = scheme_make_offset_cptr(NULL, offset, typetag);
+  SCHEME_CPTR_FLAGS(o) |= 1;
   SCHEME_CPTR_VAL(o) = cptr;
   return o;
 }
@@ -797,6 +799,14 @@ static int fd, fd_created;
 
 #if defined(MZ_JIT_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
 
+struct free_list_entry {
+  long size; /* size of elements in this bucket */
+  void *elems; /* doubly linked list for free blocks */
+  int count; /* number of items in `elems' */
+};
+
+THREAD_LOCAL_DECL(static struct free_list_entry *free_list;)
+THREAD_LOCAL_DECL(static int free_list_bucket_count;)
 
 static long get_page_size()
 {
@@ -919,10 +929,6 @@ void *scheme_malloc_code(long size)
   long size2, bucket, sz, page_size;
   void *p, *pg, *prev;
 
-# ifdef MZ_USE_PLACES
-  mzrt_mutex_lock(free_list_mutex);
-# endif
-
   if (size < CODE_HEADER_SIZE) {
     /* ensure CODE_HEADER_SIZE alignment 
        and room for free-list pointers */
@@ -986,10 +992,6 @@ void *scheme_malloc_code(long size)
     LOG_CODE_MALLOC(0, printf("allocated %ld (->%ld / %ld)\n", size, size2, bucket));
   }
 
-# ifdef MZ_USE_PLACES
-  mzrt_mutex_unlock(free_list_mutex);
-# endif
-
   return p;
 #else
   return malloc(size); /* good luck! */
@@ -1002,10 +1004,6 @@ void scheme_free_code(void *p)
   long size, size2, bucket, page_size;
   int per_page, n;
   void *prev;
-
-# ifdef MZ_USE_PLACES
-  mzrt_mutex_lock(free_list_mutex);
-# endif
 
   page_size = get_page_size();
 
@@ -1079,9 +1077,6 @@ void scheme_free_code(void *p)
       free_page(CODE_PAGE_OF(p), page_size);
     }
   }
-# ifdef MZ_USE_PLACES
-  mzrt_mutex_unlock(free_list_mutex);
-# endif
 
 #else
   free(p);

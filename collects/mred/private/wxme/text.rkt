@@ -170,6 +170,8 @@
   (define sticky-styles? #t)
   (define overwrite-mode? #f)
 
+  (define prev-mouse-snip #f)
+
   (def/public (set-styles-sticky [bool? s?]) (set! sticky-styles? (and s? #t)))
   (def/public (get-styles-sticky) sticky-styles?)
 
@@ -275,8 +277,8 @@
   (define refresh-end 0)
   (define refresh-l 0.0)
   (define refresh-t 0.0)
-  (define refresh-r 0.0)
-  (define refresh-b 0.0)
+  (define refresh-r 0.0) ; can be 'display-end
+  (define refresh-b 0.0) ; can be 'display-end
 
   (define last-draw-l 0.0)
   (define last-draw-t 0.0)
@@ -441,18 +443,15 @@
                  (not (send event leaving?)))
         (end-streaks '(except-key-sequence cursor delayed)))
       (let-values ([(dc x y scrollx scrolly)
-                    (if (or (send event button-down?) s-caret-snip)
-                        ;; first, find clicked-on snip:
-                        (let ([x (send event get-x)]
-                              [y (send event get-y)])
-                          (let-boxes ([scrollx 0.0]
-                                      [scrolly 0.0]
-                                      [dc #f])
-                              (set-box! dc (send s-admin get-dc scrollx scrolly))
-                            ;; FIXME: old code returned if !dc
-                            (values dc (+ x scrollx) (+ y scrolly) scrollx scrolly)))
-                        (values #f 0.0 0.0 0.0 0.0))])
-        (when (send event button-down?)
+                    ;; first, find clicked-on snip:
+                    (let ([x (send event get-x)]
+                          [y (send event get-y)])
+                      (let-boxes ([scrollx 0.0]
+                                  [scrolly 0.0]
+                                  [dc #f])
+                          (set-box! dc (send s-admin get-dc scrollx scrolly))
+                        ;; FIXME: old code returned if !dc
+                        (values dc (+ x scrollx) (+ y scrolly) scrollx scrolly)))])
           (let ([snip
                  (let-boxes ([onit? #f]
                              [how-close 0.0]
@@ -476,12 +475,26 @@
                                  #f
                                  snip)))
                          #f)))])
-            (set-caret-owner snip)))
-        (if (and s-caret-snip (has-flag? (snip->flags s-caret-snip) HANDLES-EVENTS))
-            (let-boxes ([x 0.0] [y 0.0])
-                (get-snip-position-and-location s-caret-snip #f x y)
-              (send s-caret-snip on-event dc (- x scrollx) (- y scrolly) x y event))
-            (on-local-event event)))))
+            (when (send event button-down?)
+              (set-caret-owner snip))
+            (when (and prev-mouse-snip
+                       (not (eq? snip prev-mouse-snip)))
+              (let-boxes ([x 0.0] [y 0.0])
+                  (get-snip-position-and-location prev-mouse-snip #f x y)
+                (send prev-mouse-snip on-event dc (- x scrollx) (- y scrolly) x y event)))
+            (set! prev-mouse-snip #f)
+            (if (and s-caret-snip (has-flag? (snip->flags s-caret-snip) HANDLES-EVENTS))
+                (let-boxes ([x 0.0] [y 0.0])
+                    (get-snip-position-and-location s-caret-snip #f x y)
+                  (send s-caret-snip on-event dc (- x scrollx) (- y scrolly) x y event))
+                (begin
+                  (when (and snip
+                             (has-flag? (snip->flags snip) HANDLES-ALL-MOUSE-EVENTS))
+                    (let-boxes ([x 0.0] [y 0.0])
+                        (get-snip-position-and-location snip #f x y)
+                      (set! prev-mouse-snip snip)
+                      (send snip on-event dc (- x scrollx) (- y scrolly) x y event)))
+                  (on-local-event event)))))))
 
   (def/override (on-default-event [mouse-event% event])
     (when s-admin
@@ -3895,8 +3908,8 @@
              #t))))
   
   (define/public (refresh-box L T w h)
-    (let ([B (+ T h)]
-          [R (+ L w)])
+    (let ([B (if (eq? h 'display-end) h (+ T h))]
+          [R (if (eq? w 'display-end) w (+ L w))])
       (if refresh-box-unset?
           (begin
             (set! refresh-l L)
@@ -3907,13 +3920,17 @@
           (begin
             (when (L . < . refresh-l)
               (set! refresh-l L))
-            (when (R . > . refresh-r)
-              (set! refresh-r R))
+            (unless (eq? refresh-r 'display-end)
+              (when (or (eq? R 'display-end)
+                        (R . > . refresh-r))
+                (set! refresh-r R)))
             (when (T . < . refresh-t)
               (set! refresh-t T))
-            (when (B . > . refresh-b)
-              (set! refresh-b B))))
-
+            (unless (eq? refresh-b 'display-end)
+              (when (or (eq? B 'display-end)
+                        (B . > . refresh-b))
+                (set! refresh-b B)))))
+      
       (set! draw-cached-in-bitmap? #f)))
 
   (def/override (needs-update [snip% snip]
@@ -3930,10 +3947,10 @@
 
   (def/override (invalidate-bitmap-cache [real? [x 0.0]] 
                                          [real? [y 0.0]]
-                                         [(make-alts nonnegative-real? (symbol-in end)) [w 'end]]
-                                         [(make-alts nonnegative-real? (symbol-in end)) [h 'end]])
-    (let ([w (if (symbol? w) (- total-width x) w)]
-          [h (if (symbol? h) (- total-height y) h)])
+                                         [(make-alts nonnegative-real? (symbol-in end display-end)) [w 'end]]
+                                         [(make-alts nonnegative-real? (symbol-in end display-end)) [h 'end]])
+    (let ([w (if (eq? w 'end) (- total-width x) w)]
+          [h (if (eq? h 'end) (- total-height y) h)])
 
       (refresh-box x y w h)
       (when (zero? delay-refresh)
@@ -4004,6 +4021,8 @@
           (set! snip-count (add1 snip-count)))))
   
   (define/private (delete-snip snip)
+    (when (eq? snip prev-mouse-snip)
+      (set! prev-mouse-snip #f))
     (cond
      [(snip->next snip)
       (splice-snip (snip->next snip) (snip->prev snip) (snip->next (snip->next snip)))]
@@ -4794,9 +4813,13 @@
                                   (values left right top bottom)
                                   (values
                                    (max refresh-l left)
-                                   (min refresh-r right)
+                                   (if (eq? refresh-r 'display-end)
+                                       right
+                                       (min refresh-r right))
                                    (max refresh-t top)
-                                   (min refresh-b bottom)))])
+                                   (if (eq? refresh-b 'display-end)
+                                       bottom
+                                       (min refresh-b bottom))))])
                   (set! refresh-unset? #t)
                   (set! refresh-box-unset? #t)
                   (set! refresh-all? #f)
@@ -4869,8 +4892,12 @@
                                                       #t))
                                             (values (max refresh-l left)
                                                     (max top refresh-t)
-                                                    (min right refresh-r)
-                                                    (min bottom refresh-b)
+                                                    (if (eq? refresh-r 'display-end)
+                                                        right
+                                                        (min right refresh-r))
+                                                    (if (eq? refresh-b 'display-end)
+                                                        bottom
+                                                        (min bottom refresh-b))
                                                     #t))
                                         (values left top right bottom refresh-all?))])
                         

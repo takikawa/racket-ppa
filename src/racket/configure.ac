@@ -540,6 +540,7 @@ EXTRALIBS=
 
 # for gmp assembly:
 EXTRA_GMP_OBJ=
+EXTRA_GMP_DEP=
 
 # For Racket targets:
 OSX=".osx"
@@ -566,6 +567,7 @@ case $OS in
   FreeBSD)
     LIBS="$LIBS -rdynamic"
     DYN_CFLAGS="-fPIC"
+    GC_THREADS_FLAG="-DGC_FREEBSD_THREADS"
     enable_pthread=yes
     ;;
   OpenBSD)
@@ -604,6 +606,7 @@ case $OS in
        ;;
       alpha)
        EXTRA_GMP_OBJ="gmp_alpha_gcc.o"
+       EXTRA_GMP_DEP='$(EXTRA_GMP_DEP_FILE)'
        ;;
       i386|i486|i586|i686)
        enable_futures_by_default=yes
@@ -618,6 +621,7 @@ case $OS in
       COMPFLAGS="$COMPFLAGS -ieee_with_inexact -assume noaligned_objects"
     elif test "$CC" = "gcc" ; then 
       EXTRA_GMP_OBJ="gmp_alpha_gcc.o"
+      EXTRA_GMP_DEP='$(EXTRA_GMP_DEP_FILE)'
     fi
     ;;
   HP-UX)
@@ -659,6 +663,22 @@ case $OS in
     if test "${enable_sdk}" != "" ; then 
       PREFLAGS="$PREFLAGS -isysroot ${enable_sdk} -mmacosx-version-min=10.4 -DEXTRA_EXCEPTION_STUBS"
       LDFLAGS="$LDFLAGS -isysroot ${enable_sdk} -mmacosx-version-min=10.4"
+      if test "${CC}" = "gcc" ; then
+        CC=gcc-4.0
+      fi
+      if test "${CXX}" = "g++" ; then
+        CXX=g++-4.0
+      fi
+      if test "${CPP}" = "gcc -E" ; then
+        CPP="gcc-4.0 -E"
+      fi
+      if test "${CXXCPP}" = "g++ -E" ; then
+        CXXCPP="g++-4.0 -E"
+      fi
+      if test "${LD}" = "gcc" ; then
+        LD=gcc-4.0
+      fi
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS} ${PREFLAGS}"'"'
     fi
     
     case `$UNAME -m` in
@@ -1492,6 +1512,7 @@ AC_SUBST(XFORMFLAGS)
 AC_SUBST(MZBINTARGET)
 AC_SUBST(MZINSTALLTARGET)
 AC_SUBST(EXTRA_GMP_OBJ)
+AC_SUBST(EXTRA_GMP_DEP)
 AC_SUBST(OSX)
 AC_SUBST(NOT_OSX)
 AC_SUBST(FRAMEWORK_INSTALL_DIR)
@@ -1582,19 +1603,14 @@ fi
 FOREIGNTARGET=
 FOREIGN_IF_USED="FOREIGN_NOT_USED"
 if test -d "${srcdir}/foreign" && test "${enable_foreign}" = "yes" ; then
-  AC_CONFIG_AUX_DIR( foreign/gcc )
-  AC_CONFIG_SUBDIRS( foreign/gcc/libffi )
-  makefiles="$makefiles foreign/Makefile"
+  AC_CONFIG_SUBDIRS( foreign/libffi )
   FOREIGNTARGET="foreign-stuff"
   FOREIGN_IF_USED="FOREIGN_USED"
-  # --disable-multilib is needed to avoid problems when running libffi's
-  # configure script.  This thing affects all usages of AC_CONFIG_SUBDIRS, but
-  # other scripts do not use it anyway.
-  ac_configure_args="$ac_configure_args --disable-multilib"
 else
-  FOREIGNTARGET="foreign-nothing"
+  FOREIGNTARGET="foreign-stub"
   MZOPTIONS="$MZOPTIONS -DDONT_USE_FOREIGN"
 fi
+makefiles="$makefiles foreign/Makefile"
 ac_configure_args="$ac_configure_args$SUB_CONFIGURE_EXTRAS"
 
 if test "${enable_gracket}" = "yes" ; then

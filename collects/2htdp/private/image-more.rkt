@@ -1,15 +1,15 @@
-#lang scheme/base
+#lang racket/base
 
 (require "../../mrlib/image-core.ss"
          "img-err.ss"
-         scheme/match
-         scheme/contract
-         scheme/class
-         scheme/gui/base
+         racket/match
+         racket/contract
+         racket/class
+         racket/gui/base
          htdp/error
-         scheme/math
-         (for-syntax scheme/base
-                     scheme/list)
+         racket/math
+         (for-syntax racket/base
+                     racket/list)
          lang/posn)
 
 (define (show-image arg [extra-space 0])
@@ -57,9 +57,8 @@
                [parent bp]) min-width 100)
     (send f show #t)))
 
-(define (save-image pre-image filename)
-  (let* ([image (to-img pre-image)]
-         [bm (make-object bitmap% 
+(define/chk (save-image image filename)
+  (let* ([bm (make-object bitmap% 
                (inexact->exact (ceiling (+ 1 (get-right image)))) 
                (inexact->exact (ceiling (+ 1 (get-bottom image)))))]
          [bdc (make-object bitmap-dc% bm)])
@@ -92,7 +91,7 @@
                                                                             
 
 ;; bitmap : string -> image
-;; gets one of the bitmaps that comes with drscheme, scales it down by 1/8 or something
+;; gets one of the bitmaps that comes with drracket, scales it down by 1/8 or something
 ;; so that later scaling /translation/whatever will look reasonable.
 ;; (the error message for a bad argument will list all of the currently installed example images;
 ;; we may want to have some way teachers can stick new ones in there)
@@ -105,11 +104,15 @@
   (scale-internal x-factor y-factor image))
 
 (define (scale-internal x-factor y-factor image)
-  (make-image (make-scale x-factor y-factor (image-shape image))
-              (make-bb (* x-factor (get-right image))
-                       (* y-factor (get-bottom image))
-                       (* y-factor (get-baseline image)))
-              #f))
+  (let ([ph (send image get-pinhole)])
+    (make-image (make-scale x-factor y-factor (image-shape image))
+                (make-bb (* x-factor (get-right image))
+                         (* y-factor (get-bottom image))
+                         (* y-factor (get-baseline image)))
+                #f
+                (and ph 
+                     (make-point (* x-factor (point-x ph))
+                                 (* y-factor (point-y ph)))))))
 
 ;; overlay : image image image ... -> image
 ;; places images on top of each other with their upper left corners aligned. 
@@ -131,11 +134,43 @@
 ;; images up at their centers.
 
 (define/chk (overlay/align x-place y-place image image2 . image3)
+  (when (or (eq? x-place 'pinhole) (eq? y-place 'pinhole))
+    (check-dependencies 'overlay/align
+                        (and (send image get-pinhole)
+                             (send image2 get-pinhole)
+                             (andmap (λ (x) (send x get-pinhole))
+                                     image3))
+                        "when x-place or y-place is ~e or ~e, then all of the arguments must have pinholes"
+                        'pinhole "pinhole"))
   (overlay/internal x-place y-place image (cons image2 image3)))
 
 (define/chk (underlay/align x-place y-place image image2 . image3)
+  (when (or (eq? x-place 'pinhole) (eq? y-place 'pinhole))
+    (check-dependencies 'underlay/align
+                        (and (send image get-pinhole)
+                             (send image2 get-pinhole)
+                             (andmap (λ (x) (send x get-pinhole))
+                                     image3))
+                        "when x-place or y-place is ~e or ~e, then all of the arguments must have pinholes"
+                        'pinhole "pinhole"))
   (let ([imgs (reverse (list* image image2 image3))])
     (overlay/internal x-place y-place (car imgs) (cdr imgs))))
+
+(define/chk (overlay/pinhole image1 image2 . image3)
+  (overlay/internal 'pinhole 'pinhole 
+                    (maybe-center-pinhole image1)
+                    (map maybe-center-pinhole (cons image2 image3))))
+
+(define/chk (underlay/pinhole image1 image2 . image3)
+  (let ([imgs (map maybe-center-pinhole (reverse (list* image1 image2 image3)))])
+    (overlay/internal 'pinhole 'pinhole
+                      (car imgs)
+                      (cdr imgs))))
+
+(define (maybe-center-pinhole img)
+  (if (send img get-pinhole)
+      img
+      (center-pinhole img)))
 
 (define (overlay/internal x-place y-place fst rst)
   (let loop ([fst fst]
@@ -154,7 +189,8 @@
                           (if (< dy 0) (- dy) 0)
                           (car rst)
                           (if (< dx 0) 0 dx)
-                          (if (< dy 0) 0 dy))
+                          (if (< dy 0) 0 dy)
+                          #t)
                (cdr rst)))])))
 
 (define (find-x-spot x-place image)
@@ -162,6 +198,7 @@
     [(left) 0]
     [(middle) (/ (get-right image) 2)]
     [(right) (get-right image)]
+    [(pinhole) (point-x (send image get-pinhole))]
     [else (error 'find-x-spot "~s" x-place)]))
 
 (define (find-y-spot y-place image)
@@ -170,6 +207,7 @@
     [(middle) (/ (get-bottom image) 2)]
     [(bottom) (get-bottom image)]
     [(baseline) (get-baseline image)]
+    [(pinhole) (point-y (send image get-pinhole))]
     [else (error 'find-y-spot "~s" y-place)]))
 
 ;; overlay/xy : image number number image -> image
@@ -181,7 +219,8 @@
              (if (< dy 0) (- dy) 0)
              image2
              (if (< dx 0) 0 dx)
-             (if (< dy 0) 0 dy)))
+             (if (< dy 0) 0 dy)
+             #t))
 
 (define/chk (underlay/xy image dx dy image2)
   (overlay/δ image2
@@ -189,18 +228,28 @@
              (if (< dy 0) 0 dy)
              image
              (if (< dx 0) (- dx) 0)
-             (if (< dy 0) (- dy) 0)))
+             (if (< dy 0) (- dy) 0)
+             #f))
 
-(define (overlay/δ image1 dx1 dy1 image2 dx2 dy2)
-  (make-image (make-overlay (make-translate dx1 dy1 (image-shape image1))
-                            (make-translate dx2 dy2 (image-shape image2)))
-              (make-bb (max (+ (get-right image1) dx1)
-                            (+ (get-right image2) dx2))
-                       (max (+ (get-bottom image1) dy1)
-                            (+ (get-bottom image2) dy2))
-                       (max (+ (get-baseline image1) dy1)
-                            (+ (get-baseline image2) dy2)))
-              #f))
+(define (overlay/δ image1 dx1 dy1 image2 dx2 dy2 first-pinhole?)
+    (make-image (make-overlay (make-translate dx1 dy1 (image-shape image1))
+                              (make-translate dx2 dy2 (image-shape image2)))
+                (make-bb (max (+ (get-right image1) dx1)
+                              (+ (get-right image2) dx2))
+                         (max (+ (get-bottom image1) dy1)
+                              (+ (get-bottom image2) dy2))
+                         (max (+ (get-baseline image1) dy1)
+                              (+ (get-baseline image2) dy2)))
+                #f
+                (if first-pinhole?
+                    (let ([ph (send image1 get-pinhole)])
+                      (and ph
+                           (make-point (+ (point-x ph) dx1)
+                                       (+ (point-y ph) dy1))))
+                    (let ([ph (send image2 get-pinhole)])
+                      (and ph
+                           (make-point (+ (point-x ph) dx2)
+                                       (+ (point-y ph) dy2)))))))
 
 ;; beside : image image image ... -> image
 ;; places images in a single horizontal row, top aligned
@@ -211,6 +260,14 @@
 ;; places images in a horizontal row where the vertical alignment is
 ;; covered by the string argument
 (define/chk (beside/align y-place image1 image2 . image3)
+  (when (eq? y-place 'pinhole)
+    (check-dependencies 'beside/align
+                        (and (send image1 get-pinhole)
+                             (send image2 get-pinhole)
+                             (andmap (λ (x) (send x get-pinhole))
+                                     image3))
+                        "when y-place is ~e or ~e, then all of the arguments must have pinholes"
+                        'pinhole "pinhole"))
   (beside/internal y-place image1 (cons image2 image3)))
 
 (define (beside/internal y-place fst rst)
@@ -228,7 +285,8 @@
                           (if (< dy 0) (- dy) 0)
                           (car rst)
                           (get-right fst)
-                          (if (< dy 0) 0 dy))
+                          (if (< dy 0) 0 dy)
+                          #t)
                (cdr rst)))])))
 
 ;; above : image image image ... -> image
@@ -240,6 +298,14 @@
 ;; places images in a horizontal row where the vertical alignment is
 ;; covered by the string argument
 (define/chk (above/align x-place image1 image2 . image3)
+  (when (eq? x-place 'pinhole)
+    (check-dependencies 'above/align
+                        (and (send image1 get-pinhole)
+                             (send image2 get-pinhole)
+                             (andmap (λ (x) (send x get-pinhole))
+                                     image3))
+                        "when x-place is ~e or ~e, then all of the arguments must have pinholes"
+                        'pinhole "pinhole"))
   (above/internal x-place image1 (cons image2 image3)))
 
 (define (above/internal x-place fst rst)
@@ -257,43 +323,68 @@
                           0
                           (car rst)
                           (if (< dx 0) 0 dx)
-                          (get-bottom fst))
+                          (get-bottom fst)
+                          #t)
                (cdr rst)))])))
 
 
-;                                                                                   
-;                               ;;      ;;                   ;;                     
-;                               ;;      ;;                  ;;;                     
-;    ;;;;    ;;;;   ;;;;;; ;;;  ;;;;;   ;;  ;; ;;;   ;;;;  ;;;;;  ;;;;   ;;;; ;;;;; 
-;   ;;;;;;  ;;;;;;  ;;;;;;;;;;  ;;;;;;  ;;  ;;;;;;  ;;  ;;  ;;;; ;;;;;;  ;;;; ;; ;; 
-;  ;;;     ;;;  ;;; ;;  ;;  ;;  ;;  ;;; ;;  ;;  ;;    ;;;;  ;;; ;;;  ;;; ;;   ;;;;; 
-;  ;;;     ;;;  ;;; ;;  ;;  ;;  ;;  ;;; ;;  ;;  ;;  ;;; ;;  ;;; ;;;  ;;; ;;     ;;;;
-;   ;;;;;;  ;;;;;;  ;;  ;;  ;;  ;;;;;;  ;;  ;;  ;; ;;;  ;;  ;;;; ;;;;;;  ;;   ;; ;;;
-;    ;;;;    ;;;;   ;;  ;;  ;;  ;; ;;   ;;  ;;  ;;  ;;;;;;   ;;;  ;;;;   ;;   ;;;;; 
-;                                                                                   
-;                                                                                   
-;       
+;                                                                                                  
+;                                                                                                  
+;                                                                                                  
+;                                 ;;;;        ;;                        ;                          
+;                                 ;;;;        ;;                       ;;                          
+;    ;;;;;   ;;;;   ;;;;;;; ;;;;  ;;;;;;;        ;;;; ;;;  ;;;;;;;   ;;;;;   ;;;;   ;;; ;;;  ;;;;; 
+;   ;;;;;;  ;;;;;;  ;;;;;;;;;;;;; ;;;;;;;;  ;;;; ;;;;;;;;; ;;;;;;;; ;;;;;;  ;;;;;;  ;;;;;;; ;;;;;; 
+;  ;;;;;;; ;;;;;;;; ;;;; ;;; ;;;; ;;;;;;;;; ;;;; ;;;; ;;;;     ;;;;  ;;;;  ;;;;;;;; ;;;; ;; ;;;;   
+;  ;;;;    ;;;; ;;; ;;;; ;;; ;;;; ;;;; ;;;; ;;;; ;;;; ;;;;  ;;;;;;;  ;;;;  ;;;; ;;; ;;;;     ;;;;  
+;  ;;;;;;; ;;;;;;;; ;;;; ;;; ;;;; ;;;;;;;;; ;;;; ;;;; ;;;; ;;  ;;;;  ;;;;; ;;;;;;;; ;;;;      ;;;; 
+;   ;;;;;;  ;;;;;;  ;;;; ;;; ;;;; ;;;;;;;;  ;;;; ;;;; ;;;; ;;;;;;;;  ;;;;;  ;;;;;;  ;;;;    ;;;;;; 
+;    ;;;;;   ;;;;   ;;;; ;;; ;;;; ;;;;;;;   ;;;; ;;;; ;;;;  ;; ;;;;   ;;;;   ;;;;   ;;;;    ;;;;;  
+;                                                                                                  
+;                                                                                                  
+;                                                                                                  
+    
 
 ;; crop : number number number number image -> image
 ;; crops an image to be w x h from (x,y)
 (define/chk (crop x1 y1 width height image)
-  (crop/internal x1 y1 width height image))
+  (check-arg 'crop
+             (<= 0 x1 (image-width image))
+             (format "number that is between 0 than the width (~a)" (image-width image))
+             1
+             x1)
+  (check-arg 'crop
+             (<= 0 y1 (image-height image))
+             (format "number that is between 0 and the height (~a)" (image-height image))
+             2
+             y1)
+  (let ([w (min width (- (image-width image) x1))]
+        [h (min height (- (image-height image) y1))])
+    (crop/internal x1 y1 w h image)))
 
 (define (crop/internal x1 y1 width height image)
-  (let* ([iw (min width (get-right image))]
-         [ih (min height (get-bottom image))]
-         [points (rectangle-points iw ih)])
+  (let ([points (rectangle-points width height)]
+        [ph (send image get-pinhole)])
     (make-image (make-crop points
                            (make-translate (- x1) (- y1) (image-shape image)))
-                (make-bb iw
-                         ih
-                         (min ih (get-baseline image)))
-                #f)))
+                (make-bb width
+                         height
+                         (min height (get-baseline image)))
+                #f
+                (and ph 
+                     (make-point (- (point-x ph) x1)
+                                 (- (point-y ph) y1))))))
 
 ;; place-image : image x y scene -> scene
 (define/chk (place-image image1 x1 y1 image2) 
   (place-image/internal image1 x1 y1 image2 'middle 'middle))
 (define/chk (place-image/align image1 x1 y1 x-place y-place image2)
+  (when (or (eq? x-place 'pinhole) (eq? y-place 'pinhole))
+    (check-dependencies 'place-image/align
+                        (and (send image1 get-pinhole)
+                             (send image2 get-pinhole))
+                        "when x-place or y-place is ~e or ~e, then both of the image arguments must have pinholes"
+                        'pinhole "pinhole"))
   (place-image/internal image1 x1 y1 image2 x-place y-place))
 
 (define (place-image/internal image orig-dx orig-dy scene x-place y-place)
@@ -309,7 +400,8 @@
                 (if (< dy 0) 0 dy)
                 scene
                 (if (< dx 0) (- dx) 0)
-                (if (< dy 0) (- dy) 0)))))
+                (if (< dy 0) (- dy) 0)
+                #f))))
 
 (define/chk (scene+line image x1 y1 x2 y2 color)
   (let* ([dx (abs (min 0 x1 x2))]
@@ -319,7 +411,8 @@
                             (make-line-segment (make-point x1 y1) (make-point x2 y2) color))
                  (image-shape image))
                 (image-bb image)
-                #f)))
+                #f
+                (send image get-pinhole))))
 
 (define/chk (scene+curve image x1 y1 angle1 pull1 x2 y2 angle2 pull2 color)
   (let* ([dx (abs (min 0 x1 x2))]
@@ -331,23 +424,28 @@
                                                 color))
                  (image-shape image))
                 (image-bb image)
-                #f)))
+                #f
+                (send image get-pinhole))))
 
 ;; frame : image -> image
 ;; draws a black frame around a image where the bounding box is
 ;; (useful for debugging images)
 
 (define/chk (frame image)
-  (make-image (make-overlay (image-shape image)
-                            (image-shape 
-                             (rectangle (get-right image)
-                                        (get-bottom image)
-                                        'outline
-                                        'black)))
+  (make-image (make-overlay (image-shape 
+                             (crop 0 0
+                                   (get-right image)
+                                   (get-bottom image)
+                                   (rectangle (get-right image)
+                                              (get-bottom image)
+                                              'outline
+                                              (pen "black" 2 'solid 'round 'round))))
+                            (image-shape image))
               (make-bb (get-right image)
                        (get-bottom image)
                        (get-baseline image))
-              #f))
+              #f
+              (send image get-pinhole)))
 
 ;; scale : I number -> I
 ;; scales the I by the given factor
@@ -358,12 +456,17 @@
   (let* ([rotated-shape (rotate-normalized-shape 
                          angle
                          (send image get-normalized-shape))]
-        [ltrb (normalized-shape-bb rotated-shape)])
+         [ltrb (normalized-shape-bb rotated-shape)]
+         [ph (send image get-pinhole)])
     (make-image (make-translate (- (ltrb-left ltrb)) (- (ltrb-top ltrb)) rotated-shape)
                 (make-bb (- (ltrb-right ltrb) (ltrb-left ltrb))
                          (- (ltrb-bottom ltrb) (ltrb-top ltrb))
                          (- (ltrb-bottom ltrb) (ltrb-top ltrb)))
-                #f)))
+                #f
+                (and ph
+                     (let ([rp (rotate-point ph angle)])
+                       (make-point (- (point-x rp) (ltrb-left ltrb))
+                                   (- (point-y rp) (ltrb-top ltrb))))))))
 
 (define/contract (rotate-normalized-shape angle shape)
   (-> number? normalized-shape? normalized-shape?)
@@ -379,13 +482,13 @@
   (-> number? cn-or-simple-shape? cn-or-simple-shape?)
   (cond
     [(crop? shape)
-     (make-crop (rotate-points angle (crop-points shape))
+     (make-crop (rotate-points (crop-points shape) angle)
                 (rotate-normalized-shape angle (crop-shape shape)))]
     [else
      (rotate-simple angle shape)]))
 
 ;; rotate-simple : angle simple-shape -> simple-shape
-(define (rotate-simple θ simple-shape)
+(define/contract (rotate-simple θ simple-shape)
   (-> number? simple-shape? simple-shape?)
   (cond
     [(line-segment? simple-shape)
@@ -405,7 +508,7 @@
                          (curve-segment-e-pull simple-shape)
                          (curve-segment-color simple-shape))]
     [(polygon? simple-shape)
-     (make-polygon (rotate-points θ (polygon-points simple-shape))
+     (make-polygon (rotate-points (polygon-points simple-shape) θ)
                    (polygon-mode simple-shape)
                    (polygon-color simple-shape))]
     [else
@@ -417,17 +520,19 @@
                                       (translate-dy simple-shape))))])
          (make-translate dx dy rotated)))]))
 
-(define-struct ltrb (left top right bottom))
+(struct ltrb (left top right bottom) #:transparent)
 (define (union-ltrb ltrb1 ltrb2)
-  (make-ltrb (min (ltrb-left ltrb1) (ltrb-left ltrb2))
-             (min (ltrb-top ltrb1) (ltrb-top ltrb2))
-             (max (ltrb-right ltrb1) (ltrb-right ltrb2))
-             (max (ltrb-bottom ltrb1) (ltrb-bottom ltrb2))))
+  (ltrb (min (ltrb-left ltrb1) (ltrb-left ltrb2))
+        (min (ltrb-top ltrb1) (ltrb-top ltrb2))
+        (max (ltrb-right ltrb1) (ltrb-right ltrb2))
+        (max (ltrb-bottom ltrb1) (ltrb-bottom ltrb2))))
+
+;; only intersection if they already overlap.
 (define (intersect-ltrb ltrb1 ltrb2)
-  (make-ltrb (max (ltrb-left ltrb1) (ltrb-left ltrb2))
-             (max (ltrb-top ltrb1) (ltrb-top ltrb2))
-             (min (ltrb-right ltrb1) (ltrb-right ltrb2))
-             (min (ltrb-bottom ltrb1) (ltrb-bottom ltrb2))))
+  (ltrb (max (ltrb-left ltrb1) (ltrb-left ltrb2))
+        (max (ltrb-top ltrb1) (ltrb-top ltrb2))
+        (min (ltrb-right ltrb1) (ltrb-right ltrb2))
+        (min (ltrb-bottom ltrb1) (ltrb-bottom ltrb2))))
 
 (define/contract (normalized-shape-bb shape)
   (-> normalized-shape? ltrb?)
@@ -460,35 +565,35 @@
            [y1 (point-y (line-segment-start simple-shape))]
            [x2 (point-x (line-segment-end simple-shape))]
            [y2 (point-y (line-segment-end simple-shape))])
-       (make-ltrb (min x1 x2)
-                  (min y1 y2)
-                  (+ (max x1 x2) 1)
-                  (+ (max y1 y2) 1)))]
+       (ltrb (min x1 x2)
+             (min y1 y2)
+             (+ (max x1 x2) 1)
+             (+ (max y1 y2) 1)))]
     [(curve-segment? simple-shape)
      (let ([x1 (point-x (curve-segment-start simple-shape))]
            [y1 (point-y (curve-segment-start simple-shape))]
            [x2 (point-x (curve-segment-end simple-shape))]
            [y2 (point-y (curve-segment-end simple-shape))])
-       (make-ltrb (min x1 x2)
-                  (min y1 y2)
-                  (+ (max x1 x2) 1)
-                  (+ (max y1 y2) 1)))]
+       (ltrb (min x1 x2)
+             (min y1 y2)
+             (+ (max x1 x2) 1)
+             (+ (max y1 y2) 1)))]
     [(polygon? simple-shape)
      (points->ltrb (polygon-points simple-shape))]
     [else
      (let ([dx (translate-dx simple-shape)]
            [dy (translate-dy simple-shape)])
        (let-values ([(l t r b) (np-atomic-bb (translate-shape simple-shape))])
-         (make-ltrb (+ l dx)
-                    (+ t dy)
-                    (+ r dx)
-                    (+ b dy))))]))
+         (ltrb (+ l dx)
+               (+ t dy)
+               (+ r dx)
+               (+ b dy))))]))
 
 (define (points->ltrb points)
   (let-values ([(left top right bottom) (points->ltrb-values points)])
-    (make-ltrb left top right bottom)))
+    (ltrb left top right bottom)))
 
-(define (np-atomic-bb atomic-shape)
+(define/contract (np-atomic-bb atomic-shape)
   (-> np-atomic-shape? (values number? number? number? number?))
   (cond
     [(ellipse? atomic-shape)
@@ -506,12 +611,13 @@
                                    (text-string atomic-shape) 
                                    (text->font atomic-shape))])
        (rotated-rectangular-bounding-box w h (text-angle atomic-shape)))]
-    [(bitmap? atomic-shape)
-     (let ([bb (bitmap-raw-bitmap atomic-shape)])
+    [(flip? atomic-shape)
+     (let* ([bitmap (flip-shape atomic-shape)]
+            [bb (bitmap-raw-bitmap bitmap)])
        (let-values ([(l t r b)
-                     (rotated-rectangular-bounding-box (* (send bb get-width) (bitmap-x-scale atomic-shape))
-                                                       (* (send bb get-height) (bitmap-y-scale atomic-shape))
-                                                       (bitmap-angle atomic-shape))])
+                     (rotated-rectangular-bounding-box (* (send bb get-width) (bitmap-x-scale bitmap))
+                                                       (* (send bb get-height) (bitmap-y-scale bitmap))
+                                                       (bitmap-angle bitmap))])
          (values l t r b)))]
     [else
      (fprintf (current-error-port) "using bad bounding box for ~s\n" atomic-shape)
@@ -527,7 +633,7 @@
             (max ax bx cx dx)
             (max ay by cy dy))))
 
-(define (rotate-points θ in-points)
+(define (rotate-points in-points θ)
   (let* ([cs (map point->c in-points)]
          [vectors (points->vectors cs)]
          [rotated-vectors (map (λ (c) (rotate-c c θ)) vectors)]
@@ -593,14 +699,20 @@
                 (text-style atomic-shape)
                 (text-weight  atomic-shape)
                 (text-underline atomic-shape))]
-    [(bitmap? atomic-shape)
-     (make-bitmap (bitmap-raw-bitmap atomic-shape)
-                  (bitmap-raw-mask atomic-shape)
-                  (bring-between (+ θ (bitmap-angle atomic-shape)) 360)
-                  (bitmap-x-scale atomic-shape)
-                  (bitmap-y-scale atomic-shape)
-                  #f
-                  #f)]))
+    [(flip? atomic-shape)
+     (let ([bitmap (flip-shape atomic-shape)]
+           [flipped? (flip-flipped? atomic-shape)])
+       (make-flip flipped?
+                  (make-bitmap (bitmap-raw-bitmap bitmap)
+                               (bitmap-raw-mask bitmap)
+                               (bring-between (if flipped? 
+                                                  (+ (bitmap-angle bitmap) θ)
+                                                  (- (bitmap-angle bitmap) θ))
+                                              360)
+                               (bitmap-x-scale bitmap)
+                               (bitmap-y-scale bitmap)
+                               #f
+                               #f)))]))
 
 ;; rotate-point : point angle -> point
 (define (rotate-point p θ)
@@ -625,19 +737,121 @@
     (make-point x y)))
 
 
-;; bring-between : number number -> number
-;; returns a number that is much like the modulo of 'x' and 'upper-bound'
-;; but does this by repeated subtraction (or addition if it is negative), 
+;; bring-between : rational integer -> rational
+;; returns a number that is much like the modulo of 'x' and 'upper-bound',
 ;; since modulo only works on integers
 (define (bring-between x upper-bound)
-  (let loop ([x x])
-    (cond
-      [(< x 0)
-       (loop (+ x upper-bound))]
-      [(< x upper-bound)
-       x]
-      [else
-       (loop (- x upper-bound))])))
+  (let* ([x-floor (floor x)]
+         [fraction (- x x-floor)])
+    (+ (modulo x-floor upper-bound) 
+       fraction)))
+
+(define/chk (flip-horizontal image)
+  (rotate 90 (flip-vertical (rotate -90 image))))
+
+(define/chk (flip-vertical image)
+  (let* ([flipped-shape (flip-normalized-shape 
+                         (send image get-normalized-shape))]
+         [ltrb (normalized-shape-bb flipped-shape)]
+         [ph (send image get-pinhole)])
+    (make-image (make-translate (- (ltrb-left ltrb)) (- (ltrb-top ltrb)) flipped-shape)
+                (make-bb (- (ltrb-right ltrb) (ltrb-left ltrb))
+                         (- (ltrb-bottom ltrb) (ltrb-top ltrb))
+                         (- (ltrb-bottom ltrb) (ltrb-top ltrb)))
+                #f
+                (and ph
+                     (make-point (+ (point-x ph) (- (ltrb-left ltrb)))
+                                 (+ (- (point-y ph)) (- (ltrb-top ltrb))))))))
+
+(define/contract (flip-normalized-shape shape)
+  (-> normalized-shape? normalized-shape?)
+  (cond
+    [(overlay? shape)
+     (let ([top-shape (flip-normalized-shape (overlay-top shape))]
+           [bottom-shape (flip-cn-or-simple-shape (overlay-bottom shape))])
+       (make-overlay top-shape bottom-shape))]
+    [else 
+     (flip-cn-or-simple-shape shape)]))
+
+(define/contract (flip-cn-or-simple-shape shape)
+  (-> cn-or-simple-shape? cn-or-simple-shape?)
+  (cond
+    [(crop? shape)
+     (make-crop (flip-points (crop-points shape))
+                (flip-normalized-shape (crop-shape shape)))]
+    [else
+     (flip-simple shape)]))
+
+(define/contract (flip-simple simple-shape)
+  (-> simple-shape? simple-shape?)
+  (cond
+    [(line-segment? simple-shape)
+     (make-line-segment (flip-point (line-segment-start simple-shape))
+                        (flip-point (line-segment-end simple-shape))
+                        (line-segment-color simple-shape))]
+    [(curve-segment? simple-shape)
+     (make-curve-segment (flip-point (curve-segment-start simple-shape))
+                         (bring-between (- (curve-segment-s-angle simple-shape)) 360)
+                         (curve-segment-s-pull simple-shape)
+                         (flip-point (curve-segment-end simple-shape))
+                         (bring-between (- (curve-segment-e-angle simple-shape)) 360)
+                         (curve-segment-e-pull simple-shape)
+                         (curve-segment-color simple-shape))]
+    [(polygon? simple-shape)
+     (make-polygon (flip-points (polygon-points simple-shape))
+                   (polygon-mode simple-shape)
+                   (polygon-color simple-shape))]
+    [else
+     (make-translate (translate-dx simple-shape) 
+                     (- (translate-dy simple-shape))
+                     (flip-atomic (translate-shape simple-shape)))]))
+
+(define/contract (flip-atomic atomic-shape)
+  (-> np-atomic-shape? np-atomic-shape?)
+  (cond
+    [(ellipse? atomic-shape)
+     (cond
+       [(= (ellipse-width atomic-shape)
+           (ellipse-height atomic-shape))
+        atomic-shape]
+       [else
+        (let ([new-angle (bring-between (- 180 (ellipse-angle atomic-shape)) 180)])
+          (cond
+            [(< new-angle 90)
+             (make-ellipse (ellipse-width atomic-shape)
+                           (ellipse-height atomic-shape)
+                           new-angle
+                           (ellipse-mode atomic-shape)
+                           (ellipse-color atomic-shape))]
+            [else
+             (make-ellipse (ellipse-height atomic-shape)
+                           (ellipse-width atomic-shape)
+                           (- new-angle 90)
+                           (ellipse-mode atomic-shape)
+                           (ellipse-color atomic-shape))]))])]
+    [(text? atomic-shape)
+     (error 'flip "cannot flip shapes that contain text")]
+    [(flip? atomic-shape)
+     (make-flip (not (flip-flipped? atomic-shape))
+                (flip-shape atomic-shape))]))
+
+(define (flip-point point) (make-point (point-x point) (- (point-y point))))
+(define (flip-points points) (map flip-point points))
+;                                                                                                 
+;                                                                                                 
+;                                                                                                 
+;  ;;;;                        ;;               ;;                                                
+;  ;;;;                        ;;               ;;                                                
+;  ;;;;;;;   ;;;;;;;   ;;;;;        ;;;;;          ;;;;;;; ;;;;  ;;;;;;;   ;;;;;;;   ;;;    ;;;;; 
+;  ;;;;;;;;  ;;;;;;;; ;;;;;; ;;;;  ;;;;;;     ;;;; ;;;;;;;;;;;;; ;;;;;;;; ;;;;;;;;  ;;;;;  ;;;;;; 
+;  ;;;;;;;;;     ;;;; ;;;;   ;;;; ;;;;;;;     ;;;; ;;;; ;;; ;;;;     ;;;; ;;; ;;;; ;;;; ;; ;;;;   
+;  ;;;; ;;;;  ;;;;;;;  ;;;;  ;;;; ;;;;        ;;;; ;;;; ;;; ;;;;  ;;;;;;; ;;;;;;;; ;;;;;;;  ;;;;  
+;  ;;;;;;;;; ;;  ;;;;   ;;;; ;;;; ;;;;;;;     ;;;; ;;;; ;;; ;;;; ;;  ;;;;  ;;;;;;; ;;;;;     ;;;; 
+;  ;;;;;;;;  ;;;;;;;; ;;;;;; ;;;;  ;;;;;;     ;;;; ;;;; ;;; ;;;; ;;;;;;;; ;   ;;;;  ;;;;;; ;;;;;; 
+;  ;;;;;;;    ;; ;;;; ;;;;;  ;;;;   ;;;;;     ;;;; ;;;; ;;; ;;;;  ;; ;;;; ;;;;;;;;   ;;;;  ;;;;;  
+;                                                                         ;;;;;;;;                
+;                                                                          ;;;;;;                 
+;                                                                                                 
 
 
 (define/chk (polygon posns mode color)
@@ -655,8 +869,9 @@
   (make-a-polygon (rectangle-points side-length side-length) mode color))
 
 (define/chk (empty-scene width height)
-  (overlay (rectangle width height 'outline 'black)
-           (rectangle width height 'solid 'white)))
+  (crop 0 0 width height
+        (overlay (rectangle width height 'outline (pen "black" 2 'solid 'round 'round))
+                 (rectangle width height 'solid 'white))))
 
 (define/chk (rhombus side-length angle mode color)
   (check-mode/color-combination 'rhombus 3 mode color)
@@ -711,7 +926,8 @@
                   (make-line-segment (make-point x1 y1) (make-point x2 y2) color)
                   (image-shape image)))
                 (make-bb right bottom baseline)
-                #f)))
+                #f
+                (send image get-pinhole))))
 
 (define/chk (add-curve image x1 y1 angle1 pull1 x2 y2 angle2 pull2 color)
   (let* ([dx (abs (min 0 x1 x2))]
@@ -731,7 +947,8 @@
                                       color)
                   (image-shape image)))
                 (make-bb right bottom baseline)
-                #f)))
+                #f
+                (send image get-pinhole))))
 
 ;; this is just so that 'text' objects can be sized.
 (define text-sizing-bm (make-object bitmap-dc% (make-object bitmap% 1 1)))
@@ -784,6 +1001,106 @@
   (check-mode/color-combination 'triangle 3 mode color)
   (make-polygon/star side-length 3 mode color values))
 
+; excess : R+ R+ -> R
+;  compute the Euclidean excess
+;  Note: If the excess is 0, then C is 90 deg.
+;        If the excess is negative, then C is obtuse.
+;        If the excess is positive, then C is acuse.
+(define (excess a b c)
+  (+ (sqr a) (sqr b) (- (sqr c))))
+
+; polar->posn : R+ R -> (posn R R)
+;  return a position with x and y coordinates
+(define (polar->posn radius angle)
+  (make-posn (* radius (cos angle))
+             (* radius (sin angle))))
+
+; cos-rel : R R R -> R+
+;   return c^2 = a^2 + b^2 - 2ab cos(C)
+(define (cos-rel a b C)
+  (+ (sqr a) (sqr b) (* -2 a b (cos C))))
+
+; sin-rel : R R R -> R
+;  return the side b
+(define (sin-rel A a B)
+  (/ (* a (sin B)) (sin A)))
+
+; last-angle : R R -> R
+;   return pi-(A+B)
+(define (last-angle A B)
+  (- pi A B))
+
+(define (radians degree)
+  (* (/ degree 180.0) pi))
+
+
+(define (triangle/sss side-a side-b side-c mode color)
+  (define (triangle-vertices/sss a b c)
+    (let ([A (acos (/ (excess b c a) (* 2 b c)))])
+      (list (make-posn 0 0)
+            (make-posn c 0)
+            (polar->posn b A))))
+  (check-dependencies 'triangle/sss
+                      (and (>= (+ side-a side-b) side-c) 
+                           (>= (+ side-a side-c) side-b) 
+                           (>= (+ side-b side-c) side-a))
+                      "the given side lengths will not form a triangle ~a, ~a, and, ~a."
+                      side-a side-b side-c)
+  (polygon (triangle-vertices/sss side-a side-b side-c) mode color))
+
+(define/chk (triangle/ass angle-a side-b side-c mode color)
+  (define (triangle-vertices/ass A b c)
+    (list (make-posn 0 0) (make-posn c 0) (polar->posn b A)))
+  (polygon (triangle-vertices/ass angle-a side-b side-c) mode color))
+
+(define/chk (triangle/sas side-a angle-b side-c mode color)
+  (define (triangle-vertices/sas a B c)
+    (let ([b^2 (cos-rel a c B)])
+      (check-dependencies 'triangle/sas
+                          "the given side, angle, and, side will not form a triangle ~a, ~a, and, ~a."
+                          side-a angle-b side-c)
+      (let* ([b (sqrt b^2)]
+             [A (acos (/ (excess b c a) (* 2 b c)))])
+        (list (make-posn 0 0) (make-posn c 0) (polar->posn b A)))))
+  (polygon (triangle-vertices/sas side-a (radians angle-b) side-c) mode color))
+(define/chk (triangle/ssa side-a side-b angle-c mode color)
+  (define (triangle-vertices/ssa a b C)
+    (let ([c^2 (cos-rel a b C)])
+      (check-dependencies 'triangle/ssa 
+                          (positive? c^2)
+                          "the given side, side, and, angle will not form a triangle ~a, ~a, and, ~a."
+                          side-a side-b angle-c)
+      (let*([c (sqrt c^2)]
+            [A (acos (/ (excess b c a) (* 2 b c)))])
+        (list (make-posn 0 0)
+              (make-posn c 0)
+              (polar->posn b A)))))
+  (polygon (triangle-vertices/ssa side-a side-b (radians angle-c)) mode color))
+
+(define/chk (triangle/aas angle-a angle-b side-c mode color)
+  (define (triangle-vertices/aas A B c)
+    (let* ([C (last-angle A B)]
+           [b (sin-rel C c B)])
+      (list (make-posn 0 0) (make-posn c 0) (polar->posn b A))))
+  (polygon (triangle-vertices/aas (radians angle-a) (radians angle-b) side-c) mode color))
+
+(define/chk (triangle/asa angle-a side-b angle-c mode color)
+  (define (triangle-vertices/asa A b C)
+    (let* ([B (last-angle A C)]
+           [c (sin-rel B b C)])
+      (list (make-posn 0 0) (make-posn c 0) (polar->posn b A))))
+  (polygon (triangle-vertices/asa (radians angle-a) side-b (radians angle-c)) mode color))
+
+(define/chk (triangle/saa side-a angle-b angle-c mode color)
+  (define (triangle-vertices/saa a B C)
+    (let* ([A (last-angle B C)]
+           [b (sin-rel A a B)]
+           [c (sin-rel A a C)])
+      (list (make-posn 0 0)
+            (make-posn c 0)
+            (polar->posn b A))))
+  (polygon (triangle-vertices/saa side-a (radians angle-b) (radians angle-c)) mode color))
+
 (define/chk (regular-polygon side-length side-count mode color)
   (check-mode/color-combination 'regular-polygon 4 mode color)
   (make-polygon/star side-length side-count mode color values))
@@ -809,6 +1126,32 @@
 (define (make-polygon/star side-length side-count mode color adjust)
   (make-a-polygon (adjust (regular-polygon-points side-length side-count)) 
                   mode color))
+
+(define/chk (radial-star point-count radius1 radius2 mode color)
+  (make-a-polygon (star-points radius1 radius2 point-count) mode color))
+  
+(define (star-points in-small-rad in-large-rad points)
+  (let* ([small-rad (- in-small-rad 1)]
+         [large-rad (- in-large-rad 1)]
+         [roff (floor (/ large-rad 2))])
+    (let loop ([i points])
+      (cond
+        [(zero? i) '()]
+        [else 
+         (let* ([this-p (- i 1)]
+                [theta1 (* 2 pi (/ this-p points))]
+                [theta2 (* 2 pi (/ (- this-p 1/2) points))])
+           (let-values ([(x1 y1) (find-xy small-rad theta1)]
+                        [(x2 y2) (find-xy large-rad theta2)])
+             (let ([p1 (make-point (+ large-rad x1)
+                                   (+ large-rad y1))]
+                   [p2 (make-point (+ large-rad x2)
+                                   (+ large-rad y2))])
+               (list* p1 p2 (loop (- i 1))))))]))))
+
+(define (find-xy radius theta)
+  (values (* radius (cos theta))
+          (* radius (sin theta))))
 
 (define (make-a-polygon points mode color)
   (let* ([poly (make-polygon points mode color)]
@@ -912,18 +1255,74 @@
                      (current-directory)))])])
        #`(make-object image-snip% (make-object bitmap% #,path 'unknown/mask)))]))
 
+(define/chk (image->color-list image)
+  (let* ([w (image-width image)]
+         [h (image-height image)]
+         [bm (make-object bitmap% w h)]
+         [bdc (make-object bitmap-dc% bm)]
+         [c (make-object color%)])
+    (send bdc clear)
+    (render-image image bdc 0 0)
+    (for/list ([i (in-range 0 (* w h))])
+      (send bdc get-pixel (remainder i w) (quotient i w) c)
+      (color (send c red) (send c green) (send c blue)))))
 
-(define build-color
+(define/chk (color-list->bitmap color-list width height)
+  (check-dependencies 'color-list->bitmap
+                      (= (* width height) (length color-list))
+                      "the length of the color list to match the product of the width and the height, but the list has ~a elements and the width and height are ~a and ~a respectively"
+                      (length color-list) width height)
+  (let* ([bmp (make-object bitmap% width height)]
+         [bdc (make-object bitmap-dc% bmp)]
+         [o (make-object color%)])
+    (for ([c (in-list color-list)]
+          [i (in-naturals)])
+      (cond
+        [(color? c)
+         (send o set (color-red c) (color-green c) (color-blue c))
+         (send bdc set-pixel (remainder i width) (quotient i width) o)]
+        [else
+         (let* ([str (if (string? c) c (symbol->string c))]
+                [clr (or (send the-color-database find-color str)
+                         (send the-color-database find-color "black"))])
+           (send bdc set-pixel (remainder i width) (quotient i width) clr))]))
+    (bitmap->image bmp)))
+      
+(define build-color/make-color
   (let ([orig-make-color make-color])
     (define/chk (make-color int0-255-1 int0-255-2 int0-255-3) 
       (orig-make-color int0-255-1 int0-255-2 int0-255-3))
     make-color))
 
-(define build-pen
+(define/chk (pinhole-x image) (let ([ph (send image get-pinhole)]) (and ph (point-x ph))))
+(define/chk (pinhole-y image) (let ([ph (send image get-pinhole)]) (and ph (point-y ph))))
+(define/chk (put-pinhole x1 y1 image) (make-image (image-shape image) (image-bb image) (image-normalized? image) (make-point x1 y1)))
+(define/chk (center-pinhole image) 
+  (let ([bb (send image get-bb)])
+    (make-image (image-shape image)
+                (image-bb image)
+                (image-normalized? image) 
+                (make-point (/ (bb-right bb) 2)
+                            (/ (bb-baseline bb) 2)))))
+(define/chk (clear-pinhole image) (make-image (image-shape image) (image-bb image) (image-normalized? image) #f))
+
+(define build-color/color
+  (let ([orig-make-color make-color])
+    (define/chk (color int0-255-1 int0-255-2 int0-255-3) 
+      (orig-make-color int0-255-1 int0-255-2 int0-255-3))
+    color))
+
+(define build-pen/make-pen
   (let ([orig-make-pen make-pen])
     (define/chk (make-pen color real-0-255 pen-style pen-cap pen-join)
       (orig-make-pen color real-0-255 pen-style pen-cap pen-join))
     make-pen))
+
+(define build-pen/pen
+  (let ([orig-make-pen make-pen])
+    (define/chk (pen color real-0-255 pen-style pen-cap pen-join)
+      (orig-make-pen color real-0-255 pen-style pen-cap pen-join))
+    pen))
 
 (provide overlay
          overlay/align
@@ -939,6 +1338,8 @@
          
          rotate
          crop
+         flip-vertical
+         flip-horizontal
          frame
 
          place-image
@@ -967,10 +1368,19 @@
          polygon
          regular-polygon
          triangle 
+         triangle/sss
+         triangle/ssa
+         triangle/sas
+         triangle/ass
+         triangle/aas
+         triangle/asa
+         triangle/saa
+
          isosceles-triangle
          right-triangle
          star
          star-polygon
+         radial-star
          
          line
          add-line
@@ -979,6 +1389,8 @@
          scene+curve
          text
          text/font
+         image->color-list
+         color-list->bitmap
          
          bitmap
          
@@ -986,8 +1398,18 @@
          
          rotate-xy
          
-         build-color
-         build-pen)
+         put-pinhole
+         pinhole-x
+         pinhole-y
+         clear-pinhole
+         center-pinhole
+         overlay/pinhole
+         underlay/pinhole
+         
+         build-color/make-color
+         build-color/color
+         build-pen/make-pen
+         build-pen/pen)
 
 (provide/contract
  [np-atomic-bb (-> np-atomic-shape? (values real? real? real? real?))]

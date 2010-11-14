@@ -11,6 +11,7 @@
          "base.rkt"
          racket/contract/exists
          "guts.rkt"
+         (for-syntax unstable/dirs)
          unstable/location
          unstable/srcloc)
 
@@ -38,6 +39,32 @@
                                      (current-inspector) #f '(0))])
     make-))
 
+(define (first-requiring-module id self)
+  (define (resolved-module-path->module-path rmp)
+    (cond
+      [(not rmp) 'top-level]
+      [(path? (resolved-module-path-name rmp))
+       `(file ,(path->string (resolved-module-path-name rmp)))]
+      [(symbol? (resolved-module-path-name rmp))
+       `(module ,(resolved-module-path-name rmp))]))  
+  ;; Here we get the module-path-index corresponding to the identifier.
+  ;; We know we can split it at least once, because the contracted identifier
+  ;; we've provided must have been required.  If the second returned value is #f,
+  ;; we just fall back on the old behavior.  If we split again without getting
+  ;; either "self", that is, the first value returned is not #f, then we should
+  ;; use the second mpi result as the module that required the value.
+  (let ([mpi (syntax-source-module id)])
+    (let*-values ([(first-mp second-mpi)
+                   (module-path-index-split mpi)]
+                  [(second-mp third-mpi)
+                   (if second-mpi
+                       (module-path-index-split second-mpi)
+                       (values #f #f))])
+      (if second-mp
+          (resolved-module-path->module-path
+           (module-path-index-resolve second-mpi))
+          self))))
+
 (define-for-syntax (make-provide/contract-transformer contract-id id external-id pos-module-source)
   (make-set!-transformer
    (let ([saved-id-table (make-hasheq)])
@@ -53,22 +80,29 @@
                                       [id id]
                                       [external-id external-id]
                                       [pos-module-source pos-module-source]
-                                      [id-ref (syntax-case stx (set!)
-                                                [(set! whatever e)
-                                                 id] ;; just avoid an error here, signal the error later
-                                                [(id . x)
-                                                 #'id]
-                                                [id
-                                                 (identifier? #'id)
-                                                 #'id])])
-                          (syntax-local-introduce
-                           (syntax-local-lift-expression
-                            #`(contract contract-id
-                                        id
-                                        pos-module-source
-                                        (quote-module-path)
-                                        'external-id
-                                        (quote-srcloc id))))))])
+                                      [loc-id (identifier-prune-to-source-module id)])
+                          (let ([srcloc-code 
+                                 (with-syntax ([src                      
+                                                (cond
+                                                  [(and
+                                                    (path-string? (syntax-source #'id))
+                                                    (path->directory-relative-string (syntax-source #'id) #:default #f))
+                                                   =>
+                                                   (lambda (rel) rel)]
+                                                  [else (syntax-source #'id)])]
+                                               [line (syntax-line #'id)]
+                                               [col (syntax-column #'id)]
+                                               [pos (syntax-position #'id)]
+                                               [span (syntax-span #'id)])
+                                   #'(make-srcloc 'src 'line 'col 'pos 'span))])
+                            (syntax-local-introduce
+                             (syntax-local-lift-expression
+                              #`(contract contract-id
+                                          id
+                                          pos-module-source
+                                          (first-requiring-module (quote-syntax loc-id) (quote-module-path))
+                                          'external-id
+                                          #,srcloc-code))))))])
                (when key
                  (hash-set! saved-id-table key lifted-id))
                ;; Expand to a use of the lifted expression:
@@ -617,9 +651,11 @@
        ;; code-for-one-exists-id : syntax -> syntax
        (define (code-for-one-exists-id x x-gen)
          #`(define #,x-gen (new-∃/c '#,x)))
-
+       
        (define (add-exists-binders stx exists-binders)
-         #`(let #,exists-binders #,stx))
+         (if (null? exists-binders)
+             stx
+             #`(let #,exists-binders #,stx)))
        
        (define (add-a-binder id id-gen binders)
          (cons #`[#,id #,id-gen] binders))
@@ -642,9 +678,12 @@
             (code-for-one-id/new-name stx id reflect-id ctrct user-rename-id #f #t)]
            [(stx id reflect-id ctrct user-rename-id mangle-for-maker?)
             (code-for-one-id/new-name id reflect-id ctrct user-rename-id mangle-for-maker? #t)]
-           [(stx id reflect-id ctrct user-rename-id mangle-for-maker? provide?)
-            (let ([no-need-to-check-ctrct? (a:known-good-contract? ctrct)]
-                  [ex-id (or reflect-id id)])
+           [(stx id reflect-id ctrct/no-prop user-rename-id mangle-for-maker? provide?)
+            (let ([no-need-to-check-ctrct? (a:known-good-contract? ctrct/no-prop)]
+                  [ex-id (or reflect-id id)]
+                  [ctrct (syntax-property ctrct/no-prop
+                                          'racket/contract:contract-on-boundary
+                                          (gensym 'provide/contract-boundary))])
               (with-syntax ([id-rename ((if mangle-for-maker? 
                                             a:mangle-id-for-maker
                                             a:mangle-id)
@@ -672,34 +711,44 @@
                                   #`(and (procedure? id)
                                          (procedure-arity-includes? id #,(length (syntax->list #'(dom ...)))))]
                                  [_ #f])])
-                (with-syntax ([code
-                               (quasisyntax/loc stx
-                                 (begin
-                                   (define pos-module-source (quote-module-path))
-                                   
-                                   #,@(if no-need-to-check-ctrct?
-                                          (list)
-                                          (list #'(define contract-id 
-                                                    (let ([ex-id ctrct]) ;; let is here to give the right name.
-                                                      (verify-contract 'provide/contract ex-id)))))
-                                   (define-syntax id-rename
-                                     (make-provide/contract-transformer (quote-syntax contract-id)
-                                                                        (quote-syntax id)
-                                                                        (quote-syntax reflect-external-name)
-                                                                        (quote-syntax pos-module-source)))
-                                   
-                                   #,@(if provide?
-                                          (list #`(provide (rename-out [id-rename external-name])))
-                                          null)))])
-                  
-                  (syntax-local-lift-module-end-declaration
-                   #`(begin 
-                       (unless extra-test
-                         (contract contract-id id pos-module-source 'ignored 'id 
-                                   (quote-srcloc id)))
-                       (void)))
-                  
-                  (syntax (code id-rename))))))]))
+                  (with-syntax ([code
+                                 (syntax-property
+                                  (quasisyntax/loc stx
+                                    (begin
+                                      (define pos-module-source (quote-module-path))
+                                      
+                                      #,@(if no-need-to-check-ctrct?
+                                             (list)
+                                             (list #'(define contract-id 
+                                                       (let ([ex-id ctrct]) ;; let is here to give the right name.
+                                                         (verify-contract 'provide/contract ex-id)))))
+                                      (define-syntax id-rename
+                                        (make-provide/contract-transformer (quote-syntax contract-id)
+                                                                           (a:update-loc
+                                                                            (quote-syntax id)
+                                                                            (vector
+                                                                             '#,(syntax-source #'id)
+                                                                             #,(syntax-line #'id)
+                                                                             #,(syntax-column #'id)
+                                                                             #,(syntax-position #'id)
+                                                                             #,(syntax-span #'id)))
+                                                                           (quote-syntax reflect-external-name)
+                                                                           (quote-syntax pos-module-source)))
+                                      
+                                      #,@(if provide?
+                                             (list #`(provide (rename-out [id-rename external-name])))
+                                             null)))
+                                  'provide/contract-original-contract
+                                  (vector #'external-name #'ctrct))])
+                    
+                    (syntax-local-lift-module-end-declaration
+                     #`(begin 
+                         (unless extra-test
+                           (contract contract-id id pos-module-source 'ignored 'id 
+                                     (quote-srcloc id)))
+                         (void)))
+                    
+                    (syntax (code id-rename))))))]))
        
        (with-syntax ([(bodies ...) (code-for-each-clause (syntax->list (syntax (p/c-ele ...))))])
          (signal-dup-syntax-error)

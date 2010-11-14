@@ -28,16 +28,17 @@
   ;; Set pretty-print options:
   (pretty-print-show-inexactness #t)
   (pretty-print-exact-as-decimal #t)
+  (show-sharing (memq 'show-sharing options))
 
-  ;; Set print handlers to use print-convert and pretty-print:
+  ;; Set print handlers to use print-convert and pretty-write:
   (current-print
    (lambda (v)
      (unless (void? v)
-       (pretty-print (print-convert v)))))
+       (pretty-write (print-convert v)))))
   (let ([orig (global-port-print-handler)])
     (global-port-print-handler
      (lambda (val port [depth 0])
        (parameterize ([global-port-print-handler orig])
          (let ([val (print-convert val)])
            (parameterize ([pretty-print-columns 'infinity])
-             (pretty-print val port depth))))))))
+             (pretty-write val port))))))))

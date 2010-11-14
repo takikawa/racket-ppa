@@ -1,5 +1,5 @@
 This is the source code distribution for Racket.  For license
-information, please see the file racket/notes/COPYING.LIB.
+information, please see the file racket/doc/release-notes/COPYING.LIB.
 
 Compiled binaries, documentation, and up-to-date information are
 available at http://racket-lang.org/; pre-compiled nightly builds are
@@ -70,7 +70,7 @@ the Unix instructions below, but note the following:
  * Under Mac OS X 10.6 and later, `configure' by default selects 32-bit
    mode for building Racket and GRacket.  To build Racket in 64-bit mode
    (GRacket is not support in that mode), use the following arguments to
-   `configure': `--enable-mac64', `--enable-sgc', and `--disable-mred'.
+   `configure': `--enable-mac64', `--enable-sgc', and `--disable-gracket'.
 
 ========================================================================
  Compiling for supported Unix variants (including Linux) or Cygwin
@@ -250,26 +250,6 @@ recorded in a "buildinfo" file in the installation.
 For a build without `--prefix' (or with `--enable-origtree') and without
 `--enable-shared', you can safely move the install tree, because all
 file references within the installation are relative.
-
-OpenGL, Unix, and pthreads
---------------------------
-
-On some Unix systems, programs that use the OpenGL library must also
-link to pthreads.  To use GRacket's OpenGL support on these systems,
-GRacket must be configured with the `--enable-pthread' option.
-Unfortunately, Racket's normal stack handling and use of signals (for
-its own thread scheduling) do not interact well with pthreads.  Thus,
-when pthreads are enabled, Racket and GRacket cannot use interupt
-timers, and the stack is limited to 1MB.  These restrictions can degrade
-performance and thread-responsiveness.
-
-If `configure' detects that OpenGL requires -lpthread for linking, and
-if `--enable-pthread' is not specified, `configure' prints a warning and
-disables GL support.  On some systems, including at least FreeBSD with
-the MESA GL implementation (but not the NVIDIA implementation, which
-does not need pthreads), `configure' cannot detect the need for
-pthreads.  On these platforms, GL support will be included in GRacket,
-but it will not work properly unless `--enable-pthread' is specified.
 
 ========================================================================
  CGC versus 3m

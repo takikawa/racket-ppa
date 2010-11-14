@@ -6,15 +6,18 @@ don't depend on any other portion of the system
 |#
 
 (provide (all-defined-out))
-(require "syntax-traversal.rkt"
-	 "utils.rkt"
-	 syntax/parse (for-syntax scheme/base syntax/parse) scheme/match unstable/debug
-         (for-syntax unstable/syntax))
+(require "syntax-traversal.rkt" racket/dict
+	 syntax/parse (for-syntax scheme/base syntax/parse) racket/match)
 
 ;; a parameter representing the original location of the syntax being currently checked
 (define current-orig-stx (make-parameter #'here))
 (define orig-module-stx (make-parameter #f))
 (define expanded-module-stx (make-parameter #f))
+
+;; a parameter holding the mutated variables for the form currently being checked
+(define mutated-vars (make-parameter #hash()))
+
+(define (is-var-mutated? id) (dict-ref (mutated-vars) id #f))
 
 (define (stringify l [between " "])
   (define (intersperse v l)
@@ -47,17 +50,17 @@ don't depend on any other portion of the system
     (when (and (warn-unreachable?)
                (log-level? l 'warning)
                (and (syntax-transforming?) (syntax-original? (syntax-local-introduce e)))
-               #;(and (orig-module-stx) (eq? (debug syntax-source-module e) (debug syntax-source-module (orig-module-stx))))
+               #;(and (orig-module-stx) (eq? (debugf syntax-source-module e) (debugf syntax-source-module (orig-module-stx))))
 	       #;(syntax-source-module stx))
-      (log-message l 'warning (format "Typed Scheme has detected unreachable code: ~e" (syntax->datum (locate-stx e)))
+      (log-message l 'warning (format "Typed Scheme has detected unreachable code: ~.s" (syntax->datum (locate-stx e)))
                    e))))
 
 (define (locate-stx stx)
   (define omodule (orig-module-stx))
   (define emodule (expanded-module-stx))
-  ;(printf "orig: ~a~n" (syntax-object->datum omodule))
-  ;(printf "exp: ~a~n" (syntax-object->datum emodule))
-  ;(printf "stx (locate): ~a~n" (syntax-object->datum stx))
+  ;(printf "orig: ~a\n" (syntax-object->datum omodule))
+  ;(printf "exp: ~a\n" (syntax-object->datum emodule))
+  ;(printf "stx (locate): ~a\n" (syntax-object->datum stx))
   (if (and (not (print-syntax?)) omodule emodule stx)
       (or (look-for-in-orig omodule emodule stx) stx)
       stx))
@@ -80,6 +83,7 @@ don't depend on any other portion of the system
   (define (reset!) (set! delayed-errors null))
   (match (reverse delayed-errors)
     [(list) (void)]
+    ;; if there's only one, we don't need multiple-error handling
     [(list (struct err (msg stx)))
      (reset!)
      (raise-typecheck-error msg stx)]
@@ -104,15 +108,16 @@ don't depend on any other portion of the system
 
 ;; produce a type error, using the current syntax
 (define (tc-error msg . rest)  
-  (let ([stx (locate-stx (current-orig-stx))])
+  (let* ([ostx (current-orig-stx)]
+         [ostxs (if (list? ostx) ostx (list ostx))]
+         [stxs (map locate-stx ostxs)])
     ;; If this isn't original syntax, then we can get some pretty bogus error messages.  Note
     ;; that this is from a macro expansion, so that introduced vars and such don't confuse the user.
     (cond
-      [(not (orig-module-stx))
-       (raise-typecheck-error (apply format msg rest) (list stx))]
-      [(eq? (syntax-source (current-orig-stx)) (syntax-source (orig-module-stx)))
-       (raise-typecheck-error (apply format msg rest) (list stx))]
-      [else (raise-typecheck-error (apply format (string-append "Error in macro expansion -- " msg) rest) (list stx))])))
+      [(or (not (orig-module-stx))
+           (for/and ([s ostxs]) (eq? (syntax-source s) (syntax-source (orig-module-stx)))))
+       (raise-typecheck-error (apply format msg rest) stxs)]
+      [else (raise-typecheck-error (apply format (string-append "Error in macro expansion -- " msg) rest) stxs)])))
 
 ;; produce a type error, given a particular syntax
 (define (tc-error/stx stx msg . rest)
@@ -132,13 +137,12 @@ don't depend on any other portion of the system
 
 ;; raise an internal error - typechecker bug!
 (define (int-err msg . args) 
-  (parameterize ([custom-printer #t])
-    (raise (make-exn:fail:tc (string-append "Internal Typechecker Error: "
-					    (apply format msg args)
-					    (format "\nwhile typechecking\n~aoriginally\n~a"
-						    (syntax->datum (current-orig-stx))
-						    (syntax->datum (locate-stx (current-orig-stx)))))
-			     (current-continuation-marks)))))
+  (raise (make-exn:fail:tc (string-append "Internal Typechecker Error: "
+                                          (apply format msg args)
+                                          (format "\nwhile typechecking\n~aoriginally\n~a"
+                                                  (syntax->datum (current-orig-stx))
+                                                  (syntax->datum (locate-stx (current-orig-stx)))))
+                           (current-continuation-marks))))
 
 (define-syntax (nyi stx)
   (syntax-case stx ()
@@ -162,8 +166,8 @@ don't depend on any other portion of the system
     #:transparent
     #:attributes (ty id)
     (pattern [nm:identifier ~! ty]
-             #:fail-unless (list? (identifier-template-binding #'nm)) "not a bound identifier"
-             #:with id #'#'nm)
+             #:fail-unless (list? ((if (= 1 (syntax-local-phase-level)) identifier-template-binding identifier-template-binding) #'nm)) "not a bound identifier"
+             #:with id #'(quote-syntax nm))
     (pattern [e:expr ty]
              #:with id #'e))
   (syntax-parse stx

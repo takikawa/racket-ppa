@@ -157,6 +157,8 @@ READ_ONLY Scheme_Object *scheme_write_proc;
 READ_ONLY Scheme_Object *scheme_display_proc;
 READ_ONLY Scheme_Object *scheme_print_proc;
 
+SHARED_OK Scheme_Object *initial_compiled_file_paths;
+
 THREAD_LOCAL_DECL(static Scheme_Object *dummy_input_port);
 THREAD_LOCAL_DECL(static Scheme_Object *dummy_output_port);
 
@@ -331,7 +333,10 @@ void scheme_init_port_fun_config(void)
 {
   scheme_set_root_param(MZCONFIG_LOAD_DIRECTORY, scheme_false);
   scheme_set_root_param(MZCONFIG_WRITE_DIRECTORY, scheme_false);
-  scheme_set_root_param(MZCONFIG_USE_COMPILED_KIND, scheme_make_pair(scheme_make_path("compiled"), scheme_null));
+  if (initial_compiled_file_paths)
+    scheme_set_root_param(MZCONFIG_USE_COMPILED_KIND, initial_compiled_file_paths);
+  else
+    scheme_set_root_param(MZCONFIG_USE_COMPILED_KIND, scheme_make_pair(scheme_make_path("compiled"), scheme_null));
   scheme_set_root_param(MZCONFIG_USE_USER_PATHS, (scheme_ignore_user_paths ? scheme_false : scheme_true));
 
   {
@@ -350,6 +355,13 @@ void scheme_init_port_fun_config(void)
   REGISTER_SO(dummy_output_port);
   dummy_input_port = scheme_make_byte_string_input_port("");
   dummy_output_port = scheme_make_null_output_port(1);
+}
+
+void scheme_set_compiled_file_paths(Scheme_Object *list)
+{
+  if (!initial_compiled_file_paths)
+    REGISTER_SO(initial_compiled_file_paths);
+  initial_compiled_file_paths = list;
 }
 
 /*========================================================================*/
@@ -4109,7 +4121,7 @@ static Scheme_Object *do_load_handler(void *data)
       m = scheme_extract_compiled_module(SCHEME_STX_VAL(d));
       if (m) {
         if (check_module_name) {
-          if (!SAME_OBJ(SCHEME_PTR_VAL(m->modname), lhd->expected_module)) {
+          if (!scheme_resolved_module_path_value_matches(m->modname, lhd->expected_module)) {
             other = m->modname;
             d = NULL;
           }
@@ -4139,8 +4151,9 @@ static Scheme_Object *do_load_handler(void *data)
 
       /* If d is NULL, shape was wrong */
       if (!d) {
+        Scheme_Object *err_msg;
 	if (!other || !SCHEME_SYMBOLP(other))
-	  other = scheme_make_byte_string("something else");
+	  err_msg = scheme_make_byte_string("something else");
 	else {
 	  char *s, *t;
 	  long len, slen;
@@ -4155,7 +4168,7 @@ static Scheme_Object *do_load_handler(void *data)
 	  s[len + slen] = '\'';
 	  s[len + slen + 1]= 0;
 
-	  other = scheme_make_sized_byte_string(s, len + slen + 1, 0);
+	  err_msg = scheme_make_sized_byte_string(s, len + slen + 1, 0);
 	}
 
         {
@@ -4164,7 +4177,7 @@ static Scheme_Object *do_load_handler(void *data)
           scheme_raise_exn(MZEXN_FAIL,
                            "default-load-handler: expected a `module' declaration for `%S', found: %T in: %V",
                            lhd->expected_module,
-                           other,
+                           err_msg,
                            ip->name);
         }
 
@@ -4299,6 +4312,7 @@ static Scheme_Object *default_load(int argc, Scheme_Object *argv[])
     config = scheme_extend_config(config, MZCONFIG_CAN_READ_INFIX_DOT, scheme_true);
     config = scheme_extend_config(config, MZCONFIG_CAN_READ_QUASI, scheme_true);
     config = scheme_extend_config(config, MZCONFIG_CAN_READ_READER, scheme_true);
+    config = scheme_extend_config(config, MZCONFIG_CAN_READ_LANG, scheme_true);
     config = scheme_extend_config(config, MZCONFIG_READ_DECIMAL_INEXACT, scheme_true);
     config = scheme_extend_config(config, MZCONFIG_READTABLE, scheme_false);
   }

@@ -1,0 +1,13 @@
+* html: generic shared code for (X)HTML generation (tag output and
+  resource rendering and referring).
+
+* common: specific code for the PLT web pages.
+
+* www: actual content of main site.
+
+* download: content of download site (only installer pages and such)
+
+* minis: smaller sites which are implemented in one-file each.
+
+* stubs: template "sites" that are intended to be hooked into other
+  systems to get the plt look.

@@ -67,8 +67,7 @@ slot is position @racket[0], and the last slot is one less than
          void?]{
 
 Updates the slot @racket[pos] of @racket[vec] to contain @racket[v].}
-
-
+                              
 @defproc[(vector->list [vec vector?]) list?]{
 
 Returns a list with the same length and elements as @racket[vec].}
@@ -150,6 +149,16 @@ _i)] is the value produced by @racket[(proc _i)].
 @(define vec-eval (make-base-eval))
 @(interaction-eval #:eval vec-eval
                    (require racket/vector))
+
+@defproc[(vector-set*! [vec (and/c vector? (not/c immutable?))]
+                       [pos exact-nonnegative-integer?]
+                       [v any/c]
+                       ...
+                       ...)
+         void?]{
+
+Updates each slot @racket[pos] of @racket[vec] to contain each @racket[v].
+The update takes place from the left so later updates overwrite earlier updates.}
 
 @defproc[(vector-map [proc procedure?] [vec vector?] ...+) 
          vector?]{
@@ -253,8 +262,11 @@ except that it can be faster.
 ]}
 
 
-@defproc[(vector-copy [vec vector?] [start exact-nonnegative-integer?
-0] [end exact-nonnegative-integer? (vector-length v)]) vector?]{
+@defproc[(vector-copy [vec vector?] 
+                      [start exact-nonnegative-integer? 0]
+                      [end exact-nonnegative-integer? (vector-length v)]) 
+         vector?]{
+
 Creates a fresh vector of size @racket[(- end start)], with all of the
 elements of @racket[vec] from @racket[start] (inclusive) to
 @racket[end] (exclusive).

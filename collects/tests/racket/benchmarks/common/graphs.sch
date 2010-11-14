@@ -638,11 +638,11 @@
 
 (let ((input (with-input-from-file "input.txt" read)))
   (time
-   (let loop ((n 3) (v 0))
+   (let loop ((n 45) (v 0))
      (if (zero? n)
          v
          (loop (- n 1)
-               (fold-over-rdg (if input 6 0)
+               (fold-over-rdg (if input 6 1)
                               2 
                               cons
                               '()))))))

@@ -8,6 +8,7 @@ PLANNED FEATURES:
 |#
   (require mzlib/string
            mzlib/file
+           (only racket/path simple-form-path)
            (only mzlib/list sort)
            net/url
            mzlib/match
@@ -40,7 +41,7 @@ PLANNED FEATURES:
        (force-package-building? #t)]
       #:args (path)
       (do-archive path)]
-     ["install" "download and install a given package"
+     ["install" "download and install a package"
       "
 Download and install the package that
    (require (planet \"file.rkt\" (<owner> <pkg> <maj> <min>)))
@@ -49,7 +50,7 @@ would install"
       (begin
         (verify-package-name pkg)
         (download/install owner pkg maj min))]
-     ["remove" "remove the specified package from the local cache"
+     ["remove" "remove a package from the local cache"
       "
 Remove the specified package from the local cache, optionally also removing its distribution file"
       #:once-each 
@@ -77,13 +78,13 @@ Install local file <plt-file> into the planet cache as though it had been downlo
   (planet (<owner> <plt-file's filename> <maj> <min>))"
        #:args (owner plt-file maj min)
        (install-plt-file plt-file owner maj min)]
-     ["link" "create a development link"
+     ["link" "create a package development link"
       "\nCreate a development link between the specified package specifier and the specified directory name"
       #:args (owner pkg maj min path)
       (begin
         (verify-package-name pkg)
         (add-hard-link-cmd owner pkg maj min path))]
-     ["unlink" "remove development link associated with the given package"
+     ["unlink" "remove a package development link"
       "\nRemove development link associated with the given package"
       #:args (owner pkg maj min)
       (begin
@@ -95,7 +96,7 @@ Install local file <plt-file> into the planet cache as though it had been downlo
        (begin
          (verify-package-name pkg)
          (download/no-install owner pkg maj min))]
-     ["url" "get a URL for the given package"
+     ["url" "get a URL for a package"
       "
 Get a URL for the given package.
 This is not necessary for normal use of planet, but may be helpful in some circumstances for retrieving packages."
@@ -103,20 +104,20 @@ This is not necessary for normal use of planet, but may be helpful in some circu
       (begin
         (verify-package-name pkg)
         (get-download-url owner pkg maj min))]
-     ["open" "unpack the contents of the given package"
+     ["open" "unpack the contents of a package"
       "
 Unpack the contents of the given package into the given directory without installing.
 This command is not necessary for normal use of planet. It is intended to allow you to inspect package contents offline without needing to install the package."
       #:args (plt-file target)
       (do-unpack plt-file target)]
      
-     ["structure" "display the structure of a given .plt archive"
+     ["structure" "display the structure of a .plt archive"
       "\nPrint the structure of the PLaneT archive named by <plt-file> to the standard output port.
 This command does not unpack or install the named .plt file."
       #:args (plt-file)
       (do-structure plt-file)]
      
-     ["print" "display a file within of the given .plt archive"
+     ["print" "display a file within a .plt archive"
       "\nPrint the contents of the file named by <path>, which must be a relative path within the PLaneT archive named by <plt-file>, to the standard output port.
 This command does not unpack or install the named .plt file."
       #:args (plt-file path)
@@ -178,7 +179,7 @@ This command does not unpack or install the named .plt file."
     
   (define (install-plt-file filestr owner majstr minstr)
     (unless (file-exists? filestr) (fail "File does not exist: ~a" filestr))
-    (let* ([file (normalize-path filestr)]
+    (let* ([file (simple-form-path filestr)]
            [name (let-values ([(base name dir?) (split-path file)]) (path->string name))]
            [fullspec (params->full-pkg-spec owner name majstr minstr)])
       (install-pkg fullspec file (pkg-spec-maj fullspec) (pkg-spec-minor-lo fullspec))))
@@ -186,7 +187,7 @@ This command does not unpack or install the named .plt file."
   (define (do-archive p)
     (unless (directory-exists? p)
       (fail "No such directory: ~a" p))
-    (make-planet-archive (normalize-path p)))
+    (make-planet-archive (simple-form-path p)))
   
   (define (remove owner pkg majstr minstr)
     (let ((maj (string->number majstr))
@@ -273,19 +274,19 @@ This command does not unpack or install the named .plt file."
   (define (do-unpack plt-file target)
     (unless (file-exists? plt-file)
       (fail (format "The specified file (~a) does not exist" plt-file))) 
-    (let ([file (normalize-path plt-file)])
+    (let ([file (simple-form-path plt-file)])
       (unpack-planet-archive file target)))
   
   (define (do-structure plt-file)
     (unless (file-exists? plt-file)
       (fail (format "The specified file (~a) does not exist" plt-file))) 
-    (let ([file (normalize-path plt-file)])
+    (let ([file (simple-form-path plt-file)])
       (display-plt-file-structure file)))
   
   (define (do-display plt-file file-to-print)
     (unless (file-exists? plt-file)
       (fail (format "The specified file (~a) does not exist" plt-file))) 
-    (let ([file (normalize-path plt-file)])
+    (let ([file (simple-form-path plt-file)])
       (display-plt-archived-file file file-to-print)))
   
   ;; ------------------------------------------------------------

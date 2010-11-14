@@ -1,10 +1,8 @@
-
-#lang scheme/base
-(require scheme/promise
+#lang racket/base
+(require racket/promise
          parser-tools/lex
-         "deriv.ss"
-         "deriv-parser.ss"
-         "deriv-tokens.ss")
+         "deriv-parser.rkt"
+         "deriv-tokens.rkt")
 
 (provide trace
          trace*
@@ -51,7 +49,7 @@
              [val (cdr sig+val)]
              [t (tokenize sig val pos)])
         (when (trace-verbose?)
-          (printf "~s: ~s~n" pos
+          (printf "~s: ~s\n" pos
                   (token-name (position-token-token t))))
         (set! pos (add1 pos))
         t))))

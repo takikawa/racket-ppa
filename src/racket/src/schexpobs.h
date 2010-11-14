@@ -111,6 +111,8 @@ extern Scheme_Object *scheme_get_expand_observe();
 #define SCHEME_EXPAND_OBSERVE_PRIM_VARREF(obs) \
         _SCHEME_EXPOBS(obs,149,scheme_false)
 
+#define SCHEME_EXPAND_OBSERVE_PRIM_STRATIFIED(observer) \
+        _SCHEME_EXPOBS(observer,155,scheme_false)
 
 #define SCHEME_EXPAND_OBSERVE_VARIABLE(observer,e1,e2)       \
         _SCHEME_EXPOBS(observer,125,scheme_make_pair(e1, e2))
@@ -174,6 +176,15 @@ extern Scheme_Object *scheme_get_expand_observe();
 #define SCHEME_EXPAND_OBSERVE_RENAME_ONE(obs,val) \
         _SCHEME_EXPOBS(obs,148,val)
 
-/* next: 152 */
+#define SCHEME_EXPAND_OBSERVE_TRACK_ORIGIN(obs,pre,post) \
+        _SCHEME_EXPOBS(obs,152,scheme_make_pair(pre,post))
+
+#define SCHEME_EXPAND_OBSERVE_LOCAL_VALUE(obs,id) \
+        _SCHEME_EXPOBS(obs,153,id)
+
+#define SCHEME_EXPAND_OBSERVE_LOCAL_VALUE_RESULT(obs,bound) \
+        _SCHEME_EXPOBS(obs,154,bound)
+
+/* next: 156 */
 
 #endif

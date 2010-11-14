@@ -1,5 +1,7 @@
-#lang scheme/base
-(require (for-syntax scheme/base))
+#lang racket/base
+(require (for-syntax racket/base)
+         racket/serialize
+         racket/pretty)
 
 (provide set seteq seteqv
          set? set-eq? set-eqv? set-equal?
@@ -12,17 +14,55 @@
          for/set for/seteq for/seteqv
          for*/set for*/seteq for*/seteqv)
 
-(define-struct set (ht)
+(define-serializable-struct set (ht)
   #:omit-define-syntaxes
+  #:property prop:custom-print-quotable 'never
   #:property prop:custom-write
-  (lambda (s port write?)
-    (define print (if write? write display))
-    (write-string "#<set:" port)
-    (set-for-each s 
-                  (lambda (e) 
-                    (write-string " " port)
-                    (print e port)))
-    (write-string ">" port))
+  (lambda (s port mode)
+    (define recur-print (cond
+                         [(not mode) display]
+                         [(integer? mode) (lambda (p port) (print p port mode))]
+                         [else write]))
+    (define (print-prefix port)
+      (if (equal? 0 mode)
+          (write-string "(set" port)
+          (write-string "#<set:" port)))
+    (define (print-suffix port)
+      (if (equal? 0 mode)
+          (write-string ")" port)
+          (write-string ">" port)))
+    (define (print-one-line port)
+      (print-prefix port)
+      (set-for-each s 
+                    (lambda (e) 
+                      (write-string " " port)
+                      (recur-print e port)))
+      (print-suffix port))
+    (define (print-multi-line port)
+      (let-values ([(line col pos) (port-next-location port)])
+        (print-prefix port)
+        (set-for-each s 
+                      (lambda (e) 
+                        (pretty-print-newline port (pretty-print-columns))
+                        (write-string (make-string (add1 col) #\space) port)
+                        (recur-print e port)))
+        (print-suffix port)))
+    (cond
+     [(and (pretty-printing)
+           (integer? (pretty-print-columns)))
+      ((let/ec esc
+         (letrec ([tport (make-tentative-pretty-print-output-port
+                          port
+                          (- (pretty-print-columns) 1)
+                          (lambda () 
+                            (esc
+                             (lambda ()
+                               (tentative-pretty-print-port-cancel tport)
+                               (print-multi-line port)))))])
+           (print-one-line tport)
+           (tentative-pretty-print-port-transfer tport port))
+         void))]
+     [else (print-one-line port)]))
   #:property prop:equal+hash (list 
                               (lambda (set1 set2 =?)
                                 (=? (set-ht set1) (set-ht set2)))
@@ -93,7 +133,7 @@
    [(set . sets)
     (for ([s (in-list (cons set sets))]
           [i (in-naturals)])
-      (unless (set? s) (apply raise-type-error 'set-union "set" i sets)))
+      (unless (set? s) (apply raise-type-error 'set-union "set" i (cons set sets))))
     (for/fold ([set set]) ([set2 (in-list sets)])
       (set-union set set2))]))
 
@@ -128,7 +168,7 @@
    [(set . sets)
     (for ([s (in-list (cons set sets))]
           [i (in-naturals)])
-      (unless (set? s) (apply raise-type-error 'set-intersect "set" i sets)))
+      (unless (set? s) (apply raise-type-error 'set-intersect "set" i (cons set sets))))
     (for/fold ([set set]) ([set2 (in-list sets)])
       (set-intersect set set2))]))
 
@@ -160,7 +200,7 @@
    [(set . sets)
     (for ([s (in-list (cons set sets))]
           [i (in-naturals)])
-      (unless (set? s) (apply raise-type-error 'set-subtract "set" i sets)))
+      (unless (set? s) (apply raise-type-error 'set-subtract "set" i (cons s sets))))
     (for/fold ([set set]) ([set2 (in-list sets)])
       (set-subtract set set2))]))
 

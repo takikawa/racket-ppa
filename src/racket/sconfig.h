@@ -88,6 +88,8 @@
 /* Solaris */
 #  if  defined(i386)
 #   define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-solaris"
+#  elif defined(__x86_64)
+#   define SCHEME_PLATFORM_LIBRARY_SUBPATH "x86_64-solaris"
 #  else
 #   define SCHEME_PLATFORM_LIBRARY_SUBPATH "sparc-solaris"
 #  endif
@@ -108,16 +110,17 @@
 # define USE_ON_EXIT_FOR_ATEXIT
 # endif
 
-#define FMOD_CAN_RETURN_POS_ZERO
+# define FMOD_CAN_RETURN_POS_ZERO
 
-# ifndef i386
+# ifdef i386
+#  define MZ_USE_JIT_I386
+#  define MZ_JIT_USE_MPROTECT
+# elif defined(__x86_64)
+#  define MZ_USE_JIT_X86_64
+#  define MZ_JIT_USE_MPROTECT
+# else
 #  define FLUSH_SPARC_REGISTER_WINDOWS
 # endif
-
-#ifdef i386
-# define MZ_USE_JIT_I386
-# define MZ_JIT_USE_MPROTECT
-#endif
 
 # define FLAGS_ALREADY_SET
 
@@ -387,10 +390,6 @@
 # define USE_FCNTL_O_NONBLOCK
 
 # define USE_TIMEZONE_AND_ALTZONE_VAR
-
-# ifdef _ABIN32
-#  define USE_LONG_LONG_FOR_BIGDIG
-# endif
 
 # define FLAGS_ALREADY_SET
 
@@ -1348,7 +1347,7 @@
 
  /* MZ_USE_JIT_I386 enables the JIT for x86 */
 
- /* MZ_USE_JIT_X86_65 enables the JIT for x86_64 */
+ /* MZ_USE_JIT_X86_64 enables the JIT for x86_64 */
 
  /* MZ_USE_JIT_PPC enables the JIT for PowerPC */
 

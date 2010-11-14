@@ -134,9 +134,9 @@ positions are initialized with the given @scheme[b]s.
              (bytes-copy! s 0 s 3 4)
              s]}
 
-@defproc[(bytes-fill! [dest (and/c bytes? (not/c immutable?))] [char
- char?]) void?]{ Changes @scheme[dest] so that every position in the
- bytes is filled with @scheme[char].
+@defproc[(bytes-fill! [dest (and/c bytes? (not/c immutable?))] [b
+ byte?]) void?]{ Changes @scheme[dest] so that every position in the
+ bytes is filled with @scheme[b].
 
 @mz-examples[(define s (bytes 65 112 112 108 101))
              (bytes-fill! s 113)
@@ -170,6 +170,23 @@ string.
  the result bytes.
 
 @mz-examples[(list->bytes (list 65 112 112 108 101))]}
+
+@defproc[(make-shared-bytes [k exact-nonnegative-integer?] [b byte? 0])
+bytes?]{ Returns a new mutable byte string of length @scheme[k] where each
+position in the byte string is initialized with the byte @scheme[b].
+When @secref["places"] are enabled, the new byte string is allocated in the
+@tech{shared memory space}.
+
+@mz-examples[(make-shared-bytes 5 65)]}
+
+
+@defproc[(shared-bytes [b byte?] ...) bytes?]{ Returns a new mutable byte
+string whose length is the number of provided @scheme[b]s, and whose
+positions are initialized with the given @scheme[b]s.
+When @secref["places"] are enabled, the new byte string is allocated in the
+@tech{shared memory space}.
+
+@mz-examples[(shared-bytes 65 112 112 108 101)]}
 
 
 @; ----------------------------------------
