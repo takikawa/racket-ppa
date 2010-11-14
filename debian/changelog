@@ -1,6 +1,7 @@
 plt-scheme (5.0-1) unstable; urgency=low
 
   * New Upsteam version
+  * Update watch file with new upstream URL.
 
  -- David Bremner <bremner@unb.ca>  Sun, 13 Jun 2010 12:39:06 -0300
 
