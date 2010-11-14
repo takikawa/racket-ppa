@@ -6,7 +6,6 @@
          "checked-cell.ss"
          "stop.ss"
          "universe-image.ss"
-         "utilities.rkt"
          htdp/error
          mzlib/runtime-path
          mrlib/bitmap-label

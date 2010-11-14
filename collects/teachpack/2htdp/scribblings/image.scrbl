@@ -1234,10 +1234,6 @@ Using @racket["pinhole"] or @racket['pinhole] is only allowed when all of the im
   Determines if @racket[x] is an integer greater than or equal to @racket[1].                                           
 }
 
-@defproc[(step-count? [x any/c]) boolean?]{
-  Determines if @racket[x] is an integer greater than or equal to @racket[1].                                           
-}
-
 @defstruct[pen ([color image-color?]
                 [width (and/c real? (<=/c 0 255))]
                 [style pen-style?]

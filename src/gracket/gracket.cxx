@@ -2299,7 +2299,6 @@ static void MrEdSchemeMessages(char *msg, ...)
       SetConsoleCtrlHandler(ConsoleHandler, TRUE);
 
 
-
       {
 	HMODULE hm;
 	gcw_proc gcw;

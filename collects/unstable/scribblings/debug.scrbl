@@ -91,13 +91,3 @@ expressions in @scheme[begin], @scheme[define], @scheme[define/private],
 @scheme[with-syntax*], and @scheme[parameterize].
 
 }
-
-@defform*[[(debugm f args ...)]]{
-Produce debugging output for the application of @racket[f], but does
-not parse or print args.  Suitable for use debugging macros.
-@examples[#:eval the-eval
-(debugm match (list 1 2 3)
-  [(list x y z) (+ x y z)])
-(debugm + 1 2 3)
-]
-}
