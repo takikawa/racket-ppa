@@ -53,6 +53,7 @@ READ_ONLY static Scheme_Object *unshadowable_symbol;
 READ_ONLY static Scheme_Env    *kernel_env;
 READ_ONLY static Scheme_Env    *unsafe_env;
 READ_ONLY static Scheme_Env    *flfxnum_env;
+READ_ONLY static Scheme_Env    *futures_env;
 
 #define MAX_CONST_LOCAL_POS 64
 #define MAX_CONST_LOCAL_TYPES 2
@@ -166,6 +167,7 @@ typedef struct Compile_Data {
   int *sealed; /* NULL => already sealed */
   int *use;
   Scheme_Object *lifts;
+  int min_use, any_use;
 } Compile_Data;
 
 typedef struct Scheme_Full_Comp_Env {
@@ -187,19 +189,6 @@ static void init_compile_data(Scheme_Comp_Env *env);
 /*                             initialization                             */
 /*========================================================================*/
 
-
-#ifdef DONT_USE_FOREIGN
-static void init_dummy_foreign(Scheme_Env *env)
-{
-  /* Works just well enough that the `mzscheme' module can 
-     import it (so that attaching `mzscheme' to a namespace 
-     also attaches `#%foreign'). */
-  Scheme_Env *menv;
-  menv = scheme_primitive_module(scheme_intern_symbol("#%foreign"), env);
-  scheme_finish_primitive_module(menv);
-  scheme_protect_primitive_provide(menv, NULL);
-}
-#endif
 
 static void boot_module_resolver()
 {
@@ -323,15 +312,17 @@ Scheme_Env *scheme_engine_instance_init() {
 #endif
 
   scheme_starting_up = 1;
- 
+
   scheme_init_portable_case();
   init_scheme_local();
   init_toplevels();
 
+  scheme_init_process_globals();
+
   scheme_init_true_false();
 
 #ifdef MZ_PRECISE_GC
-  scheme_register_traversers();
+  /* scheme_register_traversers(); --- already done in scheme_set_stack_base() */
   register_traversers();
   scheme_init_hash_key_procs();
 #endif
@@ -355,24 +346,26 @@ Scheme_Env *scheme_engine_instance_init() {
 #ifndef DONT_USE_FOREIGN
   scheme_init_foreign_globals();
 #endif
-  scheme_init_salloc();
   make_kernel_env();
 
-#if defined(MZ_PRECISE_GC) && defined(MZ_USE_PLACES)
-  scheme_places_block_child_signal();
+#if defined(MZ_PLACES_WAITPID)
+  scheme_places_start_child_signal_handler();
+#endif
 
+#if defined(MZ_PRECISE_GC) && defined(MZ_USE_PLACES)
   GC_switch_out_master_gc();
+
   scheme_spawn_master_place();
 #endif
   
   env = place_instance_init(stack_base, 1);
 
 #if defined(MZ_PRECISE_GC) && defined(MZ_USE_PLACES)
-{
-  void *signal_fd;
-  signal_fd = scheme_get_signal_handle();
-  GC_set_put_external_event_fd(signal_fd);
-}
+  {
+    void *signal_fd;
+    signal_fd = scheme_get_signal_handle();
+    GC_set_put_external_event_fd(signal_fd);
+  }
 #endif
 
   return env;
@@ -431,12 +424,39 @@ static void init_flfxnum(Scheme_Env *env)
 #endif
 }
 
+static void init_futures(Scheme_Env *env)
+{
+  Scheme_Module_Phase_Exports *pt;
+  REGISTER_SO(futures_env);
+
+  futures_env = scheme_primitive_module(scheme_intern_symbol("#%futures"), env);
+
+  scheme_init_futures(futures_env);
+
+  scheme_finish_primitive_module(futures_env);
+  pt = futures_env->module->me->rt;
+  scheme_populate_pt_ht(pt);
+  scheme_protect_primitive_provide(futures_env, NULL);
+
+#if USE_COMPILED_STARTUP
+  if (builtin_ref_counter != (EXPECTED_PRIM_COUNT + EXPECTED_UNSAFE_COUNT + EXPECTED_FLFXNUM_COUNT + EXPECTED_FUTURES_COUNT)) {
+    printf("Futures count %d doesn't match expected count %d\n",
+	   builtin_ref_counter - EXPECTED_PRIM_COUNT - EXPECTED_UNSAFE_COUNT - EXPECTED_FLFXNUM_COUNT, EXPECTED_FUTURES_COUNT);
+    abort();
+  }
+#endif
+}
+
 Scheme_Env *scheme_get_unsafe_env() {
   return unsafe_env;
 }
 
 Scheme_Env *scheme_get_flfxnum_env() {
   return flfxnum_env;
+}
+
+Scheme_Env *scheme_get_futures_env() {
+  return futures_env;
 }
 
 
@@ -455,14 +475,20 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
   scheme_init_stack_check();
   scheme_init_overflow();
 
-  init_toplevel_local_offsets_hashtable_caches();
+  scheme_init_thread_lwc();
 
+  init_toplevel_local_offsets_hashtable_caches();
 
 #ifdef TIME_STARTUP_PROCESS
   printf("pre-process @ %ld\n", scheme_get_process_milliseconds());
 #endif
 
   scheme_make_thread(stack_base);
+
+#if defined(MZ_PRECISE_GC) && defined(MZ_USE_PLACES)
+  /* each place now has a local symbol table */
+  scheme_init_place_local_symbol_table();
+#endif
 
   {
     Scheme_Object *sym;
@@ -474,10 +500,6 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
 
 #ifdef TIME_STARTUP_PROCESS
   printf("process @ %ld\n", scheme_get_process_milliseconds());
-#endif
-
-#ifdef MZ_USE_JIT
-  scheme_init_jit();
 #endif
 
   /* error handling and buffers */
@@ -497,7 +519,9 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
   scheme_init_gmp_places();
   scheme_alloc_global_fdset();
   scheme_init_file_places();
+#ifndef DONT_USE_FOREIGN
   scheme_init_foreign_places();
+#endif
 
   env = scheme_make_empty_env();
   scheme_set_param(scheme_current_config(), MZCONFIG_ENV, (Scheme_Object *)env); 
@@ -524,13 +548,9 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
 #if defined(MZ_USE_PLACES)
   scheme_jit_fill_threadlocal_table();
 #endif
-  scheme_init_futures(env);
+  scheme_init_futures_per_place();
 
-#ifndef DONT_USE_FOREIGN
   scheme_init_foreign(env);
-#else
-  init_dummy_foreign(env);
-#endif
 
   scheme_add_embedded_builtins(env);
 
@@ -737,6 +757,7 @@ static void make_kernel_env(void)
 
   init_unsafe(env);
   init_flfxnum(env);
+  init_futures(env);
   
   scheme_init_print_global_constants();
   scheme_init_variable_references_constants();
@@ -873,6 +894,7 @@ Scheme_Env *make_empty_inited_env(int toplevel_size)
   Scheme_Env *env;
   Scheme_Object *vector;
   Scheme_Hash_Table* hash_table;
+  Scheme_Module_Registry *reg;
 
   env = make_env(NULL, toplevel_size);
 
@@ -881,12 +903,15 @@ Scheme_Env *make_empty_inited_env(int toplevel_size)
   SCHEME_VEC_ELS(vector)[0] = (Scheme_Object *)hash_table;
   env->modchain = vector;
 
-  hash_table = scheme_make_hash_table(SCHEME_hash_ptr);
-  env->module_registry = hash_table;
-  env->module_registry->iso.so.type = scheme_module_registry_type;
+  reg = MALLOC_ONE_TAGGED(Scheme_Module_Registry);
+  reg->so.type = scheme_module_registry_type;
+  env->module_registry = reg;
 
   hash_table = scheme_make_hash_table(SCHEME_hash_ptr);
-  env->export_registry = hash_table;
+  reg->loaded = hash_table;
+  hash_table = scheme_make_hash_table(SCHEME_hash_ptr);
+  reg->exports = hash_table;
+
   env->label_env = NULL;
 
   return env;
@@ -919,12 +944,10 @@ static Scheme_Env *make_env(Scheme_Env *base, int toplevel_size)
   if (base) {
     env->modchain = base->modchain;
     env->module_registry = base->module_registry;
-    env->export_registry = base->export_registry;
     env->label_env = base->label_env;
   } else {
     env->modchain = NULL;
     env->module_registry = NULL;
-    env->export_registry = NULL;
     env->label_env = NULL;
   }
 
@@ -976,7 +999,6 @@ void scheme_prepare_exp_env(Scheme_Env *env)
 
     eenv->module = env->module;
     eenv->module_registry = env->module_registry;
-    eenv->export_registry = env->export_registry;
     eenv->insp = env->insp;
 
     modchain = SCHEME_VEC_ELS(env->modchain)[1];
@@ -1017,7 +1039,6 @@ void scheme_prepare_template_env(Scheme_Env *env)
 
     eenv->module = env->module;
     eenv->module_registry = env->module_registry;
-    eenv->export_registry = env->export_registry;
     eenv->insp = env->insp;
 
     modchain = SCHEME_VEC_ELS(env->modchain)[2];
@@ -1057,7 +1078,6 @@ void scheme_prepare_label_env(Scheme_Env *env)
 
     lenv->module = env->module;
     lenv->module_registry = env->module_registry;
-    lenv->export_registry = env->export_registry;
     lenv->insp = env->insp;
 
     modchain = scheme_make_vector(5, scheme_false);    
@@ -1089,7 +1109,6 @@ Scheme_Env *scheme_copy_module_env(Scheme_Env *menv, Scheme_Env *ns, Scheme_Obje
 
   menv2->module = menv->module;
   menv2->module_registry = ns->module_registry;
-  menv2->export_registry = ns->export_registry;
   menv2->insp = menv->insp;
 
   if (menv->phase < clone_phase)
@@ -1390,13 +1409,15 @@ Scheme_Object **scheme_make_builtin_references_table(void)
   scheme_misc_count += sizeof(Scheme_Object *) * (builtin_ref_counter + 1);
 #endif
 
-  for (j = 0; j < 3; j++) {
+  for (j = 0; j < 4; j++) {
     if (!j)
       kenv = kernel_env;
     else if (j == 1)
       kenv = unsafe_env;
-    else
+    else if (j == 2)
       kenv = flfxnum_env;
+    else
+      kenv = futures_env;
     
     ht = kenv->toplevel;
     
@@ -1423,13 +1444,15 @@ Scheme_Hash_Table *scheme_map_constants_to_globals(void)
 
   result = scheme_make_hash_table(SCHEME_hash_ptr);
       
-  for (j = 0; j < 3; j++) {
+  for (j = 0; j < 4; j++) {
     if (!j)
       kenv = kernel_env;
     else if (j == 1)
       kenv = unsafe_env;
-    else
+    else if (j == 2)
       kenv = flfxnum_env;
+    else
+      kenv = futures_env;
     
     ht = kenv->toplevel;
     bs = ht->buckets;
@@ -1453,13 +1476,15 @@ const char *scheme_look_for_primitive(void *code)
   long i;
   int j;
 
-  for (j = 0; j < 3; j++) {
+  for (j = 0; j < 4; j++) {
     if (!j)
       kenv = kernel_env;
     else if (j == 1)
       kenv = unsafe_env;
-    else
+    else if (j == 2)
       kenv = flfxnum_env;
+    else
+      kenv = futures_env;
     
     ht = kenv->toplevel;
     bs = ht->buckets;
@@ -1499,6 +1524,8 @@ static void init_compile_data(Scheme_Comp_Env *env)
   for (i = 0; i < c; i++) {
     use[i] = 0;
   }
+
+  data->min_use = c;
 }
 
 Scheme_Comp_Env *scheme_new_compilation_frame(int num_bindings, int flags,
@@ -2014,6 +2041,9 @@ static Scheme_Local *get_frame_loc(Scheme_Comp_Env *frame,
   u |= (cnt << SCHEME_USE_COUNT_SHIFT);
   
   COMPILE_DATA(frame)->use[i] = u;
+  if (i < COMPILE_DATA(frame)->min_use)
+    COMPILE_DATA(frame)->min_use = i;
+  COMPILE_DATA(frame)->any_use = 1;
 
   return (Scheme_Local *)scheme_make_local(scheme_local_type, p + i, 0);
 }
@@ -3073,7 +3103,8 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
   if (modname && !(flags & SCHEME_RESOLVE_MODIDS) 
       && (!(scheme_is_kernel_modname(modname) 
             || scheme_is_unsafe_modname(modname)
-            || scheme_is_flfxnum_modname(modname))
+            || scheme_is_flfxnum_modname(modname)
+            || scheme_is_futures_modname(modname))
           || (flags & SCHEME_REFERENCING))) {
     /* Create a module variable reference, so that idx is preserved: */
     return scheme_hash_module_variable(env->genv, modidx, find_id, 
@@ -3137,6 +3168,30 @@ Scheme_Object *scheme_extract_flfxnum(Scheme_Object *o)
     return (Scheme_Object *)((Scheme_Bucket *)o)->val;
   else
     return NULL;
+}
+
+Scheme_Object *scheme_extract_futures(Scheme_Object *o)
+{
+  Scheme_Env *home = ((Scheme_Bucket_With_Home *)o)->home;
+  if (home && home->module && scheme_is_futures_modname(home->module->modname))
+    return (Scheme_Object *)((Scheme_Bucket *)o)->val;
+  else
+    return NULL;
+}
+
+int scheme_env_check_reset_any_use(Scheme_Comp_Env *frame)
+{
+  int any_use;
+
+  any_use = COMPILE_DATA(frame)->any_use;
+  COMPILE_DATA(frame)->any_use = 0;
+
+  return any_use;
+}
+
+int scheme_env_min_use_below(Scheme_Comp_Env *frame, int pos)
+{
+  return COMPILE_DATA(frame)->min_use < pos;
 }
 
 int *scheme_env_get_flags(Scheme_Comp_Env *frame, int start, int count)
@@ -3257,7 +3312,10 @@ static void register_stat_dist(Optimize_Info *info, int i, int j)
       info->sd_depths[k] = 0;
     }
   }
-  
+
+  if (i >= info->new_frame)
+    scheme_signal_error("internal error: bad stat-dist index");
+
   if (info->sd_depths[i] <= j) {
     char *naya, *a;
     int k;
@@ -3501,7 +3559,7 @@ Scheme_Object *scheme_optimize_reverse(Optimize_Info *info, int pos, int unless_
   while (1) {
     if (pos < info->new_frame)
       break;
-    pos -= info->new_frame;
+    pos -= info->new_frame;    
     delta += info->original_frame;
     info = info->next;
   }
@@ -3591,7 +3649,8 @@ int scheme_optimize_any_uses(Optimize_Info *info, int start_pos, int end_pos)
 }
 
 static Scheme_Object *do_optimize_info_lookup(Optimize_Info *info, int pos, int j, int *closure_offset, int *single_use, 
-                                              int *not_ready, int once_used_ok, int context, int *potential_size)
+                                              int *not_ready, int once_used_ok, int context, int *potential_size,
+                                              int disrupt_single_use)
 {
   Scheme_Object *p, *n;
   int delta = 0;
@@ -3614,6 +3673,8 @@ static Scheme_Object *do_optimize_info_lookup(Optimize_Info *info, int pos, int 
     n = SCHEME_VEC_ELS(p)[1];
     if (SCHEME_INT_VAL(n) == pos) {
       n = SCHEME_VEC_ELS(p)[2];
+      if (info->flags & SCHEME_POST_BIND_FRAME)
+        delta += info->new_frame;          
       if (SCHEME_RPAIRP(n)) {
         /* This was a letrec-bound identifier that may or may not be ready,
            but which wasn't replaced with more information. */
@@ -3632,9 +3693,8 @@ static Scheme_Object *do_optimize_info_lookup(Optimize_Info *info, int pos, int 
       if (SAME_TYPE(SCHEME_TYPE(n), scheme_compiled_unclosed_procedure_type)) {
 	if (!closure_offset)
 	  break;
-	else {
-	  *closure_offset = delta;
-	}
+	else
+          *closure_offset = delta;
       } else if (SAME_TYPE(SCHEME_TYPE(n), scheme_compiled_toplevel_type)) {
         /* Ok */
       } else if (closure_offset) {
@@ -3643,10 +3703,17 @@ static Scheme_Object *do_optimize_info_lookup(Optimize_Info *info, int pos, int 
       } else if (SAME_TYPE(SCHEME_TYPE(n), scheme_once_used_type)) {
         Scheme_Once_Used *o;
 
+        if (disrupt_single_use) {
+          ((Scheme_Once_Used *)n)->expr = NULL;
+          ((Scheme_Once_Used *)n)->vclock = -1;
+        }
+
         if (!once_used_ok)
           break;
 
         o = (Scheme_Once_Used *)n;
+        if (!o->expr) break; /* disrupted or not available */
+
         o->delta = delta;
         o->info = info;
         return (Scheme_Object *)o;
@@ -3656,7 +3723,9 @@ static Scheme_Object *do_optimize_info_lookup(Optimize_Info *info, int pos, int 
 	pos = SCHEME_LOCAL_POS(n);
 	if (info->flags & SCHEME_LAMBDA_FRAME)
 	  j--; /* because it will get re-added on recur */
-
+        else if (info->flags & SCHEME_POST_BIND_FRAME)
+          info = info->next; /* bindings are relative to next frame */
+        
 	/* Marks local as used; we don't expect to get back
 	   a value, because chaining would normally happen on the 
 	   propagate-call side. Chaining there also means that we 
@@ -3665,13 +3734,24 @@ static Scheme_Object *do_optimize_info_lookup(Optimize_Info *info, int pos, int 
           if (!*single_use)
             single_use = NULL;
         }
-	n = do_optimize_info_lookup(info, pos, j, NULL, single_use, NULL, 0, context, potential_size);
+
+        /* If the referenced variable is not single-use, then
+           the variable it is replaced by is no longer single-use */
+        disrupt_single_use = !SCHEME_TRUEP(SCHEME_VEC_ELS(p)[3]);
+
+	n = do_optimize_info_lookup(info, pos, j, NULL, single_use, NULL,
+                                    once_used_ok && !disrupt_single_use, context, 
+                                    potential_size, disrupt_single_use);
 
 	if (!n) {
 	  /* Return shifted reference to other local: */
 	  delta += scheme_optimize_info_get_shift(info, pos);
 	  n = scheme_make_local(scheme_local_type, pos + delta, 0);
-	}
+	} else if (SAME_TYPE(SCHEME_TYPE(n), scheme_once_used_type)) {
+          /* Need to adjust delta: */
+          delta = scheme_optimize_info_get_shift(info, pos);
+          ((Scheme_Once_Used *)n)->delta += delta;
+        }
       }
       return n;
     }
@@ -3687,14 +3767,14 @@ static Scheme_Object *do_optimize_info_lookup(Optimize_Info *info, int pos, int 
 Scheme_Object *scheme_optimize_info_lookup(Optimize_Info *info, int pos, int *closure_offset, int *single_use, 
                                            int once_used_ok, int context, int *potential_size)
 {
-  return do_optimize_info_lookup(info, pos, 0, closure_offset, single_use, NULL, once_used_ok, context, potential_size);
+  return do_optimize_info_lookup(info, pos, 0, closure_offset, single_use, NULL, once_used_ok, context, potential_size, 0);
 }
 
 int scheme_optimize_info_is_ready(Optimize_Info *info, int pos)
 {
   int closure_offset, single_use, ready = 1;
   
-  do_optimize_info_lookup(info, pos, 0, &closure_offset, &single_use, &ready, 0, 0, NULL);
+  do_optimize_info_lookup(info, pos, 0, &closure_offset, &single_use, &ready, 0, 0, NULL, 0);
 
   return ready;
 }
@@ -4045,8 +4125,12 @@ static int resolve_info_lookup(Resolve_Info *info, int pos, int *flags, Scheme_O
           *_lifted = lifted;
            
            return 0;
-        } else
-          return info->new_pos[i] + offset;
+        } else {
+          pos = info->new_pos[i];
+          if (pos < 0)
+            scheme_signal_error("internal error: skipped binding is used");
+          return pos + offset;
+        }
       }
     }
 
@@ -4449,7 +4533,7 @@ namespace_mapped_symbols(int argc, Scheme_Object *argv[])
   }
 
   if (env->rename_set)
-    scheme_list_module_rename(env->rename_set, mapped, env->export_registry);
+    scheme_list_module_rename(env->rename_set, mapped, env->module_registry->exports);
 
   l = scheme_null;
   for (i = mapped->size; i--; ) {
@@ -4578,7 +4662,7 @@ now_transforming(int argc, Scheme_Object *argv[])
 static Scheme_Object *
 do_local_exp_time_value(const char *name, int argc, Scheme_Object *argv[], int recur)
 {
-  Scheme_Object *v, *sym, *a[2];
+  Scheme_Object *v, *sym, *a[2], *observer;
   Scheme_Env *menv;
   Scheme_Comp_Env *env;
   int renamed = 0;
@@ -4590,6 +4674,9 @@ do_local_exp_time_value(const char *name, int argc, Scheme_Object *argv[], int r
                      name);
 
   sym = argv[0];
+
+  observer = scheme_get_expand_observe();
+  SCHEME_EXPAND_OBSERVE_LOCAL_VALUE(observer, sym);
 
   if (!(SCHEME_STXP(sym) && SCHEME_SYMBOLP(SCHEME_STX_VAL(sym))))
     scheme_wrong_type(name, "syntax identifier", 0, argc, argv);
@@ -4627,12 +4714,15 @@ do_local_exp_time_value(const char *name, int argc, Scheme_Object *argv[], int r
 			      scheme_current_thread->current_local_certs, 
 			      scheme_current_thread->current_local_modidx, 
 			      &menv, NULL, NULL);
-    
+
+    SCHEME_EXPAND_OBSERVE_RESOLVE(observer, sym);
+
     /* Deref globals */
     if (v && SAME_TYPE(SCHEME_TYPE(v), scheme_variable_type))
       v = (Scheme_Object *)(SCHEME_VAR_BUCKET(v))->val;
     
     if (!v || NOT_SAME_TYPE(SCHEME_TYPE(v), scheme_macro_type)) {
+      SCHEME_EXPAND_OBSERVE_LOCAL_VALUE_RESULT(observer, scheme_false);
       if ((argc > 1) && SCHEME_TRUEP(argv[1]))
 	return _scheme_tail_apply(argv[1], 0, NULL);
       else
@@ -4646,21 +4736,26 @@ do_local_exp_time_value(const char *name, int argc, Scheme_Object *argv[], int r
     v = SCHEME_PTR_VAL(v);
     if (scheme_is_rename_transformer(v)) {
       sym = scheme_rename_transformer_id(v);
-      sym = scheme_stx_cert(sym, scheme_false, menv, sym, NULL, 1);
+      sym = scheme_transfer_srcloc(scheme_stx_cert(sym, scheme_false, menv, sym, NULL, 1),
+                                   v);
       renamed = 1;
       menv = NULL;
       SCHEME_USE_FUEL(1);
       if (!recur) {
+        SCHEME_EXPAND_OBSERVE_LOCAL_VALUE_RESULT(observer, scheme_true);
         a[0] = v;
         a[1] = sym;
         return scheme_values(2, a);
       }
     } else if (!recur) {
+      SCHEME_EXPAND_OBSERVE_LOCAL_VALUE_RESULT(observer, scheme_true);
       a[0] = v;
       a[1] = scheme_false;
       return scheme_values(2, a);
-    } else
+    } else {
+      SCHEME_EXPAND_OBSERVE_LOCAL_VALUE_RESULT(observer, scheme_true);
       return v;
+    }
   }
 }
 

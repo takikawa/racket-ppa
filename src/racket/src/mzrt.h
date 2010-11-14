@@ -27,12 +27,14 @@ void mzrt_set_user_break_handler(void (*user_break_handler)(int));
 # include <winsock2.h>
 typedef HANDLE mzrt_thread_id;
 #else
+#include <pthread.h>
 typedef pthread_t mzrt_thread_id;
 #endif
 
 
 typedef struct mz_proc_thread {
   mzrt_thread_id threadid;
+  int refcount;
   struct pt_mbox *mbox;
 } mz_proc_thread;
 

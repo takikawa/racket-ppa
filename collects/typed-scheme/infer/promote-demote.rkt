@@ -4,7 +4,7 @@
 (require (rep type-rep rep-utils)
 	 (types convenience union utils)
          "signatures.rkt"
-         scheme/list scheme/match)
+         scheme/list racket/match)
 
 (import)
 (export promote-demote^)
@@ -25,6 +25,7 @@
              [#:F name (if (memq name V) Univ T)]
              [#:Vector t (make-Vector (inv t))]
              [#:Box t (make-Box (inv t))]
+             [#:Channel t (make-Channel (inv t))]
              [#:Hashtable k v
                           (if (V-in? V v)
                               Univ
@@ -58,6 +59,7 @@
              [#:F name (if (memq name V) (Un) T)]
              [#:Vector t (make-Vector (inv t))]
              [#:Box t (make-Box (inv t))]
+             [#:Channel t (make-Channel (inv t))]
              [#:Hashtable k v
                           (if (V-in? V v)
                               (Un)

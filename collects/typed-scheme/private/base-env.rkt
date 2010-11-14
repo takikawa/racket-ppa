@@ -1,20 +1,31 @@
 #lang s-exp "env-lang.rkt"
 
 (require
- scheme/tcp
- scheme
- scheme/unsafe/ops
- scheme/fixnum
- (only-in rnrs/lists-6 fold-left)
- '#%paramz
- "extra-procs.rkt"
- (only-in '#%kernel [apply kernel:apply])
- scheme/promise scheme/system
- (only-in string-constants/private/only-once maybe-print-message)
- (only-in mzscheme make-namespace)
- (only-in racket/match/runtime match:error matchable? match-equality-test)
- (for-syntax (only-in (types abbrev) [-Number N] [-Boolean B] [-Symbol Sym])
-             (only-in (rep type-rep) make-HashtableTop make-MPairTop make-BoxTop make-VectorTop)))
+ 
+ 
+ (for-template 
+  (except-in racket -> ->* one-of/c)
+  racket/unsafe/ops
+  racket/tcp
+  racket/fixnum
+  racket/future
+  (only-in rnrs/lists-6 fold-left)
+  '#%paramz
+  "extra-procs.rkt"
+  (only-in '#%kernel [apply kernel:apply])
+  (only-in racket/private/pre-base new-apply-proc) 
+  scheme/promise scheme/system
+  racket/function
+  racket/mpair
+  racket/base
+  (only-in string-constants/private/only-once maybe-print-message)
+  (only-in mzscheme make-namespace)
+  (only-in racket/match/runtime match:error matchable? match-equality-test))
+ (only-in racket/private/pre-base new-apply-proc)
+ (only-in (types abbrev) [-Number N] [-Boolean B] [-Symbol Sym])
+ (only-in (rep type-rep) make-HashtableTop make-MPairTop
+          make-BoxTop make-ChannelTop make-VectorTop
+          make-HeterogenousVector))
 
 [raise (Univ . -> . (Un))]
 [raise-syntax-error (cl->* 
@@ -178,6 +189,7 @@
 [gensym (->opt [Sym] Sym)]
 [string-append (->* null -String -String)]
 [open-input-string (-> -String -Input-Port)]
+[open-input-bytes (-> -Bytes -Input-Port)]
 [open-output-file
  (->key -Pathlike
         #:mode (one-of/c 'binary 'text) #f
@@ -186,7 +198,7 @@
                            'must-truncate 'truncate/replace)
         #f
         -Output-Port)]
-[read (->opt [-Input-Port] -Sexp)]
+[read (->opt [-Input-Port] Univ)]
 [ormap (-polydots (a c b) (->... (list (->... (list a) (b b) c) (-lst a)) ((-lst b) b) c))]
 [andmap (-polydots (a c d b) (cl->*
                               ;; 1 means predicate on second argument
@@ -195,20 +207,34 @@
 [newline (->opt [-Output-Port] -Void)]
 [not (-> Univ B)]
 [box (-poly (a) (a . -> . (-box a)))]
-[unbox (-poly (a) (cl->*                   
+[unbox (-poly (a) (cl->*
                    ((-box a) . -> . a)
                    ((make-BoxTop) . -> . Univ)))]
 [set-box! (-poly (a) ((-box a) a . -> . -Void))]
+[unsafe-unbox (-poly (a) (cl->*
+                          ((-box a) . -> . a)
+                          ((make-BoxTop) . -> . Univ)))]
+[unsafe-set-box! (-poly (a) ((-box a) a . -> . -Void))]
+[unsafe-unbox* (-poly (a) (cl->*
+                           ((-box a) . -> . a)
+                           ((make-BoxTop) . -> . Univ)))]
+[unsafe-set-box*! (-poly (a) ((-box a) a . -> . -Void))]
 [box? (make-pred-ty (make-BoxTop))]
 [cons? (make-pred-ty (-pair Univ Univ))]
 [pair? (make-pred-ty (-pair Univ Univ))]
 [empty? (make-pred-ty (-val null))]
 [empty (-val null)]
 
+[make-channel (-poly (a) (-> (-channel a)))]
+[channel? (make-pred-ty (make-ChannelTop))]
+[channel-get (-poly (a) ((-channel a) . -> . a))]
+[channel-try-get (-poly (a) ((-channel a) . -> . (Un a (-val #f))))]
+[channel-put (-poly (a) ((-channel a) a . -> . -Void))]
+
 [string? (make-pred-ty -String)]
 [string (->* '() -Char -String)]
-[string-length (-String . -> . -Nat)]
-[unsafe-string-length (-String . -> . -Nat)]
+[string-length (-String . -> . -NonnegativeFixnum)]
+[unsafe-string-length (-String . -> . -NonnegativeFixnum)]
 
 [symbol? (make-pred-ty Sym)]
 [keyword? (make-pred-ty -Keyword)]
@@ -264,19 +290,38 @@
 [match-equality-test (-Param (Univ Univ . -> . Univ) (Univ Univ . -> . Univ))]
 [matchable? (make-pred-ty (Un -String -Bytes))]
 [display (Univ [-Output-Port] . ->opt . -Void)]
+[displayln (Univ [-Output-Port] . ->opt . -Void)]
 [write   (Univ [-Output-Port] . ->opt . -Void)]
 [print   (Univ [-Output-Port] . ->opt . -Void)]
 [void (->* '() Univ -Void)]
 [void? (make-pred-ty -Void)]
 [printf (->* (list -String) Univ -Void)]
+[eprintf (->* (list -String) Univ -Void)]
 [fprintf (->* (list -Output-Port -String) Univ -Void)]
 [format (->* (list -String) Univ -String)]
 
-[sleep (N . -> . -Void)]
+[thread (-> (-> Univ) -Thread)]
+[thread? (make-pred-ty -Thread)]
+[current-thread (-> -Thread)]
+[thread/suspend-to-kill (-> (-> Univ) -Thread)]
+[thread-suspend (-Thread . -> . -Void)]
+[kill-thread (-Thread . -> . -Void)]
+[break-thread (-Thread . -> . -Void)]
+[sleep ([N] . ->opt . -Void)]
+[thread-running? (-Thread . -> . B)]
+[thread-dead? (-Thread . -> . B)]
+[thread-wait (-Thread . -> . -Void)]
+[thread-send (-poly (a) (-Thread Univ [(-> a)] . ->opt . (Un -Void (-val #f) a)))]
+[thread-receive (-> Univ)]
+[thread-try-receive (-> Univ)]
+[thread-rewind-receive (-> (-lst Univ) -Void)]
+
+[future (-poly (A) ((-> A) . -> . (-future A)))]
+[touch (-poly (A) ((-future A) . -> . A))]
 
 [reverse (-poly (a) (-> (-lst a) (-lst a)))]
 [append (-poly (a) (->* (list) (-lst a) (-lst a)))]
-[length (-poly (a) (-> (-lst a) -Nat))]
+[length (-poly (a) (-> (-lst a) -NonnegativeFixnum))]
 [memq (-poly (a) (-> a (-lst a) (-opt (-lst a))))]
 [memv (-poly (a) (-> a (-lst a) (-opt (-lst a))))]
 [memf (-poly (a) ((a . -> . B) (-lst a) . -> . (-opt (-lst a))))]
@@ -299,6 +344,22 @@
 [string<=? (->* (list -String -String) -String B)]
 [string>=? (->* (list -String -String) -String B)]
 
+[char-alphabetic? (-> -Char B)]
+[char-lower-case? (-> -Char B)]
+[char-upper-case? (-> -Char B)]
+[char-title-case? (-> -Char B)]
+[char-numeric? (-> -Char B)]
+[char-symbolic? (-> -Char B)]
+[char-punctuation? (-> -Char B)]
+[char-graphic? (-> -Char B)]
+[char-whitespace? (-> -Char B)]
+[char-blank? (-> -Char B)]
+[char-iso-control? (-> -Char B)]
+[char-general-category (-> -Char (apply Un (map -val
+  '(lu ll lt lm lo mn mc me nd nl no ps pe pi pf pd
+    pc po sc sm sk so zs zp zl cc cf cs co cn))))]
+[make-known-char-range-list (-> (-lst (-Tuple (list -ExactPositiveInteger -ExactPositiveInteger B))))]
+
 [string-ci<? (->* (list -String -String) -String B)]
 [string-ci>? (->* (list -String -String) -String B)]
 [string-ci=? (->* (list -String -String) -String B)]
@@ -313,8 +374,9 @@
 [char-downcase (-> -Char -Char)]
 [char-titlecase (-> -Char -Char)]
 [char-foldcase (-> -Char -Char)]
-[char->integer (-> -Char -Nat)]
-[integer->char (-> -Nat -Char)]
+[char->integer (-> -Char -NonnegativeFixnum)]
+[integer->char (-> -Integer -Char)]
+[char-utf-8-length (-> -Char (apply Un (map -val '(1 2 3 4 5 6))))]
 
 [string-normalize-nfd (-> -String -String)]
 [string-normalize-nfkd (-> -String -String)]
@@ -324,7 +386,7 @@
 [string-copy (-> -String -String)]
 [string->immutable-string (-> -String -String)]
 [string->path (-> -String -Path)]
-[file-exists? (-> -Pathlike B)]
+
 
 [build-path ((list -Pathlike*) -Pathlike* . ->* . -Path)]
 [with-input-from-file
@@ -346,6 +408,7 @@
                      . -> . (-opt (-pair a b))))]
 
 [apply        (-poly (a b) (((list) a . ->* . b) (-lst a) . -> . b))]
+[new-apply-proc (-poly (a b) (((list) a . ->* . b) (-lst a) . -> . b))]
 [kernel:apply (-poly (a b) (((list) a . ->* . b) (-lst a) . -> . b))]
 [time-apply (-poly (a b c)
                    (cl->*
@@ -368,6 +431,11 @@
 [call-with-escape-continuation (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
 
 [struct->vector (Univ . -> . (-vec Univ))]
+[unsafe-struct-ref top-func]
+[unsafe-struct*-ref top-func]
+[unsafe-struct-set! top-func]
+[unsafe-struct*-set! top-func]
+
 ;; parameter stuff
 
 [parameterization-key Sym]
@@ -422,21 +490,6 @@
 
 [match:error ((list) Univ . ->* . (Un))]
 
-[arithmetic-shift (cl->* (-Nat -Nat . -> . -Nat)
-                         (-Integer -Integer . -> . -Integer))]
-[bitwise-and (cl->* (null -Nat . ->* . -Nat)
-                    (null -Integer . ->* . -Integer))]
-[bitwise-ior (cl->* (null -Nat . ->* . -Nat)
-                    (null -Integer . ->* . -Integer))]
-[bitwise-not (cl->* (null -Nat . ->* . -Nat)
-                    (null -Integer . ->* . -Integer))]
-[bitwise-xor (cl->* (null -Nat . ->* . -Nat)
-                    (null -Integer . ->* . -Integer))]
-
-[abs (cl->* (-Integer . -> . -Nat)
-            (-Real . -> . -Real))]
-
-[file-exists? (-Pathlike . -> . B)]
 [string->symbol (-String . -> . Sym)]
 [symbol->string (Sym . -> . -String)]
 [string->keyword (-String . -> . -Keyword)]
@@ -447,16 +500,16 @@
 
 [vector->list (-poly (a) (-> (-vec a) (-lst a)))]
 [list->vector (-poly (a) (-> (-lst a) (-vec a)))]
-[vector-length ((make-VectorTop) . -> . -Nat)]
+[vector-length ((make-VectorTop) . -> . -NonnegativeFixnum)]
 [vector (-poly (a) (->* (list) a (-vec a)))]
 [vector-immutable (-poly (a) (->* (list) a (-vec a)))]
 [vector->immutable-vector (-poly (a) (-> (-vec a) (-vec a)))]
 [vector-fill! (-poly (a) (-> (-vec a) a -Void))]
 [vector-argmax (-poly (a) (-> (-> a -Real) (-vec a) a))]
 [vector-argmin (-poly (a) (-> (-> a -Real) (-vec a) a))]
-[vector-memq (-poly (a) (-> a (-vec a) (-opt -Nat)))]
-[vector-memv (-poly (a) (-> a (-vec a) (-opt -Nat)))]
-[vector-member (-poly (a) (a (-vec a) . -> . (-opt -Nat)))]
+[vector-memq (-poly (a) (-> a (-vec a) (-opt -NonnegativeFixnum)))]
+[vector-memv (-poly (a) (-> a (-vec a) (-opt -NonnegativeFixnum)))]
+[vector-member (-poly (a) (a (-vec a) . -> . (-opt -NonnegativeFixnum)))]
 ;; [vector->values no good type here]
 
 
@@ -480,6 +533,16 @@
 [file-exists? (-> -Pathlike B)]
 [directory-list (cl-> [() (-lst -Path)]
                       [(-Path) (-lst -Path)])]
+[file-or-directory-modify-seconds
+ (cl->* (-Pathlike . -> . -Nat)
+        (-Pathlike (-val #f) . -> . -Nat)
+        (-Pathlike -Nat . -> . -Void)
+        (-Pathlike (-opt -Nat) (-> Univ) . -> . Univ))]
+
+[file-or-directory-permissions (-> -Pathlike (-lst (Un (-val 'read) (-val 'write) (-val 'execute))))]
+[file-or-directory-identity (->opt -Pathlike (Univ) -Nat)]
+[file-size (-> -Pathlike -Nat)]
+
 
 [hash? (make-pred-ty (make-HashtableTop))]
 [hash-eq? (-> (make-HashtableTop) B)]
@@ -502,7 +565,8 @@
                  (cl-> [((-HT a b) a) b]
                        [((-HT a b) a (-> c)) (Un b c)]))]
 [hash-ref! (-poly (a b)
-                  (cl-> [((-HT a b) a (-> b)) b]))]
+                  (cl-> [((-HT a b) a b) b]
+                        [((-HT a b) a (-> b)) b]))]
 [hash-has-key? (-poly (a b) (-> (-HT a b) a B))]
 [hash-update! (-poly (a b)
                      (cl-> [((-HT a b) a (-> b b)) -Void]
@@ -514,7 +578,7 @@
 [hash-remove! (-poly (a b) ((-HT a b) a . -> . -Void))]
 [hash-map (-poly (a b c) ((-HT a b) (a b . -> . c) . -> . (-lst c)))]
 [hash-for-each (-poly (a b c) (-> (-HT a b) (-> a b c) -Void))]
-[hash-count (-poly (a b) (-> (-HT a b) -Nat))]
+[hash-count (-poly (a b) (-> (-HT a b) -NonnegativeFixnum))]
 [hash-copy (-poly (a b) (-> (-HT a b) (-HT a b)))]
 [eq-hash-code (-poly (a) (-> a -Integer))]
 [eqv-hash-code (-poly (a) (-> a -Integer))]
@@ -528,25 +592,36 @@
                            ((-HT a b) -Integer . -> . a))]
 [hash-iterate-value (-poly (a b)
                            ((-HT a b) -Integer . -> . b))]
-#;[hash-table-index (-poly (a b) ((-HT a b) a b . -> . -Void))]
 
 [bytes (->* (list) -Integer -Bytes)]
-[bytes-ref (-> -Bytes -Integer -Integer)]
-[bytes-append (->* (list -Bytes) -Bytes -Bytes)]
-[subbytes (cl-> [(-Bytes -Integer) -Bytes] [(-Bytes -Integer -Integer) -Bytes])]
-[bytes-length (-> -Bytes -Nat)]
-[unsafe-bytes-length (-> -Bytes -Nat)]
+[bytes? (make-pred-ty -Bytes)]
+[make-bytes (cl-> [(-Integer -Integer) -Bytes]
+                  [(-Integer) -Bytes])]
+[bytes->immutable-bytes (-> -Bytes -Bytes)]
+[byte? (make-pred-ty -NonnegativeFixnum)]
+[bytes-append (->* (list) -Bytes -Bytes)]
+[bytes-length (-> -Bytes -NonnegativeFixnum)]
+[unsafe-bytes-length (-> -Bytes -NonnegativeFixnum)]
+[bytes-copy (-> -Bytes -Bytes)]
+[bytes->list (-> -Bytes (-lst -NonnegativeFixnum))]
+[list->bytes (-> (-lst -Integer) -Bytes)]
+[bytes<? (->* (list -Bytes) -Bytes B)]
+[bytes>? (->* (list -Bytes) -Bytes B)]
+[bytes=? (->* (list -Bytes) -Bytes B)]
 
-[read-bytes-line (->opt [-Input-Port Sym] -Bytes)]
+[read-bytes-line (->opt [-Input-Port Sym] (Un -Bytes (-val eof)))]
 [open-input-file (->key -Pathlike #:mode (Un (-val 'binary) (-val 'text)) #f -Input-Port)]
 [close-input-port (-> -Input-Port -Void)]
 [close-output-port (-> -Output-Port -Void)]
-[read-line  (->opt [-Input-Port Sym] -String)]
+[read-line  (->opt [-Input-Port Sym] (Un -String (-val eof)))]
 [copy-file (-> -Pathlike -Pathlike -Void)]
-[bytes->string/utf-8 (-> -Bytes -String)]
+[flush-output (->opt [-Output-Port] -Void)]
+[file-stream-buffer-mode (cl-> [(-Port) (Un (-val 'none) (-val 'line) (-val 'block) (-val #f))]
+                               [(-Port (Un (-val 'none) (-val 'line) (-val 'block))) -Void])]
+[file-position (cl-> [(-Port) -Nat]
+                     [(-Port -Integer) -Void])]
 
 [force (-poly (a) (-> (-Promise a) a))]
-[bytes<? (->* (list -Bytes) -Bytes B)]
 [regexp-replace*
  (cl->* (-Pattern -String -String . -> . -String)
 	(-Pattern (Un -Bytes -String) (Un -Bytes -String) . -> . -Bytes))]
@@ -560,11 +635,12 @@
 [open-output-bytes
  (cl->* [[Univ] . ->opt . -Output-Port])]
 [get-output-bytes (-Output-Port [Univ N N] . ->opt . -Bytes)]
-#;[exn:fail? (-> Univ B)]
-#;[exn:fail:read? (-> Univ B)]
+[char-ready? (->opt [-Input-Port] B)]
+[byte-ready? (->opt [-Input-Port] B)]
 
 [open-output-string (-> -Output-Port)]
-;; FIXME - wrong
+[open-output-bytes (-> -Output-Port)]
+;; FIXME - this is too general
 [get-output-string (-> -Output-Port -String)]
 
 [make-directory (-> -Path -Void)]
@@ -572,11 +648,15 @@
 [delete-file (-> -Pathlike -Void)]
 [make-namespace (->opt [(Un (-val 'empty) (-val 'initial))] -Namespace)]
 [make-base-namespace (-> -Namespace)]
-[eval (-> -Sexp Univ)]
+[eval (->opt Univ [-Namespace] Univ)]
 
 [exit (-> (Un))]
 
-[module->namespace (-> -Sexp -Namespace)]
+[collect-garbage (-> -Void)]
+[current-memory-use (-> -Nat)]
+[dump-memory-stats (-> Univ)]
+
+[module->namespace (-> (-mu x (-lst (Un -Symbol -String -Nat x (-val #f)))) -Namespace)]
 [current-namespace (-Param -Namespace -Namespace)]
 
 [getenv (-> -String (Un -String (-val #f)))]
@@ -627,12 +707,26 @@
 
 [list->string ((-lst -Char) . -> . -String)]
 [string->list (-String . -> . (-lst -Char))]
-[sort (-poly (a) ((-lst a) (a a . -> . B) . -> . (-lst a)))]
+[build-string (-Nat (-Integer . -> . -Char) . -> . -String)]
+
+[sort (-poly (a b) (cl->* ((-lst a) (a a . -> . B)
+                          #:cache-keys? B #f
+                          . ->key . (-lst a))
+                         ((-lst a) (b b . -> . B)
+                          #:key (a . -> . b) #t
+                          #:cache-keys? B #f
+                          . ->key . (-lst a))))]
 [find-system-path (Sym . -> . -Path)]
 
 [object-name (Univ . -> . Univ)]
 
 [path? (make-pred-ty -Path)]
+
+;; scheme/function
+[const (-poly (a) (-> a (->* '() Univ a)))]
+(primitive? (-> Univ B))
+(primitive-closure? (-> Univ B))
+
 
 ;; scheme/cmdline
 
@@ -653,7 +747,7 @@
                     (-lst a))
                    ((-lst b) b) 
                    . ->... . 
-                   -Nat))]
+                   -NonnegativeFixnum))]
 [filter-map (-polydots (c a b)
                        ((list
                          ((list a) (b b) . ->... . (-opt c))
@@ -675,6 +769,8 @@
                      ((-lst b) b) . ->... .(-lst c)))]
 [append*
  (-poly (a) ((-lst (-lst a)) . -> . (-lst a)))]
+[argmin (-poly (a) ((a . -> . -Real) (-lst a) . -> . a))]
+[argmax (-poly (a) ((a . -> . -Real) (-lst a) . -> . a))]
 
 ;; scheme/tcp
 [tcp-listener? (make-pred-ty -TCP-Listener)]
@@ -684,11 +780,11 @@
 [tcp-accept-ready? (-TCP-Listener . -> . B )]
 [tcp-addresses (cl->*
 		(-Port [(-val #f)] . ->opt . (-values (list -String -String)))
-		(-Port (-val #t) . -> . (-values (list -String -Nat -String -Nat))))]
+		(-Port (-val #t) . -> . (-values (list -String -NonnegativeFixnum -String -NonnegativeFixnum))))]
 [tcp-close (-TCP-Listener . -> . -Void )]
 [tcp-connect (-String -Integer . -> . (-values (list -Input-Port -Output-Port)))]
 [tcp-connect/enable-break (-String -Integer . -> . (-values (list -Input-Port -Output-Port)))]
-[tcp-listen (N . -> . -TCP-Listener)]
+[tcp-listen (-Integer [-Integer Univ (-opt -String)] . ->opt . -TCP-Listener)]
 
 ;; scheme/bool
 [boolean=? (B B . -> . B)]
@@ -704,9 +800,17 @@
 
 ;; scheme/port
 [port->lines (cl->* ([-Input-Port] . ->opt . (-lst -String)))]
+[port->bytes-lines (cl->* ([-Input-Port] . ->opt . (-lst -Bytes)))]
+[port->list (-poly (a) (->opt [(-> -Input-Port a) -Input-Port] (-lst a)))]
+[port->bytes (->opt [-Input-Port] -Bytes)]
+[port->string (->opt [-Input-Port] -String)]
 [with-output-to-string
   (-> (-> Univ) -String)]
 [open-output-nowhere (-> -Output-Port)]
+[copy-port (->* (list -Input-Port -Output-Port) -Output-Port -Void)]
+
+[input-port? (make-pred-ty -Input-Port)]
+[output-port? (make-pred-ty -Output-Port)]
 
 ;; scheme/path
 
@@ -740,16 +844,17 @@
 
 ;; unsafe
 
-[unsafe-vector-ref (-poly (a) ((-vec a) -Nat . -> . a))]
-[unsafe-vector*-ref (-poly (a) ((-vec a) -Nat . -> . a))]
-[unsafe-vector-length (-poly (a) ((-vec a) . -> . -Nat))]
-[unsafe-vector*-length (-poly (a) ((-vec a) . -> . -Nat))]
+[unsafe-vector-length ((make-VectorTop) . -> . -NonnegativeFixnum)]
+[unsafe-vector*-length ((make-VectorTop) . -> . -NonnegativeFixnum)]
 [unsafe-car (-poly (a b) 
-              (cl->*
-               (->acc (list (-pair a b)) a (list -car))))]
+                   (cl->*
+                    (->acc (list (-pair a b)) a (list -car))
+                    (->* (list (-lst a)) a)))]
 [unsafe-cdr (-poly (a b) 
-              (cl->*
-               (->acc (list (-pair a b)) b (list -cdr))))]
+                   (cl->*
+                    (->acc (list (-pair a b)) b (list -cdr))
+                    (->* (list (-lst a)) (-lst a))))]
+
 
 ;; scheme/vector
 [vector-count (-polydots (a b)
@@ -758,7 +863,7 @@
                            (-vec a))
                           ((-vec b) b)
                           . ->... . 
-                          -Nat))]
+                          -NonnegativeFixnum))]
 [vector-filter (-poly (a b) (cl->*
                              ((make-pred-ty (list a) Univ b)
                               (-vec a)
@@ -788,6 +893,12 @@
  (-poly (a) ((list (-vec a)) -Integer . ->* . (-values (list (-vec a) (-vec a)))))]
 
 
+;; racket/string
+[string-join (-> (-lst -String) -String -String)]
+[string-append*
+ (cl->* (-> (-lst -String) -String)
+        (-> -String (-lst -String) -String))]
+
 ;; scheme/system
 [system (-String . -> . -Boolean)]
 [system* ((list -Pathlike) -String . ->* . -Boolean)]
@@ -795,32 +906,11 @@
 [system*/exit-code ((list -Pathlike) -String . ->* . -Integer)]
 
 ;; Byte and String Output (Section 12.3 of the Reference)
+;; some are now in base-env-indexing-abs.rkt
 [write-char (cl-> [(-Char) -Void]
                   [(-Char -Output-Port) -Void])]
-[write-byte (cl-> [(-Nat) -Void]
-                  [(-Nat -Output-Port) -Void])]
 [newline (cl-> [() -Void]
                [(-Output-Port) -Void])]
-[write-string (cl-> [(-String) -Nat]
-                    [(-String -Output-Port) -Nat]
-                    [(-String -Output-Port -Nat) -Nat]
-                    [(-String -Output-Port -Nat -Nat) -Nat])]
-[write-bytes  (cl-> [(-Bytes) -Nat]
-                    [(-Bytes -Output-Port) -Nat]
-                    [(-Bytes -Output-Port -Nat) -Nat]
-                    [(-Bytes -Output-Port -Nat -Nat) -Nat])]
-[write-bytes-avail  (cl-> [(-Bytes) -Nat]
-                          [(-Bytes -Output-Port) -Nat]
-                          [(-Bytes -Output-Port -Nat) -Nat]
-                          [(-Bytes -Output-Port -Nat -Nat) -Nat])]
-[write-bytes-avail*  (cl-> [(-Bytes) (-opt -Nat)]
-                           [(-Bytes -Output-Port) (-opt -Nat)]
-                           [(-Bytes -Output-Port -Nat) (-opt -Nat)]
-                           [(-Bytes -Output-Port -Nat -Nat) (-opt -Nat)])]
-[write-bytes-avail/enable-break (cl-> [(-Bytes) -Nat]
-                                      [(-Bytes -Output-Port) -Nat]
-                                      [(-Bytes -Output-Port -Nat) -Nat]
-                                      [(-Bytes -Output-Port -Nat -Nat) -Nat])]
 [write-special (cl-> [(Univ) -Boolean]
                      [(Univ -Output-Port) -Boolean])]
 ;; Need event type before we can include these
@@ -829,3 +919,107 @@
 ;;write-special-evt
 [port-writes-atomic? (-Output-Port . -> . -Boolean)]
 [port-writes-special? (-Output-Port . -> . -Boolean)]
+
+;; probably the most useful cases
+[curry (-poly (a b c) 
+	      (cl->* ((a b . -> . c) a . -> . (b . -> . c))
+		     ((a b . -> . c) . -> . (a . -> . (b . -> . c)))))]
+;; mutable pairs
+[mcons (-poly (a b) (-> a b (-mpair a b)))]
+[mcar (-poly (a b)
+             (cl->* (-> (-mpair a b) a)
+                    (-> (-mlst a) a)))]
+[mcdr (-poly (a b)
+             (cl->* (-> (-mpair a b) b)
+                    (-> (-mlst a) (-mlst a))))]
+[set-mcar! (-poly (a b)
+                  (cl->* (-> (-mpair a b) a -Void)
+                         (-> (-mlst a) a -Void)))]
+[set-mcdr! (-poly (a b)
+                  (cl->* (-> (-mpair a b) b -Void)
+                         (-> (-mlst a) (-mlst a) -Void)))]
+[unsafe-mcar (-poly (a b)
+                    (cl->* (-> (-mpair a b) a)
+                           (-> (-mlst a) a)))]
+[unsafe-mcdr (-poly (a b)
+                    (cl->* (-> (-mpair a b) b)
+                           (-> (-mlst a) (-mlst a))))]
+[unsafe-set-mcar! (-poly (a b)
+                         (cl->* (-> (-mpair a b) a -Void)
+                                (-> (-mlst a) a -Void)))]
+[unsafe-set-mcdr! (-poly (a b)
+                         (cl->* (-> (-mpair a b) b -Void)
+                                (-> (-mlst a) (-mlst a) -Void)))]
+[mpair? (make-pred-ty (make-MPairTop))]
+[mlist (-poly (a) (->* (list) a (-mlst a)))]
+[mlength (-poly (a) (-> (-mlst a) -NonnegativeFixnum))]
+[mreverse! (-poly (a) (-> (-mlst a) (-mlst a)))]
+[mappend (-poly (a) (->* (list) (-mlst a) (-mlst a)))]
+
+;; module names and loading
+[resolved-module-path? (make-pred-ty -Resolved-Module-Path)]
+[make-resolved-module-path (-> (Un -Symbol -Path) -Resolved-Module-Path)]
+[resolved-module-path-name (-> -Resolved-Module-Path (Un -Path -Symbol))]
+[module-path? (make-pred-ty -Module-Path)]
+[current-module-name-resolver (-Param (cl->* (-Resolved-Module-Path . -> . Univ)
+                                             ((Un -Module-Path -Path)
+                                              (-opt -Resolved-Module-Path)
+                                              (-opt (-Syntax Univ))
+                                              -Boolean
+                                              . -> . -Resolved-Module-Path))
+                                      (cl->* (-Resolved-Module-Path . -> . Univ)
+                                             ((Un -Module-Path -Path)
+                                              (-opt -Resolved-Module-Path)
+                                              (-opt (-Syntax Univ))
+                                              -Boolean
+                                              . -> . -Resolved-Module-Path)))]
+[current-module-declare-name (-Param (-opt -Resolved-Module-Path)
+                                     (-opt -Resolved-Module-Path))]
+[current-module-declare-source (-Param (-opt (Un -Symbol -Path))
+                                       (-opt (Un -Symbol -Path)))]
+[module-path-index? (make-pred-ty -Module-Path-Index)]
+[module-path-index-resolve (-> -Module-Path-Index -Resolved-Module-Path)]
+[module-path-index-split (-> -Module-Path-Index
+                             (-values
+                              (list (-opt -Module-Path)
+                                    (-opt (Un -Module-Path-Index
+                                              -Resolved-Module-Path)))))]
+[module-path-index-join (-> (-opt -Module-Path)
+                            (-opt (Un -Module-Path-Index -Resolved-Module-Path))
+                            -Module-Path-Index)]
+[compiled-module-expression? (make-pred-ty -Compiled-Module-Expression)]
+[module-compiled-name (-> -Compiled-Module-Expression -Symbol)]
+[module-compiled-imports (-> -Compiled-Module-Expression
+                             (-lst (-pair (-opt -Integer)
+                                          (-lst -Module-Path-Index))))]
+[module-compiled-exports
+ (-> -Compiled-Module-Expression
+     (-values
+      (list
+       (-lst (-pair (-opt -Integer)
+                    (-lst (-pair -Symbol
+                                 (-pair
+                                  (-lst
+                                   (Un -Module-Path-Index
+                                       (-pair -Module-Path-Index
+                                              (-pair (-opt -Integer)
+                                                     (-pair -Symbol
+                                                            (-pair (-opt -Integer)
+                                                                   (-val null)))))))
+                                  (-val null))))))
+       (-lst (-pair (-opt -Integer)
+                    (-lst (-pair -Symbol
+                                 (-pair
+                                  (-lst
+                                   (Un -Module-Path-Index
+                                       (-pair -Module-Path-Index
+                                              (-pair (-opt -Integer)
+                                                     (-pair -Symbol
+                                                            (-pair (-opt -Integer)
+                                                                   (-val null)))))))
+                                  (-val null)))))))))]
+[module-compiled-language-info
+ (-> -Compiled-Module-Expression
+     (-opt (make-HeterogenousVector (list -Module-Path -Symbol Univ))))]
+
+[compose (-poly (a b c) (-> (-> b c) (-> a b) (-> a c)))]

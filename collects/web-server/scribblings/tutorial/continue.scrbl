@@ -62,9 +62,9 @@ By the end of this tutorial, we'll have a simple blogging application.
 We start by considering our data definitions.  We want to represent a
 list of posts.  Let's say that a post is:
 
-@racketblock[(define-struct post (title body))]
+@racketblock[(struct post (title body))]
 
-@(defstruct post ([title string?] [body string?]))
+@(defstruct* post ([title string?] [body string?]))
 
 @bold{Exercise.} Make a few examples of posts.
 
@@ -75,8 +75,8 @@ A blog, then, will be a list of posts:
 As a very simple example of a blog:
 
 @racketblock[
-(define BLOG (list (make-post "First Post!"
-                              "Hey, this is my first post!")))
+(define BLOG (list (post "First Post!"
+                         "Hey, this is my first post!")))
 ]
 
 Now that we have a sample blog structure, let's get our web
@@ -172,7 +172,7 @@ an @racket[html-response] representing that content.
 As an example, we want:
 
 @racketblock[
-    (render-post (make-post "First post!" "This is a first post."))
+    (render-post (post "First post!" "This is a first post."))
 ]
 
 to produce:
@@ -229,8 +229,8 @@ should produce:
 While
 
 @racketblock[
-(render-posts (list (make-post "Post 1" "Body 1")
-                    (make-post "Post 2" "Body 2")))
+(render-posts (list (post "Post 1" "Body 1")
+                    (post "Post 2" "Body 2")))
 ]
 
 should produce:
@@ -441,9 +441,9 @@ Earlier, we had said that a @racket[blog] was a list of @racket[post]s,
 but because we want to allow the blog to be changed, let's revisit our
 definition so that a blog is a mutable structure:
 
-@racketblock[(define-struct blog (posts) #:mutable)]
+@racketblock[(struct blog (posts) #:mutable)]
 
-@defstruct[blog ([posts (listof post?)])]
+@defstruct*[blog ([posts (listof post?)])]
 
 Mutable structures provide functions to change the fields of a
 structure; in this case, we now have a structure mutator called
@@ -484,7 +484,7 @@ the same blog.
 Next, let's extend the application so that each post can hold a list
 of comments.  We refine the data definition of a blog to be:
 
-@defstruct[post ([title string?] [body string?] [comments (listof string?)]) #:mutable]
+@defstruct*[post ([title string?] [body string?] [comments (listof string?)]) #:mutable]
 
 @bold{Exercise.} Write the updated data structure definition for posts.  Make
 sure to make the structure mutable, since we intend to add comments to
@@ -504,14 +504,14 @@ comments in an itemized list.
 
 @bold{Exercise.} Because we've extended a post to include comments, other
 post-manipulating parts of the application may need to be adjusted,
-such as uses of @racket[make-post].  Identify and fix any other part of the
+such as uses of @racket[post].  Identify and fix any other part of the
 application that needs to accommodate the post's new structure.
 
 @centerline{------------}
 
 Once we've changed the data structure of the posts and adjusted our
 functions to deal with this revised structure, the web application
-should be runnable.  The user may even may even see some of the fruits
+should be runnable.  The user may even see some of the fruits
 of our labor: if the initial @racket[BLOG] has a post with a comment, the user
 should see those comments now.  But obviously, there's something
 missing: the user doesn't have the user interface to add comments to a
@@ -594,7 +594,7 @@ handlers, our web application is fairly functional.
 
 We have an application that's functionally complete, but is visual
 lacking.  Let's try to improve its appearance.  One way we can do this
-is to use a cascading style sheet.  A style sheet can visual panache
+is to use a cascading style sheet.  A style sheet can add visual panache
 to our web pages.  For example, if we'd like to turn all of our
 paragraphs green, we might add the following style declaration within
 our response.
@@ -736,8 +736,8 @@ between the model of our blog, and the web application that uses that
 model.  Let's isolate the model: it's all the stuff near the top:
 
 @racketblock[
-    (define-struct blog (posts) #:mutable)
-    (define-struct post (title body comments) #:mutable)
+    (struct blog (posts) #:mutable)
+    (struct post (title body comments) #:mutable)
     (define BLOG ...)
     (define (blog-insert-post! ...) ...)
     (define (post-insert-comment! ...) ...)
@@ -794,7 +794,7 @@ started running---which is exactly what we want when restoring the blog data fro
 Our blog structure definition now looks like:
 
 @racketblock[
-    (define-struct blog (posts) #:mutable #:prefab)
+    (struct blog (posts) #:mutable #:prefab)
 ]
 
 Now @racket[blog] structures can be read from the outside world with @racket[read] and written
@@ -809,7 +809,7 @@ At this point, we @emph{can} read and write the blog to disk. Now let's actually
 First, we'll make a place to record in the model where the blog lives on disk. So, we need to change
 the blog structure again. Now it will be:
 
-@defstruct[blog ([home string?] [posts (listof post?)]) #:mutable]
+@defstruct*[blog ([home string?] [posts (listof post?)]) #:mutable]
 
 @bold{Exercise.} Write the new structure definition for blogs.
 
@@ -820,14 +820,14 @@ Then, we'll make a function that allows our application to initialize the blog:
 @code:comment{Reads a blog from a path, if not present, returns default}
 (define (initialize-blog! home)
   (local [(define (log-missing-exn-handler exn)
-            (make-blog
+            (blog
              (path->string home)
-             (list (make-post "First Post"
-                              "This is my first post"
-                              (list "First comment!"))
-                   (make-post "Second Post"
-                              "This is another post"
-                              (list)))))
+             (list (post "First Post"
+                         "This is my first post"
+                         (list "First comment!"))
+                   (post "Second Post"
+                         "This is another post"
+                         (list)))))
           (define the-blog
             (with-handlers ([exn? log-missing-exn-handler])
               (with-input-from-file home read)))]
@@ -983,7 +983,7 @@ By adding a new comments table, we are more in accord with the relational style.
 
 A @racket[blog] structure will simply be a container for the database handle:
 
-@defstruct[blog ([db sqlite:db?])]
+@defstruct*[blog ([db sqlite:db?])]
 
 @bold{Exercise.} Write the @racket[blog] structure definition. (It does not need to be mutable or serializable.)
 
@@ -993,7 +993,7 @@ We can now write the code to initialize a @racket[blog] structure:
 @code:comment{Sets up a blog database (if it doesn't exist)}
 (define (initialize-blog! home)
   (define db (sqlite:open home))
-  (define the-blog (make-blog db))
+  (define the-blog (blog db))
   (with-handlers ([exn? void])
     (sqlite:exec/ignore db
                         (string-append
@@ -1056,7 +1056,7 @@ However, we cannot tell from this structure
 what blog this posts belongs to, and therefore, what database; so, we could not extract the title or body values,
 since we do not know what to query. Therefore, we should associate the blog with each post:
 
-@defstruct[post ([blog blog?] [id integer?])]
+@defstruct*[post ([blog blog?] [id integer?])]
 
 @bold{Exercise.} Write the structure definition for posts.
 
@@ -1067,7 +1067,7 @@ The only function that creates posts is @racket[blog-posts]:
 @code:comment{Queries for the post ids}
 (define (blog-posts a-blog)
   (local [(define (row->post a-row)
-            (make-post 
+            (post 
              a-blog
              (vector-ref a-row 0)))
           (define rows (sqlite:select
@@ -1121,6 +1121,110 @@ web-server/insta
 
 ....
 ]
+
+@section{Using Formlets}
+
+@(require (for-label web-server/formlets))
+
+We'll now go back to the application code. One of the poor design choices we made earlier is the loose connection between the names of form elements in the display and in the form processing code:
+
+@racketblock[
+@code:comment{render-blog-page: blog request -> html-response}
+@code:comment{Produces an html-response page of the content of the}
+@code:comment{blog.}
+(define (render-blog-page a-blog request)
+  (local [(define (response-generator make-url)        
+            `(html (head (title "My Blog"))
+                   (body 
+                    (h1 "My Blog")
+                    ,(render-posts a-blog make-url)
+                    (form ((action 
+                            ,(make-url insert-post-handler)))
+                          @code:comment{"title" is used here}
+                          (input ((name "title")))
+                          (input ((name "body")))
+                          (input ((type "submit")))))))          
+          
+          (define (insert-post-handler request)
+            (define bindings (request-bindings request))
+            (blog-insert-post!
+             a-blog
+             @code:comment{And "title" is used here.}
+             (extract-binding/single 'title bindings)
+             (extract-binding/single 'body bindings))
+            (render-blog-page a-blog (redirect/get)))]
+
+    (send/suspend/dispatch response-generator)))
+]
+
+@(define formlet
+   @tech[#:doc '(lib "web-server/scribblings/web-server.scrbl")]{formlet})
+@(define formlets
+   @tech[#:doc '(lib "web-server/scribblings/web-server.scrbl")]{formlets})
+
+The Racket Web framework provides @formlets to abstract both the display and the processing associated with a form, leaving the names in the HTML implicit.
+
+Here is a @formlet for @racket[render-blog-page]:
+
+@racketblock[
+@code:comment{new-post-formlet : formlet (values string? string?)}
+@code:comment{A formlet for requesting a title and body of a post}
+(define new-post-formlet
+  (formlet
+   (#%# ,{input-string . => . title}
+        ,{input-string . => . body})
+   (values title body)))
+]
+
+The first argument of @racket[formlet] is a quoted X-expression that will be rendered when the @formlet is, but with two caveats: @racket[#%#] represents a list of X-expressions and @racket[,{_formlet . => . _id}] embeds the @formlet @racket[_formlet] in this @formlet and names the result of its processing stage @racket[_id].
+
+The second argument of @racket[formlet] is the processing stage of the @formlet where all the identifiers on the right-hand side of @racket[=>] are bound to the results of processing of the sub-@|formlets|.
+
+There are two functions that operate on @|formlets|:
+@itemize[
+@item{@racket[formlet-display] takes a @formlet and returns its rendering as a list of X-expressions. This will generate unique names for its form elements.}
+ 
+@item{@racket[formlet-process] takes a @formlet and a request and returns its processing. This automatically extracts the bindings from the request using the names generated by @racket[formlet-display].}
+]
+
+In @racket[new-post-formlet] we used @racket[input-string], a library @formlet that renders as @racketresult[`(input ([type "text"] [name ,_fresh_name]))] and is processed as @racket[(extract-binding/single _fresh_name (request-bindings request))]. Thus, @racket[(formlet-dispay new-post-formlet)] returns:
+@racketresultblock[
+(list '(input ([type "text"] [name "input_0"]))
+      '(input ([type "text"] [name "input_1"])))
+]
+And @racket[(formlet-process new-post-formlet _request)] where @racket[_request] binds @racketresult["input_0"] to @racketresult["Title"] and @racketresult["input_1"] to @racketresult["Body"] will return @racketresult[(values "Title" "Body")].
+
+We can use @racket[new-post-formlet] in @racket[render-blog-page] as follows:
+@racketblock[
+@code:comment{render-blog-page: blog request -> html-response}
+@code:comment{Produces an html-response page of the content of the}
+@code:comment{blog.}
+(define (render-blog-page a-blog request)
+  (local [(define (response-generator make-url)        
+            `(html (head (title "My Blog"))
+                   (body 
+                    (h1 "My Blog")
+                    ,(render-posts a-blog make-url)
+                    (form ([action 
+                            ,(make-url insert-post-handler)])
+                          ,@(formlet-display new-post-formlet)
+                          (input ([type "submit"]))))))
+          
+          (define (insert-post-handler request)
+            (define-values (title body) (formlet-process new-post-formlet request))
+            (blog-insert-post! a-blog title body)
+            (render-blog-page a-blog (redirect/get)))]
+    
+    (send/suspend/dispatch response-generator)))
+]
+
+@bold{Exercise.} Write a @formlet and use it in @racket[render-post-detail-page].
+
+@centerline{------------}
+
+Our application is now:
+
+@external-file["iteration-11.rkt"]
 
 @section{Leaving DrRacket}
 

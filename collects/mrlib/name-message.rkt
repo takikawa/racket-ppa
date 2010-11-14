@@ -1,30 +1,39 @@
-#lang scheme/gui
+#lang racket/gui
 
-;; min-w, min-h : number -> contract
-;; determines if the widths and heights are suitable
-(define (min-w h) (flat-named-contract "draw-button-label-width" (lambda (w) (w . > . (- h (* 2 border-inset))))))
-(define (min-h w) (flat-named-contract "draw-button-label-height" (lambda (h) (h . > . (* 2 border-inset)))))
+(define (get-left-side-padding) (+ button-label-inset circle-spacer))
+(define button-label-inset 1)
+(define black-color (make-object color% "BLACK"))
+
+(define triangle-width 10)
+(define triangle-height 14)
+(define triangle-color (make-object color% 50 50 50))
+
+(define border-inset 1)
+(define circle-spacer 4)
+(define rrect-spacer 3)
 
 (provide/contract
  [get-left-side-padding (-> number?)]
- [pad-xywh (number? number? (>=/c 0) (>=/c 0) . -> . (values number? number? (>=/c 0) (>=/c 0)))]
+ [pad-xywh (-> number? number? (>=/c 0) (>=/c 0)
+               (values number? number? (>=/c 0) (>=/c 0)))]
  [draw-button-label
-  (->d ([dc (is-a?/c dc<%>)]
+  (->i ([dc (is-a?/c dc<%>)]
         [label (or/c false/c string?)]
         [x number?]
         [y number?]
-        [w (and/c number? (min-w h))]
-        [h (and/c number? (min-h w))]
+        [w number?]
+        [h (and/c number? (>=/c (* 2 border-inset)))]
         [mouse-over? boolean?]
         [grabbed? boolean?]
         [button-label-font (is-a?/c font%)]
         [bkg-color (or/c false/c (is-a?/c color%) string?)])
-       ()
+       #:pre (w h)
+       (w . > . (- h (* 2 border-inset)))
        [result void?])]
  
  [calc-button-min-sizes
-  (->* ((is-a?/c dc<%>) string? (is-a?/c font%))
-       ()
+  (->* ((is-a?/c dc<%>) string?)
+       ((is-a?/c font%))
        (values number? number?))])
 
 (provide name-message%)
@@ -217,18 +226,6 @@
     (stretchable-height #f)
     (send (get-dc) set-smoothing 'aligned)))
 
-(define (get-left-side-padding) (+ button-label-inset circle-spacer))
-(define button-label-inset 1)
-(define black-color (make-object color% "BLACK"))
-
-(define triangle-width 10)
-(define triangle-height 14)
-(define triangle-color (make-object color% 50 50 50))
-
-(define border-inset 1)
-(define circle-spacer 4)
-(define rrect-spacer 3)
-
 (define (offset-color color offset-one)
   (make-object color%
     (offset-one (send color red))
@@ -241,7 +238,7 @@
 (define mouse-grabbed-color (make-object color% 100 100 100))
 (define grabbed-fg-color (make-object color% 220 220 220))
 
-(define (calc-button-min-sizes dc label button-label-font)
+(define (calc-button-min-sizes dc label [button-label-font (send dc get-font)])
   (let-values ([(w h a d) (send dc get-text-extent label button-label-font)])
     (let-values ([(px py pw ph) (pad-xywh 0 0 w h)])
       (values pw ph))))

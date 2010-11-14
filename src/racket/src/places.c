@@ -1,4 +1,3 @@
-
 #include "schpriv.h"
 
 /* READ ONLY SHARABLE GLOBALS */
@@ -6,6 +5,9 @@
 #ifdef MZ_USE_PLACES
 
 #include "mzrt.h"
+#ifdef UNIX_PROCESSES
+# include <unistd.h>
+#endif
 
 READ_ONLY static Scheme_Object *scheme_def_place_exit_proc;
 
@@ -15,24 +17,27 @@ static Scheme_Object *scheme_place(int argc, Scheme_Object *args[]);
 static Scheme_Object *scheme_place_wait(int argc, Scheme_Object *args[]);
 static Scheme_Object *scheme_place_sleep(int argc, Scheme_Object *args[]);
 static Scheme_Object *scheme_place_p(int argc, Scheme_Object *args[]);
-static Scheme_Object *scheme_places_deep_copy_in_master(Scheme_Object *so);
 static Scheme_Object *scheme_place_send(int argc, Scheme_Object *args[]);
 static Scheme_Object *scheme_place_recv(int argc, Scheme_Object *args[]);
 static Scheme_Object *scheme_place_channel_p(int argc, Scheme_Object *args[]);
 static Scheme_Object *def_place_exit_handler_proc(int argc, Scheme_Object *args[]);
 static Scheme_Object *scheme_place_channel(int argc, Scheme_Object *args[]);
-static Scheme_Object *scheme_place_channel_receiver_channel(int argc, Scheme_Object *args[]);
 
-static Scheme_Object *scheme_place_async_channel_create();
-static Scheme_Object *scheme_place_bi_channel_create();
-static Scheme_Object *scheme_place_bi_peer_channel_create(Scheme_Object *orig);
-static void scheme_place_bi_channel_set_signal(Scheme_Object *cho);
+static Scheme_Place_Async_Channel *scheme_place_async_channel_create();
+static Scheme_Place_Bi_Channel *scheme_place_bi_channel_create();
+static Scheme_Place_Bi_Channel *scheme_place_bi_peer_channel_create(Scheme_Place_Bi_Channel *orig);
 static int scheme_place_channel_ready(Scheme_Object *so);
 
 
-static void scheme_place_async_send(Scheme_Place_Async_Channel *ch, Scheme_Object *o);
-static Scheme_Object *scheme_place_async_recv(Scheme_Place_Async_Channel *ch);
+static void scheme_place_async_send(Scheme_Place_Async_Channel *ch, Scheme_Object *o, void *msg_memory);
+static Scheme_Object *scheme_place_async_recv(Scheme_Place_Async_Channel *ch, void **msg_memory);
+
+static Scheme_Object *scheme_places_deep_copy_to_master(Scheme_Object *so);
+/* Scheme_Object *scheme_places_deep_copy(Scheme_Object *so); */
+
+#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
 static Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Table *ht);
+#endif
 
 # ifdef MZ_PRECISE_GC
 static void register_traversers(void);
@@ -72,12 +77,11 @@ void scheme_init_place(Scheme_Env *env)
   
   plenv = scheme_primitive_module(scheme_intern_symbol("#%place"), env);
 
-  PLACE_PRIM_W_ARITY("place",          scheme_place,       1, 3, plenv);
+  PLACE_PRIM_W_ARITY("place",          scheme_place,       2, 2, plenv);
   PLACE_PRIM_W_ARITY("place-sleep",    scheme_place_sleep, 1, 1, plenv);
   PLACE_PRIM_W_ARITY("place-wait",     scheme_place_wait,  1, 1, plenv);
   PLACE_PRIM_W_ARITY("place?",         scheme_place_p,     1, 1, plenv);
   PLACE_PRIM_W_ARITY("place-channel",  scheme_place_channel,  0, 0, plenv);
-  PLACE_PRIM_W_ARITY("place-channel->receiver-channel",  scheme_place_channel_receiver_channel, 1, 1, plenv);
   PLACE_PRIM_W_ARITY("place-channel-send",  scheme_place_send,  1, 2, plenv);
   PLACE_PRIM_W_ARITY("place-channel-recv",  scheme_place_recv,  1, 1, plenv);
   PLACE_PRIM_W_ARITY("place-channel?",      scheme_place_channel_p,  1, 1, plenv);
@@ -161,31 +165,37 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
   place_data = MALLOC_ONE(Place_Start_Data);
   place_data->ready    = ready;
 
-  if (argc == 2 || argc == 3 ) {
-    place_data->module   = args[0];
-    place_data->function = args[1];
-    place_data->ready    = ready;
-    if (argc == 2) {
-      Scheme_Object *channel;
-      channel = scheme_place_bi_channel_create();
-      place->channel = channel;
-      scheme_place_bi_channel_set_signal(channel);
-      channel = scheme_place_bi_peer_channel_create(channel);
-      place_data->channel = channel;
+  if (argc == 2) {
+    Scheme_Object *so;
+
+    if (!scheme_is_module_path(args[0]) && !SCHEME_PATHP(args[0])) {
+      scheme_wrong_type("place", "module-path or path", 0, argc, args);
     }
-    else {
-      Scheme_Object *channel;
-      channel = args[2];
-      place_data->channel = channel;
-      place->channel = channel;
+    if (!SCHEME_SYMBOLP(args[1])) {
+      scheme_wrong_type("place", "symbol", 1, argc, args);
+    }
+
+    so = scheme_places_deep_copy_to_master(args[0]);
+    place_data->module   = so;
+    so = scheme_places_deep_copy_to_master(args[1]);
+    place_data->function = so;
+    place_data->ready    = ready;
+    
+    /* create channel */
+    {
+      Scheme_Place_Bi_Channel *channel;
+      channel = scheme_place_bi_channel_create();
+      place->channel = (Scheme_Object *) channel;
+      channel = scheme_place_bi_peer_channel_create(channel);
+      place_data->channel = (Scheme_Object *) channel;
     }
   }
   else {
-    scheme_wrong_count_m("place", 1, 2, argc, args, 0);
+    scheme_wrong_count_m("place", 2, 2, argc, args, 0);
   }
 
   collection_paths = scheme_current_library_collection_paths(0, NULL);
-  collection_paths = scheme_places_deep_copy_in_master(collection_paths);
+  collection_paths = scheme_places_deep_copy_to_master(collection_paths);
   place_data->current_library_collection_paths = collection_paths;
 
   /* create new place */
@@ -202,146 +212,396 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
   return (Scheme_Object*) place;
 }
 
-# ifdef MZ_PRECISE_GC
-/*============= SIGNAL HANDLER =============*/
+# if defined(MZ_PLACES_WAITPID)
+/*============= SIGCHLD SIGNAL HANDLING =============*/
+
+/* If SIGCHLD is unblocked, it gets delivered to a random thread
+   --- not necessarily on in the right place for the subprocess.
+   To avoid that problem, we centralize SIGCHLD handling here, and
+   then dispatch back out to specific places as they request 
+   information. */
+
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
 
-
-static void error_info() {
-  char *erstr;
-  erstr = strerror(errno);
-  printf("errno %i %s\n", errno, erstr);
-}
-
 typedef struct Child_Status {
   int pid;
   int status;
+  char done;
+  char unneeded; /* not in a group; result not needed */
+  char is_group;
   void *signal_fd;
   struct Child_Status *next;
+  struct Child_Status *next_group; /* see child_group_statuses */
 } Child_Status;
 
 SHARED_OK static Child_Status *child_statuses = NULL;
 SHARED_OK static mzrt_mutex* child_status_lock = NULL;
+SHARED_OK static mzrt_mutex* child_wait_lock = NULL; /* ordered before status lock */
+
+/* When a process for a process group becomes unreachable 
+   before a waitpid() on the process, then we need to keep
+   waiting on it to let the OS gc the process. Otherwise,
+   we wait only on processes in the same group as Racket. 
+   This list is protect by the wait lock. */
+SHARED_OK static Child_Status *child_group_statuses = NULL;
+
+static void add_group_signal_fd(void *signal_fd);
+static void remove_group_signal_fd(void *signal_fd);
+static void do_group_signal_fds();
 
 static void add_child_status(int pid, int status) {
   Child_Status *st;
-  st = malloc(sizeof(Child_Status));
-  st->pid = pid;
-  st->signal_fd = NULL;
-  st->status = status;
 
+  /* Search for existing record, which will have a signal_fd: */
   mzrt_mutex_lock(child_status_lock);
-  st->next = child_statuses;
-  child_statuses = st;
+  for (st = child_statuses; st; st = st->next) {
+    if (st->pid == pid)
+      break;
+  }
+
+  if (!st) {
+    /* must have terminated before it was registered
+       (and since we detected it, it must not be a group) */
+    st = malloc(sizeof(Child_Status));
+    st->pid = pid;
+    st->signal_fd = NULL;
+    st->next = child_statuses;
+    child_statuses = st;
+    st->next_group = NULL;
+    st->unneeded = 0;
+    st->is_group = 0;
+  }
+  st->status = status;
+  st->done = 1;
+
+  if (st->signal_fd && st->is_group)
+    remove_group_signal_fd(st->signal_fd);
+
   mzrt_mutex_unlock(child_status_lock);
+  
+  if (st->signal_fd)
+    scheme_signal_received_at(st->signal_fd);
+  if (st->unneeded)
+    (void)scheme_get_child_status(st->pid, 0, NULL);
 }
 
-static int raw_get_child_status(int pid, int *status) {
+static int raw_get_child_status(int pid, int *status, int done_only, int do_remove, int do_free) {
   Child_Status *st;
   Child_Status *prev;
   int found = 0;
 
   for (st = child_statuses, prev = NULL; st; prev = st, st = st->next) {
     if (st->pid == pid) {
-      *status = st->status;
-      found = 1;
-      if (prev) {
-        prev->next = st->next;
+      if (!done_only || st->done) {
+        if (status)
+          *status = st->status;
+        found = 1;
+        if (do_remove) {
+          if (prev)
+            prev->next = st->next;
+          else
+            child_statuses = st->next;
+        }
+        if (do_free)
+          free(st);
       }
-      else {
-        child_statuses = st->next;
-      }
-      free(st);
       break;
     }
   }
   return found;
 }
 
-int scheme_get_child_status(int pid, int *status) {
+int scheme_get_child_status(int pid, int is_group, int *status) {
   int found = 0;
+
+  if (is_group) {
+    /* need to specifically try the pid, since we don't
+       wait on other process groups in the background thread */
+    pid_t pid2;
+    int status;
+
+    do {
+      pid2 = waitpid((pid_t)pid, &status, WNOHANG);
+    } while ((pid2 == -1) && (errno == EINTR));
+
+    if (pid2 > 0)
+      add_child_status(pid, status);
+  }
+
   mzrt_mutex_lock(child_status_lock);
-  found = raw_get_child_status(pid, status);
+  found = raw_get_child_status(pid, status, 1, 1, 1);
   mzrt_mutex_unlock(child_status_lock);
   /* printf("scheme_get_child_status found %i pid %i status %i\n", found,  pid, *status); */
+
   return found;
 }
 
-int scheme_places_register_child(int pid, void *signal_fd, int *status) {
+int scheme_places_register_child(int pid, int is_group, void *signal_fd, int *status)
+{
   int found = 0;
 
   mzrt_mutex_lock(child_status_lock);
-  found = raw_get_child_status(pid, status);
+
+  /* The child may have terminated already: */
+  found = raw_get_child_status(pid, status, 0, 0, 0);
+
   if (!found) {
+    /* Create a record for the child: */
     Child_Status *st;
     st = malloc(sizeof(Child_Status));
     st->pid = pid;
     st->signal_fd = signal_fd;
     st->status = 0;
+    st->unneeded = 0;
+    st->done = 0;
+    st->is_group = is_group;
 
     st->next = child_statuses;
     child_statuses = st;
+    st->next_group = NULL;
+
+    if (is_group)
+      add_group_signal_fd(signal_fd);
   }
+
   mzrt_mutex_unlock(child_status_lock);
   return found;
 }
 
 static void *mz_proc_thread_signal_worker(void *data) {
   int status;
-  int pid;
+  int pid, check_pid, is_group;
   sigset_t set;
-  //GC_CAN_IGNORE siginfo_t info;
-  {
-    sigemptyset(&set);
-    sigaddset(&set, SIGCHLD);
-    pthread_sigmask(SIG_UNBLOCK, &set, NULL);
-  }
+  Child_Status *group_status, *prev_group, *next;
 
-  while(1) {
+  sigemptyset(&set);
+  sigaddset(&set, SIGCHLD);
+
+  while (1) {
     int rc;
     int signalid;
+
     do {
       rc = sigwait(&set, &signalid);
       if (rc == -1) {
-        if (errno != EINTR ) {
-        error_info();
+        if (errno != EINTR) {
+          fprintf(stderr, "unexpected error from sigwait(): %d\n", errno);
         }
       }
     } while (rc == -1 && errno == EINTR);
 
-    pid = waitpid((pid_t)-1, &status, WNOHANG);
-    if (pid == -1) {
-      char *erstr;
-      erstr = strerror(errno);
-      /* printf("errno %i %s\n", errno, erstr); */
-    }
-    else {
-      /* printf("SIGCHILD pid %i with status %i %i\n", pid, status, WEXITSTATUS(status)); */
-      add_child_status(pid, status);
-    }
-  };
+    mzrt_mutex_lock(child_status_lock);
+    do_group_signal_fds();
+    mzrt_mutex_unlock(child_status_lock);
+
+    mzrt_mutex_lock(child_wait_lock);
+
+    group_status = child_group_statuses;
+    prev_group = NULL;
+
+    do {
+      if (group_status) {
+        check_pid = group_status->pid;
+        is_group = 1;
+      } else {
+        check_pid = 0; /* => processes in the same group as Racket */
+        is_group = 0;
+      }
+
+      pid = waitpid(check_pid, &status, WNOHANG);
+
+      if (pid == -1) {
+        if (errno == EINTR) {
+          /* try again */
+          pid = 1;
+        } else if (!is_group && (errno == ECHILD)) {
+          /* no more to check */
+        } else {
+          fprintf(stderr, "unexpected error from waitpid(%d[%d]): %d\n", 
+                  check_pid, is_group, errno);
+          if (is_group) {
+            prev_group = group_status;
+            group_status = group_status->next;
+          } 
+        }
+      } else if (pid > 0) {
+        /* printf("SIGCHILD pid %i with status %i %i\n", pid, status, WEXITSTATUS(status)); */
+        if (is_group) {
+          next = group_status->next;
+          if (prev_group)
+            prev_group->next_group = next;
+          else
+            child_group_statuses = next;
+          free(group_status);
+          group_status = next;
+        } else
+          add_child_status(pid, status);
+      } else {
+        if (is_group) {
+          prev_group = group_status;
+          group_status = group_status->next;
+        }
+      }
+    } while ((pid > 0) || is_group);
+
+    mzrt_mutex_unlock(child_wait_lock);
+  }
+
   return NULL;
 }
 
+void scheme_done_with_process_id(int pid, int is_group)
+{
+  Child_Status *st;
 
-void scheme_places_block_child_signal() {
-  {
-    sigset_t set;
-    sigemptyset(&set);
-    sigaddset(&set, SIGCHLD);
-    pthread_sigmask(SIG_BLOCK, &set, NULL);
+  mzrt_mutex_lock(child_wait_lock); /* protects child_group_statuses */
+  mzrt_mutex_lock(child_status_lock);
+
+  for (st = child_statuses; st; st = st->next) {
+    if (st->pid == pid) {
+      if (!st->done) {
+        if (is_group) {
+          st->next_group = child_group_statuses;
+          child_group_statuses = st;
+          if (st->signal_fd)
+            remove_group_signal_fd(st->signal_fd);
+        } else
+          st->unneeded = 1;
+        st->signal_fd = NULL;
+      }
+      break;
+    }
+  }
+      
+  if (st && (is_group || st->done)) {
+    /* remove it from normal list: */
+    raw_get_child_status(pid, NULL, 0, 1, !st->done);
   }
 
-  {
-    mz_proc_thread *signal_thread;
-    mzrt_mutex_create(&child_status_lock);
-    signal_thread = mz_proc_thread_create(mz_proc_thread_signal_worker, NULL);
-    mz_proc_thread_detach(signal_thread);
+  mzrt_mutex_unlock(child_status_lock);
+  mzrt_mutex_unlock(child_wait_lock);
+}
+
+static void got_sigchld() XFORM_SKIP_PROC
+{ 
+  if(-1 == write(2, "SIGCHLD handler called (some thread has SIGCHLD unblocked)\n", 59)) {
+    
   }
 }
+
+void scheme_places_block_child_signal() XFORM_SKIP_PROC
+{
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGCHLD);
+  sigprocmask(SIG_BLOCK, &set, NULL);
+
+  /* Mac OS X seems to need a handler installed for SIGCHLD to be
+     delivered, since the default is to drop the signal. Also, this
+     handler serves as a back-up alert if some thread is created that
+     does not block SIGCHLD. */
+  MZ_SIGSET(SIGCHLD, got_sigchld);
+}
+
+void scheme_places_start_child_signal_handler()
+{
+  mz_proc_thread *signal_thread;
+
+  mzrt_mutex_create(&child_status_lock);
+  mzrt_mutex_create(&child_wait_lock);
+
+  signal_thread = mz_proc_thread_create(mz_proc_thread_signal_worker, NULL);
+  mz_proc_thread_detach(signal_thread);
+}
+
+void scheme_wait_suspend()
+{
+  mzrt_mutex_lock(child_wait_lock);
+}
+
+void scheme_wait_resume()
+{
+  mzrt_mutex_unlock(child_wait_lock);
+}
+
+/* ---------------------------------------------------------------------- */
+
+/* When a place has a process-group that it may be waiting on, the we
+   need to wake up the place whenever any SIGCHLD is received, since
+   the SIGDCHLD may apply to one of those places.
+   The list of signal_fds is protected by the status lock. */
+
+typedef struct Group_Signal_FD {
+  void *signal_fd;
+  int refcount;
+} Group_Signal_FD;
+
+SHARED_OK static Group_Signal_FD *signal_fds;
+SHARED_OK static int signal_fd_count;
+
+static void add_group_signal_fd(void *signal_fd)
+{
+  int i, count = 0;
+  Group_Signal_FD *a;
+
+  for (i = 0; i < signal_fd_count; i++) {
+    if (signal_fds[i].refcount) {
+      count++;
+      if (signal_fds[i].signal_fd == signal_fd) {
+        signal_fds[i].refcount++;
+        return;
+      }      
+    }
+  }
+
+  if (count == signal_fd_count) {
+    signal_fd_count = (signal_fd_count + 4) * 2;
+    a = (Group_Signal_FD *)malloc(sizeof(Group_Signal_FD) * signal_fd_count);
+    memset(a, 0, sizeof(Group_Signal_FD) * signal_fd_count);
+    memcpy(a, signal_fds, sizeof(Group_Signal_FD) * count);
+    signal_fds = a;
+  }
+
+  for (i = 0; i < signal_fd_count; i++) {
+    if (!signal_fds[i].refcount) {
+      signal_fds[i].signal_fd = signal_fd;
+      signal_fds[i].refcount = 1;
+      break;
+    }
+  }
+}
+
+static void remove_group_signal_fd(void *signal_fd)
+{
+  int i;
+
+  for (i = 0; i < signal_fd_count; i++) {
+    if (signal_fds[i].refcount) {
+      if (signal_fds[i].signal_fd == signal_fd) {
+        --signal_fds[i].refcount;
+        return;
+      }
+    }
+  }
+}
+
+static void do_group_signal_fds()
+{
+  int i;
+
+  for (i = 0; i < signal_fd_count; i++) {
+    if (signal_fds[i].refcount) {
+      scheme_signal_received_at(signal_fds[i].signal_fd);
+    }
+  }
+}
+
+#endif
+
+# if defined(MZ_PRECISE_GC)
 
 /*============= THREAD JOIN HANDLER =============*/
 typedef struct {
@@ -376,6 +636,13 @@ static int place_wait_ready(Scheme_Object *o) {
 static Scheme_Object *scheme_place_wait(int argc, Scheme_Object *args[]) {
   Scheme_Place          *place;
   place = (Scheme_Place *) args[0];
+
+  if (argc != 1) {
+    scheme_wrong_count_m("place-wait", 1, 1, argc, args, 0);
+  }
+  if (!SAME_TYPE(SCHEME_TYPE(args[0]), scheme_place_type)) {
+    scheme_wrong_type("place-wait", "place", 0, argc, args);
+  }
  
 # ifdef MZ_PRECISE_GC
    {
@@ -415,6 +682,7 @@ static Scheme_Object *scheme_place_p(int argc, Scheme_Object *args[])
 }
 
 Scheme_Object *scheme_places_deep_copy(Scheme_Object *so) {
+#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
   Scheme_Object *new_so = so;
   if (SCHEME_INTP(so)) {
     return so;
@@ -436,8 +704,12 @@ Scheme_Object *scheme_places_deep_copy(Scheme_Object *so) {
       break;
   }
   return new_so;
+#else
+  return so;
+#endif
 }
 
+#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
 Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Table *ht)
 {
   Scheme_Object *new_so = so;
@@ -494,7 +766,12 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
       new_so = scheme_make_sized_offset_char_string(SCHEME_CHAR_STR_VAL(so), 0, SCHEME_CHAR_STRLEN_VAL(so), 1);
       break;
     case scheme_byte_string_type:
-      new_so = scheme_make_sized_offset_byte_string(SCHEME_BYTE_STR_VAL(so), 0, SCHEME_BYTE_STRLEN_VAL(so), 1);
+      if (SHARED_ALLOCATEDP(so)) {
+        new_so = so;
+      }
+      else {
+        new_so = scheme_make_sized_offset_byte_string(SCHEME_BYTE_STR_VAL(so), 0, SCHEME_BYTE_STRLEN_VAL(so), 1);
+      }
       break;
     case scheme_unix_path_type:
       new_so = scheme_make_sized_offset_path(SCHEME_BYTE_STR_VAL(so), 0, SCHEME_BYTE_STRLEN_VAL(so), 1);
@@ -503,8 +780,13 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
       if (SCHEME_SYM_UNINTERNEDP(so)) {
         scheme_log_abort("cannot copy uninterned symbol");
         abort();
-      } else
-        new_so = so;
+      } else {
+        new_so = scheme_make_sized_offset_byte_string(SCHEME_SYM_VAL(so), 0, SCHEME_SYM_LEN(so), 1);
+        new_so->type = scheme_serialized_symbol_type;
+      }
+      break;
+    case scheme_serialized_symbol_type:
+        new_so = scheme_intern_exact_symbol(SCHEME_BYTE_STR_VAL(so), SCHEME_BYTE_STRLEN_VAL(so));
       break;
     case scheme_pair_type:
       {
@@ -514,7 +796,7 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
         car = scheme_places_deep_copy_worker(SCHEME_CAR(so), ht);
         cdr = scheme_places_deep_copy_worker(SCHEME_CDR(so), ht);
         pair = scheme_make_pair(car, cdr);
-        return pair;
+        new_so = pair;
       }
       break;
     case scheme_vector_type:
@@ -532,22 +814,38 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
         new_so = vec;
       }
       break;
+    case scheme_flvector_type:
+      if (SHARED_ALLOCATEDP(so)) {
+        new_so = so;
+      }
+      else {
+        Scheme_Double_Vector *vec;
+        long i;
+        long size = SCHEME_FLVEC_SIZE(so);
+        vec = scheme_alloc_flvector(size);
+
+        for (i = 0; i < size; i++) {
+          SCHEME_FLVEC_ELS(vec)[i] = SCHEME_FLVEC_ELS(so)[i];
+        }
+        new_so = (Scheme_Object *) vec;
+      }
+      break;
     case scheme_structure_type:
       {
         Scheme_Structure *st = (Scheme_Structure*)so;
-        Scheme_Structure *nst;
+        Scheme_Serialized_Structure *nst;
         Scheme_Struct_Type *stype = st->stype;
         Scheme_Struct_Type *ptype = stype->parent_types[stype->name_pos - 1];
-        long i;
+        Scheme_Object *nprefab_key;
         long size = stype->num_slots;
         int local_slots = stype->num_slots - (ptype ? ptype->num_slots : 0);
+        int i = 0;
 
         if (!stype->prefab_key) {
           scheme_log_abort("cannot copy non prefab structure");
           abort();
         }
         {
-          int i = 0;
           for (i = 0; i < local_slots; i++) {
             if (!stype->immutables || stype->immutables[i] != 1) {
               scheme_log_abort("cannot copy mutable prefab structure");
@@ -555,7 +853,27 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
             }
           }
         }
+        nprefab_key = scheme_places_deep_copy_worker(stype->prefab_key, ht);
+        nst = (Scheme_Serialized_Structure*) scheme_make_serialized_struct_instance(nprefab_key, size);
+        for (i = 0; i <size ; i++) {
+          Scheme_Object *tmp;
+          tmp = scheme_places_deep_copy_worker((Scheme_Object*) st->slots[i], ht);
+          nst->slots[i] = tmp;
+        }
+        new_so = (Scheme_Object*) nst;
+      }
+      break;
 
+    case scheme_serialized_structure_type:
+      {
+        Scheme_Serialized_Structure *st = (Scheme_Serialized_Structure*)so;
+        Scheme_Struct_Type *stype;
+        Scheme_Structure *nst;
+        long size;
+        int i = 0;
+      
+        size = st->num_slots;
+        stype = scheme_lookup_prefab_type(SCHEME_CDR(st->prefab_key), size);
         nst = (Scheme_Structure*) scheme_make_blank_prefab_struct_instance(stype);
         for (i = 0; i <size ; i++) {
           Scheme_Object *tmp;
@@ -565,6 +883,7 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
         new_so = (Scheme_Object*)nst;
       }
       break;
+
     case scheme_resolved_module_path_type:
     default:
       scheme_log_abort("cannot copy object");
@@ -576,7 +895,11 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
   }
   return new_so;
 }
+#endif
 
+
+#if 0
+/* unused code, may be useful when/if we revive shared symbol and prefab key tables */
 Scheme_Struct_Type *scheme_make_prefab_struct_type_in_master(Scheme_Object *base,
 					Scheme_Object *parent,
 					int num_fields,
@@ -613,6 +936,7 @@ Scheme_Struct_Type *scheme_make_prefab_struct_type_in_master(Scheme_Object *base
 
   return stype;
 }
+#endif
 
 static void *place_start_proc(void *data_arg) {
   void *stack_base;
@@ -642,21 +966,28 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
   /* scheme_make_thread behaves differently if the above global vars are not null */
   scheme_place_instance_init(stack_base);
 
-  a[0] = place_data->current_library_collection_paths;
+  a[0] = scheme_places_deep_copy(place_data->current_library_collection_paths);
   scheme_current_library_collection_paths(1, a);
 
   a[0] = scheme_places_deep_copy(place_data->module);
   a[1] = scheme_places_deep_copy(place_data->function);
+  a[1] = scheme_intern_exact_symbol(SCHEME_SYM_VAL(a[1]), SCHEME_SYM_LEN(a[1]));
   if (!SAME_TYPE(SCHEME_TYPE(place_data->channel), scheme_place_bi_channel_type)) {
     channel = scheme_places_deep_copy(place_data->channel);
   }
   else {
     channel = place_data->channel;
-    scheme_place_bi_channel_set_signal(channel);
   }
 
   mzrt_sema_post(place_data->ready);
   place_data = NULL;
+# ifdef MZ_PRECISE_GC
+  /* this prevents a master collection attempt from deadlocking with the 
+     place_data->ready semaphore above */
+  GC_allow_master_gc_check();
+# endif
+
+
   /* at point point, don't refer to place_data or its content
      anymore, because it's allocated in the other place */
 
@@ -689,13 +1020,137 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
   return (void*) rc;
 }
 
-Scheme_Object *scheme_places_deep_copy_in_master(Scheme_Object *so) {
-# if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
-  void *return_payload;
-  return_payload = scheme_master_fast_path(5, so);
-  return (Scheme_Object*) return_payload;
+# ifdef MZ_PRECISE_GC
+Scheme_Hash_Table *force_hash(Scheme_Object *so);
 # endif
+
+Scheme_Object *scheme_places_deep_copy_to_master(Scheme_Object *so) {
+#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+  Scheme_Object *o;
+  void *original_gc;
+  Scheme_Hash_Table *ht;
+
+  ht = force_hash(so);
+
+  original_gc = GC_switch_to_master_gc();
+  scheme_start_atomic();
+
+  o = scheme_places_deep_copy_worker(so, ht);
+
+  scheme_end_atomic_no_swap();
+  GC_switch_back_from_master(original_gc);
+  return o;
+#else
   return so;
+#endif
+}
+
+Scheme_Object *scheme_places_deserialize_worker(Scheme_Object *so)
+{
+  Scheme_Object *new_so = so;
+  if (SCHEME_INTP(so)) {
+    return so;
+  }
+  switch (so->type) {
+    case scheme_true_type:
+    case scheme_false_type:
+    case scheme_null_type:
+    /* place_bi_channels are allocated in the master and can be passed along as is */
+    case scheme_place_bi_channel_type:
+    case scheme_char_type:
+    case scheme_rational_type:
+    case scheme_float_type:
+    case scheme_double_type:
+    case scheme_complex_type:
+    case scheme_char_string_type:
+    case scheme_byte_string_type:
+    case scheme_unix_path_type:
+    case scheme_flvector_type:
+        new_so = so;
+      break;
+    case scheme_symbol_type:
+      scheme_log_abort("scheme_symbol_type: shouldn't be seen during deserialization step");
+      break;
+    case scheme_serialized_symbol_type:
+        new_so = scheme_intern_exact_symbol(SCHEME_BYTE_STR_VAL(so), SCHEME_BYTE_STRLEN_VAL(so));
+      break;
+    case scheme_pair_type:
+      {
+        Scheme_Object *tmp;
+        tmp = scheme_places_deserialize_worker(SCHEME_CAR(so));
+        SCHEME_CAR(so) = tmp;
+        tmp = scheme_places_deserialize_worker(SCHEME_CDR(so));
+        SCHEME_CDR(so) = tmp;
+        new_so = so;
+      }
+      break;
+    case scheme_vector_type:
+      {
+        long i;
+        long size = SCHEME_VEC_SIZE(so);
+        for (i = 0; i <size ; i++) {
+          Scheme_Object *tmp;
+          tmp = scheme_places_deserialize_worker(SCHEME_VEC_ELS(so)[i]);
+          SCHEME_VEC_ELS(so)[i] = tmp;
+        }
+        new_so = so;
+      }
+      break;
+    case scheme_structure_type:
+      scheme_log_abort("scheme_structure_type: shouldn't be seen during deserialization step");
+      break;
+    case scheme_serialized_structure_type:
+      {
+        Scheme_Serialized_Structure *st = (Scheme_Serialized_Structure*)so;
+        Scheme_Struct_Type *stype;
+        Scheme_Structure *nst;
+        long size;
+        int i = 0;
+      
+        size = st->num_slots;
+        stype = scheme_lookup_prefab_type(SCHEME_CDR(st->prefab_key), size);
+        nst = (Scheme_Structure*) scheme_make_blank_prefab_struct_instance(stype);
+        for (i = 0; i <size ; i++) {
+          Scheme_Object *tmp;
+          tmp = scheme_places_deserialize_worker((Scheme_Object*) st->slots[i]);
+          nst->slots[i] = tmp;
+        }
+        new_so = (Scheme_Object*)nst;
+      }
+      break;
+
+    case scheme_resolved_module_path_type:
+    default:
+      scheme_log_abort("cannot deserialize object");
+      abort();
+      break;
+  }
+  return new_so;
+}
+
+Scheme_Object *scheme_places_serialize(Scheme_Object *so, void **msg_memory) {
+#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+  Scheme_Object *new_so;
+  Scheme_Object *tmp;
+  GC_create_message_allocator();
+  new_so = scheme_places_deep_copy(so);
+  tmp = GC_finish_message_allocator();
+  (*msg_memory) = tmp;
+  return new_so;
+#else
+  return so;
+#endif
+}
+
+Scheme_Object *scheme_places_deserialize(Scheme_Object *so, void *msg_memory) {
+#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+  Scheme_Object *new_so;
+  new_so = scheme_places_deserialize_worker(so);
+  GC_adopt_message_allocator(msg_memory);
+  return new_so;
+#else
+  return so;
+#endif
 }
 
 Scheme_Object *scheme_place_send(int argc, Scheme_Object *args[]) {
@@ -705,31 +1160,47 @@ Scheme_Object *scheme_place_send(int argc, Scheme_Object *args[]) {
     if (SAME_TYPE(SCHEME_TYPE(args[0]), scheme_place_type)) {
       ch = (Scheme_Place_Bi_Channel *) ((Scheme_Place *) args[0])->channel;
     }
-    else {
-      ch = (Scheme_Place_Bi_Channel *)args[0];
+    else if (SAME_TYPE(SCHEME_TYPE(args[0]), scheme_place_bi_channel_type)) {
+      ch = (Scheme_Place_Bi_Channel *) args[0];
     }
-    mso = scheme_places_deep_copy_in_master(args[1]);
-    scheme_place_async_send((Scheme_Place_Async_Channel *) ch->sendch, mso);
+    else {
+      ch = NULL;
+      scheme_wrong_type("place-channel-send", "place-channel", 0, argc, args);
+    }
+    {
+      void *msg_memory;
+      mso = scheme_places_serialize(args[1], &msg_memory);
+      scheme_place_async_send((Scheme_Place_Async_Channel *) ch->sendch, mso, msg_memory);
+    }
   }
   else {
-    scheme_wrong_count_m("place-channel-send", 1, 2, argc, args, 0);
+    scheme_wrong_count_m("place-channel-send", 2, 2, argc, args, 0);
   }
   return scheme_true;
 }
 
 Scheme_Object *scheme_place_recv(int argc, Scheme_Object *args[]) {
   if (argc == 1) {
+    Scheme_Object *mso;
     Scheme_Place_Bi_Channel *ch;
     if (SAME_TYPE(SCHEME_TYPE(args[0]), scheme_place_type)) {
       ch = (Scheme_Place_Bi_Channel *) ((Scheme_Place *) args[0])->channel;
     }
-    else {
+    else if (SAME_TYPE(SCHEME_TYPE(args[0]), scheme_place_bi_channel_type)) {
       ch = (Scheme_Place_Bi_Channel *) args[0];
     }
-    return scheme_place_async_recv((Scheme_Place_Async_Channel *) ch->recvch);
+    else {
+      ch = NULL;
+      scheme_wrong_type("place-channel-recv", "place-channel", 0, argc, args);
+    }
+    {
+      void *msg_memory = NULL;
+      mso = scheme_place_async_recv((Scheme_Place_Async_Channel *) ch->recvch, &msg_memory);
+      return scheme_places_deserialize(mso, msg_memory);
+    }
   }
   else {
-    scheme_wrong_count_m("place-channel-recv", 1, 2, argc, args, 0);
+    scheme_wrong_count_m("place-channel-recv", 1, 1, argc, args, 0);
   }
   return scheme_true;
 }
@@ -784,6 +1255,8 @@ void force_hash_worker(Scheme_Object *so, Scheme_Hash_Table *ht)
     case scheme_byte_string_type:
     case scheme_unix_path_type:
     case scheme_symbol_type:
+    case scheme_place_bi_channel_type:
+    case scheme_flvector_type:
       break;
     case scheme_pair_type:
       {
@@ -796,7 +1269,7 @@ void force_hash_worker(Scheme_Object *so, Scheme_Hash_Table *ht)
         long i;
         long size = SCHEME_VEC_SIZE(so);
         for (i = 0; i <size ; i++) {
-          scheme_places_deep_copy_worker(SCHEME_VEC_ELS(so)[i], ht);
+          force_hash_worker(SCHEME_VEC_ELS(so)[i], ht);
         }
       }
       break;
@@ -806,6 +1279,9 @@ void force_hash_worker(Scheme_Object *so, Scheme_Hash_Table *ht)
         Scheme_Struct_Type *stype = st->stype;
         long i;
         long size = stype->num_slots;
+
+        if (stype->prefab_key)
+          force_hash_worker((Scheme_Object*)stype->prefab_key, ht);
         
         for (i = 0; i <size ; i++) {
           force_hash_worker((Scheme_Object*) st->slots[i], ht);
@@ -814,7 +1290,7 @@ void force_hash_worker(Scheme_Object *so, Scheme_Hash_Table *ht)
       break;
     case scheme_resolved_module_path_type:
     default:
-      scheme_log_abort("cannot copy object");
+      scheme_log_abort("cannot force hash");
       abort();
       break;
   }
@@ -823,64 +1299,6 @@ void force_hash_worker(Scheme_Object *so, Scheme_Hash_Table *ht)
   }
   return;
 }
-
-static void* scheme_master_place_handlemsg(int msg_type, void *msg_payload)
-{
-  switch(msg_type) {
-    case 1:
-      {
-        Scheme_Object *o;
-        Scheme_Object *copied_o;
-        copied_o = scheme_places_deep_copy((Scheme_Object *)msg_payload);
-        o = scheme_intern_resolved_module_path_worker(copied_o);
-        return o;
-      }
-      break;
-    case 3:
-      {
-        Scheme_Object *o;
-        Scheme_Symbol_Parts *parts;
-        parts = (Scheme_Symbol_Parts *) msg_payload;
-        o = (Scheme_Object *)scheme_intern_exact_symbol_in_table_worker(parts->table, parts->kind, parts->name, parts->len);
-        return o;
-      }
-      break;
-    case 5:
-      { 
-        Scheme_Object *copied_o;
-        copied_o = scheme_places_deep_copy((Scheme_Object *)msg_payload);
-        return copied_o;
-      }
-      break;
-  }
-  return NULL;
-}
-
-void* scheme_master_fast_path(int msg_type, void *msg_payload) {
-  Scheme_Object *o;
-  void *original_gc;
-  Scheme_Hash_Table *ht;
-
-  switch(msg_type) {
-    case 1:
-    case 5:
-      ht = force_hash(msg_payload);
-      break;
-  }
-
-# ifdef MZ_PRECISE_GC
-  original_gc = GC_switch_to_master_gc();
-  scheme_start_atomic();
-# endif
-  o = scheme_master_place_handlemsg(msg_type, msg_payload);
-# ifdef MZ_PRECISE_GC
-  scheme_end_atomic_no_swap();
-  GC_switch_back_from_master(original_gc);
-# endif
-
-  return o;
-}
-
 
 void scheme_spawn_master_place() {
   mzrt_proc_first_thread_init();
@@ -922,12 +1340,14 @@ static void* GC_master_malloc_tagged(size_t size) {
   return ptr;
 }
 
-Scheme_Object *scheme_place_async_channel_create() {
+Scheme_Place_Async_Channel *scheme_place_async_channel_create() {
   Scheme_Object **msgs;
   Scheme_Place_Async_Channel *ch;
+  void **msg_memory;
 
   ch = GC_master_malloc_tagged(sizeof(Scheme_Place_Async_Channel));
   msgs = GC_master_malloc(sizeof(Scheme_Object*) * 8);
+  msg_memory = GC_master_malloc(sizeof(void*) * 8);
 
   ch->so.type = scheme_place_async_channel_type;
   ch->in = 0;
@@ -936,12 +1356,13 @@ Scheme_Object *scheme_place_async_channel_create() {
   ch->size = 8;
   mzrt_mutex_create(&ch->lock);
   ch->msgs = msgs;
+  ch->msg_memory = msg_memory;
   ch->wakeup_signal = NULL;
-  return (Scheme_Object *)ch;
+  return ch;
 }
 
-Scheme_Object *scheme_place_bi_channel_create() {
-  Scheme_Object *tmp;
+Scheme_Place_Bi_Channel *scheme_place_bi_channel_create() {
+  Scheme_Place_Async_Channel *tmp;
   Scheme_Place_Bi_Channel *ch;
 
   ch = GC_master_malloc_tagged(sizeof(Scheme_Place_Bi_Channel));
@@ -951,23 +1372,28 @@ Scheme_Object *scheme_place_bi_channel_create() {
   ch->sendch = tmp;
   tmp = scheme_place_async_channel_create();
   ch->recvch = tmp;
-  return (Scheme_Object *)ch;
+  return ch;
 }
 
-Scheme_Object *scheme_place_bi_peer_channel_create(Scheme_Object *orig) {
+Scheme_Place_Bi_Channel *scheme_place_bi_peer_channel_create(Scheme_Place_Bi_Channel *orig) {
   Scheme_Place_Bi_Channel *ch;
 
   ch = GC_master_malloc_tagged(sizeof(Scheme_Place_Bi_Channel));
   ch->so.type = scheme_place_bi_channel_type;
 
-  ch->sendch = ((Scheme_Place_Bi_Channel *)orig)->recvch;
-  ch->recvch = ((Scheme_Place_Bi_Channel *)orig)->sendch;
-  return (Scheme_Object *)ch;
+  ch->sendch = orig->recvch;
+  ch->recvch = orig->sendch;
+  return ch;
 }
 
 static Scheme_Object *scheme_place_channel(int argc, Scheme_Object *args[]) {
   if (argc == 0) {
-    return scheme_place_bi_channel_create();
+    Scheme_Place_Bi_Channel *ch;
+    Scheme_Object *a[2];
+    ch = scheme_place_bi_channel_create();
+    a[0] = (Scheme_Object *) ch;
+    a[1] = (Scheme_Object *) scheme_place_bi_peer_channel_create(ch);
+    return scheme_values(2, a);
   }
   else {
     scheme_wrong_count_m("place-channel", 0, 0, argc, args, 0);
@@ -975,62 +1401,45 @@ static Scheme_Object *scheme_place_channel(int argc, Scheme_Object *args[]) {
   return scheme_true;
 }
 
-static Scheme_Object *scheme_place_channel_receiver_channel(int argc, Scheme_Object *args[]) {
-  if (argc == 1) {
-    if (SAME_TYPE(SCHEME_TYPE(args[0]), scheme_place_bi_channel_type)) {
-      return scheme_place_bi_peer_channel_create(args[0]);
-    }
-    else {
-      scheme_wrong_type("place-channel->receive-channel", "place-channel?", 0, argc, args);
-    }
-  }
-  else {
-    scheme_wrong_count_m("place-channel-send", 1, 1, argc, args, 0);
-  }
-  return scheme_true;
-}
-
-
-static void scheme_place_bi_channel_set_signal(Scheme_Object *cho) {
-  Scheme_Place_Async_Channel *ch;
-  void *signaldescr;
-  signaldescr = scheme_get_signal_handle();
-  ch = (Scheme_Place_Async_Channel *) ((Scheme_Place_Bi_Channel *)cho)->recvch;
-  ch->wakeup_signal = signaldescr;
-}
-
 static Scheme_Object *scheme_place_channel_p(int argc, Scheme_Object *args[])
 {
   return SAME_TYPE(SCHEME_TYPE(args[0]), scheme_place_bi_channel_type) ? scheme_true : scheme_false;
 }
 
-
-void scheme_place_async_send(Scheme_Place_Async_Channel *ch, Scheme_Object *o) {
+static void scheme_place_async_send(Scheme_Place_Async_Channel *ch, Scheme_Object *o, void *msg_memory) {
   int cnt;
   mzrt_mutex_lock(ch->lock);
   {
     cnt = ch->count;
     if (ch->count == ch->size) { /* GROW QUEUE */
       Scheme_Object **new_msgs;
+      void **new_msg_memory;
 
-      new_msgs = GC_master_malloc(sizeof(Scheme_Object*) *2);
+      new_msgs = GC_master_malloc(sizeof(Scheme_Object*) * ch->size * 2);
+      new_msg_memory = GC_master_malloc(sizeof(void*) * ch->size * 2);
 
       if (ch->out < ch->in) {
         memcpy(new_msgs, ch->msgs + ch->out, sizeof(Scheme_Object *) * (ch->in - ch->out));
+        memcpy(new_msg_memory, ch->msg_memory + ch->out, sizeof(void*) * (ch->in - ch->out));
       }
       else {
         int s1 = (ch->size - ch->out);
         memcpy(new_msgs, ch->msgs + ch->out, sizeof(Scheme_Object *) * s1);
         memcpy(new_msgs + s1, ch->msgs, sizeof(Scheme_Object *) * ch->in);
+
+        memcpy(new_msg_memory, ch->msg_memory + ch->out, sizeof(void*) * s1);
+        memcpy(new_msg_memory + s1, ch->msg_memory, sizeof(void*) * ch->in);
       }
       
       ch->msgs = new_msgs;
+      ch->msg_memory = new_msg_memory;
       ch->in = ch->size;
       ch->out = 0;
       ch->size *= 2;
     }
 
     ch->msgs[ch->in] = o;
+    ch->msg_memory[ch->in] = msg_memory;
     ++ch->count;
     ch->in = (++ch->in % ch->size);
   }
@@ -1046,6 +1455,9 @@ static int scheme_place_async_ch_ready(Scheme_Place_Async_Channel *ch) {
   int ready = 0;
   mzrt_mutex_lock(ch->lock);
   {
+    void *signaldescr;
+    signaldescr = scheme_get_signal_handle();
+    ch->wakeup_signal = signaldescr;
     if (ch->count > 0) ready = 1;
   }
   mzrt_mutex_unlock(ch->lock);
@@ -1064,22 +1476,32 @@ static int scheme_place_channel_ready(Scheme_Object *so) {
   return scheme_place_async_ch_ready((Scheme_Place_Async_Channel *) ch->recvch);
 }
 
-Scheme_Object *scheme_place_async_recv(Scheme_Place_Async_Channel *ch) {
+static Scheme_Object *scheme_place_async_recv(Scheme_Place_Async_Channel *ch, void **msg_memory) {
   Scheme_Object *msg = NULL;
   while(1) {
     mzrt_mutex_lock(ch->lock);
     {
       if (ch->count > 0) { /* GET MSG */
         msg = ch->msgs[ch->out];
+        *msg_memory = ch->msg_memory[ch->out];
+
         ch->msgs[ch->out] = NULL;
+        ch->msg_memory[ch->out] = NULL;
+
         --ch->count;
         ch->out = (++ch->out % ch->size);
       }
     }
     mzrt_mutex_unlock(ch->lock);
     if(msg) break;
-    scheme_thread_block(0);
-    scheme_block_until((Scheme_Ready_Fun) scheme_place_async_ch_ready, NULL, (Scheme_Object *) ch, 0);
+    else {
+      void *signaldescr;
+      signaldescr = scheme_get_signal_handle();
+      ch->wakeup_signal = signaldescr;
+    
+      scheme_thread_block(0);
+      scheme_block_until((Scheme_Ready_Fun) scheme_place_async_ch_ready, NULL, (Scheme_Object *) ch, 0);
+    }
   }
   return msg;
 }

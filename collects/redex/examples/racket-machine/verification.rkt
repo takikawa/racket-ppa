@@ -1,7 +1,7 @@
 #lang scheme
 
 (require redex/reduction-semantics)
-(require "grammar.ss")
+(require "grammar.ss" "util.ss")
 
 (define (bytecode-ok? e)
   (not (eq? 'invalid (car (term (verify ,e () 0 #f () () ∅))))))
@@ -33,44 +33,42 @@
    (side-condition (memq (term ṽ_n) '(box box-nc)))]
   
   [(verify (loc-noclr n) (ṽ_0 ... ṽ_n ṽ_n+1 ...) n_l #f γ η f) 
-   ((ṽ_0 ... (nc ṽ_n) ṽ_n+1 ...) γ (log-noclear n n_l η))
+   ((ṽ_0 ... (nc ṽ_n) ṽ_n+1 ...) γ (log-noclear n n_l ṽ_n η))
    (side-condition (= (length (term (ṽ_0 ...))) (term n)))
    (side-condition (memq (term ṽ_n) '(imm imm-nc)))]
   [(verify (loc-noclr n) (ṽ_0 ... ṽ_n ṽ_n+1 ...) n_l #t γ η f) 
-   ((ṽ_0 ... (nc ṽ_n) ṽ_n+1 ...) γ (log-noclear n n_l η))
+   ((ṽ_0 ... (nc ṽ_n) ṽ_n+1 ...) γ (log-noclear n n_l ṽ_n η))
    (side-condition (= (length (term (ṽ_0 ...))) (term n)))
    (side-condition (memq (term ṽ_n) '(imm imm-nc box box-nc)))]
   [(verify (loc-box-noclr n) (ṽ_0 ... ṽ_n ṽ_n+1 ...) n_l b γ η f) 
-   ((ṽ_0 ... box-nc ṽ_n+1 ...) γ (log-noclear n n_l η))
+   ((ṽ_0 ... box-nc ṽ_n+1 ...) γ (log-noclear n n_l ṽ_n η))
    (side-condition (= (length (term (ṽ_0 ...))) (term n)))
    (side-condition (memq (term ṽ_n) '(box box-nc)))]
   
-  [(verify (loc-clr n) (ṽ_0 ... imm ṽ_n+1 ...) n_l #f γ η f)
-   ((ṽ_0 ... not ṽ_n+1 ...) (log-clear n imm n_l γ) η)
+  [(verify (loc-clr n) (name s (ṽ_0 ... imm ṽ_n+1 ...)) n_l #f γ η f)
+   ((ṽ_0 ... not ṽ_n+1 ...) (log-clear n s n_l γ) η)
    (side-condition (= (length (term (ṽ_0 ...))) (term n)))]
-  [(verify (loc-clr n) (ṽ_0 ... ṽ_n ṽ_n+1 ...) n_l #t γ η f)
-   ((ṽ_0 ... not ṽ_n+1 ...) (log-clear n ṽ_n n_l γ) η)
+  [(verify (loc-clr n) (name s (ṽ_0 ... ṽ_n ṽ_n+1 ...)) n_l #t γ η f)
+   ((ṽ_0 ... not ṽ_n+1 ...) (log-clear n s n_l γ) η)
    (side-condition (= (length (term (ṽ_0 ...))) (term n)))
    (side-condition (memq (term ṽ_n) '(imm box)))]
-  [(verify (loc-box-clr n) (ṽ_0 ... box ṽ_n+1 ...) n_l b γ η f) 
-   ((ṽ_0 ... not ṽ_n+1 ...) (log-clear n box n_l γ) η)
+  [(verify (loc-box-clr n) (name s (ṽ_0 ... box ṽ_n+1 ...)) n_l b γ η f) 
+   ((ṽ_0 ... not ṽ_n+1 ...) (log-clear n s n_l γ) η)
    (side-condition (= (length (term (ṽ_0 ...))) (term n)))]
   
   ; branch
   [(verify (branch e_c e_t e_e) s n_l b γ η f)
-   ; FIXME: should redo γ_2?
-   ((redo-clears γ_3 (trim s_3 s)) γ_1 η_3)
+   ((redo-clears γ_2 (trim s_3 s)) (concat γ_2 γ_3) η_3)
    (where (s_1 γ_1 η_1) (verify e_c s n_l #f γ η ∅))
    (where (s_2 γ_2 η_2) (verify e_t (trim s_1 s) 0 b () () f))
-   (where (s_3 γ_3 η_3) (verify e_e (undo-noclears η_2 (undo-clears γ_2 (trim s_2 s))) 0 b γ_2 η_1 f))]
+   (where (s_3 γ_3 η_3) (verify e_e (undo-noclears η_2 (undo-clears γ_2 (trim s_2 s))) 0 b γ_1 η_1 f))]
   
   ; let-one
   [(verify (let-one e_r e_b) (ṽ_1 ...) n_l b γ η f)
-   (verify e_b (imm ṽ_1* ...) ,(add1 (term n_l)) b γ η (shift 1 f))
-   (where (s_1 γ_1 η_1) (verify e_r (uninit ṽ_1 ...) ,(add1 (term n_l)) #f γ η ∅))
-   (side-condition (term (valid? s_1)))
-   ;; MRF: the Racket implementation checks that s_1 starts with uninit
-   (where (ṽ_1* ...) (trim s_1 (ṽ_1 ...)))]
+   (verify e_b (imm ṽ_1* ...) ,(add1 (term n_l)) b γ_1 η_1 (shift 1 f))
+   (where s_0 (uninit ṽ_1 ...))
+   (where (s_1 γ_1 η_1) (verify e_r s_0 ,(add1 (term n_l)) #f γ η ∅))
+   (where (uninit ṽ_1* ...) (trim s_1 s_0))]
   
   ; seq
   [(verify (seq e_0 ... e_n) s n_l b γ η f)
@@ -108,7 +106,7 @@
    (verify (lam (τ ...) () e) s n_l b γ η f)]
   
   ; case-lam
-  [(verify (case-lam l ...) s n_l b γ η f)
+  [(verify (case-lam (name l (lam (val ...) (n ...) e)) ...) s n_l b γ η f)
    (s γ η)
    (side-condition (term (AND (verify-lam l s ?) ...)))]
   
@@ -141,7 +139,7 @@
    (side-condition (< (term n_p) (term n_l)))]
   
   ; let-rec
-  [(verify (let-rec ((name l (lam ((name v val) ...) (n_0 ...) e_0)) ...) e) (ṽ_0 ... ṽ_n ...) n_l b γ η f)
+  [(verify (let-rec ((name l (lam ((name v val) ...) (n_0 n_1 ...) e_0)) ...) e) (ṽ_0 ... ṽ_n ...) n_l b γ η f)
    (verify e s_1 n_l b γ η f)
    (where n ,(length (term (l ...))))
    (side-condition (= (length (term (ṽ_0 ...))) (term n)))
@@ -273,11 +271,12 @@
   [(nc box-nc) box-nc])
 
 (define-metafunction verification
-  log-noclear : n n η -> η
-  [(log-noclear n_p n_l (n_0 ...))
+  log-noclear : n n ṽ η -> η
+  [(log-noclear n_p n_l ṽ_p (n_0 ...))
    (,(- (term n_p) (term n_l)) n_0 ...)
-   (side-condition (>= (term n_p) (term n_l)))]
-  [(log-noclear n_p n_l η) η])
+   (side-condition (>= (term n_p) (term n_l)))
+   (side-condition (memq (term ṽ_p) '(imm box)))]
+  [(log-noclear n_p n_l ṽ_p η) η])
 
 (define-metafunction verification
   undo-noclears : η s -> s
@@ -293,25 +292,35 @@
    (undo-noclears (n_1 ...) s)])
 
 (define-metafunction verification
-  log-clear : n ṽ n γ -> γ
-  [(log-clear n_p ṽ n_l ((n_0 ṽ_0) ...))
-   ((,(- (term n_p) (term n_l)) ṽ) (n_0 ṽ_0) ...)
-   (side-condition (>= (term n_p) (term n_l)))]
-  [(log-clear n_p ṽ n_l γ) γ])
+  log-clear : n s n γ -> γ
+  [(log-clear n_p (name s (ṽ_0 ... ṽ_p ṽ_p+1 ...)) n_l ((n_i ṽ_i) ...))
+   ((,(- (- (term n_h) (term n_p)) (term 1)) ṽ_p) (n_i ṽ_i) ...)
+   (where n_h ,(length (term s)))
+   (side-condition (>= (term n_p) (term n_l)))
+   (side-condition (= (length (term (ṽ_0 ...))) (term n_p)))]
+  [(log-clear n_p s n_l γ) γ])
 
 (define-metafunction verification
   undo-clears : γ s -> s
   [(undo-clears γ invalid) invalid]
   [(undo-clears () s) s]
   [(undo-clears ((n_0 ṽ_0) (n_1 ṽ_1) ...) s)
-   (undo-clears ((n_1 ṽ_1) ...) (set ṽ_0 n_0 s))])
+   (undo-clears ((n_1 ṽ_1) ...) (set ṽ_0 ,(- (- (term n_h) (term n_0)) (term 1)) s))
+   (where n_h ,(length (term s)))
+   (side-condition (< (term n_0) (term n_h)))]
+  [(undo-clears ((n_0 ṽ_0) (n_1 ṽ_1) ...) s)
+   (undo-clears ((n_1 ṽ_1) ...) s)])
 
 (define-metafunction verification
   redo-clears : γ s -> s
   [(redo-clears γ invalid) invalid]
   [(redo-clears () s) s]
   [(redo-clears ((n_0 ṽ_0) (n_1 ṽ_1) ...) s) 
-   (redo-clears ((n_1 ṽ_1) ...) (set uninit n_0 s))])
+   (redo-clears ((n_1 ṽ_1) ...) (set not ,(- (- (term n_h) (term n_0)) (term 1)) s))
+   (where n_h ,(length (term s)))
+   (side-condition (< (term n_0) (term n_h)))]
+  [(redo-clears ((n_0 ṽ_0) (n_1 ṽ_1) ...) s) 
+   (redo-clears ((n_1 ṽ_1) ...) s)])
 
 (define-metafunction verification
   trim : s s -> s
@@ -345,10 +354,5 @@
 (define-metafunction verification
   [(not-member? any_1 (any_2 ...))
    ,(not (member (term any_1) (term (any_2 ...))))])
-
-;; Shouldn't have copied from "reduction.ss":
-(define-metafunction bytecode
-  [(count-up number)
-   ,(build-list (term number) (λ (x) x))])
 
 (provide (all-defined-out))

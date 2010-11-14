@@ -1,13 +1,19 @@
 #lang scribble/manual
 
-@begin[(require "utils.rkt" scribble/eval
+@begin[(require "utils.rkt" scribble/eval scriblib/footnote
                 racket/sandbox)
-       (require (for-label (only-meta-in 0 typed/racket)
+       (require (for-label (only-meta-in 0 [except-in typed/racket for])
+                           (only-in racket/base for)
                            racket/list srfi/14
                            version/check))]
 
 @(define the-eval (make-base-eval))
 @(the-eval '(require (except-in typed/racket #%top-interaction #%module-begin)))
+@(define the-top-eval (make-base-eval))
+@(the-top-eval '(require (except-in typed/racket #%module-begin)))
+
+@(define-syntax-rule (ex . args)
+   (examples #:eval the-top-eval . args))
 
 @title[#:tag "top"]{The Typed Racket Reference} 
 
@@ -18,15 +24,51 @@
 
 @section[#:tag "type-ref"]{Type Reference}
 
-@subsubsub*section{Base Types}
+@defidform[Any]{Any Racket value. All other types are subtypes of @racket[Any].}
+
+@defidform[Nothing]{The empty type.  No values inhabit this type, and
+any expression of this type will not evaluate to a value.}
+
+@subsection{Base Types}
+
+@subsubsection{Numeric Types}
 @deftogether[(
 @defidform[Number]
 @defidform[Complex]
+@defidform[Float-Complex]
 @defidform[Real]
+@defidform[Float]
+@defidform[Nonnegative-Float]
+@defidform[Inexact-Real]
+@defidform[Exact-Rational]
 @defidform[Integer]
 @defidform[Natural]
-@defidform[Exact-Positive-Integer]
 @defidform[Exact-Nonnegative-Integer]
+@defidform[Exact-Positive-Integer]
+@defidform[Fixnum]
+@defidform[Nonnegative-Fixnum]
+@defidform[Positive-Fixnum]
+@defidform[Zero]
+)]{These types represent the hierarchy of @rtech{numbers} of Racket.
+@racket[Integer] includes only @rtech{integers} that are @rtech{exact
+numbers}, corresponding to the predicate @racket[exact-integer?].
+@racket{Real} includes both exact and inexact reals.
+An @racket{Inexact-Real} can be either 32- or 64-bit floating-point
+numbers. @racket{Float} is restricted to 64-bit floats, which are the
+default in Racket.
+
+@ex[
+7
+8.3
+(/ 8 3)
+0
+-12
+3+4i]
+}
+
+@subsubsection{Other Base Types}
+
+@deftogether[(
 @defidform[Boolean]
 @defidform[True]
 @defidform[False]
@@ -39,42 +81,124 @@
 @defidform[Path]
 @defidform[Regexp]
 @defidform[PRegexp]
-@defidform[Syntax]
-@defidform[Identifier]
 @defidform[Bytes]
 @defidform[Namespace]
 @defidform[EOF]
 @defidform[Continuation-Mark-Set]
-@defidform[Char])]{
-These types represent primitive Racket data.  Note that @racket[Integer] represents exact integers.}
+@defidform[Char]
+@defidform[Thread])]{
+These types represent primitive Racket data.
 
-@defidform[Any]{Any Racket value. All other types are subtypes of @racket[Any].}
+@ex[
+#t
+#f
+"hello"
+(current-input-port)
+(current-output-port)
+(string->path "/")
+#rx"a*b*"
+#px"a*b*"
+'#"bytes"
+(current-namespace)
+#\b
+(thread (lambda () (add1 7)))
+]
+}
 
-@defidform[Nothing]{The empty type.  No values inhabit this type, and
-any expression of this type will not evaluate to a value.}
+@subsection{Singleton Types}
+
+Some kinds of data are given singleton types by default.  In
+particular, @rtech{symbols} and @rtech{keywords} have types which
+consist only of the particular symbol or keyword.  These types are
+subtypes of @racket[Symbol] and @racket[Keyword], respectively.
+
+@ex[
+'#:foo
+'bar
+]
+
+@subsection{Containers}
 
 
 The following base types are parameteric in their type arguments.
 
-@defform[(Listof t)]{Homogenous @rtech{lists} of @racket[t]}
-@defform[(Boxof t)]{A @rtech{box} of @racket[t]}
-@defform[(Syntaxof t)]{A @rtech{syntax object} containing a @racket[t]}
-@defform[(Vectorof t)]{Homogenous @rtech{vectors} of @racket[t]}
-@defform[(Option t)]{Either @racket[t] of @racket[#f]}
-@defform*[[(Parameter t)
-           (Parameter s t)]]{A @rtech{parameter} of @racket[t].  If two type arguments are supplied, 
-                               the first is the type the parameter accepts, and the second is the type returned.}
-@defform[(Pair s t)]{is the pair containing @racket[s] as the @racket[car]
+@defform[(Pair s t)]{is the @rtech{pair} containing @racket[s] as the @racket[car]
   and @racket[t] as the @racket[cdr]}
-@defform[(HashTable k v)]{is the type of a @rtech{hash table} with key type
-   @racket[k] and value type @racket[v].}
 
-@subsubsub*section{Type Constructors}
+@ex[
+(cons 1 2)
+(cons 1 "one")
+]
+
+
+@defform[(Listof t)]{Homogenous @rtech{lists} of @racket[t]}
+@defform[(List t ...)]{is the type of the list with one element, in order, 
+  for each type provided to the @racket[List] type constructor.}
+@defform/none[(#,(racket List) t ... trest #,(racket ...) bound)]{is the type of a list with
+one element for each of the @racket[t]s, plus a sequence of elements
+corresponding to @racket[trest], where @racket[bound]
+  must be an identifier denoting a type variable bound with @racket[...].}
+
+@ex[
+(list 'a 'b 'c)
+(map symbol->string (list 'a 'b 'c))
+]
+
+@defform[(Boxof t)]{A @rtech{box} of @racket[t]}
+
+@ex[(box "hello world")]
+
+@deftogether[(
+ @defform[(Syntaxof t)] 
+ @defidform[Syntax]
+ @defidform[Identifier])]{A @rtech{syntax object} containing a
+ @racket[t]. @racket[Syntax] is the type of any object constructable
+ via @racket[datum->syntax].  @racket[Identifier] is @racket[(Syntaxof
+ Symbol)].
+
+@ex[#'here]
+
+}
+
+@defform[(Vectorof t)]{Homogenous @rtech{vectors} of @racket[t]}
+@defform[(Vector t ...)]{is the type of the list with one element, in order, 
+  for each type provided to the @racket[Vector] type constructor.}
+
+@ex[(vector 1 2 3)
+#(a b c)]
+
+@defform[(HashTable k v)]{is the type of a @rtech{hash table} with key type
+   @racket[k] and value type @racket[v].
+
+@ex[#hash((a . 1) (b . 2))]
+}
+
+@defform[(Channelof t)]{A @rtech{channel} on which only @racket[t]s can be sent.
+@ex[
+(ann (make-channel) (Channelof Symbol))
+]
+}
+
+@defform*[[(Parameterof t)
+           (Parameterof s t)]]{A @rtech{parameter} of @racket[t].  If two type arguments are supplied, 
+                                 the first is the type the parameter accepts, and the second is the type returned.
+@ex[current-input-port
+    current-directory]
+}
+                              
+@defform[(Promise t)]{A @rtech{promise} of @racket[t].
+ @ex[(delay 3)]}
+
+@defidform[Sexp]{A recursive union containing types traversed by
+@racket[datum->syntax]. Note that this is @emph{not} the type produced
+by @racket[read].} 
+
+@subsection{Other Type Constructors}
 
 @defform*[#:id -> #:literals (* ...)
 	       [(dom ... -> rng)
 	        (dom ... rest * -> rng)
-		(dom ... rest ... bound -> rng)
+		(dom ... rest #,(racket ...) bound -> rng)
                 (dom -> rng : pred)]]{is the type of functions from the (possibly-empty)
   sequence @racket[dom ...] to the @racket[rng] type.  The second form
   specifies a uniform rest argument of type @racket[rest], and the
@@ -83,22 +207,27 @@ The following base types are parameteric in their type arguments.
   second occurrence of @racket[...] is literal, and @racket[bound]
   must be an identifier denoting a type variable. In the fourth form, 
   there must be only one @racket[dom] and @racket[pred] is the type 
-  checked by the predicate.}
-@defform[(U t ...)]{is the union of the types @racket[t ...]}
+  checked by the predicate.
+  
+  @ex[(λ: ([x : Number]) x)
+      (λ: ([x : Number] . [y : String *]) (length y))
+      ormap
+      string?]}
+@defform[(U t ...)]{is the union of the types @racket[t ...].
+ @ex[(λ: ([x : Real])(if (> 0 x) "yes" 'no))]}
 @defform[(case-lambda fun-ty ...)]{is a function that behaves like all of
   the @racket[fun-ty]s.  The @racket[fun-ty]s must all be function
   types constructed with @racket[->].}
 @defform/none[(t t1 t2 ...)]{is the instantiation of the parametric type
   @racket[t] at types @racket[t1 t2 ...]}
 @defform[(All (v ...) t)]{is a parameterization of type @racket[t], with
-  type variables @racket[v ...]}
-@defform[(List t ...)]{is the type of the list with one element, in order, 
-  for each type provided to the @racket[List] type constructor.}
-@defform[(Vector t ...)]{is the type of the list with one element, in order, 
-  for each type provided to the @racket[Vector] type constructor.}
+  type variables @racket[v ...].  If @racket[t] is a function type
+      constructed with @racket[->], the outer pair of parentheses
+      around the function type may be omitted.}
 @defform[(values t ...)]{is the type of a sequence of multiple values, with
 types @racket[t ...].  This can only appear as the return type of a
-function.}
+function.
+@ex[(values 1 2 3)]}
 @defform/none[v]{where @racket[v] is a number, boolean or string, is the singleton type containing only that value}
 @defform/none[(quote val)]{where @racket[val] is a Racket value, is the singleton type containing only that value}
 @defform/none[i]{where @racket[i] is an identifier can be a reference to a type
@@ -106,14 +235,10 @@ name or a type variable}
 @defform[(Rec n t)]{is a recursive type where @racket[n] is bound to the
 recursive type in the body @racket[t]}
 
-Other types cannot be written by the programmer, but are used
-internally and may appear in error messages.
 
-@defform/none[(struct:n (t ...))]{is the type of structures named
-@racket[n] with field types @racket[t].  There may be multiple such
-types with the same printed representation.}
-@defform/none[<n>]{is the printed representation of a reference to the
-type variable @racket[n]}
+@subsection{Other Types}
+
+@defform[(Option t)]{Either @racket[t] of @racket[#f]}
 
 @section[#:tag "special-forms"]{Special Form Reference}
 
@@ -132,8 +257,8 @@ creating new types, and annotating expressions.
 Local bindings, like @racket[let], each with
 associated types.  In the second form, @racket[_t0] is the type of the
 result of @racket[_loop] (and thus the result of the entire
-			      expression as well as the final
-				expression in @racket[body]).}
+expression as well as the final expression in @racket[body]).
+Type annotations are optional.}
 @deftogether[[
 @defform[(letrec: ([v : t e] ...) . body)]
 @defform[(let*: ([v : t e] ...) . body)]
@@ -142,7 +267,8 @@ result of @racket[_loop] (and thus the result of the entire
 @defform[(let*-values: ([([v : t] ...) e] ...) . body)]]]{
 Type-annotated versions of
 @racket[letrec], @racket[let*], @racket[let-values],
-  @racket[letrec-values], and @racket[let*-values].}  
+@racket[letrec-values], and @racket[let*-values]. As with
+@racket[let:], type annotations are optional.}
 
 @deftogether[[
 @defform[(let/cc: v : t . body)]
@@ -153,7 +279,8 @@ Type-annotated versions of
 
 @defform/subs[(lambda: formals . body)
 ([formals ([v : t] ...) 
-	  ([v : t] ... . [v : t])])]{
+	  ([v : t] ... . [v : t *])
+	  ([v : t] ... . [v : t ...])])]{
 A function of the formal arguments @racket[v], where each formal
 argument has the associated type.  If a rest argument is present, then
 it has type @racket[(Listof t)].}
@@ -171,13 +298,70 @@ A polymorphic function of multiple arities.}
 
 @subsection{Loops}
 
+@defform/subs[(for: type-ann-maybe (for-clause ...)
+                expr ...+)
+              ([type-ann-maybe code:blank
+                               @code:line[: Void]]
+	       [for:-clause [id : t seq-expr]
+	                    [id seq-expr]
+	                    @code:line[#:when guard]])]{
+Like @racket[for], but each @racket[id] having the associated type
+@racket[t]. Since the return type is always @racket[Void], annotating
+the return type of a @racket[for] form is optional. Unlike
+@racket[for], multi-valued @racket[seq-expr]s are not supported.
+Type annotations in clauses are optional for all @racket[for:]
+variants.
+}
+
+@deftogether[[
+@defform[(for/list: : u (for:-clause ...) expr ...+)]
+@;@defform[(for/hash: : u (for:-clause ...) expr ...+)] @; the ones that are commented out don't currently work
+@;@defform[(for/hasheq: : u (for:-clause ...) expr ...+)]
+@;@defform[(for/hasheqv: : u (for:-clause ...) expr ...+)]
+@;@defform[(for/vector: : u (for:-clause ...) expr ...+)]
+@;@defform[(for/flvector: : u (for:-clause ...) expr ...+)]
+@;@defform[(for/and: : u (for:-clause ...) expr ...+)]
+@defform[(for/or:   : u (for:-clause ...) expr ...+)]
+@;@defform[(for/first: : u (for:-clause ...) expr ...+)]
+@;@defform[(for/last: : u (for:-clause ...) expr ...+)]
+]]{
+These behave like their non-annotated counterparts, with the exception
+that @racket[#:when] clauses can only appear as the last
+@racket[for:-clause]. The last @racket[expr] of the body must have
+type @racket[u].
+}
+
+@deftogether[[
+@defform[(for/lists: : u ([id : t] ...)
+           (for:-clause ...)
+	   expr ...+)]
+@defform[(for/fold:  : u ([id : t init-expr] ...)
+	   (for:-clause ...)
+	   expr ...+)]]]{
+These behave like their non-annotated counterparts. Unlike the above,
+@racket[#:when] clauses can be used freely with these.
+}
+
+@deftogether[[
+@defform[(for*: type-ann-maybe (for-clause ...)
+           expr ...+)]
+@defform[(for*/lists: : u ([id : t] ...)
+           (for:-clause ...)
+	   expr ...+)]
+@defform[(for*/fold:  : u ([id : t init-expr] ...)
+	   (for:-clause ...)
+	   expr ...+)]]]{
+These behave like their non-annotated counterparts.
+}
+
 @defform/subs[(do: : u ([id : t init-expr step-expr-maybe] ...)
                        (stop?-expr finish-expr ...)
                 expr ...+)
               ([step-expr-maybe code:blank
                                 step-expr])]{
 Like @racket[do], but each @racket[id] having the associated type @racket[t], and 
-the final body @racket[expr] having the type @racket[u].
+the final body @racket[expr] having the type @racket[u]. Type
+annotations are optional.
 }
 
 
@@ -195,19 +379,31 @@ types.  In most cases, use of @racket[:] is preferred to use of @racket[define:]
 
 @subsection{Structure Definitions}
 @defform/subs[
-(define-struct: maybe-type-vars name-spec ([f : t] ...))
+(struct: maybe-type-vars name-spec ([f : t] ...) options ...)
 ([maybe-type-vars code:blank (v ...)]
- [name-spec name (name parent)])]{
+ [name-spec name (code:line name parent)]
+ [options #:transparent #:mutable])]{
  Defines a @rtech{structure} with the name @racket[name], where the
- fields @racket[f] have types @racket[t].  When @racket[parent], the
+ fields @racket[f] have types @racket[t], similar to the behavior of @racket[struct].
+  When @racket[parent] is present, the
 structure is a substructure of @racket[parent].  When
 @racket[maybe-type-vars] is present, the structure is polymorphic in the type
- variables @racket[v].}
+ variables @racket[v].
+
+Options provided have the same meaning as for the @racket[struct] form.}
+
+
+@defform/subs[
+(define-struct: maybe-type-vars name-spec ([f : t] ...) options ...)
+([maybe-type-vars code:blank (v ...)]
+ [name-spec name (name parent)]
+ [options #:transparent #:mutable])]{Legacy version of @racket[struct:], 
+corresponding to @racket[define-struct].}
                                  
 @defform/subs[
 (define-struct/exec: name-spec ([f : t] ...) [e : proc-t])
 ([name-spec name (name parent)])]{
- Like @racket[define-struct:], but defines an procedural structure.  
+ Like @racket[define-struct:], but defines a procedural structure.  
  The procdure @racket[e] is used as the value for @racket[prop:procedure], and must have type @racket[proc-t].}
 
 @subsection{Names for Types}
@@ -328,18 +524,50 @@ Other libraries can be used with Typed Racket via
 (check-version)
 ]
 
+@section{Utilities}
+
+Typed Racket provides some additional utility functions to facilitate typed programming.
+
+@defproc*[
+([(assert [v (U #f A)]) A]
+ [(assert [v A] [p? (A -> Any : B)]) B])]{
+Verifies that the argument satisfies the constraint.  If no predicate
+is provided, simply checks that the value is not
+@racket[#f].  
+}
+
+@examples[#:eval the-top-eval
+(define: x : (U #f Number) (string->number "7"))
+x
+(assert x)
+(define: y : (U String Number) 0)
+y
+(assert y number?)
+(assert y boolean?)]
+
+@defform*/subs[[(with-asserts ([id maybe-pred] ...) body ...+)]
+              ([maybe-pred code:blank
+                           (code:line predicate)])]{
+Guard the body with assertions. If any of the assertions fail, the
+program errors. These assertions behave like @racket[assert].
+}
+
+
 @section{Typed Racket Syntax Without Type Checking}
 
-@defmodulelang[typed-scheme/no-check]
+@defmodulelang*[(typed/racket/no-check
+                 typed/racket/base/no-check)]
 
 On occasions where the Typed Racket syntax is useful, but actual
-typechecking is not desired, the @racketmodname[typed-scheme/no-check]
-language is useful.  It provides the same bindings and syntax as Typed
-Racket, but does no type checking.
+typechecking is not desired, the @racketmodname[typed/racket/no-check]
+and @racketmodname[typed/racket/base/no-check] languages are useful.
+They provide the same bindings and syntax as
+@racketmodname[typed/racket] and @racketmodname[typed/racket/base],
+but do no type checking.
 
 Examples:
 
-@racketmod[typed-scheme/no-check
+@racketmod[typed/racket/no-check
 (: x Number)
 (define x "not-a-number")]
 
@@ -388,4 +616,40 @@ have the types ascribed to them; these types are converted to contracts and chec
   (define val 17))
 
 (fun val)]
+
+@section{Optimization in Typed Racket}
+
+@note{
+See
+@secref[#:doc '(lib "typed-scheme/scribblings/ts-guide.scrbl")]{optimization}
+in the guide for tips to get the most out of the optimizer.
+}
+
+Typed Racket provides a type-driven optimizer that rewrites well-typed
+programs to potentially make them faster. It should in no way make
+your programs slower or unsafe.
+
+Typed Racket's optimizer is turned on by default. If you want to
+deactivate it (for debugging, for instance), you must add the
+@racket[#:no-optimize] keyword when specifying the language of your
+program:
+
+@racketmod[typed/racket #:no-optimize]
+
+@section{Legacy Forms}
+
+The following forms are provided by Typed Racket for backwards
+compatibility.  
+
+@defidform[define-type-alias]{Equivalent to @racket[define-type].}
+@defidform[require/opaque-type]{Similar to using the @racket[opaque]
+keyword with @racket[require/typed].}
+@defidform[require-typed-struct]{Similar to using the @racket[struct]
+keyword with @racket[require/typed].}
+
+@(defmodulelang* (typed-scheme)
+                 #:use-sources (typed-scheme/typed-scheme
+                 typed-scheme/private/prims))
+Equivalent to the @racketmod[typed/racket/base] language.
+
 }

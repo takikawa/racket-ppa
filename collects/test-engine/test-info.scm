@@ -1,6 +1,7 @@
 #lang scheme/base
 
 (require scheme/class
+	 deinprogramm/quickcheck/quickcheck
 	 "print.ss")
 
 (provide (all-defined-out))
@@ -20,10 +21,19 @@
 (define-struct (incorrect-error check-fail) (expected message exn))
 ;; (make-expected-error src format string scheme-val)
 (define-struct (expected-error check-fail) (message value))
+;; (make-expected-an-error src format scheme-val)
+(define-struct (expected-an-error check-fail) (value))
 ;; (make-not-mem src format scheme-val scheme-val)
 (define-struct (not-mem check-fail) (test set))
 ;; (make-not-range src format scheme-val scheme-val scheme-val)
 (define-struct (not-range check-fail) (test min max))
+
+(define-struct signature-got (value format))
+
+(define-struct signature-violation (obj signature message srcloc blame))
+
+(define-struct (property-fail check-fail) (result))
+(define-struct (property-error check-fail) (message exn))
 
 ;; (make-message-error src format (listof string))
 (define-struct (message-error check-fail) (strings))
@@ -98,7 +108,7 @@
 	(formatter (check-fail-format fail)))
     (cond
      [(unexpected-error? fail)
-      (print "check-expect encountered the following error instead of the expected value, ~F. ~n   :: ~a"
+      (print "check-expect encountered the following error instead of the expected value, ~F. \n   :: ~a"
 	     (formatter (unexpected-error-expected fail))
 	     (unexpected-error-message fail))]
      [(unequal? fail)
@@ -111,11 +121,11 @@
 	     (formatter  (outofrange-range fail))
 	     (formatter (outofrange-actual fail)))]
      [(incorrect-error? fail)
-      (print "check-error encountered the following error instead of the expected ~a~n   :: ~a"
+      (print "check-error encountered the following error instead of the expected ~a\n   :: ~a"
 	     (incorrect-error-expected fail)
 	     (incorrect-error-message fail))]
      [(expected-error? fail)
-      (print "check-error expected the following error, but instead received the value ~F.~n ~a"
+      (print "check-error expected the following error, but instead received the value ~F.\n ~a"
 	     (formatter (expected-error-value fail))
 	     (expected-error-message fail))]
      [(message-error? fail)
@@ -129,6 +139,16 @@
              (formatter (not-range-test fail))
              (formatter (not-range-min fail))
              (formatter (not-range-max fail)))]
-     )
+     [(property-fail? fail)
+      (print-string "Property falsifiable with")
+      (for-each (lambda (arguments)
+		  (for-each (lambda (p)
+			      (if (car p)
+				  (print " ~a = ~F" (car p) (formatter (cdr p)))
+				  (print "~F" (formatter (cdr p)))))
+			    arguments))
+		(result-arguments-list (property-fail-result fail)))]
+     [(property-error? fail)
+      (print "check-property encountered the following error\n:: ~a"
+	     (property-error-message fail))])
     (print-string "\n")))
-

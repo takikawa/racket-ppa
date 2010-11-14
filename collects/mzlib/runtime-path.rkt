@@ -78,13 +78,14 @@
                                             (let ([s (cadr p)])
                                               (if (regexp-match? #rx"[./]" s)
                                                   s
-                                                  (string-append s "/main.rkt"))))]
-                        [dir (if (and (null? (cddr p))
-                                      (null? (cdr strs)))
-                                 (collection-path "mzlib")
-                                 (apply collection-path (append (cddr p) (drop-right strs 1))))])
-                   (build-path dir (last strs)))]
-                [else (error 'runtime-path "unknown form: ~e" p)])))
+                                                  (string-append s "/main.rkt"))))])
+                   (apply collection-file-path
+                          (last strs)
+                          (if (and (null? (cddr p))
+                                   (null? (cdr strs)))
+                              (list "mzlib")
+                              (append (cddr p) (drop-right strs 1)))))]
+                [else (error 'runtime-path "unknown form: ~.s" p)])))
            paths)))
   
   (define-for-syntax (register-ext-files tag-stx paths)

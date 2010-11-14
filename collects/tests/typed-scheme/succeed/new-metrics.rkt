@@ -61,7 +61,7 @@
            [table
             `((,a-hits ,b-hits)
               (,a-misses ,b-misses))]
-           [expected (λ: ([i : Natural] [j : Natural])
+           [expected (λ: ([i : Integer] [j : Integer])
                          (/ (* (row-total i table) (col-total j table)) total-subjects))])
       (exact->inexact 
        (table-sum 
@@ -93,16 +93,16 @@
 ;; ----------------------------------------
 ;; depth
 
-(: sexp-depth (Any -> Number))
+(: sexp-depth (Any -> Integer))
 (define (sexp-depth sexp)
   (cond
     [(pair? sexp)
      (+ (max-sexp-depth sexp) 1)]
     [else 0]))
 
-(: max-sexp-depth (Any -> Number))
+(: max-sexp-depth (Any -> Integer))
 (define (max-sexp-depth losx)
-  (improper-foldr (λ: ([t : Any] [r : Number]) (max (sexp-depth t) r)) 0 losx))
+  (improper-foldr (λ: ([t : Any] [r : Integer]) (max (sexp-depth t) r)) 0 losx))
 
 (: avg-sexp-depth ((Listof Any) -> Number))
 (define (avg-sexp-depth sexps)
@@ -201,7 +201,7 @@
 ;; ----------------------------------------
 ;; expression size
 
-(: atoms (Any -> Number))
+(: atoms (Any -> Integer))
 (define (atoms sexp)
   (cond
     [(null? sexp) 0]
@@ -425,7 +425,7 @@
           (show result))))
 
 ;; applies only to the combined metric [or more generally to listof-answer results]
-(: total (All (b c) (Natural (result (Listof Number) b c) -> (Listof Number))))
+(: total (All (b c) (Integer (result (Listof Number) b c) -> (Listof Number))))
 (define (total experiment-number result)
   (: total/s (Table -> Number))
   (define (total/s s) (apply + (list-ref (pivot s) experiment-number)))
@@ -447,7 +447,7 @@
     [(null? l) '()]
     [else
      (let ([n (length (car l))])
-       (build-list n (λ: ([i : Natural]) (map (λ: ([j : (Listof X)]) (list-ref j i)) l))))]))
+       (build-list n (λ: ([i : Integer]) (map (λ: ([j : (Listof X)]) (list-ref j i)) l))))]))
 
 (: variance ((Listof Number) -> Number))
 (define (variance xs)
@@ -455,16 +455,16 @@
     (/ (apply + (map (λ: ([x : Number]) (sqr (- x avg))) xs))
        (sub1 (length xs)))))
 
-(: table-ref (Natural Natural Table -> Number))
+(: table-ref (Integer Integer Table -> Number))
 (define (table-ref i j table)
   (list-ref (list-ref table i) j))
-(: row-total (Natural Table -> Number))
+(: row-total (Integer Table -> Number))
 (define (row-total i table)
   (apply + (list-ref table i)))
-(: col-total (Natural Table -> Number))
+(: col-total (Integer Table -> Number))
 (define (col-total j table)
   (apply + (map (λ: ([x : (Listof Number)]) (list-ref x j)) table)))
-(: table-sum ((Natural Natural -> Number) Table -> Number))
+(: table-sum ((Integer Integer -> Number) Table -> Number))
 (define (table-sum f table)
   (let ([rows (length table)]
         [cols (length (car table))])

@@ -24,13 +24,13 @@
 	 lang/stepper-language-interface
 	 lang/debugger-language-interface
 	 lang/run-teaching-program
+	 lang/private/continuation-mark-key
 	 stepper/private/shared
 	 
 	 (only-in test-engine/scheme-gui make-formatter)
-	 (only-in test-engine/scheme-tests scheme-test-data error-handler test-format test-execute)
-	 deinprogramm/contract/contract
-	 deinprogramm/contract/contract-test-engine
-	 deinprogramm/contract/contract-test-display
+	 test-engine/scheme-tests
+	 (lib "test-display.scm" "test-engine")
+	 deinprogramm/signature/signature
 	 )
 
 
@@ -169,8 +169,8 @@
             (let ([drs-namespace (current-namespace)]
                   [scheme-test-module-name
                    ((current-module-name-resolver) '(lib "test-engine/scheme-tests.ss") #f #f)]
-                  [scheme-contract-module-name
-                   ((current-module-name-resolver) '(lib "deinprogramm/contract/contract.ss") #f #f)])
+                  [scheme-signature-module-name
+                   ((current-module-name-resolver) '(lib "deinprogramm/signature/signature.ss") #f #f)])
               (run-in-user-thread
                (lambda ()
                  (read-accept-quasiquote (get-accept-quasiquote?))
@@ -186,20 +186,20 @@
                  (namespace-attach-module drs-namespace scheme-test-module-name)
                  (namespace-require scheme-test-module-name)
 
-                 (namespace-attach-module drs-namespace scheme-contract-module-name)
-                 (namespace-require scheme-contract-module-name)
+                 (namespace-attach-module drs-namespace scheme-signature-module-name)
+                 (namespace-require scheme-signature-module-name)
 
-		 ;; DeinProgramm hack: the test-engine code knows about the test~object name; we do, too
-		 (namespace-set-variable-value! 'test~object (build-contract-test-engine))
-		 ;; record test-case failures with the test engine
-		 (contract-violation-proc
-		  (lambda (obj contract message blame)
+		 ;; hack: the test-engine code knows about the test~object name; we do, too
+		 (namespace-set-variable-value! 'test~object (build-test-engine))
+		 ;; record signature violations with the test engine
+		 (signature-violation-proc
+		  (lambda (obj signature message blame)
 		    (cond
 		     ((namespace-variable-value 'test~object #f (lambda () #f))
 		      => (lambda (engine)
-			   (send (send engine get-info) contract-failed
-				 obj contract message blame))))))
-                 (scheme-test-data (list (drscheme:rep:current-rep) drs-eventspace contract-test-display%))
+			   (send (send engine get-info) signature-failed
+				 obj signature message blame))))))
+                 (scheme-test-data (list (drscheme:rep:current-rep) drs-eventspace test-display%))
                  (test-execute (get-preference 'tests:enable? (lambda () #t)))
                  (test-format (make-formatter (lambda (v o)
 						(render-value/format (if (procedure? v)
@@ -762,13 +762,28 @@
                                      (drscheme:rep:current-rep)
 				     '#%deinprogramm))
 
-	  ;; DeinProgramm addition: needed for test boxes; see the code
-	  ;; in collects/drscheme/private/language.ss
-	  (define/override (front-end/interaction port settings)
-	    (let ((reader (get-reader)))
-	      (lambda ()
-		(reader (object-name port) port))))
-	    
+          (define/override (front-end/interaction port settings)
+            (let ([reader (get-reader)] ;; DeinProgramm addition:
+					;; needed for test boxes; see
+					;; the code in
+					;; collects/drscheme/private/language.ss
+		  [start? #t]
+                  [done? #f])
+              (λ ()
+                (cond
+		  [start?
+		   (set! start? #f)
+		   #'(reset-tests)]
+                  [done? eof]
+                  [else
+                   (let ([ans (reader (object-name port) port)])
+                     (cond
+                       [(eof-object? ans)
+                        (set! done? #t)
+                        #`(test)]
+                       [else
+                        ans]))]))))
+
           (define/augment (capability-value key)
             (case key
               [(drscheme:teachpack-menu-items) deinprogramm-teachpack-callbacks]
@@ -996,9 +1011,10 @@
                         (parameterize ([current-custodian nc])
                           (thread (lambda () 
                                     (with-handlers ((exn? (lambda (x) (set! exn x))))
-                                      (parameterize ([read-accept-reader #t]
-						     [current-namespace (make-base-namespace)])
-                                        (compile-file filename))))))])
+                                      (parameterize ([current-namespace (make-base-namespace)])
+                                        (with-module-reading-parameterization
+                                         (lambda ()
+                                           (compile-file filename))))))))])
                    (thread
                     (lambda ()
                       (thread-wait t)
@@ -1156,15 +1172,7 @@
       ;                                                               
       ;                                                               
       ;                                                               
-      
-      
-      
-      
-      ;; cm-key : symbol
-      ;; the key used to put information on the continuation
-      ;; DeinProgramm change: contract-test-engine.ss knows about this
-      (define cm-key 'deinprogramm-teaching-languages-continuation-mark-key)
-      
+	      
       (define mf-note
         (let ([bitmap
                (make-object bitmap%
@@ -1194,7 +1202,7 @@
                        [(exn:srclocs? exn) 
                         ((exn:srclocs-accessor exn) exn)]
                        [(exn? exn) 
-                        (let ([cms (continuation-mark-set->list (exn-continuation-marks exn) cm-key)])
+                        (let ([cms (continuation-mark-set->list (exn-continuation-marks exn) teaching-languages-continuation-mark-key)])
 			  (cond
 			   ((not cms) '())
 			   ((findf (lambda (mark)
@@ -1218,7 +1226,7 @@
       
       ;; with-mark : syntax syntax -> syntax
       ;; a member of stacktrace-imports^
-      ;; guarantees that the continuation marks associated with cm-key are
+      ;; guarantees that the continuation marks associated with teaching-languages-continuation-mark-key are
       ;; members of the debug-source type
       (define (with-mark source-stx expr)
         (let ([source (syntax-source source-stx)]
@@ -1231,8 +1239,8 @@
                    (number? span))
               (with-syntax ([expr expr]
                             [mark (list source line col start-position span)]
-                            [cm-key cm-key])
-                #`(with-continuation-mark 'cm-key
+                            [teaching-languages-continuation-mark-key teaching-languages-continuation-mark-key])
+                #`(with-continuation-mark 'teaching-languages-continuation-mark-key
                     'mark
                     expr))
               expr)))
@@ -1254,10 +1262,12 @@
       ;;  test coverage
       ;;
       
+      ;; WARNING: much code copied from "collects/lang/htdp-langs.rkt"
+      
       (define test-coverage-enabled (make-parameter #t))
       (define current-test-coverage-info (make-thread-cell #f))
       
-      (define (initialize-test-coverage-point key expr)
+      (define (initialize-test-coverage-point expr)
         (unless (thread-cell-ref current-test-coverage-info)
           (let ([ht (make-hasheq)])
             (thread-cell-set! current-test-coverage-info ht)
@@ -1280,15 +1290,19 @@
                        (send rep set-test-coverage-info ht on-sd off-sd #f)))))))))
         (let ([ht (thread-cell-ref current-test-coverage-info)])
           (when ht
-            (hash-set! ht key (mcons #f expr)))))
+            (hash-set! ht expr #;(box #f) (mcons #f #f)))))
       
-      (define (test-covered key)
-        (let ([ht (thread-cell-ref current-test-coverage-info)])
-          (and ht
-               (let ([v (hash-ref ht key)])
-                 (and v
-                      (with-syntax ([v v])
-                        #'(set-mcar! v #t)))))))
+      (define (test-covered expr)
+        (let* ([ht (or (thread-cell-ref current-test-coverage-info)
+                       (error 'deinprogramm-langs
+                              "internal-error: no test-coverage table"))]
+               [v (hash-ref ht expr
+                    (lambda ()
+                      (error 'deinprogramm-langs
+                             "internal-error: expression not found: ~.s"
+                             expr)))])
+          #; (lambda () (set-box! v #t))
+          (with-syntax ([v v]) #'(#%plain-app set-mcar! v #t))))
       
       (define-values/invoke-unit et:stacktrace@
         (import et:stacktrace-imports^) (export (prefix et: et:stacktrace^)))

@@ -7,7 +7,7 @@
 
 (define-runtime-path here ".")
 
-(define standard-menus.ss-filename (simplify-path (build-path here "standard-menus.ss")))
+(define standard-menus.rkt-filename (simplify-path (build-path here "standard-menus.rkt")))
 (define docs-menus.ss-filename (simplify-path (build-path here 'up 'up "scribblings" "framework" "standard-menus.scrbl")))
 
 ;; build-before-super-item-clause : an-item -> (listof clause)
@@ -121,11 +121,11 @@
               ,(generic-initializer generic)))]))
 
 (define (main)
-  (write-standard-menus.ss)
+  (write-standard-menus.rkt)
   (write-docs))
 
 (define (write-docs)
-  (printf "writing to ~a~n" docs-menus.ss-filename)
+  (printf "writing to ~a\n" docs-menus.ss-filename)
   (call-with-output-file docs-menus.ss-filename
     (λ (port)
       (define (pop-out sexp)
@@ -202,10 +202,10 @@
       (display docs-footer-text port))
     #:exists 'truncate))
 
-(define (write-standard-menus.ss)
-  (printf "writing to ~a~n" standard-menus.ss-filename)  
+(define (write-standard-menus.rkt)
+  (printf "writing to ~a\n" standard-menus.rkt-filename)  
 
-  (call-with-output-file standard-menus.ss-filename
+  (call-with-output-file standard-menus.rkt-filename
     (λ (port)
       (pretty-print
        `(define standard-menus<%>

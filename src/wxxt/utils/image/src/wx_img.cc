@@ -34,7 +34,9 @@
  *
  * This software is provided "as is" without any express or implied warranty.
  */
-
+#ifdef __GNUC__
+#pragma GCC diagnostic ignored "-Wwrite-strings"
+#endif
 
 #define NEEDSTIME
 
@@ -670,8 +672,8 @@ void wxImage::FloydDitherize1(XImage * /* ximage */)
   /* same as FloydDitherize8, but output is a 1-bit per pixel XYBitmap,
      packed 8 pixels per byte */
 
-  register short *dp;
-  register byte   pix8, bit;
+  short          *dp;
+  byte           pix8, bit;
   short          *dithpic;
   int             i, j, err, bperln, order;
   byte           *pp, *image, w, blck, w8, b8;

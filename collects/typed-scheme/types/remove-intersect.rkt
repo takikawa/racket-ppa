@@ -3,7 +3,7 @@
 (require "../utils/utils.rkt" 
 	 (rep type-rep rep-utils)
 	 (types union subtype resolve convenience utils)
-         scheme/match mzlib/trace unstable/debug)
+         racket/match mzlib/trace unstable/debug)
 
 (provide (rename-out [*remove remove]) overlap)
 
@@ -23,9 +23,15 @@
          [(list _ (Univ:)) #t]
          [(list (F: _) _) #t]
          [(list _ (F: _)) #t]
-         [(list (Name: n) (Name: n*)) (free-identifier=? n n*)]
+         [(list (Name: n) (Name: n*)) 
+          (or (free-identifier=? n n*)
+              (overlap (resolve-once t1) (resolve-once t2)))]
          [(list (? Mu?) _) (overlap (unfold t1) t2)]
          [(list _ (? Mu?)) (overlap t1 (unfold t2))]
+         
+         [(list (Refinement: t _ _) t2) (overlap t t2)]
+         [(list t1 (Refinement: t _ _)) (overlap t1 t)]
+         
          [(list (Union: e) t)
           (ormap (lambda (t*) (overlap t* t)) e)]
          [(list t (Union: e))
@@ -50,19 +56,37 @@
          [(or (list (Pair: _ _) _)
               (list _ (Pair: _ _)))
           #f]
-         [(or (list (Value: '()) (Struct: n _ flds _ _ _ _ _ _))
-              (list (Struct: n _ flds _ _ _ _ _ _) (Value: '())))
+         [(or (list (Value: '()) (Struct: n _ flds _ _ _ _ _))
+              (list (Struct: n _ flds _ _ _ _ _) (Value: '())))
           #f]
-         [(list (Struct: n _ flds _ _ _ _ _ _)
-                (Struct: n _ flds* _ _ _ _ _ _))
-          (for/and ([f flds] [f* flds*]) (overlap f f*))]
+         [(list (Struct: n _ flds _ _ _ _ _)
+                (Struct: n _ flds* _ _ _ _ _))
+          (for/and ([f flds] [f* flds*]) 
+            (match* (f f*)
+              [((fld: t _ _) (fld: t* _ _)) (overlap t t*)]))]
+         [(list (Struct: n #f _ _ _ _ _ _)
+                (StructTop: (Struct: n #f _ _ _ _ _ _)))
+          #t]
          ;; n and n* must be different, so there's no overlap
-         [(list (Struct: n #f flds _ _ _ _ _ _)
-                (Struct: n* #f flds* _ _ _ _ _ _))
+         [(list (Struct: n #f flds _ _ _ _ _)
+                (Struct: n* #f flds* _ _ _ _ _))
           #f]
-         [(list (Struct: n p flds _ _ _ _ _ _)
-                (Struct: n* p* flds* _ _ _ _ _ _))
-          (and (= (length flds) (length flds*)) (for/and ([f flds] [f* flds*]) (overlap f f*)))]
+         [(list (Struct: n #f flds _ _ _ _ _)
+                (StructTop: (Struct: n* #f flds* _ _ _ _ _)))
+          #f]
+         [(list (and t1 (Struct: n p flds _ _ _ _ _))
+                (and t2 (Struct: n* p* flds* _ _ _ _ _)))
+          (let ([p1 (if (Name? p) (resolve-name p) p)]
+                [p2 (if (Name? p*) (resolve-name p*) p*)])
+            (or (and p2 (overlap t1 p2))
+                (and p1 (overlap t2 p1))
+                (and (= (length flds) (length flds*)) 
+                     (for/and ([f flds] [f* flds*]) 
+                       (match* (f f*)
+                               [((fld: t _ _) (fld: t* _ _)) (overlap t t*)])))))]
+         [(list (== (-val eof))
+                (Function: _))
+          #f]
          [else #t])])))
 
 

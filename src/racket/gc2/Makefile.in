@@ -14,6 +14,7 @@ mainsrcdir = @srcdir@/../..
 CC = @CC@
 CPP = @CPP@
 CXX = @CXX@
+NICEAR = $(mainsrcdir)/utils/nicear
 AR = @AR@
 ARFLAGS = @ARFLAGS@
 RANLIB = @RANLIB@
@@ -34,7 +35,7 @@ XFORM = env XFORM_USE_PRECOMP=$(XSRCDIR)/precomp.h $(XFORM_NOPRECOMP)
 SRCDIR = $(srcdir)/../src
 
 FOREIGN_USED_OBJ = foreign.@LTO@
-FOREIGN_NOT_USED_OBJ = 
+FOREIGN_NOT_USED_OBJ = $(FOREIGN_USED_OBJ)
 
 OBJS =  salloc.@LTO@ \
 	bignum.@LTO@ \
@@ -79,7 +80,7 @@ OBJS =  salloc.@LTO@ \
 	$(@FOREIGN_IF_USED@_OBJ)
 
 FOREIGN_USED_C = $(XSRCDIR)/foreign.c
-FOREIGN_NOT_USED_C =
+FOREIGN_NOT_USED_C = $(FOREIGN_USED_C)
 
 XSRCS = $(XSRCDIR)/salloc.c \
 	$(XSRCDIR)/bignum.c \
@@ -231,7 +232,7 @@ $(XSRCDIR)/type.c: ../src/type.@LTO@ $(XFORMDEP)
 $(XSRCDIR)/vector.c: ../src/vector.@LTO@ $(XFORMDEP)
 	$(XFORM) $(XSRCDIR)/vector.c $(SRCDIR)/vector.c
 $(XSRCDIR)/foreign.c: ../../foreign/foreign.@LTO@ $(XFORMDEP)
-	$(XFORM_SETUP) --cpp "$(CPP) $(CPPFLAGS) -I../../foreign/gcc/libffi/include -I${SRCDIR}/../../racket/src" -o $(XSRCDIR)/foreign.c $(SRCDIR)/../../foreign/foreign.c
+	$(XFORM_SETUP) --cpp "$(CPP) $(CPPFLAGS) -I../../foreign/libffi/include -I${SRCDIR}/../../racket/src" -o $(XSRCDIR)/foreign.c $(SRCDIR)/../../foreign/foreign.c
 $(XSRCDIR)/main.c: ../main.@LTO@ $(XFORMDEP)
 	$(XFORM_NOPRECOMP) $(XSRCDIR)/main.c $(DEF_COLLECTS_DIR) $(srcdir)/../main.c
 
@@ -322,6 +323,7 @@ main.@LTO@: $(XSRCDIR)/main.c
 
 gc2.@LTO@: \
 		$(srcdir)/alloc_cache.c \
+		$(srcdir)/block_cache.c \
 		$(srcdir)/backtrace.c \
 		$(srcdir)/commongc_internal.h \
 		$(srcdir)/platforms.h \
@@ -350,7 +352,6 @@ gc2.@LTO@: \
 		$(srcdir)/newgc.c \
 		$(srcdir)/newgc.h \
 		$(srcdir)/page_range.c \
-		$(srcdir)/protect_range.c \
 		$(srcdir)/rlimit_heapsize.c \
 		$(srcdir)/roots.c \
 		$(srcdir)/stack_comp.c \
@@ -364,22 +365,23 @@ gc2.@LTO@: \
 		$(srcdir)/weak.c
 	$(CC) $(CFLAGS) -I$(builddir)/.. -c $(srcdir)/gc2.c -o gc2.@LTO@
 
-FOREIGN_OBJS = ../../foreign/gcc/libffi/src/*.@LTO@ ../../foreign/gcc/libffi/src/*/*.@LTO@
-FOREIGN_LIB = ../../foreign/gcc/libffi/libffi@FOREIGN_CONVENIENCE@.la
+FOREIGN_OBJS = ../../foreign/libffi/src/*.@LTO@ ../../foreign/libffi/src/*/*.@LTO@
+FOREIGN_LIB = ../../foreign/libffi/libffi@FOREIGN_CONVENIENCE@.la
 FOREIGN_OBJSLIB = @FOREIGN_OBJSLIB@
 
 FOREIGN_USED_LIB = $(FOREIGN_OBJ) $(FOREIGN_LIB)
 FOREIGN_USED_OBJSLIB = $(FOREIGN_OBJSLIB)
-FOREIGN_NOT_USED_LIB = 
+FOREIGN_NOT_USED_LIB = $(FOREIGN_OBJ)
 FOREIGN_NOT_USED_OBJSLIB = 
 
-EXTRA_GMP := $(if @EXTRA_GMP_OBJ@,../src/@EXTRA_GMP_OBJ@,)
+EXTRA_GMP_DEP_FILE = ../src/@EXTRA_GMP_OBJ@
+EXTRA_GMP = @EXTRA_GMP_DEP@
 
 EXTRA_OBJS_T = ../src/gmp.@LTO@ $(EXTRA_GMP) ../src/unwind.@LTO@ $(@FOREIGN_IF_USED@_LIB)
 EXTRA_OBJS_L = ../src/gmp.@LTO@ $(EXTRA_GMP) ../src/unwind.@LTO@ $(@FOREIGN_IF_USED@_OBJSLIB)
 
 ../libracket3m.@LIBSFX@: $(OBJS) $(EXTRA_OBJS_T) gc2.@LTO@
-	$(AR) $(ARFLAGS) ../libracket3m.@LIBSFX@ $(OBJS) $(EXTRA_OBJS_L) gc2.@LTO@
+	$(NICEAR) $(AR) $(ARFLAGS) ../libracket3m.@LIBSFX@ $(OBJS) $(EXTRA_OBJS_L) gc2.@LTO@
 	$(RANLIB) ../libracket3m.@LIBSFX@
 
 ../racket@MMM@@NOT_OSX@: main.@LTO@ ../libracket3m.@LIBSFX@

@@ -197,6 +197,12 @@ please adhere to these guidelines:
  (cs-set!d-variable "set!’d variable")
  (cs-imported-variable "imported variable")
 
+  ;; mode sub-menu in the "view" menu
+  (cs-check-syntax-mode "Check Syntax Mode")
+  (cs-mode-menu-show-my-obligations "My Contract Obligations")
+  (cs-mode-menu-show-client-obligations "Client Contract Obligations")
+  (cs-mode-menu-show-syntax "Syntactic Categories")
+  
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "GC")
   (read-only "Read only")
@@ -440,8 +446,10 @@ please adhere to these guidelines:
  (online-coloring-active "Color syntax interactively")
  (open-files-in-tabs "Open files in separate tabs (not separate windows)")
  (show-interactions-on-execute "Automatically open interactions window when running a program")
-  (switch-to-module-language-automatically "Automatically switch to the module language when opening a module")
-  (interactions-beside-definitions "Put the interactions window beside the definitions window") ;; in preferences, below the checkbox one line above this one
+ (switch-to-module-language-automatically "Automatically switch to the module language when opening a module")
+ (interactions-beside-definitions "Put the interactions window beside the definitions window") ;; in preferences, below the checkbox one line above this one
+ (show-line-numbers "Show line numbers")
+ (hide-line-numbers "Hide line numbers")
  (limit-interactions-size "Limit interactions size")
  (background-color "Background Color")
  (default-text-color "Default text") ;; used for configuring colors, but doesn't need the word "color"
@@ -976,6 +984,8 @@ please adhere to these guidelines:
   ; ~a is filled with the teachpack's name; the message appears in the teachpack selection dialog when a user installs a new teachpack
   (compiling-teachpack "Compiling ~a teachpack ...")
   (teachpack-pre-installed "Preinstalled Teachpacks")
+  (teachpack-pre-installed/htdp "Preinstalled HtDP Teachpacks")
+  (teachpack-pre-installed/2htdp "Preinstalled HtDP/2e Teachpacks")
   (teachpack-user-installed "User-installed Teachpacks")
   (add-teachpack-to-list... "Add Teachpack to List...")
   (teachpack-already-installed "A teachpack with the name '~a' has already been installed. Overwrite it?")
@@ -1015,7 +1025,7 @@ please adhere to these guidelines:
  (enforce-primitives-group-box-label "Initial Bindings")
  (enforce-primitives-check-box-label "Disallow redefinition of initial bindings")
  (automatically-compile "Populate compiled/ directories (for faster loading)")
- (preserve-stacktrace-information "Preserve stacktrace (disable some JIT optimizations)")
+ (preserve-stacktrace-information "Preserve stacktrace (disable some optimizations)")
  (expression-level-stacktrace "Expression-level stacktrace")
  (function-level-stacktrace "Function-level stacktrace")
   
@@ -1263,18 +1273,20 @@ please adhere to these guidelines:
  (stepper-language-level-message "The stepper does not work for language \"~a\".")
  (stepper-button-label "Step")
 
- (stepper-previous-application "|< Application")
  (stepper-previous "< Step")
  (stepper-next "Step >")
- (stepper-next-application "Application >|")
- (stepper-jump "Jump...") ;; this one is changed.  action?
+ (stepper-jump "Jump...")
+ (stepper-jump-to-beginning "to beginning")
+ (stepper-jump-to-end "to end")
+ (stepper-jump-to-selected "to beginning of selected")
+ (stepper-jump-to-previous-application "to previous application step")
+ (stepper-jump-to-next-application "to next application step")
  (stepper-out-of-steps "Reached the end of evaluation before finding the kind of step you were looking for.")
  (stepper-no-such-step/title "Step Not Found")
  (stepper-no-such-step "Couldn't find a step matching that criterion.")
  (stepper-no-such-step/earlier "Couldn't find an earlier step matching that criterion.")
- (stepper-jump-to-beginning "to beginning") ;; name changed from stepper-home to stepper-jump-to-beginning
- (stepper-jump-to-end "to end") ;; content changed
- (stepper-jump-to-selected "to beginning of selected") ;; new
+  
+
   
  (debug-tool-button-name "Debug")
 
@@ -1429,21 +1441,30 @@ please adhere to these guidelines:
    "check-error encountered the following error instead of the expected ~a~n   :: ~a")
   (test-engine-expected-error-error
    "check-error expected the following error, but instead received the value ~F.~n ~a")
+  (test-engine-expected-an-error-error
+   "check-error expected an error, but instead received the value ~F.")
+  ;; members are appended to the message
+  (test-engine-not-mem-error "Actual value ~F differs from all given members in ")
+  (test-engine-not-range-error "Actual value ~F is not between ~F and ~F, inclusive.")
+
+  ;; followed by list of variable bindings
+  (test-engine-property-fail-error "Property falsifiable with")
+  (test-engine-property-error-error "check-property encountered the following error~n:: ~a")
 
   ; section header
   (test-engine-check-failures "Check failures:")
   ; section header
-  (test-engine-contract-violations "Contract violations:")
+  (test-engine-signature-violations "Signature violations:")
 
-  ; part of one phrase "contract <at line ...> to blame: procedure <...>
-  (test-engine-contract "contract")
+  ; part of one phrase "signature <at line ...> to blame: procedure <...>
+  (test-engine-signature "signature")
   (test-engine-to-blame "to blame: procedure")
 
-  (test-engine-no-contract-violations "No contract violations.")
-  (test-engine-1-contract-violation "1 contract violation.")
-  (test-engine-n-contract-violations "~a contract violations.")
+  (test-engine-no-signature-violations "No signature violations.")
+  (test-engine-1-signature-violation "1 signature violation.")
+  (test-engine-n-signature-violations "~a signature violations.")
 
-  ; as in got <value>, contract <at ...>
+  ; as in got <value>, signature <at ...>
   (test-engine-got "got")
 
   (profjWizward-insert-java-class "Insert Java Class")
@@ -1524,6 +1545,7 @@ please adhere to these guidelines:
   (planet-downloading "PLaneT: Downloading ~a...")
   (planet-installing "PLaneT: Installing ~a...")
   (planet-finished "PLaneT: Finished with ~a.")
+  (planet-docs-building "PLaneT: Building docs (triggered by ~a)...")
   (planet-no-status "PLaneT") ;; this can happen when there is status shown in a different and then the user switches to a tab where planet hasn't been used
   
   ;; string normalization. To see this, paste some text with a ligature into DrRacket

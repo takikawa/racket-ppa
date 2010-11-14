@@ -10,6 +10,9 @@
 
 /* This file is the same for all three version of wxWindows from
    PLT. */
+#ifdef __GNUG__
+#pragma GCC diagnostic ignored "-Wwrite-strings"
+#endif
 
 #if defined(_MSC_VER)
 # include "wx.h"
@@ -2335,8 +2338,8 @@ void wxPrintSetupData::SetPrinterMode(int mode)
 {
     printer_mode = PS_FILE;
 
-    if (mode == PS_PREVIEW && preview_command
-    ||  mode == PS_PRINTER && printer_command)
+    if ((mode == PS_PREVIEW && preview_command)
+    ||  (mode == PS_PRINTER && printer_command))
 	printer_mode = mode;
 }
 

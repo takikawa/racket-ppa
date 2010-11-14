@@ -15,6 +15,7 @@
   (#%provide for/fold for*/fold
              for for*
              for/list for*/list
+             for/vector for*/vector
              for/lists for*/lists
              for/and for*/and
              for/or for*/or
@@ -29,6 +30,7 @@
              (rename *in-range in-range)
              (rename *in-naturals in-naturals)
              (rename *in-list in-list)
+             (rename *in-mlist in-mlist)
              (rename *in-vector in-vector)
              (rename *in-string in-string)
              (rename *in-bytes in-bytes)
@@ -175,11 +177,17 @@
                    [certifier (sequence-transformer-ref m 2)])
                (let ([xformed (xformer (introducer (syntax-local-introduce clause)))])
                  (if xformed
-                     (expand-clause orig-stx (certify-clause (syntax-case clause ()
+                     (let ([r (expand-clause orig-stx 
+                                             (certify-clause (syntax-case clause ()
                                                                [(_ rhs) #'rhs])
                                                              (syntax-local-introduce (introducer xformed))
                                                              certifier
-                                                             introducer))
+                                                             introducer))])
+                       (syntax-property r
+                                        'disappeared-use
+                                        (cons (syntax-local-introduce #'form)
+                                              (or (syntax-property r 'disappeared-use)
+                                                  null))))
                      (eloop #f)))))]
           [[(id ...) (:do-in . body)]
            (syntax-case #'body ()
@@ -312,6 +320,7 @@
   (define (sequence? v)
     (or (do-sequence? v)
         (list? v)
+        (mpair? v)
         (vector? v)
         (string? v)
         (bytes? v)
@@ -323,6 +332,7 @@
     (cond
       [(do-sequence? v) ((do-sequence-ref v 0))]
       [(list? v) (:list-gen v)]
+      [(mpair? v) (:mlist-gen v)]
       [(vector? v) (:vector-gen v 0 (vector-length v) 1)]
       [(string? v) (:string-gen v 0 (string-length v) 1)]
       [(bytes? v) (:bytes-gen v 0 (bytes-length v) 1)]
@@ -372,9 +382,15 @@
   (define (in-list l)
     ;; (unless (list? l) (raise-type-error 'in-list "list" l))
     (make-do-sequence (lambda () (:list-gen l))))
-
+  
   (define (:list-gen l)
     (values car cdr l pair? void void))
+  
+  (define (in-mlist l)
+    (make-do-sequence (lambda () (:mlist-gen l))))
+
+  (define (:mlist-gen l)
+    (values mcar mcdr l mpair? void void))
 
   (define (check-ranges who start stop step)
     (unless (exact-nonnegative-integer? start) (raise-type-error who "exact non-negative integer" start))
@@ -809,8 +825,12 @@
       [(frm [orig-stx nested? #f binds] ([fold-var fold-init] ...)
             (clause . rest) . body)
        (with-syntax ([bind (expand-clause #'orig-stx #'clause)])
-         #`(frm [orig-stx nested? nested? (bind . binds)]
-                ([fold-var fold-init] ...) rest . body))]
+         (let ([r #`(frm [orig-stx nested? nested? (bind . binds)]
+                         ([fold-var fold-init] ...) rest . body)]
+               [d (syntax-property #'bind 'disappeared-use)])
+           (if d
+               (syntax-property r 'disappeared-use d)
+               r)))]
       [(_ [orig-stx . _] . _)
        (raise-syntax-error #f "bad syntax" #'orig-stx)]))
 
@@ -888,6 +908,44 @@
     (lambda (x) `(,#'reverse ,x))
     (lambda (x) x)
     (lambda (x) `(,#'cons ,x ,#'fold-var)))
+
+  (define-syntax (for/vector stx)
+    (syntax-case stx ()
+      ((for/vector (for-clause ...) body ...)
+       (syntax/loc stx
+         (list->vector 
+          (for/list (for-clause ...) body ...))))
+      ((for/vector #:length length-expr (for-clause ...) body ...)
+       (syntax/loc stx
+         (let ((len length-expr))
+           (unless (exact-nonnegative-integer? len)
+             (raise-type-error 'for/vector "exact nonnegative integer" len))
+           (let ((v (make-vector len)))
+             (for/fold ((i 0))
+                 (for-clause ... 
+                             #:when (< i len))
+               (vector-set! v i (begin body ...))
+               (add1 i))
+             v))))))
+
+  (define-syntax (for*/vector stx)
+    (syntax-case stx ()
+      ((for*/vector (for-clause ...) body ...)
+       (syntax/loc stx
+         (list->vector 
+          (for*/list (for-clause ...) body ...))))
+      ((for*/vector #:length length-expr (for-clause ...) body ...)
+       (syntax/loc stx
+         (let ((len length-expr))
+           (unless (exact-nonnegative-integer? len)
+             (raise-type-error 'for*/vector "exact nonnegative integer" len))
+           (let ((v (make-vector len)))
+             (for*/fold ((i 0))
+                 (for-clause ...
+                  #:when (< i len))
+               (vector-set! v i (begin body ...))
+               (add1 i))
+             v))))))
 
   (define-for-syntax (do-for/lists for/fold-id stx)
     (syntax-case stx ()
@@ -1063,6 +1121,31 @@
              ;; loop args -- ok to use unsafe-cdr, since car passed
              ((unsafe-cdr lst)))]]
         [_ #f])))
+  
+  (define-sequence-syntax *in-mlist
+    (lambda () #'in-mlist)
+    (lambda (stx)
+      (syntax-case stx ()
+        [[(id) (_ lst-expr)]
+         #'[(id)
+            (:do-in
+             ;;outer bindings
+             ([(lst) lst-expr])
+             ;; outer check
+             (void) ; (unless (list? lst) (in-list lst))
+             ;; loop bindings
+             ([lst lst])
+             ;; pos check
+             (not (null? lst))
+             ;; inner bindings
+             ([(id) (mcar lst)])
+             ;; pre guard
+             #t
+             ;; post guard
+             #t
+             ;; loop args 
+             ((mcdr lst)))]]
+        [_ #f])))
 
   (define-for-syntax (vector-like-gen vector?-id
                                       unsafe-vector-length-id
@@ -1153,9 +1236,9 @@
   (define-sequence-syntax *in-vector
     (lambda () #'in-vector)
     (vector-like-gen #'vector?
-                     #'unsafe-vector*-length
+                     #'unsafe-vector-length
                      #'in-vector
-                     #'unsafe-vector*-ref))
+                     #'unsafe-vector-ref))
 
   (define-sequence-syntax *in-string
     (lambda () #'in-string)
@@ -1207,6 +1290,32 @@
                ([(id) (producer* more* ...)])
                ;; pre guard
                (not (stop? id))
+               ;; post guard
+               #t
+               ;; loop args
+               ())])]
+        [[() (_ producer stop more ...)]
+         (with-syntax ([(more* ...) (generate-temporaries #'(more ...))])
+           #'[()
+              (:do-in
+                ([(producer*) producer] [(more*) more] ...
+                 [(stop?) (let ([s stop])
+                           (if (procedure? s)
+                             s
+                             (lambda (args)
+                               (and (not (null? args))
+                                    (eq? (car args) s)))))])
+               ;; outer check
+               #t
+               ;; loop bindings
+               ()
+               ;; pos check
+               #t
+               ;; inner bindings
+               ([(check) (call-with-values (lambda () (producer* more* ...))
+                                           (lambda vs vs))])
+               ;; pre guard
+               (not (stop? check))
                ;; post guard
                #t
                ;; loop args

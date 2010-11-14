@@ -175,7 +175,7 @@ static char *nl_langinfo(int which)
 
   reset_locale();
   if (!current_locale_name)
-    current_locale_name_ptr ="\0\0\0\0";
+    current_locale_name_ptr = "\0\0\0\0";
 
   if ((current_locale_name[0] == 'C')
       && !current_locale_name[1])
@@ -261,6 +261,11 @@ static Scheme_Object *string_normalize_c (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_normalize_kc (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_normalize_d (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_normalize_kd (int argc, Scheme_Object *argv[]);
+
+#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+static Scheme_Object *make_shared_byte_string (int argc, Scheme_Object *argv[]);
+static Scheme_Object *shared_byte_string (int argc, Scheme_Object *argv[]);
+#endif
 
 static Scheme_Object *make_byte_string (int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string (int argc, Scheme_Object *argv[]);
@@ -685,6 +690,15 @@ scheme_init_string (Scheme_Env *env)
 						    "bytes",
 						    0, -1),
 			     env);
+
+#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+  GLOBAL_PRIM_W_ARITY("make-shared-bytes", make_shared_byte_string, 1, 2, env);
+  GLOBAL_PRIM_W_ARITY("shared-bytes", shared_byte_string, 0, -1, env);
+#else
+  GLOBAL_PRIM_W_ARITY("make-shared-bytes", make_byte_string, 1, 2, env);
+  GLOBAL_PRIM_W_ARITY("shared-bytes", byte_string, 0, -1, env);
+#endif
+
   scheme_add_global_constant("bytes-length",
 			     scheme_make_folding_prim(byte_string_length,
 						      "bytes-length",
@@ -1140,7 +1154,9 @@ byte_p(int argc, Scheme_Object *argv[])
 #define CHAR_STR BYTE_STR
 #define MAKE_CHAR(x) scheme_make_integer_value(x)
 #define xstrlen strlen
+#define GENERATING_BYTE
 #include "strops.inc"
+#undef GENERATING_BYTE
 
 /* comparisons */
 
@@ -1663,6 +1679,23 @@ void scheme_do_format(const char *procname, Scheme_Object *port,
       case 'E':
 	used++;
 	break;
+      case '.':
+        switch (format[i+1]) {
+        case 'a':
+        case 'A':
+        case 's':
+        case 'S':
+        case 'v':
+        case 'V':
+          break;
+        default:
+	  scheme_wrong_type(procname, 
+                            "pattern-string (tag `~.' not followed by `a', `s', or `v')", 
+                            fpos, argc, argv);
+          break;
+        }
+        used++;
+        break;
       case 'x':
       case 'X':
       case 'o':
@@ -1689,7 +1722,7 @@ void scheme_do_format(const char *procname, Scheme_Object *port,
       default:
 	{
 	  char buffer[64];
-	  sprintf(buffer, "pattern-string (tag ~%c not allowed)", format[i]);
+	  sprintf(buffer, "pattern-string (tag `~%c' not allowed)", format[i]);
 	  scheme_wrong_type(procname, buffer, fpos, argc, argv);
 	  return;
 	}
@@ -1793,6 +1826,32 @@ void scheme_do_format(const char *procname, Scheme_Object *port,
 	  int len;
 	  char *s;
 	  s = scheme_make_provided_string(argv[used++], 0, &len);
+	  scheme_write_byte_string(s, len, port);
+	}
+	break;
+      case '.':
+	{
+	  long len;
+	  char *s;
+          len = scheme_get_print_width();
+          i++;
+          switch (format[i]) {
+          case 'a':
+          case 'A':
+            s = scheme_display_to_string_w_max(argv[used++], &len, len);
+            break;
+          case 's':
+          case 'S':
+            s = scheme_write_to_string_w_max(argv[used++], &len, len);
+            break;
+          case 'v':
+          case 'V':
+            s = scheme_print_to_string_w_max(argv[used++], &len, len);
+            break;
+          default:
+            s = "???";
+            len = 3;
+          }
 	  scheme_write_byte_string(s, len, port);
 	}
 	break;
@@ -3424,17 +3483,23 @@ static void reset_locale(void)
   Scheme_Object *v;
   const mzchar *name;
 
-  v = scheme_get_param(scheme_current_config(), MZCONFIG_LOCALE);
+  /* This function needs to work before threads are set up: */
+  if (scheme_current_thread) {
+    v = scheme_get_param(scheme_current_config(), MZCONFIG_LOCALE);
+  } else {
+    v = scheme_make_immutable_sized_utf8_string("", 0);
+  }
   locale_on = SCHEME_TRUEP(v);
 
   if (locale_on) {
     name = SCHEME_CHAR_STR_VAL(v);
 #ifndef DONT_USE_LOCALE
     if ((current_locale_name != name)
-	&& mz_char_strcmp("result-locale",
-			  current_locale_name, scheme_char_strlen(current_locale_name),
-			  name, SCHEME_CHAR_STRLEN_VAL(v),
-			  0, 1)) {
+        && (!current_locale_name
+            || mz_char_strcmp("result-locale",
+                              current_locale_name, scheme_char_strlen(current_locale_name),
+                              name, SCHEME_CHAR_STRLEN_VAL(v),
+                              0, 1))) {
       /* We only need CTYPE and COLLATE; two calls seem to be much
 	 faster than one call with ALL */
       char *n, buf[32];

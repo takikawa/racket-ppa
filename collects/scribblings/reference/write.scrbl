@@ -81,7 +81,8 @@ escapes:
 
 @itemize[
 
-  @item{@FmtMark{n} or @FmtMark{%} prints a newline, the same as @litchar{\n}}
+  @item{@FmtMark{n} or @FmtMark{%} prints a newline character (which
+  is equivalent to @litchar{\n} in a literal format string)}
 
   @item{@FmtMark{a} or @FmtMark{A} @racket[display]s the next argument
   among the @racket[v]s}
@@ -92,10 +93,18 @@ escapes:
   @item{@FmtMark{v} or @FmtMark{V} @racket[print]s the next argument
   among the @racket[v]s}
  
+  @item{@FmtMark{.}@nonterm{c} where @nonterm{c} is @litchar{a},
+  @litchar{A}, @litchar{s}, @litchar{S}, @litchar{v}, or @litchar{V}:
+  truncates @racket[display], @racket[write], or @racket[print] output
+  to @racket[(error-print-width)] characters, using @litchar{...} as
+  the last three characters if the untruncated output would be longer}
+
   @item{@FmtMark{e} or @FmtMark{E} outputs the next argument among the
   @racket[v]s using the current error value conversion handler (see
   @racket[error-value->string-handler]) and current error printing
-  width} @item{@FmtMark{c} or @FmtMark{C} @racket[write-char]s the
+  width}
+
+  @item{@FmtMark{c} or @FmtMark{C} @racket[write-char]s the
   next argument in @racket[v]s; if the next argument is not a
   character, the @exnraise[exn:fail:contract]}
 
@@ -133,7 +142,7 @@ supplied than are used by the format string, the
 
 @examples[
 (fprintf (current-output-port)
-         "~a as a string is ~s.~n"
+         "~a as a string is ~s.\n"
          '(3 4) 
          "(3 4)")
 ]}
@@ -154,7 +163,7 @@ Formats to a string. The result is the same as
 ]
 
 @examples[
-(format "~a as a string is ~s.~n" '(3 4) "(3 4)")
+(format "~a as a string is ~s.\n" '(3 4) "(3 4)")
 ]}
 
 @defboolparam[print-pair-curly-braces on?]{
@@ -210,6 +219,15 @@ A parameter that controls printing vectors; defaults to
 A parameter that controls printing hash tables; defaults to
 @racket[#f]. See @secref["print-hashtable"] for more information.}
 
+
+@defboolparam[print-boolean-long-form on?]{
+
+A parameter that controls printing of booleans. When the parameter's
+value is true, @racket[#t] and @racket[#f] print as @litchar{#true}
+and @litchar{#false}, otherwise they print as @litchar{#t}
+and @litchar{#f}.}
+
+
 @defboolparam[print-reader-abbreviations on?]{
 
 A parameter that controls printing of two-element lists that start
@@ -242,7 +260,7 @@ object within @litchar{#<syntax}...@litchar{>} (after the
                                             (or/c (and/c path-string? complete-path?) #f)
                                             (or/c (and/c path? complete-path?) #f)]{
 
-A parameter that is used when writing compiled code that contains
+A parameter that is used when writing compiled code (see @secref["print-compiled"]) that contains
 pathname literals, including source-location pathnames for procedure
 names. When not @racket[#f], paths that syntactically extend the
 parameter's value are converted to relative paths; when the resulting

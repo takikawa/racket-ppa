@@ -1,10 +1,8 @@
-
-#lang scheme/base
-(require "deriv.ss"
-         "deriv-util.ss")
+#lang racket/base
 (provide (struct-out protostep)
          (struct-out step)
          (struct-out misstep)
+         (struct-out remarkstep)
          (struct-out state)
          (struct-out bigframe)
          context-fill
@@ -22,9 +20,11 @@
 ;; A Step is one of
 ;;  - (make-step StepType State State)
 ;;  - (make-misstep StepType State exn)
+;;  - (make-remarkstep StepType State (listof (U string syntax 'arrow)))
 (define-struct protostep (type s1) #:transparent)
 (define-struct (step protostep) (s2) #:transparent)
 (define-struct (misstep protostep) (exn) #:transparent)
+(define-struct (remarkstep protostep) (contents) #:transparent)
 
 ;; A State is
 ;;  (make-state stx stxs Context BigContext (listof id) (listof id) (listof stx) nat/#f)
@@ -89,6 +89,9 @@
     (splice-lifts     . "Splice definitions from lifted expressions")
     (splice-module-lifts . "Splice lifted module declarations")
 
+    (remark           . "Macro made a remark")
+    (track-origin     . "Macro called syntax-track-origin")
+
     (error            . "Error")))
 
 (define (step-type->string x)
@@ -107,7 +110,8 @@
           rename-case-lambda
           rename-let-values
           rename-letrec-values
-          rename-lsv)))
+          rename-lsv
+          track-origin)))
 
 (define (rewrite-step? x)
   (and (step? x) (not (rename-step? x))))

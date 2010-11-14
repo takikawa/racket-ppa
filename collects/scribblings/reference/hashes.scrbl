@@ -180,6 +180,18 @@ Maps @scheme[key] to @scheme[v] in @scheme[hash], overwriting
 any existing mapping for @scheme[key].
 
 @see-also-caveats[]}
+                                     
+@defproc[(hash-set*! [hash (and/c hash? (not/c immutable?))]
+                     [key any/c]
+                     [v any/c]
+                     ...
+                     ...) void?]{
+
+Maps each @scheme[key] to each @scheme[v] in @scheme[hash], overwriting
+any existing mapping for each @scheme[key]. Mappings are added from the left, so
+later mappings overwrite earlier mappings.
+
+@see-also-caveats[]}
 
 
 @defproc[(hash-set [hash (and/c hash? immutable?)]
@@ -190,6 +202,20 @@ any existing mapping for @scheme[key].
 Functionally extends @scheme[hash] by mapping @scheme[key] to
 @scheme[v], overwriting any existing mapping for @scheme[key], and
 returning the extended hash table.
+
+@see-also-mutable-key-caveat[]}
+                                   
+@defproc[(hash-set* [hash (and/c hash? immutable?)]
+                    [key any/c]
+                    [v any/c]
+                    ...
+                    ...)
+          (and/c hash? immutable?)]{
+
+Functionally extends @scheme[hash] by mapping each @scheme[key] to
+@scheme[v], overwriting any existing mapping for each @scheme[key], and
+returning the extended hash table. Mappings are added from the left, so
+later mappings overwrite earlier mappings.
 
 @see-also-mutable-key-caveat[]}
 
@@ -303,7 +329,27 @@ otherwise the traversal skips a deleted key or uses the remapped key's
 new value.
 
 @see-also-concurrency-caveat[]}
+                        
+@defproc[(hash-keys [hash hash?])
+         (listof any/c)]{
+Returns a list of the keys of @scheme[hash] in an unspecified order.
+                              
+See @scheme[hash-map] for information about modifying @scheme[hash]
+during @scheme[hash-keys]. @see-also-concurrency-caveat[]}
 
+@defproc[(hash-values [hash hash?])
+         (listof any/c)]{
+Returns a list of the values of @scheme[hash] in an unspecified order.
+                              
+See @scheme[hash-map] for information about modifying @scheme[hash]
+during @scheme[hash-values]. @see-also-concurrency-caveat[]}
+                        
+@defproc[(hash->list [hash hash?])
+         (listof (cons/c any/c any/c))]{
+Returns a list of the key--value pairs of @scheme[hash] in an unspecified order.
+                              
+See @scheme[hash-map] for information about modifying @scheme[hash]
+during @scheme[hash->list]. @see-also-concurrency-caveat[]}
 
 @defproc[(hash-for-each [hash hash?]
                         [proc (any/c any/c . -> . any)])
@@ -375,33 +421,29 @@ Returns a mutable hash table with the same mappings, same
 key-comparison mode, and same key-holding strength as @scheme[hash].}
 
 
-@defproc[(eq-hash-code [v any/c]) exact-integer?]{
+@defproc[(eq-hash-code [v any/c]) fixnum?]{
 
-Returns an exact integer; for any two @scheme[eq?] values, the
-returned integer is the same. Furthermore, for the result integer
-@scheme[_k] and any other exact integer @scheme[_j], @scheme[(= _k _j)]
-implies @scheme[(eq? _k _j)].}
+Returns a @tech{fixnum}; for any two calls with @scheme[eq?] values,
+the returned number is the same.
 
-
-@defproc[(eqv-hash-code [v any/c]) exact-integer?]{
-
-Returns an exact integer; for any two @scheme[eqv?] values, the
-returned integer is the same. Furthermore, for the result integer
-@scheme[_k] and any other exact integer @scheme[_j], @scheme[(= _k _j)]
-implies @scheme[(eq? _k _j)].}
+@margin-note{Equal @tech{fixnums} are always @racket[eq?].}}
 
 
-@defproc[(equal-hash-code [v any/c]) exact-integer?]{
+@defproc[(eqv-hash-code [v any/c]) fixnum?]{
 
-Returns an exact integer; for any two @scheme[equal?] values, the
-returned integer is the same.  Furthermore, for the result integer
-@scheme[_k] and any other exact integer @scheme[_j], @scheme[(= _k _j)]
-implies @scheme[(eq? _k _j)]. A has code is computed even when
+Returns a @tech{fixnum}; for any two calls with @scheme[eqv?] values,
+the returned number is the same.}
+
+
+@defproc[(equal-hash-code [v any/c]) fixnum?]{
+
+Returns a @tech{fixnum}; for any two calls with @scheme[equal?] values,
+the returned number is the same. A hash code is computed even when
 @scheme[v] contains a cycle through pairs, vectors, boxes, and/or
 inspectable structure fields. See also @scheme[prop:equal+hash].}
 
-@defproc[(equal-secondary-hash-code [v any/c]) exact-integer?]{
+
+@defproc[(equal-secondary-hash-code [v any/c]) fixnum?]{
 
 Like @scheme[equal-hash-code], but computes a secondary value suitable
 for use in double hashing.}
-

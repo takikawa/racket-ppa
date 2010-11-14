@@ -628,8 +628,8 @@ default settings obtained via
 
 }
 
-@defmethod[(first-opened)
-           void?]{
+@defmethod*[([(first-opened [settings settings]) void?]
+             [(first-opened) void?])]{
 
 This method is called when the language is initialized, but
 no program is run. It is called from the user's eventspace's
@@ -638,21 +638,32 @@ main thread.
 See also
 @method[drracket:rep:text% initialize-console].
 
+Calling this method should not raise an exception (or otherwise
+try to escape). DrRacket is not in a position to signal the errors
+as user errors when this is called. An error will cause DrRacket
+to hang.
+
+Contrary to the method contract space, this method
+does not have to accept both zero and one arguments; the zero argument
+version is for backwards compatibility and drracket tests the arity of the
+method before invoking it.
 
 }
 
 @defmethod[(front-end/complete-program [port port]
                                        [settings settings])
            (-> (or/c sexp/c syntax? eof-object?))]{
-@scheme[front-end/complete-program] method reads, parses,
-and optionally compiles a program in the language. The first
+@scheme[front-end/complete-program] method reads and parses
+a program in the language. The @scheme[port]
 argument contains all of the data to be read (until eof) and
-the second argument is a value representing the source of
+the name of the @scheme[port] (obtained via @racket[object-name])
+is a value representing the source of
 the program (typically an editor, but may also be a string
 naming a file or some other value).
+The @scheme[settings] argument is the current settings
+for the language. 
 
-The third argument is the current settings
-for the language. The @scheme[front-end/complete-program]
+The @scheme[front-end/complete-program]
 method is expected to return a thunk that is called
 repeatedly to get all of the expressions in the
 program. When all expressions have been read, the thunk is

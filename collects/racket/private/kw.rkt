@@ -22,14 +22,23 @@
              new-prop:procedure
              new:procedure->method
              new:procedure-rename
-             new:chaperone-procedure)
+             new:chaperone-procedure
+             new:proxy-procedure)
   
   ;; ----------------------------------------
+
+  (define-values (prop:keyword-proxy keyword-proxy? keyword-proxy-ref) 
+    (make-struct-type-property 'keyword-proxy))
+  (define (keyword-procedure-proxy-of v)
+    (cond
+     [(keyword-proxy? v) ((keyword-proxy-ref v) v)]
+     [else #f]))
 
   (define-values (struct:keyword-procedure mk-kw-proc keyword-procedure?
                                            keyword-procedure-ref keyword-procedure-set!)
     (make-struct-type 'keyword-procedure #f 4 0 #f
-                      (list (cons prop:checked-procedure #t))
+                      (list (cons prop:checked-procedure #t)
+                            (cons prop:proxy-of keyword-procedure-proxy-of))
                       (current-inspector)
                       #f
                       '(0 1 2 3)))
@@ -122,12 +131,16 @@
   ;;  is used for each evaluation of a keyword lambda.)
   ;; The `procedure' property is a per-type method that has exactly
   ;;  the right arity, and that sends all arguments to `missing-kw'.
-  (define (make-required name fail-proc method?)
+  (define (make-required name fail-proc method? proxy?)
     (let-values ([(s: mk ? -ref -set!)
                   (make-struct-type (or name 'unknown)
-                                    (if method?
-                                        struct:keyword-method
-                                        struct:keyword-procedure)
+                                    (if proxy?
+                                        (if method?
+                                            struct:keyword-method-proxy
+                                            struct:keyword-procedure-proxy)
+                                        (if method?
+                                            struct:keyword-method
+                                            struct:keyword-procedure))
                                     0 0 #f
                                     (list (cons prop:arity-string 
                                                 generate-arity-string)
@@ -140,7 +153,30 @@
   (define-values (new-prop:procedure new-procedure? new-procedure-ref)
     (make-struct-type-property 'procedure #f
                                (list (cons prop:procedure values))))
+
   
+  ;; Proxies
+  (define-values (struct:keyword-procedure-proxy make-kpp keyword-procedure-proxy? kpp-ref kpp-set!)
+    (make-struct-type 'procedure
+                      struct:keyword-procedure
+                      1 0 #f
+                      (list (cons prop:keyword-proxy (lambda (v) (kpp-ref v 0))))))
+  (define-values (struct:keyword-method-proxy make-kmp keyword-method-proxy? kmp-ref kmp-set!)
+    (make-struct-type 'procedure
+                      struct:keyword-method
+                      1 0 #f
+                      (list (cons prop:keyword-proxy (lambda (v) (kmp-ref v 0))))))
+  (define-values (struct:okpp make-optional-keyword-procedure-proxy okpp? okpp-ref okpp-set!)
+    (make-struct-type 'procedure
+                      struct:okp
+                      1 0 #f
+                      (list (cons prop:keyword-proxy (lambda (v) (okpp-ref v 0))))))
+  (define-values (struct:okmp make-optional-keyword-method-proxy okmp? okmp-ref okmp-set!)
+    (make-struct-type 'procedure
+                      struct:okp
+                      1 0 #f
+                      (list (cons prop:keyword-proxy (lambda (v) (okmp-ref v 0))))))
+
   ;; ----------------------------------------
 
   (define make-keyword-procedure
@@ -486,7 +522,7 @@
                                                  [mk-id (with-syntax ([n (syntax-local-infer-name stx)]
                                                                       [call-fail (mk-kw-arity-stub)])
                                                           (syntax-local-lift-expression
-                                                           #'(make-required 'n call-fail method?)))])
+                                                           #'(make-required 'n call-fail method? #F)))])
                                      (syntax/loc stx
                                        (mk-id
                                         (lambda (given-kws given-argc)
@@ -940,9 +976,17 @@
                                               (regexp-replace #rx"^.*? given: x; (other )?"
                                                               (exn-message exn)
                                                               ""))])
-                             (apply
-                              raise-type-error 'x "x" 0 'x
-                              (append args (apply append (map list kws kw-args))))))]
+                             (let-values ([(struct:written make-written written? written-ref written-set!)
+                                           (make-struct-type 'written #f 1 0)])
+                               (parameterize ([error-value->string-handler
+                                               (let ([prev (error-value->string-handler)])
+                                                 (lambda (v n)
+                                                   (if (written? v)
+                                                       (format "~s" (written-ref v 0))
+                                                       (prev v n))))])
+                                 (apply
+                                  raise-type-error 'x "x" 0 (make-written 'x)
+                                  (append args (apply append (map list (map make-written kws) kw-args))))))))]
                       [proc-name (lambda (p) (or (and (named-keyword-procedure? p)
                                                       (car (keyword-procedure-name+fail p)))
                                                  (object-name p)
@@ -1054,7 +1098,8 @@
                                  missing-kw
                                  (inc-arity arity 1))
                                 (or (okm? proc)
-                                    (keyword-method? proc)))
+                                    (keyword-method? proc))
+                                #f)
                  kw-checker
                  new-kw-proc
                  req-kw
@@ -1090,7 +1135,7 @@
                    ;; Constructor must be from `make-required', but not a method.
                    ;; Make a new variant that's a method:
                    (let* ([name+fail (keyword-procedure-name+fail proc)]
-                          [mk (make-required (car name+fail) (cdr name+fail) #t)])
+                          [mk (make-required (car name+fail) (cdr name+fail) #t #f)])
                      (mk
                       (keyword-procedure-checker proc)
                       (keyword-procedure-proc proc)
@@ -1120,7 +1165,7 @@
                   [else
                    ;; Constructor must be from `make-required':
                    (let* ([name+fail (keyword-procedure-name+fail proc)]
-                          [mk (make-required name (cdr name+fail) (keyword-method? proc))])
+                          [mk (make-required name (cdr name+fail) (keyword-method? proc) #f)])
                      (mk
                       (keyword-procedure-checker proc)
                       (keyword-procedure-proc proc)
@@ -1131,112 +1176,153 @@
   (define new:chaperone-procedure
     (let ([chaperone-procedure 
            (lambda (proc wrap-proc . props)
-             (if (or (not (keyword-procedure? proc))
-                     (not (procedure? wrap-proc)))
-                 (apply chaperone-procedure proc wrap-proc props)
-                 (let-values ([(a) (procedure-arity proc)]
-                              [(b) (procedure-arity wrap-proc)]
-                              [(a-req a-allow) (procedure-keywords proc)]
-                              [(b-req b-allow) (procedure-keywords wrap-proc)])
-                   (define (includes? a b)
-                     (cond
-                      [(number? b) (cond
-                                    [(number? a) (= b a)]
-                                    [(arity-at-least? a)
-                                     (b . >= . (arity-at-least-value a))]
-                                    [else
-                                     (ormap (lambda (b a) (includes? a b))
-                                            a)])]
-                      [(arity-at-least? b) (cond
-                                            [(number? a) #f]
-                                            [(arity-at-least? a)
-                                             ((arity-at-least-value b) . >= . (arity-at-least-value a))]
-                                            [else (ormap (lambda (b a) (includes? b a))
-                                                         a)])]
-                      [else (andmap (lambda (b) (includes? a b)) b)]))
+             (do-chaperone-procedure #f chaperone-procedure 'chaperone-procedure proc wrap-proc props))])
+      chaperone-procedure))
 
-                   (unless (includes? b a)
-                     ;; Let core report error:
-                     (apply chaperone-procedure proc wrap-proc props))
-                   (unless (subset? b-req a-req)
-                     (raise-mismatch-error
-                      'chaperone-procedure
-                      "chaperoning procedure requires more keywords than original procedure: "
-                      proc))
-                   (unless (or (not b-allow)
-                               (and a-allow
-                                    (subset? a-allow b-allow)))
-                     (raise-mismatch-error
-                      'chaperone-procedure
-                      "chaperoning procedure does not accept all keywords of original procedure: "
-                      proc))
-                   (let* ([kw-chaperone
-                           (let ([p (keyword-procedure-proc wrap-proc)])
-                             (lambda (kws args . rest)
-                               (call-with-values (lambda () (apply p kws args rest))
-                                 (lambda results
-                                   (let ([len (length results)]
-                                         [alen (length rest)])
-                                     (unless (<= (+ alen 1) len (+ alen 2))
+  (define new:proxy-procedure
+    (let ([proxy-procedure 
+           (lambda (proc wrap-proc . props)
+             (do-chaperone-procedure #t proxy-procedure 'proxy-procedure proc wrap-proc props))])
+      proxy-procedure))
+
+  (define (do-chaperone-procedure is-proxy? chaperone-procedure name proc wrap-proc props)
+    (if (or (not (keyword-procedure? proc))
+            (not (procedure? wrap-proc))
+            ;; if any bad prop, let `chaperone-procedure' complain
+            (let loop ([props props])
+              (cond
+               [(null? props) #f]
+               [(proxy-property? (car props))
+                (let ([props (cdr props)])
+                  (or (null? props)
+                      (loop (cdr props))))]
+               [else #t])))
+        (apply chaperone-procedure proc wrap-proc props)
+        (let-values ([(a) (procedure-arity proc)]
+                     [(b) (procedure-arity wrap-proc)]
+                     [(a-req a-allow) (procedure-keywords proc)]
+                     [(b-req b-allow) (procedure-keywords wrap-proc)])
+          (define (includes? a b)
+            (cond
+             [(number? b) (cond
+                           [(number? a) (= b a)]
+                           [(arity-at-least? a)
+                            (b . >= . (arity-at-least-value a))]
+                           [else
+                            (ormap (lambda (a) (includes? a b)) a)])]
+             [(arity-at-least? b) (cond
+                                   [(number? a) #f]
+                                   [(arity-at-least? a)
+                                    ((arity-at-least-value b) . >= . (arity-at-least-value a))]
+                                   [else (ormap (lambda (a) (includes? b a)) a)])]
+             [else (andmap (lambda (b) (includes? a b)) b)]))
+
+          (unless (includes? b a)
+            ;; Let core report error:
+            (apply chaperone-procedure proc wrap-proc props))
+          (unless (subset? b-req a-req)
+            (raise-mismatch-error
+             name
+             (format
+              "~a procedure requires more keywords than original procedure: "
+              (if is-proxy? "proxying" "chaperoning"))
+             proc))
+          (unless (or (not b-allow)
+                      (and a-allow
+                           (subset? a-allow b-allow)))
+            (raise-mismatch-error
+             name
+             (format
+              "~a procedure does not accept all keywords of original procedure: "
+              (if is-proxy? "proxying" "chaperoning"))
+             proc))
+          (let* ([kw-chaperone
+                  (let ([p (keyword-procedure-proc wrap-proc)])
+                    (lambda (kws args . rest)
+                      (call-with-values (lambda () (apply p kws args rest))
+                        (lambda results
+                          (let ([len (length results)]
+                                [alen (length rest)])
+                            (unless (<= (+ alen 1) len (+ alen 2))
+                              (raise-mismatch-error
+                               '|keyword procedure chaperone|
+                               (format
+                                "expected ~a or ~a results, received ~a results from chaperoning procedure: "
+                                (+ alen 1)
+                                (+ alen 2)
+                                len)
+                               wrap-proc))
+                            (let ([extra? (= len (+ alen 2))])
+                              (let ([new-args ((if extra? cadr car) results)])
+                                (unless (and (list? new-args)
+                                             (= (length new-args) (length args)))
+                                  (raise-mismatch-error
+                                   '|keyword procedure chaperone|
+                                   (format
+                                    "expected a list of keyword-argument values as first result~a from chaperoning procedure: "
+                                    (if (= len alen)
+                                        ""
+                                        " (after the result chaperoning procedure)"))
+                                   wrap-proc))
+                                (for-each
+                                 (lambda (kw new-arg arg)
+                                   (unless is-proxy?
+                                     (unless (chaperone-of? new-arg arg)
                                        (raise-mismatch-error
                                         '|keyword procedure chaperone|
                                         (format
-                                         "expected ~a or ~a results, received ~a results from chaperoning procedure: "
-                                         (+ alen 1)
-                                         (+ alen 2)
-                                         len)
-                                        wrap-proc))
-                                     (let ([extra? (= len (+ alen 2))])
-                                       (let ([new-args ((if extra? cadr car) results)])
-                                         (unless (and (list? new-args)
-                                                      (= (length new-args) (length args)))
-                                           (raise-mismatch-error
-                                            '|keyword procedure chaperone|
-                                            (format
-                                             "expected a list of keyword-argument values as first result~a from chaperoning procedure: "
-                                             (if (= len alen)
-                                                 ""
-                                                 " (after the result chaperoning procedure)"))
-                                            wrap-proc))
-                                         (for-each
-                                          (lambda (kw new-arg arg)
-                                            (unless (chaperone-of? new-arg arg)
-                                              (raise-mismatch-error
-                                               '|keyword procedure chaperone|
-                                               (format
-                                                "~a keyword result is not a chaperone of original argument from chaperoning procedure: "
-                                                kw)
-                                               wrap-proc)))
-                                          kws
-                                          new-args
-                                          args))
-                                       (if extra?
-                                           (apply values (car results) kws (cdr results))
-                                           (apply values kws results))))))))]
-                          [new-proc
-                           (cond
-                            [(okp? proc)
-                             (make-optional-keyword-procedure
-                              (keyword-procedure-checker proc)
-                              (chaperone-procedure (keyword-procedure-proc proc)
-                                                   kw-chaperone)
-                              (keyword-procedure-required proc)
-                              (keyword-procedure-allowed proc)
-                              (chaperone-procedure (okp-ref proc 0)
-                                                   (okp-ref wrap-proc 0)))]
-                            [else
-                             ;; Constructor must be from `make-required':
-                             (let* ([name+fail (keyword-procedure-name+fail proc)]
-                                    [mk (make-required (car name+fail) (cdr name+fail) (keyword-method? proc))])
-                               (mk
-                                (keyword-procedure-checker proc)
-                                (chaperone-procedure (keyword-procedure-proc proc) kw-chaperone)
-                                (keyword-procedure-required proc)
-                                (keyword-procedure-allowed proc)))])])
-                     (if (null? props)
-                         new-proc
-                         (apply chaperone-struct new-proc 
-                                ;; chaperone-struct insists on having at least one selector:
-                                keyword-procedure-allowed values
-                                props))))))])
-      chaperone-procedure)))
+                                         "~a keyword result is not a chaperone of original argument from chaperoning procedure: "
+                                         kw)
+                                        wrap-proc))))
+                                 kws
+                                 new-args
+                                 args))
+                              (if extra?
+                                  (apply values (car results) kws (cdr results))
+                                  (apply values kws results))))))))]
+                 [new-proc
+                  (cond
+                   [(okp? proc)
+                    (if is-proxy?
+                        ((if (okm? proc)
+                             make-optional-keyword-method-proxy
+                             make-optional-keyword-procedure-proxy)
+                         (keyword-procedure-checker proc)
+                         (chaperone-procedure (keyword-procedure-proc proc)
+                                              kw-chaperone)
+                         (keyword-procedure-required proc)
+                         (keyword-procedure-allowed proc)
+                         (chaperone-procedure (okp-ref proc 0)
+                                              (okp-ref wrap-proc 0))
+                         proc)
+                        (chaperone-struct
+                         proc
+                         keyword-procedure-proc
+                         (lambda (self proc)
+                           (chaperone-procedure proc kw-chaperone))
+                         (make-struct-field-accessor okp-ref 0)
+                         (lambda (self proc)
+                           (chaperone-procedure proc
+                                                (okp-ref wrap-proc 0)))))]
+                   [else
+                    (if is-proxy?
+                        ;; Constructor must be from `make-required':
+                        (let* ([name+fail (keyword-procedure-name+fail proc)]
+                               [mk (make-required (car name+fail) (cdr name+fail) (keyword-method? proc) #t)])
+                          (mk
+                           (keyword-procedure-checker proc)
+                           (chaperone-procedure (keyword-procedure-proc proc) kw-chaperone)
+                           (keyword-procedure-required proc)
+                           (keyword-procedure-allowed proc)
+                           proc))
+                        (chaperone-struct
+                         proc
+                         keyword-procedure-proc
+                         (lambda (self proc)
+                           (chaperone-procedure proc kw-chaperone))))])])
+            (if (null? props)
+                new-proc
+                (apply chaperone-struct new-proc 
+                       ;; chaperone-struct insists on having at least one selector:
+                       keyword-procedure-allowed (lambda (s v) v)
+                       props)))))))

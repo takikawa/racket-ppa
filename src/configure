@@ -699,6 +699,7 @@ XFORMFLAGS
 MZBINTARGET
 MZINSTALLTARGET
 EXTRA_GMP_OBJ
+EXTRA_GMP_DEP
 OSX
 NOT_OSX
 FRAMEWORK_INSTALL_DIR
@@ -769,7 +770,7 @@ CCC
 CXXCPP
 XMKMF'
 ac_subdirs_all='racket/gc/libatomic_ops
-foreign/gcc/libffi
+foreign/libffi
 wxcommon/jpeg
 wxxt/src/x/wbuild '
 
@@ -5843,6 +5844,7 @@ EXTRALIBS=
 
 # for gmp assembly:
 EXTRA_GMP_OBJ=
+EXTRA_GMP_DEP=
 
 # For Racket targets:
 OSX=".osx"
@@ -5908,6 +5910,7 @@ case $OS in
        ;;
       alpha)
        EXTRA_GMP_OBJ="gmp_alpha_gcc.o"
+       EXTRA_GMP_DEP='$(EXTRA_GMP_DEP_FILE)'
        ;;
       i386|i486|i586|i686)
        enable_futures_by_default=yes
@@ -5922,6 +5925,7 @@ case $OS in
       COMPFLAGS="$COMPFLAGS -ieee_with_inexact -assume noaligned_objects"
     elif test "$CC" = "gcc" ; then
       EXTRA_GMP_OBJ="gmp_alpha_gcc.o"
+      EXTRA_GMP_DEP='$(EXTRA_GMP_DEP_FILE)'
     fi
     ;;
   HP-UX)
@@ -5963,6 +5967,22 @@ case $OS in
     if test "${enable_sdk}" != "" ; then
       PREFLAGS="$PREFLAGS -isysroot ${enable_sdk} -mmacosx-version-min=10.4 -DEXTRA_EXCEPTION_STUBS"
       LDFLAGS="$LDFLAGS -isysroot ${enable_sdk} -mmacosx-version-min=10.4"
+      if test "${CC}" = "gcc" ; then
+        CC=gcc-4.0
+      fi
+      if test "${CXX}" = "g++" ; then
+        CXX=g++-4.0
+      fi
+      if test "${CPP}" = "gcc -E" ; then
+        CPP="gcc-4.0 -E"
+      fi
+      if test "${CXXCPP}" = "g++ -E" ; then
+        CXXCPP="g++-4.0 -E"
+      fi
+      if test "${LD}" = "gcc" ; then
+        LD=gcc-4.0
+      fi
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS} ${PREFLAGS}"'"'
     fi
 
     case `$UNAME -m` in
@@ -12189,6 +12209,7 @@ LIBS="$LIBS $EXTRALIBS"
 
 
 
+
 mk_needed_dir()
 {
   if test ! -d "$1" ; then
@@ -12246,50 +12267,15 @@ fi
 FOREIGNTARGET=
 FOREIGN_IF_USED="FOREIGN_NOT_USED"
 if test -d "${srcdir}/foreign" && test "${enable_foreign}" = "yes" ; then
-  ac_aux_dir=
-for ac_dir in foreign/gcc  "$srcdir"/foreign/gcc ; do
-  if test -f "$ac_dir/install-sh"; then
-    ac_aux_dir=$ac_dir
-    ac_install_sh="$ac_aux_dir/install-sh -c"
-    break
-  elif test -f "$ac_dir/install.sh"; then
-    ac_aux_dir=$ac_dir
-    ac_install_sh="$ac_aux_dir/install.sh -c"
-    break
-  elif test -f "$ac_dir/shtool"; then
-    ac_aux_dir=$ac_dir
-    ac_install_sh="$ac_aux_dir/shtool install -c"
-    break
-  fi
-done
-if test -z "$ac_aux_dir"; then
-  { { echo "$as_me:$LINENO: error: cannot find install-sh or install.sh in foreign/gcc  \"$srcdir\"/foreign/gcc " >&5
-echo "$as_me: error: cannot find install-sh or install.sh in foreign/gcc  \"$srcdir\"/foreign/gcc " >&2;}
-   { (exit 1); exit 1; }; }
-fi
+  subdirs="$subdirs foreign/libffi"
 
-# These three variables are undocumented and unsupported,
-# and are intended to be withdrawn in a future Autoconf release.
-# They can cause serious problems if a builder's source tree is in a directory
-# whose full name contains unusual characters.
-ac_config_guess="$SHELL $ac_aux_dir/config.guess"  # Please don't use this var.
-ac_config_sub="$SHELL $ac_aux_dir/config.sub"  # Please don't use this var.
-ac_configure="$SHELL $ac_aux_dir/configure"  # Please don't use this var.
-
-
-  subdirs="$subdirs foreign/gcc/libffi"
-
-  makefiles="$makefiles foreign/Makefile"
   FOREIGNTARGET="foreign-stuff"
   FOREIGN_IF_USED="FOREIGN_USED"
-  # --disable-multilib is needed to avoid problems when running libffi's
-  # configure script.  This thing affects all usages of AC_CONFIG_SUBDIRS, but
-  # other scripts do not use it anyway.
-  ac_configure_args="$ac_configure_args --disable-multilib"
 else
-  FOREIGNTARGET="foreign-nothing"
+  FOREIGNTARGET="foreign-stub"
   MZOPTIONS="$MZOPTIONS -DDONT_USE_FOREIGN"
 fi
+makefiles="$makefiles foreign/Makefile"
 ac_configure_args="$ac_configure_args$SUB_CONFIGURE_EXTRAS"
 
 if test "${enable_gracket}" = "yes" ; then
@@ -13099,6 +13085,7 @@ XFORMFLAGS!$XFORMFLAGS$ac_delim
 MZBINTARGET!$MZBINTARGET$ac_delim
 MZINSTALLTARGET!$MZINSTALLTARGET$ac_delim
 EXTRA_GMP_OBJ!$EXTRA_GMP_OBJ$ac_delim
+EXTRA_GMP_DEP!$EXTRA_GMP_DEP$ac_delim
 OSX!$OSX$ac_delim
 NOT_OSX!$NOT_OSX$ac_delim
 FRAMEWORK_INSTALL_DIR!$FRAMEWORK_INSTALL_DIR$ac_delim
@@ -13110,7 +13097,6 @@ MZRT_CGC_FLAGS!$MZRT_CGC_FLAGS$ac_delim
 LIBATOM!$LIBATOM$ac_delim
 GRACKETLINKER!$GRACKETLINKER$ac_delim
 LIBSFX!$LIBSFX$ac_delim
-WXLIBS!$WXLIBS$ac_delim
 _ACEOF
 
   if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 97; then
@@ -13152,6 +13138,7 @@ _ACEOF
 ac_delim='%!_!# '
 for ac_last_try in false false false false false :; do
   cat >conf$$subs.sed <<_ACEOF
+WXLIBS!$WXLIBS$ac_delim
 WXVARIANT!$WXVARIANT$ac_delim
 ICP!$ICP$ac_delim
 MRLIBINSTALL!$MRLIBINSTALL$ac_delim
@@ -13196,7 +13183,7 @@ LIBOBJS!$LIBOBJS$ac_delim
 LTLIBOBJS!$LTLIBOBJS$ac_delim
 _ACEOF
 
-  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 42; then
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 43; then
     break
   elif $ac_last_try; then
     { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5

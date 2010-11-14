@@ -1,11 +1,8 @@
-
-#lang scheme/base
-(require (for-syntax scheme/base)
-         (for-syntax racket/private/struct-info)
-         scheme/list
-         scheme/match
+#lang racket/base
+(require (for-syntax racket/base)
+         racket/match
          unstable/struct
-         "deriv.ss")
+         "deriv.rkt")
 
 (provide make
 

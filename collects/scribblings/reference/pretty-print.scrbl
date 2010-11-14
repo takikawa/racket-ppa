@@ -21,7 +21,7 @@ In addition to the parameters defined in this section,
 @scheme[pretty-print] conforms to the @scheme[print-graph],
 @scheme[print-struct], @scheme[print-hash-table],
 @scheme[print-vector-length], @scheme[print-box], and
-@scheme[print-as-quasiquote] parameters.
+@scheme[print-as-expression] parameters.
 
 The pretty printer detects structures that have the
 @scheme[prop:custom-write] property and it calls the corresponding
@@ -329,9 +329,10 @@ or @scheme[pretty-display] (or the current output port).}
 @defboolparam[pretty-printing on?]{
 
 A parameter that is set to @scheme[#t] when the pretty printer calls a
-custom-write procedure (see @scheme[prop:custom-write]) for output.
-When pretty printer calls a custom-write procedure merely to detect
-cycles, it sets this parameter to @scheme[#f].}
+custom-write procedure (see @scheme[prop:custom-write]) for output in
+a mode that supports line breaks.  When pretty printer calls a
+custom-write procedure merely to detect cycles or to try to print on a
+single line, it sets this parameter to @scheme[#f].}
 
 
 @defproc[(make-tentative-pretty-print-output-port 
@@ -353,7 +354,8 @@ port. The @scheme[width] argument should be a target column width,
 usually obtained from @scheme[pretty-print-columns], possibly
 decremented to leave room for a terminator. The
 @scheme[overflow-thunk] procedure is called if more than
-@scheme[width] items are printed to the port; it can escape from the
+@scheme[width] items are printed to the port or if a newline is
+printed to the port via @racket[pretty-print-newline]; it can escape from the
 recursive print through a continuation as a short cut, but
 @scheme[overflow-thunk] can also return, in which case it is called
 every time afterward that additional output is written to the port.

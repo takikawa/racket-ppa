@@ -1,8 +1,8 @@
-(module tl-test scheme
+#lang racket
   (require "../reduction-semantics.ss"
            "test-util.ss"
            (only-in "../private/matcher.ss" make-bindings make-bind)
-           scheme/match
+           racket/match
            "../private/struct.ss")
   
   (reset-count)
@@ -101,6 +101,19 @@
         '("...."))
   
 
+  (let ()
+    ; error message shows correct form name
+    (test-syn-err
+     (let ()
+       (define-language L)
+       (define-extended-language M L
+         (z () (1 y_1)))
+       (void))
+     #rx"define-extended-language:.*underscore")
+    ; non-terminals added by extension can have underscores
+    (define-extended-language L base-grammar
+      (z () (1 z_1 z_1)))
+    (test (redex-match L z (term (1 () (1 () ())))) #f))
   
   ;; test multiple variable non-terminals
   (let ()
@@ -226,7 +239,7 @@
               main
               [(X Y Z) q])
             (void)))
-        "extend-language: new language extends old non-terminal X and also adds new shortcut Z")
+        "define-extended-language: new language extends old non-terminal X and also adds new shortcut Z")
   
   (test (with-handlers ([exn? exn-message])
           (let () 
@@ -237,7 +250,7 @@
               main
               [(X P) q])
             (void)))
-        "extend-language: new language does not have the same non-terminal aliases as the old, non-terminal P was not in the same group as X in the old language")
+        "define-extended-language: new language does not have the same non-terminal aliases as the old, non-terminal P was not in the same group as X in the old language")
   
   ;; underscores in literals
   (let ()
@@ -299,6 +312,14 @@
     (parameterize ([caching-enabled? #f])
       (term (f 1)))
     (test rhs-eval-count 2))
+  
+  (let ()
+    (define-language L)
+    (define-extended-language E L
+      (v ((bar X_1) X_1))
+      ((X Y) any))
+    (test (and (redex-match E v (term ((bar 1) 1))) #t) #t)
+    (test (redex-match E v (term ((bar 1) 2))) #f))
   
 ;                                                                                             
 ;                                                                                             
@@ -512,6 +533,13 @@
   
   (let ()
     (define-metafunction empty-language
+      [(f any) 1])
+    (define-metafunction/extension f empty-language
+      [(g any) 2])
+    (test (term (g 0)) 2))
+  
+  (let ()
+    (define-metafunction empty-language
       [(f (number_1 number_2))
        number_3
        (where number_3 ,(+ (term number_1) (term number_2)))])
@@ -704,6 +732,23 @@
     
     (test (term (f 8)) 12345))
   
+  (let ()
+    (define-metafunction empty-language
+      [(f number_1 number_2 ... (number_s ...) ...)
+       yes
+       (where number_1 1)
+       (where (number_3 ...) ,(cdr (term (number_2 ...))))
+       (where (number_3 ...) (3 4 5))
+       (where (number_1 (number_s ...) ...)
+              ,(if (null? (term ((number_s ...) ...)))
+                   (term (number_1))
+                   (term (number_1 () (6) (7 8) (9 10 11)))))]
+      [(f any ...)
+       no])
+    (test (term (f 1 2 3 4 5)) 'yes)
+    (test (term (f 1 2 3 4)) 'no)
+    (test (term (f 0 2 3 4 5)) 'no)
+    (test (term (f 1 2 3 4 5 () (6) (7 8) (9 10 11))) 'yes))
   
   (let ()
     (test-syn-err
@@ -844,6 +889,18 @@
         (list '((2 3) 20)
               '(6 (4 5))))
   
+  ; The scope of a `where' clause includes the left-hand sides
+  ; of subsequent `where' clauses.
+  (test (apply-reduction-relation
+         (reduction-relation
+          grammar
+          (--> any
+               1
+               (where number_1 2)
+               (where (side-condition any (number? (term number_1))) dontcare)))
+         'dontcare)
+        '(1))
+  
   ; shortcuts like this fail if compilation fails to preserve
   ; lexical context for side-conditions expressions.
   (test (let ([x #t])
@@ -856,6 +913,29 @@
              (==> a b)])
            '(x 4)))
         '(x))
+  
+  ; test multiply matching `where' with failing `where' inside
+  (test (apply-reduction-relation
+         (reduction-relation
+          empty-language
+          (--> ()
+               ()
+               (where (number_1 ... number_i number_i+1 ...)
+                      (1 2 3))
+               (where number_i 2)))
+         '())
+        '(()))
+  
+  (test (apply-reduction-relation
+         (reduction-relation
+          empty-language
+          (--> (in-hole (name E
+                              (in-hole ((hide-hole hole) hole)
+                                       hole))
+                        number)
+               (in-hole E ,(add1 (term number)))))
+         (term (hole 2)))
+        (list (term (hole 3))))
   
   (test (apply-reduction-relation/tag-with-names
          (reduction-relation 
@@ -893,6 +973,25 @@
           [(--> (M_1 a) (M_1 b)) (==> a b)])
          '((2 3) (4 5)))
         (list (list "mult" '((2 3) 20))))
+  
+  (test (apply-reduction-relation/tag-with-names
+         (reduction-relation
+          grammar
+          (--> any
+               (number_i number_i*)
+               (where (number_0 ... number_i number_i+1 ...) any)
+               (where (number_0* ... number_i* number_i+1* ...) any)
+               pick-two
+               (computed-name
+                (format "(~s, ~s)"
+                        (length (term (number_0 ...)))
+                        (length (term (number_0* ...)))))))
+         '(9 7))
+        '(("(0, 0)" (9 9)) ("(0, 1)" (9 7)) ("(1, 0)" (7 9)) ("(1, 1)" (7 7))))
+  
+  (test (apply-reduction-relation/tag-with-names
+         (reduction-relation grammar (--> 1 2 (computed-name 3))) 1)
+        '(("3" 2)))
   
   (test (apply-reduction-relation
          (union-reduction-relations
@@ -1060,6 +1159,22 @@
            11)
           '(1)))
   
+  (let ([R (reduction-relation
+            grammar
+            (--> (number_1 number_2 ... (number_s ...) ...)
+                 yes
+                 (where number_1 1)
+                 (where (number_3 ...) ,(cdr (term (number_2 ...))))
+                 (where (number_3 ...) (3 4 5))
+                 (where (number_1 (number_s ...) ...)
+                        ,(if (null? (term ((number_s ...) ...)))
+                             (term (number_1))
+                             (term (number_1 () (6) (7 8) (9 10 11)))))))])
+    (test (apply-reduction-relation R (term (1 2 3 4 5))) '(yes))
+    (test (apply-reduction-relation R (term (1 2 3 4))) '())
+    (test (apply-reduction-relation R (term (0 2 3 4 5))) '())
+    (test (apply-reduction-relation R (term (1 2 3 4 5 () (6) (7 8) (9 10 11)))) '(yes)))
+  
   (test-syn-err (reduction-relation 
                  grammar
                  (~~> (number_1 number_2)
@@ -1097,6 +1212,26 @@
                       mult))
                 #rx"same name on multiple rules"
                 2)
+  
+  (test-syn-err (reduction-relation
+                 grammar
+                 (--> number_1
+                      ()
+                      (where (number_1 ...) '())))
+                #rx"different depths"
+                2)
+  
+  (test-syn-err (redex-match
+                 grammar
+                 ((name x any) (name x any_2) ...))
+                #rx"different depths"
+                2)
+  
+  (test-syn-err (define-language bad-lang5
+                 (e ((name x any) (name x any_2) ...)))
+                #rx"different depths"
+                2)
+
   
   (test-syn-err (reduction-relation 
                  grammar
@@ -1310,6 +1445,22 @@
          1)
         '(3 2))
   
+  (test (apply-reduction-relation
+         (extend-reduction-relation
+          (reduction-relation empty-language (--> 1 2 (computed-name 1)))
+          empty-language
+          (--> 1 3 (computed-name 1)))
+         1)
+        '(3 2))
+  
+  (test (apply-reduction-relation
+         (extend-reduction-relation
+          (reduction-relation empty-language (--> 1 2 (computed-name 1) x))
+          empty-language
+          (--> 1 3 (computed-name 1) x))
+         1)
+        '(3))
+  
   (let ()
     (define-language e1
       (e 1))
@@ -1395,6 +1546,13 @@
           (--> q r y)
           (--> r p x)))
         '(a b c z y x))
+  
+  (test (reduction-relation->rule-names
+         (reduction-relation
+          empty-language
+          (--> x y a (computed-name "x to y"))
+          (--> y z (computed-name "y to z"))))
+        '(a))
   
   (test (reduction-relation->rule-names
          (extend-reduction-relation
@@ -1658,7 +1816,7 @@
             (where (y ... w z ...) (x ...)))))
     
     (test (apply-reduction-relation red (term (a b c)))
-          (list (term (a b)) (term (a c)) (term (b c)))))
+          (list (term (b c)) (term (a c)) (term (a b)))))
   
   
   (let ([r (reduction-relation
@@ -1929,4 +2087,5 @@
     (test-bad-equiv-arg test-->)
     (test-bad-equiv-arg test-->>))
 
-  (print-tests-passed 'tl-test.ss))
+  (print-tests-passed 'tl-test.ss)
+  

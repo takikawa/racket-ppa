@@ -1,11 +1,12 @@
 #lang racket/base
-;; owner: ryanc
+;; owner: ryanc (and cce and stamourv, where noted)
 (require syntax/kerncase
          syntax/stx
          unstable/struct
+         unstable/srcloc
          (for-syntax racket/base
                      racket/private/sc)
-         (for-template racket/base))
+         (for-template racket/base unstable/private/expand))
 
 (provide unwrap-syntax
 
@@ -16,10 +17,9 @@
          generate-temporary
          generate-n-temporaries
 
-         current-caught-disappeared-uses
-         with-catching-disappeared-uses
+         current-recorded-disappeared-uses
          with-disappeared-uses
-         syntax-local-value/catch
+         syntax-local-value/record
          record-disappeared-uses
 
          format-symbol
@@ -32,12 +32,33 @@
          syntax-local-eval
 
          with-syntax*
-         syntax-map)
+         syntax-map
+
+         ;; by cce:
+
+         to-syntax
+         to-datum
+
+         syntax-source-file-name
+         syntax-source-directory
+
+         trampoline-transformer
+         quote-transformer
+         redirect-transformer
+         head-expand
+
+         syntax-list
+
+         ;; by stamourv:
+         
+         format-unique-id
+
+         )
 
 ;; Unwrapping syntax
 
-;; unwrap-syntax : any #:stop-at (any -> boolean) -> any
-(define (unwrap-syntax stx #:stop-at [stop-at (lambda (x) #f)])
+;; unwrap-syntax : any #:stop (any -> boolean) -> any
+(define (unwrap-syntax stx #:stop [stop-at (lambda (x) #f)])
   (let loop ([x stx])
     (cond [(stop-at x) x]
           [(syntax? x) (loop (syntax-e x))]
@@ -52,6 +73,7 @@
 ;; Eli: Is there any difference between this (with the default) and
 ;;   `syntax->datum'?  If not, then maybe add the optional (or keyword) to
 ;;   there instead?
+;; Ryan: syntax->datum errors if its arg is not syntax.
 
 ;; Defining pattern variables
 
@@ -61,31 +83,28 @@
 
 ;; Statics and disappeared uses
 
-(define current-caught-disappeared-uses (make-parameter #f))
-
-(define-syntax-rule (with-catching-disappeared-uses . body)
-  (parameterize ((current-caught-disappeared-uses null))
-    (let ([result (let () . body)])
-      (values result (current-caught-disappeared-uses)))))
+(define current-recorded-disappeared-uses (make-parameter #f))
 
 (define-syntax-rule (with-disappeared-uses stx-expr)
   (let-values ([(stx disappeared-uses)
-                (with-catching-disappeared-uses stx-expr)])
+                (parameterize ((current-recorded-disappeared-uses null))
+                  (let ([result stx-expr])
+                    (values result (current-recorded-disappeared-uses))))])
     (syntax-property stx
                      'disappeared-use
                      (append (or (syntax-property stx 'disappeared-use) null)
                              disappeared-uses))))
 
-(define (syntax-local-value/catch id pred)
+(define (syntax-local-value/record id pred)
   (let ([value (syntax-local-value id (lambda () #f))])
     (and (pred value)
          (begin (record-disappeared-uses (list id))
                 value))))
 
 (define (record-disappeared-uses ids)
-  (let ([uses (current-caught-disappeared-uses)])
+  (let ([uses (current-recorded-disappeared-uses)])
     (when uses
-      (current-caught-disappeared-uses (append ids uses)))))
+      (current-recorded-disappeared-uses (append ids uses)))))
 
 ;; Generating temporaries
 
@@ -134,23 +153,6 @@
 ;;   single syntax among its inputs, and will use it for the context etc, or
 ;;   throw an error if there's more or less than 1.
 
-#|
-(define (id-append #:source [src #f]
-                   #:props [props #f]
-                   #:cert [cert #f]
-                   . args)
-  (define stxs (filter syntax? args))
-  (define lctx
-    (cond [(and (pair? stxs) (null? (cdr stxs)))
-           (car stxs)]
-          [(error 'id-append "expected exactly one identifier in arguments: ~e" args)]))
-  (define (convert x) (->atom x 'id-append))
-  (define sym (string->symbol (apply string-append (map convert args))))
-  (datum->syntax lctx sym src props cert))
-;; Eli: Yes, that looks nice (with the same comments as above on the keyword
-;;   args).  It makes more sense with the restriction on the format string.
-|#
-
 (define (restricted-format-string? fmt)
   (regexp-match? #rx"^(?:[^~]|~[aAn~%])*$" fmt))
 
@@ -173,7 +175,14 @@
 
 ;; Error reporting
 
-(define current-syntax-context (make-parameter #f))
+(define current-syntax-context
+  (make-parameter #f
+                  (lambda (new-value)
+                    (unless (or (syntax? new-value) (eq? new-value #f))
+                      (raise-type-error 'current-syntax-context
+                                        "syntax or #f"
+                                        new-value))
+                    new-value)))
 
 (define (wrong-syntax stx #:extra [extras null] format-string . args)
   (unless (or (eq? stx #f) (syntax? stx))
@@ -187,6 +196,7 @@
                         extras)))
 ;; Eli: The `report-error-as' thing seems arbitrary to me.
 
+;; Applies the renaming of intdefs to stx.
 (define (internal-definition-context-apply intdefs stx)
   (let ([qastx (local-expand #`(quote #,stx) 'expression (list #'quote) intdefs)])
     (with-syntax ([(q astx) qastx]) #'astx)))
@@ -226,6 +236,7 @@
                   (define-syntax pvar
                     (make-syntax-mapping 'depth (quote-syntax valvar)))
                   ...)))]))
+;; Ryan: alternative name: define/syntax-pattern ??
 
 ;; auxiliary macro
 (define-syntax (pvar-value stx)
@@ -246,3 +257,149 @@
 
 (define (syntax-map f . stxls)
   (apply map f (map syntax->list stxls)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  By Carl Eastlund, below
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Pattern Bindings
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define-syntax-rule (syntax-list template ...)
+  (syntax->list (syntax (template ...))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Syntax Conversions
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (to-syntax datum
+                   #:stx [stx #f]
+                   #:src [src stx]
+                   #:ctxt [ctxt stx]
+                   #:prop [prop stx]
+                   #:cert [cert stx])
+  (datum->syntax ctxt
+                 datum
+                 (if (srcloc? src) (build-source-location-list src) src)
+                 prop
+                 cert))
+
+;; Slightly different from unwrap-syntax,
+;; in that it doesn't traverse anything that isn't immediately syntax.
+;; At some point we should pick one of the other or a combination,
+;; both is probably overkill.
+(define (to-datum v)
+  (if (syntax? v) (syntax->datum v) v))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Syntax Locations
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (syntax-source-directory stx)
+  (let* ([source (syntax-source stx)])
+    (and (path-string? source)
+         (let-values ([(base file dir?) (split-path source)])
+           (and (path? base)
+                (path->complete-path base
+                                     (or (current-load-relative-directory)
+                                         (current-directory))))))))
+
+(define (syntax-source-file-name stx)
+  (let* ([f (syntax-source stx)])
+    (and (path-string? f)
+         (let-values ([(base file dir?) (split-path f)]) file))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Transformer Patterns
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define ((redirect-transformer id) stx)
+  (cond
+   [(identifier? stx) id]
+   [(and (stx-pair? stx) (identifier? (stx-car stx)))
+    (to-syntax (cons id (stx-cdr stx)) #:stx stx)]
+   [else
+    (wrong-syntax
+     stx
+     "expected an identifier (alone or in application position); cannot redirect to ~a"
+     (syntax-e id))]))
+
+(define (head-expand stx [stop-ids null] [intdef-ctx #f])
+  (local-expand stx
+                (syntax-local-context)
+                (append stop-ids (kernel-form-identifier-list))
+                intdef-ctx))
+;; Ryan: added intdef-ctx optional arg
+
+(define (quote-transformer datum)
+  #`(quasiquote
+     #,(let loop ([datum datum])
+         (cond
+          [(syntax? datum) #`(unquote (quote-syntax #,datum))]
+          [(pair? datum) #`#,(cons (loop (car datum)) (loop (cdr datum)))]
+          [(vector? datum)
+           #`#,(apply vector-immutable (map loop (vector->list datum)))]
+          [(box? datum) #`#,(box (loop (unbox datum)))]
+          [(hash? datum)
+           #`#,((cond [(hash-eqv? datum) make-immutable-hasheqv]
+                      [(hash-eq? datum) make-immutable-hasheq]
+                      [else make-immutable-hash])
+                (hash-map datum (lambda (k v) (cons k (loop v)))))]
+          [(prefab-struct-key datum) =>
+           (lambda (key)
+             #`#,(apply make-prefab-struct
+                        key
+                        (for/list ([i (in-vector (struct->vector datum) 1)])
+                          (loop i))))]
+          [else #`#,datum]))))
+
+(define trampoline-prompt-tag
+  (make-continuation-prompt-tag 'trampoline))
+
+(define ((trampoline-transformer transform) stx)
+
+  (define intro (make-syntax-introducer))
+
+  (define (body)
+    (syntax-local-introduce
+     (intro
+      (transform (trampoline-evaluator intro)
+                 intro
+                 (intro (syntax-local-introduce stx))))))
+
+  (call-with-continuation-prompt body trampoline-prompt-tag))
+
+(define ((trampoline-evaluator intro) stx)
+
+  (define ((wrap continue))
+    (call-with-continuation-prompt continue trampoline-prompt-tag))
+
+  (define ((expander continue))
+    #`(begin #,(syntax-local-introduce (intro stx))
+             (#%trampoline #,(wrap continue))))
+
+  (define (body continue)
+    (abort-current-continuation trampoline-prompt-tag (expander continue)))
+
+  (call-with-composable-continuation body trampoline-prompt-tag)
+  (void))
+
+(define (format-unique-id lctx
+                          #:source [src #f]
+                          #:props [props #f]
+                          #:cert [cert #f]
+                          fmt . args)
+  ((make-syntax-introducer) (apply format-id
+                                   lctx #:source src #:props props #:cert cert
+                                   fmt args)))

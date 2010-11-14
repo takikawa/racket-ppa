@@ -21,6 +21,7 @@
 
 #include "schpriv.h"
 #include "schmach.h"
+#include "schexpobs.h"
 
 /* The implementation of syntax objects is extremely complex due to
    two levels of optimization:
@@ -89,6 +90,7 @@ static Scheme_Object *module_trans_binding(int argc, Scheme_Object **argv);
 static Scheme_Object *module_templ_binding(int argc, Scheme_Object **argv);
 static Scheme_Object *module_label_binding(int argc, Scheme_Object **argv);
 static Scheme_Object *identifier_prune(int argc, Scheme_Object **argv);
+static Scheme_Object *identifier_prune_to_module(int argc, Scheme_Object **argv);
 static Scheme_Object *syntax_src_module(int argc, Scheme_Object **argv);
 
 static Scheme_Object *syntax_recertify(int argc, Scheme_Object **argv);
@@ -578,6 +580,11 @@ void scheme_init_stx(Scheme_Env *env)
 			     scheme_make_immed_prim(identifier_prune,
 						    "identifier-prune-lexical-context",
 						    1, 2),
+			     env);
+  scheme_add_global_constant("identifier-prune-to-source-module", 
+			     scheme_make_immed_prim(identifier_prune_to_module,
+						    "identifier-prune-to-source-module",
+						    1, 1),
 			     env);
 
 
@@ -8839,6 +8846,8 @@ static Scheme_Object *syntax_property_keys(int argc, Scheme_Object **argv)
 
 static Scheme_Object *syntax_track_origin(int argc, Scheme_Object **argv)
 {
+  Scheme_Object *result, *observer;
+
   if (!SCHEME_STXP(argv[0]))
     scheme_wrong_type("syntax-track-origin", "syntax", 0, argc, argv);
   if (!SCHEME_STXP(argv[1]))
@@ -8846,7 +8855,44 @@ static Scheme_Object *syntax_track_origin(int argc, Scheme_Object **argv)
   if (!SCHEME_STX_IDP(argv[2]))
     scheme_wrong_type("syntax-track-origin", "identifier syntax", 2, argc, argv);
   
-  return scheme_stx_track(argv[0], argv[1], argv[2]);
+  result = scheme_stx_track(argv[0], argv[1], argv[2]);
+  observer = scheme_get_expand_observe();
+  SCHEME_EXPAND_OBSERVE_TRACK_ORIGIN(observer, argv[0], result);
+  return result;
+}
+
+Scheme_Object *scheme_transfer_srcloc(Scheme_Object *to, Scheme_Object *from)
+{
+  if (!SAME_OBJ(((Scheme_Stx *)from)->srcloc, empty_srcloc)) {
+    Scheme_Stx *stx = (Scheme_Stx *)to;
+    Scheme_Object *wraps, *modinfo_cache;
+    Scheme_Object *certs;
+    long lazy_prefix;
+
+    wraps = stx->wraps;
+    if (STX_KEY(stx) & STX_SUBSTX_FLAG) {
+      modinfo_cache = NULL;
+      lazy_prefix = stx->u.lazy_prefix;
+    } else {
+      modinfo_cache = stx->u.modinfo_cache;
+      lazy_prefix = 0;
+    }
+    certs = stx->certs;
+
+    stx = (Scheme_Stx *)scheme_make_stx(stx->val, 
+                                        ((Scheme_Stx *)from)->srcloc,
+                                        stx->props);
+
+    stx->wraps = wraps;
+    if (modinfo_cache)
+      stx->u.modinfo_cache = modinfo_cache;
+    else
+      stx->u.lazy_prefix = lazy_prefix; /* same as NULL modinfo if no SUBSTX */
+    stx->certs = certs;
+
+    return (Scheme_Object *)stx;
+  } else
+    return to;
 }
 
 static Scheme_Object *delta_introducer(int argc, struct Scheme_Object *argv[], Scheme_Object *p)
@@ -9129,6 +9175,45 @@ static Scheme_Object *identifier_prune(int argc, Scheme_Object **argv)
   p = make_prune_context(l);
 
   return scheme_add_rename(a, p);
+}
+
+static Scheme_Object *identifier_prune_to_module(int argc, Scheme_Object **argv)
+{
+  WRAP_POS w;
+  Scheme_Stx *stx = (Scheme_Stx *)argv[0];
+  Scheme_Object *l = scheme_null;
+
+  if (!SCHEME_STXP(argv[0]) || !SCHEME_STX_SYMBOLP(argv[0]))
+    scheme_wrong_type("identifier-prune-to-source-module", "identifier syntax", 0, argc, argv);
+
+  /* Keep only redirecting phase shifts */
+
+  WRAP_POS_INIT(w, ((Scheme_Stx *)stx)->wraps);
+  while (!WRAP_POS_END_P(w)) {
+    if (SCHEME_BOXP(WRAP_POS_FIRST(w))) {
+      /* Phase shift:  */
+      Scheme_Object *vec, *dest, *src;
+
+      vec = SCHEME_PTR_VAL(WRAP_POS_FIRST(w));
+      
+      src = SCHEME_VEC_ELS(vec)[1];
+      dest = SCHEME_VEC_ELS(vec)[2];
+
+      /* If src is #f, shift is just for phase; no redirection */
+      if (!SCHEME_FALSEP(src)) {
+        l = scheme_make_pair(WRAP_POS_FIRST(w), l);
+      }
+    }
+
+    WRAP_POS_INC(w);
+  }
+
+  l = scheme_reverse(l);
+
+  stx = (Scheme_Stx *)scheme_make_stx(stx->val, stx->srcloc, stx->props);
+  stx->wraps = l;
+
+  return (Scheme_Object *)stx;
 }
 
 static Scheme_Object *syntax_src_module(int argc, Scheme_Object **argv)

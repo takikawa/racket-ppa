@@ -25,6 +25,13 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
+;; old-style flat mutable contracts
+;;
+(require "private/contract-mutable.rkt")
+(provide (all-from-out "private/contract-mutable.rkt"))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
 ;; provide everything from the racket/ implementation
 ;; except the arrow contracts
 ;;
@@ -40,7 +47,8 @@
 (provide 
  opt/c define-opt/c ;(all-from "private/contract-opt.rkt")
  (except-out (all-from-out racket/contract/private/ds)
-             lazy-depth-to-look)
+             lazy-depth-to-look
+             contract-struct)
  
  (all-from-out racket/contract/private/base)
  (all-from-out racket/contract/private/provide)

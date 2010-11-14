@@ -1,7 +1,6 @@
-
-#lang scheme/base
+#lang racket/base
 (require parser-tools/lex
-         "deriv.ss")
+         "deriv.rkt")
 (provide (all-defined-out))
 
 (define-tokens basic-tokens
@@ -59,6 +58,13 @@
 
    top-begin            ; identifier
    top-non-begin        ; .
+
+   local-remark         ; (listof (U string syntax))
+   local-artificial-step ; (list syntax syntax syntax syntax)
+
+   track-origin         ; (cons stx stx)
+   local-value          ; identifier
+   local-value-result   ; boolean
    ))
 
 (define-tokens renames-tokens
@@ -81,6 +87,7 @@
    prim-set!
    prim-expression
    prim-varref
+   prim-#%stratified-body
    ))
 
 ;; ** Signals to tokens
@@ -93,6 +100,8 @@
     (#f  start                   ,token-start)
     (#f  top-begin               ,token-top-begin)
     (#f  top-non-begin           ,token-top-non-begin)
+    (#f  local-remark            ,token-local-remark)
+    (#f  local-artificial-step   ,token-local-artificial-step)
 
     ;; Standard signals
     (0   visit                   ,token-visit)
@@ -170,7 +179,10 @@
     (149 prim-varref)
     (150 lift-require            ,token-lift-require)
     (151 lift-provide            ,token-lift-provide)
-    ))
+    (152 track-origin            ,token-track-origin)
+    (153 local-value             ,token-local-value)
+    (154 local-value-result      ,token-local-value-result)
+    (155 prim-#%stratified-body)))
 
 (define (signal->symbol sig)
   (if (symbol? sig)

@@ -1014,7 +1014,7 @@ please adhere to these guidelines:
  (enforce-primitives-group-box-label "Начальные привязки")
  (enforce-primitives-check-box-label "Запретить переопределение начальных привязок")
  (automatically-compile "Заполнить каталоги compiled/ (для более быстрой загрузки)")
- (preserve-stacktrace-information "Сохранить трассировку стека (отключает некоторые JIT-оптимизации)")
+ (preserve-stacktrace-information "Сохранить трассировку стека (отключает некоторые оптимизации)")
  (expression-level-stacktrace "Выражение уровня трассировки стека")
  (function-level-stacktrace "Функция уровня трассировки стека")
 
@@ -1424,17 +1424,17 @@ please adhere to these guidelines:
   ; section header
   (test-engine-check-failures "Ошибки тестирования:")
   ; section header
-  (test-engine-contract-violations "Нарушения соглашения:")
+  (test-engine-signature-violations "Нарушения соглашения:")
 
-  ; part of one phrase "contract <at line ...> to blame: procedure <...>
-  (test-engine-contract "соглашение")
+  ; part of one phrase "signature <at line ...> to blame: procedure <...>
+  (test-engine-signature "соглашение")
   (test-engine-to-blame "нарушено: процедура ")
 
-  (test-engine-no-contract-violations "Нет нарушений соглашения.")
-  (test-engine-1-contract-violation "1 нарушение соглашения.")
-  (test-engine-n-contract-violations "~a нарушений соглашения.")
+  (test-engine-no-signature-violations "Нет нарушений соглашения.")
+  (test-engine-1-signature-violation "1 нарушение соглашения.")
+  (test-engine-n-signature-violations "~a нарушений соглашения.")
 
-  ; as in got <value>, contract <at ...>
+  ; as in got <value>, signature <at ...>
   (test-engine-got "получено")
   
   (profjWizward-insert-java-class "Вставить класс Java")

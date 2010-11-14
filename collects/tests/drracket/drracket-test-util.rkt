@@ -105,7 +105,7 @@
       (or (wait-for-drscheme-frame-pred)
           (begin
             (when print-message?
-              (printf "Select DrRacket frame~n"))
+              (printf "Select DrRacket frame\n"))
             (poll-until wait-for-drscheme-frame-pred)))))
   
   ;; wait-for-new-frame : frame [(listof eventspace) = null] -> frame
@@ -151,7 +151,8 @@
 	      (fw:test:reraise-error)
 	      (send (send frame get-execute-button) is-enabled?))])
       ;(poll-until wait-for-computation-to-start 60) ;; hm.
-      (poll-until wait-for-computation-to-finish 60)))
+      (poll-until wait-for-computation-to-finish 60)
+      (sync (system-idle-evt))))
 
   (define do-execute 
     (case-lambda
@@ -386,7 +387,7 @@
     (let ([drs-frame (get-top-level-focus-window)])
       (fw:test:menu-select "Language" "Choose Language...")
       (let* ([language-dialog (wait-for-new-frame drs-frame)])
-        (fw:test:set-radio-box-item! "Use the language declared in the source")
+        (fw:test:set-radio-box-item! #rx"Use the language declared in the source")
         
         (with-handlers ([exn:fail? (lambda (x) (void))])
           (fw:test:button-push "Show Details"))
@@ -528,7 +529,7 @@
                      
                      [else
                       (loop (send snip previous)
-                            (cons (format "{unknown snip: ~e}~n" snip)
+                            (cons (format "{unknown snip: ~e}\n" snip)
                                   strings))])]))))))]))
   
   ;; run-one/sync : (-> A) -> A

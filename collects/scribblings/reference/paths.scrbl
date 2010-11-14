@@ -344,8 +344,7 @@ expansion).}
 @defproc[(cleanse-path [path path-string?]) path]{
 
 @techlink{Cleanse}s @racket[path] (as described at the beginning of
-this section). The filesystem might be accessed, but the source or
-expanded path might be a non-existent path.}
+this chapter) without consulting the filesystem.}
 
 
 @defproc[(expand-user-path [path path-string?]) path]{
@@ -525,21 +524,26 @@ no extension, @racket[#f] is returned.}
                              [path (or/c path-string?  path-for-some-system?)])
          path-for-some-system?]{
 
-Finds a relative pathname with respect to @racket[base] that names
-the same file or directory as @racket[path]. Both @racket[base]
-and @racket[path] must be simplified in the sense of
-@racket[simple-form-path].  If @racket[path] is not a proper subpath
-of @racket[base] (i.e., a subpath that is strictly longer),
-@racket[path] is returned.}
+Finds a relative pathname with respect to @racket[base] that names the
+same file or directory as @racket[path]. Both @racket[base] and
+@racket[path] must be simplified in the sense of @racket[simple-form-path].  If
+@racket[path] is not a proper subpath of @racket[base] (i.e., a
+subpath that is strictly longer), @racket[path] is returned.}
 
 @defproc[(normalize-path [path path-string?]
                          [wrt (and/c path-string? complete-path?)
                               (current-directory)]) 
          path?]{
 
-Returns a normalized, complete version of @racket[path], expanding the
-path and resolving all soft links. If @racket[path] is relative, then
-@racket[wrt] is used as the base path.
+@margin-note{For most purposes, @racket[simple-form-path] is the
+ preferred mechanism to normalize a path, because it works for paths
+ that include non-existent directory components, and it avoids
+ unnecessarily expanding soft links.}
+
+Returns a complete version of @racket[path] by making the path
+complete, expanding the complete path, and resolving all soft links
+(which requires consulting the filesystem). If @racket[path] is
+relative, then @racket[wrt] is used as the base path.
 
 Letter case is @italic{not} normalized by @racket[normalize-path]. For
 this and other reasons, such as whether the path is syntactically a
@@ -552,11 +556,12 @@ path contains an embedded path for a non-existent directory,
 or if an infinite cycle of soft links is detected.}
 
 @defproc[(path-only [path (or/c path-string? path-for-some-system?)])
-         path-for-some-system?]{
+         (or/c #f path-for-some-system?)]{
 
 If @racket[path] is a filename, the file's path is returned. If
 @racket[path] is syntactically a directory, @racket[path] is returned
-(as a path, if it was a string).}
+(as a path, if it was a string). If @racket[path] has no directory part
+@racket[#f] is returned.}
 
 @defproc[(simple-form-path [path path-string?]) path?]{
 

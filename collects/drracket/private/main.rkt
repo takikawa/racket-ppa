@@ -1,4 +1,4 @@
-#lang scheme/unit
+#lang racket/unit
 
 (require string-constants
          mzlib/contract
@@ -36,10 +36,11 @@
     ;; avoid building the mask unless we use it
     (define todays-icon
       (make-object bitmap% 
-        (build-path (collection-path "icons")
-                    (case (date-week-day (seconds->date (current-seconds)))
-                      [(6 0) "plt-logo-red-shiny.png"]
-                      [else "plt-logo-red-diffuse.png"]))
+        (collection-file-path 
+         (case (date-week-day (seconds->date (current-seconds)))
+           [(6 0) "plt-logo-red-shiny.png"]
+           [else "plt-logo-red-diffuse.png"])
+         "icons")
         'png/mask))
     
     (define todays-icon-bw-mask 
@@ -94,6 +95,11 @@
                                (finder:default-filters)))
 (application:current-app-name (string-constant drscheme))
 
+(drr:set-default 'drracket:language-dialog:hierlist-default #f (λ (x) (or (not x) (and (list? x) (andmap string? x)))))
+
+(drr:set-default 'drracket:create-executable-gui-type 'stand-alone (λ (x) (memq x '(launcher stand-alone distribution))))
+(drr:set-default 'drracket:create-executable-gui-base 'racket (λ (x) (memq x '(racket gracket))))
+
 (drr:set-default 'drracket:logger-gui-tab-panel-level 0 (λ (x) (and (exact-integer? x) (<= 0 x 5)))) 
 
 (drr:set-default 'drracket:saved-bug-reports 
@@ -112,6 +118,7 @@
 (drr:set-default 'drracket:module-language-first-line-special? #t boolean?)
 
 (drr:set-default 'drracket:defns-popup-sort-by-name? #f boolean?)
+(drr:set-default 'drracket:show-line-numbers? #f boolean?)
 
 (drr:set-default 'drracket:toolbar-state 
                          '(#f . top)
@@ -293,14 +300,15 @@
 (preferences:add-general-checkbox-panel)
 
 (let ([make-check-box
-       (λ (pref-sym string parent)
+       (λ (pref-sym string parent [extra-functionality #f])
          (let ([q (make-object check-box%
                     string
                     parent
                     (λ (checkbox evt)
-                      (preferences:set 
-                       pref-sym 
-                       (send checkbox get-value))))])
+                      (define value (send checkbox get-value))
+                      (preferences:set pref-sym value)
+                      (when extra-functionality
+                        (extra-functionality value))))])
            (preferences:add-callback pref-sym (λ (p v) (send q set-value v)))
            (send q set-value (preferences:get pref-sym))))])
   (preferences:add-to-general-checkbox-panel
@@ -319,7 +327,7 @@
      (make-check-box 'drracket:defs/ints-horizontal
                      (string-constant interactions-beside-definitions)
                      editor-panel)
-     
+
      (make-check-box 'drracket:module-language-first-line-special?
                      (string-constant ml-always-show-#lang-line)
                      editor-panel)))
@@ -484,14 +492,14 @@
                       (drracket:language-configuration:get-languages))])
           (and lang
                (let ([settings (send lang unmarshall-settings marshalled-settings)])
-                 (drracket:language-configuration:make-language-settings
+                 (drracket:language-configuration:language-settings
                   lang
                   (or settings (send lang default-settings)))))))))
 
   ;; preferences initialization
   (drr:set-default 'drracket:multi-file-search:recur? #t boolean?)
   (drr:set-default 'drracket:multi-file-search:filter? #t boolean?)
-  (drr:set-default 'drracket:multi-file-search:filter-string "\\.(ss|scm)$" string?)
+  (drr:set-default 'drracket:multi-file-search:filter-regexp "\\.(rkt.?|ss|scm)$" string?)
   (drr:set-default 'drracket:multi-file-search:search-string "" string?)
   (drr:set-default 'drracket:multi-file-search:search-type
                            1
@@ -557,18 +565,7 @@
    (drracket:frame:create-root-menubar)
    (preferences:set 'framework:exit-when-no-frames #f)]
   [else
-   (preferences:set 'framework:exit-when-no-frames #t)])
-
-
-;; is this used anywhere?
-(let* ([sl (editor:get-standard-style-list)]
-       [sd (make-object style-delta%)])
-  (send sd set-delta-foreground (make-object color% 255 0 0))
-  (send sl new-named-style 
-        "drscheme:text:ports err"
-        (send sl find-or-create-style
-              (send sl find-named-style "text:ports err")
-              sd)))  
+   (preferences:set 'framework:exit-when-no-frames #t)]) 
 
 
 (define repl-error-pref 'drracket:read-eval-print-loop:error-color)

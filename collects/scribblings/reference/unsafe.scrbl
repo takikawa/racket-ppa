@@ -5,7 +5,13 @@
                      (only-in ffi/vector
                               f64vector?
                               f64vector-ref
-                              f64vector-set!)))
+                              f64vector-set!
+                              u16vector?
+                              u16vector-ref
+                              u16vector-set!
+                              s16vector?
+                              s16vector-ref
+                              s16vector-set!)))
 
 @title[#:tag "unsafe"]{Unsafe Operations}
 
@@ -71,7 +77,7 @@ the result is always a @tech{fixnum}. The @scheme[unsafe-fxlshift] and
 @scheme[unsafe-fxrshift] is a negative (i.e., right) shift, where the
 number of bits to shift must be less than the number of bits used to
 represent a @tech{fixnum}. In the case of @scheme[unsafe-fxlshift],
-bits in the result beyond the the number of bits used to represent a
+bits in the result beyond the number of bits used to represent a
 @tech{fixnum} are effectively replaced with a copy of the high bit.}
 
 
@@ -88,11 +94,6 @@ bits in the result beyond the the number of bits used to represent a
 For @tech{fixnums}: Like @scheme[=], @scheme[<], @scheme[>],
 @scheme[<=], @scheme[>=], @scheme[min], and @scheme[max], but
 constrained to consume @tech{fixnums}.}
-
-
-@defproc[(unsafe-fx->fl [a fixnum?]) inexact-real?]{
-Unchecked version of @scheme[->fl].
-}
 
 
 @deftogether[(
@@ -154,6 +155,27 @@ For @tech{flonums}: Unchecked (potentially) versions of
 for the corresponding safe bindings.}
 
 
+@deftogether[(
+@defproc[(unsafe-make-flrectangular [a inexact-real?] [b inexact-real?]) 
+         (and/c complex? inexact? (not/c real?))]
+@defproc[(unsafe-flreal-part [a (and/c complex? inexact? (not/c real?))]) inexact-real?]
+@defproc[(unsafe-flimag-part [a (and/c complex? inexact? (not/c real?))]) inexact-real?]
+)]{
+
+For @tech{flonums}: Unchecked versions of @racket[make-flrectangular],
+@racket[flreal-part], and @racket[flimag-part].}
+
+
+@deftogether[(
+@defproc[(unsafe-fx->fl [a fixnum?]) inexact-real?]
+@defproc[(unsafe-fl->fx [a inexact-real?]) fixnum?]
+)]{
+Unchecked conversion of a fixnum to an integer flonum and vice versa.
+These are similar to the safe bindings @scheme[->fl] and @scheme[fl->exact-integer],
+but further constrained to consume or produce a fixnum.
+}
+
+
 @section{Unsafe Data Extraction}
 
 @deftogether[(
@@ -170,22 +192,22 @@ Unsafe variants of @scheme[car], @scheme[cdr], @scheme[mcar],
 
 
 @deftogether[(
-@defproc[(unsafe-unbox [v (and/c box? (not/c chaperone?))]) any/c]
-@defproc[(unsafe-set-box! [v (and/c box? (not/c chaperone?))] [val any/c]) void?]
-@defproc[(unsafe-unbox* [b box?]) fixnum?]
-@defproc[(unsafe-set-box*! [b box?] [k fixnum?]) void?]
+@defproc[(unsafe-unbox [b box?]) fixnum?]
+@defproc[(unsafe-set-box! [b box?] [k fixnum?]) void?]
+@defproc[(unsafe-unbox* [v (and/c box? (not/c chaperone?))]) any/c]
+@defproc[(unsafe-set-box*! [v (and/c box? (not/c chaperone?))] [val any/c]) void?]
 )]{
 
 Unsafe versions of @scheme[unbox] and @scheme[set-box!].}
 
 
 @deftogether[(
-@defproc[(unsafe-vector-length [v (and/c vector? (not/c chaperone?))]) fixnum?]
-@defproc[(unsafe-vector-ref [v (and/c vector? (not/c chaperone?))] [k fixnum?]) any/c]
-@defproc[(unsafe-vector-set! [v (and/c vector? (not/c chaperone?))] [k fixnum?] [val any/c]) void?]
-@defproc[(unsafe-vector*-length [v vector?]) fixnum?]
-@defproc[(unsafe-vector*-ref [v vector?] [k fixnum?]) any/c]
-@defproc[(unsafe-vector*-set! [v vector?] [k fixnum?] [val any/c]) void?]
+@defproc[(unsafe-vector-length [v vector?]) fixnum?]
+@defproc[(unsafe-vector-ref [v vector?] [k fixnum?]) any/c]
+@defproc[(unsafe-vector-set! [v vector?] [k fixnum?] [val any/c]) void?]
+@defproc[(unsafe-vector*-length [v (and/c vector? (not/c chaperone?))]) fixnum?]
+@defproc[(unsafe-vector*-ref [v (and/c vector? (not/c chaperone?))] [k fixnum?]) any/c]
+@defproc[(unsafe-vector*-set! [v (and/c vector? (not/c chaperone?))] [k fixnum?] [val any/c]) void?]
 )]{
 
 Unsafe versions of @scheme[vector-length], @scheme[vector-ref], and
@@ -242,10 +264,28 @@ Unsafe versions of @scheme[f64vector-ref] and
 
 
 @deftogether[(
-@defproc[(unsafe-struct-ref [v (not/c chaperone?)] [k fixnum?]) any/c]
-@defproc[(unsafe-struct-set! [v (not/c chaperone?)] [k fixnum?] [val any/c]) void?]
-@defproc[(unsafe-struct*-ref [v any/c] [k fixnum?]) any/c]
-@defproc[(unsafe-struct*-set! [v any/c] [k fixnum?] [val any/c]) void?]
+@defproc[(unsafe-s16vector-ref [vec s16vector?] [k fixnum?]) (integer-in -32768 32767)]
+@defproc[(unsafe-s16vector-set! [vec s16vector?] [k fixnum?] [n (integer-in -32768 32767)]) void?]
+)]{
+
+Unsafe versions of @scheme[s16vector-ref] and
+@scheme[s16vector-set!].}
+
+
+@deftogether[(
+@defproc[(unsafe-u16vector-ref [vec u16vector?] [k fixnum?]) (integer-in 0 65535)]
+@defproc[(unsafe-u16vector-set! [vec u16vector?] [k fixnum?] [n (integer-in 0 65535)]) void?]
+)]{
+
+Unsafe versions of @scheme[u16vector-ref] and
+@scheme[u16vector-set!].}
+
+
+@deftogether[(
+@defproc[(unsafe-struct-ref [v any/c] [k fixnum?]) any/c]
+@defproc[(unsafe-struct-set! [v any/c] [k fixnum?] [val any/c]) void?]
+@defproc[(unsafe-struct*-ref [v (not/c chaperone?)] [k fixnum?]) any/c]
+@defproc[(unsafe-struct*-set! [v (not/c chaperone?)] [k fixnum?] [val any/c]) void?]
 )]{
 
 Unsafe field access and update for an instance of a structure
