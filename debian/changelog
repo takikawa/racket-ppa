@@ -1,4 +1,4 @@
-plt-scheme (5.0-1) unstable; urgency=low
+racket (5.0.2-1) UNRELEASED; urgency=low
 
   * New Upsteam version
   * Update watch file with new upstream URL.
