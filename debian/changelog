@@ -1,7 +1,8 @@
 racket (5.0.2-1) UNRELEASED; urgency=low
 
   [ David Bremner ]
-  * New Upsteam version
+  * New Upsteam version (Closes: #592688)
+    + Fix FTBFS on mips with recent GCC. (Closes: #598615)
 
   [ James Vega ]
   * Update watch file with new upstream URL.
