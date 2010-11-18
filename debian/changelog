@@ -6,7 +6,9 @@ racket (5.0.2-1) UNRELEASED; urgency=low
 
   [ James Vega ]
   * Update watch file with new upstream URL.
-  * Show which garbage collector the racket package was built with.
+  * debian/rules:
+    + Show which garbage collector the racket package was built with.
+    + Use correct name for mzdyn based on which garbage collector was used.
 
  -- David Bremner <bremner@unb.ca>  Sun, 13 Jun 2010 12:39:06 -0300
 
