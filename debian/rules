@@ -28,8 +28,12 @@ DEB_DH_INSTALL_ARGS_racket-common := -X${RACKET_ARCH} -X$(MZDYN)
 DEB_DH_INSTALL_ARGS_racket-doc := -Xdoc/release-notes
 
 install/racket::
-	find debian/tmp/usr/share/racket -type d -name ${RACKET_ARCH} | sed s@debian/tmp/usr/share/@@ |xargs -I@ dh_install -pracket /usr/share/@ /usr/lib/@
-	find debian/tmp/usr/share/racket -type d -name ${RACKET_ARCH} | sed s@debian/tmp/usr/share/@@ |xargs -I@ dh_link -pracket /usr/lib/@ /usr/share/@
+	for src in $$(find debian/tmp/usr/share/racket -type d -name $(RACKET_ARCH)); do \
+	    src=$${src#debian/tmp/usr/share/}; \
+	    dest=$${src%/$(RACKET_ARCH)}; \
+	    dh_install -pracket /usr/share/"$$src" /usr/lib/"$$dest"; \
+	    dh_link -pracket /usr/lib/"$$src" /usr/share/"$$src"; \
+	done
 
 cleanbuilddir/racket::
 	rm -rf build
