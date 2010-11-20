@@ -1,5 +1,5 @@
-Source: plt-scheme
-Section: lisp 
+Source: racket
+Section: lisp
 Priority: optional
 Maintainer: Ari Pollak <ari@debian.org>
 Uploaders: James Vega <jamessan@debian.org>
@@ -34,6 +34,8 @@ Description: extensible programming language in the scheme family
  It supports the creation of new programming languages through a
  rich, expressive syntax system. Example languages include Typed Scheme,
  ACL2, FrTime, and Lazy Scheme.
+ .
+ Built with the ${racket:GC} garbage collector.
 
 Package: racket-common
 Architecture: all

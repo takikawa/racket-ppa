@@ -1,6 +1,14 @@
-plt-scheme (5.0-1) unstable; urgency=low
+racket (5.0.2-1) UNRELEASED; urgency=low
 
-  * New Upsteam version
+  [ David Bremner ]
+  * New Upsteam version (Closes: #592688)
+    + Fix FTBFS on mips with recent GCC. (Closes: #598615)
+
+  [ James Vega ]
+  * Update watch file with new upstream URL.
+  * debian/rules:
+    + Show which garbage collector the racket package was built with.
+    + Use correct name for mzdyn based on which garbage collector was used.
 
  -- David Bremner <bremner@unb.ca>  Sun, 13 Jun 2010 12:39:06 -0300
 
