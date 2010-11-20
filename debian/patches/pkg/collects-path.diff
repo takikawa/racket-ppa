@@ -15,10 +15,10 @@ Signed-off-by: David Bremner <bremner@unb.ca>
  1 files changed, 1 insertions(+), 1 deletions(-)
 
 diff --git a/src/configure b/src/configure
-index ed1448b..4ebd366 100755
+index e0f5b99..689c8d2 100755
 --- a/src/configure
 +++ b/src/configure
-@@ -2212,7 +2212,7 @@ else
+@@ -2213,7 +2213,7 @@ else
      prefix="${ac_default_prefix}"
    fi
    libpltdir="${libdir}/racket"
@@ -28,4 +28,4 @@ index ed1448b..4ebd366 100755
    docdir="${datadir}/racket/doc"
    MAKE_COPYTREE=copytree
 -- 
-tg: (1bed6ca..) pkg/collects-path (depends on: upstream)
+tg: (ff8c515..) pkg/collects-path (depends on: upstream)
