@@ -1,4 +1,4 @@
-racket (5.0.2-1) UNRELEASED; urgency=low
+racket (5.0.2-1) experimental; urgency=low
 
   [ David Bremner ]
   * New Upsteam version (Closes: #592688)
@@ -10,7 +10,7 @@ racket (5.0.2-1) UNRELEASED; urgency=low
     + Show which garbage collector the racket package was built with.
     + Use correct name for mzdyn based on which garbage collector was used.
 
- -- David Bremner <bremner@unb.ca>  Sun, 13 Jun 2010 12:39:06 -0300
+ -- James Vega <jamessan@debian.org>  Fri, 19 Nov 2010 21:22:13 -0500
 
 plt-scheme (4.2.4-2) unstable; urgency=low
 
