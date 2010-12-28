@@ -3,15 +3,11 @@ unpackaged via "dpkg-source -x".
 
 The Debian packaging for racket (previously known as plt-scheme) is now stored in git.
 
+These are untested notes.  The old notes can viewed with 'git show debian/5.0.2-1:debian/README.source'
+
 * Branch Layout
 
-  Currently there are four main branches
-
-  - release contains the upstream history. Because of the structure of
-    upstreams git repository, this is stitched together by merging
-    tgether upstream tags.  Relevant tags are release/$ver where $ver
-    is an upstream release.  Note that these tags are created after
-    merging upstream.
+  Currently there are three main branches
 
   - upstream contains the release branch history, along with file
     deletions to make it match the upstream release tar balls. Tags
@@ -53,19 +49,16 @@ by any number of tools (including dpkg-buildpackage).
      export TMPDIR=/var/tmp
 
 * New upstream version
-** Update release branch
-   - git checkout release
-   - git merge -s recursive -X theirs $upstream_tag
-   - Optionally auto resolve file addition/deletion conflicts (or use git mergetool)
-    - git status -s | egrep '^(UD|AU|DD)' | cut -f2 -d' ' | xargs git rm -f
-    - git status -s | egrep '^(UA|DU)' | cut -f2 -d' ' | xargs git add
-    - git commit
-   - git tag release/$version
 
 ** Update upstream branch
    - git checkout upstream
-   - git merge -s recursive -X theirs release/$version
-   - optionally auto resolve file deletion conflicts:
+   - git merge -s recursive -X theirs vXXXX  
+     # where vXXXX is an upstream tag. Since v5.0.1, these tags should all be on 
+     # upstream branch stable.
+
+     
+   - optionally auto resolve file deletion conflicts:  # check that this is still needed with a linear upstream
+     		     	     	  	   	       # history
      - git status -s | egrep '^(DU|UA| U|U |UD)' | cut -c4- | xargs git rm --ignore-unmatch DUMMY$$
      - git commit
 
@@ -73,6 +66,8 @@ by any number of tools (including dpkg-buildpackage).
    The manual import does some slightly dangerous things. It is
    preferable to understand what one is typing.  In principle
    git-import-orig (from git-buildpackage) ought to work as well.
+   # If we can verify git-import-orig works fine most of the time, probably the 
+   # following scary instructions can be removed.
    - Manual import:
      - git checkout upstream
      - git clean -fxd
@@ -87,4 +82,4 @@ by any number of tools (including dpkg-buildpackage).
    - git checkout master
    - git merge upstream/$version
 
- -- David Bremner <bremner@unb.ca>, Sun,  4 Jul 2010 11:10:35 -0300
+ -- David Bremner <bremner@debian.org>, Mon, 27 Dec 2010 23:20:29 -0400
