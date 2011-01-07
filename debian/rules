@@ -16,11 +16,22 @@ ifneq (,$(filter alpha hppa powerpc ppc64 mips mipsel,$(DEB_HOST_ARCH)))
     DEB_DH_GENCONTROL_ARGS_racket := -- -Vracket:GC=cgc
     MZDYN := mzdyn.o
 endif
+
+# keep the collect build from using every available core, unless 
+# explicitly enabled.
+ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+        NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+else
+	NUMJOBS = 1
+endif
+
 # Upstream does funky things with assembly, so we'll have to trust their 
 # compilation settings and override cdbs/dpkg-buildpackage defaults for
 # configure and make
 DEB_CONFIGURE_SCRIPT_ENV = CFLAGS="-g" CXXFLAGS=""
-DEB_MAKE_ENVVARS = CFLAGS="-g" CXXFLAGS="" HOME=/nonexistant
+DEB_MAKE_ENVVARS = CFLAGS="-g" CXXFLAGS="" HOME=/nonexistant PLT_SETUP_OPTIONS="-j $(NUMJOBS)"
+
+
 
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
 
