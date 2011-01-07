@@ -20,7 +20,7 @@ endif
 # compilation settings and override cdbs/dpkg-buildpackage defaults for
 # configure and make
 DEB_CONFIGURE_SCRIPT_ENV = CFLAGS="-g" CXXFLAGS=""
-DEB_MAKE_ENVVARS = CFLAGS="-g" CXXFLAGS=""
+DEB_MAKE_ENVVARS = CFLAGS="-g" CXXFLAGS="" HOME=/nonexistant
 
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
 
