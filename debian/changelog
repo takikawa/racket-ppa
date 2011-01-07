@@ -1,3 +1,10 @@
+racket (5.0.2-2) experimental; urgency=low
+
+  * Build with HOME=/nonexistant. This prevents collects installed in user
+    home directories from interfering with the build.
+
+ -- David Bremner <bremner@debian.org>  Thu, 06 Jan 2011 22:28:54 -0400
+
 racket (5.0.2-1) experimental; urgency=low
 
   [ David Bremner ]
