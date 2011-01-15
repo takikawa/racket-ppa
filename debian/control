@@ -61,7 +61,7 @@ Description: extensible programming language in the scheme family (documentation
 
 Package: plt-scheme
 Architecture: all
-Depends: racket
+Depends: racket, ${misc:Depends}
 Description: Racket Programming Environment (transitional package)
  Racket (previously PLT Scheme) is an innovative programming language
  that builds on a rich academic and practical tradition.
@@ -84,7 +84,7 @@ Description: Racket Programming Environment (transitional package)
 Package: plt-scheme-doc
 Section: doc
 Architecture: all
-Depends: racket-doc
+Depends: racket-doc, ${misc:Depends}
 Description: PLT Scheme Documentation (transitional package)
  This package includes all of the documentation for PLT Scheme.
  .
