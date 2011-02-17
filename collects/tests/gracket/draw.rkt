@@ -191,6 +191,11 @@
     (send dc set-bitmap #f)
     bm))
 
+(define (show-error . args)
+  (with-handlers ([exn? (lambda (exn)
+                          (printf "~a\n" (exn-message exn)))])
+    (apply error args)))
+
 (define DRAW-WIDTH 550)
 (define DRAW-HEIGHT 375)
 
@@ -198,9 +203,9 @@
        [vp (make-object vertical-panel% f)]
        [hp0 (make-object horizontal-panel% vp)]
        [hp (make-object horizontal-panel% vp)]
+       [hp3 (make-object horizontal-panel% vp)]
        [hp2 hp]
        [hp2.5 hp0]
-       [hp3 hp]
        [hp4 (new horizontal-panel% [parent vp]
                  [stretchable-height #f])]
        [bb (make-object bitmap% (sys-path "bb.gif") 'gif)]
@@ -217,11 +222,14 @@
        [use-bad? #f]
        [depth-one? #f]
        [cyan? #f]
+       [multi-page? #f]
        [smoothing 'unsmoothed]
        [save-filename #f]
        [save-file-format #f]
        [clip 'none]
-       [current-alpha 1.0])
+       [current-alpha 1.0]
+       [current-rotation 0.0]
+       [current-skew? #f])
   (send hp0 stretchable-height #f)
   (send hp stretchable-height #f)
   (send hp2.5 stretchable-height #f)
@@ -255,8 +263,8 @@
 	    (override*
 	     [on-paint
 	      (case-lambda
-	       [() (on-paint #f)]
-	       [(ps?)
+	       [() (time (on-paint #f))]
+	       [(kind)
 		(let* ([can-dc (get-dc)]
 		       [pen0s (make-object pen% "BLACK" 0 'solid)]
 		       [pen1s (make-object pen% "BLACK" 1 'solid)]
@@ -653,15 +661,17 @@
 			    ; Bitmap copying:
 			    (when (and (not no-bitmaps?) last?)
 			      (let ([x 5] [y 165])
-				(let ([mred-icon (get-icon)])
+				(let ([bg (send dc get-background)]
+                                      [mred-icon (get-icon)])
+                                  (send dc set-background "YELLOW")
 				  (case mask-ex-mode
 				    [(plt plt-mask plt^plt mred^plt)
 				     (let* ([plt (get-plt)]
-					    [tmp-bm (make-object bitmap% 
-								 (send mred-icon get-width)
-								 (send mred-icon get-height)
-								 #f)]
-					    [tmp-dc (make-object bitmap-dc% tmp-bm)])
+					    [ww (send mred-icon get-width)]
+                                            [hh (send mred-icon get-height)]
+					    [tmp-bm (make-object bitmap% ww hh #f)]
+					    [tmp-dc (make-object bitmap-dc% tmp-bm)]
+                                            [mask-bm tmp-bm])
 				       (send tmp-dc draw-bitmap plt
 					     (/ (- (send mred-icon get-width)
 						   (send plt get-width))
@@ -669,16 +679,33 @@
 					     (/ (- (send mred-icon get-height)
 						   (send plt get-height))
 						2))
+                                       (when (memq mask-ex-mode '(plt^plt mred^plt))
+                                         ;; Convert to grayscale
+                                         (let ([s (make-bytes (* 4 ww hh))])
+                                           (send tmp-bm get-argb-pixels 0 0 ww hh s)
+                                           (for* ([i (in-range 0 ww)]
+                                                  [j (in-range 0 hh)])
+                                             (let* ([p (* 4 (+ (* j ww) i))]
+                                                    [v (quotient (+ (bytes-ref s (+ p 1))
+                                                                    (bytes-ref s (+ p 2))
+                                                                    (bytes-ref s (+ p 3)))
+                                                                 3)])
+                                               (bytes-set! s (+ p 1) v)
+                                               (bytes-set! s (+ p 2) v)
+                                               (bytes-set! s (+ p 3) v)))
+                                           (set! mask-bm (make-object bitmap% ww hh #f))
+                                           (send tmp-dc set-bitmap mask-bm)
+                                           (send tmp-dc set-argb-pixels 0 0 ww hh s)))
 				       (if (eq? mask-ex-mode 'mred^plt)
 					   (send dc draw-bitmap mred-icon x y
 						 'solid
 						 (send the-color-database find-color "BLACK")
-						 tmp-bm)
+						 mask-bm)
 					   (send dc draw-bitmap tmp-bm x y 'solid 
 						 (send the-color-database find-color "BLACK")
 						 (cond
 						  [(eq? mask-ex-mode 'plt-mask) mred-icon]
-						  [(eq? mask-ex-mode 'plt^plt) tmp-bm]
+						  [(eq? mask-ex-mode 'plt^plt) mask-bm]
 						  [else #f]))))]
                                     [(mred^mred)
                                      (send dc draw-bitmap mred-icon x y
@@ -687,19 +714,20 @@
                                            mred-icon)]
                                     [(mred~)
                                      (send dc draw-bitmap (get-rotated) x y 'opaque)]
-                                    [(mred^mred~ opaque-mred^mred~ red-mred^mred~)
+                                    [(mred^mred~ opaque-mred^mred~ red-mred^mred~ opaque-red-mred^mred~)
                                      (send dc draw-bitmap mred-icon x y 
-                                           (if (eq? mask-ex-mode 'opaque-mred^mred~)
+                                           (if (memq mask-ex-mode '(opaque-mred^mred~ opaque-red-mred^mred~))
                                                'opaque
                                                'solid)
                                            (send the-color-database find-color 
-                                                 (if (eq? mask-ex-mode 'red-mred^mred~)
+                                                 (if (memq mask-ex-mode '(red-mred^mred~ opaque-red-mred^mred~))
                                                      "RED"
                                                      "BLACK"))
                                            (get-rotated))]
                                     [else
                                      ;; simple draw
-                                     (send dc draw-bitmap mred-icon x y 'xor)]))
+                                     (send dc draw-bitmap mred-icon x y 'xor)])
+                                  (send dc set-background bg))
 				(set! x (+ x (send (get-icon) get-width)))
 				(let ([black (send the-color-database find-color "BLACK")]
 				      [red (send the-color-database find-color "RED")]
@@ -724,7 +752,7 @@
 				    (do-one return 'solid black)
 				    (do-one return 'solid red)
 				    (do-one return 'opaque red)
-				    ;; Next three, on a bluew background
+				    ;; Next three, on a blue background
 				    (let ([end x]
 					  [b (send dc get-brush)])
 				      (send dc set-brush (make-object brush% "BLUE" 'solid))
@@ -787,7 +815,7 @@
 				  (send dc draw-rectangle 180 205 20 20)
 				  (send dc set-brush brushs))))
 			    
-			    (when (and pixel-copy? last? (not (or ps? (eq? dc can-dc))))
+			    (when (and pixel-copy? last? (not (or kind (eq? dc can-dc))))
 			      (let* ([x 100]
 				     [y 170]
 				     [x2 245] [y2 188]
@@ -893,6 +921,45 @@
 							 100 310)
 						   p))
 
+                              (let ([p (send dc get-pen)])
+                                (send dc set-pen (make-object color% 0 0 0 0.1) 1 'solid)
+                                (send dc set-brush (make-object color% 255 0 200 0.5) 'solid)
+                                (send dc draw-rectangle 250 320 20 20)
+                                (send dc set-brush (make-object color% 0 255 200 0.5) 'solid)
+                                (send dc draw-rectangle 260 330 20 20)
+                                (send dc set-pen p))
+
+                              (let ([p (send dc get-pen)])
+                                (send dc set-pen "white" 1 'transparent)
+                                (send dc set-brush (new brush%
+                                                        [gradient
+                                                         (make-object linear-gradient%
+                                                                      300 0 380 0
+                                                                      (list (list 0.0
+                                                                                  (make-object color% 255 0 0))
+                                                                            (list 0.5
+                                                                                  (make-object color% 0 255 0))
+                                                                            (list 1.0
+                                                                                  (make-object color% 0 0 255 0.0))))]))
+                                (send dc draw-rectangle 300 320 80 20)
+                                (send dc set-pen p))
+
+                              (let ([p (send dc get-pen)])
+                                (send dc set-pen "white" 1 'transparent)
+                                (send dc set-brush (new brush%
+                                                        [gradient
+                                                         (make-object radial-gradient%
+                                                                      360 250 5
+                                                                      365 245 25
+                                                                      (list (list 0.0
+                                                                                  (make-object color% 255 0 0))
+                                                                            (list 0.5
+                                                                                  (make-object color% 0 255 0))
+                                                                            (list 1.0
+                                                                                  (make-object color% 0 0 255 0.0))))]))
+                                (send dc draw-rectangle 338 228 44 44)
+                                (send dc set-pen p))
+
 			      (send dc draw-line 130 310 150 310)
 			      (send dc draw-line 130 312.5 150 312.5)
 			      (send dc draw-line 130 314.3 150 314.3)
@@ -917,7 +984,7 @@
 				(send dc draw-rectangle 187 310 20 20)
 				(send dc set-pen p)))
 			      
-			    (when (and last? (not (or ps? (eq? dc can-dc)))
+			    (when (and last? (not (or kind (eq? dc can-dc)))
 				       (send mem-dc get-bitmap))
 			      (send can-dc draw-bitmap (send mem-dc get-bitmap) 0 0 'opaque)))
 			  
@@ -926,10 +993,31 @@
 		  (send (get-dc) set-scale 1 1)
 		  (send (get-dc) set-origin 0 0)
 
-		  (let ([dc (if ps?
-				(let ([dc (if (eq? ps? 'print)
-					      (make-object printer-dc%)
-					      (make-object post-script-dc%))])
+		  (let ([dc (if kind
+				(let ([dc (case kind
+                                            [(print) (make-object printer-dc%)]
+                                            [(svg)
+                                             (let ([fn (put-file)])
+                                               (and fn
+                                                    (new svg-dc%
+                                                         [width (* xscale DRAW-WIDTH)]
+                                                         [height (* yscale DRAW-HEIGHT)]
+                                                         [output fn]
+                                                         [exists 'truncate])))]
+                                            [(ps pdf)
+                                             (let ([page?
+                                                    (eq? 'yes (message-box
+                                                               "Bounding Box"
+                                                               "Use paper bounding box?"
+                                                               #f
+                                                               '(yes-no)))])
+                                               (new (if (eq? kind 'ps)
+                                                        post-script-dc% 
+                                                        pdf-dc%)
+                                                    [width (* xscale DRAW-WIDTH)]
+                                                    [height (* yscale DRAW-HEIGHT)]
+                                                    [as-eps (not page?)]
+                                                    [use-paper-bbox page?]))])])
 				  (and (send dc ok?) dc))
 				(if (and use-bitmap?)
 				    (begin
@@ -937,12 +1025,16 @@
 				      mem-dc)
 				    (get-dc)))])
 		    (when dc
-                      (send dc clear)
-
-		      (send dc start-doc "Draw Test")
+                      (send dc start-doc "Draw Test")
 		      (send dc start-page)
 
-                      (send dc set-alpha current-alpha)
+                      (send dc clear)
+
+		      (send dc set-alpha current-alpha)
+                      (send dc set-rotation (- current-rotation))
+                      (send dc set-initial-matrix (if current-skew?
+                                                      (vector 1 0 0.2 1 3 0)
+                                                      (vector 1 0 0 1 0 0)))
 
 		      (if clip-pre-scale?
 			  (begin
@@ -988,7 +1080,7 @@
 				       (send dc set-clipping-region r))]
 			      [(rect+poly) (let ([r (mk-poly 'winding)])
 					     (send r union (mk-rect))
-						(send dc set-clipping-region r))]
+                                             (send dc set-clipping-region r))]
 			      [(rect+circle) (let ([r (mk-circle)])
 					       (send r union (mk-rect))
 					       (send dc set-clipping-region r))]
@@ -1054,9 +1146,9 @@
 
 		      (unless clock-clip?
 			(let ([r (send dc get-clipping-region)])
-			  (if (eq? clip 'none)
+                          (if (eq? clip 'none)
 			      (when r
-				(error 'draw-test "shouldn't have been a clipping region"))
+				(show-error 'draw-test "shouldn't have been a clipping region"))
 			      (let*-values ([(x y w h) (send r get-bounding-box)]
 					    [(l) (list x y w h)]
 					    [(=~) (lambda (x y)
@@ -1080,19 +1172,27 @@
 							    (- (/ (caddr l) xscale) offset)
 							    (- (/ (cadddr l) yscale) offset))
 						      l)))
-				  (error 'draw-test "clipping region changed badly: ~a" l))))))
+				  (show-error 'draw-test "clipping region changed badly: ~a" l))))))
 
 		      (let-values ([(w h) (send dc get-size)])
 			(unless (cond
-				 [ps? #t]
+				 [kind #t]
 				 [use-bad? #t]
 				 [use-bitmap? (and (= w (* xscale DRAW-WIDTH)) (= h (* yscale DRAW-HEIGHT)))]
 				 [else (and (= w (* 2 DRAW-WIDTH)) (= h (* 2 DRAW-HEIGHT)))])
-			  (error 'x "wrong size reported by get-size: ~a ~a" w h)))
+			  (show-error 'x "wrong size reported by get-size: ~a ~a (not ~a)" w h
+                                      (if use-bitmap?
+                                          (list (* xscale DRAW-WIDTH) (* yscale DRAW-HEIGHT))
+                                          (list (* 2 DRAW-WIDTH) (* 2 DRAW-HEIGHT))))))
 
 		      (send dc set-clipping-region #f)
 
-		      (send dc end-page)
+
+                      (send dc end-page)
+                      (when (and kind multi-page?)
+                        (send dc start-page)
+                        (send dc draw-text "Page 2" 0 0)
+                        (send dc end-page))
 		      (send dc end-doc)))
 		  
 		  (when save-filename
@@ -1112,10 +1212,32 @@
 		 '(horizontal))
     (make-object button% "PS" hp
 		 (lambda (self event)
-		   (send canvas on-paint #t)))
-    (make-object button% "Print" hp
+		   (send canvas on-paint 'ps)))
+    (make-object button% "PDF" hp
 		 (lambda (self event)
-		   (send canvas on-paint 'print)))
+		   (send canvas on-paint 'pdf)))
+    (make-object button% "SVG" hp
+		 (lambda (self event)
+		   (send canvas on-paint 'svg)))
+    (make-object check-box% "Multiple Pages" hp
+                 (lambda (self event)
+                   (set! multi-page? (send self get-value))))
+    (make-object button% "Save" hp
+		 (lambda (b e)
+		   (unless use-bitmap?
+		     (error 'save-file "only available for pixmap/bitmap mode"))
+		   (let ([f (put-file)])
+		     (when f
+		       (let ([format
+			      (cond 
+			       [(regexp-match "[.]xbm$" f) 'xbm]
+			       [(regexp-match "[.]xpm$" f) 'xpm]
+			       [(regexp-match "[.]jpe?g$" f) 'jpeg]
+			       [(regexp-match "[.]png$" f) 'png]
+			       [else (error 'save-file "unknown suffix: ~e" f)])])
+			 (set! save-filename f)
+			 (set! save-file-format format)
+			 (send canvas refresh))))))
     (make-object choice% #f '("1" "*2" "/2" "1,*2" "*2,1") hp
 		 (lambda (self event)
 		   (send canvas set-scale 
@@ -1147,34 +1269,19 @@
     (make-object button% "Clock" hp2.5 (lambda (b e) (do-clock #f)))
     (make-object choice% #f
 		 '("MrEd XOR" "PLT Middle" "PLT ^ MrEd" "MrEd ^ PLT" "MrEd ^ MrEd" 
-		   "MrEd~" "MrEd ^ MrEd~" "M^M~ Opaque" "M^M~ Red"
+		   "MrEd~ Opaque" "MrEd ^ MrEd~" "M^M~ Opaque" "M^M~ Red" "M^M~ Rd Opq"
 		   "PLT^PLT")
 		 hp2.5
 		 (lambda (self event)
 		   (send canvas set-mask-ex-mode 
 			 (list-ref '(mred plt plt-mask mred^plt mred^mred 
-					  mred~ mred^mred~ opaque-mred^mred~ red-mred^mred~
+					  mred~ mred^mred~ opaque-mred^mred~ 
+                                          red-mred^mred~ opaque-red-mred^mred~
 					  plt^plt)
 				   (send self get-selection)))))
     (make-object check-box% "Kern" hp2.5
 		 (lambda (self event)
 		   (send canvas set-kern (send self get-value))))
-    (make-object button% "Save" hp0
-		 (lambda (b e)
-		   (unless use-bitmap?
-		     (error 'save-file "only available for pixmap/bitmap mode"))
-		   (let ([f (put-file)])
-		     (when f
-		       (let ([format
-			      (cond 
-			       [(regexp-match "[.]xbm$" f) 'xbm]
-			       [(regexp-match "[.]xpm$" f) 'xpm]
-			       [(regexp-match "[.]jpe?g$" f) 'jpeg]
-			       [(regexp-match "[.]png$" f) 'png]
-			       [else (error 'save-file "unknown suffix: ~e" f)])])
-			 (set! save-filename f)
-			 (set! save-file-format format)
-			 (send canvas refresh))))))
     (make-object choice% "Clip" 
 		 '("None" "Rectangle" "Rectangle2" "Octagon" 
 		   "Circle" "Wedge" "Round Rectangle" "Lambda"
@@ -1212,13 +1319,28 @@
 			     (send canvas refresh))))])
       (set! do-clock clock)
       (make-object button% "Clip Clock" hp3 (lambda (b e) (clock #t)))
+      (make-object button% "Print" hp4 (lambda (self event) (send canvas on-paint 'print)))
+      (make-object button% "Print Setup" hp4 (lambda (b e) (let ([c (get-page-setup-from-user)])
+                                                             (when c
+                                                               (send (current-ps-setup) copy-from c)))))
       (make-object slider% "Alpha" 0 10 hp4
                    (lambda (s e)
                      (let ([a (/ (send s get-value) 10.0)])
                        (unless (= a current-alpha)
                          (set! current-alpha a)
                          (send canvas refresh))))
-                   10 '(horizontal plain))))
+                   10 '(horizontal plain))
+      (make-object slider% "Rotation" 0 100 hp4
+                   (lambda (s e)
+                     (let ([a (* pi 1/4 (/ (send s get-value) 100.0))])
+                       (unless (= a current-rotation)
+                         (set! current-rotation a)
+                         (send canvas refresh))))
+                   0 '(horizontal plain))
+      (make-object check-box% "Skew" hp4
+                   (lambda (c e)
+                     (set! current-skew? (send c get-value))
+                     (send canvas refresh)))))
 
   (send f show #t))
 

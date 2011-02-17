@@ -1,4 +1,3 @@
-
 #lang scheme/gui
 
 (require mzlib/class
@@ -51,6 +50,10 @@
 			   20 'decorative 
 			   'normal 'bold
 			   #f))
+(define italic-font (send the-font-list find-or-create-font
+                          13 'roman
+                          'italic 'normal
+                          #f))
 (define ($ font) (or font normal-control-font))
 
 (define (make-h&s cp f)
@@ -473,14 +476,16 @@
   (add-testers "Text" txt)
   (add-change-label "Text" txt lp #f OTHER-LABEL)
   
-  (let ([items (list l il 
+  (let ([items (list ip
+                     l il 
 		     b ib 
 		     lb
 		     cb icb 
 		     rb irb 
 		     ch
 		     txt)]
-	[names (list "label" "image label"
+	[names (list "panel"
+                     "label" "image label"
 		     "button" "image button"
 		     "list box"
 		     "checkbox" "image checkbox"
@@ -495,6 +500,17 @@
 		   (let ([v (send c get-selection)])
 		     (when (positive? v)
 		       (send (list-ref items (sub1 v)) focus)
+		       (send c set-selection 0)))))
+    (make-object choice%
+		 "Reparent"
+		 (cons "..." names)
+		 lp
+		 (lambda (c e)
+		   (let ([v (send c get-selection)])
+		     (when (positive? v)
+                       (define f (new frame% [label "New Parent"]))
+		       (send (list-ref items (sub1 v)) reparent f)
+                       (send f show #t)
 		       (send c set-selection 0)))))
     (cons (make-object popup-test-canvas% 
 		       items
@@ -1232,6 +1248,55 @@
   (instructions p "button-steps.txt")
   (send f show #t))
 
+(define (image-button-frame)
+  (define f (make-frame frame% "Image Button Test"))
+  (define pt (make-object vertical-panel% f))
+  (define pm (make-object horizontal-panel% f))
+  (define pb (make-object vertical-panel% f))
+  (define pc (make-object horizontal-panel% f))
+  (define bt (new button% [parent pt]
+                  [label (list (read-bitmap
+                                (collection-file-path "foot.png" "icons"))
+                               "Top"
+                               'top)]))
+  (define bl (new button% [parent pm]
+                  [label (list (read-bitmap
+                                (collection-file-path "b-wait.png" "icons"))
+                               "Left"
+                               'left)]))
+  (define br (new button% [parent pm]
+                  [label (list (read-bitmap
+                                (collection-file-path "b-run.png" "icons"))
+                               "Right"
+                               'right)]))
+  (define bb (new button% [parent pb]
+                  [label (list (read-bitmap
+                                (collection-file-path "bug09.png" "icons"))
+                               "Bottom"
+                               'bottom)]))
+  (new button% [parent pc]
+       [label "Strings"]
+       [callback (lambda (b e)
+                   (for ([b (in-list (list bt bl br bb))])
+                     (send b set-label (list->string
+                                        (reverse
+                                         (string->list
+                                          (cadr (send b get-label))))))))])
+  (new button% [parent pc]
+       [label "Bitmaps"]
+       [callback (lambda (b e)
+                   (for ([b (in-list (list bt bl br bb))])
+                     (send b set-label (let ([bm (car (send b get-label))])
+                                         (let* ([bm2 (make-bitmap (send bm get-width)
+                                                                  (send bm get-height))]
+                                                [dc (make-object bitmap-dc% bm2)])
+                                           (send dc scale 1 -1)
+                                           (send dc translate 0 (send bm get-height))
+                                           (send dc draw-bitmap bm 0 0)
+                                           (send dc set-bitmap #f)
+                                           bm2)))))])
+  (send f show #t))
+
 (define (checkbox-frame)
   (define f (make-frame frame% "Checkbox Test"))
   (define p f)
@@ -1562,7 +1627,80 @@
   (instructions p "choice-list-steps.txt")
   (send f show #t))
 
-(define (slider-frame)
+(define (combo-frame empty?)
+  (define f (make-frame frame% "Combo Test"))
+  (define p f)
+  (define actual-content '("Apple" "Banana"))
+  (define (callback c e) (void))
+  (define c (make-object (class combo-field% 
+                           (define/override (on-popup e)
+                             (printf "Popup!\n"))
+                           (super-new))
+                         "Tester" actual-content p callback))
+  (define counter 0)
+  (define append-with-user-data? #f)
+  (define ab (make-object button%
+			  "Append" p
+			  (lambda (b e)
+			    (set! counter (add1 counter))
+			    (let ([naya (format "~aExtra ~a" 
+						(if (= counter 10)
+						    (string-append
+						     "This is a Really Long Named Item That Would Have Used the Short Name, Yes "
+						     "This is a Really Long Named Item That Would Have Used the Short Name ")
+						    "")
+						counter)]
+				  [naya-data (box 0)])
+			      (set! actual-content (append actual-content (list naya)))
+			      (send c append naya)))))
+  (define asb (make-object button%
+                           "Append Separator" p
+                           (lambda (b e)
+                             (set! counter (add1 counter))
+                             (new separator-menu-item% [parent (send c get-menu)]))))
+  (define cdp (make-object horizontal-panel% p))
+  (define (clear)
+    (for ([i (send (send c get-menu) get-items)])
+      (send i delete)))
+  (define rb (make-object button% "Clear" cdp
+                          (lambda (b e) (clear))))
+  (define (gone l n)
+    (if (zero? n)
+        (cdr l)
+        (cons (car l) (gone (cdr l) (sub1 n)))))
+  (define (delete p)
+    (send (list-ref (send (send c get-menu) get-items) p) delete)
+    (when (<= 0 p (sub1 (length actual-content)))
+      (set! actual-content (gone actual-content p))))
+  (define db (make-object button%
+                          "Delete First" cdp
+                          (lambda (b e)
+                            (unless (null? actual-content)
+                              (delete 0)))))
+  (define dbe (make-object button%
+                           "Delete Last" cdp
+                           (lambda (b e)
+                             (unless (null? actual-content)
+                               (delete (sub1 (length actual-content)))))))
+  (define setb (make-object button%
+                            "Reset" cdp
+                            (lambda (b e)
+                              (clear)
+                              (let ([m (send c get-menu)])
+                                (for ([i '("Alpha" "Beta" "Gamma")])
+                                  (new menu-item% [parent m] [label i]
+                                       [callback (lambda (itm e)
+                                                   (send c set-value
+                                                         (format "~a from Reset" i)))]))))))
+  (define tb (make-object button%
+			  "Check" p
+			  (lambda (b e)
+                            (void))))
+  (send c stretchable-width #t)
+  (instructions p "combo-steps.txt")
+  (send f show #t))
+
+(define (slider-frame style)
   (define f (make-frame frame% "Slider Test"))
   (define p (make-object vertical-panel% f))
   (define old-list null)
@@ -1571,7 +1709,8 @@
 			 (lambda (sl e)
 			   (check-callback-event s sl e commands #f)
 			   (printf "slid: ~a\n" (send s get-value)))
-			 3))
+			 3
+                         (cons 'horizontal style)))
   (define c (make-object button% "Check" p
 			 (lambda (c e)
 			   (for-each
@@ -1679,7 +1818,7 @@
 				    (get-scroll-pos 'horizontal)
 				    (get-scroll-range 'horizontal)
 				    (get-scroll-page 'horizontal))]
-			 [dc (get-dc)])
+                         [dc (get-dc)])
 		     (let-values ([(w h) (get-client-size)]
 				  [(w2 h2) (get-virtual-size)]
 				  [(x y) (get-view-start)])
@@ -2070,7 +2209,7 @@
 			   f
 			   (lambda (b e)
 			     (send f set-cursor (make-object cursor% s)))))
-	    '(arrow bullseye cross hand ibeam watch arrow-watch blank size-n/s size-e/w size-ne/sw size-nw/se))
+	    '(arrow bullseye cross hand ibeam watch blank size-n/s size-e/w size-ne/sw size-nw/se))
   (send f show #t))
 
 
@@ -2146,6 +2285,7 @@
 (make-object button% "Make Button Frame" bp (lambda (b e) (button-frame frame% null)))
 (make-object button% "Make Default Button Frame" bp (lambda (b e) (button-frame frame% '(border))))
 (make-object button% "Make Button Dialog" bp (lambda (b e) (button-frame dialog% null)))
+(make-object button% "Make Image Buttons" bp (lambda (b e) (image-button-frame)))
 (define crp (make-object horizontal-pane% ap))
 (send crp stretchable-height #f)
 (make-object button% "Make Checkbox Frame" crp (lambda (b e) (checkbox-frame)))
@@ -2159,6 +2299,7 @@
 (send cp stretchable-width #f)
 (make-object button% "Make Choice Frame" cp (lambda (b e) (choice-or-list-frame #f null #f)))
 (make-object button% "Make Empty Choice Frame" cp (lambda (b e) (choice-or-list-frame #f null #t)))
+(make-object button% "Make Combo Frame" cp (lambda (b e) (combo-frame #f)))
 (define lp (make-object horizontal-pane% ap))
 (send lp stretchable-width #f)
 (make-object button% "Make List Frame" lp (lambda (b e) (choice-or-list-frame #t '(single) #f)))
@@ -2169,17 +2310,18 @@
 (send gsp stretchable-height #f)
 (make-object button% "Make Gauge Frame" gsp (lambda (b e) (gauge-frame)))
 (make-object vertical-pane% gsp) ; filler
-(make-object button% "Make Slider Frame" gsp (lambda (b e) (slider-frame)))
+(make-object button% "Make Slider Frame" gsp (lambda (b e) (slider-frame null)))
+(make-object button% "Make Plain Slider Frame" gsp (lambda (b e) (slider-frame '(plain))))
 (make-object vertical-pane% gsp) ; filler
 (make-object button% "Make Tab Panel" gsp (lambda (b e) (test-tab-panel #f)))
 (make-object button% "Make Tabs" gsp (lambda (b e) (test-tab-panel #t)))
-(make-object vertical-pane% gsp) ; filler
-(make-object button% "Make Modified Frame" gsp (lambda (b e) (test-modified-frame)))
 
 (define tp (make-object horizontal-pane% ap))
 (send tp stretchable-width #f)
 (make-object button% "Make Text Frame" tp (lambda (b e) (text-frame '(single))))
 (make-object button% "Make Multitext Frame" tp (lambda (b e) (text-frame '(multiple))))
+(make-object vertical-pane% tp) ; filler
+(make-object button% "Make Modified Frame" tp (lambda (b e) (test-modified-frame)))
 
 (define cnp (make-object horizontal-pane% ap))
 (send cnp stretchable-width #t)
@@ -2214,7 +2356,7 @@
   (let loop ([l radios])
     (let* ([c (car l)]
 	   [rest (cdr l)]
-	   [n (send c number)]
+	   [n (send c get-number)]
 	   [v (send c get-selection)])
       (if (< v (sub1 n))
 	  (send c set-selection (add1 v))
@@ -2252,7 +2394,7 @@
       (make-radio-box "Stretchiness" '("Normal" "All Stretchy")
 		      p1 void))
     (define font-radio
-      (make-radio-box "Label Font" '("Normal" "Small" "Tiny" "Big")
+      (make-radio-box "Label Font" '("Normal" "Small" "Tiny" "Big" "Italic")
 		      p1 void))
     (define enabled-radio
       (make-radio-box "Initially" '("Enabled" "Disabled")
@@ -2275,7 +2417,8 @@
 		      (list-ref (list #f
 				      small-control-font
 				      tiny-control-font
-				      special-font)
+				      special-font
+                                      italic-font)
 				(send font-radio get-selection))
 		      (positive? (send enabled-radio get-selection))
 		      (positive? (send selection-radio get-selection))

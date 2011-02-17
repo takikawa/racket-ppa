@@ -1,4 +1,5 @@
 #lang racket/base
+
 #|
 
 closing:
@@ -51,6 +52,19 @@ module browser threading seems wrong.
 
   (define define-button-long-label "(define ...)")
   
+  (define oprintf
+    (let ([op (current-output-port)])
+      (λ args
+        (apply fprintf op args))))
+  
+  ;; code copied from framework/private/frame.rkt
+  (define checkout-or-nightly?
+    (or (with-handlers ([exn:fail:filesystem? (λ (x) #f)])
+          (directory-exists? (collection-path "repo-time-stamp")))
+        (with-handlers ([exn:fail:filesystem? (λ (x) #f)])
+          (let ([fw (collection-path "framework")])
+            (directory-exists? (build-path fw 'up 'up ".git"))))))
+  
   (define-unit unit@
     (import [prefix help-desk: drracket:help-desk^]
             [prefix drracket:app: drracket:app^]
@@ -76,7 +90,8 @@ module browser threading seems wrong.
       set-visible-defs
       set-focus-d/i
       get-i
-      set-i)
+      set-i
+      insert-auto-text)
     (define tab<%>
       (interface (drracket:rep:context<%>)
         get-frame
@@ -129,74 +144,76 @@ module browser threading seems wrong.
                         (set! added? #t)
                         (new separator-menu-item% [parent menu]))))])
              
-             (let* ([end (send text get-end-position)]
-                    [start (send text get-start-position)])
-               (unless (= 0 (send text last-position))
-                 (let* ([str (if (= end start)
-                                 (find-symbol
-                                  text
-                                  (call-with-values
-                                   (λ ()
-                                     (send text dc-location-to-editor-location
-                                           (send event get-x)
-                                           (send event get-y)))
-                                   (λ (x y)
-                                     (send text find-position x y))))
-                                 (send text get-text start end))]
-                        ;; almost the same code as "search-help-desk" in "rep.rkt"
-                        [l (send text get-canvas)]
-                        [l (and l (send l get-top-level-window))]
-                        [l (and l (is-a? l -frame<%>) (send l get-definitions-text))]
-                        [l (and l (send l get-next-settings))]
-                        [l (and l (drracket:language-configuration:language-settings-language l))]
-                        [ctxt (and l (send l capability-value 'drscheme:help-context-term))]
-                        [name (and l (send l get-language-name))])
-                   (unless (string=? str "")
-                     (add-sep)
-                     (let ([short-str (shorten-str str 50)])
-                       (make-object menu-item%
-                         (gui-utils:format-literal-label
-                          (string-constant search-help-desk-for) 
-                          (if (equal? short-str str)
-                              str
-                              (string-append short-str "...")))
-                         menu
-                         (λ x (help-desk:help-desk str (list ctxt name)))))))))
-           
-           (when (is-a? text editor:basic<%>)
-             (let-values ([(pos text) (send text get-pos/text event)])
-               (when (and pos (is-a? text text%))
-                 (send text split-snip pos)
-                 (send text split-snip (+ pos 1))
-                 (let ([snip (send text find-snip pos 'after-or-none)])
-                   (when (or (is-a? snip image-snip%)
-                             (is-a? snip image-core:image%)
-                             (is-a? snip cache-image-snip%))
-                     (add-sep)
-                     (new menu-item%
-                          [parent menu]
-                          [label (string-constant save-image)]
-                          [callback
-                           (λ (_1 _2)
-                             (let ([fn (put-file #f 
-                                                 (send text get-top-level-window)
-                                                 #f "untitled.png" "png")])
-                               (when fn
-                                 (let ([kind (filename->kind fn)])
-                                   (cond
-                                     [kind
-                                      (cond
-                                        [(or (is-a? snip image-snip%)
-                                             (is-a? snip cache-image-snip%))
-                                         (send (send snip get-bitmap) save-file fn kind)]
-                                        [else
-                                         (image-core:save-image-as-bitmap snip fn kind)])]
-                                     [else
-                                      (message-box 
-                                       (string-constant drscheme)
-                                       "Must choose a filename that ends with either .png, .jpg, .xbm, or .xpm")])))))]))))))
-           
-           (void))))))
+             (add-search-help-desk-menu-item text menu
+                                             (let-values ([(x y)
+                                                           (send text dc-location-to-editor-location
+                                                                 (send event get-x)
+                                                                 (send event get-y))])
+                                               (send text find-position x y))
+                                             add-sep)
+             
+             (when (is-a? text editor:basic<%>)
+               (let-values ([(pos text) (send text get-pos/text event)])
+                 (when (and pos (is-a? text text%))
+                   (send text split-snip pos)
+                   (send text split-snip (+ pos 1))
+                   (let ([snip (send text find-snip pos 'after-or-none)])
+                     (when (or (is-a? snip image-snip%)
+                               (is-a? snip image-core:image%)
+                               (is-a? snip cache-image-snip%))
+                       (add-sep)
+                       (new menu-item%
+                            [parent menu]
+                            [label (string-constant save-image)]
+                            [callback
+                             (λ (_1 _2)
+                               (let ([fn (put-file #f 
+                                                   (send text get-top-level-window)
+                                                   #f "untitled.png" "png")])
+                                 (when fn
+                                   (let ([kind (filename->kind fn)])
+                                     (cond
+                                       [kind
+                                        (cond
+                                          [(or (is-a? snip image-snip%)
+                                               (is-a? snip cache-image-snip%))
+                                           (send (send snip get-bitmap) save-file fn kind)]
+                                          [else
+                                           (image-core:save-image-as-bitmap snip fn kind)])]
+                                       [else
+                                        (message-box 
+                                         (string-constant drscheme)
+                                         "Must choose a filename that ends with either .png, .jpg, .xbm, or .xpm")])))))]))))))
+             
+             (void))))))
+    
+    (define (add-search-help-desk-menu-item text menu position [add-sep void])
+      (let* ([end (send text get-end-position)]
+             [start (send text get-start-position)])
+        (unless (= 0 (send text last-position))
+          (let* ([str (if (= end start)
+                          (find-symbol text position)
+                          (send text get-text start end))]
+                 ;; almost the same code as "search-help-desk" in "rep.rkt"
+                 [l (send text get-canvas)]
+                 [l (and l (send l get-top-level-window))]
+                 [l (and l (is-a? l -frame<%>) (send l get-definitions-text))]
+                 [l (and l (send l get-next-settings))]
+                 [l (and l (drracket:language-configuration:language-settings-language l))]
+                 [ctxt (and l (send l capability-value 'drscheme:help-context-term))]
+                 [name (and l (send l get-language-name))])
+            (unless (string=? str "")
+              (add-sep)
+              (let ([short-str (shorten-str str 50)])
+                (make-object menu-item%
+                  (gui-utils:format-literal-label
+                   (string-constant search-help-desk-for) 
+                   (if (equal? short-str str)
+                       str
+                       (string-append short-str "...")))
+                  menu
+                  (λ x (help-desk:help-desk str (list ctxt name))))
+                (void)))))))
     
     (define (filename->kind fn)
       (let ([ext (filename-extension fn)])
@@ -215,30 +232,69 @@ module browser threading seems wrong.
     ;; find-symbol : number -> string
     ;; finds the symbol around the position `pos' (approx)
     (define (find-symbol text pos)
-      (send text split-snip pos)
-      (send text split-snip (+ pos 1))
-      (let ([snip (send text find-snip pos 'after)])
-        (if (is-a? snip string-snip%)
-            (let* ([before
-                    (let loop ([i (- pos 1)]
-                               [chars null])
-                      (if (< i 0)
-                          chars
-                          (let ([char (send text get-character i)])
-                            (if (non-letter? char)
-                                chars
-                                (loop (- i 1)
-                                      (cons char chars))))))]
-                   [after
-                    (let loop ([i pos])
-                      (if (< i (send text last-position))
-                          (let ([char (send text get-character i)])
-                            (if (non-letter? char)
-                                null
-                                (cons char (loop (+ i 1)))))
-                          null))])
-              (apply string (append before after)))
-            "")))
+      (cond
+        [(is-a? text scheme:text<%>)
+         (let* ([before (send text get-backward-sexp pos)]
+                [before+ (and before (send text get-forward-sexp before))]
+                [after (send text get-forward-sexp pos)]
+                [after- (and after (send text get-backward-sexp after))])
+           
+           (define (get-tokens start end)
+             (let loop ([i start])
+               (cond
+                 [(and (< i end)
+                       (< i (send text last-position)))
+                  (define-values (tstart tend) (send text get-token-range i))
+                  (cons (list (send text classify-position i) tstart tend)
+                        (loop tend))]
+                 [else '()])))
+           
+           ;; find-searchable-tokens : number number -> (or/c #f (list symbol number number))
+           (define (find-searchable-tokens start end)
+             (define tokens (get-tokens start end))
+             (define raw-tokens (map (λ (x) (list-ref x 0)) tokens))
+             (cond
+               [(equal? raw-tokens '(symbol))
+                (car tokens)]
+               [(equal? raw-tokens '(constant symbol))
+                (cadr tokens)]
+               [else #f]))
+           
+           (define searchable-token 
+             (or (and before before+ 
+                      (<= before pos before+)
+                      (find-searchable-tokens before before+))
+                 (and after after- 
+                      (<= after- pos after)
+                      (find-searchable-tokens after- after))))
+           (if searchable-token
+             (send text get-text (list-ref searchable-token 1) (list-ref searchable-token 2))
+             ""))]
+        [else
+         (send text split-snip pos)
+         (send text split-snip (+ pos 1))
+         (let ([snip (send text find-snip pos 'after)])
+           (if (is-a? snip string-snip%)
+               (let* ([before
+                       (let loop ([i (- pos 1)]
+                                  [chars null])
+                         (if (< i 0)
+                             chars
+                             (let ([char (send text get-character i)])
+                               (if (non-letter? char)
+                                   chars
+                                   (loop (- i 1)
+                                         (cons char chars))))))]
+                      [after
+                       (let loop ([i pos])
+                         (if (< i (send text last-position))
+                             (let ([char (send text get-character i)])
+                               (if (non-letter? char)
+                                   null
+                                   (cons char (loop (+ i 1)))))
+                             null))])
+                 (apply string (append before after)))
+               ""))]))
     
     ;; non-letter? : char -> boolean
     ;; returns #t if the character belongs in a symbol (approx) and #f it is
@@ -447,99 +503,12 @@ module browser threading seems wrong.
             (set! definitions-text% (make-definitions-text%)))
           definitions-text%)))
 
-    ;; links two editor's together so they scroll in tandem
-    (define (linked-scroller %)
-      (class %
-        (super-new)
-        (field [linked #f])
-        (init-field [line-numbers? #f])
-
-        (inherit insert line-start-position line-end-position)
-
-        (define/public (link-to! who)
-          (set! linked who))
-
-        #;
-        (define/override (scroll-editor-to . args)
-          (printf "Scroll editor to ~a\n" args))
-
-        #;
-        (define/override (scroll-to-position . args)
-          (printf "Scroll-to-position ~a\n" args))
-
-        (define self (gensym))
-        (define (visible? want-start want-end)
-          (define start (box 0))
-          (define end (box 0))
-          (send this get-visible-line-range start end)
-          #;
-          (printf "Visible line range ~a ~a ~a\n" (unbox start) (unbox end) self)
-          (and (>= want-start (unbox start))
-               (<= want-end (unbox end))))
-
-        (define/public (scroll-to-line start end)
-          #;
-          (printf "Need to scroll to ~a ~a ~a\n" start end self)
-          ;; dont need to scroll unless the range of lines is out of view
-          (when (not (visible? start end))
-            (send this scroll-to-position
-                  (send this line-end-position start)
-                  #f
-                  (send this line-end-position end))))
-
-        (define/augment (after-delete start length)
-          (update-numbers)
-          (inner (void) after-delete start length))
-
-        (define/augment (after-insert start length)
-          (update-numbers)
-          (inner (void) after-insert start length))
-
-        (define/public (update-numbers)
-          (when (and (not line-numbers?) linked)
-            (send linked ensure-length (send this last-line))))
-
-        ;; make sure the set of line numbers is complete
-        (define/public (ensure-length length)
-          (define lines (send this last-line))
-          (when line-numbers?
-            (when (> lines (add1 length))
-              (send this delete
-                    (line-start-position (add1 length))
-                    (line-end-position lines)
-                    #f))
-            (send this begin-edit-sequence)
-            (for ([line (in-range (add1 lines) (add1 (add1 length)))])
-              #;
-              (printf "Insert line ~a\n" line)
-              (insert (format "~a\n" line)))
-            (send this end-edit-sequence)))
-
-        (define/override (on-paint . args)
-          (define start (box 0))
-          (define end (box 0))
-          (define (current-time) (current-inexact-milliseconds))
-          ;; pass #f to avoid getting visible line ranges from multiple sources
-          (send this get-visible-line-range start end #f)
-          #;
-          (printf "text: Repaint at ~a to ~a at ~a!\n" (unbox start) (unbox end) (current-time))
-          ;; update the linked editor when the main widget is redrawn
-          (when (and (not line-numbers?) linked)
-            #;
-            (printf "Send linked scroll to ~a ~a ~a\n" (unbox start) (unbox end) self)
-            (send linked scroll-to-line (unbox start) (unbox end)))
-          (super on-paint . args))
-        ))
-
-    ;; an editor that does not respond to key presses
-    (define (uneditable %)
-      (class %
-             (super-new)
-             (define/override (on-char . stuff) (void))))
+    (define (show-line-numbers?)
+      (preferences:get 'drracket:show-line-numbers?))
 
     (define (make-definitions-text%)
       (let ([definitions-super%
-              (linked-scroller
+              (text:line-numbers-mixin
                (text:first-line-mixin
                 (drracket:module-language:module-language-put-file-mixin
                  (scheme:text-mixin
@@ -554,7 +523,8 @@ module browser threading seems wrong.
                          text:info%)))))))))))])
         ((get-program-editor-mixin)
         (class* definitions-super% (definitions-text<%>)
-          (inherit get-top-level-window is-locked? lock while-unlocked highlight-first-line)
+          (inherit get-top-level-window is-locked? lock while-unlocked highlight-first-line
+                   is-printing?)
           
           (define interactions-text #f)
           (define/public (set-interactions-text it)
@@ -676,6 +646,13 @@ module browser threading seems wrong.
             (end-edit-sequence)
             (inner (void) after-load-file success?))
           
+          (define/augment (on-lexer-valid valid?)
+            (inner (void) on-lexer-valid valid?)
+            (let ([f (get-top-level-window)])
+              (when (and f
+                         (is-a? f -frame<%>))
+                (send f set-color-status! valid?))))
+          
           (inherit is-modified? run-after-edit-sequence)
           (define/override (set-modified mod?)
             (super set-modified mod?)
@@ -755,7 +732,8 @@ module browser threading seems wrong.
           (define/public (this-and-next-language-the-same?)
             (let ([execute-lang (drracket:language-configuration:language-settings-language execute-settings)]
                   [next-lang (drracket:language-configuration:language-settings-language next-settings)])
-              (and (eq? execute-lang next-lang)
+              (and (equal? (send execute-lang get-language-position)
+                           (send next-lang get-language-position))
                    (equal?
                     (send execute-lang marshall-settings 
                           (drracket:language-configuration:language-settings-settings execute-settings))
@@ -776,7 +754,12 @@ module browser threading seems wrong.
           (define/pubment (already-warned)
             (set! already-warned-state #t))
 
+          ;; the really-modified? flag determines if there 
+          ;; is a modification that is not the insertion of the auto-text
           (define really-modified? #f)
+          
+          ;; when this flag is #t, edits to the buffer do not count as 
+          ;; user's edits and so the yellow warning does not appear
           (define ignore-edits? #f)
 
           (define/augment (after-insert x y)
@@ -795,8 +778,6 @@ module browser threading seems wrong.
                  (is-lang-line? l)))
           
           (inherit get-filename)
-          (field
-           [tmp-date-string #f])
           
           (inherit get-filename/untitled-name)
           (define/private (get-date-string)
@@ -806,18 +787,20 @@ module browser threading seems wrong.
              (get-filename/untitled-name)))
           
           (define/override (on-paint before dc left top right bottom dx dy draw-caret)
-            (when (and before
-                       (or (is-a? dc post-script-dc%)
-                           (is-a? dc printer-dc%)))
-              (set! tmp-date-string (get-date-string))
-              (let-values ([(w h d s) (send dc get-text-extent tmp-date-string)])
-                (send (current-ps-setup) set-editor-margin 0 (inexact->exact (ceiling h)))))
             (super on-paint before dc left top right bottom dx dy draw-caret)
-            (when (and (not before)
-                       (or (is-a? dc post-script-dc%)
-                           (is-a? dc printer-dc%)))
-              (send dc draw-text (get-date-string) 0 0)
-              (void))
+
+            ;; [Disabled] For printing, put date and filename in the top margin:
+            (when (and #f before (is-printing?))
+              (let ([h (box 0)]
+                    [w (box 0)])
+                (send (current-ps-setup) get-editor-margin w h)
+                (unless ((unbox h) . < . 2)
+                  (let ([font (make-font #:size (inexact->exact (ceiling (* 1/2 (unbox h))))
+                                         #:family 'modern)]
+                        [old-font (send dc get-font)])
+                    (send dc set-font font)
+                    (send dc draw-text (get-date-string) 0 0)
+                    (send dc set-font old-font)))))
             
             ;; draw the arrows
             (when before
@@ -858,8 +841,8 @@ module browser threading seems wrong.
             (and (or (= (last-position) 0) (not really-modified?))
                  (not (is-modified?))
                  (not (get-filename))))
-          ;; inserts the auto-text if any, and executes the text if so
-          (define/private (insert-auto-text)
+          ;; inserts the auto-text if any
+          (define/public (insert-auto-text)
             (define lang
               (drracket:language-configuration:language-settings-language
                next-settings))
@@ -871,20 +854,13 @@ module browser threading seems wrong.
                          (drracket:language-configuration:language-settings-settings
                           next-settings))))
             (when auto-text
+              (set! ignore-edits? #t)
               (begin-edit-sequence #f)
               (insert auto-text)
               (set-modified #f)
+              (set! ignore-edits? #f)
               (end-edit-sequence)
-              (set! really-modified? #f)
-              ;; HACK: click run; would be better to override on-execute and
-              ;; make it initialize a working repl, but the problem is that
-              ;; doing that in module-language.rkt means that it'll either need
-              ;; to find if the current text is the auto-text and analyze it to
-              ;; get this initialization, or it will need to do that for all
-              ;; possible contents, which means that it'll work when opening
-              ;; exiting files too (it might be feasible once we have a #lang
-              ;; parser).
-              (send (get-top-level-window) execute-callback)))
+              (set! really-modified? #f)))
           (define/private (remove-auto-text)
             (when (and (not really-modified?)
                        (not (get-filename))
@@ -902,10 +878,8 @@ module browser threading seems wrong.
           
           (define error-arrows #f)
           
-          (super-new)
+          (super-new [show-line-numbers? (show-line-numbers?)])
           
-          ;; insert the default-text
-          (queue-callback (lambda () (insert-auto-text)))
           (highlight-first-line
            (is-a? (drracket:language-configuration:language-settings-language next-settings)
                   drracket:module-language:module-language<%>))
@@ -1200,7 +1174,7 @@ module browser threading seems wrong.
         (define/public-final (get-defs) defs)
         (define/public-final (get-ints) ints)
         (define/public-final (get-visible-defs) (values visible-defs defs-shown?))
-        (define/public-final (set-visible-defs vd ds?) 
+        (define/public-final (set-visible-defs vd ds?)
           (set! visible-defs vd)
           (set! defs-shown? ds?))
         (define/public-final (get-visible-ints) (values visible-ints ints-shown?))
@@ -1448,11 +1422,11 @@ module browser threading seems wrong.
                         (λ (l) (remq execute-warning-panel l)))
                  (send execute-warning-canvas set-message #f))])))
 
-        (define (show-line-numbers?)
-          (preferences:get 'drracket:show-line-numbers?))
-
         (define/public (show-line-numbers! show)
-          (re-initialize-definitions-canvas show))
+          (for ([tab tabs])
+            (define text (send tab get-defs))
+            (send text show-line-numbers! show))
+          (send definitions-canvas refresh))
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ;;
@@ -2154,9 +2128,8 @@ module browser threading seems wrong.
                  ;; be sure asterisk is at the end of each list,
                  ;; since that's a relatively safe character
                  (case (system-type)
-                   [(windows) '("• " "★ " "◆ " "* ")]
-                   [(unix) '("★ " "◆ " "* ")]
-                   [else '("◆ " "★ " "* ")])])
+                   [(unix windows) '("★ " "◆ " "• " "* ")]
+                   [else '("◆ " "★ " "• " "* ")])])
             (ormap
              (lambda (candidate)
                (and (andmap (λ (x) (send normal-control-font screen-glyph-exists? x #t))
@@ -2772,43 +2745,14 @@ module browser threading seems wrong.
           (initialize-definitions-canvas)
           definitions-canvas)
 
-        (define (create-definitions-canvas line-numbers?)
-          (define (with-line-numbers)
-            (define line-numbers-text (new (linked-scroller (uneditable scheme:text%))
-                                           [line-numbers? #t]))
-            (define shared-pane (new horizontal-panel% [parent resizable-panel]))
-            (define line-canvas (new editor-canvas%
-                                     [parent shared-pane]
-                                     [style '(hide-vscroll hide-hscroll)]
-                                     [editor line-numbers-text]
-                                     [stretchable-width #f]
-                                     [min-width 60]))
-            (send definitions-text link-to! line-numbers-text)
-            (send line-numbers-text link-to! definitions-text)
-            (new (drracket:get/extend:get-definitions-canvas)
-                 [parent shared-pane]
-                 [editor definitions-text]))
-          (define (without-line-numbers)
-            (send definitions-text link-to! #f)
-            (new (drracket:get/extend:get-definitions-canvas)
+        (define (create-definitions-canvas)
+          (new (drracket:get/extend:get-definitions-canvas)
                  [parent resizable-panel]
                  [editor definitions-text]))
-          (if line-numbers?
-            (with-line-numbers)
-            (without-line-numbers)))
-
-        (define/private (re-initialize-definitions-canvas show)
-          (begin-container-sequence)
-          (set! definitions-canvas (create-definitions-canvas show))
-          (set! definitions-canvases (list definitions-canvas))
-          (update-shown)
-          (send (send definitions-canvas get-editor) update-numbers)
-          (end-container-sequence))
 
         (define/private (initialize-definitions-canvas)
           (unless definitions-canvas
-            (set! definitions-canvas (create-definitions-canvas
-                                       (show-line-numbers?)))))
+            (set! definitions-canvas (create-definitions-canvas))))
         
         (define/override (get-delegated-text) definitions-text)
         (define/override (get-open-here-editor) definitions-text)
@@ -2820,7 +2764,8 @@ module browser threading seems wrong.
             (send defs set-interactions-text ints)
             (send defs set-tab tab)
             (send ints set-definitions-text defs)
-            (send defs change-mode-to-match)))
+            (send defs change-mode-to-match)
+            (send defs insert-auto-text)))
         
         
         ;                              
@@ -2904,6 +2849,7 @@ module browser threading seems wrong.
                       definitions-canvases)
             (for-each (λ (ints-canvas) (send ints-canvas refresh))
                       interactions-canvases)
+            (set-color-status! (send definitions-text is-lexer-valid?))
             (end-container-sequence)))
         
         (define/pubment (on-tab-change from-tab to-tab)
@@ -3018,12 +2964,12 @@ module browser threading seems wrong.
           (define (set-visible-regions txt regions)
             (when regions
               (for-each (λ (canvas region) 
-                          (let ([admin (send txt get-admin)])
-                            (send admin scroll-to 
-                                  (first region)
-                                  (second region)
-                                  (third region)
-                                  (fourth region)))) 
+                           (set-visible-region canvas
+                                               (first region)
+                                               (second region)
+                                               (third region)
+                                               (fourth region)
+                                               #f))
                         (send txt get-canvases)
                         regions)))
           
@@ -3557,10 +3503,12 @@ module browser threading seems wrong.
               (hash-set! capability-menu-items menu (cons this-one old-ones)))))
         
         (define/private (update-items/capability menu)
-          (let ([new-items (begin '(get-items/capability menu)
-                                  (send menu get-items))])
-            (for-each (λ (i) (send i delete)) (send menu get-items))
-            (for-each (λ (i) (send i restore)) new-items)))
+          (let* ([old-items (send menu get-items)]
+                 [new-items (begin '(get-items/capability menu)
+                                   old-items)])
+            (unless (equal? old-items new-items)
+              (for-each (λ (i) (send i delete)) old-items)
+              (for-each (λ (i) (send i restore)) new-items))))
         (define/private (get-items/capability menu)
           (let loop ([capability-items (reverse (hash-ref capability-menu-items menu '()))]
                      [all-items (send menu get-items)]
@@ -3913,15 +3861,15 @@ module browser threading seems wrong.
 
             (new menu:can-restore-menu-item%
                  [label (if (show-line-numbers?)
-                          (string-constant hide-line-numbers)
-                          (string-constant show-line-numbers))]
+                          (string-constant hide-line-numbers/menu)
+                          (string-constant show-line-numbers/menu))]
                  [parent (get-show-menu)]
                  [callback (lambda (self event)
                              (define value (preferences:get 'drracket:show-line-numbers?))
                              (send self set-label
                                    (if value
-                                     (string-constant show-line-numbers)
-                                     (string-constant hide-line-numbers)))
+                                     (string-constant show-line-numbers/menu)
+                                     (string-constant hide-line-numbers/menu)))
                              (preferences:set 'drracket:show-line-numbers? (not value))
                              (show-line-numbers! (not value)))])
             
@@ -4042,6 +3990,8 @@ module browser threading seems wrong.
                                          vertical-dragable/def-int%)
                                      (unit-frame this)
                                      (parent panel-with-tabs))]
+        [define orientation-callback (λ (p v) (send resizable-panel set-orientation v))]
+        (preferences:add-callback 'drracket:defs/ints-horizontal orientation-callback #t)
         
         [define definitions-canvas #f]
         (initialize-definitions-canvas)
@@ -4089,6 +4039,32 @@ module browser threading seems wrong.
         (define/public (get-button-panel) button-panel)
         
         (inherit get-info-panel)
+        
+        (define color-status-canvas 
+          (and checkout-or-nightly?
+               (let ()
+                 (define on-string "()")
+                 (define color-status-canvas
+                   (new canvas% 
+                        [parent (get-info-panel)]
+                        [style '(transparent)]
+                        [stretchable-width #f]
+                        [paint-callback
+                         (λ (c dc)
+                           (when (number? th)
+                             (unless color-valid?
+                               (let-values ([(cw ch) (send c get-client-size)])
+                                 (send dc set-font small-control-font)
+                                 (send dc draw-text on-string 0 (- (/ ch 2) (/ th 2)))))))]))
+                 (define-values (tw th ta td) (send (send color-status-canvas get-dc) get-text-extent on-string small-control-font))
+                 (send color-status-canvas min-width (inexact->exact (ceiling tw)))
+                 color-status-canvas)))
+        (define color-valid? #t)
+        (define/public (set-color-status! v?)
+          (when color-status-canvas
+            (set! color-valid? v?) 
+            (send color-status-canvas refresh-now)))
+        
         (define running-canvas
           (new running-canvas% [parent (get-info-panel)]))
         
@@ -4186,6 +4162,10 @@ module browser threading seems wrong.
         
         (set-label-prefix (string-constant drscheme))
         (set! newest-frame this)
+        ;; a callback might have happened that initializes set-color-status! before the
+        ;; definitions text is connected to the frame, so we do an extra initialization
+        ;; now, once we know we have the right connection
+        (set-color-status! (send definitions-text is-lexer-valid?))
         (send definitions-canvas focus)))
     
     ;; get-define-popup-name : (or/c #f (cons/c string? string?) (list/c string? string? string)) boolean -> (or/c #f string?)
@@ -4274,8 +4254,8 @@ module browser threading seems wrong.
         (define/override (on-event evt)
           (let-values ([(w h) (get-client-size)])
             (let ([new-inside?
-                   (and (<= 0 (send evt get-x) w)
-                        (<= 0 (send evt get-y) h))]
+                   (and (< 0 (send evt get-x) w)
+                        (< 0 (send evt get-y) h))]
                   [old-inside? inside?])
               (set! inside? new-inside?)
               (cond
@@ -4755,12 +4735,13 @@ module browser threading seems wrong.
     (define (create-new-drscheme-frame filename)
       (let* ([drs-frame% (drracket:get/extend:get-unit-frame)]
              [frame (new drs-frame% (filename filename))])
-        (send (send frame get-interactions-text) initialize-console)
         (when first-frame?
           (let ([pos (preferences:get 'drracket:frame:initial-position)])
             (when pos
               (send frame move (car pos) (cdr pos)))))
         (send frame update-toolbar-visibility)
+        (send frame initialize-module-language)
         (send frame show #t)
+        (send (send frame get-interactions-text) initialize-console)
         (set! first-frame? #f)
         frame)))

@@ -9,7 +9,8 @@
          scheme/path
          scheme/string
          scheme/list
-         setup/main-collects)
+         setup/main-collects
+         file/convertible)
 (provide render-mixin)
 
 (define current-table-mode (make-parameter #f))
@@ -235,18 +236,30 @@
                                  es)]
                  [style (and (style? es) es)]
                  [core-render (lambda (e tt?)
-                                (if (and (image-element? e)
-                                         (not (disable-images)))
-                                    (let ([fn (install-file
-                                               (select-suffix 
-                                                (main-collects-relative->path
-                                                 (image-element-path e))
-                                                (image-element-suffixes e) 
-                                                '(".pdf" ".ps" ".png")))])
-                                      (printf "\\includegraphics[scale=~a]{~a}"
-                                              (image-element-scale e) fn))
-                                    (parameterize ([rendering-tt (or tt? (rendering-tt))])
-                                      (super render-content e part ri))))]
+                                (cond
+                                 [(and (image-element? e)
+                                       (not (disable-images)))
+                                  (let ([fn (install-file
+                                             (select-suffix 
+                                              (main-collects-relative->path
+                                               (image-element-path e))
+                                              (image-element-suffixes e) 
+                                              '(".pdf" ".ps" ".png")))])
+                                    (printf "\\includegraphics[scale=~a]{~a}"
+                                            (image-element-scale e) fn))]
+                                 [(and (convertible? e)
+                                       (not (disable-images))
+                                       (let ([ftag (lambda (v suffix) (and v (list v suffix)))])
+                                         (or (ftag (convert e 'pdf-bytes) ".pdf")
+                                             (ftag (convert e 'eps-bytes) ".ps")
+                                             (ftag (convert e 'png-bytes) ".png"))))
+                                  => (lambda (bstr+suffix)
+                                       (let ([fn (install-file (format "pict~a" (cadr bstr+suffix))
+                                                               (car bstr+suffix))])
+                                         (printf "\\includegraphics{~a}" fn)))]
+                                 [else
+                                  (parameterize ([rendering-tt (or tt? (rendering-tt))])
+                                    (super render-content e part ri))]))]
                  [wrap (lambda (e s tt?)
                          (printf "\\~a{" s)
                          (core-render e tt?)
@@ -259,7 +272,7 @@
                   [(bold) (wrap e "textbf" tt?)]
                   [(tt) (wrap e "Scribtexttt" #t)]
                   [(url) (wrap e "nolinkurl" 'exact)]
-                  [(no-break) (core-render e tt?)]
+                  [(no-break) (wrap e "mbox" tt?)]
                   [(sf) (wrap e "textsf" #f)]
                   [(subscript) (wrap e "textsub" #f)]
                   [(superscript) (wrap e "textsuper" #f)]
@@ -612,11 +625,13 @@
                                         "{\\SCloseSq}")
                                     c)]
                      [(#\# #\% #\& #\$) (format "\\~a" c)]
-                     [(#\uA0) "~"]
+                     [(#\uA0) "~"] ; non-breaking space
+                     [(#\uAD) "\\-"] ; soft hyphen; unfortunately, also disables auto-hyphen
                      [(#\uDF) "{\\ss}"]
                      [else
                       (if ((char->integer c) . > . 127)
                           (case c
+                            [(#\u2011) "\\mbox{-}"] ; non-breaking hyphen
                             [(#\uB0) "$^{\\circ}$"] ; degree
                             [(#\uB2) "$^2$"]
                             [(#\u039A) "K"] ; kappa

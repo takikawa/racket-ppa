@@ -27,10 +27,10 @@
 
       (define transparent (make-object brush% "WHITE" 'transparent))
       (define transparent-pen (make-object pen% "WHITE" 1 'transparent))
-      (define black-xor-pen (make-object pen% "BLACK" 1 'hilite))
+      (define black-xor-pen (make-object pen% (get-highlight-background-color) 1 'solid))
       (define red (make-object brush% "RED" 'solid))
       (define blue (make-object brush% "BLUE" 'solid))
-      (define black-xor (make-object brush% "BLACK" 'hilite))
+      (define black-xor (make-object brush% (get-highlight-background-color) 'solid))
       (define arrow-cursor (make-object cursor% 'arrow))
 
       (define-values (up-bitmap down-bitmap up-click-bitmap down-click-bitmap)
@@ -187,13 +187,14 @@
             [select (lambda (on?) (send snip select on?))]
             [click-select (lambda (on?) (send snip click-select on?))]
             [scroll-to (lambda () (let* ([admin (send snip get-admin)]
-                                         [dc (send admin get-dc)]
+                                         [dc (and admin (send admin get-dc))]
                                          [h-box (box 0.0)])
-                                    (send snip get-extent dc 0 0 #f h-box #f #f #f #f)
-                                    (send admin
-                                          scroll-to
-                                          snip
-                                          0 0 0 (unbox h-box) #t)))]
+                                    (when dc
+                                      (send snip get-extent dc 0 0 #f h-box #f #f #f #f)
+                                      (send admin
+                                            scroll-to
+                                            snip
+                                            0 0 0 (unbox h-box) #t))))]
             [user-data (case-lambda [() data][(x) (set! data x)])]
             [get-parent (lambda () 
                           (let ([parent-of-snip (send snip get-parent)])
@@ -285,9 +286,17 @@
                                (set-max-width (if (positive? w)
                                                   w
                                                   'none)))))])]
+            [refresh (lambda (x y width height draw-caret background)
+                       (super refresh x y width height
+                              (if (and selected?
+                                       (or (not (send top show-focus))
+                                           (send top has-focus?)))
+                                  (cons 0 1)
+                                  draw-caret)
+                              background))]
             [on-paint
              (lambda (pre? dc left top_ right bottom dx dy caret)
-               (when (and (not pre?) selected?)
+               (when (and pre? selected?)
                  (let ([b (send dc get-brush)]
                        [p (send dc get-pen)]
                        [filled? (or (not (send top show-focus))
@@ -652,7 +661,7 @@
 
       (define hierarchical-list%
         (class100 editor-canvas% (parent [style '(no-hscroll)])
-          (inherit min-width min-height allow-tab-exit)
+          (inherit min-width min-height allow-tab-exit refresh)
           (rename [super-on-char on-char]
                   [super-on-focus on-focus])
           (public

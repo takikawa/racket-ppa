@@ -10,14 +10,14 @@ These functions get input from the user and/or display
 
 
 
-@defproc[(get-file [message (or/c string? false/c) #f]
-                   [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
-                   [directory (or/c path-string? false/c) #f]
-                   [filename (or/c path-string? false/c) #f]
-                   [extension (or/c string? false/c) #f]
-                   [style (listof (one-of/c 'packages 'enter-packages)) null]
+@defproc[(get-file [message (or/c string? #f) #f]
+                   [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
+                   [directory (or/c path-string? #f) #f]
+                   [filename (or/c path-string? #f) #f]
+                   [extension (or/c string? #f) #f]
+                   [style (listof (or/c 'packages 'enter-packages)) null]
                    [filters (listof (list/c string? string?)) '(("Any" "*.*"))])
-         (or/c path? false/c)]{
+         (or/c path? #f)]{
 
 Obtains a file pathname from the user via the platform-specific
  standard (modal) dialog, using @scheme[parent] as the parent window if
@@ -57,34 +57,35 @@ Under Windows and X, @scheme[filters] determines a set of filters from
  which the user can choose in the dialog. Each element of the
  @scheme[filters] list contains two strings: a description of the filter
  as seen by the user, and a filter pattern matched against file names.
+ Under X, a @racket["*.*"] pattern is implicitly replaced with @racket["*"].
 
 See also @scheme[path-dialog%].
 
 
 }
 
-@defproc[(get-file-list [message (or/c string? false/c) #f]
-                        [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
-                        [directory (or/c path-string? false/c) #f]
-                        [filename (or/c path-string? false/c) #f]
-                        [extension (or/c string? false/c) #f]
+@defproc[(get-file-list [message (or/c string? #f) #f]
+                        [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
+                        [directory (or/c path-string? #f) #f]
+                        [filename (or/c path-string? #f) #f]
+                        [extension (or/c string? #f) #f]
                         [style null? null]
                         [filters (listof (list/c string? string?)) '(("Any" "*.*"))])
-         (or/c (listof path?) false/c)]{
+         (or/c (listof path?) #f)]{
 Like
 @scheme[get-file], except that the user can select multiple files, and the
  result is either a list of file paths of @scheme[#f].
 
 }
 
-@defproc[(put-file [message (or/c string? false/c) #f]
-                   [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
-                   [directory (or/c path-string? false/c) #f]
-                   [filename (or/c path-string? false/c) #f]
-                   [extension (or/c string? false/c) #f]
-                   [style (listof (one-of/c 'packages 'enter-packages)) null]
+@defproc[(put-file [message (or/c string? #f) #f]
+                   [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
+                   [directory (or/c path-string? #f) #f]
+                   [filename (or/c path-string? #f) #f]
+                   [extension (or/c string? #f) #f]
+                   [style (listof (or/c 'packages 'enter-packages)) null]
                    [filters (listof (list/c string? string?)) '(("Any" "*.*"))])
-         (or/c path? false/c)]{
+         (or/c path? #f)]{
 
 Obtains a file pathname from the user via the platform-specific
  standard (modal) dialog, using @scheme[parent] as the parent window if
@@ -115,7 +116,7 @@ Under Windows, if @scheme[extension] is not @scheme[#f], the returned path
  @scheme[extension] is used as the default extension when the user's
  @scheme[filters] choice has the pattern @scheme["*.*"].  Meanwhile, the
  @scheme[filters] argument has the same format and auxiliary role as for
-@scheme[get-file]. In particular, if the only pattern in @scheme[filters]
+ @scheme[get-file]. In particular, if the only pattern in @scheme[filters]
  is @scheme[(string-append "*." extension)], then the result pathname is guaranteed
  to have an extension mapping @scheme[extension].
 
@@ -136,8 +137,8 @@ Under Mac OS X versions before 10.5, the returned path will get a
  @scheme[filters] contains only @scheme[(string-append "*."
  extension)].
 
-The @scheme[extension] argument is ignored under X, and
- @scheme[filters] can be used to specify glob-patterns.
+Under X, @racket[extension] is ignored, and @racket[filters] is used
+ to filter the visible list of files as in @racket[get-file].
 
 The @scheme[style] list is treated as for @scheme[get-file].
 
@@ -145,11 +146,11 @@ See also @scheme[path-dialog%].
 
 }
 
-@defproc[(get-directory [message (or/c string? false/c) #f]
-                        [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
-                        [directory (or/c path? false/c) #f]
-                        [style (listof (one-of/c 'enter-packages)) null])
-         (or/c path false/c)]{
+@defproc[(get-directory [message (or/c string? #f) #f]
+                        [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
+                        [directory (or/c path? #f) #f]
+                        [style (listof (or/c 'enter-packages)) null])
+         (or/c path #f)]{
 
 Obtains a directory pathname from the user via the platform-specific
  standard (modal) dialog, using @scheme[parent] as the parent window if
@@ -171,18 +172,15 @@ specified.  The latter
  ``.app'') that the Finder normally displays like a file.
 
 See also @scheme[path-dialog%].
-
-
 }
 
 @defproc[(message-box [title label-string?]
                       [message string]
-                      [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
-                      [style (listof (one-of/c 'ok 'ok-cancel 'yes-no 'caution 'stop)) '(ok)])
-         (one-of/c 'ok 'cancel 'yes 'no)]{
+                      [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
+                      [style (listof (or/c 'ok 'ok-cancel 'yes-no 'caution 'stop)) '(ok)])
+         (or/c 'ok 'cancel 'yes 'no)]{
+
 See also @scheme[message-box/custom].
-
-
 
 Displays a message to the user in a (modal) dialog, using
  @scheme[parent] as the parent window if it is specified. The dialog's
@@ -220,25 +218,25 @@ In addition, @scheme[style] can contain @scheme['caution] to make the
 The class that implements the dialog provides a @scheme[get-message]
  method that takes no arguments and returns the text of the message as
  a string. (The dialog is accessible through the
-@scheme[get-top-level-windows] function.)
+ @scheme[get-top-level-windows] function.)
 
-
-
-
-}
+The @racket[message-box] function can be called int a thread other
+ than the handler thread of the relevant eventspace (i.e., the eventspace of
+ @racket[parent], or the current eventspace if @racket[parent] is @racket[#f]), in which case the
+ current thread blocks while the dialog runs on the handler thread.}
 
 @defproc[(message-box/custom [title label-string?]
                              [message string]
-                             [button1-label (or/c label-string? (is-a?/c bitmap%) false/c)]
-                             [button2-label (or/c label-string? (is-a?/c bitmap%) false/c)]
-                             [button3-label (or/c label-string? (is-a?/c bitmap%) false/c)]
-                             [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
-                             [style (listof (one-of/c 'stop 'caution 'number-order 
-                                                      'disallow-close 'no-default 
-                                                      'default=1 'default=2 'default=3))
+                             [button1-label (or/c label-string? (is-a?/c bitmap%) #f)]
+                             [button2-label (or/c label-string? (is-a?/c bitmap%) #f)]
+                             [button3-label (or/c label-string? (is-a?/c bitmap%) #f)]
+                             [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
+                             [style (listof (or/c 'stop 'caution 'number-order 
+                                                  'disallow-close 'no-default 
+                                                  'default=1 'default=2 'default=3))
                                    '(no-default)]
                              [close-result any/c #f])
-         (one-of/c 1 2 3 close-result)]{
+         (or/c 1 2 3 close-result)]{
 
 Displays a message to the user in a (modal) dialog, using
  @scheme[parent] as the parent window if it is specified. The dialog's
@@ -307,18 +305,19 @@ The class that implements the dialog provides a @scheme[get-message]
  a string. (The dialog is accessible through the
 @scheme[get-top-level-windows] function.)
 
-
-
-}
+The @racket[message-box/custom] function can be called int a thread
+ other than the handler thread of the relevant eventspace (i.e., the eventspace of
+ @racket[parent], or the current eventspace if @racket[parent] is @racket[#f]), in which case the
+ current thread blocks while the dialog runs on the handler thread.}
 
 @defproc[(message+check-box [title label-string?]
                             [message string]
                             [check-label label-string?]
-                            [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
-                            [style (listof (one-of/c 'ok 'ok-cancel 'yes-no 
-                                                     'caution 'stop 'checked))
+                            [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
+                            [style (listof (or/c 'ok 'ok-cancel 'yes-no 
+                                                 'caution 'stop 'checked))
                               '(ok)])
-         (one-of/c 'ok 'cancel 'yes 'no)]{
+         (values (or/c 'ok 'cancel 'yes 'no) boolean?)]{
 
 See also @scheme[message+check-box/custom].
 
@@ -335,16 +334,16 @@ Like @scheme[message-box], except that
 @defproc[(message+check-box/custom [title label-string?]
                                    [message string]
                                    [check-label label-string?]
-                                   [button1-label (or/c label-string? (is-a?/c bitmap%) false/c)]
-                                   [button2-label (or/c label-string? (is-a?/c bitmap%) false/c)]
-                                   [button3-label (or/c label-string? (is-a?/c bitmap%) false/c)]
-                                   [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
-                                   [style (listof (one-of/c 'stop 'caution 'number-order 
-                                                            'disallow-close 'no-default 
-                                                            'default=1 'default=2 'default=3))
+                                   [button1-label (or/c label-string? (is-a?/c bitmap%) #f)]
+                                   [button2-label (or/c label-string? (is-a?/c bitmap%) #f)]
+                                   [button3-label (or/c label-string? (is-a?/c bitmap%) #f)]
+                                   [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
+                                   [style (listof (or/c 'stop 'caution 'number-order 
+                                                        'disallow-close 'no-default 
+                                                        'default=1 'default=2 'default=3))
                                           '(no-default)]
                                    [close-result any/c #f])
-         (one-of/c 1 2 3 close-result)]{
+         (or/c 1 2 3 (λ (x) (eq? x close-result)))]{
 
 Like @scheme[message-box/custom], except that
 @itemize[
@@ -361,11 +360,11 @@ Like @scheme[message-box/custom], except that
 }
 
 @defproc[(get-text-from-user [title string]
-                             [message (or/c string? false/c)]
-                             [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
+                             [message (or/c string? #f)]
+                             [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
                              [init-val string? ""]
-                             [style (listof (one-of/c 'password)) null])
-         (or/c string? false/c)]{
+                             [style (listof 'password) null])
+         (or/c string? #f)]{
 
 Gets a text string from the user via a modal dialog, using
  @scheme[parent] as the parent window if it is specified. The dialog's
@@ -385,12 +384,12 @@ If @scheme[style] includes @scheme['password], the dialog's text field
 }
 
 @defproc[(get-choices-from-user [title string]
-                                [message (or/c string? false/c)]
+                                [message (or/c string? #f)]
                                 [choices (listof string?)]
-                                [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
+                                [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
                                 [init-choices (listof exact-nonnegative-integer?) null]
-                                [style (listof (one-of/c 'single 'multiple 'extended)) '(single)])
-         (or/c (listof exact-nonnegative-integer?) false/c)]{
+                                [style (listof (or/c 'single 'multiple 'extended)) '(single)])
+         (or/c (listof exact-nonnegative-integer?) #f)]{
 
 Gets a list box selection from the user via a modal dialog, using
  @scheme[parent] as the parent window if it is specified. The dialog's
@@ -411,11 +410,11 @@ The result is @scheme[#f] if the user cancels the dialog, the
 
 }
 
-@defproc[(get-color-from-user [message (or/c string? false/c) #f]
-                              [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
-                              [init-color (or/c (is-a?/c color%) false/c) #f]
+@defproc[(get-color-from-user [message (or/c string? #f) #f]
+                              [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
+                              [init-color (or/c (is-a?/c color%) #f) #f]
                               [style null? null])
-         (or/c (is-a?/c color%) false/c)]{
+         (or/c (is-a?/c color%) #f)]{
 
 Lets the user select a color though the platform-specific
  (modal) dialog, using @scheme[parent] as the parent window if it is
@@ -432,11 +431,11 @@ The result is @scheme[#f] if the user cancels the dialog, the selected
 
 }
 
-@defproc[(get-font-from-user [message (or/c string? false/c) #f]
-                             [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
-                             [init-font (or/c (is-a?/c font%) false/c) #f]
+@defproc[(get-font-from-user [message (or/c string? #f) #f]
+                             [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
+                             [init-font (or/c (is-a?/c font%) #f) #f]
                              [style null? null])
-         (or/c (is-a?/c font%) false/c)]{
+         (or/c (is-a?/c font%) #f)]{
 
 Lets the user select a font though the platform-specific
  (modal) dialog, using @scheme[parent] as the parent window if it is
@@ -453,11 +452,11 @@ The result is @scheme[#f] if the user cancels the dialog, the selected
 
 }
 
-@defproc[(get-ps-setup-from-user [message (or/c string? false/c) #f]
-                                 [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
-                                 [init-setup (or/c (is-a?/c ps-setup%) false/c) #f]
+@defproc[(get-ps-setup-from-user [message (or/c string? #f) #f]
+                                 [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
+                                 [init-setup (or/c (is-a?/c ps-setup%) #f) #f]
                                  [style null? null])
-         (or/c (is-a?/c ps-setup%) false/c)]{
+         (or/c (is-a?/c ps-setup%) #f)]{
 
 Lets the user select a PostScript configuration though a (modal)
  dialog, using @scheme[parent] as the parent window if it is
@@ -476,11 +475,11 @@ The result is @scheme[#f] if the user cancels the dialog, , a
 
 }
 
-@defproc[(get-page-setup-from-user [message (or/c string? false/c) #f]
-                                   [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
-                                   [init-setup (or/c (is-a?/c ps-setup%) false/c) #f]
+@defproc[(get-page-setup-from-user [message (or/c string? #f) #f]
+                                   [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) #f) #f]
+                                   [init-setup (or/c (is-a?/c ps-setup%) #f) #f]
                                    [style null? null])
-         (or/c (is-a?/c ps-setup%) false/c)]{
+         (or/c (is-a?/c ps-setup%) #f)]{
 
 Like
 @scheme[get-ps-setup-from-user], but the dialog configures page layout for native printing

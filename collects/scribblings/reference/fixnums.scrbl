@@ -98,7 +98,7 @@ Safe versions of @racket[unsafe-fx->fl] and @racket[unsafe-fl->fx].}
 @section{Fixnum Vectors}
 
 A @deftech{fxvector} is like a @tech{vector}, but it holds only
-@tech{fixnums}. The only advantage of an @tech{fxvector} over a
+@tech{fixnums}. The only advantage of a @tech{fxvector} over a
 @tech{vector} is that a shared version can be created with functions
 like @racket[shared-fxvector].
 
@@ -155,12 +155,20 @@ Creates a fresh @tech{fxvector} of size @racket[(- end start)], with all of the
 elements of @racket[vec] from @racket[start] (inclusive) to
 @racket[end] (exclusive).}
 
-@defproc[(in-fxvector (v fxvector?)) sequence?]{
+@defproc[(in-fxvector [vec fxvector?]
+                    [start exact-nonnegative-integer? 0]
+                    [stop (or/c exact-integer? #f) #f]
+                    [step (and/c exact-integer? (not/c zero?)) 1])
+         sequence?]{
+  Returns a sequence equivalent to @racket[vec] when no optional
+  arguments are supplied.
 
-Produces a sequence that gives the elements of @scheme[v] in order.
-Inside a @scheme[for] form, this can be optimized to step through the
-elements of @scheme[v] efficiently as in @scheme[in-list],
-@scheme[in-vector], etc.}
+  The optional arguments @racket[start], @racket[stop], and
+  @racket[step] are as in @racket[in-vector].
+
+  An @racket[in-fxvector] application can provide better
+  performance for @tech{fxvector} iteration when it appears directly in a @racket[for] clause.
+}
 
 @deftogether[(
 @defform*[((for/fxvector (for-clause ...) body ...)

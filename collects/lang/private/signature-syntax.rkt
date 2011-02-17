@@ -3,7 +3,7 @@
 (provide :
 	 signature signature/arbitrary
 	 define/signature define-values/signature
-	 -> mixed one-of predicate combined property list-of)
+	 -> mixed one-of predicate combined property list-of vector-of)
 
 (require deinprogramm/signature/signature
 	 deinprogramm/signature/signature-english
@@ -11,7 +11,6 @@
 	 (for-syntax scheme/base)
 	 (for-syntax syntax/stx)
 	 (for-syntax stepper/private/shared)
-	 (only-in lang/private/teachprims teach-equal?)
 	 (for-syntax "firstorder.rkt"))
 
 (define-for-syntax (phase-lift stx)
@@ -21,7 +20,7 @@
 
 (define-for-syntax (parse-signature name stx)
   (syntax-case* stx
-		(mixed one-of predicate list-of -> combined property reference at signature)
+		(mixed one-of predicate list-of vector-of -> combined property reference at signature)
 		module-or-top-identifier=?
     ((mixed ?signature ...)
      (with-syntax ((?stx (phase-lift stx))
@@ -50,7 +49,7 @@
 			   (syntax->list #'((?temp ?exp) ...)))))
        #'(let ((?temp ?exp) ...)
 	   ?check ...
-	   (make-case-signature '?name (list ?temp ...) teach-equal? ?stx)))))
+	   (make-case-signature '?name (list ?temp ...) equal? ?stx)))))
     ((predicate ?exp)
      (with-syntax ((?stx (phase-lift stx))
 		   (?name name))
@@ -63,6 +62,15 @@
     ((list-of ?signature1 ?rest ...)
      (raise-syntax-error #f
 			 "list-of signature accepts only a single operand"
+			 (syntax ?signature1)))
+    ((vector-of ?signature)
+     (with-syntax ((?stx (phase-lift stx))
+		   (?name name)
+		   (?signature-expr (parse-signature #f #'?signature)))
+       #'(make-vector-signature '?name ?signature-expr ?stx)))
+    ((vector-of ?signature1 ?rest ...)
+     (raise-syntax-error #f
+			 "vector-of signature accepts only a single operand"
 			 (syntax ?signature1)))
     ((?arg-signature ... -> ?return-signature)
      (with-syntax ((?stx (phase-lift stx))
@@ -250,3 +258,4 @@
 (define-syntax combined within-signature-syntax-transformer)
 (define-syntax property within-signature-syntax-transformer)
 (define-syntax list-of within-signature-syntax-transformer)
+(define-syntax vector-of within-signature-syntax-transformer)

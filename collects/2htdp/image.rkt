@@ -16,19 +16,6 @@ improvments/changes wrt to htdp/image:
   - got rid of pinholes (see the new overlay, beside, and above functions)
   - a bunch of new polygon functions
 
-Equality change: equality is now based on the structure of the construction of the picture. 
-This means that some equalities that were there before are no longer true. For example,
-in the old library, these two images are the same:
-
-  (overlay/xy (rectangle 100 10 'solid 'red)
-               0
-               10
-               (rectangle 100 10 'solid 'red))
-
-  (rectangle 100 20 'solid 'red)
-
-... and why aren't they the same again....?!
-
 todo: sort out wxme library support (loading in text mode).
 
 ------------
@@ -105,6 +92,7 @@ and they all have good sample contracts. (It is amazing what we can do with kids
          scene+curve
          text
          text/font
+         
          image->color-list
          color-list->bitmap
          
@@ -118,7 +106,8 @@ and they all have good sample contracts. (It is amazing what we can do with kids
          pen-style? 
          pen-cap?
          pen-join?
-         color-red color-blue color-green color? color
+         real-valued-posn?
+         color-red color-blue color-green color-alpha color? color
          pen-color pen-width pen-style pen-cap pen-join 
 
          image-width
@@ -137,9 +126,13 @@ and they all have good sample contracts. (It is amazing what we can do with kids
          make-pen pen
          pen?
          step-count?
-         save-image)
+         save-image
+         
+         freeze
+         bitmap/url)
 
-(provide bitmap)
+(provide bitmap
+         empty-image)
 
 (define-primitive make-color build-color/make-color)
 (define-primitive color build-color/color)

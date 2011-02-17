@@ -10,13 +10,14 @@
          pen-style? 
          pen-cap?
          pen-join?
+         real-valued-posn?
          check-mode/color-combination)
 
 (require htdp/error
          racket/class
          lang/posn
-         racket/gui/base
-         "../../mrlib/image-core.ss"
+         racket/draw
+         mrlib/image-core
          (for-syntax racket/base
                      racket/list))
 
@@ -42,29 +43,47 @@
 
 (define-syntax define/chk
   (λ (stx)
-    (syntax-case stx ()
-      [(define/chk (fn-name args ... . final-arg) body ...)
-       (identifier? #'final-arg)
-       (let ([len (length (syntax->list #'(args ...)))])
-         (with-syntax ([(i ...) (build-list len add1)])
-           #`(define (fn-name args ... . final-arg)
-               (let ([args (check/normalize 'fn-name 'args args i)] ...
-                     [final-arg (map/i (λ (x j) (check/normalize 'fn-name 'final-arg x (+ #,len j)))
-                                       final-arg)])
-                 body ...))))]
-      [(define/chk (fn-name args ...) body ...)
-       (with-syntax ([(i ...) (build-list (length (syntax->list #'(args ...))) add1)])
-         #'(define (fn-name args ...)
-             (let ([args (check/normalize 'fn-name 'args args i)] ...)
-               body ...)))])))
-
-(define (map/i f l)
-  (let loop ([l l]
-             [i 0])
-    (cond
-      [(null? l) null]
-      [else (cons (f (car l) i)
-                  (loop (cdr l) (+ i 1)))])))
+    (define (adjust-case fn-name case-args bodies)
+      (syntax-case case-args ()
+        [(args ... . final-arg)
+         (identifier? #'final-arg)
+         (let ([len (length (syntax->list #'(args ...)))])
+           (with-syntax ([(i ...) (build-list len add1)])
+             #`((args ... . final-arg)
+                (let ([args (check/normalize '#,fn-name 'args args i)] ...
+                      [final-arg 
+                       (for/list ([x (in-list final-arg)]
+                                  [j (in-naturals #,(+ len 1))])
+                         (check/normalize 'fn-name 'final-arg x j))])
+                  #,@bodies))))]
+        [(args ...)
+         (with-syntax ([(i ...) (build-list (length (syntax->list #'(args ...))) add1)]
+                       [(arg-ids ...)
+                        (map (λ (arg)
+                               (syntax-case arg ()
+                                 [x 
+                                  (identifier? #'x)
+                                  #'x]
+                                 [(x y)
+                                  (identifier? #'x)
+                                  #'x]
+                                 [_
+                                  (raise-syntax-error 'define/chk "unknown argument spec" stx arg)]))
+                             (syntax->list #'(args ...)))])
+           #`((args ...)
+              (let ([arg-ids (check/normalize '#,fn-name 'arg-ids arg-ids i)] ...)
+                #,@bodies)))]))
+    (syntax-case stx (case-lambda)
+      [(define/chk fn-name (case-lambda [in-args in-body ...] ...))
+       (with-syntax ([((args body) ...) (map (lambda (a b) (adjust-case #'fn-name a b))
+                                             (syntax->list #'(in-args ...))
+                                             (syntax->list #'((in-body ...) ...)))])
+         #'(define fn-name
+             (case-lambda
+               [args body] ...)))]
+      [(define/chk (fn-name . args) body ...)
+       (with-syntax ([(args body) (adjust-case #'fn-name #'args #'(body ...))])
+         #`(define (fn-name . args) body))])))
 
 ;; check/normalize : symbol symbol any number -> any
 ;; based on the name of the argument, checks to see if the input
@@ -111,9 +130,16 @@
                 'mode
                 i
                 arg)
-     (if (string? arg)
-         (string->symbol arg)
-         arg)]
+     (cond
+       [(or (equal? arg "solid")
+            (equal? arg 'solid))
+        255]
+       [(equal? arg "outline")
+        'outline]
+       [(and (integer? arg)
+             (not (exact? arg)))
+        (inexact->exact arg)]
+       [else arg])]
     [(width height radius radius1 radius2 side-length side-length1 side-length2
             side-a side-b side-c)
      (check-arg fn-name
@@ -129,7 +155,7 @@
                 'integer\ greater\ than\ 2
                 i arg)
      arg]
-    [(dx dy x1 y1 x2 y2 pull1 pull2)
+    [(dx dy x y x1 y1 x2 y2 pull1 pull2)
      (check-arg fn-name
                 (real? arg)
                 'real\ number
@@ -214,11 +240,15 @@
                 'list-of-posns
                 i arg)
      (check-arg fn-name
+                (andmap real-valued-posn? arg)
+                'list-of-posns-with-real-valued-x-and-y-coordinates
+                i arg)
+     (check-arg fn-name
                 (>= (length arg) 3)
                 'list-of-at-least-three-posns
                 i arg)
      arg]
-    [(int0-255-1 int0-255-2 int0-255-3)
+    [(int0-255-1 int0-255-2 int0-255-3 int0-255-4)
      (check-arg fn-name (and (integer? arg) (<= 0 arg 255)) 
                 'integer\ between\ 0\ and\ 255 i arg)
      arg]
@@ -255,7 +285,9 @@
 (define (x-place? arg)
   (member arg '("left" left "right" right "middle" middle "center" center "pinhole" pinhole)))
 (define (mode? arg)
-  (member arg '(solid outline "solid" "outline")))
+  (or (member arg '(solid outline "solid" "outline"))
+      (and (integer? arg)
+           (<= 0 arg 255))))
 (define (angle? arg)
   (and (real? arg)
        (< -360 arg 360)))
@@ -275,12 +307,17 @@
 (define (pen-join? arg)
   (member (if (string? arg) (string->symbol arg) arg)
           '(round bevel miter)))
+(define (real-valued-posn? arg)
+  (and (posn? arg)
+       (real? (posn-x arg))
+       (real? (posn-y arg))))
 
 
 ;; checks the dependent part of the 'color' specification
 (define (check-mode/color-combination fn-name i mode color)
   (cond
-    [(eq? mode 'solid)
+    [(or (eq? mode 'solid)
+         (number? mode))
      (check-arg fn-name (image-color? color) 'image-color i color)]
     [(eq? mode 'outline)
      (void)]))

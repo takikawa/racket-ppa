@@ -24,7 +24,7 @@ takes one value for each field of the structure type, except that some
 of the fields of a structure type can be @deftech{automatic fields};
 the @tech{automatic fields} are initialized to a constant that is
 associated with the structure type, and the corresponding arguments
-are omitted for the constructor procedure. All automatic fields in a
+are omitted from the constructor procedure. All automatic fields in a
 structure type follow the non-automatic fields.
 
 A structure type can be created as a @pidefterm{structure subtype} of
@@ -124,7 +124,7 @@ are initialized with @racket[auto-v]. The total field count (including
 The @racket[props] argument is a list of pairs, where the @racket[car]
 of each pair is a structure type property descriptor, and the
 @racket[cdr] is an arbitrary value. A property can be specified
-multiple times in in @racket[props] (including properties that are
+multiple times in @racket[props] (including properties that are
 automatically added by properties that are directly included in
 @racket[props]) only if the associated values are @racket[eq?],
 otherwise the @exnraise[exn:fail:contract]. See @secref["structprops"]
@@ -288,7 +288,7 @@ A @deftech{structure type property} allows per-type information to be
  property value with a new value.
 
 @defproc[(make-struct-type-property [name symbol?]
-                                    [guard (or/c procedure? #f) #f]
+                                    [guard (or/c procedure? #f 'can-impersonate) #f]
                                     [supers (listof (cons/c struct-type-property?
                                                             (any/c . -> . any/c)))
                                             null])
@@ -333,6 +333,12 @@ because the value supplied to @racket[make-struct-type] is
 inappropriate for the property), the @racket[guard] can raise an
 exception. Such an exception prevents @racket[make-struct-type] from
 returning a structure type descriptor.
+
+If @racket[guard] is @racket['can-impersonate], then the property's
+accessor can be redirected through
+@racket[impersonate-struct]. Otherwise, redirection of the property
+value through an @tech{impersonator} is disallowed, since redirection
+is tantamount to mutation.
 
 The optional @racket[supers] argument is a list of properties that are
 automatically associated with some structure type when the newly
@@ -571,13 +577,13 @@ encapsulated procedure must return):
 @itemize[
 
  @item{an identifier that is bound to the structure type's descriptor,
- or @racket[#f] it none is known;}
+ or @racket[#f] if none is known;}
 
  @item{an identifier that is bound to the structure type's constructor,
- or @racket[#f] it none is known;}
+ or @racket[#f] if none is known;}
 
  @item{an identifier that is bound to the structure type's predicate,
- or @racket[#f] it none is known;}
+ or @racket[#f] if none is known;}
 
  @item{a list of identifiers bound to the field accessors of the
  structure type, optionally with @racket[#f] as the list's last
@@ -614,7 +620,8 @@ Finally, the representation can be an instance of a structure type
 derived from @racket[struct:struct-info] or with the
 @racket[prop:struct-info] property that also implements
 @racket[prop:procedure], and where the instance is further is wrapped
-by @racket[make-set!-transformer].
+by @racket[make-set!-transformer]. In addition, the representation may
+implement the @racket[prop:struct-auto-info] property.
 
 Use @racket[struct-info?] to recognize all allowed forms of the
 information, and use @racket[extract-struct-info] to obtain a list
@@ -672,9 +679,34 @@ as @racket[make-struct-info].}
 @defthing[prop:struct-info struct-type-property?]{
 
 The @tech{structure type property} for creating new structure types
-like @racket[struct:struct-info]. The property value must a procedure
+like @racket[struct:struct-info]. The property value must be a procedure
 of one argument that takes an instance structure and returns
 structure-type information in list form.}
+
+@deftogether[(
+@defthing[prop:struct-auto-info struct-type-property?]
+@defproc[(struct-auto-info? [v any/c]) boolean?]
+@defproc[(struct-auto-info-lists [sai struct-auto-info?]) 
+         (list/c (listof identifier?) (listof identifier?))]
+)]{
+
+The @racket[prop:struct-auto-info] property is implemented to provide
+static information about which of the accessor and mutator identifiers
+for a structure type correspond to @racket[#:auto] fields (so that
+they have no corresponding argument in the constructor). The property
+value must be a procedure that accepts an instance structure to which
+the property is given, and the result must be two lists of identifiers
+suitable as a result from @racket[struct-auto-info-lists].
+
+The @racket[struct-auto-info?] predicate recognizes values that
+implement the @racket[prop:struct-auto-info] property.
+
+The @racket[struct-auto-info-lists] function extracts two lists of
+identifiers from a value that implements the
+@racket[prop:struct-auto-info] property. The first list should be a
+subset of the accessor identifiers for the structure type described by
+@racket[sai], and the second list should be a subset of the mutator
+identifiers. The two subsets correspond to @racket[#:auto] fields.}
 
 @; ----------------------------------------------------------------------
 

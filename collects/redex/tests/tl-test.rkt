@@ -321,6 +321,31 @@
     (test (and (redex-match E v (term ((bar 1) 1))) #t) #t)
     (test (redex-match E v (term ((bar 1) 2))) #f))
   
+  (let ()
+    (define-language L
+      (M N ::= (M N) (λ (x) M) x)
+      (x ::= variable-not-otherwise-mentioned))
+    (test (and (redex-match L M '(λ (x) (x x))) #t) #t)
+    (test (and (redex-match L N '(λ (x) (x x))) #t) #t)
+    (define-extended-language L+ L
+      (M ::= .... n)
+      (n m ::= number))
+    (test (and (redex-match L+ M '(λ (x) 7)) #t) #t)
+    (test (and (redex-match L+ m 7) #t) #t)
+    (let ([::= void])
+      (define-language L
+        (::= () (number ::=)))
+      (test (and (redex-match L ::= '(1 ())) #t) #t)))
+  
+  (test-syn-err (define-language (L)) #rx"expected an identifier")
+  (test-syn-err (define-language L (x ::=)) #rx"expected at least one production")
+  (test-syn-err (define-language L (x)) #rx"expected at least one production")
+  (test-syn-err (define-language L ((x))) #rx"expected at least one production")
+  (test-syn-err (define-language L (::= a b)) #rx"expected preceding non-terminal names")
+  (test-syn-err (define-language L (x (y) ::= z)) #rx"expected non-terminal name")
+  (test-syn-err (define-language L (x ::= y ::= z)) #rx"expected production")
+  (test-syn-err (define-language L q) #rx"expected non-terminal definition")
+  (test-syn-err (define-language L ()) #rx"expected non-terminal definition")
 ;                                                                                             
 ;                                                                                             
 ;                                 ;;;                                ;                        
@@ -375,6 +400,14 @@
   (test (with-handlers ((exn? (λ (x) 'exn-raised))) (term (f mis-match)) 'no-exn)
         'exn-raised)
 
+  ;; test redex-match in RHS and side-condition
+  (let ()
+    (define-metafunction empty-language
+      [(f)
+       ,(and (redex-match empty-language number 7) #t)
+       (side-condition (redex-match empty-language number 7))])
+    (test (term (f)) #t))
+  
   (define-metafunction grammar
     [(h (M_1 M_2)) ((h M_2) (h M_1))]
     [(h number_1) ,(+ (term number_1) 1)])
@@ -419,6 +452,37 @@
      (term-let ((y 'z))
                (in-domain? (f y)))
      #f))
+  
+  ; Extension reinterprets the base meta-function's contract
+  ; according to the new language.
+  (let ()
+    (define-language L (x 1))
+    (define-extended-language M L (x 2))
+    (define-metafunction L
+      f : x -> x
+      [(f x) x])
+    (define-metafunction/extension f M
+      [(g q) q])
+    
+    (with-handlers ([(λ (x) 
+                       (and (exn:fail? x)
+                            (regexp-match? #rx"no clauses matched"
+                                           (exn-message x))))
+                     (λ (_) #f)])
+      (test (begin (term (g 2)) #t) #t))
+    
+    (test (in-domain? (g 2)) #t))
+  
+  ; in-domain? interprets base meta-function LHSs according to
+  ; the new language.
+  (let ()
+    (define-language L (x 1))
+    (define-extended-language M L (x 2))
+    (define-metafunction L
+      [(f x) x])
+    (define-metafunction/extension f M
+      [(g q) q])
+    (test (in-domain? (g 2)) #t))
   
   ;; mutually recursive metafunctions
   (define-metafunction grammar
@@ -530,6 +594,18 @@
       [(h number_1) number_1])
     (test (term (g 11 17)) 11)
     (test (term (h 11 17)) 11))
+
+  (let ()
+    (define-language L 
+      (v 1))
+    (define-extended-language M
+      L
+      (v .... 2))
+    (define-metafunction L
+      [(f v) v])
+    (define-metafunction/extension f M
+      [(g 17) 17])
+    (test (term (g 2)) 2))
   
   (let ()
     (define-metafunction empty-language
@@ -537,6 +613,37 @@
     (define-metafunction/extension f empty-language
       [(g any) 2])
     (test (term (g 0)) 2))
+  
+  (let ()
+    (define-language L 
+      (v 1 (v)))
+    (define-metafunction L
+      f : v -> v
+      [(f (v)) 
+       any_1
+       (where any_1 (f v))])
+    
+    (define-extended-language M
+      L
+      (v .... 2))
+    (define-metafunction/extension f M
+      g : v -> v
+      [(g 2) 2])
+
+    (test (term (g (2))) 2))
+  
+  (let ()
+    (define-language L (x 1))
+    (define-extended-language M L (x 2))
+    (define-metafunction L 
+      [(f)
+       yes
+       (where x 2)]
+      [(f)
+       no])
+    (define-metafunction/extension f M
+      g : -> any)
+    (test (term (g)) 'yes))
   
   (let ()
     (define-metafunction empty-language
@@ -675,14 +782,36 @@
                      [current-traced-metafunctions 'all]
                      [print-as-expression #f])
         (term (f 1)))
-      (test (get-output-string sp) ">(f 1)\n<0\n"))
+      (test (get-output-string sp) "c>(f 1)\n <0\n"))
+    
+    (let ([sp (open-output-string)])
+      (parameterize ([current-output-port sp]
+                     [current-traced-metafunctions 'all]
+                     [print-as-expression #f]
+                     [caching-enabled? #f])
+        (term (f 1)))
+      (test (get-output-string sp) " >(f 1)\n > (f 0)\n < 0\n <0\n"))
     
     (let ([sp (open-output-string)])
       (parameterize ([current-output-port sp]
                      [current-traced-metafunctions '(f)]
                      [print-as-expression #f])
         (term (f 1)))
-      (test (get-output-string sp) ">(f 1)\n<0\n")))
+      (test (get-output-string sp) "c>(f 1)\n <0\n"))
+    
+    
+    (define-metafunction empty-language
+      [(g (any)) ((g any) (g any))]
+      [(g 1) 1])
+    
+    (let ([sp (open-output-string)])
+      (parameterize ([current-output-port sp]
+                     [current-traced-metafunctions '(g)]
+                     [print-as-expression #f])
+        (term (g (1))))
+      (test (get-output-string sp) " >(g (1))\n > (g 1)\n < 1\nc> (g 1)\n < 1\n <(1 1)\n"))
+    
+    )
   
   (let ()
     (define-language var-lang [(x y z w) variable])
@@ -817,7 +946,40 @@
     (test (term (<: 1 2 2)) #f)
     (test (term (<: 1 1 1)) #t))
   
- 
+  (let ()
+    (define-relation empty-language
+      d ⊆ any × any
+      [(d (any) (any)) (d any any)]
+      [(d () ())])
+    
+    (test (term (d ((())) ((())))) #t)
+    (test (term (d ((())) ())) #f))
+  
+  (let ()
+    (define-relation empty-language
+      d ⊂ any x any
+      [(d (any) (any)) (d any any)]
+      [(d () ())])
+    
+    (test (term (d ((())) ((())))) #t)
+    (test (term (d ((())) ())) #f))
+  
+  (let ()
+    (define-relation empty-language
+      d ⊂ (any)
+      [(d (1))])
+    
+    (test (term (d (1))) #t)
+    (test (term (d (2))) #f)
+    (test (with-handlers ((exn:fail? (λ (x) 'passed)))
+            (term (d 1))
+            'failed)
+          'passed))
+  
+  (test-syn-err 
+   (define-relation grammar R)
+   #rx"expected the name of the relation")
+  
 ;                    ;;                         ;                                        ;;                    ;                 
 ;                     ;                 ;                                                 ;            ;                         
 ;   ;; ;;   ;;;    ;; ; ;;  ;;   ;;;;  ;;;;;  ;;;     ;;;  ;; ;;          ;; ;;   ;;;     ;     ;;;   ;;;;;  ;;;     ;;;  ;; ;;  
@@ -1085,7 +1247,7 @@
           (with-handlers ((exn? exn-message))
             (apply-reduction-relation red 1)
             'no-exception-raised))
-        "reduction-relation: relation reduced to x via rule #0 (counting from 0), which is outside its domain")
+        "reduction-relation: relation reduced to x via an unnamed rule, which is outside its domain")
 
   (let* ([red1
           (reduction-relation 
@@ -1125,9 +1287,52 @@
     (define r2
       (extend-reduction-relation r1 l2))
     
-    ;; test that the domain is re-interpreted for the extended reduction-relation
+    ;; test that the domain is re-interpreted wrt the new language
     (test (apply-reduction-relation r2 3)
           '(3)))
+  
+  (let ()
+    (define-language L)
+    (define R
+      (reduction-relation L #:domain 1 (--> any any)))
+    (define S
+      (extend-reduction-relation R L #:domain 2))
+    
+    ;; test that the new domain applies to inherited rules
+    (test (apply-reduction-relation S 2)
+          '(2))
+    (test (with-handlers ([exn:fail? exn-message])
+            (apply-reduction-relation S 1))
+          #rx"not defined"))
+  
+  (let ()
+    (define-language L)
+    (define R
+      (reduction-relation L (--> 1 1 "a")))
+    (define S
+      (extend-reduction-relation R L (--> 2 2 "a")))
+    
+    ;; test that overridden rules do not appear (twice)
+    (test (reduction-relation->rule-names S)
+          '(a)))
+  
+  (let ()
+    (define-language L)
+    
+    ;; test that symbol-named rules replace string-named rules
+    (test (apply-reduction-relation
+           (extend-reduction-relation
+            (reduction-relation L (--> 1 1 "a"))
+            L (--> 1 2 a))
+           1)
+          '(2))
+    ;; and vice versa
+    (test (apply-reduction-relation
+           (extend-reduction-relation
+            (reduction-relation L (--> 1 1 a))
+            L (--> 1 2 "a"))
+           1)
+          '(2)))
   
   (let ()
     (define-language l1
@@ -1265,12 +1470,18 @@
   
   (test-syn-err (define-language bad-lang1 (e name)) #rx"name")
   (test-syn-err (define-language bad-lang2 (name x)) #rx"name")
-  (test-syn-err (define-language bad-lang3 (x_y x)) #rx"cannot have _")
-  (test-syn-err (define-language bad-lang4 (a 1 2) (b)) #rx"no productions")
+  (test-syn-err (define-language bad-lang3 (x_y x)) #rx"cannot use _")
+  (test-syn-err (define-language bad-lang4 (a 1 2) (b)) #rx"at least one production")
   (test-syn-err (let ()
                   (define-language good-lang (a 1 2))
                   (define-extended-language bad-lang5 good-lang (a) (b 2)))
-                #rx"no productions")
+                #rx"at least one production")
+  (test-syn-err (define-language bad-lang5 (x 1) (x 2)) #rx"same non-terminal" 2)
+  (test-syn-err (define-language bad-lang6 ((x x) 1)) #rx"same non-terminal" 2)
+  (test-syn-err (let ()
+                  (define-language good-lang)
+                  (define-extended-language bad-lang7 good-lang ((x x) 1)))
+                #rx"same non-terminal" 2)
   
   (test-syn-err (redex-match grammar m_1) #rx"before underscore")
   (test-syn-err (redex-match grammar (variable-except a 2 c)) #rx"expected an identifier")
@@ -2033,6 +2244,15 @@
           #rx"FAILED tl-test.(?:.+):[0-9.]+\nfound a cycle in the reduction graph\n1 test failed \\(out of 1 total\\).\n"))
   
   (let ()
+    (define subred (reduction-relation empty-language (--> natural ,(- (term natural) 1))))
+    (test (capture-output (test-->> subred #:pred (λ (x) #t) 1 -1) (test-results))
+          "One test passed.\n")
+    (test (capture-output (test-->> subred #:pred number? 1 -1) (test-results))
+          "One test passed.\n")
+    (test (capture-output (test-->> subred #:pred odd? 1 -1) (test-results))
+         #rx"FAILED tl-test.rkt:[0-9.]+\nfound a term that failed #:pred: 0\n1 test failed \\(out of 1 total\\).\n"))
+  
+  (let ()
     (define-metafunction empty-language [(f any) ((any))])
     (test (capture-output (test-equal (term (f 1)) (term ((1))))
                           (test-results))
@@ -2073,19 +2293,60 @@
     (test (capture-output (test--> R #:equiv mod2=? 7 1 0) (test-results))
           "One test passed.\n")
     (test (capture-output (test--> R #:equiv mod2=? 7 1) (test-results))
-          #rx"FAILED tl-test.(?:.+):[0-9.]+\nexpected: 1\n  actual: 8\n  actual: 7\n1 test failed \\(out of 1 total\\).\n"))
+          #rx"FAILED tl-test\\.(?:.+):[0-9.]+\nexpected: 1\n  actual: 8\n  actual: 7\n1 test failed \\(out of 1 total\\).\n"))
   
   (let-syntax ([test-bad-equiv-arg
                 (λ (stx)
                   (syntax-case stx ()
                     [(_ test-form)
-                     #'(test (with-handlers ([exn:fail:contract? exn-message])
-                               (test-form (reduction-relation empty-language (--> any any))
-                                          #:equiv 1 2)
-                               "no error raised")
-                             #rx"expected argument of type")]))])
+                     (syntax/loc stx
+                       (test-contract-violation
+                        (test-form (reduction-relation empty-language (--> any any))
+                                   #:equiv 1 2)
+                        #:blaming "tl-test"))]))])
     (test-bad-equiv-arg test-->)
     (test-bad-equiv-arg test-->>))
 
+  (let ()
+    (capture-output (test-results))
+    (define-language L)
+    
+    (define 1+
+      (reduction-relation 
+       L
+       (--> number ,(add1 (term number)))))
+    
+    (define (equal-to-7 x) (= x 7))
+    (test (capture-output (test-->>∃ #:steps 5 1+ 0 equal-to-7))
+          #rx"^FAILED .*\nno reachable term satisfying #<procedure:equal-to-7> \\(but some terms were not unexplored\\)\n$")
+    
+    (test (capture-output (test-->>∃ 1+ 0 7)) "")
+    (test (capture-output (test-->>E 1+ 0 7)) "")
+    (test (capture-output (test-->>∃ #:steps +inf.0 1+ 0 7)) "")
+    (test (capture-output (test-->>∃ 1+ 0 equal-to-7)) "")
+    
+    (define identity
+      (reduction-relation
+       L
+       (--> any any)))
+    
+    (test (capture-output (test-->>∃ identity 0 1))
+          #rx"^FAILED .*\nno reachable term equal to 1\n$")
+    
+    (test (capture-output (test-results)) "2 tests failed (out of 6 total).\n")
+    
+    (test-contract-violation
+     (test-->>∃ 1+ 0 (λ (x y) x))
+     #:blaming "tl-test"
+     #:message "goal expression")
+    (test-contract-violation
+     (test-->>∃ 1 0 1)
+     #:blaming "tl-test"
+     #:message "reduction relation expression")
+    (test-contract-violation
+     (test-->>∃ #:steps 1.1 1+ 0 1)
+     #:blaming "tl-test"
+     #:message "steps expression"))
+  
   (print-tests-passed 'tl-test.ss)
   

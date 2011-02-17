@@ -1,8 +1,8 @@
-(module mrcanvas mzscheme
+(module mrcanvas racket/base
   (require mzlib/class
 	   mzlib/class100
 	   mzlib/list
-	   (prefix wx: "kernel.ss")
+	   (prefix-in wx: "kernel.ss")
 	   "lock.ss"
 	   "const.ss"
 	   "kw.ss"
@@ -38,7 +38,7 @@
     area%-keywords)
 
   (define basic-canvas%
-    (class100* (make-window% #f (make-subarea% area%)) (canvas<%>) (mk-wx mismatches parent)
+    (class100* (make-subwindow% (make-window% #f (make-subarea% area%))) (canvas<%>) (mk-wx mismatches parent)
       (public
 	[on-char (lambda (e) (send wx do-on-char e))]
 	[on-event (lambda (e) (send wx do-on-event e))]
@@ -51,6 +51,22 @@
 	[warp-pointer (entry-point (lambda (x y) (send wx warp-pointer x y)))]
 
 	[get-dc (entry-point (lambda () (send wx get-dc)))]
+	[make-bitmap (lambda (w h)
+                       (unless (exact-positive-integer? w)
+                         (raise-type-error (who->name '(method canvas% make-bitmap))
+                                           "exact positive integer"
+                                           w))
+                       (unless (exact-positive-integer? h)
+                         (raise-type-error (who->name '(method canvas% make-bitmap))
+                                           "exact positive integer"
+                                           h))
+                       (send wx make-compatible-bitmap w h))]
+
+        [suspend-flush (lambda ()
+                         (send wx begin-refresh-sequence))]
+        [resume-flush (lambda ()
+                        (send wx end-refresh-sequence))]
+        [flush (lambda () (send wx flush))]
 
 	[set-canvas-background
 	 (entry-point
@@ -76,7 +92,7 @@
       (sequence
 	(as-entry
 	 (lambda ()
-	   (super-init (lambda () (set! wx (mk-wx)) wx) (lambda () wx) mismatches #f parent #f))))))
+	   (super-init (lambda () (set! wx (mk-wx)) wx) (lambda () wx) (lambda () wx) mismatches #f parent #f))))))
 
   (define default-paint-cb (lambda (canvas dc) (void)))
 
@@ -87,7 +103,9 @@
       (private-field [paint-cb paint-callback]
 		     [has-x? (and (list? style) (memq 'hscroll style))]
 		     [has-y? (and (list? style) (memq 'vscroll style))])
-      (inherit get-client-size get-dc set-label)
+      (inherit get-client-size get-dc set-label 
+               suspend-flush resume-flush flush
+               get-canvas-background)
       (rename [super-on-paint on-paint])
       (sequence 
 	(let ([cwho '(constructor canvas)])
@@ -180,6 +198,29 @@
 		    (if (eq? paint-cb default-paint-cb)
 			(super-on-paint)
 			(paint-cb this (get-dc))))])
+      (private-field [no-clear? (memq 'no-autoclear style)])
+      (public
+        [refresh-now (lambda ([do-paint (lambda (dc) (on-paint))]
+                              #:flush? [flush? #t])
+                       (let ([dc (get-dc)])
+                         (dynamic-wind
+                             (lambda ()
+                               (suspend-flush))
+                             (lambda ()
+                               (unless no-clear?
+                                 (let ([bg (get-canvas-background)])
+                                   (if bg
+                                       (let ([old-bg (send dc get-background)])
+                                         (as-entry
+                                          (lambda ()
+                                            (send dc set-background bg)
+                                            (send dc clear)
+                                            (send dc set-background old-bg))))
+                                       (send dc erase))))
+                               (do-paint dc))
+                             (lambda ()
+                               (resume-flush)))
+                         (when flush? (flush))))])
       (private-field
        [wx #f])
       (sequence

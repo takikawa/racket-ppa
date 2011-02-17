@@ -79,6 +79,7 @@ default in Racket.
 @defidform[Input-Port]
 @defidform[Output-Port]
 @defidform[Path]
+@defidform[Path-String]
 @defidform[Regexp]
 @defidform[PRegexp]
 @defidform[Bytes]
@@ -216,7 +217,8 @@ by @racket[read].}
 @defform[(U t ...)]{is the union of the types @racket[t ...].
  @ex[(λ: ([x : Real])(if (> 0 x) "yes" 'no))]}
 @defform[(case-lambda fun-ty ...)]{is a function that behaves like all of
-  the @racket[fun-ty]s.  The @racket[fun-ty]s must all be function
+  the @racket[fun-ty]s, considered in order from first to last. 
+  The @racket[fun-ty]s must all be function
   types constructed with @racket[->].}
 @defform/none[(t t1 t2 ...)]{is the instantiation of the parametric type
   @racket[t] at types @racket[t1 t2 ...]}
@@ -295,6 +297,14 @@ A function of multiple arities.  Note that each @racket[formals] must have a
 different arity.}
 @defform[(pcase-lambda: (a ...) [formals body] ...)]{
 A polymorphic function of multiple arities.}
+@defform/subs[(opt-lambda: formals . body)
+([formals ([v : t] ... [v : t default] ...)
+          ([v : t] ... [v : t default] ... . [v : t *])
+	  ([v : t] ... [v : t default] ... . [v : t ...])])]{
+A function with optional arguments.}
+@defform[(popt-lambda: (a ...) formals . body)]{
+A polymorphic function with optional arguments.}
+
 
 @subsection{Loops}
 

@@ -2,16 +2,21 @@
 (require scheme/class
          (for-syntax scheme/base)
          scheme/file
+         racket/port
          "../syntax.ss"
          "private.ss"
-         "style.ss"
-         "snip.ss"
-         "snip-flags.ss"
+         racket/snip
+         racket/snip/private/private
+	 racket/snip/private/style
+         racket/snip/private/snip-flags
+         racket/snip/private/prefs
          "editor-admin.ss"
          "stream.ss"
          "undo.ss"
          "keymap.ss"
+         "editor-data.rkt"
          (only-in "cycle.ss" 
+                  printer-dc%
                   text%
                   pasteboard%
                   editor-snip%
@@ -63,7 +68,8 @@
   (define/public (set-last-used v) (set! last-used v))
 
   (define/public (ready-offscreen width height)
-    (if (or (width . > . RIDICULOUS-SIZE)
+    (if (or #t ; disable on all  platforms
+            (width . > . RIDICULOUS-SIZE)
             (height . > . RIDICULOUS-SIZE)
             (eq? (system-type) 'macosx))
         #f
@@ -103,7 +109,7 @@
 
 ;; ----------------------------------------
 
-(define emacs-style-undo? (and (get-preference 'MrEd:emacs-undo) #t))
+(define emacs-style-undo? (and (get-preference* 'GRacket:emacs-undo) #t))
 (define (max-undo-value? v) (or (exact-nonnegative-integer? v)
                                 (eq? v 'forever)))
 
@@ -444,10 +450,6 @@
   (define/public (set-caret-owner snip focus) (void))
   (define/public (read-from-file mf) #f)
 
-  (define/public (do-copy time) (void))
-  (define/public (do-paste time) (void))
-  (define/public (do-paste-x-selection time) (void))
-
   (def/public (do-edit-operation [symbol? op] [any? [recursive? #t]] [exact-integer? [time 0]])
     (if (and recursive?
              s-caret-snip)
@@ -505,7 +507,7 @@
       snip))
 
   (def/public (insert-image [(make-or-false path-string?) [filename #f]]
-                            [symbol? [type 'unknown]]
+                            [image-type? [type 'unknown/alpha]]
                             [any? [relative? #f]]
                             [any? [inline-img? #t]])
     (let ([filename (or filename
@@ -517,7 +519,7 @@
           (insert snip)))))
 
   (def/public (on-new-image-snip [path-string? filename]
-                                 [symbol? type]
+                                 [image-type? type]
                                  [any? relative?]
                                  [any? inline-img?])
     (make-object image-snip% filename type relative? inline-img?))
@@ -737,29 +739,75 @@
   (define/public (do-end-print) (void))
   (define/public (do-has-print-page?) (void))
 
+  (define/private (run-printout
+                   parent
+                   interactive? ; currently ignored
+                   fit-to-page? ; ignored
+                   begin-doc-proc
+                   has-page?-proc
+                   print-page-proc
+                   end-doc-proc)
+    (let ([dc (make-object printer-dc% parent)])
+      (send dc start-doc "printing")
+      (begin-doc-proc dc)
+      (let loop ([i 1])
+        (when (has-page?-proc dc i)
+          (begin
+            (send dc start-page)
+            (print-page-proc dc i)
+            (send dc end-page)
+            (loop (add1 i)))))
+      (end-doc-proc)
+      (send dc end-doc)))
+
   (def/public (print [bool? [interactive? #t]]
                      [bool? [fit-to-page? #t]]
-                     [(symbol-in standard postscript) [output-mode 'standard]]
+                     [(symbol-in standard postscript pdf) [output-mode 'standard]]
                      [any? [parent #f]] ; checked in ../editor.ss
                      [bool? [force-page-bbox? #t]]
                      [bool? [as-eps? #f]])
-    (let ([ps? (case (system-type)
-                 [(macosx windows) (eq? output-mode 'postscript)]
-                 [else #t])]
+    (let ([ps? (or (eq? output-mode 'postscript)
+                   (eq? output-mode 'pdf))]
           [parent (or parent
                       (extract-parent))])
       (cond
        [ps?
-        (let ([dc (make-object post-script-dc% interactive? parent force-page-bbox? as-eps?)])
+        (let* ([ps-dc% (if (eq? output-mode 'postscript) post-script-dc% pdf-dc%)]
+               [dc (if as-eps?
+                       ;; just for size:
+                       (new ps-dc% [interactive #f] [output (open-output-nowhere)])
+                       ;; actual target:
+                       (make-object ps-dc% interactive? parent force-page-bbox? #f))])
           (when (send dc ok?)
             (send dc start-doc "printing buffer")
             (set! printing dc)
             (let ([data (do-begin-print dc fit-to-page?)])
-              (print-to-dc dc)
-              (set! printing #f)
-              (do-end-print dc data)
-              (send dc end-doc)
-              (invalidate-bitmap-cache 0.0 0.0 'end 'end))))]
+              (let ([new-dc 
+                     (if as-eps?
+                         ;; now that we know the size, create the actual target:
+                         (let ([w (box 0)]
+                               [h (box 0)]
+                               [sx (box 0)]
+                               [sy (box 0)])
+                           (get-extent w h)
+                           (send (current-ps-setup) get-scaling sx sy)
+                           (let ([dc (make-object ps-dc% interactive? parent force-page-bbox?
+                                                  #t 
+                                                  (* (unbox w) (unbox sx))
+                                                  (* (unbox h) (unbox sy)))])
+                             (and (send dc ok?)
+                                  (send dc start-doc "printing buffer")
+                                  (set! printing dc)
+                                  dc)))
+                         dc)])
+                (when new-dc
+                  (print-to-dc new-dc (if as-eps? 0 -1))
+                  (when as-eps?
+                    (send new-dc end-doc)))
+                (set! printing #f)
+                (do-end-print dc data)
+                (send dc end-doc)
+                (invalidate-bitmap-cache 0.0 0.0 'end 'end)))))]
        [else
         (let ([data #f])
           (run-printout ;; from wx
@@ -816,7 +864,7 @@
             (let loop ([e redochanges-end])
               (unless (= redochanges-start e)
                 (let ([e (modulo (+ e -1 redochanges-size) redochanges-size)])
-                  (append-undo (vector-ref redochanges (send (vector-ref redochanges e) inverse)) #f)
+                  (append-undo (send (vector-ref redochanges e) inverse) #f)
                   (loop e))))
             (let loop ()
               (unless (= redochanges-start redochanges-end)
@@ -922,12 +970,12 @@
                                      cnt
                                      (loop e (add1 cnt))))))])
                 (when (positive? cnt)
-                  (let ([cu (new composite-record% [cnt cnt] [id id] [parity (not parity)])])
+                  (let ([cu (new composite-record% [count cnt] [id id] [parity? (not parity)])])
                     (for ([i (in-range cnt)])
                       (let ([e (modulo (+ (- end cnt) i size) size)])
                         (send cu add-undo i (vector-ref c e))
                         (vector-set! c e #f)))
-                    (let ([e (modulo (+ (- end cnt) cnt size) size)])
+                    (let ([e (modulo (+ (- end cnt) size) size)])
                       (vector-set! c e cu)
                       (set! redochanges-end (modulo (add1 e) size))))))))))))
 
@@ -1265,14 +1313,14 @@
         #f))
 
   (def/public (refresh [real? left] [real? top] [nonnegative-real? width] [nonnegative-real? height]
-                       [(symbol-in no-caret show-inactive-caret show-caret) show-caret]
+                       [caret-status? show-caret]
                        [(make-or-false color%) bg-color])
     (void))
 
   (def/public (on-paint [any? pre?] [dc<%> dc]
                         [real? l] [real? t] [real? r] [real? b]
                         [real? dx] [real? dy]
-                        [(symbol-in no-caret show-inactive-caret show-caret) show-caret])
+                        [caret-status? show-caret])
     (void))
 
   (def/public (can-save-file? [path-string? filename]

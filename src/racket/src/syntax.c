@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1028,7 +1028,7 @@ define_values_optimize(Scheme_Object *data, Optimize_Info *info, int context)
 static Scheme_Object *
 define_values_resolve(Scheme_Object *data, Resolve_Info *rslv)
 {
-  long cnt = 0;
+  intptr_t cnt = 0;
   Scheme_Object *vars = SCHEME_CAR(data), *l, *a;
   Scheme_Object *val = SCHEME_CDR(data), *vec;
 
@@ -3018,7 +3018,8 @@ static Scheme_Object *make_clones(Scheme_Compiled_Let_Value *retry_start,
 static int set_code_flags(Scheme_Compiled_Let_Value *retry_start,
                           Scheme_Compiled_Let_Value *pre_body,
                           Scheme_Object *clones,
-                          int set_flags, int mask_flags, int just_tentative)
+                          int set_flags, int mask_flags, int just_tentative,
+                          int merge_flonum)
 {
   Scheme_Compiled_Let_Value *clv;
   Scheme_Object *value, *first;
@@ -3035,11 +3036,17 @@ static int set_code_flags(Scheme_Compiled_Let_Value *retry_start,
     value = clv->value;
     if (SAME_TYPE(scheme_compiled_unclosed_procedure_type, SCHEME_TYPE(value))) {
       data = (Scheme_Closure_Data *)value;
+
+      first = SCHEME_CAR(clones);
+
+      if (merge_flonum) {
+        scheme_merge_closure_flonum_map(data, (Scheme_Closure_Data *)SCHEME_CAR(first));
+        scheme_merge_closure_flonum_map(data, (Scheme_Closure_Data *)SCHEME_CDR(first));
+        scheme_merge_closure_flonum_map(data, (Scheme_Closure_Data *)SCHEME_CAR(first));
+      }        
       
       if (!just_tentative || (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_RESULT_TENTATIVE)) {
         flags = (flags & SCHEME_CLOSURE_DATA_FLAGS(data));
-        
-        first = SCHEME_CAR(clones);
         
         data = (Scheme_Closure_Data *)SCHEME_CDR(first);
         SCHEME_CLOSURE_DATA_FLAGS(data) = set_flags | (SCHEME_CLOSURE_DATA_FLAGS(data) & mask_flags);
@@ -3176,7 +3183,8 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline, i
     int try_again;
     do {
       try_again = 0;
-      /* (let ([x (let~ ([y M]) N)]) P) => (let~ ([y M]) (let ([x N]) P)) */
+      /* (let ([x (let~ ([y M]) N)]) P) => (let~ ([y M]) (let ([x N]) P))
+         or (let ([x (begin M ... N)]) P) => (begin M ... (let ([x N]) P)) */
       if (post_bind) {
         if (head->num_clauses == 1) {
           clv = (Scheme_Compiled_Let_Value *)head->body; /* ([x ...]) */
@@ -3207,6 +3215,13 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline, i
               post_bind = !(SCHEME_LET_FLAGS(head) & (SCHEME_LET_RECURSIVE | SCHEME_LET_STAR));
               try_again = 1;
             }
+          } else if (SAME_TYPE(SCHEME_TYPE(clv->value), scheme_sequence_type)) {
+            Scheme_Sequence *seq = (Scheme_Sequence *)clv->value; /* (begin M ... N) */
+
+            clv->value = seq->array[seq->count - 1];
+            seq->array[seq->count - 1] = (Scheme_Object *)head;
+
+            return scheme_optimize_expr((Scheme_Object *)seq, info, context);
           }
         }
       }
@@ -3265,9 +3280,6 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline, i
     rhs_info = scheme_optimize_info_add_frame(body_info, split_shift, 0, 0);
   else
     rhs_info = body_info;
-
-  if (for_inline)
-    body_info->inline_fuel >>= 1;
 
   body = head->body;
   for (i = head->num_clauses; i--; ) {
@@ -3611,6 +3623,7 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline, i
         (void)set_code_flags(retry_start, pre_body, clones,
                              CLOS_SINGLE_RESULT | CLOS_PRESERVES_MARKS | CLOS_RESULT_TENTATIVE, 
                              0xFFFF,
+                             0,
                              0);
         /* Re-optimize loop: */
         clv = retry_start;
@@ -3690,11 +3703,12 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline, i
 	  clv = (Scheme_Compiled_Let_Value *)clv->body;
 	}
         /* Check flags loop: */
-        flags = set_code_flags(retry_start, pre_body, clones, 0, 0xFFFF, 0);
+        flags = set_code_flags(retry_start, pre_body, clones, 0, 0xFFFF, 0, 0);
         /* Reset-flags loop: */
         (void)set_code_flags(retry_start, pre_body, clones,
                              (flags & (CLOS_SINGLE_RESULT | CLOS_PRESERVES_MARKS)), 
                              ~(CLOS_SINGLE_RESULT | CLOS_PRESERVES_MARKS | CLOS_RESULT_TENTATIVE),
+                             1,
                              1);
       }
       retry_start = NULL;

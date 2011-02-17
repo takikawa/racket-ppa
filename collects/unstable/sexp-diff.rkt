@@ -1,4 +1,4 @@
-#lang racket
+#lang racket/base
 
 ;;; diff-sexp.lisp -- diffs s-expressions based on Levenshtein-like edit distance.
 
@@ -45,12 +45,14 @@
 
 ;;; Code:
 
+(require racket/list)
+
 (provide sexp-diff)
 
 ;; Computes the number of atoms contained in TREE.
 (define (tree-size tree)
   (if (pair? tree) 
-      (apply + (map tree-size tree)) 
+      (apply + 1 (map tree-size tree))
       1))
 
 

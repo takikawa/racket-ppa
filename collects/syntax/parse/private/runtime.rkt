@@ -99,11 +99,12 @@
 
 (require syntax/stx)
 (define (stx-list-take stx n)
-  (let loop ([stx stx] [n n])
-    (if (zero? n)
-        null
-        (cons (stx-car stx)
-              (loop (stx-cdr stx) (sub1 n))))))
+  (datum->syntax #f
+                 (let loop ([stx stx] [n n])
+                   (if (zero? n)
+                       null
+                       (cons (stx-car stx)
+                             (loop (stx-cdr stx) (sub1 n)))))))
 
 ;; stx-list-drop/cx : stxish stx nat -> (values stxish stx)
 (define (stx-list-drop/cx x cx n)
@@ -130,7 +131,11 @@
                  (raise-syntax-error
                   #f
                   (format "attribute is bound to non-syntax value: ~e" value)
-                  (quote-syntax #,(attribute-mapping-name self)))))))))
+                  (quote-syntax #,(or (let loop ([p (syntax-property stx 'disappeared-use)])
+                                        (cond [(identifier? p) p]
+                                              [(pair? p) (or (loop (car p)) (loop (cdr p)))]
+                                              [else #f]))
+                                      (attribute-mapping-name self))))))))))
 
 ;; check-syntax : nat any -> boolean
 ;; Returns #t if value is a (listof^depth syntax)
@@ -304,15 +309,15 @@
     [(no-shadow e)
      (let ([ee (local-expand #'e (syntax-local-context)
                              (kernel-form-identifier-list))])
-       (syntax-case ee (begin define-values defines-syntaxes)
+       (syntax-case ee (begin define-values define-syntaxes)
          [(begin d ...)
           #'(begin (no-shadow d) ...)]
          [(define-values . _)
-          (check-shadow ee)
-          ee]
+          (begin (check-shadow ee)
+                 ee)]
          [(define-syntaxes . _)
-          (check-shadow ee)
-          ee]
+          (begin (check-shadow ee)
+                 ee)]
          [_
           ee]))]))
 
@@ -323,7 +328,7 @@
 
 (define-syntax (curried-stxclass-parser stx)
   (syntax-case stx ()
-    [(cp class argu)
+    [(_ class argu)
      (with-syntax ([#s(arguments (parg ...) (kw ...) _) #'argu])
        (let ([sc (get-stxclass/check-arity #'class #'class
                                            (length (syntax->list #'(parg ...)))

@@ -41,13 +41,13 @@
                                end))
        (vector)]
       [else
-       (unless (and (<= 0 start) (< start len))
+       (unless (and (<= 0 start len))
          (raise-mismatch-error
           'vector-copy
           (format "start index ~e out of range [~e, ~e] for vector: "
                   start 0 len)
           v))
-       (unless (and (<= start end) (<= end len))
+       (unless (and (<= start end len))
          (raise-mismatch-error
           'vector-copy
           (format "end index ~e out of range [~e, ~e] for vector: "
@@ -208,7 +208,9 @@
   (let ([init-min-var (f (unsafe-vector-ref xs 0))])
     (unless (real? init-min-var)
       (raise-type-error name "procedure that returns real numbers" f))
-    (let-values ([(min* min-var*)
+    (if (unsafe-fx= (unsafe-vector-length xs) 1)
+        (unsafe-vector-ref xs 0)
+        (let-values ([(min* min-var*)
                   (for/fold ([min (unsafe-vector-ref xs 0)]
                              [min-var init-min-var])
                       ([e (in-vector xs 1)])
@@ -219,7 +221,7 @@
                       (cond [(cmp new-min min-var)
                              (values e new-min)]
                             [else (values min min-var)])))])
-      min*)))
+      min*))))
 
 (define (vector-argmin f xs) (mk-min < 'vector-argmin f xs))
 (define (vector-argmax f xs) (mk-min > 'vector-argmax f xs))

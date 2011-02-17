@@ -5,7 +5,7 @@
 
 True and false @deftech{booleans} are represented by the values
 @scheme[#t] and @scheme[#f], respectively, though operations that
-depend a boolean value typically treat anything other than @scheme[#f]
+depend on a boolean value typically treat anything other than @scheme[#f]
 as true.
 
 See also: @scheme[and], @scheme[or], @scheme[andmap], @scheme[ormap].
@@ -44,7 +44,7 @@ strings, byte strings, numbers, pairs, mutable pairs, vectors, boxes, hash
 tables, and inspectable structures. In the last five cases, equality
 is recursively defined; if both @scheme[v1] and @scheme[v2] contain
 reference cycles, they are equal when the infinite unfoldings of the
-values would be equal. See also @scheme[prop:equal+hash] and @racket[prop:proxy-of].
+values would be equal. See also @scheme[prop:equal+hash] and @racket[prop:impersonator-of].
 
 @examples[
 (equal? 'yes 'yes)
@@ -155,7 +155,7 @@ type. The property value must be a list of three procedures:
        an instance of the structure type (or one of its subtypes) to
        which the property is associated.
 
-       The second argument is a @scheme[equal-hash-code]-like
+       The second argument is an @scheme[equal-hash-code]-like
        procedure to use for recursive hash-code computation; use the
        given procedure instead of @scheme[equal-hash-code] to ensure
        that data cycles are handled properly.}
@@ -183,8 +183,8 @@ transparent structures, @scheme[equal-hash-code] and
 values. For opaque structure types, @scheme[equal?] is the same as
 @scheme[eq?], and @scheme[equal-hash-code] and
 @scheme[equal-secondary-hash-code] results are based only on
-@scheme[eq-hash-code]. If a structure has a @racket[prop:proxy-of]
-property, then the @racket[prop:proxy-of] property takes precedence over
+@scheme[eq-hash-code]. If a structure has a @racket[prop:impersonator-of]
+property, then the @racket[prop:impersonator-of] property takes precedence over
 @racket[prop:equal+hash] if the property value's procedure returns a
 non-@racket[#f] value when applied to the structure.
 

@@ -35,7 +35,7 @@
     (opt-lambda ([full-screen? #f])
       (let ([xb (box 0)]
 	    [yb (box 0)])
-	(wx:display-size xb yb (if full-screen? 1 0))
+	(wx:display-size xb yb full-screen?)
 	(values (unbox xb) (unbox yb)))))
 
   (define get-display-left-top-inset
@@ -69,7 +69,8 @@
   (define (make-top-container% base% dlg?)
     (class100 (wx-make-container% (wx-make-window% base% #t)) (parent . args)
       (inherit get-x get-y get-width get-height set-size
-	       get-client-size is-shown? on-close enforce-size)
+	       get-client-size is-shown? on-close enforce-size
+               get-eventspace get-focus-window)
       (private-field
        ;; have we had any redraw requests while the window has been
        ;; hidden?
@@ -89,11 +90,10 @@
        [panel #f]
 
        [use-default-position? (and (= -11111 (list-ref args 2))
-				   (= -11111 (list-ref args (if dlg? 3 1))))]
+                                   (= -11111 (list-ref args 1)))]
        
        [enabled? #t]
        [focus #f]
-       [target #f]
 
        [border-buttons null]
 
@@ -107,13 +107,8 @@
 	 (lambda (b)
 	   (set! enabled? (and b #t))
 	   (super enable b))])
-      (private-field
-       [eventspace (if parent
-		       (send parent get-eventspace)
-		       (wx:current-eventspace))])
 
       (public
-	[get-eventspace (lambda () eventspace)]
 
 	[is-enabled?
 	 (lambda () enabled?)]
@@ -136,21 +131,17 @@
 							  (eq? b w))))))
 			     border-buttons)
 		   (when (w . is-a? . wx:button%)
-		     (send w defaulting #t)))))
-	   (set! focus w)
-	   (when w
-	     (set! target w)))]
+		     (send w defaulting #t))))
+             (set! focus w)))]
 	
-	[get-focus-window
-	 (lambda () focus)]
 	[get-edit-target-window
-	 (lambda () (and target (send (wx->proxy target) is-shown?) target))]
+	 (lambda () (get-focus-window #t))]
 	[get-focus-object
 	 (lambda ()
-	   (window->focus-object focus))]
+	   (window->focus-object (get-focus-window)))]
 	[get-edit-target-object
 	 (lambda ()
-	   (window->focus-object target))]
+	   (window->focus-object (get-focus-window #t)))]
 
 	[window->focus-object
 	 (lambda (w)
@@ -349,12 +340,23 @@
 		    (set! last-height correct-h)
 		    (set! already-trying? #t)
 		    (enforce-size -1 -1 -1 -1 1 1)
-		    (set-size -1 -1 correct-w correct-h)
+		    (set-size -11111 -11111 correct-w correct-h)
 		    (enforce-size min-w min-h
 				  (if sx? -1 min-w) (if sy? -1 min-h)
 				  1 1)
 		    (set! already-trying? #f)
 		    (resized)]))))))])
+
+      (public
+        [call-show
+	 (lambda (on? do-show)
+           (when on?
+             (position-for-initial-show))
+	   (if on?
+	       (hash-table-put! top-level-windows this #t)
+	       (hash-table-remove! top-level-windows this))
+	   (as-exit ; as-exit because there's an implicit wx:yield for dialogs
+            do-show))])
       
       (override
 	;; show: add capability to set perform-updates
@@ -365,12 +367,8 @@
 	;;          pass now to superclass's show.
 	[show
 	 (lambda (on?)
-           (when on?
-             (position-for-initial-show))
-	   (if on?
-	       (hash-table-put! top-level-windows this #t)
-	       (hash-table-remove! top-level-windows this))
-	   (as-exit ; as-exit because there's an implicit wx:yield for dialogs
+           (call-show
+            on?
 	    (lambda () (super show on?))))]
 
 	[on-visible
@@ -397,10 +395,10 @@
 	;;            aren't stretchable, frame resized to size of
 	;;            contents.  Each direction is handled
 	;;            independently.
-	[on-size
-	 (lambda (bad-width bad-height)
+	[queue-on-size
+	 (lambda ()
 	   (unless (and already-trying? (not (eq? 'unix (system-type))))
-	     (parameterize ([wx:current-eventspace eventspace])
+	     (parameterize ([wx:current-eventspace (get-eventspace)])
 	       (wx:queue-callback (lambda () (resized)) #t))))])
 
       (public
@@ -494,7 +492,7 @@
 						   #f)]
 					    [candidates 
 					     (map object->position (container->children panel o #t))]
-					    [dests (filter-overlapping candidates)]
+                                            [dests (filter-overlapping candidates)]
 					    [pos (if o (object->position o) (list 'x 0 0 1 1))]
 					    [o (traverse (cadr pos) (caddr pos) (cadddr pos) (list-ref pos 4)
 							 (case code
@@ -684,17 +682,11 @@
 	    (when mb (set! menu-bar mb))
 	    (super set-menu-bar mb))]
 	 [on-menu-command
-	  (entry-point
-	   (lambda (id)
-	     (let ([wx (wx:id-to-menu-item id)])
-	       (let ([go (lambda ()
-			   (do-command (wx->mred wx) (make-object wx:control-event% 'menu)))])
-		 (if (eq? 'windows (system-type))
-		     ;; Windows: need trampoline
-		     (wx:queue-callback 
-		      (entry-point (lambda () (go)))
-		      wx:middle-queue-key)
-		     (go))))))]
+          (entry-point
+           (lambda (id)
+             (let ([wx (wx:id-to-menu-item id)])
+               (when wx
+                 (do-command (wx->mred wx) (make-object wx:control-event% 'menu))))))]
 	 [on-menu-click
 	  (entry-point
 	   (lambda ()
@@ -730,7 +722,7 @@
 
   (define wx-dialog%
     (make-top-level-window-glue% 
-     7
+     6
      (class100 (make-top-container% wx:dialog% #t) args
        (sequence
 	 (apply super-init args))))))

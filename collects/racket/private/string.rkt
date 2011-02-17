@@ -15,7 +15,7 @@
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   (define (real->decimal-string n [digits 2])
     (unless (exact-nonnegative-integer? digits)
-      (raise-type-error 'real->decimal-string "exact-nonnegative-integer" n))
+      (raise-type-error 'real->decimal-string "exact-nonnegative-integer" digits))
     (let* ([e (expt 10 digits)]
            [num (round (abs (* e (inexact->exact n))))])
       (format "~a~a.~a"
@@ -87,14 +87,14 @@
           (or (hash-ref t key #f)
               (let ([rx* (run-tweak)]) (hash-set! t key rx*) rx*))))))
 
-  (define (regexp-try-match pattern input-port [start-k 0] [end-k #f] [out #f])
+  (define (regexp-try-match pattern input-port [start-k 0] [end-k #f] [out #f] [prefix #""])
     (unless (input-port? input-port)
       (raise-type-error 'regexp-try-match
                         "input port" input-port))
     (unless (or (not out) (output-port? out))
       (raise-type-error 'regexp-try-match
                         "output port or #f" out))
-    (let ([m (regexp-match-peek-positions pattern input-port start-k end-k)])
+    (let ([m (regexp-match-peek-positions pattern input-port start-k end-k #f prefix)])
       (and m
            ;; What happens if someone swipes our bytes before we can get them?
            (let ([drop (caar m)])
@@ -404,7 +404,7 @@
                                                              (check
                                                               replacement
                                                               (for/list ([m ms])
-                                                                (sub buf (car m) (cdr m))))
+                                                                (and m (sub buf (car m) (cdr m)))))
                                                              (replac ms replacement))
                                                          (sub buf start mstart)
                                                          acc))
@@ -451,7 +451,13 @@
       (and m (zero? (caar m))
            (= (cdar m)
               (cond [(bytes? s) (bytes-length s)]
-                    [(or (byte-regexp? p) (bytes? p)) (string-utf-8-length s)]
-                    [else (string-length s)])))))
+                    [(or (byte-regexp? p) (bytes? p)) 
+                     (if (path? s)
+                         (bytes-length (path->bytes s))
+                         (string-utf-8-length s))]
+                    [else 
+                     (if (path? s)
+                         (string-length (path->string s))
+                         (string-length s))])))))
 
   )

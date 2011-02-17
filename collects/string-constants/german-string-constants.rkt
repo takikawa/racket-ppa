@@ -36,13 +36,15 @@
  (web-materials "Verwandte Web-Seiten")
  (tool-web-sites "Web-Seiten mit Tools")
  (plt-homepage "Racket")
- (how-to-use-scheme "How to Use Scheme")
- (teachscheme!-homepage "TeachScheme!")
+ (pbd-homepage "Program by Design")
 
  ;;; bug report form
  (cancel-bug-report? "Bug-Report verwerfen?")
  (are-you-sure-cancel-bug-report?
   "Sind Sie sicher, dass Sie diesen Bug-Report verwerfen wollen?")
+ (do-you-want-to-discard-or-save-this-bug-report
+  "Wollen Sie den Bug-Report verwerfen oder speichern?")
+ (discard "Verwerfen") ;; a button label for a dialog box with the above question
  (bug-report-form "Formular für Bug-Report")
  (bug-report-field-name "Name")
  (bug-report-field-email "Email")
@@ -61,7 +63,14 @@
  (bug-report-synthesized-information "Generierte Information")  ;; dialog title
  (bug-report-show-synthesized-info "Generierte Informationen anzeigen")	; (an)zeigen
  (bug-report-submit "Abschicken")	
- (bug-report-submit-menu-item "Bug-Report abschicken") ;; in Help Menu (drs & help desk)
+ (close-and-save-bug-report "Schließen && Speichern") ;; button in bug report dialog, next to cancel and bug-report-submit
+ (bug-report-submit-menu-item "Bug-Report abschicken...") ;; in Help Menu (drs & help desk)
+ (saved-bug-reports-menu-item "Gepeicherte Bug-Reports") ;; in Help Menu, submenu title
+ (disacard-all-saved-bug-reports "Alle gespeicherten Bug-Reports verwerfen") ;; menu item: only shows up when there is more than one saved bug report
+ (no-saved-bug-reports "Kein Bug-Report wurde gespeichert") ;; an info message that shows up as a disabled menu item when no saved bug reports are around
+ (new-bug-report "Neuer Bug-Report") ;; button label the user sees when there are saved bug reports, but the user asks to save another one.
+ (close-and-save "Schließen und Speichern") ;; button on the bottom of the bug report form
+ (saved-unsubmitted-bug-reports "Gespeicherte, noch nicht abgeschickte Bug-Reports:") ;; next to previous line in same dialog, followed by list of bug report subjects (as buttons)
  (error-sending-bug-report "Versendung des Bug-Reports fehlgeschlagen")
  (error-sending-bug-report-expln "Ein Fehler ist beim Versenden des Bug-Reports aufgetreten. Falls Ihre Internet-Verbindung eigentlich funktioniert, besuchen Sie bitte:\n\n    http://bugs.racket-lang.org/ \n\nund teilen Sie uns den Bug mit unserem Online-Formular mit. Wir bitten um Ihr Verständnis.\n\nDie Fehlermeldung lautet:\n~a")
  (illegal-bug-report "Ungültiger Bug-Report")
@@ -311,9 +320,17 @@
  (error-saving-preferences-title "Fehler beim Speichern der Einstellungen")
  (steal-the-lock-and-retry "Lock an uns reißen && nochmal versuchen") ;; in the preferences error dialog; this happens when the lockfile exists (after 3 pref writes). 
  (error-reading-preferences "Fehler beim Lesen der Einstellungen")
+ (error-reading-preferences-explanation "Die Datei mit den Einstellungen ist gesperrt und deshalb kann die  ~a-Einstellung nicht gelesen werden") ;; ~a is filled with the name of the preference (a symbol)
+ (dont-ask-again-until-drracket-restarted "Nicht noch einmal fragen (bis DrRacket neu gestartet wird)")
+ ; difference between the above and below is one comes with a question (steal the lock or not) and the other with just a notation saying "the file is locked"
+ (dont-notify-again-until-drracket-restarted "Nicht noch einmal benachrichtigen (bis DrRacket neu gestartet wird)") 
  (prefs-file-locked "Die Datei mit den Einstellungen ist gesperrt (weil die Datei ~a existiert), weshalb die Änderungen an den Einstellungen nicht gespeichert werden konnten. Änderung an den Einstellungen rückgängig machen?")
  (try-again "Nochmal versuchen") ;; button label
+
+ (give-up-and-use-the-default "Aufgeben und Standardeinstellung verwenden") ;; button label
+  
  (prefs-file-still-locked "Die Datei mit den Einstellungen ist immer noch gesperrt (weil die Datei ~a existiert), weshalb die Änderungen an den Einstellungen nicht gespeichert werden konnten.")
+ (prefs-file-locked-nothing-doing "Die Datei mit den Einstellungen ist gesperrt (durch ~s), so dass Änderungen an den Einstellungen nicht gespeichert werden können.") ;; the  ~s is filled with the lockfile; this string is (currently) used only on windows where lockfiles are less friendly (and there is no steal fallback)
  (scheme-prefs-panel-label "Racket")
  (warnings-prefs-panel-label "Warnmeldungen")
  (editor-prefs-panel-label "Editieren")
@@ -345,14 +362,17 @@
  (show-interactions-on-execute "Interaktionen beim Programmstart automatisch öffnen")
  (switch-to-module-language-automatically "Automatisch in die `module'-Sprache wechseln, wenn ein Modul geöffnet wird")
  (interactions-beside-definitions "Interaktionen neben den Definitionen anzeigen") ;; in preferences, below the checkbox one line above this one
- (show-line-numbers "Zeilennummern anzeigen")
- (hide-line-numbers "Zeilennummern ausblenden")
+ (show-line-numbers "Zeilennummern einblenden")
+ (show-line-numbers/menu "Zeilennummern einblenden")
+ (hide-line-numbers/menu "Zeilennummern ausblenden")
+
  (limit-interactions-size "Umfang der Interaktionen einschränken")
  (background-color "Hintergrundfarbe")
  (default-text-color "Standard für Text") ;; used for configuring colors, but doesn't need the word "color"
  (choose-a-background-color "Hintergrundfarbe auswählen")
 
  (revert-to-defaults "Standardeinstellung wiederherstellen")
+ (undo-changes "Änderungen rückgängig machen und schließen") ;; used in the preferences dialog to undo preference changes
 
   (black-on-white-color-scheme "Schwarz auf Weiß") ;; these two appear in the color preferences dialog on butttons
   (white-on-black-color-scheme "Weiß auf Schwarz") ;; clicking the buttons changes the color schemes to some defaults that've been set up.
@@ -446,13 +466,14 @@
  (mfs-recur-over-subdirectories "In Unterverzeichnisse abtauchen")
  (mfs-regexp-filename-filter "Regulärer Ausdruck Dateinamen-Filter")
  (mfs-search-string "Zeichenkette suchen")
- (mfs-drscheme-multi-file-search "DrRacket - Suche in mehreren Dateien") ;; results window and error message title
+ (mfs-drscheme-multi-file-search "Suchen in mehreren Dateien - DrRacket") ;; results window and error message title
  (mfs-not-a-dir "\"~a\" ist kein Verzeichnis")
  (mfs-open-file "Datei öffnen")
  (mfs-stop-search "Suche stoppen")
  (mfs-case-sensitive-label "Groß-/Kleinschreibung beachten")
  (mfs-no-matches-found "Keine Treffer gefunden.")
  (mfs-search-interrupted "Suche abgebrochen.")
+ (mfs-drscheme-multi-file-search-title "Suchen in mehreren Dateien nach \"~a\" - DrRacket") ;; the ~a format specifier is filled in with the search string
  
  ;;; reverting a file
  (are-you-sure-revert
@@ -497,6 +518,8 @@
  (edit-menu "Bearbeiten")
  (help-menu "Hilfe")
  (windows-menu "Fenster")
+
+ (tabs-menu "Tabs")
  
  ;;; menus
  ;;; - in menu labels, the & indicates a alt-key based shortcut.
@@ -628,6 +651,7 @@
 
  ;; windows menu
  (windows-menu-label "&Fenster")
+ (tabs-menu-label "&Tabs")
  (minimize "Minimieren") ;; minimize and zoom are only used under mac os x
  (zoom "Zoomen")
  (bring-frame-to-front "Fenster nach vorn")       ;;; title of dialog
@@ -1186,6 +1210,16 @@
  (stepper-no-such-step "Kein Schritt gefunden, der das Kriterium erfüllt.")
  (stepper-no-such-step/earlier "Kein früherer Schritt gefunden, der das Kriterium erfüllt.")
  
+ (stepper-no-earlier-application-step "Keine vorherigen Applikationsschritte.")
+ (stepper-no-later-application-step "Keine weiteren Applikationsschritte..")
+ 
+ (stepper-no-earlier-step "Keine vorherigen Schritte.")
+ (stepper-no-later-step "Keine weiteren Schritte.")
+  
+ (stepper-no-selected-step "Keine Schritte im markierten Bereich. Vielleicht ist es auskommentiert?")
+  
+ (stepper-no-last-step "Der letzte Schritt ist nocht nicht verfügbar.")
+
  (debug-tool-button-name "Debugger")
 
  (dialog-back "Zurück")
@@ -1347,6 +1381,9 @@
   (test-engine-not-range-error "Tatsächlicher Wert ~F liegt nicht zwischen ~F und ~F (inklusive).")
   (test-engine-property-fail-error "Eigenschaft falsifizierbar mit")
   (test-engine-property-error-error "`check-property' bekam den folgenden Fehler~n:: ~a")
+
+  (signature-enable-checks "Signaturüberprüfung aktivieren")
+  (signature-disable-checks "Signaturüberprüfung deaktivieren")
 
   ; section header
   (test-engine-check-failures "Check-Fehler:")

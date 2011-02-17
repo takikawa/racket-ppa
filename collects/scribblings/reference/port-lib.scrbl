@@ -9,19 +9,37 @@
 @; ----------------------------------------------------------------------
 
 @section{Port String and List Conversions}
+@(define port-eval (make-base-eval))
+@(interaction-eval #:eval port-eval (require racket/port))
 
 @defproc[(port->list [r (input-port? . -> . any/c) read] [in input-port? (current-input-port)])
          (listof any/c)]{
 Returns a list whose elements are produced by calling @scheme[r]
-on @scheme[in] until it produces @scheme[eof].}
+on @scheme[in] until it produces @scheme[eof].
+
+@examples[#:eval port-eval
+(define (read-number input-port)
+  (define char (read-char input-port))
+  (if (eof-object? char)
+   char
+   (string->number (string char))))
+(port->list read-number (open-input-string "12345"))
+]}
 
 @defproc[(port->string [in input-port? (current-input-port)]) string?]{
 
-Reads all characters from @scheme[in] and returns them as a string.}
+Reads all characters from @scheme[in] and returns them as a string.
+@examples[#:eval port-eval
+(port->string (open-input-string "hello world"))
+]}
 
 @defproc[(port->bytes [in input-port? (current-input-port)]) bytes?]{
 
-Reads all bytes from @scheme[in] and returns them as a @tech{byte string}.}
+Reads all bytes from @scheme[in] and returns them as a @tech{byte string}.
+
+@examples[#:eval port-eval
+(port->bytes (open-input-string "hello world"))
+]}
 
 @defproc[(port->lines [in input-port? (current-input-port)]
                       [#:line-mode line-mode (or/c 'linefeed 'return 'return-linefeed 'any 'any-one) 'any])
@@ -30,14 +48,24 @@ Reads all bytes from @scheme[in] and returns them as a @tech{byte string}.}
 Read all characters from @scheme[in], breaking them into lines. The
 @scheme[line-mode] argument is the same as the second argument to
 @scheme[read-line], but the default is @scheme['any] instead of
-@scheme['linefeed].}
+@scheme['linefeed].
+
+@examples[#:eval port-eval
+(port->lines
+ (open-input-string "line 1\nline 2\n  line 3\nline 4"))
+]}
 
 @defproc[(port->bytes-lines [in input-port? (current-input-port)]
                             [#:line-mode line-mode (or/c 'linefeed 'return 'return-linefeed 'any 'any-one) 'any])
          (listof bytes?)]{
 
 Like @scheme[port->lines], but reading bytes and collecting them into
-lines like @scheme[read-bytes-line].}
+lines like @scheme[read-bytes-line].
+
+@examples[#:eval port-eval
+(port->bytes-lines 
+ (open-input-string "line 1\nline 2\n  line 3\nline 4"))
+]}
 
 @defproc[(display-lines [lst list?]
                         [out output-port? (current-output-port)]
@@ -478,6 +506,41 @@ is enabled for the resulting port. The default is @scheme[void].}
 
 Like @scheme[transplant-input-port], but for output ports.}
 
+@defproc[(filter-read-input-port [in input-port?]
+                                 [read-wrap (bytes? (or/c exact-nonnegative-integer?
+                                                          eof-object?
+                                                          procedure?
+                                                          evt?)
+                                                    . -> .
+                                                    (or/c exact-nonnegative-integer?
+                                                          eof-object?
+                                                          procedure?
+                                                          evt?))]
+                                 [peek-wrap (bytes? exact-nonnegative-integer? (or/c evt? #f)
+                                                    (or/c exact-nonnegative-integer?
+                                                     eof-object?
+                                                     procedure?
+                                                     evt?
+                                                     #f)
+                                             . -> . (or/c exact-nonnegative-integer?
+                                                     eof-object?
+                                                     procedure?
+                                                     evt?
+                                                     #f))]
+                                 [close? any/c #t])
+         input-port?]{
+
+Creates a port that draws from @racket[in], but each result from the
+port's read and peek procedures (in the sense of @racket[make-input-port]) 
+is filtered by @racket[read-wrap] and
+@racket[peek-wrap]. The filtering procedures each receive both the
+arguments and results of the read and peek procedures on @racket[in]
+for each call.
+
+If @racket[close?] is true, then closing the resulting port also
+closes @racket[in].}
+
+
 @defproc[(special-filter-input-port [in input-port?]
                                     [proc (procedure? bytes? . -> . (or/c exact-nonnegative-integer? 
                                                                           eof-object?
@@ -689,3 +752,4 @@ is written completely to one @scheme[out] before moving to the next
 non-blocking ports (e.g., to a file) should be placed first in the
 argument list.}
 
+@close-eval[port-eval]

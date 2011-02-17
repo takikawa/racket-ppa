@@ -1,6 +1,6 @@
 /*
   Mzscheme
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   Copyright (c) 1995 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -587,7 +587,7 @@ name (const Scheme_Object *n1, const Scheme_Object *n2) \
 { \
   if (SCHEME_INTP(n1)){ \
     if (SCHEME_INTP(n2)) { \
-      long a, b; \
+      intptr_t a, b; \
       a = SCHEME_INT_VAL(n1); \
       b = SCHEME_INT_VAL(n2); \
       return scheme_make_integer(a op b); \

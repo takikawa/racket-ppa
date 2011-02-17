@@ -337,7 +337,7 @@
   (define* (~vector-set! vec i val) (~ (vector-set! (! vec) (! i) val)))
   (define* (~set-box! box val) (~ (set-box! (! box) val)))
 
-  ;; not much to do with these besides inserting strict points
+  ;; not much to do with these besides inserting strictness points and ~begin
   (define-syntax (~cond stx)
     (syntax-case stx ()
       [(_ [test body ...] ...)
@@ -446,7 +446,7 @@
 
   (define* (~list-ref l k)
     (let ([k (! k)])
-      (unless (and (integer? k) (exact? k) (<= 0 k))
+      (unless (exact-nonnegative-integer? k)
         (raise-type-error 'list-ref "non-negative exact integer" 1 l k))
       (let loop ([k k] [l (! l)])
         (cond [(not (pair? l))
@@ -455,7 +455,7 @@
               [else (loop (sub1 k) (! (cdr l)))]))))
   (define* (~list-tail l k)
     (let ([k (! k)])
-      (unless (and (integer? k) (exact? k) (<= 0 k))
+      (unless (exact-nonnegative-integer? k)
         (raise-type-error 'list-tail "non-negative exact integer" 1 l k))
       (let loop ([k k] [l l]) ; don't force here -- unlike list-ref
         (cond [(zero? k) l]
@@ -575,10 +575,20 @@
   ;; Extra functionality that is useful for lazy list stuff
 
   (define* (take n l)
-    (let loop ([n (! n)] [l (! l)])
-      (cond [(or (<= n 0) (null? l)) '()]
-            [(pair? l) (cons (car l) (~ (loop (sub1 n) (! (cdr l)))))]
-            [else (error 'take "not a proper list: ~e" l)])))
+    (let ([n0 (! n)])
+      (unless (exact-nonnegative-integer? n0)
+        (raise-type-error 'take "non-negative exact integer" 0 n0 l))
+      (let loop ([n n0] [l l])
+        (if (zero? n)
+          '()
+          (let ([l (! l)])
+            (cond [(null? l)
+                   ;; it would be fine to force the whole list (since we now
+                   ;; know it's finite), but doing so means keeping a reference
+                   ;; to its head, which can lead to memory leaks.
+                   (error 'take "index ~e too large for input list" n0)]
+                  [(pair? l) (cons (car l) (~ (loop (sub1 n) (cdr l))))]
+                  [else (error 'take "not a proper list: ~e" l)]))))))
 
   ;; not like Haskell's `cycle' that consumes a list
   (define* (cycle . l)
@@ -588,6 +598,8 @@
   ;; --------------------------------------------------------------------------
   ;; mzlib/list functionality
 
+  ;; These are a hack, they're not the same due to different error
+  ;; messages (and they work with improper lists too).
   (define* (rest x) (~cdr x))
   (define* (first   x) (~car    x))
   (define* (second  x) (~cadr   x))
@@ -692,7 +704,7 @@
 
   (define* (build-list n f)
     (let ([n (! n)] [f (! f)])
-      (unless (and (integer? n) (exact? n) (>= n 0))
+      (unless (exact-nonnegative-integer? n)
         (error 'build-list "~s must be an exact integer >= 0" n))
       (unless (procedure? f)
         (error 'build-list "~s must be a procedure" f))

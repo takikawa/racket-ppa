@@ -1,29 +1,31 @@
 #lang at-exp racket/base
-(require (for-syntax scheme/base))
+(require (for-syntax racket/base))
 
 (require scribble/manual
          scribble/basic
          scribble/extract
-         scheme/class
-         scheme/contract)
+         racket/class
+         racket/contract)
 (provide (all-from-out scribble/manual)
          (all-from-out scribble/basic)
          (all-from-out scribble/extract)
-         (all-from-out scheme/class)
-         (all-from-out scheme/contract))
+         (all-from-out racket/class)
+         (all-from-out racket/contract))
 
-(require (for-label scheme/gui/base
-                    scheme/class
-                    scheme/contract
-                    scheme/base
-                    drscheme/tool-lib
+(require (for-label racket/gui/base
+                    racket/snip
+                    racket/class
+                    racket/contract
+                    racket/base
+                    drracket/tool-lib
 		    mrlib/switchable-button
                     framework))
-(provide (for-label (all-from-out scheme/gui/base)
-                    (all-from-out scheme/class)
-                    (all-from-out scheme/contract)
-                    (all-from-out scheme/base)
-                    (all-from-out drscheme/tool-lib)
+(provide (for-label (all-from-out racket/gui/base)
+                    (all-from-out racket/snip)
+                    (all-from-out racket/class)
+                    (all-from-out racket/contract)
+                    (all-from-out racket/base)
+                    (all-from-out drracket/tool-lib)
                     (all-from-out mrlib/switchable-button)
                     (all-from-out framework)))
 

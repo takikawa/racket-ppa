@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -397,7 +397,7 @@ zero_p (int argc, Scheme_Object *argv[])
   int v;
   v = scheme_is_zero(argv[0]);
   if (v < 0) {
-    NEED_REAL(zero?);
+    NEED_NUMBER(zero?);
     ESCAPED_BEFORE_HERE;
   }
   return (v ? scheme_true : scheme_false);

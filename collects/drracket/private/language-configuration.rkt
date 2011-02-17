@@ -1,5 +1,6 @@
 #lang racket/base
-  (require racket/unit
+  (require (prefix-in : mred/mred) ;; ensure that this module is always loaded since it is shared below for pretty big
+           racket/unit
            mrlib/hierlist
            racket/class
            racket/contract
@@ -14,7 +15,7 @@
            (only-in mzlib/struct make-->vector))
   
   (define original-output (current-output-port))
-  (define (printfo . args) (apply fprintf original-output args))
+  (define (oprintf . args) (apply fprintf original-output args))
   
   (define-values (sc-use-language-in-source sc-choose-a-language mouse-event-uses-shortcut-prefix?)
     (let* ([shortcut-prefix (get-default-shortcut-prefix)]
@@ -953,11 +954,13 @@
         (open-current-language)
         (send languages-hier-list min-client-width (text-width (send languages-hier-list get-editor)))
         (send languages-hier-list min-client-height (text-height (send languages-hier-list get-editor)))
-        (when get/set-selected-language-settings
-          (get/set-selected-language-settings settings-to-show))
         (when details-shown?
           (do-construct-details))
         (update-show/hide-details)
+        (when get/set-selected-language-settings
+          ;; this call to get/set-selected-language-settings has to come after the call to do-construct-details above
+          ;; because do-construct-details sets all of the controls to the language's default settings
+          (get/set-selected-language-settings settings-to-show))
         (size-discussion-canvas in-source-discussion-editor-canvas)
         (values
          (λ () selected-language)
@@ -1007,6 +1010,8 @@
                              (send (send t get-style-list) basic-style)
                              before (send t last-position))])
                     (send t change-style size-sd before (send t last-position))))])
+          (when (send normal-control-font get-size-in-pixels)
+            (send size-sd set-size-in-pixels-on #t))
           (let loop ([strs (regexp-split #rx"#lang" sc-lang-in-source-discussion)])
             (do-insert (car strs) #f)
             (unless (null? (cdr strs))
@@ -1501,6 +1506,14 @@
   
     (define (pretty-big-mixin %)
       (class %
+        ;; since check syntax no longer shares the gui libraries, 
+        ;; we always share it explicitly here
+        (define/override (on-execute setting run-in-user-thread)
+          (let ([mred-name ((current-module-name-resolver) 'mred/mred #f #f)])
+            (run-in-user-thread
+             (λ ()
+               (namespace-attach-module drracket:init:system-namespace mred-name))))
+          (super on-execute setting run-in-user-thread))
         (define/override (default-settings) 
           (let ([s (super default-settings)])
             (make-simple-settings+assume (drracket:language:simple-settings-case-sensitive s)

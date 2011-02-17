@@ -105,6 +105,8 @@
   scheme_extension_table->scheme_log = scheme_log;
   scheme_extension_table->scheme_log_message = scheme_log_message;
   scheme_extension_table->scheme_log_abort = scheme_log_abort;
+  scheme_extension_table->scheme_log_warning = scheme_log_warning;
+  scheme_extension_table->scheme_glib_log_message = scheme_glib_log_message;
   scheme_extension_table->scheme_out_of_memory_abort = scheme_out_of_memory_abort;
   scheme_extension_table->scheme_wrong_count = scheme_wrong_count;
   scheme_extension_table->scheme_wrong_count_m = scheme_wrong_count_m;
@@ -226,6 +228,8 @@
   scheme_extension_table->scheme_strdup_eternal = scheme_strdup_eternal;
   scheme_extension_table->scheme_malloc_fail_ok = scheme_malloc_fail_ok;
 #ifndef MZ_PRECISE_GC
+  scheme_extension_table->scheme_late_weak_reference = scheme_late_weak_reference;
+  scheme_extension_table->scheme_late_weak_reference_indirect = scheme_late_weak_reference_indirect;
   scheme_extension_table->scheme_weak_reference = scheme_weak_reference;
   scheme_extension_table->scheme_weak_reference_indirect = scheme_weak_reference_indirect;
   scheme_extension_table->scheme_unweak_reference = scheme_unweak_reference;
@@ -603,7 +607,7 @@
   scheme_extension_table->scheme_eqv = scheme_eqv;
   scheme_extension_table->scheme_equal = scheme_equal;
   scheme_extension_table->scheme_chaperone_of = scheme_chaperone_of;
-  scheme_extension_table->scheme_proxy_of = scheme_proxy_of;
+  scheme_extension_table->scheme_impersonator_of = scheme_impersonator_of;
 #ifdef MZ_PRECISE_GC
   scheme_extension_table->scheme_hash_key = scheme_hash_key;
 #endif
@@ -634,9 +638,11 @@
   scheme_extension_table->scheme_unbox = scheme_unbox;
   scheme_extension_table->scheme_set_box = scheme_set_box;
   scheme_extension_table->scheme_make_weak_box = scheme_make_weak_box;
+  scheme_extension_table->scheme_make_late_weak_box = scheme_make_late_weak_box;
   scheme_extension_table->scheme_make_ephemeron = scheme_make_ephemeron;
   scheme_extension_table->scheme_ephemeron_value = scheme_ephemeron_value;
   scheme_extension_table->scheme_ephemeron_key = scheme_ephemeron_key;
+  scheme_extension_table->scheme_make_stubborn_will_executor = scheme_make_stubborn_will_executor;
   scheme_extension_table->scheme_load = scheme_load;
   scheme_extension_table->scheme_load_extension = scheme_load_extension;
   scheme_extension_table->scheme_register_extension_global = scheme_register_extension_global;

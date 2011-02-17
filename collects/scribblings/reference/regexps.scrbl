@@ -64,20 +64,24 @@ The following completes the grammar for @racket[pregexp], which uses
 
 @px-table
 
+The Unicode categories follow.
+
+@category-table
+
 @;------------------------------------------------------------------------
 @section{Additional Syntactic Constraints}
 
-In addition to matching a grammars, regular expressions must meet two
+In addition to matching a grammar, regular expressions must meet two
 syntactic restrictions:
 
 @itemize[
 
  @item{In a @nonterm{repeat} other than @nonterm{atom}@litchar{?},
-       then @nonterm{atom} must not match an empty sequence.}
+       the @nonterm{atom} must not match an empty sequence.}
 
  @item{In a @litchar{(?<=}@nonterm{regexp}@litchar{)} or
        @litchar{(?<!}@nonterm{regexp}@litchar{)},
-       the @nonterm{regexp} must match a bounded sequence, only.}
+       the @nonterm{regexp} must match a bounded sequence only.}
 
 ]
 
@@ -296,7 +300,7 @@ begins with a start-of-string @litchar{^}; see also
 @racket[regexp-try-match]. On success, all bytes up to and including
 the match are eventually read from the port, but matching proceeds by
 first peeking bytes from the port (using @racket[peek-bytes-avail!]),
-and then (re-)reading matching bytes to discard them after the match
+and then (re@-~-)reading matching bytes to discard them after the match
 result is determined. Non-matching bytes may be read and discarded
 before the match is determined. The matcher peeks in blocking mode
 only as far as necessary to determine a match, but it may peek extra
@@ -431,7 +435,7 @@ Like @racket[regexp-match-positions], but returns multiple matches
 like @racket[regexp-match*].
 
 @examples[
-(regexp-match-positions #rx"x." "12x4x6")
+(regexp-match-positions* #rx"x." "12x4x6")
 ]}
 
 
@@ -453,7 +457,7 @@ match succeeds, @racket[#f] otherwise.
 
 
 @defproc[(regexp-match-exact? [pattern (or/c string? bytes? regexp? byte-regexp?)]
-                              [input (or/c string? bytes? path? input-port?)])
+                              [input (or/c string? bytes? path?)])
           boolean?]{
 
 Like @racket[regexp-match?], but @racket[#t] is only returned when the
@@ -642,7 +646,7 @@ like @racket[regexp-match/end].}
 
 The complement of @racket[regexp-match*]: the result is a list of
 strings (if @racket[pattern] is a string or character regexp and
-@racket[input] is a string) or byte strings (otherwise) from in
+@racket[input] is a string) or byte strings (otherwise) from
 @racket[input] that are separated by matches to
 @racket[pattern]. Adjacent matches are separated with @racket[""] or
 @racket[#""]. Zero-length matches are treated the same as for
@@ -684,7 +688,7 @@ an end-of-file if @racket[input] is an input port).
 Performs a match using @racket[pattern] on @racket[input], and then
 returns a string or byte string in which the matching portion of
 @racket[input] is replaced with @racket[insert].  If @racket[pattern]
-matches no part of @racket[input], then @racket[iput] is returned
+matches no part of @racket[input], then @racket[input] is returned
 unmodified.
 
 The @racket[insert] argument can be either a (byte) string, or a

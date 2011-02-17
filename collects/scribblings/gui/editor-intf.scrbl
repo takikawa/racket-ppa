@@ -457,11 +457,6 @@ Returns the name of a style to be used for newly inserted text,
 }
 
 
-@defmethod[(do-copy) void?]{
-
-See @xmethod[text% do-copy] or @xmethod[pasteboard% do-copy].}
-
-
 @defmethod[(do-edit-operation [op (or/c 'undo 'redo 'clear 'cut 'copy 'paste 
                                         'kill 'select-all 'insert-text-box 
                                         'insert-pasteboard-box 'insert-image)]
@@ -497,16 +492,6 @@ See @|timediscuss| for a discussion of the @scheme[time] argument. If
  @|MismatchExn|.
 
 }
-
-
-@defmethod[(do-paste) void?]{
-
-See @xmethod[text% do-paste] or @xmethod[pasteboard% do-paste].}
-
-
-@defmethod[(do-paste-x-selection) void?]{
-
-See @xmethod[text% do-paste-x-selection] or @xmethod[pasteboard% do-paste-x-selection].}
 
 
 @defmethod[(editor-location-to-dc-location [x real?]
@@ -622,6 +607,8 @@ Typically used (indirectly) by snip objects belonging to the
 
 Returns the font descent for the editor. This method is primarily used
  when an editor is an @techlink{item} within another editor.
+For a text editor, the reported descent includes the editor's
+ bottom padding (see @method[text% set-padding]).
 
 @|OVD| @FCAME[]
 
@@ -634,6 +621,8 @@ Returns the font descent for the editor. This method is primarily used
 Gets the current extent of the editor's graphical representation.
 @boxisfillnull[(scheme w) @elem{the editor's width}]
 @boxisfillnull[(scheme h) @elem{the editor's height}]
+For a text editor, the reported extent includes the editor's
+padding (see @method[text% set-padding]).
 
 @|OVD|  @FCAME[]
 
@@ -854,6 +843,8 @@ Obtaining the @techlink{location} if the bottom-right corner may
 Returns the maximum font space for the editor. This method is
  primarily used when an editor is an @techlink{item} within another
  editor.
+For a text editor, the reported space includes the editor's
+ top padding (see @method[text% set-padding]).
 
 @|OVD| @FCAME[]
 
@@ -959,7 +950,11 @@ The @scheme[show-errors?] argument is no longer used.
 
 
 @defmethod[(insert-image [filename (or/c path-string? #f) #f]
-                         [type (or/c 'unknown 'gif 'jpeg 'xbm 'xpm 'bmp 'pict) 'unknown]
+                         [type (one-of/c 'unknown 'unknown/mask 'unknown/alpha
+                                         'gif 'gif/mask 'gif/alpha 
+                                         'jpeg 'png 'png/mask 'png/alpha
+                                         'xbm 'xpm 'bmp 'pict)
+                               'unknown/alpha]
                          [relative-path? any/c #f]
                          [inline? any/c #t])
            void?]{
@@ -1521,7 +1516,10 @@ Creates a @scheme[editor-snip%] with either a sub-editor from
 
 
 @defmethod[(on-new-image-snip [filename path?]
-                              [kind (or/c 'unknown 'gif 'jpeg 'xbm 'xpm 'bmp 'pict)]
+                              [kind (one-of/c 'unknown 'unknown/mask 'unknown/alpha
+                                              'gif 'gif/mask 'gif/alpha 
+                                              'jpeg 'png 'png/mask 'png/alpha
+                                              'xbm 'xpm 'bmp 'pict)]
                               [relative-path? any/c]
                               [inline? any/c])
            (is-a?/c image-snip%)]{
@@ -1549,7 +1547,9 @@ Returns @scheme[(make-object image-snip% filename kind relative-path? inline?)].
                      [bottom real?]
                      [dx real?]
                      [dy real?]
-                     [draw-caret (or/c 'no-caret 'show-inactive-caret 'show-caret)])
+                     [draw-caret (or/c (one-of/c 'no-caret 'show-inactive-caret 'show-caret)
+                                       (cons/c exact-nonnegative-integer?
+                                               exact-nonnegative-integer?))])
            void?]{
 @methspec{
 
@@ -1709,7 +1709,7 @@ To extend or re-implement copying, override the @xmethod[text%
 
 @defmethod[(print [interactive? any/c #t]
                   [fit-on-page? any/c #t]
-                  [output-mode (or/c 'standard 'postscript) 'standard]
+                  [output-mode (or/c 'standard 'postscript 'pdf) 'standard]
                   [parent (or/c (or/c (is-a?/c frame%) (is-a?/c dialog%)) #f) #f]
                   [force-ps-page-bbox? any/c #t]
                   [as-eps? any/c #f])
@@ -1728,20 +1728,22 @@ If @scheme[fit-on-page?] is a true value, then during printing for a
  @scheme[text%] editor, the editor's maximum width is set to the width
  of the page (less margins) and the autowrapping bitmap is removed.
 
-The @scheme[output-mode] setting is used for Windows and Mac OS X. It
+The @scheme[output-mode] setting
  determines whether the output is generated directly as a PostScript
- file (using Racket's built-in PostScript system) or generated
+ file, generated directly as a PDF file, or generated
  using the platform-specific standard printing mechanism. The possible
  values are
 
 @itemize[
 
  @item{@scheme['standard] --- print using the platform-standard
- mechanism (via a @scheme[printer-dc%]) under Windows and
- Mac OS X, PostScript for Unix (via a @scheme[post-script-dc%])}
+ mechanism (via a @scheme[printer-dc%])}
 
  @item{@scheme['postscript] --- print to a PostScript file (via a
  @scheme[post-script-dc%])}
+
+ @item{@scheme['pdf] --- print to a PDF file (via a
+ @scheme[pdf-dc%])}
 
 ]
 
@@ -1753,20 +1755,21 @@ If @scheme[parent] is not @scheme[#f], it is used as the parent window
  configuration dialogs will have no parent.
 
 The @scheme[force-ps-page-bbox?] argument is used for PostScript
- printing, and is used as the third initialization argument when
- creating the @scheme[post-script-dc%] instance. Unless it is
- @scheme[#f], the bounding-box of the resulting PostScript file is set
+ and PDF printing, and is used as the third initialization argument when
+ creating the @scheme[post-script-dc%] or @racket[pdf-dc%] instance. Unless it is
+ @scheme[#f], the bounding-box of the resulting PostScript/PDF file is set
  to the current paper size.
 
-The @scheme[as-eps?] argument is used for PostScript printing, and is
+The @scheme[as-eps?] argument is used for PostScript and PDF printing, and is
  used as the fourth initialization argument when creating the
- @scheme[post-script-dc%] instance. Unless it is @scheme[#f], the
+ @scheme[post-script-dc%] or @racket[pdf-dc%] instance. Unless it is @scheme[#f], a
  resulting PostScript file is identified as Encapsulated PostScript
  (EPS).
 
 The printing margins are determined by @method[ps-setup%
  get-editor-margin] in the current @scheme[ps-setup%] object (as
- determined by @scheme[current-ps-setup]).
+ determined by @scheme[current-ps-setup]), but they are ignored when
+ @racket[as-eps?] is true.
 
 }
 
@@ -1778,11 +1781,13 @@ The printing margins are determined by @method[ps-setup%
 Prints the editor into the given drawing context. See also
  @method[editor<%> print].
 
-If @scheme[page-number] is a non-negative integer, then just the
+If @scheme[page-number] is a positive integer, then just the
 indicated page is printed, where pages are numbered from
-@scheme[1]. (So, supplying @scheme[0] as @scheme[page-number] produces
-no output.) When @scheme[page-number] is negative, the
-@method[dc<%> start-page] and @scheme[dc<%> end-page] methods of @scheme[dc] are
+@scheme[1]. If @racket[page-number] is @scheme[0], then the
+entire content of the editor is printed on a single page.
+When @scheme[page-number] is negative, then the editor content is
+split across pages as needed to fit, and the
+@method[dc<%> start-page] and @method[dc<%> end-page] methods of @scheme[dc<%>] are
 called for each page.
 
 }
@@ -1888,7 +1893,9 @@ See also @method[editor<%> add-undo].
                     [y real?]
                     [width (and/c real? (not/c negative?))]
                     [height (and/c real? (not/c negative?))]
-                    [draw-caret (or/c 'no-caret 'show-inactive-caret 'show-caret)]
+                    [draw-caret (or/c (one-of/c 'no-caret 'show-inactive-caret 'show-caret)
+                                      (cons/c exact-nonnegative-integer?
+                                              exact-nonnegative-integer?))]
                     [background (or/c (is-a?/c color%) #f)])
            void?]{
 
@@ -2035,8 +2042,11 @@ This method is normally called indirectly by @method[editor<%>
 
 The default implementation forwards the request to the
 @method[editor-admin% scroll-to] method of the current administrator,
-if any (see @method[editor<%> get-admin]). If the editor has no
-administrator, @scheme[#f] is returned.
+if any (see @method[editor<%> get-admin]). If a text editor has
+padding (see @method[text% set-padding]), then the padding is added to
+the given @techlink{location} before forwarding to the
+administrator. If the editor has no administrator, @scheme[#f] is
+returned.
 
 }
 
@@ -2249,16 +2259,16 @@ Sets the maximum number of undoables that will be remembered by the
 @defmethod[(set-max-width [width (or/c (and/c real? (not/c negative?)) 'none)])
            void?]{
 
-Sets the maximum display width for the contents of the editor;
- zero or @scheme['none] indicates that there is no maximum.  In a
- text editor, having no maximum disables automatic line breaking,
- and the minimum (positive) maximum width depends on the width of the
- autowrap bitmap.
+Sets the maximum display width for the contents of the editor; zero or
+ @scheme['none] indicates that there is no maximum.  In a text editor,
+ having no maximum disables automatic line breaking, and the minimum
+ (positive) maximum width depends on the width of the autowrap
+ bitmap. The maximum width of a text editor includes its left and
+ right padding (see @method[text% set-padding]) and its autowrap
+ bitmap (see @method[text% set-autowrap-bitmap]).
 
 Setting the width is disallowed when the editor is internally locked
  for reflowing (see also @|lockdiscuss|).
-
-See also @method[text% set-autowrap-bitmap].
 
 }
 

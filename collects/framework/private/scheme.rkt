@@ -580,6 +580,12 @@
                   (let* ([proc-name (get-proc)])
                     (or (eq? proc-name 'define)
                         (eq? proc-name 'lambda))))]
+               [curley-brace-sexp?
+                (λ ()
+                  (define up-p (find-up-sexp pos))
+                  (and up-p
+                       (equal? #\{ (get-character up-p))))]
+               
                [indent-first-arg (λ (start) (car (find-offset start)))])
             (when (and is-tabbable?
                        (not (char=? (get-character (sub1 end))
@@ -598,15 +604,33 @@
               [(not contains)
                ;; Something went wrong matching. Should we get here?
                (do-indent 0)]
+              #;  ;; disable this to accomodate PLAI programs; return to this when a #lang capability is set up.
+              [(curley-brace-sexp?)
+               ;; when we are directly inside an sexp that uses {}s,
+               ;; we indent in a more C-like fashion (to help Scribble)
+               (define first-curley (find-up-sexp pos))
+               (define containing-curleys
+                 (let loop ([pos first-curley])
+                   (let ([next (find-up-sexp pos)])
+                     (if (and next
+                              (equal? (get-character next) #\{))
+                       (+ (loop next) 1)
+                       1))))
+               (define close-first-curley (get-forward-sexp first-curley))
+               (define para (position-paragraph pos))
+               (when (and close-first-curley
+                          (<= (paragraph-start-position para) close-first-curley (paragraph-end-position para)))
+                 (set! containing-curleys (max 0 (- containing-curleys 1))))
+               (do-indent (* containing-curleys 2))]
               [(not last) 
                ;; We can't find a match backward from pos,
                ;;  but we seem to be inside an S-exp, so 
                ;;  go "up" an S-exp, and move forward past
                ;;  the associated paren
                (let ([enclosing (find-up-sexp pos)])
-                 (do-indent (if enclosing
-                                (+ (visual-offset enclosing) 1)
-                                0)))]
+                 (if enclosing
+                   (do-indent (+ (visual-offset enclosing) 1))
+                   (do-indent 0)))]
               [(= contains last)
                ;; There's only one S-expr in the S-expr
                ;;  containing "pos"
@@ -1171,6 +1195,26 @@
         [else 
          (insert-paren this)]))
     
+    (define/override (get-start-of-line pos)
+      (define para (position-paragraph pos))
+      (define para-start (paragraph-start-position para))
+      (define para-end (paragraph-end-position para))
+      (define first-non-whitespace 
+        (let loop ([i para-start])
+          (cond
+            [(= i para-end) #f]
+            [(char-whitespace? (get-character i))
+             (loop (+ i 1))]
+            [else i])))
+      (define new-pos 
+        (cond 
+          [(not first-non-whitespace) para-start]
+          [(= pos para-start) first-non-whitespace]
+          [(<= pos first-non-whitespace) para-start]
+          [else first-non-whitespace]))
+      new-pos)
+
+    
     (super-new)))
 
 (define -text-mode<%>
@@ -1220,7 +1264,7 @@
     
     (define/override (put-file text sup directory default-name)
       (parameterize ([finder:default-extension "rkt"]
-                     [finder:default-filters '(["Racket Sources" "*.rkt;*.ss;*.scm"]
+                     [finder:default-filters '(["Racket Sources" "*.rkt;*.scrbl;*.ss;*.scm"]
                                                ["Any" "*.*"])])
         ;; don't call the surrogate's super, since it sets the default extension
         (sup directory default-name)))
@@ -1409,7 +1453,7 @@
       
       (map-meta "c:space" "select-forward-sexp")
       (map-meta "c:t" "transpose-sexp")
-      
+
       ;(map-meta "c:m" "mark-matching-parenthesis")
       ; this keybinding doesn't interact with the paren colorer
       )

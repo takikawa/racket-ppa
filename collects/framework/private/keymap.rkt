@@ -7,13 +7,15 @@
          mzlib/match
          "../preferences.ss"
          mrlib/tex-table
+         (only-in srfi/13 string-prefix? string-prefix-length)
          "sig.ss")
 
   (import mred^
           [prefix finder: framework:finder^]
           [prefix handler: framework:handler^]
           [prefix frame: framework:frame^]
-          [prefix editor: framework:editor^])
+          [prefix editor: framework:editor^]
+          [prefix text: framework:text^])
   (export (rename framework:keymap^
                   [-get-file get-file]))
   (init-depend mred^)
@@ -984,20 +986,56 @@
            
            [TeX-compress
             (let* ([biggest (apply max (map (λ (x) (string-length (car x))) tex-shortcut-table))])
+              (define (meet s t)
+                (substring s 0 (string-prefix-length s t 0)))
               (λ (text event)
                 (let ([pos (send text get-start-position)])
                   (when (= pos (send text get-end-position))
                     (let ([slash (send text find-string "\\" 'backward pos (max 0 (- pos biggest 1)))])
                       (when slash
-                        (let ([to-replace (assoc (send text get-text slash pos) tex-shortcut-table)])
-                          (when to-replace
-                            (send text begin-edit-sequence)
-                            (send text delete (- slash 1) pos)
-                            (send text insert (cadr to-replace))
-                            (send text end-edit-sequence)))))))))]
+                        (define entered (send text get-text slash pos))
+                        (define completions
+                          (filter (λ (shortcut) (string-prefix? entered (first shortcut)))
+                                  tex-shortcut-table))
+                        (unless (empty? completions)
+                          (define-values (replacement partial?)
+                            (let ([complete-match 
+                                   (findf (λ (shortcut) (equal? entered (first shortcut)))
+                                          completions)])
+                              (if complete-match
+                                  (values (second complete-match) #f)
+                                  (if (= 1 (length completions))
+                                      (values (second (first completions)) #f)
+                                      (let ([tex-names (map first completions)])
+                                        (values (foldl meet (first tex-names) (rest tex-names)) #t))))))
+                          (send text begin-edit-sequence)
+                          (send text delete (if partial? slash (- slash 1)) pos)
+                          (send text insert replacement)
+                          (send text end-edit-sequence))))))))]
            
            [greek-letters "αβγδεζηθι κλμνξοπρςστυφχψω"]
-           [Greek-letters "ΑΒΓΔΕΖΗΘΙ ΚΛΜΝΞΟΠΡ ΣΤΥΦΧΨΩ"]) ;; don't have a capital ς, just comes out as \u03A2 (or junk) 
+           [Greek-letters "ΑΒΓΔΕΖΗΘΙ ΚΛΜΝΞΟΠΡ ΣΤΥΦΧΨΩ"]
+           ;; don't have a capital ς, just comes out as \u03A2 (or junk) 
+     
+           
+           [find-beginning-of-line
+            (λ (txt)
+              (cond
+                [(is-a? txt text:basic<%>)
+                 (send txt get-start-of-line (send txt get-start-position))]
+                [(is-a? txt text%)
+                 (send txt line-start-position (send txt position-line (send txt get-start-position)))]
+                [else #f]))]
+           [beginning-of-line
+             (λ (txt event)
+               (define pos (find-beginning-of-line txt))
+               (when pos
+                 (send txt set-position pos pos)))]
+           [select-to-beginning-of-line
+            (λ (txt event)
+              (define pos (find-beginning-of-line txt))
+              (when pos
+                (send txt set-position pos (send txt get-end-position))))])
       
       (λ (kmap)
         (let* ([map (λ (key func) 
@@ -1087,6 +1125,9 @@
           (add "mouse-popup-menu" mouse-popup-menu)
           
           (add "make-read-only" make-read-only)
+        
+          (add "beginning-of-line" beginning-of-line)
+          (add "select-to-beginning-of-line" select-to-beginning-of-line)
           
           ; Map keys to functions
           
@@ -1214,7 +1255,8 @@
           (map "del" "delete-key")
           
           (map-meta "d" "kill-word")
-          (map-meta "del" "backward-kill-word")
+          (map-meta "del" "kill-word")
+          (map-meta "backspace" "backward-kill-word")
           (map-meta "c" "capitalize-word")
           (map-meta "u" "upcase-word")
           (map-meta "l" "downcase-word")
@@ -1425,13 +1467,13 @@
   (define global (make-object aug-keymap%))
   (define global-main (make-object aug-keymap%))
   (send global chain-to-keymap global-main #f)
-  (setup-global global-main)
   (generic-setup global-main)
+  (setup-global global-main)
   (define (get-global) global)
   
   (define file (make-object aug-keymap%))
-  (setup-file file)
   (generic-setup file)
+  (setup-file file)
   (define (-get-file) file)
   
   (define search (make-object aug-keymap%))

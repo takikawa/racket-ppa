@@ -13,6 +13,7 @@
          web-server/configuration/responders
          web-server/private/mime-types
          web-server/servlet/setup
+         web-server/servlet/servlet-structs
          web-server/servlet-dispatch
          unstable/contract
          (prefix-in lift: web-server/dispatchers/dispatch-lift)
@@ -27,18 +28,19 @@
   (lift:make
    (lambda (request)
      (semaphore-post sema)
-     `(html (head (title "Server Stopped")
-              (link ([rel "stylesheet"] [href "/error.css"])))
-            (body (div ([class "section"])
-                    (div ([class "title"]) "Server Stopped")
-                    (p "Return to DrRacket.")))))))
+     (response/xexpr
+      `(html (head (title "Server Stopped")
+                   (link ([rel "stylesheet"] [href "/error.css"])))
+             (body (div ([class "section"])
+                        (div ([class "title"]) "Server Stopped")
+                        (p "Return to DrRacket."))))))))
 
 (define-runtime-path default-web-root
   (list 'lib
         "web-server/default-web-root"))
 
 (provide/contract
- [serve/servlet (((request? . -> . response/c))
+ [serve/servlet (((request? . -> . can-be-response?))
                  (#:connection-close? boolean?
                   #:command-line? boolean?
                   #:launch-browser? boolean?
@@ -57,7 +59,7 @@
                   #:extra-files-paths (listof path-string?)
                   #:servlets-root path-string?
                   #:servlet-current-directory path-string?
-                  #:file-not-found-responder (request? . -> . response/c)
+                  #:file-not-found-responder (request? . -> . can-be-response?)
                   #:mime-types-path path-string?
                   #:servlet-path string?
                   #:servlet-regexp regexp?
@@ -96,8 +98,9 @@
          [manager
           (make-threshold-LRU-manager
            (lambda (request)
-             `(html (head (title "Page Has Expired."))
-                    (body (p "Sorry, this page has expired. Please go back."))))
+             (response/xexpr
+              `(html (head (title "Page Has Expired."))
+                     (body (p "Sorry, this page has expired. Please go back.")))))
            (* 128 1024 1024))]
 
          #:servlet-path
@@ -172,7 +175,7 @@
       #:url->path (fsmap:make-url->path (build-path server-root-path "htdocs"))
       #:path->mime-type (make-path->mime-type mime-types-path)
       #:indices (list "index.html" "index.htm"))
-     (lift:make file-not-found-responder)))
+     (lift:make (compose any->response file-not-found-responder))))
   (serve/launch/wait
    dispatcher  
    #:connection-close? connection-close?

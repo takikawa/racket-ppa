@@ -3,7 +3,7 @@
 START_XFORM_SKIP;
 #endif
 
-/* Optimization someimtes causes a problem: d is represented in an
+/* Optimization sometimes causes a problem: d is represented in an
    extended format instead of a `double'. We don't want to turn off
    floatng-point optimizations in the rest of the program, so we use a
    little function to defeat the optimization: */
@@ -13,9 +13,9 @@ int IS_FLOAT_INF(FP_TYPE d)
 }
 
 /* Must not trigger GC! (Required by xform in number.c) */
-FP_TYPE SCHEME_BIGNUM_TO_FLOAT_INFO(const Scheme_Object *n, int skip, int *_skipped)
+FP_TYPE SCHEME_BIGNUM_TO_FLOAT_INFO(const Scheme_Object *n, intptr_t skip, intptr_t *_skipped)
 {
-  int nl, skipped;
+  intptr_t nl, skipped;
   bigdig *na;
   FP_TYPE d;
 

@@ -1090,6 +1090,8 @@
          ((equal? what #"trout") (bytes-append color #" fish"))
          (else (bytes-append color #" " what)))))
 
+(test "foofoo" regexp-replace* #px"(.)?" "a" (lambda args "foo"))
+
 ;; Test weird port offsets:
 (define (test-weird-offset regexp-match regexp-match-positions)
   (test #f regexp-match "e" (open-input-string ""))
@@ -1347,6 +1349,11 @@
 
 (test-values (list (void)) (lambda () (for-each (lambda (x) (values 1 2)) '(1 2))))
 (err/rt-test (map (lambda (x) (values 1 2)) '(1 2)) arity?)
+
+;; Make sure `values' isn't JIT-inlined in a single-value position:
+(err/rt-test ((if (zero? (random 1)) (lambda () (+ (values) 3)) #f)) arity?)
+(err/rt-test ((if (zero? (random 1)) (lambda () (+ (values 1 2) 3)) #f)) arity?)
+(err/rt-test ((if (zero? (random 1)) (lambda () (+ (values 1 2 4) 3)) #f)) arity?)
 
 (test #t andmap add1 null)
 (test #t andmap < null null)
@@ -1835,6 +1842,19 @@
         (if (pair? x)
             ((car x) (lambda () x))
             (pair? (x)))))
+
+;; Check shared escape continuation of nested call/cc:
+(let ([ch (make-channel)])
+ (thread
+  (lambda ()
+    (channel-put 
+     ch
+     (call/cc
+      (lambda (escape)
+        (call/cc
+         (lambda (escape1)
+           (escape1 3))))))))
+ (sync ch))
 
 (arity-test call/cc 1 2)
 (arity-test call/ec 1 1)

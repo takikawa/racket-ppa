@@ -212,7 +212,7 @@
     right kind.  If @scheme[flash?] is true, the matching open parenthesis will be
     flashed.
   }
-  @defmethod*[(((classify-position (position natural-number?)) symbol?))]{
+  @defmethod*[(((classify-position (position exact-nonnegative-integer?)) symbol?))]{
 
 
     Return a symbol for the lexer-determined token type for the token that
@@ -220,6 +220,29 @@
 
     Must only be called while the tokenizer is started.
   }
+  
+  @defmethod[(get-token-range [position exact-nonnegative-integer?]) 
+             (values (or/c #f exact-nonnegative-integer?)
+                     (or/c #f exact-nonnegative-integer?))]{
+    
+    Returns the range of the token surrounding @racket[position], if there is a token there.
+    
+    This method must be called only when the tokenizer is started.
+    
+  }
+  
+  @defmethod[#:mode augment (on-lexer-valid [valid? boolean?]) any]{
+    This method is an observer for when the lexer is working.
+    It is called when the lexer's state changes from valid to invalid (and back). 
+    The @racket[valid?] argument indicates if the lexer has finished running over the editor (or not).
+    
+    The default method just returns @racket[(void)].
+  }
+  
+  @defmethod[#:mode public-final (is-lexer-valid?) boolean?]{
+    Indicates if the lexer is currently valid for this editor.
+  }
+  
 }
 @defmixin[color:text-mixin (text:basic<%>) (color:text<%>)]{
   Adds the functionality needed for on-the-fly coloring and parenthesis

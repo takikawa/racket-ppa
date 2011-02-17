@@ -949,7 +949,6 @@
            (let ([v (read-compact cp)])
              (make-closure 
               v
-              ; XXX Why call gensym here?
               (gensym
                (let ([s (lam-name v)])
                  (cond
@@ -1046,6 +1045,9 @@
     (for ([i (in-range 1 symtabsize)])
       (read-sym cp i))
     
+    #;(printf "Parsed table:\n")
+    #;(for ([(i v) (in-dict (cport-symtab cp))])
+      (printf "~a = ~a\n" i (placeholder-get v)) )
     (set-cport-pos! cp shared-size)
     (make-reader-graph
      (read-marshalled 'compilation-top-type cp))))

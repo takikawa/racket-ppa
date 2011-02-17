@@ -3,66 +3,16 @@
            racket/port
 	   syntax/moddep
            (prefix-in wx: "kernel.ss")
-	   (prefix-in wx: "wxme/snip.ss")
-	   (prefix-in wx: "wxme/cycle.ss")
+	   (prefix-in wx: racket/snip)
 	   "check.ss"
 	   "editor.ss")
 		
-  (provide readable-snip<%>
-	   open-input-text-editor 
+  (provide open-input-text-editor 
 	   open-input-graphical-file
 	   text-editor-load-handler
 	   open-output-text-editor )
 
-  ;; snip-class% and editor-data-class% loaders
-
-  (define (ok-string-element? m)
-    (and (string? m)
-         (regexp-match? #rx"^[-a-zA-Z0-9_. ]+$" m)
-         (not (string=? m ".."))
-         (not (string=? m "."))))
-  
-  (define (ok-lib-path? m)
-    (and (pair? m)
-         (eq? 'lib (car m))
-         (pair? (cdr m))
-         (list? m)
-         (andmap ok-string-element? (cdr m))))
-
-  (let ([load-one
-	 (lambda (str id %)
-	   (let ([m (with-handlers ([exn:fail:read? (lambda (x) #f)])
-		      (and (regexp-match #rx"^[(].*[)]$" str)
-                           (let* ([p (open-input-string str)]
-                                  [m (read p)])
-                             (and (eof-object? (read p))
-                                  m))))])
-	     (if (or (ok-lib-path? m)
-                     (and (list? m)
-                          (= (length m) 2)
-                          (ok-lib-path? (car m))
-                          (ok-lib-path? (cadr m))))
-                 (let ([m (if (ok-lib-path? m)
-                              m
-                              (car m))])
-                   (let ([result (dynamic-require m id)])
-                     (if (is-a? result %)
-                         result
-                         (error 'load-class "not a ~a% instance" id))))
-		 #f)))])
-    ;; install the getters:
-    (wx:set-get-snip-class!
-     (lambda (name)
-       (load-one name 'snip-class wx:snip-class%)))
-    (wx:set-get-editor-data-class!
-     (lambda (name)
-       (load-one name 'editor-data-class wx:editor-data-class%))))
-
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-  (define readable-snip<%>
-    (interface ()
-      read-special))
 
   (define empty-string (make-bytes 0))
   
@@ -106,7 +56,9 @@
 		(open-input-string (send text get-text start end) port-name)
 		;; It's all text, so the reading process is simple:
                 (let ([start start])
-                  (when lock-while-reading? (send text lock #t))
+                  (when lock-while-reading?
+                    (send text begin-edit-sequence)
+                    (send text lock #t))
                   (let-values ([(pipe-r pipe-w) (make-pipe)])
 		    (make-input-port/read-to-peek
                      port-name
@@ -119,7 +71,8 @@
                                      (close-output-port pipe-w)
 				     (when lock-while-reading?
                                        (set! lock-while-reading? #f)
-                                       (send text lock #f))
+                                       (send text lock #f)
+                                       (send text end-edit-sequence))
                                      eof)
 				   (begin
 				     (write-string (send text get-text start (+ start n)) pipe-w)
@@ -128,7 +81,8 @@
                                        (when lock-while-reading?
                                          (when (eof-object? ans)
                                            (set! lock-while-reading? #f)
-                                           (send text lock #f)))
+                                           (send text lock #f)
+                                           (send text edit-edit-sequence)))
                                        ans))))
 			     v)))
                      (lambda (s skip general-peek)
@@ -184,7 +138,7 @@
 					 (next-snip empty-string)
 					 (lambda (file line col ppos)
 					   (if (is-a? the-snip wx:snip%)
-					       (if (is-a? the-snip readable-snip<%>)
+					       (if (is-a? the-snip wx:readable-snip<%>)
 						   (send the-snip read-special file line col ppos)
 						   (send the-snip copy))
 					       the-snip)))]
@@ -198,7 +152,8 @@
                                   (when (eof-object? res)
                                     (when lock-while-reading? 
                                       (set! lock-while-reading? #f)
-                                      (send text lock #f)))
+                                      (send text lock #f)
+                                      (send text end-edit-sequence)))
                                   res))
                               (lambda (s skip general-peek)
 				(let ([v (peek-bytes-avail!* s skip #f pipe-r)])
@@ -206,7 +161,9 @@
 				      (general-peek s skip)
 				      v)))
 			      close)])
-		  (when lock-while-reading? (send text lock #t))
+		  (when lock-while-reading? 
+                    (send text begin-edit-sequence)
+                    (send text lock #t))
                   (if (is-a? snip wx:string-snip%)
 		      ;; Special handling for initial snip string in
 		      ;; case it starts too early:

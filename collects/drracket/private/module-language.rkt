@@ -14,6 +14,7 @@
          framework
          string-constants
          planet/config
+         setup/dirs
          "drsig.rkt"
          "rep.rkt")
 
@@ -79,6 +80,28 @@
         (unless sandbox
           (when language-info
             (set! sandbox (make-evaluator 'racket/base)))))
+      
+      (define/override (first-opened settings)
+        (define ns (with-handlers ((exn:fail? (lambda (x) #f)))
+                     ;; get-ns can fail in all kinds of strange ways;
+                     ;; just give up if it does, since an error here
+                     ;; means drracket won't start up.
+                     (get-ns (get-auto-text settings))))
+        (when ns (current-namespace ns)))
+      
+      (define/private (get-ns str)
+        (define ev (make-evaluator 'racket/base))
+        (ev `(parameterize ([read-accept-reader #t])
+               (define stx (read-syntax "here" (open-input-string ,str)))
+               (define modname
+                 (syntax-case stx ()
+                   [(module name . stuff)
+                    `',(syntax->datum #'name)]
+                   [_ #f]))
+               (and modname
+                    (eval stx)
+                    (namespace-require modname)
+                    (module->namespace modname)))))
       
       (inherit get-language-name)
       (define/public (get-users-language-name defs-text)
@@ -160,7 +183,8 @@
                 (module-language-settings-collection-paths settings)
                 (module-language-settings-command-line-args settings)
                 (module-language-settings-auto-text settings)
-                (module-language-settings-compilation-on? settings))))
+                (module-language-settings-compilation-on? settings)
+                (module-language-settings-full-trace? settings))))
       
       (define/override (unmarshall-settings marshalled)
         (and (list? marshalled)
@@ -247,14 +271,11 @@
                    (cons (build-path "compiled" "drracket" "errortrace")
                          (use-compiled-file-paths)))]))
              
-             (current-load/use-compiled (make-compilation-manager-load/use-compiled-handler))
-             (let* ([cd (find-system-path 'collects-dir)]
-                    [no-dirs (list (CACHE-DIR) 
-                                   (if (relative-path? cd)
-                                       (find-executable-path
-                                        (find-system-path 'exec-file)
-                                        cd)
-                                       cd))])
+             (current-load/use-compiled (make-compilation-manager-load/use-compiled-handler #t))
+             (let* ([cd (find-collects-dir)]
+                    [no-dirs (if cd 
+                                 (list (CACHE-DIR) cd)
+                                 (list (CACHE-DIR)))])
                (manager-skip-file-handler
                 (λ (p) (file-stamp-in-paths p no-dirs))))))))
       
@@ -280,7 +301,9 @@
       (define repl-init-thunk (make-thread-cell #f))
       
       (define/override (front-end/complete-program port settings)
-        (define (super-thunk) ((get-reader) (object-name port) port))
+        (define (super-thunk) 
+          (define reader (get-reader))
+          (reader (object-name port) port))
         (define path
           (cond [(get-filename port) => (compose simplify-path cleanse-path)]
                 [else #f]))
@@ -292,7 +315,7 @@
           (let ([expr
                  ;; just reading the definitions might be a syntax error,
                  ;; possibly due to bad language (eg, no foo/lang/reader)
-                 (with-handlers ([exn? (λ (e)
+                 (with-handlers ([exn:fail? (λ (e)
                     ;; [Eli] FIXME: use `read-language' on `port' after calling
                     ;; `file-position' to reset it to the beginning (need to
                     ;; make sure that it's always a seekable port), then see
@@ -300,8 +323,8 @@
                     ;; the port (a second reset), construct a string holding
                     ;; the #lang, and read from it an empty module, and extract
                     ;; the base module from it (ask Matthew about this).
-                                         (raise-hopeless-exception
-                                          e "invalid module text"))])
+                                              (raise-hopeless-exception
+                                               e "invalid module text"))])
                    (super-thunk))])
             (when (eof-object? expr) (raise-hopeless-syntax-error))
             (let ([more (super-thunk)])
@@ -436,7 +459,24 @@
                       gui?
                       call-create-embedding-executable)]
                     [(stand-alone)
-                     (call-create-embedding-executable executable-filename)])))))))
+                     (define c (make-custodian))
+                     (define d (new dialog% [parent parent] [label (string-constant create-executable-title)]))
+                     (new message% [parent d] [label (string-constant creating-executable-progress-status)])
+                     (new button%
+                          [parent d]
+                          [label (string-constant abort)]
+                          [callback (lambda (_1 _2)
+                                      (custodian-shutdown-all c))])
+                     (define thd
+                       (parameterize ([current-custodian c])
+                         (thread
+                          (λ ()
+                            (call-create-embedding-executable executable-filename)))))
+                     (thread
+                      (λ ()
+                        (thread-wait thd)
+                        (queue-callback (λ () (send d show #f)))))
+                     (send d show #t)])))))))
       
       (super-new
        [module #f]
@@ -473,7 +513,7 @@
     (custodian-shutdown-all (send rep get-user-custodian)))
   
   (define (raise-hopeless-syntax-error . error-args)
-    (with-handlers ([exn? raise-hopeless-exception])
+    (with-handlers ([exn:fail? raise-hopeless-exception])
       (apply raise-syntax-error '|Module Language|
              (if (null? error-args)
                (list (string-append

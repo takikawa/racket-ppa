@@ -1,24 +1,24 @@
 /*
- * @(#)regexp.c	1.3 of 18 April 87
+ * @(#)regexp.c 1.3 of 18 April 87
  * Revised for PLT Racket, 1995-2001
- * Copyright (c) 2004-2010 PLT Scheme Inc.
+ * Copyright (c) 2004-2011 PLT Scheme Inc.
  *
- *	Copyright (c) 1986 by University of Toronto.
- *	Written by Henry Spencer.  Not derived from licensed software.
+ * Copyright (c) 1986 by University of Toronto.
+ * Written by Henry Spencer.  Not derived from licensed software.
  *
- *	Permission is granted to anyone to use this software for any
- *	purpose on any computer system, and to redistribute it freely,
- *	subject to the following restrictions:
+ * Permission is granted to anyone to use this software for any
+ * purpose on any computer system, and to redistribute it freely,
+ * subject to the following restrictions:
  *
- *	1. The author is not responsible for the consequences of use of
- *		this software, no matter how awful, even if they arise
- *		from defects in it.
+ * 1. The author is not responsible for the consequences of use of
+ *    this software, no matter how awful, even if they arise
+ *    from defects in it.
  *
- *	2. The origin of this software must not be misrepresented, either
- *		by explicit claim or by omission.
+ * 2. The origin of this software must not be misrepresented, either
+ *    by explicit claim or by omission.
  *
- *	3. Altered versions must be plainly marked as such, and must not
- *		be misrepresented as being the original software.
+ * 3. Altered versions must be plainly marked as such, and must not
+ *    be misrepresented as being the original software.
  *
  * Beware that some of this code is subtly aware of the way operator
  * precedence is structured in regular expressions.  Serious changes in
@@ -83,10 +83,10 @@ THREAD_LOCAL_DECL(static int regncounter);   /* {} count */
 THREAD_LOCAL_DECL(static rxpos regcode) ;    /* Code-emit pointer, if less than regcodesize */
 THREAD_LOCAL_DECL(static rxpos regcodesize);
 THREAD_LOCAL_DECL(static rxpos regcodemax);
-THREAD_LOCAL_DECL(static long regmaxlookback);
+THREAD_LOCAL_DECL(static intptr_t regmaxlookback);
 
 /* caches to avoid gc */
-THREAD_LOCAL_DECL(static long rx_buffer_size);
+THREAD_LOCAL_DECL(static intptr_t rx_buffer_size);
 THREAD_LOCAL_DECL(static rxpos *startp_buffer_cache);
 THREAD_LOCAL_DECL(static rxpos *endp_buffer_cache);
 THREAD_LOCAL_DECL(static rxpos *maybep_buffer_cache);
@@ -2523,7 +2523,7 @@ regexec(const char *who,
 	rxpos *startp, rxpos *maybep, rxpos *endp, rxpos *match_stack,
 	Scheme_Object *port, Scheme_Object *unless_evt, int nonblock,
 	/* Used only when port is non-NULL: */
-	char **stringp, int peek, int get_offsets, long save_prior,
+	char **stringp, int peek, int get_offsets, intptr_t save_prior,
 	Scheme_Object *discard_oport, 
 	Scheme_Object *portstart, Scheme_Object *portend, Scheme_Object **_dropped,
         char *prefix, rxpos prefix_len, rxpos prefix_offset)
@@ -2590,7 +2590,7 @@ regexec(const char *who,
       /* Make sure that's there's not an EOF before peekskip: */
       if (!SAME_OBJ(peekskip, scheme_make_integer(0))) {
         char tmp[1];
-        long got;
+        intptr_t got;
         got = scheme_get_byte_string_unless("regexp-match", port, 
                                             tmp, 0, 1, 1,
                                             1, scheme_bin_minus(peekskip, scheme_make_integer(1)),
@@ -2602,7 +2602,7 @@ regexec(const char *who,
       }
     } else {
       /* In non-peek port mode, skip over portstart chars: */
-      long amt, got;
+      intptr_t amt, got;
 
       if (SCHEME_INTP(portstart)) {
 	amt = SCHEME_INT_VAL(portstart);
@@ -2655,7 +2655,7 @@ regexec(const char *who,
 	if (!peek) {
 	  /* Need to consume matched chars: */
 	  char *drain;
-	  long got;
+	  intptr_t got;
 
 	  if (discard_oport && *startp)
 	    scheme_put_byte_string(who, discard_oport, *stringp, 0, *startp, 0);
@@ -2675,7 +2675,7 @@ regexec(const char *who,
 	if (!peek) {
 	  /* Need to consume all chars, up to portend */
 	  char *drain;
-	  long got;
+	  intptr_t got;
 	  
 	  if (portend && SCHEME_INTP(portend) && SCHEME_INT_VAL(portend) < 4096) {
 	    got = SCHEME_INT_VAL(portend);
@@ -2888,7 +2888,7 @@ regtry(regexp *prog, char *string, int stringpos, int stringlen,
 static void read_more_from_regport(Regwork *rw, rxpos need_total)
      /* Called when we're about to look past our read-ahead */
 {
-  long got;
+  intptr_t got;
   Scheme_Object *peekskip;
 
   /* limit reading by rw->input_maxend: */
@@ -2902,7 +2902,7 @@ static void read_more_from_regport(Regwork *rw, rxpos need_total)
 
   if (rw->instr_size < need_total) {
     char *naya;
-    long size = rw->instr_size;
+    intptr_t size = rw->instr_size;
     
     size = size * 2;
     if (size < need_total)
@@ -4086,15 +4086,15 @@ regstrcspn(char *s1, char *e1, char *s2)
    - regsub - perform substitutions after a regexp match
    */
 static 
-char *regsub(regexp *prog, char *src, int sourcelen, long *lenout, char *insrc, 
+char *regsub(regexp *prog, char *src, int sourcelen, intptr_t *lenout, char *insrc, 
              rxpos *startp, rxpos *endp, rxpos minpos,
              char *prefix, rxpos prefix_offset)
 {
   char *dest;
   char c;
-  long no;
-  long len;
-  long destalloc, destlen, srcpos;
+  intptr_t no;
+  intptr_t len;
+  intptr_t destalloc, destlen, srcpos;
 	
   destalloc = 2 * sourcelen;
   destlen = 0;
@@ -4656,7 +4656,7 @@ static int translate(unsigned char *s, int len, char **result, int pcre)
 	range_len = scheme_list_length(ranges);
 	range_array = (unsigned int *)scheme_malloc_atomic(2 * range_len * sizeof(unsigned int));
 	for (rp = 0; SCHEME_PAIRP(ranges); ranges = SCHEME_CDR(ranges), rp += 2) {
-	  unsigned long hi, lo;
+	  uintptr_t hi, lo;
 	  scheme_get_unsigned_int_val(SCHEME_CAAR(ranges), &lo);
 	  scheme_get_unsigned_int_val(SCHEME_CDR(SCHEME_CAR(ranges)), &hi);
 	  range_array[rp] = (unsigned int)lo;
@@ -5406,7 +5406,7 @@ static Scheme_Object *gen_compare(char *name, int pos,
 	    l = scheme_make_pair(scheme_make_pair(startpd, endpd),
 				 l);
 	  } else {
-	    long len;
+	    intptr_t len;
 	    len = endp[i] - startp[i];
             if (startp[i] >= offset) {
               if (was_non_byte) {
@@ -5528,9 +5528,9 @@ static char *build_call_name(const char *n)
   return m;
 }
 
-static int initial_char_len(unsigned char *source, long start, long end)
+static int initial_char_len(unsigned char *source, intptr_t start, intptr_t end)
 {
-  long i;
+  intptr_t i;
 
   for (i = start + 1; i <= end; i++) {
     if (scheme_utf8_decode_count(source, start, i, NULL, 1, 1)) {
@@ -5655,7 +5655,7 @@ static Scheme_Object *gen_replace(const char *name, int argc, Scheme_Object *arg
 
     if (m) {
       char *insert;
-      long len, end, startpd, endpd;
+      intptr_t len, end, startpd, endpd;
 
       if (SCHEME_PROCP(argv[2])) {
         int i;
@@ -5671,7 +5671,7 @@ static Scheme_Object *gen_replace(const char *name, int argc, Scheme_Object *arg
           if (startp[i] < minpos) {
             args[i] = scheme_false;
           } else {
-            long len;
+            intptr_t len;
             len = endp[i] - startp[i];
             if (was_non_byte) {
 	      m = scheme_make_sized_offset_utf8_string(source, startp[i], len);
@@ -5733,7 +5733,7 @@ static Scheme_Object *gen_replace(const char *name, int argc, Scheme_Object *arg
 	  return scheme_make_sized_byte_string(insert, len, 0);
       } else if (!all) {
 	char *result;
-	long total;
+	intptr_t total;
 	
 	total = len + (startpd - srcoffset) + (end - endpd);
 	
@@ -5748,7 +5748,7 @@ static Scheme_Object *gen_replace(const char *name, int argc, Scheme_Object *arg
 	  return scheme_make_sized_byte_string(result, total, 0);
       } else {
 	char *naya;
-	long total;
+	intptr_t total;
         int more;
 
         if (startpd == endpd)  {
@@ -5782,7 +5782,7 @@ static Scheme_Object *gen_replace(const char *name, int argc, Scheme_Object *arg
 	return orig;
     } else {
       char *result;
-      long total, slen;
+      intptr_t total, slen;
       
       slen = sourcelen - srcoffset;
       total = prefix_len + slen;

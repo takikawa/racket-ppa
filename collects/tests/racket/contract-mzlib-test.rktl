@@ -78,9 +78,12 @@ of the contract library does not change over time.
   (define (test/spec-failed name expression blame)
     (let ()
       (define (has-proper-blame? msg)
-        (regexp-match?
-         (string-append "(^| )" (regexp-quote blame) " broke")
-         msg))
+        (define reg
+          (case blame
+            [(pos) #rx"^self-contract violation"]
+            [(neg) #rx"blaming neg"]
+            [else (error 'test/spec-failed "unknown blame name ~s" blame)]))
+        (regexp-match? reg msg))
       (printf "testing: ~s\n" name)
       (contract-eval
        `(,thunk-error-test 
@@ -4161,7 +4164,7 @@ so that propagation occurs.
   (test-name '(>/c 5) (>/c 5))
   (test-name '(between/c 5 6) (between/c 5 6))
   (test-name '(integer-in 0 10) (integer-in 0 10))
-  (test-name '(real-in 1 10) (real-in 1 10))
+  (test-name '(between/c 1 10) (real-in 1 10))
   (test-name '(string-len/c 3) (string/len 3))
   (test-name 'natural-number/c natural-number/c)
   (test-name #f false/c)

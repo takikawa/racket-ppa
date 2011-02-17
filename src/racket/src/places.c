@@ -119,7 +119,7 @@ typedef struct Place_Start_Data {
 
 static Scheme_Object *def_place_exit_handler_proc(int argc, Scheme_Object *argv[])
 {
-  long status;
+  intptr_t status;
 
   if (SCHEME_INTP(argv[0])) {
     status = SCHEME_INT_VAL(argv[0]);
@@ -234,19 +234,22 @@ typedef struct Child_Status {
   char is_group;
   void *signal_fd;
   struct Child_Status *next;
-  struct Child_Status *next_group; /* see child_group_statuses */
+  struct Child_Status *next_unused; /* see unused_pid_statuses */
 } Child_Status;
 
 SHARED_OK static Child_Status *child_statuses = NULL;
 SHARED_OK static mzrt_mutex* child_status_lock = NULL;
 SHARED_OK static mzrt_mutex* child_wait_lock = NULL; /* ordered before status lock */
 
-/* When a process for a process group becomes unreachable 
-   before a waitpid() on the process, then we need to keep
-   waiting on it to let the OS gc the process. Otherwise,
-   we wait only on processes in the same group as Racket. 
+/* When the Racket process value for a process in a different group becomes 
+   GC-unreachable before a waitpid() on the process, then we 
+   need to keep waiting on the pid to let the OS gc the process.
+   This list is especially needed for processes that we create in
+   their own group, but it's also needed for processes that put
+   themselves in their own group (which we conservatively assume
+   can be any child process).
    This list is protect by the wait lock. */
-SHARED_OK static Child_Status *child_group_statuses = NULL;
+SHARED_OK static Child_Status *unused_pid_statuses = NULL;
 
 static void add_group_signal_fd(void *signal_fd);
 static void remove_group_signal_fd(void *signal_fd);
@@ -270,7 +273,7 @@ static void add_child_status(int pid, int status) {
     st->signal_fd = NULL;
     st->next = child_statuses;
     child_statuses = st;
-    st->next_group = NULL;
+    st->next_unused = NULL;
     st->unneeded = 0;
     st->is_group = 0;
   }
@@ -317,9 +320,9 @@ static int raw_get_child_status(int pid, int *status, int done_only, int do_remo
 int scheme_get_child_status(int pid, int is_group, int *status) {
   int found = 0;
 
-  if (is_group) {
-    /* need to specifically try the pid, since we don't
-       wait on other process groups in the background thread */
+  /* Check specific pid, in case the child has its own group
+     (either given by Racket or given to itself): */
+  {
     pid_t pid2;
     int status;
 
@@ -361,7 +364,7 @@ int scheme_places_register_child(int pid, int is_group, void *signal_fd, int *st
 
     st->next = child_statuses;
     child_statuses = st;
-    st->next_group = NULL;
+    st->next_unused = NULL;
 
     if (is_group)
       add_group_signal_fd(signal_fd);
@@ -375,7 +378,7 @@ static void *mz_proc_thread_signal_worker(void *data) {
   int status;
   int pid, check_pid, is_group;
   sigset_t set;
-  Child_Status *group_status, *prev_group, *next;
+  Child_Status *unused_status, *prev_unused, *next;
 
   sigemptyset(&set);
   sigaddset(&set, SIGCHLD);
@@ -399,14 +402,18 @@ static void *mz_proc_thread_signal_worker(void *data) {
 
     mzrt_mutex_lock(child_wait_lock);
 
-    group_status = child_group_statuses;
-    prev_group = NULL;
+    unused_status = unused_pid_statuses;
+    prev_unused = NULL;
 
     do {
-      if (group_status) {
-        check_pid = group_status->pid;
+      if (unused_status) {
+        /* See unused_pid_statuses above */
+        check_pid = unused_status->pid;
         is_group = 1;
       } else {
+        /* We wait only on processes in the same group as Racket,
+           because detecting the termination of a group's main process
+           disables our ability to terminate all processes in the group. */
         check_pid = 0; /* => processes in the same group as Racket */
         is_group = 0;
       }
@@ -423,26 +430,26 @@ static void *mz_proc_thread_signal_worker(void *data) {
           fprintf(stderr, "unexpected error from waitpid(%d[%d]): %d\n", 
                   check_pid, is_group, errno);
           if (is_group) {
-            prev_group = group_status;
-            group_status = group_status->next;
+            prev_unused = unused_status;
+            unused_status = unused_status->next;
           } 
         }
       } else if (pid > 0) {
         /* printf("SIGCHILD pid %i with status %i %i\n", pid, status, WEXITSTATUS(status)); */
         if (is_group) {
-          next = group_status->next;
-          if (prev_group)
-            prev_group->next_group = next;
+          next = unused_status->next;
+          if (prev_unused)
+            prev_unused->next_unused = next;
           else
-            child_group_statuses = next;
-          free(group_status);
-          group_status = next;
+            unused_pid_statuses = next;
+          free(unused_status);
+          unused_status = next;
         } else
           add_child_status(pid, status);
       } else {
         if (is_group) {
-          prev_group = group_status;
-          group_status = group_status->next;
+          prev_unused = unused_status;
+          unused_status = unused_status->next;
         }
       }
     } while ((pid > 0) || is_group);
@@ -456,16 +463,17 @@ static void *mz_proc_thread_signal_worker(void *data) {
 void scheme_done_with_process_id(int pid, int is_group)
 {
   Child_Status *st;
+  int keep_unused = 1; /* assume that any process can be in a new group */
 
-  mzrt_mutex_lock(child_wait_lock); /* protects child_group_statuses */
+  mzrt_mutex_lock(child_wait_lock); /* protects unused_pid_statuses */
   mzrt_mutex_lock(child_status_lock);
 
   for (st = child_statuses; st; st = st->next) {
     if (st->pid == pid) {
       if (!st->done) {
-        if (is_group) {
-          st->next_group = child_group_statuses;
-          child_group_statuses = st;
+        if (keep_unused) {
+          st->next_unused = unused_pid_statuses;
+          unused_pid_statuses = st;
           if (st->signal_fd)
             remove_group_signal_fd(st->signal_fd);
         } else
@@ -476,7 +484,7 @@ void scheme_done_with_process_id(int pid, int is_group)
     }
   }
       
-  if (st && (is_group || st->done)) {
+  if (st && (keep_unused || st->done)) {
     /* remove it from normal list: */
     raw_get_child_status(pid, NULL, 0, 1, !st->done);
   }
@@ -609,7 +617,7 @@ typedef struct {
   Scheme_Place   *waiting_place; 
   int            *wake_fd;
   int             ready;
-  long            rc;
+  intptr_t            rc;
 } proc_thread_wait_data;
 
 
@@ -618,7 +626,7 @@ static void *mz_proc_thread_wait_worker(void *data) {
   proc_thread_wait_data *wd = (proc_thread_wait_data*) data;
 
   rc = mz_proc_thread_wait(wd->proc_thread);
-  wd->rc = (long) rc;
+  wd->rc = (intptr_t) rc;
   wd->ready = 1;
   scheme_signal_received_at(wd->wake_fd);
   return NULL;
@@ -663,7 +671,7 @@ static Scheme_Object *scheme_place_wait(int argc, Scheme_Object *args[]) {
     mz_proc_thread_detach(worker_thread);
     scheme_block_until(place_wait_ready, NULL, (Scheme_Object *) wd, 0);
 
-    rc = scheme_make_integer((long)wd->rc);
+    rc = scheme_make_integer((intptr_t)wd->rc);
     free(wd);
     return rc;
   }
@@ -671,7 +679,7 @@ static Scheme_Object *scheme_place_wait(int argc, Scheme_Object *args[]) {
   {
     void *rcvoid;
     rcvoid = mz_proc_thread_wait((mz_proc_thread *)place->proc_thread);
-    return scheme_make_integer((long) rcvoid);
+    return scheme_make_integer((intptr_t) rcvoid);
   }
 # endif
 }
@@ -727,9 +735,13 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
     case scheme_true_type:
     case scheme_false_type:
     case scheme_null_type:
+    case scheme_void_type:
     /* place_bi_channels are allocated in the master and can be passed along as is */
     case scheme_place_bi_channel_type:
       new_so = so;
+      break;
+    case scheme_place_type:
+      new_so = ((Scheme_Place *) so)->channel;
       break;
     case scheme_char_type:
       new_so = scheme_make_char(SCHEME_CHAR_VAL(so));
@@ -746,10 +758,10 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
       }
       break;
     case scheme_float_type:
-      new_so = scheme_make_char(SCHEME_FLT_VAL(so));
+      new_so = scheme_make_float(SCHEME_FLT_VAL(so));
       break;
     case scheme_double_type:
-      new_so = scheme_make_char(SCHEME_DBL_VAL(so));
+      new_so = scheme_make_double(SCHEME_DBL_VAL(so));
       break;
     case scheme_complex_type:
       {
@@ -802,8 +814,8 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
     case scheme_vector_type:
       {
         Scheme_Object *vec;
-        long i;
-        long size = SCHEME_VEC_SIZE(so);
+        intptr_t i;
+        intptr_t size = SCHEME_VEC_SIZE(so);
         vec = scheme_make_vector(size, 0);
         for (i = 0; i <size ; i++) {
           Scheme_Object *tmp;
@@ -814,14 +826,30 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
         new_so = vec;
       }
       break;
+    case scheme_fxvector_type:
+      if (SHARED_ALLOCATEDP(so)) {
+        new_so = so;
+      }
+      else {
+        Scheme_Vector *vec;
+        intptr_t i;
+        intptr_t size = SCHEME_FXVEC_SIZE(so);
+        vec = scheme_alloc_fxvector(size);
+
+        for (i = 0; i < size; i++) {
+          SCHEME_FXVEC_ELS(vec)[i] = SCHEME_FXVEC_ELS(so)[i];
+        }
+        new_so = (Scheme_Object *) vec;
+      }
+      break;
     case scheme_flvector_type:
       if (SHARED_ALLOCATEDP(so)) {
         new_so = so;
       }
       else {
         Scheme_Double_Vector *vec;
-        long i;
-        long size = SCHEME_FLVEC_SIZE(so);
+        intptr_t i;
+        intptr_t size = SCHEME_FLVEC_SIZE(so);
         vec = scheme_alloc_flvector(size);
 
         for (i = 0; i < size; i++) {
@@ -837,7 +865,7 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
         Scheme_Struct_Type *stype = st->stype;
         Scheme_Struct_Type *ptype = stype->parent_types[stype->name_pos - 1];
         Scheme_Object *nprefab_key;
-        long size = stype->num_slots;
+        intptr_t size = stype->num_slots;
         int local_slots = stype->num_slots - (ptype ? ptype->num_slots : 0);
         int i = 0;
 
@@ -869,7 +897,7 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
         Scheme_Serialized_Structure *st = (Scheme_Serialized_Structure*)so;
         Scheme_Struct_Type *stype;
         Scheme_Structure *nst;
-        long size;
+        intptr_t size;
         int i = 0;
       
         size = st->num_slots;
@@ -886,7 +914,8 @@ Scheme_Object *scheme_places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
 
     case scheme_resolved_module_path_type:
     default:
-      scheme_log_abort("cannot copy object");
+      printf("places deep copy cannot copy object of type %hi at %p\n", so->type, so);
+      scheme_log_abort("places deep copy cannot copy object");
       abort();
       break;
   }
@@ -952,7 +981,7 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
   Scheme_Object *place_main;
   Scheme_Object *a[2], *channel;
   mzrt_thread_id ptid;
-  long rc = 0;
+  intptr_t rc = 0;
   ptid = mz_proc_thread_self();
   
   place_data = (Place_Start_Data *) data_arg;
@@ -1055,6 +1084,7 @@ Scheme_Object *scheme_places_deserialize_worker(Scheme_Object *so)
     case scheme_true_type:
     case scheme_false_type:
     case scheme_null_type:
+    case scheme_void_type:
     /* place_bi_channels are allocated in the master and can be passed along as is */
     case scheme_place_bi_channel_type:
     case scheme_char_type:
@@ -1066,6 +1096,7 @@ Scheme_Object *scheme_places_deserialize_worker(Scheme_Object *so)
     case scheme_byte_string_type:
     case scheme_unix_path_type:
     case scheme_flvector_type:
+    case scheme_fxvector_type:
         new_so = so;
       break;
     case scheme_symbol_type:
@@ -1086,8 +1117,8 @@ Scheme_Object *scheme_places_deserialize_worker(Scheme_Object *so)
       break;
     case scheme_vector_type:
       {
-        long i;
-        long size = SCHEME_VEC_SIZE(so);
+        intptr_t i;
+        intptr_t size = SCHEME_VEC_SIZE(so);
         for (i = 0; i <size ; i++) {
           Scheme_Object *tmp;
           tmp = scheme_places_deserialize_worker(SCHEME_VEC_ELS(so)[i]);
@@ -1104,7 +1135,7 @@ Scheme_Object *scheme_places_deserialize_worker(Scheme_Object *so)
         Scheme_Serialized_Structure *st = (Scheme_Serialized_Structure*)so;
         Scheme_Struct_Type *stype;
         Scheme_Structure *nst;
-        long size;
+        intptr_t size;
         int i = 0;
       
         size = st->num_slots;
@@ -1168,7 +1199,7 @@ Scheme_Object *scheme_place_send(int argc, Scheme_Object *args[]) {
       scheme_wrong_type("place-channel-send", "place-channel", 0, argc, args);
     }
     {
-      void *msg_memory;
+      void *msg_memory = NULL;
       mso = scheme_places_serialize(args[1], &msg_memory);
       scheme_place_async_send((Scheme_Place_Async_Channel *) ch->sendch, mso, msg_memory);
     }
@@ -1266,8 +1297,8 @@ void force_hash_worker(Scheme_Object *so, Scheme_Hash_Table *ht)
       break;
     case scheme_vector_type:
       {
-        long i;
-        long size = SCHEME_VEC_SIZE(so);
+        intptr_t i;
+        intptr_t size = SCHEME_VEC_SIZE(so);
         for (i = 0; i <size ; i++) {
           force_hash_worker(SCHEME_VEC_ELS(so)[i], ht);
         }
@@ -1277,8 +1308,8 @@ void force_hash_worker(Scheme_Object *so, Scheme_Hash_Table *ht)
       {
         Scheme_Structure *st = (Scheme_Structure*)so;
         Scheme_Struct_Type *stype = st->stype;
-        long i;
-        long size = stype->num_slots;
+        intptr_t i;
+        intptr_t size = stype->num_slots;
 
         if (stype->prefab_key)
           force_hash_worker((Scheme_Object*)stype->prefab_key, ht);

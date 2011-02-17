@@ -134,13 +134,15 @@ please adhere to these guidelines:
  (web-materials "Related Web Sites") ;; menu item title
  (tool-web-sites "Tool Web Sites")   ;; menu item title
  (plt-homepage "Racket")
- (how-to-use-scheme "How to Use Scheme") ;; title of a book.
- (teachscheme!-homepage "TeachScheme!") ;; probably this should be a `word' in all languages
+ (pbd-homepage "Program by Design")
 
  ;;; bug report form
  (cancel-bug-report? "Cancel Bug Report?")
  (are-you-sure-cancel-bug-report?
   "Are you sure that you want to cancel sending this bug report?")
+ (do-you-want-to-discard-or-save-this-bug-report
+  "Do you want to discard or save this bug report?")
+ (discard "Discard") ;; a button label for a dialog box with the above question
  (bug-report-form "Bug Report Form")
  (bug-report-field-name "Name")
  (bug-report-field-email "Email")
@@ -154,12 +156,19 @@ please adhere to these guidelines:
  (bug-report-field-docs-installed "Docs Installed")
  (bug-report-field-collections "Collections")
  (bug-report-field-human-language "Human Language")
-  (bug-report-field-memory-use "Memory Use")
+ (bug-report-field-memory-use "Memory Use")
  (bug-report-field-version "Version")
  (bug-report-synthesized-information "Synthesized Information")  ;; dialog title
  (bug-report-show-synthesized-info "Show Synthesized Info")
  (bug-report-submit "Submit")
- (bug-report-submit-menu-item "Submit Bug Report") ;; in Help Menu (drs & help desk)
+ (close-and-save-bug-report "Close && Save") ;; button in bug report dialog, next to cancel and bug-report-submit
+ (bug-report-submit-menu-item "Submit Bug Report...")  ;; same as above, but used when there are saved bug reports
+ (saved-bug-reports-menu-item "Saved Bug Reports") ;; in Help Menu, submenu title
+ (disacard-all-saved-bug-reports "Discard All Saved Bug Reports") ;; menu item: only shows up when there is more than one saved bug report
+ (no-saved-bug-reports "No bug reports have been saved") ;; an info message that shows up as a disabled menu item when no saved bug reports are around
+ (new-bug-report "New Bug Report") ;; button label the user sees when there are saved bug reports, but the user asks to save another one.
+ (close-and-save "Close and Save") ;; button on the bottom of the bug report form
+ (saved-unsubmitted-bug-reports "Saved, unsubmitted bug reports:") ;; next to previous line in same dialog, followed by list of bug report subjects (as buttons)
  (error-sending-bug-report "Error Sending Bug Report")
  (error-sending-bug-report-expln "An error occurred when sending this bug report. If your internet connection is otherwise working fine, please visit:\n\n    http://bugs.racket-lang.org/\n\nand submit the bug via our online web-form. Sorry for the difficulties.\n\nThe error message is:\n~a")
  (illegal-bug-report "Illegal Bug Report")
@@ -414,10 +423,18 @@ please adhere to these guidelines:
  (error-saving-preferences "Error saving preferences: ~a")
  (error-saving-preferences-title "Error saving preferences")
  (steal-the-lock-and-retry "Steal the lock && retry") ;; in the preferences error dialog; this happens when the lockfile exists (after 3 pref writes). 
+ 
  (error-reading-preferences "Error reading preferences")
+ (error-reading-preferences-explanation "The preferences file is locked and thus the ~a preference cannot be read") ;; ~a is filled with the name of the preference (a symbol)
+ (dont-ask-again-until-drracket-restarted "Don't ask again (until DrRacket is restarted)")
+ ; difference between the above and below is one comes with a question (steal the lock or not) and the other with just a notation saying "the file is locked"
+ (dont-notify-again-until-drracket-restarted "Don't notify again (until DrRacket is restarted)") 
  (prefs-file-locked "The preferences file is locked (because the file ~a exists), so your preference change could not be saved. Cancel preference change?")
  (try-again "Try again") ;; button label
+ (give-up-and-use-the-default "Give up and use the default") ;; button label
+  
  (prefs-file-still-locked "The preferences file is still locked (because the file ~a exists), so your preference change will not be saved.")
+ (prefs-file-locked-nothing-doing "The preferences file is locked (via ~s) so changes to the preferences not be saved.") ;; the  ~s is filled with the lockfile; this string is (currently) used only on windows where lockfiles are less friendly (and there is no steal fallback)
  (scheme-prefs-panel-label "Racket")
  (warnings-prefs-panel-label "Warnings")
  (editor-prefs-panel-label "Editing")
@@ -449,12 +466,14 @@ please adhere to these guidelines:
  (switch-to-module-language-automatically "Automatically switch to the module language when opening a module")
  (interactions-beside-definitions "Put the interactions window beside the definitions window") ;; in preferences, below the checkbox one line above this one
  (show-line-numbers "Show line numbers")
- (hide-line-numbers "Hide line numbers")
+ (show-line-numbers/menu "Show Line Numbers")  ;; just like the above, but capitalized for appearance in a menu item
+ (hide-line-numbers/menu "Hide Line Numbers")
  (limit-interactions-size "Limit interactions size")
  (background-color "Background Color")
  (default-text-color "Default text") ;; used for configuring colors, but doesn't need the word "color"
  (choose-a-background-color "Please choose a background color")
  (revert-to-defaults "Revert to Defaults")
+ (undo-changes "Undo Changes and Close") ;; used in the preferences dialog to undo preference changes
   
   (black-on-white-color-scheme "Black on White") ;; these two appear in the color preferences dialog on butttons
   (white-on-black-color-scheme "White on Black") ;; clicking the buttons changes the color schemes to some defaults that've been set up.
@@ -548,14 +567,15 @@ please adhere to these guidelines:
  (mfs-recur-over-subdirectories "Recur over subdirectories")
  (mfs-regexp-filename-filter "Regexp filename filter")
  (mfs-search-string "Search string")
- (mfs-drscheme-multi-file-search "DrRacket - Multi File Search") ;; results window and error message title
+ (mfs-drscheme-multi-file-search "Multi File Search - DrRacket") ;; error message window title
  (mfs-not-a-dir "\"~a\" is not a directory")
  (mfs-open-file "Open File")
  (mfs-stop-search "Stop Search")
  (mfs-case-sensitive-label "Case sensitive")
  (mfs-no-matches-found "No matches found.")
  (mfs-search-interrupted "Search aborted.")
- 
+ (mfs-drscheme-multi-file-search-title "Multi File Search for \"~a\" - DrRacket") ;; the ~a format specifier is filled in with the search string
+  
  ;;; reverting a file
  (are-you-sure-revert
   "Are you sure that you want to revert this file? This change cannot be undone.")
@@ -599,7 +619,8 @@ please adhere to these guidelines:
  (edit-menu "Edit")
  (help-menu "Help")
  (windows-menu "Windows")
- 
+ (tabs-menu "Tabs") ;; this is the name of the "Windows" menu under linux & windows
+  
  ;;; menus
  ;;; - in menu labels, the & indicates a alt-key based shortcut.
  ;;; - sometimes, things are stuck in the middle of 
@@ -730,6 +751,7 @@ please adhere to these guidelines:
 
   ;; windows menu
  (windows-menu-label "&Windows")
+ (tabs-menu-label "&Tabs") ;; this is the name of the menu under linux & windows
  (minimize "Minimize") ;; minimize and zoom are only used under mac os x
  (zoom "Zoom")
  (bring-frame-to-front "Bring Frame to Front")       ;;; title of dialog
@@ -900,7 +922,7 @@ please adhere to these guidelines:
  (convert-to-semicolon-comment "Convert to Semicolon Comment")
  
  ;;; executables
- (create-executable-menu-item-label "Create Executable...")
+ (create-executable-menu-item-label "Create &Executable...")
  (create-executable-title "Create Executable")
  (must-save-before-executable "You must save your program before creating an executable.")
  (save-a-mred-launcher "Save a GRacket Launcher")
@@ -1285,6 +1307,18 @@ please adhere to these guidelines:
  (stepper-no-such-step/title "Step Not Found")
  (stepper-no-such-step "Couldn't find a step matching that criterion.")
  (stepper-no-such-step/earlier "Couldn't find an earlier step matching that criterion.")
+ 
+ (stepper-no-earlier-application-step "No earlier application steps.")
+ (stepper-no-later-application-step "No more application steps.")
+ 
+ (stepper-no-earlier-step "No earlier steps.")
+ (stepper-no-later-step "No more steps.")
+  
+ (stepper-no-selected-step "No steps taken in the highlighted region. Perhaps it's commented out?")
+  
+ (stepper-no-last-step "No final step available yet.")
+ 
+  
   
 
   
@@ -1450,6 +1484,9 @@ please adhere to these guidelines:
   ;; followed by list of variable bindings
   (test-engine-property-fail-error "Property falsifiable with")
   (test-engine-property-error-error "check-property encountered the following error~n:: ~a")
+
+  (signature-enable-checks "Enable Signature Checks")
+  (signature-disable-checks "Disable Signature Checks")
 
   ; section header
   (test-engine-check-failures "Check failures:")

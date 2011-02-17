@@ -479,10 +479,10 @@ a syntax error.
   ...)
 ]{
 
-Like @scheme[class*], but includes a sub-expression to use used as the
+Like @scheme[class*], but includes a sub-expression to be used as the
 source for all syntax errors within the class definition. For example,
 @scheme[define-serializable-class] expands to @scheme[class/derived]
-so that error in the body of the class are reported in terms of
+so that errors in the body of the class are reported in terms of
 @scheme[define-serializable-class] instead of @scheme[class].
 
 The @scheme[original-datum] is the original expression to use for
@@ -556,7 +556,7 @@ by-position arguments.
 
 Arguments provided by position are converted into by-name arguments
 using the order of @scheme[init] and @scheme[init-field] clauses and
-the order of variables within each clause. When a @scheme[instantiate]
+the order of variables within each clause. When an @scheme[instantiate]
 form provides both by-position and by-name arguments, the converted
 arguments are placed before by-name arguments. (The order can be
 significant; see also @secref["objcreation"].)
@@ -712,7 +712,7 @@ of augmenting methods that would be ignored.
 
 Always accesses the superclass method, independent of whether the
 method is overridden again in subclasses. Using the @scheme[super]
-form outside of @scheme[class*] is an syntax error. Each @scheme[arg]
+form outside of @scheme[class*] is a syntax error. Each @scheme[arg]
 is as for @scheme[#%app]: either @scheme[_arg-expr] or
 @scheme[_keyword _arg-expr].
 
@@ -775,7 +775,7 @@ results of the @scheme[arg] expressions as arguments.
 Methods that are present in the superclass but not declared with
 @scheme[inherit], @scheme[inherit/super], or @scheme[inherit/inner] or
 @scheme[rename-super] are not directly accessible in the class
-(through they can be called with @scheme[send]).  Every public method
+(though they can be called with @scheme[send]).  Every public method
 in a superclass is present in a derived class, even if it is not
 declared with @scheme[inherit] in the derived class; the
 @scheme[inherit] clause does not control inheritance, but merely
@@ -804,8 +804,8 @@ the class expression (including within @scheme[super] or
 a single @scheme[id] is provided for a method declaration, the
 identifier is used for both the internal and external names.
 
-Method inheritance, overriding, and augmentation are based external
-names, only.  Separate internal and external names are required for
+Method inheritance, overriding, and augmentation are based on external
+names only.  Separate internal and external names are required for
 @scheme[rename-super] and @scheme[rename-inner] (for historical
 reasons, mainly).
 
@@ -829,7 +829,7 @@ name. Overall, each internal identifier must be distinct from all
 other internal identifiers, each external method name must be distinct
 from all other method names, each external field name must be distinct
 from all other field names, and each initialization argument name must
-be distinct from all other initialization argument names
+be distinct from all other initialization argument names.
 
 By default, external names have no lexical scope, which means, for
 example, that an external method name matches the same syntactic
@@ -862,9 +862,9 @@ symbolic form.
 
 The binding introduced by @scheme[define-local-member-name] is a
 syntax binding that can be exported and imported with
-@scheme[module]s. Each execution of a
+@scheme[module]s. Each evaluation of a
 @scheme[define-local-member-name] declaration generates a distinct
-hidden name (except as a top-level definitions). The
+hidden name (except as a top-level definition). The
 @scheme[interface->method-names] procedure does not expose hidden
 names.
 
@@ -974,7 +974,7 @@ expressions are evaluated as they appear in the class expression,
 from left to right.
 
 Sometime during the evaluation of the expressions,
-superclass-declared initializations must be executed once by
+superclass-declared initializations must be evaluated once by
 using the @scheme[super-make-object] procedure,
 @scheme[super-new] form, or @scheme[super-instantiate] form.
 
@@ -999,7 +999,7 @@ invoked more than once, the @exnraise[exn:fail:object].
 Fields inherited from a superclass are not initialized until the
 superclass's initialization procedure is invoked. In contrast,
 all methods are available for an object as soon as the object is
-created; the overriding of methods is not affect by
+created; the overriding of methods is not affected by
 initialization (unlike objects in C++).
 
 
@@ -1052,7 +1052,7 @@ arguments. See @secref["objcreation"] for more information.}
 @section[#:tag "ivaraccess"]{Field and Method Access}
 
 In expressions within a class definition, the initialization
-variables, fields, and methods of the class all part of the
+variables, fields, and methods of the class are all part of the
 environment. Within a method body, only the fields and other methods
 of the class can be referenced; a reference to any other
 class-introduced identifier is a syntax error.  Elsewhere within the
@@ -1131,7 +1131,7 @@ is the same as
 
 Extracts methods from an object and binds a local name that can be
 applied directly (in the same way as declared methods within a class)
-for each method. The each @scheme[obj-expr] must produce an object,
+for each method. Each @scheme[obj-expr] must produce an object,
 which must have a public method named by the corresponding
 @scheme[method-id]. The corresponding @scheme[id] is bound so that it
 can be applied directly (see @secref["methodcalls"]).
@@ -1180,7 +1180,7 @@ the @exnraise[exn:fail:object].}
 
 @defform[(field-bound? id obj-expr)]{
 
-Produces @scheme[#t] if the object result of @scheme[obj-expr] has an
+Produces @scheme[#t] if the object result of @scheme[obj-expr] has a
 field with (external) name @scheme[id], @scheme[#f] otherwise.
 
 If @scheme[obj-expr] does not produce an object, the
@@ -1408,21 +1408,21 @@ the trait is later converted to a mixin and applied to a class.}
 
 Produces a new @tech{trait} that is like the @tech{trait} result of
 @scheme[trait-expr], but with the definition of a method named by
-@scheme[id] removed; as the method definition is removed, either a
+@scheme[id] removed; as the method definition is removed, either an
 @scheme[inherit], @scheme[inherit/super], or @scheme[inherit/inner]
 declaration is added:
 
 @itemize[
 
  @item{A method declared with @scheme[public], @scheme[pubment], or
-  @scheme[public-final] is replaced with a @scheme[inherit]
+  @scheme[public-final] is replaced with an @scheme[inherit]
   declaration.}
 
  @item{A method declared with @scheme[override] or @scheme[override-final]
- is replaced with a @scheme[inherit/super] declaration.}
+ is replaced with an @scheme[inherit/super] declaration.}
 
   @item{A method declared with @scheme[augment], @scheme[augride], or
-  @scheme[augment-final] is replaced with a @scheme[inherit/inner] declaration.}
+  @scheme[augment-final] is replaced with an @scheme[inherit/inner] declaration.}
 
  @item{A method declared with @scheme[overment] is not replaced
   with any @scheme[inherit] declaration.}
@@ -1459,7 +1459,7 @@ Produces a new @tech{trait} that is like the @tech{trait} result of
 @scheme[trait-expr], but all definitions and references to methods
 named @scheme[id] are replaced by definitions and references to
 methods named by @scheme[new-id]. The consistency requirements for the
-resulting trait is the same as for @scheme[trait-sum], otherwise the
+resulting trait are the same as for @scheme[trait-sum], otherwise the
 @exnraise[exn:fail:contract].}
 
 
@@ -1469,7 +1469,7 @@ Produces a new @tech{trait} that is like the @tech{trait} result of
 @scheme[trait-expr], but all definitions and references to fields
 named @scheme[id] are replaced by definitions and references to fields
 named by @scheme[new-id]. The consistency requirements for the
-resulting trait is the same as for @scheme[trait-sum], otherwise the
+resulting trait are the same as for @scheme[trait-sum], otherwise the
 @exnraise[exn:fail:contract].}
 
 @; ------------------------------------------------------------------------
@@ -1626,6 +1626,11 @@ behaves as if its class had been wrapped with the equivalent
 @scheme[class/c] contract.
 }
                              
+@defproc[(instanceof/c [class-contract contract?]) contract?]{
+Produces a contract for an object, where the object is an
+instance of a class that conforms to @scheme[class-contract].
+}
+                             
 @defform/subs[
 #:literals (field -> ->* ->d)
 
@@ -1702,7 +1707,7 @@ Returns a flat contract that recognizes classes that implement
 
 @defproc[(subclass?/c [class class?]) flat-contract?]{
 
-Returns a flat-contract that recognizes classes that
+Returns a flat contract that recognizes classes that
 are subclasses of @scheme[class].}
 
 
@@ -1710,7 +1715,7 @@ are subclasses of @scheme[class].}
 
 @section[#:tag "objectequality"]{Object Equality and Hashing}
 
-But default, objects that are instances of different classes or that
+By default, objects that are instances of different classes or that
 are instances of a non-transparent class are @scheme[equal?] only if
 they are @scheme[eq?]. Like transparent structures, two objects that
 are instances of the same transparent class (i.e., every superclass of
@@ -1733,7 +1738,7 @@ analogous to the functions provided for a structure type with
  is an object that is an instance of the same class (or a subclass
  that does not re-declare its implementation of @scheme[equal<%>])
  and that is being compared to the target object. The second argument
- is a @scheme[equal?]-like procedure of two arguments that should be
+ is an @scheme[equal?]-like procedure of two arguments that should be
  used for recursive equality testing. The result should be a true
  value if the object and the first argument of the method are equal,
  @scheme[#f] otherwise.}
@@ -1774,7 +1779,7 @@ Binds @scheme[class-id] to a class, where @scheme[superclass-expr],
 the @scheme[interface-expr]s, and the @scheme[class-clause]s are as in
 @scheme[class*].
 
-This forms can only be used at the top level, either within a module
+This form can only be used at the top level, either within a module
 or outside. The @scheme[class-id] identifier is bound to the new
 class, and @schemeidfont{deserialize-info:}@scheme[class-id] is also
 defined; if the definition is within a module, then the latter is
@@ -1833,7 +1838,7 @@ for instances of non-serializable subclasses.}
   class-clause ...)
 ]{
 
-Like @scheme[define-serializable-class*], but with not interface
+Like @scheme[define-serializable-class*], but without interface
 expressions (analogous to @scheme[class]).}
 
 
@@ -1857,7 +1862,7 @@ The @scheme[printable<%>] interface includes only the
 @scheme[custom-print], @scheme[custom-write], and
 @scheme[custom-display] methods. The @scheme[custom-print] method
 accepts two arguments: the destination port and the current
-@scheme[quaisquote] depth as an exact nonnegative integer. The
+@scheme[quasiquote] depth as an exact nonnegative integer. The
 @scheme[custom-write] and @scheme[custom-display] methods each accepts
 a single argument, which is the destination port to @scheme[write] or
 @scheme[display] the object.
@@ -1986,11 +1991,11 @@ Returns two values, analogous to the return
 values of @scheme[struct-info]:
 @itemize[
 
-  @item{@scheme[class]: a class or @scheme[#f]; the result is
+  @item{@scheme[_class]: a class or @scheme[#f]; the result is
   @scheme[#f] if the current inspector does not control any class for
   which the @scheme[object] is an instance.}
 
-  @item{@scheme[skipped?]: @scheme[#f] if the first result corresponds
+  @item{@scheme[_skipped?]: @scheme[#f] if the first result corresponds
   to the most specific class of @scheme[object], @scheme[#t]
   otherwise.}
 
@@ -2011,31 +2016,31 @@ values of @scheme[struct-type-info]:
 
 @itemize[
 
-  @item{@scheme[name]: the class's name as a symbol;}
+  @item{@scheme[_name]: the class's name as a symbol;}
 
-  @item{@scheme[field-cnt]: the number of fields (public and private)
+  @item{@scheme[_field-cnt]: the number of fields (public and private)
    defined by the class;}
 
-  @item{@scheme[field-name-list]: a list of symbols corresponding to the
-  class's public fields; this list can be larger than @scheme[field-k]
+  @item{@scheme[_field-name-list]: a list of symbols corresponding to the
+  class's public fields; this list can be larger than @scheme[_field-cnt]
   because it includes inherited fields;}
 
-  @item{@scheme[field-accessor]: an accessor procedure for obtaining
+  @item{@scheme[_field-accessor]: an accessor procedure for obtaining
   field values in instances of the class; the accessor takes an
   instance and a field index between @scheme[0] (inclusive)
-  and @scheme[field-cnt] (exclusive);}
+  and @scheme[_field-cnt] (exclusive);}
 
-  @item{@scheme[field-mutator]: a mutator procedure for modifying
+  @item{@scheme[_field-mutator]: a mutator procedure for modifying
   field values in instances of the class; the mutator takes an
   instance, a field index between @scheme[0] (inclusive)
-  and @scheme[field-cnt] (exclusive), and a new field value;}
+  and @scheme[_field-cnt] (exclusive), and a new field value;}
 
-  @item{@scheme[super-class]: a class for the most specific ancestor of
+  @item{@scheme[_super-class]: a class for the most specific ancestor of
    the given class that is controlled by the current inspector,
    or @scheme[#f] if no ancestor is controlled by the current
    inspector;}
 
-  @item{@scheme[skipped?]: @scheme[#f] if the sixth result is the most
+  @item{@scheme[_skipped?]: @scheme[#f] if the sixth result is the most
    specific ancestor class, @scheme[#t] otherwise.}
 
 ]}

@@ -12,9 +12,7 @@
          ps-add-unpstruct
          ps-add-opaque
 
-         #|
          ps->stx+index
-         |#
          ps-context-syntax
          ps-difference
 
@@ -86,7 +84,8 @@ Interpretation: Inner PS structures are applied first.
     (match ps
       [(cons (? syntax? stx) _) stx]
       [(cons 'car parent)
-       (let ([d (syntax-e (interp parent))])
+       (let* ([d (interp parent)]
+              [d (if (syntax? d) (syntax-e d) d)])
          (cond [(pair? d) (car d)]
                [(vector? d) (vector->list d)]
                [(box? d) (unbox d)]
@@ -97,15 +96,16 @@ Interpretation: Inner PS structures are applied first.
          (stx-cdr stx))]
       [(cons 'post parent)
        (interp parent)]))
-  (match ps
-    [(cons (? syntax? stx) _)
-     (values stx 0)]
-    [(cons 'car parent)
-     (values (interp ps) 0)]
-    [(cons (? exact-positive-integer? n) parent)
-     (values (interp parent) n)]
-    [(cons 'post parent)
-     (ps->stx+index parent)]))
+  (let ([ps (ps-truncate-opaque ps)])
+    (match ps
+      [(cons (? syntax? stx) _)
+       (values stx 0)]
+      [(cons 'car parent)
+       (values (interp ps) 0)]
+      [(cons (? exact-positive-integer? n) parent)
+       (values (interp parent) n)]
+      [(cons 'post parent)
+       (ps->stx+index parent)])))
 
 ;; ps-difference : PS PS -> nat
 ;; Returns N s.t. B = (ps-add-cdr^N A)

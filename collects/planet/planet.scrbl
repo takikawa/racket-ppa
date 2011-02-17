@@ -1,11 +1,14 @@
-#lang scribble/doc
+#lang scribble/manual
 
-@(require scribble/manual
-          scribble/bnf
-	  scribble/eval
-          (for-label racket)
-          (for-label planet/config)
-          (for-label planet/util))
+@(require
+   (for-label
+     racket/base
+     scribble/manual
+     planet/config
+     planet/util
+     planet/version
+     planet/syntax
+     planet/scribble))
 
 @(define-syntax-rule (eg (code resl) ...)
    (interaction
@@ -556,7 +559,7 @@ The port on the server the client should connect to if
 @racket[USE-HTTP-DOWNLOADS?] is @racket[#f]. The default value for this parameter is
 @racket[270].}
 
-@subsection[#:tag "util.rkt"]{Utilities}
+@subsection[#:tag "util.rkt"]{Package Archive}
 
 @defmodule[planet/util]
 
@@ -567,39 +570,46 @@ functionality exposed by @seclink["cmdline"]{the @exec{raco planet} command-line
 also available programmatically through this library.
 
 @defproc[(download/install-pkg [owner string?]
-			       [pkg string?]
+			       [pkg (and/c string? #rx"[.]plt")]
 			       [maj natural-number/c]
 			       [min natural-number/c])
          (or/c pkg? #f)]{
 Downloads and installs the package specifed by the given owner name,
 package name, major and minor version number. Returns false if no such
 package is available; otherwise returns a package structure for the
-installed package.}
+installed package.
 
-@defproc[(install-pkg [pkg pkg-spec?]
+The @racket[pkg] argument must end with @racket[".plt"].
+}
+
+@defproc[(install-pkg [pkg-spec pkg-spec?]
                       [file path-string?]
                       [maj natural-number/c]
                       [min natural-number/c])
-         (or/c pkg? #f)]{
+         (or/c pkg-spec? #f)]{
  Installs the package represented by the arguments, using
- only the @racket[pkg-spec-path] and @racket[pkg-spec-name]
- fields of @racket[pkg].
+ the @racket[pkg-spec] argument to find the path and name of
+ the package to install.
+ 
+ See @racket[get-package-spec] to build a @racket[pkg-spec] argument.
  
  Returns a new @racket[pkg-spec?] corresponding to the package
  that was actually installed.
 }
 
 @defproc[(get-package-spec [owner string?]
-                           [pkg string?]
+                           [pkg (and/c string? #rx"[.]plt")]
                            [maj (or/c #f natural-number/c) #f]
                            [min (or/c #f natural-number/c) #f])
          pkg-spec?]{
   Builds a @racket[pkg-spec?] corresponding to the package specified by 
   @racket[owner], @racket[pkg], @racket[maj], and @racket[min].
+  
+  The @racket[pkg] argument must end with the string @racket[".plt"].
 }
 
 @defproc[(pkg-spec? [v any/c]) boolean?]{
-  Recognizes the result of @racket[get-package-spec].                                        
+  Recognizes the result of @racket[get-package-spec] (and @racket[install-pkg]).
 }
                    
 @defparam[current-cache-contents contents
@@ -640,11 +650,14 @@ Unpacks the PLaneT archive with the given filename, placing its contents
 into the given directory (creating that path if necessary).}
 
 @defproc[(remove-pkg [owner string?]
-		     [pkg   string?]
+		     [pkg   (and/c string? #rx"[.]plt")]
 		     [maj   natural-number/c]
 		     [min   natural-number/c])
 	 any]{
-Removes the specified package from the local planet cache.}
+Removes the specified package from the local planet cache.
+
+The @racket[pkg] argument must end with the string @racket[".plt"].
+}
 
 @defproc[(display-plt-file-structure [plt-file (or/c path-string? path?)])
          any]{
@@ -662,7 +675,7 @@ Removes the entire linkage table from the system, which will force all
 modules to relink themselves to PLaneT modules the next time they run.}
 
 @defproc[(add-hard-link [owner string?]
-			[pkg   string?]
+			[pkg   (and/c string? #rx"[.]plt$")]
 			[maj   natural-number/c]
 			[min   natural-number/c]
 			[dir   path?])
@@ -675,14 +688,20 @@ development; users only interested in using PLaneT packages
 available online should not need to create any development links.
 
 If the specified package already has a development link, this function
-first removes the old link and then adds the new one.}
+first removes the old link and then adds the new one.
+
+The @racket[pkg] argument must end with the string @racket[".plt"].
+}
 
 @defproc[(remove-hard-link [owner string?]
-	 		   [pkg   string?]
+	 		   [pkg   (and/c string? #rx"[.]plt")]
 			   [maj   natural-number/c]
 			   [min   natural-number/c])
  	 any]{
-Removes any hard link that may be associated with the given package.}
+Removes any hard link that may be associated with the given package.
+
+The @racket[pkg] argument must end with the string @racket[".plt"].
+}
 
 @defproc[(resolve-planet-path [spec quoted-planet-require-spec?])
 	 path?]{
@@ -698,15 +717,9 @@ file within it actually exists.}
 @defform[(this-package-version-maj)]
 @defform[(this-package-version-min)]
 )]{
-Macros that expand into expressions that evaluate to information about
-the name, owner, and version number of the package in which they 
-appear. @racket[this-package-version] returns a list consisting of a string
-naming the package's owner, a string naming the package, a number
-indicating the package major version and a number indicating the
-package minor version, or @racket[#f] if the expression appears outside the
-context of a package. The others are convenience macros that
-select out the relevant field, or return @racket[#f] if the expression
-appears outside the context of a PLaneT package.}
+Aliases of the same bindings from @racketmodname[planet/version] for backward
+compatibility.
+}
 
 @defproc[(path->package-version [p path?])
          (or/c (list/c string? string? natural-number/c natural-number/c) #f)]{
@@ -718,7 +731,137 @@ produces a list corresponding to its name and version, exactly like
 }
 
 @defproc[(exn:fail:planet? [val any/c]) boolean?]{
-  Returns @racket[#t] if @racket[val] is                                                   
+  Returns @racket[#t] if @racket[val] is an exception indicating a planet-specific failure.
+}
+
+@subsection[#:tag "version.rkt"]{Package Version}
+
+Provides bindings for @|PLaneT| developers that automatically
+produce references to the name and version of the containing @|PLaneT| package
+so the same code may be reused across releases without accidentally referring to
+a different version of the same package.
+
+@defmodule[planet/version]
+
+@deftogether[(
+@defform[(this-package-version)]
+@defform*[[(this-package-version-symbol)
+           (this-package-version-symbol suffix-id)]]
+@defform[(this-package-version-name)]
+@defform[(this-package-version-owner)]
+@defform[(this-package-version-maj)]
+@defform[(this-package-version-min)]
+)]{
+
+Macros that expand into expressions that evaluate to information about the name,
+owner, and version number of the package in which they
+appear. @racket[this-package-version] returns a list consisting of a string
+naming the package's owner, a string naming the package, a number indicating the
+package major version and a number indicating the package minor version, or
+@racket[#f] if the expression appears outside the context of a package.
+The macros @racket[this-package-version-name],
+@racket[this-package-version-owner], @racket[this-package-version-maj], and
+@racket[this-package-version-min] produce the relevant fields of the package
+version list.
+
+@racket[this-package-version-symbol] produces a symbol
+suitable for use in @racket[planet] module paths.  For instance, in version
+@racketmodfont{1:0} of the package @racketmodfont{package.plt} owned by
+@racketmodfont{author}, @racket[(this-package-version-symbol dir/file)] produces
+@racket['author/package:1:0/dir/file].  In the same package,
+@racket[(this-package-version-symbol)] produces @racket['author/package:1:0].
+
+}
+
+@defform[(this-package-in suffix-id ...)]{
+
+A @racket[require] sub-form that requires modules from within the same @|PLaneT|
+package version as the require, as referred to by each @racket[suffix-id]. For
+instance, in version @racketmodfont{1:0} of the package
+@racketmodfont{package.plt} owned by @racketmodfont{author},
+@racket[(require (this-package-in dir/file))] is equivalent to
+@racket[(require (planet author/package:1:0/dir/file))].
+
+@italic{Note:} Use @racket[this-package-in] when documenting @|PLaneT| packages
+with Scribble to associate each documented binding with the appropriate package.
+
+}
+
+@subsection[#:tag "syntax.rkt"]{Macros and Syntax Objects}
+
+@defmodule[planet/syntax]
+
+Provides bindings useful for @|PLaneT|-based macros.
+
+@deftogether[(
+@defproc[(syntax-source-planet-package [stx syntax?]) (or/c list? #f)]
+@defproc[(syntax-source-planet-package-owner [stx syntax?]) (or/c string? #f)]
+@defproc[(syntax-source-planet-package-name [stx syntax?]) (or/c string? #f)]
+@defproc[(syntax-source-planet-package-major [stx syntax?]) (or/c integer? #f)]
+@defproc[(syntax-source-planet-package-minor [stx syntax?]) (or/c integer? #f)]
+@defproc[(syntax-source-planet-package-symbol
+           [stx syntax?]
+           [suffix (or/c symbol? #f) #f])
+         (or/c symbol? #f)]
+)]{
+
+Produce output analogous to @racket[this-package-version],
+@racket[this-package-version-owner], @racket[this-package-version-name],
+@racket[this-package-version-maj], @racket[this-package-version-min], and
+@racket[this-package-version-symbol] based on the source location of
+@racket[stx].
+
+}
+
+@defproc[(make-planet-require-spec
+           [stx syntax?]
+           [suffix (or/c symbol? #f) #f])
+         syntax?]{
+
+Produces a @racket[require] sub-form for the module referred to by
+@racket[suffix] in the @|PLaneT| package containing the source location of
+@racket[stx].
+
+}
+
+@subsection[#:tag "scribble.rkt"]{Scribble Documentation}
+
+@defmodule[planet/scribble]
+
+Provides bindings for documenting @|PLaneT| packages.
+
+@defform[(this-package-in suffix-id ...)]{
+
+This binding from @racketmodname[planet/version] is also exported from
+@racketmodname[planet/scribble], as it is useful for @racket[for-label] imports
+in Scribble documentation.
+
+}
+
+@deftogether[(
+@defform[(racketmod/this-package maybe-file suffix-id datum ...)]
+@defform*[((racketmodname/this-package suffix-id)
+           (racketmodname/this-package (#,(racket unsyntax) suffix-expr)))]
+@defform[(racketmodlink/this-package suffix-id pre-content-expr ...)]
+@defform[(defmodule/this-package maybe-req suffix-id maybe-sources pre-flow ...)]
+@defform*[((defmodulelang/this-package suffix-id maybe-sources pre-flow ...)
+           (defmodulelang/this-package suffix-id #:module-paths (mod-suffix-id ...) maybe-sources pre-flow ...))]
+@defform[(defmodulereader/this-package suffix-id maybe-sources pre-flow ...)]
+@defform[(defmodule*/this-package maybe-req (suffix-id ...+) maybe-sources pre-flow ...)]
+@defform*[((defmodulelang*/this-package (suffix-id ...+) maybe-sources pre-flow ...)
+           (defmodulelang*/this-package (suffix-id ...+) #:module-paths (mod-suffix-id ...) maybe-sources pre-flow ...))]
+@defform[(defmodulereader*/this-package (suffix-id ...+) maybe-sources pre-flow ...)]
+@defform[(defmodule*/no-declare/this-package maybe-req (suffix-id ...+) maybe-sources pre-flow ...)]
+@defform*[((defmodulelang*/no-declare/this-package (suffix-id ...+) maybe-sources pre-flow ...)
+           (defmodulelang*/no-declare/this-package (suffix-id ...+) #:module-paths (mod-suffix-id ...) maybe-sources pre-flow ...))]
+@defform[(defmodulereader*/no-declare/this-package (suffix-id ...+) maybe-sources pre-flow ...)]
+)]{
+
+Variants of @racket[defmodule], etc., from @racketmodname[scribble/manual] in
+which each module path is replaced by an identifier (@racket[suffix-id] or
+@racket[mod-suffix-id]) representing a module within the current version of the
+containing @|PLaneT| package.
+
 }
 
 @subsection{Terse Status Updates}
@@ -734,19 +877,33 @@ is saved in the namespace, making the listening and information producing
 namespace-specific.
 
 @defproc[(planet-terse-register
-          [proc (-> (or/c 'download 'install 'docs-build 'finish) string? any/c)]
-          [namespace namespace? (current-namespace)]) void?]{
+          [proc (-> (or/c 'download 'install 'docs-build 'finish)
+                    string?
+                    any/c)])
+         void?]{
 Registers @racket[proc] as a function to be called when
-@racket[planet-terse-log] is called with a matching namespace argument.
- Note that @racket[proc] is called 
+@racket[planet-terse-log] is called.
+
+Note that @racket[proc] is called 
 asynchronously (ie, on some thread other than the one calling @racket[planet-terse-register]).
 }
 
 @defproc[(planet-terse-log [id (or/c 'download 'install 'finish)]
-                           [msg string?]
-                           [namespace namespace? (current-namespace)]) void?]{
-  This function is called by PLaneT to announce when things are happening.
-The namespace passed along is used to identify the procs to notify.
+                           [msg string?]) void?]{
+This function is called by PLaneT to announce when things are happening. See also
+@racket[planet-terse-set-key].
+}
+
+@defproc[(planet-terse-set-key [key any/c]) void?]{
+  This sets a @seclink["threadcells" #:doc '(lib "scribblings/reference/reference.scrbl")]{thread cell}
+  to the value of @racket[key].
+  The value of the thread cell is used as an index into a table to determine which
+  of the functions passed to @racket[planet-terse-register] to call when 
+  @racket[planet-terse-log] is called.
+  
+  The table holding the key uses ephemerons and a weak hash table to ensure that
+  when the @racket[key] is unreachable, then the procedures passed to @racket[planet-terse-log]
+  cannot be reached through the table.
 }
 
 @section{Developing Packages for PLaneT}
@@ -818,8 +975,18 @@ automatically skipped by the packaging tool).
 @subsubsection{Create Documentation [Optional]}
 
 Use Scribble to write documentation for your package. See
+@secref["scribble.rkt"] for macros that ensure proper bindings and version
+numbers in documentation for @|PLaneT| packages, and
 @other-manual['(lib "scribblings/scribble/scribble.scrbl")]
 for instructions on how to write Scribble documentation.
+
+@italic{Note:} Always use @racket[this-package-in] in @racket[for-label]
+bindings when documenting @|PLaneT| packages, and always use the bindings in
+@racketmodname[planet/scribble] rather than @racketmodname[scribble/manual].
+These macros automatically produce @racket[planet]-based module paths with
+appropriate version numbers.  Other @racket[require] subforms and Scribble
+declarations may refer to the wrong version of a package, or may not be
+recognized as part of a @|PLaneT| package at all when documentation is produced.
 
 @subsubsection{Create an @filepath{info.rkt} File [Optional]}
 

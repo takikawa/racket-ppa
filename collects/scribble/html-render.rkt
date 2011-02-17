@@ -9,6 +9,7 @@
          scheme/port
          scheme/list
          scheme/string
+         file/convertible
          mzlib/runtime-path
          setup/main-doc
          setup/main-collects
@@ -947,6 +948,15 @@
       (cond
         [(string? e) (super render-content e part ri)] ; short-cut for common case
         [(list? e) (super render-content e part ri)] ; also a short-cut
+        [(and (convertible? e)
+              (convert e 'png-bytes))
+         => (lambda (bstr)
+              (let ([w (integer-bytes->integer (subbytes bstr 16 20) #f #t)]
+                    [h (integer-bytes->integer (subbytes bstr 20 24) #f #t)])
+                `((img ([src ,(install-file "pict.png" bstr)]
+                        [alt "image"]
+                        [width ,(number->string w)]
+                        [height ,(number->string h)])))))]
         [(image-element? e)
          (let* ([src (main-collects-relative->path (image-element-path e))]
                 [suffixes (image-element-suffixes e)]
@@ -956,24 +966,59 @@
                    (number->string
                     (inexact->exact
                      (floor (* scale (integer-bytes->integer s #f #t))))))]
-                [src (select-suffix src suffixes '(".png" ".gif"))]
-                [sz (if (= 1.0 scale)
-                        null
-                        ;; Try to extract file size:
-                        (call-with-input-file*
-                         src
-                         (lambda (in)
-                           (if (regexp-try-match #px#"^\211PNG.{12}" in)
-                               `([width ,(to-num (read-bytes 4 in))]
-                                 [height ,(to-num (read-bytes 4 in))])
-                               null))))])
-           `((img ([src ,(let ([p (install-file src)])
+                [src (select-suffix src suffixes '(".png" ".gif" ".svg"))]
+                [svg? (regexp-match? #rx#"[.]svg$" (if (path? src) (path->bytes src) src))]
+                [sz (cond
+                     [svg?
+                      (call-with-input-file*
+                       src
+                       (lambda (in)
+                         (with-handlers ([exn:fail? (lambda (exn) 
+                                                      (log-warning
+                                                       (format "warning: error while reading SVG file for size: ~a"
+                                                               (if (exn? exn)
+                                                                   (exn-message exn)
+                                                                   (format "~e" exn))))
+                                                      null)])
+                           (let* ([d (xml:read-xml in)]
+                                  [attribs (xml:element-attributes 
+                                            (xml:document-element d))]
+                                  [check-name (lambda (n)
+                                                (lambda (a)
+                                                  (and (eq? n (xml:attribute-name a))
+                                                       (xml:attribute-value a))))]
+                                  [w (ormap (check-name 'width) attribs)]
+                                  [h (ormap (check-name 'height) attribs)])
+                             (if (and w h)
+                                 `([width ,w][height ,h])
+                                 null)))))]
+                     [(= 1.0 scale) null]
+                     [else
+                      ;; Try to extract file size:
+                      (call-with-input-file*
+                       src
+                       (lambda (in)
+                         (cond
+                          [(regexp-try-match #px#"^\211PNG.{12}" in)
+                           `([width ,(to-num (read-bytes 4 in))]
+                             [height ,(to-num (read-bytes 4 in))])]
+                          [else
+                           null])))])])
+           (let ([srcref (let ([p (install-file src)])
                            (if (path? p)
                                (url->string (path->url (path->complete-path p)))
-                               p))]
-                   [alt ,(content->string (element-content e))]
-                   ,@sz
-                   ,@(attribs)))))]
+                               p))])
+             `((,(if svg? 'object 'img)
+                ([,(if svg? 'data 'src) ,srcref]
+                 [alt ,(content->string (element-content e))]
+                 ,@(if svg?
+                       `([type "image/svg+xml"])
+                       null)
+                 ,@sz
+                 ,@(attribs))
+                ,@(if svg? 
+                      `((param ([name "src"] [value ,srcref])))
+                      null)))))]
         [(and (or (element? e) (multiarg-element? e))
               (ormap (lambda (v) (and (script-property? v) v))
                      (let ([s (if (element? e)
@@ -1032,7 +1077,7 @@
                                           (bytes->string/utf-8
                                            (base64-encode
                                             (string->bytes/utf-8
-                                             (format "~a" (serialize
+                                             (format "~s" (serialize
                                                            (link-element-tag e)))))))
                                     (url-query u))])))]
                         [else
@@ -1253,7 +1298,7 @@
              (ascii-ize i)))]
         [(symbol? i)
          (case i
-           [(mdash) '(" " ndash " ")]
+           [(mdash) '(8212 (wbr))] ;; <wbr> encourages breaking after rather than before
            ;; use "single left/right-pointing angle quotation mark"
            ;; -- it's not a correct choice, but works best for now
            ;;    (see the "Fonts with proper angle brackets"

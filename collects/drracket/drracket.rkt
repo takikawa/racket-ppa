@@ -36,7 +36,9 @@
     (when cm-trace?
       (flprintf "PLTDRDEBUG: enabling CM tracing\n")
       (manager-trace-handler
-       (λ (x) (display "1: ") (display x) (newline) (flush-output))))))
+       (λ (x) 
+         (when (regexp-match #rx"compiling:|end compile:" x)
+           (display "1: ") (display x) (newline) (flush-output)))))))
 
 (when install-cm?
   (flprintf "PLTDRCM: installing compilation manager\n")
@@ -49,8 +51,17 @@
     (current-load/use-compiled (make-compilation-manager-load/use-compiled-handler))
     (when cm-trace?
       (flprintf "PLTDRCM: enabling CM tracing\n")
-      (manager-trace-handler
-       (λ (x) (display "1: ") (display x) (newline) (flush-output))))))
+      (let ([evt (make-log-receiver (current-logger) 'info)])
+        (void
+         (thread
+          (λ ()
+            (let loop ()
+              (define vec (sync evt))
+              (define str (vector-ref vec 1))
+              (when (regexp-match #rx"^cm: *compil(ing|ed)" str)
+                (display str)
+                (newline))
+              (loop)))))))))
 
 (when profiling?
   (flprintf "PLTDRPROFILE: installing profiler\n")

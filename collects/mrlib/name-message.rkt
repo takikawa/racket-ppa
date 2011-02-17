@@ -185,6 +185,7 @@
         (let-values ([(w h) (get-client-size)])
           (cond
             [hidden? 
+             #;
              (let ([pen (send dc get-pen)]
                    [brush (send dc get-brush)])
                (send dc set-brush (send the-brush-list find-or-create-brush (get-panel-background) 'panel))
@@ -261,8 +262,8 @@
              circle-spacer 
              border-inset)])
     (values 
-     (- tx (quotient (- ans-w tw) 2))
-     (- ty (quotient (- ans-h th) 2))
+     (- tx (quotient (ceiling (- ans-w tw)) 2))
+     (- ty (quotient (ceiling (- ans-h th)) 2))
      ans-w
      ans-h)))
 
@@ -276,7 +277,8 @@
   
   (define w (+ border-inset circle-spacer button-label-inset label-width button-label-inset triangle-width circle-spacer border-inset))
 
-  (when bkg-color
+  (when (and bkg-color
+             (and (not (or mouse-over? grabbed?))))
     (send dc set-pen bkg-color 1 'solid)
     (send dc set-brush bkg-color 'solid)
     (send dc draw-rectangle dx dy w h))

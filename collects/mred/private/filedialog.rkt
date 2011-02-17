@@ -3,8 +3,9 @@
 	   mzlib/etc
 	   mzlib/list
 	   (prefix wx: "kernel.ss")
-	   (prefix wx: "wxme/style.ss")
-	   (prefix wx: "wxme/cycle.ss")
+	   (prefix wx: racket/snip)
+	   (rename "wxme/cycle.ss" wx:set-editor-get-file! set-editor-get-file!)
+	   (rename "wxme/cycle.ss" wx:set-editor-put-file! set-editor-put-file!)
 	   "lock.ss"
 	   "wx.ss"
 	   "cycle.ss"
@@ -16,17 +17,6 @@
 	   get-file-list
 	   put-file
 	   get-directory)
-
-  (define (files->list s)
-    (let ([s (open-input-bytes s)])
-      (let loop ()
-	(let ([n (read s)])
-	  (if (eof-object? n)
-	      null
-	      (begin
-		(read-byte s) ; drop space
-		(cons (read-bytes n s)
-		      (loop))))))))
 
   (define (mk-file-selector who put? multi? dir?)
     (lambda (message parent directory filename extension style filters)
@@ -52,7 +42,7 @@
 	(raise-type-error who "list of 2-string lists" filters))
       (let* ([std? (memq 'common style)]
              [style (if std? (remq 'common style) style)])
-        (if (or std? (eq? (system-type) 'unix))
+        (if std?
           (send (new path-dialog%
                   [put?      put?]
                   [dir?      dir?]
@@ -66,23 +56,22 @@
                          [dir? #f]
                          [else filters])])
                 run)
-          (let ([s (wx:file-selector
-                    message directory filename extension
-                    ;; file types:
-                    (apply string-append
-                           (map (lambda (s) (format "~a|~a|" (car s) (cadr s)))
-                                filters))
-                    ;; style:
-                    (cons (cond [dir?   'dir]
-                                [put?   'put]
-                                [multi? 'multi]
-                                [else   'get])
-                          style)
-                    ;; parent:
-                    (and parent (mred->wx parent)))])
-            (if (and multi? s)
-              (map bytes->path (files->list (path->bytes s)))
-              s))))))
+          (wx:file-selector
+           message directory filename extension
+           ;; file types:
+           filters
+           #;
+           (apply string-append
+           (map (lambda (s) (format "~a|~a|" (car s) (cadr s)))
+           filters))
+           ;; style:
+           (cons (cond [dir?   'dir]
+                       [put?   'put]
+                       [multi? 'multi]
+                       [else   'get])
+                 style)
+           ;; parent:
+           (and parent (mred->wx parent)))))))
 
   (define default-filters '(("Any" "*.*")))
 

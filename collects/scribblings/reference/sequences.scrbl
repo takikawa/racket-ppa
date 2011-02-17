@@ -41,6 +41,8 @@ built-in datatypes, the sequence datatype includes the following:
 
  @item{input ports (see @secref["ports"])}
 
+ @item{streams (see @secref["streams"])}
+
 ]
 
 In addition, @scheme[make-do-sequence] creates a sequence given a thunk
@@ -51,7 +53,7 @@ For most sequence types, extracting elements from a sequence has no
 side-effect on the original sequence value; for example, extracting the
 sequence of elements from a list does not change the list.  For other
 sequence types, each extraction implies a side effect; for example,
-extracting the sequence of bytes from a port cause the bytes to be read
+extracting the sequence of bytes from a port causes the bytes to be read
 from the port.
 
 Individual elements of a sequence typically correspond to single values,
@@ -94,7 +96,7 @@ in the sequence.
 
 @defproc[(in-vector [vec vector?]
                     [start exact-nonnegative-integer? 0]
-                    [stop (or/c exact-nonnegative-integer? #f) #f]
+                    [stop (or/c exact-integer? #f) #f]
                     [step (and/c exact-integer? (not/c zero?)) 1])
          sequence?]{
   Returns a sequence equivalent to @scheme[vec] when no optional
@@ -112,19 +114,18 @@ in the sequence.
   equal to @scheme[end] if @scheme[step] is non-negative, or less or
   equal to @scheme[end] if @scheme[step] is negative.
 
+  If @racket[start] is not a valid index, or @racket[stop]
+  is not in [-1, @racket[(vector-length vec)]] then the @exnraise[exn:fail:contract].
   If @scheme[start] is less than @scheme[stop] and @scheme[step] is
   negative, then the @exnraise[exn:fail:contract:mismatch].  Similarly,
   if @scheme[start] is more than @scheme[stop] and @scheme[step] is
-  positive, then the @exnraise[exn:fail:contract:mismatch].  The
-  @scheme[start] and @scheme[stop] values are @emph{not} checked against
-  the size of @scheme[vec], so access can fail when an element is
-  demanded from the sequence.
+  positive, then the @exnraise[exn:fail:contract:mismatch].
 
   @speed[in-vector "vector"]}
 
 @defproc[(in-string [str string?]
                     [start exact-nonnegative-integer? 0]
-                    [stop (or/c exact-nonnegative-integer? #f) #f]
+                    [stop (or/c exact-integer? #f) #f]
                     [step (and/c exact-integer? (not/c zero?)) 1])
          sequence?]{
   Returns a sequence equivalent to @scheme[str] when no optional
@@ -139,7 +140,7 @@ in the sequence.
 
 @defproc[(in-bytes [bstr bytes?]
                    [start exact-nonnegative-integer? 0]
-                   [stop (or/c exact-nonnegative-integer? #f) #f]
+                   [stop (or/c exact-integer? #f) #f]
                    [step (and/c exact-integer? (not/c zero?)) 1])
          sequence?]{
   Returns a sequence equivalent to @scheme[bstr] when no optional
@@ -162,7 +163,7 @@ in the sequence.
   Returns a sequence equivalent to @scheme[(in-port read-byte in)].}
 
 @defproc[(in-input-port-chars [in input-port?]) sequence?]{
-  Returns a sequence whose elements are read as characters form
+  Returns a sequence whose elements are read as characters from
   @scheme[in] (equivalent to @scheme[(in-port read-char in)]).}
 
 @defproc[(in-lines [in input-port? (current-input-port)]
@@ -184,19 +185,49 @@ in the sequence.
 @defproc[(in-hash [hash hash?]) sequence?]{
   Returns a sequence equivalent to @scheme[hash].
 
+  @examples[
+  (define table (hash 'a 1 'b 2))
+  (for ([(key value) (in-hash table)])
+    (printf "key: ~a value: ~a\n" key value))
+  ]
+
   @info-on-seq["hashtables" "hash tables"]}
 
 @defproc[(in-hash-keys [hash hash?]) sequence?]{
-  Returns a sequence whose elements are the keys of @scheme[hash].}
+  Returns a sequence whose elements are the keys of @scheme[hash].
+
+  @examples[
+  (define table (hash 'a 1 'b 2))
+  (for ([key (in-hash-keys table)])
+    (printf "key: ~a\n" key))
+  ]
+  
+  }
 
 @defproc[(in-hash-values [hash hash?]) sequence?]{
-  Returns a sequence whose elements are the values of @scheme[hash].}
+  Returns a sequence whose elements are the values of @scheme[hash].
+
+  @examples[
+  (define table (hash 'a 1 'b 2))
+  (for ([value (in-hash-values table)])
+    (printf "value: ~a\n" value))
+  ]
+  
+  }
 
 @defproc[(in-hash-pairs [hash hash?]) sequence?]{
   Returns a sequence whose elements are pairs, each containing a key and
   its value from @scheme[hash] (as opposed to using @scheme[hash]
   directly as a sequence to get the key and value as separate values for
-  each element).}
+  each element).
+
+  @examples[
+  (define table (hash 'a 1 'b 2))
+  (for ([key+value (in-hash-pairs table)])
+    (printf "key and value: ~a\n" key+value))
+  ]
+  
+  }
 
 @defproc[(in-directory [dir (or/c #f path-string?) #f]) sequence?]{
   Return a sequence that produces all of the paths for files,
@@ -208,12 +239,14 @@ in the sequence.
 @defproc[(in-producer [producer procedure?] [stop any/c] [args any/c] ...)
          sequence?]{
   Returns a sequence that contains values from sequential calls to
-  @scheme[producer].  @scheme[stop] identifies the value that marks the
-  end of the sequence --- this value is not included in the sequence.
-  @scheme[stop] can be a predicate or a value that is tested against the
-  results with @scheme[eq?].  Note that you must use a predicate
-  function if the stop value is itself a function, or if the
-  @scheme[producer] returns multiple values.}
+  @scheme[producer].  A @scheme[stop] value returned by
+  @racket[producer] marks the end of the sequence (and the
+  @racket[stop] value is not included in the sequence); @scheme[stop]
+  can be a predicate that is applied to the results of @racket[producer],
+  or it can be a value that is tested against the result of 
+  with @scheme[eq?].  (The @racket[stop] argument must be a predicate
+  if the stop value is itself a function or if
+  @scheme[producer] returns multiple values.)}
 
 @defproc[(in-value [v any/c]) sequence?]{
   Returns a sequence that produces a single value: @scheme[v].  This
@@ -282,7 +315,7 @@ in the sequence.
     @item{The fifth result is like the fourth result, but it takes the
       current element value(s) instead of the current position.}
     @item{The sixth result is like the fourth result, but it takes both
-      the current position and the current element values(s) and
+      the current position and the current element value(s) and
       determines a sequence end after the current element is already
       included in the sequence.}]
 
@@ -319,7 +352,18 @@ in the sequence.
         c)]]}
 
 @; ----------------------------------------------------------------------
-@section{Additional Sequence Operations}
+@section{Sequence Generators}
+
+@defproc[(sequence-generate [seq sequence?])
+         (values (-> boolean?) (-> any))]{
+  Returns two thunks to extract elements from the sequence.  The first
+  returns @scheme[#t] if more values are available for the sequence.
+  The second returns the next element (which may be multiple values)
+  from the sequence; if no more elements are available, the
+  @exnraise[exn:fail:contract].}
+
+@; ----------------------------------------------------------------------
+@section[#:tag "streams"]{Streams}
 
 @note-lib[racket/stream]
 
@@ -413,26 +457,15 @@ in the sequence.
 
 @defproc[(stream-add-between [s sequence?] [e any/c])
          sequence?]{
-  Returns a sequence whose elements are the elements of @scheme[s]
-  except in between each is @scheme[e].  The new sequence is constructed
-  lazily.}
+  Returns a sequence whose elements are the elements of @scheme[s],
+  but with @scheme[e] between each pair of elements in @racket[s].
+  The new sequence is constructed lazily.}
 
 @defproc[(stream-count [f procedure?] [s sequence?])
          exact-nonnegative-integer?]{
   Returns the number of elements in @scheme[s] for which @scheme[f]
   returns a true result.  If @scheme[s] is infinite, this function does
   not terminate.}
-
-@; ----------------------------------------------------------------------
-@section{Sequence Generators}
-
-@defproc[(sequence-generate [seq sequence?])
-         (values (-> boolean?) (-> any))]{
-  Returns two thunks to extract elements from the sequence.  The first
-  returns @scheme[#t] if more values are available for the sequence.
-  The second returns the next element (which may be multiple values)
-  from the sequence; if no more elements are available, the
-  @exnraise[exn:fail:contract].}
 
 @; ----------------------------------------------------------------------
 @section{Iterator Generators}
@@ -467,7 +500,7 @@ in the sequence.
     (g)
     (g)]
 
-  To use an existing generator as a sequence, you should use
+  To use an existing generator as a sequence, use
   @scheme[in-producer] with a stop-value known for the generator.
 
   @examples[#:eval generator-eval
@@ -485,7 +518,7 @@ in the sequence.
 
 @defform[(infinite-generator body ...)]{
   Creates a function similar to @scheme[generator] but when the last
-  @scheme[body] is executed the function will re-execute all the bodies
+  @scheme[body] is evaluated, the function will re-evaluates all the bodies
   in a loop.
 
   @examples[#:eval generator-eval

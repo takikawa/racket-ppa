@@ -32,7 +32,7 @@ means specifically @tech{@Spattern}.
 
 @schemegrammar*[#:literals (_ ~var ~literal ~or ~and ~not ~rest ~datum
                             ~describe ~seq ~optional ~rep ~once ~between
-                            ~! ~bind ~fail ~parse ~peek)
+                            ~! ~bind ~fail ~parse ~peek ~peek-not ~do)
                 [S-pattern
                  pvar-id
                  pvar-id:syntax-class-id
@@ -77,6 +77,7 @@ means specifically @tech{@Spattern}.
                  (@#,ref[~commit h] H-pattern)
                  (@#,ref[~delimit-cut h] H-pattern)
                  (~peek H-pattern)
+                 (~peek-not H-pattern)
                  proper-S-pattern]
                 [EH-pattern
                  (@#,ref[~or eh] EH-pattern ...)
@@ -86,10 +87,11 @@ means specifically @tech{@Spattern}.
                  H-pattern]
                 [A-pattern
                  ~!
-                 (~bind [attr-id expr] ...)
+                 (~bind [attr-arity-decl expr] ...)
                  (~fail maybe-fail-condition maybe-message-expr)
                  (~parse S-pattern stx-expr)
-                 (@#,ref[~and a] A-pattern ...+)]
+                 (@#,ref[~and a] A-pattern ...+)
+                 (~do defn-or-expr ...)]
                 [proper-S-pattern
                  #, @elem{a @svar{S-pattern} that is not a @svar{A-pattern}}]
                 [proper-H-pattern
@@ -145,7 +147,7 @@ One of @ref[~commit s] or @ref[~commit h]:
 
 @defidform[~delimit-cut]{
 
-One of @ref[~delimit-cut s] or @ref[~describe h]:
+One of @ref[~delimit-cut s] or @ref[~delimit-cut h]:
 @itemize[
 @item{@ref[~delimit-cut h] if the subpattern is a @tech{proper @Hpattern}}
 @item{@ref[~delimit-cut s] otherwise}
@@ -733,6 +735,25 @@ a sequence.
 ]
 }
 
+@specsubform[(@#,defhere[~peek-not] H-pattern)]{
+
+Like @racket[~peek], but succeeds if the subpattern fails and fails if
+the subpattern succeeds. On success, the @racket[~peek-not] resets the
+matching position, so the pattern consumes no input. Used to look
+ahead in a sequence. None of the subpattern's attributes are bound
+outside of the @scheme[~peek-not]-pattern.
+
+@myexamples[
+(define-splicing-syntax-class final (code:comment "final term")
+  (pattern (~seq x (~peek-not _))))
+
+(syntax-parse #'(a b c)
+  [((~or f:final o:other) ...)
+   (printf "finals are ~s\n" (syntax->datum #'(f.x ...)))
+   (printf "others are ~s\n" (syntax->datum #'(o ...)))])
+]
+}
+
 @specsubform[S-pattern]{
 
 Matches a sequence of one element, which must be a term matching
@@ -894,7 +915,10 @@ within a @scheme[~not] pattern unless there is an intervening
 @scheme[~delimit-cut] or @scheme[~commit] pattern.
 }
 
-@specsubform[(@#,defhere[~bind] [attr-id expr] ...)]{
+@specsubform/subs[(@#,defhere[~bind] [attr-arity-decl expr] ...)
+                  ([attr-arity-decl
+                    attr-name-id
+                    (attr-name-id depth)])]{
 
 Evaluates the @scheme[expr]s and binds them to the given
 @scheme[attr-id]s as attributes.
@@ -929,4 +953,21 @@ Evaluates @scheme[stx-expr] to a syntax object and matches it against
 @specsubform[(@#,def[~and a] A-pattern ...+)]{
 
 Performs the actions of each @scheme[A-pattern].
+}
+
+@specsubform[(@#,defhere[~do] defn-or-expr ...)]{
+
+Takes a sequence of definitions and expressions, which may be
+intermixed, and evaluates them in the scope of all previous attribute
+bindings. The names bound by the definitions are in scope in the
+expressions of subsequent patterns and clauses.
+
+There is currently no way to bind attributes using a @scheme[~do]
+pattern. It is an error to shadow an attribute binding with a
+definition in a @scheme[~do] block.
+
+@myexamples[
+(syntax-parse #'(1 2 3)
+  [(a b (~do (printf "a was ~s\n" #'a)) c:id) 'ok])
+]
 }

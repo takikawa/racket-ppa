@@ -11,6 +11,7 @@
         (namespace-require '(for-syntax scheme/base))
         (namespace-require '(for-template scheme/base))
         (namespace-require 'scheme/contract)
+        (namespace-require 'scheme/set)
         (namespace-require '(only racket/contract/private/arrow procedure-accepts-and-more?))
         (namespace-require 'scheme/class)
         (namespace-require 'scheme/promise)
@@ -89,9 +90,12 @@
   (define (test/spec-failed name expression blame)
     (let ()
       (define (has-proper-blame? msg)
-        (regexp-match?
-         (string-append "(^| )" (regexp-quote blame) " broke")
-         msg))
+        (define reg
+          (case blame
+            [(pos) #rx"^self-contract violation"]
+            [(neg) #rx"blaming neg"]
+            [else (error 'test/spec-failed "unknown blame name ~s" blame)]))
+        (regexp-match? reg msg))
       (printf "testing: ~s\n" name)
       (contract-eval
        `(,thunk-error-test 
@@ -2604,6 +2608,70 @@
 			   'pos
 			   'neg)
 	 #f))
+
+  (test/spec-passed/result
+   '->i48
+   '(let ([x '()])
+      ((contract (->i ([arg (begin (set! x (cons 'arg-eval x)) integer?)])
+		      [res () (begin
+				(set! x (cons 'res-eval x))
+				(λ (res)
+				   (set! x (cons 'res-check x))))])
+		 (λ (arg) 
+		    (set! x (cons 'body x)))
+		 'pos
+		 'neg)
+       1)
+      x)
+   '(res-check res-eval body arg-eval))
+
+  (test/spec-passed/result
+   '->i49
+   '(let ([x '()])
+     ((contract (->i ([arg (begin (set! x (cons 'arg-eval x)) integer?)])
+		     [_ () (begin
+			     (set! x (cons 'res-eval x))
+			     (λ (res)
+				(set! x (cons 'res-check x))))])
+		(λ (arg) 
+		   (set! x (cons 'body x)))
+		'pos
+		'neg)
+      1)
+     x)
+   '(res-check body res-eval arg-eval))
+
+  (test/spec-passed/result
+   '->i50
+   '(let ([x '()])
+     ((contract (->i ([arg (begin (set! x (cons 'arg-eval x)) integer?)])
+		     [res (begin
+			    (set! x (cons 'res-eval x))
+			    (λ (res)
+			       (set! x (cons 'res-check x))))])
+		(λ (arg) 
+		   (set! x (cons 'body x)))
+		'pos
+		'neg)
+      1)
+     x)
+   '(res-check body res-eval arg-eval))
+
+  (test/spec-passed/result
+   '->i51
+   '(let ([x '()])
+     ((contract (->i ([arg (begin (set! x (cons 'arg-eval x)) integer?)])
+		     [_ (begin
+			  (set! x (cons 'res-eval x))
+			  (λ (res)
+			     (set! x (cons 'res-check x))))])
+		(λ (arg) 
+		   (set! x (cons 'body x)))
+		'pos
+		'neg)
+      1)
+     x)
+   '(res-check body res-eval arg-eval))
 
   (test/pos-blame
    '->i-arity1
@@ -5980,6 +6048,16 @@
     (test #t (contract-eval 'is-a?) (contract-eval `(contract (object-contract) ,o 'pos 'neg)) i<%>)
     (test #t (contract-eval 'is-a?) (contract-eval `(contract (object-contract) ,o 'pos 'neg)) c%))
   
+  ;; Currently the new object contracts using impersonators don't even attempt to ensure that
+  ;; these reflective operations still work, and I'm not even sure they should.  For now, I
+  ;; just get the class info from the original object, which means that all contracts are evaded.
+  ;;
+  ;; Just as a note, if we move the class-insp-mk values forward in class/c-proj and make-wrapper-class,
+  ;; we get a failure in object->vector for the second testcase because the field-ref/field-set! in the
+  ;; contracted version of the class (for a struct subtype of the original class's struct type) doesn't
+  ;; know how to get the fields out of the object struct. We can always force it with unsafe-struct-ref,
+  ;; but if we had impersonate-struct-type, with the same ability to replace the prop:object as
+  ;; impersonate-struct has, then we might be able to handle this better.
   (let ([c% (parameterize ([current-inspector (make-inspector)])
               (contract-eval '(class object% (super-new))))])
     (test (list c% #f) 
@@ -7409,6 +7487,124 @@
                         'neg)])
       (set-field! n pre-o #t)
       (get-field n o)))
+  
+
+;                                                                           
+;                                                                           
+;                                                                           
+;   ;                                                                    ;;;
+;   ;                                                                   ;   
+;                        ;                                              ;   
+;                        ;                                              ;   
+;   ;   ;; ;;;    ;;;;  ;;;;;  ;;;;   ;; ;;;     ;;;    ;;;     ;;;    ;;;; 
+;  ;;    ;;   ;  ;    ;  ;         ;   ;;   ;   ;   ;  ;   ;   ;   ;    ;   
+;   ;    ;    ;  ;    ;  ;         ;   ;    ;  ;    ; ;     ; ;     ;   ;   
+;   ;    ;    ;   ;;     ;     ;;;;;   ;    ;  ;      ;;;;;;; ;     ;   ;   
+;   ;    ;    ;     ;;   ;    ;    ;   ;    ;  ;      ;       ;     ;   ;   
+;   ;    ;    ;  ;    ;  ;    ;    ;   ;    ;  ;      ;       ;     ;   ;   
+;   ;    ;    ;  ;    ;  ;    ;   ;;   ;    ;   ;   ;  ;    ;  ;   ;    ;   
+;  ;;;  ;;;  ;;;  ;;;;    ;;;  ;;; ;; ;;;  ;;;   ;;;    ;;;;    ;;;    ;;;  
+;                                                                           
+;                                                                           
+;                                                                           
+;                                                                           
+
+  (test/spec-passed
+   'instanceof/c-first-order-1
+   '(let* ([c% object%]
+           [c%/c (class/c)])
+      (contract (instanceof/c c%/c) (new c%) 'pos 'neg)))
+  
+  (test/pos-blame
+   'instanceof/c-first-order-2
+   '(let* ([c% object%]
+           [c%/c (class/c (field [f number?]))])
+      (contract (instanceof/c c%/c) (new c%) 'pos 'neg)))
+  
+  (test/pos-blame
+   'instanceof/c-first-order-3
+   '(let* ([c% object%]
+           [c%/c (class/c [m (->m number? number?)])])
+      (contract (instanceof/c c%/c) (new c%) 'pos 'neg)))
+  
+  (test/spec-passed
+   'instanceof/c-first-order-4
+   '(let* ([c% (class object% (super-new) (field [f 3]))]
+           [c%/c (class/c (field [f number?]))])
+      (contract (instanceof/c c%/c) (new c%) 'pos 'neg)))
+  
+  (test/spec-passed
+   'instanceof/c-first-order-5
+   '(let* ([c% (class object% (super-new) (define/public (m x) x))]
+           [c%/c (class/c [m (->m number? number?)])])
+      (contract (instanceof/c c%/c) (new c%) 'pos 'neg)))
+  
+  (test/spec-passed
+   'instanceof/c-first-order-6
+   '(let* ([c% (class object% (super-new) (define/public (m x) x))]
+           [c%/c (class/c [m (->m number? number?)])]
+           [d%/c (class/c [n (->m number? number?)])])
+      (contract (instanceof/c (or/c c%/c d%/c)) (new c%) 'pos 'neg)))
+  
+  (test/spec-passed
+   'instanceof/c-first-order-7
+   '(let* ([d% (class object% (super-new) (define/public (n x) x))]
+           [c%/c (class/c [m (->m number? number?)])]
+           [d%/c (class/c [n (->m number? number?)])])
+      (contract (instanceof/c (or/c c%/c d%/c)) (new d%) 'pos 'neg)))
+  
+  (test/pos-blame
+   'instanceof/c-first-order-8
+   '(let* ([e% (class object% (super-new) (define/public (p x) x))]
+           [c%/c (class/c [m (->m number? number?)])]
+           [d%/c (class/c [n (->m number? number?)])])
+      (contract (instanceof/c (or/c c%/c d%/c)) (new e%) 'pos 'neg)))
+  
+  (test/spec-passed/result
+   'instanceof/c-higher-order-1
+   '(let* ([c% (class object% (super-new) (field [f 3]))]
+           [c%/c (class/c (field [f number?]))]
+           [o (contract (instanceof/c c%/c) (new c%) 'pos 'neg)])
+      (get-field f o))
+   3)
+  
+  (test/neg-blame
+   'instanceof/c-higher-order-2
+   '(let* ([c% (class object% (super-new) (field [f 3]))]
+           [c%/c (class/c (field [f number?]))]
+           [o (contract (instanceof/c c%/c) (new c%) 'pos 'neg)])
+      (set-field! f o #t)))
+  
+  (test/pos-blame
+   'instanceof/c-higher-order-3
+   '(let* ([c% (class object% (super-new) (define/public (m x) (zero? x)))]
+           [c%/c (class/c [m (->m number? number?)])]
+           [o (contract (instanceof/c c%/c) (new c%) 'pos 'neg)])
+      (send o m 3)))
+  
+  (test/spec-passed
+   'instanceof/c-higher-order-4
+   '(let* ([c% (class object% (super-new) (define/public (m x) x))]
+           [c%/c (class/c [m (->m number? number?)])]
+           [d%/c (class/c [n (->m number? number?)])]
+           [o (contract (instanceof/c (or/c c%/c d%/c)) (new c%) 'pos 'neg)])
+      (send o m 3)))
+  
+  (test/pos-blame
+   'instanceof/c-higher-order-4
+   '(let* ([c% (class object% (super-new) (define/public (m x) #t))]
+           [c%/c (class/c [m (->m number? number?)])]
+           [d%/c (class/c [n (->m number? number?)])]
+           [o (contract (instanceof/c (or/c c%/c d%/c)) (new c%) 'pos 'neg)])
+      (send o m 3)))
+  
+  (test/neg-blame
+   'instanceof/c-higher-order-4
+   '(let* ([c% (class object% (super-new) (define/public (m x) x))]
+           [c%/c (class/c [m (->m number? number?)])]
+           [d%/c (class/c [n (->m number? number?)])]
+           [o (contract (instanceof/c (or/c c%/c d%/c)) (new c%) 'pos 'neg)])
+      (send o m #t)))
 
 ;                                                                                    
 ;                                                                                    
@@ -7872,6 +8068,87 @@
                 (make-s 1 (make-s 2 3))
                 'pos
                 'neg)))
+  
+  (test/spec-passed
+   'struct/c6
+   '(let ()
+      (define-struct s (f))
+      (let ([v (contract (struct/c s (-> number? number?))
+                         (make-s values)
+                         'pos
+                         'neg)])
+        ((s-f v) 3))))
+
+  (test/neg-blame
+   'struct/c7
+   '(let ()
+      (define-struct s (f))
+      (let ([v (contract (struct/c s (-> number? number?))
+                         (make-s values)
+                         'pos
+                         'neg)])
+        ((s-f v) #f))))
+
+  (test/pos-blame
+   'struct/c8
+   '(let ()
+      (define-struct s (f))
+      (let ([v (contract (struct/c s (-> number? number?))
+                         (make-s (λ (v) #f))
+                         'pos
+                         'neg)])
+        ((s-f v) 3))))
+  
+  (test/spec-passed
+   'struct/c9
+   '(let ()
+      (define-struct s (a b) #:mutable)
+      (let ([v (contract (struct/c s integer? boolean?)
+                         (make-s 3 #t)
+                         'pos
+                         'neg)])
+        (set-s-a! v 4)
+        (set-s-b! v #t))))
+
+  (test/neg-blame
+   'struct/c10
+   '(let ()
+      (define-struct s (a b) #:mutable)
+      (let ([v (contract (struct/c s integer? boolean?)
+                         (make-s 3 #t)
+                         'pos
+                         'neg)])
+        (set-s-a! v #f))))
+
+  (test/neg-blame
+   'struct/c11
+   '(let ()
+      (define-struct s (a [b #:mutable]))
+      (let ([v (contract (struct/c s integer? boolean?)
+                         (make-s 3 #t)
+                         'pos
+                         'neg)])
+        (set-s-b! v 5))))
+  
+  (test/spec-passed/result
+   'struct/c12
+   '(let ()
+      (define-struct s (a) #:mutable)
+      (define alpha (new-∃/c 'alpha))
+      (define v (make-s 3))
+      (let ([v* (contract (struct/c s alpha) v 'pos 'neg)])
+        (set-s-a! v* (s-a v*)))
+      (s-a v))
+   3)
+  
+  (test/neg-blame
+   'struct/c13
+   '(let ()
+      (define-struct s (a) #:mutable)
+      (define alpha (new-∃/c 'alpha))
+      (define v (make-s 3))
+      (let ([v* (contract (struct/c s alpha) v 'pos 'neg)])
+        (set-s-a! v* 4))))
 
   
 ;                                                                              
@@ -7941,6 +8218,26 @@
               #f
               'pos
               'neg))
+  
+  (test/spec-passed
+   'recursive-contract6
+   '(letrec ([ctc (or/c number? (cons/c number? (recursive-contract ctc #:flat)))])
+      (contract ctc (cons 1 (cons 2 3)) 'pos 'neg)))
+  
+  (test/pos-blame
+   'recursive-contract7
+   '(letrec ([ctc (or/c number? (cons/c number? (recursive-contract ctc #:flat)))])
+      (contract ctc (cons 1 (cons 2 #t)) 'pos 'neg)))
+  
+  (test/pos-blame
+   'recursive-contract8
+   '(letrec ([ctc (or/c number? (cons/c number? (recursive-contract ctc #:flat)))])
+      (contract ctc (cons 1 (cons #t 3)) 'pos 'neg)))
+  
+  (test/spec-passed
+   'recursive-contract9
+   '(letrec ([ctc (or/c number? (hash/c (recursive-contract ctc #:chaperone) number?))])
+      (make-hash (list (cons (make-hash (list (cons 3 4))) 5)))))
   
   
 
@@ -8843,8 +9140,45 @@ so that propagation occurs.
   (ctest #t flat-contract? (and/c (flat-contract number?)
 				 (flat-contract integer?)))
   (ctest #t flat-contract? (let ()
-                            (define-struct s (a b))
-                            (struct/c s any/c any/c)))
+                             (define-struct s (a b))
+                             (struct/c s any/c any/c)))
+  (ctest #f flat-contract? (let ()
+                             (define-struct s (a b) #:mutable)
+                             (struct/c s any/c any/c)))
+  (ctest #t chaperone-contract? (let ()
+                                  (define-struct s (a b) #:mutable)
+                                  (struct/c s any/c any/c)))
+  (ctest #f flat-contract? (let ()
+                             (define-struct s ([a #:mutable] b))
+                             (struct/c s any/c any/c)))
+  (ctest #t chaperone-contract? (let ()
+                                  (define-struct s ([a #:mutable] b))
+                                  (struct/c s any/c any/c)))
+  (ctest #f flat-contract? (let ()
+                             (define-struct s (a [b #:mutable]))
+                             (struct/c s any/c any/c)))
+  (ctest #t chaperone-contract? (let ()
+                                  (define-struct s (a [b #:mutable]))
+                                  (struct/c s any/c any/c)))
+  (ctest #f flat-contract? (let ()
+                             (define-struct s (f))
+                             (struct/c s (-> number? any))))
+  (ctest #t chaperone-contract? (let ()
+                                  (define-struct s (f))
+                                  (struct/c s (-> number? any))))
+  
+  (ctest #f flat-contract? (let ()
+                             (define-struct s (a) #:mutable)
+                             (define alpha (new-∃/c 'alpha))
+                             (struct/c s alpha)))
+  (ctest #f chaperone-contract? (let ()
+                                  (define-struct s (a) #:mutable)
+                                  (define alpha (new-∃/c 'alpha))
+                                  (struct/c s alpha)))
+  (ctest #t contract? (let ()
+                        (define-struct s (a) #:mutable)
+                        (define alpha (new-∃/c 'alpha))
+                        (struct/c s alpha)))
   
   ;; Hash contracts with flat domain/range contracts
   (ctest #t contract?           (hash/c any/c any/c #:immutable #f))
@@ -8864,17 +9198,24 @@ so that propagation occurs.
   (ctest #f flat-contract?      (hash/c number? (hash/c number? number?)))
   
   ;; Hash contracts with proxy range contracts
-  (ctest #t contract?           (hash/c number? (-> number? number?) #:immutable #f))
-  (ctest #f chaperone-contract? (hash/c number? (-> number? number?) #:immutable #f))
-  (ctest #f flat-contract?      (hash/c number? (-> number? number?) #:immutable #f))
+  (contract-eval
+   '(define trivial-proxy-ctc
+      (make-contract
+       #:name 'trivial-proxy-ctc
+       #:first-order values
+       #:projection (λ (b) values))))
 
-  (ctest #t contract?           (hash/c number? (-> number? number?) #:immutable #t))
-  (ctest #f chaperone-contract? (hash/c number? (-> number? number?) #:immutable #t))
-  (ctest #f flat-contract?      (hash/c number? (-> number? number?) #:immutable #t))
+  (ctest #t contract?           (hash/c number? trivial-proxy-ctc #:immutable #f))
+  (ctest #f chaperone-contract? (hash/c number? trivial-proxy-ctc #:immutable #f))
+  (ctest #f flat-contract?      (hash/c number? trivial-proxy-ctc #:immutable #f))
   
-  (ctest #t contract?           (hash/c number? (-> number? number?)))
-  (ctest #f chaperone-contract? (hash/c number? (-> number? number?)))
-  (ctest #f flat-contract?      (hash/c number? (-> number? number?)))
+  (ctest #t contract?           (hash/c number? trivial-proxy-ctc #:immutable #t))
+  (ctest #f chaperone-contract? (hash/c number? trivial-proxy-ctc #:immutable #t))
+  (ctest #f flat-contract?      (hash/c number? trivial-proxy-ctc #:immutable #t))
+  
+  (ctest #t contract?           (hash/c number? trivial-proxy-ctc))
+  (ctest #f chaperone-contract? (hash/c number? trivial-proxy-ctc))
+  (ctest #f flat-contract?      (hash/c number? trivial-proxy-ctc))
   
   ;; Make sure that proxies cannot be used as the domain contract in hash/c.
   (contract-error-test
@@ -8882,7 +9223,7 @@ so that propagation occurs.
            (make-contract
             #:name 'proxy-ctc
             #:first-order values
-            #:higher-order (λ (b) values))])
+            #:projection (λ (b) values))])
       (hash/c proxy-ctc proxy-ctc))
    exn:fail?)
   
@@ -8902,13 +9243,26 @@ so that propagation occurs.
   (ctest #t chaperone-contract? (box/c (box/c number?) #:immutable #t))
   (ctest #f flat-contract?      (box/c (box/c number?) #:immutable #t))
 
-  (ctest #t contract?           (box/c (-> number? number?)))
-  (ctest #f chaperone-contract? (box/c (-> number? number?)))
-  (ctest #f flat-contract?      (box/c (-> number? number?)))
+  (ctest #t contract?           (box/c trivial-proxy-ctc))
+  (ctest #f chaperone-contract? (box/c trivial-proxy-ctc))
+  (ctest #f flat-contract?      (box/c trivial-proxy-ctc))
 
-  (ctest #t contract?           (box/c (-> number? number?) #:immutable #t))
-  (ctest #f chaperone-contract? (box/c (-> number? number?) #:immutable #t))
-  (ctest #f flat-contract?      (box/c (-> number? number?) #:immutable #t))
+  (ctest #t contract?           (box/c trivial-proxy-ctc #:immutable #t))
+  (ctest #f chaperone-contract? (box/c trivial-proxy-ctc #:immutable #t))
+  (ctest #f flat-contract?      (box/c trivial-proxy-ctc #:immutable #t))
+  
+  ;; Test the ability to create different types of contracts with recursive-contract
+  (ctest #t flat-contract? (letrec ([ctc (or/c number? 
+                                               (cons/c (recursive-contract ctc #:flat)
+                                                       (recursive-contract ctc #:flat)))])
+                             ctc))
+  
+  (ctest #f flat-contract? (letrec ([ctc (or/c number? 
+                                               (box/c (recursive-contract ctc #:chaperone)))])
+                             ctc))
+  (ctest #t chaperone-contract? (letrec ([ctc (or/c number? 
+                                                    (box/c (recursive-contract ctc #:chaperone)))])
+                                  ctc))
 
   (ctest #t contract? 1)
   (ctest #t contract? (-> 1 1))
@@ -9225,7 +9579,7 @@ so that propagation occurs.
   (test-name '(between/c 5 6) (between/c 5 6))
   (test-name '(between/c -inf.0 +inf.0) (between/c -inf.0 +inf.0))
   (test-name '(integer-in 0 10) (integer-in 0 10))
-  (test-name '(real-in 1 10) (real-in 1 10))
+  (test-name '(between/c 1 10) (real-in 1 10))
   (test-name '(string-len/c 3) (string-len/c 3))
   (test-name 'natural-number/c natural-number/c)
   (test-name #f false/c)
@@ -9357,6 +9711,11 @@ so that propagation occurs.
   (test-name '(couple/dc [hd any/c] [tl ...])
              (couple/dc [hd any/c] [tl (hd) any/c]))
 
+  (test-name '(set/c integer?) (set/c integer?))
+  (test-name '(set/c boolean? #:cmp 'equal) (set/c boolean? #:cmp 'equal))
+  (test-name '(set/c char? #:cmp 'eq) (set/c char? #:cmp 'eq))
+  (test-name '(set/c (set/c char?) #:cmp 'eqv) (set/c (set/c char? #:cmp 'dont-care) #:cmp 'eqv))
+  
   ;; NOT YET RELEASED
   #;
   (test-name '(pr/dc [x integer?]
@@ -9723,6 +10082,17 @@ so that propagation occurs.
              (f 3))
            (c)))
   
+  (ctest 1
+         'tail-unconstrained-domain-arrow
+         (let ([c (counter)])
+           (letrec ([f 
+                     (contract (unconstrained-domain-> c)
+                               (λ (x) (if (zero? x) x (f (- x 1))))
+                               'pos
+                               'neg)])
+             (f 3))
+           (c)))
+  
   (ctest 2
          'tail-multiple-value-arrow
          (let ([c (counter)])
@@ -9745,98 +10115,6 @@ so that propagation occurs.
              (f 3))
            (c)))
   
-  
-  ;; this one is not tail recursive, since the contract system
-  ;; cannot tell that the range contract doesn't depend on 'arg'
-  (ctest 8
-         'tail-arrow-d1/changing-args
-         (let ([c (counter)])
-           (letrec ([f 
-                     (contract (->d ([arg any/c]) () (values [_ c] [_ c]))
-                               (λ (x) (if (zero? x) (values x x) (f (- x 1))))
-                               'pos
-                               'neg)])
-             (f 3))
-           (c)))
-  
-  (ctest 2
-         'tail-arrow-d1
-         (let ([c (counter)])
-           (letrec ([x 5]
-                    [f 
-                     (contract (->d ([arg any/c]) () (values [_ c] [_ c]))
-                               (λ (_ignored) (if (zero? x) (values x x) (begin (set! x (- x 1)) (f _ignored))))
-                               'pos
-                               'neg)])
-             (f 'ignored))
-           (c)))
-  
-  
-  ;; this one is just like the one two above.
-  (ctest 4
-         'tail-arrow-d2/changing-args
-         (let ([c (counter)])
-           (letrec ([f 
-                     (contract (->d ([arg any/c]) () [rng c])
-                               (λ (x) (if (zero? x) x (f (- x 1))))
-                               'pos
-                               'neg)])
-             (f 3))
-           (c)))
-  
-  (ctest 1
-         'tail-arrow-d2
-         (let ([c (counter)])
-           (letrec ([x 3]
-                    [f 
-                     (contract (->d ([arg any/c]) () [rng c])
-                               (λ (ignored) (if (zero? x) x (begin (set! x (- x 1)) (f ignored))))
-                               'pos
-                               'neg)])
-             (f 3))
-           (c)))
-  
-  ;; the tail-call optimization cannot handle two different
-  ;; contracts on the stack one after the other one, so this
-  ;; returns '(4 4) instead of '(1 1) (which would indicate
-  ;; the optimization had happened).
-  (ctest '(4 4)
-         'tail->d-mut-rec
-         (letrec ([odd-count 0]
-                  [pos-count 0]
-                  [count-odd?
-                   (λ (x)
-                     (set! odd-count (+ odd-count 1))
-                     (odd? x))]
-                  [count-positive? 
-                   (λ (x)
-                     (set! pos-count (+ pos-count 1))
-                     (positive? x))]
-                  [returns-odd
-                   (contract (->d ([x any/c]) () [_ count-odd?])
-                             (λ (x) (returns-pos x))
-                             'pos
-                             'neg)]
-                  [returns-pos
-                   (contract (->d ([x any/c]) () [_ count-positive?])
-                             (λ (x) (if (zero? x) 1 (returns-odd (- x 1))))
-                             'pos
-                             'neg)])
-           (returns-odd 3)
-           (list odd-count pos-count)))
-    
-  ;; this one is not tail recursive, since the contract system
-  ;; cannot tell that the range contract doesn't depend on 'arg'
-  (ctest 8
-         'tail-arrow-d1/changing-args
-         (let ([c (counter)])
-           (letrec ([f 
-                     (contract (->i ([arg any/c]) () (values [_ (arg) c] [_ (arg) c]))
-                               (λ (x) (if (zero? x) (values x x) (f (- x 1))))
-                               'pos
-                               'neg)])
-             (f 3))
-           (c)))
   
   (ctest 1
          'case->-regular
@@ -9935,12 +10213,11 @@ so that propagation occurs.
     (test ctc value-contract (contract ctc (λ (x [y 3]) x) 'pos 'neg)))
   (let ([ctc (->i ([x number?]) ([y number?]) [_ number?])])
     (test ctc value-contract (contract ctc (λ (x [y 3]) x) 'pos 'neg)))
-  ;; currently fails due to procedure-rename interacting badly with
-  ;; chaperoned/proxied procedures
   (let ([ctc (unconstrained-domain-> number?)])
     (test ctc value-contract (contract ctc (λ (x) 3) 'pos 'neg)))
   (let ([ctc (case-> (-> number? number? number?) (-> number? number?))])
     (test ctc value-contract (contract ctc (case-lambda [(x) 3] [(x y) (+ x y)]) 'pos 'neg)))
+
   (let ([ctc (box/c number?)])
     (test ctc value-contract (contract ctc (box 3) 'pos 'neg)))
   (let ([ctc (hash/c number? number?)])
@@ -9949,6 +10226,9 @@ so that propagation occurs.
     (test ctc value-contract (contract ctc (vector 1 2 3) 'pos 'neg)))
   (let ([ctc (vector/c number? number?)])
     (test ctc value-contract (contract ctc (vector 4 5) 'pos 'neg)))
+  
+  (let ([ctc (object-contract)])
+    (test ctc value-contract (contract ctc (new object%) 'pos 'neg)))
   
 ;                             
 ;                             
@@ -9993,6 +10273,85 @@ so that propagation occurs.
                  'neg)
        (λ (x) x)))
    11)
+  
+  (test/pos-blame
+   '∀1
+   '(contract (new-∀/c 'pair)
+              1
+              'pos
+              'neg))
+  
+  (test/spec-passed
+   '∀2
+   '((contract (-> (new-∀/c 'pair) any/c)
+               (λ (x) x)
+               'pos
+               'neg)
+     1))
+  
+  (test/spec-passed/result
+   '∀3
+   '(let ([pair (new-∀/c 'pair)])
+      ((contract (-> pair pair)
+                 (λ (x) x)
+                 'pos
+                 'neg)
+       11))
+   11)
+  
+  
+;                                 ;        
+;                                ;         
+;                    ;           ;         
+;    ;;;;    ;;;;  ;;;;;;       ;     ;;;; 
+;   ;        ;   ;   ;         ;     ;     
+;   ;;      ;    ;   ;         ;    ;      
+;     ;;    ;;;;;;   ;        ;     ;      
+;       ;   ;        ;        ;     ;      
+;       ;   ;        ;       ;       ;     
+;   ;;;;     ;;;;;    ;;;   ;         ;;;; 
+;                           ;              
+;                          ;               
+;                                          
+
+  (test/spec-passed/result
+   'set/c1
+   '(contract (set/c integer?)
+              (set 0)
+              'pos 'neg)
+   (contract-eval '(set 0)))
+  
+  (test/pos-blame 
+   'set/c2
+   '(contract (set/c integer?)
+              (set #t)
+              'pos 'neg))
+  
+  (test/pos-blame
+   'set/c3
+   '(contract (set/c integer? #:cmp 'eq)
+              (set 0)
+              'pos 'neg))
+  
+  (test/pos-blame
+   'set/c4
+   '(contract (set/c integer? #:cmp 'eqv)
+              (set 0)
+              'pos 'neg))
+  
+  (test/pos-blame
+   'set/c5
+   '(contract (set/c integer? #:cmp 'equal)
+              (seteq 0)
+              'pos 'neg))
+  
+  (test/spec-passed/result
+   'set/c6
+   '(set-map (contract (set/c integer?)
+                       (set 0)
+                       'pos 'neg)
+             values)
+   (list 0))
   
 ;                                                        
 ;                                                        
@@ -10735,14 +11094,30 @@ so that propagation occurs.
            (require 'provide/contract-35/m)
            (f #f)))))
     
-      (test (format "contract-test.rktl:~a.30: "
+      (test (format "contract-test.rktl:~a.30"
                     (+ here-line 8))
             'provide/contract-compiled-source-locs
             (with-handlers ((exn:fail? (λ (x) 
-                                         (let ([m (regexp-match #rx"contract-test.rktl[^ ]* " (exn-message x))])
+                                         (let ([m (regexp-match #rx"contract-test.rktl[^ ]*.30" (exn-message x))])
                                            (and m (car m))))))
               
               (contract-eval '(require 'provide/contract-35/n)))))
+  
+  ;; test that provide/contract by itself in a module doesn't signal an error
+  (test/spec-passed/result
+   'provide/contract35
+   '(begin
+      (eval '(module provide/contract35-m1 racket
+               (provide/contract [add1 (-> number? number?)])))
+      
+      (eval '(module provide/contract35-m2 racket/base
+               (require 'provide/contract35-m1)
+               (provide provide/contract35-three)
+               (define provide/contract35-three (add1 2))))
+      
+      (eval '(require 'provide/contract35-m2))
+      (eval 'provide/contract35-three))
+   3)
   
   (contract-error-test
    #'(begin
@@ -10841,7 +11216,6 @@ so that propagation occurs.
                 (provide/contract [f (-> integer? integer? integer?)])))
        (eval '(require 'pce8-bug1)))
    (λ (x)
-     (printf ">> ~s\n" (exn-message x))
      (and (exn? x)
           (regexp-match #rx"pce8-bug" (exn-message x)))))
 
@@ -10856,7 +11230,7 @@ so that propagation occurs.
        (eval '(g 12)))
    (λ (x)
      (and (exn? x)
-          (regexp-match #rx"broke the contract.*on g" (exn-message x)))))
+          (regexp-match #rx"contract on g from 'pce9-bug" (exn-message x)))))
   
   (contract-error-test
    #'(begin
@@ -10869,7 +11243,7 @@ so that propagation occurs.
        (eval '(g 'a)))
    (λ (x)
      (and (exn? x)
-          (regexp-match #rx"broke the contract.*on g" (exn-message x)))))
+          (regexp-match #rx"contract on g from 'pce10-bug" (exn-message x)))))
    
   (contract-eval
    `(,test

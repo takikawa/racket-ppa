@@ -4,6 +4,10 @@
                      racket/runtime-path
                      setup/dirs))
 
+@(define file-eval (make-base-eval))
+@(interaction-eval #:eval file-eval (begin (require racket/file) (define filename (make-temporary-file))))
+
+
 @title{Filesystem}
 
 @;------------------------------------------------------------------------
@@ -149,7 +153,8 @@ by @racket[kind], which must be one of the following:
 Parses a string or byte string containing a list of paths, and returns
 a list of path strings. Under @|AllUnix|, paths in a path list are
 separated by a @litchar{:}; under Windows, paths are separated by a
-@litchar{;}. Whenever the path list contains an empty path, the list
+@litchar{;}, and all @litchar{"}s in the string are discarded. Whenever the path 
+list contains an empty path, the list
 @racket[default-path-list] is spliced into the returned list of
 paths. Parts of @racket[str] that do not form a valid path are not
 included in the returned list.}
@@ -248,12 +253,13 @@ directory (on the same disk) as well as rename a file/directory within
 a directory. Unless @racket[exists-ok?]  is provided as a true value,
 @racket[new] cannot refer to an existing file or directory. Even if
 @racket[exists-ok?] is true, @racket[new] cannot refer to an existing
-file when @racket[old] is a directory, and vice versa. (If
-@racket[new] exists and is replaced, the replacement is atomic in the
-filesystem, except under Windows 95, 98, or Me. However, the check for
-existence is not included in the atomic action, which means that race
-conditions are possible when @racket[exists-ok?] is false or not
-supplied.)
+file when @racket[old] is a directory, and vice versa.
+
+If @racket[new] exists and is replaced, the replacement is atomic
+under Unix and Mac OS X, but it is not guaranteed to be atomic under
+Windows. Furthermore, if @racket[new] exists and is opened by any
+process for reading or writing, then attempting to replace it will
+typically fail under Windows.
 
 If @racket[old] is a link, the link is renamed rather than the
 destination of the link, and it counts as a file for replacing any
@@ -447,6 +453,15 @@ Racket-specific shared-object library directories (as determined by
 libraries that are installed specifically for Racket get carried
 along in distributions.
 
+If @racket[expr] produces a list of the form @racket[(list 'module
+_module-path _var-ref)], the value bound to @racket[id] is a
+@tech{module path index}, where @racket[_module-path] is treated as
+relative (if it is relative) to the module that is the home of the
+@tech{variable reference} @racket[_var-ref], where @racket[_var-ref]
+can be @racket[#f] if @racket[_module-path] is absolute. In an
+executable, the corresponding module is carried along, including all
+of its dependencies.
+
 For compile-time, the @racket[expr] result is used by an executable
 creator---but not the result when the containing module is
 compiled. Instead, @racket[expr] is preserved in the module as a
@@ -541,6 +556,18 @@ Like @racket[define-runtime-path], but @racket[expr] should produce a
 list of paths.}
 
 
+@defform[(define-runtime-module-path-index id module-path-expr)]{
+
+Similar to @racket[define-runtime-path], but @racket[id] is bound to a
+@tech{module path index} that encapsulates the result of
+@racket[module-path-expr] relative to the enclosing module.
+
+Use @racket[define-runtime-module-path] to bind a module path that is
+passed to a reflective function like @racket[dynamic-require] while
+also creating a module dependency for building and distributing
+executables.}
+
+
 @defform[(define-runtime-module-path id module-path)]{
 
 Similar to @racket[define-runtime-path], but @racket[id] is bound to a
@@ -549,18 +576,16 @@ Similar to @racket[define-runtime-path], but @racket[id] is bound to a
 as a module path for @racket[require]), which can be relative to the
 enclosing module.
 
-Use @racket[define-runtime-module-path] to bind a module path that is
-passed to a reflective function like @racket[dynamic-require] while
-also creating a module dependency for building and distributing
-executables.
-
-The @racket[define-runtime-module-path] form creates a
-@racket[for-label] dependency from an enclosing module to
-@racket[module-path]. Since the dependency is merely
-@racket[for-label], @racket[module-path] is not @tech{instantiate}d or
-@tech{visit}ed when the enclosing module is @tech{instantiate}d or
-@tech{visit}ed (unless such a dependency is created by other
-@racket[require]s).}
+The @racket[define-runtime-module-path-index] form is usually
+preferred, because it creates a weaker link to the referenced module.
+Unlike @racket[define-runtime-module-path-index], the
+@racket[define-runtime-module-path] form creates a @racket[for-label]
+dependency from an enclosing module to @racket[module-path]. Since the
+dependency is merely @racket[for-label], @racket[module-path] is not
+@tech{instantiate}d or @tech{visit}ed when the enclosing module is
+@tech{instantiate}d or @tech{visit}ed (unless such a dependency is
+created by other @racket[require]s), but the code for the referenced
+module is loaded when the enclosing module is loaded.}
 
 
 @defform[(runtime-paths module-path)]{
@@ -833,10 +858,21 @@ desired access and flags (probably using the @racket['truncate] flag;
 see @racket[open-output-file]) and to delete it when it is no longer
 needed.}
 
+
 @defproc[(get-preference [name symbol?]
                          [failure-thunk (-> any) (lambda () #f)]
                          [flush-mode any/c 'timestamp]
-                         [filename (or/c string-path? #f) #f])
+                         [filename (or/c string-path? #f) #f]
+                         [#:use-lock? use-lock? any/c #t]
+                         [#:timeout-lock-there timeout-lock-there 
+                                               (or/c (path? . -> . any) #f)
+                                               #f]
+                         [#:lock-there 
+                          lock-there
+                          (or/c (path? . -> . any) #f)
+                          (make-handle-get-preference-locked 
+                           0.01 name failure-thunk flush-mode filename
+                           #:lock-there timeout-lock-there)])
          any]{
 
 Extracts a preference value from the file designated by
@@ -866,6 +902,18 @@ cache is used instead of the re-consulting the preferences file. If
 then the cache is used only if the file has a timestamp that is the
 same as the last time the file was read. Otherwise, the file is
 re-consulted.
+
+Under platforms for which @racket[preferences-lock-file-mode] returns
+@racket['file-lock] and when @racket[use-lock?] is true,
+preference-file reading is guarded by a lock; multiple readers can
+share the lock, but writers take the lock exclusively. If the
+preferences file cannot be read because the lock is unavailable,
+@racket[lock-there] is called on the path of the lock file; if
+@racket[lock-there] is @racket[#f], an exception is raised. The
+default @racket[lock-there] handler retries about 5 times (with
+increasing delays between each attempt) before trying 
+@racket[timeout-lock-there], and the default @racket[timeout-lock-there] 
+triggers an exception.
 
 See also @racket[put-preferences]. For a more elaborate preference
 system, see @racket[preferences:get].
@@ -904,21 +952,125 @@ whose @racket[write] output is @racket[read]able (i.e., the
 writing preferences).
 
 Current preference values are read from the preference file before
-updating, and an update ``lock'' is held starting before the file
+updating, and a write lock is held starting before the file
 read, and lasting until after the preferences file is updated. The
 lock is implemented by the existence of a file in the same directory
-as the preference file. If the directory of the preferences file does
+as the preference file; see @racket[preferences-lock-file-mode] for 
+more information. If the directory of the preferences file does
 not already exist, it is created.
 
-If the update lock is already held (i.e., the lock file exists), then
-@racket[locked] is called with a single argument: the path of the lock
-file. The default @racket[locked] reports an error; an alternative
+If the write lock is already held, then
+@racket[locked-proc] is called with a single argument: the path of the lock
+file. The default @racket[locked-proc] reports an error; an alternative
 thunk might wait a while and try again, or give the user the choice to
 delete the lock file (in case a previous update attempt encountered
-disaster).
+disaster and locks are implemented by the presence of the lock file).
 
 If @racket[filename] is @racket[#f] or not supplied, and the
 preference file does not already exist, then values read from the
 @filepath{defaults} collection (if any) are written for preferences
 that are not mentioned in @racket[names].}
 
+
+@defproc[(preferences-lock-file-mode) (or/c 'exists 'file-lock)]{
+
+Reports the way that the lock file is used to implement
+preference-file locking on the current platform.
+
+The @racket['exists] mode is currently used on all platforms except
+Windows. In @racket['exists] mode, the existence of the lock file
+indicates that a write lock is held, and readers need no lock (because
+the preferences file is atomically updated via
+@racket[rename-file-or-directory]).
+
+The @racket['file-lock] mode is currently used under Windows. In
+@racket['file-lock] mode, shared and exclusive locks (in the sense of
+@racket[port-try-file-lock?]) on the lock file reflect reader and
+writer locks on the preference-file content. (The preference file
+itself is not locked, because a lock would interfere with replacing
+the file via @racket[rename-file-or-directory].)}
+
+
+@defproc[(make-handle-get-preference-locked
+          [delay real?]
+          [name symbol?]
+          [failure-thunk (-> any) (lambda () #f)]
+          [flush-mode any/c 'timestamp]
+          [filename (or/c path-string? #f) #f]
+          [#:lock-there lock-there (or/c (path? . -> . any) #f) #f]
+          [#:max-delay max-delay real? 0.2])
+         (path-string? . -> . any)]{
+
+Creates a procedure suitable for use as the @racket[#:lock-there]
+argument to @racket[get-preference], where the @racket[name],
+@racket[failure-thunk], @racket[flush-mode], and @racket[filename]
+are all passed on to @racket[get-preference] by the result procedure
+to retry the preferences lookup.
+
+Before calling @racket[get-preference], the result procedure uses
+@racket[(sleep delay)] to pause. Then, if @racket[(* 2 delay)] is less
+than @racket[max-delay], the result procedure calls
+
+@racket[make-handle-get-preference-locked] to generate a new retry
+procedure to pass to @racket[get-preference], but with a
+@racket[delay] of @racket[(* 2 delay)]. If @racket[(* 2 delay)] is not
+less than @racket[max-delay], then @racket[get-preference] is called
+with the given @racket[lock-there], instead.}
+
+@defproc[(call-with-file-lock/timeout
+          [filename (or/c path-string? #f)]
+          [kind (or/c 'shared 'exclusive)]
+          [thunk (-> any)]
+          [failure-thunk (-> any)]
+          [#:get-lock-file get-lock-file (-> path-string?) (lambda () (make-lock-filename filename))]
+          [#:delay delay real? 0.01]
+          [#:max-delay max-delay real? 0.2])
+         any]{
+
+Obtains a lock for the filename returned from @racket[(get-lock-file)] and then
+calls @racket[thunk].  When @racket[thunk] returns,
+@racket[call-with-file-lock] releases the lock, returning the result of
+@racket[thunk]. The @racket[call-with-file-lock/timeout] function will retry
+after @racket[#:delay] seconds and continue retrying with exponential backoff
+until delay reaches @racket[#:max-delay]. If
+@racket[call-with-file-lock/timeout] fails to obtain the lock,
+@racket[failure-thunk] is called in tail position.  The @racket[kind] argument
+specifies whether the lock is @racket['shared] or @racket['exclusive]
+
+The @racket[filename] argument specifies a file path prefix that is only used
+to generate the lock filename, when @racket[#:get-lock-file] is not present.
+The @racket[call-with-file-lock/timeout] function uses a separate lock file to
+prevent race conditions on @racket[filename], when @racket[filename] has not yet
+been created.  On the Windows platfom, the @racket[call-with-file-lock/timeout]
+function uses a separate lock file (@racket["_LOCKfilename"]), because a lock
+on @racket[filename] would interfere with replacing @racket[filename]] via
+@racket[rename-file-or-directory].
+}
+
+@examples[
+  #:eval file-eval
+  (call-with-file-lock/timeout filename 'exclusive
+    (lambda () (printf "File is locked\n"))
+    (lambda () (printf "Failed to obtain lock for file\n")))
+
+  (call-with-file-lock/timeout #f 'exclusive
+    (lambda () 
+      (call-with-file-lock/timeout filename 'shared
+        (lambda () (printf "Shouldn't get here\n"))
+        (lambda () (printf "Failed to obtain lock for file\n"))))
+    (lambda () (printf "Shouldn't ger here eithere\n"))
+    #:get-lock-file (lambda () (make-lock-file-name filename)))]
+
+@defproc*[([(make-lock-file-name [path path-string?]) path-string?]
+           [(make-lock-file-name [dir path-string?] [name path-string?]) path-string?])]{
+Creates a lock filename by prepending @racket["_LOCK"] on windows or @racket[".LOCK"] on all other platforms
+to the file portion of the path.
+}
+
+@examples[
+  #:eval file-eval
+  (make-lock-file-name "/home/george/project/important-file")]
+
+
+@(interaction-eval #:eval file-eval (delete-file filename))
+@(close-eval file-eval)

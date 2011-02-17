@@ -134,8 +134,7 @@ please adhere to these guidelines:
  (web-materials "Связанные Web-сайты") ;; menu item title
  (tool-web-sites "Web-сайты установленных инструментов")   ;; menu item title
  (plt-homepage "Racket")
- (how-to-use-scheme "Как использовать Scheme") ;; title of a book.
- (teachscheme!-homepage "TeachScheme!") ;; probably this should be a `word' in all languages
+ (pbd-homepage "Program by Design")
 
  ;;; bug report form
  (cancel-bug-report? "Отменить отправку отчета об ошибках?")
@@ -159,7 +158,7 @@ please adhere to these guidelines:
  (bug-report-synthesized-information "Собранные данные")  ;; dialog title
  (bug-report-show-synthesized-info "Показать собранные данные")
  (bug-report-submit "Отправить")
- (bug-report-submit-menu-item "Отправить отчет об ошибке") ;; in Help Menu (drs & help desk)
+ (bug-report-submit-menu-item "Отправить отчет об ошибке...") ;; in Help Menu (drs & help desk)
  (error-sending-bug-report "Сбой при отправке отчета об ошибке")
  (error-sending-bug-report-expln "При отправке отчета об ошибке произошел сбой. При наличии работающего подключения к Internet посетите сайт:\n\n    http://bugs.racket-lang.org/\n\nи отправьте отчет об ошибке через Web-форму на нем. Извините за неудобства.\n\nСообщение об ошибке:\n~a")
  (illegal-bug-report "Некорректный отчет об ошибке")
@@ -540,7 +539,7 @@ please adhere to these guidelines:
  (mfs-recur-over-subdirectories "Искать во вложенных каталогах")
  (mfs-regexp-filename-filter "Фильтровать имена файлов по регулярных выражениях")
  (mfs-search-string "Искать строки")
- (mfs-drscheme-multi-file-search "DrRacket - многофайловый поиск") ;; results window and error message title
+ (mfs-drscheme-multi-file-search "многофайловый поиск - DrRacket") ;; results window and error message title
  (mfs-not-a-dir "\"~a\" не каталог")
  (mfs-open-file "Открыть файл")
  (mfs-stop-search "Остановить поиск")

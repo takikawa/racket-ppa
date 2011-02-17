@@ -139,9 +139,10 @@
                   [scheme-test-module-name
                    ((current-module-name-resolver) '(lib "test-engine/scheme-tests.ss") #f #f)]
                   [scheme-signature-module-name
-                   ((current-module-name-resolver) '(lib "deinprogramm/signature/signature.ss") #f #f)])
+                   ((current-module-name-resolver) '(lib "deinprogramm/signature/signature-english.rkt") #f #f)])
               (run-in-user-thread
                (lambda ()
+                 (when (getenv "PLTDRHTDPNOCOMPILED") (use-compiled-file-paths '()))
                  (read-accept-quasiquote (get-accept-quasiquote?))
                  (namespace-attach-module drs-namespace ''drscheme-secrets)
                  (namespace-attach-module drs-namespace set-result-module-name)                 
@@ -158,17 +159,25 @@
 		 ;; hack: the test-engine code knows about the test~object name; we do, too
 		 (namespace-set-variable-value! 'test~object (build-test-engine))
 		 ;; record signature violations with the test engine
-		 (signature-violation-proc
-		  (lambda (obj signature message blame)
-		    (cond
-		     ((namespace-variable-value 'test~object #f (lambda () #f))
-		      => (lambda (engine)
-			   (send (send engine get-info) signature-failed
-				 obj signature message blame))))))
+                 (signature-violation-proc
+                  (lambda (obj signature message blame)
+                    (cond
+                      ((namespace-variable-value 'test~object #f (lambda () #f))
+                       => (lambda (engine)
+                            (send (send engine get-info) signature-failed
+                                  obj signature message blame))))))
                  (scheme-test-data (list (drscheme:rep:current-rep) drs-eventspace test-display%))
                  (test-execute (get-preference 'tests:enable? (lambda () #t)))
+		 (signature-checking-enabled? (get-preference 'signatures:enable-checking? (lambda () #t)))
                  (test-format (make-formatter (lambda (v o) (render-value/format v settings o 40)))))))
-            (super on-execute settings run-in-user-thread))
+            (super on-execute settings run-in-user-thread)
+            
+            ;; set the global-port-print-handler after the super class because the super sets it too
+            (run-in-user-thread
+             (lambda ()
+               (global-port-print-handler
+                (λ (value port [depth 0])
+                  (teaching-language-render-value/format value settings port 'infinity))))))
           
           (define/private (teaching-languages-error-value->string settings v len)
             (let ([sp (open-output-string)])
@@ -430,8 +439,8 @@
           
           (define/override (first-opened settings)
             (for ([tp (in-list (htdp-lang-settings-teachpacks settings))])
-              (with-handlers ((exn:fail? void)) ;; swallow errors here; drracket is not ready to display errors at this point
-                (for-each namespace-require/constant tp))))
+              (with-handlers ((exn:fail? void))
+                (namespace-require/constant tp))))
           
           (inherit get-module get-transformer-module get-init-code
                    use-namespace-require/copy?)
@@ -558,7 +567,7 @@
                 (cond
 		  [start?
 		   (set! start? #f)
-		   #'(reset-tests)]
+		   #'(#%plain-app reset-tests)]
                   [done? eof]
                   [else
                    (let ([ans (parameterize ([read-accept-lang #f])
@@ -661,7 +670,7 @@
           
           (inherit default-settings)
           (define/override (metadata->settings metadata)
-            (let* ([table (metadata->table metadata)] ;; extract the table
+            (let* ([table (massage-metadata (metadata->table metadata))] ;; extract the table
                    [ssv (assoc 'htdp-settings table)])
               (if ssv
                   (let ([settings-list (vector->list (cadr ssv))])
@@ -671,11 +680,18 @@
                         (default-settings)))
                   (default-settings))))
           
+          (define/private (massage-metadata md)
+            (if (and (list? md)
+                     (andmap (λ (x) (and (pair? x) (symbol? (car x)))) md))
+                md
+                '()))
+          
           (define/private (metadata->table metadata)
-            (let ([p (open-input-string metadata)])
-              (regexp-match #rx"\n#reader" p) ;; skip to reader
-              (read p) ;; skip module
-              (read p)))
+            (with-handlers ((exn:fail:read? (λ (x) #f)))
+              (let ([p (open-input-string metadata)])
+                (regexp-match #rx"\n#reader" p) ;; skip to reader
+                (read p) ;; skip module
+                (read p))))
           
           (define/override (get-metadata-lines) 3)
           

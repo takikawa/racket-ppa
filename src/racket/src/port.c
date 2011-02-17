@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -41,6 +41,7 @@
 # include <fcntl.h>
 # include <sys/types.h>
 # include <sys/time.h>
+# include <sys/file.h>
 # ifdef BSTRING_INCLUDE
 #  include <bstring.h>
 # endif
@@ -263,8 +264,8 @@ static int dec_refcount(int *refcount)
 /* The Scheme_FD type is used for both input and output */
 typedef struct Scheme_FD {
   MZTAG_IF_REQUIRED
-  long fd;                   /* fd is really a HANDLE in Windows */
-  long bufcount, buffpos;
+  intptr_t fd;                   /* fd is really a HANDLE in Windows */
+  intptr_t bufcount, buffpos;
   char flushing, regfile, flush;
   char textmode; /* Windows: textmode => CRLF conversion; SOME_FDS_... => select definitely works */
   unsigned char *buffer;
@@ -362,9 +363,9 @@ THREAD_LOCAL_DECL(static int put_external_event_fd);
 static void register_port_wait();
 
 #ifdef MZ_FDS
-static long flush_fd(Scheme_Output_Port *op,
-		     const char * volatile bufstr, volatile unsigned long buflen,
-		     volatile unsigned long offset, int immediate_only, int enable_break);
+static intptr_t flush_fd(Scheme_Output_Port *op,
+		     const char * volatile bufstr, volatile uintptr_t buflen,
+		     volatile uintptr_t offset, int immediate_only, int enable_break);
 static void flush_if_output_fds(Scheme_Object *o, Scheme_Close_Custodian_Client *f, void *data);
 #endif
 
@@ -384,7 +385,7 @@ typedef struct Scheme_Read_Write_Evt {
   Scheme_Object *port;
   Scheme_Object *v; /* peek skip or writeable special */
   char *str;
-  long start, size;
+  intptr_t start, size;
 } Scheme_Read_Write_Evt;
 
 static int rw_evt_ready(Scheme_Object *rww, Scheme_Schedule_Info *sinfo);
@@ -676,6 +677,15 @@ Scheme_Object * scheme_make_eof (void)
   return scheme_eof;
 }
 
+void scheme_set_stdio_makers(Scheme_Stdio_Maker_Proc in,
+			     Scheme_Stdio_Maker_Proc out,
+			     Scheme_Stdio_Maker_Proc err)
+{
+  scheme_make_stdin = in;
+  scheme_make_stdout = out;
+  scheme_make_stderr = err;
+}
+
 /*========================================================================*/
 /*                                fd arrays                               */
 /*========================================================================*/
@@ -719,9 +729,9 @@ void *scheme_alloc_fdset_array(int count, int permanent)
   }
 
   if (permanent)
-    return scheme_malloc_eternal(count * (dynamic_fd_size + sizeof(long)));
+    return scheme_malloc_eternal(count * (dynamic_fd_size + sizeof(intptr_t)));
   else
-    return scheme_malloc_atomic(count * (dynamic_fd_size + sizeof(long)));
+    return scheme_malloc_atomic_allow_interior(count * (dynamic_fd_size + sizeof(intptr_t)));
 }
 
 void *scheme_init_fdset_array(void *fdarray, int count)
@@ -731,12 +741,12 @@ void *scheme_init_fdset_array(void *fdarray, int count)
 
 void *scheme_get_fdset(void *fdarray, int pos)
 {
-  return ((char *)fdarray) + (pos * (dynamic_fd_size + sizeof(long)));
+  return ((char *)fdarray) + (pos * (dynamic_fd_size + sizeof(intptr_t)));
 }
 
 void scheme_fdzero(void *fd)
 {
-  memset(fd, 0, dynamic_fd_size + sizeof(long));
+  memset(fd, 0, dynamic_fd_size + sizeof(intptr_t));
 }
 
 #else
@@ -1522,7 +1532,7 @@ XFORM_NONGCING static void inc_pos(Scheme_Port *ip, int a)
   ip->utf8state = 0;
 }
 
-static Scheme_Object *quick_plus(Scheme_Object *s, long v)
+static Scheme_Object *quick_plus(Scheme_Object *s, intptr_t v)
 {
   if (SCHEME_INTP(s)) {
     int k;
@@ -1544,9 +1554,9 @@ static Scheme_Object *quick_plus(Scheme_Object *s, long v)
 
 #define state_len(state) ((state >> 3) & 0x7)
 
-XFORM_NONGCING static void do_count_lines(Scheme_Port *ip, const char *buffer, long offset, long got)
+XFORM_NONGCING static void do_count_lines(Scheme_Port *ip, const char *buffer, intptr_t offset, intptr_t got)
 {
-  long i;
+  intptr_t i;
   int c, degot = 0;
 
   mzAssert(ip->lineNumber >= 0);
@@ -1636,15 +1646,15 @@ XFORM_NONGCING static void do_count_lines(Scheme_Port *ip, const char *buffer, l
   mzAssert(ip->position >= 0);
 }
 
-long scheme_get_byte_string_unless(const char *who,
+intptr_t scheme_get_byte_string_unless(const char *who,
 				   Scheme_Object *port,
-				   char *buffer, long offset, long size,
+				   char *buffer, intptr_t offset, intptr_t size,
 				   int only_avail,
 				   int peek, Scheme_Object *peek_skip,
 				   Scheme_Object *unless_evt)
 {
   Scheme_Input_Port *ip;
-  long got = 0, total_got = 0, gc;
+  intptr_t got = 0, total_got = 0, gc;
   int special_ok = special_is_ok, check_special;
   Scheme_Get_String_Fun gs;
   Scheme_Peek_String_Fun ps;
@@ -1691,7 +1701,7 @@ long scheme_get_byte_string_unless(const char *who,
 
     if ((ip->ungotten_count || pipe_char_count(ip->peeked_read))
 	&& (!total_got || !peek)) {
-      long l, i;
+      intptr_t l, i;
       unsigned char *s;
 
       i = ip->ungotten_count;
@@ -1788,7 +1798,7 @@ long scheme_get_byte_string_unless(const char *who,
 	   && (ip->pending_eof < 2)) {
       char *tmp;
       int v, pcc;
-      long skip;
+      intptr_t skip;
       Scheme_Cont_Frame_Data cframe;
 
 
@@ -2011,9 +2021,9 @@ long scheme_get_byte_string_unless(const char *who,
   return total_got;
 }
 
-long scheme_get_byte_string_special_ok_unless(const char *who,
+intptr_t scheme_get_byte_string_special_ok_unless(const char *who,
 					      Scheme_Object *port,
-					      char *buffer, long offset, long size,
+					      char *buffer, intptr_t offset, intptr_t size,
 					      int only_avail,
 					      int peek, Scheme_Object *peek_skip,
 					      Scheme_Object *unless_evt)
@@ -2023,9 +2033,9 @@ long scheme_get_byte_string_special_ok_unless(const char *who,
 				       only_avail, peek, peek_skip, unless_evt);
 }
 
-long scheme_get_byte_string(const char *who,
+intptr_t scheme_get_byte_string(const char *who,
 			    Scheme_Object *port,
-			    char *buffer, long offset, long size,
+			    char *buffer, intptr_t offset, intptr_t size,
 			    int only_avail,
 			    int peek, Scheme_Object *peek_skip)
 {
@@ -2119,7 +2129,7 @@ static void remove_extra(void *ip_v)
 }
 
 static int complete_peeked_read_via_get(Scheme_Input_Port *ip,
-					long size)
+					intptr_t size)
 {
   Scheme_Get_String_Fun gs;
   int did;
@@ -2184,12 +2194,12 @@ static Scheme_Object *return_data(void *data, int argc, Scheme_Object **argv)
 }
 
 int scheme_peeked_read_via_get(Scheme_Input_Port *ip,
-			       long _size,
+			       intptr_t _size,
 			       Scheme_Object *unless_evt,
 			       Scheme_Object *_target_evt)
 {
   Scheme_Object * volatile v, *sema, *a[3], ** volatile aa, * volatile l;
-  volatile long size = _size;
+  volatile intptr_t size = _size;
   volatile int n, current_leader = 0;
   volatile Scheme_Type t;
   Scheme_Object * volatile target_evt = _target_evt;
@@ -2348,7 +2358,7 @@ int scheme_peeked_read_via_get(Scheme_Input_Port *ip,
 }
 
 int scheme_peeked_read(Scheme_Object *port,
-		       long size,
+		       intptr_t size,
 		       Scheme_Object *unless_evt,
 		       Scheme_Object *target_evt)
 {
@@ -2409,9 +2419,9 @@ static int progress_evt_ready(Scheme_Object *evt, Scheme_Schedule_Info *sinfo)
   return 0;
 }
 
-long scheme_get_char_string(const char *who,
+intptr_t scheme_get_char_string(const char *who,
 			    Scheme_Object *port,
-			    mzchar *buffer, long offset, long size,
+			    mzchar *buffer, intptr_t offset, intptr_t size,
 			    int peek, Scheme_Object *peek_skip)
 {
   int ahead_skip = 0;
@@ -2456,7 +2466,7 @@ long scheme_get_char_string(const char *who,
 					    quick_plus(peek_skip, ahead_skip),
 					    NULL);
 	if (got > 0) {
-	  long ulen, glen;
+	  intptr_t ulen, glen;
 	  glen = scheme_utf8_decode_as_prefix((const unsigned char *)s, 0, got + leftover,
 					      buffer, offset, offset + size,
 					      &ulen, 0, 0xFFFD);
@@ -2525,7 +2535,7 @@ long scheme_get_char_string(const char *who,
       got = 0;
 
     if (got >= 0) {
-      long ulen, glen;
+      intptr_t ulen, glen;
 
       glen = scheme_utf8_decode_as_prefix((const unsigned char *)s, 0, got + leftover,
 					  buffer, offset, offset + size,
@@ -2563,13 +2573,13 @@ long scheme_get_char_string(const char *who,
 }
 
 static MZ_INLINE
-long get_one_byte(const char *who,
+intptr_t get_one_byte(const char *who,
 		  Scheme_Object *port,
-		  char *buffer, long offset,
+		  char *buffer, intptr_t offset,
 		  int only_avail)
 {
   Scheme_Input_Port *ip;
-  long gc;
+  intptr_t gc;
   int special_ok = special_is_ok;
   Scheme_Get_String_Fun gs;
 
@@ -2737,7 +2747,7 @@ scheme_get_byte_special_ok(Scheme_Object *port)
   return scheme_get_byte(port);
 }
 
-long scheme_get_bytes(Scheme_Object *port, long size, char *buffer, int offset)
+intptr_t scheme_get_bytes(Scheme_Object *port, intptr_t size, char *buffer, int offset)
 {
   int n;
   int only_avail = 0;
@@ -2877,7 +2887,7 @@ int scheme_peekc_is_ungetc(Scheme_Object *port)
 
 Scheme_Object *make_read_write_evt(Scheme_Type type, 
 				   Scheme_Object *port, Scheme_Object *skip, 
-				   char *str, long start, long size)
+				   char *str, intptr_t start, intptr_t size)
 {
   Scheme_Read_Write_Evt *rww;
 
@@ -2895,7 +2905,7 @@ Scheme_Object *make_read_write_evt(Scheme_Type type,
 static int rw_evt_ready(Scheme_Object *_rww, Scheme_Schedule_Info *sinfo)
 {
   Scheme_Read_Write_Evt *rww = (Scheme_Read_Write_Evt *)_rww;
-  long v;
+  intptr_t v;
 
   if (sinfo->false_positive_ok) {
     /* Causes the thread to swap in, which we need in case there's an
@@ -2945,7 +2955,7 @@ static void rw_evt_wakeup(Scheme_Object *_rww, void *fds)
 }
 
 Scheme_Object *scheme_write_evt_via_write(Scheme_Output_Port *port,
-					  const char *str, long offset, long size)
+					  const char *str, intptr_t offset, intptr_t size)
 {
   return make_read_write_evt(scheme_write_evt_type, (Scheme_Object *)port, NULL, 
 			     (char *)str, offset, size);
@@ -2959,7 +2969,7 @@ Scheme_Object *scheme_write_special_evt_via_write_special(Scheme_Output_Port *po
 }
 	
 Scheme_Object *scheme_make_write_evt(const char *who, Scheme_Object *port,
-				     Scheme_Object *special, char *str, long start, long size)
+				     Scheme_Object *special, char *str, intptr_t start, intptr_t size)
 {
   Scheme_Output_Port *op;
 
@@ -3069,7 +3079,7 @@ scheme_char_ready (Scheme_Object *port)
 }
 
 Scheme_Object *scheme_get_special(Scheme_Object *port,
-				  Scheme_Object *src, long line, long col, long pos,
+				  Scheme_Object *src, intptr_t line, intptr_t col, intptr_t pos,
 				  int peek, Scheme_Hash_Table **for_read)
 {
   int cnt;
@@ -3135,7 +3145,7 @@ static Scheme_Object *do_get_ready_special(Scheme_Object *port,
 					   int peek,
 					   Scheme_Hash_Table **ht)
 {
-  long line, col, pos;
+  intptr_t line, col, pos;
 
   if (!stxsrc) {
     Scheme_Input_Port *ip;
@@ -3236,11 +3246,11 @@ scheme_need_wakeup (Scheme_Object *port, void *fds)
           CHECK_PORT_CLOSED(who, "output", port, ((Scheme_Output_Port *)port)->closed); \
         }
 
-long
+intptr_t
 scheme_tell (Scheme_Object *port)
 {
   Scheme_Port *ip;
-  long pos;
+  intptr_t pos;
 
   ip = scheme_port_record(port);
   
@@ -3254,11 +3264,11 @@ scheme_tell (Scheme_Object *port)
   return pos;
 }
 
-long
+intptr_t
 scheme_tell_line (Scheme_Object *port)
 {
   Scheme_Port *ip;
-  long line;
+  intptr_t line;
 
   ip = scheme_port_record(port);
 
@@ -3272,11 +3282,11 @@ scheme_tell_line (Scheme_Object *port)
   return line;
 }
 
-long
+intptr_t
 scheme_tell_column (Scheme_Object *port)
 {
   Scheme_Port *ip;
-  long col;
+  intptr_t col;
 
   ip = scheme_port_record(port);
 
@@ -3291,17 +3301,17 @@ scheme_tell_column (Scheme_Object *port)
 }
 
 void
-scheme_tell_all (Scheme_Object *port, long *_line, long *_col, long *_pos)
+scheme_tell_all (Scheme_Object *port, intptr_t *_line, intptr_t *_col, intptr_t *_pos)
 {
   Scheme_Port *ip;
-  long line = -1, col = -1, pos = -1;
+  intptr_t line = -1, col = -1, pos = -1;
   
   ip = scheme_port_record(port);
 
   if (ip->count_lines && ip->location_fun) {
     Scheme_Location_Fun location_fun;
     Scheme_Object *r, *a[3];
-    long v;
+    intptr_t v;
     int got, i;
     
     location_fun = ip->location_fun;
@@ -3423,9 +3433,9 @@ int scheme_close_should_force_port_closed()
 
 /****************************** main output writer ******************************/
 
-long
+intptr_t
 scheme_put_byte_string(const char *who, Scheme_Object *port,
-		       const char *str, long d, long len,
+		       const char *str, intptr_t d, intptr_t len,
 		       int rarely_block)
 {
   /* Unlike the main reader, the main writer is simple. It doesn't
@@ -3434,7 +3444,7 @@ scheme_put_byte_string(const char *who, Scheme_Object *port,
 
   Scheme_Output_Port *op;
   Scheme_Write_String_Fun ws;
-  long out, llen, oout;
+  intptr_t out, llen, oout;
   int enable_break;
 
   op = scheme_output_port_record(port);
@@ -3491,14 +3501,14 @@ scheme_put_byte_string(const char *who, Scheme_Object *port,
   return oout;
 }
 
-void scheme_write_byte_string(const char *str, long len, Scheme_Object *port)
+void scheme_write_byte_string(const char *str, intptr_t len, Scheme_Object *port)
 {
   (void)scheme_put_byte_string("write-string", port, str, 0, len, 0);
 }
 
-void scheme_write_char_string(const mzchar *str, long len, Scheme_Object *port)
+void scheme_write_char_string(const mzchar *str, intptr_t len, Scheme_Object *port)
 {
-  long blen;
+  intptr_t blen;
   char *bstr, buf[64];
 
   bstr = scheme_utf8_encode_to_buffer_len(str, len, buf, 64, &blen);
@@ -3506,11 +3516,11 @@ void scheme_write_char_string(const mzchar *str, long len, Scheme_Object *port)
   scheme_write_byte_string(bstr, blen, port);
 }
 
-long
+intptr_t
 scheme_put_char_string(const char *who, Scheme_Object *port,
-		       const mzchar *str, long d, long len)
+		       const mzchar *str, intptr_t d, intptr_t len)
 {
-  long blen;
+  intptr_t blen;
   char *bstr, buf[64];
 
   blen = scheme_utf8_encode(str, d, d + len, NULL, 0, 0);
@@ -3523,7 +3533,7 @@ scheme_put_char_string(const char *who, Scheme_Object *port,
   return scheme_put_byte_string(who, port, bstr, 0, blen, 0);
 }
 
-long
+intptr_t
 scheme_output_tell(Scheme_Object *port)
 {
   return scheme_tell(port);
@@ -3617,9 +3627,9 @@ scheme_file_stream_port_p (int argc, Scheme_Object *argv[])
   return scheme_false;
 }
 
-int scheme_get_port_file_descriptor(Scheme_Object *p, long *_fd)
+int scheme_get_port_file_descriptor(Scheme_Object *p, intptr_t *_fd)
 {
-  long fd = 0;
+  intptr_t fd = 0;
   int fd_ok = 0;
 
   if (SCHEME_INPUT_PORTP(p)) {
@@ -3665,9 +3675,9 @@ int scheme_get_port_file_descriptor(Scheme_Object *p, long *_fd)
   return 1;
 }
 
-long scheme_get_port_fd(Scheme_Object *p)
+intptr_t scheme_get_port_fd(Scheme_Object *p)
 {
-  long fd;
+  intptr_t fd;
 
   if (scheme_get_port_file_descriptor(p, &fd))
     return fd;
@@ -3677,7 +3687,7 @@ long scheme_get_port_fd(Scheme_Object *p)
 
 Scheme_Object *scheme_file_identity(int argc, Scheme_Object *argv[])
 {
-  long fd = 0;
+  intptr_t fd = 0;
   int fd_ok = 0;
   Scheme_Object *p;
 
@@ -3727,7 +3737,7 @@ static int is_fd_terminal(int fd)
 
 Scheme_Object *scheme_terminal_port_p(int argc, Scheme_Object *argv[])
 {
-  long fd = 0;
+  intptr_t fd = 0;
   int fd_ok = 0;
   Scheme_Object *p;
 
@@ -3841,7 +3851,7 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
       m_set++;
     } else {
       char *astr;
-      long alen;
+      intptr_t alen;
 
       astr = scheme_make_args_string("other ", i, argc, argv, &alen);
       scheme_raise_exn(MZEXN_FAIL_CONTRACT,
@@ -3852,7 +3862,7 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
 
     if (m_set > 1) {
       char *astr;
-      long alen;
+      intptr_t alen;
 
       astr = scheme_make_args_string("", -1, argc, argv, &alen);
       scheme_raise_exn(MZEXN_FAIL_CONTRACT,
@@ -4025,7 +4035,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
       m_set++;
     } else {
       char *astr;
-      long alen;
+      intptr_t alen;
 
       astr = scheme_make_args_string("other ", i, argc, argv, &alen);
       scheme_raise_exn(MZEXN_FAIL_CONTRACT,
@@ -4036,7 +4046,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
 
     if (m_set > 1 || e_set > 1) {
       char *astr;
-      long alen;
+      intptr_t alen;
 
       astr = scheme_make_args_string("", -1, argc, argv, &alen);
       scheme_raise_exn(MZEXN_FAIL_CONTRACT,
@@ -4382,7 +4392,7 @@ scheme_file_position(int argc, Scheme_Object *argv[])
     } else if (SAME_OBJ(ip->sub_type, scheme_string_input_port_type))
       is = (Scheme_Indexed_String *)ip->port_data;
     else if (argc < 2) {
-      long pos;
+      intptr_t pos;
       pos = ip->p.position;
       if (pos < 0) {
 	scheme_raise_exn(MZEXN_FAIL,
@@ -4437,7 +4447,7 @@ scheme_file_position(int argc, Scheme_Object *argv[])
       }
 #ifdef MZ_FDS
     } else if (had_fd) {
-      long lv;
+      intptr_t lv;
       
       if (!SCHEME_INPUT_PORTP(argv[0])) {
 	flush_fd(scheme_output_port_record(argv[0]), NULL, 0, 0, 0, 0);
@@ -4485,7 +4495,7 @@ scheme_file_position(int argc, Scheme_Object *argv[])
       }
 #endif
     } else {
-      long n;
+      intptr_t n;
 
       if (whence == SEEK_SET) {
         if (!scheme_get_int_val(argv[1], &n)) {
@@ -4604,7 +4614,7 @@ scheme_file_position(int argc, Scheme_Object *argv[])
   }
 }
 
-long scheme_set_file_position(Scheme_Object *port, long pos)
+intptr_t scheme_set_file_position(Scheme_Object *port, intptr_t pos)
 {
   if (pos >= 0) {
     Scheme_Object *a[2];
@@ -4681,6 +4691,142 @@ scheme_file_buffer(int argc, Scheme_Object *argv[])
   }
 }
 
+static int try_lock(int fd, int writer, int *_errid)
+{
+#ifdef UNIX_FILE_SYSTEM
+  {
+    int ok;
+
+    do {
+      ok = flock(fd, (writer ? LOCK_EX : LOCK_SH) | LOCK_NB);
+    } while ((ok == -1) && (errno == EINTR));
+
+    if (ok == 0)
+      return 1;
+
+    if (errno == EWOULDBLOCK) {
+      *_errid = 0;
+      return 0;
+    }
+    
+    *_errid = errno;
+    return 0;
+  }
+#endif
+#ifdef WINDOWS_FILE_HANDLES
+  {
+    OVERLAPPED o;
+    int errid;
+
+# define LOCK_ALL_FILE_LO 0
+# define LOCK_ALL_FILE_HI 0x10000
+
+    memset(&o, 0, sizeof(OVERLAPPED));
+    if (LockFileEx((HANDLE)fd, 
+		   (LOCKFILE_FAIL_IMMEDIATELY
+		    | (writer ? LOCKFILE_EXCLUSIVE_LOCK : 0)),
+		   0, 
+		   LOCK_ALL_FILE_LO, LOCK_ALL_FILE_HI,
+		   &o))
+      return 1;
+   
+    errid = GetLastError();
+    if (errid == ERROR_LOCK_VIOLATION)
+      *_errid = 0;
+    else
+      *_errid = errid;
+    
+    return 0;
+  }
+#endif
+}
+
+static void check_already_closed(const char *name, Scheme_Object *p)
+{
+  int is_closed;
+  if (SCHEME_INPUT_PORTP(p)) {
+    is_closed = scheme_input_port_record(p)->closed;
+  } else {
+    is_closed = scheme_output_port_record(p)->closed;
+  }
+  if (is_closed) {
+    scheme_raise_exn(MZEXN_FAIL_CONTRACT,
+                     "%s: port is closed: %V",
+                     name, 
+                     p);
+  }
+}
+
+Scheme_Object *scheme_file_try_lock(int argc, Scheme_Object **argv)
+{
+  intptr_t fd;
+  int writer = 0, errid;
+
+  if (!scheme_get_port_file_descriptor(argv[0], &fd))
+    scheme_wrong_type("port-try-file-lock?", "file-stream-port", 0, argc, argv);
+
+  if (SCHEME_SYMBOLP(argv[1]) && !SCHEME_SYM_WEIRDP(argv[1])) {
+    if (!strcmp(SCHEME_SYM_VAL(argv[1]), "exclusive"))
+      writer = 1;
+    else if (!strcmp(SCHEME_SYM_VAL(argv[1]), "shared"))
+      writer = 0;
+    else
+      writer = -1;
+  } else
+    writer = -1;
+
+  if (writer == -1)
+    scheme_wrong_type("port-try-file-lock?", "'shared or 'exclusive", 1, argc, argv);
+
+  check_already_closed("port-try-file-lock?", argv[0]);
+
+  if (try_lock(fd, writer, &errid))
+    return scheme_true;
+  
+  if (errid) {
+    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                     "port-try-file-lock?: error getting file %s lock (%E)",
+                     (writer ? "exclusive" : "shared"),
+                     errid);
+  }
+   
+  return scheme_false;
+}
+
+Scheme_Object *scheme_file_unlock(int argc, Scheme_Object **argv)
+{
+  int ok, errid;
+  intptr_t fd;
+
+  if (!scheme_get_port_file_descriptor(argv[0], &fd))
+    scheme_wrong_type("port-file-unlock", "file-stream-port", 0, argc, argv);
+
+  check_already_closed("port-file-unlock", argv[0]);
+
+#ifdef UNIX_FILE_SYSTEM
+  do {
+    ok = flock(fd, LOCK_UN);
+  } while ((ok == -1) && (errno == EINTR));
+  ok = !ok;
+  errid = errno;
+#endif
+#ifdef WINDOWS_FILE_HANDLES
+  ok = UnlockFile((HANDLE)fd, 0, 0, LOCK_ALL_FILE_LO, LOCK_ALL_FILE_HI);
+  if (!ok)
+    errid = GetLastError();
+  else
+    errid = 0;
+#endif
+
+  if (!ok) {
+    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                     "port-file-unlock: error unlocking file (%E)",
+                     errid);
+  }
+
+  return scheme_void;
+}
+
 /*========================================================================*/
 /*                          FILE input ports                              */
 /*========================================================================*/
@@ -4691,8 +4837,8 @@ file_byte_ready (Scheme_Input_Port *port)
   return 1;
 }
 
-static long file_get_string(Scheme_Input_Port *port,
-			    char *buffer, long offset, long size,
+static intptr_t file_get_string(Scheme_Input_Port *port,
+			    char *buffer, intptr_t offset, intptr_t size,
 			    int nonblock,
 			    Scheme_Object *unless_evt)
 {
@@ -4957,13 +5103,13 @@ fd_byte_ready (Scheme_Input_Port *port)
   }
 }
 
-static long fd_get_string_slow(Scheme_Input_Port *port,
-                               char *buffer, long offset, long size,
+static intptr_t fd_get_string_slow(Scheme_Input_Port *port,
+                               char *buffer, intptr_t offset, intptr_t size,
                                int nonblock,
                                Scheme_Object *unless)
 {
   Scheme_FD *fip;
-  long bc;
+  intptr_t bc;
 
   fip = (Scheme_FD *)port->port_data;
 
@@ -5180,13 +5326,13 @@ static long fd_get_string_slow(Scheme_Input_Port *port,
   }
 }
 
-static long fd_get_string(Scheme_Input_Port *port,
-			  char *buffer, long offset, long size,
+static intptr_t fd_get_string(Scheme_Input_Port *port,
+			  char *buffer, intptr_t offset, intptr_t size,
 			  int nonblock,
 			  Scheme_Object *unless)
 {
   Scheme_FD *fip;
-  long bc;
+  intptr_t bc;
 
   /* Buffer-reading fast path is designed to avoid GC, 
      and thus avoid MZ_PRECISE_GC instrumentation. */
@@ -5732,13 +5878,13 @@ static void file_flush(Scheme_Output_Port *port)
   }
 }
 
-static long
+static intptr_t
 file_write_string(Scheme_Output_Port *port,
-		  const char *str, long d, long llen,
+		  const char *str, intptr_t d, intptr_t llen,
 		  int rarely_block, int enable_break)
 {
   FILE *fp;
-  long len = llen;
+  intptr_t len = llen;
 
   fp = ((Scheme_Output_File *)port->port_data)->f;
 
@@ -5983,14 +6129,14 @@ static void release_flushing_lock(void *_fop)
   fop->flushing = 0;
 }
 
-static long flush_fd(Scheme_Output_Port *op,
-		     const char * volatile bufstr, volatile unsigned long buflen, volatile unsigned long offset,
+static intptr_t flush_fd(Scheme_Output_Port *op,
+		     const char * volatile bufstr, volatile uintptr_t buflen, volatile uintptr_t offset,
 		     int immediate_only, int enable_break)
      /* immediate_only == 1 => write at least one character, then give up;
 	immediate_only == 2 => never block */
 {
   Scheme_FD * volatile fop = (Scheme_FD *)op->port_data;
-  volatile long wrote = 0;
+  volatile intptr_t wrote = 0;
 
   if (fop->flushing) {
     if (scheme_force_port_closed) {
@@ -6021,7 +6167,7 @@ static long flush_fd(Scheme_Output_Port *op,
        output through `immediate_only'. */
 
     while (1) {
-      long len;
+      intptr_t len;
       int errsaved, full_write_buffer;
 
 #ifdef WINDOWS_FILE_HANDLES
@@ -6073,7 +6219,7 @@ static long flush_fd(Scheme_Output_Port *op,
 	   is ERROR_NOT_ENOUGH_MEMORY (as opposed to a partial write). */
 	{
 	  int ok;
-	  long towrite = buflen - offset;
+	  intptr_t towrite = buflen - offset;
 
 	  while (1) {
 	    ok = WriteFile((HANDLE)fop->fd, bufstr XFORM_OK_PLUS offset, towrite, &winwrote, NULL);
@@ -6284,7 +6430,7 @@ static long flush_fd(Scheme_Output_Port *op,
 	    full_write_buffer = 1;
 	    WaitForSingleObject(oth->ready_sema, 0); /* clear any leftover state */
 	  } else {
-	    long topp;
+	    intptr_t topp;
 	    int was_pre;
 
 	    if (!oth->buflen) {
@@ -6394,15 +6540,15 @@ static long flush_fd(Scheme_Output_Port *op,
   return wrote;
 }
 
-static long
+static intptr_t
 fd_write_string(Scheme_Output_Port *port,
-		const char *str, long d, long len,
+		const char *str, intptr_t d, intptr_t len,
 		int rarely_block, int enable_break)
 {
   /* Note: !flush => !rarely_block, !len => flush */
 
   Scheme_FD *fop;
-  long l;
+  intptr_t l;
   int flush = (!len || rarely_block);
 
   fop = (Scheme_FD *)port->port_data;
@@ -6455,7 +6601,7 @@ fd_write_string(Scheme_Output_Port *port,
   if ((flush || (fop->flush == MZ_FLUSH_ALWAYS)) && fop->bufcount) {
     flush_fd(port, NULL, 0, 0, 0, enable_break);
   } else if (fop->flush == MZ_FLUSH_BY_LINE) {
-    long i;
+    intptr_t i;
 
     for (i = len; i--; ) {
       if (str[d] == '\n' || str[d] == '\r') {
@@ -6801,7 +6947,10 @@ static int MyPipe(int *ph, int near_index) {
 # define GC_write_barrier(x) /* empty */
 #endif
 
-SHARED_OK static void *unused_groups;
+/* See `unused_pid_statuses' in "places.c" for
+   a reminder of why this is needed (in both 
+   implementations): */
+SHARED_OK static void *unused_pids;
 
 static int need_to_check_children;
 
@@ -6850,18 +6999,18 @@ static void init_sigchld(void)
 static void check_child_done(pid_t pid)
 {
   pid_t result, check_pid;
-  int status, is_group;
+  int status, is_unused;
   System_Child *sc, *prev;
-  void **unused = (void **)unused_groups, **unused_prev = NULL;
+  void **unused = (void **)unused_pids, **unused_prev = NULL;
 
   if (scheme_system_children) {
     do {
       if (!pid && unused) {
-        check_pid = (pid_t)(long)unused[0];
-        is_group = 1;
+        check_pid = (pid_t)(intptr_t)unused[0];
+        is_unused = 1;
       } else {
         check_pid = pid;
-        is_group = 0;
+        is_unused = 0;
       }
 
       do {
@@ -6871,14 +7020,14 @@ static void check_child_done(pid_t pid)
       } while ((result == -1) && (errno == EINTR));
 
       if (result > 0) {
-        if (is_group) {
+        if (is_unused) {
           /* done with an inaccessible group id */
           void *next;
           next = (void **)unused[1];
           if (unused_prev)
             unused_prev[1] = unused[1];
           else
-            unused_groups = unused[1];
+            unused_pids = unused[1];
           free(unused);
           unused = (void **)next;
         }
@@ -6905,12 +7054,12 @@ static void check_child_done(pid_t pid)
           }
         }
       } else {
-        if (is_group) {
+        if (is_unused) {
           unused_prev = unused;
           unused = unused[1];
         }
       }
-    } while ((result > 0) || is_group);
+    } while ((result > 0) || is_unused);
   }
 }
 
@@ -6928,9 +7077,9 @@ void scheme_check_child_done(void)
 /*                           null output ports                            */
 /*========================================================================*/
 
-static long
+static intptr_t
 null_write_bytes(Scheme_Output_Port *port,
-		 const char *str, long d, long len,
+		 const char *str, intptr_t d, intptr_t len,
 		 int rarely_block, int enable_break)
 {
   return len;
@@ -6942,7 +7091,7 @@ null_close_out (Scheme_Output_Port *port)
 }
 
 static Scheme_Object *
-null_write_evt(Scheme_Output_Port *op, const char *str, long offset, long size)
+null_write_evt(Scheme_Output_Port *op, const char *str, intptr_t offset, intptr_t size)
 {
   Scheme_Object *a[2];
   a[0] = scheme_always_ready_evt;
@@ -6995,9 +7144,9 @@ scheme_make_null_output_port(int can_write_special)
 
 static Scheme_Object *redirect_write_bytes_k(void);
 
-static long
+static intptr_t
 redirect_write_bytes(Scheme_Output_Port *op,
-		     const char *str, long d, long len,
+		     const char *str, intptr_t d, intptr_t len,
 		     int rarely_block, int enable_break)
 {
   /* arbitrary nesting means we can overflow the stack */
@@ -7030,11 +7179,11 @@ static Scheme_Object *redirect_write_bytes_k(void)
   Scheme_Thread *p = scheme_current_thread;
   Scheme_Output_Port *op = (Scheme_Output_Port *)p->ku.k.p1;
   const char *str = (const char *)p->ku.k.p2;
-  long d = p->ku.k.i1;
-  long len = p->ku.k.i2;
+  intptr_t d = p->ku.k.i1;
+  intptr_t len = p->ku.k.i2;
   int rarely_block = p->ku.k.i3;
   int enable_break = p->ku.k.i4;
-  long n;
+  intptr_t n;
 
   p->ku.k.p1 = NULL;
   p->ku.k.p2 = NULL;
@@ -7050,7 +7199,7 @@ redirect_close_out (Scheme_Output_Port *port)
 }
 
 static Scheme_Object *
-redirect_write_evt(Scheme_Output_Port *op, const char *str, long offset, long size)
+redirect_write_evt(Scheme_Output_Port *op, const char *str, intptr_t offset, intptr_t size)
 {
   return scheme_make_write_evt("redirect-write-evt", 
 			       (Scheme_Object *)op->port_data,
@@ -7146,7 +7295,9 @@ static int subp_done(Scheme_Object *so)
   {
     System_Child *sc;
     sc = (System_Child *)sp->handle;
-    check_child_done(sp->is_group ? sp->pid : 0);
+    /* Check specific pid, in case the child has its own group
+       (either given by Racket or given to itself): */
+    check_child_done(sp->pid);
     if (sc->done)
       child_mref_done(sp);
     return sc->done;
@@ -7204,7 +7355,7 @@ static Scheme_Object *subprocess_status(int argc, Scheme_Object **argv)
   }
 # else
   System_Child *sc = (System_Child *)sp->handle;
-  check_child_done(sp->is_group ? sp->pid : 0);
+  check_child_done(sp->pid);
 
   if (sc->done) {
     child_mref_done(sp);
@@ -7428,7 +7579,7 @@ static Scheme_Object *subproc_group_on (int argc, Scheme_Object *argv[])
 }
 
 #ifdef UNIX_PROCESSES
-static void unused_process_group(void *_sp, void *ignored)
+static void unused_process_record(void *_sp, void *ignored)
 {
   Scheme_Subprocess *sp = (Scheme_Subprocess *)_sp;
 
@@ -7436,11 +7587,13 @@ static void unused_process_group(void *_sp, void *ignored)
   if (!sp->done)
     scheme_done_with_process_id(sp->pid, sp->is_group);
 # else
-  void **unused_group;
-  unused_group = malloc(sizeof(void *) * 2);
-  unused_group[0] = (void *)(long)sp->pid;
-  unused_group[1] = unused_groups;
-  need_to_check_children = 1;
+  if (!((System_Child *)sp->handle)->done) {
+    void **unused_pid;
+    unused_pid = malloc(sizeof(void *) * 2);
+    unused_pid[0] = (void *)(intptr_t)sp->pid;
+    unused_pid[1] = unused_pids;
+    need_to_check_children = 1;
+  }
 # endif
 }
 #endif
@@ -7503,12 +7656,12 @@ static char *cmdline_protect(char *s)
   return s;
 }
 
-static long mz_spawnv(char *command, const char * const *argv,
+static intptr_t mz_spawnv(char *command, const char * const *argv,
 		      int exact_cmdline, int sin, int sout, int serr, int *pid,
                       int new_process_group)
 {
   int i, l, len = 0;
-  long cr_flag;
+  intptr_t cr_flag;
   char *cmdline;
   STARTUPINFOW startup;
   PROCESS_INFORMATION info;
@@ -7557,7 +7710,7 @@ static long mz_spawnv(char *command, const char * const *argv,
 		     &startup, &info)) {
     CloseHandle(info.hThread);
     *pid = info.dwProcessId;
-    return (long)info.hProcess;
+    return (intptr_t)info.hProcess;
   } else
     return -1;
 }
@@ -8108,8 +8261,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
 # if defined(WINDOWS_PROCESSES)
   scheme_add_finalizer(subproc, close_subprocess_handle, NULL);
 # else
-  if (new_process_group)
-    scheme_add_finalizer(subproc, unused_process_group, NULL);
+  scheme_add_finalizer(subproc, unused_process_record, NULL);
 # endif
 
   if (SCHEME_TRUEP(cust_mode)) {
@@ -8355,10 +8507,10 @@ void scheme_release_file_descriptor(void)
 
 #if defined(WIN32_FD_HANDLES)
 
-static void clean_up_wait(long result, OS_SEMAPHORE_TYPE *array,
+static void clean_up_wait(intptr_t result, OS_SEMAPHORE_TYPE *array,
 			  int *rps, int count)
 {
-  if ((result >= (long)WAIT_OBJECT_0) && (result < (long)WAIT_OBJECT_0 + count)) {
+  if ((result >= (intptr_t)WAIT_OBJECT_0) && (result < (intptr_t)WAIT_OBJECT_0 + count)) {
     result -= WAIT_OBJECT_0;
     if (rps[result])
       ReleaseSemaphore(array[result], 1, NULL);
@@ -8409,8 +8561,8 @@ static void default_sleep(float v, void *fds)
 #if defined(FILES_HAVE_FDS)
     /* Sleep by selecting on the external event fd */
     struct timeval time;
-    long secs = (long)v;
-    long usecs = (long)(fmod(v, 1.0) * 1000000);
+    intptr_t secs = (intptr_t)v;
+    intptr_t usecs = (intptr_t)(fmod(v, 1.0) * 1000000);
 
     if (v && (v > 100000))
       secs = 100000;
@@ -8461,8 +8613,8 @@ static void default_sleep(float v, void *fds)
 #endif
 
     {
-      long secs = (long)v;
-      long usecs = (long)(fmod(v, 1.0) * 1000000);
+      intptr_t secs = (intptr_t)v;
+      intptr_t usecs = (intptr_t)(fmod(v, 1.0) * 1000000);
 
       if (v && (v > 100000))
 	secs = 100000;
@@ -8507,7 +8659,7 @@ static void default_sleep(float v, void *fds)
 
 #if defined(WIN32_FD_HANDLES)
     {
-      long result;
+      intptr_t result;
       OS_SEMAPHORE_TYPE *array, just_two_array[2], break_sema;
       int count, rcount, *rps;
 
@@ -8678,10 +8830,10 @@ int scheme_get_external_event_fd(void)
 
 static HANDLE itimer;
 static OS_SEMAPHORE_TYPE itimer_semaphore;
-static long itimer_delay;
+static intptr_t itimer_delay;
 typedef struct {
   int volatile *fuel_counter_ptr;
-  unsigned long volatile *jit_stack_boundary_ptr;
+  uintptr_t volatile *jit_stack_boundary_ptr;
 } Win_Itimer_Data;
 
 static long WINAPI ITimer(void *data)
@@ -8696,7 +8848,7 @@ static long WINAPI ITimer(void *data)
   while (1) {
     if (WaitForSingleObject(itimer_semaphore, itimer_delay / 1000) == WAIT_TIMEOUT) {
       *d->fuel_counter_ptr = 0;
-      *d->jit_stack_boundary_ptr = (unsigned long)-1;
+      *d->jit_stack_boundary_ptr = (uintptr_t)-1;
       WaitForSingleObject(itimer_semaphore, INFINITE);
     }
   }
@@ -8704,7 +8856,7 @@ static long WINAPI ITimer(void *data)
   /* scheme_done_os_thread(); */
 }
 
-static void scheme_start_itimer_thread(long usec)
+static void scheme_start_itimer_thread(intptr_t usec)
 {
   DWORD id;
 
@@ -8737,7 +8889,7 @@ typedef struct ITimer_Data {
   pthread_cond_t cond;
   int delay;
   volatile int * fuel_counter_ptr;
-  volatile unsigned long * jit_stack_boundary_ptr;
+  volatile uintptr_t * jit_stack_boundary_ptr;
 } ITimer_Data;
 
 THREAD_LOCAL_DECL(static ITimer_Data *itimerdata);
@@ -8757,7 +8909,7 @@ static void *green_thread_timer(void *data)
     }
     usleep(itimer_data->delay);
     *(itimer_data->fuel_counter_ptr) = 0;
-    *(itimer_data->jit_stack_boundary_ptr) = (unsigned long)-1;
+    *(itimer_data->jit_stack_boundary_ptr) = (uintptr_t)-1;
 
     pthread_mutex_lock(&itimer_data->mutex);
     if (!itimer_data->die) {
@@ -8774,7 +8926,7 @@ static void *green_thread_timer(void *data)
   return NULL;
 }
 
-static void start_green_thread_timer(long usec) 
+static void start_green_thread_timer(intptr_t usec) 
 {
   itimerdata->die = 0;
   itimerdata->delay = usec;
@@ -8805,7 +8957,7 @@ static void kill_green_thread_timer()
   itimerdata = NULL;
 }
 
-static void kickoff_green_thread_timer(long usec) 
+static void kickoff_green_thread_timer(intptr_t usec) 
 {
   pthread_mutex_lock(&itimerdata->mutex);
   itimerdata->delay = usec;
@@ -8823,7 +8975,7 @@ static void kickoff_green_thread_timer(long usec)
   pthread_mutex_unlock(&itimerdata->mutex);
 }
 
-static void scheme_start_itimer_thread(long usec)
+static void scheme_start_itimer_thread(intptr_t usec)
 {
   if (!itimerdata) {
     itimerdata = (ITimer_Data *)malloc(sizeof(ITimer_Data));
@@ -8845,13 +8997,13 @@ static void itimer_expired(int ignored)
   XFORM_SKIP_PROC
 {
   scheme_fuel_counter = 0;
-  scheme_jit_stack_boundary = (unsigned long)-1;
+  scheme_jit_stack_boundary = (uintptr_t)-1;
 #  ifdef SIGSET_NEEDS_REINSTALL
   MZ_SIGSET(SIGPROF, itimer_expired);
 #  endif
 }
 
-static void kickoff_itimer(long usec) 
+static void kickoff_itimer(intptr_t usec) 
   XFORM_SKIP_PROC
 {
   struct itimerval t;
@@ -8873,7 +9025,7 @@ static void kickoff_itimer(long usec)
 
 #endif
 
-void scheme_kickoff_green_thread_time_slice_timer(long usec) {
+void scheme_kickoff_green_thread_time_slice_timer(intptr_t usec) {
 #ifdef USE_ITIMER
   kickoff_itimer(usec);
 #elif defined(USE_WIN32_THREAD_TIMER)
@@ -9005,7 +9157,7 @@ void scheme_end_sleeper_thread()
 
 
 #ifdef MEMORY_COUNTING_ON
-void scheme_count_input_port(Scheme_Object *port, long *s, long *e,
+void scheme_count_input_port(Scheme_Object *port, intptr_t *s, intptr_t *e,
 			     Scheme_Hash_Table *ht)
 {
   Scheme_Input_Port *ip;
@@ -9044,7 +9196,7 @@ void scheme_count_input_port(Scheme_Object *port, long *s, long *e,
   }
 }
 
-void scheme_count_output_port(Scheme_Object *port, long *s, long *e,
+void scheme_count_output_port(Scheme_Object *port, intptr_t *s, intptr_t *e,
 			      Scheme_Hash_Table *ht)
 {
   Scheme_Output_Port *op;

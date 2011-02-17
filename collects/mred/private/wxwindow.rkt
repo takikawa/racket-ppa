@@ -2,6 +2,7 @@
   (require mzlib/class
 	   mzlib/class100
 	   (prefix wx: "kernel.ss")
+           "te.rkt"
 	   "lock.ss"
 	   "helper.ss"
 	   "wx.ss")
@@ -39,6 +40,14 @@
             [() skip-sub-events?]
             [(skip?) (set! skip-sub-events? skip?)])])
 	(public
+          [get-text-extent (lambda (s wb hb db ab font)
+                             (let-values ([(w h d a) (get-window-text-extent* s font #t)])
+                               (let ([set (lambda (b v)
+                                            (when b (set-box! b (inexact->exact (ceiling v)))))])
+                                 (set wb w)
+                                 (set hb h)
+                                 (set db d)
+                                 (set ab a))))]
 	  [on-active
 	   (lambda ()
 	     (let ([act? (is-enabled-to-root?)])
@@ -171,51 +180,44 @@
        [old-w -1]
        [old-h -1]
        [old-x -1]
-       [old-y -1])
+       [old-y -1]
+       [expose-focus? #t])
+      (public
+        [set-no-expose-focus (lambda () (set! expose-focus? #f))])
       (override
 	[on-drop-file (entry-point
 		       (lambda (f)
 			 (as-exit
 			  (lambda ()
 			    (send (get-proxy) on-drop-file f)))))]
-	[on-size (lambda (bad-w bad-h)
-		   (super on-size bad-w bad-h)
-		   ;; Delay callback to make sure X structures (position) are updated, first.
-		   ;; Also, Windows needs a trampoline.
-		   (queue-window-callback
-		    this
-		    (entry-point
-		     (lambda ()
-		       (let ([mred (get-mred)])
-			 (when mred 
-			   (let* ([w (get-width)]
-				  [h (get-height)])
-			     (when (not (and (= w old-w) (= h old-h)))
-			       (set! old-w w)
-			       (set! old-h h)
-			       (as-exit (lambda () (send mred on-size w h)))))
-			   (let* ([p (area-parent)]
-				  [x (- (get-x) (or (and p (send p dx)) 0))]
-				  [y (- (get-y) (or (and p (send p dy)) 0))])
-			     (when (not (and (= x old-x) (= y old-y)))
-			       (set! old-x x)
-			       (set! old-y y)
-			       (as-exit (lambda () (send mred on-move x y)))))))))))]
-	[on-set-focus (entry-point
-		       (lambda ()
-					; Windows circumvents the event queue to call on-focus
-					;  when you click on the window's icon in the task bar.
-			 (queue-window-callback
-			  this 
-			  (lambda () (send (get-proxy) on-focus #t)))
-			 (as-exit (lambda () (super on-set-focus)))))]
-	[on-kill-focus (entry-point
-			(lambda ()
-					; see on-set-focus:
-			  (queue-window-callback
-			   this
-			   (lambda () (send (get-proxy) on-focus #f)))
-			  (as-exit (lambda () (super on-kill-focus)))))]
+	[queue-on-size
+         (lambda ()
+           (super queue-on-size)
+           (queue-window-callback
+            this
+            (entry-point
+             (lambda ()
+               (let ([mred (get-mred)])
+                 (when mred 
+                   (let* ([w (get-width)]
+                          [h (get-height)])
+                     (when (not (and (= w old-w) (= h old-h)))
+                       (set! old-w w)
+                       (set! old-h h)
+                       (as-exit (lambda () (send mred on-size w h)))))
+                   (let* ([p (area-parent)]
+                          [x (max -10000 (min 10000 (- (get-x) (or (and p (send p dx)) 0))))]
+                          [y (max -10000 (min 10000 (- (get-y) (or (and p (send p dy)) 0))))])
+                     (when (not (and (= x old-x) (= y old-y)))
+                       (set! old-x x)
+                       (set! old-y y)
+                       (as-exit (lambda () (send mred on-move x y)))))))))))]
+	[on-set-focus (lambda () 
+                        (super on-set-focus)
+                        (when expose-focus? (send (get-proxy) on-focus #t)))]
+	[on-kill-focus (lambda () 
+                         (super on-kill-focus)
+                         (when expose-focus? (send (get-proxy) on-focus #f)))]
 	[pre-on-char (lambda (w e)
 		       (or (super pre-on-char w e)
                            (if (skip-subwindow-events?)

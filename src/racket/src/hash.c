@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -30,8 +30,8 @@
 #include <math.h>
 #include "../gc2/gc2_obj.h"
 
-THREAD_LOCAL_DECL(long scheme_hash_request_count);
-THREAD_LOCAL_DECL(long scheme_hash_iteration_count);
+THREAD_LOCAL_DECL(intptr_t scheme_hash_request_count);
+THREAD_LOCAL_DECL(intptr_t scheme_hash_iteration_count);
 
 READ_ONLY static Scheme_Object GONE[1];
 
@@ -44,20 +44,20 @@ static void register_traversers(void);
 to create a hashkey.  Setting a hashkey on a Scheme_Object however, may 
 lead to race conditions */
 
-FIXME_LATER static long keygen;
+FIXME_LATER static intptr_t keygen;
 XFORM_NONGCING static MZ_INLINE
-long PTR_TO_LONG(Scheme_Object *o)
+intptr_t PTR_TO_LONG(Scheme_Object *o)
 {
-  long bits;
+  intptr_t bits;
   short v;
 
   if (SCHEME_INTP(o))
-    return (long)o;
+    return (intptr_t)o;
 
   v = o->keyex;
 
   if (!(v & 0xFFFC)) {
-    long local_keygen = keygen;
+    intptr_t local_keygen = keygen;
     v |= (short)local_keygen;
 #ifdef OBJHEAD_HAS_HASH_BITS
     /* In 3m mode, we only have 14 bits of hash code in the
@@ -88,7 +88,7 @@ long PTR_TO_LONG(Scheme_Object *o)
   return (bits << 16) | (v & 0xFFFF);
 }
 #else
-# define PTR_TO_LONG(p) ((long)(p))
+# define PTR_TO_LONG(p) ((intptr_t)(p))
 #endif
 
 #define FILL_FACTOR 1.4
@@ -97,7 +97,7 @@ long PTR_TO_LONG(Scheme_Object *o)
 
 typedef int (*Hash_Compare_Proc)(void*, void*);
 
-typedef unsigned long hash_v_t;
+typedef uintptr_t hash_v_t;
 
 #define MAX_HASH_DEPTH 128
 
@@ -105,10 +105,10 @@ typedef unsigned long hash_v_t;
 /*                         hashing functions                              */
 /*========================================================================*/
 
-static void string_hash_indices(void *_key, long *_h, long *_h2)
+static void string_hash_indices(void *_key, intptr_t *_h, intptr_t *_h2)
 {
   const char *key = (char *)_key;
-  long i, h, h2;
+  intptr_t i, h, h2;
 
   h2 = h = i = 0;
   while (key[i]) {
@@ -123,10 +123,10 @@ static void string_hash_indices(void *_key, long *_h, long *_h2)
     *_h2 = h2;
 }
 
-static void id_hash_indices(void *_key, long *_h, long *_h2)
+static void id_hash_indices(void *_key, intptr_t *_h, intptr_t *_h2)
 {
   Scheme_Object *key = (Scheme_Object *)_key;
-  long lkey;
+  intptr_t lkey;
 
   if (SCHEME_STXP(key))
     key = SCHEME_STX_VAL(key);
@@ -174,7 +174,7 @@ static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int 
 {
   Scheme_Object *tkey, **keys;
   hash_v_t h, h2, useme = 0;
-  unsigned long mask;
+  uintptr_t mask;
 
  rehash_key:
 
@@ -187,14 +187,14 @@ static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int 
       _h2 = NULL;
     } else
       _h2 = &h2;
-    table->make_hash_indices((void *)key, (long *)&h, (long *)_h2);
+    table->make_hash_indices((void *)key, (intptr_t *)&h, (intptr_t *)_h2);
     h = h & mask;
     if (_h2) {
       h2 = (h2 & mask) | 1;
     }
   } else {
-    unsigned long lkey;
-    lkey = (unsigned long)PTR_TO_LONG((Scheme_Object *)key);
+    uintptr_t lkey;
+    lkey = (uintptr_t)PTR_TO_LONG((Scheme_Object *)key);
     h = (lkey >> 2) & mask;
     h2 = ((lkey >> 3) & mask) | 1;
   }
@@ -222,7 +222,7 @@ static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int 
       }
       scheme_hash_iteration_count++;
       if (!h2) {
-        table->make_hash_indices((void *)key, NULL, (long *)&h2);
+        table->make_hash_indices((void *)key, NULL, (intptr_t *)&h2);
         h2 = (h2 & (table->size - 1)) | 1;
       }
       h = (h + h2) & mask;
@@ -296,13 +296,13 @@ static Scheme_Object *do_hash_set(Scheme_Hash_Table *table, Scheme_Object *key, 
 {
   Scheme_Object *tkey, **keys;
   hash_v_t h, h2, useme = 0;
-  unsigned long mask;
-  unsigned long lkey;
+  uintptr_t mask;
+  uintptr_t lkey;
   int set = 2;
 
   mask = table->size - 1;
 
-  lkey = (unsigned long)PTR_TO_LONG((Scheme_Object *)key);
+  lkey = (uintptr_t)PTR_TO_LONG((Scheme_Object *)key);
   h = (lkey >> 2) & mask;
   h2 = (lkey >> 3) & mask;
 
@@ -352,12 +352,12 @@ XFORM_NONGCING static Scheme_Object *do_hash_get(Scheme_Hash_Table *table, Schem
 {
   Scheme_Object *tkey, **keys;
   hash_v_t h, h2;
-  unsigned long mask;
-  unsigned long lkey;
+  uintptr_t mask;
+  uintptr_t lkey;
 
   mask = table->size - 1;
 
-  lkey = (unsigned long)PTR_TO_LONG((Scheme_Object *)key);
+  lkey = (uintptr_t)PTR_TO_LONG((Scheme_Object *)key);
   h = (lkey >> 2) & mask;
   h2 = (lkey >> 3) & mask;
 
@@ -518,7 +518,7 @@ void scheme_reset_hash_table(Scheme_Hash_Table *table, int *history)
 /*========================================================================*/
 
 Scheme_Bucket_Table *
-scheme_make_bucket_table (int size, int type)
+scheme_make_bucket_table (intptr_t size, int type)
 {
   Scheme_Bucket_Table *table;
   size_t asize;
@@ -541,7 +541,12 @@ scheme_make_bucket_table (int size, int type)
     table->buckets = ba;
   }
 
-  table->weak = (type == SCHEME_hash_weak_ptr);
+  if (type == SCHEME_hash_weak_ptr)
+    table->weak = 1;
+  else if (type == SCHEME_hash_late_weak_ptr)
+    table->weak = 2;
+  else
+    table->weak = 0;
   
   return table;
 }
@@ -581,19 +586,19 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
   hash_v_t h, h2;
   Scheme_Bucket *bucket;
   Compare_Proc compare = table->compare;
-  unsigned long mask;
+  uintptr_t mask;
 
  rehash_key:
 
   mask = table->size - 1;
 
   if (table->make_hash_indices) {
-    table->make_hash_indices((void *)key, (long *)&h, (long *)&h2);
+    table->make_hash_indices((void *)key, (intptr_t *)&h, (intptr_t *)&h2);
     h = h & mask;
     h2 = h2 & mask;
   } else {
-    unsigned long lkey;
-    lkey = (unsigned long)PTR_TO_LONG((Scheme_Object *)key);
+    uintptr_t lkey;
+    lkey = (uintptr_t)PTR_TO_LONG((Scheme_Object *)key);
     h = (lkey >> 2) & mask;
     h2 = (lkey >> 3) & mask;
   }
@@ -649,8 +654,9 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
     if (table->weak && (table->size > 4096)) {
       int actual = 0;
 
-      /* Forced GC: so that the new table is as small as possible. */
-      scheme_collect_garbage();
+      /* It might be nice to force a GC so that the new table is
+         as small as possible, but that's too expensive. */
+      /* scheme_collect_garbage(); */
 
       /* Check actual count: */
       for (i = 0; i < oldsize; i++) {
@@ -714,15 +720,21 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
     if (table->weak) {
 #ifdef MZ_PRECISE_GC
       void *kb;
-      kb = GC_malloc_weak_box((void *)key, (void **)bucket, (void **)&bucket->val - (void **)bucket);
+      kb = GC_malloc_weak_box((void *)key, (void **)bucket, (void **)&bucket->val - (void **)bucket, 
+                              (table->weak > 1));
       bucket->key = (char *)kb;
 #else
       char *kb;
       kb = (char *)MALLOC_ONE_WEAK(void *);
       bucket->key = kb;
       *(void **)bucket->key = (void *)key;
-      scheme_weak_reference_indirect((void **)bucket->key, (void *)key);
-      scheme_weak_reference_indirect((void **)&bucket->val, (void *)key);
+      if (table->weak > 1) {
+        scheme_late_weak_reference_indirect((void **)bucket->key, (void *)key);
+        scheme_late_weak_reference_indirect((void **)&bucket->val, (void *)key);
+      } else {
+        scheme_weak_reference_indirect((void **)bucket->key, (void *)key);
+        scheme_weak_reference_indirect((void **)&bucket->val, (void *)key);
+      }
 #endif
     } else
       bucket->key = (char *)key;
@@ -876,7 +888,7 @@ void scheme_init_hash_key_procs(void)
   register_traversers();
 }
 
-long scheme_hash_key(Scheme_Object *o)
+intptr_t scheme_hash_key(Scheme_Object *o)
 {
   return PTR_TO_LONG(o) >> 2;
 }
@@ -890,16 +902,16 @@ END_XFORM_SKIP;
 /*========================================================================*/
 
 typedef struct Hash_Info {
-  long depth; /* always odd */
+  intptr_t depth; /* always odd */
   Scheme_Object *recur;
 } Hash_Info;
 
-static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi);
-static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi);
+static intptr_t equal_hash_key(Scheme_Object *o, intptr_t k, Hash_Info *hi);
+static intptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi);
 
 static Scheme_Object *hash_recur(int argc, Scheme_Object **argv, Scheme_Object *prim)
 {
-  long v;
+  intptr_t v;
   Hash_Info *hi;
 
   hi = (Hash_Info *)SCHEME_PRIM_CLOSURE_ELS(prim)[0];
@@ -915,7 +927,7 @@ static Scheme_Object *hash_k(void)
   Scheme_Thread *p = scheme_current_thread;
   Scheme_Object *v = (Scheme_Object *)p->ku.k.p1;
   Hash_Info *hi = (Hash_Info *)p->ku.k.p2;
-  long nv;
+  intptr_t nv;
 
   p->ku.k.p1 = NULL;
   p->ku.k.p2 = NULL;
@@ -925,10 +937,10 @@ static Scheme_Object *hash_k(void)
   return scheme_make_integer_value(nv);
 }
 
-static long overflow_equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
+static intptr_t overflow_equal_hash_key(Scheme_Object *o, intptr_t k, Hash_Info *hi)
 {
   Scheme_Object *nv;
-  long val;
+  intptr_t val;
   Hash_Info *hi2;
   Scheme_Thread *p = scheme_current_thread;
 
@@ -947,7 +959,7 @@ static long overflow_equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
   return val;
 }
 
-XFORM_NONGCING static long dbl_hash_val(double d) 
+XFORM_NONGCING static intptr_t dbl_hash_val(double d) 
   XFORM_SKIP_PROC
 {
   int e;
@@ -969,10 +981,10 @@ XFORM_NONGCING static long dbl_hash_val(double d)
     d = frexp(d, &e);
   }
 
-  return ((long)(d * (1 << 30))) + e;
+  return ((intptr_t)(d * (1 << 30))) + e;
 }
 
-XFORM_NONGCING static long dbl_hash2_val(double d)  
+XFORM_NONGCING static intptr_t dbl_hash2_val(double d)  
   XFORM_SKIP_PROC
 {
   int e;
@@ -994,7 +1006,7 @@ XFORM_NONGCING static long dbl_hash2_val(double d)
    http://www.burtleburtle.net/bob/hash/doobs.html: */
 #define MZ_MIX(k) (k += (k << 10), k ^= (k >> 6))
 
-static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
+static intptr_t equal_hash_key(Scheme_Object *o, intptr_t k, Hash_Info *hi)
 {
   Scheme_Type t;
 
@@ -1028,7 +1040,7 @@ static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
 	k2 = (k2 << 3) + k2 + d[i];
       }
     
-      return (long)k2;
+      return (intptr_t)k2;
     }
     break;
   case scheme_rational_type:
@@ -1065,6 +1077,12 @@ static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
       o = SCHEME_CDR(o);
       break;
     }
+  case scheme_cpointer_type:
+    {
+      k = (k << 3) + k;
+      k += (intptr_t)((char *)SCHEME_CPTR_VAL(o) + SCHEME_CPTR_OFFSET(o));
+      return k;
+    }
   case scheme_vector_type:
   case scheme_fxvector_type:
   case scheme_wrap_chunk_type:
@@ -1088,7 +1106,7 @@ static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
     }
   case scheme_flvector_type:
     {
-      long len = SCHEME_FLVEC_SIZE(o), i;
+      intptr_t len = SCHEME_FLVEC_SIZE(o), i;
       double d;
 
       if (!len)
@@ -1167,7 +1185,7 @@ static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
         if (SCHEME_INTP(v))
           return k + SCHEME_INT_VAL(v);
         else if (SCHEME_BIGNUMP(v)) {
-          return k + (long)((Scheme_Bignum *)v)->digits[0];
+          return k + (intptr_t)((Scheme_Bignum *)v)->digits[0];
         } else {
           scheme_arg_mismatch("equal-hash-code",
                               "hash procedure returned a value other than an exact integer: ",
@@ -1208,7 +1226,7 @@ static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
       Scheme_Hash_Table *ht = (Scheme_Hash_Table *)o;
       Scheme_Object **vals, **keys;
       int i;
-      long vk, old_depth;
+      intptr_t vk, old_depth;
 
 #     include "mzhashchk.inc"
 
@@ -1236,7 +1254,7 @@ static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
       Scheme_Hash_Tree *ht = (Scheme_Hash_Tree *)o;
       Scheme_Object *ik, *iv;
       int i;
-      long vk, old_depth;
+      intptr_t vk, old_depth;
 
 #     include "mzhashchk.inc"
 
@@ -1262,7 +1280,7 @@ static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
       Scheme_Bucket **buckets, *bucket;
       const char *key;
       int i, weak;
-      long vk, old_depth;
+      intptr_t vk, old_depth;
   
 #    include "mzhashchk.inc"
 
@@ -1338,7 +1356,7 @@ static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
   goto top;
 }
 
-long scheme_equal_hash_key(Scheme_Object *o)
+intptr_t scheme_equal_hash_key(Scheme_Object *o)
 {
   Hash_Info hi;
 
@@ -1348,7 +1366,7 @@ long scheme_equal_hash_key(Scheme_Object *o)
   return equal_hash_key(o, 0, &hi);
 }
 
-long scheme_equal_hash_key2(Scheme_Object *o)
+intptr_t scheme_equal_hash_key2(Scheme_Object *o)
 {
   Hash_Info hi;
 
@@ -1358,7 +1376,7 @@ long scheme_equal_hash_key2(Scheme_Object *o)
   return equal_hash_key2(o, &hi);
 }
 
-long scheme_eqv_hash_key(Scheme_Object *o)
+intptr_t scheme_eqv_hash_key(Scheme_Object *o)
 {
   if (!SCHEME_INTP(o) && (SCHEME_NUMBERP(o) || SCHEME_CHARP(o)))
     return scheme_equal_hash_key(o);
@@ -1366,7 +1384,7 @@ long scheme_eqv_hash_key(Scheme_Object *o)
     return (PTR_TO_LONG(o) >> 2);
 }
 
-long scheme_eqv_hash_key2(Scheme_Object *o)
+intptr_t scheme_eqv_hash_key2(Scheme_Object *o)
 {
   if (!SCHEME_INTP(o) && (SCHEME_NUMBERP(o) || SCHEME_CHARP(o)))
     return scheme_equal_hash_key2(o);
@@ -1376,7 +1394,7 @@ long scheme_eqv_hash_key2(Scheme_Object *o)
 
 static Scheme_Object *hash2_recur(int argc, Scheme_Object **argv, Scheme_Object *prim)
 {
-  long v;
+  intptr_t v;
   Hash_Info *hi;
 
   hi = (Hash_Info *)SCHEME_PRIM_CLOSURE_ELS(prim)[0];
@@ -1392,7 +1410,7 @@ static Scheme_Object *hash2_k(void)
   Scheme_Thread *p = scheme_current_thread;
   Scheme_Object *v = (Scheme_Object *)p->ku.k.p1;
   Hash_Info *hi = (Hash_Info *)p->ku.k.p2;
-  long nv;
+  intptr_t nv;
 
   p->ku.k.p1 = NULL;
   p->ku.k.p2 = NULL;
@@ -1402,10 +1420,10 @@ static Scheme_Object *hash2_k(void)
   return scheme_make_integer(nv);
 }
 
-static long overflow_equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
+static intptr_t overflow_equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
 {
   Scheme_Object *nv;
-  long val;
+  intptr_t val;
   Hash_Info *hi2;
   Scheme_Thread *p = scheme_current_thread;
 
@@ -1426,7 +1444,7 @@ static long overflow_equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
 #undef OVERFLOW_HASH
 #define OVERFLOW_HASH() overflow_equal_hash_key2(o, hi)
 
-static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
+static intptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
 {
   Scheme_Type t;
 
@@ -1455,7 +1473,7 @@ static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
     return equal_hash_key2(scheme_rational_numerator(o), hi);
   case scheme_complex_type:
     {
-      long v1, v2;
+      intptr_t v1, v2;
       Scheme_Complex *c = (Scheme_Complex *)o;
       v1 = equal_hash_key2(c->r, hi);
       v2 = equal_hash_key2(c->i, hi);
@@ -1463,7 +1481,7 @@ static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
     }
   case scheme_pair_type:
     {
-      long v1, v2;
+      intptr_t v1, v2;
 #     include "mzhashchk.inc"
       hi->depth += 2;
       v1 = equal_hash_key2(SCHEME_CAR(o), hi);
@@ -1472,19 +1490,23 @@ static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
     }
   case scheme_mutable_pair_type:
     {
-      long v1, v2;
+      intptr_t v1, v2;
 #     include "mzhashchk.inc"
       hi->depth += 2;
       v1 = equal_hash_key2(SCHEME_CAR(o), hi);
       v2 = equal_hash_key2(SCHEME_CDR(o), hi);
       return v1 + v2;
     }
+  case scheme_cpointer_type:
+    {
+      return (intptr_t)((char *)SCHEME_CPTR_VAL(o) + SCHEME_CPTR_OFFSET(o));
+    }
   case scheme_vector_type:
   case scheme_fxvector_type:
   case scheme_wrap_chunk_type:
     {
       int len = SCHEME_VEC_SIZE(o), i;
-      long k = 0;
+      intptr_t k = 0;
 
 #     include "mzhashchk.inc"
 
@@ -1499,9 +1521,9 @@ static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
     }
   case scheme_flvector_type:
     {
-      long len = SCHEME_FLVEC_SIZE(o), i;
+      intptr_t len = SCHEME_FLVEC_SIZE(o), i;
       double d;
-      long k = 0;
+      intptr_t k = 0;
 
       if (!len)
 	return k + 1;
@@ -1577,7 +1599,7 @@ static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
         if (SCHEME_INTP(v))
           return SCHEME_INT_VAL(v);
         else if (SCHEME_BIGNUMP(v)) {
-          return (long)((Scheme_Bignum *)v)->digits[0];
+          return (intptr_t)((Scheme_Bignum *)v)->digits[0];
         } else {
           scheme_arg_mismatch("equal-secondary-hash-code",
                               "hash procedure returned a value other than an exact integer: ",
@@ -1589,7 +1611,7 @@ static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
         insp = scheme_get_param(scheme_current_config(), MZCONFIG_INSPECTOR);
         if (scheme_inspector_sees_part(o, insp, -2)) {
           int i;
-          long k = 0;
+          intptr_t k = 0;
           Scheme_Structure *s1 = (Scheme_Structure *)o;
           
 #         include "mzhashchk.inc"
@@ -1614,7 +1636,7 @@ static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
       Scheme_Hash_Table *ht = (Scheme_Hash_Table *)o;
       Scheme_Object **vals, **keys;
       int i;
-      long k = 0, old_depth;
+      intptr_t k = 0, old_depth;
       
 #     include "mzhashchk.inc"
 
@@ -1638,7 +1660,7 @@ static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
       Scheme_Hash_Tree *ht = (Scheme_Hash_Tree *)o;
       Scheme_Object *iv, *ik;
       int i;
-      long k = 0, old_depth;
+      intptr_t k = 0, old_depth;
       
 #     include "mzhashchk.inc"
 
@@ -1660,7 +1682,7 @@ static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
       Scheme_Bucket **buckets, *bucket;
       const char *key;
       int i, weak;
-      long k = 0, old_depth;
+      intptr_t k = 0, old_depth;
 
 #     include "mzhashchk.inc"
   
@@ -1703,12 +1725,12 @@ static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
   }
 }
 
-long scheme_recur_equal_hash_key(Scheme_Object *o, void *cycle_data)
+intptr_t scheme_recur_equal_hash_key(Scheme_Object *o, void *cycle_data)
 {
   return equal_hash_key(o, 0, (Hash_Info *)cycle_data);
 }
 
-long scheme_recur_equal_hash_key2(Scheme_Object *o, void *cycle_data)
+intptr_t scheme_recur_equal_hash_key2(Scheme_Object *o, void *cycle_data)
 {
   return equal_hash_key2(o, (Hash_Info *)cycle_data);
 }
@@ -1725,7 +1747,7 @@ long scheme_recur_equal_hash_key2(Scheme_Object *o, void *cycle_data)
 
 typedef struct RBNode {
   Scheme_Inclhash_Object iso; /* 0x1 => red */
-  unsigned long code;
+  uintptr_t code;
   Scheme_Object *key; /* NULL => val is list of key-value pairs */
   Scheme_Object *val;
   struct RBNode *left, *right;
@@ -1741,7 +1763,7 @@ typedef struct RBNode {
 
 static RBNode *make_rb(int red, 
                        RBNode *left,
-                       unsigned long code, Scheme_Object *key, Scheme_Object *val,
+                       uintptr_t code, Scheme_Object *key, Scheme_Object *val,
                        RBNode *right)
 {
   RBNode *rb;
@@ -1766,7 +1788,7 @@ static RBNode *recolor_rb(int red, RBNode *rb)
                  rb->right);
 }
 
-static RBNode *rb_find(unsigned long code, RBNode *s)
+static RBNode *rb_find(uintptr_t code, RBNode *s)
 {
   while (1) {
     if (!s)
@@ -1781,7 +1803,7 @@ static RBNode *rb_find(unsigned long code, RBNode *s)
   }
 }
 
-static RBNode *RB_CHK(RBNode *rb, unsigned long code)
+static RBNode *RB_CHK(RBNode *rb, uintptr_t code)
 {
   RB_ASSERT(rb_find(code, rb));
   return rb;
@@ -1795,7 +1817,7 @@ static RBNode *RB_CHK(RBNode *rb, unsigned long code)
 */
 
 static RBNode *lbalance(RBNode *x1, 
-                        unsigned long code, Scheme_Object *key, Scheme_Object *val,
+                        uintptr_t code, Scheme_Object *key, Scheme_Object *val,
                         RBNode *d)
 {
   /*
@@ -1838,7 +1860,7 @@ static RBNode *lbalance(RBNode *x1,
 }
 
 static RBNode *rbalance(RBNode *a, 
-                        unsigned long code, Scheme_Object *key, Scheme_Object *val,
+                        uintptr_t code, Scheme_Object *key, Scheme_Object *val,
                         RBNode *x3)
 {
   /*
@@ -1877,7 +1899,7 @@ static RBNode *rbalance(RBNode *a,
   return make_rb(0, a, code, key, val, x3);
 }
 
-static RBNode *ins(unsigned long code, Scheme_Object *key, Scheme_Object *val, RBNode *s)
+static RBNode *ins(uintptr_t code, Scheme_Object *key, Scheme_Object *val, RBNode *s)
 {
   /*
       (match s
@@ -1928,7 +1950,7 @@ static RBNode *ins(unsigned long code, Scheme_Object *key, Scheme_Object *val, R
   }
 }
 
-static RBNode *rb_insert(unsigned long code, Scheme_Object *key, Scheme_Object *val,
+static RBNode *rb_insert(uintptr_t code, Scheme_Object *key, Scheme_Object *val,
                          RBNode *s)
 {
   RBNode *s1;
@@ -2100,7 +2122,7 @@ static RBNode *remove_min(RBNode *s, RBNode **_m, int *_bh_dec)
   }
 }
 
-static RBNode *remove_aux(RBNode *s, unsigned long code, int *_bh_dec)
+static RBNode *remove_aux(RBNode *s, uintptr_t code, int *_bh_dec)
 {
   /*
     (define (remove-aux s)
@@ -2195,7 +2217,7 @@ static RBNode *remove_aux(RBNode *s, unsigned long code, int *_bh_dec)
   }
 }
 
-static RBNode *rb_remove(RBNode *s, unsigned long code)
+static RBNode *rb_remove(RBNode *s, uintptr_t code)
 {
   int bh_dec;
   return remove_aux(s, code, &bh_dec);
@@ -2218,18 +2240,18 @@ Scheme_Hash_Tree *scheme_make_hash_tree(int kind)
 Scheme_Hash_Tree *scheme_hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val)
 {
   Scheme_Hash_Tree *tree2;
-  unsigned long h;
+  uintptr_t h;
   RBNode *root, *added;
   int delta;
 
   if (SCHEME_HASHTR_FLAGS(tree) & 0x3) {
     if (SCHEME_HASHTR_FLAGS(tree) & 0x1) {
-      h = (unsigned long)scheme_equal_hash_key(key);
+      h = (uintptr_t)scheme_equal_hash_key(key);
     } else {
-      h = (unsigned long)scheme_eqv_hash_key(key);
+      h = (uintptr_t)scheme_eqv_hash_key(key);
     }
   } else {
-    h = (unsigned long)PTR_TO_LONG((Scheme_Object *)key);
+    h = (uintptr_t)PTR_TO_LONG((Scheme_Object *)key);
   }
 
   if (!val) {
@@ -2367,17 +2389,17 @@ Scheme_Hash_Tree *scheme_hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *ke
 
 Scheme_Object *scheme_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *key)
 {
-  unsigned long h;
+  uintptr_t h;
   RBNode *rb;
   int kind = (SCHEME_HASHTR_FLAGS(tree) & 0x3);
 
   if (kind) {
     if (kind == 1)
-      h = (unsigned long)scheme_equal_hash_key(key);
+      h = (uintptr_t)scheme_equal_hash_key(key);
     else
-      h = (unsigned long)scheme_eqv_hash_key(key);
+      h = (uintptr_t)scheme_eqv_hash_key(key);
   } else {
-    h = (unsigned long)PTR_TO_LONG((Scheme_Object *)key);
+    h = (uintptr_t)PTR_TO_LONG((Scheme_Object *)key);
   }
 
   rb = rb_find(h, tree->root);
@@ -2418,7 +2440,7 @@ Scheme_Object *scheme_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *key)
   return NULL;
 }
 
-long scheme_hash_tree_next(Scheme_Hash_Tree *tree, long pos)
+intptr_t scheme_hash_tree_next(Scheme_Hash_Tree *tree, intptr_t pos)
 {
   if (pos >= tree->count)
     return -2;
@@ -2429,7 +2451,7 @@ long scheme_hash_tree_next(Scheme_Hash_Tree *tree, long pos)
     return -1;
 }
 
-static int fill_elems(RBNode *rb, Scheme_Object *vec, long pos, long count)
+static int fill_elems(RBNode *rb, Scheme_Object *vec, intptr_t pos, intptr_t count)
 {
   if (!rb)
     return pos;
@@ -2458,7 +2480,7 @@ static int fill_elems(RBNode *rb, Scheme_Object *vec, long pos, long count)
   return pos;
 }
 
-int scheme_hash_tree_index(Scheme_Hash_Tree *tree, long pos, Scheme_Object **_key, Scheme_Object **_val)
+int scheme_hash_tree_index(Scheme_Hash_Tree *tree, intptr_t pos, Scheme_Object **_key, Scheme_Object **_val)
 {
   Scheme_Object *elems, *elems_box;
 

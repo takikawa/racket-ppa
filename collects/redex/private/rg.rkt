@@ -12,8 +12,14 @@
          (for-syntax "keyword-macros.ss")
          mrlib/tex-table)
 
-(define (exotic-choice? [random random]) (= 0 (random 5)))
-(define (use-lang-literal? [random random]) (= 0 (random 20)))
+(define redex-pseudo-random-generator
+  (make-parameter (current-pseudo-random-generator)))
+(define (generator-random . arg)
+  (parameterize ([current-pseudo-random-generator (redex-pseudo-random-generator)])
+    (apply random arg)))
+
+(define (exotic-choice? [random generator-random]) (= 0 (random 5)))
+(define (use-lang-literal? [random generator-random]) (= 0 (random 20)))
 
 (define default-check-attempts 1000)
 
@@ -21,11 +27,11 @@
 (define tex-chars-threshold 1500)
 (define chinese-chars-threshold 2500)
 
-(define (pick-var lang-lits attempt [random random])
+(define (pick-var lang-lits attempt [random generator-random])
   (let ([length (add1 (random-natural 4/5 random))])
     (string->symbol (random-string lang-lits length attempt random))))
 
-(define (pick-char attempt [random random])
+(define (pick-char attempt [random generator-random])
   (cond [(or (< attempt ascii-chars-threshold) (not (exotic-choice? random)))
          (let ([i (random (add1 (- (char->integer #\z) (char->integer #\a))))]
                [cap? (zero? (random 2))])
@@ -39,18 +45,18 @@
         [else
          (integer->char (+ #x4E00 (random (- #x9FCF #x4E00))))]))
 
-(define (random-string lang-lits length attempt [random random])
+(define (random-string lang-lits length attempt [random generator-random])
   (if (and (not (null? lang-lits)) (use-lang-literal? random))
       (pick-from-list lang-lits random)
       (list->string (build-list length (λ (_) (pick-char attempt random))))))
 
-(define (pick-any lang sexp [random random]) 
+(define (pick-any lang sexp [random generator-random]) 
   (if (and (> (dict-count (rg-lang-non-cross lang)) 0) (zero? (random 5)))
       (let ([nts (rg-lang-non-cross lang)])
         (values lang (pick-from-list (dict-map nts (λ (nt _) nt)) random)))
       (values sexp 'sexp)))
 
-(define (pick-string lang-lits attempt [random random])
+(define (pick-string lang-lits attempt [random generator-random])
   (random-string lang-lits (random-natural 1/5 random) attempt random))
 
 ;; next-non-terminal-decision selects a subset of a non-terminal's productions.
@@ -58,7 +64,8 @@
 ;; generator's test cases restrict the productions.
 (define pick-nts values)
 
-(define (pick-from-list l [random random]) (list-ref l (random (length l))))
+(define (pick-from-list l [random generator-random])
+  (list-ref l (random (length l))))
 
 ;; Chooses a random (exact) natural number from the "shifted" geometric distribution:
 ;;   P(random-natural = k) = p(1-p)^k
@@ -66,22 +73,22 @@
 ;; P(random-natural >= k) = (1-p)^(k+1)
 ;; E(random-natural) = (1-p)/p
 ;; Var(random-natural) = (1-p)/p^2
-(define (random-natural p [random random])
+(define (random-natural p [random generator-random])
   (sub1 (inexact->exact (ceiling (real-part (/ (log (random)) (log (- 1 p))))))))
 
 (define (negative? random)
   (zero? (random 2)))
 
-(define (random-integer p [random random])
+(define (random-integer p [random generator-random])
   (* (if (negative? random) -1 1) (random-natural p random)))
 
-(define (random-rational p [random random])
+(define (random-rational p [random generator-random])
   (/ (random-integer p random) (add1 (random-natural p random))))
 
-(define (random-real p [random random])
+(define (random-real p [random generator-random])
   (* (random) 2 (random-integer p random)))
 
-(define (random-complex p [random random])
+(define (random-complex p [random generator-random])
   (let ([randoms (list random-integer random-rational random-real)])
     (make-rectangular ((pick-from-list randoms random) p random) 
                       ((pick-from-list randoms random) p random))))
@@ -102,29 +109,16 @@
   ;; E = 0 => p = 1, which breaks random-natural
   (/ 1 (+ (max 1 E) 1)))
 
-(define-for-syntax (apply-contract ctc expr desc redex-form)
-  #`(contract #,ctc #,expr
-              #,(let ([m (syntax-source-module expr)])
-                  (cond [(module-path-index? m)
-                         (format "~a" (module-path-index-resolve m))]
-                        [(or (symbol? m) (path? m))
-                         (format "~a" m)]
-                        [else (format "~s client" redex-form)]))
-              '#,redex-form #,desc
-              #(#,(syntax-source expr)
-                #,(syntax-line expr) 
-                #,(syntax-column expr) 
-                #,(syntax-position expr)
-                #,(syntax-span expr))))
-
 ; Determines a size measure for numbers, sequences, etc., using the
 ; attempt count.
-(define default-attempt->size
+(define default-attempt-size
   (λ (n) (inexact->exact (floor (/ (log (add1 n)) (log 5))))))
+(define attempt-size/c
+  (-> natural-number/c natural-number/c))
 (define attempt->size 
-  (make-parameter default-attempt->size))
+  (make-parameter default-attempt-size))
 
-(define (pick-number attempt #:top-threshold [top-threshold complex-threshold] [random random])
+(define (pick-number attempt #:top-threshold [top-threshold complex-threshold] [random generator-random])
   (let loop ([threshold 0] 
              [generator random-natural]
              [levels `((,integer-threshold . ,random-integer)
@@ -138,13 +132,13 @@
         (generator (expected-value->p ((attempt->size) (- attempt threshold))) random)
         (loop (caar levels) (cdar levels) (cdr levels)))))
 
-(define (pick-natural attempt [random random])
+(define (pick-natural attempt [random generator-random])
   (pick-number attempt #:top-threshold 0 random))
 
-(define (pick-integer attempt [random random])
+(define (pick-integer attempt [random generator-random])
   (pick-number attempt #:top-threshold integer-threshold random))
 
-(define (pick-real attempt [random random])
+(define (pick-real attempt [random generator-random])
   (pick-number attempt #:top-threshold real-threshold random))
 
 (define (pick-sequence-length attempt)
@@ -170,7 +164,7 @@
   (define-values/invoke-unit (generation-decisions)
     (import) (export decisions^))
   
-  (define (gen-nt lang name cross? retries size attempt in-hole)
+  (define (gen-nt lang name cross? retries size attempt filler)
     (let*-values
         ([(productions)
           (hash-ref ((if cross? rg-lang-cross rg-lang-non-cross) lang) name)]
@@ -181,7 +175,7 @@
                                      ((if cross? base-cases-cross base-cases-non-cross)
                                       (rg-lang-base-cases lang)))
                           ((next-non-terminal-decision) productions)))])
-            (gen retries (max 0 (sub1 size)) attempt empty-env in-hole))])
+            (gen retries (max 0 (sub1 size)) attempt empty-env filler))])
       term))
   
   (define (generate/pred name gen pred init-sz init-att retries)
@@ -235,10 +229,13 @@
             (if (null? envs)
                 (values null null)
                 (let*-values 
-                    ([(term env) (gen (car envs) the-hole)]
-                     [(terms envs) (recur (cdr envs))])
-                  (values (cons term terms) (cons env envs)))))])
+                    ([(hd env) (gen (car envs))]
+                     [(tl envs) (recur (cdr envs))])
+                  (values (cons hd tl) (cons env envs)))))])
       (values seq (merge-environments envs))))
+  
+  (define ((generator/attempts g) r s a e f)
+    (values (g a) e))
   
   (define (mismatches-satisfied? env)
     (let ([groups (make-hasheq)])
@@ -271,114 +268,129 @@
           (λ (pat any?)
             (let* ([nt? (is-nt? (if any? sexpp langp))]
                    [mismatches? #f]
-                   [generator ; retries size attempt env in-hole -> (values term env)
+                   [generator 
+                    ; retries size attempt env filler -> (values terms env)
+                    ;
+                    ; Patterns like (in-hole C_1 p) require constructing both an unfilled context
+                    ; (exposed via the C_1 binding) and a filled context (exposed as the result).
+                    ; A generator constructs both by constructing the context, using either 
+                    ; `the-hole' or `the-not-hole' as appropriate, then filling it using `plug'.
+                    ; Before returning its result, a generator replaces occurrences of `the-not-hole'
+                    ; with `the-hole' to avoid exposing the distinction to the user, but 
+                    ; `the-not-hole' remains in bindings supplied to side-condition predicates, to
+                    ; match the behavior of the matcher.
+                    ;
+                    ; Repeated traversals via `plug' are not asymptotically worse than simultaneously
+                    ; constructing the filled and unfilled pattern, due to languages like this one,
+                    ; which names contexts in a way that prevents any sharing.
+                    ; (define-language L
+                    ;  (W hole
+                    ;  ; extra parens to avoid matcher loop
+                    ;  (in-hole (W_1) (+ natural hole))))
                     (let recur ([pat pat])
                       (match pat
-                        [`number (λ (r s a e h) (values ((next-number-decision) a) e))]
-                        [`natural (λ (r s a e h) (values ((next-natural-decision) a) e))]
-                        [`integer (λ (r s a e h) (values ((next-integer-decision) a) e))]
-                        [`real (λ (r s a e h) (values ((next-real-decision) a) e))]
+                        [`number (generator/attempts (λ (a) ((next-number-decision) a)))]
+                        [`natural (generator/attempts (λ (a) ((next-natural-decision) a)))]
+                        [`integer (generator/attempts (λ (a) ((next-integer-decision) a)))]
+                        [`real (generator/attempts (λ (a) ((next-real-decision) a)))]
                         [`(variable-except ,vars ...)
                          (let ([g (recur 'variable)])
-                           (λ (r s a e h)
+                           (λ (r s a e f)
                              (generate/pred pat
-                                            (λ (s a) (g r s a e h))
+                                            (λ (s a) (g r s a e f))
                                             (λ (var _) (not (memq var vars)))
                                             s a r)))]
-                        [`variable 
-                         (λ (r s a e h)
-                           (values ((next-variable-decision) lits a) e))]
+                        [`variable (generator/attempts (λ (a) ((next-variable-decision) lits a)))]
                         [`variable-not-otherwise-mentioned
                          (let ([g (recur 'variable)])
-                           (λ (r s a e h)
+                           (λ (r s a e f)
                              (generate/pred pat
-                                            (λ (s a) (g r s a e h))
+                                            (λ (s a) (g r s a e f))
                                             (λ (var _) (not (memq var lit-syms)))
                                             s a r)))]
                         [`(variable-prefix ,prefix)
                          (define (symbol-append prefix suffix)
                            (string->symbol (string-append (symbol->string prefix) (symbol->string suffix))))
                          (let ([g (recur 'variable)])
-                           (λ (r s a e h)
-                             (let-values ([(term _) (g r s a e h)])
-                               (values (symbol-append prefix term) e))))]
-                        [`string 
-                         (λ (r s a e h)
-                           (values ((next-string-decision) lits a) e))]
+                           (λ (r s a e f)
+                             (let-values ([(t e) (g r s a e f)])
+                               (values (symbol-append prefix t) e))))]
+                        [`string (generator/attempts (λ (a) ((next-string-decision) lits a)))]
                         [`(side-condition ,pat ,(? procedure? condition) ,guard-src-loc)
                          (let ([g (recur pat)])
-                           (λ (r s a e h)
+                           (λ (r s a e f)
                              (generate/pred `(side-condition ,(unparse-pattern pat) ,guard-src-loc) 
-                                            (λ (s a) (g r s a e h))
+                                            (λ (s a) (g r s a e f))
                                             (λ (_ env) (condition (bindings env)))
                                             s a r)))]
                         [`(name ,(? symbol? id) ,p)
                          (let ([g (recur p)])
-                           (λ (r s a e h)
-                             (let-values ([(term env) (g r s a e h)])
-                               (values term (hash-set env (make-binder id) term)))))]
-                        [`hole (λ (r s a e h) (values h e))]
-                        [`(in-hole ,context ,contractum)
-                         (let ([ctx (recur context)]
-                               [ctm (recur contractum)])
-                           (λ (r s a e h)
-                             (let-values ([(term env) (ctm r s a e h)])
-                               (ctx r s a env term))))]
+                           (λ (r s a e f)
+                             (let-values ([(t env) (g r s a e f)])
+                               (values t (hash-set env (make-binder id) t)))))]
+                        [`hole (λ (r s a e f) (values f e))]
+                        [`(in-hole ,context ,filler)
+                         (let ([c-context (recur context)]
+                               [c-filler (recur filler)])
+                           (λ (r s a e f)
+                             (let*-values ([(filler env) (c-filler r s a e f)]
+                                           [(context env) (c-context r s a env the-hole)])
+                               (values (plug context filler) env))))]
                         [`(hide-hole ,pattern)
                          (let ([g (recur pattern)])
-                           (λ (r s a e h)
-                             (g r s a e the-hole)))]
+                           (λ (r s a e f)
+                             (g r s a e the-not-hole)))]
                         [`any
-                         (λ (r s a e h)
+                         (λ (r s a e f)
                            (let*-values ([(lang nt) ((next-any-decision) langc sexpc)]
-                                         [(term) (gen-nt lang nt #f r s a the-hole)])
+                                         [(term) (gen-nt lang nt #f r s a (list the-hole))])
                              (values term e)))]
                         [(or (? symbol? (? nt? p)) `(cross ,(? symbol? p)))
                          (let ([cross? (not (symbol? pat))])
-                           (λ (r s a e h)
-                             (values (gen-nt (if any? sexpc langc) p cross? r s a h) e)))]
-                        [(struct binder ((or (app (symbol-match named-nt-rx) (? symbol? p)) p)))
-                         (let ([g (recur p)])
-                           (λ (r s a e h)
-                             (generate/prior pat e (λ () (g r s a e h)))))]
-                        [(struct mismatch (_ (app (symbol-match mismatch-nt-rx) p)))
-                         (let ([g (recur p)])
+                           (λ (r s a e f)
+                             (values (gen-nt (if any? sexpc langc) p cross? r s a f) e)))]
+                        [(? binder?)
+                         (let ([g (recur (binder-pattern pat))])
+                           (λ (r s a e f)
+                             (generate/prior pat e (λ () (g r s a e f)))))]
+                        [(? mismatch?)
+                         (let ([g (recur (mismatch-pattern pat))])
                            (set! mismatches? #t)
-                           (λ (r s a e h)
-                             (let-values ([(term _) (g r s a e h)])
-                               (values term (hash-set e pat term)))))]
+                           (λ (r s a e f)
+                             (let-values ([(t e) (g r s a e f)])
+                               (values t (hash-set e pat t)))))]
                         [(or (? symbol?) (? number?) (? string?) (? boolean?) (? null?))
-                         (λ (r s a e h) (values pat e))]
+                         (λ (r s a e f) (values pat e))]
                         [(list-rest (struct ellipsis (name sub-pat class vars)) rest)
                          (let ([elemg (recur sub-pat)]
                                [tailg (recur rest)])
                            (when (mismatch? name)
                              (set! mismatches? #t))
-                           (λ (r s a e h)
+                           (λ (r s a e f)
                              (let*-values ([(len) 
                                             (let ([prior (hash-ref e class #f)])
                                               (if prior
                                                   prior
                                                   (if (zero? s) 0 ((next-sequence-decision) a))))]
                                            [(seq env)
-                                            (generate-sequence (λ (e h) (elemg r s a e h)) e vars len)]
+                                            (generate-sequence (λ (e) (elemg r s a e f)) e vars len)]
                                            [(tail env) 
                                             (let ([e (hash-set (hash-set env class len) name len)])
-                                              (tailg r s a e h))])
+                                              (tailg r s a e f))])
                                (values (append seq tail) env))))]
                         [(list-rest hdp tlp)
                          (let ([hdg (recur hdp)]
                                [tlg (recur tlp)])
-                           (λ (r s a e h)
+                           (λ (r s a e f)
                              (let*-values 
-                                 ([(hd env) (hdg r s a e h)]
-                                  [(tl env) (tlg r s a env h)])
+                                 ([(hd env) (hdg r s a e f)]
+                                  [(tl env) (tlg r s a env f)])
                                (values (cons hd tl) env))))]
                         [else
                          (error what "unknown pattern ~s\n" pat)]))])
               (if mismatches?
-                  (λ (r s a e h)
-                    (let ([g (λ (s a) (generator r s a e h))]
+                  (λ (r s a e f)
+                    (let ([g (λ (s a) (generator r s a e f))]
                           [p? (λ (_ e) (mismatches-satisfied? e))])
                       (generate/pred (unparse-pattern pat) g p? s a r)))
                   generator)))]
@@ -403,8 +415,12 @@
       (λ (pat)
         (let ([g (compile-pattern (reassign-classes (parse-pattern pat lang 'top-level)))])
           (λ (size attempt retries)
-            (let-values ([(term env) (g retries size attempt empty-env the-hole)])
-              (values term (bindings env)))))))))
+            (let-values ([(t e) (g retries size attempt empty-env the-hole)])
+              (values (let replace-the-not-hole ([t t])
+                        (cond [(eq? t the-not-hole) the-hole]
+                              [(list? t) (map replace-the-not-hole t)]
+                              [else t])) 
+                      (bindings e)))))))))
 
 (define-struct base-cases (cross non-cross))
 
@@ -434,13 +450,18 @@
     (let ([nts '()])
       (let loop ([pat pat])
         (match pat
-          [(? symbol? pat)
-           (when ((is-nt? lang) (symbol->nt pat))
-             (set! nts (cons (cons #f (symbol->nt pat)) nts)))]
+          [(? binder?)
+           (set! nts (cons (cons #f (binder-pattern pat)) nts))]
+          [(? mismatch?)
+           (set! nts (cons (cons #f (mismatch-pattern pat)) nts))]
+          [(? symbol?)
+           (when ((is-nt? lang) pat)
+             (set! nts (cons (cons #f pat) nts)))]
           [`(cross ,(? symbol? x-nt))
            (set! nts (cons (cons #t x-nt) nts))]
           [`(variable-except ,s ...) (void)]
           [`(variable-prefix ,p) (void)]
+          [`(name ,_ ,p) (loop p)]
           [`() (void)]
           [(struct ellipsis (_ p _ _))
            (loop p)]
@@ -518,8 +539,20 @@
          (and match (cadr match) (string->symbol (cadr match))))))
 
 (define-struct class (id) #:inspector (make-inspector))
+
 (define-struct mismatch (id group) #:inspector (make-inspector))
+(define mismatch-pattern
+  (match-lambda
+    [(struct mismatch (_ name))
+     ((symbol-match mismatch-nt-rx) name)]))
+
 (define-struct binder (name) #:inspector (make-inspector))
+(define binder-pattern
+  (match-lambda
+    [(struct binder (name))
+     (match ((symbol-match named-nt-rx) name)
+       [#f name]
+       [p p])]))
 
 ;; name: (or/c symbol? mismatch?)
 ;;   The generator records `name' in the environment when generating an ellipsis,
@@ -666,15 +699,6 @@
   (let ([m (metafunc name)])
     (if m m (raise-syntax-error #f "not a metafunction" stx name))))
 
-(define (assert-nat name x)
-  (if (and (integer? x) (>= x 0))
-      x
-      (raise-type-error name "natural number" x)))
-(define (assert-rel name x)
-  (if (reduction-relation? x)
-      x
-      (raise-type-error name "reduction-relation" x)))
-
 (define-for-syntax (term-generator lang pat what)
   (with-syntax ([pattern 
                  (rewrite-side-conditions/check-errs 
@@ -684,25 +708,20 @@
 
 (define-syntax (generate-term stx)
   (syntax-case stx ()
-    [(name lang pat size . kw-args)
-     (with-syntax ([(attempt retries)
-                    (parse-kw-args `((#:attempt-num . 1)
-                                     (#:retries . ,#'default-retries))
-                                   (syntax kw-args)
-                                   stx)])
+    [(_ lang pat size . kw-args)
+     (with-syntax ([generator (syntax/loc stx (generate-term lang pat))])
        (syntax/loc stx
-         ((generate-term lang pat) size #:attempt-num attempt #:retries retries)))]
+         (generator size . kw-args)))]
     [(name lang pat)
-     (with-syntax ([make-gen (term-generator #'lang
-                                             #'pat
-                                             (syntax-e #'name))])
-       (syntax/loc stx
-         (let ([generate make-gen])
-           (λ (size #:attempt-num [attempt-num 1] #:retries [retries default-retries])
-             (let ([att (assert-nat 'name attempt-num)]
-                   [ret (assert-nat 'name retries)])
-               (let-values ([(term _) (generate size att ret)])
-                 term))))))]))
+     #`(let ([generate #,(term-generator #'lang #'pat (syntax-e #'name))])
+         (with-contract
+          name #:result 
+          (->* (natural-number/c)
+               (#:attempt-num natural-number/c #:retries natural-number/c)
+               any)
+          (λ (size #:attempt-num [attempt-num 1] #:retries [retries default-retries])
+            (let-values ([(term _) (generate size attempt-num retries)])
+              term))))]))
 
 (define-for-syntax (show-message stx)
   (syntax-case stx ()
@@ -720,27 +739,41 @@
             "~a: ~a~a"
             'what (if loc (string-append loc "\n") "") msg)))]))
 
-(define-for-syntax (contracted-fix stx form [ctc #'(-> any/c any/c)])
-  (and stx (apply-contract ctc stx "#:attempt-size argument" form)))
-(define-for-syntax (contracted-attempt-size stx form)
-  (apply-contract #'(-> natural-number/c natural-number/c) stx "#:prepare argument" form))
+(define-for-syntax attempts-keyword
+  (list '#:attempts #'default-check-attempts
+        (list #'natural-number/c "#:attempts argument")))
+(define-for-syntax source-keyword
+  (list '#:source #f))
+(define-for-syntax retries-keyword
+  (list '#:retries #'default-retries 
+        (list #'natural-number/c "#:retries argument")))
+(define-for-syntax print?-keyword
+  (list '#:print? #t))
+(define-for-syntax attempt-size-keyword
+  (list '#:attempt-size #'default-attempt-size 
+        (list #'attempt-size/c "#:attempt-size argument")))
+(define-for-syntax (prepare-keyword lists?)
+  (list '#:prepare #f 
+        (list (if lists? #'(-> list? list?) #'(-> any/c any/c)) 
+              "#:prepare argument")))
 
 (define-syntax (redex-check stx)
   (syntax-case stx ()
-    [(_ lang pat property . kw-args)
+    [(form lang pat property . kw-args)
      (let-values ([(names names/ellipses) 
                    (extract-names (language-id-nts #'lang 'redex-check)
                                   'redex-check #t #'pat)]
                   [(attempts-stx source-stx retries-stx print?-stx size-stx fix-stx)
                    (apply values
-                          (parse-kw-args `((#:attempts . ,#'default-check-attempts)
-                                           (#:source . #f)
-                                           (#:retries . ,#'default-retries)
-                                           (#:print? . #t)
-                                           (#:attempt-size . ,#'default-attempt->size)
-                                           (#:prepare . #f))
+                          (parse-kw-args (list attempts-keyword
+                                               source-keyword
+                                               retries-keyword
+                                               print?-keyword
+                                               attempt-size-keyword
+                                               (prepare-keyword #f))
                                          (syntax kw-args)
-                                         stx))])
+                                         stx
+                                         (syntax-e #'form)))])
        (with-syntax ([(name ...) names]
                      [(name/ellipses ...) names/ellipses]
                      [show (show-message stx)])
@@ -750,20 +783,21 @@
                                      (term-let ([name/ellipses (lookup-binding bindings 'name)] ...)
                                                property))))])
            (quasisyntax/loc stx
-             (let ([att (assert-nat 'redex-check #,attempts-stx)]
-                   [ret (assert-nat 'redex-check #,retries-stx)]
+             (let ([att #,attempts-stx]
+                   [ret #,retries-stx]
                    [print? #,print?-stx]
-                   [fix #,(contracted-fix fix-stx 'redex-check)]
+                   [fix #,fix-stx]
                    [term-match (λ (generated)
                                  (cond [(test-match lang pat generated) => values]
                                        [else (redex-error 'redex-check "~s does not match ~s" generated 'pat)]))])
-               (parameterize ([attempt->size #,(contracted-attempt-size size-stx 'redex-check)])
+               (parameterize ([attempt->size #,size-stx])
                #,(if source-stx
                      #`(let-values ([(metafunc/red-rel num-cases) 
                                      #,(cond [(and (identifier? source-stx) (metafunc source-stx))
                                               => (λ (x) #`(values #,x (length (metafunc-proc-cases #,x))))]
                                              [else
-                                              #`(let ([r (assert-rel 'redex-check #,source-stx)])
+                                              #`(let ([r #,(apply-contract #'reduction-relation? source-stx 
+                                                                           "#:source argument" (syntax-e #'form))])
                                                   (values r (length (reduction-relation-make-procs r))))])])
                          (check-lhs-pats
                           lang
@@ -850,7 +884,8 @@
   (let ([lang-gen (compile lang what)])
     (let-values ([(pats srcs)
                   (cond [(metafunc-proc? mf/rr)
-                         (values (map metafunc-case-lhs-pat (metafunc-proc-cases mf/rr))
+                         (values (map (λ (case) ((metafunc-case-lhs+ case) lang)) 
+                                      (metafunc-proc-cases mf/rr))
                                  (metafunction-srcs mf/rr))]
                         [(reduction-relation? mf/rr)
                          (values (map (λ (rwp) ((rewrite-proc-lhs rwp) lang)) (reduction-relation-make-procs mf/rr))
@@ -881,26 +916,27 @@
 
 (define-syntax (check-metafunction stx)
   (syntax-case stx ()
-    [(_ name property . kw-args)
+    [(form name property . kw-args)
      (let-values ([(attempts retries print? size fix)
                    (apply values
-                          (parse-kw-args `((#:attempts . , #'default-check-attempts)
-                                           (#:retries . ,#'default-retries)
-                                           (#:print? . #t)
-                                           (#:attempt-size . ,#'default-attempt->size)
-                                           (#:prepare . #f))
+                          (parse-kw-args (list attempts-keyword
+                                               retries-keyword
+                                               print?-keyword
+                                               attempt-size-keyword
+                                               (prepare-keyword #t))
                                          (syntax kw-args)
-                                         stx))]
+                                         stx
+                                         (syntax-e #'form)))]
                   [(m) (metafunc/err #'name stx)])
        (quasisyntax/loc stx
-         (parameterize ([attempt->size #,(contracted-attempt-size size 'check-metafunction)])
-           (let ([att (assert-nat 'check-metafunction #,attempts)]
-                 [ret (assert-nat 'check-metafunction #,retries)]
-                 [fix #,(contracted-fix fix 'check-metafunction #'(-> (listof any/c) (listof any/c)))])
+         (parameterize ([attempt->size #,size])
+           (let ([att #,attempts]
+                 [ret #,retries]
+                 [fix #,fix])
              (check-lhs-pats 
               (metafunc-proc-lang #,m)
               #,m
-              (term-prop property)
+              (term-prop #,(apply-contract #'(-> (listof any/c) any) #'property #f (syntax-e #'form)))
               att
               ret
               'check-metafunction
@@ -918,26 +954,27 @@
 
 (define-syntax (check-reduction-relation stx)
   (syntax-case stx ()
-    [(_ relation property . kw-args)
+    [(form relation property . kw-args)
      (let-values ([(attempts retries print? size fix)
                    (apply values
-                          (parse-kw-args `((#:attempts . , #'default-check-attempts)
-                                           (#:retries . ,#'default-retries)
-                                           (#:print? . #t)
-                                           (#:attempt-size . ,#'default-attempt->size)
-                                           (#:prepare . #f))
+                          (parse-kw-args (list attempts-keyword
+                                               retries-keyword
+                                               print?-keyword
+                                               attempt-size-keyword
+                                               (prepare-keyword #f))
                                          (syntax kw-args)
-                                         stx))])
+                                         stx
+                                         (syntax-e #'form)))])
        (quasisyntax/loc stx
-         (parameterize ([attempt->size #,(contracted-attempt-size size 'check-reduction-relation)])
-           (let ([att (assert-nat 'check-reduction-relation #,attempts)]
-                 [ret (assert-nat 'check-reduction-relation #,retries)]
-                 [rel (assert-rel 'check-reduction-relation relation)]
-                 [fix #,(contracted-fix fix 'check-reduction-relation)])
+         (parameterize ([attempt->size #,size])
+           (let ([att #,attempts]
+                 [ret #,retries]
+                 [rel #,(apply-contract #'reduction-relation? #'relation #f (syntax-e #'form))]
+                 [fix #,fix])
              (check-lhs-pats
               (reduction-relation-lang rel)
               rel
-              (term-prop property)
+              (term-prop #,(apply-contract #'(-> any/c any) #'property #f (syntax-e #'form)))
               att
               ret
               'check-reduction-relation
@@ -973,7 +1010,10 @@
          generate-term
          check-reduction-relation
          check-metafunction
-         exn:fail:redex:generation-failure?)
+         default-attempt-size
+         attempt-size/c
+         exn:fail:redex:generation-failure?
+         redex-pseudo-random-generator)
 
 (provide (struct-out ellipsis) 
          (struct-out mismatch)

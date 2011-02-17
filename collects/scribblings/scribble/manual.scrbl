@@ -30,6 +30,67 @@ includes a @racket[latex-defaults] @tech{style property}.
 @; ------------------------------------------------------------------------
 @section[#:tag "scribble:manual:code"]{Typesetting Code}
 
+@defform/subs[(codeblock option ... str-expr ...+)
+              ([option (code:line #:keep-lang-line? keep-expr)
+                       (code:line #:indent indent-expr)
+                       (code:line #:expand expand-expr)
+                       (code:line #:context context-expr)])
+              #:contracts ([keep-expr any/c]
+                           [indent-expr exact-nonnegative-integer?]
+                           [expand-expr (or/c #f (syntax-object? . -> . syntax-object?))]
+                           [context-expr syntax-object?])]{
+
+Parses the code formed by the strings produced by the
+@racket[str-expr]s as a Racket module (roughly) and produces a
+@tech{block} that typesets the code. The @racket[str-expr]s should
+normally start with @hash-lang[] to determine the reader syntax for
+the module, but the resulting ``module'' need not expand or
+compile---except as needed by @racket[expand-expr]. If
+@racket[expand-expr] is omitted or produces false, then the input
+formed by @racket[str-expr] is read until an end-of-file is
+encountered, otherwise a single form is read from the input.
+
+When @racket[keep-expr] produces a true value (the default), the first
+line in the input (which is typically @hash-lang[]) is preserved in
+the typeset output, otherwise the first line is dropped. The typeset
+code is indented by the amount specified by @racket[indent-expr],
+which defaults to @racket[2].
+
+When @racket[expand-expr] produces @racket[#f] (which is the default),
+identifiers in the typeset code are colored and linked based on
+for-label bindings in the lexical environment of the syntax object
+provided by @racket[context-expr]. The default @racket[context-expr]
+has the same lexical context as the first @racket[str-expr].
+
+When @racket[expand-expr] produces a procedure, it is used to
+macro-expand the parsed program, and syntax coloring is based on the
+parsed program.
+
+For example,
+
+@codeblock[#:keep-lang-line? #f]|<|{
+  #lang scribble/manual
+  @codeblock|{
+    #lang scribble/manual
+    @codeblock{
+      #lang scribble/manual
+      @title{Hello}
+    }
+  }|
+}|>|
+
+produces the typeset result
+
+  @codeblock|{
+    #lang scribble/manual
+    @codeblock{
+      #lang scribble/manual
+      @title{Hello}
+    }
+  }|               
+
+}
+
 @defform[(racketblock datum ...)]{
 
 Typesets the @racket[datum] sequence as a table of Racket code inset
@@ -147,7 +208,7 @@ without insetting the code.}
 @defform[(RACKETRESULTBLOCK0 datum ...)]
 )]{
 
-Like @racketblock[racketblock], etc., but colors the typeset text as a
+Like @racket[racketblock], etc., but colors the typeset text as a
 result  (i.e., a single color with no hyperlinks) instead of code.}
 
 @deftogether[(
@@ -1178,6 +1239,9 @@ Returns @racket[#t] if @racket[v] is a bibliography entry created by
 
 @defproc[(t [pre-content pre-content?] ...) paragraph?]{Wraps the
 @tech{decode}d @racket[pre-content] as a paragraph.}
+
+@defthing[etc element?]{Like @racket["etc."], but with an
+abbreviation-ending period for use in the middle of a sentence.}
 
 @defthing[PLaneT element?]{@racket["PLaneT"] (to help make sure you get
 the letters in the right case).}

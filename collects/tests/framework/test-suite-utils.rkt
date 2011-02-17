@@ -1,13 +1,16 @@
-#lang scheme
+#lang racket/base
 
 (require (only-in mzscheme fluid-let)
          launcher
-         scheme/system
+         racket/system
+         racket/tcp
+         racket/pretty
          "debug.ss")
 
 (provide
  test-name
  failed-tests
+ number-of-tests
  
  ;(struct eof-result ())
  eof-result?
@@ -48,6 +51,7 @@
 
 (define test-name "<<setup>>")
 (define failed-tests null)
+(define number-of-tests 0)
 
 (define-struct eof-result ())
 
@@ -87,8 +91,10 @@
        (build-path
         (let-values ([(dir exe _)
                       (split-path (find-system-path 'exec-file))])
-          dir)
-        (if (eq? 'windows (system-type)) "GRacket.exe" "gracket")))
+          (if (eq? dir 'relative)
+              'same
+              dir))
+        (if (eq? 'windows (system-type)) "Racket.exe" "racket")))
       (path->string
        (build-path (collection-path "tests" "framework")
                    "framework-test-engine.ss")))))
@@ -136,12 +142,10 @@
 (define queue-sexp-to-mred
   (lambda (sexp)
     (send-sexp-to-mred
-     `(let ([thunk (lambda () ,sexp)]
-            [sema (make-semaphore 0)])
-        (queue-callback (lambda ()
-                          (thunk)
-                          (semaphore-post sema)))
-        (semaphore-wait sema)))))
+     `(let ([thunk (lambda () ,sexp)]  ;; low tech hygiene
+            [c (make-channel)])
+        (queue-callback (lambda () (channel-put c (thunk))))
+        (channel-get c)))))
 
 (define re:tcp-read-error (regexp "tcp-read:"))
 (define re:tcp-write-error (regexp "tcp-write:"))
@@ -149,7 +153,7 @@
   (or (regexp-match re:tcp-read-error (exn-message exn))
       (regexp-match re:tcp-write-error (exn-message exn))))
 
-(namespace-require 'scheme) ;; in order to make the eval below work right.
+(namespace-require 'racket) ;; in order to make the eval below work right.
 (define (send-sexp-to-mred sexp)
   (let/ec k
     (let ([show-text
@@ -172,7 +176,7 @@
                      (or (not (char-ready? in-port))
                          (not (eof-object? (peek-char in-port))))))
         (restart-mred))
-      (debug-printf messages "  ~a // ~a: sending to gracket:\n"
+      (debug-printf messages "  ~a // ~a: sending to framework side to eval:\n"
                     section-name test-name)
       (show-text sexp)
       (with-handlers ([exn:fail?
@@ -222,12 +226,12 @@
             (raise (make-eof-result))
             (case (car answer)
               [(error)
-               (error 'send-sexp-to-mred "gracket raised \"~a\"" (second answer))]
+               (error 'send-sexp-to-mred "gracket raised \"~a\"" (list-ref answer 1))]
               [(last-error)
-               (error 'send-sexp-to-mred "gracket (last time) raised \"~a\"" (second answer))]
-              [(cant-read) (error 'mred/cant-parse (second answer))]
+               (error 'send-sexp-to-mred "gracket (last time) raised \"~a\"" (list-ref answer 1))]
+              [(cant-read) (error 'mred/cant-parse (list-ref answer 1))]
               [(normal) 
-               (eval (second answer))]))))))
+               (eval (list-ref answer 1))]))))))
 
 (define test
   (case-lambda
@@ -254,6 +258,7 @@
                                                 (exn->str x)
                                                 (format "~s" x))))])
                           (not (passed? result)))])
+           (set! number-of-tests (+ number-of-tests 1))
            (when failed
              (debug-printf schedule "FAILED ~a:\n  ~s\n" test-name result)
              (set! failed-tests (cons (cons section-name test-name) failed-tests))
@@ -282,7 +287,15 @@
                  (sleep ,pause-time)
                  (loop (- n 1))))))))))
 
-(define (wait-for sexp) (wait-for/wrapper (lambda (x) x) sexp))
+(define (wait-for sexp #:queue? [queue? #f]) 
+  (wait-for/wrapper
+   (lambda (x) x)
+   (if queue?
+       `(let ([t (λ () ,sexp)]
+              [c (make-channel)])
+          (queue-callback (λ () (channel-put c (t))))
+          (channel-get c))
+       sexp)))
 
 (define (wait-for-new-frame sexp)
   (wait-for/wrapper

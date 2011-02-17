@@ -5,6 +5,7 @@
 
 @table-of-contents[]
 
+@include-section["convertible.scrbl"]
 @include-section["gzip.scrbl"]
 @include-section["gunzip.scrbl"]
 @include-section["zip.scrbl"]
@@ -12,6 +13,7 @@
 @include-section["md5.scrbl"]
 @include-section["sha1.scrbl"]
 @include-section["gif.scrbl"]
+@include-section["resource.scrbl"]
 
 @(bibliography
   (bib-entry #:key "Gervautz1990"

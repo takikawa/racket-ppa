@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
  
     This library is free software; you can redistribute it and/or
@@ -157,8 +157,8 @@ void scheme_set_startup_use_jit(int v) { scheme_startup_use_jit =  v; }
 /* THREAD LOCAL SHARED */
 THREAD_LOCAL_DECL(volatile int scheme_fuel_counter);
 #ifdef USE_STACK_BOUNDARY_VAR
-THREAD_LOCAL_DECL(unsigned long scheme_stack_boundary);
-THREAD_LOCAL_DECL(unsigned long volatile scheme_jit_stack_boundary);
+THREAD_LOCAL_DECL(uintptr_t scheme_stack_boundary);
+THREAD_LOCAL_DECL(uintptr_t volatile scheme_jit_stack_boundary);
 #endif
 THREAD_LOCAL_DECL(static Scheme_Object *quick_stx);
 THREAD_LOCAL_DECL(int scheme_continuation_application_count);
@@ -504,13 +504,13 @@ void scheme_init_stack_check()
      /* Finds the C stack limit --- platform-specific. */
 {
   int *v, stack_grows_up;
-  unsigned long deeper;
+  uintptr_t deeper;
 #ifdef UNIX_FIND_STACK_BOUNDS
   struct rlimit rl;
 #endif
   
   deeper = scheme_get_deeper_address();
-  stack_grows_up = (deeper > (unsigned long)&v);
+  stack_grows_up = (deeper > (uintptr_t)&v);
 
 #ifdef STACK_GROWS_UP
   if (!stack_grows_up) {
@@ -547,14 +547,14 @@ void scheme_init_stack_check()
 # endif
 
 # ifdef MACOS_FIND_STACK_BOUNDS
-    scheme_stack_boundary = (unsigned long)&v +  STACK_SAFETY_MARGIN - StackSpace();
+    scheme_stack_boundary = (uintptr_t)&v +  STACK_SAFETY_MARGIN - StackSpace();
 # endif
 
 # ifdef PALMOS_FIND_STACK_BOUNDS
     {
       Ptr s, e;
       SysGetStackInfo(Ptr &s, &e);
-      scheme_stack_boundary = (unsigned long)e + STACK_SAFETY_MARGIN;
+      scheme_stack_boundary = (uintptr_t)e + STACK_SAFETY_MARGIN;
     }
 # endif
 
@@ -562,22 +562,22 @@ void scheme_init_stack_check()
     {
       thread_info info;
       get_thread_info(find_thread(NULL), &info);
-      scheme_stack_boundary = (unsigned long)info.stack_base + STACK_SAFETY_MARGIN;
+      scheme_stack_boundary = (uintptr_t)info.stack_base + STACK_SAFETY_MARGIN;
     }
 # endif
 
 # ifdef OSKIT_FIXED_STACK_BOUNDS
-    scheme_stack_boundary = (unsigned long)base_stack_start + STACK_SAFETY_MARGIN;
+    scheme_stack_boundary = (uintptr_t)base_stack_start + STACK_SAFETY_MARGIN;
 # endif
 
 # ifdef UNIX_FIND_STACK_BOUNDS
     getrlimit(RLIMIT_STACK, &rl);
   
     {
-      unsigned long bnd, lim;
-      bnd = (unsigned long)scheme_get_current_os_thread_stack_base();
+      uintptr_t bnd, lim;
+      bnd = (uintptr_t)scheme_get_current_os_thread_stack_base();
 
-      lim = (unsigned long)rl.rlim_cur;
+      lim = (uintptr_t)rl.rlim_cur;
 #  ifdef UNIX_STACK_MAXIMUM
       if (lim > UNIX_STACK_MAXIMUM)
         lim = UNIX_STACK_MAXIMUM;
@@ -600,13 +600,13 @@ void scheme_init_stack_check()
 }
 
 
-int scheme_check_runstack(long size)
+int scheme_check_runstack(intptr_t size)
      /* Checks whether the Scheme stack has `size' room left */
 {
   return ((MZ_RUNSTACK - MZ_RUNSTACK_START) >= (size + SCHEME_TAIL_COPY_THRESHOLD));
 }
 
-void *scheme_enlarge_runstack(long size, void *(*k)())
+void *scheme_enlarge_runstack(intptr_t size, void *(*k)())
      /* Adds a Scheme stack segment, of at least `size' bytes */
 {
   Scheme_Thread *p = scheme_current_thread;
@@ -632,7 +632,7 @@ void *scheme_enlarge_runstack(long size, void *(*k)())
     /* If we keep growing the stack, then probably it
        needs to be much larger, so at least double the 
        stack size, to a point: */
-    long min_size;
+    intptr_t min_size;
     min_size = 2 * (p->runstack_size);
     if (min_size > 128000)
       min_size = 128000;
@@ -2482,13 +2482,14 @@ Scheme_Object *scheme_no_potential_size(Scheme_Object *v)
 static Scheme_Object *apply_inlined(Scheme_Object *p, Scheme_Closure_Data *data, Optimize_Info *info,
 				    int argc, Scheme_App_Rec *app, Scheme_App2_Rec *app2, Scheme_App3_Rec *app3,
                                     int context,
-                                    int nested_count, Scheme_Object *orig, Scheme_Object *le_prev, long prev_offset)
+                                    int nested_count, Scheme_Object *orig, Scheme_Object *le_prev, intptr_t prev_offset)
 {
   Scheme_Let_Header *lh;
   Scheme_Compiled_Let_Value *lv, *prev = NULL;
   Scheme_Object *val;
   int i, expected;
   int *flags, flag;
+  Optimize_Info *sub_info;
 
   expected = data->num_params;
 
@@ -2565,7 +2566,14 @@ static Scheme_Object *apply_inlined(Scheme_Object *p, Scheme_Closure_Data *data,
   else
     lh->body = p;
 
-  p = scheme_optimize_lets((Scheme_Object *)lh, info, 1, context);
+  sub_info = scheme_optimize_info_add_frame(info, 0, 0, 0);
+  sub_info->inline_fuel >>= 1;
+
+  p = scheme_optimize_lets((Scheme_Object *)lh, sub_info, 1, context);
+
+  info->single_result = sub_info->single_result;
+  info->preserves_marks = sub_info->preserves_marks;
+  scheme_optimize_info_done(sub_info);
 
   if (le_prev) {
     *((Scheme_Object **)(((char *)le_prev) + prev_offset)) = p;
@@ -2588,7 +2596,7 @@ Scheme_Object *optimize_for_inline(Optimize_Info *info, Scheme_Object *le, int a
 {
   int offset = 0, single_use = 0, psize = 0;
   Scheme_Object *bad_app = NULL, *prev = NULL, *orig_le = le;
-  long prev_offset = 0;
+  intptr_t prev_offset = 0;
   int nested_count = 0, outside_nested = 0, already_opt = optimized_rator;
 
   if (info->inline_fuel < 0)
@@ -2602,11 +2610,11 @@ Scheme_Object *optimize_for_inline(Optimize_Info *info, Scheme_Object *le, int a
     
     lh = (Scheme_Let_Header *)le;
     prev = le; 
-    prev_offset = (long)&(((Scheme_Let_Header *)0x0)->body);
+    prev_offset = (intptr_t)&(((Scheme_Let_Header *)0x0)->body);
     le = lh->body;
     for (i = 0; i < lh->num_clauses; i++) {
       prev = le;
-      prev_offset = (long)&(((Scheme_Compiled_Let_Value *)0x0)->body);
+      prev_offset = (intptr_t)&(((Scheme_Compiled_Let_Value *)0x0)->body);
       le = ((Scheme_Compiled_Let_Value *)le)->body;
     }
     nested_count += lh->count;
@@ -2814,14 +2822,14 @@ static void register_flonum_argument_types(Scheme_App_Rec *app, Scheme_App2_Rec 
               if (!map) {
                 map = MALLOC_N_ATOMIC(char, n);
                 memset(map, 1, n);
+                memset(map, 0, i);
               }
             }
             if (map && !is_flonum)
               map[i] = 0;
           }
 
-          if (map)
-            scheme_set_closure_flonum_map(data, map);
+          scheme_set_closure_flonum_map(data, map);
         }
       }
     }
@@ -2855,7 +2863,7 @@ char *scheme_optimize_context_to_string(Scheme_Object *context)
         if (SCHEME_VECTORP(name)) {
           Scheme_Object *port;
           int print_width = 1024;
-          long plen;
+          intptr_t plen;
           
           port = scheme_make_byte_string_output_port();
 
@@ -3038,12 +3046,8 @@ int scheme_wants_flonum_arguments(Scheme_Object *rator, int argpos, int rotate_m
             || IS_NAMED_PRIM(rator, "flacos")
             || IS_NAMED_PRIM(rator, "flatan")
             || IS_NAMED_PRIM(rator, "fllog")
-            || IS_NAMED_PRIM(rator, "flexp"))
-          return 1;
-      }
-    } else if (SCHEME_PRIM_IS_SOMETIMES_INLINED(rator)) {
-      if (!rotate_mode) {
-        if (IS_NAMED_PRIM(rator, "fl+")
+            || IS_NAMED_PRIM(rator, "flexp")
+            || IS_NAMED_PRIM(rator, "fl+")
             || IS_NAMED_PRIM(rator, "fl-")
             || IS_NAMED_PRIM(rator, "fl*")
             || IS_NAMED_PRIM(rator, "fl/")
@@ -3055,7 +3059,6 @@ int scheme_wants_flonum_arguments(Scheme_Object *rator, int argpos, int rotate_m
             || IS_NAMED_PRIM(rator, "flmax"))
           return 1;
       }
-    } else if (SCHEME_PRIM_IS_SOMETIMES_INLINED(rator)) {
       if ((rotate_mode || (argpos == 2))
           && IS_NAMED_PRIM(rator, "unsafe-flvector-set!")) 
         return 1;
@@ -7079,7 +7082,7 @@ scheme_compile_expand_expr(Scheme_Object *form, Scheme_Comp_Env *env,
       phase = " in the transformer environment";
     else {
       phase = buf;
-      sprintf(buf, " at phase %ld", env->genv->phase);
+      sprintf(buf, " at phase %" PRIdPTR, env->genv->phase);
     }
     if (has_orig_unbound) {
       scheme_wrong_syntax(scheme_compile_stx_string, 
@@ -8314,7 +8317,7 @@ void scheme_pop_continuation_frame(Scheme_Cont_Frame_Data *d)
   MZ_CONT_MARK_STACK = d->cont_mark_stack;
 }
 
-static MZ_MARK_STACK_TYPE clone_meta_cont_set_mark(Scheme_Meta_Continuation *mc, Scheme_Object *val, long findpos)
+static MZ_MARK_STACK_TYPE clone_meta_cont_set_mark(Scheme_Meta_Continuation *mc, Scheme_Object *val, intptr_t findpos)
 {
   /* Clone the meta-continuation, in case it was captured by
      a continuation in its current state. */
@@ -8370,17 +8373,17 @@ MZ_MARK_STACK_TYPE scheme_set_cont_mark(Scheme_Object *key, Scheme_Object *val)
 {
   Scheme_Thread *p = scheme_current_thread;
   Scheme_Cont_Mark *cm = NULL;
-  long findpos, bottom;
+  intptr_t findpos, bottom;
 
-  findpos = (long)MZ_CONT_MARK_STACK;
-  bottom = (long)p->cont_mark_stack_bottom;
+  findpos = (intptr_t)MZ_CONT_MARK_STACK;
+  bottom = (intptr_t)p->cont_mark_stack_bottom;
   while (1) {
     if (findpos-- > bottom) {
       Scheme_Cont_Mark *seg = p->cont_mark_stack_segments[findpos >> SCHEME_LOG_MARK_SEGMENT_SIZE];
-      long pos = findpos & SCHEME_MARK_SEGMENT_MASK;
+      intptr_t pos = findpos & SCHEME_MARK_SEGMENT_MASK;
       Scheme_Cont_Mark *find = seg + pos;
 
-      if ((long)find->pos < (long)MZ_CONT_MARK_POS) {
+      if ((intptr_t)find->pos < (intptr_t)MZ_CONT_MARK_POS) {
         break;
       } else {
         if (find->key == key) {
@@ -8399,7 +8402,7 @@ MZ_MARK_STACK_TYPE scheme_set_cont_mark(Scheme_Object *key, Scheme_Object *val)
           if (key != scheme_stack_dump_key) {
             /* Check the end of the meta-continuation's stack */
             Scheme_Meta_Continuation *mc = p->meta_continuation;
-            for (findpos = (long)mc->cont_mark_total; findpos--; ) {
+            for (findpos = (intptr_t)mc->cont_mark_total; findpos--; ) {
               if (mc->cont_mark_stack_copied[findpos].pos != mc->cont_mark_pos)
                 break;
               if (mc->cont_mark_stack_copied[findpos].key == key) {
@@ -8422,13 +8425,13 @@ MZ_MARK_STACK_TYPE scheme_set_cont_mark(Scheme_Object *key, Scheme_Object *val)
 
   if (!cm) {
     /* Allocate a new mark record: */
-    long segpos;
-    long pos;
+    intptr_t segpos;
+    intptr_t pos;
     Scheme_Cont_Mark *seg;
 
     findpos = MZ_CONT_MARK_STACK;
-    segpos = ((long)findpos) >> SCHEME_LOG_MARK_SEGMENT_SIZE;
-    pos = ((long)findpos) & SCHEME_MARK_SEGMENT_MASK;
+    segpos = ((intptr_t)findpos) >> SCHEME_LOG_MARK_SEGMENT_SIZE;
+    pos = ((intptr_t)findpos) & SCHEME_MARK_SEGMENT_MASK;
 
     if (segpos >= p->cont_mark_seg_count) {
 #ifdef MZ_USE_FUTURES
@@ -8882,6 +8885,7 @@ Scheme_Object *scheme_jump_to_continuation(Scheme_Object *obj, int num_rands, Sc
          created with a new thread or a barrier prompt. */
       p->meta_continuation = NULL; /* since prompt wasn't in any meta-continuation */
       p->meta_prompt = NULL;
+      p->acting_barrier_prompt = NULL;
       if ((c->barrier_prompt == barrier_prompt) && barrier_prompt) {
         /* Barrier determines continuation end. */
         c->resume_to = NULL;
@@ -9310,7 +9314,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	  } else {
 	    stack = RUNSTACK;
 	    /* Possibly, but not necessarily, rands > stack: */
-	    if ((unsigned long)rands > (unsigned long)stack) {
+	    if ((uintptr_t)rands > (uintptr_t)stack) {
 	      int i;
 	      for (i = 0; i < n; i++) {
 		stack[i] = rands[i];
@@ -9386,8 +9390,8 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
       }
 
       if (pmstack >= 0) {
-        long segpos = ((long)pmstack) >> SCHEME_LOG_MARK_SEGMENT_SIZE;
-        long pos = ((long)pmstack) & SCHEME_MARK_SEGMENT_MASK;
+        intptr_t segpos = ((intptr_t)pmstack) >> SCHEME_LOG_MARK_SEGMENT_SIZE;
+        intptr_t pos = ((intptr_t)pmstack) & SCHEME_MARK_SEGMENT_MASK;
         GC_CAN_IGNORE Scheme_Cont_Mark *pm = NULL;
 
         pm = p->cont_mark_stack_segments[segpos] + pos;
@@ -9401,12 +9405,12 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	}
       } else { 
 	/* Allocate a new mark record: */
-	long segpos = ((long)MZ_CONT_MARK_STACK) >> SCHEME_LOG_MARK_SEGMENT_SIZE;
+	intptr_t segpos = ((intptr_t)MZ_CONT_MARK_STACK) >> SCHEME_LOG_MARK_SEGMENT_SIZE;
 	if (segpos >= p->cont_mark_seg_count) {
 	  UPDATE_THREAD_RSPTR_FOR_PROC_MARK();
 	  pmstack = scheme_set_cont_mark(scheme_stack_dump_key, data->name); 
 	} else {
-	  long pos = ((long)MZ_CONT_MARK_STACK) & SCHEME_MARK_SEGMENT_MASK;
+	  intptr_t pos = ((intptr_t)MZ_CONT_MARK_STACK) & SCHEME_MARK_SEGMENT_MASK;
           GC_CAN_IGNORE Scheme_Cont_Mark *pm;
 	  GC_CAN_IGNORE Scheme_Cont_Mark *seg;
 	
@@ -9466,7 +9470,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
       data = ((Scheme_Native_Closure *)obj)->code;
 
       /* Enlarge the runstack? This max_let_depth is in bytes instead of words. */
-      if ((unsigned long)data->max_let_depth > ((unsigned long)RUNSTACK - (unsigned long)RUNSTACK_START)) {
+      if ((uintptr_t)data->max_let_depth > ((uintptr_t)RUNSTACK - (uintptr_t)RUNSTACK_START)) {
 	p->ku.k.p1 = (void *)obj;
 	p->ku.k.i1 = num_rands;
 	p->ku.k.p2 = (void *)rands;
@@ -10501,7 +10505,7 @@ Scheme_Object *scheme_eval_linked_expr_multi_with_dynamic_state(Scheme_Object *o
 }
 
 /* for mzc: */
-Scheme_Object *scheme_load_compiled_stx_string(const char *str, long len)
+Scheme_Object *scheme_load_compiled_stx_string(const char *str, intptr_t len)
 {
   Scheme_Object *port, *expr;
 
@@ -10525,7 +10529,7 @@ Scheme_Object *scheme_compiled_stx_symbol(Scheme_Object *stx)
 
 /* for mzc: */
 Scheme_Object *scheme_eval_compiled_stx_string(Scheme_Object *expr, Scheme_Env *env,
-					       long shift, Scheme_Object *modidx)
+					       intptr_t shift, Scheme_Object *modidx)
 {
   /* If modidx, then last element is a module index; shift the rest. */
   if (modidx) {
@@ -12939,7 +12943,7 @@ static Scheme_Object *write_syntax(Scheme_Object *obj)
       l = scheme_protect_quote(SCHEME_VEC_ELS(rest)[0]);
       if (!SAME_OBJ(l, SCHEME_VEC_ELS(rest)[0])) {
         Scheme_Object *vec;
-        long i, len;
+        intptr_t i, len;
         len = SCHEME_VEC_SIZE(rest);
         vec = scheme_make_vector(len, NULL);
         SCHEME_VEC_ELS(vec)[0] = l;

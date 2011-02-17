@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
  
     This library is free software; you can redistribute it and/or
@@ -111,17 +111,17 @@ extern HANDLE scheme_break_semaphore;
 static int swapping = 0;
 #endif
 
-extern void scheme_gmp_tls_init(long *s);
-extern void *scheme_gmp_tls_load(long *s);
-extern void scheme_gmp_tls_unload(long *s, void *p);
-extern void scheme_gmp_tls_snapshot(long *s, long *save);
-extern void scheme_gmp_tls_restore_snapshot(long *s, void *data, long *save, int do_free);
+extern void scheme_gmp_tls_init(intptr_t *s);
+extern void *scheme_gmp_tls_load(intptr_t *s);
+extern void scheme_gmp_tls_unload(intptr_t *s, void *p);
+extern void scheme_gmp_tls_snapshot(intptr_t *s, intptr_t *save);
+extern void scheme_gmp_tls_restore_snapshot(intptr_t *s, void *data, intptr_t *save, int do_free);
 
 static void check_ready_break();
 
 THREAD_LOCAL_DECL(extern int scheme_num_read_syntax_objects);
-THREAD_LOCAL_DECL(extern long scheme_hash_request_count);
-THREAD_LOCAL_DECL(extern long scheme_hash_iteration_count);
+THREAD_LOCAL_DECL(extern intptr_t scheme_hash_request_count);
+THREAD_LOCAL_DECL(extern intptr_t scheme_hash_iteration_count);
 #ifdef MZ_USE_JIT
 extern int scheme_jit_malloced;
 #else
@@ -145,7 +145,7 @@ THREAD_LOCAL_DECL(Scheme_Thread *scheme_main_thread = NULL);
 THREAD_LOCAL_DECL(Scheme_Thread *scheme_first_thread = NULL);
 
 XFORM_NONGCING Scheme_Thread *scheme_get_current_thread() { return scheme_current_thread; }
-XFORM_NONGCING long scheme_get_multiple_count() { return scheme_current_thread->ku.multiple.count; }
+XFORM_NONGCING intptr_t scheme_get_multiple_count() { return scheme_current_thread->ku.multiple.count; }
 XFORM_NONGCING Scheme_Object **scheme_get_multiple_array() { return scheme_current_thread->ku.multiple.array; }
 XFORM_NONGCING void scheme_set_current_thread_ran_some() { scheme_current_thread->ran_some = 1; }
 
@@ -190,13 +190,13 @@ ROSYM Scheme_Object *scheme_parameterization_key;
 ROSYM Scheme_Object *scheme_exn_handler_key;
 ROSYM Scheme_Object *scheme_break_enabled_key;
 
-THREAD_LOCAL_DECL(long scheme_total_gc_time);
-THREAD_LOCAL_DECL(static long start_this_gc_time);
-THREAD_LOCAL_DECL(static long end_this_gc_time);
+THREAD_LOCAL_DECL(intptr_t scheme_total_gc_time);
+THREAD_LOCAL_DECL(static intptr_t start_this_gc_time);
+THREAD_LOCAL_DECL(static intptr_t end_this_gc_time);
 static void get_ready_for_GC(void);
 static void done_with_GC(void);
 #ifdef MZ_PRECISE_GC
-static void inform_GC(int major_gc, long pre_used, long post_used);
+static void inform_GC(int major_gc, intptr_t pre_used, intptr_t post_used);
 #endif
 
 THREAD_LOCAL_DECL(static volatile short delayed_break_ready);
@@ -206,7 +206,7 @@ HOOK_SHARED_OK void (*scheme_sleep)(float seconds, void *fds);
 HOOK_SHARED_OK void (*scheme_notify_multithread)(int on);
 HOOK_SHARED_OK void (*scheme_wakeup_on_input)(void *fds);
 HOOK_SHARED_OK int (*scheme_check_for_break)(void);
-HOOK_SHARED_OK void (*scheme_on_atomic_timeout)(void);
+HOOK_SHARED_OK Scheme_On_Atomic_Timeout_Proc scheme_on_atomic_timeout;
 HOOK_SHARED_OK static int atomic_timeout_auto_suspend;
 HOOK_SHARED_OK static int atomic_timeout_atomic_level;
 
@@ -214,7 +214,6 @@ THREAD_LOCAL_DECL(struct Scheme_GC_Pre_Post_Callback_Desc *gc_prepost_callback_d
 
 ROSYM static Scheme_Object *read_symbol, *write_symbol, *execute_symbol, *delete_symbol, *exists_symbol;
 ROSYM static Scheme_Object *client_symbol, *server_symbol;
-ROSYM static Scheme_Object *froz_key;
 
 THREAD_LOCAL_DECL(static int do_atomic = 0);
 THREAD_LOCAL_DECL(static int missed_context_switch = 0);
@@ -243,7 +242,7 @@ THREAD_LOCAL_DECL(struct Scheme_Hash_Table *place_local_misc_table);
 
 
 #ifdef MZ_PRECISE_GC
-extern long GC_get_memory_use(void *c);
+extern intptr_t GC_get_memory_use(void *c);
 #else
 extern MZ_DLLIMPORT long GC_get_memory_use();
 #endif
@@ -270,7 +269,7 @@ typedef struct {
   Scheme_Custodian *val;
 } Scheme_Custodian_Weak_Box;
 
-# define MALLOC_MREF() (Scheme_Custodian_Reference *)scheme_make_weak_box(NULL)
+# define MALLOC_MREF() (Scheme_Custodian_Reference *)scheme_make_late_weak_box(NULL)
 # define CUSTODIAN_FAM(x) ((Scheme_Custodian_Weak_Box *)x)->val
 # define xCUSTODIAN_FAM(x) SCHEME_BOX_VAL(x)
 #else
@@ -380,7 +379,6 @@ static void make_initial_config(Scheme_Thread *p);
 
 static int do_kill_thread(Scheme_Thread *p);
 static void suspend_thread(Scheme_Thread *p);
-static void wait_until_suspend_ok(int for_stack);
 
 static int check_sleep(int need_activity, int sleep_now);
 
@@ -438,7 +436,7 @@ extern BOOL WINAPI DllMain(HINSTANCE inst, ULONG reason, LPVOID reserved);
 #endif
 
 #ifdef MZ_PRECISE_GC
-unsigned long scheme_get_current_thread_stack_start(void);
+uintptr_t scheme_get_current_thread_stack_start(void);
 #endif
 
 SHARED_OK Scheme_Object *initial_cmdline_vec;
@@ -471,9 +469,6 @@ void scheme_init_thread(Scheme_Env *env)
   client_symbol = scheme_intern_symbol("client");
   server_symbol = scheme_intern_symbol("server");
   
-  REGISTER_SO(froz_key);
-  froz_key = scheme_make_symbol("frozen"); /* uninterned */
-
   scheme_add_global_constant("dump-memory-stats",
 			     scheme_make_prim_w_arity(scheme_dump_gc_stats,
 						      "dump-memory-stats",
@@ -934,7 +929,7 @@ static Scheme_Object *collect_garbage(int c, Scheme_Object *p[])
 static Scheme_Object *current_memory_use(int argc, Scheme_Object *args[])
 {
   Scheme_Object *arg = NULL;
-  long retval = 0;
+  intptr_t retval = 0;
 
   if (argc) {
     if(SAME_TYPE(SCHEME_TYPE(args[0]), scheme_custodian_type)) {
@@ -986,7 +981,7 @@ static void adjust_limit_table(Scheme_Custodian *c)
 
 static Scheme_Object *custodian_require_mem(int argc, Scheme_Object *args[])
 {
-  long lim;
+  intptr_t lim;
   Scheme_Custodian *c1, *c2, *cx;
 
   if(NOT_SAME_TYPE(SCHEME_TYPE(args[0]), scheme_custodian_type)) {
@@ -1036,7 +1031,7 @@ static Scheme_Object *custodian_require_mem(int argc, Scheme_Object *args[])
 
 static Scheme_Object *custodian_limit_mem(int argc, Scheme_Object *args[])
 {
-  long lim;
+  intptr_t lim;
   
   if (NOT_SAME_TYPE(SCHEME_TYPE(args[0]), scheme_custodian_type)) {
     scheme_wrong_type("custodian-limit-memory", "custodian", 0, argc, args);
@@ -1432,7 +1427,7 @@ Scheme_Custodian_Reference *scheme_add_managed(Scheme_Custodian *m, Scheme_Objec
   }
 
 #ifdef MZ_PRECISE_GC
-  b = scheme_make_weak_box(NULL);
+  b = scheme_make_late_weak_box(NULL);
 #else
   b = MALLOC_ONE_WEAK(Scheme_Object*);
 #endif
@@ -1833,7 +1828,7 @@ static Scheme_Object *make_custodian_box(int argc, Scheme_Object *argv[])
   /* 3m  */
   {
     Scheme_Object *wb, *pr, *prev;
-    wb = GC_malloc_weak_box(cb, NULL, 0);
+    wb = GC_malloc_weak_box(cb, NULL, 0, 1);
     pr = scheme_make_raw_pair(wb, cb->cust->cust_boxes);
     cb->cust->cust_boxes = pr;
     cb->cust->num_cust_boxes++;
@@ -2013,7 +2008,7 @@ void scheme_schedule_custodian_close(Scheme_Custodian *c)
 
   scheduled_kills = scheme_make_pair((Scheme_Object *)c, scheduled_kills);
   scheme_fuel_counter = 0;
-  scheme_jit_stack_boundary = (unsigned long)-1;
+  scheme_jit_stack_boundary = (uintptr_t)-1;
 }
 
 static void check_scheduled_kills()
@@ -2509,25 +2504,25 @@ void *scheme_tls_get(int pos)
     return p->user_tls[pos];
 }
 
-Scheme_Object **scheme_alloc_runstack(long len)
+Scheme_Object **scheme_alloc_runstack(intptr_t len)
   XFORM_SKIP_PROC
 {
 #ifdef MZ_PRECISE_GC
-  long sz;
+  intptr_t sz;
   void **p;
   sz = sizeof(Scheme_Object*) * (len + 4);
   p = (void **)GC_malloc_tagged_allow_interior(sz);
   *(Scheme_Type *)(void *)p = scheme_rt_runstack;
-  ((long *)(void *)p)[1] = gcBYTES_TO_WORDS(sz);
-  ((long *)(void *)p)[2] = 0;
-  ((long *)(void *)p)[3] = len;
+  ((intptr_t *)(void *)p)[1] = gcBYTES_TO_WORDS(sz);
+  ((intptr_t *)(void *)p)[2] = 0;
+  ((intptr_t *)(void *)p)[3] = len;
   return (Scheme_Object **)(p + 4);
 #else
   return (Scheme_Object **)scheme_malloc_allow_interior(sizeof(Scheme_Object*) * len);
 #endif
 }
 
-void scheme_set_runstack_limits(Scheme_Object **rs, long len, long start, long end)
+void scheme_set_runstack_limits(Scheme_Object **rs, intptr_t len, intptr_t start, intptr_t end)
   XFORM_SKIP_PROC
 /* With 3m, we can tell the GC not to scan the unused parts, and we
    can have the fixup function zero out the unused parts; that avoids
@@ -2535,10 +2530,10 @@ void scheme_set_runstack_limits(Scheme_Object **rs, long len, long start, long e
    GC. For CGC, we have to just clear out the unused part. */
 {
 #ifdef MZ_PRECISE_GC
-  if (((long *)(void *)rs)[-2] != start)
-    ((long *)(void *)rs)[-2] = start;
-  if (((long *)(void *)rs)[-1] != end)
-    ((long *)(void *)rs)[-1] = end;
+  if (((intptr_t *)(void *)rs)[-2] != start)
+    ((intptr_t *)(void *)rs)[-2] = start;
+  if (((intptr_t *)(void *)rs)[-1] != end)
+    ((intptr_t *)(void *)rs)[-1] = end;
 #else
   memset(rs, 0, start * sizeof(Scheme_Object *));
   memset(rs + end, 0, (len - end) * sizeof(Scheme_Object *));
@@ -2550,10 +2545,11 @@ void *scheme_register_process_global(const char *key, void *val)
   void *old_val = NULL;
   char *key2;
   Proc_Global_Rec *pg;
-  long len;
+  intptr_t len;
 
 #if defined(MZ_USE_MZRT)
-  mzrt_mutex_lock(process_global_lock);
+  if (process_global_lock)
+    mzrt_mutex_lock(process_global_lock);
 #endif
 
   for (pg = process_globals; pg; pg = pg->next) {
@@ -2575,7 +2571,8 @@ void *scheme_register_process_global(const char *key, void *val)
   }
 
 #if defined(MZ_USE_MZRT)
-  mzrt_mutex_unlock(process_global_lock);
+  if (process_global_lock)
+    mzrt_mutex_unlock(process_global_lock);
 #endif
 
   return old_val;
@@ -2660,7 +2657,7 @@ static void do_swap_thread()
     }
 
     {
-      long cpm;
+      intptr_t cpm;
       cpm = scheme_get_process_milliseconds();
       scheme_current_thread->current_start_process_msec = cpm;
     }
@@ -2673,7 +2670,7 @@ static void do_swap_thread()
     Scheme_Thread *new_thread = swap_target;
 
     {
-      long cpm;
+      intptr_t cpm;
       cpm = scheme_get_process_milliseconds();
       scheme_current_thread->accum_process_msec += (cpm - scheme_current_thread->current_start_process_msec);
     }
@@ -2986,7 +2983,7 @@ static void start_child(Scheme_Thread * volatile child,
     }
 
     {
-      long cpm;
+      intptr_t cpm;
       cpm = scheme_get_process_milliseconds();
       scheme_current_thread->current_start_process_msec = cpm;
     }
@@ -3309,10 +3306,6 @@ Scheme_Object *scheme_thread_w_details(Scheme_Object *thunk,
   if (scheme_is_stack_too_shallow()) {
     Scheme_Thread *p = scheme_current_thread;
 
-    /* Don't mangle the stack if we're in atomic mode, because that
-       probably means a stack-freeze trampoline, etc. */
-    wait_until_suspend_ok(1);
-
     p->ku.k.p1 = thunk;
     p->ku.k.p2 = config;
     p->ku.k.p3 = mgr;
@@ -3377,7 +3370,7 @@ Scheme_Object *scheme_call_as_nested_thread(int argc, Scheme_Object *argv[], voi
 
   SCHEME_USE_FUEL(25);
 
-  wait_until_suspend_ok(0);
+  scheme_wait_until_suspend_ok();
 
   np = MALLOC_ONE_TAGGED(Scheme_Thread);
   np->so.type = scheme_thread_type;
@@ -3886,7 +3879,7 @@ static Scheme_Object *raise_user_break(int argc, Scheme_Object ** volatile argv)
      though (if the break handler performs bignum arithmetic), so
      that's why we save and restore an old snapshot. */
   mz_jmp_buf *savebuf, newbuf;
-  long save[4];
+  intptr_t save[4];
 
   savebuf = scheme_current_thread->error_buf;
   scheme_current_thread->error_buf = &newbuf;
@@ -4039,7 +4032,7 @@ void scheme_break_thread(Scheme_Thread *p)
   if (p == scheme_current_thread) {
     if (scheme_can_break(p)) {
       scheme_fuel_counter = 0;
-      scheme_jit_stack_boundary = (unsigned long)-1;
+      scheme_jit_stack_boundary = (uintptr_t)-1;
     }
   }
   scheme_weak_resume_thread(p);
@@ -4047,6 +4040,54 @@ void scheme_break_thread(Scheme_Thread *p)
   if (SAME_OBJ(p, scheme_main_thread))
     ReleaseSemaphore(scheme_break_semaphore, 1, NULL);
 # endif
+}
+
+static void call_on_atomic_timeout(int must)
+{
+  Scheme_Thread *p = scheme_current_thread;
+  int running;
+  double sleep_end;
+  int block_descriptor;
+  Scheme_Object *blocker;
+  Scheme_Ready_Fun block_check;
+  Scheme_Needs_Wakeup_Fun block_needs_wakeup;
+  Scheme_Kill_Action_Func private_on_kill;
+  void *private_kill_data;
+  void **private_kill_next;
+
+  /* Save any state that has to do with the thread blocking or 
+     sleeping, in case scheme_on_atomic_timeout() runs Racket code. */
+
+  running = p->running;
+  sleep_end = p->sleep_end;
+  block_descriptor = p->block_descriptor;
+  blocker = p->blocker;
+  block_check = p->block_check;
+  block_needs_wakeup = p->block_needs_wakeup;
+
+  private_on_kill = p->private_on_kill;
+  private_kill_data = p->private_kill_data;
+  private_kill_next = p->private_kill_next;
+
+  p->running = MZTHREAD_RUNNING;
+  p->sleep_end = 0.0;
+  p->block_descriptor = 0;
+  p->blocker = NULL;
+  p->block_check = NULL;
+  p->block_needs_wakeup = NULL;
+
+  scheme_on_atomic_timeout(must);
+
+  p->running = running;
+  p->sleep_end = sleep_end;
+  p->block_descriptor = block_descriptor;
+  p->blocker = blocker;
+  p->block_check = block_check;
+  p->block_needs_wakeup = block_needs_wakeup;
+
+  p->private_on_kill = private_on_kill;
+  p->private_kill_data = private_kill_data;
+  p->private_kill_next = private_kill_next;
 }
 
 static void find_next_thread(Scheme_Thread **return_arg) {
@@ -4210,7 +4251,7 @@ void scheme_thread_block(float sleep_time)
   if ((p->running & MZTHREAD_USER_SUSPENDED)
       && !(p->running & MZTHREAD_NEED_SUSPEND_CLEANUP)) {
     /* This thread was suspended. */
-    wait_until_suspend_ok(0);
+    scheme_wait_until_suspend_ok();
     if (!p->next) {
       /* Suspending the main thread... */
       select_thread();
@@ -4309,9 +4350,9 @@ void scheme_thread_block(float sleep_time)
   }
 #endif
 
-/*####################################*/
-/* THREAD CONTEXT SWITCH HAPPENS HERE */
-/*####################################*/
+  /*####################################*/
+  /* THREAD CONTEXT SWITCH HAPPENS HERE */
+  /*####################################*/
 
   if (next) {
     /* Swap in `next', but first clear references to other threads. */
@@ -4327,7 +4368,7 @@ void scheme_thread_block(float sleep_time)
         scheme_fuel_counter = p->engine_weight;
         scheme_jit_stack_boundary = scheme_stack_boundary;
       }
-      scheme_on_atomic_timeout();
+      call_on_atomic_timeout(0);
       if (atomic_timeout_auto_suspend > 1)
         --atomic_timeout_auto_suspend;
     }
@@ -4358,7 +4399,7 @@ void scheme_thread_block(float sleep_time)
   /* Suspended while I was asleep? */
   if ((p->running & MZTHREAD_USER_SUSPENDED)
       && !(p->running & MZTHREAD_NEED_SUSPEND_CLEANUP)) {
-    wait_until_suspend_ok(0);
+    scheme_wait_until_suspend_ok();
     if (!p->next)
       scheme_thread_block(0.0); /* main thread handled at top of this function */
     else
@@ -4545,8 +4586,6 @@ void scheme_thread_block_enable_break(float sleep_time, int enable_break)
 
 void scheme_start_atomic(void)
 {
-  if (!do_atomic)
-    missed_context_switch = 0;
   do_atomic++;
 }
 
@@ -4577,6 +4616,7 @@ void scheme_end_atomic(void)
 {
   scheme_end_atomic_no_swap();
   if (!do_atomic && missed_context_switch) {
+    missed_context_switch = 0;
     scheme_thread_block(0.0);
     scheme_current_thread->ran_some = 1;    
   }
@@ -4590,22 +4630,33 @@ void scheme_end_atomic_can_break(void)
     scheme_check_break_now();
 }
 
-static void wait_until_suspend_ok(int for_stack)
+int scheme_wait_until_suspend_ok(void)
 {
-  if (scheme_on_atomic_timeout && atomic_timeout_auto_suspend) {
+  int did = 0;
+
+  if (scheme_on_atomic_timeout) {
     /* new-style atomic timeout */
-    if (for_stack) {
-      /* a stack overflow is ok for the new-style timeout */
-      return;
-    } else if (do_atomic > atomic_timeout_atomic_level) {
+    if (do_atomic > atomic_timeout_atomic_level) {
       scheme_log_abort("attempted to wait for suspend in nested atomic mode");
       abort();
     }
   }
 
   while (do_atomic && scheme_on_atomic_timeout) {
-    scheme_on_atomic_timeout();
+    did = 1;
+    if (atomic_timeout_auto_suspend)
+      atomic_timeout_auto_suspend++;
+    call_on_atomic_timeout(1);
+    if (atomic_timeout_auto_suspend > 1)
+      --atomic_timeout_auto_suspend;
   }
+
+  if (do_atomic) {
+    scheme_log_abort("about to suspend in atomic mode");
+    abort();
+  }
+
+  return did;
 }
 
 Scheme_On_Atomic_Timeout_Proc scheme_set_on_atomic_timeout(Scheme_On_Atomic_Timeout_Proc p)
@@ -4629,10 +4680,6 @@ void scheme_weak_suspend_thread(Scheme_Thread *r)
   if (r->running & MZTHREAD_SUSPENDED)
     return;
 
-  if (r == scheme_current_thread) {
-    wait_until_suspend_ok(0);
-  }
-  
   if (r->prev) {
     r->prev->next = r->next;
     r->next->prev = r->prev;
@@ -4677,7 +4724,6 @@ void scheme_weak_resume_thread(Scheme_Thread *r)
 
 void scheme_about_to_move_C_stack(void)
 {
-  wait_until_suspend_ok(1);
 }
 
 static Scheme_Object *
@@ -4789,7 +4835,7 @@ void scheme_kill_thread(Scheme_Thread *p)
 {
   if (do_kill_thread(p)) {
     /* Suspend/kill self: */
-    wait_until_suspend_ok(0);
+    scheme_wait_until_suspend_ok();
     if (p->suspend_to_kill)
       suspend_thread(p);
     else
@@ -4919,7 +4965,7 @@ static void suspend_thread(Scheme_Thread *p)
     p->running |= MZTHREAD_USER_SUSPENDED;
   } else {
     if (p == scheme_current_thread) {
-      wait_until_suspend_ok(0);
+      scheme_wait_until_suspend_ok();
     }
     p->running |= MZTHREAD_USER_SUSPENDED;
     scheme_weak_suspend_thread(p); /* ok if p is scheme_current_thread */
@@ -5966,6 +6012,8 @@ static Scheme_Object *do_sync(const char *name, int argc, Scheme_Object *argv[],
     if (!SCHEME_FALSEP(argv[0])) {
       if (SCHEME_REALP(argv[0]))
 	timeout = (float)scheme_real_to_double(argv[0]);
+      else if (scheme_check_proc_arity(NULL, 0, 0, argc, argv))
+        timeout = 0.0;
       
       if (timeout < 0.0) {
 	scheme_wrong_type(name, "non-negative real number", 0, argc, argv);
@@ -6124,10 +6172,17 @@ static Scheme_Object *do_sync(const char *name, int argc, Scheme_Object *argv[],
       }
     }
     return o;
-  } else if (tailok)
-    return scheme_false;
-  else
-    return NULL;
+  } else {
+    if (with_timeout && SCHEME_PROCP(argv[0])) {
+      if (tailok)
+        return _scheme_tail_apply(argv[0], 0, NULL);
+      else
+        return _scheme_apply(argv[0], 0, NULL);
+    } else if (tailok)
+      return scheme_false;
+    else
+      return NULL;
+  }
 }
 
 static Scheme_Object *sch_sync(int argc, Scheme_Object *argv[])
@@ -6901,6 +6956,11 @@ static void make_initial_config(Scheme_Thread *p)
                                   0, 0);
     init_param(cells, paramz, MZCONFIG_PROMPT_READ_HANDLER, ph);
 
+    ph = scheme_make_prim_w_arity(scheme_default_read_input_port_handler,
+                                  "default-get-interaction-input-port",
+                                  0, 0);
+    init_param(cells, paramz, MZCONFIG_READ_INPUT_PORT_HANDLER, ph);
+
     ph = scheme_make_prim_w_arity(scheme_default_read_handler,
                                   "default-read-interaction-handler",
                                   2, 2);
@@ -7112,7 +7172,7 @@ Scheme_Env *scheme_get_env(Scheme_Config *c)
 Scheme_Object *scheme_make_namespace(int argc, Scheme_Object *argv[])
 {
   Scheme_Env *genv, *env;
-  long phase;
+  intptr_t phase;
 
   genv = scheme_get_env(NULL);
   env = scheme_make_empty_env();
@@ -7277,6 +7337,7 @@ typedef struct WillExecutor {
   Scheme_Object so;
   Scheme_Object *sema;
   ActiveWill *first, *last;
+  int is_stubborn;
 } WillExecutor;
 
 static void activate_will(void *o, void *data) 
@@ -7285,8 +7346,13 @@ static void activate_will(void *o, void *data)
   WillExecutor *w;
   Scheme_Object *proc;
 
-  w = (WillExecutor *)scheme_ephemeron_key(data);
-  proc = scheme_ephemeron_value(data);
+  if (SCHEME_PAIRP(data)) {
+    w = (WillExecutor *)SCHEME_CAR(data);
+    proc = SCHEME_CDR(data);
+  } else {
+    w = (WillExecutor *)scheme_ephemeron_key(data);
+    proc = scheme_ephemeron_value(data);
+  }
 
   if (w) {
     a = MALLOC_ONE_RT(ActiveWill);
@@ -7333,6 +7399,17 @@ static Scheme_Object *make_will_executor(int argc, Scheme_Object **argv)
   w->first = NULL;
   w->last = NULL;
   w->sema = sema;
+  w->is_stubborn = 0;
+
+  return (Scheme_Object *)w;
+}
+
+Scheme_Object *scheme_make_stubborn_will_executor()
+{
+  WillExecutor *w;
+
+  w = (WillExecutor *)make_will_executor(0, NULL);
+  w->is_stubborn = 1;
 
   return (Scheme_Object *)w;
 }
@@ -7352,10 +7429,15 @@ static Scheme_Object *register_will(int argc, Scheme_Object **argv)
     scheme_wrong_type("will-register", "will-executor", 0, argc, argv);
   scheme_check_proc_arity("will-register", 1, 2, argc, argv);
 
-  /* If we lose track of the will executor, then drop the finalizer. */
-  e = scheme_make_ephemeron(argv[0], argv[2]);
+  if (((WillExecutor *)argv[0])->is_stubborn) {
+    e = scheme_make_pair(argv[0], argv[2]);
+    scheme_add_finalizer(argv[1], activate_will, e);
+  } else {
+    /* If we lose track of the will executor, then drop the finalizer. */
+    e = scheme_make_ephemeron(argv[0], argv[2]);
+    scheme_add_scheme_finalizer(argv[1], activate_will, e);
+  }
 
-  scheme_add_scheme_finalizer(argv[1], activate_will, e);
 
   return scheme_void;
 }
@@ -7621,12 +7703,12 @@ static void prepare_thread_for_GC(Scheme_Object *t)
   if (!p->nestee) {
     Scheme_Saved_Stack *saved;
 # define RUNSTACK_TUNE(x) /* x   - Used for performance tuning */
-    RUNSTACK_TUNE( long size; );
+    RUNSTACK_TUNE( intptr_t size; );
 
     if ((!p->runstack_owner
          || (p == *p->runstack_owner))
         && p->runstack_start) {
-      long rs_end;
+      intptr_t rs_end;
       Scheme_Object **rs_start;
 
       /* If there's a meta-prompt, we can also zero out past the unused part */
@@ -7682,7 +7764,7 @@ static void prepare_thread_for_GC(Scheme_Object *t)
 
     /* release unused cont mark stack segments */
     if (p->cont_mark_stack)
-      segcount = ((long)(p->cont_mark_stack - 1) >> SCHEME_LOG_MARK_SEGMENT_SIZE) + 1;
+      segcount = ((intptr_t)(p->cont_mark_stack - 1) >> SCHEME_LOG_MARK_SEGMENT_SIZE) + 1;
     else
       segcount = 0;
     for (i = segcount; i < p->cont_mark_seg_count; i++) {
@@ -7692,11 +7774,11 @@ static void prepare_thread_for_GC(Scheme_Object *t)
       p->cont_mark_seg_count = segcount;
       
     /* zero unused part of last mark stack segment */
-    segpos = ((long)p->cont_mark_stack >> SCHEME_LOG_MARK_SEGMENT_SIZE);
+    segpos = ((intptr_t)p->cont_mark_stack >> SCHEME_LOG_MARK_SEGMENT_SIZE);
     
     if (segpos < p->cont_mark_seg_count) {
       Scheme_Cont_Mark *seg = p->cont_mark_stack_segments[segpos];
-      int stackpos = ((long)p->cont_mark_stack & SCHEME_MARK_SEGMENT_MASK);
+      int stackpos = ((intptr_t)p->cont_mark_stack & SCHEME_MARK_SEGMENT_MASK);
       if (seg) {
         for (i = stackpos; i < SCHEME_MARK_SEGMENT_SIZE; i++) {
           if (seg[i].key) {
@@ -7717,10 +7799,10 @@ static void prepare_thread_for_GC(Scheme_Object *t)
       for (pos = 0; pos < p->cont_mark_stack_bottom; pos++) {
         Scheme_Cont_Mark *seg;
         int stackpos;
-        segpos = ((long)pos >> SCHEME_LOG_MARK_SEGMENT_SIZE);
+        segpos = ((intptr_t)pos >> SCHEME_LOG_MARK_SEGMENT_SIZE);
         seg = p->cont_mark_stack_segments[segpos];
         if (seg) {
-          stackpos = ((long)pos & SCHEME_MARK_SEGMENT_MASK);
+          stackpos = ((intptr_t)pos & SCHEME_MARK_SEGMENT_MASK);
           seg[stackpos].key = NULL;
           seg[stackpos].val = NULL;
           seg[stackpos].cache = NULL;
@@ -7791,7 +7873,7 @@ static void get_ready_for_GC()
 #endif
 
   scheme_fuel_counter = 0;
-  scheme_jit_stack_boundary = (unsigned long)-1;
+  scheme_jit_stack_boundary = (uintptr_t)-1;
 
 #ifdef WINDOWS_PROCESSES
   scheme_suspend_remembered_threads();
@@ -7842,7 +7924,7 @@ static void done_with_GC()
 }
 
 #ifdef MZ_PRECISE_GC
-static void inform_GC(int major_gc, long pre_used, long post_used)
+static void inform_GC(int major_gc, intptr_t pre_used, intptr_t post_used)
 {
   Scheme_Logger *logger = scheme_get_main_logger();
   if (logger) {
@@ -7850,10 +7932,11 @@ static void inform_GC(int major_gc, long pre_used, long post_used)
        based on the max value-print width, and we may not be at a
        point where parameters are available. */
     char buf[128];
-    long buflen;
+    intptr_t buflen;
 
     sprintf(buf,
-            "GC [%s] at %ld bytes; %ld collected in %ld msec",
+            "GC [%s] at %" PRIdPTR " bytes; %" PRIdPTR 
+	    " collected in %" PRIdPTR " msec",
             (major_gc ? "major" : "minor"),
             pre_used, pre_used - post_used,
             end_this_gc_time - start_this_gc_time);
@@ -7909,7 +7992,7 @@ static Scheme_Object *current_stats(int argc, Scheme_Object *argv[])
     case 4:
       {
 	/* Stack size: */
-	long sz = 0;
+	intptr_t sz = 0;
 
 	if (MZTHREAD_STILL_RUNNING(t->running)) {
 	  Scheme_Overflow *overflow;
@@ -7921,10 +8004,10 @@ static Scheme_Object *current_stats(int argc, Scheme_Object *argv[])
 	    stk_start = t->stack_start;
 	    stk_end = (void *)&stk_end;
 #         ifdef STACK_GROWS_UP
-	    sz = (long)stk_end XFORM_OK_MINUS (long)stk_start;
+	    sz = (intptr_t)stk_end XFORM_OK_MINUS (intptr_t)stk_start;
 #         endif
 #         ifdef STACK_GROWS_DOWN
-	    sz = (long)stk_start XFORM_OK_MINUS (long)stk_end;
+	    sz = (intptr_t)stk_start XFORM_OK_MINUS (intptr_t)stk_end;
 #         endif
 	  } else {
 	    if (t->jmpup_buf.stack_copy)
@@ -7950,9 +8033,9 @@ static Scheme_Object *current_stats(int argc, Scheme_Object *argv[])
 	  
 	  /* Mark stack */
 	  if (t == scheme_current_thread) {
-	    sz += ((long)scheme_current_cont_mark_pos >> 1) * sizeof(Scheme_Cont_Mark);
+	    sz += ((intptr_t)scheme_current_cont_mark_pos >> 1) * sizeof(Scheme_Cont_Mark);
 	  } else {
-	    sz += ((long)t->cont_mark_pos >> 1) * sizeof(Scheme_Cont_Mark);
+	    sz += ((intptr_t)t->cont_mark_pos >> 1) * sizeof(Scheme_Cont_Mark);
 	  }
 	}
 
@@ -7980,7 +8063,7 @@ static Scheme_Object *current_stats(int argc, Scheme_Object *argv[])
       break;
     }
   } else {
-    long cpuend, end, gcend;
+    intptr_t cpuend, end, gcend;
 
     cpuend = scheme_get_process_milliseconds();
     end = scheme_get_milliseconds();
@@ -8030,7 +8113,7 @@ static Scheme_Object *current_stats(int argc, Scheme_Object *argv[])
    Meanwhile, scheme_gmp_tls_unload, etc., attach to the pool to the
    owning thread as needed for GC. */
 
-void *scheme_malloc_gmp(unsigned long amt, void **mem_pool)
+void *scheme_malloc_gmp(uintptr_t amt, void **mem_pool)
 {
   void *p, *mp;
 
@@ -8058,269 +8141,6 @@ void scheme_free_gmp(void *p, void **mem_pool)
 }
 
 /*========================================================================*/
-/*                             stack freezer                              */
-/*========================================================================*/
-
-/* When interacting with certain libraries that can lead to Scheme
-   callbacks, the stack region used by the library should not be
-   modified by Scheme thread swaps. In that case, the callback must be
-   constrained. Completely disallowing synchornization with ther
-   threads or unbounded computation, however, is sometimes too
-   difficult. A stack-freezer sequence offer a compromise, where the
-   callback is run as much as possible, but it can be suspended to
-   allow the library call to return so that normal Scheme-thread
-   scheduling can resume. The callback is then completed in a normal
-   scheduling context, where it is no longer specially constrained.
-   
-   The call process is
-    scheme_with_stack_freeze(f, data)
-     -> f(data) in frozen mode
-         -> ... frozen_run_some(g, data2)          \
-             -> Scheme code, may finish or may not  | maybe loop
-         froz->in_progress inicates whether done   /
-     -> continue scheme if not finished
-
-   In this process, it's the call stack between f(data) and the call
-   to frozen_run_some() that won't be copied in or out until f(data)
-   returns.
-
-   Nesting scheme_with_stack_freeze() calls should be safe, but it
-   won't achieve the goal, which is to limit the amount of work done
-   before returning (because the inner scheme_with_stack_freeze() will
-   have to run to completion). */
-
-static unsigned long get_deeper_base();
-
-typedef struct FrozenTramp {
-  MZTAG_IF_REQUIRED
-  Scheme_Frozen_Stack_Proc do_f;
-  void *do_data;
-  int val;
-  int in_progress;
-  int progress_is_resumed;
-  Scheme_Object *old_param;
-  Scheme_Config *config;
-  void *progress_base_addr;
-  mz_jmp_buf progress_base;
-  Scheme_Jumpup_Buf_Holder *progress_cont;
-  int timer_on;
-  double continue_until;
-#ifdef MZ_PRECISE_GC
-  void *fixup_var_stack_chain;
-#endif
-}  FrozenTramp;
-
-int scheme_with_stack_freeze(Scheme_Frozen_Stack_Proc wha_f, void *wha_data)
-{
-  FrozenTramp *froz;
-  Scheme_Cont_Frame_Data cframe;
-  Scheme_Object *bx;
-  int retval;
-  Scheme_Jumpup_Buf_Holder *pc;
-
-  froz = MALLOC_ONE_RT(FrozenTramp);
-  SET_REQUIRED_TAG(froz->type = scheme_rt_frozen_tramp);
-
-  bx = scheme_make_raw_pair((Scheme_Object *)froz, NULL);
-
-  scheme_push_continuation_frame(&cframe);
-  scheme_set_cont_mark(froz_key, bx);
-
-  pc = scheme_new_jmpupbuf_holder();
-  froz->progress_cont = pc;
-
-  scheme_init_jmpup_buf(&froz->progress_cont->buf);
-
-  scheme_start_atomic();
-  retval = wha_f(wha_data);
-  froz->val = retval;
-
-  if (froz->in_progress) {
-    /* We have leftover work; jump and finish it (non-atomically).
-       But don't swap until we've jumped back in, because the jump-in
-       point might be trying to suspend the thread (and that should
-       complete before any swap). */
-    scheme_end_atomic_no_swap();
-    SCHEME_CAR(bx) = NULL;
-    froz->in_progress = 0;
-    froz->progress_is_resumed = 1;
-    if (!scheme_setjmp(froz->progress_base)) {
-#ifdef MZ_PRECISE_GC
-      froz->fixup_var_stack_chain = &__gc_var_stack__;
-#endif
-      scheme_longjmpup(&froz->progress_cont->buf);
-    }
-  } else {
-    scheme_end_atomic();
-  }
-
-  scheme_pop_continuation_frame(&cframe);
-
-  froz->old_param = NULL;
-  froz->progress_cont = NULL;
-  froz->do_data = NULL;
-
-  return froz->val;
-}
-
-static void suspend_froz_progress(void)
-{
-  FrozenTramp * volatile froz;
-  double msecs;
-  Scheme_Object *v;
-
-  v = scheme_extract_one_cc_mark(NULL, froz_key);
-  froz = (FrozenTramp *)SCHEME_CAR(v);
-  v = NULL;
-
-  msecs = scheme_get_inexact_milliseconds();
-  if (msecs < froz->continue_until)
-    return;
-
-  scheme_on_atomic_timeout = NULL;
-
-  froz->in_progress = 1;
-  if (scheme_setjmpup(&froz->progress_cont->buf, (void*)froz->progress_cont, froz->progress_base_addr)) {
-    /* we're back */
-    scheme_reset_jmpup_buf(&froz->progress_cont->buf);
-#ifdef MZ_PRECISE_GC
-    /* Base addr points to the last valid gc_var_stack address.
-       Fixup that link to skip over the part of the stack we're
-       not using right now. */
-    ((void **)froz->progress_base_addr)[0] = froz->fixup_var_stack_chain;
-    ((void **)froz->progress_base_addr)[1] = NULL;
-#endif
-  } else {
-    /* we're leaving */
-    scheme_longjmp(froz->progress_base, 1);
-  }
-}
-
-static void froz_run_new(FrozenTramp * volatile froz, int run_msecs)
-{
-  double msecs;
-
-  /* We're willing to start new work that is specific to this thread */
-  froz->progress_is_resumed = 0;
-
-  msecs = scheme_get_inexact_milliseconds();
-  froz->continue_until = msecs + run_msecs;
-  
-  if (!scheme_setjmp(froz->progress_base)) {
-    Scheme_Frozen_Stack_Proc do_f;
-    scheme_start_atomic();
-    scheme_on_atomic_timeout = suspend_froz_progress;
-    atomic_timeout_atomic_level = -1;
-    do_f = froz->do_f;
-    do_f(froz->do_data);
-  }
-
-  if (froz->progress_is_resumed) {
-    /* we've already returned once; jump out to new progress base */
-    scheme_longjmp(froz->progress_base, 1);
-  } else {
-    scheme_on_atomic_timeout = NULL;
-    scheme_end_atomic_no_swap();
-  }
-}
-
-static void froz_do_run_new(FrozenTramp * volatile froz, int *iteration, int run_msecs)
-{
-  /* This function just makes room on the stack, eventually calling
-     froz_run_new(). */
-  int new_iter[32];
-
-  if (iteration[0] == 3) {
-#ifdef MZ_PRECISE_GC
-    froz->progress_base_addr = (void *)&__gc_var_stack__;
-#else
-    froz->progress_base_addr = (void *)new_iter;
-#endif
-    froz_run_new(froz, run_msecs);
-  } else {
-    new_iter[0] = iteration[0] + 1;
-    froz_do_run_new(froz, new_iter, run_msecs);
-  }
-}
-
-int scheme_frozen_run_some(Scheme_Frozen_Stack_Proc do_f, void *do_data, int run_msecs)
-{
-  FrozenTramp * volatile froz;
-  int more = 0;
-  Scheme_Object *v;
-  
-  v = scheme_extract_one_cc_mark(NULL, froz_key);
-  if (v)
-    froz = (FrozenTramp *)SCHEME_CAR(v);
-  else
-    froz = NULL;
-  v = NULL;
-
-  if (froz) {
-    if (froz->in_progress) {
-      /* We have work in progress. */
-      if ((unsigned long)froz->progress_base_addr < get_deeper_base()) {
-	/* We have stack space to resume the old work: */
-        double msecs;
-	froz->in_progress = 0;
-	froz->progress_is_resumed = 1;
-        msecs = scheme_get_inexact_milliseconds();
-        froz->continue_until = msecs + run_msecs;
-	scheme_start_atomic();
-	scheme_on_atomic_timeout = suspend_froz_progress;
-        atomic_timeout_atomic_level = -1;
-	if (!scheme_setjmp(froz->progress_base)) {
-#ifdef MZ_PRECISE_GC
-	  froz->fixup_var_stack_chain = &__gc_var_stack__;
-#endif
-	  scheme_longjmpup(&froz->progress_cont->buf);
-	} else {
-	  scheme_on_atomic_timeout = NULL;
-	  scheme_end_atomic_no_swap();
-	}
-      }
-    } else {
-      int iter[1];
-      iter[0] = 0;
-      froz->do_f = do_f;
-      froz->do_data = do_data;
-      froz_do_run_new(froz, iter, run_msecs);
-    }
-
-    more = froz->in_progress;
-  }
-
-  return more;
-}
-
-int scheme_is_in_frozen_stack()
-{
-  Scheme_Object *v;
-  
-  v = scheme_extract_one_cc_mark(NULL, froz_key);
-  if (v)
-    return 1;
-  else
-    return 0;
-}
-
-/* Disable warning for returning address of local variable: */
-#ifdef _MSC_VER
-#pragma warning (disable:4172)
-#endif
-
-static unsigned long get_deeper_base()
-{
-  long here;
-  unsigned long here_addr = (unsigned long)&here;
-  return here_addr;
-}
-
-#ifdef _MSC_VER
-#pragma warning (default:4172)
-#endif
-
-/*========================================================================*/
 /*                               precise GC                               */
 /*========================================================================*/
 
@@ -8341,11 +8161,11 @@ Scheme_Jumpup_Buf_Holder *scheme_new_jmpupbuf_holder(void)
 }
 
 #ifdef MZ_PRECISE_GC
-unsigned long scheme_get_current_thread_stack_start(void)
+uintptr_t scheme_get_current_thread_stack_start(void)
 {
   Scheme_Thread *p;
   p = scheme_current_thread;
-  return (unsigned long)p->stack_start;
+  return (uintptr_t)p->stack_start;
 }
 #endif
 
@@ -8372,7 +8192,6 @@ static void register_traversers(void)
   GC_REG_TRAV(scheme_rt_evt, mark_evt);
   GC_REG_TRAV(scheme_rt_syncing, mark_syncing);
   GC_REG_TRAV(scheme_rt_parameterization, mark_parameterization);
-  GC_REG_TRAV(scheme_rt_frozen_tramp, mark_frozen_tramp);
 }
 
 END_XFORM_SKIP;

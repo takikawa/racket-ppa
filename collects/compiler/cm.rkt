@@ -20,13 +20,16 @@
          (rename-out [trace manager-trace-handler])
          get-file-sha1
          get-compiled-file-sha1
-         with-compile-output)
+         with-compile-output
+         parallel-lock-client)
 
 (define manager-compile-notify-handler (make-parameter void))
 (define trace (make-parameter void))
 (define indent (make-parameter ""))
 (define trust-existing-zos (make-parameter #f))
 (define manager-skip-file-handler (make-parameter (λ (x) #f)))
+(define depth (make-parameter 0))
+(define parallel-lock-client (make-parameter #f))
 
 (define (file-stamp-in-collection p)
   (file-stamp-in-paths p (current-library-collection-paths)))
@@ -177,7 +180,13 @@
          (set! ok? #t)))
      (lambda ()
        (if ok?
-           (rename-file-or-directory tmp-path path #t)
+           (if (eq? (system-type) 'windows)
+              (let ([tmp-path2 (make-temporary-file "tmp~a" #f (path-only path))])
+                (with-handlers ([exn:fail:filesystem? void])
+                  (rename-file-or-directory path tmp-path2 #t))
+                (rename-file-or-directory tmp-path path #t)
+                (try-delete-file tmp-path2))
+              (rename-file-or-directory tmp-path path #t))
            (try-delete-file tmp-path))))))
 
 (define (get-source-sha1 p)
@@ -359,8 +368,6 @@
         (verify-times path tmp-name)
         (write-deps code mode path src-sha1 external-deps reader-deps up-to-date read-src-syntax)))))
 
-(define depth (make-parameter 0))
-
 (define (actual-source-path path)
   (if (file-exists? path) 
       path
@@ -406,21 +413,36 @@
                      #f)
                    ((if sha1-only? values (lambda (build) (build) #f))
                     (lambda ()
-                      (when zo-exists? (try-delete-file zo-name #f))
-                      (log-info (format "cm: ~acompiling ~a" 
-                                        (build-string 
-                                         (depth)
-                                         (λ (x) (if (= 2 (modulo x 3)) #\| #\space)))
-                                        actual-path))
-                      (parameterize ([depth (+ (depth) 1)])
-                        (with-handlers
-                            ([exn:get-module-code?
-                              (lambda (ex)
-                                (compilation-failure mode path zo-name
-                                                     (exn:get-module-code-path ex)
-                                                     (exn-message ex))
-                                (raise ex))])
-                          (compile-zo* mode path src-sha1 read-src-syntax zo-name up-to-date))))))))))
+                      (let* ([lc (parallel-lock-client)]
+                             [locked? (and lc (lc 'lock zo-name))]
+                             [ok-to-compile? (or (not lc) locked?)])
+                        (dynamic-wind
+                          (lambda () (void))
+                          (lambda ()
+                            (when ok-to-compile?
+                              (when zo-exists? (try-delete-file zo-name #f))
+                              (log-info (format "cm: ~acompiling ~a" 
+                                                (build-string 
+                                                 (depth)
+                                                 (λ (x) (if (= 2 (modulo x 3)) #\| #\space)))
+                                                actual-path))
+                              (parameterize ([depth (+ (depth) 1)])
+                                (with-handlers
+                                    ([exn:get-module-code?
+                                      (lambda (ex)
+                                        (compilation-failure mode path zo-name
+                                                             (exn:get-module-code-path ex)
+                                                             (exn-message ex))
+                                        (raise ex))])
+                                  (compile-zo* mode path src-sha1 read-src-syntax zo-name up-to-date)))
+                              (log-info (format "cm: ~acompiled  ~a" 
+                                                (build-string 
+                                                 (depth)
+                                                 (λ (x) (if (= 2 (modulo x 3)) #\| #\space)))
+                                                actual-path))))
+                          (lambda ()
+                            (when locked?
+                              (lc 'unlock zo-name))))))))))))
      (unless sha1-only?
        (trace-printf "end compile: ~a" actual-path)))))
 
@@ -540,7 +562,8 @@
     (lambda (src)
       (parameterize ([current-load/use-compiled
                       (make-compilation-manager-load/use-compiled-handler/table
-                       cache)])
+                       cache
+                       #f)])
         (compile-root (car (use-compiled-file-paths))
                       (path->complete-path src)
                       cache
@@ -548,10 +571,10 @@
                       #f)
         (void)))))
 
-(define (make-compilation-manager-load/use-compiled-handler)
-  (make-compilation-manager-load/use-compiled-handler/table (make-hash)))
+(define (make-compilation-manager-load/use-compiled-handler [delete-zos-when-rkt-file-does-not-exist? #f])
+  (make-compilation-manager-load/use-compiled-handler/table (make-hash) delete-zos-when-rkt-file-does-not-exist?))
 
-(define (make-compilation-manager-load/use-compiled-handler/table cache)
+(define (make-compilation-manager-load/use-compiled-handler/table cache delete-zos-when-rkt-file-does-not-exist?)
   (let ([orig-eval (current-eval)]
         [orig-load (current-load)]
         [orig-registry (namespace-module-registry (current-namespace))]
@@ -564,7 +587,13 @@
                       (let ([p2 (rkt->ss path)])
                         (and (not (eq? path p2))
                              (file-exists? p2)))))
-             (trace-printf "skipping:  ~a file does not exist" path)]
+             (trace-printf "skipping:  ~a file does not exist" path)
+             (when delete-zos-when-rkt-file-does-not-exist?
+               (unless (null? modes)
+                 (define to-delete (path-add-suffix (get-compilation-path (car modes) path) #".zo")) 
+                 (when (file-exists? to-delete)
+                   (trace-printf "deleting:  ~s" to-delete)
+                 (delete-file to-delete))))]
             [(or (null? (use-compiled-file-paths))
                  (not (equal? (car modes)
                               (car (use-compiled-file-paths)))))

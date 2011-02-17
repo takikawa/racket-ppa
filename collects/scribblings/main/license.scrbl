@@ -27,7 +27,7 @@ for more information.
 
 @copyright{
   Racket
-  Copyright (c) 2010 PLT Scheme Inc.
+  Copyright (c) 2010-2011 PLT Scheme Inc.
 }
 
 Racket software includes or extends the following copyrighted material:
@@ -35,44 +35,27 @@ Racket software includes or extends the following copyrighted material:
 @copyright{
   DrScheme
   Copyright (c) 1995-2003 PLT
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   All rights reserved.
 }
 
 @copyright{
   MrEd
   Copyright (c) 1995-2003 PLT
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   All rights reserved.
 }
 
 @copyright{
   MzScheme
   Copyright (c) 1995-2003 PLT
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   All rights reserved.
 }
 
 @copyright{
   libscheme
   Copyright (c) 1994 Brent Benson
-  All rights reserved.
-}
-
-@copyright{
-  wxWindows
-  Copyright (c) 1994
-  Artificial Intelligence Applications Institute,
-  The University of Edinburgh
-  All rights reserved.
-}
-
-@copyright{
-  wxWindows Xt
-  Copyright (c) 1994
-  Artificial Intelligence Applications Institute,
-  The University of Edinburgh
-  Copyright (c) 1995 GNU (Markus Holzem)
   All rights reserved.
 }
 
@@ -92,30 +75,6 @@ Racket software includes or extends the following copyrighted material:
 }
 
 @copyright{
-  The A List
-  Copyright (c) 1997-2000 Kyle Hammond.
-  All rights reserved.
-}
-
-@copyright{
-  Independent JPEG Group library
-  Copyright (c) 1991-1998 Thomas G. Lane.
-  All rights reserved.
-}
-
-@copyright{
-  libpng
-  Copyright (c) 2000-2002 Glenn Randers-Pehrson
-  All rights reserved.
-}
-
-@copyright{
-  zlib
-  Copyright (c) 1995-2002 Jean-loup Gailly and Mark Adler
-  All rights reserved.
-}
-
-@copyright{
   GNU MP Library
   Copyright (c) 1992, 1993, 1994, 1996
   Free Software Foundation, Inc.
@@ -130,11 +89,6 @@ Racket software includes or extends the following copyrighted material:
 @copyright{
   libunwind
   Copyright (c) 2003-2005 Hewlett-Packard Development Company, L.P.
-}
-
-@copyright{
-  GNU Classpath
-  GNU Public License with special exception
 }
 
 @copyright{

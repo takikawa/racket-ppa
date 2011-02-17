@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   Copyright (c) 1995-2002 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -117,7 +117,7 @@ FIXME_LATER static Scheme_Hash_Table *fullpath_loaded_extensions; /* hash on ful
 #endif
 
 /* For precise GC, make a proc ptr look like a fixnum: */
-#define mzPROC_TO_HASH_OBJ(f) ((Scheme_Object *)(((long)f) | 0x1))
+#define mzPROC_TO_HASH_OBJ(f) ((Scheme_Object *)(((intptr_t)f) | 0x1))
 
 void scheme_init_dynamic_extension(Scheme_Env *env)
 {
@@ -179,7 +179,7 @@ typedef struct {
 static char *copy_vers(char *vers)
 {
   if (vers) {
-    int len = strlen(vers);
+    intptr_t len = strlen(vers);
     char *vcopy;
     vcopy = (char *)scheme_malloc_atomic(len + 1);
     memcpy(vcopy, vers, len + 1);
@@ -434,7 +434,7 @@ static Scheme_Object *do_load_extension(const char *filename,
 
       if (n && SCHEME_SYMBOLP(n)) {
 	char *s, *t;
-	long len, slen;
+	intptr_t len, slen;
 	
 	t = "module `";
 	len = strlen(t);
@@ -464,7 +464,7 @@ static Scheme_Object *do_load_extension(const char *filename,
 #endif
 }
 
-void scheme_register_extension_global(void *ptr, long size)
+void scheme_register_extension_global(void *ptr, intptr_t size)
   XFORM_SKIP_PROC
 {
   GC_add_roots((char *)ptr, (char *)(((char *)ptr) + size + 1));

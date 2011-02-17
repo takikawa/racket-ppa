@@ -1,4 +1,3 @@
-
 #lang scheme/signature
 
 add-color<%>
@@ -38,8 +37,6 @@ control<%>
 current-eventspace
 current-eventspace-has-menu-root?
 current-eventspace-has-standard-menus?
-current-ps-afm-file-paths
-current-ps-cmap-file-paths
 current-ps-setup
 current-text-keymap-initializer
 cursor%
@@ -65,6 +62,7 @@ editor<%>
 end-busy-cursor
 event%
 event-dispatch-handler
+eventspace-event-evt
 eventspace-handler-thread
 eventspace-shutdown?
 eventspace?
@@ -91,6 +89,8 @@ get-font-from-user
 get-page-setup-from-user
 get-panel-background
 get-ps-setup-from-user
+get-highlight-background-color
+get-highlight-text-color
 get-resource
 get-text-from-user
 get-the-editor-data-class-list
@@ -115,11 +115,16 @@ key-event%
 keymap%
 label->plain-label
 labelled-menu-item<%>
+linear-gradient%
 list-box%
 list-control<%>
+make-bitmap
 make-eventspace
+make-gl-bitmap
 make-gui-empty-namespace
 make-gui-namespace
+make-monochrome-bitmap
+make-screen-bitmap
 map-command-as-meta-key
 menu%
 menu-bar%
@@ -141,6 +146,7 @@ open-output-text-editor
 pane%
 panel%
 pasteboard%
+pdf-dc%
 pen%
 pen-list%
 play-sound
@@ -153,14 +159,15 @@ put-file
 queue-callback
 radio-box%
 readable-snip<%>
+read-bitmap
 read-editor-global-footer
 read-editor-global-header
 read-editor-version
+radial-gradient%
 region%
 register-collecting-blit
 scroll-event%
 selectable-menu-item<%>
-send-event
 send-message-to-window
 separator-menu-item%
 sleep/yield
@@ -178,6 +185,7 @@ style-list%
 style<%>
 subarea<%>
 subwindow<%>
+svg-dc%
 system-position-ok-before-cancel?
 tab-snip%
 text%
