@@ -25,6 +25,14 @@ else
 	NUMJOBS = 1
 endif
 
+# Support for packaging Git snapshots
+
+SOURCEPKG=$(shell dpkg-parsechangelog | sed  -n 's/^Source: \(.*\)/\1/p')
+SNAPSHOT=$(shell dpkg-parsechangelog |  sed -n 's/^Version: \(.*\)-[^-]*/\1/p')
+SHA1=$(lastword $(subst ~g, ,$(SNAPSHOT)))
+ORIG=${SOURCEPKG}_${SNAPSHOT}.orig.tar.gz
+
+
 # Upstream does funky things with assembly, so we'll have to trust their 
 # compilation settings and override cdbs/dpkg-buildpackage defaults for
 # configure and make
@@ -52,3 +60,11 @@ cleanbuilddir/racket::
 	rm -f debian/mzconfig.h debian/racket-arch.mk
 debian/racket-arch.mk: debian/racket-arch.c
 	touch debian/mzconfig.h && cpp -Isrc -Idebian -o $@ debian/racket-arch.c
+
+describe-current-version:
+	git describe --tags upstream-master | sed 's,^\(snapshot\|upstream\)/*v*,,;s,-,+,;s,-,~,;'
+
+get-orig-source:
+	git archive --format=tar $(SHA1) | gzip -9 > ../$(ORIG)
+
+.PHONY: describe-current-version git-orig-source

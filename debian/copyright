@@ -3,18 +3,6 @@ Fri, 4 Feb 2000 22:10:09 -0700.
 
 It was downloaded from http://download.plt-scheme.org/drscheme/
 
-Upstream Authors/Copyright:
-	- Main code: © 2000-2010 PLT Scheme Inc.
-	- Embedded copy of GMP: © 1991-2000 Free Software Foundation
-
-Copyright: 
-Everything in this package is licensed under the GNU Lesser General Public
-License (LGPL) v2.1 or later, except for the the R5RS and SRFI docs, of which
-the copyrights follow below. The text of the LGPL is not included in this file,
-because there is a verbatim copy in /usr/share/common-licenses/LGPL on Debian
-systems.
-
--------------------------------
 
 readline collection notes:
 GNU's readline library is covered by the GPL (found at
@@ -24,31 +12,90 @@ default; you should explicitly enable it if you want to.  Also, be aware that
 if you write code that uses this library, it will make your code link to the
 readline library when invoked, with the usual GPL implications.
 
--------------------------------
+Files: *
+Copyright: © 1995-2011 PLT Scheme Inc.
+Portions Copyright: © 1994 Brent Benson
+Licence: Lgpl 2.1+
+    Racket is distributed under the GNU Lesser General Public License
+    (LGPL).  This means that you can link Racket into proprietary
+    applications, provided you follow the rules stated in the LGPL.  You can
+    also modify Racket; if you distribute a modified version, you must
+    distribute it under the terms of the LGPL, which in particular means
+    that you must release the source code for the modified software.  See
+    doc/release-notes/COPYING.LIB for more information.
 
-SRFI license:
+Files: src/racket/src/gmp/*
+Copyright: © 1992, 1993, 1994, 1996  Free Software Foundation, Inc.
+License: LGPL2.1+
 
-	Permission is hereby granted, free of charge, to any person obtaining a
-	copy of this software and associated documentation files (the "Software"),
-	to deal in the Software without restriction, including without limitation
-	the rights to use, copy, modify, merge, publish, distribute, sublicense,
-	and/or sell copies of the Software, and to permit persons to whom the
-	Software is furnished to do so, subject to the following conditions:
+Files: src/racket/src/unbwind/*
+Copyright: © 2003-2005 Hewlett-Packard Development Company, L.P.
+License: MIT
+  see below for license text
 
-	The above copyright notice and this permission notice shall be included in
-	all copies or substantial portions of the Software.
+Files: src/racket/src/lightning/*
+Copyright: © 1994, 1995, 1996, 1999, 2000, 2001, 2002  Free Software Foundation, Inc.
+License: LGPL2.1+
 
-	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-	AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-	FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-	DEALINGS IN THE SOFTWARE.
+File: collects/gui-debugger/icons/clanbomber-*.png, collects/icons/stop*.png
+Copyright: © 2008 Everaldo Coelho
+License: LGPL2.1+
 
--------------------------------
+File: collects/icons/save.png
+Copyright: ©2008  David Vignoni
 
-R5RS license:
+Files: src/racket/gc/*
+Copyright: 1988, 1989 Hans-J. Boehm, Alan J. Demers
+Copyright: (c) 1991-1995 by Xerox Corporation.  All rights reserved.
+Copyright: (c) 1996-1999 by Silicon Graphics.  All rights reserved.
+Copyright: (c) 1999-2001 by Hewlett-Packard. All rights reserved.
+License:
+    THIS MATERIAL IS PROVIDED AS IS, WITH ABSOLUTELY NO WARRANTY EXPRESSED
+    OR IMPLIED.  ANY USE IS AT YOUR OWN RISK.
+
+    Permission is hereby granted to use or copy this program
+    for any purpose,  provided the above notices are retained on all copies.
+    Permission to modify the code and to distribute modified code is granted,
+    provided the above notices are retained, and a notice that the code was
+    modified is included with the above copyright notice.
+
+Files: src/racket/gc/libatomic_ops/*
+Copyright: © 1991-2005 Hewlett-Packard Development Company, and others.
+License: MIT
+
+Files: src/racket/gc/libatomic_ops/sysdeps/{armcc,gcc}/*
+Copyright: © 1991-2005 Hewlett-Packard Development Company, and others.
+License: MIT-like
+    THIS MATERIAL IS PROVIDED AS IS, WITH ABSOLUTELY NO WARRANTY EXPRESSED
+    OR IMPLIED.  ANY USE IS AT YOUR OWN RISK.
+
+    Permission is hereby granted to use or copy this program
+    for any purpose,  provided the above notices are retained on all copies.
+    Permission to modify the code and to distribute modified code is granted,
+    provided the above notices are retained, and a notice that the code was
+    modified is included with the above copyright notice.
+
+Files: src/racket/gc/libatomic_ops/{tests/*, src/atomic_ops_malloc.[ch], src/atomic_ops_stack.[ch]}
+Copyright: © 2003-2005 Hewlett-Packard Company.
+License: GPL2+
+    This file may be redistributed and/or modified under the
+    terms of the GNU General Public License as published by the Free Software
+    Foundation; either version 2, or (at your option) any later version.
+
+    It is distributed in the hope that it will be useful, but WITHOUT ANY
+    WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+    FOR A PARTICULAR PURPOSE.  See the GNU General Public License in the
+    file doc/COPYING for more details.
+
+These files don't seem to be compiled/linked to by racket.
+
+Files: src/foreign/libffi/*
+Copyright: © 1996-2009  Anthony Green, Red Hat, Inc and others.  
+License: MIT
+
+Files: doc/r5rs-std/*
+Copyright: © 1998 William D Clinger, Richard Kelsey, Jonathan A Rees.
+License:
 
     We intend this report to belong to the entire Scheme community,
     and so we grant permission to copy it in whole or in part without
@@ -82,4 +129,352 @@ On Jul  6, Jonathan A Rees wrote:
 > yes.
 > 
 > Jonathan
+
+
+Files: doc/srfi-std/*
+Copyright: SRFI contributors
+License: MIT
+
+Files: 2htdp/private/csv/csv.rkt
+Copyright: ©  2004-2009 Neil Van Dyke
+License: LGPL3+
+
+Files: collects/file/sha1.rkt
+Copyright: © 2006 Eric Knauel
+License: LGPL2.1+ (relicensed from BSD3)
+
+Files: collects/mred/private/wx/common/rbtree.rkt
+Copyright: © 2000 Jean-Christophe FILLIATRE
+Copyright: © 2006-2010 PLT Scheme Inc.
+License: LGPL2.1+
+	   
+Files: collects/net/*
+Copyright: 2001-2004 by Francisco Solsona, Noel Walsh
+License: LGPL2.1+
+
+Files: collects/r6rs/records-{core|explicit}
+Copyright: © 2005 Michael Sperber 
+License: MIT
+
+Files: racket/draw/private/lzw.rkt
+Copyright: © 2006 Zachary Beane
+License: MIT
+
+Files: collects/rackunit/*
+Copyright: © 2005 by Noel Welsh. 
+License: LGPL2.1+
+
+Files: rnrs/records/syntactic-6.rkt
+Copyright: © 2005 Michael Sperber
+License: MIT 
+
+Files: collects/sgl/sgl.rkt
+Copyright: ©  2003-2011  Scott Owens
+License: LGPL 2.1+
+
+Files: collects/sgl/examples/gears.rkt
+Copyright: ©  2003-2011  Scott Owens, © 1999-2001
+License: 
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the
+    "Software"), to deal in the Software without restriction, including
+    without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to
+    permit persons to whom the Software is furnished to do so, subject to
+    the following conditions:
+
+    The above copyright notice and this permission notice shall be included
+    in all copies or substantial portions of the Software.
+
+Files: collects/srfi/*
+Copyright: (c) 1998, 1999 by Olin Shivers, 2002 Noel Walsh
+License: LGPL 2.1+
+
+Files: collects/srfi/41/derived.rkt
+Copyright (C) 2007 by Philip L. Bewig of Saint Louis, Missouri, USA.  
+License: MIT
+
+Files: collects/srfi/60/60.rkt
+Copyright: (C) 2005 David Van Horn
+Copyright: (C) 1991, 1993, 2001, 2003, 2005 Aubrey Jaffer
+License: SRFI
+
+Files: collects/srfi/63/63.rkt
+Copyright: © 2007-2011 Chongkai Zhu, © 2001, 2003, 2005, 2006 Aubrey Jaffer
+License: SRFI
+
+Files: collects/srfi/64/testing.rkt
+Copyright: © 2005, 2006 Per Bothner
+License: MIT
+
+Files: collects/srfi/67/compare-reference.scm
+Copyright: © 2005 Sebastian Egner and Jens Axel S{\o}gaard.
+License: MIT
+
+Files: srfi/74/blob.scm
+Copyright: © 2005 Michael Sperber 
+License: MIT
+
+Files: collects/srfi/78/{check-reference.scm, examples-78.scm}
+Copyright: © 2005-2006 Sebastian Egner.
+License: MIT
+
+Files: collects/srfi/98.rkt
+Copyright: © 2009-2011 Derick Eddington.  All rights reserved.
+License: MIT
+
+Files: collects/srfi/optional.rkt
+Copyright: © 1993-1999 Richard Kelsey and Jonathan Rees, © 1994-1999 by Olin Shivers and Brian D. Carlstrom.
+License: BSD3
+
+Files: collects/swindle/*
+Copyright: © 1998-2011 Eli Barzilay (eli@barzilay.org)
+License: LGPL 2.1+
+
+Files: collects/swindle/tiny-clos.rkt
+Copyright: © 1992 Xerox Corporation, © 1998-2011 Eli Barzilay (eli@barzilay.org)
+License: LGPL2.1+, and the following:
+    Use, reproduction, and preparation of derivative works are permitted.  Any
+    copy of this software or of any derivative work must include the above
+    copyright notice of Xerox Corporation, this paragraph and the one after it.
+    Any distribution of this software or derivative works must comply with all
+    applicable United States export control laws.
+    This software is made available AS IS, and XEROX CORPORATION DISCLAIMS ALL
+    WARRANTIES, EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION THE IMPLIED
+    WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE, AND
+    NOTWITHSTANDING ANY OTHER PROVISION CONTAINED HEREIN, ANY LIABILITY FOR
+    DAMAGES RESULTING FROM THE SOFTWARE OR ITS USE IS EXPRESSLY DISCLAIMED,
+    WHETHER ARISING IN CONTRACT, TORT (INCLUDING NEGLIGENCE) OR STRICT
+    LIABILITY, EVEN IF XEROX CORPORATION IS ADVISED OF THE POSSIBILITY OF SUCH
+    DAMAGES.
+
+Files: collects/tests/rackunit/*, tests/srfi/1/*
+Copyright: © 2005 by Noel Welsh. 
+License: LGPL2.1+
+
+Files: collects/tests/srfi/13/string-test.rkt, 
+       collects/tests/srfi/2/and-let-test.rkt,
+       collects/tests/srfi/14/char-set-test.rkt	      
+Copyright: © 2002 by Francisco Solsona.
+License: LGPL 2.1+
+
+
+License: SRFI
+    Permission to copy this software, to modify it, to redistribute it,
+    to distribute modified versions, and to use it for any purpose is
+    granted, subject to the following restrictions and understandings.
+
+    1.  Any copy made of this software must include this copyright notice
+    in full.
+
+    2.  I have made no warranty or representation that the operation of
+    this software will be error-free, and I am under no obligation to
+    provide any services, by way of maintenance, update, or otherwise.
+
+    3.  In conjunction with products arising from the use of this
+    material, there shall be no use of my name in any advertising,
+    promotional, or sales literature without prior written consent in
+    each case.
+
+
+License: MIT
+    Permission is hereby granted, free of charge, to any person obtaining
+    a copy of this software and associated documentation files (the
+    "Software"), to deal in the Software without restriction, including
+    without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to
+    permit persons to whom the Software is furnished to do so, subject to
+    the following conditions:
+
+    The above copyright notice and this permission notice shall be
+    included in all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+    LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+    OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+    WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+License: BSD3
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in the
+       documentation and/or other materials provided with the distribution.
+    3. The name of the authors may not be used to endorse or promote products
+       derived from this software without specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
+    IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+    OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+    IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+    INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+    NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+    THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PROBLEMATIC FILES:
+-----------------
+
+Files: collects/file/md5.rkt
+Copyright: © 2002, Jens Axel Soegaard
+Copyright: © 2005-2011, PLT Scheme Inc.
+License:
+    Permission to copy this software, in whole or in part, to use this software
+    for any lawful purpose, and to redistribute this software is hereby
+    granted.
+
+
+Files: doc/r6rs-std/*
+Copyright: © 2007 William D Clinger, Richard Kelsey, Jonathan A Rees.
+License:
+
+    We intend this report to belong to the entire Scheme community,
+    and so we grant permission to copy it in whole or in part without
+    fee. In particular, we encourage implementors of Scheme to use
+    this report as a starting point for manuals and other
+    documentation, modifying it as necessary.
+
+(this license occurs elsewhere in the archive mind you, as these docs
+are their own package)
+
+
+Files: collects/mzlib/deflate.rkt: 
+Copyright © 1992-1993 Jean-loup Gailly
+License:
+Translated from C file with license
+/* deflate.c -- compress data using the deflation algorithm
+ * Copyright (C) 1992-1993 Jean-loup Gailly
+ * This is free software; you can redistribute it and/or modify it under the
+ * terms of the GNU General Public License, see the file COPYING.
+ */
+
+(this is only problematic in the sense it might make the resulting code GPL)
+ 
+Files: collects/racklog/*
+Copyright:  © 1993-2001, Dorai Sitaram.
+License:
+    Permission to distribute and use this work for any
+    purpose is hereby granted provided this copyright
+    notice is included in the copy.  This work is provided
+    as is, with no warranty of any kind.
+
+Files: scribble/jfp/*
+Copyright: 2001 Cambridge University Press
+License:
+    This software may only be used in the preparation of journal articles
+    or books or parts of books to be published by Cambridge University Press.
+    Any other use constitutes an infringement of copyright.
+
+Files: collects/srfi/13/string.rkt
+Copyright: © 1988-1994 Massachusetts Institute of Technology.
+License (1):
+    MIT Scheme copyright terms
+    ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    This material was developed by the Scheme project at the Massachusetts
+    Institute of Technology, Department of Electrical Engineering and
+    Computer Science.  Permission to copy and modify this software, to
+    redistribute either the original software or a modified version, and
+    to use this software for any purpose is granted, subject to the
+    following restrictions and understandings.
+
+    1. Any copy made of this software must include this copyright notice
+    in full.
+
+    2. Users of this software agree to make their best efforts (a) to
+    return to the MIT Scheme project any improvements or extensions that
+    they make, so that these may be included in future releases; and (b)
+    to inform MIT of noteworthy uses of this software.
+
+    3. All materials developed as a consequence of the use of this
+    software shall duly acknowledge such use, in accordance with the usual
+    standards of acknowledging credit in academic research.
+
+    4. MIT has made no warrantee or representation that the operation of
+    this software will be error-free, and MIT is under no obligation to
+    provide any services, by way of maintenance, update, or otherwise.
+
+    5. In conjunction with products arising from the use of this material,
+    there shall be no use of the name of the Massachusetts Institute of
+    Technology nor of any adaptation thereof in any advertising,
+    promotional, or sales literature without prior written consent from
+    MIT in each case.
+License(2): BSD3
+
+Problem: does racket say "includes MIT stuff" somewhere in the docs?
+
+Files: collects/srfi/19/time.rkt
+Copyright: (C) I/NET, Inc. (2000, 2002, 2003). 
+Copyright: (C) Neodesic Corporation (2000). All Rights Reserved. 
+License:
+    This document and translations of it may be copied and furnished to others, 
+    and derivative works that comment on or otherwise explain it or assist in its 
+    implementation may be prepared, copied, published and distributed, in whole or 
+    in part, without restriction of any kind, provided that the above copyright 
+    notice and this paragraph are included on all such copies and derivative works. 
+    However, this document itself may not be modified in any way, such as by 
+    removing the copyright notice or references to the Scheme Request For 
+    Implementation process or editors, except as needed for the purpose of 
+    developing SRFIs in which case the procedures for copyrights defined in the SRFI 
+    process must be followed, or as required to translate it into languages other 
+    than English. 
+
+    The limited permissions granted above are perpetual and will not be revoked 
+    by the authors or their successors or assigns. 
+
+    This document and the information contained herein is provided on an "AS IS" 
+    basis and THE AUTHOR AND THE SRFI EDITORS DISCLAIM ALL WARRANTIES, EXPRESS OR 
+    IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTY THAT THE USE OF THE 
+    INFORMATION HEREIN WILL NOT INFRINGE ANY RIGHTS OR ANY IMPLIED WARRANTIES OF 
+    MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE. 
+
+Problem: I think the file in question is a derived work, but the
+license is a bit bizarre.
+
+Files: collects/tests/racket/benchmarks/common/psyntax-input.txt
+Copyright: © 1992-2002 Cadence Research Systems
+License: 
+    Permission to copy this software, in whole or in part, to use this
+    software for any lawful purpose, and to redistribute this software
+    is granted subject to the restriction that all copies made of this
+    software must include this copyright notice in full.  This software
+    is provided AS IS, with NO WARRANTY, EITHER EXPRESS OR IMPLIED,
+    INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY
+    OR FITNESS FOR ANY PARTICULAR PURPOSE.  IN NO EVENT SHALL THE
+    AUTHORS BE LIABLE FOR CONSEQUENTIAL OR INCIDENTAL DAMAGES OF ANY
+    NATURE WHATSOEVER.
+
+Problem: no obvious permission to modify
+
+
+Files: collects/tests/xml/clark-tests/readme.html:
+    Copyright (C) 1998 James Clark.  All rights reserved.  Permission is
+    granted to copy and modify this collection in any way for internal use
+    within a company or organization.  Permission is granted to
+    redistribute the file <code>xmltest.zip</code> containing this
+    collection to third parties provided that no modifications of any kind
+    are made to this file.  Note that permission to distribute the
+    collection in any other form is not granted.
+
+Problem: no permission to distribute derivative works.
+
+Files with copyright statements, but without license statements:
+
+collects/scribble/sigplan/sigplanconf.cls:    no license
+collects/srfi/17/set.rkt:;;; Copyright (C) Per Bothner (1999, 2000). 
+collects/srfi/43/vector-lib.rkt:;;; Copyright (C) 2005-2011 by Chongkai Zhu.
+collects/tests/racket/benchmarks/common/maze.sch:;;; Copyright: © 1995 by Olin Shivers.
+collects/tests/racket/benchmarks/common/maze2.sch:;;; Copyright: © 1995 by Olin Shivers.
+collects/tests/racket/benchmarks/common/typed/maze2.rktl:;;; Copyright: © 1995 by Olin Shivers.
+collects/tests/racket/testing.rktl: Copyright: © 1991, 1992, 1993, 1994 Aubrey Jaffer.
+collects/tests/utils/mz-testing.rkt: Copyright: © 1991, 1992, 1993, 1994 Aubrey Jaffer.
+
+
 

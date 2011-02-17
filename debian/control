@@ -5,8 +5,8 @@ Maintainer: Ari Pollak <ari@debian.org>
 Uploaders: James Vega <jamessan@debian.org>, David Bremner <bremner@debian.org>
 Standards-Version: 3.8.0
 Build-Depends: cdbs, quilt, debhelper (>= 7.0.0), patchutils,
- libfreetype6-dev, libjpeg-dev, libpng12-dev, libssl-dev, libxaw7-dev,
- xbitmaps, libxft-dev, libgl1-mesa-dev | libgl-dev,
+ libfreetype6-dev, libjpeg-dev, libpango1.0-dev, libpng12-dev, libssl-dev, 
+ libxaw7-dev, xbitmaps, libxft-dev, libgl1-mesa-dev | libgl-dev,
  libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev
 Vcs-Git: git://git.debian.org/git/collab-maint/racket
 Vcs-Browser: http://git.debian.org/?p=collab-maint/racket.git;a=summary
@@ -61,7 +61,7 @@ Description: extensible programming language in the scheme family (documentation
 
 Package: plt-scheme
 Architecture: all
-Depends: racket
+Depends: racket, ${misc:Depends}
 Description: Racket Programming Environment (transitional package)
  Racket (previously PLT Scheme) is an innovative programming language
  that builds on a rich academic and practical tradition.
@@ -84,7 +84,7 @@ Description: Racket Programming Environment (transitional package)
 Package: plt-scheme-doc
 Section: doc
 Architecture: all
-Depends: racket-doc
+Depends: racket-doc, ${misc:Depends}
 Description: PLT Scheme Documentation (transitional package)
  This package includes all of the documentation for PLT Scheme.
  .
