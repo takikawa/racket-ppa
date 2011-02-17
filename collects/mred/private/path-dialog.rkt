@@ -1,7 +1,8 @@
 (module path-dialog mzscheme
   (require mzlib/class mzlib/list mzlib/string mzlib/file
 	   (prefix wx: "kernel.ss")
-	   (prefix wx: "wxme/style.ss")
+	   (prefix wx: racket/snip)
+           racket/snip/private/prefs
 	   "helper.ss" "mrtop.ss" "mritem.ss" "mrpanel.ss" "mrtextfield.ss"
            "messagebox.ss" "mrmenu.ss" (only scheme/base compose))
   (provide path-dialog%)
@@ -199,7 +200,7 @@
                       (if put? "Save File" "Open File"))))
 
       (define size
-        (let ([s (get-preference 'mred:path-dialog:size (lambda () #f))])
+        (let ([s (get-preference* 'mred:path-dialog:size (lambda () #f))])
           (or (and (list? s) (= 2 (length s)) (andmap integer? s) s)
               '(300 300))))
 
@@ -521,7 +522,7 @@
         (let ([new (list width height)])
           (unless (equal? new size)
             (set! size new)
-            (put-preferences '(mred:path-dialog:size) (list size)))))
+            (put-preferences* '(mred:path-dialog:size) (list size)))))
 
       ;;-----------------------------------------------------------------------
       ;; Delayed Filename Completion
@@ -685,23 +686,29 @@
           (make-object message% (protect& message) p)))
 
       (define dir-text
-        (let ([c (class (if win? combo-field% text-field%) (super-new)
+        (let* ([c%
+                (if win?
+                    (class combo-field%
+                      (super-new [choices '()])
+                      (define/override (on-popup e)
+                        (let ([m (send this get-menu)])
+                          (for-each (lambda (i) (send i delete))
+                                    (send m get-items))
+                          (for-each (lambda (r)
+                                      (define l (path->string r))
+                                      (make-object menu-item% l m
+                                                   (lambda _
+                                                     (enter-text r)
+                                                     (do-enter))))
+                                    (filesystem-root-list)))))
+                    text-field%)]
+               [c (class c%
+                    (super-new)
                     (define editor (send this get-editor))
                     (define/public (lock)   (send editor lock #t))
                     (define/public (unlock) (send editor lock #f))
-                    (when win?
-                      (let ([m (send this get-menu)])
-                        (for-each (lambda (r)
-                                    (define l (path->string r))
-                                    (make-object menu-item% l m
-                                                 (lambda _
-                                                   (enter-text r)
-                                                   (do-enter))))
-                                  (filesystem-root-list))))
                     (lock))])
-          (if win?
-            (new c [label #f] [parent this] [init-value ""] [choices '()])
-            (new c [label #f] [parent this] [init-value ""]))))
+          (new c [label #f] [parent this] [init-value ""])))
 
       (define path-list
         (new (class list-box%

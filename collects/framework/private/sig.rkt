@@ -59,8 +59,9 @@
      horizontal-dragable-mixin
      horizontal-dragable%))
   (define-signature panel^ extends panel-class^
-    ())
-  
+    (dragable-container-size
+     dragable-place-children))
+
   (define-signature application-class^
     ())
   (define-signature application^ extends application-class^
@@ -70,6 +71,7 @@
     ())
   (define-signature preferences^ extends preferences-class^
     (put-preferences/gui
+     get-preference/gui
      add-panel
      add-font-panel
      
@@ -163,6 +165,7 @@
   (define-signature text-class^
     (basic<%>
      first-line<%>
+     line-numbers<%>
      foreground-color<%>
      hide-caret/selection<%>
      nbsp->space<%>
@@ -199,6 +202,7 @@
      
      basic-mixin
      first-line-mixin
+     line-numbers-mixin
      foreground-color-mixin
      hide-caret/selection-mixin
      nbsp->space-mixin
@@ -448,6 +452,8 @@
      rgb-color-distance
      rgb->xyz
      xyz->rgb))
+  
+  (define-signature early-init^ ())
   
   (define-signature framework^
     ((open (prefix application: application^))

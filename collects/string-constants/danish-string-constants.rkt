@@ -132,8 +132,7 @@ please adhere to these guidelines:
   (web-materials "Relaterede websites") ;; menu item title
   (tool-web-sites "Tool Web Sites")   ;; menu item title
   (plt-homepage "Racket")
-  (how-to-use-scheme "How to Use Scheme") ;; title of a book.
-  (teachscheme!-homepage "TeachScheme!") ;; probably this should be a `word' in all languages
+  (pbd-homepage "Program by Design")
   
   ;;; bug report form
   (cancel-bug-report? "Fortryd afsendelse af fejlrapport?")
@@ -157,7 +156,7 @@ please adhere to these guidelines:
   (bug-report-synthesized-information "Indsamlet information")  ;; dialog title
   (bug-report-show-synthesized-info "Vis indsamlet information")
   (bug-report-submit "Send")
-  (bug-report-submit-menu-item "Send fejlrapport") ;; in Help Menu (drs & help desk)
+  (bug-report-submit-menu-item "Send fejlrapport...") ;; in Help Menu (drs & help desk)
   (error-sending-bug-report "Fejl under afsendelse af fejlrapport")
   (error-sending-bug-report-expln "Der opstod en fejl ved afsendelse af fejlrapporten. Hvis din internetforbindelse ellers er velfungerende, besøg venligst:\n\n    http://bugs.racket-lang.org/\n\nog send fejlrapporten ved hjælp af vores online fejlrapporteringsside. Vi er kede af besværet.\n\nFejlmeddelelsen er:\n~a")
   (illegal-bug-report "Ugyldig fejlrapport")
@@ -488,7 +487,7 @@ please adhere to these guidelines:
   (mfs-recur-over-subdirectories "Rekursivt i undermapper")
   (mfs-regexp-filename-filter "Regexp filnavnsfilter")
   (mfs-search-string "Søgestreng")
-  (mfs-drscheme-multi-file-search "DrRacket - Søgning i flere filer") ;; results window and error message title
+  (mfs-drscheme-multi-file-search "Søgning i flere filer - DrRacket") ;; results window and error message title
   (mfs-not-a-dir "\"~a\" er ikke en mappe")
   (mfs-open-file "Åbn fil")
   (mfs-stop-search "Stop søgning")

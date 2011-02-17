@@ -2,12 +2,15 @@
 @(require scribble/manual
           scribble/bnf
           "common.ss"
+          scribble/eval
           (for-label racket/base
                      racket/include
                      racket/contract
                      compiler/cm
                      compiler/cm-accomplice))
 
+@(define cm-eval (make-base-eval))
+@(interaction-eval #:eval cm-eval (require compiler/cm))
 @title[#:tag "make"]{@exec{raco make}: Compiling Source to Bytecode}
 
 The @exec{raco make} command accept filenames for Racket modules to be
@@ -117,7 +120,8 @@ and files as @exec{raco make}, so the two tools can be used together.
 implements the compilation and dependency management used by
 @exec{raco make} and @exec{raco setup}.}
 
-@defproc[(make-compilation-manager-load/use-compiled-handler)
+@defproc[(make-compilation-manager-load/use-compiled-handler 
+          [delete-zos-when-rkt-file-does-not-exist? any/c #f])
          (path? (or/c symbol? false/c) . -> . any)]{
 
 Returns a procedure suitable as a value for the
@@ -199,6 +203,10 @@ consistent with the caching of the default module name resolver (see
 If @racket[use-compiled-file-paths] contains an empty list when
 @racket[make-compilation-manager-load/use-compiled-handler] is called,
 then @racket[exn:fail:contract] exception is raised.
+
+If the @racket[delete-zos-when-rkt-file-does-not-exist?] argument is a true
+value, then the returned handler will delete @filepath{.zo} files
+when there is no corresponding original source file.
 
 @emph{Do not} install the result of
 @racket[make-compilation-manager-load/use-compiled-handler] when the
@@ -303,8 +311,49 @@ returns, @racket[with-compile-output] renames @racket[tmp-path] to
 exception.  Breaks are managed so that the @racket[port] is reliably
 closed and the @racket[tmp-path] file is reliably deleted if there's a
 break. The result of @racket[proc] is the result of the
-@racket[with-compile-output] call.}
+@racket[with-compile-output] call.
 
+Windows prevents programs from overwriting files that are open. As a result,
+@racket[with-compile-output] calls to @racket[rename-file-or-directory] will
+fail if the destination file argument is an open file. Windows, however, does 
+allow you to rename an open file. To avoid overwriting open files
+windows, @racket[with-compile-output] creates a second temporary file
+@racket[tmp-path2], renames @racket[p] to @racket[tmp-path2], renames
+@racket[tmp-path] to @racket[p], and finally deletes @racket[tmp-path2].}
+
+@defparam[parallel-lock-client proc ([command (or/c 'lock 'unlock)] [zo-path bytes?] . -> . boolean?)]{
+
+Holds the parallel compilation lock client, which prevents compilation races
+between parallel builders.  The @racket[proc] function takes a command argument
+of either @racket['lock] or @racket['unlock].  The @racket[zo-path] argument
+specifies the path of the zo for which compilation should be locked.
+
+When the @racket[proc] @racket['lock] command returns @racket[#t], the current
+builder has obtained the lock for @racket[zo-path].
+Once compilation of @racket[zo-path] is complete, the builder process must
+release the lock by calling @racket[proc] @racket['unlock] with the exact same
+@racket[zo-path].
+
+When the @racket[proc] @racket['lock] command returns @racket[#f], another
+parallel builder obtained the lock first and has already compiled the zo.  The
+parallel builder should continue without compiling @racket[zo-path].  
+
+@examples[
+  #:eval cm-eval
+(let* ([lc (parallel-lock-client)]
+       [zo-name  #"collects/racket/compiled/draw_rkt.zo"]
+       [locked? (and lc (lc 'lock zo-name))]
+       [ok-to-compile? (or (not lc) locked?)])
+  (dynamic-wind
+    (lambda () (void))
+    (lambda ()
+      (when ok-to-compile?
+        (printf "Do compile here ...\n")))
+    (lambda ()
+     (when locked?
+       (lc 'unlock zo-name)))))
+]
+}
 @; ----------------------------------------------------------------------
 
 @section{Compilation Manager Hook for Syntax Transformers}
@@ -334,7 +383,7 @@ path of an included file as it expands an @racket[include] form.}
 The @DFlag{no-deps} mode for @exec{raco make} is an improverished
 form of the compilation, because it does not track import
 dependencies. It does, however, support compilation of non-module
-source in an namespace that iniitially imports @racketmodname[scheme].
+source in an namespace that initially imports @racketmodname[scheme].
 
 Outside of a module, top-level @racket[define-syntaxes],
 @racket[module], @racket[#%require],
@@ -347,7 +396,7 @@ For example, when compiling the file containing
 
 @racketblock[
 (require racket/class)
-(define f (class% object% (super-new)))
+(define f (class object% (super-new)))
 ]
 
 the @racket[class] form from the @racketmodname[racket/class] library
@@ -373,3 +422,5 @@ compiling the source files specified on the command line.
 
 In general, a better solution is to put all code to compile into a
 module and use @exec{raco make} in its default mode.
+
+@(close-eval cm-eval)

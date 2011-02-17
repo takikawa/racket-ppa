@@ -42,8 +42,7 @@
  (web-materials "Sitios de Web Relacionados")
  (tool-web-sites "Sitios de Web de Herramientas")   ;; menu item title
  (plt-homepage "Racket")
- (how-to-use-scheme "Cómo Usar Scheme")
- (teachscheme!-homepage "TeachScheme!")
+ (pbd-homepage "Program by Design")
  
  ;;; bug report form
  (cancel-bug-report? "¿Cancelar el reporte de problemas?")
@@ -66,7 +65,7 @@
  (bug-report-synthesized-information "Información sintetizada")  ;; dialog title
  (bug-report-show-synthesized-info "Muestra información resumida")
  (bug-report-submit "Enviar")
- (bug-report-submit-menu-item "Enviar reporte de problemas") ;; in Help Menu (drs & help desk)
+ (bug-report-submit-menu-item "Enviar reporte de problemas...") ;; in Help Menu (drs & help desk)
  (error-sending-bug-report "Error al enviar el reporte de problemas")
  (error-sending-bug-report-expln "Un error ocurrió mientras enviaba éste reporte de problemas.  Si tu conexión a Internet está funcionando bien, por favor visita:\n\n    http://bugs.racket-lang.org/\n\ny envía el reporte de problemas por medio de la forma de web en esea página de WEB. Sentimos mucho las molestias que esto te ocasiona.\n\nEl mensaje de error es:\n~a")
  (illegal-bug-report "Reporte de problemas ilegal")
@@ -381,7 +380,7 @@
  (mfs-recur-over-subdirectories "Recurrir sobre subdirectorios")
  (mfs-regexp-filename-filter "Filtro de nombres de archivo con expresiones regulares")
  (mfs-search-string "Buscar cadena")
- (mfs-drscheme-multi-file-search "DrRacket - Búsqueda Multi Archivo")
+ (mfs-drscheme-multi-file-search "Búsqueda Multi Archivo  - DrRacket")
  (mfs-not-a-dir "\"~a\" no es un directorio")
  (mfs-open-file "Abrir Archivo")
  (mfs-stop-search "Detener Búsqueda")

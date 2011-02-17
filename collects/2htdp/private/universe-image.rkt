@@ -1,10 +1,18 @@
-#lang scheme/base
+#lang racket/base
 (require (prefix-in 2: 2htdp/image)
+         (prefix-in 2-core: mrlib/image-core)
          (prefix-in 1: htdp/image)
+         racket/class
          htdp/error)
 
 (provide image? scene? image-width image-height text 2:image?
-         check-image check-scene check-scene-result)
+         check-image check-scene check-scene-result
+         disable-cache)
+
+(define (disable-cache x)
+  (if (is-a? x 2-core:image%)
+      (2-core:un/cache-image x #f)
+      x))
 
 (define (scene? x)
   ;; be sure to check 2:image? first so that

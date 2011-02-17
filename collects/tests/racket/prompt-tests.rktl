@@ -855,11 +855,16 @@
                        (lambda ()
                          (k (lambda () (continuation-mark-set-first #f 'x #f catch-tag))))
                        catch-tag)
-                 (test 8
+                 (test #f
                        call-with-continuation-prompt
                        (lambda ()
                          (k (lambda () (continuation-mark-set-first #f 'y #f catch-tag))))
                        catch-tag)
+                 (test (if (eq? catch-tag (default-continuation-prompt-tag)) #f 8)
+                       call-with-continuation-prompt
+                       (lambda ()
+                         (k (lambda () (continuation-mark-set-first #f 'y #f catch-tag))))
+                       (default-continuation-prompt-tag))
                  (test (if blocked?
                            '(17)
                            '(17 18))
@@ -1965,3 +1970,337 @@
             (k (lambda () (abort-current-continuation
                            (default-continuation-prompt-tag)
                            (lambda () 45))))))))
+
+;; ----------------------------------------
+;; Check continuations captured in continuations applied in
+;;  a thread:
+
+(test (void)
+      'simple-thread-transfer
+      (let ([k (call-with-continuation-prompt
+                (lambda ()
+                  (call/cc values)))])
+        (sync (thread (lambda () (k 6))))
+        (void)))
+
+(test (void)
+      'capture-in-transferred-thread
+      (let ([k (call-with-continuation-prompt
+                (lambda ()
+                  (let/ec esc
+                    (call/cc esc)
+                    (call/cc values))))])
+        (sync (thread (lambda () (k 6))))
+        (void)))
+
+(let ()
+  (define sema (make-semaphore 1))
+  (define l null)
+  (define (push v) (semaphore-wait sema) (set! l (cons v l)) (semaphore-post sema))
+  (define (count n)
+    (let loop ([l l])
+      (cond
+       [(null? l) 0]
+       [(equal? (car l) n) (add1 (loop (cdr l)))]
+       [else (loop (cdr l))])))
+  (define (f)
+    (push 1)
+    (call/cc thread)
+    (push 2)
+    (call/cc thread)
+    (push 3))
+  
+  (call-with-continuation-prompt f)
+  (sync (system-idle-evt))
+  (test 1 count 1)
+  (test 2 count 2)
+  (test 4 count 3))
+
+;; ----------------------------------------
+;; Test genearted by a random tester that turns out
+;;  to check meta-continuation continuation-mark lookup
+;;  in a dynamic-wind thunk:
+
+(test 
+ 'exn
+ 'random-dc-test
+ (with-handlers ([exn:fail? (lambda (exn) 'exn)])
+   (let ()
+     (define tag
+       (let ([tags (make-hash)])
+         (λ (v)
+            (hash-ref tags v 
+                      (λ ()
+                         (let ([t (make-continuation-prompt-tag)])
+                           (hash-set! tags v t)
+                           t))))))
+
+     (define-syntax-rule (% tag-val expr handler)
+       (call-with-continuation-prompt 
+        (λ () expr)
+        (let ([v tag-val])
+          (if (let comparable? ([v v])
+                (cond [(procedure? v) #f]
+                      [(list? v) (andmap comparable? v)]
+                      [else #t]))
+              (tag v)
+              (raise-type-error '% "non-procedure" v)))
+        (let ([h handler])
+          (λ (x) (h x)))))
+
+     (define (abort tag-val result) 
+       (abort-current-continuation (tag tag-val) result))
+
+     (define (call/comp proc tag-val) 
+       (call-with-composable-continuation (compose proc force-unary) (tag tag-val)))
+
+     (define (call/cm key val thunk)
+       (with-continuation-mark key val (thunk)))
+
+     (define (current-marks key tag-val)
+       (continuation-mark-set->list 
+        (current-continuation-marks (tag tag-val))
+        key))
+
+     (define ((force-unary f) x) (f x))
+
+     (define (_call/cc proc tag-val)
+       (call/cc (compose proc force-unary) (tag tag-val)))
+
+     (letrec ((CEJ-comp-cont_13 #f)
+              (CEJ-skip-pre?_12 #f)
+              (CEJ-allocated?_11 #f)
+              (s-comp-cont_9 #f)
+              (s-skip-pre?_8 #f)
+              (s-allocated?_7 #f)
+              (N-comp-cont_4 #f)
+              (N-skip-pre?_3 #f)
+              (N-allocated?_2 #f)
+              (handlers-disabled?_0 #f))
+       (%
+        #t
+        ((begin
+           (set! handlers-disabled?_0 #t)
+           ((λ (v_1)
+               (%
+                v_1
+                ((λ (t_5)
+                    (if N-allocated?_2
+                        (begin (if handlers-disabled?_0 #f (set! N-skip-pre?_3 #t)) (N-comp-cont_4 t_5))
+                        (%
+                         1
+                         (dynamic-wind
+                             (λ ()
+                                (if handlers-disabled?_0
+                                    #f
+                                    (if N-allocated?_2
+                                        (if N-skip-pre?_3
+                                            (set! N-skip-pre?_3 #f)
+                                            (begin
+                                              (set! handlers-disabled?_0 #t)
+                                              ((λ (v_6)
+                                                  (% v_6 (_call/cc (λ (k) (abort v_6 k)) v_6) (λ (x) (begin (set! handlers-disabled?_0 #f) x))))
+                                               print)))
+                                        #f)))
+                             (λ () ((call/comp (λ (k) (begin (set! N-comp-cont_4 k) (abort 1 k))) 1)))
+                             (λ () (if handlers-disabled?_0 (set! N-allocated?_2 #t) (if N-allocated?_2 #f (set! N-allocated?_2 #t)))))
+                         (λ (k) (begin (if handlers-disabled?_0 #f (set! N-skip-pre?_3 #t)) (k t_5))))))
+                 (λ ()
+                    ((λ (t_10)
+                        (if s-allocated?_7
+                            (begin (if handlers-disabled?_0 #f (set! s-skip-pre?_8 #t)) (s-comp-cont_9 t_10))
+                            (%
+                             1
+                             (dynamic-wind
+                                 (λ () (if handlers-disabled?_0 #f (if s-allocated?_7 (if s-skip-pre?_8 (set! s-skip-pre?_8 #f) #f) #f)))
+                                 (λ () ((call/comp (λ (k) (begin (set! s-comp-cont_9 k) (abort 1 k))) 1)))
+                                 (λ ()
+                                    (if handlers-disabled?_0 (set! s-allocated?_7 #t) (if s-allocated?_7 #f (set! s-allocated?_7 #t)))))
+                             (λ (k) (begin (if handlers-disabled?_0 #f (set! s-skip-pre?_8 #t)) (k t_10))))))
+                     (λ ()
+                        ((λ (t_14)
+                            (if CEJ-allocated?_11
+                                (begin (if handlers-disabled?_0 #f (set! CEJ-skip-pre?_12 #t)) (CEJ-comp-cont_13 t_14))
+                                (%
+                                 1
+                                 (dynamic-wind
+                                     (λ ()
+                                        (if handlers-disabled?_0
+                                            #f
+                                            (if CEJ-allocated?_11 (if CEJ-skip-pre?_12 (set! CEJ-skip-pre?_12 #f) first) #f)))
+                                     (λ () ((call/comp (λ (k) (begin (set! CEJ-comp-cont_13 k) (abort 1 k))) 1)))
+                                     (λ ()
+                                        (if handlers-disabled?_0
+                                            (set! CEJ-allocated?_11 #t)
+                                            (if CEJ-allocated?_11 call/cm (set! CEJ-allocated?_11 #t)))))
+                                 (λ (k) (begin (if handlers-disabled?_0 #f (set! CEJ-skip-pre?_12 #t)) (k t_14))))))
+                         (λ () (_call/cc (λ (k) (abort v_1 k)) v_1)))))))
+                (λ (x) (begin (set! handlers-disabled?_0 #f) x))))
+            #t))
+         1234)
+        (λ (x) x))))))
+
+;; ----------------------------------------
+;; Test genearted by a random tester that turns out
+;;  to check meta-continuation offsets for dynamic-wind
+;;  frames:
+
+(test
+ 'expected-result
+ 'nested-meta-continuaion-test
+ (let ()
+   (define pt1 (make-continuation-prompt-tag))
+   (define pt3 (make-continuation-prompt-tag))
+
+   (define call/comp call-with-composable-continuation)
+   (define abort abort-current-continuation)
+   (define-syntax-rule (% pt body handler)
+     (call-with-continuation-prompt
+      (lambda () body)
+      pt
+      handler))
+
+   ;; (lambda (f) (f)) 
+   ;; as a composable continuation:
+   (define comp-app
+     (%
+      pt1
+      ((call/comp
+        (λ (k) (abort pt1 k))
+        pt1))
+      (lambda (k) k)))
+
+   ;; (lambda (f) (dynamic-wind void f void))
+   ;; as a composable continuation:
+   (define dw-comp-app
+     (%
+      pt1
+      (dynamic-wind
+          void
+          (λ ()
+             ((call/comp
+               (λ (k) (abort pt1 k))
+               pt1)))
+          void)
+      (lambda (k) k)))
+
+   (%
+    pt3
+    (dw-comp-app
+     (λ ()
+        (%
+         pt1
+         (dynamic-wind
+             void
+             (λ ()
+                ((call/comp
+                  (λ (k) (abort pt1 k))
+                  pt1)))
+             void)
+         (λ (k) 
+            (k ; composable app under two dyn-winds
+             ;;  where the outer dw is in a deeper meta-cont
+             (λ ()
+                (comp-app
+                 (λ () ; at this point, both dws are in a meta-cont
+                    (make-will-executor)
+                    ((%
+                      pt3
+                      (comp-app 
+                       (λ () ;; both dws are in a meta-meta-cont
+                          ;;    as the continuation is captured
+                          (call/cc (λ (k) k) pt3)))
+                      void) ; = id continuation that aborts to pt3;
+                     ;; as the continuation is applied, dws are back to
+                     ;; being in a mere meta-cont, but the continuation
+                     ;; itself will restore a meta-continuation layer
+                     'expected-result)))))))))
+    (λ (x) x))))
+
+;; ----------------------------------------
+;; There's a "is the target prompt still in place?"
+;;  check that should not happen when a composable
+;;  continuation is applied. (Random testing discovered
+;;  an incorrect check.)
+
+(test
+ 12345
+ 'no-prompt-check-on-compose
+ (let ()
+   (define pt1 (make-continuation-prompt-tag))
+
+   (define-syntax-rule (% pt body handler)
+     (call-with-continuation-prompt
+      (lambda () body)
+      pt
+      handler))
+
+   ;; (lambda (v) v)
+   ;; as a composable continuation:
+   (define comp-id
+     (%
+      pt1
+      (call-with-composable-continuation
+       (λ (k) (abort-current-continuation pt1 k))
+       pt1)
+      (lambda (k) k)))
+
+   ((% pt1
+       (dynamic-wind
+           (λ () (comp-id 2))
+           (λ () 
+              ;; As we jump back to this continuation,
+              ;; it's ok that no `pt1' prompt is
+              ;; in place anymore
+              (call-with-composable-continuation
+               (λ (k) (abort-current-continuation
+                       pt1 
+                       k))
+               pt1))
+           (λ () #f))
+       (λ (x) x))
+    12345)))
+
+(test
+ 12345
+ 'no-prompt-post-check-on-compose
+ (let ()
+   (define pt1 (make-continuation-prompt-tag))
+   
+   (define-syntax-rule (% pt body handler)
+     (call-with-continuation-prompt
+      (lambda () body)
+      pt
+      handler))
+
+   ((λ (y-comp-cont_7)
+       ((λ (x-comp-cont_3)
+           ((%
+             pt1
+             (x-comp-cont_3
+              (λ ()
+                 (y-comp-cont_7
+                  (λ () (call-with-composable-continuation
+                         (λ (k) (abort-current-continuation pt1 k))
+                         pt1)))))
+             (λ (x) x))
+            12345))
+        (%
+         pt1
+         (dynamic-wind
+             (λ () (y-comp-cont_7 (λ () #f)))
+             (λ () ((call-with-composable-continuation
+                     (λ (k) (abort-current-continuation pt1 k))
+                     pt1)))
+             (λ () #f))
+         (λ (x) x))))
+    (%
+     pt1
+     (dynamic-wind
+         (λ () #f)
+         (λ () ((call-with-composable-continuation
+                 (λ (k) (abort-current-continuation pt1 k)) 
+                 pt1)))
+         (λ () #f))
+     (λ (x) x)))))
+

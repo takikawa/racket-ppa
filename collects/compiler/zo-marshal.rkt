@@ -44,8 +44,8 @@
   ; calculates what values show up in the compilation top more than once
   ; closures are always included even if they only show up once
   (define (create-symbol-table)
-    (define encountered (make-hash))
-    (define shared (make-hash))
+    (define encountered (make-hasheq))
+    (define shared (make-hasheq))
     (define (encountered? v)
       ((hash-ref encountered v 0) . > . 0))
     (define (encounter! v)
@@ -455,7 +455,7 @@
 
 (define (shareable? v)
   (define never-share-this?
-    (or-pred? v char? maybe-same-as-fixnum? empty? boolean? void? hash? ))
+    (or-pred? v char? maybe-same-as-fixnum? empty? boolean? void? hash?))
   (define always-share-this?
     (or-pred? v closure?))
   (or always-share-this?
@@ -481,8 +481,8 @@
 (define-syntax with-type-trace
   (syntax-rules ()
     [(_ v body ...)
-     (begin body ...)
-     #;(with-continuation-mark 'zo (typeof v)
+     #;(begin body ...)
+     (with-continuation-mark 'zo (typeof v)
        (begin0 (begin body ...) (void)))]))
 
 (define (out-anything v out)
@@ -860,7 +860,8 @@
         (out-byte CPT_ESCAPE out)
         (define bstr (get-output-bytes s))
         (out-number (bytes-length bstr) out)
-        (out-bytes bstr out)])))))
+        (out-bytes bstr out)]
+       [else (error 'out-anything "~s" (current-type-trace))])))))
 
 (define-struct module-decl (content))
 

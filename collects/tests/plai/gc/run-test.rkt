@@ -52,4 +52,15 @@
 (bad (heap-loc head) 62 47 "at line 19")
 
 END
+ 
+  (capture-output (test-mutator (build-path here "other-mutators" "begin.rkt")))
+ =>
+ #<<END
+Value at location 2:
+#t
+
+END
+ 
+ (test-mutator (build-path here "other-mutators" "quote.rkt"))
+ =error> "alloc: out of space"
  )

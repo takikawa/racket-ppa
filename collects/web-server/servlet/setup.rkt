@@ -11,6 +11,7 @@
          web-server/http
          web-server/servlet/web
          web-server/configuration/namespace
+         web-server/servlet/servlet-structs
          web-server/private/web-server-structs
          web-server/private/servlet
          web-server/private/util)
@@ -61,15 +62,17 @@
                   (values instance-id
                           (custodian-box-value ((manager-continuation-lookup manager) instance-id k-id salt)))])]
            [else
-            (values ((manager-create-instance manager) (exit-handler))
+            (define eh (exit-handler))
+            (values ((manager-create-instance manager) (λ () (eh #f)))
                     start)]))
        
        (parameterize ([current-servlet-instance-id instance-id])
          (handler req))))))
 
 (define (make-stateless.servlet directory stuffer manager start)
+  (define eh (exit-handler))
   (define instance-id
-    ((manager-create-instance manager) (exit-handler)))
+    ((manager-create-instance manager) (λ () (eh #f))))
   (define ses 
     (make-stateless-servlet
      (current-custodian) (current-namespace)
@@ -111,9 +114,9 @@
           servlet-module-specs
           lang-module-specs))
 (provide/contract
- [make-v1.servlet (path-string? integer? (request? . -> . response/c) . -> . servlet?)]
- [make-v2.servlet (path-string? manager? (request? . -> . response/c) . -> . servlet?)]
- [make-stateless.servlet (path-string? (stuffer/c serializable? bytes?) manager? (request? . -> . response/c) . -> . servlet?)]
+ [make-v1.servlet (path-string? integer? (request? . -> . can-be-response?) . -> . servlet?)]
+ [make-v2.servlet (path-string? manager? (request? . -> . can-be-response?) . -> . servlet?)]
+ [make-stateless.servlet (path-string? (stuffer/c serializable? bytes?) manager? (request? . -> . can-be-response?) . -> . servlet?)]
  [default-module-specs (listof (or/c resolved-module-path? module-path?))])
 
 (define (make-default-path->servlet #:make-servlet-namespace [make-servlet-namespace (make-make-servlet-namespace)]
@@ -143,13 +146,13 @@
                                          (dynamic-require module-name 'timeout)
                                          pos-blame neg-blame
                                          "timeout" loc)]
-                      [start (contract (request? . -> . response/c)
+                      [start (contract (request? . -> . can-be-response?)
                                        (dynamic-require module-name 'start)
                                        pos-blame neg-blame
                                        "start" loc)])
                   (make-v1.servlet (directory-part a-path) timeout start))]
                [(v2)
-                (let ([start (contract (request? . -> . response/c)
+                (let ([start (contract (request? . -> . can-be-response?)
                                        (dynamic-require module-name 'start)
                                        pos-blame neg-blame
                                        "start" loc)]
@@ -159,7 +162,7 @@
                                          "manager" loc)])
                   (make-v2.servlet (directory-part a-path) manager start))]
                [(stateless)
-                (let ([start (contract (request? . -> . response/c)
+                (let ([start (contract (request? . -> . can-be-response?)
                                        (dynamic-require module-name 'start)
                                        pos-blame neg-blame
                                        "start" loc)]
@@ -176,7 +179,7 @@
           [else
            (make-v1.servlet (directory-part a-path) timeouts-default-servlet
                             (v0.response->v1.lambda 
-                             (contract response/c s
+                             (contract response? (response/xexpr s)
                                        pos-blame neg-blame
                                        path-string loc)
                              a-path))])))))

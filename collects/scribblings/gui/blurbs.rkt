@@ -4,10 +4,17 @@
            scribble/manual
            scribble/scheme
            scribble/decode
-           (for-label scheme/gui/base)
-           (for-syntax scheme/base))
+           (for-label scheme/gui/base
+                      scheme/base)
+           (for-syntax scheme/base)
+           (only-in scribblings/draw/blurbs
+                    res-sym
+                    boxisfill
+                    boxisfillnull
+                    MismatchExn))
 
-  (provide (except-out (all-defined-out) p define-inline))
+  (provide (except-out (all-defined-out) p define-inline)
+           (all-from-out scribblings/draw/blurbs))
 
   (define-syntax-rule (define-inline (name) body)
     (define-syntax (name stx)
@@ -31,25 +38,22 @@
     @elem{If @litchar{&} occurs in @|where|@|detail|, it 
  is specially parsed as for @scheme[button%].})
 
-  (define (bitmapuseinfo pre what thing then detail)
-   @elem{@|pre| @|what| is @|thing|, @|then| the bitmap@|detail|
- must be valid (see @xmethod[bitmap% ok?]) and not installed
- in a @scheme[bitmap-dc%] object; otherwise, @|MismatchExn|. If the
+  (define (bitmapuseinfo pre what thing and the)
+   @elem{@|pre| @|what| is @|thing|,@|and| if @|the|
  bitmap has a mask (see @xmethod[bitmap% get-loaded-mask])
  that is the same size as the bitmap, then the mask is used for the
- label; furthermore, in contrast to the limitations of
- @xmethod[dc<%> draw-bitmap], non-monochrome label masks work
- consistently on all platforms.})
+ label. Modifying a bitmap while it is used as a label has
+ an unspecified effect on the displayed label.})
 
   (define-syntax bitmaplabeluse
    (syntax-rules ()
-     [(_ id) @bitmapuseinfo["If" (scheme id) "a bitmap" "then" ""]]))
+     [(_ id) @bitmapuseinfo["If" (scheme id) "a bitmap" " and" "the"]]))
   (define-syntax bitmaplabelusearray
    (syntax-rules ()
-     [(_ id) @bitmapuseinfo["If" (scheme id) "a list of bitmaps" "then" "s"]]))
+     [(_ id) @bitmapuseinfo["If" (scheme id) "a list of bitmaps" " and" "a"]]))
   (define-syntax bitmaplabeluseisbm
     (syntax-rules ()
-      [(_ id) @bitmapuseinfo["Since" (scheme id) "a bitmap" "" ""]]))
+      [(_ id) @bitmapuseinfo["Since" (scheme id) "a bitmap" "" "the"]]))
   
   (define bitmapiforiglabel
     @elem{The bitmap label is installed only
@@ -152,8 +156,7 @@ information@|details|, even if the editor currently has delayed refreshing (see
 
   (define SeeMzParam @elem{(see @secref[#:doc reference-doc "parameters"])})
   
-  (define DrawSizeNote @elem{Restrictions on the magnitude of
-                            drawing coordinates are described with @scheme[dc<%>].})
+  (define DrawSizeNote "")
 
   (define LineNumbering @elem{Lines are numbered starting with @scheme[0].})
   (define ParagraphNumbering @elem{Paragraphs are numbered starting with @scheme[0].})
@@ -193,8 +196,6 @@ information@|details|, even if the editor currently has delayed refreshing (see
               @scheme[min-width], @scheme[min-height], @scheme[stretchable-width], and 
               @scheme[stretchable-height] arguments, see @scheme[area<%>].})
 
-  (define MismatchExn @elem{an @scheme[exn:fail:contract] exception is raised})
-  
   (define AFM @elem{Adobe Font Metrics})
   
   (define (MonitorMethod what by-what method whatsit)
@@ -244,18 +245,6 @@ information@|details|, even if the editor currently has delayed refreshing (see
                         (hspace 1)
                         (bytes->string/latin-1 name))))
   
-  (define (res-sym s)
-    (string->symbol (string-append "GRacket:" s)))
-
-  (define (Resource s)
-    @elem{@to-element[`(quote ,(res-sym s))]
-          preference})
-  (define (ResourceFirst s) ; fixme -- add index
-    (let ([r (Resource s)])
-      (index* (list (format "~a preference" (res-sym s)))
-              (list r) 
-              r)))
-
   (define (edsnipsize a b c)
     @elem{An @scheme[editor-snip%] normally stretches to wrap around the size
           of the editor it contains. This method @|a| of the snip
@@ -269,13 +258,16 @@ information@|details|, even if the editor currently has delayed refreshing (see
                 "smaller"
                 @elem{the editor is @|b|-aligned in the snip}))
 
-  (define (boxisfill which what)
-    @elem{The @|which| box is filled with @|what|.})
-  (define (boxisfillnull which what)
-    @elem{The @|which| box is filled with @|what|, unless @|which| is @scheme[#f].})
-
   (define (slant . s)
     (make-element "slant" (decode-content s)))
 
+  (define (Resource s)
+    @elem{@to-element[`(quote ,(res-sym s))]
+          preference})
+  (define (ResourceFirst s) ; fixme -- add index
+    (let ([r (Resource s)])
+      (index* (list (format "~a preference" (res-sym s)))
+              (list r) 
+              r)))
   )
 

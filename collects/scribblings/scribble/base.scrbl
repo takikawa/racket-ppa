@@ -233,7 +233,7 @@ beginning of each line.
 
 The @racket[str]s are @emph{not} decoded with @racket[decode-content],
 so @racket[(verbatim "---")] renders with three hyphens instead of an
-em-dash. Beware, however, that @emph{reading}
+em dash. Beware, however, that @emph{reading}
 @litchar["@"]@racket[verbatim] converts @litchar["@"] syntax
 within the argument, and such reading occurs well before
 arguments to @racket[verbatim] are delivered at run-time. To disable simple
@@ -288,14 +288,6 @@ gets progressively larger.}
 @defproc[(emph [pre-content pre-content?] ...) element?]{
 The same as @racket[italic].}
 
-@defproc[(linebreak) element?]{
-Produces an element that forces a line break.}
-
-@defproc[(hspace [n exact-nonnegative-integer?]) element?]{
-
-Produces an element containing @racket[n] spaces and style
-@racket['hspace].}
-
 @defproc[(literal [str string?] ...+) element?]{
 
 Produces an element containing literally @racket[str]s with no
@@ -337,8 +329,8 @@ See also @racket[verbatim].}
  
  The strings in @racket[suffixes] are filtered to those supported by
  given renderer, and then the acceptable suffixes are tried in
- order. The HTML renderer supports @racket[".png"] and
- @racket[".gif"], while the Latex renderer supports @racket[".png"],
+ order. The HTML renderer supports @racket[".png"],
+ @racket[".gif"], and @racket[".svg"], while the Latex renderer supports @racket[".png"],
  @racket[".pdf"], and @racket[".ps"] (but @racket[".ps"] works only
  when converting Latex output to DVI, and @racket[".png"] and
  @racket[".pdf"] work only for converting Latex output to PDF).
@@ -346,6 +338,66 @@ See also @racket[verbatim].}
  Note that when the @racket[suffixes] library is non-empty, then 
  the @racket[path] argument should not have a suffix.
  }
+
+@; ------------------------------------------------------------------------
+@section[#:tag "spacing"]{Spacing}
+
+@defproc[(linebreak) element?]{
+Produces an element that forces a line break.}
+
+
+@def-elem-proc[nonbreaking]{Like @racket[elem], but line breaks are
+suppressed while rendering the content.}
+
+
+@defproc[(hspace [n exact-nonnegative-integer?]) element?]{
+
+Produces an element containing @racket[n] spaces and style
+@racket['hspace].}
+
+
+@defthing[~ string?]{
+
+A string containing the non-breaking space character,
+which is equivalent to @racket['nbsp] as an element.}
+
+
+@defthing[-~- string?]{
+
+A string containing the non-breaking hyphen character.}
+
+
+@defthing[?- string?]{
+
+A string containing the soft-hyphen character (i.e., a suggestion of
+where to hyphenate a word to break it across lines when rendering).}
+
+
+@defthing[._ element?]{
+
+Generates a period that ends an abbreviation in the middle of a
+sentence, as opposed to a period that ends a sentence (since the
+latter may be typeset with extra space). Use @litchar|{@._}| in a
+document instead of just @litchar{.} for an abbreviation-ending period
+that is preceded by a lowercase letter and followed by a space.
+
+See @racket[.__] for an example.}
+
+
+@defthing[.__ element?]{
+
+Generates a period that ends a sentence (which may be typeset with
+extra space), as opposed to a period that ends an abbreviation in the
+middle of a sentence. Use @litchar|{@.__}| in a document instead of just
+@litchar{.} for a sentence-ending period that is preceded by an
+uppercase letter.
+
+The following example illustrates both @racket[._] and @racket[.__]:
+
+@codeblock|{
+ #lang scribble/base
+ My name is Mr@._ T@.__ I pity the fool who can't typeset punctuation.
+}|}
 
 
 @; ------------------------------------------------------------------------
@@ -394,6 +446,16 @@ the youngest ancestor that produces a match).
 
 If @racket[underline?] is @racket[#f], then the hyperlink is rendered
 in HTML without an underline.}
+
+
+@defproc[(Secref [tag string?]
+                 [#:doc module-path (or/c module-path? false/c) #f]
+                 [#:tag-prefixes prefixes (or/c (listof string?) false/c) #f]
+                 [#:underline? underline? any/c #t])
+         element?]{
+
+Like @racket[secref], but if the rendered form of the reference starts
+with a word (e.g., ``section''), then the word is capitalized.}
 
 
 @defproc[(seclink [tag string?] 

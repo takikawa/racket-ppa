@@ -28,7 +28,7 @@
 @title[#:tag "syntax" #:style 'toc]{Syntactic Forms}
 
 This section describes the core syntax forms that appear in a fully
-expanded expression, plus a many closely-related non-core forms.
+expanded expression, plus many closely related non-core forms.
 See @secref["fully-expanded"] for the core grammar.
 
 @local-table-of-contents[]
@@ -413,7 +413,7 @@ bindings of each @racket[require-spec] are visible for expanding later
 
  @specsubform[#:literals (for-meta)
               (for-meta phase-level require-spec ...)]{Like the combination of
-  @racket[require-spec]s, but constrained each binding specified by
+  @racket[require-spec]s, but the binding specified by
   each @racket[require-spec] is shifted by @racket[phase-level]. The
   @tech{label phase level} corresponds to @racket[#f], and a shifting
   combination that involves @racket[#f] produces @racket[#f].
@@ -655,7 +655,7 @@ an identifier can be either imported or defined for a given
 
 @defform[(local-require require-spec ...)]{
 
-Like @scheme[require], but for use in a local-definition context to
+Like @scheme[require], but for use in a @tech{internal-definition context} to
 import just into the local context. Only bindings from @tech{phase
 level} 0 are imported.}
 
@@ -837,8 +837,11 @@ follows.
  ]}
 
  @defsubform[(protect-out provide-spec ...)]{ Like the union of the
- @racket[provide-spec]s, except that the exports are protected; see
- @secref["modprotect"]. The @racket[provide-spec] must specify only
+ @racket[provide-spec]s, except that the exports are protected;
+ requiring modules may refer to these bindings, but may not extract
+ these bindings from macro expansions or access them via @racket[eval] without
+ access privileges.
+ For more details, see @secref["modprotect"]. The @racket[provide-spec] must specify only
  bindings that are defined within the exporting module.
 
  @examples[#:eval (syntax-eval)
@@ -1287,9 +1290,9 @@ module, or at the top level if the form is not inside a module).
 A @tech{variable reference} can be used with
 @racket[variable-reference->empty-namespace],
 @racket[variable-reference->resolved-module-path], and
-@racket[variable-reference->top-level-namespace], but facilities like
+@racket[variable-reference->namespace], but facilities like
 @racket[define-namespace-anchor] and
-@racket[namespace-anchor->namespace] wrap those to provide an clearer
+@racket[namespace-anchor->namespace] wrap those to provide a clearer
 interface. A @tech{variable reference} is also useful to low-level
 extensions; see @other-manual['(lib
 "scribblings/inside/inside.scrbl")].}
@@ -1499,7 +1502,7 @@ exceptions, not the result of @racket[procedure-arity].}
                         (id ...+ . rest-id)
                         rest-id])]{
                
-Produces a procedure. Each @racket[[forms body ...+]]
+Produces a procedure. Each @racket[[formals body ...+]]
 clause is analogous to a single @racket[lambda] procedure; applying
 the @racket[case-lambda]-generated procedure is the same as applying a
 procedure that corresponds to one of the clauses---the first procedure
@@ -1771,7 +1774,7 @@ evaluated in order, and the results from all but the last
 form.}
 
 @specsubform[#:literals (=>) [test-expr => proc-expr]]{The @racket[proc-expr] is
-evaluated, and it must produce a procedure that accepts on argument,
+evaluated, and it must produce a procedure that accepts one argument,
 otherwise the @exnraise[exn:fail:contract]. The procedure is applied
 to the result of @racket[test-expr] in tail position with respect to
 the @racket[cond] expression.}
@@ -1838,7 +1841,7 @@ respect to the original @racket[and] form.
 If no @racket[expr]s are provided, then result is @racket[#f].
 
 If a single @racket[expr] is provided, then it is in tail position, so
-the results of the @racket[and] expression are the results of the
+the results of the @racket[or] expression are the results of the
 @racket[expr].
 
 Otherwise, the first @racket[expr] is evaluated. If it produces a
@@ -1925,7 +1928,9 @@ defined as follows:
                                          @#,elem{if} (#,cvt head . _datum) = expr
 ]
 
-At the top level, the top-level binding @racket[id] is created after
+In an @tech{internal-definition context} (see @secref["intdef-body"]), 
+a @racket[define] form introduces a local binding.
+At the top level, the top-level binding for @racket[id] is created after
 evaluating @racket[expr], if it does not exist already, and the
 top-level mapping of @racket[id] (in the @techlink{namespace} linked
 with the compiled definition) is set to the binding at the same time.
@@ -1955,6 +1960,8 @@ Evaluates the @racket[expr], and @tech{bind}s the results to the
 @racket[id]s; if @racket[expr] produces a different number of results,
 the @exnraise[exn:fail:contract].
 
+In an @tech{internal-definition context} (see @secref["intdef-body"]), 
+a @racket[define-values] form introduces local bindings.
 At the top level, the top-level binding for each @racket[id] is
 created after evaluating @racket[expr], if it does not exist already,
 and the top-level mapping of each @racket[id] (in the
@@ -1984,6 +1991,9 @@ The second form is a shorthand the same as for @racket[define]; it
 expands to a definition of the first form where the @racket[expr] is a
 @racket[lambda] form.}
 
+In an @tech{internal-definition context} (see @secref["intdef-body"]), 
+a @racket[define-syntax] form introduces a local binding.
+
 @defexamples[#:eval (syntax-eval)
 (define-syntax foo
   (syntax-rules ()
@@ -2011,6 +2021,9 @@ When @racket[expr] produces zero values for a top-level
 @racket[define-syntaxes] (i.e., not in a module or internal-definition
 position), then the @racket[id]s are effectively declared without
 binding; see @secref["macro-introduced-bindings"].
+
+In an @tech{internal-definition context} (see @secref["intdef-body"]), 
+a @racket[define-syntaxes] form introduces local bindings.
 
 @defexamples[#:eval (syntax-eval)
 (define-syntaxes (foo1 foo2 foo3)
@@ -2274,7 +2287,7 @@ x
 
 Assuming that all @racket[id]s refer to variables, this form evaluates
 @racket[expr], which must produce as many values as supplied
-@racket[id]s.  The location of each @racket[id] is filled wih to the
+@racket[id]s.  The location of each @racket[id] is filled with the
 corresponding value from @racket[expr] in the same way as for
 @racket[set!].
 

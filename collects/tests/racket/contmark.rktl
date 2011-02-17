@@ -719,4 +719,202 @@
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; Check that `(current-continuation-marks)' captures
+;; consistent context information --- essentially checking
+;; that an internal cache isn't broken
+
+(sync (thread void)) ; tends to flush the cache
+(let ()
+  (define (go)
+    (f (+ 200 (random 1000))))
+
+  (define (f x)
+    (cond
+     [(zero? x)
+      (let ([m1 (current-continuation-marks)]
+            [m2 (current-continuation-marks)]
+            [m3 (current-continuation-marks)]
+            [m4 (current-continuation-marks)]
+            [m5 (current-continuation-marks)])
+        (and (same? m1 m2)
+             (same? m2 m3)
+             (same? m3 m4)
+             (same? m4 m5)))]
+     [else
+      (case (random 7)
+        [(0) (values (f (- x 1)))]
+        [(1) (f (- x 1))]
+        [(2) (values (g (- x 1)))]
+        [(3) (g (- x 1))]
+        [(4) (h (- x 1))]
+        [(5) (i (- x 1))]
+        [(6) (j (- x 1))])]))
+
+  ;; no-name(?)
+  (define g
+    (let ([a-fun (λ (x) x)])
+      (set! a-fun (λ (y) y))
+      (a-fun
+       (λ (x) (f x)))))
+
+  (define q 0)
+  (define (h x)
+    (let ([x 1])
+      (set! x (+ x q))
+      (set! q x)
+      (values (f (- x 1)))))
+
+  (define (i x)
+    (let ([x 1]
+          [y 2])
+      (set! x (+ y x))
+      (set! y (+ x y))
+      (set! q (+ x y))
+      (values (f (- x 1)))))
+
+  (define (j x)
+    (let ([x 1]
+          [y 2]
+          [z 3]
+          [w 4])
+      (set! x (+ y z))
+      (set! y (+ w x))
+      (set! z (+ z z))
+      (set! w (+ w 1))
+      (set! q (+ x y z w))
+      (values (f (- x 1)))))
+
+  (define (same? m1 m2)
+    (equal? (continuation-mark-set->context m1)
+            (continuation-mark-set->context m2)))
+
+  (let ([s (random 10000)])
+    (random-seed s)
+    (test (list s #t)
+          list s (for/and ([i (in-range 100)]) (go)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Test interaction of prompts and `continuation-mark-set-first'
+
+(let ()
+  (define key 'key)
+  (define value 'value)
+  (define pt (make-continuation-prompt-tag))
+
+  (for-each
+   (lambda (thunk)
+     (test #f (lambda (f) (f)) thunk))
+   
+   (list
+    (lambda ()
+      (with-continuation-mark key value
+        (call-with-continuation-prompt
+         (lambda ()
+           (continuation-mark-set-first
+            #f
+            key)))))
+
+    (lambda ()
+      (with-continuation-mark key value
+        (call-with-continuation-prompt
+         (lambda ()
+           (continuation-mark-set-first
+            (current-continuation-marks)
+            key)))))
+
+    (lambda ()
+      (with-continuation-mark key value
+        (call-with-continuation-prompt
+         (lambda ()
+           (continuation-mark-set-first
+            (current-continuation-marks (default-continuation-prompt-tag))
+            key)))))
+
+    (lambda ()
+      (with-continuation-mark key value
+        (call-with-continuation-prompt
+         (lambda ()
+           (continuation-mark-set-first
+            #f
+            key
+            #f
+            (default-continuation-prompt-tag))))))
+
+    (lambda ()
+      (with-continuation-mark key value
+        (call-with-continuation-prompt
+         (lambda ()
+           (continuation-mark-set-first
+            (current-continuation-marks)
+            key
+            #f
+            (default-continuation-prompt-tag))))))
+
+    (lambda ()
+      (with-continuation-mark key value
+        (call-with-continuation-prompt
+         (lambda ()
+           (continuation-mark-set-first
+            (current-continuation-marks)
+            key
+            #f
+            pt))
+         pt)))
+
+    (lambda ()
+      (with-continuation-mark key value
+        (call-with-continuation-prompt
+         (lambda ()
+           (continuation-mark-set-first
+            (current-continuation-marks (default-continuation-prompt-tag))
+            key
+            #f
+            (default-continuation-prompt-tag))))))
+
+    (lambda ()
+      (with-continuation-mark key value
+        (call-with-continuation-prompt
+         (lambda ()
+           (continuation-mark-set-first
+            (current-continuation-marks pt)
+            key
+            #f
+            (default-continuation-prompt-tag)))
+         pt)))))
+
+  (test 'alt 'alt-fail
+        (with-continuation-mark key value
+          (call-with-continuation-prompt
+           (lambda ()
+             (continuation-mark-set-first
+              #f
+              key
+              'alt)))))
+
+  (test value 'no-block
+        (with-continuation-mark key value
+          (call-with-continuation-prompt
+           (lambda ()
+             (continuation-mark-set-first
+              (current-continuation-marks)
+              key
+              #f
+              (default-continuation-prompt-tag)))
+           pt)))
+
+  (test value 'no-block2
+        (call-with-continuation-prompt
+         (lambda ()
+           (with-continuation-mark key value
+             (call-with-continuation-prompt
+              (lambda ()
+                (continuation-mark-set-first
+                 (current-continuation-marks pt)
+                 key
+                 #f
+                 pt)))))
+         pt)))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (report-errs)

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -192,6 +192,23 @@ READ_ONLY Scheme_Object *scheme_single_inf_object, *scheme_single_minus_inf_obje
 #include <machine/fpu.h>
 #endif
 
+#ifdef ASM_DBLPREC_CONTROL_87
+/* Linux uses extended precision by default.
+   Make x87 computations double-precision instead of 
+   extended-precision, so that if/when the JIT generates
+   x87 instructions, it's consistent with everything else. */
+static void to_double_prec(void)
+{
+  int _dblprec = 0x27F;
+  asm ("fldcw %0" : : "m" (_dblprec));
+}
+static void to_extended_prec(void)
+{
+  int _dblprec = 0x37F;
+  asm ("fldcw %0" : : "m" (_dblprec));
+}
+#endif
+
 void
 scheme_init_number (Scheme_Env *env)
 {
@@ -247,13 +264,7 @@ scheme_init_number (Scheme_Env *env)
   }
 #endif
 #ifdef ASM_DBLPREC_CONTROL_87
-  {
-    /* Make x87 computations double-precision instead of 
-       extended-precision, so that if/when the JIT generates
-       x87 instructions, it's consistent with everything else. */
-    int _dblprec = 0x27F;
-    asm ("fldcw %0" : : "m" (_dblprec));
-  }
+  to_double_prec();
 #endif
   END_XFORM_SKIP;
 
@@ -934,7 +945,7 @@ void scheme_init_unsafe_number(Scheme_Env *env)
 
 
 Scheme_Object *
-scheme_make_integer_value(long i)
+scheme_make_integer_value(intptr_t i)
 {
   Scheme_Object *o = scheme_make_integer(i);
   
@@ -945,12 +956,12 @@ scheme_make_integer_value(long i)
 }
 
 Scheme_Object *
-scheme_make_integer_value_from_unsigned(unsigned long i)
+scheme_make_integer_value_from_unsigned(uintptr_t i)
 {
   Scheme_Object *o = scheme_make_integer(i);
   
   if ((SCHEME_INT_VAL(o) >= 0)
-      && ((unsigned long)SCHEME_INT_VAL(o)) == i)
+      && ((uintptr_t)SCHEME_INT_VAL(o)) == i)
     return o;
   else
     return scheme_make_bignum_from_unsigned(i);
@@ -964,7 +975,7 @@ Scheme_Object *scheme_make_integer_value_from_long_long(mzlonglong i)
   if (i < 0) {
     if (!(((i >> 32) & 0xFFFFFFFF) ^ 0xFFFFFFFF)
 	&& (i & 0x80000000)) {
-      return scheme_make_integer_value((long)i);
+      return scheme_make_integer_value((intptr_t)i);
     } else
       return scheme_make_bignum_from_long_long(i);
   } else {
@@ -979,17 +990,17 @@ Scheme_Object *scheme_make_integer_value_from_unsigned_long_long(umzlonglong i)
   return scheme_make_integer_value_from_unsigned(i);
 #else
   if (!((i >> 32) & 0xFFFFFFFF))
-    return scheme_make_integer_value_from_unsigned((long)i);
+    return scheme_make_integer_value_from_unsigned((intptr_t)i);
   else
     return scheme_make_bignum_from_unsigned_long_long(i);
 #endif
 }
 
-static Scheme_Object * fixnum_expt (long x, long y);
+static Scheme_Object * fixnum_expt (intptr_t x, intptr_t y);
 
 Scheme_Object *
-scheme_make_integer_value_from_unsigned_long_halves(unsigned long lowhalf,
-						    unsigned long hihalf)
+scheme_make_integer_value_from_unsigned_long_halves(uintptr_t lowhalf,
+						    uintptr_t hihalf)
 {
 #ifdef NO_LONG_LONG_TYPE
   /*  Paste the two halves together by 
@@ -1014,8 +1025,8 @@ scheme_make_integer_value_from_unsigned_long_halves(unsigned long lowhalf,
 }
 
 Scheme_Object *
-scheme_make_integer_value_from_long_halves(unsigned long lowhalf,
-					   unsigned long hihalf)
+scheme_make_integer_value_from_long_halves(uintptr_t lowhalf,
+					   uintptr_t hihalf)
 {
 #ifdef NO_LONG_LONG_TYPE
   /* hihalf and lowhalf form the two halves of a 64bit 
@@ -1041,7 +1052,7 @@ scheme_make_integer_value_from_long_halves(unsigned long lowhalf,
 }
 
 
-int scheme_get_int_val(Scheme_Object *o, long *v)
+int scheme_get_int_val(Scheme_Object *o, intptr_t *v)
 {
   if (SCHEME_INTP(o)) {
     *v = SCHEME_INT_VAL(o);
@@ -1052,10 +1063,10 @@ int scheme_get_int_val(Scheme_Object *o, long *v)
     return 0;
 }
 
-int scheme_get_unsigned_int_val(Scheme_Object *o, unsigned long *v)
+int scheme_get_unsigned_int_val(Scheme_Object *o, uintptr_t *v)
 {
   if (SCHEME_INTP(o)) {
-    long i = SCHEME_INT_VAL(o);
+    intptr_t i = SCHEME_INT_VAL(o);
     if (i < 0)
       return 0;
     *v = i;
@@ -1080,7 +1091,7 @@ int scheme_get_long_long_val(Scheme_Object *o, mzlonglong *v)
 int scheme_get_unsigned_long_long_val(Scheme_Object *o, umzlonglong *v)
 {
   if (SCHEME_INTP(o)) {
-    long i = SCHEME_INT_VAL(o);
+    intptr_t i = SCHEME_INT_VAL(o);
     if (i < 0)
       return 0;
     *v = i;
@@ -1453,7 +1464,7 @@ Scheme_Object *
 scheme_bin_gcd (const Scheme_Object *n1, const Scheme_Object *n2)
 {
   if (SCHEME_INTP(n1) && SCHEME_INTP(n2)) {
-    long i1, i2, a, b, r;
+    intptr_t i1, i2, a, b, r;
 
     i1 = SCHEME_INT_VAL(n1);
     i2 = SCHEME_INT_VAL(n2);
@@ -2368,16 +2379,16 @@ Scheme_Object *int_sqrt_rem (int argc, Scheme_Object *argv[])
   return do_int_sqrt("integer-sqrt/remainder", argc, argv, 1);
 }
 
-static Scheme_Object *fixnum_expt(long x, long y)
+static Scheme_Object *fixnum_expt(intptr_t x, intptr_t y)
 {
-  long orig_x = x;
-  long orig_y = y;
+  intptr_t orig_x = x;
+  intptr_t orig_y = y;
 
   if ((x == 2) && (y <= MAX_SHIFT_TRY))
-    return scheme_make_integer((long)1 << y);
+    return scheme_make_integer((intptr_t)1 << y);
   else
   {
-    long result = 1;
+    intptr_t result = 1;
     int odd_result = (x < 0) && (y & 0x1);
 
     if (x < 0)
@@ -2390,7 +2401,7 @@ static Scheme_Object *fixnum_expt(long x, long y)
 
       if (y & 0x1) /* if (odd?) */
       {
-        long next_result = x * result;
+        intptr_t next_result = x * result;
         if (y == 1 && x > 46339 && !(next_result / x == result))
           return scheme_generic_integer_power(scheme_make_integer_value(orig_x), scheme_make_integer_value(orig_y));
         else
@@ -2450,8 +2461,20 @@ static double sch_pow(double x, double y)
 	  return scheme_infinity_val;
       }
     }
-  } else
-    return pow(x, y);
+  } else {
+#ifdef ASM_DBLPREC_CONTROL_87
+    /* libm's pow() implementation seems to rely on
+       extended precision in pow(), so reset the control
+       word while calling pow(); note that the x87 control 
+       word is thread-specific */
+    to_extended_prec();
+#endif
+    x = pow(x, y);
+#ifdef ASM_DBLPREC_CONTROL_87
+    to_double_prec();
+#endif
+    return x;
+  }
 }
 #endif
 
@@ -2915,7 +2938,7 @@ scheme_inexact_to_exact (int argc, Scheme_Object *argv[])
     double d = SCHEME_FLOAT_VAL(o);
 
     /* Try simple case: */
-    Scheme_Object *i = scheme_make_integer((long)d);
+    Scheme_Object *i = scheme_make_integer((intptr_t)d);
     if ((double)SCHEME_INT_VAL(i) == d) {
 # ifdef NAN_EQUALS_ANYTHING
       if (!MZ_IS_NAN(d))
@@ -2973,7 +2996,7 @@ bitwise_not(int argc, Scheme_Object *argv[])
   Scheme_Object *o = argv[0];
 
   if (SCHEME_INTP(o)) {
-    long a = SCHEME_INT_VAL(o);
+    intptr_t a = SCHEME_INT_VAL(o);
 
     a = ~a;
     return scheme_make_integer(a);
@@ -2988,7 +3011,7 @@ Scheme_Object *
 scheme_bitwise_shift(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *v, *so;
-  long shift;
+  intptr_t shift;
 
   v = argv[0];
   
@@ -3016,7 +3039,7 @@ scheme_bitwise_shift(int argc, Scheme_Object *argv[])
     return v;
 
   if (SCHEME_INTP(v)) {
-    long i = SCHEME_INT_VAL(v);
+    intptr_t i = SCHEME_INT_VAL(v);
 
     if (!i)
       return v;
@@ -3030,7 +3053,7 @@ scheme_bitwise_shift(int argc, Scheme_Object *argv[])
 	} else
 	  return scheme_make_integer(0);
       } else if (shift <= MAX_SHIFT_TRY) {
-	long n;
+	intptr_t n;
 	
 	n = i << shift;
 	if ((n > 0) && (SCHEME_INT_VAL(scheme_make_integer(n)) >> shift == i))
@@ -3055,20 +3078,20 @@ static Scheme_Object *bitwise_bit_set_p (int argc, Scheme_Object *argv[])
   }
   sb = argv[1];
   if (SCHEME_INTP(sb)) {
-    long v;
+    intptr_t v;
     v = SCHEME_INT_VAL(sb);
     if (v < 0) {
       scheme_wrong_type("bitwise-bit-set?", "nonnegative exact integer", 1, argc, argv);
       ESCAPED_BEFORE_HERE;
     }
     if (SCHEME_INTP(so)) {
-      if (v < (sizeof(long) * 8))
-        return ((((long)1 << v) & SCHEME_INT_VAL(so)) ? scheme_true : scheme_false);
+      if (v < (sizeof(intptr_t) * 8))
+        return ((((intptr_t)1 << v) & SCHEME_INT_VAL(so)) ? scheme_true : scheme_false);
       else
         return ((SCHEME_INT_VAL(so) < 0) ? scheme_true : scheme_false);
     } else {
       bigdig d;
-      long vd, vb;
+      intptr_t vd, vb;
       vd = v / (sizeof(bigdig) * 8);
       vb = v & ((sizeof(bigdig) * 8) - 1);
       if (vd >= ((Scheme_Bignum *)so)->len)
@@ -3143,29 +3166,29 @@ static Scheme_Object *bitwise_bit_field (int argc, Scheme_Object *argv[])
   sb1 = argv[1];
   sb2 = argv[2];
   if (SCHEME_EXACT_INTEGERP(so)) {
-    /* Fast path is when sb1 < sizeof(long), sb2 - sb1 < sizeof(long),
+    /* Fast path is when sb1 < sizeof(intptr_t), sb2 - sb1 < sizeof(intptr_t),
        and argument is positive (though the fixnum negative case is also
        handled here). */
     if (SCHEME_INTP(sb1)) {
-      long v1;
+      intptr_t v1;
       v1 = SCHEME_INT_VAL(sb1);
       if (v1 >= 0) {
         if (SCHEME_INTP(sb2)) {
-          long v2;
+          intptr_t v2;
           v2 = SCHEME_INT_VAL(sb2);
           if (v2 >= v1) {
             v2 -= v1;
-            if (v2 < (sizeof(long) * 8)) {
+            if (v2 < (sizeof(intptr_t) * 8)) {
               if (SCHEME_INTP(so)) {
-                if (v1 < (sizeof(long) * 8)) {
-                  long res;
-                  res = ((SCHEME_INT_VAL(so) >> v1) & (((long)1 << v2) - 1));
+                if (v1 < (sizeof(intptr_t) * 8)) {
+                  intptr_t res;
+                  res = ((SCHEME_INT_VAL(so) >> v1) & (((intptr_t)1 << v2) - 1));
                   return scheme_make_integer(res);
                 } else if (SCHEME_INT_VAL(so) > 0) 
                   return scheme_make_integer(0);
               } else if (SCHEME_BIGPOS(so)) {
                 bigdig d;
-                long vd, vb, avail;
+                intptr_t vd, vb, avail;
                 vd = v1 / (sizeof(bigdig) * 8);
                 vb = v1 & ((sizeof(bigdig) * 8) - 1);
                 if (vd >= ((Scheme_Bignum *)so)->len)
@@ -3195,11 +3218,11 @@ static Scheme_Object *
 integer_length(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *o = argv[0];
-  unsigned long n;
+  uintptr_t n;
   int base;
 
   if (SCHEME_INTP(o)) {
-    long a = SCHEME_INT_VAL(o);
+    intptr_t a = SCHEME_INT_VAL(o);
 
     if (a < 0)
       a = ~a;
@@ -3219,12 +3242,12 @@ integer_length(int argc, Scheme_Object *argv[])
     base = (base - 1) * (sizeof(bigdig) * 8);
 
 #ifdef USE_LONG_LONG_FOR_BIGDIG
-    n = (unsigned long)d;
+    n = (uintptr_t)d;
     if ((bigdig)n != d) {
       /* Must have been overflow */
-      d >>= (sizeof(unsigned long) * 8);
-      base += (sizeof(unsigned long) * 8);
-      n = (unsigned long)d;
+      d >>= (sizeof(uintptr_t) * 8);
+      base += (sizeof(uintptr_t) * 8);
+      n = (uintptr_t)d;
     }
 #else
     n = d;
@@ -3242,7 +3265,7 @@ integer_length(int argc, Scheme_Object *argv[])
   return scheme_make_integer(base);
 }
 
-long scheme_integer_length(Scheme_Object *n)
+intptr_t scheme_integer_length(Scheme_Object *n)
 {
   Scheme_Object *a[1], *r;
   a[0] = n;
@@ -3255,7 +3278,7 @@ long scheme_integer_length(Scheme_Object *n)
 /*                             flvectors                               */
 /************************************************************************/
 
-Scheme_Double_Vector *scheme_alloc_flvector(long size)
+Scheme_Double_Vector *scheme_alloc_flvector(intptr_t size)
 {
   Scheme_Double_Vector *vec;
 
@@ -3269,13 +3292,14 @@ Scheme_Double_Vector *scheme_alloc_flvector(long size)
 }
 
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
-static Scheme_Double_Vector *alloc_shared_flvector(long size)
+static Scheme_Double_Vector *alloc_shared_flvector(intptr_t size)
 {
   Scheme_Double_Vector *vec;
   void *original_gc;
 
   original_gc = GC_switch_to_master_gc();
   vec = scheme_alloc_flvector(size);
+  SHARED_ALLOCATED_SET(vec); 
   GC_switch_back_from_master(original_gc);
 
   return vec;
@@ -3320,7 +3344,7 @@ static Scheme_Object *flvector_p (int argc, Scheme_Object *argv[])
 static Scheme_Object *do_make_flvector (const char *name, int as_shared, int argc, Scheme_Object *argv[])
 {
   Scheme_Double_Vector *vec;
-  long size;
+  intptr_t size;
   double d;
   int i;
 
@@ -3390,7 +3414,7 @@ Scheme_Object *scheme_checked_flvector_ref (int argc, Scheme_Object *argv[])
 {
   double d;
   Scheme_Object *vec;
-  long len, pos;
+  intptr_t len, pos;
 
   vec = argv[0];
   if (!SCHEME_FLVECTORP(vec))
@@ -3414,7 +3438,7 @@ Scheme_Object *scheme_checked_flvector_ref (int argc, Scheme_Object *argv[])
 Scheme_Object *scheme_checked_flvector_set (int argc, Scheme_Object *argv[])
 {
   Scheme_Object *vec;
-  long len, pos;
+  intptr_t len, pos;
 
   vec = argv[0];
   if (!SCHEME_FLVECTORP(vec))
@@ -3442,7 +3466,7 @@ Scheme_Object *scheme_checked_flvector_set (int argc, Scheme_Object *argv[])
 /*                             fxvectors                               */
 /************************************************************************/
 
-Scheme_Vector *scheme_alloc_fxvector(long size)
+Scheme_Vector *scheme_alloc_fxvector(intptr_t size)
 {
   Scheme_Vector *vec;
 
@@ -3456,13 +3480,14 @@ Scheme_Vector *scheme_alloc_fxvector(long size)
 }
 
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
-static Scheme_Vector *alloc_shared_fxvector(long size)
+static Scheme_Vector *alloc_shared_fxvector(intptr_t size)
 {
   Scheme_Vector *vec;
   void *original_gc;
 
   original_gc = GC_switch_to_master_gc();
   vec = scheme_alloc_fxvector(size);
+  SHARED_ALLOCATED_SET(vec); 
   GC_switch_back_from_master(original_gc);
 
   return vec;
@@ -3507,7 +3532,7 @@ static Scheme_Object *fxvector_p (int argc, Scheme_Object *argv[])
 static Scheme_Object *do_make_fxvector (const char *name, int as_shared, int argc, Scheme_Object *argv[])
 {
   Scheme_Vector *vec;
-  long size;
+  intptr_t size;
 
   if (SCHEME_INTP(argv[0]))
     size = SCHEME_INT_VAL(argv[0]);
@@ -3574,7 +3599,7 @@ static Scheme_Object *fxvector_length (int argc, Scheme_Object *argv[])
 Scheme_Object *scheme_checked_fxvector_ref (int argc, Scheme_Object *argv[])
 {
   Scheme_Object *vec;
-  long len, pos;
+  intptr_t len, pos;
 
   vec = argv[0];
   if (!SCHEME_FXVECTORP(vec))
@@ -3596,7 +3621,7 @@ Scheme_Object *scheme_checked_fxvector_ref (int argc, Scheme_Object *argv[])
 Scheme_Object *scheme_checked_fxvector_set (int argc, Scheme_Object *argv[])
 {
   Scheme_Object *vec;
-  long len, pos;
+  intptr_t len, pos;
 
   vec = argv[0];
   if (!SCHEME_FXVECTORP(vec))
@@ -3660,7 +3685,7 @@ SAFE_FX(fx_rshift, "fxrshift", neg_bitwise_shift, FIXNUM_WIDTH_P, FIXNUM_WIDTH_T
 
 static Scheme_Object *fx_not (int argc, Scheme_Object *argv[])
 {
-  long v;
+  intptr_t v;
   if (!SCHEME_INTP(argv[0])) scheme_wrong_type("fxnot", "fixnum", 0, argc, argv);
   v = SCHEME_INT_VAL(argv[0]);
   v = ~v;
@@ -3669,7 +3694,7 @@ static Scheme_Object *fx_not (int argc, Scheme_Object *argv[])
 
 static Scheme_Object *fx_to_fl (int argc, Scheme_Object *argv[])
 {
-  long v;
+  intptr_t v;
   if (!SCHEME_INTP(argv[0])) scheme_wrong_type("fx->fl", "fixnum", 0, argc, argv);
   v = SCHEME_INT_VAL(argv[0]);
   return scheme_make_double(v);
@@ -3678,7 +3703,7 @@ static Scheme_Object *fx_to_fl (int argc, Scheme_Object *argv[])
 static Scheme_Object *fl_to_fx (int argc, Scheme_Object *argv[])
 {
   double d;
-  long v;
+  intptr_t v;
   Scheme_Object *o;
 
   if (!SCHEME_DBLP(argv[0])
@@ -3686,7 +3711,7 @@ static Scheme_Object *fl_to_fx (int argc, Scheme_Object *argv[])
     scheme_wrong_type("fl->fx", "flonum integer", 0, argc, argv);
 
   d = SCHEME_DBL_VAL(argv[0]);
-  v = (long)d;
+  v = (intptr_t)d;
   if ((double)v == d) {
     o = scheme_make_integer_value(v);
     if (SCHEME_INTP(o))
@@ -3722,7 +3747,7 @@ SAFE_FL(log)
 #define UNSAFE_FX(name, op, fold)                            \
  static Scheme_Object *name(int argc, Scheme_Object *argv[]) \
  {                                                           \
-   long v;                                                   \
+   intptr_t v;                                                   \
    if (scheme_current_thread->constant_folding) return fold(argc, argv);     \
    v = SCHEME_INT_VAL(argv[0]) op SCHEME_INT_VAL(argv[1]);   \
    return scheme_make_integer(v);                            \
@@ -3737,7 +3762,7 @@ UNSAFE_FX(unsafe_fx_rshift, >>, neg_bitwise_shift)
 
 static Scheme_Object *unsafe_fx_not (int argc, Scheme_Object *argv[])
 {
-  long v;
+  intptr_t v;
   if (scheme_current_thread->constant_folding) return bitwise_not(argc, argv);
   v = SCHEME_INT_VAL(argv[0]);
   v = ~v;
@@ -3746,7 +3771,7 @@ static Scheme_Object *unsafe_fx_not (int argc, Scheme_Object *argv[])
 
 static Scheme_Object *unsafe_fx_to_fl (int argc, Scheme_Object *argv[])
 {
-  long v;
+  intptr_t v;
   if (scheme_current_thread->constant_folding) return scheme_exact_to_inexact(argc, argv);
   v = SCHEME_INT_VAL(argv[0]);
   return scheme_make_double(v);
@@ -3754,9 +3779,9 @@ static Scheme_Object *unsafe_fx_to_fl (int argc, Scheme_Object *argv[])
 
 static Scheme_Object *unsafe_fl_to_fx (int argc, Scheme_Object *argv[])
 {
-  long v;
+  intptr_t v;
   if (scheme_current_thread->constant_folding) return scheme_inexact_to_exact(argc, argv);
-  v = (long)(SCHEME_DBL_VAL(argv[0]));
+  v = (intptr_t)(SCHEME_DBL_VAL(argv[0]));
   return scheme_make_integer(v);
 }
 
@@ -3784,7 +3809,7 @@ static Scheme_Object *unsafe_flvector_length (int argc, Scheme_Object *argv[])
 
 static Scheme_Object *unsafe_flvector_ref (int argc, Scheme_Object *argv[])
 {
-  long pos;
+  intptr_t pos;
   double d;
 
   pos = SCHEME_INT_VAL(argv[1]);
@@ -3795,7 +3820,7 @@ static Scheme_Object *unsafe_flvector_ref (int argc, Scheme_Object *argv[])
 
 static Scheme_Object *unsafe_flvector_set (int argc, Scheme_Object *argv[])
 {
-  long pos;
+  intptr_t pos;
 
   pos = SCHEME_INT_VAL(argv[1]);
   SCHEME_FLVEC_ELS(argv[0])[pos] = SCHEME_DBL_VAL(argv[2]);
@@ -3810,7 +3835,7 @@ static Scheme_Object *unsafe_fxvector_length (int argc, Scheme_Object *argv[])
 
 static Scheme_Object *unsafe_fxvector_ref (int argc, Scheme_Object *argv[])
 {
-  long pos;
+  intptr_t pos;
 
   pos = SCHEME_INT_VAL(argv[1]);
   return SCHEME_FXVEC_ELS(argv[0])[pos];
@@ -3818,7 +3843,7 @@ static Scheme_Object *unsafe_fxvector_ref (int argc, Scheme_Object *argv[])
 
 static Scheme_Object *unsafe_fxvector_set (int argc, Scheme_Object *argv[])
 {
-  long pos;
+  intptr_t pos;
 
   pos = SCHEME_INT_VAL(argv[1]);
   SCHEME_FXVEC_ELS(argv[0])[pos] = argv[2];
@@ -3828,7 +3853,7 @@ static Scheme_Object *unsafe_fxvector_set (int argc, Scheme_Object *argv[])
 
 static Scheme_Object *s16_ref (int argc, Scheme_Object *argv[])
 {
-  long v;
+  intptr_t v;
   Scheme_Object *p;
   p = ((Scheme_Structure *)argv[0])->slots[0];
   v = ((short *)SCHEME_CPTR_VAL(p))[SCHEME_INT_VAL(argv[1])];
@@ -3845,7 +3870,7 @@ static Scheme_Object *s16_set (int argc, Scheme_Object *argv[])
 
 static Scheme_Object *u16_ref (int argc, Scheme_Object *argv[])
 {
-  long v;
+  intptr_t v;
   Scheme_Object *p;
   p = ((Scheme_Structure *)argv[0])->slots[0];
   v = ((unsigned short *)SCHEME_CPTR_VAL(p))[SCHEME_INT_VAL(argv[1])];

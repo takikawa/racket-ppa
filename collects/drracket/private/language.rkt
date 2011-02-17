@@ -1,8 +1,4 @@
 #lang racket/unit
-;; WARNING: printf is rebound in this module to always use the 
-;;          original stdin/stdout of drscheme, instead of the 
-;;          user's io ports, to aid any debugging printouts.
-;;          (esp. useful when debugging the users's io)
 
 (require "drsig.rkt"
          string-constants
@@ -36,7 +32,7 @@
   (export drracket:language^)
   
   (define original-output-port (current-output-port))
-  (define (printf . args) (apply fprintf original-output-port args)) 
+  (define (oprintf . args) (apply fprintf original-output-port args)) 
   
   (define-struct text/pos (text start end))
   ;; text/pos = (make-text/pos (instanceof text% number number))
@@ -488,7 +484,7 @@
             (current-eval (drracket:debug:make-debug-eval-handler (current-eval)))]))
        
        (global-port-print-handler
-        (λ (value port)
+        (λ (value port [depth 0])
           (let-values ([(converted-value write?)
                         (call-with-values 
                             (lambda () (simple-module-based-language-convert-value value setting))
@@ -874,7 +870,7 @@
                   parent))
              users-name))))
   
-  ;; users-name-ok? : symbol string (union #f frame% dialog%) string -> boolean
+  ;; users-name-ok? : symbol string (union #f frame% dialog%) path? -> boolean
   ;; returns #t if the string is an acceptable name for
   ;; a saved executable, and #f otherwise.
   (define (users-name-ok? mode extension parent name)

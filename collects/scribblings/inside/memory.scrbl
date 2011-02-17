@@ -56,12 +56,15 @@ The basic collector allocation functions are:
  object for future garbage collection (as described
  in @secref["im:3m"]).}
 
- @item{@cppi{scheme_malloc_allow_interior} --- Allocates a large
- array of pointers such that references are allowed into the middle of
- the block under 3m, and such pointers prevent the block from being
- collected. This procedure is the same as @cppi{scheme_malloc} with
- the conservative collector, but in the that case, having @italic{only}
- a pointer into the interior will not prevent the array from being
+ @item{@cppi{scheme_malloc_allow_interior} --- Allocates an array of
+ pointers such that the array is never moved by the garbage collector
+ and references are allowed into the middle of the block under 3m (and
+ pointers to the middle prevent the block from being collected). Use
+ this procedure sparingly, because small, non-moving objects are
+ handled less efficiently than movable objects by the 3m collector.
+ This procedure is the same as @cppi{scheme_malloc} with the
+ conservative collector, but in the that case, having @italic{only} a
+ pointer into the interior will not prevent the array from being
  collected.}
 
  @item{@cppi{scheme_malloc_atomic_allow_interior} --- Like
@@ -651,13 +654,13 @@ Like @cpp{scheme_malloc}, but in 3m, the type tag determines how the
 @function[(void* scheme_malloc_allow_interior
            [size_t n])]{
 
-Like @cpp{scheme_malloc}, but in 3m, pointers are allowed to
+Like @cpp{scheme_malloc}, but in 3m, the object never moves, and pointers are allowed to
  reference the middle of the object; see @secref["im:memoryalloc"].}
 
 @function[(void* scheme_malloc_atomic_allow_interior
            [size_t n])]{
 
-Like @cpp{scheme_malloc_atomic}, but in 3m, pointers are allowed to
+Like @cpp{scheme_malloc_atomic}, but in 3m, the object never moves, and pointers are allowed to
  reference the middle of the object; see @secref["im:memoryalloc"].}
 
 @function[(char* scheme_strdup
@@ -692,7 +695,7 @@ using @cpp{scheme_free_immobile_box}.}
 
 Frees an immobile box allocated with @cpp{scheme_malloc_immobile_box}.}
 
-@function[(void* scheme_malloc_code [long size])]{
+@function[(void* scheme_malloc_code [intptr_t size])]{
 
 Allocates non-collectable memory to hold executable machine code. Use
 this function instead of @cpp{malloc} to ensure that the allocated
@@ -705,7 +708,7 @@ Frees memory allocated with @cpp{scheme_malloc_code}.}
 
 @function[(void scheme_register_extension_global
            [void* ptr]
-           [long size])]{
+           [intptr_t size])]{
 
 Registers an extension's global variable that can contain Racket
  pointers. The address of the global is given in @var{ptr}, and its
@@ -831,7 +834,7 @@ The @var{tls_index} argument must be @cpp{0}. It is currently
 
 @function[(void scheme_register_static
            [void* ptr]
-           [long size])]{
+           [intptr_t size])]{
 
 Like @cpp{scheme_register_extension_global}, for use in embedding
  applications in situations where the collector does not automatically
@@ -915,16 +918,16 @@ To remove an added finalizer, use @cpp{scheme_subtract_finalizer}.}
            [void* data])]{
 
 Installs a ``will''-like finalizer, similar to @scheme[will-register].
- Scheme finalizers are called one at a time, requiring the collector
+ Will-like finalizers are called one at a time, requiring the collector
  to prove that a value has become inaccessible again before calling
- the next Racket finalizer. Finalizers registered with
+ the next will-like finalizer. Finalizers registered with
  @cpp{scheme_register_finalizer} or @cpp{scheme_add_finalizer} are
- not called until all Racket finalizers have been exhausted.
+ not called until all will-like finalizers have been exhausted.
 
 See @cpp{scheme_register_finalizer}, above, for information about
  the arguments.
 
-There is currently no facility to remove a ``will''-like finalizer.}
+There is currently no facility to remove a will-like finalizer.}
 
 @function[(void scheme_add_finalizer_once
            [void* p]

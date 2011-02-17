@@ -7,10 +7,19 @@
                      racket/gui/base
                      (only-in racket/base path-string?))
           lang/posn
-          "shared.ss"
-          "image-util.ss"
+          "shared.rkt"
           scribble/decode
           scribble/manual)
+
+@(require scribble/eval)
+
+@(define img-eval (make-base-eval))
+@(interaction-eval #:eval img-eval (require 2htdp/image))
+@(interaction-eval #:eval img-eval (require lang/posn))
+
+@(define-syntax-rule 
+   (image-examples exp ...)
+   (examples #:eval img-eval exp ...))
 
 @teachpack["image"]{Images}
 
@@ -44,7 +53,8 @@ Existing images can be rotated, scaled, flipped, and overlaid on top of each oth
   @mode/color-text
   
    @image-examples[(circle 30 "outline" "red")
-                   (circle 20 "solid" "blue")]
+                   (circle 20 "solid" "blue")
+                   (circle 20 100 "blue")]
 
 }
 
@@ -58,12 +68,13 @@ Existing images can be rotated, scaled, flipped, and overlaid on top of each oth
                      [mode (or/c 'outline "outline")] 
                      [pen-or-color (or/c image-color? pen?)])
             image?])]{
-  Constructs an ellipsis with the given width, height, mode, and color.
+  Constructs an ellipse with the given width, height, mode, and color.
 
   @mode/color-text
   
-  @image-examples[(ellipse 40 20 "outline" "black")
-                  (ellipse 20 40 "solid" "blue")] 
+  @image-examples[(ellipse 60 30 "outline" "black")
+                  (ellipse 30 60 "solid" "blue")
+                  (ellipse 30 60 100 "blue")] 
 }
 
 @defproc[(line [x1 real?] [y1 real?] [pen-or-color (or/c pen? image-color?)]) image?]{
@@ -177,6 +188,16 @@ Unlike @racket[scene+curve], if the line passes outside of @racket[image], the i
                              #f 'roman 'normal 'normal #t)]
 }
 
+@defthing[empty-image image?]{
+  The empty image. Its width and height are both zero and it does not draw at all.
+  
+  @image-examples[(image-width empty-image)
+                  (equal? (above empty-image
+                                 (rectangle 10 10 "solid" "red"))
+                          (beside empty-image
+                                  (rectangle 10 10 "solid" "red")))]
+}
+                
 @section{Polygons}
                      
 @defproc*[([(triangle [side-length (and/c real? (not/c negative?))] 
@@ -549,11 +570,11 @@ the @scheme[point-count] argument determines how many points the star has.
 }
 
                      
-@defproc*[([(polygon [vertices (listof posn?)] 
+@defproc*[([(polygon [vertices (listof real-valued-posn?)] 
                      [mode mode?]
                      [color image-color?])
             image?]
-           [(polygon [vertices (listof posn?)] 
+           [(polygon [vertices (listof real-valued-posn?)] 
                      [outline-mode (or/c 'outline "outline")]
                      [pen-or-color (or/c pen? image-color?)])
             image?])]{
@@ -640,17 +661,21 @@ the @scheme[point-count] argument determines how many points the star has.
   }
 
 @defproc[(overlay/xy [i1 image?] [x real?] [y real?] [i2 image?]) image?]{
-  Constructs an image by overlaying @racket[i1] on top of @racket[i2] after
-  shifting @racket[i2] over by @racket[x] pixels to the right and @racket[y] 
-  pixels down.
+  Constructs an image by overlaying @racket[i1] on top of @racket[i2].
+  The images are initially lined up on their upper-left corners and 
+  then @racket[i2] is shifted to the right 
+  by @racket[x] pixels to and down by @racket[y] pixels.
+
+  This is the same as @racket[(underlay/xy i2 (- x) (- y) i1)].
+  
   @image-examples[(overlay/xy (rectangle 20 20 "outline" "black")
                               20 0
                               (rectangle 20 20 "outline" "black"))
                   (overlay/xy (rectangle 20 20 "solid" "red")
-                              20 20
+                              10 10
                               (rectangle 20 20 "solid" "black"))
                   (overlay/xy (rectangle 20 20 "solid" "red")
-                              -20 -20
+                              -10 -10
                               (rectangle 20 20 "solid" "black"))
                   (overlay/xy 
                    (overlay/xy (ellipse 40 40 "outline" "black")
@@ -659,7 +684,13 @@ the @scheme[point-count] argument determines how many points the star has.
                                (ellipse 10 10 "solid" "forestgreen"))
                    20
                    15
-                   (ellipse 10 10 "solid" "forestgreen"))]
+                   (ellipse 10 10 "solid" "forestgreen"))
+                  (overlay/xy
+                   (overlay/xy (circle 30 'solid (color 0 150 0 127))
+                               26 0
+                               (circle 30 'solid (color 0 0 255 127)))
+                   13 26
+                   (circle 30 'solid (color 200 0 0 127)))]
 }
 
 @defproc[(underlay [i1 image?] [i2 image?] [is image?] ...) image?]{
@@ -677,7 +708,13 @@ the @scheme[point-count] argument determines how many points the star has.
                             (ellipse 30 40 "solid" "red")
                             (ellipse 40 30 "solid" "black")
                             (ellipse 50 20 "solid" "red")
-                            (ellipse 60 10 "solid" "black"))]
+                            (ellipse 60 10 "solid" "black"))
+                  (underlay (ellipse 10 60 40 "red")
+                            (ellipse 20 50 40 "red")
+                            (ellipse 30 40 40 "red")
+                            (ellipse 40 30 40 "red")
+                            (ellipse 50 20 40 "red")
+                            (ellipse 60 10 40 "red"))]
   
   }
 
@@ -694,15 +731,21 @@ the @scheme[point-count] argument determines how many points the star has.
                                   (rectangle 50 50 "solid" "seagreen")
                                   (rectangle 40 40 "solid" "silver")
                                   (rectangle 30 30 "solid" "seagreen")
-                                  (rectangle 20 20 "solid" "silver"))]
+                                  (rectangle 20 20 "solid" "silver"))
+                  (underlay/align "left" "middle"
+                                  (rectangle 50 50 50 "seagreen")
+                                  (rectangle 40 40 50 "seagreen")
+                                  (rectangle 30 30 50 "seagreen")
+                                  (rectangle 20 20 50 "seagreen"))]
                                   
   
   }
 
 @defproc[(underlay/xy [i1 image?] [x real?] [y real?] [i2 image?]) image?]{
-  Constructs an image by underlaying @racket[i1] underneath of @racket[i2] after
-  shifting @racket[i2] over by @racket[x] pixels to the right and @racket[y] 
-  pixels down.
+  Constructs an image by underlaying @racket[i1] underneath @racket[i2].
+  The images are initially lined up on their upper-left corners and 
+  then @racket[i2] is shifted to the right 
+  by @racket[x] pixels to and down by @racket[y] pixels.
   
   This is the same as @racket[(overlay/xy i2 (- x) (- y) i1)].
   
@@ -710,10 +753,10 @@ the @scheme[point-count] argument determines how many points the star has.
                                20 0
                                (rectangle 20 20 "outline" "black"))
                   (underlay/xy (rectangle 20 20 "solid" "red")
-                               20 20
+                               10 10
                                (rectangle 20 20 "solid" "black"))
                   (underlay/xy (rectangle 20 20 "solid" "red")
-                               -20 -20
+                               -10 -10
                                (rectangle 20 20 "solid" "black"))
                   (underlay/xy 
                    (underlay/xy (ellipse 40 40 "solid" "gray")
@@ -1072,6 +1115,14 @@ more expensive than with the other shapes.
                   (bitmap icons/b-run.png)]
 }
 
+@defproc[(bitmap/url [url string?]) image?]{
+  Goes out on the web and downloads the image at @racket[url].
+
+  Downloading the image happens each time this function is called, so
+  you may find it simpler to download the image once with a browser 
+  and then paste it into your program or download it and use @racket[bitmap].
+}
+                                 
 @defproc[(image->color-list [image image?]) (listof color?)]{
   Returns a list of colors that correspond to the colors in the
   image, reading from left to right, top to bottom.
@@ -1098,7 +1149,29 @@ more expensive than with the other shapes.
                     3 1))]
   
   }
-                             
+                
+
+@defproc*[([(freeze [image image?]) image?]
+           [(freeze [width (and/c real? (not/c negative?))]
+                    [width (and/c real? (not/c negative?))]
+                    [image image?]) image?]
+           [(freeze [x real?]
+                    [y real?]
+                    [width (and/c real? (not/c negative?))]
+                    [width (and/c real? (not/c negative?))]
+                    [image image?]) image?])]{
+  Freezing an image internally builds a bitmap, crops the image, draws the cropped image
+  into the bitmap and then
+  uses the bitmap to draw that image afterwards. Typically this is used as a performance
+  hint. When an image both contains many sub-images and is going to be drawn many times
+  (but not scaled or rotated),
+  using freeze on the image can substantially improve performance without changing how
+  the image draws.
+  
+  If @racket[freeze] is passed only the image argument, then it crops the image to its bounding
+  box. If it is given three arguments, the two numbers are used as the width and height and
+  the five argument version fully specifies where to crop the image.
+}
 
 @section{Image Properties}
 
@@ -1148,10 +1221,17 @@ This section lists predicates for the basic structures provided by the image lib
 
 @defproc[(mode? [x any/c]) boolean?]{
  Determines if @racket[x] is a mode suitable for
- constructing images. It can be one of
+ constructing images. 
+ 
+ It can be one of
  @racket['solid], @racket["solid"], @racket['outline],
  or @racket["outline"], indicating if the shape is
  filled in or not.
+ 
+ It can also be an integer between @racket[0] and @racket[255] (inclusive)
+ indicating the transparency of the image. The integer @racket[255] is
+ fully opaque, and is the same as @racket["solid"] (or @racket['solid]).
+ The integer @racket[0] means fully transparent.
 }
 
 @defproc[(image-color? [x any/c]) boolean?]{
@@ -1173,9 +1253,23 @@ This section lists predicates for the basic structures provided by the image lib
 
 @defstruct[color ([red (and/c natural-number/c (<=/c 255))]
                   [green (and/c natural-number/c (<=/c 255))]
-                  [blue (and/c natural-number/c (<=/c 255))])]{
-  The @racket[color] struct defines a color with red, green, and blue components
-      that range from @racket[0] to @racket[255].
+                  [blue (and/c natural-number/c (<=/c 255))]
+                  [alpha (and/c natural-number/c (<=/c 255))])]{
+  The @racket[color] struct defines a color with @racket[red], 
+      @racket[green], @racket[blue], and @racket[alpha] components
+      that range from @racket[0] to @racket[255]. 
+      
+    The @racket[red], @racket[green], and @racket[blue] fields
+      combine to make a color, with the higher values meaning more of the given color. 
+      For example, @racket[(make-color 255 0 0)] makes a
+      bright red color and @racket[(make-color 255 0 255)] makes a bright purple.
+    
+      The @racket[alpha] field controls the transparency of the color. A value of @racket[255] means
+      that the color is opaque and @racket[0] means the color is fully transparent.
+      
+  The constructor, @racket[make-color], also accepts only three arguments, in which case
+  the three arguments are used for the @racket[red], @racket[green], and @racket[blue] fields, and the
+  @racket[alpha] field defaults to @racket[255].
 }
 
 @defproc[(y-place? [x any/c]) boolean?]{
@@ -1234,6 +1328,11 @@ Using @racket["pinhole"] or @racket['pinhole] is only allowed when all of the im
   Determines if @racket[x] is an integer greater than or equal to @racket[1].                                           
 }
 
+@defproc[(real-valued-posn? [x any/c]) boolean?]{
+  Determines if @racket[x] is a @racket[posn] whose @racket[_x] and @racket[_y]
+  fields are both @racket[real?] numbers.
+}
+
 @defstruct[pen ([color image-color?]
                 [width (and/c real? (<=/c 0 255))]
                 [style pen-style?]
@@ -1279,7 +1378,7 @@ Using @racket["pinhole"] or @racket['pinhole] is only allowed when all of the im
 
 @section{Equality Testing of Images}
 
-Two images are equal if they draw exactly the same way at their current size
+Two images are @racket[equal?] if they draw exactly the same way at their current size
 (not neccessarily at all sizes) and, if there are pinholes, the pinholes are
 in the same place.
 
@@ -1443,7 +1542,7 @@ are not lost if the image is later clipped to its bounding box.
 @;-----------------------------------------------------------------------------
 @section{Exporting Images to Disk}
 
-In order to use an image as an input to another program (Photoshop, e.g., or 
+In order to use an image as an input to another program (e.g., Photoshop or 
 a web browser), it is necessary to represent it in a format that these programs
 can understand. The @racket[save-image] function provides this functionality, 
 writing an image to disk using the @tt{PNG} format. Since this
@@ -1451,8 +1550,22 @@ format represents an image using a set of pixel values, an image written to disk
 generally contains less information than the image that was written, and cannot be scaled
 or manipulated as cleanly (by any image program).
 
-@defproc[(save-image [image image?] [filename path-string?]) boolean?]{
- writes an image to the path specified by @racket[filename], using the
- @tt{PNG} format.}
+@defproc[(save-image [image image?]
+                     [filename path-string?]
+                     [width 
+                      (and/c real? (not/c negative?))
+                      (image-width image)]
+                     [height 
+                      (and/c real? (not/c negative?))
+                      (image-height image)])
+         boolean?]{
+ Writes an image to the path specified by @racket[filename], using the
+ @tt{PNG} format.
+ 
+ The last two arguments are optional. If present, they determine the width
+ and height of the save image file. If absent, the width and height of the image is used.
+ 
+ }
 
 
+@(close-eval img-eval)

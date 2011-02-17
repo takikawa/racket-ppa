@@ -1,23 +1,17 @@
-#lang scheme/unit
-#|
-
-WARNING: printf is rebound in the body of the unit to always
-         print to the original output port.
-
-|#
+#lang racket/unit
 
 (require string-constants
-         scheme/unit
-         scheme/class
-         scheme/match
-         scheme/path
-         "sig.ss"
-         "../gui-utils.ss"
-         "../preferences.ss"
+         racket/unit
+         racket/class
+         racket/match
+         racket/path
+         "sig.rkt"
+         "../gui-utils.rkt"
+         "../preferences.rkt"
          mred/mred-sig
          mrlib/interactive-value-port
          setup/dirs
-         (prefix-in srfi1: srfi/1))
+         racket/list)
 (require setup/xref
          scribble/xref
          scribble/manual-struct)
@@ -36,10 +30,7 @@ WARNING: printf is rebound in the body of the unit to always
 (init-depend framework:editor^)
 
 (define original-output-port (current-output-port))
-(define (printf . args) 
-  (apply fprintf original-output-port args)
-  (void))
-
+(define (oprintf . args) (apply fprintf original-output-port args))
 
 (define-struct range (start end caret-space? style color) #:inspector #f)
 (define-struct rectangle (left top right bottom style color) #:inspector #f)
@@ -81,7 +72,8 @@ WARNING: printf is rebound in the body of the unit to always
     move/copy-to-edit
     initial-autowrap-bitmap
     get-port-name
-    port-name-matches?))
+    port-name-matches?
+    get-start-of-line))
 
 (define basic-mixin
   (mixin (editor:basic<%> (class->interface text%)) (basic<%>)
@@ -110,8 +102,9 @@ WARNING: printf is rebound in the body of the unit to always
       (let ([filename (get-filename)])
         (or (and (path? id)
                  (path? filename)
-                 (equal? (normal-case-path (normalize-path (get-filename)))
-                         (normal-case-path (normalize-path id))))
+                 (or (equal? id filename) ;; "fast path" check
+                     (equal? (normal-case-path (normalize-path (get-filename)))
+                             (normal-case-path (normalize-path id)))))
             (and (symbol? port-name-identifier)
                  (symbol? id)
                  (equal? port-name-identifier id)))))
@@ -540,8 +533,12 @@ WARNING: printf is rebound in the body of the unit to always
                          ""
                          parent)))
     
+    (define/public (get-start-of-line pos)
+      (line-start-position (position-line pos)))
+    
     (super-new)
     (set-autowrap-bitmap (initial-autowrap-bitmap))))
+
 
 (define (hash-cons! h k v) (hash-set! h k (cons v (hash-ref h k '()))))
 
@@ -620,11 +617,11 @@ WARNING: printf is rebound in the body of the unit to always
              (cond
                [(<= (unbox by) h)
                 ;; the max is relevant when we're already scrolled to the top.
-                (send admin scroll-to localx (max 0 (- localy h)) width height refresh? bias)]
+                (super scroll-editor-to localx (max 0 (- localy h)) width height refresh? bias)]
                [else
-                (send admin scroll-to localx localy width height refresh? bias)]))]
+                (super scroll-editor-to localx localy width height refresh? bias)]))]
           [else
-           (send admin scroll-to localx localy width height refresh? bias)])))
+           (super scroll-editor-to localx localy width height refresh? bias)])))
     
     (define/override (on-event event)
       (cond
@@ -784,9 +781,14 @@ WARNING: printf is rebound in the body of the unit to always
     (inherit begin-edit-sequence end-edit-sequence
              delete insert split-snip find-snip
              get-snip-position get-top-level-window find-string)
-    (define pasting? #f)
-    (define rewriting? #f)
     
+    ;; pasting-info : (or/c #f (listof (list number number)))
+    ;; when #f, we are not in a paste
+    ;; when a list, we are in a paste and the 
+    ;;   list contains the regions that have
+    ;;   been changed by the paste
+    (define paste-info #f)
+
     (define/public (ask-normalize?)
       (cond
         [(preferences:get 'framework:ask-about-paste-normalization)
@@ -811,45 +813,46 @@ WARNING: printf is rebound in the body of the unit to always
         [else
          (preferences:get 'framework:do-paste-normalization)]))
     (define/public (string-normalize s) (string-normalize-nfkc s))
-
-    
     
     (define/override (do-paste start time)
       (dynamic-wind
-       (λ () (set! pasting? #t))
-       (λ () (super do-paste start time))
-       (λ () (set! pasting? #f))))
+       (λ () (set! paste-info '()))
+       (λ () (super do-paste start time)
+         (let ([local-paste-info paste-info])
+           (set! paste-info #f)
+           (deal-with-paste local-paste-info)))
+       ;; use the dynamic wind to be sure that the paste-info is set back to #f
+       ;; in the case that the middle thunk raises an exception
+       (λ () (set! paste-info #f))))
     
-    (define/augment (on-insert start len)
-      (inner (void) on-insert start len)
-      (begin-edit-sequence))
-         
     (define/augment (after-insert start len)
-      (when pasting?
-        (unless rewriting?
-          (set! rewriting? #t)
-          (let/ec abort
-            (define ask? #t)
-            (split-snip start)
-            (split-snip (+ start len))
-            (let loop ([snip (find-snip start 'after-or-none)])
-              (when snip
-                (let ([pos (get-snip-position snip)])
-                  (when (< pos (+ start len))
-                    (when (is-a? snip string-snip%)
-                      (let* ([old (send snip get-text 0 (send snip get-count))]
-                             [new (string-normalize old)])
-                        (unless (equal? new old)
-                          (when ask?
-                            (set! ask? #f)
-                            (unless (ask-normalize?) (abort)))
-                          (let ([snip-pos (get-snip-position snip)])
-                            (delete snip-pos (+ snip-pos (string-length old)))
-                            (insert new snip-pos snip-pos #f)))))
-                    (loop (send snip next)))))))
-          (set! rewriting? #f)))
-      (end-edit-sequence)
+      (when paste-info
+        (set! paste-info (cons (list start len) paste-info)))
       (inner (void) after-insert start len))
+
+    (define/private (deal-with-paste local-paste-info)
+      (let/ec abort
+        (define ask? #t)
+        (for ([insertion (in-list local-paste-info)])
+          (define start (list-ref insertion 0))
+          (define len (list-ref insertion 1))
+          (split-snip start)
+          (split-snip (+ start len))
+          (let loop ([snip (find-snip start 'after-or-none)])
+            (when snip
+              (let ([pos (get-snip-position snip)])
+                (when (< pos (+ start len))
+                  (when (is-a? snip string-snip%)
+                    (let* ([old (send snip get-text 0 (send snip get-count))]
+                           [new (string-normalize old)])
+                      (unless (equal? new old)
+                        (when ask?
+                          (set! ask? #f)
+                          (unless (ask-normalize?) (abort)))
+                        (let ([snip-pos (get-snip-position snip)])
+                          (delete snip-pos (+ snip-pos (string-length old)))
+                          (insert new snip-pos snip-pos #f)))))
+                  (loop (send snip next)))))))))
     
     (super-new)))
 
@@ -2032,6 +2035,7 @@ WARNING: printf is rebound in the body of the unit to always
                (start . >= . unread-start-point))
            (inner #t can-delete? start len)))
     
+    (inherit set-position)
     (define/override (on-local-char key)
       (let ([start (get-start-position)]
             [end (get-end-position)]
@@ -2044,7 +2048,8 @@ WARNING: printf is rebound in the body of the unit to always
           [(and (insertion-point . <= . start)
                 (= start end)
                 (submit-to-port? key))
-           (insert "\n")
+           (insert "\n" (last-position) (last-position))
+           (set-position (last-position) (last-position))
            (for-each/snips-chars
             unread-start-point
             (last-position)
@@ -2371,7 +2376,7 @@ WARNING: printf is rebound in the body of the unit to always
         (let ([install-handlers
                (λ (port)
                  ;; don't want to set the port-print-handler here; 
-                 ;; instead drscheme sets the global-port-print-handler
+                 ;; instead drracket sets the global-port-print-handler
                  ;; to catch fractions and the like
                  (set-interactive-write-handler port)
                  (set-interactive-display-handler port))])
@@ -3127,14 +3132,23 @@ designates the character that triggers autocompletion
     ;; should change the current word to the word in the list.
     (define/private (show-options word start-pos end-pos cursor)
       (let ([x (box 0)]
-            [y (box 0)])
-        (position-location start-pos x y #f)
+            [yb (box 0)]
+            [yt (box 0)])
+        (position-location start-pos x yb #f)
+        (position-location start-pos #f yt #t)
         (set! completions-box (new completion-box%
                                    [completions (new scroll-manager% [cursor cursor])]
-                                   [menu-x (unbox x)]
-                                   [menu-y (+ (unbox y) 2)]
+                                   [line-x (unbox x)]
+                                   [line-y-above (unbox yt)]
+                                   [line-y-below (unbox yb)]
                                    [editor this]))
         (send completions-box redraw)))
+    
+    (define/augment (after-set-position)
+      (when completions-box
+        (destroy-completions-box)
+        (auto-complete))
+      (inner (void) after-set-position))
     
     ;; on-char must handle inputs for two modes: normal text mode and in-the-middle-of-autocompleting mode
     ;; perhaps it would be better to handle this using the state machine pattern
@@ -3299,7 +3313,7 @@ designates the character that triggers autocompletion
          (set! hidden? #t)
          (set! all-completions (send cursor get-completions))
          (set! all-completions-length (send cursor get-length))
-         (set! visible-completions (srfi1:take (send cursor get-completions) (autocomplete-limit)))
+         (set! visible-completions (take (send cursor get-completions) (autocomplete-limit)))
          (set! visible-completions-length (autocomplete-limit))]))
     
     (define/public (get-completions) all-completions)
@@ -3313,14 +3327,14 @@ designates the character that triggers autocompletion
     
     (define/public (scroll-down)
       (when hidden?
-        (set! all-completions (append (srfi1:drop all-completions (autocomplete-limit)) visible-completions))
-        (set! visible-completions (srfi1:take all-completions (autocomplete-limit)))))
+        (set! all-completions (append (drop all-completions (autocomplete-limit)) visible-completions))
+        (set! visible-completions (take all-completions (autocomplete-limit)))))
     
     (define/public (scroll-up)
       (when hidden?
         (let ([n (- all-completions-length (autocomplete-limit))])
-          (set! all-completions (append (srfi1:drop all-completions n) (srfi1:take all-completions n)))
-          (set! visible-completions (srfi1:take all-completions (autocomplete-limit))))))
+          (set! all-completions (append (drop all-completions n) (take all-completions n)))
+          (set! visible-completions (take all-completions (autocomplete-limit))))))
     
     (define/public (narrow char)
       (let ([new-cursor (send cursor narrow char)])
@@ -3371,8 +3385,9 @@ designates the character that triggers autocompletion
   (class* object% (completion-box<%>)
     
     (init-field completions       ; scroll-manager%       the possible completions (all of which have base-word as a prefix)
-                menu-x            ; int                   the menu's top-left x coordinate
-                menu-y            ; int                   the menu's top-left y coordinate
+                line-x            ; int                   the x coordinate of the line where the menu goes
+                line-y-above      ; int                   the y coordinate of the top of the line where the menu goes
+                line-y-below      ; int                   the y coordinate of the bottom of the line where the menu goes
                 editor            ; editor<%>             the owner of this completion box
                 )
     
@@ -3417,7 +3432,7 @@ designates the character that triggers autocompletion
             (cond
               [(zero? num-completions)
                (let-values ([(tw th _1 _2) (send dc get-text-extent (string-constant no-completions) 
-                                                 (get-mt-font dc))])
+                                                 (get-mt-font))])
                  (values (+ menu-padding-x tw menu-padding-x)
                          (+ menu-padding-y th menu-padding-y)))]
               [else
@@ -3429,7 +3444,7 @@ designates the character that triggers autocompletion
                  (cond
                    [(null? pc)
                     (let-values ([(hidden?) (send completions items-are-hidden?)] 
-                                 [(tw th _1 _2) (send dc get-text-extent hidden-completions-text)])
+                                 [(tw th _1 _2) (send dc get-text-extent hidden-completions-text (get-reg-font))])
                       (let ([w (if hidden? (max tw w) w)]
                             [h (if hidden? (+ th h) h)])
                         (initialize-mouse-offset-map! coord-map)
@@ -3439,7 +3454,7 @@ designates the character that triggers autocompletion
                                   (+ offset-h h)))))]
                    [else 
                     (let ([c (car pc)])
-                      (let-values ([(tw th _1 _2) (send dc get-text-extent c)])
+                      (let-values ([(tw th _1 _2) (send dc get-text-extent c (get-reg-font))])
                         (loop (cdr pc)
                               (max tw w)
                               (+ th h)
@@ -3447,12 +3462,18 @@ designates the character that triggers autocompletion
                               (add1 n))))]))])))
         
         (let ([final-x (cond
-                         [(< (+ menu-x w) editor-width)
-                          menu-x]
+                         [(< (+ line-x w) editor-width)
+                          line-x]
                          [(> editor-width w)
                           (- editor-width w)]
-                         [else menu-x])]
-              [final-y menu-y])
+                         [else line-x])]
+              [final-y (cond
+                         [(< (+ line-y-below 2 h) editor-height)
+                          (+ line-y-below 2)]
+                         [(> (- line-y-above h) 0)
+                          (- line-y-above h)]
+                         [else
+                          (+ line-y-below 2)])])
           
           (make-geometry final-x final-y w h vec))))
     
@@ -3466,48 +3487,56 @@ designates the character that triggers autocompletion
     ;; draws the menu to the given drawing context at offset dx, dy
     (define/public (draw dc dx dy)
       (let ([old-pen (send dc get-pen)]
-            [old-brush (send dc get-brush)])
+            [old-brush (send dc get-brush)]
+            [font (send dc get-font)])
+        (define-values (mx my tw th) (get-menu-coordinates))
         (send dc set-pen (send editor get-autocomplete-border-color) 1 'solid)
         (send dc set-brush (send editor get-autocomplete-background-color) 'solid)
-        (let-values ([(mx my tw th) (get-menu-coordinates)])
-          (send dc draw-rectangle (+ mx dx) (+ my dy) tw th)
-          (cond
-            [(send completions empty?)
-             (let ([font (send dc get-font)])
-               (send dc set-font (get-mt-font dc))
-               (send dc draw-text (string-constant no-completions) (+ mx dx menu-padding-x) (+ menu-padding-y my dy))
-               (send dc set-font font))]
-            [else
-             (let loop ([item-number 0] [y my] [pc (send completions get-visible-completions)])
-               (cond
-                 [(null? pc) 
-                  (when (send completions items-are-hidden?)
-                    (let-values ([(hw _1 _2 _3) (send dc get-text-extent hidden-completions-text)])
-                      (send dc draw-text 
-                            hidden-completions-text 
-                            (+ mx dx (- (/ tw 2) (/ hw 2)))
-                            (+ menu-padding-y y dy))))]
-                 [else
-                  (let ([c (car pc)])
-                    (let-values ([(w h d a) (send dc get-text-extent c)])
-                      (when (= item-number highlighted-menu-item)
-                        (send dc set-pen "black" 1 'transparent)
-                        (send dc set-brush (send editor get-autocomplete-selected-color) 'solid)
-                        (send dc draw-rectangle (+ mx dx 1) (+ dy y menu-padding-y 1) (- tw 2) (- h 1)))
-                      (send dc draw-text c (+ mx dx menu-padding-x) (+ menu-padding-y y dy))
-                      (loop (add1 item-number) (+ y h) (cdr pc))))]))]))
+        (send dc draw-rectangle (+ mx dx) (+ my dy) tw th)
+        
+        (cond
+          [(send completions empty?)
+           (let ([font (send dc get-font)])
+             (send dc set-font (get-mt-font))
+             (send dc draw-text (string-constant no-completions) (+ mx dx menu-padding-x) (+ menu-padding-y my dy))
+             (send dc set-font font))]
+          [else
+           (send dc set-font (get-reg-font))
+           (let loop ([item-number 0] [y my] [pc (send completions get-visible-completions)])
+             (cond
+               [(null? pc) 
+                (when (send completions items-are-hidden?)
+                  (let-values ([(hw _1 _2 _3) (send dc get-text-extent hidden-completions-text)])
+                    (send dc draw-text 
+                          hidden-completions-text 
+                          (+ mx dx (- (/ tw 2) (/ hw 2)))
+                          (+ menu-padding-y y dy))))]
+               [else
+                (let ([c (car pc)])
+                  (let-values ([(w h d a) (send dc get-text-extent c)])
+                    (when (= item-number highlighted-menu-item)
+                      (send dc set-pen "black" 1 'transparent)
+                      (send dc set-brush (send editor get-autocomplete-selected-color) 'solid)
+                      (send dc draw-rectangle (+ mx dx 1) (+ dy y menu-padding-y 1) (- tw 2) (- h 1)))
+                    (send dc draw-text c (+ mx dx menu-padding-x) (+ menu-padding-y y dy))
+                    (loop (add1 item-number) (+ y h) (cdr pc))))]))])
         (send dc set-pen old-pen)
-        (send dc set-brush old-brush)))
+        (send dc set-brush old-brush)
+        (send dc set-font font)))
     
-    (define/private (get-mt-font dc)
-      (let ([font (send dc get-font)])
-        (send the-font-list find-or-create-font
-              (send font get-point-size)
-              (send font get-family)
-              'italic
-              (send font get-weight)
-              (send font get-underlined)
-              (send font get-smoothing))))
+    (define/private (get-mt-font)
+      (send the-font-list find-or-create-font
+            (preferences:get 'framework:standard-style-list:font-size)
+            'default
+            'italic
+            'normal))
+    
+    (define/private (get-reg-font)
+      (send the-font-list find-or-create-font
+            (preferences:get 'framework:standard-style-list:font-size)
+            'default
+            'normal
+            'normal))
     
     ;; redraw : -> void
     ;; tells the parent to refresh enough of itself to redraw this menu
@@ -3679,6 +3708,292 @@ designates the character that triggers autocompletion
     (send e insert "\n\n     get")
     (send e set-position (send e last-position) (send e last-position))
     (send f show #t)))
+
+;; ============================================================
+;; line number text%
+
+(define line-numbers<%>
+  (interface ()
+             show-line-numbers!
+             showing-line-numbers?
+             set-line-numbers-color))
+
+;; draws line numbers on the left hand side of a text% object
+(define line-numbers-mixin
+  (mixin ((class->interface text%)) (line-numbers<%>)
+    (inherit get-visible-line-range
+             get-visible-position-range
+             last-line
+             line-location
+             line-paragraph
+             line-start-position
+             line-end-position
+             get-view-size
+             set-padding
+             get-padding)
+
+    (init-field [line-numbers-color "black"])
+    (init-field [show-line-numbers? #t])
+    ;; whether the numbers are aligned on the left or right
+    ;; only two values should be 'left or 'right
+    (init-field [alignment 'right])
+
+    (define/private (number-space)
+      (number->string (max (* 10 (add1 (last-line))) 100)))
+    ;; add an extra 0 so it looks nice
+    (define/private (number-space+1) (string-append (number-space) "0"))
+
+    (define/private (repaint)
+      (send this invalidate-bitmap-cache))
+
+    (define padding-dc (new bitmap-dc% [bitmap (make-screen-bitmap 1 1)]))
+    (define/private (setup-padding)
+      (if (showing-line-numbers?)
+        (let ()
+          (send padding-dc set-font (get-style-font))
+          (define-values (padding-left padding-top padding-right padding-bottom) (get-padding))
+          (define new-padding (text-width padding-dc (number-space+1)))
+          (set-padding new-padding 0 0 0)
+          (when (not (= padding-left new-padding))
+            (repaint)))
+        (set-padding 0 0 0 0)))
+
+    ;; call this method with #t or #f to turn on/off line numbers
+    (define/public (show-line-numbers! what)
+      (set! show-line-numbers? what)
+      (setup-padding))
+
+    (define/public (showing-line-numbers?)
+      show-line-numbers?)
+
+    (define/public (set-line-numbers-color color)
+      (set! line-numbers-color color))
+
+    (define notify-registered-in-list #f)
+
+    (define style-change-notify
+      (lambda (style) (unless style (setup-padding))))
+
+    (define/private (get-style-font)
+      (let* ([style-list (send this get-style-list)]
+             [std (or (send style-list find-named-style "Standard")
+                      (send style-list basic-style))])
+        ;; If the style changes, we should re-check the width of
+        ;; drawn line numbers:
+        (unless (eq? notify-registered-in-list style-list)
+          ;; `notify-on-change' holds the given function weakly:
+          (send style-list notify-on-change style-change-notify)
+          ;; Avoid registering multiple notifications:
+          (set! notify-registered-in-list style-list))
+        ;; Extract the font from the style:
+        (send std get-font)))
+
+    (define-struct saved-dc-state (pen font foreground-color))
+    (define/private (save-dc-state dc)
+      (saved-dc-state (send dc get-pen)
+                      (send dc get-font)
+                      (send dc get-text-foreground)))
+
+    (define/private (restore-dc-state dc dc-state)
+      (send dc set-pen (saved-dc-state-pen dc-state))
+      (send dc set-font (saved-dc-state-font dc-state))
+      (send dc set-text-foreground (saved-dc-state-foreground-color dc-state)))
+
+    ;; set the dc stuff to values we want
+    (define/private (setup-dc dc)
+      (send dc set-pen "black" 1 'solid)
+      (send dc set-font (get-style-font))
+      (send dc set-text-foreground (make-object color% line-numbers-color)))
+
+    (define/private (lighter-color color)
+      (define (integer number)
+        (inexact->exact (round number)))
+      ;; hue 0-360
+      ;; saturation 0-1
+      ;; lightness 0-1
+      ;; returns rgb as float values with ranges 0-1
+      (define (hsl->rgb hue saturation lightness)
+        (define (helper x a b)
+          (define x* (cond
+                       [(< x 0) (+ x 1)]
+                       [(> x 1) (- x 1)]
+                       [else x]))
+          (cond
+            [(< (* x 6) 1) (+ b (* 6 (- a b) x))]
+            [(< (* x 6) 3) a]
+            [(< (* x 6) 4) (+ b (* (- a b) (- 4 (* 6 x))))]
+            [else b]))
+
+        (define h (/ hue 360))
+        (define a (if (< lightness 0.5)
+                    (+ lightness (* lightness saturation))
+                    (- (+ lightness saturation) (* lightness saturation))))
+        (define b (- (* lightness 2) a))
+        (define red (helper (+ h (/ 1.0 3)) a b))
+        (define green (helper h a b))
+        (define blue (helper (- h (/ 1.0 3)) a b))
+        (values red green blue))
+        
+      ;; red 0-255
+      ;; green 0-255
+      ;; blue 0-255
+      (define (rgb->hsl red green blue)
+        (define-values (a b c d)
+                       (if (> red green)
+                         (if (> red blue)
+                           (if (> green blue)
+                             (values red (- green blue) blue 0)
+                             (values red (- green blue) green 0))
+                           (values blue (- red green) green 4))
+                         (if (> red blue)
+                           (values green (- blue red) blue 2)
+                           (if (> green blue)
+                             (values green (- blue red) red 2)
+                             (values blue (- red green) red 4)))))
+        (define hue (if (= a c) 0
+                      (let ([x (* 60 (+ d (/ b (- a c))))])
+                        (if (< x 0) (+ x 360) x))))
+        (define saturation (cond
+                             [(= a c) 0]
+                             [(< (+ a c) 1) (/ (- a c) (+ a c))]
+                             [else (/ (- a c) (- 2 a c))]))
+        (define lightness (/ (+ a c) 2))
+        (values hue saturation lightness))
+      (define-values (hue saturation lightness)
+                     (rgb->hsl (send color red)
+                               (send color green)
+                               (send color blue)))
+      (define-values (red green blue)
+                     (hsl->rgb hue saturation (+ 0.5 lightness)))
+      (make-object color% (min 255 (integer (* 255 red)))
+                          (min 255 (integer (* 255 green)))
+                          (min 255 (integer (* 255 blue)))))
+
+    ;; adjust space so that we are always at the left-most position where
+    ;; drawing looks right
+    (define/private (left-space dc dx)
+      (define left (box 0))
+      (define top (box 0))
+      (define width (box 0))
+      (define height (box 0))
+      (send (send this get-admin) get-view left top width height)
+      (+ (unbox left) dx))
+
+    (define/augment (after-insert start length)
+      (inner (void) after-insert start length)
+      ; in case the max line number changed:
+      (setup-padding))
+
+    (define/augment (after-delete start length)
+      (inner (void) after-delete start length)
+      ; in case the max line number changed:
+      (setup-padding))
+
+    (define/private (draw-numbers dc top bottom dx dy start-line end-line)
+      (define (draw-text . args)
+        (send/apply dc draw-text args))
+
+      (define right-space (text-width dc (number-space)))
+      (define single-space (text-width dc "0"))
+
+      (define last-paragraph #f)
+      (for ([line (in-range start-line end-line)])
+        (define y (line-location line))
+        (define yb (line-location line #f))
+
+        (when (and (y . <= . bottom) (yb . >= . top))
+          (define view (number->string (add1 (line-paragraph line))))
+          (define final-x
+            (+ (left-space dc dx)
+               (case alignment
+                 [(left) 0]
+                 [(right) (- right-space (text-width dc view) single-space)]
+                 [else 0])))
+          (define final-y (+ dy y))
+          (if (and last-paragraph (= last-paragraph (line-paragraph line)))
+            (begin
+              (send dc set-text-foreground (lighter-color (send dc get-text-foreground)))
+              (draw-text view final-x final-y)
+              (send dc set-text-foreground (make-object color% line-numbers-color)))
+            (draw-text view final-x final-y)))
+
+        (set! last-paragraph (line-paragraph line))))
+
+    ;; draw the line between the line numbers and the actual text
+    (define/private (draw-separator dc top bottom dx dy x)
+      (define line-x (+ (left-space dc dx) x))
+      (define line-y1 (+ dy top))
+      (define line-y2 (+ dy bottom))
+      (send dc draw-line line-x line-y1
+                         line-x line-y2))
+
+    ;; `line-numbers-space' will get mutated in the `on-paint' method
+    ;; (define line-numbers-space 0)
+
+    (define/private (draw-line-numbers dc left top right bottom dx dy)
+      (define saved-dc (save-dc-state dc))
+      (setup-dc dc)
+      (define start-line (box 0))
+      (define end-line (box 0))
+      (get-visible-line-range start-line end-line #f)
+
+      #|
+      (define view-width (box 0))
+      (define view-height (box 0))
+      (send this get-view-size view-width view-height)
+      |#
+
+      ; (printf "dx ~a\n" dx)
+      ;; draw it!
+      (draw-numbers dc top bottom dx dy (unbox start-line) (add1 (unbox end-line)))
+      (draw-separator dc top bottom dx dy (text-width dc (number-space)))
+      (restore-dc-state dc saved-dc))
+
+    (define/private (text-width dc stuff)
+      (define-values (font-width font-height baseline space)
+                     (send dc get-text-extent stuff))
+      font-width)
+
+    (define/private (text-height dc stuff)
+      (define-values (font-width height baseline space)
+                     (send dc get-text-extent stuff))
+      height)
+
+    (define old-clipping #f)
+    (define/override (on-paint before? dc left top right bottom dx dy draw-caret)
+      (if show-line-numbers?
+        (begin
+          (if before?
+            (let ()
+              (define left-most (left-space dc dx))
+              (set! old-clipping (send dc get-clipping-region))
+              (define saved-dc (save-dc-state dc))
+              (setup-dc dc)
+              (define clipped (make-object region% dc))
+              (define all (make-object region% dc))
+              (define copy (make-object region% dc))
+              (send all set-rectangle
+                    (+ dx left) (+ dy top)
+                    (- right left) (- bottom top))
+              (if old-clipping
+                (send copy union old-clipping)
+                (send copy union all))
+              (send clipped set-rectangle
+                    0 (+ dy top)
+                    (text-width dc (number-space+1))
+                    (- bottom top))
+              (restore-dc-state dc saved-dc)
+              (send copy subtract clipped)
+              (send dc set-clipping-region copy))
+            (begin
+              (send dc set-clipping-region old-clipping)
+              (draw-line-numbers dc left top right bottom dx dy))))
+          (void))
+      (void)
+      (super on-paint before? dc left top right bottom dx dy draw-caret))
+
+    (super-new)
+    (setup-padding)))
 
 (define basic% (basic-mixin (editor:basic-mixin text%)))
 (define hide-caret/selection% (hide-caret/selection-mixin basic%))

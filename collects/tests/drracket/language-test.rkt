@@ -119,6 +119,7 @@ the settings above should match r5rs
     (test-expression "+1/2i" "0+1/2i")
     (test-expression "779625/32258" "{number 779625/32258 \"24 5433/32258\" mixed}")
     (test-expression "(exact? 1.5)" "#f")
+    (test-expression "(print (floor (sqrt 2)))" "1.0")
     
     (test-expression "(let ([f (lambda (x) x)]) f)" "#<procedure:f>")
     (test-expression ",1" "{stop-22x22.png} unquote: not in quasiquote in: (unquote 1)")
@@ -218,6 +219,7 @@ the settings above should match r5rs
     (test-expression "+1/2i" "0+1/2i")
     (test-expression "779625/32258" "{number 779625/32258 \"24 5433/32258\" mixed}")
     (test-expression "(exact? 1.5)" "#f")
+    (test-expression "(print (floor (sqrt 2)))" "1.0")
     
     (test-expression "(let ([f (lambda (x) x)]) f)" "#<procedure:f>")
     (test-expression ",1" "{stop-22x22.png} unquote: not in quasiquote in: (unquote 1)")
@@ -323,6 +325,7 @@ the settings above should match r5rs
     (test-expression "+1/2i" "0+1/2i")
     (test-expression "779625/32258" "{number 779625/32258 \"24 5433/32258\" mixed}")
     (test-expression "(exact? 1.5)" "#f")
+    (test-expression "(print (floor (sqrt 2)))" #rx"reference to undefined identifier: print")
     
     (test-expression "(let ((f (lambda (x) x))) f)" "#<procedure:f>")
     (test-expression ",1" "{stop-22x22.png} unquote: not in quasiquote in: (unquote 1)")
@@ -477,9 +480,10 @@ the settings above should match r5rs
     (test-expression "779625/32258"
                      "{number 779625/32258 \"24.1684233368466736933473866...\" decimal}"
                      "{number 779625/32258 \"24.1684233368466736933473866...\" decimal}")
-    (test-expression "(exact? 1.5)" 
-                     "true"
-                     "true")
+    (test-expression "(exact? 1.5)" "true")
+    (test-expression "(print (floor (sqrt 2)))" 
+                     "print: name is not defined, not a parameter, and not a primitive name"
+                     "reference to an identifier before its definition: print")
     
     (test-expression "(let ([f (lambda (x) x)]) f)"
                      "let: name is not defined, not a parameter, and not a primitive name"
@@ -643,9 +647,10 @@ the settings above should match r5rs
     (test-expression "779625/32258"
                      "{number 779625/32258 \"24.1684233368466736933473866...\" decimal}"
                      "{number 779625/32258 \"24.1684233368466736933473866...\" decimal}")
-    (test-expression "(exact? 1.5)" 
-                     "true"
-                     "true")
+    (test-expression "(exact? 1.5)" "true")
+    (test-expression "(print (floor (sqrt 2)))" 
+                     "print: name is not defined, not a parameter, and not a primitive name"
+                     "reference to an identifier before its definition: print")
     
     (test-expression "(let ([f (lambda (x) x)]) f)" 
                      "let: name is not defined, not a parameter, and not a primitive name"
@@ -803,9 +808,10 @@ the settings above should match r5rs
     (test-expression "779625/32258" 
                      "{number 779625/32258 \"24.1684233368466736933473866...\" decimal}"
                      "{number 779625/32258 \"24.1684233368466736933473866...\" decimal}")
-    (test-expression "(exact? 1.5)" 
-                     "true"
-                     "true")
+    (test-expression "(exact? 1.5)" "true")
+    (test-expression "(print (floor (sqrt 2)))" 
+                     "print: name is not defined, not a parameter, and not a primitive name"
+                     "reference to an identifier before its definition: print")
     
     (test-expression "(let ([f (lambda (x) x)]) f)" 
                      "function:f"
@@ -960,9 +966,10 @@ the settings above should match r5rs
     (test-expression "779625/32258" 
                      "{number 779625/32258 \"24.1684233368466736933473866...\" decimal}"
                      "{number 779625/32258 \"24.1684233368466736933473866...\" decimal}")
-    (test-expression "(exact? 1.5)" 
-                     "true"
-                     "true")
+    (test-expression "(exact? 1.5)" "true")
+    (test-expression "(print (floor (sqrt 2)))" 
+                     "print: name is not defined, not a parameter, and not a primitive name"
+                     "reference to an identifier before its definition: print")
     
     (test-expression "(let ([f (lambda (x) x)]) f)" 
                      "(lambda (a1) ...)"
@@ -1119,9 +1126,8 @@ the settings above should match r5rs
     (test-expression "779625/32258" 
                      "{number 779625/32258 \"24.1684233368466736933473866...\" decimal}"
                      "{number 779625/32258 \"24.1684233368466736933473866...\" decimal}")
-    (test-expression "(exact? 1.5)" 
-                     "true"
-                     "true")
+    (test-expression "(exact? 1.5)" "true")
+    (test-expression "(print (floor (sqrt 2)))" "#i1.0")
     
     (test-expression "(let ([f (lambda (x) x)]) f)" 
                      "(lambda (a1) ...)"
@@ -1183,7 +1189,7 @@ the settings above should match r5rs
   (let* ([expression "#!/bin/sh\n1"]
          [result "1"]
          [drs (get-top-level-focus-window)]
-         [interactions (send drs get-interactions-text)])
+         [interactions (queue-callback (λ () (send drs get-interactions-text)))])
     (clear-definitions drs)
     (type-in-definitions drs expression)
     (do-execute drs)
@@ -1209,10 +1215,15 @@ the settings above should match r5rs
     (do-execute drs)
     (let* ([interactions (send drs get-interactions-text)]
            [short-lang (last (language))]
-           [get-line (lambda (n) (send interactions get-text 
-                                       (send interactions paragraph-start-position n)
-                                       (send interactions paragraph-end-position n)))]
-           [line0-expect (format "Welcome to DrRacket, version ~a [3m]." (version:version))]
+           [get-line (lambda (n) 
+                       (queue-callback/res
+                        (λ ()
+                          (send interactions get-text 
+                                (send interactions paragraph-start-position n)
+                                (send interactions paragraph-end-position n)))))]
+           [line0-expect (format "Welcome to DrRacket, version ~a [~a]." 
+                                 (version:version)
+                                 (system-type 'gc))]
            [line1-expect 
             (if (string? short-lang)
                 (format "Language: ~a" short-lang)
@@ -1364,19 +1375,21 @@ the settings above should match r5rs
 
 (define (test-error-after-definition)
   (let* ([drs (wait-for-drscheme-frame)]
-         [interactions-text (send drs get-interactions-text)])
+         [interactions-text (queue-callback/res (λ () (send drs get-interactions-text)))])
     (clear-definitions drs)
     (type-in-definitions drs "(define y 0) (define (f x) (/ x y)) (f 2)")
     (do-execute drs)
-    (let ([last-para (send interactions-text last-paragraph)])
+    (let ([last-para (queue-callback/res (λ () (send interactions-text last-paragraph)))])
       (type-in-interactions drs "y\n")
       (wait-for-computation drs)
       (let ([got
              (fetch-output/should-be-tested
               drs
-              (send interactions-text paragraph-start-position (+ last-para 1))
-              (send interactions-text paragraph-end-position
-                    (- (send interactions-text last-paragraph) 1)))])
+              (queue-callback/res (λ () (send interactions-text paragraph-start-position (+ last-para 1))))
+              (queue-callback/res
+               (λ ()
+                 (send interactions-text paragraph-end-position
+                       (- (send interactions-text last-paragraph) 1)))))])
         (unless (equal? got "0")
           (fprintf (current-error-port)
                    "FAILED: test-error-after-definition failed, expected 0, got ~s\n" got))))))
@@ -1389,8 +1402,8 @@ the settings above should match r5rs
 ;; types an expression in the REPL and tests the output from the REPL.
 (define (test-expression expression defs-expected [repl-expected defs-expected])
   (let* ([drs (wait-for-drscheme-frame)]
-         [interactions-text (send drs get-interactions-text)]
-         [definitions-text (send drs get-definitions-text)]
+         [interactions-text (queue-callback/res (λ () (send drs get-interactions-text)))]
+         [definitions-text (queue-callback/res (λ () (send drs get-definitions-text)))]
          [handle-insertion
           (lambda (item)
             (cond
@@ -1432,9 +1445,11 @@ the settings above should match r5rs
     (let ([got
            (fetch-output
             drs
-            (send interactions-text paragraph-start-position 2)
-            (send interactions-text paragraph-end-position
-                  (- (send interactions-text last-paragraph) 1)))])
+            (queue-callback/res (λ () (send interactions-text paragraph-start-position 2)))
+            (queue-callback/res
+             (λ ()
+               (send interactions-text paragraph-end-position
+                     (- (send interactions-text last-paragraph) 1)))))])
       (when (regexp-match re:out-of-sync got)
         (error 'text-expression "got out of sync message"))
       (unless (check-expectation defs-expected got)
@@ -1442,9 +1457,8 @@ the settings above should match r5rs
                  (make-err-msg defs-expected) 
                  'definitions (language) expression defs-expected got)))
     
-    (let ([s (make-semaphore 0)]
-          [dp (defs-prefix)])
-      (queue-callback
+    (let ([dp (defs-prefix)])
+      (queue-callback/res
        (λ ()
          ;; select all except the defs-prefix
          (send definitions-text set-position
@@ -1455,19 +1469,21 @@ the settings above should match r5rs
          (send interactions-text set-position
                (send interactions-text last-position)
                (send interactions-text last-position))
-         (send interactions-text paste)
-         (semaphore-post s)))
-      (semaphore-wait s))
+         (send interactions-text paste))))
     
-    (let ([last-para (send interactions-text last-paragraph)])
+    (let ([last-para (queue-callback/res (λ () (send interactions-text last-paragraph)))])
       (alt-return-in-interactions drs)
       (wait-for-computation drs)
       (let ([got
              (fetch-output
               drs
-              (send interactions-text paragraph-start-position (+ last-para 1))
-              (send interactions-text paragraph-end-position
-                    (- (send interactions-text last-paragraph) 1)))])
+              (queue-callback/res
+               (λ ()
+                 (send interactions-text paragraph-start-position (+ last-para 1))))
+              (queue-callback/res
+               (λ ()
+                 (send interactions-text paragraph-end-position
+                       (- (send interactions-text last-paragraph) 1)))))])
         (when (regexp-match re:out-of-sync got)
           (error 'text-expression "got out of sync message"))
         (unless (check-expectation repl-expected got)
@@ -1492,12 +1508,12 @@ the settings above should match r5rs
 
 (define (run-test)
   (go module-lang)
+  (go pretty-big)
   (go r5rs)
   (go beginner)
   (go beginner/abbrev)
   (go intermediate)
   (go intermediate/lambda)
-  (go advanced)
-  (go pretty-big))
+  (go advanced))
 
 (fire-up-drscheme-and-run-tests run-test)

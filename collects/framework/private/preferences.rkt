@@ -1,4 +1,4 @@
-#lang scheme/unit
+#lang racket/unit
 
 #|
 
@@ -30,7 +30,7 @@ the state transitions / contracts are:
 
   (require string-constants
 	   mzlib/class
-           scheme/file
+           racket/file
            "sig.ss"
            "../gui-utils.ss"
            "../preferences.ss"
@@ -46,7 +46,44 @@ the state transitions / contracts are:
   (define past-failure-ps '())
   (define past-failure-vs '())
   (define number-of-consecutive-failures 0)
-
+  (define stop-warning? #f)
+  
+  (define get-pref-retry-result #f)
+  
+  (define (get-preference/gui sym [def (λ () (error 'get-preference/gui "unknown pref ~s" sym))])
+    (define (try)
+      (get-preference sym
+                      def
+                      #:timeout-lock-there
+                      (λ (filename)
+                        (define what-to-do
+                          (cond
+                            [get-pref-retry-result
+                             get-pref-retry-result]
+                            [else
+                             (define-values (res dont-ask-again?)
+                               (message+check-box/custom
+                                (string-constant error-reading-preferences)
+                                (format (string-constant error-reading-preferences-explanation)
+                                        sym)
+                                (string-constant dont-ask-again-until-drracket-restarted) ;; check label
+                                (string-constant try-again)
+                                (string-constant give-up-and-use-the-default)
+                                #f
+                                #f
+                                '(caution default=1)
+                                1)) ;; cannot return #f here or get-pref-retry-result may get set wrong
+                             (when dont-ask-again?
+                               (set! get-pref-retry-result res))
+                             res]))
+                        (case what-to-do
+                          [(1) (try)]
+                          [(2) (def)]))))
+    (try))
+                          
+  
+  (define put-pref-retry-result #f)
+  
   (define (put-preferences/gui new-ps new-vs)
     
     ;; NOTE: old ones must come first in the list, 
@@ -67,30 +104,46 @@ the state transitions / contracts are:
       (cond
         [(= number-of-consecutive-failures 3)
          (set! number-of-consecutive-failures 0)
-         (let ([mb-ans
-                (message-box/custom
-                 (string-constant error-saving-preferences-title)
-                 (format (string-constant prefs-file-locked)
-                         (path->string path))
-                 (string-constant steal-the-lock-and-retry)
-                 (string-constant cancel)
-                 #f
-                 #f ;;parent
-                 '(default=2 caution))])
-           (case mb-ans
-             [(2 #f) (record-actual-failure)]
-             [(1) 
-              (let ([delete-failed #f])
-                (with-handlers ((exn:fail:filesystem? (λ (x) (set! delete-failed x))))
-                  (delete-file path))
-                (cond
-                  [delete-failed
-                   (record-actual-failure)
-                   (message-box 
-                    (string-constant error-saving-preferences-title)
-                    (exn-message delete-failed))]
-                  [else
-                   (put-preferences ps vs second-fail-func)]))]))]
+         (define the-mode (preferences-lock-file-mode)) 
+         (define mb-ans
+           (case the-mode
+             [(file-lock) 
+              (define-values (checked? res)
+                (if put-pref-retry-result
+                    (values #t 'ok)
+                    (message+check-box
+                     (string-constant error-saving-preferences-title)
+                     (format (string-constant prefs-file-locked-nothing-doing)
+                             path)
+                     (string-constant dont-notify-again-until-drracket-restarted))))
+              (when checked?
+                (set! put-pref-retry-result #t))
+               2]
+             [(exists) 
+              (message-box/custom
+               (string-constant error-saving-preferences-title)
+               (format (string-constant prefs-file-locked)
+                       (path->string path))
+               (string-constant steal-the-lock-and-retry)
+               (string-constant cancel)
+               #f
+               #f ;;parent
+               '(default=2 caution))]
+             [else (error 'preferences.rkt "preferences-lock-file-mode returned unknown mode ~s\n" the-mode)]))
+         (case mb-ans
+           [(2 #f) (record-actual-failure)]
+           [(1) 
+            (let ([delete-failed #f])
+              (with-handlers ((exn:fail:filesystem? (λ (x) (set! delete-failed x))))
+                (delete-file path))
+              (cond
+                [delete-failed
+                 (record-actual-failure)
+                 (message-box 
+                  (string-constant error-saving-preferences-title)
+                  (exn-message delete-failed))]
+                [else
+                 (put-preferences ps vs second-fail-func)]))])]
         [else 
          (record-actual-failure)]))
     (define (second-fail-func path)
@@ -101,6 +154,7 @@ the state transitions / contracts are:
                (path->string path))
        #f
        '(stop ok)))
+    
     (with-handlers ((exn? 
                      (λ (x)
                        (message-box
@@ -206,13 +260,14 @@ the state transitions / contracts are:
   
   (define (make-preferences-dialog)
     (letrec ([stashed-prefs (preferences:get-prefs-snapshot)]
-             [cancelled? #t]
+             [cancelled? #f]
              [frame-stashed-prefs%
               (class frame:basic%
                 (inherit close)
                 (define/override (on-subwindow-char receiver event)
                   (cond
                     [(eq? 'escape (send event get-key-code))
+                     (set! cancelled? #t)
                      (close)]
                     [else 
                      (super on-subwindow-char receiver event)]))
@@ -222,7 +277,7 @@ the state transitions / contracts are:
                 (define/override (show on?)
                   (when on?
                     ;; reset the flag and save new prefs when the window becomes visible
-                    (set! cancelled? #t)
+                    (set! cancelled? #f)
                     (set! stashed-prefs (preferences:get-prefs-snapshot)))
                   (super show on?))
                 (super-new))]
@@ -280,9 +335,10 @@ the state transitions / contracts are:
                               (for-each
                                (λ (f) (f))
                                on-close-dialog-callbacks)
-                              (set! cancelled? #f)
                               (send frame close)))]
-             [cancel-callback (λ () (send frame close))])
+             [cancel-callback (λ () 
+                                (set! cancelled? #t)
+                                (send frame close))])
       (new button%
            [label (string-constant revert-to-defaults)]
            [callback
@@ -293,7 +349,9 @@ the state transitions / contracts are:
       (gui-utils:ok/cancel-buttons
        bottom-panel
        ok-callback
-       (λ (a b) (cancel-callback)))
+       (λ (a b) (cancel-callback))
+       (string-constant ok)
+       (string-constant undo-changes))
       (make-object grow-box-spacer-pane% bottom-panel)
       (send* bottom-panel
         (stretchable-height #f)
@@ -454,8 +512,10 @@ the state transitions / contracts are:
                                'framework:autosaving-on? 
                                (string-constant auto-save-files)
                                values values)
-                   (make-check editor-panel  'framework:backup-files? (string-constant backup-files) values values)
+                   (make-check editor-panel 'framework:backup-files? (string-constant backup-files) values values)
                    (make-check editor-panel 'framework:show-status-line (string-constant show-status-line) values values)
+                   ;; does this not belong here?
+                   ;; (make-check editor-panel 'drracket:show-line-numbers (string-constant show-line-numbers)
                    (make-check editor-panel 'framework:col-offsets (string-constant count-columns-from-one) values values)
                    (make-check editor-panel 
                                'framework:display-line-numbers
@@ -528,18 +588,7 @@ the state transitions / contracts are:
                    (cond
                      [(string? default) string?]
                      [(number? default) number?]
-                     [else (error 'internal-error.set-default "unrecognized default: ~a\n" default)]))
-                  (preferences:add-callback 
-                   name 
-                   (λ (p new-value)
-                     (write-resource 
-                      font-section
-                      font-entry
-                      (if (and (string? new-value)
-                               (string=? font-default-string new-value))
-                          ""
-                          new-value)
-                      font-file))))))])
+                     [else (error 'internal-error.set-default "unrecognized default: ~a\n" default)])))))])
       
       (for-each (set-default build-font-entry font-default-string string?)
                 font-families)
@@ -577,14 +626,7 @@ the state transitions / contracts are:
                             
                             [message (make-object message%
                                        (let ([b (box "")])
-                                         (if (and (get-resource 
-                                                   font-section 
-                                                   (build-font-entry name)
-                                                   b)
-                                                  (not (string=? (unbox b) 
-                                                                 "")))
-                                             (unbox b)
-                                             font-default-string)) 
+                                         font-default-string)
                                        horiz)]
                             [button 
                              (make-object button%
@@ -641,11 +683,7 @@ the state transitions / contracts are:
                   [size-panel (make-object horizontal-panel% main '(border))]
                   [initial-font-size
                    (let ([b (box 0)])
-                     (if (get-resource font-section 
-                                       font-size-entry
-                                       b)
-                         (unbox b)
-                         font-default-size))]
+                     font-default-size)]
                   [size-slider
                    (make-object slider%
                      (string-constant font-size-slider-label)

@@ -7,14 +7,18 @@
          "const.ss"
          "mline.ss"
          "private.ss"
+         racket/snip/private/private
+         racket/snip/private/prefs
          "editor.ss"
+         "editor-data.rkt"
          "undo.ss"
-         "style.ss"
-         "snip.ss"
-         "snip-flags.ss"
-         "snip-admin.ss"
+         racket/snip
+         racket/snip/private/snip-flags
+         "standard-snip-admin.rkt"
          "keymap.ss"
-         (only-in "cycle.ss" set-text%!)
+         (only-in "cycle.ss" 
+                  printer-dc%
+                  set-text%!)
          "wordbreak.ss"
          "stream.ss"
          "wx.ss")
@@ -42,19 +46,18 @@
 
 (define TAB-WIDTH 20.0)
 
+;; Used when max-width is set, but padding takes up
+;; all available space:
+(define ZERO-LINE-WIDTH 0.1)
+
 (define show-outline-for-inactive?
-  (and (get-preference 'MrEd:outline-inactive-selection) #t))
+  (and (get-preference* 'GRacket:outline-inactive-selection) #t))
 
 (define caret-pen (send the-pen-list find-or-create-pen "BLACK" 1 'xor))
 (define outline-pen (send the-pen-list find-or-create-pen "BLACK" 0 'transparent))
-(define outline-inactive-pen (send the-pen-list find-or-create-pen "BLACK" 1 'hilite))
-(define outline-brush (send the-brush-list find-or-create-brush "BLACK" 'hilite))
-(define xpattern #"\x88\x88\0\0\x22\x22\0\0\x88\x88\0\0\x22\x22\0\0\x88\x88\0\0\x22\x22\0\0\x88\x88\0\0\x22\x22\0\0")
-(define outline-nonowner-brush (let ([b (new brush%)])
-                                 (send b set-color "BLACK")
-                                 (send b set-stipple (make-object bitmap% xpattern 16 16))
-                                 (send b set-style 'xor)
-                                 b))
+(define outline-inactive-pen (send the-pen-list find-or-create-pen (get-highlight-background-color) 1 'solid))
+(define outline-brush (send the-brush-list find-or-create-brush (get-highlight-background-color) 'solid))
+(define outline-nonowner-brush outline-brush)
 (define clear-brush (send the-brush-list find-or-create-brush "WHITE" 'solid))
 
 (define (showcaret>= a b)
@@ -81,7 +84,6 @@
   (inherit on-change
            on-local-event
            on-local-char
-           scroll-editor-to
            free-old-copies
            install-copy-buffer
            begin-copy-buffer
@@ -196,6 +198,13 @@
   (define min-height 0.0)
   (define wrap-bitmap-width 0.0)
 
+  (define max-line-width 0.0)
+  
+  (define padding-l 0.0) ; space conceptually at the left of each line,
+  (define padding-t 0.0) ; space conceptually added to the top of the first line,
+  (define padding-r 0.0) ; etc. --- locations in mline do not take this
+  (define padding-b 0.0) ;          padding into account
+
   (define auto-wrap-bitmap #f)
 
   (define delay-refresh 0)
@@ -225,11 +234,12 @@
 
   (define extra-line-h 0.0)
 
-  (define total-height 0.0) ; total height/width in canvas units
+  (define total-height 0.0) ; total height/width in canvas units, not including padding
   (define total-width 0.0)
   (define final-descent 0.0) ; descent of last line
   (define initial-space 0.0) ; space from first line
   (define initial-line-base 0.0) ; inverse descent from first line
+  (define reported-padding (vector 0.0 0.0 0.0 0.0))
 
   (define/public (get-s-snips) snips)
   (define/public (get-s-last-snip) last-snip)
@@ -941,7 +951,7 @@
            (let-values ([(topx botx)
                          (if (botx . < . topx)
                              ;; when the end position is to the left of the start position 
-                             (values 0 total-width)
+                             (values 0 (+ total-width padding-t padding-b))
                              (values topx botx))])
              (scroll-editor-to topx topy (- botx topx) (- boty topy) refresh? bias)))]))))
 
@@ -2025,10 +2035,10 @@
         (copy extend? time start end)
         (delete start end))))
 
-  (def/override (do-copy [exact-nonnegative-integer? startp] 
-                         [exact-nonnegative-integer? endp] 
-                         [exact-integer? time] 
-                         [bool? extend?])
+  (def/public (do-copy [exact-nonnegative-integer? startp] 
+                       [exact-nonnegative-integer? endp] 
+                       [exact-integer? time] 
+                       [bool? extend?])
     (let ([startp (max startp 0)]
           [endp (min endp len)])
       (unless (endp . <= . startp)
@@ -2087,10 +2097,10 @@
         (set! prev-paste-start start)
         (set! prev-paste-end (+ start delta)))))
 
-  (define/override (do-paste start time)
+  (define/public (do-paste start time)
     (do-generic-paste the-clipboard start time))
 
-  (define/override (do-paste-x-selection start time)
+  (define/public (do-paste-x-selection start time)
     (do-generic-paste the-x-selection-clipboard start time))
 
   (define/private (generic-paste x-sel? time start end)
@@ -2490,6 +2500,28 @@
 
   (def/public (get-line-spacing) line-spacing)
 
+  (def/public (get-padding)
+    (values padding-l padding-t padding-r padding-b))
+  (def/public (set-padding [nonnegative-real? l]
+                           [nonnegative-real? t]
+                           [nonnegative-real? r]
+                           [nonnegative-real? b])
+    (unless (and (= l padding-l)
+                 (= t padding-t)
+                 (= r padding-r)
+                 (= b padding-b))
+      (set! padding-l (exact->inexact l))
+      (set! padding-t (exact->inexact t))
+      (set! padding-r (exact->inexact r))
+      (set! padding-b (exact->inexact b))
+      (unless (= 0.0 max-width)
+        (set! max-line-width (max (- max-width padding-t padding-r)
+                                  ZERO-LINE-WIDTH)))
+      (set! flow-invalid? #t)
+      (set! graphic-maybe-invalid? #t)
+      (set! changed? #t)
+      (need-refresh -1 -1)))
+
   (def/override (get-max-width)
     (if (max-width . <= . 0)
         'none
@@ -2519,6 +2551,10 @@
                        (+ CURSOR-WIDTH 1)
                        w)])
             (set! max-width w)
+            (set! max-line-width (if (= w 0.0)
+                                     0.0
+                                     (max (- w padding-t padding-r)
+                                          ZERO-LINE-WIDTH)))
             (set! flow-invalid? #t)
             (set! graphic-maybe-invalid? #t)
             (set! changed? #t)
@@ -2567,7 +2603,9 @@
                              [(symbol-in guess same copy standard text text-force-cr) [format 'guess]]
                              [any? [replace-styles? #t]])
     (if (or write-locked? s-user-locked?)
-        'guess ;; FIXME: docs say that this is more specific
+        (if (not (detect-wxme-file (method-name 'text% 'insert-file) f #t))
+            'text
+            'standard)
         (do-insert-file (method-name 'text% 'insert-file) f format replace-styles?)))
 
   (define/private (do-insert-file who f fmt clear-styles?)
@@ -2789,7 +2827,7 @@
      [(i . >= . num-valid-lines) len]
      [else
       (let* ([line (mline-find-line (unbox line-root-box) i)]
-             [x (- x (mline-get-left-location line max-width))])
+             [x (- x padding-l (mline-get-left-location line max-line-width))])
         (if (x . <= . 0)
             (find-first-visible-position line)
             (let ([p (mline-get-position line)])
@@ -2935,15 +2973,16 @@
     (when onit?
       (set-box! onit? #f))
     
-    (cond
-     [(not (check-recalc #t #f)) 0]
-     [(y . <= . 0) 0]
-     [(or (y . >= . total-height) (and extra-line? (y . >= . (- total-height extra-line-h))))
-      (- num-valid-lines (if extra-line? 0 1))]
-     [else
-      (when onit?
-        (set-box! onit? #t))
-      (mline-get-line (mline-find-location (unbox line-root-box) y))]))
+    (let ([y (- y padding-t)])
+      (cond
+       [(not (check-recalc #t #f)) 0]
+       [(y . <= . 0) 0]
+       [(or (y . >= . total-height) (and extra-line? (y . >= . (- total-height extra-line-h))))
+        (- num-valid-lines (if extra-line? 0 1))]
+       [else
+        (when onit?
+          (set-box! onit? #t))
+        (mline-get-line (mline-find-location (unbox line-root-box) y))])))
 
   (def/public (find-position [real? x] [real? y]
                              [maybe-box? [ateol? #f]]
@@ -3059,11 +3098,13 @@
                (if whole-line?
                    (begin
                      (when (or tx bx)
-                       (let ([xl (mline-get-left-location first-line max-width)])
+                       (let ([xl (+ (mline-get-left-location first-line max-line-width)
+                                    padding-l)])
                          (when tx (set-box! tx xl))
                          (when bx (set-box! bx xl))))
                      (when (or ty by)
-                       (let ([yl (mline-get-location first-line)])
+                       (let ([yl (+ (mline-get-location first-line)
+                                    padding-t)])
                          (when ty (set-box! ty yl))
                          (when by (set-box! by (+ yl (mline-h first-line))))))
                      #f)
@@ -3071,19 +3112,21 @@
               [(start . >= . len)
                (if (and extra-line? (not eol?))
                    (begin
-                     (when ty (set-box! ty (- total-height extra-line-h)))
-                     (when by (set-box! by total-height))
-                     (when tx (set-box! tx 0))
-                     (when bx (set-box! bx 0))
+                     (when ty (set-box! ty (+ (- total-height extra-line-h) padding-t)))
+                     (when by (set-box! by (+ total-height padding-t)))
+                     (when tx (set-box! tx padding-l))
+                     (when bx (set-box! bx padding-l))
                      #f)
                    (if (or whole-line? (zero? len))
                        (begin
                          (when (or tx bx)
-                           (let ([xl (mline-get-right-location last-line max-width)])
+                           (let ([xl (+ (mline-get-right-location last-line max-line-width)
+                                        padding-l)])
                              (when tx (set-box! tx xl))
                              (when bx (set-box! bx xl))))
                          (when (or ty by)
-                           (let ([yl (mline-get-location last-line)])
+                           (let ([yl (+ (mline-get-location last-line)
+                                        padding-t)])
                              (when ty (set-box! ty yl))
                              (when by (set-box! by (+ yl (mline-h last-line))))))
                          #f)
@@ -3093,7 +3136,7 @@
                  (if whole-line?
                      (begin
                        (when (or by ty)
-                         (let ([yl (mline-get-location line)])
+                         (let ([yl (+ (mline-get-location line) padding-t)])
                            (when ty (set-box! ty yl))
                            (when by (set-box! by (+ yl (mline-h line))))))
                        (if (not (or tx bx))
@@ -3106,8 +3149,8 @@
             (set! write-locked? #t)
             (set! flow-locked? #t)
 
-            (let ([horiz (mline-get-left-location line max-width)]
-                  [topy (mline-get-location line)]
+            (let ([horiz (+ (mline-get-left-location line max-line-width) padding-l)]
+                  [topy (+ (mline-get-location line) padding-t)]
                   [start (- start (mline-get-position line))])
               (let-values ([(snip horiz start dc)
                             (cond
@@ -3187,18 +3230,20 @@
                              [any? [top? #t]])
     (cond
      [(not (check-recalc #t #f)) 0.0]
-     [(i . < . 0) 0.0]
-     [(i . > . num-valid-lines) total-height]
+     [(i . < . 0) padding-t]
+     [(i . > . num-valid-lines) (+ padding-t total-height)]
      [(= num-valid-lines i)
-      (if extra-line?
-          (- total-height extra-line-h)
-          total-height)]
+      (+ padding-t
+         (if extra-line?
+             (- total-height extra-line-h)
+             total-height))]
      [else
       (let* ([line (mline-find-line (unbox line-root-box) i)]
              [y (mline-get-location line)])
-        (if top?
-            y
-            (+ y (mline-h line))))]))
+        (+ padding-t
+           (if top?
+               y
+               (+ y (mline-h line)))))]))
 
   (define/private (do-line-position start? i visible-only?)
     (cond
@@ -3344,41 +3389,42 @@
 
   (def/override (get-extent [maybe-box? w] [maybe-box? h])
     (check-recalc #t #f)
-    (when w (set-box! w total-width))
-    (when h (set-box! h total-height)))
+    (when w (set-box! w (+ total-width padding-l padding-r)))
+    (when h (set-box! h (+ total-height padding-t padding-b))))
 
   (def/override (get-descent)
     (check-recalc #t #f)
-    final-descent)
+    (+ final-descent padding-b))
   
   (def/override (get-space)
     (check-recalc #t #f)
-    initial-space)
+    (+ initial-space padding-t))
   
   (def/public (get-top-line-base)
     (check-recalc #t #f)
-    initial-line-base)
+    (+ initial-line-base padding-t))
   
   (def/override (scroll-line-location [exact-nonnegative-integer? scroll])
     (if read-locked?
         0.0
         (begin
           (check-recalc #t #f)
-          (let ([total (+ (mline-get-scroll last-line) (mline-numscrolls last-line))])
-            (cond
-             [(= total scroll)
-              (if extra-line?
-                  (- total-height extra-line-h)
-                  total-height)]
-             [(scroll . > . total)
-              total-height]
-             [else
-              (let* ([line (mline-find-scroll (unbox line-root-box) scroll)]
-                     [p (mline-get-scroll line)]
-                     [y (mline-get-location line)])
-                (if (p . < . scroll)
-                    (+ y (mline-scroll-offset line (- scroll p)))
-                    y))])))))
+          (+ padding-t
+             (let ([total (+ (mline-get-scroll last-line) (mline-numscrolls last-line))])
+               (cond
+                [(= total scroll)
+                 (if extra-line?
+                     (- total-height extra-line-h)
+                     (+ total-height padding-b))]
+                [(scroll . > . total)
+                 (+ total-height padding-b)]
+                [else
+                 (let* ([line (mline-find-scroll (unbox line-root-box) scroll)]
+                        [p (mline-get-scroll line)]
+                        [y (mline-get-location line)])
+                   (if (p . < . scroll)
+                       (+ y (mline-scroll-offset line (- scroll p)))
+                       y))]))))))
 
   (def/override (num-scroll-lines)
     (if read-locked?
@@ -3395,12 +3441,12 @@
         (begin
           (check-recalc #t #f)
           (if (and extra-line?
-                   (p . >= . (- total-height extra-line-h)))
+                   (p . >= . (- total-height extra-line-h padding-t)))
               (- (num-scroll-lines) 1)
-              (let* ([line (mline-find-location (unbox line-root-box) p)]
+              (let* ([line (mline-find-location (unbox line-root-box) (- p padding-t))]
                      [s (mline-get-scroll line)])
                 (if ((mline-numscrolls line) . > . 1)
-                    (let ([y (mline-get-location line)])
+                    (let ([y (+ (mline-get-location line) padding-t)])
                       (+ s (mline-find-extra-scroll line (- p y))))
                     s))))))
 
@@ -3853,6 +3899,14 @@
           #t]
          [else #f]))]))
 
+  (define/override (scroll-editor-to localx localy w h refresh? bias)
+    (super scroll-editor-to 
+           (- localx padding-l)
+           (- localy padding-t)
+           (+ w padding-l padding-r)
+           (+ h padding-t padding-b)
+           refresh? bias))
+
   (def/public (scroll-to [snip% snip] [real? localx] [real? localy]
                          [nonnegative-real? w] [nonnegative-real? h]
                          [any? refresh?]
@@ -3949,8 +4003,8 @@
                                          [real? [y 0.0]]
                                          [(make-alts nonnegative-real? (symbol-in end display-end)) [w 'end]]
                                          [(make-alts nonnegative-real? (symbol-in end display-end)) [h 'end]])
-    (let ([w (if (eq? w 'end) (- total-width x) w)]
-          [h (if (eq? h 'end) (- total-height y) h)])
+    (let ([w (if (eq? w 'end) (- (+ total-width padding-l padding-r) x) w)]
+          [h (if (eq? h 'end) (- (+ total-height padding-t padding-b) y) h)])
 
       (refresh-box x y w h)
       (when (zero? delay-refresh)
@@ -4540,7 +4594,7 @@
 
       (let loop ([snip start]
                  [p p]
-                 [_total-width 0])
+                 [_total-width padding-l])
         (if (and snip (not (has-flag? (snip->flags snip) HARD-NEWLINE)))
             (begin
               (when (not checking-underflow?)
@@ -4667,7 +4721,7 @@
                      (set! write-locked? #t)
                      (set! flow-locked? #t)
                      
-                     (let ([w (- max-width CURSOR-WIDTH)])
+                     (let ([w (- max-width padding-l padding-t CURSOR-WIDTH)])
                        (let loop ([-changed? #f])
                          (if (begin0
                               (mline-update-flow (unbox line-root-box) line-root-box this w dc
@@ -4701,7 +4755,8 @@
             (set! num-valid-lines (mline-number (unbox line-root-box))))
 
           (let ([-changed?
-                 (or (mline-update-graphics (unbox line-root-box) this dc)
+                 (or (mline-update-graphics (unbox line-root-box) this dc
+                                            padding-l padding-t)
                      -changed?)])
 
             (if (and (not -changed?)
@@ -4741,13 +4796,17 @@
                                      (not (= total-width X))
                                      (not (= final-descent descent))
                                      (not (= initial-space space))
-                                     (not (= line-base initial-line-base)))
+                                     (not (= line-base initial-line-base))
+                                     (not (equal? reported-padding
+                                                  (vector padding-l padding-t padding-r padding-b))))
                                  (begin
                                    (set! total-height Y)
                                    (set! total-width X)
                                    (set! final-descent descent)
                                    (set! initial-space space)
                                    (set! initial-line-base line-base)
+                                   (set! reported-padding
+                                         (vector padding-l padding-t padding-r padding-b))
                                    #t)
                                  #f)])
 
@@ -4759,7 +4818,7 @@
 
                         (when (and resized? s-admin)
                           (send s-admin resized #f))
-                        
+
                         (on-reflow)))))))))))
 
   (def/public (on-reflow) (void))
@@ -4887,7 +4946,9 @@
                                                                (min refresh-t top)
                                                                top)
                                                       right (if (not refresh-box-unset?)
-                                                                (max bottom refresh-b)
+                                                                (if (eq? refresh-b 'display-end)
+                                                                    bottom
+                                                                    (max bottom refresh-b))
                                                                 bottom)
                                                       #t))
                                             (values (max refresh-l left)
@@ -4931,7 +4992,7 @@
 
   ;; called by the administrator to trigger a redraw
   (def/override (refresh [real? left] [real? top] [nonnegative-real? width] [nonnegative-real? height]
-                         [(symbol-in no-caret show-inactive-caret show-caret) show-caret]
+                         [caret-status? show-caret]
                          [(make-or-false color%) bg-color])
     (cond
      [(or (width . <= . 0) (height . <= . 0)) (void)]
@@ -4953,6 +5014,7 @@
 
           (let ([show-caret
                  (if (and caret-blinked?
+                          (not (pair? show-caret))
                           (not (eq? show-caret 'no-caret))
                           (not s-caret-snip))
                      ;; maintain caret-blinked invariant
@@ -4977,7 +5039,9 @@
                              (dc . is-a? . printer-dc%))]
                     [show-xsel?
                      (and ALLOW-X-STYLE-SELECTION?
-                          (or (not (eq? 'show-caret show-caret)) s-caret-snip)
+                          (or (and (not (eq? 'show-caret show-caret)) 
+                                   (not (pair? show-caret)))
+                              s-caret-snip)
                           (eq? this editor-x-selection-owner)
                           (not flash?)
                           (not (= endpos startpos)))])
@@ -5040,16 +5104,23 @@
 
                       (send dc set-clipping-rect (- left x) (- top y) width height)
 
-                      (do-redraw dc top bottom left right (- y) (- x) show-caret show-xsel? bg-color)
+                      (send dc suspend-flush)
 
-                      (send dc set-clipping-region rgn)
+                      (dynamic-wind
+                          void
+                          (lambda ()
+                            (do-redraw dc top bottom left right (- y) (- x) show-caret show-xsel? bg-color))
+                          (lambda ()
+                            (send dc set-clipping-region rgn)
+                            
+                            (send dc set-brush brush)
+                            (send dc set-pen pen)
+                            (send dc set-font font)
+                            (send dc set-text-foreground fg)
+                            (send dc set-text-background bg)
+                            (send dc set-text-mode bgmode)
 
-                      (send dc set-brush brush)
-                      (send dc set-pen pen)
-                      (send dc set-font font)
-                      (send dc set-text-foreground fg)
-                      (send dc set-text-background bg)
-                      (send dc set-text-mode bgmode))))))
+                            (send dc resume-flush))))))))
 
           (end-sequence-lock)))]))
   
@@ -5067,9 +5138,10 @@
 
         (send dc set-text-mode 'solid)
 
-        (let ([line (mline-find-location (unbox line-root-box) starty)])
+        (let ([line (mline-find-location (unbox line-root-box) (- starty padding-t))])
 
-          (when bg-color
+          (when (and bg-color
+                     (not (pair? show-caret)))
             (let ([lsave-pen (send dc get-pen)]
                   [lsave-brush (send dc get-brush)])
               (let ([wb (if (and (= 255 (send bg-color red))
@@ -5090,14 +5162,30 @@
           (let* ([call-on-paint
                   (lambda (pre?)
                     (on-paint pre? dc leftx starty rightx endy dx dy
-                              (if (not s-caret-snip)
+                              (if (or (pair? show-caret)
+                                      (not s-caret-snip))
                                   show-caret
                                   'no-caret)))]
                  [paint-done
                   (lambda ()
                     (call-on-paint #f)
                     (set! write-locked? wl?)
-                    (set! flow-locked? #f))])
+                    (set! flow-locked? #f))]
+
+                 [local-caret-pen
+                  (if bg-color
+                      (let ([r (send bg-color red)]
+                            [g (send bg-color green)]
+                            [b (send bg-color blue)])
+                        (if (and (= r 255) (= g 255) (= b 255))
+                            caret-pen
+                            (make-object pen% (make-object color% 
+                                                           (- 255 r)
+                                                           (- 255 g)
+                                                           (- 255 b))
+                                         (send caret-pen get-width) 
+                                         'solid)))
+                      caret-pen)])
 
             (call-on-paint #t)
             
@@ -5108,13 +5196,14 @@
                     [tendy (+ endy dy)])
                 (let lloop ([line line]
                             [old-style #f]
-                            [ycounter (mline-get-location line)]
+                            [ycounter (+ (mline-get-location line) padding-t)]
                             [pcounter (mline-get-position line)]
                             [prevwasfirst 0.0])
                   (cond
                    [(not line)
                     (send (send s-style-list basic-style) switch-to dc old-style)
-                    (when (and (eq? 'show-caret show-caret) (not s-caret-snip)
+                    (when (and (eq? 'show-caret show-caret) 
+                               (not s-caret-snip)
                                extra-line?
                                (not pos-at-eol?)
                                (= len -startpos)
@@ -5122,8 +5211,10 @@
                                hilite-on?)
                       (let ([y ycounter]
                             [save-pen (send dc get-pen)])
-                        (send dc set-pen caret-pen)
-                        (send dc draw-line dx (+ y dy) dx (sub1 (+ y extra-line-h dy)))
+                        (send dc set-pen local-caret-pen)
+                        (send dc draw-line 
+                              (+ dx padding-l) (+ y dy)
+                              (+ dx padding-l) (sub1 (+ y extra-line-h dy)))
                         (send dc set-pen save-pen)))
                     (paint-done)]
                    [(ycounter . >= . endy)
@@ -5133,120 +5224,124 @@
                           [last (snip->next (mline-last-snip line))]
                           [bottombase (+ ycounter (mline-bottombase line))]
                           [topbase (+ ycounter (mline-topbase line))])
-                      (let-values ([(hilite-some? hsxs hsxe hsys hsye old-style)
-                                    (let sloop ([snip first]
-                                                [p pcounter]
-                                                [x (mline-get-left-location line max-width)]
-                                                [hilite-some? #f]
-                                                [hsxs 0.0]
-                                                [hsxe 0.0]
-                                                [hsys 0.0]
-                                                [hsye 0.0]
-                                                [old-style old-style])
-                                      (if (eq? snip last)
-                                          (values hilite-some? hsxs hsxe hsys hsye old-style)
-                                          (begin
-                                            (send (snip->style snip) switch-to dc old-style)
-                                            (let ([old-style (snip->style snip)])
-                                              (let-boxes ([w 0.0] [h 0.0] [descent 0.0] [space 0.0])
-                                                  (send snip get-extent dc x ycounter w h descent space #f #f)
-                                                (let* ([align (send (snip->style snip) get-alignment)]
-                                                       [down
-                                                        (cond
-                                                         [(eq? 'bottom align)
-                                                          (+ (- bottombase h) descent)]
-                                                         [(eq? 'top align)
-                                                          (- topbase space)]
-                                                         [else
-                                                          (- (/ (+ topbase bottombase) 2) 
-                                                             (/ (- h descent space) 2)
-                                                             space)])])
+                      (define (process-snips draw? maybe-hilite? old-style)
+                        (let sloop ([snip first]
+                                    [p pcounter]
+                                    [x (+ (mline-get-left-location line max-line-width) padding-l)]
+                                    [hilite-some? #f]
+                                    [hsxs 0.0]
+                                    [hsxe 0.0]
+                                    [hsys 0.0]
+                                    [hsye 0.0]
+                                    [old-style old-style])
+                          (if (eq? snip last)
+                              (values hilite-some? hsxs hsxe hsys hsye old-style)
+                              (begin
+                                (send (snip->style snip) switch-to dc old-style)
+                                (let ([old-style (snip->style snip)])
+                                  (let-boxes ([w 0.0] [h 0.0] [descent 0.0] [space 0.0])
+                                      (send snip get-extent dc x ycounter w h descent space #f #f)
+                                    (let* ([align (send (snip->style snip) get-alignment)]
+                                           [down
+                                            (cond
+                                             [(eq? 'bottom align)
+                                              (+ (- bottombase h) descent)]
+                                             [(eq? 'top align)
+                                              (- topbase space)]
+                                             [else
+                                              (- (/ (+ topbase bottombase) 2) 
+                                                 (/ (- h descent space) 2)
+                                                 space)])])
 
-                                                  (when (and (x . <= . rightx)
-                                                             ((+ x w) . >= . leftx))
-                                                    (send snip draw dc (+ x dx) (+ down dy)
-                                                          tleftx tstarty trightx tendy
-                                                          dx dy
-                                                          (if (eq? snip s-caret-snip)
-                                                              show-caret
-                                                              'no-caret)))
+                                      (when draw?
+                                        (when (and (x . <= . rightx)
+                                                   ((+ x w) . >= . leftx))
+                                          (send snip draw dc (+ x dx) (+ down dy)
+                                                tleftx tstarty trightx tendy
+                                                dx dy
+                                                (if (pair? show-caret)
+                                                    (cons p (+ p (snip->count snip)))
+                                                    (if (eq? snip s-caret-snip)
+                                                        show-caret
+                                                        (if (and maybe-hilite?
+                                                                 (-endpos . > . p)
+                                                                 (-startpos . < . (+ p (snip->count snip))))
+                                                            (cons (max 0 (- -startpos p))
+                                                                  (min (snip->count snip) (- -endpos p)))
+                                                            'no-caret))))))
 
-                                                  ;; the rules for hiliting are surprisingly complicated:
-                                                  (let ([hilite? 
-                                                         (and
-                                                          hilite-on?
-                                                          (or show-xsel?
-                                                              (and (not s-caret-snip)
-                                                                   (or (eq? 'show-caret show-caret)
-                                                                       (and (show-caret . showcaret>= . s-inactive-caret-threshold)
-                                                                            (not (= -endpos -startpos))))))
-                                                          (if pos-at-eol?
-                                                              (= -startpos (+ p (snip->count snip)))
-                                                              (or (and (-startpos . < . (+ p (snip->count snip)))
-                                                                       (-endpos . >= . p)
-                                                                       (or (= -endpos -startpos) (-endpos . > . p)))
-                                                                  (and (= (+ p (snip->count snip)) len)
-                                                                       (= len -startpos))))
-                                                          (or (not (has-flag? (snip->flags snip) NEWLINE))
-                                                              ;; end of line:
-                                                              (or (not (= -startpos (+ p (snip->count snip))))
-                                                                  (and (= -endpos -startpos) pos-at-eol?)
-                                                                  (and (not (= -endpos -startpos)) 
-                                                                       (-startpos . < . (+ p (snip->count snip))))))
-                                                          (or (not (eq? snip first))
-                                                              ;; beginning of line:
-                                                              (or (not (= p -endpos))
-                                                                  (and (= -endpos -startpos) (not pos-at-eol?))
-                                                                  (and (not (= -endpos -startpos))
-                                                                       (-endpos . > . p)))))])
-                                                    
-                                                    (if hilite?
-                                                        (let*-values ([(bottom) (+ down h)]
-                                                                      [(hxs) (if (-startpos . <= . p)
-                                                                                 (if (-startpos . < . p)
-                                                                                     0
-                                                                                     x)
-                                                                                 (+ x (send snip partial-offset dc x ycounter
-                                                                                            (- -startpos p))))]
-                                                                      [(hxe bottom) (if (-endpos . >= . (+ p (snip->count snip)))
-                                                                                        (if (has-flag? (snip->flags snip) NEWLINE)
-                                                                                            (if (= -startpos -endpos)
-                                                                                                (values hxs bottom)
-                                                                                                (values rightx
-                                                                                                        (+ ycounter (mline-h line))))
-                                                                                            (values (+ x w) bottom))
-                                                                                        (values (+ x (send snip partial-offset dc x ycounter
-                                                                                                           (- -endpos p)))
-                                                                                                bottom))])
-                                                          
-                                                          (let-values ([(hsxs hsxe hsys hsye)
-                                                                        (if (not hilite-some?)
-                                                                            (values hxs hxe down bottom)
-                                                                            (values hsxs hxe (min down hsys) (max hsye bottom)))])
-                                                            (sloop (snip->next snip)
-                                                                   (+ p (snip->count snip))
-                                                                   (+ x w)
-                                                                   #t hsxs hsxe hsys hsye
-                                                                   old-style)))
-                                                        (sloop (snip->next snip)
-                                                               (+ p (snip->count snip))
-                                                               (+ x w)
-                                                               hilite-some? hsxs hsxe hsys hsye
-                                                               old-style)))))))))])
-                        (when (and (positive? wrap-bitmap-width)
-                                   (not (has-flag? (snip->flags (mline-last-snip line)) HARD-NEWLINE))
-                                   last
-                                   (rightx . >= . max-width)
-                                   (send auto-wrap-bitmap ok?))
-                          (let ([h (min (->long (send auto-wrap-bitmap get-height))
-                                        (mline-bottombase line))]
-                                [osfg (send old-style get-foreground)])
-                            (send dc draw-bitmap-section
-                                  auto-wrap-bitmap 
-                                  (sub1 (+ max-width dx)) (+ (- bottombase h) dy)
-                                  0 0 wrap-bitmap-width h
-                                  'solid osfg)))
-
+                                      ;; the rules for hiliting are surprisingly complicated:
+                                      (let ([hilite?
+                                             (and
+                                              hilite-on?
+                                              (or show-xsel?
+                                                  (and (not s-caret-snip)
+                                                       (or (eq? 'show-caret show-caret)
+                                                           (and (show-caret . showcaret>= . s-inactive-caret-threshold)
+                                                                (not (= -endpos -startpos))))))
+                                              (if pos-at-eol?
+                                                  (= -startpos (+ p (snip->count snip)))
+                                                  (or (and (-startpos . < . (+ p (snip->count snip)))
+                                                           (-endpos . >= . p)
+                                                           (or (= -endpos -startpos) (-endpos . > . p)))
+                                                      (and (= (+ p (snip->count snip)) len)
+                                                           (= len -startpos))))
+                                              (or (not (has-flag? (snip->flags snip) NEWLINE))
+                                                  ;; end of line:
+                                                  (or (not (= -startpos (+ p (snip->count snip))))
+                                                      (and (= -endpos -startpos) pos-at-eol?)
+                                                      (and (not (= -endpos -startpos)) 
+                                                           (-startpos . < . (+ p (snip->count snip))))))
+                                              (or (not (eq? snip first))
+                                                  ;; beginning of line:
+                                                  (or (not (= p -endpos))
+                                                      (and (= -endpos -startpos) (not pos-at-eol?))
+                                                      (and (not (= -endpos -startpos))
+                                                           (-endpos . > . p)))))])
+                                        
+                                        (if hilite?
+                                            (let*-values ([(bottom) (+ down h)]
+                                                          [(hxs) (if (-startpos . <= . p)
+                                                                     (if (-startpos . < . p)
+                                                                         0
+                                                                         x)
+                                                                     (+ x (send snip partial-offset dc x ycounter
+                                                                                (- -startpos p))))]
+                                                          [(hxe bottom) (if (-endpos . >= . (+ p (snip->count snip)))
+                                                                            (if (has-flag? (snip->flags snip) NEWLINE)
+                                                                                (if (= -startpos -endpos)
+                                                                                    (values hxs bottom)
+                                                                                    (values rightx
+                                                                                            (+ ycounter (mline-h line))))
+                                                                                (values (+ x w) bottom))
+                                                                            (values (+ x (send snip partial-offset dc x ycounter
+                                                                                               (- -endpos p)))
+                                                                                    bottom))])
+                                              
+                                              (let-values ([(hsxs hsxe hsys hsye)
+                                                            (if (not hilite-some?)
+                                                                (values hxs hxe down bottom)
+                                                                (values hsxs hxe (min down hsys) (max hsye bottom)))])
+                                                (sloop (snip->next snip)
+                                                       (+ p (snip->count snip))
+                                                       (+ x w)
+                                                       #t hsxs hsxe hsys hsye
+                                                       old-style)))
+                                            (sloop (snip->next snip)
+                                                   (+ p (snip->count snip))
+                                                   (+ x w)
+                                                   hilite-some? hsxs hsxe hsys hsye
+                                                   old-style))))))))))
+                      (let*-values ([(draw-first?)
+                                     (or (and (or (not (showcaret>= show-caret 'show-caret))
+						  (and s-caret-snip (not (pair? show-caret)))
+						  (not hilite-on?))
+					      (not show-xsel?))
+                                         (= -startpos -endpos)
+                                         (-endpos . < . pcounter)
+                                         (-startpos . > . (+ pcounter (mline-len line))))]
+                                    [(hilite-some? hsxs hsxe hsys hsye old-style)
+                                     (process-snips draw-first? #f old-style)])
                         (let ([prevwasfirst
                                (if hilite-some?
                                    (if (not (= hsxs hsxe))
@@ -5298,18 +5393,39 @@
                                          (when (eq? 'show-caret show-caret)
                                            (when (and (hsxs . <= . rightx) (hsxs . >= . leftx))
                                              (let ([save-pen (send dc get-pen)])
-                                               (send dc set-pen caret-pen)
+                                               (send dc set-pen local-caret-pen)
                                                (send dc draw-line (+ hsxs dx) (+ hsys dy) 
                                                      (+ hsxs dx) 
                                                      (+ hsye (sub1 dy)))
                                                (send dc set-pen save-pen))))
                                          prevwasfirst))
                                    prevwasfirst)])
-                          (lloop (mline-next line)
-                                 old-style
-                                 (+ ycounter (mline-h line))
-                                 (+ pcounter (mline-len line))
-                                 prevwasfirst))))])))))))))
+                          
+                          (when (and (positive? wrap-bitmap-width)
+                                     (not (has-flag? (snip->flags (mline-last-snip line)) HARD-NEWLINE))
+                                     last
+                                     (rightx . >= . max-width)
+                                     (send auto-wrap-bitmap ok?))
+                            (let ([h (min (->long (send auto-wrap-bitmap get-height))
+                                          (mline-bottombase line))]
+                                  [osfg (send old-style get-foreground)])
+                              (send dc draw-bitmap-section
+                                    auto-wrap-bitmap 
+                                    (sub1 (+ max-width dx)) (+ (- bottombase h) dy)
+                                    0 0 wrap-bitmap-width h
+                                    'solid osfg)))
+
+                          (let ([old-style
+                                 (if draw-first?
+                                     old-style
+                                     (let-values ([(_hilite-some? _hsxs _hsxe _hsys _hsye old-style)
+                                                   (process-snips #t #t old-style)])
+                                       old-style))])
+                            (lloop (mline-next line)
+                                   old-style
+                                   (+ ycounter (mline-h line))
+                                   (+ pcounter (mline-len line))
+                                   prevwasfirst)))))])))))))))
 
   ;; ----------------------------------------
 
@@ -5478,7 +5594,8 @@
               (begin
                 (when (or (zero? (unbox W)) (zero? (unbox H)))
                   (get-default-print-size W H))
-                (send (current-ps-setup) get-editor-margin hm vm))
+                (when (not (zero? page))
+                  (send (current-ps-setup) get-editor-margin hm vm)))
             (let ([H (- H (* 2 vm))]
                   [W (- W (* 2 hm))])
 
@@ -5504,7 +5621,8 @@
                      (cond
                       [(or (zero? h)
                            (and (i . < . num-valid-lines)
-                                ((mline-h line) . < . (- H h))
+                                (or (zero? page)
+                                    ((mline-h line) . < . (- H h)))
                                 can-continue?))
                        (let ([lh (mline-h line)]
                              [new-page? (new-page-line? line)])
@@ -5516,7 +5634,8 @@
                       [else
                        (let-values ([(h i line)
                                      (cond
-                                      [(and (h . < . H)
+                                      [(and (not (zero? page))
+                                            (h . < . H)
                                             (i . < . num-valid-lines)
                                             ((mline-h line) . > . H))
                                        ;; we'll have to break it up anyway; start now?
@@ -5531,7 +5650,8 @@
                                       [else
                                        (values h i line)])])
                          (let-values ([(next-h h)
-                                       (if (h . > . H)
+                                       (if (and (not (zero? page))
+                                                (h . > . H))
                                            ;; only happens if we have something that's too big to fit on a page;
                                            ;; look for internal scroll positions
                                            (let* ([pos (find-scroll-line (+ y H))]
@@ -5544,16 +5664,17 @@
                                            (values next-h h))])
                            (or (if print?
                                    (begin
-                                     (when (or (negative? page) (= this-page page))
+                                     (when (or (page . <= . 0)
+                                               (= this-page page))
                                        (begin
-                                         (when (negative? page)
+                                         (when (page . <= . 0)
                                            (send dc start-page))
                                          (do-redraw dc 
                                                     (+ y (if (zero? i) 0 1))
                                                     (+ y (- h 1 unline))
                                                     0 W (+ (- y) vm) hm
                                                     'no-caret #f #f)
-                                         (when (negative? page)
+                                         (when (page . <= . 0)
                                            (send dc end-page))))
                                      #f)
                                    (= this-page page))

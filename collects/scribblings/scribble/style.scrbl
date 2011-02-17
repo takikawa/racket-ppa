@@ -77,6 +77,11 @@ procedure should have a single definition point. (Scribble issues a
 warning when a binding has multiple definition points.) Instead, use
 @racket[defproc*] or @racket[defform*].
 
+For function arguments, use @racket[v] as the meta-variable for ``any
+value.'' Use @racket[x] as a meta-variable only for numerical
+values. Other conventions include @racket[lst] for a list and
+@racket[proc] for a procedure.
+
 Pay attention to the difference between identifiers and meta-variables
 when using @racket[racket], especially outside of @racket[defproc] or
 @racket[defform]. Prefix a meta-variable with @litchar{_}; for
@@ -125,9 +130,8 @@ Refrain from referring to documentation ``above'' or ``below,'' and
 instead have a hyperlink point to the right place.
 
 In prose, use @litchar{``} and @litchar{''} quotation marks instead of
-@litchar{"}. Use @litchar{---} for an em-dash, and do not include
-spaces on either side, though it will typeset as an en-dash and spaces
-in HTML output. Use American style for quotation marks and punctuation
+@litchar{"}. Use @litchar{---} for an em dash, and do not include
+spaces on either side. Use American style for quotation marks and punctuation
 @; [Eli] BTW, I've asked several people about this, and the general
 @;   agreement that I've seen is that this is a rather arbitrary rule
 @;   and there's no harm in doing the more logical thing of putting

@@ -1069,6 +1069,48 @@
 (err/rt-test (readstr "#s((v 0 (2 #f) #()) 1)") exn:fail:read?)
 (err/rt-test (readstr "#s((v 0 (2 #f) #(0)) 1)") exn:fail:read?)
 
+(err/rt-test (readstr "#s(1 2)") (lambda (x)
+                                   (and (exn:fail:read? x)
+                                        (not (exn:fail:read:eof? x)))))
+(err/rt-test (readstr "#s(1 2") exn:fail:read:eof?)
+(err/rt-test (read-syntax 's (open-input-string "#s((a #(0)) 1)"))
+             (lambda (x)
+               (and (exn:fail:read? x)
+                    (not (exn:fail:read:eof? x)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; read-language
+
+(test #t procedure? (read-language (open-input-string "#lang racket/base")))
+(test #t procedure? (read-language (open-input-string ";;\n#lang racket/base")))
+(test #t procedure? (read-language (open-input-string ";;\n#|\n\n   |#\n#lang racket/base")))
+(test #t procedure? (read-language (open-input-string "#! /bin/env \n#lang racket/base")))
+(test #t procedure? (read-language (open-input-string "#!/bin/env \n#lang racket/base")))
+(test #t procedure? (read-language (open-input-string "#!racket/base")))
+(let ([check-nothing
+       (lambda (str exn?)
+         (err/rt-test (read-language (open-input-string str)) exn?)
+         (test 'no read-language (open-input-string str) (lambda () 'no)))])
+  (check-nothing "" exn:fail:read:eof?)
+  (check-nothing ";" exn:fail:read:eof?)
+  (check-nothing "#| |#" exn:fail:read:eof?)
+  (check-nothing "8 9" exn:fail:read?))
+(err/rt-test (read-language (open-input-string "#l") void) exn:fail:read:eof?)
+(err/rt-test (read-language (open-input-string "#la") void) exn:fail:read:eof?)
+(err/rt-test (read-language (open-input-string ";;\n;\n#la") void) exn:fail:read:eof?)
+(err/rt-test (read-language (open-input-string ";;\n;\n#lx") void) exn:fail:read?)
+(test (void) read-language (open-input-string ";;\n;\n#xa") void)
+;; Check error-message formatting:
+(err/rt-test (read (open-input-string "#l"))
+             (lambda (exn) (regexp-match? #rx"`#l'" (exn-message exn))))
+;; Make sure read-language error here is this can comes from read-language
+;; and not from an ill-formed srcloc construction:
+(let ()
+  (define p (open-input-string ";\n"))
+  (port-count-lines! p)
+  (err/rt-test (read-language p)
+               (lambda (exn) (regexp-match? #rx"read-language" (exn-message exn)))))
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (report-errs)

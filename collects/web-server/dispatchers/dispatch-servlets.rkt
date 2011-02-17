@@ -1,6 +1,7 @@
 #lang racket/base
 (require racket/contract)
 (require web-server/servlet/setup
+         web-server/servlet/servlet-structs
          web-server/managers/manager
          web-server/http
          web-server/http/response
@@ -47,8 +48,8 @@
 ; -----
 (provide/contract
  [make (->* (url->servlet/c)
-            (#:responders-servlet-loading (url? any/c . -> . response/c)
-                                          #:responders-servlet (url? any/c . -> . response/c))
+            (#:responders-servlet-loading (url? any/c . -> . can-be-response?)
+                                          #:responders-servlet (url? any/c . -> . can-be-response?))
             dispatcher/c)])
 
 (define (make url->servlet
@@ -60,10 +61,10 @@
     (parameterize ([current-custodian instance-custodian]
                    [current-execution-context (make-execution-context req)]
                    [exit-handler
-                    (lambda _
+                    (lambda (r)
                       (kill-connection! conn)
                       (custodian-shutdown-all instance-custodian))])
-      (define response
+      (define maybe-response
         (with-handlers ([exn:fail:filesystem:exists?
                          (lambda (the-exn) (next-dispatcher))]
                         [exn:dispatcher? raise]
@@ -84,4 +85,4 @@
                     ((servlet-handler the-servlet) req))
                   servlet-prompt)))))))
       
-      (output-response conn response))))
+      (output-response conn (any->response maybe-response)))))

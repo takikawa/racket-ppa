@@ -1,32 +1,28 @@
-(module same mzscheme
-  (require mzlib/etc
-           mzlib/class
-           mzlib/unit
-           mred
-           mzlib/list
-           "../show-scribbling.ss")
-  
-  (provide game@)
-  
-  (define game@
-    (unit
-      (import)
-      (export)
-      
-      (define board-width 20)
-      (define board-height 10)
-      (define cell-size 30)
-      (define colors (map (lambda (x) (make-object color% x)) (list "blue" "red" "magenta" "yellow" "cyan")))
-      (define pens (map (lambda (x) (make-object pen% x 1 'solid)) colors))
-      (define brushes (map (lambda (x) (make-object brush% x 'solid)) colors))
-      (define white-pen (make-object pen% "white" 1 'solid))
-      (define white-brush (make-object brush% "white" 'solid))
-      
-      ;; build-board : (-> (vectorof (vectorof (vector (union num #f) boolean))))
-      ;   this represents the board. Each entry is the color index of
-      ;   the piece and a node to mark for the depth-first traversal.
-      ;   #f for the color index indicates an eliminated piece.
-      (define (build-board)
+#lang racket/base
+(require racket/class
+         racket/unit
+         racket/list
+         racket/gui/base
+         racket/math
+         "../show-scribbling.ss"
+         "same-lib.rkt")
+
+(provide game@)
+
+(define game@
+  (unit
+    (import)
+    (export)
+    
+    (define board-width 20)
+    (define board-height 16)
+    
+    ;; build-board : (-> (vectorof (vectorof (vector (union num #f) boolean))))
+    ;   this represents the board. Each entry is the color index of
+    ;   the piece and a node to mark for the depth-first traversal.
+    ;   #f for the color index indicates an eliminated piece.
+    (define (build-board)
+      (define board
         (build-vector
          board-width
          (lambda (i)
@@ -34,336 +30,309 @@
             board-height
             (lambda (j)
               (vector
-               (begin
-                 (if (= j (- board-height 1))
-                     (- (length colors) 1)
-                     (modulo i (- (length colors) 1)))
-                 (random (length colors)))
+               (random (length colors))
                #f))))))
-      
-      (define board (build-board))
-      
-      (define game-over? #f)
-      
-      (define score 0)
-      (define (calc-score n)
-        (cond
-          [(= n 2) 2]
-          [else (- (* (- n 1) (- n 1)) (- n 3))]))
-      
-      (define same-canvas%
-        (class canvas%
-          (inherit get-dc get-client-size)
-          (define/private (get-width) (let-values ([(w h) (get-client-size)]) w))
-          (define/private (get-height) (let-values ([(w h) (get-client-size)]) h))
-          (define/private (get-x-step) (/ (get-width) board-width))
-          (define/private (get-y-step) (/ (get-height) board-height))
-          [define/public draw-cell
-            (lambda (dc highlight? i j)
-              (let ([index (vector-ref (vector-ref (vector-ref board i) j) 0)]
-                    [x (* i (get-x-step))]
-                    [y (* j (get-y-step))])
-		(send dc set-brush white-brush)
-		(send dc set-pen white-pen)
-		(send dc draw-rectangle x y (get-x-step) (get-y-step))
-		(when index
-		  (send dc set-brush (list-ref brushes index))
-		  (send dc set-pen (list-ref pens index))
-		  (cond
-		   [highlight?
-		    (send dc draw-ellipse 
-			  (floor (+ x (/ (get-x-step) 4)))
-			  (floor (+ y (/ (get-y-step) 4)))
-			  (floor (/ (get-x-step) 2))
-			  (floor (/ (get-y-step) 2)))]
-		   [else
-		    (send dc draw-ellipse x y (get-x-step) (get-y-step))]))))]
-          
-          [define/public  draw-line
-            (lambda (dc i)
-              (let ([show-turned? (> (length turned) 1)])
-                (let loop ([j board-height])
-                  (cond
-                    [(zero? j) (void)]
-                    [else
-                     (draw-cell dc (and show-turned? (member (list i (- j 1)) turned)) i (- j 1))
-                     (loop (- j 1))]))))]
-          
-          [define/public find-same-colors
-            (lambda (i j)
-              (let* ([index (vector-ref (vector-ref (vector-ref board i) j) 0)]
-                     [ans
-                      (let loop ([i i]
-                                 [j j]
-                                 [ps null])
-                        (cond
-                          [(not (and (<= 0 i) (< i board-width)
-                                     (<= 0 j) (< j board-height)))
-                           ps]
-                          [(vector-ref (vector-ref (vector-ref board i) j) 1) ps]
-                          [(not (vector-ref (vector-ref (vector-ref board i) j) 0)) ps]
-                          [(= index (vector-ref (vector-ref (vector-ref board i) j) 0))
-                           (let ([v (vector-ref (vector-ref board i) j)])
-                             (vector-set! v 1 #t)
-                             (loop (+ i 1)
-                                   j
-                                   (loop (- i 1)
-                                         j
-                                         (loop i
-                                               (- j 1)
-                                               (loop i
-                                                     (+ j 1)
-                                                     (cons (list v i j) ps))))))]
-                          [else ps]))])
-                (for-each (lambda (p) (vector-set! (first p) 1 #f)) ans)
-                ans))]
-          
-          [define/public get-game-over-size
-            (lambda (dc)
-              (let ([border 5])
-                (let-values ([(text-width text-height d l) (send dc get-text-extent game-over)])
-                  (let ([x (- (/ (get-width) 2) (/ text-width 2))]
-                        [y (- (/ (get-height) 2) (/ text-height 2))])
-                    (values x y text-width text-height border)))))]
-          
-          [define/public paint-game-over
-            (lambda (dc)
-              (send dc set-font font)
-              (let-values ([(x y text-width text-height border) (get-game-over-size dc)])
-                (send dc set-pen white-pen)
-                (send dc set-brush white-brush)
-                (send dc draw-rectangle
-                      (- x border) (- y border)
-                      (+ text-width border border)
-                      (+ text-height border border))
-                (send dc draw-text game-over x y)))]
-          
-          
-          (field
-           [game-over "Game Over"]
-           [font (make-object font% 24 'decorative 'normal 'normal #f)]
-           [turned null])
-          
-          [define/private recalc/draw-turned
-            (lambda (i j)
-              (set! turned (map (lambda (xx) (list (second xx) (third xx))) (find-same-colors i j)))
-              (cond
-                [(> (length turned) 1)
-                 (send this-message set-label (number->string (calc-score (length turned))))
-                 (for-each (lambda (p) (draw-cell (get-dc) #t (first p) (second p))) turned)]
-                [else
-                 (send this-message set-label "")]))]
-          
-          [define/override on-event
-            (lambda (evt)
-              (let+ ([val x (send evt get-x)]
-                     [val y (send evt get-y)]
-                     [val i (inexact->exact (floor (* (/ x (get-width)) board-width)))]
-                     [val j (inexact->exact (floor (* (/ y (get-height)) board-height)))])
-                    (cond
-                      [(or (send evt moving?)
-                           (send evt entering?)
-                           (send evt leaving?))
-                       (cond
-                         [(and (<= 0 i) (< i board-width)
-                               (<= 0 j) (< j board-height))
-                          (unless (member (list i j) turned)
-                            (when (> (length turned) 1)
-                              (for-each (lambda (p) (draw-cell (get-dc) #f (first p) (second p))) turned))
-                            (recalc/draw-turned i j))]
-                         [else
-                          (when (> (length turned) 1)
-                            (for-each (lambda (p) (draw-cell (get-dc) #f (first p) (second p))) turned))
-                          (set! turned null)
-                          (send this-message set-label "")])]
-                      [(send evt button-up?)
-                       (when (and (<= 0 i) (< i board-width)
-                                  (<= 0 j) (< j board-height))
-                         (when (> (length turned) 1)
-                           (for-each (lambda (p) (draw-cell (get-dc) #f (first p) (second p))) turned))
-                         (set! turned null)
-                         (send this-message set-label "")
-                         (let ([same-colors (find-same-colors i j)])
-                           
-                           ;; reset back the marks for the next depth-first traversal
-                           
-                           (when (>= (length same-colors) 2)
-                             
-                             ;; update score
-                             (set! score (+ score (calc-score (length same-colors))))
-                             (send message set-label (number->string score)) 
-                             
-                             ;; slide down empty pieces
-                             (let ([is null])
-                               (for-each
-                                (lambda (p)
-                                  (let ([i (second p)]
-                                        [j (third p)])
-                                    (unless (member i is)
-                                      (set! is (cons i is)))
-                                    (let loop ([x j])
-                                      (cond
-                                        [(<= 1 x)
-                                         (let ([next (vector-ref (vector-ref board i) (- x 1))]
-                                               [this (vector-ref (vector-ref board i) x)])
-                                           (vector-set! this 0 (vector-ref next 0))
-                                           (loop (- x 1)))]
-                                        [else
-                                         (vector-set! (vector-ref (vector-ref board i) x) 0 #f)]))))
-                                (sort same-colors
-                                      (lambda (x y) (<= (third x) (third y)))))
-
-                               ;; slide empty over empty rows
-                               (set! is (sort is >))
-                               (let ([empty-is (filter (lambda (i)
-                                                         (not (vector-ref (vector-ref (vector-ref board i) (- board-height 1)) 0)))
-                                                       is)])
-                                 (let ([is (if (null? empty-is)
-                                               is
-                                               (filter (lambda (x) (< x (car empty-is)))
-                                                       is))])
-                                   (for-each (lambda (empty-i)
-                                               (let loop ([i empty-i])
-                                                 (cond
-                                                   [(<= i (- board-width 2))
-                                                    (vector-set! board i (vector-ref board (+ i 1)))
-                                                    (loop (+ i 1))]
-                                                   [(= i (- board-width 1))
-                                                    (vector-set! board i (build-vector board-height
-                                                                                       (lambda (i) (vector #f #f))))])))
-                                             empty-is)
-                                   
-                                   ;; draw changed lines
-                                   (for-each (lambda (i) (draw-line (get-dc) i)) is)
-                                   (unless (null? empty-is)
-                                     (let loop ([i (car (last-pair empty-is))])
-                                       (cond
-                                         [(= i board-width) (void)]
-                                         [else (draw-line (get-dc) i)
-                                               (loop (+ i 1))])))
-                                   
-                                   ;; update `small' balls
-                                   (recalc/draw-turned i j)
-                                   )))
-                             
-                             (set! game-over?
-                                   (not
-                                    (let loop ([i board-width]
-                                               [continue? #f])
-                                      (cond
-                                        [(zero? i) continue?]
-                                        [else
-                                         (or continue?
-                                             (loop
-                                              (sub1 i)
-                                              (let loop ([j board-height]
-                                                         [continue? continue?])
-                                                (cond
-                                                  [(zero? j) continue?]
-                                                  [else
-                                                   (or continue?
-                                                       (loop
-                                                        (sub1 j)
-                                                        (> (length (find-same-colors (sub1 i) (sub1 j))) 1)))]))))])))) 
-                             (when game-over?
-                               (paint-game-over (get-dc))))))]
-                      
-                      [else (void)])))]
-          
-          [define/override on-paint
-            (lambda ()
-              (let ([dc (get-dc)])
-                (send dc set-pen white-pen)
-                (send dc set-brush white-brush)
-                (let loop ([i board-width])
-                  (cond
-                    [(zero? i) (void)]
-                    [else (draw-line dc (- i 1))
-                          (loop (- i 1))]))
-                (when game-over?
-                  (paint-game-over dc))))]
-          
-          (super-new)
-
-	  (send (get-dc) set-smoothing 'aligned)))
-      
-      (define semaphore (make-semaphore 0))
-      (define same-frame%
-        (class frame%
-          [define/augment on-close
-            (lambda ()
-	      (semaphore-post semaphore)
-              (inner (void) on-close))]
-          (super-new [style '(metal)])))
-      
-      (define find-largest-connected-region
-        (let ([biggest-so-far 0]
-              [tests 0])
-          (lambda ()
-            (let ([answer 0])
-              (let loop ([i 20])
-                (cond
-                  [(zero? i) (void)]
-                  [else
-                   (let loop ([j 10])
-                     (cond
-                       [(zero? j) (void)]
-                       [else (set! answer
-                                   (max
-                                    answer
-                                    (length
-                                     (send canvas find-same-colors
-                                           (- i 1) (- j 1)))))
-                             (loop (- j 1))]))
-                   (loop (- i 1))]))
-              (set! biggest-so-far (max biggest-so-far (calc-score answer)))
-              (set! tests (+ tests 1))
-              (printf "tests: ~a sofar: ~a largest connected region: ~a score ~a\n"
-                      tests
-                      biggest-so-far
-                      answer
-                      (calc-score answer))))))
-      
-      (define (new-game-callback redraw?)
-        (set! game-over? #f)
-        (set! board (build-board))
-        (unless (= score 0)
-          (set! score 0)
-          (send message set-label "0"))
-        (send this-message set-label "")
-        (when redraw?
-          (send canvas on-paint)))
-      
-      (define frame (make-object same-frame% "Same"))
-      (define panel (make-object vertical-panel% frame))
-      (define canvas (make-object same-canvas% panel))
-      (define hp (make-object horizontal-panel% panel))
-      (make-object message% "Total Score: " hp)
-      (define message (make-object message% "0" hp))
-      (make-object message% "This Score: " hp)
-      (define this-message (make-object message% "0" hp))
-      (define button (make-object button% "New Game" hp (lambda x (new-game-callback #t))))
-      '(make-object button% "Run Scores" hp (lambda x
-                                              (let loop ()
-                                                (new-game-callback #f)
-                                                (find-largest-connected-region)
-                                                (loop))))
-      
-      (define help-button (make-object button% "Help"
-                            hp
-                            (let ([show-help
-                                   (show-scribbling
-                                    '(lib "games/scribblings/games.scrbl")
-                                    "same")])
-                              (lambda (_1 _2)
-                                (show-help)))))
-      
-      (send message stretchable-width #t)
-      (send this-message stretchable-width #t)
-      (send hp stretchable-height #f)
-      (send canvas min-width (* board-width cell-size))
-      (send canvas min-height (* board-height cell-size))
-      
-      (send frame show #t)
-      (yield semaphore))))
+      (for* ([x (in-range 1 board-width)]
+             [y (in-range 1 board-height)])
+        (when (zero? (random 5))
+          (define-values (prev-x prev-y)
+            (if (zero? (random 2))
+                (values x (- y 1))
+                (values (- x 1) y)))
+          (define this-vector (board-ref board x y))
+          (define prev-vector (board-ref board prev-x prev-y))
+          (vector-set! this-vector 0 (vector-ref prev-vector 0))))
+      board)
     
+    (define board (build-board))
+    
+    (define game-over? #f)
+    
+    ;; adds up as the user clicks
+    (define clicked-score 0)
+    (define (calc-score n) (* n n))
+    (define (reset-score)
+      (set! clicked-score 0)
+      (set-score-label))
+    (define (update-score balls-going-away)
+      (set! clicked-score (+ clicked-score (calc-score balls-going-away)))
+      (set-score-label))
+    (define (set-score-label)
+      (define cells-filled-in 0)
+      (for ([v (in-vector board)])
+        (for ([v (in-vector v)])
+          (when (vector-ref v 0)
+            (set! cells-filled-in (+ cells-filled-in 1)))))
+      (define bonus-start 50) ;; bonus for getting down to 49 (or fewer) balls
+      (define bonus-per-ball 100) ;; number of points for clearing each of those last 'bonus-start' balls
+      (define bonus (if (<= cells-filled-in bonus-start)
+                        (* bonus-per-ball (- bonus-start cells-filled-in))
+                        0))
+      (send score-message set-label 
+            (format "~a + ~a = ~a"
+                    clicked-score
+                    bonus
+                    (+ clicked-score bonus))))
+    
+    (define same-canvas%
+      (class canvas%
+        (inherit get-dc get-client-size)
+        (define/private (get-width) (let-values ([(w h) (get-client-size)]) w))
+        (define/private (get-height) (let-values ([(w h) (get-client-size)]) h))
+        (define/private (get-x-step) (/ (get-width) board-width))
+        (define/private (get-y-step) (/ (get-height) board-height))
+        
+        (define mouse-current-x #f)
+        (define mouse-current-y #f)
+        (define mouse-clicked-x #f)
+        (define mouse-clicked-y #f)
+        
+        (define background-valid? #f)
+        (define background #f)
+        
+        (define/public (invalidate-board-bitmap)
+          (set! background-valid? #f))
+          
+        (define/override (on-size w h)
+          (define-values (cw ch) (get-client-size))
+          (when background
+            (unless (and (= cw (send background get-width))
+                         (= ch (send background get-height)))
+              (set! background #f)
+              (set! background-valid? #f))))
+        
+        (define/override (on-paint)
+          (define-values (cw ch) (get-client-size))
+          (define dc (get-dc))
+          (send dc set-smoothing 'smoothed)
+          (build-background)
+          (send dc set-scale 1 1)
+          (send dc draw-bitmap background 0 0)
+          
+          (define current-blob 
+            (and mouse-current-x 
+                 (find-same-colors board board-width board-height 
+                                   mouse-current-x
+                                   mouse-current-y)))
+          (cond
+            [(and mouse-clicked-x
+                  mouse-current-x
+                  (equal? mouse-clicked-x mouse-current-x)
+                  (equal? mouse-clicked-y mouse-current-y))
+             
+             ;; don't know what to do here
+             
+             (define blob
+               (find-same-colors board board-width board-height 
+                                 mouse-current-x
+                                 mouse-current-y))
+             (unless (null? blob)
+               (define color
+                 (vector-ref (board-ref board mouse-current-x mouse-current-y)
+                             0))
+               (define-values (cw ch) (get-client-size))
+               (update-dc-scale dc cw ch board-width board-height)
+               (update-pen/draw-blob
+                blob dc color
+                mouse-current-x mouse-current-y
+                mouse-clicked-x mouse-clicked-y))]
+            [mouse-current-x
+             (define blob
+               (find-same-colors board board-width board-height 
+                                 mouse-current-x
+                                 mouse-current-y))
+             (unless (null? blob)
+               (define color
+                 (vector-ref (board-ref board mouse-current-x mouse-current-y)
+                             0))
+               (define-values (cw ch) (get-client-size))
+               (update-dc-scale dc cw ch board-width board-height)
+               (update-pen/draw-blob
+                blob dc color
+                mouse-current-x mouse-current-y
+                mouse-clicked-x mouse-clicked-y))])
+          
+          (when game-over?
+            (update-dc-scale dc cw ch board-width board-height)
+            (paint-game-over)))
+        
+        (define/private (build-background)
+          (unless background-valid?
+            (define-values (cw ch) (get-client-size))
+            (unless background
+              (set! background (make-bitmap cw ch)))
+            (define bdc (make-object bitmap-dc% background))
+            (draw-board bdc board-width board-height board cw ch #f #f #f #f)
+            (send bdc set-bitmap #f)
+            (set! background-valid? #t)))
+        
+        (define/private (paint-game-over)
+          (define dc (get-dc))
+          (define game-over "Game Over")
+          (send dc set-font 
+                (send the-font-list find-or-create-font
+                      24 'decorative 'normal 'normal #f))
+          (define border 5)
+          (define-values (text-width text-height d l)
+            (send dc get-text-extent game-over))
+          (define x (- (/ (* cell-w board-width) 2) (/ text-width 2)))
+          (define y (- (/ (* cell-h board-height) 2) (/ text-height 2)))
+          (send dc set-pen "white" 1' transparent)
+          (send dc set-brush "white" 'solid)
+          (send dc set-alpha .8)
+          (send dc draw-rectangle
+                (- x border border) (- y border)
+                (+ text-width border border border border)
+                (+ text-height border border))
+          (send dc set-alpha 1)
+          (send dc draw-text game-over x y))
+        
+        (inherit refresh) 
+        (define/override (on-event evt)
+          (define x (send evt get-x))
+          (define y (send evt get-y))
+          (define-values (cw ch) (get-client-size))
+          (define bx (floor (* (/ x cw) board-width)))
+          (define by (floor (* (/ y ch) board-height)))
+          (unless (<= 0 bx (- board-width 1)) (set! bx #f))
+          (unless (<= 0 by (- board-height 1)) (set! by #f))
+          (when (send evt leaving?)
+            (set! bx #f)
+            (set! by #f))
+          
+          (when (send evt button-up?)
+            (when (and (equal? mouse-clicked-x bx)
+                       (equal? mouse-clicked-y by))
+              (define removed-ball-count
+                (make-a-move mouse-clicked-x mouse-clicked-y 
+                             board board-width board-height))
+              (when removed-ball-count
+                (update-score removed-ball-count)
+                (invalidate-board-bitmap)
+                (update-game-over)
+                (refresh))))
+          
+          (define-values (new-mouse-clicked-x new-mouse-clicked-y)
+            (cond
+              [(send evt button-down?) (values bx by)]
+              [(send evt button-up?) (values #f #f)]
+              [else (values mouse-clicked-x mouse-clicked-y)]))
+          
+          (define this-score-needs-update? #f)
+          
+          (unless (and (equal? mouse-clicked-x new-mouse-clicked-x)
+                       (equal? mouse-clicked-y new-mouse-clicked-y))
+            (set! mouse-clicked-x new-mouse-clicked-x)
+            (set! mouse-clicked-y new-mouse-clicked-y)
+            (set! this-score-needs-update? #t)
+            (refresh))
+          
+          (unless (and (equal? bx mouse-current-x)
+                       (equal? by mouse-current-y))
+            (set! mouse-current-x bx)
+            (set! mouse-current-y by)
+            (set! this-score-needs-update? #t)
+            (refresh))
+          
+          (when this-score-needs-update?
+            (update-this-score (if mouse-clicked-x
+                                   mouse-clicked-x
+                                   mouse-current-x)
+                               (if mouse-clicked-y
+                                   mouse-clicked-y
+                                   mouse-current-y))))
+        
+        (define/private (update-this-score x y)
+          (send this-score-message set-label 
+                (cond
+                  [(and x y)
+                   (define num (length (find-same-colors board
+                                                         board-width
+                                                         board-height
+                                                         x y)))
+                   (if (= num 1)
+                       ""
+                       (format "~a" (calc-score num)))]
+                  [else ""])))
+        
+        (define/public-final (update-game-over)
+          (set! game-over?
+                (not
+                 (let loop ([i board-width]
+                            [continue? #f])
+                   (cond
+                     [(zero? i) continue?]
+                     [else
+                      (or continue?
+                          (loop
+                           (sub1 i)
+                           (let loop ([j board-height]
+                                      [continue? continue?])
+                             (cond
+                               [(zero? j) continue?]
+                               [else
+                                (or continue?
+                                    (loop
+                                     (sub1 j)
+                                     (> (length (find-same-colors board 
+                                                                  board-width
+                                                                  board-height
+                                                                  (sub1 i)
+                                                                  (sub1 j)))
+                                        1)))]))))])))))
+        
+        
+        
+        (super-new)))
+    
+    (define semaphore (make-semaphore 0))
+    (define same-frame%
+      (class frame%
+        [define/augment on-close
+          (lambda ()
+            (semaphore-post semaphore)
+            (inner (void) on-close))]
+        (super-new [style '(metal)])))
+    
+    (define (new-game-callback redraw?)
+      (set! game-over? #f)
+      (set! board (build-board))
+      (reset-score)
+      (send canvas invalidate-board-bitmap)
+      (send canvas update-game-over)
+      (when redraw?
+        (send canvas refresh)))
+    
+    (define frame (make-object same-frame% "Same"))
+    (define panel (make-object vertical-panel% frame))
+    (define canvas (make-object same-canvas% panel))
+    (define hp (new horizontal-panel% [parent panel] [stretchable-height #f]))
+    (new message% [label "Total Score: "] [parent hp])
+    (define score-message (new message% 
+                               [label "10000 + 10000 = 20000"] ;; get a reasonable min size
+                               [parent hp] [stretchable-width #t]))
+    (new message% [label "This Score: "] [parent hp])
+    (define this-score-message (new message% 
+                                    [label "10000"] ;; get a reasonable min size
+                                    [parent hp]
+                                    [stretchable-width #t]))
+    (define button (make-object button% "New Game" hp (lambda x (new-game-callback #t))))
+    
+    (define help-button (make-object button% "Help"
+                          hp
+                          (let ([show-help
+                                 (show-scribbling
+                                  '(lib "games/scribblings/games.scrbl")
+                                  "same")])
+                            (lambda (_1 _2)
+                              (show-help)))))
+    
+    (send canvas update-game-over)
+    (reset-score)
+    (send canvas min-width (ceiling (* board-width cell-w #e2.5)))
+    (send canvas min-height (ceiling (* board-height cell-h #e2.5)))
+    (send frame show #t)
+    (void (yield semaphore))))
+
+; (make-same-bitmap "same.png")
+

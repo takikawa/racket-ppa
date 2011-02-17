@@ -1,6 +1,7 @@
-#lang scheme/base
+#lang racket/base
 
-(require tests/eli-tester "promise.ss" "lang.ss")
+(require tests/eli-tester "promise.rkt" "forcers.rkt" "lang.rkt")
 
-(test do (lang-tests)
-      do (promise-tests))
+(test do (promise-tests)
+      do (forcer-tests)
+      do (lang-tests))

@@ -5,14 +5,17 @@
          "../syntax.ss"
          "const.ss"
          "private.ss"
+         racket/snip/private/private
          "editor.ss"
+         "editor-data.rkt"
          "undo.ss"
-         "style.ss"
-         "snip.ss"
-         "snip-flags.ss"
-         "snip-admin.ss"
+         racket/snip
+         racket/snip/private/snip-flags
+         "standard-snip-admin.rkt"
          "keymap.ss"
-         (only-in "cycle.ss" set-pasteboard%!)
+         (only-in "cycle.ss" 
+                  printer-dc%
+                  set-pasteboard%!)
          "wordbreak.ss"
          "stream.ss"
          "wx.ss")
@@ -34,8 +37,9 @@
 (define black-brush (send the-brush-list find-or-create-brush "black" 'xor))
 (define white-brush (send the-brush-list find-or-create-brush "white" 'solid))
 (define invisi-pen (send the-pen-list find-or-create-pen "black" 1 'transparent))
-(define rb-brush (send the-brush-list find-or-create-brush "black" 'transparent))
-(define rb-pen (send the-pen-list find-or-create-pen "black" 1 'xor-dot))
+(define invisi-brush (send the-brush-list find-or-create-brush "black" 'transparent))
+(define rb-pen (send the-pen-list find-or-create-pen (get-highlight-background-color) 1 'xor-dot))
+(define rb-brush (send the-brush-list find-or-create-brush (get-highlight-background-color) 'solid))
 
 (define arrow (make-object cursor% 'arrow))
 
@@ -122,6 +126,11 @@
   (define dragging? #f)
   (define rubberband? #f)
 
+  (define rb-x 0.0)
+  (define rb-y 0.0)
+  (define rb-w 0.0)
+  (define rb-h 0.0)
+
   (define need-resize? #f)
 
   (define resizing #f) ; a snip
@@ -167,7 +176,7 @@
 
   ;; ----------------------------------------
 
-  (define/private (rubber-band x y w h)
+  (define/private (rubber-band-update x y w h)
     (when (and s-admin
                (not (zero? w))
                (not (zero? h)))
@@ -192,22 +201,11 @@
                   [b (min b (+ vy vh))])
               (unless (or (x . >= . r)
                           (y . >= . b))
-                (let-boxes ([dc #f]
-                            [dx 0.0]
-                            [dy 0.0])
-                    (set-box! dc (send s-admin get-dc dx dy))
-                  (let ([old-pen (send dc get-pen)]
-                        [old-brush (send dc get-brush)])
-                    (send dc set-pen rb-pen)
-                    (send dc set-brush rb-brush)
-  
-                    (send dc draw-rectangle
-                          (- x dx) (- y dy)
-                          (- r x)
-                          (- b y))
-
-                    (send dc set-pen old-pen)
-                    (send dc set-brush old-brush))))))))))
+                (set! rb-x x)
+                (set! rb-y y)
+                (set! rb-w (- r x))
+                (set! rb-h (- b y))
+                (update rb-x rb-y rb-w rb-h))))))))
 
   (def/override (adjust-cursor [mouse-event% event])
     (if (not s-admin)
@@ -317,7 +315,7 @@
 
               (when rubberband?
                 (set! rubberband? #f)
-                (rubber-band start-x start-y (- last-x start-x) (- last-y start-y))
+                (rubber-band-update start-x start-y (- last-x start-x) (- last-y start-y))
                 (add-selected start-x start-y (- last-x start-x) (- last-y start-y))
                 (update-all)))
 
@@ -377,10 +375,12 @@
                   (when (send event dragging?)
                     (cond
                      [rubberband?
+                      (begin-edit-sequence)
                       ;; erase old
-                      (rubber-band start-x start-y (- last-x start-x) (- last-y start-y))
+                      (rubber-band-update start-x start-y (- last-x start-x) (- last-y start-y))
                       ;; draw new:
-                      (rubber-band start-x start-y (- x start-x) (- y start-y))]
+                      (rubber-band-update start-x start-y (- x start-x) (- y start-y))
+                      (end-edit-sequence)]
                      [resizing
                       (do-event-resize x y)]
                      [else
@@ -916,6 +916,8 @@
                       (on-resize snip w h)
                       (set! write-locked (sub1 write-locked))
 
+                      (update-location loc)
+
                       (let ([rv? 
                              (and (send snip resize w h)
                                   (begin
@@ -934,6 +936,8 @@
                           (set-modified #t))
 
                         (after-resize snip w h rv?)
+
+                        (update-location loc)
 
                         (set! write-locked (add1 write-locked))
                         (end-edit-sequence)
@@ -1275,6 +1279,17 @@
                         show-caret
                         'no-caret))
 
+          (when rubberband?
+            (let ([a (send dc get-alpha)])
+              (send dc set-alpha (* a 0.5))
+              (send dc set-brush rb-brush)
+              (send dc set-pen invisi-pen)
+              (send dc draw-rectangle (+ rb-x dx) (+ rb-y dy) rb-w rb-h)
+              (send dc set-pen rb-pen)
+              (send dc set-alpha a)
+              (send dc set-brush invisi-brush)
+              (send dc draw-rectangle (+ rb-x dx) (+ rb-y dy) rb-w rb-h)))
+
           (set! flow-locked? #f)
           (set! write-locked (sub1 write-locked))))))
 
@@ -1340,18 +1355,25 @@
                         [bgmode (send dc get-text-mode)]
                         [rgn (send dc get-clipping-region)])
 
+                    (send dc suspend-flush)
+
                     (send dc set-clipping-rect (- left x) (- top y) width height)
-
-                    (draw dc (- x) (- y) left top width height show-caret bg-color)
-
-                    (send dc set-clipping-region rgn)
-
-                    (send dc set-brush brush)
-                    (send dc set-pen pen)
-                    (send dc set-font font)
-                    (send dc set-text-foreground fg)
-                    (send dc set-text-background bg)
-                    (send dc set-text-mode bgmode)))))
+                    
+                    (dynamic-wind
+                        void
+                        (lambda ()
+                          (draw dc (- x) (- y) left top width height show-caret bg-color))
+                        (lambda ()
+                          (send dc set-clipping-region rgn)
+                          
+                          (send dc set-brush brush)
+                          (send dc set-pen pen)
+                          (send dc set-font font)
+                          (send dc set-text-foreground fg)
+                          (send dc set-text-background bg)
+                          (send dc set-text-mode bgmode)
+                          
+                          (send dc resume-flush)))))))
 
           (end-sequence-lock)))]))
   ;; ----------------------------------------
@@ -1433,14 +1455,14 @@
                 (set! update-top (min y update-top))
                 (set! update-left (min x update-left))
                 (set! update-bottom (max b update-bottom))
-                (when (symbol? b)
-                  (if (eq? b 'display-end)
+                (when (symbol? h)
+                  (if (eq? h 'display-end)
                       (set! update-bottom-end 'display-end)
                       (unless (eq? update-bottom-end 'display-end)
                         (set! update-bottom-end 'end))))
                 (set! update-right (max r update-right))
-                (when (symbol? r)
-                  (if (eq? r 'display-end)
+                (when (symbol? w)
+                  (if (eq? w 'display-end)
                       (set! update-right-end 'display-end)
                       (unless (eq? update-right-end 'display-end)
                         (set! update-right-end 'end))))))
@@ -1731,7 +1753,7 @@
     (copy extend? time)
     (clear))
 
-  (def/override (do-copy [exact-integer? time] [bool? extend?])
+  (def/public (do-copy [exact-integer? time] [bool? extend?])
     (set-common-copy-region-data! #f)
     (let ([sl (if (and extend?
                        copy-style-list)
@@ -1794,10 +1816,10 @@
                 (add-selected snip)
                 (loop (snip->next snip))))))))
 
-  (def/override (do-paste [exact-integer? time])
+  (def/public (do-paste [exact-integer? time])
     (do-generic-paste the-clipboard time))
 
-  (def/override (do-paste-x-selection [exact-integer? time])
+  (def/public (do-paste-x-selection [exact-integer? time])
     (do-generic-paste the-x-selection-clipboard time))
   
   (define/private (generic-paste x-sel? time)
@@ -1887,7 +1909,7 @@
                              [any? [replace-styles? #f]])
     (if (or s-user-locked? 
             (not (zero? write-locked)))
-        'guess ;; FIXME: docs say that this is more specific
+        'standard
         (do-insert-file (method-name 'pasteboard% 'insert-file) f replace-styles?)))
   
   (define/private (do-insert-file who f clear-styles?)
@@ -2096,36 +2118,41 @@
             (when (or (zero? (unbox w))
                       (zero? (unbox h)))
               (get-default-print-size w h))
-            (send (current-ps-setup) get-editor-margin hm vm))
+            (unless (zero? page)
+              (send (current-ps-setup) get-editor-margin hm vm)))
         (let ([W (- w (* 2 hm))]
-              [H (- h (* 2 vm))])
+              [H (- h (* 2 vm))]
+              [eps? (zero? page)])
           (let-boxes ([w 0.0]
                       [h 0.0])
               (get-extent w h)
 
-            (let ([hcount (->long (ceiling (/ w W)))]
-                  [vcount (->long (ceiling (/ h H)))])
+            (let ([hcount (if eps? 1 (->long (ceiling (/ w W))))]
+                  [vcount (if eps? 1 (->long (ceiling (/ h H))))])
 
               (if (not print?)
                   (page . <= . (* hcount vcount))
                   (let-values ([(start end)
-                                (if (negative? page)
-                                    (values 1 (* hcount vcount))
-                                    (values page page))])
+                                (cond
+                                 [(zero? page) (values 1 1)]
+                                 [(negative? page)
+                                  (values 1 (* hcount vcount))]
+                                 [else
+                                  (values page page)])])
                     (for ([p (in-range start (add1 end))])
                       (let ([vpos (quotient (- p 1) hcount)]
                             [hpos (modulo (- p 1) hcount)])
-                        (let ([x (* hpos w)]
-                              [y (* vpos h)])
-                          (when (negative? page)
+                        (let ([x (* hpos W)]
+                              [y (* vpos H)])
+                          (when (page . <= . 0)
                             (send dc start-page))
                             
                           (draw dc (+ (- x) hm) (+ (- y) vm)
-                                x y (+ x w) (+ y h)
+                                x y (+ x (if eps? w W)) (+ y (if eps? h H))
                                 'no-caret
                                 #f)
 
-                          (when (negative? page)
+                          (when (page . <= . 0)
                             (send dc end-page)))))))))))))
 
   ;; ----------------------------------------

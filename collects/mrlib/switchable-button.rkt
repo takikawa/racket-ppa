@@ -56,6 +56,8 @@
                 [alternate-bitmap bitmap]
                 [vertical-tight? #f])
     
+    (define/public (get-button-label) label)
+    
     (when (and (is-a? label bitmap%)
                (not (send label ok?)))
       (error 'switchable-button% "label bitmap is not ok?"))
@@ -88,7 +90,9 @@
     (define/override (on-superwindow-show show?)
       (unless show?
         (set! in? #f)
-        (set! down? #f))
+        (set! down? #f)
+                (update-float #f)
+        (refresh))
       (super on-superwindow-show show?))
     
     (define/override (on-event evt)
@@ -104,6 +108,7 @@
          (refresh)
          (when (and in?
                     (not disabled?))
+           (update-float #f)
            (callback this))]
         [(send evt entering?)
          (set! in? #t)
@@ -144,7 +149,7 @@
            (unless (and float-window
                         (equal? new-value? (send float-window is-shown?)))
              (cond
-               [in?
+               [new-value?
                 (unless float-window
                   (set! float-window (new frame% 
                                           [label ""]
@@ -185,8 +190,8 @@
                     (<= 0 (send evt get-y) ch))])
           (unless (equal? new-in? in?)
             (set! in? new-in?)
-            (update-float in?)
-            (refresh)))))
+            (refresh))
+          (update-float new-in?))))
     
     (define/override (on-paint)
       (let ([dc (get-dc)])

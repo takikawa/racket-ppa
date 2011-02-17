@@ -123,7 +123,7 @@ add this test:
     (do-execute drs-frame)
     (type-in-interactions drs-frame program)
     (let ([before-newline-pos (send interactions-text last-position)])
-      (type-in-interactions drs-frame (string #\newline))
+      (type-in-interactions drs-frame "\n")
       (wait (λ ()
               ;; the focus moves to the input box, so wait for that.
               (send interactions-text get-focus-snip))
@@ -133,9 +133,13 @@ add this test:
       (wait-for-computation drs-frame)
       (let ([got-value
              (fetch-output drs-frame 
-                           (send interactions-text paragraph-start-position 3) ;; start after test expression
-                           (send interactions-text paragraph-end-position
-                                 (- (send interactions-text last-paragraph) 1)))])
+                           (queue-callback/res
+                            (λ ()
+                              (send interactions-text paragraph-start-position 3))) ;; start after test expression
+                           (queue-callback/res
+                            (λ ()
+                              (send interactions-text paragraph-end-position
+                                    (- (send interactions-text last-paragraph) 1)))))])
         (unless (equal? got-value expected-transcript)
           (fprintf (current-error-port)
                    "FAILED: expected: ~s\n             got: ~s\n         program: ~s\n           input: ~s\n"
@@ -168,8 +172,12 @@ add this test:
                  "()\n()")
   
   (do-input-test "(begin (write (read)) (flush-output) (write (read)))"
+                 "(1) (2)\n"
+                 "(1) (2)\n(1)(2)")
+  
+  (do-input-test "(let ([a (read)][b (read)]) (write a) (write b))"
                  "(1)\n(2)\n"
-                 "(1)\n(1)(2)\n(2)")
+                 "(1)\n(2)\n(1)(2)")
   
   (do-input-test 
    (string-append "(let ([b (read-byte)][bs0 (bytes 0)][bs1 (bytes 1)][bs2 (bytes 2)])"
@@ -186,7 +194,7 @@ add this test:
 (fire-up-drscheme-and-run-tests
  (λ ()
    (set! drs-frame (wait-for-drscheme-frame))
-   (set! interactions-text  (send drs-frame get-interactions-text))
+   (set! interactions-text (queue-callback/res (lambda () (send drs-frame get-interactions-text))))
    (set-language-level! (list #rx"Pretty Big"))
    (clear-definitions drs-frame)
    (do-execute drs-frame)

@@ -1,4 +1,5 @@
-(module frame mzscheme
+#lang racket/base
+
   (require "test-suite-utils.ss")
   
   (send-sexp-to-mred '(send (make-object frame:basic%
@@ -11,7 +12,7 @@
      (lambda (x) (eq? 'passed x))
      (lambda ()
        (let ([frame-label
-              (send-sexp-to-mred
+              (queue-sexp-to-mred
                `(let ([f (instantiate ,class-expression () ,@args)])
                   (send f show #t)
                   (send f get-label)))])
@@ -108,7 +109,7 @@
          (equal? x test-file-contents))
        (lambda ()
          (let ([frame-name 
-                (send-sexp-to-mred
+                (queue-sexp-to-mred
                  `(let ([frame (new ,class-expression)])
                     (preferences:set 'framework:file-dialogs 'common)
                     (send frame show #t)
@@ -120,10 +121,11 @@
            (call-with-output-file tmp-file
              (lambda (port)
                (display test-file-contents port))
-             'truncate)
+             #:exists 'truncate)
+           (queue-sexp-to-mred
+            `(send (find-labelled-window "Filename:") focus))
            (send-sexp-to-mred
-            `(begin (send (find-labelled-window "Filename:") focus)
-                    ,(case (system-type)
+            `(begin ,(case (system-type)
                        [(macos macosx) `(test:keystroke #\a '(meta))]
                        [(unix) `(test:keystroke #\a '(meta))]
                        [(windows) `(test:keystroke #\a '(control))]
@@ -133,16 +135,15 @@
                     (test:keystroke #\return)))
            (wait-for-frame tmp-file-name)
            (begin0
+             (queue-sexp-to-mred
+              `(let* ([w (get-top-level-focus-window)])
+                 (send (send w get-editor) get-text)))
              (send-sexp-to-mred
-              `(let* ([w (get-top-level-focus-window)]
-                      [t (send (send w get-editor) get-text)])
-                 (test:close-top-level-window w)
-                 t))
+              `(test:close-top-level-window (get-top-level-focus-window)))
              (wait-for-frame frame-name)
              (queue-sexp-to-mred
               `(send (get-top-level-focus-window) close))))))))
   
   (test-open "frame:searchable open" 'frame:searchable%)
   (test-open "frame:text open" 'frame:text%)
-  
-  )
+

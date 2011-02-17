@@ -584,9 +584,10 @@ all non-GUI portions of Redex) and also exported by
 @racketmodname[redex] (which includes all of Redex).
 
 @defform/subs[(define-language lang-name 
-                (non-terminal-spec @#,ttpattern ...)
-                ...)
-              ([non-terminal-spec symbol (symbol ...)])]{
+                non-terminal-def ...)
+              ([non-terminal-def (non-terminal-name ...+ ::= @#,ttpattern ...+)
+                                 (non-terminal-name @#,ttpattern ...+)
+                                 ((non-terminal-name ...+) @#,ttpattern ...+)])]{
 
 This form defines the grammar of a language. It allows the
 definition of recursive @|pattern|s, much like a BNF, but for
@@ -595,10 +596,9 @@ power, however, because repeated @racket[name] @|pattern|s and
 side-conditions can restrict matches in a context-sensitive
 way.
 
-The non-terminal-spec can either by a symbol, indicating a
-single name for this non-terminal, or a sequence of symbols,
-indicating that all of the symbols refer to these
-productions.
+A @racket[non-terminal-def] comprises one or more non-terminal names
+(considered aliases) followed by one or more productions. A non-terminal's
+names and productions may be separated by the keyword @racket[::=].
 
 As a simple example of a grammar, this is the lambda
 calculus:
@@ -618,9 +618,11 @@ with non-terminals @racket[e] for the expression language, @racket[x] for
 variables, @racket[c] for the evaluation contexts and @racket[v] for values.
 }
 
-@defform[(define-extended-language language language
-           (non-terminal @#,ttpattern ...)
-           ...)]{
+@defform/subs[(define-extended-language extended-lang base-lang 
+                non-terminal-def ...)
+              ([non-terminal-def (non-terminal-name ...+ ::= @#,ttpattern ...+)
+                                 (non-terminal-name @#,ttpattern ...+)
+                                 ((non-terminal-name ...+) @#,ttpattern ...+)])]{
 
 This form extends a language with some new, replaced, or
 extended non-terminals. For example, this language:
@@ -682,21 +684,21 @@ all non-GUI portions of Redex) and also exported by
                [extras rule-name
                        (fresh fresh-clause ...)
                        (side-condition racket-expression)
-                       (where tl-pat @#,tttterm)
+                       (where pat @#,tttterm)
                        (side-condition/hidden racket-expression)
-                       (where/hidden tl-pat @#,tttterm)]
+                       (where/hidden pat @#,tttterm)]
                [rule-name identifier
                           string 
                           (computed-name racket-expression)]
-               [fresh-clause var ((var1 ...) (var2 ...))]
-               [tl-pat identifier (tl-pat-ele ...)]
-               [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
+               [fresh-clause var ((var1 ...) (var2 ...))])]{
 
 Defines a reduction relation casewise, one case for each of the
 clauses beginning with @racket[-->] (or with @racket[arrow], if
 specified). Each of the @racket[pattern]s
 refers to the @racket[language], and binds variables in the
-@|tttterm|. 
+@|tttterm|. If present, the pattern following the @racket[#:domain]
+keyword specifies what terms the reduction relation operates on and
+is checked when the relation is used.
 
 Following the @|pattern| and @|tterm| can be the name of the
 reduction rule, declarations of some fresh variables, and/or
@@ -739,20 +741,20 @@ a sequence of variables. The variable @racket[var2] is used to
 determine the number of variables generated and @racket[var2] must be
 bound by the left-hand side of the rule.
 
-All side-conditions provided with @racket[side-condition] and
-@racket[hidden-side-condition] are collected with @racket[and] and
+The expressions within @as-index{@racket[side-condition] clause}s
+and @as-index{@racket[side-condition/hidden] clause}s are collected with @racket[and] and
 used as guards on the case being matched. The argument to each
 side-condition should be a Racket expression, and the pattern
 variables in the @|ttpattern| are bound in that expression. A
-@racket[side-condition/hidden] form is the same as
-@racket[side-condition], except that the side condition is not
+@racket[side-condition/hidden] clause is the same as
+a @racket[side-condition] clause, except that the condition is not
 rendered when typesetting via @racketmodname[redex/pict].
 
-Each @racket[where] clause acts as a side condition requiring a
+Each @as-index{@racket[where] clause} acts as a side condition requiring a
 successful pattern match, and it can bind pattern variables in the
 side-conditions (and @racket[where] clauses) that follow and in the
 metafunction result. The bindings are the same as bindings in a
-@racket[term-let] expression. A @racket[where/hidden] clause is the
+@racket[term-let] expression. A @as-index{@racket[where/hidden] clause} is the
 same as a @racket[where] clause, but the clause is not
 rendered when typesetting via @racketmodname[redex/pict].
 
@@ -928,17 +930,15 @@ all non-GUI portions of Redex) and also exported by
 
 @defform/subs[#:literals (: -> where side-condition side-condition/hidden where/hidden)
              (define-metafunction language
-               contract
+               metafunction-contract
                [(name @#,ttpattern ...) @#,tttterm extras ...] 
                ...)
-             ([contract (code:line) 
-                        (code:line id : @#,ttpattern ... -> @#,ttpattern)]
+             ([metafunction-contract (code:line) 
+                                     (code:line id : @#,ttpattern ... -> @#,ttpattern)]
               [extras (side-condition racket-expression)
                       (side-condition/hidden racket-expression)
-                      (where tl-pat @#,tttterm)
-                      (where/hidden tl-pat @#,tttterm)]
-              [tl-pat identifier (tl-pat-ele ...)]
-              [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
+                      (where pat @#,tttterm)
+                      (where/hidden pat @#,tttterm)])]{
 
 The @racket[define-metafunction] form builds a function on
 sexpressions according to the pattern and right-hand-side
@@ -1011,7 +1011,7 @@ match.
 }
 
 @defform[(define-metafunction/extension f language 
-           contract
+           metafunction-contract
            [(g @#,ttpattern ...) @#,tttterm extras ...] 
            ...)]{
 
@@ -1044,9 +1044,11 @@ and @racket[#f] otherwise.
 
 @defform/subs[#:literals ()
               (define-relation language
+               relation-contract
                [(name @#,ttpattern ...) @#,tttterm ...] ...)
-               ([tl-pat identifier (tl-pat-ele ...)]
-                [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
+               ([relation-contract (code:line)
+                                   (code:line id ⊂ pat x ... x pat)
+                                   (code:line id ⊆ pat × ... × pat)])]{
 
 The @racket[define-relation] form builds a relation on
 sexpressions according to the pattern and right-hand-side
@@ -1065,6 +1067,11 @@ the result is @racket[#f]. If there are multiple expressions on
 the right-hand side of a relation, then all of them must be satisfied
 in order for that clause of the relation to be satisfied.
 
+The contract specification for a relation restricts the patterns that can
+be used as input to a relation. For each argument to the relation, there
+should be a single pattern, using @racket[x] or @racket[×] to separate
+the argument contracts.
+
 Note that relations are assumed to always return the same results for
 the same inputs, and their results are cached, unless
 @racket[caching-enable?] is set to @racket[#f]. Accordingly, if a
@@ -1077,6 +1084,12 @@ sides are evaluated only once.
 Controls which metafunctions are currently being traced. If it is
 @racket['all], all of them are. Otherwise, the elements of the list
 name the metafunctions to trace. 
+
+The tracing looks just like the tracing done by the @racketmodname[racket/trace]
+library, except that the first column printed by each traced call indicate
+if this call to the metafunction is cached. Specifically, a @tt{c} is printed
+in the first column if the result is just returned from the cache and a
+space is printed if the metafunction call is actually performed.
 
 Defaults to @racket['()].
 
@@ -1096,17 +1109,29 @@ Tests to see if @racket[e1] is equal to @racket[e2].
 
 @defform/subs[(test-->> rel-expr option ... e1-expr e2-expr ...)
               ([option (code:line #:cycles-ok)
-                       (code:line #:equiv pred-expr)])
+                       (code:line #:equiv pred-expr)
+                       (code:line #:pred pred-expr)])
               #:contracts ([rel-expr reduction-relation?]
-                           [pred-expr (--> any/c any/c any/c)]
+                           [pred-expr (--> any/c any)]
                            [e1-expr any/c]
                            [e2-expr any/c])]{
 
 Tests to see if the term @racket[e1-expr],
 reduces to the terms @racket[e2-expr] under @racket[rel-expr],
-using @racket[pred-expr] to determine equivalence. This test uses
+using @racket[pred-expr] to determine equivalence. 
+
+If @racket[#:pred] is specified, it is applied to each reachable term
+until one of the terms fails to satify the predicate (i.e., the
+predicate returns @racket[#f]). If that happens, then the test fails
+and a message is printed with the term that failed to satisfy the
+predicate.
+
+This test uses
 @racket[apply-reduction-relation*], so it does not terminate
 when the resulting reduction graph is infinite.
+
+
+
 }
 
 @defform/subs[(test--> rel-expr option ... e1-expr e2-expr ...)
@@ -1138,6 +1163,37 @@ step, using @racket[pred-expr] to determine equivalence.
        (test--> R #:equiv mod2=? 7 1)
 
        (test--> R #:equiv mod2=? 7 1 0)
+       
+       (test-results)]
+
+@defform/subs[(test-->>∃ option ... rel-expr start-expr spec-expr)
+              ([option (code:line #:steps steps-expr)])
+              #:contracts ([rel-expr reduction-relation?]
+                           [start-expr any/c]
+                           [spec-expr (or/c (-> any/c any/c)
+                                            (not/c procedure?))]
+                           [steps-expr (or/c natural-number/c +inf.0)])]{
+Tests to see if the term @racket[start-expr] reduces according to the reduction 
+relation @racket[rel-expr] to a term specified by @racket[goal-expr] in 
+@racket[steps-expr] or fewer steps (default 1,000). The specification 
+@racket[goal-expr] may be either a predicate on terms or a term itself.
+}
+@defidform[test-->>E]{An alias for @racket[test-->>∃].}
+
+@examples[
+#:eval redex-eval
+       (define-language L
+         (n natural))
+
+       (define succ-mod8
+         (reduction-relation
+          L
+          (--> n ,(modulo (add1 (term n)) 8))))
+
+       (test-->>∃ succ-mod8 6 2)
+       (test-->>∃ succ-mod8 6 even?)
+       (test-->>∃ succ-mod8 6 8)
+       (test-->>∃ #:steps 6 succ-mod8 6 5)
        
        (test-results)]
 
@@ -1264,7 +1320,7 @@ random terms in its search. The size and complexity of these terms tend to incre
 with each failed attempt. The @racket[#:attempt-size] keyword determines the rate at which
 terms grow by supplying a function that bounds term size based on the number of failed
 attempts (see @racket[generate-term]'s @racket[#:size] keyword). By default, the bound
-grows logarithmically with failed attempts.
+grows according to the @racket[default-attempt-size] function.
 
 When @racket[print?-expr] produces any non-@racket[#f] value (the default), 
 @racket[redex-check] prints the test outcome on @racket[current-output-port].
@@ -1405,12 +1461,26 @@ produces and consumes argument lists.}
        
        (check-metafunction Σ (λ (args) (printf "~s\n" args)) #:attempts 2)]
                                                             
+@defproc[(default-attempt-size [n natural-number/c]) natural-number/c]{
+The default value of the @racket[#:attempt-size] argument to 
+@racket[redex-check] and the other randomized testing forms, this 
+procedure computes an upper bound on the size of the next
+test case from the number of previously attempted tests @racket[n]. 
+Currently, this procedure computes the base 5 logarithm, but 
+that behavior may change in future versions.
+}
+               
+@defparam[redex-pseudo-random-generator generator pseudo-random-generator?]{
+@racket[generate-term] and the randomized testing forms (e.g., @racket[redex-check])
+use the parameter @racket[generator] to construct random terms. The parameter's
+initial value is @racket[(current-pseudo-random-generator)].}
+
 @defproc[(exn:fail:redex:generation-failure? [v any/c]) boolean?]{
   Recognizes the exceptions raised by @racket[generate-term], 
   @racket[redex-check], etc. when those forms are unable to produce
   a term matching some pattern.
 }
-                                                            
+
 @deftech{Debugging PLT Redex Programs}
 
 It is easy to write grammars and reduction rules that are

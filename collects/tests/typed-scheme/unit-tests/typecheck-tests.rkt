@@ -148,10 +148,10 @@
         (tc-e/t 3 -PositiveFixnum)
         (tc-e/t 100 -PositiveFixnum)
         (tc-e/t -100 -NegativeFixnum)
-        (tc-e/t 2147483647 -PositiveFixnum)
-        (tc-e/t -2147483647 -NegativeFixnum)
-        (tc-e/t 2147483648 -Pos)
-        (tc-e/t -2147483648 -Integer)
+        (tc-e/t 1073741823 -PositiveFixnum)
+        (tc-e/t -1073741824 -NegativeFixnum)
+        (tc-e/t 1073741824 -Pos)
+        (tc-e/t -1073741825 -Integer)
         (tc-e/t "foo" -String)
         (tc-e (+ 3 4) -Pos)
         [tc-e/t (lambda: () 3) (t:-> -PositiveFixnum : -true-lfilter)]
@@ -872,7 +872,8 @@
    (tc-l #"foo" -Bytes)
    [tc-l () (-val null)]
    [tc-l (3 . 4) (-pair -PositiveFixnum -PositiveFixnum)]
-   [tc-l #hash((1 . 2) (3 . 4)) (make-Hashtable -PositiveFixnum -PositiveFixnum)])
+   [tc-l #hash((1 . 2) (3 . 4)) (make-Hashtable -Integer -Integer)]
+   [tc-l #hasheq((a . q) (b . w)) (make-Hashtable -Symbol -Symbol)])
   ))
 
 

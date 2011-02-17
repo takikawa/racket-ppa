@@ -158,12 +158,14 @@ is @racket[#f].
 
 If @racket[in] has a @litchar{#lang} or @litchar{#!} specification,
 but parsing and resolving the specification raises an exception, the
-exception is propagated by @racket[read-language].
+exception is propagated by @racket[read-language]. Having at least
+@litchar{#l} or @litchar{#!} (after comments and whitespace) counts as
+starting a @litchar{#lang} or @litchar{#!} specification.
 
 If @racket[in] does not specify a @tech{reader language} with
 @litchar{#lang} or @litchar{#!}, then @racket[fail-thunk] is
 called. The default @racket[fail-thunk] raises
-@racket[exn:fail:contract].}
+@racket[exn:fail:read] or @racket[exn:fail:read:eof].}
 
 
 @defboolparam[read-case-sensitive on?]{

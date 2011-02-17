@@ -1,9 +1,10 @@
-(module wxtextfield mzscheme
+(module wxtextfield racket/base
   (require mzlib/class
 	   mzlib/class100
-	   (prefix wx: "kernel.ss")
-           (prefix wx: "wxme/text.ss")
-           (prefix wx: "wxme/editor-canvas.ss")
+	   (prefix-in wx: "kernel.ss")
+           (prefix-in wx: "wxme/text.ss")
+           (prefix-in wx: racket/snip)
+           (prefix-in wx: "wxme/editor-canvas.ss")
 	   "lock.ss"
 	   "const.ss"
 	   "check.ss"
@@ -17,18 +18,69 @@
 	   "editor.ss"
 	   "mrpopup.ss")
 
-  (provide (protect wx-text-field%))
+  (provide (protect-out wx-text-field%))
+
+  (define no-pen (send wx:the-pen-list find-or-create-pen "white" 1 'transparent))
+  (define black-brush (send wx:the-brush-list find-or-create-brush "black" 'solid))
+
+  (define password-string-snip%
+    (class wx:string-snip%
+      (inherit get-count
+               get-style
+               get-text)
+      (super-new)
+
+      (define delta 3)
+      (define hdelta 2)
+      (define (get-size)
+        (max 4 (send (send (get-style) get-font) get-point-size)))
+               
+      (define/override (get-extent dc x y [w #f] [h #f] [descent #f] [space #f] [lspace #f] [rspace #f])
+        (let ([s (get-size)])
+          (when w (set-box! w (* (max 1.0 (- s hdelta hdelta)) (get-count))))
+          (when h (set-box! h (+ s 2.0)))
+          (when descent (set-box! descent 1.0))
+          (when space (set-box! space 1.0))
+          (when lspace (set-box! lspace 0.0))
+          (when rspace (set-box! rspace 0.0))))
+      (define/override (partial-offset dc x y pos)
+        (let ([s (get-size)])
+          (* (max 1.0 (- s hdelta hdelta)) pos)))
+      (define/override (draw dc x y left top right bottom dx dy draw-caret)
+        (let ([s (get-size)]
+              [b (send dc get-brush)]
+              [p (send dc get-pen)]
+              [m (send dc get-smoothing)])
+          (send dc set-pen no-pen)
+          (send dc set-brush black-brush)
+          (send dc set-smoothing 'aligned)
+          (for/fold ([x x]) ([i (in-range (get-count))])
+            (send dc draw-ellipse (- (+ x delta) hdelta) (+ y delta 1) (- s delta delta) (- s delta delta))
+            (+ x (- s hdelta hdelta)))
+          (send dc set-pen p)
+          (send dc set-brush b)
+          (send dc set-smoothing m)))
+      (define/override (split pos first second)
+        (let ([a (new password-string-snip%)]
+              [b (new password-string-snip%)]
+              [c (get-count)])
+          (send a insert (get-text 0 pos) pos)
+          (send b insert (get-text pos c) (- c pos))
+          (set-box! first a)
+          (set-box! second b)))))
 
   (define text-field-text% 
-    (class100 text% (cb ret-cb control set-cb-mgrs!)
+    (class100 text% (cb ret-cb control set-cb-mgrs! record-text pw?)
       (rename [super-on-char on-char])
-      (inherit get-text last-position set-max-undo-history)
+      (inherit get-text last-position set-max-undo-history get-flattened-text)
       (private-field
-       [return-cb ret-cb])
+       [return-cb ret-cb]
+       [password? pw?])
       (private-field
        [block-callback 1]
        [callback
 	(lambda (type)
+          (as-exit (lambda () (record-text (get-flattened-text))))
 	  (when (zero? block-callback)
 	    (let ([e (make-object wx:control-event% type)])
 	      (as-exit (lambda ()
@@ -38,10 +90,17 @@
 	 (entry-point
 	  (lambda (e)
 	    (let ([c (send e get-key-code)])
-	      (unless (and (or (eq? c #\return) (eq? c #\newline))
+	      (unless (and (or (eq? c #\return) 
+                               (eq? c #\newline)
+                               (eq? c #\u3)) ; numpad enter
 			   return-cb
 			   (return-cb (lambda () (callback 'text-field-enter) #t)))
-		(as-exit (lambda () (super-on-char e)))))))])
+		(as-exit (lambda () (super-on-char e)))))))]
+        [on-new-string-snip
+         (lambda ()
+           (if password?
+               (new password-string-snip%)
+               (super on-new-string-snip)))])
       (augment
        [after-insert
 	(lambda args
@@ -88,7 +147,10 @@
 		       this
 		       (lambda (wc cr)
 			 (set! without-callback wc)
-			 (set! callback-ready cr)))])
+			 (set! callback-ready cr))
+                       (lambda (t)
+                         (send c set-combo-text t))
+                       (memq 'password style))])
       (sequence
 	(as-exit
 	 (lambda ()
@@ -136,7 +198,7 @@
 			   (cdr r))
 		     r))))])
       (sequence
-	(super-init #f proxy parent (if (memq 'deleted style) '(deleted) null))
+	(super-init #f proxy parent (if (memq 'deleted style) '(deleted) null) #f)
 	(unless (memq 'deleted style)
 	  (send (area-parent) add-child this)))
       (private-field
@@ -148,7 +210,7 @@
        [dy 0]
        [p (if horiz?
 	      this
-	      (let ([p (make-object wx-vertical-pane% #f proxy this null)])
+	      (let ([p (make-object wx-vertical-pane% #f proxy this null #f)])
                 (send p skip-subwindow-events? #t)
 		(send (send p area-parent) add-child p)
 		p))])
@@ -157,12 +219,19 @@
 	(unless horiz? (send p alignment 'left 'top))
 	(unless multi? (stretchable-in-y #f))
 	;; For Windows:
-	(wx:set-combo-box-font font)
+	; (wx:set-combo-box-font font)
         (spacing 3))
       (private-field
        [l (and label
 	       (make-object wx-message% #f proxy p label -1 -1 null font))]
-       [c (make-object wx-text-editor-canvas% #f proxy this p
+       [combo-callback #f]
+       [c (make-object (class wx-text-editor-canvas% 
+                         (define/override (on-combo-select i)
+                           (let ([len (length callbacks)])
+                             (when (< -1 i len)
+                               ((list-ref callbacks (- len i 1))))))
+                         (super-new))
+                       #f proxy this p
 		       (append
 			'(control-border)
 			(if (memq 'combo style)
@@ -172,7 +241,38 @@
 			    (if (memq 'hscroll style)
 				null
 				'(hide-hscroll))
-			    '(hide-vscroll hide-hscroll))))])
+			    '(hide-vscroll hide-hscroll))))]
+       [callbacks null])
+      (override 
+        [pre-on-event (lambda (w e)
+                        (or (super pre-on-event w e)
+                            (and combo-callback
+                                 (eq? w c)
+                                 (send e button-down?)
+                                 (let ([w (box 0)]
+                                       [h (box 0)])
+                                   (send c get-client-size w h)
+                                   (not (and (<= 0 (send e get-x) (unbox w))
+                                             (<= 0 (send e get-y) (unbox h)))))
+                                 (begin
+                                   (do-popup-callback)
+                                   #t))))])
+      (private
+        [do-popup-callback (lambda ()
+                             (wx:queue-callback (lambda ()
+                                                  (when (send c is-enabled-to-root?)
+                                                    (combo-callback)
+                                                    (send c popup-combo)))
+                                                wx:middle-queue-key))])
+      (public
+        [set-on-popup (lambda (proc) 
+                        (set! combo-callback proc) 
+                        (send c set-on-popup (lambda () (do-popup-callback))))]
+        [clear-combo-items (lambda () (set! callbacks null) (send c clear-combo-items))]
+        [append-combo-item (lambda (s cb)
+                             (and (send c append-combo-item s)
+                                  (set! callbacks (cons cb callbacks))
+                                  #t))])
       (sequence
         (send c skip-subwindow-events? #t)
 	(when l
@@ -185,14 +285,7 @@
 	(send e auto-wrap (and multi? (not (memq 'hscroll style))))
 	(let ([f font]
 	      [s (send (send e get-style-list) find-named-style "Standard")])
-	  (send s set-delta (let ([d (font->delta f)])
-			      (if (memq 'password style)
-				  (begin
-				    (send d set-face #f)
-				    (send d set-family 'modern)
-				    (send d set-delta-foreground "darkgray")
-				    (send d set-delta-background "darkgray"))
-				  d))))
+	  (send s set-delta (font->delta f)))
 	(send c set-editor e)
 	(send c set-line-count (if multi? 3 1))
 	(unless multi? (send c set-single-line))
@@ -220,7 +313,7 @@
 	      (set! dy (- dy (unbox ybox))))
 	    
 	    ;; Subtract ascent of label
-	    (send l get-text-extent "hi" wbox hbox ybox abox)
+	    (send l get-text-extent "hi" wbox hbox ybox abox font)
 	    (set! dy (- dy (- (unbox hbox) (unbox ybox))))
 	    
 	    ;; Subtract space above label
@@ -228,7 +321,7 @@
 
 	    ;; Exact
 	    (set! dy (inexact->exact dy))))
-	
+
 	(when value
 	  (set-value value)
 	  (unless (string=? value "")

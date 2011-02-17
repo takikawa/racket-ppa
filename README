@@ -11,7 +11,7 @@ Important executables:
 * Racket: the main command-line entry point for running racket programs
   and scripts.
 
-* GRacket: the GUI-enabled Racket executable.
+* GRacket: the GUI-mode Racket executable.
 
 * raco: Racket's command-line toolset.
 
@@ -28,7 +28,7 @@ License
 -------
 
 Racket
-Copyright (c) 2010 PLT Scheme Inc.
+Copyright (c) 2010-2011 PLT Scheme Inc.
 
 Racket is distributed under the GNU Lesser General Public License
 (LGPL).  This means that you can link Racket into proprietary

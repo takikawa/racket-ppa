@@ -141,6 +141,13 @@
      The number is updated in @xmethod[text% after-insert] and
      @xmethod[text% after-delete].
   }
+ 
+  @defmethod[(get-start-of-line [pos exact-nonnegative-integer?]) exact-nonnegative-integer?]{
+    This method is used by @racket[keymap:setup-global] to implement 
+    a keybinding for the @racket["home"] key and for @racket["c:a"].
+    
+    Its default implementation is @racket[(#,(method text% line-start-position) (#,(method text% position-line) pos))].
+  }
   
 }
 @defmixin[text:basic-mixin (editor:basic<%> text%) (text:basic<%>)]{
@@ -1163,5 +1170,46 @@
 @defclass[text:backup-autosave% (editor:backup-autosave-mixin text:clever-file-format%) ()]{}
 @defclass[text:searching% (text:searching-mixin text:backup-autosave%) ()]{}
 @defclass[text:info% (text:info-mixin (editor:info-mixin text:searching%)) ()]{}
+
+@definterface[text:line-numbers<%> ()]{
+
+  @defmethod*[(((show-line-numbers! (show boolean?)) void))]{
+
+    Enables or disables line number drawing.
+  }
+  
+  @defmethod*[(((show-line-numbers?) boolean?))]{
+
+    Returns whether or not line drawing is enabled.
+  }
+  
+  @defmethod*[(((set-line-numbers-color (color string?)) void?))]{
+
+    Sets the color of the line numbers.
+  }
+}
+
+@defmixin[text:line-numbers-mixin (text%) (text:line-numbers<%>)]{
+
+  @defmethod*[#:mode override (((on-paint) void))]{
+
+    Draws the line numbers.
+  }
+
+  @defmethod*[(((show-line-numbers! (show boolean?)) void))]{
+
+    Enables or disables line number drawing.
+  }
+  
+  @defmethod*[(((show-line-numbers?) boolean?))]{
+
+    Returns whether or not line drawing is enabled.
+  }
+  
+  @defmethod*[(((set-line-numbers-color (color string?)) void?))]{
+
+    Sets the color of the line numbers.
+  }
+}
 
 @(include-previously-extracted "main-extracts.ss" #rx"^text:")

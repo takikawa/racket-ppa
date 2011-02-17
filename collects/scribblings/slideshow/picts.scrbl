@@ -1,5 +1,6 @@
 #lang scribble/doc
 @(require "ss.ss"
+          "pict-diagram.rkt"
           (for-label racket/gui
                      slideshow/code
                      slideshow/flash
@@ -34,16 +35,7 @@ offset of an embedded pict in a larger pict.
 In addition to its drawing part, a pict has the following
 @deftech{bounding box} structure:
 
-@verbatim[#:indent 7]{
-           w
-   ------------------
-  |                  | a  \
-  |------------------|    |
-  |                  |    | h
-  |----------last----|    |
-  |                  | d  /
-   ------------------
-}
+@centerline[pict-diagram]
 
 That is, the bounding box has a width @math{w} and a height
 @math{h}. For a single text line, @math{d} is descent below the
@@ -64,6 +56,10 @@ arbitrarily complex computations on the size and shape of existing
 picts. The functions @racket[pict-width], @racket[pict-height],
 @racket[pict-descent], and @racket[pict-ascent] extract bounding-box
 information from a pict.
+
+A pict is a convertible datatype through the @racketmodname[file/convertible]
+protocol. Supported conversions include @racket['png-bytes],
+@racket['eps-bytes], and @racket['pdf-bytes].
 
 
 @defstruct[pict ([draw any/c]
@@ -154,9 +150,8 @@ adding the given ascent and descent.}
          pict?]{
 
 Creates a pict that draws text. For creating text picts within a slide
-presentation, see @racket[t], instead. Otherwise, before calling this
-function, a drawing context must be installed with
-@racket[dc-for-text-size].
+presentation, see @racket[t]. The size of the resulting pict may
+depend on the value of @racket[dc-for-text-size].
 
 The @racket[style] argument must be one of the following:
 
@@ -712,6 +707,26 @@ plain pumpkin. The @racket[size] determines the width.}
 Creates an angel wing, left or right, or any size.  The color and pen
 width for drawing the wing outline is the current one.}
 
+@defproc[(desktop-machine [scale real?]
+                          [style (listof symbol?) null])
+         pict?]{
+
+Produces a picture of ancient desktop computer. The @racket[scale]
+argument scales the size relative to the base size of 120 by 115. 
+
+The @racket[style] can include any of the following:
+
+@itemlist[
+
+ @item{@racket['plt] --- include a Racket logo on the machine's screen}
+
+ @item{@racket['binary] --- put 1s and 0s on the machine's screen}
+
+ @item{@racket['devil] --- like @racket['binary], and also give the machine 
+                           horns and a tail}
+
+]}
+
 @; ----------------------------------------
 
 @subsection{Balloon Annotations}
@@ -993,10 +1008,10 @@ A parameter that is used to determine the @tech{bounding box} of picts
 created with @racket[text].
 
 The drawing context installed in this parameter need not be the same
-as the ultimate drawing context, but it must measure text in the same
-way. In particular, use a @racket[post-script-dc%] for preparing
-PostScript output, while a @racket[bitmap-dc%] instance will work fine
-for either @racket[bitmap-dc%] or @racket[canvas%] output.}
+as the ultimate drawing context, but it should measure text in the same
+way. Under normal circumstances, font metrics are the same for all
+drawing contexts, so the default value of @racket[dc-for-text-size] is
+a @racket[bitmap-dc%] that draws to a 1-by-1 bitmap.}
 
 
 @defproc[(draw-pict [pict pict?]

@@ -134,8 +134,7 @@ please adhere to these guidelines:
  (web-materials "関連するウェブサイト") ;; menu item title
  (tool-web-sites "ツールのウェブサイト")   ;; menu item title
  (plt-homepage "Racket")
- (how-to-use-scheme "How to Use Scheme") ;; title of a book.
- (teachscheme!-homepage "TeachScheme!") ;; probably this should be a `word' in all languages
+ (pbd-homepage "Program by Design")
 
  ;;; bug report form
  (cancel-bug-report? "バグ報告を中止しますか？")
@@ -158,7 +157,7 @@ please adhere to these guidelines:
  (bug-report-synthesized-information "詳細情報")  ;; dialog title
  (bug-report-show-synthesized-info "詳細情報の表示")
  (bug-report-submit "送信")
- (bug-report-submit-menu-item "バグ報告の送信") ;; in Help Menu (drs & help desk)
+ (bug-report-submit-menu-item "バグ報告の送信...") ;; in Help Menu (drs & help desk)
  (error-sending-bug-report "バグ報告の送信エラー")
  (error-sending-bug-report-expln "バグ報告の送信中にエラーが発生しました。もし、インターネット接続が正常であるなら、\n\n    http://bugs.racket-lang.org/\n\nを開いて、オンラインのウェブフォームからバグ報告を行ってください。お手間をかけて申し訳ありません。\n\nエラーメッセージ:\n~a")
  (illegal-bug-report "バグ報告が正しく入力されていません")
@@ -535,7 +534,7 @@ please adhere to these guidelines:
  (mfs-recur-over-subdirectories "サブディレクトリ内を再帰的に検索")
  (mfs-regexp-filename-filter "ファイル名を正規表現でフィルタ")
  (mfs-search-string "検索語")
- (mfs-drscheme-multi-file-search "DrRacket - 複数ファイルからの検索") ;; results window and error message title
+ (mfs-drscheme-multi-file-search "複数ファイルからの検索 - DrRacket") ;; results window and error message title
  (mfs-not-a-dir "\"~a\" はディレクトリではありません")
  (mfs-open-file "ファイルを開く")
  (mfs-stop-search "検索を中止")

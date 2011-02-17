@@ -110,7 +110,10 @@
     [(_) (mutator-app void)]
     [(_ e) e]
     [(_ fe e ...)
-     (mutator-let ([tmp fe]) (mutator-begin e ...))]))
+     (let ([tmp 
+            (syntax-parameterize ([mutator-tail-call? #f])
+                                 fe)])
+       (mutator-begin e ...))]))
 
 ; Real Macros
 (define-syntax-rule (mutator-define-values (id ...) e)
@@ -178,8 +181,8 @@
          (quasisyntax/loc stx
            (let ([closure (lambda (id ...) 
                             (syntax-parameterize ([mutator-env-roots 
-                                                   (list* #'id ...
-                                                          (syntax-parameter-value #'mutator-env-roots))]
+                                                   (list #'id ...
+                                                         #'free-id ...)]
                                                   [mutator-tail-call? #t])
                                                  (->address body)))])
              (add-closure-env! closure (list (make-env-root free-id) ...))
@@ -229,9 +232,9 @@
 (define-syntax mutator-quote
   (syntax-rules ()
     [(_ (a . d))
-     (mutator-anf-app collector:cons (mutator-quote a) (mutator-quote d))]
+     (mutator-app collector:cons (mutator-quote a) (mutator-quote d))]
     [(_ s) 
-     (mutator-anf-app collector:alloc-flat 's)]))
+     (mutator-app collector:alloc-flat 's)]))
 (define-syntax (mutator-datum stx)
   (syntax-case stx ()
     [(_ . e) 

@@ -24,6 +24,8 @@
 	   (protect menu-parent-only
 		    menu-or-bar-parent))
 
+  (define root-menu-frame-used? #f)
+
   ;; Most of the work is in the item. Anything that appears in a menubar or
   ;;  menu has an item. Submenus are created as instances of menu%, but
   ;;  menu% has a get-item method for manipulating the menu w.r.t. the parent
@@ -183,7 +185,7 @@
     (unless (or (not c) 
 		(char? c)
 		(and (symbol? c)
-		     (positive? (wx:key-symbol-to-integer c))))
+		     (wx:key-symbol-to-menu-key c)))
       (raise-type-error (who->name who) "character, key-code symbol, or #f" c)))
 
   (define (check-shortcut-prefix who p)
@@ -259,7 +261,7 @@
 							 (if (memq 'meta prefix) "Meta+" "")
 							 (if (memq 'alt prefix) "Alt+" "")
 							 (if (symbol? shortcut)
-							     (string-titlecase (symbol->string shortcut))
+							     (wx:key-symbol-to-menu-key shortcut)
 							     (char-name
 							      (char-upcase shortcut)
 							      #t)))]
@@ -273,7 +275,7 @@
 							     (char->integer #\A)))
 							 (if (char? shortcut)
 							     (char->integer (char-upcase shortcut))
-							     (wx:key-symbol-to-integer shortcut)))]))
+							     (wx:key-symbol-to-menu-key shortcut)))]))
 					     (strip-tab label))]
 			      [key-binding (and shortcut
 						(let ([base (if (symbol? shortcut)
@@ -426,17 +428,13 @@
       (private-field 
        [callback demand-callback]
        [prnt (if (eq? parent 'root)
-		 (let ([f (make-object (class frame%
-					 (define/override (on-exit)
-					   (exit))
-					 (super-make-object "Root")))])
+		 (begin
 		   (as-entry
 		    (lambda ()
-		      (when root-menu-frame
+		      (when root-menu-frame-used?
 			(raise-mismatch-error (constructor-name 'menu-bar) "already has a menu bar: " parent))
-		      (send (mred->wx f) designate-root-frame)
-		      (set-root-menu-frame! f)))
-		   f)
+		      (set! root-menu-frame-used? #t)))
+		   root-menu-frame)
 		 parent)]
        [wx #f]
        [wx-parent #f]
@@ -466,6 +464,4 @@
 
   (define (menu-or-bar-parent who p)
     (unless (or (is-a? p internal-menu<%>) (is-a? p menu-bar%))
-      (raise-type-error (constructor-name who) "built-in menu-item-container<%> object" p)))
-  
-  (wx:set-menu-tester (lambda (m) (is-a? m popup-menu%))))
+      (raise-type-error (constructor-name who) "built-in menu-item-container<%> object" p))))

@@ -17,8 +17,8 @@
 (send f show #t)
 |#
 
-(require "../image.ss"
-         (only-in "../../mrlib/image-core.ss" 
+(require 2htdp/image
+         (only-in mrlib/image-core 
                   image%
                   make-image
                   image-shape
@@ -36,18 +36,23 @@
                   crop?
                   normalized-shape?
                   image-snip->image
-                  to-img)
-         (only-in "../private/image-more.ss" 
+                  to-img
+                  render-normalized
+                  render-image)
+         (only-in "../private/image-more.rkt"
                   bring-between
                   swizzle)
-         ; "../private/img-err.ss"
-         "../../mrlib/private/image-core-bitmap.ss"
+         mrlib/private/image-core-bitmap
          lang/posn
          racket/math
          racket/class
          racket/file
          racket/gui/base
+         racket/port
+         wxme
          rackunit
+         file/convertible
+         (only-in lang/imageeq image=?)
          (prefix-in 1: htdp/image)
          (only-in lang/htdp-advanced equal~?))
 
@@ -150,6 +155,15 @@
 (test (image-height (rectangle 100 0 'solid 'blue))
       =>
       0)
+
+(test (image-width empty-image) => 0)
+(test (image-height empty-image) => 0)
+(test (equal? (above empty-image
+                     (rectangle 10 10 "solid" "red"))
+              (beside empty-image
+                      (rectangle 10 10 "solid" "red")))
+      =>
+      #t)
 
 (check-close (image-width (rotate 45 (rectangle 100 0 'solid 'blue)))
              (inexact->exact (ceiling (* (sin (* pi 1/4)) 100))))
@@ -301,6 +315,25 @@
                .1)
       =>
       #t)
+
+;; test to make sure that image=? is provided from 2htdp/image and
+;; not just built into the teaching languages.
+(test (image=? (rectangle 10 10 'solid 'red) (rectangle 10 10 'solid 'red))
+      =>
+      #t)
+
+(test (image=? (overlay (rectangle 3 1 'solid 'blue)
+                        (rectangle 1 3 'solid 'blue))
+               (overlay (rectangle 1 3 'solid 'blue)
+                        (rectangle 3 1 'solid 'blue)))
+      =>
+      #t)
+
+
+(test (with-handlers ((exn:fail? (λ (x) 'passed)))
+        (begin (image=? 1 2) 'fail))
+      =>
+      'passed)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -653,14 +686,12 @@
 ;;  testing normalization
 ;;
 
-(test (normalize-shape (image-shape (ellipse 50 100 'solid 'red))
-                       values)
+(test (normalize-shape (image-shape (ellipse 50 100 'solid 'red)))
       =>
-      (make-translate 25 50 (make-ellipse 50 100 0 'solid "red")))
+      (make-translate 25 50 (make-ellipse 50 100 0 255 "red")))
 
 (test (normalize-shape (make-overlay (image-shape (ellipse 50 100 'solid 'red))
-                                     (image-shape (ellipse 50 100 'solid 'blue)))
-                       values)
+                                     (image-shape (ellipse 50 100 'solid 'blue))))
       =>
       (make-overlay (image-shape (ellipse 50 100 'solid 'red))
                     (image-shape (ellipse 50 100 'solid 'blue))))
@@ -668,34 +699,30 @@
 (test (normalize-shape (make-overlay
                         (make-overlay (image-shape (ellipse 50 100 'solid 'red))
                                       (image-shape (ellipse 50 100 'solid 'blue)))
-                        (image-shape (ellipse 50 100 'solid 'green)))
-                       values)
+                        (image-shape (ellipse 50 100 'solid 'green))))
       =>
       (make-overlay 
-       (make-overlay (make-translate 25 50 (make-ellipse 50 100 0 'solid "red"))
-                     (make-translate 25 50 (make-ellipse 50 100 0 'solid "blue")))
-       (make-translate 25 50 (make-ellipse 50 100 0 'solid "green"))))
+       (make-overlay (make-translate 25 50 (make-ellipse 50 100 0 255 "red"))
+                     (make-translate 25 50 (make-ellipse 50 100 0 255 "blue")))
+       (make-translate 25 50 (make-ellipse 50 100 0 255 "green"))))
 
 (test (normalize-shape (make-overlay
                         (image-shape (ellipse 50 100 'solid 'green))
                         (make-overlay (image-shape (ellipse 50 100 'solid 'red))
-                                      (image-shape (ellipse 50 100 'solid 'blue))))
-                       values)
+                                      (image-shape (ellipse 50 100 'solid 'blue)))))
       =>
       (make-overlay 
-       (make-overlay (make-translate 25 50 (make-ellipse 50 100 0 'solid "green"))
-                     (make-translate 25 50 (make-ellipse 50 100 0 'solid "red")))
-       (make-translate 25 50 (make-ellipse 50 100 0 'solid "blue"))))
+       (make-overlay (make-translate 25 50 (make-ellipse 50 100 0 255 "green"))
+                     (make-translate 25 50 (make-ellipse 50 100 0 255 "red")))
+       (make-translate 25 50 (make-ellipse 50 100 0 255 "blue"))))
 
-(test (normalize-shape (make-translate 100 100 (image-shape (ellipse 50 100 'solid 'blue)))
-                       values)
+(test (normalize-shape (make-translate 100 100 (image-shape (ellipse 50 100 'solid 'blue))))
       =>
-      (make-translate 125 150 (make-ellipse 50 100 0 'solid "blue")))
+      (make-translate 125 150 (make-ellipse 50 100 0 255 "blue")))
 
-(test (normalize-shape (make-translate 10 20 (make-translate 100 100 (image-shape (ellipse 50 100 'solid 'blue))))
-                       values)
+(test (normalize-shape (make-translate 10 20 (make-translate 100 100 (image-shape (ellipse 50 100 'solid 'blue)))))
       =>
-      (make-translate 135 170 (make-ellipse 50 100 0 'solid "blue")))
+      (make-translate 135 170 (make-ellipse 50 100 0 255 "blue")))
 
 (test (normalize-shape (image-shape
                         (beside/align 'top
@@ -708,7 +735,7 @@
               (make-point 10 0)
               (make-point 10 10)
               (make-point 0 10))
-        'solid
+        255
         "black")
        (make-crop
         (list (make-point 10 0)
@@ -720,7 +747,7 @@
                (make-point 20 0)
                (make-point 20 10)
                (make-point 10 10))
-         'solid
+         255
          "green"))))
 
 
@@ -743,12 +770,10 @@
       #t)
 
 (test (round-numbers
-       (normalize-shape (image-shape (rotate 90 (rotate 90 (rectangle 50 100 'solid 'purple))))
-                        values))
+       (normalize-shape (image-shape (rotate 90 (rotate 90 (rectangle 50 100 'solid 'purple))))))
       =>
       (round-numbers
-       (normalize-shape (image-shape (rotate 180 (rectangle 50 100 'solid 'purple)))
-                        values)))
+       (normalize-shape (image-shape (rotate 180 (rectangle 50 100 'solid 'purple))))))
 
 (test (round-numbers (normalize-shape (image-shape (rotate 90 (ellipse 10 10 'solid 'red)))))
       =>
@@ -831,6 +856,23 @@
       =>
       (ellipse (* 30 3) (* 60 4) 'outline 'purple))
 
+
+;; test scaling of bitmaps with alpha (in this case, a completely blank one)
+(let ()
+  (define bmp (make-bitmap 1 1))
+  (define bdc (make-object bitmap-dc% bmp))
+  (send bdc erase)
+  (send bdc set-bitmap #f)
+  (define i (make-object image-snip% bmp))
+  (test (overlay i
+                 (rectangle 1 1 'solid 'red))
+        =>
+        (rectangle 1 1 'solid 'red))
+  (test (overlay (scale 2 i)
+                 (rectangle 2 2 'solid 'red))
+        =>
+        (rectangle 2 2 'solid 'red)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; misc tests
@@ -840,6 +882,11 @@
       =>
       (rectangle 100 10 "solid" "blue"))
 
+(test (overlay (rectangle 100 10 'solid (color 255 0 0 0))
+               (rectangle 100 10 'solid (color 0 255 0 255))
+               (rectangle 100 10 'solid (color 0 0 255 0)))
+      =>
+      (rectangle 100 10 'solid (color 0 255 0)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -1204,8 +1251,8 @@
       16)
 
 (test (let ()
-        (define bmp (make-object bitmap% 4 4))
-        (define mask (make-object bitmap% 4 4))
+        (define bmp (make-bitmap 4 4))
+        (define mask (make-bitmap 4 4))
         (define bdc (make-object bitmap-dc% bmp))
         (send bdc set-brush "black" 'solid)
         (send bdc draw-rectangle 0 0 4 4)
@@ -1217,13 +1264,13 @@
         (let-values ([(bytes w h) (bitmap->bytes bmp mask)])
           bytes))
       =>
-      (bytes-append #"\0\0\0\0" #"\0\0\0\0"   #"\0\0\0\0" #"\0\0\0\0"
-                    #"\0\0\0\0" #"\377\0\0\0" #"\0\0\0\0" #"\0\0\0\0"
-                    #"\0\0\0\0" #"\0\0\0\0"   #"\0\0\0\0" #"\0\0\0\0"
-                    #"\0\0\0\0" #"\0\0\0\0"   #"\0\0\0\0" #"\0\0\0\0"))
+      (bytes-append #"\377\0\0\0" #"\377\0\0\0"   #"\377\0\0\0" #"\377\0\0\0"
+                    #"\377\0\0\0" #"\377\0\0\0"   #"\377\0\0\0" #"\377\0\0\0"
+                    #"\377\0\0\0" #"\377\0\0\0"   #"\377\0\0\0" #"\377\0\0\0"
+                    #"\377\0\0\0" #"\377\0\0\0"   #"\377\0\0\0" #"\377\0\0\0"))
 
 ;; ensure no error
-(test (begin (scale 2 (make-object bitmap% 10 10))
+(test (begin (scale 2 (make-bitmap 10 10))
              (void))
       =>
       (void))
@@ -1236,18 +1283,18 @@
     (send bdc draw-rectangle x y w h)
     (send bdc set-bitmap #f)))
 
-(define blue-10x20-bitmap (make-object bitmap% 10 20))
+(define blue-10x20-bitmap (make-bitmap 10 20))
 (fill-bitmap blue-10x20-bitmap "blue")
-(define blue-20x10-bitmap (make-object bitmap% 20 10))
+(define blue-20x10-bitmap (make-bitmap 20 10))
 (fill-bitmap blue-20x10-bitmap "blue")
-(define blue-20x40-bitmap (make-object bitmap% 20 40))
+(define blue-20x40-bitmap (make-bitmap 20 40))
 (fill-bitmap blue-20x40-bitmap "blue")
 
-(define green-blue-10x20-bitmap (make-object bitmap% 10 20))
+(define green-blue-10x20-bitmap (make-bitmap 10 20))
 (fill-bitmap green-blue-10x20-bitmap "green")
 (fill-bitmap green-blue-10x20-bitmap "blue" 0 0 10 10)
 
-(define green-blue-20x10-bitmap (make-object bitmap% 20 10))
+(define green-blue-20x10-bitmap (make-bitmap 20 10))
 (fill-bitmap green-blue-20x10-bitmap "green")
 (fill-bitmap green-blue-20x10-bitmap "blue" 10 0 10 10)
 
@@ -1260,9 +1307,6 @@
 (test (image-baseline (image-snip->image (make-object image-snip% blue-10x20-bitmap)))
       => 
       20)
-(test (scale 2 (make-object image-snip% blue-10x20-bitmap))
-      =>
-      (image-snip->image (make-object image-snip% blue-20x40-bitmap)))
 
 (test (rotate 90 (make-object image-snip% blue-10x20-bitmap))
       =>
@@ -1289,6 +1333,12 @@
 (test (rotate 0 (make-object image-snip% green-blue-20x10-bitmap))
       =>
       (to-img (make-object image-snip% green-blue-20x10-bitmap)))
+
+;; make sure that raw image snips are equal to image snips
+(let ([i1 (make-object image-snip% (collection-file-path "bug09.png" "icons"))]
+      [i2 (make-object image-snip% (collection-file-path "bug09.png" "icons"))])
+  (test (equal? (rotate 0 i1) i2) => #t)
+  (test (equal? i1 (rotate 0 i2)) => #t))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -1464,9 +1514,9 @@
                  "white"))
 
 (let* ([bdc (make-object bitmap-dc%)]
-       [bm-ul (make-object bitmap% 10 10)]
-       [bm-ur (make-object bitmap% 10 10)]
-       [bm-ll (make-object bitmap% 10 10)])
+       [bm-ul (make-bitmap 10 10)]
+       [bm-ur (make-bitmap 10 10)]
+       [bm-ll (make-bitmap 10 10)])
   (send bdc set-bitmap bm-ul)
   (send bdc set-pen "red" 1 'transparent)
   (send bdc set-brush "red" 'solid)
@@ -1595,6 +1645,51 @@
                                  (empty-scene 5 20)))
         =>
         #t))
+
+(test (image->color-list
+       (overlay
+        (color-list->bitmap 
+         (list (color 0 0 0 0)
+               (color 0 0 255 255))
+         1 2)
+        (color-list->bitmap 
+         (list (color 255 0 0 255)
+               (color 0 0 0 0))
+         1 2)))
+      =>
+      (list (color 255 0 0 255) 
+            (color 0 0 255 255)))
+
+(let ([i 
+       (overlay (circle 20 'solid 'red)
+                (rectangle 10 60 'solid 'blue))])
+  (test (freeze i)
+        => 
+        i))
+
+(test (freeze 10 10 (rectangle 20 20 'solid 'blue))
+      =>
+      (rectangle 10 10 'solid 'blue))
+
+(test (freeze 5 5 10 10 (rectangle 20 20 'solid 'blue))
+      =>
+      (rectangle 10 10 'solid 'blue))
+
+(test (freeze 5 7 12 10 (rectangle 20 20 'solid 'blue))
+      =>
+      (rectangle 12 10 'solid 'blue))
+
+(let ()
+  (define bkg (rectangle 12 12 'solid 'white))
+  (define i1 (overlay/xy 
+              (freeze 0 0 11 11 (rectangle 10 10 'outline 'orange))
+              0 0
+              bkg))
+  (define i2 (overlay/xy
+              (rectangle 10 10 'outline 'orange)
+              0 0
+              bkg))
+  (test i1 => i2))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -1796,6 +1891,17 @@
        0 0 "center" "center"
        (rectangle 10 100 'solid 'blue)))
 
+(test (clear-pinhole
+       (place-image/align
+        (center-pinhole (rectangle 100 10 'solid 'red))
+        0 0 "pinhole" "pinhole"
+        (rectangle 10 100 'solid 'blue)))
+      =>
+      (place-image/align
+       (rectangle 100 10 'solid 'red)
+       0 0 "center" "center"
+       (rectangle 10 100 'solid 'blue)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;;  test errors.
@@ -1854,6 +1960,11 @@
                    'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
           #rx"^polygon: expected <image-color>")
+(test/exn (polygon (list (make-posn 0 0+1i) (make-posn 100 0) (make-posn 100 100))
+                   'solid (make-pen "black" 12 "solid" "round" "round"))
+          =>
+          #rx"^polygon: expected <list-of-posns-with-real-valued-x-and-y-coordinates>")
+
 
 (test/exn (save-image "tri.png" (triangle 50 "solid" "purple"))
           =>
@@ -1930,18 +2041,7 @@
           =>
           #rx"^underlay/align")
 
-(test/exn (place-image/align
-           (center-pinhole (rectangle 10 100 'solid 'blue))
-           0 0 "pinhole" "center"
-           (rectangle 100 10 'solid 'red))
-          =>
-          #rx"^place-image/align")
-(test/exn (place-image/align
-           (center-pinhole (rectangle 10 100 'solid 'blue))
-           0 0 "center" "pinhole" 
-           (rectangle 100 10 'solid 'red))
-          =>
-          #rx"^place-image/align")
+
 (test/exn (place-image/align
            (rectangle 100 10 'solid 'red)
            0 0 "pinhole" "center"
@@ -1969,6 +2069,69 @@
            (rectangle 100 10 'solid 'red))
           =>
           #rx"^beside/align")
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  testing the wxme connection for 2htdp/image images
+;;
+
+(let ()
+  (define txt (new text%))
+  (define img1 (overlay (rectangle 100 20 'solid 'red)
+                        (rectangle 20 100 'solid 'red)))
+  (define img2 
+    (put-pinhole 50 
+                 20
+                 (overlay (rectangle 100 20 'solid 'red)
+                          (rectangle 20 100 'solid 'red))))
+
+  (send txt insert "(define img (list ")
+  (send txt insert img1)
+  (send txt insert " ")
+  (send txt insert img2)
+  (send txt insert "))")
+
+  (define sp (open-output-string))
+  (send txt save-port sp)
+  (test (port->string (wxme-port->text-port (open-input-string (get-output-string sp))))
+        =>
+        "(define img (list . .))"))
+
+(let ()
+  (define txt (new text%))
+  (define img1 (overlay (rectangle 100 20 'solid 'red)
+                        (rectangle 20 200 'solid 'red)))
+  (define img2 
+    (put-pinhole 50 
+                 20
+                 (overlay (rectangle 200 20 'solid 'red)
+                          (rectangle 20 100 'solid 'red))))
+  (define img3 (text "Hello" 32 'black))
+
+  (send txt insert "(")
+  (send txt insert img1)
+  (send txt insert " ")
+  (send txt insert img2)
+  (send txt insert " ")
+  (send txt insert img3)
+  (send txt insert ")")
+
+  (define sp (open-output-string))
+  (send txt save-port sp)
+  (define washed (read (wxme-port->port (open-input-string (get-output-string sp)))))
+  (test (list? washed) => #t)
+  (test (map pinhole-x washed) => (list #f 50 #f))
+  (test (map pinhole-y washed) => (list #f 20 #f))
+  (test (image-width (car washed)) => 100)
+  (test (image-height (car washed)) => 200)
+  (test (image-baseline (car washed)) => 200)
+  (test (equal? (image-baseline (list-ref washed 2))
+                (image-height (list-ref washed 2)))
+        =>
+        #f))
+
+(test (convertible? (circle 20 "solid" "red")) => #t)
+(test (bytes? (convert (circle 20 "solid" "red") 'png-bytes)) => #t)
 
 
 
@@ -2022,47 +2185,6 @@
 
 (define-namespace-anchor anchor)
 
-(define (image-struct-count obj)
-  (let ([counts (make-hash)])
-    (let loop ([obj obj])
-      (when (struct? obj)
-        (let ([stuff (vector->list (struct->vector obj))])
-          (unless (member (car stuff) '(struct:flip struct:translate struct:scale)) ;; skip these becuase normalization eliminates them
-            (hash-set! counts (car stuff) (+ 1 (hash-ref counts (car stuff) 0))))
-          (for-each loop (cdr stuff)))))
-    (sort (hash-map counts list) string<=? #:key (λ (x) (symbol->string (car x))))))
-
-(define (check-image-properties img-sexp img)
-  (let* ([raw-size (image-struct-count (image-shape img))]
-         [normalized (normalize-shape (image-shape img) values)]
-         [norm-size (image-struct-count normalized)]) 
-    (unless (normalized-shape? normalized)
-      (error 'test-image.ss "found a non-normalized shape after normalization:\n~s" 
-             img-sexp))
-    (unless (equal? norm-size raw-size)
-      (error 'test-image.ss "found differing sizes for ~s:\n  ~s\n  ~s" 
-             img-sexp raw-size norm-size))))
-
-
-(time
- (redex-check
-  2htdp/image
-  image
-  (check-image-properties 
-   (term image)
-   (to-img (eval (term image) (namespace-anchor->namespace anchor))))
-  #:attempts 1000))
-
-(define (test-save/load img fn)
-  (let ([t1 (new text%)]
-        [t2 (new text%)])
-    (send t1 insert img)
-    (send t1 save-file fn)
-    (send t2 load-file fn)
-    (let ([s1 (send t1 find-first-snip)]
-          [s2 (send t2 find-first-snip)])
-      (equal? s1 s2))))
-
 ;; scale-down : image -> image
 ;; scale image so that it is at most 10000 pixels in area
 (define (scale-down img)
@@ -2075,6 +2197,75 @@
         (scale/xy (/ (sqrt max-s) w) 
                   (/ (sqrt max-s) h)
                   img))))
+
+(define (image-struct-count obj)
+  (let ([counts (make-hash)])
+    (let loop ([obj obj])
+      (when (struct? obj)
+        (let ([stuff (vector->list (struct->vector obj))])
+          (unless (member (car stuff) '(struct:flip struct:translate struct:scale)) ;; skip these becuase normalization eliminates them
+            (hash-set! counts (car stuff) (+ 1 (hash-ref counts (car stuff) 0))))
+          (for-each loop (cdr stuff)))))
+    (sort (hash-map counts list) string<=? #:key (λ (x) (symbol->string (car x))))))
+
+(define (check-image-properties img-sexp img)
+  (let* ([raw-size (image-struct-count (image-shape img))]
+         [normalized (normalize-shape (image-shape img))]
+         [norm-size (image-struct-count normalized)]) 
+    (unless (normalized-shape? normalized)
+      (error 'test-image.ss "found a non-normalized shape after normalization:\n~s" 
+             img-sexp))
+    (unless (equal? norm-size raw-size)
+      (error 'test-image.ss "found differing sizes for ~s:\n  ~s\n  ~s" 
+             img-sexp raw-size norm-size))))
+
+(time
+ (redex-check
+  2htdp/image
+  image
+  (check-image-properties 
+   (term image)
+   (to-img (eval (term image) (namespace-anchor->namespace anchor))))
+  #:attempts 1000))
+
+
+(let ()
+  (define w 200)
+  (define h 200)
+  (define bm1 (make-bitmap w h))
+  (define bm2 (make-bitmap w h))
+  (define bytes1 (make-bytes (* w h 4) 0))
+  (define bytes2 (make-bytes (* w h 4) 0))
+  (define bdc1 (make-object bitmap-dc% bm1))
+  (define bdc2 (make-object bitmap-dc% bm2))
+  
+  (define (render-and-compare img)
+    (send bdc1 clear)
+    (send bdc2 clear)
+    (parameterize ([render-normalized #f])
+      (render-image img bdc1 0 0))
+    (parameterize ([render-normalized #t])
+      (render-image img bdc2 0 0))
+    (send bdc1 get-argb-pixels 0 0 w h bytes1)
+    (send bdc2 get-argb-pixels 0 0 w h bytes2)
+    (equal? bytes1 bytes2))
+  (time
+   (redex-check
+    2htdp/image
+    image
+    (render-and-compare (scale-down (eval (term image) (namespace-anchor->namespace anchor))))
+    #:attempts 100)))
+
+(define (test-save/load img fn)
+  (let ([t1 (new text%)]
+        [t2 (new text%)])
+    (send t1 insert img)
+    (send t1 save-file fn)
+    (send t2 load-file fn)
+    (let ([s1 (send t1 find-first-snip)]
+          [s2 (send t2 find-first-snip)])
+      (equal? s1 s2))))
+
 
 #;
 (time

@@ -201,6 +201,10 @@ about creating ports that return non-character values.
                         "<doc><bold>hi</bold> there!</doc>"))))
 ]}
 
+@defproc[(read-xml/document [in input-port? (current-input-port)]) document?]{
+
+Like @racket[read-xml], except that the reader stops after the single element, rather than attempting to read "miscellaneous" XML content after the element. The document returned by @racket[read-xml/document] always has an empty @racket[document-misc].}
+
 @defproc[(read-xml/element [in input-port? (current-input-port)]) element?]{
 
 Reads a single XML element from the port.  The next non-whitespace
@@ -240,6 +244,13 @@ significant.}
 
 Like @racket[write-xml/content], but with indentation and newlines
 like @racket[display-xml].}
+               
+
+@defproc[(write-xexpr [xe xexpr/c] [out output-port? (current-output-port)])
+         void?]{
+
+Writes an X-expression to the given output port, without using an intermediate
+XML document.}
 
 
 @; ----------------------------------------------------------------------

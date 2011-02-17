@@ -4,11 +4,8 @@
 @defclass/title[dialog% object% (top-level-window<%>)]{
 
 A dialog is a top-level window that is @defterm{modal}: while the
- dialog is shown, all other top-level windows in the dialog's
- eventspace are disabled.
-
-
-
+ dialog is shown, key and mouse press/release events are disabled for
+ all other top-level windows in the dialog's eventspace.
 
 @defconstructor[([label label-string?]
                  [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
@@ -16,7 +13,9 @@ A dialog is a top-level window that is @defterm{modal}: while the
                  [height (or/c (integer-in 0 10000) false/c) #f]
                  [x (or/c (integer-in 0 10000) false/c) #f]
                  [y (or/c (integer-in 0 10000) false/c) #f]
-                 [style (listof (one-of/c 'no-caption 'resize-border 'no-sheet)) null]
+                 [style (listof (one-of/c 'no-caption 'resize-border 
+                                          'no-sheet 'close-button)) 
+                        null]
                  [enabled any/c #t]
                  [border (integer-in 0 1000) 0]
                  [spacing (integer-in 0 1000) 0]
@@ -68,6 +67,9 @@ The @scheme[style] flags adjust the appearance of the dialog on some
  @item{@scheme['no-sheet] --- uses a movable window for the dialog,
  even if a parent window is provided (Mac OS X)}
 
+ @item{@scheme['close-button] --- include a close button in the 
+ dialog's title bar, which would not normally be included (Mac OS X)}
+
 ]
 
 Even if the dialog is not shown, a few notification events may be
@@ -109,4 +111,11 @@ If @scheme[show?] is true, the method does not immediately return. Instead,
   method returns as soon as possible after the dialog is hidden.
 
 }
+
+@defmethod[(show-without-yield)
+           void?]{
+
+Like @racket[(send @#,this-obj[] @#,method[dialog% show] #t)], but returns
+immediately instead of @racket[yield]ing.}
+
 }

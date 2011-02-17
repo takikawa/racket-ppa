@@ -10,7 +10,7 @@ from @as-index{shared objects} (a.k.a. @defterm{@as-index{shared
 libraries}} or @defterm{@as-index{dynamically loaded libraries}}). The
 @scheme[ffi-lib] function loads a shared object.
 
-@defproc[(ffi-lib? [v any/c]) boolean>]{
+@defproc[(ffi-lib? [v any/c]) boolean?]{
 
 Returns @scheme[#t] if @scheme[v] is the result of @scheme[ffi-lib],
 @scheme[#f] otherwise.}
@@ -19,7 +19,7 @@ Returns @scheme[#t] if @scheme[v] is the result of @scheme[ffi-lib],
 @defproc[(ffi-lib [path (or/c path-string? #f)]
                   [version (or/c string? (listof (or/c string? #f)) #f) #f]) any]{
 
-Returns an foreign-library value. If @scheme[path] is a path, the
+Returns a foreign-library value. If @scheme[path] is a path, the
 result represents the foreign library, which is opened in an
 OS-specific way (using @cpp{LoadLibrary} under Windows, and
 @cpp{dlopen} under Unix and Mac OS X).

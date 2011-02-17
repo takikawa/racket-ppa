@@ -5,7 +5,6 @@
 #| TODO: 
    -- check that on-release is only defined if on-key is defined 
 
-   -- yield instead of sync
    -- run callbacks in user eventspace
    -- make timer fire just once; restart after on-tick callback finishes
    -- take out counting; replace by 0.25 delay
@@ -13,7 +12,8 @@
    -- make window resizable :: why
 |#
 
-(require (for-syntax "private/syn-aux.ss")
+(require (for-syntax "private/syn-aux.ss"
+                     stepper/private/shared)
          "private/syn-aux-aux.ss" 
          "private/syn-aux.ss"
          "private/check-aux.ss"
@@ -226,12 +226,19 @@
                    [(V) (set! rec? #'V)]
                    [_ (err '#'record? stx)])))]
             [args 
-             (->args 'big-bang stx #'w #'(clause ...) WldSpec ->rec? "world")])
-       #`(run-it ((new-world (if #,rec? aworld% world%)) w #,@args)))]))
+             (->args 'big-bang stx #'w #'(clause ...) WldSpec ->rec? "world")]
+            [dom (syntax->list #'(clause ...))])
+       (cond
+         [(and (not (contains-clause? #'to-draw dom)) (not (contains-clause? #'on-draw dom)))
+          (raise-syntax-error #f "missing to-draw clause" stx)]
+         [else 
+          (stepper-syntax-property
+           #`(run-it ((new-world (if #,rec? aworld% world%)) w #,@args))
+           'stepper-skip-completely #t)]))]))
 
 (define (run-simulation f)
   (check-proc 'run-simulation f 1 "first" "one argument")
-  (big-bang 1 (on-draw f) (on-tick add1)))
+  (big-bang 0 (on-draw f) (on-tick add1)))
 
 (define animate run-simulation)
 
@@ -308,11 +315,11 @@
     [(universe u bind ...)
      (let* ([args
              (->args 'universe stx #'u #'(bind ...) UniSpec void "universe")]
-            [dom (map (compose car syntax->datum) (syntax->list #'(bind ...)))])
+            [dom (syntax->list #'(bind ...))])
        (cond
-         [(not (memq 'on-new dom))
+         [(not (contains-clause? #'on-new dom))
           (raise-syntax-error #f "missing on-new clause" stx)]
-         [(not (memq 'on-msg dom))
+         [(not (contains-clause? #'on-msg dom))
           (raise-syntax-error #f "missing on-msg clause" stx)]
          [else ; (and (memq #'on-new dom) (memq #'on-msg dom))
           #`(run-it ((new-universe universe%) u #,@args))]))]))
@@ -338,5 +345,7 @@
   (define esp (make-eventspace))
   (define thd (eventspace-handler-thread esp))
   (with-handlers ((exn:break? (lambda (x) (break-thread thd))))
+    (define obj:ch (make-channel))
     (parameterize ([current-eventspace esp])
-      (send (o) last))))
+      (queue-callback (lambda () (channel-put obj:ch (o)))))
+    (send (channel-get obj:ch) last)))

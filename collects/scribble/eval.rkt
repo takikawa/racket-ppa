@@ -8,6 +8,8 @@
            racket/sandbox
            racket/promise
            racket/string
+           racket/port
+           file/convertible
            (for-syntax racket/base))
 
   (provide interaction
@@ -37,6 +39,8 @@
   (define image-counter 0)
 
   (define maxlen 60)
+
+  (define-namespace-anchor anchor)
 
   (namespace-require 'racket/base)
   (namespace-require '(for-syntax racket/base))
@@ -74,6 +78,50 @@
                                                    (hspace 2)
                                                    (literal-string style s)))))))
                         s))))))))))
+
+    (define (format-output-stream in style)
+      (define (add-string string-accum line-accum)
+        (if string-accum
+            (cons (list->string (reverse string-accum))
+                  (or line-accum null))
+            line-accum))
+      (define (add-line line-accum flow-accum)
+        (if line-accum
+            (cons (make-paragraph
+                   (cons
+                    (hspace 2)
+                    (map (lambda (s)
+                           (if (string? s)
+                               (literal-string style s)
+                               s))
+                         (reverse line-accum))))
+                  flow-accum)
+            flow-accum))
+      (let loop ([string-accum #f] [line-accum #f] [flow-accum null])
+        (let ([v (read-char-or-special in)])
+          (cond
+           [(eof-object? v)
+            (let* ([line-accum (add-string string-accum line-accum)]
+                   [flow-accum (add-line line-accum flow-accum)])
+              (list
+               (list
+                (make-flow 
+                 (list
+                  (if (= 1 (length flow-accum))
+                      (car flow-accum)
+                      (make-table
+                       #f
+                       (map (lambda (l)
+                              (list (make-flow (list l))))
+                            flow-accum))))))))]
+           [(equal? #\newline v)
+            (loop #f #f (add-line (add-string string-accum line-accum)
+                                  flow-accum))]
+           [(char? v)
+            (loop (cons v (or string-accum null)) line-accum flow-accum)]
+           [else
+            (loop #f (cons v (or (add-string string-accum line-accum) null))
+                  flow-accum)]))))
 
   (define (interleave title expr-paras val-list+outputs)
     (make-table
@@ -117,8 +165,8 @@
                                (list s)))
                          (regexp-split #rx"\n" s))))))]
               [(box? (caar val-list+outputs))
-               ;; Output formatted as string:
-               (format-output (unbox (caar val-list+outputs)) result-color)]
+               ;; Output witten to a port
+               (format-output-stream (unbox (caar val-list+outputs)) result-color)]
               [else
                ;; Normal result case:
                (let ([val-list (caar val-list+outputs)])
@@ -142,50 +190,59 @@
        [(syntax? s) (loop (syntax-e s) ops)]
        [else (loop ((car ops) s) (cdr ops))])))
 
-  (define ((do-eval ev) s)
+  (define (extract-to-evaluate s)
     (let loop ([s s][expect #f])
       (syntax-case s (code:comment eval:alts eval:check)
         [(code:line v (code:comment . rest))
          (loop (extract s cdr car) expect)]
         [(code:comment . rest)
-         (list (list (void)) "" "")]
+         (values #f expect)]
         [(eval:alts p e)
          (loop (extract s cdr cdr car) expect)]
         [(eval:check e expect)
          (loop (extract s cdr car)
                (list (syntax->datum (datum->syntax #f (extract s cdr cdr car)))))]
         [else
-         (let ([r (with-handlers ([(lambda (x)
-                                     (not (exn:break? x)))
-                                   (lambda (e)
-                                     (list (if (exn? e)
-                                               (exn-message e)
-                                               (format "uncaught exception: ~s" e))
-                                           (get-output ev)
-                                           (get-error-output ev)))])
-                    (list (let ([v (do-plain-eval ev s #t)])
-                            (if (call-in-sandbox-context
-                                 ev
-                                 (let ([cp (current-print)])
-                                   (lambda ()
-                                     (and (eq? (current-print) cp)
-                                          (print-as-expression)))))
-                                (make-reader-graph (copy-value v (make-hasheq)))
-                                (box
-                                 (call-in-sandbox-context
+         (values s expect)])))
+
+  (define ((do-eval ev) s)
+    (let-values ([(s expect) (extract-to-evaluate s)])
+      (if s
+          (let ([r (with-handlers ([(lambda (x)
+                                      (not (exn:break? x)))
+                                    (lambda (e)
+                                      (list (if (exn? e)
+                                                (exn-message e)
+                                                (format "uncaught exception: ~s" e))
+                                            (get-output ev)
+                                            (get-error-output ev)))])
+                     (list (let ([v (do-plain-eval ev s #t)])
+                             (if (call-in-sandbox-context
                                   ev
-                                  (lambda ()
-                                    (let ([s (open-output-string)])
-                                      (parameterize ([current-output-port s])
-                                        (map (current-print) v))
-                                      (get-output-string s)))))))
-                          (get-output ev)
-                          (get-error-output ev)))])
-           (when expect
-             (let ([expect (do-plain-eval ev (car expect) #t)])
-               (unless (equal? (car r) expect)
-                 (raise-syntax-error 'eval "example result check failed" s))))
-           r)])))
+                                  (let ([cp (current-print)])
+                                    (lambda ()
+                                      (and (eq? (current-print) cp)
+                                           (print-as-expression)))))
+                                 ;; default printer => get result as S-expression
+                                 (make-reader-graph (copy-value v (make-hasheq)))
+                                 ;; other printer => go through a string
+                                 (box
+                                  (call-in-sandbox-context
+                                   ev
+                                   (lambda ()
+                                     (let-values ([(in out) (make-pipe-with-specials)])
+                                       (parameterize ([current-output-port out])
+                                         (map (current-print) v))
+                                       (close-output-port out)
+                                       in))))))
+                           (get-output ev)
+                           (get-error-output ev)))])
+            (when expect
+              (let ([expect (do-plain-eval ev (car expect) #t)])
+                (unless (equal? (car r) expect)
+                  (raise-syntax-error 'eval "example result check failed" s))))
+            r)
+          (values (list (list (void)) "" "")))))
                    
 
   (define (install ht v v2)
@@ -270,7 +327,12 @@
        (parameterize ([sandbox-output 'string]
                       [sandbox-error-output 'string]
                       [sandbox-propagate-breaks #f])
-         (make-evaluator '(begin))))))
+         (let ([e (make-evaluator '(begin))])
+           (let ([ns (namespace-anchor->namespace anchor)])
+             (call-in-sandbox-context e
+                                      (lambda ()
+                                        (namespace-attach-module ns 'file/convertible))))
+           e)))))
 
   (define (make-base-eval-factory mod-paths)
     (let ([ns (delay (let ([ns (make-base-empty-namespace)])
@@ -329,9 +391,11 @@
   (define-syntax-rule (quote-expr e) 'e)
 
   (define (do-interaction-eval ev e)
-    (parameterize ([current-command-line-arguments #()])
-      (do-plain-eval (or ev (make-base-eval)) e #f))
-    "")
+    (let-values ([(e expect) (extract-to-evaluate e)])
+      (when e
+        (parameterize ([current-command-line-arguments #()])
+          (do-plain-eval (or ev (make-base-eval)) e #f)))
+      ""))
 
   (define-syntax interaction-eval
     (syntax-rules ()

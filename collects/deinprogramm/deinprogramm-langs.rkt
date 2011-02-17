@@ -170,9 +170,10 @@
                   [scheme-test-module-name
                    ((current-module-name-resolver) '(lib "test-engine/scheme-tests.ss") #f #f)]
                   [scheme-signature-module-name
-                   ((current-module-name-resolver) '(lib "deinprogramm/signature/signature.ss") #f #f)])
+                   ((current-module-name-resolver) '(lib "deinprogramm/signature/signature-german.rkt") #f #f)])
               (run-in-user-thread
                (lambda ()
+		 (when (getenv "PLTDRHTDPNOCOMPILED") (use-compiled-file-paths '()))
                  (read-accept-quasiquote (get-accept-quasiquote?))
                  (ensure-drscheme-secrets-declared drs-namespace)
                  (namespace-attach-module drs-namespace ''drscheme-secrets)
@@ -201,6 +202,7 @@
 				 obj signature message blame))))))
                  (scheme-test-data (list (drscheme:rep:current-rep) drs-eventspace test-display%))
                  (test-execute (get-preference 'tests:enable? (lambda () #t)))
+		 (signature-checking-enabled? (preferences:get 'signatures:enable-checking?))
                  (test-format (make-formatter (lambda (v o)
 						(render-value/format (if (procedure? v)
 									 generic-proc
@@ -773,7 +775,7 @@
                 (cond
 		  [start?
 		   (set! start? #f)
-		   #'(reset-tests)]
+		   #'(#%plain-app reset-tests)]
                   [done? eof]
                   [else
                    (let ([ans (reader (object-name port) port)])

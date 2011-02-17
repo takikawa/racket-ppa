@@ -1,6 +1,7 @@
 (module const mzscheme
   (require mzlib/class
 	   mzlib/file
+           racket/snip/private/prefs
 	   (prefix wx: "kernel.ss"))
   (provide (protect (all-defined)))
 
@@ -38,7 +39,9 @@
   (define arrow-cursor (make-object wx:cursor% 'arrow))
 
   (define default-x-prefix (if (eq? 'unix (system-type))
-			       (let ([v (get-preference '|MrEd:defaultMenuPrefix| (lambda () 'ctl))])
+			       (let ([v (get-preference*
+                                         '|GRacket:defaultMenuPrefix| 
+                                         (lambda () 'ctl))])
 				 (if (memq v '(meta ctl alt ctl-m))
 				     v
 				     'ctl))
@@ -60,11 +63,11 @@
   (define black-color (make-object wx:color% 0 0 0))
   (define disabled-color (make-object wx:color% 150 150 150))
 
-  (define trans-pen (send (wx:get-the-pen-list) find-or-create-pen "white" 0 'transparent))
-  (define light-pen (send (wx:get-the-pen-list) find-or-create-pen (scale-color bg-color #e1.35) 0 'solid))
-  (define border-pen (send (wx:get-the-pen-list) find-or-create-pen (scale-color bg-color #e0.85) 0 'solid)) 
-  (define dark-pen (send (wx:get-the-pen-list) find-or-create-pen (scale-color bg-color #e0.6) 0 'solid)) 
-  (define dark-brush (send (wx:get-the-brush-list) find-or-create-brush (scale-color bg-color #e0.8) 'solid))
+  (define trans-pen (send wx:the-pen-list find-or-create-pen "white" 0 'transparent))
+  (define light-pen (send wx:the-pen-list find-or-create-pen (scale-color bg-color #e1.35) 0 'solid))
+  (define border-pen (send wx:the-pen-list find-or-create-pen (scale-color bg-color #e0.85) 0 'solid)) 
+  (define dark-pen (send wx:the-pen-list find-or-create-pen (scale-color bg-color #e0.6) 0 'solid)) 
+  (define dark-brush (send wx:the-brush-list find-or-create-brush (scale-color bg-color #e0.8) 'solid))
   
   (define wx-tab-group<%> (interface ()))
   (define wx-group-box<%> (interface ()))

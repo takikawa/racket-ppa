@@ -21,7 +21,7 @@
 
 (when (eq? 'windows (system-type))
   (let* ([concat string-append]
-         [studio  "c:/Program Files/Microsoft Visual Studio 8"]
+         [studio  "c:/Program Files/Microsoft Visual Studio 10.0"]
          [scommon (concat studio "/Common7")]
          [vc      (concat studio "/VC")])
     (putenv "PATH"    (concat (getenv "PATH")
@@ -70,6 +70,8 @@
   (t  2 'add1_byte_int  (_fun _byte -> _int ) 1)
   (t  2 'add1_int_byte  (_fun _int  -> _byte) 1)
   (t  2 'add1_byte_byte (_fun _byte -> _byte) 1)
+  (t  -1 'add1_int_int   (_fun _int  -> _int ) -2)
+  (t  -1 'add1_int_int   (_fun _int  -> _fixint ) -2)
   ;; ---
   (t 12 'decimal_int_int_int    (_fun _int  _int  -> _int ) 1 2)
   (t 12 'decimal_byte_int_int   (_fun _byte _int  -> _int ) 1 2)
@@ -238,6 +240,40 @@
 (let ([v (malloc _pointer)])
   (ptr-set! v _pointer (ptr-add #f 107))
   (test 107 ptr-ref v _intptr))
+
+;; Test equality and hashing of c pointers:
+(let ([seventeen1 (cast 17 _long _pointer)]
+      [seventeen2 (cast 17 _long _pointer)]
+      [seventeen3 (ptr-add (cast 13 _long _pointer) 4)]
+      [sixteen (cast 16 _long _pointer)])
+  (test #t equal? seventeen1 seventeen2)
+  (test #t equal? seventeen1 seventeen3)
+  (test #f equal? sixteen seventeen1)
+  (test #t = (equal-hash-code seventeen1) (equal-hash-code seventeen2))
+  (test #t = (equal-hash-code seventeen1) (equal-hash-code seventeen3))
+  (let ([ht (make-hash)])
+    (hash-set! ht seventeen1 'hello)
+    (test 'hello hash-ref ht seventeen2 #f)
+    (test 'hello hash-ref ht seventeen3 #f)))
+
+;; Check proper handling of offsets:
+(let ()
+  (define scheme_make_sized_byte_string 
+    (get-ffi-obj 'scheme_make_sized_byte_string #f (_fun _pointer _long _int -> _scheme)))
+  ;; Non-gcable:
+  (let ()
+    (define p (cast (ptr-add #f 20) _pointer _pointer))
+    (define d (scheme_make_sized_byte_string (ptr-add p 24)
+                                             4
+                                             0))
+    (test 44 values (cast d _pointer _long)))
+  ;; GCable:
+  (let ()
+    (define p (cast (ptr-add #f 20) _pointer _gcpointer))
+    (define d (scheme_make_sized_byte_string (ptr-add p 24)
+                                             4
+                                             0))
+    (test 44 values (cast d _gcpointer _long))))
 
 (delete-test-files)
 

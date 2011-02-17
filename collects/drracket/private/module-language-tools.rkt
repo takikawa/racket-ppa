@@ -68,9 +68,11 @@
       ;; move button panel to the front of the list
       (send (get-button-panel) change-children 
             (λ (l) (cons toolbar-button-panel (remq toolbar-button-panel l))))
-      (let ([defs (get-definitions-text)])
-        (when (send defs get-in-module-language?)
-          (send defs move-to-new-language)))))
+      
+      (define/public (initialize-module-language)
+        (let ([defs (get-definitions-text)])
+          (when (send defs get-in-module-language?)
+            (send defs move-to-new-language))))))
   
   (define definitions-text<%> (interface ()))
   (define definitions-text-mixin
@@ -86,12 +88,24 @@
       (define/augment (after-delete start len)
         (inner (void) after-delete start len)
         (modification-at start))
+      
+      (define timer #f)
+      
       (define/private (modification-at start)
         (when (send (send (get-tab) get-frame) initialized?) 
           (when in-module-language?
             (when (or (not hash-lang-last-location)
                       (<= start hash-lang-last-location))
-              (move-to-new-language)))))
+              
+              (unless timer
+                (set! timer (new timer% 
+                                 [notify-callback
+                                  (λ () 
+                                    (when in-module-language?
+                                      (move-to-new-language)))]
+                                 [just-once? #t])))
+              (send timer stop)
+              (send timer start 200 #t)))))
       
       (define/private (update-in-module-language? new-one)
         (unless (equal? new-one in-module-language?)
@@ -154,6 +168,10 @@
                [frame (send tab get-frame)])
           (when (send frame initialized?)
             (send frame begin-container-sequence)
+            
+            ;; avoid any time with both sets of buttons in the panel so the window doesn't get too wide
+            (send (send frame get-toolbar-button-panel) change-children (λ (x) '()))
+            
             (let ([directly-specified-buttons
                    (map (λ (button-spec)
                           (new switchable-button%

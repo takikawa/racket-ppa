@@ -11,6 +11,7 @@
 	   "helper.ss"
 	   "wx.ss"
 	   "wxitem.ss"
+           "wxlitem.ss"
 	   "mrwindow.ss"
 	   "mrcontainer.ss")
 
@@ -38,8 +39,7 @@
 
   (define control<%>
     (interface (subwindow<%>)
-      command
-      get-font))
+      command))
 
   (define-local-member-name hidden-child? label-checker)
 
@@ -53,14 +53,21 @@
     control%-nofont-keywords)
 
   (define basic-control%
-    (class100* (make-window% #f (make-subarea% area%)) (control<%>) (mk-wx mismatches lbl parent cb cursor
-									   ;; for keyword use
-									   [font no-val])
+    (class100* (make-subwindow% (make-window% #f (make-subarea% area%))) (control<%>) 
+      (mk-wx mismatches lbl parent cb cursor
+             ;; for keyword use
+             [font no-val])
       (rename [super-set-label set-label])
-      (private-field [label lbl][callback cb])
+      (private-field [label lbl][callback cb] 
+                     [can-bitmap? (or (lbl . is-a? . wx:bitmap%)
+                                      (pair? lbl))]
+                     [can-string? (or (string? lbl)
+                                      (pair? lbl))])
       (override
 	[get-label (lambda () label)]
-	[get-plain-label (lambda () (and (string? label) (wx:label->plain-label label)))]
+	[get-plain-label (lambda () 
+                           (let ([label (if (pair? label) (cadr label) label)])
+                             (and (string? label) (wx:label->plain-label label))))]
 	[set-label (entry-point
 		    (lambda (l)
 		      ((label-checker)
@@ -68,19 +75,26 @@
 		      (let ([l (if (string? l)
                                  (string->immutable-string l)
                                  l)])
-			(send wx set-label l)
-			(set! label l))))])
+                        (when (or (and can-bitmap?
+                                       (l . is-a? . wx:bitmap%))
+                                  (and can-string?
+                                       (string? l)))
+                          (send wx set-label l)
+                          (if (pair? label)
+                              (if (string? l)
+                                  (set! label (list (car label) l (caddr label)))
+                                  (set! label (list l (cadr label) (caddr label))))
+                              (set! label l))))))])
       (public
 	[hidden-child? (lambda () #f)] ; module-local method
 	[label-checker  (lambda () check-label-string/false)] ; module-local method
-	[command (lambda (e) (void (callback this e)))] ; no entry/exit needed
-	[get-font (lambda (e) (send wx get-font))]) ; no entry/exit needed
+	[command (lambda (e) (void (callback this e)))]) ; no entry/exit needed
       (private-field
        [wx #f])
       (sequence
 	(when (string? label)
 	  (set! label (string->immutable-string label)))
-	(super-init (lambda () (set! wx (mk-wx)) wx) (lambda () wx) mismatches label parent cursor)
+	(super-init (lambda () (set! wx (mk-wx)) wx) (lambda () wx) (lambda () wx) mismatches label parent cursor)
 	(unless (hidden-child?)
 	  (as-exit (lambda () (send parent after-new-child this)))))))
 
@@ -105,8 +119,7 @@
       (sequence ; abuse of `sequence'!
         (inherit/super [super-min-width min-width] 
                        [super-min-height min-height]
-                       [super-get-label get-label]
-                       [super-get-font get-font]))
+                       [super-get-label get-label]))
       (private-field
        [do-auto-resize? auto-resize]
        [orig-font (or (no-val->#f font)
@@ -205,7 +218,7 @@
 	[label-checker  (lambda () check-label-string-or-bitmap)]) ; module-local method
       (sequence
 	(let ([cwho '(constructor button)])
-	  (check-label-string-or-bitmap cwho label)
+	  (check-label-string-or-bitmap-or-both cwho label)
 	  (check-container-parent cwho parent)
 	  (check-callback cwho callback)
 	  (check-style cwho #f '(border deleted) style)
@@ -318,11 +331,12 @@
 		       (lambda ()
 			 (let ([cwho '(constructor radio-box)])
 			   (check-container-ready cwho parent)
-			   (unless (< selection (length choices))
-			     (raise-mismatch-error (who->name cwho)
-						   (format "initial selection is too large, given only ~a choices: "
-							   (length choices))
-						   selection))))
+                           (when selection
+                             (unless (< selection (length choices))
+                               (raise-mismatch-error (who->name cwho)
+                                                     (format "initial selection is too large, given only ~a choices: "
+                                                             (length choices))
+                                                     selection)))))
 		       label parent callback #f)))
 	(when (or (not selection) (positive? selection))
 	  (set-selection selection)))))

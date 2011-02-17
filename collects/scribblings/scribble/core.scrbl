@@ -340,10 +340,11 @@ The recognized @tech{style properties} are as follows:
        normally shows only the top-level sections).}
 
  @item{@racket['hidden] --- The part title is not shown in rendered
-       HTML output.}
+       HTML output. The @racket['toc-hidden] style usually should be
+       included with @racket['hidden].}
 
  @item{@racket['toc-hidden] --- The part title is not shown in tables
-       of contents.}
+       of contents, including in ``on this page'' boxes.}
 
  @item{@racket['quiet] --- In HTML output and most other output modes,
        hides entries for sub-parts of this part in a
@@ -412,8 +413,9 @@ The currently recognized @tech{style properties} are as follows:
 @itemize[
 
  @item{@racket['omitable] --- When a table cell contains a single
-       @racket[omitable-paragraph], then when rendering to HTML, no
-       @tt{p} tag wraps the cell content.}
+       @racket[paragraph] with the @racket['omitable] style property,
+       then when rendering to HTML, no @tt{<p>} tag wraps the cell
+       content.}
 
  @item{@racket['div] --- Generates @tt{<div>} HTML output instead of
        @tt{<p>}.}
@@ -528,8 +530,8 @@ The following @tech{style properties} are currently recognized:
 
 A @techlink{nested flow} has a style and a @tech{flow}.
 
-In @racket[style], the @racket{style name} is normally a string that
-corresponds to a CSS class for HTML @tt{blockquote} output or a Latex
+In @racket[style], the @tech{style name} is normally a string that
+corresponds to a CSS class for HTML @tt{<blockquote>} output or a Latex
 environment (see @secref["extra-style"]). The following symbolic style
 names are recognized:
 
@@ -646,6 +648,9 @@ recognized:
  @item{@racket['newline] --- Renders a line break independent of
        the @racket[content].}
 
+ @item{@racket['no-break] --- Prevents line breaks when rendering
+       @racket[content].}
+
 ]
 
 The following @tech{style properties} are currently recognized:
@@ -674,7 +679,7 @@ The following @tech{style properties} are currently recognized:
        script alternative to @racket[content].}
 
   @item{@racket[body-id] structure --- For HTML uses the given
-        string as an @tt{id} attribute of the @tt{span} tag.}
+        string as an @tt{id} attribute of the @tt{<span>} tag.}
 
   @item{@racket['aux] --- Intended for use in titles, where the
         auxiliary part of the title can be omitted in hyperlinks. See,
@@ -704,7 +709,7 @@ For each string in @racket[suffixes], if the rendered works with the
 corresponding suffix, the suffix is added to @racket[path] and used if
 the resulting path refers to a file that exists. The order in
 @racket[suffixes] determines the order in which suffixes are
-tried. The HTML renderer supports @racket[".png"] and @racket[".gif"],
+tried. The HTML renderer supports @racket[".png"], @racket[".gif"], and @racket[".svg"],
 while the Latex renderer supports @racket[".png"], @racket[".pdf"],
 and @racket[".ps"] (but rendering Latex output to PDF will not work
 with @racket[".ps"] files, while rendering to Latex DVI output works
@@ -943,8 +948,9 @@ otherwise.}
 Returns @racket[#t] if @racket[v] is a string, symbol,
 @racket[element], @racket[multiarg-element],
 @racket[traverse-element], @racket[delayed-element],
-@racket[part-relative-element], or list of @tech{content}, @racket[#f]
-otherwise.}
+@racket[part-relative-element], a convertible value in 
+the sense of @racket[convertible?], or list of @tech{content}. 
+Otherwise, it returns @racket[#f].}
 
 
 @defstruct[style ([name (or/c string? symbol? #f)]

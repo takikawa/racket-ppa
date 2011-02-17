@@ -2,12 +2,14 @@
 (require scheme/class
          "../syntax.ss"
          "private.ss"
+         racket/snip/private/private
          "const.ss"
-         "snip.ss"
-         "snip-flags.ss"
+         racket/snip
+         racket/snip/private/snip-flags
+         "standard-snip-admin.rkt"
          "editor.ss"
          "editor-admin.ss"
-         "snip-admin.ss"
+         "editor-snip-class.rkt"
          "text.ss"
          "pasteboard.ss"
          "wx.ss"
@@ -15,8 +17,7 @@
                     text%
                     pasteboard%
                     editor-snip%
-                    editor-snip-editor-admin%
-                    snip-admin%))
+                    editor-snip-editor-admin%))
 
 (provide editor-snip%
          editor-snip-editor-admin<%>)
@@ -284,7 +285,7 @@
 
   (def/override (draw [dc<%> dc] [real? x] [real? y] 
                       [real? left] [real? top] [real? right] [real? bottom] 
-                      [real? dx] [real? dy] [symbol? caret])
+                      [real? dx] [real? dy] [caret-status? caret])
     (send my-admin
           with-dc
           dc x y
@@ -320,6 +321,7 @@
 
                 (let ([bg-color
                        (cond
+                        [(pair? caret) #f]
                         [(not use-style-bg?)
                          (make-object color% 255 255 255)]
                         [(send s-style get-transparent-text-backing)
@@ -357,34 +359,40 @@
                           caret bg-color))
 
                   (when with-border?
-                    (let* ([l (+ orig-x left-inset)]
-                           [t (+ orig-y top-inset)]
-                           [r (+ l w left-margin right-margin 
-                                 (- (+ left-inset right-inset))
-                                 -1)]
-                           [b (+ t h top-margin bottom-margin 
-                                 (- (+ top-inset bottom-inset))
-                                 -1)])
-                      (let ([ml (max (min l right) left)]
-                            [mr (max (min r right) left)]
-                            [mt (max (min t bottom) top)]
-                            [mb (max (min b bottom) top)])
-                        (when (and (l . >= . left)
-                                   (l . < . right)
-                                   (mt . < . mb))
-                          (send dc draw-line l mt l mb))
-                        (when (and (r . >= . left)
-                                   (r . < . right)
-                                   (mt . < . mb))
-                          (send dc draw-line r mt r mb))
-                        (when (and (t . >= . top)
-                                   (t . < . bottom)
-                                   (ml . < . mr))
-                          (send dc draw-line ml t mr t))
-                        (when (and (b . >= . top)
-                                   (b . < . bottom)
-                                   (ml . < . mr))
-                          (send dc draw-line ml b mr b)))))))))))
+                    (let ([pen (send dc get-pen)])
+                      (when (and (pair? caret)
+                                 (send s-admin get-selected-text-color))
+                        (send dc set-pen (send s-admin get-selected-text-color) 1 'solid))
+                      (let* ([l (+ orig-x left-inset)]
+                             [t (+ orig-y top-inset)]
+                             [r (+ l w left-margin right-margin 
+                                   (- (+ left-inset right-inset))
+                                   -1)]
+                             [b (+ t h top-margin bottom-margin 
+                                   (- (+ top-inset bottom-inset))
+                                   -1)])
+                        (let ([ml (max (min l right) left)]
+                              [mr (max (min r right) left)]
+                              [mt (max (min t bottom) top)]
+                              [mb (max (min b bottom) top)])
+                          (when (and (l . >= . left)
+                                     (l . < . right)
+                                     (mt . < . mb))
+                            (send dc draw-line l mt l mb))
+                          (when (and (r . >= . left)
+                                     (r . < . right)
+                                     (mt . < . mb))
+                            (send dc draw-line r mt r mb))
+                          (when (and (t . >= . top)
+                                     (t . < . bottom)
+                                     (ml . < . mr))
+                            (send dc draw-line ml t mr t))
+                          (when (and (b . >= . top)
+                                     (b . < . bottom)
+                                     (ml . < . mr))
+                            (send dc draw-line ml b mr b))))
+                      (when (pair? caret)
+                        (send dc set-pen pen))))))))))
 
   (def/override (copy)
     (let* ([mb (and editor

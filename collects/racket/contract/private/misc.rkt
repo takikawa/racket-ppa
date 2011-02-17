@@ -1,7 +1,6 @@
 #lang racket/base
 
 (require (for-syntax racket/base
-                     racket/struct-info
                      "helpers.rkt"
                      "opt-guts.rkt")
          racket/promise
@@ -22,7 +21,6 @@
          symbols one-of/c
          listof non-empty-listof cons/c list/c
          promise/c
-         struct/c
          syntax/c
          
          check-between/c
@@ -119,11 +117,11 @@
              [(null? (cdr ho-contracts))
               (if (chaperone-contract? (car ho-contracts))
                   (make-chaperone-single-or/c pred flat-contracts (car ho-contracts))
-                  (make-proxy-single-or/c pred flat-contracts (car ho-contracts)))]
+                  (make-impersonator-single-or/c pred flat-contracts (car ho-contracts)))]
              [else
               (if (andmap chaperone-contract? ho-contracts)
                   (make-chaperone-multi-or/c flat-contracts ho-contracts)
-                  (make-proxy-multi-or/c flat-contracts ho-contracts))]))))]))
+                  (make-impersonator-multi-or/c flat-contracts ho-contracts))]))))]))
 
 (define (single-or/c-projection ctc)
   (let ([c-proc (contract-projection (single-or/c-ho-ctc ctc))]
@@ -167,7 +165,7 @@
    #:first-order single-or/c-first-order
    #:stronger single-or/c-stronger?))
 
-(define-struct (proxy-single-or/c single-or/c) ()
+(define-struct (impersonator-single-or/c single-or/c) ()
   #:property prop:contract
   (build-contract-property
    #:projection single-or/c-projection
@@ -253,7 +251,7 @@
    #:first-order multi-or/c-first-order
    #:stronger multi-or/c-stronger?))
 
-(define-struct (proxy-multi-or/c multi-or/c) ()
+(define-struct (impersonator-multi-or/c multi-or/c) ()
   #:property prop:contract
   (build-contract-property
    #:projection multi-or/c-proj
@@ -717,11 +715,7 @@
   (unless (and (real? start)
                (real? end))
     (error 'real-in "expected two real numbers as arguments, got ~e and ~e" start end))
-  (flat-named-contract 
-   `(real-in ,start ,end)
-   (λ (x)
-     (and (real? x)
-          (<= start x end)))))
+  (between/c start end))
 
 (define/final-prop (not/c f)
   (let* ([ctc (coerce-flat-contract 'not/c f)]
@@ -1021,74 +1015,6 @@
                 val))
              (delay (p-app (force val))))))
        #:first-order promise?))))
-
-#|
-   as with copy-struct in struct.rkt, this first begin0
-   expansion "declares" that struct/c is an expression.
-   It prevents further expansion until the internal definition
-   context is sorted out.
-  |#
-(define-syntax (struct/c stx)
-  (syntax-case stx ()
-    [(_ . args) 
-     (with-syntax ([x (syntax/loc stx (do-struct/c . args))])
-       (syntax/loc stx (begin0 x)))]))
-
-(define-syntax (do-struct/c stx)
-  (syntax-case stx ()
-    [(_ struct-name args ...)
-     (and (identifier? (syntax struct-name))
-          (struct-info? (syntax-local-value (syntax struct-name) (λ () #f))))
-     (with-syntax ([(ctc-x ...) (generate-temporaries (syntax (args ...)))]
-                   [(ctc-name-x ...) (generate-temporaries (syntax (args ...)))]
-                   [(ctc-pred-x ...) (generate-temporaries (syntax (args ...)))]
-                   [(ctc-app-x ...) (generate-temporaries (syntax (args ...)))]
-                   [(field-numbers ...)
-                    (let loop ([i 0]
-                               [l (syntax->list (syntax (args ...)))])
-                      (cond
-                        [(null? l) '()]
-                        [else (cons i (loop (+ i 1) (cdr l)))]))]
-                   [(type-desc-id 
-                     constructor-id 
-                     predicate-id 
-                     (rev-selector-id ...)
-                     (mutator-id ...)
-                     super-id)
-                    (lookup-struct-info (syntax struct-name) stx)])
-       (unless (= (length (syntax->list (syntax (rev-selector-id ...))))
-                  (length (syntax->list (syntax (args ...)))))
-         (raise-syntax-error 'struct/c 
-                             (format "expected ~a contracts because struct ~a has ~a fields"
-                                     (length (syntax->list (syntax (rev-selector-id ...))))
-                                     (syntax-e #'struct-name)
-                                     (length (syntax->list (syntax (rev-selector-id ...)))))
-                             stx))
-       (with-syntax ([(selector-id ...) (reverse (syntax->list (syntax (rev-selector-id ...))))])
-         (syntax
-          (let ([ctc-x (coerce-contract 'struct/c args)] ...)
-            
-            (unless predicate-id
-              (error 'struct/c "could not determine predicate for ~s" 'struct-name))
-            (unless (and selector-id ...)
-              (error 'struct/c "could not determine selectors for ~s" 'struct-name))
-            
-            (unless (flat-contract? ctc-x)
-              (error 'struct/c "expected flat contracts as arguments, got ~e" args))
-            ...
-            
-            (let ([ctc-pred-x (flat-contract-predicate ctc-x)] 
-                  ...
-                  [ctc-name-x (contract-name ctc-x)]
-                  ...)
-              (build-flat-contract
-               (build-compound-type-name 'struct/c 'struct-name ctc-x ...)
-               (λ (val)
-                 (and (predicate-id val)
-                      (ctc-pred-x (selector-id val)) ...))))))))]
-    [(_ struct-name anything ...)
-     (raise-syntax-error 'struct/c "expected a struct identifier" stx (syntax struct-name))]))
-
 
 (define/subexpression-pos-prop (parameter/c x)
   (make-parameter/c (coerce-contract 'parameter/c x)))

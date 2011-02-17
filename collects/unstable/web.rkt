@@ -1,5 +1,6 @@
-#lang racket
+#lang racket/base
 (require xml
+         racket/contract
          unstable/function
          unstable/text)
 
@@ -66,13 +67,6 @@
 ;; write-prop-val : PropVal [OutputPort] -> Void
 ;; Writes a property value to a Cascading Style Sheet.
 (define write-prop-val write-text)
-
-(provide/contract
- [write-xexpr (->* [xexpr/c] [output-port?] void?)])
-
-(define write-xexpr
-  (lambda/parameter (xexpr [output #:param current-output-port])
-    (write-xml/content (xexpr->xml xexpr))))
 
 (provide/contract
  [create-webpage (string? xexpr/c . -> . void?)]

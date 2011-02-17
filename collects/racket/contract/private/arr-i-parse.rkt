@@ -360,10 +360,17 @@ code does the parsing and validation of the syntax.
                    [_ (values #f leftover)])]
                 [(pre-cond leftover)
                  (syntax-case leftover ()
-                   [(#:pre (id ...) pre-cond . leftover)
+                   [(#:pre (id ...) pre-cond . pre-leftover)
                     (begin
+                      (syntax-case #'pre-leftover ()
+                        [() (raise-syntax-error 
+                             #f
+                             "expected #:pre to be followed by at least three subterms (a sequence of identifiers, the pre-condition and the range contract), but found only two" 
+                             stx
+                             (car (syntax->list leftover)))]
+                        [x (void)])
                       (for-each (λ (x) (check-id stx x)) (syntax->list #'(id ...)))
-                      (values (pre/post (syntax->list #'(id ...)) #'pre-cond) #'leftover))]
+                      (values (pre/post (syntax->list #'(id ...)) #'pre-cond) #'pre-leftover))]
                    [_ (values #f leftover)])]
                 [(range leftover) 
                  (syntax-case leftover ()
@@ -373,7 +380,7 @@ code does the parsing and validation of the syntax.
                    [(a . b)
                     (raise-syntax-error #f "expected a range expression" stx #'a)]
                    [()
-                    (raise-syntax-error #f "expected a range expression, but found nothing" stx leftover)])]
+                    (raise-syntax-error #f "expected a range expression, but found nothing" stx)])]
                 [(post-cond leftover) 
                  (syntax-case leftover ()
                    [(#:post (id ...) post-cond . leftover)

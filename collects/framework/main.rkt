@@ -193,6 +193,19 @@
             are also written at that point.}]})
 
  (proc-doc/names
+  preferences:get-preference/gui
+  (->* (symbol?)
+       ((-> void?))
+       any/c)
+  ((sym)
+   ((default (λ () (error 'get-preference/gui "unknown pref ~s" sym)))))
+  @{Like @scheme[get-preference], but has more sophisticated error handling.
+  In particular, it passes a @racket[#:timeout-lock-there] argument that
+  informs the user that the preferences file is locked (and offers the alternative
+  of not showing the message again).})
+
+ 
+ (proc-doc/names
   preferences:add-panel
   (-> (or/c string? (cons/c string? (listof string?)))
       (->i ([parent (is-a?/c area-container-window<%>)])
@@ -1436,6 +1449,41 @@
     is now the first keymap after @scheme[keymap:get-user] (if that keymap is
     in the list.)})
 
+ (proc-doc/names
+  panel:dragable-container-size
+  (-> (listof (list/c real? real? boolean? boolean?)) real? boolean?
+      (values real? real?))
+  (container-info bar-thickness vertical?)
+  @{Returns the minimum width and height for a @racket[panel:dragable<%>] object
+    where @racket[container-info] (see @method[area-container<%> container-size] for
+    more details on that argument) is the children's info, and @racket[bar-thickness] and
+    @racket[vertical?] indicate the properties of the panel.
+    
+    This function is exported mostly for the test suite.})
+
+ (proc-doc/names
+  panel:dragable-place-children
+  (-> (listof (list/c real? real? boolean? boolean?)) 
+      real?
+      real?
+      (listof (between/c 0 1)) 
+      real?
+      boolean?
+      (values (listof (list/c (integer-in 0 10000)
+                              (integer-in 0 10000)
+                              (integer-in 0 10000)
+                              (integer-in 0 10000)))
+              (listof (list/c (integer-in 0 10000)
+                              (integer-in 0 10000)))))
+  (container-info width height percentages bar-thickness vertical?)
+  @{Returns the geometry information for a dragable panel. The inputs
+    are the @racket[container-info] (see @method[area-container<%> place-children] for more info),
+    the @racket[width] and @racket[height] of the window, the @racket[percentages] for the spacing
+    of the children, and a real and a boolean indicating the thickness of the bar between
+    the child panels and whether or not this is a vertical panel, respectively.
+    
+    This function is exported mostly for the test suite.})
+ 
  (proc-doc/names
   color-model:rgb->xyz
   (number? number? number? . -> . color-model:xyz?)

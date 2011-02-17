@@ -61,17 +61,9 @@ cpointer_obj {
   }
   gcMARK2(SCHEME_CPTR_TYPE(p), gc);
  size:
-  gcBYTES_TO_WORDS(sizeof(Scheme_Cptr));
-}
-
-offset_cpointer_obj {
- mark:
-  if (!(SCHEME_CPTR_FLAGS(p) & 0x1)) {
-    gcMARK2(SCHEME_CPTR_VAL(p), gc);
-  }
-  gcMARK2(SCHEME_CPTR_TYPE(p), gc);
- size:
-  gcBYTES_TO_WORDS(sizeof(Scheme_Offset_Cptr));
+   (SCHEME_CPTR_HAS_OFFSET(p)
+    ? gcBYTES_TO_WORDS(sizeof(Scheme_Offset_Cptr))
+    : gcBYTES_TO_WORDS(sizeof(Scheme_Cptr)));
 }
 
 twoptr_obj {
@@ -650,6 +642,7 @@ thread_val {
 
   gcMARK2(pr->meta_prompt, gc);
   gcMARK2(pr->meta_continuation, gc);
+  gcMARK2(pr->acting_barrier_prompt, gc);
   
   gcMARK2(pr->cont_mark_stack_segments, gc);
   gcMARK2(pr->cont_mark_stack_owner, gc);
@@ -732,7 +725,7 @@ thread_val {
 }
 
 runstack_val {
-  long *s = (long *)p;
+  intptr_t *s = (intptr_t *)p;
  mark:
   void **a, **b;
   a = (void **)s + 4 + s[2];
@@ -1857,19 +1850,6 @@ mark_thread_cell {
 
  size:
   gcBYTES_TO_WORDS(sizeof(Thread_Cell));
-}
-
-mark_frozen_tramp {
- mark:
-  FrozenTramp *f = (FrozenTramp *)p;
- 
-  gcMARK2(f->do_data, gc);
-  gcMARK2(f->old_param, gc);
-  gcMARK2(f->config, gc);
-  gcMARK2(f->progress_cont, gc);
-
- size:
-  gcBYTES_TO_WORDS(sizeof(FrozenTramp));
 }
 
 END thread;

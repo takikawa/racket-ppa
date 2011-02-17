@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   Copyright (c) 1995 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -23,6 +23,8 @@
    which messes up Racket's (GRacket's, really) threads. */
 
 #include "schpriv.h"
+
+#ifndef _WIN64
 
 int __declspec(naked) scheme_mz_setjmp(mz_jmp_buf b)
 {
@@ -55,3 +57,5 @@ void __declspec(naked) scheme_mz_longjmp(mz_jmp_buf b, int v)
 	ret
   }
 }
+
+#endif

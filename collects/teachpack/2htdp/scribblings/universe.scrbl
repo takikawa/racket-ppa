@@ -189,6 +189,40 @@ The design of a world program demands that you come up with a data
  closes the canvas.
 }
 
+The only mandatory clause of a @scheme[big-bang] description is
+@scheme[to-draw] (or @scheme[on-draw] for backwards compatibility): 
+@itemize[
+
+@item{
+ 
+@defform[(to-draw render-expr)
+         #:contracts
+         ([render-expr (-> (unsyntax @tech{WorldState}) scene?)])]{ 
+
+ tells DrRacket to call the function @scheme[render-expr] whenever the
+ canvas must be drawn. The external canvas is usually re-drawn after DrRacket has
+ dealt with an event. Its size is determined by the size of the first
+ generated @tech{scene}.}
+
+@defform/none[#:literals (to-draw)
+              (to-draw render-expr width-expr height-expr)
+              #:contracts
+              ([render-expr (-> (unsyntax @tech{WorldState}) scene?)]
+	       [width-expr natural-number/c]
+               [height-expr natural-number/c])]{ 
+
+ tells DrRacket to use a @scheme[width-expr] by @scheme[height-expr]
+ canvas instead of one determine by the first generated @tech{scene}.
+}
+
+For compatibility reasons, the teachpack also supports the keyword
+@defidform/inline[on-draw] in lieu of @scheme[to-draw] but the latter is preferred
+now. 
+}
+
+]
+
+All remaining clauses are optional: 
 @itemize[
 
 @item{
@@ -208,7 +242,7 @@ current world. The clock ticks at the rate of 28 times per second.}}
                [rate-expr (and/c real? positive?)])]{
 tells DrRacket to call the @scheme[tick-expr] function on the current
 world every time the clock ticks. The result of the call becomes the
-current world. The clock ticks at the rate of @scheme[rate-expr].}}
+current world. The clock ticks every @scheme[rate-expr] seconds.}}
 
 @item{A @tech{KeyEvent} represents key board events. 
 
@@ -394,33 +428,6 @@ All @tech{MouseEvent}s are represented via strings:
 }
 
 @item{
- 
-@defform[(to-draw render-expr)
-         #:contracts
-         ([render-expr (-> (unsyntax @tech{WorldState}) scene?)])]{ 
-
- tells DrRacket to call the function @scheme[render-expr] whenever the
- canvas must be drawn. The external canvas is usually re-drawn after DrRacket has
- dealt with an event. Its size is determined by the size of the first
- generated @tech{scene}.}
-
-@defform/none[#:literals (to-draw)
-              (to-draw render-expr width-expr height-expr)
-              #:contracts
-              ([render-expr (-> (unsyntax @tech{WorldState}) scene?)]
-	       [width-expr natural-number/c]
-               [height-expr natural-number/c])]{ 
-
- tells DrRacket to use a @scheme[width-expr] by @scheme[height-expr]
- canvas instead of one determine by the first generated @tech{scene}.
-}
-
-For compatibility reasons, the teachpack also supports the keyword
-@defidform/inline[on-draw] in lieu of @scheme[to-draw] but the latter is preferred
-now. 
-}
-
-@item{
 
 @defform[(stop-when last-world?)
          #:contracts
@@ -450,7 +457,7 @@ now.
 
 @item{
 
-@defstruct[stop-with ([w (unsyntax @tech{WorldState})])]{signals to
+@defstruct*[stop-with ([w (unsyntax @tech{WorldState})])]{signals to
 DrRacket that the world program should shut down. That is, any
 handler may return @scheme[(stop-with w)] provided @scheme[w] is a
 @tech{WorldState}. If it does, the state of the world becomes @scheme[w]
@@ -492,6 +499,15 @@ and @scheme[big-bang] will close down all event handling.}
  who wish to see how their world evolves---without having to design a
  rendering function---plus for the debugging of world programs. 
 }}
+
+@item{
+@defform[(name name-expr)
+         #:contracts
+         ([name-expr (or/c symbol? string?)])]{
+ provide a name (@scheme[namer-expr]) to this world, which is used as the
+ title of the canvas.}
+}
+
 ]
 
 The following example shows that @scheme[(run-simulation create-UFO-scene)] is
@@ -747,17 +763,11 @@ following shapes:
 @item{
 @defform[(register ip-expr) #:contracts ([ip-expr string?])]{
  connect this world to a universe server at the specified @scheme[ip-expr]
- address and set up capabilities for sending and receiving messages.}
-}
-
-@item{
-@defform[(name name-expr)
-         #:contracts
-         ([name-expr (or/c symbol? string?)])]{
- provide a name (@scheme[namer-expr]) to this world, which is used as the
- title of the canvas and the name sent to the server.}
-}
-
+ address and set up capabilities for sending and receiving messages.
+ If the world description includes a name specification of the form 
+ @scheme[(name SomeString)] or @scheme[(name SomeSymbol)], the name of the
+ world is sent along to the server. 
+}}
 ]
 
 When a world program registers with a universe program and the universe program
@@ -1015,8 +1025,8 @@ optional handlers:
               #:contracts
               ([tick-expr (-> (unsyntax @tech{UniverseState}) bundle?)]
                [rate-expr (and/c real? positive?)])]{ 
- tells DrRacket to apply @scheme[tick-expr] as above but use the specified
- clock tick rate instead of the default.}
+ tells DrRacket to apply @scheme[tick-expr] as above; the clock ticks
+ every  @scheme[rate-expr] seconds.}
 }
 
 @item{

@@ -15,11 +15,6 @@ TODO
 ; =Handler= means in the handler thread of some eventspace; it must
 ;  be combined with either =Kernel= or =User=
 
-;; WARNING: printf is rebound in this module to always use the 
-;;          original stdin/stdout of drscheme, instead of the 
-;;          user's io ports, to aid any debugging printouts.
-;;          (esp. useful when debugging the users's io)
-
 (require racket/class
          racket/path
          racket/pretty
@@ -39,6 +34,10 @@ TODO
          planet/terse-info)
 
 (provide rep@ with-stack-checkpoint)
+
+(define orig-output-port (current-output-port))
+(define (oprintf . args) (apply fprintf orig-output-port args))
+ 
 
 ;; run a thunk, and if an exception is raised, make it possible to cut the
 ;; stack so that the surrounding context is hidden
@@ -235,11 +234,12 @@ TODO
       ;; for use in debugging the stack trace stuff
       #;
       (when (exn? exn)
-        (print-struct #t)
-        (for-each 
-         (λ (frame) (printf " ~s\n" frame))
-         (continuation-mark-set->context (exn-continuation-marks exn)))
-        (printf "\n"))
+        (parameterize ([print-struct #t])
+          (for-each 
+           (λ (frame) (printf " ~s\n" frame))
+           (continuation-mark-set->context (exn-continuation-marks exn)))
+          (printf "\n")))
+      
       (drracket:debug:error-display-handler/stacktrace msg exn stack)))
   
   (define (main-user-eventspace-thread?)
@@ -303,8 +303,6 @@ TODO
   (send drs-bindings-keymap map-function "f1" "search-help-desk")
   (send drs-bindings-keymap map-function "c:tab" "next-tab")
   (send drs-bindings-keymap map-function "c:s:tab" "prev-tab")
-  (send drs-bindings-keymap map-function "d:s:right" "next-tab")
-  (send drs-bindings-keymap map-function "d:s:left" "prev-tab")
   (send drs-bindings-keymap map-function "c:pagedown" "next-tab")
   (send drs-bindings-keymap map-function "c:pageup" "prev-tab")
   
@@ -335,41 +333,14 @@ TODO
   ;; queue is full):
   (define output-limit-size 2000)
   
-  (define (printf . args) (apply fprintf drracket:init:original-output-port args))
-  
   (define setup-scheme-interaction-mode-keymap
     (λ (keymap)
-      (define (beginning-of-line text select?)
-        (let* ([para (send text position-line (send text get-start-position))]
-               [para-start (send text line-start-position para)]
-               [prompt (send text get-prompt)]
-               [para-start-text (send text get-text para-start (+ para-start (string-length prompt)))]
-               [new-start 
-                (cond
-                  [(equal? prompt para-start-text)
-                   (+ para-start (string-length prompt))]
-                  [else
-                   para-start])])
-          (if select?
-              (send text set-position new-start (send text get-end-position))
-              (send text set-position new-start new-start))))
-      
-      (send keymap add-function "beginning-of-line/prompt"
-            (λ (text event) (beginning-of-line text #f)))
-      (send keymap add-function "select-to-beginning-of-line/prompt"
-            (λ (text event) (beginning-of-line text #t)))
-      
       (send keymap add-function "put-previous-sexp"
             (λ (text event) 
               (send text copy-prev-previous-expr)))
       (send keymap add-function "put-next-sexp"
             (λ (text event) 
               (send text copy-next-previous-expr)))
-      
-      (send keymap map-function "c:a" "beginning-of-line/prompt")
-      (send keymap map-function "s:c:a" "select-to-beginning-of-line/prompt")
-      (send keymap map-function "home" "beginning-of-line/prompt")
-      (send keymap map-function "s:home" "select-to-beginning-of-line/prompt")
       
       (keymap:send-map-function-meta keymap "p" "put-previous-sexp")
       (keymap:send-map-function-meta keymap "n" "put-next-sexp")
@@ -439,7 +410,6 @@ TODO
   
   (define-struct sexp (left right prompt))
   
-  (define console-max-save-previous-exprs 30)
   (let* ([list-of? (λ (p?)
                      (λ (l)
                        (and (list? l)
@@ -451,25 +421,24 @@ TODO
      'drracket:console-previous-exprs
      null
      list-of-lists-of-snip/strings?))
-  (let ([marshall 
-         (λ (lls)
-           (map (λ (ls)
-                  (list
-                   (apply
-                    string-append
-                    (reverse
-                     (map (λ (s)
-                            (cond
-                              [(is-a? s string-snip%)
-                               (send s get-text 0 (send s get-count))]
-                              [(string? s) s]
-                              [else "'non-string-snip"]))
-                          ls)))))
-                lls))]
-        [unmarshall (λ (x) x)])
+  (define (marshall-previous-exprs lls)
+    (map (λ (ls)
+           (list
+            (apply
+             string-append
+             (reverse
+              (map (λ (s)
+                     (cond
+                       [(is-a? s string-snip%)
+                        (send s get-text 0 (send s get-count))]
+                       [(string? s) s]
+                       [else "'non-string-snip"]))
+                   ls)))))
+         lls))
+  (let ([unmarshall (λ (x) x)])
     (preferences:set-un/marshall
      'drracket:console-previous-exprs
-     marshall unmarshall))
+     marshall-previous-exprs unmarshall))
   
   (define color? ((get-display-depth) . > . 8))
   
@@ -1322,15 +1291,17 @@ TODO
                  (initialize-parameters snip-classes))))
             
 
-            ;; register drscheme with the planet-terse-register for the user's namespace
-            ;; must be called after 'initialize-parameters' is called (since it initializes
-            ;; the user's namespace)
-            (planet-terse-set-key (gensym))
-            (planet-terse-register
-             (lambda (tag package)
-               (parameterize ([current-eventspace drracket:init:system-eventspace])
-                 (queue-callback (λ () (new-planet-info tag package))))))
-            
+            (queue-user/wait
+             (λ ()
+               ;; register drscheme with the planet-terse-register for the user's namespace
+               ;; must be called after 'initialize-parameters' is called (since it initializes
+               ;; the user's namespace)
+               (planet-terse-set-key (namespace-module-registry (current-namespace)))
+               (planet-terse-register 
+                (lambda (tag package)
+                  (parameterize ([current-eventspace drracket:init:system-eventspace])
+                    (queue-callback (λ () (new-planet-info tag package))))))))
+               
             ;; disable breaks until an evaluation actually occurs
             (send context set-breakables #f #f)
             
@@ -1676,31 +1647,28 @@ TODO
         (thaw-colorer)
         (send context disable-evaluation)
         (reset-console)
-        
-        (let ([exn-raised #f]
-              [lang (drracket:language-configuration:language-settings-language user-language-settings)])
-          (queue-user/wait
-           (λ () ; =User=, =No-Breaks=
-             (with-handlers ((exn:fail? (λ (x) (set! exn-raised x))))
-               (cond
-                 ;; this is for backwards compatibility; drracket used to
-                 ;; expect this method to be a thunk (but that was a bad decision)
-                 [(object-method-arity-includes? lang 'first-opened 1)
-                  (send lang first-opened
-                        (drracket:language-configuration:language-settings-settings user-language-settings))]
-                 [else
-                  ;; this is the backwards compatible case.
-                  (send lang first-opened)]))))
-          (when exn-raised
-            (let ([sp (open-output-string)])
-              (parameterize ([current-error-port sp])
-                (drracket:init:original-error-display-handler (exn-message exn-raised) exn-raised)) 
-              (message-box (string-constant drscheme)
-                           (format "Exception raised while running the first-opened method of the language ~s:\n~a"
-                                   (send lang get-language-position)
-                                   (get-output-string sp))))))
-        
         (insert-prompt)
+        
+        ;; call the first-opened method on the user's thread, but wait here for that to terminate
+        (let ([lang (drracket:language-configuration:language-settings-language user-language-settings)]
+              [drr-evtspace (current-eventspace)]
+              [s (make-semaphore 0)])
+          (run-in-evaluation-thread
+           (λ ()
+             (let/ec k
+               (parameterize ([error-escape-handler (λ () (k (void)))])
+                 (cond
+                   ;; this is for backwards compatibility; drracket used to
+                   ;; expect this method to be a thunk (but that was a bad decision)
+                   [(object-method-arity-includes? lang 'first-opened 1)
+                    (send lang first-opened
+                          (drracket:language-configuration:language-settings-settings user-language-settings))]
+                   [else
+                    ;; this is the backwards compatible case.
+                    (send lang first-opened)])))
+             (semaphore-post s)))
+          (semaphore-wait s))
+        
         (send context enable-evaluation)
         (end-edit-sequence)
         (clear-undos))
@@ -1769,18 +1737,25 @@ TODO
       (define/private (get-previous-exprs)
         (append global-previous-exprs local-previous-exprs))
       (define/private (add-to-previous-exprs snips)
-        (let* ([new-previous-exprs 
-                (let* ([trimmed-previous-exprs (trim-previous-exprs local-previous-exprs)])
-                  (let loop ([l trimmed-previous-exprs])
-                    (if (null? l)
-                        (list snips)
-                        (cons (car l) (loop (cdr l))))))])
-          (set! local-previous-exprs new-previous-exprs)))
+        (set! local-previous-exprs (append local-previous-exprs (list snips))))
       
+      ; list-of-lists-of-snip/strings? -> list-of-lists-of-snip/strings?
       (define/private (trim-previous-exprs lst)
-        (if ((length lst). >= .  console-max-save-previous-exprs)
-            (cdr lst)
-            lst))
+        (define max-size 10000)
+        (define (expr-size expr)
+          (for/fold ([s 0]) ([e expr]) (+ s (string-length e))))
+        (define within-bound
+          (let loop ([marshalled (reverse (marshall-previous-exprs lst))]
+                     [keep 0]
+                     [sum 0])
+            (if (empty? marshalled)
+                keep
+                (let* ([size (expr-size (first marshalled))]
+                       [w/another (+ size sum)])
+                  (if (> w/another max-size)
+                      keep
+                      (loop (rest marshalled) (add1 keep) w/another))))))
+        (take-right lst within-bound))
       
       (define/private (save-interaction-in-history start end)
         (split-snip start)
@@ -1832,6 +1807,35 @@ TODO
               (and (not (null? canvases))
                    (car canvases)))))
 
+      (inherit paragraph-end-position)
+      (define/override (get-start-of-line pos)
+        (define para (position-paragraph pos))
+        (define para-start (paragraph-start-position para))
+        (define para-end (paragraph-end-position para))
+        (define after-prompt-start 
+          (let* ([prompt (get-prompt)]
+                 [para-start-text (get-text para-start (+ para-start (string-length prompt)))])
+            (cond
+              [(equal? prompt para-start-text)
+               (+ para-start (string-length prompt))]
+              [else
+               para-start])))
+        (define first-non-whitespace 
+          (let loop ([i after-prompt-start])
+            (cond
+              [(= i para-end) #f]
+              [(char-whitespace? (get-character i))
+               (loop (+ i 1))]
+              [else i])))
+        (define new-pos 
+          (cond 
+            [(not first-non-whitespace) after-prompt-start]
+            [(< pos after-prompt-start) after-prompt-start]
+            [(= pos after-prompt-start) first-non-whitespace]
+            [(<= pos first-non-whitespace) after-prompt-start]
+            [else first-non-whitespace]))
+        new-pos)
+      
       (super-new)
       (auto-wrap #t)
       (set-styles-sticky #f)

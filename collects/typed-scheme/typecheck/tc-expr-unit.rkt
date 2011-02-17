@@ -27,8 +27,8 @@
 ;; `fixnum?' to avoid creating platform-dependent .zo files.
 (define (portable-fixnum? n)
   (and (exact-integer? n)
-       (< n (expt 2 31))
-       (> n (- (expt 2 31)))))
+       (< n (expt 2 30))
+       (>= n (- (expt 2 30)))))
 
 ;; return the type of a literal value
 ;; scheme-value -> type
@@ -96,7 +96,7 @@
      (let* ([h (syntax-e #'i)]
             [ks (hash-map h (lambda (x y) (tc-literal x)))]
             [vs (hash-map h (lambda (x y) (tc-literal y)))])
-       (make-Hashtable (apply Un ks) (apply Un vs)))]
+       (make-Hashtable (generalize (apply Un ks)) (generalize (apply Un vs))))]
     [(a . b) (-pair (tc-literal #'a) (tc-literal #'b))]
     [_ Univ]))
 
@@ -260,7 +260,7 @@
         [(#%top . id) (check-below (tc-id #'id) expected)]
         ;; weird
         [(#%variable-reference . _)
-         (tc-error/expr #:return (ret expected) "#%variable-reference is not supported by Typed Scheme")]
+         (tc-error/expr #:return (ret expected) "#%variable-reference is not supported by Typed Racket")]
         ;; identifiers
         [x:identifier
            (check-below (tc-id #'x) expected)]
@@ -375,7 +375,7 @@
       [(#%expression e) (tc-expr #'e)]
       ;; weird
       [(#%variable-reference . _)
-       (tc-error/expr #:return (ret (Un)) "#%variable-reference is not supported by Typed Scheme")]
+       (tc-error/expr #:return (ret (Un)) "#%variable-reference is not supported by Typed Racket")]
       ;; identifiers
       [x:identifier (tc-id #'x)]
       ;; application        
@@ -428,7 +428,7 @@
                            ret-ty)])
           (add-typeof-expr form retval)
           retval)]
-       [(tc-result1: t) (int-err "non-symbol methods not supported by Typed Scheme: ~a" t)])]
+       [(tc-result1: t) (int-err "non-symbol methods not supported by Typed Racket: ~a" t)])]
     [(tc-result1: t) (tc-error/expr #:return (or expected (ret (Un))) "send: expected a class instance, got ~a" t)]))
 
 (define (single-value form [expected #f])  

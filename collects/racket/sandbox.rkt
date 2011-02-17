@@ -32,6 +32,7 @@
          evaluator-alive?
          kill-evaluator
          break-evaluator
+         get-user-custodian
          set-eval-limits
          set-eval-handler
          put-input
@@ -621,6 +622,7 @@
 (define-evaluator-messenger evaluator-alive? 'alive?)
 (define-evaluator-messenger kill-evaluator 'kill)
 (define-evaluator-messenger break-evaluator 'break)
+(define-evaluator-messenger get-user-custodian 'user-cust)
 (define-evaluator-messenger (set-eval-limits secs mb) 'limits)
 (define-evaluator-messenger (set-eval-handler handler) 'handler)
 (define-evaluator-messenger (put-input . xs) 'input)
@@ -819,6 +821,7 @@
           [(alive?)  (and user-thread (not (thread-dead? user-thread)))]
           [(kill)    (terminate+kill! 'evaluator-killed #f)]
           [(break)   (user-break)]
+          [(user-cust) user-cust]
           [(limits)  (set! limits (evaluator-message-args expr))]
           [(handler) (set! eval-handler (car (evaluator-message-args expr)))]
           [(input)   (apply input-putter (evaluator-message-args expr))]
@@ -969,9 +972,9 @@
          (if (or (not reqlang) (equal? reqlang (syntax->datum #'lang)))
            (values (car prog) source)
            (error 'make-evaluator
-                  "module code used `~e' for a language, expecting `~e'"
+                  "module code used `~.s' for a language, expecting `~.s'"
                   (syntax->datum #'lang) reqlang))]
-        [_else (error 'make-evaluator "expecting a `module' program; got ~e"
+        [_else (error 'make-evaluator "expecting a `module' program; got ~.s"
                       (syntax->datum (car prog)))])))
   (make-evaluator* void
                    (if (path? input-program) (cons input-program allow) allow)

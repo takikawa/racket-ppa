@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2010 PLT Scheme Inc.
+  Copyright (c) 2004-2011 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -174,7 +174,7 @@ static Scheme_Object *procedure_rename(int argc, Scheme_Object *argv[]);
 static Scheme_Object *procedure_to_method(int argc, Scheme_Object *argv[]);
 static Scheme_Object *procedure_equal_closure_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *chaperone_procedure(int argc, Scheme_Object *argv[]);
-static Scheme_Object *proxy_procedure(int argc, Scheme_Object *argv[]);
+static Scheme_Object *impersonate_procedure(int argc, Scheme_Object *argv[]);
 static Scheme_Object *primitive_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *primitive_closure_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *primitive_result_arity (int argc, Scheme_Object *argv[]);
@@ -183,6 +183,7 @@ Scheme_Object *scheme_values(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_print(int argc, Scheme_Object **argv);
 static Scheme_Object *current_prompt_read(int, Scheme_Object **);
 static Scheme_Object *current_read(int, Scheme_Object **);
+static Scheme_Object *current_get_read_input_port(int, Scheme_Object **);
 
 static Scheme_Object *write_compiled_closure(Scheme_Object *obj);
 static Scheme_Object *read_compiled_closure(Scheme_Object *obj);
@@ -281,6 +282,9 @@ scheme_init_fun (Scheme_Env *env)
 						 "values",
 						 0, -1,
 						 0, -1);
+  SCHEME_PRIM_PROC_FLAGS(scheme_values_func) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                                 | SCHEME_PRIM_IS_BINARY_INLINED
+                                                 | SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("values",
 			     scheme_values_func,
 			     env);
@@ -530,9 +534,9 @@ scheme_init_fun (Scheme_Env *env)
 						      "chaperone-procedure",
 						      2, -1),
 			     env);
-  scheme_add_global_constant("proxy-procedure",
-			     scheme_make_prim_w_arity(proxy_procedure,
-						      "proxy-procedure",
+  scheme_add_global_constant("impersonate-procedure",
+			     scheme_make_prim_w_arity(impersonate_procedure,
+						      "impersonate-procedure",
 						      2, -1),
 			     env);
 
@@ -567,6 +571,11 @@ scheme_init_fun (Scheme_Env *env)
 			     scheme_register_parameter(current_read,
 						       "current-read-interaction",
 						       MZCONFIG_READ_HANDLER),
+			     env);
+  scheme_add_global_constant("current-get-interaction-input-port",
+			     scheme_register_parameter(current_get_read_input_port,
+						       "current-get-interaction-input-port",
+						       MZCONFIG_READ_INPUT_PORT_HANDLER),
 			     env);
 
   scheme_install_type_writer(scheme_unclosed_procedure_type,
@@ -1143,12 +1152,41 @@ void scheme_set_closure_flonum_map(Scheme_Closure_Data *data, char *flonum_map)
     cl->flonum_map = flonum_map;
   }
   
-  for (i = data->num_params; i--; ) {
-    if (flonum_map[i]) break;
+  if (flonum_map) {
+    for (i = data->num_params; i--; ) {
+      if (flonum_map[i]) break;
+    }
+    
+    if (i < 0) {
+      cl->flonum_map = NULL;
+    }
   }
+}
 
-  if (i < 0) {
-    cl->flonum_map = NULL;
+void scheme_merge_closure_flonum_map(Scheme_Closure_Data *data1, Scheme_Closure_Data *data2)
+{
+  Closure_Info *cl1 = (Closure_Info *)data1->closure_map;
+  Closure_Info *cl2 = (Closure_Info *)data2->closure_map;
+
+  if (cl1->has_flomap) {
+    if (!cl1->flonum_map || !cl2->has_flomap) {
+      cl2->has_flomap = 1;
+      cl2->flonum_map = cl1->flonum_map;
+    } else if (cl2->flonum_map) {
+      int i;
+      for (i = data1->num_params; i--; ) {
+        if (cl1->flonum_map[i] != cl2->flonum_map[i]) {
+          cl2->flonum_map = NULL;
+          cl1->flonum_map = NULL;
+          break;
+        }
+      }
+    } else {
+      cl1->flonum_map = NULL;
+    }
+  } else if (cl2->has_flomap) {
+    cl1->has_flomap = 1;
+    cl1->flonum_map = cl2->flonum_map;
   }
 }
 
@@ -1852,10 +1890,10 @@ Scheme_Object *scheme_source_to_name(Scheme_Object *code)
     }
 
     if (cstx->srcloc->line >= 0) {
-      sprintf(buf, "%s%s%ld:%ld",
+      sprintf(buf, "%s%s%" PRIdPTR ":%" PRIdPTR,
 	      src, (src[0] ? ":" : ""), cstx->srcloc->line, cstx->srcloc->col - 1);
     } else {
-      sprintf(buf, "%s%s%ld",
+      sprintf(buf, "%s%s%" PRIdPTR,
 	      src, (src[0] ? "::" : ""), cstx->srcloc->pos);
     }
 
@@ -1929,7 +1967,7 @@ scheme_make_closure_compilation(Scheme_Comp_Env *env, Scheme_Object *code,
   Scheme_Compile_Info lam;
   Scheme_Comp_Env *frame;
   int i;
-  long num_params;
+  intptr_t num_params;
   Closure_Info *cl;
 
   data  = MALLOC_ONE_TAGGED(Scheme_Closure_Data);
@@ -2067,7 +2105,7 @@ void scheme_really_create_overflow(void *stack_base)
       p->overflow_reply = NULL; /* means "continue the error" */
     } else {
       void *p1, *p2, *p3, *p4, *p5;
-      long i1, i2, i3, i4;
+      intptr_t i1, i2, i3, i4;
       Overflow_K_Proc f = p->overflow_k;
       Scheme_Object *reply;
 
@@ -3001,7 +3039,7 @@ static Scheme_Object *clone_arity(Scheme_Object *a, int delta)
     return a;
 }
 
-static Scheme_Object *get_or_check_arity(Scheme_Object *p, long a, Scheme_Object *bign)
+static Scheme_Object *get_or_check_arity(Scheme_Object *p, intptr_t a, Scheme_Object *bign)
 /* a == -1 => get arity
    a == -2 => check for allowing bignum */
 {
@@ -3328,7 +3366,7 @@ static Scheme_Object *get_or_check_arity(Scheme_Object *p, long a, Scheme_Object
   return scheme_true;
 }
 
-Scheme_Object *scheme_get_or_check_arity(Scheme_Object *p, long a)
+Scheme_Object *scheme_get_or_check_arity(Scheme_Object *p, intptr_t a)
 {
   return get_or_check_arity(p, a, NULL);
 }
@@ -3709,7 +3747,7 @@ static Scheme_Object *procedure_arity_p(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *procedure_arity_includes(int argc, Scheme_Object *argv[])
 {
-  long n;
+  intptr_t n;
 
   if (!SCHEME_PROCP(argv[0]))
     scheme_wrong_type("procedure-arity-includes?", "procedure", 0, argc, argv);
@@ -4084,7 +4122,7 @@ static Scheme_Object *procedure_equal_closure_p(int argc, Scheme_Object *argv[])
 }
 
 static Scheme_Object *do_chaperone_procedure(const char *name, const char *whating,
-                                             int is_proxy, int argc, Scheme_Object *argv[])
+                                             int is_impersonator, int argc, Scheme_Object *argv[])
 {
   Scheme_Chaperone *px;
   Scheme_Object *val = argv[0], *orig, *naya;
@@ -4118,8 +4156,8 @@ static Scheme_Object *do_chaperone_procedure(const char *name, const char *whati
   px->props = props;
   px->redirects = argv[1];
 
-  if (is_proxy)
-    SCHEME_CHAPERONE_FLAGS(px) |= SCHEME_CHAPERONE_IS_PROXY;
+  if (is_impersonator)
+    SCHEME_CHAPERONE_FLAGS(px) |= SCHEME_CHAPERONE_IS_IMPERSONATOR;
 
   return (Scheme_Object *)px;
 }
@@ -4129,9 +4167,9 @@ static Scheme_Object *chaperone_procedure(int argc, Scheme_Object *argv[])
   return do_chaperone_procedure("chaperone-procedure", "chaperoning", 0, argc, argv);
 }
 
-static Scheme_Object *proxy_procedure(int argc, Scheme_Object *argv[])
+static Scheme_Object *impersonate_procedure(int argc, Scheme_Object *argv[])
 {
-  return do_chaperone_procedure("proxy-procedure", "proxying", 1, argc, argv);
+  return do_chaperone_procedure("impersonate-procedure", "impersonating", 1, argc, argv);
 }
 
 static Scheme_Object *apply_chaperone_k(void)
@@ -4206,10 +4244,10 @@ Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object 
   }
   px = (Scheme_Chaperone *)o;
 
-  if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_PROXY))
+  if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_IMPERSONATOR))
     what = "chaperone";
   else
-    what = "proxy";
+    what = "impersonator";
 
   /* Ensure that the original procedure accepts `argc' arguments: */
   a[0] = px->prev;
@@ -4224,7 +4262,7 @@ Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object 
   }
 
   if (px->props) {
-    app_mark = scheme_hash_tree_get(px->props, scheme_app_mark_proxy_property);
+    app_mark = scheme_hash_tree_get(px->props, scheme_app_mark_impersonator_property);
     /* app_mark should be (cons mark val) */
     if (app_mark && !SCHEME_PAIRP(app_mark))
       app_mark = NULL;
@@ -4267,7 +4305,7 @@ Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object 
       memmove(argv2, argv2 + 1, sizeof(Scheme_Object*)*argc);
     } else
       post = NULL;
-    if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_PROXY)) {
+    if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_IMPERSONATOR)) {
       for (i = 0; i < argc; i++) {
         if (!scheme_chaperone_of(argv2[i], argv[i])) {
           if (argc == 1)
@@ -4390,7 +4428,7 @@ Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object 
     }
 
     if (c == argc) {
-      if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_PROXY)) {
+      if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_IMPERSONATOR)) {
         for (i = 0; i < argc; i++) {
           if (!scheme_chaperone_of(argv2[i], argv[i])) {
             if (argc == 1)
@@ -4719,7 +4757,7 @@ int scheme_escape_continuation_ok(Scheme_Object *ec)
 static Scheme_Object *call_with_immediate_cc_mark (int argc, Scheme_Object *argv[])
 {
   Scheme_Thread *p = scheme_current_thread;
-  long findpos, bottom;
+  intptr_t findpos, bottom;
   Scheme_Object *a[1], *key;
 
   scheme_check_proc_arity("call-with-immediate-continuation-mark", 1, 1, argc, argv);
@@ -4731,14 +4769,14 @@ static Scheme_Object *call_with_immediate_cc_mark (int argc, Scheme_Object *argv
     a[0] = scheme_false;
 
   if (p->cont_mark_stack_segments) {
-    findpos = (long)MZ_CONT_MARK_STACK;
-    bottom = (long)p->cont_mark_stack_bottom;
+    findpos = (intptr_t)MZ_CONT_MARK_STACK;
+    bottom = (intptr_t)p->cont_mark_stack_bottom;
     while (findpos-- > bottom) {
       Scheme_Cont_Mark *seg = p->cont_mark_stack_segments[findpos >> SCHEME_LOG_MARK_SEGMENT_SIZE];
-      long pos = findpos & SCHEME_MARK_SEGMENT_MASK;
+      intptr_t pos = findpos & SCHEME_MARK_SEGMENT_MASK;
       Scheme_Cont_Mark *find = seg + pos;
 
-      if ((long)find->pos < (long)MZ_CONT_MARK_POS) {
+      if ((intptr_t)find->pos < (intptr_t)MZ_CONT_MARK_POS) {
         break;
       } else {
         if (find->key == key) {
@@ -4862,7 +4900,7 @@ static Scheme_Saved_Stack *copy_out_runstack(Scheme_Thread *p,
 {
   Scheme_Saved_Stack *saved, *isaved, *csaved, *share_saved, *share_csaved, *ss;
   Scheme_Object **start;
-  long size;
+  intptr_t size;
   int done;
 
   /* Copy out current runstack: */
@@ -4944,15 +4982,15 @@ static Scheme_Saved_Stack *copy_out_runstack(Scheme_Thread *p,
 static Scheme_Cont_Mark *copy_out_mark_stack(Scheme_Thread *p, 
 					     MZ_MARK_STACK_TYPE pos,
 					     Scheme_Cont *sub_cont,
-					     long *_offset,
+					     intptr_t *_offset,
 					     Scheme_Prompt *effective_prompt,
                                              int clear_caches)
 {
-  long cmcount, offset = 0, sub_count = 0;
+  intptr_t cmcount, offset = 0, sub_count = 0;
   Scheme_Cont_Mark *cont_mark_stack_copied;
 
   /* Copy cont mark stack: */
-  cmcount = (long)pos;
+  cmcount = (intptr_t)pos;
   offset = 0;
 
   if (sub_cont) {
@@ -4974,7 +5012,7 @@ static Scheme_Cont_Mark *copy_out_mark_stack(Scheme_Thread *p,
     while (cmcount--) {
       int cms = cmcount + offset;
       Scheme_Cont_Mark *seg = p->cont_mark_stack_segments[cms >> SCHEME_LOG_MARK_SEGMENT_SIZE];
-      long pos = cms & SCHEME_MARK_SEGMENT_MASK;
+      intptr_t pos = cms & SCHEME_MARK_SEGMENT_MASK;
       Scheme_Cont_Mark *cm = seg + pos;
       
       memcpy(cont_mark_stack_copied + cmcount, cm, sizeof(Scheme_Cont_Mark));
@@ -4990,7 +5028,7 @@ static Scheme_Cont_Mark *copy_out_mark_stack(Scheme_Thread *p,
 static void copy_in_runstack(Scheme_Thread *p, Scheme_Saved_Stack *isaved, int set_runstack)
 {
   Scheme_Saved_Stack *csaved;
-  long size;
+  intptr_t size;
 
   size = isaved->runstack_size;
   if (set_runstack) {
@@ -5014,23 +5052,23 @@ static void copy_in_runstack(Scheme_Thread *p, Scheme_Saved_Stack *isaved, int s
 
 static void copy_in_mark_stack(Scheme_Thread *p, Scheme_Cont_Mark *cont_mark_stack_copied,
 			       MZ_MARK_STACK_TYPE cms, MZ_MARK_STACK_TYPE base_cms,
-			       long copied_offset, Scheme_Object **_sub_conts,
+			       intptr_t copied_offset, Scheme_Object **_sub_conts,
                                int clear_caches)
      /* Copies in the mark stack up to depth cms, but assumes that the
 	stack up to depth base_cms is already in place (probably in
 	place for a dynamic-wind context in an continuation
 	restoration.) */
 {
-  long cmcount, base_cmcount, cmoffset;
+  intptr_t cmcount, base_cmcount, cmoffset;
   Scheme_Cont_Mark *cm_src;
   Scheme_Cont *sub_cont = NULL;
 
-  cmcount = (long)cms;
-  base_cmcount = (long)base_cms;
+  cmcount = (intptr_t)cms;
+  base_cmcount = (intptr_t)base_cms;
 
   if (cmcount) {
     /* First, make sure we have enough segments */
-    long needed = ((cmcount - 1) >> SCHEME_LOG_MARK_SEGMENT_SIZE) + 1;
+    intptr_t needed = ((cmcount - 1) >> SCHEME_LOG_MARK_SEGMENT_SIZE) + 1;
 
     if (needed > p->cont_mark_seg_count) {
       Scheme_Cont_Mark **segs, **old_segs = p->cont_mark_stack_segments;
@@ -5066,7 +5104,7 @@ static void copy_in_mark_stack(Scheme_Thread *p, Scheme_Cont_Mark *cont_mark_sta
 
   while (base_cmcount < cmcount) {
     Scheme_Cont_Mark *seg = p->cont_mark_stack_segments[base_cmcount >> SCHEME_LOG_MARK_SEGMENT_SIZE];
-    long pos = base_cmcount & SCHEME_MARK_SEGMENT_MASK;
+    intptr_t pos = base_cmcount & SCHEME_MARK_SEGMENT_MASK;
     GC_CAN_IGNORE Scheme_Cont_Mark *cm = seg + pos;
     
     cm_src = cont_mark_stack_copied;
@@ -5100,13 +5138,13 @@ static void copy_in_mark_stack(Scheme_Thread *p, Scheme_Cont_Mark *cont_mark_sta
 static MZ_MARK_STACK_TYPE find_shareable_marks()
 {
   Scheme_Thread *p = scheme_current_thread;
-  long cmcount, delta = 0;
+  intptr_t cmcount, delta = 0;
 
-  cmcount = (long)MZ_CONT_MARK_STACK;
+  cmcount = (intptr_t)MZ_CONT_MARK_STACK;
 
   while (cmcount--) {
     Scheme_Cont_Mark *seg = p->cont_mark_stack_segments[cmcount >> SCHEME_LOG_MARK_SEGMENT_SIZE];
-    long pos = cmcount & SCHEME_MARK_SEGMENT_MASK;
+    intptr_t pos = cmcount & SCHEME_MARK_SEGMENT_MASK;
 
     if (seg[pos].pos < MZ_CONT_MARK_POS)
       break;
@@ -5218,7 +5256,7 @@ static Scheme_Saved_Stack *clone_runstack_copied(Scheme_Saved_Stack *copied,
                                                  Scheme_Object **copied_start,
                                                  Scheme_Saved_Stack *saved, 
                                                  Scheme_Object **boundary_start,
-                                                 long boundary_offset)
+                                                 intptr_t boundary_offset)
 {
   Scheme_Saved_Stack *naya, *first = NULL, *prev = NULL, *s;
 
@@ -5248,7 +5286,7 @@ static Scheme_Saved_Stack *clone_runstack_copied(Scheme_Saved_Stack *copied,
     prev = naya;
     if ((!s && copied_start == boundary_start)
         || (s && (s->runstack_start == boundary_start))) {
-      long size;
+      intptr_t size;
       Scheme_Object **a;
       size = boundary_offset - naya->runstack_offset;
       if (size < 0)
@@ -5300,7 +5338,7 @@ static Scheme_Meta_Continuation *clone_meta_cont(Scheme_Meta_Continuation *mc,
     memcpy(naya, mc, sizeof(Scheme_Meta_Continuation));
     if (SAME_OBJ(mc, prompt_cont)) {
       /* Need only part of this meta-continuation's marks. */
-      long delta;
+      intptr_t delta;
       void *stack_boundary;
 
       delta = prompt->mark_boundary - naya->cont_mark_offset;
@@ -5439,7 +5477,7 @@ void prune_cont_marks(Scheme_Meta_Continuation *resume_mc, Scheme_Cont *cont, Sc
 {
   Scheme_Object *val;
   Scheme_Hash_Table *ht;
-  long pos, num_overlap, num_coverlap, new_overlap, base, i;
+  intptr_t pos, num_overlap, num_coverlap, new_overlap, base, i;
   Scheme_Cont_Mark *cp;
   
   for (pos = resume_mc->cont_mark_total, num_overlap = 0;
@@ -5552,9 +5590,11 @@ static MZ_MARK_STACK_TYPE exec_dyn_wind_pres(Scheme_Dynamic_Wind_List *dwl,
         if (!skip_dws)
           pre(dwl->dw->data);
 
-        if (scheme_continuation_application_count != old_cac) {
-          old_cac = scheme_continuation_application_count;
-          scheme_recheck_prompt_and_barrier(cont);
+        if (!cont->composable) {
+          if (scheme_continuation_application_count != old_cac) {
+            old_cac = scheme_continuation_application_count;
+            scheme_recheck_prompt_and_barrier(cont);
+          }
         }
       }
       p = scheme_current_thread;
@@ -5732,7 +5772,7 @@ static Scheme_Cont *grab_continuation(Scheme_Thread *p, int for_prompt, int comp
   {
     Scheme_Prompt *effective_prompt;
     Scheme_Cont_Mark *msaved;
-    long offset;
+    intptr_t offset;
     effective_prompt = (for_prompt ? p->meta_prompt : prompt);
     msaved = copy_out_mark_stack(p, cont->ss.cont_mark_stack, sub_cont, &offset, 
                                  effective_prompt,
@@ -5917,7 +5957,7 @@ static void restore_continuation(Scheme_Cont *cont, Scheme_Thread *p, int for_pr
      continuation, then we're sharing it's base runstack. */
   copy_in_runstack(p, cont->runstack_copied, 0);
   {
-    long done = cont->runstack_copied->runstack_size, size;
+    intptr_t done = cont->runstack_copied->runstack_size, size;
     sub_cont = cont;
     while (sub_cont) {
       if (sub_cont->buf.cont
@@ -6181,7 +6221,7 @@ internal_call_cc (int argc, Scheme_Object *argv[])
       && (sub_cont->prompt_tag == prompt_tag)
       && (sub_cont->barrier_prompt == effective_barrier_prompt)
       && (((Scheme_Escaping_Cont *)sub_cont->escape_cont)->myerr == p->error_buf)) {
-    /* Whether sub_cont turns out to be the same continuaiton, we can use
+    /* Whether sub_cont turns out to be the same continuation, we can use
        its escape continuation, because jumping to the escape continuation
        triggers the same C-level clean-up actions, same `dynamic-wind's, and
        crosses the same continuation barriers. */
@@ -6224,15 +6264,15 @@ internal_call_cc (int argc, Scheme_Object *argv[])
       cont = sub_cont;
     } else {
       /* Only continuation marks can be different. Mostly just re-use sub_cont. */
-      long offset;
+      intptr_t offset;
       Scheme_Cont_Mark *msaved;
 
       cont = MALLOC_ONE_TAGGED(Scheme_Cont);
       cont->so.type = scheme_cont_type;
       cont->buf.cont = sub_cont;
-      sub_cont = sub_cont->buf.cont;
-
       cont->escape_cont = sub_cont->escape_cont;
+
+      sub_cont = sub_cont->buf.cont;
 
       /* This mark stack won't be restored, but it may be
 	 used by `continuation-marks'. */
@@ -6276,23 +6316,25 @@ internal_call_cc (int argc, Scheme_Object *argv[])
          Must be inside overflow, or the ids wouldn't match. */
       stack_start = prompt->stack_boundary;
     } else {
-      Scheme_Prompt *meta_prompt;
+      Scheme_Prompt *meta_prompt, *stack_barrier_prompt;
 
-      if (!barrier_prompt->is_barrier)
-        barrier_prompt = NULL;
-      else if (barrier_prompt->boundary_overflow_id != overflow_id)
-        barrier_prompt = NULL;
+      stack_barrier_prompt = barrier_prompt;
+
+      if (!stack_barrier_prompt->is_barrier)
+        stack_barrier_prompt = NULL;
+      else if (stack_barrier_prompt->boundary_overflow_id != overflow_id)
+        stack_barrier_prompt = NULL;
       meta_prompt = p->meta_prompt;
       if (meta_prompt)
         if (meta_prompt->boundary_overflow_id != overflow_id)
           meta_prompt = NULL;
 
-      if (barrier_prompt && meta_prompt) {
-        barrier_prompt = NULL;
+      if (stack_barrier_prompt && meta_prompt) {
+        stack_barrier_prompt = NULL;
       }
 
-      if (barrier_prompt)
-        stack_start = barrier_prompt->stack_boundary;
+      if (stack_barrier_prompt)
+        stack_start = stack_barrier_prompt->stack_boundary;
       else if (meta_prompt)
         stack_start = meta_prompt->stack_boundary;
       else
@@ -6357,6 +6399,23 @@ internal_call_cc (int argc, Scheme_Object *argv[])
 
     /* We may have just re-activated breaking: */
     scheme_check_break_now();
+
+    if (!scheme_get_barrier_prompt(NULL, NULL)) {
+      /* The continuation was applied in a thread where the barrier prompt
+         was supposed to be the pseduo-prompt for a thread, but we've lost
+         that prompt. The barrier prompt from capturing the continuation
+         has the right info, but we need to claim that it's not a barrier
+         from the perspective of changing continuations. */
+      Scheme_Prompt *acting_barrier_prompt;
+      if (!barrier_prompt->is_barrier)
+        acting_barrier_prompt = barrier_prompt;
+      else {
+        acting_barrier_prompt = MALLOC_ONE_TAGGED(Scheme_Prompt);
+        memcpy(acting_barrier_prompt, barrier_prompt, sizeof(Scheme_Prompt));
+        acting_barrier_prompt->is_barrier = 0;
+      }
+      p->acting_barrier_prompt = acting_barrier_prompt;
+    }
     
     return result;
   } else if (composable || cont->escape_cont) {
@@ -6437,7 +6496,23 @@ call_with_continuation_barrier (int argc, Scheme_Object *argv[])
 Scheme_Prompt *scheme_get_barrier_prompt(Scheme_Meta_Continuation **_meta_cont,
                                          MZ_MARK_POS_TYPE *_pos)
 {
-  return (Scheme_Prompt *)scheme_extract_one_cc_mark_with_meta(NULL, barrier_prompt_key, NULL, _meta_cont, _pos);
+  Scheme_Prompt *p;
+  
+  p = (Scheme_Prompt *)scheme_extract_one_cc_mark_with_meta(NULL, barrier_prompt_key, NULL, _meta_cont, _pos);
+  if (!p) {
+    p = scheme_current_thread->acting_barrier_prompt;
+    if (_meta_cont) {
+      /* acting barrier prompt is deepest: */
+      Scheme_Meta_Continuation *mc = scheme_current_thread->meta_continuation;
+      while (mc && mc->next) {
+        mc = mc->next;
+      }
+      *_meta_cont = mc;
+      *_pos = -1;
+    }
+  }
+
+  return p;
 }
 
 Scheme_Prompt *scheme_get_prompt(Scheme_Object *prompt_tag,
@@ -6637,7 +6712,6 @@ Scheme_Object *scheme_finish_apply_for_prompt(Scheme_Prompt *prompt, Scheme_Obje
          val, then p->cjs.jumping_to_continuation is unset,
          so it's ok to communicate val via p->cjs.val. The
          target for this jump is in compose_continuation(). */
-      p->next_meta -= 1;
       if (val) {
         if (val == SCHEME_MULTIPLE_VALUES) {
           if (SAME_OBJ(p->ku.multiple.array, p->values_buffer))
@@ -7229,14 +7303,14 @@ Scheme_Object *scheme_compose_continuation(Scheme_Cont *cont, int num_rands, Sch
        meta-continuation when `cont' is applied. */
     Scheme_Thread *p = scheme_current_thread;
     Scheme_Object *cm_info;
-    long findpos, bottom, pos;
+    intptr_t findpos, bottom, pos;
     int count, mcount, i;
 
     p->meta_continuation = mc->next;
 
-    bottom = (long)p->cont_mark_stack_bottom;
+    bottom = (intptr_t)p->cont_mark_stack_bottom;
     count = 0;
-    for (findpos = (long)MZ_CONT_MARK_STACK - 1; findpos >= bottom; findpos--) {
+    for (findpos = (intptr_t)MZ_CONT_MARK_STACK - 1; findpos >= bottom; findpos--) {
       GC_CAN_IGNORE Scheme_Cont_Mark *seg;
 
       seg = p->cont_mark_stack_segments[findpos >> SCHEME_LOG_MARK_SEGMENT_SIZE];
@@ -7246,14 +7320,14 @@ Scheme_Object *scheme_compose_continuation(Scheme_Cont *cont, int num_rands, Sch
       count++;
     }
     mcount = 0;
-    for (findpos = (long)mc->cont_mark_total; findpos--; ) {
+    for (findpos = (intptr_t)mc->cont_mark_total; findpos--; ) {
       if (mc->cont_mark_stack_copied[findpos].pos != mc->cont_mark_pos)
         break;
       mcount++;
     }
 
     cm_info = scheme_make_vector((count + mcount) * 2, NULL);
-    for (findpos = (long)MZ_CONT_MARK_STACK - 1, i = 0; i < count; findpos--, i++) {
+    for (findpos = (intptr_t)MZ_CONT_MARK_STACK - 1, i = 0; i < count; findpos--, i++) {
       GC_CAN_IGNORE Scheme_Cont_Mark *seg;
 
       seg = p->cont_mark_stack_segments[findpos >> SCHEME_LOG_MARK_SEGMENT_SIZE];
@@ -7261,7 +7335,7 @@ Scheme_Object *scheme_compose_continuation(Scheme_Cont *cont, int num_rands, Sch
       SCHEME_VEC_ELS(cm_info)[2*i] = seg[pos].key;
       SCHEME_VEC_ELS(cm_info)[(2*i)+1] = seg[pos].val;
     }
-    for (findpos = (long)mc->cont_mark_total - 1, i = 0; i < mcount; findpos--, i++) {
+    for (findpos = (intptr_t)mc->cont_mark_total - 1, i = 0; i < mcount; findpos--, i++) {
       SCHEME_VEC_ELS(cm_info)[2*(count + i)] = mc->cont_mark_stack_copied[findpos].key;
       SCHEME_VEC_ELS(cm_info)[(2*(count + i))+1] = mc->cont_mark_stack_copied[findpos].val;
     }
@@ -7419,8 +7493,8 @@ static Scheme_Object *continuation_marks(Scheme_Thread *p,
   Scheme_Cont_Mark_Chain *first = NULL, *last = NULL;
   Scheme_Cont_Mark_Set *set;
   Scheme_Object *cache, *nt;
-  long findpos, bottom;
-  long cmpos, first_cmpos = 0, cdelta = 0;
+  intptr_t findpos, bottom;
+  intptr_t cmpos, first_cmpos = 0, cdelta = 0;
   int found_tag = 0, at_mc_boundary = 0;
 
   if (cont && SAME_OBJ(cont->prompt_tag, prompt_tag))
@@ -7430,27 +7504,27 @@ static Scheme_Object *continuation_marks(Scheme_Thread *p,
 
   do {
     if (econt) {
-      findpos = (long)((Scheme_Escaping_Cont *)econt)->envss.cont_mark_stack;
-      cmpos = (long)((Scheme_Escaping_Cont *)econt)->envss.cont_mark_pos;
+      findpos = (intptr_t)((Scheme_Escaping_Cont *)econt)->envss.cont_mark_stack;
+      cmpos = (intptr_t)((Scheme_Escaping_Cont *)econt)->envss.cont_mark_pos;
       if (mc) {
         cdelta = mc->cont_mark_offset;
         bottom = 0;
       } else
         bottom = p->cont_mark_stack_bottom;
     } else if (cont) {
-      findpos = (long)cont->ss.cont_mark_stack;
-      cmpos = (long)cont->ss.cont_mark_pos;
+      findpos = (intptr_t)cont->ss.cont_mark_stack;
+      cmpos = (intptr_t)cont->ss.cont_mark_pos;
       cdelta = cont->cont_mark_offset;
       bottom = 0;
     } else if (mc) {
-      findpos = (long)mc->cont_mark_stack;
-      cmpos = (long)mc->cont_mark_pos;
+      findpos = (intptr_t)mc->cont_mark_stack;
+      cmpos = (intptr_t)mc->cont_mark_pos;
       cdelta = mc->cont_mark_offset;
       bottom = 0;
       at_mc_boundary = 1;
     } else {
-      findpos = (long)MZ_CONT_MARK_STACK;
-      cmpos = (long)MZ_CONT_MARK_POS;
+      findpos = (intptr_t)MZ_CONT_MARK_STACK;
+      cmpos = (intptr_t)MZ_CONT_MARK_POS;
       if (!p->cont_mark_stack_segments)
         findpos = 0;
       bottom = p->cont_mark_stack_bottom;
@@ -7460,7 +7534,7 @@ static Scheme_Object *continuation_marks(Scheme_Thread *p,
 
     while (findpos-- > bottom) {
       Scheme_Cont_Mark *find;
-      long pos;
+      intptr_t pos;
 
       if (cont) {
         while (findpos < cdelta) {
@@ -7881,7 +7955,7 @@ extract_cc_markses(int argc, Scheme_Object *argv[])
   Scheme_Object *first = scheme_null, *last = NULL;
   Scheme_Object *pr, **keys, *vals, *none, *prompt_tag;
   int len, i;
-  long last_pos;
+  intptr_t last_pos;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_cont_mark_set_type)) {
     scheme_wrong_type("continuation-mark-set->list*", "continuation-mark-set", 0, argc, argv);
@@ -7926,8 +8000,8 @@ extract_cc_markses(int argc, Scheme_Object *argv[])
       if (SCHEME_MARK_CHAIN_FLAG(chain) & 0x1)
         last_pos = -1;
       if (SAME_OBJ(chain->key, keys[i])) {
-	long pos;
-	pos = (long)chain->pos;
+	intptr_t pos;
+	pos = (intptr_t)chain->pos;
 	if (pos != last_pos) {
 	  vals = scheme_make_vector(len, none);
 	  last_pos = pos;
@@ -8057,12 +8131,14 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
     while (chain) {
       if (chain->key == key)
 	return chain->val;
+      else if (SAME_OBJ(chain->key, prompt_tag))
+        break;
       else 
 	chain = chain->next;
     }
   } else {
-    long findpos, bottom, startpos;
-    long pos;
+    intptr_t findpos, bottom, startpos;
+    intptr_t pos;
     Scheme_Object *val = NULL;
     MZ_MARK_POS_TYPE vpos = 0;
     Scheme_Object *cache;
@@ -8075,7 +8151,7 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
         startpos = mc->cont_mark_total;
         bottom = 0;
       } else {
-        startpos = (long)MZ_CONT_MARK_STACK;
+        startpos = (intptr_t)MZ_CONT_MARK_STACK;
         if (!p->cont_mark_stack_segments)
           findpos = 0;
         bottom = p->cont_mark_stack_bottom;
@@ -8096,6 +8172,8 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
         if (SAME_OBJ(seg[pos].key, key)) {
           val = seg[pos].val;
           vpos = seg[pos].pos;
+          break;
+        } else if (SAME_OBJ(seg[pos].key, prompt_tag)) {
           break;
         } else {
           cache = seg[pos].cache;
@@ -8279,7 +8357,8 @@ extract_one_cc_mark(int argc, Scheme_Object *argv[])
     }
   } 
 
-  r = scheme_extract_one_cc_mark_to_tag(SCHEME_TRUEP(argv[0]) ? argv[0] : NULL, argv[1], prompt_tag);
+  r = scheme_extract_one_cc_mark_to_tag(SCHEME_TRUEP(argv[0]) ? argv[0] : NULL, argv[1], 
+                                        prompt_tag ? SCHEME_PTR_VAL(prompt_tag) : NULL);
   if (!r) {
     if (argc > 2)
       r = argv[2];
@@ -8402,7 +8481,7 @@ Scheme_Lightweight_Continuation *scheme_capture_lightweight_continuation(Scheme_
    allows it to work in a thread for runing futures (where allocation
    and GC in general ae disallowed). */
 {
-  long len, i, j, pos;
+  intptr_t len, i, j, pos;
   Scheme_Object **runstack_slice;
   Scheme_Cont_Mark *cont_mark_stack_slice;
   Scheme_Current_LWC *lwc;
@@ -8437,6 +8516,7 @@ Scheme_Lightweight_Continuation *scheme_capture_lightweight_continuation(Scheme_
 
   lw = (Scheme_Lightweight_Continuation *)storage[0];
   lw->stack_slice = stack;
+  lwc = lw->saved_lwc;
 
   len = lwc->runstack_start - lwc->runstack_end;
   runstack_slice = MALLOC_N(Scheme_Object*, len);
@@ -8451,11 +8531,12 @@ Scheme_Lightweight_Continuation *scheme_capture_lightweight_continuation(Scheme_
      was handy; zero out such slots to avoid retaining a runstack
      unnecessarily: */
   for (i = 0; i < len; i++) {
-    if (((unsigned long)runstack_slice[i] >= (unsigned long)lwc->runstack_end)
-        && ((unsigned long)runstack_slice[i] <= (unsigned long)lwc->runstack_start))
+    if (((uintptr_t)runstack_slice[i] >= (uintptr_t)lwc->runstack_end)
+        && ((uintptr_t)runstack_slice[i] <= (uintptr_t)lwc->runstack_start))
       runstack_slice[i] = 0;
   }
 
+  lwc = lw->saved_lwc;
   len = lwc->cont_mark_stack_end - lwc->cont_mark_stack_start;
 
   if (len) {
@@ -8508,8 +8589,8 @@ int scheme_can_apply_lightweight_continuation(Scheme_Lightweight_Continuation *l
 {
 #ifdef DO_STACK_CHECK
   /* enough room on C stack? */
-  unsigned long size;
-  size = (unsigned long)lw->saved_lwc->stack_start - (unsigned long)lw->saved_lwc->stack_end;
+  uintptr_t size;
+  size = (uintptr_t)lw->saved_lwc->stack_start - (uintptr_t)lw->saved_lwc->stack_end;
   
   {
 # define SCHEME_PLUS_STACK_DELTA(x) ((x) - size)
@@ -8528,7 +8609,7 @@ int scheme_can_apply_lightweight_continuation(Scheme_Lightweight_Continuation *l
 Scheme_Object *scheme_apply_lightweight_continuation(Scheme_Lightweight_Continuation *lw,
                                                      Scheme_Object *result) XFORM_SKIP_PROC
 {
-  long len, cm_len, cm_pos_delta, cm_delta, i, cm;
+  intptr_t len, cm_len, cm_pos_delta, cm_delta, i, cm;
   Scheme_Cont_Mark *seg;
   Scheme_Object **rs;
  
@@ -8560,7 +8641,7 @@ Scheme_Object *scheme_apply_lightweight_continuation(Scheme_Lightweight_Continua
     MZ_CONT_MARK_POS = lw->saved_lwc->cont_mark_pos_end + cm_pos_delta;
   }
 
-  cm_delta = (long)MZ_CONT_MARK_STACK - (long)lw->saved_lwc->cont_mark_stack_end;
+  cm_delta = (intptr_t)MZ_CONT_MARK_STACK - (intptr_t)lw->saved_lwc->cont_mark_stack_end;
 
   rs = MZ_RUNSTACK - len;
   MZ_RUNSTACK = rs;
@@ -8584,7 +8665,7 @@ int scheme_push_marks_from_lightweight_continuation(Scheme_Lightweight_Continuat
                                                     Scheme_Cont_Frame_Data *d)
 {
   Scheme_Thread *p;
-  long pos, len, delta;
+  intptr_t pos, len, delta;
   Scheme_Cont_Mark *seg;
 
   len = (lw->saved_lwc->cont_mark_stack_end
@@ -8614,7 +8695,7 @@ int scheme_push_marks_from_lightweight_continuation(Scheme_Lightweight_Continuat
 int scheme_push_marks_from_thread(Scheme_Thread *p2, Scheme_Cont_Frame_Data *d)
 {
   Scheme_Thread *p;
-  long i, pos, delta;
+  intptr_t i, pos, delta;
   Scheme_Cont_Mark *seg;
 
   if (p2->cont_mark_stack) {
@@ -8962,7 +9043,7 @@ void scheme_apply_dw_in_meta(Scheme_Dynamic_Wind *dw, int post_part, int meta_de
   */
   Scheme_Thread *p = scheme_current_thread;
   Scheme_Meta_Continuation *mc, *old_mc, *rest;
-  long delta;
+  intptr_t delta;
   int i, actual_depth;
   int old_cac;
 
@@ -8984,7 +9065,7 @@ void scheme_apply_dw_in_meta(Scheme_Dynamic_Wind *dw, int post_part, int meta_de
   rest = mc;
   for (i = 0; i < actual_depth - 1; i++) {
     rest->cont_mark_total = 0;
-    rest->cont_mark_offset = 0;
+    rest->cont_mark_offset = rest->cont_mark_stack;
     rest->cont_mark_stack_copied = NULL;
     sync_meta_cont(rest);
     rest = rest->next;
@@ -9018,7 +9099,7 @@ void scheme_apply_dw_in_meta(Scheme_Dynamic_Wind *dw, int post_part, int meta_de
 
   p = scheme_current_thread;
 
-  if (recheck) {
+  if (recheck && !recheck->composable) {
     if (scheme_continuation_application_count != old_cac) {
       scheme_recheck_prompt_and_barrier(recheck);
     }
@@ -9062,7 +9143,7 @@ static Scheme_Object *jump_to_alt_continuation()
 #define CLOCKS_PER_SEC 1000000
 #endif
 
-long scheme_get_milliseconds(void)
+intptr_t scheme_get_milliseconds(void)
   XFORM_SKIP_PROC
 /* this function can be called from any OS thread */
 {
@@ -9072,7 +9153,7 @@ long scheme_get_milliseconds(void)
 # ifdef USE_FTIME
   struct MSC_IZE(timeb) now;
   MSC_IZE(ftime)(&now);
-  return (long)(now.time * 1000 + now.millitm);
+  return (intptr_t)(now.time * 1000 + now.millitm);
 # else
 #  ifdef PALMOS_STUFF
   /* FIXME */
@@ -9117,7 +9198,7 @@ double scheme_get_inexact_milliseconds(void)
 #endif
 }
 
-long scheme_get_process_milliseconds(void)
+intptr_t scheme_get_process_milliseconds(void)
   XFORM_SKIP_PROC
 {
 #ifdef USER_TIME_IS_CLOCK
@@ -9125,7 +9206,7 @@ long scheme_get_process_milliseconds(void)
 #else
 # ifdef USE_GETRUSAGE
   struct rusage use;
-  long s, u;
+  intptr_t s, u;
 
   do {
     if (!getrusage(RUSAGE_SELF, &use))
@@ -9141,7 +9222,7 @@ long scheme_get_process_milliseconds(void)
   {
     UnsignedWide time;
     Microseconds(&time);
-    return ((unsigned long)time.lo) / 1000;
+    return ((uintptr_t)time.lo) / 1000;
   }
 #  else
 #   ifdef WINDOWS_GET_PROCESS_TIMES
@@ -9151,7 +9232,7 @@ long scheme_get_process_milliseconds(void)
       mzlonglong v;
       v = ((((mzlonglong)kr.dwHighDateTime << 32) + kr.dwLowDateTime)
 	   + (((mzlonglong)us.dwHighDateTime << 32) + us.dwLowDateTime));
-      return (unsigned long)(v / 10000);
+      return (uintptr_t)(v / 10000);
     }
   }
 #   endif
@@ -9162,13 +9243,13 @@ long scheme_get_process_milliseconds(void)
 #endif
 }
 
-long scheme_get_thread_milliseconds(Scheme_Object *thrd)
+intptr_t scheme_get_thread_milliseconds(Scheme_Object *thrd)
   XFORM_SKIP_PROC
 {
   Scheme_Thread *t = thrd ? (Scheme_Thread *)thrd : scheme_current_thread;
 
   if (t == scheme_current_thread) {
-    long cpm;
+    intptr_t cpm;
     cpm = scheme_get_process_milliseconds();
     return t->accum_process_msec + (cpm - t->current_start_process_msec);
   } else {
@@ -9176,7 +9257,7 @@ long scheme_get_thread_milliseconds(Scheme_Object *thrd)
   }
 }
 
-long scheme_get_seconds(void)
+intptr_t scheme_get_seconds(void)
 {
 #ifdef USE_MACTIME
   unsigned long secs;
@@ -9189,7 +9270,7 @@ long scheme_get_seconds(void)
 #  ifdef USE_FTIME
   struct MSC_IZE(timeb) now;
   MSC_IZE(ftime)(&now);
-  return (long)now.time;
+  return (intptr_t)now.time;
 #  else
 #   ifdef USE_PLAIN_TIME
   time_t now;
@@ -9393,10 +9474,10 @@ static Scheme_Object *seconds_to_date(int argc, Scheme_Object **argv)
 
 static Scheme_Object *time_apply(int argc, Scheme_Object *argv[])
 {
-  long start, end;
-  long cpustart, cpuend;
-  long gcstart, gcend;
-  long dur, cpudur, gcdur;
+  intptr_t start, end;
+  intptr_t cpustart, cpuend;
+  intptr_t gcstart, gcend;
+  intptr_t dur, cpudur, gcdur;
   int i, num_rands;
   Scheme_Object *v, *p[4], **rand_vec, *rands, *r;
 
@@ -9416,7 +9497,7 @@ static Scheme_Object *time_apply(int argc, Scheme_Object *argv[])
 
   if (SCHEME_FALSEP(get_or_check_arity(argv[0], num_rands, NULL))) {
     char *s;
-    long aelen;
+    intptr_t aelen;
 
     s = scheme_make_arity_expect_string(argv[0], num_rands, NULL, &aelen);
 
@@ -9489,7 +9570,7 @@ static Scheme_Object *current_gc_milliseconds(int argc, Scheme_Object **argv)
 
 static Scheme_Object *current_seconds(int argc, Scheme_Object **argv)
 {
-  long secs;
+  intptr_t secs;
   secs = scheme_get_seconds();
   return scheme_make_integer_value_from_time(secs);
 }
@@ -9528,6 +9609,15 @@ current_read(int argc, Scheme_Object **argv)
 			     2, NULL, NULL, 0);
 }
 
+static Scheme_Object *
+current_get_read_input_port(int argc, Scheme_Object **argv)
+{
+  return scheme_param_config("current-get-interaction-input-port",
+			     scheme_make_integer(MZCONFIG_READ_INPUT_PORT_HANDLER),
+			     argc, argv,
+			     0, NULL, NULL, 0);
+}
+
 Scheme_Object *
 scheme_default_print_handler(int argc, Scheme_Object *argv[])
 {
@@ -9551,21 +9641,36 @@ scheme_default_print_handler(int argc, Scheme_Object *argv[])
 }
 
 Scheme_Object *
+scheme_default_read_input_port_handler(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *inport;
+  
+  inport = scheme_get_param(scheme_current_config(), MZCONFIG_INPUT_PORT);
+
+  if (inport == scheme_orig_stdin_port)
+    scheme_flush_orig_outputs();
+
+  return inport;
+}
+
+Scheme_Object *
 scheme_default_prompt_read_handler(int argc, Scheme_Object *argv[])
 {
   Scheme_Config *config;
-  Scheme_Object *port, *reader;
+  Scheme_Object *port, *reader, *getter;
   Scheme_Object *inport, *name, *a[2];
 
   config = scheme_current_config();
   port = scheme_get_param(config, MZCONFIG_OUTPUT_PORT);
-  inport = scheme_get_param(config, MZCONFIG_INPUT_PORT);
 
   scheme_write_byte_string("> ", 2, port);
   scheme_flush_output(port);
 
-  if (inport == scheme_orig_stdin_port)
-    scheme_flush_orig_outputs();
+  getter = scheme_get_param(config, MZCONFIG_READ_INPUT_PORT_HANDLER);
+  inport = _scheme_apply(getter, 0, NULL);
+
+  if (!SCHEME_INPORTP(inport))
+    scheme_wrong_type("default-prompt-read-hander", "input port", -1, -1, &inport);
 
   name = (Scheme_Object *)scheme_port_record(inport);
   name = ((Scheme_Input_Port *)name)->name;

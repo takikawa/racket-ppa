@@ -20,7 +20,11 @@
     (send-generic mdc (make-generic (object-interface mdc) m) . args)
     (error 'bad-dc "~a shouldn't succeed" `(send <bad-dc> ,m ...))))
 
-(define (test-all mdc try)
+(define (good m . args)
+  (send-generic mdc (make-generic (object-interface mdc) m) . args))
+
+(define (test-all mdc try try-ok)
+  (try 'erase)
   (try 'clear)
   (try 'draw-arc 0 0 10 10 0.1 0.2)
   (try 'draw-bitmap bm2 0 0)
@@ -40,35 +44,49 @@
   (try 'end-page)
   (try 'end-doc)
 
-  (try 'get-background)
-  (try 'get-brush)
-  (try 'get-clipping-region)
-  (try 'get-font)
-  (try 'get-pen)
   (try 'get-size)
-  (try 'get-text-background)
-  (try 'get-text-foreground)
-  (try 'get-text-mode)
 
-  (try 'set-background (make-object color% "Yellow"))
-  (try 'set-brush (make-object brush% "Yellow" 'solid))
-  (try 'set-clipping-rect 0 0 10 10)
-  (try 'set-clipping-region (make-object region% mdc))
-  (try 'set-font (make-object font% 12 'default 'normal 'normal))
-  (try 'set-origin 0 0)
-  (try 'set-pen (make-object pen% "Yellow" 1 'solid))
-  (try 'set-scale 2 2)
-  (try 'set-text-background (make-object color% "Yellow"))
-  (try 'set-text-foreground (make-object color% "Yellow"))
-  (try 'set-text-mode 'transparent)
+  (try-ok 'get-background)
+  (try-ok 'get-brush)
+  (try-ok 'get-clipping-region)
+  (try-ok 'get-font)
+  (try-ok 'get-pen)
+  (try-ok 'get-text-background)
+  (try-ok 'get-text-foreground)
+  (try-ok 'get-text-mode)
+  (try-ok 'get-alpha)
+  (try-ok 'get-scale)
+  (try-ok 'get-origin)
+  (try-ok 'get-rotation)
+
+  (try-ok 'set-background (make-object color% "Yellow"))
+  (try-ok 'set-brush (make-object brush% "Yellow" 'solid))
+  (try-ok 'set-clipping-rect 0 0 10 10)
+  (try-ok 'set-clipping-region (make-object region% mdc))
+  (try-ok 'set-font (make-object font% 12 'default 'normal 'normal))
+  (try-ok 'set-origin 0 0)
+  (try-ok 'set-pen (make-object pen% "Yellow" 1 'solid))
+  (try-ok 'set-scale 2 2)
+  (try-ok 'set-alpha 0.75)
+  (try-ok 'set-text-background (make-object color% "Yellow"))
+  (try-ok 'set-text-foreground (make-object color% "Yellow"))
+  (try-ok 'set-text-mode 'transparent)
+
+  (try-ok 'get-char-height)
+  (try-ok 'get-char-width)
+
   (try 'try-color (make-object color% "Yellow") (make-object color%)))
 
 (st #f mdc ok?)
-(test-all mdc bad)
+(test-all mdc bad good)
 
 (send mdc set-bitmap bm)
-(test-all mdc (lambda (m . args)
-		(send-generic mdc (make-generic (object-interface mdc) m) . args)))
+
+(test-all mdc 
+          (lambda (m . args)
+            (send-generic mdc (make-generic (object-interface mdc) m) . args))
+          (lambda (m . args)
+            (send-generic mdc (make-generic (object-interface mdc) m) . args)))
 
 (send mdc set-bitmap #f)
 
@@ -178,6 +196,134 @@
           #"\377\0\0\0\377\0\0\0\377\377\377\377\377\377\377\377\377\0\0\0\377\0\0\0\377\0\0\0"
           #"\377\377\377\377\377\377\377\377\377\0\0\0\377\0\0\0\377\0\0\0")))
   (test #t 'same-bits (equal? bs bs2)))
+
+;; ----------------------------------------
+;; Test draw-bitmap-section-smooth
+
+(let* ([bm (make-bitmap 100 100)]
+       [dc (make-object bitmap-dc% bm)]
+       [bm2 (make-bitmap 70 70)]
+       [dc2 (make-object bitmap-dc% bm2)]
+       [bm3 (make-bitmap 70 70)]
+       [dc3 (make-object bitmap-dc% bm3)])
+  (send dc draw-ellipse 0 0 100 100)
+  (send dc2 draw-bitmap-section-smooth bm 
+        10 10 50 50
+        0 0 100 100)
+  (send dc3 scale 0.5 0.5)
+  (send dc3 draw-bitmap bm 20 20)
+  (let ([s2 (make-bytes (* 4 70 70))]
+        [s3 (make-bytes (* 4 70 70))])
+    (send bm2 get-argb-pixels 0 0 70 70 s2)
+    (send bm3 get-argb-pixels 0 0 70 70 s3)
+    (test #t 'same-scaled (equal? s2 s3))))
+
+;; ----------------------------------------
+;; Test some masking combinations
+
+(let ()
+  (define u (make-object bitmap% 2 2))
+  (define mu (make-object bitmap% 2 2))
+  (send u set-argb-pixels 0 0 2 2
+        (bytes 255 100 0 0
+               255 0 0 0
+               255 100 0 0
+               255 255 255 255))
+  (send mu set-argb-pixels 0 0 2 2
+        (bytes 255 0 0 0
+               255 255 255 255
+               255 0 0 0
+               255 255 255 255))
+  (send u set-loaded-mask mu)
+  (define (try-draw nonce-color mode expect 
+                    #:bottom? [bottom? #f])
+    (let* ((b&w? (not (eq? mode 'color)))
+           (bm (make-object bitmap% 2 2 b&w?))
+           (dc (make-object bitmap-dc% bm)))
+      (send dc clear)
+      (when (eq? mode 'black)
+        (send dc set-brush "black" 'solid)
+        (send dc draw-rectangle 0 0 2 2))
+      ;; Check that draw-bitmap-section really uses the
+      ;; section, even in combination with a mask.
+      (send dc draw-bitmap-section u 
+            0 (if bottom? 1 0)
+            0 (if bottom? 1 0) 2 1
+            'solid nonce-color (send u get-loaded-mask))
+      (send dc set-bitmap #f)
+      (let ([s (make-bytes (* 2 2 4))])
+        (send bm get-argb-pixels 0 0 2 2 s)
+        (when b&w? (send bm get-argb-pixels 0 0 2 2 s #t))
+        (test expect 'masked-draw s))))
+  (define usual-expect (bytes 255 100 0 0
+                              255 255 255 255
+                              255 255 255 255
+                              255 255 255 255))
+  (try-draw (make-object color% "green") 'color usual-expect)
+  (try-draw (make-object color%) 'color usual-expect)
+  (try-draw (make-object color%) 'white
+            ;; For b&w destination, check that the
+            ;;  alpha is consistent with the drawn pixels
+            (bytes 255 0 0 0
+                   0 255 255 255
+                   0 255 255 255
+                   0 255 255 255))
+  (send mu set-argb-pixels 0 0 2 2
+        (bytes 255 255 255 255
+               255 255 255 255
+               255 0 0 0
+               255 0 0 0))
+  (try-draw (make-object color%) 'black
+            #:bottom? #t
+            ;; Another b&w destination test, this time
+            ;; with a mask that forces black pixels to
+            ;; white:
+            (bytes 255 0 0 0
+                   255 0 0 0
+                   255 0 0 0
+                   0 255 255 255))
+  (send mu set-argb-pixels 0 0 2 2
+        (bytes 255 255 255 255
+               255 0 0 0
+               255 255 255 255
+               255 0 0 0))
+  (try-draw (make-object color%) 'color
+            (bytes 255 255 255 255
+                   255 0 0 0
+                   255 255 255 255
+                   255 255 255 255))
+  (let ([dc (make-object bitmap-dc% mu)])
+    (send dc erase)
+    (send dc set-pen "white" 1 'transparent)
+    (send dc set-brush "black" 'solid)
+    (send dc draw-rectangle 0 0 1 1)
+    (send dc set-bitmap #f))
+  (try-draw (make-object color%) 'color usual-expect))
+
+;; ----------------------------------------
+;; 0 alpha should make the RGB components irrelevant
+
+(let ()
+  (define bm1 (make-bitmap 1 2))
+  (define bm2 (make-bitmap 1 2))
+
+  (send bm1 set-argb-pixels 0 0 1 2 (bytes 0   0 0 0
+                                           255 0 0 255))
+  (send bm2 set-argb-pixels 0 0 1 2 (bytes 255 255 0 0
+                                           0   0   0 0))
+
+  (define the-bytes (make-bytes 8 0))
+
+  (define bm3 (make-bitmap 1 2))
+  (define bdc (make-object bitmap-dc% bm3))
+  (void (send bdc draw-bitmap bm1 0 0))
+  (void (send bdc draw-bitmap bm2 0 0))
+
+  (send bdc get-argb-pixels 0 0 1 2 the-bytes)
+  (test (bytes 255 255 0 0
+               255 0   0 255)
+        values
+        the-bytes))
 
 ;; ----------------------------------------
 

@@ -24,8 +24,9 @@
          setup/plt-single-installer 
          setup/getinfo
          setup/unpack
-         
-         (for-syntax racket/base)
+
+         unstable/syntax
+         (for-syntax racket/base syntax/parse)
          (prefix-in srfi1: srfi/1)
          )
 
@@ -61,17 +62,17 @@
             (list/c #t path? natural-number/c natural-number/c)
             (list/c #f string?)))]
  [download/install-pkg
-  (-> string? string? natural-number/c any/c (or/c pkg? #f))]
+  (-> string? (and/c string? #rx"[.]plt") natural-number/c any/c (or/c pkg? #f))]
  [install-pkg
   (-> pkg-spec? path-string? natural-number/c any/c (or/c pkg? #f))]
  [add-hard-link 
-  (-> string? string? natural-number/c natural-number/c path? void?)]
+  (-> string? (and/c string? #rx"[.]plt") natural-number/c natural-number/c path? void?)]
  [remove-hard-link 
-  (-> string? string? natural-number/c natural-number/c void?)]
+  (-> string? (and/c string? #rx"[.]plt") natural-number/c natural-number/c void?)]
  [remove-pkg
-  (-> string? string? natural-number/c natural-number/c void?)]
+  (-> string? (and/c string? #rx"[.]plt") natural-number/c natural-number/c void?)]
  [erase-pkg
-  (-> string? string? natural-number/c natural-number/c void?)])
+  (-> string? (and/c string? #rx"[.]plt") natural-number/c natural-number/c void?)])
 
 
 ;; get-package-spec : string string [nat | #f] [min-ver-spec | #f] -> pkg?
@@ -784,13 +785,16 @@
          this-package-version-owner
          this-package-version-maj
          this-package-version-min
+         this-package-version-symbol
+         package-version->symbol
+         make-planet-symbol
          (rename-out [this-package-version/proc path->package-version]))
 
 (define-syntax (this-package-version stx)
   (syntax-case stx ()
     [(_)
-     #`(this-package-version/proc 
-        #,(datum->syntax stx `(,#'this-expression-source-directory)))]))
+     #`(this-package-version/proc
+         (this-expression-source-directory #,stx))]))
 
 (define-syntax define-getters
   (syntax-rules ()
@@ -809,7 +813,34 @@
   (this-package-version-maj pd->maj)
   (this-package-version-min pd->min))
 
+(define-syntax (this-package-version-symbol stx)
+  (syntax-parse stx
+    [(_ (~optional suffix:id))
+     #`(package-version->symbol
+         (this-package-version/proc
+           (this-expression-source-directory #,stx))
+         #,@(if (attribute suffix) #'['suffix] #'[]))]))
+
 ;; ----------------------------------------
+
+(define (make-planet-symbol stx [suffix #f])
+  (match (syntax-source-directory stx)
+    [#f #f]
+    [dir (match (this-package-version/proc dir)
+           [#f #f]
+           [ver (package-version->symbol ver suffix)])]))
+
+(define (package-version->symbol ver [suffix #f])
+  (match ver
+    [(list owner name major minor)
+     (string->symbol
+       (format "~a/~a:~a:~a~a"
+         owner
+         (regexp-replace #rx"\\.plt$" name "")
+         major
+         minor
+         (if suffix (format-symbol "/~a" suffix) "")))]
+    [#f #f]))
 
 (define (this-package-version/proc srcdir)
   (let* ([package-roots (get-all-planet-packages)]

@@ -51,16 +51,19 @@ complicated.
          [ess (map normalize-expectstack ess)]
          [ess (remove-duplicates ess)]
          [ess (simplify-common-expectstacks ess)])
-    (map report/expectstack ess)))
+    (let-values ([(stx index) (ps->stx+index (failure-progress (car fs)))])
+      (for/list ([es (in-list ess)])
+        (report/expectstack es stx index)))))
 
-;; report/expectstack : ExpectStack -> Report
-(define (report/expectstack es)
-  (let ([top-frame (and (pair? es) (car es))])
-    (cond [(not top-frame)
+;; report/expectstack : ExpectStack syntax nat -> Report
+(define (report/expectstack es stx index)
+  (let ([frame-expect (and (pair? es) (car es))])
+    (cond [(not frame-expect)
            (report "bad syntax" #f)]
           [else
-           (let ([frame-expect (and top-frame (car top-frame))]
-                 [frame-stx (and top-frame (cdr top-frame))])
+           (let ([frame-stx
+                  (let-values ([(x cx) (stx-list-drop/cx stx stx index)])
+                    (datum->syntax cx x cx))])
              (cond [(equal? frame-expect (expect:atom '()))
                     (syntax-case frame-stx ()
                       [(one . more)
@@ -72,7 +75,7 @@ complicated.
                    [else
                     (report/expects (list frame-expect) frame-stx)]))])))
 
-;; report/expects : (listof Expect) -> Report
+;; report/expects : (listof Expect) syntax -> Report
 (define (report/expects expects frame-stx)
   (report (join-sep (for/list ([expect expects])
                       (prose-for-expect expect))

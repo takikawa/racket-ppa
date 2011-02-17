@@ -1,6 +1,9 @@
 #lang racket/base
+
 (require '#%flfxnum 
-         "private/vector-wraps.rkt")
+         "private/vector-wraps.rkt"
+         "unsafe/ops.rkt"
+         (for-syntax racket/base))
 
 (provide fl+ fl- fl* fl/
          flabs flsqrt flexp fllog
@@ -17,6 +20,7 @@
 
 (define-vector-wraps "flvector"
   flvector? flvector-length flvector-ref flvector-set! make-flvector
+  unsafe-flvector-ref unsafe-flvector-set! unsafe-flvector-length
   in-flvector*
   in-flvector
   for/flvector

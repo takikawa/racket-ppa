@@ -116,6 +116,8 @@ Aliases for basic integer types. The @scheme[_byte] aliases correspond
 to @scheme[_int8]. The @scheme[_short] and @scheme[_word] aliases
 correspond to @scheme[_int16]. The @scheme[_int] aliases correspond to
 @scheme[_int32]. The @scheme[_long] aliases correspond to either
+@scheme[_int32] or @scheme[_int64], depending on the platform. Similarly,
+the @scheme[_intptr] aliases correspond to either
 @scheme[_int32] or @scheme[_int64], depending on the platform.}
 
 @defthing*[([_fixnum ctype?]
@@ -123,14 +125,16 @@ correspond to @scheme[_int16]. The @scheme[_int] aliases correspond to
 
 For cases where speed matters and where you know that the integer is
 small enough, the types @scheme[_fixnum] and @scheme[_ufixnum] are
-similar to @scheme[_long] and @scheme[_ulong] but assume that the
+similar to @scheme[_intptr] and @scheme[_uintptr] but assume that the
 quantities fit in Racket's immediate integers (i.e., not bignums).}
 
 @defthing*[([_fixint ctype?]
             [_ufixint ctype?])]{
 
-Like @scheme[_fixnum] and @scheme[_ufixnum], but coercions from C are
-checked to be in range.}
+Similar to @scheme[_fixnum]/@scheme[_ufixnum], but based on
+@racket[_int]/@racket[_uint] instead of
+@racket[_intptr]/@racket[_uintptr], and coercions from C are checked
+to be in range.}
 
 @defthing*[([_float ctype?]
             [_double ctype?]
@@ -284,7 +288,11 @@ The address referenced by a @scheme[_pointer] value must not refer to
 memory managed by the garbage collector (unless the address
 corresponds to a value that supports interior pointers and that is
 otherwise referenced to preserve the value from garbage collection).
-The reference is not traced or updated by the garbage collector.}
+The reference is not traced or updated by the garbage collector.
+
+The @racket[equal?] predicate equates C pointers (including pointers
+for @racket[_gcpointer] and possibly containing an offset) when they
+refer to the same address.}
 
 
 @defthing[_gcpointer ctype?]{
@@ -378,11 +386,11 @@ used.  There are no restrictions on the Racket procedure; in
 particular, its lexical context is properly preserved.
 
 The optional @scheme[abi] keyword argument determines the foreign ABI
-that is used.  @scheme[#f] or @scheme['default] will use a
-platform-dependent default; other possible values are
-@scheme['stdcall] and @scheme['sysv] (the latter corresponds to
-``cdecl'').  This is especially important on Windows, where most
-system functions are @scheme['stdcall], which is not the default.
+that is used. Supplying @scheme[#f] or @scheme['default] indicates the
+platform-dependent default. The other possible
+values---@scheme['stdcall]and @scheme['sysv] (i.e., ``cdecl'')---are
+currently supported only for 32-bit Windows; using them on other
+platforms raises an exception.
 
 If @scheme[atomic?] is true, then when a Racket procedure is given
 this procedure type and called from foreign code, then the Racket
@@ -401,19 +409,22 @@ procedure with the generated procedure type can be applied in a
 foreign thread (i.e., an OS-level thread other than the one used to
 run Racket). The call in the foreign thread is transferred to the
 OS-level thread that runs Racket, but the Racket-level thread (in the
-sense of @racket[thread]) is unspecified; the job of
-@scheme[async-apply] is to arrange for the callback procedure to be
-run in a suitable Racket thread. The @scheme[async-apply] function is
+sense of @racket[thread]) is unspecified; the job of the provided
+@scheme[async-apply] procedure is to arrange for the callback procedure to be
+run in a suitable Racket thread. The given @scheme[async-apply] procedure is
 applied to a thunk that encapsulates the specific callback invocation,
 and the foreign OS-level thread blocks until the thunk is called and
 completes; the thunk must be called exactly once, and the callback
-invocation must return normally. The @scheme[async-apply] procedure
+invocation must return normally. The given @scheme[async-apply] procedure
 itself is called in atomic mode (see @scheme[atomic?] above). If the
 callback is known to complete quickly, requires no synchronization,
 and works independent of the Racket thread in which it runs, then
-@scheme[async-apply] can apply the thunk directly. Otherwise,
-@racket[async-apply] must arrange for the thunk to be applied in a
-suitable Racket thread sometime after @racket[async-apply] itself
+it is safe for the given 
+@scheme[async-apply] procedure to apply the thunk directly. Otherwise,
+the given @racket[async-apply] procedure
+must arrange for the thunk to be applied in a
+suitable Racket thread sometime after the given
+@racket[async-apply] procedure itself
 returns; if the thunk raises an exception or synchronizes within an
 unsuitable Racket-level thread, it can deadlock or otherwise damage
 the Racket process. Foreign-thread detection to trigger
@@ -814,7 +825,9 @@ The resulting bindings are as follows:
   an argument for each type.}
 
  @item{@schemevarfont{id}@schemeidfont{-}@scheme[field-id] : an accessor
-  function for each @scheme[field-id].}
+  function for each @scheme[field-id]; if the field has a cstruct type, then
+  the result of the accessor is a pointer to the field within the
+  enclosing structure, rather than a  copy of the field.}
 
  @item{@schemeidfont{set-}@schemevarfont{id}@schemeidfont{-}@scheme[field-id]@schemeidfont{!}
   : a mutator function for each @scheme[field-id].}
@@ -860,12 +873,11 @@ addition for the new fields.  This adjustment of the constructor is,
 again, in analogy to using a supertype with @scheme[define-struct].
 
 Note that structs are allocated as atomic blocks, which means that the
-garbage collector ignores their content.  Currently, there is no safe
-way to store pointers to GC-managed objects in structs (even if you
-keep a reference to avoid collecting the referenced objects, a the 3m
-variant's GC will invalidate the pointer's value).  Thus, only
-non-pointer values and pointers to memory that is outside the GC's
-control can be placed into struct fields.
+garbage collector ignores their content.  Thus, struct fields can hold
+only non-pointer values, pointers to memory outside the GC's control,
+and otherwise-reachable pointers to immobile GC-managed values (such
+as those allocated with @racket[malloc] and @racket['internal] or
+@racket['internal-atomic]).
 
 As an example, consider the following C code:
 
@@ -988,7 +1000,9 @@ Although the constructors below are describes as procedures, they are
 implemented as syntax, so that error messages can report a type name
 where the syntactic context implies one.
 
-@defproc[(_enum [symbols list?] [basetype ctype? _ufixint])
+@defproc[(_enum [symbols list?]
+                [basetype ctype? _ufixint]
+                [#:unknown unknown any/c (lambda (x) (error ....))])
          ctype?]{
 
 Takes a list of symbols and generates an enumeration type.  The
@@ -1001,7 +1015,12 @@ example, the list @scheme['(x y = 10 z)] maps @scheme['x] to
 @scheme[0], @scheme['y] to @scheme[10], and @scheme['z] to
 @scheme[11].
 
-The @scheme[basetype] argument specifies the base type to use.}
+The @scheme[basetype] argument specifies the base type to use.
+
+The @scheme[unknown] argument specifies the result of converting an
+unknown integer from the foreign side: it can be a one-argument function
+to be applied on the integer, or a value to return instead.  The default
+is to throw an exception.}
 
 @defproc[(_bitmask [symbols (or symbol? list?)] [basetype ctype? _uint])
          ctype?]{

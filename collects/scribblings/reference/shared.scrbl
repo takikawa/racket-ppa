@@ -60,16 +60,21 @@ production take precedence over later variants:
 [plain-expr expr]
 ]
 
-The @|maker| identifier above references to any binding whose name has
-@schemeidfont{make-} in the middle, and where @|typedef| has a
-@tech{transformer binding} to structure information with a full set of
-mutator bindings; see @secref["structinfo"]. A @scheme[_shell-id] must
-be one of the @scheme[id]s bound by the @scheme[shared] form to a
+The @|maker| identifier above matches three kinds of references. The
+first kind is any binding whose name has @schemeidfont{make-} in the
+middle, and where @|typedef| has a @tech{transformer binding} to
+structure information with a full set of mutator bindings; see
+@secref["structinfo"]. The second kind is an identifier that itself has a
+@tech{transformer binding} to structure information. The third kind is an
+identifier that has a @racket['constructor-for] @tech{syntax property}
+whose value is an identifier with a @tech{transformer binding} to structure
+information. A @scheme[_shell-id], meanwhile, must be one of the
+@scheme[id]s bound by the @scheme[shared] form to a
 @scheme[_shell-expr].
 
-When the @scheme[expr]s of the @scheme[shared] form are parsed via
+When the @scheme[expr]s of the @scheme[shared] form are parsed as
 @scheme[_shared-expr] (taking into account the order of the variants
-for precedence), and sub-expressions that parse via
+for parsing precedence), the sub-expressions that were parsed via
 @scheme[_early-expr] will be evaluated first when the @scheme[shared]
 form is evaluated. Among such expressions, they are evaluated in the
 order as they appear within the @scheme[shared] form. However, any

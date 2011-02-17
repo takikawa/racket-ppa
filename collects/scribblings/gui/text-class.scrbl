@@ -422,8 +422,7 @@ Deletes the specified range or the currently selected text (when no
 
 }
 
-@defmethod[#:mode override
-           (do-copy [start exact-nonnegative-integer?]
+@defmethod[(do-copy [start exact-nonnegative-integer?]
                     [end exact-nonnegative-integer?]
                     [time exact-integer?]
                     [extend? any/c])
@@ -447,8 +446,7 @@ Copy the data from @scheme[start] to @scheme[end], extending the current
 }}
 
 
-@defmethod[#:mode override
-           (do-paste [start exact-nonnegative-integer?]
+@defmethod[(do-paste [start exact-nonnegative-integer?]
                      [time exact-integer?])
            void?]{
 @methspec{
@@ -469,8 +467,7 @@ Pastes into the @techlink{position} @scheme[start].
 }}
 
 
-@defmethod[#:mode override
-           (do-paste-x-selection [start exact-nonnegative-integer?]
+@defmethod[(do-paste-x-selection [start exact-nonnegative-integer?]
                                  [time exact-integer?])
            void?]{
 @methspec{
@@ -816,6 +813,17 @@ Returns @scheme[#t] if the editor is in overwrite mode, @scheme[#f]
 }
 
 
+@defmethod[(get-padding) (values nonnegative-real?
+                                 nonnegative-real?
+                                 nonnegative-real?
+                                 nonnegative-real?)]{
+
+Returns the editor's padding for its left, top, right, and bottom
+sides (in that order).
+
+See also @method[text% set-padding].}
+
+
 @defmethod[(get-position [start (or/c (box/c exact-nonnegative-integer?) #f)]
                          [end (or/c (box/c exact-nonnegative-integer?) #f) #f])
            void?]{
@@ -971,6 +979,8 @@ If @scheme[force-cr?] is not @scheme[#f] and @scheme[flattened?] is not
 Returns the distance from the top of the editor to the alignment
  baseline of the top line. This method is primarily used when an
  editor is an @techlink{item} within another editor.
+The reported baseline distance includes the editor's
+ top padding (see @method[text% set-padding]).
 
 @|OVD| @FCAME[]
 
@@ -1786,10 +1796,6 @@ If @scheme[bitmap] is @scheme[#f], no autowrap indicator is drawn
  (this is the default). The previously used bitmap (possibly
  @scheme[#f]) is returned.
 
-The bitmap will not be modified. It may be selected into a
- @scheme[bitmap-dc%] object, but it will be selected out if this
- method is called again.
-
 Setting the bitmap is disallowed when the editor is internally locked
  for reflowing (see also @|lockdiscuss|).
 
@@ -1876,6 +1882,23 @@ Enables or disables overwrite mode. See @method[text%
  detect changes in the overwrite mode.
 
 }
+
+@defmethod[(set-padding [left nonnegative-real?]
+                        [top nonnegative-real?]
+                        [right nonnegative-real?]
+                        [bottom nonnegative-real?])
+           void?]{
+
+Sets padding that insets the editor's content when drawn within its
+@techlink{display}.
+
+Unlike any margin that may be applied by the editor's
+@techlink{display}, padding is counted in @techlink{location}
+information that is reported by methods such as @method[text%
+position-location]. For example, with a @racket[left] padding of 17.0
+and a @racket[top] padding of 9.0, the location of position 0 will be
+(17.0, 9.0) rather than (0, 0). Padding also contributes to the
+editor's size as reported by @method[editor<%> get-extent].}
 
 
 @defmethod[(set-paragraph-alignment [paragraph exact-nonnegative-integer?]

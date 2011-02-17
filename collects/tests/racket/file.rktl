@@ -676,6 +676,21 @@
 (close-output-port test-file)
 (check-test-file "tmp2")
 
+(let ([p (open-input-file "tmp2")])
+  (test #t port-try-file-lock? p 'shared)
+  (let ([p2 (open-input-file "tmp2")])
+    (test #t port-try-file-lock? p2 'shared)
+    (test (void) port-file-unlock p2)
+    (close-input-port p2))
+  (let ([p3 (open-input-file "tmp2")])
+    (test #f port-try-file-lock? p3 'exclusive)
+    (test (void) port-file-unlock p)
+    (test #t port-try-file-lock? p3 'exclusive)
+    (test #f port-try-file-lock? p 'shared)
+    (close-input-port p3))
+  (test #t port-try-file-lock? p 'exclusive)
+  (close-input-port p))
+
 (define ui (make-input-port 'name (lambda (s) (bytes-set! s 0 (char->integer #\")) 1) #f void))
 (test "" read ui)
 (arity-test (port-read-handler ui) 1 2)
@@ -1273,6 +1288,30 @@
 		 '(close-output-port w2)
 		 '(close-input-port r2))))
   (tcp-close l))
+
+;;----------------------------------------------------------------------
+;; File Locks
+(define tempfile (make-temporary-file))
+(err/rt-test (call-with-file-lock/timeout 10 'shared (lambda () #t) (lambda () #f)))
+(err/rt-test (call-with-file-lock/timeout tempfile 'bogus (lambda () #t) (lambda () #f)))
+(err/rt-test (call-with-file-lock/timeout tempfile 'shared (lambda (x) #t) (lambda () #f)))
+(err/rt-test (call-with-file-lock/timeout tempfile 'exclusive (lambda () #t) (lambda (x) #f)))
+
+(test #t call-with-file-lock/timeout tempfile 'shared (lambda () #t) (lambda () #f))
+(test #t call-with-file-lock/timeout tempfile 'exclusive (lambda () #t) (lambda () #f))
+
+(err/rt-test (call-with-file-lock/timeout tempfile 'exclusive (lambda ()
+    (call-with-file-lock/timeout tempfile 'exclusive (lambda () #f) (lambda () (error))))
+  (lambda () 'uhoh)))
+(err/rt-test (call-with-file-lock/timeout tempfile 'exclusive (lambda ()
+    (call-with-file-lock/timeout tempfile 'shared (lambda () #f) (lambda () (error))))
+  (lambda () 'uhon)))
+(err/rt-test (call-with-file-lock/timeout tempfile 'shared (lambda ()
+    (call-with-file-lock/timeout tempfile 'exclusive (lambda () #f) (lambda () (error))))
+  (lambda () 'uhoh)))
+(test #t call-with-file-lock/timeout tempfile 'shared (lambda ()
+    (call-with-file-lock/timeout tempfile 'shared (lambda () #t) (lambda () #f)))
+  (lambda () 'uhoh))
 
 ;;----------------------------------------------------------------------
 ;; TCP

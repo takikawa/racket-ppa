@@ -9,6 +9,24 @@
 
 (define-struct base-vectorof (elem immutable))
 
+(define-for-syntax (convert-args args this-one)
+  (let loop ([args args]
+             [new-args null])
+    (cond
+      [(null? args) (reverse new-args)]
+      [(keyword? (syntax-e (car args)))
+       (if (null? (cdr args))
+           (reverse (cons (car args) new-args))
+           (loop (cddr args)
+                 (list* (cadr args) (car args) new-args)))]
+      [else
+       (loop (cdr args)
+             (cons (syntax-property
+                    (car args)
+                    'racket/contract:positive-position
+                    this-one)
+                   new-args))])))
+
 (define (vectorof-name c)
   (let ([immutable (base-vectorof-immutable c)])
     (apply build-compound-type-name 'vectorof 
@@ -85,7 +103,7 @@
                     (elem-pos-proj val))
                   (λ (vec i val)
                     (elem-neg-proj val))
-                  proxy-prop:contracted ctc))))))))
+                  impersonator-prop:contracted ctc))))))))
 
 (define-struct (chaperone-vectorof base-vectorof) ()
   #:property prop:chaperone-contract
@@ -94,12 +112,12 @@
    #:first-order vectorof-first-order
    #:projection (vectorof-ho-projection chaperone-vector)))
 
-(define-struct (proxy-vectorof base-vectorof) ()
+(define-struct (impersonator-vectorof base-vectorof) ()
   #:property prop:contract
   (build-contract-property
    #:name vectorof-name
    #:first-order vectorof-first-order
-   #:projection (vectorof-ho-projection proxy-vector)))
+   #:projection (vectorof-ho-projection impersonate-vector)))
 
 (define-syntax (wrap-vectorof stx)
   (syntax-case stx ()
@@ -111,29 +129,11 @@
       (vector (gensym 'ctc) (list #'x) null))]
     [(vecof arg ...)
      (let ([args (syntax->list #'(arg ...))]
-           [this-one (gensym 'ctc)])
-       (define (convert-args args)
-         (let loop ([args args]
-                    [new-args null])
-           (cond
-             [(null? args) (reverse new-args)]
-             [(keyword? (syntax-e (car args)))
-              (if (null? (cdr args))
-                  (reverse (cons (car args) new-args))
-                  (loop (cddr args)
-                        (list* (cadr args) (car args) new-args)))]
-             [else
-              (append (reverse new-args)
-                      (cons (syntax-property
-                             (car args)
-                             'racket/contract:positive-position
-                             this-one)
-                            (cdr args)))])))
-       (with-syntax ([(new-arg ...) (convert-args args)]
-                     [app (datum->syntax stx '#%app)])
+           [this-one (gensym 'vectorof-ctc)])
+       (with-syntax ([(new-arg ...) (convert-args args this-one)])
          (syntax-property
           (syntax/loc stx
-            (app vectorof new-arg ...))
+            (vectorof new-arg ...))
           'racket/contract:contract
           (vector this-one (list #'vecof) null))))]))
 
@@ -149,7 +149,7 @@
       [(chaperone-contract? ctc)
        (make-chaperone-vectorof ctc immutable)]
       [else
-       (make-proxy-vectorof ctc immutable)])))
+       (make-impersonator-vectorof ctc immutable)])))
 
 (define/subexpression-pos-prop (vector-immutableof c)
   (vectorof c #:immutable #t))
@@ -239,7 +239,7 @@
                     ((vector-ref elem-pos-projs i) val))
                   (λ (vec i val)
                     ((vector-ref elem-neg-projs i) val))
-                  proxy-prop:contracted ctc))))))))
+                  impersonator-prop:contracted ctc))))))))
 
 (define-struct (chaperone-vector/c base-vector/c) ()
   #:property prop:chaperone-contract
@@ -248,12 +248,12 @@
    #:first-order vector/c-first-order
    #:projection (vector/c-ho-projection chaperone-vector)))
 
-(define-struct (proxy-vector/c base-vector/c) ()
+(define-struct (impersonator-vector/c base-vector/c) ()
   #:property prop:contract
   (build-contract-property
    #:name vector/c-name
    #:first-order vector/c-first-order
-   #:projection (vector/c-ho-projection proxy-vector)))
+   #:projection (vector/c-ho-projection impersonate-vector)))
 
 (define-syntax (wrap-vector/c stx)
   (syntax-case stx ()
@@ -265,29 +265,11 @@
       (vector (gensym 'ctc) (list #'x) null))]
     [(vec/c arg ...)
      (let ([args (syntax->list #'(arg ...))]
-           [this-one (gensym 'ctc)])
-       (define (convert-args args)
-         (let loop ([args args]
-                    [new-args null])
-           (cond
-             [(null? args) (reverse new-args)]
-             [(keyword? (syntax-e (car args)))
-              (if (null? (cdr args))
-                  (reverse (cons (car args) new-args))
-                  (loop (cddr args)
-                        (list* (cadr args) (car args) new-args)))]
-             [else
-              (loop (cdr args)
-                    (cons (syntax-property
-                           (car args)
-                           'racket/contract:positive-position
-                           this-one)
-                          new-args))])))
-       (with-syntax ([(new-arg ...) (convert-args args)]
-                     [app (datum->syntax stx '#%app)])
+           [this-one (gensym 'vector/c-ctc)])
+       (with-syntax ([(new-arg ...) (convert-args args this-one)])
          (syntax-property
           (syntax/loc stx
-            (app vector/c new-arg ...))
+            (vector/c new-arg ...))
           'racket/contract:contract
           (vector this-one (list #'vec/c) null))))]))
 
@@ -303,7 +285,7 @@
       [(andmap chaperone-contract? ctcs)
        (make-chaperone-vector/c ctcs immutable)]
       [else
-       (make-proxy-vector/c ctcs immutable)])))
+       (make-impersonator-vector/c ctcs immutable)])))
 
 (define/subexpression-pos-prop (vector-immutable/c . args)
   (apply vector/c args #:immutable #t))
