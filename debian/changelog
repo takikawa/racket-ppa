@@ -1,14 +1,10 @@
-racket (5.1-1) experimental; urgency=low
+racket (5.1+dfsg1-1) experimental; urgency=low
 
-  * New upstream version
-
- -- David Bremner <bremner@debian.org>  Fri, 11 Feb 2011 11:43:25 -0400
-
-racket (5.0.2-2) experimental; urgency=low
-
+  * New upstream version, plus DFSG compliance modifications.  
+    + Thanks to Eli Barzilay of the PLT Scheme team for making a big effort
+      of contacting people and updating licensing.
   * Build with HOME=/nonexistant. This prevents collects installed in user
     home directories from interfering with the build.
-  
   * Use parallel=n to control collects build parallelism.
 
  -- David Bremner <bremner@debian.org>  Fri, 07 Jan 2011 07:22:44 -0400
