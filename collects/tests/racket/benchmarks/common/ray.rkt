@@ -1,2 +1,0 @@
-
-(module ray "wrap.ss")

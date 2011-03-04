@@ -1,2 +1,0 @@
-
-(module triangle "wrap.ss")
