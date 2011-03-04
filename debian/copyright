@@ -41,8 +41,18 @@ File: collects/gui-debugger/icons/clanbomber-*.png, collects/icons/stop*.png
 Copyright: © 2008 Everaldo Coelho
 License: LGPL2.1+
 
+Files: collects/mzlib/deflate.rkt: 
+Copyright © 1992-1993 Jean-loup Gailly
+License: DFSG. If GPL versus LGPL matters, contact PLT Scheme team.
+    *** The original version that this code was taken from was
+    distributed with a GPL license, but later the code (later version of
+    it) was also included in zlib, which is distributed with an
+    LGPL-compatible license.  I (Eli Barzilay) have tried to contact the
+    author, but no reply yet.
+
 File: collects/icons/save.png
-Copyright: ©2008  David Vignoni
+Copyright: © 2008  David Vignoni
+License: LGPL 2.1
 
 Files: src/racket/gc/*
 Copyright: 1988, 1989 Hans-J. Boehm, Alan J. Demers
@@ -323,15 +333,6 @@ License: BSD3
 PROBLEMATIC FILES:
 -----------------
 
-Files: collects/file/md5.rkt
-Copyright: © 2002, Jens Axel Soegaard
-Copyright: © 2005-2011, PLT Scheme Inc.
-License:
-    Permission to copy this software, in whole or in part, to use this software
-    for any lawful purpose, and to redistribute this software is hereby
-    granted.
-
-
 Files: doc/r6rs-std/*
 Copyright: © 2007 William D Clinger, Richard Kelsey, Jonathan A Rees.
 License:
@@ -345,70 +346,12 @@ License:
 (this license occurs elsewhere in the archive mind you, as these docs
 are their own package)
 
-
-Files: collects/mzlib/deflate.rkt: 
-Copyright © 1992-1993 Jean-loup Gailly
-License:
-Translated from C file with license
-/* deflate.c -- compress data using the deflation algorithm
- * Copyright (C) 1992-1993 Jean-loup Gailly
- * This is free software; you can redistribute it and/or modify it under the
- * terms of the GNU General Public License, see the file COPYING.
- */
-
-(this is only problematic in the sense it might make the resulting code GPL)
- 
-Files: collects/racklog/*
-Copyright:  © 1993-2001, Dorai Sitaram.
-License:
-    Permission to distribute and use this work for any
-    purpose is hereby granted provided this copyright
-    notice is included in the copy.  This work is provided
-    as is, with no warranty of any kind.
-
 Files: scribble/jfp/*
 Copyright: 2001 Cambridge University Press
 License:
     This software may only be used in the preparation of journal articles
     or books or parts of books to be published by Cambridge University Press.
     Any other use constitutes an infringement of copyright.
-
-Files: collects/srfi/13/string.rkt
-Copyright: © 1988-1994 Massachusetts Institute of Technology.
-License (1):
-    MIT Scheme copyright terms
-    ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-    This material was developed by the Scheme project at the Massachusetts
-    Institute of Technology, Department of Electrical Engineering and
-    Computer Science.  Permission to copy and modify this software, to
-    redistribute either the original software or a modified version, and
-    to use this software for any purpose is granted, subject to the
-    following restrictions and understandings.
-
-    1. Any copy made of this software must include this copyright notice
-    in full.
-
-    2. Users of this software agree to make their best efforts (a) to
-    return to the MIT Scheme project any improvements or extensions that
-    they make, so that these may be included in future releases; and (b)
-    to inform MIT of noteworthy uses of this software.
-
-    3. All materials developed as a consequence of the use of this
-    software shall duly acknowledge such use, in accordance with the usual
-    standards of acknowledging credit in academic research.
-
-    4. MIT has made no warrantee or representation that the operation of
-    this software will be error-free, and MIT is under no obligation to
-    provide any services, by way of maintenance, update, or otherwise.
-
-    5. In conjunction with products arising from the use of this material,
-    there shall be no use of the name of the Massachusetts Institute of
-    Technology nor of any adaptation thereof in any advertising,
-    promotional, or sales literature without prior written consent from
-    MIT in each case.
-License(2): BSD3
-
-Problem: does racket say "includes MIT stuff" somewhere in the docs?
 
 Files: collects/srfi/19/time.rkt
 Copyright: (C) I/NET, Inc. (2000, 2002, 2003). 
@@ -468,8 +411,6 @@ Problem: no permission to distribute derivative works.
 Files with copyright statements, but without license statements:
 
 collects/scribble/sigplan/sigplanconf.cls:    no license
-collects/srfi/17/set.rkt:;;; Copyright (C) Per Bothner (1999, 2000). 
-collects/srfi/43/vector-lib.rkt:;;; Copyright (C) 2005-2011 by Chongkai Zhu.
 collects/tests/racket/benchmarks/common/maze.sch:;;; Copyright: © 1995 by Olin Shivers.
 collects/tests/racket/benchmarks/common/maze2.sch:;;; Copyright: © 1995 by Olin Shivers.
 collects/tests/racket/benchmarks/common/typed/maze2.rktl:;;; Copyright: © 1995 by Olin Shivers.
