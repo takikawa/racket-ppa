@@ -25,21 +25,17 @@ else
 	NUMJOBS = 1
 endif
 
-# Support for packaging Git snapshots
+# Support for generating ".orig.tar.gz" from git
 
 SOURCEPKG=$(shell dpkg-parsechangelog | sed  -n 's/^Source: \(.*\)/\1/p')
-SNAPSHOT=$(shell dpkg-parsechangelog |  sed -n 's/^Version: \(.*\)-[^-]*/\1/p')
-SHA1=$(lastword $(subst ~g, ,$(SNAPSHOT)))
-ORIG=${SOURCEPKG}_${SNAPSHOT}.orig.tar.gz
+UPSTREAM=$(shell dpkg-parsechangelog |  sed -n 's/^Version: \(.*\)-[^-]*/\1/p')
+ORIG=${SOURCEPKG}_${UPSTREAM}.orig.tar.gz
 
-
-# Upstream does funky things with assembly, so we'll have to trust their 
+# Upstream does funky things with assembly, so we'll have to trust their
 # compilation settings and override cdbs/dpkg-buildpackage defaults for
 # configure and make
 DEB_CONFIGURE_SCRIPT_ENV = CFLAGS="-g" CXXFLAGS=""
 DEB_MAKE_ENVVARS = CFLAGS="-g" CXXFLAGS="" HOME=/nonexistant PLT_SETUP_OPTIONS="-j $(NUMJOBS)"
-
-
 
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
 
@@ -58,13 +54,11 @@ cleanbuilddir/racket::
 	rm -rf build
 	rm -rf include # This got created at build-time
 	rm -f debian/mzconfig.h debian/racket-arch.mk
+
 debian/racket-arch.mk: debian/racket-arch.c
 	touch debian/mzconfig.h && cpp -Isrc -Idebian -o $@ debian/racket-arch.c
 
-describe-current-version:
-	git describe --tags upstream-master | sed 's,^\(snapshot\|upstream\)/*v*,,;s,-,+,;s,-,~,;'
-
 get-orig-source:
-	git archive --format=tar $(SHA1) | gzip -9 > ../$(ORIG)
+	git archive --format=tar upstream/${UPSTREAM} | gzip -9 > ../${ORIG}
 
-.PHONY: describe-current-version git-orig-source
+.PHONY: git-orig-source
