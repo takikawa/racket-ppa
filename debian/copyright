@@ -381,41 +381,9 @@ License:
 Problem: I think the file in question is a derived work, but the
 license is a bit bizarre.
 
-Files: collects/tests/racket/benchmarks/common/psyntax-input.txt
-Copyright: © 1992-2002 Cadence Research Systems
-License: 
-    Permission to copy this software, in whole or in part, to use this
-    software for any lawful purpose, and to redistribute this software
-    is granted subject to the restriction that all copies made of this
-    software must include this copyright notice in full.  This software
-    is provided AS IS, with NO WARRANTY, EITHER EXPRESS OR IMPLIED,
-    INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY
-    OR FITNESS FOR ANY PARTICULAR PURPOSE.  IN NO EVENT SHALL THE
-    AUTHORS BE LIABLE FOR CONSEQUENTIAL OR INCIDENTAL DAMAGES OF ANY
-    NATURE WHATSOEVER.
-
-Problem: no obvious permission to modify
-
-
-Files: collects/tests/xml/clark-tests/readme.html:
-    Copyright (C) 1998 James Clark.  All rights reserved.  Permission is
-    granted to copy and modify this collection in any way for internal use
-    within a company or organization.  Permission is granted to
-    redistribute the file <code>xmltest.zip</code> containing this
-    collection to third parties provided that no modifications of any kind
-    are made to this file.  Note that permission to distribute the
-    collection in any other form is not granted.
-
-Problem: no permission to distribute derivative works.
-
 Files with copyright statements, but without license statements:
 
 collects/scribble/sigplan/sigplanconf.cls:    no license
-collects/tests/racket/benchmarks/common/maze.sch:;;; Copyright: © 1995 by Olin Shivers.
-collects/tests/racket/benchmarks/common/maze2.sch:;;; Copyright: © 1995 by Olin Shivers.
-collects/tests/racket/benchmarks/common/typed/maze2.rktl:;;; Copyright: © 1995 by Olin Shivers.
-collects/tests/racket/testing.rktl: Copyright: © 1991, 1992, 1993, 1994 Aubrey Jaffer.
-collects/tests/utils/mz-testing.rkt: Copyright: © 1991, 1992, 1993, 1994 Aubrey Jaffer.
 
 
 
