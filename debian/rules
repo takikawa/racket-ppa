@@ -42,6 +42,9 @@ DEB_BUILDDIR := $(DEB_SRCDIR)/build
 DEB_DH_INSTALL_ARGS_racket-common := -X${RACKET_ARCH} -X$(MZDYN)
 DEB_DH_INSTALL_ARGS_racket-doc := -Xdoc/release-notes
 
+# do not strip mzscheme, as this causes it to stop working
+DEB_DH_STRIP_ARGS_racket := -Xbin/mzscheme
+
 install/racket::
 	for src in $$(find debian/tmp/usr/share/racket -type d -name $(RACKET_ARCH)); do \
 	    src=$${src#debian/tmp/usr/share/}; \
