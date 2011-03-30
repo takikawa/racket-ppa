@@ -278,6 +278,81 @@ License: LGPL2.1+, and the following:
     LIABILITY, EVEN IF XEROX CORPORATION IS ADVISED OF THE POSSIBILITY OF SUCH
     DAMAGES.
 
+
+Files: collects/srfi/19/time.rkt
+Copyright: (C) I/NET, Inc. (2000, 2002, 2003). 
+Copyright: (C) Neodesic Corporation (2000). All Rights Reserved. 
+License:
+    The following note comes from the scsh-0.6 debian/copyright	
+    ;; SRFI-19: Time Data Types and Procedures.
+    ;;
+    ;; Debian maintainer's note: Originally published under the license hereunder,
+    ;; this file has since been elevated to the public domain by its author,
+    ;; Will Fitzgerald.
+    ;; 
+
+    Here is a relevant mailing list post 
+    (http://article.gmane.org/gmane.lisp.scheme.scsh/6497):
+
+    To:	scsh@zurich.csail.mit.edu
+    Subject:	 Re: possible licensing issues with some scsh source files
+    From:	 Lionel Elie Mamane <lmamane-scsh-list-2003-10-29@conuropsis.org>
+    Date:	 Tue, 6 Jan 2004 18:57:56 +0100
+    Cc:	 Martin Gasbichler <gasbichl@informatik.uni-tuebingen.de>, 
+	     joostvb-scsh-list-2003-10-29@conuropsis.org
+    Sender:	 Lionel Elie Mamane <master@tofu.mamane.lu>
+
+    On Sun, Jan 04, 2004 at 11:44:28PM +0100, Lionel Elie Mamane wrote:
+    > On Sun, Jan 04, 2004 at 02:05:48PM +0100, Lionel Elie Mamane wrote:
+
+    >> indeed includes (a derivative of) the reference implementation of
+    >> SRFI 19, but the SRFI copyright notice was stripped.
+
+    > Having said that, I must say that it is the policy of the GNU
+    > project to include code in its official projects only if the
+    > copyright is assigned to the FSF, so in this particular case, the
+    > original author (Will Fitzgerald) probably has signed copyright over
+    > to the FSF.
+
+    I got an answer back from the FSF "records" guy and he tells me that
+    Will Fitzgerald elevated his reference implementation of SRFI 19 to
+    the public domain. But this answer comes with a disclaimer:
+
+     this is not a legal opinion, nor is this a binding pronouncment of
+     the FSF
+
+    so I don't know if we can rely on it.
+
+    -- 
+    Lionel
+
+
+
+    Original License:
+
+    This document and translations of it may be copied and furnished to others, 
+    and derivative works that comment on or otherwise explain it or assist in its 
+    implementation may be prepared, copied, published and distributed, in whole or 
+    in part, without restriction of any kind, provided that the above copyright 
+    notice and this paragraph are included on all such copies and derivative works. 
+    However, this document itself may not be modified in any way, such as by 
+    removing the copyright notice or references to the Scheme Request For 
+    Implementation process or editors, except as needed for the purpose of 
+    developing SRFIs in which case the procedures for copyrights defined in the SRFI 
+    process must be followed, or as required to translate it into languages other 
+    than English. 
+
+    The limited permissions granted above are perpetual and will not be revoked 
+    by the authors or their successors or assigns. 
+
+    This document and the information contained herein is provided on an "AS IS" 
+    basis and THE AUTHOR AND THE SRFI EDITORS DISCLAIM ALL WARRANTIES, EXPRESS OR 
+    IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTY THAT THE USE OF THE 
+    INFORMATION HEREIN WILL NOT INFRINGE ANY RIGHTS OR ANY IMPLIED WARRANTIES OF 
+    MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE. 
+
+
+
 Files: collects/tests/rackunit/*, tests/srfi/1/*
 Copyright: © 2005 by Noel Welsh. 
 License: LGPL2.1+
@@ -366,32 +441,5 @@ License:
 (this license occurs elsewhere in the archive mind you, as these docs
 are their own package)
 
-Files: collects/srfi/19/time.rkt
-Copyright: (C) I/NET, Inc. (2000, 2002, 2003). 
-Copyright: (C) Neodesic Corporation (2000). All Rights Reserved. 
-License:
-    This document and translations of it may be copied and furnished to others, 
-    and derivative works that comment on or otherwise explain it or assist in its 
-    implementation may be prepared, copied, published and distributed, in whole or 
-    in part, without restriction of any kind, provided that the above copyright 
-    notice and this paragraph are included on all such copies and derivative works. 
-    However, this document itself may not be modified in any way, such as by 
-    removing the copyright notice or references to the Scheme Request For 
-    Implementation process or editors, except as needed for the purpose of 
-    developing SRFIs in which case the procedures for copyrights defined in the SRFI 
-    process must be followed, or as required to translate it into languages other 
-    than English. 
-
-    The limited permissions granted above are perpetual and will not be revoked 
-    by the authors or their successors or assigns. 
-
-    This document and the information contained herein is provided on an "AS IS" 
-    basis and THE AUTHOR AND THE SRFI EDITORS DISCLAIM ALL WARRANTIES, EXPRESS OR 
-    IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTY THAT THE USE OF THE 
-    INFORMATION HEREIN WILL NOT INFRINGE ANY RIGHTS OR ANY IMPLIED WARRANTIES OF 
-    MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE. 
-
-Problem: I think the file in question is a derived work, but the
-license is a bit bizarre.
 
 
