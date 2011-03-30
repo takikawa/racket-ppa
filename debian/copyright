@@ -366,13 +366,6 @@ License:
 (this license occurs elsewhere in the archive mind you, as these docs
 are their own package)
 
-Files: scribble/jfp/*
-Copyright: 2001 Cambridge University Press
-License:
-    This software may only be used in the preparation of journal articles
-    or books or parts of books to be published by Cambridge University Press.
-    Any other use constitutes an infringement of copyright.
-
 Files: collects/srfi/19/time.rkt
 Copyright: (C) I/NET, Inc. (2000, 2002, 2003). 
 Copyright: (C) Neodesic Corporation (2000). All Rights Reserved. 
@@ -400,10 +393,5 @@ License:
 
 Problem: I think the file in question is a derived work, but the
 license is a bit bizarre.
-
-Files with copyright statements, but without license statements:
-
-collects/scribble/sigplan/sigplanconf.cls:    no license
-
 
 
