@@ -160,6 +160,9 @@ On Jul  6, Jonathan A Rees wrote:
 > 
 > Jonathan
 
+(Comment from David Bremner <bremner@debian.org>, apparently Eli
+Barzilay did the actual questioning and collecting of answers, with the
+question provided by Ari).
 
 Files: doc/srfi-std/*
 Copyright: SRFI contributors
