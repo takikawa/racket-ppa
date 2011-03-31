@@ -62,6 +62,6 @@ debian/racket-arch.mk: debian/racket-arch.c
 	touch debian/mzconfig.h && cpp -Isrc -Idebian -o $@ debian/racket-arch.c
 
 get-orig-source:
-	git archive --format=tar upstream/${UPSTREAM} | gzip -9 > ../${ORIG}
+	git archive --format=tar --prefix=racket-${UPSTREAM}/ upstream/${UPSTREAM} | gzip -9 > ../${ORIG}
 
 .PHONY: git-orig-source
