@@ -123,6 +123,16 @@ Files: src/foreign/libffi/*
 Copyright: © 1996-2009  Anthony Green, Red Hat, Inc and others.  
 License: MIT
 
+Files: doc/r6rs-std/*
+Copyright: © 2007 William D Clinger, Richard Kelsey, Jonathan A Rees.
+License:
+
+    We intend this report to belong to the entire Scheme community,
+    and so we grant permission to copy it in whole or in part without
+    fee. In particular, we encourage implementors of Scheme to use
+    this report as a starting point for manuals and other
+    documentation, modifying it as necessary.
+
 Files: doc/r5rs-std/*
 Copyright: © 1998 William D Clinger, Richard Kelsey, Jonathan A Rees.
 License:
@@ -428,21 +438,7 @@ License: BSD3
     (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
     THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-PROBLEMATIC FILES:
------------------
 
-Files: doc/r6rs-std/*
-Copyright: © 2007 William D Clinger, Richard Kelsey, Jonathan A Rees.
-License:
-
-    We intend this report to belong to the entire Scheme community,
-    and so we grant permission to copy it in whole or in part without
-    fee. In particular, we encourage implementors of Scheme to use
-    this report as a starting point for manuals and other
-    documentation, modifying it as necessary.
-
-(this license occurs elsewhere in the archive mind you, as these docs
-are their own package)
 
 
 
