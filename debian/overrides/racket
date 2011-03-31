@@ -1,3 +1,5 @@
 # Ignore this while we talk to upstream about fixing it in a manner they'll
 # accept
 racket: embedded-zlib
+# Stripping mzscheme makes it stop working
+racket: unstripped-binary-or-object ./usr/bin/mzscheme
