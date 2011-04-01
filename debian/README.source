@@ -9,9 +9,10 @@ These are untested notes.  The old notes can viewed with 'git show debian/5.0.2-
 
   Currently there are three main branches
 
-  - upstream contains the release branch history, along with file
-    deletions to make it match the upstream release tar balls. Tags
-    are upstream/$ver where $ver is an upstream version.
+ - dfsg contains the release branch history, along with file deletions
+   to make it match the upstream release tar balls, and some further
+   deletions of non-free bits. Tags are upstream/$ver where $ver is an
+   upstream version.
 
  - debian contains packaging commits.
 
@@ -82,4 +83,4 @@ by any number of tools (including dpkg-buildpackage).
    - git checkout master
    - git merge upstream/$version
 
- -- David Bremner <bremner@debian.org>, Mon, 27 Dec 2010 23:20:29 -0400
+ -- David Bremner <bremner@debian.org>, Thu, 31 Mar 2011 21:25:06 -0300
