@@ -3,7 +3,6 @@
 include /usr/share/cdbs/1/rules/debhelper.mk
 include /usr/share/cdbs/1/class/autotools.mk
 include debian/racket-arch.mk
-include $(wildcard /usr/share/topgit/tg2quilt.mk)
 
 DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
 DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
@@ -64,4 +63,10 @@ debian/racket-arch.mk: debian/racket-arch.c
 get-orig-source:
 	git archive --format=tar --prefix=racket-${UPSTREAM}/ upstream/${UPSTREAM} | gzip -9 > ../${ORIG}
 
-.PHONY: git-orig-source
+export-patches: 
+	[ ! -r debian/patches ] || \
+	grep "^\#.*$(notdir $(PATCH_EXPORT_SCRIPT))" debian/patches/series
+	rm -rf debian/patches
+	sh $(PATCH_EXPORT_SCRIPT)
+
+.PHONY: git-orig-source export-patches
