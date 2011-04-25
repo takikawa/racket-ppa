@@ -5,7 +5,7 @@ The Debian packaging for racket (previously known as plt-scheme) is now stored i
 
 * Branch Layout
 
-  Currently there are four main branches
+  Currently there are three main branches
 
  - dfsg contains the release branch history, along with file deletions
    to make it match the upstream release tar balls, and some further
@@ -15,17 +15,17 @@ The Debian packaging for racket (previously known as plt-scheme) is now stored i
  - patch-queue/dfsg contains patches on top of dfsg. Tags are 
    patches/$debian_ver where $debian_ver is a debian version.
 
- - debian contains packaging commits.
-
-   Tags are packaging/$debian_ver where $debian_ver is a debian
-   version.
-
- - master is merged debian and upstream.
+ - master is merged debian packaging and upstream commits.
 
    Tags are debian/$debian_ver where $debian_ver is a debian version.
+   To get a list of packaging commits, run
+
+      git log dfsg..
 
 There is also a branch pristine-tar contains information used by the
 pristine-tar utility to reconstruct bit identical upstream tarball.
+There was a branch debian of just packaging commits, but I (David)
+kept forgetting to use it.
 
 The master branch is a debianized source tree, and should be buildable
 by any number of tools (including dpkg-buildpackage).
@@ -109,4 +109,4 @@ version 0.17 or later.
        % ./debian/rules export-patches
 
 
- -- David Bremner <bremner@debian.org>, Mon, 25 Apr 2011 07:48:51 -0300
+ -- David Bremner <bremner@debian.org>, Mon, 25 Apr 2011 07:59:39 -0300
