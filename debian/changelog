@@ -1,3 +1,9 @@
+racket (5.1+dfsg1-2) unstable; urgency=low
+
+  * Cherry-pick patch from upstream to fix kFreeBSD build failures
+
+ -- David Bremner <bremner@debian.org>  Mon, 25 Apr 2011 08:01:00 -0300
+
 racket (5.1+dfsg1-1) unstable; urgency=low
 
   * New upstream version, plus DFSG compliance modifications.  
