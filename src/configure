@@ -2271,7 +2271,7 @@ else
     prefix="${ac_default_prefix}"
   fi
   libpltdir="${libdir}/racket"
-  collectsdir="${libdir}/racket/collects"
+  collectsdir="${datadir}/racket/collects"
   includepltdir="${includedir}/racket"
   docdir="${datadir}/racket/doc"
   MAKE_COPYTREE=copytree
