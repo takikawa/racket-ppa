@@ -1,8 +1,10 @@
 racket (5.1+dfsg1-2) unstable; urgency=low
 
   * Cherry-pick patch from upstream to fix kFreeBSD build failures
+  * Cherry-pick patches from upstream to fail gracefully when SSLv2 is not
+    found.
 
- -- David Bremner <bremner@debian.org>  Mon, 25 Apr 2011 08:01:00 -0300
+ -- David Bremner <bremner@debian.org>  Mon, 25 Apr 2011 23:15:34 -0300
 
 racket (5.1+dfsg1-1) unstable; urgency=low
 
