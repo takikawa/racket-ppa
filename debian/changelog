@@ -1,3 +1,9 @@
+racket (5.1+dfsg1-3) unstable; urgency=low
+
+  * New patch for kFreeBSD-i386 and floatingpoint.h
+
+ -- David Bremner <bremner@debian.org>  Wed, 27 Apr 2011 06:54:23 -0300
+
 racket (5.1+dfsg1-2) unstable; urgency=low
 
   * Cherry-pick patch from upstream to fix kFreeBSD build failures
