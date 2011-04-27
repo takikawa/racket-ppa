@@ -58,7 +58,7 @@ cleanbuilddir/racket::
 	rm -f debian/mzconfig.h debian/racket-arch.mk
 
 debian/racket-arch.mk: debian/racket-arch.c
-	touch debian/mzconfig.h && cpp -Isrc -Idebian -o $@ debian/racket-arch.c
+	touch debian/mzconfig.h && cpp -Isrc -Idebian -o - $< | tail -1 > $@
 
 get-orig-source:
 	git archive --format=tar --prefix=racket-${UPSTREAM}/ upstream/${UPSTREAM} | gzip -9 > ../${ORIG}
