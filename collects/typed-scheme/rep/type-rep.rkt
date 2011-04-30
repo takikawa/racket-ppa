@@ -4,7 +4,7 @@
 (require (utils tc-utils) 
 	 "rep-utils.rkt" "object-rep.rkt" "filter-rep.rkt" "free-variance.rkt"
          mzlib/trace racket/match mzlib/etc
-         scheme/contract unstable/debug
+         scheme/contract
          (for-syntax scheme/base syntax/parse))
 
 (define name-table (make-weak-hasheq))
@@ -131,7 +131,14 @@
     [#:key 'channel])
 
 ;; name is a Symbol (not a Name)
-(dt Base ([name symbol?] [contract syntax?]) 
+;; contract is used when generating contracts from types
+;; predicate is used to check (at compile-time) whether a value belongs
+;; to that base type. This is used to check for subtyping between value
+;; types and base types.
+;; marshaled has to be a syntax object that refers to the base type
+;; being created. this allows us to avoid reconstructing the base type
+;; when using it from its marshaled representation
+(dt Base ([name symbol?] [contract syntax?] [predicate procedure?] [marshaled syntax?])
     [#:frees #f] [#:fold-rhs #:base] [#:intern name]
     [#:key (case name
 	     [(Number Integer) 'number]
@@ -285,7 +292,7 @@
                          pred-id
                          cert
                          maker-id)]
-    [#:key #f])
+    [#:key 'struct])
 
 ;; A structure type descriptor
 ;; s : struct
@@ -297,7 +304,7 @@
 (dt VectorTop () [#:fold-rhs #:base] [#:key 'vector])
 (dt HashtableTop () [#:fold-rhs #:base] [#:key 'hash])
 (dt MPairTop () [#:fold-rhs #:base] [#:key 'mpair])
-(dt StructTop ([name Struct?]) [#:key #f])
+(dt StructTop ([name Struct?]) [#:key 'struct])
 
 ;; v : Scheme Value
 (dt Value (v) [#:frees #f] [#:fold-rhs #:base] [#:key (cond [(number? v) 'number]

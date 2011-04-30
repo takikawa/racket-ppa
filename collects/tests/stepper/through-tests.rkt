@@ -487,7 +487,7 @@
 (t1 'map
     m:mz "(map (lambda (x) x) (list 3 4 5))"
     `((before-after ((map (lambda (x) x) (hilite (list 3 4 5))))
-                    ((map (lambda (x) x) (hilite `( 3 4 5)))))
+                    ((map (lambda (x) x) (hilite `(3 4 5)))))
       (before-after ((hilite (map (lambda (x) x) `(3 4 5))))
                     ((... (hilite 3) ...)))
       (before-after (...)
@@ -1445,14 +1445,15 @@
      -> {7})
   
 
-  ;; LAZY.SS:
+  ;; --------------------------------------------------------------------------
+  ;; Lazy Stepper tests
+  ;; --------------------------------------------------------------------------
+  
+  (define err '(/ 1 0))
 
   (t 'lazy1 m:lazy
      (! (+ 3 4))
-     :: 3 -> 3
-     :: 3 -> 3
-     :: 3 -> 3
-     :: {(! (+ 3 4))} -> {7})
+     :: {(+ 3 4)} -> {7})
 
   (t 'lazy2 m:lazy
      (+ (+ 3 4) 5)
@@ -1462,14 +1463,667 @@
      -> {12})
 
   (t 'lazy3 m:lazy
-     ((lambda (x y) (* x x)) (+ 1 2) (+ 3 4))
-     :: {((lambda (x y) (* x x)) (+ 1 2) (+ 3 4))}
+     ((lambda (x y) (* x x)) (+ 1 2) (/ 1 0))
+     :: {((lambda (x y) (* x x)) (+ 1 2) (/ 1 0))}
      -> {(* (+ 1 2) (+ 1 2))}
      :: (* {(+ 1 2)} {(+ 1 2)})
      -> (* {3} {3})
      :: {(* 3 3)}
      -> {9})
+  
+  (t 'lazy-multi m:lazy
+     (+ 1 2) (+ 3 4)
+     :: {(+ 1 2)} -> {3}
+     :: 3 {(+ 3 4)} -> 3 {7})
+  
+  ; lazy-app1: 
+  ; (define (f x) (+ x x))
+  ; (f (+ 1 2))
+  (let* ([body '(+ x x)]
+         [lam `(lambda (x) ,body)]
+         [def `(define (f x) ,body)]
+         [arg '(+ 1 2)])
+    (t 'lazy-app1 m:lazy
+       ,def (f ,arg)
+       :: ,def ({f} ,arg)        -> ,def ({,lam} ,arg)
+       :: ,def {(,lam ,arg)}     -> ,def {(+ ,arg ,arg)}
+       :: ,def (+ {,arg} {,arg}) -> ,def (+ {3} {3})
+       :: ,def {(+ 3 3)}         -> ,def {6}))
+  
+  ; lazy-app2: 
+  ; (define (f x) (+ x x))
+  ; (f (f (+ 1 2)))
+  (let* ([body '(+ x x)]
+         [lam `(lambda (x) ,body)]
+         [def `(define (f x) ,body)]
+         [arg1 '(+ 1 2)]
+         [arg2 `(f ,arg1)])
+    (t 'lazy-app2 m:lazy
+       ,def (f ,arg2)
+       :: ,def ({f} ,arg2)                 -> ,def ({,lam} ,arg2)
+       :: ,def {(,lam ,arg2)}              -> ,def {(+ ,arg2 ,arg2)}
+       :: ,def (+ ({f} ,arg1) ({f} ,arg1)) -> ,def (+ ({,lam} ,arg1) ({,lam} ,arg1))
+       :: ,def (+ {(,lam ,arg1)} {(,lam ,arg1)})           
+       -> ,def (+ {(+ ,arg1 ,arg1)} {(+ ,arg1 ,arg1)})
+       :: ,def (+ (+ {,arg1} {,arg1}) (+ {,arg1} {,arg1})) 
+       -> ,def (+ (+ {3} {3}) (+ {3} {3})) 
+       :: ,def (+ {(+ 3 3)} {(+ 3 3)})     -> ,def (+ {6} {6})
+       :: ,def {(+ 6 6)}                   -> ,def {12}))
+     
+  ; lazy-app3
+  ; (define (f x) (+ (+ x x) x))
+  ; (define (g x) (+ x (+ x x)))
+  ; (f (+ 1 2))
+  ; (g (+ 3 4))
+  (let* ([body '(+ x x)]
+         [body1 `(+ ,body x)]
+         [body2 `(+ x ,body)]
+         [def1 `(define (f x) ,body1)]
+         [def2 `(define (g x) ,body2)]
+         [lam1 `(lambda (x) ,body1)]
+         [lam2 `(lambda (x) ,body2)]
+         [arg1 '(+ 1 2)]
+         [arg2 '(+ 3 4)])
+    (t 'lazy-app3 m:lazy
+       ,def1 ,def2 (f ,arg1) (g ,arg2)
+       :: ,def1 ,def2 ({f} ,arg1) -> ,def1 ,def2 ({,lam1} ,arg1)
+       :: ,def1 ,def2 {(,lam1 ,arg1)} -> ,def1 ,def2 {(+ (+ ,arg1 ,arg1) ,arg1)}
+       :: ,def1 ,def2 (+ (+ {,arg1} {,arg1}) {,arg1}) -> ,def1 ,def2 (+ (+ {3} {3}) {3})
+       :: ,def1 ,def2 (+ {(+ 3 3)} 3) -> ,def1 ,def2 (+ {6} 3)
+       :: ,def1 ,def2 {(+ 6 3)} -> ,def1 ,def2 {9}
+       :: ,def1 ,def2 9 ({g} ,arg2) -> ,def1 ,def2 9 ({,lam2} ,arg2)
+       :: ,def1 ,def2 9 {(,lam2 ,arg2)} -> ,def1 ,def2 9 {(+ ,arg2 (+ ,arg2 ,arg2))}
+       :: ,def1 ,def2 9 (+ {,arg2} (+ {,arg2} {,arg2})) -> ,def1 ,def2 9 (+ {7} (+ {7} {7}))
+       :: ,def1 ,def2 9 (+ 7 {(+ 7 7)}) -> ,def1 ,def2 9 (+ 7 {14})
+       :: ,def1 ,def2 9 {(+ 7 14)} -> ,def1 ,def2 9 {21}))
 
+   (t 'lazy-cons1 m:lazy
+      (car (cons (+ 1 2) ,err))
+      :: {(car (cons (+ 1 2) ,err))} -> {(+ 1 2)} -> {3})
+   
+   (t 'lazy-cons2 m:lazy
+      (cdr (cons ,err (+ 1 2)))
+      :: {(cdr (cons ,err (+ 1 2)))} -> {(+ 1 2)} -> {3})
+   
+   (t 'lazy-list1 m:lazy
+      (car (list (+ 1 2) ,err))
+      :: {(car (list (+ 1 2) ,err))} -> {(+ 1 2)} -> {3})
+   
+   (t 'lazy-list2 m:lazy
+      (cdr (list ,err (+ 1 2)))
+      :: {(cdr (list ,err (+ 1 2)))} -> {(list (+ 1 2))})
+
+   (t 'lazy-list3 m:lazy
+      (cadr (second (third (list ,err ,err (list ,err (list ,err (+ 1 2)))))))
+      :: (cadr (second {(third (list ,err ,err (list ,err (list ,err (+ 1 2)))))}))
+      -> (cadr (second {(list ,err (list ,err (+ 1 2)))}))
+      :: (cadr {(second (list ,err (list ,err (+ 1 2))))})
+      -> (cadr {(list ,err (+ 1 2))})
+      :: {(cadr (list ,err (+ 1 2)))}
+      -> {(+ 1 2)} -> {3})
+   
+   (t 'lazy-caar m:lazy
+      (caar (list (list 1)))
+      :: {(caar (list (list 1)))} -> {1})
+   (t 'lazy-cadr m:lazy
+      (cadr (list 1 2))
+      :: {(cadr (list 1 2))} -> {2})
+   (t 'lazy-cdar m:lazy
+      (cdar (list (list 1)))
+      :: {(cdar (list (list 1)))} -> {empty})
+   (t 'lazy-cddr m:lazy
+      (cddr (list 1 2))
+      :: {(cddr (list 1 2))} -> {empty})
+   (t 'lazy-caaar m:lazy
+      (caaar (list (list (list 1))))
+      :: {(caaar (list (list (list 1))))} -> {1})
+   (t 'lazy-caadr m:lazy
+      (caadr (list 1 (list 1)))
+      :: {(caadr (list 1 (list 1)))} -> {1})
+   (t 'lazy-cadar m:lazy
+      (cadar (list (list 1 2)))
+      :: {(cadar (list (list 1 2)))} -> {2})
+   (t 'lazy-caddr m:lazy
+      (caddr (list 1 2 3))
+      :: {(caddr (list 1 2 3))} -> {3})
+   (t 'lazy-cdaar m:lazy
+      (cdaar (list (list (list 1))))
+      :: {(cdaar (list (list (list 1))))} -> {empty})
+   (t 'lazy-cdadr m:lazy
+      (cdadr (list 1 (list 1)))
+      :: {(cdadr (list 1 (list 1)))} -> {empty})
+   (t 'lazy-cddar m:lazy
+      (cddar (list (list 1 2)))
+      :: {(cddar (list (list 1 2)))} -> {empty})
+   (t 'lazy-cdddr m:lazy
+      (cdddr (list 1 2 3))
+      :: {(cdddr (list 1 2 3))} -> {empty})
+   (t 'lazy-caaaar m:lazy
+      (caaaar (list (list (list (list 1)))))
+      :: {(caaaar (list (list (list (list 1)))))} -> {1})
+   (t 'lazy-caaadr m:lazy
+      (caaadr (list 1 (list (list 1))))
+      :: {(caaadr (list 1 (list (list 1))))} -> {1})
+   (t 'lazy-caadar m:lazy
+      (caadar (list (list 1 (list 2))))
+      :: {(caadar (list (list 1 (list 2))))} -> {2})
+   (t 'lazy-caaddr m:lazy
+      (caaddr (list 1 2 (list 1)))
+      :: {(caaddr (list 1 2 (list 1)))} -> {1})
+   (t 'lazy-cadaar m:lazy
+      (cadaar (list (list (list 1 2))))
+      :: {(cadaar (list (list (list 1 2))))} -> {2})
+   (t 'lazy-cadadr m:lazy
+      (cadadr (list 1 (list 1 2)))
+      :: {(cadadr (list 1 (list 1 2)))} -> {2})
+   (t 'lazy-caddar m:lazy
+      (caddar (list (list 1 2 3)))
+      :: {(caddar (list (list 1 2 3)))} -> {3})
+   (t 'lazy-cadddr m:lazy
+      (cadddr (list 1 2 3 4))
+      :: {(cadddr (list 1 2 3 4))} -> {4})
+   (t 'lazy-cdaaar m:lazy
+      (cdaaar (list (list (list (list 1)))))
+      :: {(cdaaar (list (list (list (list 1)))))} -> {empty})
+   (t 'lazy-cdaadr m:lazy
+      (cdaadr (list 1 (list (list 1))))
+      :: {(cdaadr (list 1 (list (list 1))))} -> {empty})
+   (t 'lazy-cdadar m:lazy
+      (cdadar (list (list 1 (list 2))))
+      :: {(cdadar (list (list 1 (list 2))))} -> {empty})
+   (t 'lazy-cdaddr m:lazy
+      (cdaddr (list 1 2 (list 1)))
+      :: {(cdaddr (list 1 2 (list 1)))} -> {empty})
+   (t 'lazy-cddaar m:lazy
+      (cddaar (list (list (list 1 2))))
+      :: {(cddaar (list (list (list 1 2))))} -> {empty})
+   (t 'lazy-cddadr m:lazy
+      (cddadr (list 1 (list 1 2)))
+      :: {(cddadr (list 1 (list 1 2)))} -> {empty})
+   (t 'lazy-cdddar m:lazy
+      (cdddar (list (list 1 2 3)))
+      :: {(cdddar (list (list 1 2 3)))} -> {empty})
+   (t 'lazy-cddddr m:lazy
+      (cddddr (list 1 2 3 4))
+      :: {(cddddr (list 1 2 3 4))} -> {empty})
+   (t 'lazy-second m:lazy
+      (second (list 1 2 3 4 5 6 7 8))
+      :: {(second (list 1 2 3 4 5 6 7 8))} -> {2})
+   (t 'lazy-third m:lazy
+      (third (list 1 2 3 4 5 6 7 8))
+      :: {(third (list 1 2 3 4 5 6 7 8))} -> {3})
+   (t 'lazy-fourth m:lazy
+      (fourth (list 1 2 3 4 5 6 7 8))
+      :: {(fourth (list 1 2 3 4 5 6 7 8))} -> {4})
+   (t 'lazy-fifth m:lazy
+      (fifth (list 1 2 3 4 5 6 7 8))
+      :: {(fifth (list 1 2 3 4 5 6 7 8))} -> {5})
+   (t 'lazy-sixth m:lazy
+      (sixth (list 1 2 3 4 5 6 7 8))
+      :: {(sixth (list 1 2 3 4 5 6 7 8))} -> {6})
+   (t 'lazy-seventh m:lazy
+      (seventh (list 1 2 3 4 5 6 7 8))
+      :: {(seventh (list 1 2 3 4 5 6 7 8))} -> {7})
+   (t 'lazy-eighth m:lazy
+      (eighth (list 1 2 3 4 5 6 7 8))
+      :: {(eighth (list 1 2 3 4 5 6 7 8))} -> {8})
+ 
+   (t 'lazy-list4 m:lazy
+      (caaaar (cdddar (list (list ,err ,err ,err (list (list (list (+ 1 2))))))))
+      :: (caaaar {(cdddar (list (list ,err ,err ,err (list (list (list (+ 1 2)))))))})
+      -> (caaaar {(list (list (list (list (+ 1 2)))))})
+      :: {(caaaar (list (list (list (list (+ 1 2))))))} -> {(+ 1 2)} -> {3})
+   
+   ; lazy-list5
+   ; (define (f x) (+ (car (caar x)) (cadr (cddr x))))
+   ; (f (list (list (list (+ 1 2))) (/ 1 0) (/ 1 0) (+ 3 4)))
+   (let* ([make-rand1 (λ (x) `(car (caar ,x)))]
+          [make-rand2 (λ (x) `(cadr (cddr ,x)))]
+          [rand1 (make-rand1 'x)]
+          [rand2 (make-rand2 'x)]
+          [make-body (λ (x) `(+ ,(make-rand1 x) ,(make-rand2 x)))]
+          [body (make-body 'x)]
+          [def `(define (f x) ,body)]
+          [lam `(lambda (x) ,body)]
+          [subarg1 '(+ 1 2)]
+          [subarg2 `(list ,subarg1)]
+          [subarg3 '(+ 3 4)]
+          [subarg4 `(list ,err ,subarg3)]
+          [make-arg (λ (x y) `(list (list ,x) ,err ,err ,y))]
+          [arg (make-arg subarg2 subarg3)]
+          [body-subst (make-body arg)]
+          [rand2-subst (make-rand2 arg)])
+     (t 'lazy-list5 m:lazy
+        ,def (f ,arg)
+        :: ,def ({f} ,arg) -> ,def ({,lam} ,arg)
+        :: ,def {(,lam ,arg)} -> ,def {,body-subst}
+        :: ,def (+ (car {(caar ,arg)}) ,rand2-subst)
+        -> ,def (+ (car {,subarg2}) ,rand2-subst)
+        :: ,def (+ {(car ,subarg2)} ,rand2-subst)
+        -> ,def (+ {,subarg1} ,rand2-subst)
+        :: ,def (+ {,subarg1} (cadr (cddr (list (list (list {,subarg1})) ,err ,err ,subarg3))))
+        -> ,def (+ {3} (cadr (cddr (list (list (list {3})) ,err ,err ,subarg3))))
+        :: ,def (+ 3 (cadr {(cddr (list (list (list 3)) ,err ,err ,subarg3))}))
+        -> ,def (+ 3 (cadr {,subarg4}))
+        :: ,def (+ 3 {(cadr ,subarg4)})
+        -> ,def (+ 3 {,subarg3}) -> ,def (+ 3 {7})
+        :: ,def {(+ 3 7)} -> ,def {10}))
+   
+   ; lazy-if1
+   ; (define (f x) (if x (/ 1 0) (not x)))
+   ; (f (< 1 0))
+   (let* ([make-body (λ (x) `(if ,x ,err (not ,x)))]
+          [body (make-body 'x)]
+          [def `(define (f x) ,body)]
+          [lam `(lambda (x) ,body)]
+          [arg '(< 1 0)]
+          [body-subst (make-body arg)])
+     (t 'lazy-if1 m:lazy
+        ,def (f ,arg)
+        :: ,def ({f} ,arg) -> ,def ({,lam} ,arg)
+        :: ,def {(,lam ,arg)} -> ,def {,body-subst}
+        :: ,def (if {,arg} ,err (not {,arg})) -> ,def (if {false} ,err (not {false}))
+        :: ,def {(if false ,err (not false))} -> ,def {(not false)} -> ,def {true}))
+   
+   ; lazy-if2
+   ; (define (f x) (if x (not x) (/ 1 0)))
+   ; (f (> 1 0))
+   (let* ([make-body (λ (x) `(if ,x (not ,x) ,err))]
+          [body (make-body 'x)]
+          [def `(define (f x) ,body)]
+          [lam `(lambda (x) ,body)]
+          [arg '(> 1 0)]
+          [body-subst (make-body arg)])
+     (t 'lazy-if2 m:lazy
+        ,def (f ,arg)
+        :: ,def ({f} ,arg) -> ,def ({,lam} ,arg)
+        :: ,def {(,lam ,arg)} -> ,def {,body-subst}
+        :: ,def (if {,arg} (not {,arg}) ,err) -> ,def (if {true} (not {true}) ,err)
+        :: ,def {(if true (not true) ,err)} -> ,def {(not true)} -> ,def {false}))
+
+   ; lazy-take-0
+   (let ([e '(take 0 (list 1 2))])
+     (t 'lazy-take-0 m:lazy
+        ,e :: {,e} -> {empty}))
+   
+   (define (<delay#> n)
+     (string->symbol 
+      (string-append "<DelayedEvaluation#" (number->string n) ">")))
+     
+   ; lazy-take
+   (t 'lazy-take m:lazy
+      (take (+ 0 2) (list (+ 1 2) (+ 3 4) (/ 1 0)))
+      :: (take {(+ 0 2)} (list (+ 1 2) (+ 3 4) (/ 1 0)))
+      -> (take {2} (list (+ 1 2) (+ 3 4) (/ 1 0)))
+      :: {(take 2 (list (+ 1 2) (+ 3 4) (/ 1 0)))}
+      -> {(cons (+ 1 2) ,(<delay#> 0))})
+   
+   ; lazy-take-impl
+;   (define (take-n n lst)
+;     (if (= n 0)
+;         null
+;         (cons (first lst)
+;               (take-n (- n 1) (rest lst)))))
+;   (define (f lst) (+ (first lst) (second lst)))
+;   (f (take-n 3 (list 1 2 (/ 1 0) 4)))
+   (let* ([make-take-body 
+           (λ (n lst) 
+             `(if (= ,n 0) null
+                  (cons (first ,lst)
+                        (take-n (- ,n 1) (rest ,lst)))))]
+          [take-body (make-take-body 'n 'lst)]
+          [take-def `(define (take-n n lst) ,take-body)]
+          [take-lam `(lambda (n lst) ,take-body)]
+          [make-f-body (λ (lst) `(+ (first ,lst) (second ,lst)))]
+          [f-body (make-f-body 'lst)]
+          [f-def `(define (f lst) ,f-body)]
+          [f-lam `(lambda (lst) ,f-body)]
+          [lst-arg `(list (+ 1 2) (+ 3 4) ,err (+ 5 6))]
+          [lst-arg-red1 `(list 3 (+ 3 4) ,err (+ 5 6))]
+          [make-take-app (λ (n lst) `(take-n ,n ,lst))]
+          [take-arg (make-take-app 3 lst-arg)])
+     (t 'lazy-take-impl m:lazy
+        ,take-def ,f-def (f ,take-arg)
+        :: ,take-def ,f-def ({f} ,take-arg) -> ,take-def ,f-def ({,f-lam} ,take-arg)
+        :: ,take-def ,f-def {(,f-lam ,take-arg)} -> ,take-def ,f-def {,(make-f-body take-arg)}
+        :: ,take-def ,f-def ,(make-f-body `({take-n} 3 ,lst-arg))
+        -> ,take-def ,f-def ,(make-f-body `({,take-lam} 3 ,lst-arg))
+        :: ,take-def ,f-def ,(make-f-body `{(,take-lam 3 ,lst-arg)})
+        -> ,take-def ,f-def ,(make-f-body `{,(make-take-body 3 lst-arg)})
+        :: ,take-def ,f-def ,(make-f-body `(if {(= 3 0)} null
+                                               (cons (first ,lst-arg)
+                                                     (take-n (- 3 1) (rest ,lst-arg)))))
+        -> ,take-def ,f-def ,(make-f-body `(if {false} null
+                                               (cons (first ,lst-arg)
+                                                     (take-n (- 3 1) (rest ,lst-arg)))))
+        :: ,take-def ,f-def ,(make-f-body `{(if false null
+                                                (cons (first ,lst-arg)
+                                                      (take-n (- 3 1) (rest ,lst-arg))))})
+        -> ,take-def ,f-def ,(make-f-body `{(cons (first ,lst-arg) ,(make-take-app '(- 3 1) `(rest ,lst-arg)))})
+        :: ,take-def ,f-def (+ {(first (cons (first ,lst-arg) ,(make-take-app '(- 3 1) `(rest ,lst-arg))))}
+                               (second (cons (first ,lst-arg) ,(make-take-app '(- 3 1) `(rest ,lst-arg)))))
+        -> ,take-def ,f-def (+ {(first ,lst-arg)}
+                               (second (cons (first ,lst-arg) ,(make-take-app '(- 3 1) `(rest ,lst-arg)))))
+        :: ,take-def ,f-def (+ {(first ,lst-arg)}
+                               (second (cons {(first ,lst-arg)} ,(make-take-app '(- 3 1) `(rest ,lst-arg)))))
+        -> ,take-def ,f-def (+ {(+ 1 2)}
+                               (second (cons {(+ 1 2)} ,(make-take-app '(- 3 1) `(rest ,lst-arg)))))
+        :: ,take-def ,f-def (+ {(+ 1 2)}
+                               (second (cons {(+ 1 2)} ,(make-take-app '(- 3 1) `(rest (list {(+ 1 2)} (+ 3 4) ,err (+ 5 6)))))))
+        -> ,take-def ,f-def (+ {3}
+                               (second (cons {3} ,(make-take-app '(- 3 1) `(rest (list {3} (+ 3 4) ,err (+ 5 6)))))))
+        :: ,take-def ,f-def (+ 3 (second (cons 3 ({take-n} (- 3 1) (rest ,lst-arg-red1)))))
+        -> ,take-def ,f-def (+ 3 (second (cons 3 ({,take-lam} (- 3 1) (rest ,lst-arg-red1)))))
+        :: ,take-def ,f-def (+ 3 (second (cons 3 {(,take-lam (- 3 1) (rest ,lst-arg-red1))})))
+        -> ,take-def ,f-def (+ 3 (second (cons 3 {,(make-take-body '(- 3 1) `(rest ,lst-arg-red1))})))
+        :: ,take-def ,f-def (+ 3 (second (cons 3 ,(make-take-body '{(- 3 1)} `(rest ,lst-arg-red1)))))
+        -> ,take-def ,f-def (+ 3 (second (cons 3 ,(make-take-body '{2} `(rest ,lst-arg-red1)))))
+        :: ,take-def ,f-def (+ 3 (second (cons 3 (if {(= 2 0)} null (cons (first (rest ,lst-arg-red1))
+                                                                          (take-n (- 2 1) (rest (rest ,lst-arg-red1))))))))
+        -> ,take-def ,f-def (+ 3 (second (cons 3 (if {false} null (cons (first (rest ,lst-arg-red1))
+                                                                        (take-n (- 2 1) (rest (rest ,lst-arg-red1))))))))
+        :: ,take-def ,f-def (+ 3 (second (cons 3 {(if false null (cons (first (rest ,lst-arg-red1))
+                                                                       (take-n (- 2 1) (rest (rest ,lst-arg-red1)))))})))
+        -> ,take-def ,f-def (+ 3 (second (cons 3 {(cons (first (rest ,lst-arg-red1))
+                                                        (take-n (- 2 1) (rest (rest ,lst-arg-red1))))})))
+        :: ,take-def ,f-def (+ 3 {(second (cons 3 (cons (first (rest ,lst-arg-red1))
+                                                        (take-n (- 2 1) (rest (rest ,lst-arg-red1))))))})
+        -> ,take-def ,f-def (+ 3 {(first (rest ,lst-arg-red1))})
+        :: ,take-def ,f-def (+ 3 (first {(rest ,lst-arg-red1)}))
+        -> ,take-def ,f-def (+ 3 (first {(list (+ 3 4) (/ 1 0) (+ 5 6))}))
+        :: ,take-def ,f-def (+ 3 {(first (list (+ 3 4) (/ 1 0) (+ 5 6)))})
+        -> ,take-def ,f-def (+ 3 {(+ 3 4)}) -> ,take-def ,f-def (+ 3 {7})
+        :: ,take-def ,f-def {(+ 3 7)} -> ,take-def ,f-def {10}
+        ))
+
+   ; lazy-unknown1
+   (t 'lazy-unknown1 m:lazy
+      (second (take 3 (list (+ 1 2) (+ 3 4) (/ 1 0))))
+      :: (second {(take 3 (list (+ 1 2) (+ 3 4) (/ 1 0)))})
+      -> (second {(cons (+ 1 2) ,(<delay#> 0))})
+      :: {(second (cons (+ 1 2) (cons (+ 3 4) ,(<delay#> 1))))}
+      -> {(+ 3 4)} -> {7})
+      
+   ; lazy-unknown2
+   (let* ([make-body (λ (x) `(+ (second ,x) (third ,x)))]
+          [body (make-body 'x)]
+          [def `(define (f x) ,body)]
+          [lam `(lambda (x) ,body)]
+          [subarg `(take 4 (list (+ 1 2) (+ 3 4) (+ 5 6) (+ 7 8) (/ 1 0)))]
+          [arg `(cdr ,subarg)]
+          [arg-red `(cons (+ 3 4) (cons (+ 5 6) ,(<delay#> 1)))])
+     (t 'lazy-unknown2 m:lazy
+        ,def (f ,arg)
+        :: ,def ({f} ,arg) -> ,def ({,lam} ,arg)
+        :: ,def {(,lam ,arg)} -> ,def {,(make-body arg)}
+        :: ,def ,(make-body `(cdr {,subarg}))
+        -> ,def ,(make-body `(cdr {(cons (+ 1 2) ,(<delay#> 0))}))
+        :: ,def ,(make-body `{(cdr (cons (+ 1 2) ,(<delay#> 0)))})
+        -> ,def ,(make-body `{,(<delay#> 0)})
+        :: ,def (+ {(second ,arg-red)} (third ,arg-red))
+        -> ,def (+ {(+ 5 6)} (third ,arg-red))
+        :: ,def (+ {(+ 5 6)} (third (cons (+ 3 4) (cons {(+ 5 6)} ,(<delay#> 1)))))
+        -> ,def (+ {11} (third (cons (+ 3 4) (cons {11} ,(<delay#> 1)))))
+        :: ,def (+ 11 {(third (cons (+ 3 4) (cons 11 ,(<delay#> 1))))})
+        -> ,def (+ 11 {(+ 7 8)}) -> ,def (+ 11 {15})
+        :: ,def {(+ 11 15)} -> ,def {26}
+        ))
+   
+   ; lazy-inf-list1
+;   (define (add-one x) (+ x 1))
+;   (define nats (cons 1 (map add-one nats)))
+;   (+ (second nats) (third nats))
+   (let* ([add1-body '(+ x 1)]
+          [add1-def `(define (add-one x) ,add1-body)]
+          [add1-lam `(lambda (x) ,add1-body)]
+          [nats-def '(define nats (cons 1 (map add-one nats)))]
+          [nats-def-expanded `(define nats (cons 1 (cons 2 (cons 3 ,(<delay#> 4)))))])
+     (t 'lazy-inf-list1 m:lazy
+        ,add1-def ,nats-def (+ (second nats) (third nats))
+        :: ,add1-def ,nats-def (+ (second {nats}) (third nats))
+        -> ,add1-def ,nats-def (+ (second {(cons 1 (map add-one nats))}) (third nats))
+        :: ,add1-def (define nats (cons 1 (map {add-one} nats)))
+        (+ (second (cons 1 (map {add-one} nats))) (third nats))
+        -> ,add1-def (define nats (cons 1 (map {,add1-lam} nats)))
+        (+ (second (cons 1 (map {,add1-lam} nats))) (third nats))
+        :: ,add1-def (define nats (cons 1 (map ,add1-lam {nats})))
+        (+ (second (cons 1 (map ,add1-lam {nats}))) (third nats))
+        -> ,add1-def (define nats (cons 1 (map ,add1-lam {(cons 1 ,(<delay#> 0))})))
+        (+ (second (cons 1 (map ,add1-lam {(cons 1 ,(<delay#> 0))}))) (third nats))
+        :: ,add1-def (define nats (cons 1 {(map ,add1-lam (cons 1 ,(<delay#> 0)))}))
+        (+ (second (cons 1 {(map ,add1-lam (cons 1 ,(<delay#> 0)))})) (third nats))
+        -> ,add1-def (define nats (cons 1 {(cons ,(<delay#> 1) ,(<delay#> 2))}))
+        (+ (second (cons 1 {(cons ,(<delay#> 1) ,(<delay#> 2))})) (third nats))
+        :: ,add1-def (define nats (cons 1 (cons ,(<delay#> 1) ,(<delay#> 2))))
+        (+ {(second (cons 1 (cons ,(<delay#> 1) ,(<delay#> 2))))} (third nats))
+        -> ,add1-def (define nats (cons 1 (cons ,(<delay#> 1) ,(<delay#> 2))))
+        (+ {,(<delay#> 1)} (third nats))
+;        :: ,add1-def (define nats (cons 1 (cons {(+ 1 1)} ,(<delay#> 2))))
+;        (+ {,(<delay#> 1)} (third nats))
+        :: ...
+        -> ,add1-def (define nats (cons 1 (cons {(+ 1 1)} ,(<delay#> 2))))
+        (+ {(+ 1 1)} (third nats))
+        -> ,add1-def (define nats (cons 1 (cons {2} ,(<delay#> 2))))
+        (+ {2} (third nats))
+        :: ,add1-def (define nats (cons 1 (cons 2 ,(<delay#> 2))))
+        (+ 2 (third {nats}))
+        -> ,add1-def (define nats (cons 1 (cons 2 ,(<delay#> 2))))
+        (+ 2 (third {(cons 1 (cons 2 ,(<delay#> 2)))}))
+        :: ,add1-def (define nats (cons 1 (cons 2 ,(<delay#> 2))))
+        (+ 2 {(third (cons 1 (cons 2 ,(<delay#> 2))))})
+        -> ,add1-def (define nats (cons 1 (cons 2 (cons ,(<delay#> 3) ,(<delay#> 4)))))
+        (+ 2 {,(<delay#> 3)})
+;        :: ,add1-def (define nats (cons 1 (cons 2 (cons {(+ 2 1)} ,(<delay#> 4)))))
+;        (+ 2 {,(<delay#> 3)})
+        :: ...
+        -> ,add1-def (define nats (cons 1 (cons 2 (cons {(+ 2 1)} ,(<delay#> 4)))))
+        (+ 2 {(+ 2 1)})
+        -> ,add1-def (define nats (cons 1 (cons 2 (cons {3} ,(<delay#> 4)))))
+        (+ 2 {3})
+        :: ,add1-def ,nats-def-expanded {(+ 2 3)}
+        -> ,add1-def ,nats-def-expanded {5}
+        ))
+   
+   ; lazy-cond1, lazy-cond2
+;   (define (f x)
+;     (cond ((> 0 x) (/ 1 0))
+;           ((< 0 x) (* x 10))
+;           (else (+ x 10))))
+;   (f 0)
+;   (f 1)
+   (let* ([make-test1 (λ (x) `(> 0 ,x))]
+          [make-test2 (λ (x) `(< 0 ,x))]
+          [test1 (make-test1 0)]
+          [test2 (make-test2 0)]
+          [test12 (make-test1 2)]
+          [test22 (make-test2 2)]
+          [make-clause1 (λ (x) `(* ,x 10))]
+          [make-clause2 (λ (x) `(+ ,x 10))]
+          [clause1 (make-clause1 0)]
+          [clause2 (make-clause2 0)]
+          [clause12 (make-clause1 2)]
+          [clause22 (make-clause2 2)]
+          [cnd (λ (x) `(cond (,(make-test1 x) ,err)
+                             (,(make-test2 x) ,(make-clause1 x))
+                             (else ,(make-clause2 x))))]
+          [make-def (λ (x) `(define (f x) ,(cnd x)))]
+          [def (make-def 'x)]
+          [lam (λ (x) `(lambda (x) ,(cnd x)))])
+     (t 'lazy-cond1 m:lazy
+        ,def (f 0)
+        :: ,def ({f} 0) -> ,def ({,(lam 'x)} 0)
+        :: ,def {(,(lam 'x ) 0)} -> ,def {,(cnd 0)}
+        :: ,def (cond ({,test1} ,err)
+                      (,test2 ,clause1)
+                      (else ,clause2))
+        -> ,def (cond ({false} ,err)
+                      (,test2 ,clause1)
+                      (else ,clause2))
+        :: ,def {(cond (false ,err)
+                       (,test2 ,clause1)
+                       (else ,clause2))}
+        -> ,def {(cond (,test2 ,clause1)
+                       (else ,clause2))}
+        :: ,def (cond ({,test2} ,clause1)
+                      (else ,clause2))
+        -> ,def (cond ({false} ,clause1)
+                      (else ,clause2))
+        :: ,def {(cond (false ,clause1)
+                       (else ,clause2))}
+        -> ,def {(cond (else ,clause2))} 
+        -> ,def {,clause2} -> ,def {10})
+     (t 'lazy-cond2 m:lazy
+        ,def (f 2)
+        :: ,def ({f} 2) -> ,def ({,(lam 'x)} 2)
+        :: ,def {(,(lam 'x ) 2)} -> ,def {,(cnd 2)}
+        :: ,def (cond ({,test12} ,err)
+                      (,test22 ,clause12)
+                      (else ,clause22))
+        -> ,def (cond ({false} ,err)
+                      (,test22 ,clause12)
+                      (else ,clause22))
+        :: ,def {(cond (false ,err)
+                       (,test22 ,clause12)
+                       (else ,clause22))}
+        -> ,def {(cond (,test22 ,clause12)
+                       (else ,clause22))}
+        :: ,def (cond ({,test22} ,clause12)
+                      (else ,clause22))
+        -> ,def (cond ({true} ,clause12)
+                      (else ,clause22))
+        :: ,def {(cond (true ,clause12)
+                       (else ,clause22))}
+        -> ,def {,clause12} -> ,def {20})
+     )
+   
+   ; lazy-cond3
+   (t 'lazy-cond3 m:lazy
+      (! (cond [false 1] [else 2]))
+      :: {(cond [false 1] [else 2])} -> {(cond [else 2])} -> {2})
+   
+   
+   (t 'lazy-eq? m:lazy
+      (eq? 'a 'a)
+      :: {(eq? 'a'a)} -> {true})
+   (t 'lazy-eqv? m:lazy
+      (eqv? (integer->char 955) (integer->char 955))
+      :: (eqv? {(integer->char 955)} (integer->char 955))
+      -> (eqv? {#\λ} (integer->char 955))
+      :: (eqv? #\λ {(integer->char 955)})
+      -> (eqv? #\λ {#\λ})
+      :: {(eqv? #\λ #\λ)} -> {true})
+   (t 'lazy-equal? m:lazy
+      (equal? (list 1 2) (list 1 2))
+      :: {(equal? (list 1 2) (list 1 2))} -> {true})
+   (t 'lazy-list?1 m:lazy
+      (list? (list 1 2))
+      :: {(list? (list 1 2))} -> {true})
+   (t 'lazy-list?2 m:lazy
+      (list? empty)
+      :: {(list? empty)} -> {true})
+   (t 'lazy-list?3 m:lazy
+      (list? (+ 1 2))
+      :: (list? {(+ 1 2)}) -> (list? {3})
+      :: {(list? 3)} -> {false})
+   (t 'lazy-length m:lazy
+      (length (list 1 2))
+      :: {(length (list 1 2))} -> {2})
+   (t 'lazy-list-ref m:lazy
+      (list-ref (list 1 2) (+ 1 0))
+      :: (list-ref (list 1 2) {(+ 1 0)}) -> (list-ref (list 1 2) {1})
+      :: {(list-ref (list 1 2) 1)} -> {2})
+   (t 'lazy-list-tail m:lazy
+      (list-tail (list 1 2) 1)
+      :: {(list-tail (list 1 2) 1)} -> {(list 2)})
+   (t 'lazy-append m:lazy
+      (append (list 1 2) (list 3 4))
+      :: {(append (list 1 2) (list 3 4))}
+      -> {(cons 1 ,(<delay#> 0))})
+   (t 'lazy-reverse m:lazy
+      (reverse (list 1 2 3))
+      :: {(reverse (list 1 2 3))} -> {(list 3 2 1)})
+   (t 'lazy-empty? m:lazy
+      (empty? (list 1 2))
+      :: {(empty? (list 1 2))} -> {false})
+   (t 'lazy-assoc m:lazy
+      (assoc 1 (list (list 1 2)))
+      :: {(assoc 1 (list (list 1 2)))} -> {(list 1 2)})
+   (t 'lazy-assq m:lazy
+      (assq 1 (list (list 1 2)))
+      :: {(assq 1 (list (list 1 2)))} -> {(list 1 2)})
+   (t 'lazy-assv m:lazy
+      (assv 1 (list (list 1 2)))
+      :: {(assv 1 (list (list 1 2)))} -> {(list 1 2)})
+   (t 'lazy-cons? m:lazy
+      (cons? (list 1 2))
+      :: {(cons? (list 1 2))} -> {true})
+   (t 'lazy-remove m:lazy
+      (remove 2 (list 1 2 3))
+      :: {(remove 2 (list 1 2 3))} -> {(cons 1 ,(<delay#> 0))})
+   (t 'lazy-remq m:lazy
+      (remq 2 (list 1 2 3))
+      :: {(remq 2 (list 1 2 3))} -> {(cons 1 ,(<delay#> 0))})
+   (t 'lazy-remv m:lazy
+      (remv 2 (list 1 2 3))
+      :: {(remv 2 (list 1 2 3))} -> {(cons 1 ,(<delay#> 0))})
+   (t 'lazy-member m:lazy
+      (member 1 (list 1 2))
+      :: {(member 1 (list 1 2))} -> {(list 1 2)})
+   (t 'lazy-memq m:lazy
+      (memq 1 (list 1 2))
+      :: {(memq 1 (list 1 2))} -> {(list 1 2)})
+   (t 'lazy-memv m:lazy
+      (memv 1 (list 1 2))
+      :: {(memv 1 (list 1 2))} -> {(list 1 2)})
+  
+   
+   (t 'lazy-filter1 m:lazy
+      (third (filter (lambda (x) (>= x 3)) '(1 2 3 4 5)))
+      :: (third {(filter (lambda (x) (>= x 3)) (list 1 2 3 4 5))})
+      -> (third (... {(>= 1 3)} ...))
+      -> (third (... {false} ...))
+      :: ... -> (third {,(<delay#> 0)})
+      :: ... -> (third {(>= 2 3)}) -> (third {false})
+      :: ... -> (third {(>= 3 3)}) -> (third {true})
+      :: ... -> (third (cons 3 {(>= 4 3)})) -> (third (cons 3 {true}))
+      :: ... -> (third (cons 3 (cons 4 {(>= 5 3)})))
+      -> (third (cons 3 (cons 4 {true})))
+      :: {(third (cons 3 (cons 4 (cons 5 ,(<delay#> 1)))))} -> {5})
+   
+   ; same as lazy-filter1 except forcing of the list itself shows up as a step
+   ; only difference is in lazy-filter1 a quote (') is used while in lazy-filter2
+   ; a list constructor is used
+   (t 'lazy-filter2 m:lazy
+      (third (filter (lambda (x) (>= x 3)) (list 1 2 3 4 5)))
+      :: (third {(filter (lambda (x) (>= x 3)) (list 1 2 3 4 5))})
+      -> (third (... {(list 1 2 3 4 5)} ...))
+      :: ... -> (third (... {(>= 1 3)} ...)) -> (third (... {false} ...))
+      :: ... -> (third {,(<delay#> 0)})
+      :: ... -> (third {(>= 2 3)}) -> (third {false})
+      :: ... -> (third {(>= 3 3)}) -> (third {true})
+      :: ... -> (third (cons 3 {(>= 4 3)})) -> (third (cons 3 {true}))
+      :: ... -> (third (cons 3 (cons 4 {(>= 5 3)})))
+      -> (third (cons 3 (cons 4 {true})))
+      :: {(third (cons 3 (cons 4 (cons 5 ,(<delay#> 1)))))} -> {5})
+   
+   (t 'lazy-fold m:lazy
+      (+ (foldr (lambda (x y) (+ x y)) 0 '(1 2 3)) 1000)
+      :: (+ {(foldr (lambda (x y) (+ x y)) 0 (list 1 2 3))} 1000)
+      -> (+ {,(<delay#> 0)} 1000)
+      :: ... -> (+ {(+ 1 ,(<delay#> 1))} 1000)
+      :: ... -> (+ (+ 1 {(+ 2 ,(<delay#> 2))}) 1000)
+      :: ... -> (+ (+ 1 (+ 2 {(+ 3 ,(<delay#> 3))})) 1000)
+      :: (+ (+ 1 (+ 2 {(+ 3 0)})) 1000)
+      -> (+ (+ 1 (+ 2 {3})) 1000)
+      :: (+ (+ 1 {(+ 2 3)}) 1000)
+      -> (+ (+ 1 {5}) 1000)
+      :: (+ {(+ 1 5)} 1000)
+      -> (+ {6} 1000)
+      :: {(+ 6 1000)} -> {1006})
+    
+    
+    
+   
   #;
   (t1 'teachpack-callbacks
      (test-teachpack-sequence

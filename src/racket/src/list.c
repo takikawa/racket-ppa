@@ -223,11 +223,9 @@ scheme_init_list (Scheme_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
   scheme_add_global_constant ("null?", p, env);
 
-  scheme_add_global_constant ("list?",
-			      scheme_make_immed_prim(list_p_prim,
-						     "list?",
-						     1, 1),
-			      env);
+  p = scheme_make_folding_prim(list_p_prim, "list?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant ("list?", p, env);
 
   REGISTER_SO(scheme_list_proc);
   p = scheme_make_immed_prim(list_prim, "list", 0, -1);
@@ -250,11 +248,11 @@ scheme_init_list (Scheme_Env *env)
 						      "immutable?",
 						      1, 1, 1),
 			     env);
-  scheme_add_global_constant ("length",
-			      scheme_make_immed_prim(length_prim,
-						     "length",
-						     1, 1),
-			      env);
+
+  p = scheme_make_immed_prim(length_prim, "length", 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("length", p, env);
+
   scheme_add_global_constant ("append",
 			      scheme_make_immed_prim(append_prim,
 						     "append",
@@ -1076,6 +1074,10 @@ int scheme_is_list(Scheme_Object *obj1)
 
   obj2 = obj1;
 
+  /* There's no fuel check in this loop. Checking a very long list
+     could interfere with thread switching --- but only once, because
+     another query on the same list will take half as long. */
+  
   while (1) {
     obj1 = SCHEME_CDR(obj1);
 
@@ -1183,6 +1185,11 @@ length_prim (int argc, Scheme_Object *argv[])
   l = scheme_list_length(argv[0]);
 
   return scheme_make_integer(l);
+}
+
+Scheme_Object *scheme_checked_length(Scheme_Object *v)
+{
+  return length_prim(1, &v);
 }
 
 Scheme_Object *
@@ -3252,7 +3259,7 @@ Scheme_Object *scheme_make_ephemeron(Scheme_Object *key, Scheme_Object *val)
   Scheme_Ephemeron *e;
   int can_gc = 1;
 
-  if (SCHEME_INTP(val) || !GC_base(val)) 
+  if (SCHEME_INTP(key) || !GC_base(key))
     can_gc = 0;
 
   if (can_gc) {
@@ -3261,12 +3268,12 @@ Scheme_Object *scheme_make_ephemeron(Scheme_Object *key, Scheme_Object *val)
     e = (Scheme_Ephemeron *)scheme_malloc(sizeof(Scheme_Ephemeron));
   }
   e->so.type = scheme_ephemeron_type;
+  e->key = key;
+  e->val = val;
   if (can_gc) {
     e->next = ephemerons;
     ephemerons = e;
   }
-  e->key = key;
-  e->val = val;
 
   return (Scheme_Object *)e;
 #endif

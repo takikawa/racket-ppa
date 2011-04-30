@@ -5,7 +5,6 @@
          "private/core-layout.ss"
          "private/loc-wrapper.ss"
          "reduction-semantics.ss"
-         (lib "mred.ss" "mred")
          (lib "mrpict.ss" "texpict"))
 
 (define reduction-rule-style/c
@@ -115,6 +114,7 @@
 
 (provide/contract
  [set-arrow-pict! (-> symbol? (-> pict?) void?)]
+ [arrow->pict (-> symbol? pict?)]
  
  [lw->pict
   (-> (or/c (listof symbol?) compiled-lang?) lw? pict?)]

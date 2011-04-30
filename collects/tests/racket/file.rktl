@@ -666,6 +666,9 @@
   (close-input-port p)
   (close-input-port q))
 
+;; We should be able to install the current permissions:
+(test (void) file-or-directory-permissions "tmp1" (file-or-directory-permissions "tmp1" 'bits))
+
 (define test-file 
   (open-output-file "tmp2" #:exists 'truncate))
 (write-char #\; test-file)
@@ -1317,11 +1320,11 @@
 ;; TCP
 
 (let ([do-once
-       (lambda (evt?)
+       (lambda (evt? localhost)
 	 (let* (
 	  [l (tcp-listen 0 5 #t)]
     [pn (listen-port l)])
-	   (let-values ([(r1 w1) (tcp-connect "localhost" pn)]
+	   (let-values ([(r1 w1) (tcp-connect localhost pn)]
 			[(r2 w2) (if evt?
 				     (apply values (sync (tcp-accept-evt l)))
 				     (tcp-accept l))])
@@ -1339,8 +1342,10 @@
 	   (when evt?
 	     (test #f sync/timeout 0 (tcp-accept-evt l)))
 	   (tcp-close l)))])
-  (do-once #f)
-  (do-once #t))
+  (do-once #f "localhost")
+  (do-once #t "localhost")
+  (do-once #f "::1")
+  (do-once #t "::1"))
 
 (test #f tcp-port? (current-input-port))
 (test #f tcp-port? (current-output-port))
@@ -1457,6 +1462,9 @@
   (err/rt-test (rename-file-or-directory "tmp1" "tmp11") (fs-reject? 'rename-file-or-directory))
   (err/rt-test (copy-file "tmp1" "tmp11") (fs-reject? 'copy-file))
   (err/rt-test (make-file-or-directory-link "tmp1" "tmp11") (fs-reject? 'make-file-or-directory-link))
+  (err/rt-test (file-or-directory-permissions "tmp1" 7) (fs-reject? 'file-or-directory-permissions))
+  (err/rt-test (file-or-directory-permissions "tmp1" 0) (fs-reject? 'file-or-directory-permissions))
+  (test #t exact-integer? (file-or-directory-permissions "tmp1" 'bits))
   (let ([p (open-input-file "tmp1")])
     (test #t input-port? p)
     (close-input-port p))

@@ -784,7 +784,7 @@
                           [(keyword? (cadr l))
                            (raise-syntax-error
                             'application
-                            "keyword in expression possition (immediately after another keyword)"
+                            "keyword in expression position (immediately after another keyword)"
                             stx
                             (cadr l))]
                           [else
@@ -821,7 +821,11 @@
                   [(keyword? (syntax-e (car l)))
                    (loop (cddr l)
                          (cdr ids)
-                         (cons (list (car ids) (cadr l)) bind-accum)
+                         (cons (list (car ids) (syntax-property (cadr l)
+                                                                'inferred-name
+                                                                ;; void hides binding name
+                                                                (void)))
+                               bind-accum)
                          arg-accum
                          (cons (cons (car l) (car ids))
                                kw-pairs))]
@@ -1239,7 +1243,8 @@
              proc))
           (let* ([kw-chaperone
                   (let ([p (keyword-procedure-proc wrap-proc)])
-                    (lambda (kws args . rest)
+                    (case-lambda 
+                     [(kws args . rest)
                       (call-with-values (lambda () (apply p kws args rest))
                         (lambda results
                           (let ([len (length results)]
@@ -1280,7 +1285,11 @@
                                  args))
                               (if extra?
                                   (apply values (car results) kws (cdr results))
-                                  (apply values kws results))))))))]
+                                  (apply values kws results))))))]
+                     ;; The following case exists only to make sure that the arity of
+                     ;; any procedure passed to `make-keyword-args' is covered
+                     ;; bu this procedure's arity.
+                     [other (error "shouldn't get here")]))]
                  [new-proc
                   (cond
                    [(okp? proc)

@@ -84,6 +84,8 @@
  (cs-bold "Fett")
  (cs-underline "Unterstrichen")
  (cs-change-color "Farbe ändern")
+ (cs-foreground-color "Vordergrundfarbe")
+ (cs-background-color "Hintergrundfarbe")
  (cs-tack/untack-arrow "Pfeil befestigen/lösen")
  (cs-jump-to-next-bound-occurrence "Zum nächsten gebundenen Vorkommen springen")
  (cs-jump-to-binding "Zu bindendem Vorkommen springen")
@@ -348,7 +350,7 @@
  (show-status-line "Status-Zeile anzeigen")
  (count-columns-from-one "Spaltennummern fangen mit 1 an")
  (display-line-numbers "Zeilennummern in Puffern anzeigen, keine Puffer-Indizes")
- (show-line-and-column-numbers "Zeilen- und Spaltennummern anzeigen") ; used for popup menu; right click on line/column box in bottom of drs window
+ (show-line-and-column-numbers "Zeilen- && Spaltennummern anzeigen") ; used for popup menu; right click on line/column box in bottom of drs window
  (show-character-offsets "Zeichen-Offsets anzeigen") ; used for popup menu; right click on line/column box in bottom of drs window
  (enable-keybindings-in-menus "Tastenbelegung für Menüs")
  (automatically-to-ps "Automatisch in PostScript-Datei drucken")
@@ -363,9 +365,10 @@
  (switch-to-module-language-automatically "Automatisch in die `module'-Sprache wechseln, wenn ein Modul geöffnet wird")
  (interactions-beside-definitions "Interaktionen neben den Definitionen anzeigen") ;; in preferences, below the checkbox one line above this one
  (show-line-numbers "Zeilennummern einblenden")
- (show-line-numbers/menu "Zeilennummern einblenden")
- (hide-line-numbers/menu "Zeilennummern ausblenden")
+ (show-line-numbers/menu "Zeilen&nummern einblenden")
+ (hide-line-numbers/menu "Zeilen&nummern ausblenden")
 
+ (show-line-numbers-in-definitions "Alle Zeilennummern in Definitionen einblenden") ;; shows up in the popup menu item in the bottom of the drracket window; controls the line numbers on each line in the definitions; used in a checkable menu item
  (limit-interactions-size "Umfang der Interaktionen einschränken")
  (background-color "Hintergrundfarbe")
  (default-text-color "Standard für Text") ;; used for configuring colors, but doesn't need the word "color"
@@ -945,7 +948,7 @@
  (enforce-primitives-group-box-label "Initiale Bindungen")
  (enforce-primitives-check-box-label "Änderungen von initialen Bindungen verbieten")
 
- (automatically-compile "compiled/-Verzeichnisse bestücken (für schnelleres laden)")
+ (automatically-compile "\"compiled\"-Verzeichnisse bestücken (für schnelleres laden)")
  (preserve-stacktrace-information "Stack-Trace behalten (einige Optimierungen werden abgeschaltet)")
  (expression-level-stacktrace "Stack-Trace mit Ausdrücken")
  (function-level-stacktrace "Stack-Trace mit Funktionen")
@@ -1059,6 +1062,8 @@
  (test-coverage-clear? "Änderungen im Definitionsfenster machen die Information über Testabdeckung ungültig. Weitermachen?")
  (test-coverage-clear-and-do-not-ask-again "Ja, und nicht nicht wieder fragen")
  (test-coverage-ask? "Frage nach dem Löschen der Testabdeckungs-Information")
+ (test-coverage-on "Durch Tests abgedeckt")
+ (test-coverage-off "Durch Tests nicht abgedeckt")
   
  ;; tracing
  (tracing-enable-tracing "Tracing einschalten")
@@ -1125,6 +1130,8 @@
  (module-browser-open-file-format "~a öffnen")
  (module-browser "Modul-Browser") ;; frame title
  (module-browser... "&Modul-Browser...") ;; menu item title
+ (module-browser-in-file "M&odul-Browser auf ~a") ;; menu item title; ~a is filled with a filename
+ (module-browser-no-file "Modul-Browser auf dieser gespeicherten Datei") ;; menu item title for above menu item; used when there is no saved file
  (module-browser-error-expanding "Fehler beim Expandieren des Programms:\n\n~a")
  (module-browser-show-lib-paths "Dateien anzeigen, die über (lib ..)-Pfade eingebunden wurden")
  (module-browser-progress "Modul-Browser: ~a") ;; prefix in the status line
@@ -1132,6 +1139,7 @@
  (module-browser-show-lib-paths/short "\"lib\"-requires folgen") ;; check box label in show module browser pane in drscheme window.
  (module-browser-show-planet-paths/short "\"PLaneT\"-requires folgen") ;; check box label in show module browser pane in drscheme window.
  (module-browser-refresh "Aktualisieren") ;; button label in show module browser pane in drscheme window.
+ (module-browser-highlight "Hervorheben") ;; used to search in the graph; the label on a text-field% object
  (module-browser-only-in-plt-and-module-langs
   "Der Modul-Browser ist nur für modulbasierte Programme verfügbar.")
  (module-browser-name-length "Länge der Namen")

@@ -49,7 +49,7 @@
       (field 
        [universe 
         (new checked-cell% [msg "UniSt"] [value0 universe0] [ok? check-with] 
-             [display (and state "your server's state")])])
+             [display (if (string? state) state (and state  "your server's state"))])])
  
       ;; -----------------------------------------------------------------------
       ;; dealing with events
@@ -234,9 +234,9 @@
 
 ;; IPort OPort Sexp -> IWorld 
 (define (create-iworld i o info)
-  (if (and (pair? info) (string? (car info)))
-      (make-iworld i o (car info) (cdr info))
-      (make-iworld i o (symbol->string (gensym 'iworld)) info)))
+  (if (string? info)
+      (make-iworld i o info "info field not available")
+      (make-iworld i o (symbol->string (gensym 'iworld)) "info field not available")))
 
 ;; Player S-exp -> Void
 (define (iworld-send p sexp)

@@ -131,7 +131,6 @@ static void eval_exptime(Scheme_Object *names, int count,
 static Scheme_Module_Exports *make_module_exports();
 
 static Scheme_Object *scheme_sys_wraps_phase_worker(intptr_t p);
-static Scheme_Object *resolved_module_path_value(Scheme_Object *rmp);
 
 #define cons scheme_make_pair
 
@@ -205,6 +204,7 @@ READ_ONLY static Scheme_Object *expression_stx;
 READ_ONLY static Scheme_Object *empty_self_modidx;
 READ_ONLY static Scheme_Object *empty_self_modname;
 
+THREAD_LOCAL_DECL(static Scheme_Object *empty_self_shift_cache);
 THREAD_LOCAL_DECL(static Scheme_Bucket_Table *starts_table);
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
 THREAD_LOCAL_DECL(static Scheme_Bucket_Table *place_local_modpath_table);
@@ -1421,7 +1421,7 @@ static Scheme_Object *namespace_attach_module(int argc, Scheme_Object *argv[])
   while (!SCHEME_NULLP(todo)) {
     if (phase > max_phase)
       max_phase = phase;
-    if (phase < 0) {
+    if (phase < orig_phase) {
       /* As soon as we start traversing negative phases, stop transferring
          instances (i.e., transfer declarations only). This transfer-only
          mode should stick even even if we go back into positive phases. */
@@ -1466,7 +1466,7 @@ static Scheme_Object *namespace_attach_module(int argc, Scheme_Object *argv[])
 	   deeper in phases (for-syntax levels) than the target
 	   namespace has ever gone, so there's definitely no conflict
 	   at this level in that case. */
-	if ((phase >= 0) && SCHEME_TRUEP(to_modchain)) {
+	if ((phase >= orig_phase) && SCHEME_TRUEP(to_modchain)) {
 	  menv2 = (Scheme_Env *)scheme_hash_get(MODCHAIN_TABLE(to_modchain), name);
 	  if (menv2) {
 	    if (!SAME_OBJ(menv->toplevel, menv2->toplevel))
@@ -1642,7 +1642,7 @@ static Scheme_Object *namespace_attach_module(int argc, Scheme_Object *argv[])
         }
 	
 	from_modchain = SCHEME_VEC_ELS(from_modchain)[2];
-        if (phase > 0) {
+        if (phase > orig_phase) {
           to_modchain = SCHEME_CAR(past_to_modchains);
           past_to_modchains = SCHEME_CDR(past_to_modchains);
         }
@@ -1669,7 +1669,7 @@ static Scheme_Object *namespace_attach_module(int argc, Scheme_Object *argv[])
 	}
 	
 	from_modchain = SCHEME_VEC_ELS(from_modchain)[1];
-        if (phase >= 0) {
+        if (phase >= orig_phase) {
           past_to_modchains = cons(to_modchain, past_to_modchains);
           if (SCHEME_TRUEP(to_modchain))
             to_modchain = SCHEME_VEC_ELS(to_modchain)[1];
@@ -1821,7 +1821,7 @@ static Scheme_Object *namespace_attach_module(int argc, Scheme_Object *argv[])
 
     LOG_ATTACH(printf("Copying %d (%p)\n", phase, checked));
 
-    if (phase >= 0)
+    if (phase >= orig_phase)
       check_modchain_consistency(MODCHAIN_TABLE(to_modchain), phase);
 
     for (i = checked->size; i--; ) {
@@ -1837,7 +1837,7 @@ static Scheme_Object *namespace_attach_module(int argc, Scheme_Object *argv[])
 	  menv2 = (Scheme_Env *)scheme_hash_get(MODCHAIN_TABLE(to_modchain), name);
 	  if (!menv2) {
 	    /* Clone/copy menv for the new namespace: */
-            if ((phase >= 0) && !just_declare) {
+            if ((phase >= orig_phase) && !just_declare) {
               menv2 = scheme_copy_module_env(menv, to_env, to_modchain, orig_phase);
               if (menv->attached)
                 menv2->attached = 1;
@@ -1858,7 +1858,7 @@ static Scheme_Object *namespace_attach_module(int argc, Scheme_Object *argv[])
     
     past_checkeds = SCHEME_CDR(past_checkeds);
     from_modchain = SCHEME_VEC_ELS(from_modchain)[2];
-    if (phase > 0)
+    if (phase > orig_phase)
       to_modchain = SCHEME_VEC_ELS(to_modchain)[2];   
     --phase;
   }
@@ -2826,7 +2826,7 @@ static Scheme_Object *module_compiled_name(int argc, Scheme_Object *argv[])
   m = scheme_extract_compiled_module(argv[0]);
       
   if (m) {
-    return resolved_module_path_value(m->modname);
+    return scheme_resolved_module_path_value(m->modname);
   }
 
   scheme_wrong_type("module-compiled-name", "compiled module declaration", 0, argc, argv);
@@ -2937,7 +2937,7 @@ static Scheme_Object *make_resolved_module_path_obj(Scheme_Object *o)
 
 #if defined(MZ_USE_PLACES)
   if (SCHEME_SYMBOLP(o)) {
-    newo = scheme_make_sized_offset_byte_string(SCHEME_SYM_VAL(o), 0, SCHEME_SYM_LEN(o), 1);
+    newo = scheme_make_sized_offset_byte_string((char *)o, SCHEME_SYMSTR_OFFSET(o), SCHEME_SYM_LEN(o), 1);
   }
   else {
     newo = o;
@@ -2953,7 +2953,7 @@ static Scheme_Object *make_resolved_module_path_obj(Scheme_Object *o)
   return rmp;
 }
 
-static Scheme_Object *resolved_module_path_value(Scheme_Object *rmp)
+Scheme_Object *scheme_resolved_module_path_value(Scheme_Object *rmp)
 {
   Scheme_Object *rmp_val;
   rmp_val = SCHEME_RMP_VAL(rmp);
@@ -3040,7 +3040,7 @@ static Scheme_Object *resolved_module_path_name(int argc, Scheme_Object *argv[])
   if (!SCHEME_MODNAMEP(argv[0]))
     scheme_wrong_type("resolved-module-path-name", "resolved-module-path", 0, argc, argv);
 
-  return resolved_module_path_value(argv[0]);
+  return scheme_resolved_module_path_value(argv[0]);
 }
 
 
@@ -3242,8 +3242,8 @@ Scheme_Object *module_resolve_in_namespace(Scheme_Object *modidx, Scheme_Env *en
 }
 
 Scheme_Object *scheme_modidx_shift(Scheme_Object *modidx, 
-				   Scheme_Object *shift_from_modidx,
-				   Scheme_Object *shift_to_modidx)
+                                   Scheme_Object *shift_from_modidx,
+                                   Scheme_Object *shift_to_modidx)
 {
   Scheme_Object *base;
 
@@ -3274,59 +3274,72 @@ Scheme_Object *scheme_modidx_shift(Scheme_Object *modidx,
          a small global cache in that case. */
 
       if (SCHEME_MODNAMEP(sbase)) {
-	sbm = NULL;
-	cvec = global_shift_cache;
+        sbm = NULL;
+        cvec = global_shift_cache;
+      } else if (SAME_OBJ(sbase, empty_self_modidx)) {
+        sbm = (Scheme_Modidx *)sbase;
+        cvec = empty_self_shift_cache;
       } else {
-	sbm = (Scheme_Modidx *)sbase;
-	cvec = sbm->shift_cache;
+        sbm = (Scheme_Modidx *)sbase;
+        cvec = sbm->shift_cache;
       }
 
+      /* attempt lookup in cache */
+      /* ASSERT(SCHEME_VECTORP(cvec)); */
       c = (cvec ? SCHEME_VEC_SIZE(cvec) : 0);
-      
       for (i = 0; i < c; i += 2) {
-	if (SHIFT_CACHE_NULLP(SCHEME_VEC_ELS(cvec)[i]))
-	  break;
-	if (SAME_OBJ(modidx, SCHEME_VEC_ELS(cvec)[i]))
-	  return SCHEME_VEC_ELS(cvec)[i + 1];
+        if (SHIFT_CACHE_NULLP(SCHEME_VEC_ELS(cvec)[i]))
+          break;
+        if (SAME_OBJ(modidx, SCHEME_VEC_ELS(cvec)[i]))
+          return SCHEME_VEC_ELS(cvec)[i + 1];
       }
-      
+     
+      /* lookup failed, add entry to cache */
       smodidx = scheme_make_modidx(((Scheme_Modidx *)modidx)->path,
-				   sbase,
-				   scheme_false);
-
+                                   sbase,
+                                   scheme_false);
+      
+      /* make room in cache */
       if (!sbm) {
-	if (!global_shift_cache)
-	  global_shift_cache = scheme_make_vector(GLOBAL_SHIFT_CACHE_SIZE, SHIFT_CACHE_NULL);
-	for (i = 0; i < (GLOBAL_SHIFT_CACHE_SIZE - 2); i++) {
-	  SCHEME_VEC_ELS(global_shift_cache)[i+2] = SCHEME_VEC_ELS(global_shift_cache)[i];
-	}
-	SCHEME_VEC_ELS(global_shift_cache)[0] = modidx;
-	SCHEME_VEC_ELS(global_shift_cache)[1] = smodidx;
+        if (!global_shift_cache)
+          global_shift_cache = scheme_make_vector(GLOBAL_SHIFT_CACHE_SIZE, SHIFT_CACHE_NULL);
+        else {
+          for (i = (GLOBAL_SHIFT_CACHE_SIZE - 2); i--; ) {
+            SCHEME_VEC_ELS(global_shift_cache)[i+2] = SCHEME_VEC_ELS(global_shift_cache)[i];
+          }
+        }
+        cvec = global_shift_cache;
+        i = 0;
       } else {
-	/* May have GCed: */
-	if (cvec && !sbm->shift_cache)
-	  sbm->shift_cache = cvec;
+        /* May have GCed: */
+        if (cvec && !sbm->shift_cache)
+          sbm->shift_cache = cvec;
 
-	if (i >= c) {
-	  /* Grow cache vector */
-	  Scheme_Object *naya;
-	  int j;
-	    
-	  naya = scheme_make_vector(c + 10, SHIFT_CACHE_NULL);
-	  for (j = 0; j < c; j++) {
-	    SCHEME_VEC_ELS(naya)[j] = SCHEME_VEC_ELS(cvec)[j];
-	  }
-	  if (0 && !sbm->shift_cache) {
-	    sbm->cache_next = modidx_caching_chain;
-	    modidx_caching_chain = sbm;
-	  }
+        if (i >= c) {
+          /* Grow cache vector */
+          Scheme_Object *naya;
+          int j;
 
-	  sbm->shift_cache = naya;
-	}
-	  
-	SCHEME_VEC_ELS(sbm->shift_cache)[i] = modidx;
-	SCHEME_VEC_ELS(sbm->shift_cache)[i+1] = smodidx;
+          naya = scheme_make_vector(c + 10, SHIFT_CACHE_NULL);
+          for (j = 0; j < c; j++) {
+            SCHEME_VEC_ELS(naya)[j] = SCHEME_VEC_ELS(cvec)[j];
+          }
+          if (!SAME_OBJ((Scheme_Object *)sbm, empty_self_modidx) && !sbm->shift_cache) {
+            sbm->cache_next = modidx_caching_chain;
+            modidx_caching_chain = sbm;
+          }
+          cvec = naya;
+          if (!SAME_OBJ((Scheme_Object *)sbm, empty_self_modidx)) {
+            sbm->shift_cache = cvec;
+          } else {
+            empty_self_shift_cache = cvec;
+          }
+        }
       }
+
+      /* set entry in cache */
+      SCHEME_VEC_ELS(cvec)[i]   = modidx;
+      SCHEME_VEC_ELS(cvec)[i+1] = smodidx;
 
       return smodidx;
     }
@@ -3340,6 +3353,7 @@ void scheme_clear_modidx_cache(void)
   Scheme_Modidx *sbm, *next;
 
   global_shift_cache = NULL;
+  empty_self_shift_cache = NULL;
   
   for (sbm = modidx_caching_chain; sbm; sbm = next) {
     sbm->shift_cache = NULL;
@@ -4226,7 +4240,7 @@ static Scheme_Env *instantiate_module(Scheme_Module *m, Scheme_Env *env, int res
     menv->insp = insp;
 
     /* These three should be set by various "finish"es, but
-       we initialize them in case there's an error runing a "finish". */
+       we initialize them in case there's an error running a "finish". */
     menv->require_names = scheme_null;
     menv->et_require_names = scheme_null;
     menv->tt_require_names = scheme_null;
@@ -6055,7 +6069,7 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
     SCHEME_EXPAND_OBSERVE_TAG(rec[drec].observer, fm);
   }
 
-  fm = scheme_stx_property(fm, module_name_symbol, resolved_module_path_value(m->modname));
+  fm = scheme_stx_property(fm, module_name_symbol, scheme_resolved_module_path_value(m->modname));
 
   /* phase shift to replace self_modidx of previous expansion (if any): */
   fm = scheme_stx_phase_shift(fm, 0, empty_self_modidx, self_modidx, NULL);
@@ -6074,7 +6088,7 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
       mb = scheme_datum_to_syntax(module_begin_symbol, form, scheme_false, 0, 0);
       fm = scheme_make_pair(mb, scheme_make_pair(fm, scheme_null));
       fm = scheme_datum_to_syntax(fm, form, form, 0, 2);
-      fm = scheme_stx_property(fm, module_name_symbol, resolved_module_path_value(m->modname));
+      fm = scheme_stx_property(fm, module_name_symbol, scheme_resolved_module_path_value(m->modname));
       /* Since fm is a newly-created syntax object, we need to re-add renamings: */
       fm = scheme_add_rename(fm, rn_set);
       
@@ -10133,8 +10147,8 @@ static Scheme_Object *write_module(Scheme_Object *obj)
     l = cons(scheme_false, l);
 
   l = cons(m->me->src_modidx, l);
-  l = cons(resolved_module_path_value(m->modsrc), l);
-  l = cons(resolved_module_path_value(m->modname), l);
+  l = cons(scheme_resolved_module_path_value(m->modsrc), l);
+  l = cons(scheme_resolved_module_path_value(m->modname), l);
 
   return l;
 }

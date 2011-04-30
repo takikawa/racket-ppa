@@ -2,7 +2,7 @@
 (require (lib "mrpict.ss" "texpict")
          (lib "utils.ss" "texpict")
          racket/contract
-         scheme/gui/base
+         racket/draw
          scheme/class
          scheme/match
          (only-in scheme/list drop-right last partition)
@@ -55,7 +55,8 @@
          metafunction-cases
          compact-vertical-min-width
          extend-language-show-union
-         set-arrow-pict!)
+         set-arrow-pict!
+         arrow->pict)
 (provide/contract
  [linebreaks (parameter/c (or/c #f (listof boolean?)))])
 

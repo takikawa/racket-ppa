@@ -5,25 +5,30 @@
          "../core.rkt"
          "../base.rkt"
          "manual-scheme.rkt"
+         scribble/core
          (for-syntax racket/base
                      syntax/parse))
 
 (provide codeblock
+         codeblock0
          typeset-code)
 
-(define-syntax (codeblock stx)
+(define-for-syntax (do-codeblock stx)
   (syntax-parse stx
     [(_ (~seq (~or (~optional (~seq #:expand expand-expr:expr)
                               #:defaults ([expand-expr #'#f])
                               #:name "#:expand keyword")
                    (~optional (~seq #:indent indent-expr:expr)
-                              #:defaults ([indent-expr #'2])
+                              #:defaults ([indent-expr #'0])
                               #:name "#:expand keyword")
                    (~optional (~seq #:keep-lang-line? keep-lang-line?-expr:expr)
                               #:defaults ([keep-lang-line?-expr #'#t])
                               #:name "#:keep-lang-line? keyword")
                    (~optional (~seq #:context context-expr:expr)
-                              #:name "#:context keyword"))
+                              #:name "#:context keyword")
+                   (~optional (~seq #:line-numbers line-numbers:expr)
+                              #:defaults ([line-numbers #'#f])
+                              #:name "#:line-numbers keyword"))
               ...)
         str ...)
      #`(typeset-code str ...
@@ -36,12 +41,20 @@
                                       (let ([v #'(str ...)])
                                         (and (pair? (syntax-e v))
                                              #`#'#,(car (syntax-e v))))
-                                      #'#f)))]))
+                                      #'#f))
+                     #:line-numbers line-numbers)]))
+
+(define (code-inset p)
+  (make-nested-flow (make-style 'code-inset '()) (list p)))
+
+(define-syntax (codeblock stx) #`(code-inset #,(do-codeblock stx)))
+(define-syntax (codeblock0 stx) (do-codeblock stx))
 
 (define (typeset-code #:context [context #f]
                       #:expand [expand #f]
                       #:indent [indent 2]
                       #:keep-lang-line? [keep-lang-line? #t]
+                      #:line-numbers [line-numbers #f]
                       . strs)
   (let* ([str (apply string-append strs)]
          [bstr (string->bytes/utf-8 (regexp-replace* #rx"(?m:^$)" str "\xA0"))]
@@ -121,7 +134,7 @@
                      [else null]))]
            [has-hash-lang? (regexp-match? #rx"^#lang " bstr)]
            [language (if has-hash-lang?
-                         (let ([m (regexp-match #rx"^#lang ([-a-zA-Z/._+]+)" bstr)])
+                         (let ([m (regexp-match #rx"^#lang ([-0-9a-zA-Z/._+]+)" bstr)])
                            (if m
                                (link-mod
                                 #:orig? #t
@@ -149,6 +162,7 @@
        ((if keep-lang-line? values cdr) ; FIXME: #lang can span lines
         (list->lines
          indent
+         #:line-numbers line-numbers
          (let loop ([pos 0]
                     [tokens tokens])
            (cond
@@ -195,17 +209,37 @@
 
 (define omitable (make-style #f '(omitable)))
 
-(define (list->lines indent-amt l)
-  (define (make-line accum-line) (list (paragraph omitable 
-                                                  (cons indent-elem
-                                                        (reverse accum-line)))))
-  (define indent-elem (hspace indent-amt))
-  (let loop ([l l] [accum-line null])
-    (cond
-     [(null? l) (if (null? accum-line)
-                    null
-                    (list (make-line accum-line)))]
-     [(eq? 'newline (car l))
-      (cons (make-line accum-line)
-            (loop (cdr l) null))]
-     [else (loop (cdr l) (cons (car l) accum-line))])))
+(define (list->lines indent-amt l #:line-numbers [line-numbers #f])
+  (define indent-elem (if (zero? indent-amt)
+                          ""
+                          (hspace indent-amt)))
+  ;(list of any) delim -> (list of (list of any))
+  (define (break-list lst delim)
+    (let loop ([l lst] [n null] [c null])
+      (cond
+       [(null? l) (reverse (if (null? c) n (cons (reverse c) n)))]
+       [(eq? delim (car l)) (loop (cdr l) (cons (reverse c) n) null)]
+       [else (loop (cdr l) n (cons (car l) c) )])))
+
+  (define lines (break-list l 'newline))
+  (define line-cnt (length lines))
+  (define line-cntl (string-length (format "~a" (+ line-cnt (or line-numbers 0)))))
+
+  (define (prepend-line-number n r)
+    (define ln (format "~a" n))
+    (define lnl (string-length ln))
+    (define diff (- line-cntl lnl))
+    (define l1 (list (tt ln) (hspace 1)))
+    (cons (make-element 'smaller (make-element 'smaller  
+      (if (not (zero? diff)) (cons (hspace diff) l1) l1))) r))
+
+  (define (make-line accum-line line-number)
+    (define rest (cons indent-elem accum-line))
+    (list (paragraph omitable (if line-numbers
+                                  (prepend-line-number line-number rest)
+                                  rest))))
+
+  (for/list ([l (break-list l 'newline)]
+             [i (in-naturals (or line-numbers 1))])
+            (make-line l i)))
+

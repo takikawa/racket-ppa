@@ -3,7 +3,7 @@
                      syntax/stx
                      syntax/id-table
                      syntax/keyword
-                     unstable/syntax
+                     racket/syntax
                      "rep-data.rkt"
                      "rep.rkt"
                      "kws.rkt"
@@ -68,7 +68,11 @@ Optimizations
  (define (wash-iattrs stx)
    (wash-list wash-iattr stx))
  (define (wash-sattrs stx)
-   (wash-list wash-sattr stx)))
+   (wash-list wash-sattr stx))
+ (define (generate-n-temporaries n)
+   (generate-temporaries
+    (for/list ([i (in-range n)])
+      (string->symbol (format "g~sx" i))))))
 
 ;; ----
 
@@ -124,6 +128,9 @@ Conventions:
 ;; (parse:variants x cx relsattrs variants splicing? pr es success cp0) : expr[Ans]
 (define-syntax (parse:variants stx)
   (syntax-case stx ()
+    [(parse:variants x cx relsattrs () splicing? pr es success cp0 commit?)
+     ;; Special case: no variants
+     #'(fail (failure pr es))]
     [(parse:variants x cx relsattrs (variant ...) splicing? pr es success cp0 commit?)
      #'(try (parse:variant x cx relsattrs variant splicing? pr es success cp0 commit?) ...)]))
 
@@ -177,7 +184,9 @@ Conventions:
 ;; (parse:clauses x clauses ctx)
 (define-syntax (parse:clauses stx)
   (syntax-case stx ()
-    [(parse:clauses x clauses ctx)
+    [(parse:clauses x clauses body-mode ctx)
+     ;; if templates? is true, expect one form after kwargs in clause, wrap it with syntax
+     ;; otherwise, expect non-empty body sequence (defs and exprs)
      (with-disappeared-uses
       (with-txlifts
        (lambda ()
@@ -187,32 +196,47 @@ Conventions:
                                  #:no-duplicates? #t))
         (define context
           (options-select-value chunks '#:context #:default #'x))
+        (define colon-notation?
+          (not (assq '#:disable-colon-notation chunks)))
         (define-values (decls0 defs)
           (get-decls+defs chunks #t #:context #'ctx))
         (define (for-clause clause)
           (syntax-case clause ()
             [[p . rest]
              (let-values ([(rest pattern defs2)
-                           (parse-pattern+sides #'p #'rest
-                                                #:splicing? #f
-                                                #:decls decls0
-                                                #:context #'ctx)])
-               (unless (and (stx-list? rest) (stx-pair? rest))
-                 (raise-syntax-error #f
-                                     "expected non-empty clause body"
-                                     #'ctx
-                                     clause))
+                           (parameterize ((stxclass-colon-notation? colon-notation?))
+                             (parse-pattern+sides #'p #'rest
+                                                  #:splicing? #f
+                                                  #:decls decls0
+                                                  #:context #'ctx))])
                (with-syntax ([rest rest]
                              [pattern pattern]
-                             [(local-def ...) (append defs defs2)])
+                             [(local-def ...) (append defs defs2)]
+                             [body-expr
+                              (case (syntax-e #'body-mode)
+                                ((one-template)
+                                 (syntax-case rest ()
+                                   [(template)
+                                    #'(syntax template)]
+                                   [_ (raise-syntax-error #f "expected exactly one template" #'ctx)]))
+                                ((body-sequence)
+                                 (syntax-case rest ()
+                                   [(e0 e ...) #'(let () e0 e ...)]
+                                   [_ (raise-syntax-error #f "expected non-empty clause body"
+                                                          #'ctx clause)]))
+                                (else
+                                 (raise-syntax-error #f "internal error: unknown body mode" #'ctx #'body-mode)))])
                  #`(let ()
                      local-def ...
-                     (parse:S x cx pattern pr es (let () . rest)))))]))
-        (unless (and (stx-list? clauses-stx) (stx-pair? clauses-stx))
-          (raise-syntax-error #f "expected non-empty sequence of clauses" #'ctx))
+                     (parse:S x cx pattern pr es body-expr))))]))
+        (unless (stx-list? clauses-stx)
+          (raise-syntax-error #f "expected sequence of clauses" #'ctx))
+        (define alternatives
+          (if (stx-pair? clauses-stx)
+              (map for-clause (stx->list clauses-stx))
+              (list #`(fail (failure pr es)))))
         (with-syntax ([(def ...) (append (get-txlifts-as-definitions) defs)]
-                      [(alternative ...)
-                       (map for-clause (stx->list clauses-stx))])
+                      [(alternative ...) alternatives])
           #`(let* ([ctx0 #,context]
                    [pr (ps-empty x ctx0)]
                    [es null]
@@ -288,14 +312,14 @@ Conventions:
         #`(let ([d (if (syntax? x) (syntax-e x) x)])
             (if (equal? d (quote datum))
                 k
-                (fail (failure pr (cons(expect:atom 'datum) es)))))]
+                (fail (failure pr (cons (expect:atom 'datum) es)))))]
        [#s(pat:literal attrs literal input-phase lit-phase)
         #`(if (and (identifier? x)
                    (free-identifier=?/phases
                     x input-phase
                     (quote-syntax literal) lit-phase))
               k
-              (fail (failure pr (cons(expect:literal (quote-syntax literal)) es))))]
+              (fail (failure pr (cons (expect:literal (quote-syntax literal)) es))))]
        [#s(pat:action attrs action subpattern)
         #'(parse:A x cx action pr es (parse:S x cx subpattern pr es k))]
        [#s(pat:head attrs head tail)
@@ -654,8 +678,8 @@ Conventions:
                      [(attr-repc ...) attr-repcs]
                      [tail-pattern-is-null?
                       (equal? (syntax->datum #'tail) '#s(pat:datum () ()))])
-         (define-pattern-variable alt-map #'((id . alt-id) ...))
-         (define-pattern-variable loop-k
+         (define/with-syntax alt-map #'((id . alt-id) ...))
+         (define/with-syntax loop-k
            #'(dots-loop dx* dcx* loop-pr* fail-handler cut-prompt rel-rep ... alt-id ...))
          #`(let ()
              ;; dots-loop : stx progress rel-rep ... alt-id ... -> Ans
@@ -693,7 +717,7 @@ Conventions:
   (syntax-case stx ()
     [(parse:EH x cx pr repc x* cx* pr* alts rep head es k)
      (let ()
-       (define-pattern-variable k*
+       (define/with-syntax k*
          (let* ([main-attrs (wash-iattrs (pattern-attrs (wash #'head)))]
                 [ids (map attr-name main-attrs)]
                 [alt-ids

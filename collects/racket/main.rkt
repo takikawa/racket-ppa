@@ -16,14 +16,17 @@
          racket/list
          racket/vector
          racket/string
+         racket/bytes
          racket/function
          racket/path
          racket/file
+         racket/place
          racket/port
          racket/cmdline
          racket/promise
          racket/bool
          racket/stream
+         racket/sequence
          racket/local
          racket/system
          (for-syntax racket/base))
@@ -44,14 +47,17 @@
                        racket/list
                        racket/vector
                        racket/string
+                       racket/bytes
                        racket/function
                        racket/path
                        racket/file
+                       racket/place
                        racket/port
                        racket/cmdline
                        racket/promise
                        racket/bool
                        racket/stream
+                       racket/sequence
                        racket/local
                        racket/system)
          (for-syntax (all-from-out racket/base)))

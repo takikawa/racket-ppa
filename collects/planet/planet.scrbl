@@ -400,9 +400,12 @@ package specifier and the specified directory name.
 @subsection[#:tag "unlink"]{@exec{unlink}}
 
 Usage:
-@commandline{raco planet unlink <owner> <pkg> <maj> <min>}
+@commandline{raco planet unlink [ <option> ] <owner> <pkg> <maj> <min>}
 Remove any development link (see @secref{devlinks}) associated with
 the given package.
+
+@exec{<option>} can only be:
+@itemize[@item{@exec{-q, --quiet}: don't signal an error on nonexistent links}]
 
 @subsection[#:tag "fetch"]{@exec{fetch}}
 
@@ -696,11 +699,15 @@ The @racket[pkg] argument must end with the string @racket[".plt"].
 @defproc[(remove-hard-link [owner string?]
 	 		   [pkg   (and/c string? #rx"[.]plt")]
 			   [maj   natural-number/c]
-			   [min   natural-number/c])
+			   [min   natural-number/c]
+                           [#:quiet? quiet? boolean? #false])
  	 any]{
 Removes any hard link that may be associated with the given package.
 
 The @racket[pkg] argument must end with the string @racket[".plt"].
+The @racket[maj] and @racket[min] arguments must be integers. This
+procedure signals an error if no such link exists, unless
+@racket[#:quiet?] is @racket[#true].
 }
 
 @defproc[(resolve-planet-path [spec quoted-planet-require-spec?])
@@ -845,23 +852,57 @@ in Scribble documentation.
 @defform[(racketmodlink/this-package suffix-id pre-content-expr ...)]
 @defform[(defmodule/this-package maybe-req suffix-id maybe-sources pre-flow ...)]
 @defform*[((defmodulelang/this-package suffix-id maybe-sources pre-flow ...)
-           (defmodulelang/this-package suffix-id #:module-paths (mod-suffix-id ...) maybe-sources pre-flow ...))]
+           (defmodulelang/this-package suffix-id
+             #:module-paths (mod-suffix-id ...) maybe-sources 
+             pre-flow ...))]
 @defform[(defmodulereader/this-package suffix-id maybe-sources pre-flow ...)]
-@defform[(defmodule*/this-package maybe-req (suffix-id ...+) maybe-sources pre-flow ...)]
-@defform*[((defmodulelang*/this-package (suffix-id ...+) maybe-sources pre-flow ...)
-           (defmodulelang*/this-package (suffix-id ...+) #:module-paths (mod-suffix-id ...) maybe-sources pre-flow ...))]
-@defform[(defmodulereader*/this-package (suffix-id ...+) maybe-sources pre-flow ...)]
-@defform[(defmodule*/no-declare/this-package maybe-req (suffix-id ...+) maybe-sources pre-flow ...)]
-@defform*[((defmodulelang*/no-declare/this-package (suffix-id ...+) maybe-sources pre-flow ...)
-           (defmodulelang*/no-declare/this-package (suffix-id ...+) #:module-paths (mod-suffix-id ...) maybe-sources pre-flow ...))]
-@defform[(defmodulereader*/no-declare/this-package (suffix-id ...+) maybe-sources pre-flow ...)]
+@defform[(defmodule*/this-package maybe-req (suffix-id ...+) 
+           maybe-sources pre-flow ...)]
+@defform*[((defmodulelang*/this-package (suffix-id ...+) 
+             maybe-sources pre-flow ...)
+           (defmodulelang*/this-package (suffix-id ...+) 
+             #:module-paths (mod-suffix-id ...) maybe-sources 
+             pre-flow ...))]
+@defform[(defmodulereader*/this-package (suffix-id ...+) 
+           maybe-sources pre-flow ...)]
+@defform[(defmodule*/no-declare/this-package maybe-req (suffix-id ...+)
+           maybe-sources pre-flow ...)]
+@defform*[((defmodulelang*/no-declare/this-package (suffix-id ...+)
+             maybe-sources pre-flow ...)
+           (defmodulelang*/no-declare/this-package (suffix-id ...+) 
+             #:module-paths (mod-suffix-id ...) maybe-sources pre-flow ...))]
+@defform[(defmodulereader*/no-declare/this-package (suffix-id ...+)
+           maybe-sources pre-flow ...)]
+@defform[(declare-exporting/this-package suffix-id ... maybe-sources)]
 )]{
 
-Variants of @racket[defmodule], etc., from @racketmodname[scribble/manual] in
-which each module path is replaced by an identifier (@racket[suffix-id] or
-@racket[mod-suffix-id]) representing a module within the current version of the
-containing @|PLaneT| package.
+Variants of @racket[racketmod], @racket[racketmodname],
+@racket[racketmodlink], @racket[defmodule], @racket[defmodulereader],
+@racket[defmodulelang], @racket[defmodule*], @racket[defmodulelang*],
+@racket[defmodulereader*], @racket[defmodule*/no-declare],
+@racket[defmodulelang*/no-declare],
+@racket[defmodulereader*/no-declare], and @racket[declare-exporting],
+respectively, that implicitly refer to the PLaneT package that
+contains the enclosing module.
 
+The full module name passed to @racket[defmodule], etc is formed by
+appending the @racket[suffix-id] or @racket[mod-suffix-id] to the
+symbol returned by @racket[(this-package-version-symbol)], separated
+by a @litchar{/} character, and tagging the resulting symbol as a
+@racket[planet] module path. As a special case, if @racket[suffix-id]
+is @racketid[main], the suffix is omitted.
+
+For example, within a package named @tt{package.plt} by @tt{author},
+version @tt{1:0}, the following are equivalent:
+@racketblock[
+(defmodule/this-package dir/file)
+  @#,elem{=} (defmodule (planet author/package:1:0/dir/file))
+]
+and
+@racketblock[
+(defmodule/this-package main)
+  @#,elem{=} (defmodule (planet author/package:1:0))
+]
 }
 
 @subsection{Terse Status Updates}

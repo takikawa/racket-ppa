@@ -1704,9 +1704,8 @@ mark_parameterization {
 mark_config {
  mark:
   Scheme_Config *config = (Scheme_Config *)p;
-  gcMARK2(config->key, gc);
-  gcMARK2(config->cell, gc);
-  gcMARK2(config->next, gc);
+  gcMARK2(config->ht, gc);
+  gcMARK2(config->root, gc);
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Config));
 }
@@ -2333,6 +2332,7 @@ future {
  mark:
   future_t *f = (future_t *)p;
   gcMARK2(f->orig_lambda, gc);
+  gcMARK2(f->cust, gc);
   gcMARK2(f->arg_s0, gc);
   gcMARK2(f->arg_t0, gc);
   gcMARK2(f->arg_S0, gc);
@@ -2344,6 +2344,7 @@ future {
   gcMARK2(f->arg_s2, gc);
   gcMARK2(f->arg_S2, gc);
   gcMARK2(f->arg_p, gc);
+  gcMARK2(f->arg_S4, gc);
   gcMARK2(f->retval_s, gc);
   gcMARK2(f->retval, gc);
   gcMARK2(f->multiple_array, gc);
@@ -2353,9 +2354,22 @@ future {
   gcMARK2(f->next, gc);
   gcMARK2(f->next_waiting_atomic, gc);
   gcMARK2(f->next_waiting_lwc, gc);
+  gcMARK2(f->next_waiting_touch, gc);
   gcMARK2(f->suspended_lw, gc);
+  gcMARK2(f->prev_in_fsema_queue, gc);
+  gcMARK2(f->next_in_fsema_queue, gc);
+  gcMARK2(f->touching, gc);
  size:
   gcBYTES_TO_WORDS(sizeof(future_t));
+}
+
+fsemaphore {
+ mark:
+    fsemaphore_t *s = (fsemaphore_t*)p;
+    gcMARK2(s->queue_front, gc);
+    gcMARK2(s->queue_end, gc);
+ size:
+    gcBYTES_TO_WORDS(sizeof(fsemaphore_t));
 }
 
 #else
@@ -2371,7 +2385,17 @@ sequential_future {
   gcBYTES_TO_WORDS(sizeof(future_t));
 }
 
+sequential_fsemaphore {
+ mark:
+    fsemaphore_t *s = (fsemaphore_t*)p;
+    gcMARK2(s->sema, gc);
+ size:
+    gcBYTES_TO_WORDS(sizeof(fsemaphore_t));
+}
+
 #endif
+
+
 
 END future;
 

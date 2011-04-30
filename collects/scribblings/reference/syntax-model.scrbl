@@ -573,9 +573,9 @@ way that unexported and protected @tech{module bindings} are used. See
 @secref["stxcerts"] for more information on @tech{syntax
 certificates}.
 
-The expander's handling of @racket[letrec-values+syntaxes] is similar
+The expander's handling of @racket[letrec-syntaxes+values] is similar
 to its handling of @racket[define-syntaxes]. A
-@racket[letrec-values+syntaxes] might be expanded in an arbitrary phase
+@racket[letrec-syntaxes+values] can be expanded in an arbitrary phase
 level @math{n} (not just 0), in which case the expression for the
 @tech{transformer binding} is expanded at @tech{phase level} @math{n+1}.
 
@@ -633,7 +633,7 @@ recursively expands only until the form becomes one of the following:
        @racket[define-values] form before expansion continues. When a
        @racket[define-syntaxes] form is discovered, the right-hand
        side is expanded and evaluated (as for a
-       @racket[letrec-values+syntaxes] form), and a transformer
+       @racket[letrec-syntaxes+values] form), and a transformer
        binding is installed for the body sequence before expansion
        continues.}
 
@@ -968,7 +968,10 @@ When an @indexed-racket['inferred-name] property is attached to a
 syntax object for an expression (see @secref["stxprops"]), the
 property value is used for naming the expression, and it overrides any
 name that was inferred from the expression's context. Normally, the
-property value should be a symbol or an identifier.
+property value should be a symbol. A @racket['inferred-name] 
+property value of @|void-const| hides a name that would otherwise be
+inferred from context (perhaps because a binding identifier's was 
+automatically generated and should not be exposed).
 
 When an inferred name is not available, but a source location is
 available, a name is constructed using the source location

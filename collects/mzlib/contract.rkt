@@ -47,6 +47,8 @@
          racket/contract/private/misc
          racket/contract/private/provide
          racket/contract/private/guts
+         racket/contract/private/prop
+         racket/contract/private/blame
          racket/contract/private/ds
          racket/contract/private/opt
          racket/contract/private/basic-opters)
@@ -54,7 +56,6 @@
 (provide 
  opt/c define-opt/c ;(all-from "private/contract-opt.rkt")
  (except-out (all-from-out racket/contract/private/ds)
-             lazy-depth-to-look
              contract-struct)
  
  (all-from-out racket/contract/private/base)
@@ -67,11 +68,7 @@
  (rename-out [string-len/c string/len])
  (except-out (all-from-out racket/contract/private/guts)
              check-flat-contract
-             check-flat-named-contract))
+             check-flat-named-contract)
+ (all-from-out racket/contract/private/prop
+               racket/contract/private/blame))
 
-
-;; copied here because not provided by racket/contract anymore
-(define (flat-contract/predicate? pred)
-  (or (flat-contract? pred)
-      (and (procedure? pred)
-           (procedure-arity-includes? pred 1))))

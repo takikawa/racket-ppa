@@ -22,10 +22,10 @@
 (require racket/block
          racket/match
          unstable/pretty
-         unstable/srcloc
-         unstable/location
-         unstable/syntax
-         (for-syntax racket/base racket/match syntax/parse unstable/syntax))
+         syntax/srcloc
+         syntax/location
+         racket/syntax
+         (for-syntax racket/base racket/match syntax/parse racket/syntax))
 
 (define-syntax (let/debug stx)
   (syntax-parse stx

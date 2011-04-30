@@ -1,3 +1,54 @@
+Version 5.1.1, May 2011
+Enabled single-precision floats by default
+Added single-flonum?
+Changed eqv? so that inexacts are equivalent only when they
+ have the same precision
+Changed file-or-directory-permission to add 'bits mode
+ and permission-setting mode
+Added special treatment of void as an 'inferred-name property
+Removed the "MrEd" compatability executable under Windows
+ and Mac OS X, but the "mred" compatibility script remains
+racket/gui: added multi-column support to list-box%
+racket/gui: added scrollbar support to panel%, vertical-panel%,
+ and horizontal-panel%
+racket/gui: added 'wheel-left and 'wheel-right events
+racket/file: add user-read-bit, etc.
+racket/contract: removed the following (undocumented) exports:
+  build-flat-contract
+  chaperone-contract-struct?
+  contract-struct-first-order
+  contract-struct-name
+  contract-struct-projection
+  contract-struct-stronger?
+  contract-struct?
+  contracted-function
+  contracted-function-ctc
+  contracted-function-proc
+  contracted-function?
+  first-order-get
+  first-order-pred?
+  first-order-prop
+  flat-contract-struct?
+  flat-get
+  flat-pred?
+  flat-prop
+  make-opt-contract/info
+  name-get
+  name-pred?
+  name-prop
+  opt-contract/info-contract
+  opt-contract/info-enforcer
+  opt-contract/info-id
+  proj-get
+  proj-pred?
+  proj-prop
+  stronger-get
+  stronger-pred?
+  stronger-prop
+  struct:contracted-function
+  synthesized-value
+  unknown?
+
 Version 5.1, February 2011
 Renamed "proxy" to "impersonator"
 Added current-get-interaction-input-port, which enables
@@ -1308,7 +1359,7 @@ Refined error messages
 Version 49, May 31, 1997 
 Multiple superclass inheritance is no longer supported
 Added (Java-ish) interfaces to object system
-class* syntax changed to accomodate interfaces and removed
+class* syntax changed to accommodate interfaces and removed
   multiple superclasses
 uq-ivar always takes two arguments; class is not a legal argument
 uq-make-generic accepts a class or an interface
@@ -1454,7 +1505,7 @@ stdout/stderr are not auto-flushed for read-char or peek-char on stdin
 Added port-display-handler and port-write-handler
 
 Version 45, November 12, 1996
-Multiple return values are agressively supported
+Multiple return values are aggressively supported
 IMPORTANT: let-values is now analogous to let; the old 
   let-values is now let*-values
 let-values, letrec-values, define-values, and begin0 are primitive
@@ -1620,7 +1671,7 @@ Version 0.33: December 21, 1995
 rationals and complex numbers supported
 make-class and make-class* syntax changed (one set of parens
   added). The old syntax is still supported for now, but you
-  should convert. The old syntax will eventualy go away (and
+  should convert. The old syntax will eventually go away (and
   Zodiac will never be compatible with it).
 class variables and cvar no longer allowed
 ivar always takes an object; if class included, must be first

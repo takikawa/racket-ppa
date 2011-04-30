@@ -152,6 +152,12 @@ inline static int postmaster_and_master_gc(NewGC *gc) {
 inline static int postmaster_and_place_gc(NewGC *gc) {
   return (MASTERGC && gc != MASTERGC);
 }
+
+intptr_t GC_is_place() {
+  NewGC *gc = GC_get_GC();
+  return postmaster_and_place_gc(gc);
+}
+
 static void master_collect_initiate(NewGC *gc);
 #endif
 
@@ -302,12 +308,16 @@ static void *ofm_malloc_zero(size_t size) {
   return ptr;
 }
 
+inline static size_t size_to_apage_count(size_t len) {
+  return (len / APAGE_SIZE) + (((len % APAGE_SIZE) == 0) ? 0 : 1);
+}
+  
 inline static void check_used_against_max(NewGC *gc, size_t len) 
 {
-  intptr_t delta;
+  intptr_t page_count;
 
-  delta = (len / APAGE_SIZE) + (((len % APAGE_SIZE) == 0) ? 0 : 1);
-  gc->used_pages += delta;
+  page_count = size_to_apage_count(len);
+  gc->used_pages += page_count;
 
   if(gc->in_unsafe_allocation_mode) {
     if(gc->used_pages > gc->max_pages_in_heap)
@@ -321,7 +331,7 @@ inline static void check_used_against_max(NewGC *gc, size_t len)
           /* too much memory allocated. 
            * Inform the thunk and then die semi-gracefully */
           if(GC_out_of_memory) {
-            gc->used_pages -= delta;
+            gc->used_pages -= page_count;
             GC_out_of_memory();
           }
           out_of_memory();
@@ -344,7 +354,7 @@ static void *malloc_pages(NewGC *gc, size_t len, size_t alignment, int dirty, in
 
 static void free_pages(NewGC *gc, void *p, size_t len, int type, int expect_mprotect, void **src_block)
 {
-  gc->used_pages -= (len / APAGE_SIZE) + (((len % APAGE_SIZE) == 0) ? 0 : 1);
+  gc->used_pages -= size_to_apage_count(len);
   mmu_free_page(gc->mmu, p, len, type, expect_mprotect, src_block);
 }
 
@@ -620,7 +630,7 @@ int GC_is_allocated(void *p)
 # else
 #  define PREFIX_WSIZE 1
 # endif
-#else /* GC_ALIGHT_FOUR or byte aligned */
+#else /* GC_ALIGN_FOUR or byte aligned */
 # define PREFIX_WSIZE 0
 #endif
 #define PREFIX_SIZE (PREFIX_WSIZE * WORD_SIZE)
@@ -659,6 +669,10 @@ static size_t round_to_apage_size(size_t sizeb)
   sizeb += APAGE_SIZE - 1;
   sizeb -= sizeb & (APAGE_SIZE - 1);
   return sizeb;
+}
+
+static inline size_t real_page_size(mpage *page) {
+  return (page->size_class > 1) ? round_to_apage_size(page->size) : APAGE_SIZE;
 }
 
 #if 0
@@ -772,6 +786,7 @@ static void *allocate_big(const size_t request_size_bytes, int type)
   NewGC *gc = GC_get_GC();
   mpage *bpage;
   size_t allocate_size;
+  size_t realpagesize;
   void *addr;
 
   if (GC_gen0_alloc_only) return NULL;
@@ -811,11 +826,12 @@ static void *allocate_big(const size_t request_size_bytes, int type)
      segment. So round up. */
   
   bpage = malloc_mpage();
+  realpagesize = round_to_apage_size(allocate_size);
 
   if (type == PAGE_ATOMIC)
-    addr = malloc_pages(gc, round_to_apage_size(allocate_size), APAGE_SIZE, MMU_DIRTY, MMU_BIG_MED, MMU_NON_PROTECTABLE, &bpage->mmu_src_block);
+    addr = malloc_pages(gc, realpagesize, APAGE_SIZE, MMU_DIRTY, MMU_BIG_MED, MMU_NON_PROTECTABLE, &bpage->mmu_src_block);
   else
-    addr = malloc_pages(gc, round_to_apage_size(allocate_size), APAGE_SIZE, MMU_ZEROED, MMU_BIG_MED, MMU_PROTECTABLE, &bpage->mmu_src_block);
+    addr = malloc_pages(gc, realpagesize, APAGE_SIZE, MMU_ZEROED, MMU_BIG_MED, MMU_PROTECTABLE, &bpage->mmu_src_block);
 
   bpage->addr = addr;
   bpage->size = allocate_size;
@@ -834,6 +850,7 @@ static void *allocate_big(const size_t request_size_bytes, int type)
   /* message memory pages shouldn't go into the page_map, they are getting sent to another place */
   if (gc->saved_allocator) {
     mmu_memory_allocated_dec(gc->mmu, allocate_size);
+    gc->used_pages -= size_to_apage_count(realpagesize);
   }
   else {
     pagemap_add(gc->page_maps, bpage);
@@ -985,6 +1002,7 @@ inline static mpage *gen0_create_new_nursery_mpage(NewGC *gc, const size_t page_
   /* message memory pages shouldn't go into the page_map, they are getting sent to another place */
   if (gc->saved_allocator) {
     mmu_memory_allocated_dec(gc->mmu, page_size);
+    gc->used_pages -= size_to_apage_count(page_size);
   }
   else {
     pagemap_add_with_size(gc->page_maps, page, page_size);
@@ -1004,7 +1022,7 @@ inline static void gen0_free_nursery_mpage(NewGC *gc, mpage *page, const size_t 
 /* Needs to be consistent with GC_alloc_alignment(): */
 #define THREAD_LOCAL_PAGE_SIZE APAGE_SIZE
 
-uintptr_t GC_make_jit_nursery_page(int count) {
+uintptr_t GC_make_jit_nursery_page(int count, uintptr_t *sz) {
   NewGC *gc = GC_get_GC();
   mpage *new_mpage;
   intptr_t size = count * THREAD_LOCAL_PAGE_SIZE;
@@ -1026,9 +1044,9 @@ uintptr_t GC_make_jit_nursery_page(int count) {
   }
 
   if (!new_mpage->size) {
-    /* To avoid roundoff problems, the JIT needs the
-       result to be not a multiple of THREAD_LOCAL_PAGE_SIZE,
-       so add a prefix if alignment didn't force one. */
+     /* To avoid roundoff problems, the JIT needs the
+        result to be not a multiple of THREAD_LOCAL_PAGE_SIZE,
+        so add a prefix if alignment didn't force one. */
 #if defined(GC_ALIGN_SIXTEEN)
     new_mpage->size = 16;
 #elif defined(GC_ALIGN_EIGHT)
@@ -1037,6 +1055,8 @@ uintptr_t GC_make_jit_nursery_page(int count) {
     new_mpage->size = WORD_SIZE;
 #endif
   }
+  if (sz) 
+    *sz = size - new_mpage->size;
   return (NUM(new_mpage->addr) + new_mpage->size);
 }
 
@@ -1221,6 +1241,9 @@ void *GC_malloc_pair(void *car, void *cdr)
     cdr = gc->park[1];
     gc->park[0] = NULL;
     gc->park[1] = NULL;
+
+    /* Future-local allocation can fail: */
+    if (!pair) return NULL;
   }
   else {
     objhead *info = (objhead *) PTR(GC_gen0_alloc_page_ptr);
@@ -1372,17 +1395,22 @@ void GC_adopt_message_allocator(void *param) {
   
   if (msgm->big_pages)
   { 
+    size_t realpagesize;
     tmp = msgm->big_pages;
+    realpagesize = real_page_size(tmp);
     pagemap_add(gc->page_maps, tmp);
-    mmu_memory_allocated_inc(gc->mmu, GEN0_ALLOC_SIZE(tmp));
-    gc->gen0.current_size += GEN0_ALLOC_SIZE(tmp);
+    mmu_memory_allocated_inc(gc->mmu, realpagesize);
+    gc->gen0.current_size += realpagesize;
+    gc->used_pages += size_to_apage_count(realpagesize);
 
     while (tmp->next) { 
       tmp = tmp->next; 
+      realpagesize = real_page_size(tmp);
 
       pagemap_add(gc->page_maps, tmp);
-      mmu_memory_allocated_inc(gc->mmu, GEN0_ALLOC_SIZE(tmp));
-      gc->gen0.current_size += GEN0_ALLOC_SIZE(tmp);
+      mmu_memory_allocated_inc(gc->mmu, realpagesize);
+      gc->gen0.current_size += realpagesize;
+      gc->used_pages += size_to_apage_count(realpagesize);
     }
 
 
@@ -1397,18 +1425,23 @@ void GC_adopt_message_allocator(void *param) {
   if (msgm->pages)
   { 
     mpage *gen0end;
+    size_t realpagesize;
 
     tmp = msgm->pages;
-    mmu_memory_allocated_inc(gc->mmu, GEN0_ALLOC_SIZE(tmp));
-    pagemap_add_with_size(gc->page_maps, tmp, GEN0_ALLOC_SIZE(tmp));
-    gc->gen0.current_size += GEN0_ALLOC_SIZE(tmp);
+    realpagesize = GEN0_ALLOC_SIZE(tmp);
+    mmu_memory_allocated_inc(gc->mmu, realpagesize);
+    pagemap_add_with_size(gc->page_maps, tmp, realpagesize);
+    gc->gen0.current_size += realpagesize;
+    gc->used_pages += size_to_apage_count(realpagesize);
     
     while (tmp->next) { 
       tmp = tmp->next;
+      realpagesize = GEN0_ALLOC_SIZE(tmp);
 
-      mmu_memory_allocated_inc(gc->mmu, GEN0_ALLOC_SIZE(tmp));
-      pagemap_add_with_size(gc->page_maps, tmp, GEN0_ALLOC_SIZE(tmp));
-      gc->gen0.current_size += GEN0_ALLOC_SIZE(tmp);
+      mmu_memory_allocated_inc(gc->mmu, realpagesize);
+      pagemap_add_with_size(gc->page_maps, tmp, realpagesize);
+      gc->gen0.current_size += realpagesize;
+      gc->used_pages += size_to_apage_count(realpagesize);
     }
 
     /* preserve locality of gen0, when it resizes by adding message pages to end of gen0.pages list */
@@ -2074,9 +2107,6 @@ int GC_merely_accounting()
 /* administration / initialization                                           */
 /*****************************************************************************/
 
-static inline size_t real_page_size(mpage *page) {
-  return (page->size_class > 1) ? round_to_apage_size(page->size) : APAGE_SIZE;
-}
 static inline int page_mmu_type(mpage *page) {
   return (page->size_class >= 1) ? MMU_BIG_MED : MMU_SMALL_GEN1;
 }

@@ -830,7 +830,7 @@
 					(test-control-event e '(list-box))
 					(set! side-effect 'list-box)
 					'oops)
-				      (list style))])
+				      style)])
 	       (label-test l "List Box")
 	       (stv l command (make-object control-event% 'list-box))
 	       (test 'list-box 'list-box-callback side-effect)
@@ -838,15 +838,42 @@
 	       (stv l set-data 0 'a)
 	       (stv l set-data 2 'c-&-d)
 	       
-	       (test-list-control l #f (and (memq style '(multiple extended)) #t))
+	       (test-list-control l #f (and (or (memq 'multiple style) 
+                                                (memq 'extended style))
+                                            #t))
 	       
 	       (containee-window-tests l #t #t parent frame 2)
 
+               (st '("Column") l get-column-labels)
+               (st '(0) l get-column-order)
+               (let ([check-col-width
+                      (lambda (col)
+                        (let-values ([(val lo hi) (send l get-column-width col)])
+                          (test #t 'col-width (<= 0 lo val hi 10000))))])
+                 (check-col-width 0)
+
+                 (when (memq 'variable-columns style)
+                   (stv l append-column "Second")
+                   (st '("Column" "Second") l get-column-labels)
+                   (st '(0 1) l get-column-order)
+                   (stv l set-column-order '(1 0))
+                   (st '(1 0) l get-column-order)
+                   (stv l set-string 0 "A2" 1)
+                   (check-col-width 1)
+                   (stv l append-column "Three")
+                   (check-col-width 2)
+                   (st '("Column" "Second" "Three") l get-column-labels)
+                   (st '(1 0 2) l get-column-order)
+                   (stv l delete-column 1)
+                   (st '("Column" "Three") l get-column-labels)
+                   (st '(0 1) l get-column-order)))
+               
 	       (stv parent delete-child l)))])
 
-      (mk-list 'single)
-      (mk-list 'multiple)
-      (mk-list 'extended))
+      (mk-list '(single))
+      (mk-list '(multiple))
+      (mk-list '(extended))
+      (mk-list '(single variable-columns)))
 
     'done-lists)
   (let ([l (make-object list-box% "List Two"
@@ -959,6 +986,8 @@
 		
 	'done-sb))
 
+    (stv c init-manual-scrollbars 1000000 1000000 999999 999999 4 5)
+
     (stv c warp-pointer 21 23)
 
     (containee-window-tests c #t #t parent frame 0))
@@ -1010,20 +1039,29 @@
 
 (test-controls frame frame)
 
-(define (panel-tests frame% show?)
-  (define (panel-test % win?)
+(define (panel-tests frame% show? #:shorter? [shorter? shorter?])
+  (define (panel-test % win? 
+                      #:choices? [choices? #f]
+                      #:label? [label? #f]
+                      #:margin [m 0]
+                      #:style [style '()])
     (let* ([frame (make-object frame% "Panel Test" #f 100 100)]
            [panel (if %
-		      (make-object % frame)
+                      (cond
+                       [choices?
+                        (new % [parent frame] [choices '("A" "B")] [style style])]
+                       [label?
+                        (new % [parent frame] [label "Stuff"])]
+                       [else (new % [parent frame])])
 		      frame)])
       (let ([go
 	     (lambda ()
 	       (test-controls panel frame)
 	       (if win?
-		   ((if % containee-window-tests window-tests) panel #t #t (and % frame) frame 0)
+		   ((if % containee-window-tests window-tests) panel #t #t (and % frame) frame m)
 		   (area-tests panel #t #t #f #f))
                (when (is-a? panel panel%)
-                 (st #t panel get-orientation (is-a? panel horizontal-panel%)))
+                 (st (is-a? panel horizontal-panel%) panel get-orientation))
 	       (container-tests panel win?)
 	       (send frame show #f))])
 	(when (eq? show? 'dialog)
@@ -1037,12 +1075,14 @@
     (panel-test vertical-pane% #f)
     (panel-test horizontal-pane% #f)
     (panel-test vertical-panel% #t)
-    (panel-test horizontal-panel% #t)))
+    (panel-test horizontal-panel% #t)
+    (panel-test tab-panel% #t #:choices? #t))
+  (panel-test tab-panel% #t #:choices? #t #:style '(no-border))
+  (panel-test group-box-panel% #t #:label? #t #:margin 2))
 
 (panel-tests dialog% #f)
-(panel-tests frame% #t)
+(panel-tests frame% #t #:shorter? #f)
 (panel-tests frame% #f)
 (panel-tests dialog% 'dialog)
-
 
 (report-errs)

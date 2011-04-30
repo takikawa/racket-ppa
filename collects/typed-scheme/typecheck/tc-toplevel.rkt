@@ -2,7 +2,7 @@
 
 (require (rename-in "../utils/utils.rkt" [infer r:infer])
          syntax/kerncase
-         unstable/list unstable/syntax syntax/parse unstable/debug
+         unstable/list racket/syntax syntax/parse 
          mzlib/etc
          racket/match
          "signatures.rkt"
@@ -22,7 +22,7 @@
          racket/dict         
          (for-template
           "internal-forms.rkt"
-          unstable/location
+          syntax/location
           mzlib/contract
           scheme/base))
 

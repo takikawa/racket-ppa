@@ -8,10 +8,7 @@
 (require (for-syntax racket/base
                      "helpers.rkt"))
 
-(provide (except-out (all-from-out "blame.rkt") make-blame)
-         (all-from-out "prop.rkt")
-         
-         coerce-contract
+(provide coerce-contract
          coerce-contracts
          coerce-flat-contract
          coerce-flat-contracts
@@ -25,7 +22,6 @@
          flat-contract
          flat-contract-predicate
          flat-named-contract
-         build-flat-contract
          
          build-compound-type-name
          
@@ -184,9 +180,19 @@
 (define-syntax (define/final-prop stx)
   (syntax-case stx ()
     [(_ header bodies ...)
-     (with-syntax ([ctc (if (identifier? #'header)
-                            #'header
-                            (car (syntax-e #'header)))])
+     (with-syntax ([ctc 
+                    (syntax-case #'header ()
+                      [id
+                       (identifier? #'id)
+                       #'id]
+                      [(id1 . rest)
+                       (identifier? #'id1)
+                       #'id1]
+                      [_ 
+                       (raise-syntax-error #f 
+                                           "malformed header position"
+                                           stx 
+                                           #'header)])])
        (with-syntax ([ctc/proc (string->symbol (format "~a/proc" (syntax-e #'ctc)))])
          #'(begin
              (define ctc/proc
@@ -322,6 +328,24 @@
           ([p (in-list (cdr projs))])
           (λ (v) (p (proj v))))))))
 
+(define (first-order-and-proj ctc)
+  (λ (blame)
+    (λ (val)
+      (let loop ([predicates (first-order-and/c-predicates ctc)]
+                 [ctcs (base-and/c-ctcs ctc)])
+          (cond
+            [(null? predicates) val]
+            [else
+             (if ((car predicates) val)
+                 (loop (cdr predicates) (cdr ctcs))
+                 (raise-blame-error
+                  blame
+                  val
+                  "expected <~s>, given ~a, which isn't ~s"
+                  (contract-name ctc)
+                  val
+                  (contract-name (car ctcs))))])))))
+
 (define (and-stronger? this that)
   (and (base-and/c? that)
        (let ([this-ctcs (base-and/c-ctcs this)]
@@ -332,6 +356,13 @@
                       that-ctcs)))))
 
 (define-struct base-and/c (ctcs))
+(define-struct (first-order-and/c base-and/c) (predicates)
+  #:property prop:flat-contract
+  (build-flat-contract-property
+   #:projection first-order-and-proj
+   #:name and-name
+   #:first-order and-first-order
+   #:stronger and-stronger?))
 (define-struct (chaperone-and/c base-and/c) ()
   #:property prop:chaperone-contract
   (build-chaperone-contract-property
@@ -347,15 +378,14 @@
    #:first-order and-first-order
    #:stronger and-stronger?))
 
+
 (define/subexpression-pos-prop (and/c . raw-fs)
   (let ([contracts (coerce-contracts 'and/c raw-fs)])
     (cond
       [(null? contracts) any/c]
       [(andmap flat-contract? contracts)
        (let ([preds (map flat-contract-predicate contracts)])
-         (flat-named-contract
-          (apply build-compound-type-name 'and/c contracts)
-          (λ (x) (for/and ([pred (in-list preds)]) (pred x)))))]
+         (make-first-order-and/c contracts preds))]
       [(andmap chaperone-contract? contracts)
        (make-chaperone-and/c contracts)]
       [else (make-impersonator-and/c contracts)])))
@@ -479,6 +509,3 @@
                                            (predicate-contract-pred that))))
    #:name (λ (ctc) (predicate-contract-name ctc))
    #:first-order (λ (ctc) (predicate-contract-pred ctc))))
-
-(define (build-flat-contract name pred) (make-predicate-contract name pred))
-

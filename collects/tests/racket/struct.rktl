@@ -720,7 +720,7 @@
   (test-values '(() (#:kw)) (lambda () (procedure-keywords (make-a 1 2)))))
 
 ;; ------------------------------------------------------------
-;; Check that struct definiton sequences work:
+;; Check that struct definition sequences work:
 
 (let ()
   (define-struct a (x y))
@@ -1002,6 +1002,62 @@
   (test (list 1 2) 'match (match (make-a 1 2)
                             [(struct foo2 (x y)) (list x y)])))
                               
+
+;; ----------------------------------------
+
+(let ()
+  (struct s (a b))
+  (struct t s (c))
+  (struct u t (d))
+  (test 11
+        'struct-copy1
+        (t-c (struct-copy t (t 1 2 3) [c 11])))
+  (test 11
+        'struct-copy2
+        (s-a (struct-copy t (t 1 2 3) [a #:parent s 11])))
+  (test 11
+        'struct-copy2
+        (s-a (struct-copy u (u 1 2 3 4) [a #:parent s 11])))
+  
+  (syntax-test #'(struct-copy t (t 1 2 3) [a #:parent p 11])))
+
+(let ()
+  (struct s (a b) #:transparent)
+  (struct t s (c) #:transparent)
+  (struct u t (d) #:transparent)
+  (test (t 1 2 11)
+        'struct-copy1
+        (struct-copy t (t 1 2 3) [c 11]))
+  (test (t 11 2 3)
+        'struct-copy2
+        (struct-copy t (t 1 2 3) [a #:parent s 11]))
+  (test (s 11 2)
+        'struct-copy2
+        (struct-copy s (t 1 2 3) [a 11]))
+  (test (u 11 2 3 4)
+        'struct-copy2
+        (struct-copy u (u 1 2 3 4) [a #:parent s 11]))
+  
+  (syntax-test #'(struct-copy t (t 1 2 3) [a #:parent p 11])))
+
+(let ()
+  (struct s (a b) #:prefab)
+  (struct t s (c) #:prefab)
+  (struct u t (d) #:prefab)
+  (test (t 1 2 11)
+        'struct-copy1
+        (struct-copy t (t 1 2 3) [c 11]))
+  (test (t 11 2 3)
+        'struct-copy2
+        (struct-copy t (t 1 2 3) [a #:parent s 11]))
+  (test (s 11 2)
+        'struct-copy2
+        (struct-copy s (t 1 2 3) [a 11]))
+  (test (u 11 2 3 4)
+        'struct-copy2
+        (struct-copy u (u 1 2 3 4) [a #:parent s 11]))
+  
+  (syntax-test #'(struct-copy t (t 1 2 3) [a #:parent p 11])))
 
 ;; ----------------------------------------
 

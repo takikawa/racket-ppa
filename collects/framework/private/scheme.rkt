@@ -413,7 +413,10 @@
              end-edit-sequence
              local-edit-sequence?
              find-string
+             extend-position
              get-character
+             get-extend-end-position
+             get-extend-start-position
              get-keymap
              get-text
              get-start-position
@@ -454,17 +457,17 @@
           [else
            (let ([type (classify-position (max 0 (- current-pos 1)))])
              (cond
-               [(eq? 'symbol type) 
-                (get-text (look-for-non-symbol (max 0 (- current-pos 1)))
+               [(memq type '(symbol keyword)) 
+                (get-text (look-for-non-symbol/non-kwd (max 0 (- current-pos 1)))
                           current-pos)]
                [else no-word]))])))
     
-    (define/private (look-for-non-symbol start)
+    (define/private (look-for-non-symbol/non-kwd start)
       (let loop ([i start])
         (cond
           [(< i 0) 
            0]
-          [(eq? (classify-position i) 'symbol)
+          [(memq (classify-position i) '(symbol keyword))
            (loop (- i 1))]
           [else
            (+ i 1)])))
@@ -518,28 +521,32 @@
           (letrec	
               ([find-offset
                 (λ (start-pos)
-                  (let ([end-pos
-                         (let loop ([p start-pos])
-                           (let ([c (get-character p)])
-                             (cond
-                               [(char=? c #\tab)
-                                (loop (add1 p))]
-                               [(char=? c #\newline)
-                                p]
-                               [(char-whitespace? c)
-                                (loop (add1 p))]
-                               [else
-                                p])))]
-                        [start-x (box 0)]
-                        [end-x (box 0)])
-                    (position-location start-pos start-x #f #t #t)
-                    (position-location end-pos end-x #f #t #t)
-                    (let-values ([(w _1 _2 _3) (send (get-dc) get-text-extent "x" 
-                                                     (send (send (get-style-list)
-                                                                 find-named-style "Standard")
-                                                           get-font))])
-                      (cons (inexact->exact (floor (/ (- (unbox end-x) (unbox start-x)) w)))
-                            end-pos))))]
+                  (define tab-char? #f)
+                  (define end-pos
+                    (let loop ([p start-pos])
+                      (let ([c (get-character p)])
+                        (cond
+                          [(char=? c #\tab)
+                           (set! tab-char? #t)
+                           (loop (add1 p))]
+                          [(char=? c #\newline)
+                           p]
+                          [(char-whitespace? c)
+                           (loop (add1 p))]
+                          [else
+                           p]))))
+                  (define start-x (box 0))
+                  (define end-x (box 0))
+                  (position-location start-pos start-x #f #t #t)
+                  (position-location end-pos end-x #f #t #t)
+                  (define-values (w _1 _2 _3)
+                    (send (get-dc) get-text-extent "x" 
+                          (send (send (get-style-list)
+                                      find-named-style "Standard")
+                                get-font)))
+                  (values (inexact->exact (floor (/ (- (unbox end-x) (unbox start-x)) w)))
+                          end-pos
+                          tab-char?))]
                
                [visual-offset
                 (λ (pos)
@@ -556,12 +563,11 @@
                             [else (add1 (loop (sub1 p)))])))))]
                [do-indent
                 (λ (amt)
-                  (let* ([pos-start end]
-                         [curr-offset (find-offset pos-start)])
-                    (unless (= amt (- (cdr curr-offset) pos-start))
-                      (delete pos-start (cdr curr-offset))
-                      (insert (make-string amt #\space)
-                              pos-start))))]
+                  (define pos-start end)
+                  (define-values (gwidth curr-offset tab-char?) (find-offset pos-start))
+                  (unless (and (not tab-char?) (= amt (- curr-offset pos-start)))
+                    (delete pos-start curr-offset)
+                    (insert (make-string amt #\space) pos-start)))]
                [get-proc
                 (λ ()
                   (let ([id-end (get-forward-sexp contains)])
@@ -586,7 +592,9 @@
                   (and up-p
                        (equal? #\{ (get-character up-p))))]
                
-               [indent-first-arg (λ (start) (car (find-offset start)))])
+               [indent-first-arg (λ (start)
+                                   (define-values (gwidth curr-offset tab-char?) (find-offset start))
+                                   gwidth)])
             (when (and is-tabbable?
                        (not (char=? (get-character (sub1 end))
                                     #\newline)))
@@ -595,7 +603,7 @@
               [(not is-tabbable?) 
                (when (= para 0)
                  (do-indent 0))]
-              [(let ([real-start (cdr (find-offset end))]) 
+              [(let-values ([(gwidth real-start tab-char?) (find-offset end)]) 
                  (and (<= (+ 3 real-start) (last-position))
                       (string=? ";;;"
                                 (get-text real-start
@@ -604,7 +612,7 @@
               [(not contains)
                ;; Something went wrong matching. Should we get here?
                (do-indent 0)]
-              #;  ;; disable this to accomodate PLAI programs; return to this when a #lang capability is set up.
+              #;  ;; disable this to accommodate PLAI programs; return to this when a #lang capability is set up.
               [(curley-brace-sexp?)
                ;; when we are directly inside an sexp that uses {}s,
                ;; we indent in a more C-like fashion (to help Scribble)
@@ -1018,16 +1026,20 @@
           #t))]
     
     (define/private (select-text f forward?)
-      (let* ([start-pos (get-start-position)]
-             [end-pos (get-end-position)])
-        (let-values ([(new-start new-end)
-                      (if forward?
-                          (values start-pos (f end-pos))
-                          (values (f start-pos) end-pos))])
-          (if (and new-start new-end) 
-              (set-position new-start new-end)
-              (bell))
-          #t)))
+      (define start-pos (get-start-position))
+      (define end-pos (get-end-position))
+      (define new-pos
+        (if forward?
+            (if (= (get-extend-start-position) start-pos)
+                (f end-pos)
+                (f start-pos))
+            (if (= (get-extend-end-position) end-pos)
+                (f start-pos)
+                (f end-pos))))
+      (if new-pos 
+          (extend-position new-pos)
+          (bell))
+          #t)
     (public select-forward-sexp select-backward-sexp select-up-sexp select-down-sexp)
     [define select-forward-sexp (λ () (select-text (λ (x) (get-forward-sexp x)) #t))]
     [define select-backward-sexp (λ () (select-text (λ (x) (get-backward-sexp x)) #f))]

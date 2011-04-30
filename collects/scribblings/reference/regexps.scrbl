@@ -190,9 +190,9 @@ syntax (see @secref["regexp-syntax"]). The result can be used with
 Produces a string or byte string suitable for use with @racket[regexp]
 to match the literal sequence of characters in @racket[str] or
 sequence of bytes in @racket[bstr]. If @racket[case-sensitive?] is
-true, the resulting regexp matches letters in @racket[str] or
-@racket[bytes] case-insensitively, otherwise it matches
-case-sensitively.
+true (the default), the resulting regexp matches letters in
+@racket[str] or @racket[bytes] case-sensitively, otherwise it matches
+case-insensitively.
 
 @examples[
 (regexp-match "." "apple.scm")
@@ -275,7 +275,7 @@ The first [byte] string in a result list is the portion of
 earliest is found.
 
 Additional [byte] strings are returned in the list if @racket[pattern]
-contains parenthesized sub-expressions (but not when the open
+contains parenthesized sub-expressions (but not when the opening
 parenthesis is followed by @litchar{?}). Matches for the
 sub-expressions are provided in the order of the opening parentheses
 in @racket[pattern]. When sub-expressions occur in branches of an
@@ -711,7 +711,7 @@ is replaced with the matching portion of @racket[input] before it is
 substituted into the match's place.  If @racket[insert] contains
 @litchar{\}@nonterm{n} for some integer @nonterm{n}, then it is
 replaced with the @nonterm{n}th matching sub-expression from
-@racket[input]. A @litchar{&} and @litchar{\0} are synonymous. If
+@racket[input]. A @litchar{&} and @litchar{\0} are aliases. If
 the @nonterm{n}th sub-expression was not used in the match, or if
 @nonterm{n} is greater than the number of sub-expressions in
 @racket[pattern], then @litchar{\}@nonterm{n} is replaced with the

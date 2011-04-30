@@ -38,6 +38,9 @@
   (class %
     (inherit-field prefix-file style-file style-extra-files)
 
+    (define/override (current-render-mode)
+      '(latex))
+
     (define/override (get-suffix) #".tex")
 
     (inherit render-block
@@ -249,14 +252,23 @@
                                             (image-element-scale e) fn))]
                                  [(and (convertible? e)
                                        (not (disable-images))
-                                       (let ([ftag (lambda (v suffix) (and v (list v suffix)))])
-                                         (or (ftag (convert e 'pdf-bytes) ".pdf")
-                                             (ftag (convert e 'eps-bytes) ".ps")
-                                             (ftag (convert e 'png-bytes) ".png"))))
-                                  => (lambda (bstr+suffix)
-                                       (let ([fn (install-file (format "pict~a" (cadr bstr+suffix))
-                                                               (car bstr+suffix))])
-                                         (printf "\\includegraphics{~a}" fn)))]
+                                       (let ([ftag (lambda (v suffix) (and v (list v suffix)))]
+                                             [xlist (lambda (v) (and v (list v #f #f #f #f)))])
+                                         (or (ftag (convert e 'pdf-bytes+bounds) ".pdf")
+                                             (ftag (xlist (convert e 'pdf-bytes)) ".pdf")
+                                             (ftag (xlist (convert e 'eps-bytes)) ".ps")
+                                             (ftag (xlist (convert e 'png-bytes)) ".png"))))
+                                  => (lambda (bstr+info+suffix)
+                                       (let* ([bstr (list-ref (list-ref bstr+info+suffix 0) 0)]
+                                              [suffix (list-ref bstr+info+suffix 1)]
+                                              [height (list-ref (list-ref bstr+info+suffix 0) 2)]
+                                              [descent (and height
+                                                            (+ (list-ref (list-ref bstr+info+suffix 0) 3)
+                                                               (- (ceiling height) height)))]
+                                              [fn (install-file (format "pict~a" suffix) bstr)])
+                                         (if descent
+                                             (printf "\\raisebox{-~apx}{\\includegraphics{~a}}" descent fn)
+                                             (printf "\\includegraphics{~a}" fn))))]
                                  [else
                                   (parameterize ([rendering-tt (or tt? (rendering-tt))])
                                     (super render-content e part ri))]))]
@@ -313,7 +325,7 @@
                   (let ([v (car l)])
                     (cond
                      [(target-url? v)
-                      (printf "\\href{~a}{" (target-url-addr v))
+                      (printf "\\href{~a}{" (regexp-replace* #rx"%" (target-url-addr v) "\\\\%"))
                       (loop (cdr l) #t)
                       (printf "}")]
                      [(color-property? v)
@@ -351,14 +363,19 @@
                 [else (format "x~x" (char->integer c))]))
             (string->list (format "~s" s)))))
 
-    (define/override (render-flow p part ri starting-item?)
+    (define/override (render-flow p part ri starting-item? [wrap-each? #f])
       (if (null? p)
           null
           (begin
+            (when wrap-each? (printf "{"))
             (render-block (car p) part ri starting-item?)
+            (when wrap-each? (printf "}"))
             (for ([b (in-list (cdr p))])
-              (printf "\n\n")
-              (render-block b part ri #f))
+              (if wrap-each?
+                  (printf "%\n{")
+                  (printf "\n\n"))
+              (render-block b part ri #f)
+              (when wrap-each? (printf "}")))
             null)))
 
     (define/override (render-table t part ri starting-item?)
@@ -468,7 +485,7 @@
                                               (loop (cdr flows) (add1 n))]
                                              [else n]))])
                             (unless (= cnt 1) (printf "\\multicolumn{~a}{l}{" cnt))
-                            (render-table-cell (car flows) part ri twidth (car cell-styles))
+                            (render-table-cell (car flows) part ri (/ twidth cnt) (car cell-styles))
                             (unless (= cnt 1) (printf "}"))
                             (unless (null? (list-tail flows cnt)) (printf " &\n"))))
                         (unless (null? (cdr flows)) (loop (cdr flows)
@@ -534,22 +551,27 @@
         null))
 
     (define/private (do-render-nested-flow t part ri single-column?)
-      (let ([kind (or (let ([s (style-name (nested-flow-style t))])
-                        (or (and (string? s) s)
-                            (and (eq? s 'inset) "quote")))
-                      "Subflow")]
-            [command? (memq 'command (style-properties (nested-flow-style t)))])
-        (if command?
-            (printf "\\~a{" kind)
-            (printf "\\begin{~a}" kind))
+      (let* ([kind (or (let ([s (style-name (nested-flow-style t))])
+                         (or (and (string? s) s)
+                             (and (eq? s 'inset) "quote")
+                             (and (eq? s 'code-inset) "SCodeFlow")))
+                       "Subflow")]
+             [props (style-properties (nested-flow-style t))]
+             [command? (memq 'command props)]
+             [multicommand? (memq 'multicommand props)])
+        (cond
+         [command? (printf "\\~a{" kind)]
+         [multicommand? (printf "\\~a" kind)]
+         [else (printf "\\begin{~a}" kind)])
         (parameterize ([current-table-mode (if (or single-column?
                                                    (not (current-table-mode)))
                                                (current-table-mode)
                                                (list "nested-flow" t))])
-          (render-flow (nested-flow-blocks t) part ri #f))
-        (if command?
-            (printf "}")
-            (printf "\\end{~a}" kind))
+          (render-flow (nested-flow-blocks t) part ri #f multicommand?))
+        (cond
+         [command? (printf "}")]
+         [multicommand? (void)]
+         [else (printf "\\end{~a}" kind)])
         null))
 
     (define/override (render-nested-flow t part ri)
@@ -778,11 +800,25 @@
                             [(#\à) "\\`{a}"]
                             [(#\À) "\\`{A}"]
                             [(#\á) "\\'{a}"]
+                            [(#\â) "\\^{a}"]
+                            [(#\Â) "\\^{A}"]
                             [(#\Á) "\\'{A}"]
+                            [(#\ç) "\\c{c}"]
+                            [(#\Ç) "\\c{C}"]
                             [(#\è) "\\`{e}"]
                             [(#\È) "\\`{E}"]
                             [(#\é) "\\'{e}"]
                             [(#\É) "\\'{E}"]
+                            [(#\ê) "\\^{e}"]
+                            [(#\Ê) "\\^{E}"]
+                            [(#\í) "\\'{i}"]
+                            [(#\Í) "\\'{I}"]
+                            [(#\î) "\\^{i}"]
+                            [(#\Î) "\\^{I}"]
+                            [(#\ô) "\\^{o}"]
+                            [(#\Ô) "\\^{O}"]
+                            [(#\û) "\\^{u}"]
+                            [(#\Û) "\\^{U}"]
                             [(#\ä) "\\\"a"]
                             [(#\Ä) "\\\"A"]
                             [(#\ü) "\\\"u"]
@@ -791,12 +827,16 @@
                             [(#\Ö) "\\\"O"]
                             [(#\ø) "{\\o}"]
                             [(#\Ø) "{\\O}"]
+                            [(#\ł) "{\\l}"]
+                            [(#\Ł) "{\\L}"]
+                            [(#\š) "{\\v s}"]
                             [(#\uA7) "{\\S}"]
                             [(#\〚) "$[\\![$"]
                             [(#\〛) "$]\\!]$"]
                             [(#\↦) "$\\mapsto$"]
                             [(#\⊤) "$\\top$"]
                             [(#\¥) "{\\textyen}"]
+                            [(#\™) "{\\texttrademark}"]
                             [else c])
                           c)])))
                 (loop (add1 i)))))))

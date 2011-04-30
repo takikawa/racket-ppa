@@ -54,7 +54,6 @@ If the namespace does not, they are colored the unbound color.
 (define status-coloring-program (string-constant cs-status-coloring-program))
 (define status-eval-compile-time (string-constant cs-status-eval-compile-time))
 (define status-expanding-expression (string-constant cs-status-expanding-expression))
-(define status-loading-docs-index (string-constant cs-status-loading-docs-index))
 
 (define jump-to-next-bound-occurrence (string-constant cs-jump-to-next-bound-occurrence))
 (define jump-to-binding (string-constant cs-jump-to-binding))
@@ -1033,15 +1032,17 @@ If the namespace does not, they are colored the unbound color.
           (syncheck:clear-highlighting))
         
         (define/public (syncheck:clear-error-message)
+          (send report-error-text clear-output-ports)
+          (send report-error-text lock #f)
+          (send report-error-text delete/io 0 (send report-error-text last-position))
+          (send report-error-text lock #t)
           (when error-report-visible?
-            (set! error-report-visible? #f)
-            (send report-error-text clear-output-ports)
-            (send report-error-text lock #f)
-            (send report-error-text delete/io 0 (send report-error-text last-position))
-            (send report-error-text lock #t)
-            (when (is-current-tab?)
-              (send (get-frame) hide-error-report)
-              (send (get-frame) update-menu-status this))))
+            (cond
+              [(is-current-tab?)
+               (send (get-frame) hide-error-report)
+               (send (get-frame) update-menu-status this)]
+              [else
+               (set! error-report-visible? #f)])))
         
         (define/public (syncheck:clear-highlighting)
           (let ([definitions (get-defs)])
@@ -1276,24 +1277,29 @@ If the namespace does not, they are colored the unbound color.
                                     (cleanup)
                                     (custodian-shutdown-all user-custodian)))))]
                             [error-port (send (send the-tab get-error-report-text) get-err-port)]
+                            [output-port (send (send the-tab get-error-report-text) get-out-port)]
                             [init-proc
                              (λ () ; =user=
                                (send the-tab set-breakables (current-thread) (current-custodian))
                                (set-directory definitions-text)
                                (current-error-port error-port)
+                               (current-output-port output-port)
                                (error-display-handler 
                                 (λ (msg exn) ;; =user=
                                   (parameterize ([current-eventspace drs-eventspace])
                                     (queue-callback
                                      (λ () ;; =drs=
                                        
+                                       ;; this has to come first or else the positioning
+                                       ;; computations in the highlight-errors/exn method
+                                       ;; will be wrong by the size of the error report box
+                                       (show-error-report/tab)
+                                       
                                        ;; a call like this one also happens in 
                                        ;; drracket:debug:error-display-handler/stacktrace
                                        ;; but that call won't happen here, because
                                        ;; the rep is not in the current-rep parameter
-                                       (send interactions-text highlight-errors/exn exn)
-                                       
-                                       (show-error-report/tab))))
+                                       (send interactions-text highlight-errors/exn exn))))
                                   
                                   (drracket:debug:error-display-handler/stacktrace 
                                    msg 

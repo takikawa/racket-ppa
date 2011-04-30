@@ -309,7 +309,7 @@
               (min-width 0)
               (min-height 0)))))
     
-    (super-new [style '(transparent)])
+    (super-new [style '(transparent no-focus)])
     
     (send (get-dc) set-font small-control-font)
     (setup-sizes)
@@ -669,7 +669,7 @@
                 (set! memory-canvases (remq ec memory-canvases))))
         (send panel stretchable-width #f)))
     
-    [define gc-canvas (make-object bday-click-canvas% (get-info-panel) '(border))]
+    (define gc-canvas (new bday-click-canvas% [parent (get-info-panel)] [style '(border no-focus)]))
     (define/private (register-gc-blit)
       (let ([onb (icon:get-gc-on-bitmap)]
             [offb (icon:get-gc-off-bitmap)])
@@ -776,7 +776,7 @@
             (when (and (<= (send evt get-x) cw)
                        (<= (send evt get-y) ch))
               (button-up))))))
-    (super-new (style '(transparent)))
+    (super-new (style '(transparent no-focus)))
     (let ([dc (get-dc)])
       (let-values ([(_1 th _2 _3) (send dc get-text-extent str)])
         (min-client-height (inexact->exact (floor th)))))
@@ -786,7 +786,8 @@
                        set-macro-recording
                        overwrite-status-changed
                        anchor-status-changed
-                       editor-position-changed))
+                       editor-position-changed
+                       add-line-number-menu-items))
 (define text-info-mixin
   (mixin (info<%>) (text-info<%>)
     (inherit get-info-editor)
@@ -917,27 +918,31 @@
       (editor-position-changed-offset/numbers
        (preferences:get 'framework:col-offsets)
        (preferences:get 'framework:display-line-numbers)))
-    [define/public overwrite-status-changed
-      (λ ()
-        (let ([info-edit (get-info-editor)]
-              [failed
-               (λ ()
-                 (set! overwrite-last-state? #f)
-                 (send overwrite-message show #f))])
-          (cond
-            [info-edit
-             (let ([overwrite-now? (send info-edit get-overwrite-mode)])
-               (unless (eq? overwrite-now? overwrite-last-state?)
-                 (cond
-                   [(object? overwrite-message)
-                    (send overwrite-message
-                          show
-                          overwrite-now?)
-                    (set! overwrite-last-state? overwrite-now?)]
-                   [else
-                    (failed)])))]
-            [else
-             (failed)])))]
+    (define/public (overwrite-status-changed)
+      (let ([info-edit (get-info-editor)]
+            [failed
+             (λ ()
+               (set! overwrite-last-state? #f)
+               (send overwrite-message show #f))])
+        (cond
+          [info-edit
+           (let ([overwrite-now? (send info-edit get-overwrite-mode)])
+             (unless (eq? overwrite-now? overwrite-last-state?)
+               (cond
+                 [(object? overwrite-message)
+                  (send overwrite-message
+                        show
+                        overwrite-now?)
+                  (set! overwrite-last-state? overwrite-now?)]
+                 [else
+                  (failed)])))]
+          [else
+           (failed)])))
+    
+
+    (define/public (add-line-number-menu-items menu)
+      (void))
+    
     (define/override (update-info)
       (super update-info)
       (update-macro-recording-icon)
@@ -952,7 +957,8 @@
                                  [border 2]
                                  [parent (get-info-panel)]
                                  [stretchable-width #f]
-                                 [stretchable-height #f]))
+                                 [stretchable-height #f]
+                                 [extra-menu-items (λ (menu) (add-line-number-menu-items menu))]))
     (define position-canvas (new position-canvas% [parent position-parent] [init-width "000:00-000:00"]))
     (define/private (change-position-edit-contents str)
       (send position-canvas set-str str))
@@ -997,10 +1003,11 @@
 
 (define click-pref-panel%
   (class horizontal-panel%
+    (init-field extra-menu-items)
     (inherit popup-menu)
     (define/override (on-subwindow-event receiver evt)
       (cond
-        [(send evt button-down? 'right)
+        [(send evt button-down?)
          (let ([menu (new popup-menu%)]
                [line-numbers? (preferences:get 'framework:display-line-numbers)])
            (new checkable-menu-item%
@@ -1013,6 +1020,7 @@
                 [label (string-constant show-character-offsets)]
                 [callback (λ (x y) (preferences:set 'framework:display-line-numbers #f))]
                 [checked (not line-numbers?)])
+           (extra-menu-items menu)
            (popup-menu menu 
                        (+ 1 (send evt get-x))
                        (+ 1 (send evt get-y))))
@@ -1748,7 +1756,15 @@
     (for-each
      (λ (x) (insert x (last-position) (last-position)))
      (preferences:get pref-sym))
-    (end-edit-sequence)))
+    (end-edit-sequence)
+    
+    (define pref-callback 
+      (λ (p v)
+        (let ([c (get-canvas)])
+          (when (and c (send c get-line-count))
+            (send c set-editor (send c get-editor))))))
+    
+    (preferences:add-callback 'framework:standard-style-list:font-size pref-callback #t)))
 
 (define find-text%
   (class find/replace-text%
@@ -2312,6 +2328,7 @@
                                             [line-count 1]
                                             [stretchable-height #f]
                                             [stretchable-width #t])))
+
           (define _3 (set! replace-canvas (new searchable-canvas%
                                                [style '(hide-hscroll hide-vscroll)]
                                                [vertical-inset 2]
@@ -2566,7 +2583,7 @@
     (inherit get-dc flush get-client-size min-width min-height)
     (super-new [stretchable-width #f]
                [stretchable-height #f]
-               [style '(transparent)])
+               [style '(transparent no-focus)])
     
     (send (get-dc) set-smoothing 'smoothed)
     (define-values (indicator-width indicator-height)

@@ -600,8 +600,8 @@ A @racket[non-terminal-def] comprises one or more non-terminal names
 (considered aliases) followed by one or more productions. A non-terminal's
 names and productions may be separated by the keyword @racket[::=].
 
-As a simple example of a grammar, this is the lambda
-calculus:
+For example, the following defines @deftech{@racket[lc-lang]} as the
+grammar of the lambda calculus:
 
 @racketblock[
   (define-language lc-lang
@@ -676,35 +676,59 @@ All of the exports in this section are provided both by
 all non-GUI portions of Redex) and also exported by
 @racketmodname[redex] (which includes all of Redex).
 
-@defform/subs[#:literals (--> fresh side-condition where) 
-              (reduction-relation language domain main-arrow reduction-case ...)
+@defform/subs[#:literals (--> fresh side-condition where with) 
+              (reduction-relation language domain base-arrow
+                                  reduction-case ...
+                                  shortcuts)
               ([domain (code:line) (code:line #:domain @#,ttpattern)]
-               [main-arrow (code:line) (code:line #:arrow arrow)]
-               [reduction-case (--> @#,ttpattern @#,tttterm extras ...)]
+               [base-arrow (code:line) (code:line #:arrow base-arrow-name)]
+               [reduction-case (arrow-name @#,ttpattern @#,tttterm extras ...)]
                [extras rule-name
                        (fresh fresh-clause ...)
                        (side-condition racket-expression)
-                       (where pat @#,tttterm)
+                       (where @#,ttpattern @#,tttterm)
                        (side-condition/hidden racket-expression)
-                       (where/hidden pat @#,tttterm)]
+                       (where/hidden @#,ttpattern @#,tttterm)]
+               [shortcuts (code:line)
+                          (code:line with shortcut ...)]
+               [shortcut [(old-arrow-name @#,ttpattern @#,tttterm)
+                          (new-arrow-name identifier identifier)]]
                [rule-name identifier
                           string 
                           (computed-name racket-expression)]
                [fresh-clause var ((var1 ...) (var2 ...))])]{
 
 Defines a reduction relation casewise, one case for each of the
-clauses beginning with @racket[-->] (or with @racket[arrow], if
-specified). Each of the @racket[pattern]s
-refers to the @racket[language], and binds variables in the
-@|tttterm|. If present, the pattern following the @racket[#:domain]
-keyword specifies what terms the reduction relation operates on and
-is checked when the relation is used.
+@racket[reduction-case] clauses. 
 
-Following the @|pattern| and @|tterm| can be the name of the
-reduction rule, declarations of some fresh variables, and/or
-some side-conditions.
+The optional @racket[domain] clause provides a contract for the
+relation, in the form of a pattern that defines the relation's 
+domain and codomain.
 
-The rule's name (used in @seclink["Typesetting" "typesetting"],
+The @racket[arrow-name] in each @racket[reduction-case] clause is either 
+@racket[base-arrow-name] (default @racket[-->]) or an arrow name
+defined by @racket[shortcuts] (described below). In either case, 
+the @|pattern| refers to @racket[language] and binds variables in
+the corresponding @|tterm|. Following the @|pattern| and @|tterm|
+can be the name of the reduction rule and declarations of fresh
+variables and side-conditions.
+
+For example, the expression
+
+@racketblock[
+  (reduction-relation
+   lc-lang
+   (--> (in-hole c_1 ((lambda (variable_i ...) e_body) v_i ...))
+        (in-hole c_1 ,(foldl lc-subst 
+                             (term e_body) 
+                             (term (v_i ...)) 
+                             (term (variable_i ...))))
+        beta-v))
+]
+
+defines a reduction relation for the @tech{@racket[lc-lang]} grammar.
+
+A rule's name (used in @seclink["Typesetting" "typesetting"],
 the @racket[stepper], @racket[traces], and 
 @racket[apply-reduction-relation/tag-with-names]) can be given
 as a literal (an identifier or a string) or as an expression
@@ -722,18 +746,18 @@ only when the rule has no literal name or when it would not typeset in
 pink due to @racket[with-unquote-rewriter]s in the context; otherwise,
 the literal name (or nothing) is shown.
 
-The fresh variables clause generates variables that do not
-occur in the term being matched. If the @racket[fresh-clause] is a
+Fresh variable clauses generate variables that do not
+occur in the term being reduced. If the @racket[fresh-clause] is a
 variable, that variable is used both as a binding in the
-rhs-exp and as the prefix for the freshly generated
+@|tterm| and as the prefix for the freshly generated
 variable. (The variable does not have to be
 a non-terminal in the language of the reduction relation.)
 
-The second case of a @racket[fresh-clause] is used when you want to
-generate a sequence of variables. In that case, the ellipses
+The second form of @racket[fresh-clause]s generates 
+a sequence of variables. In that case, the ellipses
 are literal ellipses; that is, you must actually write
 ellipses in your rule. The variable @racket[var1] is like the
-variable in first case of a @racket[fresh-clause], namely it is
+variable in first case of a @racket[fresh-clause]; namely it is
 used to determine the prefix of the generated variables and
 it is bound in the right-hand side of the reduction rule,
 but unlike the single-variable fresh clause, it is bound to
@@ -758,45 +782,13 @@ metafunction result. The bindings are the same as bindings in a
 same as a @racket[where] clause, but the clause is not
 rendered when typesetting via @racketmodname[redex/pict].
 
-As an example, this
+Each @racket[shortcut] clause defines arrow names in terms of 
+@racket[base-arrow-name] and earlier @racket[shortcut] definitions.
+The left- and right-hand sides of a @racket[shortcut] definition 
+are identifiers, not @|pattern|s and @|tterm|s. These identifiers
+need not correspond to non-terminals in @racket[language].
 
-@racketblock[
-  (reduction-relation
-   lc-lang
-   (--> (in-hole c_1 ((lambda (variable_i ...) e_body) v_i ...))
-        (in-hole c_1 ,(foldl lc-subst 
-                             (term e_body) 
-                             (term (v_i ...)) 
-                             (term (variable_i ...))))
-        beta-v))
-]
-
-defines a reduction relation for the lambda-calculus above.
-}
-
-@defform/none[#:literals (with reduction-relation)
-         (reduction-relation 
-          language
-          (arrow-var @#,ttpattern @#,tttterm) ...
-          with
-          [(arrow @#,ttpattern @#,tttterm)
-           (arrow-var var var)] ...)]{
-
-Defines a reduction relation with shortcuts. As above, the
-first section defines clauses of the reduction relation, but
-instead of using @racket[-->], those clauses can use any identifier
-for an arrow, as long as the identifier is bound after the
-@racket[with] clause. 
-
-Each of the clauses after the @racket[with] define new relations
-in terms of other definitions after the @racket[with] clause or in
-terms of the main @racket[-->] relation.
-
-A @racket[fresh] variable is always fresh with respect to the entire
-term, not just with respect to the part that matches the
-right-hand-side of the newly defined arrow.
-
-As an example, this
+For example, this expression
 
 @racketblock[
   (reduction-relation
@@ -815,8 +807,12 @@ As an example, this
 ]
   
 defines reductions for the lambda calculus with numbers,
-where the @tt{==>} relation is defined by reducing in the context
+where the @tt{==>} shortcut is defined by reducing in the context
 @tt{c}.
+
+A @racket[fresh] clause in @racket[reduction-case] defined by shortcut
+refers to the entire term, not just the portion matched by the left-hand
+side of shortcut's use.
 }
 
 @defform[(extend-reduction-relation reduction-relation language more ...)]{
@@ -934,7 +930,11 @@ all non-GUI portions of Redex) and also exported by
                [(name @#,ttpattern ...) @#,tttterm extras ...] 
                ...)
              ([metafunction-contract (code:line) 
-                                     (code:line id : @#,ttpattern ... -> @#,ttpattern)]
+                                     (code:line id : @#,ttpattern ... -> range)]
+              [range @#,ttpattern
+                     (code:line @#,ttpattern or range)
+                     (code:line @#,ttpattern ∨ range)
+                     (code:line @#,ttpattern ∪ range)]
               [extras (side-condition racket-expression)
                       (side-condition/hidden racket-expression)
                       (where pat @#,tttterm)
@@ -1166,11 +1166,11 @@ step, using @racket[pred-expr] to determine equivalence.
        
        (test-results)]
 
-@defform/subs[(test-->>∃ option ... rel-expr start-expr spec-expr)
+@defform/subs[(test-->>∃ option ... rel-expr start-expr goal-expr)
               ([option (code:line #:steps steps-expr)])
               #:contracts ([rel-expr reduction-relation?]
                            [start-expr any/c]
-                           [spec-expr (or/c (-> any/c any/c)
+                           [goal-expr (or/c (-> any/c any/c)
                                             (not/c procedure?))]
                            [steps-expr (or/c natural-number/c +inf.0)])]{
 Tests to see if the term @racket[start-expr] reduces according to the reduction 
@@ -1278,8 +1278,9 @@ The argument @racket[size-expr] bounds the height of the generated term
 The optional keyword argument @racket[attempt-num-expr] 
 (default @racket[1]) provides coarse grained control over the random
 decisions made during generation; increasing @racket[attempt-num-expr]
-tends to increase the complexity of the result. For example, the expected
-length of @pattech[pattern-sequence]s increases with @racket[attempt-num-expr].
+tends to increase the complexity of the result. For example, the absolute
+values of numbers chosen for @pattech[integer] patterns increase with
+@racket[attempt-num-expr].
 
 The random generation process does not actively consider the constraints
 imposed by @pattech[side-condition] or @tt{_!_} @|pattern|s; instead, 
@@ -1315,7 +1316,7 @@ matches @racket[pattern] then evaluating @racket[property-expr]
 using the @racket[match-bindings] produced by @racket[match]ing
 @math{t} against @racket[pattern].
 
-@racket[redex-check] generates at most @racket[attempts-expr] (default @racket[1000])
+@racket[redex-check] generates at most @racket[attempts-expr] (default @racket[(default-check-attempts)])
 random terms in its search. The size and complexity of these terms tend to increase 
 with each failed attempt. The @racket[#:attempt-size] keyword determines the rate at which
 terms grow by supplying a function that bounds term size based on the number of failed
@@ -1469,7 +1470,11 @@ test case from the number of previously attempted tests @racket[n].
 Currently, this procedure computes the base 5 logarithm, but 
 that behavior may change in future versions.
 }
-               
+
+@defparam[default-check-attempts attempts natural-number/c]{Determines the default
+value for @racket[redex-check]'s optional @racket[#:attempts] argument. By default,
+@racket[attempts] is 1,000.}
+
 @defparam[redex-pseudo-random-generator generator pseudo-random-generator?]{
 @racket[generate-term] and the randomized testing forms (e.g., @racket[redex-check])
 use the parameter @racket[generator] to construct random terms. The parameter's
@@ -1547,13 +1552,13 @@ exploring reduction sequences.
          void?]{
 
 This function opens a new window and inserts each expression
-in expr (if @racket[multiple?] is @racket[#t] -- if
-@racket[multiple?] is @racket[#f], then expr is treated as a single
+in @racket[expr] (if @racket[multiple?] is @racket[#t] -- if
+@racket[multiple?] is @racket[#f], then @racket[expr] is treated as a single
 expression). Then, it reduces the terms until at least
 @racket[reduction-steps-cutoff] (see below) different terms are
 found, or no more reductions can occur. It inserts each new
 term into the gui. Clicking the @onscreen{reduce} button reduces
-until reduction-steps-cutoff more terms are found.
+until @racket[reduction-steps-cutoff] more terms are found.
 
 The @racket[pred] function indicates if a term has a particular
 property. If it returns @racket[#f], the term is displayed with a
@@ -1561,11 +1566,11 @@ pink background. If it returns a string or a @racket[color%] object,
 the term is displayed with a background of that color (using
 @racket[the-color-database] to map the string to a color). If it
 returns any other value, the term is displayed normally. If
-the pred function accepts two arguments, a term-node
+the @racket[pred] function accepts two arguments, a term-node
 corresponding to the term is passed to the predicate. This
 lets the predicate function explore the (names of the)
-reductions that led to this term, using term-node-children,
-term-node-parents, and term-node-labels.
+reductions that led to this term, using @racket[term-node-children],
+@racket[term-node-parents], and @racket[term-node-labels].
 
 The @racket[pred] function may be called more than once per node. In
 particular, it is called each time an edge is added to a
@@ -1594,12 +1599,12 @@ mouse is over a graph node that is connected to that arrow, and the
 second for when the mouse is not over that arrow. Similarly, the next
 colors are for the text drawn on the arrow and the last two are for
 the color that fills the arrow head.  If fewer than six colors are
-specified, the colors specified colors are used and then defaults are
+specified, the specified colors are used and then defaults are
 filled in for the remaining colors.
 
 The @racket[racket-colors?] argument (along with @racket[scheme-colors?],
-retained for backward compatibility), controls the coloring of the
-coloring of each window. When @racket[racket-colors?] is @racket[#t] (and
+retained for backward compatibility), controls the coloring of 
+each window. When @racket[racket-colors?] is @racket[#t] (and
 @racket[scheme-colors?] is @racket[#t] too), @racket[traces] colors the 
 contents according to DrRacket's Racket-mode color scheme; otherwise,
 @racket[traces] uses a black color scheme.
@@ -1612,7 +1617,7 @@ The @racket[x-spacing] and @racket[y-spacing] control the amount of
 space put between the snips in the default layout.
 
 The @racket[layout] argument is called (with all of the terms) when
-new terms is inserted into the window. In general, it is called when
+new terms are inserted into the window. In general, it is called
 after new terms are inserted in response to the user clicking on the
 reduce button, and after the initial set of terms is inserted.
 See also @racket[term-node-set-position!].
@@ -1624,7 +1629,7 @@ The @racket[edge-label-font] argument is used as the font on the edge
 labels. If @racket[#f] is suppled, the @racket[dc<%>] object's default
 font is used.
 
-The traces library an instance of the @racketmodname[mrlib/graph]
+The traces library uses an instance of the @racketmodname[mrlib/graph]
 library's @racket[graph-pasteboard<%>] interface to layout
 the graphs.  Sometimes, overriding one of its methods can
 help give finer-grained control over the layout, so the
@@ -1681,11 +1686,11 @@ just before the PostScript is created with the graph pasteboard.
           void?]{
 
 This function opens a stepper window for exploring the
-behavior of its third argument in the reduction system
-described by its first two arguments. 
+behavior of the term @racket[t] in the reduction system given by
+@racket[reductions].
 
 The @racket[pp] argument is the same as to the
-@racket[traces] functions (above) but is here for
+@racket[traces] function but is here for
 backwards compatibility only and
 should not be changed for most uses, but instead adjusted with
 @racket[pretty-print-parameters]. Specifically, the 
@@ -2167,19 +2172,15 @@ in-hole decompositions, which use the @racket[default-style].
 The @racket[grammar-style] is used for the ``::='' and ``|''
 in grammars.
 
-The @racket[non-terminal-style] is used for the names of non-terminals.
+The @racket[non-terminal-style] parameter is used for the names of non-terminals.
 Two parameters style the text in the (optional) "underscore" component
 of a non-terminal reference. The first, @racket[non-terminal-subscript-style],
 applies to the segment between the underscore and the first caret (@racket[^]) 
 to follow it; the second, @racket[non-terminal-superscript-style], applies
 to the segment following that caret. For example, in the non-terminal 
-reference @racket[x_y_z], @racket[x] has style @racket[non-terminal-style],
+reference @racket[x_y^z], @racket[x] has style @racket[non-terminal-style],
 @racket[y] has style @racket[non-terminal-subscript-style], and @racket[z]
 has style @racket[non-terminal-superscript-style].
-
-The
-@racket[non-terminal-subscript-style] is used for the portion
-after the underscore in non-terminal references.
 
 The @racket[default-style] is used for parenthesis, the dot in dotted
 lists, spaces, the
@@ -2216,6 +2217,10 @@ Defaults to @racket[#t].
 This parameter's function is called whenever Redex typesets
 some part of a grammar, reduction relation, or
 metafunction. It defaults to slideshow's @racket[text] function.
+}
+
+@defproc[(arrow->pict [arrow symbol?]) pict?]{
+  Returns the pict corresponding to @racket[arrow].                                             
 }
 
 @defproc[(set-arrow-pict! [arrow symbol?] [proc  (-> pict?)]) void?]{
@@ -2437,7 +2442,7 @@ The line, line-span, column, and column-span correspond to
 the logical spacing for the redex program, not the actual
 spacing that will be used when they are rendered. The
 logical spacing is only used when determining where to place
-typeset portions of the program. In the absense of any
+typeset portions of the program. In the absence of any
 rewriters, these numbers correspond to the line and column
 numbers in the original program.
 

@@ -11,7 +11,7 @@ method returns #f, then you get a black circle out.
 improvments/changes wrt to htdp/image:
 
   - copying and pasting does not introduce jaggies
-  - equal comparisions are more efficient
+  - equal comparisons are more efficient
   - added rotation & scaling
   - got rid of pinholes (see the new overlay, beside, and above functions)
   - a bunch of new polygon functions
@@ -42,9 +42,14 @@ and they all have good sample contracts. (It is amazing what we can do with kids
 (provide-primitives
          overlay
          overlay/align
+         overlay/offset
+         overlay/align/offset
          overlay/xy
+         
          underlay
          underlay/align
+         underlay/offset
+         underlay/align/offset
          underlay/xy
          
          beside

@@ -159,8 +159,9 @@ address-harvesting robots.}
  @racket[pre-flow] (i.e., parsed with @racket[decode-flow]).
  
  The @racket[style] argument is handled the same as @racket[para].
- The @racket['inset] style causes the nested flow to be inset compared
- to surrounding text.}
+ The @racket['inset] and @racket['code-inset] styles cause the nested
+ flow to be inset compared to surrounding text, with the latter
+ particularly intended for insetting code.}
 
 
 @defproc[(centered [pre-flow pre-flow?] ...) nested-flow?]{
@@ -168,13 +169,21 @@ address-harvesting robots.}
 Produces a @tech{nested flow} whose content is centered.}
 
 
-@defproc[(margin-note [pre-flow pre-flow?] ...) block?]{
+@defproc[(margin-note [pre-flow pre-flow?] ...
+                      [#:left? left? any/c #f])
+         block?]{
 
 Produces a @tech{nested flow} that is typeset in the margin, instead
-of inlined.}
+of inlined.
+
+If @racket[left?] is true, then the note is shown on the opposite as
+it would normally be shown (which is the left-hand side for HTML
+output). Beware of colliding with output for a table of contents.}
 
 
-@defproc[(margin-note* [pre-content pre-content?] ...) element?]{
+@defproc[(margin-note* [pre-content pre-content?] ...
+                       [#:left? left? any/c #f]) 
+         element?]{
 
 Produces an @racket[element] that is typeset in the margin, instead of
 inlined. Unlike @racket[margin-note], @racket[margin-note*] can be
@@ -424,9 +433,7 @@ Generates a literal hyperlinked URL.}
                  [#:underline? underline? any/c #t])
          element?]{
 
-Inserts the hyperlinked title of the section tagged @racket[tag], but
-elements in the title content with the @racket['aux] @tech{style property}
-are omitted in the hyperlink label.
+Inserts a reference to the section tagged @racket[tag].
 
 If @racket[#:doc module-path] is provided, the @racket[tag] refers to
 a tag with a prefix determined by @racket[module-path]. When
@@ -444,8 +451,18 @@ reach the @racket[tag] section. When @racket[#:doc] is not provided,
 the @racket[prefixes] path is relative to any enclosing section (i.e.,
 the youngest ancestor that produces a match).
 
-If @racket[underline?] is @racket[#f], then the hyperlink is rendered
-in HTML without an underline.}
+For HTML output, the generated reference is the hyperlinked title of
+the elements in the section's title content, except that elements with
+the @racket['aux] @tech{style property} are omitted in the hyperlink
+label. If @racket[underline?] is @racket[#f], then the hyperlink is
+rendered in HTML without an underline.
+
+For Latex output, the generated reference's format depends on the
+document style. By default, only the section number is shown in the
+reference, but the @racketmodname[scribble/manual] style shows the
+title after the section number. Customize the output (see
+@secref["config"]) by redefining the @ltx{BookRef}, @|etc|, macros (see
+@secref["builtin-latex"]).}
 
 
 @defproc[(Secref [tag string?]

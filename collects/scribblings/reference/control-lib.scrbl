@@ -15,7 +15,7 @@ The @scheme[racket/control] library provides various control operators
 from the research literature on higher-order control operators, plus a
 few extra convenience forms. These control operators are implemented
 in terms of @scheme[call-with-continuation-prompt],
-@scheme[call-with-composable-continuations], etc., and they generally
+@scheme[call-with-composable-continuations], @|etc|, and they generally
 work sensibly together. Many are redundant; for example,
 @scheme[reset] and @scheme[prompt] are aliases.
  
@@ -79,7 +79,7 @@ When @scheme[handler-expr] is omitted, @scheme[%] is the same as
 )]{
 
 Among the earliest operators for higher-order control
-@cite["Felleisen88" "Sitaram90"].
+@cite["Felleisen88a" "Felleisen88" "Sitaram90"].
 
 The essential reduction rules are:
 @schemeblock[
@@ -160,7 +160,7 @@ tags.}
 @defform[(shift0 id expr ...+)]
 )]{
 
-Generalizations of @scheme[prompt], etc. @cite["Shan04"].
+Generalizations of @scheme[prompt], @|etc| @cite["Shan04"].
 
 The essential reduction rules are:
 
@@ -173,7 +173,7 @@ The essential reduction rules are:
                                    (lambda (_v) (reset0 _E[_v])))
 ]
 
-The @scheme[reset0] and @scheme[prompt0] forms are interchangable.
+The @scheme[reset0] and @scheme[prompt0] forms are interchangeable.
 Furthermore, the following reductions apply:
 
 @schemeblock[
@@ -200,7 +200,7 @@ behavior, otherwise the non-@scheme[0] behavior applies.}
 @defform[(shift0-at prompt-tag-expr id expr ...+)]
 )]{
 
-Variants of @scheme[prompt0], @|etc| that accept a prompt tag.}
+Variants of @scheme[prompt0], @|etc|, that accept a prompt tag.}
 
 @; ----------------------------------------------------------------------
 

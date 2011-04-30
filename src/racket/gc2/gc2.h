@@ -438,13 +438,14 @@ GC2_EXTERN intptr_t GC_alloc_alignment();
    can be called from any thread.
 */
 
-GC2_EXTERN uintptr_t GC_make_jit_nursery_page(int count);
+GC2_EXTERN uintptr_t GC_make_jit_nursery_page(int count, uintptr_t *sz);
 /*
    Obtains nursery pages from the GC for thread local allocation;
    resulting space is count times the allocation alignment.
    The result is an uintptr_t because it's not a valid
    pointer to a GCable object. The result becomes invalid (i.e. it's collected)
-   with the next GC.
+   with the next GC. If non-NULL, the `sz' argument is filled
+   with the length of the allocation area after the result.
 */
 
 GC2_EXTERN void GC_check_master_gc_request();
@@ -483,6 +484,13 @@ GC2_EXTERN void GC_adopt_message_allocator(void *msg_memory);
    Adopts the message memory captures by the sending place into
    the current receiving place's gc
 */
+
+GC2_EXTERN intptr_t GC_is_place();
+/*
+   Returns 1 if current GC is a place gc.
+   Otherwise returns 0;
+*/
+
 
 
 # ifdef __cplusplus

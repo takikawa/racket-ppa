@@ -126,7 +126,10 @@
                            (RegisterClipboardFormatW t)))]
            [all-data (for/list ([t (in-list types)]
                                 [t-id (in-list type-ids)])
-                       (let ([d (send c get-data t)])
+                       (let ([d (let ([d (send c get-data t)])
+                                  (if (string? d)
+                                      (string->bytes/utf-8 d)
+                                      d))])
                          (cond
                           [(equal? t-id CF_UNICODETEXT)
                            ;; convert UTF-8 to UTF-16:
@@ -145,11 +148,12 @@
                            ;; no conversion:
                            d])))]
            [all-handles (for/list ([d (in-list all-data)])
-                          (let ([h (GlobalAlloc GHND (bytes-length d))])
-                            (let ([p (GlobalLock h)])
-                              (memcpy p d (bytes-length d)))
-                            (GlobalUnlock h)
-                            h))])
+			  (and d
+			       (let ([h (GlobalAlloc GHND (bytes-length d))])
+				 (let ([p (GlobalLock h)])
+				   (memcpy p d (bytes-length d)))
+				 (GlobalUnlock h)
+				 h)))])
       (if (null? types)
           (drop-client c)
           (atomically
@@ -158,7 +162,8 @@
                  (EmptyClipboard)
                  (for ([t (in-list type-ids)]
                        [h (in-list all-handles)])
-                   (SetClipboardData t h))
+		   (when h
+		     (SetClipboardData t h)))
                  (if (CloseClipboard)
                      (set! client c)
                      (drop-client c)))

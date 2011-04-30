@@ -1824,11 +1824,15 @@ static Scheme_Object *make_toplevel(mzshort depth, int position, int resolved, i
 	&& (position < MAX_CONST_TOPLEVEL_POS))
       return toplevels[depth][position][flags];
 
-    pr = (flags
-	  ? scheme_make_pair(scheme_make_integer(position),
-			     scheme_make_integer(flags))
-	  : scheme_make_integer(position));
-    pr = scheme_make_pair(scheme_make_integer(depth), pr);
+    if ((position < 0xFFFF) && (depth < 0xFF)) {
+      int ep = position | (depth << 16) | (flags << 24);
+      pr = scheme_make_integer(ep);
+    } else {
+      pr = scheme_make_vector(3, NULL);
+      SCHEME_VEC_ELS(pr)[0] = scheme_make_integer(position);
+      SCHEME_VEC_ELS(pr)[1] = scheme_make_integer(flags);
+      SCHEME_VEC_ELS(pr)[2] = scheme_make_integer(depth);
+    }
     v = scheme_hash_get_atomic(toplevels_ht, pr);
     if (v)
       return v;
@@ -4651,7 +4655,7 @@ static Scheme_Object *variable_module_source(int argc, Scheme_Object *argv[])
     scheme_wrong_type("variable-reference->module-source", "variable-reference", 0, argc, argv);
 
   if (env->module)
-    return SCHEME_PTR_VAL(env->module->modsrc);
+    return scheme_resolved_module_path_value(env->module->modsrc);
   else
     return scheme_false;
 }

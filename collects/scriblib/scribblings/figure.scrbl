@@ -1,5 +1,6 @@
 #lang scribble/manual
-@(require (for-label scribble/struct
+@(require (for-label scribble/core
+                     scribble/decode
                      scriblib/figure
                      scheme/base
                      scheme/contract))
@@ -8,29 +9,28 @@
 
 @defmodule[scriblib/figure]
 
-@defproc[(figure-style-extras) list?]{
-
-Include the content of the result list in the style of a document part
-that includes all figures. These style extras pull in HTML and Latex
-rendering support.}
-
-
 @deftogether[(
 @defproc[(figure [tag string?] [caption content?] [pre-flow pre-flow?] ...) block?]
 @defproc[(figure* [tag string?] [caption content?] [pre-flow pre-flow?] ...) block?]
-@defproc[(figure** [tag string?] [caption content?] [pre-flow pre-flow?] ...) block?]
+@defproc[(figure** [tag string?] [caption content?] [pre-flow pre-flow?] ...)
+block?]
+@defproc[(figure-here [tag string?] [caption content?] [pre-flow pre-flow?] ...) block?]
 )]{
 
 Creates a figure. The given @scheme[tag] is for use with
 @scheme[figure-ref] or @scheme[Figure-ref]. The @scheme[caption] is an
 element. The @scheme[pre-flow] is decoded as a flow.
 
-For HTML output, the @scheme[figure*] and @scheme[figure*] functions
+For HTML output, the @scheme[figure] and @scheme[figure*] functions
 center the figure content, while @scheme[figure**] allows the content
 to be wider than the document body.
+For two-column Latex output, @scheme[figure*] and @scheme[figure**]
+generate a figure that spans columns.
 
-For two-column latex output, @scheme[figure*] and @scheme[figure**]
-generate a figure that spans columns.}
+For Latex output, @scheme[figure-here] generates a figure to be included at
+the position in the output text where the @scheme[figure-here] occurs
+in the source text. For HTML output, all @scheme[figure] variants
+place the figure where the use appears in the source text.}
 
 
 @defproc[(figure-ref [tag string?]) element?]{

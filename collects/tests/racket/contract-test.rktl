@@ -1070,6 +1070,18 @@
    'contract-arrow-any3
    '((contract (integer? . -> . any) (lambda (x) #f) 'pos 'neg) #t))
 
+  (test/spec-passed
+   'contract-arrow-all-kwds
+   '(contract (-> #:a string? string?) 
+              (make-keyword-procedure void)
+              'pos 'neg))
+  
+  (test/spec-passed
+   'contract-arrow-all-kwds2
+   '((contract (-> #:a string? void?) 
+               (make-keyword-procedure void)
+               'pos 'neg)
+     #:a "abcdef"))
   
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;
@@ -2500,6 +2512,38 @@
    '((contract (->i ([x number?]) #:pre () (= 1 2) any)
 	       (λ (x) 1)
 	       'pos 'neg) 2))
+  
+  (test/neg-blame
+   '->i35-b
+   '((contract (->i ([x number?]) #:pre () #t #:pre () (= 1 2) any)
+	       (λ (x) 1)
+	       'pos 'neg) 2))
+  
+  (test/neg-blame
+   '->i35-c
+   '((contract (->i ([x number?]) #:pre (x) (even? x) #:pre (x) (positive? x) any)
+	       (λ (x) 1)
+	       'pos 'neg) 3))
+  
+  (test/neg-blame
+   '->i35-d
+   '((contract (->i ([x number?]) #:pre (x) (even? x) #:pre (x) (positive? x) any)
+	       (λ (x) 1)
+	       'pos 'neg) -2))
+  
+  (test/neg-blame
+   '->i35-e
+   '((contract (->i ([x any/c]) #:pre (x) (pair? x) #:pre (x) (car x) any)
+	       (λ (x) 1)
+	       'pos 'neg)
+     (cons #f 1)))
+  
+  (test/neg-blame
+   '->i35-f
+   '((contract (->i ([x any/c]) #:pre/name (x) "pair" (pair? x) #:pre/name (x) "car" (car x) any)
+	       (λ (x) 1)
+	       'pos 'neg) 
+     (cons #f 1)))
 
   (test/spec-passed/result
    '->i36
@@ -2570,51 +2614,95 @@
   (test/spec-passed/result
    '->i44
    '((contract (->i ([x () any/c])
-					[y any/c]
-					#:post (x) x)
-			   (lambda (x) x)
-			   'pos
-			   'neg)
-	 #t)
+                    [y any/c]
+                    #:post (x) x)
+               (lambda (x) x)
+               'pos
+               'neg)
+     #t)
    '#t)
-
+  
   (test/pos-blame
    '->i45
    '((contract (->i ([x () any/c])
-					[y any/c]
-					#:post (x) x)
-			   (lambda (x) x)
-			   'pos
-			   'neg)
-	 #f))
+                    [y any/c]
+                    #:post (x) x)
+               (lambda (x) x)
+               'pos
+               'neg)
+     #f))
 
   (test/spec-passed/result
    '->i46
    '((contract (->i ([x any/c])
-					[y () any/c]
-					#:post (y) y)
-			   (lambda (x) x)
-			   'pos
-			   'neg)
-	 #t)
+                    [y () any/c]
+                    #:post (y) y)
+               (lambda (x) x)
+               'pos
+               'neg)
+     #t)
    '#t)
-
+  
   (test/pos-blame
    '->i47
    '((contract (->i ([x any/c])
-					[y () any/c]
-					#:post (y) y)
-			   (lambda (x) x)
-			   'pos
-			   'neg)
-	 #f))
+                    [y () any/c]
+                    #:post (y) y)
+               (lambda (x) x)
+               'pos
+               'neg)
+     #f))
+  
+  (test/pos-blame
+   '->i47-b
+   '((contract (->i ([x any/c])
+                    [y () any/c]
+                    #:post (y) (even? y)
+                    #:post (y) (positive? y))
+               (lambda (x) x)
+               'pos
+               'neg)
+     -2))
+  
+  (test/pos-blame
+   '->i47-c
+   '((contract (->i ([x any/c])
+                    [y () any/c]
+                    #:post (y) (even? y)
+                    #:post (y) (positive? y))
+               (lambda (x) x)
+               'pos
+               'neg)
+     3))
+  
+  (test/pos-blame
+   '->i47-d
+   '((contract (->i ([x any/c])
+                    [y () any/c]
+                    #:post (y) (pair? y)
+                    #:post (y) (car y))
+               (lambda (x) x)
+               'pos
+               'neg)
+     (cons #f 1)))
+  
+  (test/pos-blame
+   '->i47-e
+   '((contract (->i ([x any/c])
+                    [y () any/c]
+                    #:post/name (y) "pair" (pair? y)
+                    #:post/name (y) "car" (car y))
+               (lambda (x) x)
+               'pos
+               'neg)
+     (cons #f 1)))
 
   (test/spec-passed/result
    '->i48
    '(let ([x '()])
       ((contract (->i ([arg (begin (set! x (cons 'arg-eval x)) integer?)])
-		      [res () (begin
-				(set! x (cons 'res-eval x))
+                      [res () (begin
+                                (set! x (cons 'res-eval x))
 				(λ (res)
 				   (set! x (cons 'res-check x))))])
 		 (λ (arg) 
@@ -2825,6 +2913,27 @@
                'neg)
      1))
 
+  
+  ;; test to make sure the values are in the error messages
+  (contract-error-test
+   #'((contract (->i ([x number?]) #:pre (x) #f any)
+                (λ (x) x)
+                'pos
+                'neg)
+      123456789)
+   (λ (x) 
+     (and (exn? x)
+          (regexp-match #rx"x: 123456789" (exn-message x)))))
+  (contract-error-test
+   #'((contract (->i ([|x y| number?]) #:pre (|x y|) #f any)
+                (λ (x) x)
+                'pos
+                'neg)
+      123456789)
+   (λ (x) 
+     (and (exn? x)
+          (regexp-match (regexp-quote "|x y|: 123456789") (exn-message x)))))
+   
   (test/neg-blame
    '->i-protect-shared-state
    '(let ([x 1])
@@ -3532,6 +3641,18 @@
        1)
       (reverse x))
    '(3 1 2 4))
+  
+  (test/spec-passed/result
+   'and/c-isnt
+   '(and (regexp-match #rx"isn't even?"
+                       (with-handlers ((exn:fail? exn-message))
+                         (contract (and/c integer? even? positive?)
+                                   -3
+                                   'pos
+                                   'neg)
+                         "not the error!"))
+         #t)
+   #t)
   
   (test/spec-passed
    'contract-flat1 
@@ -6607,6 +6728,28 @@
       (send (new d%) f)))
   
   (test/spec-passed
+   'class/c-first-order-absent-1
+   '(contract (class/c (absent m)) object% 'pos 'neg))
+  
+  (test/pos-blame
+   'class/c-first-order-absent-2
+   '(contract (class/c (absent m))
+              (class object% (super-new) (define/public (m) 3))
+              'pos
+              'neg))
+  
+  (test/spec-passed
+   'class/c-first-order-absent-3
+   '(contract (class/c (absent (field f))) object% 'pos 'neg))
+  
+  (test/pos-blame
+   'class/c-first-order-absent-4
+   '(contract (class/c (absent (field f)))
+              (class object% (super-new) (field [f 3]))
+              'pos
+              'neg))
+  
+  (test/spec-passed
    'class/c-higher-order-init-1
    '(let ([c% (contract (class/c (init [a number?]))
                         (class object% (super-new) (init a))
@@ -9526,7 +9669,11 @@ so that propagation occurs.
               (->i ([x integer?]) #:pre (x) #t  [q (x) number?] #:post (x) #t))
   (test-name '(->i ([x real?]) [_ (x) ...])
               (->i ([x real?]) [_ (x) (>/c x)]))
-
+  (test-name '(->i ([x any/c]) #:pre/name (x) "pair" ... #:pre/name (x) "car" ... any)
+              (->i ([x any/c]) #:pre/name (x) "pair" (pair? x) #:pre/name (x) "car" (car x) any))
+  (test-name '(->i ([x any/c]) [y () ...] #:post/name (y) "pair" ... #:post/name (y) "car" ...)
+              (->i ([x any/c]) [y () any/c] #:post/name (y) "pair" (pair? y) #:post/name (y) "car" (car y)))
+  
   (test-name '(case->) (case->))
   (test-name '(case-> (-> integer? any) (-> boolean? boolean? any) (-> char? char? char? any))
              (case-> (-> integer? any) (-> boolean? boolean? any) (-> char? char? char? any)))
@@ -10453,7 +10600,7 @@ so that propagation occurs.
 ;                                                                    
 
   ;;
-  ;; (at the end, becuase they are slow w/out .zo files)
+  ;; (at the end, because they are slow w/out .zo files)
   ;;
   
   (test/spec-passed
@@ -11251,15 +11398,206 @@ so that propagation occurs.
      (compose blame-positive exn:fail:contract:blame-object)
      (with-handlers ((void values)) (contract not #t 'pos 'neg))))
 
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-  ;;;;
-  ;;;;
-  ;;;;  Legacy Contract Constructor tests
-  ;;;;
-  ;;;;
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  
+  
+;                                                            
+;                                                            
+;                                                            
+;                                                            
+;                      ;;;   ;  ;;;      ;;;;;;; ;;;         
+;                      ;;; ;;;          ;;;      ;;;         
+;  ;;; ;; ;;;  ;;; ;;; ;;; ;;;; ;;;     ;;;; ;;; ;;;   ;;;;  
+;  ;;;;;;;;;;; ;;; ;;; ;;; ;;;; ;;;     ;;;; ;;; ;;;  ;; ;;; 
+;  ;;; ;;; ;;; ;;; ;;; ;;; ;;;  ;;;     ;;;  ;;; ;;; ;;; ;;; 
+;  ;;; ;;; ;;; ;;; ;;; ;;; ;;;  ;;; ;;;;;;;  ;;; ;;; ;;;;;;; 
+;  ;;; ;;; ;;; ;;; ;;; ;;; ;;;  ;;; ;;;;;;;  ;;; ;;; ;;;     
+;  ;;; ;;; ;;; ;;;;;;; ;;; ;;;; ;;;     ;;;  ;;; ;;;  ;;;;;; 
+;  ;;; ;;; ;;;  ;; ;;; ;;;  ;;; ;;;     ;;;  ;;; ;;;   ;;;;  
+;                                                            
+;                                                            
+;                                                            
+;                                                            
+
+  (let ()
+    ;; build-and-run : (listof (cons/c string[filename] (cons/c string[lang-line] (listof sexp[body-of-module]))) -> any
+    ;; sets up the files named by 'test-case', dynamically requires the first one, deletes the files
+    ;; and returns/raises-the-exception from the require'd file
+    (define (build-and-run test-case)
+      (define dir (make-temporary-file "contract-test~a" 'directory))
+      (for ([f (in-list test-case)])
+        (call-with-output-file (build-path dir (car f))
+          (lambda (port)
+            (display (cadr f) port)
+            (newline port)
+            (for ([sexp (in-list (cddr f))])
+              (fprintf port "~s\n" sexp)))))
+      (dynamic-wind
+       void
+       (lambda () (contract-eval `(dynamic-require ,(build-path dir (car (car test-case))) #f)))
+       (lambda ()
+         (for ([f (in-list test-case)])
+           (delete-file (build-path dir (car f))))
+         (delete-directory dir))))
+
+    (define exn:fail:contract:blame-object (contract-eval 'exn:fail:contract:blame-object))
+    (define (get-last-part-of-path sexp)
+      (define str (format "orig-blame: ~s" sexp))
+      (define m (regexp-match #rx"[/\\]([-a-z0-9.]*)[^/\\]*$" str))
+      (if m (cadr m) str))
+    
+    ;; basic negative blame case
+    (let ([blame
+           (exn:fail:contract:blame-object 
+            (with-handlers ((exn? values))
+              (build-and-run 
+               (list (list "a.rkt"
+                           "#lang racket/base"
+                           '(require "b.rkt")
+                           '(f #f))
+                     (list "b.rkt"
+                           "#lang racket/base"
+                           '(require racket/contract)
+                           '(provide/contract [f (-> integer? integer?)])
+                           '(define (f x) 1))))))])
+      (ctest "a.rkt"
+             'multi-file-blame1-positive
+             (,get-last-part-of-path (blame-positive ,blame)))
+      (ctest "b.rkt"
+             'multi-file-blame1-negative
+             (,get-last-part-of-path (blame-negative ,blame))))
+    
+    ;; basic positive blame case
+    (let ([blame
+           (exn:fail:contract:blame-object 
+            (with-handlers ((exn? values))
+              (build-and-run 
+               (list (list "a.rkt"
+                           "#lang racket/base"
+                           '(require "b.rkt")
+                           '(f 1))
+                     (list "b.rkt"
+                           "#lang racket/base"
+                           '(require racket/contract)
+                           '(provide/contract [f (-> integer? integer?)])
+                           '(define (f x) #f))))))])
+      (ctest "b.rkt"
+             'multi-file-blame2-positive
+             (,get-last-part-of-path (blame-positive ,blame)))
+      (ctest "a.rkt"
+             'multi-file-blame2-negative
+             (,get-last-part-of-path (blame-negative ,blame))))
+    
+    ;; positive blame via a re-provide
+    (let ([blame
+           (exn:fail:contract:blame-object 
+            (with-handlers ((exn? values))
+              (build-and-run 
+               (list (list "a.rkt"
+                           "#lang racket/base"
+                           '(require "b.rkt")
+                           '(f 1))
+                     (list "b.rkt"
+                           "#lang racket/base"
+                           '(require "c.rkt")
+                           '(provide f))
+                     (list "c.rkt"
+                           "#lang racket/base"
+                           '(require racket/contract)
+                           '(provide/contract [f (-> integer? integer?)])
+                           '(define (f x) #f))))))])
+      (ctest "c.rkt"
+             'multi-file-blame3-positive
+             (,get-last-part-of-path (blame-positive ,blame)))
+      (ctest "a.rkt"
+             'multi-file-blame3-negative
+             (,get-last-part-of-path (blame-negative ,blame))))
+    
+    ;; negative blame via a re-provide
+    (let ([blame
+           (exn:fail:contract:blame-object 
+            (with-handlers ((exn? values))
+              (build-and-run 
+               (list (list "a.rkt"
+                           "#lang racket/base"
+                           '(require "b.rkt")
+                           '(f #f))
+                     (list "b.rkt"
+                           "#lang racket/base"
+                           '(require "c.rkt")
+                           '(provide f))
+                     (list "c.rkt"
+                           "#lang racket/base"
+                           '(require racket/contract)
+                           '(provide/contract [f (-> integer? integer?)])
+                           '(define (f x) 1))))))])
+      (ctest "a.rkt"
+             'multi-file-blame4-positive
+             (,get-last-part-of-path (blame-positive ,blame)))
+      (ctest "c.rkt"
+             'multi-file-blame4-negative
+             (,get-last-part-of-path (blame-negative ,blame))))
+    
+    ;; have some sharing in the require graph
+    (let ([blame
+           (exn:fail:contract:blame-object 
+            (with-handlers ((exn? values))
+              (build-and-run 
+               (list (list "client.rkt"
+                           "#lang racket/base"
+                           '(require "server.rkt" "other.rkt")
+                           '(turn-init #f))
+                     (list "server.rkt"
+                           "#lang racket/base"
+                           '(require racket/contract)
+                           '(provide/contract [turn-init (-> number? any)])
+                           '(define turn-init void))
+                     (list "other.rkt"
+                           "#lang racket/base"
+                           '(require "server.rkt"))))))])
+      (ctest "client.rkt"
+             'multi-file-blame5-positive
+             (,get-last-part-of-path (blame-positive ,blame)))
+      (ctest "server.rkt"
+             'multi-file-blame5-negative
+             (,get-last-part-of-path (blame-negative ,blame)))))
+  
+  
+  
+;                                             
+;                                             
+;                                             
+;                                             
+;  ;;;                                        
+;  ;;;                                        
+;  ;;;   ;;;;   ;; ;;;  ;;;;;    ;;;   ;;; ;;;
+;  ;;;  ;; ;;; ;;;;;;; ;;;;;;;  ;;;;;  ;;; ;;;
+;  ;;; ;;; ;;; ;;; ;;; ;;  ;;; ;;;  ;;  ;; ;; 
+;  ;;; ;;;;;;; ;;; ;;;   ;;;;; ;;;      ;; ;; 
+;  ;;; ;;;     ;;; ;;; ;;; ;;; ;;;  ;;  ;; ;; 
+;  ;;;  ;;;;;; ;;;;;;; ;;; ;;;  ;;;;;    ;;;  
+;  ;;;   ;;;;   ;; ;;;  ;;;;;;   ;;;     ;;;  
+;                  ;;;                 ;;;;;  
+;              ;;;;;;                  ;;;;   
+;                                             
+;                                             
+
+;                                                                                    
+;                                                                                    
+;                                                                                    
+;                                                                                    
+;                                   ;                         ;                      
+;                                 ;;;                       ;;;                      
+;    ;;;     ;;;   ;;; ;;   ;;;;  ;;;; ;;; ;;;; ;;;   ;;;   ;;;;   ;;;   ;;; ;;;;;;  
+;   ;;;;;   ;;;;;  ;;;;;;; ;;; ;; ;;;; ;;;;;;;; ;;;  ;;;;;  ;;;;  ;;;;;  ;;;;;;;; ;; 
+;  ;;;  ;; ;;; ;;; ;;; ;;; ;;;    ;;;  ;;;  ;;; ;;; ;;;  ;; ;;;  ;;; ;;; ;;;  ;;;    
+;  ;;;     ;;; ;;; ;;; ;;;  ;;;;  ;;;  ;;;  ;;; ;;; ;;;     ;;;  ;;; ;;; ;;;   ;;;;  
+;  ;;;  ;; ;;; ;;; ;;; ;;;    ;;; ;;;  ;;;  ;;; ;;; ;;;  ;; ;;;  ;;; ;;; ;;;     ;;; 
+;   ;;;;;   ;;;;;  ;;; ;;; ;; ;;; ;;;; ;;;  ;;;;;;;  ;;;;;  ;;;;  ;;;;;  ;;;  ;; ;;; 
+;    ;;;     ;;;   ;;; ;;;  ;;;;   ;;; ;;;   ;; ;;;   ;;;    ;;;   ;;;   ;;;   ;;;;  
+;                                                                                    
+;                                                                                    
+;                                                                                    
+;                                                                                    
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;
