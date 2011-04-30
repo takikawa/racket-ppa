@@ -57,20 +57,16 @@ by any number of tools (including dpkg-buildpackage).
    - git merge -s recursive -X theirs vXXXX  
      # where vXXXX is an upstream tag. Since v5.0.1, these tags should all be on 
      # upstream branch stable.
-
      
-   - optionally auto resolve file deletion conflicts:  # check that this is still needed with a linear upstream
-     		     	     	  	   	       # history
+   - optionally auto resolve file deletion conflicts: 
      - git status -s | egrep '^(DU|UA| U|U |UD)' | cut -c4- | xargs git rm --ignore-unmatch DUMMY$$
      - git commit
 
 ** Import upstream tarball
-   The manual import does some slightly dangerous things. It is
-   preferable to understand what one is typing.  In principle
-   git-import-orig (from git-buildpackage) ought to work as well.
-   # If we can verify git-import-orig works fine most of the time, probably the 
-   # following scary instructions can be removed.
-   - Manual import:
+
+   We do a manual import, because e.g. git-import-orig wants to merge
+   into master. I have a git alias [1] which does most of this
+
      - git checkout upstream
      - git clean -fxd
      - git ls-files -z | xargs -0 rm -f
@@ -78,11 +74,20 @@ by any number of tools (including dpkg-buildpackage).
      - git add -A
      - git commit -m 'Importing '`basename $tarball`
      - pristine-tar commit $tarball
-   - git tag upstream/$version
 
-** Update master branch
-   - git checkout master
-   - git merge upstream/$version
+** Update dfsg branch
+   - git checkout dfsg
+   - git merge upstream
+
+   - probably the same conflicts with deletions exist here, which can
+     be resolved as above.
+
+   - git tag upstream/$version+dfsg1
+
+** Make a tarball
+
+   git checkout master && ./debian/rules get-orig-source
+   pristine-tar commit ../racket_$version.orig.tar.gz
 
 * Managing patches
 
@@ -109,4 +114,13 @@ version 0.17 or later.
        % ./debian/rules export-patches
 
 
- -- David Bremner <bremner@debian.org>, Mon, 25 Apr 2011 07:59:39 -0300
+Notes:
+
+[1] My git alias to import tarballs is
+
+ [alias]
+	import-tgz = "!f() { if [ -f $1 ]; then git clean -fxd; git ls-files -z | xargs -0 rm -f; tar --strip-components=1 -zxvf $1 ; git add -A; git commit -m'Importing '`basename $1`; else echo "missing tarball $1"; fi; }; f"
+
+
+ -- David Bremner <bremner@debian.org>, Sat, 30 Apr 2011 08:48:49 -0300
+
