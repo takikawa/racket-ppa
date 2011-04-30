@@ -1,8 +1,13 @@
-racket (5.1+dfsg1-3) unstable; urgency=low
+racket (5.1.1+dfsg1-1) unstable; urgency=low
 
-  * New patch for kFreeBSD-i386 and floatingpoint.h
+  * New Upstream version
+    - several copyright license clarification patches now upstream, thanks
+      again to Eli Barzilay.
+  * New patches for kFreeBSD: big thanks to Matthew Flatt.
+    - re-enable 3m garbage collector
+    - fix various build issues.
 
- -- David Bremner <bremner@debian.org>  Wed, 27 Apr 2011 06:54:23 -0300
+ -- David Bremner <bremner@debian.org>  Sat, 30 Apr 2011 08:33:44 -0300
 
 racket (5.1+dfsg1-2) unstable; urgency=low
 
