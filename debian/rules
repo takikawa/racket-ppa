@@ -10,7 +10,7 @@ DEB_DH_GENCONTROL_ARGS_racket := -- -Vracket:GC=3m
 MZDYN := mzdyn3m.o
 # Some architectures don't like the 3m garbage collector, so use Boehm (aka
 # cgc)
-ifneq (,$(filter kfreebsd-amd64 kfreebsd-i386 alpha hppa powerpc ppc64 mips mipsel,$(DEB_HOST_ARCH)))
+ifneq (,$(filter alpha hppa powerpc ppc64 mips mipsel,$(DEB_HOST_ARCH)))
     DEB_CONFIGURE_EXTRA_FLAGS := --enable-cgcdefault
     DEB_DH_GENCONTROL_ARGS_racket := -- -Vracket:GC=cgc
     MZDYN := mzdyn.o
@@ -63,12 +63,10 @@ debian/racket-arch.mk: debian/racket-arch.c
 get-orig-source:
 	git archive --format=tar --prefix=racket-${UPSTREAM}/ upstream/${UPSTREAM} | gzip -9 > ../${ORIG}
 
-PATCH_EXPORT_SCRIPT=/usr/share/gitpkg/hooks/quilt-patches-deb-export-hook
-
 export-patches: 
 	[ ! -r debian/patches ] || \
 	grep "^\#.*$(notdir $(PATCH_EXPORT_SCRIPT))" debian/patches/series
 	rm -rf debian/patches
-	bash $(PATCH_EXPORT_SCRIPT)
+	sh $(PATCH_EXPORT_SCRIPT)
 
 .PHONY: git-orig-source export-patches
