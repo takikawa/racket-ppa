@@ -113,7 +113,7 @@ static void init_iconv()
     iconv_errno = (errno_proc_t)GetProcAddress(m, "_errno");
     if (!iconv_errno) {
       /* The iconv.dll distributed with PLT Scheme links to msvcrt.dll.
-	 It's a slighly dangerous assumption that whaetever iconv we
+	 It's a slighly dangerous assumption that whatever iconv we
 	 found also uses msvcrt.dll. */
       m = LoadLibrary("msvcrt.dll");
       if (m) {
@@ -266,10 +266,8 @@ static Scheme_Object *string_normalize_kc (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_normalize_d (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_normalize_kd (int argc, Scheme_Object *argv[]);
 
-#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
 static Scheme_Object *make_shared_byte_string (int argc, Scheme_Object *argv[]);
 static Scheme_Object *shared_byte_string (int argc, Scheme_Object *argv[]);
-#endif
 
 static Scheme_Object *make_byte_string (int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string (int argc, Scheme_Object *argv[]);
@@ -695,13 +693,8 @@ scheme_init_string (Scheme_Env *env)
 						    0, -1),
 			     env);
 
-#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
   GLOBAL_PRIM_W_ARITY("make-shared-bytes", make_shared_byte_string, 1, 2, env);
   GLOBAL_PRIM_W_ARITY("shared-bytes", shared_byte_string, 0, -1, env);
-#else
-  GLOBAL_PRIM_W_ARITY("make-shared-bytes", make_byte_string, 1, 2, env);
-  GLOBAL_PRIM_W_ARITY("shared-bytes", byte_string, 0, -1, env);
-#endif
 
   scheme_add_global_constant("bytes-length",
 			     scheme_make_folding_prim(byte_string_length,
@@ -3513,6 +3506,26 @@ static void reset_locale(void)
 #endif
     current_locale_name_ptr = (void *)name;
   }
+}
+
+char *scheme_push_c_numeric_locale()
+{
+#ifndef DONT_USE_LOCALE
+  GC_CAN_IGNORE char *prev;
+  prev = setlocale(LC_NUMERIC, NULL);
+  if (!strcmp(prev, "C"))
+    return NULL;
+  else
+    return setlocale(LC_NUMERIC, "C");
+#endif  
+}
+
+void scheme_pop_c_numeric_locale(char *prev)
+{
+#ifndef DONT_USE_LOCALE
+  if (prev)
+    setlocale(LC_NUMERIC, prev);
+#endif  
 }
 
 static int find_special_casing(int ch)

@@ -50,39 +50,69 @@
           stx (syntax-pair-map (syntax-e stx) (lambda (stx) (unwind stx settings))) stx stx)
          stx))
    
-   (define (fall-through stx settings)
-     (kernel-syntax-case stx #f
-        [id
-         (identifier? stx)
-         (or (stepper-syntax-property stx 'stepper-lifted-name)
-             stx)]
-        [(define-values dc ...)
-         (unwind-define stx settings)]
-        [(#%plain-app exp ...)
-         (recur-on-pieces #'(exp ...) settings)]
-        [(quote datum)
-         (if (symbol? #'datum)
-             stx
-             #'datum)]
-        [(let-values . rest)
-         (unwind-mz-let stx settings)]
-        [(letrec-values . rest)
-         (unwind-mz-let stx settings)]
-        [(#%plain-lambda . rest)
-         (recur-on-pieces #'(lambda . rest) settings)]
-        [(set! var rhs)
-         (with-syntax ([unwound-var (or (stepper-syntax-property
-                                         #`var 'stepper-lifted-name)
-                                        #`var)]
-                       [unwound-body (unwind #`rhs settings)])
-           #`(set! unwound-var unwound-body))]
-        [else (recur-on-pieces stx settings)]))
-   
+  (define (fall-through stx settings)
+    (kernel-syntax-case stx #f
+      [id
+       (identifier? stx)
+       (or (stepper-syntax-property stx 'stepper-lifted-name)
+           stx)]
+      [(define-values dc ...)
+       (unwind-define stx settings)]
+      ; STC: app special cases from lazy racket
+      ; extract-if-lazy-proc - can't hide this in lazy.rkt bc it's needed
+      ; to distinguish the general lazy application
+      [(#%plain-app proc-extract p)
+       (or (eq? (syntax->datum #'proc-extract) 'extract-if-lazy-proc)
+           (eq? (object-name 
+                 (with-handlers ; for print output-style
+                     ([(λ (e) #t) (λ (e) #f)]) 
+                   (syntax-e (second (syntax-e #'proc-extract)))))
+                'extract-if-lazy-proc))
+       (unwind #'p settings)]
+      ; lazy #%app special case: force and delay
+      [(#%plain-app f arg)
+       (let ([fn (syntax->datum #'f)])
+         (or (eq? fn 'lazy-proc)
+             (eq? fn 'force) (eq? fn '!) (eq? fn '!!)
+             (eq? fn '!list) (eq? fn '!!list)
+             (equal? fn '(#%plain-app parameter-procedure))))
+       (unwind #'arg settings)]
+      ; general lazy application
+      [(#%plain-app 
+        (#%plain-lambda args1 (#%plain-app (#%plain-app proc p) . args2)) 
+        . args3)
+       (and (eq? (syntax->datum #'proc) 'extract-if-lazy-proc)
+            (equal? (syntax->datum (cdr (syntax-e #'args1)))
+                    (syntax->datum #'args2)))
+       (recur-on-pieces #'args3 settings)]
+      [(#%plain-app exp ...)
+       (recur-on-pieces #'(exp ...) settings)]
+      [(quote datum)
+       (if (symbol? #'datum)
+           stx
+           #'datum)]
+      [(let-values . rest)
+       (unwind-mz-let stx settings)]
+      [(letrec-values . rest)
+       (unwind-mz-let stx settings)]
+      [(#%plain-lambda . rest)
+       (recur-on-pieces #'(lambda . rest) settings)]
+      [(set! var rhs)
+       (with-syntax ([unwound-var (or (stepper-syntax-property
+                                       #`var 'stepper-lifted-name)
+                                      #`var)]
+                     [unwound-body (unwind #`rhs settings)])
+         #`(set! unwound-var unwound-body))]
+      [else (recur-on-pieces stx settings)]))
+
    (define (unwind stx settings)
      (transfer-info
       (let ([hint (stepper-syntax-property stx 'stepper-hint)])
         (if (procedure? hint)
-            (hint stx (lambda (stx) (recur-on-pieces stx settings)))
+            ; STC: For fn hints, I changed the recur procedure to unwind
+            ; (was recur-on-pieces). This should not affect the non-lazy 
+            ; stepper since it doesnt seem to use any fn hints.
+            (hint stx (lambda (stx) (unwind stx settings)))
             (let ([process (case hint
                              [(comes-from-cond)  unwind-cond]
                              [(comes-from-and)   (unwind-and/or 'and)]
@@ -203,7 +233,7 @@
         (label ([(var ...) rhs] ...) . bodies)
         (with-syntax ([(rhs2 ...) (map (lambda (rhs) (unwind rhs settings)) (syntax->list #'(rhs ...)))]
                       [new-bodies (map (lambda (body) (unwind body settings)) (syntax->list #'bodies))])
-          #`(,label ([(var ...) rhs2] ...) . new-bodies))]))
+          #`(label ([(var ...) rhs2] ...) . new-bodies))]))
    
    (define (unwind-local stx settings)
      (kernel-syntax-case stx #f

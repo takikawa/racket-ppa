@@ -57,7 +57,7 @@
 							    [(bottom) BS_BOTTOM])
                                                           0))
                                          0 0 0 0
-                                         (send parent get-client-hwnd)
+                                         (send parent get-content-hwnd)
                                          #f
                                          hInstance
                                          #f)]
@@ -157,7 +157,7 @@
     (define/override (is-command? cmd)
       (= cmd BN_CLICKED))
 
-    (define/public (do-command cmd control-hwnd)
+    (define/override (do-command cmd control-hwnd)
       (queue-window-event this (lambda ()
                                  (callback this
                                            (new control-event%

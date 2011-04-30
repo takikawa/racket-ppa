@@ -8893,7 +8893,7 @@ Scheme_Object *scheme_jump_to_continuation(Scheme_Object *obj, int num_rands, Sc
       } else {
         /* Prompt is pseudo-prompt at thread beginning.
            We're effectively composing the continuation,
-           so use it's prompt stack start. */
+           so use its prompt stack start. */
         Scheme_Overflow *oflow;
         oflow = scheme_get_thread_end_overflow();
         c->resume_to = oflow;
@@ -11559,7 +11559,7 @@ local_eval(int argc, Scheme_Object **argv)
   names = argv[0];
   for (l = names; SCHEME_PAIRP(l); l = SCHEME_CDR(l)) {
     a = SCHEME_CAR(l);
-    if (!SCHEME_STX_SYMBOLP(a))
+    if (!SCHEME_STXP(a) || !SCHEME_STX_SYMBOLP(a))
       break;
     cnt++;
   }

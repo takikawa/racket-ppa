@@ -43,7 +43,7 @@
     (extract-names all-nts what bind-names? orig-stx) 
     
     (let loop ([term orig-stx])
-      (syntax-case term (side-condition variable-except variable-prefix hole name in-hole hide-hole side-condition cross)
+      (syntax-case term (side-condition variable-except variable-prefix hole name in-hole hide-hole side-condition cross unquote)
         [(side-condition pre-pat (and))
          ;; rewriting metafunctions (and possibly other things) that have no where, etc clauses
          ;; end up with side-conditions that are empty 'and' expressions, so we just toss them here.
@@ -90,6 +90,8 @@
          term]
         [(cross a ...) (expected-exact 'cross 1 term)]
         [cross (expected-arguments 'cross term)]
+        [(unquote . _)
+         (raise-syntax-error what "unquote disallowed in patterns" orig-stx term)]
         [_
          (identifier? term)
          (match (regexp-match #rx"^([^_]*)_.*" (symbol->string (syntax-e term)))
@@ -125,7 +127,7 @@
             (let loop ([stx orig-stx]
                        [names null]
                        [depth 0])
-              (syntax-case stx (name in-hole side-condition)
+              (syntax-case stx (name in-hole side-condition cross)
                 [(name sym pat)
                  (identifier? (syntax sym))
                  (loop (syntax pat) 
@@ -137,6 +139,7 @@
                        depth)]
                 [(side-condition pat . rest)
                  (loop (syntax pat) names depth)]
+                [(cross _) names]
                 [(pat ...)
                  (let i-loop ([pats (syntax->list (syntax (pat ...)))]
                               [names names])

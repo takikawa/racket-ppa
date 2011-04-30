@@ -182,6 +182,8 @@ please adhere to these guidelines:
  (cs-bold "Bold")
  (cs-underline "Underline")
  (cs-change-color "Change Color")
+ (cs-foreground-color "Foreground Color")
+ (cs-background-color "Background Color")
  (cs-tack/untack-arrow "Tack/Untack Arrow(s)")
  (cs-jump-to-next-bound-occurrence "Jump to Next Bound Occurrence")
  (cs-jump-to-binding "Jump to Binding Occurrence")
@@ -452,8 +454,8 @@ please adhere to these guidelines:
  (show-status-line "Show status-line")
  (count-columns-from-one "Count column numbers from one")
  (display-line-numbers "Display line numbers in buffer; not character offsets")
- (show-line-and-column-numbers "Show line && column numbers") ; used for popup menu; right click on line/column box in bottom of drs window
- (show-character-offsets "Show character offsets") ; used for popup menu; right click on line/column box in bottom of drs window
+ (show-line-and-column-numbers "Show Line && Column Numbers") ; used for popup menu; right click on line/column box in bottom of drs window
+ (show-character-offsets "Show Character Offsets") ; used for popup menu; right click on line/column box in bottom of drs window
  (enable-keybindings-in-menus "Enable keybindings in menus")
  (automatically-to-ps "Automatically print to PostScript file")
  (command-as-meta "Treat command key as meta") ;; macos/macos x only
@@ -466,8 +468,9 @@ please adhere to these guidelines:
  (switch-to-module-language-automatically "Automatically switch to the module language when opening a module")
  (interactions-beside-definitions "Put the interactions window beside the definitions window") ;; in preferences, below the checkbox one line above this one
  (show-line-numbers "Show line numbers")
- (show-line-numbers/menu "Show Line Numbers")  ;; just like the above, but capitalized for appearance in a menu item
- (hide-line-numbers/menu "Hide Line Numbers")
+ (show-line-numbers/menu "Show Line &Numbers")  ;; just like the above, but capitalized for appearance in a menu item
+ (hide-line-numbers/menu "Hide Line &Numbers")
+ (show-line-numbers-in-definitions "Show All Line Numbers in Definitions") ;; shows up in the popup menu item in the bottom of the drracket window; controls the line numbers on each line in the definitions; used in a checkable menu item
  (limit-interactions-size "Limit interactions size")
  (background-color "Background Color")
  (default-text-color "Default text") ;; used for configuring colors, but doesn't need the word "color"
@@ -1046,7 +1049,7 @@ please adhere to these guidelines:
  (decimal-notation-for-rationals "Use decimal notation for rationals")
  (enforce-primitives-group-box-label "Initial Bindings")
  (enforce-primitives-check-box-label "Disallow redefinition of initial bindings")
- (automatically-compile "Populate compiled/ directories (for faster loading)")
+ (automatically-compile "Populate \"compiled\" directories (for faster loading)")
  (preserve-stacktrace-information "Preserve stacktrace (disable some optimizations)")
  (expression-level-stacktrace "Expression-level stacktrace")
  (function-level-stacktrace "Function-level stacktrace")
@@ -1159,6 +1162,9 @@ please adhere to these guidelines:
  (test-coverage-clear-and-do-not-ask-again "Yes, and don't ask again")
  (test-coverage-ask? "Ask about clearing test coverage")
   
+ (test-coverage-on "Tests covered")
+ (test-coverage-off "Tests didn't cover")
+  
  ;; tracing
  (tracing-enable-tracing "Enable tracing")
  (tracing-show-tracing-window "Show Tracing")
@@ -1224,6 +1230,8 @@ please adhere to these guidelines:
  (module-browser-open-file-format "Open ~a")
  (module-browser "Module Browser") ;; frame title
  (module-browser... "&Module Browser...") ;; menu item title
+ (module-browser-in-file "M&odule Browser on ~a") ;; menu item title; ~a is filled with a filename
+ (module-browser-no-file "Module Browser on This Saved File") ;; menu item title for above menu item; used when there is no saved file
  (module-browser-error-expanding "Error expanding the program:\n\n~a")
  (module-browser-show-lib-paths "Show files loaded by (lib ..) paths")
  (module-browser-progress "Module Browser: ~a") ;; prefix in the status line
@@ -1231,7 +1239,8 @@ please adhere to these guidelines:
  (module-browser-show-lib-paths/short "Follow lib requires") ;; check box label in show module browser pane in drscheme window.
  (module-browser-show-planet-paths/short "Follow PLaneT requires") ;; check box label in show module browser pane in drscheme window.
  (module-browser-refresh "Refresh") ;; button label in show module browser pane in drscheme window.
- (module-browser-only-in-plt-and-module-langs
+ (module-browser-highlight "Highlight") ;; used to search in the graph; the label on a text-field% object
+  (module-browser-only-in-plt-and-module-langs
   "The module browser is only available for module-based programs.")
  (module-browser-name-length "Name length")
  (module-browser-name-short "Short")

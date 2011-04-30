@@ -1599,7 +1599,7 @@ scheme_resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
   }
 
   if (convert
-      && (offset || !has_tl) /* either need args, or treat as convert becasue it's fully closed */
+      && (offset || !has_tl) /* either need args, or treat as convert because it's fully closed */
       ) {
     /* Take over closure_map to be the convert map, instead. */
     convert_map = closure_map;
@@ -1944,6 +1944,10 @@ Scheme_Object *scheme_build_closure_name(Scheme_Object *code, Scheme_Compile_Inf
   name = scheme_stx_property(code, scheme_inferred_name_symbol, NULL);
   if (name && SCHEME_SYMBOLP(name)) {
     name = combine_name_with_srcloc(name, code, 0);
+  } else if (name && SCHEME_VOIDP(name)) {
+    name = scheme_source_to_name(code);
+    if (name)
+      name = combine_name_with_srcloc(name, code, 1);
   } else {
     name = rec[drec].value_name;
     if (!name || SCHEME_FALSEP(name)) {
@@ -5954,7 +5958,7 @@ static void restore_continuation(Scheme_Cont *cont, Scheme_Thread *p, int for_pr
   /* Copy stack back in: p->runstack and p->runstack_saved arrays
      are already restored, so the shape is certainly the same as
      when cont->runstack_copied was made. If we have a derived
-     continuation, then we're sharing it's base runstack. */
+     continuation, then we're sharing its base runstack. */
   copy_in_runstack(p, cont->runstack_copied, 0);
   {
     intptr_t done = cont->runstack_copied->runstack_size, size;
@@ -8445,6 +8449,7 @@ struct Scheme_Lightweight_Continuation {
   void *stack_slice;
   Scheme_Object **runstack_slice;
   Scheme_Cont_Mark *cont_mark_stack_slice;
+  void *stored1, *stored2;
 };
 
 void scheme_init_thread_lwc(void) XFORM_SKIP_PROC
@@ -8478,7 +8483,7 @@ Scheme_Lightweight_Continuation *scheme_capture_lightweight_continuation(Scheme_
 /* This function explicitly coorperates with the GC by storing the
    pointers it needs to save across a collection in `storage'. Also,
    if allocation fails, it can abort and return NULL. The combination
-   allows it to work in a thread for runing futures (where allocation
+   allows it to work in a thread for running futures (where allocation
    and GC in general ae disallowed). */
 {
   intptr_t len, i, j, pos;
@@ -8523,6 +8528,7 @@ Scheme_Lightweight_Continuation *scheme_capture_lightweight_continuation(Scheme_
   if (!runstack_slice) return NULL;
 
   lw = (Scheme_Lightweight_Continuation *)storage[0];
+  lwc = lw->saved_lwc;
   lw->runstack_slice = runstack_slice;
   memcpy(runstack_slice, lw->saved_lwc->runstack_end, len * sizeof(Scheme_Object *));
 
@@ -8533,10 +8539,9 @@ Scheme_Lightweight_Continuation *scheme_capture_lightweight_continuation(Scheme_
   for (i = 0; i < len; i++) {
     if (((uintptr_t)runstack_slice[i] >= (uintptr_t)lwc->runstack_end)
         && ((uintptr_t)runstack_slice[i] <= (uintptr_t)lwc->runstack_start))
-      runstack_slice[i] = 0;
+      runstack_slice[i] = NULL;
   }
 
-  lwc = lw->saved_lwc;
   len = lwc->cont_mark_stack_end - lwc->cont_mark_stack_start;
 
   if (len) {
@@ -8582,7 +8587,7 @@ static void *apply_lwc_k()
   p->ku.k.p1 = NULL;
   p->ku.k.p2 = NULL;
 
-  return scheme_apply_lightweight_continuation(lw, result);
+  return scheme_apply_lightweight_continuation(lw, result, p->ku.k.i1, p->ku.k.i2);
 }
 
 int scheme_can_apply_lightweight_continuation(Scheme_Lightweight_Continuation *lw)
@@ -8607,19 +8612,30 @@ int scheme_can_apply_lightweight_continuation(Scheme_Lightweight_Continuation *l
 }
 
 Scheme_Object *scheme_apply_lightweight_continuation(Scheme_Lightweight_Continuation *lw,
-                                                     Scheme_Object *result) XFORM_SKIP_PROC
+                                                     Scheme_Object *result,
+                                                     int result_is_rs_argv,
+                                                     intptr_t min_stacksize) 
+  XFORM_SKIP_PROC
 {
   intptr_t len, cm_len, cm_pos_delta, cm_delta, i, cm;
   Scheme_Cont_Mark *seg;
   Scheme_Object **rs;
- 
+
   len = lw->saved_lwc->runstack_start - lw->saved_lwc->runstack_end;
  
-  if (!scheme_check_runstack(len)) {
+  if (!scheme_check_runstack(len)
+      /* besides making sure that the save slice fits, we need to
+         make sure that any advance check on available from the old thread
+         still applies in the new thread */
+      || ((MZ_RUNSTACK - MZ_RUNSTACK_START) < min_stacksize)) {
     /* This will not happen when restoring a future-thread-captured
        continuation in a future thread. */
     scheme_current_thread->ku.k.p1 = lw;
     scheme_current_thread->ku.k.p2 = result;
+    scheme_current_thread->ku.k.i1 = result_is_rs_argv;
+    scheme_current_thread->ku.k.i2 = min_stacksize;
+    if (len < min_stacksize)
+      len = min_stacksize;
     return (Scheme_Object *)scheme_enlarge_runstack(len, apply_lwc_k);
   }
 
@@ -8657,6 +8673,9 @@ Scheme_Object *scheme_apply_lightweight_continuation(Scheme_Lightweight_Continua
       rs[i+1] = scheme_make_integer(cm);
     }
   }
+
+  if (result_is_rs_argv)
+    result = (Scheme_Object *)(rs + 2);
 
   return scheme_apply_lightweight_continuation_stack(lw->saved_lwc, lw->stack_slice, result);
 }

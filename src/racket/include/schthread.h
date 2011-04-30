@@ -158,7 +158,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Object **fixup_runstack_base_;
   int fixup_already_in_place_;
   void *retry_alloc_r1_;
-  double save_fp_;
+  double scheme_jit_save_fp_;
   struct Scheme_Bucket_Table *starts_table_;
   struct Scheme_Modidx *modidx_caching_chain_;
   struct Scheme_Object *global_shift_cache_;
@@ -307,6 +307,10 @@ typedef struct Thread_Local_Variables {
   struct FFI_Sync_Queue *ffi_sync_queue_;
   struct Scheme_GC_Pre_Post_Callback_Desc *gc_prepost_callback_descs_;
   struct Scheme_Hash_Table *place_local_misc_table_;
+  int place_evts_array_size_;
+  struct Evt **place_evts_;
+  void *place_object_;
+  struct Scheme_Object *empty_self_shift_cache_;
 } Thread_Local_Variables;
 
 #if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS)
@@ -470,7 +474,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define fixup_runstack_base XOA (scheme_get_thread_local_variables()->fixup_runstack_base_)
 #define fixup_already_in_place XOA (scheme_get_thread_local_variables()->fixup_already_in_place_)
 #define retry_alloc_r1 XOA (scheme_get_thread_local_variables()->retry_alloc_r1_)
-#define save_fp XOA (scheme_get_thread_local_variables()->save_fp_)
+#define scheme_jit_save_fp XOA (scheme_get_thread_local_variables()->scheme_jit_save_fp_)
 #define starts_table XOA (scheme_get_thread_local_variables()->starts_table_)
 #define modidx_caching_chain XOA (scheme_get_thread_local_variables()->modidx_caching_chain_)
 #define global_shift_cache XOA (scheme_get_thread_local_variables()->global_shift_cache_)
@@ -619,6 +623,10 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define ffi_sync_queue XOA (scheme_get_thread_local_variables()->ffi_sync_queue_)
 #define gc_prepost_callback_descs XOA (scheme_get_thread_local_variables()->gc_prepost_callback_descs_)
 #define place_local_misc_table XOA (scheme_get_thread_local_variables()->place_local_misc_table_)
+#define place_evts_array_size XOA (scheme_get_thread_local_variables()->place_evts_array_size_)
+#define place_evts XOA (scheme_get_thread_local_variables()->place_evts_)
+#define place_object XOA (scheme_get_thread_local_variables()->place_object_)
+#define empty_self_shift_cache XOA (scheme_get_thread_local_variables()->empty_self_shift_cache_)
 
 /* **************************************** */
 

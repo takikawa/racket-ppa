@@ -1,8 +1,9 @@
 #lang scheme/base
 
 (require unstable/sequence racket/require racket/match
-         (path-up "rep/type-rep.rkt" "rep/filter-rep.rkt" "rep/object-rep.rkt" "types/abbrev.rkt"
-                  "rep/rep-utils.rkt" "utils/utils.rkt" "utils/tc-utils.rkt"))
+         (path-up "rep/type-rep.rkt" "rep/filter-rep.rkt" "rep/object-rep.rkt" "rep/rep-utils.rkt"
+                  "types/abbrev.rkt" "types/numeric-tower.rkt" "types/subtype.rkt"
+                  "utils/utils.rkt" "utils/tc-utils.rkt"))
 
 ;; do we attempt to find instantiations of polymorphic types to print? 
 ;; FIXME - currently broken
@@ -142,7 +143,7 @@
                       [else (fp "~a" v)])]
     [(? tuple? t)
      (fp "~a" (cons 'List (tuple-elems t)))]
-    [(Base: n cnt) (fp "~s" n)]      
+    [(Base: n cnt _ _) (fp "~s" n)]
     [(Opaque: pred _) (fp "(Opaque ~a)" (syntax->datum pred))]
     [(Struct: (== promise-sym) #f  (list (fld: t _ _)) _    _ _ _ _) (fp "(Promise ~a)" t)]
     [(Struct: nm       par (list (fld: t _ _) ...)       proc _ _ _ _)
@@ -195,10 +196,10 @@
     #;
     [(Mu-unsafe: b) (fp "(unsafe-mu ~a ~a)" (Type-seq c) b)]
     [(Mu: x (Syntax: (Union: (list
-                              (Base: 'Number _) 
-                              (Base: 'Boolean _)
-                              (Base: 'Symbol _)
-                              (Base: 'String _)
+                              (Base: 'Number _ _ _)
+                              (Base: 'Boolean _ _ _)
+                              (Base: 'Symbol _ _ _)
+                              (Base: 'String _ _ _)
                               (Mu: var (Union: (list (Value: '()) (Pair: (F: x) (F: var)))))
                               (Mu: y (Union: (list (F: x) (Pair: (F: x) (F: y)))))
                               (Vector: (F: x))

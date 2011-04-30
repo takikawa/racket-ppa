@@ -24,7 +24,8 @@ Two parsing forms are provided: @scheme[syntax-parse] and
                              (code:line #:literals (literal ...))
                              (code:line #:literal-sets (literal-set ...))
                              (code:line #:conventions (convention-id ...))
-                             (code:line #:local-conventions (convention-rule ...))]
+                             (code:line #:local-conventions (convention-rule ...))
+                             (code:line #:disable-colon-notation)]
                [literal literal-id
                         (pattern-id literal-id)
                         (pattern-id literal-id #:phase phase-expr)]
@@ -91,13 +92,18 @@ input's binding at phase @scheme[phase-expr].
 @specsubform/subs[(code:line #:literal-sets (literal-set ...))
                   ([literal-set literal-set-id
                                 (literal-set-id literal-set-option ...)]
-                   [literal-set-option (code:line #:at context-id)
+                   [literal-set-option (code:line #:at lctx)
                                        (code:line #:phase phase-expr)])
                   #:contracts ([phase-expr (or/c exact-integer? #f)])]{
 
 Many literals can be declared at once via one or more @tech{literal
 sets}, imported with the @scheme[#:literal-sets] option. See
 @tech{literal sets} for more information.
+
+If the @racket[#:at] keyword is given, the lexical context of the
+@racket[lctx] term is used to determine which identifiers in the
+patterns are treated as literals; this option is useful primarily for
+macros that generate @racket[syntax-parse] expressions.
 }
 
 @specsubform[(code:line #:conventions (conventions-id ...))]{
@@ -119,8 +125,38 @@ of @tech{pattern directives}, and a non-empty sequence of body
 expressions.
 }
 
+@specsubform[(code:line #:disable-colon-notation)]{
+
+Suppresses the ``colon notation'' for annotated pattern variables.
+
+@myexamples[
+(syntax-parse #'(a b c)
+  [(x:y ...) 'ok])
+(syntax-parse #'(a b c) #:disable-colon-notation
+  [(x:y ...) 'ok])
+]
+}
+
 @defform[(syntax-parser parse-option ... clause ...+)]{
 
 Like @scheme[syntax-parse], but produces a matching procedure. The
 procedure accepts a single argument, which should be a syntax object.
+}
+
+@defform[(define/syntax-parse syntax-pattern pattern-directive ... stx-expr)
+         #:contracts ([stx-expr syntax?])]{
+
+Definition form of @racket[syntax-parse]. That is, it matches the
+syntax object result of @racket[stx-expr] against
+@racket[syntax-pattern] and creates pattern variable definitions for
+the attributes of @racket[syntax-pattern].
+
+@myexamples[
+(define/syntax-parse ((~seq kw:keyword arg:expr) ...)
+  #'(#:a 1 #:b 2 #:c 3))
+#'(kw ...)
+]
+
+Compare with @racket[define/with-syntax], a similar definition form
+that uses the simpler @racket[syntax-case] patterns.
 }

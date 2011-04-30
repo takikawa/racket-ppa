@@ -21,7 +21,7 @@
 (define (exotic-choice? [random generator-random]) (= 0 (random 5)))
 (define (use-lang-literal? [random generator-random]) (= 0 (random 20)))
 
-(define default-check-attempts 1000)
+(define default-check-attempts (make-parameter 1000))
 
 (define ascii-chars-threshold 1000)
 (define tex-chars-threshold 1500)
@@ -141,8 +141,8 @@
 (define (pick-real attempt [random generator-random])
   (pick-number attempt #:top-threshold real-threshold random))
 
-(define (pick-sequence-length attempt)
-  (random-natural (expected-value->p ((attempt->size) attempt))))
+(define (pick-sequence-length size)
+  (random-natural (expected-value->p size)))
 
 (define (min-prods nt prods base-table)
   (let* ([sizes (hash-ref base-table nt)]
@@ -343,7 +343,7 @@
                         [`any
                          (λ (r s a e f)
                            (let*-values ([(lang nt) ((next-any-decision) langc sexpc)]
-                                         [(term) (gen-nt lang nt #f r s a (list the-hole))])
+                                         [(term) (gen-nt lang nt #f r s a the-not-hole)])
                              (values term e)))]
                         [(or (? symbol? (? nt? p)) `(cross ,(? symbol? p)))
                          (let ([cross? (not (symbol? pat))])
@@ -371,7 +371,7 @@
                                             (let ([prior (hash-ref e class #f)])
                                               (if prior
                                                   prior
-                                                  (if (zero? s) 0 ((next-sequence-decision) a))))]
+                                                  (if (zero? s) 0 ((next-sequence-decision) s))))]
                                            [(seq env)
                                             (generate-sequence (λ (e) (elemg r s a e f)) e vars len)]
                                            [(tail env) 
@@ -740,7 +740,7 @@
             'what (if loc (string-append loc "\n") "") msg)))]))
 
 (define-for-syntax attempts-keyword
-  (list '#:attempts #'default-check-attempts
+  (list '#:attempts #'(default-check-attempts)
         (list #'natural-number/c "#:attempts argument")))
 (define-for-syntax source-keyword
   (list '#:source #f))
@@ -1011,6 +1011,7 @@
          check-reduction-relation
          check-metafunction
          default-attempt-size
+         default-check-attempts
          attempt-size/c
          exn:fail:redex:generation-failure?
          redex-pseudo-random-generator)

@@ -613,7 +613,7 @@
       ;     e3))))
       ;
       ; note that this elaboration looks exactly like the one for letrec, and that's
-      ; okay, becuase expand guarantees that reordering them will not cause capture.
+      ; okay, because expand guarantees that reordering them will not cause capture.
       ; this is because a bound variable answers is considered bound by a binding only when
       ; the pair answers true to bound-identifier=?, which is determined during (the first)
       ; expand.
@@ -811,9 +811,12 @@
              [varref-no-break-wrap
               (lambda ()
                 (outer-wcm-wrap (make-debug-info-normal free-varrefs) var))]
+             [base-namespace-symbols (namespace-mapped-symbols (make-base-namespace))]
              [top-level-varref-break-wrap
               (lambda ()
-                (if (memq (syntax-e var) beginner-defined:must-reduce)
+                (if (or (memq (syntax-e var) beginner-defined:must-reduce)
+                        (and (stepper-syntax-property var 'lazy-op)
+                             (not (memq (syntax->datum var) base-namespace-symbols))))
                     (varref-break-wrap)
                     (varref-no-break-wrap)))])
           (vector 
@@ -1176,7 +1179,7 @@
   (define/contract annotate/top-level
     (syntax? . -> . syntax?)
     (lambda (exp)
-      (syntax-case exp (module #%plain-module-begin let-values dynamic-wind #%plain-lambda #%plain-app)
+      (syntax-case exp (module #%plain-module-begin let-values dynamic-wind #%plain-lambda #%plain-app define-values)
         [(module name lang
            (#%plain-module-begin . bodies))
          #`(module name lang (#%plain-module-begin #,@(map annotate/module-top-level (syntax->list #`bodies))))]
@@ -1189,7 +1192,10 @@
                         (#%plain-lambda () . rest2)
                         (#%plain-lambda () . rest3)))
          exp]
-        [else
+        ; STC: for lazy, handle defines
+        [(define-values (ids ...) bodies) (annotate/module-top-level exp)]
+        [else (annotate/module-top-level exp)]
+        #;[else
          (error `annotate/top-level "unexpected top-level expression: ~a\n"
                 (syntax->datum exp))
          #;(annotate/module-top-level exp)])))
@@ -1277,6 +1283,30 @@
                                        call-with-values (#%plain-lambda () vals)
                                        print-values))))
                  exp))]
+             ; STC: for lazy racket
+             ; This is similar to app case above, but with toplevel-forcer
+             [(#%plain-app (#%plain-app toplevel-forcer) operand)
+              (stepper-recertify
+               #`(#%plain-app
+                  call-with-values
+                  (#%plain-lambda 
+                   () 
+                   (#%plain-app 
+                    (#%plain-app toplevel-forcer)
+                    #,(top-level-annotate/inner (top-level-rewrite #'operand) exp #f)))
+                  (#%plain-lambda 
+                   vals
+                   (begin
+                     (#,exp-finished-break
+                      (#%plain-app 
+                       list 
+                       (#%plain-app 
+                        list 
+                        #,(lambda () exp) #f (#%plain-lambda () vals))))
+                     (#%plain-app 
+                      call-with-values 
+                      (#%plain-lambda () vals) values))))
+               exp)]
              [any
               (stepper-syntax-property exp 'stepper-test-suite-hint)
               (top-level-annotate/inner (top-level-rewrite exp) exp #f)]

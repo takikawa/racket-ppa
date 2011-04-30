@@ -8,11 +8,11 @@
 	 (env lexical-env type-alias-env global-env type-env-structs)
          (rep type-rep)
          syntax/free-vars
-         ;racket/trace unstable/debug
+         ;racket/trace 
          racket/match (prefix-in c: racket/contract)
          (except-in racket/contract -> ->* one-of/c)
          syntax/kerncase syntax/parse unstable/syntax
-         unstable/debug
+         
          (for-template 
           racket/base
           "internal-forms.rkt"))
@@ -29,7 +29,7 @@
 
 (d/c (do-check expr->type namess results expected-results form exprs body clauses expected #:abstract [abstract null])
      (((syntax? syntax? tc-results? . c:-> . any/c)
-       (listof (listof identifier?)) (listof tc-results?)
+       (listof (listof identifier?)) (listof tc-results?) (listof tc-results?)
        syntax? (listof syntax?) syntax? (listof syntax?) (or/c #f tc-results?))
       (#:abstract any/c)
       . c:->* . 

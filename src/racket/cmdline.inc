@@ -979,6 +979,12 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  argv++;
 	  --argc;
 	  sprog = argv[0];
+          if (!*sprog) {
+            PRINTF("%s: empty path after %s switch\n", 
+		   prog, 
+		   real_switch);
+	    goto show_need_help;
+          }
           was_config_flag = 1;
 	  break;
 	case 'q':
@@ -1171,6 +1177,9 @@ static int run_from_cmd_line(int argc, char *_argv[],
     sprog = prog;
   
   (void)scheme_set_run_cmd(sprog);
+#ifdef CAN_SET_OS_PROCESS_NAME
+  set_os_process_name(sprog);
+#endif
   
   if (no_compiled)
     scheme_set_compiled_file_paths(scheme_make_null());

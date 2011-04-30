@@ -518,7 +518,13 @@
          empty any 5 0 (decisions #:nt (patterns first)
                                   #:any (λ (langc sexpc) (values sexpc 'sexp))
                                   #:var (list (λ _ 'x))))
-        'x))
+        'x)
+  (test 
+   (generate-term/decisions 
+    empty (in-hole (any hole) 7) 5 0
+    (decisions #:any (list (λ (_ sexp) (values sexp 'sexp)))
+               #:nt (patterns fourth)))
+   (term (hole 7))))
 
 ;; `hide-hole' pattern
 (let ()
@@ -621,6 +627,11 @@
     (e e 4)
     (n number))
   
+  (test (let ([checked 0])
+          (parameterize ([default-check-attempts 1])
+            (redex-check lang () (set! checked (add1 checked)) #:print? #f))
+          checked)
+        1)
   (test (redex-check lang d #t #:attempts 1 #:print? (not #t)) #t)
   (test (redex-check lang d #f #:print? #f)
         (make-counterexample 5))
@@ -1272,7 +1283,7 @@
 (let ([seed 0])
   (define-language L)
   (define (generate)
-    (generate-term L (number ...) 10000000 #:attempt-num 10000000))
+    (generate-term L (number ...) 100 #:attempt-num 10000000))
   (test (begin (random-seed seed) (generate))
         (begin (random-seed seed) (generate)))
   (let ([prg (make-pseudo-random-generator)])

@@ -4171,18 +4171,16 @@ static int mark_config_SIZE(void *p, struct NewGC *gc) {
 
 static int mark_config_MARK(void *p, struct NewGC *gc) {
   Scheme_Config *config = (Scheme_Config *)p;
-  gcMARK2(config->key, gc);
-  gcMARK2(config->cell, gc);
-  gcMARK2(config->next, gc);
+  gcMARK2(config->ht, gc);
+  gcMARK2(config->root, gc);
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Config));
 }
 
 static int mark_config_FIXUP(void *p, struct NewGC *gc) {
   Scheme_Config *config = (Scheme_Config *)p;
-  gcFIXUP2(config->key, gc);
-  gcFIXUP2(config->cell, gc);
-  gcFIXUP2(config->next, gc);
+  gcFIXUP2(config->ht, gc);
+  gcFIXUP2(config->root, gc);
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Config));
 }
@@ -5692,6 +5690,7 @@ static int future_SIZE(void *p, struct NewGC *gc) {
 static int future_MARK(void *p, struct NewGC *gc) {
   future_t *f = (future_t *)p;
   gcMARK2(f->orig_lambda, gc);
+  gcMARK2(f->cust, gc);
   gcMARK2(f->arg_s0, gc);
   gcMARK2(f->arg_t0, gc);
   gcMARK2(f->arg_S0, gc);
@@ -5703,6 +5702,7 @@ static int future_MARK(void *p, struct NewGC *gc) {
   gcMARK2(f->arg_s2, gc);
   gcMARK2(f->arg_S2, gc);
   gcMARK2(f->arg_p, gc);
+  gcMARK2(f->arg_S4, gc);
   gcMARK2(f->retval_s, gc);
   gcMARK2(f->retval, gc);
   gcMARK2(f->multiple_array, gc);
@@ -5712,7 +5712,11 @@ static int future_MARK(void *p, struct NewGC *gc) {
   gcMARK2(f->next, gc);
   gcMARK2(f->next_waiting_atomic, gc);
   gcMARK2(f->next_waiting_lwc, gc);
+  gcMARK2(f->next_waiting_touch, gc);
   gcMARK2(f->suspended_lw, gc);
+  gcMARK2(f->prev_in_fsema_queue, gc);
+  gcMARK2(f->next_in_fsema_queue, gc);
+  gcMARK2(f->touching, gc);
   return
   gcBYTES_TO_WORDS(sizeof(future_t));
 }
@@ -5720,6 +5724,7 @@ static int future_MARK(void *p, struct NewGC *gc) {
 static int future_FIXUP(void *p, struct NewGC *gc) {
   future_t *f = (future_t *)p;
   gcFIXUP2(f->orig_lambda, gc);
+  gcFIXUP2(f->cust, gc);
   gcFIXUP2(f->arg_s0, gc);
   gcFIXUP2(f->arg_t0, gc);
   gcFIXUP2(f->arg_S0, gc);
@@ -5731,6 +5736,7 @@ static int future_FIXUP(void *p, struct NewGC *gc) {
   gcFIXUP2(f->arg_s2, gc);
   gcFIXUP2(f->arg_S2, gc);
   gcFIXUP2(f->arg_p, gc);
+  gcFIXUP2(f->arg_S4, gc);
   gcFIXUP2(f->retval_s, gc);
   gcFIXUP2(f->retval, gc);
   gcFIXUP2(f->multiple_array, gc);
@@ -5740,13 +5746,42 @@ static int future_FIXUP(void *p, struct NewGC *gc) {
   gcFIXUP2(f->next, gc);
   gcFIXUP2(f->next_waiting_atomic, gc);
   gcFIXUP2(f->next_waiting_lwc, gc);
+  gcFIXUP2(f->next_waiting_touch, gc);
   gcFIXUP2(f->suspended_lw, gc);
+  gcFIXUP2(f->prev_in_fsema_queue, gc);
+  gcFIXUP2(f->next_in_fsema_queue, gc);
+  gcFIXUP2(f->touching, gc);
   return
   gcBYTES_TO_WORDS(sizeof(future_t));
 }
 
 #define future_IS_ATOMIC 0
 #define future_IS_CONST_SIZE 1
+
+
+static int fsemaphore_SIZE(void *p, struct NewGC *gc) {
+  return
+    gcBYTES_TO_WORDS(sizeof(fsemaphore_t));
+}
+
+static int fsemaphore_MARK(void *p, struct NewGC *gc) {
+    fsemaphore_t *s = (fsemaphore_t*)p;
+    gcMARK2(s->queue_front, gc);
+    gcMARK2(s->queue_end, gc);
+  return
+    gcBYTES_TO_WORDS(sizeof(fsemaphore_t));
+}
+
+static int fsemaphore_FIXUP(void *p, struct NewGC *gc) {
+    fsemaphore_t *s = (fsemaphore_t*)p;
+    gcFIXUP2(s->queue_front, gc);
+    gcFIXUP2(s->queue_end, gc);
+  return
+    gcBYTES_TO_WORDS(sizeof(fsemaphore_t));
+}
+
+#define fsemaphore_IS_ATOMIC 0
+#define fsemaphore_IS_CONST_SIZE 1
 
 
 #else
@@ -5780,7 +5815,32 @@ static int sequential_future_FIXUP(void *p, struct NewGC *gc) {
 #define sequential_future_IS_CONST_SIZE 1
 
 
+static int sequential_fsemaphore_SIZE(void *p, struct NewGC *gc) {
+  return
+    gcBYTES_TO_WORDS(sizeof(fsemaphore_t));
+}
+
+static int sequential_fsemaphore_MARK(void *p, struct NewGC *gc) {
+    fsemaphore_t *s = (fsemaphore_t*)p;
+    gcMARK2(s->sema, gc);
+  return
+    gcBYTES_TO_WORDS(sizeof(fsemaphore_t));
+}
+
+static int sequential_fsemaphore_FIXUP(void *p, struct NewGC *gc) {
+    fsemaphore_t *s = (fsemaphore_t*)p;
+    gcFIXUP2(s->sema, gc);
+  return
+    gcBYTES_TO_WORDS(sizeof(fsemaphore_t));
+}
+
+#define sequential_fsemaphore_IS_ATOMIC 0
+#define sequential_fsemaphore_IS_CONST_SIZE 1
+
+
 #endif
+
+
 
 #endif  /* FUTURE */
 

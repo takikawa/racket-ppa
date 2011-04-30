@@ -76,6 +76,8 @@
 
    srcloc->edition/pair
    
+   test-coverage-on-style-name
+   test-coverage-off-style-name
    
    ;show-error-and-highlight
    ;print-bug-to-stderr
@@ -320,6 +322,7 @@
   ())
 (define-signature drracket:module-overview^ extends drracket:module-overview-cm^
   (module-overview
+   module-overview/file
    make-module-overview-pasteboard
    fill-pasteboard))
 

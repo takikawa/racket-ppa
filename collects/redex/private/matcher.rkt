@@ -51,9 +51,11 @@ before the pattern compiler is invoked.
 ;; repeat = (make-repeat compiled-pattern (listof rib) (union #f symbol) boolean)
 (define-struct repeat (pat empty-bindings suffix mismatch?) #:inspector (make-inspector)) ;; inspector for tests below
 
-;; compiled-pattern : exp (union #f none sym) -> (union #f (listof mtch))
-;; mtch = (make-mtch bindings sexp[context w/none-inside for the hole] (union none sexp[hole]))
-;; mtch is short for "match"
+;; compiled-pattern : exp hole-info -> (union #f (listof mtch))
+;; mtch = (make-mtch bindings sexp[context] (union none sexp[hole]))
+;; hole-info = boolean
+;;               #f means we're not in a `in-hole' context
+;;               #t means we're looking for a hole
 (define-values (mtch-bindings mtch-context mtch-hole make-mtch mtch?)
   (let ()
     (define-struct mtch (bindings context hole) #:inspector (make-inspector))
@@ -66,7 +68,6 @@ before the pattern compiler is invoked.
               (make-mtch a b c))
             mtch?)))
 
-;; used to mean no context is available; also used as the "name" for an unnamed (ie, normal) hole
 (define none
   (let ()
     (define-struct none ())
@@ -83,9 +84,6 @@ before the pattern compiler is invoked.
 ;;                                     pict-builder
 ;;                                     (listof symbol)
 ;;                                     (listof (listof symbol))) -- keeps track of `primary' non-terminals
-;; hole-info = (union #f none)
-;;               #f means we're not in a `in-hole' context
-;;               none means we're looking for a hole
 
 (define-struct compiled-lang (lang cclang ht list-ht across-ht across-list-ht
                                    has-hole-ht cache bind-names-cache pict-builder
@@ -370,21 +368,23 @@ before the pattern compiler is invoked.
 ;; The number result is the number of times that the nt appeared in the pattern.
 (define (build-compatible-context-maker clang-ht pattern prefix)
   (let ([count 0])
-    (values
+    (define maker
      (let loop ([pattern pattern])
+       (define (untouched-pattern _) 
+         (values pattern #f))
        (match pattern
-         [`any (lambda (l) 'any)]
-         [`number (lambda (l) 'number)]
-         [`string (lambda (l) 'string)]
-         [`natural (lambda (l) 'natural)]
-         [`integer (lambda (l) 'integer)]
-         [`real (lambda (l) 'real)]
-         [`variable (lambda (l) 'variable)] 
-         [`(variable-except ,vars ...) (lambda (l) pattern)]
-         [`(variable-prefix ,var) (lambda (l) pattern)]
-         [`variable-not-otherwise-mentioned (λ (l) pattern)]
-         [`hole  (lambda (l) 'hole)]
-         [(? string?) (lambda (l) pattern)]
+         [`any untouched-pattern]
+         [`number untouched-pattern]
+         [`string untouched-pattern]
+         [`natural untouched-pattern]
+         [`integer untouched-pattern]
+         [`real untouched-pattern]
+         [`variable untouched-pattern] 
+         [`(variable-except ,vars ...) untouched-pattern]
+         [`(variable-prefix ,var) untouched-pattern]
+         [`variable-not-otherwise-mentioned untouched-pattern]
+         [`hole untouched-pattern]
+         [(? string?) untouched-pattern]
          [(? symbol?) 
           (cond
             [(hash-ref clang-ht pattern #f)
@@ -393,73 +393,70 @@ before the pattern compiler is invoked.
                (let ([fst (car (unbox l))])
                  (set-box! l (cdr (unbox l)))
                  (if fst
-                     `(cross ,(symbol-append prefix '- pattern))
-                     pattern)))]
-            [else
-             (lambda (l) pattern)])]
+                     (values `(cross ,(symbol-append prefix '- pattern)) #t)
+                     (values pattern #f))))]
+            [else untouched-pattern])]
          [`(name ,name ,pat)
           (let ([patf (loop pat)])
             (lambda (l)
-              `(name ,name ,(patf l))))]
+              (let-values ([(p h?) (patf l)])
+                (values `(name ,name ,p) h?))))]
          [`(in-hole ,context ,contractum)
           (let ([match-context (loop context)]
                 [match-contractum (loop contractum)])
             (lambda (l)
-              `(in-hole ,(match-context l)
-                        ,(match-contractum l))))]
+              (let-values ([(ctxt _) (match-context l)]
+                           [(ctct h?) (match-contractum l)])
+                (values `(in-hole ,ctxt ,ctct) h?))))]
          [`(hide-hole ,p)
           (let ([m (loop p)])
             (lambda (l)
-              `(hide-hole ,(m l))))]
+              (let-values ([(p h?) (m l)])
+                (if h?
+                    (values p #t)
+                    (values `(hide-hole ,p) #f)))))]
          [`(side-condition ,pat ,condition ,expr)
           (let ([patf (loop pat)])
             (lambda (l)
-              `(side-condition ,(patf l) ,condition ,expr)))]
+              (let-values ([(p h?) (patf l)])
+                (values `(side-condition ,p ,condition ,expr) h?))))]
          [(? list?)
-          (let ([f/pats
-                 (let l-loop ([pattern pattern])
-                   (cond
-                     [(null? pattern) null]
-                     [(null? (cdr pattern))
-                      (list (vector (loop (car pattern))
-                                    #f
-                                    #f))]
-                     [(eq? (cadr pattern) '...)
-                      (cons (vector (loop (car pattern))
-                                    #t
-                                    (car pattern))
-                            (l-loop (cddr pattern)))]
-                     [else
-                      (cons (vector (loop (car pattern))
-                                    #f
-                                    #f)
-                            (l-loop (cdr pattern)))]))])
-            (lambda (l)
-              (let loop ([f/pats f/pats])
-                (cond
-                  [(null? f/pats) null]
-                  [else
-                   (let ([f/pat (car f/pats)])
-                     (cond
-                       [(vector-ref f/pat 1)
-                        (let ([new ((vector-ref f/pat 0) l)]
-                              [pat (vector-ref f/pat 2)])
-                          (if (equal? new pat)
-                              (list* pat
-                                     '...
-                                     (loop (cdr f/pats)))
-                              (list* (vector-ref f/pat 2)
-                                     '...
-                                     new
-                                     (vector-ref f/pat 2)
-                                     '...
-                                     (loop (cdr f/pats)))))]
-                       [else
-                        (cons ((vector-ref f/pat 0) l)
-                              (loop (cdr f/pats)))]))]))))]
-         [else 
-          (lambda (l) pattern)]))
-     count)))
+          (define pre-cross
+            (let l-loop ([ps pattern])
+              (match ps
+                ['() '()]
+                [(list-rest p '... ps*)
+                 (cons (list (loop p) p) (l-loop ps*))]
+                [(cons p ps*)
+                 (cons (list (loop p) #f) (l-loop ps*))])))
+          (λ (l)
+            (define any-cross? #f)
+            (define post-cross
+              (map (match-lambda 
+                     [(list f r?)
+                      (let-values ([(p h?) (f l)])
+                        (set! any-cross? (or any-cross? h?))
+                        (list p h? r?))])
+                   pre-cross))
+            (define (hide p)
+              (if any-cross? `(hide-hole ,p) p))
+            (values
+             (foldr (λ (post tail)
+                      (match post
+                        [(list p* #t (and (not #f) p))
+                         `(,(hide p) ... ,p* ,(hide p) ... . ,tail)]
+                        [(list p #f (not #f))
+                         `(,(hide p) ... . ,tail)]
+                        [(list p* #t #f)
+                         `(,p* . ,tail)]
+                        [(list p #f #f)
+                         `(,(hide p) . ,tail)]))
+                    '()
+                    post-cross)
+             any-cross?))]
+         [else untouched-pattern])))
+    (values (λ (l) (let-values ([(p _) (maker l)]) p))
+            count)))
 
 ;; build-list-nt-label : lang -> hash[symbol -o> boolean]
 (define (build-list-nt-label lang)
@@ -684,7 +681,7 @@ before the pattern compiler is invoked.
                                          none)))))))
         #f)]
       [`hole
-       (values (match-hole none) #t)]
+       (values match-hole #t)]
       [(? string?)
        (values
         (lambda (exp hole-info)
@@ -734,7 +731,7 @@ before the pattern compiler is invoked.
        (let-values ([(match-context ctxt-has-hole?) (compile-pattern/default-cache context)]
                     [(match-contractum contractum-has-hole?) (compile-pattern/default-cache contractum)])
          (values
-          (match-in-hole context contractum exp match-context match-contractum none)
+          (match-in-hole context contractum exp match-context match-contractum)
           (or ctxt-has-hole? contractum-has-hole?)))]
       [`(hide-hole ,p)
        (let-values ([(match-pat has-hole?) (compile-pattern/default-cache p)])
@@ -1013,7 +1010,7 @@ before the pattern compiler is invoked.
                         ; return the found element
                         (cdr entry)]
                        [else
-                        ;; didnt hit yet, continue searchign
+                        ;; didn't hit yet, continue searching
                         (loop previous1 current (cdr current) (+ i 1))]))]))])])))))
 
 ;; hash version, but with a vector that tells when to evict cache entries
@@ -1127,27 +1124,21 @@ before the pattern compiler is invoked.
         (printf "Overall miss rate: ~a%\n" 
                 (floor (* 100 (/ overall-miss (+ overall-hits overall-miss)))))))))
 
-;; match-hole : (union none symbol) -> compiled-pattern
-(define (match-hole hole-id)
-  (let ([mis-matched-hole
-         (λ (exp)
-           (and (hole? exp)
-                (list (make-mtch (make-bindings '())
-                                 the-hole
-                                 none))))])
-    (lambda (exp hole-info)
-      (if hole-info
-          (if (eq? hole-id hole-info)
-              (list (make-mtch (make-bindings '())
-                               the-hole
-                               exp))
-              (mis-matched-hole exp))
-          (mis-matched-hole exp)))))
+;; match-hole : compiled-pattern
+(define (match-hole exp hole-info)
+  (if hole-info
+      (list (make-mtch (make-bindings '())
+                       the-hole
+                       exp))
+      (and (hole? exp)
+           (list (make-mtch (make-bindings '())
+                            the-hole
+                            none)))))
 
-;; match-in-hole : sexp sexp sexp compiled-pattern compiled-pattern hole-info -> compiled-pattern
-(define (match-in-hole context contractum exp match-context match-contractum hole-info)
+;; match-in-hole : sexp sexp sexp compiled-pattern compiled-pattern -> compiled-pattern
+(define (match-in-hole context contractum exp match-context match-contractum)
   (lambda (exp old-hole-info)
-    (let ([mtches (match-context exp hole-info)])
+    (let ([mtches (match-context exp #t)])
       (and mtches
            (let loop ([mtches mtches]
                       [acc null])
@@ -1175,8 +1166,7 @@ before the pattern compiler is invoked.
                                                         (bindings-table bindings)))
                                                (build-nested-context 
                                                 (mtch-context mtch)
-                                                (mtch-context contractum-mtch)
-                                                hole-info)
+                                                (mtch-context contractum-mtch))
                                                (mtch-hole contractum-mtch))
                                     acc)))]))
                       (loop (cdr mtches) acc)))]))))))
@@ -1466,7 +1456,14 @@ before the pattern compiler is invoked.
              [else (let ([r-exp (car r-exps)])
                      (cond
                        [(repeat? r-exp)
-                        (append (repeat-empty-bindings r-exp)
+                        (append (if (repeat-suffix r-exp)
+                                    (list ((if (repeat-mismatch? r-exp)
+                                               make-mismatch-bind
+                                               make-bind)
+                                           (repeat-suffix r-exp)
+                                           '()))
+                                    null)
+                                (repeat-empty-bindings r-exp)
                                 (i-loop (cdr r-exps) ribs))]
                        [else
                         (loop (car r-exps) (i-loop (cdr r-exps) ribs))]))])))]
@@ -1549,26 +1546,23 @@ before the pattern compiler is invoked.
 (define (build-append-context e1 e2) (append e1 e2))
 (define (build-list-context x) (list x))
 (define (reverse-context x) (reverse x))
-(define (build-nested-context c1 c2 hole-info) 
-  (plug c1 c2 hole-info))
-(define plug
-  (case-lambda
-    [(exp hole-stuff) (plug exp hole-stuff none)]
-    [(exp hole-stuff hole-info)
-     (let ([done? #f])
-       (let loop ([exp exp])
-         (cond
-           [(pair? exp) 
-            (cons (loop (car exp))
-                  (loop (cdr exp)))]
-           [(eq? the-not-hole exp)
-            the-not-hole]
-           [(eq? the-hole exp)
-            (if done?
-                exp
-                (begin (set! done? #t)
-                       hole-stuff))]
-           [else exp])))]))
+(define (build-nested-context c1 c2) 
+  (plug c1 c2))
+(define (plug exp hole-stuff)
+  (let ([done? #f])
+    (let loop ([exp exp])
+      (cond
+        [(pair? exp) 
+         (cons (loop (car exp))
+               (loop (cdr exp)))]
+        [(eq? the-not-hole exp)
+         the-not-hole]
+        [(eq? the-hole exp)
+         (if done?
+             exp
+             (begin (set! done? #t)
+                    hole-stuff))]
+        [else exp]))))
 
 ;;
 ;; end context adt

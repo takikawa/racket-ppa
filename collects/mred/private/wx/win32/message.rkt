@@ -90,7 +90,7 @@
                                                               SS_ICON
                                                               0)))
                                          0 0 0 0
-                                         (send parent get-client-hwnd)
+                                         (send parent get-content-hwnd)
                                          #f
                                          hInstance
                                          #f)]
@@ -115,6 +115,8 @@
     (if (symbol? label)
         (set-size -11111 -11111 32 32)
         (auto-size font label 0 0 0 0))
+
+    (define/public (set-preferred-size) #f)
 
     (define/override (get-setimage-message)
       STM_SETIMAGE)))

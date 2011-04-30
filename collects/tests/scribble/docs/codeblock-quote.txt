@@ -1,0 +1,4 @@
+quote
+
+  @itemlist[#:style 'ordered   
+            @item{Eat cookie.}]

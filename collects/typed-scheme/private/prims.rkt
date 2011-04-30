@@ -30,14 +30,14 @@ This file defines two sorts of primitives. All of them are provided into any mod
 (require "../utils/require-contract.rkt"
          "colon.rkt"
          "../typecheck/internal-forms.rkt"
-         (rename-in racket/contract [-> c->])
+         (rename-in racket/contract [-> c->] [case-> c:case->])
          "base-types.rkt"
          "base-types-extra.rkt"
          racket/flonum ; for for/flvector and for*/flvector
          mzlib/etc
          (for-syntax 
           syntax/parse
-	  syntax/private/util
+	  racket/syntax
           racket/base
           racket/struct-info
           syntax/struct
@@ -48,7 +48,9 @@ This file defines two sorts of primitives. All of them are provided into any mod
           "../utils/tc-utils.rkt"	  
           "../env/type-name-env.rkt"
           "type-contract.rkt"
-          "for-clauses.rkt"))
+          "for-clauses.rkt")
+         "../types/numeric-predicates.rkt")
+(provide index?) ; useful for assert, and racket doesn't have it
 
 (define-for-syntax (ignore stx) (syntax-property stx 'typechecker:ignore #t))
 

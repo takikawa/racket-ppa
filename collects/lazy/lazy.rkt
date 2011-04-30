@@ -56,6 +56,34 @@
     (syntax->list #'(! !! !list !!list !values !!values)))
 
   ;; --------------------------------------------------------------------------
+  ;; Stepper utility fns
+
+  (define-for-syntax (stepper-hide-operator stx)
+    (stepper-syntax-property stx 'stepper-skipto (append skipto/cdr skipto/second)))
+  (define-for-syntax (stepper-add-lazy-op-prop stx)
+    (stepper-syntax-property stx 'lazy-op #t))
+  
+  (define-syntax (hidden-car stx)
+    (syntax-case stx ()
+      [(_ arg) (stepper-hide-operator (syntax/loc stx (car arg)))]))
+  
+  (define-syntax (hidden-cdr stx)
+    (syntax-case stx ()
+      [(_ arg) (stepper-hide-operator (syntax/loc stx (cdr arg)))]))
+  
+  (define-syntax (hidden-! stx)
+    (syntax-case stx ()
+      [(_ arg) (stepper-hide-operator (syntax/loc stx (! arg)))]))
+  
+  (define-syntax (mark-as-lazy-op stx)
+    (syntax-case stx ()
+      [(_ arg) (stepper-add-lazy-op-prop (syntax/loc stx arg))]))
+    
+  (define-syntax (hidden-~ stx)
+    (syntax-case stx ()
+      [(_ arg) (stepper-hide-operator (syntax/loc stx (~ arg)))]))
+  
+  ;; --------------------------------------------------------------------------
   ;; Determine laziness
 
   (define-values (lazy-proc lazy-proc?)
@@ -107,7 +135,7 @@
                ;; single expr
                [(expr) #`(begin #,@(reverse defs) expr)]
                [(expr ...)
-                #`(begin #,@(reverse defs) (~ (begin (! expr) ...)))]))]))))
+                #`(begin #,@(reverse defs) (hidden-~ (begin (hidden-! expr) ...)))]))]))))
 
   ;; redefined to use lazy-proc and ~begin
   (define-syntax (~lambda stx)
@@ -120,9 +148,33 @@
                              'inferred-name n)])
            (syntax/loc stx (lazy-proc lam))))]))
   (provide (rename ~lambda λ))
-  (defsubst
-    (~define (f . xs) body0 body ...) (define f (~lambda xs body0 body ...))
-    (~define v x) (define v x))
+  
+;  (defsubst
+;    (~define (f . xs) body0 body ...) (define f (~lambda xs body0 body ...))
+;    (~define v x) (define v x))
+  ;; STC: define ~define to add stepper-properties
+  ;; had to duplicate some stuff from ~lambda
+  (define-syntax (~define stx)
+    (define (attach-inferred-name stx fn-name-stx)
+      (syntax-property
+       (stepper-syntax-property
+        (stepper-syntax-property
+         stx
+         'stepper-define-type 'shortened-proc-define)
+        'stepper-proc-define-name fn-name-stx)
+       'inferred-name fn-name-stx))
+    ; duplicated some stuff from ~lambda so I could add stepper-properties
+    (syntax-case stx ()
+      [(_ (f . args) body0 body ...)
+       (quasisyntax/loc stx
+         (define f 
+           (lazy-proc
+            #,(attach-inferred-name
+               #'(lambda args (~begin body0 body ...))
+               #'f)
+            )))]
+      [(_ name expr) #'(define name expr)]))
+  
   (defsubst
     (~let [(x v) ...] body0 body ...)
       (let ([x v] ...) (~begin body0 body ...))
@@ -137,7 +189,7 @@
   (defsubst (~parameterize ([param val] ...) body ...)
     ;; like ~begin, delaying the whole thing is necessary to tie the evaluation
     ;; to whenever the value is actually forced
-    (~ (parameterize ([param (! val)] ...) (~begin body ...))))
+    (hidden-~ (parameterize ([param (hidden-! val)] ...) (~begin body ...))))
 
   ;; Multiple values are problematic: Racket promises can use multiple
   ;; values, but to carry that out `call-with-values' should be used in all
@@ -146,10 +198,14 @@
   ;; used (spceifically, students never use them).  So `values' is redefined to
   ;; produce a first-class tuple-holding struct, and `split-values' turns that
   ;; into multiple values.
-  (define-struct multiple-values (values))
+  ;; STC: add inspector for lazy stepper
+  (define-struct multiple-values (values) (make-inspector))
   (define (split-values x)
     (let ([x (! x)])
       (if (multiple-values? x) (apply values (multiple-values-values x)) x)))
+  (define-syntax (hidden-split-values stx)
+    (syntax-case stx ()
+      [(_ arg) (stepper-hide-operator (syntax/loc stx (split-values arg)))]))
   ;; Force and split resulting values.
   (define (!values x)
     (split-values (! x)))
@@ -165,7 +221,7 @@
 
   ;; Redefine multiple-value constructs so they split the results
   (defsubst (~define-values (v ...) body)
-    (define-values (v ...) (split-values body)))
+    (define-values (v ...) (hidden-split-values body)))
   (defsubst (~let-values ([(x ...) v] ...) body ...)
     (let-values ([(x ...) (split-values v)] ...) (~begin body ...)))
   (defsubst (~let*-values ([(x ...) v] ...) body ...)
@@ -198,11 +254,8 @@
   ;; `!apply': provided as `apply' (no need to provide `~!apply', since all
   ;;           function calls are delayed by `#%app')
 
-  (define-syntax (hidden-! stx)
-    (syntax-case stx (!)
-      [(_ arg) (stepper-syntax-property #'(! arg) 'stepper-skipto
-                                        (append skipto/cdr skipto/second))]))
-
+  (define (extract-if-lazy-proc f)
+    (or (procedure-extract-target f) f))
   (define-syntax (!*app stx)
     (syntax-case stx ()
       [(_ f x ...)
@@ -220,16 +273,19 @@
                             skipto/first)))])
          (with-syntax ([(y ...) (generate-temporaries #'(x ...))])
            ;; use syntax/loc for better errors etc
-           (with-syntax ([lazy   (syntax/loc stx (p y     ...))]
+           (with-syntax ([lazy   (syntax/loc stx ((extract-if-lazy-proc p) y ...))]
                          [strict (syntax/loc stx (p (hidden-! y) ...))])
              (quasisyntax/loc stx
-               (let ([p f] [y x] ...)
+               ((lambda (p y ...)
+                  #,($$ #'(if (lazy? p) lazy strict)))
+                f x ...)
+               #;(let ([p f] [y x] ...)
                  ;; #,($$ #`(if (lazy? p) lazy strict))
                  (if (lazy? p) lazy strict))))))]))
 
-  (defsubst (!app   f x ...) (!*app (hidden-! f) x ...))
-  (defsubst (~!*app f x ...) (~ (!*app f x ...)))
-  (defsubst (~!app  f x ...) (~ (!app f x ...)))
+  (defsubst (!app   f x ...) (!*app (hidden-! (mark-as-lazy-op f)) x ...))
+  (defsubst (~!*app f x ...) (hidden-~ (!*app f x ...)))
+  (defsubst (~!app  f x ...) (hidden-~ (!app f x ...)))
 
   (define-for-syntax (toplevel?)
     (memq (syntax-local-context)
@@ -241,12 +297,12 @@
 
   (provide (rename ~!%app #%app)) ; all applications are delayed
   (define-syntax (~!%app stx) ; provided as #%app
-    (define (unwinder stx rec)
+    #;(define (unwinder stx rec)
       (syntax-case stx (!)
         [(let-values ([(_p) (_app ! f)] [(_y) x] ...) _body)
          (with-syntax ([(f x ...) (rec #'(f x ...))])
            #'(f x ...))]))
-    (define (stepper-annotate stx)
+    #;(define (stepper-annotate stx)
       (let* ([stx (stepper-syntax-property stx 'stepper-hint unwinder)]
              [stx (stepper-syntax-property stx 'stepper-skip-double-break #t)])
         stx))
@@ -272,8 +328,8 @@
   (define* (!apply f . xs)
     (let ([f (! f)] [xs (!list (apply list* xs))])
       (apply f (if (lazy? f) xs (map ! xs)))))
-  (defsubst (~!*apply f . xs) (~ (!*apply f . xs)))
-  (defsubst (~!apply  f . xs) (~ (!apply  f . xs)))
+  (defsubst (~!*apply f . xs) (hidden-~ (!*apply f . xs)))
+  (defsubst (~!apply  f . xs) (hidden-~ (!apply  f . xs)))
 
   (provide (rename !apply apply)) ; can only be used through #%app => delayed
 
@@ -284,8 +340,8 @@
       [(_ . id) (if (toplevel?) #'(! (#%top . id)) #'(#%top . id))]))
 
   ;; used for explicitly strict/lazy calls
-  (defsubst (strict-call f x ...) (~ (f (! x) ...)))
-  (defsubst (lazy-call f x ...) (~ (f x ...)))
+  (defsubst (strict-call f x ...) (hidden-~ (f (! x) ...)))
+  (defsubst (lazy-call f x ...) (hidden-~ (f x ...)))
 
   ;; --------------------------------------------------------------------------
   ;; Special forms that are now functions
@@ -296,8 +352,8 @@
   (define* *if
     (case-lambda [(e1 e2 e3) (if (! e1) e2 e3)]
                  [(e1 e2   ) (if (! e1) e2   )]))
-  (defsubst (~if e1 e2 e3) (~ (if (! e1) e2 e3))
-            (~if e1 e2   ) (~ (if (! e1) e2   ))
+  (defsubst (~if e1 e2 e3) (hidden-~ (if (hidden-! e1) e2 e3))
+            (~if e1 e2   ) (hidden-~ (if (hidden-! e1) e2   ))
             ~if *if)
 
   (define* (*and . xs)
@@ -305,29 +361,29 @@
       (or (null? xs)
           (let loop ([x (car xs)] [xs (cdr xs)])
             (if (null? xs) x (and (! x) (loop (car xs) (cdr xs))))))))
-  (defsubst (~and x ...) (~ (and (! x) ...)) ~and *and)
+  (defsubst (~and x ...) (hidden-~ (and (hidden-! x) ...)) ~and *and)
 
   (define* (*or . xs)
     (let ([xs (!list xs)])
       (and (pair? xs)
            (let loop ([x (car xs)] [xs (cdr xs)])
              (if (null? xs) x (or (! x) (loop (car xs) (cdr xs))))))))
-  (defsubst (~or x ...) (~ (or (! x) ...)) ~or *or)
+  (defsubst (~or x ...) (hidden-~ (or (hidden-! x) ...)) ~or *or)
 
   ;; --------------------------------------------------------------------------
   ;; Special forms that are still special forms since they use ~begin
 
   (defsubst (~begin0 x y ...) ; not using ~begin, but equivalent
-    (~ (let ([val (! x)]) (! y) ... val)))
+    (hidden-~ (let ([val (hidden-! x)]) (hidden-! y) ... val)))
 
-  (defsubst (~when   e x ...) (~ (when   (! e) (~begin x ...))))
-  (defsubst (~unless e x ...) (~ (unless (! e) (~begin x ...))))
+  (defsubst (~when   e x ...) (hidden-~ (when   (hidden-! e) (~begin x ...))))
+  (defsubst (~unless e x ...) (hidden-~ (unless (hidden-! e) (~begin x ...))))
 
   ;; --------------------------------------------------------------------------
   ;; Misc stuff
 
   ;; Just for fun...
-  (defsubst (~set! id expr) (~ (set! id (! expr))))
+  (defsubst (~set! id expr) (hidden-~ (set! id (hidden-! expr))))
   ;; The last ! above is needed -- without it:
   ;;   (let ([a 1] [b 2]) (set! a (add1 b)) (set! b (add1 a)) a)
   ;; goes into an infinite loop.  (Thanks to Jos Koot)
@@ -338,18 +394,32 @@
   (define* (~set-box! box val) (~ (set-box! (! box) val)))
 
   ;; not much to do with these besides inserting strictness points and ~begin
+  ; for stepper: change else to #t test, add new error else branch
   (define-syntax (~cond stx)
     (syntax-case stx ()
-      [(_ [test body ...] ...)
-       (with-syntax ([(test ...)
-                      ;; avoid forcing an `else' keyword
-                      (map (lambda (stx)
-                             (syntax-case stx (else)
-                               [else stx] [x #'(! x)]))
-                           (syntax->list #'(test ...)))])
-         #'(~ (cond [test (~begin body ...)] ...)))]))
+      [(_ clause ...) ; stepper needs the loc of the full clause
+       (with-syntax
+           ([(new-clause ...)
+             (map 
+              (λ (c)
+                (with-syntax ([(test body ...) c])
+                  (with-syntax
+                      ([new-test
+                        (syntax-case #'test (else)
+                          [else ; for stepper
+                           (stepper-syntax-property #'#t 'stepper-else #t)]
+                          [x (syntax/loc #'x (hidden-! x))])])
+                    (syntax/loc c (new-test (~begin body ...))))))
+              (syntax->list #'(clause ...)))]
+            [new-else-body (syntax/loc stx (error 'cond "should not get here"))])
+         (quasisyntax/loc stx
+           (hidden-~ 
+            #,(syntax/loc stx
+                (cond
+                  new-clause ...
+                  [else new-else-body])))))]))
   (defsubst (~case v [keys body ...] ...)
-    (~ (case (! v) [keys (~begin body ...)] ...)))
+    (hidden-~ (case (hidden-! v) [keys (~begin body ...)] ...)))
 
   ;; Doing this will print the whole thing, but problems with infinite things
   (define* (~error . args) (apply error (!! args)))
@@ -497,14 +567,14 @@
          #'(define* ?~name
              (case-lambda
                [(?proc ?args ... ?l)
-                (let ([?proc (! ?proc)])
-                  (let ?loop ([?l (! ?l)] [?var ?init] ...)
+                (let ([?proc (hidden-! ?proc)])
+                  (let ?loop ([?l (hidden-! ?l)] [?var ?init] ...)
                     (if (null? ?l)
                       ?base
                       ?step-single)))]
                [(?proc ?args ... ?l . ?ls)
-                (let ([?proc (! ?proc)])
-                  (let ?loop ([?ls (cons (! ?l) (!!list ?ls))] [?var ?init] ...)
+                (let ([?proc (hidden-! ?proc)])
+                  (let ?loop ([?ls (cons (hidden-! ?l) (!!list ?ls))] [?var ?init] ...)
                     (if (ormap null? ?ls)
                       (if (andmap null? ?ls)
                         ?base

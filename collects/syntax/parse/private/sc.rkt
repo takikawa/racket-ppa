@@ -1,12 +1,13 @@
 #lang racket/base
 (require (for-syntax racket/base
                      syntax/stx
-                     unstable/syntax
+                     racket/syntax
                      "rep-data.rkt"
                      "rep.rkt")
          "parse.rkt"
          "keywords.rkt"
-         "runtime.rkt")
+         "runtime.rkt"
+         "runtime-report.rkt")
 
 (provide define-syntax-class
          define-splicing-syntax-class
@@ -22,7 +23,10 @@
          attribute
          this-syntax
 
+         define/syntax-parse
+
          ;;----
+         syntax-parser/template
          parser/rhs)
 
 (begin-for-syntax
@@ -126,7 +130,7 @@
     [(syntax-parse stx-expr . clauses)
      (quasisyntax/loc stx
        (let ([x (datum->syntax #f stx-expr)])
-         (parse:clauses x clauses #,((make-syntax-introducer) stx))))]))
+         (parse:clauses x clauses body-sequence #,((make-syntax-introducer) stx))))]))
 
 (define-syntax (syntax-parser stx)
   (syntax-case stx ()
@@ -134,4 +138,46 @@
      (quasisyntax/loc stx
        (lambda (x)
          (let ([x (datum->syntax #f x)])
-           (parse:clauses x clauses #,((make-syntax-introducer) stx)))))]))
+           (parse:clauses x clauses body-sequence #,((make-syntax-introducer) stx)))))]))
+
+(define-syntax (syntax-parser/template stx)
+  (syntax-case stx ()
+    [(syntax-parser/template ctx . clauses)
+     (quasisyntax/loc stx
+       (lambda (x)
+         (let ([x (datum->syntax #f x)])
+           (parse:clauses x clauses one-template ctx))))]))
+
+;; ====
+
+(define-syntax (define/syntax-parse stx)
+  (syntax-case stx ()
+    [(define/syntax-parse pattern . rest)
+     (let-values ([(rest pattern defs)
+                   (parse-pattern+sides #'pattern
+                                        #'rest
+                                        #:splicing? #f
+                                        #:decls (new-declenv null)
+                                        #:context stx)])
+       (let ([expr
+              (syntax-case rest ()
+                [( expr ) #'expr]
+                [_ (raise-syntax-error #f "bad syntax" stx)])]
+             [attrs (pattern-attrs pattern)])
+         (with-syntax ([(a ...) attrs]
+                       [(#s(attr name _ _) ...) attrs]
+                       [pattern pattern]
+                       [(def ...) defs]
+                       [expr expr])
+           #'(defattrs/unpack (a ...)
+               (let* ([x expr]
+                      [cx x]
+                      [pr (ps-empty x x)]
+                      [es null]
+                      [fh0 (syntax-patterns-fail x)])
+                 def ...
+                 (#%expression
+                  (with ([fail-handler fh0]
+                         [cut-prompt fh0])
+                    (parse:S x cx pattern pr es
+                             (list (attribute name) ...)))))))))]))

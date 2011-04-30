@@ -70,12 +70,14 @@
                      (not fn))
                 (values #f #f #f #f #f #f #f)
                 (let* ([paper (assoc (send pss get-paper-name) paper-sizes)]
-                       [w (if (or (not init-w) use-paper-bbox)
-                              (cadr paper)
-                              init-w)]
-                       [h (if (or (not init-h) use-paper-bbox)
-                              (caddr paper)
-                              init-h)]
+                       [w (ceiling
+                           (if (or (not init-w) use-paper-bbox)
+                               (cadr paper)
+                               init-w))]
+                       [h (ceiling
+                           (if (or (not init-h) use-paper-bbox)
+                               (caddr paper)
+                               init-h))]
                        [landscape? (eq? (send pss get-orientation) 'landscape)]
                        [file (if (output-port? fn)
                                  fn
@@ -142,6 +144,9 @@
             (values h w)
             (values w h))))
 
+    (define/override (get-device-scale)
+      (values scale-x scale-y))
+
     (define/override (end-cr)
       (cairo_surface_finish s)
       (cairo_destroy c)
@@ -178,6 +183,9 @@
     
     (define/override (can-mask-bitmap?)
       #f)
+
+    (define/override (dc-adjust-cap-shape shape sx pw) shape)
+    (define/override (get-hairline-width cx) (/ 1.0 (* cx 4)))
 
     (define is-eps? (and as-eps #t))
     (define/public (multiple-pages-ok?) (not is-eps?))

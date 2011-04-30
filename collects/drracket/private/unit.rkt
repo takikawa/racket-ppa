@@ -451,7 +451,7 @@ module browser threading seems wrong.
         (values get-program-editor-mixin
                 add-to-program-editor-mixin)))
     
-    ;; this sends a message to it's frame when it gets the focus
+    ;; this sends a message to its frame when it gets the focus
     (define make-searchable-canvas%
       (λ (%)
         (class %
@@ -1422,7 +1422,31 @@ module browser threading seems wrong.
                         (λ (l) (remq execute-warning-panel l)))
                  (send execute-warning-canvas set-message #f))])))
 
-        (define/public (show-line-numbers! show)
+        
+        ;; bind the proc to a field
+        ;; so it stays alive as long 
+        ;; as the frame stays alive
+        (define show-line-numbers-pref-fn
+          (let ([fn (lambda (pref value) (show-line-numbers! value))])
+            (preferences:add-callback
+             'drracket:show-line-numbers?
+             fn
+             #t)
+            fn))
+        
+        (define/override (add-line-number-menu-items menu)
+          (define on? (preferences:get 'drracket:show-line-numbers?))
+          (new separator-menu-item% [parent menu])
+          (new checkable-menu-item% 
+               [label (string-constant show-line-numbers-in-definitions)]
+               [parent menu]
+               [checked on?]
+               [callback
+                (λ (c dc)
+                  (preferences:set 'drracket:show-line-numbers? (not on?)))])
+          (super add-line-number-menu-items menu))
+        
+        (define/private (show-line-numbers! show)
           (for ([tab tabs])
             (define text (send tab get-defs))
             (send text show-line-numbers! show))
@@ -3722,6 +3746,34 @@ module browser threading seems wrong.
               (string-constant module-browser...)
               language-specific-menu
               (λ (x y) (drracket:module-overview:module-overview this)))
+            (let ()
+              (define base-title (format (string-constant module-browser-in-file) ""))
+              (define (update-menu-item i)
+                (define fn (send definitions-text get-filename))
+                (send i set-label 
+                      (if fn
+                          (let* ([str (path->string fn)]
+                                 [overage (- 200 
+                                             (+ (string-length str)
+                                                (string-length base-title)))])
+                            (format (string-constant module-browser-in-file)
+                                    (if (overage . >= . 0)
+                                        str
+                                        (string-append "..."
+                                                       (substring str
+                                                                  (+ (- (string-length str) (abs overage)) 3)
+                                                                  (string-length str))))))
+                          (string-constant module-browser-no-file)))
+                (send i enable fn))
+              (define i (new menu:can-restore-menu-item%
+                             [label base-title]
+                             [parent language-specific-menu]
+                             [demand-callback update-menu-item]
+                             [callback (λ (x y) 
+                                         (define fn (send definitions-text get-filename))
+                                         (when fn
+                                           (drracket:module-overview:module-overview/file fn this)))]))
+              (update-menu-item i))
             (make-object separator-menu-item% language-specific-menu)
             
             (let ([cap-val
@@ -4211,7 +4263,7 @@ module browser threading seems wrong.
                   (send dc draw-text message 
                         (floor (- (/ w 2) (/ tw 2)))
                         (floor (- (/ h 2) (/ th 2)))))))))
-        (super-new)
+        (super-new [style '(no-focus)])
         (let-values ([(w h d a) (send (get-dc) get-text-extent "Xy")])
           (min-height (+ 4 (floor (inexact->exact h)))))))
     
@@ -4290,7 +4342,7 @@ module browser threading seems wrong.
         
         (super-new [stretchable-width #f]
                    [stretchable-height #f]
-                   [style '(transparent)])
+                   [style '(transparent no-focus)])
         (inherit min-width min-height)
         (min-width (apply max (map (λ (x) (send x get-width)) running/waiting-bitmaps)))
         (min-height (apply max (map (λ (x) (send x get-height)) running/waiting-bitmaps)))))
