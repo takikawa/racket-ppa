@@ -1,8 +1,9 @@
 #lang scribble/doc
 @(require "mz.ss"
           racket/class
-          (for-syntax racket/base)
-          (for-label racket/trait))
+          (for-syntax racket/base
+                      racket/serialize
+                      racket/trait))
 
 @(begin
 
@@ -369,7 +370,7 @@ calling subclass augmentations of methods (see
 
 @defform[(class superclass-expr class-clause ...)]{
 
-Like @scheme[class*], but omits the @scheme[interface-expr]s, for the case that none are needed.
+Like @scheme[class*], but omits the @scheme[_interface-expr]s, for the case that none are needed.
 
 @defexamples[
 #:eval class-eval
@@ -639,20 +640,20 @@ Each @scheme[public], @scheme[override], @scheme[augment],
 @scheme[public-final], @scheme[override-final],
 @scheme[augment-final], and @scheme[private] clause in a class
 declares one or more method names. Each method name must have a
-corresponding @scheme[method-definition]. The order of
-@scheme[public], @|etc| clauses and their corresponding definitions
+corresponding @scheme[_method-definition]. The order of
+@scheme[public], @|etc|, clauses and their corresponding definitions
 (among themselves, and with respect to other clauses in the class)
 does not matter.
 
 As shown in the grammar for @scheme[class*], a method definition is
 syntactically restricted to certain procedure forms, as defined by the
-grammar for @scheme[method-procedure]; in the last two forms of
-@scheme[method-procedure], the body @scheme[id] must be one of the
+grammar for @scheme[_method-procedure]; in the last two forms of
+@scheme[_method-procedure], the body @scheme[id] must be one of the
 @scheme[id]s bound by @scheme[let-values] or @scheme[letrec-values]. A
-@scheme[method-procedure] expression is not evaluated
+@scheme[_method-procedure] expression is not evaluated
 directly. Instead, for each method, a class-specific method procedure
 is created; it takes an initial object argument, in addition to the
-arguments the procedure would accept if the @scheme[method-procedure]
+arguments the procedure would accept if the @scheme[_method-procedure]
 expression were evaluated directly. The body of the procedure is
 transformed to access methods and fields through the object argument.
 
@@ -1477,7 +1478,7 @@ resulting trait are the same as for @scheme[trait-sum], otherwise the
 @section{Object and Class Contracts}
 
 @defform/subs[
-#:literals (field init init-field inherit inherit-field super inner override augment augride)
+#:literals (field init init-field inherit inherit-field super inner override augment augride absent)
 
 (class/c member-spec ...)
 
@@ -1492,14 +1493,18 @@ resulting trait are the same as for @scheme[trait-sum], otherwise the
   (inner method-spec ...)
   (override method-spec ...)
   (augment method-spec ...)
-  (augride method-spec ...)]
+  (augride method-spec ...)
+  (absent absent-spec ...)]
  
  [method-spec
   method-id
   (method-id method-contract)]
  [field-spec
   field-id
-  (field-id contract-expr)])]{
+  (field-id contract-expr)]
+ [absent-spec
+  method-id
+  (field field-id ...)])]{
 Produces a contract for a class.
 
 There are two major categories of contracts listed in a @scheme[class/c]
@@ -1516,6 +1521,8 @@ contracts which discuss the state of the object when the method is called
 (or, for dependent contracts, in other parts of the contract).  Alternative
 contract forms, such as @scheme[->m], are provided as a shorthand
 for writing method contracts.
+
+Methods and fields listed in an @scheme[absent] clause must @emph{not} be present in the class.
 
 The external contracts are as follows:
 
@@ -1571,6 +1578,10 @@ The internal contracts are as follows:
    dynamic dispatch chain.  @scheme[augment] is used when subclasses can augment the method, and
    @scheme[augride] is used when subclasses can override the current augmentation.}
 ]}
+
+@defform[(absent method-id ...)]{
+See @scheme[class/c]; use outside of a @scheme[class/c] form is a syntax error.
+}
 
 @defform[(->m dom ... range)]{
 Similar to @scheme[->], except that the domain of the resulting contract contains one more element

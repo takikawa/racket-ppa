@@ -3929,7 +3929,7 @@ static void struct_type_set_if_immutable(Scheme_Struct_Type *struct_type) {
     size = struct_type->num_islots;
     if (struct_type->name_pos)
       size -= struct_type->parent_types[struct_type->name_pos - 1]->num_islots;
-    if (struct_type->immutables) {
+    if (!size || struct_type->immutables) {
       for (i = 0; i < size; i++) {
         if (!struct_type->immutables[i])
           return;
@@ -4653,7 +4653,7 @@ static Scheme_Object *make_prefab_key(Scheme_Struct_Type *type)
 #if defined(MZ_USE_PLACES)
     if (SCHEME_SYMBOLP(type->name)) {
       Scheme_Object *newname;
-      newname = scheme_make_sized_offset_byte_string(SCHEME_SYM_VAL(type->name), 0, SCHEME_SYM_LEN(type->name), 1);
+      newname = scheme_make_sized_offset_byte_string((char *)type->name, SCHEME_SYMSTR_OFFSET(type->name), SCHEME_SYM_LEN(type->name), 1);
       key = scheme_make_pair(newname, key);
     }
     else {
@@ -4748,7 +4748,7 @@ Scheme_Struct_Type *scheme_lookup_prefab_type(Scheme_Object *key, int field_coun
 #if defined(MZ_USE_PLACES)
   if (SCHEME_SYMBOLP(key)) {
     Scheme_Object *newname;
-    newname = scheme_make_sized_offset_byte_string(SCHEME_SYM_VAL(key), 0, SCHEME_SYM_LEN(key), 1);
+    newname = scheme_make_sized_offset_byte_string((char*)key, SCHEME_SYMSTR_OFFSET(key), SCHEME_SYM_LEN(key), 1);
     key = scheme_make_pair(newname, scheme_null);
   }
   if (SCHEME_BYTE_STRINGP(key))

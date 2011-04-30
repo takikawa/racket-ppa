@@ -36,8 +36,7 @@ evaluation context protected by the barrier:
 ]
 
 In addition, extensions of Racket may install barriers in
-additional contexts. In particular, GRacket installs a continuation
-barrier around most every callback. Finally,
+additional contexts. Finally,
 @racket[call-with-continuation-barrier] applies a thunk barrier
 between the application and the current continuation.
 
@@ -181,7 +180,7 @@ than @racket[call-with-current-continuation].
 
 A continuation obtained from @racket[call-with-escape-continuation] is
 actually a kind of prompt. Escape continuations are provided mainly
-for backward compatibility, since they pre-date general prompts in
+for backwards compatibility, since they pre-date general prompts in
 Racket, and because @racket[call/ec] is often an easy replacement
 for @racket[call/cc] to improve performance.}
 

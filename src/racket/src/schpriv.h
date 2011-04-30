@@ -534,6 +534,7 @@ typedef struct Scheme_Custodian_Box {
 } Scheme_Custodian_Box;
 
 Scheme_Thread *scheme_do_close_managed(Scheme_Custodian *m, Scheme_Exit_Closer_Func f);
+Scheme_Custodian *scheme_get_current_custodian(void);
 
 typedef struct Scheme_Security_Guard {
   Scheme_Object so;
@@ -577,10 +578,8 @@ typedef struct {
 
 struct Scheme_Config {
   Scheme_Object so;
-  Scheme_Object *key; /* NULL => cell is a Scheme_Parameterization* and next is NULL */
-  Scheme_Object *cell; /* value or thread cell (when key != NULL) or Scheme_Parameterization* (otherwise) */
-  int depth;
-  struct Scheme_Config *next;
+  Scheme_Hash_Tree *ht;
+  Scheme_Parameterization *root;
 };
 
 extern Scheme_Object *scheme_parameterization_key;
@@ -590,6 +589,8 @@ extern Scheme_Object *scheme_break_enabled_key;
 extern void scheme_flatten_config(Scheme_Config *c);
 
 extern Scheme_Object *scheme_apply_thread_thunk(Scheme_Object *rator);
+
+Scheme_Custodian* scheme_custodian_extract_reference(Scheme_Custodian_Reference *mr);
 
 /*========================================================================*/
 /*                       hash tables and globals                          */
@@ -1604,6 +1605,8 @@ void scheme_post_syncing_nacks(Syncing *syncing);
 int scheme_try_channel_get(Scheme_Object *ch);
 int scheme_try_channel_put(Scheme_Object *ch, Scheme_Object *v);
 
+intptr_t scheme_get_semaphore_init(const char *who, int n, Scheme_Object **p);
+
 /*========================================================================*/
 /*                                 numbers                                */
 /*========================================================================*/
@@ -1692,6 +1695,9 @@ XFORM_NONGCING float scheme_bignum_to_float_inf_info(const Scheme_Object *n, int
 void scheme_clear_bignum_cache(void);
 
 intptr_t scheme_integer_length(Scheme_Object *n);
+
+char *scheme_push_c_numeric_locale();
+void scheme_pop_c_numeric_locale(char *prev);
 
 /****** Rational numbers *******/
 
@@ -2303,7 +2309,9 @@ Scheme_Lightweight_Continuation *scheme_capture_lightweight_continuation(Scheme_
                                                                          Scheme_Current_LWC *p_lwc,
                                                                          void **storage);
 Scheme_Object *scheme_apply_lightweight_continuation(Scheme_Lightweight_Continuation *captured,
-                                                     Scheme_Object *result);
+                                                     Scheme_Object *result,
+                                                     int result_is_rs_argv,
+                                                     intptr_t min_stacksize);
 Scheme_Object **scheme_adjust_runstack_argument(Scheme_Lightweight_Continuation *captured,
                                                 Scheme_Object **arg);
 
@@ -3089,6 +3097,12 @@ void scheme_add_global_constant_symbol(Scheme_Object *name, Scheme_Object *v, Sc
 #define GLOBAL_PRIM_W_ARITY2(name, func, a1, a2, a3, a4, env) scheme_add_global_constant(name, scheme_make_prim_w_arity2(func, name, a1, a2, a3, a4), env)
 #define GLOBAL_NONCM_PRIM(name, func, a1, a2, env)            scheme_add_global_constant(name, scheme_make_noncm_prim(func, name, a1, a2), env)
 
+#define GLOBAL_FOLDING_PRIM_UNARY_INLINED(name, func, a1, a2, a3, env)      do {\
+  Scheme_Object *p; \
+  p = scheme_make_folding_prim(func, name, a1, a2, a3); \
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED; \
+  scheme_add_global_constant(name, p, env); \
+} while(0)
 
 
 Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, Scheme_Object *bdg, int mode, 
@@ -3123,6 +3137,7 @@ Scheme_Object *scheme_modidx_shift(Scheme_Object *modidx,
 
 #define SCHEME_RMPP(o) (SAME_TYPE(SCHEME_TYPE((o)), scheme_resolved_module_path_type))
 Scheme_Object *scheme_intern_resolved_module_path(Scheme_Object *o);
+Scheme_Object *scheme_resolved_module_path_value(Scheme_Object *rmp);
 int scheme_resolved_module_path_value_matches(Scheme_Object *rmp, Scheme_Object *o);
 
 Scheme_Object *scheme_hash_module_variable(Scheme_Env *env, Scheme_Object *modidx, 
@@ -3503,6 +3518,7 @@ Scheme_Object *scheme_checked_caar(int argc, Scheme_Object **argv);
 Scheme_Object *scheme_checked_cadr(int argc, Scheme_Object **argv);
 Scheme_Object *scheme_checked_cdar(int argc, Scheme_Object **argv);
 Scheme_Object *scheme_checked_cddr(int argc, Scheme_Object **argv);
+Scheme_Object *scheme_checked_length(Scheme_Object *v);
 Scheme_Object *scheme_checked_mcar(int argc, Scheme_Object **argv);
 Scheme_Object *scheme_checked_mcdr(int argc, Scheme_Object **argv);
 Scheme_Object *scheme_checked_set_mcar (int argc, Scheme_Object *argv[]);
@@ -3628,13 +3644,15 @@ typedef struct Scheme_Place_Bi_Channel {
 typedef struct Scheme_Place {
   Scheme_Object so;
   void *proc_thread;
+  void *place_obj;
   Scheme_Object *channel;
+  Scheme_Custodian_Reference *mref;
 } Scheme_Place;
 
 Scheme_Env *scheme_place_instance_init();
 void scheme_place_instance_destroy();
 void scheme_kill_green_thread_timer();
-
+void scheme_place_check_for_killed();
 /*========================================================================*/
 /*                           engine                                       */
 /*========================================================================*/

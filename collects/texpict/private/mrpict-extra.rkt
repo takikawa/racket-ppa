@@ -425,7 +425,9 @@
 							  (if (eq? (cadr x) 'thicklines)
 							      1
 							      0))
-						      'solid))
+                                                      (if (eq? (cadr x) #f)
+                                                          'transparent
+                                                          'solid)))
 			 (loop dx dy (caddr x))
 			 (set-pen p))]
 		      [(prog)
@@ -445,6 +447,18 @@
 
 
       (define (convert-pict p format default)
+        (if (eq? format 'pdf-bytes+bounds)
+            (let ([xscale (box 1.0)]
+                  [yscale (box 1.0)])
+              (send (current-ps-setup) get-scaling xscale yscale)
+              (list (convert-pict/bytes p 'pdf-bytes default)
+                    (* (unbox xscale) (pict-width p))
+                    (* (unbox yscale) (pict-height p))
+                    (* (unbox yscale) (pict-descent p))
+                    0))
+            (convert-pict/bytes p format default)))
+      
+      (define (convert-pict/bytes p format default)
         (case format
           [(png-bytes)
            (let* ([bm (make-bitmap (max 1 (inexact->exact (ceiling (pict-width p))))
@@ -457,12 +471,15 @@
                (send bm save-file s 'png)
                (get-output-bytes s)))]
           [(eps-bytes pdf-bytes)
-           (let ([s (open-output-bytes)])
+           (let ([s (open-output-bytes)]
+                 [xs (box 1)]
+                 [ys (box 1)])
+             (send (current-ps-setup) get-scaling xs ys)
              (let ([dc (new (if (eq? format 'eps-bytes) post-script-dc% pdf-dc%)
                             [interactive #f]
                             [as-eps #t]
-                            [width (pict-width p)]
-                            [height (pict-height p)]
+                            [width (* (pict-width p) (unbox xs))]
+                            [height (* (pict-height p) (unbox ys))]
                             [output s])])
                (send dc start-doc "pict")
                (send dc start-page)

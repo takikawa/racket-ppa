@@ -24,7 +24,7 @@ int scheme_make_prim_w_arity(prim_t func, char *name, int arg1, int arg2);
 
 #include <stdio.h>
 
-typedef void (*prim_void_void_3args_t)(Scheme_Object **);
+typedef Scheme_Object **(*prim_on_demand_t)(Scheme_Object **, Scheme_Object **);
 typedef Scheme_Object* (*prim_obj_int_pobj_obj_t)(Scheme_Object*, int, Scheme_Object**);
 typedef Scheme_Object* (*prim_int_pobj_obj_t)(int, Scheme_Object**);
 typedef Scheme_Object* (*prim_int_pobj_obj_obj_t)(int, Scheme_Object**, Scheme_Object*);
@@ -36,7 +36,9 @@ typedef void (*prim_allocate_values_t)(int, Scheme_Thread *);
 #define WAITING_FOR_PRIM 2
 #define FINISHED 3
 #define PENDING_OVERSIZE 4
-#define WAITING_FOR_REQUEUE 5
+#define HANDLING_PRIM 5
+#define WAITING_FOR_FSEMA 6
+#define SUSPENDED 7
 
 #define FSRC_OTHER 0
 #define FSRC_RATOR 1
@@ -48,27 +50,32 @@ typedef struct future_t {
 
   int id;
   int thread_short_id;
+
+  /* The status field is the main locking mechanism. It
+     should only be read and written when holding a lock
+     (and all associated fields for a status should be 
+     set at the same time). */
   int status;
-  int work_completed;
+
   mzrt_sema *can_continue_sema;
 
   Scheme_Object *orig_lambda;
   void *code;
 
+  Scheme_Custodian *cust; /* an approximate custodian; don't use a future
+                             thread if this custodian is shut down */
+
   /* Runtime call stuff */
-  int rt_prim; /* flag to indicate waiting for a prim call */
   int want_lw; /* flag to indicate waiting for lw capture */
+  int in_touch_queue; /* flag to indicate waiting for lw capture */
   int rt_prim_is_atomic;
   double time_of_request;
   const char *source_of_request;
   int source_type;
 
   uintptr_t alloc_retval;
+  uintptr_t alloc_sz_retval;
   int alloc_retval_counter;
-
-  /* For logging the future's execution time */
-  double time_of_start;
-  double time_of_completion;
 
   void *prim_func;
   int prim_protocol;
@@ -89,6 +96,11 @@ typedef struct future_t {
   Scheme_Object **arg_S2;
   int arg_i2;
 
+  const char *arg_str0;
+  const char *arg_str1;
+  int arg_i3;
+  Scheme_Object **arg_S4;
+
   Scheme_Thread *arg_p;
   struct Scheme_Current_LWC *lwc;
   struct Scheme_Future_Thread_State *fts;
@@ -99,7 +111,7 @@ typedef struct future_t {
   Scheme_Object *retval_s;
   void *retval_p; /* use only with conservative GC */
   MZ_MARK_STACK_TYPE retval_m;
-  int no_retval;
+  int no_retval, retval_is_rs_argv;
 
   Scheme_Object **multiple_array;
   int multiple_count;
@@ -114,15 +126,34 @@ typedef struct future_t {
 
   struct future_t *next_waiting_atomic;
   struct future_t *next_waiting_lwc;
+  struct future_t *next_waiting_touch;
+
+  struct future_t *prev_in_fsema_queue;
+  struct future_t *next_in_fsema_queue;
+
+  Scheme_Object *touching; /* a list of weak pointers to futures touching this one */
 } future_t;
+
+typedef struct fsemaphore_t {
+  Scheme_Object so;
+
+  int ready;
+  mzrt_mutex *mut; 
+  future_t *queue_front;
+  future_t *queue_end;
+} fsemaphore_t;
+
 
 /* Primitive instrumentation stuff */
 
 /* Signature flags for primitive invocations */
-#define SIG_VOID_VOID_3ARGS    1
+#define SIG_ON_DEMAND          1
 #define SIG_ALLOC              2
 #define SIG_ALLOC_MARK_SEGMENT 3
 #define SIG_ALLOC_VALUES       4
+#define SIG_MAKE_FSEMAPHORE    5
+#define SIG_FUTURE             6
+#define SIG_WRONG_TYPE_EXN     7
 
 # include "jit_ts_protos.h"
 
@@ -138,25 +169,27 @@ extern Scheme_Object *scheme_ts_scheme_force_value_same_mark(Scheme_Object *v);
 																/*GDB_BREAK;*/ \
 															}
 
-extern void scheme_rtcall_void_void_3args(const char *who, int src_type, prim_void_void_3args_t f);
+extern Scheme_Object **scheme_rtcall_on_demand(const char *who, int src_type, prim_on_demand_t f, Scheme_Object **argv);
 extern uintptr_t scheme_rtcall_alloc(const char *who, int src_type);
 extern void scheme_rtcall_new_mark_segment(Scheme_Thread *p);
 extern void scheme_rtcall_allocate_values(const char *who, int src_type, int count, Scheme_Thread *t, 
                                           prim_allocate_values_t f);
-#else 
+extern Scheme_Object *scheme_rtcall_make_fsemaphore(const char *who, int src_type, Scheme_Object *ready);
+extern Scheme_Object *scheme_rtcall_make_future(const char *who, int src_type, Scheme_Object *proc);
+#else
 
 #define IS_WORKER_THREAD 0
 #define ASSERT_CORRECT_THREAD 
 
 #endif 
 
-extern void *scheme_on_demand_jit_code;
 extern void scheme_on_demand_generate_lambda(Scheme_Native_Closure *nc, int argc, Scheme_Object **argv);
 
 void scheme_future_block_until_gc();
 void scheme_future_continue_after_gc();
 void scheme_check_future_work();
 void scheme_future_gc_pause();
+void scheme_future_check_custodians();
 
 #ifdef UNIT_TEST
 //These forwarding decls only need to be here to make 
@@ -166,10 +199,19 @@ extern Scheme_Object *touch(int argc, Scheme_Object **argv);
 extern Scheme_Object *future_touch(int futureid);
 #endif
 
+#else 
 #endif /* MZ_USE_FUTURES */
 
 /* always defined: */
 Scheme_Object *scheme_future(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_current_future(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_fsemaphore_p(int argc, Scheme_Object *argv[]);
+
+Scheme_Object *scheme_fsemaphore_count(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_make_fsemaphore(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_make_fsemaphore_inl(Scheme_Object *ready);
+Scheme_Object *scheme_fsemaphore_wait(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_fsemaphore_post(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_fsemaphore_try_wait(int argc, Scheme_Object *argv[]);
 
 #endif

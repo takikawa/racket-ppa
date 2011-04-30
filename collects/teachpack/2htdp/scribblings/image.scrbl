@@ -95,7 +95,7 @@ Existing images can be rotated, scaled, flipped, and overlaid on top of each oth
   Adds a line to the image @racket[image], starting from the point (@racket[x1],@racket[y1])
   and going to the point (@racket[x2],@racket[y2]).
   Unlike @racket[scene+line], if the line passes outside of @racket[image], the image
-  gets larger to accomodate the line.
+  gets larger to accommodate the line.
   
   @image-examples[(add-line (ellipse 40 40 "outline" "maroon")
                             0 40 40 0 "maroon")
@@ -126,7 +126,7 @@ long the curve tries to stay with that angle. Larger numbers
 mean that the curve stays with the angle longer.
 
 Unlike @racket[scene+curve], if the line passes outside of @racket[image], the image
-  gets larger to accomodate the curve.
+  gets larger to accommodate the curve.
 
 
   @image-examples[(add-curve (rectangle 100 100 "solid" "black")
@@ -660,14 +660,59 @@ the @scheme[point-count] argument determines how many points the star has.
   
   }
 
+@defproc[(overlay/offset [i1 image?] [x real?] [y real?] [i2 image?]) image?]{
+  Just like @racket[overlay], this function lines up its image arguments on top of
+  each other. Unlike @racket[overlay], it moves @racket[i2] by @racket[x] pixels to
+  the right and @racket[y] down before overlaying them.
+  
+  @image-examples[(overlay/offset (circle 40 "solid" "red")
+                                  10 10
+                                  (circle 40 "solid" "blue"))
+                  
+                  (overlay/offset (overlay/offset (rectangle 60 20 "solid" "black")
+                                                  -50 0
+                                                  (circle 20 "solid" "darkorange"))
+                                  70 0
+                                  (circle 20 "solid" "darkorange"))
+                  (overlay/offset
+                   (overlay/offset (circle 30 'solid (color 0 150 0 127))
+                                   26 0
+                                   (circle 30 'solid (color 0 0 255 127)))
+                   0 26
+                   (circle 30 'solid (color 200 0 0 127)))]
+}
+
+@defproc[(overlay/align/offset [x-place x-place?] [y-place y-place?] [i1 image?] [x real?] [y real?] [i2 image?])
+         image?]{
+  Overlays image @racket[i1] on top of @racket[i2], using @racket[x-place] and @racket[y-place] as the 
+  starting points for the overlaying, and then adjusts @racket[i2] by @racket[x] to the right and
+  @racket[y] pixels down. 
+  
+  This function combines the capabilities of @racket[overlay/align] and @racket[overlay/offset].
+  
+  @image-examples[(overlay/align/offset
+                   "right" "bottom"
+                   (star-polygon 20 20 3 "solid" "navy")
+                   10 10
+                   (circle 30 "solid" "cornflowerblue"))
+                  (overlay/align/offset
+                   "left" "bottom"
+                   (star-polygon 20 20 3 "solid" "navy")
+                   -10 10
+                   (circle 30 "solid" "cornflowerblue"))]
+  
+}
+
 @defproc[(overlay/xy [i1 image?] [x real?] [y real?] [i2 image?]) image?]{
   Constructs an image by overlaying @racket[i1] on top of @racket[i2].
   The images are initially lined up on their upper-left corners and 
   then @racket[i2] is shifted to the right 
   by @racket[x] pixels to and down by @racket[y] pixels.
-
-  This is the same as @racket[(underlay/xy i2 (- x) (- y) i1)].
   
+  This is the same as @racket[(underlay/xy i2 (- x) (- y) i1)].
+
+  See also @racket[overlay/offset] and @racket[underlay/offset].
+
   @image-examples[(overlay/xy (rectangle 20 20 "outline" "black")
                               20 0
                               (rectangle 20 20 "outline" "black"))
@@ -684,13 +729,7 @@ the @scheme[point-count] argument determines how many points the star has.
                                (ellipse 10 10 "solid" "forestgreen"))
                    20
                    15
-                   (ellipse 10 10 "solid" "forestgreen"))
-                  (overlay/xy
-                   (overlay/xy (circle 30 'solid (color 0 150 0 127))
-                               26 0
-                               (circle 30 'solid (color 0 0 255 127)))
-                   13 26
-                   (circle 30 'solid (color 200 0 0 127)))]
+                   (ellipse 10 10 "solid" "forestgreen"))]
 }
 
 @defproc[(underlay [i1 image?] [i2 image?] [is image?] ...) image?]{
@@ -741,6 +780,56 @@ the @scheme[point-count] argument determines how many points the star has.
   
   }
 
+
+@defproc[(underlay/offset [i1 image?] [x real?] [y real?] [i2 image?]) image?]{
+  Just like @racket[overlay], this function lines up its image arguments on top of
+  each other. Unlike @racket[overlay], it moves @racket[i2] by @racket[x] pixels to
+  the right and @racket[y] down before overlaying them.
+  
+  @image-examples[(underlay/offset (circle 40 "solid" "red")
+                                  10 10
+                                  (circle 40 "solid" "blue"))
+                  
+                  (underlay/offset (circle 40 "solid" "gray")
+                                   0 -10
+                                   (underlay/offset (circle 10 "solid" "navy")
+                                                   -30 0
+                                                   (circle 10 "solid" "navy")))]
+}
+
+@defproc[(underlay/align/offset [x-place x-place?] [y-place y-place?] [i1 image?] [x real?] [y real?] [i2 image?])
+         image?]{
+  Underlays image @racket[i1] underneath @racket[i2], using @racket[x-place] and @racket[y-place] as the 
+  starting points for the combination, and then adjusts @racket[i2] by @racket[x] to the right and
+  @racket[y] pixels down. 
+  
+  This function combines the capabilities of @racket[underlay/align] and @racket[underlay/offset].
+  
+  @image-examples[(underlay/align/offset
+                   "right" "bottom"
+                   (star-polygon 20 20 3 "solid" "navy")
+                   10 10
+                   (circle 30 "solid" "cornflowerblue"))
+                  (underlay/align/offset
+                   "right" "bottom"
+                   (underlay/align/offset
+                    "left" "bottom"
+                    (underlay/align/offset
+                     "right" "top"
+                     (underlay/align/offset
+                      "left" "top"
+                      (rhombus 120 90 "solid" "navy")
+                      16 16
+                      (star-polygon 20 11 3 "solid" "cornflowerblue"))
+                     -16 16
+                     (star-polygon 20 11 3 "solid" "cornflowerblue"))
+                    16 -16
+                    (star-polygon 20 11 3 "solid" "cornflowerblue"))
+                   -16 -16
+                   (star-polygon 20 11 3 "solid" "cornflowerblue"))]
+  
+}
+
 @defproc[(underlay/xy [i1 image?] [x real?] [y real?] [i2 image?]) image?]{
   Constructs an image by underlaying @racket[i1] underneath @racket[i2].
   The images are initially lined up on their upper-left corners and 
@@ -749,6 +838,8 @@ the @scheme[point-count] argument determines how many points the star has.
   
   This is the same as @racket[(overlay/xy i2 (- x) (- y) i1)].
   
+  See also @racket[underlay/offset] and @racket[overlay/offset].
+
   @image-examples[(underlay/xy (rectangle 20 20 "outline" "black")
                                20 0
                                (rectangle 20 20 "outline" "black"))
@@ -1050,8 +1141,8 @@ the parts that fit onto @racket[scene].
                           (scale/xy 1 1/2 (flip-vertical (star 40 "solid" "gray"))))]
 }
 
-@defproc[(crop [x (and/c real? (between/c 0 (image-width image)))]
-               [y (and/c real? (between/c 0 (image-height image)))] 
+@defproc[(crop [x real?]
+               [y real?] 
                [width (and/c real? (not/c negative?))]
                [height (and/c real? (not/c negative?))]
                [image image?])
@@ -1059,9 +1150,6 @@ the parts that fit onto @racket[scene].
 
  Crops @racket[image] to the rectangle with the upper left at the point (@racket[x],@racket[y])
  and with @racket[width] and @racket[height]. 
- 
- The @racket[x] and @racket[y] arguments must be between 0 and
- the @racket[width] or @racket[height], respectively.
  
  @image-examples[(crop 0 0 40 40 (circle 40 "solid" "chocolate"))
                  (crop 40 60 40 60 (ellipse 80 120 "solid" "dodgerblue"))
@@ -1197,13 +1285,27 @@ more expensive than with the other shapes.
 
 @defproc[(image-baseline [i image?]) (and/c integer? (not/c negative?) exact?)]{
   Returns the distance from the top of the image to its baseline. 
-  Unless the image was constructed with @racket[text] or @racket[text/font],
-  this will be the same as its height.
+  Unless the image was constructed with @racket[text], @racket[text/font] 
+  or, in some cases, @racket[crop], this will be the same as its height.
   
   @image-examples[(image-baseline (text "Hello" 24 "black"))
                   (image-height (text "Hello" 24 "black"))
                   (image-baseline (rectangle 100 100 "solid" "black"))
                   (image-height (rectangle 100 100 "solid" "black"))]
+
+  A @racket[crop]ped image's baseline is the same as the image's baseline, if the
+  cropping stays within the original image's bounding box. But if the cropping actually
+  enlarges the image, then the baseline can end up being smaller.
+  
+  @image-examples[(image-height (rectangle 20 20 "solid" "black"))
+                  (image-baseline (rectangle 20 20 "solid" "black"))
+                  
+                  (image-height (crop 10 10 5 5 (rectangle 20 20 "solid" "black")))
+                  (image-baseline (crop 10 10 5 5 (rectangle 20 20 "solid" "black")))
+                  
+                  (image-height (crop 10 10 30 30 (rectangle 20 20 "solid" "black")))
+                  (image-baseline (crop 10 10 30 30 (rectangle 20 20 "solid" "black")))]
+                  
 }
 
 @section{Image Predicates}
@@ -1379,7 +1481,7 @@ Using @racket["pinhole"] or @racket['pinhole] is only allowed when all of the im
 @section{Equality Testing of Images}
 
 Two images are @racket[equal?] if they draw exactly the same way at their current size
-(not neccessarily at all sizes) and, if there are pinholes, the pinholes are
+(not necessarily at all sizes) and, if there are pinholes, the pinholes are
 in the same place.
 
 @section[#:tag "pinholes"]{Pinholes}

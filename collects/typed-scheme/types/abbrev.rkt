@@ -6,11 +6,14 @@
          "resolve.rkt"
          (utils tc-utils)
          racket/list
-         racket/match         
-         (except-in racket/contract ->* ->)
-         (prefix-in c: racket/contract)
+         racket/match
+         unstable/function
+         (except-in racket/contract/base ->* ->)
+         (prefix-in c: racket/contract/base)
          (for-syntax racket/base syntax/parse)
-	 (for-template racket/base racket/contract racket/promise racket/tcp racket/flonum))
+	 (for-template racket/base racket/contract/base racket/promise racket/tcp racket/flonum)
+         ;; for base type predicates
+         racket/promise racket/tcp racket/flonum)
 
 (provide (all-defined-out)
          (rename-out [make-Listof -lst]
@@ -30,9 +33,20 @@
 (define -future make-Future)
 (define (-seq . args) (make-Sequence args))
 
+
+(define (flat t)
+  (match t
+    [(Union: es) es]
+    [(Values: (list (Result: (Union: es) _ _))) es]
+    [(Values: (list (Result: t _ _))) (list t)]
+    [_ (list t)]))
+
+;; Simple union constructor.
+;; Flattens nested unions and sorts types, but does not check for
+;; overlapping subtypes.
 (define-syntax *Un
   (syntax-rules ()
-    [(_ . args) (make-Union (list . args))]))
+    [(_ . args) (make-Union (remove-dups (sort (apply append (map flat (list . args))) type<?)))]))
 
 
 (define (make-Listof elem) (-mu list-rec (*Un (-val null) (-pair elem list-rec))))
@@ -48,6 +62,7 @@
   (foldr -pair b l))
 
 (define (untuple t)
+  ;; FIXME - do we really need resolution here?
   (match (resolve t)
     [(Value: '()) null]
     [(Pair: a b) (cond [(untuple b) => (lambda (l) (cons a l))]
@@ -94,32 +109,45 @@
 
 (define -Listof (-poly (list-elem) (make-Listof list-elem)))
 
-(define -Boolean (make-Base 'Boolean #'boolean?))
-(define -Symbol (make-Base 'Symbol #'symbol?))
-(define -Void (make-Base 'Void #'void?))
-(define -Undefined (make-Base 'Undefined #'(lambda (x) (equal? (letrec ([y y]) y) x)))) ; initial value of letrec bindings
-(define -Bytes (make-Base 'Bytes #'bytes?))
-(define -Regexp (make-Base 'Regexp #'(and/c regexp? (not/c pregexp?) (not/c byte-regexp?))))
-(define -PRegexp (make-Base 'PRegexp #'(and/c pregexp? (not/c byte-pregexp?))))
-(define -Byte-Regexp (make-Base 'Byte-Regexp #'(and/c byte-regexp? (not/c byte-pregexp?))))
-(define -Byte-PRegexp (make-Base 'Byte-PRegexp #'byte-pregexp?))
-(define -String (make-Base 'String #'string?))
-(define -Keyword (make-Base 'Keyword #'keyword?))
-(define -Char (make-Base 'Char #'char?))
-(define -Thread (make-Base 'Thread #'thread?))
-(define -Resolved-Module-Path (make-Base 'Resolved-Module-Path #'resolved-module-path?))
-(define -Module-Path (make-Base 'Module-Path #'module-path?))
-(define -Module-Path-Index (make-Base 'Module-Path-Index #'module-path-index?))
-(define -Compiled-Module-Expression (make-Base 'Compiled-Module-Expression #'compiled-module-expression?))
-(define -Prompt-Tag (make-Base 'Prompt-Tag #'continuation-prompt-tag?))
-(define -Cont-Mark-Set (make-Base 'Continuation-Mark-Set #'continuation-mark-set?))
-(define -Path (make-Base 'Path #'path?))
-(define -Namespace (make-Base 'Namespace #'namespace?))
-(define -Output-Port (make-Base 'Output-Port #'output-port?))
-(define -Input-Port (make-Base 'Input-Port #'input-port?))
-(define -TCP-Listener (make-Base 'TCP-Listener #'tcp-listener?))
+(define -Boolean (make-Base 'Boolean #'boolean? boolean? #'-Boolean))
+(define -Symbol (make-Base 'Symbol #'symbol? symbol? #'-Symbol))
+(define -Void (make-Base 'Void #'void? void? #'-Void))
+(define -Undefined
+  (make-Base 'Undefined
+             #'(lambda (x) (equal? (letrec ([y y]) y) x)) ; initial value of letrec bindings
+             (lambda (x) (equal? (letrec ([y y]) y) x))
+             #'-Undefined))
+(define -Bytes (make-Base 'Bytes #'bytes? bytes? #'-Bytes))
+(define -Regexp (make-Base 'Regexp
+                           #'(and/c regexp? (not/c pregexp?) (not/c byte-regexp?))
+                           (conjoin regexp? (negate pregexp?) (negate byte-regexp?))
+                           #'-Regexp))
+(define -PRegexp (make-Base 'PRegexp
+                            #'(and/c pregexp? (not/c byte-pregexp?))
+                            (conjoin pregexp? (negate byte-pregexp?))
+                            #'-PRegexp))
+(define -Byte-Regexp (make-Base 'Byte-Regexp
+                                #'(and/c byte-regexp? (not/c byte-pregexp?))
+                                (conjoin byte-regexp? (negate byte-pregexp?))
+                                #'-Byte-Regexp))
+(define -Byte-PRegexp (make-Base 'Byte-PRegexp #'byte-pregexp? byte-pregexp? #'-Byte-PRegexp))
+(define -String (make-Base 'String #'string? string? #'-String))
+(define -Keyword (make-Base 'Keyword #'keyword? keyword? #'-Keyword))
+(define -Char (make-Base 'Char #'char? char? #'-Char))
+(define -Thread (make-Base 'Thread #'thread? thread? #'-Thread))
+(define -Resolved-Module-Path (make-Base 'Resolved-Module-Path #'resolved-module-path? resolved-module-path? #'-Resolved-Module-Path))
+(define -Module-Path (make-Base 'Module-Path #'module-path? module-path? #'-Module-Path))
+(define -Module-Path-Index (make-Base 'Module-Path-Index #'module-path-index? module-path-index? #'-Module-Path-Index))
+(define -Compiled-Module-Expression (make-Base 'Compiled-Module-Expression #'compiled-module-expression? compiled-module-expression? #'-Compiled-Module-Expression))
+(define -Prompt-Tag (make-Base 'Prompt-Tag #'continuation-prompt-tag? continuation-prompt-tag? #'-Prompt-Tag))
+(define -Cont-Mark-Set (make-Base 'Continuation-Mark-Set #'continuation-mark-set? continuation-mark-set? #'-Cont-Mark-Set))
+(define -Path (make-Base 'Path #'path? path? #'-Path))
+(define -Namespace (make-Base 'Namespace #'namespace? namespace? #'-Namespace))
+(define -Output-Port (make-Base 'Output-Port #'output-port? output-port? #'-Output-Port))
+(define -Input-Port (make-Base 'Input-Port #'input-port? input-port? #'-Input-Port))
+(define -TCP-Listener (make-Base 'TCP-Listener #'tcp-listener? tcp-listener? #'-TCP-Listener))
 
-(define -FlVector (make-Base 'FlVector #'flvector?))
+(define -FlVector (make-Base 'FlVector #'flvector? flvector? #'-FlVector))
 
 (define -Syntax make-Syntax)
 (define -HT make-Hashtable)
@@ -150,47 +178,6 @@
 (define -car (make-CarPE))
 (define -cdr (make-CdrPE))
 (define -syntax-e (make-SyntaxPE))
-
-;; Numeric hierarchy
-(define -Number (make-Base 'Number #'number?))
-
-(define -FloatComplex (make-Base 'Float-Complex
-                                 #'(and/c number?
-                                          (lambda (x)
-                                            (and (flonum? (imag-part x))
-                                                 (flonum? (real-part x)))))))
-
-;; default 64-bit floats
-(define -Flonum (make-Base 'Flonum #'flonum?))
-(define -NonnegativeFlonum (make-Base 'Nonnegative-Flonum
-                                      #'(and/c flonum?
-                                               (or/c positive? zero?)
-                                               (lambda (x) (not (eq? x -0.0))))))
-;; could be 32- or 64-bit floats
-(define -InexactReal (make-Base 'Inexact-Real #'inexact-real?))
-
-(define -ExactRational 
-  (make-Base 'Exact-Rational #'(and/c number? rational? exact?)))
-(define -Integer (make-Base 'Integer #'exact-integer?))
-(define -ExactPositiveInteger
-  (make-Base 'Exact-Positive-Integer #'exact-positive-integer?))
-
-;; We're generating a reference to fixnum? rather than calling it, so
-;; we're safe from fixnum size issues on different platforms.
-(define -PositiveFixnum
-  (make-Base 'Positive-Fixnum #'(and/c fixnum? positive?)))
-(define -NegativeFixnum
-  (make-Base 'Negative-Fixnum #'(and/c fixnum? negative?)))
-
-(define -Zero (-val 0))
-(define -Real (*Un -InexactReal -ExactRational))
-(define -Fixnum (*Un -PositiveFixnum -NegativeFixnum -Zero))
-(define -NonnegativeFixnum (*Un -PositiveFixnum -Zero))
-(define -ExactNonnegativeInteger (*Un -ExactPositiveInteger -Zero))
-(define -Nat -ExactNonnegativeInteger)
-
-(define -Byte -NonnegativeFixnum)
-
 
 
 ;; convenient syntax

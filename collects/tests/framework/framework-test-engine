@@ -1,0 +1,3 @@
+#!/bin/sh
+
+exec gracket -u framework-test-engine.rkt "$@"

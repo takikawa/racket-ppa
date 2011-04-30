@@ -18,10 +18,12 @@
          "item.rkt"
          "hbitmap.rkt"
          "gcwin.rkt"
-         "theme.rkt")
+         "theme.rkt"
+         "panel.rkt")
 
 (provide 
- (protect-out canvas%))
+ (protect-out canvas%
+              canvas-panel%))
 
 (define WS_EX_STATICEDGE        #x00020000)
 (define WS_EX_CLIENTEDGE        #x00000200)
@@ -88,8 +90,10 @@
               reset-auto-scroll
               refresh-for-autoscroll)
 
-     (define hscroll? (memq 'hscroll style))
-     (define vscroll? (memq 'vscroll style))
+     (define hscroll? (or (memq 'hscroll style)
+                          (memq 'auto-hscroll style)))
+     (define vscroll? (or (memq 'vscroll style)
+                          (memq 'auto-vscroll style)))
      (define for-gl? (memq 'gl style))
 
      (define panel-hwnd
@@ -99,7 +103,7 @@
                              #f
                              (bitwise-ior WS_CHILD)
                              0 0 w h
-                             (send parent get-client-hwnd)
+                             (send parent get-content-hwnd)
                              #f
                              hInstance
                              #f)))
@@ -116,7 +120,7 @@
                                      (if hscroll? WS_HSCROLL 0)
                                      (if vscroll? WS_VSCROLL 0))
                         0 0 w h
-                        (or panel-hwnd (send parent get-client-hwnd))
+                        (or panel-hwnd (send parent get-content-hwnd))
                         #f
                         hInstance
                         #f))
@@ -135,13 +139,28 @@
                                      hInstance
                                      #f)))
 
+     (define content-hwnd
+       (if (is-panel?)
+           (CreateWindowExW 0
+                            "PLTTabPanel"
+                            #f
+                            (bitwise-ior WS_CHILD WS_CLIPSIBLINGS WS_VISIBLE)
+                            0 0 w h
+                            canvas-hwnd
+                            #f
+                            hInstance
+                            #f)
+           canvas-hwnd))
+
      (define hwnd (or panel-hwnd canvas-hwnd))
 
      (super-new [parent parent]
                 [hwnd hwnd]
                 [extra-hwnds (if panel-hwnd
                                  (list canvas-hwnd combo-hwnd)
-                                 null)]
+                                 (if (eq? content-hwnd canvas-hwnd)
+                                     null
+                                     (list content-hwnd)))]
                 [style style])
 
      (when combo-hwnd
@@ -150,6 +169,9 @@
      (define control-border-theme
        (and (memq 'control-border style)
             (OpenThemeData canvas-hwnd "Edit")))
+
+     (define/override (get-content-hwnd)
+       content-hwnd)
 
      (define/override (wndproc w msg wParam lParam default)
        (cond
@@ -197,10 +219,12 @@
                1)
              (default w msg wParam lParam))]
         [(= msg WM_HSCROLL)
-         (on-scroll-change SB_HORZ (LOWORD wParam))
+         (when hscroll?
+           (on-scroll-change SB_HORZ (LOWORD wParam)))
          0]
         [(= msg WM_VSCROLL)
-         (on-scroll-change SB_VERT (LOWORD wParam))
+         (when vscroll?
+           (on-scroll-change SB_VERT (LOWORD wParam)))
          0]
         [else (super wndproc w msg wParam lParam default)]))
      
@@ -228,6 +252,15 @@
                  (get-virtual-v-pos)
                  0)))
 
+     (define/public (tell-me-what)
+       (let ([r (GetClientRect (get-client-hwnd))]
+             [rr (GetWindowRect (get-hwnd))])
+         (printf "~s\n"
+                 (list hscroll? vscroll?
+                       (list (RECT-left r) (RECT-top r) (RECT-right r) (RECT-bottom r))
+                       (list (RECT-left rr) (RECT-top rr) (RECT-right rr) (RECT-bottom rr))))))
+
+
      (define/override (show-children)
        (when (dc . is-a? . dc<%>)
          ;; if the canvas was never shown, then it has never
@@ -249,6 +282,7 @@
            (MoveWindow combo-hwnd 0 0 (max 1 w) (- h 2) #t)))
        (on-size))
 
+     ;; this `on-size' method is for `editor-canvas%', only:
      (define/public (on-size) (void))
 
      ;; The `queue-paint' and `paint-children' methods
@@ -337,9 +371,12 @@
                                          (send col green)
                                          (send col blue)))))
 
-     (define wants-focus? (not (memq 'no-focus style)))
+     (define wants-focus? (and (not (is-panel?))
+                               (not (memq 'no-focus style))))
      (define/override (can-accept-focus?)
        wants-focus?)
+
+     (define/public (is-panel?) #f)
 
      (define h-scroll-visible? hscroll?)
      (define v-scroll-visible? vscroll?)
@@ -461,6 +498,7 @@
 
      (define/override (definitely-wants-event? w msg wParam e) 
        (cond
+        [(is-panel?) #f]
         [(e . is-a? . key-event%)
          ;; All key events to canvas, event for combo:
          #t]
@@ -494,7 +532,7 @@
        (or (= cmd CBN_SELENDOK)
            (= cmd CBN_DROPDOWN)))
 
-     (define/public (do-command cmd control-hwnd)
+     (define/override (do-command cmd control-hwnd)
        (cond
         [(= cmd CBN_SELENDOK)
          (let ([i (SendMessageW combo-hwnd CB_GETCURSEL 0 0)])
@@ -551,3 +589,40 @@
         (set! reg-blits null))))))
 
 
+;; ----------------------------------------
+
+(define canvas-panel%
+  (class (panel-mixin canvas%)
+    (inherit get-content-hwnd
+             get-client-hwnd
+             get-virtual-h-pos
+             get-virtual-v-pos)
+
+    (define/override (is-panel?) #t)
+
+    (define/override (notify-child-extent x y)
+      (let* ([content-hwnd (get-content-hwnd)]
+             [r (GetWindowRect content-hwnd)]
+             [w (- (RECT-right r) (RECT-left r))]
+             [h (- (RECT-bottom r) (RECT-top r))])
+        (when (or (> x w) (> y h))
+          (let ([pr (GetWindowRect (get-client-hwnd))])
+            (MoveWindow content-hwnd 
+                        (- (RECT-left r) (RECT-left pr)) 
+                        (- (RECT-top r) (RECT-top pr))
+                        (max w x) (max y h)
+                        #t)))))
+
+    (define/override (reset-dc-for-autoscroll)
+      (super reset-dc-for-autoscroll)
+      (let* ([content-hwnd (get-content-hwnd)]
+             [r (GetWindowRect content-hwnd)]
+             [w (- (RECT-right r) (RECT-left r))]
+             [h (- (RECT-bottom r) (RECT-top r))])
+        (MoveWindow content-hwnd 
+                    (- (get-virtual-h-pos))
+                    (- (get-virtual-v-pos))
+                    w h
+                    #t)))
+
+    (super-new)))

@@ -74,6 +74,7 @@
 \newcommand{\atItemizeStart}[0]{\addtolength{\stabLeft}{\labelsep}
                                 \addtolength{\stabLeft}{\labelwidth}}
 
+
 % For a single-column table in simple environments, it's better to
 %  use the `list' environment instead of `stabular'.
 \newenvironment{SingleColumn}{\begin{list}{}{\topsep=0pt\partopsep=0pt%
@@ -92,7 +93,14 @@
 \listparindent=0pt\itemindent=0pt\labelwidth=0pt\leftmargin=0pt\rightmargin=0pt%
 \itemsep=0pt}\item}{\end{list}}
 
-% The 'inset neested-flow style uses the `quote' environment
+% The 'inset nested-flow style uses the `quote' environment
+
+% Indent a 'code-inset nested flow:
+\newcommand{\SCodePreSkip}{\vskip\abovedisplayskip}
+\newcommand{\SCodePostSkip}{\vskip\belowdisplayskip}
+\newenvironment{SCodeFlow}{\SCodePreSkip\begin{list}{}{\topsep=0pt\partopsep=0pt%
+\listparindent=0pt\itemindent=0pt\labelwidth=0pt\leftmargin=2ex\rightmargin=0pt%
+\itemsep=0pt\parsep=0pt}\item}{\end{list}\SCodePostSkip}
 
 % The 'compact itemization style:
 \newenvironment{compact}{\begin{itemize}}{\end{itemize}}
@@ -104,10 +112,14 @@
 % The \refpara command corresponds to `margin-note'. The
 % refcolumn and refcontent environments also wrap the note,
 % because they simplify the CSS side.
-\newcommand{\refpara}[1]{\marginpar{\raggedright \footnotesize #1}}
+\newcommand{\refpara}[1]{\normalmarginpar\marginpar{\raggedright \footnotesize #1}}
 \newcommand{\refelem}[1]{\refpara{#1}}
 \newenvironment{refcolumn}{}{}
 \newenvironment{refcontent}{}{}
+
+\newcommand{\refparaleft}[1]{\reversemarginpar\marginpar{\raggedright \footnotesize #1}}
+\newcommand{\refelemleft}[1]{\refparaleft{#1}}
+\newenvironment{refcolumnleft}{\begin{refcolumn}}{\end{refcolumn}}
 
 % Macros used by `title' and `author':
 \newcommand{\titleAndVersionAndAuthors}[3]{\title{#1\\{\normalsize Version #2}}\author{#3}\maketitle}

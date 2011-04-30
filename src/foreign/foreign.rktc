@@ -194,7 +194,7 @@ THREAD_LOCAL_DECL(static Scheme_Hash_Table *opened_libs);
         handle = NULL;
         null_ok = 1;
       } else
-        handle = LoadLibrary(name);
+        handle = LoadLibraryW(WIDE_PATH(name));
     }{
       handle = dlopen(name, RTLD_NOW | RTLD_GLOBAL);
     }
@@ -640,9 +640,9 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 @(defctype* '(ufixnum "umzintptr")
    "uintptr_t" "INT" "UINT" "integer_from_unsigned")
 
-@(defctype* 'float  "float"        "FLT"  "FLT"        "float")
+@(defctype* 'float  "float"        "FLOAT"  "FLOAT"        "double")
 
-@(defctype* 'double "double"       "DBL"  "DBL"        "double")
+@(defctype* 'double "double"       "FLOAT"  "FLOAT"        "double")
 @;
 @; Not useful?  not implemented in any case.
 @; (defctype* 'longdouble "long double" ...???...)
@@ -2549,8 +2549,15 @@ static Scheme_Object *foreign_make_ctype(int argc, Scheme_Object **argv)
   return scheme_false;
 }
 
+static Scheme_Object *foreign_make_stubborn_will_executor(int argc, Scheme_Object *argv[])
+{
+  return scheme_make_stubborn_will_executor();
+}
+
 @(define (lookup name)
-  (if (member (cadr name) '("compiler_sizeof" "make_ctype"))
+  (if (member (cadr name) '("compiler_sizeof"
+                            "make_ctype" 
+                            "make_stubborn_will_executor"))
       name
       'unimplemented))
 

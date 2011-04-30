@@ -28,7 +28,9 @@
 	      get-default-control-font
 
               GetWindowRect
-              GetClientRect))
+              GetClientRect
+
+              _NMHDR))
 
 (define (unhide-cursor) (void))
 
@@ -136,6 +138,9 @@
   (init style
         [extra-hwnds null])
 
+  (define enabled? #t)
+  (define parent-enabled? #t)
+
   (super-new)
   
   (define eventspace (if parent
@@ -148,6 +153,7 @@
 
   (define/public (get-hwnd) hwnd)
   (define/public (get-client-hwnd) hwnd)
+  (define/public (get-content-hwnd) (get-client-hwnd))
   (define/public (get-focus-hwnd) hwnd)
   (define/public (get-eventspace) eventspace)
 
@@ -188,15 +194,11 @@
          [(= msg WM_CHAR)
           (do-key w msg wParam lParam #t #f default)]
 	 [(= msg WM_MOUSEWHEEL)
-	  (let ([orig-delta (quotient (HIWORD wParam) WHEEL_DELTA)])
-	    (let loop ([delta (abs orig-delta)])
-	      (unless (zero? delta)
-		(do-key w msg (if (negative? orig-delta)
-				  'wheel-down
-				  'wheel-up)
-			lParam #f #f void)
-                (loop (sub1 delta)))))
+          (gen-wheels w msg lParam (HIWORD wParam) 'wheel-down 'wheel-up)
 	  0]
+         [(= msg WM_MOUSEHWHEEL) ; Vista and later
+          (gen-wheels w msg lParam (HIWORD wParam) 'wheel-left 'wheel-right)
+          0]
          [(= msg WM_COMMAND)
           (let* ([control-hwnd (cast lParam _LPARAM _HWND)]
                  [wx (any-hwnd->wx control-hwnd)]
@@ -213,7 +215,7 @@
                  [cmd (LOWORD (NMHDR-code nmhdr))])
             (if (and wx (send wx is-command? cmd))
                 (begin
-                  (send wx do-command cmd control-hwnd)
+                  (send wx do-command-ex cmd control-hwnd nmhdr)
                   0)
                 (default w msg wParam lParam)))]
          [(or (= msg WM_HSCROLL)
@@ -246,6 +248,11 @@
   (define/public (is-command? cmd) #f)
   (define/public (control-scrolled) #f)
 
+  (define/public (do-command cmd control-hwnd)
+    (void))
+  (define/public (do-command-ex cmd control-hwnd nmhdr)
+    (do-command cmd control-hwnd))
+
   (define/public (show on?)
     (when on? (show-children))
     (atomically (direct-show on?)))
@@ -265,10 +272,8 @@
   (define/public (on-set-focus) (void))
   (define/public (on-kill-focus) (void))
   (define/public (get-handle) hwnd)
-  (define/public (get-client-handle) (get-client-hwnd))
+  (define/public (get-client-handle) (get-content-hwnd))
 
-  (define enabled? #t)
-  (define parent-enabled? #t)
   (define/public (enable on?)
     (unless (eq? enabled? (and on? #t))
       (atomically
@@ -300,11 +305,11 @@
 
   (define/public (get-x)
     (let ([r (GetWindowRect hwnd)]
-          [pr (GetWindowRect (send parent get-client-hwnd))])
+          [pr (GetWindowRect (send parent get-content-hwnd))])
       (- (RECT-left r) (RECT-left pr))))
   (define/public (get-y)
     (let ([r (GetWindowRect hwnd)]
-          [pr (GetWindowRect (send parent get-client-hwnd))])
+          [pr (GetWindowRect (send parent get-content-hwnd))])
       (- (RECT-top r) (RECT-top pr))))
 
   (define/public (get-width)
@@ -314,19 +319,23 @@
     (let ([r (GetWindowRect hwnd)])
       (- (RECT-bottom r) (RECT-top r))))
 
+  (define/public (notify-child-extent x y)
+    (void))
+
   (define/public (set-size x y w h)
-    (if (or (= x -11111)
-            (= y -11111)
-            (= w -1)
-            (= h -1))
-        (let ([r (GetWindowRect hwnd)])
-          (MoveWindow hwnd 
-                      (if (= x -11111) (RECT-left r) x)
-                      (if (= y -11111) (RECT-top r) y)
-                      (if (= w -1) (- (RECT-right r) (RECT-left r)) w)
-                      (if (= h -1) (- (RECT-bottom r) (RECT-top r)) h)
-                      #t))
-        (MoveWindow hwnd x y w h #t))
+    (let-values ([(x y w h)
+                  (if (or (= x -11111)
+                          (= y -11111)
+                          (= w -1)
+                          (= h -1))
+                      (let ([r (GetWindowRect hwnd)])
+                        (values (if (= x -11111) (RECT-left r) x)
+                                (if (= y -11111) (RECT-top r) y)
+                                (if (= w -1) (- (RECT-right r) (RECT-left r)) w)
+                                (if (= h -1) (- (RECT-bottom r) (RECT-top r)) h)))
+                      (values x y w h))])
+      (when parent (send parent notify-child-extent (+ x w) (+ y h)))
+      (MoveWindow hwnd x y w h #t))
     (unless (and (= w -1) (= h -1))
       (on-resized))
     (queue-on-size)
@@ -392,7 +401,7 @@
   (define/public (set-parent p) 
     ;; in atomic mode
     (set! parent p)
-    (SetParent hwnd (send parent get-client-hwnd)))
+    (SetParent hwnd (send parent get-content-hwnd)))
 
   (define/public (is-frame?) #f)
 
@@ -496,6 +505,16 @@
 
   (define/public (get-top-frame)
     (send parent get-top-frame))
+
+  (define/private (gen-wheels w msg lParam val down up)
+    (let ([orig-delta (quotient val WHEEL_DELTA)])
+      (let loop ([delta (abs orig-delta)])
+        (unless (zero? delta)
+          (do-key w msg (if (negative? orig-delta)
+                            down
+                            up)
+                  lParam #f #f void)
+          (loop (sub1 delta))))))
   
   (define/private (do-key w msg wParam lParam is-char? is-up? default)
     (let ([e (make-key-event #f wParam lParam is-char? is-up? hwnd)])

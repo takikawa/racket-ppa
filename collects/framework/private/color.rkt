@@ -297,6 +297,14 @@ added get-regions
                        (get-token in in-start-pos in-lexer-mode)
                        (enable-suspend #t)))])
         (unless (eq? 'eof type)
+          (unless (exact-nonnegative-integer? new-token-start)
+            (error 'color:text<%> "expected an exact nonnegative integer for the token start, got ~e" new-token-start))
+          (unless (exact-nonnegative-integer? new-token-end)
+            (error 'color:text<%> "expected an exact nonnegative integer for the token end, got ~e" new-token-end))
+          (unless (exact-nonnegative-integer? backup-delta)
+            (error 'color:text<%> "expected an exact nonnegative integer for the backup delta, got ~e" backup-delta))
+          (unless (0 . < . (- new-token-end new-token-start))
+            (error 'color:text<%> "expected the distance between the start and end position for each token to be positive, but start was ~e and end was ~e" new-token-start new-token-end))
           (enable-suspend #f)
           #; (printf "~a at ~a to ~a\n" lexeme (+ in-start-pos (sub1 new-token-start))
                      (+ in-start-pos (sub1 new-token-end)))
@@ -312,7 +320,7 @@ added get-regions
                             (sp (+ in-start-pos (sub1 new-token-start)))
                             (ep (+ in-start-pos (sub1 new-token-end))))
                        (λ ()
-                          (change-style color sp ep #f)))
+                         (change-style color sp ep #f)))
                      colors)))
             ;; Using the non-spec version takes 3 times as long as the spec
             ;; version.  In other words, the new greatly outweighs the tree

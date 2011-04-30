@@ -36,6 +36,7 @@ AC_ARG_ENABLE(origtree,[  --enable-origtree       install with original director
 AC_ARG_ENABLE(jit,     [  --enable-jit            compile JIT support (enabled by default)], , enable_jit=yes)
 
 AC_ARG_ENABLE(foreign, [  --enable-foreign        compile foreign support (enabled by default)], , enable_foreign=yes)
+AC_ARG_ENABLE(libffi,  [  --enable-libffi         use installed libffi (enabled by default)], , enable_libffi=yes)
 
 AC_ARG_ENABLE(places,  [  --enable-places         compile places support])
 AC_ARG_ENABLE(futures, [  --enable-futures        compile futures support (usually enabled by default)])
@@ -47,7 +48,7 @@ AC_ARG_ENABLE(account, [  --enable-account        3m: use memory-accounting GC (
 AC_ARG_ENABLE(compact, [  --enable-compact        3m: use compact GC (no accounting)])
 AC_ARG_ENABLE(backtrace, [  --enable-backtrace      3m: support GC backtrace dumps])
 
-AC_ARG_ENABLE(float,   [  --enable-float          include support for single-precision floats])
+AC_ARG_ENABLE(float,   [  --enable-float          support single-precision floats (enabled by default)], , enable_float=yes)
 AC_ARG_ENABLE(floatinstead, [  --enable-floatinstead   compile to use single-precision by default])
 
 AC_ARG_ENABLE(pthread, [  --enable-pthread        link with pthreads])
@@ -279,6 +280,7 @@ show_explicitly_enabled "${enable_orig}" "Original install tree"
 show_explicitly_disabled "${enable_jit}" JIT
 
 show_explicitly_disabled "${enable_foreign}" Foreign
+show_explicitly_disabled "${enable_libffi}" "Installed libffi"
 
 show_explicitly_enabled "${enable_places}" Places
 show_explicitly_enabled "${enable_gc2_places_testing}" "GC2 Places Testing"
@@ -290,7 +292,7 @@ show_explicitly_enabled "${enable_sgcdebug}" "SGC debug mode"
 show_explicitly_enabled "${enable_compact}" "Compact 3m GC"
 show_explicitly_enabled "${enable_backtrace}" "3m GC backtraces"
 
-show_explicitly_enabled "${enable_float}" "Single-precision floats"
+show_explicitly_disabled "${enable_float}" "Single-precision floats"
 show_explicitly_enabled "${enable_floatinstead}" "Single-precision default floats"
 
 show_explicitly_enabled "${enable_pthread}" "pthreads"
@@ -335,6 +337,8 @@ WX_MMD_FLAG=
 PREFLAGS="$CPPFLAGS"
 MZRT_CGC_FLAGS=""
 LIBATOM="LIBATOM_NONE"
+
+OWN_LIBFFI="ON"
 
 ar_libtool_no_undefined=""
 LIBRACKET_DEP=""
@@ -390,11 +394,11 @@ fi
 
 if test "${enable_floatinstead}" = "yes" ; then
   enable_float=yes
-  OPTIONS="${OPTIONS} -DUSE_SINGLE_FLOATS_AS_DEFAULT"
+  AC_DEFINE(USE_SINGLE_FLOATS_AS_DEFAULT,1,[Single-precision floats by default])
 fi
 
 if test "${enable_float}" = "yes" ; then
-  OPTIONS="${OPTIONS} -DUSE_SINGLE_FLOATS"
+  AC_DEFINE(USE_SINGLE_FLOATS,1,[Single-precision floats])
 fi
 
 ###### Autoconfigure #######
@@ -451,12 +455,6 @@ if test "$REZ" = '' ; then
 fi
 
 if test "${enable_gracket}" = "yes" ; then
-  if test "${enable_quartz}" = "yes" ; then
-   :
-  else
-   AC_PATH_XTRA
-  fi
-
   MAKE_GRACKET=gracket
 else
   MAKE_GRACKET=no
@@ -609,10 +607,11 @@ case $OS in
         LD=gcc-4.0
       fi
       SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS} ${PREFLAGS}"'"'
+      need_cc_in_extras=yes
     fi
     
-    case `$UNAME -m` in
-      i386)
+    case "`$UNAME -m`" in
+      i386|x86_64)
        enable_futures_by_default=yes
        ;;
       *)
@@ -652,7 +651,7 @@ case $OS in
 
     # Force 32-bit build unless mac64 is enabled:
     if test "${enable_mac64}" != "yes" ; then
-      if test `${UNAME} -m` = "i386" ; then
+      if test "`${UNAME} -m`" != "Power Macintosh" ; then
         if test "${ORIG_CC}" = "" ; then
            PREFLAGS="${PREFLAGS} -m32"
            CPPFLAGS="${CPPFLAGS} -m32"
@@ -660,8 +659,13 @@ case $OS in
            # To make the libffi build work, we have to fold -m32 into CC
            # instead of CFLAGS:
            SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CC="'"'"${CC}"' -m32"'
+           need_cc_in_extras=no
         fi
       fi
+    fi
+
+    if test "${need_cc_in_extras}" = "yes" ; then
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CC="'"'"${CC}"'"'
     fi
 
     if test "${enable_quartz}" = "yes" ; then
@@ -787,7 +791,7 @@ AC_MSG_CHECKING([for getaddrinfo])
 AC_TRY_LINK([#include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>],
-	[getaddrinfo(NULL, NULL, NULL, NULL);],
+	[getaddrinfo(0, 0, 0, 0);],
    AC_DEFINE(HAVE_GETADDRINFO,1,[Have getaddrinfo])
    have_getaddrinfo=yes,
    have_getaddrinfo=no)
@@ -847,6 +851,57 @@ if test "$mbsrtowcs" = "no" ; then
   MZOPTIONS="$MZOPTIONS -DNO_MBTOWC_FUNCTIONS"
 fi
 AC_MSG_RESULT($mbsrtowcs)
+
+if test "${enable_libffi}" = "yes" ; then
+ if test "${enable_foreign}" = "yes" ; then
+  AC_MSG_CHECKING([for libffi])
+
+  # Try to get flags form pkg-config:
+  libffi_config_prog="pkg-config libffi"
+  libffi_config_preflags=`$libffi_config_prog --cflags-only-I  2> /dev/null`
+  if test "$?" = 0 ; then
+    libffi_config_cflags=`$libffi_config_prog --cflags-only-other  2> /dev/null`
+    if test "$?" = 0 ; then
+      libffi_config_libs=`$libffi_config_prog --libs  2> /dev/null`
+      if test "$?" != 0 ; then
+        libffi_config_preflags=""
+        libffi_config_cflags=""
+        libffi_config_libs="-lffi"
+      fi
+    else
+      libffi_config_preflags=""
+      libffi_config_cflags=""
+      libffi_config_libs="-lffi"
+    fi
+  else
+    libffi_config_preflags=""
+    libffi_config_cflags=""
+    libffi_config_libs="-lffi"
+  fi
+
+  OLD_CFLAGS="${CFLAGS}"
+  OLD_LIBS="${LIBS}"
+  CFLAGS="${CFLAGS} ${libffi_config_preflags} ${libffi_config_cflags}"
+  LIBS="${LIBS} ${libffi_config_libs}"
+  AC_TRY_LINK([#include <ffi.h>],
+              [ffi_cif cif; ]
+              [ffi_prep_cif(&cif, FFI_DEFAULT_ABI, 0, &ffi_type_void, NULL);],
+             have_libffi=yes,
+             have_libffi=no)
+  AC_MSG_RESULT($have_libffi)
+  if test "${have_libffi}" = "no" ; then
+    CFLAGS="${OLD_CFLAGS}"
+    LIBS="${OLD_LIBS}"
+    echo "Building own libffi"
+  else
+    CFLAGS="${OLD_CFLAGS}"
+    PREFLAGS="${PREFLAGS} ${libffi_config_preflags}"
+    COMPFLAGS="${COMPFLAGS} ${libffi_config_cflags}"
+    echo "Using installed libffi"
+    OWN_LIBFFI="OFF"
+  fi
+ fi
+fi
 
 if test "${enable_backtrace}" = "yes" ; then
   GC2OPTIONS="$GC2OPTIONS -DMZ_GC_BACKTRACE"
@@ -1175,6 +1230,7 @@ AC_SUBST(EXE_SUFFIX)
 AC_SUBST(SO_SUFFIX)
 AC_SUBST(MZRT_CGC_FLAGS)
 AC_SUBST(LIBATOM)
+AC_SUBST(OWN_LIBFFI)
 
 AC_SUBST(LIBSFX)
 AC_SUBST(WXLIBS)
@@ -1249,7 +1305,9 @@ fi
 FOREIGNTARGET=
 FOREIGN_IF_USED="FOREIGN_NOT_USED"
 if test -d "${srcdir}/foreign" && test "${enable_foreign}" = "yes" ; then
-  AC_CONFIG_SUBDIRS( foreign/libffi )
+  if test "${have_libffi}" != "yes" ; then
+    AC_CONFIG_SUBDIRS( foreign/libffi )
+  fi
   FOREIGNTARGET="foreign-stuff"
   FOREIGN_IF_USED="FOREIGN_USED"
 else

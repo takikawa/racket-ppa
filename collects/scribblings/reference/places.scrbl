@@ -48,7 +48,7 @@ places that share the value, because they are allowed in a
 
 A @tech{place channel} can be used as a @tech{synchronizable event}
 (see @secref["sync"]) to receive a value through the channel. A place
-can also receive messages with @racket[place-channel-recv], and
+can also receive messages with @racket[place-channel-receive], and
 messages can be sent with @racket[place-channel-send].
 
 Constraints on messages across a place channel---and therefore on the
@@ -66,7 +66,7 @@ message to each, and then waits for the places to complete and return:
    (for ([i (in-range 2)]
          [p pls])
       (place-channel-send p i)
-      (printf "~a\n" (place-channel-recv p)))
+      (printf "~a\n" (place-channel-receive p)))
    (map place-wait pls))
 ]
 
@@ -81,7 +81,7 @@ racket
 
 (define (place-main pch)
   (place-channel-send pch (format "Hello from place ~a" 
-                                  (place-channel-recv pch))))
+                                  (place-channel-receive pch))))
 ]
 
 
@@ -120,25 +120,25 @@ racket
 
 @defproc[(place-channel) (values place-channel? place-channel?)]{
 
-  Returns two @tech{place channels}. Data send through the first
-  channel can be received through the second channel, and data send
+  Returns two @tech{place channels}. Data sent through the first
+  channel can be received through the second channel, and data sent
   through the second channel can be received from the first.
 
   Typically, one place channel is used by the current @tech{place} to
   send messages to a destination @tech{place}; the other place channel
-  us sent to the destination @tech{place} (via an existing @tech{place
+  is sent to the destination @tech{place} (via an existing @tech{place
   channel}).
 }
 
 @defproc[(place-channel-send [pch place-channel?] [v any/c]) void]{
-  Sends a message @racket[v] on channel @racket[pch].
+  Sends an immutable message @racket[v] on channel @racket[pch].
 }
 
-@defproc[(place-channel-recv [pch place-channel?]) any/c]{
-  Returns a message received on channel @racket[pch].
+@defproc[(place-channel-receive [pch place-channel?]) any/c]{
+  Returns an immutable message received on channel @racket[pch].
 }
 
-@defproc[(place-channel-send/recv [pch place-channel?] [v any/c]) void]{
+@defproc[(place-channel-send/receive [pch place-channel?] [v any/c]) void]{
   Sends an immutable message @racket[v] on channel @racket[pch] and then 
   waits for a reply message on the same channel.
 }

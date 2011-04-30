@@ -122,6 +122,17 @@
     ;; Used to keep smoothing disabled for b&w contexts
     dc-adjust-smoothing
 
+    ;; dc-adjust-cap-shape
+    ;; 
+    ;; Adjusts cap shape, used to get more consistent drawing
+    ;; in bitmaps with small pens
+    dc-adjust-cap-shape
+
+    ;; get-hairline-width
+    ;;
+    ;; Gets the pen width to use in place of 0 in 'smoothed mode
+    get-hairline-width
+
     ;; install-color : cairo_t color<%> alpha boolean? -> void
     ;; 
     ;; Installs a color, which a monochrome context might reduce
@@ -129,8 +140,9 @@
     ;;  the color is for a background.
     install-color
 
-    ;; The public get-size method:
+    ;; The public get-size & get-device-scale methods:
     get-size
+    get-device-scale
 
     ;; set-auto-scroll : real real -> void
     ;;
@@ -142,6 +154,8 @@
     ;; Return #t if text at given font size (already scaled)
     ;;  looks good when drawn all at once (which allows kerning,
     ;;  but may be spaced weirdly)
+    ;; This method is not currently used, because consistent
+    ;;  kerning is needed for libraries like Slideshow
     can-combine-text?
 
     ;; can-mask-bitmap? : -> bool
@@ -185,6 +199,11 @@
     (define/public (ok?) #t)
 
     (define/public (dc-adjust-smoothing s) s)
+    (define/public (get-hairline-width sx) (/ 1 sx))
+    (define/public (dc-adjust-cap-shape shape sx pw)
+      (if ((* pw sx) . <= . 1.0)
+          'round
+          shape))
 
     (define/public (install-color cr c a bg?)
       (let ([norm (lambda (v) (/ v 255.0))])
@@ -197,6 +216,7 @@
     (define/public (collapse-bitmap-b&w?) #f)
 
     (define/public (get-size) (values 0.0 0.0))
+    (define/public (get-device-scale) (values 1.0 1.0))
 
     (define/public (set-auto-scroll dx dy) (void))
 
@@ -234,9 +254,10 @@
     (super-new)
 
     (inherit flush-cr get-cr release-cr end-cr init-cr-matrix get-pango
-             install-color dc-adjust-smoothing reset-clip
+             install-color dc-adjust-smoothing get-hairline-width dc-adjust-cap-shape
+             reset-clip
              collapse-bitmap-b&w?
-             ok? can-combine-text? can-mask-bitmap? get-clear-operator)
+             ok? can-mask-bitmap? get-clear-operator)
 
     ;; Using the global lock here is troublesome, becase
     ;; operations involving paths, regions, and text can
@@ -612,6 +633,10 @@
       (check-ok 'get-size)
       (super get-size))
 
+    (define/override (get-device-scale)
+      (check-ok 'get-device-scale)
+      (super get-device-scale))
+
     (def/public (suspend-flush) (void))
     (def/public (resume-flush) (void))
     (def/public (flush) (void))
@@ -867,11 +892,14 @@
                                  alpha
                                  #f)))
             (cairo_set_line_width cr (let* ([v (send pen get-width)]
-                                            [v (if (aligned? smoothing)
+                                            [align? (aligned? smoothing)]
+                                            [v (if align?
                                                    (/ (floor (* effective-scale-x v)) effective-scale-x)
                                                    v)])
                                        (if (zero? v)
-                                           1
+                                           (if align?
+                                               (/ 1 effective-scale-x)
+                                               (get-hairline-width effective-scale-x))
                                            v)))
             (unless (or (eq? s 'solid)
                         (eq? s 'xor))
@@ -900,9 +928,9 @@
                                [(eq? s 'dot-dash) 4]
                                [else 0])))
             (cairo_set_line_cap cr
-                                (case (if ((send pen get-width) . <= . 1.0)
-                                          'round
-                                          (send pen get-cap))
+                                (case (dc-adjust-cap-shape (send pen get-cap)
+                                                           effective-scale-x
+                                                           (send pen get-width))
                                   [(butt) CAIRO_LINE_CAP_BUTT]
                                   [(round) CAIRO_LINE_CAP_ROUND]
                                   [(projecting) CAIRO_LINE_CAP_SQUARE]))
@@ -1208,17 +1236,15 @@
               [y (if rotate? 0.0 (exact->inexact y))])
           ;; We have two ways to draw text:
           ;;  - If `combine?' (to enable kerning etc.), then we create a Pango layout
-          ;;    and draw it. This is the slow but pretty way (bt not used for editors,
+          ;;    and draw it. This is the slow but pretty way (but not used for editors,
           ;;    where the text needs to draw the same if it's drawn all together or
           ;;    in pieces).
-          ;;  - If not `combine' or if combining isn't supported (e.g., because the scale
-          ;;    is too small, so that it would look bad), then we draw character by character.
-          (if (and combine?
-                   (can-combine-text? (* effective-scale-y (send font get-point-size))))
+          ;;  - If not `combine?', then we draw character by character.
+          (if combine?
               ;; This is combine mode. It has to be a little complicated, after all,
               ;; because we may need to implement font substitution ourselves, which
               ;; breaks the string into multiple layouts.
-              (let loop ([s s] [w 0.0] [h 0.0] [d 0.0] [a 0.0])
+              (let loop ([s s] [draw? draw?] [measured? #f] [w 0.0] [h 0.0] [d 0.0] [a 0.0])
                 (cond
                  [(not s)
                   (when rotate? (cairo_restore cr))
@@ -1254,28 +1280,37 @@
                                    ;; find a face that works for the long character:
                                    (install-alternate-face (string-ref s 0) layout font desc attrs context))
                                  (substring s (max 1 ok-count))))])
-                      (let ([logical (make-PangoRectangle 0 0 0 0)])
-                        (pango_layout_get_extents layout #f logical)
-                        (when draw?
-                          (let ([bl (/ (pango_layout_get_baseline layout) (exact->inexact PANGO_SCALE))])
-                            (pango_layout_get_extents layout #f logical)
-                            (cairo_move_to cr (text-align-x/delta (+ x w) 0) (text-align-y/delta (+ y bl) 0))
-                            ;; Draw the text:
-                            (pango_cairo_show_layout_line cr (pango_layout_get_line_readonly layout 0))))
-                        (cond
-                         [(and draw? (not next-s))
-                          (g_object_unref layout)
-                          (when rotate? (cairo_restore cr))]
-                         [else
-                          (let ([nw (if blank?
-                                        0.0
-                                        (integral (/ (PangoRectangle-width logical) (exact->inexact PANGO_SCALE))))]
-                                [nh (/ (PangoRectangle-height logical) (exact->inexact PANGO_SCALE))]
+                      (cond
+                       [(and draw? next-s (not measured?))
+                        ;; It's going to take multiple layouts, so first gather measurements.
+                        (let-values ([(w2 h d a) (loop s #f #f w h d a)])
+                          ;; draw again, supplying `h', `d', and `a' for the whole line
+                          (loop s #t #t w h d a))]
+                       [else
+                        (let ([logical (make-PangoRectangle 0 0 0 0)])
+                          (pango_layout_get_extents layout #f logical)
+                          (let ([nh (/ (PangoRectangle-height logical) (exact->inexact PANGO_SCALE))]
                                 [nd (/ (- (PangoRectangle-height logical)
                                           (pango_layout_get_baseline layout))
-                                       (exact->inexact PANGO_SCALE))]
-                                [na 0.0])
-                            (loop next-s (+ w nw) (max h nh) (max d nd) (max a na)))]))))]))
+                                       (exact->inexact PANGO_SCALE))])
+                            (when draw?
+                              (let ([bl (if measured? (- h d) (- nh nd))])
+                                (pango_layout_get_extents layout #f logical)
+                                (cairo_move_to cr 
+                                               (text-align-x/delta (+ x w) 0) 
+                                               (text-align-y/delta (+ y bl) 0))
+                                ;; Draw the text:
+                                (pango_cairo_show_layout_line cr (pango_layout_get_line_readonly layout 0))))
+                            (cond
+                             [(and draw? (not next-s))
+                              (g_object_unref layout)
+                              (when rotate? (cairo_restore cr))]
+                             [else
+                              (let ([nw (if blank?
+                                            0.0
+                                            (integral (/ (PangoRectangle-width logical) (exact->inexact PANGO_SCALE))))]
+                                    [na 0.0])
+                                (loop next-s measured? draw? (+ w nw) (max h nh) (max d nd) (max a na)))])))])))]))
               ;; This is character-by-character mode. It uses a cached per-character+font layout
               ;;  object.
               (let ([cache (if (or combine?
@@ -1609,7 +1644,8 @@
           [(or (send src is-color?)
                (and (not (eq? style 'opaque))
                     (= alpha 1.0)
-                    black?))
+                    black?
+                    (not (collapse-bitmap-b&w?))))
            (let ([s (cairo_get_source cr)])
              (cairo_pattern_reference s)
              (cairo_set_source_surface cr 

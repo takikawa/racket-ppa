@@ -8,7 +8,7 @@
          syntax/id-table
          syntax/stx
          syntax/keyword
-         unstable/syntax
+         racket/syntax
          unstable/struct
          "txlift.rkt"
          "rep-data.rkt"
@@ -159,17 +159,16 @@
   (call/txlifts
    (lambda ()
      (parameterize ((current-syntax-context ctx))
-       (define-values (rest description transp? attributes auto-nested?
+       (define-values (rest description transp? attributes auto-nested? colon-notation?
                             decls defs options)
          (parse-rhs/part1 stx splicing? (and expected-attrs #t)))
        (define variants
          (parameterize ((stxclass-lookup-config
                          (cond [expected-attrs 'yes]
                                [auto-nested? 'try]
-                               [else 'no])))
+                               [else 'no]))
+                        (stxclass-colon-notation? colon-notation?))
            (parse-variants rest decls splicing? expected-attrs)))
-       (when (null? variants)
-         (wrong-syntax #f "expected at least one variant"))
        (let ([sattrs
               (or attributes
                   (intersect-sattrss (map variant-attrs variants)))])
@@ -188,14 +187,15 @@
   (define opaque? (and (assq '#:opaque chunks) #t))
   (define transparent? (not opaque?))
   (define auto-nested? (and (assq '#:auto-nested-attributes chunks) #t))
+  (define colon-notation? (not (assq '#:disable-colon-notation chunks)))
   (define commit?
     (and (assq '#:commit chunks) #t))
   (define delimit-cut?
     (not (assq '#:no-delimit-cut chunks)))
   (define attributes (options-select-value chunks '#:attributes #:default #f))
   (define-values (decls defs) (get-decls+defs chunks strict?))
-  (values rest description transparent? attributes auto-nested? decls defs
-          (make options commit? delimit-cut?)))
+  (values rest description transparent? attributes auto-nested? colon-notation?
+          decls defs (make options commit? delimit-cut?)))
 
 ;; ----
 
@@ -844,7 +844,8 @@ A syntax class is integrable if
      (let* ([chunks (parse-keyword-options/eol #'more phase-directive-table
                                                #:no-duplicates? #t
                                                #:context stx)]
-            [phase (options-select-value chunks '#:phase #:default #f)])
+            [phase (options-select-value chunks '#:phase
+                                         #:default #'(syntax-local-phase-level))])
        ;; FIXME: Duplicates phase expr!
        (create-pat:literal #'lit phase phase))]
     [_
@@ -1548,7 +1549,8 @@ A syntax class is integrable if
 
 ;; common-parse-directive-table
 (define common-parse-directive-table
-  (list (list '#:literals check-literals-list)
+  (list (list '#:disable-colon-notation)
+        (list '#:literals check-literals-list)
         (list '#:literal-sets check-literal-sets-list)
         (list '#:conventions check-conventions-list)
         (list '#:local-conventions check-conventions-rules)))
@@ -1604,7 +1606,7 @@ A syntax class is integrable if
 
 ;; litset-directive-table
 (define litset-directive-table
-  (cons (list '#:at check-identifier)
+  (cons (list '#:at (lambda (stx ctx) stx))
         phase-directive-table))
 
 ;; var-pattern-directive-table

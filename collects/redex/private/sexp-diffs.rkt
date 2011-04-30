@@ -52,7 +52,9 @@
   (let loop ([s s])
     (cond
       [(pair? s) (cons (loop (car s))
-                       (loop (cdr s)))]
+                       (if (null? (cdr s))
+                           '()
+                           (loop (cdr s))))]
       [(vector? s)
        (list->vector (map loop (vector->list s)))]
       [(box? s)
@@ -60,6 +62,8 @@
       [(syntax? s) (datum->syntax s (unkink (loop (syntax-e s))) s)]
       [(number? s) (make-wrap s)]
       [(symbol? s) (make-wrap s)]
+      [(null? s) (make-wrap s)]
+      [(boolean? s) (make-wrap s)]
       [else s])))
 
 (define-struct wrap (content) #:inspector (make-inspector))
@@ -135,11 +139,13 @@
                       [pretty-print-size-hook
                        (λ (val dsp? port)
                          (if (wrap? val)
-                             (string-length (format "~s" (wrap-content val)))
-                             #f))]
+                             (or (default-pretty-printer-size-hook (wrap-content val) dsp? port)
+                                 (string-length (format "~s" (wrap-content val))))
+                             (default-pretty-printer-size-hook val dsp? port)))]
                       [pretty-print-print-hook
                        (λ (val dsp? port)
-                         (write (wrap-content val) port))]
+                         (let ([unwrapped (if (wrap? val) (wrap-content val) val)])
+                           (default-pretty-printer-print-hook unwrapped dsp? port)))]
                       [pretty-print-pre-print-hook
                        (λ (obj port)
                          (when (hash-ref diff-ht obj #f)

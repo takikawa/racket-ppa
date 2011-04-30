@@ -14,7 +14,7 @@
          racket/match
          mzlib/etc
          racket/trace racket/contract
-	 unstable/sequence unstable/list unstable/debug unstable/hash
+	 unstable/sequence unstable/list unstable/hash
          racket/list)
 
 (import dmap^ constraints^ promote-demote^)
@@ -107,6 +107,32 @@
               [(dcon-exact null rest) rest]
               [_ (int-err "did not get a rest-only dcon when moving to the dmap")])))))
 
+
+;; Maps dotted vars (combined with dotted types, to ensure global uniqueness)
+;; to "fresh" symbols.
+;; That way, we can share the same "fresh" variables between the elements of a
+;; cset if they're talking about the same dotted variable.
+;; This makes it possible to reduce the size of the csets, since we can detect
+;; identical elements that would otherwise differ only by these fresh vars.
+;; The domain of this map is pairs (var . dotted-type).
+;; The range is this map is a list of symbols generated on demand, as we need
+;; more dots.
+(define dotted-var-store (make-hash))
+;; Take (generate as needed) n symbols that correspond to variable var used in
+;; the context of type t.
+(define (var-store-take var t n)
+  (let* ([key (cons var t)]
+         [res (hash-ref dotted-var-store key '())])
+    (if (>= (length res) n)
+        ;; there are enough symbols already, take n
+        (take res n)
+        ;; we need to generate more
+        (let* ([new (build-list (- n (length res))
+                                (lambda (x) (gensym var)))]
+               [all (append res new)])
+          (hash-set! dotted-var-store key all)
+          all))))
+
 (define (cgen/filter V X Y s t)
   (match* (s t)
     [(e e) (empty-cset X Y)]
@@ -164,8 +190,7 @@
        (fail! s-arr t-arr))
      (unless (<= (length ss) (length ts))
        (fail! ss ts))
-     (let* ([vars      (for/list ([n (in-range (- (length ts) (length ss)))])
-                         (gensym dbound))]
+     (let* ([vars      (var-store-take dbound dty (- (length ts) (length ss)))]
             [new-tys   (for/list ([var vars])
                          (substitute (make-F var) dbound dty))]
             [new-s-arr (make-arr (append ss new-tys) s #f #f null)]
@@ -178,8 +203,7 @@
        (fail! s-arr t-arr))
      (unless (<= (length ts) (length ss))
        (fail! ss ts))
-     (let* ([vars     (for/list ([n (in-range (- (length ss) (length ts)))])
-                        (gensym dbound))]
+     (let* ([vars     (var-store-take dbound dty (- (length ss) (length ts)))]
             [new-tys  (for/list ([var vars])
                         (substitute (make-F var) dbound dty))]
             [new-t-arr (make-arr (append ts new-tys) t #f #f null)]
@@ -230,8 +254,7 @@
                 [ret-mapping (cg s t)])
            (cset-meet* (list arg-mapping darg-mapping ret-mapping)))
          ;; the hard case
-         (let* ([vars     (for/list ([n (in-range (- (length ss) (length ts)))])
-                            (gensym dbound))]
+         (let* ([vars     (var-store-take dbound t-dty (- (length ss) (length ts)))]
                 [new-tys  (for/list ([var vars])
                             (substitute (make-F var) dbound t-dty))]
                 [new-t-arr (make-arr (append ts new-tys) t #f (cons t-dty dbound) null)]
@@ -244,8 +267,7 @@
        (fail! s-arr t-arr))
      (cond [(< (length ss) (length ts))
             ;; the hard case
-            (let* ([vars     (for/list ([n (in-range (- (length ts) (length ss)))])
-                               (gensym dbound))]
+            (let* ([vars     (var-store-take dbound s-dty (- (length ts) (length ss)))]
                    [new-tys  (for/list ([var vars])
                                (substitute (make-F var) dbound s-dty))]
                    [new-s-arr (make-arr (append ss new-tys) s #f (cons s-dty dbound) null)]
@@ -297,6 +319,12 @@
           [(a a) empty]
           ;; CG-Top
           [(_ (Univ:)) empty]
+
+          ;; they're subtypes. easy.
+          [(a b) (=> nevermind)
+           (if (subtype a b)
+               empty
+               (nevermind))]
 
           ;; refinements are erased to their bound
           [((Refinement: S _ _) T)
@@ -368,11 +396,11 @@
                          (cg t t*)))]
           [((Vector: t) (Sequence: (list t*)))
            (cg t t*)]
-          [((Base: 'String _) (Sequence: (list t*)))
+          [((Base: 'String _ _ _) (Sequence: (list t*)))
            (cg -Char t*)]
-          [((Base: 'Bytes _) (Sequence: (list t*)))
+          [((Base: 'Bytes _ _ _) (Sequence: (list t*)))
            (cg -Nat t*)]
-          [((Base: 'Input-Port _) (Sequence: (list t*)))
+          [((Base: 'Input-Port _ _ _) (Sequence: (list t*)))
            (cg -Nat t*)]
           [((Vector: t) (Sequence: (list t*)))
            (cg t t*)]
@@ -399,8 +427,7 @@
           [((ListDots: s-dty dbound) (List: ts))
            (unless (memq dbound Y) (fail! S T))
            
-           (let* ([vars     (for/list ([n (in-range (length ts))])
-                              (gensym dbound))]
+           (let* ([vars     (var-store-take dbound s-dty (length ts))]
                   ;; new-tys are dummy plain type variables, standing in for the elements of dbound that need to be generated
                   [new-tys  (for/list ([var vars])
                               (substitute (make-F var) dbound s-dty))]
@@ -434,8 +461,7 @@
            (unless (>= (length ts) (length ss)) (fail! ss ts))
            (unless (memq dbound Y) (fail! S T))
            
-           (let* ([vars     (for/list ([n (in-range (- (length ts) (length ss)))])
-                              (gensym dbound))]
+           (let* ([vars     (var-store-take dbound s-dty (- (length ts) (length ss)))]
                   ;; new-tys are dummy plain type variables, standing in for the elements of dbound that need to be generated
                   [new-tys  (for/list ([var vars])
                               (substitute (make-F var) dbound s-dty))]
@@ -505,11 +531,8 @@
                              (cgen/filter-set V X Y f-s f-t)
                              (cgen/object V X Y o-s o-t)))]
           [(_ _)
-           (cond 
-             ;; subtypes are easy - should this go earlier?
-             [(subtype S T) empty]
-             ;; or, nothing worked, and we fail
-             [else (fail! S T)])]))))
+           ;; nothing worked, and we fail
+           (fail! S T)]))))
 
 ;; C : cset? - set of constraints found by the inference engine
 ;; Y : (listof symbol?) - index variables that must have entries
@@ -617,12 +640,21 @@
 ;; Y : the set of index variables to be constrained
 ;; S : a list of types to be the subtypes of T
 ;; T : a list of types
+;; expected-cset : a cset representing the expected type, to meet early and
+;;  keep the number of constraints in check. (empty by default)
 ;; produces a cset which determines a substitution that makes the Ss subtypes of the Ts
-(d/c (cgen/list V X Y S T)
-  ((listof symbol?) (listof symbol?) (listof symbol?) (listof Type?) (listof Type?) . -> . cset?)
+(d/c (cgen/list V X Y S T
+                #:expected-cset [expected-cset (empty-cset '() '())])
+  (((listof symbol?) (listof symbol?) (listof symbol?) (listof Type?) (listof Type?))
+   (#:expected-cset cset?) . ->* . cset?)
   (unless (= (length S) (length T))
     (fail! S T))
-  (cset-meet* (for/list ([s S] [t T]) (cgen V X Y s t))))
+  (cset-meet*
+   (for/list ([s S] [t T])
+             ;; We meet early to prune the csets to a reasonable size.
+             ;; This weakens the inference a bit, but sometimes avoids
+             ;; constraint explosion.
+             (cset-meet (cgen V X Y s t) expected-cset))))
 
 ;; X : variables to infer
 ;; Y : indices to infer
@@ -635,10 +667,11 @@
 ;; just return a boolean result
 (define (infer X Y S T R [expected #f])
   (with-handlers ([exn:infer? (lambda _ #f)])  
-    (let* ([cs (cgen/list null X Y S T)]
-           [cs* (if expected 
-                    (cset-meet cs (cgen null X Y R expected))
-                    cs)])
+    (let* ([expected-cset (if expected
+                              (cgen null X Y R expected)
+                              (empty-cset '() '()))]
+           [cs  (cgen/list null X Y S T #:expected-cset expected-cset)]
+           [cs* (cset-meet cs expected-cset)])
           (if R (subst-gen cs* Y R) #t))))
 
 ;; like infer, but T-var is the vararg type:
@@ -653,16 +686,19 @@
   (with-handlers ([exn:infer? (lambda _ #f)])
     (let* ([short-S (take S (length T))]
            [rest-S (drop S (length T))]
-           [cs-short (cgen/list null X (list dotted-var) short-S T)]
-           [new-vars (for/list ([i (in-range (length rest-S))]) (gensym dotted-var))]
+           [expected-cset (if expected
+                              (cgen null X (list dotted-var) R expected)
+                              (empty-cset '() '()))]
+           [cs-short (cgen/list null X (list dotted-var) short-S T
+                                #:expected-cset expected-cset)]
+           [new-vars (var-store-take dotted-var T-dotted (length rest-S))]
            [new-Ts (for/list ([v new-vars])
                      (substitute (make-F v) dotted-var 
                                  (substitute-dots (map make-F new-vars) #f dotted-var T-dotted)))]
-           [cs-dotted (cgen/list null (append new-vars X) (list dotted-var) rest-S new-Ts)]
+           [cs-dotted (cgen/list null (append new-vars X) (list dotted-var) rest-S new-Ts
+                                 #:expected-cset expected-cset)]
            [cs-dotted* (move-vars-to-dmap cs-dotted dotted-var new-vars)]
            [cs (cset-meet cs-short cs-dotted*)])
-      (if (not expected)
-          (subst-gen cs (list dotted-var) R)
-          (subst-gen (cset-meet cs (cgen null X (list dotted-var) R expected)) (list dotted-var) R)))))
+      (subst-gen (cset-meet cs expected-cset) (list dotted-var) R))))
 
 ;(trace cgen)

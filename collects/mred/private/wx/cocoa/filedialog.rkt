@@ -29,7 +29,10 @@
                      parent)])
 
     (let ([extensions (append
-                       (if extension (list extension) null)
+                       (if (and extension 
+                                (not (equal? "" extension)))
+                           (list extension) 
+                           null)
                        (if (memq 'packages style) (list "app") null)
                        (for/list ([e (in-list filters)]
                                   #:when (and (regexp-match #rx"[*][.][^.]+$" (cadr e))
@@ -53,6 +56,10 @@
      [(memq 'dir style)
       (tellv ns setCanChooseDirectories: #:type _BOOL #t)
       (tellv ns setCanChooseFiles: #:type _BOOL #f)])
+
+    (when (or (memq 'put style)
+              (memq 'dir style))
+      (tellv ns setCanCreateDirectories: #:type _BOOL #t))
 
     (when message
       (tellv ns setMessage: #:type _NSString message))

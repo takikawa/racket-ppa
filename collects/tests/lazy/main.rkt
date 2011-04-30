@@ -1,0 +1,7 @@
+#lang racket/base
+
+(require tests/eli-tester "promise.rkt" "forcers.rkt" "lang.rkt")
+
+(test do (promise-tests)
+      do (forcer-tests)
+      do (lang-tests))

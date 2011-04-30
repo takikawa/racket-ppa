@@ -5,7 +5,7 @@
          "../utils/utils.rkt"
          "../utils/tc-utils.rkt"
          (for-template scheme/base)
-         (types abbrev utils type-table)
+         (types numeric-tower utils type-table)
          (rep type-rep)
          (optimizer utils float-complex))
 
@@ -59,7 +59,7 @@
                  ;; clauses of form ((v) rhs), currently only supports 1 lhs var
                  (partition
                   (lambda (p)
-                    (and (isoftype? (cadr p) -FloatComplex)
+                    (and (subtypeof? (cadr p) -FloatComplex)
                          (could-be-unboxed-in? (car (syntax-e (car p)))
                                                #'(begin body ...))))
                   (syntax-map syntax->list #'(clause ...))))
@@ -75,7 +75,7 @@
                      (not (null? (syntax-e (car p))))
                      (let ((fun-name (car (syntax-e (car p)))))
                        (and
-                        ;; if the function escapes, we can't change it's interface
+                        ;; if the function escapes, we can't change its interface
                         (not (is-var-mutated? fun-name))
                         (not (escapes? fun-name #'(begin rhs ... ...) #f))
                         (not (escapes? fun-name #'(begin body ...) let-loop?))

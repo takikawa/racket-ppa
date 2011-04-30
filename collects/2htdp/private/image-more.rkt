@@ -328,6 +328,33 @@
                           #t)
                (cdr rst)))])))
 
+(define/chk (overlay/offset image1 dx dy image2)
+  (overlay/offset/internal 'middle 'middle image1 dx dy image2))
+
+(define/chk (overlay/align/offset x-place y-place image1 dx dy image2)
+  (overlay/offset/internal x-place y-place image1 dx dy image2))
+
+(define/chk (underlay/offset image1 dx dy image2)
+  (overlay/offset/internal 'middle 'middle  image2 (- dx) (- dy) image1))
+
+(define/chk (underlay/align/offset x-place y-place image1 dx dy image2)
+  (overlay/offset/internal x-place y-place image2 (- dx) (- dy) image1))
+
+(define (overlay/offset/internal x-place y-place fst orig-dx orig-dy snd)
+  (let* ([fst-x-spot (find-x-spot x-place fst)]
+         [fst-y-spot (find-y-spot y-place fst)]
+         [snd-x-spot (find-x-spot x-place snd)]
+         [snd-y-spot (find-y-spot y-place snd)]
+         [dx (+ (- fst-x-spot snd-x-spot) orig-dx)]
+         [dy (+ (- fst-y-spot snd-y-spot) orig-dy)])
+    (overlay/δ fst
+               (if (< dx 0) (- dx) 0) 
+               (if (< dy 0) (- dy) 0)
+               snd
+               (if (< dx 0) 0 dx)
+               (if (< dy 0) 0 dy)
+               #t)))
+
 
 ;                                                                                                  
 ;                                                                                                  
@@ -349,19 +376,7 @@
 ;; crop : number number number number image -> image
 ;; crops an image to be w x h from (x,y)
 (define/chk (crop x1 y1 width height image)
-  (check-arg 'crop
-             (<= 0 x1 (image-width image))
-             (format "number that is between 0 than the width (~a)" (image-width image))
-             1
-             x1)
-  (check-arg 'crop
-             (<= 0 y1 (image-height image))
-             (format "number that is between 0 and the height (~a)" (image-height image))
-             2
-             y1)
-  (let ([w (min width (- (image-width image) x1))]
-        [h (min height (- (image-height image) y1))])
-    (crop/internal x1 y1 w h image)))
+  (crop/internal x1 y1 width height image))
 
 (define (crop/internal x1 y1 width height image)
   (let ([points (rectangle-points width height)]
@@ -1382,9 +1397,14 @@
 
 (provide overlay
          overlay/align
+         overlay/offset
+         overlay/align/offset
          overlay/xy
+         
          underlay
          underlay/align
+         underlay/align/offset
+         underlay/offset
          underlay/xy
          
          beside

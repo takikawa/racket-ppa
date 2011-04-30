@@ -3,6 +3,7 @@
           (for-label racket/struct-info))
 
 @(define struct-eval (make-base-eval))
+@(define struct-copy-eval (make-base-eval))
 
 @title[#:tag "structures" #:style 'toc]{Structures}
 
@@ -243,7 +244,7 @@ The result of @racket[make-struct-type] is five values:
 (make-p 'x 'y 'z)
 ]
 
-@defproc[(make-struct-field-accessor [accessor-proc struct-accessot-procedure?]
+@defproc[(make-struct-field-accessor [accessor-proc struct-accessor-procedure?]
                                      [field-pos exact-nonnegative-integer?]
                                      [field-name (or/c symbol? #f) 
                                                  (symbol->string (format "field~a" field-pos))])
@@ -388,19 +389,24 @@ by @racket[make-struct-type-property], @racket[#f] otherwise.}
 @;------------------------------------------------------------------------
 @section[#:tag "struct-copy"]{Copying and Updating Structures}
 
-@defform[(struct-copy id struct-expr [field-id expr] ...)]{
+@defform/subs[(struct-copy id struct-expr fld-id ...)
+              ((fld-id [field-id expr]
+                       [field-id #:parent parent-id expr]))]{
 
 Creates a new instance of the structure type @racket[id] with the same
 field values as the structure produced by @racket[struct-expr], except
 that the value of each supplied @racket[field-id] is instead
-determined by the corresponding @racket[expr].
+determined by the corresponding @racket[expr]. If @racket[#:parent]
+is specified, the @racket[parent-id] must be bound to a parent
+structure type of @racket[id].
 
 The @racket[id] must have a @tech{transformer binding} that
 encapsulates information about a structure type (i.e., like the
 initial identifier bound by @racket[struct]), and the binding
 must supply a constructor, a predicate, and all field accessors.
 
-Each @racket[field-id] is combined with @racket[id] to form
+Each @racket[field-id] is combined with @racket[id] 
+(or @racket[parent-id], if present) to form
 @racket[id]@racketidfont{-}@racket[field-id] (using the lexical
 context of @racket[field-id]), which must be one of the accessor
 bindings in @racket[id]. The accessor bindings determined by different
@@ -417,7 +423,32 @@ structure instance is created.
 
 The result of @racket[struct-expr] can be an instance of a sub-type of
 @racket[id], but the resulting copy is an immediate instance of
-@racket[id] (not the sub-type).}
+@racket[id] (not the sub-type).
+
+@examples[
+#:eval struct-copy-eval
+(struct fish (color weight) #:transparent)
+(define marlin (fish 'orange-and-white 11))
+(define dory (struct-copy fish marlin
+                          [color 'blue]))
+dory
+             
+(struct shark fish (weeks-since-eating-fish) #:transparent)
+(define bruce (shark 'grey 110 3))
+(define chum (struct-copy shark bruce
+                          [weight #:parent fish 90]
+                          [weeks-since-eating-fish 0]))
+chum
+
+(code:comment "subtypes can be copied as if they were supertypes,")
+(code:comment "but the result is an instance of the supertype")
+(define not-really-chum
+  (struct-copy fish bruce
+               [weight 90]))
+not-really-chum
+]
+
+}
 
 @;------------------------------------------------------------------------
 @section[#:tag "structutils"]{Structure Utilities}
@@ -711,3 +742,4 @@ identifiers. The two subsets correspond to @racket[#:auto] fields.}
 @; ----------------------------------------------------------------------
 
 @close-eval[struct-eval]
+@close-eval[struct-copy-eval]

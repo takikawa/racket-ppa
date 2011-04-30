@@ -224,7 +224,7 @@ static Scheme_Object *foreign_ffi_lib(int argc, Scheme_Object *argv[])
       handle = NULL;
       null_ok = 1;
     } else
-      handle = LoadLibrary(name);
+      handle = LoadLibraryW(WIDE_PATH(name));
 #   else /* WINDOWS_DYNAMIC_LOAD undefined */
     handle = dlopen(name, RTLD_NOW | RTLD_GLOBAL);
 #   endif /* WINDOWS_DYNAMIC_LOAD */
@@ -674,18 +674,18 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 /* Type Name:   float
  * LibFfi type: ffi_type_float
  * C type:      float
- * Predicate:   SCHEME_FLTP(<Scheme>)
- * Scheme->C:   SCHEME_FLT_VAL(<Scheme>)
+ * Predicate:   SCHEME_FLOATP(<Scheme>)
+ * Scheme->C:   SCHEME_FLOAT_VAL(<Scheme>)
  * S->C offset: 0
- * C->Scheme:   scheme_make_float(<C>)
+ * C->Scheme:   scheme_make_double(<C>)
  */
 
 #define FOREIGN_double (15)
 /* Type Name:   double
  * LibFfi type: ffi_type_double
  * C type:      double
- * Predicate:   SCHEME_DBLP(<Scheme>)
- * Scheme->C:   SCHEME_DBL_VAL(<Scheme>)
+ * Predicate:   SCHEME_FLOATP(<Scheme>)
+ * Scheme->C:   SCHEME_FLOAT_VAL(<Scheme>)
  * S->C offset: 0
  * C->Scheme:   scheme_make_double(<C>)
  */
@@ -1306,7 +1306,7 @@ static Scheme_Object *C2SCHEME(Scheme_Object *type, void *src,
     case FOREIGN_ufixint: return scheme_make_integer_from_unsigned(REF_CTYPE(Tuint32));
     case FOREIGN_fixnum: return scheme_make_integer(REF_CTYPE(intptr_t));
     case FOREIGN_ufixnum: return scheme_make_integer_from_unsigned(REF_CTYPE(uintptr_t));
-    case FOREIGN_float: return scheme_make_float(REF_CTYPE(float));
+    case FOREIGN_float: return scheme_make_double(REF_CTYPE(float));
     case FOREIGN_double: return scheme_make_double(REF_CTYPE(double));
     case FOREIGN_doubleS: return scheme_make_double(REF_CTYPE(double));
     case FOREIGN_bool: return (REF_CTYPE(int)?scheme_true:scheme_false);
@@ -1507,9 +1507,9 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, intptr_t delta,
         delta += (sizeof(int)-sizeof(float));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
-      if (SCHEME_FLTP(val)) {
+      if (SCHEME_FLOATP(val)) {
         float tmp;
-        tmp = (float)(SCHEME_FLT_VAL(val));
+        tmp = (float)(SCHEME_FLOAT_VAL(val));
         (((float*)W_OFFSET(dst,delta))[0]) = tmp; return NULL;
       } else {
         scheme_wrong_type("Scheme->C","float",0,1,&(val));
@@ -1522,9 +1522,9 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, intptr_t delta,
         delta += (sizeof(int)-sizeof(double));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
-      if (SCHEME_DBLP(val)) {
+      if (SCHEME_FLOATP(val)) {
         double tmp;
-        tmp = (double)(SCHEME_DBL_VAL(val));
+        tmp = (double)(SCHEME_FLOAT_VAL(val));
         (((double*)W_OFFSET(dst,delta))[0]) = tmp; return NULL;
       } else {
         scheme_wrong_type("Scheme->C","double",0,1,&(val));
@@ -3484,6 +3484,11 @@ static Scheme_Object *foreign_make_ctype(int argc, Scheme_Object **argv)
   return scheme_false;
 }
 
+static Scheme_Object *foreign_make_stubborn_will_executor(int argc, Scheme_Object *argv[])
+{
+  return scheme_make_stubborn_will_executor();
+}
+
 void scheme_init_foreign(Scheme_Env *env)
 {
   /* Create a dummy module. */
@@ -3576,7 +3581,7 @@ void scheme_init_foreign(Scheme_Env *env)
   scheme_add_global("lookup-errno",
    scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "lookup-errno", 1, 1), menv);
   scheme_add_global("make-stubborn-will-executor",
-   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "make-stubborn-will-executor", 0, 0), menv);
+   scheme_make_prim_w_arity((Scheme_Prim *)foreign_make_stubborn_will_executor, "make-stubborn-will-executor", 0, 0), menv);
   scheme_add_global("make-late-weak-box",
    scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "make-late-weak-box", 1, 1), menv);
   scheme_add_global("make-late-weak-hasheq",

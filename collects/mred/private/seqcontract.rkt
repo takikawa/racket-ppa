@@ -243,7 +243,7 @@ Matthew
        (and (not (locked-for-write?))
             (not (locked-for-flow?))
             (not (locked-for-read?)))
-       (set-position [(x) (x y) (x y z) (x y z p) (x y z p q)] unlocked)
+       (set-position [(x) (x y) (x y z) (x y z p) (x y z p q) (x y z p q r)] unlocked)
        (set-autowrap-bitmap [(bitmap)] unlocked)
        (print-to-dc [(dc) (dc page)] unlocked)
        (move-position [(code?) (code? extend) (code? extend kind)] unlocked)
@@ -410,13 +410,13 @@ Matthew
      set-before ;SetBefore
      set-after ;SetAfter
      ;ReallyCanEdit -- only when op != wxEDIT_COPY
-     ;Refresh has wierd code checking writeLocked -- what does < 0 mean?
+     ;Refresh has weird code checking writeLocked -- what does < 0 mean?
      do-paste ; DoPaste
      paste ; Paste
      insert-port ; InsertPort
      insert-file ; InsertFile
      read-from-file ; ReadFromFile
-     ; BeginEditSequence ;; -- wierd flag check
-     ; EndEditSequence ;; -- wierd flag check, like BeginEditSequence
+     ; BeginEditSequence ;; -- weird flag check
+     ; EndEditSequence ;; -- weird flag check, like BeginEditSequence
   
   |#
