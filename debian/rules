@@ -44,14 +44,6 @@ DEB_DH_INSTALL_ARGS_racket-doc := -Xdoc/release-notes
 # do not strip mzscheme, as this causes it to stop working
 DEB_DH_STRIP_ARGS_racket := -Xbin/mzscheme
 
-install/racket::
-	for src in $$(find debian/tmp/usr/share/racket -type d -name $(RACKET_ARCH)); do \
-	    src=$${src#debian/tmp/usr/share/}; \
-	    dest=$${src%/$(RACKET_ARCH)}; \
-	    dh_install -pracket /usr/share/"$$src" /usr/lib/"$$dest"; \
-	    dh_link -pracket /usr/lib/"$$src" /usr/share/"$$src"; \
-	done
-
 cleanbuilddir/racket::
 	rm -rf build
 	rm -rf include # This got created at build-time
