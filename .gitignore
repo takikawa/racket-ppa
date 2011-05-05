@@ -1,0 +1,8 @@
+*.o
+*.zo
+*.dep
+*.sxref
+*.html
+bin/*
+debian/mzconfig.h
+debian/racket-arch.mk
