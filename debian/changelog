@@ -1,9 +1,14 @@
 racket (5.1.1+dfsg1-2) unstable; urgency=low
 
   * Collects is (for now) all architecture independant. 
-    - Simplify package build.
+    - Simplify package build (no more symlinking to /usr/lib/racket)
+    - Split install step into architecture dependant/independent steps.
+  * Patch for kFreeBSD: catch both SIGBUS (squeeze) and SIGSEGV (wheezy)
+    from mprotect.
+  * Patch: Disable building scribble docs for scribble (fallout from
+    missing sigplan class)
 
- -- David Bremner <bremner@debian.org>  Wed, 04 May 2011 23:15:01 -0300
+ -- David Bremner <bremner@debian.org>  Thu, 12 May 2011 16:37:43 -0300
 
 racket (5.1.1+dfsg1-1) unstable; urgency=low
 
