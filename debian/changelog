@@ -1,3 +1,9 @@
+racket (5.1.1+dfsg1-3) unstable; urgency=low
+
+  * Replace kFreeBSD signal patch with upstream version of same.
+
+ -- David Bremner <bremner@debian.org>  Mon, 16 May 2011 15:58:45 +0200
+
 racket (5.1.1+dfsg1-2) unstable; urgency=low
 
   * Collects is (for now) all architecture independant. 
