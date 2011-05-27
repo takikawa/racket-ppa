@@ -37,7 +37,7 @@ by any number of tools (including dpkg-buildpackage).
 
   % git config gitpkg.pre-export-hook /usr/share/gitpkg/hooks/pristine-tar-pre-export-hook
 
-** Make a source package
+** Make a source package. This relies on gitpkg (>= 0.19)
 
   % gitpkg master
 
@@ -122,5 +122,5 @@ Notes:
 	import-tgz = "!f() { if [ -f $1 ]; then git clean -fxd; git ls-files -z | xargs -0 rm -f; tar --strip-components=1 -zxvf $1 ; git add -A; git commit -m'Importing '`basename $1`; else echo "missing tarball $1"; fi; }; f"
 
 
- -- David Bremner <bremner@debian.org>, Sat, 30 Apr 2011 08:48:49 -0300
+ -- David Bremner <bremner@debian.org>, Fri, 27 May 2011 18:37:25 -0300
 
