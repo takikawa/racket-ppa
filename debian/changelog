@@ -1,3 +1,9 @@
+racket (5.1.1+dfsg1-2~bpo60+1) squeeze-backports; urgency=low
+
+  * Rebuild for squeeze-backports.
+
+ -- David Bremner <bremner@debian.org>  Fri, 27 May 2011 18:00:00 -0300
+
 racket (5.1.1+dfsg1-2) unstable; urgency=low
 
   * Collects is (for now) all architecture independant. 
