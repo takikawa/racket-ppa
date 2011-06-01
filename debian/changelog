@@ -1,6 +1,7 @@
 racket (5.1.1+dfsg1-2~bpo60+1) squeeze-backports; urgency=low
 
   * Rebuild for squeeze-backports.
+  * Modify gitpkg hook control file to support ~bpo versions
 
  -- David Bremner <bremner@debian.org>  Fri, 27 May 2011 18:00:00 -0300
 
