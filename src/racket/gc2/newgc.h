@@ -184,7 +184,6 @@ typedef struct NewGC {
   unsigned int owner_table_size;
   AccountHook *hooks;
 
-
   uintptr_t number_of_gc_runs;
   unsigned int since_last_full;
   uintptr_t last_full_mem_use;
@@ -211,8 +210,9 @@ typedef struct NewGC {
   /* Callbacks */
   void (*GC_collect_start_callback)(void);
   void (*GC_collect_end_callback)(void);
-  void (*GC_collect_inform_callback)(int major_gc, intptr_t pre_used, intptr_t post_used);
+  GC_collect_inform_callback_Proc GC_collect_inform_callback;
   uintptr_t (*GC_get_thread_stack_base)(void);
+  GC_Post_Propagate_Hook_Proc GC_post_propagate_hook;
 
   GC_Immobile_Box *immobile_boxes;
 

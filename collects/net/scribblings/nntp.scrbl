@@ -1,12 +1,9 @@
 #lang scribble/doc
-@(require "common.ss"
-          (for-label net/nntp
-                     net/nntp-unit
-                     net/nntp-sig))
+@(require "common.rkt" (for-label net/nntp net/nntp-unit net/nntp-sig))
 
 @title[#:tag "nntp"]{NNTP: Newsgroup Protocol}
 
-@defmodule[net/nntp]{The @schememodname[net/nntp] module provides
+@defmodule[net/nntp]{The @racketmodname[net/nntp] module provides
 tools to access Usenet group via NNTP @cite["RFC977"].}
 
 @section{Connection and Operations}
@@ -17,13 +14,13 @@ tools to access Usenet group via NNTP @cite["RFC977"].}
                          [port (integer-in 0 65535)])]{
 
 Once a connection to a Usenet server has been established, its state
-is stored in a @scheme[communicator], and other procedures take
+is stored in a @racket[communicator], and other procedures take
 communicators as an argument.}
 
 @defproc[(connect-to-server [server string?] [port-number (integer-in 0 65535) 119])
          communicator?]{
 
-Connects to @scheme[server] at @scheme[port-number].}
+Connects to @racket[server] at @racket[port-number].}
 
 @defproc[(disconnect-from-server [communicator communicator?]) void?]{
 
@@ -45,7 +42,7 @@ article, and the last available article.}
           void?]{
 
 Tries to authenticate a user with the original authinfo command (uses
-cleartext). The @scheme[password] argument is ignored if the server
+cleartext). The @racket[password] argument is ignored if the server
 does not ask for it.}
 
 @defproc[(head-of-message [communicator communicator?]
@@ -72,8 +69,8 @@ Implements the @tt{NEWNEWS} command (often disabled on servers).}
           [message-index exact-nonnegative-integer?])
          (listof string?)]{
 
-Useful primitive for implementing @scheme[head-of-message],
-@scheme[body-of-message] and other similar commands.}
+Useful primitive for implementing @racket[head-of-message],
+@racket[body-of-message] and other similar commands.}
 
 @defproc[(make-desired-header [tag-string string?])
          regexp?]{
@@ -85,7 +82,7 @@ Takes a header field's tag and returns a regexp to match the field}
          (listof string?)]{
 
 Given a list of header lines and of desired regexps, returns the
-header lines that match any of the @scheme[desireds].}
+header lines that match any of the @racket[desireds].}
 
 
 @section{Exceptions}
@@ -98,7 +95,7 @@ The supertype of all NNTP exceptions.}
                                        [text string?])]{
 
 Raised whenever an unexpected response code is received.  The
-@scheme[text] field holds the response text sent by the server.}
+@racket[text] field holds the response text sent by the server.}
 
 @defstruct[(bad-status-line nntp) ([line string?])]{
 
@@ -142,7 +139,7 @@ Raised when the server reject an authentication attempt.}
 
 @defthing[nntp@ unit?]{
 
-Imports nothing, exports @scheme[nntp^].}
+Imports nothing, exports @racket[nntp^].}
 
 @; ----------------------------------------
 
@@ -152,4 +149,4 @@ Imports nothing, exports @scheme[nntp^].}
 
 @defsignature[nntp^ ()]{}
 
-Includes everything exported by the @schememodname[net/nntp] module.
+Includes everything exported by the @racketmodname[net/nntp] module.

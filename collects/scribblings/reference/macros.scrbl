@@ -1,5 +1,5 @@
 #lang scribble/doc
-@(require "mz.ss")
+@(require "mz.rkt")
 
 @title[#:style 'toc]{Macros}
 
@@ -18,7 +18,7 @@ called.
 @include-section["stx-param.scrbl"]
 @include-section["splicing.scrbl"]
 @include-section["stx-props.scrbl"]
-@include-section["stx-certs.scrbl"]
+@include-section["stx-taints.scrbl"]
 @include-section["stx-expand.scrbl"]
 @include-section["include.scrbl"]
 @include-section["syntax-util.scrbl"]

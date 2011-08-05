@@ -1,34 +1,26 @@
 #;
 (
-unboxed-let-functions2.rkt line 35 col 21 - x - unbox float-complex
-unboxed-let-functions2.rkt line 35 col 23 - y - unbox float-complex
-unboxed-let-functions2.rkt line 35 col 19 - + - unboxed binary float complex
-unboxed-let-functions2.rkt line 35 col 18 - (#%app + x y) - unboxed float complex
-unboxed-let-functions2.rkt line 34 col 20 - x - unboxed var -> table
-unboxed-let-functions2.rkt line 35 col 21 - x - unbox float-complex
-unboxed-let-functions2.rkt line 35 col 23 - y - unbox float-complex
-unboxed-let-functions2.rkt line 35 col 19 - + - unboxed binary float complex
-unboxed-let-functions2.rkt line 35 col 18 - (#%app + x y) - unboxed float complex
-unboxed-let-functions2.rkt line 34 col 42 - y - unboxed var -> table
-unboxed-let-functions2.rkt line 34 col 7 - f - unboxed function -> table
-unboxed-let-functions2.rkt line 34 col 7 - f - fun -> unboxed fun
-unboxed-let-functions2.rkt line 35 col 21 - x - leave var unboxed
-unboxed-let-functions2.rkt line 35 col 23 - y - leave var unboxed
-unboxed-let-functions2.rkt line 35 col 19 - + - unboxed binary float complex
-unboxed-let-functions2.rkt line 35 col 18 - (#%app + x y) - unboxed float complex
-unboxed-let-functions2.rkt line 36 col 8 - 1.0+2.0i - unboxed literal
-unboxed-let-functions2.rkt line 36 col 17 - 2.0+4.0i - unboxed literal
-unboxed-let-functions2.rkt line 36 col 6 - + - unboxed binary float complex
-unboxed-let-functions2.rkt line 37 col 5 - 3.0+6.0i - unboxed literal
-unboxed-let-functions2.rkt line 36 col 3 - f - unboxed call site
-unboxed-let-functions2.rkt line 36 col 3 - f - call to fun with unboxed args
+TR opt: unboxed-let-functions2.rkt 26:7 f -- fun -> unboxed fun
+TR opt: unboxed-let-functions2.rkt 26:7 f -- unboxed function -> table
+TR opt: unboxed-let-functions2.rkt 26:20 x -- unboxed var -> table
+TR opt: unboxed-let-functions2.rkt 26:42 y -- unboxed var -> table
+TR opt: unboxed-let-functions2.rkt 27:18 (+ x y) -- unboxed float complex
+TR opt: unboxed-let-functions2.rkt 27:19 + -- unboxed binary float complex
+TR opt: unboxed-let-functions2.rkt 27:21 x -- leave var unboxed
+TR opt: unboxed-let-functions2.rkt 27:21 x -- unbox float-complex
+TR opt: unboxed-let-functions2.rkt 27:23 y -- leave var unboxed
+TR opt: unboxed-let-functions2.rkt 27:23 y -- unbox float-complex
+TR opt: unboxed-let-functions2.rkt 28:3 f -- call to fun with unboxed args
+TR opt: unboxed-let-functions2.rkt 28:3 f -- unboxed call site
+TR opt: unboxed-let-functions2.rkt 28:6 + -- unboxed binary float complex
+TR opt: unboxed-let-functions2.rkt 28:8 1.0+2.0i -- unboxed literal
+TR opt: unboxed-let-functions2.rkt 28:17 2.0+4.0i -- unboxed literal
+TR opt: unboxed-let-functions2.rkt 29:5 3.0+6.0i -- unboxed literal
 6.0+12.0i
 )
 
 #lang typed/scheme
 #:optimize
-
-
 
 ;; function with multiple complex args
 (let ((f (lambda: ((x :   Float-Complex) (y : Float-Complex))

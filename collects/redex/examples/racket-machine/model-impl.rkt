@@ -63,7 +63,7 @@
         `(branch ,(recur c) ,(recur t) ,(recur e))]
        [(let-rec rs b)
         `(let-rec ,(map recur rs) ,(recur b))]
-       [(lam _ _ _ τs #f ns `(val/ref ...) _ b)
+       [(lam _ _ _ τs #f ns `(val/ref ...) _ _ b)
         `(lam ,τs ,(vector->list ns) ,(recur b))]
        [(closure l _)
         (define (model-rep)
@@ -122,7 +122,7 @@
               [(let-rec rs b)
                (for-each recur rs) 
                (recur b)]
-              [(lam _ _ _ _ _ _ _ _ b)
+              [(lam _ _ _ _ _ _ _ _ _ b)
                (recur b)]
               [(closure l _)
                (recur l)]
@@ -189,7 +189,7 @@
                            (cons (lam (gensym) '()
                                       (length τs) τs #f
                                       (list->vector ns) (for/list ([_ ns]) 'val/ref)
-                                      (+ (length τs) (length ns) db) rb)
+                                      #f (+ (length τs) (length ns) db) rb)
                                  0))]
                         [`(proc-const (,τs ...) ,b)
                          (match-let ([(cons re 0) (recur `(lam ,τs () ,b))])

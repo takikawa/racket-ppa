@@ -1,6 +1,7 @@
 #lang racket
 
-(require 2htdp/universe 2htdp/image (only-in lang/imageeq image=?))
+(require 2htdp/universe 2htdp/image (only-in lang/imageeq image=?) 
+         racket/runtime-path)
 
 (define (draw-number n)
   (place-image (text (number->string n) 44 'red) 50 50 (empty-scene 100 100)))
@@ -9,13 +10,12 @@
   (place-image stop 50 50 (empty-scene 100 100)))
 (define stop (text "STOP" 44 'red))
 
-
-(define dir "images0")
+(define-runtime-path dir "images0")
 (unless (directory-exists? dir)
   (make-directory dir))
 (parameterize ([current-directory dir])
   (for-each delete-file (directory-list)))
-(with-output-to-file (format "./~a/index.html" dir)
+(with-output-to-file (build-path dir "index.html")
   (lambda ()
     (displayln "<html><body><img src=\"i-animated.gif\" /></body></html>"))
   #:exists 'replace)
@@ -26,7 +26,10 @@
             (on-draw draw-number)
             (record? dir)))
 (sleep 1)
-(unless (image=? (bitmap "images0/i1.png") (draw-stop 5))
-  (fprintf (current-error-port)
-           "this test needs to be revised -- the way 'world' writes images adds an extra pixel -- think! \n"))
+
+(define i (bitmap "images0/i1.png"))
+(define j (draw-stop 5))
+
+(unless (image=? (crop 0 0 100 100 i) j)
+  (eprintf "this test needs to be revised -- the way 'world' writes images adds an extra pixel -- think! \n"))
 

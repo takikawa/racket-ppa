@@ -1,17 +1,18 @@
-
 ;; Implements the Beginner Scheme language, at least in terms of the
 ;; forms and procedures. The reader-level aspects of the language
 ;; (e.g., case-sensitivity) are not implemented here.
 
 (module htdp-beginner scheme/base
   (require mzlib/etc
-	   mzlib/list
-	   syntax/docprovide
+           mzlib/list
+           syntax/docprovide
+           "private/rewrite-error-message.rkt"
+           (for-syntax "private/rewrite-error-message.rkt")
            (for-syntax scheme/base))
 
   ;; Implements the forms:
-  (require "private/teach.ss"
-	   "private/teach-module-begin.ss"
+  (require "private/teach.rkt"
+           "private/teach-module-begin.rkt"
            test-engine/scheme-tests)
 
   ;; syntax:
@@ -34,6 +35,8 @@
             [beginner-dots ....]
             [beginner-dots .....]
             [beginner-dots ......]
+            [beginner-true true]
+            [beginner-false false]
             )
            check-expect
            check-within
@@ -43,7 +46,7 @@
            ;; define-wish
 	   #%datum
            #%top-interaction
-	   empty true false
+	   empty
 
 ; 	   signature : -> mixed one-of predicate combined
 ; 	   Number Real Rational Integer Natural Boolean True False String Symbol Char Empty-list Any
@@ -51,13 +54,10 @@
 ; 	   Property
 ; 	   check-property for-all ==> expect expect-within expect-member-of expect-range
 	   )
-  
-  (require (for-syntax "private/firstorder.ss"))
-    
-  ;; This is essentially a specialized version of `define-primitive'
-  ;;  that refines the error messages for built-in things, which
-  ;;  we might like to call "contructor" or "predicate" instead of
-  ;;  just "primitive".
+
+  (require (for-syntax "private/firstorder.rkt"))
+
+
   (define-syntax (in-rator-position-only stx)
     (syntax-case stx ()
       [(_ new-name orig-name)
@@ -66,37 +66,20 @@
          ;; Some things are not really functions:
          (if (memq (syntax-e orig) '(beginner:pi beginner:e beginner:null beginner:eof))
              #'(define new-name orig-name)
-	     (with-syntax ([(what something)
-			    (case (syntax-e orig)
-			      [(beginner:make-posn)
-			       #'("constructor"
-				  "called with values for the structure fields")]
-			      [(beginner:posn-x beginner:posn-y)
-			       #'("selector"
-				  "applied to a structure to get the field value")]
-			      [(beginner:posn?)
-			       #'("predicate"
-				  "applied to an argument")]
-			      [else
-			       #'("primitive operator"
-				  "applied to arguments")])])
-	       #'(define-syntax new-name 
-                   (make-first-order
-                    (lambda (stx)
-                      (syntax-case stx ()
-                        [(id . args)
-                         (syntax/loc stx (beginner-app orig-name . args))]
-                        [_else
-                         (raise-syntax-error
-                          #f
-                          (format
-                           "this ~a must be ~a; expected an open parenthesis before the ~a name"
-                           what
-                           something
-                           what)
-                          stx)]))
-                    #'orig-name)))))]))
-      
+	     #'(define-syntax new-name 
+                 (make-first-order
+                  (lambda (stx)
+                    (syntax-case stx ()
+                      [(id . args)
+                        (syntax/loc stx (beginner-app orig-name . args))]
+                      [_else
+                       (raise-syntax-error
+                        #f
+                        (format
+                         "expected a function call, but there is no open parenthesis before this function")
+                        stx)]))
+                  #'orig-name))))]))
+  
   ;; procedures:
   (provide-and-document/wrap
    procedures

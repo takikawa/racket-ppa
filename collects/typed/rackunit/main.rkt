@@ -5,18 +5,14 @@
 
 (define-type check-ish-ty
   (case-lambda
-    (Any Any -> (U #t Void))
-    (Any Any String -> (U #t Void))))
+    (Any Any -> Any)
+    (Any Any String -> Any)))
 (define-type (Predicate A) (A -> Boolean))
 (define-type (Thunk A) (-> A))
 
 ; 3.2
 (require/typed/provide
  rackunit
- [check (All (A B C)
-             (case-lambda
-               ((A B -> C) A B -> C)
-               ((A B -> C) A B String -> C)))]
  [check-eq? check-ish-ty]
  [check-not-eq? check-ish-ty]
  [check-eqv? check-ish-ty]
@@ -24,40 +20,47 @@
  [check-equal? check-ish-ty]
  [check-not-equal? check-ish-ty]
  [check-pred
-  (All (A B)
+  (All (A)
        (case-lambda
-         ((A -> B) A -> #t)
-         ((A -> B) A String -> #t)))]
+         ((A -> Any) A -> Any)
+         ((A -> Any) A String -> Any)))]
  [check-=
   (case-lambda
-    (Number Number Number -> #t)
-    (Number Number Number String -> #t))]
+    (Real Real Real -> Any)
+    (Real Real Real String -> Any))]
  [check-true
   (case-lambda
-    (Boolean -> #t)
-    (Boolean String -> #t))]
+    (Any -> Any)
+    (Any String -> Any))]
  [check-false
   (case-lambda
-    (Boolean -> #t)
-    (Boolean String -> #t))]
+    (Any -> Any)
+    (Any String -> Any))]
  [check-not-false
   (case-lambda
-    (Any -> #t)
-    (Any String -> #t))]
+    (Any -> Any)
+    (Any String -> Any))]
  [check-exn
-  (case-lambda 
-    ((Predicate Any) (Thunk Any) -> #t)
-    ((Predicate Any) (Thunk Any) String -> #t))]
+  (case-lambda
+    ((U (Predicate Any) Regexp) (Thunk Any) -> Any)
+    ((U (Predicate Any) Regexp) (Thunk Any) String -> Any))]
  [check-not-exn
   (case-lambda
-    ((Thunk Any) -> #t)
-    ((Thunk Any) String -> #t))]
+    ((Thunk Any) -> Any)
+    ((Thunk Any) String -> Any))]
+ [check-regexp-match
+  (Regexp String -> Any)]
+
+
+ [check (All (A B)
+             (case-lambda
+               ((A B -> Any) A B -> Any)
+               ((A B -> Any) A B String -> Any)))]
+
  [fail
   (case-lambda
-    (-> #t)
-    (String -> #t))]
- [check-regexp-match
-  (Regexp String -> #t)])
+    (-> Void)
+    (String -> Void))])
 
 ; 3.2.1
 (require-typed-struct check-info
@@ -82,18 +85,10 @@
 (require (only-in rackunit define-simple-check define-binary-check define-check fail-check))
 (provide define-simple-check define-binary-check define-check fail-check)
 
-; 3.2.3
-(require/typed/provide
- rackunit
- [current-check-handler
-  (Parameter (Any -> Any))]
- [current-check-around
-  (Parameter ((Thunk Any) -> Any))])
-
 ; 3.3
 (require (prefix-in t: (except-in rackunit struct:check-info struct:exn:test struct:exn:test:check struct:test-result struct:test-failure
                                   struct:test-error struct:test-success)))
-(define-rewriter t:test-begin test-begin 
+(define-rewriter t:test-begin test-begin
   [t:current-test-case-around current-test-case-around]
   [t:check-around check-around]
   [t:current-check-handler current-check-handler]
@@ -107,6 +102,8 @@
 
 (require/opaque-type TestCase test-case? rackunit)
 (provide TestCase test-case?)
+
+
 
 (require (only-in rackunit test-suite))
 (provide test-suite)
@@ -158,7 +155,7 @@
 
 (require/typed/provide
  rackunit
- [run-test-case 
+ [run-test-case
   ((Option String) (Thunk Any) -> test-result)]
  [run-test
   (Test -> (Tree test-result))]
@@ -168,3 +165,14 @@
  ; XXX Requires knowing more about test cases and structs
  #;[foldts-test-suite
     XXX])
+
+
+; 5.1
+(require/typed/provide
+ rackunit
+ [current-check-handler
+  (Parameter (Any -> Any))]
+ [current-check-around
+  (Parameter ((Thunk Any) -> Any))])
+
+

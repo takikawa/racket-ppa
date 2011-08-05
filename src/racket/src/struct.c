@@ -32,6 +32,7 @@ READ_ONLY Scheme_Object *scheme_source_property;
 READ_ONLY Scheme_Object *scheme_input_port_property;
 READ_ONLY Scheme_Object *scheme_output_port_property;
 READ_ONLY Scheme_Object *scheme_equal_property;
+READ_ONLY Scheme_Object *scheme_no_arity_property;
 READ_ONLY Scheme_Object *scheme_impersonator_of_property;
 READ_ONLY Scheme_Object *scheme_make_struct_type_proc;
 READ_ONLY Scheme_Object *scheme_current_inspector_proc;
@@ -120,9 +121,6 @@ static Scheme_Object *struct_to_vector(int argc, Scheme_Object *argv[]);
 static Scheme_Object *prefab_struct_key(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_prefab_struct(int argc, Scheme_Object *argv[]);
 static Scheme_Object *prefab_key_struct_type(int argc, Scheme_Object *argv[]);
-#ifdef MZ_USE_PLACES
-static Scheme_Object *convert_prefab_key_to_external_form(Scheme_Object *key);
-#endif
 
 static Scheme_Object *struct_setter_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *struct_getter_p(int argc, Scheme_Object *argv[]);
@@ -338,6 +336,12 @@ scheme_init_struct (Scheme_Env *env)
     REGISTER_SO(proc_property);
     proc_property = scheme_make_struct_type_property(scheme_intern_symbol("procedure"));
     scheme_add_global_constant("prop:procedure", proc_property, env);
+  }
+
+  {
+    REGISTER_SO(scheme_no_arity_property);
+    scheme_no_arity_property = scheme_make_struct_type_property(scheme_intern_symbol("incomplete-arity"));
+    scheme_add_global_constant("prop:incomplete-arity", scheme_no_arity_property, env);
   }
 
   {
@@ -1007,13 +1011,21 @@ static Scheme_Object *prop_accessor(int argc, Scheme_Object **args, Scheme_Objec
     v = do_chaperone_prop_accessor(((Scheme_Primitive_Proc *)prim)->name, SCHEME_PRIM_CLOSURE_ELS(prim)[0], v);
   else
     v = do_prop_accessor(SCHEME_PRIM_CLOSURE_ELS(prim)[0], v);
-  
-  if (!v)
-    scheme_wrong_type(((Scheme_Primitive_Proc *)prim)->name, 
+
+  if (v)
+    return v;
+  else if (argc == 1) {
+    scheme_wrong_type(((Scheme_Primitive_Proc *)prim)->name,
 		      "struct or struct-type with property",
-                      0, 1, args);
-  
-  return v;
+		      0, 1, args);
+    return NULL;
+  } else {
+    v = args[1];
+    if (SCHEME_PROCP(v))
+      return _scheme_tail_apply(v, 0, NULL);
+    else
+      return v;
+  }
 }
 
 static Scheme_Object *make_struct_type_property_from_c(int argc, Scheme_Object *argv[],
@@ -1087,14 +1099,17 @@ static Scheme_Object *make_struct_type_property_from_c(int argc, Scheme_Object *
   name[len+1] = 0;
 
   v = scheme_make_folding_prim_closure(prop_pred, 1, a, name, 1, 1, 0);
+  ((Scheme_Closed_Primitive_Proc *)v)->pp.flags |= (SCHEME_PRIM_IS_STRUCT_OTHER
+                                                    | SCHEME_PRIM_TYPE_STRUCT_PROP_PRED);
   *predout = v;
 
   name = MALLOC_N_ATOMIC(char, len + 10);
   memcpy(name, SCHEME_SYM_VAL(argv[0]), len);
   memcpy(name + len, "-accessor", 10);
 
-  v = scheme_make_folding_prim_closure(prop_accessor, 1, a, name, 1, 1, 0);
-  ((Scheme_Closed_Primitive_Proc *)v)->pp.flags |= SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER;
+  v = scheme_make_folding_prim_closure(prop_accessor, 1, a, name, 1, 2, 0);
+  ((Scheme_Closed_Primitive_Proc *)v)->pp.flags |= (SCHEME_PRIM_IS_STRUCT_OTHER
+                                                    | SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER);
   
   *accessout = v;
 
@@ -2801,13 +2816,7 @@ Scheme_Object *scheme_prefab_struct_key(Scheme_Object *so)
     s = (Scheme_Structure *)SCHEME_CHAPERONE_VAL((Scheme_Object *)s);
   
   if (SCHEME_STRUCTP(((Scheme_Object *)s)) && s->stype->prefab_key) {
-    Scheme_Object *prefab_key;
-    prefab_key = SCHEME_CDR(s->stype->prefab_key);
-#ifdef MZ_USE_PLACES
-    return convert_prefab_key_to_external_form(prefab_key);
-#else
-    return prefab_key;
-#endif
+    return SCHEME_CDR(s->stype->prefab_key);
   }
   
   return scheme_false;
@@ -2980,8 +2989,8 @@ struct_prop_getter_p(int argc, Scheme_Object *argv[])
   Scheme_Object *v = argv[0];
   if (SCHEME_CHAPERONEP(v)) v = SCHEME_CHAPERONE_VAL(v);
   return ((STRUCT_mPROCP(v, 
-                         SCHEME_PRIM_OTHER_TYPE_MASK,
-                         SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER)
+                         SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_OTHER_TYPE_MASK,
+                         SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER)
            && SAME_TYPE(SCHEME_TYPE(SCHEME_PRIM_CLOSURE_ELS(v)[0]), scheme_struct_property_type))
 	  ? scheme_true : scheme_false);
 }
@@ -2992,8 +3001,8 @@ chaperone_prop_getter_p(int argc, Scheme_Object *argv[])
   Scheme_Object *v = argv[0];
   if (SCHEME_CHAPERONEP(v)) v = SCHEME_CHAPERONE_VAL(v);
   return ((STRUCT_mPROCP(v, 
-                         SCHEME_PRIM_OTHER_TYPE_MASK,
-                         SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER)
+                         SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_OTHER_TYPE_MASK,
+                         SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER)
            && SAME_TYPE(SCHEME_TYPE(SCHEME_PRIM_CLOSURE_ELS(v)[0]), scheme_chaperone_property_type))
 	  ? scheme_true : scheme_false);
 }
@@ -3966,8 +3975,6 @@ Scheme_Struct_Type *scheme_make_prefab_struct_type_raw(Scheme_Object *base,
   struct_type->num_islots = num_fields + (parent_type ? parent_type->num_islots : 0);
   struct_type->name_pos = depth;
   struct_type->inspector = scheme_false;
-  //Scheme_Object *accessor *mutator;
-  //Scheme_Object *prefab_key;
   struct_type->uninit_val = uninit_val;
   struct_type->props = NULL;
   struct_type->num_props = 0;
@@ -3988,19 +3995,12 @@ static Scheme_Struct_Type *scheme_make_prefab_struct_type(Scheme_Object *base,
                                                           Scheme_Object *uninit_val,
                                                           char *immutable_array)
 {
-#ifdef MZ_USE_PLACES
-/*
-  return scheme_make_prefab_struct_type_in_master
-*/
-#else
-#endif
-  return scheme_make_prefab_struct_type_raw
-         (base,
-          parent,
-          num_fields,
-          num_uninit_fields,
-          uninit_val,
-          immutable_array);
+  return scheme_make_prefab_struct_type_raw(base,
+                                            parent,
+                                            num_fields,
+                                            num_uninit_fields,
+                                            uninit_val,
+                                            immutable_array);
 }
 
 static Scheme_Object *_make_struct_type(Scheme_Object *base,
@@ -4346,24 +4346,13 @@ Scheme_Object *scheme_make_struct_type_from_string(const char *base,
 static Scheme_Struct_Type *lookup_prefab(Scheme_Object *key) {
   Scheme_Object *a = NULL;
 
-# if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
-  void *original_gc;
-  original_gc = GC_switch_to_master_gc();
-  scheme_start_atomic();
-# endif
-
   if (prefab_table) {
     a = scheme_lookup_in_table(prefab_table, (const char *)key);
   }
 
-# if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
-  scheme_end_atomic_no_swap();
-  GC_switch_back_from_master(original_gc);
-# endif
+  if (a)
+    return (Scheme_Struct_Type *)SCHEME_WEAK_BOX_VAL(a);
 
-  if (a) {
-      return (Scheme_Struct_Type *) SCHEME_WEAK_BOX_VAL(a);
-  }
   return NULL;
 }
 
@@ -4649,19 +4638,7 @@ static Scheme_Object *make_prefab_key(Scheme_Struct_Type *type)
     if (!SCHEME_NULLP(stack))
       key = scheme_make_pair(scheme_make_integer(icnt), key);
 
-/*symbols aren't equal?  across places now*/
-#if defined(MZ_USE_PLACES)
-    if (SCHEME_SYMBOLP(type->name)) {
-      Scheme_Object *newname;
-      newname = scheme_make_sized_offset_byte_string((char *)type->name, SCHEME_SYMSTR_OFFSET(type->name), SCHEME_SYM_LEN(type->name), 1);
-      key = scheme_make_pair(newname, key);
-    }
-    else {
-       scheme_arg_mismatch("make_prefab_key", "unknown type of struct name", type->name);
-    }
-#else
     key = scheme_make_pair(type->name, key);
-#endif
 
     if (SCHEME_PAIRP(stack)) {
       type = (Scheme_Struct_Type *)SCHEME_CAR(stack);
@@ -4714,29 +4691,6 @@ static char *mutability_data_to_immutability_data(int icnt, Scheme_Object *mutab
   return immutable_array;
 }
 
-#ifdef MZ_USE_PLACES
-static Scheme_Object *convert_prefab_key_to_external_form(Scheme_Object *key)
-{
-  Scheme_Object *l;
-  Scheme_Object *nl;
-
-  if (SCHEME_SYMBOLP(key)) return key;
-  if (SCHEME_BYTE_STRINGP(key))
-    return scheme_intern_exact_symbol(SCHEME_BYTE_STR_VAL(key), SCHEME_BYTE_STRLEN_VAL(key));
-
-  nl = scheme_null;
-  for (l = key; SCHEME_PAIRP(l); l = SCHEME_CDR(l)) {
-    Scheme_Object *a;
-    a = SCHEME_CAR(l);
-    if (SCHEME_BYTE_STRINGP(a))
-     a = scheme_intern_exact_symbol(SCHEME_BYTE_STR_VAL(a), SCHEME_BYTE_STRLEN_VAL(a));
-    nl = scheme_make_pair(a, nl);
-  }
-
-  return scheme_reverse(nl);
-}
-#endif
-
 Scheme_Struct_Type *scheme_lookup_prefab_type(Scheme_Object *key, int field_count)
 {
   Scheme_Struct_Type *parent = NULL;
@@ -4744,19 +4698,8 @@ Scheme_Struct_Type *scheme_lookup_prefab_type(Scheme_Object *key, int field_coun
   int ucnt, icnt;
   char *immutable_array = NULL;
 
-/*symbols aren't equal?  across places now*/
-#if defined(MZ_USE_PLACES)
-  if (SCHEME_SYMBOLP(key)) {
-    Scheme_Object *newname;
-    newname = scheme_make_sized_offset_byte_string((char*)key, SCHEME_SYMSTR_OFFSET(key), SCHEME_SYM_LEN(key), 1);
-    key = scheme_make_pair(newname, scheme_null);
-  }
-  if (SCHEME_BYTE_STRINGP(key))
-    key = scheme_make_pair(key, scheme_null);
-#else
   if (SCHEME_SYMBOLP(key))
     key = scheme_make_pair(key, scheme_null);
-#endif
 
   if (scheme_proper_list_length(key) < 0)
     return NULL;
@@ -4830,21 +4773,9 @@ Scheme_Struct_Type *scheme_lookup_prefab_type(Scheme_Object *key, int field_coun
     a = SCHEME_CAR(key);
     key = SCHEME_CDR(key);
 
-/*symbols aren't equal?  across places now*/
-#if defined(MZ_USE_PLACES)
-    if (SCHEME_SYMBOLP(a)) {
-      name = a;
-    }
-    else if (SCHEME_BYTE_STRINGP(a))
-      name = scheme_intern_exact_symbol(SCHEME_BYTE_STR_VAL(a), SCHEME_BYTE_STRLEN_VAL(a));
-    else
-      return NULL;
-#else
     if (!SCHEME_SYMBOLP(a))
       return NULL;
     name = a;
-#endif
-
 
     immutable_array = mutability_data_to_immutability_data(icnt + ucnt, mutables);
 
@@ -4852,10 +4783,10 @@ Scheme_Struct_Type *scheme_lookup_prefab_type(Scheme_Object *key, int field_coun
       return NULL;
 
     parent = scheme_make_prefab_struct_type(name,
-                                     (Scheme_Object *)parent,
-                                     icnt, ucnt,
-                                     uninit_val,
-                                     immutable_array);
+                                            (Scheme_Object *)parent,
+                                            icnt, ucnt,
+                                            uninit_val,
+                                            immutable_array);
     
   }
 
@@ -5405,8 +5336,7 @@ Scheme_Hash_Tree *scheme_parse_chaperone_props(const char *who, int start_at, in
 
 START_XFORM_SKIP;
 
-#define MARKS_FOR_STRUCT_C
-#include "mzmark.c"
+#include "mzmark_struct.inc"
 
 static void register_traversers(void)
 {

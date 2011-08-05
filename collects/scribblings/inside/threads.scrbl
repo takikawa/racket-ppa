@@ -1,6 +1,5 @@
 #lang scribble/doc
-@(require "utils.ss"
-          (for-label scheme/tcp))
+@(require "utils.rkt" (for-label scheme/tcp))
 
 @title[#:tag "threads"]{Threads}
 
@@ -82,7 +81,7 @@ thread scheduling is based on timer interrupts, the argument is
 ignored. On some platforms, however, the integer represents the amount
 of ``fuel'' that has been consumed since the last call to
 @cpp{SCHEME_USE_FUEL}. For example, the implementation of
-@scheme[vector->list] consumes a unit of fuel for each created cons
+@racket[vector->list] consumes a unit of fuel for each created cons
 cell:
 
 @verbatim[#:indent 2]{
@@ -115,7 +114,7 @@ to run, block using @cppi{scheme_block_until}.  This procedure takes
 two functions: a polling function that tests whether the blocking
 operation can be completed, and a prepare-to-sleep function that sets
 bits in @cpp{fd_set}s when Racket decides to sleep (because all Racket
-threads are blocked). Under Windows, an ``@cpp{fd_set}'' can also
+threads are blocked). On Windows, an ``@cpp{fd_set}'' can also
 accommodate OS-level semaphores or other handles via
 @cpp{scheme_add_fd_handle}.
 
@@ -127,8 +126,8 @@ exception handler, however, in reaction to a break (if breaks are
 enabled).
 
 When a blocking operation is associated with an object, then the
-object might make sense as an argument to @indexed-scheme[sync]. To
-extend the set of objects accepted by @scheme[sync], either register
+object might make sense as an argument to @indexed-racket[sync]. To
+extend the set of objects accepted by @racket[sync], either register
 polling and sleeping functions with @cppi{scheme_add_evt}, or register
 a semaphore accessor with @cppi{scheme_add_evt_through_sema}.
 
@@ -382,7 +381,7 @@ The following function @cpp{mzsleep} is an appropriate
 @function[(Scheme_Object* scheme_thread
            [Scheme_Object* thunk])]{
 
-Creates a new thread, just like @scheme[thread].}
+Creates a new thread, just like @racket[thread].}
 
 @function[(Scheme_Object* scheme_thread_w_details
            [Scheme_Object* thunk]
@@ -396,8 +395,8 @@ Like @cpp{scheme_thread}, except that the created thread belongs to
 @var{config} for its initial configuration, it uses @var{cells} for
 its thread-cell table, and if @var{suspend_to_kill} is non-zero, then
 the thread is merely suspended when it would otherwise be killed
-(through either @scheme[kill-thread] or
-@scheme[custodian-shutdown-all]).
+(through either @racket[kill-thread] or
+@racket[custodian-shutdown-all]).
 
 The @var{config} argument is typically obtained through
 @cpp{scheme_current_config} or @cpp{scheme_extend_config}. A
@@ -460,7 +459,7 @@ Sends a break signal to the given thread.}
 @function[(int scheme_break_waiting
            [Scheme_Thread* thread])]{
 
-Returns @cpp{1} if a break from @scheme[break-thread] or @cpp{scheme_break_thread}
+Returns @cpp{1} if a break from @racket[break-thread] or @cpp{scheme_break_thread}
  has occurred in the specified thread but has not yet been handled.}
 
 @function[(int scheme_block_until
@@ -495,7 +494,7 @@ If Racket decides to sleep, then the @var{fdf} function is called to
  @cpp{fd_set}s: one or reading, one for writing, and one for
  exceptions. Use @cpp{scheme_get_fdset} to get elements of this
  array, and manipulate an ``@cpp{fd_set}'' with @cpp{MZ_FD_SET}
- instead of @cpp{FD_SET}, etc. Under Windows, an ``@cpp{fd_set}'' can
+ instead of @cpp{FD_SET}, etc. On Windows, an ``@cpp{fd_set}'' can
  also accommodate OS-level semaphores or other handles via
  @cpp{scheme_add_fd_handle}.
 
@@ -595,7 +594,7 @@ The @cpp{scheme_add_fd_handle} function is useful for implementing
  the second procedure passed to @cpp{scheme_wait_until}, or for
  implementing a custom input port.
 
-Under Unix and Mac OS X, this function has no effect.}
+On Unix and Mac OS X, this function has no effect.}
 
 
 @function[(void scheme_add_fd_eventmask
@@ -612,7 +611,7 @@ The event mask is only used when some handle is installed with
  @cpp{scheme_add_fd_handle}. This awkward restriction may force you
  to create a dummy semaphore that is never posted.
 
-Under Unix, and Mac OS X, this function has no effect.}
+On Unix, and Mac OS X, this function has no effect.}
 
 @function[(void scheme_add_evt
            [Scheme_Type type]
@@ -630,7 +629,7 @@ The argument types are defined as follows:
    typedef int (*Scheme_Wait_Filter_Fun)(Scheme_Object *data);
 }
 
-Extends the set of waitable objects for @scheme[sync]
+Extends the set of waitable objects for @racket[sync]
  to those with the type tag @var{type}. If @var{filter} is
  non-@cpp{NULL}, it constrains the new waitable set to those objects
  for which @var{filter} returns a non-zero value.
@@ -697,9 +696,9 @@ Calls @var{prim} with the given @var{argc} and @var{argv} with breaks
  interrupted by a break. The @var{prim} function should not block,
  yield, or check for breaks after it succeeds, where ``succeeds''
  depends on the operation. For example,
- @scheme[tcp-accept/enable-break] is implemented by wrapping this
- function around the implementation of @scheme[tcp-accept]; the
- @scheme[tcp-accept] implementation does not block or yield after it
+ @racket[tcp-accept/enable-break] is implemented by wrapping this
+ function around the implementation of @racket[tcp-accept]; the
+ @racket[tcp-accept] implementation does not block or yield after it
  accepts a connection.}
 
 @function[(Scheme_Object* scheme_make_thread_cell

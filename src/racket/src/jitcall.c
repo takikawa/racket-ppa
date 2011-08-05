@@ -29,6 +29,11 @@
 
 int scheme_direct_call_count, scheme_indirect_call_count;
 
+struct jit_direct_arg {
+  int gen;
+  int reg;
+};
+
 THREAD_LOCAL_DECL(static Scheme_Object **fixup_runstack_base);
 THREAD_LOCAL_DECL(static int fixup_already_in_place);
 
@@ -69,8 +74,7 @@ static jit_insn *generate_proc_struct_retry(mz_jit_state *jitter, int num_rands,
 
   /* JIT_R1 now has the wrapped procedure */
   refz4 = jit_bmsi_i(jit_forward(), JIT_R1, 0x1);
-  jit_ldr_s(JIT_R2, JIT_R1);
-  refz2 = jit_bnei_i(jit_forward(), JIT_R2, scheme_native_closure_type);
+  refz2 = mz_bnei_t(jit_forward(), JIT_R1, scheme_native_closure_type, JIT_R2);
   CHECK_LIMIT();
 
   /* It's a native closure, but we can't just jump to it, in case
@@ -248,13 +252,18 @@ static int generate_direct_prim_tail_call(mz_jit_state *jitter, int num_rands)
   return 1;
 }
 
-int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_native, int need_set_rs, int is_inline)
-/* Proc is in V1, args are at RUNSTACK.
+#define NUM_AVAIL_DIRECT_ARG_REGS 3
+static const int direct_arg_regs[] = { JIT_V1, JIT_R1, JIT_R0 };
+
+int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_native, int need_set_rs, 
+                              int is_inline, Scheme_Native_Closure *direct_to_code, jit_direct_arg *direct_args)
+/* Proc is in V1 unless direct_to_code, args are at RUNSTACK.
    If num_rands < 0, then argc is in LOCAL2 and arguments are already below RUNSTACK_BASE.
    If direct_native == 2, then some arguments are already in place (shallower in the runstack
-   than the arguments to move). */
+   than the arguments to move).
+   If direct_args, then R0, R1, V1 hold arguments. */
 {
-  int i;
+  int i, r2_has_runstack = 0;
   GC_CAN_IGNORE jit_insn *refagain, *ref, *ref2, *ref4, *ref5;
 
   __START_SHORT_JUMPS__(num_rands < 100);
@@ -262,8 +271,9 @@ int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
   /* First, try fast direct jump to native code: */
   if (!direct_native) {
     ref = jit_bmsi_ul(jit_forward(), JIT_V1, 0x1);
-    jit_ldr_s(JIT_R1, JIT_V1);
+    jit_ldxi_s(JIT_R1, JIT_V1, &((Scheme_Object *)0x0)->type);
     ref2 = jit_bnei_i(jit_forward(), JIT_R1, scheme_native_closure_type);
+    /* code at ref2 uses JIT_R1 */
     CHECK_LIMIT();
   } else {
     ref = ref2 = NULL;
@@ -272,23 +282,29 @@ int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
   refagain = _jit.x.pc;
 
   /* Right kind of function. Extract data and check stack depth: */
-  jit_ldxi_p(JIT_R0, JIT_V1, &((Scheme_Native_Closure *)0x0)->code);
-  jit_ldxi_i(JIT_R2, JIT_R0, &((Scheme_Native_Closure_Data *)0x0)->max_let_depth);
-  mz_tl_ldi_p(JIT_R1, tl_MZ_RUNSTACK_START);
-  jit_subr_ul(JIT_R1, JIT_RUNSTACK, JIT_R1);
-  ref4 = jit_bltr_ul(jit_forward(), JIT_R1, JIT_R2);
-  CHECK_LIMIT();
+  if (!direct_to_code) {
+    jit_ldxi_p(JIT_R0, JIT_V1, &((Scheme_Native_Closure *)0x0)->code);
+    jit_ldxi_i(JIT_R2, JIT_R0, &((Scheme_Native_Closure_Data *)0x0)->max_let_depth);
+    mz_tl_ldi_p(JIT_R1, tl_MZ_RUNSTACK_START);
+    jit_subr_ul(JIT_R1, JIT_RUNSTACK, JIT_R1);
+    ref4 = jit_bltr_ul(jit_forward(), JIT_R1, JIT_R2);
+    CHECK_LIMIT();
+  } else
+    ref4 = NULL;
 
   /* Fast jump ok (proc will check argc).
-     At this point, V1 = closure and R0 = code. */
+     At this point, V1 = closure (unless direct_to_code) and R0 = code. */
 
   /* Check for thread swap: */
-  (void)mz_tl_ldi_i(JIT_R2, tl_scheme_fuel_counter);
-  ref5 = jit_blei_i(jit_forward(), JIT_R2, 0);
+  if (!direct_to_code) {
+    (void)mz_tl_ldi_i(JIT_R2, tl_scheme_fuel_counter);
+    ref5 = jit_blei_i(jit_forward(), JIT_R2, 0);
 #ifndef FUEL_AUTODECEREMENTS
-  jit_subi_p(JIT_R2, JIT_R2, 0x1);
-  (void)mz_tl_sti_i(tl_scheme_fuel_counter, JIT_R2, JIT_R1);
+    jit_subi_p(JIT_R2, JIT_R2, 0x1);
+    (void)mz_tl_sti_i(tl_scheme_fuel_counter, JIT_R2, JIT_R1);
 #endif
+  } else
+    ref5 = NULL;
   CHECK_LIMIT();
 
   /* Copy args to runstack base: */
@@ -299,11 +315,17 @@ int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
       jit_subi_p(JIT_R2, JIT_RUNSTACK_BASE_OR_ALT(JIT_R2), WORDS_TO_BYTES(num_rands)); 
       CHECK_RUNSTACK_OVERFLOW();
       for (i = num_rands; i--; ) {
-        jit_ldxi_p(JIT_R1, JIT_RUNSTACK, WORDS_TO_BYTES(i));
-        jit_stxi_p(WORDS_TO_BYTES(i), JIT_R2, JIT_R1);
+        if (direct_args) {
+          int reg = direct_args[i].reg;
+          jit_stxi_p(WORDS_TO_BYTES(i), JIT_R2, reg);
+        } else {
+          jit_ldxi_p(JIT_R1, JIT_RUNSTACK, WORDS_TO_BYTES(i));
+          jit_stxi_p(WORDS_TO_BYTES(i), JIT_R2, JIT_R1);
+        }
         CHECK_LIMIT();
       }
       jit_movr_p(JIT_RUNSTACK, JIT_R2);
+      r2_has_runstack = 1;
     } else {
 #ifdef JIT_RUNSTACK_BASE
       jit_movr_p(JIT_RUNSTACK, JIT_RUNSTACK_BASE);
@@ -315,36 +337,58 @@ int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
       mz_get_local_p(JIT_R1, JIT_LOCAL2);
       jit_lshi_l(JIT_R1, JIT_R1, JIT_LOG_WORD_SIZE);
       jit_subr_p(JIT_RUNSTACK, JIT_RUNSTACK, JIT_R1);
+      r2_has_runstack = 0;
       CHECK_RUNSTACK_OVERFLOW();
     }
   } else {
     /* Variable argc (in LOCAL2):
        arguments are already in place. */
   }
-  /* RUNSTACK, RUNSTACK_BASE, V1, and R0 are ready */
+  /* RUNSTACK, RUNSTACK_BASE, V1 (unless direct_to_code), and R0 are ready */
   
   /* Extract function and data: */
-  jit_movr_p(JIT_R2, JIT_V1);
-  if (direct_native) {
-    jit_ldxi_p(JIT_V1, JIT_R0, &((Scheme_Native_Closure_Data *)0x0)->u.tail_code);
-  } else {
-    jit_ldxi_p(JIT_V1, JIT_R0, &((Scheme_Native_Closure_Data *)0x0)->arity_code);
+  if (!direct_to_code) {
+    jit_movr_p(JIT_R2, JIT_V1);
+    r2_has_runstack = 0;
+    if (direct_native) {
+      jit_ldxi_p(JIT_V1, JIT_R0, &((Scheme_Native_Closure_Data *)0x0)->u.tail_code);
+    } else {
+      jit_ldxi_p(JIT_V1, JIT_R0, &((Scheme_Native_Closure_Data *)0x0)->arity_code);
+    }
+    jit_movr_p(JIT_R0, JIT_R2);
   }
   /* Set up arguments; JIT_RUNSTACK and JIT_RUNSTACK_BASE must also be ready */
-  jit_movr_p(JIT_R0, JIT_R2);
   if (num_rands >= 0) {
     jit_movi_i(JIT_R1, num_rands);
     if (direct_native > 1) { /* => some_args_already_in_place */
       mz_get_local_p(JIT_R2, JIT_LOCAL2);
       jit_addr_i(JIT_R1, JIT_R1, JIT_R2);
+      r2_has_runstack = 0;
     }
   } else {
     mz_get_local_p(JIT_R1, JIT_LOCAL2);    
   }
-  jit_movr_p(JIT_R2, JIT_RUNSTACK);
-  if (need_set_rs) {
+  if (!r2_has_runstack)
+    jit_movr_p(JIT_R2, JIT_RUNSTACK);
+  if (need_set_rs && !direct_to_code) {
     /* In case arity check fails, need to update runstack now: */
     JIT_UPDATE_THREAD_RSPTR();
+  }
+  if (direct_native && direct_to_code) {
+    int retptr;
+    __END_SHORT_JUMPS__(num_rands < 100);
+    /* load closure pointer into R0: */
+    retptr = mz_retain(direct_to_code);
+#ifdef JIT_PRECISE_GC
+    if (retptr)
+      scheme_mz_load_retained(jitter, JIT_R0, retptr);
+    else
+#endif
+      (void)jit_patchable_movi_p(JIT_R0, direct_to_code);
+    /* jump directly: */
+    (void)jit_jmpi(direct_to_code->code->u.tail_code);
+    /* no slow path in this mode */
+    return 1;
   }
   /* Now jump: */
   jit_jmpr(JIT_V1);
@@ -353,13 +397,15 @@ int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
   if (!direct_native && !is_inline && (num_rands >= 0)) {
     /* Handle simple applicable struct: */
     mz_patch_branch(ref2);
+    /* uses JIT_R1: */
     ref2 = generate_proc_struct_retry(jitter, num_rands, refagain);
     CHECK_LIMIT();
   }
 
   /* The slow way: */
   /*  V1 and RUNSTACK must be intact! */
-  mz_patch_branch(ref5);
+  if (ref5)
+    mz_patch_branch(ref5);
   generate_pause_for_gc_and_retry(jitter,
                                   num_rands < 100,  /* in short jumps */
                                   JIT_V1, /* expose V1 to GC */
@@ -369,7 +415,8 @@ int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
     mz_patch_branch(ref);
     mz_patch_branch(ref2);
   }
-  mz_patch_branch(ref4);
+  if (ref4)
+    mz_patch_branch(ref4);
   CHECK_LIMIT();
   if (need_set_rs) {
     JIT_UPDATE_THREAD_RSPTR();
@@ -579,8 +626,9 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
   /* Check for inlined native type */
   if (!direct_native) {
     ref = jit_bmsi_ul(jit_forward(), JIT_V1, 0x1);
-    jit_ldr_s(JIT_R1, JIT_V1);
+    jit_ldxi_s(JIT_R1, JIT_V1, &((Scheme_Object *)0x0)->type);
     ref2 = jit_bnei_i(jit_forward(), JIT_R1, scheme_native_closure_type);
+    /* code at ref2 uses JIT_R1 */
     CHECK_LIMIT();
   } else {
     ref = ref2 = NULL;
@@ -800,6 +848,7 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
     /* Check for simple applicable struct wrapper */
     if (!is_inlined && (num_rands >= 0)) {
       mz_patch_branch(ref2);
+      /* uses JIT_R1 */
       ref2 = generate_proc_struct_retry(jitter, num_rands, refagain);
       CHECK_LIMIT();
     }
@@ -1109,7 +1158,8 @@ static int do_generate_shared_call(mz_jit_state *jitter, void *_data)
     if (data->direct_prim)
       ok = generate_direct_prim_tail_call(jitter, data->num_rands);
     else
-      ok = scheme_generate_tail_call(jitter, data->num_rands, data->direct_native, 1, 0);
+      ok = scheme_generate_tail_call(jitter, data->num_rands, data->direct_native, 1, 0, 
+                                     NULL, NULL);
 
     scheme_jit_register_helper_func(jitter, code);
 
@@ -1208,6 +1258,89 @@ static int can_direct_native(Scheme_Object *p, int num_rands, intptr_t *extract_
   return 0;
 }
 
+static int is_noncm_hash_ref(Scheme_Object *rator, int num_rands, Scheme_App_Rec *app)
+{
+  /* hash-ref acts like a non-cm prim if there's no procedure 3rd argument */
+  if (SAME_OBJ(rator, scheme_hash_ref_proc) && ((num_rands == 2) || (num_rands == 3))) {
+    if (num_rands == 3) {
+      if ((SCHEME_TYPE(app->args[3]) < _scheme_values_types_)
+          || SCHEME_PROCP(app->args[3]))
+        return 0;
+    }
+    return 1;
+  }
+
+  return 0;
+}
+
+static jit_direct_arg *check_special_direct_args(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_rands, 
+                                                 int args_already_in_place)
+{
+  jit_direct_arg *inline_direct_args = NULL;
+  Scheme_Object *v;
+  int reg_to_pos[NUM_AVAIL_DIRECT_ARG_REGS];
+  int n = 0, j, pos, i;
+
+  return NULL;
+
+  for (j = 0; j < NUM_AVAIL_DIRECT_ARG_REGS; j++) {
+    reg_to_pos[j] = 0;
+  }
+
+  for (i = 0; i < num_rands; i++) {
+    v = (alt_rands 
+         ? alt_rands[i+1+args_already_in_place] 
+         : app->args[i+1+args_already_in_place]);
+    if (SAME_TYPE(SCHEME_TYPE(v), scheme_local_type)
+        && !SCHEME_GET_LOCAL_FLAGS(v)) {
+      pos = SCHEME_LOCAL_POS(v);
+      for (j = 0; j < n; j++) {
+        if (reg_to_pos[j] == pos)
+          break;
+      }
+      if (j >= n) {
+        if (n >= NUM_AVAIL_DIRECT_ARG_REGS)
+          break;
+        reg_to_pos[n++] = pos;
+      }
+    } else
+      break;
+  }
+
+  if (i < num_rands)
+    return NULL;
+
+  /* We hit the special case! */
+  inline_direct_args = MALLOC_N_ATOMIC(jit_direct_arg, num_rands);
+
+  n = 0;
+  for (j = 0; j < NUM_AVAIL_DIRECT_ARG_REGS; j++)  {
+    reg_to_pos[j] = 0;
+  }
+  
+  for (i = 0; i < num_rands; i++) {
+    v = (alt_rands 
+         ? alt_rands[i+1+args_already_in_place] 
+         : app->args[i+1+args_already_in_place]);
+    pos = SCHEME_LOCAL_POS(v);
+    for (j = 0; j < n; j++) {
+      if (reg_to_pos[j] == pos) {
+        inline_direct_args[i].gen = 0;
+        inline_direct_args[i].reg = direct_arg_regs[j];
+        break;
+      }
+    }
+    if (j >= n) {
+      reg_to_pos[n] = pos;
+      inline_direct_args[i].gen = 1;
+      inline_direct_args[i].reg = direct_arg_regs[n];
+      n++;
+    }
+  }
+
+  return inline_direct_args;
+}
+
 int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_rands, 
 			mz_jit_state *jitter, int is_tail, int multi_ok, int no_call)
 /* de-sync'd ok 
@@ -1216,6 +1349,8 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
 {
   int i, offset, need_safety = 0, apply_to_list = 0;
   int direct_prim = 0, need_non_tail = 0, direct_native = 0, direct_self = 0, nontail_self = 0;
+  Scheme_Native_Closure *inline_direct_native = NULL;
+  jit_direct_arg *inline_direct_args = NULL;
   int proc_already_in_place = 0;
   Scheme_Object *rator, *v, *arg;
   int reorder_ok = 0;
@@ -1232,6 +1367,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
 	&& ((num_rands <= ((Scheme_Primitive_Proc *)rator)->mu.maxa)
 	    || (((Scheme_Primitive_Proc *)rator)->mina < 0))
 	&& (scheme_is_noncm(rator, jitter, 0, 0)
+            || is_noncm_hash_ref(rator, num_rands, app)
             /* It's also ok to directly call `values' if multiple values are ok: */
             || (multi_ok && SAME_OBJ(rator, scheme_values_func))))
       direct_prim = 1;
@@ -1306,6 +1442,29 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
             direct_self = 1;
           else if (jitter->self_nontail_code)
             nontail_self = 1;
+        } else if (is_tail) {
+          Scheme_Closure *c = (Scheme_Closure *)rator;
+          if (ZERO_SIZED_CLOSUREP(c)) {
+            /* If we're calling a constant function in tail position, then
+               there's a good chance that this function is a wrapper to
+               get to a loop. Inline the jump to the potential loop,
+               absorbing the runstack and C stack checks into the check
+               for this function --- only works if we can JIT the target
+               of the call. */
+            Scheme_Native_Closure *nc;
+            nc = (Scheme_Native_Closure *)scheme_jit_closure((Scheme_Object *)data, NULL);
+            if (nc->code->code == scheme_on_demand_jit_code) {
+              if (nc->code->arity_code != sjc.in_progress_on_demand_jit_arity_code) {
+                scheme_on_demand_generate_lambda(nc, 0, NULL);
+              }
+            }
+            if (nc->code->code != scheme_on_demand_jit_code) {
+              if (nc->code->max_let_depth > jitter->max_tail_depth)
+                jitter->max_tail_depth = nc->code->max_let_depth;
+
+              inline_direct_native = nc;
+            }
+          }
         }
       }
       reorder_ok = 1;
@@ -1356,8 +1515,16 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
     }
   }
 
+  if (inline_direct_native) {
+    /* Look for very special case where arguments are so simple
+       that we can move them directly into a couple of registers. */
+    inline_direct_args = check_special_direct_args(app, alt_rands, num_rands, args_already_in_place);
+  }
+
   if (num_rands) {
-    if (!direct_prim || (num_rands > 1) || (no_call == 2)) {
+    if (inline_direct_args) {
+      mz_runstack_skipped(jitter, num_rands);
+    } else if (!direct_prim || (num_rands > 1) || (no_call == 2)) {
       mz_rs_dec(num_rands);
       need_safety = num_rands;
       CHECK_RUNSTACK_OVERFLOW();
@@ -1456,16 +1623,25 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
       }
     } else
 #endif
-      scheme_generate_non_tail(arg, jitter, 0, !need_non_tail, 0); /* sync'd below */
+      if (inline_direct_args) {
+        if (inline_direct_args[i].gen)
+          scheme_generate(arg, jitter, 0, 0, 0, inline_direct_args[i].reg, NULL);
+      } else
+        scheme_generate_non_tail(arg, jitter, 0, !need_non_tail, 0); /* sync'd below */
     RESUME_JIT_DATA();
     CHECK_LIMIT();
+
     if ((i == num_rands - 1) && !direct_prim && !reorder_ok && !direct_self && !proc_already_in_place) {
       /* Move rator back to register: */
       mz_rs_ldxi(JIT_V1, i + offset);
     }
     if ((!direct_prim || (num_rands > 1) || (no_call == 2))
-	&& (!direct_self || !is_tail || no_call || (i + 1 < num_rands))) {
+               && (!direct_self || !is_tail || no_call || (i + 1 < num_rands))
+               && !inline_direct_args) {
+      int r0;
+      r0 = (mz_CURRENT_R0_STATUS_VALID() ? mz_CURRENT_R0_STATUS() : -1);
       mz_rs_stxi(i + offset, JIT_R0);
+      if (r0 > -1) mz_RECORD_R0_STATUS(r0);
     }
   }
   /* not sync'd... */
@@ -1489,7 +1665,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
     }
   }
 
-  if (reorder_ok) {
+  if (reorder_ok && !inline_direct_native) {
     if ((no_call < 2) && !apply_to_list) {
       scheme_generate(rator, jitter, 0, 0, 0, JIT_V1, NULL); /* sync'd below, or not */
     }
@@ -1514,6 +1690,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
   if (no_call) {
     /* leave actual call to inlining code */
   } else if (!(direct_self && is_tail)
+             && !inline_direct_native
              && (num_rands >= MAX_SHARED_CALL_RANDS)) {
     LOG_IT(("<-many args\n"));
     if (is_tail) {
@@ -1525,7 +1702,8 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
           jit_movi_l(JIT_R2, args_already_in_place);
           mz_set_local_p(JIT_R2, JIT_LOCAL2);
         }
-	scheme_generate_tail_call(jitter, num_rands, direct_native, jitter->need_set_rs, 1);
+	scheme_generate_tail_call(jitter, num_rands, direct_native, jitter->need_set_rs, 1, 
+                                  NULL, NULL);
       }
     } else {
       if (direct_prim)
@@ -1552,6 +1730,16 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
         LOG_IT(("<-self\n"));
 	generate_self_tail_call(rator, jitter, num_rands, code, args_already_in_place, app, alt_rands);
 	CHECK_LIMIT();
+      } else if (inline_direct_native) {
+        LOG_IT(("<-native-tail\n"));
+        scheme_mz_flostack_restore(jitter, 0, 0, 1, 1);
+        if (args_already_in_place) {
+          jit_movi_l(JIT_R2, args_already_in_place);
+          mz_set_local_p(JIT_R2, JIT_LOCAL2);
+        }
+        scheme_generate_tail_call(jitter, num_rands, direct_native, jitter->need_set_rs, 1,
+                                  inline_direct_native, inline_direct_args);
+        CHECK_LIMIT();
       } else {
         scheme_mz_flostack_restore(jitter, 0, 0, 1, 1);
         LOG_IT(("<-tail\n"));

@@ -717,6 +717,8 @@ static MemoryChunk *sys_malloc_others;
 int GC_dl_entries;
 int GC_fo_entries;
 
+int GC_dont_gc;
+
 void (*GC_push_last_roots)(void);
 void (*GC_push_last_roots_again)(void);
 
@@ -1884,7 +1886,7 @@ static void dump_sector_map(char *prefix)
 	    if ((was_kind != kind) || (was_sec != pagetable[j].start))
 	      same_sec = diff_sec;
 
-	    FPRINTF(STDERR, same_sec);
+	    FPRINTF(STDERR, "%s", same_sec);
 	    
 	    was_kind = kind;
 	    was_sec = pagetable[j].start;
@@ -2106,9 +2108,11 @@ void GC_dump(void)
   FPRINTF(STDERR, "End Map\n");
 }
 
-intptr_t GC_get_memory_use()
+long GC_get_memory_use()
 {
-  return mem_real_use;
+  /* returns a `long' instead of `intptr_t' for compatibility
+     with the Boehm GC */
+  return (long)mem_real_use;
 }
 
 void GC_end_stubborn_change(void *p)
@@ -2440,7 +2444,7 @@ static void *do_malloc(SET_NO_BACKINFO
 
   block = (BlockOfMemory *)malloc_sector(c, sector_kind_block, 1);
   if (!block) {
-    if (mem_use >= mem_limit) {
+    if ((mem_use >= mem_limit) && !GC_dont_gc) {
       GC_gcollect();
       return do_malloc(KEEP_SET_INFO_ARG(set_no)
 		       size, common, othersptr, flags);
@@ -4743,6 +4747,9 @@ void GC_gcollect(void)
   intptr_t dummy;
 
   if (!sector_mem_use)
+    return;
+
+  if (GC_dont_gc)
     return;
 
   FLUSH_REGISTER_WINDOWS;

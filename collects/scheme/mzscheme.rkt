@@ -17,7 +17,9 @@
              racket/private/map ; shadows #%kernel bindings
              racket/private/kernstruct
              racket/private/promise
+             racket/private/cert
              (only racket/private/cond old-cond)
+             (only racket/private/list assq assv assoc) ; shadows #%kernel bindings
              racket/tcp
              racket/udp
              '#%builtin) ; so it's attached
@@ -36,6 +38,7 @@
              (rename old-cond cond)
              define-struct let-struct
              identifier? ;; from racket/private/stx
+             (all-from racket/private/cert)
              (all-from racket/private/qqstx)
              (all-from racket/private/define)
              (all-from racket/private/kernstruct)
@@ -62,7 +65,8 @@
                               hash-iterate-first hash-iterate-next
                               hash-iterate-value hash-iterate-key
                               log-message log-level? make-logger logger? current-logger logger-name
-                              make-log-receiver log-receiver?)
+                              make-log-receiver log-receiver?
+                              prop:incomplete-arity)
              (rename syntax->datum syntax-object->datum)
              (rename datum->syntax datum->syntax-object)
              (rename free-identifier=? module-identifier=?)
@@ -90,6 +94,7 @@
              make-namespace
              #%top-interaction
              map for-each andmap ormap
+             assq assv assoc
              (rename datum #%datum)
              (rename mzscheme-in-stx-module-begin #%module-begin)
              (rename #%module-begin #%plain-module-begin)

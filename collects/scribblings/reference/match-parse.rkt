@@ -16,13 +16,13 @@
                   (list (fixup-meaning (substring s 0 (caar m)))
                         middle
                         (fixup-meaning (substring s (cdar m)))))))
-    
+
 (define (fixup-meaning s)
   (cond
    [(regexp-match-positions #rx"pattern" s)
     => (fixup s "pattern")]
    [(regexp-match-positions #rx"equal%" s)
-    => (fixup s (scheme equal?))]
+    => (fixup s (racket equal?))]
    [(regexp-match-positions #rx"pat" s)
     => (fixup s (fixup-sexp 'pat))]
    [(regexp-match-positions #rx"qp" s)
@@ -36,11 +36,11 @@
    [(regexp-match-positions #rx"expr" s)
     => (fixup s (fixup-sexp 'expr))]
    [(regexp-match-positions #rx"[*][*][*]" s)
-    => (fixup s (schemeidfont "..."))]
+    => (fixup s (racketidfont "..."))]
    [(regexp-match-positions #rx"[(]" s)
-    => (fixup s (schemeparenfont "("))]
+    => (fixup s (racketparenfont "("))]
    [(regexp-match-positions #rx"[)]" s)
-    => (fixup s (schemeparenfont ")"))]
+    => (fixup s (racketparenfont ")"))]
    [(regexp-match-positions #rx"K" s)
     => (fixup s (match-nonterm "k"))]
    [else s]))

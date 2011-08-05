@@ -95,6 +95,7 @@ typedef struct future_t {
   Scheme_Object *arg_s2;
   Scheme_Object **arg_S2;
   int arg_i2;
+  void *arg_p2;
 
   const char *arg_str0;
   const char *arg_str1;
@@ -111,6 +112,7 @@ typedef struct future_t {
   Scheme_Object *retval_s;
   void *retval_p; /* use only with conservative GC */
   MZ_MARK_STACK_TYPE retval_m;
+  int retval_i;
   int no_retval, retval_is_rs_argv;
 
   Scheme_Object **multiple_array;
@@ -182,8 +184,6 @@ extern Scheme_Object *scheme_rtcall_make_future(const char *who, int src_type, S
 #define ASSERT_CORRECT_THREAD 
 
 #endif 
-
-extern void scheme_on_demand_generate_lambda(Scheme_Native_Closure *nc, int argc, Scheme_Object **argv);
 
 void scheme_future_block_until_gc();
 void scheme_future_continue_after_gc();

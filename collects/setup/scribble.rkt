@@ -1,10 +1,11 @@
 #lang scheme/base
 
-(require "getinfo.ss"
-         "dirs.ss"
-         "private/path-utils.ss"
-         "main-collects.ss"
-         "main-doc.ss"
+(require "getinfo.rkt"
+         "dirs.rkt"
+         "path-to-relative.rkt"
+         "private/path-utils.rkt"
+         "main-collects.rkt"
+         "main-doc.rkt"
          "parallel-do.rkt"
          scheme/class
          scheme/list
@@ -139,10 +140,11 @@
                     (parallel-do 
                       worker-count
                       (lambda (workerid) (list workerid program-name (verbose) only-dirs latex-dest auto-main? auto-user?))
-                      docs
-                      (lambda (x) (s-exp->fasl (serialize x)))
-                      (lambda (work r outstr errstr) (printf "~a" outstr) (printf "~a" errstr) (deserialize (fasl->s-exp r)))
-                      (lambda (work errmsg outstr errstr) (parallel-do-error-handler setup-printf work errmsg outstr errstr))
+                      (ListQueue
+                        docs
+                        (lambda (x) (s-exp->fasl (serialize x)))
+                        (lambda (work r outstr errstr) (printf "~a" outstr) (printf "~a" errstr) (deserialize (fasl->s-exp r)))
+                        (lambda (work errmsg outstr errstr) (parallel-do-error-handler setup-printf work errmsg outstr errstr)))
                       (define-worker (get-doc-info-worker workerid program-name verbosev only-dirs latex-dest auto-main? auto-user?) 
                         (define ((get-doc-info-local program-name only-dirs latex-dest auto-main? auto-user?) doc)
                           (define (setup-printf subpart formatstr . rest)
@@ -231,10 +233,10 @@
                    (unless (or (memq 'depends-all (doc-flags (info-doc info)))
                                (memq 'depends-all-main (doc-flags (info-doc info))))
                      (unless one?
-                       (setup-printf "WARNING"
-                                     "undefined tag in ~a:" 
-                                     (path->name (doc-src-file
-                                                  (info-doc info))))
+                       (setup-printf
+                        "WARNING" "undefined tag in ~a:"
+                        (path->relative-string/setup
+                         (doc-src-file (info-doc info))))
                        (set! one? #t))
                      (setup-printf #f " ~s" k)))])
             (for ([k (info-undef info)])
@@ -299,7 +301,7 @@
                                       infos)])
           (define (say-rendering i)
             (setup-printf (if (info-rendered? i) "re-rendering" "rendering") "~a"
-              (path->name (doc-src-file (info-doc i)))))
+              (path->relative-string/setup (doc-src-file (info-doc i)))))
           (define (update-info info response)
             (match response 
               [#f (set-info-failed?! info #t)]
@@ -321,15 +323,16 @@
               (parallel-do 
                 worker-count
                 (lambda (workerid) (list workerid (verbose) latex-dest))
-                need-rerun
-                (lambda (i) 
-                  (say-rendering i)
-                  (s-exp->fasl (serialize (info-doc i))))
-                (lambda (i r outstr errstr) 
-                  (printf "~a" outstr) 
-                  (printf "~a" errstr)
-                  (update-info i (deserialize (fasl->s-exp r))))
-                (lambda (i errmsg outstr errstr) (parallel-do-error-handler setup-printf (info-doc i) errmsg outstr errstr))
+                (ListQueue
+                  need-rerun
+                  (lambda (i) 
+                    (say-rendering i)
+                    (s-exp->fasl (serialize (info-doc i))))
+                  (lambda (i r outstr errstr) 
+                    (printf "~a" outstr) 
+                    (printf "~a" errstr)
+                    (update-info i (deserialize (fasl->s-exp r))))
+                  (lambda (i errmsg outstr errstr) (parallel-do-error-handler setup-printf (info-doc i) errmsg outstr errstr)))
                 (define-worker (build-again!-worker2  workerid verbosev latex-dest)
                   (define (with-record-error cc go fail-k)
                     (with-handlers ([exn:fail?
@@ -539,10 +542,10 @@
                             (and auto-user?
                                  (memq 'depends-all (doc-flags doc)))))])
     (when (or (not up-to-date?) (verbose))
-      (setup-printf 
+      (setup-printf
        (cond [up-to-date? "using"] [can-run? "running"] [else "skipping"])
        "~a"
-       (path->name (doc-src-file doc))))
+       (path->relative-string/setup (doc-src-file doc))))
 
     (if up-to-date?
       ;; Load previously calculated info:
@@ -786,7 +789,7 @@
       (namespace-attach-module ns 'scribble/base-render p)
       (namespace-attach-module ns 'scribble/html-render p)
       ;; This is here for de-serialization; we need a better repair than
-      ;;  hard-wiring the "manual.ss" library:
+      ;;  hard-wiring the "manual.rkt" library:
       (namespace-attach-module ns 'scribble/manual p)
       (parameterize ([current-namespace p])
         (call-in-nested-thread (lambda () (dynamic-require mod-path 'doc)))))))

@@ -91,7 +91,7 @@
 
 ;; ------------------------------------------------------------------------
 (define OUT-ERROR
-  "The conversion function must produce a number; result: ~e")
+  "The conversion function must produce a number; but it produced ~e")
 
 ;; ============================================================================
 ;; MODEL

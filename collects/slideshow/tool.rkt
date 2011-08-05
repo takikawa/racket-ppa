@@ -25,8 +25,8 @@ pict snip :
            texpict/mrpict
            texpict/pict-value-snip
            mzlib/list
-           "private/pict-box-lib.ss"
-           "private/image-snipr.ss")
+           "private/pict-box-lib.rkt"
+           "private/image-snipr.rkt")
 
   (provide tool@
            get-snp/poss
@@ -34,15 +34,6 @@ pict snip :
 
   (define orig-inspector (current-code-inspector))
   (define orig-lcp (current-library-collection-paths))
-
-  (define-syntax syntax/cert 
-    (syntax-rules ()
-      [(_ stx tmpl) (let ([stx stx])
-		      (syntax-recertify
-		       (syntax/loc stx tmpl)
-		       stx
-		       orig-inspector
-		       #f))]))
 
   (define tool@
     (unit 

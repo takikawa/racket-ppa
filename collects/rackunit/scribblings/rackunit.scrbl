@@ -1,7 +1,7 @@
 #lang scribble/doc
 @(require "base.rkt")
 
-@title{@bold{RackUnit}: Unit Testing for Racket}
+@title{RackUnit: Unit Testing}
 
 @author[(author+email "Noel Welsh" "noelwelsh@gmail.com")
         (author+email "Ryan Culpepper" "ryanc@racket-lang.org")]
@@ -15,6 +15,7 @@ from novices to experts.
 @include-section["quick-start.scrbl"]
 @include-section["philosophy.scrbl"]
 @include-section["api.scrbl"]
+@include-section["utils.scrbl"]
 @include-section["internals.scrbl"]
 @include-section["release-notes.scrbl"]
 @include-section["acknowledgements.scrbl"]

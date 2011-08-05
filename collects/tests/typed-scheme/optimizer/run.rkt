@@ -1,92 +1,76 @@
 #lang racket
-(require racket/runtime-path racket/sandbox)
+(require racket/runtime-path
+         rackunit rackunit/text-ui
+         typed-scheme/optimizer/logging
+         unstable/logging)
 
-(define show-names? (make-parameter #f))
+(provide optimization-tests missed-optimization-tests
+         test-opt test-missed-optimization test-file?
+         generate-log tests-dir missed-optimizations-dir)
 
-(define prog-rx
-  (pregexp (string-append "^\\s*"
-                          "(#lang typed/(?:scheme|racket)(?:/base)?)"
-                          "\\s+"
-                          "#:optimize"
-                          "\\s+")))
+(define (generate-log name dir)
+  ;; some tests require other tests, so some fiddling is required
+  (with-output-to-string
+    (lambda ()
+      (with-intercepted-logging ; catch opt logs
+       (lambda (l)
+         (when (eq? (vector-ref l 2) ; look only for optimizer messages
+                    optimization-log-key)
+           (displayln (vector-ref l 1)))) ; print log message
+       (lambda ()
+         (parameterize
+             ([current-namespace (make-base-empty-namespace)]
+              [current-load-relative-directory dir])
+           (dynamic-require
+            (build-path (current-load-relative-directory) name)
+            #f)))
+       #:level 'warning))))
 
-(define (evaluator file #:optimize [optimize? #f])
-  (call-with-trusted-sandbox-configuration
-   (lambda ()
-     (parameterize ([current-load-relative-directory tests-dir]
-                    [sandbox-memory-limit #f] ; TR needs memory
-                    [sandbox-output 'string]
-                    [sandbox-namespace-specs
-                     (list (car (sandbox-namespace-specs))
-                           'typed/racket
-                           'typed/scheme)])
-       ;; drop the expected log
-       (let* ([prog (with-input-from-file file
-                      (lambda ()
-                        (read-line) ; drop #;
-                        (read)      ; drop expected log
-                        (port->string)))] ; get the actual program
-              [m    (or (regexp-match-positions prog-rx prog)
-                        (error 'evaluator "bad program contents in ~e" file))]
-              [prog (string-append (substring prog (caadr m) (cdadr m))
-                                   (if (not optimize?) "\n#:no-optimize\n" "\n")
-                                   (substring prog (cdar m)))]
-              [evaluator (make-module-evaluator prog)]
-              [out       (get-output evaluator)])
-         (kill-evaluator evaluator)
-         out)))))
+;; we log optimizations and compare to an expected log to make sure that all
+;; the optimizations we expected did indeed happen
+(define (compare-logs name dir)
+  (test-suite "Log Comparison"
+              (check-equal?
+               ;; ugly, but otherwise rackunit spews the entire logs to
+               ;; stderr, and they can be quite long
+               #t
+               (equal?
+                ;; actual log
+                (with-input-from-string
+                    (string-append "(" (generate-log name dir) ")")
+                  read)
+                ;; expected log
+                (with-input-from-file (build-path dir name)
+                  (lambda () ; from the test file
+                    (read-line) ; skip the #;
+                    (read)))))))
 
-(define (generate-opt-log name)
-  (parameterize ([current-load-relative-directory tests-dir]
-                 [current-command-line-arguments  '#("--log-optimizations")])
-    (let ((log-string
-           (with-output-to-string
-             (lambda ()
-               (dynamic-require (build-path (current-load-relative-directory)
-                                            name)
-                                #f)))))
-      ;; have the log as an sexp, since that's what the expected log is
-      (with-input-from-string (string-append "(" log-string ")")
-        read))))
 
-(define (test gen)
-  (let-values (((base name _) (split-path gen)))
-    (when (show-names?) (displayln name))
-    (or (not (regexp-match ".*rkt$" name)) ; we ignore all but racket files
-        ;; we log optimizations and compare to an expected log to make sure
-        ;; that all the optimizations we expected did indeed happen
-        (and (or (let ((log      (generate-opt-log name))
-                       ;; expected optimizer log, to see what was optimized
-                       (expected
-                        (with-input-from-file gen
-                          (lambda ()
-                            (read-line) ; skip the #;
-                            (read)))))  ; get the log itself
-                   (equal? log expected))
-                 (begin (printf "~a failed: optimization log mismatch\n\n" name)
-                        #f))
-             ;; optimized and non-optimized versions must evaluate to the
-             ;; same thing
-             (or (equal? (evaluator gen) (evaluator gen #:optimize #t))
-                 (begin (printf "~a failed: result mismatch\n\n" name)
-                        #f))))))
+(define-runtime-path tests-dir                "./tests")
+(define-runtime-path missed-optimizations-dir "./missed-optimizations")
 
-(define to-run
-  (command-line
-   #:once-each
-   ["--show-names" "show the names of tests as they are run" (show-names? #t)]
-   ;; we optionally take a test name. if none is given, run everything (#f)
-   #:args maybe-test-to-run
-   (and (not (null? maybe-test-to-run))
-        (car maybe-test-to-run))))
+;; these two return lists of tests to be run for that category of tests
+(define (test-opt name)
+  (list (compare-logs name tests-dir)))
+(define (test-missed-optimization name)
+  (list (compare-logs name missed-optimizations-dir)))
 
-(define-runtime-path tests-dir "./tests")
+(define (test-file? name)
+  (and (regexp-match ".*rkt$" name)
+       ;; skip emacs temp unsaved file backups
+       (not (regexp-match "^\\.#" name))))
 
-(let ((n-failures
-       (if to-run
-           (if (test to-run) 0 1)
-           (for/fold ((n-failures 0))
-             ((gen (in-directory tests-dir)))
-             (+ n-failures (if (test gen) 0 1))))))
-  (unless (= n-failures 0)
-    (error (format "~a tests failed." n-failures))))
+;; proc returns the list of tests to be run on each file
+(define (mk-suite suite-name dir proc)
+  (make-test-suite
+   suite-name
+   (for/list ([name (directory-list dir)]
+              #:when (test-file? name))
+     (make-test-suite
+      (path->string name)
+      (proc name)))))
+
+(define optimization-tests
+  (mk-suite "Optimization Tests" tests-dir test-opt))
+(define missed-optimization-tests
+  (mk-suite "Missed Optimization Tests" missed-optimizations-dir test-missed-optimization))

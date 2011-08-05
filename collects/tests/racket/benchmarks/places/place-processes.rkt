@@ -12,12 +12,12 @@
                      racket/file))
 
 (provide
-  place
+  dynamic-place
   place-wait
   place-kill
-  place-channel-receive
-  place-channel-send
-  place-channel-send/receive
+  place-channel-get
+  place-channel-put
+  place-channel-put/get
   place-child-channel
   place/base
   map-reduce/lambda
@@ -35,17 +35,17 @@
 (define (place-child-channel) (make-place-channel-s (current-input-port) (current-output-port)))
 
 ;; send x on channel ch
-(define (place-channel-send ch x)
+(define (place-channel-put ch x)
   (define out (place-channel-s-out (resolve->channel ch)))
   (write (s-exp->fasl (serialize x)) out)
   (flush-output out))
 
 ;; receives msg on channel ch
-(define (place-channel-receive ch)
+(define (place-channel-get ch)
   (deserialize (fasl->s-exp (read (place-channel-s-in (resolve->channel ch))))))
 
 ;; create a place given a module file path and a func-name to invoke
-(define (place module-name func-name)
+(define (dynamic-place module-name func-name)
   (define (send/msg x ch)
     (write x ch)
     (flush-output ch))
@@ -78,9 +78,9 @@
     (subprocess-wait spo)
     (subprocess-status spo)))
 
-(define (place-channel-send/receive ch x)
-  (place-channel-send ch x)
-  (place-channel-receive ch))
+(define (place-channel-put/get ch x)
+  (place-channel-put ch x)
+  (place-channel-get ch))
 
 ;; splits lst into n equal pieces
 (define (split-n n lst)
@@ -133,7 +133,7 @@
 
         (splat (syntax->datum worker-syntax) module-path)
 
-        (define place-syntax #`(place #,module-path (quote name)))
+        (define place-syntax #`(dynamic-place #,module-path (quote name)))
         ;(write (syntax->datum place-syntax))
         place-syntax)]))
 
@@ -144,7 +144,7 @@
        (define (place/current-module-path funcname)
          (with-syntax ([funcname funcname])
            #'(let ([module-path (resolved-module-path-name (variable-reference->resolved-module-path (#%variable-reference)))])
-               (place module-path (quote funcname)))))
+               (dynamic-place module-path (quote funcname)))))
        (with-syntax ([interal-def-name (syntax-local-lift-expression #'(lambda () ((lambda (args ...) body ...) (place-child-channel))))])
          (syntax-local-lift-provide #'(rename interal-def-name name)))
        (place/current-module-path #'name))]))
@@ -166,12 +166,12 @@
       #'(begin
         (define places (for/list ([i (in-range (processor-count))])
           (place/lambda (name ch)
-            (place-channel-send ch ((lambda (listvar) body ...) (place-channel-receive ch))))))
+            (place-channel-put ch ((lambda (listvar) body ...) (place-channel-get ch))))))
 
         (for ([p places]
               [item (split-n (processor-count) lst)])
-          (place-channel-send p item))
-        (define result ((lambda (listvar) body ...) (map place-channel-receive places)))
+          (place-channel-put p item))
+        (define result ((lambda (listvar) body ...) (map place-channel-get places)))
         (map place-wait places)
         (map place-kill places)
         result)]))

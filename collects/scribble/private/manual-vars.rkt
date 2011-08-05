@@ -1,8 +1,8 @@
 #lang scheme/base
-(require "../decode.ss"
-         "../scheme.ss"
-         "../struct.ss"
-         (only-in "../core.ss" style-name)
+(require "../decode.rkt"
+         "../scheme.rkt"
+         "../struct.rkt"
+         (only-in "../core.rkt" style-name)
          scheme/contract
          (for-syntax scheme/base
                      syntax/kerncase
@@ -15,31 +15,24 @@
 (provide/contract
  [struct (box-splice splice) ([run list?])]) ; XXX ugly copying
 (provide deftogether *deftogether
-         with-scheme-variables
-         with-togetherable-scheme-variables)
+         with-racket-variables
+         with-togetherable-racket-variables)
 
 (begin-for-syntax (define-struct deftogether-tag () #:omit-define-syntaxes))
 
-(define-syntax (with-togetherable-scheme-variables stx)
+(define-syntax (with-togetherable-racket-variables stx)
   (syntax-case stx ()
-    [(_ . rest)
-     (let ([result (syntax/loc stx
-                     (with-togetherable-scheme-variables* . rest))]
-           [ctx (syntax-local-context)])
-       (if (and (pair? ctx) (deftogether-tag? (car ctx)))
-           ;; Make it transparent, so deftogether is allowed to pull it apart
-           (syntax-property result
-                            'certify-mode
-                            'transparent)
-           ;; Otherwise, don't make it transparent, because that
-           ;; removes certificates that will be needed on the `letrec-syntaxes'
-           ;; that we introduce later.
-           result))]))
+    [(_ lits vars decl)
+     (with-syntax ([vars (syntax-property #'vars 'taint-mode 'none)])
+       (syntax-property
+        #'(with-togetherable-racket-variables* lits vars decl)
+        'taint-mode
+        'transparent))]))
 
-(define-syntax-rule (with-togetherable-scheme-variables* . rest)
-  (with-scheme-variables . rest))
+(define-syntax-rule (with-togetherable-racket-variables* . rest)
+  (with-racket-variables . rest))
 
-(define-syntax (with-scheme-variables stx)
+(define-syntax (with-racket-variables stx)
   (syntax-case stx ()
     [(_ lits ([kind s-exp] ...) body)
      (let ([ht (make-bound-identifier-mapping)]
@@ -137,10 +130,10 @@
                                            def
                                            (list (make-deftogether-tag))
                                            (cons
-                                            #'with-togetherable-scheme-variables*
+                                            #'with-togetherable-racket-variables*
                                             (kernel-form-identifier-list)))])
-                             (syntax-case exp-def (with-togetherable-scheme-variables*)
-                               [(with-togetherable-scheme-variables* lits vars decl)
+                             (syntax-case exp-def (with-togetherable-racket-variables*)
+                               [(with-togetherable-racket-variables* lits vars decl)
                                 exp-def]
                                [_
                                 (raise-syntax-error
@@ -149,7 +142,7 @@
                                  stx
                                  def)])))
                          (syntax->list #'(def ...)))])
-       #'(with-togetherable-scheme-variables
+       #'(with-togetherable-racket-variables
           (lit ... ...)
           (var ... ...)
           (*deftogether (list decl ...) (lambda () (list . body)))))]))

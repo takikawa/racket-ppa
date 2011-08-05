@@ -1,6 +1,5 @@
 #lang scribble/doc
-@(require "mz.ss"
-          (for-label racket/syntax))
+@(require "mz.rkt" (for-label racket/syntax))
 
 @title[#:tag "syntax-util"]{Syntax Utilities}
 
@@ -16,17 +15,17 @@
 @section{Creating formatted identifiers}
 
 @defproc[(format-id [lctx (or/c syntax? #f)]
+                    [fmt string?]
+                    [v (or/c string? symbol? identifier? keyword? char? number?)] ...
                     [#:source src (or/c syntax? #f) #f]
                     [#:props props (or/c syntax? #f) #f]
-                    [#:cert cert (or/c syntax? #f) #f]
-                    [fmt string?]
-                    [v (or/c string? symbol? identifier? keyword? char? number?)] ...)
+                    [#:cert ignored (or/c syntax? #f) #f])
          identifier?]{
 
 Like @racket[format], but produces an identifier using @racket[lctx]
-for the lexical context, @racket[src] for the source location,
-@racket[props] for the properties, and @racket[cert] for the inactive
-certificates. (See @racket[datum->syntax].)
+for the lexical context, @racket[src] for the source location, and
+@racket[props] for the properties. An argument supplied with
+@racket[#:cert] is ignored. (See @racket[datum->syntax].)
 
 The format string must use only @litchar{~a} placeholders. Identifiers
 in the argument list are automatically converted to symbols.

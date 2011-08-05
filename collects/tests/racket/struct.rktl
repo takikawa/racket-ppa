@@ -10,7 +10,7 @@
   (arity-test make-struct-type-property 1 3)
   (test 3 primitive-result-arity make-struct-type-property)
   (arity-test p? 1 1)
-  (arity-test p-ref 1 1)
+  (arity-test p-ref 1 2)
   (arity-test struct-type-property? 1 1)
   (test #t struct-type-property? prop:p)
   (test #f struct-type-property? 5)
@@ -634,6 +634,14 @@
 		base2-l x132 1
 		two132-a x132 6
 		one32-y x132 4))))
+
+;; ------------------------------------------------------------
+;; Property accessor errors
+
+(let-values ([(prop:p p? p-ref) (make-struct-type-property 'prop1 'can-impersonate '())])
+  (test 42 p-ref 5 42)
+  (test 17 p-ref 5 (lambda () (* 1 17)))
+  (err/rt-test (p-ref 5) exn:fail:contract?))
 
 ;; ------------------------------------------------------------
 ;; Property type supers

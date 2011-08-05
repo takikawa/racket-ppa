@@ -1,11 +1,11 @@
 #lang scribble/doc
-@(require "../common.ss")
+@(require "../common.rkt")
 
 @title[#:style 'toc]{Aligned Pasteboard}
 
 The aligned-pasteboard library provides classes derived from
-@scheme[pasteboard%] with geometry management that mirrors that of
-@scheme[vertical-panel%] and @scheme[horizontal-panel%].
+@racket[pasteboard%] with geometry management that mirrors that of
+@racket[vertical-panel%] and @racket[horizontal-panel%].
 
 @defmodule[mrlib/aligned-pasteboard]
 
