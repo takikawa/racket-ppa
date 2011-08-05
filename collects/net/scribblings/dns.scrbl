@@ -1,12 +1,9 @@
 #lang scribble/doc
-@(require "common.ss"
-          (for-label net/dns
-                     net/dns-unit
-                     net/dns-sig))
+@(require "common.rkt" (for-label net/dns net/dns-unit net/dns-sig))
 
 @title[#:tag "dns"]{DNS: Domain Name Service Queries}
 
-@defmodule[net/dns]{The @schememodname[net/dns] library provides
+@defmodule[net/dns]{The @racketmodname[net/dns] library provides
 utilities for looking up hostnames.
 
 Thanks to Eduardo Cavazos and Jason Crowe for repairs and
@@ -21,11 +18,11 @@ improvements.}
          string?]{
 
 Consults the specified nameserver (normally a numerical address like
-@scheme["128.42.1.30"]) to obtain a numerical address for the given
+@racket["128.42.1.30"]) to obtain a numerical address for the given
 Internet address.
 
 The query record sent to the DNS server includes the "recursive" bit,
-but @scheme[dns-get-address] also implements a recursive search itself
+but @racket[dns-get-address] also implements a recursive search itself
 in case the server does not provide this optional feature.}
 
 
@@ -34,7 +31,7 @@ in case the server does not provide this optional feature.}
          string?]{
 
 Consults the specified nameserver (normally a numerical address like
-@scheme["128.42.1.30"]) to obtain a name for the given numerical
+@racket["128.42.1.30"]) to obtain a name for the given numerical
 address.}
 
 
@@ -44,15 +41,15 @@ address.}
 
 Consults the specified nameserver to obtain the address for a mail
 exchanger the given mail host address. For example, the mail exchanger
-for @scheme["ollie.cs.rice.edu"] might be @scheme["cs.rice.edu"].}
+for @racket["ollie.cs.rice.edu"] might be @racket["cs.rice.edu"].}
 
 
 
 @defproc[(dns-find-nameserver) (or/c string? false/c)]{
 
 Attempts to find the address of a nameserver on the present system.
-Under Unix, this procedure parses @filepath{/etc/resolv.conf} to
-extract the first nameserver address. Under Windows, it runs
+On Unix and Mac OS X, this procedure parses @filepath{/etc/resolv.conf} to
+extract the first nameserver address. On Windows, it runs
 @exec{nslookup.exe}.}
 
 @; ----------------------------------------
@@ -63,7 +60,7 @@ extract the first nameserver address. Under Windows, it runs
 
 @defthing[dns@ unit?]{
 
-Imports nothing, exports @scheme[dns^].}
+Imports nothing, exports @racket[dns^].}
 
 @; ----------------------------------------
 
@@ -73,4 +70,4 @@ Imports nothing, exports @scheme[dns^].}
 
 @defsignature[dns^ ()]{}
 
-Includes everything exported by the @schememodname[net/dns] module.
+Includes everything exported by the @racketmodname[net/dns] module.

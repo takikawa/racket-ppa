@@ -1,7 +1,5 @@
 #lang scribble/doc
-@(require scribble/manual
-          scribble/eval
-          "guide-utils.ss")
+@(require scribble/manual scribble/eval "guide-utils.rkt")
 
 @title[#:tag "for"]{Iterations and Comprehensions}
 
@@ -29,6 +27,8 @@ the @racket[_body]s for side effects.
   (display i))
 (for ([i "abc"])
   (printf "~a..." i))
+(for ([i 4])
+  (display i))
 ]
 
 The @racket[for/list] variant of @racket[for] is more Racket-like. It
@@ -41,6 +41,8 @@ comprehension}.
 (for/list ([i '(1 2 3)])
   (* i i))
 (for/list ([i "abc"])
+  i)
+(for/list ([i 4])
   i)
 ]
 
@@ -58,10 +60,13 @@ see the kinds of sequence generators that make interesting examples.
 
 The @racket[in-range] function generates a sequence of numbers, given
 an optional starting number (which defaults to @racket[0]), a number
-before which the sequences ends, and an optional step (which defaults
-to @racket[1]).
+before which the sequence ends, and an optional step (which defaults
+to @racket[1]). Using a non-negative integer @racket[_k] directly as 
+a sequence is a shorthand for @racket[(in-range _k)].
 
 @examples[
+(for ([i 3])
+  (display i))
 (for ([i (in-range 3)])
   (display i))
 (for ([i (in-range 1 4)])
@@ -102,7 +107,8 @@ true.
 
 Sequence constructors like @racket[in-list], @racket[in-vector] and
 @racket[in-string] simply make explicit the use of a list, vector, or
-string as a sequence. Since they raise an exception when given the
+string as a sequence. Along with @racket[in-range],
+these constructors raise an exception when given the
 wrong kind of value, and since they otherwise avoid a run-time
 dispatch to determine the sequence type, they enable more efficient
 code generation; see @secref["for-performance"] for more information.
@@ -124,7 +130,8 @@ A more complete syntax of @racket[for] is
 (for (clause ...)
   body ...+)
 ([clause [id sequence-expr]
-         (code:line #:when boolean-expr)])
+         (code:line #:when boolean-expr)
+         (code:line #:unless boolean-expr)])
 ]{}
 
 When multiple @racket[[_id _sequence-expr]] clauses are provided
@@ -185,6 +192,10 @@ mutually nested, instead of in parallel, even with @racket[for].
       #:when (not (equal? chapter "Index")))
   (printf "~a Chapter ~a. ~a\n" book i chapter))
 ]
+
+An @racket[#:unless] clause is analogus to a @racket[#:when] clause, but
+the @racket[_body]s evaluate only when the @racket[_boolean-expr]
+produces a false value.
 
 @section{@racket[for/list] and @racket[for*/list]}
 
@@ -425,7 +436,8 @@ fast-clause [id fast-seq]
 
 @racketgrammar[
 #:literals [in-range in-naturals in-list in-vector in-string in-bytes in-value stop-before stop-after]
-fast-seq (in-range expr expr)
+fast-seq (in-range expr)
+         (in-range expr expr)
          (in-range expr expr expr)
          (in-naturals)
          (in-naturals expr)

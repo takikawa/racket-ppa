@@ -15,7 +15,7 @@ See more in PR8831.
 
 
 ;;;
-;;; <uri-codec-unit.ss> ---- En/Decode URLs and form-urlencoded data
+;;; <uri-codec-unit.rkt> ---- En/Decode URLs and form-urlencoded data
 ;;; Time-stamp: <03/04/25 10:31:31 noel>
 ;;;
 ;;; Copyright (C) 2002 by Noel Welsh.
@@ -86,13 +86,9 @@ See more in PR8831.
 ;; Draws inspiration from encode-decode.scm by Kurt Normark and a code
 ;; sample provided by Eli Barzilay
 
-#lang scheme/unit
+#lang racket/unit
 
-(require mzlib/match
-         mzlib/string
-         mzlib/list
-         mzlib/etc
-         "uri-codec-sig.ss")
+(require racket/match racket/string racket/list "uri-codec-sig.rkt")
 
 (import)
 (export uri-codec^)
@@ -151,7 +147,7 @@ See more in PR8831.
   (let ([encoding-table (build-vector ascii-size number->hex-string)]
         [decoding-table (build-vector ascii-size values)])
     (for-each (match-lambda
-               [(orig . enc)
+               [(cons orig enc)
                 (vector-set! encoding-table
                              (char->integer orig)
                              (string enc))
@@ -188,17 +184,16 @@ See more in PR8831.
 ;; vector string -> string
 (define (decode table str)
   (define internal-decode
-    (match-lambda [() (list)]
-                  [(#\% (? hex-digit? char1) (? hex-digit? char2) . rest)
+    (match-lambda [(list) (list)]
+                  [(list* #\% (? hex-digit? char1) (? hex-digit? char2) rest)
                    ;; This used to consult the table again, but I think that's
                    ;;  wrong. For example %2b should produce +, not a space.
                    (cons (string->number (string char1 char2) 16)
                          (internal-decode rest))]
-                  [((? ascii-char? char) . rest)
-                   (cons
-                    (vector-ref table (char->integer char))
-                    (internal-decode rest))]
-                  [(char . rest)
+                  [(cons (? ascii-char? char) rest)
+                   (cons (vector-ref table (char->integer char))
+                         (internal-decode rest))]
+                  [(cons char rest)
                    (append
                     (bytes->list (string->bytes/utf-8 (string char)))
                     (internal-decode rest))]))
@@ -269,20 +264,19 @@ See more in PR8831.
 ;; string -> listof (cons string string)
 ;; http://www.w3.org/TR/html401/appendix/notes.html#ampersands-in-uris
 (define (form-urlencoded->alist str)
-  (define keyval-regexp #rx"^([^=]*)(?:=(.*))?$")
+  (define keyval-regexp #rx"=")
   (define value-regexp
     (case (current-alist-separator-mode)
       [(semi) #rx"[;]"]
       [(amp) #rx"[&]"]
       [else #rx"[&;]"]))
-  (if (equal? "" str)
-    '()
-    (map (lambda (keyval)
-           (let ([m (regexp-match keyval-regexp keyval)]) ; cannot fail
-             (cons (string->symbol (form-urlencoded-decode (cadr m)))
-                   ;; can be #f for no "=..." part
-                   (and (caddr m) (form-urlencoded-decode (caddr m))))))
-         (regexp-split value-regexp str))))
+  (define (parse-keyval keyval)
+    (let (;; m = #f => no "=..." part
+          [m (regexp-match-positions keyval-regexp keyval)])
+      (cons (string->symbol (form-urlencoded-decode
+                             (if m (substring keyval 0 (caar m)) keyval)))
+            (and m (form-urlencoded-decode (substring keyval (cdar m)))))))
+  (if (equal? "" str) '() (map parse-keyval (regexp-split value-regexp str))))
 
 (define current-alist-separator-mode
   (make-parameter 'amp-or-semi
@@ -293,4 +287,4 @@ See more in PR8831.
                           s))
       s)))
 
-;;; uri-codec-unit.ss ends here
+;;; uri-codec-unit.rkt ends here

@@ -1,7 +1,7 @@
 #lang scheme/base
 (require scheme/unit
          racket/future
-         "option-sig.ss")
+         "option-sig.rkt")
 
 (provide setup:option@ set-flag-params)
 
@@ -27,7 +27,10 @@
 
   (define setup-program-name (make-parameter "raco setup"))
 
-  (define-flag-param parallel-workers (min (processor-count) 8))
+  (define-flag-param parallel-workers (min (processor-count) 
+                                           (if (fixnum? (arithmetic-shift 1 40))
+                                               8    ; 64-bit machine
+                                               4))) ; 32-bit machine
   (define-flag-param verbose #f)
   (define-flag-param make-verbose #f)
   (define-flag-param compiler-verbose #f)

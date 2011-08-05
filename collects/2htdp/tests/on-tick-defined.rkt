@@ -6,9 +6,18 @@
 
 (error-print-source-location #f)
 
-(define legal "~a: not a legal clause in a world description")
-(define double 
-  (string-append (format legal 'on-tick) ", on-tick has been redefined"))
+(define legal "big-bang: ~a clauses are not allowed when using big-bang")
+(define double "big-bang: the on-tick clause appears twice")
+(define atleast "big-bang: expects a [to-draw handler] clause, missing")
+
+;; is the mandatort to-draw clause specified 
+(with-handlers ((exn:fail:syntax? 
+                 (lambda (x) 
+                   (unless (string=? (exn-message x) atleast) (raise x)))))
+  (eval '(module a scheme 
+           (require 2htdp/universe)
+           (local ((define (run) (big-bang 0 (on-tick add1))))
+             10))))
 
 (with-handlers ((exn:fail:syntax? 
                  (lambda (x) 
@@ -33,7 +42,8 @@
 
 (with-handlers ((exn:fail:syntax? 
                  (lambda (e)
-                   (unless (string=? (exn-message e) (format legal 'stop-when))
+                   (unless (string=? (exn-message e) 
+                                     "big-bang: expected a clause, but found something else")
                      (raise e)))))
   (eval '(module a scheme
            (require 2htdp/universe)
@@ -44,7 +54,7 @@
 
 (with-handlers ((exn:fail:syntax? 
                  (lambda (x) 
-                   (unless (string=? (exn-message x) "big-bang: missing initial state")
+                   (unless (string=? (exn-message x) "big-bang: expected an initial state, but found a clause")
                      (raise x)))))
   (eval '(module a scheme 
            (require 2htdp/universe)
@@ -52,7 +62,7 @@
 
 (with-handlers ((exn:fail:syntax? 
                  (lambda (x) 
-                   (unless (string=? (exn-message x) "universe: missing initial state")
+                   (unless (string=? (exn-message x) "universe: expected an initial state, but found a clause")
                      (raise x)))))
   (eval '(module a scheme 
            (require 2htdp/universe)

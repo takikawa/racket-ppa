@@ -3,13 +3,13 @@
 (require (for-syntax scheme/base scheme/require-transform)
          scheme/require-syntax)
 
-(define-for-syntax (splice-requires specs)  
+(define-for-syntax (splice-requires specs)
   (define subs (map (compose cons expand-import) specs))
   (values (apply append (map car subs)) (apply append (map cdr subs))))
 
 (define-syntax define-module
   (syntax-rules ()
-    [(_ nm spec ...)     
+    [(_ nm spec ...)
      (define-syntax nm
        (make-require-transformer
         (lambda (stx)
@@ -36,12 +36,12 @@
 
 (define-module rackunit
   (planet/multiple ("schematics" "rackunit.plt" 2 11)
-                   "test.ss"
-                   ;"graphical-ui.ss"
-                   "text-ui.ss"
-                   "util.ss")
+                   "test.rkt"
+                   ;"graphical-ui.rkt"
+                   "text-ui.rkt"
+                   "util.rkt")
   ;; disabled until Carl updates to v4
   #;
   (planet/multiple ("cce" "fasttest.plt" 1 2)
-                   "random.ss"
-                   "rackunit.ss"))
+                   "random.rkt"
+                   "rackunit.rkt"))

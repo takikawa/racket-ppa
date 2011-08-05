@@ -1,9 +1,12 @@
 #lang scribble/doc
-@(require scribble/manual
-          "common.ss"
-          (for-label racket/runtime-path))
+@(require scribble/manual "common.rkt" (for-label racket/runtime-path))
 
 @title[#:tag "exe"]{@exec{raco exe}: Creating Stand-Alone Executables}
+
+@margin-note{Use a smaller base language to achieve a faster startup time such
+as @racketmodfont{#lang} @racketmodname[racket/base] instead of
+@racketmodfont{#lang} @racketmodname[racket] rather than relying on @exec{raco
+exe}.}
 
 Compiled code produced by @exec{raco make} relies on Racket
 executables to provide run-time support to the compiled code. However,
@@ -14,7 +17,7 @@ an executable produced by @exec{raco exe} will not improve performance
 over @exec{raco make}.
 
 The @exec{raco exe} command embeds a module, from source or byte
-code, into a copy of the @exec{racket} executable. (Under Unix, the
+code, into a copy of the @exec{racket} executable. (On Unix, the
 embedding executable is actually a copy of a wrapper executable.)  The
 created executable invokes the embedded module on startup. The
 @DFlag{gui} flag causes the program to be embedded in a copy of the

@@ -1,6 +1,6 @@
 #lang scheme
-(require "bitmap-test-util.ss"
-         "../main.ss")
+(require "bitmap-test-util.rkt"
+         "../main.rkt")
 
 ;; tests: 
 ;;  - language,
@@ -243,5 +243,19 @@
        hole))
   (test (render-language L) "holes.png"))
 
-(printf "bitmap-test.ss: ")
+(let ()
+  ;; the 'has no lambdas' relation (useful because it has a case with no premises)
+  (define-relation lang
+    [(r e_1 e_2) (r e_1) (r e_2)]
+    [(r x)])
+  (test (render-relation r) "relation.png"))
+
+(let ()
+  ;; a relation with a `name' pattern in its conclusion
+  (define-relation lang
+    [(r (name e (λ (x) x)))
+     (r x)])
+  (test (render-relation r) "relation-with-name.png"))    
+
+(printf "bitmap-test.rkt: ")
 (done)

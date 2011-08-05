@@ -4,7 +4,7 @@
           (for-syntax racket/base racket/path)
           (for-label scribble/base))
 
-@title[#:tag "unstable"]{Unstable}
+@title[#:tag "unstable"]{Unstable: May Change Without Warning}
 
 @defmodule[unstable]
 
@@ -71,6 +71,7 @@ Keep documentation and tests up to date.
   Add new documentation links to the list immediately below.
 }
 
+@include-section["../automata/scribblings/automata.scrbl"]
 @include-section["bytes.scrbl"]
 @include-section["contract.scrbl"]
 @include-section["wrapc.scrbl"]
@@ -78,7 +79,6 @@ Keep documentation and tests up to date.
 @include-section["debug.scrbl"]
 @include-section["define.scrbl"]
 @include-section["dict.scrbl"]
-@include-section["dirs.scrbl"]
 @include-section["exn.scrbl"]
 @include-section["file.scrbl"]
 @include-section["find.scrbl"]
@@ -88,6 +88,7 @@ Keep documentation and tests up to date.
 @include-section["hash.scrbl"]
 @include-section["class-iop.scrbl"] ;; Interface-oriented Programming
 @include-section["list.scrbl"]
+@include-section["logging.scrbl"]
 @include-section["markparam.scrbl"]
 @include-section["match.scrbl"]
 @include-section["net.scrbl"]
@@ -99,6 +100,7 @@ Keep documentation and tests up to date.
 @include-section["string.scrbl"]
 @include-section["struct.scrbl"]
 @include-section["syntax.scrbl"]
+@include-section["../temp-c/scribblings/temp-c.scrbl"]
 
 @;{--------}
 

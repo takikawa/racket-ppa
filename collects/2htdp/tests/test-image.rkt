@@ -1665,6 +1665,14 @@
        160 160 0 1/2
        (make-pen "black" 12 "solid" "round" "round")))
 
+(test (add-line (rectangle 30 30 "outline" "black")
+                0 0 30 30 
+                (make-pen (make-color 0 0 0 255) 15 "solid" "butt" "round"))
+      =>
+      (add-line (rectangle 30 30 "outline" "black")
+                0 0 30 30 
+                (make-pen "black" 15 "solid" "butt" "round")))
+
 (test (image->color-list
        (above (beside (rectangle 1 1 'solid (color 1 1 1))
                       (rectangle 1 1 'solid (color 2 2 2))
@@ -1964,60 +1972,60 @@
 
 (test/exn (rectangle 10 10 "solid" (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^rectangle: expected <image-color>")
+          #rx"^rectangle: expects an image-color")
 
 (test/exn (rectangle 10 10 'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^rectangle: expected <image-color>")
+          #rx"^rectangle: expects an image-color")
 
 (test/exn (circle 10 'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^circle: expected <image-color>")
+          #rx"^circle: expects an image-color")
 
 (test/exn (ellipse 10 10 'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^ellipse: expected <image-color>")
+          #rx"^ellipse: expects an image-color")
 
 (test/exn (triangle 10 'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^triangle: expected <image-color>")
+          #rx"^triangle: expects an image-color")
 
 (test/exn (right-triangle 10 12 'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^right-triangle: expected <image-color>")
+          #rx"^right-triangle: expects an image-color")
 
 (test/exn (isosceles-triangle 10 120 'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^isosceles-triangle: expected <image-color>")
+          #rx"^isosceles-triangle: expects an image-color")
 
 (test/exn (square 10 'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^square: expected <image-color>")
+          #rx"^square: expects an image-color")
 
 (test/exn (rhombus 40 45 'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^rhombus: expected <image-color>")
+          #rx"^rhombus: expects an image-color")
 
 (test/exn (regular-polygon 40 6 'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^regular-polygon: expected <image-color>")
+          #rx"^regular-polygon: expects an image-color")
 
 (test/exn (star 40 'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^star: expected <image-color>")
+          #rx"^star: expects an image-color")
 
 (test/exn (star-polygon 40 7 3 'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^star-polygon: expected <image-color>")
+          #rx"^star-polygon: expects an image-color")
 
 (test/exn (polygon (list (make-posn 0 0) (make-posn 100 0) (make-posn 100 100))
                    'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^polygon: expected <image-color>")
+          #rx"^polygon: expects an image-color")
 (test/exn (polygon (list (make-posn 0 0+1i) (make-posn 100 0) (make-posn 100 100))
                    'solid (make-pen "black" 12 "solid" "round" "round"))
           =>
-          #rx"^polygon: expected <list-of-posns-with-real-valued-x-and-y-coordinates>")
+          #rx"^polygon: expects a list-of-posns-with-real-valued-x-and-y-coordinates")
 
 
 (test/exn (save-image "tri.png" (triangle 50 "solid" "purple"))
@@ -2186,8 +2194,18 @@
 
 (test (convertible? (circle 20 "solid" "red")) => #t)
 (test (bytes? (convert (circle 20 "solid" "red") 'png-bytes)) => #t)
-
-
+(let ()
+  (define tmpfile (make-temporary-file "2htdpimage-test-~a"))
+  (define i (circle 15 "solid" "red"))
+  (call-with-output-file tmpfile
+    (lambda (p)
+      (display (convert i 'png-bytes) p))
+    #:exists 'truncate)
+  (define i2 (rotate 0 (read-bitmap tmpfile))) ;; add rotate to be sure we get an image so that equal? works properly
+  (delete-file tmpfile)
+  (test (image-width i2) => 30)
+  (test (image-height i2) => 30)
+  (test i2 => i))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -2267,10 +2285,10 @@
          [normalized (normalize-shape (image-shape img))]
          [norm-size (image-struct-count normalized)]) 
     (unless (normalized-shape? normalized)
-      (error 'test-image.ss "found a non-normalized shape after normalization:\n~s" 
+      (error 'test-image.rkt "found a non-normalized shape after normalization:\n~s" 
              img-sexp))
     (unless (equal? norm-size raw-size)
-      (error 'test-image.ss "found differing sizes for ~s:\n  ~s\n  ~s" 
+      (error 'test-image.rkt "found differing sizes for ~s:\n  ~s\n  ~s" 
              img-sexp raw-size norm-size))))
 
 (time

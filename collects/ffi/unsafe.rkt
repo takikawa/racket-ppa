@@ -142,7 +142,9 @@
              (and (file-exists? name0) ; relative with original
                   (ffi-lib* (fullpath name0)))
              ;; give up: call ffi-lib so it will raise an error
-             (ffi-lib (car names))))])]))
+             (if (pair? names)
+                 (ffi-lib (car names))
+                 (ffi-lib name0))))])]))
 
 (define (get-ffi-lib-internal x)
   (if (ffi-lib? x) x (get-ffi-lib x)))
@@ -244,12 +246,15 @@
 
   ;; The `_fun' macro tears its input apart and reassemble it using pieces from
   ;; custom function types (macros).  This whole deal needs some work to make
-  ;; it play nicely with code certificates, so Matthew wrote the following
+  ;; it play nicely with taints and code inspectors, so Matthew wrote the following
   ;; code.  The idea is to create a define-fun-syntax which makes the new
   ;; syntax transformer be an object that carries extra information, later used
   ;; by `expand-fun-syntax/fun'.
 
-  (define fun-cert-key (gensym))
+  (define orig-inspector (current-code-inspector))
+
+  (define (disarm stx)
+    (syntax-disarm stx orig-inspector))
 
   ;; bug in begin-for-syntax (PR7104), see below
   (define foo!!! (make-parameter #f))
@@ -257,15 +262,14 @@
     ((foo!!!) fun-stx stx))
 
   (define-values (make-fun-syntax fun-syntax?
-                  fun-syntax-proc fun-syntax-certifier fun-syntax-name)
+                  fun-syntax-proc fun-syntax-name)
     (let-values ([(desc make pred? get set!)
                   (make-struct-type
-                   'fun-syntax #f 3 0 #f '() (current-inspector)
+                   'fun-syntax #f 2 0 #f '() (current-inspector)
                    expand-fun-syntax/normal)])
       (values make pred?
               (make-struct-field-accessor get 0 'proc)
-              (make-struct-field-accessor get 1 'certifier)
-              (make-struct-field-accessor get 2 'name))))
+              (make-struct-field-accessor get 1 'name))))
 
   ;; This is used to expand a fun-syntax in a _fun type context.
   (define (expand-fun-syntax/fun stx)
@@ -287,16 +291,17 @@
                    (introduce
                     ;; Actually expand:
                     ((fun-syntax-proc proc)
-                     ;; Add mark specific to this expansion:
-                     (introduce
-                      ;; Remove mark related to expansion of `_fun':
-                      (syntax-local-introduce stx)))))])
-            ;; Certify based on definition of expander, then loop
+                     ;; Disarm taints:
+                     (disarm
+                      ;; Add mark specific to this expansion:
+                      (introduce
+                       ;; Remove mark related to expansion of `_fun':
+                       (syntax-local-introduce stx))))))])
+            ;; Restore die packs from original, then loop
             ;;  to continue expanding:
-            (loop ((fun-syntax-certifier proc)
-                   expanded fun-cert-key introduce)))
+            (loop (syntax-rearm expanded stx)))
           stx))
-      (syntax-case stx ()
+      (syntax-case (disarm stx) ()
         [(id . rest) (identifier? #'id) (do-expand #'id #f)]
         [id          (identifier? #'id) (do-expand #'id #t)]
         [_else stx])))
@@ -323,15 +328,12 @@
                        '(#%app #%top #%datum)))
     ;; Expand `type' using expand-fun-syntax/fun
     (define orig (expand-fun-syntax/fun type))
-    (define (with-arg x)
+    (define (with-arg x rearm)
       (syntax-case* x (=>) id=?
         [(id => body) (identifier? #'id)
-         ;; Extract #'body from its context, use a key it needs certification:
-         (list (syntax-recertify #'id orig #f fun-cert-key)
-	       (syntax-recertify #'body orig #f fun-cert-key))]
-        [_else x]))
-    (define (cert-id id)
-      (syntax-recertify id orig #f fun-cert-key))
+         ;; Extract #'body from its context
+         (list (rearm #'id) (rearm #'body))]
+        [_else (rearm x)]))
    (let ([keys '()])
      (define (setkey! key val . id?)
        (cond
@@ -341,28 +343,26 @@
           (err "bad expansion of custom type (`~a:' expects an identifier)"
                key type)]
          [else (set! keys (cons (cons key val) keys))]))
-     (let loop ([t orig])
+     (let loop ([t (disarm orig)])
        (define (next rest . args) (apply setkey! args) (loop rest))
+       (define (rearm e) (syntax-rearm e orig))
        (syntax-case* t
            (type: expr: bind: 1st-arg: prev-arg: pre: post: keywords: =>)
            id=?
-         [(type: t x ...)      (next #'(x ...) 'type #'t)]
-         [(expr:     e  x ...) (next #'(x ...) 'expr #'e)]
-         [(bind:     id x ...) (next #'(x ...) 'bind (cert-id #'id) #t)]
-         [(1st-arg:  id x ...) (next #'(x ...) '1st  (cert-id #'id) #t)]
-         [(prev-arg: id x ...) (next #'(x ...) 'prev (cert-id #'id) #t)]
-         ;; in the following two cases pass along orig for recertifying
-         ;; first explicitly check if the `(id => expr)' form left off
-         ;; the parentheses
+         [(type: t x ...)      (next #'(x ...) 'type (rearm #'t))]
+         [(expr:     e  x ...) (next #'(x ...) 'expr (rearm #'e))]
+         [(bind:     id x ...) (next #'(x ...) 'bind (rearm #'id) #t)]
+         [(1st-arg:  id x ...) (next #'(x ...) '1st  (rearm #'id) #t)]
+         [(prev-arg: id x ...) (next #'(x ...) 'prev (rearm #'id) #t)]
          [(pre:      p => expr x ...) (err "bad form for `pre:'. Expected either `pre: (id => expression)' or `pre: expression'" #'(pre: p => expr))]
-         [(pre:      p  x ...) (next #'(x ...) 'pre  (with-arg #'p))]
+         [(pre:      p  x ...) (next #'(x ...) 'pre  (with-arg #'p rearm))]
          [(post:     p => expr x ...) (err "bad form for `post:' Expected either `post: (id => expression)' or `post: expression'" #'(post: p => expr))]
-         [(post:     p  x ...) (next #'(x ...) 'post (with-arg #'p))]
+         [(post:     p  x ...) (next #'(x ...) 'post (with-arg #'p rearm))]
          [(keywords: x ...)
           (let kloop ([ks '()] [xs #'(x ...)])
             (syntax-case xs ()
               [(k v x ...) (syntax-e #'k)
-               (kloop (cons (cons (syntax-e #'k) #'v) ks) #'(x ...))]
+               (kloop (cons (cons (syntax-e (rearm #'k)) (rearm #'v)) ks) #'(x ...))]
               [_ (next xs 'keywords (reverse ks))]))]
          [() (and (pair? keys) keys)]
          [_else #f]))))
@@ -423,8 +423,6 @@
          (let ([f (make-fun-syntax (if set!-trans?
                                      (set!-transformer-procedure xformer)
                                      xformer)
-                                   ;; Capture definition-time certificates:
-                                   (syntax-local-certifier)
                                    'id)])
            (if set!-trans? (make-set!-transformer f) f))))]))
 
@@ -439,13 +437,14 @@
                       #:wrapper     [wrapper #f]
                       #:keep        [keep    #t]
                       #:atomic?     [atomic? #f]
-                      #:async-apply [async-apply   #f]
+                      #:in-original-place? [orig-place? #f]
+                      #:async-apply [async-apply #f]
                       #:save-errno  [errno   #f])
-  (_cprocedure* itypes otype abi wrapper keep atomic? async-apply errno))
+  (_cprocedure* itypes otype abi wrapper keep atomic? orig-place? async-apply errno))
 
 ;; for internal use
 (define held-callbacks (make-weak-hasheq))
-(define (_cprocedure* itypes otype abi wrapper keep atomic? async-apply errno)
+(define (_cprocedure* itypes otype abi wrapper keep atomic? orig-place? async-apply errno)
   (define-syntax-rule (make-it wrap)
     (make-ctype _fpointer
       (lambda (x)
@@ -458,7 +457,7 @@
                                   (if (or (null? x) (pair? x)) (cons cb x) cb)))]
                      [(procedure? keep) (keep cb)])
                cb)))
-      (lambda (x) (and x (wrap (ffi-call x itypes otype abi errno))))))
+      (lambda (x) (and x (wrap (ffi-call x itypes otype abi errno orig-place?))))))
   (if wrapper (make-it wrapper) (make-it begin)))
 
 ;; Syntax for the special _fun type:
@@ -481,7 +480,8 @@
 
 (provide _fun)
 (define-for-syntax _fun-keywords
-  `([#:abi ,#'#f] [#:keep ,#'#t] [#:atomic? ,#'#f] [#:async-apply ,#'#f] [#:save-errno ,#'#f]))
+  `([#:abi ,#'#f] [#:keep ,#'#t] [#:atomic? ,#'#f] [#:in-original-place? ,#'#f] 
+    [#:async-apply ,#'#f] [#:save-errno ,#'#f]))
 (define-syntax (_fun stx)
   (define (err msg . sub) (apply raise-syntax-error '_fun msg stx sub))
   (define xs     #f)
@@ -630,6 +630,7 @@
                              #,wrapper
                              #,(kwd-ref '#:keep)
                              #,(kwd-ref '#:atomic?)
+                             #,(kwd-ref '#:in-original-place?)
                              #,(kwd-ref '#:async-apply)
                              #,(kwd-ref '#:save-errno)))])
       (if (or (caddr output) input-names (ormap caddr inputs)
@@ -1502,7 +1503,9 @@
   (unless killer-thread
     (let ([priviledged-custodian ((get-ffi-obj 'scheme_make_custodian #f (_fun _pointer -> _scheme)) #f)])
       (set! killer-thread
-            (parameterize ([current-custodian priviledged-custodian])
+            (parameterize ([current-custodian priviledged-custodian]
+                           ;; don't hold onto the namespace in the finalizer thread:
+                           [current-namespace (make-base-empty-namespace)])
               (thread (lambda ()
                         (let loop () (will-execute killer-executor) (loop))))))))
   (will-register killer-executor obj finalizer))

@@ -12,6 +12,13 @@
   All rights reserved.
 */
 
+/* SKIP */
+
+/* After modifying this file, `make exports' (you must have `racket'
+   in your path) to recreated derived files. */
+
+/* Do no remove the SKIP tag above or the START tag below. */
+
 /* Racket function prototypes */
 /* Macros generally shouldn't go in this file; it is used both to
    prototype functions, and as a parsing source for
@@ -128,6 +135,7 @@ MZ_EXTERN void scheme_cancel_sleep(void);
 
 MZ_EXTERN void scheme_start_sleeper_thread(void (*mzsleep)(float seconds, void *fds), float secs, void *fds, int hit_fd);
 MZ_EXTERN void scheme_end_sleeper_thread();
+MZ_EXTERN void scheme_set_place_sleep(Scheme_Sleep_Proc slp);
 
 MZ_EXTERN void scheme_notify_sleep_progress();
 
@@ -392,6 +400,7 @@ MZ_EXTERN void *GC_malloc_uncollectable(size_t size_in_bytes);
 #endif
 
 MZ_EXTERN void *scheme_malloc_code(intptr_t size);
+MZ_EXTERN void *scheme_malloc_permanent_code(intptr_t size);
 MZ_EXTERN void scheme_free_code(void *p);
 #ifndef MZ_PRECISE_GC
 MZ_EXTERN void *scheme_malloc_gcable_code(intptr_t size);
@@ -430,6 +439,7 @@ MZ_EXTERN void scheme_dont_gc_ptr(void *p);
 MZ_EXTERN void scheme_gc_ptr_ok(void *p);
 
 MZ_EXTERN void scheme_collect_garbage(void);
+MZ_EXTERN void scheme_enable_garbage_collection(int on);
 
 #ifdef MZ_PRECISE_GC
 # ifndef USE_THREAD_LOCAL
@@ -477,6 +487,7 @@ MZ_EXTERN Scheme_Hash_Table *scheme_clone_hash_table(Scheme_Hash_Table *bt);
 MZ_EXTERN Scheme_Hash_Tree *scheme_make_hash_tree(int kind);
 MZ_EXTERN Scheme_Hash_Tree *scheme_hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val);
 MZ_EXTERN Scheme_Object *scheme_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *key);
+XFORM_NONGCING MZ_EXTERN Scheme_Object *scheme_eq_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *key);
 MZ_EXTERN intptr_t scheme_hash_tree_next(Scheme_Hash_Tree *tree, intptr_t pos);
 MZ_EXTERN int scheme_hash_tree_index(Scheme_Hash_Tree *tree, intptr_t pos, Scheme_Object **_key, Scheme_Object **_val);
 MZ_EXTERN int scheme_hash_tree_equal(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2);
@@ -839,6 +850,8 @@ MZ_EXTERN void scheme_set_port_location_fun(Scheme_Port *port,
 					    Scheme_Location_Fun location_fun);
 MZ_EXTERN void scheme_set_port_count_lines_fun(Scheme_Port *port,
 					       Scheme_Count_Lines_Fun count_lines_fun);
+MZ_EXTERN void scheme_port_count_lines(Scheme_Port *ip, const char *buffer, 
+                                       intptr_t offset, intptr_t got);
 
 MZ_EXTERN Scheme_Object *scheme_progress_evt_via_get(Scheme_Input_Port *port);
 MZ_EXTERN int scheme_peeked_read_via_get(Scheme_Input_Port *port,
@@ -1142,5 +1155,8 @@ MZ_EXTERN intptr_t scheme_char_strlen(const mzchar *s);
 
 MZ_EXTERN Scheme_Object *scheme_stx_extract_marks(Scheme_Object *stx);
 
-MZ_EXTERN Scheme_Object *scheme_get_place_table(void);
+MZ_EXTERN Scheme_Hash_Table *scheme_get_place_table(void);
 MZ_EXTERN void *scheme_register_process_global(const char *key, void *val);
+
+MZ_EXTERN Scheme_Object *scheme_malloc_key(void);
+MZ_EXTERN void scheme_free_key(Scheme_Object *k);

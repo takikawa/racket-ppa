@@ -1,4 +1,4 @@
-#lang scheme/base  
+#lang scheme/base
 (require "../utils/utils.rkt"
          (rep type-rep filter-rep object-rep rep-utils)
          (utils tc-utils)
@@ -63,7 +63,7 @@
 
 (define In-Syntax
   (-mu e
-       (Un (-val null) -Boolean -Symbol -String -Keyword -Char -Number 
+       (Un (-val null) -Boolean -Symbol -String -Keyword -Char -Number
            (make-Vector (-Syntax e))
            (make-Box (-Syntax e))
            (-lst (-Syntax e))
@@ -74,7 +74,7 @@
 (define (-Sexpof t)
   (-mu sexp
        (Un (-val '())
-           -Number -Boolean -Symbol -String -Keyword -Char           
+           -Number -Boolean -Symbol -String -Keyword -Char
            (-pair sexp sexp)
            (make-Vector sexp)
            (make-Box sexp)
@@ -85,4 +85,16 @@
 (define Syntax-Sexp (-Sexpof Any-Syntax))
 
 (define Ident (-Syntax -Symbol))
+
+
+(define -Module-Path (*Un -Symbol -String
+                          (-lst* (-val 'quote) -Symbol)
+                          (-lst* (-val 'lib) -String)
+                          (-lst* (-val 'file) -String)
+                          (-pair (-val 'planet)
+                           (*Un (-lst* -Symbol)
+                                (-lst* -String)
+                                (-lst* -String (-lst* -String -String #:tail (make-Listof (*Un -Nat (-lst* (*Un -Nat (one-of/c '= '+ '-)) -Nat)))))))))
+
+(define -Log-Level (one-of/c 'fatal 'error 'warning 'info 'debug))
 

@@ -1,9 +1,9 @@
 #;
 (
-unboxed-let-functions8.rkt line 15 col 67 - x - unbox float-complex
-unboxed-let-functions8.rkt line 15 col 69 - 2.0+4.0i - unboxed literal
-unboxed-let-functions8.rkt line 15 col 65 - + - unboxed binary float complex
-unboxed-let-functions8.rkt line 15 col 64 - (#%app + x (quote 2.0+4.0i)) - unboxed float complex
+TR opt: unboxed-let-functions8.rkt 15:64 (+ x 2.0+4.0i) -- unboxed float complex
+TR opt: unboxed-let-functions8.rkt 15:65 + -- unboxed binary float complex
+TR opt: unboxed-let-functions8.rkt 15:67 x -- unbox float-complex
+TR opt: unboxed-let-functions8.rkt 15:69 2.0+4.0i -- unboxed literal
 3.0+6.0i
 )
 

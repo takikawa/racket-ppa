@@ -130,6 +130,7 @@
     (define special-peeked null)
     (define special-peeked-tail #f)
     (define progress-requested? #f)
+    (define line-counting? #f)
     (define use-manager? #f)
     (define manager-th #f)
     (define manager-ch (make-channel))
@@ -313,11 +314,15 @@
         #f
         (let* ([avail (pipe-content-length peeked-r)]
                [p-commit (min avail amt)])
-          (let loop ([amt (- amt p-commit)] [l special-peeked])
+          (let loop ([amt (- amt p-commit)]
+                     [l special-peeked]
+                     ;; result is either bytes (if needed for line ounting)
+                     ;; or an integer count (for on-consumed)
+                     [result (if line-counting? null 0)])
             (cond
               [(amt . <= . 0)
                ;; Enough has been peeked. Do commit...
-               (actual-commit p-commit l unless-evt done-evt)]
+               (actual-commit p-commit l unless-evt done-evt result)]
               [(null? l)
                ;; Requested commit was larger than previous peeks
                #f]
@@ -330,21 +335,39 @@
                      (set-mcdr! l next)
                      (when (eq? l special-peeked-tail)
                        (set! special-peeked-tail next))
-                     (loop 0 (mcdr l)))
+                     (loop 0 (mcdr l) (if line-counting?
+                                          (cons (subbytes (mcar l) 0 amt) result)
+                                          (+ amt result))))
                    ;; Consume this string...
-                   (loop  (- amt bl) (mcdr l))))]
+                   (loop  (- amt bl) (mcdr l) (if line-counting?
+                                                  (cons (mcar l) result)
+                                                  (+ bl result)))))]
               [else
-               (loop (sub1 amt) (mcdr l))])))))
-    (define (actual-commit p-commit l unless-evt done-evt)
+               (loop (sub1 amt) (mcdr l) (if line-counting?
+                                             (cons #"." result)
+                                             (add1 result)))])))))
+    (define (actual-commit p-commit l unless-evt done-evt result)
       ;; The `finish' proc finally, actually, will commit...
       (define (finish)
-        (unless (zero? p-commit)
-          (peek-byte peeked-r (sub1 p-commit))
-          (port-commit-peeked p-commit unless-evt always-evt peeked-r))
-        (set! special-peeked l)
-        (when (null? special-peeked) (set! special-peeked-tail #f))
-        (when (and progress-requested? (zero? p-commit)) (make-progress))
-        #t)
+        (let ([result (if line-counting?
+                          (cons (peek-bytes p-commit 0 peeked-r) result)
+                          (+ p-commit result))])
+          (unless (zero? p-commit)
+            (peek-byte peeked-r (sub1 p-commit))
+            (port-commit-peeked p-commit unless-evt always-evt peeked-r))
+          (set! special-peeked l)
+          (when (null? special-peeked) (set! special-peeked-tail #f))
+          (when (and progress-requested? (zero? p-commit)) (make-progress))
+          (if line-counting?
+              ;; bytes representation of committed text allows line counting
+              ;; to be updated correctly (when line counting is implemented
+              ;; automatically)
+              (let ([bstr (apply bytes-append (reverse result))])
+                (when on-consumed (on-consumed (bytes-length bstr)))
+                bstr)
+              (begin
+                (when on-consumed (on-consumed result))
+                #t))))
       ;; If we can sync done-evt immediately, then finish.
       (if (sync/timeout 0 (wrap-evt done-evt (lambda (x) #t)))
         (finish)
@@ -429,7 +452,9 @@
        (port-progress-evt peeked-r))
      commit-it
      location-proc
-     count-lines!-proc
+     (lambda ()
+       (set! line-counting? #t)
+       (count-lines!-proc))
      init-position
      (and buffer-mode-proc
           (case-lambda
@@ -504,8 +529,7 @@
           (lambda (n evt target-evt) (port-commit-peeked n evt target-evt p)))
      (lambda () (port-next-location p))
      (lambda () (port-count-lines! p))
-     (let-values ([(line col pos) (port-next-location p)])
-       (or pos (file-position p))))))
+     (add1 (file-position p)))))
 
 ;; Not kill-safe.
 (define make-pipe-with-specials
@@ -844,31 +868,62 @@
 
 (define make-limited-input-port
   (lambda (port limit [close-orig? #t])
-    (let ([got 0])
+    (let ([got 0]
+          [lock-semaphore (make-semaphore 1)])
+      (define (do-read str)
+        (let ([count (min (- limit got) (bytes-length str))])
+          (if (zero? count)
+              eof
+              (let ([n (read-bytes-avail!* str port 0 count)])
+                (cond [(eq? n 0) (wrap-evt port (lambda (x) 0))]
+                      [(number? n) (set! got (+ got n)) n]
+                      [(procedure? n) (set! got (add1 got)) n]
+                      [else n])))))
+      (define (do-peek str skip progress-evt)
+        (let ([count (max 0 (min (- limit got skip) (bytes-length str)))])
+          (if (zero? count)
+              eof
+              (let ([n (peek-bytes-avail!* str skip progress-evt port 0 count)])
+                (if (eq? n 0)
+                    (wrap-evt port (lambda (x) 0))
+                    n)))))
+      (define (try-again)
+        (wrap-evt
+         (semaphore-peek-evt lock-semaphore)
+         (lambda (x) 0)))
       (make-input-port
        (object-name port)
        (lambda (str)
-         (let ([count (min (- limit got) (bytes-length str))])
-           (if (zero? count)
-             eof
-             (let ([n (read-bytes-avail!* str port 0 count)])
-               (cond [(eq? n 0) (wrap-evt port (lambda (x) 0))]
-                     [(number? n) (set! got (+ got n)) n]
-                     [(procedure? n) (set! got (add1 got)) n]
-                     [else n])))))
+         (call-with-semaphore 
+          lock-semaphore
+          do-read
+          try-again
+          str))
        (lambda (str skip progress-evt)
-         (let ([count (max 0 (min (- limit got skip) (bytes-length str)))])
-           (if (zero? count)
-             eof
-             (let ([n (peek-bytes-avail!* str skip progress-evt port 0 count)])
-               (if (eq? n 0)
-                 (wrap-evt port (lambda (x) 0))
-                 n)))))
+         (call-with-semaphore 
+          lock-semaphore
+          do-peek
+          try-again
+          str skip progress-evt))
        (lambda ()
          (when close-orig?
-           (close-input-port port)))))))
-
-
+           (close-input-port port)))
+       (and (port-provides-progress-evts? port)
+            (lambda () (port-progress-evt port)))
+       (and (port-provides-progress-evts? port)
+            (lambda (n evt target-evt) 
+              (let loop ()
+                (if (semaphore-try-wait? lock-semaphore)
+                    (let ([ok? (port-commit-peeked n evt target-evt port)])
+                      (when ok? (set! got (+ got n)))
+                      (semaphore-post lock-semaphore)
+                      ok?)
+                    (sync (handle-evt evt (lambda (v) #f))
+                          (handle-evt (semaphore-peek-evt lock-semaphore)
+                                      (lambda (v) (loop))))))))
+       (lambda () (port-next-location port))
+       (lambda () (port-count-lines! port))
+       (add1 (file-position port))))))
 
 (define special-filter-input-port
   (lambda (p filter [close? #t])
@@ -902,8 +957,7 @@
           (lambda (n evt target-evt) (port-commit-peeked n evt target-evt p)))
      (lambda () (port-next-location p))
      (lambda () (port-count-lines! p))
-     (let-values ([(l c p) (port-next-location p)])
-       p))))
+     (add1 (file-position p)))))
 
 ;; ----------------------------------------
 
@@ -1733,8 +1787,7 @@
     (let ([new (transplant-output-port
                 p
                 (lambda () (port-next-location p))
-                (let-values ([(line col pos) (port-next-location p)])
-                  (or pos (file-position p)))
+                (add1 (file-position p))
                 close?
                 (lambda () (port-count-lines! p)))])
       (port-display-handler new (port-display-handler p))
@@ -1746,8 +1799,7 @@
     (let ([new (transplant-input-port
                 p
                 (lambda () (port-next-location p))
-                (let-values ([(line col pos) (port-next-location p)])
-                  (or pos (file-position p)))
+                (add1 (file-position p))
                 close?
                 (lambda () (port-count-lines! p)))])
       (port-read-handler new (port-read-handler p))

@@ -1,7 +1,7 @@
 (module ellipses scheme/base
   (require scribble/manual
-           "ellipses-defn.ss"
-           (for-label "ellipses-defn.ss"))
+           "ellipses-defn.rkt"
+           (for-label "ellipses-defn.rkt"))
 
   (provide ellipses-defn
            ellipses-id)
@@ -12,4 +12,4 @@
        (defidform (... ...) . body)]))
 
   (define ellipses-id
-    (scheme ...)))
+    (racket ...)))

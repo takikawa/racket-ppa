@@ -1,6 +1,5 @@
 #lang scribble/doc
-@(require "mz.ss"
-          (for-label racket/set))
+@(require "mz.rkt" (for-label racket/set))
 
 @title[#:tag "sets"]{Sets}
 @(define set-eval (make-base-eval))
@@ -247,7 +246,7 @@ seteq lst)], and @racket[(apply seteqv lst)], respectively.
 
 @defproc[(set->list [st set?]) list?]{
 
-Produces a list containing the elements of @scheme[st].}
+Produces a list containing the elements of @racket[st].}
 
 
 @close-eval[set-eval]

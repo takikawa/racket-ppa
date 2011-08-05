@@ -1,7 +1,5 @@
 #lang scribble/doc
-@(require scribble/bnf
-          "mz.ss"
-          (for-label racket/fixnum))
+@(require scribble/bnf "mz.rkt" (for-label racket/fixnum))
 
 @title[#:tag "exns"]{Exceptions}
 
@@ -142,7 +140,8 @@ message names the bad argument and also lists the other arguments. If
 (feed-animals 'cow 'sheep 'dog 'cat)
 ]}
 
-@defproc[(raise-mismatch-error [name symbol?] [message string?] [v any/c]) any]{
+@defproc[(raise-mismatch-error [name symbol?] [message string?] [v any/c] 
+                               ...+ ...+) any]{
 
 Creates an @racket[exn:fail:contract] value and @racket[raise]s it as
 an exception.  The @racket[name] is used as the source procedure's
@@ -150,7 +149,12 @@ name in the error message. The @racket[message] is the error
 message. The @racket[v] argument is the improper argument received by
 the procedure. The printed form of @racket[v] is appended to
 @racket[message] (using the error value conversion handler; see
-@racket[error-value->string-handler]).}
+@racket[error-value->string-handler]).
+
+Additional arguments are concatenated to the error message like
+@racket[message] and @racket[v]. Every other additional argument
+(starting with the argument after @racket[v]) must be a string, but a
+string need not have a following value argument.}
 
 @defproc[(raise-arity-error [name (or/c symbol? procedure?)]
                             [arity-v (or/c exact-nonnegative-integer?
@@ -379,7 +383,7 @@ To report a run-time error, use @racket[raise] or procedures like
 @racket[error], instead of calling the error display handler
 directly.}
 
-@defparam[error-print-width width (and exact-integer? (>=/c 3))]{
+@defparam[error-print-width width (and/c exact-integer? (>=/c 3))]{
 
 A parameter whose value is used as the maximum number of characters
 used to print a Racket value that is embedded in a primitive error
@@ -572,6 +576,58 @@ value---the structure type instance from which to extract source
 locations---and returns a list of @racket[srcloc]s. Some @tech{error
 display handlers} use only the first returned location.}
 
+As an example,
+@codeblock|{
+#lang racket
+
+;; We create a structure that supports the
+;; prop:exn:srcloc protocol.  It carries
+;; with it the location of the syntax that
+;; is guilty.
+(define-struct (exn:fail:he-who-shall-not-be-named
+                exn:fail)
+  (a-srcloc)
+  #:property prop:exn:srclocs
+  (lambda (a-struct)
+    (match a-struct
+      [(struct exn:fail:he-who-shall-not-be-named
+         (msg marks a-srcloc))
+       (list a-srcloc)])))
+
+;; We can play with this by creating a form that
+;; looks at identifiers, and only flags specific ones.
+(define-syntax (skeeterize stx)
+  (syntax-case stx ()
+    [(_ expr)
+     (cond
+       [(and (identifier? #'expr)
+             (eq? (syntax-e #'expr) 'voldemort))
+        (quasisyntax/loc stx
+          (raise (make-exn:fail:he-who-shall-not-be-named
+                  "oh dear don't say his name"
+                  (current-continuation-marks)
+                  (srcloc '#,(syntax-source #'expr)
+                          '#,(syntax-line #'expr)
+                          '#,(syntax-column #'expr)
+                          '#,(syntax-position #'expr)
+                          '#,(syntax-span #'expr)))))]
+       [else
+        ;; Otherwise, leave the expression alone.
+        #'expr])]))
+
+(define (f x)
+  (* (skeeterize x) x))
+
+(define (g voldemort)
+  (* (skeeterize voldemort) voldemort))
+
+;; Examples:
+(f 7)
+(g 7)  
+;; The error should highlight the use
+;; of the one-who-shall-not-be-named
+;; in g.
+}|
 
 @defproc[(exn:srclocs? [v any/c]) boolean?]{
 

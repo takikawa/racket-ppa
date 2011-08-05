@@ -6,7 +6,7 @@
 ;; without using bytecode.
 
 (define url-host "download.racket-lang.org")
-(define url-path "/libs/2/")
+(define url-path "/libs/3/")
 (define url-base (string-append "http://" url-host url-path))
 
 (provide all-files+sizes)
@@ -28,19 +28,19 @@
     ;; GUI Libraries
     [gui
      [i386-macosx
-      ["libcairo.2.dylib" 832656]
-      ["libintl.8.dylib" 57536]
-      ["libgio-2.0.0.dylib" 748360]
+      ["libcairo.2.dylib" 803196]
+      ["libintl.8.dylib" 57604]
+      ["libgio-2.0.0.dylib" 736720]
       ["libjpeg.62.dylib" 412024]
-      ["libglib-2.0.0.dylib" 1015008]
-      ["libpango-1.0.0.dylib" 347180]
-      ["libgmodule-2.0.0.dylib" 19016]
-      ["libpangocairo-1.0.0.dylib" 84340]
-      ["libgobject-2.0.0.dylib" 288252]
-      ["libpixman-1.0.dylib" 526824]
-      ["libgthread-2.0.0.dylib" 24592]
-      ["libpng14.14.dylib" 182992]
-      ["PSMTabBarControl.tgz" 91302 "PSMTabBarControl.framework" 247768]]
+      ["libglib-2.0.0.dylib" 1009572]
+      ["libpango-1.0.0.dylib" 345476]
+      ["libgmodule-2.0.0.dylib" 18836]
+      ["libpangocairo-1.0.0.dylib" 83612]
+      ["libgobject-2.0.0.dylib" 284384]
+      ["libpixman-1.0.dylib" 526564]
+      ["libgthread-2.0.0.dylib" 24368]
+      ["libpng14.14.dylib" 182732]
+      ["PSMTabBarControl.tgz" 94103 "PSMTabBarControl.framework" 251764]]
      [x86_64-macosx
       ["libcairo.2.dylib" 919840]
       ["libintl.8.dylib" 61016]
@@ -108,6 +108,7 @@
       ["libglib-2.0-0.dll" 1267577]
       ["libgobject-2.0-0.dll" 425888]
       ["libgmodule-2.0-0.dll" 119538]
+      ["libgthread-2.0-0.dll" 126615]
       ["libpangocairo-1.0-0.dll" 185168]
       ["libpangowin32-1.0-0.dll" 192656]
       ["libpangoft2-1.0-0.dll" 1188615]

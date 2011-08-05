@@ -1,6 +1,5 @@
 #lang scribble/doc
-@(require scribble/manual
-          "utils.ss"
+@(require scribble/manual "utils.rkt"
           (for-syntax racket/base)
           (for-label scribble/manual-struct))
 
@@ -345,7 +344,7 @@ in a form definition.}
 @defform[(schemeresult datum ...)]
 @defform[(schemeid datum ...)]
 @defform*[((schememodname datum)
-           (schememodname ((unsyntax (scheme unsyntax)) expr)))]
+           (schememodname ((unsyntax (racket unsyntax)) expr)))]
 @defform[(schememodlink datum pre-content-expr ...)]
 @defproc[(schemefont [pre-content pre-content?] ...) element?]
 @defproc[(schemevalfont [pre-content pre-content?] ...) element?]
@@ -482,14 +481,15 @@ and one that combines several modules) via your own
 Associates the @racket[mod-path]s to all bindings defined within the
 enclosing section, except as overridden by other
 @racket[declare-exporting] declarations in nested sub-sections.  The
-list of @racket[mod-path]s is shown, for example, when the user hovers
-the mouse over one of the bindings defined within the section.
+list of @racket[mod-path]s before @racket[#:use-sources] is shown, for
+example, when the user hovers the mouse over one of the bindings
+defined within the section.
 
-More significantly, the first @racket[mod-path] plus the
-@racket[#:use-sources] @racket[mod-path]s determine the binding that
-is documented by each @racket[defform], @racket[defproc], or similar
-form within the section that contains the @racket[declare-exporting]
-declaration:
+More significantly, the first @racket[mod-path] before
+@racket[#:use-sources] plus the @racket[mod-path]s after
+@racket[#:use-sources] determine the binding that is documented by
+each @racket[defform], @racket[defproc], or similar form within the
+section that contains the @racket[declare-exporting] declaration:
 
 @itemize[
 
@@ -498,14 +498,46 @@ declaration:
        @racket[mod-path].}
 
  @item{If @racket[#:use-sources] @racket[mod-path]s are supplied, then
-       they are tried in order. The first one to provide an export
-       with the same symbolic name and
-       @racket[free-label-identifier=?] to the given name is used as
-       the documented binding. This binding is assumed to be the same
-       as the identifier as exported by the first @racket[mod-path] in
-       the @racket[declare-exporting] declaration.}
+       they are tried in order before the first @racket[mod-path]. The
+       @racket[mod-path] that provides an export with the same
+       symbolic name and @racket[free-label-identifier=?] to the given
+       name is used as the documented binding. This binding is assumed
+       to be the same as the identifier as exported by the first
+       @racket[mod-path] in the @racket[declare-exporting]
+       declaration.}
 
 ]
+
+Use @racket[#:use-sources] sparingly, but it is needed when
+
+@itemlist[
+
+ @item{bindings are documented as originating from a module
+       @racket[_M], but the bindings are actually re-exported from
+       some module @racket[_P]; and}
+
+ @item{other documented modules also re-export the bindings from
+       @racket[_P], but they are documented as re-exporting from
+       @racket[_M].}
+
+]
+
+For example, the @racket[parameterize] binding of
+@racketmodname[mzscheme] is documented as re-exported from
+@racketmodname[racket/base], but @racket[parameterize] happens to be
+implemented in a private module and re-exported by both
+@racketmodname[racket/base] and @racketmodname[mzscheme].  Importing
+@racket[parameterize] from @racketmodname[mzscheme] does not go
+through @racketmodname[racket/base], so a search for documentation on
+@racket[parameterize] in @racketmodname[mzscheme] would not
+automatically connect to the documentation of
+@racketmodname[racket/base]. To make the connection, the documentation
+of @racketmodname[racket/base] declares the private module to be a
+source through @racket[#:use-sources], so that any re-export of
+@racket[parameterize] from the private module connects to the
+documentation for @racketmodname[racket/base] (unless a re-export has
+its own documentation, which would override the automatic connection
+when searching for documentation).
 
 The initial @racket[mod-path]s sequence can be empty if
 @racket[mod-path]s are given with @racket[#:use-sources]. In that
@@ -608,7 +640,8 @@ it's best to document a related group of procedures at once.}
 @defform/subs[(defform maybe-id maybe-literals form-datum maybe-contracts
                 pre-flow ...)
               ([maybe-id code:blank
-                         (code:line #:id id)]
+                         (code:line #:id id)
+                         (code:line #:id [id id-expr])]
                [maybe-literals code:blank
                                (code:line #:literals (literal-id ...))]
                [maybe-contracts code:blank
@@ -616,18 +649,24 @@ it's best to document a related group of procedures at once.}
                                                         ...))])]{
 
 Produces a sequence of flow elements (encapsulated in a
-@racket[splice]) to document a syntatic form named by @racket[id]
-whose syntax is described by @racket[form-datum]. If no @racket[#:id] is used
-to specify @racket[id], then @racket[form-datum] must have the form
-@racket[(id . _datum)].
+@racket[splice]) to document a syntatic form named by @racket[id] (or the
+result of @racket[id-expr]) whose syntax is described by
+@racket[form-datum]. If no @racket[#:id] is used to specify
+@racket[id], then @racket[form-datum] must have the form @racket[(id
+. _datum)].
 
-The @racket[id] is indexed, and it is also registered so that
-@racket[racket]-typeset uses of the identifier (with the same
-for-label binding) are hyperlinked to this documentation.
+If @racket[#:id [id id-expr]] is supplied, then @racket[id] is the
+identifier as it appears in the @racket[form-datum] (to be replaced by
+a defining instance), and @racket[id-expr] produces the identifier to
+be documented. This split between @racket[id] and @racket[id-expr]
+roles is useful for functional abstraction of @racket[defform].
 
-The @racket[defmodule] or @racket[declare-exporting] requirements, as
-well as the binding requirements for @racket[id], are the same as for
-@racket[defproc].
+The @racket[id] (or result of @racket[id-expr]) is indexed, and it is
+also registered so that @racket[racket]-typeset uses of the identifier
+(with the same for-label binding) are hyperlinked to this
+documentation. The @racket[defmodule] or @racket[declare-exporting]
+requirements, as well as the binding requirements for @racket[id] (or
+result of @racket[id-expr]), are the same as for @racket[defproc].
 
 The @tech{decode}d @racket[pre-flow] documents the form. In this
 description, a reference to any identifier in @racket[form-datum] via
@@ -639,7 +678,12 @@ determined by the enclosing context).
 If a @racket[#:contracts] clause is provided, each
 @racket[subform-datum] (typically an identifier that serves as a
 meta-variable in @racket[form-datum]) is shown as producing a value
-that must satisfy the contract described by @racket[contract-expr-datum].
+that must satisfy the contract described by
+@racket[contract-expr-datum].  Use @racket[#:contracts] only to
+specify constraints on a @emph{value} produced by an expression;
+for constraints on the @emph{syntax} of a @racket[subform-datum],
+use grammar notation instead, possibly through an 
+auxiliary grammar specified using @racket[defform/subs].
 
 The typesetting of @racket[form-datum], @racket[subform-datum], and
 @racket[contract-expr-datum] preserves the source layout, like
@@ -681,11 +725,13 @@ Like @racket[defform], but without registering a definition.}
 Like @racket[defform], but with a plain @racket[id] as the form.}
 
 
-@defform[(defidform/inline id)]{
+@defform*[[(defidform/inline id)
+           (defidform/inline (@#,racket[unsyntax] id-expr))]]{
 
-Like @racket[defidform], but @racket[id] is typeset as an inline
-element. Use this form sparingly, because the typeset form does not
-stand out to the reader as a specification of @racket[id].}
+Like @racket[defidform], but @racket[id] (or the result of
+@racket[id-expr], analogous to @racket[defform]) is typeset as an
+inline element. Use this form sparingly, because the typeset form does
+not stand out to the reader as a specification of @racket[id].}
 
 
 @defform[(specform maybe-literals datum maybe-contracts

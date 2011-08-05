@@ -22,6 +22,7 @@
   define-syntax-block
 
   declare-names
+  define-renaming
   define-renamings
   define-single-definition
   define-with-parameter
@@ -54,20 +55,7 @@
                      (syntax-list decl.external ...))
        "duplicate defined name"
        #'(define-syntaxes [decl.external ...]
-           ;; Easier way to ensure the internal names are bound than
-           ;; local-expand: bind them to an error macro and force the
-           ;; user to shadow them.
-           (let-syntax
-               ([decl.internal
-                 (make-set!-transformer
-                   (lambda (stx)
-                     (raise-syntax-error #f
-                       "transformer must be defined within define-syntax-block"
-                       stx)))]
-                ...)
-             (block
-               body ...
-               (values decl.internal ...))))])))
+           (block body ... (values decl.internal ...)))])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -139,6 +127,9 @@
 
 (define-syntax-rule (define-renamings [new old] ...)
   (define-syntaxes [new ...] (values (make-rename-transformer #'old) ...)))
+
+(define-syntax-rule (define-renaming new old)
+  (define-renamings [new old]))
 
 (define-syntax (in-phase1 stx)
   (syntax-case stx []

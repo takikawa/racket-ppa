@@ -1,6 +1,5 @@
 #lang scribble/doc
-@(require scribble/manual
-          "private/utils.ss")
+@(require scribble/manual "private/utils.rkt")
 
 @(define (copyright . strs) (apply verbatim #:indent 2 strs))
 
@@ -22,7 +21,7 @@ General Public License (LGPL).  This means
 
 ]
 
-See @filepath{doc/release-notes/COPYING.LIB} in your Racket installation
+See @filepath{doc/release-notes/COPYING.txt} in your Racket installation
 for more information.
 
 @copyright{

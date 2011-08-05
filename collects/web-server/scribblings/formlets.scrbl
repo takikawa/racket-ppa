@@ -120,7 +120,7 @@ Most users will want to use the syntactic shorthand for creating @tech{formlet}s
  These forms @emph{may not} appear nested inside @racket[unquote] or @racket[unquote-splicing]. For example, this is illegal:
  @racketblock[
   (formlet (div ,@(for/list ([i (in-range 10)])
-                    `(p ,(text-input . => . name))))
+                    `(p ,((text-input) . => . name))))
            name)
   ]
 }
@@ -164,7 +164,7 @@ to be @emph{syntactically} an @|xexpr|. You may discover you want to use a more 
  @racketblock[
   (formlet* `(div ,@(for/list ([i (in-range 1 10)])
                       `(p ,(number->string i)
-                          ,(text-input . =>* . name))))
+                          ,((text-input) . =>* . name))))
             name)
   ]
  @racket[name] is bound to a list of strings, not a single string, where the first element is the string that
@@ -173,7 +173,7 @@ to be @emph{syntactically} an @|xexpr|. You may discover you want to use a more 
  In this example, it is clear that this is the desired behavior. However, sometimes the value of a formlet's
  result may be surprising. For example, in
  @racketblock[
-  (formlet* `(div (p ,(text-input . =>* . name)))
+  (formlet* `(div (p ,((text-input) . =>* . name)))
             name)
   ]
  @racket[name] is bound to a list of strings, because @racket[formlet*] cannot syntactically determine if
@@ -304,8 +304,10 @@ These @tech{formlet}s are the main combinators for form input.
  This @tech{formlet} renders using an INPUT element with the PASSWORD type and the attributes given in the arguments.
 }
                                             
-@defproc[(textarea-input [#:rows rows (or/c false/c number?) #f]
-                         [#:cols cols (or/c false/c number?) #f])
+@defproc[(textarea-input [#:value value (or/c false/c bytes?) #f]
+                         [#:rows rows (or/c false/c number?) #f]
+                         [#:cols cols (or/c false/c number?) #f]
+                         [#:attributes attrs (listof (list/c symbol? string?)) empty])
         (formlet/c (or/c false/c binding?))]{
  This @tech{formlet} renders using an TEXTAREA element with attributes given in the arguments.
 }

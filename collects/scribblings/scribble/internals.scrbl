@@ -1,5 +1,5 @@
 #lang scribble/manual
-@(require "utils.ss")
+@(require "utils.rkt")
 
 @title[#:tag "internals" #:style 'toc]{Low-Level Scribble API}
 
@@ -14,3 +14,4 @@
 @include-section["docreader.scrbl"]
 @include-section["xref.scrbl"]
 @include-section["config.scrbl"]
+@include-section["racket.scrbl"]

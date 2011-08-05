@@ -1,9 +1,6 @@
 #lang scribble/doc
-@(require "common.ss"
-	  scribble/struct
-          scribble/bnf
-          racket/list
-	  mrlib/tex-table
+@(require "common.rkt"
+          scribble/struct scribble/bnf racket/list mrlib/tex-table
           (for-label racket/gui/base))
 
 @(define (keybinding key . desc)
@@ -38,7 +35,7 @@ key.  Depending on your keyboard, Meta may be called ``Left,''
 ``Right,'' or have a diamond symbol, but it's usually on the bottom
 row next to the space bar. M-@nonterm{key} can also be performed as a
 two-character sequence: first, strike and release the Escape key, then
-strike @nonterm{key}. Under Windows and Mac OS X, Meta is only
+strike @nonterm{key}. On Windows and Mac OS X, Meta is only
 available through the Escape key.
 
 DEL is the Delete key.
@@ -49,7 +46,7 @@ On most keyboards, ``<'' and ``>'' are shifted characters. So, to
 get M->, you actually have to type Meta-Shift->. That is, press and
 hold down both the Meta and Shift keys, and then strike ``>''.
 
-Under Windows, some of these keybindings are actually standard menu
+On Windows, some of these keybindings are actually standard menu
 items.  Those keybindings will behave according to the menus, unless
 the @onscreen{Enable keybindings in menus} preference is unchecked.
 
@@ -174,7 +171,7 @@ as the @tech{definitions window} plus a few more:
 @section{LaTeX and TeX inspired keybindings}
 
 @itemize[
-@keybinding['("C-\\" "M-\\")]{traces backwards from the insertion
+@keybinding['("C-\\" "M-\\" "c:x;l")]{traces backwards from the insertion
 point, looking for a backslash followed by a @index["LaTeX"]{LaTeX} 
 macro name or a prefix of such a name. If a macro name is found,
 it replaces the backslash and the name with the corresponding key in

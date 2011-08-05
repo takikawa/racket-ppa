@@ -278,7 +278,7 @@
   (test #f assq 'd e)
   (test '(a 1) assq 'a '((x 0) (a 1) b 2))
   (test '(a 1) assq 'a '((x 0) (a 1) . 0))
-  (arity-test assq 2 2)
+  (arity-test assq 2 (if (eq? assq-name 'assoc) 3 2))
 
   (err/rt-test (assq 1 1) exn:application:mismatch?)
   (err/rt-test (assq 1 '(1 2))  exn:application:mismatch?)
@@ -312,6 +312,7 @@
 (test #t immutable? (string->immutable-string "hi"))
 (test #t immutable? (string->immutable-string (string-copy "hi")))
 
+(test #t immutable? (make-immutable-hasheq))
 (test #t immutable? (make-immutable-hasheq null))
 (test #t immutable? (make-immutable-hasheq '((a . b))))
 (test #t immutable? (make-immutable-hash '((a . b))))
@@ -653,6 +654,10 @@
   (err/rt-test (make-string 500000000000000 #\f) exn:fail:out-of-memory?)) ;; bignum on 32-bit machines
 (err/rt-test (make-string 50000000000000000000 #\f) exn:fail:out-of-memory?)  ;; bignum on 64-bit machines
 
+(unless 64-bit-machine?
+  (err/rt-test (make-vector 1234567890 #\f) exn:fail:out-of-memory?)
+  (err/rt-test (read (open-input-string "#1234567890(0)")) exn:fail:out-of-memory?))
+(test #t vector? (make-vector 0))
 
 (define f (make-string 3 #\*))
 (test "?**" 'string-set! (begin (string-set! f 0 #\?) f))
@@ -1991,7 +1996,7 @@
 (err/rt-test (procedure-arity-includes? cons 1.0))
 (err/rt-test (procedure-arity-includes? 'cons 1))
 
-(arity-test procedure-arity-includes? 2 2)
+(arity-test procedure-arity-includes? 2 3)
 
 (newline)
 (display ";testing scheme 4 functions; ")
@@ -2383,9 +2388,11 @@
   (check-all-bad hash-iterate-key)
   (check-all-bad hash-iterate-value))
 
-(test (list 1 2 3) hash-keys #hasheq((1 . a)(2 . b)(3 . c)))
-(test (list 'a 'b 'c) hash-values #hasheq((1 . a)(2 . b)(3 . c)))
-(test (list (cons 1 'a) (cons 2 'b) (cons 3 'c)) hash->list #hasheq((1 . a)(2 . b)(3 . c)))
+(test (list 1 2 3) sort (hash-keys #hasheq((1 . a) (2 . b) (3 . c))) <)
+(test (list 'a 'b 'c) 
+      sort (hash-values #hasheq((1 . a) (2 . b) (3 . c))) string<? #:key symbol->string)
+(test (list (cons 1 'a) (cons 2 'b) (cons 3 'c)) 
+      sort (hash->list #hasheq((1 . a) (2 . b) (3 . c))) < #:key car)
 
 (err/rt-test (hash-set*! im-t 1 2) exn:fail?)
 (err/rt-test (hash-set* (make-hasheq null) 1 2) exn:fail?)
@@ -2417,8 +2424,9 @@
                     3 4)
         ht))
 
-(arity-test make-immutable-hash 1 1)
-(arity-test make-immutable-hasheq 1 1)
+(arity-test make-immutable-hash 0 1)
+(arity-test make-immutable-hasheq 0 1)
+(arity-test make-immutable-hasheqv 0 1)
 (arity-test hash-keys 1 1)
 (arity-test hash-values 1 1)
 (arity-test hash-count 1 1)
@@ -2488,6 +2496,19 @@
                (values (a i) (a (a i))))])
     (test (equal-hash-code ht) values (equal-hash-code ht2))
     (test (equal-secondary-hash-code ht) values (equal-secondary-hash-code ht2))))
+
+;; Check that immutable hash trees aren't confused by an
+;; "is a list" bit set in a key:
+(let ()
+  (define p (list 1 2 3 4))
+  (define ht (hasheq p 1 'a 7 'b 10 'c 13))
+  (test 1 hash-ref ht p #f)
+  (list? p)
+  (list? p)
+  (list? (list* 1 2 p))
+  (list? (list* 1 2 p))
+  (list? (list* 1 2 p))
+  (test 1 hash-ref ht p #f))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Misc

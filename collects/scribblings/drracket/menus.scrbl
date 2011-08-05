@@ -1,6 +1,5 @@
 #lang scribble/doc
-@(require "common.ss"
-          scribble/struct)
+@(require "common.rkt" scribble/struct)
 
 @(define (defmenuitem . s)
   (let ([mi (apply onscreen s)])
@@ -81,10 +80,10 @@
   search are displayed in a separate window.}
 
  @item{@defmenuitem{Close} Closes this DrRacket window. If this window
-  is the only open DrRacket window, then DrRacket quits, except under
+  is the only open DrRacket window, then DrRacket quits, except on
   Mac OS X.}
 
- @item{{@onscreen{Quit} or @onscreen{Exit}} Exits DrRacket. (Under Mac
+ @item{{@onscreen{Quit} or @onscreen{Exit}} Exits DrRacket. (On Mac
   OS X, this menu item is in the Apple menu.)}
 
 ]
@@ -167,7 +166,7 @@ case-sensitive and case-insensitive search.}
 insertion point, using the manuals as a source of completions.}
 
  @item{@defmenuitem{Preferences...} Opens the preferences dialog. See
-  @secref["prefs-explanation"]. (Under Mac OS X, this menu item is in
+  @secref["prefs-explanation"]. (On Mac OS X, this menu item is in
   the Apple menu.)}  ]
 
 @; ----------------------------------------
@@ -205,7 +204,7 @@ appears at any time.
 
  @item{@defmenuitem{Toolbar} 
 @itemize[
-@item{@defmenuitem{Toolbar on Left} Moves the tool bar (defaultly on the top of DrRacket's window) to the left-hand side, organized vertically.}
+@item{@defmenuitem{Toolbar on Left} Moves the tool bar (on the top of DrRacket's window by default) to the left-hand side, organized vertically.}
 @item{@defmenuitem{Toolbar on Top} Moves the toolbar to the top of the DrRacket window.}
 @item{@defmenuitem{Toolbar on Right} Moves the tool bar to the right-hand side, organized vertically.}
 @item{@defmenuitem{Toolbar Hidden} Hides the toolbar entirely.}]}

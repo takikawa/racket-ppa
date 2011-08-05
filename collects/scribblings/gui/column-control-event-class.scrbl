@@ -1,9 +1,9 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
 @defclass/title[column-control-event% control-event% ()]{
 
-A @scheme[column-control-event%] object contains information about a
+A @racket[column-control-event%] object contains information about a
  event on an @racket[list-box%] column header.
 
 @defconstructor[([column exact-nonnegative-integer?]

@@ -100,6 +100,8 @@
              get-size
              get-transformation
              set-transformation
+             get-smoothing
+             set-smoothing
              scale
              get-font)
     
@@ -132,20 +134,22 @@
                                  [exact-nonnegative-integer? w]
                                  [exact-nonnegative-integer? h]
                                  [bytes? bstr]
-                                 [any? [set-alpha? #f]])
+                                 [any? [set-alpha? #f]]
+                                 [any? [pre-mult? #f]])
       (let ([bm (internal-get-bitmap)])
         (when bm
-          (send bm set-argb-pixels x y w h bstr set-alpha?))))
+          (send bm set-argb-pixels x y w h bstr set-alpha? pre-mult?))))
 
     (def/public (get-argb-pixels [exact-nonnegative-integer? x]
                                  [exact-nonnegative-integer? y]
                                  [exact-nonnegative-integer? w]
                                  [exact-nonnegative-integer? h]
                                  [bytes? bstr]
-                                 [any? [get-alpha? #f]])
+                                 [any? [get-alpha? #f]]
+                                 [any? [pre-mult? #f]])
       (let ([bm (internal-get-bitmap)])
         (when bm
-          (send bm get-argb-pixels x y w h bstr get-alpha?))))
+          (send bm get-argb-pixels x y w h bstr get-alpha? pre-mult?))))
 
     (def/public (draw-bitmap-section-smooth [bitmap% src]
                                             [real? dest-x]
@@ -161,10 +165,13 @@
                                             [(make-or-false bitmap%) [mask #f]])
       (let ([sx (if (zero? src-w) 1.0 (/ dest-w src-w))]
             [sy (if (zero? src-h) 1.0 (/ dest-h src-h))])
-        (let ([t (get-transformation)])
+        (let ([t (get-transformation)]
+              [s (get-smoothing)])
           (scale sx sy)
+          (when (eq? s 'unsmoothed) (set-smoothing 'aligned))
           (begin0
            (draw-bitmap-section src (/ dest-x sx) (/ dest-y sy) src-x src-y src-w src-h style color mask)
+           (when (eq? s 'unsmoothed) (set-smoothing 'unsmoothed))
            (set-transformation t)))))
 
     (def/override (get-char-width)

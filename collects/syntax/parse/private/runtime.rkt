@@ -257,13 +257,16 @@
 (provide check-literal
          free-identifier=?/phases)
 
-;; check-literal : id phase-level stx -> void
+;; check-literal : id phase-level phase-level stx -> void
 ;; FIXME: change to normal 'error', if src gets stripped away
-(define (check-literal id phase ctx)
-  (unless (identifier-binding id phase)
-    (raise-syntax-error #f
-                        (format "literal is unbound in phase ~s" phase)
-                        ctx id)))
+(define (check-literal id abs-phase mod-phase ctx)
+  (unless (identifier-binding id abs-phase)
+    (raise-syntax-error
+     #f
+     (format "literal is unbound in phase ~a (phase ~a relative to the enclosing module)"
+             abs-phase
+             (and abs-phase (- abs-phase mod-phase)))
+     ctx id)))
 
 ;; free-identifier=?/phases : id phase-level id phase-level -> boolean
 ;; Determines whether x has the same binding at phase-level phase-x

@@ -1,6 +1,5 @@
 #lang scribble/doc
-@(require "utils.ss"
-          (for-label ffi/unsafe))
+@(require "utils.rkt" (for-label ffi/unsafe))
 
 @title[#:tag "im:memoryalloc"]{Memory Allocation}
 
@@ -51,14 +50,14 @@ The basic collector allocation functions are:
  @item{@cppi{scheme_malloc_tagged} --- Allocates collectable memory
  that contains a mixture of pointers and atomic data. With the
  conservative collector, this function is the same
- as @cppi{scheme_malloc}, but under 3m, the type tag stored at the
+ as @cppi{scheme_malloc}, but on 3m, the type tag stored at the
  start of the block is used to determine the size and shape of the
  object for future garbage collection (as described
  in @secref["im:3m"]).}
 
  @item{@cppi{scheme_malloc_allow_interior} --- Allocates an array of
  pointers such that the array is never moved by the garbage collector
- and references are allowed into the middle of the block under 3m (and
+ and references are allowed into the middle of the block on 3m (and
  pointers to the middle prevent the block from being collected). Use
  this procedure sparingly, because small, non-moving objects are
  handled less efficiently than movable objects by the 3m collector.
@@ -85,7 +84,9 @@ variable must be registered with
 visible to the garbage collector. Registered variables need not
 contain a collectable pointer at all times (even with 3m, but the
 variable must contain some pointer, possibly uncollectable, at all
-times).
+times). Beware that static or global variables that are not 
+thread-specific (in the OS sense of ``thread'') generally do not
+work with multiple @|tech-place|s.
 
 With conservative collection, no registration is needed for the global
 or static variables of an embedding program, unless it calls
@@ -99,7 +100,7 @@ function can be safely called even when it's not needed, but it must
 not be called multiple times for a single memory address.
 
 Collectable memory can be temporarily locked from collection by using
-the reference-counting function @cppi{scheme_dont_gc_ptr}. Under 3m,
+the reference-counting function @cppi{scheme_dont_gc_ptr}. On 3m,
 such locking does not prevent the object from being moved.
 
 Garbage collection can occur during any call into Racket or its
@@ -162,12 +163,14 @@ retaining such a pointer can lead to a crash.
 As explained in @secref["im:values+types"], the @cpp{scheme_make_type}
 function can be used to obtain a new tag for a new type of object.
 These new types are in relatively short supply for 3m; the maximum tag
-is 255, and Racket itself uses nearly 200.
+is 512, and Racket itself uses nearly 300.
 
 After allocating a new tag in 3m (and before creating instances of the
 tag), a @defterm{size procedure}, a @defterm{mark procedure}, and a
 @defterm{fixup procedure} must be installed for the tag using
-@cppi{GC_register_traversers}.
+@cppi{GC_register_traversers}. A type tag and its associated GC
+procedures apply to all @|tech-place|s, even though specific allocated
+objects are confined to a particular @|tech-place|.
 
 A size procedure simply takes a pointer to an object with the tag and
 returns its size in words (not bytes). The @cppi{gcBYTES_TO_WORDS}
@@ -694,7 +697,7 @@ Copies the null-terminated string @var{str}; the copy will never be freed.}
            [size_t size])]{
 
 Attempts to allocate @var{size} bytes using @var{mallocf}. If the
-allocation fails, the @scheme[exn:misc:out-of-memory] exception is
+allocation fails, the @racket[exn:misc:out-of-memory] exception is
 raised.}
 
 @function[(void** scheme_malloc_immobile_box
@@ -727,8 +730,11 @@ Frees memory allocated with @cpp{scheme_malloc_code}.}
            [intptr_t size])]{
 
 Registers an extension's global variable that can contain Racket
- pointers. The address of the global is given in @var{ptr}, and its
- size in bytes in @var{size}.In addition to global variables, this
+ pointers (for the current @|tech-place|). The address of the global 
+ is given in @var{ptr}, and its
+ size in bytes in @var{size}.
+
+In addition to global variables, this
  function can be used to register any permanent memory that the
  collector would otherwise treat as atomic. A garbage collection can
  occur during the registration.}
@@ -800,7 +806,7 @@ for CGC:
     }
 }
 
-Under 3m, the above code does not quite work, because @var{stack_addr}
+On 3m, the above code does not quite work, because @var{stack_addr}
 must be the beginning or end of a local-frame registration. Worse, in
 CGC or 3m, if @cpp{real_main} is declared @cpp{static}, the compiler
 may inline it and place variables containing collectable values deeper
@@ -822,8 +828,8 @@ requires a few frames.
 
 If @var{stack_end} is @cpp{NULL}, then the stack end is computed
 automatically: the stack size assumed to be the limit reported by
-@cpp{getrlimit} under Unix and Mac OS X, or it is assumed to be 1 MB
-under Windows; if this size is greater than 8 MB, then 8 MB is
+@cpp{getrlimit} on Unix and Mac OS X, or it is assumed to be 1 MB
+on Windows; if this size is greater than 8 MB, then 8 MB is
 assumed, instead; the size is decremented by 50000 bytes to cover a
 large margin of error; finally, the size is subtracted from (for
 stacks that grow down) or added to (for stacks that grow up) the stack
@@ -837,7 +843,7 @@ overflow.}
            [void* ptr]
            [int   tls_index])]{
 
-Only available under Windows; registers @var{ptr} as the address of a
+Only available on Windows; registers @var{ptr} as the address of a
  thread-local pointer variable that is declared in the main
  executable. The variable's storage will be used to implement
  thread-local storage within the Racket run-time. See
@@ -933,7 +939,7 @@ To remove an added finalizer, use @cpp{scheme_subtract_finalizer}.}
            [fnl_proc f]
            [void* data])]{
 
-Installs a ``will''-like finalizer, similar to @scheme[will-register].
+Installs a ``will''-like finalizer, similar to @racket[will-register].
  Will-like finalizers are called one at a time, requiring the collector
  to prove that a value has become inaccessible again before calling
  the next will-like finalizer. Finalizers registered with
@@ -975,7 +981,7 @@ Removes a finalizer that was installed with
            [void* p])]{
 
 Removes all finalization (``will''-like or not) for @var{p}, including
- wills added in Scheme with @scheme[will-register] and finalizers used
+ wills added in Scheme with @racket[will-register] and finalizers used
  by custodians.}
 
 @function[(void scheme_dont_gc_ptr
@@ -1001,6 +1007,18 @@ See @cpp{scheme_dont_gc_ptr}.}
 @function[(void scheme_collect_garbage)]{
 
 Forces an immediate garbage-collection.}
+
+@function[(void scheme_enable_garbage_collection [int on])]{
+
+Garbage collection is enabled only when an internal counter is
+@cpp{0}.  Calling @cpp{scheme_enable_garbage_collection} with a false
+value increments the counter, and calling
+@cpp{scheme_enable_garbage_collection} with a true value decrements
+the counter.
+
+When the @envvar{PLTDISABLEGC} environment variable is set, then
+@exec{racket} initializes the internal counter to @cpp{1} to initially
+disable garbage collection.}
 
 
 @function[(void GC_register_traversers
@@ -1087,16 +1105,16 @@ foreign function to be called. The following protocols are supported:
 
  @item{@racket['osapi_ptr_int->void] corresponds to @cpp{void
  (*)(void*, int)}, but using the stdcall calling convention
- under Windows.}
+ on Windows.}
 
  @item{@racket['osapi_ptr_ptr->void] corresponds to @cpp{void
  (*)(void*, void*)}, but using the stdcall calling convention
- under Windows.}
+ on Windows.}
 
  @item{@racket['osapi_ptr_int_int_int_int_ptr_int_int_long->void]
  corresponds to @cpp{void (*)(void*, int, int, int, int, void*,
  int, int, long)}, but using the stdcall calling convention
- under Windows.}
+ on Windows.}
 
 ]
 

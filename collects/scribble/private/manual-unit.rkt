@@ -1,16 +1,16 @@
 #lang scheme/base
-(require "../decode.ss"
-         "../struct.ss"
-         "../scheme.ss"
-         "../search.ss"
-         "../basic.ss"
-         "manual-utils.ss"
-         "manual-vars.ss"
-         "manual-style.ss"
-         "manual-scheme.ss"
-         "manual-bind.ss"
-         "manual-ex.ss"
-         "manual-proc.ss"
+(require "../decode.rkt"
+         "../struct.rkt"
+         "../scheme.rkt"
+         "../search.rkt"
+         "../basic.rkt"
+         "manual-utils.rkt"
+         "manual-vars.rkt"
+         "manual-style.rkt"
+         "manual-scheme.rkt"
+         "manual-bind.rkt"
+         "manual-ex.rkt"
+         "manual-proc.rkt"
          scheme/contract
          (for-syntax scheme/base)
          (for-label scheme/base))
@@ -20,7 +20,7 @@
          sigelem)
 
 (define-syntax-rule (defsignature name (super ...) body ...)
-  (with-togetherable-scheme-variables
+  (with-togetherable-racket-variables
    ()
    ()
    (*defsignature (quote-syntax name)
@@ -29,7 +29,7 @@
                   #t)))
 
 (define-syntax-rule (defsignature/splice name (super ...) body ...)
-  (with-togetherable-scheme-variables
+  (with-togetherable-racket-variables
    ()
    ()
    (*defsignature (quote-syntax name)

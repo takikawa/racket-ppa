@@ -1,7 +1,7 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
-@title{@bold{Net}: Racket Networking Libraries}
+@title{Net: Networking Libraries}
 
 @table-of-contents[]
 
@@ -38,14 +38,14 @@
             #:location "RFC"
             #:url "http://www.ietf.org/rfc/rfc0822.txt"
             #:date "1982")
-            
+
  (bib-entry #:key "RFC977"
             #:title "Network News Transfer Protocol"
             #:author "Brian Kantor and Phil Lapsley"
             #:location "RFC"
             #:url "http://www.ietf.org/rfc/rfc0977.txt"
             #:date "1986")
-            
+
  (bib-entry #:key "RFC1738"
             #:title "Uniform Resource Locators (URL)"
             #:author "T. Berners-Lee, L. Masinter, and M. McCahill"

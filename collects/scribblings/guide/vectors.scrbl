@@ -1,7 +1,5 @@
 #lang scribble/doc
-@(require scribble/manual
-          scribble/eval
-          "guide-utils.ss")
+@(require scribble/manual scribble/eval "guide-utils.rkt")
 
 @title[#:tag "vectors"]{Vectors}
 
@@ -11,7 +9,7 @@ update of its elements.
 
 A vector prints similar to a list---as a parenthesized sequence of its
 elements---but a vector is prefixed with @litchar{#} after
-@litchar{'}, or it uses @schemeresult[vector] if one of its elements
+@litchar{'}, or it uses @racketresult[vector] if one of its elements
 cannot be expressed with @racket[quote].
 
 For a vector as an expression, an optional length can be

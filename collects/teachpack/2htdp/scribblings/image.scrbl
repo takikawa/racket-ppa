@@ -175,7 +175,7 @@ Unlike @racket[scene+curve], if the line passes outside of @racket[image], the i
   The @racket[face] and the @racket[family] combine to give the complete typeface. If 
   @racket[face] is available on the system, it is used, but if not then a default typeface
   based on the @racket[family] is chosen. The @racket[style] controls if the face is italic
-  or not (under Windows and Mac OS X, @racket['slant] and @racket['italic] are the same),
+  or not (on Windows and Mac OS X, @racket['slant] and @racket['italic] are the same),
   the @racket[weight] controls if it is boldface (or light), and @racket[underline?]
   determines if the face is underlined. For more details on these arguments, see @racket[font%],
   which ultimately is what this code uses to draw the font.
@@ -264,9 +264,9 @@ Unlike @racket[scene+curve], if the line passes outside of @racket[image], the i
 }
 
 To create a general triangle given known sides and angles the following
-family of functions are useful: @scheme[triangle/sss], 
-@scheme[triangle/ass], @scheme[triangle/sas], @scheme[triangle/ssa], 
-@scheme[triangle/sss], @scheme[triangle/sss], and, @scheme[triangle/sss].
+family of functions are useful: @racket[triangle/sss], 
+@racket[triangle/ass], @racket[triangle/sas], @racket[triangle/ssa], 
+@racket[triangle/sss], @racket[triangle/sss], and, @racket[triangle/sss].
 They all construct a triangle oriented as follows:
 
 @image["triangle-xxx.png"]
@@ -283,8 +283,8 @@ They all construct a triangle oriented as follows:
                           [outline-mode (or/c 'outline "outline")]
                           [pen-or-color (or/c pen? image-color?)])
             image?])]{
- Creates a triangle where the side lengths a, b, and, c are given by @scheme[side-length-a],
- @scheme[side-length-b], and, @scheme[side-length-c] respectively.
+ Creates a triangle where the side lengths a, b, and, c are given by @racket[side-length-a],
+ @racket[side-length-b], and, @racket[side-length-c] respectively.
  
  @mode/color-text
  
@@ -305,8 +305,8 @@ They all construct a triangle oriented as follows:
                           [outline-mode (or/c 'outline "outline")]
                           [pen-or-color (or/c pen? image-color?)])
             image?])]{
- Creates a triangle where the angle A and side length a and b, are given by @scheme[angle-a],
- @scheme[side-length-b], and, @scheme[side-length-c] respectively.
+ Creates a triangle where the angle A and side length a and b, are given by @racket[angle-a],
+ @racket[side-length-b], and, @racket[side-length-c] respectively.
  
  @mode/color-text
  
@@ -327,8 +327,8 @@ They all construct a triangle oriented as follows:
                           [outline-mode (or/c 'outline "outline")]
                           [pen-or-color (or/c pen? image-color?)])
             image?])]{
- Creates a triangle where the side length a, angle B, and, side length c given by @scheme[side-length-a],
- @scheme[angle-b], and, @scheme[side-length-c] respectively.
+ Creates a triangle where the side length a, angle B, and, side length c given by @racket[side-length-a],
+ @racket[angle-b], and, @racket[side-length-c] respectively.
  
  @mode/color-text
  
@@ -349,8 +349,8 @@ They all construct a triangle oriented as follows:
                           [outline-mode (or/c 'outline "outline")]
                           [pen-or-color (or/c pen? image-color?)])
             image?])]{
- Creates a triangle where the side length a, side length b, and, angle c given by @scheme[side-length-a],
- @scheme[side-length-b], and, @scheme[angle-c] respectively.
+ Creates a triangle where the side length a, side length b, and, angle c given by @racket[side-length-a],
+ @racket[side-length-b], and, @racket[angle-c] respectively.
  
  @mode/color-text
  
@@ -370,8 +370,8 @@ They all construct a triangle oriented as follows:
                           [outline-mode (or/c 'outline "outline")]
                           [pen-or-color (or/c pen? image-color?)])
             image?])]{
- Creates a triangle where the angle A, angle B, and, side length c given by @scheme[angle-a],
- @scheme[angle-b], and, @scheme[side-length-c] respectively.
+ Creates a triangle where the angle A, angle B, and, side length c given by @racket[angle-a],
+ @racket[angle-b], and, @racket[side-length-c] respectively.
  
  @mode/color-text
  
@@ -392,8 +392,8 @@ They all construct a triangle oriented as follows:
                           [outline-mode (or/c 'outline "outline")]
                           [pen-or-color (or/c pen? image-color?)])
             image?])]{
- Creates a triangle where the angle A, side length b, and, angle C given by @scheme[angle-a],
- @scheme[side-length-b], and, @scheme[angle-c] respectively.
+ Creates a triangle where the angle A, side length b, and, angle C given by @racket[angle-a],
+ @racket[side-length-b], and, @racket[angle-c] respectively.
  
  @mode/color-text
  
@@ -414,8 +414,8 @@ They all construct a triangle oriented as follows:
                           [outline-mode (or/c 'outline "outline")]
                           [pen-or-color (or/c pen? image-color?)])
             image?])]{
- Creates a triangle where the side length a, angle B, and, angle C given by @scheme[side-length-a],
- @scheme[angle-b], and, @scheme[angle-c] respectively.
+ Creates a triangle where the side length a, angle B, and, angle C given by @racket[side-length-a],
+ @racket[angle-b], and, @racket[angle-c] respectively.
  
  @mode/color-text
  
@@ -543,7 +543,7 @@ other. The top and bottom pair of angles is @racket[angle] and the left and righ
                                    
 Constructs a star-like polygon where the star is specified by two radii and a number of points. 
 The first radius determines where the points begin, the second determines where they end, and
-the @scheme[point-count] argument determines how many points the star has.
+the @racket[point-count] argument determines how many points the star has.
 
 @image-examples[(radial-star 8 8 64 "solid" "darkslategray")
                 (radial-star 32 30 40 "outline" "black")]
@@ -936,14 +936,20 @@ the @scheme[point-count] argument determines how many points the star has.
 Placing images into scenes is particularly useful when building worlds
 and universes using @racket[2htdp/universe].
 
-@defproc[(empty-scene [width (and/c real? (not/c negative?))]
-                      [height (and/c real? (not/c negative?))])
-         image?]{
+@defproc*[([(empty-scene [width (and/c real? (not/c negative?))]
+	                 [height (and/c real? (not/c negative?))])
+	    image?]
+            [(empty-scene [width (and/c real? (not/c negative?))]
+                          [height (and/c real? (not/c negative?))]
+		          [color image-color?])
+            image?])]{
 
-Creates an empty scene, i.e., a rectangle with a black outline.
+Creates an empty scene, i.e., a white rectangle with a black outline.
 
 @image-examples[(empty-scene 160 90)]
-                                                                 
+
+The three-argument version creates a rectangle of the specified color with
+a black outline. 
 }
 
 @defproc[(place-image [image image?] [x real?] [y real?] [scene image?]) image?]{
@@ -1010,7 +1016,7 @@ Creates an empty scene, i.e., a rectangle with a black outline.
 @defproc[(scene+line [image image?]
                      [x1 real?] [y1 real?]
                      [x2 real?] [y2 real?]
-                     [color image-color?])
+                     [pen-or-color (or/c pen? image-color?)])
          image?]{
 
   Adds a line to the image @racket[scene], starting from the point (@racket[x1],@racket[y1])
@@ -1119,10 +1125,10 @@ the parts that fit onto @racket[scene].
 }
 
 @defproc[(flip-horizontal [image image?]) image?]{
-   Flips @scheme[image] left to right.
+   Flips @racket[image] left to right.
          
-         Flipping images with text is not supported (so passing @scheme[flip-horizontal] an image
-         that contains a @scheme[text] or @scheme[text/font] image inside somewhere signals an error).
+         Flipping images with text is not supported (so passing @racket[flip-horizontal] an image
+         that contains a @racket[text] or @racket[text/font] image inside somewhere signals an error).
          
          @image-examples[(beside
                           (rotate 30 (square 50 "solid" "red"))
@@ -1131,10 +1137,10 @@ the parts that fit onto @racket[scene].
 }
 
 @defproc[(flip-vertical [image image?]) image?]{
-   Flips @scheme[image] top to bottom.
+   Flips @racket[image] top to bottom.
          
-         Flipping images with text is not supported (so passing @scheme[flip-horizontal] an image
-         that contains a @scheme[text] or @scheme[text/font] image inside somewhere signals an error).
+         Flipping images with text is not supported (so passing @racket[flip-horizontal] an image
+         that contains a @racket[text] or @racket[text/font] image inside somewhere signals an error).
 
          @image-examples[(above 
                           (star 40 "solid" "firebrick")

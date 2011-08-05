@@ -1,12 +1,11 @@
-
 (module htdp-intermediate-lambda scheme/base
-  (require "private/teach.ss"
-	   "private/teach-module-begin.ss"
-	   mzlib/etc
-	   mzlib/list
-	   syntax/docprovide
+  (require "private/teach.rkt"
+           "private/teach-module-begin.rkt"
+           mzlib/etc
+           mzlib/list
+           syntax/docprovide
            test-engine/scheme-tests)
-  
+
   ;; syntax:
   (provide (rename-out
             [intermediate-lambda-define define]
@@ -37,6 +36,8 @@
             [intermediate-unquote-splicing unquote-splicing]
             [intermediate-time time]
             [intermediate-module-begin #%module-begin]
+            [beginner-true true]
+            [beginner-false false]
             )
            check-expect
            check-within
@@ -45,7 +46,7 @@
            check-range
 	   #%datum
            #%top-interaction
-	   empty true false
+	   empty
 
 ; 	   signature : -> mixed one-of predicate combined
 ; 	   Number Real Rational Integer Natural Boolean True False String Symbol Char Empty-list Any

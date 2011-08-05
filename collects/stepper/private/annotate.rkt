@@ -2,18 +2,17 @@
 
 (require (prefix-in kernel: syntax/kerncase)
          racket/contract
-         "marks.ss"
-         "shared.ss"
-         "my-macros.ss"
-         #;"xml-box.ss"
-         (prefix-in beginner-defined: "beginner-defined.ss")
+         "marks.rkt"
+         "shared.rkt"
+         "my-macros.rkt"
+         #;"xml-box.rkt"
+         (prefix-in beginner-defined: "beginner-defined.rkt")
          (for-syntax racket/base))
 
 (define-syntax (where stx)
   (syntax-case stx ()
     [(_ body bindings)
      (syntax/loc stx (letrec bindings body))]))
-
 
 ; CONTRACTS
 
@@ -105,7 +104,8 @@
 ; label-var-types returns a syntax object which is identical to the 
 ; original except that the variable references are labeled with the 
 ; stepper-syntax-property 'stepper-binding-type, which is set to either 
-; let-bound, lambda-bound, or non-lexical.
+; let-bound, lambda-bound, or non-lexical. (It can also be 'macro-bound, set
+; earlier during macro expansion.)
 
 (define (top-level-rewrite stx)
   (let loop ([stx stx]
@@ -155,11 +155,12 @@
     
     (cond 
       [(or (stepper-syntax-property stx 'stepper-skip-completely)
-           (stepper-syntax-property stx 'stepper-define-struct-hint))
+           (stepper-syntax-property stx 'stepper-black-box-expr))
        stx]
       [else
        (define rewritten
-         (kernel:kernel-syntax-case 
+         (let ([stx (syntax-disarm stx saved-code-inspector)])
+           (kernel:kernel-syntax-case 
           stx
           #f
           ; cond :
@@ -198,7 +199,7 @@
            (stepper-syntax-property stx 'stepper-skip-completely #t)]
           
           ; wrapper on a local.  This is necessary because 
-          ; teach.ss expands local into a trivial let wrapping a bunch of
+          ; teach.rkt expands local into a trivial let wrapping a bunch of
           ; internal defines, and therefore the letrec-values on 
           ; which I want to hang the 'stepper-hint doesn't yet
           ; exist.  So we patch it up after expansion.  And we 
@@ -234,7 +235,7 @@
            (let ([content (syntax-e stx)])
              (if (pair? content)
                  (rebuild-stx (syntax-pair-map content recur-regular) stx)
-                 stx))]))
+                 stx))])))
        
        (if (eq? (stepper-syntax-property stx 'stepper-xml-hint) 'from-xml-box)
            (stepper-syntax-property #`(#%plain-app 
@@ -811,21 +812,25 @@
              [varref-no-break-wrap
               (lambda ()
                 (outer-wcm-wrap (make-debug-info-normal free-varrefs) var))]
+             ;; JBC: shouldn't this be the namespace of the user's code... ?
              [base-namespace-symbols (namespace-mapped-symbols (make-base-namespace))]
-             [top-level-varref-break-wrap
+             [module-bound-varref-break-wrap
               (lambda ()
-                (if (or (memq (syntax-e var) beginner-defined:must-reduce)
+                (varref-break-wrap)
+                #;(if (or (memq (syntax-e var) beginner-defined:must-reduce)
                         (and (stepper-syntax-property var 'lazy-op)
                              (not (memq (syntax->datum var) base-namespace-symbols))))
                     (varref-break-wrap)
                     (varref-no-break-wrap)))])
           (vector 
-           (case (stepper-syntax-property var 'stepper-binding-type)
-             ((lambda-bound macro-bound)   (varref-no-break-wrap))
-             ((let-bound)                  (varref-break-wrap))
-             ((non-lexical) ;; is it from this module or not?
-              (match (identifier-binding var)                                 
-                (#f (top-level-varref-break-wrap))
+           (match (stepper-syntax-property var 'stepper-binding-type)
+             [(or 'lambda-bound 'macro-bound)   (varref-no-break-wrap)]
+             ['let-bound                        (varref-break-wrap)]
+             ['non-lexical ;; is it from this module or not?
+              (match (identifier-binding var)
+                ;; this can only come up when stepping through non-module code...
+                ;; perhaps we should just signal an error here.
+                (#f (varref-break-wrap))
                 ['lexical  
                  ;; my reading of the docs suggest that this should not occur in v4...
                  (error 'varref-abstraction 
@@ -833,21 +838,25 @@
                 [(list-rest (? module-path-index? path-index) dontcare)
                  (let-values ([(module-path dc5)
                                (module-path-index-split path-index)])
-                   (if module-path 
+                   (if module-path
                        ;; not a module-local variable:
-                       (top-level-varref-break-wrap)
+                       (module-bound-varref-break-wrap)
                        ;; a module-local-variable:
                        (varref-break-wrap)))]
                 [other (error 
                         'annotate
-                        "unexpected value for identifier-binding: ~v" other)])))
+                        "unexpected value for identifier-binding: ~v" other)])]
+             [other
+              (error 'annotate 
+                     "unexpected value for stepper-binding-type on variable ~e: ~e"
+                     (syntax->datum var)
+                     other)])
            free-varrefs)))
                   
       (define (recertifier vals)
         (match-let* ([(vector new-exp bindings) vals])
-          (vector (stepper-recertify new-exp exp)
-                  (map (lambda (b)
-                         (stepper-recertify b exp))
+          (vector new-exp
+                  (map (lambda (b) b)
                        bindings))))
 
       ;; this is a terrible hack... until some other language form needs it. 
@@ -882,7 +891,8 @@
              (vector (wcm-wrap 13 exp) null)]
             
             [else
-             (recertifier
+             (let ([exp (syntax-disarm exp saved-code-inspector)])
+              (recertifier
               (maybe-final-val-wrap
                (kernel:kernel-syntax-case 
                 exp #f
@@ -1167,7 +1177,7 @@
                  (varref-abstraction #`var-stx)]
                 
                 [else 
-                 (error 'annotate "unexpected syntax for expression: ~v" (syntax->datum exp))])))])))
+                 (error 'annotate "unexpected syntax for expression: ~v" (syntax->datum exp))]))))])))
   
   ;; annotate/top-level : syntax-> syntax
   ;; expansion of teaching level language programs produces two kinds of 
@@ -1235,7 +1245,7 @@
           [(stepper-syntax-property exp 'stepper-skip-completely) exp]
           ;; for kathy's test engine:
           [(syntax-property exp 'test-call) exp]
-          [(stepper-syntax-property exp 'stepper-define-struct-hint)
+          [(stepper-syntax-property exp 'stepper-black-box-expr)
            #`(begin #,exp
                     (#%plain-app #,(make-define-struct-break exp)))]
           [(stepper-syntax-property exp 'stepper-skipto)
@@ -1252,12 +1262,23 @@
                  #`(begin
                      (define-values (new-var ...)
                        #,(top-level-annotate/inner (top-level-rewrite #`e) exp defined-name))
-                     ;; this next expression should deliver the newly computed values to an exp-finished-break
-                     (#%plain-app #,exp-finished-break (#%plain-app list (#%plain-app list #,(lambda () exp) #f (#%plain-lambda () (#%plain-app list new-var ...))))))
+                     ;; this next expression should deliver the newly computed values to an
+                     ;; exp-finished-break
+                     (#%plain-app #,exp-finished-break
+                                  (#%plain-app list 
+                                               (#%plain-app list
+                                                            #,(lambda () exp)
+                                                            #f
+                                                            (#%plain-lambda ()
+                                                                            (#%plain-app
+                                                                             list
+                                                                             new-var ...))))))
                  #'e))]
              [(define-syntaxes (new-vars ...) e)
               exp]
              [(#%require specs ...)
+              ;; this should only include requires inserted automatically, as others should 
+              ;; get caught above in the "stepper-black-box-expr" check:
               exp]
              [(#%provide specs ...)
               exp]
@@ -1324,7 +1345,7 @@
 (define saved-code-inspector (current-code-inspector))
 
 (define (stepper-recertify new-stx old-stx)
-  (syntax-recertify new-stx old-stx saved-code-inspector #f))
+  (syntax-rearm new-stx old-stx #t))
 
 ;; does this stx have the 'stepper-skip-completely property?
 (define (skipped? stx)

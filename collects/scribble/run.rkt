@@ -1,16 +1,16 @@
 #lang racket/base
 
-(require "core.ss"
-         "base-render.ss"
-         "xref.ss"
+(require "core.rkt"
+         "base-render.rkt"
+         "xref.rkt"
          scheme/cmdline
          scheme/file
          scheme/class
          raco/command-name
-         (prefix-in text:  "text-render.ss")
-         (prefix-in html:  "html-render.ss")
-         (prefix-in latex: "latex-render.ss")
-         (prefix-in pdf:   "pdf-render.ss"))
+         (prefix-in text:  "text-render.rkt")
+         (prefix-in html:  "html-render.rkt")
+         (prefix-in latex: "latex-render.rkt")
+         (prefix-in pdf:   "pdf-render.rkt"))
 
 (define multi-html:render-mixin
   (lambda (%) (html:render-multi-mixin (html:render-mixin %))))
@@ -51,30 +51,32 @@
     (current-render-mixin latex:render-mixin)]
    [("--pdf") "generate PDF-format output (with PDFLaTeX)"
     (current-render-mixin pdf:render-mixin)]
+   [("--latex-section") n "generate LaTeX-format output for section depth <n>"
+    (let ([v (string->number n)])
+      (unless (exact-nonnegative-integer? v)
+        (raise-user-error 'scribble (format "bad section depth: ~a" n)))
+      (current-render-mixin (latex:make-render-part-mixin v)))]
    #:once-each
    [("--dest") dir "write output in <dir>"
     (current-dest-directory dir)]
    [("--dest-name") name "write output as <name>"
     (current-dest-name name)]
-   [("--prefix") file "use given .html/.tex prefix (for doctype/documentclass)"
-    (current-prefix-file file)]
+   #:multi
+   [("++style") file "add given .css/.tex file after others"
+    (current-style-extra-files (cons file (current-style-extra-files)))]
+   #:once-each
    [("--style") file "use given base .css/.tex file"
     (current-style-file file)]
-   [("--redirect") url "redirect external links to tag search via <url>"
-    (current-redirect url)]
-   [("--redirect-main") url "redirect main doc links to <url>"
-    (current-redirect-main url)]
-   [("--info-out") file "write format-specific link information to <file>"
-    (current-info-output-file file)]
+   [("--prefix") file "use given .html/.tex prefix (for doctype/documentclass)"
+    (current-prefix-file file)]
    #:multi
    [("++extra") file "add given file"
     (current-extra-files (cons file (current-extra-files)))]
-   [("++style") file "add given .css/.tex file after others"
-    (current-style-extra-files (cons file (current-style-extra-files)))]
-   [("++info-in") file "load format-specific link information from <file>"
-    (current-info-input-files
-     (cons file (current-info-input-files)))]
-   [("++xref-in") module-path proc-id "load format-specific link information by"
+   [("--redirect-main") url "redirect main doc links to <url>"
+    (current-redirect-main url)]
+   [("--redirect") url "redirect external links to tag search via <url>"
+    (current-redirect url)]
+   [("++xref-in") module-path proc-id "load format-specific cross-ref info by"
     "calling <proc-id> as exported by <module-path>"
     (let ([mod (read-one module-path)]
           [id (read-one proc-id)])
@@ -86,6 +88,11 @@
          'scribble "bad procedure identifier for ++ref-in: ~s" proc-id))
       (current-xref-input-modules
        (cons (cons mod id) (current-xref-input-modules))))]
+   [("--info-out") file "write format-specific cross-ref info to <file>"
+    (current-info-output-file file)]
+   [("++info-in") file "load format-specific cross-ref info from <file>"
+    (current-info-input-files
+     (cons file (current-info-input-files)))]
    #:once-each
    [("--quiet") "suppress output-file reporting"
     (current-quiet #t)]

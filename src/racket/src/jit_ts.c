@@ -16,7 +16,7 @@
 
 #ifdef JIT_TS_PROCS
 define_ts_bsi_v(call_set_global_bucket, FSRC_MARKS)
-define_ts_s_s(make_global_ref, FSRC_OTHER)
+define_ts_ss_s(make_global_ref, FSRC_OTHER)
 define_ts_iiS_v(lexical_binding_wrong_return_arity, FSRC_MARKS)
 define_ts_siS_v(wrong_argument_count, FSRC_MARKS)
 # ifdef JIT_PRECISE_GC
@@ -53,6 +53,7 @@ define_ts_iS_s(scheme_checked_caar, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_cadr, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_cdar, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_cddr, FSRC_MARKS)
+define_ts_iSp_v(apply_prim_to_fail, FSRC_OTHER)
 define_ts_s_s(scheme_checked_length, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_mcar, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_mcdr, FSRC_MARKS)
@@ -82,6 +83,10 @@ define_ts_s_s(scheme_unbox, FSRC_MARKS)
 define_ts_si_s(scheme_struct_ref, FSRC_MARKS)
 define_ts_sis_v(scheme_struct_set, FSRC_MARKS)
 define_ts_iS_s(scheme_extract_checked_procedure, FSRC_MARKS)
+define_ts_iS_s(scheme_procedure_arity_includes, FSRC_MARKS)
+define_ts_ssi_s(vector_check_chaperone_of, FSRC_OTHER)
+define_ts_iS_s(scheme_checked_list_ref, FSRC_MARKS)
+define_ts_iS_s(scheme_checked_list_tail, FSRC_MARKS)
 #endif
 
 #ifdef JITCALL_TS_PROCS
@@ -104,6 +109,7 @@ define_ts_ss_s(scheme_jit_make_two_element_vector, FSRC_OTHER)
 define_ts_l_s(scheme_jit_make_ivector, FSRC_OTHER)
 define_ts_l_s(scheme_jit_make_vector, FSRC_OTHER)
 # endif
+define_ts_ss_i(scheme_equal, FSRC_OTHER)
 #endif
 
 #ifdef JIT_APPLY_TS_PROCS
@@ -153,6 +159,7 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_scheme_checked_cadr scheme_checked_cadr
 # define ts_scheme_checked_cdar scheme_checked_cdar
 # define ts_scheme_checked_cddr scheme_checked_cddr
+# define ts_apply_prim_to_fail apply_prim_to_fail
 # define ts_scheme_checked_length scheme_checked_length
 # define ts_scheme_checked_mcar scheme_checked_mcar
 # define ts_scheme_checked_mcdr scheme_checked_mcdr
@@ -172,6 +179,7 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_scheme_fxvector_length scheme_fxvector_length
 # define ts_scheme_struct_ref scheme_struct_ref
 # define ts_scheme_struct_set scheme_struct_set
+# define ts_scheme_equal scheme_equal
 # define ts_tail_call_with_values_from_multiple_result tail_call_with_values_from_multiple_result
 # define ts_raise_bad_call_with_values raise_bad_call_with_values
 # define ts_call_with_values_from_multiple_result_multi call_with_values_from_multiple_result_multi
@@ -188,7 +196,11 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_scheme_checked_fxvector_set scheme_checked_fxvector_set
 # define ts_scheme_checked_syntax_e scheme_checked_syntax_e
 # define ts_scheme_extract_checked_procedure scheme_extract_checked_procedure
+# define ts_scheme_procedure_arity_includes scheme_procedure_arity_includes
 # define ts_apply_checked_fail apply_checked_fail
 # define ts_scheme_build_list_offset scheme_build_list_offset
 # define ts_wrong_argument_count wrong_argument_count
+# define ts_vector_check_chaperone_of vector_check_chaperone_of
+# define ts_scheme_checked_list_ref scheme_checked_list_ref
+# define ts_scheme_checked_list_tail scheme_checked_list_tail
 #endif

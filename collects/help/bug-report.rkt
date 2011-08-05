@@ -4,11 +4,12 @@
          racket/gui/base
          framework
          racket/class
+         racket/port
          net/url
          net/uri-codec
          browser/htmltext
          "private/bug-report-controls.rkt"
-         "private/buginfo.ss"
+         "private/buginfo.rkt"
          "private/save-bug-report.rkt")
 
 (provide help-desk:report-bug
@@ -16,8 +17,15 @@
          saved-bug-report-titles/ids
          discard-all-saved-bug-reports)
 
-(define bug-www-server "bugs.racket-lang.org")
-(define bug-www-server-port 80)
+(define (bug-server-url path)
+  (string->url (string-append "http://bugs.racket-lang.org/" path)))
+(define bug-report-url   (bug-server-url "bug-report.cgi"))
+(define captcha-text-url (bug-server-url "captcha-text"))
+(define (get-captcha-text)
+  (let* ([s (port->string (get-pure-port captcha-text-url))]
+         [s (regexp-replace #px"^\\s+" s "")]
+         [s (regexp-replace #px"\\s+$" s "")])
+    (and ((string-length s) . > . 0) s)))
 
 (preferences:set-default 'drracket:email "" string? #:aliases '(drscheme:email))
 (preferences:set-default 'drracket:full-name "" string? #:aliases '(drscheme:full-name))
@@ -43,7 +51,7 @@
                 (loop (cdr open-frames))))]))]
     [else
      (report-bug/new-frame this-bug-id frame-mixin)]))
-  
+
 (define (report-bug/new-frame this-bug-id frame-mixin)
   (define bug-frame%
     (class (frame-mixin (frame:standard-menus-mixin frame:basic%))
@@ -186,77 +194,99 @@
     (unsave-bug-report (saved-report-id init-bug-report))
     (send single active-child finished-panel)
     (send finished-close focus))
-  
-  ; send-bug-report : (-> void)
+
+  ;; send-bug-report : (-> void)
   ;; initiates sending the bug report and switches the GUI's mode
   (define (send-bug-report)
-    (define query (get-query))
-    (define url
-      (string->url (format "http://~a:~a/cgi-bin/bug-report"
-                           bug-www-server
-                           bug-www-server-port)))
-    (define post-data
-      (parameterize ([current-alist-separator-mode 'amp])
-        (string->bytes/utf-8 (alist->form-urlencoded query))))
     (set! cancel-kill-cust (make-custodian))
     (define response-chan (make-channel))
     (define exn-chan (make-channel))
     (define worker-thread
-      (parameterize ([current-custodian cancel-kill-cust])
+      (parameterize ([current-custodian cancel-kill-cust]
+                     [current-alist-separator-mode 'amp])
         (thread
          (λ ()
+           ;; Note that this UI is not great: every submission asks for a
+           ;; captcha and nothing is kept.  This is fine since this is only in
+           ;; case it needs to be used in the future -- if/when that happens,
+           ;; the code can be improved to remember some of it, and the server
+           ;; can have some better policy to send the same captcha to the same
+           ;; client.  So the only case where you'd suffer the bad UI is if a
+           ;; captcha is added *and* you have this version of the code (which
+           ;; will be outdated by that time).
+           (define captcha-question (get-captcha-text))
+           (define captcha-answer
+             (and captcha-question
+                  (get-text-from-user
+                   "Are you human?" ; FIXME: use string-constant
+                   captcha-question bug-frame)))
+           (define post-data
+             (let* ([q (get-query)]
+                    [q (if captcha-answer
+                         `([captcha . ,captcha-answer]
+                           ;; send back the question too: if things get really
+                           ;; bad, then the server can make up random captchas
+                           ;; and check the reply against the challenge that
+                           ;; was used
+                           [captcha-question . ,captcha-question]
+                           ,@q)
+                         q)])
+               (string->bytes/utf-8 (alist->form-urlencoded q))))
            (with-handlers ([exn:fail? (λ (x) (channel-put exn-chan x))])
-             (parameterize ([current-alist-separator-mode 'amp])
-               (call/input-url 
-                url
-                (case-lambda
-                  [(x) (post-pure-port x post-data)]
-                  [(x y) (post-pure-port x post-data y)])
-                (lambda (port)
-                  (define response-text (new html-text%))
-                  (render-html-to-text port response-text #t #f)
-                  (send response-text auto-wrap #t)
-                  (send response-text lock #t)
-                  (channel-put response-chan response-text)))))))))
-    
+             (call/input-url
+              bug-report-url
+              (lambda (x) (post-impure-port x post-data))
+              (lambda (port)
+                (define error?
+                  (cond [(regexp-match #rx"^HTTP/[0-9.]+ +([0-9]+) *(.*)$"
+                                       (read-line port 'any))
+                         => (lambda (m)
+                              ;; ignore the status text -- the reply should
+                              ;; have a better indication of what went wrong
+                              ((string->number (cadr m)) . >= . 400))]
+                        [else #f]))
+                ;; skip HTTP headers
+                (regexp-match-positions #rx"\r?\n\r?\n" port)
+                (if error?
+                  ;; error status => show as error
+                  (begin (with-pending-text
+                          (λ ()
+                            (send pending-text erase)
+                            (render-html-to-text port pending-text #t #f)))
+                         (channel-put exn-chan #f)) ; #f = "already rendered"
+                  ;; (hopefully) a good result
+                  (let ([response-text (new html-text%)])
+                    (render-html-to-text port response-text #t #f)
+                    (send response-text auto-wrap #t)
+                    (send response-text lock #t)
+                    (channel-put response-chan response-text))))))))))
+    (define (render-error to-render)
+      (cond
+        [(string? to-render)
+         (let ([str (string-append "<pre>\n\nERROR:\n"to-render"\n</pre>\n")])
+           (render-error (open-input-string str)))]
+        [(exn? to-render) (render-error (exn-message to-render))]
+        [(or (input-port? to-render) (not to-render))
+         (queue-callback
+          (λ ()
+            (when to-render
+              (with-pending-text
+               (λ () (render-html-to-text to-render pending-text #t #f))))
+            (send pending-back enable #t)
+            (send pending-abort enable #f)))]
+        [else (error 'render-error "internal error")]))
+
     (thread
      (λ ()
-       (sync
-        (handle-evt
-         exn-chan
-         (λ (exn)
-           (queue-callback
-            (λ ()
-              (define sp (open-output-string))
-              (define-values (in out) (make-pipe))
-              (thread
-               (λ ()
-                 (fprintf out "<pre>\n")
-                 (display (exn-message exn) out)
-                 (fprintf out "\n</pre>\n")
-                 (close-output-port out)))
-              (with-pending-text
-               (λ () (render-html-to-text in pending-text #t #f)))
-              (send pending-back enable #t)
-              (send pending-abort enable #f)))))
-        (handle-evt
-         (thread-dead-evt worker-thread)
-         (λ (_)
-           (queue-callback
-            (λ ()
-              (with-pending-text
-               (λ () 
-                 (define p (send pending-text last-position))
-                 (send pending-text insert "Killed." p p)))
-              (send pending-back enable #t)
-              (send pending-abort enable #f)))))
-        (handle-evt
-         response-chan
-         (λ (finished-text)
-           (queue-callback
-            (lambda ()
-              (switch-to-finished-view finished-text))))))))
-    
+       (sync (handle-evt exn-chan render-error)
+             (handle-evt (thread-dead-evt worker-thread)
+                         (λ (_) (render-error "reporting process killed")))
+             (handle-evt response-chan
+                         (λ (finished-text)
+                           (queue-callback
+                            (λ ()
+                              (switch-to-finished-view finished-text))))))))
+
     (init-pending-view))
 
   (define (ok)

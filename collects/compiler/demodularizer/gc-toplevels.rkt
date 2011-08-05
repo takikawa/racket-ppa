@@ -74,7 +74,7 @@
        (for-each (lambda (f) (build-graph! lhs f)) forms)]
       [(struct splice (forms))
        (for-each (lambda (f) (build-graph! lhs f)) forms)]
-      [(and l (struct lam (name flags num-params param-types rest? closure-map closure-types max-let-depth body)))
+      [(and l (struct lam (name flags num-params param-types rest? closure-map closure-types tl-map max-let-depth body)))
        (build-graph! lhs body)]
       [(and c (struct closure (code gen-id)))
        (build-graph! lhs code)]
@@ -120,8 +120,9 @@
       [(struct beg0 (seq))
        (for-each (lambda (f) (build-graph! lhs f))
                  seq)]
-      [(struct varref (tl))
-       (build-graph! lhs tl)]
+      [(struct varref (tl dummy))
+       (build-graph! lhs tl)
+       (build-graph! lhs dummy)]
       [(and f (struct assign (id rhs undef-ok?)))
        (build-graph! lhs id)
        (build-graph! lhs rhs)]
@@ -206,8 +207,9 @@
        (make-seq (filter identity (map update forms)))]
       [(struct splice (forms))
        (make-splice (filter identity (map update forms)))]
-      [(and l (struct lam (name flags num-params param-types rest? closure-map closure-types max-let-depth body)))
+      [(and l (struct lam (name flags num-params param-types rest? closure-map closure-types tl-map max-let-depth body)))
        (struct-copy lam l
+                    [toplevel-map #f] ; consevrative
                     [body (update body)])]
       [(and c (struct closure (code gen-id)))
        (struct-copy closure c
@@ -251,8 +253,8 @@
         (update body))]
       [(struct beg0 (seq))
        (make-beg0 (map update seq))]
-      [(struct varref (tl))
-       (make-varref (update tl))]
+      [(struct varref (tl dummy))
+       (make-varref (update tl) (update dummy))]
       [(and f (struct assign (id rhs undef-ok?)))
        (struct-copy assign f
                     [id (update id)]

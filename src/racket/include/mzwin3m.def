@@ -53,6 +53,7 @@ EXPORTS
  scheme_cancel_sleep
  scheme_start_sleeper_thread
  scheme_end_sleeper_thread
+ scheme_set_place_sleep
  scheme_notify_sleep_progress
  scheme_make_thread_cell
  scheme_thread_cell_get
@@ -194,6 +195,7 @@ EXPORTS
  GC_malloc_atomic_allow_interior
  GC_malloc_tagged_allow_interior
  scheme_malloc_code
+ scheme_malloc_permanent_code
  scheme_free_code
  scheme_malloc_gcable_code
  scheme_malloc_eternal
@@ -217,6 +219,7 @@ EXPORTS
  scheme_dont_gc_ptr
  scheme_gc_ptr_ok
  scheme_collect_garbage
+ scheme_enable_garbage_collection
  GC_variable_stack
  GC_register_traversers
  GC_resolve
@@ -249,6 +252,7 @@ EXPORTS
  scheme_make_hash_tree
  scheme_hash_tree_set
  scheme_hash_tree_get
+ scheme_eq_hash_tree_get
  scheme_hash_tree_next
  scheme_hash_tree_index
  scheme_hash_tree_equal
@@ -436,6 +440,7 @@ EXPORTS
  scheme_set_next_port_custodian
  scheme_set_port_location_fun
  scheme_set_port_count_lines_fun
+ scheme_port_count_lines
  scheme_progress_evt_via_get
  scheme_peeked_read_via_get
  scheme_write_evt_via_write
@@ -611,3 +616,5 @@ EXPORTS
  scheme_stx_extract_marks
  scheme_get_place_table
  scheme_register_process_global
+ scheme_malloc_key
+ scheme_free_key

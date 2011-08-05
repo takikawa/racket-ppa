@@ -7,15 +7,18 @@ static void  *os_alloc_pages(size_t len);
 static void   os_free_pages(void *p, size_t len);
 static void   os_protect_pages(void *p, size_t len, int writable);
 
-#define BC_BLOCK_SIZE (1 << 24)  /* 16 MB */
+#define BC_STARTING_BLOCK_SIZE (1 << 21)  /* 2 MB */
+#define BC_MAX_BLOCK_SIZE (1 << 24)  /* 16 MB */
 
 struct block_desc;
 static AllocCacheBlock *alloc_cache_create();
-static ssize_t alloc_cache_free_page(AllocCacheBlock *blockfree, char *p, size_t len, int dirty);
+static ssize_t alloc_cache_free(AllocCacheBlock *);
+static ssize_t alloc_cache_free_page(AllocCacheBlock *blockfree, char *p, size_t len, int dirty, int originated_here);
 static ssize_t alloc_cache_flush_freed_pages(AllocCacheBlock *blockfree);
 static void *alloc_cache_alloc_page(AllocCacheBlock *blockfree,  size_t len, size_t alignment, int dirty_ok, ssize_t *size_diff);
 
 static Page_Range *page_range_create();
+static void page_range_free(Page_Range *pr);
 static void page_range_flush(Page_Range *pr, int writeable);
 static void page_range_add(Page_Range *pr, void *_start, uintptr_t len, int writeable);
 
@@ -40,6 +43,7 @@ typedef struct block_group {
   GCList full;
   GCList free;
   int atomic;
+  int block_size;
 } block_group;
 
 typedef struct BlockCache {
@@ -60,27 +64,46 @@ static BlockCache* block_cache_create(MMU *mmu) {
   gclist_init(&bc->atomic.full);
   gclist_init(&bc->atomic.free);
   bc->atomic.atomic = 1;
+  bc->atomic.block_size = BC_STARTING_BLOCK_SIZE;
   gclist_init(&bc->non_atomic.full);
   gclist_init(&bc->non_atomic.free);
-  bc->atomic.atomic = 0;
+  bc->non_atomic.atomic = 0;
+  bc->non_atomic.block_size = BC_STARTING_BLOCK_SIZE;
   bc->bigBlockCache = alloc_cache_create();
   bc->page_range = page_range_create();
   bc->mmu = mmu;
   return bc;
 }
 
-static void block_cache_free(BlockCache* bc) {
+static ssize_t block_cache_free(BlockCache* bc) {
+  ssize_t acf = alloc_cache_free(bc->bigBlockCache);
+  page_range_free(bc->page_range);
   free(bc);
+  return acf;
 }
 
 static block_desc *bc_alloc_std_block(block_group *bg) {
-  void *r = os_alloc_pages(BC_BLOCK_SIZE);
-  void *ps = align_up_ptr(r, APAGE_SIZE);
+  int this_block_size = bg->block_size;
+  void *r = os_alloc_pages(this_block_size);
+  block_desc *bd;
+  void *ps;
 
-  block_desc *bd = (block_desc*) ofm_malloc(sizeof(block_desc));
+  if (!r) return NULL;
+
+  ps = align_up_ptr(r, APAGE_SIZE);
+
+  if (this_block_size < BC_MAX_BLOCK_SIZE) {
+    bg->block_size <<= 1;
+  }
+
+  bd = (block_desc*) ofm_malloc(sizeof(block_desc));
+  if (!bd) {
+    os_free_pages(r, this_block_size);
+    return NULL;
+  }
   bd->block = r;
   bd->free = ps;
-  bd->size = BC_BLOCK_SIZE;
+  bd->size = this_block_size;
   bd->used = 0;
   bd->group = bg;
   gclist_init(&bd->gclist);
@@ -92,9 +115,9 @@ static block_desc *bc_alloc_std_block(block_group *bg) {
     if (diff) {
       intptr_t enddiff = APAGE_SIZE - diff;
       os_free_pages(r, diff);
-      os_free_pages(r + BC_BLOCK_SIZE - enddiff, enddiff);
+      os_free_pages(r + this_block_size - enddiff, enddiff);
       bd->block = ps;
-      bd->size  = BC_BLOCK_SIZE - APAGE_SIZE;
+      bd->size  = this_block_size - APAGE_SIZE;
       /* printf("UNALIGNED FROM OS %p %li %li\n", r, diff, enddiff); */
     }
   }
@@ -137,8 +160,10 @@ static void *bc_alloc_std_page(BlockCache *bc, int dirty_ok, int expect_mprotect
     }
   }
   else {
+    block_desc *bd;
     newbl = 1;
-    block_desc *bd = bc_alloc_std_block(bg);
+    bd = bc_alloc_std_block(bg);
+    if (!bd) return NULL;
     gclist_add(free_head, &(bd->gclist));
     (*size_diff) += bd->size;
     /* printf("ALLOC BLOCK %i %p %p-%p size %li %p\n", expect_mprotect, bg, bd->block, bd->block + bd->size, bd->size, bd->free); */
@@ -217,7 +242,8 @@ static int find_addr_in_bd(GCList *head, void *p, char* msg) {
 }
 #endif
 
-static ssize_t block_cache_free_page(BlockCache* bc, void *p, size_t len, int type, int expect_mprotect, void **src_block) {
+static ssize_t block_cache_free_page(BlockCache* bc, void *p, size_t len, int type, int expect_mprotect, void **src_block,
+                                     int originated_here) {
   switch(type) {
     case MMU_SMALL_GEN1:
       {
@@ -247,7 +273,7 @@ static ssize_t block_cache_free_page(BlockCache* bc, void *p, size_t len, int ty
           printf("FREE  PAGE %i %p %p-%p %03i %03i %04i %04i : %03i %03i %03i %03i %09i\n", expect_mprotect, bg, p, p + APAGE_SIZE, afu, afr, nafu, nafr, afub, afrb, nafub, nafrb, mmu_memory_allocated(bc->mmu));
         }
 #endif
-        return 0;
+        return (originated_here ? 0 : len);
       }
       break;
     default:
@@ -258,7 +284,7 @@ static ssize_t block_cache_free_page(BlockCache* bc, void *p, size_t len, int ty
                find_addr_in_bd(&bc->non_atomic.free, p, "non_atomic freeblock")));
       assert(*src_block == (char*)~0x0);
 #endif
-      return alloc_cache_free_page(bc->bigBlockCache, p, len, MMU_DIRTY);
+      return alloc_cache_free_page(bc->bigBlockCache, p, len, MMU_DIRTY, originated_here);
       break;
   }
 }

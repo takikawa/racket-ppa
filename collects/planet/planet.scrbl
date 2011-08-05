@@ -15,7 +15,7 @@
      (eval:alts code resl)
      ...))
 
-@title{@bold{PLaneT}: Automatic Package Distribution}
+@title{PLaneT: Automatic Package Distribution}
 
 @author["Jacob Matthews" "Robert Bruce Findler"]
 
@@ -487,7 +487,7 @@ the resolvers behavior.
 }
 
 @defparam[install? inst? boolean?]{
-  A parameter that controls if @PLaneT attempts to install a planet package that isn't already installed.                                  
+  A parameter that controls if @PLaneT attempts to install a planet package that isn't already installed.
   If the package isn't installed, the resolver will raise the @racket[exn:fail:planet?] exception
   instead of installing it.
 }

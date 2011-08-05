@@ -1,5 +1,5 @@
 #lang scribble/doc
-@(require "mz.ss")
+@(require "mz.rkt")
 
 @title[#:tag "pathutils" #:style 'toc]{Paths}
 
@@ -103,7 +103,7 @@ the conversion of Windows paths.
 
 See also @racket[some-system-path->string].}
 
-@defproc[(path->bytes [path path?]) bytes?]{
+@defproc[(path->bytes [path path-for-some-system?]) bytes?]{
 
 Produces @racket[path]'s byte string representation. No information is
 lost in this translation, so that @racket[(bytes->path (path->bytes
@@ -129,7 +129,7 @@ Windows paths.
 
 If @racket[str] does not correspond to any path element
 (e.g., it is an absolute path, or it can be split), or if it
-corresponds to an up-directory or same-directory indicator under
+corresponds to an up-directory or same-directory indicator on
 @|AllUnix|, then @exnraise[exn:fail:contract].
 
 As for @racket[path->string], information can be lost from
@@ -138,7 +138,7 @@ As for @racket[path->string], information can be lost from
 
 @defproc[(bytes->path-element [bstr bytes?]
                               [type (or/c 'unix 'windows) (system-path-convention-type)]) 
-         path?]{
+         path-for-some-system?]{
 
 Like @racket[bytes->path], except that @racket[bstr] corresponds to a
 single relative element in a path. In terms of conversions and
@@ -155,7 +155,7 @@ elements is necessary.}
 @defproc[(path-element->string [path path?]) string?]{
 
 Like @racket[path->string], except that trailing path separators are
-removed (as by @racket[split-path]). Under Windows, any
+removed (as by @racket[split-path]). On Windows, any
 @litchar{\\?\REL} encoding prefix is also removed; see
 @secref["windowspaths"] for more information on Windows paths.
 
@@ -186,7 +186,7 @@ reassembling the result with @racket[bytes->path-element] and
 @racket[build-path]).}
 
 
-@defproc[(path-convention-type [path path?])
+@defproc[(path-convention-type [path path-for-some-system?])
          (or/c 'unix 'windows)]{
 
 Accepts a path value (not a string) and returns its convention
@@ -201,11 +201,11 @@ Returns the path convention type of the current platform:
 Windows.}
 
 
-@defproc[(build-path [base (or/c path-string? 'up 'same)]
-                     [sub (or/c (and/c path-string? 
+@defproc[(build-path [base (or/c path-string? path-for-some-system? 'up 'same)]
+                     [sub (or/c (and/c (or/c path-string? path-for-some-system?)
                                        (not/c complete-path?))
                                 (or/c 'up 'same))] ...)
-         path?]{
+         path-for-some-system?]{
 
 Creates a path given a base path and any number of sub-path
 extensions. If @racket[base] is an absolute path, the result is an
@@ -219,7 +219,7 @@ drive specification (with or without a trailing slash) the first
 @racket[sub] can be an absolute (driveless) path. For all platforms,
 the last @racket[sub] can be a filename.
 
-The @racket[base] and @racket[sub-paths] arguments can be paths for
+The @racket[base] and @racket[sub] arguments can be paths for
 any platform. The platform for the resulting path is inferred from the
 @racket[base] and @racket[sub] arguments, where string arguments imply
 a path for the current platform. If different arguments are for
@@ -261,15 +261,18 @@ Windows examples.
 ]}
 
 
-@defproc[(build-path/convention-type [type (or/c 'unix 'windows)]
-                                     [base path-string?]
-                                     [sub (or/c path-string? 'up 'same)] ...)
-         path?]{
+@defproc[(build-path/convention-type
+                     [type (or/c 'unix 'windows)]
+                     [base (or/c path-string? path-for-some-system? 'up 'same)]
+                     [sub (or/c (and/c (or/c path-string? path-for-some-system?)
+                                       (not/c complete-path?))
+                                (or/c 'up 'same))] ...)
+         path-for-some-system?]{
 
 Like @racket[build-path], except a path convention type is specified
 explicitly.}
 
-@defproc[(absolute-path? [path path-string?]) boolean?]{
+@defproc[(absolute-path? [path (or/c path-string? path-for-some-system?)]) boolean?]{
 
 Returns @racket[#t] if @racket[path] is an absolute path, @racket[#f]
 otherwise. The @racket[path] argument can be a path for any
@@ -278,7 +281,7 @@ contains a nul character), @racket[#f] is returned. This procedure
 does not access the filesystem.}
 
 
-@defproc[(relative-path? [path path-string?]) boolean?]{
+@defproc[(relative-path? [path (or/c path-string? path-for-some-system?)]) boolean?]{
 
 Returns @racket[#t] if @racket[path] is a relative path, @racket[#f]
 otherwise. The @racket[path] argument can be a path for any
@@ -287,7 +290,7 @@ contains a nul character), @racket[#f] is returned. This procedure
 does not access the filesystem.}
 
 
-@defproc[(complete-path? [path path-string?]) boolean?]{
+@defproc[(complete-path? [path (or/c path-string? path-for-some-system?)]) boolean?]{
 
 Returns @racket[#t] if @racket[path] is a completely determined path
 (@italic{not} relative to a directory or drive), @racket[#f]
@@ -300,9 +303,9 @@ contains a nul character), @racket[#f] is returned.
 This procedure does not access the filesystem.}
 
 
-@defproc[(path->complete-path [path path-string?]
-                              [base path-string? (current-directory)])
-         path?]{
+@defproc[(path->complete-path [path (or/c path-string? path-for-some-system?)]
+                              [base (or/c path-string? path-for-some-system?) (current-directory)])
+         path-for-some-system?]{
 
 Returns @racket[path] as a complete path. If @racket[path] is already
 a complete path, it is returned as the result. Otherwise,
@@ -317,12 +320,13 @@ platforms, the @exnraise[exn:fail:contract].
 This procedure does not access the filesystem.}
 
 
-@defproc[(path->directory-path [path path-string?]) path?]{
+@defproc[(path->directory-path [path (or/c path-string? path-for-some-system?)])
+         path-for-some-system?]{
 
 Returns @racket[path] if @racket[path] syntactically refers to a
 directory and ends in a separator, otherwise it returns an extended
 version of @racket[path] that specifies a directory and ends with a
-separator. For example, under @|AllUnix|, the path @filepath{x/y/}
+separator. For example, on @|AllUnix|, the path @filepath{x/y/}
 syntactically refers to a directory and ends in a separator, but
 @filepath{x/y} would be extended to @filepath{x/y/}, and @filepath{x/..} would be
 extended to @filepath{x/../}. The @racket[path] argument can be a path for
@@ -334,29 +338,32 @@ This procedure does not access the filesystem.}
 @defproc[(resolve-path [path path-string?]) path?]{
 
 @tech{Cleanse}s @racket[path] and returns a path that references the
-same file or directory as @racket[path]. Under @|AllUnix|, if
+same file or directory as @racket[path]. On @|AllUnix|, if
 @racket[path] is a soft link to another path, then the referenced path
 is returned (this may be a relative path with respect to the directory
 owning @racket[path]), otherwise @racket[path] is returned (after
 expansion).}
 
 
-@defproc[(cleanse-path [path path-string?]) path]{
+@defproc[(cleanse-path [path (or/c path-string? path-for-some-system?)])
+         path-for-some-system?]{
 
 @techlink{Cleanse}s @racket[path] (as described at the beginning of
 this chapter) without consulting the filesystem.}
 
 
-@defproc[(expand-user-path [path path-string?]) path]{
+@defproc[(expand-user-path [path path-string?]) path?]{
 
-@techlink{Cleanse}s @racket[path]. In addition, under @|AllUnix|, a
+@techlink{Cleanse}s @racket[path]. In addition, on @|AllUnix|, a
 leading @litchar{~} is treated as user's home directory and expanded;
 the username follows the @litchar{~} (before a @litchar{/} or the end
 of the path), where @litchar{~} by itself indicates the home directory
 of the current user.}
 
 
-@defproc[(simplify-path [path path-string?] [use-filesystem? boolean? #t]) path?]{
+@defproc[(simplify-path [path (or/c path-string? path-for-some-system?)]
+                        [use-filesystem? boolean? #t])
+         path-for-some-system?]{
 
 Eliminates redundant path separators (except for a single trailing
 separator), up-directory @litchar{..}, and same-directory @litchar{.}
@@ -364,9 +371,9 @@ indicators in @racket[path], and changes @litchar{/} separators to
 @litchar{\} separators in Windows paths, such that the result
 accesses the same file or directory (if it exists) as @racket[path].
 
-In general, the pathname is normalized as much as possible --- without
+In general, the pathname is normalized as much as possible---without
 consulting the filesystem if @racket[use-filesystem?] is @racket[#f],
-and (under Windows) without changing the case of letters within the
+and (on Windows) without changing the case of letters within the
 path.  If @racket[path] syntactically refers to a directory, the
 result ends with a directory separator.
 
@@ -401,7 +408,8 @@ See @secref["unixpaths"] for more information on simplifying
 information on simplifying Windows paths.}
  
 
-@defproc[(normal-case-path [path path-string?]) path?]{
+@defproc[(normal-case-path [path (or/c path-string? path-for-some-system?)])
+         path-for-some-system?]{
 
 Returns @racket[path] with ``normalized'' case letters. For @|AllUnix|
 paths, this procedure always returns the input path, because
@@ -419,9 +427,9 @@ different on the current platform than for the path's platform.
 This procedure does not access the filesystem.}
 
 
-@defproc[(split-path [path path-string?])
-         (values (or/c path? 'relative #f)
-                 (or/c path? 'up 'same)
+@defproc[(split-path [path (or/c path-string? path-for-some-system?)])
+         (values (or/c path-for-some-system? 'relative #f)
+                 (or/c path-for-some-system? 'up 'same)
                  boolean?)]{
 
 Deconstructs @racket[path] into a smaller path and an immediate
@@ -443,9 +451,9 @@ directory or file name.  Three values are returned:
    @item{a directory-name path,} 
    @item{a filename,}
    @item{@racket['up] if the last part of @racket[path] specifies the parent
-    directory of the preceding path (e.g., @litchar{..} under Unix), or}
+    directory of the preceding path (e.g., @litchar{..} on Unix), or}
    @item{@racket['same] if the last part of @racket[path] specifies the 
-     same directory as the  preceding path (e.g., @litchar{.} under Unix).}
+     same directory as the  preceding path (e.g., @litchar{.} on Unix).}
   ]}
 
  @item{@racket[must-be-dir?] is @racket[#t] if @racket[path] explicitly
@@ -469,9 +477,9 @@ See @secref["unixpaths"] for more information on splitting
 information on splitting Windows paths.}
 
 
-@defproc[(path-replace-suffix [path path-string?]
+@defproc[(path-replace-suffix [path (or/c path-string? path-for-some-system?)]
                               [suffix (or/c string? bytes?)])
-         path?]{
+         path-for-some-system?]{
 
 Returns a path that is the same as @racket[path], except that the
 suffix for the last element of the path is changed to
@@ -483,9 +491,9 @@ at the end of the path element, as long as the path element is not
 path for any platform, and the result is for the same platform. If
 @racket[path] represents a root, the @exnraise[exn:fail:contract].}
 
-@defproc[(path-add-suffix [path path-string?]
+@defproc[(path-add-suffix [path (or/c path-string? path-for-some-system?)]
                           [suffix (or/c string? bytes?)])
-         path?]{
+         path-for-some-system?]{
 
 Similar to @racket[path-replace-suffix], but any existing suffix on
 @racket[path] is preserved by replacing every @litchar{.} in the last

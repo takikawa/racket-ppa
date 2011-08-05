@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require mrlib/image-core
-         "img-err.ss"
+         "img-err.rkt"
          racket/match
          racket/contract
          racket/class
@@ -882,10 +882,10 @@
   (check-mode/color-combination 'square 3 mode color)
   (make-a-polygon (rectangle-points side-length side-length) mode color))
 
-(define/chk (empty-scene width height)
+(define/chk (empty-scene width height [color 'white])
   (crop 0 0 width height
         (overlay (rectangle width height 'outline (pen "black" 2 'solid 'round 'round))
-                 (rectangle width height 'solid 'white))))
+                 (rectangle width height 'solid color))))
 
 (define/chk (rhombus side-length angle mode color)
   (check-mode/color-combination 'rhombus 3 mode color)
@@ -1372,14 +1372,14 @@
 
 (define build-pen/make-pen
   (let ([orig-make-pen make-pen])
-    (define/chk (make-pen color real-0-255 pen-style pen-cap pen-join)
-      (orig-make-pen color real-0-255 pen-style pen-cap pen-join))
+    (define/chk (make-pen color int-0-255 pen-style pen-cap pen-join)
+      (orig-make-pen color int-0-255 pen-style pen-cap pen-join))
     make-pen))
 
 (define build-pen/pen
   (let ([orig-make-pen make-pen])
-    (define/chk (pen color real-0-255 pen-style pen-cap pen-join)
-      (orig-make-pen color real-0-255 pen-style pen-cap pen-join))
+    (define/chk (pen color int-0-255 pen-style pen-cap pen-join)
+      (orig-make-pen color int-0-255 pen-style pen-cap pen-join))
     pen))
 
 (define/chk freeze

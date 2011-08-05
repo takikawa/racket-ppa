@@ -1,11 +1,11 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
 @definterface/title[stretchable-snip<%> ()]{
 
 This interface must be implemented by any snip class who's
 objects will be stretchable when inserted into an
-@scheme[aligned-pasteboard<%>].
+@racket[aligned-pasteboard<%>].
 
 
 

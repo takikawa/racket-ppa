@@ -136,7 +136,7 @@ void *scheme_generate_one(mz_jit_state *old_jitter,
 	buffer = scheme_malloc_gcable_code(size);
 #endif
       } else {
-        buffer = scheme_malloc_code(size);
+        buffer = scheme_malloc_permanent_code(size);
       }
       RECORD_CODE_SIZE(size);
     } else if (old_jitter) {
@@ -346,6 +346,12 @@ void scheme_mz_popr_p_it(mz_jit_state *jitter, int reg, int discard)
   jitter->need_set_rs = 1;
 }
 
+void scheme_mz_need_space(mz_jit_state *jitter, int need_extra)
+{
+  if (jitter->extra_pushed + need_extra > jitter->max_extra_pushed)
+    jitter->max_extra_pushed = jitter->extra_pushed + need_extra;
+}
+
 void scheme_mz_runstack_skipped(mz_jit_state *jitter, int n) 
 {
   int v;
@@ -476,6 +482,9 @@ int scheme_mz_compute_runstack_restored(mz_jit_state *jitter, int adj, int skip)
         c >>= 2;
         if (c > 0)
           amt += c;
+        else {
+          if (adj) jitter->self_pos += c;
+        }
       }
     } else if (c & 0x2) {
       /* single procedure */

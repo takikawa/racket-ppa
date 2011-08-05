@@ -1,13 +1,13 @@
-
 (module teachhelp mzscheme
-  (require "firstorder.ss"
+  (require "firstorder.rkt"
+           "rewrite-error-message.rkt"
            stepper/private/shared)
 
   (require-for-syntax stepper/private/shared)
-  
-  (provide make-undefined-check 
-	   make-first-order-function)
-  
+
+  (provide make-undefined-check
+           make-first-order-function)
+
   (define (make-undefined-check check-proc tmp-id)
     (let ([set!-stx (datum->syntax-object check-proc 'set!)])
       (make-set!-transformer
@@ -42,7 +42,7 @@
              'stepper-skipto
              (append skipto/cdr
                      skipto/third))])))))
-    
+#;    
   (define (appropriate-use what)
     (case what
      [(constructor)
@@ -64,20 +64,15 @@
 	   (identifier? #'id)
 	   (raise-syntax-error
 	    #f
-	    (format "this is a ~a, so it must be ~a (which requires using a parenthesis before the name)"
-		    what
-		    (appropriate-use what))
+	    (format "expected a function call, but there is no open parenthesis before this function")
 	    stx
 	    #f)]
 	  [(id . rest)
-	   (let ([l (length (syntax->list #'rest))])
-	     (unless (= l arity)
+	   (let ([found (length (syntax->list #'rest))])
+	     (unless (= found arity)
 	       (raise-syntax-error
 		#f
-		(format "this ~a expects ~a argument~a, here it is provided ~a argument~a"
-			what 
-			arity (if (= 1 arity) "" "s")
-			l (if (= 1 l) "" "s"))
+                (argcount-error-message arity found)
 		stx
 		#f))
 	     (datum->syntax-object

@@ -202,7 +202,9 @@
       (display-source-info stx)
       (display-extra-source-info stx)
       (display-symbol-property-info stx)
-      (display-marks stx))
+      (display-marks stx)
+      ;; Disable until correct:
+      (when #f (display-taint stx)))
 
     ;; display-source-info : syntax -> void
     (define/private (display-source-info stx)
@@ -210,16 +212,16 @@
       (define s-line (syntax-line stx))
       (define s-column (syntax-column stx))
       (define s-position (syntax-position stx))
-      (define s-span0 (syntax-span stx))
-      (define s-span (if (zero? s-span0) #f s-span0))
+      (define s-span (syntax-span stx))
+      (define s-span-known? (not (memv s-span '(0 #f))))
       (display "Source location\n" key-sd)
-      (if (or s-source s-line s-column s-position s-span)
+      (if (or s-source s-line s-column s-position s-span-known?)
           (begin
             (display-subkv "source" (prettify-source s-source))
             (display-subkv "line" s-line)
             (display-subkv "column" s-column)
             (display-subkv "position" s-position)
-            (display-subkv "span" s-span0))
+            (display-subkv "span" s-span))
           (display "No source location available\n" n/a-sd))
       (display "\n" #f))
 
@@ -246,7 +248,20 @@
     ;; display-marks : syntax -> void
     (define/private (display-marks stx)
       (display "Marks: " key-sd)
-      (display (format "~s\n" (simplify-marks (get-marks stx))) #f))
+      (display (format "~s\n" (simplify-marks (get-marks stx))) #f)
+      (display "\n" #f))
+
+    ;; display-taint : syntax -> void
+    (define/private (display-taint stx)
+      (define (syntax-armed? stx)
+        (syntax-tainted? (datum->syntax stx 'dummy)))
+      (display "Tamper status: " key-sd)
+      (display (cond [(syntax-tainted? stx)
+                      "tainted"]
+                     [(syntax-armed? stx)
+                      "armed"]
+                     [else "clean"])
+               #f))
 
     ;; display-kv : any any -> void
     (define/private (display-kv key value)

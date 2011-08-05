@@ -1,4 +1,3 @@
-
 #lang scheme/unit
 
   (require mzlib/class
@@ -7,8 +6,8 @@
   (require racket/draw/draw-sig
            racket/gui/dynamic)
 
-  (require "mrpict-sig.ss"
-	   "common-sig.ss")
+  (require "mrpict-sig.rkt"
+           "common-sig.rkt")
 
   (import draw^
           texpict-common^
@@ -410,7 +409,7 @@
 			       (unless requested-color
 				 (fprintf (current-error-port)
 					  "WARNING: couldn't find color: ~s\n" (cadr x)))
-			       (set-pen (find-or-create-pen color (send p get-width) 'solid))
+                               (set-pen (find-or-create-pen color (send p get-width) (send p get-style)))
 			       (set-brush (find-or-create-brush color 'solid))
 			       (set-text-foreground color))
 			     (loop dx dy (caddr x))

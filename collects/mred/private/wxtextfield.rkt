@@ -1,22 +1,22 @@
 (module wxtextfield racket/base
   (require mzlib/class
-	   mzlib/class100
-	   (prefix-in wx: "kernel.ss")
-           (prefix-in wx: "wxme/text.ss")
+           mzlib/class100
+           (prefix-in wx: "kernel.rkt")
+           (prefix-in wx: "wxme/text.rkt")
            (prefix-in wx: racket/snip)
-           (prefix-in wx: "wxme/editor-canvas.ss")
-	   "lock.ss"
-	   "const.ss"
-	   "check.ss"
-	   "helper.ss"
-	   "gdi.ss"
-	   "wx.ss"
-	   "wxwindow.ss"
-	   "wxitem.ss"
-	   "wxcanvas.ss"
-	   "wxpanel.ss"
-	   "editor.ss"
-	   "mrpopup.ss")
+           (prefix-in wx: "wxme/editor-canvas.rkt")
+           "lock.rkt"
+           "const.rkt"
+           "check.rkt"
+           "helper.rkt"
+           "gdi.rkt"
+           "wx.rkt"
+           "wxwindow.rkt"
+           "wxitem.rkt"
+           "wxcanvas.rkt"
+           "wxpanel.rkt"
+           "editor.rkt"
+           "mrpopup.rkt")
 
   (provide (protect-out wx-text-field%))
 
@@ -131,6 +131,8 @@
 
   (define wx-text-field%
     (class100 wx-horizontal-panel% (mred proxy parent fun label value style _font)
+      (sequence
+       (send (send parent get-top-level) begin-container-sequence))
       ;; Make text field first because we'll have to exit
       ;;  for keymap initializer
       (private-field
@@ -336,4 +338,5 @@
 	(let ([min-size (get-min-size)])
 	  (set-min-width (car min-size))
 	  (set-min-height (cadr min-size)))
+	(send (send parent get-top-level) end-container-sequence)
 	(callback-ready)))))

@@ -1,21 +1,21 @@
 #lang scheme/base
-(require "../decode.ss"
-         "../struct.ss"
-         "../scheme.ss"
-         "../search.ss"
-         "../basic.ss"
-         "../manual-struct.ss"
-         "qsloc.ss"
+(require "../decode.rkt"
+         "../struct.rkt"
+         "../scheme.rkt"
+         "../search.rkt"
+         "../basic.rkt"
+         "../manual-struct.rkt"
+         "qsloc.rkt"
          scheme/serialize
          scheme/stxparam
-         "manual-utils.ss"
-         "manual-vars.ss"
-         "manual-style.ss"
-         "manual-scheme.ss"
-         "manual-bind.ss"
-         "manual-method.ss"
-         "manual-proc.ss"
-         "manual-ex.ss"
+         "manual-utils.rkt"
+         "manual-vars.rkt"
+         "manual-style.rkt"
+         "manual-scheme.rkt"
+         "manual-bind.rkt"
+         "manual-method.rkt"
+         "manual-proc.rkt"
+         "manual-ex.rkt"
          scheme/string
          scheme/list
          (for-syntax scheme/base)
@@ -218,9 +218,9 @@
                         (car content)))
                     spacer ":" spacer
                     (case kind
-                      [(class) (scheme class?)]
-                      [(interface) (scheme interface?)]
-                      [(mixin) (schemeblockelem (class? . -> . class?))])))))))
+                      [(class) (racket class?)]
+                      [(interface) (racket interface?)]
+                      [(mixin) (racketblockelem (class? . -> . class?))])))))))
     (if super
       (list
        (list (make-flow
@@ -412,7 +412,7 @@
                         (case (syntax-e #'mode)
                           [(pubment)
                            #'((t "Refine this method with "
-                                 (scheme augment) "."))]
+                                 (racket augment) "."))]
                           [(override override-final extend augment)
                            #`((t (case (syntax-e #'mode)
                                    [(override override-final) "Overrides "]
