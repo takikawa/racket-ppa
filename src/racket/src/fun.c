@@ -94,9 +94,11 @@ READ_ONLY Scheme_Object *scheme_default_prompt_tag;
 /* READ ONLY SHARABLE GLOBALS */
 
 ROSYM static Scheme_Object *certify_mode_symbol;
+ROSYM static Scheme_Object *taint_mode_symbol;
 ROSYM static Scheme_Object *transparent_symbol;
 ROSYM static Scheme_Object *transparent_binding_symbol;
 ROSYM static Scheme_Object *opaque_symbol;
+ROSYM static Scheme_Object *none_symbol;
 ROSYM static Scheme_Object *is_method_symbol;
 ROSYM static Scheme_Object *cont_key; /* uninterned */
 ROSYM static Scheme_Object *barrier_prompt_key; /* uninterned */
@@ -117,6 +119,7 @@ THREAD_LOCAL_DECL(static Scheme_Object *cached_mod_stx);
 THREAD_LOCAL_DECL(static Scheme_Object *cached_mod_beg_stx);
 THREAD_LOCAL_DECL(static Scheme_Object *cached_dv_stx);
 THREAD_LOCAL_DECL(static Scheme_Object *cached_ds_stx);
+THREAD_LOCAL_DECL(static Scheme_Object *cached_dvs_stx);
 THREAD_LOCAL_DECL(static int cached_stx_phase);
 THREAD_LOCAL_DECL(static Scheme_Cont *offstack_cont);
 THREAD_LOCAL_DECL(static Scheme_Overflow *offstack_overflow);
@@ -168,7 +171,6 @@ static Scheme_Object *seconds_to_date(int argc, Scheme_Object **argv);
 static Scheme_Object *object_name(int argc, Scheme_Object *argv[]);
 static Scheme_Object *procedure_arity(int argc, Scheme_Object *argv[]);
 static Scheme_Object *procedure_arity_p(int argc, Scheme_Object *argv[]);
-static Scheme_Object *procedure_arity_includes(int argc, Scheme_Object *argv[]);
 static Scheme_Object *procedure_reduce_arity(int argc, Scheme_Object *argv[]);
 static Scheme_Object *procedure_rename(int argc, Scheme_Object *argv[]);
 static Scheme_Object *procedure_to_method(int argc, Scheme_Object *argv[]);
@@ -185,8 +187,6 @@ static Scheme_Object *current_prompt_read(int, Scheme_Object **);
 static Scheme_Object *current_read(int, Scheme_Object **);
 static Scheme_Object *current_get_read_input_port(int, Scheme_Object **);
 
-static Scheme_Object *write_compiled_closure(Scheme_Object *obj);
-static Scheme_Object *read_compiled_closure(Scheme_Object *obj);
 static Scheme_Object *
 scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key, 
                                      Scheme_Object *prompt_tag, Scheme_Meta_Continuation **_meta,
@@ -502,12 +502,12 @@ scheme_init_fun (Scheme_Env *env)
 						      1, 1, 1),
 			     env);
 
-  scheme_procedure_arity_includes_proc = scheme_make_folding_prim(procedure_arity_includes,
-                                                                  "procedure-arity-includes?",
-                                                                  2, 2, 1);
-  scheme_add_global_constant("procedure-arity-includes?",
-			     scheme_procedure_arity_includes_proc,
-			     env);
+  o = scheme_make_folding_prim(scheme_procedure_arity_includes,
+                               "procedure-arity-includes?",
+                               2, 3, 1);
+  SCHEME_PRIM_PROC_FLAGS(o) |= SCHEME_PRIM_IS_BINARY_INLINED;  
+  scheme_procedure_arity_includes_proc = o;
+  scheme_add_global_constant("procedure-arity-includes?", o, env);
 
   scheme_add_global_constant("procedure-reduce-arity",
 			     scheme_make_prim_w_arity(procedure_reduce_arity,
@@ -578,20 +578,18 @@ scheme_init_fun (Scheme_Env *env)
 						       MZCONFIG_READ_INPUT_PORT_HANDLER),
 			     env);
 
-  scheme_install_type_writer(scheme_unclosed_procedure_type,
-			     write_compiled_closure);
-  scheme_install_type_reader(scheme_unclosed_procedure_type,
-			     read_compiled_closure);
-  
   REGISTER_SO(certify_mode_symbol);
+  REGISTER_SO(taint_mode_symbol);
   REGISTER_SO(transparent_symbol);
   REGISTER_SO(transparent_binding_symbol);
   REGISTER_SO(opaque_symbol);
+  REGISTER_SO(none_symbol);
   certify_mode_symbol        = scheme_intern_symbol("certify-mode");
+  taint_mode_symbol          = scheme_intern_symbol("taint-mode");
   transparent_symbol         = scheme_intern_symbol("transparent");
   transparent_binding_symbol = scheme_intern_symbol("transparent-binding");
   opaque_symbol              = scheme_intern_symbol("opaque");
-
+  none_symbol                = scheme_intern_symbol("none");
 
   REGISTER_SO(is_method_symbol);
   REGISTER_SO(scheme_inferred_name_symbol);
@@ -601,7 +599,7 @@ scheme_init_fun (Scheme_Env *env)
   scheme_inferred_name_symbol = scheme_intern_symbol("inferred-name");
   cont_key = scheme_make_symbol("k"); /* uninterned */
   barrier_prompt_key = scheme_make_symbol("bar"); /* uninterned */
-  
+
   REGISTER_SO(scheme_default_prompt_tag);
   {
     Scheme_Object *a[1];
@@ -624,6 +622,7 @@ scheme_init_fun_places()
   REGISTER_SO(cached_mod_beg_stx);
   REGISTER_SO(cached_dv_stx);
   REGISTER_SO(cached_ds_stx);
+  REGISTER_SO(cached_dvs_stx);
   REGISTER_SO(offstack_cont);
   REGISTER_SO(offstack_overflow);
 }
@@ -868,1187 +867,6 @@ int scheme_has_method_property(Scheme_Object *code)
 }
 
 /*========================================================================*/
-/*                  closures (run time and compilation)                   */
-/*========================================================================*/
-
-Scheme_Object *
-scheme_make_closure(Scheme_Thread *p, Scheme_Object *code, int close)
-     /* Creates a closure at run-time (or an empty closure at compile
-        time; note that the byte-code marshaller in print.c can handle
-        empty closures for that reason). */
-{
-  Scheme_Closure_Data *data;
-  Scheme_Closure *closure;
-  GC_CAN_IGNORE Scheme_Object **runstack;
-  GC_CAN_IGNORE Scheme_Object **dest;
-  GC_CAN_IGNORE mzshort *map;
-  int i;
-
-  data = (Scheme_Closure_Data *)code;
-  
-#ifdef MZ_USE_JIT
-  if (data->u.native_code) {
-    Scheme_Object *nc;
-
-    nc = scheme_make_native_closure(data->u.native_code);
-
-    if (close) {
-      runstack = MZ_RUNSTACK;
-      dest = ((Scheme_Native_Closure *)nc)->vals;
-      map = data->closure_map;
-      i = data->closure_size;
-      
-      /* Copy data into the closure: */
-      while (i--) {
-	dest[i] = runstack[map[i]];
-      }
-    }
-
-    return nc;
-  }
-#endif
-
-  i = data->closure_size;
-
-  closure = (Scheme_Closure *)
-    scheme_malloc_tagged(sizeof(Scheme_Closure)
-			 + (i - 1) * sizeof(Scheme_Object *));
-
-  closure->so.type = scheme_closure_type;
-  SCHEME_COMPILED_CLOS_CODE(closure) = data;
-
-  if (!close || !i)
-    return (Scheme_Object *)closure;
-
-  runstack = MZ_RUNSTACK;
-  dest = closure->vals;
-  map = data->closure_map;
-
-  /* Copy data into the closure: */
-  while (i--) {
-    dest[i] = runstack[map[i]];
-  }
-
-  return (Scheme_Object *)closure;
-}
-
-Scheme_Closure *scheme_malloc_empty_closure()
-{
-  Scheme_Closure *cl;
-
-  cl = (Scheme_Closure *)scheme_malloc_tagged(sizeof(Scheme_Closure) - sizeof(Scheme_Object *));
-  cl->so.type = scheme_closure_type;
-
-  return cl;
-}
-
-Scheme_Object *scheme_jit_closure(Scheme_Object *code, Scheme_Object *context)
-  /* If lr is supplied as a letrec binding this closure, it may be used
-     for JIT compilation. */
-{
-#ifdef MZ_USE_JIT
-  Scheme_Closure_Data *data = (Scheme_Closure_Data *)code, *data2;
-
-  /* We need to cache clones to support multiple references
-     to a zero-sized closure in bytecode. We need either a clone
-     or native code, and context determines which field is relevant,
-     so we put the two possibilities in a union `u'. */
-
-  if (!context)
-    data2 = data->u.jit_clone;
-  else
-    data2 = NULL;
-
-  if (!data2) {
-    Scheme_Native_Closure_Data *ndata;
-    
-    data2 = MALLOC_ONE_TAGGED(Scheme_Closure_Data);
-    memcpy(data2, code, sizeof(Scheme_Closure_Data));
-
-    data2->context = context;
-
-    ndata = scheme_generate_lambda(data2, 1, NULL);
-    data2->u.native_code = ndata;
-
-    if (!context)
-      data->u.jit_clone = data2;
-  }      
-    
-  /* If it's zero-sized, then create closure now */
-  if (!data2->closure_size)
-    return scheme_make_native_closure(data2->u.native_code);
-
-  return (Scheme_Object *)data2;
-#endif
-
-  return code;
-}
-
-void scheme_delay_load_closure(Scheme_Closure_Data *data)
-{
-  if (SCHEME_RPAIRP(data->code)) {
-    Scheme_Object *v, *vinfo = NULL;
-
-    v = SCHEME_CAR(data->code);
-    if (SCHEME_VECTORP(v)) {
-      /* Has info for delayed validation */
-      vinfo = v;
-      v = SCHEME_VEC_ELS(vinfo)[0];
-    }
-    v = scheme_load_delayed_code(SCHEME_INT_VAL(v), 
-                                 (struct Scheme_Load_Delay *)SCHEME_CDR(data->code));
-    data->code = v;
-    
-    if (vinfo) {
-      scheme_validate_closure(NULL, 
-                              (Scheme_Object *)data,
-                              (char *)SCHEME_VEC_ELS(vinfo)[1], 
-                              (Validate_TLS)SCHEME_VEC_ELS(vinfo)[2], 
-                              SCHEME_INT_VAL(SCHEME_VEC_ELS(vinfo)[3]),
-                              SCHEME_INT_VAL(SCHEME_VEC_ELS(vinfo)[4]),
-                              SCHEME_INT_VAL(SCHEME_VEC_ELS(vinfo)[5]),
-                              SCHEME_INT_VAL(SCHEME_VEC_ELS(vinfo)[6]),
-                              (SCHEME_TRUEP(SCHEME_VEC_ELS(vinfo)[7])
-                               ? (Scheme_Hash_Tree *)SCHEME_VEC_ELS(vinfo)[7]
-                               : NULL));
-    }
-  }
-}
-
-/* Closure_Info is used to store extra closure information
-   before a closure mapping is resolved. */
-typedef struct {
-  MZTAG_IF_REQUIRED
-  int *local_flags; /* for arguments from compile pass, flonum info updated in optimize pass */
-  mzshort base_closure_size; /* doesn't include top-level (if any) */
-  mzshort *base_closure_map;
-  char *flonum_map; /* NULL when has_flomap set => no flonums */
-  char has_tl, has_flomap, has_nonleaf;
-  int body_size, body_psize;
-} Closure_Info;
-
-Scheme_Object *
-scheme_optimize_closure_compilation(Scheme_Object *_data, Optimize_Info *info, int context)
-{
-  Scheme_Closure_Data *data;
-  Scheme_Object *code, *ctx;
-  Closure_Info *cl;
-  mzshort dcs, *dcm;
-  int i, cnt;
-  Scheme_Once_Used *first_once_used = NULL, *last_once_used = NULL;
-
-  data = (Scheme_Closure_Data *)_data;
-
-  info->single_result = 1;
-  info->preserves_marks = 1;
-
-  info = scheme_optimize_info_add_frame(info, data->num_params, data->num_params,
-					SCHEME_LAMBDA_FRAME);
-
-  info->vclock += 1; /* model delayed evaluation as vclock increment */
-
-  /* For reporting warnings: */
-  if (info->context && SCHEME_PAIRP(info->context))
-    ctx = scheme_make_pair((Scheme_Object *)data,
-                           SCHEME_CDR(info->context));
-  else if (info->context)
-    ctx = scheme_make_pair((Scheme_Object *)data, info->context);
-  else
-    ctx = (Scheme_Object *)data;
-  info->context = ctx;
-
-  cl = (Closure_Info *)data->closure_map;
-  for (i = 0; i < data->num_params; i++) {
-    if (cl->local_flags[i] & SCHEME_WAS_SET_BANGED)
-      scheme_optimize_mutated(info, i);
-    
-    cnt = ((cl->local_flags[i] & SCHEME_USE_COUNT_MASK) >> SCHEME_USE_COUNT_SHIFT);
-    if (cnt == 1) {
-      last_once_used = scheme_make_once_used(NULL, i, info->vclock, last_once_used);
-      if (!first_once_used) first_once_used = last_once_used;
-      scheme_optimize_propagate(info, i, (Scheme_Object *)last_once_used, 1);
-    }
-  }
-
-  code = scheme_optimize_expr(data->code, info, 0);
-
-  for (i = 0; i < data->num_params; i++) {
-    if (scheme_optimize_is_flonum_arg(info, i, 1))
-      cl->local_flags[i] |= SCHEME_WAS_FLONUM_ARGUMENT;
-  }
-
-  while (first_once_used) {
-    if (first_once_used->vclock < 0) {
-      /* no longer used once, due to binding propagation */
-      cl->local_flags[first_once_used->pos] |= SCHEME_USE_COUNT_MASK;
-    }
-    first_once_used = first_once_used->next;
-  }
-
-  if (info->single_result)
-    SCHEME_CLOSURE_DATA_FLAGS(data) |= CLOS_SINGLE_RESULT;
-  else if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_SINGLE_RESULT)
-    SCHEME_CLOSURE_DATA_FLAGS(data) -= CLOS_SINGLE_RESULT;
-
-  if (info->preserves_marks)
-    SCHEME_CLOSURE_DATA_FLAGS(data) |= CLOS_PRESERVES_MARKS;
-  else if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_PRESERVES_MARKS)
-    SCHEME_CLOSURE_DATA_FLAGS(data) -= CLOS_PRESERVES_MARKS;
-
-  if ((info->single_result > 0) && (info->preserves_marks > 0)
-      && (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_RESULT_TENTATIVE))
-    SCHEME_CLOSURE_DATA_FLAGS(data) -= CLOS_RESULT_TENTATIVE;
-
-  data->code = code;
-
-  /* Remembers positions of used vars (and unsets usage for this level) */
-  scheme_env_make_closure_map(info, &dcs, &dcm);
-  cl->base_closure_size = dcs;
-  cl->base_closure_map = dcm;
-  if (scheme_env_uses_toplevel(info))
-    cl->has_tl = 1;
-  else
-    cl->has_tl = 0;
-  cl->body_size = info->size;
-  cl->body_psize = info->psize;
-  cl->has_nonleaf = info->has_nonleaf;
-  
-  info->size++;
-
-  data->closure_size = (cl->base_closure_size
-			+ (cl->has_tl ? 1 : 0));
-
-  scheme_optimize_info_done(info);
-
-  return (Scheme_Object *)data;
-}
-
-char *scheme_get_closure_flonum_map(Scheme_Closure_Data *data, int arg_n, int *ok)
-{
-  Closure_Info *cl = (Closure_Info *)data->closure_map;
-
-  if ((SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_REST)
-      || (arg_n != data->num_params)) {
-    *ok = 0;
-    return NULL;
-  }
-
-  if (cl->has_flomap && !cl->flonum_map) {
-    *ok = 0;
-    return NULL;
-  }
-
-  *ok = 1;
-  return cl->flonum_map;
-}
-
-void scheme_set_closure_flonum_map(Scheme_Closure_Data *data, char *flonum_map)
-{
-  Closure_Info *cl = (Closure_Info *)data->closure_map;
-  int i;
-
-  if (!cl->flonum_map) {
-    cl->has_flomap = 1;
-    cl->flonum_map = flonum_map;
-  }
-  
-  if (flonum_map) {
-    for (i = data->num_params; i--; ) {
-      if (flonum_map[i]) break;
-    }
-    
-    if (i < 0) {
-      cl->flonum_map = NULL;
-    }
-  }
-}
-
-void scheme_merge_closure_flonum_map(Scheme_Closure_Data *data1, Scheme_Closure_Data *data2)
-{
-  Closure_Info *cl1 = (Closure_Info *)data1->closure_map;
-  Closure_Info *cl2 = (Closure_Info *)data2->closure_map;
-
-  if (cl1->has_flomap) {
-    if (!cl1->flonum_map || !cl2->has_flomap) {
-      cl2->has_flomap = 1;
-      cl2->flonum_map = cl1->flonum_map;
-    } else if (cl2->flonum_map) {
-      int i;
-      for (i = data1->num_params; i--; ) {
-        if (cl1->flonum_map[i] != cl2->flonum_map[i]) {
-          cl2->flonum_map = NULL;
-          cl1->flonum_map = NULL;
-          break;
-        }
-      }
-    } else {
-      cl1->flonum_map = NULL;
-    }
-  } else if (cl2->has_flomap) {
-    cl1->has_flomap = 1;
-    cl1->flonum_map = cl2->flonum_map;
-  }
-}
-
-Scheme_Object *scheme_clone_closure_compilation(int dup_ok, Scheme_Object *_data, Optimize_Info *info, int delta, int closure_depth)
-{
-  Scheme_Closure_Data *data, *data2;
-  Scheme_Object *body;
-  Closure_Info *cl;
-  int *flags, sz;
-  char *flonum_map;
-
-  data = (Scheme_Closure_Data *)_data;
-
-  body = scheme_optimize_clone(dup_ok, data->code, info, delta, closure_depth + data->num_params);
-  if (!body) return NULL;
-
-  data2 = MALLOC_ONE_TAGGED(Scheme_Closure_Data);
-  memcpy(data2, data, sizeof(Scheme_Closure_Data));
-
-  data2->code = body;
-
-  cl = MALLOC_ONE_RT(Closure_Info);
-  memcpy(cl, data->closure_map, sizeof(Closure_Info));
-  data2->closure_map = (mzshort *)cl;
-
-  /* We don't have to update base_closure_map, because
-     it will get re-computed as the closure is re-optimized. */
-
-  sz = sizeof(int) * data2->num_params;
-  flags = (int *)scheme_malloc_atomic(sz);
-  memcpy(flags, cl->local_flags, sz);
-  cl->local_flags = flags;
-
-  if (cl->flonum_map) {
-    sz = data2->num_params;
-    flonum_map = (char *)scheme_malloc_atomic(sz);
-    memcpy(flonum_map, cl->flonum_map, sz);
-    cl->flonum_map = flonum_map;
-  }
-
-  return (Scheme_Object *)data2;
-}
-
-Scheme_Object *scheme_shift_closure_compilation(Scheme_Object *_data, int delta, int after_depth)
-{
-  Scheme_Object *expr;
-  Scheme_Closure_Data *data = (Scheme_Closure_Data *)_data;
-
-  expr = scheme_optimize_shift(data->code, delta, after_depth + data->num_params);
-  data->code = expr;
-
-  return _data;
-}
-
-Scheme_Object *scheme_sfs_closure(Scheme_Object *expr, SFS_Info *info, int self_pos)
-{
-  Scheme_Closure_Data *data = (Scheme_Closure_Data *)expr;
-  Scheme_Object *code;
-  int i, size, has_tl = 0;
-
-  size = data->closure_size;
-  if (size) {
-    if (info->stackpos + data->closure_map[size - 1] == info->tlpos) {
-      has_tl = 1;
-      --size;
-    }
-  }
-
-  if (!info->pass) {
-    for (i = size; i--; ) {
-      scheme_sfs_used(info, data->closure_map[i]);
-    }
-  } else {
-    /* Check whether we need to zero out any stack positions
-       after capturing them in a closure: */
-    Scheme_Object *clears = scheme_null;
-
-    if (info->ip < info->max_nontail) {
-      int pos, ip;
-      for (i = size; i--; ) {
-        pos = data->closure_map[i] + info->stackpos;
-        if (pos < info->depth) {
-          ip = info->max_used[pos];
-          if ((ip == info->ip)
-              && (ip < info->max_calls[pos])) {
-            pos -= info->stackpos;
-            clears = scheme_make_pair(scheme_make_integer(pos),
-                                      clears);
-          }
-        }
-      }
-    }
-
-    return scheme_sfs_add_clears(expr, clears, 0);
-  }
-
-  if (!(SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_SFS)) {
-    SCHEME_CLOSURE_DATA_FLAGS(data) |= CLOS_SFS;
-    info = scheme_new_sfs_info(data->max_let_depth);
-    scheme_sfs_push(info, data->closure_size + data->num_params, 1);
-
-    if (has_tl)
-      info->tlpos = info->stackpos + data->closure_size - 1;
-
-    if (self_pos >= 0) {
-      for (i = size; i--; ) {
-        if (data->closure_map[i] == self_pos) {
-          info->selfpos = info->stackpos + i;
-          info->selfstart = info->stackpos;
-          info->selflen = data->closure_size;
-          break;
-        }
-      }
-    }
-
-    code = scheme_sfs(data->code, info, data->max_let_depth);
-
-    /* If any arguments go unused, and if there's a non-tail,
-       non-immediate call in the body, then we flush the
-       unused arguments at the start of the body. We assume that
-       the closure values are used (otherwise they wouldn't
-       be in the closure). */
-    if (info->max_nontail) {
-      int i, pos, cnt;
-      Scheme_Object *clears = scheme_null;
-
-      cnt = data->num_params;
-      for (i = 0; i < cnt; i++) {
-        pos = data->max_let_depth - (cnt - i);
-        if (!info->max_used[pos]) {
-          pos = i + data->closure_size;
-          clears = scheme_make_pair(scheme_make_integer(pos),
-                                    clears);
-        }
-      }
-      
-      if (SCHEME_PAIRP(clears))
-        code = scheme_sfs_add_clears(code, clears, 1);
-    }
-
-    data->code = code;
-  }
-
-  return expr;
-}
-
-int scheme_closure_body_size(Scheme_Closure_Data *data, int check_assign, 
-                             Optimize_Info *info, int *is_leaf)
-{
-  int i;
-  Closure_Info *cl;
-
-  cl = (Closure_Info *)data->closure_map;
-
-  if (check_assign) {
-    /* Don't try to inline if any arguments are mutated: */
-    for (i = data->num_params; i--; ) {
-      if (cl->local_flags[i] & SCHEME_WAS_SET_BANGED)
-	return -1;
-    }
-  }
-
-  if (is_leaf)
-    *is_leaf = !cl->has_nonleaf;
-
-  return cl->body_size + ((info && info->use_psize) ? cl->body_psize : 0);
-}
-
-int scheme_closure_has_top_level(Scheme_Closure_Data *data)
-{
-  Closure_Info *cl;
-
-  cl = (Closure_Info *)data->closure_map;
-
-  return cl->has_tl;
-}
-
-int scheme_closure_argument_flags(Scheme_Closure_Data *data, int i)
-{
-  return ((Closure_Info *)data->closure_map)->local_flags[i];
-}
-
-XFORM_NONGCING static int boxmap_size(int n)
-{
-  return ((2 * n) + (BITS_PER_MZSHORT - 1)) / BITS_PER_MZSHORT;
-}
-
-static mzshort *allocate_boxmap(int n)
-{
-  mzshort *boxmap;
-  int size;
-
-  size = boxmap_size(n);
-  boxmap = MALLOC_N_ATOMIC(mzshort, size);
-  memset(boxmap, 0, size * sizeof(mzshort));
-
-  return boxmap;
-}
-
-XFORM_NONGCING static void boxmap_set(mzshort *boxmap, int j, int bit, int delta)
-{
-  boxmap[delta + ((2 * j) / BITS_PER_MZSHORT)] |= ((mzshort)bit << ((2 * j) & (BITS_PER_MZSHORT - 1)));
-}
-
-XFORM_NONGCING static int boxmap_get(mzshort *boxmap, int j, int bit)
-{
-  if (boxmap[(2 * j) / BITS_PER_MZSHORT] & ((mzshort)bit << ((2 * j) & (BITS_PER_MZSHORT - 1))))
-    return 1;
-  else
-    return 0;
-}
-
-Scheme_Object *
-scheme_resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info, 
-                                   int can_lift, int convert, int just_compute_lift,
-                                   Scheme_Object *precomputed_lift)
-{
-  Scheme_Closure_Data *data;
-  int i, closure_size, offset, np, num_params, expanded_already = 0;
-  int has_tl, convert_size, need_lift;
-  mzshort *oldpos, *closure_map, *new_closure_map;
-  Closure_Info *cl;
-  Resolve_Info *new_info;
-  Scheme_Object *lifted, *result, *lifteds = NULL;
-  Scheme_Hash_Table *captured = NULL;
-  mzshort *convert_map, *convert_boxes = NULL;
-
-  data = (Scheme_Closure_Data *)_data;
-  cl = (Closure_Info *)data->closure_map;
-  if (!just_compute_lift)
-    data->iso.so.type = scheme_unclosed_procedure_type;
-
-  if (convert || can_lift) {
-    if (!convert && !scheme_resolving_in_procedure(info))
-      can_lift = 0; /* no point in lifting when outside of a lambda or letrec */
-    if (!info->lifts)
-      can_lift = 0;
-  }
-
-  /* We have to perform a small bit of constant propagation here.
-     Procedures closed only over top-level bindings are lifted during
-     this pass. Some of the captured bindings from this phase may
-     refer to a lifted procedure. In that case, we can replace the
-     lexical reference with a direct reference to the top-level
-     binding, which means that we can drop the binding from the
-     closure. */
-
-  closure_size = data->closure_size;
-  if (cl->flonum_map) {
-    int at_least_one = 0;
-    for (i = data->num_params; i--; ) {
-      if (cl->flonum_map[i]) {
-        if (cl->local_flags[i] & SCHEME_WAS_FLONUM_ARGUMENT)
-          at_least_one = 1;
-        else
-          cl->flonum_map[i] = 0;
-      }
-    }
-    if (at_least_one) {
-      closure_size += boxmap_size(data->num_params + closure_size);
-      expanded_already = 1;
-    } else
-      cl->flonum_map = NULL;
-  }
-  closure_map = (mzshort *)scheme_malloc_atomic(sizeof(mzshort) * closure_size);
-  if (cl->flonum_map)
-    memset(closure_map, 0, sizeof(mzshort) * closure_size);
-
-  has_tl = cl->has_tl;
-  if (has_tl && !can_lift)
-    convert = 0;
-
-  /* Locals in closure are first: */
-  oldpos = cl->base_closure_map;
-  offset = 0;
-  for (i = 0; i < cl->base_closure_size; i++) {
-    int li, flags;
-    li = scheme_resolve_info_lookup(info, oldpos[i], &flags, &lifted, 0);
-    if (lifted) {
-      /* Drop lifted binding from closure. */
-      if (SAME_TYPE(SCHEME_TYPE(lifted), scheme_toplevel_type)
-          || SAME_TYPE(SCHEME_TYPE(SCHEME_CAR(lifted)), scheme_toplevel_type)) {
-        has_tl = 1;
-        if (!can_lift)
-          convert = 0;
-      }
-      /* If the lifted binding is for a converted closure,
-         we may need to add more bindings to this closure. */
-      if (SCHEME_RPAIRP(lifted)) {
-        lifteds = scheme_make_raw_pair(lifted, lifteds);
-      }
-    } else {
-      closure_map[offset] = li;
-      if (convert && (flags & (SCHEME_INFO_BOXED | SCHEME_INFO_FLONUM_ARG))) {
-        /* The only problem with a boxed/flonum variable is that
-           it's more difficult to validate. We have to track
-           which arguments are boxes. And the resulting procedure
-           must be used only in application positions. */
-        if (!convert_boxes)
-          convert_boxes = allocate_boxmap(cl->base_closure_size);
-        boxmap_set(convert_boxes, offset, (flags & SCHEME_INFO_BOXED) ? 1 : 2, 0);
-      } else {
-        /* Currently, we only need flonum information as a closure type */
-        if (flags & SCHEME_INFO_FLONUM_ARG) {
-          if (!expanded_already) {
-            closure_size += boxmap_size(data->num_params + closure_size);
-            new_closure_map = (mzshort *)scheme_malloc_atomic(sizeof(mzshort) * closure_size);
-            memset(new_closure_map, 0, sizeof(mzshort) * closure_size);
-            memcpy(new_closure_map, closure_map, sizeof(mzshort) * data->closure_size);
-            closure_map = new_closure_map;
-            expanded_already = 1;
-          }
-          boxmap_set(closure_map, data->num_params + offset, 2, data->closure_size);
-        }
-      }
-      offset++;
-    }
-  }
-
-  /* Add bindings introduced by closure conversion. The `captured'
-     table maps old positions to new positions. */
-  while (lifteds) {
-    int j, cnt, boxed, flonumed;
-    Scheme_Object *vec, *loc;
-
-    if (!captured) {
-      captured = scheme_make_hash_table(SCHEME_hash_ptr);
-      for (i = 0; i < offset; i++) {
-        int cp;
-        cp = i;
-        if (convert_boxes) {
-          if (boxmap_get(convert_boxes, i, 1))
-            cp = -((2 * cp) + 1);
-          else if (boxmap_get(convert_boxes, i, 2))
-            cp = -((2 * cp) + 2);
-        }
-        scheme_hash_set(captured, scheme_make_integer(closure_map[i]), scheme_make_integer(cp));
-      }
-    }
-
-    lifted = SCHEME_CAR(lifteds);
-    vec = SCHEME_CDR(lifted);
-    cnt = SCHEME_VEC_SIZE(vec);
-    --cnt;
-    for (j = 0; j < cnt; j++) {
-      loc = SCHEME_VEC_ELS(vec)[j+1];
-      if (SCHEME_BOXP(loc)) {
-        loc = SCHEME_BOX_VAL(loc);
-        boxed = 1;
-        flonumed = 0;
-      } else if (SCHEME_VECTORP(loc)) {
-        loc = SCHEME_VEC_ELS(loc)[0];
-        boxed = 0;
-        flonumed = 1;
-      } else {
-        boxed = 0;
-        flonumed = 0;
-      }
-      i = SCHEME_LOCAL_POS(loc);
-      if (!scheme_hash_get(captured, scheme_make_integer(i))) {
-        /* Need to capture an extra binding: */
-        int cp;
-        cp = captured->count;
-        if (boxed)
-          cp = -((2 * cp) + 1);
-        else if (flonumed)
-          cp = -((2 * cp) + 2);
-        scheme_hash_set(captured, scheme_make_integer(i), scheme_make_integer(cp));
-      }
-    }
-
-    lifteds = SCHEME_CDR(lifteds);
-  }
-
-  if (captured && (captured->count > offset)) {
-    /* We need to extend the closure map.  All the info
-       is in captured, so just build it from scratch. */
-    int old_pos, j, new_size;
-    new_size = (captured->count + (has_tl ? 1 : 0));
-    if (cl->flonum_map)
-      new_size += boxmap_size(data->num_params + new_size);
-    closure_map = (mzshort *)scheme_malloc_atomic(sizeof(mzshort) * new_size);
-    if (cl->flonum_map)
-      memset(closure_map, 0, sizeof(mzshort) * new_size);
-    offset = captured->count;
-    convert_boxes = NULL;
-    for (j = captured->size; j--; ) {
-      if (captured->vals[j]) {
-        int cp;
-        cp = SCHEME_INT_VAL(captured->vals[j]);
-        old_pos = SCHEME_INT_VAL(captured->keys[j]);
-        if (cp < 0) {
-          /* Boxed or flonum */
-          int bit;
-          cp = -cp;
-          if (cp & 0x1) {
-            cp = (cp - 1) / 2;
-            bit = 1;
-          } else {
-            cp = (cp - 2) / 2;
-            bit = 2;
-          }
-          if (!convert_boxes)
-            convert_boxes = allocate_boxmap(offset);
-          boxmap_set(convert_boxes, cp, bit, 0);
-        }
-        closure_map[cp] = old_pos;
-      }
-    }
-  }
-
-  if (convert
-      && (offset || !has_tl) /* either need args, or treat as convert because it's fully closed */
-      ) {
-    /* Take over closure_map to be the convert map, instead. */
-    convert_map = closure_map;
-    convert_size = offset;
-
-    if (has_tl || convert_boxes || cl->flonum_map) {
-      int new_boxes_size;
-      int sz;
-      new_boxes_size = boxmap_size(convert_size + data->num_params + (has_tl ? 1 : 0));
-      sz = ((has_tl ? sizeof(mzshort) : 0) + new_boxes_size * sizeof(mzshort));
-      closure_map = (mzshort *)scheme_malloc_atomic(sz);
-      memset(closure_map, 0, sz);
-      if (convert_boxes) {
-        int bsz;
-        bsz = boxmap_size(convert_size);
-        memcpy(closure_map XFORM_OK_PLUS (has_tl ? 1 : 0), 
-               convert_boxes,
-               bsz * sizeof(mzshort));
-      }
-    } else
-      closure_map = NULL;
-    offset = 0;
-  } else {
-    convert = 0;
-    convert_map = NULL;
-    convert_size = 0;
-    convert_boxes = NULL;
-  }
-
-  /* Then the pointer to globals, if any: */
-  if (has_tl) {
-    /* GLOBAL ASSUMPTION: jit.c assumes that the array
-       of globals is the last item in the closure; grep
-       for "GLOBAL ASSUMPTION" in jit.c */
-    int li;
-    li = scheme_resolve_toplevel_pos(info);
-    closure_map[offset] = li;
-    offset++;
-  }
-
-  /* Reset closure_size, in case a lifted variable was removed: */
-  closure_size = offset;
-  if (!just_compute_lift) {
-    data->closure_size = closure_size;
-    if (convert && convert_boxes)
-      SCHEME_CLOSURE_DATA_FLAGS(data) |= CLOS_HAS_TYPED_ARGS;
-  }
-
-  /* Set up environment mapping, initialized for arguments: */
-
-  np = num_params = data->num_params;
-  if ((data->num_params == 1)
-      && (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_REST)
-      && !(cl->local_flags[0] & SCHEME_WAS_USED)
-      && !convert) {
-    /* (lambda args E) where args is not in E => drop the argument */
-    new_info = scheme_resolve_info_extend(info, 0, 1, cl->base_closure_size);
-    num_params = 0;
-    if (!just_compute_lift)
-      data->num_params = 0;
-  } else {
-    new_info = scheme_resolve_info_extend(info, data->num_params, data->num_params,
-					  cl->base_closure_size + data->num_params);
-    for (i = 0; i < data->num_params; i++) {
-      scheme_resolve_info_add_mapping(new_info, i, i + closure_size + convert_size,
-                                      (((cl->local_flags[i] & SCHEME_WAS_SET_BANGED)
-                                        ? SCHEME_INFO_BOXED
-                                        : 0)
-                                       | ((cl->flonum_map && cl->flonum_map[i])
-                                          ? SCHEME_INFO_FLONUM_ARG
-                                          : 0)),
-                                      NULL);
-      if (cl->flonum_map && cl->flonum_map[i])
-        boxmap_set(closure_map, i + convert_size, 2, closure_size);
-    }
-    if (expanded_already && !just_compute_lift)
-      SCHEME_CLOSURE_DATA_FLAGS(data) |= CLOS_HAS_TYPED_ARGS;
-  }
-
-  /* Extend mapping to go from old locations on the stack (as if bodies were
-     evaluated immediately) to new locations (where closures
-     effectively shift and compact values on the stack). 
-
-     We don't have to include bindings added because an oiriginal
-     binding was lifted (i.e., the extra bindings in `captured'),
-     because they don't appear in the body. Instead, they are
-     introduced directly in resolved form through the `lifted' info.
-     That means, though, that we need to transform the `lifted'
-     mapping. */
-  if (has_tl && convert) {
-    /* Skip handle for globals */
-    offset = 1;
-  } else {
-    offset = 0;
-  }
-  for (i = 0; i < cl->base_closure_size; i++) {
-    int p = oldpos[i], flags;
-
-    if (p < 0)
-      p -= np;
-    else
-      p += np;
-
-    flags = scheme_resolve_info_flags(info, oldpos[i], &lifted);
-
-    if (lifted && SCHEME_RPAIRP(lifted)) {
-      /* Convert from a vector of local references to an array of
-         positions. */
-      Scheme_Object *vec, *loc, **ca;
-      mzshort *cmap, *boxmap = NULL;
-      int sz, j, cp;
-
-      vec = SCHEME_CDR(lifted);
-      sz = SCHEME_VEC_SIZE(vec);
-      --sz;
-      cmap = MALLOC_N_ATOMIC(mzshort, sz);
-      for (j = 0; j < sz; j++) {
-        loc = SCHEME_VEC_ELS(vec)[j+1];
-        if (SCHEME_BOXP(loc)) {
-          if (!boxmap)
-            boxmap = allocate_boxmap(sz);
-          boxmap_set(boxmap, j, 1, 0);
-          loc = SCHEME_BOX_VAL(loc);
-        } else if (SCHEME_VECTORP(loc)) {
-          if (!boxmap)
-            boxmap = allocate_boxmap(sz);
-          boxmap_set(boxmap, j, 2, 0);
-          loc = SCHEME_VEC_ELS(loc)[0];
-        }
-        loc = scheme_hash_get(captured, scheme_make_integer(SCHEME_LOCAL_POS(loc)));
-        cp = SCHEME_INT_VAL(loc);
-        if (cp < 0) {
-          cp = -cp;
-          if (cp & 0x1)
-            cp = (cp - 1) / 2;
-          else
-            cp = (cp - 2) / 2;
-        }
-        cmap[j] = cp + (has_tl && convert ? 1 : 0);
-      }
-
-      ca = MALLOC_N(Scheme_Object *, 4);
-      ca[0] = scheme_make_integer(sz);
-      ca[1] = (Scheme_Object *)cmap;
-      ca[2] = SCHEME_VEC_ELS(vec)[0];
-      ca[3] = (Scheme_Object *)boxmap;
-      
-      lifted = scheme_make_raw_pair(SCHEME_CAR(lifted), (Scheme_Object *)ca);
-    }
-
-    scheme_resolve_info_add_mapping(new_info, p, lifted ? 0 : offset++, flags, lifted);
-  }
-  if (has_tl) {
-    if (convert)
-      offset = 0; /* other closure elements converted to arguments */
-    else
-      offset = closure_size - 1;
-    scheme_resolve_info_set_toplevel_pos(new_info, offset);
-  }
-
-  if (!just_compute_lift)
-    data->closure_map = closure_map;
-
-  new_info->in_proc = 1;
-
-  if (!just_compute_lift) {
-    Scheme_Object *code;
-    code = scheme_resolve_expr(data->code, new_info);
-    data->code = code;
-
-    data->max_let_depth = (new_info->max_let_depth
-                           + num_params
-                           + closure_size
-                           + convert_size
-                           + SCHEME_TAIL_COPY_THRESHOLD);
-
-    /* Add code to box set!ed argument variables: */
-    for (i = 0; i < num_params; i++) {
-      if (cl->local_flags[i] & SCHEME_WAS_SET_BANGED) {
-        int j = i + closure_size + convert_size;
-        Scheme_Object *bcode;
-        
-        bcode = scheme_make_syntax_resolved(BOXENV_EXPD,
-                                            scheme_make_pair(scheme_make_integer(j),
-                                                             data->code));
-        data->code = bcode;
-      }
-    }
-  }
-
-  if ((closure_size == 1)
-      && can_lift
-      && has_tl
-      && info->lifts) {
-    need_lift = 1;
-  } else
-    need_lift = 0;
-
-  if (convert) {
-    num_params += convert_size;
-    if (!just_compute_lift)
-      data->num_params = num_params;
-  }
-
-  /* If the closure is empty, create the closure now */
-  if (!closure_size) {
-    if (precomputed_lift) {
-      result = SCHEME_CAR(precomputed_lift);
-      if (!just_compute_lift)
-        ((Scheme_Closure *)result)->code = data;
-    } else {
-      if (just_compute_lift)
-        result = (Scheme_Object *)scheme_malloc_empty_closure();
-      else
-        result = scheme_make_closure(NULL, (Scheme_Object *)data, 0);
-    }
-  } else
-    result = (Scheme_Object *)data;
-  
-  if (need_lift) {
-    if (just_compute_lift) {
-      if (just_compute_lift > 1)
-        result = scheme_resolve_invent_toplevel(info);
-      else
-        result = scheme_resolve_generate_stub_lift();
-    } else {
-      Scheme_Object *tl, *defn_tl;
-      if (precomputed_lift) {
-        tl = precomputed_lift;
-        if (SCHEME_RPAIRP(tl))
-          tl = SCHEME_CAR(tl);
-      } else {
-        tl = scheme_resolve_invent_toplevel(info);
-      }
-      defn_tl = scheme_resolve_invented_toplevel_to_defn(info, tl);
-      scheme_resolve_lift_definition(info, defn_tl, result);
-      if (has_tl)
-        closure_map[0] = 0; /* globals for closure creation will be at 0 after lifting */
-      result = tl;
-    }
-  }
-  
-  if (convert) {
-    Scheme_Object **ca, *arity;
-
-    if ((SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_REST)) {
-      arity = scheme_box(scheme_make_integer(num_params - convert_size - 1));
-    } else {
-      arity = scheme_make_integer(num_params - convert_size);
-    }
-
-    ca = MALLOC_N(Scheme_Object *, 4);
-    ca[0] = scheme_make_integer(convert_size);
-    ca[1] = (Scheme_Object *)convert_map;
-    ca[2] = arity;
-    ca[3] = (Scheme_Object *)convert_boxes;
-
-    if (precomputed_lift) {
-      SCHEME_CAR(precomputed_lift) = result;
-      SCHEME_CDR(precomputed_lift) = (Scheme_Object *)ca;
-      result = precomputed_lift;
-    } else 
-      result = scheme_make_raw_pair(result, (Scheme_Object *)ca);
-  }
-
-  return result;
-}
-
-Scheme_Object *scheme_source_to_name(Scheme_Object *code)
-     /* Makes up a procedure name when there's not a good one in the source: */
-{
-  Scheme_Stx *cstx = (Scheme_Stx *)code;
-  if ((cstx->srcloc->col >= 0) || (cstx->srcloc->pos >= 0)) {
-    char buf[50], src[20];
-    Scheme_Object *name;
-
-    if (cstx->srcloc->src && SCHEME_PATHP(cstx->srcloc->src)) {
-      if (SCHEME_BYTE_STRLEN_VAL(cstx->srcloc->src) < 20)
-	memcpy(src, SCHEME_BYTE_STR_VAL(cstx->srcloc->src), SCHEME_BYTE_STRLEN_VAL(cstx->srcloc->src) + 1);
-      else {
-	memcpy(src, SCHEME_BYTE_STR_VAL(cstx->srcloc->src) + SCHEME_BYTE_STRLEN_VAL(cstx->srcloc->src) - 19, 20);
-	src[0] = '.';
-	src[1] = '.';
-	src[2] = '.';
-      }
-    } else {
-      return NULL;
-    }
-
-    if (cstx->srcloc->line >= 0) {
-      sprintf(buf, "%s%s%" PRIdPTR ":%" PRIdPTR,
-	      src, (src[0] ? ":" : ""), cstx->srcloc->line, cstx->srcloc->col - 1);
-    } else {
-      sprintf(buf, "%s%s%" PRIdPTR,
-	      src, (src[0] ? "::" : ""), cstx->srcloc->pos);
-    }
-
-    name = scheme_intern_exact_symbol(buf, strlen(buf));
-    return name;
-  }
-
-  return NULL;
-}
-
-Scheme_Object *combine_name_with_srcloc(Scheme_Object *name, Scheme_Object *code, int src_based_name)
-{
-  Scheme_Stx *cstx = (Scheme_Stx *)code;
-
-  if (((cstx->srcloc->col >= 0) || (cstx->srcloc->pos >= 0))
-      && cstx->srcloc->src) {
-    Scheme_Object *vec;
-    vec = scheme_make_vector(7, NULL);
-    SCHEME_VEC_ELS(vec)[0] = name;
-    SCHEME_VEC_ELS(vec)[1] = cstx->srcloc->src;
-    if (cstx->srcloc->line >= 0) {
-      SCHEME_VEC_ELS(vec)[2] = scheme_make_integer(cstx->srcloc->line);
-      SCHEME_VEC_ELS(vec)[3] = scheme_make_integer(cstx->srcloc->col-1);
-    } else {
-      SCHEME_VEC_ELS(vec)[2] = scheme_false;
-      SCHEME_VEC_ELS(vec)[3] = scheme_false;
-    }
-    if (cstx->srcloc->pos >= 0)
-      SCHEME_VEC_ELS(vec)[4] = scheme_make_integer(cstx->srcloc->pos);
-    else
-      SCHEME_VEC_ELS(vec)[4] = scheme_false;
-    if (cstx->srcloc->span >= 0)
-      SCHEME_VEC_ELS(vec)[5] = scheme_make_integer(cstx->srcloc->span);
-    else
-      SCHEME_VEC_ELS(vec)[5] = scheme_false;
-    SCHEME_VEC_ELS(vec)[6] = (src_based_name ? scheme_true : scheme_false);
-    
-    return vec;
-  }
-
-  return name;
-}
-
-Scheme_Object *scheme_build_closure_name(Scheme_Object *code, Scheme_Compile_Info *rec, int drec)
-{
-  Scheme_Object *name;
-
-  name = scheme_stx_property(code, scheme_inferred_name_symbol, NULL);
-  if (name && SCHEME_SYMBOLP(name)) {
-    name = combine_name_with_srcloc(name, code, 0);
-  } else if (name && SCHEME_VOIDP(name)) {
-    name = scheme_source_to_name(code);
-    if (name)
-      name = combine_name_with_srcloc(name, code, 1);
-  } else {
-    name = rec[drec].value_name;
-    if (!name || SCHEME_FALSEP(name)) {
-      name = scheme_source_to_name(code);
-      if (name)
-	name = combine_name_with_srcloc(name, code, 1);
-    } else {
-      name = combine_name_with_srcloc(name, code, 0);
-    }
-  }
-  return name;
-}
-
-Scheme_Object *
-scheme_make_closure_compilation(Scheme_Comp_Env *env, Scheme_Object *code,
-				Scheme_Compile_Info *rec, int drec)
-     /* Compiles a `lambda' expression */
-{
-  Scheme_Object *allparams, *params, *forms, *param, *name;
-  Scheme_Closure_Data *data;
-  Scheme_Compile_Info lam;
-  Scheme_Comp_Env *frame;
-  int i;
-  intptr_t num_params;
-  Closure_Info *cl;
-
-  data  = MALLOC_ONE_TAGGED(Scheme_Closure_Data);
-
-  data->iso.so.type = scheme_compiled_unclosed_procedure_type;
-
-  params = SCHEME_STX_CDR(code);
-  params = SCHEME_STX_CAR(params);
-  allparams = params;
-
-  num_params = 0;
-  for (; SCHEME_STX_PAIRP(params); params = SCHEME_STX_CDR(params)) {
-    num_params++;
-  }
-  SCHEME_CLOSURE_DATA_FLAGS(data) = 0;
-  if (!SCHEME_STX_NULLP(params)) {
-    SCHEME_CLOSURE_DATA_FLAGS(data) |= CLOS_HAS_REST;
-    num_params++;
-  }
-  data->num_params = num_params;
-  if ((data->num_params > 0) && scheme_has_method_property(code))
-    SCHEME_CLOSURE_DATA_FLAGS(data) |= CLOS_IS_METHOD;
-
-  forms = SCHEME_STX_CDR(code);
-  forms = SCHEME_STX_CDR(forms);
-
-  frame = scheme_new_compilation_frame(data->num_params, SCHEME_LAMBDA_FRAME, env, rec[drec].certs);
-  params = allparams;
-  for (i = 0; i < data->num_params; i++) {
-    if (!SCHEME_STX_PAIRP(params))
-      param = params;
-    else
-      param = SCHEME_STX_CAR(params);
-    scheme_add_compilation_binding(i, param, frame);
-    if (SCHEME_STX_PAIRP(params))
-      params = SCHEME_STX_CDR (params);
-  }
-
-  if (SCHEME_STX_NULLP(forms))
-    scheme_wrong_syntax(NULL, NULL, code, "bad syntax (empty body)");
-
-  forms = scheme_datum_to_syntax(forms, code, code, 0, 0);
-  forms = scheme_add_env_renames(forms, frame, env);
-
-  name = scheme_build_closure_name(code, rec, drec);
-  data->name = name;
-
-  scheme_compile_rec_done_local(rec, drec);
-
-  scheme_init_lambda_rec(rec, drec, &lam, 0);
-
-  {
-    Scheme_Object *datacode;
-    datacode = scheme_compile_sequence(forms,
-				       scheme_no_defines(frame),
-				       &lam, 0);
-    data->code = datacode;
-  }
-
-  scheme_merge_lambda_rec(rec, drec, &lam, 0);
-
-  cl = MALLOC_ONE_RT(Closure_Info);
-#ifdef MZTAG_REQUIRED
-  cl->type = scheme_rt_closure_info;
-#endif
-  {
-    int *local_flags;
-    local_flags = scheme_env_get_flags(frame, 0, data->num_params);
-    cl->local_flags = local_flags;
-  }
-  data->closure_map = (mzshort *)cl;
-
-  return (Scheme_Object *)data;
-}
-
-
-/*========================================================================*/
 /*                            prompt helpers                              */
 /*========================================================================*/
 
@@ -2193,7 +1011,6 @@ static void save_dynamic_state(Scheme_Thread *thread, Scheme_Dynamic_State *stat
     state->current_local_env = thread->current_local_env;
     state->mark              = thread->current_local_mark;
     state->name              = thread->current_local_name;
-    state->certs             = thread->current_local_certs;
     state->modidx            = thread->current_local_modidx;
     state->menv              = thread->current_local_menv;
 }
@@ -2202,21 +1019,18 @@ static void restore_dynamic_state(Scheme_Dynamic_State *state, Scheme_Thread *th
     thread->current_local_env     = state->current_local_env;
     thread->current_local_mark    = state->mark;
     thread->current_local_name    = state->name;
-    thread->current_local_certs   = state->certs;
     thread->current_local_modidx  = state->modidx;
     thread->current_local_menv    = state->menv;
 }
 
 void scheme_set_dynamic_state(Scheme_Dynamic_State *state, Scheme_Comp_Env *env, Scheme_Object *mark, 
-			Scheme_Object *name, 
-			Scheme_Object *certs, 
-			Scheme_Env *menv,
-			Scheme_Object *modidx)
+                              Scheme_Object *name, 
+                              Scheme_Env *menv,
+                              Scheme_Object *modidx)
 {
   state->current_local_env = env;
   state->mark              = mark;
   state->name              = name;
-  state->certs             = certs;
   state->modidx            = modidx;
   state->menv              = menv;
 }
@@ -2726,11 +1540,12 @@ _scheme_tail_apply_to_list (Scheme_Object *rator, Scheme_Object *rands)
 static Scheme_Object *cert_with_specials_k(void);
 
 static Scheme_Object *
-cert_with_specials(Scheme_Object *code, Scheme_Object *mark, Scheme_Env *menv, 
-		   Scheme_Object *orig_code, Scheme_Object *closest_code,
-                   Scheme_Comp_Env *cenv, int phase, 
+cert_with_specials(Scheme_Object *code, 
+                   Scheme_Object *insp,
+                   Scheme_Object *old_stx,
+                   intptr_t phase, 
 		   int deflt, int cadr_deflt)
-/* Adds (if mark) or lifts (if not mark) certificates. */
+/* Arms (insp) or re-arms (old_stx) taints. */
 {
   Scheme_Object *prop;
   int next_cadr_deflt = 0;
@@ -2741,13 +1556,10 @@ cert_with_specials(Scheme_Object *code, Scheme_Object *mark, Scheme_Env *menv,
     {
       Scheme_Thread *p = scheme_current_thread;
       Scheme_Object **args;
-      args = MALLOC_N(Scheme_Object*, 6);
+      args = MALLOC_N(Scheme_Object*, 3);
       args[0] = code;
-      args[1] = mark;
-      args[2] = (Scheme_Object *)menv;
-      args[3] = orig_code;
-      args[4] = closest_code;
-      args[5] = (Scheme_Object *)cenv;
+      args[1] = insp;
+      args[2] = old_stx;
       p->ku.k.p1 = (void *)args;
       p->ku.k.i1 = phase;
       p->ku.k.i2 = deflt;
@@ -2758,12 +1570,20 @@ cert_with_specials(Scheme_Object *code, Scheme_Object *mark, Scheme_Env *menv,
 #endif
 
   if (SCHEME_STXP(code)) {
-    prop = scheme_stx_property(code, certify_mode_symbol, NULL);
-    if (SAME_OBJ(prop, opaque_symbol)) {
-      if (mark)
-        return scheme_stx_cert(code, mark, menv, orig_code, NULL, 1);
+    if (scheme_stx_is_tainted(code))
+       /* nothing happens to already-tainted syntax objects */
+      return code;
+
+    prop = scheme_stx_property(code, taint_mode_symbol, NULL);
+    if (SCHEME_FALSEP(prop))
+      prop = scheme_stx_property(code, certify_mode_symbol, NULL);
+    if (SAME_OBJ(prop, none_symbol))
+      return code;
+    else if (SAME_OBJ(prop, opaque_symbol)) {
+      if (old_stx)
+        return scheme_stx_taint_rearm(code, old_stx);
       else
-        return scheme_stx_lift_active_certs(code);
+        return scheme_stx_taint_arm(code, insp);
     } else if (SAME_OBJ(prop, transparent_symbol)) {
       cadr_deflt = 0;
       /* fall through */
@@ -2779,13 +1599,15 @@ cert_with_specials(Scheme_Object *code, Scheme_Object *mark, Scheme_Env *menv,
         scheme_log(NULL,
                    SCHEME_LOG_WARNING,
                    0,
-                   "warning: unrecognized 'certify-mode property value: %V",
+                   "warning: unrecognized 'taint-mode property value: %V",
                    prop);
       if (SCHEME_STX_PAIRP(code)) {
 	Scheme_Object *name;
-	name = SCHEME_STX_CAR(code);
+	/* name = SCHEME_STX_CAR(code); */
+        name = scheme_stx_taint_disarm(code, NULL);
+        name = SCHEME_STX_CAR(name);
 	if (SCHEME_STX_SYMBOLP(name)) {
-	  Scheme_Object *beg_stx, *mod_stx, *mod_beg_stx, *dv_stx, *ds_stx;
+	  Scheme_Object *beg_stx, *mod_stx, *mod_beg_stx, *dv_stx, *ds_stx, *dvs_stx;
 
 	  if (!phase) {
             mod_stx = scheme_module_stx;
@@ -2793,28 +1615,35 @@ cert_with_specials(Scheme_Object *code, Scheme_Object *mark, Scheme_Env *menv,
 	    mod_beg_stx = scheme_module_begin_stx;
 	    dv_stx = scheme_define_values_stx;
 	    ds_stx = scheme_define_syntaxes_stx;
+	    dvs_stx = scheme_define_for_syntaxes_stx;
 	  } else if (phase == cached_stx_phase) {
 	    beg_stx = cached_beg_stx;
 	    mod_stx = cached_mod_stx;
 	    mod_beg_stx = cached_mod_beg_stx;
 	    dv_stx = cached_dv_stx;
 	    ds_stx = cached_ds_stx;
+	    dvs_stx = cached_dvs_stx;
 	  } else {
+            Scheme_Object *sr;
+            sr = scheme_sys_wraps_phase(scheme_make_integer(phase));
 	    beg_stx = scheme_datum_to_syntax(SCHEME_STX_VAL(scheme_begin_stx), scheme_false, 
-					     scheme_sys_wraps(cenv), 0, 0);
+					     sr, 0, 0);
 	    mod_stx = scheme_datum_to_syntax(SCHEME_STX_VAL(scheme_module_stx), scheme_false, 
-					     scheme_sys_wraps(cenv), 0, 0);
+					     sr, 0, 0);
 	    mod_beg_stx = scheme_datum_to_syntax(SCHEME_STX_VAL(scheme_module_begin_stx), scheme_false, 
-                                                 scheme_sys_wraps(cenv), 0, 0);
+                                                 sr, 0, 0);
 	    dv_stx = scheme_datum_to_syntax(SCHEME_STX_VAL(scheme_define_values_stx), scheme_false, 
-					    scheme_sys_wraps(cenv), 0, 0);
+					    sr, 0, 0);
 	    ds_stx = scheme_datum_to_syntax(SCHEME_STX_VAL(scheme_define_syntaxes_stx), scheme_false, 
-					    scheme_sys_wraps(cenv), 0, 0);
+					    sr, 0, 0);
+	    dvs_stx = scheme_datum_to_syntax(SCHEME_STX_VAL(scheme_define_for_syntaxes_stx), scheme_false, 
+                                             sr, 0, 0);
 	    cached_beg_stx = beg_stx;
 	    cached_mod_stx = mod_stx;
 	    cached_mod_beg_stx = mod_beg_stx;
 	    cached_dv_stx = dv_stx;
 	    cached_ds_stx = ds_stx;
+	    cached_dvs_stx = dvs_stx;
 	    cached_stx_phase = phase;
 	  }
 
@@ -2824,18 +1653,19 @@ cert_with_specials(Scheme_Object *code, Scheme_Object *mark, Scheme_Env *menv,
 	    trans = 1;
 	    next_cadr_deflt = 0;
 	  } else if (scheme_stx_module_eq(dv_stx, name, phase)
-		     || scheme_stx_module_eq(ds_stx, name, phase)) {
+		     || scheme_stx_module_eq(ds_stx, name, phase)
+		     || scheme_stx_module_eq(dvs_stx, name, phase)) {
 	    trans = 1;
 	    next_cadr_deflt = 1;
 	  }
 	}
       }
-      
+
       if (!trans) {
-        if (mark)
-          return scheme_stx_cert(code, mark, menv, orig_code, NULL, 1);
+        if (old_stx)
+          return scheme_stx_taint_rearm(code, old_stx);
         else
-          return scheme_stx_lift_active_certs(code);
+          return scheme_stx_taint_arm(code, insp);
       }
     }
   }
@@ -2843,30 +1673,24 @@ cert_with_specials(Scheme_Object *code, Scheme_Object *mark, Scheme_Env *menv,
   if (SCHEME_STX_PAIRP(code)) {
     Scheme_Object *a, *d, *v;
     
-    if (SCHEME_STXP(code))
-      closest_code = code;
-
     a = SCHEME_STX_CAR(code);
-    a = scheme_stx_propagate_inactive_certs(a, closest_code);
-    a = cert_with_specials(a, mark, menv, orig_code, closest_code, cenv, phase, cadr_deflt, 0);
+    a = cert_with_specials(a, insp, old_stx, phase, cadr_deflt, 0);
     d = SCHEME_STX_CDR(code);
-    if (SCHEME_STXP(d))
-      d = scheme_stx_propagate_inactive_certs(d, closest_code);
-    d = cert_with_specials(d, mark, menv, orig_code, closest_code, cenv, phase, 1, next_cadr_deflt);
+    d = cert_with_specials(d, insp, old_stx, phase, 1, next_cadr_deflt);
 
     v = scheme_make_pair(a, d);
 
     if (SCHEME_PAIRP(code))
       return v;
 
-    return scheme_datum_to_syntax(v, code, code, 0, 2);
+    return scheme_datum_to_syntax(v, code, scheme_false, 0, 1);
   } else if (SCHEME_STX_NULLP(code))
     return code;
 
-  if (mark)
-    return scheme_stx_cert(code, mark, menv, orig_code, NULL, 1);
+  if (old_stx)
+    return scheme_stx_taint_rearm(code, old_stx);
   else
-    return scheme_stx_lift_active_certs(code);
+    return scheme_stx_taint_arm(code, insp);
 }
 
 static Scheme_Object *cert_with_specials_k(void)
@@ -2876,18 +1700,9 @@ static Scheme_Object *cert_with_specials_k(void)
 
   p->ku.k.p1 = NULL;
 
-  return cert_with_specials(args[0], args[1], (Scheme_Env *)args[2],
-                            args[3], args[4],
-                            (Scheme_Comp_Env *)args[5], p->ku.k.i1,
+  return cert_with_specials(args[0], args[1], args[2],
+                            p->ku.k.i1,
                             p->ku.k.i2, p->ku.k.i3);
-}
-
-Scheme_Object *scheme_lift_local_stx_certificates(Scheme_Object *code, 
-                                                  Scheme_Comp_Env *env)
-{
-  return cert_with_specials(code, NULL, NULL, code, code,
-                            NULL, env->genv->phase,
-                            0, 0);
 }
 
 Scheme_Object *
@@ -2898,8 +1713,6 @@ scheme_apply_macro(Scheme_Object *name, Scheme_Env *menv,
 		   int for_set)
 {
   Scheme_Object *orig_code = code;
-  Scheme_Object *certs;
-  certs = rec[drec].certs;
 
   if (scheme_is_rename_transformer(rator)) {
     Scheme_Object *mark;
@@ -2927,30 +1740,35 @@ scheme_apply_macro(Scheme_Object *name, Scheme_Env *menv,
       code = scheme_datum_to_syntax(code, orig_code, scheme_sys_wraps(env), 0, 0);
     }
 
-    code = cert_with_specials(code, mark, menv, orig_code, orig_code, env, env->genv->phase, 0, 0);
-
     code = scheme_stx_track(code, orig_code, name);
+
+    /* Restore old dye packs: */
+    code = cert_with_specials(code, NULL, orig_code, env->genv->phase, 0, 0);
 
     return code;
   } else {
-    Scheme_Object *mark, *rands_vec[1];
+    Scheme_Object *mark, *rands_vec[1], *track_code;
 
-    certs = scheme_stx_extract_certs(code, certs);
- 
     if (scheme_is_set_transformer(rator))
       rator = scheme_set_transformer_proc(rator);
 
-    mark = scheme_new_mark();
-    code = scheme_add_remove_mark(code, mark);
-
     {
-      /* Ensure that source doesn't already have 'certify-mode, in case argument
-         properties are used for result properties. */
+      /* Ensure that source doesn't already have 'taint-mode or 'certify-mode, 
+         in case argument properties are used for result properties. */
       Scheme_Object *prop;
+      prop = scheme_stx_property(code, taint_mode_symbol, NULL);
+      if (SCHEME_TRUEP(prop))
+        code = scheme_stx_property(code, taint_mode_symbol, scheme_false);
       prop = scheme_stx_property(code, certify_mode_symbol, NULL);
       if (SCHEME_TRUEP(prop))
         code = scheme_stx_property(code, certify_mode_symbol, scheme_false);
     }
+    track_code = code;  /* after mode properties are removed */
+
+    mark = scheme_new_mark();
+    code = scheme_add_remove_mark(code, mark);
+
+    code = scheme_stx_taint_disarm(code, NULL);
 
     SCHEME_EXPAND_OBSERVE_MACRO_PRE_X(rec[drec].observer, code);
 
@@ -2966,8 +1784,8 @@ scheme_apply_macro(Scheme_Object *name, Scheme_Env *menv,
       scheme_push_continuation_frame(&cframe);
       scheme_set_cont_mark(scheme_parameterization_key, (Scheme_Object *)config);
 
-      scheme_set_dynamic_state(&dyn_state, env, mark, boundname, certs, 
-          menv, menv ? menv->link_midx : env->genv->link_midx);
+      scheme_set_dynamic_state(&dyn_state, env, mark, boundname, 
+                               menv, menv ? menv->link_midx : env->genv->link_midx);
 
       rands_vec[0] = code;
       code = scheme_apply_with_dynamic_state(rator, 1, rands_vec, &dyn_state);
@@ -2986,12 +1804,52 @@ scheme_apply_macro(Scheme_Object *name, Scheme_Env *menv,
 
     code = scheme_add_remove_mark(code, mark);
 
-    code = cert_with_specials(code, mark, menv, orig_code, orig_code, env, env->genv->phase, 0, 0);
-
-    code = scheme_stx_track(code, orig_code, name);
+    code = scheme_stx_track(code, track_code, name);
+    
+    /* Restore old dye packs: */
+    code = cert_with_specials(code, NULL, orig_code, env->genv->phase, 0, 0);
 
     return code;
   }
+}
+
+Scheme_Object *scheme_syntax_taint_arm(Scheme_Object *stx, Scheme_Object *insp, int use_mode)
+{
+  intptr_t phase;
+
+  if (SCHEME_FALSEP(insp)) {
+    insp = scheme_get_local_inspector();
+  }
+
+  if (use_mode) {
+    Scheme_Thread *p = scheme_current_thread;
+    phase = (p->current_local_env
+             ? p->current_local_env->genv->phase
+             : p->current_phase_shift);
+    return cert_with_specials(stx, insp, NULL, phase, 0, 0);
+  } else
+    return scheme_stx_taint_arm(stx, insp);
+}
+
+Scheme_Object *scheme_syntax_taint_disarm(Scheme_Object *o, Scheme_Object *insp)
+{
+  if (SCHEME_FALSEP(insp)) {
+    insp = scheme_get_local_inspector();
+  }
+
+  return scheme_stx_taint_disarm(o, insp);
+}
+
+Scheme_Object *scheme_syntax_taint_rearm(Scheme_Object *stx, Scheme_Object *from_stx)
+{
+  Scheme_Thread *p = scheme_current_thread;
+  intptr_t phase;
+  
+  phase = (p->current_local_env
+           ? p->current_local_env->genv->phase
+           : p->current_phase_shift);
+  
+  return cert_with_specials(stx, NULL, from_stx, phase, 0, 0);
 }
 
 /*========================================================================*/
@@ -3043,7 +1901,7 @@ static Scheme_Object *clone_arity(Scheme_Object *a, int delta)
     return a;
 }
 
-static Scheme_Object *get_or_check_arity(Scheme_Object *p, intptr_t a, Scheme_Object *bign)
+static Scheme_Object *get_or_check_arity(Scheme_Object *p, intptr_t a, Scheme_Object *bign, int inc_ok)
 /* a == -1 => get arity
    a == -2 => check for allowing bignum */
 {
@@ -3121,6 +1979,10 @@ static Scheme_Object *get_or_check_arity(Scheme_Object *p, intptr_t a, Scheme_Ob
     return first;
   } else if (type == scheme_proc_struct_type) {
     int is_method;
+    if (!inc_ok
+        && scheme_no_arity_property
+        && scheme_struct_type_property_ref(scheme_no_arity_property, p))
+      return scheme_false;
     if (scheme_reduced_procedure_struct
         && scheme_is_struct_instance(scheme_reduced_procedure_struct, p)) {
       if (a >= 0) {
@@ -3372,7 +2234,7 @@ static Scheme_Object *get_or_check_arity(Scheme_Object *p, intptr_t a, Scheme_Ob
 
 Scheme_Object *scheme_get_or_check_arity(Scheme_Object *p, intptr_t a)
 {
-  return get_or_check_arity(p, a, NULL);
+  return get_or_check_arity(p, a, NULL, 1);
 }
 
 int scheme_check_proc_arity2(const char *where, int a,
@@ -3389,7 +2251,7 @@ int scheme_check_proc_arity2(const char *where, int a,
   if (false_ok && SCHEME_FALSEP(p))
     return 1;
 
-  if (!SCHEME_PROCP(p) || SCHEME_FALSEP(get_or_check_arity(p, a, NULL))) {
+  if (!SCHEME_PROCP(p) || SCHEME_FALSEP(get_or_check_arity(p, a, NULL, 1))) {
     if (where) {
       char buffer[60];
 
@@ -3576,6 +2438,12 @@ const char *scheme_get_proc_name(Scheme_Object *p, int *len, int for_error)
       name = ((Scheme_Closure_Data *)p)->name;
     } else if (type == scheme_closure_type) {
       name = SCHEME_COMPILED_CLOS_CODE(p)->name;
+    } else if (type == scheme_case_lambda_sequence_type) {
+      Scheme_Case_Lambda *cl = (Scheme_Case_Lambda *)p;
+      if (!cl->count)
+        name = NULL;
+      else
+        name = ((Scheme_Closure_Data *)cl->array[0])->name;
     } else {
       /* Native closure: */
       name = ((Scheme_Native_Closure *)p)->code->u2.name;
@@ -3705,7 +2573,7 @@ static Scheme_Object *object_name(int argc, Scheme_Object **argv)
 
 Scheme_Object *scheme_arity(Scheme_Object *p)
 {
-  return get_or_check_arity(p, -1, NULL);
+  return get_or_check_arity(p, -1, NULL, 1);
 }
 
 static Scheme_Object *procedure_arity(int argc, Scheme_Object *argv[])
@@ -3713,7 +2581,7 @@ static Scheme_Object *procedure_arity(int argc, Scheme_Object *argv[])
   if (!SCHEME_PROCP(argv[0]))
     scheme_wrong_type("procedure-arity", "procedure", 0, argc, argv);
 
-  return get_or_check_arity(argv[0], -1, NULL);
+  return get_or_check_arity(argv[0], -1, NULL, 1);
 }
 
 static Scheme_Object *procedure_arity_p(int argc, Scheme_Object *argv[])
@@ -3749,9 +2617,10 @@ static Scheme_Object *procedure_arity_p(int argc, Scheme_Object *argv[])
     return scheme_false;
 }
 
-static Scheme_Object *procedure_arity_includes(int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_procedure_arity_includes(int argc, Scheme_Object *argv[])
 {
   intptr_t n;
+  int inc_ok;
 
   if (!SCHEME_PROCP(argv[0]))
     scheme_wrong_type("procedure-arity-includes?", "procedure", 0, argc, argv);
@@ -3759,7 +2628,9 @@ static Scheme_Object *procedure_arity_includes(int argc, Scheme_Object *argv[])
   n = scheme_extract_index("procedure-arity-includes?", 1, argc, argv, -2, 0);
   /* -2 means a bignum */
 
-  return get_or_check_arity(argv[0], n, argv[1]);
+  inc_ok = ((argc > 2) && SCHEME_TRUEP(argv[2]));
+  
+  return get_or_check_arity(argv[0], n, argv[1], inc_ok);
 }
 
 static int is_arity(Scheme_Object *a, int at_least_ok, int list_ok)
@@ -3971,7 +2842,7 @@ static Scheme_Object *procedure_reduce_arity(int argc, Scheme_Object *argv[])
      a bit complicated, because both the source and target can be
      lists that include arity-at-least records. */
 
-  orig = get_or_check_arity(argv[0], -1, NULL);
+  orig = get_or_check_arity(argv[0], -1, NULL, 1);
   aty = clone_arity(argv[1], 0);
 
   if (!is_subarity(aty, orig)) {
@@ -3999,7 +2870,7 @@ static Scheme_Object *procedure_rename(int argc, Scheme_Object *argv[])
   p = scheme_rename_struct_proc(argv[0], argv[1]);
   if (p) return p;
 
-  aty = get_or_check_arity(argv[0], -1, NULL);  
+  aty = get_or_check_arity(argv[0], -1, NULL, 1);  
 
   return make_reduced_proc(argv[0], aty, argv[1], NULL);
 }
@@ -4011,7 +2882,7 @@ static Scheme_Object *procedure_to_method(int argc, Scheme_Object *argv[])
   if (!SCHEME_PROCP(argv[0]))
     scheme_wrong_type("procedure->method", "procedure", 0, argc, argv);
 
-  aty = get_or_check_arity(argv[0], -1, NULL);  
+  aty = get_or_check_arity(argv[0], -1, NULL, 1);  
 
   return make_reduced_proc(argv[0], aty, NULL, scheme_true);
 }
@@ -4140,8 +3011,8 @@ static Scheme_Object *do_chaperone_procedure(const char *name, const char *whati
   if (!SCHEME_PROCP(argv[1]))
     scheme_wrong_type(name, "procedure", 1, argc, argv);
 
-  orig = get_or_check_arity(val, -1, NULL);
-  naya = get_or_check_arity(argv[1], -1, NULL);
+  orig = get_or_check_arity(val, -1, NULL, 1);
+  naya = get_or_check_arity(argv[1], -1, NULL, 1);
 
   if (!is_subarity(orig, naya))
     scheme_raise_exn(MZEXN_FAIL_CONTRACT,
@@ -9514,7 +8385,7 @@ static Scheme_Object *time_apply(int argc, Scheme_Object *argv[])
     num_rands++;
   }
 
-  if (SCHEME_FALSEP(get_or_check_arity(argv[0], num_rands, NULL))) {
+  if (SCHEME_FALSEP(get_or_check_arity(argv[0], num_rands, NULL, 1))) {
     char *s;
     intptr_t aelen;
 
@@ -9732,205 +8603,6 @@ scheme_default_read_handler(int argc, Scheme_Object *argv[])
 }
 
 /*========================================================================*/
-/*                        [un]marshalling closure code                    */
-/*========================================================================*/
-
-#define BOOL(x) (x ? scheme_true : scheme_false)
-
-static Scheme_Object *write_compiled_closure(Scheme_Object *obj)
-{
-  Scheme_Closure_Data *data;
-  Scheme_Object *name, *l, *code, *ds;
-  int svec_size, pos;
-  Scheme_Marshal_Tables *mt;
-
-  data = (Scheme_Closure_Data *)obj;
-
-  if (data->name) {
-    name = data->name;
-    if (SCHEME_VECTORP(name)) {
-      /* We can only save marshalable src names, which includes
-	 paths, symbols, and strings: */
-      Scheme_Object *src;
-      src = SCHEME_VEC_ELS(name)[1];
-      if (!SCHEME_PATHP(src)
-	  && !SCHEME_PATHP(src)
-	  && !SCHEME_SYMBOLP(src)) {
-	/* Just keep the name */
-	name = SCHEME_VEC_ELS(name)[0];
-      }
-    }
-  } else {
-    name = scheme_null;
-  }
-
-  svec_size = data->closure_size;
-  if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_TYPED_ARGS) {
-    svec_size += ((2 * (data->num_params + data->closure_size)) + BITS_PER_MZSHORT - 1) / BITS_PER_MZSHORT;
-  }
-
-  if (SCHEME_RPAIRP(data->code)) {
-    /* This can happen if loaded bytecode is printed out and the procedure
-       body has never been needed before.
-       It's also possible in non-JIT mode if an empty closure is embedded 
-       as a 3-D value in compiled code. */
-    scheme_delay_load_closure(data);
-  }
-
-  /* If the body is simple enough, write it directly.
-     Otherwise, create a delay indirection so that the body
-     is loaded on demand. */
-  code = data->code;
-  switch (SCHEME_TYPE(code)) {
-  case scheme_toplevel_type:
-  case scheme_local_type:
-  case scheme_local_unbox_type:
-  case scheme_integer_type:
-  case scheme_true_type:
-  case scheme_false_type:
-  case scheme_void_type:
-  case scheme_quote_syntax_type:
-    ds = code;
-    break;
-  default:
-    ds = NULL;
-    break;
-  }
-  
-  if (!ds) {
-    mt = scheme_current_thread->current_mt;
-    if (!mt->pass) {
-      int key;
-
-      pos = mt->cdata_counter;
-      if ((!mt->cdata_map || (pos >= 32))
-          && !(pos & (pos - 1))) {
-        /* Need to grow the array */
-        Scheme_Object **a;
-        a = MALLOC_N(Scheme_Object *, (pos ? 2 * pos : 32));
-        memcpy(a, mt->cdata_map, pos * sizeof(Scheme_Object *));
-        mt->cdata_map = a;
-      }
-      mt->cdata_counter++;
-
-      key = pos & 255;
-      MZ_OPT_HASH_KEY(&data->iso) = ((int)MZ_OPT_HASH_KEY(&data->iso) & 0x00FF) | (key << 8);
-    } else {
-      pos = ((int)MZ_OPT_HASH_KEY(&data->iso) & 0xFF00) >> 8;
-
-      while (pos < mt->cdata_counter) {
-        ds = mt->cdata_map[pos];
-        if (ds) {
-          ds = SCHEME_PTR_VAL(ds);
-          if (SAME_OBJ(data->code, ds))
-            break;
-          if (SAME_TYPE(scheme_quote_compilation_type, SCHEME_TYPE(ds)))
-            if (SAME_OBJ(data->code, SCHEME_PTR_VAL(ds)))
-              break;
-        }
-        pos += 256;
-      }
-      if (pos >= mt->cdata_counter) {
-        scheme_signal_error("didn't find delay record");
-      }
-    }
-
-    ds = mt->cdata_map[pos];
-    if (!ds) {
-      if (mt->pass)
-        scheme_signal_error("broken closure-data table\n");
-    
-      code = scheme_protect_quote(data->code);
-    
-      ds = scheme_alloc_small_object();
-      ds->type = scheme_delay_syntax_type;
-      SCHEME_PTR_VAL(ds) = code;
-
-      MZ_OPT_HASH_KEY(&((Scheme_Small_Object *)ds)->iso) |= 1; /* => hash on ds, not contained data */
-
-      mt->cdata_map[pos] = ds;
-    }
-  }
-
-  l = CONS(scheme_make_svector(svec_size,
-                               data->closure_map),
-           ds);
-
-  if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_TYPED_ARGS)
-    l = CONS(scheme_make_integer(data->closure_size),
-             l);
-
-  return CONS(scheme_make_integer(SCHEME_CLOSURE_DATA_FLAGS(data) & 0x7F),
-	      CONS(scheme_make_integer(data->num_params),
-		   CONS(scheme_make_integer(data->max_let_depth),
-			CONS(name,
-			     l))));
-}
-
-static Scheme_Object *read_compiled_closure(Scheme_Object *obj)
-{
-  Scheme_Closure_Data *data;
-  Scheme_Object *v;
-
-#define BAD_CC "bad compiled closure"
-#define X_SCHEME_ASSERT(x, y)
-
-  data  = (Scheme_Closure_Data *)scheme_malloc_tagged(sizeof(Scheme_Closure_Data));
-
-  data->iso.so.type = scheme_unclosed_procedure_type;
-
-  if (!SCHEME_PAIRP(obj)) return NULL;
-  v = SCHEME_CAR(obj);
-  obj = SCHEME_CDR(obj);
-  SCHEME_CLOSURE_DATA_FLAGS(data) = (short)(SCHEME_INT_VAL(v));
-
-  if (!SCHEME_PAIRP(obj)) return NULL;
-  v = SCHEME_CAR(obj);
-  obj = SCHEME_CDR(obj);
-  data->num_params = SCHEME_INT_VAL(v);
-  if (data->num_params < 0) return NULL;
-
-  if (!SCHEME_PAIRP(obj)) return NULL;
-  data->max_let_depth = SCHEME_INT_VAL(SCHEME_CAR(obj));
-  if (data->max_let_depth < 0) return NULL;
-  obj = SCHEME_CDR(obj);
-
-  if (!SCHEME_PAIRP(obj)) return NULL;
-  data->name = SCHEME_CAR(obj);
-  obj = SCHEME_CDR(obj);
-  if (SCHEME_NULLP(data->name))
-    data->name = NULL;
-
-  if (!SCHEME_PAIRP(obj)) return NULL;
-  v = SCHEME_CAR(obj);
-  obj = SCHEME_CDR(obj);
-
-  /* v is an svector or an integer... */
-  if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_TYPED_ARGS) {
-    if (!SCHEME_INTP(v)) return NULL;
-    data->closure_size = SCHEME_INT_VAL(v);
-    
-    if (!SCHEME_PAIRP(obj)) return NULL;
-    v = SCHEME_CAR(obj);
-    obj = SCHEME_CDR(obj);
-  }
-
-  data->code = obj;
-
-  if (!SAME_TYPE(scheme_svector_type, SCHEME_TYPE(v))) return NULL;
-
-  if (!(SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_TYPED_ARGS))
-    data->closure_size = SCHEME_SVEC_LEN(v);
-  data->closure_map = SCHEME_SVEC_VEC(v);
-
-  /* If the closure is empty, create the closure now */
-  if (!data->closure_size)
-    return scheme_make_closure(NULL, (Scheme_Object *)data, 0);
-  else
-    return (Scheme_Object *)data;
-}
-
-/*========================================================================*/
 /*                                precise GC                              */
 /*========================================================================*/
 
@@ -9938,8 +8610,7 @@ static Scheme_Object *read_compiled_closure(Scheme_Object *obj)
 
 START_XFORM_SKIP;
 
-#define MARKS_FOR_FUN_C
-#include "mzmark.c"
+#include "mzmark_fun.inc"
 
 static void register_traversers(void)
 {

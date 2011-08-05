@@ -16,8 +16,6 @@
          after
          around)
 
-(define USE-ERROR-HANDLER? #f)
-
 (define current-test-name
   (make-parameter
    #f
@@ -30,29 +28,12 @@
 ;;
 ;; Run a test-case immediately, printing information on failure
 (define (default-test-case-around thunk)
-  (with-handlers ([exn? default-test-case-handler])
+  (with-handlers ([(lambda (e) #t) default-test-case-handler])
     (thunk)))
 
-;; default-test-case-handler : exn -> any
+;; default-test-case-handler : any -> any
 (define (default-test-case-handler e)
-  (let ([out (open-output-string)])
-    ;;(display "test case failed\n" out)
-    (parameterize ((current-output-port out))
-      (display-delimiter)
-      (display-test-name (current-test-name))
-      (cond [(exn:test:check? e)
-             (display-failure)(newline)
-             (display-check-info-stack (exn:test:check-stack e))]
-            [(exn? e)
-             (display-error)(newline)
-             (display-exn e)])
-      (display-delimiter))
-    (cond [USE-ERROR-HANDLER?
-           ((error-display-handler) (get-output-string out)
-            ;; So that DrRacket won't recognize exn:fail:syntax, etc
-            (make-exn (exn-message e) (exn-continuation-marks e)))]
-          [else
-           (display (get-output-string out) (current-error-port))])))
+  (display-test-failure/error e (current-test-name)))
 
 (define current-test-case-around
   (make-parameter

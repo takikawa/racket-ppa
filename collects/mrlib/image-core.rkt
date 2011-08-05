@@ -30,15 +30,15 @@ has been moved out).
 (require racket/class
          racket/draw
          (for-syntax racket/base)
-         file/convertible         
+         file/convertible
          racket/math
          racket/contract
-         "private/image-core-bitmap.ss" 
-         "image-core-wxme.ss"
+         "private/image-core-bitmap.rkt"
+         "image-core-wxme.rkt"
          "private/image-core-snipclass.rkt"
          "private/regmk.rkt"
          racket/snip
-         (prefix-in cis: "cache-image-snip.ss"))
+         (prefix-in cis: "cache-image-snip.rkt"))
 
 
 
@@ -231,8 +231,8 @@ has been moved out).
 (define (to-bitmap img)  
   (let* ([bb (send img get-bb)]
          [bm (make-bitmap
-              (add1 (inexact->exact (ceiling (bb-right bb)))) 
-              (add1 (inexact->exact (ceiling (bb-bottom bb)))))]
+              (inexact->exact (ceiling (bb-right bb)))
+              (inexact->exact (ceiling (bb-bottom bb))))]
          [bdc (new bitmap-dc% [bitmap bm])])
     (send bdc erase)
     (render-image img bdc 0 0)
@@ -1136,7 +1136,7 @@ the mask bitmap and the original bitmap are all together in a single bytes!
 
 (define (pen->pen-obj/cache pen)
   (send the-pen-list find-or-create-pen 
-        (pen-color pen)
+        (get-color-arg (pen-color pen))
         (pen-width pen)
         (pen-style pen)
         (pen-cap pen)

@@ -1,12 +1,6 @@
 #lang scribble/doc
-@(require scribble/manual
-          scribble/eval
-          racket/class
-          "guide-utils.ss"
-
-          (for-label racket/class
-                     racket/trait
-                     racket/contract))
+@(require scribble/manual scribble/eval racket/class "guide-utils.rkt"
+          (for-label racket/class racket/trait racket/contract))
 
 @(define class-eval
    (let ([e (make-base-eval)])
@@ -347,6 +341,13 @@ cannot be overridden). Similarly, @racket[overment] overrides a method
 and makes the overriding implementation augmentable.
 
 @section[#:tag "extnames"]{Controlling the Scope of External Names}
+
+@margin-note{
+  Java's access modifiers (like @index["protected method"]{@tt{protected}})
+  play a role similar to @racket[define-member-name], but
+  unlike in Java, Racket's mechanism for controlling access
+  is based on lexical scope, not the inheritance hierarchy.
+}
 
 As noted in @secref["intnames"], class members have both
 internal and external names. A member definition binds an internal

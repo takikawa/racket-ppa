@@ -9,6 +9,7 @@
                     setup/option-sig
                     setup/dirs
                     setup/main-collects
+                    setup/path-to-relative
                     setup/xref scribble/xref
                     ;; setup/infotab -- no bindings from this are used
                     setup/getinfo
@@ -76,8 +77,8 @@ The @exec{raco setup} command performs two main services:
    @elemref["clean"]{@racket[clean]} for more information.
 
    The @DFlag{workers} (or @Flag{j}) flag to @exec{raco setup} takes
-   an argument @scheme[_n] to make compilation use up to @scheme[_n]
-   parallel processes.  The default value of @scheme[_n] is
+   an argument @racket[_n] to make compilation use up to @racket[_n]
+   parallel processes.  The default value of @racket[_n] is
    @racket[(processor-count)], which typically uses all the machine's
    processing cores.
 
@@ -266,72 +267,72 @@ Optional @filepath{info.rkt} fields trigger additional actions by
    separated by space if @racket[(truncate (/ _n 10))]and
    @racket[(truncate (/ _m 10))] are different.}
 
- @item{@scheme[racket-launcher-names] : @scheme[(listof string?)]
+ @item{@racket[racket-launcher-names] : @racket[(listof string?)]
    --- @elemtag["racket-launcher-names"] A list of executable names
    to be generated in the installation's executable directory to run
    Racket-based programs implemented by the collection. A parallel
    list of library names must be provided by
-   @scheme[racket-launcher-libraries] or
-   @scheme[racket-launcher-flags].
+   @racket[racket-launcher-libraries] or
+   @racket[racket-launcher-flags].
 
    For each name, a launching executable is set up using
-   @scheme[make-racket-launcher].  The arguments are @Flag{l-} and
+   @racket[make-racket-launcher].  The arguments are @Flag{l-} and
    @tt{@nonterm{colls}/.../@nonterm{file}}, where @nonterm{file} is
-   the file named by @scheme[racket-launcher-libraries] and
+   the file named by @racket[racket-launcher-libraries] and
    @tt{@nonterm{colls}/...}  are the collections (and subcollections)
    of the @filepath{info.rkt} file.
 
    In addition,
 
-   @schemeblock[
+   @racketblock[
     (build-aux-from-path
      (build-path (collection-path #,(nonterm "colls") _...) #,(nonterm "suffixless-file")))
    ]
 
-   is provided for the optional @scheme[_aux] argument (for icons,
-   etc.) to @scheme[make-racket-launcher], where where
+   is provided for the optional @racket[_aux] argument (for icons,
+   etc.) to @racket[make-racket-launcher], where where
    @nonterm{suffixless-file} is @nonterm{file} without its suffix.
 
-   If @scheme[racket-launcher-flags] is provided, it is used as a
+   If @racket[racket-launcher-flags] is provided, it is used as a
    list of command-line arguments passed to @exec{racket} instead of
    the above default, allowing arbitrary command-line arguments. If
-   @scheme[racket-launcher-flags] is specified together with
-   @scheme[racket-launcher-libraries], then the flags will override
+   @racket[racket-launcher-flags] is specified together with
+   @racket[racket-launcher-libraries], then the flags will override
    the libraries, but the libraries can still be used to specify a
-   name for @scheme[build-aux-from-path] (to find related information
+   name for @racket[build-aux-from-path] (to find related information
    like icon files etc).}
 
- @item{@scheme[racket-launcher-libraries] : @scheme[(listof
+ @item{@racket[racket-launcher-libraries] : @racket[(listof
    path-string?)] --- A list of library names in parallel to
-   @elemref["racket-launcher-names"]{@scheme[racket-launcher-names]}.}
+   @elemref["racket-launcher-names"]{@racket[racket-launcher-names]}.}
 
- @item{@scheme[racket-launcher-flags] : @scheme[(listof string?)]
+ @item{@racket[racket-launcher-flags] : @racket[(listof string?)]
    --- A list of command-line flag lists, in parallel to
-   @elemref["racket-launcher-names"]{@scheme[racket-launcher-names]}.}
+   @elemref["racket-launcher-names"]{@racket[racket-launcher-names]}.}
 
- @item{@scheme[mzscheme-launcher-names],
-   @scheme[mzscheme-launcher-libraries], and
-   @scheme[mzscheme-launcher-flags] --- Backward-compatible variant of
+ @item{@racket[mzscheme-launcher-names],
+   @racket[mzscheme-launcher-libraries], and
+   @racket[mzscheme-launcher-flags] --- Backward-compatible variant of
    @racket[racket-launcher-names], etc.}
 
- @item{@scheme[gracket-launcher-names] : @scheme[(listof string?)]  ---
+ @item{@racket[gracket-launcher-names] : @racket[(listof string?)]  ---
    @elemtag["gracket-launcher-names"] Like
-   @elemref["racket-launcher-names"]{@scheme[racket-launcher-names]},
+   @elemref["racket-launcher-names"]{@racket[racket-launcher-names]},
    but for GRacket-based executables. The launcher-name list is treated
-   in parallel to @scheme[gracket-launcher-libraries] and
-   @scheme[gracket-launcher-flags].}
+   in parallel to @racket[gracket-launcher-libraries] and
+   @racket[gracket-launcher-flags].}
 
- @item{@scheme[gracket-launcher-libraries] : @scheme[(listof path-string?)]
+ @item{@racket[gracket-launcher-libraries] : @racket[(listof path-string?)]
    --- A list of library names in parallel to
-   @elemref["gracket-launcher-names"]{@scheme[gracket-launcher-names]}.}
+   @elemref["gracket-launcher-names"]{@racket[gracket-launcher-names]}.}
 
- @item{@scheme[gracket-launcher-flags] : @scheme[(listof string?)] --- A
+ @item{@racket[gracket-launcher-flags] : @racket[(listof string?)] --- A
    list of command-line flag lists, in parallel to
-   @elemref["gracket-launcher-names"]{@scheme[gracket-launcher-names]}.}
+   @elemref["gracket-launcher-names"]{@racket[gracket-launcher-names]}.}
 
- @item{@scheme[mred-launcher-names],
-   @scheme[mred-launcher-libraries], and
-   @scheme[mred-launcher-flags] --- Backward-compatible variant of
+ @item{@racket[mred-launcher-names],
+   @racket[mred-launcher-libraries], and
+   @racket[mred-launcher-flags] --- Backward-compatible variant of
    @racket[gracket-launcher-names], etc.}
 
  @item{@racket[install-collection] : @racket[path-string?]  --- A
@@ -985,7 +986,7 @@ An @deftech{unpackable} is one of the following:
 
 @defproc[(find-dll-dir) (or/c path? false/c)]{
   Returns a path to the directory that contains DLLs for use with the
-  current executable (e.g., @filepath{libmzsch.dll} under Windows).
+  current executable (e.g., @filepath{libmzsch.dll} on Windows).
   The result is @racket[#f] if no such directory is available, or if no
   specific directory is available (i.e., other than the platform's normal
   search path).}
@@ -1047,7 +1048,7 @@ An @deftech{unpackable} is one of the following:
           false/c)]{
    Accepts a list of strings naming a collection or sub-collection,
    and calls @racket[get-info/full] with the full path corresponding to the
-   named collection and the @scheme[namespace] argument.}
+   named collection and the @racket[namespace] argument.}
 
 @defproc[(get-info/full [path path?]
                          [#:namespace namespace (or/c namespace? #f) #f])
@@ -1067,9 +1068,9 @@ An @deftech{unpackable} is one of the following:
    the info procedure is the result of the @racket[_thunk] in that
    case. If the name is not defined and no @racket[_thunk] is
    provided, then an exception is raised.
-   
+
    The @racket[get-info/full] function returns @racket[#f] if there is
-   no @filepath{info.rkt} or @filepath{info.ss} file in the directory. If there is a
+   no @filepath{info.rkt} (or @filepath{info.ss}) file in the directory. If there is a
    @filepath{info.rkt} (or @filepath{info.ss}) file that has the wrong shape (i.e., not a module
    using @racketmodname[setup/infotab] or @racket[(lib "infotab.rkt" "setup")]),
    or if the @filepath{info.rkt} file fails to load, then an exception
@@ -1080,7 +1081,7 @@ An @deftech{unpackable} is one of the following:
    or returning the @racket[get-info] function from the @filepath{info.rkt} file.
 
    The @filepath{info.rkt} (or @filepath{info.ss}) module is loaded
-   into @scheme[namespace] if it is not @scheme[#f], or a private,
+   into @racket[namespace] if it is not @racket[#f], or a private,
    weakly-held namespace otherwise.}
 
 @defproc[(find-relevant-directories
@@ -1138,13 +1139,21 @@ An @deftech{unpackable} is one of the following:
   file for this collection or @PLaneT package exists on the filesystem the @racket[syms] field holds the 
   identifiers defined in that file.
 }
-                                    
+
 @defproc[(reset-relevant-directories-state!) void?]{
    Resets the cache used by @racket[find-relevant-directories].}
 
 @; ------------------------------------------------------------------------
 
-@section[#:tag "main-collects"]{API for Paths Relative to @filepath{collects}}
+@section[#:tag "relative-paths"]{API for Relative Paths}
+
+The Racket installation tree can usually be moved around the filesystem.
+To support this, care must be taken to avoid absolute paths.  The
+following two APIs cover two aspects of this: a way to convert a path to
+a value that is relative to the @filepath{collets} tree, and a way to
+display such paths (e.g., in error messages).
+
+@subsection{Representing paths relative to @filepath{collects}}
 
 @defmodule[setup/main-collects]
 
@@ -1166,21 +1175,79 @@ converted to a path using @racket[bytes->path].}
 
 @defproc[(main-collects-relative->path
           [rel (or/c bytes? path-string?
-                     (cons/c 'collects
-                             (or/c (listof bytes?) bytes?)))])
+                     (cons/c 'collects (listof bytes?)))])
          path?]{
 
 The inverse of @racket[path->main-collects-relative]: if @racket[rel]
 is a pair that starts with @racket['collects], then it is converted
 back to a path relative to @racket[(find-collects-dir)].
 
-For historical reasons, a single byte string is allowed in place of a
-list of byte strings after @racket['collects], in which case it is
-assumed to be a relative path after conversion with
-@racket[bytes->path].
-
-Also for historical reasons, if @racket[rel] is any kind of value other
+For historical reasons, if @racket[rel] is any kind of value other
 than specified in the contract above, it is returned as-is.}
+
+@subsection{Displaying paths relative to a common root}
+
+@defmodule[setup/path-to-relative]
+
+@defproc[(path->relative-string/library
+          [path path-string?]
+          [default (or/c (-> path-string? any/c) any/c)
+                   (lambda (x) (if (path? x) (path->string x) x))])
+         any/c]{
+  Produces a string suitable for display in error messages.  If the path
+  is an absolute one that is inside the @filepath{collects} tree, the
+  result will be a string that begins with @racket["<collects>/"].
+  Similarly, a path in the user-specific collects results in a prefix of
+  @racket["<user-collects>/"], and a @PLaneT path results in
+  @racket["<planet>/"].
+
+  If the path is not absolute, or if it is not in any of these, it is
+  returned as-is (converted to a string if needed).  If @racket[default]
+  is given, it specifies the return value instead: it can be a procedure
+  which is applied onto the path to get the result, or the result
+  itself.
+
+  Note that this function can be a non-string only if @racket[default]
+  is given, and it does not return a string.
+}
+
+@defproc[(path->relative-string/setup
+          [path path-string?]
+          [default (or/c (-> path-string? any/c) any/c)
+                   (lambda (x) (if (path? x) (path->string x) x))])
+         any]{
+  Similar to @racket[path->relative-string/library], but more suited for
+  output during compilation: @filepath{collects} paths are shown with no
+  prefix, and in the user-specific collects with just a
+  @racket["<user>"] prefix.
+
+  If the path is not absolute, or if it is not in any of these, it is
+  returned as-is (converted to a string if needed).  If @racket[default]
+  is given, it specifies the return value instead: it can be a procedure
+  which is applied onto the path to get the result, or the result
+  itself.
+
+  Note that this function can be a non-string only if @racket[default]
+  is given, and it does not return a string.
+}
+
+@defproc[(make-path->relative-string
+          [dirs (listof (cons (-> path?) string?))]
+          [default (or/c (-> path-string? any/c) any/c)
+                   (lambda (x) (if (path? x) (path->string x) x))])
+         (path-string? any/c . -> . any)]{
+  This function produces functions like
+  @racket[path->relative-string/library] and
+  @racket[path->relative-string/setup].
+
+  @racket[dirs] determines the prefix substitutions.  It should be an
+  association list mapping a path-producing thunk to a prefix string for
+  paths in the specified path.
+
+  @racket[default] determines the default for the resulting function
+  (which can always be overridden by an additional argument to this
+  function).
+}
 
 @; ------------------------------------------------------------------------
 

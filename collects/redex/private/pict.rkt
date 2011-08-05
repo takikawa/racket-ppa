@@ -1,18 +1,20 @@
-#lang scheme/base
-(require (lib "mrpict.ss" "texpict")
-         (lib "utils.ss" "texpict")
-         racket/contract
+#lang racket/base
+(require racket/contract
          racket/draw
-         scheme/class
-         scheme/match
-         (only-in scheme/list drop-right last partition)
-         "reduction-semantics.ss"
-         "struct.ss"
-         "loc-wrapper.ss"
-         "matcher.ss"
-         "arrow.ss"
-         "core-layout.ss")
-(require (for-syntax scheme/base))
+         racket/class
+         racket/match
+         (only-in racket/list drop-right last partition)
+         
+         texpict/mrpict
+         texpict/utils
+         
+         "reduction-semantics.rkt"
+         "struct.rkt"
+         "loc-wrapper.rkt"
+         "matcher.rkt"
+         "arrow.rkt"
+         "core-layout.rkt")
+(require (for-syntax racket/base))
 
 (provide render-term 
          term->pict
@@ -25,8 +27,11 @@
          render-reduction-relation
          render-reduction-relation-rules
          
+         relation->pict
          metafunction->pict
          metafunctions->pict
+
+         render-relation
          render-metafunction
          render-metafunctions
          
@@ -56,7 +61,10 @@
          compact-vertical-min-width
          extend-language-show-union
          set-arrow-pict!
-         arrow->pict)
+         arrow->pict
+         horizontal-bar-spacing
+         relation-clauses-combine)
+
 (provide/contract
  [linebreaks (parameter/c (or/c #f (listof boolean?)))])
 
@@ -98,16 +106,18 @@
      (map (rr-lws->trees (language-nts (reduction-relation-lang rr)))
           (if rules
               (let ([ht (make-hash)])
-                (for-each (lambda (rp)
-                            (hash-set! ht (rule-pict-label rp) rp))
-                          (reduction-relation-lws rr))
+                (for ([rp (in-list (reduction-relation-lws rr))]
+                      [i (in-naturals)])
+                  (hash-set! ht i rp)
+                  (hash-set! ht (rule-pict-label rp) rp))
                 (map (lambda (label)
                        (hash-ref ht (if (string? label)
                                         (string->symbol label)
                                         label)
                                  (lambda ()
                                    (error what
-                                          "no rule found for label: ~e"
+                                          "no rule found for ~a: ~e"
+                                          (if (number? label) "index" "label")
                                           label))))
                      rules))
               (reduction-relation-lws rr))))))
@@ -142,7 +152,7 @@
                                 (tp rewritten))))
                     (map (lambda (v) 
                            (if (pair? v)
-                               (cons (tp (car v)) (tp (cdr v)))
+                               (where-pict (tp (car v)) (tp (cdr v)))
                                (tp v)))
                          (rule-pict-side-conditions/pattern-binds rp))
                     (map tp (rule-pict-fresh-vars rp)))))
@@ -167,22 +177,26 @@
     (table 4
            (apply
             append
-            (map (lambda (rp)
-                   (let ([arrow (hbl-append (blank (arrow-space) 0)
-                                            (arrow->pict (rule-pict-arrow rp))
-                                            (blank (arrow-space) 0))]
-                         [lhs (rule-pict-lhs rp)]
-                         [rhs (rule-pict-rhs rp)]
-                         [spc (basic-text " " (default-style))]
-                         [label (hbl-append (blank (label-space) 0) (rp->pict-label rp))]
-                         [sep (blank 4)])
-                     (list lhs arrow rhs label
-                           (blank) (blank)
-                           (let ([sc (rp->side-condition-pict rp max-w)])
-                             (inset sc (min 0 (- max-rhs (pict-width sc))) 0 0 0))
-                           (blank)
-                           sep (blank) (blank) (blank))))
-                 rps))
+            (let ([len (length rps)])
+              (for/list ([rp (in-list rps)]
+                         [i (in-naturals 1)])
+                (let ([arrow (hbl-append (blank (arrow-space) 0)
+                                         (arrow->pict (rule-pict-arrow rp))
+                                         (blank (arrow-space) 0))]
+                      [lhs (rule-pict-lhs rp)]
+                      [rhs (rule-pict-rhs rp)]
+                      [spc (basic-text " " (default-style))]
+                      [label (hbl-append (blank (label-space) 0) (rp->pict-label rp))]
+                      [sep (blank 4)])
+                  (append 
+                   (list lhs arrow rhs label
+                         (blank) (blank)
+                         (let ([sc (rp->side-condition-pict rp max-w)])
+                           (inset sc (min 0 (- max-rhs (pict-width sc))) 0 0 0))
+                         (blank))
+                   (if (= len i)
+                       '()
+                       (list sep (blank) (blank) (blank))))))))
            (list* left-column-align ctl-superimpose ltl-superimpose)
            (list* left-column-align ctl-superimpose ltl-superimpose)
            (list* sep sep (+ sep (current-label-extra-space))) 2)))
@@ -298,9 +312,7 @@
                ltl-superimpose ltl-superimpose
                2 2))))
 
-;; side-condition-pict : (listof pict) (listof (or/c (cons/c pict pict) pict)) number -> pict
-;; the elements of pattern-binds/sc that are pairs are bindings (ie "x = <something>")
-;;     and the elements of pattern-binds/sc that are just picts are just plain side-conditions
+;; side-condition-pict : (listof pict) (listof pict) number -> pict
 (define (side-condition-pict fresh-vars pattern-binds/sc max-w)
   (let* ([frsh 
           (if (null? fresh-vars)
@@ -313,18 +325,10 @@
                   (basic-text ", " (default-style))
                   fresh-vars))
                 (basic-text " fresh" (default-style)))))]
-         [binds (map (lambda (b)
-                       (if (pair? b)
-                           (htl-append
-                            (car b)
-                            (make-=)
-                            (cdr b))
-                           b))
-                     pattern-binds/sc)]
          [lst (add-between
                'comma
                (append
-                binds
+                pattern-binds/sc
                 frsh))])
     (if (null? lst)
         (blank)
@@ -341,6 +345,9 @@
                              (vl-append p
                                         (loop (car lst) (cdr lst)))]
                             [else (loop (htl-append p (car lst)) (cdr lst))]))))))))
+
+(define (where-pict lhs rhs)
+  (htl-append lhs (make-=) rhs))
 
 (define (rp->side-condition-pict rp max-w)
   (side-condition-pict (rule-pict-fresh-vars rp)
@@ -718,6 +725,12 @@
           (andmap identifier? (syntax->list #'(name2 ...))))
      #'(metafunctions->pict/proc (list (metafunction name1) (metafunction name2) ...) 'metafunctions->pict)]))
 
+(define-syntax (relation->pict stx)
+  (syntax-case stx ()
+    [(_ name1)
+     (identifier? #'name1)
+     #'(relation->pict/proc (metafunction name1) 'relation->pict)]))
+
 (define-syntax (render-metafunctions stx)
   (syntax-case stx ()
     [(_ name1 name2 ...)
@@ -737,6 +750,15 @@
     [(_ name file)
      (identifier? #'name)
      #'(render-metafunction/proc (list (metafunction name)) file 'render-metafunction)]))
+
+(define-syntax (render-relation stx)
+  (syntax-case stx ()
+    [(_ name)
+     (identifier? #'name)
+     #'(render-relation/proc (metafunction name) #f)]
+    [(_ name #:file filename)
+     (identifier? #'name)
+     #'(render-relation/proc (metafunction name) filename)]))
 
 (define linebreaks (make-parameter #f))
 
@@ -772,6 +794,9 @@
        (cons (car l) (loop (cdr l)))])))
 
 (define (metafunctions->pict/proc mfs name)
+  (for ([mf (in-list mfs)])
+    (when (metafunc-proc-relation? (metafunction-proc mf))
+      (error name "expected metafunction as argument, got a relation")))
   (unless (andmap (λ (mf) (eq? (metafunc-proc-lang (metafunction-proc (car mfs)))
                                (metafunc-proc-lang (metafunction-proc mf))))
                   mfs)
@@ -831,7 +856,7 @@
                                                        '() fresh)
                                                 (map (match-lambda
                                                       [(struct metafunc-extra-where (lhs rhs))
-                                                       (cons (wrapper->pict lhs) (wrapper->pict rhs))]
+                                                       (where-pict (wrapper->pict lhs) (wrapper->pict rhs))]
                                                       [(struct metafunc-extra-side-cond (expr))
                                                        (wrapper->pict expr)])
                                                      where/sc)
@@ -909,7 +934,7 @@
                     (list*
                      ;; the first loc wrapper is just there to make the
                      ;; shape of this line be one that the apply-rewrites
-                     ;; function (in core-layout.ss) recognizes as a metafunction
+                     ;; function (in core-layout.rkt) recognizes as a metafunction
                      (make-lw "("
                               (lw-line an-lw)
                               0
@@ -1018,7 +1043,53 @@
     [else
      (parameterize ([dc-for-text-size (make-object bitmap-dc% (make-object bitmap% 1 1))])
        (metafunctions->pict/proc mfs name))]))
-     
+
+(define (render-relation/proc mf filename)
+  (cond
+    [filename
+     (save-as-ps (λ () (relation->pict/proc mf 'render-reduction-relation))
+                 filename)]
+    [else
+     (parameterize ([dc-for-text-size (make-object bitmap-dc% (make-object bitmap% 1 1))])
+       (relation->pict/proc mf 'render-reduction-relation))]))
+
+
+(define (relation->pict/proc mf name)
+  (unless (metafunc-proc-relation? (metafunction-proc mf))
+    (error name "expected relation as argument, got a metafunction"))
+  (let* ([all-nts (language-nts (metafunc-proc-lang (metafunction-proc mf)))]
+         [wrapper->pict (lambda (lw) (lw->pict all-nts lw))]
+         [all-eqns (metafunc-proc-pict-info (metafunction-proc mf))]
+         [all-conclusions 
+          (map (lambda (eqn) 
+                 (wrapper->pict
+                  (metafunction-call (metafunc-proc-name (metafunction-proc mf))
+                                     (list-ref eqn 0)
+                                     (metafunc-proc-multi-arg? (metafunction-proc mf)))))
+               (metafunc-proc-pict-info (metafunction-proc mf)))]
+         [eqns (select-cases all-eqns)]
+         [conclusions (select-cases all-conclusions)]
+         [premisess (map (lambda (eqn)
+                           (append (map wrapper->pict (list-ref eqn 2))
+                                   (map (match-lambda
+                                          [(struct metafunc-extra-where (lhs rhs))
+                                           (where-pict (wrapper->pict lhs) (wrapper->pict rhs))])
+                                        (list-ref eqn 1))))
+                         eqns)])
+    ((relation-clauses-combine)
+     (for/list ([conclusion (in-list conclusions)]
+                [premises (in-list premisess)])
+       (define top (apply hbl-append 20 premises))
+       (define line-w (max (pict-width top) (pict-width conclusion)))
+       (vc-append
+        (horizontal-bar-spacing)
+        top
+        (dc (λ (dc dx dy) (send dc draw-line dx dy (+ dx line-w) dy))
+            line-w 1)
+        conclusion)))))
+
+(define horizontal-bar-spacing (make-parameter 4))
+(define relation-clauses-combine (make-parameter (λ (l) (apply vc-append 20 l))))
 
 ;                              
 ;                              

@@ -9,10 +9,10 @@
            mzlib/etc
 	   mzlib/contract
            scheme/match
-           "marks.ss"
-           "model-settings.ss"
-           "shared.ss"
-           "my-macros.ss"
+           "marks.rkt"
+           "model-settings.rkt"
+           "shared.rkt"
+           "my-macros.rkt"
            (for-syntax scheme/base)
            racket/private/promise)
 
@@ -107,7 +107,8 @@
   ; of a let, or unless there _is_ no name.
   
   (define recon-value
-    (opt-lambda (val render-settings [assigned-name #f] [current-so-far nothing-so-far])
+    (opt-lambda (val render-settings [assigned-name #f] 
+                     [current-so-far nothing-so-far] [seen-promises null])
       (if (hash-ref finished-xml-box-table val (lambda () #f))
           (stepper-syntax-property #`(quote #,val) 'stepper-xml-value-hint 'from-xml-box)
           (let* ([extracted-proc (unwrap-proc val)]
@@ -133,55 +134,67 @@
                       (mark-source mark) (list mark) null null render-settings)))]
               ; promise does not have annotation info,
               ; must be from library code, or it's a running promise
+              ; or it's a nested promise?
               [(promise? val)
-               (let ([partial-eval-promise
-                      (or (hash-ref partially-evaluated-promises-table
-                                    val (λ () #f))
-                          ; can be an extra promise layer when dealing with lists
-                          (hash-ref partially-evaluated-promises-table
-                                    (pref val) (λ () #f)))])
-                 (cond [partial-eval-promise partial-eval-promise]
-                       ; running promise not found by search in recon-inner
-                       ; must be a nested running promise
-                       [(and (nested-promise-running? val)
-                             (not (eq? current-so-far nothing-so-far)))
-                        (hash-set! partially-evaluated-promises-table
-                                   val current-so-far)
-                        current-so-far]
-                       ; promise is not running if we get here
-                       [(and (promise-forced? val)
-                             (not (nested-promise-running? val)))
-                        (recon-value (force val) render-settings assigned-name current-so-far)]
-                       ; unknown promise: promise not in src code, created in library fn
-                       [else 
-                        (let ([unknown-promise
-                               (hash-ref unknown-promises-table
-                                         val (λ () #f))])
-                          (if unknown-promise
-                              (render-unknown-promise unknown-promise)
-                              ; else generate a fresh unknown promise
-                              (begin0
-                                (render-unknown-promise next-unknown-promise)
-                                (hash-set! unknown-promises-table
-                                           val next-unknown-promise)
-                                (set! next-unknown-promise 
-                                      (add1 next-unknown-promise)))))]))]
+               (cond 
+                 ; running promise cached by recon-inner
+                 [(or (hash-ref partially-evaluated-promises-table val (λ () #f))
+                      ; can be an extra promise layer when dealing with lists
+                      (hash-ref partially-evaluated-promises-table (pref val) (λ () #f)))]
+                 ; running promise not found by search in recon-inner
+                 ; must be a nested running promise
+                 [(and (nested-promise-running? val)
+                       (not (eq? current-so-far nothing-so-far)))
+                  (hash-set! partially-evaluated-promises-table val current-so-far)
+                  current-so-far]
+                 #;[(and (nested-promise-running? val)
+                       (not (null? last-so-far)))
+                  last-so-far]
+                 ; promise is not running if we get here
+                 [(and (promise-forced? val)
+                       (not (nested-promise-running? val))
+                       (not (assq val seen-promises)))
+                  (recon-value (force val) render-settings 
+                               assigned-name current-so-far 
+                               (cons (list val assigned-name) seen-promises))]
+                 ; for cyclic lists, use assigned name if it's available
+                 [(let ([v (assq val seen-promises)])
+                    (and v (second v)))]
+                 ; unknown promise: promise not in src code, created in library fn
+                 [(hash-ref unknown-promises-table val (λ () #f))
+                  =>
+                  render-unknown-promise]
+                 [else ; else generate a fresh unknown promise
+                  (begin0
+                    (render-unknown-promise next-unknown-promise)
+                    (hash-set! unknown-promises-table
+                               val next-unknown-promise)
+                    (set! next-unknown-promise 
+                          (add1 next-unknown-promise)))])]
               ; STC: handle lists here, instead of deferring to render-to-sexp fn
               ; because there may be nested promises
-              [(null? val) #'empty]
-              [(list? val)
+              #;[(null? val) #'empty]
+              [(and (not (null? val))
+                    (list? val)
+                    (ormap promise? val))
                (with-syntax 
                    ([(reconed-vals ...)
-                     (map (lx (recon-value _ render-settings assigned-name current-so-far)) val)])
+                     (map 
+                      (lx (recon-value _ render-settings #f current-so-far seen-promises))
+                      val)])
                  (if (render-settings-constructor-style-printing? render-settings)
                      #'(#%plain-app list reconed-vals ...)
                      #'`(reconed-vals ...)))]
-              [(pair? val)
+              [(and (pair? val)
+                    (or (promise? (car val))
+                        (promise? (cdr val))))
                (with-syntax 
                    ([reconed-car
-                     (recon-value (car val) render-settings assigned-name current-so-far)]
+                     (recon-value (car val) render-settings 
+                                  #f current-so-far seen-promises)]
                     [reconed-cdr
-                     (recon-value (cdr val) render-settings assigned-name current-so-far)])
+                     (recon-value (cdr val) render-settings 
+                                  #f current-so-far seen-promises)])
                  #'(#%plain-app cons reconed-car reconed-cdr))]
               [else
                (let* ([rendered 
@@ -235,6 +248,18 @@
     #`(quote #,(string->symbol 
                 (string-append "<DelayedEvaluation#" (number->string x) ">"))))
   
+  ; This is used when we need the exp associated with a running promise, but the promise is at top-level,
+  ; so it never gets added to partially-evaluated-promises-table
+  ; This is a huge hack and I dont know if it the assumptions I'm making always hold
+  ;  (ie - that the exp associated with any running promise not in partially-evaluated-promises-table is the last so-far), 
+  ;  but it's working for all test cases so far 10/29/2010.
+  ;  Another solution is to wrap all lazy programs in a dummy top-level expression???
+  ;  Update 11/1/2010: needed to add the following guards in the code to make the assumptions hold 
+  ;                    (guards are mainly triggered when there are infinite lists)
+  ;  - in recon-inner, dont add running promise to partially-evaluated-promises-table if so-far = nothing-so-far
+  ;  - in recon, dont set last-so-far when so-far = nothing-so-far 
+  ;  - in recon-value, dont use last-so-far if it hasnt been set (ie - if it's still null)
+  (define last-so-far null)
        ;      ;                                                                     ;;;
        ;                                                          ;                    ;
   ;;;  ;   ;  ;  ; ;;;         ;    ; ;    ; ;    ;          ;;; ;;;;  ;;;   ; ;;;     ;
@@ -264,8 +289,7 @@
        (or 
         ;; don't stop for a double-break on a let that is the expansion of a 'begin'
         (let ([expr (mark-source (car mark-list))])
-          (or (eq? (stepper-syntax-property expr 'stepper-hint) 'comes-from-begin)
-              (stepper-syntax-property expr 'stepper-skip-double-break)))
+          (eq? (stepper-syntax-property expr 'stepper-hint) 'comes-from-begin))
         (not (render-settings-lifting? render-settings)))]
       [(expr-finished-break define-struct-break late-let-break) #f]))
   
@@ -329,7 +353,7 @@
            [stepper-safe-expanded (skipto/auto expanded-application 'discard (lambda (x) x))]
            [just-the-fn 
             (kernel:kernel-syntax-case 
-             stepper-safe-expanded #f
+             (syntax-disarm stepper-safe-expanded (current-code-inspector)) #f
              ; STC: lazy racket case
              ;      Must change this case if lazy language changes!
              [(#%plain-app 
@@ -340,7 +364,7 @@
               #'fn]
              [(#%plain-app fn . rest) #`fn]
              [else (error 'find-special-name "couldn't find expanded name for ~a" name)])])
-      (eval (syntax-recertify just-the-fn expanded-application (current-code-inspector) #f))))
+      (eval just-the-fn)))
 
   ;; these are delayed so that they use the userspace expander.  I'm sure
   ;; there's a more robust & elegant way to do this.
@@ -653,9 +677,9 @@
              (vector (reconstruct-completed-define exp vars (vals-getter) render-settings) #f))])
         (let ([exp (skipto/auto exp 'discard (lambda (exp) exp))])
           (cond 
-            [(stepper-syntax-property exp 'stepper-define-struct-hint)
+            [(stepper-syntax-property exp 'stepper-black-box-expr)
              ;; the hint contains the original syntax
-             (vector (stepper-syntax-property exp 'stepper-define-struct-hint) #t)]
+             (vector (stepper-syntax-property exp 'stepper-black-box-expr) #t)]
             ;; for test cases, use the result here as the final result of the expression:
             [(stepper-syntax-property exp 'stepper-use-val-as-final)
              (vector (recon-value (car (vals-getter)) render-settings) #f)]
@@ -812,19 +836,11 @@
                                         (map reconstruct-remaining-def (cdr not-done-glumps))))
                               null)]
                          [recon-bindings (append before-bindings after-bindings)]
-                         ;; there's a terrible tangle of invariants here.  Among them:  
-                         ;; num-defns-done = (length binding-sets) IFF the so-far has a 'stepper-offset' index
-                         ;; that is not #f (that is, we're evaluating the body...)                                    
-                         [so-far-offset-index (and (not (eq? so-far nothing-so-far)) 
-                                                   (stepper-syntax-property so-far 'stepper-offset-index))]
-                         [bodies (syntax->list (syntax bodies))]
+                         ;; JBC: deleted a bunch of dead code here referring to a never-set "stepper-offset" index...
+                         ;; frightening.
                          [rectified-bodies 
-                          (map (lambda (body offset-index)
-                                 (if (eq? offset-index so-far-offset-index)
-                                     so-far
-                                     (recon-source-expr body mark-list binding-list binding-list render-settings)))
-                               bodies
-                               (iota (length bodies)))])
+                          (for/list ([body (in-list (syntax->list #'bodies))])
+                            (recon-source-expr body mark-list binding-list binding-list render-settings))])
                          (attach-info #`(label #,recon-bindings #,@rectified-bodies) exp))))])
              
              ; STC: cache any running promises in the top mark 
@@ -1030,6 +1046,8 @@
          
          (define (recon so-far mark-list first)
            (cond [(null? mark-list) ; now taken to indicate a callback:
+                  (unless (eq? so-far nothing-so-far)
+                    (set! last-so-far so-far))
                   so-far
                   ;(error `recon "expcted a top-level mark at the end of the mark list.")
                   ]
@@ -1059,6 +1077,7 @@
            (begin
              ; STC: reset partial-eval-promise table on each call to recon
              (set! partially-evaluated-promises-table (make-weak-hash))
+             (set! last-so-far null)
              
              (case break-kind
                ((left-side)

@@ -1,6 +1,6 @@
 #lang setup/infotab
 
-(define scribblings '(("lazy.scrbl" () (experimental))))
+(define scribblings '(("lazy.scrbl" () (experimental 50))))
 
 ;; STC 2010-06-01
 ;; Changing lazy to be a tools-based language so I can use 
@@ -9,7 +9,7 @@
 
 ;(require string-constants)
 ;(define name "Lazy Scheme")
-;(define drscheme-language-modules '(("lazy.ss" "lazy")))
+;(define drscheme-language-modules '(("lazy.rkt" "lazy")))
 ;(define drscheme-language-positions
 ;  `((,(string-constant experimental-languages) "Lazy Racket")))
 ;(define drscheme-language-numbers '((1000 -500)))

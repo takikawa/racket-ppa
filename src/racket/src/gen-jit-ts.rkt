@@ -175,6 +175,7 @@
     n_s
     _s
     ss_s
+    ssi_s
     tt_s
     ss_m
     Sl_s
@@ -191,7 +192,9 @@
     siS_v
     z_p
     si_s
-    sis_v))
+    sis_v
+    ss_i
+    iSp_v))
 
 (with-output-to-file "jit_ts_def.c"
   #:exists 'replace

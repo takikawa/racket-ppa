@@ -1,7 +1,7 @@
 #lang scheme/base
 
-(require "core.ss"
-         "private/render-utils.ss"
+(require "core.rkt"
+         "private/render-utils.rkt"
          mzlib/class
          mzlib/serialize
          scheme/file
@@ -9,7 +9,7 @@
          setup/main-collects
          setup/path-relativize
          file/convertible
-         "render-struct.ss")
+         "render-struct.rkt")
 
 (provide render%)
 
@@ -139,10 +139,16 @@
 
     (define/public (extract-version d)
       (or (ormap (lambda (v)
-               (and (document-version? v)
-                    (document-version-text v)))
+                   (and (document-version? v)
+                        (document-version-text v)))
                  (style-properties (part-style d)))
           ""))
+
+    (define/public (extract-date d)
+      (ormap (lambda (v)
+               (and (document-date? v)
+                    (document-date-text v)))
+             (style-properties (part-style d))))
 
     (define/private (extract-pre-paras d sym)
       (let loop ([l (part-blocks d)])

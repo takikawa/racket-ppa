@@ -62,11 +62,11 @@
               (list (make-toc-element
                      #f
                      (list (elemtag '(chunk tag)
-                                    (bold (italic (scheme name)) " ::=")))
+                                    (bold (italic (racket name)) " ::=")))
                      (list (smaller (elemref '(chunk tag) #:underline? #f
                                              str
                                              rest ...))))
-                    (schemeblock expr ...))))))]))
+                    (racketblock expr ...))))))]))
 
 (define-syntax (chunkref stx)
   (syntax-case stx ()

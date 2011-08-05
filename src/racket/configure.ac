@@ -23,72 +23,53 @@ AC_INIT([Racket])
 AC_CONFIG_SRCDIR(racket/src/bignum.c)
 AC_CONFIG_HEADERS([racket/mzconfig.h])
 
-AC_ARG_ENABLE(gracket, [  --enable-gracket        compile GRacket as well as Racket (enabled by default)], , enable_gracket=yes )
-AC_ARG_ENABLE(plot,    [  --enable-plot           compile plot libraries (enabled by default)], , enable_plot=yes )
+AC_CONFIG_AUX_DIR(lt)
+AC_CANONICAL_SYSTEM
+
+AC_ARG_ENABLE(gracket, [  --enable-gracket        build GRacket as well as Racket (enabled by default)], , enable_gracket=yes )
+AC_ARG_ENABLE(jit,     [  --enable-jit            support JIT compiler (enabled by default)], , enable_jit=yes)
+AC_ARG_ENABLE(foreign, [  --enable-foreign        support foreign calls (enabled by default)], , enable_foreign=yes)
+AC_ARG_ENABLE(places,  [  --enable-places         support places (3m only; usually enabled by default)])
+AC_ARG_ENABLE(futures, [  --enable-futures        support futures (usually enabled by default)])
+AC_ARG_ENABLE(plot,    [  --enable-plot           support plot libraries (enabled by default)], , enable_plot=yes )
+AC_ARG_ENABLE(float,   [  --enable-float          support single-precision floats (enabled by default)], , enable_float=yes)
+AC_ARG_ENABLE(floatinstead, [  --enable-floatinstead   use single-precision by default])
+
+AC_ARG_ENABLE(racket,  [  --enable-racket=<path>  use <path> as Racket executable to build Racket])
+
+AC_ARG_ENABLE(origtree,[  --enable-origtree       install with original directory structure])
+
 AC_ARG_ENABLE(docs,    [  --enable-docs           build docs on install (enabled by default)], , enable_docs=yes)
 AC_ARG_ENABLE(usersetup, [  --enable-usersetup      setup user-specific files on install])
 AC_ARG_ENABLE(shared,  [  --enable-shared         create shared libraries])
 AC_ARG_ENABLE(dynlib,  [  --enable-dynlib         same as --enable-shared])
 AC_ARG_ENABLE(lt,      [  --enable-lt=<prog>      use <prog> instead of bundled libtool], LIBTOOLPROG="$enableval", enable_lt=no)
 
-AC_ARG_ENABLE(origtree,[  --enable-origtree       install with original directory structure])
-
-AC_ARG_ENABLE(jit,     [  --enable-jit            compile JIT support (enabled by default)], , enable_jit=yes)
-
-AC_ARG_ENABLE(foreign, [  --enable-foreign        compile foreign support (enabled by default)], , enable_foreign=yes)
 AC_ARG_ENABLE(libffi,  [  --enable-libffi         use installed libffi (enabled by default)], , enable_libffi=yes)
 
-AC_ARG_ENABLE(places,  [  --enable-places         compile places support])
-AC_ARG_ENABLE(futures, [  --enable-futures        compile futures support (usually enabled by default)])
-
-AC_ARG_ENABLE(cgcdefault, [  --enable-cgcdefault     use CGC (Boehm or Senora) as default build])
-AC_ARG_ENABLE(sgc,     [  --enable-sgc            use Senora GC instead of the Boehm GC])
-AC_ARG_ENABLE(sgcdebug,[  --enable-sgcdebug       use Senora GC for debugging])
-AC_ARG_ENABLE(account, [  --enable-account        3m: use memory-accounting GC (enabled by default)], , enable_account=yes)
-AC_ARG_ENABLE(compact, [  --enable-compact        3m: use compact GC (no accounting)])
-AC_ARG_ENABLE(backtrace, [  --enable-backtrace      3m: support GC backtrace dumps])
-
-AC_ARG_ENABLE(float,   [  --enable-float          support single-precision floats (enabled by default)], , enable_float=yes)
-AC_ARG_ENABLE(floatinstead, [  --enable-floatinstead   compile to use single-precision by default])
-
-AC_ARG_ENABLE(pthread, [  --enable-pthread        link with pthreads])
-AC_ARG_ENABLE(stackup, [  --enable-stackup        assume "up" if stack direction cannot be determined])
-AC_ARG_ENABLE(bigendian, [  --enable-bigendian      assume "big" if endianness cannot be determined])
-
-AC_ARG_ENABLE(oskit,   [  --enable-oskit          compile OSKit-based Racket kernel])
-AC_ARG_ENABLE(smalloskit, [  --enable-smalloskit     compile small OSKit-based Racket kernel])
-
-AC_ARG_ENABLE(perl,    [  --enable-perl           use perl to regenerate certain sources])
-
-AC_ARG_ENABLE(gprof,   [  --enable-gprof          compile for profiling with gprof (gcc only)])
-AC_ARG_ENABLE(gcov,    [  --enable-gcov           compile to gather gcov statistics (gcc3 only)])
-
-AC_ARG_ENABLE(noopt,   [  --enable-noopt          drop -O C flags])
-
-AC_ARG_ENABLE(enable_sdk,   [  --enable-sdk=<path>     use Mac OS X 10.4 SDK directory])
-
-AC_ARG_ENABLE(xonx,    [  --enable-xonx           compile Unix style (e.g., use Gtk) for Mac OS X])
+AC_ARG_ENABLE(sdk,     [  --enable-sdk=<path>     use Mac OS X 10.4 SDK directory])
+AC_ARG_ENABLE(xonx,    [  --enable-xonx           use Unix style (e.g., use Gtk) for Mac OS X])
 AC_ARG_ENABLE(libfw,   [  --enable-libfw          install Mac OS X frameworks to /Library/Frameworks])
 AC_ARG_ENABLE(libfw,   [  --enable-userfw         install Mac OS X frameworks to ~/Library/Frameworks])
 AC_ARG_ENABLE(macprefix, [  --enable-macprefix      allow --prefix with a Mac OS X install])
 AC_ARG_ENABLE(mac64,   [  --enable-mac64          do not force 32-bit build])
 
-AC_ARG_ENABLE(gc2_places_testing,  [  --enable-gcplacestest   compile GC places testing support])
+AC_ARG_ENABLE(cgcdefault, [  --enable-cgcdefault     use CGC (Boehm or Senora) as default build])
+AC_ARG_ENABLE(sgc,     [  --enable-sgc            use Senora GC instead of the Boehm GC])
+AC_ARG_ENABLE(sgcdebug,[  --enable-sgcdebug       use Senora GC for debugging])
+AC_ARG_ENABLE(backtrace, [  --enable-backtrace      3m: support GC backtrace dumps])
 
-###### Get OS Type #######
+AC_ARG_ENABLE(pthread, [  --enable-pthread        link with pthreads])
+AC_ARG_ENABLE(stackup, [  --enable-stackup        assume "up" if stack direction cannot be determined])
+AC_ARG_ENABLE(bigendian, [  --enable-bigendian      assume "big" if endianness cannot be determined])
 
-if test -x "/bin/uname" ; then
-  UNAME=/bin/uname
-elif test -x "/usr/bin/uname" ; then
-  UNAME=/usr/bin/uname
-elif test -x "/usr/local/bin/uname" ; then
-  UNAME=/usr/local/bin/uname
-else
-  echo configure: cannot find uname
-  exit 1
-fi
+# AC_ARG_ENABLE(oskit,   [  --enable-oskit          compile OSKit-based Racket kernel])
+# AC_ARG_ENABLE(smalloskit, [  --enable-smalloskit     compile small OSKit-based Racket kernel])
 
-OS=`$UNAME -s`
+AC_ARG_ENABLE(gprof,   [  --enable-gprof          compile for profiling with gprof (gcc only)])
+AC_ARG_ENABLE(gcov,    [  --enable-gcov           compile to gather gcov statistics (gcc3 only)])
+
+AC_ARG_ENABLE(noopt,   [  --enable-noopt          drop -O C flags])
 
 ###### Some flags imply other flags #######
 
@@ -117,20 +98,23 @@ if test "${enable_lt}" = "yes" ; then
 fi
 
 if test "${enable_shared}" = "yes" ; then
-  if test "$OS" = "Darwin" ; then
+  case "$host_os" in
+  darwin*)
     if test "${enable_xonx}" != "yes" ; then
        echo "ERROR: don't use --enable-shared or --enable-dynlib under Mac OS X,"
        echo "       unless you also use --enable-xonx"
        exit 1
     fi
-  fi
+  ;;
+  esac
 fi
 
 enable_quartz=no
 if test "${enable_xonx}" = "yes" ; then
   enable_quartz=no
 else
-  if test "$OS" = "Darwin" ; then
+  case "$host_os" in
+  darwin*)
     enable_quartz=yes
     enable_origtree=yes
     if test "${prefix}" != "NONE" ; then
@@ -144,23 +128,8 @@ else
         exit 1
       fi
     fi
-  fi
-fi
-
-if test "${enable_gc2_places_testing}" = "yes" ; then
-  enable_shared=yes
-  enable_places=yes
-fi
-
-
-# Hack for the implementor:
-if test "${enable_perl}" = "" ; then
-  if test "$USER" = "mflatt" ; then
-    enable_perl=yes
-  fi
-  if test "$USER" = "matthewf" ; then
-    enable_perl=yes
-  fi
+  ;;
+  esac
 fi
 
 if test "${enable_iconv}" = "" ; then
@@ -283,13 +252,12 @@ show_explicitly_disabled "${enable_foreign}" Foreign
 show_explicitly_disabled "${enable_libffi}" "Installed libffi"
 
 show_explicitly_enabled "${enable_places}" Places
-show_explicitly_enabled "${enable_gc2_places_testing}" "GC2 Places Testing"
+show_explicitly_disabled "${enable_places}" Places
 show_explicitly_enabled "${enable_futures}" Futures
 show_explicitly_disabled "${enable_futures}" Futures
 
 show_explicitly_enabled "${enable_sgc}" SGC
 show_explicitly_enabled "${enable_sgcdebug}" "SGC debug mode"
-show_explicitly_enabled "${enable_compact}" "Compact 3m GC"
 show_explicitly_enabled "${enable_backtrace}" "3m GC backtraces"
 
 show_explicitly_disabled "${enable_float}" "Single-precision floats"
@@ -298,8 +266,6 @@ show_explicitly_enabled "${enable_floatinstead}" "Single-precision default float
 show_explicitly_enabled "${enable_pthread}" "pthreads"
 show_explicitly_enabled "${enable_oskit}" "OSKit"
 show_explicitly_enabled "${enable_smalloskit}" "OSKit small mode"
-
-show_explicitly_enabled "${enable_perl}" "Perl"
 
 show_explicitly_enabled "${enable_gprof}" "gprof"
 show_explicitly_enabled "${enable_gcov}" "gcov"
@@ -310,6 +276,14 @@ show_explicitly_enabled "${enable_mac64}" "64-bit Mac OS X"
 
 show_explicitly_enabled "${enable_libfw}" "Frameworks-to-system"
 show_explicitly_enabled "${enable_userfw}" "Frameworks-to-user"
+
+if test "${enable_sdk}" != "" ; then
+   echo "=== Using Mac OS X SDK directory ${enable_sdk}"
+fi
+
+if test "${enable_racket}" != "" ; then
+   echo "=== Using Racket executable ${enable_racket}"
+fi
 
 ###### Some defaults #######
 
@@ -326,8 +300,6 @@ CGCOPTIONS=
 GC2OPTIONS=
 DYN_CFLAGS=
 
-LIBS=
-
 WXVARIANT="wx_xt"
 
 MROPTIONS=
@@ -335,8 +307,6 @@ INCLUDEDEP="#"
 WX_MMD_FLAG=
 
 PREFLAGS="$CPPFLAGS"
-MZRT_CGC_FLAGS=""
-LIBATOM="LIBATOM_NONE"
 
 OWN_LIBFFI="ON"
 
@@ -444,12 +414,6 @@ if test "$CC" = "gcc" ; then
   DYN_CFLAGS="-fPIC"
 fi
 
-if test "${enable_perl}" = "yes" ; then
-  AC_PATH_PROG(PERL,perl)
-else
-  PERL=""
-fi
-
 if test "$REZ" = '' ; then 
  REZ=/Developer/Tools/Rez
 fi
@@ -494,37 +458,30 @@ OSX=".osx"
 NOT_OSX=""
 CGC_X86_64=""
 
-case $OS in
-  SunOS)
-    case `$UNAME -r` in
-      5.*)
-       STATICLINK="-Wl,-Bstatic" # after -ldl
-       LIBS="$LIBS -lsocket -lnsl -lintl"
-       need_gcc_static_libgcc="yes"
-       check_gcc_dash_e="yes"
-       ;;
-      *)
-       ;;
-    esac
+case "$host_os" in
+  solaris2*)
+    STATICLINK="-Wl,-Bstatic" # after -ldl
+    LIBS="$LIBS -lsocket -lnsl -lintl"
+    need_gcc_static_libgcc="yes"
+    check_gcc_dash_e="yes"
     ;;
-  AIX)
+  aix*)
     enable_cgcdefault="yes"
     EXTRALIBS="-Wl,-brtl,-bE:\$(srcdir)/../racket/include/racket.exp"
     ;;
-  FreeBSD)
+  *freebsd*)
     LIBS="$LIBS -rdynamic"
     DYN_CFLAGS="-fPIC"
-    GC_THREADS_FLAG="-DGC_FREEBSD_THREADS"
     enable_pthread=yes
     ;;
-  OpenBSD)
+  openbsd*)
     LIBS="$LIBS -rdynamic -Wl,--export-dynamic"
     enable_pthread=yes
     ;;
-  NetBSD)
+  netbsd*)
     LIBS="$LIBS -rdynamic"
     ;;
-  IRIX)
+  irix*)
     enable_cgcdefault="yes"
     STATICLINK="/usr/lib/libC.a /usr/lib/libmalloc.a"
     if test "$X_PRE_LIBS" = " -lSM -lICE" ; then
@@ -532,31 +489,30 @@ case $OS in
       X_PRE_LIBS=""
     fi
     ;;
-  Linux)
+  linux*)
     LIBS="$LIBS -ldl -lm -rdynamic"
     DYN_CFLAGS="-fPIC"
-    GC_THREADS_FLAG="-DGC_LINUX_THREADS"
     STRIP_DEBUG="strip -S"
-    case `$UNAME -m` in
+    case "$host_cpu" in
       #Required for CentOS 4.6
       x86_64)
-       enable_futures_by_default=yes
+       enable_parallel_by_default=yes
        CGC_X86_64="1"
        ;;
-      ppc)
+      ppc|powerpc)
        ;;
       alpha)
        EXTRA_GMP_OBJ="gmp_alpha_gcc.o"
        EXTRA_GMP_DEP='$(EXTRA_GMP_DEP_FILE)'
        ;;
       i386|i486|i586|i686)
-       enable_futures_by_default=yes
+       enable_parallel_by_default=yes
        ;;
       *)
        ;;
     esac
     ;;
-  OSF1)
+  osf1*)
     enable_cgcdefault="yes"
     if test "$CC" = "cc" ; then 
       COMPFLAGS="$COMPFLAGS -ieee_with_inexact -assume noaligned_objects"
@@ -565,7 +521,7 @@ case $OS in
       EXTRA_GMP_DEP='$(EXTRA_GMP_DEP_FILE)'
     fi
     ;;
-  HP-UX)
+  hpux*)
     enable_cgcdefault="yes"
     if test "$CC" = "gcc"; then
       COMPFLAGS="$COMPFLAGS -fPIC"
@@ -578,7 +534,7 @@ case $OS in
     fi
     LIBS="$LIBS -Wl,-E"
     ;;
-  CYGWIN*)
+  cygwin*)
     enable_cgcdefault="yes"
     MZINSTALLTARGET=unix-cygwin-install
     if test "${enable_shared}" = "yes" ; then
@@ -588,11 +544,11 @@ case $OS in
     fi
     EXE_SUFFIX=".exe"
     ;;
-  BeOS)
+  beos*)
     enable_cgcdefault="yes"
     enable_sgc=yes
     ;;
-  Darwin)
+  darwin*)
 
     if test "${enable_sdk}" != "" ; then 
       PREFLAGS="$PREFLAGS -isysroot ${enable_sdk} -mmacosx-version-min=10.4 -DEXTRA_EXCEPTION_STUBS"
@@ -610,9 +566,9 @@ case $OS in
       need_cc_in_extras=yes
     fi
     
-    case "`$UNAME -m`" in
+    case "$host_cpu" in
       i386|x86_64)
-       enable_futures_by_default=yes
+       enable_parallel_by_default=yes
        ;;
       *)
        ;;
@@ -624,34 +580,9 @@ case $OS in
 
     SO_SUFFIX=.dylib
 
-    GC_THREADS_FLAG="-DGC_DARWIN_THREADS"
-
-[   gcc_vers_three=`${CC} -v 2>&1 | grep "version [3-9][.]"` ]
-    if test "$gcc_vers_three" = "" ; then
-      # gcc 2.95.2
-      if test "${enable_quartz}" = "yes" ; then
-        MROPTIONS="$MROPTIONS -cpp-precomp"
-      fi
-    else
-      # gcc 3.x
-      if test "${enable_quartz}" = "yes" ; then
-[       gcc_vers_three_one=`${CC} -v 2>&1 | grep "version 3[.]1"` ]
-        if test "$gcc_vers_three_one" = "" ; then
-          # gcc 3.3 and up
-          GCC_VERSION_THREE_THREE="yes"
-        else
-          # gcc 3.1
-          WXPRECOMP='$(WXPRECOMPDIR)/precomp.o'
-          USE_WXPRECOMP='--load-pch $(WXPRECOMPDIR)'
-        fi
-      else
-        MROPTIONS="$MROPTIONS -no-cpp-precomp"
-      fi
-    fi
-
     # Force 32-bit build unless mac64 is enabled:
     if test "${enable_mac64}" != "yes" ; then
-      if test "`${UNAME} -m`" != "Power Macintosh" ; then
+      if test "$host_cpu" != "powerpc" ; then
         if test "${ORIG_CC}" = "" ; then
            PREFLAGS="${PREFLAGS} -m32"
            CPPFLAGS="${CPPFLAGS} -m32"
@@ -670,7 +601,6 @@ case $OS in
 
     if test "${enable_quartz}" = "yes" ; then
       WXVARIANT="wx_mac"
-      MROPTIONS="$MROPTIONS -fpascal-strings"
       INCLUDEDEP="-include"
       OPTIONS="$OPTIONS -fno-common"
       OSX=""
@@ -699,8 +629,7 @@ case $OS in
     ;;
 esac
 
-MACH=`$UNAME -p`
-case "$MACH" in
+case "$host_cpu" in
   alpha | sparc | powerpc)
     if test "$CC" = "gcc" ; then
       if test "$as_was_set" = "no" ; then
@@ -907,20 +836,6 @@ if test "${enable_backtrace}" = "yes" ; then
   GC2OPTIONS="$GC2OPTIONS -DMZ_GC_BACKTRACE"
 fi
 
-if test "${enable_compact}" = "yes" ; then
-  GC2OPTIONS="$GC2OPTIONS -DUSE_COMPACT_3M_GC"
-  enable_account=no
-  enable_memtrace=no
-fi
-
-if test "${enable_account}" = "yes" ; then
-  GC2OPTIONS="$GC2OPTIONS -DNEWGC_BTC_ACCOUNT"
-fi
-
-if test "${enable_memtrace}" = "yes" ; then
-  GC2OPTIONS="$GC2OPTIONS -DNEWGC_MEMORY_TRACE"
-fi
-
 LFS_CFLAGS=`getconf LFS_CFLAGS 2> /dev/null`
 if test "${LFS_CFLAGS}" != "" ; then
   echo "Large-file support: ${LFS_CFLAGS}"
@@ -996,13 +911,13 @@ if test "${endianness}" = "big" ; then
   AC_DEFINE(SCHEME_BIG_ENDIAN,1,[Big endian])
 fi
 
-############### GC2_PLACES_TESTING ###################
-
-if test "${enable_gc2_places_testing}" = "yes" ; then
-  AC_DEFINE(GC2_PLACES_TESTING,1,[GC2 Places Testing])
-fi
-
 ############### places ###################
+
+if test "${enable_parallel_by_default}" = "yes" ; then
+  if test "${enable_places}" = "" ; then
+    enable_places=yes
+  fi
+fi
 
 if test "${enable_places}" = "yes" ; then
   AC_DEFINE(MZ_USE_PLACES,1,[Places enabled])
@@ -1011,7 +926,7 @@ fi
 
 ############### futures ###################
 
-if test "${enable_futures_by_default}" = "yes" ; then
+if test "${enable_parallel_by_default}" = "yes" ; then
   if test "${enable_futures}" = "" ; then
     enable_futures=yes
   fi
@@ -1025,8 +940,6 @@ fi
 ############### OS threads ###################
 
 if test "${enable_mzrt}" = "yes" ; then
-  MZRT_CGC_FLAGS="$GC_THREADS_FLAG -DTHREAD_LOCAL_ALLOC"
-  LIBATOM="LIBATOM_USE"
   enable_pthread=yes
 fi
 
@@ -1100,6 +1013,20 @@ fi
 
 if test "${enable_docs}" = "no" ; then  
   INSTALL_SETUP_FLAGS="${INSTALL_SETUP_FLAGS} --no-docs"
+fi
+
+############## Racket for Racket ################
+
+if test "${enable_racket}" = "" ; then
+  RUN_RACKET_CGC='$(RUN_THIS_RACKET_CGC)'
+  RUN_RACKET_MMM='$(RUN_THIS_RACKET_MMM)'
+  RUN_RACKET_MAIN_VARIANT='$(RUN_THIS_RACKET_MAIN_VARIANT)'
+  CGC_IF_NEEDED_FOR_MMM="cgc"
+else
+  RUN_RACKET_CGC="${enable_racket}"
+  RUN_RACKET_MMM="${enable_racket}"
+  RUN_RACKET_MAIN_VARIANT="${enable_racket}"
+  CGC_IF_NEEDED_FOR_MMM="no-cgc-needed"
 fi
 
 ############## libtool ################
@@ -1189,7 +1116,6 @@ AC_SUBST(PROFFLAGS)
 AC_SUBST(LDFLAGS)
 AC_SUBST(CPP)
 AC_SUBST(SED)
-AC_SUBST(PERL)
 AC_SUBST(AS)
 AC_SUBST(RANLIB)
 AC_SUBST(AR)
@@ -1228,8 +1154,6 @@ AC_SUBST(FRAMEWORK_PREFIX)
 AC_SUBST(INSTALL_ORIG_TREE)
 AC_SUBST(EXE_SUFFIX)
 AC_SUBST(SO_SUFFIX)
-AC_SUBST(MZRT_CGC_FLAGS)
-AC_SUBST(LIBATOM)
 AC_SUBST(OWN_LIBFFI)
 
 AC_SUBST(LIBSFX)
@@ -1279,6 +1203,11 @@ AC_SUBST(MAIN_VARIANT)
 
 AC_SUBST(INSTALL_SETUP_FLAGS)
 
+AC_SUBST(RUN_RACKET_CGC)
+AC_SUBST(RUN_RACKET_MMM)
+AC_SUBST(RUN_RACKET_MAIN_VARIANT)
+AC_SUBST(CGC_IF_NEEDED_FOR_MMM)
+
 mk_needed_dir()
 {
   if test ! -d "$1" ; then
@@ -1297,15 +1226,11 @@ if test "${enable_shared}" = "yes" ; then
   ac_configure_args="$ac_configure_args --enable-shared"
 fi
 
-if test "${LIBATOM}" = "LIBATOM_USE" ; then
-  AC_CONFIG_AUX_DIR( racket/gc/libatomic_ops )
-  AC_CONFIG_SUBDIRS( racket/gc/libatomic_ops )
-fi
-
 FOREIGNTARGET=
 FOREIGN_IF_USED="FOREIGN_NOT_USED"
 if test -d "${srcdir}/foreign" && test "${enable_foreign}" = "yes" ; then
   if test "${have_libffi}" != "yes" ; then
+    AC_CONFIG_AUX_DIR( foreign/libffi )
     AC_CONFIG_SUBDIRS( foreign/libffi )
   fi
   FOREIGNTARGET="foreign-stuff"

@@ -1,15 +1,15 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
 @defclass/title[editor-snip% snip% ()]{
 
-An @scheme[editor-snip%] object is a @scheme[snip%] object that
- contains and displays an @scheme[editor<%>] object. This snip class
+An @racket[editor-snip%] object is a @racket[snip%] object that
+ contains and displays an @racket[editor<%>] object. This snip class
  is used to insert an editor as a single @techlink{item} within
  another editor.
 
 
-@defconstructor[([editor (or/c (is-a?/c text%) false/c) #f]
+@defconstructor[([editor (or/c (is-a?/c editor<%>) false/c) #f]
                  [with-border? any/c #t]
                  [left-margin exact-nonnegative-integer? 5]
                  [top-margin exact-nonnegative-integer? 5]
@@ -19,19 +19,19 @@ An @scheme[editor-snip%] object is a @scheme[snip%] object that
                  [top-inset exact-nonnegative-integer? 1]
                  [right-inset exact-nonnegative-integer? 1]
                  [bottom-inset exact-nonnegative-integer? 1]
-                 [min-width (or/c (and/c real? (not/c negative?)) (one/of 'none)) 'none]
-                 [max-width (or/c (and/c real? (not/c negative?)) (one/of 'none)) 'none]
-                 [min-height (or/c (and/c real? (not/c negative?)) (one/of 'none)) 'none]
-                 [max-height (or/c (and/c real? (not/c negative?)) (one/of 'none)) 'none])]{
+                 [min-width (or/c (and/c real? (not/c negative?)) (one-of/c 'none)) 'none]
+                 [max-width (or/c (and/c real? (not/c negative?)) (one-of/c 'none)) 'none]
+                 [min-height (or/c (and/c real? (not/c negative?)) (one-of/c 'none)) 'none]
+                 [max-height (or/c (and/c real? (not/c negative?)) (one-of/c 'none)) 'none])]{
 
-If @scheme[editor] is non-@scheme[#f], then it will be used as the
+If @racket[editor] is non-@racket[#f], then it will be used as the
  editor contained by the snip. See also @method[editor-snip%
  set-editor].
 
-If @scheme[with-border?] is not @scheme[#f], then a border will be drawn
+If @racket[with-border?] is not @racket[#f], then a border will be drawn
  around the snip. The editor display will be inset in the snip area by
- the amounts specified in the @scheme[-margin] arguments.  The border
- will be drawn with an inset specified by the @scheme[-inset] arguments.
+ the amounts specified in the @racket[-margin] arguments.  The border
+ will be drawn with an inset specified by the @racket[-inset] arguments.
 
 See @method[editor-snip% get-inset] and @method[editor-snip%
 get-margin] for information about the inset and margin arguments.
@@ -57,8 +57,8 @@ Gets a cursor from the embedded editor by calling its
 @defmethod[(border-visible?)
            boolean?]{
 
-Returns @scheme[#t] if the snip has a border draw around it,
-@scheme[#f] otherwise.
+Returns @racket[#t] if the snip has a border draw around it,
+@racket[#f] otherwise.
 
 See also @method[editor-snip% show-border].
 
@@ -79,7 +79,7 @@ See also @method[editor-snip% set-align-top-line].
 @defmethod[(get-editor)
            (or/c (or/c (is-a?/c text%) (is-a?/c pasteboard%)) false/c)]{
 
-Returns the editor contained by the snip, or @scheme[#f] is there is
+Returns the editor contained by the snip, or @racket[#f] is there is
  no editor.
 
 }
@@ -107,11 +107,11 @@ The top space always corresponds to the space of the editor's top
  the descent of the top line, plus the height rest of the editor's
  lines, plus the snip's bottom margin.
 
-If the editor is a text editor, then @scheme[1] is normally subtracted
+If the editor is a text editor, then @racket[1] is normally subtracted
  from the editor's width as returned by @method[editor<%> get-extent],
  because the result looks better for editing.  If the snip is in
  tight-text-fit mode (see @method[editor-snip% set-tight-text-fit])
- then @scheme[2] is subtracted from a text editor's width, eliminating
+ then @racket[2] is subtracted from a text editor's width, eliminating
  the two pixels that the text editor reserves for the blinking
  caret. In addition, tight-text-fit mode subtracts an amount equal to
  the line spacing from the editor's height. By default, tight-text-fit
@@ -129,10 +129,10 @@ If the editor is a text editor, then @scheme[1] is normally subtracted
 Gets the current border insets for the snip. The inset sets how much space
 is left between the edge of the snip and the border.
 
-@boxisfill[(scheme l) @elem{left inset}]
-@boxisfill[(scheme t) @elem{top inset}]
-@boxisfill[(scheme r) @elem{right inset}]
-@boxisfill[(scheme b) @elem{bottom inset}]
+@boxisfill[@racket[l] @elem{left inset}]
+@boxisfill[@racket[t] @elem{top inset}]
+@boxisfill[@racket[r] @elem{right inset}]
+@boxisfill[@racket[b] @elem{bottom inset}]
 
 }
 
@@ -147,43 +147,43 @@ Gets the current margins for the snip. The margin sets how much space
 is left between the edge of the editor's contents and the edge of the
 snip.
 
-@boxisfill[(scheme l) @elem{left margin}]
-@boxisfill[(scheme t) @elem{top margin}]
-@boxisfill[(scheme r) @elem{right margin}]
-@boxisfill[(scheme b) @elem{bottom margin}]
+@boxisfill[@racket[l] @elem{left margin}]
+@boxisfill[@racket[t] @elem{top margin}]
+@boxisfill[@racket[r] @elem{right margin}]
+@boxisfill[@racket[b] @elem{bottom margin}]
 
 }
 
 
 @defmethod[(get-max-height)
-           (or/c (and/c real? (not/c negative?)) (one/of 'none))]{
+           (or/c (and/c real? (not/c negative?)) (one-of/c 'none))]{
 
-Gets the maximum display height of the snip; zero or @scheme['none]
+Gets the maximum display height of the snip; zero or @racket['none]
  indicates that there is no maximum.
 
 }
 
 
 @defmethod[(get-max-width)
-           (or/c (and/c real? (not/c negative?)) (one/of 'none))]{
+           (or/c (and/c real? (not/c negative?)) (one-of/c 'none))]{
 
-Gets the maximum display width of the snip; zero or @scheme['none]
+Gets the maximum display width of the snip; zero or @racket['none]
  indicates that there is no maximum.
 
 }
 
 @defmethod[(get-min-height)
-           (or/c (and/c real? (not/c negative?)) (one/of 'none))]{
+           (or/c (and/c real? (not/c negative?)) (one-of/c 'none))]{
 
-Gets the minimum display height of the snip; zero or @scheme['none]
+Gets the minimum display height of the snip; zero or @racket['none]
  indicates that there is no minimum.
 
 }
 
 @defmethod[(get-min-width)
-           (or/c (and/c real? (not/c negative?)) (one/of 'none))]{
+           (or/c (and/c real? (not/c negative?)) (one-of/c 'none))]{
 
-Gets the minimum display width of the snip; zero or @scheme['none]
+Gets the minimum display width of the snip; zero or @racket['none]
  indicates that there is no minimum.
 
 }
@@ -233,14 +233,14 @@ Sets the editor contained by the snip, releasing the old editor in the
  snip (if any). If the new editor already has an administrator, then
  the new editor is @italic{not} installed into the snip.
 
-When an @scheme[editor-snip%] object is not inserted in an editor, it
+When an @racket[editor-snip%] object is not inserted in an editor, it
  does not have an administrator. During this time, it does not give
  its contained editor an administrator, either. The administratorless
  contained editor can therefore ``defect'' to some other
  @techlink{display} with an administrator. When a contained editor
  defects and the snip is eventually inserted into a different editor,
  the snip drops the traitor contained editor, setting its contained
- editor to @scheme[#f].
+ editor to @racket[#f].
 
 }
 
@@ -268,41 +268,41 @@ Sets the current margins for the snip. The margin sets how much space
 
 }
 
-@defmethod[(set-max-height [h (or/c (and/c real? (not/c negative?)) (one/of 'none))])
+@defmethod[(set-max-height [h (or/c (and/c real? (not/c negative?)) (one-of/c 'none))])
            void?]{
 
-@edsnipmax[(scheme height)]
+@edsnipmax[@racket[height]]
 
-Zero or @scheme['none] disables the limit.
+Zero or @racket['none] disables the limit.
 
 }
 
-@defmethod[(set-max-width [w (or/c (and/c real? (not/c negative?)) (one/of 'none))])
+@defmethod[(set-max-width [w (or/c (and/c real? (not/c negative?)) (one-of/c 'none))])
            void?]{
 
-@edsnipmax[(scheme width)] The contained editor's width limits are not
+@edsnipmax[@racket[width]] The contained editor's width limits are not
  changed by this method.
 
-Zero or @scheme['none] disables the limit.
+Zero or @racket['none] disables the limit.
 
 }
 
-@defmethod[(set-min-height [h (or/c (and/c real? (not/c negative?)) (one/of 'none))])
+@defmethod[(set-min-height [h (or/c (and/c real? (not/c negative?)) (one-of/c 'none))])
            void?]{
 
-@edsnipmin[(scheme height) @elem{top}]
+@edsnipmin[@racket[height] @elem{top}]
 
-Zero or @scheme['none] disables the limit.
+Zero or @racket['none] disables the limit.
 
 }
 
-@defmethod[(set-min-width [w (or/c (and/c real? (not/c negative?)) (one/of 'none))])
+@defmethod[(set-min-width [w (or/c (and/c real? (not/c negative?)) (one-of/c 'none))])
            void?]{
 
-@edsnipmin[(scheme width) @elem{left}] The contained editor's width
+@edsnipmin[@racket[width] @elem{left}] The contained editor's width
  limits are not changed by this method.
 
-Zero or @scheme['none] disables the limit.
+Zero or @racket['none] disables the limit.
 
 }
 
@@ -327,8 +327,8 @@ Shows or hides the snip's border.
 @defmethod[(style-background-used?)
            boolean?]{
 
-Returns @scheme[#t] if the snip uses its style's background and
- transparency information when drawing, @scheme[#f] otherwise.
+Returns @racket[#t] if the snip uses its style's background and
+ transparency information when drawing, @racket[#f] otherwise.
 
 See also @method[editor-snip% use-style-background].
 
@@ -342,7 +342,7 @@ Causes the snip to use or not used (the default) its style's
  background and transparency information for drawing the background
  within the snip's border.
 
-If @scheme[use?] is @scheme[#f], the style background and transparency
+If @racket[use?] is @racket[#f], the style background and transparency
 information is ignored, otherwise is it used.
 
 }}

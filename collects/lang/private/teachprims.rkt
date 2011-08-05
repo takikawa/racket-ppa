@@ -1,18 +1,16 @@
+#lang scheme 
+
 #| tests are at plt/collects/tests/mzscheme/
-collects/tests/mzscheme/beginner.ss
-                    .../beginner-abbr.ss
-                    .../intermediate.ss
-                    .../intermediate-lambda.ss
-                    .../advanced.ss
+collects/tests/mzscheme/beginner.rkt
+                    .../beginner-abbr.rkt
+                    .../intermediate.rkt
+                    .../intermediate-lambda.rkt
+                    .../advanced.rkt
 
 Each one has to run separately, since they mangle the top-level
 namespace.
 |#
 
-;; MF: switched from 
-;; module teachprims mzscheme
-;; to 
-#lang scheme 
 
 (require mzlib/list 
          mzlib/math
@@ -69,8 +67,8 @@ namespace.
     (unless (ok? b)
       (raise
        (make-exn:fail:contract
-        (format "~a: second argument must be of type <~a>, given ~e and ~e"
-                prim-name type
+        (format "~a: second argument must be ~a ~a, but received ~e and ~e"
+                prim-name (a-or-an type) type
                 a b)
         (current-continuation-marks))))))
 
@@ -90,15 +88,9 @@ namespace.
            (unless (ok? last)
              (raise
               (make-exn:fail:contract
-               (format "~a: last argument must be of type <~a>, given ~e; other args:~a"
-                       prim-name type
-                       last
-                       ;; all-but-last:
-                       (build-arg-list
-                        (let loop ([args args])
-                          (cond
-                            [(null? (cdr args)) null]
-                            [else (cons (car args) (loop (cdr args)))]))))
+               (format "~a: last argument must be ~a ~a, but received ~e"
+                       prim-name (a-or-an type) type
+                       last)
                (current-continuation-marks)))))]
         [else (loop (cdr l))]))))
 
@@ -113,7 +105,7 @@ namespace.
          (lambda (v which type)
            (raise
             (make-exn:fail:contract
-             (format "~a: ~a argument must be of type <~a>, given ~e, ~e, and ~e"
+             (format "~a: ~a argument must be of a ~a, given ~e, ~e, and ~e"
                      prim-name which type
                      a b c)
              (current-continuation-marks))))])
@@ -156,7 +148,7 @@ namespace.
     (unless (number? a)
       (raise
        (make-exn:fail:contract
-        (format "sqr: expected number; given ~e" a)
+        (format "sqr: expected a number; given ~e" a)
         (current-continuation-marks))))
     (sqr a)))
 
@@ -280,9 +272,9 @@ namespace.
          (and (number? b)
               (beginner-=~ a b epsilon))]
 	[(procedure? a)
-	 (fail "first argument of equality cannot be a procedure, given ~e" a)]
+	 (fail "first argument of equality cannot be a function, given ~e" a)]
 	[(procedure? b)
-	 (fail "second argument of equality cannot be a procedure, given ~e" b)]
+	 (fail "second argument of equality cannot be a function, given ~e" b)]
         [(union-equal!? a b) #t]
         [else (equal?/recur a b ?)]))))
 
@@ -299,9 +291,9 @@ namespace.
     (let recur ([a x] [b y])
       (cond
        [(procedure? a)
-	(fail "first argument of equality cannot be a procedure, given ~e" a)]
+	(fail "first argument of equality cannot be a function, given ~e" a)]
        [(procedure? b)
-	(fail "second argument of equality cannot be a procedure, given ~e" b)]
+	(fail "second argument of equality cannot be a function, given ~e" b)]
        [(and (number? a)
 	     (inexact? a))
 	(fail "first argument of equality cannot be an inexact number, given ~e" a)]
@@ -334,51 +326,34 @@ namespace.
 
 (provide hocheck)
 
-(define (do-sort l cmp? name)
-  (unless (beginner-list? l) 
-    (hocheck name "first argument must be of type <list>, given ~e" l))
-  (unless (and (procedure? cmp?) (procedure-arity-includes? cmp? 2))
-    (hocheck name "second argument must be a <procedure> that accepts two arguments, given ~e" cmp?))
-  (sort l (lambda (x y) 
-            (define r (cmp? x y))
-            (unless (boolean? r)
-              (hocheck name "the results of the procedure argument must be of type <boolean>, produced ~e" r))
-            r)))
-
-(define-teach intermediate quicksort
-  (lambda (l cmp?)
-    (do-sort l cmp? 'quicksort)))
-(define-teach intermediate sort
-  (lambda (l cmp?)
-    (do-sort l cmp? 'sort)))
-
 (define-teach intermediate foldr
   (lambda (f e l)
     (unless (and (procedure? f) (procedure-arity-includes? f 2))
-      (hocheck 'foldr "first argument must be a <procedure> that accepts two arguments, given ~e" f))
+      (hocheck 'foldr "first argument must be a function that expects two arguments, given ~e" f))
     (unless (beginner-list? l) 
-      (hocheck 'foldr "third argument must be of type <list>, given ~e" l))
+      (hocheck 'foldr "third argument must be a list, given ~e" l))
     (foldr f e l)))
 
 (define-teach intermediate foldl
   (lambda (f e l)
     (unless (and (procedure? f) (procedure-arity-includes? f 2))
-      (hocheck 'foldl "first argument must be a <procedure> that accepts two arguments, given ~e" f))
+      (hocheck 'foldl "first argument must be a function that expects two arguments, given ~e" f))
     (unless (beginner-list? l) 
-      (hocheck 'foldl "third argument must be of type <list>, given ~e" l))
+      (hocheck 'foldl "third argument must be a list, given ~e" l))
     (foldl f e l)))
 
 (define-teach intermediate build-string
   (lambda (n f)
     (unless (and (procedure? f) (procedure-arity-includes? f 1))
-      (hocheck 'build-string "second argument must be a <procedure> that accepts one argument, given ~e" f))
+      (hocheck 'build-string "second argument must be a function that accepts one argument, given ~e" f))
     (unless (and (number? n) (integer? n) (>= n 0))
-      (hocheck 'build-string "first argument must be of type <natural number>, given ~e" n))
+      (hocheck 'build-string "first argument must be a natural number, given ~e" n))
     (build-string n (lambda (i)
                       (define r (f i))
                       (unless (char? r)
                         (hocheck 'build-string
-                                "second argument must be a <procedure> that produces a <char>, given ~e, which produced ~e for ~e" f r i))
+                                 "the second argument must be a function that produces a character, ~
+                                  given ~e, which produced ~e when given ~e" f r i))
                       r))))
 
 
@@ -448,8 +423,6 @@ namespace.
  beginner-equal?
  beginner-equal~?
  beginner-=~
- intermediate-quicksort
- intermediate-sort
  intermediate-foldr
  intermediate-foldl
  intermediate-build-string
@@ -469,24 +442,24 @@ namespace.
 ;; auxiliary stuff, ignore
 
 (define 1-LET "1-letter string")
-(define 1-LETTER (format "<~a>" 1-LET))
-(define 1-LETTER* (format "<list of ~as>" 1-LET))
-(define NAT "<natural number>")
+(define 1-LETTER (format "~a" 1-LET))
+(define 1-LETTER* (format "list of ~as" 1-LET))
+(define NAT "natural number")
 
 ;; Symbol Any -> Boolean 
 ;; is this a 1-letter string?
 (define (1-letter? tag s)
-  (unless (string? s) (err tag "~a expected, not a string: ~e" 1-LETTER s))
+  (unless (string? s) (err tag "expected a ~a, but received a string: ~e" 1-LETTER s))
   (= (string-length s) 1))
 
 ;; Symbol Any -> Boolean 
 ;; is s a list of 1-letter strings
 ;; effect: not a list, not a list of strings 
 (define (1-letter*? tag s)
-  (unless (list? s) (err tag "~a expected, not a <list>: ~e" 1-LETTER* s))
+  (unless (list? s) (err tag "expected a ~a, but received: ~e" 1-LETTER* s))
   (for-each 
    (lambda (c) 
-     (unless (string? c) (err tag "~a expected, not a <string>: ~e" 1-LETTER* c)))
+     (unless (string? c) (err tag "expected a ~a, but received: ~e" 1-LETTER* c)))
    s)
   (andmap (compose (curry = 1) string-length) s))
 
@@ -496,25 +469,29 @@ namespace.
     (apply format (string-append (symbol->string tag) ": " msg-format) args)
     (current-continuation-marks))))
 
+(define (a-or-an after)
+  (if (member (string-ref (format "~a" after) 0) '(#\a #\e #\i #\o #\u))
+      "an" "a"))
+
 (define cerr 
   (case-lambda
     [(tag check-result format-msg actual)
      (unless check-result
-       (err tag (string-append format-msg " expected, given ~e") actual))]
+       (err tag (string-append "expected " (a-or-an format-msg) " " format-msg ", but received ~e") actual))]
     [(tag check-result format-msg actual snd)
      (unless check-result
-       (err tag (string-append format-msg " for ~a argument expected, given ~e")
+       (err tag (string-append "expected " (a-or-an format-msg) " " format-msg " for the ~a argument, but received ~e")
             snd actual))]))
 
 ;; -----------------------------------------------------------------------------
 
 (define-teach beginner string-ith
   (lambda (s n)
-    (define f "<exact integer in [0, length of the given string (~s))>")
-    (cerr 'string-ith (string? s) "<string>" s "first")
+    (define f "exact integer in [0, length of the given string]")
+    (cerr 'string-ith (string? s) "string" s "first")
     (cerr 'string-ith (and (number? n) (integer? n) (>= n 0)) NAT n "second")
     (let ([l (string-length s)]) 
-      (cerr 'string-ith (< n l) (format f l) n "second"))
+      (cerr 'string-ith (< n l) f n "second"))
     (string (string-ref s n))))
 
 ;; -----------------------------------------------------------------------------
@@ -522,7 +499,7 @@ namespace.
 (define-teach beginner replicate 
   (lambda (n s1)
     (cerr 'replicate (and (number? n) (exact-integer? n) (>= n 0)) NAT n)
-    (cerr 'replicate (string? s1) "<string>" s1)
+    (cerr 'replicate (string? s1) "string" s1)
     (apply string-append (build-list n (lambda (i) s1)))))
 
 ;; -----------------------------------------------------------------------------
@@ -531,7 +508,7 @@ namespace.
   (lambda (i) 
     (cerr 'int->string 
           (and (exact-integer? i) (or (<= 0 i 55295) (<= 57344 i 1114111)))
-          "<exact integer in [0,55295] or [57344 1114111]>"
+          "exact integer in [0,55295] or [57344 1114111]"
           i)
     (string (integer->char i))))
 
@@ -546,7 +523,7 @@ namespace.
 
 (define-teach beginner explode 
   (lambda (s)
-    (cerr 'explode (string? s) "<string>" s)
+    (cerr 'explode (string? s) "string" s)
     (map string (string->list s))))
 
 ;; -----------------------------------------------------------------------------
@@ -561,7 +538,7 @@ namespace.
 (define-teach beginner string-numeric? 
   ;; is this: (number? (string->number s)) enough?
   (lambda (s1)
-    (cerr 'string-numeric? (string? s1) "<string>" s1)
+    (cerr 'string-numeric? (string? s1) "string" s1)
     (andmap char-numeric? (string->list s1))))
 
 ;; -----------------------------------------------------------------------------
@@ -570,14 +547,14 @@ namespace.
 
 (define-teach beginner string-alphabetic? 
   (lambda (s1)
-    (cerr 'string-alphabetic? (string? s1) "<string>" s1)
+    (cerr 'string-alphabetic? (string? s1) "string" s1)
     (andmap char-alphabetic? (string->list s1))))
 
 ;; -----------------------------------------------------------------------------
 
 (define-teach beginner string-whitespace? 
   (lambda (s)
-    (cerr 'string-whitespace? (string? s)  "<string>" s)
+    (cerr 'string-upper-case? (string? s)  "string" s)
     (andmap char-whitespace? (string->list s))))
 
 ;; -----------------------------------------------------------------------------
@@ -585,14 +562,14 @@ namespace.
 
 (define-teach beginner string-upper-case? 
   (lambda (s)
-    (cerr 'string-upper-case? (string? s) "<string>" s)
+    (cerr 'string-upper-case? (string? s) "string" s)
     (andmap char-upper-case? (string->list s))))
 
 ;; -----------------------------------------------------------------------------
 
 (define-teach beginner string-lower-case? 
   (lambda (s)
-    (cerr 'string-lower-case? (string? s) "<string>" s)
+    (cerr 'string-lower-case? (string? s) "string" s)
     (andmap char-lower-case? (string->list s))))
 
 (provide

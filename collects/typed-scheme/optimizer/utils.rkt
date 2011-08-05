@@ -1,33 +1,19 @@
-#lang scheme/base
+#lang racket/base
 
 (require unstable/match racket/match
          racket/dict syntax/id-table racket/syntax unstable/syntax
          "../utils/utils.rkt"
-         (for-template scheme/base)
+         (for-template racket/base)
          (types type-table utils subtype)
          (rep type-rep))
 
-(provide log-optimization *log-optimizations?* *log-optimizatons-to-log-file?*
-         *optimization-log-file* *show-optimized-code*
+(provide *show-optimized-code*
          subtypeof? isoftype?
          mk-unsafe-tbl
          n-ary->binary
          unboxed-gensym reset-unboxed-gensym
          optimize)
 
-(define *log-optimizations?*
-  (member "--log-optimizations"
-          (vector->list (current-command-line-arguments))))
-(define *log-optimizatons-to-log-file?* #f)
-(define *optimization-log-file* "opt-log")
-(define (log-optimization kind stx)
-  (if *log-optimizations?*
-      (printf "~a line ~a col ~a - ~a - ~a\n"
-              (syntax-source-file-name stx)
-              (syntax-line stx) (syntax-column stx)
-              (syntax->datum stx)
-              kind)
-      #t))
 ;; if set to #t, the optimizer will dump its result to stdout before compilation
 (define *show-optimized-code* #f)
 

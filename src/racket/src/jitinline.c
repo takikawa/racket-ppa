@@ -58,11 +58,21 @@ static int check_val_struct_prim(Scheme_Object *p, int arity)
         return 1;
       else if (((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER)
         return 2;
+      else if (((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_IS_STRUCT_OTHER) {
+        int t = (((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_OTHER_TYPE_MASK);
+        if (t == SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER)
+          return 4;
+        else if (t == SCHEME_PRIM_TYPE_STRUCT_PROP_PRED)
+          return 6;
+      }
     } else if (arity == 2) {
-      if ((((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_IS_STRUCT_OTHER)
-          && ((((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_OTHER_TYPE_MASK)
-              == SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER))
-        return 3;
+      if ((((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_IS_STRUCT_OTHER)) {
+        int t = (((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_OTHER_TYPE_MASK);
+        if (t == SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER)
+          return 3;
+        else if (t == SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER)
+          return 5;
+      }
     }
   }
   return 0;
@@ -167,7 +177,7 @@ static int generate_inlined_type_test(mz_jit_state *jitter, Scheme_App2_Rec *app
 				      Branch_Info *for_branch, int branch_short, int need_sync)
 {
   GC_CAN_IGNORE jit_insn *ref, *ref2, *ref3, *ref4, *ref5;
-  int int_ok;
+  int int_ok, r0_set, r0;
 
   int_ok = ((lo_ty <= scheme_integer_type) && (scheme_integer_type <= hi_ty));
 
@@ -184,7 +194,13 @@ static int generate_inlined_type_test(mz_jit_state *jitter, Scheme_App2_Rec *app
 
   __START_SHORT_JUMPS__(branch_short);
 
+  r0_set = 0;
+  r0 = 0;
   if (for_branch) {
+    if (mz_CURRENT_R0_STATUS_VALID()) {
+      r0_set = 1;
+      r0 = mz_CURRENT_R0_STATUS();
+    }
     scheme_prepare_branch_jump(jitter, for_branch);
     CHECK_LIMIT();
   }
@@ -194,6 +210,13 @@ static int generate_inlined_type_test(mz_jit_state *jitter, Scheme_App2_Rec *app
     ref4 = NULL;
     ref = NULL;
     ref5 = NULL;
+#ifdef jit_bxnei_s
+  } else if (!can_chaperone && (lo_ty == hi_ty)) {
+    ref = jit_bmsi_ul(jit_forward(), JIT_R0, 0x1);
+    ref3 = jit_bxnei_s(jit_forward(), JIT_R0, lo_ty);
+    ref4 = NULL;
+    ref5 = NULL;
+#endif
   } else {
     ref = jit_bmsi_ul(jit_forward(), JIT_R0, 0x1);
     jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
@@ -230,6 +253,13 @@ static int generate_inlined_type_test(mz_jit_state *jitter, Scheme_App2_Rec *app
     scheme_add_branch_false(for_branch, ref3);
     scheme_add_branch_false(for_branch, ref4);
     scheme_add_branch_false(for_branch, ref5);
+
+    /* In case true is a fall-through, note that the test 
+       didn't disturb R0: */
+    if (r0_set) {
+      mz_RECORD_R0_STATUS(r0);
+    }
+
     scheme_branch_for_true(jitter, for_branch);
     CHECK_LIMIT();
   } else {
@@ -306,15 +336,44 @@ static int generate_inlined_struct_op(int kind, mz_jit_state *jitter,
     } else {
       (void)jit_calli(sjc.struct_get_code);
     }
-  } else {
+  } else if (kind == 3) {
     if (multi_ok) {
       (void)jit_calli(sjc.struct_set_multi_code);
     } else {
       (void)jit_calli(sjc.struct_set_code);
     }
+  } else if (kind == 4) {
+    if (multi_ok) {
+      (void)jit_calli(sjc.struct_prop_get_multi_code);
+    } else {
+      (void)jit_calli(sjc.struct_prop_get_code);
+    }
+  } else if (kind == 5) {
+    if (multi_ok) {
+      (void)jit_calli(sjc.struct_prop_get_defl_multi_code);
+    } else {
+      (void)jit_calli(sjc.struct_prop_get_defl_code);
+    }
+  } else if (kind == 6) {
+    if (multi_ok) {
+      (void)jit_calli(sjc.struct_prop_pred_multi_code);
+    } else {
+      (void)jit_calli(sjc.struct_prop_pred_code);
+    }
+  } else {
+    scheme_signal_error("internal error: unknown struct-op mode");
   }
 
   return 1;
+}
+
+static int is_cXr_prim(const char *name) 
+{
+  int i;
+  if (name[0] != 'c') return 0;
+  for (i = 1; (name[i] == 'a') || (name[i] == 'd'); i++) { }
+  if (name[i] != 'r') return 0;
+  return !name[i+1];
 }
 
 static int generate_vector_alloc(mz_jit_state *jitter, Scheme_Object *rator,
@@ -333,8 +392,8 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       generate_inlined_struct_op(1, jitter, rator, app->rand, NULL, for_branch, branch_short, multi_ok);
       scheme_direct_call_count++;
       return 1;
-    } else if ((k == 2) && !for_branch) {
-      generate_inlined_struct_op(2, jitter, rator, app->rand, NULL, for_branch, branch_short, multi_ok);
+    } else if (((k == 2) || (k == 4) || (k == 6)) && !for_branch) {
+      generate_inlined_struct_op(k, jitter, rator, app->rand, NULL, for_branch, branch_short, multi_ok);
       scheme_direct_call_count++;
       return 1;
     }
@@ -418,19 +477,19 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
     generate_inlined_constant_test(jitter, app, scheme_eof, NULL, for_branch, branch_short, need_sync);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "zero?")) {
-    scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 0, 0, 0, for_branch, branch_short, 0, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 0, CMP_EQUAL, 0, for_branch, branch_short, 0, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "negative?")) {
-    scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 0, -2, 0, for_branch, branch_short, 0, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 0, CMP_LT, 0, for_branch, branch_short, 0, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "positive?")) {
-    scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 0, 2, 0, for_branch, branch_short, 0, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 0, CMP_GT, 0, for_branch, branch_short, 0, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "even?")) {
-    scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 0, 4, 0, for_branch, branch_short, 0, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 0, CMP_EVENP, 0, for_branch, branch_short, 0, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "odd?")) {
-    scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 0, -4, 0, for_branch, branch_short, 0, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 0, CMP_ODDP, 0, for_branch, branch_short, 0, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "list?")) {
     GC_CAN_IGNORE jit_insn *ref0, *ref1, *ref3, *ref4;
@@ -516,8 +575,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
 
     /* Check for positive bignum: */
     __START_SHORT_JUMPS__(branch_short);
-    jit_ldxi_s(JIT_R2, JIT_R0, &((Scheme_Object *)0x0)->type);
-    ref2 = jit_bnei_i(jit_forward(), JIT_R2, scheme_bignum_type);
+    ref2 = mz_bnei_t(jit_forward(), JIT_R0, scheme_bignum_type, JIT_R2);
     jit_ldxi_s(JIT_R2, JIT_R0, &MZ_OPT_HASH_KEY(&((Scheme_Stx *)0x0)->iso));
     ref3 = jit_bmci_ul(jit_forward(), JIT_R2, 0x1);
     __END_SHORT_JUMPS__(branch_short);
@@ -559,12 +617,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
 
     return 1;
   } else if (!for_branch) {
-    if (IS_NAMED_PRIM(rator, "car")
-	|| IS_NAMED_PRIM(rator, "cdr")
-	|| IS_NAMED_PRIM(rator, "cadr")
-	|| IS_NAMED_PRIM(rator, "cdar")
-	|| IS_NAMED_PRIM(rator, "caar")
-	|| IS_NAMED_PRIM(rator, "cddr")) {
+    if (is_cXr_prim(((Scheme_Primitive_Proc *)rator)->name)) {
 #     define MAX_LEVELS 2
       GC_CAN_IGNORE jit_insn *reffail = NULL, *ref;
       int steps, i;
@@ -601,7 +654,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
               } else {
                 (void)jit_calli(sjc.bad_cdr_code);
               }
-            } else {
+            } else if (steps == 2) {
               if (name[1] == 'a') {
                 if (name[2] == 'a') {
                   (void)jit_calli(sjc.bad_caar_code);
@@ -615,14 +668,16 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
                   (void)jit_calli(sjc.bad_cddr_code);
                 }
               }
+            } else {
+              (void)jit_movi_p(JIT_R0, ((Scheme_Primitive_Proc *)rator)->prim_val);
+              (void)jit_calli(sjc.bad_cXr_code);
             }
             __START_TINY_JUMPS__(1);
             mz_patch_branch(ref);
           } else {
             (void)jit_bmsi_ul(reffail, JIT_R0, 0x1);
           }
-          jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
-          (void)jit_bnei_i(reffail, JIT_R1, scheme_pair_type);
+          (void)mz_bnei_t(reffail, JIT_R0, scheme_pair_type, JIT_R1);
         } else {
           reffail = NULL;
         }
@@ -665,8 +720,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       }
       __START_TINY_JUMPS__(1);
       mz_patch_branch(ref);
-      jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
-      (void)jit_bnei_i(reffail, JIT_R1, scheme_mutable_pair_type);
+      (void)mz_bnei_t(reffail, JIT_R0, scheme_mutable_pair_type, JIT_R1);
       if (name[2] == 'a') {
         (void)jit_ldxi_p(JIT_R0, JIT_R0, &((Scheme_Simple_Object *)0x0)->u.pair_val.car);
       } else {
@@ -768,18 +822,16 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
 
         __START_TINY_JUMPS__(1);
         mz_patch_branch(ref);
-        jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
         if (for_fl)
-          (void)jit_bnei_i(reffail, JIT_R1, scheme_flvector_type);
+          (void)mz_bnei_t(reffail, JIT_R0, scheme_flvector_type, JIT_R1);
         else if (for_fx)
-          (void)jit_bnei_i(reffail, JIT_R1, scheme_fxvector_type);
+          (void)mz_bnei_t(reffail, JIT_R0, scheme_fxvector_type, JIT_R1);
         else
-          (void)jit_bnei_i(reffail, JIT_R1, scheme_vector_type);
+          (void)mz_bnei_t(reffail, JIT_R0, scheme_vector_type, JIT_R1);
         __END_TINY_JUMPS__(1);
       } else if (can_chaperone) {
         __START_TINY_JUMPS__(1);
-        jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
-        ref = jit_bnei_i(jit_forward(), JIT_R1, scheme_chaperone_type);
+        ref = mz_bnei_t(jit_forward(), JIT_R0, scheme_chaperone_type, JIT_R1);
         jit_ldxi_p(JIT_R0, JIT_R0, (intptr_t)&((Scheme_Chaperone *)0x0)->val);
         mz_patch_branch(ref);
         __END_TINY_JUMPS__(1);
@@ -837,8 +889,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       __START_TINY_JUMPS__(1);
       refdone = jit_jmpi(jit_forward());
       mz_patch_branch(ref);
-      jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
-      (void)jit_bnei_i(reffail, JIT_R1, scheme_box_type);
+      (void)mz_bnei_t(reffail, JIT_R0, scheme_box_type, JIT_R1);
       __END_TINY_JUMPS__(1);
 
       (void)jit_ldxi_p(JIT_R0, JIT_R0, &SCHEME_BOX_VAL(0x0));
@@ -877,8 +928,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
 
       /* check for chaperone: */
       __START_TINY_JUMPS__(1);
-      jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
-      ref = jit_bnei_i(jit_forward(), JIT_R1, scheme_chaperone_type);
+      ref = mz_bnei_t(jit_forward(), JIT_R0, scheme_chaperone_type, JIT_R1);
       (void)jit_calli(sjc.unbox_code);
       jit_retval(JIT_R0);
       ref2 = jit_jmpi(jit_forward());
@@ -958,8 +1008,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       }
       __START_TINY_JUMPS__(1);
       mz_patch_branch(ref);
-      jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
-      (void)jit_bnei_i(reffail, JIT_R1, scheme_complex_type);
+      (void)mz_bnei_t(reffail, JIT_R0, scheme_complex_type, JIT_R1);
       if (name[0] == 'i') {
         (void)jit_ldxi_p(JIT_R0, JIT_R0, &((Scheme_Complex *)0x0)->i);
       } else if (name[0] == 'r') {
@@ -968,8 +1017,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
         /* real part must always be inexact */
         (void)jit_ldxi_p(JIT_R1, JIT_R0, &((Scheme_Complex *)0x0)->r);
         CHECK_LIMIT();
-        jit_ldxi_s(JIT_R2, JIT_R1, &((Scheme_Object *)0x0)->type);
-        (void)jit_bnei_i(reffail, JIT_R2, scheme_double_type);
+        (void)mz_bnei_t(reffail, JIT_R1, scheme_double_type, JIT_R2);
         if (name[2] == 'i') {
           (void)jit_ldxi_p(JIT_R0, JIT_R0, &((Scheme_Complex *)0x0)->i);
         } else {
@@ -1017,34 +1065,34 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       
       return 1;
     } else if (IS_NAMED_PRIM(rator, "add1")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 1, 0, 1, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_ADD, 0, 1, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "sub1")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, -1, 0, 1, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_SUB, 0, 1, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "-")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, -1, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_SUB, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "abs")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 11, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_ABS, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fxabs")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 11, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_ABS, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fxabs")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 11, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_ABS, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-flabs")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 11, 0, 0, NULL, 1, 0, 1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_ABS, 0, 0, NULL, 1, 0, 1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "flabs")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 11, 0, 0, NULL, 1, 0, -1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_ABS, 0, 0, NULL, 1, 0, -1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-flsqrt")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 13, 0, 0, NULL, 1, 0, 1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_SQRT, 0, 0, NULL, 1, 0, 1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "flsqrt")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 13, 0, 0, NULL, 1, 0, -1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_SQRT, 0, 0, NULL, 1, 0, -1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "flfloor")
                || IS_NAMED_PRIM(rator, "flceiling")
@@ -1058,36 +1106,37 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
                || IS_NAMED_PRIM(rator, "flatan")
                || IS_NAMED_PRIM(rator, "flexp")
                || IS_NAMED_PRIM(rator, "fllog")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 14, 0, 0, NULL, 1, 0, -1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_FLUNOP, 0, 0, NULL, 1, 0, -1, NULL);
       return 1;
-    } else if (IS_NAMED_PRIM(rator, "exact->inexact")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 12, 0, 0, NULL, 1, 0, 0, NULL);
+    } else if (IS_NAMED_PRIM(rator, "exact->inexact")
+	       || IS_NAMED_PRIM(rator, "real->double-flonum")) {
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_EX_INEX, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fx->fl")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 12, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_EX_INEX, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "->fl")
                || IS_NAMED_PRIM(rator, "fx->fl")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 12, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_EX_INEX, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "inexact->exact")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 15, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_INEX_EX, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fl->fx")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 15, 0, 0, NULL, 1, 0, 1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_INEX_EX, 0, 0, NULL, 1, 0, 1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fl->exact-integer")
                || IS_NAMED_PRIM(rator, "fl->fx")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 15, 0, 0, NULL, 1, 0, -1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_INEX_EX, 0, 0, NULL, 1, 0, -1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "bitwise-not")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 7, 0, 9, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_NOT, 0, 9, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fxnot")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 7, 0, 9, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_NOT, 0, 9, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fxnot")) {
-      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 7, 0, 9, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_NOT, 0, 9, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "vector-immutable")
                || IS_NAMED_PRIM(rator, "vector")) {
@@ -1346,8 +1395,7 @@ static int generate_binary_char(mz_jit_state *jitter, Scheme_App3_Rec *app,
     }
     __START_SHORT_JUMPS__(branch_short);
     mz_patch_branch(pref);
-    jit_ldxi_s(JIT_R2, JIT_R0, (int)&((Scheme_Object *)0x0)->type);
-    (void)jit_bnei_i(reffail, JIT_R2, scheme_char_type);
+    (void)mz_bnei_t(reffail, JIT_R0, scheme_char_type, JIT_R2);
     CHECK_LIMIT();
   } else {
     if (!direct)
@@ -1370,8 +1418,7 @@ static int generate_binary_char(mz_jit_state *jitter, Scheme_App3_Rec *app,
     } else {
       (void)jit_bmsi_ul(reffail, JIT_R1, 0x1);
     }
-    jit_ldxi_s(JIT_R2, JIT_R1, (int)&((Scheme_Object *)0x0)->type);
-    (void)jit_bnei_i(reffail, JIT_R2, scheme_char_type);
+    (void)mz_bnei_t(reffail, JIT_R1, scheme_char_type, JIT_R2);
     CHECK_LIMIT();
   } else {
     if (!direct)
@@ -1429,8 +1476,7 @@ static int generate_vector_op(mz_jit_state *jitter, int set, int int_ready, int 
       ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
     } else {
       /* assert: can_chaperone */
-      jit_ldxi_s(JIT_R2, JIT_R0, &((Scheme_Object *)0x0)->type);
-      ref = jit_bnei_i(jit_forward(), JIT_R2, scheme_chaperone_type);
+      ref = mz_bnei_t(jit_forward(), JIT_R0, scheme_chaperone_type, JIT_R2);
     }
     __END_TINY_JUMPS__(1);
 
@@ -1475,19 +1521,18 @@ static int generate_vector_op(mz_jit_state *jitter, int set, int int_ready, int 
         (void)jit_bmci_ul(reffail, JIT_R1, 0x1);
       if (set && for_fx)
         (void)jit_bmci_ul(reffail, JIT_R2, 0x1);
-      jit_ldxi_s(JIT_R2, JIT_R0, &((Scheme_Object *)0x0)->type);
       if (for_fx) {
-        (void)jit_bnei_i(reffail, JIT_R2, scheme_fxvector_type);
+        (void)mz_bnei_t(reffail, JIT_R0, scheme_fxvector_type, JIT_R2);
         jit_ldxi_l(JIT_R2, JIT_R0, (int)&SCHEME_FXVEC_SIZE(0x0));
       } else if (!for_fl) {
-        (void)jit_bnei_i(reffail, JIT_R2, scheme_vector_type);
+        (void)mz_bnei_t(reffail, JIT_R0, scheme_vector_type, JIT_R2);
         if (check_mutable) {
           jit_ldxi_s(JIT_R2, JIT_R0, &MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)0x0));
           (void)jit_bmsi_ul(reffail, JIT_R2, 0x1);
         }
         jit_ldxi_l(JIT_R2, JIT_R0, (int)&SCHEME_VEC_SIZE(0x0));
       } else {
-        (void)jit_bnei_i(reffail, JIT_R2, scheme_flvector_type);
+        (void)mz_bnei_t(reffail, JIT_R0, scheme_flvector_type, JIT_R2);
         jit_ldxi_l(JIT_R2, JIT_R0, (int)&SCHEME_FLVEC_SIZE(0x0));
       }
       if (!int_ready) {
@@ -1501,8 +1546,7 @@ static int generate_vector_op(mz_jit_state *jitter, int set, int int_ready, int 
       if (for_fl && set && !unbox_flonum) {
         jit_ldr_p(JIT_R2, JIT_RUNSTACK);
         (void)jit_bmsi_ul(reffail, JIT_R2, 0x1);
-        jit_ldxi_s(JIT_R2, JIT_R2, &((Scheme_Object *)0x0)->type);
-        (void)jit_bnei_i(reffail, JIT_R2, scheme_double_type);
+        (void)mz_bnei_t(reffail, JIT_R2, scheme_double_type, JIT_R2);
         CHECK_LIMIT();
       }
     } else if (!int_ready) {
@@ -1536,6 +1580,8 @@ static int generate_vector_op(mz_jit_state *jitter, int set, int int_ready, int 
         --jitter->unbox_depth;
       }
     }
+    if (can_chaperone)
+      mz_patch_ucbranch(pref);
     if (!result_ignored)
       (void)jit_movi_p(JIT_R0, scheme_void);
   } else {
@@ -1550,9 +1596,9 @@ static int generate_vector_op(mz_jit_state *jitter, int set, int int_ready, int 
       else
         scheme_generate_alloc_double(jitter, 0);
     }
+    if (can_chaperone)
+      mz_patch_ucbranch(pref);
   }
-  if (can_chaperone)
-    mz_patch_ucbranch(pref);
 
   return 1;
 }
@@ -1589,11 +1635,14 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 {
   Scheme_Object *rator = app->rator;
 
-  if (!for_branch
-      && inlineable_struct_prim(rator, jitter, 2, 2)) {
-    generate_inlined_struct_op(3, jitter, rator, app->rand1, app->rand2, for_branch, branch_short, multi_ok);
-    scheme_direct_call_count++;
-    return 1;
+  if (!for_branch) {
+    int k;
+    k = inlineable_struct_prim(rator, jitter, 2, 2);
+    if (k) {
+      generate_inlined_struct_op(k, jitter, rator, app->rand1, app->rand2, for_branch, branch_short, multi_ok);
+      scheme_direct_call_count++;
+      return 1;
+    }
   }
 
 
@@ -1698,240 +1747,351 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
     }
     
     return 1;
+  }  else if (IS_NAMED_PRIM(rator, "equal?")) {
+    GC_CAN_IGNORE jit_insn *ref_f, *ref_d, *refr;
+
+    generate_two_args(app->rand1, app->rand2, jitter, 0, 2);
+    CHECK_LIMIT();
+
+    mz_rs_sync();
+    JIT_UPDATE_THREAD_RSPTR_IF_NEEDED();
+
+    jit_prepare(2);
+    jit_pusharg_p(JIT_R0);
+    jit_pusharg_p(JIT_R1);
+    mz_finish_prim_lwe(ts_scheme_equal, refr);
+    jit_retval(JIT_R0);
+    CHECK_LIMIT();
+
+    __START_SHORT_JUMPS__(branch_short);
+    
+    if (for_branch) {
+      scheme_prepare_branch_jump(jitter, for_branch);
+      CHECK_LIMIT();
+    }
+    
+    ref_f = jit_beqi_p(jit_forward(), JIT_R0, 0);
+
+    if (for_branch) {
+      scheme_add_branch_false(for_branch, ref_f);
+      scheme_branch_for_true(jitter, for_branch);
+    } else {
+      (void)jit_movi_p(JIT_R0, scheme_true);
+      ref_d = jit_jmpi(jit_forward());
+      
+      mz_patch_branch(ref_f);
+      (void)jit_movi_p(JIT_R0, scheme_false);
+
+      mz_patch_ucbranch(ref_d);
+    }
+
+    __END_SHORT_JUMPS__(branch_short);
+
+    return 1;
+  } else if (IS_NAMED_PRIM(rator, "eqv?")) {
+    GC_CAN_IGNORE jit_insn *ref_f1, *ref_f2, *ref_f3, *ref_f4, *ref_f5;
+    GC_CAN_IGNORE jit_insn *ref_d1, *ref_d2, *ref_t1;
+
+    generate_two_args(app->rand1, app->rand2, jitter, 0, 2);
+    CHECK_LIMIT();
+
+    if (need_sync) mz_rs_sync();
+
+    __START_SHORT_JUMPS__(branch_short);
+    
+    if (for_branch) {
+      scheme_prepare_branch_jump(jitter, for_branch);
+      CHECK_LIMIT();
+    }
+
+    /* eq? */
+    ref_t1 = jit_beqr_p(jit_forward(), JIT_R0, JIT_R1);
+
+    /* if either is fixnum, result is false */
+    ref_f1 = jit_bmsi_ul(jit_forward(), JIT_R0, 0x1);
+    ref_f2 = jit_bmsi_ul(jit_forward(), JIT_R1, 0x1);
+    CHECK_LIMIT();
+
+    /* Both have a tag */
+    jit_ldxi_s(JIT_R2, JIT_R0, &((Scheme_Object *)0x0)->type);
+    jit_ldxi_s(JIT_V1, JIT_R1, &((Scheme_Object *)0x0)->type);
+    ref_f3 = jit_bner_i(jit_forward(), JIT_R2, JIT_V1);
+
+    /* check in range of type treated by eqv: */
+    ref_f4 = jit_blti_i(jit_forward(), JIT_R2, scheme_char_type);
+    ref_f5 = jit_bgti_i(jit_forward(), JIT_R2, scheme_complex_type);
+    CHECK_LIMIT();
+    
+    /* in range of interesting types, so break out the generic comparison */
+    if (for_branch) {
+      scheme_add_branch_false_movi(for_branch, jit_patchable_movi_p(JIT_V1, jit_forward()));    
+      (void)jit_calli(sjc.eqv_branch_code);
+
+      scheme_add_branch_false(for_branch, ref_f1);
+      scheme_add_branch_false(for_branch, ref_f2);
+      scheme_add_branch_false(for_branch, ref_f3);
+      scheme_add_branch_false(for_branch, ref_f4);
+      scheme_add_branch_false(for_branch, ref_f5);
+
+      mz_patch_branch(ref_t1);
+      scheme_branch_for_true(jitter, for_branch);
+    } else {
+      (void)jit_calli(sjc.eqv_code);
+      ref_d1 = jit_jmpi(jit_forward());
+
+      mz_patch_branch(ref_t1);
+      (void)jit_movi_p(JIT_R0, scheme_true);
+      ref_d2 = jit_jmpi(jit_forward());
+      
+      mz_patch_branch(ref_f1);
+      mz_patch_branch(ref_f2);
+      mz_patch_branch(ref_f3);
+      mz_patch_branch(ref_f4);
+      mz_patch_branch(ref_f5);
+
+      (void)jit_movi_p(JIT_R0, scheme_false);
+
+      mz_patch_ucbranch(ref_d1);
+      mz_patch_ucbranch(ref_d2);
+    }
+
+    __END_SHORT_JUMPS__(branch_short);
+
+    return 1;
   } else if (IS_NAMED_PRIM(rator, "=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 0, 0, for_branch, branch_short, 0, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_EQUAL, 0, for_branch, branch_short, 0, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "unsafe-fx=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 0, 0, for_branch, branch_short, 1, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_EQUAL, 0, for_branch, branch_short, 1, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "fx=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 0, 0, for_branch, branch_short, -1, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_EQUAL, 0, for_branch, branch_short, -1, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "unsafe-fl=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 0, 0, for_branch, branch_short, 0, 1, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_EQUAL, 0, for_branch, branch_short, 0, 1, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "fl=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 0, 0, for_branch, branch_short, 0, -1, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_EQUAL, 0, for_branch, branch_short, 0, -1, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "<=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, -1, 0, for_branch, branch_short, 0, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_LEQ, 0, for_branch, branch_short, 0, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "unsafe-fx<=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, -1, 0, for_branch, branch_short, 1, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_LEQ, 0, for_branch, branch_short, 1, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "fx<=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, -1, 0, for_branch, branch_short, -1, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_LEQ, 0, for_branch, branch_short, -1, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "unsafe-fl<=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, -1, 0, for_branch, branch_short, 0, 1, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_LEQ, 0, for_branch, branch_short, 0, 1, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "fl<=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, -1, 0, for_branch, branch_short, 0, -1, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_LEQ, 0, for_branch, branch_short, 0, -1, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "<")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, -2, 0, for_branch, branch_short, 0, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_LT, 0, for_branch, branch_short, 0, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "unsafe-fx<")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, -2, 0, for_branch, branch_short, 1, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_LT, 0, for_branch, branch_short, 1, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "fx<")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, -2, 0, for_branch, branch_short, -1, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_LT, 0, for_branch, branch_short, -1, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "unsafe-fl<")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, -2, 0, for_branch, branch_short, 0, 1, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_LT, 0, for_branch, branch_short, 0, 1, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "fl<")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, -2, 0, for_branch, branch_short, 0, -1, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_LT, 0, for_branch, branch_short, 0, -1, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, ">=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 1, 0, for_branch, branch_short, 0, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_GEQ, 0, for_branch, branch_short, 0, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "unsafe-fx>=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 1, 0, for_branch, branch_short, 1, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_GEQ, 0, for_branch, branch_short, 1, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "fx>=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 1, 0, for_branch, branch_short, -1, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_GEQ, 0, for_branch, branch_short, -1, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "unsafe-fl>=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 1, 0, for_branch, branch_short, 0, 1, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_GEQ, 0, for_branch, branch_short, 0, 1, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "fl>=")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 1, 0, for_branch, branch_short, 0, -1, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_GEQ, 0, for_branch, branch_short, 0, -1, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, ">")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 2, 0, for_branch, branch_short, 0, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_GT, 0, for_branch, branch_short, 0, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "unsafe-fx>")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 2, 0, for_branch, branch_short, 1, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_GT, 0, for_branch, branch_short, 1, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "fx>")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 2, 0, for_branch, branch_short, -1, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_GT, 0, for_branch, branch_short, -1, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "unsafe-fl>")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 2, 0, for_branch, branch_short, 0, 1, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_GT, 0, for_branch, branch_short, 0, 1, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "fl>")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 2, 0, for_branch, branch_short, 0, -1, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_GT, 0, for_branch, branch_short, 0, -1, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "bitwise-bit-set?")) {
-    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, 3, 0, for_branch, branch_short, 0, 0, NULL);
+    scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 0, CMP_BIT, 0, for_branch, branch_short, 0, 0, NULL);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "char=?")) {
     generate_binary_char(jitter, app, for_branch, branch_short);
     return 1;
   } else if (!for_branch) {
     if (IS_NAMED_PRIM(rator, "+")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 1, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_ADD, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fx+")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 1, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_ADD, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fx+")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 1, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_ADD, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fl+")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 1, 0, 0, NULL, 1, 0, 1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_ADD, 0, 0, NULL, 1, 0, 1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fl+")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 1, 0, 0, NULL, 1, 0, -1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_ADD, 0, 0, NULL, 1, 0, -1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "-")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -1, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_SUB, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fx-")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -1, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_SUB, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fx-")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -1, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_SUB, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fl-")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -1, 0, 0, NULL, 1, 0, 1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_SUB, 0, 0, NULL, 1, 0, 1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fl-")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -1, 0, 0, NULL, 1, 0, -1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_SUB, 0, 0, NULL, 1, 0, -1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "*")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 2, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MUL, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fx*")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 2, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MUL, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fx*")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 2, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MUL, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fl*")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 2, 0, 0, NULL, 1, 0, 1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MUL, 0, 0, NULL, 1, 0, 1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fl*")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 2, 0, 0, NULL, 1, 0, -1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MUL, 0, 0, NULL, 1, 0, -1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "/")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -2, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_DIV, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fl/")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -2, 0, 0, NULL, 1, 0, 1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_DIV, 0, 0, NULL, 1, 0, 1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fl/")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -2, 0, 0, NULL, 1, 0, -1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_DIV, 0, 0, NULL, 1, 0, -1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "quotient")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -3, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_QUOT, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fxquotient")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -3, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_QUOT, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fxquotient")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -3, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_QUOT, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "remainder")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -4, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_REM, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "modulo")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -5, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MOD, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fxremainder")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -4, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_REM, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fxmodulo")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -5, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MOD, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fxremainder")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -4, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_REM, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fxmodulo")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -5, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MOD, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "min")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 9, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MIN, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "max")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 10, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MAX, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-flmin")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 9, 0, 0, NULL, 1, 0, 1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MIN, 0, 0, NULL, 1, 0, 1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-flmax")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 10, 0, 0, NULL, 1, 0, 1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MAX, 0, 0, NULL, 1, 0, 1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "flmin")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 9, 0, 0, NULL, 1, 0, -1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MIN, 0, 0, NULL, 1, 0, -1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "flmax")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 10, 0, 0, NULL, 1, 0, -1, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MAX, 0, 0, NULL, 1, 0, -1, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fxmin")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 9, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MIN, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fxmax")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 10, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MAX, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fxmin")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 9, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MIN, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fxmax")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 10, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_MAX, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "bitwise-and")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 3, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_AND, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fxand")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 3, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_AND, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fxand")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 3, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_AND, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "bitwise-ior")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 4, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_IOR, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fxior")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 4, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_IOR, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fxior")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 4, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_IOR, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "bitwise-xor")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 5, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_XOR, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fxxor")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 5, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_XOR, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fxxor")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 5, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_XOR, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "arithmetic-shift")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 6, 0, 0, NULL, 1, 0, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_LSH, 0, 0, NULL, 1, 0, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fxlshift")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 6, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_LSH, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fxlshift")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, 6, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_LSH, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "unsafe-fxrshift")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -6, 0, 0, NULL, 1, 1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_RSH, 0, 0, NULL, 1, 1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fxrshift")) {
-      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, -6, 0, 0, NULL, 1, -1, 0, NULL);
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_RSH, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "vector-ref")
                || IS_NAMED_PRIM(rator, "unsafe-vector-ref")
@@ -1950,9 +2110,9 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       int unbox = jitter->unbox;
       int can_chaperone = 1, for_struct = 0, for_fx = 0;
 
-      if (IS_NAMED_PRIM(rator, "vector-ref"))
+      if (IS_NAMED_PRIM(rator, "vector-ref")) {
         which = 0;
-      else if (IS_NAMED_PRIM(rator, "fxvector-ref")) {
+      } else if (IS_NAMED_PRIM(rator, "fxvector-ref")) {
 	which = 0;
         for_fx = 1;
         can_chaperone = 0;
@@ -2013,6 +2173,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 
         if (!which) {
           /* vector-ref is relatively simple and worth inlining */
+          if (can_chaperone) scheme_mz_need_space(jitter, 3);
           generate_vector_op(jitter, 0, 0, base_offset, 0, unsafe, 
                              0, 0, can_chaperone, for_struct, for_fx, 0);
           CHECK_LIMIT();
@@ -2070,6 +2231,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 	jit_movi_l(JIT_V1, offset);
 	if (!which) {
           /* vector-ref is relatively simple and worth inlining */
+          if (can_chaperone) scheme_mz_need_space(jitter, 3);
           generate_vector_op(jitter, 0, 1, base_offset, 0, unsafe, 
                              0, 0, can_chaperone, for_struct, for_fx, 0);
           CHECK_LIMIT();
@@ -2166,6 +2328,16 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       jit_ori_l(JIT_R0, JIT_R0, 0x1);
 
       return 1;
+    } else if (IS_NAMED_PRIM(rator, "list-ref")
+               || IS_NAMED_PRIM(rator, "list-tail")) {
+      generate_two_args(app->rand1, app->rand2, jitter, 1, 2);
+
+      if (IS_NAMED_PRIM(rator, "list-ref"))
+        (void)jit_calli(sjc.list_ref_code);
+      else
+        (void)jit_calli(sjc.list_tail_code);
+
+      return 1;
     } else if (IS_NAMED_PRIM(rator, "set-mcar!")
                || IS_NAMED_PRIM(rator, "set-mcdr!")) {
       GC_CAN_IGNORE jit_insn *reffail, *ref;
@@ -2189,8 +2361,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
         (void)jit_calli(sjc.bad_set_mcdr_code);
       __START_TINY_JUMPS__(1);
       mz_patch_branch(ref);
-      jit_ldxi_s(JIT_R2, JIT_R0, &((Scheme_Object *)0x0)->type);
-      (void)jit_bnei_i(reffail, JIT_R2, scheme_mutable_pair_type);
+      (void)mz_bnei_t(reffail, JIT_R0, scheme_mutable_pair_type, JIT_R2);
       __END_TINY_JUMPS__(1);
       CHECK_LIMIT();
 
@@ -2239,8 +2410,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
         ref3 = jit_bmsi_ul(jit_forward(), JIT_R0, 0x1);
       else
         ref3 = NULL;
-      jit_ldxi_s(JIT_R2, JIT_R0, &((Scheme_Object *)0x0)->type);
-      ref = jit_beqi_i(jit_forward(), JIT_R2, scheme_box_type);
+      ref = mz_beqi_t(jit_forward(), JIT_R0, scheme_box_type, JIT_R2);
       if (ref3)
         mz_patch_branch(ref3);
       reffail = _jit.x.pc;
@@ -2409,11 +2579,9 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       refslow = _jit.x.pc;
       (void)jit_calli(sjc.bad_make_flrectangular_code);
       mz_patch_branch(ref);
-      jit_ldxi_s(JIT_R2, JIT_R0, &((Scheme_Object *)0x0)->type);
-      (void)jit_bnei_i(refslow, JIT_R2, scheme_double_type);
+      (void)mz_bnei_t(refslow, JIT_R0, scheme_double_type, JIT_R2);
       (void)jit_bmsi_ul(refslow, JIT_R1, 0x1);
-      jit_ldxi_s(JIT_R2, JIT_R1, &((Scheme_Object *)0x0)->type);
-      (void)jit_bnei_i(refslow, JIT_R2, scheme_double_type);
+      (void)mz_bnei_t(refslow, JIT_R1, scheme_double_type, JIT_R2);
       __END_TINY_JUMPS__(1);
       CHECK_LIMIT();
 
@@ -2427,6 +2595,16 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       CHECK_LIMIT();
       
       allocate_rectangular(jitter);
+
+      return 1;
+    } else if (IS_NAMED_PRIM(rator, "procedure-arity-includes?")) {
+      LOG_IT(("inlined procedure-arity-includes?\n"));
+
+      generate_two_args(app->rand1, app->rand2, jitter, 1, 2);
+      CHECK_LIMIT();
+
+      mz_rs_sync();
+      (void)jit_calli(sjc.proc_arity_includes_code);
 
       return 1;
     } else if (IS_NAMED_PRIM(rator, "values")) {
@@ -2483,19 +2661,19 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
   scheme_direct_call_count++;
 
   if (IS_NAMED_PRIM(rator, "=")) {
-    scheme_generate_nary_arith(jitter, app, 0, 0, for_branch, branch_short);
+    scheme_generate_nary_arith(jitter, app, 0, CMP_EQUAL, for_branch, branch_short);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "<")) {
-    scheme_generate_nary_arith(jitter, app, 0, -2, for_branch, branch_short);
+    scheme_generate_nary_arith(jitter, app, 0, CMP_LT, for_branch, branch_short);
     return 1;
   } else if (IS_NAMED_PRIM(rator, ">")) {
-    scheme_generate_nary_arith(jitter, app, 0, 2, for_branch, branch_short);
+    scheme_generate_nary_arith(jitter, app, 0, CMP_GT, for_branch, branch_short);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "<=")) {
-    scheme_generate_nary_arith(jitter, app, 0, -1, for_branch, branch_short);
+    scheme_generate_nary_arith(jitter, app, 0, CMP_LEQ, for_branch, branch_short);
     return 1;
   } else if (IS_NAMED_PRIM(rator, ">=")) {
-    scheme_generate_nary_arith(jitter, app, 0, 1, for_branch, branch_short);
+    scheme_generate_nary_arith(jitter, app, 0, CMP_GEQ, for_branch, branch_short);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "current-future")) { 
     mz_rs_sync();
@@ -2691,6 +2869,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
       if (!simple) {
 	if (!which) {
           /* vector-set! is relatively simple and worth inlining */
+          if (can_chaperone) scheme_mz_need_space(jitter, 3);
           generate_vector_op(jitter, 1, 0, base_offset, 0, unsafe, 
                              flonum_arg, result_ignored, can_chaperone, 
                              for_struct, for_fx, check_mutable);
@@ -2740,6 +2919,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
 	jit_movi_l(JIT_V1, offset);
 	if (!which) {
           /* vector-set! is relatively simple and worth inlining */
+          if (can_chaperone) scheme_mz_need_space(jitter, 3);
           generate_vector_op(jitter, 1, 1, base_offset, 0, unsafe, 
                              flonum_arg, result_ignored, can_chaperone, 
                              for_struct, for_fx, check_mutable);
@@ -2933,23 +3113,23 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
 
       return 1;
     } else if (IS_NAMED_PRIM(rator, "+")) {
-      return scheme_generate_nary_arith(jitter, app, 1, 0, NULL, 1);
+      return scheme_generate_nary_arith(jitter, app, ARITH_ADD, 0, NULL, 1);
     } else if (IS_NAMED_PRIM(rator, "-")) {
-      return scheme_generate_nary_arith(jitter, app, -1, 0, NULL, 1);
+      return scheme_generate_nary_arith(jitter, app, ARITH_SUB, 0, NULL, 1);
     } else if (IS_NAMED_PRIM(rator, "*")) {
-      return scheme_generate_nary_arith(jitter, app, 2, 0, NULL, 1);
+      return scheme_generate_nary_arith(jitter, app, ARITH_MUL, 0, NULL, 1);
     } else if (IS_NAMED_PRIM(rator, "/")) {
-      return scheme_generate_nary_arith(jitter, app, -2, 0, NULL, 1);
+      return scheme_generate_nary_arith(jitter, app, ARITH_DIV, 0, NULL, 1);
     } else if (IS_NAMED_PRIM(rator, "bitwise-and")) {
-      return scheme_generate_nary_arith(jitter, app, 3, 0, NULL, 1);
+      return scheme_generate_nary_arith(jitter, app, ARITH_AND, 0, NULL, 1);
     } else if (IS_NAMED_PRIM(rator, "bitwise-ior")) {
-      return scheme_generate_nary_arith(jitter, app, 4, 0, NULL, 1);
+      return scheme_generate_nary_arith(jitter, app, ARITH_IOR, 0, NULL, 1);
     } else if (IS_NAMED_PRIM(rator, "bitwise-xor")) {
-      return scheme_generate_nary_arith(jitter, app, 5, 0, NULL, 1);
+      return scheme_generate_nary_arith(jitter, app, ARITH_XOR, 0, NULL, 1);
     } else if (IS_NAMED_PRIM(rator, "min")) {
-      return scheme_generate_nary_arith(jitter, app, 9, 0, NULL, 1);
+      return scheme_generate_nary_arith(jitter, app, ARITH_MIN, 0, NULL, 1);
     } else if (IS_NAMED_PRIM(rator, "max")) {
-      return scheme_generate_nary_arith(jitter, app, 10, 0, NULL, 1);
+      return scheme_generate_nary_arith(jitter, app, ARITH_MAX, 0, NULL, 1);
     } else if (IS_NAMED_PRIM(rator, "checked-procedure-check-and-extract")) {
       scheme_generate_app(app, NULL, 5, jitter, 0, 0, 2);  /* sync'd below */
       CHECK_LIMIT();
@@ -2976,9 +3156,8 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
 }
 
 int scheme_generate_cons_alloc(mz_jit_state *jitter, int rev, int inline_retry)
+/* Args must be in R0 (car) and R1 (cdr); uses R2 and V1 as temporaries */
 {
-  /* Args should be in R0 (car) and R1 (cdr) */
-
 #ifdef CAN_INLINE_ALLOC
   /* Inlined alloc */
   scheme_inline_alloc(jitter, sizeof(Scheme_Simple_Object), scheme_pair_type, 0, 1, 0, inline_retry);

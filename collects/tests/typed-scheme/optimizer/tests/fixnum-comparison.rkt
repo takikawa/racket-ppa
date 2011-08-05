@@ -1,8 +1,8 @@
 #;
 (
-fixnum-comparison.rkt line 12 col 4 - vector-length - vector-length
-#f line #f col #f - op - string-length
-fixnum-comparison.rkt line 12 col 1 - < - binary fixnum
+TR opt: #f (no location) op -- string-length
+TR opt: fixnum-comparison.rkt 12:1 < -- binary fixnum
+TR opt: fixnum-comparison.rkt 12:4 vector-length -- vector-length
 #t
 )
 

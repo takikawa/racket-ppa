@@ -1,5 +1,5 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
 @defclass/title[image-snip% snip% ()]{
 
@@ -25,7 +25,7 @@ Creates an image snip, loading the image @racket[file] if
 }
 
 
-@defmethod[(equal-hash-code [hash-code (any/c . -> . exact-integer?)])
+@defmethod[(equal-hash-code-of [hash-code (any/c . -> . exact-integer?)])
            exact-integer?]{
 
 Returns an integer that can be used as a @racket[equal?]-based hash
@@ -34,7 +34,7 @@ code for @this-obj[] (using the same notion of @racket[equal?] as
 
 See also @racket[equal<%>].}
 
-@defmethod[(equal-secondary-hash-code [hash-code (any/c . -> . exact-integer?)])
+@defmethod[(equal-secondary-hash-code-of [hash-code (any/c . -> . exact-integer?)])
            exact-integer?]{
 
 Returns an integer that can be used as a @racket[equal?]-based
@@ -68,7 +68,7 @@ Returns the name of the currently loaded, non-inlined file, or
  @racket[#f] if a file is not loaded or if a file was loaded with
  inlining (the default).
 
-@boxisfillnull[(scheme relative-path) @elem{@racket[#t] if the loaded file's path is
+@boxisfillnull[@racket[relative-path] @elem{@racket[#t] if the loaded file's path is
 relative to the owning editor's path}]
 
 }

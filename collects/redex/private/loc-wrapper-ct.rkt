@@ -1,7 +1,7 @@
 #lang scheme/base
 (require (for-template scheme/base)
-         (for-template "loc-wrapper-rt.ss")
-         "term-fn.ss")
+         (for-template "loc-wrapper-rt.rkt")
+         "term-fn.rkt")
 (provide to-lw/proc to-lw/uq/proc is-term-fn?)
 
 ;; this parameter allows define-metafunction to
@@ -67,7 +67,8 @@
         #,quoted?)]
     [x 
      (and (identifier? #'x)
-          (or (term-fn? (syntax-local-value #'x (λ () #f)))
+          (or (and (syntax-transforming?)
+                   (term-fn? (syntax-local-value #'x (λ () #f))))
               ((is-term-fn?) #'x)))
      #`(make-lw
         '#,(syntax-e #'x)

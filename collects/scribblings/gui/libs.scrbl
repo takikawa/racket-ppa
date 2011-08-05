@@ -1,5 +1,5 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
 @(define draw-doc '(lib "scribblings/draw/draw.scrbl"))
 
@@ -7,7 +7,7 @@
 
 See @secref[#:doc draw-doc "libs"] in @other-manual[draw-doc] for
 information on platform library dependencies for
-@racketmodname[racket/draw]. Under Unix, the following additional
+@racketmodname[racket/draw]. On Unix, the following additional
 system libraries must be installed for @racketmodname[racket/gui/base]:
 
 @itemlist[

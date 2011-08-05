@@ -1,10 +1,10 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
 @defclass/title[horizontal-pasteboard% pasteboard% (aligned-pasteboard<%>)]{
 
 @defconstructor/auto-super[()]{
-Passes all arguments to @scheme[super-init].
+Passes all arguments to @racket[super-init].
 }
 
 @defmethod[#:mode override 
@@ -28,4 +28,3 @@ Passes all arguments to @scheme[super-init].
            (resized [snip (is-a?/c snip%)]
                     [redraw-now? any/c])
            void?]{}}
-

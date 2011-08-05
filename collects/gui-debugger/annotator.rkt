@@ -19,9 +19,6 @@
       [(var . others)
        (cons #'var (arglist-bindings #'others))]))
 
-
-
-
   ;; Retreives the binding of a variable from a normal-breakpoint-info.
   ;; Returns a list of pairs `(,variable-name-stx ,variable-value). Each
   ;; item in the list is a shadowed instance of a variable with the given
@@ -162,14 +159,18 @@
       (define (top-level-annotate stx)
         (kernel:kernel-syntax-case/phase
          stx (namespace-base-phase)
-         [(module identifier name (plain-module-begin . module-level-exprs))
-          (with-syntax ([(module . _) stx])
-            (quasisyntax/loc stx (module identifier name
-                                   (plain-module-begin 
-                                    #,@(map (lambda (e) (module-level-expr-iterator
-                                                         e (list (syntax-e #'identifier)
-                                                                 (syntax-source #'identifier))))
-                                            (syntax->list #'module-level-exprs))))))]
+         [(module identifier name mb)
+          (syntax-case (disarm #'mb) ()
+            [(plain-module-begin . module-level-exprs)
+             (with-syntax ([(module . _) stx])
+               (quasisyntax/loc stx (module identifier name
+                                      #,(rearm
+                                         #'mb
+                                         #`(plain-module-begin 
+                                            #,@(map (lambda (e) (module-level-expr-iterator
+                                                                 e (list (syntax-e #'identifier)
+                                                                         (syntax-source #'identifier))))
+                                                    (syntax->list #'module-level-exprs)))))))])]
          [else-stx
           (general-top-level-expr-iterator stx  #f)]))
       
@@ -241,7 +242,7 @@
         
         (define (let/rec-values-annotator letrec?)
           (kernel:kernel-syntax-case
-           expr #f
+           (disarm expr) #f
            [(label (((var ...) rhs) ...) . bodies)
             (let* ([new-bindings (apply append
                                         (map syntax->list
@@ -308,9 +309,10 @@
                    #,@new-bodies))))]))
         
         (define annotated
-          (syntax-recertify
+          (rearm
+           expr
            (kernel:kernel-syntax-case
-            expr #f
+            (disarm expr) #f
             [var-stx (identifier? (syntax var-stx))
                      (let ([binder (and (syntax-original? expr)
                                         (srfi:member expr bound-vars free-identifier=?))])
@@ -381,10 +383,7 @@
             [(#%variable-reference . _) expr]
             
             [else (error 'expr-syntax-object-iterator "unknown expr: ~a"
-                         (syntax->datum expr))])
-           expr
-           (current-code-inspector)
-           #f))
+                         (syntax->datum expr))])))
         
         (if annotate-break?
             (break-wrap
@@ -394,4 +393,9 @@
              is-tail?)
             annotated))
       
-      (values (top-level-annotate stx) (hash-map breakpoints (lambda (k v) k))))))
+      (values (top-level-annotate stx) (hash-map breakpoints (lambda (k v) k)))))
+
+  (define (disarm stx) (syntax-disarm stx code-insp))
+  (define (rearm old new) (syntax-rearm new old))
+
+  (define code-insp (current-code-inspector)))

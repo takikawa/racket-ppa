@@ -11,10 +11,6 @@ typedef unsigned int uint32_t;
 # include <stdint.h>
 #endif
 
-MZ_INLINE uint32_t mzrt_atomic_add_32(volatile unsigned int *counter, unsigned int value);
-MZ_INLINE uint32_t mzrt_atomic_incr_32(volatile unsigned int *counter);
-
-
 /****************** SIGNAL HANDLING ***************************************/
 /* mzrt.c */
 void mzrt_set_segfault_debug_handler();
@@ -35,7 +31,6 @@ typedef pthread_t mzrt_thread_id;
 typedef struct mz_proc_thread {
   mzrt_thread_id threadid;
   int refcount;
-  struct pt_mbox *mbox;
 } mz_proc_thread;
 
 
@@ -88,87 +83,53 @@ int mzrt_sema_post(mzrt_sema *sema);
 int mzrt_sema_wait(mzrt_sema *sema);
 int mzrt_sema_destroy(mzrt_sema *sema);
 
-/****************** PROCESS THREAD MAIL BOX *******************************/
-typedef struct pt_mbox_msg {
-  int     type;
-  void    *payload;
-  struct pt_mbox *origin;
-} pt_mbox_msg;
-
-typedef struct pt_mbox {
-  struct pt_mbox_msg queue[5];
-  int count;
-  int in;
-  int out;
-  mzrt_mutex *mutex;
-  mzrt_cond *nonempty;
-  mzrt_cond *nonfull;
-} pt_mbox;
-
-pt_mbox *pt_mbox_create();
-void pt_mbox_send(pt_mbox *mbox, int type, void *payload, pt_mbox *origin);
-void pt_mbox_recv(pt_mbox *mbox, int *type, void **payload, pt_mbox **origin);
-void pt_mbox_send_recv(pt_mbox *mbox, int type, void *payload, pt_mbox *origin, int *return_type, void **return_payload);
-void pt_mbox_destroy(pt_mbox *mbox);
+/****************** Compare and Swap *******************************/
 
 static MZ_INLINE int mzrt_cas(volatile size_t *addr, size_t old, size_t new_val) {
-#if defined(__GNUC__) && !defined(__INTEL_COMPILER)
+#if defined(__GNUC__) && !defined(__INTEL_COMPILER) && __GNUC__ <= 4 && __GNUC_MINOR__ < 1
 # if defined(__i386__)
-  char result;
-  __asm__ __volatile__("lock; cmpxchgl %3, %0; setz %1"
-      : "=m"(*addr), "=q"(result)
-      : "m"(*addr), "r" (new_val), "a"(old) 
-      : "memory");
-  return (int) result;
+    char result;
+    __asm__ __volatile__("lock; cmpxchgl %3, %0; setz %1"
+        : "=m"(*addr), "=q"(result)
+        : "m"(*addr), "r" (new_val), "a"(old)
+        : "memory");
+    return (int) result;
 # elif defined(__x86_64__)
-  char result;
-  __asm__ __volatile__("lock; cmpxchgq %3, %0; setz %1"
-      : "=m"(*addr), "=q"(result)
-      : "m"(*addr), "r" (new_val), "a"(old) 
-      : "memory");
-  return (int) result;
-# elif defined(__powerpc__) || defined(__ppc__) || defined(__PPC__) \
-     || defined(__powerpc64__) || defined(__ppc64__)
-
+    char result;
+    __asm__ __volatile__("lock; cmpxchgq %3, %0; setz %1"
+        : "=m"(*addr), "=q"(result)
+        : "m"(*addr), "r" (new_val), "a"(old)
+        : "memory");
+    return (int) result;
+# elif defined(__POWERPC__) || defined(__powerpc__) || defined(__ppc__) || defined(__PPC__)  \
+  || defined(__powerpc64__) || defined(__ppc64__)
+    size_t oldval;
+    int result = 0;
 #  if defined(__powerpc64__) || defined(__ppc64__) || defined(__64BIT__)
-/* FIXME: Completely untested.  */
-  AO_t oldval;
-  int result = 0;
-
-  __asm__ __volatile__(
-               "1:ldarx %0,0,%2\n"   /* load and reserve              */
-               "cmpd %0, %4\n"      /* if load is not equal to  */
-               "bne 2f\n"            /*   old, fail     */
-               "stdcx. %3,0,%2\n"    /* else store conditional         */
-               "bne- 1b\n"           /* retry if lost reservation      */
-         "li %1,1\n"       /* result = 1;     */
-               "2:\n"
-              : "=&r"(oldval), "=&r"(result)
-              : "r"(addr), "r"(new_val), "r"(old), "1"(result)
-              : "memory", "cc");
-
-  return result;
+#   define CAS_I_SIZE "d"
 #  else
-  AO_t oldval;
-  int result = 0;
-
-  __asm__ __volatile__(
-               "1:lwarx %0,0,%2\n"   /* load and reserve              */
-               "cmpw %0, %4\n"      /* if load is not equal to  */
-               "bne 2f\n"            /*   old, fail     */
-               "stwcx. %3,0,%2\n"    /* else store conditional         */
-               "bne- 1b\n"           /* retry if lost reservation      */
-         "li %1,1\n"       /* result = 1;     */
-               "2:\n"
-              : "=&r"(oldval), "=&r"(result)
-              : "r"(addr), "r"(new_val), "r"(old), "1"(result)
-              : "memory", "cc");
-
-  return result;
+#   define CAS_I_SIZE "w"
 #  endif
+    /* This code is based on Boehm GC's libatomic */
+    __asm__ __volatile__(
+                         "1:l" CAS_I_SIZE "arx %0,0,%2\n" /* load and reserve */
+                         "cmpw %0, %4\n"                  /* if load is not equal to  */
+                         "bne 2f\n"                       /*   old, fail */
+                         "st" CAS_I_SIZE "cx. %3,0,%2\n"  /* else store conditional */
+                         "bne- 1b\n"                      /* retry if lost reservation */
+                         "li %1,1\n"                      /* result = 1;     */
+                         "2:\n"
+                         : "=&r"(oldval), "=&r"(result)
+                         : "r"(addr), "r"(new_val), "r"(old), "1"(result)
+                         : "memory", "cc");
+    
+    return result;
 # else
-# error mzrt_cas not defined on this platform
+#  error mzrt_cas not defined on this platform
 # endif
+
+#elif defined(__GNUC__) && !defined(__INTEL_COMPILER)
+  return __sync_bool_compare_and_swap(addr, old, new_val);
 #elif defined(_MSC_VER)
 # if defined(_AMD64_)
   return _InterlockedCompareExchange64((LONGLONG volatile *)addr, (LONGLONG)new_val, (LONGLONG)old) == (LONGLONG)old;

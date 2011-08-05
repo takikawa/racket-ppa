@@ -1,12 +1,13 @@
-
 (module htdp-intermediate scheme/base
-  (require "private/teach.ss"
-           "private/teachprims.ss"
-	   "private/teach-module-begin.ss"
-	   mzlib/etc
-	   mzlib/list
-	   syntax/docprovide
-           test-engine/scheme-tests)
+
+  (require "private/teach.rkt"
+           "private/teachprims.rkt"
+           "private/teach-module-begin.rkt"
+           mzlib/etc
+           mzlib/list
+           syntax/docprovide
+           test-engine/scheme-tests
+           (for-syntax scheme/base))
 
   ;; syntax:
   (provide (rename-out 
@@ -37,6 +38,8 @@
             [intermediate-unquote-splicing unquote-splicing]
             [intermediate-time time]
             [intermediate-module-begin #%module-begin]
+            [beginner-true true]
+            [beginner-false false]
             )
            check-expect
            check-within
@@ -45,7 +48,7 @@
            check-range
 	   #%datum
            #%top-interaction
-	   empty true false
+	   empty 
 
 ; 	   signature : -> mixed one-of predicate combined
 ; 	   Number Real Rational Integer Natural Boolean True False String Symbol Char Empty-list Any
@@ -54,7 +57,7 @@
 ; 	   check-property for-all ==> expect expect-within expect-member-of expect-range
 	   )
 
-  ;; procedures:
+
   (provide-and-document
    procedures
    (all-from beginner: lang/private/intermediate-funs procedures))

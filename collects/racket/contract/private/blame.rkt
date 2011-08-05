@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require syntax/srcloc racket/pretty)
+(require syntax/srcloc racket/pretty setup/path-to-relative)
 
 (provide blame?
          make-blame
@@ -63,8 +63,8 @@
     b)))
 
 (define (default-blame-format b x custom-message)
-  (let* ([source-message (regexp-replace #rx": *$" (source-location->prefix (blame-source b)) "")]
-         [positive-message (show/display (blame-positive b))]
+  (let* ([source-message (source-location->string (blame-source b))]
+         [positive-message (show/display (convert-blame-party (blame-positive b)))]
          
          [contract-message (format "  contract: ~a" (show/write (blame-contract b)))]
          [contract-message+at (if (regexp-match #rx"\n$" contract-message)
@@ -76,19 +76,18 @@
                                                  "\n"
                                                  (if (string=? source-message "")
                                                      ""
-                                                     (format "        at: ~a" source-message))))]
-                                                 
-         [value-message (if (blame-value b)
-                          (format " on ~a" (show/display (blame-value b)))
-                          "")])
+                                                     (format "        at: ~a" source-message))))])
     ;; use (regexp-match #rx"\n" ...) to find out if show/display decided that this
     ;; is a multiple-line message and adjust surrounding formatting accordingly
     (cond
       [(blame-original? b)
+       (define start-of-message
+         (if (blame-value b)
+             (format "~a: self-contract violation," (blame-value b))
+             "self-contract violation:"))
        (string-append
-        (format "self-contract violation: ~a\n" custom-message)
-        (format "  contract~a from ~a~a blaming ~a~a" 
-                value-message 
+        (format "~a ~a\n" start-of-message custom-message)
+        (format "  contract from ~a~a blaming ~a~a" 
                 positive-message
                 (if (regexp-match #rx"\n" positive-message)
                     " "
@@ -99,11 +98,14 @@
                     "\n"))
         contract-message+at)]
       [else
-       (define negative-message (show/display (blame-negative b)))
+       (define negative-message (show/display (convert-blame-party (blame-negative b))))
+       (define start-of-message
+         (if (blame-value b)
+             (format "~a: contract violation," (blame-value b))
+             "contract violation:"))
        (string-append
-        (format "contract violation: ~a\n" custom-message)
-        (format "  contract~a from ~a~a blaming ~a~a" 
-                value-message
+        (format "~a ~a\n" start-of-message custom-message)
+        (format "  contract from ~a~a blaming ~a~a" 
                 negative-message 
                 (if (regexp-match #rx"\n" negative-message)
                     " "
@@ -138,6 +140,11 @@
   (let ([port (open-output-string)])
     (pretty-write v port)
     (get-output-string port)))
+
+(define (convert-blame-party x)
+  (cond
+    [(path? x) (path->relative-string/library x)]
+    [else x]))
 
 (define show/display (show pretty-format/display))
 (define show/write (show pretty-format/write))

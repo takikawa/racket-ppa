@@ -1,14 +1,14 @@
-;; mysterx.ss
+;; mysterx.rkt
 
 (module mysterx mzscheme
 
   ; private mysterx modules
 
-  (require (prefix mxprims: "private/mxmain.ss"))
-  (require (prefix style: "private/style.ss"))
-  (require "private/filter.ss")
-  (require "private/properties.ss")
-  (require "private/util.ss")
+  (require (prefix mxprims: "private/mxmain.rkt")
+           (prefix style: "private/style.rkt")
+           "private/filter.rkt"
+           "private/properties.rkt"
+           "private/util.rkt")
 
   ; mzlib
 
@@ -79,8 +79,7 @@
     com-scode->number
     number->com-scode
     com-object?
-    com-iunknown?
-    %%initialize-dotnet-runtime)
+    com-iunknown?)
 
   (define mx-version mxprims:mx-version)
   (define block-while-browsers mxprims:block-while-browsers)
@@ -121,8 +120,6 @@
   (define set-coclass-from-progid! mxprims:set-coclass-from-progid!)
   (define com-object-eq? mxprims:com-object-eq?)
   (define com-omit mxprims:com-omit)
-
-  (define %%initialize-dotnet-runtime mxprims:%%initialize-dotnet-runtime)
 
   ;; sort results of "reflection" results
 

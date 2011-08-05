@@ -1,11 +1,27 @@
 #lang racket/base
-(require racket/unit
-         racket/contract
-         "url-structs.ss"
-         "url-sig.ss"
-         "url-unit.ss"
-         "tcp-sig.ss"
-         "tcp-unit.ss")
+(require racket/unit racket/contract
+         (rename-in racket/tcp 
+                    [tcp-connect plain-tcp-connect]
+                    [tcp-abandon-port plain-tcp-abandon-port])
+         openssl
+         "tcp-sig.rkt"
+         "url-structs.rkt" "url-sig.rkt" "url-unit.rkt")
+
+;; Define `tcp-connect' and `tcp-abandon-port' to fit with
+;; `current-connect-scheme' from `url-unt@'
+(define (tcp-connect host port)
+  (cond
+   [(equal? (current-connect-scheme) "https") 
+    (ssl-connect host port (current-https-protocol))]
+   [else 
+    (plain-tcp-connect host port)]))
+
+(define (tcp-abandon-port port)
+  (cond
+   [(ssl-port? port) (ssl-abandon-port port)]
+   [else (plain-tcp-abandon-port port)]))
+
+(define-unit-from-context tcp@ tcp^)
 
 (define-compound-unit/infer url+tcp@
   (import) (export url^)
@@ -14,6 +30,9 @@
 (define-values/invoke-unit/infer url+tcp@)
 
 (provide (struct-out url) (struct-out path/param))
+
+(define current-https-protocol (make-parameter 'sslv2-or-v3))
+(provide current-https-protocol)
 
 (provide/contract
  (string->url ((or/c bytes? string?) . -> . url?))
@@ -34,16 +53,15 @@
  (display-pure-port (input-port? . -> . void?))
  (purify-port (input-port? . -> . string?))
  (netscape/string->url (string? . -> . url?))
- (call/input-url  (case->
-                   (-> url?
-                       (-> url? input-port?)
-                       (-> input-port? any)
-                       any)
-                   (-> url?
-                       (-> url? (listof string?) input-port?)
-                       (-> input-port? any)
-                       (listof string?)
-                       any)))
+ (call/input-url (case-> (-> url?
+                             (-> url? input-port?)
+                             (-> input-port? any)
+                             any)
+                         (-> url?
+                             (-> url? (listof string?) input-port?)
+                             (-> input-port? any)
+                             (listof string?)
+                             any)))
  (combine-url/relative (url? string? . -> . url?))
  (url-exception? (any/c . -> . boolean?))
  (current-proxy-servers

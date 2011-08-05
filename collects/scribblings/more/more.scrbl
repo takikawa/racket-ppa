@@ -39,7 +39,7 @@
                  " in plain text: "
                  (link file "step " which) ".")))
 
-@title{@bold{More}: Systems Programming with Racket}
+@title{More: Systems Programming with Racket}
 
 @author["Matthew Flatt"]
 
@@ -75,7 +75,7 @@ start @exec{racket} with no command-line arguments:
 
 @verbatim[#:indent 2]{
   $ racket
-  Welcome to Racket
+  @(regexp-replace #rx"\n+$" (banner) "")
   > 
 }
 

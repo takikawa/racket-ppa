@@ -1,12 +1,12 @@
 #lang scheme/base
 
-;; this is the runtime code for loc-wrapper-ct.ss.
+;; this is the runtime code for loc-wrapper-ct.rkt.
 ;; it isn't really its own module, but separated
 ;; out in order to get the phases right.
 (provide (all-defined-out))
 
-(require (lib "etc.ss")
-         "term.ss")
+(require mzlib/etc
+         "term.rkt")
 
 (define (init-loc-wrapper e line column quoted?)
   (make-lw e line #f column #f (not quoted?) #f))
@@ -58,7 +58,7 @@
       [(string? e) 
        (values line col (+ col (string-length e)))]
       [(symbol? e)
-       (values line col (+ col (string-length (symbol->string e))))]
+       (values line col (+ col (string-length (format "~s" e))))]
       [(not e) (values line col col)]
       [else 
        (let loop ([lws e]

@@ -1,6 +1,9 @@
 #lang scribble/manual
 @(require scribble/eval "utils.rkt" (for-label scheme unstable/hash))
 
+@(define the-eval (make-base-eval))
+@(the-eval '(require unstable/hash))
+
 @title{Hash Tables}
 
 @defmodule[unstable/hash]
@@ -19,14 +22,14 @@ This module provides tools for manipulating hash tables.
                                     (lambda (k a b) (combine a b))])
          (and/c hash? hash-can-functional-set?)]{
 
-Computes the union of @scheme[h0] with each hash table @scheme[h] by functional
-update, adding each element of each @scheme[h] to @scheme[h0] in turn.  For each
-key @scheme[k] and value @scheme[v], if a mapping from @scheme[k] to some value
-@scheme[v0] already exists, it is replaced with a mapping from @scheme[k] to
-@scheme[(combine/key k v0 v)].
+Computes the union of @racket[h0] with each hash table @racket[h] by functional
+update, adding each element of each @racket[h] to @racket[h0] in turn.  For each
+key @racket[k] and value @racket[v], if a mapping from @racket[k] to some value
+@racket[v0] already exists, it is replaced with a mapping from @racket[k] to
+@racket[(combine/key k v0 v)].
 
 @defexamples[
-#:eval (eval/require 'unstable/hash)
+#:eval the-eval
 (hash-union (make-immutable-hash '([1 . one])) (make-immutable-hash '([2 . two])) (make-immutable-hash '([3 . three])))
 (hash-union (make-immutable-hash '([1 . (one uno)] [2 . (two dos)]))
             (make-immutable-hash '([1 . (ein une)] [2 . (zwei deux)]))
@@ -45,14 +48,14 @@ key @scheme[k] and value @scheme[v], if a mapping from @scheme[k] to some value
                                      (lambda (k a b) (combine a b))])
          void?]{
 
-Computes the union of @scheme[h0] with each hash table @scheme[h] by mutable
-update, adding each element of each @scheme[h] to @scheme[h0] in turn.  For each
-key @scheme[k] and value @scheme[v], if a mapping from @scheme[k] to some value
-@scheme[v0] already exists, it is replaced with a mapping from @scheme[k] to
-@scheme[(combine/key k v0 v)].
+Computes the union of @racket[h0] with each hash table @racket[h] by mutable
+update, adding each element of each @racket[h] to @racket[h0] in turn.  For each
+key @racket[k] and value @racket[v], if a mapping from @racket[k] to some value
+@racket[v0] already exists, it is replaced with a mapping from @racket[k] to
+@racket[(combine/key k v0 v)].
 
 @defexamples[
-#:eval (eval/require 'unstable/hash)
+#:eval the-eval
 (define h (make-hash))
 h
 (hash-union! h (make-immutable-hash '([1 . (one uno)] [2 . (two dos)])))
@@ -64,3 +67,5 @@ h
 ]
 
 }
+
+@(close-eval the-eval)

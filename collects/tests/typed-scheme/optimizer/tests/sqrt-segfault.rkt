@@ -1,12 +1,12 @@
 #;
 (
-sqrt-segfault.rkt line 18 col 15 - - - binary float
-sqrt-segfault.rkt line 19 col 15 - * - binary float
+TR opt: sqrt-segfault.rkt 18:15 - -- binary float
+TR opt: sqrt-segfault.rkt 19:15 * -- binary float
+TR missed opt: sqrt-segfault.rkt 20:31 (sqrt dist2) -- unexpected complex type
 )
 
 #lang typed/scheme
 #:optimize
-
 
 
 ;; from the nbody-generic benchmark.

@@ -1,6 +1,6 @@
 #;
 (
-vector-ref.rkt line 10 col 1 - vector-ref - vector
+TR opt: vector-ref.rkt 10:1 vector-ref -- vector
 1
 )
 

@@ -1,6 +1,6 @@
 #;
 (
-#f line #f col #f - make-sequence - in-string
+TR opt: in-string.rkt 6:0 #%module-begin -- in-string
 123)
 
 #lang typed/scheme

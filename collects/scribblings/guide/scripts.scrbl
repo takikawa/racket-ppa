@@ -1,12 +1,10 @@
 #lang scribble/doc
-@(require scribble/manual
-          scheme/cmdline
-          "guide-utils.ss")
+@(require scribble/manual scheme/cmdline "guide-utils.rkt")
 
 @title[#:tag "scripts"]{Scripts}
 
-Racket files can be turned into executable scripts under Unix and Mac
-OS X.  Under Windows, a compatibility layer like Cygwin support the
+Racket files can be turned into executable scripts on Unix and Mac
+OS X.  On Windows, a compatibility layer like Cygwin support the
 same kind of scripts, or scripts can be implemented as batch files.
 
 @section{Unix Scripts}
@@ -18,6 +16,10 @@ the next character must be either a space or @litchar{/}, and the
 remainder of the first line must be a command to execute the script. For
 some platforms, the total length of the first line is restricted to 32
 characters, and sometimes the space is required.
+
+@margin-note{Use @racketmodfont{#lang} @racketmodname[racket/base] instead
+of @racketmodfont{#lang} @racketmodname[racket] to produce scripts with a
+faster startup time.}
 
 The simplest script format uses an absolute path to a @exec{racket}
 executable followed by a module declaration. For example, if

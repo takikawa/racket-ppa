@@ -1,9 +1,9 @@
 #lang racket/unit
 
-  (require "sig.ss"
+  (require "sig.rkt"
            mred/mred-sig
            racket/class
-           "../preferences.ss"
+           "../preferences.rkt"
            string-constants)
   
   (import mred^)
@@ -523,4 +523,3 @@
       (set-flags (cons 'handles-events (get-flags)))
       (set-snipclass number-snipclass)
       (iterate 1))) ;; calc first digits
-  

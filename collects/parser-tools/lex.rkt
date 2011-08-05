@@ -2,19 +2,19 @@
 
   ;; Provides the syntax used to create lexers and the functions needed to
   ;; create and use the buffer that the lexer reads from.  See docs.
-	
+
   (require-for-syntax mzlib/list
                       syntax/stx
                       syntax/define
                       syntax/boundmap
-                      "private-lex/util.ss"
-                      "private-lex/actions.ss"
-                      "private-lex/front.ss"
-                      "private-lex/unicode-chars.ss")
+                      "private-lex/util.rkt"
+                      "private-lex/actions.rkt"
+                      "private-lex/front.rkt"
+                      "private-lex/unicode-chars.rkt")
 
   (require mzlib/stxparam
            syntax/readerr
-           "private-lex/token.ss")
+           "private-lex/token.rkt")
 
   (provide lexer lexer-src-pos define-lex-abbrev define-lex-abbrevs define-lex-trans
            
@@ -189,14 +189,12 @@
                      (normalize-definition (syntax (define-syntax name-form body-form)) #'lambda)))
          
          #`(define-syntax #,name 
-             (let ((certifier (syntax-local-certifier))
-                   (func #,body))
+             (let ((func #,body))
                (unless (procedure? func)
                  (raise-syntax-error 'define-lex-trans "expected a procedure as the transformer, got ~e" func))
                (unless (procedure-arity-includes? func 1)
                  (raise-syntax-error 'define-lex-trans "expected a procedure that accepts 1 argument as the transformer, got ~e" func))
-               (make-lex-trans (lambda (stx)
-                                 (certifier (func stx) 'a)))))))
+               (make-lex-trans func)))))
       (_
        (raise-syntax-error
         #f
@@ -366,8 +364,8 @@
   (create-unicode-abbrevs #'here)
   
   (define-lex-trans (char-set stx)
-                    (syntax-case stx ()
-                      ((_ str)
+    (syntax-case stx ()
+      ((_ str)
        (string? (syntax-e (syntax str)))
        (with-syntax (((char ...) (string->list (syntax-e (syntax str)))))
          (syntax (union char ...))))))

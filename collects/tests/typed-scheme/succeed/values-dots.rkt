@@ -1,6 +1,6 @@
 #lang typed-scheme
 
-(require typed-scheme/private/extra-procs)
+(require typed-scheme/base-env/extra-procs)
 
 
 (call-with-values (lambda () (values 1 2)) (lambda: ([x : Number] [y : Number]) (+ x y)))
@@ -20,7 +20,7 @@
 
 (inst map-with-funcs Integer Integer)
 
-(map-with-funcs 
+(map-with-funcs
  (lambda: ([x : Integer] [y : Integer]) (+ x y))
  (lambda: ([x : Integer] [y : Integer]) (- x y)) )
 

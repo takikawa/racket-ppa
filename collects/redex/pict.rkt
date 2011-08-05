@@ -1,11 +1,11 @@
-#lang scheme/base
+#lang racket/base
 
-(require scheme/contract
-         "private/pict.ss"
-         "private/core-layout.ss"
-         "private/loc-wrapper.ss"
-         "reduction-semantics.ss"
-         (lib "mrpict.ss" "texpict"))
+(require racket/contract
+         "private/pict.rkt"
+         "private/core-layout.rkt"
+         "private/loc-wrapper.rkt"
+         "reduction-semantics.rkt"
+         texpict/mrpict)
 
 (define reduction-rule-style/c
   (symbols 'compact-vertical
@@ -29,7 +29,7 @@
  [reduction-relation->pict (->* (reduction-relation?)
                                 (#:style reduction-rule-style/c)
                                 pict?)]
- [render-reduction-relation-rules (parameter/c (or/c false/c (listof (or/c symbol? string?))))]
+ [render-reduction-relation-rules (parameter/c (or/c false/c (listof (or/c symbol? string? exact-nonnegative-integer?))))]
  
  [language->pict (->* (compiled-lang?)
                       (#:nts (or/c false/c (listof (or/c string? symbol?))))
@@ -45,8 +45,11 @@
                    pict?)])])
 
 ; syntax
-(provide metafunction->pict
+(provide relation->pict
+         metafunction->pict
          metafunctions->pict
+         
+         render-relation
          render-metafunction
          render-metafunctions)
 
@@ -68,7 +71,9 @@
  [linebreaks (parameter/c (or/c false/c (listof boolean?)))]
  [curly-quotes-for-strings (parameter/c boolean?)]
  [white-bracket-sizing (parameter/c
-                        (-> string? number? (values number? number? number? number?)))])
+                        (-> string? number? (values number? number? number? number?)))]
+ [horizontal-bar-spacing (parameter/c exact-nonnegative-integer?)]
+ [relation-clauses-combine (parameter/c (-> (listof pict?) pict?))])
 
 (provide/contract
  [rule-pict-style 
@@ -103,7 +108,31 @@
  lw-column-span)
 
 (provide to-lw
+         to-lw/stx
          (struct-out lw))
+
+(require (prefix-in lw/ct: "private/loc-wrapper-ct.rkt")
+         (prefix-in lw/rt: "private/loc-wrapper-rt.rkt"))
+(define (to-lw/stx stx)
+  (let loop ([stx (lw/ct:to-lw/proc stx)])
+    (syntax-case stx (init-loc-wrapper make-lw add-spans list quote)
+      [(make-lw arg ...) 
+       (apply make-lw (map loop (syntax->list #'(arg ...))))]
+      [(init-loc-wrapper arg ...)
+       (apply lw/rt:init-loc-wrapper (map loop (syntax->list #'(arg ...))))]
+      [(add-spans arg ...)
+       (apply lw/rt:add-spans (map loop (syntax->list #'(arg ...))))]
+      [(list arg ...)
+       (apply list (map loop (syntax->list #'(arg ...))))]
+      [(quote arg)
+       (syntax->datum #'arg)]
+      [_ 
+       (let ([x (syntax-e stx)])
+         (unless (or (number? x)
+                     (string? x)
+                     (boolean? x))
+           (error 'to-lw/stx "unk thing: ~s\n" (syntax->datum stx)))
+         x)])))
 
 (provide/contract
  [just-before (-> (or/c pict? string? symbol?) lw? lw?)]
