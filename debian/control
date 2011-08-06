@@ -19,7 +19,7 @@ Recommends: racket-doc (>= ${source:Upstream-Version})
 Breaks: plt-scheme (<<5.0~)
 Replaces: plt-scheme (<<5.0~)
 Provides: plt-scheme
-Description: extensible programming language in the scheme family
+Description: extensible programming language in the Scheme family
  Racket (previously PLT Scheme) is an innovative programming language
  that builds on a rich academic and practical tradition.
  .
@@ -43,7 +43,7 @@ Depends: ${misc:Depends}, ${shlibs:Depends}
 Recommends: racket-doc (>= ${source:Upstream-Version})
 Breaks: plt-scheme (<<5.0~)
 Replaces: plt-scheme (<<5.0~)
-Description: extensible programming language in the scheme family (shared files)
+Description: extensible programming language in the Scheme family (shared files)
  This package includes the architecture independent files for Racket
  (but not the documentation, see racket-doc for that).
 
@@ -56,7 +56,7 @@ Enhances: racket
 Breaks: plt-scheme-doc (<<5.0~)
 Replaces: plt-scheme-doc (<<5.0~)
 Provides: plt-scheme-doc
-Description: extensible programming language in the scheme family (documentation)
+Description: extensible programming language in the Scheme family (documentation)
  This package includes all of the documentation for Racket.
 
 Package: plt-scheme
