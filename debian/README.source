@@ -13,7 +13,8 @@ The Debian packaging for racket (previously known as plt-scheme) is now stored i
    upstream version.
 
  - patch-queue/dfsg contains patches on top of dfsg. Tags are 
-   patches/$debian_ver where $debian_ver is a debian version.
+   patches/$debian_ver where $debian_ver is a debian version. This
+   branch is rebased for each new upstream version.
 
  - master is merged debian packaging and upstream commits.
 
