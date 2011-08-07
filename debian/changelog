@@ -5,6 +5,10 @@ racket (5.1.2+dfsg1-1) UNRELEASED; urgency=low
   * Captialize Scheme in package short descriptions. (Closes: #625276)
   * Build-Depend on libffi-dev to use the system library instead of the
     bundled version.
+  * Update Lintian overrides
+    + Correct path according for unstripped-binary-or-object
+    + Remove obsolete embedded-zlib override
+    + Add override for menu-icon-missing, icon is shipped in racket-common
 
  -- James Vega <jamessan@debian.org>  Fri, 05 Aug 2011 07:03:09 -0400
 
