@@ -9,6 +9,7 @@ racket (5.1.2+dfsg1-1) UNRELEASED; urgency=low
     + Correct path according for unstripped-binary-or-object
     + Remove obsolete embedded-zlib override
     + Add override for menu-icon-missing, icon is shipped in racket-common
+  * Add dversionmangle to watch file to strip dfsg.
 
  -- James Vega <jamessan@debian.org>  Fri, 05 Aug 2011 07:03:09 -0400
 
