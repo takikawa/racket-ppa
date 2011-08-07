@@ -8,8 +8,8 @@ Build-Depends: cdbs, quilt, debhelper (>= 7.0.0), patchutils, libffi-dev,
  libfreetype6-dev, libjpeg-dev, libpango1.0-dev, libpng12-dev, libssl-dev, 
  libxaw7-dev, xbitmaps, libxft-dev, libgl1-mesa-dev | libgl-dev,
  libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev
-Vcs-Git: git://git.debian.org/git/collab-maint/racket
-Vcs-Browser: http://git.debian.org/?p=collab-maint/racket.git;a=summary
+Vcs-Git: git://anonscm.debian.org/collab-maint/racket.git
+Vcs-Browser: http://anonscm.debian.org/gitweb/?p=collab-maint/racket.git
 Homepage: http://www.racket-lang.org/
 
 Package: racket
