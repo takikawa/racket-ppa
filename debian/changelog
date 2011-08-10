@@ -14,6 +14,7 @@ racket (5.1.2+dfsg2-1) UNRELEASED; urgency=low
   * Update Vcs-* for the Alioth transition.
   * Restore collects/scribble/sigplan (sans sigplanconf.cls) and re-enable
     building of scribble's documentation.  (Closes: #636699)
+  * Symlink racket's icons into /usr/share/pixmaps.
 
  -- James Vega <jamessan@debian.org>  Fri, 05 Aug 2011 07:03:09 -0400
 
