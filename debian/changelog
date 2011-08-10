@@ -1,4 +1,4 @@
-racket (5.1.2+dfsg1-1) UNRELEASED; urgency=low
+racket (5.1.2+dfsg2-1) UNRELEASED; urgency=low
 
   * New Upstream version
   * Correct the /u/s/d/racket/release-notes symlink. (Closes: #628887)
@@ -12,6 +12,8 @@ racket (5.1.2+dfsg1-1) UNRELEASED; urgency=low
   * Add dversionmangle to watch file to strip dfsg.
   * Bump Standards-Version to 3.9.2.0, no changes needed.
   * Update Vcs-* for the Alioth transition.
+  * Restore collects/scribble/sigplan (sans sigplanconf.cls) and re-enable
+    building of scribble's documentation.  (Closes: #636699)
 
  -- James Vega <jamessan@debian.org>  Fri, 05 Aug 2011 07:03:09 -0400
 
