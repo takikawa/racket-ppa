@@ -3,15 +3,19 @@ Fri, 4 Feb 2000 22:10:09 -0700.
 
 It was downloaded from http://racket-lang.org/download
 
-The following directories were removed from the upstream tarball
-because of licensing concerns
+The following were removed from the upstream tarball because of licensing
+concerns
 
-	collects/scribble/jfp
-	collects/scribble/sigplan
-	collects/tests            
-
-(only a small fraction of the tests are problematic, but the build
-system doesn't deal with partial deletions)
+	collects/scribble/jfp/
+	collects/scribble/sigplan/sigplanconf.cls
+	collects/tests/racket/benchmarks/common/maze.sch
+	collects/tests/racket/benchmarks/common/maze2.sch
+	collects/tests/racket/benchmarks/common/psyntax-input.txt
+	collects/tests/racket/benchmarks/common/types/maze2.rktl
+	collects/tests/racket/testing.rktl
+	collects/tests/utils/mz-testing.rkt
+	collects/tests/utils/sexp-diff.rkt
+	collects/tests/xml/clark-tests/
 
 readline collection notes:
 GNU's readline library is covered by the GPL (found at
