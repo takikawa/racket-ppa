@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=DrRacket
+Comment=IDE for Racket
+Exec=drracket
+Terminal=false
+Type=Application
+Categories=Development;
+Icon=plt
+StartupNotify=true
