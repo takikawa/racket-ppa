@@ -19,10 +19,11 @@ racket (5.1.3+dfsg1-1) unstable; urgency=low
   * Install a desktop file for drracket.  (Closes: #513390)
 
   [ David Bremner ]
-  * Use upstream stubs for sigplanconf.cls and jfp.cls
+  * Use upstream stubs for sigplanconf.cls and jfp.cls, restore 
+    collects/scribble/jfp (licensing questions resolved).
   * remove kFreeBSD patches,  now upstream
 
- -- David Bremner <bremner@debian.org>  Sun, 21 Aug 2011 22:14:48 -0300
+ -- David Bremner <bremner@debian.org>  Sun, 21 Aug 2011 22:51:49 -0300
 
 racket (5.1.1+dfsg1-3) unstable; urgency=low
 
