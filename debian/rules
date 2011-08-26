@@ -20,9 +20,13 @@ endif
 # keep the collect build from using every available core, unless 
 # explicitly enabled.
 ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
-        NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+    NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 else
-	NUMJOBS = 1
+    NUMJOBS = 1
+endif
+
+ifneq (,$(filter noopt,$(DEB_BUILD_OPTIONS)))
+    DEB_CONFIGURE_EXTRA_FLAGS += --enable-noopt
 endif
 
 # Support for generating ".orig.tar.gz" from git
