@@ -11,7 +11,7 @@ MZDYN := mzdyn3m.o
 
 # Some architectures don't like the 3m garbage collector, so use Boehm (aka
 # cgc)
-ifneq (,$(filter alpha hppa powerpc ppc64 mips mipsel,$(DEB_HOST_ARCH)))
+ifneq (,$(filter alpha hppa mips mipsel,$(DEB_HOST_ARCH)))
     DEB_CONFIGURE_EXTRA_FLAGS := --enable-cgcdefault
     DEB_DH_GENCONTROL_ARGS_racket := -- -Vracket:GC=cgc
     MZDYN := mzdyn.o
