@@ -6,16 +6,7 @@ include debian/racket-arch.mk
 
 DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
 DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
-DEB_DH_GENCONTROL_ARGS_racket := -- -Vracket:GC=3m
 MZDYN := mzdyn3m.o
-
-# Some architectures don't like the 3m garbage collector, so use Boehm (aka
-# cgc)
-ifneq (,$(filter alpha hppa mips mipsel,$(DEB_HOST_ARCH)))
-    DEB_CONFIGURE_EXTRA_FLAGS := --enable-cgcdefault
-    DEB_DH_GENCONTROL_ARGS_racket := -- -Vracket:GC=cgc
-    MZDYN := mzdyn.o
-endif
 
 # keep the collect build from using every available core, unless 
 # explicitly enabled.

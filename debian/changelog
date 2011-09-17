@@ -3,6 +3,9 @@ racket (5.1.3+dfsg1-2) UNRELEASED; urgency=low
   * Pass --enable-noopt to configure when noopt is in DEB_BUILD_OPTIONS
   * Remove powerpc/ppc64 from the "use cgc".  Racket builds fine with 3m on
     powerpc systems and those binaries will run on ppc64-kernel systems.
+  * Use 3m for all architectures, as cgc is too problematic.
+    + Remove "use cgc" list from debian/rules
+    + Remove "Built with the ... garbage collector" from package description
 
  -- James Vega <jamessan@debian.org>  Fri, 26 Aug 2011 01:08:19 -0400
 

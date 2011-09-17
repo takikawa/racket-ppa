@@ -34,8 +34,6 @@ Description: extensible programming language in the Scheme family
  It supports the creation of new programming languages through a
  rich, expressive syntax system. Example languages include Typed Scheme,
  ACL2, FrTime, and Lazy Scheme.
- .
- Built with the ${racket:GC} garbage collector.
 
 Package: racket-common
 Architecture: all
