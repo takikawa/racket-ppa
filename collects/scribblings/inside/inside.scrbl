@@ -1,8 +1,8 @@
 #lang scribble/doc
-@(require "utils.ss")
+@(require "utils.rkt")
 
 @title[#:tag-prefix '(lib "scribblings/inside/inside.scrbl") 
-       #:tag "top"]{@bold{Inside}: Racket C API}
+       #:tag "top"]{Inside: Racket C API}
 
 @author["Matthew Flatt"]
 

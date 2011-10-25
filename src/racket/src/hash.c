@@ -54,9 +54,9 @@ static void register_traversers(void);
 
 #ifdef MZ_PRECISE_GC
 /* keygen race conditions below are ok, because keygen is randomness used
-   to create a hashkey.  Setting a hashkey on a Scheme_Object however, may 
-   lead to race conditions */
-FIXME_LATER static uintptr_t keygen;
+   to create a hashkey. (Make sure that only one thread at a time sets
+   a hash code in a specific object, though.) */
+SHARED_OK static uintptr_t keygen;
 
 XFORM_NONGCING static MZ_INLINE
 uintptr_t PTR_TO_LONG(Scheme_Object *o)
@@ -1812,7 +1812,7 @@ static RBNode *recolor_rb(int red, RBNode *rb)
                  rb->right);
 }
 
-static RBNode *rb_find(uintptr_t code, RBNode *s)
+XFORM_NONGCING static RBNode *rb_find(uintptr_t code, RBNode *s)
 {
   while (1) {
     if (!s)
@@ -2276,6 +2276,7 @@ Scheme_Hash_Tree *scheme_hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *ke
     }
   } else {
     h = PTR_TO_LONG((Scheme_Object *)key);
+    h = h >> 2;
   }
 
   if (!val) {
@@ -2411,6 +2412,32 @@ Scheme_Hash_Tree *scheme_hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *ke
   return tree2;
 }
 
+Scheme_Object *scheme_eq_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *key)
+{
+  uintptr_t h;
+  RBNode *rb;
+
+  h = PTR_TO_LONG((Scheme_Object *)key);
+  h = h >> 2;
+
+  rb = rb_find(h, tree->root);
+  if (rb) {
+    if (!rb->key) {
+      /* Have list of keys & vals: */
+      Scheme_Object *prs = rb->val, *a;
+      while (prs) {
+        a = SCHEME_CAR(prs);
+        if (SAME_OBJ(SCHEME_CAR(a), key))
+          return SCHEME_CDR(a);
+        prs = SCHEME_CDR(prs);
+      }
+    } else if (SAME_OBJ(rb->key, key))
+      return rb->val;
+  }
+
+  return NULL;
+}
+
 Scheme_Object *scheme_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *key)
 {
   uintptr_t h;
@@ -2423,7 +2450,7 @@ Scheme_Object *scheme_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *key)
     else
       h = to_unsigned_hash(scheme_eqv_hash_key(key));
   } else {
-    h = PTR_TO_LONG((Scheme_Object *)key);
+    return scheme_eq_hash_tree_get(tree, key);
   }
 
   rb = rb_find(h, tree->root);
@@ -2433,31 +2460,23 @@ Scheme_Object *scheme_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *key)
       Scheme_Object *prs = rb->val, *a;
       while (prs) {
         a = SCHEME_CAR(prs);
-        if (kind) {
-          if (kind == 1) {
-            if (scheme_equal(SCHEME_CAR(a), key))
-              return SCHEME_CDR(a);
-          } else {
-            if (scheme_eqv(SCHEME_CAR(a), key))
-              return SCHEME_CDR(a);
-          }
+        if (kind == 1) {
+          if (scheme_equal(SCHEME_CAR(a), key))
+            return SCHEME_CDR(a);
         } else {
-          if (SAME_OBJ(SCHEME_CAR(a), key))
+          if (scheme_eqv(SCHEME_CAR(a), key))
             return SCHEME_CDR(a);
         }
         prs = SCHEME_CDR(prs);
       }
     } else {
-      if (kind) {
-        if (kind == 1) {
-          if (scheme_equal(key, rb->key))
-            return rb->val;
-        } else {
-          if (scheme_eqv(key, rb->key))
-            return rb->val;
-        }
-      } else if (SAME_OBJ(key, rb->key))
-        return rb->val;
+      if (kind == 1) {
+        if (scheme_equal(key, rb->key))
+          return rb->val;
+      } else {
+        if (scheme_eqv(key, rb->key))
+          return rb->val;
+      }
     }
   }
 
@@ -2566,8 +2585,7 @@ int scheme_hash_tree_equal(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2)
 
 START_XFORM_SKIP;
 
-#define MARKS_FOR_HASH_C
-#include "mzmark.c"
+#include "mzmark_hash.inc"
 
 static void register_traversers(void)
 {

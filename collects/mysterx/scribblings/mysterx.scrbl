@@ -1,7 +1,7 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
-@title{@bold{MysterX}: Using Windows COM Objects in Racket}
+@title{MysterX: Using Windows COM Objects in Racket}
 
 @author["Paul Steckler"]
 

@@ -1,14 +1,11 @@
 #lang scribble/doc
-@(require "common.ss"
-          (for-label net/pop3
-                     net/pop3-unit
-                     net/pop3-sig))
+@(require "common.rkt" (for-label net/pop3 net/pop3-unit net/pop3-sig))
 
 @(define pt (tt ">"))
 
 @title[#:tag "pop3"]{POP3: Reading Mail}
 
-@defmodule[net/pop3]{The @schememodname[net/pop3] module provides
+@defmodule[net/pop3]{The @racketmodname[net/pop3] module provides
 tools for the Post Office Protocol version 3 @cite["RFC977"].}
 
 @defstruct[communicator ([sender output-port?]
@@ -18,31 +15,31 @@ tools for the Post Office Protocol version 3 @cite["RFC977"].}
                          [state (one-of/c 'disconnected 'authorization 'transaction)])]{
 
 Once a connection to a POP-3 server has been established, its state is
-stored in a @scheme[communicator] instance, and other procedures take
-@scheme[communicator] instances as an argument.}
+stored in a @racket[communicator] instance, and other procedures take
+@racket[communicator] instances as an argument.}
 
 
 @defproc[(connect-to-server [server string?]
                             [port-number (integer-in 0 65535) 110])
          communicator?]{
 
-Connects to @scheme[server] at @scheme[port-number].}
+Connects to @racket[server] at @racket[port-number].}
 
 
 @defproc[(disconnect-from-server [communicator communicator?])
          void?]{
 
-Disconnects @scheme[communicator] from the server, and sets
-@scheme[communicator]'s state to @scheme['disconnected].}
+Disconnects @racket[communicator] from the server, and sets
+@racket[communicator]'s state to @racket['disconnected].}
 
 
 @defproc[(authenticate/plain-text [user string?] [passwd string?]       
                                   [communicator communicator?])
           void?]{
 
-Authenticates using @scheme[user] and @scheme[passwd]. If
-authentication is successful, @scheme[communicator]'s state is set to
-@scheme['transaction].}
+Authenticates using @racket[user] and @racket[passwd]. If
+authentication is successful, @racket[communicator]'s state is set to
+@racket['transaction].}
 
 @defproc[(get-mailbox-status [communicator communicator?])
          (values  exact-nonnegative-integer? exact-nonnegative-integer?)]{
@@ -86,8 +83,8 @@ Gets the server's unique id for a particular message.}
          (listof (cons/c exact-integer? string?))]{
 
 Gets a list of unique id's from the server for all the messages in the
-mailbox. The @scheme[car] of each item in the result list is the
-message number, and the @scheme[cdr] of each item is the message's
+mailbox. The @racket[car] of each item in the result list is the
+message number, and the @racket[cdr] of each item is the message's
 id.}
 
 @defproc[(make-desired-header [tag-string string?])
@@ -100,7 +97,7 @@ Takes a header field's tag and returns a regexp to match the field}
          (listof string?)]{
 
 Given a list of header lines and of desired regexps, returns the
-header lines that match any of the @scheme[desireds].}
+header lines that match any of the @racket[desireds].}
 
 @; ----------------------------------------
 
@@ -150,32 +147,32 @@ Raised when the server does not gracefully disconnect.}
 
 @defstruct[(malformed-server-response pop3) ([communicator communicator?])]{
 
-Raised when the server produces a mal-formed response.}
+Raised when the server produces a malformed response.}
 
 @section{Example Session}
 
-@schemeblock[
+@racketblock[
  #,pt (require net/pop3)
- #,pt (define c (connect-to-server "cs.rice.edu"))
- #,pt (authenticate/plain-text "scheme" "********" c)
+ #,pt (define c (connect-to-server "foo.bar.com"))
+ #,pt (authenticate/plain-text "bob" "********" c)
  #,pt (get-mailbox-status c)
  196
  816400
  #,pt (get-message/headers c 100)
  ("Date: Thu, 6 Nov 1997 12:34:18 -0600 (CST)"
-  "Message-Id: <199711061834.MAA11961@new-world.cs.rice.edu>"
-  "From: Shriram Krishnamurthi <shriram@cs.rice.edu>"
+  "Message-Id: <199711061834.MAA11961@foo.bar.com>"
+  "From: Alice <alice@foo.bar.com>"
   ....
   "Status: RO")
  #,pt (get-message/complete  c 100)
  ("Date: Thu, 6 Nov 1997 12:34:18 -0600 (CST)"
-  "Message-Id: <199711061834.MAA11961@new-world.cs.rice.edu>"
-  "From: Shriram Krishnamurthi <shriram@cs.rice.edu>"
+  "Message-Id: <199711061834.MAA11961@foo.bar.com>"
+  "From: Alice <alice@foo.bar.com>"
   ....
   "Status: RO")
  ("some body" "text" "goes" "." "here" "." "")
  #,pt (get-unique-id/single c 205)
- @#,schemeerror{no message numbered 205 available for unique id}
+ @#,racketerror{no message numbered 205 available for unique id}
  #,pt (list-tail (get-unique-id/all c) 194)
  ((195 . "e24d13c7ef050000") (196 . "3ad2767070050000"))
  #,pt (get-unique-id/single c 196)
@@ -191,7 +188,7 @@ Raised when the server produces a mal-formed response.}
 
 @defthing[pop3@ unit?]{
 
-Imports nothing, exports @scheme[pop3^].}
+Imports nothing, exports @racket[pop3^].}
 
 @; ----------------------------------------
 
@@ -201,4 +198,4 @@ Imports nothing, exports @scheme[pop3^].}
 
 @defsignature[pop3^ ()]{}
 
-Includes everything exported by the @schememodname[net/pop3] module.
+Includes everything exported by the @racketmodname[net/pop3] module.

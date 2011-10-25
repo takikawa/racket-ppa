@@ -4,7 +4,7 @@
                      ;; these requires are needed since their code
                      ;; appears in the residual program
                      "typecheck/renamer.rkt" "types/type-table.rkt" profile)
-         "private/base-special-env.rkt" )
+         "base-env/base-special-env.rkt" )
 
 (provide (rename-out [module-begin #%module-begin]
                      [top-interaction #%top-interaction]
@@ -14,15 +14,18 @@
          with-type
          (for-syntax do-standard-inits))
 
+(define-for-syntax initialized #f)
 (define-for-syntax (do-standard-inits)
-  (initialize-special)
-  ((dynamic-require 'typed-scheme/private/base-structs 'initialize-structs))
-  ((dynamic-require 'typed-scheme/private/base-env-indexing 'initialize-indexing))
-  ((dynamic-require 'typed-scheme/private/base-env 'init))
-  ((dynamic-require 'typed-scheme/private/base-env-numeric 'init)))
+  (unless initialized
+      (initialize-special)
+      ((dynamic-require 'typed-scheme/base-env/base-structs 'initialize-structs))
+      ((dynamic-require 'typed-scheme/base-env/base-env-indexing 'initialize-indexing))
+      ((dynamic-require 'typed-scheme/base-env/base-env 'init))
+      ((dynamic-require 'typed-scheme/base-env/base-env-numeric 'init))
+      (set! initialized #t)))
 
 (define-syntax-rule (drivers [name sym] ...)
-  (begin 
+  (begin
     (define-syntax (name stx)
       (do-standard-inits)
       ((dynamic-require 'typed-scheme/core 'sym) stx))

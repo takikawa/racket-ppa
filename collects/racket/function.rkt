@@ -1,27 +1,40 @@
-#lang scheme/base
+#lang racket/base
 
-(provide const negate curry curryr)
+(require (for-syntax racket/base syntax/name))
+
+(provide identity const thunk thunk* negate curry curryr)
+
+(define (identity x) x)
 
 (define (const c)
   (define (const . _) c)
   (make-keyword-procedure const const))
 
+(define-syntax (thunk stx)
+  (syntax-case stx ()
+    [(_ body0 body ...) (syntax/loc stx (lambda () body0 body ...))]))
+
+(define-syntax (thunk* stx)
+  (syntax-case stx ()
+    [(_ body0 body ...)
+     (with-syntax ([proc (syntax-property
+                          (syntax/loc stx
+                            ;; optimize 0- and 1-argument cases
+                            (case-lambda [() body0 body ...]
+                                         [(x) (th)] [xs (th)]))
+                          'inferred-name (syntax-local-infer-name stx))])
+       (syntax/loc stx
+         (letrec ([th proc])
+           (make-keyword-procedure (lambda (_1 _2 . _3) (th)) proc))))]))
+
 (define (negate f)
   (unless (procedure? f) (raise-type-error 'negate "procedure" f))
-  (let-values ([(arity) (procedure-arity f)]
-               [(required-kws accepted-kws) (procedure-keywords f)])
-    (define negated ; simple version, optimize some cases
-      (case arity
-        [(0) (lambda () (not (f)))]
-        [(1) (lambda (x) (not (f x)))]
-        [(2) (lambda (x y) (not (f x y)))]
-        [else (lambda xs (not (apply f xs)))]))
-    (if (and (null? required-kws) (null? accepted-kws))
-      negated
-      ;; keyworded function
-      (make-keyword-procedure (lambda (kws kvs . args)
-                                (not (keyword-apply f kws kvs args)))
-                              negated))))
+  (let-values ([(arity) (procedure-arity f)] [(_ kwds) (procedure-keywords f)])
+    (case (and (null? kwds) arity) ; optimize some simple cases
+      [(0) (lambda () (not (f)))]
+      [(1) (lambda (x) (not (f x)))]
+      [(2) (lambda (x y) (not (f x y)))]
+      [else (compose1 not f)]))) ; keyworded or more args => just compose
 
 (define (make-curry right?)
   ;; The real code is here

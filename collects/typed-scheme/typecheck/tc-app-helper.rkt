@@ -12,7 +12,7 @@
 
 
 ;; syntax? syntax? arr? (listof tc-results?) (or/c #f tc-results) [boolean?] -> tc-results?
-(d/c (tc/funapp1 f-stx args-stx ftype0 argtys expected #:check [check? #t])
+(define/cond-contract (tc/funapp1 f-stx args-stx ftype0 argtys expected #:check [check? #t])
   ((syntax? syntax? arr? (c:listof tc-results?) (c:or/c #f tc-results?)) (#:check boolean?) . c:->* . tc-results?)
   (match* (ftype0 argtys)
     ;; we check that all kw args are optional
@@ -25,7 +25,7 @@
              [(and rest (< (length t-a) (length dom)))
               (tc-error/expr #:return (ret t-r)
                              "Wrong number of arguments, expected at least ~a and got ~a" (length dom) (length t-a))])
-       (for ([dom-t (if rest (in-sequence-forever dom rest) (in-list dom))] 
+       (for ([dom-t (if rest (in-sequence-forever dom rest) (in-list dom))]
              [a (in-list (syntax->list args-stx))]
              [arg-t (in-list t-a)])
          (parameterize ([current-orig-stx a]) (check-below arg-t dom-t))))
@@ -39,7 +39,7 @@
                          (values (if (>= nm dom-count) (make-Empty) oa)
                                  ta))])
          (define-values (t-r f-r o-r)
-           (for/lists (t-r f-r o-r) 
+           (for/lists (t-r f-r o-r)
              ([r (in-list results)])
              (open-Result r o-a t-a)))
          (ret t-r f-r o-r)))]
@@ -65,16 +65,16 @@
           [else (string-append (stringify (map make-printable dom)) rng-string)])))
 
 ;; Generates error messages when operand types don't match operator domains.
-(d/c (domain-mismatches f-stx args-stx ty doms rests drests rngs arg-tys tail-ty tail-bound
-                           #:expected [expected #f] #:return [return (make-Union null)]
-                           #:msg-thunk [msg-thunk (lambda (dom) dom)])
+(define/cond-contract (domain-mismatches f-stx args-stx ty doms rests drests rngs arg-tys tail-ty tail-bound
+                                         #:expected [expected #f] #:return [return (make-Union null)]
+                                         #:msg-thunk [msg-thunk (lambda (dom) dom)])
    ((syntax? syntax? Type/c (c:listof (c:listof Type/c)) (c:listof (c:or/c #f Type/c))
      (c:listof (c:or/c #f (c:cons/c Type/c (c:or/c c:natural-number/c symbol?))))
      (c:listof (c:or/c Values? ValuesDots?)) (c:listof tc-results?) (c:or/c #f Type/c) c:any/c)
     (#:expected (c:or/c #f tc-results?) #:return tc-results?
      #:msg-thunk (c:-> string? string?))
     . c:->* . tc-results?)
-   
+
   (define arguments-str
     (stringify-domain arg-tys
                       (if (not tail-bound) tail-ty #f)
@@ -274,8 +274,8 @@
 
 (define (poly-fail f-stx args-stx t argtypes #:name [name #f] #:expected [expected #f])
   (match t
-    [(or (Poly-names: 
-          msg-vars 
+    [(or (Poly-names:
+          msg-vars
           (Function: (list (arr: msg-doms msg-rngs msg-rests msg-drests (list (Keyword: _ _ #f) ...)) ...)))
          (PolyDots-names:
           msg-vars
@@ -286,7 +286,7 @@
        (if (and (andmap null? msg-doms)
                 (null? argtypes))
            (tc-error/expr #:return (ret (Un))
-                          (string-append 
+                          (string-append
                            "Could not infer types for applying polymorphic "
                            fcn-string
                            "\n"))
@@ -308,7 +308,7 @@
        (if (and (andmap null? msg-doms)
                 (null? argtypes))
            (tc-error/expr #:return (ret (Un))
-                          (string-append 
+                          (string-append
                            "Could not infer types for applying polymorphic "
                            fcn-string
                            "\n"))

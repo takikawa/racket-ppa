@@ -1,15 +1,16 @@
 #lang scribble/doc
 
-@(require scribble/manual "shared.ss"
-          (for-label (except-in scheme/base file-size)
+@(require scribble/manual "shared.rkt"
+          (for-label (except-in racket/base file-size)
                      teachpack/htdp/dir
-                     scheme/contract))
+                     racket/contract))
 
 @teachpack["dir"]{Working with Files and Directories}
 
-@declare-exporting[teachpack/htdp/dir]
+@;declare-exporting[teachpack/htdp/dir]
+@defmodule[#:require-form beginner-require htdp/dir]
 
-The teachpack provides structures and operations for working with files and
+The teachpack provides structures and functions for working with files and
 directories: 
 
 @defstruct[dir ([name symbol?][dirs (listof dir?)][files (listof file?)])]{}
@@ -17,12 +18,12 @@ directories:
 @defstruct[file ([name symbol?][size integer?][content (listof char?)])]{}
 
 @defproc[(create-dir [path symbol?]) dir?]{
- Turns the directory found at @scheme[path] on your computer into an instance of @scheme[dir?].}
+ Turns the directory found at @racket[path] on your computer into an instance of @racket[dir?].}
 
-Sample: Set teachpack to @filepath{dir.ss} and click RUN:
+Sample: Set teachpack to @filepath{dir.rkt} and click Run:
 @(begin
 #reader scribble/comment-reader
-(schemeblock
+(racketblock
 > (create-dir ".")
 (make-dir
   '|.|
@@ -32,7 +33,7 @@ Sample: Set teachpack to @filepath{dir.ss} and click RUN:
               (cons (make-file 'greenbal.gif 204 empty)
                     (cons (make-file 'redball.gif 203 empty)
                           (cons (make-file 'ufo.gif 1044 empty)
-                                (cons (make-file 'gif-test.ss 5811 empty)
+                                (cons (make-file 'gif-test.rkt 5811 empty)
                                       empty)))))))
 ))
 Using ``.'' usually means the directory in which your program is

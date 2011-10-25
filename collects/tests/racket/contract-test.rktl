@@ -92,7 +92,7 @@
       (define (has-proper-blame? msg)
         (define reg
           (case blame
-            [(pos) #rx"^self-contract violation"]
+            [(pos) #rx"self-contract violation"]
             [(neg) #rx"blaming neg"]
             [else (error 'test/spec-failed "unknown blame name ~s" blame)]))
         (regexp-match? reg msg))
@@ -2933,6 +2933,14 @@
    (λ (x) 
      (and (exn? x)
           (regexp-match (regexp-quote "|x y|: 123456789") (exn-message x)))))
+
+  ;; test to make sure the collects directories are appropriately prefixed
+  (contract-error-test
+    #'(contract symbol? "not a symbol" 'pos 'neg 'not-a-symbol #'here)
+    (lambda (x)
+      (and (exn? x)
+        (regexp-match? #px"<collects>"
+          (exn-message x)))))
    
   (test/neg-blame
    '->i-protect-shared-state
@@ -3927,6 +3935,7 @@
   (ctest #t contract? proj:add1->sub1)
   (ctest #f flat-contract? proj:add1->sub1)
   (ctest #f chaperone-contract? proj:add1->sub1)
+  (ctest #t impersonator-contract? proj:add1->sub1)
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;
@@ -3986,6 +3995,7 @@
   (ctest #t contract? proj:prime-box-list/c)
   (ctest #f flat-contract? proj:prime-box-list/c)
   (ctest #t chaperone-contract? proj:prime-box-list/c)
+  (ctest #f impersonator-contract? proj:prime-box-list/c)
   
   (contract-eval
    '(define proj:bad-prime-box-list/c
@@ -4006,6 +4016,7 @@
   (ctest #t contract? proj:bad-prime-box-list/c)
   (ctest #f flat-contract? proj:bad-prime-box-list/c)
   (ctest #t chaperone-contract? proj:bad-prime-box-list/c)
+  (ctest #f impersonator-contract? proj:bad-prime-box-list/c)
   
   (contract-error-test
    '(contract proj:bad-prime-box-list/c (list (box 2) (box 3)) 'pos 'neg)
@@ -4861,6 +4872,23 @@
                           (define (f) (values 3 "foo"))
                           (f))])
       1))
+  
+  (test/spec-passed/result
+   'with-contract-#%app
+   '(begin
+      (eval '(module with-contract-#%app-app racket
+               (define-syntax (-app x) #''apped)
+               (provide (rename-out (-app #%app)))))
+      (eval '(module with-contract-#%app-client racket
+               (require 'with-contract-#%app-app)
+               (provide with-contract-#%app-h with-contract-#%app-i)
+               (with-contract x ([f any/c]) (define (f x) 'f))
+               (define (g x) 'g)
+               (define with-contract-#%app-h (f 2))
+               (define with-contract-#%app-i (g 2))))
+      (eval '(require 'with-contract-#%app-client))
+      (eval '(list with-contract-#%app-h with-contract-#%app-i)))
+   (list 'apped 'apped))
 
 ;                                                                                                                         
 ;                                                                                                                         
@@ -9291,24 +9319,36 @@ so that propagation occurs.
   (ctest #t chaperone-contract? (let ()
                                   (define-struct s (a b) #:mutable)
                                   (struct/c s any/c any/c)))
+  (ctest #f impersonator-contract? (let ()
+                                    (define-struct s (a b) #:mutable)
+                                    (struct/c s any/c any/c)))
   (ctest #f flat-contract? (let ()
                              (define-struct s ([a #:mutable] b))
                              (struct/c s any/c any/c)))
   (ctest #t chaperone-contract? (let ()
                                   (define-struct s ([a #:mutable] b))
                                   (struct/c s any/c any/c)))
+  (ctest #f impersonator-contract? (let ()
+                                    (define-struct s ([a #:mutable] b))
+                                    (struct/c s any/c any/c)))
   (ctest #f flat-contract? (let ()
                              (define-struct s (a [b #:mutable]))
                              (struct/c s any/c any/c)))
   (ctest #t chaperone-contract? (let ()
                                   (define-struct s (a [b #:mutable]))
                                   (struct/c s any/c any/c)))
+  (ctest #f impersonator-contract? (let ()
+                                    (define-struct s (a [b #:mutable]))
+                                    (struct/c s any/c any/c)))
   (ctest #f flat-contract? (let ()
                              (define-struct s (f))
                              (struct/c s (-> number? any))))
   (ctest #t chaperone-contract? (let ()
                                   (define-struct s (f))
                                   (struct/c s (-> number? any))))
+  (ctest #f impersonator-contract? (let ()
+                                    (define-struct s (f))
+                                    (struct/c s (-> number? any))))
   
   (ctest #f flat-contract? (let ()
                              (define-struct s (a) #:mutable)
@@ -9318,27 +9358,36 @@ so that propagation occurs.
                                   (define-struct s (a) #:mutable)
                                   (define alpha (new-∃/c 'alpha))
                                   (struct/c s alpha)))
+  (ctest #t impersonator-contract? (let ()
+                                    (define-struct s (a) #:mutable)
+                                    (define alpha (new-∃/c 'alpha))
+                                    (struct/c s alpha)))
   (ctest #t contract? (let ()
                         (define-struct s (a) #:mutable)
                         (define alpha (new-∃/c 'alpha))
                         (struct/c s alpha)))
   
+  (ctest #t flat-contract? (set/c integer?))
+          
   ;; Hash contracts with flat domain/range contracts
-  (ctest #t contract?           (hash/c any/c any/c #:immutable #f))
-  (ctest #t chaperone-contract? (hash/c any/c any/c #:immutable #f))
-  (ctest #t flat-contract?      (hash/c any/c any/c #:immutable #f #:flat? #t))
+  (ctest #t contract?              (hash/c any/c any/c #:immutable #f))
+  (ctest #t chaperone-contract?    (hash/c any/c any/c #:immutable #f))
+  (ctest #f impersonator-contract? (hash/c any/c any/c #:immutable #f))
+  (ctest #t flat-contract?         (hash/c any/c any/c #:immutable #f #:flat? #t))
 
   (ctest #t flat-contract?      (hash/c any/c any/c #:immutable #t))
   (ctest #t flat-contract?      (hash/c any/c any/c #:immutable #t #:flat? #t))
 
-  (ctest #t contract?           (hash/c any/c any/c))
-  (ctest #t chaperone-contract? (hash/c any/c any/c))
-  (ctest #t flat-contract?      (hash/c any/c any/c #:flat? #t))
+  (ctest #t contract?              (hash/c any/c any/c))
+  (ctest #t chaperone-contract?    (hash/c any/c any/c))
+  (ctest #f impersonator-contract? (hash/c any/c any/c))
+  (ctest #t flat-contract?         (hash/c any/c any/c #:flat? #t))
   
   ;; Hash contracts with chaperone range contracts
-  (ctest #t contract?           (hash/c number? (hash/c number? number?)))
-  (ctest #t chaperone-contract? (hash/c number? (hash/c number? number?)))
-  (ctest #f flat-contract?      (hash/c number? (hash/c number? number?)))
+  (ctest #t contract?              (hash/c number? (hash/c number? number?)))
+  (ctest #t chaperone-contract?    (hash/c number? (hash/c number? number?)))
+  (ctest #f impersonator-contract? (hash/c number? (hash/c number? number?)))
+  (ctest #f flat-contract?         (hash/c number? (hash/c number? number?)))
   
   ;; Hash contracts with proxy range contracts
   (contract-eval
@@ -9348,17 +9397,20 @@ so that propagation occurs.
        #:first-order values
        #:projection (λ (b) values))))
 
-  (ctest #t contract?           (hash/c number? trivial-proxy-ctc #:immutable #f))
-  (ctest #f chaperone-contract? (hash/c number? trivial-proxy-ctc #:immutable #f))
-  (ctest #f flat-contract?      (hash/c number? trivial-proxy-ctc #:immutable #f))
+  (ctest #t contract?              (hash/c number? trivial-proxy-ctc #:immutable #f))
+  (ctest #f chaperone-contract?    (hash/c number? trivial-proxy-ctc #:immutable #f))
+  (ctest #t impersonator-contract? (hash/c number? trivial-proxy-ctc #:immutable #f))
+  (ctest #f flat-contract?         (hash/c number? trivial-proxy-ctc #:immutable #f))
   
-  (ctest #t contract?           (hash/c number? trivial-proxy-ctc #:immutable #t))
-  (ctest #f chaperone-contract? (hash/c number? trivial-proxy-ctc #:immutable #t))
-  (ctest #f flat-contract?      (hash/c number? trivial-proxy-ctc #:immutable #t))
+  (ctest #t contract?              (hash/c number? trivial-proxy-ctc #:immutable #t))
+  (ctest #f chaperone-contract?    (hash/c number? trivial-proxy-ctc #:immutable #t))
+  (ctest #t impersonator-contract? (hash/c number? trivial-proxy-ctc #:immutable #t))
+  (ctest #f flat-contract?         (hash/c number? trivial-proxy-ctc #:immutable #t))
   
-  (ctest #t contract?           (hash/c number? trivial-proxy-ctc))
-  (ctest #f chaperone-contract? (hash/c number? trivial-proxy-ctc))
-  (ctest #f flat-contract?      (hash/c number? trivial-proxy-ctc))
+  (ctest #t contract?              (hash/c number? trivial-proxy-ctc))
+  (ctest #f chaperone-contract?    (hash/c number? trivial-proxy-ctc))
+  (ctest #t impersonator-contract? (hash/c number? trivial-proxy-ctc))
+  (ctest #f flat-contract?         (hash/c number? trivial-proxy-ctc))
   
   ;; Make sure that proxies cannot be used as the domain contract in hash/c.
   (contract-error-test
@@ -9370,29 +9422,35 @@ so that propagation occurs.
       (hash/c proxy-ctc proxy-ctc))
    exn:fail?)
   
-  (ctest #t contract?           (box/c number? #:flat? #t))
-  (ctest #t chaperone-contract? (box/c number? #:flat? #t))
-  (ctest #t flat-contract?      (box/c number? #:flat? #t))
+  (ctest #t contract?              (box/c number? #:flat? #t))
+  (ctest #t chaperone-contract?    (box/c number? #:flat? #t))
+  (ctest #f impersonator-contract? (box/c number? #:flat? #t))
+  (ctest #t flat-contract?         (box/c number? #:flat? #t))
 
-  (ctest #t contract?           (box/c number? #:immutable #t))
-  (ctest #t chaperone-contract? (box/c number? #:immutable #t))
-  (ctest #t flat-contract?      (box/c number? #:immutable #t))
+  (ctest #t contract?              (box/c number? #:immutable #t))
+  (ctest #t chaperone-contract?    (box/c number? #:immutable #t))
+  (ctest #f impersonator-contract? (box/c number? #:immutable #t))
+  (ctest #t flat-contract?         (box/c number? #:immutable #t))
 
-  (ctest #t contract?           (box/c number?))
-  (ctest #t chaperone-contract? (box/c number?))
-  (ctest #f flat-contract?      (box/c number?))
+  (ctest #t contract?              (box/c number?))
+  (ctest #t chaperone-contract?    (box/c number?))
+  (ctest #f impersonator-contract? (box/c number?))
+  (ctest #f flat-contract?         (box/c number?))
 
-  (ctest #t contract?           (box/c (box/c number?) #:immutable #t))
-  (ctest #t chaperone-contract? (box/c (box/c number?) #:immutable #t))
-  (ctest #f flat-contract?      (box/c (box/c number?) #:immutable #t))
+  (ctest #t contract?              (box/c (box/c number?) #:immutable #t))
+  (ctest #t chaperone-contract?    (box/c (box/c number?) #:immutable #t))
+  (ctest #f impersonator-contract? (box/c (box/c number?) #:immutable #t))
+  (ctest #f flat-contract?         (box/c (box/c number?) #:immutable #t))
 
-  (ctest #t contract?           (box/c trivial-proxy-ctc))
-  (ctest #f chaperone-contract? (box/c trivial-proxy-ctc))
-  (ctest #f flat-contract?      (box/c trivial-proxy-ctc))
+  (ctest #t contract?              (box/c trivial-proxy-ctc))
+  (ctest #f chaperone-contract?    (box/c trivial-proxy-ctc))
+  (ctest #t impersonator-contract? (box/c trivial-proxy-ctc))
+  (ctest #f flat-contract?         (box/c trivial-proxy-ctc))
 
-  (ctest #t contract?           (box/c trivial-proxy-ctc #:immutable #t))
-  (ctest #f chaperone-contract? (box/c trivial-proxy-ctc #:immutable #t))
-  (ctest #f flat-contract?      (box/c trivial-proxy-ctc #:immutable #t))
+  (ctest #t contract?              (box/c trivial-proxy-ctc #:immutable #t))
+  (ctest #f chaperone-contract?    (box/c trivial-proxy-ctc #:immutable #t))
+  (ctest #t impersonator-contract? (box/c trivial-proxy-ctc #:immutable #t))
+  (ctest #f flat-contract?         (box/c trivial-proxy-ctc #:immutable #t))
   
   ;; Test the ability to create different types of contracts with recursive-contract
   (ctest #t flat-contract? (letrec ([ctc (or/c number? 
@@ -9406,6 +9464,9 @@ so that propagation occurs.
   (ctest #t chaperone-contract? (letrec ([ctc (or/c number? 
                                                     (box/c (recursive-contract ctc #:chaperone)))])
                                   ctc))
+  (ctest #f impersonator-contract? (letrec ([ctc (or/c number? 
+                                                  (box/c (recursive-contract ctc #:chaperone)))])
+                                    ctc))
 
   (ctest #t contract? 1)
   (ctest #t contract? (-> 1 1))
@@ -9862,6 +9923,7 @@ so that propagation occurs.
   (test-name '(set/c boolean? #:cmp 'equal) (set/c boolean? #:cmp 'equal))
   (test-name '(set/c char? #:cmp 'eq) (set/c char? #:cmp 'eq))
   (test-name '(set/c (set/c char?) #:cmp 'eqv) (set/c (set/c char? #:cmp 'dont-care) #:cmp 'eqv))
+  (test-name '(set/c (-> char? char?) #:cmp 'eqv) (set/c (-> char? char?) #:cmp 'eqv))
   
   ;; NOT YET RELEASED
   #;
@@ -10499,6 +10561,22 @@ so that propagation occurs.
                        'pos 'neg)
              values)
    (list 0))
+  
+  (test/neg-blame
+   'set/c7
+   '(let ([s (set-map (contract (set/c (-> integer? integer?))
+                                (set (λ (x) #f))
+                                'pos 'neg)
+                      values)])
+      ((car s) #f)))
+  
+  (test/pos-blame
+   'set/c8
+   '(let ([s (set-map (contract (set/c (-> integer? integer?))
+                                (set (λ (x) #f))
+                                'pos 'neg)
+                      values)])
+      ((car s) 1)))
   
 ;                                                        
 ;                                                        
@@ -11275,7 +11353,7 @@ so that propagation occurs.
        (eval '(require 'pce1-bug)))
    (λ (x)
      (and (exn? x)
-          (regexp-match #rx"on the-defined-variable1" (exn-message x)))))
+          (regexp-match #rx"the-defined-variable1: self-contract violation" (exn-message x)))))
   
   (contract-error-test
    #'(begin
@@ -11287,7 +11365,7 @@ so that propagation occurs.
        (eval '(the-defined-variable2 #f)))
    (λ (x)
      (and (exn? x)
-          (regexp-match #rx"on the-defined-variable2" (exn-message x)))))
+          (regexp-match #rx"the-defined-variable2: contract violation" (exn-message x)))))
   
   (contract-error-test
    #'(begin
@@ -11299,7 +11377,7 @@ so that propagation occurs.
        (eval '(the-defined-variable3 #f)))
    (λ (x)
      (and (exn? x)
-          (regexp-match #rx"on the-defined-variable3" (exn-message x)))))
+          (regexp-match #rx"the-defined-variable3" (exn-message x)))))
   
   (contract-error-test
    #'(begin
@@ -11311,7 +11389,7 @@ so that propagation occurs.
        (eval '((if #t the-defined-variable4 the-defined-variable4) #f)))
    (λ (x)
      (and (exn? x)
-          (regexp-match #rx"on the-defined-variable4" (exn-message x)))))
+          (regexp-match #rx"^the-defined-variable4" (exn-message x)))))
 
   (contract-error-test
    #'(begin
@@ -11377,7 +11455,7 @@ so that propagation occurs.
        (eval '(g 12)))
    (λ (x)
      (and (exn? x)
-          (regexp-match #rx"contract on g from 'pce9-bug" (exn-message x)))))
+          (regexp-match #rx"^g.*contract from pce9-bug" (exn-message x)))))
   
   (contract-error-test
    #'(begin
@@ -11390,7 +11468,7 @@ so that propagation occurs.
        (eval '(g 'a)))
    (λ (x)
      (and (exn? x)
-          (regexp-match #rx"contract on g from 'pce10-bug" (exn-message x)))))
+          (regexp-match #rx"^g.*contract from pce10-bug" (exn-message x)))))
    
   (contract-eval
    `(,test

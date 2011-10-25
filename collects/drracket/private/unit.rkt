@@ -684,9 +684,10 @@ module browser threading seems wrong.
           ;; returns the current warning message if "Run" should be clicked (ie, if the
           ;; state of the REPL is out of sync with drscheme).
           (define/public (get-needs-execution-message)
-            (or (and (not (this-and-next-language-the-same?))
-                     (string-constant needs-execute-language-changed))
-                needs-execution-state))
+            (and (not already-warned-state)
+                 (or (and (not (this-and-next-language-the-same?))
+                          (string-constant needs-execute-language-changed))
+                     needs-execution-state)))
           
           (define/pubment (get-next-settings) next-settings)
           (define/pubment (set-next-settings _next-settings [update-prefs? #t])
@@ -1208,7 +1209,8 @@ module browser threading seems wrong.
         (define/public (get-current-execute-warning) current-execute-warning)
         (define/public (clear-execution-state) 
           (set! current-execute-warning #f)
-          (update-execute-warning-gui))
+          (update-execute-warning-gui)
+          (send defs already-warned))
         (define/public (update-execute-warning-gui)
           (when (is-current-tab?)
             (send frame show/hide-warning-message 
@@ -2093,7 +2095,27 @@ module browser threading seems wrong.
                 (get-tab-label-from-filename fn)
                 (send defs get-filename/untitled-name))))
         
+	;; tab-label-cache-valid : (listof path)
+	;; If the current set of filenames in the tabs is the
+        ;;   same set of filenames as in this list, then the
+        ;;   tab-label-cache is valid; otherwise not
+	(define tab-label-cache-valid '())
+
+        ;; tab-label-cache : path -o> string
+        (define tab-label-cache (make-hasheq))
+
         (define/private (get-tab-label-from-filename fn)
+          (define current-paths (map (lambda (tab) (send (send tab get-defs) get-filename))
+                                     tabs))
+          (unless (and (= (length tab-label-cache-valid) (length current-paths))
+                       (andmap eq? tab-label-cache-valid current-paths))
+            (set! tab-label-cache-valid current-paths)
+            (set! tab-label-cache (make-hasheq)))
+          (hash-ref! tab-label-cache 
+                     fn
+                     (lambda () (compute-tab-label-from-filename fn))))
+
+        (define/private (compute-tab-label-from-filename fn)
           (let* ([take-n
                   (λ (n lst)
                     (let loop ([n n]

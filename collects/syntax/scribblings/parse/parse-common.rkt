@@ -8,7 +8,7 @@
          myexamples
          myinteraction)
 
-(define ellipses (scheme ...))
+(define ellipses (racket ...))
 
 (define (fixup exn)
   (let ([src (ormap values (exn:fail:syntax-exprs exn))])
@@ -34,6 +34,7 @@
                                              syntax/parse/experimental/splicing
                                              syntax/parse/experimental/contract
                                              syntax/parse/experimental/reflect
+                                             syntax/parse/experimental/specialize
                                              syntax/parse/experimental/eh)])
                                  `((for-syntax racket/base ,@mods)
                                    ,@mods)))))
@@ -60,10 +61,10 @@
 (define Apatterns "action patterns")
 
 (provide Spattern
-         Lpattern 
-         Hpattern 
+         Lpattern
+         Hpattern
          EHpattern
-         Apattern 
+         Apattern
          Spatterns
          Lpatterns
          Hpatterns
@@ -78,14 +79,14 @@
   (syntax-rules ()
     [(ref id suffix ...)
      (elemref (list 'pattern-link (list 'id 'suffix ...))
-              (schemekeywordfont (symbol->string 'id))
+              (racketkeywordfont (symbol->string 'id))
               (superscript (symbol->string 'suffix)) ...
               #:underline? #f)]))
 (define-syntax def
   (syntax-rules ()
     [(def id suffix ...)
      (elemtag (list 'pattern-link (list 'id 'suffix ...))
-              (scheme id)
+              (racket id)
               #|(superscript (symbol->string 'suffix)) ...|# )]))
 
 (provide defhere
@@ -102,6 +103,7 @@
                     syntax/parse/experimental/splicing
                     syntax/parse/experimental/reflect
                     syntax/parse/experimental/provide
+                    syntax/parse/experimental/specialize
                     syntax/parse/experimental/eh
                     "parse-dummy-bindings.rkt"))
 (provide (for-label (all-from-out racket/base)
@@ -112,5 +114,6 @@
                     (all-from-out syntax/parse/experimental/splicing)
                     (all-from-out syntax/parse/experimental/reflect)
                     (all-from-out syntax/parse/experimental/provide)
+                    (all-from-out syntax/parse/experimental/specialize)
                     (all-from-out syntax/parse/experimental/eh)
                     (all-from-out "parse-dummy-bindings.rkt")))

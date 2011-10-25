@@ -14,7 +14,7 @@
  (protect-out menu-bar%
               gtk_menu_item_new_with_mnemonic
               gtk_menu_shell_append
-              fixup-mneumonic))
+              fixup-mnemonic))
 
 (define-gtk gtk_menu_bar_new (_fun -> _GtkWidget))
 (define-gtk gtk_menu_shell_append (_fun _GtkWidget _GtkWidget -> _void))
@@ -26,17 +26,8 @@
 
 (define-gtk gtk_widget_set_usize (_fun _GtkWidget _int _int -> _void))
 
-(define (fixup-mneumonic title)
-  (regexp-replace*
-   "&&"
-   (regexp-replace*
-    #rx"&([^&])"
-    (regexp-replace*
-     #rx"_" 
-     (regexp-replace #rx"\t.*$" title "")
-     "__")
-    "_\\1")
-   "&"))
+(define (fixup-mnemonic title)
+  (mnemonic-string (regexp-replace #rx"\t.*$" title "")))
 
 (define-signal-handler connect-select "select"
   (_fun _GtkWidget -> _void)
@@ -48,6 +39,13 @@
             (constrained-reply (send frame get-eventspace)
                                (lambda () (send frame on-menu-click))
                                (void))))))))
+
+(define-signal-handler connect-ubuntu-local "notify::ubuntu-local"
+  (_fun _GtkWidget -> _void)
+  (lambda (gtk)
+    (let ([wx (gtk->wx gtk)])
+      (when wx
+	(send wx reset-menu-height)))))
 
 (define top-menu%
   (class widget%
@@ -82,6 +80,12 @@
   (connect-menu-key-press gtk)
   (connect-menu-button-press gtk)
 
+  ;; Ubuntu patches Gtk so that a menu bar starts
+  ;; as "remote" instead of appearing in a frame.
+  ;; For configurations that put the menu bar in a frame,
+  ;; the "notify::ubuntu-local" signal is issued.
+  (connect-ubuntu-local gtk)
+
   ; (gtk_menu_set_accel_group gtk the-accelerator-group)
 
   (define top-wx #f)
@@ -89,18 +93,29 @@
   (define/public (set-top-window top)
     (set! top-wx top)
     (install-widget-parent top)
-    ;; return initial size; also, add a menu to make sure there is one,
+    (fix-menu-height))
+
+  (define/public (reset-menu-height)
+    (when top-wx
+      (send top-wx reset-menu-height (fix-menu-height))))
+
+  (define/private (fix-menu-height)
+    ;; a menu to make sure there is one,
     ;; and force the menu bar to be at least that tall always
     (atomically
-     (let ([item (gtk_menu_item_new_with_mnemonic "Xyz")])
+     (define item 
+       (and (null? menus)
+	    (gtk_menu_item_new_with_mnemonic "Xyz")))
+     (when item
        (gtk_menu_shell_append gtk item)
-       (gtk_widget_show item)
-       (begin0
-        (let ([req (make-GtkRequisition 0 0)])
-          (gtk_widget_size_request gtk req)
-          (gtk_widget_set_usize gtk -1 (GtkRequisition-height req))
-          (GtkRequisition-height req))
-        (gtk_container_remove gtk item)))))
+       (gtk_widget_show item))
+     (define req (make-GtkRequisition 0 0))
+     (gtk_widget_size_request gtk req)
+     (define height (GtkRequisition-height req))
+     (gtk_widget_set_usize gtk -1 height)
+     (when item
+       (gtk_container_remove gtk item))
+     height))
 
   (define/public (get-top-window)
     top-wx)
@@ -112,7 +127,7 @@
     (let ([l (list-ref menus pos)])
       (let ([item-gtk (car l)])
 	(gtk_label_set_text_with_mnemonic (gtk_bin_get_child item-gtk) 
-                                          (fixup-mneumonic str)))))
+                                          (fixup-mnemonic str)))))
     
   (define/public (enable-top pos on?)
     (gtk_widget_set_sensitive (car (list-ref menus pos)) on?))
@@ -135,7 +150,7 @@
   (define (append-menu menu title)
     (send menu set-parent this)
     (atomically
-     (let* ([item (let ([title (fixup-mneumonic title)])
+     (let* ([item (let ([title (fixup-mnemonic title)])
                     (as-gtk-allocation
                      (gtk_menu_item_new_with_mnemonic title)))]
             [item-wx (new top-menu% [parent this] [gtk item])])

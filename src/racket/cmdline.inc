@@ -308,6 +308,11 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
             a[0] = scheme_make_pair(scheme_intern_symbol(name),
                                     scheme_make_pair(scheme_make_utf8_string(fa->evals_and_loads[i]),
                                                      scheme_make_null()));
+            if (!scheme_is_module_path(a[0])) {
+              scheme_signal_error("require: bad module path: %V derived from command-line argument: %s",
+                                  a[0],
+                                  fa->evals_and_loads[i]);
+            }
             if (!did_config)
               configure_environment(a[0]);
             scheme_apply(nsreq, 1, a);
@@ -1134,6 +1139,9 @@ static int run_from_cmd_line(int argc, char *_argv[],
     if (s) {
       stderr_level = get_log_level(prog, NULL, "PLTSTDERR", "stderr", s);
     }
+  }
+  if (getenv("PLTDISABLEGC")) {
+    scheme_enable_garbage_collection(0);
   }
 #endif
 

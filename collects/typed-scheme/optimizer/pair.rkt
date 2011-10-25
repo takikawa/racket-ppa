@@ -7,7 +7,7 @@
          (rep type-rep)
          (types type-table utils)
          (typecheck typechecker)
-         (optimizer utils))
+         (optimizer utils logging))
 
 (provide pair-opt-expr)
 
@@ -24,20 +24,14 @@
   (pattern (~literal set-mcdr!) #:with unsafe #'unsafe-set-mcdr!))
 
 
-(define-syntax-class pair-expr
-  #:commit
-  (pattern e:expr
-           #:when (match (type-of #'e) ; type of the operand
-                    [(tc-result1: (Pair: _ _)) #t]
-                    [_ #f])
-           #:with opt ((optimize) #'e)))
-(define-syntax-class mpair-expr
-  #:commit
-  (pattern e:expr
-           #:when (match (type-of #'e) ; type of the operand
-                    [(tc-result1: (MPair: _ _)) #t]
-                    [_ #f])
-           #:with opt ((optimize) #'e)))
+(define (has-pair-type? e)
+  (match (type-of e) ; type of the operand
+    [(tc-result1: (Pair: _ _)) #t]
+    [_ #f]))
+(define (has-mpair-type? e)
+  (match (type-of e) ; type of the operand
+    [(tc-result1: (MPair: _ _)) #t]
+    [_ #f]))
 
 (define-syntax-class pair-opt-expr
   #:commit
@@ -45,16 +39,33 @@
            #:with opt
            (begin (log-optimization "derived pair" #'e)
                   #'e.opt))
-  (pattern (#%plain-app op:pair-op p:pair-expr)
+  (pattern (#%plain-app op:pair-op p:expr)
+           #:when (or (has-pair-type? #'p)
+                      ;; in this case, we have a potentially empty list, but
+                      ;; it has to be a list, otherwise, there would have been
+                      ;; a type error
+                      (begin
+                        (log-missed-optimization "car/cdr on a potentially empty list"
+                                                 this-syntax #'p)
+                        #f))
            #:with opt
            (begin (log-optimization "pair" #'op)
-                  #'(op.unsafe p.opt)))
-  (pattern (#%plain-app op:mpair-op p:mpair-expr e:expr ...)
+                  #`(op.unsafe #,((optimize) #'p))))
+  (pattern (#%plain-app op:mpair-op p:expr e:expr ...)
+           #:when (or (has-mpair-type? #'p)
+                      (begin
+                        (log-missed-optimization "mpair op on a potentially empty mlist"
+                                                 this-syntax #'p)
+                        #f))
            #:with opt
            (begin (log-optimization "mutable pair" #'op)
-                  #`(op.unsafe p.opt #,@(syntax-map (optimize) #'(e ...))))))
+                  #`(op.unsafe #,@(syntax-map (optimize) #'(p e ...))))))
 
-  
+
+;; change the source location of a given syntax object
+(define (relocate stx loc-stx)
+  (datum->syntax stx (syntax->datum stx) loc-stx stx stx))
+
 ;; if the equivalent sequence of cars and cdrs is guaranteed not to fail,
 ;; we can optimize
 
@@ -66,7 +77,7 @@
        (if (null? accessors)
            #'arg
            (quasisyntax/loc stx
-             (#%plain-app #,(car accessors)
+             (#%plain-app #,(relocate (car accessors) stx)
                           #,(gen-alt-helper (cdr accessors))))))
      (let ((ty  (type-of stx))
            (obj (gen-alt-helper accessors)))

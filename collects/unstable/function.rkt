@@ -1,5 +1,5 @@
 #lang racket/base
-(require racket/dict racket/match racket/function
+(require racket/dict racket/match
          (for-syntax racket/base racket/list))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -84,28 +84,6 @@
        (make-keyword-procedure
         (let* ([name (case-lambda keyword-clause)]) name)
         (let* ([name (case-lambda* positional-clause ...)]) name)))]))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;;  Degenerate Functions
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(define (identity x) x)
-
-(define-syntax (thunk stx)
-  (syntax-case stx ()
-    [(thunk body ...)
-     (syntax/loc stx
-       (make-keyword-thunk (lambda () body ...)))]))
-
-(define (make-keyword-thunk f)
-  (make-intermediate-procedure
-   'thunk-function
-    [(x ... 8) (f)]
-    [xs (f)]
-    #:keyword
-    [(ks vs . xs) (f)]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -365,9 +343,7 @@
 
 (provide
  ;; functions
- identity
- thunk
- negate conjoin disjoin
+ conjoin disjoin
  curryn currynr papply papplyr call
  ;; macros
  eta eta*

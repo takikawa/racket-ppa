@@ -1,15 +1,15 @@
-#lang scheme/unit
+#lang racket/unit
 
-(require scheme/path
-         scheme/file
-         scheme/list
-         scheme/string
+(require racket/path
+         racket/file
+         racket/list
+         racket/string
 
          compiler/embed
          setup/dirs
          setup/variant
 
-         "launcher-sig.ss"
+         "launcher-sig.rkt"
 
          compiler/private/winutf16)
 
@@ -99,7 +99,13 @@
             (directory-exists? dest)
             (link-exists? dest))
     (delete-directory/files dest))
-  (copy-file src dest))
+  (copy-file src dest)
+  ;; make sure it's read/write/execute-able
+  (let* ([perms1 (file-or-directory-permissions dest 'bits)]
+         [perms2 (bitwise-ior user-read-bit user-write-bit user-execute-bit
+                              perms1)])
+    (unless (equal? perms1 perms2)
+      (file-or-directory-permissions dest perms2))))
 
 (define (script-variant? v)
   (memq v '(script-3m script-cgc)))
@@ -353,7 +359,7 @@
         (display header)
         (newline)
         ;; comments needed to rehack launchers when paths change
-        ;; (see setup/unixstyle-install.ss)
+        ;; (see setup/unixstyle-install.rkt)
         (display "# {{{ bindir\n")
         (display dir-finder)
         (display "# }}} bindir\n")

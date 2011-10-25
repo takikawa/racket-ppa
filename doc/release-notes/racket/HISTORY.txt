@@ -1,3 +1,35 @@
+Version 5.1.2, July 2011
+Replaced syntax certificates with syntax taints:
+ Added syntax-tainted?, syntax-arm, syntax-disarm, syntax-rearm,
+  syntax-taint, and syntax-protect
+ Changed syntax-recertify and syntax-local-certifier to
+  have no effect on the target syntax object
+ Changed syntax-rules and syntax-id-rules to use
+  syntax-protect implicitly
+ Changed the way inspectors are associated to syntax objects
+  and variable references in compiled code
+Changed "sequence" to include exact nonnegative integers
+mzlib/contract: removed (undocumented) exports:
+  chaperone-contract-struct?
+  contract-struct-first-order
+  contract-struct-name
+  contract-struct-projection
+  contract-struct-stronger?
+  contract-struct?
+  flat-contract-struct?
+  make-opt-contract/info
+  opt-contract/info-contract
+  opt-contract/info-enforcer
+  opt-contract/info-id
+  synthesized-value
+  unknown?
+racket/function: added identity, thunk, compose1
+slideshow/pict: added rotate function, and added sxy anf syx
+ fields to a child structure
+compiler/zo-struct: removed certificate structures; changed
+ wrapper to have a tamper-status field instead of certs;
+ added toplevel-map field to lam
+
 Version 5.1.1, May 2011
 Enabled single-precision floats by default
 Added single-flonum?

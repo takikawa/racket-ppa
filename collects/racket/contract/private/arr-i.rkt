@@ -4,6 +4,7 @@
          "prop.rkt"
          "guts.rkt"
          "opt.rkt"
+         "misc.rkt"
          "blame.rkt"
          syntax/location
          (for-syntax racket/base
@@ -785,7 +786,7 @@
                          keyword<?)
                 #,(and (istx-rst an-istx) #t)
                 #,(and (syntax-parameter-value #'making-a-method) #t)
-                (quote-module-path)
+                (quote-module-name)
                 #,wrapper-func
                 '#(#,(for/list ([an-arg (in-list (istx-args an-istx))])
                        `(,(if (arg/res-vars an-arg) 'dep 'nodep)

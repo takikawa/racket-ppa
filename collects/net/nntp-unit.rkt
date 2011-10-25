@@ -1,6 +1,6 @@
-#lang scheme/unit
+#lang racket/unit
 
-(require scheme/tcp "nntp-sig.ss")
+(require racket/tcp "nntp-sig.rkt")
 
 (import)
 (export nntp^)
@@ -195,7 +195,7 @@
          [status-line (get-one-line-from-server receiver)])
     (let-values ([(code rest-of-line)
                   (parse-status-line status-line)])
-      (values code rest-of-line (get-rest-of-multi-line-response)))))
+      (values code rest-of-line (get-rest-of-multi-line-response communicator)))))
 
 ;; open-news-group :
 ;; communicator x string -> number x number x number

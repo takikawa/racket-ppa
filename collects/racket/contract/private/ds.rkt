@@ -20,7 +20,8 @@ it around flattened out.
 (require "guts.rkt"
          "prop.rkt"
          "blame.rkt"
-         "opt.rkt")
+         "opt.rkt"
+         "misc.rkt")
 (require (for-syntax scheme/base)
          (for-syntax "ds-helpers.rkt")
          (for-syntax "helpers.rkt")
@@ -245,7 +246,7 @@ it around flattened out.
                     (raise-blame-error
                      blame
                      val
-                     "expected <~a>, got ~e" 'name val))
+                     "expected <~s>, got ~e" 'name val))
                   (cond
                     [(already-there? contract/info val lazy-depth-to-look)
                      val]
@@ -298,7 +299,7 @@ it around flattened out.
                    (do-selection struct (+ i 1))
                    (wrap-get struct (+ i 1)))]
               [else
-               (error selector-name "expected <~a>, got ~e" 'name struct)]))
+               (error selector-name "expected <~s>, got ~e" 'name struct)]))
           
           (define (lazy-contract-name ctc)
             (do-contract-name 'struct/c
@@ -451,7 +452,7 @@ it around flattened out.
                                 (raise-blame-error
                                  blame
                                  val
-                                 "expected <~a>, got ~e"
+                                 "expected <~s>, got ~e"
                                  (contract-name ctc)
                                  val)]))
                             lifts

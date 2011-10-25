@@ -7,10 +7,10 @@
          scheme/class
          mred/mred-sig
          syntax-color/module-lexer
-         "collapsed-snipclass-helpers.ss"
-         "sig.ss"
-         "../gui-utils.ss"
-         "../preferences.ss"
+         "collapsed-snipclass-helpers.rkt"
+         "sig.rkt"
+         "../gui-utils.rkt"
+         "../preferences.rkt"
          scheme/match)
 
 (import mred^
@@ -1276,6 +1276,7 @@
     
     (define/override (put-file text sup directory default-name)
       (parameterize ([finder:default-extension "rkt"]
+                     #; ; no need for the following, since it's the default
                      [finder:default-filters '(["Racket Sources" "*.rkt;*.scrbl;*.ss;*.scm"]
                                                ["Any" "*.*"])])
         ;; don't call the surrogate's super, since it sets the default extension

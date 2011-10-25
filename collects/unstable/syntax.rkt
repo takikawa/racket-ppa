@@ -1,19 +1,23 @@
 #lang racket/base
 ;; owner: ryanc (and cce and stamourv, where noted)
 (require racket/syntax
-         syntax/stx)
+         syntax/stx
+         (for-syntax racket/base))
 
 (provide (rename-out [stx-map syntax-map])
          syntax-list
 
          ;; by cce:
-
          syntax-source-file-name
          syntax-source-directory
 
          ;; by stamourv:
+         format-unique-id
+         syntax-within?
 
-         format-unique-id)
+         ;; by ryanc
+         explode-module-path-index
+         phase-of-enclosing-module)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -60,3 +64,32 @@
   ((make-syntax-introducer) (apply format-id
                                    lctx #:source src #:props props #:cert cert
                                    fmt args)))
+
+;; is syntax a contained within syntax b, inclusively
+(define (syntax-within? a b)
+  (let ([pos-a  (syntax-position a)]
+        [span-a (syntax-span a)]
+        [pos-b  (syntax-position b)]
+        [span-b (syntax-span b)])
+    (and pos-a span-a pos-b span-b
+         (<= pos-b pos-a)
+         (>= (+ pos-b span-b) (+ pos-a span-a)))))
+
+
+;; by ryanc
+
+(define (explode-module-path-index mpi)
+  (let-values ([(x y) (module-path-index-split mpi)])
+    (cons x
+          (if (module-path-index? y)
+              (explode-module-path-index y)
+              (list y)))))
+
+(define-syntax (phase-of-enclosing-module stx)
+  (syntax-case stx ()
+    [(poem)
+     (let ([phase-within-module (syntax-local-phase-level)])
+       #`(let ([phase-of-this-expression
+                (variable-reference->phase (#%variable-reference))])
+           (- phase-of-this-expression
+              #,(if (zero? phase-within-module) 0 1))))]))

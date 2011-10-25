@@ -1,12 +1,12 @@
 #lang scheme/base
 
 (require syntax/parse unstable/syntax
-         racket/match
+         racket/match racket/flonum
          (for-template scheme/base racket/flonum scheme/unsafe/ops)
          "../utils/utils.rkt"
          (rep type-rep)
-         (types type-table utils)
-         (optimizer utils))
+         (types type-table utils numeric-tower)
+         (optimizer utils logging fixnum))
 
 (provide vector-opt-expr)
 
@@ -14,10 +14,14 @@
 (define-syntax-class vector-op
   #:commit
   ;; we need the * versions of these unsafe operations to be chaperone-safe
-  (pattern (~literal vector-ref)  #:with unsafe #'unsafe-vector-ref)
-  (pattern (~literal vector-set!) #:with unsafe #'unsafe-vector-set!))
+  (pattern (~literal vector-ref)  #:with unsafe #'unsafe-vector-ref  #:with unsafe-no-impersonator #'unsafe-vector*-ref)
+  (pattern (~literal vector-set!) #:with unsafe #'unsafe-vector-set! #:with unsafe-no-impersonator #'unsafe-vector*-set!))
+(define-syntax-class flvector-op
+  #:commit
+  (pattern (~literal flvector-ref)  #:with unsafe #'unsafe-flvector-ref)
+  (pattern (~literal flvector-set!) #:with unsafe #'unsafe-flvector-set!))
 
-(define-syntax-class vector-expr
+(define-syntax-class known-length-vector-expr
   #:commit
   (pattern e:expr
            #:when (match (type-of #'e)
@@ -31,7 +35,7 @@
   (pattern (#%plain-app (~and op (~or (~literal vector-length)
                                       (~literal unsafe-vector-length)
                                       (~literal unsafe-vector*-length)))
-                        v:vector-expr)
+                        v:known-length-vector-expr)
            #:with opt
            (begin (log-optimization "known-length vector-length" #'op)
                   (match (type-of #'v)
@@ -51,7 +55,7 @@
                   #`(unsafe-flvector-length #,((optimize) #'v))))
   ;; we can optimize vector ref and set! on vectors of known length if we know
   ;; the index is within bounds (for now, literal or singleton type)
-  (pattern (#%plain-app op:vector-op v:vector-expr i:expr new:expr ...)
+  (pattern (#%plain-app op:vector-op v:known-length-vector-expr i:expr new:expr ...)
            #:when (let ((len (match (type-of #'v)
                                [(tc-result1: (HeterogenousVector: es)) (length es)]
                                [_ 0]))
@@ -63,4 +67,46 @@
            #:with opt
            (begin (log-optimization "vector" #'op)
                   #`(op.unsafe v.opt #,((optimize) #'i)
-                               #,@(syntax-map (optimize) #'(new ...))))))
+                               #,@(syntax-map (optimize) #'(new ...)))))
+
+  ;; we can do the bounds checking separately, to eliminate some of the checks
+  (pattern (#%plain-app op:vector-op v:expr i:fixnum-expr new:expr ...)
+           #:with opt
+           (begin (log-optimization "vector access splitting" this-syntax)
+                  (let ([safe-fallback #`(op new-v new-i #,@(syntax-map (optimize) #'(new ...)))]
+                        [i-known-nonneg? (subtypeof? #'i -NonNegFixnum)])
+                    #`(let ([new-i #,((optimize) #'i)]
+                            [new-v #,((optimize) #'v)])
+                        ;; do the impersonator check up front, to avoid doing it twice (length and op)
+                        (if (impersonator? new-v)
+                            (if #,(let ([one-sided #'(unsafe-fx< new-i (unsafe-vector-length v))])
+                                    (if i-known-nonneg?
+                                        ;; we know it's nonnegative, one-sided check
+                                        one-sided
+                                        #`(and (unsafe-fx>= new-i 0)
+                                               #,one-sided)))
+                                (op.unsafe new-v new-i #,@(syntax-map (optimize) #'(new ...)))
+                                #,safe-fallback) ; will error. to give the right error message
+                            ;; not an impersonator, can use unsafe-vector* ops
+                            (if #,(let ([one-sided #'(unsafe-fx< new-i (unsafe-vector*-length v))])
+                                    (if i-known-nonneg?
+                                        one-sided
+                                        #`(and (unsafe-fx>= new-i 0)
+                                               #,one-sided)))
+                                (op.unsafe-no-impersonator new-v new-i #,@(syntax-map (optimize) #'(new ...)))
+                                #,safe-fallback))))))
+  ;; similarly for flvectors
+  (pattern (#%plain-app op:flvector-op v:expr i:fixnum-expr new:expr ...)
+           #:with opt
+           (begin (log-optimization "flvector access splitting" this-syntax)
+                  (let ([safe-fallback #`(op new-v new-i #,@(syntax-map (optimize) #'(new ...)))]
+                        [i-known-nonneg? (subtypeof? #'i -NonNegFixnum)])
+                    #`(let ([new-i #,((optimize) #'i)]
+                            [new-v #,((optimize) #'v)])
+                        (if #,(let ([one-sided #'(unsafe-fx< new-i (unsafe-flvector-length v))])
+                                (if i-known-nonneg?
+                                    one-sided
+                                    #`(and (unsafe-fx>= new-i 0)
+                                           #,one-sided)))
+                            (op.unsafe new-v new-i #,@(syntax-map (optimize) #'(new ...)))
+                            #,safe-fallback))))))

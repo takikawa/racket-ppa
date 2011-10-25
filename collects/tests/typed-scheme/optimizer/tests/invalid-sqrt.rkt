@@ -1,5 +1,6 @@
 #;
 (
+TR missed opt: invalid-sqrt.rkt 9:0 (sqrt -2.0) -- unexpected complex type
 0+1.4142135623730951i
 )
 

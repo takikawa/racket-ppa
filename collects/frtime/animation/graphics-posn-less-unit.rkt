@@ -1,4 +1,3 @@
-; graphics.ss
 ; Simple graphics routines for GRacket
 ; Originally written by Johnathan Franklin
 ;
@@ -11,7 +10,7 @@
 	   mzlib/class100
 	   mzlib/etc
            frtime/core/frp
-	   "graphics-sig.ss")
+	   "graphics-sig.rkt")
 
   (import (prefix mred: mred^)
           graphics:posn^)
@@ -524,7 +523,7 @@
     (rec draw-arc-viewport
 	 (case-lambda
 	  [(p width height start-radians end-radians)
-           (draw-arc-viewport p width height (make-rgb 0 0 0))]
+           (draw-arc-viewport p width height start-radians end-radians (make-rgb 0 0 0))]
 	  [(p width height start-radians end-radians color)
 	   (check 'draw-arc
 		  posn? p "posn"

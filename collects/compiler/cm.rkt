@@ -1,6 +1,7 @@
 #lang scheme/base
 (require syntax/modcode
          syntax/modresolve
+         syntax/modread
          setup/main-collects
 	 unstable/file
          scheme/file
@@ -360,7 +361,17 @@
                             (if (eq? base 'relative)
                               (current-directory)
                               (path->complete-path base (current-directory))))])
-            (write code out)))
+            (let ([b (open-output-bytes)])
+              ;; Write bytecode into string
+              (write code b)
+              ;; Compute SHA1 over bytecode so far
+              (let* ([s (get-output-bytes b)]
+                     [h (sha1-bytes (open-input-bytes s))]
+                     [delta (+ 3 (bytes-ref s 2))])
+                ;; Use sha1 for module hash in string form of bytecode
+                (bytes-copy! s delta h)
+                ;; Write out the bytecode with module hash
+                (write-bytes s out)))))
         ;; redundant, but close as early as possible:
         (close-output-port out)
         ;; Note that we check time and write .deps before returning from
@@ -455,11 +466,13 @@
       -inf.0))
 
 (define (try-file-sha1 path dep-path)
-  (with-handlers ([exn:fail:filesystem? (lambda (exn) #f)])
-    (string-append
-     (call-with-input-file* path sha1)
-     (with-handlers ([exn:fail:filesystem? (lambda (exn) "")])
-       (call-with-input-file* dep-path (lambda (p) (cdadr (read p))))))))
+  (with-module-reading-parameterization
+   (lambda ()
+     (with-handlers ([exn:fail:filesystem? (lambda (exn) #f)])
+       (string-append
+        (call-with-input-file* path sha1)
+        (with-handlers ([exn:fail:filesystem? (lambda (exn) "")])
+          (call-with-input-file* dep-path (lambda (p) (cdadr (read p))))))))))
 
 (define (get-compiled-sha1 mode path)
   (define-values (dir name) (get-compilation-dir+name mode path))
@@ -482,9 +495,11 @@
   (define orig-path (simple-form-path path0))
   (define (read-deps path)
     (with-handlers ([exn:fail:filesystem? (lambda (ex) (list (version) '#f))])
-      (call-with-input-file
-          (path-add-suffix (get-compilation-path mode path) #".dep")
-        read)))
+      (with-module-reading-parameterization
+       (lambda ()
+         (call-with-input-file
+             (path-add-suffix (get-compilation-path mode path) #".dep")
+           read)))))
   (define (do-check)
     (let* ([main-path orig-path]
            [alt-path (rkt->ss orig-path)]

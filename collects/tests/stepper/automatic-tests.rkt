@@ -1,7 +1,12 @@
 #lang scheme
 
-(require "through-tests.ss" 
-         "test-engine.ss")
+
+;; run shared.rkt unit tests:
+(require "shared-unit-tests.rkt")
+
+;; now, the rest:
+(require "through-tests.rkt" 
+         "test-engine.rkt")
 
 (define lazy-tests 
   '(lazy1 lazy2 lazy3 lazy-multi lazy-app1 lazy-app2 lazy-app3 
@@ -17,7 +22,8 @@
     lazy-eq? lazy-eqv? lazy-equal? lazy-list?1 lazy-list?2 lazy-list?3
     lazy-length lazy-list-ref lazy-list-tail lazy-append lazy-reverse lazy-empty? 
     lazy-assoc lazy-assq lazy-assv lazy-cons? lazy-remove lazy-remq lazy-remv
-    lazy-member lazy-memq lazy-memv lazy-filter1 lazy-filter2 lazy-fold))
+    lazy-member lazy-memq lazy-memv lazy-filter1 lazy-filter2 lazy-fold
+    lazy-cyclic1))
 
 (let ((outer-namespace (current-namespace)))
   (parameterize ([display-only-errors #t]

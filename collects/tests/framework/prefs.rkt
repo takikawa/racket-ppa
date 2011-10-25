@@ -1,5 +1,5 @@
 #lang racket/base
-(require "test-suite-utils.ss")
+(require "test-suite-utils.rkt")
   
   (define ((check-eq? x) y) (eq? x y))
   (define pref-sym 'plt:not-a-real-preference)
@@ -84,4 +84,3 @@
                                                 'failed
                                                 'passed)
                                             'passed))))))
-  

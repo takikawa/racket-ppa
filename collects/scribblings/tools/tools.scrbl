@@ -18,7 +18,7 @@
      (item (indexed-racket x) ": " . ys))) ;; indexing missing
 
 
-@title{@bold{Plugins}: Extending DrRacket}
+@title{Extending DrRacket}
 
 @author["Robert Bruce Findler"]
 
@@ -612,6 +612,8 @@ Check Syntax is a part of the DrRacket collection, but is implemented via the to
 @include-section["module-language-tools.scrbl"]
 @include-section["module-language.scrbl"]
 
+@include-section["documentation-utils.scrbl"]
+
 @section{Backwards compatibility}
 
 This section lists the bindings that begin with @tt{drscheme:} provided by the tools
@@ -626,9 +628,9 @@ library; they are here for backwards compatibility and to provide links to the
                 [(drr-parent drr-vars drr-var-defs-in-sig drr-stx-defs-in-sig) (signature-members #'drracket:tool-cm^ #'here)])
      (with-syntax ([(drs-id ...) drs-vars]
                    [(drr-id ...) drr-vars])
-       #'(begin 
+       #'(begin
            (defthing drs-id any/c
-             "This is provided for backwards compatibility; new code should use " (scheme drr-id) " instead.") 
+             "This is provided for backwards compatibility; new code should use " (racket drr-id) " instead.") 
            ...))))
 @drs-compat[]
 

@@ -1,29 +1,27 @@
 #lang scribble/doc
 
-@(require scribble/manual "shared.ss"
-          (for-label scheme 
-                     teachpack/htdp/arrow))
+@(require scribble/manual "shared.rkt"
+          (for-label scheme teachpack/htdp/arrow))
 
 @teachpack["arrow"]{Managing Control Arrows}
 
-@declare-exporting[teachpack/htdp/arrow]
+@;declare-exporting[teachpack/htdp/arrow]
+@defmodule[#:require-form beginner-require htdp/arrow]
 
-The teachpack implements a controller for moving shapes across a canvass. A
-shape is a class of data for which @scheme[move] and @scheme[draw]
-operations can be drawn. 
+The teachpack implements a controller for moving shapes across a canvass.  
 
 @defproc[(control-left-right
 	   [shape Shape]
 	   [n number?]
 	   [move (-> number? Shape Shape)]
-	   [draw (-> Shape true)]) true]{Moves shape @scheme[n] pixels left
+	   [draw (-> Shape true)]) true]{Moves shape @racket[n] pixels left
 (negative) or right (positive).} 
 
 @defproc[(control-up-down
 	   [shape Shape]
 	   [n number?]
 	   [move (-> number? Shape Shape)]
-	   [draw (-> Shape true)]) true]{Moves shape @scheme[n] pixels up
+	   [draw (-> Shape true)]) true]{Moves shape @racket[n] pixels up
 (negative) or down (positive).} 
 
 @defproc[(control
@@ -32,12 +30,12 @@ operations can be drawn.
 	   [move-lr (-> number? Shape Shape)]
 	   [move-ud (-> number? Shape Shape)]
 	   [draw (-> Shape true)]) true]{
-Moves shape @scheme[N] pixels left or right and up or down, respectively.} 
+Moves shape @racket[N] pixels left or right and up or down, respectively.} 
 
 Example:
 @(begin
 #reader scribble/comment-reader
-(schemeblock 
+(racketblock 
 ;; A shape is a structure:
 ;;   (make-posn num num)
 
@@ -64,7 +62,7 @@ Example:
 (define (draw-it sh)
   (draw-solid-disk sh RAD))
 
-;; RUN: 
+;; Run:
 
 ;; this creates the canvas
 (start 100 50)

@@ -82,6 +82,20 @@ case SIG_ss_s:
      send_special_result(future, retval);
      break;
   }
+case SIG_ssi_s:
+  {
+     prim_ssi_s f = (prim_ssi_s)future->prim_func;
+     GC_CAN_IGNORE Scheme_Object* retval;
+     JIT_TS_LOCALIZE(Scheme_Object*, arg_s0); JIT_TS_LOCALIZE(Scheme_Object*, arg_s1); JIT_TS_LOCALIZE(int, arg_i2);
+     
+     future->arg_s0 = NULL; future->arg_s1 = NULL;
+     
+     retval = 
+     f(arg_s0, arg_s1, arg_i2);
+     future->retval_s = retval;
+     send_special_result(future, retval);
+     break;
+  }
 case SIG_tt_s:
   {
      prim_tt_s f = (prim_tt_s)future->prim_func;
@@ -316,6 +330,34 @@ case SIG_sis_v:
      
      
      f(arg_s0, arg_i1, arg_s2);
+     
+     
+     break;
+  }
+case SIG_ss_i:
+  {
+     prim_ss_i f = (prim_ss_i)future->prim_func;
+     GC_CAN_IGNORE int retval;
+     JIT_TS_LOCALIZE(Scheme_Object*, arg_s0); JIT_TS_LOCALIZE(Scheme_Object*, arg_s1);
+     
+     future->arg_s0 = NULL; future->arg_s1 = NULL;
+     
+     retval = 
+     f(arg_s0, arg_s1);
+     future->retval_i = retval;
+     
+     break;
+  }
+case SIG_iSp_v:
+  {
+     prim_iSp_v f = (prim_iSp_v)future->prim_func;
+     
+     JIT_TS_LOCALIZE(int, arg_i0); JIT_TS_LOCALIZE(Scheme_Object**, arg_S1); JIT_TS_LOCALIZE(void*, arg_p2);
+     
+     future->arg_S1 = NULL; future->arg_p2 = NULL;
+     ADJUST_RS_ARG(future, arg_S1);
+     
+     f(arg_i0, arg_S1, arg_p2);
      
      
      break;

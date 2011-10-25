@@ -99,6 +99,7 @@
 #  define USE_FCNTL_O_NONBLOCK
 #  define SOME_FDS_ARE_NOT_SELECTABLE
 #  define NEED_RESET_STDOUT_BLOCKING
+#  undef USE_FLOCK_FOR_FILE_LOCKS
 #  define USE_TIMEZONE_AND_ALTZONE_VAR
 #  define USE_NULL_TO_DISCONNECT_UDP
 # else
@@ -202,6 +203,7 @@
 # define SIGSET_IS_SIGNAL
 # define SIGSET_NEEDS_REINSTALL
 
+# define LINUX_FIND_STACK_BASE
 # define USE_DYNAMIC_FDSET_SIZE
 
 # define USE_TIMEZONE_VAR_W_DLS
@@ -320,17 +322,24 @@
 
   /************** x86/FreeBSD with gcc ****************/
 
-#if defined(__FreeBSD__)
+#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
  
 # if defined(__i386__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-freebsd"
 #  define REGISTER_POOR_MACHINE
 #  define MZ_USE_JIT_I386
-#  define FREEBSD_CONTROL_387
+#  if defined(__FreeBSD_kernel__)
+#   define ASM_DBLPREC_CONTROL_87
+#  else
+#   define FREEBSD_CONTROL_387
+#  endif
 # elif defined(__amd64__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "amd64-freebsd"
 #  define REGISTER_POOR_MACHINE
 #  define MZ_USE_JIT_X86_64
+#  if defined(__FreeBSD_kernel__)
+#   define ASM_DBLPREC_CONTROL_87
+#  endif
 # elif defined(__sparc64__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "sparc64-freebsd"
 #  define FLUSH_SPARC_REGISTER_WINDOWS
@@ -342,7 +351,6 @@
    initial pthread's stack size doesn't use rlimit: */
 # define ASSUME_FIXED_STACK_SIZE
 # define FIXED_STACK_SIZE 1048576
-# define USE_PTHREAD_INSTEAD_OF_ITIMER
 
 # include "uconfig.h"
 # undef HAS_STANDARD_IOB
@@ -356,7 +364,9 @@
 # define USE_UNDERSCORE_SETJMP
 
 # define USE_IEEE_FP_PREDS
-# define POW_HANDLES_INF_CORRECTLY
+# ifndef ASM_DBLPREC_CONTROL_87
+#  define POW_HANDLES_INF_CORRECTLY
+# endif
 
 # define USE_DYNAMIC_FDSET_SIZE
 
@@ -524,6 +534,12 @@
 
 # define DO_STACK_CHECK
 # define WINDOWS_FIND_STACK_BOUNDS
+/* This value needs to be consistent with the
+   stack size specified at link time: */
+# define WINDOWS_DEFAULT_STACK_SIZE 8388608
+# ifdef _WIN64
+#  define STACK_SAFETY_MARGIN 100000
+# endif
 
 # ifndef _WIN64
 #  define USE_MZ_SETJMP
@@ -914,11 +930,14 @@
 
 #ifndef FLAGS_ALREADY_SET
 
+/* assume generic Unix: */
+#include "uconfig.h"
+# define SIGSET_IS_SIGNAL
+# define SIGSET_NEEDS_REINSTALL
+
   /*********************/
  /* Operating System  */
 /*********************/
-
-#define SYSTEM_TYPE_NAME "unix"
 
   /* SYSTEM_TYPE_NAME must be a string; this will be converted into
      a symbol for the result of (system-type) */
@@ -931,11 +950,6 @@
   /*********************/
  /* Language Features */
 /*********************/
-
-#define TIME_SYNTAX
-#define PROCESS_FUNCTION
-#define DIR_FUNCTION
-#define GETENV_FUNCTION
 
  /* TIME_SYNTAX adds the (time ...) syntax; this may need to be
      turned off for compilation on some systems.
@@ -975,9 +989,6 @@
   /*******************/
  /*   Filesystem    */
 /*******************/
-
-#define UNIX_FILE_SYSTEM
-#define EXPAND_FILENAME_TILDE
 
  /* UNIX_FILE_SYSTEM indicates that filenames are as in Unix, with
     forward slash separators, ".." as the parent directory, "/" 
@@ -1029,20 +1040,20 @@
    None of these flags are required, but char-ready? may return
    spurious #ts if they are set up incorrectly. */
 
-#define HAS_STANDARD_IOB
-#define FILES_HAVE_FDS
-#define USE_UNIX_SOCKETS_TCP
-#define CLOSE_ALL_FDS_AFTER_FORK
-
  /* HAS_STANDARD_IOB, HAS_GNU_IOB, HAS_CYGWIN_IOB, HAS_LINUX_IOB,
     HAS_BSD_IOB, and HAS_SCO_IOB are mutually exclusive; they describe
     how to read the FILE* structure to determine if there are
     available cached characters. */
 
+ /* USE_FD_PORTS uses Unix-style open(), etc., for file ports. */
+
  /* FILES_HAVE_FDS means that a FILE* is always associated with a
     file desciptor, which can be select-ed to see if there are
     pending bytes. Don't use this unless one of the HAS_<X>_IOB
     flags is used. */
+
+ /* USE_FLOCK_FOR_FILE_LOCKS means that flock() is available and works
+    for file locking. */
 
  /* CLOSE_ALL_FDS_AFTER_FORK means that all fds except 0, 1, and 2
     should be closed after performing a fork() for `process'
@@ -1115,10 +1126,6 @@
 /***********************/
 
 /* These are flags about the implementation of system, process, etc. */
-
-# define UNIX_PROCESSES
-# define SIGSET_IS_SIGNAL
-# define SIGSET_NEEDS_REINSTALL
 
  /* UNIX_PROCESSES implements the process functions for Unix; uses
     sigset() to install the signal handler. */
@@ -1288,10 +1295,6 @@
  /* Stack Maniuplations */
 /***********************/
 
-# define DO_STACK_CHECK
-# define UNIX_FIND_STACK_BOUNDS
-# define STACK_SAFETY_MARGIN 50000
-
  /* DO_STACK_CHECK checks for stack overflow during execution.
      Requires either UNIX_FIND_STACK_BOUNDS, USE_STACKAVAIL,
      MACOS_FIND_STACK_BOUNDS, or ASSUME_FIXED_STACK_SIZE. */
@@ -1305,6 +1308,9 @@
     WINDOWS_FIND_STACK_BOUNDS figures out the maximum stack position
      under Windows (uses GC_find_stack_base())
     MACOS_FIND_STACK_BOUNDS figures out the stack limit on the Mac.
+    LINUX_FIND_STACK_BASE figures out the stack base under Linux
+     by reading from /proc/self/maps and looking for "[stack]"
+     line.
     ASSUME_FIXED_STACK_SIZE assumes that the main stack size is
      always FIXED_STACK_SIZE.
     Use only one of these if DO_STACK_CHECK is used, or none otherwise. */
@@ -1326,8 +1332,6 @@
   /***********************/
  /*   Dynamic Loading   */
 /***********************/
-
-#define UNIX_DYNAMIC_LOAD
 
  /* UNIX_DYNAMIC_LOAD implements dynamic extensions under Unix
      using dlopen(); you may have to add the -ldl flag in the LIBS 
@@ -1405,8 +1409,6 @@
   /***********************/
  /*    Miscellaneous    */
 /***********************/
-
-#define UNISTD_INCLUDE
 
  /* USE_MAP_ANON indicates that mmap should use BSD's MAP_ANON flag
     rather than trying to open /dev/zero */

@@ -1,5 +1,5 @@
 #lang scheme/base
-(require "private/provide-structs.ss"
+(require "private/provide-structs.rkt"
          scheme/serialize
          scheme/contract
          file/convertible)
@@ -176,6 +176,7 @@
          [properties list?])]
  ;; properties:
  [document-version ([text (or/c string? false/c)])]
+ [document-date ([text (or/c string? false/c)])]
  [target-url ([addr path-string?])]
  [color-property ([color (or/c string? (list/c byte? byte? byte?))])]
  [background-color-property ([color (or/c string? (list/c byte? byte? byte?))])]

@@ -257,7 +257,7 @@ static void *print_to_port_k(void)
   p->ku.k.p3 = NULL;
 
   print_to_port((p->ku.k.i2 
-                 ? ((p->ku.k.i2 = 2)
+                 ? ((p->ku.k.i2 == 2)
                     ? "print"
                     : "write")
                  : "display"), 
@@ -2429,7 +2429,7 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
         int is_sym;
         if (notdisplay)
           print_utf8_string(pp, "#<resolved-module-path:", 0, 23);
-        is_sym = SCHEME_SYMBOLP(SCHEME_PTR_VAL(obj));
+        is_sym = !SCHEME_PATHP(SCHEME_PTR_VAL(obj));
         print_utf8_string(pp, (is_sym ? "'" : "\"") , 0, 1);
         print(SCHEME_PTR_VAL(obj), 0, 0, ht, mt, pp);
 	PRINTADDRESS(pp, obj);
@@ -2565,7 +2565,7 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
           int is_sym;
           
           modname = ((Scheme_Env *)obj)->module->modname;
-          is_sym = SCHEME_SYMBOLP(SCHEME_PTR_VAL(modname));
+          is_sym = !SCHEME_PATHP(SCHEME_PTR_VAL(modname));
           print_utf8_string(pp, (is_sym ? "'" : "\""), 0, 1);
           print(SCHEME_PTR_VAL(modname), 0, 0, ht, mt, pp);
           PRINTADDRESS(pp, modname);
@@ -3056,8 +3056,6 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
         mt->symtab = symtab;
 	rns = scheme_make_hash_table(SCHEME_hash_ptr);
         mt->rns = rns;
-        tht = scheme_make_hash_table_equal();
-        mt->cert_lists = tht;
         tht = scheme_make_hash_table(SCHEME_hash_ptr);
         mt->shift_map = tht;
         mt->reverse_map = NULL;
@@ -3097,6 +3095,9 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 	/* Remember version: */
         print_one_byte(pp, strlen(MZSCHEME_VERSION));
 	print_this_string(pp, MZSCHEME_VERSION, 0, -1);
+
+        /* Leave space for a module hash code */
+        print_this_string(pp, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 0, 20);
 
         if (mt->st_refs->count != mt->sorted_keys_count)
           scheme_signal_error("shared key count somehow changed");
@@ -4012,8 +4013,7 @@ static void custom_write_struct(Scheme_Object *s, Scheme_Hash_Table *ht,
 
 START_XFORM_SKIP;
 
-#define MARKS_FOR_PRINT_C
-#include "mzmark.c"
+#include "mzmark_print.inc"
 
 static void register_traversers(void)
 {

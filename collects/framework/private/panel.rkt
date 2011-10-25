@@ -1,7 +1,7 @@
 #lang racket/unit
 
   (require mzlib/class
-           "sig.ss"
+           "sig.rkt"
            mred/mred-sig
            mzlib/list
            mzlib/etc)
@@ -498,7 +498,7 @@
       (super-new [vertical? #t])))
   
   (define horizontal-dragable-mixin
-    (mixin (dragable<%>) (vertical-dragable<%>)
+    (mixin (dragable<%>) (horizontal-dragable<%>)
       (super-new [vertical? #f])))
   
   (define vertical-dragable% (vertical-dragable-mixin (dragable-mixin panel%)))

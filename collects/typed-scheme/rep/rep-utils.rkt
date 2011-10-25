@@ -8,8 +8,8 @@
          "interning.rkt"
 	 racket/syntax unstable/match unstable/struct
          mzlib/etc
-         scheme/contract         
-         (for-syntax 
+         scheme/contract
+         (for-syntax
           scheme/list
           (only-in racket/syntax generate-temporary)
           racket/match
@@ -35,16 +35,16 @@
     #:attributes (i cnt)
     (pattern i:id
              #:with cnt #'any/c)
-    (pattern [i:id cnt]))  
+    (pattern [i:id cnt]))
   ;; fields
   (define-syntax-class (idlist name)
     #:attributes ((i 1) (cnt 1) fs maker pred (acc 1))
-    (pattern (oci:opt-cnt-id ...)               
+    (pattern (oci:opt-cnt-id ...)
              #:with (i ...) #'(oci.i ...)
              #:with (cnt ...) #'(oci.cnt ...)
              #:with fs #'(i ...)
              #:with (_ maker pred acc ...) (build-struct-names name (syntax->list #'fs) #f #t name)))
-  
+
   (define (combiner f flds)
     (syntax-parse flds
       [() #'#hasheq()]
@@ -79,11 +79,11 @@
              #:with fold (format-id #f "~a-fold" #'nm)
              #:with kw (string->keyword (symbol->string (syntax-e #'nm)))
              #:with *maker (format-id #'nm "*~a" #'nm)))
-  (lambda (stx)          
-    (syntax-parse stx 
+  (lambda (stx)
+    (syntax-parse stx
       [(dform nm:form-nm
               (~var flds (idlist #'nm))
-              (~or 
+              (~or
                (~optional (~and (~fail #:unless key? "#:key not allowed")
                                 [#:key key-expr:expr])
                           #:defaults ([key-expr #'#f]))
@@ -94,14 +94,14 @@
                                       [(f) #'f]
                                       [(fs ...) #'(list fs ...)])]))
                (~optional [#:frees frees:frees-pat]
-                          #:defaults 
+                          #:defaults
                           ([frees.f1 (combiner #'Rep-free-vars #'flds.fs)]
                            [frees.f2 (combiner #'Rep-free-idxs #'flds.fs)]))
                (~optional [#:fold-rhs (~var fold-rhs (fold-pat #'nm.fold))]
                           #:defaults
                           ([fold-rhs.proc
                             #'(procedure-rename
-                               (lambda () 
+                               (lambda ()
                                  #`(nm.*maker (#,type-rec-id flds.i) ...))
                                'nm.fold)]))
                (~optional [#:contract cnt:expr]
@@ -112,21 +112,21 @@
          ;; has to be down here to refer to #'cnt
          [provides (if (attribute no-provide?)
                        #'(begin)
-                       #'(begin 
+                       #'(begin
                            (provide nm.ex flds.pred flds.acc ...)
-                           (p/c (rename nm.*maker flds.maker cnt))))])
+                           (provide/cond-contract (rename nm.*maker flds.maker cnt))))])
         #`(begin
             (define-struct (nm #,par) flds.fs #:inspector #f)
             (define-match-expander nm.ex
               (lambda (s)
-                (syntax-parse s 
-                  [(_ . fs) 
+                (syntax-parse s
+                  [(_ . fs)
                    #:with pat (syntax/loc s (ign-pats ... . fs))
                    (syntax/loc s (struct nm pat))])))
             (begin-for-syntax
               (hash-set! #,ht-stx 'nm.kw (list #'nm.ex #'flds.fs fold-rhs.proc #f)))
             #,(quasisyntax/loc stx
-                (w/c nm ([nm.*maker cnt])
+                (with-cond-contract nm ([nm.*maker cnt])
                      #,(quasisyntax/loc #'nm
                          (defintern (nm.*maker . flds.fs) flds.maker intern?
                            #:extra-args
@@ -136,17 +136,17 @@
 
 (define-for-syntax (mk-fold ht type-rec-id rec-ids kws)
   (lambda (stx)
-    (define new-ht (hash-copy ht))    
+    (define new-ht (hash-copy ht))
     (define-syntax-class clause
-      (pattern  
+      (pattern
        (k:keyword #:matcher mtch pats ... e:expr)
        #:attr kw (attribute k.datum)
-       #:attr val (list #'mtch 
+       #:attr val (list #'mtch
                         (syntax/loc this-syntax (pats ...))
                         (lambda () #'e)
                         this-syntax))
       (pattern
-       (k:keyword pats ... e:expr) 
+       (k:keyword pats ... e:expr)
        #:attr kw (syntax-e #'k)
        #:attr val (list (format-id stx "~a:" (attribute kw))
                         (syntax/loc this-syntax (pats ...))
@@ -165,7 +165,7 @@
     (define-syntax-class (sized-list kws)
       #:description (format "keyword expr pairs matching with keywords in the list ~a" kws)
       (pattern ((~or (~seq (~var k (keyword-in kws)) e:expr)) ...)
-               #:when (equal? (length (attribute k.datum)) 
+               #:when (equal? (length (attribute k.datum))
                               (length (remove-duplicates (attribute k.datum))))
                #:attr mapping (for/hash ([k* (attribute k.datum)]
                                          [e* (attribute e)])
@@ -192,30 +192,19 @@
                    [_ error-msg]))))])))
 
 
-(define-syntax (make-prim-type stx)    
-  (define-syntax-class type-name-base
-    #:attributes (i d-id key? (fld-names 1))
-    #:transparent
-    (pattern [i:id (~optional (~and #:key
-                                    (~bind [key? #'#t]
-                                           [(fld-names 1) (list #'key)]))
-                              #:defaults ([key? #'#f]
-                                          [(fld-names 1) null]))
-                   #:d d-id:id]))
+(define-syntax (make-prim-type stx)
   (define-syntax-class type-name
+    #:attributes (name d-id key? (fld-names 1) case printer ht rec-id kw pred? (accs 1))
     #:transparent
-    #:auto-nested-attributes
-    (pattern :type-name-base
-             #:with lower-s (string->symbol (string-downcase (symbol->string (syntax-e #'i))))
-             #:with name #'i
-             #:with keyword (string->keyword (symbol->string (syntax-e #'i)))
-             #:with tmp-rec-id (generate-temporary)
-             #:with case (format-id #'i "~a-case" #'lower-s)
-             #:with printer (format-id #'i "print-~a*" #'lower-s)
-             #:with ht (format-id #'i "~a-name-ht" #'lower-s)
-             #:with rec-id (format-id #'i "~a-rec-id" #'lower-s)
+    (pattern [name:id
+              d-id:id kw:keyword case:id printer:id ht:id rec-id:id
+              (~optional (~and #:key
+                               (~bind [key? #'#t]
+                                      [(fld-names 1) (list #'key)]))
+                         #:defaults ([key? #'#f]
+                                     [(fld-names 1) null]))]
              #:with (_ _ pred? accs ...)
-                    (build-struct-names #'name (syntax->list #'(fld-names ...)) #f #t #'name)))
+             (build-struct-names #'name (syntax->list #'(fld-names ...)) #f #t #'name)))
   (syntax-parse stx
     [(_ i:type-name ...)
      #'(begin
@@ -224,33 +213,33 @@
          (define-syntax i.d-id (mk #'i.name #'i.ht i.key?)) ...
          (define-for-syntax i.ht (make-hasheq)) ...
          (define-struct/printer (i.name Rep) (i.fld-names ...) (lambda (a b c) ((unbox i.printer) a b c))) ...
-         (define-for-syntax i.rec-id #'i.rec-id) ...   
-         (provide i.case ...)           
+         (define-for-syntax i.rec-id #'i.rec-id) ...
+         (provide i.case ...)
          (define-syntaxes (i.case ...)
-           (let ()               
+           (let ()
              (apply values
-                    (map (lambda (ht) 
+                    (map (lambda (ht)
                            (define rec-ids (list i.rec-id ...))
-                           (mk-fold ht 
+                           (mk-fold ht
                                     (car rec-ids)
                                     rec-ids
-                                    '(i.keyword ...)))
+                                    '(i.kw ...)))
                          (list i.ht ...))))))]))
 
-(make-prim-type [Type #:key #:d dt]
-                [Filter #:d df]
-                [Object #:d do] 
-                [PathElem #:d dpe])
+(make-prim-type [Type def-type #:Type type-case print-type* type-name-ht type-rec-id #:key]
+                [Filter def-filter #:Filter filter-case print-filter* filter-name-ht filter-rec-id]
+                [Object def-object #:Object object-case print-object* object-name-ht object-rec-id]
+                [PathElem def-pathelem #:PathElem pathelem-case print-pathelem* pathelem-name-ht pathelem-rec-id])
 
 (provide PathElem? (rename-out [Rep-seq Type-seq]
                                [Rep-free-vars free-vars*]
                                [Rep-free-idxs free-idxs*]))
 
-(p/c (struct Rep ([seq exact-nonnegative-integer?] 
-                  [free-vars (hash/c symbol? variance?)]                   
-                  [free-idxs (hash/c symbol? variance?)]
-                  [stx (or/c #f syntax?)]))
-     [replace-syntax (Rep? syntax? . -> . Rep?)])
+(provide/cond-contract (struct Rep ([seq exact-nonnegative-integer?]
+                                    [free-vars (hash/c symbol? variance?)]
+                                    [free-idxs (hash/c symbol? variance?)]
+                                    [stx (or/c #f syntax?)]))
+                       [replace-syntax (Rep? syntax? . -> . Rep?)])
 
 (define (replace-field val new-val idx)
   (define-values (type skipped) (struct-info val))

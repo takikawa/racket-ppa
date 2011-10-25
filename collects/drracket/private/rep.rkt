@@ -204,13 +204,13 @@ TODO
   ;; a port that accepts values for printing in the repl
   (define current-value-port (make-parameter #f))
   
-  ;; drscheme-error-display-handler : (string (union #f exn) -> void
+  ;; drracket-error-display-handler : (string (union #f exn) -> void
   ;; =User=
   ;; the timing is a little tricky here. 
   ;; the file icon must appear before the error message in the text, so that happens first.
   ;; the highlight must be set after the error message, because inserting into the text resets
   ;;     the highlighting.
-  (define (drscheme-error-display-handler msg exn)
+  (define (drracket-error-display-handler msg exn)
     (let* ([cut-stack (if (and (exn? exn)
                                (main-user-eventspace-thread?))
                           (cut-stack-at-checkpoint exn)
@@ -708,7 +708,7 @@ TODO
           (reset-highlighting)
           
           (set! error-ranges locs)
-          
+
           (for-each (λ (loc) (send (srcloc-source loc) begin-edit-sequence)) locs)
           
           (when color?
@@ -751,6 +751,14 @@ TODO
             (for-each (λ (loc) (send (srcloc-source loc) end-edit-sequence)) locs)
             
             (when first-loc
+              
+              (when (eq? first-file definitions-text)
+                ;; when we're highlighting something in the defs window,
+                ;; make sure it is visible
+                (let ([tlw (send first-file get-top-level-window)]) 
+                  (when (is-a? tlw drracket:unit:frame<%>)
+                    (send tlw ensure-defs-shown))))
+              
               (send first-file set-caret-owner (get-focus-snip) 'global)))))
       
       (define highlights-can-be-reset (make-parameter #t))
@@ -1493,7 +1501,7 @@ TODO
         
         (current-language-settings user-language-settings)
         (error-print-source-location #f)
-        (error-display-handler drscheme-error-display-handler)
+        (error-display-handler drracket-error-display-handler)
         (current-load-relative-directory #f)
         (current-custodian user-custodian)
         (current-load text-editor-load-handler)

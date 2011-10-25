@@ -4,7 +4,7 @@
          (for-template scheme/base)
          "../utils/utils.rkt"
          (types type-table)
-         (optimizer utils))
+         (optimizer utils logging))
 
 (provide dead-code-opt-expr)
 
@@ -15,12 +15,12 @@
   (pattern (if tst:expr thn:expr els:expr)
            #:when (tautology? #'tst)
            #:with opt
-           (begin (log-optimization "dead else branch" #'op)
-                  #`(begin #,((optimize) #'tst)
-                           #,((optimize) #'thn))))
+           (begin (log-optimization "dead else branch" #'els)
+                  #`(#%expression (begin #,((optimize) #'tst)
+                                         #,((optimize) #'thn)))))
   (pattern (if tst:expr thn:expr els:expr)
            #:when (contradiction? #'tst)
            #:with opt
-           (begin (log-optimization "dead then branch" #'op)
-                  #`(begin #,((optimize) #'tst)
-                           #,((optimize) #'els)))))
+           (begin (log-optimization "dead then branch" #'thn)
+                  #`(#%expression (begin #,((optimize) #'tst)
+                                         #,((optimize) #'els))))))

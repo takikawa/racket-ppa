@@ -346,7 +346,7 @@
         (copy-file ,list-zo ,test-zo) => (void)
         (copy-file ,test-zo ,list-zo) =err> "access denied"
         (load/use-compiled ,test-lib) => (void)
-        (require 'list) =err> "access from an uncertified context"
+        (require 'list) =err> "access disallowed by code inspector"
         (delete-file ,test-zo) => (void)
         (delete-file ,test-lib) =err> "`delete' access denied"
         --top--
@@ -364,7 +364,7 @@
         (cp ,list-lib ,test2-lib) (cp ,list-zo   ,test2-zo)
         ;; bytecode from test-lib is bad, even when we can read/write to it
         (load/use-compiled ,test-zo)
-        (require 'list) =err> "access from an uncertified context"
+        (require 'list) =err> "access disallowed by code inspector"
         ;; bytecode from test2-lib is explicitly allowed
         (load/use-compiled ,test2-lib)
         (require 'list) => (void))
@@ -384,7 +384,7 @@
    (make-evaluator! '(special beginner)
                     (make-prog "(define l null)" "(define x 3.5)"))
    --eval--
-   (cond [null? l 0]) =err> "expected an open parenthesis"
+   (cond [null? l 0]) =err> "no open parenthesis"
    --top--
    (eq? (ev "6") (ev "(sub1 (* 2 3.5))"))
    (eq? (ev "6") (ev "(sub1 (* 2 x))"))
@@ -476,7 +476,7 @@
    --top--
    (when (custodian-memory-accounting-available?)
      (t --top--
-        (parameterize ([sandbox-eval-limits '(2 5)]
+        (parameterize ([sandbox-eval-limits '(10 5)]
                        [sandbox-memory-limit 100])
           (make-base-evaluator!))
         --eval--
@@ -490,7 +490,7 @@
            (collect-garbage)
            ;; increases size of the current evaluation
            (cons (make-bytes 500000) v)))
-        =err> "out of memo(?:ry)"
+        =err> "out of mem+o(?:ry)"
         b => 1))
 
    ))

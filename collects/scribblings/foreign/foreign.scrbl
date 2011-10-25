@@ -1,13 +1,13 @@
 #lang scribble/doc
-@(require "utils.ss")
+@(require "utils.rkt")
 
-@title{@bold{FFI}: Racket Foreign Interface}
+@title{The Racket Foreign Interface}
 
 @author["Eli Barzilay"]
 
 @defmodule[ffi/unsafe #:use-sources ('#%foreign)]
 
-The @schememodname[ffi/unsafe] library enables the direct use of
+The @racketmodname[ffi/unsafe] library enables the direct use of
 C-based APIs within Racket programs---without writing any new C
 code. From the Racket perspective, functions and data with a C-based
 API are @idefterm{foreign}, hence the term @defterm{foreign

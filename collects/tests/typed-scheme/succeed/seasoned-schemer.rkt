@@ -1,6 +1,6 @@
-#lang typed-scheme  
+#lang typed-scheme
 #;(require mzlib/etc)
-#;(require "prims.ss")
+#;(require "prims.rkt")
 (require mzlib/match)
 
 (define-type-alias number Number)
@@ -70,7 +70,7 @@
 (pick 2 (cons 'a (cons 'd (cons 'c #{'() : (list-of symbol)}))))
 
 (define: (multirember [a : atom] [l : lat]) : lat
-  (letrec ([#{mr : (lat -> lat)} 
+  (letrec ([#{mr : (lat -> lat)}
 	    (lambda: ([l : lat])
 		     (cond [(null? l) l]
 			   [(eq? a (car l)) (mr (cdr l))]
@@ -82,7 +82,7 @@
 		(cond [(null? l) l]
 		      [(f a (car l)) (mr (cdr l))]
 		      [else (cons (car l) (mr (cdr l)))]))
-	  #;(letrec ([#{mr : ((list-of e) -> (list-of e))} 
+	  #;(letrec ([#{mr : ((list-of e) -> (list-of e))}
 	  (lambda: ([l : (list-of e)])
 	  (cond [(null? l) l]
 	  [(f a (car l)) (mr (cdr l))]

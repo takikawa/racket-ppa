@@ -1,8 +1,5 @@
 #lang scribble/doc
-@(require scribble/manual
-          scribble/bnf
-          "common.ss"
-          scribble/eval
+@(require scribble/manual scribble/bnf scribble/eval "common.rkt"
           (for-label racket/base
                      racket/include
                      racket/contract
@@ -363,7 +360,7 @@ parallel builder should continue without compiling @racket[zo-path].
 
 @defmodule[setup/parallel-build]{
 
-The @schememodname[setup/parallel-build] library provides the parallel compilation to bytecode
+The @racketmodname[setup/parallel-build] library provides the parallel compilation to bytecode
 functionality of @exec{rack setup} and @exec{raco make}.}
 
 @; ----------------------------------------------------------------------

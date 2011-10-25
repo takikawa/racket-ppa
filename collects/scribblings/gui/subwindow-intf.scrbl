@@ -1,9 +1,9 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
 @definterface/title[subwindow<%> (subarea<%> window<%>)]{
 
-A @scheme[subwindow<%>] is a containee window.
+A @racket[subwindow<%>] is a containee window.
 
 @defmethod[(reparent [new-parent (or/c (is-a?/c frame%) (is-a?/c dialog%) 
                                        (is-a?/c panel%) (is-a?/c pane%))])

@@ -1,9 +1,8 @@
-
 (module struct scheme/base
   (require (for-syntax scheme/base)
            mzlib/etc
            scheme/contract
-	   "stx.ss"
+           "stx.rkt"
            scheme/struct-info)
   (require (for-template mzscheme))
   
@@ -199,28 +198,29 @@
 			       (append base '(#f))
 			       base)
 			   base))]
-             [cert-f (gensym)]
 	     [qs (lambda (x) (if (eq? x #t)
 				 x
-				 (and x `(,cert-f (quote-syntax ,x)))))])
-        `(let ([,cert-f (syntax-local-certifier #t)])
+				 (and x `(quote-syntax ,x))))]
+         [self-sels (reverse (if omit-sel?
+                                 null
+                                 (map qs (if omit-set? flds (every-other flds)))))]
+         [self-sets (reverse (if omit-sel?
+                                 null
+                                 (if omit-set?
+                                     (map (lambda (sel) #f) self-sels)
+                                     (map qs (every-other (if (null? flds)
+                                                              null
+                                                              (cdr flds)))))))])
+        `(let ()
            (list
             ,(qs (car names))
             ,(qs (cadr names))
             ,(qs (caddr names))
             (list 
-             ,@(reverse (if omit-sel?
-                            null
-                            (map qs (if omit-set? flds (every-other flds)))))
+             ,@self-sels
              ,@(map qs (add-#f omit-sel? base-getters)))
             (list
-             ,@(reverse (if omit-set?
-                            null
-                            (map qs (if omit-sel?
-                                        flds
-                                        (every-other (if (null? flds)
-                                                         null
-                                                         (cdr flds)))))))
+             ,@self-sets
              ,@(map qs (add-#f omit-set? base-setters)))
             ,(qs base-name))))))
 
@@ -242,8 +242,7 @@
     ;; if `defined-names' is #f.
     ;; If `expr?' is #t, then generate an expression to build the info,
     ;; otherwise build the info directly.
-    (let* ([cert-f (gensym)]
-           [qs (lambda (x) #`(#,cert-f (quote-syntax #,x)))]
+    (let* ([qs (lambda (x) #`(quote-syntax #,x))]
            [every-other (lambda (l)
                           (let loop ([l l][r null])
                             (cond
@@ -281,7 +280,7 @@
                              (values null null))]
                         [(fields) (cdddr defined-names)]
                         [(wrap) (lambda (x) #`(list #,@x))])
-             #`(let ([#,cert-f (syntax-local-certifier)])
+             #`(let ()
                  (make-struct-info
                   (lambda ()
                     #,(wrap

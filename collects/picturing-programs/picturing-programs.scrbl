@@ -13,7 +13,7 @@
              ))
 
 @; teachpack["picturing-programs"]{Picturing Programs}
-@title{Picturing Programs Teachpack}
+@title{@italic{Picturing Programs} Teachpack}
 @author{Stephen Bloch}
 
 @defmodule[picturing-programs]
@@ -41,7 +41,7 @@ It's intended to be used with the textbook
 This package should be bundled with DrRacket version 5.1 and later, so there should be
 no installation procedure.
 
-@section{Functions from image.rkt and universe.rkt}
+@section{Functions from @racketmodname[2htdp/image] and @racketmodname[2htdp/universe]}
 
 This package includes all of 
 @racketmodlink[2htdp/image]{the image teachpack} and
@@ -57,7 +57,19 @@ This package also provides the following additional functions:
 
 @; @include-section{image.rkt}
 
+@section{Animation support}
+Since the 
+@hyperlink["http://www.picturingprograms.com" "Picturing Programs"]
+textbook introduces animations with image models before other model
+types, we provide a draw handler for the simple case in which the
+model is exactly what should be displayed in the animation window:
+
+@defproc[(show-it [img image?]) 
+         image?]{Returns the given image unaltered.  Useful as a draw handler for animations whose model is an image.}
+
 @section{New image functions}
+@; @defmodule*/no-declare[(picturing-programs/tiles)]
+@declare-exporting[picturing-programs/private/tiles picturing-programs]
 
 @defproc[(rotate-cw [img image?])
          image?]{Rotates an image 90 degrees clockwise.}
@@ -80,8 +92,15 @@ This package also provides the following additional functions:
 @defproc[(crop-right [img image?] [pixels natural-number/c]) 
          image?]{Chops off the specified number of pixels from the right side of the image.}
 
-@defproc[(show-it [img image?]) 
-         image?]{Returns the given image unaltered.  Useful as a draw handler for animations whose model is an image.}
+@defproc[(flip-main [img image?])
+ 	 image?]{Reflects an image across the line x=y, moving the pixel
+at coordinates (x,y) to (y,x).  The top-right corner becomes the
+bottom-left corner, and vice versa.  Width and height are swapped.}
+
+@defproc[(flip-other [img image?])
+	 image?]{Reflects an image by moving the pixel at coordinates
+(x,y) to (h-y, w-x).  The top-left corner becomes the bottom-right
+corner, and vice versa.  Width and height are swapped.}
 
 @defproc[(reflect-vert [img image?]) 
          image?]{The same as @racket[flip-vertical]; retained for compatibility.}
@@ -89,7 +108,19 @@ This package also provides the following additional functions:
 @defproc[(reflect-horiz [img image?]) 
          image?]{The same as @racket[flip-horizontal]; retained for compatibility.} 
 
+@defproc[(reflect-main-diag [img image?])
+	 image?]{The same as @racket[flip-main]; retained for
+compatibility.}
+
+@defproc[(reflect-other-diag [img image?])
+	 image?]{The same as @racket[flip-other]; retained for
+compatibility.}
+
 @section{Variables}
+
+@; @defmodule*/no-declare[(picturing-programs/book-pictures)]
+@declare-exporting[picturing-programs/private/book-pictures picturing-programs]
+
 This teachpack also defines variable names for some of the pictures used in the textbook.
 
 @defthing[pic:bloch image?]{A picture of the author, c. 2005.}
@@ -110,6 +141,11 @@ distinguish them from anything you might define that happens to be named
 particular, there's no requirement that your names start with "pic:".
 
 @section{Pixel functions}
+
+@; @defmodule*/no-declare[(picturing-programs/map-image)]
+@declare-exporting[picturing-programs/private/map-image picturing-programs]
+
+
 The above functions allow you to operate on a picture as a whole, but sometimes
 you want to manipulate a picture pixel-by-pixel.
 
@@ -157,6 +193,7 @@ Gets the color of a specified pixel in the given image.  If x and/or y are outsi
 the bounds of the image, returns a transparent color.}
 
 @subsection{Specifying the color of each pixel of an image}
+
 @defproc[(build-image [width natural-number/c]
                       [height natural-number/c]
                       [f (-> natural-number/c natural-number/c color?)])
@@ -164,18 +201,45 @@ the bounds of the image, returns a transparent color.}
 
 Builds an image of the specified size and shape by calling the specified function
 on the coordinates of each pixel.  For example,
-@racketblock[
-             (define (fuzz pic)
-               (local [(define (near-pixel x y)
-                         (get-pixel-color (+ x -3 (random 7))
-                                          (+ y -3 (random 7))
-                                          pic))]
-                 (build-image (image-width pic)
-                              (image-height pic)
-                              near-pixel)))
-                                           ]
+@codeblock|{
+; fuzz : image -> image
+(define (fuzz pic)
+   (local [; near-pixel : num(x) num(y) -> color
+           (define (near-pixel x y)
+              (get-pixel-color (+ x -3 (random 7))
+                               (+ y -3 (random 7))
+                               pic))]
+      (build-image (image-width pic)
+                   (image-height pic)
+                   near-pixel)))
+}|
 produces a fuzzy version of the given picture by replacing each pixel with a
 randomly chosen pixel near it.}
+
+@defproc[(build-image/extra
+         [width natural-number/c]
+         [height natural-number/c]
+         [f (-> natural-number/c natural-number/c any/c color?)] [extra any/c]) image?]{
+Equivalent to @racketblock[(build-image width height (lambda (x y) (f x y extra)))]
+In other words, it passes the @racket[extra] argument in as a third argument in each call
+to @racket[f].  This allows students who haven't learned closures yet to do pixel-by-pixel image
+manipulations inside a function depending on a parameter of that function.
+
+For example, the above @racket[fuzz] example could also be written as
+@codeblock|{
+; near-pixel : number(x) number(y) image -> color
+(define (near-pixel x y pic)
+  (get-pixel-color (+ x -3 (random 7))
+                   (+ y -3 (random 7))
+                   pic))
+; fuzz : image -> image
+(define (fuzz pic)
+  (build-image/extra (image-width pic)
+                     (image-height pic)
+                     near-pixel
+                     pic))
+}|
+}
 
 @defproc[(build4-image [width natural-number/c] [height natural-number/c]
 		       [red-function (-> natural-number/c natural-number/c natural-number/c)]
@@ -201,11 +265,12 @@ Just like @racket[build4-image], but without specifying the alpha component
 
 Applies the given function to each pixel in a given image, producing a new image the same
 size and shape.  For example,
-@racketblock[
-             (define (lose-red x y old-color)
-               (make-color 0 (color-green old-color) (color-blue old-color)))
-             
-             (map-image lose-red my-picture)]
+@codeblock|{
+; lose-red : num(x) num(y) color -> color
+(define (lose-red x y old-color)
+   (make-color 0 (color-green old-color) (color-blue old-color)))
+
+(map-image lose-red my-picture)}|
 produces a copy of @racket[my-picture] with all the red leached out,
 leaving only the blue and green components.
 
@@ -218,16 +283,44 @@ that was in the original image.  To preserve this information, one could write
 old-color)))]
 
 Another example:
-@racketblock[
-             (define (apply-gradient x y old-color)
-               (make-color (min (* 3 x) 255)
-                           0 
-                           (min (* 3 y) 255)))
-             
-             (map-image apply-gradient my-picture)]
+@codeblock|{
+; apply-gradient : num(x) num(y) color -> color
+(define (apply-gradient x y old-color)
+   (make-color (min (* 3 x) 255)
+               0 
+               (min (* 3 y) 255)))
+
+(map-image apply-gradient my-picture)}|
 produces a picture the size of @racket[my-picture]'s bounding rectangle,
 with a smooth color gradient with red increasing from left to
 right and blue increasing from top to bottom.}
+
+@defproc[(map-image/extra
+         [f (-> natural-number/c natural-number/c color? any/c color?)] [img image?] [extra any/c]) image?]{
+Equivalent to @racketblock[(map-image (lambda (x y c) (f x y c extra)) img)]
+In other words, it passes the @racket[extra] argument in as a fourth argument in each call
+to @racket[f].  This allows students who haven't learned closures yet to do pixel-by-pixel image
+manipulations inside a function depending on a parameter of that function.
+
+For example,
+@codeblock|{
+; new-pixel : number(x) number(y) color height -> color
+(check-expect (new-pixel 36 100 (make-color 30 60 90) 100)
+              (make-color 30 60 255))
+(check-expect (new-pixel 58 40 (make-color 30 60 90) 100)
+              (make-color 30 60 102))
+(define (new-pixel x y c h)
+  (make-color (color-red c)
+              (color-green c)
+              (real->int (* 255 (/ y h)))))
+
+; apply-blue-gradient : image -> image
+(define (apply-blue-gradient pic)
+  (map-image/extra new-pixel pic (image-height pic)))
+}|
+This @racket[apply-blue-gradient] function changes the blue component of an image to increase gradually
+from the top to the bottom of the image, (almost) reaching 255 at the bottom of the image.
+}
 
 @defproc[(map4-image 
 [red-func (-> natural-number/c natural-number/c natural-number/c natural-number/c natural-number/c natural-number/c natural-number/c)]
@@ -247,20 +340,22 @@ The results of the four functions are used as the red, green, blue, and alpha
 components in the corresponding pixel of the resulting picture.
 
 For example,
-@racketblock[
+@codeblock|{
+; each function : num(x) num(y) num(r) num(g) num(b) num(a) -> num
 (define (zero x y r g b a) 0)
 (define (same-g x y r g b a) g)
 (define (same-b x y r g b a) b)
 (define (same-alpha x y r g b a) a)
-(map4-image zero same-g same-b same-alpha my-picture)]
+(map4-image zero same-g same-b same-alpha my-picture)}|
 produces a copy of @racket[my-picture] with all the red leached out,
 leaving only the blue, green, and alpha components.
 
-@racketblock[
+@codeblock|{
+; each function : num(x) num(y) num(r) num(g) num(b) num(a) -> num
 (define (3x x y r g b a) (min (* 3 x) 255))
 (define (3y x y r g b a) (min (* 3 y) 255))
 (define (return-255 x y r g b a) 255)
-(map4-image 3x zero 3y return-255 my-picture)]
+(map4-image 3x zero 3y return-255 my-picture)}|
 produces an opaque picture the size of @racket[my-picture]'s bounding rectangle,
 with a smooth color gradient with red increasing from left to
 right and blue increasing from top to bottom.
@@ -283,18 +378,20 @@ corresponding pixel of the resulting picture.
 
 The alpha component in the resulting picture is copied from the source
 picture.  For example,
-@racketblock[
+@codeblock|{
+; each function : num(x) num(y) num(r) num(g) num(b) -> num
 (define (zero x y r g b) 0)
 (define (same-g x y r g b) g)
 (define (same-b x y r g b) b)
-(map3-image zero same-g same-b my-picture)]
+(map3-image zero same-g same-b my-picture)}|
 produces a copy of @racket[my-picture] with all the red leached out; parts of
 the picture that were transparent are still transparent, and parts that were
 dithered are still dithered.
-@racketblock[
+@codeblock|{
+; each function : num(x) num(y) num(r) num(g) num(b) num(a) -> num
 (define (3x x y r g b a) (min (* 3 x) 255))
 (define (3y x y r g b a) (min (* 3 y) 255))
-(map3-image zero 3x 3y my-picture)]
+(map3-image zero 3x 3y my-picture)}|
 produces a @racket[my-picture]-shaped "window" on a color-gradient.
 }
 
@@ -302,19 +399,27 @@ produces a @racket[my-picture]-shaped "window" on a color-gradient.
          integer?]{
 Not specific to colors, but useful if you're building colors by arithmetic.
 For example,
-@racketblock[
-             (define (bad-gradient x y)
-               (make-color (* 2.5 x) (* 1.6 y) 0))
-             (build-image 50 30 bad-gradient)
-             (define (good-gradient x y)
-               (make-color (real->int (* 2.5 x)) (real->int (* 1.6 y)) 0))
-             (build-image 50 30 good-gradient)
-             ]
+@codeblock|{
+; bad-gradient : num(x) num(y) -> color
+(define (bad-gradient x y)
+   (make-color (* 2.5 x) (* 1.6 y) 0))
+(build-image 50 30 bad-gradient)
+
+; good-gradient : num(x) num(y) -> color
+(define (good-gradient x y)
+   (make-color (real->int (* 2.5 x)) (real->int (* 1.6 y)) 0))
+(build-image 50 30 good-gradient)
+}|
 The version using @racket[bad-gradient] crashes because color components must be exact integers.
 The version using @racket[good-gradient] works.}
 
 
 @section{Input and Output}
+
+@; @defmodule*/no-declare[(picturing-programs/io-stuff)]
+@declare-exporting[picturing-programs/private/io-stuff picturing-programs]
+
+
 This teachpack also provides several functions to help in testing
 I/O functions (in Advanced Student language; ignore this section if
 you're in a Beginner or Intermediate language):
@@ -354,16 +459,18 @@ Web page at the specified URL rather than from the keyboard.}
 Combines @racket[with-input-from-string] and @racket[with-output-to-string]:
 calls @tt{thunk} with its input coming from @tt{input} and accumulates
 its output into a string, which is returned.  Especially useful for testing:
-@racketblock[
-             (define (ask question)
-               (begin (display question)
-                      (read)))                  
-             (define (greet)
-               (local [(define name (ask "What is your name?"))]
-                 (printf "Hello, ~a!" name)))
-             (check-expect
-              (with-io-strings "Steve" greet)
-              "What is your name?Hello, Steve!")]
+@codeblock|{
+; ask : string -> prints output, waits for text input, returns it
+(define (ask question)
+   (begin (display question)
+          (read)))
+; greet : nothing -> prints output, waits for text input, prints output
+(define (greet)
+   (local [(define name (ask "What is your name?"))]
+      (printf "Hello, ~a!" name)))
+(check-expect
+   (with-io-strings "Steve" greet)
+   "What is your name?Hello, Steve!")}|
 }
 
 @; @include-section{worlds.scrbl}

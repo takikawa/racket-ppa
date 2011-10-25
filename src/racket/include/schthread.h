@@ -103,6 +103,8 @@ struct gmp_tmp_stack
 typedef intptr_t objhead;
 #endif
 
+typedef void (*Scheme_Sleep_Proc)(float seconds, void *fds);
+
 /* **************************************** */
 
 #ifndef USE_THREAD_LOCAL
@@ -114,6 +116,7 @@ typedef intptr_t objhead;
 /* **************************************** */
 
 typedef struct Thread_Local_Variables {
+  int scheme_current_place_id_;
   void **GC_variable_stack_;
   struct NewGC *GC_instance_;
   uintptr_t GC_gen0_alloc_page_ptr_;
@@ -146,7 +149,10 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Object *cached_mod_beg_stx_;
   struct Scheme_Object *cached_dv_stx_;
   struct Scheme_Object *cached_ds_stx_;
+  struct Scheme_Object *cached_dvs_stx_;
   int cached_stx_phase_;
+  struct Scheme_Object *cwv_stx_;
+  int cwv_stx_phase_;
   struct Scheme_Cont *offstack_cont_;
   struct Scheme_Overflow *offstack_overflow_;
   struct Scheme_Overflow_Jmp *scheme_overflow_jmp_;
@@ -168,8 +174,12 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Object *scheme_orig_stdin_port_;
   struct mz_fd_set *scheme_fd_set_;
   struct Scheme_Custodian *new_port_cust_;
+#if (defined(__WIN32__) || defined(WIN32) || defined(_WIN32))
+  void *scheme_break_semaphore_;
+#else
   int external_event_fd_;
   int put_external_event_fd_;
+#endif
   char *read_string_byte_buffer_;
   struct ITimer_Data *itimerdata_;
   char *quick_buffer_;
@@ -262,6 +272,7 @@ typedef struct Thread_Local_Variables {
   int env_uid_counter_;
   int scheme_overflow_count_;
   struct Scheme_Object *original_pwd_;
+  void *file_path_wc_buffer_;
   intptr_t scheme_hash_request_count_;
   intptr_t scheme_hash_iteration_count_;
   struct Scheme_Env *initial_modules_env_;
@@ -300,6 +311,7 @@ typedef struct Thread_Local_Variables {
   struct mzrt_mutex *jit_lock_;
   struct free_list_entry *free_list_;
   int free_list_bucket_count_;
+  void *code_allocation_page_list_;
   struct Scheme_Bucket_Table *prefab_table_;
   struct Scheme_Hash_Table *place_local_symbol_table_;
   struct Scheme_Hash_Table *place_local_keyword_table_;
@@ -309,14 +321,24 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Hash_Table *place_local_misc_table_;
   int place_evts_array_size_;
   struct Evt **place_evts_;
-  void *place_object_;
+  struct Scheme_Place_Object *place_object_;
   struct Scheme_Object *empty_self_shift_cache_;
+  struct Scheme_Bucket_Table *scheme_module_code_cache_;
+  struct Scheme_Object *group_member_cache_;
+  struct Scheme_Prefix *scheme_prefix_finalize_;
+  struct Scheme_Hash_Table *loaded_extensions_;
+  struct Scheme_Hash_Table *fullpath_loaded_extensions_;
+  Scheme_Sleep_Proc scheme_place_sleep_;
+  struct Scheme_Bucket_Table *taint_intern_table_;
 } Thread_Local_Variables;
 
 #if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS)
 /* Using Pthread getspecific() */
 # include <pthread.h>
 MZ_EXTERN pthread_key_t scheme_thread_local_key;
+# if defined(__APPLE__) && defined(__MACH__)
+MZ_EXTERN int scheme_thread_local_offset;
+# endif
 # ifndef INLINE_GETSPECIFIC_ASSEMBLY_CODE
 #  define scheme_get_thread_local_variables() ((Thread_Local_Variables *)pthread_getspecific(scheme_thread_local_key))
 #  ifdef MZ_XFORM
@@ -331,13 +353,13 @@ static inline Thread_Local_Variables *scheme_get_thread_local_variables() {
   Thread_Local_Variables *x = NULL;
 #  if defined(__APPLE__) && defined(__MACH__)
 #   if defined(__x86_64__)
-  asm volatile("movq %%gs:0x60(,%1,8), %0" : "=r"(x) : "r"(scheme_thread_local_key));
+  asm("movq %%gs:0(%1,%2,8), %0" : "=r"(x) : "r"(scheme_thread_local_offset), "r"((int)scheme_thread_local_key));
 #   else
-  asm volatile("movl %%gs:0x48(,%1,4), %0" : "=r"(x) : "r"(scheme_thread_local_key));
+  asm("movl %%gs:0(%1,%2,4), %0" : "=r"(x) : "r"(scheme_thread_local_offset), "r"(scheme_thread_local_key));
 #   endif
 #  elif defined(linux)
 #   if defined(__x86_64__)
-  asm volatile( "mov %1, %%eax;" 
+  asm( "mov %1, %%eax;" 
   "shl $0x4, %%rax;"
   "mov %%fs:0x10, %%rdx;" 
   "mov 0x118(%%rax,%%rdx), %0;"
@@ -428,6 +450,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 # define XOA /* empty */
 #endif
 
+#define scheme_current_place_id XOA (scheme_get_thread_local_variables()->scheme_current_place_id_)
 #define GC_objhead_template XOA (scheme_get_thread_local_variables()->GC_objhead_template_)
 #define GC_instance XOA (scheme_get_thread_local_variables()->GC_instance_)
 #define GC_gen0_alloc_page_ptr XOA (scheme_get_thread_local_variables()->GC_gen0_alloc_page_ptr_)
@@ -461,7 +484,10 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define cached_mod_beg_stx XOA (scheme_get_thread_local_variables()->cached_mod_beg_stx_)
 #define cached_dv_stx XOA (scheme_get_thread_local_variables()->cached_dv_stx_)
 #define cached_ds_stx XOA (scheme_get_thread_local_variables()->cached_ds_stx_)
+#define cached_dvs_stx XOA (scheme_get_thread_local_variables()->cached_dvs_stx_)
 #define cached_stx_phase XOA (scheme_get_thread_local_variables()->cached_stx_phase_)
+#define cwv_stx XOA (scheme_get_thread_local_variables()->cwv_stx_)
+#define cwv_stx_phase XOA (scheme_get_thread_local_variables()->cwv_stx_phase_)
 #define offstack_cont XOA (scheme_get_thread_local_variables()->offstack_cont_)
 #define offstack_overflow XOA (scheme_get_thread_local_variables()->offstack_overflow_)
 #define scheme_overflow_jmp XOA (scheme_get_thread_local_variables()->scheme_overflow_jmp_)
@@ -484,6 +510,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define scheme_orig_stdin_port XOA (scheme_get_thread_local_variables()->scheme_orig_stdin_port_)
 #define scheme_fd_set XOA (scheme_get_thread_local_variables()->scheme_fd_set_)
 #define new_port_cust XOA (scheme_get_thread_local_variables()->new_port_cust_)
+#define scheme_break_semaphore XOA (scheme_get_thread_local_variables()->scheme_break_semaphore_)
 #define external_event_fd XOA (scheme_get_thread_local_variables()->external_event_fd_)
 #define put_external_event_fd XOA (scheme_get_thread_local_variables()->put_external_event_fd_)
 #define read_string_byte_buffer XOA (scheme_get_thread_local_variables()->read_string_byte_buffer_)
@@ -578,6 +605,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define env_uid_counter XOA (scheme_get_thread_local_variables()->env_uid_counter_)
 #define scheme_overflow_count XOA (scheme_get_thread_local_variables()->scheme_overflow_count_)
 #define original_pwd XOA (scheme_get_thread_local_variables()->original_pwd_)
+#define file_path_wc_buffer XOA (scheme_get_thread_local_variables()->file_path_wc_buffer_)
 #define scheme_hash_request_count XOA (scheme_get_thread_local_variables()->scheme_hash_request_count_)
 #define scheme_hash_iteration_count XOA (scheme_get_thread_local_variables()->scheme_hash_iteration_count_)
 #define initial_modules_env XOA (scheme_get_thread_local_variables()->initial_modules_env_)
@@ -616,6 +644,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define jit_lock XOA (scheme_get_thread_local_variables()->jit_lock_)
 #define free_list XOA (scheme_get_thread_local_variables()->free_list_)
 #define free_list_bucket_count XOA (scheme_get_thread_local_variables()->free_list_bucket_count_)
+#define code_allocation_page_list XOA (scheme_get_thread_local_variables()->code_allocation_page_list_)
 #define prefab_table XOA (scheme_get_thread_local_variables()->prefab_table_)
 #define place_local_symbol_table XOA (scheme_get_thread_local_variables()->place_local_symbol_table_)
 #define place_local_keyword_table XOA (scheme_get_thread_local_variables()->place_local_keyword_table_)
@@ -627,6 +656,13 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define place_evts XOA (scheme_get_thread_local_variables()->place_evts_)
 #define place_object XOA (scheme_get_thread_local_variables()->place_object_)
 #define empty_self_shift_cache XOA (scheme_get_thread_local_variables()->empty_self_shift_cache_)
+#define scheme_module_code_cache XOA (scheme_get_thread_local_variables()->scheme_module_code_cache_)
+#define group_member_cache XOA (scheme_get_thread_local_variables()->group_member_cache_)
+#define scheme_prefix_finalize XOA (scheme_get_thread_local_variables()->scheme_prefix_finalize_)
+#define loaded_extensions XOA (scheme_get_thread_local_variables()->loaded_extensions_)
+#define fullpath_loaded_extensions XOA (scheme_get_thread_local_variables()->fullpath_loaded_extensions_)
+#define scheme_place_sleep XOA (scheme_get_thread_local_variables()->scheme_place_sleep_)
+#define taint_intern_table XOA (scheme_get_thread_local_variables()->taint_intern_table_)
 
 /* **************************************** */
 

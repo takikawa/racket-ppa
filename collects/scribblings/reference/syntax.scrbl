@@ -1,6 +1,5 @@
 #lang scribble/doc
-@(require "mz.ss"
-          scribble/bnf
+@(require "mz.rkt" scribble/bnf scribble/core
           (for-label (only-in racket/require-transform
                               make-require-transformer)
                      racket/require-syntax
@@ -24,6 +23,25 @@
 @(define cvt (racketfont "CVT"))
 @(define unquote-id (racket unquote))
 @(define unquote-splicing-id (racket unquote-splicing))
+
+@(define-syntax-rule (equiv-to-block b)
+    (tabular #:style (make-style #f (list (make-table-columns
+                                           (list (make-style #f '(baseline))
+                                                 (make-style #f '(baseline))))))
+             (list (list (para (hspace 2) " is equivalent to" (hspace 1))
+                         (racketblock0 b)))))
+
+@(define-syntax-rule (subeqivs [a0 b0] [a b] ...)
+   (tabular (map
+             list
+             (apply
+              append
+              (list (list (racketblock a0)
+                          (equiv-to-block b0))
+                    (list (para 'nbsp)
+                          (racketblock a)
+                          (equiv-to-block b))
+                    ...)))))
 
 @title[#:tag "syntax" #:style 'toc]{Syntactic Forms}
 
@@ -205,7 +223,7 @@ corresponding compiled and/or declared module. The third component of
 the vector should be printable and @racket[read]able, so that it can
 be preserved in marshaled bytecode. The @racketmodname[racket/base]
 and @racketmodname[racket] languages attach
-@scheme['#(racket/language-info get-info #f)] to a @racket[module]
+@racket['#(racket/language-info get-info #f)] to a @racket[module]
 form. See also @racket[module-compiled-language-info],
 @racket[module->language-info], and
 @racketmodname[racket/language-info].}
@@ -655,7 +673,7 @@ an identifier can be either imported or defined for a given
 
 @defform[(local-require require-spec ...)]{
 
-Like @scheme[require], but for use in a @tech{internal-definition context} to
+Like @racket[require], but for use in a @tech{internal-definition context} to
 import just into the local context. Only bindings from @tech{phase
 level} 0 are imported.}
 
@@ -1093,7 +1111,7 @@ aliens
 @defform[(filtered-in proc-expr require-spec)]{ 
 
   Applies an arbitrary transformation on the import names (as strings)
-  of @scheme[require-spec]. The @racket[proc-expr] must evaluate at
+  of @racket[require-spec]. The @racket[proc-expr] must evaluate at
   expansion time to a single-argument procedure, which is applied on
   each of the names from @racket[require-spec].  For each name, the
   procedure must return either a string for the import's new name or
@@ -1107,7 +1125,7 @@ aliens
                      (regexp-replace #rx"-" (string-titlecase name) "")))
               racket/base))]
   imports only bindings from @racketmodname[racket/base] that match the
-  pattern @scheme[#rx"^[a-z-]+$"], and it converts the names to ``camel case.''}
+  pattern @racket[#rx"^[a-z-]+$"], and it converts the names to ``camel case.''}
 
 @defform[(path-up rel-string ...)]{
 
@@ -1161,6 +1179,36 @@ but then sub-directories that are called
 @filepath{utils} override the one in the project's root.
 In other words, the previous method requires only a single unique name.}
 
+@defform/subs[(multi-in subs ...+)
+              ([subs sub-path
+                     (sub-path ...)]
+               [sub-path rel-string
+                         id])]{
+
+Specifies multiple files to be required from a hierarchy of
+directories or collections. The set of required module paths is computed
+as the cartesian product of the @racket[subs] groups, where each
+@racket[sub-path] is combined with other @racket[sub-path]s in order
+using a @litchar{/} separator. A @racket[sub-path] as a @racket[subs]
+is equivalent to @racket[(sub-path)]. All @racket[sub-path]s in a given
+@racket[multi-in] form must be either strings or identifiers.
+
+Examples:
+
+@subeqivs[
+[(require (multi-in racket (dict @#,racketidfont{list})))
+ (require racket/dict racket/list)]
+[(require (multi-in "math" "matrix" "utils.rkt"))
+ (require "math/matrix/utils.rkt")]
+[(require (multi-in "utils" ("math.rkt" "matrix.rkt")))
+ (require "utils/math.rkt" "utils/matrix.rkt")]
+[(require (multi-in ("math" "matrix") "utils.rkt"))
+ (require "math/utils.rkt" "matrix/utils.rkt")]
+[(require (multi-in ("math" "matrix") ("utils.rkt" "helpers.rkt")))
+ (require "math/utils.rkt" "math/helpers.rkt"
+          "matrix/utils.rkt" "matrix/helpers.rkt")]
+]}
+
 @; --------------------
 
 @subsection{Additional @racket[provide] Forms}
@@ -1174,7 +1222,7 @@ In other words, the previous method requires only a single unique name.}
 
 @defform[(filtered-out proc-expr provide-spec)]{
 
- Analogous to @scheme[filtered-in], but for filtering and renaming
+ Analogous to @racket[filtered-in], but for filtering and renaming
  exports.
 
   For example,
@@ -1186,7 +1234,7 @@ In other words, the previous method requires only a single unique name.}
                       #rx"-" (string-titlecase name) "")))
               (all-defined-out)))]
   exports only bindings that match the
-  pattern @scheme[#rx"^[a-z-]+$"], and it converts the names to ``camel case.''}
+  pattern @racket[#rx"^[a-z-]+$"], and it converts the names to ``camel case.''}
 
 @;------------------------------------------------------------------------
 @section[#:tag "quote"]{Literals: @racket[quote] and @racket[#%datum]}

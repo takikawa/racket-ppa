@@ -238,13 +238,9 @@ SHARED_OK static Scheme_Object *addon_dir;
 READ_ONLY static Scheme_Object *windows_symbol, *unix_symbol;
 
 #if defined(UNIX_FILE_SYSTEM) && !defined(NO_UNIX_USERS)
-typedef struct {
-  gid_t gid;
-  char set, in;
-} Group_Mem_Cache;
 
 # define GROUP_CACHE_SIZE 10
-FIXME_LATER static Group_Mem_Cache group_mem_cache[GROUP_CACHE_SIZE];
+THREAD_LOCAL_DECL(static Scheme_Object *group_member_cache);
 
 SHARED_OK static int have_user_ids = 0;
 SHARED_OK static uid_t uid;
@@ -1153,7 +1149,7 @@ int scheme_os_setcwd(char *expanded, int noexn)
 
 #ifdef DOS_FILE_SYSTEM
 #define WC_BUFFER_SIZE 1024
-static wchar_t wc_buffer[WC_BUFFER_SIZE];
+THREAD_LOCAL_DECL(static void *file_path_wc_buffer);
 
 static int wc_strlen(const wchar_t *ws)
 {
@@ -1174,9 +1170,13 @@ wchar_t *scheme_convert_to_wchar(const char *s, int do_copy)
 			   NULL, 0, -1,
 			   NULL, 1/*UTF-16*/, '\t');
 
-  if (!do_copy && (len < (WC_BUFFER_SIZE-1)))
-    ws = wc_buffer;
-  else
+  if (!do_copy && (len < (WC_BUFFER_SIZE-1))) {
+    if (!file_path_wc_buffer) {
+      REGISTER_SO(file_path_wc_buffer);
+      file_path_wc_buffer = scheme_malloc_atomic(sizeof(wchar_t) * WC_BUFFER_SIZE);
+    }
+    ws = (wchar_t *)file_path_wc_buffer;
+  } else
     ws = (wchar_t *)scheme_malloc_atomic(sizeof(wchar_t) * (len + 1));
   scheme_utf8_decode(s, 0, l,
 		     (unsigned int *)ws, 0, -1,
@@ -3834,7 +3834,7 @@ failed:
 static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
 {
   char *src, *dest, *reason = NULL;
-  int pre_exists = 0;
+  int pre_exists = 0, has_err_val = 0, err_val = 0;
   Scheme_Object *bss, *bsd;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
@@ -3885,12 +3885,16 @@ static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
 
     s = fopen(src, "rb");
     if (!s) {
+      err_val = errno;
+      has_err_val = 1;
       reason = "cannot open source file";
       goto failed;
     }
 
     d = fopen(dest, "wb");
     if (!d) {
+      err_val = errno;
+      has_err_val = 1;
       fclose(s);
       reason = "cannot open destination file";
       goto failed;
@@ -3916,6 +3920,8 @@ static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
 	else if (errno != EINTR)
 	  break;
       }
+      err_val = errno;
+      has_err_val = 0;
       reason = "cannot set destination's mode";
     } else
       reason = "read or write failed";
@@ -3927,15 +3933,23 @@ static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
     return scheme_void;
   
   reason = "copy failed";
-  if (GetLastError() == ERROR_ALREADY_EXISTS)
+  err_val = GetLastError();
+  if ((err_val == ERROR_FILE_EXISTS)
+      || (err_val == ERROR_ALREADY_EXISTS))
     pre_exists = 1;
+  has_err_val = 1;
 #endif
 
   scheme_raise_exn(pre_exists ? MZEXN_FAIL_FILESYSTEM_EXISTS : MZEXN_FAIL_FILESYSTEM, 
-		   "copy-file: %s; cannot copy: %q to: %q",
+		   "copy-file: %s; cannot copy: %q to: %q%s%m%s",
 		   reason,
 		   filename_for_error(argv[0]),
-		   filename_for_error(argv[1]));
+		   filename_for_error(argv[1]),
+		   has_err_val ? " (" : "",
+		   has_err_val,
+		   err_val,
+		   has_err_val ? ")" : "");
+
   return NULL;
 }
 
@@ -4018,8 +4032,8 @@ static Scheme_Object *resolve_path(int argc, Scheme_Object *argv[])
   char *filename;
   int expanded;
 
-  if (!SCHEME_GENERAL_PATH_STRINGP(argv[0]))
-    scheme_wrong_type("resolve-path", SCHEME_GENERAL_PATH_STRING_STR, 0, argc, argv);
+  if (!SCHEME_PATH_STRINGP(argv[0]))
+    scheme_wrong_type("resolve-path", SCHEME_PATH_STRING_STR, 0, argc, argv);
 
   filename = do_expand_filename(argv[0],
 				NULL,
@@ -4669,10 +4683,15 @@ static Scheme_Object *current_drive(int argc, Scheme_Object *argv[])
 static Scheme_Object *cleanse_path(int argc, Scheme_Object *argv[])
 {
   char *filename;
-  int expanded;
+  int expanded, kind;
 
-  if (!SCHEME_PATH_STRINGP(argv[0]))
-    scheme_wrong_type("cleanse-path", SCHEME_PATH_STRING_STR, 0, argc, argv);
+  if (!SCHEME_GENERAL_PATH_STRINGP(argv[0]))
+    scheme_wrong_type("cleanse-path", SCHEME_GENERAL_PATH_STRING_STR, 0, argc, argv);
+
+  if (SCHEME_GENERAL_PATHP(argv[0]))
+    kind = SCHEME_PATH_KIND(argv[0]);
+  else
+    kind = SCHEME_PLATFORM_PATH_KIND;
 
   filename = do_expand_filename(argv[0],
 				NULL,
@@ -4681,13 +4700,13 @@ static Scheme_Object *cleanse_path(int argc, Scheme_Object *argv[])
 				&expanded,
 				1, 0,
 				0, /* no security check, since the filesystem is not used */ 
-                                SCHEME_PLATFORM_PATH_KIND,
+                                kind,
                                 0);
   
-  if (!expanded && SCHEME_PATHP(argv[0]))
+  if (!expanded && SCHEME_GENERAL_PATHP(argv[0]))
     return argv[0];
   else
-    return scheme_make_sized_path(filename, strlen(filename), 1);
+    return scheme_make_sized_offset_kind_path(filename, 0, strlen(filename), 1, kind);
 }
 
 static Scheme_Object *expand_user_path(int argc, Scheme_Object *argv[])
@@ -5337,9 +5356,16 @@ static int user_in_group(uid_t uid, gid_t gid)
   struct passwd *pw;
   int i, in;
 
+  if (!group_member_cache) {
+    group_member_cache = scheme_make_vector(2 * GROUP_CACHE_SIZE, scheme_false);
+    REGISTER_SO(group_member_cache);
+  }
+
   for (i = 0; i < GROUP_CACHE_SIZE; i++) {
-    if (group_mem_cache[i].set && (group_mem_cache[i].gid == gid))
-      return group_mem_cache[i].in;
+    Scheme_Object *gid_e;
+    gid_e = SCHEME_VEC_ELS(group_member_cache)[2*i];
+    if (!SCHEME_FALSEP(gid_e) && (SCHEME_INT_VAL(gid_e) == gid))
+      return SCHEME_FALSEP(SCHEME_VEC_ELS(group_member_cache)[2*i+1]) ? 0 : 1;
   }
 
   pw = getpwuid(uid);
@@ -5358,10 +5384,10 @@ static int user_in_group(uid_t uid, gid_t gid)
   in = !!(g->gr_mem[i]);
 
   for (i = 0; i < GROUP_CACHE_SIZE; i++) {
-    if (!group_mem_cache[i].set) {
-      group_mem_cache[i].set = 1;
-      group_mem_cache[i].gid = gid;
-      group_mem_cache[i].in = in;
+    if (SCHEME_FALSEP(SCHEME_VEC_ELS(group_member_cache)[2*i])) {
+      SCHEME_VEC_ELS(group_member_cache)[2*i]   = scheme_make_integer(gid);
+      SCHEME_VEC_ELS(group_member_cache)[2*i+1] = in ? scheme_true : scheme_false;
+      return in;
     }
   }
 

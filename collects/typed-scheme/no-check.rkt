@@ -1,13 +1,13 @@
 #lang scheme/base
 
-(require 
- (except-in "private/prims.rkt"
+(require
+ (except-in "base-env/prims.rkt"
             require/typed require/opaque-type require-typed-struct)
- "private/base-types-extra.rkt"
+ "base-env/base-types-extra.rkt"
  (for-syntax scheme/base syntax/parse syntax/struct))
 (provide (all-from-out scheme/base)
 	 (all-defined-out)
-	 (all-from-out "private/prims.rkt" "private/base-types-extra.rkt"))
+	 (all-from-out "base-env/prims.rkt" "base-env/base-types-extra.rkt"))
 
 
 (define-syntax (require/typed stx)
@@ -37,9 +37,9 @@
              #:with opt #'(#:name-exists)))
   (syntax-parse stx
     [(_ lib (~or sc:simple-clause strc:struct-clause oc:opaque-clause) ...)
-     #'(begin 
+     #'(begin
 	 (require/opaque-type oc.ty oc.pred lib . oc.opt) ...
-	 (require/typed sc.nm sc.ty lib) ... 
+	 (require/typed sc.nm sc.ty lib) ...
 	 (require-typed-struct strc.nm (strc.body ...) lib) ...)]
     [(_ nm:opt-rename ty lib (~optional [~seq #:struct-maker parent]) ...)
      #'(require (only-in lib nm.spec))]))

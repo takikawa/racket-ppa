@@ -42,19 +42,22 @@
          scheme/match
          scheme/class
          scheme/list
-         (prefix-in a: "annotate.ss")
-         (prefix-in r: "reconstruct.ss")
-         "shared.ss"
-         "marks.ss"
-         "model-settings.ss"
-         "macro-unwind.ss"
-         "lifting.ss"
+         (prefix-in a: "annotate.rkt")
+         (prefix-in r: "reconstruct.rkt")
+         "shared.rkt"
+         "marks.rkt"
+         "model-settings.rkt"
+         "macro-unwind.rkt"
+         "lifting.rkt"
          (prefix-in test-engine: test-engine/scheme-tests)
          #;(file "/Users/clements/clements/scheme-scraps/eli-debug.ss")
          ;; for breakpoint display
          ;; (commented out to allow nightly testing)
-         #;"display-break-stuff.ss"
+         #;"display-break-stuff.rkt"
          (for-syntax scheme/base))
+
+(define stepper-model-debug? (make-parameter #f))
+(provide stepper-model-debug?)
 
 
 (define program-expander-contract
@@ -86,7 +89,7 @@
             #:disable-error-handling? [disable-error-handling? #f]
             #:raw-step-receiver [raw-step-receiver #f])
   
-  (define DEBUG #f)
+  (define DEBUG (stepper-model-debug?))
   
   ;; finished-exps:
   ;;   (listof (list/c syntax-object? (or/c number? false?)( -> any)))
@@ -222,7 +225,7 @@
       (let* ([mark-list (and mark-set (extract-mark-list mark-set))]
              [dump-marks
               (when DEBUG
-                (printf "MARKLIST:\n")
+                (printf "MARKLIST:\n\n")
                 (and mark-set
                      (map (λ (x) (printf "~a\n" (display-mark x))) mark-list))
                 (printf "RETURNED VALUE LIST: ~a\n" returned-value-list))])
@@ -340,8 +343,6 @@
           (equal? (map syntax->hilite-datum lhs)
                   (map syntax->hilite-datum rhs)))
         
-        #;(>>> break-kind)
-        #;(fprintf (current-error-port) "break called with break-kind: ~a ..." break-kind)
         (if (r:skip-step? break-kind mark-list render-settings)
             (begin
               (when DEBUG (printf "skipped step\n"))
@@ -488,8 +489,8 @@
                       (printf "  source: ~a\n" (syntax->hilite-datum ((car x))))
                       (printf "  index: ~a\n" (second x))
                       (printf "  getter: ")
-                      (if (stepper-syntax-property ((car x)) 'stepper-define-struct-hint)
-                          (printf "no getter for term with stepper-define-struct-hint property\n")
+                      (if (stepper-syntax-property ((car x)) 'stepper-black-box-expr)
+                          (printf "no getter for term with stepper-black-box-expr property\n")
                           (printf "~a\n" ((third x)))))
                     returned-value-list))
                  (for-each (lambda (source/index/getter)
@@ -501,13 +502,13 @@
   (define maybe-lift
     (if (render-settings-lifting? render-settings)
         lift
-        ;; ... oh dear; model.ss should disable the double-break & late-let break when lifting is off.
+        ;; ... oh dear; model.rkt should disable the double-break & late-let break when lifting is off.
         (lambda (stx dont-care) (list stx))))
   
   (define (step-through-expression expanded expand-next-expression)
     (define show-lambdas-as-lambdas?
       (render-settings-show-lambdas-as-lambdas? render-settings))
-    (let* ([annotated (a:annotate expanded break 
+    (let* ([annotated (a:annotate expanded break
                                   show-lambdas-as-lambdas?)])
       (parameterize ([test-engine:test-silence #t])
         (eval-syntax annotated))

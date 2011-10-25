@@ -1,5 +1,5 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
 @defclass/title[button% object% (control<%>)]{
 
@@ -15,7 +15,7 @@ Whenever a button is clicked by the user, the button's callback
                  [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) 
                                (is-a?/c panel%) (is-a?/c pane%))]
                  [callback ((is-a?/c button%) (is-a?/c control-event%) . -> . any) (lambda (b e) (void))]
-                 [style (one-of/c 'border 'deleted) null]
+                 [style (listof (one-of/c 'border 'deleted)) null]
                  [font (is-a?/c font%) normal-control-font]
                  [enabled any/c #t]
                  [vert-margin (integer-in 0 1000) 2]
@@ -31,35 +31,35 @@ Creates a button with a string label, bitmap label, or both.
  symbol @racket['left], @racket['top], @racket['right], or @racket['bottom]
  specifies the location of the image relative to the text on the button.
 
-If @litchar{&} occurs in @scheme[label] (when @scheme[label] includes a
-string), it is specially parsed; under Windows and X, the character
+If @litchar{&} occurs in @racket[label] (when @racket[label] includes a
+string), it is specially parsed; on Windows and Unix, the character
 following @litchar{&} is underlined in the displayed control to
-indicate a keyboard mnemonic. (Under Mac OS X, mnemonic underlines are
+indicate a keyboard mnemonic. (On Mac OS X, mnemonic underlines are
 not shown.)  The underlined mnemonic character must be a letter or a
 digit. The user can effectively click the button by typing the
 mnemonic when the control's top-level-window contains the keyboard
 focus. The user must also hold down the Meta or Alt key if the
 keyboard focus is currently in a control that handles normal
 alphanumeric input. The @litchar{&} itself is removed from
-@scheme[label] before it is displayed for the control; a @litchar{&&}
-in @scheme[label] is converted to @litchar{&} (with no mnemonic
-underlining). Under Mac OS X, a parenthesized mnemonic character is
+@racket[label] before it is displayed for the control; a @litchar{&&}
+in @racket[label] is converted to @litchar{&} (with no mnemonic
+underlining). On Mac OS X, a parenthesized mnemonic character is
 removed (along with any surrounding space) before the label is
 displayed, since a parenthesized mnemonic is often used for non-Roman
 languages. Finally, any text after a tab character is removed on all
 platforms. Mnemonic keyboard events are handled by
-@method[top-level-window<%> on-traverse-char] (but not under Mac OS
+@method[top-level-window<%> on-traverse-char] (but not on Mac OS
 X).
 
-The @scheme[callback] procedure is called (with the event type
-@indexed-scheme['button]) whenever the user clicks the button.
+The @racket[callback] procedure is called (with the event type
+@indexed-racket['button]) whenever the user clicks the button.
 
-If @scheme[style] includes @scheme['border], the button is drawn with
+If @racket[style] includes @racket['border], the button is drawn with
 a special border that indicates to the user that it is the default
 action button (see @method[top-level-window<%>
-on-traverse-char]). @DeletedStyleNote[@scheme[style] @scheme[parent]]{button}
+on-traverse-char]). @DeletedStyleNote[@racket[style] @racket[parent]]{button}
 
-@FontKWs[@scheme[font]] @WindowKWs[@scheme[enabled]] @SubareaKWs[] @AreaKWs[]}
+@FontKWs[@racket[font]] @WindowKWs[@racket[enabled]] @SubareaKWs[] @AreaKWs[]}
 
 
 @defmethod[#:mode override
@@ -67,7 +67,7 @@ on-traverse-char]). @DeletedStyleNote[@scheme[style] @scheme[parent]]{button}
                                    (is-a?/c bitmap%))])
            void?]{
 
-The same as @xmethod[window<%> set-label] when @scheme[label] is a
+The same as @xmethod[window<%> set-label] when @racket[label] is a
  string.
 
 Otherwise, sets the bitmap label for a bitmap button. @bitmaplabeluseisbm[label]

@@ -1,11 +1,11 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
 @defclass/title[gl-config% object% ()]{
 
-A @scheme[gl-config%] object encapsulates configuration information
- for an OpenGL drawing context. Use a @scheme[gl-config%] object as an
- initialization argument for @scheme[canvas%] or provide it to
+A @racket[gl-config%] object encapsulates configuration information
+ for an OpenGL drawing context. Use a @racket[gl-config%] object as an
+ initialization argument for @racket[canvas%] or provide it to
  @racket[make-gl-bitmap].
 
 

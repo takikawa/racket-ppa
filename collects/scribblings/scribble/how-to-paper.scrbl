@@ -1,16 +1,11 @@
 #lang scribble/doc
-@(require scribble/manual
-          scribble/bnf
-          "utils.ss"
-          (for-label scriblib/figure
-                     scribble/base
-                     scribble/sigplan))
+@(require scribble/manual scribble/bnf "utils.rkt"
+          (for-label scriblib/figure scribble/base scribble/sigplan))
 
 @(define-syntax-rule (samplemod . text) (codeblock . text))
-@(define-syntax-rule (sample a . text) (codeblock #:context #'a 
-                                                  #:keep-lang-line? #f 
-                                                  "#lang scribble/base" "\n" 
-                                                  a . text))
+@(define-syntax-rule (sample a . text)
+   (codeblock #:context #'a #:keep-lang-line? #f
+     "#lang scribble/base" "\n" a . text))
 @(define (result . text) (apply nested #:style 'inset text))
 
 @title[#:tag "getting-started"]{Getting Started}
@@ -46,15 +41,7 @@ for the kind of document that you want as output:
        @itemize[
 
          @item{Run
-                @commandline{scribble --pdf mouse.scrbl}
-               to generate PDF as @filepath{mouse.pdf}. This will
-               work only if you have @exec{pdflatex} installed.
-               If you'd like to see the intermediate Latex, try
-                @commandline{scribble --latex mouse.scrbl}
-               to generate @filepath{mouse.tex}.}
-
-         @item{Run
-               @commandline{scribble --html mouse.scrbl}
+               @commandline{scribble mouse.scrbl}
               to generate HTML as @filepath{mouse.html}.  You may
               notice that the apostrophe in ``he's'' turned into a
               curly apostrophe.}
@@ -65,7 +52,18 @@ for the kind of document that you want as output:
               Sub-sections (which we add next) will appear as separate
               HTML files in the @filepath{mouse} directory.}
 
+         @item{Run
+                @commandline{scribble --pdf mouse.scrbl}
+               to generate PDF as @filepath{mouse.pdf}. This will
+               work only if you have @exec{pdflatex} installed.
+               If you'd like to see the intermediate Latex, try
+                @commandline{scribble --latex mouse.scrbl}
+               to generate @filepath{mouse.tex}.}
+
           ]
+
+See @secref["running"] for more information on the @exec{scribble}
+command-line tool.
 
 @section{Multiple Sections}
 
@@ -528,13 +526,13 @@ converting @litchar{---} to an em dash or for converting @litchar{"}
 and @litchar{'} to suitable curly quotes.
 
 The decoding process for document's stream is ultimately determined by
-the @hash-lang[] line that starts the document. The @racketmodname[scribble/base],
-@racketmodname[scribble/manual], and @racketmodname[scribble/sigplan]
-languages all use the same @racket[decode] operation.  The
-@racketmodname[scribble/text] language, however, acts more like a
-plain-text preprocessor and it does not perform any such decoding
-rules. (For more on @racketmodname[scribble/text], see
-@secref["preprocessor"].)
+the @hash-lang[] line that starts the document.  The
+@racketmodname[scribble/base], @racketmodname[scribble/manual], and
+@racketmodname[scribble/sigplan] languages all use the same
+@racket[decode] operation.  The @racketmodname[scribble/text] language,
+however, acts more like a plain-text genrator and preprocessor, and it
+does not perform any such decoding rules.  (For more on
+@racketmodname[scribble/text], see @secref["text"].)
 
 @margin-note{More precisely, languages like
              @racketmodname[scribble/base] apply @racket[decode] only after
@@ -609,5 +607,5 @@ Racket, continue with @secref["reader"] and then
 @secref["generic-prose"].  Move on to @secref["internals"] when you
 need more power.
 
-If you are interested in text preprocessing, contiue with
-@secref["reader"], but then skip to @secref["preprocessor"].
+If you are interested in text generation and preprocessing, continue
+with @secref["reader"], but then skip to @secref["text"].

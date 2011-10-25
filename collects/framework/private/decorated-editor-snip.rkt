@@ -5,11 +5,11 @@
 
 
 (provide editor-snip:decorated%
-         editor-snip:decorated-snipclass
+         editor-snip:decorated-snipclass%
          editor-snip:decorated-mixin
          editor-snip:decorated<%>)
 
-(require "../preferences.ss")
+(require "../preferences.rkt")
 
 (define editor-snip:decorated<%>
   (interface ((class->interface editor-snip%))
@@ -230,7 +230,7 @@
     (super-new
      (editor (make-editor)))))
 
-(define editor-snip:decorated-snipclass
+(define editor-snip:decorated-snipclass%
   (class snip-class%
     
     ;; make-snip : stream-in -> (is-a?/c snip%)

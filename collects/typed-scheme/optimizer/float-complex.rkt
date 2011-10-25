@@ -4,7 +4,7 @@
          "../utils/utils.rkt" racket/unsafe/ops
          (for-template scheme/base scheme/math racket/flonum scheme/unsafe/ops)
          (types numeric-tower)
-         (optimizer utils float))
+         (optimizer utils numeric-utils logging float))
 
 (provide float-complex-opt-expr
          float-complex-arith-opt-expr
@@ -57,7 +57,7 @@
                                    (list
                                     #`((real-binding) #,(skip-0s #'(c1.real-binding c2.real-binding cs.real-binding ...)))
                                     #`((imag-binding) #,(skip-0s #'(c1.imag-binding c2.imag-binding cs.imag-binding ...)))))))))
-  
+
   (pattern (#%plain-app (~and op (~literal -))
                         c1:unboxed-float-complex-opt-expr
                         c2:unboxed-float-complex-opt-expr
@@ -84,7 +84,7 @@
                                   (list
                                    #`((real-binding) #,(skip-0s #'(c1.real-binding c2.real-binding cs.real-binding ...)))
                                    #`((imag-binding) #,(skip-0s #'(c1.imag-binding c2.imag-binding cs.imag-binding ...)))))))))
-  
+
   (pattern (#%plain-app (~and op (~literal *))
                         c1:unboxed-float-complex-opt-expr
                         c2:unboxed-float-complex-opt-expr
@@ -133,7 +133,7 @@
                                                            #`(unsafe-fl- (unsafe-fl* #,o1 #,(car e1))
                                                                          (unsafe-fl* #,o2 #,(car e2))))))
                                              res)))))))))
-  
+
   (pattern (#%plain-app (~and op (~literal /))
                         c1:unboxed-float-complex-opt-expr
                         c2:unboxed-float-complex-opt-expr
@@ -213,17 +213,17 @@
            (begin (log-optimization "unboxed unary float complex" #'op)
                   #`(#,@(append (syntax->list #'(c.bindings ...))
                                 (list #'((imag-binding) (unsafe-fl- 0.0 c.imag-binding)))))))
-  
+
   (pattern (#%plain-app (~and op (~literal magnitude)) c:unboxed-float-complex-opt-expr)
            #:with real-binding (unboxed-gensym "unboxed-real-")
            #:with imag-binding #f
            #:with (bindings ...)
            (begin (log-optimization "unboxed unary float complex" #'op)
                   #`(c.bindings ...
-                     ((real-binding) (unsafe-flsqrt 
-                                      (unsafe-fl+ (unsafe-fl* c.real-binding c.real-binding) 
+                     ((real-binding) (unsafe-flsqrt
+                                      (unsafe-fl+ (unsafe-fl* c.real-binding c.real-binding)
                                                   (unsafe-fl* c.imag-binding c.imag-binding)))))))
-  
+
   (pattern (#%plain-app (~and op (~or (~literal real-part) (~literal unsafe-flreal-part)))
                         c:unboxed-float-complex-opt-expr)
            #:with real-binding #'c.real-binding
@@ -238,21 +238,21 @@
            #:with (bindings ...)
            (begin (log-optimization "unboxed unary float complex" #'op)
                   #'(c.bindings ...)))
-  
+
   ;; special handling of reals inside complex operations
   ;; must be after any cases that we are supposed to handle
-  (pattern e:float-coerce-expr
+  (pattern e:float-arg-expr
            #:with real-binding (unboxed-gensym 'unboxed-float-)
            #:with imag-binding #f
-           #:when (log-optimization "float-coerce-expr in complex ops" #'e)
+           #:when (log-optimization "float-arg-expr in complex ops" #'e)
            #:with (bindings ...)
            #`(((real-binding) e.opt)))
-    
+
 
   ;; we can eliminate boxing that was introduced by the user
   (pattern (#%plain-app (~and op (~or (~literal make-rectangular)
                                       (~literal unsafe-make-flrectangular)))
-                        real:float-coerce-expr imag:float-coerce-expr)
+                        real:float-arg-expr imag:float-arg-expr)
            #:with real-binding (unboxed-gensym "unboxed-real-")
            #:with imag-binding (unboxed-gensym "unboxed-imag-")
            #:with (bindings ...)
@@ -260,7 +260,7 @@
                   #'(((real-binding) real.opt)
                      ((imag-binding) imag.opt))))
   (pattern (#%plain-app (~and op (~literal make-polar))
-                        r:float-coerce-expr theta:float-coerce-expr)
+                        r:float-arg-expr theta:float-arg-expr)
            #:with magnitude    (unboxed-gensym)
            #:with angle        (unboxed-gensym)
            #:with real-binding (unboxed-gensym "unboxed-real-")
@@ -281,7 +281,7 @@
            #:with (bindings ...)
            (begin (log-optimization "leave var unboxed" #'v)
                   #'()))
-  
+
   ;; else, do the unboxing here
 
   ;; we can unbox literals right away
@@ -309,7 +309,7 @@
                   #`(((real-binding) #,(datum->syntax
                                         #'here
                                         (exact->inexact (syntax->datum #'n)))))))
-  
+
   (pattern e:expr
            #:when (subtypeof? #'e -FloatComplex)
            #:with e* (unboxed-gensym)
@@ -360,6 +360,32 @@
 (define-syntax-class float-complex-opt-expr
   #:commit
 
+  ;; Dummy pattern that can't actually match.
+  ;; We just want to detect "unexpected" Complex _types_ that come up.
+  ;; (not necessarily complex _values_, in fact, most of the time this
+  ;; case would come up, no actual complex values will be generated,
+  ;; but the type system has to play it safe, and must assume that it
+  ;; could happen. ex: (sqrt Integer), if the type system can't prove
+  ;; that the argument is non-negative, it must assume that complex
+  ;; results can happen, even if it never does in the user's program.
+  ;; This is exactly what makes complex types like this "unexpected")
+  ;; We define unexpected as: the whole expression has a Complex type,
+  ;; but none of its subexpressions do. Since our definition of
+  ;; arithmetic expression (see the arith-expr syntax class) exclude
+  ;; constructors (like make-rectangular) and coercions, this is a
+  ;; reasonable definition.
+  (pattern e:arith-expr
+           #:when (when (and (in-complex-layer? #'e)
+                             (for/and ([subexpr (in-list (syntax->list #'(e.args ...)))])
+                               (subtypeof? subexpr -Real)))
+                    (log-missed-optimization "unexpected complex type" this-syntax))
+           ;; We don't actually want to match.
+           #:when #f
+           #:with real-binding #'#f ; required, otherwise syntax/parse is not happy
+           #:with imag-binding #'#f
+           #:with (bindings ...) #'()
+           #:with opt #'#f)
+
   ;; we can optimize taking the real of imag part of an unboxed complex
   ;; hopefully, the compiler can eliminate unused bindings for the other part if it's not used
   (pattern (#%plain-app (~and op (~or (~literal real-part) (~literal flreal-part) (~literal unsafe-flreal-part)
@@ -375,7 +401,7 @@
                                 (free-identifier=? #'op #'unsafe-flreal-part))
                             #'c*.real-binding
                             #'c*.imag-binding))))
-  
+
   (pattern (#%plain-app op:float-complex-unary-op n:float-complex-expr)
            #:with opt
            (begin (log-optimization "unary float complex" #'op)
@@ -400,13 +426,13 @@
            #:with opt
            (begin (log-optimization "call to fun with unboxed args" #'op)
                   #'e*.opt))
-  
+
   (pattern e:float-complex-arith-opt-expr
            #:with opt #'e.opt))
 
 (define-syntax-class float-complex-arith-opt-expr
   #:commit
-  
+
   (pattern (#%plain-app op:float-complex->float-op e:expr ...)
            #:when (subtypeof? this-syntax -Flonum)
            #:with exp*:unboxed-float-complex-opt-expr this-syntax
@@ -430,7 +456,7 @@
                   (reset-unboxed-gensym)
                   #'(let*-values (exp*.bindings ...)
                       (unsafe-make-flrectangular exp*.real-binding exp*.imag-binding))))
-  
+
   (pattern v:id
            #:with unboxed-info (dict-ref unboxed-vars-table #'v #f)
            #:when (syntax->datum #'unboxed-info)

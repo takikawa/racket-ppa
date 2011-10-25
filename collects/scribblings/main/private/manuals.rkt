@@ -5,7 +5,8 @@
          setup/getinfo
          setup/main-collects
          scheme/list
-         "../config.ss")
+         scheme/match
+         "../config.rkt")
 
 (provide make-start-page)
 
@@ -85,9 +86,9 @@
                 ;; Add HtDP
                 (list
                  ;; Category
-                 'getting-started
+                 'teaching
                  ;; Priority
-                 7
+                 -11
                  ;; Priority label (not used):
                  ""
                  ;; Path
@@ -112,30 +113,40 @@
          (lambda (sec)
            (let ([docs (filter (lambda (doc) (eq? (car doc) (sec-cat sec)))
                                docs)])
-             (list*
-              (plain-line (hspace 1))
-              (plain-line (let ([s (sec-label sec)])
-                            (if (and (list? s) (eq? 'link (car s)))
-                                (seclink "top" #:doc (caddr s) #:underline? #f (cadr s))
-                                s)))
-              (add-sections
-               (sec-cat sec)
-               (lambda (str)
-                 (plain-line
-                  (make-element (if (string=? str "") "sepspace" "septitle")
-                                (list 'nbsp str))))
-               (sort (map (lambda (doc)
-                            (list (cadr doc) (line (cadddr (cdr doc))) (caddr doc)))
-                          docs)
-                     (lambda (ad bd)
-                       (if (= (car ad) (car bd))
-                         (let ([str (lambda (x)
-                                      (element->string
-                                       (cadr (paragraph-content
-                                              (car (flow-paragraphs
-                                                    (caadr x)))))
-                                       renderer part resolve-info))])
-                           (string-ci<? (str ad) (str bd)))
-                         (> (car ad) (car bd)))))))))
+             (cond [(and (null? docs) (string? (sec-label sec)))
+                    ;; Drop section if it contains no manuals,
+                    ;; *unless* the section label contains a link.
+                    null]
+                   [else
+                    (list*
+                     (plain-line (hspace 1))
+                     (plain-line (let loop ([s (sec-label sec)])
+                                   (match s
+                                     [(list 'elem parts ...)
+                                      (apply elem (map loop parts))]
+                                     [(list 'link text doc-mod-path)
+                                      (seclink "top" #:doc doc-mod-path #:underline? #f text)]
+                                     [(list 'link text doc-mod-path tag)
+                                      (seclink tag #:doc doc-mod-path #:underline? #f text)]
+                                     [_ s])))
+                     (add-sections
+                      (sec-cat sec)
+                      (lambda (str)
+                        (plain-line
+                         (make-element (if (string=? str "") "sepspace" "septitle")
+                                       (list 'nbsp str))))
+                      (sort (map (lambda (doc)
+                                   (list (cadr doc) (line (cadddr (cdr doc))) (caddr doc)))
+                                 docs)
+                            (lambda (ad bd)
+                              (if (= (car ad) (car bd))
+                                  (let ([str (lambda (x)
+                                               (element->string
+                                                (cadr (paragraph-content
+                                                       (car (flow-paragraphs
+                                                             (caadr x)))))
+                                                renderer part resolve-info))])
+                                    (string-ci<? (str ad) (str bd)))
+                                  (> (car ad) (car bd)))))))])))
          sections))))
     (make-delayed-block contents)))

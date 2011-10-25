@@ -2,12 +2,7 @@
 
 (require string-constants)
 
-(define tools (list "eopl-tool.ss"))
-(define tool-icons (list "eopl-small.png"))
-(define tool-names (list "Essentials of Programming Languages"))
-(define tool-urls (list "http://www.eopl3.com/"))
-
-(define scribblings '(("eopl.scrbl" () (language -12))))
+(define scribblings '(("eopl.scrbl" () (teaching -20))))
 
 (define textbook-pls
   (list (list '("eopl-small.png" "eopl")

@@ -12,17 +12,17 @@
          (struct-out t-subst) (struct-out i-subst) (struct-out i-subst/starred) (struct-out i-subst/dotted)
          substitution/c make-simple-substitution)
 
-(d-s/c subst-rhs () #:transparent)
-(d-s/c (t-subst subst-rhs) ([type Type/c]) #:transparent)
-(d-s/c (i-subst subst-rhs) ([types (listof Type/c)]) #:transparent)
-(d-s/c (i-subst/starred subst-rhs) ([types (listof Type/c)] [starred Type/c]) #:transparent)
-(d-s/c (i-subst/dotted subst-rhs) ([types (listof Type/c)] [dty Type/c] [dbound symbol?]) #:transparent)
+(define-struct/cond-contract subst-rhs () #:transparent)
+(define-struct/cond-contract (t-subst subst-rhs) ([type Type/c]) #:transparent)
+(define-struct/cond-contract (i-subst subst-rhs) ([types (listof Type/c)]) #:transparent)
+(define-struct/cond-contract (i-subst/starred subst-rhs) ([types (listof Type/c)] [starred Type/c]) #:transparent)
+(define-struct/cond-contract (i-subst/dotted subst-rhs) ([types (listof Type/c)] [dty Type/c] [dbound symbol?]) #:transparent)
 
 (define substitution/c (hash/c symbol? subst-rhs? #:immutable #t))
 
 (define (subst v t e) (substitute t v e))
 
-(d/c (make-simple-substitution vs ts)
+(define/cond-contract (make-simple-substitution vs ts)
   (([vs (listof symbol?)] [ts (listof Type/c)]) ()
    #:pre (vs ts) (= (length vs) (length ts))
     . ->i . [_ substitution/c])
@@ -31,7 +31,7 @@
 
 
 ;; substitute : Type Name Type -> Type
-(d/c (substitute image name target #:Un [Un (get-union-maker)])
+(define/cond-contract (substitute image name target #:Un [Un (get-union-maker)])
   ((Type/c symbol? Type?) (#:Un procedure?) . ->* . Type?)
   (define (sb t) (substitute image name t))
   (if (hash-ref (free-vars* target) name #f)
@@ -64,7 +64,7 @@
 
 ;; implements angle bracket substitution from the formalism
 ;; substitute-dots : Listof[Type] Option[type] Name Type -> Type
-(d/c (substitute-dots images rimage name target)
+(define/cond-contract (substitute-dots images rimage name target)
   ((listof Type/c) (or/c #f Type/c) symbol? Type? . -> . Type?)
   (define (sb t) (substitute-dots images rimage name t))
   (if (or (hash-ref (free-idxs* target) name #f) (hash-ref (free-vars* target) name #f))
@@ -80,7 +80,7 @@
                  [#:ValuesDots types dty dbound
                                (if (eq? name dbound)
                                    (make-Values
-                                    (append 
+                                    (append
                                      (map sb types)
                                      ;; We need to recur first, just to expand out any dotted usages of this.
                                      (let ([expanded (sb dty)])
@@ -93,7 +93,7 @@
                  [#:arr dom rng rest drest kws
                         (if (and (pair? drest)
                                  (eq? name (cdr drest)))
-                            (make-arr (append 
+                            (make-arr (append
                                        (map sb dom)
                                        ;; We need to recur first, just to expand out any dotted usages of this.
                                        (let ([expanded (sb (car drest))])
@@ -140,7 +140,7 @@
 ;; substitute many variables
 ;; substitution = Listof[U List[Name,Type] List[Name,Listof[Type]]]
 ;; subst-all : substitution Type -> Type
-(d/c (subst-all s t)
+(define/cond-contract (subst-all s t)
   (substitution/c Type? . -> . Type?)
   (for/fold ([t t]) ([(v r) (in-hash s)])
     (match r
@@ -149,7 +149,7 @@
       [(i-subst imgs)
        (substitute-dots imgs #f v t)]
       [(i-subst/starred imgs rest)
-       (substitute-dots imgs rest v t)]     
+       (substitute-dots imgs rest v t)]
       [(i-subst/dotted null dty dbound)
        (substitute-dotted dty dbound v t)]
       [(i-subst/dotted imgs dty dbound)

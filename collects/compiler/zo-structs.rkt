@@ -2,7 +2,8 @@
 (require mzlib/etc 
          scheme/match
          scheme/contract
-         scheme/list)
+         scheme/list
+         racket/set)
 
 #| Unresolved issues
 
@@ -28,7 +29,7 @@
      [struct id ([field-id field-contract] ...)])))
 
 (define-struct zo () #:prefab)
-(provide zo?)
+(provide (struct-out zo))
 
 (define-syntax define-form-struct
   (syntax-rules ()
@@ -56,21 +57,11 @@
 (define mark-map? 
   (alist/c number? module-path-index?)
   #;(hash/c number? module-path-index?))
-(define-form-struct certificate ())
-(define-form-struct (certificate:nest certificate)
-  ([nested mark-map?]
-   [map  mark-map?]))
-(define-form-struct (certificate:ref certificate)
-  ([val any/c]
-   [map  mark-map?]))
-(define-form-struct (certificate:plain certificate)
-  ([map  mark-map?]))
-
 
 (define-form-struct wrap ())
 (define-form-struct wrapped ([datum any/c] 
                              [wraps (listof wrap?)] 
-                             [certs (or/c certificate? #f)]))
+                             [tamper-status (or/c 'clean 'armed 'tainted)]))
 
 ;; In stxs of prefix:
 (define-form-struct stx ([encoded wrapped?]))
@@ -90,8 +81,7 @@
                               [src-name symbol?] 
                               [nom-src any/c] ; should be (or/c module-path-index? #f)
                               [src-phase (or/c 0 1)] 
-                              [protected? boolean?] 
-                              [insp (or/c boolean? void?)]))
+                              [protected? boolean?]))
 
 (define-form-struct (toplevel expr) ([depth exact-nonnegative-integer?] 
                                      [pos exact-nonnegative-integer?] 
@@ -131,12 +121,14 @@
                                 [internal-context (or/c #f #t stx?)]))
 
 (define-form-struct (lam expr) ([name (or/c symbol? vector? empty?)]
-                                [flags (listof (or/c 'preserves-marks 'is-method 'single-result 'only-rest-arg-not-used))]
+                                [flags (listof (or/c 'preserves-marks 'is-method 'single-result
+                                                     'only-rest-arg-not-used 'sfs-clear-rest-args))]
                                 [num-params exact-nonnegative-integer?]
                                 [param-types (listof (or/c 'val 'ref 'flonum))]
                                 [rest? boolean?]
                                 [closure-map (vectorof exact-nonnegative-integer?)]
                                 [closure-types (listof (or/c 'val/ref 'flonum))]
+                                [toplevel-map (or/c #f (set/c exact-nonnegative-integer?))]
                                 [max-let-depth exact-nonnegative-integer?]
                                 [body (or/c expr? seq? any/c)])) ; `lambda'
 (define-form-struct (closure expr) ([code lam?] [gen-id symbol?])) ; a static closure (nothing to close over)
@@ -164,7 +156,7 @@
                                            [body (or/c expr? seq? any/c)])) ; `with-continuation-mark'
 (define-form-struct (beg0 expr) ([seq (listof (or/c expr? seq? any/c))])) ; `begin0'
 (define-form-struct (splice form) ([forms (listof (or/c form? any/c))])) ; top-level `begin'
-(define-form-struct (varref expr) ([toplevel toplevel?])) ; `#%variable-reference'
+(define-form-struct (varref expr) ([toplevel toplevel?] [dummy toplevel?])) ; `#%variable-reference'
 (define-form-struct (assign expr) ([id toplevel?] [rhs (or/c expr? seq? any/c)] [undef-ok? boolean?])) ; top-level or module-level set!
 (define-form-struct (apply-values expr) ([proc (or/c expr? seq? any/c)] [args-expr (or/c expr? seq? any/c)])) ; `(call-with-values (lambda () ,args-expr) ,proc)
 (define-form-struct (primval expr) ([id exact-nonnegative-integer?])) ; direct preference to a kernel primitive

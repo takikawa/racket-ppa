@@ -1,9 +1,9 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
 @defclass/title[editor-stream-in% object% ()]{
 
-An @scheme[editor-stream-in%] object is used to read editor
+An @racket[editor-stream-in%] object is used to read editor
  information from a file or other input stream (such as the
  clipboard).
 
@@ -11,8 +11,8 @@ An @scheme[editor-stream-in%] object is used to read editor
 
 @defconstructor/make[([base (is-a?/c editor-stream-in-base%)])]{
 
-An in-stream base---possibly an @scheme[editor-stream-in-bytes-base%]
- object---must be supplied in @scheme[base].
+An in-stream base---possibly an @racket[editor-stream-in-bytes-base%]
+ object---must be supplied in @racket[base].
 
 }
 
@@ -23,9 +23,9 @@ An in-stream base---possibly an @scheme[editor-stream-in-bytes-base%]
               (is-a?/c editor-stream-in%)])]{
 
 Reads data from the stream, returning itself.
-Reading from a bad stream always gives @scheme[0].
+Reading from a bad stream always gives @racket[0].
 
-@boxisfill[(scheme v) @elem{the next integer or floating-point value in the stream}]
+@boxisfill[@racket[v] @elem{the next integer or floating-point value in the stream}]
 
 }
 
@@ -40,7 +40,7 @@ Like @method[editor-stream-in% get-unterminated-bytes], but the last
  @method[editor-stream-in% get-unterminated-bytes] when data is
  written with an explicit byte count.
 
-@boxisfillnull[(scheme len) @elem{the length of the byte string plus one (to indicate the terminator)}]
+@boxisfillnull[@racket[len] @elem{the length of the byte string plus one (to indicate the terminator)}]
 
 }
 
@@ -54,7 +54,7 @@ Returns the next integer value in the stream.
 @defmethod[(get-fixed [v (box/c exact-integer?)])
            (is-a?/c editor-stream-in%)]{
 
-@boxisfill[(scheme v) @elem{a fixed-size integer from the stream obtained through 
+@boxisfill[@racket[v] @elem{a fixed-size integer from the stream obtained through 
            @method[editor-stream-in% get-fixed-exact]}]
 
 }
@@ -64,7 +64,7 @@ Returns the next integer value in the stream.
 
 Gets a fixed-sized integer from the stream. See
 @method[editor-stream-out% put-fixed] for more information.
-Reading from a bad stream always gives @scheme[0].
+Reading from a bad stream always gives @racket[0].
 
 }
 
@@ -84,13 +84,13 @@ use @method[editor-stream-out% put] with two arguments
 (passing along the length of the bytes) to write out the bytes
 to match this method.
 
-Reading from a bad stream returns @scheme[#f] or @scheme[#""].
+Reading from a bad stream returns @racket[#f] or @racket[#""].
 
 Note that when @method[editor-stream-out% put] is not given a byte
  length, it includes an extra byte for a nul terminator; use
  @method[editor-stream-in% get-bytes] to read such byte strings.
 
-@boxisfillnull[(scheme len) @elem{the length of the byte string}]
+@boxisfillnull[@racket[len] @elem{the length of the byte string}]
 
 }
 
@@ -104,8 +104,8 @@ Jumps to a given position in the stream.
 @defmethod[(ok?)
            boolean?]{
 
-Returns @scheme[#t] if the stream is ready for reading, @scheme[#f] otherwise.
-Reading from a bad stream always returns @scheme[0] or @scheme[""].
+Returns @racket[#t] if the stream is ready for reading, @racket[#f] otherwise.
+Reading from a bad stream always returns @racket[0] or @racket[""].
 
 }
 
@@ -119,7 +119,7 @@ See @method[editor-stream-in% set-boundary].
 @defmethod[(set-boundary [n exact-nonnegative-integer?])
            void?]{
 
-Sets a file-reading boundary at @scheme[n] bytes past the current
+Sets a file-reading boundary at @racket[n] bytes past the current
  stream location. If there is an attempt to read past this boundary,
  an error is signaled. The boundary is removed with a call to
  @method[editor-stream-in% remove-boundary].  Every call to
@@ -136,7 +136,7 @@ Boundaries help keep a subroutine from reading too much data leading
 @defmethod[(skip [n exact-nonnegative-integer?])
            void?]{
 
-Skips past the next @scheme[n] bytes in the stream.
+Skips past the next @racket[n] bytes in the stream.
 
 }
 

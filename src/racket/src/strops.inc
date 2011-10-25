@@ -18,7 +18,10 @@ X(scheme_make_sized_offset, _string)(Xchar *chars, intptr_t d, intptr_t len, int
   if (copy) {
     Xchar *naya;
 
-    naya = (Xchar *)scheme_malloc_fail_ok(scheme_malloc_atomic, (len + 1) * sizeof(Xchar));
+    if (len < 100)
+      naya = (Xchar *)scheme_malloc_atomic((len + 1) * sizeof(Xchar));
+    else
+      naya = (Xchar *)scheme_malloc_fail_ok(scheme_malloc_atomic, (len + 1) * sizeof(Xchar));
     SCHEME_X_STR_VAL(str) = naya;
     memcpy(naya, chars + d, len * sizeof(Xchar));
     naya[len] = 0;
@@ -233,6 +236,12 @@ X__(string_length) (int argc, Scheme_Object *argv[])
     scheme_wrong_type(XSTRINGSTR "-length", XSTR "string", 0, argc, argv);
 
   return scheme_make_integer(SCHEME_X_STRTAG_VAL(argv[0]));
+}
+
+Scheme_Object *
+X_(scheme, string_length) (Scheme_Object *v)
+{
+  return X__(string_length)(1, &v);
 }
 
 Scheme_Object *

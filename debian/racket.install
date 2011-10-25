@@ -1,3 +1,4 @@
 debian/overrides/racket	usr/share/lintian/overrides/
+debian/drracket.desktop	usr/share/applications/
 usr/bin
 usr/lib

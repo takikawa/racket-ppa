@@ -28,7 +28,7 @@
 
 /* types should all be registered before invoking places */
 
-SHARED_OK Scheme_Type_Reader2 *scheme_type_readers;
+SHARED_OK Scheme_Type_Reader *scheme_type_readers;
 SHARED_OK Scheme_Type_Writer *scheme_type_writers;
 SHARED_OK Scheme_Equal_Proc *scheme_type_equals;
 SHARED_OK Scheme_Primary_Hash_Proc *scheme_type_hash1s;
@@ -41,9 +41,19 @@ SHARED_OK static Scheme_Type maxtype, allocmax;
 SHARED_OK intptr_t scheme_type_table_count;
 #endif
 
+#ifdef MZ_USE_PLACES
+static mzrt_mutex *type_array_mutex;
+#endif
+
+#define RAW_MALLOC_N(t, n) (t*)malloc(n * sizeof(t))
+
 static void init_type_arrays()
 {
   intptr_t n;
+
+#ifdef MZ_USE_PLACES
+  mzrt_mutex_create(&type_array_mutex);
+#endif
 
   REGISTER_SO(type_names);
   REGISTER_SO(scheme_type_readers);
@@ -55,35 +65,36 @@ static void init_type_arrays()
   maxtype = _scheme_last_type_;
   allocmax = maxtype + 100;
 
-  type_names = MALLOC_N(char *, allocmax);
-  scheme_type_readers = MALLOC_N_ATOMIC(Scheme_Type_Reader2, allocmax);
+  type_names = RAW_MALLOC_N(char *, allocmax);
+  memset(type_names, 0, allocmax * sizeof(char *));
+  scheme_type_readers = RAW_MALLOC_N(Scheme_Type_Reader, allocmax);
   n = allocmax * sizeof(Scheme_Type_Reader);
-  memset((char *)scheme_type_readers, 0, n);
+  memset(scheme_type_readers, 0, n);
 
 #ifdef MEMORY_COUNTING_ON
   scheme_type_table_count += n;
   scheme_misc_count += (allocmax * sizeof(char *));
 #endif
 
-  scheme_type_writers = MALLOC_N_ATOMIC(Scheme_Type_Writer, allocmax);
+  scheme_type_writers = RAW_MALLOC_N(Scheme_Type_Writer, allocmax);
   n = allocmax * sizeof(Scheme_Type_Writer);
-  memset((char *)scheme_type_writers, 0, n);
+  memset(scheme_type_writers, 0, n);
 
 #ifdef MEMORY_COUNTING_ON
   scheme_type_table_count += n;
 #endif  
 
-  scheme_type_equals = MALLOC_N_ATOMIC(Scheme_Equal_Proc, allocmax);
+  scheme_type_equals = RAW_MALLOC_N(Scheme_Equal_Proc, allocmax);
   n = allocmax * sizeof(Scheme_Equal_Proc);
-  memset((char *)scheme_type_equals, 0, n);
+  memset(scheme_type_equals, 0, n);
 
-  scheme_type_hash1s = MALLOC_N_ATOMIC(Scheme_Primary_Hash_Proc, allocmax);
+  scheme_type_hash1s = RAW_MALLOC_N(Scheme_Primary_Hash_Proc, allocmax);
   n = allocmax * sizeof(Scheme_Primary_Hash_Proc);
-  memset((char *)scheme_type_hash1s, 0, n);
+  memset(scheme_type_hash1s, 0, n);
 
-  scheme_type_hash2s = MALLOC_N_ATOMIC(Scheme_Secondary_Hash_Proc, allocmax);
+  scheme_type_hash2s = RAW_MALLOC_N(Scheme_Secondary_Hash_Proc, allocmax);
   n = allocmax * sizeof(Scheme_Secondary_Hash_Proc);
-  memset((char *)scheme_type_hash2s, 0, n);
+  memset(scheme_type_hash2s, 0, n);
 }
 
 void
@@ -107,14 +118,23 @@ scheme_init_type ()
   set_name(scheme_application3_type, "<binary-application-code>");
   set_name(scheme_compiled_unclosed_procedure_type, "<procedure-semi-code>");
   set_name(scheme_unclosed_procedure_type, "<procedure-code>");
-  set_name(scheme_syntax_type, "<syntax-code>");
-  set_name(scheme_compiled_syntax_type, "<syntax-semi-code>");
   set_name(scheme_branch_type, "<branch-code>");
   set_name(scheme_sequence_type, "<sequence-code>");
-  set_name(scheme_case_lambda_sequence_type, "<case-lambda-code>");
-  set_name(scheme_begin0_sequence_type, "<begin0-code>");
   set_name(scheme_with_cont_mark_type, "<with-continuation-mark-code>");
   set_name(scheme_quote_syntax_type, "<quote-syntax-code>");
+
+  set_name(scheme_define_values_type, "<define-values-code>");
+  set_name(scheme_define_syntaxes_type, "<define-syntaxes-code>");
+  set_name(scheme_define_for_syntax_type, "<define-for-syntax-code>");
+  set_name(scheme_begin0_sequence_type, "<begin0-code>");
+  set_name(scheme_splice_sequence_type, "<splicing-begin-code>");
+  set_name(scheme_module_type, "<module-code>");
+  set_name(scheme_set_bang_type, "<set!-code>");
+  set_name(scheme_boxenv_type, "<boxenv-code>");
+  set_name(scheme_require_form_type, "<require-code>");
+  set_name(scheme_varref_form_type, "<varref-code>");
+  set_name(scheme_apply_values_type, "<apply-values-code>");
+  set_name(scheme_case_lambda_sequence_type, "<case-lambda-code>");
 
   set_name(scheme_let_value_type, "<let-value-code>");
   set_name(scheme_let_void_type, "<let-void-code>");
@@ -194,6 +214,7 @@ scheme_init_type ()
   set_name(scheme_regexp_type, "<regexp>");
   set_name(scheme_rename_table_type, "<rename-table>");
   set_name(scheme_bucket_type, "<hash-table-bucket>");
+  set_name(scheme_prefix_type, "<runtime-prefix>");
   set_name(scheme_resolve_prefix_type, "<resolve-prefix>");
   set_name(scheme_readtable_type, "<readtable>");
 
@@ -214,7 +235,6 @@ scheme_init_type ()
   set_name(scheme_set_macro_type, "<set!-transformer>");
   set_name(scheme_id_macro_type, "<rename-transformer>");
 
-  set_name(scheme_module_type, "<module-code>");
   set_name(scheme_module_index_type, "<module-path-index>");
 
   set_name(scheme_subprocess_type, "<subprocess>");
@@ -260,8 +280,6 @@ scheme_init_type ()
 
   set_name(scheme_special_comment_type, "<special-comment>");
 
-  set_name(scheme_certifications_type, "<certifications>");
-
   set_name(scheme_global_ref_type, "<variable-reference>");
 
   set_name(scheme_delay_syntax_type, "<on-demand-stub>");
@@ -290,13 +308,13 @@ scheme_init_type ()
 Scheme_Type scheme_make_type(const char *name)
 {
   Scheme_Type newtype;
-#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
-  void *saved_gc; 
-  saved_gc = GC_switch_to_master_gc();
-#endif
 
   if (!type_names)
     init_type_arrays();
+
+#ifdef MZ_USE_PLACES
+  mzrt_mutex_lock(type_array_mutex);
+#endif
 
   if (maxtype == allocmax) {
     /* Expand arrays */
@@ -305,33 +323,40 @@ Scheme_Type scheme_make_type(const char *name)
     
     allocmax += 20;
 
-    naya = scheme_malloc(allocmax * sizeof(char *));
+    naya = malloc(allocmax * sizeof(char *));
     memcpy(naya, type_names, maxtype * sizeof(char *));
+    memset(naya, 0, maxtype * sizeof(char *));
+    free(type_names);
     type_names = (char **)naya;
 
-    naya = scheme_malloc_atomic(n = allocmax * sizeof(Scheme_Type_Reader2));
-    memset((char *)naya, 0, n);
-    memcpy(naya, scheme_type_readers, maxtype * sizeof(Scheme_Type_Reader2));
-    scheme_type_readers = (Scheme_Type_Reader2 *)naya;
+    naya = malloc(n = allocmax * sizeof(Scheme_Type_Reader));
+    memset(naya, 0, n);
+    memcpy(naya, scheme_type_readers, maxtype * sizeof(Scheme_Type_Reader));
+    free(scheme_type_readers);
+    scheme_type_readers = (Scheme_Type_Reader *)naya;
 
-    naya = scheme_malloc_atomic(n = allocmax * sizeof(Scheme_Type_Writer));
-    memset((char *)naya, 0, n);
+    naya = malloc(n = allocmax * sizeof(Scheme_Type_Writer));
+    memset(naya, 0, n);
     memcpy(naya, scheme_type_writers, maxtype * sizeof(Scheme_Type_Writer));
+    free(scheme_type_writers);
     scheme_type_writers = (Scheme_Type_Writer *)naya;
 
-    naya = scheme_malloc_atomic(n = allocmax * sizeof(Scheme_Equal_Proc));
-    memset((char *)naya, 0, n);
+    naya = malloc(n = allocmax * sizeof(Scheme_Equal_Proc));
+    memset(naya, 0, n);
     memcpy(naya, scheme_type_equals, maxtype * sizeof(Scheme_Equal_Proc));
+    free(scheme_type_equals);
     scheme_type_equals = (Scheme_Equal_Proc *)naya;
 
-    naya = scheme_malloc_atomic(n = allocmax * sizeof(Scheme_Primary_Hash_Proc));
-    memset((char *)naya, 0, n);
+    naya = malloc(n = allocmax * sizeof(Scheme_Primary_Hash_Proc));
+    memset(naya, 0, n);
     memcpy(naya, scheme_type_hash1s, maxtype * sizeof(Scheme_Primary_Hash_Proc));
+    free(scheme_type_hash1s);
     scheme_type_hash1s = (Scheme_Primary_Hash_Proc *)naya;
 
-    naya = scheme_malloc_atomic(n = allocmax * sizeof(Scheme_Secondary_Hash_Proc));
-    memset((char *)naya, 0, n);
+    naya = malloc(n = allocmax * sizeof(Scheme_Secondary_Hash_Proc));
+    memset(naya, 0, n);
     memcpy(naya, scheme_type_hash2s, maxtype * sizeof(Scheme_Secondary_Hash_Proc));
+    free(scheme_type_hash2s);
     scheme_type_hash2s = (Scheme_Secondary_Hash_Proc *)naya;
 
 #ifdef MEMORY_COUNTING_ON
@@ -343,15 +368,20 @@ Scheme_Type scheme_make_type(const char *name)
 
   {
     char *tn;
-    tn = scheme_strdup(name);
+    int len;
+    len = strlen(name) + 1;
+    tn = (char *)malloc(len);
+    memcpy(tn, name, len);
     type_names[maxtype] = tn;
   }
 
   newtype = maxtype;
   maxtype++;
-#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
-  GC_switch_back_from_master(saved_gc);
+
+#ifdef MZ_USE_PLACES
+  mzrt_mutex_unlock(type_array_mutex);
 #endif
+
   return newtype;
 }
 
@@ -363,14 +393,6 @@ char *scheme_get_type_name(Scheme_Type t)
 }
 
 void scheme_install_type_reader(Scheme_Type t, Scheme_Type_Reader f)
-{
-  if (t < 0 || t >= maxtype)
-    return;
-
-  scheme_type_readers[t] = (Scheme_Type_Reader2)f;
-}
-
-void scheme_install_type_reader2(Scheme_Type t, Scheme_Type_Reader2 f)
 {
   if (t < 0 || t >= maxtype)
     return;
@@ -493,8 +515,7 @@ static void FIXUP_jmpup(Scheme_Jumpup_Buf *buf, struct NewGC *gc)
 
 #define RUNSTACK_ZERO_VAL NULL
 
-#define MARKS_FOR_TYPE_C
-#include "mzmark.c"
+#include "mzmark_type.inc"
 
 void scheme_register_traversers(void)
 {
@@ -502,7 +523,6 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_variable_type, variable_obj);
   GC_REG_TRAV(scheme_local_type, local_obj);
   GC_REG_TRAV(scheme_local_unbox_type, local_obj);
-  GC_REG_TRAV(scheme_syntax_type, iptr_obj);
   GC_REG_TRAV(scheme_application_type, app_rec);
   GC_REG_TRAV(scheme_application2_type, app2_rec);
   GC_REG_TRAV(scheme_application3_type, app3_rec);
@@ -517,12 +537,24 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_quote_syntax_type, quotesyntax_obj);
   GC_REG_TRAV(scheme_module_variable_type, module_var);
 
+  GC_REG_TRAV(scheme_define_values_type, vector_obj);
+  GC_REG_TRAV(scheme_define_syntaxes_type, vector_obj);
+  GC_REG_TRAV(scheme_define_for_syntax_type, vector_obj);
+  GC_REG_TRAV(scheme_varref_form_type, twoptr_obj);
+  GC_REG_TRAV(scheme_apply_values_type, twoptr_obj);
+  GC_REG_TRAV(scheme_boxenv_type, twoptr_obj);
+  GC_REG_TRAV(scheme_case_lambda_sequence_type, case_closure);
+  GC_REG_TRAV(scheme_begin0_sequence_type, seq_rec);
+  GC_REG_TRAV(scheme_splice_sequence_type, seq_rec);
+  GC_REG_TRAV(scheme_set_bang_type, set_bang);
+  GC_REG_TRAV(scheme_module_type, module_val);
+  GC_REG_TRAV(scheme_require_form_type, twoptr_obj);
+
   GC_REG_TRAV(_scheme_values_types_, bad_trav);
   
   GC_REG_TRAV(scheme_compiled_unclosed_procedure_type, unclosed_proc);
   GC_REG_TRAV(scheme_compiled_let_value_type, comp_let_value);
   GC_REG_TRAV(scheme_compiled_let_void_type, let_header);
-  GC_REG_TRAV(scheme_compiled_syntax_type, iptr_obj);
   GC_REG_TRAV(scheme_compiled_toplevel_type, toplevel_obj);
   GC_REG_TRAV(scheme_compiled_quote_syntax_type, local_obj);
 
@@ -530,6 +562,7 @@ void scheme_register_traversers(void)
 
   GC_REG_TRAV(_scheme_compiled_values_types_, bad_trav);
 
+  GC_REG_TRAV(scheme_prefix_type, prefix_val);
   GC_REG_TRAV(scheme_resolve_prefix_type, resolve_prefix_val);
   GC_REG_TRAV(scheme_rt_comp_prefix, comp_prefix_val);
 
@@ -556,6 +589,10 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_unix_path_type, bstring_obj);
   GC_REG_TRAV(scheme_windows_path_type, bstring_obj);
   GC_REG_TRAV(scheme_symbol_type, symbol_obj);
+#ifdef MZ_USE_PLACES  
+  GC_REG_TRAV(scheme_serialized_symbol_type, bstring_obj);
+  GC_REG_TRAV(scheme_place_dead_type, small_object);
+#endif
   GC_REG_TRAV(scheme_keyword_type, symbol_obj);
   GC_REG_TRAV(scheme_null_type, char_obj); /* small */
   GC_REG_TRAV(scheme_pair_type, cons_cell);
@@ -602,8 +639,6 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_undefined_type, char_obj); /* small */
   GC_REG_TRAV(scheme_placeholder_type, small_object);
   GC_REG_TRAV(scheme_table_placeholder_type, iptr_obj);
-  GC_REG_TRAV(scheme_case_lambda_sequence_type, case_closure);
-  GC_REG_TRAV(scheme_begin0_sequence_type, seq_rec);
 
   GC_REG_TRAV(scheme_svector_type, svector_val);
 
@@ -613,7 +648,6 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_stx_type, stx_val);
   GC_REG_TRAV(scheme_stx_offset_type, stx_off_val);
   GC_REG_TRAV(scheme_expanded_syntax_type, twoptr_obj);
-  GC_REG_TRAV(scheme_module_type, module_val);
   GC_REG_TRAV(scheme_rt_module_exports, module_exports_val);
   GC_REG_TRAV(scheme_module_phase_exports_type, module_phase_exports_val);
   GC_REG_TRAV(scheme_module_index_type, modidx_val);
@@ -640,7 +674,7 @@ void scheme_register_traversers(void)
   
   GC_REG_TRAV(scheme_thread_cell_values_type, small_object);
 
-  GC_REG_TRAV(scheme_global_ref_type, small_object);
+  GC_REG_TRAV(scheme_global_ref_type, twoptr_obj);
 
   GC_REG_TRAV(scheme_delay_syntax_type, small_object);
 

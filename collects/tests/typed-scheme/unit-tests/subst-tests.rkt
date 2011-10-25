@@ -1,8 +1,8 @@
 #lang scheme/base
 
-(require "test-utils.ss" (for-syntax scheme/base)
+(require "test-utils.rkt" (for-syntax scheme/base)
          (rep type-rep)
-	 (types utils abbrev numeric-tower substitute)
+         (types utils abbrev numeric-tower substitute)
          rackunit)
 
 (define-syntax-rule (s img var tgt result)
@@ -17,7 +17,7 @@
               (s... (-Number -Boolean) a (make-Function (list (make-arr-dots null -Number (-v a) 'a))) (-Number -Boolean . -> . -Number))
               (s... (-Number -Boolean) a (make-Function (list (make-arr-dots (list -String) -Number (-v a) 'a))) (-String -Number -Boolean . -> . -Number))
               (s... (-Number -Boolean) a (make-Function (list (make-arr-dots (list -String) -Number (-v b) 'a))) (-String (-v b) (-v b) . -> . -Number))
-              (s... (-Number -Boolean) a (make-Function (list (make-arr-dots (list -String) -Number (-v b) 'b))) 
+              (s... (-Number -Boolean) a (make-Function (list (make-arr-dots (list -String) -Number (-v b) 'b)))
                     (make-Function (list (make-arr-dots (list -String) -Number (-v b) 'b))))))
 
 (define-go subst-tests)

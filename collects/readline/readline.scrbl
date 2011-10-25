@@ -10,7 +10,7 @@
 @(define readline "Readline")
 @(define Readline "Readline")
 
-@title{@bold{Readline}: Terminal Interaction}
+@title{Readline: Terminal Interaction}
 
 The @filepath{readline} collection (not to be confused with Racket's
 @racket[read-line] function) provides glue for using GNU's @|readline|
@@ -82,7 +82,7 @@ prompt; otherwise, it displays a prompt as determined by
 
 Adds @racket[(require readline/rep)] to the result of
 @racket[(find-system-path 'init-file)], which is
-@filepath{~/.racketrc} under Unix. Consequently, @|readline| will be
+@filepath{~/.racketrc} on Unix. Consequently, @|readline| will be
 loaded whenever Racket is started in interactive mode. The
 declaration is added only if it is not already present, as determined
 by @racket[read]ing and checking all top-level expressions in the
@@ -241,7 +241,7 @@ from @racketmodname[ffi/unsafe], determines the type of value supplied
 to the @racket[proc].}
 
 
-@section{License Issues}
+@section[#:tag "readline-license"]{License Issues}
 
 GNU's @|readline| library is covered by the GPL, and that applies to
 code that links with it.  Racket is licensed with the LGPL, so the

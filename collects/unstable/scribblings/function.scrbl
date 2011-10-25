@@ -1,6 +1,9 @@
 #lang scribble/manual
 @(require scribble/eval "utils.rkt" (for-label racket unstable/function))
 
+@(define the-eval (make-base-eval))
+@(the-eval '(require unstable/function))
+
 @title{Functions}
 
 @defmodule[unstable/function]
@@ -11,37 +14,16 @@ This module provides tools for higher-order programming and creating functions.
 
 @section{Simple Functions}
 
-@defproc[(identity [x any/c]) (one-of/c x)]{
-
-Returns @scheme[x].
-
-}
-
-@defform[(thunk body ...)]{
-
-Creates a function that ignores its inputs and evaluates the given body.  Useful
-for creating event handlers with no (or irrelevant) arguments.
-
-@defexamples[
-#:eval (eval/require 'unstable/function)
-(define f (thunk (define x 1) (printf "~a\n" x)))
-(f)
-(f 'x)
-(f #:y 'z)
-]
-
-}
-
 @section{Higher Order Predicates}
 
 @defproc[((negate [f (-> A ... boolean?)]) [x A] ...) boolean?]{
 
-Negates the results of @scheme[f]; equivalent to @scheme[(not (f x ...))].
+Negates the results of @racket[f]; equivalent to @racket[(not (f x ...))].
 
-This function is reprovided from @schememodname[scheme/function].
+This function is reprovided from @racketmodname[scheme/function].
 
 @defexamples[
-#:eval (eval/require 'unstable/function)
+#:eval the-eval
 (define f (negate exact-integer?))
 (f 1)
 (f 'one)
@@ -51,11 +33,11 @@ This function is reprovided from @schememodname[scheme/function].
 
 @defproc[((conjoin [f (-> A ... boolean?)] ...) [x A] ...) boolean?]{
 
-Combines calls to each function with @scheme[and].  Equivalent to
-@scheme[(and (f x ...) ...)]
+Combines calls to each function with @racket[and].  Equivalent to
+@racket[(and (f x ...) ...)]
 
 @defexamples[
-#:eval (eval/require 'unstable/function)
+#:eval the-eval
 (define f (conjoin exact? integer?))
 (f 1)
 (f 1.0)
@@ -67,11 +49,11 @@ Combines calls to each function with @scheme[and].  Equivalent to
 
 @defproc[((disjoin [f (-> A ... boolean?)] ...) [x A] ...) boolean?]{
 
-Combines calls to each function with @scheme[or].  Equivalent to
-@scheme[(or (f x ...) ...)]
+Combines calls to each function with @racket[or].  Equivalent to
+@racket[(or (f x ...) ...)]
 
 @defexamples[
-#:eval (eval/require 'unstable/function)
+#:eval the-eval
 (define f (disjoin exact? integer?))
 (f 1)
 (f 1.0)
@@ -85,11 +67,11 @@ Combines calls to each function with @scheme[or].  Equivalent to
 
 @defproc[(call [f (-> A ... B)] [x A] ...) B]{
 
-Passes @scheme[x ...] to @scheme[f].  Keyword arguments are allowed.  Equivalent
-to @scheme[(f x ...)].  Useful for application in higher-order contexts.
+Passes @racket[x ...] to @racket[f].  Keyword arguments are allowed.  Equivalent
+to @racket[(f x ...)].  Useful for application in higher-order contexts.
 
 @defexamples[
-#:eval (eval/require 'unstable/function)
+#:eval the-eval
 (map call
      (list + - * /)
      (list 1 2 3 4)
@@ -111,17 +93,17 @@ to @scheme[(f x ...)].  Useful for application in higher-order contexts.
 @defproc[(papplyr [f (A ... B ... -> C)] [x B] ...) (A ... -> C)]
 )]{
 
-The @scheme[papply] and @scheme[papplyr] functions partially apply @scheme[f] to
-@scheme[x ...], which may include keyword arguments.  They obey the following
+The @racket[papply] and @racket[papplyr] functions partially apply @racket[f] to
+@racket[x ...], which may include keyword arguments.  They obey the following
 equations:
 
-@schemeblock[
+@racketblock[
 ((papply f x ...) y ...) = (f x ... y ...)
 ((papplyr f x ...) y ...) = (f y ... x ...)
 ]
 
 @defexamples[
-#:eval (eval/require 'unstable/function)
+#:eval the-eval
 (define reciprocal (papply / 1))
 (reciprocal 3)
 (reciprocal 4)
@@ -143,15 +125,15 @@ equations:
          (An ... -> ooo -> A1 ... -> B)]
 )]{
 
-@emph{Note:} The @scheme[ooo] above denotes a loosely associating ellipsis.
+@emph{Note:} The @racket[ooo] above denotes a loosely associating ellipsis.
 
-The @scheme[curryn] and @scheme[currynr] functions construct a curried version
-of @scheme[f], specialized at @scheme[x ...], that produces a result after
-@scheme[n] further applications.  Arguments at any stage of application may
+The @racket[curryn] and @racket[currynr] functions construct a curried version
+of @racket[f], specialized at @racket[x ...], that produces a result after
+@racket[n] further applications.  Arguments at any stage of application may
 include keyword arguments, so long as no keyword is duplicated.  These curried
 functions obey the following equations:
 
-@schemeblock[
+@racketblock[
 (curryn 0 f x ...) = (f x ...)
 ((curryn (+ n 1) f x ...) y ...) = (curryn n f x ... y ...)
 
@@ -159,17 +141,17 @@ functions obey the following equations:
 ((currynr (+ n 1) f x ...) y ...) = (currynr n f y ... x ...)
 ]
 
-The @scheme[call], @scheme[papply], and @scheme[papplyr] utilities are related
-to @scheme[curryn] and @scheme[currynr] in the following manner:
+The @racket[call], @racket[papply], and @racket[papplyr] utilities are related
+to @racket[curryn] and @racket[currynr] in the following manner:
 
-@schemeblock[
+@racketblock[
 (call f x ...) = (curryn 0 f x ...) = (currynr 0 f x ...)
 (papply f x ...) = (curryn 1 f x ...)
 (papplyr f x ...) = (currynr 1 f x ...)
 ]
 
 @defexamples[
-#:eval (eval/require 'unstable/function)
+#:eval the-eval
 
 (define reciprocal (curryn 1 / 1))
 (reciprocal 3)
@@ -203,15 +185,15 @@ to @scheme[curryn] and @scheme[currynr] in the following manner:
 
 @defform[(eta f)]{
 
-Produces a function equivalent to @scheme[f], except that @scheme[f] is
+Produces a function equivalent to @racket[f], except that @racket[f] is
 evaluated every time it is called.
 
 This is useful for function expressions that may be run, but not called, before
-@scheme[f] is defined.  The @scheme[eta] expression will produce a function
-without evaluating @scheme[f].
+@racket[f] is defined.  The @racket[eta] expression will produce a function
+without evaluating @racket[f].
 
 @defexamples[
-#:eval (eval/require 'unstable/function)
+#:eval the-eval
 (define f (eta g))
 f
 (define g (lambda (x) (+ x 1)))
@@ -222,15 +204,15 @@ f
 
 @defform[(eta* f x ...)]{
 
-Produces a function equivalent to @scheme[f], with argument list @scheme[x ...].
-In simple cases, this is equivalent to @scheme[(lambda (x ...) (f x ...))].
+Produces a function equivalent to @racket[f], with argument list @racket[x ...].
+In simple cases, this is equivalent to @racket[(lambda (x ...) (f x ...))].
 Optional (positional or keyword) arguments are not allowed.
 
-This macro behaves similarly to @scheme[eta], but produces a function with
+This macro behaves similarly to @racket[eta], but produces a function with
 statically known arity which may improve efficiency and error reporting.
 
 @defexamples[
-#:eval (eval/require 'unstable/function)
+#:eval the-eval
 (define f (eta* g x))
 f
 (procedure-arity f)
@@ -248,15 +230,15 @@ f
    [param-arg-spec id [id default-expr] [id #:param param-expr]])
 ]{
 
-Constructs a function much like @scheme[lambda], except that some optional
+Constructs a function much like @racket[lambda], except that some optional
 arguments correspond to the value of a parameter.  For each clause of the form
-@scheme[[id #:param param-expr]], @scheme[param-expr] must evaluate to a value
-@scheme[param] satisfying @scheme[parameter?].  The default value of the
-argument @scheme[id] is @scheme[(param)]; @scheme[param] is bound to @scheme[id]
-via @scheme[parameterize] during the function call.
+@racket[[id #:param param-expr]], @racket[param-expr] must evaluate to a value
+@racket[param] satisfying @racket[parameter?].  The default value of the
+argument @racket[id] is @racket[(param)]; @racket[param] is bound to @racket[id]
+via @racket[parameterize] during the function call.
 
 @defexamples[
-#:eval (eval/require 'unstable/function)
+#:eval the-eval
 (define p (open-output-string))
 (define hello-world
   (lambda/parameter ([port #:param current-output-port])
@@ -267,3 +249,5 @@ via @scheme[parameterize] during the function call.
 ]
 
 }
+
+@(close-eval the-eval)

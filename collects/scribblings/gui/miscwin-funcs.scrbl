@@ -1,6 +1,5 @@
 #lang scribble/doc
-@(require "common.ss"
-          scribble/struct)
+@(require "common.rkt" scribble/struct)
 
 @(define (atable . l)
    (make-table #f (map (lambda (i)
@@ -17,14 +16,12 @@
 @defproc[(begin-busy-cursor) void?]{
 
 Changes the cursor to a watch cursor for all windows in the current eventspace.
-Use 
-@racket[end-busy-cursor] to revert the cursor back to its previous state. Calls to
-@racket[begin-busy-cursor] and 
-@racket[end-busy-cursor] can be nested arbitrarily.
+Use @racket[end-busy-cursor] to revert the cursor back to its previous
+state. Calls to @racket[begin-busy-cursor] and @racket[end-busy-cursor] can be
+nested arbitrarily.
 
-The cursor installed by 
-@racket[begin-busy-cursor] overrides any window-specific cursors installed with
-@method[window<%> set-cursor].
+The cursor installed by @racket[begin-busy-cursor] overrides any
+window-specific cursors installed with @method[window<%> set-cursor].
 
 See also @racket[is-busy?].
 }
@@ -37,13 +34,13 @@ Rings the system bell.
 See @racket[begin-busy-cursor].
 }
 
-@defproc*[([(file-creator-and-type [filename path]
+@defproc*[([(file-creator-and-type [filename path?]
                                    [creator-string (lambda (s) (and (bytes? s)
                                                                     (= 4 (bytes-length s))))]
                                    [type-bytes (lambda (s) (and (bytes? s)
                                                                  (= 4 (bytes-length s))))])
             void?]
-           [(file-creator-and-type [filename path])
+           [(file-creator-and-type [filename path?])
             (values (lambda (s) (and (bytes? s)
                                 (= 4 (bytes-length s))))
                     (lambda (s) (and (bytes? s)
@@ -52,7 +49,7 @@ See @racket[begin-busy-cursor].
 Gets or sets the creator and type of a file in Mac OS X.
 
 The get operation always returns @racket[#"????"] and @racket[#"????"] for
- Unix or Windows. The set operation has no effect under Unix or
+ Unix or Windows. The set operation has no effect on Unix or
  Windows.
 }
 
@@ -80,14 +77,12 @@ The result depends on @racket[what], and a @racket[#f] result is only
   ]}
 
  @item{@racket['x-display] returns a ``path'' whose string identifies
- the X display if specified by either the @Flag{display} flag or the
- @envvar{DISPLAY} environment variable when GRacket starts under X. For
+ the X11 display if specified by either the @Flag{display} flag or the
+ @envvar{DISPLAY} environment variable when GRacket starts on Unix. For
  other platforms, or when neither @Flag{display} nor @envvar{DISPLAY}
  was specified, the result is @racket[#f].}
 
 ]
-
-
 
 }
 
@@ -98,8 +93,8 @@ Returns an immutable list specifying the default prefix for menu
 shortcuts. See also
 @xmethod[selectable-menu-item<%> get-shortcut-prefix].
 
-Under Windows, the default is @racket['(ctl)]. Under Mac OS X, the
-default is @racket['(cmd)]. Under X, the default is normally
+On Windows, the default is @racket['(ctl)]. On Mac OS X, the
+default is @racket['(cmd)]. On Unix, the default is normally
 @racket['(ctl)], but the default can be changed through the
 @Resource{defaultMenuPrefix} low-level preference (see
 @|mrprefsdiscuss|).}
@@ -128,7 +123,7 @@ Returns the color that is used to draw selected text or @racket[#f] if
 selected text is drawn with its usual color.}
 
 
-@defproc[(get-window-text-extent [string string]
+@defproc[(get-window-text-extent [string string?]
                                  [font (is-a?/c font%)]
                                  [combine? any/c #f])
          (values exact-nonnegative-integer?
@@ -141,7 +136,7 @@ argument is as for @xmethod[dc<%> get-text-extent].
 See also @xmethod[dc<%> get-text-extent].
 }
 
-@defproc[(graphical-read-eval-print-loop [eval-eventspace eventspace #f]
+@defproc[(graphical-read-eval-print-loop [eval-eventspace (or/c eventspace? #f) #f]
                                          [redirect-ports? any/c (not eval-eventspace)])
          void?]{
 
@@ -213,7 +208,7 @@ Returns @racket[#t] if a busy cursor has been installed with
 @racket[end-busy-cursor].
 }
 
-@defproc[(label->plain-label [label string]) string?]{
+@defproc[(label->plain-label [label string?]) string?]{
 
 Strips shortcut ampersands from @racket[label], removes parenthesized
  ampersand--character combinations along with any surrounding space,
@@ -226,7 +221,7 @@ Strips shortcut ampersands from @racket[label], removes parenthesized
 @defproc[(make-gl-bitmap [width exact-positive-integer?]
                          [height exact-positive-integer?]
                          [config (is-a?/c gl-config%)])
-         (is-a/c? bitmap%)]{
+         (is-a?/c bitmap%)]{
 
 Creates a bitmap that supports both normal @racket[dc<%>] drawing an
 OpenGL drawing through a context returned by @xmethod[dc<%> get-gl-context].
@@ -252,13 +247,13 @@ environment of the result namespace.}
 
 @defproc[(make-screen-bitmap [width exact-positive-integer?]
                              [height exact-positive-integer?]) 
-         (is-a/c? bitmap%)]{
+         (is-a?/c bitmap%)]{
 
 Creates a bitmap that draws in a way that is the same as drawing to a
 canvas in its default configuration.
 
 A normal @racket[bitmap%] draws in a more platform-independent way and
-may use fewer constrained resources, particularly under Windows.}
+may use fewer constrained resources, particularly on Windows.}
 
 
 @defproc[(play-sound [filename path-string?]
@@ -270,9 +265,9 @@ Plays a sound file. If @racket[async?] is false, the function does not
  The result is @racket[#t] if the sound plays successfully, @racket[#f]
  otherwise.
 
-Under Windows, only @filepath{.wav} files are supported.
+On Windows, only @filepath{.wav} files are supported.
 
-Under X, the function invokes an external sound-playing program;
+On Unix, the function invokes an external sound-playing program;
   looking for a few known programs (@exec{aplay}, @exec{play},
   @exec{esdplay}, @exec{sndfile-play}, @exec{audioplay}). In addition, a
   play command can be defined through the @ResourceFirst{playcmd}
@@ -286,7 +281,7 @@ Under X, the function invokes an external sound-playing program;
   error code---in this case the last part of the error output is
   shown.
 
-Under Mac OS X, Quicktime is used to play sounds; most sound
+On Mac OS X, Quicktime is used to play sounds; most sound
  formats (.wav, .aiff, .mp3) are supported in recent versions of
  Quicktime. In order to play .wav files, Quicktime 3.0 (compatible
  with OS 7.5 and up) is required.}
@@ -319,18 +314,18 @@ The background behind @racket[on] is unspecified, so @racket[on]
  that is used for drawing, and @racket[off-x] and @racket[off-y]
  similarly specify an offset within @racket[off].
 
-The blit is automatically unregistered if @scheme[canvas] becomes
+The blit is automatically unregistered if @racket[canvas] becomes
  invisible and inaccessible.  Multiple registrations can be installed
- for the same @scheme[canvas].
+ for the same @racket[canvas].
 
-See also @scheme[unregister-collecting-blit].}
+See also @racket[unregister-collecting-blit].}
 
 
 @defproc[(unregister-collecting-blit [canvas (is-a?/c canvas%)])
          void?]{
 
 Unregisters all blit requests installed for @racket[canvas] with
- @scheme[register-collecting-blit].}
+ @racket[register-collecting-blit].}
 
 
 @defproc[(send-message-to-window [x (integer-in -10000 10000)]
@@ -351,10 +346,10 @@ Unregisters all blit requests installed for @racket[canvas] with
 
 @defproc[(system-position-ok-before-cancel?) boolean?]{
 
-Returns @racket[#t] under Windows---indicating that a dialog with
+Returns @racket[#t] on Windows---indicating that a dialog with
 @onscreen{OK} and @onscreen{Cancel} buttons should place the
 @onscreen{OK} button on to left of the @onscreen{Cancel} button---and
-returns @racket[#f] under Mac OS X and X.}
+returns @racket[#f] on Mac OS X and Unix.}
 
 
 @defthing[the-clipboard (is-a?/c clipboard<%>)]{
@@ -373,7 +368,7 @@ See @racket[clipboard<%>].
 
 @defproc[(label-string? [v any/c]) boolean?]{
   Returns @racket[#t] if @racket[v] is a string whose length is less than or equal to @racket[200].
-          
+
   This predicate is typically used as the contract for strings that 
   appear in GUI objects. In some cases, such as the label in a @racket[button%]
   or @racket[menu-item%] object, the character @litchar{&} is treated specially

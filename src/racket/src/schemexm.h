@@ -59,6 +59,7 @@
 #define scheme_cancel_sleep (scheme_extension_table->scheme_cancel_sleep)
 #define scheme_start_sleeper_thread (scheme_extension_table->scheme_start_sleeper_thread)
 #define scheme_end_sleeper_thread (scheme_extension_table->scheme_end_sleeper_thread)
+#define scheme_set_place_sleep (scheme_extension_table->scheme_set_place_sleep)
 #define scheme_notify_sleep_progress (scheme_extension_table->scheme_notify_sleep_progress)
 #define scheme_make_thread_cell (scheme_extension_table->scheme_make_thread_cell)
 #define scheme_thread_cell_get (scheme_extension_table->scheme_thread_cell_get)
@@ -219,6 +220,7 @@
 # endif
 #endif
 #define scheme_malloc_code (scheme_extension_table->scheme_malloc_code)
+#define scheme_malloc_permanent_code (scheme_extension_table->scheme_malloc_permanent_code)
 #define scheme_free_code (scheme_extension_table->scheme_free_code)
 #ifndef MZ_PRECISE_GC
 #define scheme_malloc_gcable_code (scheme_extension_table->scheme_malloc_gcable_code)
@@ -246,6 +248,7 @@
 #define scheme_dont_gc_ptr (scheme_extension_table->scheme_dont_gc_ptr)
 #define scheme_gc_ptr_ok (scheme_extension_table->scheme_gc_ptr_ok)
 #define scheme_collect_garbage (scheme_extension_table->scheme_collect_garbage)
+#define scheme_enable_garbage_collection (scheme_extension_table->scheme_enable_garbage_collection)
 #ifdef MZ_PRECISE_GC
 # ifndef USE_THREAD_LOCAL
 #define GC_variable_stack (scheme_extension_table->GC_variable_stack)
@@ -282,6 +285,7 @@
 #define scheme_make_hash_tree (scheme_extension_table->scheme_make_hash_tree)
 #define scheme_hash_tree_set (scheme_extension_table->scheme_hash_tree_set)
 #define scheme_hash_tree_get (scheme_extension_table->scheme_hash_tree_get)
+#define scheme_eq_hash_tree_get (scheme_extension_table->scheme_eq_hash_tree_get)
 #define scheme_hash_tree_next (scheme_extension_table->scheme_hash_tree_next)
 #define scheme_hash_tree_index (scheme_extension_table->scheme_hash_tree_index)
 #define scheme_hash_tree_equal (scheme_extension_table->scheme_hash_tree_equal)
@@ -486,6 +490,7 @@
 #define scheme_set_next_port_custodian (scheme_extension_table->scheme_set_next_port_custodian)
 #define scheme_set_port_location_fun (scheme_extension_table->scheme_set_port_location_fun)
 #define scheme_set_port_count_lines_fun (scheme_extension_table->scheme_set_port_count_lines_fun)
+#define scheme_port_count_lines (scheme_extension_table->scheme_port_count_lines)
 #define scheme_progress_evt_via_get (scheme_extension_table->scheme_progress_evt_via_get)
 #define scheme_peeked_read_via_get (scheme_extension_table->scheme_peeked_read_via_get)
 #define scheme_write_evt_via_write (scheme_extension_table->scheme_write_evt_via_write)
@@ -667,6 +672,8 @@
 #define scheme_stx_extract_marks (scheme_extension_table->scheme_stx_extract_marks)
 #define scheme_get_place_table (scheme_extension_table->scheme_get_place_table)
 #define scheme_register_process_global (scheme_extension_table->scheme_register_process_global)
+#define scheme_malloc_key (scheme_extension_table->scheme_malloc_key)
+#define scheme_free_key (scheme_extension_table->scheme_free_key)
 #ifdef MZ_PRECISE_GC
 #pragma GC_VARIABLE_STACK_THOUGH_TABLE
 #endif

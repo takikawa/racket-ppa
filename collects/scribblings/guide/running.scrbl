@@ -1,7 +1,5 @@
 #lang scribble/doc
-@(require scribble/manual
-          "guide-utils.ss"
-          (for-syntax racket/pretty))
+@(require scribble/manual "guide-utils.rkt" (for-syntax racket/pretty))
 
 @title[#:tag "running" #:style 'toc]{Running and Creating Executables}
 
@@ -36,7 +34,7 @@ confguration options, like @Flag{j}), then it starts a @tech{REPL}
 with a @litchar{> } prompt:
 
 @verbatim[#:indent 2]{
-  Welcome to Racket
+  @(regexp-replace #rx"\n+$" (banner) "")
   > 
 }
 

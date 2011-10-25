@@ -1,6 +1,5 @@
 #lang scribble/doc
-@(require scribble/manual
-          "common.ss"
+@(require scribble/manual "common.rkt"
           (for-label racket/base
                      compiler/decompile
                      (only-in compiler/zo-parse compilation-top? req)
@@ -140,4 +139,8 @@ Consumes a representation of bytecode and writes it to @racket[out].}
 
 Consumes a representation of bytecode and generates a byte string for
 the marshaled bytecode.}
+
+@; ------------------------------------------------------------
+
+@include-section["zo-struct.scrbl"]
 

@@ -1,5 +1,5 @@
 #lang scribble/doc
-@(require "common.ss"
+@(require "common.rkt"
           (for-label mrlib/name-message))
 
 @title{Name Message}
@@ -71,7 +71,7 @@ saying that there is no file name until the file is saved.}
   the label is determined by
   the @method[name-message% set-message].
 }
-                 
+
 @defmethod[(get-background-color) (or/c #f (is-a/c color%) string?)]{
 
 The result of this method is used for the background color
@@ -90,7 +90,7 @@ If it receives false, the name message will not shrink and
 its minimum width will be the size required to display its
 current label.
 
-Defaultly, the name-message does not allow shrinking.
+By default, the name-message does not allow shrinking.
 }
 
 }

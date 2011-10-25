@@ -24,7 +24,7 @@
 (check-expect (name->color "black") (make-color 0 0 0))
 (check-expect (name->color "blue") (make-color 0 0 255))
 (check-expect (name->color "plaid") false)
-(check-error (name->color 7) "name->color: argument must be a string or symbol")
+(check-error (name->color 7) "name->color: Expected a string or symbol, but received 7")
 
 (check-expect (color=? (make-color 5 10 15) (make-color 5 10 15)) true)
 (check-expect (color=? (make-color 5 10 15) (make-color 5 15 10)) false)
@@ -36,10 +36,26 @@
 (check-expect (color=? (make-color 5 10 15 255) (make-color 5 10 15)) true)
 (check-expect (color=? (make-color 5 10 15 0) false) true)
 (check-expect (color=? (make-color 5 10 15 20) false) false)
-(check-error (color=? "white" 3) "colorize: Unrecognized type")
-(check-error (color=? "white" "plaid") "color=?: Expected two colors or color names as arguments")
+(check-error (color=? "white" 3) "colorize: Expected a color, but received 3")
+(check-error (color=? "plaid" "white") "color=?: Expected a color or color name as first argument, but received \"plaid\"")
+(check-error (color=? "white" "plaid") "color=?: Expected a color or color name as second argument, but received \"plaid\"")
 
 ; Test cases for map3-image:
+;(check-error (map3-image 5 + + pic:bloch)
+;             "map3-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) -> num(r) as first argument")
+; Actually, the above is caught by Check Syntax, before map3-image has a chance to check anything.
+(check-error (map3-image sqrt + + pic:bloch)
+             "map3-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) -> num(r) as first argument")
+;(check-error (map3-image + 5 + pic:bloch)
+;             "map3-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) -> num(g) as second argument")
+(check-error (map3-image + sqrt + pic:bloch)
+             "map3-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) -> num(g) as second argument")
+;(check-error (map3-image + + 5 pic:bloch)
+;             "map3-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) -> num(b) as third argument")
+(check-error (map3-image + + sqrt pic:bloch)
+             "map3-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) -> num(b) as third argument")
+(check-error (map3-image + + + 5)
+             "map3-image: Expected an image as fourth argument, but received 5")
 
 ; red-id : x y r g b -> num
 (define (red-id x y r g b) r)
@@ -81,6 +97,24 @@
 (map3-image blue-id red-id green-id bloch)
 
 "Test cases for map4-image:"
+;(check-error (map4-image 5 + + + pic:bloch)
+;             "map4-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) -> num(r) as first argument")
+(check-error (map4-image sqrt + + + pic:bloch)
+             "map4-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) num(alpha) -> num(r) as first argument")
+;(check-error (map4-image + 5 + + pic:bloch)
+;             "map4-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) num(alpha) -> num(g) as second argument")
+(check-error (map4-image + sqrt + + pic:bloch)
+             "map4-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) num(alpha) -> num(g) as second argument")
+;(check-error (map4-image + + 5 + pic:bloch)
+;             "map4-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) num(alpha) -> num(b) as third argument")
+(check-error (map4-image + + sqrt + pic:bloch)
+             "map4-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) num(alpha) -> num(b) as third argument")
+;(check-error (map4-image + + + 5 pic:bloch)
+;             "map4-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) num(alpha) -> num(a) as fourth argument")
+(check-error (map4-image + + + sqrt pic:bloch)
+             "map4-image: Expected a function with contract num(x) num(y) num(r) num(g) num(b) num(alpha) -> num(alpha) as fourth argument")
+(check-error (map4-image + + + + 5)
+             "map4-image: Expected an image as fifth argument, but received 5")
 ; red-id6 : x y r g b a -> num
 (define (red-id6 x y r g b a) r)
 ; green-id6 : x y r g b a -> num
@@ -115,6 +149,13 @@
 (overlay (map4-image red-id6 green-id6 blue-id6 x-gradient-6 bloch) bluebox)
 
 ; Test cases for map-image:
+;(check-error (map-image 5 pic:bloch)
+;             "map-image: Expected a function with contract num(x) num(y) color -> color as first argument")
+(check-error (map-image sqrt pic:bloch)
+             "map-image: Expected a function with contract num(x) num(y) color -> color as first argument")
+(check-error (map-image + 5)
+             "map-image: Expected an image as second argument, but received 5")
+
 ; color-id : x y color -> color
 (define (color-id x y c)
   c)
@@ -146,7 +187,7 @@
 (define ex6 (map-image kill-red bloch)) ex6
 (define (return-5 x y c) 5)
 
-(check-error (map-image return-5 bloch) "colorize: Unrecognized type")
+(check-error (map-image return-5 bloch) "colorize: Expected a color, but received 5")
 
 "Test cases for build3-image:"
 (define (x-gradient-2 x y) (min 255 (* 4 x)))
@@ -155,19 +196,19 @@
 "(build3-image 60 40 zero-2-args x-gradient-2 y-gradient-2) should be a 60x40 rectangle with no red, green increasing from left to right, and blue increasing from top to bottom:"
 (build3-image 60 40 zero-2-args x-gradient-2 y-gradient-2)
 (check-error (build3-image "hello" true sqrt sqrt sqrt)
-             "build3-image: Expected natural number as first argument")
+             "build3-image: Expected a natural number as first argument, but received \"hello\"")
 (check-error (build3-image 17 true sqrt sqrt sqrt)
-             "build3-image: Expected natural number as second argument")
+             "build3-image: Expected a natural number as second argument, but received true")
 (check-error (build3-image 17 24 sqrt sqrt sqrt)
-             "build3-image: Expected function with contract num(x) num(y) -> color as third argument")
+             "build3-image: Expected a function with contract num(x) num(y) -> color as third argument")
 (check-error (build3-image 17 24 x-gradient-2 sqrt sqrt)
-             "build3-image: Expected function with contract num(x) num(y) -> color as fourth argument")
+             "build3-image: Expected a function with contract num(x) num(y) -> color as fourth argument")
 (check-error (build3-image 17 24 x-gradient-2 y-gradient-2 sqrt)
-             "build3-image: Expected function with contract num(x) num(y) -> color as fifth argument")
+             "build3-image: Expected a function with contract num(x) num(y) -> color as fifth argument")
 
 (define (return-minus-5 x y) -5)
 (check-error (build3-image 17 24 x-gradient-2 y-gradient-2 return-minus-5)
-             "make-color: expected <integer between 0 and 255> as third argument, given: -5")
+             "make-color: expects an integer between 0 and 255 as third argument, given -5")
 
 "Test cases for build4-image:"
 "(build4-image 50 50 x-gradient-2 x-gradient-2 zero-2-args y-gradient-2) should be a square, increasingly yellow from left to right and increasingly alpha from top to bottom.  On a blue background."
@@ -184,9 +225,9 @@
 "(build-image 100 100 (lambda (x y) (make-color (* x 2.5) (* y 2.5) 0))):"
 (build-image 100 100 a-gradient)
 "should be a 100x100 square with a color gradient increasing in red from left to right, and in green from top to bottom"
-(check-error (build-image 3.2 100 a-gradient) "build-image: Expected natural number as first argument")
-(check-error (build-image 100 -2 a-gradient) "build-image: Expected natural number as second argument")
-(check-error (build-image 100 100 sqrt) "build-image: Expected function with contract num(x) num(y) -> color as third argument")
+(check-error (build-image 3.2 100 a-gradient) "build-image: Expected a natural number as first argument, but received 3.2")
+(check-error (build-image 100 -2 a-gradient) "build-image: Expected a natural number as second argument, but received -2")
+(check-error (build-image 100 100 sqrt) "build-image: Expected a function with contract num(x) num(y) -> color as third argument")
 
 
 
@@ -241,13 +282,6 @@ fuzzy-tri
    white-pixel->trans
    pic))
 
-(define (white-pixel->red x y old-color)
-  (if (color=? old-color 'white)
-      "red"
-      old-color))
-(define (white->red pic)
-  (map-image white-pixel->red pic))
-
 "(overlay (white->trans hieroglyphics) (rectangle 100 100 'solid 'blue)):"
 (define hier (white->trans hieroglyphics))
 (overlay hier (rectangle 100 100 "solid" "blue"))
@@ -276,3 +310,57 @@ fuzzy-tri
 (overlay (color->gray hieroglyphics) bluebox)
 "(overlay (color->gray (white->trans hieroglyphics)) bluebox):"
 (overlay (color->gray (white->trans hieroglyphics)) bluebox)
+
+; invert-pixel : x y color -> color
+(check-expect (invert-pixel 3 17 (make-color 0 0 0)) (make-color 255 255 255))
+(check-expect (invert-pixel 92 4 (make-color 50 100 150)) (make-color 205 155 105))
+(define (invert-pixel x y color)
+  (make-color (- 255 (color-red color))
+              (- 255 (color-green color))
+              (- 255 (color-blue color))))
+
+; invert-pic : image -> image
+(define (invert-pic pic)
+  (map-image invert-pixel pic))
+
+(check-expect (invert-pic (rectangle 30 20 "solid" "red"))
+              (rectangle 30 20 "solid" (make-color 0 255 255)))
+(invert-pic pic:bloch) "should be Dr. Bloch in photonegative"
+
+; Test cases for map-image/extra and build-image/extra:
+; Exercise 27.4.1:
+; new-pixel : number(x) number(y) color height -> color
+(check-expect (new-pixel 36 100 (make-color 30 60 90) 100)
+              (make-color 30 60 255))
+(check-expect (new-pixel 58 40 (make-color 30 60 90) 100)
+              (make-color 30 60 102))
+(define (new-pixel x y c h)
+  ; x         number
+  ; y         number
+  ; c         color
+  ; h         number
+  (make-color (color-red c)
+              (color-green c)
+              (real->int (* 255 (/ y h)))))
+
+; apply-blue-gradient : image -> image
+(define (apply-blue-gradient pic)
+  (map-image/extra new-pixel pic (image-height pic)))
+
+(apply-blue-gradient pic:bloch)
+"should be Dr. Bloch with an amount of blue increasing steadily from top to bottom"
+(apply-blue-gradient (rectangle 40 60 "solid" "red"))
+"should be a rectangle shading from red at the top to purple at the bottom"
+
+; flip-pixel : num(x) num(y) image -> color
+(define (flip-pixel x y pic)
+   (if (>= x y)
+       (get-pixel-color x y pic)
+       (get-pixel-color y x pic)))
+
+(define (diag-mirror pic)
+   (build-image/extra (image-width pic) (image-width pic) flip-pixel pic))
+
+(diag-mirror pic:bloch)
+"should be the upper-right corner of Dr. Bloch's head, mirrored to the lower-left"
+

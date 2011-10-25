@@ -1,7 +1,7 @@
 #reader scribble/reader
 #lang scheme/base
 
-(require "../config.ss"
+(require "../config.rkt"
          scribble/manual
          scribble/core
          scribble/html-properties
@@ -56,8 +56,7 @@
                                    (if (not force-racket-css?)
                                        null
                                        (list
-                                        (make-css-addition (build-path (collection-path "scribble")
-                                                                       "racket.css"))))))
+                                        (make-css-addition (collection-file-path "racket.css" "scribble"))))))
            title-string
            #;
            ;; the "(installation)" part shouldn't be visible on the web, but
@@ -78,7 +77,7 @@
                      (list @script{SetPLTRoot("@(version)", "@up-path")@";"})
                      '()))))
 
-;; FIXME: Use this to avoid hard-wiring manual titles and paths in config.ss
+;; FIXME: Use this to avoid hard-wiring manual titles and paths in config.rkt
 (define (resolve s [f s])
   (resolved-module-path-name
    (module-path-index-resolve

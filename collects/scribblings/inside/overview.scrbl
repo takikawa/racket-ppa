@@ -1,5 +1,5 @@
 #lang scribble/doc
-@(require "utils.ss")
+@(require "utils.rkt")
 
 @title[#:tag "overview"]{Overview}
 
@@ -71,10 +71,10 @@ steps:
  This initialization function can install new global primitive
  procedures or other values into the namespace, or it can simply
  return a Racket value. The initialization function is called when the
- extension is loaded with @racket[load-extension] (the first time);
- the return value from @cpp{scheme_initialize} is used as the return
- value for @racket[load-extension]. The namespace provided to
- @cpp{scheme_initialize} is the current namespace when
+ extension is loaded with @racket[load-extension] the first time in a
+ given @|tech-place|; the return value from @cpp{scheme_initialize} is used
+ as the return value for @racket[load-extension]. The namespace
+ provided to @cpp{scheme_initialize} is the current namespace when
  @racket[load-extension] is called.}
 
 
@@ -82,9 +82,9 @@ steps:
  arguments and return type as @cpp{scheme_initialize}.
 
  This function is called if @racket[load-extension] is called a second
- time (or more times) for an extension. Like @cpp{scheme_initialize},
- the return value from this function is the return value for
- @racket[load-extension].}
+ time (or more times) for an extension in a given @|tech-place|. Like
+ @cpp{scheme_initialize}, the return value from this function is the
+ return value for @racket[load-extension].}
 
 
  @item{Define the C function @cppi{scheme_module_name}, which takes
@@ -165,7 +165,9 @@ so pointers to Racket objects can be kept in registers, stack
 variables, or structures allocated with @cppi{scheme_malloc}. However,
 static variables that contain pointers to collectable memory must be
 registered using @cppi{scheme_register_extension_global} (see
-@secref["im:memoryalloc"]).
+@secref["im:memoryalloc"]); even then, such static variables must be
+thread-local (in the OS-thread sense) to work with multiple
+@|tech-place|s (see @secref["places"]).
 
 As an example, the following C code defines an extension that returns
 @racket["hello world"] when it is loaded:
@@ -184,7 +186,7 @@ As an example, the following C code defines an extension that returns
 }
 
 Assuming that this code is in the file @filepath{hw.c}, the extension
-is compiled under Unix with the following two commands:
+is compiled on Unix with the following two commands:
 
 @commandline{raco ctool --cgc --cc hw.c}
 @commandline{raco ctool --cgc --ld hw.so hw.o}
@@ -221,11 +223,11 @@ must be extended as follows:
 ]
 
 For a relatively simple extension @filepath{hw.c}, the extension is
-compiled under Unix for 3m with the following three commands:
+compiled on Unix for 3m with the following three commands:
 
 @commandline{raco ctool --xform hw.c}
 @commandline{raco ctool --3m --cc hw.3m.c}
-@commandline{raco ctool --3m --ld hw.so hw.o}
+@commandline{raco ctool --3m --ld hw.so hw_3m.o}
 
 Some examples in @filepath{collects/mzscheme/examples} work with
 Racket 3m in this way. A few examples are manually instrumented, in
@@ -296,7 +298,7 @@ To embed Racket CGC in a program, follow these steps:
   standard distribution provides 3m libraries, only, you will most
   likely have to build from source.
 
-  Under Unix, the libraries are @as-index{@filepath{libracket.a}}
+  On Unix, the libraries are @as-index{@filepath{libracket.a}}
   and @as-index{@filepath{libmzgc.a}} (or
   @as-index{@filepath{libracket.so}} and
   @as-index{@filepath{libmzgc.so}} for a dynamic-library build, with
@@ -306,7 +308,7 @@ To embed Racket CGC in a program, follow these steps:
   libraries into the installation's @filepath{lib} directory. Be sure
   to build the CGC variant, since the default is 3m.
 
-  Under Windows, stub libraries for use with Microsoft tools are
+  On Windows, stub libraries for use with Microsoft tools are
   @filepath{libracket@italic{x}.lib} and
   @filepath{libmzgc@italic{x}.lib} (where @italic{x} represents the
   version number) are in a compiler-specific directory in
@@ -323,7 +325,7 @@ To embed Racket CGC in a program, follow these steps:
   use. (@filepath{Racket.exe} and @filepath{GRacket.exe} use the latter
   strategy.)
 
-  Under Mac OS X, dynamic libraries are provided by the
+  On Mac OS X, dynamic libraries are provided by the
   @filepath{Racket} framework, which is typically installed in
   @filepath{lib} sub-directory of the installation. Supply
   @exec{-framework Racket} to @exec{gcc} when linking, along
@@ -361,7 +363,7 @@ To embed Racket CGC in a program, follow these steps:
   @cpp{scheme_main_stack_setup} trampoline registers the C stack with
   the memory manager without creating a namespace.)
 
-  Under 32-bit Windows, when support for parallelism is enabled in the Racket
+  On 32-bit Windows, when support for parallelism is enabled in the Racket
   build (as is the default), then before calling
   @cpp{scheme_main_setup}, your embedding application must first call
   @cppi{scheme_register_tls_space}:
@@ -474,12 +476,12 @@ int main(int argc, char *argv[])
 }
 }
 
-Under Mac OS X, or under Windows when Racket is compiled to a DLL
+On Mac OS X, or on Windows when Racket is compiled to a DLL
 using Cygwin, the garbage collector cannot find static variables
 automatically. In that case, @cppi{scheme_main_setup} must be called with a
 non-zero first argument.
 
-Under Windows (for any other build mode), the garbage collector finds
+On Windows (for any other build mode), the garbage collector finds
 static variables in an embedding program by examining all memory
 pages. This strategy fails if a program contains multiple Windows
 threads; a page may get unmapped by a thread while the collector is
@@ -514,21 +516,21 @@ In addition, some library details are different:
 
 @itemize[
 
- @item{Under Unix, the library is just
+ @item{On Unix, the library is just
   @as-index{@filepath{libracket3m.a}} (or
   @as-index{@filepath{libracket3m.so}} for a dynamic-library build,
   with @as-index{@filepath{libracket3m.la}} for use with
   @exec{libtool}). There is no separate library for 3m analogous to
   CGC's @filepath{libmzgc.a}.}
 
- @item{Under Windows, the stub library for use with Microsoft tools is
+ @item{On Windows, the stub library for use with Microsoft tools is
   @filepath{libracket3m@italic{x}.lib} (where @italic{x} represents the
   version number). This library identifies the bindings that are
   provided by @filepath{libracket3m@italic{x}.dll}.  There is no
   separate library for 3m analogous to CGC's
   @filepath{libmzgc@italic{x}.lib}.}
 
-  @item{Under Mac OS X, 3m dynamic libraries are provided by the
+  @item{On Mac OS X, 3m dynamic libraries are provided by the
   @filepath{Racket} framework, just as for CGC, but as a version
   suffixed with @filepath{_3m}.}
 
@@ -612,27 +614,51 @@ and when all temporary values are put into variables.
 
 @; ----------------------------------------------------------------------
 
+@section[#:tag "places"]{Racket and Places}
+
+Each Racket @|tech-place| corresponds to a separate OS-implemented
+thread. Each place has its own memory manager. Pointers to GC-managed
+memory cannot be communicated from one place to another, because such
+pointers in one place are invisible to the memory manager of another
+place.
+
+When @|tech-place| support is enabled, static variables in an
+extension or an embedding generally cannot hold pointers to GC-managed
+memory, since the static variable may be used from multiple places.
+For some OSes, a static variable can be made thread-local, in which
+case it has a different address in each OS thread, and each different
+address can be registered with the GC for a given place.
+
+The OS thread that originally calls @cpp{scheme_basic_env} is the OS
+thread of the original place. When @cpp{scheme_basic_env} is called a
+second time to reset the interpreter, it can be called in an OS thread
+that is different from the original call to
+@cpp{scheme_basic_env}. Thereafter, the new thread is the OS thread
+for the original place.
+
+@; ----------------------------------------------------------------------
+
 @section{Racket and Threads}
 
 Racket implements threads for Racket programs without aid from the
 operating system, so that Racket threads are cooperative from the
-perspective of C code. Under Unix, stand-alone Racket uses a single
-OS-implemented thread. Under Windows and Mac OS X, stand-alone
+perspective of C code. On Unix, stand-alone Racket uses a single
+OS-implemented thread. On Windows and Mac OS X, stand-alone
 Racket uses a few private OS-implemented threads for background
 tasks, but these OS-implemented threads are never exposed by the
 Racket API.
 
 In an embedding application, Racket can co-exist with additional
 OS-implemented threads, but the additional OS threads must not call
-any @cpp{scheme_} function.  Only the OS thread that originally calls
-@cpp{scheme_basic_env} can call @cpp{scheme_} functions. (This
-restriction is stronger than saying all calls must be serialized
-across threads. Racket relies on properties of specific threads to
-avoid stack overflow and garbage collection.) When
-@cpp{scheme_basic_env} is called a second time to reset the
-interpreter, it can be called in an OS thread that is different from
-the original call to @cpp{scheme_basic_env}. Thereafter, all calls to
-@cpp{scheme_} functions must originate from the new thread.
+any @cpp{scheme_} function.  Only the OS thread representing a
+particular @|tech-place| can call @cpp{scheme_} functions. (This
+restriction is stronger than saying all calls for a given place must
+be serialized across threads. Racket relies on properties of specific
+threads to avoid stack overflow and garbage collection.) For the
+original place, only the OS thread used to call @cpp{scheme_basic_env}
+can call @cpp{scheme_} functions. For any other place, only the OS
+thread that is created by Racket for the place can be used to call
+@cpp{scheme_} functions.
 
 See @secref["threads"] for more information about threads, including
 the possible effects of Racket's thread implementation on extension

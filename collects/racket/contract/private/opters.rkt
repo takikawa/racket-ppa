@@ -4,6 +4,7 @@
          "guts.rkt"
          "arrow.rkt"
          "blame.rkt"
+         "misc.rkt"
          (for-syntax racket/base
                      syntax/stx
                      "opt-guts.rkt"))
@@ -147,7 +148,7 @@
                           (raise-blame-error
                            blame
                            val
-                           "expected <~a>, given: ~e"
+                           "expected <~s>, given: ~e"
                            (contract-name ctc)
                            val)))
               lifts3
@@ -185,7 +186,7 @@
                   (raise-blame-error
                    blame
                    val
-                   "expected <~a>, given: ~e"
+                   "expected <~s>, given: ~e"
                    (contract-name ctc)
                    val)))
              lifts3
@@ -267,7 +268,7 @@
                        (raise-blame-error
                         blame
                         val
-                        "expected <~a>, given: ~e"
+                        "expected <~s>, given: ~e"
                         (contract-name ctc)
                         val))))
          (append
@@ -328,7 +329,7 @@
                        (raise-blame-error
                         blame
                         val
-                        "expected <~a>, given: ~e"
+                        "expected <~s>, given: ~e"
                         (contract-name ctc)
                         val))))        
          (append lifts-hdp lifts-tlp) 

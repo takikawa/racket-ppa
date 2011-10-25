@@ -2,23 +2,23 @@
 (require scheme/class
          scheme/port
          scheme/file
-         "../syntax.ss"
-         "const.ss"
-         "private.ss"
+         "../syntax.rkt"
+         "const.rkt"
+         "private.rkt"
          racket/snip/private/private
-         "editor.ss"
+         "editor.rkt"
          "editor-data.rkt"
-         "undo.ss"
+         "undo.rkt"
          racket/snip
          racket/snip/private/snip-flags
          "standard-snip-admin.rkt"
-         "keymap.ss"
-         (only-in "cycle.ss" 
+         "keymap.rkt"
+         (only-in "cycle.rkt"
                   printer-dc%
                   set-pasteboard%!)
-         "wordbreak.ss"
-         "stream.ss"
-         "wx.ss")
+         "wordbreak.rkt"
+         "stream.rkt"
+         "wx.rkt")
 
 (provide pasteboard%
          add-pasteboard-keymap-functions)
@@ -729,7 +729,10 @@
     (case-args
      args
      [()
-      (delete-some (lambda (s) (loc-selected? (snip-loc s))))]
+      (delete-some (lambda (s) 
+                     (let ([l (snip-loc s)])
+                       (and l ;; deleted already!
+                            (loc-selected? l)))))]
      [([snip% s])
       (unless (or s-user-locked?
                   (not (zero? write-locked)))
@@ -1295,7 +1298,7 @@
 
   ;; called by the administrator to trigger a redraw
   (def/override (refresh [real? left] [real? top] [nonnegative-real? width] [nonnegative-real? height]
-                         [(symbol-in no-caret show-inactive-caret show-caret) show-caret]
+                         [caret-status? show-caret]
                          [(make-or-false color%) bg-color])
 
     (cond

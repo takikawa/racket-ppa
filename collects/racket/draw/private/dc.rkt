@@ -7,21 +7,21 @@
          ffi/unsafe/atomic
          racket/math
          racket/class
-         "hold.ss"
-         "local.ss"
-         "../unsafe/cairo.ss"
-         "../unsafe/pango.ss"
-         "color.ss"
-         "pen.ss"
-         "brush.ss"
-         "gradient.ss"
-         "font.ss"
-         "bitmap.ss"
-         "region.ss"
-         "dc-intf.ss"
-         "dc-path.ss"
-         "point.ss"
-         "local.ss"
+         "hold.rkt"
+         "local.rkt"
+         "../unsafe/cairo.rkt"
+         "../unsafe/pango.rkt"
+         "color.rkt"
+         "pen.rkt"
+         "brush.rkt"
+         "gradient.rkt"
+         "font.rkt"
+         "bitmap.rkt"
+         "region.rkt"
+         "dc-intf.rkt"
+         "dc-path.rkt"
+         "point.rkt"
+         "local.rkt"
          "../unsafe/bstr.rkt")
 
 (provide dc-mixin
@@ -379,8 +379,11 @@
         (cairo_matrix_translate mx origin-x origin-y)
         (cairo_matrix_scale mx scale-x scale-y)
         (cairo_matrix_rotate mx (- rotation))
-        (set! effective-scale-x (cairo_matrix_t-xx mx))
-        (set! effective-scale-y (cairo_matrix_t-yy mx))
+        (let ([ssq (lambda (a b) (sqrt (+ (* a a) (* b b))))])
+          (set! effective-scale-x (ssq (cairo_matrix_t-xx mx)
+                                       (cairo_matrix_t-xy mx)))
+          (set! effective-scale-y (ssq (cairo_matrix_t-yy mx)
+                                       (cairo_matrix_t-yx mx))))
         (set! effective-origin-x (cairo_matrix_t-x0 mx))
         (set! effective-origin-y (cairo_matrix_t-y0 mx))
         (let ([v (vector (cairo_matrix_t-xx mx)
@@ -448,13 +451,14 @@
         (cairo_matrix_translate mx origin-x origin-y)
         (cairo_matrix_scale mx scale-x scale-y)
         (cairo_matrix_rotate mx (- rotation))
-        (cairo_matrix_multiply mx mx mx2)
+        (cairo_matrix_multiply mx mx2 mx)
         (set! origin-x 0.0)
         (set! origin-y 0.0)
         (set! scale-x 1.0)
         (set! scale-y 1.0)
         (set! rotation 0.0)
         (set! matrix mx)
+        (reset-effective!)
         (reset-matrix)))
 
     (def/public (set-initial-matrix [matrix-vector? m])
@@ -1198,6 +1202,13 @@
                     (substring s offset))]
              [blank? (string=? s "")]
              [s (if (and (not draw?) blank?) " " s)]
+             [s (if (for/or ([c (in-string s)])
+                      (or (eqv? c #\uFFFE) (eqv? c #\uFFFF)))
+                    ;; Since \uFFFE and \uFFFF are not supposed to be in any
+                    ;; interchange, we must replace them away before passing a
+                    ;; string to Pango:
+                    (regexp-replace* #rx"[\uFFFE\uFFFF]" s "\uFFFD")
+                    s)]
              [rotate? (and draw? (not (zero? angle)))]
              [smoothing-index (case (dc-adjust-smoothing (send font get-smoothing))
                                 [(default) 0]
@@ -1623,12 +1634,17 @@
               [a-src-y (floor src-y)]
               [a-msrc-x (floor msrc-x)]
               [a-msrc-y (floor msrc-y)]
+              [adjust-pattern-filter
+               (lambda (p)
+                 (when (eq? smoothing 'unsmoothed)
+                   (cairo_pattern_set_filter p CAIRO_FILTER_NEAREST)))]
               [stamp-pattern
                (lambda (src a-src-x a-src-y)
                  (let ([p (cairo_pattern_create_for_surface (send src get-cairo-alpha-surface))]
                        [m (make-cairo_matrix_t 0.0 0.0 0.0 0.0 0.0 0.0)])
                    (cairo_matrix_init_translate m (- a-src-x a-dest-x) (- a-src-y a-dest-y))
                    (cairo_pattern_set_matrix p m)
+                   (adjust-pattern-filter (cairo_get_source cr))
                    ;; clip to the section that we're supposed to draw:
                    (cairo_save cr)
                    (when op (cairo_set_operator cr op))
@@ -1652,6 +1668,7 @@
                                        (send src get-cairo-surface)
                                        (- a-dest-x a-src-x)
                                        (- a-dest-y a-src-y))
+             (adjust-pattern-filter (cairo_get_source cr))
              (if mask
                  (stamp-pattern mask a-msrc-x a-msrc-y)
                  (begin
@@ -1725,38 +1742,45 @@
         tmp-bm))
 
     (def/public (glyph-exists? [char? c])
-      (with-cr
-       #f
-       cr
-       (let ([desc (get-pango font)]
-             [attrs (send font get-pango-attrs)]
-             [context (or (for/or ([c (in-vector contexts)])
-                            c)
-                          (pango_cairo_create_context cr))])
-         (let ([layout (pango_layout_new context)])
-           (pango_layout_set_font_description layout desc)
-           (pango_layout_set_text layout (string c))
-           (pango_cairo_update_layout cr layout)
-           (begin0
-            (or (zero? (pango_layout_get_unknown_glyphs_count layout))
-                (and substitute-fonts?
-                     (install-alternate-face c layout font desc attrs context)
-                     (zero? (pango_layout_get_unknown_glyphs_count layout))))
-            (g_object_unref layout))))))
+      (and
+       (not (eqv? c #\uFFFF))
+       (not (eqv? c #\uFFFE))
+       (with-cr
+        #f
+        cr
+        (let ([desc (get-pango font)]
+              [attrs (send font get-pango-attrs)]
+              [context (or (for/or ([c (in-vector contexts)])
+                             c)
+                           (pango_cairo_create_context cr))])
+          (let ([layout (pango_layout_new context)])
+            (pango_layout_set_font_description layout desc)
+            (pango_layout_set_text layout (string c))
+            (pango_cairo_update_layout cr layout)
+            (begin0
+             (or (zero? (pango_layout_get_unknown_glyphs_count layout))
+                 (and substitute-fonts?
+                      (install-alternate-face c layout font desc attrs context)
+                      (zero? (pango_layout_get_unknown_glyphs_count layout))))
+             (g_object_unref layout)))))))
     
     (def/public (get-char-width)
-      (with-cr
-       10.0
-       cr
-       (get-font-metric cr pango_font_metrics_get_approximate_char_width)))
+      (or (with-cr
+           10.0
+           cr
+           (get-font-metric cr pango_font_metrics_get_approximate_char_width))
+          (let-values ([(w h d a) (get-text-extent "X")])
+            w)))
 
     (def/public (get-char-height)
-      (with-cr
-       12.0
-       cr
-       (get-font-metric cr (lambda (m)
-                             (+ (pango_font_metrics_get_ascent m)
-                                (pango_font_metrics_get_descent m))))))
+      (or (with-cr
+           12.0
+           cr
+           (get-font-metric cr (lambda (m)
+                                 (+ (pango_font_metrics_get_ascent m)
+                                    (pango_font_metrics_get_descent m)))))
+          (let-values ([(w h d a) (get-text-extent "X")])
+            h)))
 
     (define/private (get-font-metric cr sel)
       (let ([desc (get-pango font)]
@@ -1770,10 +1794,11 @@
         (let ([font (pango_font_map_load_font (cdr context+fontmap)
                                               (car context+fontmap)
                                               desc)])
-          (let ([metrics (pango_font_get_metrics font (pango_language_get_default))])
-            (let ([v (sel metrics)])
-              (pango_font_metrics_unref metrics)
-              (/ v (exact->inexact PANGO_SCALE)))))))
+          (and font ;; else font match failed
+               (let ([metrics (pango_font_get_metrics font (pango_language_get_default))])
+                 (let ([v (sel metrics)])
+                   (pango_font_metrics_unref metrics)
+                   (/ v (exact->inexact PANGO_SCALE))))))))
 
     (void))
 

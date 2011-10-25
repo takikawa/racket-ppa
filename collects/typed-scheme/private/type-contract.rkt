@@ -12,9 +12,11 @@
  (types resolve utils)
  (prefix-in t: (types convenience abbrev))
  (private parse-type)
- racket/match unstable/match syntax/struct syntax/stx mzlib/trace racket/syntax scheme/list 
+ racket/match unstable/match syntax/struct syntax/stx mzlib/trace racket/syntax scheme/list
  (only-in scheme/contract -> ->* case-> cons/c flat-rec-contract provide/contract any/c)
- (for-template scheme/base racket/contract (utils any-wrap)
+ (for-template scheme/base racket/contract racket/set (utils any-wrap)
+               (prefix-in t: (types numeric-predicates))
+               (only-in unstable/contract sequence/c)
 	       (only-in scheme/class object% is-a?/c subclass?/c object-contract class/c init object/c class?)))
 
 (define (define/fixup-contract? stx)
@@ -32,13 +34,13 @@
      (let ([typ (if maker?
                     ((map fld-t (Struct-flds (lookup-type-name (Name-id typ)))) #f . t:->* . typ)
                     typ)])
-       (with-syntax ([cnt (type->contract 
-                           typ 
+       (with-syntax ([cnt (type->contract
+                           typ
                            ;; this is for a `require/typed', so the value is not from the typed side
-                           #:typed-side #f 
+                           #:typed-side #f
                            #:flat flat?
                            (lambda () (tc-error/stx prop "Type ~a could not be converted to a contract." typ)))])
-         (syntax/loc stx (define-values (n) cnt))))]
+         (quasisyntax/loc stx (define-values (n) (recursive-contract cnt #,(if flat? #'#:flat #'#:impersonator))))))]
     [_ (int-err "should never happen - not a define-values: ~a" (syntax->datum stx))]))
 
 (define (change-contract-fixups forms)
@@ -65,7 +67,7 @@
           [(Function: (list (top-arr:))) #'procedure?]
           [(Function: arrs)
            (when flat? (exit (fail)))
-           (let ()           
+           (let ()
              (define ((f [case-> #f]) a)
                (define-values (dom* opt-dom* rngs* rst)
                  (match a
@@ -75,7 +77,7 @@
                                  [(conv) (match-lambda [(Keyword: kw kty _) (list kw (t->c/neg kty))])])
                       (values (append (map t->c/neg dom) (append-map conv mand-kws))
                               (append-map conv opt-kws)
-                              (map t->c rngs) 
+                              (map t->c rngs)
                               (and rst (t->c/neg rst))))]
                    ;; functions with filters or objects
                    [(arr: dom (Values: (list (Result: rngs _ _) ...)) rst #f '())
@@ -86,7 +88,7 @@
                                 (and rst (t->c/neg rst)))
                         (exit (fail)))]
                    [_ (exit (fail))]))
-               (with-syntax 
+               (with-syntax
                    ([(dom* ...) (if method? (cons #'any/c dom*) dom*)]
                     [(opt-dom* ...) opt-dom*]
                     [rng* (match rngs*
@@ -139,11 +141,11 @@
         [(== t:-NegInt type-equal?) #'(flat-named-contract 'Negative-Integer (and/c exact-integer? negative?))]
         [(== t:-NonPosInt type-equal?) #'(flat-named-contract 'Nonpositive-Integer (and/c exact-integer? (lambda (x) (<= x 0))))]
         [(== t:-Int type-equal?) #'(flat-named-contract 'Integer exact-integer?)]
-        [(== t:-PosRat type-equal?) #'(flat-named-contract 'Positive-Rational (and/c exact-rational? positive?))]
-        [(== t:-NonNegRat type-equal?) #'(flat-named-contract 'Nonnegative-Rational (and/c exact-rational? (lambda (x) (>= x 0))))]
-        [(== t:-NegRat type-equal?) #'(flat-named-contract 'Negative-Rational (and/c exact-rational? negative?))]
-        [(== t:-NonPosRat type-equal?) #'(flat-named-contract 'Nonpositive-Rational (and/c exact-rational? (lambda (x) (<= x 0))))]
-        [(== t:-Rat type-equal?) #'(flat-named-contract 'Rational exact-rational?)]
+        [(== t:-PosRat type-equal?) #'(flat-named-contract 'Positive-Rational (and/c t:exact-rational? positive?))]
+        [(== t:-NonNegRat type-equal?) #'(flat-named-contract 'Nonnegative-Rational (and/c t:exact-rational? (lambda (x) (>= x 0))))]
+        [(== t:-NegRat type-equal?) #'(flat-named-contract 'Negative-Rational (and/c t:exact-rational? negative?))]
+        [(== t:-NonPosRat type-equal?) #'(flat-named-contract 'Nonpositive-Rational (and/c t:exact-rational? (lambda (x) (<= x 0))))]
+        [(== t:-Rat type-equal?) #'(flat-named-contract 'Rational t:exact-rational?)]
         [(== t:-FlonumZero type-equal?) #'(flat-named-contract 'Float-Zero (and/c flonum? zero?))]
         [(== t:-NonNegFlonum type-equal?) #'(flat-named-contract 'Nonnegative-Float (and/c flonum? (lambda (x) (>= x 0))))]
         [(== t:-NonPosFlonum type-equal?) #'(flat-named-contract 'Nonpositive-Float (and/c flonum? (lambda (x) (<= x 0))))]
@@ -176,13 +178,15 @@
         [(Base: sym cnt _ _) #`(flat-named-contract '#,sym (flat-contract-predicate #,cnt))]
         [(Refinement: par p? cert)
          #`(and/c #,(t->c par) (flat-contract #,(cert p?)))]
-        [(Union: elems)         
+        [(Union: elems)
          (let-values ([(vars notvars) (partition F? elems)])
            (unless (>= 1 (length vars)) (exit (fail)))
-           (with-syntax 
+           (with-syntax
                ([cnts (append (map t->c vars) (map t->c notvars))])
              #'(or/c . cnts)))]
         [(and t (Function: _)) (t->c/fun t)]
+	[(Set: t) #`(set/c #,(t->c t))]
+        [(Sequence: ts) #`(sequence/c #,@(map t->c ts))]
         [(Vector: t)
          (if flat?
              #`(vectorof #,(t->c t #:flat #t) #:flat? #t)
@@ -229,44 +233,60 @@
            #'(class/c (name fcn-cnt) ... (init [by-name-init by-name-cnt] ...)))]
         [(Value: '()) #'null?]
         [(Struct: nm par (list (fld: flds acc-ids mut?) ...) proc poly? pred? cert maker-id)
-         (cond 
+         (cond
            [(assf (λ (t) (type-equal? t ty)) structs-seen)
             =>
             cdr]
            [proc (exit (fail))]
-           [poly? 
+           [poly?
             (with-syntax* ([(rec blame val) (generate-temporaries '(rec blame val))]
                            [maker maker-id]
-                           [cnt-name nm]
-                           [(fld-cnts ...)
-                            (for/list ([fty flds]
+                           [cnt-name nm])
+              ;If it should be a flat contract, we make flat contracts for the type of each field,
+              ;extract the predicates, and apply the predicates to the corresponding field value
+              (if flat?
+                #`(letrec ([rec
+                            (make-flat-contract
+                             #:name 'cnt-name
+                             #:first-order
+                              (lambda (val)
+                               (and
+                                (#,pred? val)
+                                #,@(for/list ([fty flds] [f-acc acc-ids])
+                                    #`((flat-contract-predicate
+                                       #,(t->c fty #:seen (cons (cons ty #'(recursive-contract rec)) structs-seen)))
+                                       (#,f-acc val))))))])
+                    rec)
+                ;Should make this case a chaperone/impersonator contract
+                (with-syntax ([(fld-cnts ...)
+                              (for/list ([fty flds]
                                        [f-acc acc-ids]
                                        [m? mut?])
-                #`(((contract-projection
-                     #,(t->c fty #:seen (cons (cons ty #'(recursive-contract rec)) structs-seen)))
-                    blame)
-                   (#,f-acc val)))])
-                #`(letrec ([rec 
-                            (make-contract 
-                             #:name 'cnt-name
-                             #:first-order #,pred?
-                             #:projection 
-                             (lambda (blame)
-                               (lambda (val)
-                                 (unless (#,pred? val)
-                                   (raise-blame-error blame val "expected ~a value, got ~v" 'cnt-name val))
-                                 (maker fld-cnts ...))))])
-                    rec))]
+                               #`(((contract-projection
+                                    #,(t->c fty #:seen (cons (cons ty #'(recursive-contract rec)) structs-seen)))
+                                   blame)
+                                  (#,f-acc val)))])
+                  #`(letrec ([rec
+                              (make-contract
+                               #:name 'cnt-name
+                               #:first-order #,pred?
+                               #:projection
+                               (lambda (blame)
+                                 (lambda (val)
+                                   (unless (#,pred? val)
+                                     (raise-blame-error blame val "expected ~a value, got ~v" 'cnt-name val))
+                                   (maker fld-cnts ...))))])
+                      rec))))]
            [else #`(flat-named-contract '#,(syntax-e pred?) #,(cert pred?))])]
         [(Syntax: (Base: 'Symbol _ _ _)) #'identifier?]
         [(Syntax: t) #`(syntax/c #,(t->c t))]
         [(Value: v) #`(flat-named-contract #,(format "~a" v) (lambda (x) (equal? x '#,v)))]
         [(Param: in out) #`(parameter/c #,(t->c out))]
-	[(Hashtable: k v) 
+	[(Hashtable: k v)
          (if flat?
              #`(hash/c #,(t->c k #:flat #t) #,(t->c v #:flat #t) #:flat? #t #:immutable 'dont-care)
              #`(hash/c #,(t->c k) #,(t->c v) #:immutable 'dont-care))]
-        [else          
+        [else
          (exit (fail))]))))
 
 

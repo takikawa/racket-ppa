@@ -650,7 +650,7 @@ typedef struct Scheme_Offset_Cptr
 #define SCHEME_PRIM_TYPE_PARAMETER               64
 #define SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER      (64 | 128)
 #define SCHEME_PRIM_SOMETIMES_INLINED            (64 | 256)
-/* combination still available: 64|128|256 */
+#define SCHEME_PRIM_TYPE_STRUCT_PROP_PRED        (64 | 128 | 256)
 
 #define SCHEME_PRIM_IS_STRUCT_PROC (SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER | SCHEME_PRIM_IS_STRUCT_PRED | SCHEME_PRIM_IS_STRUCT_OTHER)
 
@@ -1033,7 +1033,6 @@ typedef struct Scheme_Thread {
   struct Scheme_Comp_Env *current_local_env;
   Scheme_Object *current_local_mark;
   Scheme_Object *current_local_name;
-  Scheme_Object *current_local_certs;
   Scheme_Object *current_local_modidx;
   Scheme_Env *current_local_menv;
   Scheme_Object *current_local_bindings;

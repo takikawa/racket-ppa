@@ -202,12 +202,14 @@ Scheme_Config *scheme_init_error_escape_proc(Scheme_Config *config)
   %- = skip int
 
   %L = line number as intptr_t, -1 means no line
-  %e = error number for strerror()
+  %e = error number for strerror()/FormatMessage()
   %E = error number for platform-specific error string
   %Z = potential platform-specific error number; additional char*
        is either NULL or a specific error message
   %N = boolean then error number like %E (if boolean is 0)
        or error number for scheme_hostname_error()
+  %m = boolean then error number like %e, which
+       is used only if the boolean is 1
 */
 
 static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list args, char **_s)
@@ -259,6 +261,7 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	ints[ip++] = mzVA_ARG(args, int);
 	break;
       case 'N':
+      case 'm':
 	ints[ip++] = mzVA_ARG(args, int);
 	ints[ip++] = mzVA_ARG(args, int);
 	break;
@@ -389,14 +392,19 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	  }
 	  break;
 	case 'e':
+        case 'm':
 	case 'E':
 	case 'Z':
 	case 'N':
 	  {
-	    int en, he;
+	    int en, he, none = 0;
 	    char *es;
-
-	    if (type == 'N') {
+            
+	    if (type == 'm') {
+              none = !ints[ip++];
+	      type = 'e';
+              he = 0;
+	    } else if (type == 'N') {
 	      he = ints[ip++];
 	      type = 'E';
 	    } else
@@ -412,7 +420,7 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	    if (he)
 	      es = (char *)scheme_hostname_error(en);
 
-	    if (en || es) {
+	    if ((en || es) && !none) {
 #ifdef NO_STRERROR_AVAILABLE
 	      if (!es)
 		es = "Unknown error";
@@ -443,8 +451,13 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	      sprintf((char *)t, "%s; errno=%d", es, en);
 	      tlen = strlen(t);
 	    } else {
-	      t = "errno=?";
-	      tlen = 7;
+              if (none) {
+                t = "";
+                tlen = 0;
+              } else {
+                t = "errno=?";
+                tlen = 7;
+              }
 	    }
 
 	  }
@@ -579,7 +592,7 @@ void scheme_init_error(Scheme_Env *env)
   GLOBAL_NONCM_PRIM("raise-user-error",           raise_user_error,      1, -1, env);
   GLOBAL_NONCM_PRIM("raise-syntax-error",         raise_syntax_error,    2,  5, env);
   GLOBAL_NONCM_PRIM("raise-type-error",           raise_type_error,      3, -1, env);
-  GLOBAL_NONCM_PRIM("raise-mismatch-error",       raise_mismatch_error,  3,  3, env);
+  GLOBAL_NONCM_PRIM("raise-mismatch-error",       raise_mismatch_error,  3, -1, env);
 
   scheme_raise_arity_error_proc =                  scheme_make_noncm_prim(raise_arity_error, "raise-arity-error", 2, -1);
   scheme_add_global_constant("raise-arity-error",  scheme_raise_arity_error_proc, env);
@@ -1735,8 +1748,11 @@ static void do_wrong_syntax(const char *where,
 
   if (SCHEME_FALSEP(form))
     form = extra_sources;
-  else
+  else {
+    if (SCHEME_STXP(form))
+      form = scheme_stx_taint(form);
     form = scheme_make_pair(form, extra_sources);
+  }
 
   scheme_raise_exn(MZEXN_FAIL_SYNTAX, 
 		   form,
@@ -1951,8 +1967,11 @@ void scheme_raise_out_of_memory(const char *where, const char *msg, ...)
 void scheme_unbound_global(Scheme_Bucket *b)
 {
   Scheme_Object *name = (Scheme_Object *)b->key;
+  Scheme_Env *home;
 
-  if (((Scheme_Bucket_With_Home *)b)->home->module) {
+  home = scheme_get_bucket_home(b);
+
+  if (home && home->module) {
     const char *errmsg;
     char *phase, phase_buf[20];
     
@@ -1961,8 +1980,8 @@ void scheme_unbound_global(Scheme_Bucket *b)
     else
       errmsg = "reference to an identifier before its definition: %S%_%s";
 
-    if (((Scheme_Bucket_With_Home *)b)->home->phase) {
-      sprintf(phase_buf, " phase: %" PRIdPTR "", ((Scheme_Bucket_With_Home *)b)->home->phase);
+    if (home->phase) {
+      sprintf(phase_buf, " phase: %" PRIdPTR "", home->phase);
       phase = phase_buf;
     } else
       phase = "";
@@ -1971,7 +1990,7 @@ void scheme_unbound_global(Scheme_Bucket *b)
 		     name,
 		     errmsg,
 		     name,
-		     ((Scheme_Bucket_With_Home *)b)->home->module->modsrc,
+		     home->module->modsrc,
                      phase);
   } else {
     scheme_raise_exn(MZEXN_FAIL_CONTRACT_VARIABLE,
@@ -2174,17 +2193,61 @@ static Scheme_Object *raise_type_error(int argc, Scheme_Object *argv[])
 static Scheme_Object *raise_mismatch_error(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *s;
+  int i; 
 
   if (!SCHEME_SYMBOLP(argv[0]))
     scheme_wrong_type("raise-mismatch-error", "symbol", 0, argc, argv);
   if (!SCHEME_CHAR_STRINGP(argv[1]))
     scheme_wrong_type("raise-mismatch-error", "string", 1, argc, argv);
 
-  s = scheme_char_string_to_byte_string(argv[1]);
+  /* additional arguments: odd ones must be strings */
+  for (i = 3; i < argc; i += 2) {
+    if (!SCHEME_CHAR_STRINGP(argv[i]))
+      scheme_wrong_type("raise-mismatch-error", "string", i, argc, argv);
+  }
 
-  scheme_arg_mismatch(scheme_symbol_val(argv[0]),
-		      SCHEME_BYTE_STR_VAL(s),
-		      argv[2]);
+  if (argc == 3) {
+    /* Simple case: one string & value: */
+    s = scheme_char_string_to_byte_string(argv[1]);
+    
+    scheme_arg_mismatch(scheme_symbol_val(argv[0]),
+                        SCHEME_BYTE_STR_VAL(s),
+                        argv[2]);
+  } else {
+    /* Multiple strings & values: */
+    char *st, **ss;
+    intptr_t slen, *slens, total = 0;
+    int scount = argc - 1;
+
+    ss = (char **)MALLOC_N(char*, scount);
+    slens = (intptr_t *)MALLOC_N_ATOMIC(intptr_t, scount);
+
+    for (i = 1; i < argc; i++) {
+      if (i & 1) {
+        s = scheme_char_string_to_byte_string(argv[i]);
+        st = SCHEME_BYTE_STR_VAL(s);
+        slen = SCHEME_BYTE_STRLEN_VAL(s);
+      } else {
+        st = scheme_make_provided_string(argv[i], scount / 2, &slen);
+      }
+      total += slen;
+      ss[i-1] = st;
+      slens[i-1] = slen;
+    }
+    st = (char *)scheme_malloc_atomic(total + 1);
+
+    total = 0;
+    for (i = 0; i < scount; i++) {
+      slen = slens[i];
+      memcpy(st + total, ss[i], slen);
+      total += slen;
+    }
+    st[total] = 0;
+    
+    scheme_raise_exn(MZEXN_FAIL_CONTRACT,
+                     "%s: %t",
+                     scheme_symbol_val(argv[0]), st, total);
+  }
 
   return NULL;
 }

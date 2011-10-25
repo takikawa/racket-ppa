@@ -79,7 +79,6 @@ This produces an ACK message
 
 (define test-data
   (list
-
    ;; basic tests
    (mktest "1"
            ("1"
@@ -540,12 +539,12 @@ This produces an ACK message
    
    (mktest "(require lang/htdp-beginner)\n(cond [1 2 3 4])"
            
-           ("{stop-22x22.png} cond: expected a clause with one question and one answer, but found a clause with 4 parts in:\n  1\n  2\n  3\n  4"
-            "{stop-22x22.png} cond: expected a clause with one question and one answer, but found a clause with 4 parts in:\n  1\n  2\n  3\n  4"
-            "{stop-22x22.png} repl-test-tmp3.rkt:2:7: cond: expected a clause with one question and one answer, but found a clause with 4 parts in:\n  1\n  2\n  3\n  4"
-            "{stop-multi.png} {stop-22x22.png} cond: expected a clause with one question and one answer, but found a clause with 4 parts in:\n  1\n  2\n  3\n  4"
-            "{stop-multi.png} {stop-22x22.png} cond: expected a clause with one question and one answer, but found a clause with 4 parts in:\n  1\n  2\n  3\n  4"
-            "{stop-multi.png} {stop-22x22.png} repl-test-tmp3.rkt:2:7: cond: expected a clause with one question and one answer, but found a clause with 4 parts in:\n  1\n  2\n  3\n  4")
+           ("{stop-22x22.png} cond: expected a clause with a question and an answer, but found a clause with 4 parts in:\n  1\n  2\n  3\n  4"
+            "{stop-22x22.png} cond: expected a clause with a question and an answer, but found a clause with 4 parts in:\n  1\n  2\n  3\n  4"
+            "{stop-22x22.png} repl-test-tmp3.rkt:2:7: cond: expected a clause with a question and an answer, but found a clause with 4 parts in:\n  1\n  2\n  3\n  4"
+            "{stop-multi.png} {stop-22x22.png} cond: expected a clause with a question and an answer, but found a clause with 4 parts in:\n  1\n  2\n  3\n  4"
+            "{stop-multi.png} {stop-22x22.png} cond: expected a clause with a question and an answer, but found a clause with 4 parts in:\n  1\n  2\n  3\n  4"
+            "{stop-multi.png} {stop-22x22.png} repl-test-tmp3.rkt:2:7: cond: expected a clause with a question and an answer, but found a clause with 4 parts in:\n  1\n  2\n  3\n  4")
            'definitions
            #f
            void
@@ -611,7 +610,7 @@ This produces an ACK message
            #f
            void
            void)
-   
+
    ;; error escape handler test
    (mktest
     "(let ([old (error-escape-handler)])\n(+ (let/ec k\n(dynamic-wind\n(lambda () (error-escape-handler (lambda () (k 5))))\n(lambda () (expt 3 #f))\n(lambda () (error-escape-handler old))))\n10))"

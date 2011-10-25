@@ -1,8 +1,7 @@
 #lang scribble/manual
-@(require scribble/bnf
-          "utils.ss")
+@(require scribble/bnf "utils.rkt")
 
-@title{@bold{Scribble}: Racket Documentation Tool}
+@title{Scribble: The Racket Documentation Tool}
 
 @author["Matthew Flatt" "Eli Barzilay"]
 
@@ -27,7 +26,8 @@ starting with the @filepath{scribble.scrbl} file.
 @include-section["generic.scrbl"]
 @include-section["plt.scrbl"]
 @include-section["lp.scrbl"]
-@include-section["preprocessor.scrbl"]
+@include-section["text.scrbl"]
 @include-section["internals.scrbl"]
+@include-section["running.scrbl"]
 
 @index-section[]

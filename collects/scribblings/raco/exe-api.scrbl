@@ -95,7 +95,7 @@ parameter is true.
 
 Copies the Racket (if @racket[gracket?] and @racket[mred?] are
 @racket[#f]) or GRacket (otherwise) binary, embedding code into the
-copied executable to be loaded on startup.  Under Unix, the binary is
+copied executable to be loaded on startup.  On Unix, the binary is
 actually a wrapper executable that execs the original; see also the
 @racket['original-exe?] tag for @racket[aux].
 
@@ -146,9 +146,9 @@ understood by the default module name resolver). The prefix can be a
 symbol, @racket[#f] to indicate no prefix, or @racket[#t] to indicate
 an auto-generated prefix. For example,
 
-@racketblock['((#f "m.ss"))]
+@racketblock['((#f "m.rkt"))]
 
-embeds the module @racket[m] from the file @filepath{m.ss}, without
+embeds the module @racket[m] from the file @filepath{m.rkt}, without
 prefixing the name of the module; the @racket[literal-sexpr] argument
 to go with the above might be @racket['(require m)].
 
@@ -159,7 +159,7 @@ below. When a module declares run-time paths via
 path (for use both by immediate execution and for creating a
 distribution that contains the executable).
 
-If @racket[collects-dest] is a path insteda of @racket[#f], then
+If @racket[collects-dest] is a path instead of @racket[#f], then
 instead of embedding collection-based modules into the executable, the
 modules (in compiled form, only) are copied into collections in the
 @racket[collects-dest] directory.
@@ -381,7 +381,7 @@ currently @racket[#f] for all platforms.}
          boolean?]{
 
 Indicates whether Racket/GRacket executables for the current platform
-actually correspond to directories. The result is @racket[#t] under
+actually correspond to directories. The result is @racket[#t] on
 Mac OS X when @racket[mred?] is @racket[#t], @racket[#f] otherwise.}
 
 

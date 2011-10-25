@@ -1,9 +1,9 @@
 (module racket racket/base
-  (require "core.ss"
-           "basic.ss"
-           "search.ss"
-           "private/manual-sprop.ss"
-           "private/on-demand.ss"
+  (require "core.rkt"
+           "basic.rkt"
+           "search.rkt"
+           "private/manual-sprop.rkt"
+           "private/on-demand.rkt"
            mzlib/class
            mzlib/for
            syntax/modresolve
@@ -209,12 +209,19 @@
                                       (memq (syntax-e c) (current-variable-list)))]
                       [(s it? sub?)
                        (let ([sc (syntax-e c)])
-                         (let ([s (or (syntax-property c 'display-string)
-                                      (format "~s" (if (literal-syntax? sc)
-                                                       (literal-syntax-stx sc)
-                                                       (if (var-id? sc)
-                                                           (var-id-sym sc)
-                                                           sc))))])
+                         (let ([s (cond
+                                    [(syntax-property c 'display-string) => values]
+                                    [(literal-syntax? sc) (format "~s" (literal-syntax-stx sc))]
+                                    [(var-id? sc) (format "~s" (var-id-sym sc))]
+                                    [(eq? sc #t) 
+                                     (if (equal? (syntax-span c) 5)
+                                         "#true"
+                                         "#t")]
+                                    [(eq? sc #f) 
+                                     (if (equal? (syntax-span c) 6)
+                                         "#false"
+                                         "#f")]
+                                    [else (format "~s" sc)])])
                            (if (and (symbol? sc)
                                     ((string-length s) . > . 1)
                                     (char=? (string-ref s 0) #\_)

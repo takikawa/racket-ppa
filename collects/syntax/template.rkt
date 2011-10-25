@@ -1,8 +1,8 @@
 #lang scheme/base
-(require "stx.ss"
+(require "stx.rkt"
          unstable/struct
          (for-template scheme/base
-                       "private/template-runtime.ss"))
+                       "private/template-runtime.rkt"))
 
 (provide transform-template)
 
@@ -74,8 +74,7 @@
          (and k
               (let ([as (loop (struct->list (syntax-e tmpl)) in-ellipses?)])
                 (and (or as (not const-leaf?))
-                     (make-prefab k as))
-                #f)))])))
+                     (make-prefab k as)))))])))
 
 (define (template-map-collect tmap template s->d leaf->d pvar->d)
   (let loop ([tmap tmap][template template])

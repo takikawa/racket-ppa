@@ -3,7 +3,7 @@
          scheme/class
          framework
          scheme/pretty
-         "matcher.ss")
+         "matcher.rkt")
 
 (provide reflowing-snip<%>
          size-editor-snip%
@@ -46,7 +46,7 @@
      (display "hole" op)]
     [(eq? val 'hole) 
      (display ",'hole" op)]
-    [else (display val op)]))
+    [else (write val op)]))
 
 (define reflowing-snip<%>
   (interface ()

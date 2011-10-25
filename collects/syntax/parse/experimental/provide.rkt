@@ -1,12 +1,13 @@
 #lang racket/base
 (require racket/contract/base
+         racket/contract/combinator
          syntax/location
          (for-syntax racket/base
                      racket/syntax
                      "../private/minimatch.rkt"
                      "../private/sc.rkt"
                      "../private/lib.rkt"
-                     "../private/rep-data.ss"
+                     "../private/rep-data.rkt"
                      "../private/kws.rkt"
                      unstable/wrapc))
 (provide provide-syntax-class/contract
@@ -136,7 +137,7 @@
     [(_ [scname c:stxclass-ctc] ...)
      #:declare scname (static stxclass? "syntax class")
      (parameterize ((current-syntax-context stx))
-       #`(begin (define pos-module-source (quote-module-path))
+       #`(begin (define pos-module-source (quote-module-name))
                 #,@(for/list ([scname (in-list (syntax->list #'(scname ...)))]
                               [stxclass (in-list (attribute scname.value))]
                               [rec (in-list (attribute c.rec))])

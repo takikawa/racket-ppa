@@ -2,9 +2,9 @@
 
   (require mzlib/class
            string-constants
-           "sig.ss"
-           "../preferences.ss"
-           "../gui-utils.ss"
+           "sig.rkt"
+           "../preferences.rkt"
+           "../gui-utils.rkt"
            mzlib/etc
            mred/mred-sig
            scheme/path)
@@ -52,9 +52,10 @@
                                  #f))
       
       (define/public (get-pos/text event)
-        (let ([event-x (send event get-x)]
-              [event-y (send event get-y)]
-              [on-it? (box #f)])
+        (get-pos/text-dc-location (send event get-x) (send event get-y)))
+      
+      (define/public (get-pos/text-dc-location event-x event-y)
+        (let ([on-it? (box #f)])
           (let loop ([editor this])
             (let-values ([(x y) (send editor dc-location-to-editor-location event-x event-y)])
               (cond
@@ -73,7 +74,7 @@
                    (if (and snip
                             (is-a? snip editor-snip%))
                        (loop (send snip get-editor))
-                       (values editor #f)))]
+                       (values #f editor)))]
                 [else (values #f #f)])))))
       
       ;; get-filename/untitled-name : -> string

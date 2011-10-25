@@ -1,9 +1,9 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
 @defclass/title[vertical-pane% pane% ()]{
 
-A vertical pane arranges its subwindows in a single column. See also @scheme[pane%].
+A vertical pane arranges its subwindows in a single column. See also @racket[pane%].
 
 
 

@@ -1,6 +1,5 @@
 #lang scribble/doc
-@(require "utils.ss"
-          (only-in scribble/decode make-splice))
+@(require "utils.rkt" (only-in scribble/decode make-splice))
 
 @title[#:tag "homogeneous-vectors"]{Safe Homogenous Vectors}
 
@@ -9,8 +8,8 @@
 Homogenous vectors are similar to C vectors (see
 @secref["foreign:cvector"]), except that they define different types
 of vectors, each with a hard-wired type. An exception is the
-@schemeidfont{u8} family of bindings, which are just aliases for
-byte-string bindings; for example, @scheme[make-u8vector] is an alias
+@racketidfont{u8} family of bindings, which are just aliases for
+byte-string bindings; for example, @racket[make-u8vector] is an alias
 for @racket[make-bytes].
 
 @(begin
@@ -19,7 +18,7 @@ for @racket[make-bytes].
      (syntax-case stx ()
        [(_ id elem)
         #'(srfi-4-vector/desc id elem make-splice
-                              "Like " (scheme make-vector) ", etc., but for " (scheme elem) " elements.")]))
+            "Like " (racket make-vector) ", etc., but for " (racket elem) " elements.")]))
    (define-syntax (srfi-4-vector/desc stx)
      (syntax-case stx ()
        [(_ id elem extra desc ...)
@@ -58,7 +57,8 @@ for @racket[make-bytes].
                  desc ...
                  (extra
                   (list
-                   " The " (scheme ->cpointer) " function extracts a plain pointer to the underlying array.")))
+                   " The " (racket ->cpointer)
+                   " function extracts a plain pointer to the underlying array.")))
                ;; Big pain: make up relatively-correct source locations
                ;; for pieces in the _vec definition:
                (defform* [#,(datum->syntax
@@ -91,13 +91,14 @@ for @racket[make-bytes].
                                    (sub1 (syntax-position #'vec))
                                    10))
                            _vec]
-                 "Like " (scheme _cvector) ", but for vectors of " (scheme elem) " elements."))))])))
+                 "Like " (racket _cvector) ", but for vectors of "
+                 (racket elem) " elements."))))])))
 
 
 @srfi-4-vector/desc[u8 _uint8 (lambda (x) (make-splice null))]{
 
-Like @scheme[_cvector], but for vectors of @scheme[_byte] elements. These are
-aliases for @schemeidfont{byte} operations, where @racket[u8vector->cpointer]
+Like @racket[_cvector], but for vectors of @racket[_byte] elements. These are
+aliases for @racketidfont{byte} operations, where @racket[u8vector->cpointer]
 is the identity function.}
 
 @srfi-4-vector[s8 _int8]

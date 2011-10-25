@@ -1,36 +1,36 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
 @title{System Menus}
 
 
 @defproc[(current-eventspace-has-standard-menus?)
          boolean?]{
-Returns @scheme[#t] for Mac OS X when the current eventspace is the
+Returns @racket[#t] for Mac OS X when the current eventspace is the
  initial one, since that eventspace is the target for the standard
  application menus. For any other system or eventspace, the result is
- @scheme[#f].
+ @racket[#f].
 
 This procedure is intended for use in deciding whether to include a
  @onscreen{Quit}, @onscreen{About}, and @onscreen{Preferences} menu
- item in a frame's menu. Under Mac OS X, the application
+ item in a frame's menu. On Mac OS X, the application
  @onscreen{Quit} menu triggers a call to a frame's
 @method[top-level-window<%> on-exit] method, the @onscreen{About} menu item is controlled by
- @scheme[application-about-handler], and the
+ @racket[application-about-handler], and the
  @onscreen{Preferences} menu item is controlled by
- @scheme[application-preferences-handler].
+ @racket[application-preferences-handler].
 
 }
 
 @defproc[(current-eventspace-has-menu-root?)
          boolean?]{
-Returns @scheme[#t] for Mac OS X when the current eventspace is the
+Returns @racket[#t] for Mac OS X when the current eventspace is the
  initial one, since that eventspace can supply a menu bar to be active
  when no frame is visible. For any other system or eventspace, the
- result is @scheme[#f].
+ result is @racket[#f].
 
 This procedure is intended for use in deciding whether to create a
- @scheme[menu-bar%] instance with @scheme['root] as its parent.
+ @racket[menu-bar%] instance with @racket['root] as its parent.
 
 }
 
@@ -41,14 +41,14 @@ This procedure is intended for use in deciding whether to create a
 
 When the current eventspace is the initial eventspace, this
 procedure retrieves or installs a thunk that is called when the
-user selects the application @onscreen{About} menu item in Mac OS
+user selects the application @onscreen{About} menu item on Mac OS
 X.  The thunk is always called in the initial eventspace's
 handler thread (as a callback).
 
 The default handler displays a generic Racket dialog.
 
 If the current eventspace is not the initial eventspace, this
-procedure returns @scheme[void] (when called with zero arguments)
+procedure returns @racket[void] (when called with zero arguments)
 or has no effect (when called with a handler).
 
 }
@@ -59,15 +59,15 @@ or has no effect (when called with a handler).
             void?])]{
 When the current eventspace is the initial eventspace, this procedure
  retrieves or installs a thunk that is called when the user selects
- the application @onscreen{Preferences} menu item in Mac OS X.  The
+ the application @onscreen{Preferences} menu item on Mac OS X.  The
  thunk is always called in the initial eventspace's handler thread (as
- a callback). If the handler is set to @scheme[#f], the
+ a callback). If the handler is set to @racket[#f], the
  @onscreen{Preferences} item is disabled.
 
-The default handler is @scheme[#f].
+The default handler is @racket[#f].
 
 If the current eventspace is not the initial eventspace, this
-procedure returns @scheme[void] (when called with zero arguments)
+procedure returns @racket[void] (when called with zero arguments)
 or has no effect (when called with a handler).
 }
 
@@ -78,24 +78,24 @@ or has no effect (when called with a handler).
 When the current eventspace is the initial eventspace, this procedure
  retrieves or installs a thunk that is called when the user requests
  that the application quit (e.g., through the @onscreen{Quit} menu
- item in Mac OS X, or when shutting down the machine in Windows). The
+ item on Mac OS X, or when shutting down the machine in Windows). The
  thunk is always called in the initial eventspace's handler thread (as
- a callback). If the result of the thunk is @scheme[#f], then the
+ a callback). If the result of the thunk is @racket[#f], then the
  operating system is explicitly notified that the application does not
- intend to quit (under Windows).
+ intend to quit (on Windows).
 
 The default handler queues a call to the
  @method[top-level-window<%> can-exit?] method of the most
  recently active frame in the initial eventspace (and then calls the
  frame's @method[top-level-window<%> on-exit] method if the
- result is true). The result is @scheme[#t] if the eventspace is
+ result is true). The result is @racket[#t] if the eventspace is
  left with no open frames after
- @method[top-level-window<%> on-exit] returns, @scheme[#f]
+ @method[top-level-window<%> on-exit] returns, @racket[#f]
  otherwise.
 
 
 If the current eventspace is not the initial eventspace, this
-procedure returns @scheme[void] (when called with zero arguments)
+procedure returns @racket[void] (when called with zero arguments)
 or has no effect (when called with a handler).
 }
 
@@ -104,7 +104,7 @@ or has no effect (when called with a handler).
            [(application-file-handler [handler-proc (path? . -> . any)])
             void?])]{
 When the current eventspace is the initial eventspace, this procedure
- retrieves or installs a procedure that is called under Mac OS X
+ retrieves or installs a procedure that is called on Mac OS X
  and Windows when the application is running and user double-clicks an
  application-handled file or drags a file onto the application's
  icon. The procedure is always called in the initial eventspace's
@@ -112,7 +112,7 @@ When the current eventspace is the initial eventspace, this procedure
 
 The default handler queues a callback to the
 @method[window<%> on-drop-file] method of the most-recently activated frame in the main eventspace (see
-@scheme[get-top-level-edit-target-window]), if
+@racket[get-top-level-edit-target-window]), if
  drag-and-drop is enabled for that frame. Otherwise, it saves
  the filename and re-queues the handler event when the application
  file handler is later changed.
@@ -123,6 +123,6 @@ When the application is @italic{not} running and user double-clicks an
  application.
 
 If the current eventspace is not the initial eventspace, this
-procedure returns @scheme[void] (when called with zero arguments)
+procedure returns @racket[void] (when called with zero arguments)
 or has no effect (when called with a handler).
 }

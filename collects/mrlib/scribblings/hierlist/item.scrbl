@@ -1,6 +1,5 @@
 #lang scribble/doc
-@(require "../common.ss"
-          (for-label mrlib/hierlist))
+@(require "../common.rkt" (for-label mrlib/hierlist))
 
 @definterface/title[hierarchical-list-item<%> ()]{
 
@@ -22,7 +21,7 @@ Reports whether the item is selected.}
              [(click-select [on? any/c]) void?])]{
 
 Calls @method[hierarchical-list% select] or @method[hierarchical-list%
-click-select]. The @scheme[on?] argument can be @scheme[#f] only if
+click-select]. The @racket[on?] argument can be @racket[#f] only if
 @xmethod[hierarchical-list% allow-deselect] allows it.}
 
 

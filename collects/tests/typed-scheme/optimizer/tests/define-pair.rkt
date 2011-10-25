@@ -1,6 +1,6 @@
 #;
 (
-define-pair.rkt line 9 col 11 - car - pair
+TR opt: define-pair.rkt 9:11 car -- pair
 )
 
 #lang typed/scheme

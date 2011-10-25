@@ -1,7 +1,5 @@
 #lang scribble/doc
-@(require scribble/manual
-          scribble/eval
-          "guide-utils.ss")
+@(require scribble/manual scribble/eval "guide-utils.rkt")
 
 @title[#:tag "paths"]{Paths}
 
@@ -18,7 +16,7 @@ Despite the occasional encoding problems, most paths can be converted
 to and from strings. Thus, procedures that accept a path argument
 always accept a string, and the printed form of a path uses the string
 decoding of the path inside @litchar{#<path:} and @litchar{>}. The
-@scheme[display] form of a path is the same as the @scheme[display]
+@racket[display] form of a path is the same as the @racket[display]
 form of its string encodings.
 
 @examples[
@@ -28,32 +26,28 @@ form of its string encodings.
 (display (string->path "my-data.txt"))
 ]
 
-Produces that produce references to the filesystem always produce path
+Procedures that produce references to the filesystem always produce path
 values, instead of strings.
 
 @examples[
-(path-replace-suffix "foo.scm" #".ss")
+(path-replace-suffix "foo.scm" #".rkt")
 ]
 
 Although it's sometimes tempting to directly manipulate strings that
 represent filesystem paths, correctly manipulating a path can be
-surprisingly difficult. For example, if you start under Unix with the
-absolute path @filepath{/tmp/~} and take just the last part, you end up
-with @filepath{~}---which looks like a reference to the current user's
-home directory, instead of a relative path to a file of directory
-named @filepath{~}. Windows path manipulation, furthermore, is far
-trickier, because path elements like @filepath{aux} can have special
+surprisingly difficult. Windows path manipulation is especially
+tricky, because path elements like @filepath{aux} can have special
 meanings.
 
 @refdetails/gory["windows-path"]{Windows filesystem paths}
 
-Use procedures like @scheme[split-path] and @scheme[build-path] to
+Use procedures like @racket[split-path] and @racket[build-path] to
 deconstruct and construct paths. When you must manipulate the name of
 a specific path element (i.e., a file or directory component in a
-path), use procedures like @scheme[path-element->bytes] and
-@scheme[bytes->path-element].
+path), use procedures like @racket[path-element->bytes] and
+@racket[bytes->path-element].
 
 @examples[
-(build-path "easy" "file.ss")
-(split-path (build-path "easy" "file.ss"))
+(build-path "easy" "file.rkt")
+(split-path (build-path "easy" "file.rkt"))
 ]

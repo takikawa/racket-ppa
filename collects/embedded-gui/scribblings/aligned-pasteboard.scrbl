@@ -1,6 +1,6 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 
 @defclass/title[aligned-pasteboard% pasteboard% (alignment-parent<%>)]{
 
-Acts as the top of an @scheme[alignment<%>] tree.}
+Acts as the top of an @racket[alignment<%>] tree.}

@@ -1,13 +1,9 @@
 #lang scribble/manual
-@(require scribble/eval	  
-	  "utils.rkt"
-          (for-label unstable/match
-                     racket/match
-                     racket/contract
-                     racket/base))
+@(require scribble/eval "utils.rkt"
+          (for-label unstable/match racket/match racket/contract racket/base))
 
 @(define the-eval (make-base-eval))
-@(the-eval '(require unstable/match racket/match))
+@(the-eval '(require racket/match unstable/match))
 
 @title[#:tag "match"]{Match}
 
@@ -38,11 +34,11 @@ not provided, it defaults to @racket[equal?].
 
 @defform[(match? val-expr pat ...)]{
 
-Returns @scheme[#t] if the result of @scheme[val-expr] matches any of
-@scheme[pat], and returns @scheme[#f] otherwise.
+Returns @racket[#t] if the result of @racket[val-expr] matches any of
+@racket[pat], and returns @racket[#f] otherwise.
 
 @defexamples[
-#:eval (eval/require 'racket/match 'unstable/match)
+#:eval the-eval
 (match? (list 1 2 3)
   (list a b c)
   (vector x y z))
@@ -58,12 +54,12 @@ Returns @scheme[#t] if the result of @scheme[val-expr] matches any of
 
 @defform[(as ([lhs-id rhs-expr] ...) pat ...)]{
 
-As a match expander, binds each @scheme[lhs-id] as a pattern variable with the
-result value of @scheme[rhs-expr], and continues matching each subsequent
-@scheme[pat].
+As a match expander, binds each @racket[lhs-id] as a pattern variable with the
+result value of @racket[rhs-expr], and continues matching each subsequent
+@racket[pat].
 
 @defexamples[
-#:eval (eval/require 'racket/match 'unstable/match)
+#:eval the-eval
 (match (list 1 2 3)
   [(as ([a 0]) (list b c d)) (list a b c d)])
 ]

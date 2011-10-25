@@ -1,9 +1,9 @@
 #;
 (
-maybe-exact-complex.rkt line 15 col 3 - 1.0+2.0i - unboxed literal
-maybe-exact-complex.rkt line 15 col 12 - 2+4i - unboxed literal
-maybe-exact-complex.rkt line 15 col 1 - + - unboxed binary float complex
-maybe-exact-complex.rkt line 15 col 0 - (#%app + (quote 1.0+2.0i) (quote 2+4i)) - unboxed float complex
+TR opt: maybe-exact-complex.rkt 15:0 (+ 1.0+2.0i 2+4i) -- unboxed float complex
+TR opt: maybe-exact-complex.rkt 15:1 + -- unboxed binary float complex
+TR opt: maybe-exact-complex.rkt 15:3 1.0+2.0i -- unboxed literal
+TR opt: maybe-exact-complex.rkt 15:12 2+4i -- unboxed literal
 3.0+6.0i
 )
 

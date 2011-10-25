@@ -1,5 +1,5 @@
 #lang scribble/doc
-@(require "mz.ss")
+@(require "mz.rkt")
 
 @title[#:tag "threads"]{Threads}
 
@@ -98,9 +98,9 @@ running. If the thread has terminated or is already suspended,
 @racket[thread-suspend] has no effect. The thread remains suspended
 (i.e., it does not execute) until it is resumed with
 @racket[thread-resume]. If the @tech{current custodian} does not
-manage @racket[thd] (and none of its subordinates manages
-@racket[thd]), the @exnraise[exn:fail:contract], and the thread is not
-suspended.}
+solely manage @racket[thd] (i.e., some custodian of @racket[thd]
+is not the current custodian or a subordinate), the 
+@exnraise[exn:fail:contract], and the thread is not suspended.}
 
 @defproc[(thread-resume [thd thread?] [benefactor (or/c thread? custodian? #f) #f]) void?]{
 
@@ -164,7 +164,7 @@ consumed or not consumed, and other threads can safely use the port.}
 thread. If breaking is disabled in @racket[thd], the break will be
 ignored until breaks are re-enabled (see @secref["breakhandler"]).}
 
-@defproc[(sleep [secs nonnegative-number? 0]) void?]{
+@defproc[(sleep [secs (>=/c 0) 0]) void?]{
 
 Causes the current thread to sleep until at least @racket[secs]
 seconds have passed after it starts sleeping. A zero value for

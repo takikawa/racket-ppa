@@ -1,11 +1,10 @@
 #;
 (
-#f line #f col #f - op - dead else branch
-dead-else.rkt line 14 col 14 - + - binary float
-#f line #f col #f - op - dead else branch
-dead-else.rkt line 17 col 14 - + - binary float
-5.05.0
-)
+TR opt: dead-else.rkt 13:14 + -- binary float
+TR opt: dead-else.rkt 14:13 (+ 4.0 5.0) -- dead else branch
+TR opt: dead-else.rkt 16:14 + -- binary float
+TR opt: dead-else.rkt 17:13 (+ 4.0 5.0) -- dead else branch
+5.05.0)
 
 #lang typed/scheme
 #:optimize

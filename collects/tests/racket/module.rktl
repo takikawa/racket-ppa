@@ -502,5 +502,30 @@
         (test 5 eval '(lambda (x) x) n-ns)))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check printing of resolved module paths
+
+(let ([s (open-output-string)])
+  (print (make-resolved-module-path (build-path (current-directory) "a.rkt")) s)
+  (test #t regexp-match? #rx"<resolved-module-path:\"" (get-output-string s)))
+(let ([s (open-output-string)])
+  (print (make-resolved-module-path 'other) s)
+  (test #t regexp-match? #rx"<resolved-module-path:'" (get-output-string s)))
+
+(let ([s (open-output-string)])
+  (print (module->namespace 'scheme/base) s)
+  (test #t regexp-match? #rx"<namespace:\"" (get-output-string s)))
+(let ([s (open-output-string)])
+  (print (module->namespace ''n) s)
+  (test #t regexp-match? #rx"<namespace:'" (get-output-string s)))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check "source" name of built-in module:
+
+(parameterize ([current-namespace (module->namespace ''#%network)])
+  (test '#%network 
+        variable-reference->module-source
+        (eval (datum->syntax #'here '(#%variable-reference)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (report-errs)

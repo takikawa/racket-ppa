@@ -26,6 +26,7 @@
              [#:Vector t (make-Vector (inv t))]
              [#:Box t (make-Box (inv t))]
              [#:Channel t (make-Channel (inv t))]
+             [#:ThreadCell t (make-ThreadCell (inv t))]
              [#:Hashtable k v
                           (if (V-in? V v)
                               Univ
@@ -34,7 +35,7 @@
                       (make-Param (var-demote in V)
                                   (vp out))]
              [#:arr dom rng rest drest kws
-                    (cond                      
+                    (cond
                       [(apply V-in? V (get-filters rng))
                        (make-top-arr)]
                       [(and drest (memq (cdr drest) V))
@@ -60,6 +61,7 @@
              [#:Vector t (make-Vector (inv t))]
              [#:Box t (make-Box (inv t))]
              [#:Channel t (make-Channel (inv t))]
+             [#:ThreadCell t (make-ThreadCell (inv t))]
              [#:Hashtable k v
                           (if (V-in? V v)
                               (Un)

@@ -1,8 +1,8 @@
-#lang scheme/base
+#lang racket/base
 
-;; This file provides the utilities that mzscheme's `help' form uses.
-;; It is required dynamically when used from mzscheme, to avoid the
-;; loading overhead, and to have mzscheme independent of having the
+;; This file provides the utilities that racket's `help' form uses.
+;; It is required dynamically when used from racket, to avoid the
+;; loading overhead, and to have racket independent of having the
 ;; documentation system.
 
 (require setup/xref
@@ -10,14 +10,14 @@
          scribble/manual-struct
          net/uri-codec
          net/sendurl
-         scheme/path
-         scheme/list
-         "search.ss")
+         racket/string
+         racket/path
+         "search.rkt")
 
 (provide search-for find-help find-help/lib go-to-main-page)
 
 (define (search-for strs)
-  (perform-search (apply string-append (add-between strs " "))))
+  (perform-search (string-join strs " ")))
 
 (define-namespace-anchor anchor)
 

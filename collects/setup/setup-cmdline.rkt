@@ -1,7 +1,7 @@
 #lang racket/base
 
 ;; Command-line parsing is in its own module because it has to be used
-;;  both in setup.ss (pre-zo, pre-cm) and setup-go.ss (use zos and cm).
+;;  both in setup.ss (pre-zo, pre-cm) and setup-go.rkt (use zos and cm).
 ;; This means that command lines will be parsed twice.
 
 (require racket/cmdline
@@ -13,7 +13,7 @@
 ;; The result of parse-cmdline is three lists:
 ;;  - An assoc list mapping flag symbols to booleans
 ;;     (nearly all symbols correspond to parameter names
-;;      in setup-go.ss)
+;;      in setup-go.rkt)
 ;;  - A list of specific collections
 ;;  - A list of archives
 
@@ -80,7 +80,7 @@
      [("--doc-pdf") dir "Write doc PDF to <dir>"
       (add-flags `((doc-pdf-dest ,dir)))]
      [("-l") => (lambda (flag . collections)
-                  (check-collections collections)
+                  (check-collections short-name collections)
                   (cons 'collections (map list collections)))
              '("Setup specific <collection>s only" "collection")]
      [("-A") => (λ (flag . archives)
@@ -103,7 +103,7 @@
                                   '())])
          (cond
          [raco?
-          (check-collections rest)
+          (check-collections short-name rest)
           (values (append pre-collections (map list rest))
                   pre-archives)]
          [else
@@ -119,15 +119,16 @@
 
     (values short-name x-flags x-specific-collections x-specific-planet-packages x-archives))
 
-(define (check-collections collections)
+(define (check-collections name collections)
   (for ((v (in-list collections)))
     ;; A normal-form collection path matches a symbolic module path;
     ;; this is a bit of a hack, but it's not entirely a coincidence:
     (unless (module-path? (string->symbol v))
-      (error (format "bad collection path~a: ~a"
-                     (cond [(regexp-match? #rx"/$" v)
-                            " (trailing slash not allowed)"]
-                           [(regexp-match? #rx"\\\\" v)
-                            " (backslash not allowed)"]
-                           [else ""])
-                     v)))))
+      (raise-user-error (string->symbol name)
+                        "bad collection path~a: ~a"
+                        (cond [(regexp-match? #rx"/$" v)
+                               " (trailing slash not allowed)"]
+                              [(regexp-match? #rx"\\\\" v)
+                               " (backslash not allowed)"]
+                              [else ""])
+                        v))))

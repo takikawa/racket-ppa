@@ -1,12 +1,12 @@
 #lang typed-scheme
 
-(require typed-scheme/private/extra-procs)
+(require typed-scheme/base-env/extra-procs)
 
 (: f (All (A ...) (All (B ...) (A ... A -> Integer))))
 
 (define (f . xs) 5)
 
-(: map-with-funcs 
+(: map-with-funcs
    (All (A ...)
         (All (B ...)
              ((B ... B -> A) ... A ->

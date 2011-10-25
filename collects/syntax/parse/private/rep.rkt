@@ -2,7 +2,8 @@
 (require (for-template racket/base
                        racket/stxparam
                        "keywords.rkt"
-                       "runtime.rkt")
+                       "runtime.rkt"
+                       (only-in unstable/syntax phase-of-enclosing-module))
          racket/contract/base
          "minimatch.rkt"
          syntax/id-table
@@ -51,27 +52,20 @@
   (-> syntax?
       #:context syntax?
       arity?)]
- #|
- [check-literals-list
-  ;; NEEDS txlift context
+ [check-stxclass-header
   (-> syntax? syntax?
-      (listof (list/c identifier? identifier? ct-phase/c ct-phase/c)))]
- |#
- [check-literals-list/litset
+      (list/c identifier? syntax? arity?))]
+ [check-stxclass-application
   (-> syntax? syntax?
-      (listof (list/c identifier? identifier?)))]
- #|
- [check-literal-sets-list
-  ;; NEEDS txlift context
-  (-> syntax? syntax?
-      (listof (listof (list/c identifier? identifier? ct-phase/c))))]
- |#
+      (cons/c identifier? arguments?))]
  [check-conventions-rules
   (-> syntax? syntax?
       (listof (list/c regexp? any/c)))]
  [check-attr-arity-list
   (-> syntax? syntax?
       (listof sattr?))])
+
+;; ----
 
 (define (atomic-datum? stx)
   (let ([datum (syntax-e stx)])
@@ -319,6 +313,8 @@ A syntax class is integrable if
 (define (create-aux-def entry)
   (match entry
     [(struct den:lit (_i _e _ip _lp))
+     (values entry null)]
+    [(struct den:magic-class (name class argu))
      (values entry null)]
     [(struct den:class (name class argu))
      ;; FIXME: integrable syntax classes?
@@ -667,6 +663,22 @@ A syntax class is integrable if
   (match entry
     [(struct den:lit (internal literal input-phase lit-phase))
      (create-pat:literal literal input-phase lit-phase)]
+    [(struct den:magic-class (name class argu))
+     (let* ([pos-count (length (arguments-pargs argu))]
+            [kws (arguments-kws argu)]
+            [sc (get-stxclass/check-arity class class pos-count kws)]
+            [splicing? (stxclass-splicing? sc)]
+            [attrs (stxclass-attrs sc)]
+            [parser (stxclass-parser sc)]
+            [commit? (stxclass-commit? sc)]
+            [delimit-cut? (stxclass-delimit-cut? sc)])
+       (check-no-delimit-cut-in-not id delimit-cut?)
+       (if splicing?
+           (begin
+             (unless allow-head?
+               (wrong-syntax id "splicing syntax class not allowed here"))
+             (parse-pat:id/h id parser argu attrs commit?))
+           (parse-pat:id/s id parser argu attrs commit?)))]
     [(struct den:class (_n _c _a))
      (error 'parse-pat:id
             "(internal error) decls had leftover stxclass entry: ~s"
@@ -714,28 +726,21 @@ A syntax class is integrable if
        #'name]
       [_
        (wrong-syntax stx "bad ~~var form")]))
-  (define-values (scname argu pfx)
+  (define-values (scname sc+args-stx argu pfx)
     (syntax-case stx (~var)
       [(~var _name)
-       (values #f null #f)]
+       (values #f #f null #f)]
       [(~var _name sc/sc+args . rest)
        (let-values ([(sc argu)
-                     (syntax-case #'sc/sc+args ()
-                       [sc
-                        (identifier? #'sc)
-                        (values #'sc no-arguments)]
-                       [(sc arg ...)
-                        (identifier? #'sc)
-                        (values #'sc (parse-argu (syntax->list #'(arg ...))))]
-                       [_
-                        (wrong-syntax stx "bad ~~var form")])])
+                     (let ([p (check-stxclass-application #'sc/sc+args stx)])
+                       (values (car p) (cdr p)))])
          (define chunks
            (parse-keyword-options/eol #'rest var-pattern-directive-table
                                       #:no-duplicates? #t
                                       #:context stx))
          (define sep
            (options-select-value chunks '#:attr-name-separator #:default #f))
-         (values sc argu (if sep (syntax-e sep) ".")))]
+         (values sc #'sc/sc+args argu (if sep (syntax-e sep) ".")))]
       [_
        (wrong-syntax stx "bad ~~var form")]))
   (cond [(and (epsilon? name0) (not scname))
@@ -743,7 +748,7 @@ A syntax class is integrable if
         [(and (wildcard? name0) (not scname))
          (create-pat:any)]
         [scname
-         (let ([sc (get-stxclass/check-arity scname stx
+         (let ([sc (get-stxclass/check-arity scname sc+args-stx
                                              (length (arguments-pargs argu))
                                              (arguments-kws argu))])
            (parse-pat:var* stx allow-head? name0 sc argu pfx))]
@@ -1297,7 +1302,9 @@ A syntax class is integrable if
 (define (check-literal-entry stx ctx)
   (define (go internal external phase)
     (txlift #`(check-literal (quote-syntax #,external)
-                             #,phase (quote-syntax #,ctx)))
+                             #,phase
+                             (phase-of-enclosing-module)
+                             (quote-syntax #,ctx)))
     (list internal external phase phase))
   (syntax-case stx ()
     [(internal external #:phase phase)
@@ -1309,29 +1316,6 @@ A syntax class is integrable if
     [id
      (identifier? #'id)
      (go #'id #'id #'(syntax-local-phase-level))]
-    [_
-     (raise-syntax-error #f "expected literal entry"
-                         ctx stx)]))
-
-;; Literal sets - Definition
-
-;; check-literals-list/litset : stx stx -> (listof (list id id))
-(define (check-literals-list/litset stx ctx)
-  (let ([lits (for/list ([x (in-list (stx->list stx))])
-                (check-literal-entry/litset x ctx))])
-    (let ([dup (check-duplicate-identifier (map car lits))])
-      (when dup (raise-syntax-error #f "duplicate literal identifier" ctx dup)))
-    lits))
-
-;; check-literal-entry/litset : stx stx -> (list id id)
-(define (check-literal-entry/litset stx ctx)
-  (syntax-case stx ()
-    [(internal external)
-     (and (identifier? #'internal) (identifier? #'external))
-     (list #'internal #'external)]
-    [id
-     (identifier? #'id)
-     (list #'id #'id)]
     [_
      (raise-syntax-error #f "expected literal entry"
                          ctx stx)]))
@@ -1358,7 +1342,7 @@ A syntax class is integrable if
       (list (datum->syntax lctx (car entry) stx)
             (cadr entry)
             phase
-            (literalset-phase litset))))
+            (caddr entry))))
   (syntax-case stx ()
     [(litset . more)
      (and (identifier? #'litset))
@@ -1419,19 +1403,33 @@ A syntax class is integrable if
            (raise-syntax-error #f "expected identifier convention pattern"
                                ctx blame)]))
   (define (check-sc-expr x rx)
-    (syntax-case x ()
-      [sc
-       (identifier? #'sc)
-       (make den:class rx #'sc no-arguments)]
-      [(sc arg ...)
-       (identifier? #'sc)
-       (make den:class rx #'sc (parse-argu (syntax->list #'(arg ...))))]
-      [_ (raise-syntax-error #f "expected syntax class use" ctx x)]))
+    (let ([x (check-stxclass-application x ctx)])
+      (make den:class rx (car x) (cdr x))))
   (syntax-case stx ()
     [(rx sc)
      (let ([name-pattern (check-conventions-pattern (syntax-e #'rx) #'rx)])
-       (list name-pattern
-             (check-sc-expr #'sc name-pattern)))]))
+       (list name-pattern (check-sc-expr #'sc name-pattern)))]))
+
+(define (check-stxclass-header stx ctx)
+  (syntax-case stx ()
+    [name
+     (identifier? #'name)
+     (list #'name #'() no-arity)]
+    [(name . formals)
+     (identifier? #'name)
+     (list #'name #'formals (parse-kw-formals #'formals #:context ctx))]
+    [_ (raise-syntax-error #f "expected syntax class header" stx ctx)]))
+
+(define (check-stxclass-application stx ctx)
+  ;; Doesn't check "operator" is actually a stxclass
+  (syntax-case stx ()
+    [op
+     (identifier? #'op)
+     (cons #'op no-arguments)]
+    [(op arg ...)
+     (identifier? #'op)
+     (cons #'op (parse-argu (syntax->list #'(arg ...))))]
+    [_ (raise-syntax-error #f "expected syntax class use" ctx stx)]))
 
 ;; bind clauses
 (define (check-bind-clause-list stx ctx)

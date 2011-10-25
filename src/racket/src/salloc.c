@@ -67,8 +67,14 @@ SHARED_OK THREAD_LOCAL Thread_Local_Variables scheme_thread_locals;
 # endif
 #endif
 
+#if defined(__APPLE__) && defined(__MACH__)
+# include <sys/param.h>
+# include <sys/sysctl.h>
+int scheme_thread_local_offset = 0;
+#endif
+
 extern int scheme_num_copied_stacks;
-SHARED_OK static uintptr_t scheme_primordial_os_thread_stack_base;
+SHARED_OK static uintptr_t primordial_os_thread_stack_base;
 THREAD_LOCAL_DECL(static uintptr_t scheme_os_thread_stack_base);
 #ifdef USE_THREAD_LOCAL
 SHARED_OK Thread_Local_Variables *scheme_vars; /* for debugging */
@@ -112,8 +118,8 @@ void scheme_set_stack_base(void *base, int no_auto_statics) XFORM_SKIP_PROC
   scheme_register_traversers();
 #endif
 
-  scheme_primordial_os_thread_stack_base  = (uintptr_t) base;
-  scheme_os_thread_stack_base             = (uintptr_t) base;
+  primordial_os_thread_stack_base = (uintptr_t) base;
+  scheme_os_thread_stack_base     = (uintptr_t) base;
 
 #if defined(MZ_PRECISE_GC) || defined(USE_SENORA_GC)
   GC_set_stack_base(base);
@@ -144,6 +150,11 @@ void scheme_set_current_os_thread_stack_base(void *base)
 uintptr_t scheme_get_current_os_thread_stack_base()
 {
   return scheme_os_thread_stack_base;
+}
+
+uintptr_t scheme_get_primordial_thread_stack_base()
+{
+  return primordial_os_thread_stack_base;
 }
 
 typedef struct {
@@ -198,47 +209,6 @@ void scheme_set_thread_local_variables(Thread_Local_Variables *tlvs) XFORM_SKIP_
 }
 #endif
 
-#if 0 && defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS) && defined(INLINE_GETSPECIFIC_ASSEMBLY_CODE)
-/* This code is dsiabled */
-static void macosx_get_thread_local_key_for_assembly_code() XFORM_SKIP_PROC
-{
-  /* Our [highly questionable] strategy for inlining pthread_getspecific() is taken from 
-     the Go implementation (see "http://golang.org/src/libcgo/darwin_386.c").
-     In brief, we assume that thread-local variables are going to be
-     accessed via the gs segment register at offset 0x48 (i386) or 0x60 (x86_64),
-     and we also hardwire the thread-local key 0x110. Here we have to try to get
-     that particular key and double-check that it worked. */
-  pthread_key_t unwanted[16];
-  int num_unwanted = 0;
-
-  while (1) {
-    if (pthread_key_create(&scheme_thread_local_key, NULL)) {
-      fprintf(stderr, "pthread key create failed\n");
-      abort();
-    }
-    if (scheme_thread_local_key == 0x110)
-      break;
-    else {
-      if (num_unwanted == 24) {
-        fprintf(stderr, "pthread key create never produced 0x110 for inline hack\n");
-        abort();
-      }
-      unwanted[num_unwanted++] = scheme_thread_local_key;
-    }
-  }
-
-  pthread_setspecific(scheme_thread_local_key, (void *)0xaced);
-  if (scheme_get_thread_local_variables() != (Thread_Local_Variables *)0xaced) {
-    fprintf(stderr, "pthread getspecific inline hack failed\n");
-    abort();
-  }
-
-  while (num_unwanted--) {
-    pthread_key_delete(unwanted[num_unwanted]);
-  }
-}
-#endif
-
 #ifdef IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
 void scheme_register_tls_space(void *tls_space, int tls_index) XFORM_SKIP_PROC
 {
@@ -267,6 +237,45 @@ void scheme_setup_thread_local_key_if_needed() XFORM_SKIP_PROC
     fprintf(stderr, "pthread key create failed\n");
     abort();
   }
+# if defined(__APPLE__) && defined(__MACH__)
+  /* Darwin version 11 (Max OS X Lion) changes the offset from %gs
+     for thread-local storage. */
+  {
+    int name[2];
+    char vers[128];
+    size_t len;
+    int i, vn = 0, bad = 0;
+
+    name[0] = CTL_KERN;
+    name[1] = KERN_OSRELEASE;
+    len = sizeof(vers);
+    if (sysctl(name, 2, vers, &len, NULL, 0))
+      bad = 1;
+    else {
+      for (i = 0; vers[i] && (vers[i] != '.'); i++) {
+        if ((vers[i] < '0') || (vers[i] > '9'))
+          break;
+        vn = (vn * 10) + (vers[i] - '0');
+      }
+      if ((vers[i] == '.') && (vn > 0) && (vn < 1000)) {
+        if (vn > 10)
+          scheme_thread_local_offset = 0;
+        else {
+#   if defined(__x86_64__)
+          scheme_thread_local_offset = 0x60;
+#   else
+          scheme_thread_local_offset = 0x48;
+#   endif
+        }
+      } else
+        bad = 1;
+    }
+    if (bad) {
+      fprintf(stderr, "kernel version lookup failed\n");
+      abort();
+    }
+  }
+# endif
 #endif
 #ifdef IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
   {
@@ -806,9 +815,18 @@ void *scheme_malloc_uncollectable_tagged(size_t s)
 START_XFORM_SKIP;
 #endif
 
-/* Max of desired alignment and 2 * sizeof(intptr_t): */
-#define CODE_HEADER_SIZE 16
+/* Max of desired alignment and 4 * sizeof(intptr_t): */
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+# define CODE_HEADER_SIZE 32
+#else
+# define CODE_HEADER_SIZE 16
+#endif
 
+/* First two `intptr_t's of a code page are the element
+   size and allocation count. The next two are "prev" and
+   "next" pointers in a doubly-linked list of all pages. */
+
+THREAD_LOCAL_DECL(static void *code_allocation_page_list);
 
 THREAD_LOCAL_DECL(intptr_t scheme_code_page_total);
 
@@ -829,6 +847,12 @@ struct free_list_entry {
 
 THREAD_LOCAL_DECL(static struct free_list_entry *free_list;)
 THREAD_LOCAL_DECL(static int free_list_bucket_count;)
+
+#ifdef MZ_USE_PLACES
+static mzrt_mutex *permanent_code_mutex = NULL; 
+static void *permanent_code_page = NULL;
+static intptr_t available_code_page_amount = 0;
+#endif
 
 static intptr_t get_page_size()
 {
@@ -940,6 +964,26 @@ static void free_page(void *p, intptr_t size)
 #endif
 }
 
+static void chain_page(void *pg)
+{
+  if (code_allocation_page_list)
+    ((void **)code_allocation_page_list)[2] = pg;
+  ((void **)pg)[2] = NULL;
+  ((void **)pg)[3] = code_allocation_page_list;
+  code_allocation_page_list = pg;
+}
+
+static void unchain_page(void *pg)
+{
+  if (!((void **)pg)[2])
+    code_allocation_page_list = ((void **)pg)[3];
+  else
+    ((void **)(((void **)pg)[2]))[3] = ((void **)pg)[3];
+
+  if (((void **)pg)[3])
+    ((void **)(((void **)pg)[3]))[2] = ((void **)pg)[2];
+}
+
 static void init_free_list()
 {
   intptr_t page_size = get_page_size();
@@ -1017,11 +1061,11 @@ void *scheme_malloc_code(intptr_t size)
     pg = malloc_page(sz);
     scheme_code_page_total += sz;
     *(intptr_t *)pg = sz;
+    chain_page(pg);
     LOG_CODE_MALLOC(1, printf("allocated large %p (%ld) [now %ld]\n", 
                               pg, size + CODE_HEADER_SIZE, scheme_code_page_total));
     p = ((char *)pg) + CODE_HEADER_SIZE;
-  }
-  else {
+  } else {
     bucket = free_list_find_bucket(size);
     size2 = free_list[bucket].size;
 
@@ -1031,7 +1075,7 @@ void *scheme_malloc_code(intptr_t size)
       pg = malloc_page(page_size);
       scheme_code_page_total += page_size;
       LOG_CODE_MALLOC(2, printf("new page for %ld / %ld at %p [now %ld]\n", 
-            size2, bucket, pg, scheme_code_page_total));
+                                size2, bucket, pg, scheme_code_page_total));
       sz = page_size - size2;
       for (i = CODE_HEADER_SIZE; i <= sz; i += size2) {
         p = ((char *)pg) + i;
@@ -1046,6 +1090,7 @@ void *scheme_malloc_code(intptr_t size)
       ((intptr_t *)pg)[0] = bucket; /* first intptr_t of page indicates bucket */
       ((intptr_t *)pg)[1] = 0; /* second intptr_t indicates number of allocated on page */
       free_list[bucket].count = count;
+      chain_page(pg);
     }
 
     p = free_list[bucket].elems;
@@ -1065,6 +1110,47 @@ void *scheme_malloc_code(intptr_t size)
 #endif
 }
 
+void *scheme_malloc_permanent_code(intptr_t size)
+/* allocate code that will never be freed and that can be used
+   in multiple places */
+{
+#if defined(MZ_USE_PLACES) && (defined(MZ_JIT_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC))
+  void *p;
+  intptr_t page_size;
+
+  if (!permanent_code_mutex) {
+    /* This function will be called at least once before any other place
+       is created, so it's ok to create the mutex here. */
+    mzrt_mutex_create(&permanent_code_mutex);
+  }
+
+  /* 16-byte alignment: */
+  if (size & 0xF) size += 16 - (size & 0xF);
+
+  mzrt_mutex_lock(permanent_code_mutex);
+  
+  if (available_code_page_amount < size) {
+    page_size = get_page_size();
+    page_size *= 4;
+    while (page_size < size) page_size *= 2;
+
+    permanent_code_page = malloc_page(page_size);
+
+    available_code_page_amount = page_size;
+  }
+   
+  p = permanent_code_page;
+  permanent_code_page = ((char *)permanent_code_page) + size;
+  available_code_page_amount -= size;
+  
+  mzrt_mutex_unlock(permanent_code_mutex);
+
+  return p;
+#else
+  return scheme_malloc_code(size);
+#endif
+}
+
 void scheme_free_code(void *p)
 {
 #if defined(MZ_JIT_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
@@ -1080,10 +1166,10 @@ void scheme_free_code(void *p)
     /* it was a large object on its own page(s) */
     scheme_code_page_total -= size;
     LOG_CODE_MALLOC(1, printf("freeing large %p (%ld) [%ld left]\n", 
-          p, size, scheme_code_page_total));
+                              p, size, scheme_code_page_total));
+    unchain_page((char *)p - CODE_HEADER_SIZE);
     free_page((char *)p - CODE_HEADER_SIZE, size);
-  }
-  else {
+  } else {
     bucket = size;
 
     if ((bucket < 0) || (bucket >= free_list_bucket_count)) {
@@ -1140,13 +1226,35 @@ void scheme_free_code(void *p)
 
       scheme_code_page_total -= page_size;
       LOG_CODE_MALLOC(2, printf("freeing page at %p [%ld left]\n", 
-            CODE_PAGE_OF(p), scheme_code_page_total));
+                                CODE_PAGE_OF(p), scheme_code_page_total));
+      unchain_page(CODE_PAGE_OF(p));
       free_page(CODE_PAGE_OF(p), page_size);
     }
   }
 
 #else
   free(p);
+#endif
+}
+
+void scheme_free_all_code(void)
+{
+#if defined(MZ_JIT_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
+  void *p, *next;
+  intptr_t page_size;
+
+  page_size = get_page_size();
+
+  for (p = code_allocation_page_list; p; p = next) {
+    next = ((void **)p)[3];
+    if (((intptr_t*)p)[0] > page_size)
+      free_page(p, ((intptr_t*)p)[0]);
+    else
+      free_page(p, page_size);
+  }
+  code_allocation_page_list = NULL;
+
+  free_page(free_list, page_size);
 #endif
 }
 
@@ -1258,8 +1366,7 @@ typedef struct Finalizations {
 
 START_XFORM_SKIP;
 
-#define MARKS_FOR_SALLOC_C
-#include "mzmark.c"
+#include "mzmark_salloc.inc"
 
 END_XFORM_SKIP;
 
@@ -1538,11 +1645,41 @@ void scheme_collect_garbage(void)
   GC_gcollect();
 }
 
+void scheme_enable_garbage_collection(int on)
+{
+#ifdef MZ_PRECISE_GC
+  GC_enable_collection(on);
+#else
+  if (on)
+    --GC_dont_gc;
+  else
+    GC_dont_gc++;
+#endif
+}
+
 uintptr_t scheme_get_deeper_address(void)
 {
   int v, *vp;
   vp = &v;
   return (uintptr_t)vp;
+}
+
+Scheme_Object *scheme_malloc_key()
+/* allocates a Scheme object that is useful as an `eq?'-based key,
+   that can be used from any place, and that is not GCed */
+{
+  Scheme_Object *k;
+
+  k = (Scheme_Object *)malloc(sizeof(Scheme_Small_Object));
+  k->type = scheme_box_type;
+  SCHEME_BOX_VAL(k) = scheme_false;
+
+  return k;
+}
+
+void scheme_free_key(Scheme_Object *k)
+{
+  free(k);
 }
 
 /************************************************************************/
@@ -2597,11 +2734,6 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
   case scheme_local_type: 
   case scheme_local_unbox_type:
     s = sizeof(Scheme_Local);
-    break;
-  case scheme_syntax_type:
-#if FORCE_KNOWN_SUBPARTS
-    e = COUNT(SCHEME_IPTR_VAL(root));
-#endif
     break;
   case scheme_application_type:
     {

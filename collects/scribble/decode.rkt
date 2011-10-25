@@ -1,26 +1,28 @@
 #lang scheme/base
-(require "core.ss"
-         "private/provide-structs.ss"
-         "decode-struct.ss"
+(require "core.rkt"
+         "private/provide-structs.rkt"
+         "decode-struct.rkt"
          scheme/contract
          scheme/class
          scheme/list)
 
 (define (pre-content? i)
   (or (string? i)
-      (and (content? i)
-           (not (list? i)))
+      (content? i)
       (and (splice? i)
            (andmap pre-content? (splice-run i)))
+      (and (list? i)
+           (andmap pre-content? i))
       (void? i)))
 
 (define (pre-flow? i)
   (or (string? i)
-      (and (content? i)
-           (not (list? i)))
+      (content? i)
       (block? i)
       (and (splice? i)
            (andmap pre-flow? (splice-run i)))
+      (and (list? i)
+           (andmap pre-flow? i))
       (void? i)))
 
 (define (pre-part? v)
@@ -32,7 +34,9 @@
       (part-tag-decl? v)
       (part? v)
       (and (splice? v)
-           (andmap pre-part? (splice-run v)))))
+           (andmap pre-part? (splice-run v)))
+      (and (list? v)
+           (andmap pre-part? v))))
 
 (provide-structs
  [title-decl ([tag-prefix (or/c false/c string?)]
@@ -189,10 +193,13 @@
           (part-to-collect part)
           (append para (part-blocks part))
           (cons (car l) (part-parts part))))]
-      [(and (part-start? (car l))
-            (or (not part-depth)
-                ((part-start-depth (car l)) . <= . part-depth)))
-       (unless part-depth (error 'decode "misplaced part: ~e" (car l)))
+      [(part-start? (car l))
+       (unless part-depth
+         (error 'decode "misplaced part; title: ~s" (part-start-title (car l))))
+       (unless ((part-start-depth (car l)) . <= . part-depth)
+         (error 'decode
+                "misplaced part (the part is more than one layer deeper than its container); title: ~s"
+                (part-start-title (car l))))
        (let ([s (car l)])
          (let loop ([l (cdr l)] [s-accum null])
            (if (or (null? l)
@@ -221,6 +228,9 @@
       [(splice? (car l))
        (loop (append (splice-run (car l)) (cdr l))
              next? keys colls accum title tag-prefix tags vers style)]
+      [(list? (car l))
+       (loop (append (car l) (cdr l))
+             next? keys colls accum title tag-prefix tags vers style)]
        [(null? (cdr l))
         (loop null #f keys colls (cons (car l) accum) title tag-prefix tags
               vers style)]
@@ -236,8 +246,9 @@
               (append tags (list (part-tag-decl-tag (car l))))
               vers style)]
        [(and (pair? (cdr l))
-	     (splice? (cadr l)))
-	(loop (cons (car l) (append (splice-run (cadr l)) (cddr l)))
+	     (or (splice? (cadr l))
+                 (list? (cadr l))))
+	(loop (cons (car l) (append ((if (splice? (cadr l)) splice-run values) (cadr l)) (cddr l)))
               next? keys colls accum title tag-prefix tags vers style)]
        [(line-break? (car l))
 	(if next?
@@ -275,6 +286,8 @@
         [(line-break? (car l)) (skip-whitespace l)]
         [(splice? (car l))
          (match-newline-whitespace (append (splice-run (car l)) (cdr l)))]
+        [(list? (car l))
+         (match-newline-whitespace (append (car l) (cdr l)))]
         [(whitespace? (car l)) (match-newline-whitespace (cdr l))]
         [else #f]))
 
@@ -296,6 +309,7 @@
                            [(string? s) (decode-string s)]
                            [(void? s) null]
                            [(splice? s) (decode-content (splice-run s))]
+                           [(list? s) (decode-content s)]
                            [else (list s)]))
               (skip-whitespace l)))
 

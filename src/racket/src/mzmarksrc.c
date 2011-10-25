@@ -7,7 +7,7 @@ variable_obj {
 
   gcMARK2(b->key, gc);
   gcMARK2(b->val, gc);
-  gcMARK2(((Scheme_Bucket_With_Home *)b)->home, gc);
+  gcMARK2(((Scheme_Bucket_With_Home *)b)->home_link, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Bucket_With_Home));
@@ -156,6 +156,7 @@ unclosed_proc {
   gcMARK2(d->name, gc);
   gcMARK2(d->code, gc);
   gcMARK2(d->closure_map, gc);
+  gcMARK2(d->tl_map, gc);
 #ifdef MZ_USE_JIT
   gcMARK2(d->u.native_code, gc);
   gcMARK2(d->context, gc);
@@ -242,6 +243,17 @@ let_header {
   gcBYTES_TO_WORDS(sizeof(Scheme_Let_Header));
 }
 
+set_bang {
+ mark:
+  Scheme_Set_Bang *b = (Scheme_Set_Bang *)p;
+  
+  gcMARK2(b->var, gc);
+  gcMARK2(b->val, gc);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Set_Bang));
+}
+
 prim_proc {
   Scheme_Primitive_Proc *prim = (Scheme_Primitive_Proc *)p;
 
@@ -288,15 +300,30 @@ closed_prim_proc {
 scm_closure {
   Scheme_Closure *c = (Scheme_Closure *)p;
   int closure_size = (c->code 
-                      ? ((Scheme_Closure_Data *)GC_resolve(c->code))->closure_size
+                      ? ((Scheme_Closure_Data *)GC_resolve2(c->code, gc))->closure_size
                       : 0);
 
  mark:
 
   int i = closure_size;
+  START_MARK_ONLY;
+# define CLOSURE_DATA_TYPE Scheme_Closure_Data
+# include "mzclpf_decl.inc"
+  END_MARK_ONLY;
+
+  gcMARK2(c->code, gc);
+
+  START_MARK_ONLY;
+# include "mzclpf_pre.inc"
+  END_MARK_ONLY;
+
   while (i--)
     gcMARK2(c->vals[i], gc);
-  gcMARK2(c->code, gc);
+
+  START_MARK_ONLY;
+# include "mzclpf_post.inc"
+# undef CLOSURE_DATA_TYPE
+  END_MARK_ONLY;
   
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Closure)
@@ -666,7 +693,6 @@ thread_val {
   gcMARK2(pr->current_local_env, gc);
   gcMARK2(pr->current_local_mark, gc);
   gcMARK2(pr->current_local_name, gc);
-  gcMARK2(pr->current_local_certs, gc);
   gcMARK2(pr->current_local_modidx, gc);
   gcMARK2(pr->current_local_menv, gc);
   gcMARK2(pr->current_local_bindings, gc);
@@ -868,6 +894,7 @@ namespace_val {
 
   gcMARK2(e->modvars, gc);
 
+  gcMARK2(e->weak_self_link, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Env));
@@ -896,6 +923,19 @@ compilation_top_val {
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Compilation_Top));
+}
+
+prefix_val {
+  Scheme_Prefix *pf = (Scheme_Prefix *)p;
+ mark:
+  int i;
+  for (i = pf->num_slots; i--; )
+    gcMARK2(pf->a[i], gc);
+ size:
+  gcBYTES_TO_WORDS((sizeof(Scheme_Prefix) 
+		    + ((pf->num_slots-1) * sizeof(Scheme_Object *))
+                    + ((((pf->num_slots - (pf->num_stxes ? (pf->num_stxes+1) : 0)) + 31) / 32) 
+                       * sizeof(int))));
 }
 
 resolve_prefix_val {
@@ -937,7 +977,7 @@ stx_val {
   gcMARK2(stx->val, gc);
   gcMARK2(stx->srcloc, gc);
   gcMARK2(stx->wraps, gc);
-  gcMARK2(stx->certs, gc);
+  gcMARK2(stx->taints, gc);
   gcMARK2(stx->props, gc);
   if (!(MZ_OPT_HASH_KEY(&(stx)->iso) & STX_SUBSTX_FLAG))
     gcMARK2(stx->u.modinfo_cache, gc);
@@ -956,6 +996,9 @@ stx_off_val {
 module_val {
  mark:
   Scheme_Module *m = (Scheme_Module *)p;
+
+  gcMARK2(m->code_key, gc);
+
   gcMARK2(m->modname, gc);
   gcMARK2(m->modsrc, gc);
 
@@ -1014,7 +1057,6 @@ module_phase_exports_val {
   gcMARK2(m->provide_src_names, gc);
   gcMARK2(m->provide_nominal_srcs, gc);
   gcMARK2(m->provide_src_phases, gc);
-  gcMARK2(m->provide_insps, gc);
 
   gcMARK2(m->kernel_exclusion, gc);
   gcMARK2(m->kernel_exclusion2, gc);
@@ -1120,18 +1162,13 @@ END type;
 
 /**********************************************************************/
 
-START engine;
-
-engine_val {
- mark:
-  Scheme_Engine *en = (Scheme_Engine *)p;
- size:
-  gcBYTES_TO_WORDS(sizeof(Scheme_Engine));
-}
-
-END engine;
-
 START env;
+
+END env;
+
+/**********************************************************************/
+
+START compenv;
 
 mark_comp_env {
  mark:
@@ -1142,7 +1179,6 @@ mark_comp_env {
   gcMARK2(e->base.prefix, gc);
   gcMARK2(e->base.next, gc);
   gcMARK2(e->base.values, gc);
-  gcMARK2(e->base.certs, gc);
   gcMARK2(e->base.renames, gc);
   gcMARK2(e->base.uid, gc);
   gcMARK2(e->base.uids, gc);
@@ -1162,12 +1198,19 @@ mark_comp_env {
   gcBYTES_TO_WORDS(sizeof(Scheme_Full_Comp_Env));
 }
 
+END compenv;
+
+/**********************************************************************/
+
+START resolve;
+
 mark_resolve_info {
  mark:
   Resolve_Info *i = (Resolve_Info *)p;
   
   gcMARK2(i->prefix, gc);
   gcMARK2(i->stx_map, gc);
+  gcMARK2(i->tl_map, gc);
   gcMARK2(i->old_pos, gc);
   gcMARK2(i->new_pos, gc);
   gcMARK2(i->old_stx_pos, gc);
@@ -1179,6 +1222,30 @@ mark_resolve_info {
  size:
   gcBYTES_TO_WORDS(sizeof(Resolve_Info));
 }
+
+END resolve;
+
+/**********************************************************************/
+
+START sfs;
+
+mark_sfs_info {
+ mark:
+  SFS_Info *i = (SFS_Info *)p;
+  
+  gcMARK2(i->max_used, gc);
+  gcMARK2(i->max_calls, gc);
+  gcMARK2(i->saved, gc);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(SFS_Info));
+}
+
+END sfs;
+
+/**********************************************************************/
+
+START optimize;
 
 mark_optimize_info {
  mark:
@@ -1198,18 +1265,6 @@ mark_optimize_info {
   gcBYTES_TO_WORDS(sizeof(Optimize_Info));
 }
 
-mark_sfs_info {
- mark:
-  SFS_Info *i = (SFS_Info *)p;
-  
-  gcMARK2(i->max_used, gc);
-  gcMARK2(i->max_calls, gc);
-  gcMARK2(i->saved, gc);
-
- size:
-  gcBYTES_TO_WORDS(sizeof(SFS_Info));
-}
-
 mark_once_used {
  mark:
   Scheme_Once_Used *o = (Scheme_Once_Used *)p;
@@ -1220,7 +1275,7 @@ mark_once_used {
   gcBYTES_TO_WORDS(sizeof(Scheme_Once_Used));
 }
 
-END env;
+END optimize;
 
 /**********************************************************************/
 
@@ -1231,7 +1286,6 @@ mark_comp_info {
   Scheme_Compile_Info *i = (Scheme_Compile_Info *)p;
   
   gcMARK2(i->value_name, gc);
-  gcMARK2(i->certs, gc);
   gcMARK2(i->observer, gc);
 
  size:
@@ -1249,6 +1303,12 @@ mark_saved_stack {
   gcBYTES_TO_WORDS(sizeof(Scheme_Saved_Stack));
 }
 
+END eval;
+
+/**********************************************************************/
+
+START validate;
+
 mark_validate_clearing {
  mark:
   Validate_Clearing *vc = (Validate_Clearing *)p;
@@ -1260,23 +1320,7 @@ mark_validate_clearing {
   gcBYTES_TO_WORDS(sizeof(Validate_Clearing));
 }
 
-END eval;
-
-/**********************************************************************/
-
-START file;
-
-mark_reply_item {
- mark:
-  ReplyItem *r = (ReplyItem *)p;
-  
-  gcMARK2(r->next, gc);
-
- size:
-  gcBYTES_TO_WORDS(sizeof(ReplyItem));
-}
-
-END file;
+END validate;
 
 /**********************************************************************/
 
@@ -1385,7 +1429,7 @@ END hash;
 
 /**********************************************************************/
 
-START places;
+START place;
 
 place_bi_channel_val {
  mark:
@@ -1397,10 +1441,17 @@ place_bi_channel_val {
   gcBYTES_TO_WORDS(sizeof(Scheme_Place_Bi_Channel));
 }
 
+place_object_val {
+ mark:
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Place_Object));
+}
+
 place_val {
  mark:
   Scheme_Place *pr = (Scheme_Place *)p;
   gcMARK2(pr->channel, gc);
+  gcMARK2(pr->mref, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Place));
@@ -1409,17 +1460,15 @@ place_val {
 place_async_channel_val {
  mark:
   Scheme_Place_Async_Channel *pac = (Scheme_Place_Async_Channel *)p;
-  int i;
   gcMARK2(pac->msgs, gc);
   gcMARK2(pac->msg_memory, gc);
-  for (i = pac->size; i--; )
-    gcMARK2(pac->msgs[i], gc);
+  gcMARK2(pac->wakeup_signal, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Place_Async_Channel));
 }
 
-END places;
+END place;
 
 /**********************************************************************/
 
@@ -1492,18 +1541,6 @@ END portfun;
 /**********************************************************************/
 
 START port;
-
-#ifdef WINDOWS_PROCESSES
-mark_thread_memory {
- mark:
-  Scheme_Thread_Memory *tm = (Scheme_Thread_Memory *)p;
-  gcMARK2(tm->prev, gc);
-  gcMARK2(tm->next, gc);
-
- size:
-  gcBYTES_TO_WORDS(sizeof(Scheme_Thread_Memory));
-}
-#endif
 
 mark_input_file {
  mark:
@@ -1612,7 +1649,6 @@ mark_marshal_tables {
   gcMARK2(mt->st_ref_stack, gc);
   gcMARK2(mt->reverse_map, gc);
   gcMARK2(mt->same_map, gc);
-  gcMARK2(mt->cert_lists, gc);
   gcMARK2(mt->shift_map, gc);
   gcMARK2(mt->top_map, gc);
   gcMARK2(mt->key_map, gc);
@@ -1747,7 +1783,7 @@ mark_custodian_val {
 mark_custodian_box_val {
  mark:
   Scheme_Custodian_Box *b = (Scheme_Custodian_Box *)p;
-  int sd = ((Scheme_Custodian *)GC_resolve(b->cust))->shut_down;
+  int sd = ((Scheme_Custodian *)GC_resolve2(b->cust, gc))->shut_down;
 
   gcMARK2(b->cust, gc);
   if (!sd) {
@@ -1936,7 +1972,7 @@ mark_serialized_struct_val {
 
 mark_struct_val {
   Scheme_Structure *s = (Scheme_Structure *)p;
-  int num_slots = ((Scheme_Struct_Type *)GC_resolve(s->stype))->num_slots;
+  int num_slots = ((Scheme_Struct_Type *)GC_resolve2(s->stype, gc))->num_slots;
 
  mark:
   int i;
@@ -2034,9 +2070,9 @@ END struct;
 
 /**********************************************************************/
 
-START syntax;
+START compile;
 
-END syntax;
+END compile;
 
 /**********************************************************************/
 
@@ -2056,7 +2092,6 @@ mark_cport {
   gcMARK2(cp->ht, gc);
   gcMARK2(cp->ut, gc);
   gcMARK2(cp->symtab, gc);
-  gcMARK2(cp->insp, gc);
   gcMARK2(cp->relto, gc);
   gcMARK2(cp->magic_sym, gc);
   gcMARK2(cp->magic_val, gc);
@@ -2095,7 +2130,6 @@ mark_delay_load {
   gcMARK2(ld->path, gc);
   gcMARK2(ld->symtab, gc);
   gcMARK2(ld->shared_offsets, gc);
-  gcMARK2(ld->insp, gc);
   gcMARK2(ld->relto, gc);
   gcMARK2(ld->ut, gc);
   gcMARK2(ld->current_rp, gc);
@@ -2166,7 +2200,7 @@ END string;
 
 /**********************************************************************/
 
-START stxobj;
+START syntax;
 
 mark_rename_table {
  mark:
@@ -2179,6 +2213,7 @@ mark_rename_table {
   gcMARK2(rn->set_identity, gc);
   gcMARK2(rn->marked_names, gc);
   gcMARK2(rn->free_id_renames, gc);
+  gcMARK2(rn->insp, gc);
  size:
   gcBYTES_TO_WORDS(sizeof(Module_Renames));
 }
@@ -2191,6 +2226,7 @@ mark_rename_table_set {
   gcMARK2(rns->other_phases, gc);
   gcMARK2(rns->share_marked_names, gc);
   gcMARK2(rns->set_identity, gc);
+  gcMARK2(rns->insp, gc);
  size:
   gcBYTES_TO_WORDS(sizeof(Module_Renames_Set));
 }
@@ -2212,19 +2248,6 @@ mark_wrapchunk {
   }
  size:
   gcBYTES_TO_WORDS(sizeof(Wrap_Chunk) + ((wc->len - 1) * sizeof(Scheme_Object *)));
-}
-
-mark_cert {
- mark:
-  Scheme_Cert *c = (Scheme_Cert *)p;
-  gcMARK2(c->mark, gc);
-  gcMARK2(c->modidx, gc);
-  gcMARK2(c->insp, gc);
-  gcMARK2(c->key, gc);
-  gcMARK2(c->mapped, gc);
-  gcMARK2(c->next, gc);
- size:
-  gcBYTES_TO_WORDS(sizeof(Scheme_Cert));
 }
 
 lex_rib {
@@ -2253,7 +2276,7 @@ mark_free_id_info {
 
 
 
-END stxobj;
+END syntax;
 
 /**********************************************************************/
 
@@ -2261,21 +2284,35 @@ START jit;
 
 native_closure {
   Scheme_Native_Closure *c = (Scheme_Native_Closure *)p;
-  int closure_size = ((Scheme_Native_Closure_Data *)GC_resolve(c->code))->closure_size;
+  int closure_size = ((Scheme_Native_Closure_Data *)GC_resolve2(c->code, gc))->closure_size;
 
   if (closure_size < 0) {
     closure_size = -(closure_size + 1);
   }
 
  mark:
-
   {
-    int i = closure_size;
-    while (i--)
-      gcMARK2(c->vals[i], gc);
-  }
+  int i = closure_size;
+  START_MARK_ONLY;
+# define CLOSURE_DATA_TYPE Scheme_Native_Closure_Data
+# include "mzclpf_decl.inc"
+  END_MARK_ONLY;
+
   gcMARK2(c->code, gc);
-  
+
+  START_MARK_ONLY;
+# include "mzclpf_pre.inc"
+  END_MARK_ONLY;
+
+  while (i--)
+    gcMARK2(c->vals[i], gc);
+
+  START_MARK_ONLY;
+# include "mzclpf_post.inc"
+# undef CLOSURE_DATA_TYPE
+  END_MARK_ONLY;
+  }
+
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Native_Closure)
 		    + (closure_size - 1) * sizeof(Scheme_Object *)));
@@ -2304,6 +2341,7 @@ native_unclosed_proc {
   if (d->closure_size < 0) {
     gcMARK2(d->u.arities, gc);
   }
+  gcMARK2(d->tl_map, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Native_Closure_Data));
@@ -2400,5 +2438,3 @@ sequential_fsemaphore {
 END future;
 
 /**********************************************************************/
-
-#define GC_REG_TRAV(type, base) GC_register_traversers2(type, base ## _SIZE, base ## _MARK, base ## _FIXUP, base ## _IS_CONST_SIZE, base ## _IS_ATOMIC)

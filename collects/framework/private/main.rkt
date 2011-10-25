@@ -1,7 +1,7 @@
 #lang racket/unit
 (require racket/class
-         "sig.ss"
-         "../preferences.ss"
+         "sig.rkt"
+         "../preferences.rkt"
          mred/mred-sig)
 
 (import mred^
@@ -201,7 +201,7 @@
 (preferences:set-default 'framework:windows-mdi #f boolean?)
 (preferences:set-default 'framework:menu-bindings #t boolean?)
 (preferences:set-default 'framework:verify-change-format #f boolean?)
-(preferences:set-default 'framework:auto-set-wrap? #t boolean?)
+(preferences:set-default 'framework:auto-set-wrap? #f boolean?)
 (preferences:set-default 'framework:display-line-numbers #t boolean?)
 (preferences:set-default 'framework:show-status-line #t boolean?)
 (preferences:set-default 'framework:col-offsets #f boolean?)
@@ -221,11 +221,13 @@
             '(struct
               local
                      
-              define-type
+              struct: define-struct: define-typed-struct define-struct/exec:
+              define: pdefine:
+              define-type define-predicate
               match-define))
   (for-each (λ (x) 
               (hash-set! hash-table x 'begin))
-            '(case-lambda
+            '(case-lambda case-lambda: pcase-lambda:
                match-lambda match-lambda*
                cond
                delay
@@ -250,10 +252,22 @@
                let/cc let/ec letcc catch
                let-syntax letrec-syntax fluid-let-syntax letrec-syntaxes+values
                
-               for for/list for/hash for/hasheq for/and for/or 
-               for/lists for/first for/last for/fold
-               for* for*/list for*/hash for*/hasheq for*/and for*/or 
-               for*/lists for*/first for*/last for*/fold                 
+               let: letrec: let*:
+               let-values: letrec-values: let*-values:
+               let/cc: let/ec:
+               lambda: λ:
+               plambda: opt-lambda: popt-lambda:
+
+               for for/list for/hash for/hasheq for/hasheqv for/and for/or 
+               for/lists for/first for/last for/fold for/vector for/flvector
+               for* for*/list for*/hash for*/hasheq for*/hasheqv for*/and for*/or 
+               for*/lists for*/first for*/last for*/fold for*/vector for*/flvector
+
+               for: for/list: for/hash: for/hasheq: for/hasheqv: for/and: for/or:
+               for/lists: for/first: for/last: for/fold: for/vector: for/flvector:
+               for*: for*/list: for*/hash: for*/hasheq: for*/hasheqv: for*/and: for*/or:
+               for*/lists: for*/first: for*/last: for*/fold: for*/vector: for*/flvector:
+               do:
                
                kernel-syntax-case
                syntax-case syntax-case* syntax-rules syntax-id-rules

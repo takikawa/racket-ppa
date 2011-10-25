@@ -1,4 +1,4 @@
-#lang scheme/unit
+#lang racket/unit
 
 ;; To do:
 ;;   Handle HTTP/file errors.
@@ -11,14 +11,11 @@
 ;;   "impure" = they have text waiting
 ;;   "pure" = the MIME headers have been read
 
-(require scheme/port scheme/string
-         "url-structs.ss"
-         "uri-codec.ss"
-         "url-sig.ss"
-         "tcp-sig.ss")
+(require racket/port racket/string
+         "url-structs.rkt" "uri-codec.rkt" "url-sig.rkt" "tcp-sig.rkt")
 
 (import tcp^)
-(export url^)
+(export url+scheme^)
 
 (define-struct (url-exception exn:fail) ())
 
@@ -90,7 +87,9 @@
     (cond [(not scheme) 80]
           [(string=? scheme "http") 80]
           [(string=? scheme "https") 443]
-          [else (url-error "Scheme ~a not supported" (url-scheme url))])))
+          [else (url-error "URL scheme ~s not supported" scheme)])))
+
+(define current-connect-scheme (make-parameter "http"))
 
 ;; make-ports : url -> in-port x out-port
 (define (make-ports url proxy)
@@ -98,7 +97,8 @@
                        (caddr proxy)
                        (or (url-port url) (url->default-port url)))]
         [host (if proxy (cadr proxy) (url-host url))])
-    (tcp-connect host port-number)))
+    (parameterize ([current-connect-scheme (url-scheme url)])
+      (tcp-connect host port-number))))
 
 ;; http://getpost-impure-port : bool x url x union (str, #f) x list (str) -> in-port
 (define (http://getpost-impure-port get? url post-data strings)

@@ -210,6 +210,7 @@ struct scheme_jit_common_record {
   void *call_original_nary_arith_code;
   void *bad_car_code, *bad_cdr_code;
   void *bad_caar_code, *bad_cdar_code, *bad_cadr_code, *bad_cddr_code;
+  void *bad_cXr_code;
   void *bad_mcar_code, *bad_mcdr_code;
   void *bad_set_mcar_code, *bad_set_mcdr_code;
   void *imag_part_code, *real_part_code, *make_rectangular_code;
@@ -219,31 +220,38 @@ struct scheme_jit_common_record {
   void *bad_flvector_length_code;
   void *bad_fxvector_length_code;
   void *vector_ref_code, *vector_ref_check_index_code, *vector_set_code, *vector_set_check_index_code;
+  void *chap_vector_ref_code, *chap_vector_ref_check_index_code, *chap_vector_set_code, *chap_vector_set_check_index_code;
   void *string_ref_code, *string_ref_check_index_code, *string_set_code, *string_set_check_index_code;
   void *bytes_ref_code, *bytes_ref_check_index_code, *bytes_set_code, *bytes_set_check_index_code;
   void *flvector_ref_check_index_code, *flvector_set_check_index_code, *flvector_set_flonum_check_index_code;
   void *fxvector_ref_code, *fxvector_ref_check_index_code, *fxvector_set_code, *fxvector_set_check_index_code;
   void *struct_raw_ref_code, *struct_raw_set_code;
   void *syntax_e_code;
-  void *on_demand_jit_arity_code;
+  void *on_demand_jit_arity_code, *in_progress_on_demand_jit_arity_code;
   void *get_stack_pointer_code;
   void *stack_cache_pop_code;
   void *struct_pred_code, *struct_pred_multi_code;
   void *struct_pred_branch_code;
   void *struct_get_code, *struct_get_multi_code;
   void *struct_set_code, *struct_set_multi_code;
+  void *struct_prop_get_code, *struct_prop_get_multi_code;
+  void *struct_prop_get_defl_code, *struct_prop_get_defl_multi_code;
+  void *struct_prop_pred_code, *struct_prop_pred_multi_code;
   void *struct_proc_extract_code;
   void *bad_app_vals_target;
   void *app_values_slow_code, *app_values_multi_slow_code, *app_values_tail_slow_code;
   void *values_code;
   void *list_p_code, *list_p_branch_code;
   void *list_length_code;
+  void *list_ref_code, *list_tail_code;
   void *finish_tail_call_code, *finish_tail_call_fixup_code;
   void *module_run_start_code, *module_exprun_start_code, *module_start_start_code;
   void *box_flonum_from_stack_code;
   void *fl1_fail_code, *fl2rr_fail_code[2], *fl2fr_fail_code[2], *fl2rf_fail_code[2];
   void *wcm_code, *wcm_nontail_code;
   void *apply_to_list_tail_code, *apply_to_list_code, *apply_to_list_multi_ok_code;
+  void *eqv_code, *eqv_branch_code;
+  void *proc_arity_includes_code;
 
 #ifdef CAN_INLINE_ALLOC
   void *make_list_code, *make_list_star_code;
@@ -273,7 +281,7 @@ typedef struct {
   char *limit;
   int extra_pushed, max_extra_pushed;
   int depth; /* the position of the closure's first value on the stack */
-  int max_depth;
+  int max_depth, max_tail_depth;
   int *mappings; /* For each element,
 		    case 0x1 bit:
 		    . 0 -> case 0x2 bit:
@@ -332,11 +340,10 @@ typedef struct {
   Branch_Info_Addr *addrs;
 } Branch_Info;
 
-#define mz_RECORD_STATUS(s) (jitter->status_at_ptr = _jit.x.pc, jitter->reg_status = (s))
-#define mz_CURRENT_STATUS() ((jitter->status_at_ptr == _jit.x.pc) ? jitter->reg_status : 0)
-#define mz_CLEAR_STATUS() (jitter->reg_status = 0)
-
-#define mz_RS_R0_HAS_RUNSTACK0 0x1
+#define mz_RECORD_R0_STATUS(s) (jitter->status_at_ptr = _jit.x.pc, jitter->reg_status = (s))
+#define mz_CURRENT_R0_STATUS_VALID() (jitter->status_at_ptr == _jit.x.pc)
+#define mz_CURRENT_R0_STATUS() (jitter->reg_status)
+#define mz_CLEAR_R0_STATUS() (jitter->status_at_ptr = 0)
 
 /* If JIT_THREAD_LOCAL is defined, then access to global variables
    goes through a thread_local_pointers table. Call
@@ -504,15 +511,19 @@ static void *top4;
    register. */
 
 #if 1
-# define mz_rs_dec(n) (jitter->rs_virtual_offset -= (n))
-# define mz_rs_inc(n) (jitter->rs_virtual_offset += (n))
+# define mz_rs_dec(n) (((jitter->reg_status >= 0) ? jitter->reg_status += (n) : 0), jitter->rs_virtual_offset -= (n))
+# define mz_rs_inc(n) (jitter->reg_status -= (n), jitter->rs_virtual_offset += (n))
 # define mz_rs_ldxi(reg, n) jit_ldxi_p(reg, JIT_RUNSTACK, WORDS_TO_BYTES(((n) + jitter->rs_virtual_offset)))
 # define mz_rs_ldr(reg) mz_rs_ldxi(reg, 0)
 # define mz_rs_stxi(n, reg) jit_stxi_p(WORDS_TO_BYTES(((n) + jitter->rs_virtual_offset)), JIT_RUNSTACK, reg)
 # define mz_rs_str(reg) mz_rs_stxi(0, reg)
 # define mz_rs_sync() (jitter->rs_virtual_offset \
-                       ? (jit_addi_p(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES(jitter->rs_virtual_offset)), \
-                          jitter->rs_virtual_offset = 0) \
+                       ? ((jitter->status_at_ptr == _jit.x.pc) \
+                          ? (jit_addi_p(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES(jitter->rs_virtual_offset)), \
+                             jitter->status_at_ptr = _jit.x.pc, \
+                             jitter->rs_virtual_offset = 0) \
+                          : (jit_addi_p(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES(jitter->rs_virtual_offset)), \
+                             jitter->rs_virtual_offset = 0)) \
                        : 0)
 # define mz_rs_sync_0() (jitter->rs_virtual_offset = 0)
 #else
@@ -556,6 +567,18 @@ int check_location;
 
 #define mz_retain(x) scheme_mz_retain_it(jitter, x)
 #define mz_remap(x) scheme_mz_remap_it(jitter, x)
+
+#ifdef jit_bxnei_s
+# define mz_bnei_t(label, reg, stype, scratch_reg) jit_bxnei_s(label, reg, stype)
+# define mz_beqi_t(label, reg, stype, scratch_reg) jit_bxeqi_s(label, reg, stype)
+#else
+# define mz_bnei_t(label, reg, stype, scratch_reg) \
+  (jit_ldxi_s(scratch_reg, reg, &((Scheme_Object *)0x0)->type), \
+   jit_bnei_i(label, scratch_reg, stype))
+# define mz_beqi_t(label, reg, stype, scratch_reg) \
+  (jit_ldxi_s(scratch_reg, reg, &((Scheme_Object *)0x0)->type), \
+   jit_beqi_i(label, scratch_reg, stype))
+#endif
 
 /* Stack alignment, fixed up by mz_push_locals():
     - On PPC, jit_prolog() generates an aligned stack.
@@ -989,6 +1012,22 @@ static void emit_indentation(mz_jit_state *jitter)
      mz_patch_ucbranch(refcont); \
      __END_TINY_JUMPS__(1); \
   }
+# define mz_finish_prim_lwe(prim, refr) \
+    { \
+      GC_CAN_IGNORE jit_insn *refdirect, *refdone; \
+      int argstate; \
+      __START_TINY_JUMPS__(1); \
+      jit_save_argstate(argstate); \
+      mz_tl_ldi_i(JIT_R0, tl_scheme_use_rtcall); \
+      refdirect = jit_beqi_i(jit_forward(), JIT_R0, 0); \
+      (void)mz_finish_lwe(prim, refr); \
+      refdone = jit_jmpi(jit_forward()); \
+      jit_restore_argstate(argstate); \
+      mz_patch_branch(refdirect); \
+      (void)mz_finish(prim); \
+      mz_patch_ucbranch(refdone); \
+      __END_TINY_JUMPS__(1); \
+    }
 #else
 /* futures not enabled */
 # define mz_prepare_direct_prim(n) mz_prepare(n)
@@ -999,6 +1038,7 @@ static void emit_indentation(mz_jit_state *jitter)
 # define ts_make_fsemaphore scheme_make_fsemaphore
 # define mz_generate_direct_prim(direct_only, first_arg, reg, prim_indirect) \
   (mz_direct_only(direct_only), first_arg, mz_finishr_direct_prim(reg, prim_indirect))
+# define mz_finish_prim_lwe(prim, refr) (void)mz_finish_lwe(prim, refr)
 #endif
 
 /**********************************************************************/
@@ -1024,7 +1064,7 @@ static int past_limit(mz_jit_state *jitter)
 {
   if (((uintptr_t)jit_get_ip().ptr > (uintptr_t)jitter->limit + JIT_BUFFER_PAD_SIZE)
       || (jitter->retain_start)) {
-    printf("way past\n");
+    printf("way past\n"); abort();
   }
   return 0;
 }
@@ -1047,6 +1087,7 @@ double *scheme_mz_retain_double(mz_jit_state *jitter, double d);
 int scheme_mz_remap_it(mz_jit_state *jitter, int i);
 void scheme_mz_pushr_p_it(mz_jit_state *jitter, int reg);
 void scheme_mz_popr_p_it(mz_jit_state *jitter, int reg, int discard);
+void scheme_mz_need_space(mz_jit_state *jitter, int need_extra);
 int scheme_stack_safety(mz_jit_state *jitter, int cnt, int offset);
 #ifdef USE_FLONUM_UNBOXING
 int scheme_mz_flonum_pos(mz_jit_state *jitter, int i);
@@ -1127,12 +1168,15 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
 /*                              jitcall                               */
 /**********************************************************************/
 
+typedef struct jit_direct_arg jit_direct_arg;
+
 void *scheme_generate_shared_call(int num_rands, mz_jit_state *old_jitter, int multi_ok, int is_tail, 
 				  int direct_prim, int direct_native, int nontail_self);
 void scheme_ensure_retry_available(mz_jit_state *jitter, int multi_ok);
 int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_rands, 
 			mz_jit_state *jitter, int is_tail, int multi_ok, int no_call);
-int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_native, int need_set_rs, int is_inline);
+int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_native, int need_set_rs, 
+                              int is_inline, Scheme_Native_Closure *direct_to_code, jit_direct_arg *direct_arg);
 int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direct_native, int need_set_rs, 
 				  int multi_ok, int nontail_self, int pop_and_jump, int is_inlined);
 int scheme_generate_finish_tail_call(mz_jit_state *jitter, int direct_native);
@@ -1216,3 +1260,70 @@ void scheme_jit_register_traversers(void);
 #ifdef MZ_USE_LWC
 Scheme_Object *scheme_jit_continuation_apply_install(Apply_LWC_Args *args);
 #endif
+
+
+/**********************************************************************/
+
+/* Arithmetic operation codes. Used in jitarith.c and jitinline.c. */
+
+// +, add1, fx+, unsafe-fx+, fl+, unsafe-fl+
+#define ARITH_ADD      1
+// -, sub1, fx-, unsafe-fx-, fl-, unsafe-fl-
+#define ARITH_SUB     -1
+// *, fx*, unsafe-fx*, fl*, unsafe-fl*
+#define ARITH_MUL      2
+// /, fl/, unsafe-fl/
+#define ARITH_DIV     -2
+// quotient, fxquotient, unsafe-fxquotient
+#define ARITH_QUOT    -3
+// remainder, fxremainder, unsafe-fxremainder
+#define ARITH_REM     -4
+// modulo, fxmodulo, unsafe-fxmodulo
+#define ARITH_MOD     -5
+// bitwise-and, fxand, unsafe-fxand
+#define ARITH_AND      3
+// bitwise-ior, fxior, unsafe-fxior
+#define ARITH_IOR      4
+// bitwise-xor, fxxor, unsafe-fxxor
+#define ARITH_XOR      5
+// arithmetic-shift, fxlshift, unsafe-fxlshift
+#define ARITH_LSH      6
+// fxrshift, unsafe-fxrshift
+#define ARITH_RSH     -6
+// bitwise-not, fxnot, unsafe-fxnot
+#define ARITH_NOT      7
+// min, fxmin, unsafe-fxmin, flmin, unsafe-flmin
+#define ARITH_MIN      9
+// max, fxmax, unsafe-fxmax, flmax, unsafe-flmax
+#define ARITH_MAX      10
+// abs, fxabs, unsafe-fxabs, flabs, unsafe-flabs
+#define ARITH_ABS      11
+// exact->inexact, real->double-flonum, unsafe-fx->fl, ->fl, fx->fl
+#define ARITH_EX_INEX  12
+// sqrt, flsqrt, unsafe-flsqrt
+#define ARITH_SQRT     13
+// flfloor, flceiling, flround, fltruncate, flsin,  flcos, fltan,
+// flasin, flacos, flatan, flexp, fllog
+#define ARITH_FLUNOP   14
+// inexact->exact, unsafe-fl->fx, fl->exact-integer, fl->fx
+#define ARITH_INEX_EX  15
+
+
+/* Comparison codes. Used in jitarith.c and jitinline.c. */
+
+// zero?, =, fx=, unsafe-fx=, fl=, unsafe-fl=
+#define CMP_EQUAL  0
+// >=, fx>=, unsafe-fx>=, fl>=, unsafe-fl>=
+#define CMP_GEQ    1
+// <=, fx<=, unsafe-fx<=, fl<=, unsafe-fl<=
+#define CMP_LEQ   -1
+// >, fx>, unsafe-fx>, fl>, unsafe-fl>, positive?
+#define CMP_GT     2
+// <, fx<, unsafe-fx<, fl<, unsafe-fl<, negative?
+#define CMP_LT    -2
+// bitwise-bit-test?
+#define CMP_BIT    3
+// even?
+#define CMP_EVENP  4
+// odd?
+#define CMP_ODDP  -4

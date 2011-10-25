@@ -1,9 +1,9 @@
 #lang racket/gui
-  (require "../reduction-semantics.ss"
-           "test-util.ss"
-           (only-in "../private/matcher.ss" make-bindings make-bind)
+  (require "../reduction-semantics.rkt"
+           "test-util.rkt"
+           (only-in "../private/matcher.rkt" make-bindings make-bind)
            racket/match
-           "../private/struct.ss")
+           "../private/struct.rkt")
   
   (reset-count)
 
@@ -287,6 +287,10 @@
       (e (e e) number))
     ;; not a syntax error since first e is not a binder
     (test (pair? (redex-match L ((cross e) e ...) (term ((hole 2) 1)))) #t))
+  
+  ;; match structures do not report ..._x bindings
+  (test (map match-bindings (redex-match grammar (a ..._1) (term (a a a))))
+        '(()))
   
   (define-syntax (test-match stx)
     (syntax-case stx ()
@@ -1313,6 +1317,14 @@
          'x)
         (list 'a 'b 'c 'd))
   
+  
+  (let ([R (reduction-relation empty-language #:domain number (--> 1 a "first"))]
+        [S (reduction-relation empty-language (--> 2 a "second"))])
+    (test (apply-reduction-relation (union-reduction-relations R S) 2)
+          (list 'a))
+    (test (apply-reduction-relation (union-reduction-relations S R) 2)
+          (list 'a)))
+  
   (test (apply-reduction-relation
          (reduction-relation 
           empty-language
@@ -1929,6 +1941,58 @@
              (--> r p x))))
         '(a b c z y x))
   
+  
+    ;                                                                 
+    ;                                                                 
+    ;                    ;;                        ;;                 
+    ;                     ;                         ;            ;    
+    ;   ;; ;;   ;;;    ;; ;   ;;;  ;;  ;;           ;     ;;;   ;;;;; 
+    ;    ;;    ;   ;  ;  ;;  ;   ;  ;  ;            ;    ;   ;   ;    
+    ;    ;     ;;;;;  ;   ;  ;;;;;   ;;    ;;;;;    ;    ;;;;;   ;    
+    ;    ;     ;      ;   ;  ;       ;;             ;    ;       ;    
+    ;    ;     ;      ;   ;  ;      ;  ;            ;    ;       ;   ;
+    ;   ;;;;;   ;;;;   ;;;;;  ;;;; ;;  ;;         ;;;;;   ;;;;    ;;; 
+    ;                                                                 
+    ;                                                                 
+    ;                                                                 
+    ;                                                                 
+  
+    (let ()
+      (define-language L
+        (n number)
+        (x variable))
+      
+      (test (redex-let L ([(n_1 n_2) '(1 2)])
+                       (term (n_2 n_1)))
+            (term (2 1)))
+      (test (redex-let L ([(x_i ([x_0 n_0] ... [x_i n_i] [x_i+1 n_i+1] ...))
+                           '(b ([a 1] [b 2] [c 3]))])
+                       (term n_i))
+            2)
+      (test (with-handlers ([exn:fail:redex? exn-message])
+              (redex-let L ([(n) 1]) 'no-exn))
+            "redex-let: term 1 does not match pattern (n)")
+      (test (with-handlers ([exn:fail:redex? exn-message])
+              (redex-let L ([(n_1 ... n_i n_i+1 ...) '(1 2 3)]) 'no-exn))
+            "redex-let: pattern (n_1 ... n_i n_i+1 ...) matched term (1 2 3) multiple ways")
+      (test (redex-let L ([n_1 1])
+                       (redex-let L ([n_1 2] [n_2 (term n_1)])
+                                  (term (n_1 n_2))))
+            (term (2 1)))
+      (test (redex-let L ([n_1 1])
+                       (redex-let* L ([n_1 2] [n_2 (term n_1)])
+                                   (term (n_1 n_2))))
+            (term (2 2)))
+      
+      (test (redex-let L ([(n_1 n_1) '(1 1)]) (term n_1))
+            1)
+      (test-syn-err
+       (redex-let grammar ([(number) 1] [number 1]) (term number))
+       #rx"redex-let: duplicate pattern variable" 1)
+      (test
+       (redex-let* L ([(n_1) '(1)] [n_1 1]) (term n_1))
+       1))
+  
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;
   ;; examples from doc.txt
@@ -1960,7 +2024,7 @@
           (and m (length m)))
         1)
   
-  (require (lib "list.ss"))
+  (require mzlib/list)
   (let ()
     (define-metafunction lc-lang
       free-vars : e -> (x ...)
@@ -2032,6 +2096,9 @@
          '(x y))
         '(x . y))
   
+  (test ((term-match/single empty-language [() 'a] [() 'b])
+         '())
+        'a)
 
   (test (with-handlers ((exn:fail:redex? (λ (x) 'right-exn))
                         ((λ (x) #t) (λ (x) 'wrong-exn)))
@@ -2455,7 +2522,7 @@
     
     (define (equal-to-7 x) (= x 7))
     (test (capture-output (test-->>∃ #:steps 5 1+ 0 equal-to-7))
-          #rx"^FAILED .*\nno reachable term satisfying #<procedure:equal-to-7> \\(but some terms were not explored\\)\n$")
+          #rx"^FAILED .*\nno term satisfying #<procedure:equal-to-7> reachable from 0 \\(within 5 steps\\)\n$")
     
     (test (capture-output (test-->>∃ 1+ 0 7)) "")
     (test (capture-output (test-->>E 1+ 0 7)) "")
@@ -2468,7 +2535,7 @@
        (--> any any)))
     
     (test (capture-output (test-->>∃ identity 0 1))
-          #rx"^FAILED .*\nno reachable term equal to 1\n$")
+          #rx"^FAILED .*\nterm 1 not reachable from 0\n$")
     
     (test (capture-output (test-results)) "2 tests failed (out of 6 total).\n")
     
@@ -2485,5 +2552,4 @@
      #:blaming "tl-test"
      #:message "steps expression"))
   
-  (print-tests-passed 'tl-test.ss)
-  
+  (print-tests-passed 'tl-test.rkt)

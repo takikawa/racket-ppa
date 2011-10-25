@@ -49,10 +49,11 @@
 ;                                                                 
 
 
-(module lw-test mzscheme
-  (require "test-util.ss"
-           "../private/loc-wrapper.ss"
-           "lw-test-util.ss")
+(module lw-test racket/base
+  (require "test-util.rkt"
+           "../private/loc-wrapper.rkt"
+           "lw-test-util.rkt"
+           (only-in "../pict.rkt" to-lw/stx))
   
   (reset-count)
   
@@ -262,6 +263,14 @@
            2))
          0 0 0 3))
   
+  (test (normalize-lw (to-lw (|+1| x)))
+        (build-lw
+         (list (build-lw "(" 0 0 0 1)
+               (build-lw '|+1| 0 0 1 4)
+               (build-lw 'x 0 0 6 1)
+               (build-lw ")" 0 0 7 1))
+         0 0 0 8))
+  
   ;; this one seems suspicious: why does the second comma start at 1 instead of 0?
   ;; rendering seems to work, however, so we'll go with it ..
   (test (normalize-lw (to-lw ,,x))
@@ -278,5 +287,40 @@
            #t #f))
          0 0 0 3))
   
-  (print-tests-passed "lw-test.ss"))
+  (let ([from-str (λ (str) 
+                    (define p (open-input-string str))
+                    (port-count-lines! p)
+                    (read-syntax #f p))])
+    
+    (test (normalize-lw (to-lw/stx (from-str "()")))
+          (normalize-lw (to-lw ())))
+
+    (test (normalize-lw (to-lw/stx (from-str "a")))
+          (normalize-lw (to-lw a)))
+
+    (test (normalize-lw (to-lw/stx (from-str "(c)")))
+          (normalize-lw (to-lw (c))))
+    
+    (test (normalize-lw (to-lw/stx (from-str "((b))")))
+          (normalize-lw (to-lw ((b)))))
+    
+    (test (normalize-lw (to-lw/stx (from-str "(a b c)")))
+          (normalize-lw (to-lw (a b c))))
+    
+    (test (normalize-lw (to-lw/stx (from-str "1")))
+          (normalize-lw (to-lw 1)))
+    
+    (test (normalize-lw (to-lw/stx (from-str "(#t)")))
+          (normalize-lw (to-lw (#t))))
+    
+    (test (normalize-lw (to-lw/stx (from-str "#f")))
+          (normalize-lw (to-lw #f)))
+    
+    (test (normalize-lw (to-lw/stx (from-str "(a b)")))
+          (normalize-lw (to-lw (a b))))
+    
+    (test (normalize-lw (to-lw/stx (from-str "(a ((b)) c 1 #t)")))
+          (normalize-lw (to-lw (a ((b)) c 1 #t)))))
+  
+  (print-tests-passed "lw-test.rkt"))
 

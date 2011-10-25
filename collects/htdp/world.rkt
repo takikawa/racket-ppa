@@ -24,7 +24,7 @@
 ;; Wed Apr 23 11:42:25 EDT 2008: fixed reverse bug in animation 
 ;; Thu Mar 20 17:15:54 EDT 2008: fixed place-image0, which used shrink off-by-1
 ;; Mon Sep 17 09:40:39 EDT 2007: run-simulation now allows recordings, too
-;; Mon Aug  6 19:50:30 EDT 2007: exporting both add-line from image.ss and scene+line 
+;; Mon Aug  6 19:50:30 EDT 2007: exporting both add-line from "image.rkt" and scene+line 
 ;; Fri May  4 18:05:33 EDT 2007: define-run-time-path 
 ;; Thu May  3 22:06:16 EDT 2007: scene # image; pasteboard% for text%
 ;; Sat Apr 28 13:31:02 EDT 2007: fixed the image and animated-gif thing, using Matthew's lib
@@ -60,7 +60,7 @@ Matthew
 ;; Sun Dec 09 23:17:41 EST 2006: add-line fixed so it cuts off lines before drawing
 ;; Mon Mar 27 10:29:28 EST 2006: integrated Felix's mouse events
 ;; Wed Jan 25 13:38:42 EST 2006: on-redraw: proc is now called on installation
-;; Tue Jan  3 11:17:50 EST 2006: changed add-line behavior in world.ss 
+;; Tue Jan  3 11:17:50 EST 2006: changed add-line behavior in "world.rkt"
 ;; Sat Dec 10 19:39:03 EST 2005: fixed name, changed interface to on-key-event
 ;; Fri Dec  9 21:39:03 EST 2005: remoevd (update ... produce ...); added on-redraw 
 ;; Thu Dec  1 17:03:03 EST 2005: fixed place-image; all coordinates okay now
@@ -73,6 +73,7 @@ Matthew
          htdp/image
          mrlib/cache-image-snip
          lang/prim
+         lang/private/rewrite-error-message
          (for-syntax scheme/base))
 
 (require mrlib/gif)
@@ -180,13 +181,8 @@ Matthew
     (define args (length x))
     (if (or (= args 5) (= args 4))
         (apply big-bang0 x) 
-        (error 'big-bang msg))))
-(define msg
-  (string-append
-   "big-bang consumes 4 or 5 arguments:\n"
-   "-- (big-bang <width> <height> <rate> <world0>)\n"
-   "-- (big-bang <width> <height> <rate> <world0> <animated-gif>)\n"
-   "see Help Desk."))
+        (tp-error 'big-bang "expects 4 or 5 arguments, given ~a" args))))
+
 (define *running?* #f)
 (define big-bang0
   (case-lambda 
@@ -199,17 +195,17 @@ Matthew
      ;; ============================================
      (check-arg 'big-bang
                 (and (number? delta) (<= 0 delta 1000))
-                "number [of seconds] between 0 and 1000"
+                "number of seconds between 0 and 1000"
                 "third"
                 delta)
      (check-arg 'big-bang 
                 (boolean? animated-gif)
-                "boolean expected"
+                "boolean"
                 "fifth"
                 animated-gif)
      (let ([w (coerce w)]
            [h (coerce h)])
-       (when *running?*  (error 'big-bang "the world is still running"))
+       (when *running?*  (error 'big-bang "the world is still running, cannot start another world"))
        (set! *running?* #t)
        (callback-stop!)
        ;; (when (vw-init?) (error 'big-bang "big-bang already called once"))
@@ -288,13 +284,7 @@ Matthew
     (define args (length x))
     (if (or (= args 5) (= args 4))
         (apply run-simulation0 x) 
-        (error 'run-simulation msg-run-simulation))))
-(define msg-run-simulation
-  (string-append
-   "consumes 4 or 5 arguments:\n"
-   "-- (run-simulation <width> <height> <rate> <world-to-world-function>)\n"
-   "-- (run-simulation <width> <height> <rate> <world-to-world-function> <create-animated-gif?>)\n"
-   "see Help Desk."))
+        (tp-error 'run-simulation "expects 4 or 5 arguments, given ~a" args))))
 
 
 (define run-simulation0
@@ -343,7 +333,7 @@ Matthew
 (define (check-scene tag i rank)
   (if (image? i)
       (unless (scene? i)
-        (error tag "scene expected, given image whose pinhole is at (~s,~s) instead of (0,0)"
+        (tp-error tag "expects a scene, given image whose pinhole is at (~s,~s) instead of (0,0)"
                (pinhole-x i) (pinhole-y i)))
       (check-arg tag #f "image" rank i)))
 
@@ -415,7 +405,10 @@ Matthew
             [(lower-left)  (if (number? low) (add low h) (add 0 lft))]
             [(upper-right) (if (number? upp) (add upp 0) (add w rgt))]
             [(lower-right) (if (number? low) (add low h) (add w rgt))]
-            [else (error 'dir "contract violation: ~e" dir)])]
+            [else (tp-error
+                   'dir
+                   "expected a symbol for the direction, such as 'upper-left 'lower-right 'upper-right or 'lower-right, given ~a"
+                   dir)])]
          [(and (< 0 x1 w) (< 0 y1 h)) ;; (x1,y1) in interior; symmetry!
           (add-line-to-scene0 img x1 y1 x0 y0 c)]
          [else 
@@ -524,7 +517,7 @@ Matthew
 (define unique-world (cons 1 1))
 (define (check-world tag)
   (when (eq? unique-world the-world) 
-    (error tag "evaluate (big-bang Number Number Number World) first")))
+    (tp-error tag "big-bang has not been called before calling ~a" tag)))
 
 (define the-world unique-world)
 (define the-world0 unique-world)
@@ -696,7 +689,7 @@ Matthew
       [(tick)  (timer-callback0 world)]
       [(key)   (key-callback0 world (cadr fst))]
       [(mouse) (mouse-callback0 world (cadr fst) (caddr fst) (cadddr fst))]
-      [else (error 'play-back "bad type of event: ~s" fst)]))
+      [else (tp-error 'play-back "bad type of event: ~s" fst)]))
   ;; --- creating images 
   (define total (+ (length event-history) 1))
   (define image-count 0)
@@ -872,7 +865,7 @@ Matthew
         [(send e entering?)    'enter]
         [(send e leaving?)     'leave]
         [else ; (send e get-event-type)
-         (error 'on-mouse-event
+         (tp-error 'on-mouse-event
                 (format 
                  "Unknown event type: ~a"
                  (send e get-event-type)))]))

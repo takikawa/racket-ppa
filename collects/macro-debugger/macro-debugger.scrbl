@@ -16,7 +16,7 @@
                          macro-debugger/stepper-text))
      the-eval))
 
-@title{@bold{Macro Debugger}}
+@title{Macro Debugger: Inspecting Macro Expansion}
 
 @author["Ryan Culpepper"]
 
@@ -52,7 +52,7 @@ stepping through the expansion.
 
 @defmodule[macro-debugger/expand]
 
-This module provides @scheme[expand]-like procedures that allow the
+This module provides @racket[expand]-like procedures that allow the
 user to specify macros whose expansions should be hidden.
 
 Warning: because of limitations in the way macro expansion is
@@ -62,8 +62,8 @@ result as the original syntax.
 @defproc[(expand-only [stx any/c] [transparent-macros (listof identifier?)])
          syntax?]{
 
-  Expands the given syntax @scheme[stx], but only shows the expansion
-  of macros whose names occur in @scheme[transparent-macros].
+  Expands the given syntax @racket[stx], but only shows the expansion
+  of macros whose names occur in @racket[transparent-macros].
 
   @(examples #:eval the-eval
              (syntax->datum
@@ -75,7 +75,7 @@ result as the original syntax.
 @defproc[(expand/hide [stx any/c] [hidden-macros (listof identifier?)])
          syntax?]{
 
-  Expands the given syntax @scheme[stx], but hides the expansion of macros in the
+  Expands the given syntax @racket[stx], but hides the expansion of macros in the
   given identifier list (conceptually, the complement of expand-only).
 
   @(examples #:eval the-eval
@@ -87,8 +87,8 @@ result as the original syntax.
 @defproc[(expand/show-predicate [stx any/c] [show? (-> identifier? boolean?)])
          syntax?]{
 
-  Expands the given syntax @scheme[stx], but only shows the expansion of macros
-  whose names satisfy the predicate @scheme[show?].
+  Expands the given syntax @racket[stx], but only shows the expansion of macros
+  whose names satisfy the predicate @racket[show?].
 
   @(examples #:eval the-eval
              (syntax->datum
@@ -116,12 +116,12 @@ the macro's context. The remark is only displayed if the macro that
 emits it is considered transparent by the hiding policy.
 
 By default, syntax objects in remarks have the transformer's mark
-applied (using @scheme[syntax-local-introduce]) so that their
+applied (using @racket[syntax-local-introduce]) so that their
 appearance in the macro stepper matches their appearance after the
-transformer returns. Unmarking is suppressed if @scheme[unmark?] is
-@scheme[#f].
+transformer returns. Unmarking is suppressed if @racket[unmark?] is
+@racket[#f].
 
-@schemeblock[
+@racketblock[
 (define-syntax (mymac stx)
   (syntax-case stx ()
     [(_ x y)
@@ -141,9 +141,9 @@ transformer returns. Unmarking is suppressed if @scheme[unmark?] is
          void?]{
 
 Emits an event that simulates a local expansion step from
-@scheme[before] to @scheme[after].
+@racket[before] to @racket[after].
 
-The @scheme[id] argument acts as the step's ``macro'' for the purposes
+The @racket[id] argument acts as the step's ``macro'' for the purposes
 of macro hiding.
 }
 
@@ -178,8 +178,8 @@ of macro hiding.
          (symbol? -> void?)]{
 
   Returns a procedure that can be called on the symbol
-  @scheme['next] to print the next step or on the symbol
-  @scheme['all] to print out all remaining steps.
+  @racket['next] to print the next step or on the symbol
+  @racket['all] to print out all remaining steps.
 }
 
 
@@ -197,7 +197,7 @@ of macro hiding.
 @defproc[(browse-syntaxes [stxs (listof syntax?)])
          void?]{
 
-  Like @scheme[browse-syntax], but shows multiple syntax objects in
+  Like @racket[browse-syntax], but shows multiple syntax objects in
   the same frame. The coloring partitions are shared between the two,
   showing the relationships between subterms in different syntax
   objects.
@@ -270,7 +270,7 @@ syntax may be original, or it may be produced by the expansion of a
 nonhygienic macro.
 
 Note: even terms that have the same marks might not be
-@scheme[bound-identifier=?] to each other, because they might occur in
+@racket[bound-identifier=?] to each other, because they might occur in
 different environments.
 
 @;@example[(bound-identifier=? (let ([x 1]) #'x) #'x)]
@@ -284,8 +284,8 @@ selected term are highlighted in yellow.
 
 The available secondary partitionings are:
 @itemize[
-@item{@scheme[bound-identifier=?]}
-@item{@scheme[free-identifier=?]}
+@item{@racket[bound-identifier=?]}
+@item{@racket[free-identifier=?]}
 ]
 
 @subsection{Properties}
@@ -298,12 +298,12 @@ selected syntax object. The properties pane has two tabbed pages:
 
       If the selection is an identifier, shows the binding information
       associated with the syntax object. For more information, see
-      @scheme[identifier-binding], etc.
+      @racket[identifier-binding], etc.
 }
 @item{@bold{Syntax Object}:
 
       Displays source location information and other properties (see
-      @scheme[syntax-property]) carried by the syntax object.
+      @racket[syntax-property]) carried by the syntax object.
 }
 ]
 
@@ -313,3 +313,67 @@ The binding information of a syntax object may not be the same as
 the binding structure of the program it represents. The binding
 structure of a program is only determined after macro expansion is
 complete.
+
+
+@section{Checking requires}
+@section-index["useless-requires"]
+
+@defmodule[macro-debugger/analysis/check-requires]
+
+@defproc[(check-requires [module-name module-path?])
+         (listof (list/c 'keep   module-path-index? number? (or/c string? #f))
+	         (list/c 'bypass module-path-index? number?)
+		 (list/c 'drop   module-path-index? number?))]{
+
+Estimate a module's useless requires.
+The procedure returns one element per (non-label) require in the
+following format:
+@itemlist[
+@item{
+  @racket['keep] @racket[module] at @racket[phase] @racket[(optional-comment)]
+  @itemlist[
+  @item{The require must be kept because bindings defined within it are used.}
+  @item{The optional comment indicates if the require must be kept
+        @itemlist[
+	@item{only because its bindings are re-exported}
+	@item{only because the whitelist DB says so}
+	]}]}
+@item{
+  @racket['bypass] @racket[module] at @racket[phase]
+  @itemlist[
+  @item{The require is used, but only for bindings that could be more
+        directly obtained via another module. For example, @racket[racket]
+	can be bypassed in favor of some subset of @racket[racket/base],
+	@racket[racket/contract], etc.}]}
+@item{
+  @racket['drop] @racket[module] at @racket[phase]
+  @itemlist[
+  @item{The require appears to be unused. Unless it must be kept for side
+        effects or for bindings of a very unusual macro, it can be dropped
+        entirely.}]}]
+
+Examples:
+@racketblock[
+ (check-requires 'typed-scheme)
+ (check-requires 'unstable/markparam)
+ (check-requires 'macro-debugger/syntax-browser/widget)
+]
+}
+
+A scripting interface to @racket[macro-debugger/analysis/check-requires]
+usable from the command-line is available at
+@racket[macro-debugger/analysis/check-requires-script.rkt].
+
+Example (from racket root directory):
+
+@commandline{racket -l macro-debugger/analysis/check-requires-script \
+  collects/syntax/*.rkt}
+
+
+@defproc[(show-requires [module-name module-path?])
+         (listof (list/c 'keep   module-path? number? (or/c string? #f))
+	         (list/c 'bypass module-path? number?)
+		 (list/c 'drop   module-path? number?))]{
+Similar to @racket[check-requires], but outputs module paths instead of
+module path indexes, for more readability.
+}

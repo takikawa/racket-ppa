@@ -1,15 +1,14 @@
-; graphics.ss
 ; Simple graphics routines for GRacket
 ; Originally written by Johnathan Franklin
 
 (module graphics-posn-less-unit mzscheme
   (require mzlib/unit
-	   mred/mred-sig
+           mred/mred-sig
            mred
-	   mzlib/class
-	   mzlib/class100
-	   mzlib/etc
-	   "graphics-sig.ss")
+           mzlib/class
+           mzlib/class100
+           mzlib/etc
+           "graphics-sig.rkt")
   (provide graphics-posn-less@)
 
   (define-syntax define-do-pixel
@@ -1110,7 +1109,7 @@
     (opt-lambda (filename [type 'unknown/mask])
       (check 'draw-pixmap-posn
 	     (andp path-string? file-exists?) filename "filename"
-	     (lambda (x) (memq x '(gif xbm xpm bmp pict unknown unknown/mask gif/mask))) type "file type symbol")
+	     (lambda (x) (memq x '(gif xbm xpm bmp unknown unknown/mask gif/mask))) type "file type symbol")
       (let* ([bitmap (make-object mred:bitmap% filename type)])
 	(lambda (viewport)
 	  (check 'draw-pixmap-posn
@@ -1155,7 +1154,7 @@
       (opt-lambda (filename [kind 'xpm])
 	(check 'save-pixmap
 	       (andp path-string? (orp relative-path? absolute-path?)) filename "filename"
-	       (lambda (x) (memq x '(xpm xbm bmp pict))) kind "file type symbol")
+	       (lambda (x) (memq x '(xpm xbm bmp))) kind "file type symbol")
 	(let ([bm (viewport-bitmap viewport)])
 	  (send bm save-file filename kind)))))
 

@@ -187,13 +187,13 @@ READ_ONLY Scheme_Object *scheme_single_inf_object, *scheme_single_minus_inf_obje
 
 
 #ifdef FREEBSD_CONTROL_387
-#include <machine/floatingpoint.h>
+# include <ieeefp.h>
 #endif
 #ifdef LINUX_CONTROL_387
-#include <fpu_control.h>
+# include <fpu_control.h>
 #endif
 #ifdef ALPHA_CONTROL_FP
-#include <machine/fpu.h>
+# include <machine/fpu.h>
 #endif
 
 #ifdef ASM_DBLPREC_CONTROL_87
@@ -243,7 +243,7 @@ scheme_init_number (Scheme_Env *env)
   MZ_SIGSET(SIGFPE, SIG_IGN);
 #endif
 #ifdef FREEBSD_CONTROL_387
-  fpsetmask(0);
+  (void)fpsetmask(0);
 #endif
 #ifdef LINUX_CONTROL_387
   __setfpucw(_FPU_EXTENDED + _FPU_RC_NEAREST + 0x3F);
@@ -377,6 +377,10 @@ scheme_init_number (Scheme_Env *env)
   scheme_add_global_constant("real->single-flonum", p, env);
 
   p = scheme_make_folding_prim(real_to_double_flonum, "real->double-flonum", 1, 1, 1);
+  if (scheme_can_inline_fp_op())
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  else
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
   scheme_add_global_constant("real->double-flonum", p, env);
   
   scheme_add_global_constant("exact?", 
@@ -2193,8 +2197,8 @@ atan_prim (int argc, Scheme_Object *argv[])
   int dbl = 0;
 # define MZ_USE_SINGLE !dbl
 # else
-  int single = 0;
-# define MZ_USE_SINGLE single == 2
+  int sgl = 0;
+# define MZ_USE_SINGLE sgl == 2
 #endif
 #endif
 
@@ -2206,7 +2210,7 @@ atan_prim (int argc, Scheme_Object *argv[])
   else if (SCHEME_FLTP(n1)) {
     v = SCHEME_FLT_VAL(n1);
 # ifndef USE_SINGLE_FLOATS_AS_DEFAULT
-    single++;
+    sgl++;
 # endif
   }
 #endif
@@ -2254,7 +2258,7 @@ atan_prim (int argc, Scheme_Object *argv[])
     else if (SCHEME_FLTP(n2)) {
       v2 = SCHEME_FLT_VAL(n2);
 # ifndef USE_SINGLE_FLOATS_AS_DEFAULT
-      single++;
+      sgl++;
 # endif
     }
 #endif
@@ -2292,7 +2296,7 @@ atan_prim (int argc, Scheme_Object *argv[])
 #endif
 
     v = atan2(v, v2);
-  } else {
+  } else { /* 1-argument case */
     if (argv[0] == zeroi)
       return zeroi;
 
@@ -2300,7 +2304,7 @@ atan_prim (int argc, Scheme_Object *argv[])
 
 #ifdef MZ_USE_SINGLE_FLOATS
 # ifndef USE_SINGLE_FLOATS_AS_DEFAULT
-    single++;
+    sgl++; /* sgl needs to be 2 to return a single-precision result */
 # endif
 #endif    
   }
@@ -2623,7 +2627,7 @@ scheme_expt(int argc, Scheme_Object *argv[])
 	if (!norm) {
 	  int isnonneg, iseven, negz;
 #ifdef MZ_USE_SINGLE_FLOATS
-	  int single = !SCHEME_DBLP(n) && !SCHEME_DBLP(e);
+	  int sgl = !SCHEME_DBLP(n) && !SCHEME_DBLP(e);
 #endif
 
 	  if (scheme_is_integer(e)) {
@@ -2638,13 +2642,13 @@ scheme_expt(int argc, Scheme_Object *argv[])
 	  if (isnonneg) {
 	    if (iseven || !negz) {
 #ifdef MZ_USE_SINGLE_FLOATS
-	      if (single)
+	      if (sgl)
 		return scheme_zerof;
 #endif
 	      return scheme_zerod;
 	    } else {
 #ifdef MZ_USE_SINGLE_FLOATS
-	      if (single)
+	      if (sgl)
 		return scheme_nzerof;
 #endif
 	      return scheme_nzerod;
@@ -2652,13 +2656,13 @@ scheme_expt(int argc, Scheme_Object *argv[])
 	  } else {
 	    if (iseven || !negz) {
 #ifdef MZ_USE_SINGLE_FLOATS
-	      if (single)
+	      if (sgl)
 		return scheme_single_inf_object;
 #endif
 	      return scheme_inf_object;
 	    } else {
 #ifdef MZ_USE_SINGLE_FLOATS
-	      if (single)
+	      if (sgl)
 		return scheme_single_minus_inf_object;
 #endif
 	      return scheme_minus_inf_object;

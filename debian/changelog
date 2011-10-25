@@ -1,9 +1,35 @@
-racket (5.1.1+dfsg1-2~bpo60+1) squeeze-backports; urgency=low
+racket (5.1.3+dfsg1-1) unstable; urgency=low
 
-  * Rebuild for squeeze-backports.
-  * Modify gitpkg hook control file to support ~bpo versions
+  [ James Vega ]
+  * New Upstream version
+  * Correct the /u/s/d/racket/release-notes symlink. (Closes: #628887)
+  * Captialize Scheme in package short descriptions. (Closes: #625276)
+  * Build-Depend on libffi-dev to use the system library instead of the
+    bundled version.
+  * Update Lintian overrides
+    + Correct path according for unstripped-binary-or-object
+    + Remove obsolete embedded-zlib override
+    + Add override for menu-icon-missing, icon is shipped in racket-common
+  * Add dversionmangle to watch file to strip dfsg.
+  * Bump Standards-Version to 3.9.2.0, no changes needed.
+  * Update Vcs-* for the Alioth transition.
+  * Restore collects/scribble/sigplan and re-enable building of scribble's
+    documentation.  (Closes: #636699)
+  * Symlink racket's icons into /usr/share/pixmaps.
+  * Install a desktop file for drracket.  (Closes: #513390)
 
- -- David Bremner <bremner@debian.org>  Fri, 27 May 2011 18:00:00 -0300
+  [ David Bremner ]
+  * Use upstream stubs for sigplanconf.cls and jfp.cls, restore 
+    collects/scribble/jfp (licensing questions resolved).
+  * remove kFreeBSD patches,  now upstream
+
+ -- David Bremner <bremner@debian.org>  Sun, 21 Aug 2011 22:51:49 -0300
+
+racket (5.1.1+dfsg1-3) unstable; urgency=low
+
+  * Replace kFreeBSD signal patch with upstream version of same.
+
+ -- David Bremner <bremner@debian.org>  Mon, 16 May 2011 15:58:45 +0200
 
 racket (5.1.1+dfsg1-2) unstable; urgency=low
 

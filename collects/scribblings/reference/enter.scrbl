@@ -1,14 +1,17 @@
 #lang scribble/doc
-@(require "mz.ss"
-          (for-label racket/enter))
+@(require "mz.rkt" (for-label racket/enter))
 
 @title[#:tag "enter"]{Interactive Module Loading}
 
 @note-init-lib[racket/enter]
 
-@defform*[[(enter! module-path)
-           (enter! #f)
-           (enter! module-path noise-flag)]]{
+@defform*/subs[[(enter! module-path)
+                (enter! #f)
+                (enter! module-path flag ...+)]
+               ([flag #:quiet
+                      #:verbose-reload
+                      #:verbose
+                      #:dont-re-require-enter])]{
 
 Intended for use in a @tech{REPL}, such as when @exec{racket} is
 started in interactive mode. When a @racket[module-path] is provided
@@ -27,13 +30,21 @@ module is re-loaded. Re-loading support works only for modules that
 are first loaded (either directly or indirectly through transitive
 @racket[require]s) via @racket[enter!].
 
-After switching namespaces to the designated module, @racket[enter!]
-automatically requires @racket[racket/enter] into the namespace, so
-that @racket[enter!] can be used to switch namespaces again.
+Additional @racket[flag]s can customize aspects of @racket[enter!]:
+@itemize[
 
-When @racket[enter!] loads or re-loads a module from a file, it can
-print a message to @racket[(current-error-port)], as determined by the
-optional @racket[noise-flag].  It can be @racket[#:verbose] to print a
-message about such loads and re-loads, @racket[#:verbose-reload] to
-print a message only for re-loaded modules, and it can be
-@racket[#:quiet] for no printouts.}
+ @item{When @racket[enter!] loads or re-loads a module from a file, it
+  can print a message to @racket[(current-error-port)].  Use the
+  @racket[#:verbose] flag to print a message about such loads and
+  re-loads, @racket[#:verbose-reload] to print a message only for
+  re-loaded modules, and @racket[#:quiet] for no printouts.  The default
+  reporting corresponds to @racket[#:verbose-reload].}
+
+ @item{After switching namespaces to the designated module,
+  @racket[enter!] automatically requires @racket[racket/enter] into the
+  namespace, so that @racket[enter!] can be used to switch namespaces
+  again.  In some cases, requiring @racket[racket/enter] 
+  might not be desirable (e.g., in a tool
+  that uses @racket[racket/enter]); use the
+  @racket[#:dont-re-require-enter] flag to disable the require.}]
+}

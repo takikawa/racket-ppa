@@ -133,13 +133,14 @@
              (all-from-except '#%kernel lambda λ #%app #%module-begin apply prop:procedure 
                               procedure-arity procedure-reduce-arity raise-arity-error
                               procedure->method procedure-rename
-                              chaperone-procedure impersonate-procedure)
+                              chaperone-procedure impersonate-procedure
+                              assq assv assoc
+                              prop:incomplete-arity)
              (all-from "reqprov.rkt")
              (all-from-except "for.rkt"
                               define-in-vector-like
                               define-:vector-like-gen
                               make-in-vector-like
-                              normalise-inputs
                               stream? stream-empty? stream-first stream-rest 
                               prop:stream in-stream empty-stream make-do-stream)
              (all-from "kernstruct.rkt")

@@ -1,15 +1,34 @@
 #lang racket/gui
 
-(require (for-syntax "syn-aux.ss")
-         "checked-cell.ss"
-         "check-aux.ss"
-         "timer.ss"    
-         "last.ss"
+;; ---------------------------------------------------------------------------------------------------
+;; provides the universe functionality (distributed worlds)
+
+(require "checked-cell.rkt"
+         "check-aux.rkt"
+         "timer.rkt"    
+         "last.rkt"
+         "clauses-spec-aux.rkt"
          htdp/error
          (only-in mzlib/etc evcase)
          string-constants)
 
-(provide universe%)
+(provide 
+ universe%
+ ;; --- sample worlds and function on worlds ---
+ iworld?  ;; Any -> Boolean 
+ iworld=? ;; World World -> Boolean 
+ iworld-name ;; World -> Symbol 
+ iworld1  ;; sample worlds 
+ iworld2
+ iworld3
+ ;; --- sending 'mail' to worlds ---
+ ;; type Bundle = (make-bundle [Listof World] Universe [Listof Mail]) 
+ ;; type Mail = (make-mail World S-expression)
+ make-bundle ;; [Listof World] Universe [Listof Mail] -> Bundle 
+ bundle?     ;; is this a bundle? 
+ make-mail   ;; World S-expression -> Mail 
+ mail?       ;; is this a real mail? 
+ )
 
 ;                                                          
 ;                                                          
@@ -48,7 +67,7 @@
       
       (field 
        [universe 
-        (new checked-cell% [msg "UniSt"] [value0 universe0] [ok? check-with] 
+        (new checked-cell% [value0 universe0] [ok? check-with] 
              [display (if (string? state) state (and state  "your server's state"))])])
  
       ;; -----------------------------------------------------------------------
@@ -68,7 +87,7 @@
 	      (define n (if (object-name name) (object-name name) name))
               (define-values (u mails bad) 
                 (bundle> n (name (send universe get) a ...)))
-              (send universe set (format "~a callback" 'name) u)
+              (send universe set (format "value returned from ~a" 'name) u)
               (unless (boolean? to-string) (send gui add (to-string u)))
               (broadcast mails)
               (for-each (lambda (iw)
@@ -101,8 +120,10 @@
         (kill iworld))
       
       ;; tick, tock : deal with a tick event for this world 
-      (def/cback pubment (ptock) (lambda (w) (pptock w)))
+      (def/cback pubment (ptock) (let ([on-tick (lambda (w) (pptock w))]) on-tick))
       (define/public (pptock w) (void))
+      (define/public (name-of-tick-handler)
+        "the on-tick-handler")
       
       ;; IWorld -> Void 
       ;; effect: remove from given iworld from iworlds 
@@ -160,7 +181,7 @@
                 (loop))))
           ;; --- go universe go ---
           (set! iworlds '())
-          (send universe set "initial value" universe0)
+          (send universe set "initial expression" universe0)
           (send gui add "a new universe is up and running")
           (thread loop)))
       
@@ -204,14 +225,6 @@
 ;                                            
 ;                                            
 ;                                            
-
-(provide 
- iworld?  ;; Any -> Boolean 
- iworld=? ;; World World -> Boolean 
- iworld-name ;; World -> Symbol 
- iworld1  ;; sample worlds 
- iworld2
- iworld3)
 
 ;; --- the server representation of a world --- 
 (define-struct iworld (in out name info) #; #:transparent)
@@ -332,15 +345,6 @@
 ;                              
 ;                              
 
-(provide
- ;; type Bundle = (make-bundle [Listof World] Universe [Listof Mail]) 
- ;; type Mail = (make-mail World S-expression)
- make-bundle ;; [Listof World] Universe [Listof Mail] -> Bundle 
- bundle?     ;; is this a bundle? 
- make-mail   ;; World S-expression -> Mail 
- mail?       ;; is this a real mail? 
- )
-
 (define-struct bundle (state mails bad) #:transparent)
 
 (set! make-bundle
@@ -361,10 +365,7 @@
 ;; Symbol Any ->* Universe [Listof Mail] [Listof IWorld]
 (define (bundle> tag r)
   (unless (bundle? r) 
-    (raise
-      (make-exn
-	(format "error: bundle expected from ~a, given: ~e" tag r)
-	(current-continuation-marks))))
+    (tp-error tag "expected the ~a function to return a bundle, but it returned ~e" tag r))
   (values (bundle-state r) (bundle-mails r) (bundle-bad r)))
 
 (define-struct mail (to content) #:transparent)

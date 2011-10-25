@@ -72,7 +72,7 @@ all of the names in the tools library, for use defining keybindings
                                   [_
                                    (raise-syntax-error 'provide/dr/doc "unknown thing" case)])])
                    (with-syntax ([mid (munge-id #'id)])
-                     #'(thing-doc mid ctc ("This is provided for backwards compatibility; new code should use " (scheme id) " instead.")))))
+                     #'(thing-doc mid ctc ("This is provided for backwards compatibility; new code should use " (racket id) " instead.")))))
                (syntax->list #'(case ...)))])])
     (syntax-case stx ()
       [(_  rst ...)
@@ -96,7 +96,7 @@ all of the names in the tools library, for use defining keybindings
     
     See @racket[read-language] for more details on how language's specify how to opt out.
     DrRacket will invoke the @tt{get-info} proc from @racket[read-language] with
-    @indexed-scheme['drscheme:opt-out-toolbar-buttons]. If the result is a list of symbols, the
+    @indexed-racket['drscheme:opt-out-toolbar-buttons]. If the result is a list of symbols, the
     listed symbols are opted out. If the result is @racket[#f], all buttons are opted
     out. The default is the empty list, meaning that all opt-out buttons appear.
     })
@@ -425,7 +425,7 @@ all of the names in the tools library, for use defining keybindings
     
     It looks for both stack trace information in the continuation
     marks both via the
-    @schememodname[errortrace/errortrace-key] 
+    @racketmodname[errortrace/errortrace-key] 
     module and via 
     @racket[continuation-mark-set->context].
     
@@ -522,24 +522,32 @@ all of the names in the tools library, for use defining keybindings
  
  (proc-doc/names
   drracket:debug:srcloc->edition/pair
-  (-> srcloc?
-      (or/c #f (is-a?/c drracket:rep:text<%>))
-      (or/c #f (is-a?/c drracket:unit:definitions-text<%>))
-      (or/c #f (cons/c (let ([weak-box-containing-an-editor?
-                              (λ (x) (and (weak-box? x)
-                                          (let ([v (weak-box-value x)])
-                                            (or (not v)
-                                                (is-a?/c v editor<%>)))))])
-                         weak-box-containing-an-editor?)
-                       number?)))
-  (srcloc ints defs)
+  (->* (srcloc?
+        (or/c #f (is-a?/c drracket:rep:text<%>))
+        (or/c #f (is-a?/c drracket:unit:definitions-text<%>)))
+       ((or/c #f (and/c hash? hash-equal?)))
+       (or/c #f (cons/c (let ([weak-box-containing-an-editor?
+                               (λ (x) (and (weak-box? x)
+                                           (let ([v (weak-box-value x)])
+                                             (or (not v)
+                                                 (is-a?/c v editor<%>)))))])
+                          weak-box-containing-an-editor?)
+                        number?)))
+  ((srcloc ints defs)
+   ((cache #f)))
   @{Constructs a edition pair from a source location,
     returning the current edition of the editor editing
     the source location (if any).
     
     The @racket[ints] and @racket[defs] arguments are used to map source locations, 
     in the case that the source location corresponds to the definitions
-    window (when it has not been saved) or the interactions window.
+    window (when it has not been saved) or the interactions window. This calls
+    @racket[normalize-path], so to avoid the severe performance penalty that can
+    incur on some filesystems, the @racket[cache] argument is consulted and updated, 
+    when it is provided. Use this argument if you're calling 
+    @racket[drracket:debug:srcloc->edition/pair] a number of times in a loop, when you
+    do not expect the filesystem to change across iterations of the loop. The initial
+    argument should be an empty equal hash (e.g., @racket[(make-hash)]).
     })
  
  
@@ -798,8 +806,8 @@ all of the names in the tools library, for use defining keybindings
   @{Returns a keymap that binds various DrRacket-specific
     keybindings. This keymap is used in the definitions
     and interactions window.
-    
-    Defaultly binds C-x;o to a function that switches
+
+    By default, binds C-x;o to a function that switches
     the focus between the definitions and interactions
     windows. Also binds f5 to Execute and f1 to Help Desk.})
  
@@ -1131,9 +1139,8 @@ all of the names in the tools library, for use defining keybindings
     is initialized to.
     If unsure of a default, the currently set language
     in the user's preferences can be obtained via:
-    @schemeblock[
-                 (preferences:get (drracket:language-configuration:get-settings-preferences-symbol))
-                                                                                                    ]
+    @racketblock[
+      (preferences:get (drracket:language-configuration:get-settings-preferences-symbol))]
     
     The @racket[parent] argument is used as the parent
     to the dialog.
@@ -1204,69 +1211,68 @@ all of the names in the tools library, for use defining keybindings
                                 "--- " desc ...)])])
        (itemize
         @cap[drracket:check-syntax-button boolean? #t]{controls the visiblity of the check syntax button}
-        @cap[drracket:language-menu-title
-             string?
+        @cap[drracket:language-menu-title string?
              (string-constant scheme-menu-name)]{
-                                                 controls the name of the menu just to the right of the language
-                                                 menu (defaultly named ``Racket'')}
+          controls the name of the menu just to the right of the language
+          menu (named ``Racket'' by default)}
         @cap[drscheme:define-popup
              (or/c #f
                    (list/c string? string? string?)
                    (cons/c string? string?))
              (list "(define" "(define ...)" "δ")]{
-                                                  specifies the prefix that the define popup should look for and what
-                                                  label it should have, or @racket[#f] if it should not appear at all.
-                                                  
-                                                  If the list of three strings alternative is used, the first string is
-                                                  the prefix that is looked for when finding definitions. The second
-                                                  and third strings are used as the label of the control, in horizontal
-                                                  and vertical mode, respectively.
-                                                  
-                                                  The pair of strings alternative is deprecated. If it is used, 
-                                                  the pair @racket[(cons a-str b-str)] is the same as @racket[(list a-str b-str "δ")].}
+          specifies the prefix that the define popup should look for and what
+          label it should have, or @racket[#f] if it should not appear at all.
+          
+          If the list of three strings alternative is used, the first string is
+          the prefix that is looked for when finding definitions. The second
+          and third strings are used as the label of the control, in horizontal
+          and vertical mode, respectively.
+          
+          The pair of strings alternative is deprecated. If it is used, 
+          the pair @racket[(cons a-str b-str)] is the same as @racket[(list a-str b-str "δ")].}
         @cap[drscheme:help-context-term (or/c false/c string?) #f]{
-                                                                   specifies a context query for documentation searches that are
-                                                                   initiated in this language, can be @racket[#f] (no change to the
-                                                                   user's setting) or a string to be used as a context query (note: the
-                                                                   context is later maintained as a cookie, @racket[""] is different
-                                                                   from @racket[#f] in that it clears the stored context)}
+          specifies a context query for documentation searches that are
+          initiated in this language, can be @racket[#f] (no change to the
+          user's setting) or a string to be used as a context query (note: the
+          context is later maintained as a cookie, @racket[""] is different
+          from @racket[#f] in that it clears the stored context)}
         @cap[drscheme:special:insert-fraction boolean? #t]{
-                                                           determines if the insert fraction menu item in the special menu is
-                                                           visible}
+          determines if the insert fraction menu item in the special menu is
+          visible}
         @cap[drscheme:special:insert-lambda boolean? #t]{
-                                                         determines if the insert lambda menu item in the special menu is
-                                                         visible}
+          determines if the insert lambda menu item in the special menu is
+          visible}
         @cap[drscheme:special:insert-large-letters boolean? #t]{
-                                                                determines if the insert large letters menu item in the special menu
-                                                                is visible}
+          determines if the insert large letters menu item in the special menu
+          is visible}
         @cap[drscheme:special:insert-image boolean? #t]{
-                                                        determines if the insert image menu item in the special menu is
-                                                        visible}
+          determines if the insert image menu item in the special menu is
+          visible}
         @cap[drscheme:special:insert-comment-box boolean? #t]{
-                                                              determines if the insert comment box menu item in the special menu
-                                                              is visible}
+          determines if the insert comment box menu item in the special menu
+          is visible}
         @cap[drscheme:special:insert-gui-tool boolean? #t]{
-                                                           determines if the insert gui menu item in the special menu is
-                                                           visible}
+          determines if the insert gui menu item in the special menu is
+          visible}
         @cap[drscheme:special:slideshow-menu-item boolean? #t]{
-                                                               determines if the insert pict box menu item in the special menu is
-                                                               visible}
+          determines if the insert pict box menu item in the special menu is
+          visible}
         @cap[drscheme:special:insert-text-box boolean? #t]{
-                                                           determines if the insert text box menu item in the special menu is
-                                                           visible}
+          determines if the insert text box menu item in the special menu is
+          visible}
         @cap[drscheme:special:xml-menus boolean? #t]{
-                                                     determines if the insert scheme box, insert scheme splice box, and
-                                                     the insert xml box menu item in the special menu are visible}
+          determines if the insert scheme box, insert scheme splice box, and
+          the insert xml box menu item in the special menu are visible}
         @cap[drscheme:autocomplete-words (listof string?) '()]{
-                                                               determines the list of words that are used when completing words in
-                                                               this language}
+          determines the list of words that are used when completing words in
+          this language}
         @cap[drscheme:tabify-menu-callback
              (or/c false/c (-> (is-a?/c text%) number? number? void?))
              (λ (t a b) (send t tabify-selection a b))]{
-                                                        is used as the callback when the ``Reindent'' or ``Reindent All''
-                                                        menu is selected. The first argument is the editor, and the second
-                                                        and third are a range in the editor.}
-                                                       ))})
+          is used as the callback when the ``Reindent'' or ``Reindent All''
+          menu is selected. The first argument is the editor, and the second
+          and third are a range in the editor.}
+          ))})
  
  (proc-doc/names
   drracket:language:capability-registered? 

@@ -1,14 +1,11 @@
 #lang scribble/doc
 
-@(require scribble/manual
-          "shared.ss"
-	  scribble/struct
-          (for-label scheme
-                     teachpack/deinprogramm/sound))
+@(require scribble/manual scribble/struct "shared.rkt"
+          (for-label scheme teachpack/deinprogramm/sound))
 
 @teachpack["sound"]{Abspielen von Audio-Dateien}
 
-Note: This is documentation for the @tt{sound.ss} teachpack that goes
+Note: This is documentation for the @filepath{sound.rkt} teachpack that goes
 with the German textbook
 @italic{@link["http://www.deinprogramm.de/dmda/"]{Die Macht der
 Abstraktion}}.
@@ -22,12 +19,12 @@ Rechner.
 
 @defthing[play-sound-file (string -> unspecific)]{ 
 Der Aufruf
-@scheme[(play-sound-file f)] spielt die Audio-Datei mit dem Namen
-@scheme[f] ab.}
+@racket[(play-sound-file f)] spielt die Audio-Datei mit dem Namen
+@racket[f] ab.}
 
 @defthing[background-play-sound-file (string -> unspecific)]{ 
 Der Aufruf
-@scheme[(background-play-sound-file f)] spielt die Audio-Datei mit dem Namen
-@scheme[f] im Hintergrund ab, also ohne dass das Scheme-Programm anhält.}
+@racket[(background-play-sound-file f)] spielt die Audio-Datei mit dem Namen
+@racket[f] im Hintergrund ab, also ohne dass das Scheme-Programm anhält.}
 
 

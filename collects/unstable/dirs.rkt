@@ -1,5 +1,8 @@
 #lang racket/base
 
+;; This file needs to be deleted -- it is now superseded by
+;; `setup/path-relativize'.
+
 ;; Unstable library by: Carl Eastlund <cce@ccs.neu.edu>
 ;; intended for use in racket/contract, so don't try to add contracts!
 
@@ -13,7 +16,7 @@
 
 (define library-relative-directories
   (list (cons find-collects-dir 'collects)
-        (cons find-user-collects-dir 'user)
+        (cons find-user-collects-dir 'user-collects)
         (cons find-planet-dir 'planet)))
 
 (define setup-relative-directories
@@ -59,11 +62,11 @@
             (with-handlers ([exn:fail? (lambda (e) #f)])
               (path->relative path)))
           (when (list? exploded)
-            (let* ([relative (path->string
-                              (apply build-path
-                                (map bytes->path-element (cdr exploded))))])
+            (let ([relative (path->string
+                             (apply build-path
+                               (map bytes->path-element (cdr exploded))))])
               (return
                (if dir-name
                  (format "<~a>/~a" dir-name relative)
-                 (format "~a" relative))))))))
+                 relative)))))))
     default))

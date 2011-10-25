@@ -1,20 +1,20 @@
 #lang racket/base
-#| planet-shared.ss -- shared client/server utility functions
+#| planet-shared.rkt -- shared client/server utility functions
 
 Various common pieces of code that both the client and server need to access
 ==========================================================================================
 |#
   
   (require (only-in mzlib/file path-only)
-	   mzlib/port
+           mzlib/port
            racket/file
            setup/getinfo
            (prefix-in srfi1: srfi/1)
-           "../config.ss"
-           "data.ss")
+           "../config.rkt"
+           "data.rkt")
   
   (provide (all-defined-out)
-           (all-from-out "data.ss")) 
+           (all-from-out "data.rkt"))
   
   ; ==========================================================================================
   ; CACHE LOGIC
@@ -442,12 +442,12 @@ Various common pieces of code that both the client and server need to access
   (define (copy-n-chars n ip op)
     (let ((cport (make-cutoff-port ip 
                                    n
-                                   (lambda ()
+                                   (lambda (m)
                                      (raise 
                                       (make-exn:fail:read:eof
                                        (format "Not enough chars on input (expected ~a, got ~a)" 
                                                n 
-                                               (- n 0))
+                                               m)
                                        (current-continuation-marks)
                                        ip))))))
       (copy-port cport op)))
@@ -517,8 +517,11 @@ Various common pieces of code that both the client and server need to access
                   (close-input-port in) 
                   (when outport (close-output-port outport))]
                  [else
-                  (when outport (display l outport))
-                  (planet-log l)
+                  (when outport 
+                    (display l outport)
+                    (newline outport)
+                    (flush-output outport))
+                  (planet-log "~a" l)
                   (loop)]))))))
       (begin0
         (parameterize ([current-output-port out])
@@ -526,7 +529,7 @@ Various common pieces of code that both the client and server need to access
         (close-output-port out))))
   
   ;; pkg->info : PKG -> (symbol (-> TST) -> TST)
-  ;; get an info.ss thunk for the given package
+  ;; get an info.rkt thunk for the given package
   (define (pkg->info p)
     (or
      (with-handlers ([exn:fail? (lambda (e) #f)])

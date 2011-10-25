@@ -4,7 +4,7 @@
            scribble/eval
            scribble/decode
            racket/contract
-           "../icons.ss")
+           "../icons.rkt")
   
   (provide (all-from-out scribble/manual)
            (all-from-out scribble/eval)
@@ -35,12 +35,12 @@
            (t (make-collect-element
                #f null
                (lambda (ci)
-                 (collect-put! ci `(scheme-extra-lib ,'lib) (schememodname lib))))
+                 (collect-put! ci `(racket-extra-lib ,'lib) (racketmodname lib))))
               "The bindings documented in this section are provided by the "
-              (schememodname lib)
+              (racketmodname lib)
               " and "
-              (schememodname racket)
-              " libraries, but not " (schememodname racket/base)
+              (racketmodname racket)
+              " libraries, but not " (racketmodname racket/base)
               "."
               . more)))]
       [(_ lib . more)
@@ -54,13 +54,13 @@
          (declare-exporting lib racket/init #:use-sources (src ...))
          (defmodule*/no-declare (lib)
            (t "The bindings documented in this section are provided by the "
-              (schememodname lib)
+              (racketmodname lib)
               " and "
-              (schememodname racket/init)
+              (racketmodname racket/init)
               " libraries, which means that they are available when "
               " the Racket executable is started with no command-line arguments."
-              " They are not provided by " (schememodname racket/base)
-              " or " (schememodname racket) "."
+              " They are not provided by " (racketmodname racket/base)
+              " or " (racketmodname racket) "."
               . more)))]
       [(_ lib . more)
        (note-init-lib lib #:use-sources () . more)]))
@@ -71,22 +71,22 @@
       [(_ lib #:use-sources (src ...) . more)
        (defmodule lib #:use-sources (src ...)
          (t "The bindings documented in this section are provided by the "
-            (schememodname lib)
-            " library, not " (schememodname racket/base)
-            " or " (schememodname racket)
+            (racketmodname lib)
+            " library, not " (racketmodname racket/base)
+            " or " (racketmodname racket)
             "."
             . more))]
       [(_ lib . more)
        (note-lib-only lib #:use-sources () . more)]))
-  
+
   (define (*exnraise s)
     (make-element #f (list s " exception is raised")))
   (define-syntax exnraise
     (syntax-rules ()
-      [(_ s) (*exnraise (scheme s))]))
+      [(_ s) (*exnraise (racket s))]))
   (define-syntax Exn
     (syntax-rules ()
-      [(_ s) (scheme s)]))
+      [(_ s) (racket s)]))
   (provide exnraise Exn)
   
   (provide margin-note/ref
@@ -132,6 +132,6 @@
   (define-syntax speed
     (syntax-rules ()
       [(_ id what)
-       (t "An " (scheme id) " application can provide better performance for "
+       (t "An " (racket id) " application can provide better performance for "
           (elem what)
-          " iteration when it appears directly in a " (scheme for) " clause.")])))
+          " iteration when it appears directly in a " (racket for) " clause.")])))

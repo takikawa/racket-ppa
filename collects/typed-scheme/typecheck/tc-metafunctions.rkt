@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require "../utils/utils.rkt"
-         (rename-in (types subtype convenience remove-intersect union utils filter-ops)                   
+         (rename-in (types subtype convenience remove-intersect union utils filter-ops)
                     [-> -->]
                     [->* -->*]
                     [one-of/c -one-of/c])
@@ -12,12 +12,12 @@
 (provide abstract-results)
 
 
-(d/c (abstract-results results arg-names)
+(define/cond-contract (abstract-results results arg-names)
      (tc-results? (listof identifier?) . -> . (or/c Values? ValuesDots?))
      (define keys (for/list ([(nm k) (in-indexed arg-names)]) k))
      (match results
        [(tc-results: ts fs os dty dbound)
-        (make-ValuesDots 
+        (make-ValuesDots
          (for/list ([t ts] [f fs] [o os])
            (make-Result t (abstract-filter arg-names keys f) (abstract-object arg-names keys o)))
          dty dbound)]
@@ -27,28 +27,28 @@
            (make-Result t (abstract-filter arg-names keys f) (abstract-object arg-names keys o))))]))
 
 
-(d/c (abstract-object ids keys o)
+(define/cond-contract (abstract-object ids keys o)
   (-> (listof identifier?) (listof name-ref/c) Object? Object?)
   (define (lookup y)
     (for/first ([x ids] [i keys] #:when (free-identifier=? x y)) i))
   (define-match-expander lookup:
     (syntax-rules ()
       [(_ i) (app lookup (? values i))]))
-  (match o    
+  (match o
     [(Path: p (lookup: idx)) (make-Path p idx)]
     [_ (make-Empty)]))
 
 
-(d/c (abstract-filter ids keys fs)
+(define/cond-contract (abstract-filter ids keys fs)
   (-> (listof identifier?) (listof name-ref/c) FilterSet/c FilterSet/c)
   (match fs
     [(FilterSet: f+ f-)
      (-FS (abo ids keys f+) (abo ids keys f-))]
     [(NoFilter:) (-FS -top -top)]))
 
-(d/c (abo xs idxs f)
+(define/cond-contract (abo xs idxs f)
   ((listof identifier?) (listof name-ref/c) Filter/c . -> . Filter/c)
-  (d/c (lookup y)
+  (define/cond-contract (lookup y)
        (identifier? . -> . (or/c #f integer?))
        (for/first ([x xs] [i idxs] #:when (free-identifier=? x y)) i))
   (define-match-expander lookup:
@@ -58,7 +58,7 @@
   (define (rec f) (abo xs idxs f))
   (define (sb-t t) t)
   (filter-case (#:Type sb-t #:Filter rec) f
-               [#:TypeFilter 
+               [#:TypeFilter
                 t p (lookup: idx)
                 (-filter t idx p)]
                [#:NotTypeFilter
@@ -77,10 +77,10 @@
 (provide combine-props tc-results->values)
 
 
-(d/c (resolve atoms prop)
-  ((listof Filter/c) 
+(define/cond-contract (resolve atoms prop)
+  ((listof Filter/c)
    Filter/c
-   . -> . 
+   . -> .
    Filter/c)
   (for/fold ([prop prop])
     ([a (in-list atoms)])
@@ -102,20 +102,20 @@
       [(cons (AndFilter: ps*) ps) (loop (append ps* ps))]
       [(cons p ps) (cons p (loop ps))])))
 
-(d/c (combine-props new-props old-props flag)
+(define/cond-contract (combine-props new-props old-props flag)
   ((listof Filter/c) (listof Filter/c) (box/c boolean?)
-   . -> . 
+   . -> .
    (values (listof (or/c ImpFilter? OrFilter? AndFilter?)) (listof (or/c TypeFilter? NotTypeFilter?))))
   (define (atomic-prop? p) (or (TypeFilter? p) (NotTypeFilter? p)))
   (define-values (new-atoms new-formulas) (partition atomic-prop? (flatten-props new-props)))
-  (let loop ([derived-props null] 
+  (let loop ([derived-props null]
              [derived-atoms new-atoms]
              [worklist (append old-props new-formulas)])
     (if (null? worklist)
         (values derived-props derived-atoms)
         (let* ([p (car worklist)]
                [p (resolve derived-atoms p)])
-          (match p      
+          (match p
             [(AndFilter: ps) (loop derived-props derived-atoms (append ps (cdr worklist)))]
             [(ImpFilter: a c)
              ;(printf "combining ~a with ~a\n" p (append derived-props derived-atoms))
@@ -123,10 +123,10 @@
                    (implied-atomic? a p))
                  (loop derived-props derived-atoms (cons c (cdr worklist)))
                  (loop (cons p derived-props) derived-atoms (cdr worklist)))]
-            [(OrFilter: ps) 
+            [(OrFilter: ps)
              (let ([new-or
                     (let or-loop ([ps ps] [result null])
-                      (cond 
+                      (cond
                         [(null? ps) (apply -or result)]
                         [(for/or ([other-p (in-list (append derived-props derived-atoms))])
                              (opposite? (car ps) other-p))

@@ -1,10 +1,7 @@
 #lang scribble/doc
-@(require scribble/manual
-          scribble/eval
-          scribble/bnf
-          racket/list
-          (for-label racket/list)
-          "guide-utils.ss")
+@(require scribble/manual scribble/eval scribble/bnf racket/list
+          "guide-utils.rkt"
+          (for-label racket/list))
 
 @(define step @elem{=})
 
@@ -286,7 +283,7 @@ It turns out that if you write
     (f i)))
 ]
 
-then the @racket[for/list] form in the function both is expanded to
+then the @racket[for/list] form in the function is expanded to
 essentially the same code as the @racket[iter] local definition and
 use. The difference is merely syntactic convenience.
 

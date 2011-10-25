@@ -1,13 +1,7 @@
 #lang scribble/doc
-@(require scribble/base
-          scribble/manual
-          scribble/eval
-	  "utils.rkt"
-          (for-label racket/dict
-                     unstable/list
-                     syntax/id-table
-                     racket/contract
-                     racket/base))
+@(require scribble/base scribble/manual scribble/eval "utils.rkt"
+          (for-label racket/base racket/dict syntax/id-table racket/contract
+                     unstable/list))
 
 @(define the-eval (make-base-eval))
 @(the-eval '(require unstable/list))
@@ -27,6 +21,41 @@
 ]
 }
 
+@defproc[(take-common-prefix [l list?] [r list?]
+                             [#:same? same? equal?])
+         list?]{
+
+  Returns the longest common prefix of @racket[l] and @racket[r].
+
+@examples[#:eval the-eval
+(take-common-prefix '(a b c d) '(a b x y z))
+]
+}
+
+@defproc[(drop-common-prefix [l list?] [r list?]
+                             [#:same same? equal?])
+         (values list? list?)]{
+
+  Returns the tails of @racket[l] and @racket[r] with the common
+  prefix removed.
+
+@examples[#:eval the-eval
+(drop-common-prefix '(a b c d) '(a b x y z))
+]
+}
+
+@defproc[(split-common-prefix [l list?] [r list?]
+                              [#:same? same? equal?])
+         (values list? list? list?)]{
+
+  Returns the longest common prefix together with the tails of
+  @racket[l] and @racket[r] with the common prefix removed.
+
+@examples[#:eval the-eval
+(split-common-prefix '(a b c d) '(a b x y z))
+]
+}
+
 @addition{Sam Tobin-Hochstadt}
 
 @defproc[(filter-multiple [l list?] [f procedure?] ...) (values list? ...)]{
@@ -40,7 +69,7 @@ Produces @racket[(values (filter f l) ...)].
 @defproc[(extend [l1 list?] [l2 list?] [v any/c]) list?]{
 Extends @racket[l2] to be as long as @racket[l1] by adding @racket[(-
 (length l1) (length l2))] copies of @racket[v] to the end of
-@racket[l2].   
+@racket[l2].
 
 @examples[#:eval the-eval
 (extend '(1 2 3) '(a) 'b)
@@ -80,7 +109,7 @@ true value. The procedures @racket[equal?], @racket[eqv?], and
 ]
 }
 
-                         
+
 @addition{Carl Eastlund}
 
 @defproc[(map/values [n natural-number/c]
@@ -106,11 +135,11 @@ Produces lists of the respective values of @racket[f] applied to the elements in
 @defproc[(map2 [f (-> A ... (values B C))] [lst (listof A)] ...)
          (values (listof B) (listof C))]{
 
-Produces a pair of lists of the respective values of @scheme[f] applied to the
-elements in @scheme[lst ...] sequentially.
+Produces a pair of lists of the respective values of @racket[f] applied to the
+elements in @racket[lst ...] sequentially.
 
 @defexamples[
-#:eval (eval/require 'unstable/list)
+#:eval the-eval
 (map2 (lambda (x) (values (+ x 1) (- x 1))) (list 1 2 3))
 ]
 
