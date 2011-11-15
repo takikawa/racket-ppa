@@ -1,7 +1,6 @@
 #lang racket/base
 (require racket/pretty
          unstable/class-iop
-         syntax/stx
          unstable/struct
          "interfaces.rkt"
          "../model/stx-util.rkt")
@@ -29,8 +28,7 @@
      [print-struct #t]
      [print-box #t]
      [print-vector-length #f]
-     [print-hash-table #t]
-     [print-honu #f])
+     [print-hash-table #t])
     (pretty-write datum port)))
 
 (define-struct syntax-dummy (val))

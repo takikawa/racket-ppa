@@ -315,8 +315,8 @@ the source form are identifiers. We could use a
   (syntax-case stx ()
     [(rotate a c ...)
      (begin
-      (check-ids stx #'(a c ...))
-      #'(shift-to (c ... a) (a c ...)))]))
+       (check-ids stx #'(a c ...))
+       #'(shift-to (c ... a) (a c ...)))]))
 ]
 
 The @racket[check-ids] function can use the @racket[syntax->list]
@@ -352,19 +352,20 @@ make all of these modes treat code consistently, Racket separates the
 binding spaces for different phases.
 
 To define a @racket[check-ids] function that can be referenced at
-compile time, use @racket[define-for-syntax]:
+compile time, use @racket[begin-for-syntax]:
 
 @racketblock/eval[
 #:eval check-eval
-(define-for-syntax (check-ids stx forms)
-  (for-each
-   (lambda (form)
-     (unless (identifier? form)
-       (raise-syntax-error #f
-                           "not an identifier"
-                           stx
-                           form)))
-   (syntax->list forms)))
+(begin-for-syntax
+  (define (check-ids stx forms)
+    (for-each
+     (lambda (form)
+       (unless (identifier? form)
+         (raise-syntax-error #f
+                             "not an identifier"
+                             stx
+                             form)))
+     (syntax->list forms))))
 ]
 
 With this for-syntax definition, then @racket[swap] works:
@@ -445,7 +446,39 @@ the right-hand side of the inner @racket[define-syntax] is in the
 @deftech{meta-compile phase level}, also known as @deftech{phase level
 2}. To import @racket[syntax-case] into that phase level, you would
 have to use @racket[(require (for-syntax (for-syntax racket/base)))]
-or, equivalently, @racket[(require (for-meta 2 racket/base))].
+or, equivalently, @racket[(require (for-meta 2 racket/base))].  For example,
+
+@codeblock|{
+#lang racket/base
+(require  ;; This provides the bindings for the definition
+          ;; of shell-game.
+          (for-syntax racket/base)
+ 
+          ;; And this for the definition of
+          ;; swap.
+          (for-syntax (for-syntax racket/base)))
+
+(define-syntax (shell-game stx)
+
+  (define-syntax (swap stx)
+    (syntax-case stx ()
+      [(_ a b)
+       #'(let ([tmp a])
+           (set! a b)
+           (set! b tmp))]))
+  
+  (syntax-case stx ()
+    [(_ a b c)
+     (let ([a #'a] [b #'b] [c #'c])
+       (when (= 0 (random 2)) (swap a b))
+       (when (= 0 (random 2)) (swap b c))
+       (when (= 0 (random 2)) (swap a c))
+       #`(list #,a #,b #,c))]))
+
+(shell-game 3 4 5)
+(shell-game 3 4 5)
+(shell-game 3 4 5)
+}|
 
 Negative phase levels also exist. If a macro uses a helper function
 that is imported @racket[for-syntax], and if the helper function

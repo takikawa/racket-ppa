@@ -339,7 +339,7 @@ In more detail, patterns match as follows:
         @racket[quasiquote] expression form, @racketidfont{unquote}
         and @racketidfont{unquote-splicing} escape back to normal
         patterns.
-        
+
         @examples[
        #:eval match-eval
         (match '(1 2 3)
@@ -349,7 +349,14 @@ In more detail, patterns match as follows:
  @item{@racket[_derived-pattern] --- matches a pattern defined by a
        macro extension via @racket[define-match-expander].}
 
-]}
+]
+
+Note that the matching process may destructure the input multiple times, and
+may evaluate expressions embedded in patterns such as @racket[(#,(racketidfont
+"app") expr pat)] in arbitrary order, or multiple times.  Therefore, such
+expressions must be safe to call multiple times, or in an order other than they
+appear in the original program.
+}
 
 @; ----------------------------------------------------------------------
 
@@ -360,12 +367,19 @@ In more detail, patterns match as follows:
 			[(pat ...+) (=> id) body ...+]])]{
 Matches a sequence of values against each clause in order, matching
 only when all patterns in a clause match.  Each clause must have the
-same number of patterns as the number of @racket[val-expr]s. 
+same number of patterns as the number of @racket[val-expr]s.
 
 @examples[#:eval match-eval
 (match* (1 2 3)
  [(_ (? number?) x) (add1 x)])
 ]
+}
+
+@defform[(match/values expr clause clause ...)]{
+If @racket[expr] evaluates to @racket[n] values, then match all @racket[n]
+values against the patterns in @racket[clause ...]. Each clause must contain
+exactly @racket[n] patterns. At least one clause is required to determine how
+many values to expect from @racket[expr].
 }
 
 @defform[(match-lambda clause ...)]{
@@ -413,6 +427,14 @@ bindings of each @racket[pat] are available in each subsequent
   x)
 ]}
 
+@defform[(match-let-values ([(pat ...) expr] ...) body ...+)]{
+
+Like @racket[match-let], but generalizes @racket[let-values].}
+
+@defform[(match-let*-values ([(pat ...) expr] ...) body ...+)]{
+
+Like @racket[match-let*], but generalizes @racket[let*-values].}
+
 @defform[(match-letrec ([pat expr] ...) body ...+)]{
 
 Like @racket[match-let], but generalizes @racket[letrec].}
@@ -426,6 +448,18 @@ matching against the result of @racket[expr].
 @examples[
 #:eval match-eval
 (match-define (list a b) '(1 2))
+b
+]}
+
+@defform[(match-define-values (pat pats ...) expr)]{
+
+Like @racket[match-define] but for when expr produces multiple values.
+Like match/values, it requires at least one pattern to determine the
+number of values to expect.
+
+@examples[
+#:eval match-eval
+(match-define-values (a b) (values 1 2))
 b
 ]}
 
@@ -465,7 +499,7 @@ whether multiple uses of an identifier match the ``same'' value. The
 default is @racket[equal?].}
 
 @deftogether[[@defform[(match/derived val-expr original-datum clause ...)]
-              @defform[(match*/derived (val-expr ...) original-datum clause* ...)]]]{ 
+              @defform[(match*/derived (val-expr ...) original-datum clause* ...)]]]{
 Like @racket[match] and @racket[match*] respectively, but includes a
 sub-expression to be used as the source for all syntax errors within the form.
 For example, @racket[match-lambda] expands to @racket[match/derived] so that
@@ -480,9 +514,10 @@ instead of @racket[match].}
  A @racket[match] pattern form that matches an instance of a structure
  type named @racket[struct-id], where the field @racket[field] in the
  instance matches the corresponding @racket[pat].
-                                                
- Any field of @racket[struct-id] may be omitted, and such fields can occur in any order.
- 
+
+ Any field of @racket[struct-id] may be omitted, and such fields can
+ occur in any order.
+
  @defexamples[
   #:eval match-eval
   (define-struct tree (val left right))

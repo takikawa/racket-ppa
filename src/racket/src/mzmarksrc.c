@@ -99,7 +99,7 @@ app_rec {
 
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_App_Rec) 
-		    + (r->num_args * sizeof(Scheme_Object *))
+		    + ((r->num_args + 1 - mzFLEX_DELTA) * sizeof(Scheme_Object *))
 		    + ((r->num_args + 1) * sizeof(char))));
 }
 
@@ -134,7 +134,7 @@ seq_rec {
 
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Sequence)
-		    + ((s->count - 1) * sizeof(Scheme_Object *))));
+		    + ((s->count - mzFLEX_DELTA) * sizeof(Scheme_Object *))));
 }
 
 branch_rec {
@@ -273,7 +273,7 @@ prim_proc {
  size:
   ((prim->pp.flags & SCHEME_PRIM_IS_CLOSURE)
    ? (gcBYTES_TO_WORDS(sizeof(Scheme_Primitive_Closure))
-      + ((Scheme_Primitive_Closure *)prim)->count - 1)
+      + ((Scheme_Primitive_Closure *)prim)->count - mzFLEX_DELTA)
    : ((prim->pp.flags & SCHEME_PRIM_IS_MULTI_RESULT)
       ? gcBYTES_TO_WORDS(sizeof(Scheme_Prim_W_Result_Arity))
       : gcBYTES_TO_WORDS(sizeof(Scheme_Primitive_Proc))));
@@ -327,7 +327,7 @@ scm_closure {
   
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Closure)
-		    + (closure_size - 1) * sizeof(Scheme_Object *)));
+		    + (closure_size - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
 }
 
 case_closure {
@@ -345,7 +345,7 @@ case_closure {
 
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Case_Lambda)
-		    + ((c->count - 1) * sizeof(Scheme_Object *))));
+		    + ((c->count - mzFLEX_DELTA) * sizeof(Scheme_Object *))));
 }
 
 cont_proc {
@@ -564,7 +564,7 @@ vector_obj {
 
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Vector) 
-		    + ((vec->size - 1) * sizeof(Scheme_Object *))));
+		    + ((vec->size - mzFLEX_DELTA) * sizeof(Scheme_Object *))));
 }
 
 fxvector_obj {
@@ -573,7 +573,7 @@ fxvector_obj {
  mark:
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Vector) 
-		    + ((vec->size - 1) * sizeof(Scheme_Object *))));
+		    + ((vec->size - mzFLEX_DELTA) * sizeof(Scheme_Object *))));
 }
 
 flvector_obj {
@@ -582,7 +582,7 @@ flvector_obj {
  mark:
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Double_Vector) 
-		    + ((vec->size - 1) * sizeof(double))));
+		    + ((vec->size - mzFLEX_DELTA) * sizeof(double))));
 }
 
 input_port {
@@ -876,6 +876,7 @@ namespace_val {
   gcMARK2(e->exp_env, gc);
   gcMARK2(e->template_env, gc);
   gcMARK2(e->label_env, gc);
+  gcMARK2(e->instance_env, gc);
 
   gcMARK2(e->shadowed_syntax, gc);
 
@@ -885,6 +886,7 @@ namespace_val {
   gcMARK2(e->tt_require_names, gc);
   gcMARK2(e->dt_require_names, gc);
   gcMARK2(e->other_require_names, gc);
+  gcMARK2(e->running, gc);
   gcMARK2(e->did_starts, gc);
   gcMARK2(e->available_next[0], gc);
   gcMARK2(e->available_next[1], gc);
@@ -933,7 +935,7 @@ prefix_val {
     gcMARK2(pf->a[i], gc);
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Prefix) 
-		    + ((pf->num_slots-1) * sizeof(Scheme_Object *))
+		    + ((pf->num_slots-mzFLEX_DELTA) * sizeof(Scheme_Object *))
                     + ((((pf->num_slots - (pf->num_stxes ? (pf->num_stxes+1) : 0)) + 31) / 32) 
                        * sizeof(int))));
 }
@@ -954,6 +956,7 @@ comp_prefix_val {
  mark:
   Comp_Prefix *cp = (Comp_Prefix *)p;
   gcMARK2(cp->toplevels, gc);
+  gcMARK2(cp->unbound, gc);
   gcMARK2(cp->stxes, gc);
   gcMARK2(cp->uses_unsafe, gc);
 
@@ -1008,23 +1011,13 @@ module_val {
   gcMARK2(m->dt_requires, gc);
   gcMARK2(m->other_requires, gc);
 
-  gcMARK2(m->body, gc);
-  gcMARK2(m->et_body, gc);
+  gcMARK2(m->bodies, gc);
 
   gcMARK2(m->me, gc);
 
-  gcMARK2(m->provide_protects, gc);
-  gcMARK2(m->indirect_provides, gc);
-
-  gcMARK2(m->indirect_syntax_provides, gc);
-
-  gcMARK2(m->et_provide_protects, gc);
-  gcMARK2(m->et_indirect_provides, gc);
+  gcMARK2(m->exp_infos, gc);
 
   gcMARK2(m->self_modidx, gc);
-
-  gcMARK2(m->accessible, gc);
-  gcMARK2(m->et_accessible, gc);
 
   gcMARK2(m->insp, gc);
 
@@ -1042,6 +1035,20 @@ module_val {
   gcMARK2(m->primitive, gc);
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Module));
+}
+
+exp_info_val {
+ mark:
+  Scheme_Module_Export_Info *m = (Scheme_Module_Export_Info *)p;
+
+  gcMARK2(m->provide_protects, gc);
+  gcMARK2(m->indirect_provides, gc);
+
+  gcMARK2(m->indirect_syntax_provides, gc);
+
+  gcMARK2(m->accessible, gc);
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Module_Export_Info));
 }
 
 module_phase_exports_val {
@@ -1452,6 +1459,7 @@ place_val {
   Scheme_Place *pr = (Scheme_Place *)p;
   gcMARK2(pr->channel, gc);
   gcMARK2(pr->mref, gc);
+  gcMARK2(pr->pumper_threads, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Place));
@@ -1466,6 +1474,24 @@ place_async_channel_val {
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Place_Async_Channel));
+}
+
+serialized_file_fd_val {
+ mark:
+  Scheme_Serialized_File_FD *ffd = (Scheme_Serialized_File_FD *) p;
+  gcMARK2(ffd->name, gc);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Serialized_File_FD));
+}
+
+serialized_socket_fd_val {
+ mark:
+  Scheme_Serialized_Socket_FD *sfd = (Scheme_Serialized_Socket_FD *) p;
+  gcMARK2(sfd->name, gc);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Serialized_Socket_FD));
 }
 
 END place;
@@ -1675,7 +1701,7 @@ mark_listener {
   gcMARK2(l->mref, gc);
 
  size:
-  gcBYTES_TO_WORDS(sizeof(listener_t) + ((l->count - 1) * sizeof(tcp_t)));
+  gcBYTES_TO_WORDS(sizeof(listener_t) + ((l->count - mzFLEX_DELTA) * sizeof(tcp_t)));
 }
 
 #ifdef USE_TCP
@@ -1734,7 +1760,7 @@ mark_parameterization {
 
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Parameterization)
-		    + ((max_configs - 1) * sizeof(Scheme_Object*))));
+		    + ((max_configs - mzFLEX_DELTA) * sizeof(Scheme_Object*))));
 }
 
 mark_config {
@@ -1966,7 +1992,7 @@ mark_serialized_struct_val {
 
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Serialized_Structure) 
-		    + ((num_slots - 1) * sizeof(Scheme_Object *))));
+		    + ((num_slots - mzFLEX_DELTA) * sizeof(Scheme_Object *))));
 }
 #endif
 
@@ -1984,7 +2010,7 @@ mark_struct_val {
 
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Structure) 
-		    + ((num_slots - 1) * sizeof(Scheme_Object *))));
+		    + ((num_slots - mzFLEX_DELTA) * sizeof(Scheme_Object *))));
 }
 
 mark_struct_type_val {
@@ -2008,7 +2034,8 @@ mark_struct_type_val {
 
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Struct_Type)
-		    + (t->name_pos * sizeof(Scheme_Struct_Type *))));
+		    + ((t->name_pos + 1 - mzFLEX_DELTA) 
+                       * sizeof(Scheme_Struct_Type *))));
 }
 
 mark_struct_proc_info {
@@ -2177,9 +2204,19 @@ mark_regwork {
   gcMARK2(r->counters, gc);
   gcMARK2(r->peekskip, gc);
   gcMARK2(r->prefix, gc);
+  gcMARK2(r->lazy_string, gc);
   gcMARK2(r->rewind_stack, gc);
  size:
   gcBYTES_TO_WORDS(sizeof(Regwork));
+}
+
+mark_lazy_string {
+ mark:
+  rx_lazy_str_t *ls = (rx_lazy_str_t *)p;
+  gcMARK2(ls->s, gc);
+  gcMARK2(ls->chars, gc);
+ size:
+  gcBYTES_TO_WORDS(sizeof(rx_lazy_str_t));
 }
 
 END regexp;
@@ -2247,7 +2284,7 @@ mark_wrapchunk {
     gcMARK2(wc->a[i], gc);
   }
  size:
-  gcBYTES_TO_WORDS(sizeof(Wrap_Chunk) + ((wc->len - 1) * sizeof(Scheme_Object *)));
+  gcBYTES_TO_WORDS(sizeof(Wrap_Chunk) + ((wc->len - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
 }
 
 lex_rib {
@@ -2261,20 +2298,6 @@ lex_rib {
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Lexical_Rib));
 }
-
-mark_free_id_info {
- mark:
-  Scheme_Vector *vec = (Scheme_Vector *)p;
-  int i;
-  for (i = 8; i--; )
-    gcMARK2(vec->els[i], gc);
-
- size:
-  gcBYTES_TO_WORDS((sizeof(Scheme_Vector) 
-		    + ((8 - 1) * sizeof(Scheme_Object *))));
-}
-
-
 
 END syntax;
 
@@ -2315,7 +2338,7 @@ native_closure {
 
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Native_Closure)
-		    + (closure_size - 1) * sizeof(Scheme_Object *)));
+		    + (closure_size - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
 }
 
 mark_jit_state {
@@ -2323,6 +2346,11 @@ mark_jit_state {
   mz_jit_state *j = (mz_jit_state *)p;
   gcMARK2(j->mappings, gc);
   gcMARK2(j->self_data, gc);
+  gcMARK2(j->example_argv, gc);
+  gcMARK2(j->nc, gc);
+  gcMARK2(j->retaining_data, gc);
+  gcMARK2(j->patch_depth, gc);
+  
  size:
   gcBYTES_TO_WORDS(sizeof(mz_jit_state));
 }

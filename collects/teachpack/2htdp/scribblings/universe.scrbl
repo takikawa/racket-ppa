@@ -167,6 +167,7 @@ The design of a world program demands that you come up with a data
               ([clause
 		 (on-tick tick-expr)
 		 (on-tick tick-expr rate-expr)
+		 (on-tick tick-expr rate-expr limit-expr)
 		 (on-key key-expr)
 		 (on-release release-expr)
 		 (on-mouse mouse-expr)
@@ -250,6 +251,18 @@ current world. The clock ticks at the rate of 28 times per second.}}
 tells DrRacket to call the @racket[tick-expr] function on the current
 world every time the clock ticks. The result of the call becomes the
 current world. The clock ticks every @racket[rate-expr] seconds.}}
+
+@item{
+@defform/none[#:literals(on-tick)
+              (on-tick tick-expr rate-expr limit-expr)
+              #:contracts
+              ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))]
+               [rate-expr (and/c real? positive?)]
+	       [limit-expr (and/c integer? positive?)])]{
+tells DrRacket to call the @racket[tick-expr] function on the current
+world every time the clock ticks. The result of the call becomes the
+current world. The clock ticks every @racket[rate-expr] seconds. 
+The world ends when the clock has ticked more than @scheme[limit-expr] times.}}
 
 @item{A @tech{KeyEvent} represents key board events. 
 
@@ -429,10 +442,16 @@ All @tech{MouseEvent}s are represented via strings:
  coordinates may be negative or larger than the (implicitly) specified
  width and height.
 
- Note: the computer's software doesn't really notice every single movement
+ @bold{Note 1}: the operating system doesn't really notice every single movement
  of the mouse (across the mouse pad). Instead it samples the movements and
  signals most of them.}
-}
+
+ @bold{Note 2}: while mouse events are usually reported in the expected
+ manner, the operating system doesn't necessarily report them in the
+ expected order. For example, the Windows operating system insists on
+ signaling a @racket["move"] event immediately after a @racket["button-up"]
+ event is discovered.  Programmers must design the @racket[on-mouse]
+ handler to handle any possible mouse event at any moment.  }
 
 @item{
 
@@ -714,6 +733,14 @@ As mentioned, all event handlers may return @tech{WorldState}s or
                [rate-expr (and/c real? positive?)])]{
 }
 
+@defform/none[#:literals (on-tick)
+              (on-tick tick-expr rate-expr)
+              #:contracts
+              ([tick-expr (-> (unsyntax @tech{WorldState}) (or/c (unsyntax @tech{WorldState}) package?))]
+               [rate-expr (and/c real? positive?)]
+	       [limit-expr (and/c integer? positive?)])]{
+}
+
 @defform/none[#:literals (on-key)
               (on-key key-expr)
               #:contracts
@@ -955,6 +982,7 @@ The @tech{server} itself is created with a description that includes the
 		 (on-msg msg-expr)
 		 (on-tick tick-expr)
 		 (on-tick tick-expr rate-expr)
+		 (on-tick tick-expr rate-expr limit-expr)
 		 (on-disconnect dis-expr)
 		 (state boolean-expr)
 		 (to-string render-expr)
@@ -1034,7 +1062,18 @@ optional handlers:
                [rate-expr (and/c real? positive?)])]{ 
  tells DrRacket to apply @racket[tick-expr] as above; the clock ticks
  every  @racket[rate-expr] seconds.}
-}
+
+@defform/none[#:literals (on-tick)
+              (on-tick tick-expr rate-expr)
+              #:contracts
+              ([tick-expr (-> (unsyntax @tech{UniverseState}) bundle?)]
+               [rate-expr (and/c real? positive?)]
+               [limit-expr (and/c integer? positive?)])]{ 
+ tells DrRacket to apply @racket[tick-expr] as above; the clock ticks
+ every  @racket[rate-expr] seconds. The universe stops when the clock has
+ ticked more than @scheme[limit-expr] times.}
+ }
+
 
 @item{
  @defform[(on-disconnect dis-expr)
@@ -1115,6 +1154,40 @@ Once you have designed a world program, add a function definition
  The three worlds can then interact via a server. When all of them have
  stopped, they produce the final states, here @racket[10], @racket[25], and
  @racket[33]. 
+
+For advanced programmers, the library also provides a programmatic
+interface for launching many worlds in parallel. 
+
+@defproc[(launch-many-worlds/proc [thunk-that-runs-a-world (-> any/c)] ...)
+          (values any @#,racketfont{...})]{
+ invokes all given @racket[thunk-that-runs-a-world] in parallel. Typically
+ each argument is a function of no argument that evaluates a @racket[big-bang]
+ expression. When all worlds have stopped, the function expression returns
+ all final worlds in order.}
+
+It is thus possible to decide at run time how many and which worlds to run
+in parallel:
+@;%
+@(begin
+#reader scribble/comment-reader
+(racketblock
+> (apply launch-many-worlds/proc 
+         (build-list (random 10)
+                     (lambda (i) (main (number->string i)))))
+0
+9
+1
+2
+3
+6
+5
+4
+8
+7
+))
+@;%
+
+
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "universe-sample"]{A First Sample Universe} 

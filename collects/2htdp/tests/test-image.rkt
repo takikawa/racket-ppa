@@ -45,6 +45,7 @@
          mrlib/private/image-core-bitmap
          lang/posn
          racket/math
+         racket/runtime-path
          racket/class
          racket/file
          racket/gui/base
@@ -1003,6 +1004,12 @@
       =>
       #t)
 
+(test (equal~? (triangle/ass 90 60 60 'solid 'red)
+               (triangle/sss (* 60 (sqrt 2)) 60 60 'solid 'red)
+               0.001)
+      =>
+      #t)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; square
@@ -1359,13 +1366,37 @@
       => 
       20)
 
-(test (rotate 90 (make-object image-snip% blue-10x20-bitmap))
-      =>
-      (image-snip->image (make-object image-snip% blue-20x10-bitmap)))
+(define (close-enough i1 i2)
+  (define w (image-width i1))
+  (define h (image-height i1))
+  (cond
+    [(and (= w (image-width i2))
+          (= h (image-height i2)))
+     (define b1 (make-bytes (* w h 4)))
+     (define b2 (make-bytes (* w h 4)))
+     (define bm (make-bitmap w h))
+     (define bdc (make-object bitmap-dc% bm))
+     (render-image i1 bdc 0 0)
+     (send bdc get-argb-pixels 0 0 w h b1)
+     (send bdc erase)
+     (render-image i2 bdc 0 0)
+     (send bdc get-argb-pixels 0 0 w h b2)
+     (define diff 0)
+     (for ([x (in-range 0 (bytes-length b1))])
+       (set! diff (+ diff (abs (- (bytes-ref b1 x)
+                                  (bytes-ref b2 x))))))
+     (define avg-diff (/ diff (bytes-length b1)))
+     (<= avg-diff 10)]
+    [else #f]))
+       
 
-(test (rotate 90 (make-object image-snip% green-blue-20x10-bitmap))
-      =>
-      (image-snip->image (make-object image-snip% green-blue-10x20-bitmap)))
+(test (close-enough (rotate 90 (make-object image-snip% blue-10x20-bitmap))
+                    (image-snip->image (make-object image-snip% blue-20x10-bitmap)))
+      => #t)
+      
+(test (close-enough (rotate 90 (make-object image-snip% green-blue-20x10-bitmap))
+                    (image-snip->image (make-object image-snip% green-blue-10x20-bitmap)))
+      => #t)
 
 (test (rotate 90 (rotate 90 (make-object image-snip% green-blue-20x10-bitmap)))
       =>
@@ -1390,6 +1421,48 @@
       [i2 (make-object image-snip% (collection-file-path "bug09.png" "icons"))])
   (test (equal? (rotate 0 i1) i2) => #t)
   (test (equal? i1 (rotate 0 i2)) => #t))
+
+(define-runtime-path u.png "u.png")
+(let ()
+  (define i (rotate 0 (make-object bitmap% u.png 'unknown/mask)))
+  (define t (new text%))
+  (send t insert i)
+  (define bop (open-output-bytes))
+  (void (send t save-port bop))
+  (define bip (open-input-bytes (get-output-bytes bop)))
+  (define t2 (new text%))
+  (void (send t2 insert-port bip))
+  (test (equal? (send t find-first-snip)
+                (send t2 find-first-snip))
+        =>
+        #t))
+
+(let ()
+  (define i1 (rotate 0 (make-object bitmap% u.png 'unknown/mask)))
+  (define i2 (rotate 0 (make-object bitmap% u.png 'unknown/alpha)))
+  (test (equal? i1 i2) => #t))
+
+(define (get-from-file f)
+  (define t (new text%))
+  (send t load-file f)
+  (send t find-first-snip))
+
+(define-runtime-path bmp-5.1.3.rktd "bmp-5.1.3.rktd")
+(let ()
+  (define b1 (get-from-file bmp-5.1.3.rktd))
+  (define b2 (get-from-file bmp-5.1.3.rktd))
+  (test (image? b1) => #t)
+  ;; test that the drawing code doesn't crash (since the images are not
+  ;; eq?, they'll be drawn to be compared)
+  (test (equal? b1 b2) => #t))
+
+(define-runtime-path bmp-5.0.1.rktd "bmp-5.0.1.rktd")
+(let ()
+  (define b1 (get-from-file bmp-5.0.1.rktd))
+  (define b2 (get-from-file bmp-5.0.1.rktd))
+  (test (image? b1) => #t)
+  (test (equal? b1 b2) => #t))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -2031,6 +2104,9 @@
 (test/exn (save-image "tri.png" (triangle 50 "solid" "purple"))
           =>
           #rx"^save-image:")
+(test/exn (save-svg-image "tri.png" (triangle 50 "solid" "purple"))
+          =>
+          #rx"^save-svg-image:")
 
 (test/exn (pen 1 2 3 4 5)
           =>

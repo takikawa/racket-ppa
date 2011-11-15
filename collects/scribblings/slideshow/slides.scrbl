@@ -316,12 +316,25 @@ A width commonly used for layout.}
 
 @defthing[bullet pict?]{
 
-A filled bullet used by default by @racket[item].}
+A filled bullet used by default by @racket[item].
+
+It is either @racket[(t "\u2022")], if that character
+is available in the font that @racket[t] uses,
+or it uses an implementation similar to @racket[o-bullet],
+but not hollow (using @racket[disk], not @racket[circle]).
+}
 
 
 @defthing[o-bullet pict?]{
 
-A hollow bullet used by default by @racket[subitem].}
+A hollow bullet used by default by @racket[subitem].
+
+It's implementation is:
+@racketblock[(baseless
+              (cc-superimpose 
+               (circle (/ gap-size 2)) 
+               (blank 0 gap-size)))]
+}
 
 
 @defidform[client-w]{
@@ -391,7 +404,7 @@ triggered via the @DFlag{condense} command-line flag.}
 
 @defparam[current-font-size n exact-nonnegative-integer?]{
 
-Parameter that determines he font size used by @racket[t],
+Parameter that determines the font size used by @racket[t],
 @racket[para], etc. The default size is @racket[32].}
 
 
@@ -438,7 +451,7 @@ to paint the screen margins, too.
 
 The default assembler uses @racket[titlet] to turn a title string (if
 any) to a pict. See also @racket[current-titlet] and
-@racket[set-title-h!],.
+@racket[set-title-h!].
 
 The slide assembler is @emph{not} responsible for adding page
 numbers to the slide; that job belongs to the viewer. See also

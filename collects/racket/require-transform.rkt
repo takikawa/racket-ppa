@@ -1,13 +1,11 @@
 (module require-transform '#%kernel
   (#%require "private/stxcase-scheme.rkt"
-             "private/qqstx.rkt"
              "private/stx.rkt"
              "private/define-struct.rkt"
-             "private/more-scheme.rkt"
              "private/small-scheme.rkt"
              "private/define.rkt"
              (for-template (only '#%kernel quote))
-             (for-syntax '#%kernel "private/stxcase-scheme.rkt"))
+             (for-syntax '#%kernel))
   
   (#%provide expand-import 
              syntax-local-require-certifier 
@@ -71,7 +69,8 @@
      [(v) v]
      [(v mark) v]))
 
-  (define orig-insp (current-code-inspector))
+  (define orig-insp (variable-reference->module-declaration-inspector
+                     (#%variable-reference)))
 
   ;; expand-import : stx bool -> (listof import)
   (define (expand-import stx)
@@ -92,7 +91,7 @@
               #f
               "invalid module-path form"
               stx))
-           (let ([namess (syntax-local-module-exports stx)])
+           (let ([namess (syntax-local-module-exports mod-path)])
              (values
               (apply
                append
@@ -111,7 +110,7 @@
                                             stx))
                              (cdr names))))
                     namess))
-              (list (make-import-source #'simple 0)))))]
+              (list (make-import-source (datum->syntax #'simple mod-path) 0)))))]
         [(id . rest)
          (identifier? #'id)
          (let ([t (syntax-local-value #'id (lambda () #f))])

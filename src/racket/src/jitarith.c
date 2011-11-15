@@ -95,6 +95,16 @@ static int is_inline_unboxable_op(Scheme_Object *obj, int flag, int unsafely, in
 int scheme_generate_pop_unboxed(mz_jit_state *jitter)
 {
 #if defined(MZ_USE_JIT_I386)
+# if 1
+  if (jitter->unbox_depth) {
+    scheme_signal_error("internal error: scheme_generate_pop_unboxed() isn't right");
+  }
+  /* The code below doesn't work right because it's emitted *before*
+     the test for failure. Adding it after the failure test means
+     moving it to (something like) sjc.unbound_global_code. Meanwhile,
+     the JIT doesn't currently actually try to reference globals when it has
+     values on the FP stack. */
+# else
   /* If we have some arguments pushed on the FP stack, we need
      to pop them off before escaping. */
   int i;
@@ -102,6 +112,7 @@ int scheme_generate_pop_unboxed(mz_jit_state *jitter)
     FSTPr(0);
   }
   CHECK_LIMIT();
+# endif
 #endif
   return 1;
 }
@@ -394,13 +405,14 @@ static int generate_double_arith(mz_jit_state *jitter, Scheme_Object *rator,
 /* Unless unboxed, first arg is in JIT_R1, second in JIT_R0.
    If unboxed in push/pop mode, first arg is pushed before second.
    If unboxed in direct mode, first arg is in JIT_FPR0+depth
-    and second is in JIT_FPR1+depth (which is backward). */
+    and second is in JIT_FPR1+depth (which is backward). 
+   Unboxed implies unsafe unless arith == ARITH_INEX_EX. */
 {
 #if defined(INLINE_FP_OPS) || defined(INLINE_FP_COMP)
   GC_CAN_IGNORE jit_insn *ref8, *ref9, *ref10, *refd, *refdt, *refs = NULL, *refs2 = NULL;
   int no_alloc = unboxed_result, need_post_pop = 0;
 
-  if (!unsafe_fl) {
+  if (!unsafe_fl && !unboxed) {
     /* Maybe they're doubles */
     __START_TINY_JUMPS__(1);
     if (two_args) {
@@ -550,6 +562,8 @@ static int generate_double_arith(mz_jit_state *jitter, Scheme_Object *rator,
           /* to check whether it fits in a fixnum, we
              need to convert back and check whether it
              is the same */
+          if (unboxed)
+            jit_movr_d_fppush(fpr1+1, fpr1); /* for slow path */
           jit_extr_l_d_fppush(fpr0, JIT_R1);
           __START_TINY_JUMPS__(1);
           refs = jit_bantieqr_d_fppop(jit_forward(), fpr0, fpr1);
@@ -560,6 +574,10 @@ static int generate_double_arith(mz_jit_state *jitter, Scheme_Object *rator,
           __START_TINY_JUMPS__(1);
           refs2 = jit_bner_l(jit_forward(), JIT_R1, JIT_R2);
           __END_TINY_JUMPS__(1);
+#ifndef DIRECT_FPR_ACCESS
+          if (unboxed)
+            jit_roundr_d_l_fppop(JIT_R1, fpr2); /* slow path won't be needed */
+#endif
         }
         jit_lshi_l(JIT_R0, JIT_R1, 1);
         jit_ori_l(JIT_R0, JIT_R0, 0x1);
@@ -680,11 +698,13 @@ static int generate_double_arith(mz_jit_state *jitter, Scheme_Object *rator,
     /* No, they're not both doubles, or slow path is needed
        for some other reason. */
     __START_TINY_JUMPS__(1);
-    if (two_args) {
-      mz_patch_branch(ref8);
-      mz_patch_branch(ref10);
+    if (!unboxed) {
+      if (two_args) {
+        mz_patch_branch(ref8);
+        mz_patch_branch(ref10);
+      }
+      mz_patch_branch(ref9);
     }
-    mz_patch_branch(ref9);
     if (refs)
       mz_patch_branch(refs);
     if (refs2)
@@ -937,7 +957,7 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
 
     generate_double_arith(jitter, rator, arith, cmp, reversed, !!rand2, 0,
                           &refd, &refdt, for_branch, branch_short, 
-                          (arith == 15) ? (unsafe_fl > 0) : 1, 
+                          (arith == ARITH_INEX_EX) ? (unsafe_fl > 0) : 1, 
                           args_unboxed, jitter->unbox);
     CHECK_LIMIT();
     ref3 = NULL;
@@ -946,6 +966,9 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
 
     if ((arith == ARITH_INEX_EX) && (unsafe_fl < 1)) {
       /* need a slow path */
+      if (args_unboxed) {
+        (void)jit_calli(sjc.box_flonum_from_reg_code);
+      }
       generate_arith_slow_path(jitter, rator, &ref, &ref4, for_branch, orig_args, reversed, arith, 0, 0);
       /* assert: !ref4, since not for_branch */
       jit_patch_movi(ref, (_jit.x.pc));
@@ -1078,15 +1101,14 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
       /* rand2 in R0, and rand in R1 unless it's simple */
 
       if (simple_rand || simple_rand2) {
-        int pos, va;
+        int va;
 
         if (simple_rand && SCHEME_INTP(rand)) {
           (void)jit_movi_p(JIT_R1, rand);
           va = JIT_R0;
         } else {
           if (simple_rand) {
-            pos = mz_remap(SCHEME_LOCAL_POS(rand));
-            mz_rs_ldxi(JIT_R1, pos);
+            scheme_generate(rand, jitter, 0, 0, 0, JIT_R1, NULL);
           }
           if (!unsafe_fx && !unsafe_fl) {
             /* check both fixnum bits at once by ANDing into R2: */

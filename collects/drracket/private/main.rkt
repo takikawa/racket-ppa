@@ -3,6 +3,7 @@
 (require string-constants
          mzlib/contract
          "drsig.rkt"
+         "frame-icon.rkt"
          mred
          framework
          mzlib/class
@@ -18,7 +19,7 @@
         [prefix drracket:get/extend: drracket:get/extend^]
         [prefix drracket:language-configuration: drracket:language-configuration/internal^]
         [prefix drracket:language: drracket:language^]
-        [prefix drracket:module-language: drracket:module-language^]
+        [prefix drracket:module-language: drracket:module-language/int^]
         [prefix drracket:tools: drracket:tools^]
         [prefix drracket:debug: drracket:debug^]
         [prefix drracket:frame: drracket:frame^]
@@ -33,40 +34,7 @@
    name val predicate 
    #:aliases (list (string->symbol (regexp-replace #rx"^drracket:" (symbol->string name) "drscheme:")))))
 
-(when (eq? (system-type) 'unix)
-  (let ()
-    ;; avoid building the mask unless we use it
-    (define todays-icon
-      (make-object bitmap% 
-        (collection-file-path 
-         (case (date-week-day (seconds->date (current-seconds)))
-           [(6 0) "plt-logo-red-shiny.png"]
-           [else "plt-logo-red-diffuse.png"])
-         "icons")
-        'png/mask))
-    
-    (define todays-icon-bw-mask 
-      (and (send todays-icon ok?)
-           (send todays-icon get-loaded-mask)
-           (let* ([w (send todays-icon get-width)]
-                  [h (send todays-icon get-height)]
-                  [bm (make-object bitmap% w h #t)]
-                  [color-mask (send todays-icon get-loaded-mask)]
-                  [src-bytes (make-bytes (* w h 4) 0)]
-                  [dest-bits (make-bytes (* w h 4) 255)]
-                  [bdc (make-object bitmap-dc% bm)]
-                  [black (send the-color-database find-color "black")]
-                  [white (send the-color-database find-color "white")])
-             (send color-mask get-argb-pixels 0 0 w h src-bytes #t)
-             (for ([i (in-range 0 w)])
-               (for ([j (in-range 0 h)])
-                 (let ([b (= (bytes-ref src-bytes (* 4 (+ i (* j h)))) 0)])
-                   (send bdc set-pixel i j (if b white black)))))
-             (send bdc set-bitmap #f)
-             bm)))
-    
-    (send todays-icon set-loaded-mask todays-icon-bw-mask)
-    (frame:current-icon todays-icon)))
+(frame:current-icon todays-icon)
   
 (application-file-handler
  (let ([default (application-file-handler)])
@@ -137,12 +105,6 @@
                                                (andmap string? (cdr x))))
                                         x))))
 (drr:set-default 'drracket:defs/ints-horizontal #f boolean?)
-(drr:set-default 'drracket:unit-window-max? #f boolean?)
-(drr:set-default 'drracket:frame:initial-position #f 
-                         (λ (x) (or (not x)
-                                    (and (pair? x)
-                                         (number? (car x))
-                                         (number? (cdr x))))))
 
 (drr:set-default 'drracket:child-only-memory-limit (* 1024 1024 128)
                          (λ (x) (or (boolean? x)
@@ -202,8 +164,11 @@
   (let-values ([(w h) (get-display-size)])
     (set! frame-width (min frame-width (- w window-trimming-upper-bound-width)))
     (set! frame-height (min frame-height (- h window-trimming-upper-bound-height))))
-  (drr:set-default 'drracket:unit-window-width frame-width number?)
-  (drr:set-default 'drracket:unit-window-height frame-height number?))
+  (frame:setup-size-pref 'drracket:unit-window-size 
+                         frame-width
+                         frame-height 
+                         #:position-preferences
+                         'drracket:unit-window-position))
 
 (drr:set-default 'drracket:backtrace-window-width 400 number?)
 (drr:set-default 'drracket:backtrace-window-height 300 number?)
@@ -524,7 +489,17 @@
                   lang
                   (or settings (send lang default-settings)))))))))
 
-  ;; preferences initialization
+  (preferences:set-default 'drracket:online-compilation-default-off #f boolean?)
+  (preferences:set-default 'drracket:online-expansion:read-in-defs-errors 
+                           'corner
+                           (or/c 'margin 'gold 'corner))
+  (preferences:set-default 'drracket:online-expansion:variable-errors 
+                           'margin
+                           (or/c 'margin 'gold))
+  (preferences:set-default 'drracket:online-expansion:other-errors
+                           'margin
+                           (or/c 'margin 'gold))
+  
   (drr:set-default 'drracket:multi-file-search:recur? #t boolean?)
   (drr:set-default 'drracket:multi-file-search:filter? #t boolean?)
   (drr:set-default 'drracket:multi-file-search:filter-regexp "\\.(rkt.?|scrbl|ss|scm)$" string?)
@@ -578,6 +553,7 @@
                                                                   (and (integer? i)
                                                                        (<= 1 i 255))))
                                                            (not x))))
+  (drr:set-default 'drracket:module-language:auto-text "#lang racket\n" string?)
 
 (let ([drs-handler-recent-items-super%
        (class (drracket:frame:basics-mixin
@@ -650,7 +626,7 @@
                                             drracket:debug:test-coverage-off-style-name
                                             (string-constant test-coverage-off))))
 
-
+(drracket:module-language:initialize-prefs-panel)
 
 (let* ([find-frame
         (λ (item)
@@ -745,32 +721,44 @@
                 (loop (cdr files))
                 (cons (car files) (loop (cdr files))))])))
 
-;; NOTE: drscheme-normal.rkt sets current-command-line-arguments to
-;; the list of files to open, after parsing out flags like -h
-(let* ([files-to-open 
-        (if (preferences:get 'drracket:open-in-tabs)
-            (vector->list (current-command-line-arguments))
-            (reverse (vector->list (current-command-line-arguments))))]
-       [normalized/filtered
-        (let loop ([files files-to-open])
-          (cond
-            [(null? files) null]
-            [else (let ([file (car files)])
-                    (if (file-exists? file)
-                        (cons (normalize-path file) (loop (cdr files)))
-                        (begin
-                          (message-box
-                           (string-constant drscheme)
-                           (format (string-constant cannot-open-because-dne) file))
-                          (loop (cdr files)))))]))]
-       [no-dups (remove-duplicates normalized/filtered)]
-       [frames
-        (map (λ (f) (handler:edit-file
-                     f
-                     (λ () (drracket:unit:open-drscheme-window f))))
-             no-dups)])
-  (when (null? (filter (λ (x) x) frames))
-    (make-basic))
-  (when (and (preferences:get 'drracket:open-in-tabs)
-             (not (null? no-dups)))
-    (handler:edit-file (car no-dups))))
+;; we queue a callback here to open the first frame
+;; so that the modules that are being loaded by drracket
+;; are all finished before we trigger the dynamic 
+;; requires that can happen when the module language looks
+;; at the #lang line (which can end up loading drracket itself
+;; in a bad way leading to errors like this:
+;;   link: reference (phase 0) to a variable in module: ...
+;;   that is uninitialized (phase level 0); 
+;;   reference appears in module: ...)
+
+(queue-callback
+ (λ ()
+   ;; NOTE: drscheme-normal.rkt sets current-command-line-arguments to
+   ;; the list of files to open, after parsing out flags like -h
+   (let* ([files-to-open 
+           (if (preferences:get 'drracket:open-in-tabs)
+               (vector->list (current-command-line-arguments))
+               (reverse (vector->list (current-command-line-arguments))))]
+          [normalized/filtered
+           (let loop ([files files-to-open])
+             (cond
+               [(null? files) null]
+               [else (let ([file (car files)])
+                       (if (file-exists? file)
+                           (cons (normalize-path file) (loop (cdr files)))
+                           (begin
+                             (message-box
+                              (string-constant drscheme)
+                              (format (string-constant cannot-open-because-dne) file))
+                             (loop (cdr files)))))]))]
+          [no-dups (remove-duplicates normalized/filtered)]
+          [frames
+           (map (λ (f) (handler:edit-file
+                        f
+                        (λ () (drracket:unit:open-drscheme-window f))))
+                no-dups)])
+     (when (null? (filter (λ (x) x) frames))
+       (make-basic))
+     (when (and (preferences:get 'drracket:open-in-tabs)
+                (not (null? no-dups)))
+       (handler:edit-file (car no-dups))))))

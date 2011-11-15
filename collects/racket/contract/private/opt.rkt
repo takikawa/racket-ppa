@@ -1,7 +1,5 @@
 #lang racket/base
-(require "guts.rkt"
-         "prop.rkt"
-         "blame.rkt"
+(require "prop.rkt"
          "misc.rkt"
          racket/stxparam)
 (require (for-syntax racket/base)
@@ -107,7 +105,8 @@
       null
       #f
       #f
-      null)]
+      null
+      #t)]
     [else
      (opt/unknown opt/i opt/info stx)]))
 
@@ -150,7 +149,7 @@
                                           #f
                                           #'this
                                           #'that)]
-                   [(next lifts superlifts partials _ __ stronger-ribs) (opt/i info #'e)])
+                   [(next lifts superlifts partials _ __ stronger-ribs chaperone?) (opt/i info #'e)])
        (with-syntax ([next next])
          (bind-superlifts
           superlifts

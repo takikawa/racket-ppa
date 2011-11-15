@@ -5,7 +5,10 @@
          racket/pretty
          string-constants/string-constant
          setup/dirs
+         setup/link
          framework
+         (for-syntax racket/base
+                     racket/list)
          "buginfo.rkt"
          "save-bug-report.rkt")
 
@@ -234,6 +237,16 @@
      #f
      #:top-panel synthesized-panel))
   
+  (define links-ctrl
+    (build/label
+     (string-constant bug-report-field-links)
+     (lambda (panel)
+       (keymap:call/text-keymap-initializer
+        (lambda ()
+          (make-object text-field% #f panel void ""))))
+     #f
+     #:top-panel synthesized-panel))
+  
   (define collections
     (make-big-text
      (string-constant bug-report-field-collections)
@@ -301,6 +314,8 @@
                    "\n"
                    (format "Human Language: ~a\n" (send human-language get-value))
                    (format "(current-memory-use) ~a\n" (send memory-use get-value))
+                   (format "Links: ~a\n" (send links-ctrl get-value))
+                   "\n"
                    "\nCollections:\n"
                    (format "~a" (send (send collections get-editor) get-text))
                    "\n"
@@ -398,6 +413,24 @@
                    (if (directory-exists? d)
                        (map path->string (directory-list d))
                        '(non-existent-path))))))
+  
+  (define-syntax (links-calls stx)
+    (syntax-case stx ()
+      [(_ calls ...)
+       (let ([str 
+              (apply 
+               string-append
+               (add-between (map (λ (x) "~s = ~s")
+                                 (syntax->list #'(calls ...)))
+                            "; "))])
+         #`(format #,str #,@(apply append (map (λ (x) (list #`'#,x x))
+                                               (syntax->list #'(calls ...))))))]))
+  (send (send links-ctrl get-editor)
+        insert
+        (links-calls (links)
+                     (links #:user? #f)
+                     (links #:root? #t)
+                     (links #:user? #f #:root? #t)))
   
   (send human-language set-value (format "~a" (this-language)))
   (send memory-use set-value (format "~a" (current-memory-use)))

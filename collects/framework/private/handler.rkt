@@ -1,13 +1,12 @@
 #lang scheme/unit
 
 (require mzlib/class
-         mzlib/list
          mrlib/hierlist
          "sig.rkt"
          "../preferences.rkt"
          "../gui-utils.rkt"
          mred/mred-sig
-         scheme/path
+         racket/path
          string-constants)
 
 (import mred^
@@ -101,14 +100,6 @@
               (send already-open make-visible filename)
               (send already-open show #t)
               already-open]
-             [(and (preferences:get 'framework:open-here?)
-                   (send (group:get-the-frame-group) get-open-here-frame))
-              =>
-              (λ (fr)
-                (add-to-recent filename)
-                (send fr open-here filename)
-                (send fr show #t)
-                fr)]
              [else
               (let ([handler (and (path? filename)
                                   (find-format-handler filename))])
@@ -120,25 +111,29 @@
 
 ;; add-to-recent : path -> void
 (define (add-to-recent filename)
-  (let* ([old-list (preferences:get 'framework:recently-opened-files/pos)]
-         [old-ents (filter (λ (x) (string=? (path->string (car x))
-                                            (path->string filename)))
-                           old-list)]
-         [old-ent (if (null? old-ents)
-                      #f
-                      (car old-ents))]
-         [new-ent (list filename
-                        (if old-ent (cadr old-ent) 0)
-                        (if old-ent (caddr old-ent) 0))]
-         [added-in (cons new-ent
-                         (remove new-ent old-list compare-recent-list-items))]
-         [new-recent (size-down added-in
-                                (preferences:get 'framework:recent-max-count))])
-    (preferences:set 'framework:recently-opened-files/pos new-recent)))
+  
+  (define old-list (preferences:get 'framework:recently-opened-files/pos))
+  (define old-ents (filter (λ (x) (recently-opened-files-same-enough-path? (car x) filename))
+                           old-list))
+  (define new-ent (if (null? old-ents)
+                      (list filename 0 0)
+                      (cons filename (cdr (car old-ents)))))
+  (define added-in (cons new-ent
+                         (remove* (list new-ent)
+                                  old-list 
+                                  (λ (l1 l2) 
+                                    (recently-opened-files-same-enough-path? (car l1) (car l2))))))
+  (define new-recent (size-down added-in
+                                (preferences:get 'framework:recent-max-count)))
+  (preferences:set 'framework:recently-opened-files/pos new-recent))
 
-;; compare-recent-list-items : recent-list-item recent-list-item -> boolean
-(define (compare-recent-list-items l1 l2)
-  (equal? (car l1) (car l2)))
+;; same-enough-path? : path path -> boolean
+;; used to determine if the open-recent-files menu item considers two paths to be the same
+(define (recently-opened-files-same-enough-path? p1 p2)
+  (equal? (simplify-path (normal-case-path p1) #f)
+          (simplify-path (normal-case-path p2) #f)))
+
+
 
 ;; size-down : (listof X) -> (listof X)[< recent-max-count]
 ;; takes a list of stuff and returns the
@@ -167,8 +162,8 @@
           (preferences:get 'framework:recently-opened-files/pos)]
          [new-recent-items
           (map (λ (x)
-                 (if (string=? (path->string (car x))
-                               (path->string filename))
+                 (if (recently-opened-files-same-enough-path? (path->string (car x))
+                                                              (path->string filename))
                      (list* (car x) start end (cdddr x))
                      x))
                (preferences:get 'framework:recently-opened-files/pos))])
@@ -198,9 +193,8 @@
 
 (define (recent-list-item->menu-label recent-list-item)
   (let ([filename (car recent-list-item)])
-    (gui-utils:trim-string
-     (regexp-replace* #rx"&" (path->string filename) "\\&\\&")
-     200)))
+    (gui-utils:quote-literal-label
+     (path->string filename))))
 
 ;; this function must mimic what happens in install-recent-items
 ;; it returns #t if all of the labels of menus are the same, or approximation to
@@ -225,12 +219,15 @@
          [end (caddr recent-list-item)])
     (cond
       [(file-exists? filename)
-       (let ([fr (edit-file filename)])
-         (when (is-a? fr frame:open-here<%>)
-           (let ([ed (send fr get-open-here-editor)])
-             (when (equal? (send ed get-filename) filename)
-               (send ed set-position start end)))))]
+       (edit-file filename)]
       [else
+       (preferences:set 'framework:recently-opened-files/pos
+                        (remove* (list recent-list-item)
+                                 (preferences:get 'framework:recently-opened-files/pos)
+                                 (λ (l1 l2)
+                                   (recently-opened-files-same-enough-path?
+                                    (car l1)
+                                    (car l2)))))
        (message-box (string-constant error)
                     (format (string-constant cannot-open-because-dne)
                             filename))])))
@@ -345,8 +342,7 @@
       (super-instantiate ()))))
 
 (define (open-file [directory #f])
-  (let* ([parent (and (or (not (eq? 'macosx (system-type)))
-                          (preferences:get 'framework:open-here?))
+  (let* ([parent (and (not (eq? 'macosx (system-type)))
                       (get-top-level-focus-window))]
          [file
           (parameterize ([finder:dialog-parent-parameter parent])

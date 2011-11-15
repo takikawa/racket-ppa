@@ -3,11 +3,14 @@
 (require (for-syntax scheme/base 
                      "term-fn.rkt"
                      syntax/boundmap
+                     syntax/parse
                      racket/syntax)
          "error.rkt"
          "matcher.rkt")
 
-(provide term term-let term-let/error-name term-let-fn term-define-fn hole in-hole)
+(provide term term-let define-term
+         hole in-hole
+         term-let/error-name term-let-fn term-define-fn)
 
 (define-syntax (hole stx) (raise-syntax-error 'hole "used outside of term"))
 (define-syntax (in-hole stx) (raise-syntax-error 'in-hole "used outside of term"))
@@ -69,6 +72,15 @@
        (let ([id (syntax-local-value/record (syntax x) (λ (x) #t))])
          (values (datum->syntax (term-id-id id) (syntax-e (term-id-id id)) (syntax x))
                  (term-id-depth id)))]
+      [x
+       (defined-term-id? #'x)
+       (let ([ref (syntax-property
+                   (defined-term-value (syntax-local-value #'x))
+                   'disappeared-use #'x)])
+         (with-syntax ([v #`(begin
+                              #,(defined-check ref "term" #:external #'x)
+                              #,ref)])
+           (values #'#,v 0)))]
       [(unquote x)
        (values (syntax (unsyntax x)) 0)]
       [(unquote . x)
@@ -115,10 +127,7 @@
         #`(begin
             #,@(free-identifier-mapping-map
                 applied-metafunctions
-                (λ (f _)
-                  (if (eq? (identifier-binding f) 'lexical)
-                      #`(check-defined-lexical #,f '#,f)
-                      #`(check-defined-module (λ () #,f) '#,f))))
+                (λ (f _) (defined-check f "metafunction")))
             #,(let loop ([bs (reverse outer-bindings)])
                 (cond
                   [(null? bs) (syntax (syntax->datum (quasisyntax rewritten)))]
@@ -126,18 +135,6 @@
                                       [fst (car bs)])
                           (syntax (with-syntax (fst)
                                     rec)))])))))]))
-
-(define (check-defined-lexical value name)
-  (when (eq? (letrec ([x x]) x) value)
-    (report-undefined-metafunction name)))
-
-(define (check-defined-module thunk name)
-  (with-handlers ([exn:fail:contract:variable?
-                   (λ (_) (report-undefined-metafunction name))])
-    (thunk)))
-
-(define (report-undefined-metafunction name)
-  (redex-error #f "metafunction ~s applied before its definition" name))
 
 (define-syntax (term-let-fn stx)
   (syntax-case stx ()
@@ -223,3 +220,11 @@
       (term-let/error-name term-let ((x rhs) ...) body1 body2 ...))]
     [(_ x)
      (raise-syntax-error 'term-let "expected at least one body" stx)]))
+
+(define-syntax (define-term stx)
+  (syntax-parse stx
+    [(_ x:id t:expr)
+     (not-expression-context stx)
+     #'(begin
+         (define term-val (term t))
+         (define-syntax x (defined-term #'term-val)))]))

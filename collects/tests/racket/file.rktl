@@ -131,6 +131,11 @@
 (test "12\r3" read (open-input-string (string #\" #\1 #\\ #\return #\newline #\2 #\\ #\newline #\return #\3 #\")))
 (test "1\r23" read (open-input-string (string #\" #\1 #\\ #\newline #\return #\2 #\\ #\return #\newline #\3 #\")))
 
+;; test names of file handling procedures (see racket/private/kw-file)
+(test 'open-input-file object-name open-input-file)
+(test 'with-input-from-file object-name with-input-from-file)
+(test 'call-with-output-file object-name call-with-output-file)
+
 ; Test string ports with file-position:
 (let ([s (open-output-string)])
   (test (string) get-output-string s)
@@ -289,6 +294,16 @@
    `(,modes ,replacement)))
 (err/rt-test (open-output-file (build-path (current-directory) "baddir" "x"))
 	    exn:fail:filesystem?)
+
+(let ([tf (make-temporary-file)])
+  (let-values ([(base name dir?) (split-path tf)])
+    (test #t 'make-temporary-file-uses-srcloc (and (regexp-match #rx"file.rktl" (path->bytes name)) #t)))
+  (delete-file tf))
+
+(let ([tf ((λ (t) (t)) make-temporary-file)])
+  (test #t 'make-temporary-file-in-ho-position (file-exists? tf))
+  (delete-file tf))
+
 
 (define tempfilename (make-temporary-file))
 (when (file-exists? tempfilename)
@@ -679,20 +694,30 @@
 (close-output-port test-file)
 (check-test-file "tmp2")
 
-(let ([p (open-input-file "tmp2")])
+(let-values ([(p p-out) (open-input-output-file "tmp2" #:exists 'update)])
+  (test #t port-try-file-lock? p 'shared)
   (test #t port-try-file-lock? p 'shared)
   (let ([p2 (open-input-file "tmp2")])
     (test #t port-try-file-lock? p2 'shared)
+    (test #t port-try-file-lock? p2 'shared)
     (test (void) port-file-unlock p2)
     (close-input-port p2))
-  (let ([p3 (open-input-file "tmp2")])
+  (let ([p3 (open-output-file "tmp2" #:exists 'update)])
     (test #f port-try-file-lock? p3 'exclusive)
     (test (void) port-file-unlock p)
+    (when (eq? (system-type) 'windows)
+      ;; need another unlock, since we got a 'shared lock twice
+      (test #f port-try-file-lock? p3 'exclusive)
+      (test (void) port-file-unlock p))
     (test #t port-try-file-lock? p3 'exclusive)
+    (test (not (eq? 'windows (system-type))) port-try-file-lock? p3 'exclusive)
     (test #f port-try-file-lock? p 'shared)
-    (close-input-port p3))
-  (test #t port-try-file-lock? p 'exclusive)
-  (close-input-port p))
+    (close-output-port p3))
+  (err/rt-test (port-try-file-lock? p 'exclusive))
+  (err/rt-test (port-try-file-lock? p-out 'shared))
+  (test #t port-try-file-lock? p-out 'exclusive)
+  (close-input-port p)
+  (close-output-port p-out))
 
 (define ui (make-input-port 'name (lambda (s) (bytes-set! s 0 (char->integer #\")) 1) #f void))
 (test "" read ui)
@@ -1291,30 +1316,6 @@
 		 '(close-output-port w2)
 		 '(close-input-port r2))))
   (tcp-close l))
-
-;;----------------------------------------------------------------------
-;; File Locks
-(define tempfile (make-temporary-file))
-(err/rt-test (call-with-file-lock/timeout 10 'shared (lambda () #t) (lambda () #f)))
-(err/rt-test (call-with-file-lock/timeout tempfile 'bogus (lambda () #t) (lambda () #f)))
-(err/rt-test (call-with-file-lock/timeout tempfile 'shared (lambda (x) #t) (lambda () #f)))
-(err/rt-test (call-with-file-lock/timeout tempfile 'exclusive (lambda () #t) (lambda (x) #f)))
-
-(test #t call-with-file-lock/timeout tempfile 'shared (lambda () #t) (lambda () #f))
-(test #t call-with-file-lock/timeout tempfile 'exclusive (lambda () #t) (lambda () #f))
-
-(err/rt-test (call-with-file-lock/timeout tempfile 'exclusive (lambda ()
-    (call-with-file-lock/timeout tempfile 'exclusive (lambda () #f) (lambda () (error))))
-  (lambda () 'uhoh)))
-(err/rt-test (call-with-file-lock/timeout tempfile 'exclusive (lambda ()
-    (call-with-file-lock/timeout tempfile 'shared (lambda () #f) (lambda () (error))))
-  (lambda () 'uhon)))
-(err/rt-test (call-with-file-lock/timeout tempfile 'shared (lambda ()
-    (call-with-file-lock/timeout tempfile 'exclusive (lambda () #f) (lambda () (error))))
-  (lambda () 'uhoh)))
-(test #t call-with-file-lock/timeout tempfile 'shared (lambda ()
-    (call-with-file-lock/timeout tempfile 'shared (lambda () #t) (lambda () #f)))
-  (lambda () 'uhoh))
 
 ;;----------------------------------------------------------------------
 ;; TCP

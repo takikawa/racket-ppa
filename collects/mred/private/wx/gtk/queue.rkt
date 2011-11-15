@@ -25,6 +25,7 @@
 ;; Gtk initialization
 
 (define-gtk gtk_init_check (_fun (_ptr io _int) (_ptr io _gcpointer) -> _gboolean))
+(define-gdk gdk_set_program_class (_fun _string -> _void))
 
 (define x11-display
   (let* ([argc-ptr (scheme_register_process_global "PLT_X11_ARGUMENT_COUNT" #f)]
@@ -63,19 +64,20 @@
                                 ;; all other ignored flags have a single argument
                                 (loop (+ i 2) #t)])))))])
       (let-values ([(new-argc new-argv)
-                    (if (null? args)
-                        (values 0 #f)
-                        (values (add1 (length args))
-                                (cast (cons (ptr-ref argv _bytes 0)
-                                            args)
-                                      (_list i _bytes)
-                                      _pointer)))])
+                    (values (add1 (length args))
+                            (cast (cons (path->bytes (find-system-path 'run-file))
+                                        args)
+                                  (_list i _bytes)
+                                  _pointer))])
         (unless (gtk_init_check new-argc new-argv)
           (error (format
                   "Gtk initialization failed for display ~s"
                   (or display ":0"))))
         (when single-instance?
           (do-single-instance))
+        (let ([v (scheme_register_process_global "Racket-GUI-wm-class" #f)])
+          (when v
+            (gdk_set_program_class (cast v _pointer _string))))
         display))))
 
 ;; ------------------------------------------------------------

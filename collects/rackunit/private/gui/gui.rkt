@@ -1,7 +1,6 @@
 #lang racket/base
 (require racket/class
          unstable/class-iop
-         racket/gui/base
          "../base.rkt"
          "../result.rkt"
          "../check-info.rkt"
@@ -14,8 +13,7 @@
   (define controller
     (new controller%))
   (define frame
-    (parameterize ((current-eventspace (make-eventspace)))
-      (make-view-frame controller)))
+    (make-view-frame controller))
   (lambda tests
     (for ([test (in-list tests)])
       (run test controller))))

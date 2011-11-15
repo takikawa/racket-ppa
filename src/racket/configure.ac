@@ -239,7 +239,7 @@ show_explicitly_enabled "${enable_xonx}" "Unix style"
 show_explicitly_enabled "${enable_shared}" "Shared libraries"
 
 show_explicitly_disabled "${enable_gracket}" GRacket
-show_explicitly_disabled "${enable_plot}" Plot
+show_explicitly_disabled "${enable_plot}" Plot fit library
 
 if test "$LIBTOOLPROG" != "" ; then
   echo "=== Libtool program: $LIBTOOLPROG"
@@ -625,6 +625,10 @@ case "$host_os" in
       PREFLAGS="$PREFLAGS -DXONX "
     fi
     ;;
+  nto-qnx*)
+    enable_sgc=yes
+    LIBS="$LIBS -lsocket -Wl,--export-dynamic"
+    ;;
   *)
     ;;
 esac
@@ -837,7 +841,7 @@ if test "${enable_backtrace}" = "yes" ; then
 fi
 
 LFS_CFLAGS=`getconf LFS_CFLAGS 2> /dev/null`
-if test "${LFS_CFLAGS}" != "" ; then
+if test "${LFS_CFLAGS}" != "" && test "${LFS_CFLAGS}" != "undefined"; then
   echo "Large-file support: ${LFS_CFLAGS}"
   MZOPTIONS="${MZOPTIONS} ${LFS_CFLAGS}"  
 fi
@@ -911,6 +915,17 @@ if test "${endianness}" = "big" ; then
   AC_DEFINE(SCHEME_BIG_ENDIAN,1,[Big endian])
 fi
 
+################### JIT ####################
+
+if test "${enable_jit}" = "no" ; then
+   PREFLAGS="${PREFLAGS} -DMZ_DONT_USE_JIT"
+   if test "${enable_futures}" = "yes" ; then
+     echo configure: cannot enable futures and disable the JIT
+     exit 1
+   fi
+   enable_futures=no
+fi
+
 ############### places ###################
 
 if test "${enable_parallel_by_default}" = "yes" ; then
@@ -936,6 +951,29 @@ if test "${enable_futures}" = "yes" ; then
   AC_DEFINE(MZ_USE_FUTURES,1,[Futures enabled])
   enable_mzrt=yes
 fi
+
+############## compare-and-swap ################
+
+if test "${enable_mzrt}" = "yes" ; then
+  [ msg="for compare-and-swap" ]
+  AC_MSG_CHECKING($msg)
+  AC_TRY_RUN(
+   int check1(long *addr, long old, long new_val) {
+     return __sync_bool_compare_and_swap(addr, old, new_val);
+   }
+   int check2(short *addr, short old, short new_val) {
+     return __sync_bool_compare_and_swap(addr, old, new_val);
+   }
+   int main() {
+      long l = 2; short s = 3;
+      return !check1(&l, 2, 4) || !check2(&s, 3, 6);
+   }, cas_available=yes, cas_available=no, cas_available=no)
+  AC_MSG_RESULT($cas_available)
+  if test "${cas_available}" = "yes" ; then
+    AC_DEFINE(MZ_CAS_AVAILABLE,1,[Compare-and-swap available])
+  fi
+fi
+  
 
 ############### OS threads ###################
 
@@ -995,12 +1033,6 @@ fi
 if test "${enable_noopt}" = "yes" ; then
   AWKPRG='BEGIN { FS = "(^| )-O(0|1|2|3|4|5|6|7|8|9|())( |$)" } /.*/ { for (i = 1; i < NF; i++) printf "%s ", $i; print $NF }'
   CFLAGS=`echo "$CFLAGS" | awk "$AWKPRG"`
-fi
-
-################### JIT ####################
-
-if test "${enable_jit}" = "no" ; then
-   PREFLAGS="${PREFLAGS} -DMZ_DONT_USE_JIT"
 fi
 
 ############## usersetup ################
@@ -1164,7 +1196,7 @@ AC_SUBST(MRLIBINSTALL)
 AC_SUBST(LIBFINISH)
 
 AC_SUBST(MAKE_GRACKET)
-AC_SUBST(MAKE_PLOT)
+AC_SUBST(MAKE_FIT)
 AC_SUBST(MAKE_COPYTREE)
 AC_SUBST(MAKE_FINISH)
 
@@ -1242,12 +1274,12 @@ fi
 makefiles="$makefiles foreign/Makefile"
 ac_configure_args="$ac_configure_args$SUB_CONFIGURE_EXTRAS"
 
-if test -d "${srcdir}/plot" && test "${enable_plot}" = "yes" ; then
+if test -d "${srcdir}/fit" && test "${enable_plot}" = "yes" ; then
   makefiles="$makefiles
-             plot/Makefile"
-  MAKE_PLOT=plot
+             fit/Makefile"
+  MAKE_FIT=fit
 else
-  MAKE_PLOT=no
+  MAKE_FIT=no
 fi
 
 if test "${enable_gracket}" = "yes" ; then

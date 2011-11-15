@@ -1,8 +1,11 @@
-#lang racket
-(require (for-syntax syntax/parse
+#lang racket/base
+(require (for-syntax racket/base
+                     syntax/parse
                      racket/local
                      racket/function
                      racket/list)
+         racket/list
+         racket/match
          datalog/ast
          datalog/eval)
 

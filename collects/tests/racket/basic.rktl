@@ -180,24 +180,35 @@
 (err/rt-test (set-mcar! (cons 1 4) 4))
 (err/rt-test (set-mcdr! (cons 1 4) 4))
 
-(define (box-tests box unbox box? set-box! set-box!-name unbox-name)
+(define (box-tests box unbox box? set-box! set-box!-name unbox-name 2nd-arg?)
   (define b (box 5))
   (test 5 unbox b)
   (when set-box!
-	(set-box! b 6)
-	(test 6 unbox b))
+    (set-box! b 6)
+    (test 6 unbox b))
   (test #t box? b)
   (test #f box? 5)
   (arity-test box 1 1)
-  (arity-test unbox 1 1)
+  (arity-test unbox 1 (if 2nd-arg? 2 1))
   (arity-test box? 1 1)
   (when set-box!
-	(arity-test set-box! 2 2))
+    (arity-test set-box! 2 2))
   (err/rt-test (unbox 8))
   (when set-box!
     (err/rt-test (set-box! 8 8))))
-(box-tests box unbox box? set-box! 'set-box! 'unbox)
-(box-tests make-weak-box weak-box-value weak-box? #f #f 'weak-box-value)
+(box-tests box unbox box? set-box! 'set-box! 'unbox #f)
+(box-tests make-weak-box weak-box-value weak-box? #f #f 'weak-box-value #t)
+
+;; test clearing weak boxes
+(when (eq? '3m (system-type 'gc))
+  (let* ([s (gensym)]
+         [b (make-weak-box s)])
+    (test s weak-box-value b)
+    (test s weak-box-value b 123)
+    (set! s 'something-else)
+    (collect-garbage)
+    (test #f weak-box-value b)
+    (test 123 weak-box-value b 123)))
 
 (test '(x y) append '(x) '(y))
 (test '(a b c d) append '(a) '(b c d))
@@ -2509,6 +2520,16 @@
   (list? (list* 1 2 p))
   (list? (list* 1 2 p))
   (test 1 hash-ref ht p #f))
+
+;; Check that hash-table cycles don't lead to an
+;;  explosion in the time to compute a hash code.
+(let ()
+  (define ht (make-hash))
+  (hash-set! ht 'a ht)
+  (hash-set! ht 'b ht)
+  (eq-hash-code ht)
+  (equal-hash-code ht)
+  (equal-secondary-hash-code ht))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Misc

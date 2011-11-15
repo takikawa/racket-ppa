@@ -10,6 +10,7 @@ application-about-handler
 application-file-handler
 application-preferences-handler
 application-quit-handler
+application-start-empty-handler
 area-container-window<%>
 area-container<%>
 area<%>
@@ -79,6 +80,7 @@ get-choices-from-user
 get-color-from-user
 get-default-shortcut-prefix
 get-directory
+get-display-count
 get-display-depth
 get-display-left-top-inset
 get-display-size

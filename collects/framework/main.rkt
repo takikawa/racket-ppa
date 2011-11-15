@@ -1,15 +1,19 @@
 #lang at-exp racket/base
 
-(require racket/contract
+(require racket/contract/base
          racket/unit
          racket/class
          racket/gui/base
          mred/mred-unit
-         mred/mred-sig
          framework/framework-unit
          framework/private/sig
          (for-syntax scheme/base)
-         scribble/srcdoc)
+         scribble/srcdoc) 
+
+;; these next two lines do a little dance to make the
+;; require/doc setup work out properly
+(require (prefix-in :: framework/private/focus-table))
+(define frame:lookup-focus-table ::frame:lookup-focus-table)
 
 (require framework/preferences
          framework/test
@@ -200,14 +204,19 @@
       any)
   (name-list val-list)
   @{Like @racket[put-preferences], but has more sophisticated error handling.
-    In particular, it
+    In particular, when it fails to grab a lock, it
     @itemize[
       @item{waits for three consecutive failures before informing the user}
       @item{gives the user the opportunity to ``steal'' the lockfile after the
             third failure, and}
-      @item{when failures occur, it remembers what its arguments were and if
+      @item{when lock failures occur, it remembers what its arguments were and if
             any preference save eventually succeeds, all of the past failures
-            are also written at that point.}]})
+            are also written at that point.}]
+    
+    In addition when an error is raised trying to save a preference to the preference
+    file, @racket[preferences:put-preferences/gui] logs the error using @racket[log-warning],
+    instead of raising an exception.
+    })
 
  (proc-doc/names
   preferences:get-preference/gui
@@ -358,6 +367,11 @@
     ``weak'' pointer to the object; i.e., the autosaver does not keep an object
     from garbage collection.})
 
+ (thing-doc
+  autosave:toc-path
+  path?
+  @{The path to the a table-of-contents file for the autosave files that DrRacket has created.})
+ 
  (proc-doc/names
   autosave:restore-autosave-files/gui
   (-> void?)
@@ -630,12 +644,25 @@
 
  (proc-doc/names
   frame:setup-size-pref
-  (symbol? number? number? . -> . void)
-  (size-pref-sym width height)
+  (->* (symbol? number? number?) 
+       (#:maximized? 
+        boolean?
+        #:position-preferences 
+        (or/c #f symbol?))
+       void?)
+  ((size-pref-sym width height)
+   ((maximized? #f)
+    (position-preferences-sym #f)))
   @{Initializes a preference for the @racket[frame:size-pref] mixin.
     
     The first argument should be the preferences symbol, and the second and
-    third should be the default width and height, respectively.})
+    third should be the default width and height, respectively. If the
+    window should be maximized by default, pass @racket[#t] for the
+    @racket[maximized?] argument.
+    
+    If @racket[position-preferences-sym] is passed, then that symbol will be
+    used to track the position of the window.
+    })
 
  (proc-doc/names
   frame:add-snip-menu-items
@@ -680,10 +707,10 @@
     @racket[frame:basic-mixin].
     @itemize[
       @item{If it is @racket[#f], then its value is ignored.}
-      @item{If it is a @racket[bitmap%], then the @method[frame% set-icon] is
+      @item{If it is a @racket[bitmap%], then the @method[top-level-window<%> set-icon] is
             called with the bitmap, the result of invoking the
             @racket[bitmap% get-loaded-mask] method, and @racket['both].}
-      @item{If it is a pair of bitmaps, then the @method[frame% set-icon]
+      @item{If it is a pair of bitmaps, then the @method[top-level-window<%> set-icon]
             method is invoked twice, once with each bitmap in the pair. The
             first bitmap is passed (along with the result of its
             @racket[bitmap% get-loaded-mask]) and @racket['small], and then the
@@ -691,7 +718,24 @@
             @racket[bitmap% get-loaded-mask]) and @racket['large].}]
     
     Defaults to @racket[#f].})
-
+ 
+ (proc-doc/names
+  frame:lookup-focus-table
+  (->* () (eventspace?) (listof (is-a?/c frame:focus-table<%>)))
+  (()
+   ((eventspace (current-eventspace))))
+  @{Returns a list of the frames in @racket[eventspace], where the first element of the list
+    is the frame with the focus.
+    
+    The order and contents of the list are maintained by
+    the methods in @racket[frame:focus-table-mixin], meaning that the
+    OS-level callbacks that track the focus of individual frames is 
+    ignored.
+    
+    See also @racket[test:use-focus-table] and @racket[test:get-active-top-level-window].
+    
+    })
+ 
  (proc-doc/names
   group:get-the-frame-group
   (-> (is-a?/c group:%))
@@ -798,14 +842,7 @@
   ((filename)
    ((make-default
      (λ () ((handler:current-create-new-window) filename)))))
-  @{This function creates a frame or re-uses an existing frame to edit a file.
-    
-    If the preference @racket['framework:open-here] is set to @racket[#t], and
-    @racket[(send (group:get-the-frame-group) get-open-here-frame)] returns a
-    frame, the @method[frame:open-here<%> open-here] method of that frame is
-    used to load the file in the existing frame.
-    
-    Otherwise, it invokes the appropriate format handler to open the file (see
+  @{This function invokes the appropriate format handler to open the file (see
     @racket[handler:insert-format-handler]).
     
     @itemize[

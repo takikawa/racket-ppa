@@ -1,20 +1,34 @@
 #lang scribble/doc
 @(require scribble/manual
           scribble/struct
+          scribble/decode
           scribble/eval
-          (for-label scheme/base
+          (for-label racket/base
+                     racket/contract/base
+                     racket/runtime-path
                      macro-debugger/expand
                      macro-debugger/emit
                      macro-debugger/stepper
                      macro-debugger/stepper-text
                      macro-debugger/syntax-browser
-                     (rename-in scheme (free-identifier=? module-identifier=?))))
+                     (except-in macro-debugger/analysis/check-requires main)
+                     (except-in macro-debugger/analysis/show-dependencies main)))
 
 @(define the-eval
    (let ([the-eval (make-base-eval)])
-     (the-eval '(require macro-debugger/expand
-                         macro-debugger/stepper-text))
+     (the-eval '(require racket/pretty
+                         macro-debugger/expand
+                         macro-debugger/stepper-text
+                         (except-in macro-debugger/analysis/check-requires main)
+                         (except-in macro-debugger/analysis/show-dependencies main)))
+     (the-eval '(current-print pretty-print-handler))
      the-eval))
+
+@(define (defoutput proto . text)
+   (nested #:style "leftindent"
+          (tabular #:style 'boxed (list (list proto)))
+          "\n" "\n"
+          (splice text)))
 
 @title{Macro Debugger: Inspecting Macro Expansion}
 
@@ -105,8 +119,15 @@ result as the original syntax.
 Macros can explicitly send information to a listening macro stepper by
 using the procedures in this module.
 
-@defproc[(emit-remark [fragment (or/c syntax? string?)] ...
-                      [#:unmark? unmark? boolean? #t])
+@defproc[(emit-remark [fragment
+                       (letrec ([emit-arg/c
+                                 (recursive-contract
+                                  (or/c string?
+                                        syntax?
+                                        (listof emit-arg/c)
+                                        (-> emit-arg/c)))])
+                         emit-arg/c)] ...
+                      [#:unmark? unmark? boolean? (syntax-transforming?)])
          void?]{
 
 Emits an event to the macro stepper (if one is listening) containing
@@ -315,65 +336,234 @@ structure of a program is only determined after macro expansion is
 complete.
 
 
-@section{Checking requires}
+@section{Finding Useless @racket[require]s}
 @section-index["useless-requires"]
 
 @defmodule[macro-debugger/analysis/check-requires]
 
-@defproc[(check-requires [module-name module-path?])
-         (listof (list/c 'keep   module-path-index? number? (or/c string? #f))
-	         (list/c 'bypass module-path-index? number?)
-		 (list/c 'drop   module-path-index? number?))]{
+The @racketmodname[macro-debugger/analysis/check-requires] can be run
+as a command-line script. For example (from racket root directory):
 
-Estimate a module's useless requires.
-The procedure returns one element per (non-label) require in the
-following format:
+@verbatim{
+racket -lm macro-debugger/analysis/check-requires \
+  collects/syntax/*.rkt
+
+racket -lm macro-debugger/analysis/check-requires -- -kbu \
+  openssl
+}
+
+Each argument is interpreted as a file path if it exists; otherwise,
+it is interpreted as a module path. See @racket[check-requires] for a
+description of the output format, known limitations in the script's
+recommendations, etc.
+
+@defproc[(check-requires [module-to-analyze module-path?]
+                         [#:show-keep? show-keep? boolean? #t]
+                         [#:show-bypass? show-bypass? boolean? #t]
+                         [#:show-drop? show-drop? boolean? #t]
+                         [#:show-uses? show-uses? boolean? #f])
+         void?]{
+
+Analyzes @racket[module-to-analyze], detecting useless requires. Each
+module imported by @racket[module-to-analyze] is classified as one of
+KEEP, BYPASS, or DROP. For each required module, one or more lines is
+printed with the module's classification and supporting
+information. Output may be suppressed based on classification via
+@racket[show-keep?], @racket[show-bypass?], and @racket[show-drop?];
+by default, only DROP recommendations are printed.
+
+Modules required @racket[for-label] are not analyzed.
+
+@defoutput[@tt{KEEP @racket[_req-module] at @racket[_req-phase]}]{
+
+  The require of module @racket[_req-module] at phase
+  @racket[_req-phase] must be kept because bindings defined within it
+  are used. 
+
+  If @racket[show-uses?] is true, the dependencies of
+  @racket[module-to-analyze] on @racket[_req-module] are enumerated,
+  one per line, in the following format:
+
+  @defoutput[@tt{@racket[_exp-name] at @racket[_use-phase] (@racket[_mode ...]) [RENAMED TO @racket[_ref-name]]}]{
+
+    Indicates an export named @racket[_exp-name] is used at phase
+    @racket[_use-phase] (not necessarily the phase it was provided at,
+    if @racket[_req-phase] is non-zero). 
+
+    The @racket[_modes] indicate what kind(s) of dependencies were
+    observed: used as a @tt{reference}, appeared in a syntax template
+    (@tt{quote-syntax}), etc.
+
+    If the @tt{RENAMED TO} clause is present, it indicates that the
+    binding is renamed on import into the module, and
+    @racket[_ref-name] gives the local name used (@racket[_exp-name]
+    is the name under which @racket[_req-module] provides the
+    binding).
+  }
+}
+
+@defoutput[@tt{BYPASS @racket[_req-module] at @racket[_req-phase]}]{
+
+  The require is used, but only for bindings that could be more
+  directly obtained via one or more other modules. For example, a use
+  of @racketmodname[racket] might be bypassed in favor of
+  @racketmodname[racket/base], @racketmodname[racket/match], and
+  @racketmodname[racket/contract], etc.
+
+  A list of replacement requires is given, one per line, in the
+  following format:
+
+  @defoutput[@tt{TO @racket[_repl-module] at @racket[_repl-phase] [WITH RENAMING]}]{
+
+    Add a require of @racket[_repl-module] at phase
+    @racket[_repl-phase]. If @racket[show-uses?] is true, then
+    following each @tt{TO} line is an enumeration of the dependencies
+    that would be satisfied by @racket[_repl-module] in the same
+    format as described under @tt{KEEP} below.
+
+    If the @tt{WITH RENAMING} clause is present, it indicates that at
+    least one of the replacement modules provides a binding under a
+    different name from the one used locally in the module. Either the
+    references should be changed or @racket[rename-in] should be used
+    with the replacement modules as necessary.
+  }
+
+  Bypass recommendations are restricted by the following rules:
+  @itemlist[
+
+  @item{@racket[_repl-module] must not involve crossing a new
+    @tt{private} directory from @racket[_req-module]}
+
+  @item{@racket[_repl-module] is never a built-in (``@litchar{#%}'')
+    module}
+
+  @item{@racket[_req-module] must not be in the ``no-bypass''
+    whitelist}
+  ]
+}
+
+@defoutput[@tt{DROP @racket[_req-module] at @racket[_req-phase]}]{
+
+  The require appears to be unused, and it can probably be dropped
+  entirely.
+}
+
+Due to limitations in its implementation strategy,
+@racket[check-requires] occasionally suggests dropping or bypassing a
+module that should not be dropped or bypassed. The following are
+typical reasons for such bad suggestions:
+
 @itemlist[
-@item{
-  @racket['keep] @racket[module] at @racket[phase] @racket[(optional-comment)]
-  @itemlist[
-  @item{The require must be kept because bindings defined within it are used.}
-  @item{The optional comment indicates if the require must be kept
-        @itemlist[
-	@item{only because its bindings are re-exported}
-	@item{only because the whitelist DB says so}
-	]}]}
-@item{
-  @racket['bypass] @racket[module] at @racket[phase]
-  @itemlist[
-  @item{The require is used, but only for bindings that could be more
-        directly obtained via another module. For example, @racket[racket]
-	can be bypassed in favor of some subset of @racket[racket/base],
-	@racket[racket/contract], etc.}]}
-@item{
-  @racket['drop] @racket[module] at @racket[phase]
-  @itemlist[
-  @item{The require appears to be unused. Unless it must be kept for side
-        effects or for bindings of a very unusual macro, it can be dropped
-        entirely.}]}]
 
-Examples:
-@racketblock[
- (check-requires 'typed-scheme)
- (check-requires 'unstable/markparam)
- (check-requires 'macro-debugger/syntax-browser/widget)
+@item{The module's invocation has side-effects. For example, the
+  module body may update a shared table or perform I/O, or it might
+  transitively require a module that does. (Consider adding the module
+  to the whitelist.)}
+
+@item{Bindings from the module are used in identifier comparisons by a
+  macro, such as appearing in the macro's ``literals list.'' In such
+  cases, a macro should annotate its expansion with the
+  @racket['disappeared-use] property containing the identifier(s)
+  compared with its literals; however, most casually-written macros do
+  not do so. On the other hand, macros and their literal identifiers
+  are typically provided by the same module, so this problem is
+  somewhat uncommon.}
+]
+
+@examples[#:eval the-eval
+(check-requires 'framework)
+(check-requires 'openssl #:show-uses? #t)
 ]
 }
 
-A scripting interface to @racket[macro-debugger/analysis/check-requires]
-usable from the command-line is available at
-@racket[macro-debugger/analysis/check-requires-script.rkt].
-
-Example (from racket root directory):
-
-@commandline{racket -l macro-debugger/analysis/check-requires-script \
-  collects/syntax/*.rkt}
-
-
 @defproc[(show-requires [module-name module-path?])
-         (listof (list/c 'keep   module-path? number? (or/c string? #f))
-	         (list/c 'bypass module-path? number?)
+         (listof (list/c 'keep   module-path? number?)
+	         (list/c 'bypass module-path? number? list?)
 		 (list/c 'drop   module-path? number?))]{
-Similar to @racket[check-requires], but outputs module paths instead of
-module path indexes, for more readability.
+
+Like @racket[check-requires], but returns the analysis as a list
+instead of printing it. The procedure
+returns one element per (non-label) require in the following format:
+@itemlist[
+@item{@racket[(list 'keep _req-module _req-phase)]}
+@item{@racket[(list 'bypass _req-module _req-phase _replacements)]}
+@item{@racket[(list 'drop _req-module _req-phase)]}
+]
+
+@examples[#:eval the-eval
+(show-requires 'framework)
+]
+}
+
+
+@section{Showing Module Dependencies}
+@section-index["show-dependencies"]
+
+@defmodule[macro-debugger/analysis/show-dependencies]
+
+The @racketmodname[macro-debugger/analysis/show-dependencies] module
+can be run as a command-line script. For example (from racket root
+directory):
+
+@verbatim{
+racket -lm macro-debugger/analysis/show-dependencies -- -bc \
+  collects/openssl/main.rkt
+
+racket -lm macro-debugger/analysis/show-dependencies -- -c \
+  --exclude racket \
+  openssl
+}
+
+Each argument is interpreted as a file path if it exists; otherwise it
+is interpreted as a module path. See @racket[show-dependencies] for a
+description of the output format.
+
+@defproc[(show-dependencies [root module-path?] ...
+                            [#:exclude exclusions
+                             (listof module-path?) null]
+                            [#:show-context? show-context? boolean? #f])
+         void?]{
+
+Computes the set of modules transitively required by the @racket[root]
+module(s). A @racket[root] module is included in the output
+only if it is a dependency of another @racket[root] module. The
+computed dependencies do not include modules reached through
+@racket[dynamic-require] or referenced by
+@racket[define-runtime-module-path-index] but do include modules
+referenced by @racket[define-runtime-module-path] (since that
+implicitly creates a @racket[for-label] dependency).
+
+Dependencies are printed, one per line, in the following format:
+
+@defoutput[@tt{@racket[_dep-module] [<- @racket[(_direct-dependent ...)]]}]{
+
+Indicates that @racket[_dep-module] is transitively required by one or
+more @racket[root] modules. If @racket[show-context?] is true, then
+the @racket[_direct-dependent]s are shown; they are the modules
+reachable from (and including) the @racket[root] modules that directly
+require @racket[_dep-module].
+}
+
+The dependencies are trimmed by removing any module reachable from (or
+equal to) a module in @racket[exclusions].
+
+@examples[#:eval the-eval
+(show-dependencies 'openssl
+                   #:show-context? #t
+                   #:exclude (list 'racket))
+]
+}
+
+@defproc[(get-dependencies [root module-path?] ...
+                           [#:exclude exclusions
+                            (listof module-path?) null])
+         (listof (list module-path? (listof module-path?)))]{
+
+Like @racket[show-dependencies], but returns a list instead of
+producing output. Each element of the list is a list containing a
+module path and the module paths of its immediate dependents.
+
+@examples[#:eval the-eval
+(get-dependencies 'openssl #:exclude (list 'racket))
+]
 }

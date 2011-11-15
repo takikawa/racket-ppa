@@ -123,7 +123,7 @@
 
 (define (vector-filter-not f v)
   (one-arg-check f v 'vector-filter-not)
-  (list->vector (for/list ([i (in-vector v)] #:when (not (f i))) i)))
+  (list->vector (for/list ([i (in-vector v)] #:unless (f i)) i)))
 
 (define (vector-count f v . vs)
   (unless (and (procedure? f) (procedure-arity-includes? f (add1 (length vs))))
@@ -231,7 +231,7 @@
 (define-syntax-rule (vm-mk name cmp)
   (define (name val vec)
     (unless (vector? vec)
-      (raise-type-error 'name "vector" 1 vec))
+      (raise-type-error 'name "vector" 1 val vec))
     (let ([sz (unsafe-vector-length vec)])
       (let loop ([k 0])
         (cond [(= k sz) #f]

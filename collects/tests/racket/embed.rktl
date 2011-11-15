@@ -216,6 +216,8 @@
   (one-mz-test "embed-me1d.rkt" "This is 1d\n" #f)
   (one-mz-test "embed-me1e.rkt" "This is 1e\n" #f)
   (one-mz-test "embed-me2.rkt" "This is 1\nThis is 2: #t\n" #t)
+  (one-mz-test "embed-me13.rkt" "This is 14\n" #f)
+  (one-mz-test "embed-me14.rkt" "This is 14\n" #f)
 
   ;; Try unicode expr and cmdline:
   (prepare dest "unicode")
@@ -304,7 +306,7 @@
     (try-exe (mk-dest mred?) "This is 6\n#t\n" mred? void "cts") ; <- cts copied to distribution
     (delete-directory/files "cts")
     (test #f system* (mk-dest mred?))
-
+  
     (void)))
 
 (define (try-mzc)
@@ -377,23 +379,7 @@
              "--gui-exe"
              (path->string (mk-dest #t))
              (path->string (build-path (collection-path "tests" "racket") "embed-me5.rkt")))
-    (try-exe (mk-dest #t) "This is 5: #<class:button%>\n" #t))
-
-  ;; Another GRacket-specific: try embedding plot, which has extra DLLs and font files:
-  (parameterize ([current-directory (find-system-path 'temp-dir)])
-    (define direct (build-path (find-system-path 'temp-dir) "direct.ps"))
-
-    (test #t
-          system* (build-path (find-console-bin-dir) "mred")
-          "-qu"
-          (path->string (build-path (collection-path "tests" "racket") "embed-me7.rkt"))
-          (path->string direct))
-
-    (system* mzc 
-             "--gui-exe"
-             (path->string (mk-dest #t))
-             (path->string (build-path (collection-path "tests" "racket") "embed-me7.rkt")))
-    (try-exe (mk-dest #t) "plotted\n" #t)))
+    (try-exe (mk-dest #t) "This is 5: #<class:button%>\n" #t)))
 
 ;; Try including source that needs a reader extension
 

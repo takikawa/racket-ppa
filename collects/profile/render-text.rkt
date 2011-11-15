@@ -1,8 +1,8 @@
-#lang at-exp scheme/base
+#lang at-exp racket/base
 
 (provide render)
 
-(require "structs.rkt" "analyzer.rkt" "utils.rkt" scheme/list)
+(require "analyzer.rkt" "utils.rkt" racket/list)
 
 (define (f:msec msec)
   (number->string (round (inexact->exact msec))))
@@ -122,8 +122,8 @@
       (define (sub get-edges get-node get-node-time)
         (for*/list ([edge (in-list (get-edges node))]
                     [sub  (in-list (list (get-node edge)))] ; <-- hack...
-                    #:when (not (or (eq? *-node sub)        ; <-- ...for this
-                                    (memq sub hidden))))
+                    #:unless (or (eq? *-node sub)           ; <-- ...for this
+                                 (memq sub hidden)))
           (define name   (node-> 'sub-label sub))
           (define local% (format-percent (get-node-time edge) total))
           `("" "" "" "" "" "" "" ""

@@ -121,7 +121,8 @@ implements the compilation and dependency management used by
 @exec{raco make} and @exec{raco setup}.}
 
 @defproc[(make-compilation-manager-load/use-compiled-handler 
-          [delete-zos-when-rkt-file-does-not-exist? any/c #f])
+          [delete-zos-when-rkt-file-does-not-exist? any/c #f]
+          [#:security-guard security-guard (or/c security-guard? #f) #f])
          (path? (or/c symbol? false/c) . -> . any)]{
 
 Returns a procedure suitable as a value for the
@@ -208,6 +209,15 @@ If the @racket[delete-zos-when-rkt-file-does-not-exist?] argument is a true
 value, then the returned handler will delete @filepath{.zo} files
 when there is no corresponding original source file.
 
+If the @racket[security-guard] argument is supplied, it is used when
+creating @filepath{.zo} files, @filepath{.dep} files, and @filepath{compiled/}
+directories, and when it adjusts the timestamps for existing files.
+If it is @racket[#f], then
+the security guard in the @racket[current-security-guard] when 
+the files are created is used (not the security guard at the point 
+@racket[make-compilation-manager-load/use-compiled-handler] is called).
+
+
 @emph{Do not} install the result of
 @racket[make-compilation-manager-load/use-compiled-handler] when the
 current namespace contains already-loaded versions of modules that may
@@ -218,7 +228,8 @@ modules may produce compiled files with inconsistent timestamps and/or
 
 
 @defproc[(managed-compile-zo [file path-string?]
-                             [read-src-syntax (any/c input-port? . -> . syntax?) read-syntax]) 
+                             [read-src-syntax (any/c input-port? . -> . syntax?) read-syntax]
+                             [#:security-guard security-guard (or/c security-guard? #f) #f]) 
          void?]{
 
 Compiles the given module source file to a @filepath{.zo}, installing
@@ -230,7 +241,16 @@ to record the timestamps of immediate files used to compile the source
 If @racket[file] is compiled from source, then
 @racket[read-src-syntax] is used in the same way as
 @racket[read-syntax] to read the source module. The normal
-@racket[read-syntax] is used for any required files, however.}
+@racket[read-syntax] is used for any required files, however.
+
+If @racket[security-guard] is not @racket[#f], then the provided security
+guard is used when creating the @filepath{compiled/} directories, 
+@filepath{.dep} and @filepath{.zo} files, and when it adjusts the timestamps 
+of existing files. If it is @racket[#f], then
+the security guard in the @racket[current-security-guard] when 
+the files are created is used (not the security guard at the point 
+@racket[managed-compile-zo] is called).
+}
 
 
 @defboolparam[trust-existing-zos trust?]{
@@ -242,13 +262,13 @@ out-of-date @filepath{.zo} files instead of re-compiling from source.}
 
 
 @defproc[(make-caching-managed-compile-zo
-          [read-src-syntax (any/c input-port? . -> . syntax?)])
+          [read-src-syntax (any/c input-port? . -> . syntax?)]
+          [#:security-guard security-guard (or/c security-guard? #f) #f])
          (path-string? . -> . void?)]{
 
 Returns a procedure that behaves like @racket[managed-compile-zo]
 (providing the same @racket[read-src-syntax] each time), but a cache
 of timestamp information is preserved across calls to the procedure.}
-
 
 @defparam[manager-compile-notify-handler notify (path? . -> . any)]{
 
@@ -287,7 +307,6 @@ Returns the file-modification date and @racket[delay]ed hash of
 
  This function is intended for use with @racket[manager-skip-file-handler].}
 
-
 @defproc[(get-file-sha1 [p path?]) (or/c string? #f)]{
 
 Computes a SHA-1 hash for the file @racket[p]; the result is
@@ -321,12 +340,25 @@ windows, @racket[with-compile-output] creates a second temporary file
 @racket[tmp-path2], renames @racket[p] to @racket[tmp-path2], renames
 @racket[tmp-path] to @racket[p], and finally deletes @racket[tmp-path2].}
 
-@defparam[parallel-lock-client proc ([command (or/c 'lock 'unlock)] [zo-path bytes?] . -> . boolean?)]{
+@defparam[parallel-lock-client proc 
+                               (or/c #f
+                                     (->i ([command (or/c 'lock 'unlock)]
+                                           [file bytes?])
+                                          [res (command) (if (eq? command 'lock)
+                                                             boolean?
+                                                             void?)]))]{
 
-Holds the parallel compilation lock client, which prevents compilation races
-between parallel builders.  The @racket[proc] function takes a command argument
-of either @racket['lock] or @racket['unlock].  The @racket[zo-path] argument
-specifies the path of the zo for which compilation should be locked.
+Holds the parallel compilation lock client, which
+is used by the result of @racket[make-compilation-manager-load/use-compiled-handler] to
+prevent compilation races between parallel builders.  
+
+When @racket[proc] is @racket[#f] (the default), no checking for parallel
+compilation is done (and thus multiple threads or places running compilations
+via @racket[make-compilation-manager-load/use-compiled-handler] will potentially
+corrupt each other's @filepath{.zo} files).
+
+When @racket[proc] is a function, its first argument is a command, indicating
+if it wants to lock or unlock the path specified in the second argument.
 
 When the @racket[proc] @racket['lock] command returns @racket[#t], the current
 builder has obtained the lock for @racket[zo-path].
@@ -336,7 +368,9 @@ release the lock by calling @racket[proc] @racket['unlock] with the exact same
 
 When the @racket[proc] @racket['lock] command returns @racket[#f], another
 parallel builder obtained the lock first and has already compiled the zo.  The
-parallel builder should continue without compiling @racket[zo-path].  
+parallel builder should continue without compiling @racket[zo-path].
+(In this case, @racket[make-compilation-manager-load/use-compiled-handler]'s
+result will not call @racket[proc] with @racket['unlock].)
 
 @examples[
   #:eval cm-eval
@@ -350,10 +384,34 @@ parallel builder should continue without compiling @racket[zo-path].
       (when ok-to-compile?
         (printf "Do compile here ...\n")))
     (lambda ()
-     (when locked?
-       (lc 'unlock zo-name)))))
+      (when locked?
+        (lc 'unlock zo-name)))))
 ]
 }
+
+@defproc[(compile-lock->parallel-lock-client [pc place-channel?] [cust (or/c #f custodian?) #f])
+         (-> (or/c 'lock 'unlock) bytes? boolean?)]{
+
+  Returns a function that follows the @racket[parallel-lock-client]
+  by communicating over @racket[pc]. The argument must have 
+  be the result of @racket[make-compile-lock].
+  
+  This communication protocol implementation is not kill safe. To make it kill safe,
+  it needs a sufficiently powerful custodian, i.e., one that is not subject to
+  termination (unless all of the participants in the compilation are also terminated).
+  It uses this custodian to create a thread that monitors the threads that are
+  doing the compilation. If one of them is terminated, the presence of the
+  custodian lets another one continue. (The custodian is also used to create
+  a thread that manages a thread safe table.)
+}
+
+@defproc[(make-compile-lock) place-channel?]{
+  Creates a @racket[place-channel?] that can be used with
+            @racket[compile-lock->parallel-lock-client] to avoid concurrent
+            compilations of the same racket source files in multiple places.
+}
+
+
 @; ----------------------------------------------------------------------
 
 @section[#:tag "api:parallel-build"]{API for Parallel-Build}
@@ -361,7 +419,7 @@ parallel builder should continue without compiling @racket[zo-path].
 @defmodule[setup/parallel-build]{
 
 The @racketmodname[setup/parallel-build] library provides the parallel compilation to bytecode
-functionality of @exec{rack setup} and @exec{raco make}.}
+functionality of @exec{raco setup} and @exec{raco make}.}
 
 @; ----------------------------------------------------------------------
 
@@ -407,7 +465,13 @@ error occurs. The other arguments give more information for each status update.
   [setup-fprintf (->* ([stage string?] [format string?]) 
                       () 
                       #:rest (listof any/c) void)]
-  [append-error (cc? [prefix string?] [exn (or/c exn? null?)] [out string?] [err srtring?] [message string?] . -> . void?)]
+  [append-error (-> cc?
+                    [prefix string?] 
+                    [exn (or/c exn? null?)]
+                    [out string?]
+                    [err srtring?]
+                    [message string?]
+                    void?)]
   [collects-tree (listof any/c)])  (void)]{
 
 The @racket[parallel-compile] internal utility function is used by @exec{rack

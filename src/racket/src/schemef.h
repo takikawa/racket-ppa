@@ -586,6 +586,8 @@ MZ_EXTERN Scheme_Object *scheme_append_char_string(Scheme_Object *, Scheme_Objec
 MZ_EXTERN mzchar *scheme_string_recase(mzchar *s, int d, int len, int mode, int inplace, int *_len);
 
 MZ_EXTERN Scheme_Object *scheme_make_vector(intptr_t size, Scheme_Object *fill);
+MZ_EXTERN Scheme_Double_Vector *scheme_alloc_flvector(intptr_t size);
+MZ_EXTERN Scheme_Vector *scheme_alloc_fxvector(intptr_t size);
 MZ_EXTERN Scheme_Object *scheme_make_integer_value(intptr_t i);
 MZ_EXTERN Scheme_Object *scheme_make_integer_value_from_unsigned(uintptr_t i);
 MZ_EXTERN Scheme_Object *scheme_make_integer_value_from_long_long(mzlonglong i);
@@ -807,6 +809,7 @@ MZ_EXTERN intptr_t scheme_output_tell(Scheme_Object *port);
 MZ_EXTERN intptr_t scheme_tell_line(Scheme_Object *port);
 MZ_EXTERN intptr_t scheme_tell_column(Scheme_Object *port);
 MZ_EXTERN void scheme_tell_all(Scheme_Object *port, intptr_t *line, intptr_t *col, intptr_t *pos);
+MZ_EXTERN void scheme_set_port_location(int argc, Scheme_Object **argv);
 MZ_EXTERN void scheme_count_lines(Scheme_Object *port);
 MZ_EXTERN void scheme_close_input_port(Scheme_Object *port);
 MZ_EXTERN void scheme_close_output_port(Scheme_Object *port);
@@ -1154,6 +1157,8 @@ MZ_EXTERN void *scheme_get_signal_handle();
 MZ_EXTERN intptr_t scheme_char_strlen(const mzchar *s);
 
 MZ_EXTERN Scheme_Object *scheme_stx_extract_marks(Scheme_Object *stx);
+
+MZ_EXTERN int scheme_get_place_id(void);
 
 MZ_EXTERN Scheme_Hash_Table *scheme_get_place_table(void);
 MZ_EXTERN void *scheme_register_process_global(const char *key, void *val);

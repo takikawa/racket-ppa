@@ -1,10 +1,6 @@
 #lang racket/base
 (require racket/class
-         racket/unit
-         racket/list
-         racket/file
          racket/path
-         racket/match
          racket/gui/base
          framework
          unstable/class-iop
@@ -213,6 +209,9 @@
       (menu-option/notify-box extras-menu
                               "Draw binding arrows"
                               (get-field draw-arrows? config))
+      (menu-option/notify-box extras-menu
+                              "Enable reader abbreviations"
+                              (get-field pretty-abbrev? config))
       (menu-option/notify-box extras-menu
                               "Extra navigation"
                               (get-field extra-navigation? config)))

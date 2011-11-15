@@ -318,7 +318,12 @@ supplied.  The reader function receives a value to be used as input
 source (i.e., the first argument to @racket[read-syntax]), and it
 should return a list of @tech{syntax objects}.  The default reader
 calls @racket[read-syntax], accumulating results in a list until it
-receives @racket[eof].}
+receives @racket[eof].
+
+Note that the reader function is usually called as is, but when it is
+used to read the program input for @racket[make-module-evaluator],
+@racket[read-accept-lang] and @racket[read-accept-reader] are set to
+@racket[#t].}
 
 
 @defparam[sandbox-input in (or/c #f
@@ -671,22 +676,24 @@ other resources intact.}
 
 @defparam[sandbox-make-inspector make (-> inspector?)]{
 
-A parameter that determines the procedure used to create the inspector
-for sandboxed evaluation.  The procedure is called when initializing
-an evaluator, and the default parameter value is
-@racket[make-inspector].}
+A parameter that determines the (nullary) procedure that is used to
+create the inspector for sandboxed evaluation.  The procedure is called
+when initializing an evaluator.  The default parameter value is
+@racket[(lambda () (make-inspector (current-inspector)))].}
 
 
 @defparam[sandbox-make-code-inspector make (-> inspector?)]{
 
-A parameter that determines the procedure used to create the code
-inspector for sandboxed evaluation.  The procedure is called when
-initializing an evaluator, and the default parameter value is
-@racket[make-inspector].  The @racket[current-load/use-compiled]
-handler is setup to still allow loading of bytecode files under the
-original code inspector when @racket[sandbox-path-permissions] allows
-it through a @racket['read-bytecode] mode symbol, to make it possible
-to load libraries.}
+A parameter that determines the (nullary) procedure that is used to
+create the code inspector for sandboxed evaluation.  The procedure is
+called when initializing an evaluator.  The default parameter value is
+@racket[(lambda () (make-inspector (current-code-inspector)))].
+
+The @racket[current-load/use-compiled] handler is setup to allow loading
+of bytecode files under the original code inspector when
+@racket[sandbox-path-permissions] allows it through a
+@racket['read-bytecode] mode symbol, which makes loading libraries
+possible.}
 
 
 @defparam[sandbox-make-logger make (-> logger?)]{
@@ -878,10 +885,11 @@ your own permissions, for example,
 @racketblock[
   (let ([guard (current-security-guard)])
     (call-in-sandbox-context
+      ev
       (lambda ()
         (parameterize ([current-security-guard guard])
           (code:comment @#,t{can access anything you want here})
-          ))))
+          (delete-file "/some/file")))))
 ]}
 
 @; ----------------------------------------------------------------------

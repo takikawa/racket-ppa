@@ -2,14 +2,7 @@
 (require (for-template scheme/base)
          (for-template "loc-wrapper-rt.rkt")
          "term-fn.rkt")
-(provide to-lw/proc to-lw/uq/proc is-term-fn?)
-
-;; this parameter allows define-metafunction to
-;; communicate which name is the recursive calls
-;; to the typesetting code, since the let-term-fn
-;; won't have been expanded before to-lw/proc
-;; is called.
-(define is-term-fn? (make-parameter (λ (x) #f)))
+(provide to-lw/proc to-lw/uq/proc)
 
 (define (process-arg stx quote-depth)
   (define quoted? (quote-depth . > . 0))
@@ -67,9 +60,9 @@
         #,quoted?)]
     [x 
      (and (identifier? #'x)
-          (or (and (syntax-transforming?)
-                   (term-fn? (syntax-local-value #'x (λ () #f))))
-              ((is-term-fn?) #'x)))
+          (and (syntax-transforming?)
+               (or (term-fn? (syntax-local-value #'x (λ () #f)))
+                   (judgment-form? (syntax-local-value #'x (λ () #f))))))
      #`(make-lw
         '#,(syntax-e #'x)
         #,(syntax-line stx) 

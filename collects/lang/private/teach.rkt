@@ -477,7 +477,7 @@
              #'id 
              "expected a function after the open parenthesis, but found ~a"
              (syntax-e #'id))]
-           [_ (datum->syntax stx val)]))))
+           [_ (datum->syntax stx val stx)]))))
     
     (define beginner-true/proc (make-constant-expander #t))
     (define beginner-false/proc (make-constant-expander #f))
@@ -1550,29 +1550,39 @@
                       'stepper-black-box-expr
                       stx)]))]
         [(_ (planet . rest))
-         (syntax-case stx (planet)
-           [(_ (planet s1 (s2 s3 n1 n2)))
-            (and (string? (syntax-e #'s1))
-                 (string? (syntax-e #'s2))
-                 (string? (syntax-e #'s3))
-                 (version-number? (syntax-e #'n1))
-                 (version-number? (syntax-e #'n2)))
-            (begin
-              (check-string-form stx #'s1)
-              (check-string-form stx #'s2)
-              (check-string-form stx #'s3)
-              ;; use the original `planet', so that it binds correctly:
-              (syntax-case stx ()
-                [(_ ms) (stepper-syntax-property
-                         #'(require ms)
-                         'stepper-black-box-expr
-                         stx)]))]
-           [_else
-            (teach-syntax-error
-             'require
-             stx
-             #f
-             "not a valid planet path; should be: (require (planet STRING (STRING STRING NUMBER NUMBER)))")])]
+         (let ([go
+                (λ ()
+                  ;; use the original `planet', so that it binds correctly:
+                  (syntax-case stx ()
+                    [(_ ms) (stepper-syntax-property
+                             #'(require ms)
+                             'stepper-black-box-expr
+                             stx)]))])
+           (syntax-case stx (planet)
+             [(_ (planet s1 (s2 s3 n1 n2)))
+              (and (string? (syntax-e #'s1))
+                   (string? (syntax-e #'s2))
+                   (string? (syntax-e #'s3))
+                   (version-number? (syntax-e #'n1))
+                   (version-number? (syntax-e #'n2)))
+              (begin
+                (check-string-form stx #'s1)
+                (check-string-form stx #'s2)
+                (check-string-form stx #'s3)
+                (go))]
+             [(_ (planet a))
+              (or (string? (syntax-e #'a))
+                  (symbol? (syntax-e #'a)))
+              (go)]
+             [_else
+              (teach-syntax-error
+               'require
+               stx
+               #f
+               (string-append
+                "not a valid planet path; should be:"
+                " (require (planet STRING (STRING STRING NUMBER NUMBER)))"
+                " (require (planet STRING)) or (require (planet SYMBOL))"))]))]
         [(_ thing)
          (teach-syntax-error
           'require
@@ -1636,13 +1646,13 @@
 		  ;;  forms know that it's ok to expand in this internal
 		  ;;  definition context.
 		  [int-def-ctx (build-expand-context (make-expanding-for-intermediate-local))])
-	      (let* ([partly-expanded-defns 
-		      (map (lambda (d)
-			     (local-expand
-			      d
-			      int-def-ctx
-			      (kernel-form-identifier-list)))
-			   defns)]
+	      (let* ([partly-expand (lambda (d)
+                                      (local-expand
+                                       d
+                                       int-def-ctx
+                                       (kernel-form-identifier-list)))]
+                     [partly-expanded-defns
+		      (map partly-expand defns)]
 		     [flattened-defns
 		      (let loop ([l partly-expanded-defns][origs defns])
 			(apply
@@ -1653,7 +1663,7 @@
 				  ;; or `define-syntaxes', because only macros can generate
 				  ;; them
 				  [(begin defn ...)
-				   (let ([l (syntax->list (syntax (defn ...)))])
+				   (let ([l (map partly-expand (syntax->list (syntax (defn ...))))])
 				     (loop l l))]
 				  [(define-values . _)
 				   (list d)]
@@ -1750,13 +1760,14 @@
 			(stepper-syntax-property
 			 (quasisyntax/loc stx
 			   (let ()
-			     (define #,(gensym) 1) ; this ensures that the expansion of 'local' looks
-					; roughly the same, even if the local has no defs.
-			     mapping ...
-			     stx-def ...
-			     (define-values (tmp-id ...) def-expr)
-			     ...
-			     . exprs))
+                             (#%stratified-body
+                              (define #,(gensym) 1) ; this ensures that the expansion of 'local' looks
+					            ; roughly the same, even if the local has no defs.
+                              mapping ...
+                              stx-def ...
+                              (define-values (tmp-id ...) def-expr)
+                              ...
+                              . exprs)))
 			 'stepper-hint
 			 'comes-from-local)))))))]
 	   [(_ def-non-seq . __)
@@ -1805,12 +1816,13 @@
 			  [(rhs-expr ...) (map allow-local-lambda 
 					       (syntax->list (syntax (rhs-expr ...))))])
 	      (quasisyntax/loc stx
-		(letrec-syntaxes+values ([(name) (make-undefined-check
-						  (quote-syntax check-not-undefined)
-						  (quote-syntax tmp-id))]
-					 ...)
-		    ([(tmp-id) rhs-expr] 
-		     ...)
+                (#%stratified-body
+                  (define-syntaxes (name) (make-undefined-check
+                                           (quote-syntax check-not-undefined)
+                                           (quote-syntax tmp-id)))
+                  ...
+                  (define-values (tmp-id) rhs-expr)
+                  ...
 		  expr)))]
 	   [_else (bad-let-form 'letrec stx stx)]))))
     
@@ -2143,9 +2155,7 @@
 	       (with-syntax ([x (loop (syntax x) (sub1 depth))]
 			     [rest (loop (syntax rest) depth)]
 			     [uq-splicing (stx-car (stx-car stx))])
-		 (stepper-syntax-property (syntax/loc stx (the-cons/matchable (list (quote uq-splicing) x) rest))
-                                  'stepper-hint
-                                  'quasiquote-the-cons-application)))]
+                 (syntax/loc stx (the-cons/matchable (list (quote uq-splicing) x) rest))))]
 	  [intermediate-unquote-splicing
 	   (teach-syntax-error
 	    'quasiquote
@@ -2159,9 +2169,7 @@
 	  [(a . b)
 	   (with-syntax ([a (loop (syntax a) depth)]
 			 [b (loop (syntax b) depth)])
-	     (stepper-syntax-property (syntax/loc stx (the-cons/matchable a b))
-                              'stepper-hint
-                              'quasiquote-the-cons-application))]
+             (syntax/loc stx (the-cons/matchable a b)))]
 	  [any
 	   (syntax/loc stx (quote any))])))
 

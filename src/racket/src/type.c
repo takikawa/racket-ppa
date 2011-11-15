@@ -125,7 +125,7 @@ scheme_init_type ()
 
   set_name(scheme_define_values_type, "<define-values-code>");
   set_name(scheme_define_syntaxes_type, "<define-syntaxes-code>");
-  set_name(scheme_define_for_syntax_type, "<define-for-syntax-code>");
+  set_name(scheme_begin_for_syntax_type, "<begin-for-syntax-code>");
   set_name(scheme_begin0_sequence_type, "<begin0-code>");
   set_name(scheme_splice_sequence_type, "<splicing-begin-code>");
   set_name(scheme_module_type, "<module-code>");
@@ -297,12 +297,16 @@ scheme_init_type ()
   set_name(_scheme_values_types_, "<resurrected>");
   set_name(_scheme_compiled_values_types_, "<internal>");
 
+  set_name(scheme_place_type, "<place>");
+  set_name(scheme_place_async_channel_type, "<place-half-channel>");
+  set_name(scheme_place_bi_channel_type, "<place-channel>");
+  set_name(scheme_place_dead_type, "<place-dead-evt>");
+
+  set_name(scheme_resolved_module_path_type, "<resolve-module-path>");
+
 #ifdef MZ_GC_BACKTRACE
   set_name(scheme_rt_meta_cont, "<meta-continuation>");
 #endif
-  set_name(scheme_place_type, "<place>");
-  set_name(scheme_place_async_channel_type, "<place_async_channel>");
-  set_name(scheme_place_bi_channel_type, "<place_bidirectional_channel>");
 }
 
 Scheme_Type scheme_make_type(const char *name)
@@ -387,9 +391,14 @@ Scheme_Type scheme_make_type(const char *name)
 
 char *scheme_get_type_name(Scheme_Type t)
 {
+  char *s;
   if (t < 0 || t >= maxtype)
     return "<bad-value>";
-  return type_names[t];
+  s = type_names[t];
+  if (!s)
+    return "???";
+  else
+    return s;
 }
 
 void scheme_install_type_reader(Scheme_Type t, Scheme_Type_Reader f)
@@ -539,7 +548,7 @@ void scheme_register_traversers(void)
 
   GC_REG_TRAV(scheme_define_values_type, vector_obj);
   GC_REG_TRAV(scheme_define_syntaxes_type, vector_obj);
-  GC_REG_TRAV(scheme_define_for_syntax_type, vector_obj);
+  GC_REG_TRAV(scheme_begin_for_syntax_type, vector_obj);
   GC_REG_TRAV(scheme_varref_form_type, twoptr_obj);
   GC_REG_TRAV(scheme_apply_values_type, twoptr_obj);
   GC_REG_TRAV(scheme_boxenv_type, twoptr_obj);
@@ -548,6 +557,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_splice_sequence_type, seq_rec);
   GC_REG_TRAV(scheme_set_bang_type, set_bang);
   GC_REG_TRAV(scheme_module_type, module_val);
+  GC_REG_TRAV(scheme_rt_export_info, exp_info_val);
   GC_REG_TRAV(scheme_require_form_type, twoptr_obj);
 
   GC_REG_TRAV(_scheme_values_types_, bad_trav);
@@ -684,6 +694,8 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_log_reader_type, mark_log_reader);
 
   GC_REG_TRAV(scheme_rt_runstack, runstack_val);
+
+  GC_REG_TRAV(scheme_free_id_info_type, vector_obj);
 
   GC_REG_TRAV(scheme_rib_delimiter_type, small_object);
   GC_REG_TRAV(scheme_noninline_proc_type, small_object);

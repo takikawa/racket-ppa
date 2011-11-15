@@ -6,15 +6,16 @@
          "private/planet-shared.rkt"
          "private/linkage.rkt"
          
-         "resolver.rkt"
+         "private/resolver.rkt"
+         "private/version.rkt"
+         
          net/url
          xml/xml
          
-         mzlib/file
-         mzlib/list
-         mzlib/etc
+         racket/file
+         racket/list
          
-         racket/contract
+         racket/contract/base
          racket/port
          racket/path
          racket/class
@@ -25,9 +26,7 @@
          setup/getinfo
          setup/unpack
 
-         racket/syntax
-         unstable/syntax
-         (for-syntax racket/base syntax/parse)
+         (for-syntax racket/base)
          (prefix-in srfi1: srfi/1)
          )
 
@@ -50,9 +49,9 @@
  display-plt-archived-file
  get-package-from-cache
  pkg->download-url
- exn:fail:planet?
- make-exn:fail:planet
- pkg-spec?)
+ (struct-out exn:fail:planet)
+ pkg-spec?
+ pkg?)
 
 (provide/contract
  [get-package-spec
@@ -63,19 +62,19 @@
             (list/c #t path? natural-number/c natural-number/c)
             (list/c #f string?)))]
  [download/install-pkg
-  (-> string? (and/c string? #rx"[.]plt") natural-number/c any/c (or/c pkg? #f))]
+  (-> string? (and/c string? #rx"[.]plt$") natural-number/c any/c (or/c pkg? #f))]
  [install-pkg
   (-> pkg-spec? path-string? natural-number/c any/c (or/c pkg? #f))]
  [add-hard-link 
-  (-> string? (and/c string? #rx"[.]plt") natural-number/c natural-number/c path? void?)]
+  (-> string? (and/c string? #rx"[.]plt$") natural-number/c natural-number/c path? void?)]
  [remove-hard-link 
-  (->* (string? (and/c string? #rx"[.]plt") natural-number/c natural-number/c)
+  (->* (string? (and/c string? #rx"[.]plt$") natural-number/c natural-number/c)
        (#:quiet? boolean?)
       void?)]
  [remove-pkg
-  (-> string? (and/c string? #rx"[.]plt") natural-number/c natural-number/c void?)]
+  (-> string? (and/c string? #rx"[.]plt$") natural-number/c natural-number/c void?)]
  [erase-pkg
-  (-> string? (and/c string? #rx"[.]plt") natural-number/c natural-number/c void?)])
+  (-> string? (and/c string? #rx"[.]plt$") natural-number/c natural-number/c void?)])
 
 
 ;; get-package-spec : string string [nat | #f] [min-ver-spec | #f] -> pkg?
@@ -128,7 +127,10 @@
          (clean-planet-package path (list owner name '() maj min))))
       (planet-log "Erasing metadata")
       (erase-metadata p)
-      (planet-log "Deleting files in ~a" (path->string path))
+      (planet-log "Deleting metadata and files in ~a" (path->string path))
+      (for ([file (in-list (dir->metadata-files path))])
+        (with-handlers ((exn:fail:filesystem? void))
+          (delete-file file)))
       (delete-directory/files path)
       (planet-log "Trimming empty directories")
       (trim-directory (CACHE-DIR) path)
@@ -245,19 +247,6 @@
          (delete-directory (car dirs))
          (loop (cdr dirs))]
         [else (void)]))))
-
-;; current-linkage : -> ((symbol (package-name nat nat) ...) ...)
-;; gives the current "linkage table"; a table that links modules to particular versions
-;; of planet requires that satisfy those linkages
-(define (current-linkage)
-  (let* ((links 
-          (if (file-exists? (LINKAGE-FILE))
-              (with-input-from-file (LINKAGE-FILE) read-all)
-              '()))
-         (buckets (categorize caar links)))
-    (map
-     (lambda (x) (cons (car x) (map (lambda (y) (drop-last (cadr y))) (cdr x))))
-     buckets)))
 
 ;; regexp->filter : (string | regexp) -> (path -> bool)
 ;; computes a filter that accepts paths that match the given regexps and rejects other paths
@@ -395,7 +384,9 @@
                                         (cons (format "Error generating scribble documentation: ~a" (render-exn e))
                                               critical-errors)))])
                  (unless (list? scribble-files)
-                   (error (format "malformed scribblings field; expected (listof (list string (listof symbol))), received ~e" 
+                   (error (format (string-append
+                                   "malformed scribblings field; expected"
+                                   " (listof (list string (listof symbol))), received ~e") 
                                   scribble-files)))
                  (for ([entry scribble-files])
                    (unless (scribble-entry? entry)
@@ -405,7 +396,9 @@
                      (unless (and (relative-path? filename) 
                                   (subpath? abs-dir filename)
                                   (bytes=? (filename-extension filename) #"scrbl"))
-                       (error "illegal scribblings file ~a (must be a file with extension .scrbl in the package directory or a subdirectory"))
+                       (error (string-append
+                               "illegal scribblings file ~a (must be a file with"
+                               " extension .scrbl in the package directory or a subdirectory")))
                      (unless (file-exists? (build-path abs-dir filename))
                        (error (format "scribblings file ~a not found" filename)))
                      (printf "Building: ~a\n" filename)
@@ -415,22 +408,25 @@
                                (build-path SCRIBBLE-DOCUMENT-DIR name)
                                (memq 'multi-page flags))))))))
            
-           (unless 
-               (or (null? critical-errors)
-                   (force-package-building?))
-             (raise-user-error '|PLaneT packager| "~a\nRefusing to continue packaging." (car critical-errors)))
+           (unless (or (null? critical-errors)
+                       (force-package-building?))
+             (raise-user-error '|PLaneT packager| "~a\nRefusing to continue packaging." 
+                               (if (pair? critical-errors)
+                                   (car critical-errors)
+                                   "")))
 
            (pack archive-name
                  "archive" 
                  (list ".") ;; if this changes, the filter (just below) must also change
                  null
-                 (if (PLANET-ARCHIVE-FILTER)
-                     (regexp->filter (PLANET-ARCHIVE-FILTER))
-                     (λ (p)
-                       (or (for/and ([always-in (list 'same (string->path "planet-docs"))]
-                                     [this-one (explode-path p)])
-                             (equal? always-in this-one))
-                           (std-filter p))))
+                 (let ([p-a-f (PLANET-ARCHIVE-FILTER)])
+                   (if p-a-f
+                       (regexp->filter p-a-f)
+                       (λ (p)
+                         (or (for/and ([always-in (list 'same (string->path "planet-docs"))]
+                                       [this-one (explode-path p)])
+                               (equal? always-in this-one))
+                             (std-filter p)))))
                  #t
                  'file
                  #f
@@ -606,7 +602,9 @@
     (let ([i* (get-info/full dir)])
       (cond
         [(not i*) 
-         (warn "Package has no info.rkt file. This means it will not have a description or documentation on the PLaneT web site.")]
+         (warn (string-append
+                "Package has no info.rkt file. This means it will not have"
+                " a description or documentation on the PLaneT web site."))]
         [else
          (let ([i (λ (field) (i* field (λ () #f)))])
            (checkinfo i fail
@@ -619,62 +617,94 @@
                        (λ (b) (and (list? b) (andmap xexpr? b)))
                        (announce "Package blurb: ~s\n" blurb)
                        (unless blurb
-                         (warn "Package's info.rkt does not contain a blurb field. Without a blurb field, the package will have no description on planet.racket-lang.org."))]
+                         (warn 
+                          (string-append
+                           "Package's info.rkt does not contain a blurb field."
+                           " Without a blurb field, the package will have no description on planet.racket-lang.org.")))]
                       [release-notes 
                        (λ (b) (and (list? b) (andmap xexpr? b)))
                        (announce "Release notes: ~s\n" release-notes)
                        (unless release-notes
-                         (warn "Package's info.rkt does not contain a release-notes field. Without a release-notes field, the package will not have any listed release information on planet.racket-lang.org beyond the contents of the blurb field."))]
+                         (warn
+                          (string-append
+                           "Package's info.rkt does not contain a release-notes field. Without a release-notes"
+                           " field, the package will not have any listed release information on"
+                           " planet.racket-lang.org beyond the contents of the blurb field.")))]
                       [categories
                        (λ (s) (and (list? s) (andmap symbol? s)))
                        (cond
                          [(ormap illegal-category categories)
                           =>
                           (λ (bad-cat)
-                            (fail (format "Package's info.rkt file contains illegal category \"~a\". The legal categories are: ~a\n" 
+                            (fail (format (string-append
+                                           "Package's info.rkt file contains illegal category \"~a\"."
+                                           " The legal categories are: ~a\n") 
                                           bad-cat
                                           legal-categories)))]
                          [else (announce "Categories: ~a\n" categories)])
                        (unless categories
-                         (warn "Package's info.rkt file does not contain a category listing. It will be placed in the Miscellaneous category."))]
+                         (warn (string-append
+                                "Package's info.rkt file does not contain a category listing."
+                                " It will be placed in the Miscellaneous category.")))]
                       [doc.txt
                        string?
                        (announce "doc.txt file: ~a\n" doc.txt)
                        (when doc.txt
-                         (warn "Package's info.rkt contains a doc.txt entry, which is now considered deprecated. The preferred method of documentation for PLaneT packages is now Scribble (see the Scribble documentation included in the Racket distribution for more information)."))]
+                         (warn
+                          (string-append
+                           "Package's info.rkt contains a doc.txt entry, which is now considered deprecated."
+                           " The preferred method of documentation for PLaneT packages is now Scribble"
+                           " (see the Scribble documentation included in the Racket distribution for"
+                           " more information).")))]
                       [html-docs
                        (lambda (s) (and (list? s) (andmap string? s)))
-                       (warn "Package specifies an html-docs entry. The preferred method of documentation for PLaneT packages is now Scribble (see the Scribble documentation included in the Racket distribution for more information).")]
+                       (warn (string-append
+                              "Package specifies an html-docs entry. The preferred method of documentation"
+                              " for PLaneT packages is now Scribble (see the Scribble documentation included"
+                              " in the Racket distribution for more information)."))]
                       [scribblings
                        (lambda (s) 
                          (and (list? s) 
                               (andmap scribble-entry? s)))
                        (void)
                        (unless scribblings
-                         (warn "Package does not specify a scribblings field. Without a scribblings field, the package will not have browsable online documentation."))]
+                         (warn (string-append
+                                "Package does not specify a scribblings field. Without a scribblings field,"
+                                " the package will not have browsable online documentation.")))]
                       [homepage 
                        string?
                        (cond
                          [(url-string? homepage)
                           (announce "Home page: ~a\n" homepage)]
                          [else
-                          (fail (format "The value of the package's info.rkt homepage field, ~s, does not appear to be a legal URL." homepage))])]
+                          (fail (format (string-append
+                                         "The value of the package's info.rkt homepage field, ~s, "
+                                         "does not appear to be a legal URL.")
+                                        homepage))])]
                       [primary-file
                        (λ (x) (or (string? x) (and (list? x) (andmap string? x))))
                        (begin
                          (cond
                            [(string? primary-file) 
                             (unless (file-in-current-directory? primary-file)
-                              (warn (format "Package's info.rkt primary-file field is ~s, a file that does not exist in the package." 
+                              (warn (format (string-append
+                                             "Package's info.rkt primary-file field is ~s, a file that"
+                                             " does not exist in the package.") 
                                             primary-file)))]
                            [(pair? primary-file)
                             (let ([bad-files (filter (λ (f) (not (file-in-current-directory? f))) primary-file)])
                               (unless (null? bad-files)
-                                (warn (format "Package's info.rkt primary-file field is ~s, which contains non-existant files ~s."
+                                (warn (format (string-append
+                                               "Package's info.rkt primary-file field is ~s, which contains"
+                                               " non-existant files ~s.")
                                               primary-file bad-files))))])
                          (announce "Primary file: ~a\n" primary-file))
                        (unless primary-file
-                         (warn "Package's info.rkt does not contain a primary-file field. The package's listing on planet.racket-lang.org will not have a valid require line for your package."))]
+                         (warn 
+                          (string-append
+                           "Package's info.rkt does not contain a primary-file field."
+                           " The package's listing on planet.racket-lang.org will not have a"
+                           " valid require line for your package.")))]
                       [required-core-version 
                        core-version?
                        (announce "Required racket version: ~a\n" required-core-version)]
@@ -682,7 +712,9 @@
                        (λ (x) (and (list? x) 
                                    (srfi1:lset<= equal? x '("3xx" "4.x"))))
                        (announce "Repositories: ~s\n" repositories)
-                       (warn "Package's info.rkt does not contain a repositories field. The package will be listed in all repositories by default.")]
+                       (warn (string-append
+                              "Package's info.rkt does not contain a repositories field."
+                              " The package will be listed in all repositories by default."))]
                       [version
                        string?
                        (announce "Version description: ~a\n" version)]))])
@@ -790,7 +822,8 @@
 
 ;; ============================================================
 ;; VERSION INFO
-
+;;  re-provided here for backwards compatibility (no idea 
+;;  why it was here in the first place, actually)
 (provide this-package-version
          this-package-version-name
          this-package-version-owner
@@ -799,91 +832,4 @@
          this-package-version-symbol
          package-version->symbol
          make-planet-symbol
-         (rename-out [this-package-version/proc path->package-version]))
-
-(define-syntax (this-package-version stx)
-  (syntax-case stx ()
-    [(_)
-     #`(this-package-version/proc
-         (this-expression-source-directory #,stx))]))
-
-(define-syntax define-getters
-  (syntax-rules ()
-    [(define-getters (name position) ...)
-     (begin
-       (define-syntax (name stx)
-         (syntax-case stx ()
-           [(name)
-            #`(let ([p #,(datum->syntax stx `(,#'this-package-version))])
-                (and p (position p)))]))
-       ...)]))
-
-(define-getters
-  (this-package-version-name pd->name)
-  (this-package-version-owner pd->owner)
-  (this-package-version-maj pd->maj)
-  (this-package-version-min pd->min))
-
-(define-syntax (this-package-version-symbol stx)
-  (syntax-parse stx
-    [(_ (~optional suffix:id))
-     #`(package-version->symbol
-         (this-package-version/proc
-           (this-expression-source-directory #,stx))
-         #,@(if (attribute suffix) #'['suffix] #'[]))]))
-
-;; ----------------------------------------
-
-(define (make-planet-symbol stx [suffix #f])
-  (match (syntax-source-directory stx)
-    [#f #f]
-    [dir (match (this-package-version/proc dir)
-           [#f #f]
-           [ver (package-version->symbol ver suffix)])]))
-
-(define (package-version->symbol ver [suffix #f])
-  (match ver
-    [(list owner name major minor)
-     (string->symbol
-       (format "~a/~a:~a:~a~a"
-         owner
-         (regexp-replace #rx"\\.plt$" name "")
-         major
-         minor
-         (if suffix (format-symbol "/~a" suffix) "")))]
-    [#f #f]))
-
-(define (this-package-version/proc srcdir)
-  (let* ([package-roots (get-all-planet-packages)]
-         [thepkg (ormap (predicate->projection (contains-dir? srcdir))
-                        package-roots)])
-    (and thepkg (archive-retval->simple-retval thepkg))))
-
-;; predicate->projection : #f \not\in X ==> (X -> boolean) -> (X -> X)
-(define (predicate->projection pred) (λ (x) (if (pred x) x #f)))
-
-;; contains-dir? : path -> pkg -> boolean
-(define ((contains-dir? srcdir) alleged-superdir-pkg)
-  (let* ([nsrcdir (simple-form-path srcdir)]
-         [nsuperdir (simple-form-path (car alleged-superdir-pkg))]
-         [nsrclist (explode-path nsrcdir)]
-         [nsuperlist (explode-path nsuperdir)])
-    (list-prefix? nsuperlist nsrclist)))
-
-(define (list-prefix? sup sub)
-  (let loop ([sub sub]
-             [sup sup])
-    (cond
-      [(null? sup) #t]
-      [(equal? (car sup) (car sub))
-       (loop (cdr sub) (cdr sup))]
-      [else #f])))
-
-(define (archive-retval->simple-retval p)
-  (list-refs p '(1 2 4 5)))
-
-(define-values (pd->owner pd->name pd->maj pd->min)
-  (apply values (map (λ (n) (λ (l) (list-ref l n))) '(0 1 2 3))))
-
-(define (list-refs p ns)
-  (map (λ (n) (list-ref p n)) ns))
+         path->package-version)

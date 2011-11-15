@@ -8,7 +8,6 @@
          "define-forms.rkt"
          "struct.rkt"
          (for-syntax "parse.rkt"
-                     "gen-match.rkt"
                      (only-in "patterns.rkt" match-...-nesting)))
 
 (provide (for-syntax match-...-nesting)
@@ -19,4 +18,5 @@
 
 (define-forms parse
   match match* match-lambda match-lambda* match-lambda** match-let match-let*
-  match-define match-letrec match/derived match*/derived)
+  match-let-values match-let*-values
+  match-define match-define-values match-letrec match/values match/derived match*/derived)

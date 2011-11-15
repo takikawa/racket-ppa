@@ -42,6 +42,7 @@
   cancel-quit
   display-origin
   display-size
+  display-count
   bell
   hide-cursor
   get-display-depth
@@ -61,7 +62,8 @@
  play-sound
  file-creator-and-type
  file-selector
- key-symbol-to-menu-key)
+ key-symbol-to-menu-key
+ needs-grow-box-spacer?)
 
 (import-class NSScreen NSCursor NSMenu)
 
@@ -88,31 +90,59 @@
 
 (define (check-for-break) #f)
 
-(define (display-origin xb yb all?)
-  (if all?
-      (atomically
-       (with-autorelease
-        (let* ([screen (tell (tell NSScreen screens) objectAtIndex: #:type _NSUInteger 0)]
-               [f (tell #:type _NSRect screen visibleFrame)])
-          (set-box! xb (->long (NSPoint-x (NSRect-origin f)))))))
+(define (display-origin xb yb all? num fail)
+  (if (or all? (positive? num))
+      (unless (atomically
+               (with-autorelease
+                (let ([screens (tell NSScreen screens)])
+                  (if (num . < . (tell #:type _NSUInteger screens count))
+                      (let* ([screen (tell screens objectAtIndex: #:type _NSUInteger num)]
+                             [f (if (zero? num)
+                                    (tell #:type _NSRect screen visibleFrame)
+                                    (tell #:type _NSRect screen frame))])
+                        (set-box! xb ((if (and all? (zero? num)) + -) (->long (NSPoint-x (NSRect-origin f)))))
+                        (unless (zero? num)
+                          (let* ([screen0 (tell screens objectAtIndex: #:type _NSUInteger 0)]
+                                 [f0 (tell #:type _NSRect screen0 frame)])
+                            (set-box! yb (->long (- (+ (NSPoint-y (NSRect-origin f))
+                                                       (NSSize-height (NSRect-size f)))
+                                                    (NSSize-height (NSRect-size f0)))))))
+                        #t)
+                      #f))))
+        (fail))
       (set-box! xb 0))
-  (set-box! yb (get-menu-bar-height)))
+  (when (zero? num)
+    (set-box! yb 0))
+  (set-box! yb (+ (unbox yb) (get-menu-bar-height))))
 
-(define (display-size xb yb all?)
+(define (display-size xb yb all? num fail)
+  (unless (atomically
+           (with-autorelease
+            (let ([screens (tell NSScreen screens)])
+              (if (num . < . (tell #:type _NSUInteger screens count))
+                  (let* ([screen (tell screens objectAtIndex: #:type _NSUInteger num)]
+                         [f (if all?
+                                (tell #:type _NSRect screen frame)
+                                (tell #:type _NSRect screen visibleFrame))])
+                    (set-box! xb (->long (NSSize-width (NSRect-size f))))
+                    (set-box! yb (->long (- (NSSize-height (NSRect-size f))
+                                            (cond
+                                             [all? 0]
+                                             [(positive? num) 0]
+                                             [(tell #:type _BOOL NSMenu menuBarVisible) 0]
+                                             ;; Make result consistent when menu bar is hidden:
+                                             [else 
+                                              (get-menu-bar-height)]))))
+                    #t)
+                  #f))))
+    (fail)))
+
+
+(define (display-count)
   (atomically
    (with-autorelease
-    (let* ([screen (tell (tell NSScreen screens) objectAtIndex: #:type _NSUInteger 0)]
-           [f (if all?
-                  (tell #:type _NSRect screen frame)
-                  (tell #:type _NSRect screen visibleFrame))])
-      (set-box! xb (->long (NSSize-width (NSRect-size f))))
-      (set-box! yb (->long (- (NSSize-height (NSRect-size f))
-                              (cond
-                               [all? 0]
-                               [(tell #:type _BOOL NSMenu menuBarVisible) 0]
-                               ;; Make result consistent when menu bar is hidden:
-                               [else 
-                                (get-menu-bar-height)]))))))))
+    (let ([screens (tell NSScreen screens)])
+      (tell #:type _NSUInteger screens count)))))
 
 (define-appkit NSBeep (_fun -> _void))  
 (define (bell) (NSBeep))
@@ -159,3 +189,6 @@
 
 (define (get-highlight-text-color)
   #f)
+
+(define (needs-grow-box-spacer?)
+  (not (version-10.7-or-later?)))

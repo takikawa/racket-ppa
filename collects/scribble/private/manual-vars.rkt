@@ -2,8 +2,11 @@
 (require "../decode.rkt"
          "../scheme.rkt"
          "../struct.rkt"
-         (only-in "../core.rkt" style-name)
-         scheme/contract
+         (only-in "../core.rkt" 
+                  make-style style-name 
+                  nested-flow? nested-flow-blocks nested-flow-style)
+         "../html-properties.rkt"
+         racket/contract/base
          (for-syntax scheme/base
                      syntax/kerncase
                      syntax/boundmap)
@@ -16,7 +19,15 @@
  [struct (box-splice splice) ([run list?])]) ; XXX ugly copying
 (provide deftogether *deftogether
          with-racket-variables
-         with-togetherable-racket-variables)
+         with-togetherable-racket-variables
+         vertical-inset-style
+         boxed-style)
+
+(define vertical-inset-style 
+  (make-style 'vertical-inset null))
+
+(define boxed-style 
+  (make-style 'boxed (list (make-attributes (list (cons 'class "RBoxed"))))))
 
 (begin-for-syntax (define-struct deftogether-tag () #:omit-define-syntaxes))
 
@@ -67,7 +78,9 @@
                       (let loop ([form (case (syntax-e kind)
                                          [(form) (if (identifier? s-exp)
                                                      null
-                                                     (cdr (syntax-e s-exp)))]
+                                                     (if (pair? (syntax-e s-exp))
+                                                         (cdr (syntax-e s-exp))
+                                                         null))]
                                          [(form/none) s-exp]
                                          [(form/maybe)
                                           (syntax-case s-exp ()
@@ -104,21 +117,28 @@
 (define (*deftogether boxes body-thunk)
   (make-box-splice
    (cons
-    (make-table
-     'boxed
-     (map
-      (lambda (box)
-        (unless (and (box-splice? box)
-                     (= 1 (length (splice-run box)))
-                     (table? (car (splice-run box)))
-                     (eq? 'boxed (style-name (table-style (car (splice-run box))))))
-          (error 'deftogether
-                 "element is not a boxing splice containing a single table: ~e"
-                 box))
-        (list (make-flow (list (make-table
-                                "together"
-                                (table-flowss (car (splice-run box))))))))
-      boxes))
+    (make-blockquote 
+     vertical-inset-style
+     (list
+      (make-table
+       boxed-style
+       (map
+        (lambda (box)
+          (unless (and (box-splice? box)
+                       (= 1 (length (splice-run box)))
+                       (nested-flow? (car (splice-run box)))
+                       (eq? vertical-inset-style (nested-flow-style (car (splice-run box))))
+                       (let ([l (nested-flow-blocks (car (splice-run box)))])
+                         (= 1 (length l))
+                         (table? (car l))
+                         (eq? boxed-style (table-style (car l)))))
+            (error 'deftogether
+                   "element is not a boxing splice containing a single nested-flow with a single table: ~e"
+                   box))
+          (list (make-flow (list (make-table
+                                  "together"
+                                  (table-flowss (car (nested-flow-blocks (car (splice-run box))))))))))
+        boxes))))
     (body-thunk))))
 
 (define-syntax (deftogether stx)

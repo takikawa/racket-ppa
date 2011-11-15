@@ -3,6 +3,8 @@
          racket/fixnum
          racket/place
          racket/list
+         racket/tcp
+         racket/match
          rackunit
          (for-syntax racket/base))
 
@@ -165,7 +167,32 @@
       (raise (format "~a master length ~a != worker length ~a\n" desc ll wlen))
     (place-wait p))))
 
+
 (define (main)
+  (let ()
+    (define flx (make-shared-fxvector 10 0))
+    (define flv (make-shared-flvector 10 0.0))
+    (define bs (make-shared-bytes 10 60))
+    (define-values (in out) (place-channel))
+
+    (define p (place ch 
+                     (define a
+                       (for/hash ([x (place-channel-get ch)])
+                                 (values x x)))
+                     (define b
+                       (for/hash ([x (place-channel-get ch)])
+                                 (values x x)))
+                     (test #t eq? a a)
+                     (test #t eq? b b)
+                     (test #f eq? a b)
+                     (test #t equal? a b)
+                     (test #t equal? b a)))
+
+    (place-channel-put p (list flx flv bs in out))
+    (place-channel-put p (list flx flv bs in out))
+    (place-wait p))
+
+
   (let ()
     (define p1 (place ch
                       (define in (place-channel-get ch))
@@ -228,7 +255,6 @@
     (test (void) printf "signal-handle vector growing completes"))
 
 
-
 (let ([pl (place-worker)])
   (define flv1 (shared-flvector 0.0 1.0 2.0 3.0))
   (define flv2 (make-shared-flvector 4 3.0))
@@ -288,7 +314,7 @@
   (check-not-exn (λ () (place-channel-put pl (bytes->path #"/tmp/unix" 'unix))))
   (check-not-exn (λ () (place-channel-put pl (bytes->path #"C:\\Windows" 'windows))))
 
-  (place-wait pl))
+    (place-wait pl))
 
   ; test place-break
   (let ([p (place ch
@@ -328,6 +354,6 @@
   (test-long (lambda (x) (intern-num-sym (modulo x 1000))) "Listof symbols")
   (test-long (lambda (x) #s(clown "Binky" "pie")) "Listof prefabs")
   (test-long (lambda (x) (read (open-input-string "#0=(#0# . #0#)"))) "Listof cycles")
-  )
-
+)
+  
 ;(report-errs)

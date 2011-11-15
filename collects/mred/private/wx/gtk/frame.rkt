@@ -21,6 +21,7 @@
  (protect-out frame%
               display-origin
               display-size
+	      display-count
               location->window))
 
 ;; ----------------------------------------
@@ -90,6 +91,8 @@
     (let ([wx (gtk->wx gtk)])
       (when wx
         (send wx remember-size 
+              (GdkEventConfigure-x a)
+              (GdkEventConfigure-y a)
               (GdkEventConfigure-width a)
               (GdkEventConfigure-height a))))
     #f))
@@ -178,7 +181,8 @@
                [client-gtk panel-gtk]
                [no-show? #t]
                [add-to-parent? #f]
-               [extra-gtks (list panel-gtk)])
+               [extra-gtks (list panel-gtk)]
+               [connect-size-allocate? #f])
 
     (set-size x y w h)
 
@@ -262,7 +266,7 @@
                 (send p get-size sw-box sh-box)
                 (set-box! sx-box (send p get-x))
                 (set-box! sy-box (send p get-y)))
-              (display-size sw-box sh-box #t)))
+              (display-size sw-box sh-box #t 0 void)))
         (let* ([sw (unbox sw-box)]
                [sh (unbox sh-box)]
                [fw (unbox w-box)]
@@ -284,8 +288,7 @@
 
     (define/override (really-set-size gtk x y processed-x processed-y w h)
       (set-top-position x y)
-      (gtk_window_resize gtk (max 1 w) (max 1 h))
-      (queue-on-size))
+      (gtk_window_resize gtk (max 1 w) (max 1 h)))
 
     (define/override (show on?)
       (let ([es (get-eventspace)])
@@ -316,6 +319,10 @@
       (set! saved-child child))
     (define/override (register-child-in-parent on?)
       (void))
+
+    (define/override (refresh-all-children)
+      (when saved-child
+        (send saved-child refresh)))
 
     (define/override (direct-show on?)
       ;; atomic mode
@@ -487,11 +494,29 @@
 (define-gdk gdk_screen_get_width (_fun _GdkScreen -> _int))
 (define-gdk gdk_screen_get_height (_fun _GdkScreen -> _int))
 
-(define (display-origin x y all?) (set-box! x 0) (set-box! y 0))
-(define (display-size w h all?)
-  (let ([s (gdk_screen_get_default)])
-    (set-box! w (gdk_screen_get_width s))
-    (set-box! h (gdk_screen_get_height s))))
+(define-gdk gdk_screen_get_monitor_geometry (_fun _GdkScreen _int _GdkRectangle-pointer -> _void))
+(define-gdk gdk_screen_get_n_monitors (_fun _GdkScreen -> _int))
+
+(define (monitor-rect num fail)
+  (let ([s (gdk_screen_get_default)]
+	[r (make-GdkRectangle 0 0 0 0)])
+    (unless (num . < . (gdk_screen_get_n_monitors s))
+      (fail))
+    (gdk_screen_get_monitor_geometry s num r)
+    r))
+
+(define (display-origin x y all? num fail)
+  (let ([r (monitor-rect num fail)])
+    (set-box! x (- (GdkRectangle-x r)))
+    (set-box! y (- (GdkRectangle-y r)))))
+
+(define (display-size w h all? num fail)
+  (let ([r (monitor-rect num fail)])
+    (set-box! w (GdkRectangle-width r))
+    (set-box! h (GdkRectangle-height r))))
+
+(define (display-count)
+  (gdk_screen_get_n_monitors (gdk_screen_get_default)))
 
 (define (location->window x y)
   (for/or ([f (in-hash-keys all-frames)])

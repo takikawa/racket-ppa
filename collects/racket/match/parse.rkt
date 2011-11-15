@@ -1,10 +1,7 @@
 #lang scheme/base
 
-(require syntax/boundmap
-         syntax/stx
-         scheme/struct-info
+(require scheme/struct-info
          "patterns.rkt"
-         "compiler.rkt"
          "parse-helper.rkt"
          "parse-quasi.rkt"
          (for-template (only-in "runtime.rkt" matchable?)
@@ -17,7 +14,8 @@
     [(a b) #'(list a b)]
     [x (identifier? #'x) #'x]))
 
-(define orig-insp (current-code-inspector))
+(define orig-insp (variable-reference->module-declaration-inspector
+                   (#%variable-reference)))
 
 ;; parse : syntax -> Pat
 ;; compile stx into a pattern, using the new syntax

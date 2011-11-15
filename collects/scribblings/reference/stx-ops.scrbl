@@ -3,10 +3,18 @@
 
 @title[#:tag "stxops"]{Syntax Object Content}
 
+
 @defproc[(syntax? [v any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is a @tech{syntax object}, @racket[#f]
 otherwise. See also @secref["stxobj-model"].}
+
+
+@defproc[(identifier? [v any/c]) boolean?]{
+
+Returns @racket[#t] if @racket[v] is a @tech{syntax object} and
+@racket[(syntax-e stx)] produces a symbol.}
+
 
 @defproc[(syntax-source [stx syntax?]) any]{
 
@@ -62,7 +70,7 @@ marshaling compiled @tech{syntax object}s.}
 @defproc[(syntax-original? [stx syntax?]) boolean?]{
 
 Returns @racket[#t] if @racket[stx] has the property that
-@racket[read-syntax] and @racket[read-honu-syntax] attach to the
+@racket[read-syntax] attaches to the
 @tech{syntax object}s that they generate (see @secref["stxprops"]), and if
 @racket[stx]'s @tech{lexical information} does not indicate that the
 object was introduced by a syntax transformer (see
@@ -221,10 +229,14 @@ The @racket[ignored] argument is allowed for backward compatibility
 and has no effect on the returned syntax object.}
 
 
-@defproc[(identifier? [v any/c]) boolean?]{
+@defproc[(syntax-shift-phase-level [stx syntax?]
+                                   [shift exact-integer?])
+         syntax?]{
 
-Returns @racket[#t] if @racket[v] is a @tech{syntax object} and
-@racket[(syntax-e stx)] produces a symbol.}
+Returns a syntax object that is like @racket[stx], but with all of its
+top-level and module binding shifted by @racket[shift] @tech{phase
+levels}. If @racket[shift] is @racket[0], then the result is
+@racket[stx].}
 
 
 @defproc[(generate-temporaries [stx-pair (or syntax? list?)]) 

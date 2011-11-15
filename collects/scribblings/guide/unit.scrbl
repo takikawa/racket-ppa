@@ -40,7 +40,7 @@ The interface of a unit is described in terms of
 following signature, placed in a @filepath{toy-factory-sig.rkt} file,
 describes the exports of a component that implements a toy factory:
 
-@margin-note{By convention, signature names with @litchar{^}.}
+@margin-note{By convention, signature names end with @litchar{^}.}
 
 @racketmod/eval[[#:file
 "toy-factory-sig.rkt"
@@ -59,7 +59,7 @@ An implementation of the @racket[toy-factory^] signature is written
 using @racket[define-unit] with an @racket[export] clause that names
 @racket[toy-factory^]:
 
-@margin-note{By convention, unit names with @litchar["@"].}
+@margin-note{By convention, unit names end with @litchar["@"].}
 
 @racketmod/eval[[#:file
 "simple-factory-unit.rkt"
@@ -205,7 +205,8 @@ color, which the factory gets by importing @racket[toy-store^]:
 "store-specific-factory-unit.rkt"
 racket
 
-(require "toy-factory-sig.rkt")]
+(require "toy-store-sig.rkt"
+         "toy-factory-sig.rkt")]
 
 (define-unit store-specific-factory@
   (import toy-store^)
@@ -239,6 +240,8 @@ unit's imports using the exports of other linked units.
 
 @interaction[
 #:eval toy-eval
+(eval:alts (require "toy-factory-sig.rkt") (void))
+(eval:alts (require "toy-store-sig.rkt") (void))
 (eval:alts (require "store-specific-factory-unit.rkt") (void))
 (define-compound-unit/infer toy-store+factory@
   (import)
@@ -310,28 +313,28 @@ racket
 
 (define toy-store@-maker
   (lambda (the-color)
-   (unit
-    (import toy-factory^)
-    (export toy-store^)
+    (unit
+     (import toy-factory^)
+     (export toy-store^)
 
-    (define inventory null)
+     (define inventory null)
 
-    (define (store-color) the-color)
+     (define (store-color) the-color)
 
-    (code:comment @#,t{the rest is the same as before})
+     (code:comment @#,t{the rest is the same as before})
 
-    (define (maybe-repaint t)
-      (if (eq? (toy-color t) (store-color))
-          t
-          (repaint t (store-color))))
+     (define (maybe-repaint t)
+       (if (eq? (toy-color t) (store-color))
+           t
+           (repaint t (store-color))))
 
-    (define (stock! n)
-      (set! inventory 
-            (append inventory
-                    (map maybe-repaint
-                         (build-toys n)))))
+     (define (stock! n)
+       (set! inventory
+             (append inventory
+                     (map maybe-repaint
+                          (build-toys n)))))
 
-    (define (get-inventory) inventory))))
+     (define (get-inventory) inventory))))
 
 (provide toy-store@-maker)
 ]
@@ -608,7 +611,7 @@ simple application to values---that make them suitable for different
 purposes.
 
 The @racket[module] form is more fundamental than the others, in a
-sense. After all, a program fragment cannot reliably refer to
+sense. After all, a program fragment cannot reliably refer to a
 @racket[lambda], @racket[class], or @racket[unit] form without the
 namespace management provided by @racket[module]. At the same time,
 because namespace management is closely related to separate expansion

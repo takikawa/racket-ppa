@@ -204,7 +204,7 @@ static Scheme_Object *resolve_application(Scheme_Object *o, Resolve_Info *orig_i
     }
   }
 
-  devals = sizeof(Scheme_App_Rec) + ((n - 1) * sizeof(Scheme_Object *));
+  devals = sizeof(Scheme_App_Rec) + ((n - mzFLEX_DELTA) * sizeof(Scheme_Object *));
   
   info = resolve_info_extend(orig_info, n - 1, 0, 0);
   
@@ -324,7 +324,14 @@ static Scheme_Object *resolve_application2(Scheme_Object *o, Resolve_Info *orig_
   merge_resolve_tl_map(orig_info, info);
 
   set_app2_eval_type(app);
-        
+
+  if (SAME_OBJ(app->rator, scheme_varref_const_p_proc)) {
+    if (SAME_TYPE(SCHEME_TYPE(app->rand), scheme_varref_form_type)) {
+      /* drop reference to namespace: */
+      SCHEME_PTR2_VAL(app->rand) = scheme_false;
+    }
+  }
+  
   return (Scheme_Object *)app;
 }
 
@@ -571,14 +578,14 @@ define_values_resolve(Scheme_Object *data, Resolve_Info *rslv)
 
   /* If this is a module-level definition: for each variable, if the
      defined variable doesn't have SCHEME_TOPLEVEL_MUTATED, then
-     resolve to a top-level reference with SCHEME_TOPLEVEL_CONST, so
+     resolve to a top-level reference with SCHEME_TOPLEVEL_SEAL, so
      that we know to set GLOS_IS_IMMUTATED at run time. */
   for (l = vars; !SCHEME_NULLP(l); l = SCHEME_CDR(l)) {
     a = SCHEME_CAR(l);
     if (rslv->in_module
 	&& rslv->enforce_const
 	&& (!(SCHEME_TOPLEVEL_FLAGS(a) & SCHEME_TOPLEVEL_MUTATED))) {
-      a = scheme_toplevel_to_flagged_toplevel(a, SCHEME_TOPLEVEL_CONST);
+      a = scheme_toplevel_to_flagged_toplevel(a, SCHEME_TOPLEVEL_SEAL);
     }
     a = resolve_toplevel(rslv, a, 0);
     SCHEME_CAR(l) = a;
@@ -661,10 +668,23 @@ ref_resolve(Scheme_Object *data, Resolve_Info *rslv)
 {
   Scheme_Object *v;
 
-  v = scheme_resolve_expr(SCHEME_PTR1_VAL(data), rslv);
-  SCHEME_PTR1_VAL(data) = v;
   v = scheme_resolve_expr(SCHEME_PTR2_VAL(data), rslv);
   SCHEME_PTR2_VAL(data) = v;
+  
+  v = SCHEME_PTR1_VAL(data);
+  if (SAME_OBJ(v, scheme_true)
+      || SAME_OBJ(v, scheme_false)) {
+    if (SCHEME_TRUEP(v))
+      SCHEME_VARREF_FLAGS(data) |= 0x1; /* => constant */
+    v = SCHEME_PTR2_VAL(data);
+  } else if (SAME_TYPE(SCHEME_TYPE(v), scheme_local_type)) {
+    v = scheme_resolve_expr(v, rslv);
+    if (SAME_TYPE(SCHEME_TYPE(v), scheme_local_type))
+      SCHEME_VARREF_FLAGS(data) |= 0x1; /* because mutable would be unbox */
+    v = SCHEME_PTR2_VAL(data);
+  } else
+    v = scheme_resolve_expr(v, rslv);
+  SCHEME_PTR1_VAL(data) = v;
 
   return data;
 }
@@ -709,7 +729,7 @@ case_lambda_resolve(Scheme_Object *expr, Resolve_Info *rslv)
   return expr;
 }
 
-static Scheme_Object *do_define_syntaxes_resolve(Scheme_Object *data, Resolve_Info *info, int for_stx)
+static Scheme_Object *do_define_syntaxes_resolve(Scheme_Object *data, Resolve_Info *info)
 {
   Comp_Prefix *cp;
   Resolve_Prefix *rp;
@@ -728,8 +748,6 @@ static Scheme_Object *do_define_syntaxes_resolve(Scheme_Object *data, Resolve_In
 
   einfo = scheme_resolve_info_create(rp);
 
-  if (for_stx)
-    names = scheme_resolve_list(names, einfo);
   val = scheme_resolve_expr(val, einfo);
 
   rp = scheme_remap_prefix(rp, einfo);
@@ -750,19 +768,54 @@ static Scheme_Object *do_define_syntaxes_resolve(Scheme_Object *data, Resolve_In
     names = SCHEME_CDR(names);
   }
 
-  vec->type = (for_stx ? scheme_define_for_syntax_type : scheme_define_syntaxes_type);
+  vec->type = scheme_define_syntaxes_type;
 
   return vec;
 }
 
 static Scheme_Object *define_syntaxes_resolve(Scheme_Object *data, Resolve_Info *info)
 {
-  return do_define_syntaxes_resolve(data, info, 0);
+  return do_define_syntaxes_resolve(data, info);
 }
 
-static Scheme_Object *define_for_syntaxes_resolve(Scheme_Object *data, Resolve_Info *info)
+static Scheme_Object *begin_for_syntax_resolve(Scheme_Object *data, Resolve_Info *info)
 {
-  return do_define_syntaxes_resolve(data, info, 1);
+  Comp_Prefix *cp;
+  Resolve_Prefix *rp;
+  Scheme_Object *l, *p, *a, *base_stack_depth, *dummy, *vec;
+  Resolve_Info *einfo;
+
+  cp = (Comp_Prefix *)SCHEME_VEC_ELS(data)[0];
+  dummy = SCHEME_VEC_ELS(data)[1];
+  l = SCHEME_VEC_ELS(data)[2];
+
+  rp = scheme_resolve_prefix(1, cp, 1);
+
+  dummy = scheme_resolve_expr(dummy, info);
+
+  einfo = scheme_resolve_info_create(rp);
+
+  p = scheme_null;
+  while (!SCHEME_NULLP(l)) {
+    a = SCHEME_CAR(l);
+    a = scheme_resolve_expr(a, einfo);
+    p = scheme_make_pair(a, p);
+    l = SCHEME_CDR(l);
+  }
+  l = scheme_reverse(p);
+  
+  rp = scheme_remap_prefix(rp, einfo);
+
+  base_stack_depth = scheme_make_integer(einfo->max_let_depth);
+  
+  vec = scheme_make_vector(4, NULL);
+  SCHEME_VEC_ELS(vec)[0] = l;
+  SCHEME_VEC_ELS(vec)[1] = (Scheme_Object *)rp;
+  SCHEME_VEC_ELS(vec)[2] = base_stack_depth;
+  SCHEME_VEC_ELS(vec)[3] = dummy;
+  vec->type = scheme_begin_for_syntax_type;
+
+  return vec;
 }
 
 /*========================================================================*/
@@ -775,7 +828,8 @@ static int is_lifted_reference(Scheme_Object *v)
     return 1;
 
   return (SAME_TYPE(SCHEME_TYPE(v), scheme_toplevel_type)
-          && (SCHEME_TOPLEVEL_FLAGS(v) & SCHEME_TOPLEVEL_CONST));
+          && ((SCHEME_TOPLEVEL_FLAGS(v) & SCHEME_TOPLEVEL_FLAGS_MASK)
+              >= SCHEME_TOPLEVEL_CONST));
 }
 
 static int is_closed_reference(Scheme_Object *v)
@@ -1873,6 +1927,13 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
     offset++;
   }
 
+  if (!convert && !just_compute_lift && (offset < data->closure_size) && expanded_already) {
+    /* shift boxmap down, since we're dropping closure elements */
+    int bsz;
+    bsz = boxmap_size(data->num_params + offset);
+    memmove(closure_map + offset, closure_map + data->closure_size, sizeof(mzshort) * bsz);
+  }
+
   /* Reset closure_size, in case a lifted variable was removed: */
   closure_size = offset;
   if (!just_compute_lift) {
@@ -1895,7 +1956,7 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
       data->num_params = 0;
   } else {
     new_info = resolve_info_extend(info, data->num_params, data->num_params,
-					  cl->base_closure_size + data->num_params);
+                                   cl->base_closure_size + data->num_params);
     for (i = 0; i < data->num_params; i++) {
       resolve_info_add_mapping(new_info, i, i + closure_size + convert_size,
                                (((cl->local_flags[i] & SCHEME_WAS_SET_BANGED)
@@ -1905,7 +1966,7 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
                                    ? SCHEME_INFO_FLONUM_ARG
                                    : 0)),
                                NULL);
-      if (cl->flonum_map && cl->flonum_map[i])
+      if (cl->flonum_map && cl->flonum_map[i] && !just_compute_lift)
         boxmap_set(closure_map, i + convert_size, 2, closure_size);
     }
     if (expanded_already && !just_compute_lift)
@@ -2131,20 +2192,20 @@ module_expr_resolve(Scheme_Object *data, Resolve_Info *old_rslv)
   rslv->in_module = 1;
   scheme_enable_expression_resolve_lifts(rslv);
 
-  cnt = SCHEME_VEC_SIZE(m->body);
+  cnt = SCHEME_VEC_SIZE(m->bodies[0]);
   for (i = 0; i < cnt; i++) {
     Scheme_Object *e;
-    e = scheme_resolve_expr(SCHEME_VEC_ELS(m->body)[i], rslv);
-    SCHEME_VEC_ELS(m->body)[i] = e;
+    e = scheme_resolve_expr(SCHEME_VEC_ELS(m->bodies[0])[i], rslv);
+    SCHEME_VEC_ELS(m->bodies[0])[i] = e;
   }
 
   m->max_let_depth = rslv->max_let_depth;
 
   lift_vec = rslv->lifts;
   if (!SCHEME_NULLP(SCHEME_VEC_ELS(lift_vec)[0])) {
-    b = scheme_append(SCHEME_VEC_ELS(lift_vec)[0], scheme_vector_to_list(m->body));
+    b = scheme_append(SCHEME_VEC_ELS(lift_vec)[0], scheme_vector_to_list(m->bodies[0]));
     b = scheme_list_to_vector(b);
-    m->body = b;
+    m->bodies[0] = b;
   }
   rp->num_lifts = SCHEME_INT_VAL(SCHEME_VEC_ELS(lift_vec)[1]);
 
@@ -2267,8 +2328,8 @@ Scheme_Object *scheme_resolve_expr(Scheme_Object *expr, Resolve_Info *info)
     return define_values_resolve(expr, info);
   case scheme_define_syntaxes_type:
     return define_syntaxes_resolve(expr, info);
-  case scheme_define_for_syntax_type:
-    return define_for_syntaxes_resolve(expr, info);
+  case scheme_begin_for_syntax_type:
+    return begin_for_syntax_resolve(expr, info);
   case scheme_set_bang_type:
     return set_resolve(expr, info);
   case scheme_require_form_type:
@@ -2857,7 +2918,7 @@ static int resolve_quote_syntax_pos(Resolve_Info *info)
   return info->prefix->num_toplevels;
 }
 
-static Scheme_Object *resolve_toplevel(Resolve_Info *info, Scheme_Object *expr, int keep_ready)
+static Scheme_Object *resolve_toplevel(Resolve_Info *info, Scheme_Object *expr, int as_reference)
 {
   int skip, pos;
 
@@ -2870,10 +2931,7 @@ static Scheme_Object *resolve_toplevel(Resolve_Info *info, Scheme_Object *expr, 
   return scheme_make_toplevel(skip + SCHEME_TOPLEVEL_DEPTH(expr), /* depth is 0 (normal) or 1 (exp-time) */
                               pos,
                               1,
-                              SCHEME_TOPLEVEL_FLAGS(expr) & (SCHEME_TOPLEVEL_CONST
-                                                             | (keep_ready 
-                                                                ? SCHEME_TOPLEVEL_READY
-                                                                : 0)));
+                              SCHEME_TOPLEVEL_FLAGS(expr) & SCHEME_TOPLEVEL_FLAGS_MASK);
 }
 
 static Scheme_Object *shift_toplevel(Scheme_Object *expr, int delta)

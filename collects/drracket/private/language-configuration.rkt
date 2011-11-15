@@ -56,7 +56,7 @@
             [prefix drracket:app: drracket:app^]
             [prefix drracket:tools: drracket:tools^]
             [prefix drracket:help-desk: drracket:help-desk^]
-            [prefix drracket:module-language: drracket:module-language^])
+            [prefix drracket:module-language: drracket:module-language/int^])
     (export drracket:language-configuration/internal^)
     
     ;; settings-preferences-symbol : symbol
@@ -162,7 +162,7 @@
     (define language-dialog
       (λ (show-welcome? language-settings-to-show [parent #f])
         (define ret-dialog%
-          (class dialog%
+          (class (frame:focus-table-mixin dialog%)
             (define/override (on-subwindow-char receiver evt)
               (case (send evt get-key-code)
                 [(escape) (cancel-callback)]
@@ -170,7 +170,7 @@
                 [else
                  (or (key-pressed receiver evt)
                      (super on-subwindow-char receiver evt))]))
-            (super-instantiate ())))
+            (super-new)))
         
         (define dialog (instantiate ret-dialog% ()
                          (label (if show-welcome?
@@ -214,7 +214,8 @@
         (define (ok-callback)
           (unless (enter-callback)
             (message-box (string-constant drscheme)
-                         (string-constant please-select-a-language))))
+                         (string-constant please-select-a-language)
+                         #:dialog-mixin frame:focus-table-mixin)))
         
         ;; cancel-callback : -> void
         (define (cancel-callback)
@@ -559,7 +560,10 @@
                            (= (length positions) (length numbers))
                            ((length numbers) . >= . 1))
                 (error 'drracket:language
-                       "languages position and numbers must be lists of strings and numbers, respectively, must have the same length, and must each contain at least one element, got: ~e ~e"
+                       (string-append
+                        "languages position and numbers must be lists of strings and numbers,"
+                        " respectively, must have the same length, and must each contain at"
+                        " least one element, got: ~e ~e")
                        positions numbers))
               
               (when (null? (cdr positions))
@@ -1285,7 +1289,8 @@
                                                 (message-box (string-constant drscheme)
                                                              (if (exn? x)
                                                                  (exn-message x)
-                                                                 (format "uncaught exception: ~s" x)))
+                                                                 (format "uncaught exception: ~s" x))
+                                                             #:dialog-mixin frame:focus-table-mixin)
                                                 read-syntax/namespace-introduce)])
                                (contract
                                 (->* ()
@@ -1335,7 +1340,8 @@
                  numberss
                  summaries
                  urls
-                 reader-specs))])))))
+                 reader-specs)
+                #:dialog-mixin frame:focus-table-mixin)])))))
     
     (define (platform-independent-string->path str)
       (apply
@@ -1822,26 +1828,14 @@
               [else
                (string<=? (cadr x) (cadr y))])))))
       
-      (define plt-logo-shiny
-        (make-object bitmap% (collection-file-path "plt-logo-red-shiny.png" "icons")
-          'png/mask))
-
       (define (display-racketeer)
         (new canvas-message% 
              (parent racketeer-panel)
              (label (string-constant racketeer?)))
-        (new canvas% 
+        (new canvas-message% 
+             [label (read-bitmap (collection-file-path "plt-logo-red-shiny.png" "icons"))]
              [parent racketeer-panel]
-             [stretchable-width #f]
-             [paint-callback
-              (λ (c dc)
-                (send dc set-scale 1/2 1/2)
-                (send dc draw-bitmap plt-logo-shiny 0 0
-                      'solid (send the-color-database find-color "black")
-                      (send plt-logo-shiny get-loaded-mask)))]
-             [style '(transparent)]
-             [min-width (floor (/ (send plt-logo-shiny get-width) 2))]
-             [min-height (floor (/ (send plt-logo-shiny get-height) 2))])
+             [callback (λ () (change-current-lang-to (λ (x) (is-a? x drracket:module-language:module-language<%>))))])
         (new canvas-message%
              (parent racketeer-panel) 
              (label (string-constant use-language-in-source))
@@ -1904,23 +1898,32 @@
                (super on-event evt)]))
           
           (define/override (on-paint)
-            (let* ([dc (get-dc)]
-                   [old-font (send dc get-font)]
-                   [old-tf (send dc get-text-foreground)])
-              (send dc set-text-foreground color)
-              (send dc set-font font)
-              (send dc draw-text label 0 0 #t)
-              (send dc set-font old-font)
-              (send dc set-text-foreground old-tf)))
+            (define dc (get-dc))
+            (cond
+              [(string? label)
+               (define old-font (send dc get-font))
+               (define old-tf (send dc get-text-foreground))
+               (send dc set-text-foreground color)
+               (send dc set-font font)
+               (send dc draw-text label 0 0 #t)
+               (send dc set-font old-font)
+               (send dc set-text-foreground old-tf)]
+              [(is-a? label bitmap%)
+               (send dc draw-bitmap label 0 0)]))
           
           (super-new [stretchable-width #f]
                      [stretchable-height #f]
                      [style '(transparent)])
           
           (inherit min-width min-height get-dc)
-          (let-values ([(w h _1 _2) (send (get-dc) get-text-extent label font #t)])
-            (min-width (inexact->exact (floor w)))
-            (min-height (inexact->exact (floor h))))))
+          (cond
+            [(string? label)
+             (define-values (w h _1 _2) (send (get-dc) get-text-extent label font #t))
+             (min-width (inexact->exact (ceiling w)))
+             (min-height (inexact->exact (ceiling h)))]
+            [(is-a? label bitmap%)
+             (min-width (inexact->exact (ceiling (send label get-width))))
+             (min-height (inexact->exact (ceiling (send label get-height))))])))
       
       (define (question/answer line1 line2 icon-lst)
         (display-two-line-choice 
@@ -1944,7 +1947,7 @@
       (define (get-text-pls info-filename)
         (let ([proc (get-info/full info-filename)])
           (if proc
-              (let ([qs (proc 'textbook-pls)])
+              (let ([qs (proc 'textbook-pls (λ () '()))])
                 (unless (list? qs)
                   (error 'splash-questions "expected a list, got ~e" qs))
                 (for-each 
@@ -1960,7 +1963,10 @@
                                 (andmap string? (cdr pr)))
                      (error 
                       'splash-questions
-                      "expected a list of lists, with each inner list being at least three elements long and the first element of the inner list being a list of strings and the rest of the elements being strings, got ~e"
+                      (string-append
+                       "expected a list of lists, with each inner list being at least three elements long"
+                       " and the first element of the inner list being a list of strings and the rest of"
+                       " the elements being strings, got ~e")
                       pr)))
                  qs)
                 qs)

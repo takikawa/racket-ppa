@@ -2,7 +2,6 @@
 
 (require (for-syntax racket/base)
          racket/contract/base
-         mzlib/list
          "private/port.rkt")
 
 (define (input-port-with-progress-evts? ip)
@@ -29,40 +28,6 @@
         (loop (read-line in))))))
 
 ;; ----------------------------------------
-
-(define (copy-port src dest . dests)
-  (unless (input-port? src)
-    (raise-type-error 'copy-port "input-port" src))
-  (for-each
-   (lambda (dest)
-     (unless (output-port? dest)
-       (raise-type-error 'copy-port "output-port" dest)))
-   (cons dest dests))
-  (let ([s (make-bytes 4096)]
-        [dests (cons dest dests)])
-    (let loop ()
-      (let ([c (read-bytes-avail! s src)])
-        (cond
-          [(number? c)
-           (let loop ([dests dests])
-             (unless (null? dests)
-               (let loop ([start 0])
-                 (unless (= start c)
-                   (let ([c2 (write-bytes-avail s (car dests) start c)])
-                     (loop (+ start c2)))))
-               (loop (cdr dests))))
-           (loop)]
-          [(procedure? c)
-           (let ([v (let-values ([(l col p) (port-next-location src)])
-                      (c (object-name src) l col p))])
-             (let loop ([dests dests])
-               (unless (null? dests)
-                 (write-special v (car dests))
-                 (loop (cdr dests)))))
-           (loop)]
-          [else
-           ;; Must be EOF
-           (void)])))))
 
 (define merge-input
   (case-lambda
@@ -1332,7 +1297,7 @@
                 [newline-convert? #f]
                 [decode-error (lambda (msg port)
                                 (error 'reencode-input-port
-                                       (format "~a: ~e" msg)
+                                       (format "~a: ~~e" msg)
                                        port))])
     (let ([c (let ([c (bytes-open-converter encoding "UTF-8")])
                (if newline-convert? (mcons c #f) c))]
@@ -1468,8 +1433,8 @@
                 [name (object-name port)]
                 [convert-newlines-to #f]
                 [decode-error (lambda (msg port)
-                                (error 'reencode-input-port
-                                       (format "~a: ~e" msg)
+                                (error 'reencode-output-port
+                                       (format "~a: ~~e" msg)
                                        port))])
     (let ([c (bytes-open-converter "UTF-8" encoding)]
           [ready-bytes (make-bytes 1024)]

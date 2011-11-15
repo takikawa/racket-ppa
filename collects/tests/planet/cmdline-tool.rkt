@@ -11,8 +11,13 @@ using 'system' to call out to the tool and then reading its results, etc.
          planet/config
          net/url)
 
+(define debug? #f)
+
 (define planet-bin-path
-  (simplify-path (build-path (collection-path "racket") 'up 'up "bin" "planet")))
+  (simplify-path (build-path (collection-path "racket") 'up 'up  
+                             (if (eq? (system-type) 'windows)
+                                 "planet.exe"
+                                 (build-path "bin" "planet")))))
 
 (define test-connection-spec '("planet" "test-connection.plt" "1" "0"))
 (define test-connection.plt-cache
@@ -20,8 +25,6 @@ using 'system' to call out to the tool and then reading its results, etc.
          (UNINSTALLED-PACKAGE-CACHE) 
          (append test-connection-spec
                  (list (list-ref test-connection-spec 1)))))
-
-(define debug? #f)
 
 (define (call-planet . args)
   (when debug? (printf "~s\n" (cons 'call-planet args)))
@@ -179,7 +182,7 @@ using 'system' to call out to the tool and then reading its results, etc.
                               (copy-port port sp)))
                           (get-output-string sp)))
   
-  (system (format "rm -rf ~a" tmp-dir))
+  (delete-directory/files tmp-dir)
   (printf "done\n")
   (unless (equal? open-files structure-files)
     (error 'cmdline-tool.rkt "expected planet structure to produce the same files as planet open, got ~s and ~s"

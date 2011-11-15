@@ -16,8 +16,8 @@ bytes, and it can track @deftech{line locations} and @deftech{column
 locations}; this optional tracking must be specifically enabled for a
 port via @racket[port-count-lines!] or the
 @racket[port-count-lines-enabled] parameter. Position, line, and
-column locations for a port are used by @racket[read-syntax] and
-@racket[read-honu-syntax]. Position and line locations are numbered
+column locations for a port are used by @racket[read-syntax]. 
+Position and line locations are numbered
 from @math{1}; column locations are numbered from @math{0}.
 
 When counting lines, Racket treats linefeed, return, and
@@ -37,6 +37,11 @@ port exceeds the value of the largest fixnum, then the position for
 the port becomes unknown, and line and column tacking is disabled.
 Return-linefeed combinations are treated as a single character
 position only when line and column counting is enabled.
+
+@tech{Custom ports} can define their own counting functions, which are
+not subject to the rules above, except that the counting functions are
+invoked only when tracking is specifically enabled with
+@racket[port-count-lines!].
 
 @;------------------------------------------------------------------------
 
@@ -79,6 +84,18 @@ the point when line counting is enabled.
 
 Even with line counting enabled, a port may return @racket[#f] values
 if it somehow cannot keep track of lines, columns, or positions.}
+
+
+@defproc[(set-port-next-location! [port port?]
+                                  [line (or/c exact-positive-integer? #f)]
+                                  [column (or/c exact-nonnegative-integer? #f)]
+                                  [position (or/c exact-positive-integer? #f)])
+         void?]{
+
+Sets the next line, column, and position for @racket[port]. If line
+counting has not been enabled for @racket[port] or if @racket[port] is
+a @tech{custom port} that defines its own counting function, then 
+@racket[set-port-next-location!] has no effect.}
 
 
 @defboolparam[port-count-lines-enabled on?]{

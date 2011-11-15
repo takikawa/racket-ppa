@@ -59,6 +59,8 @@ disappear when placed into a weak box (see @secref["weakbox"]) used as
 the key in a weak @tech{hash table} (see @secref["hashtables"]), or
 used as an ephemeron key (see @secref["ephemerons"]).
 
+@see-read-print["symbol"]{symbols}
+
 @defproc[(symbol? [v any/c]) boolean?]{Returns @racket[#t] if @racket[v] is
  a symbol, @racket[#f] otherwise.
 
@@ -141,6 +143,8 @@ Two keywords are @racket[eq?] if and only if they print the same.
 Like symbols, keywords are only weakly held by the internal keyword
 table; see @secref["symbols"] for more information.
 
+@see-read-print["keyword"]{keywords}
+
 @defproc[(keyword? [v any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is a keyword, @racket[#f] otherwise.}
@@ -177,6 +181,8 @@ for each pair of keywords is the same as using
 
 A @deftech{box} is like a single-element vector, normally used as
 minimal mutable storage.
+
+A literal or printed box starts with @litchar{#&}. @see-read-print["box"]{boxes}
 
 @defproc[(box? [v any/c]) boolean?]{
 
@@ -227,7 +233,10 @@ Sets the content of @racket[box] to @racket[v].}
 The constant @|void-const| is returned by most forms and procedures
 that have a side-effect and no useful result. The constant
 @|undefined-const| is used as the initial value for @racket[letrec]
-bindings.
+bindings. 
+
+The @|void-const| value is always @racket[eq?] to itself, and the
+@|undefined-const| value is also @racket[eq?] to itself.
 
 @defproc[(void? [v any/c]) void?]{Returns @racket[#t] if @racket[v] is the
  constant @|void-const|, @racket[#f] otherwise.}

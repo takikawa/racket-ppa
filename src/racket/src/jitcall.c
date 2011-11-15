@@ -1399,11 +1399,12 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
 	}
       }
     } else if (t == scheme_toplevel_type) {
-      if (SCHEME_TOPLEVEL_FLAGS(rator) & SCHEME_TOPLEVEL_CONST) {
+      if (0 && (SCHEME_TOPLEVEL_FLAGS(rator) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_FIXED) {
         /* We can re-order evaluation of the rator. */
         reorder_ok = 1;
 
-        if (jitter->nc) {
+        if (jitter->nc && 0
+            && ((SCHEME_TOPLEVEL_FLAGS(rator) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_CONST)) {
           Scheme_Object *p;
 
           p = scheme_extract_global(rator, jitter->nc);
@@ -1638,10 +1639,9 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
     if ((!direct_prim || (num_rands > 1) || (no_call == 2))
                && (!direct_self || !is_tail || no_call || (i + 1 < num_rands))
                && !inline_direct_args) {
-      int r0;
-      r0 = (mz_CURRENT_R0_STATUS_VALID() ? mz_CURRENT_R0_STATUS() : -1);
+      int reg = mz_CURRENT_REG_STATUS_VALID();
       mz_rs_stxi(i + offset, JIT_R0);
-      if (r0 > -1) mz_RECORD_R0_STATUS(r0);
+      mz_SET_REG_STATUS_VALID(reg);
     }
   }
   /* not sync'd... */

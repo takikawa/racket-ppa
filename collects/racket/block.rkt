@@ -1,24 +1,25 @@
 (module block '#%kernel
   (#%require "private/define.rkt"
-             "private/small-scheme.rkt"
-             "private/more-scheme.rkt"
              (for-syntax '#%kernel
                          "private/stx.rkt"
                          "private/small-scheme.rkt"
                          "private/stxcase-scheme.rkt"
-                         "private/name.rkt"
-                         "private/norm-define.rkt"
-                         "private/qqstx.rkt"
-                         "private/sort.rkt"))
+                         "private/qqstx.rkt"))
 
 (#%provide block)
+
+(define-values-for-syntax (make-context)
+  (let-values ([(struct: mk ? ref set)
+                (make-struct-type 'in-liberal-define-context #f 0 0 #f
+                                  (list (cons prop:liberal-define-context #t)))])
+    mk))
 
 (define-syntax (block stx)
   ;; Body can have mixed exprs and defns. Wrap expressions with
   ;; `(define-values () ... (values))' as needed, and add a (void)
   ;; at the end if needed.
   (let* ([def-ctx (syntax-local-make-definition-context)]
-         [ctx (list (gensym 'intdef))]
+         [ctx (list (make-context))]
          ;; [kernel-forms (kernel-form-identifier-list)]
          [stoplist (list #'begin #'define-syntaxes #'define-values)]
          [init-exprs (let ([v (syntax->list stx)])

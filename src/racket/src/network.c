@@ -90,7 +90,14 @@ struct SOCKADDR_IN {
 # define WAS_WSAEMSGSIZE(e) (e == WSAEMSGSIZE)
 # define mz_AFNOSUPPORT WSAEAFNOSUPPORT
 extern int scheme_stupid_windows_machine;
+# ifdef MZ_USE_PLACES
+static HANDLE winsock_sema;
+# endif
 #endif
+
+intptr_t scheme_socket_errno() {
+  return SOCK_ERRNO();
+}
 
 #include "schfd.h"
 
@@ -116,7 +123,7 @@ typedef struct {
   Scheme_Object so;
   Scheme_Custodian_Reference *mref;
   int count;
-  tcp_t s[1];
+  tcp_t s[mzFLEX_ARRAY_DECL];
 } listener_t;
 #endif
 
@@ -271,6 +278,14 @@ void scheme_init_network(Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY  ( "udp-send-to-evt"           , udp_write_to_evt         , 4 , 6 , netenv ) ;
 
   scheme_finish_primitive_module(netenv);
+
+#ifdef USE_WINSOCK_TCP
+# ifdef MZ_USE_PLACES
+  if (!winsock_sema) {
+    winsock_sema = CreateSemaphore(NULL, 1, 1, NULL);
+  }
+# endif
+#endif
 }
 
 
@@ -309,7 +324,7 @@ typedef struct SOCKADDR_IN mz_unspec_address;
 
 /******************************* hostnames ************************************/
 
-#ifdef OS_X
+#if defined(OS_X) || defined(USE_PTHREAD_THREAD_TIMER)
 # define PTHREADS_OK_FOR_GHBN
 #endif
 
@@ -409,8 +424,6 @@ const char *mz_gai_strerror(int ecode)
 #   define MZ_LPTHREAD_START_ROUTINE void *(*)(void *)
 # endif
 
-static volatile int ghbn_lock;
-
 typedef struct {
 # ifdef USE_WINSOCK_TCP
   HANDLE th;
@@ -422,59 +435,71 @@ typedef struct {
   int done;
 } GHBN_Rec;
 
-static struct mz_addrinfo * volatile ghbn_result;
-static volatile int ghbn_err;
-
 /* For in-thread DNS: */
 #define MZ_MAX_HOSTNAME_LEN 128
 #define MZ_MAX_SERVNAME_LEN 32
 
-static char ghbn_hostname[MZ_MAX_HOSTNAME_LEN];
-static char ghbn_servname[MZ_MAX_SERVNAME_LEN];
-static struct mz_addrinfo ghbn_hints;
+typedef struct GHBN_Thread_Data {
+  int ghbn_lock;
+  char ghbn_hostname[MZ_MAX_HOSTNAME_LEN];
+  char ghbn_servname[MZ_MAX_SERVNAME_LEN];
+  struct mz_addrinfo ghbn_hints;
 # ifdef USE_WINSOCK_TCP
-HANDLE ready_sema;
+  HANDLE ready_sema;
 # else
-int ready_fd;
+  int ready_fd;
 # endif
+  struct mz_addrinfo *ghbn_result;
+  int ghbn_err;
+} GHBN_Thread_Data;
 
-static intptr_t getaddrinfo_in_thread(void *data)
+THREAD_LOCAL_DECL(GHBN_Thread_Data *ghbn_thread_data);
+
+static intptr_t getaddrinfo_in_thread(void *_data)
   XFORM_SKIP_PROC
 {
+  GHBN_Thread_Data *data = (GHBN_Thread_Data *)_data;
   int ok;
   struct mz_addrinfo *res, hints;
   char hn_copy[MZ_MAX_HOSTNAME_LEN], sn_copy[MZ_MAX_SERVNAME_LEN];
 # ifndef USE_WINSOCK_TCP
-  int fd = ready_fd;
+  int fd = data->ready_fd;
+  int cr;
 # endif
   
-  if (ghbn_result) {
-    mz_freeaddrinfo(ghbn_result);
-    ghbn_result = NULL;
+  if (data->ghbn_result) {
+    mz_freeaddrinfo(data->ghbn_result);
+    data->ghbn_result = NULL;
   }
 
-  strcpy(hn_copy, ghbn_hostname);
-  strcpy(sn_copy, ghbn_servname);
-  memcpy(&hints, &ghbn_hints, sizeof(hints));
+  strcpy(hn_copy, data->ghbn_hostname);
+  strcpy(sn_copy, data->ghbn_servname);
+  memcpy(&hints, &data->ghbn_hints, sizeof(hints));
 
 # ifdef USE_WINSOCK_TCP
-  ReleaseSemaphore(ready_sema, 1, NULL);  
+  ReleaseSemaphore(data->ready_sema, 1, NULL);  
 # else
-  write(fd, "?", 1);
+  do {
+    cr = write(fd, "?", 1);
+  } while ((cr == -1) && (errno == EINTR));
 # endif
 
   ok = mz_getaddrinfo(hn_copy[0] ? hn_copy : NULL, 
 		      sn_copy[0] ? sn_copy : NULL, 
 		      &hints, &res);
 
-  ghbn_result = res;
-  ghbn_err = ok;
+  data->ghbn_result = res;
+  data->ghbn_err = ok;
 
 # ifndef USE_WINSOCK_TCP
   {
     long v = 1;
-    write(fd, &v, sizeof(v));
-    close(fd);
+    do {
+      cr = write(fd, &v, sizeof(v));
+    } while ((cr == -1) && (errno == EINTR));
+    do {
+      cr = close(fd);
+    } while ((cr == -1) && (errno == EINTR));
   }
 # endif
 
@@ -483,7 +508,7 @@ static intptr_t getaddrinfo_in_thread(void *data)
 
 static void release_ghbn_lock(GHBN_Rec *rec)
 {
-  ghbn_lock = 0;
+  ghbn_thread_data->ghbn_lock = 0;
 # ifdef USE_WINSOCK_TCP
   CloseHandle(rec->th);
 # else
@@ -493,7 +518,7 @@ static void release_ghbn_lock(GHBN_Rec *rec)
 
 static int ghbn_lock_avail(Scheme_Object *_ignored)
 {
-  return !ghbn_lock;
+  return !ghbn_thread_data->ghbn_lock;
 }
 
 static int ghbn_thread_done(Scheme_Object *_rec)
@@ -505,19 +530,23 @@ static int ghbn_thread_done(Scheme_Object *_rec)
 
 # ifdef USE_WINSOCK_TCP
   if (WaitForSingleObject(rec->th, 0) == WAIT_OBJECT_0) {
-    rec->result = ghbn_result;
-    ghbn_result = NULL;
-    rec->err = ghbn_err;
+    rec->result = ghbn_thread_data->ghbn_result;
+    ghbn_thread_data->ghbn_result = NULL;
+    rec->err = ghbn_thread_data->ghbn_err;
     rec->done = 1;
     return 1;
   }
 # else
   {
     long v;
-    if (read(rec->pin, &v, sizeof(long)) > 0) {
-      rec->result = ghbn_result;
-      ghbn_result = NULL;
-      rec->err = ghbn_err;
+    int cr;
+    do {
+      cr = read(rec->pin, &v, sizeof(long));
+    } while ((cr == -1) && (errno == EINTR));
+    if (cr > 0) {
+      rec->result = ghbn_thread_data->ghbn_result;
+      ghbn_thread_data->ghbn_result = NULL;
+      rec->err = ghbn_thread_data->ghbn_err;
       rec->done = 1;
       return 1;
     }
@@ -556,34 +585,41 @@ static int MZ_GETADDRINFO(const char *name, const char *svc, struct mz_addrinfo 
     return mz_getaddrinfo(name, svc, hints, res);
   }
 
+  if (!ghbn_thread_data) {
+    ghbn_thread_data = (GHBN_Thread_Data *)malloc(sizeof(GHBN_Thread_Data));
+    memset(ghbn_thread_data, 0, sizeof(GHBN_Thread_Data));
+  }
+
   rec = MALLOC_ONE_ATOMIC(GHBN_Rec);
   rec->done = 0;
 
   scheme_block_until(ghbn_lock_avail, NULL, NULL, 0);
 
-  ghbn_lock = 1;
+  ghbn_thread_data->ghbn_lock = 1;
 
   if (name)
-    strcpy(ghbn_hostname, name);
+    strcpy(ghbn_thread_data->ghbn_hostname, name);
   else
-    ghbn_hostname[0] = 0;
+    ghbn_thread_data->ghbn_hostname[0] = 0;
   if (svc)
-    strcpy(ghbn_servname, svc);
+    strcpy(ghbn_thread_data->ghbn_servname, svc);
   else
-    ghbn_servname[0] = 0;
-  memcpy(&ghbn_hints, hints, sizeof(ghbn_hints));
+    ghbn_thread_data->ghbn_servname[0] = 0;
+  memcpy(&ghbn_thread_data->ghbn_hints, hints, sizeof(*hints));
 
 # ifdef USE_WINSOCK_TCP
   {
+    HANDLE ready_sema;
     DWORD id;
     intptr_t th;
     
     ready_sema = CreateSemaphore(NULL, 0, 1, NULL);
+    ghbn_thread_data->ready_sema = ready_sema;
     th = _beginthreadex(NULL, 5000, 
 			(MZ_LPTHREAD_START_ROUTINE)getaddrinfo_in_thread,
-			NULL, 0, &id);
-    WaitForSingleObject(ready_sema, INFINITE);
-    CloseHandle(ready_sema);
+			ghbn_thread_data, 0, &id);
+    WaitForSingleObject(ghbn_thread_data->ready_sema, INFINITE);
+    CloseHandle(ghbn_thread_data->ready_sema);
     
     rec->th = (HANDLE)th;
     ok = 1;
@@ -596,17 +632,20 @@ static int MZ_GETADDRINFO(const char *name, const char *svc, struct mz_addrinfo 
     } else {
       pthread_t t;
       rec->pin = p[0];
-      ready_fd = p[1];
+      ghbn_thread_data->ready_fd = p[1];
       if (pthread_create(&t, NULL, 
 			 (MZ_LPTHREAD_START_ROUTINE)getaddrinfo_in_thread,
-			 NULL)) {
+			 ghbn_thread_data)) {
 	close(p[0]);
 	close(p[1]);
 	ok = 0;
       } else {
 	char buf[1];
+        int cr;
 	pthread_detach(t);
-	read(rec->pin, buf, 1);
+        do {
+          cr = read(rec->pin, buf, 1);
+        } while ((cr == -1) && (errno == EINTR));
 	fcntl(rec->pin, F_SETFL, MZ_NONBLOCKING);
 	ok = 1;
       }
@@ -614,9 +653,9 @@ static int MZ_GETADDRINFO(const char *name, const char *svc, struct mz_addrinfo 
 
     if (!ok) {
       getaddrinfo_in_thread(rec);
-      rec->result = ghbn_result;
-      ghbn_result = NULL;
-      rec->err = ghbn_err;
+      rec->result = ghbn_thread_data->ghbn_result;
+      ghbn_thread_data->ghbn_result = NULL;
+      rec->err = ghbn_thread_data->ghbn_err;
     }
   }
 # endif
@@ -633,14 +672,22 @@ static int MZ_GETADDRINFO(const char *name, const char *svc, struct mz_addrinfo 
 # endif
   }
 
-  ghbn_lock = 0;
+  ghbn_thread_data->ghbn_lock = 0;
 
   *res = rec->result;
 
   return rec->err;
 }
+
+void scheme_free_ghbn_data() {
+  if (ghbn_thread_data) {
+    free(ghbn_thread_data);
+    ghbn_thread_data = NULL;
+  }
+}
 #else
 # define MZ_GETADDRINFO mz_getaddrinfo
+void scheme_free_ghbn_data() { }
 #endif
 
 #ifdef USE_SOCKETS_TCP
@@ -713,45 +760,66 @@ static void winsock_remember(tcp_t s)
   int i, new_size;
   tcp_t *naya;
 
+# ifdef MZ_USE_PLACES
+  WaitForSingleObject(winsock_sema, INFINITE);
+# endif
+
   for (i = 0; i < wsr_size; i++) {
     if (!wsr_array[i]) {
       wsr_array[i] = s;
-      return;
+      break;
     }
   }
 
-  if (!wsr_size) {
-    REGISTER_SO(wsr_array);
-    new_size = 32;
-  } else
-    new_size = 2 * wsr_size;
+  if (i >= wsr_size) {
+    if (!wsr_size) {
+      new_size = 32;
+    } else
+      new_size = 2 * wsr_size;
 
-  naya = MALLOC_N_ATOMIC(tcp_t, new_size);
-  for (i = 0; i < wsr_size; i++) {
-    naya[i] = wsr_array[i];
-  }
+    naya = malloc(sizeof(tcp_t) * new_size);
+    for (i = 0; i < wsr_size; i++) {
+      naya[i] = wsr_array[i];
+    }
 
-  naya[wsr_size] = s;
+    naya[wsr_size] = s;
 
-  wsr_array = naya;
-  wsr_size = new_size;  
+    if (wsr_array) free(wsr_array);
+
+    wsr_array = naya;
+    wsr_size = new_size;
+  }  
+
+# ifdef MZ_USE_PLACES
+  ReleaseSemaphore(winsock_sema, 1, NULL);
+# endif
 }
 
 static void winsock_forget(tcp_t s)
 {
   int i;
 
+# ifdef MZ_USE_PLACES
+  WaitForSingleObject(winsock_sema, INFINITE);
+# endif
+
   for (i = 0; i < wsr_size; i++) {
     if (wsr_array[i] == s) {
       wsr_array[i] = (tcp_t)NULL;
-      return;
+      break;
     }
   }
+
+# ifdef MZ_USE_PLACES
+  ReleaseSemaphore(winsock_sema, 1, NULL);
+# endif
 }
 
 static int winsock_done(void)
 {
   int i;
+
+  /* only called in the original place */
 
   for (i = 0; i < wsr_size; i++) {
     if (wsr_array[i]) {
@@ -767,6 +835,10 @@ static void TCP_INIT(char *name)
 {
   static int started = 0;
   
+# ifdef MZ_USE_PLACES
+  WaitForSingleObject(winsock_sema, INFINITE);
+# endif
+
   if (!started) {
     WSADATA data;
     if (!WSAStartup(MAKEWORD(1, 1), &data)) {
@@ -776,15 +848,18 @@ static void TCP_INIT(char *name)
 #else      
       _onexit(winsock_done);
 #endif
-      return;
     }
-  } else
-    return;
+  }
+
+  if (!started)
+    scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
+		     "%s: not supported on this machine"
+		     " (no winsock driver)",
+		     name);
   
-  scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
-		   "%s: not supported on this machine"
-		   " (no winsock driver)",
-		   name);
+# ifdef MZ_USE_PLACES
+  ReleaseSemaphore(winsock_sema, 1, NULL);
+# endif
 }
 #else
 /* Not Winsock */
@@ -1435,7 +1510,7 @@ tcp_out_buffer_mode(Scheme_Port *p, int mode)
 }
 
 static Scheme_Object *
-make_tcp_input_port(void *data, const char *name, Scheme_Object *cust)
+make_tcp_input_port_symbol_name(void *data, Scheme_Object *name, Scheme_Object *cust)
 {
   Scheme_Input_Port *ip;
 
@@ -1444,7 +1519,7 @@ make_tcp_input_port(void *data, const char *name, Scheme_Object *cust)
   
   ip = scheme_make_input_port(scheme_tcp_input_port_type,
 			      data,
-			      scheme_intern_symbol(name),
+                              name,
 			      tcp_get_string,
 			      NULL,
 			      scheme_progress_evt_via_get,
@@ -1460,7 +1535,13 @@ make_tcp_input_port(void *data, const char *name, Scheme_Object *cust)
 }
 
 static Scheme_Object *
-make_tcp_output_port(void *data, const char *name, Scheme_Object *cust)
+make_tcp_input_port(void *data, const char *name, Scheme_Object *cust)
+{
+  return make_tcp_input_port_symbol_name(data, scheme_intern_symbol(name), cust);
+}
+
+static Scheme_Object *
+make_tcp_output_port_symbol_name(void *data, Scheme_Object *name, Scheme_Object *cust)
 {
   Scheme_Output_Port *op;
 
@@ -1469,7 +1550,7 @@ make_tcp_output_port(void *data, const char *name, Scheme_Object *cust)
 
   op = scheme_make_output_port(scheme_tcp_output_port_type,
 						  data,
-						  scheme_intern_symbol(name),
+						  name,
 						  scheme_write_evt_via_write,
 						  tcp_write_string,
 						  (Scheme_Out_Ready_Fun)tcp_check_write,
@@ -1482,6 +1563,12 @@ make_tcp_output_port(void *data, const char *name, Scheme_Object *cust)
   op->p.buffer_mode_fun = tcp_out_buffer_mode;
 
   return (Scheme_Object *)op;
+}
+
+static Scheme_Object *
+make_tcp_output_port(void *data, const char *name, Scheme_Object *cust)
+{
+  return make_tcp_output_port_symbol_name(data, scheme_intern_symbol(name), cust);
 }
 
 #endif /* USE_TCP */
@@ -1919,7 +2006,7 @@ tcp_listen(int argc, Scheme_Object *argv[])
 
 	    if (!listen(s, backlog)) {
 	      if (!pos) {
-		l = scheme_malloc_tagged(sizeof(listener_t) + ((count - 1) * sizeof(tcp_t)));
+		l = scheme_malloc_tagged(sizeof(listener_t) + ((count - mzFLEX_DELTA) * sizeof(tcp_t)));
 		l->so.type = scheme_listener_type;
 		l->count = count;
 		{
@@ -2383,6 +2470,10 @@ static Scheme_Object *tcp_abandon_port(int argc, Scheme_Object *argv[])
   return NULL;
 }
 
+void scheme_tcp_abandon_port(Scheme_Object *port) {
+  tcp_abandon_port(1, &port);
+}
+
 static Scheme_Object *tcp_port_p(int argc, Scheme_Object *argv[])
 {
 #ifdef USE_TCP
@@ -2507,6 +2598,70 @@ void scheme_socket_to_ports(intptr_t s, const char *name, int takeover,
   if (takeover) {
     REGISTER_SOCKET(s);
   }
+}
+
+void scheme_socket_to_input_port(intptr_t s, Scheme_Object *name, int takeover,
+                                 Scheme_Object **_inp)
+{
+  Scheme_Tcp *tcp;
+  Scheme_Object *v;
+
+  tcp = make_tcp_port_data(s, takeover ? 1 : 2);
+
+  v = make_tcp_input_port_symbol_name(tcp, name, NULL);
+  *_inp = v;
+  
+  if (takeover) {
+    REGISTER_SOCKET(s);
+  }
+}
+
+void scheme_socket_to_output_port(intptr_t s, Scheme_Object *name, int takeover,
+                                  Scheme_Object **_outp)
+{
+  Scheme_Tcp *tcp;
+  Scheme_Object *v;
+
+  tcp = make_tcp_port_data(s, takeover ? 1 : 2);
+
+  v = make_tcp_output_port_symbol_name(tcp, name, NULL);
+  *_outp = v;
+  
+  if (takeover) {
+    REGISTER_SOCKET(s);
+  }
+}
+
+intptr_t scheme_dup_socket(intptr_t fd) {
+#ifdef USE_SOCKETS_TCP
+# ifdef USE_WINSOCK_TCP
+  intptr_t nsocket;
+  intptr_t rc;
+  WSAPROTOCOL_INFO protocolInfo;
+  rc = WSADuplicateSocket(fd, GetCurrentProcessId(), &protocolInfo);
+  if (rc)
+    return rc;
+  nsocket = WSASocket(FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, &protocolInfo, 0, WSA_FLAG_OVERLAPPED);
+  REGISTER_SOCKET(nsocket);
+  return nsocket;
+# else
+  intptr_t nfd;
+  do {
+    nfd = dup(fd);
+  } while (nfd == -1 && errno == EINTR);
+  return nfd;
+# endif
+#else
+  return -1;
+#endif
+}
+
+void scheme_close_socket_fd(intptr_t fd) 
+{
+#ifdef USE_SOCKETS_TCP
+  UNREGISTER_SOCKET(fd);
+  closesocket(fd);
+#endif
 }
 
 /*========================================================================*/
@@ -2753,7 +2908,7 @@ static Scheme_Object *udp_bind_or_connect(const char *name, int argc, Scheme_Obj
         int ok;
 #ifdef USE_NULL_TO_DISCONNECT_UDP
         ok = !connect(udp->s, NULL, 0);
-#else  //#ifndef USE_NULL_TO_DISCONNECT_UDP
+#else
         GC_CAN_IGNORE mz_unspec_address ua;
         ua.sin_family = AF_UNSPEC;
         ua.sin_port = 0;

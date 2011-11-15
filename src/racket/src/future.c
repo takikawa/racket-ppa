@@ -147,6 +147,11 @@ static Scheme_Object *processor_count(int argc, Scheme_Object *argv[])
   return scheme_make_integer(1);
 }
 
+int scheme_is_multiprocessor(int now)
+{
+  return 0;
+}
+
 Scheme_Object *scheme_current_future(int argc, Scheme_Object *argv[])
 {
   future_t *ft = scheme_current_thread->current_ft;
@@ -285,11 +290,6 @@ static void future_do_runtimecall(struct Scheme_Future_Thread_State *fts,
                                   int is_atomic,
                                   int can_suspend);
 static int capture_future_continuation(future_t *ft, void **storage);
-static void future_raise_wrong_type_exn(const char *who, 
-                                        const char *expected_type, 
-                                        int what, 
-                                        int argc, 
-                                        Scheme_Object **argv);
 
 #define INITIAL_C_STACK_SIZE 500000
 #define FUTURE_RUNSTACK_SIZE 2000
@@ -1297,13 +1297,7 @@ Scheme_Object *scheme_fsemaphore_count(int argc, Scheme_Object **argv)
   fsemaphore_t *sema;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_fsemaphore_type)) { 
-    Scheme_Future_Thread_State *fts = scheme_future_thread_state;
-    if (!fts) { 
-      scheme_wrong_type("fsemaphore-count", "fsemaphore", 0, argc, argv);
-    }
-
-    /* On a future thread -- ask the runtime to raise an exception for us */
-    future_raise_wrong_type_exn("fsemaphore-count", "fsemaphore", 0, argc, argv);
+    SCHEME_WRONG_TYPE_MAYBE_IN_FT("fsemaphore-count", "fsemaphore", 0, argc, argv);
   }
 
   sema = (fsemaphore_t*)argv[0]; 
@@ -1362,13 +1356,7 @@ Scheme_Object *scheme_fsemaphore_post(int argc, Scheme_Object **argv)
   int old_count;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_fsemaphore_type)) { 
-    Scheme_Future_Thread_State *fts = scheme_future_thread_state;
-    if (!fts) { 
-      scheme_wrong_type("fsemaphore-post", "fsemaphore", 0, argc, argv);
-    }
-
-    /* On a future thread -- ask the runtime to raise an exception for us */
-    future_raise_wrong_type_exn("fsemaphore-post", "fsemaphore", 0, argc, argv);
+    SCHEME_WRONG_TYPE_MAYBE_IN_FT("fsemaphore-post", "fsemaphore", 0, argc, argv);
   }
 
   sema = (fsemaphore_t*)argv[0];
@@ -1428,13 +1416,7 @@ Scheme_Object *scheme_fsemaphore_wait(int argc, Scheme_Object **argv)
   void *storage[3];
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_fsemaphore_type)) { 
-    Scheme_Future_Thread_State *fts = scheme_future_thread_state;
-    if (!fts) { 
-      scheme_wrong_type("fsemaphore-wait", "fsemaphore", 0, argc, argv);
-    }
-
-    /* On a future thread -- ask the runtime to raise an exception for us */
-    future_raise_wrong_type_exn("fsemaphore-wait", "fsemaphore", 0, argc, argv);
+    SCHEME_WRONG_TYPE_MAYBE_IN_FT("fsemaphore-wait", "fsemaphore", 0, argc, argv);
   }
 
   sema = (fsemaphore_t*)argv[0];
@@ -1546,13 +1528,7 @@ Scheme_Object *scheme_fsemaphore_try_wait(int argc, Scheme_Object **argv)
   Scheme_Object *ret;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_fsemaphore_type)) { 
-    Scheme_Future_Thread_State *fts = scheme_future_thread_state;
-    if (!fts) { 
-      scheme_wrong_type("fsemaphore-try-wait?", "fsemaphore", 0, argc, argv);
-    }
-
-    /* On a future thread -- ask the runtime to raise an exception for us */
-    future_raise_wrong_type_exn("fsemaphore-try-wait?", "fsemaphore", 0, argc, argv);
+    SCHEME_WRONG_TYPE_MAYBE_IN_FT("fsemaphore-try-wait?", "fsemaphore", 0, argc, argv);
   }
 
   sema = (fsemaphore_t*)argv[0];
@@ -1938,17 +1914,31 @@ static void init_cpucount(void)
   size_t size = sizeof(cpucount);
 
   if (sysctlbyname("hw.ncpu", &cpucount, &size, NULL, 0))
-	{
-	  cpucount = 1;
-	}
+    cpucount = 2;
 #elif defined(DOS_FILE_SYSTEM)
   SYSTEM_INFO sysinfo;
   GetSystemInfo(&sysinfo);
   cpucount = sysinfo.dwNumberOfProcessors;
 #else
   /* Conservative guess! */
-  cpucount = 1;
+  /* A result of 1 is not conservative, because claiming a
+     uniprocessor means that atomic cmpxchg operations are not used
+     for setting pair flags and hash codes. */
+  cpucount = 2;
 #endif
+}
+
+int scheme_is_multiprocessor(int now)
+{
+  if (cpucount > 1) {
+    if (!now) 
+      return 1;
+    else {
+      Scheme_Future_State *fs = scheme_future_state;
+      return (fs && fs->future_threads_created);
+    }
+  } else
+    return 0;
 }
 
 Scheme_Object *processor_count(int argc, Scheme_Object *argv[])
@@ -2256,6 +2246,7 @@ void scheme_check_future_work()
     if (ft) {
       fs->future_waiting_atomic = ft->next_waiting_atomic;
       ft->next_waiting_atomic = NULL;
+      ft->in_queue_waiting_for_lwc = 0;
       if ((ft->status == WAITING_FOR_PRIM) && ft->rt_prim_is_atomic) {
         ft->status = HANDLING_PRIM;
         ft->want_lw = 0; /* we expect to handle it quickly,
@@ -2441,8 +2432,12 @@ static void future_do_runtimecall(Scheme_Future_Thread_State *fts,
     if (insist_to_suspend) {
       /* couldn't capture the continuation locally, so ask
          the runtime thread to capture it: */
-      future->next_waiting_lwc = fs->future_waiting_lwc;
-      fs->future_waiting_lwc = future;
+      if (!future->in_queue_waiting_for_lwc) { 
+        future->next_waiting_lwc = fs->future_waiting_lwc;
+        fs->future_waiting_lwc = future;
+        future->in_queue_waiting_for_lwc = 1;
+      }
+
       future->want_lw = 1;
     }
   }
@@ -2478,6 +2473,7 @@ static void future_do_runtimecall(Scheme_Future_Thread_State *fts,
   future = fts->thread->current_ft;
 
   if (future) {
+    future->want_lw = 0;
     if (future->no_retval) {
       record_fevent(FEVENT_RTCALL_ABORT, fid);
       future->status = FINISHED;
@@ -2504,7 +2500,7 @@ static void future_do_runtimecall(Scheme_Future_Thread_State *fts,
 /**********************************************************************/
 /* Functions for primitive invocation          			      */
 /**********************************************************************/
-static void future_raise_wrong_type_exn(const char *who, const char *expected_type, int what, int argc, Scheme_Object **argv) 
+void scheme_wrong_type_from_ft(const char *who, const char *expected_type, int what, int argc, Scheme_Object **argv) 
   XFORM_SKIP_PROC 
 /* Called in future thread */
 {

@@ -28,6 +28,11 @@
 #ifdef DOS_FILE_SYSTEM
 # include <windows.h>
 #endif
+#ifdef NO_ERRNO_GLOBAL
+# define errno -1
+#else
+# include <errno.h>
+#endif
 #ifdef USE_C_SYSLOG
 # include <syslog.h>
 # include <stdarg.h>
@@ -157,6 +162,14 @@ static void default_output(char *s, intptr_t len)
   fflush(stderr);
 }
 
+intptr_t scheme_errno() {
+#ifdef WINDOWS_FILE_HANDLES
+  return GetLastError();
+#else
+  return errno;
+#endif
+}
+
 Scheme_Config *scheme_init_error_escape_proc(Scheme_Config *config)
 {
   if (!def_error_esc_proc) {
@@ -210,6 +223,8 @@ Scheme_Config *scheme_init_error_escape_proc(Scheme_Config *config)
        or error number for scheme_hostname_error()
   %m = boolean then error number like %e, which
        is used only if the boolean is 1
+  %M = boolean then error number like %E, which
+       is used only if the boolean is 1
 */
 
 static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list args, char **_s)
@@ -262,6 +277,7 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	break;
       case 'N':
       case 'm':
+      case 'M':
 	ints[ip++] = mzVA_ARG(args, int);
 	ints[ip++] = mzVA_ARG(args, int);
 	break;
@@ -394,6 +410,7 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	case 'e':
         case 'm':
 	case 'E':
+        case 'M':
 	case 'Z':
 	case 'N':
 	  {
@@ -403,6 +420,10 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	    if (type == 'm') {
               none = !ints[ip++];
 	      type = 'e';
+              he = 0;
+	    } else if (type == 'M') {
+              none = !ints[ip++];
+	      type = 'E';
               he = 0;
 	    } else if (type == 'N') {
 	      he = ints[ip++];
@@ -1598,7 +1619,8 @@ static void do_wrong_syntax(const char *where,
                             Scheme_Object *detail_form,
                             Scheme_Object *form,
                             char *s, intptr_t slen,
-                            Scheme_Object *extra_sources)
+                            Scheme_Object *extra_sources,
+                            int exn_kind)
 {
   intptr_t len, vlen, dvlen, blen, plen;
   char *buffer;
@@ -1754,7 +1776,7 @@ static void do_wrong_syntax(const char *where,
     form = scheme_make_pair(form, extra_sources);
   }
 
-  scheme_raise_exn(MZEXN_FAIL_SYNTAX, 
+  scheme_raise_exn(exn_kind, 
 		   form,
 		   "%t", buffer, blen);
 }
@@ -1778,7 +1800,23 @@ void scheme_wrong_syntax(const char *where,
     HIDE_FROM_XFORM(va_end(args));
   }
 
-  do_wrong_syntax(where, detail_form, form, s, slen, scheme_null);
+  do_wrong_syntax(where, detail_form, form, s, slen, scheme_null, MZEXN_FAIL_SYNTAX);
+}
+
+void scheme_unbound_syntax(const char *where,
+                           Scheme_Object *detail_form,
+                           Scheme_Object *form,
+                           const char *detail, ...)
+{
+  char *s;
+  intptr_t slen;
+  GC_CAN_IGNORE va_list args;
+
+  HIDE_FROM_XFORM(va_start(args, detail));
+  slen = sch_vsprintf(NULL, 0, detail, args, &s);
+  HIDE_FROM_XFORM(va_end(args));
+
+  do_wrong_syntax(where, detail_form, form, s, slen, scheme_null, MZEXN_FAIL_SYNTAX_UNBOUND);
 }
 
 void scheme_wrong_syntax_with_more_sources(const char *where,
@@ -1801,7 +1839,7 @@ void scheme_wrong_syntax_with_more_sources(const char *where,
     HIDE_FROM_XFORM(va_end(args));
   }
 
-  do_wrong_syntax(where, detail_form, form, s, slen, extra_sources);
+  do_wrong_syntax(where, detail_form, form, s, slen, extra_sources, MZEXN_FAIL_SYNTAX);
 }
 
 void scheme_wrong_rator(Scheme_Object *rator, int argc, Scheme_Object **argv)
@@ -1973,16 +2011,23 @@ void scheme_unbound_global(Scheme_Bucket *b)
 
   if (home && home->module) {
     const char *errmsg;
-    char *phase, phase_buf[20];
+    char *phase, phase_buf[20], *phase_note = "";
     
     if (SCHEME_TRUEP(scheme_get_param(scheme_current_config(), MZCONFIG_ERROR_PRINT_SRCLOC)))
-      errmsg = "reference to an identifier before its definition: %S in module: %D%s";
+      errmsg = "reference to an identifier before its definition: %S in module: %D%s%s";
     else
-      errmsg = "reference to an identifier before its definition: %S%_%s";
+      errmsg = "reference to an identifier before its definition: %S%_%s%s";
 
     if (home->phase) {
       sprintf(phase_buf, " phase: %" PRIdPTR "", home->phase);
       phase = phase_buf;
+      if ((home->phase == 1) && (home->template_env)) {
+        if (scheme_lookup_in_table(home->template_env->toplevel, (const char *)name))
+          phase_note = " (which cannot access the run-time definition)";
+        else if (home->template_env->syntax
+                 && scheme_lookup_in_table(home->template_env->syntax, (const char *)name))
+          phase_note = " (which cannot access the syntax binding for run-time expressions)";
+      }
     } else
       phase = "";
 
@@ -1991,7 +2036,8 @@ void scheme_unbound_global(Scheme_Bucket *b)
 		     errmsg,
 		     name,
 		     home->module->modsrc,
-                     phase);
+                     phase,
+                     phase_note);
   } else {
     scheme_raise_exn(MZEXN_FAIL_CONTRACT_VARIABLE,
 		     name,

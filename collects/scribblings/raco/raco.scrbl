@@ -16,9 +16,11 @@ a typical Racket installation.
 @table-of-contents[]
 
 @include-section["make.scrbl"]
+@include-section["link.scrbl"]
 @include-section["exe.scrbl"]
 @include-section["dist.scrbl"]
 @include-section["plt.scrbl"]
+@include-section["unpack.scrbl"]
 @include-section["planet.scrbl"]
 @include-section["setup.scrbl"]
 @include-section["decompile.scrbl"]

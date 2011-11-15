@@ -5,7 +5,7 @@
          framework/test
          framework/preferences)
 
-(require tests/drracket/drracket-test-util)
+(require tests/drracket/private/drracket-test-util)
 
 (fire-up-drscheme-and-run-tests
  (λ ()
@@ -18,8 +18,10 @@
        
        (set-language-level! (list #rx"How to Design Programs" #rx"Beginning Student$"))
        (clear-definitions drr-frame)
-       (send definitions-text set-filename fn)
-       (send definitions-text insert "(define (f x) x)\n(f 1)\n")
+       (queue-callback/res
+        (λ () 
+          (send definitions-text set-filename fn)
+          (send definitions-text insert "(define (f x) x)\n(f 1)\n")))
        (test:menu-select "File" "Save Definitions")
        (unless (call-with-input-file fn
                  (λ (p) (regexp-match #rx";;[^\n]*metadata" p)))
@@ -30,7 +32,7 @@
          (error 'save-teaching-lang-file.rkt
                 "expected the saved file to contain the word 'metadata' in a comment"))
        (do-execute drr-frame)
-       (test:menu-select "File" "Close Tab")
+       (test:menu-select "File" (if (eq? (system-type) 'unix) "Close" "Close Tab"))
        (use-get/put-dialog 
         (λ () 
           (test:menu-select "File" "Open..."))
@@ -40,7 +42,7 @@
                       drr-frame
                       (send interactions-text paragraph-start-position 2)
                       (send interactions-text last-position))])
-         (test:menu-select "File" "Close Tab")
+         (test:menu-select "File" (if (eq? (system-type) 'unix) "Close" "Close Tab"))
          (delete-file fn)
          (unless (equal? result "1\n> ")
            (error 'save-teaching-lang-file.rkt "expected the program to produce 1 (followed by the prompt), got ~s" result)))))))

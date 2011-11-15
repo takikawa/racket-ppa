@@ -52,19 +52,21 @@
       [(syntax? v) (short-version (syntax-e v) depth)]
       [else v]))
   
-  (define (make-st-mark stx)
+  (define (make-st-mark stx phase)
     (unless (syntax? stx)
       (error 'make-st-mark
              "expected syntax object as argument, got ~e" stx))
     (cond
       [(syntax-source stx)
-       #`(quote (#,(short-version stx 10)
-                 #,(syntax-source stx)
-                 #,(syntax-line stx)
-                 #,(syntax-column stx)
-                 #,(syntax-position stx)
-                 #,(syntax-span stx)))]
+       (with-syntax ([quote (syntax-shift-phase-level #'quote phase)])
+         #`(quote (#,(short-version stx 10)
+                   #,(syntax-source stx)
+                   #,(syntax-line stx)
+                   #,(syntax-column stx)
+                   #,(syntax-position stx)
+                   #,(syntax-span stx))))]
       [else #f]))
+  
   (define (st-mark-source src)
     (and src
          (datum->syntax #f (car src) (cdr src) #f)))
@@ -168,6 +170,8 @@
          (insert-at-tail* se sexpr phase)]
         [(letrec-values bindings . body)
          (insert-at-tail* se sexpr phase)]
+        [(letrec-syntaxes+values sbindings bindings . body)
+         (insert-at-tail* se sexpr phase)]
         
         [(begin . _)
          (insert-at-tail* se sexpr phase)]
@@ -250,7 +254,8 @@
            [bodyl (map (lambda (b) (annotate b phase)) bodys)])
       (rebuild expr (map cons bodys bodyl))))
   
-  (define orig-inspector (current-code-inspector))
+  (define orig-inspector (variable-reference->module-declaration-inspector
+                          (#%variable-reference)))
   
   (define (rearm orig new)
     (syntax-rearm new orig))
@@ -307,6 +312,8 @@
   (define (make-annotate top? name)
     (lambda (expr phase)
       (define disarmed-expr (disarm expr))
+      (define (with-mrk* mark expr)
+        (with-mark mark expr phase))
       (test-coverage-point
        (kernel-syntax-case/phase disarmed-expr phase
          [_
@@ -322,11 +329,11 @@
               expr]
              [else
               ;; might be undefined/uninitialized
-              (with-mark expr expr)]))]
+              (with-mrk* expr expr)]))]
          
          [(#%top . id)
           ;; might be undefined/uninitialized
-          (with-mark expr expr)]
+          (with-mrk* expr expr)]
          [(#%variable-reference . _)
           ;; no error possible
           expr]
@@ -335,7 +342,7 @@
           top?
           ;; Can't put annotation on the outside
           (let* ([marked 
-                  (with-mark expr
+                  (with-mrk* expr
                              (annotate-named
                               (one-name #'names)
                               (syntax rhs)
@@ -370,22 +377,21 @@
                                    (annotate-named
                                     (one-name #'(name ...))
                                     (syntax rhs)
-                                    (add1 phase)))])
+                                    (add1 phase))
+                                   (add1 phase))])
             (rearm
              expr
              (rebuild disarmed-expr (list (cons #'rhs marked)))))]
          
-         [(define-values-for-syntax (name ...) rhs)
+         [(begin-for-syntax . exprs)
           top?
-          (let ([marked (with-mark expr
-                                   (annotate-named
-                                    (one-name (syntax (name ...)))
-                                    (syntax rhs)
-                                    (add1 phase)))])
-            (rearm
-             expr
-             (rebuild disarmed-expr (list (cons #'rhs marked)))))]
-         
+          (rearm
+           expr
+           (annotate-seq disarmed-expr
+                         (syntax exprs)
+                         annotate-top 
+                         (add1 phase)))]
+
          [(module name init-import mb)
           (syntax-case (disarm #'mb) ()
             [(__plain-module-begin body ...)
@@ -406,7 +412,6 @@
                            (rebuild mb (map cons bodys bodyl)))))))))])]
          
          [(#%expression e)
-          top?
           (rearm expr #`(#%expression #,(annotate (syntax e) phase)))]
          
          ;; No way to wrap
@@ -427,7 +432,7 @@
            expr
            (keep-lambda-properties
             expr
-            (profile-annotate-lambda name expr expr (syntax body)
+            (profile-annotate-lambda name expr disarmed-expr (syntax body)
                                      phase)))]
          [(case-lambda clause ...)
           (with-syntax ([([args . body] ...)
@@ -447,7 +452,7 @@
          
          ;; Wrap RHSs and body
          [(let-values ([vars rhs] ...) . body)
-          (with-mark expr
+          (with-mrk* expr
                      (rearm
                       expr
                       (annotate-let disarmed-expr phase
@@ -467,7 +472,17 @@
                     (free-identifier=? #'var1 #'var2))
                fm]
               [_
-               (with-mark expr fm)]))]
+               (with-mrk* expr fm)]))]
+         ;; This case is needed for `#lang errortrace ...', which uses
+         ;; `local-expand' on the module body.
+         [(letrec-syntaxes+values sbindings ([vars rhs] ...) . body)
+          (let ([fm (rearm
+                     expr
+                     (annotate-let disarmed-expr phase
+                                   (syntax (vars ...))
+                                   (syntax (rhs ...))
+                                   (syntax body)))])
+            (with-mrk* expr fm))]
 
          ;; Wrap RHS
          [(set! var rhs)
@@ -476,7 +491,7 @@
                           (syntax rhs)
                           phase)])
             ;; set! might fail on undefined variable, or too many values:
-            (with-mark expr
+            (with-mrk* expr
                        (rearm
                         expr
                         (rebuild disarmed-expr (list (cons #'rhs new-rhs))))))]
@@ -488,12 +503,12 @@
            expr
            #`(begin #,(annotate (syntax e) phase)))]
          [(begin . body)
-          (with-mark expr
+          (with-mrk* expr
                      (rearm
                       expr
                       (annotate-seq disarmed-expr #'body annotate phase)))]
          [(begin0 . body)
-          (with-mark expr
+          (with-mrk* expr
                      (rearm
                       expr
                       (annotate-seq disarmed-expr #'body annotate phase)))]
@@ -501,7 +516,7 @@
           (let ([w-tst (annotate (syntax tst) phase)]
                 [w-thn (annotate (syntax thn) phase)]
                 [w-els (annotate (syntax els) phase)])
-            (with-mark expr
+            (with-mrk* expr
                        (rearm
                         expr
                         (rebuild disarmed-expr (list (cons #'tst w-tst)
@@ -510,13 +525,13 @@
          [(if tst thn)
           (let ([w-tst (annotate (syntax tst) phase)]
                 [w-thn (annotate (syntax thn) phase)])
-            (with-mark expr
+            (with-mrk* expr
                        (rearm
                         expr
                         (rebuild disarmed-expr (list (cons #'tst w-tst)
                                                      (cons #'thn w-thn))))))]
          [(with-continuation-mark . body)
-          (with-mark expr
+          (with-mrk* expr
                      (rearm
                       expr
                       (annotate-seq disarmed-expr (syntax body)
@@ -537,7 +552,7 @@
             ;; It's (void):
             expr]
            [else
-            (with-mark expr (rearm
+            (with-mrk* expr (rearm
                              expr
                              (annotate-seq disarmed-expr (syntax body)
                                            annotate phase)))])]

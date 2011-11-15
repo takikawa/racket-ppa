@@ -1,4 +1,7 @@
 #lang racket/base
+(require "path.rkt"
+         (for-syntax racket/base
+                     setup/path-to-relative))
 
 (provide delete-directory/files
          copy-directory/files
@@ -35,7 +38,6 @@
          other-read-bit
          other-write-bit
          other-execute-bit)
-
 
 (require "private/portlines.rkt")
 
@@ -82,41 +84,81 @@
     (unless (directory-exists? dir)
       (make-directory dir))))
 
-(define (make-temporary-file [template "mztmp~a"] [copy-from #f] [base-dir #f])
-  (with-handlers ([exn:fail:contract?
-                   (lambda (x)
-                     (raise-type-error 'make-temporary-file
-                                       "format string for 1 argument"
-                                       template))])
-    (format template void))
-  (unless (or (not copy-from)
-              (path-string? copy-from)
-              (eq? copy-from 'directory))
-    (raise-type-error 'make-temporary-file
-                      "path, valid-path string, 'directory, or #f"
-                      copy-from))
-  (unless (or (not base-dir) (path-string? base-dir))
-    (raise-type-error 'make-temporary-file
-                      "path, valid-path, string, or #f"
-                      base-dir))
-  (let ([tmpdir (find-system-path 'temp-dir)])
-    (let loop ([s (current-seconds)]
-               [ms (inexact->exact (truncate (current-inexact-milliseconds)))])
-      (let ([name (let ([n (format template (format "~a~a" s ms))])
-                    (cond [base-dir (build-path base-dir n)]
-                          [(relative-path? n) (build-path tmpdir n)]
-                          [else n]))])
-        (with-handlers ([exn:fail:filesystem:exists?
-                         (lambda (x)
-                           ;; try again with a new name
-                           (loop (- s (random 10))
-                                 (+ ms (random 10))))])
-          (if copy-from
-              (if (eq? copy-from 'directory)
-                  (make-directory name)
-                  (copy-file copy-from name))
-              (close-output-port (open-output-file name)))
-          name)))))
+(define-syntax (make-temporary-file stx)
+  (with-syntax ([app (datum->syntax stx #'#%app stx)])
+    (syntax-case stx ()
+      [x (identifier? #'x) #'make-temporary-file/proc]
+      [(_)
+       (let ()
+         (define line   (syntax-line stx))
+         (define col    (syntax-column stx))
+         (define source (syntax-source stx))
+         (define pos    (syntax-position stx))
+         (define str-src
+           (cond [(path? source)
+                  (regexp-replace #rx"^<(.*?)>(?=/)"
+                                  (path->relative-string/library source)
+                                  (lambda (_ s) (string-upcase s)))]
+                 [(string? source) source]
+                 [else #f]))
+         (define str-loc
+           (cond [(and line col) (format "-~a-~a" line col)]
+                 [pos (format "--~a" pos)]
+                 [else ""]))
+         (define combined-str (string-append (or str-src "rkttmp") str-loc))
+         (define sanitized-str (regexp-replace* #rx"[<>:\"/\\|]" combined-str "-"))
+         (define max-len 50) ;; must be even
+         (define not-too-long-str
+           (cond [(< max-len (string-length sanitized-str))
+                  (string-append (substring sanitized-str 0 (- (/ max-len 2) 2))
+                                 "----"
+                                 (substring sanitized-str
+                                            (- (string-length sanitized-str)
+                                               (- (/ max-len 2) 2))))]
+                 [else sanitized-str]))
+         #`(app make-temporary-file/proc
+                #,(string-append not-too-long-str "_~a")))]
+      [(_ . whatever)
+       #'(app make-temporary-file/proc . whatever)])))
+
+(define make-temporary-file/proc
+  (let ()
+    (define (make-temporary-file [template "rkttmp~a"] [copy-from #f] [base-dir #f])
+      (with-handlers ([exn:fail:contract?
+                       (lambda (x)
+                         (raise-type-error 'make-temporary-file
+                                           "format string for 1 argument"
+                                           template))])
+        (format template void))
+      (unless (or (not copy-from)
+                  (path-string? copy-from)
+                  (eq? copy-from 'directory))
+        (raise-type-error 'make-temporary-file
+                          "path, valid-path string, 'directory, or #f"
+                          copy-from))
+      (unless (or (not base-dir) (path-string? base-dir))
+        (raise-type-error 'make-temporary-file
+                          "path, valid-path, string, or #f"
+                          base-dir))
+      (let ([tmpdir (find-system-path 'temp-dir)])
+        (let loop ([s (current-seconds)]
+                   [ms (inexact->exact (truncate (current-inexact-milliseconds)))])
+          (let ([name (let ([n (format template (format "~a~a" s ms))])
+                        (cond [base-dir (build-path base-dir n)]
+                              [(relative-path? n) (build-path tmpdir n)]
+                              [else n]))])
+            (with-handlers ([exn:fail:filesystem:exists?
+                             (lambda (x)
+                               ;; try again with a new name
+                               (loop (- s (random 10))
+                                     (+ ms (random 10))))])
+              (if copy-from
+                  (if (eq? copy-from 'directory)
+                      (make-directory name)
+                      (copy-file copy-from name))
+                  (close-output-port (open-output-file name)))
+              name)))))
+    make-temporary-file))
 
 (define (with-pref-params thunk)
   (parameterize ([read-case-sensitive #f]
@@ -154,20 +196,31 @@
     (unless (eq? table (weak-box-value pref-cache))
       (set! pref-cache (make-weak-box table)))))
 
+(define (make-pathless-lock-file-name name)
+  (bytes->path-element
+   (bytes-append
+    (if (eq? 'windows (system-type))
+        #"_"
+        #".")
+    #"LOCK"
+    (path-element->bytes name))))
 
 (define make-lock-file-name
   (case-lambda
-   [(path) (let-values ([(dir name dir?) (split-path path)])
-             (make-lock-file-name dir name))]
+   [(path)
+    (unless (path-string? path)
+      (raise-type-error 'make-lock-file-name "path string" path))
+    (let-values ([(dir name dir?) (split-path path)])
+      (if (eq? dir 'relative)
+          (make-pathless-lock-file-name name)
+          (make-lock-file-name dir name)))]
    [(dir name)
+    (unless (path-string? dir)
+      (raise-type-error 'make-lock-file-name "path string" dir))
+    (unless (path-element? name)
+      (raise-type-error 'make-lock-file-name "path element" name))
     (build-path dir
-                (bytes->path-element
-                 (bytes-append
-                  (if (eq? 'windows (system-type))
-                      #"_"
-                      #".")
-                  #"LOCK"
-                  (path-element->bytes name))))]))
+                (make-pathless-lock-file-name name))]))
 
 (define (preferences-lock-file-mode)
   (case (system-type)
@@ -175,40 +228,37 @@
     [else 'exists]))
 
 (define (call-with-file-lock/timeout fn kind thunk failure-thunk
-    #:get-lock-file [get-lock-file (make-lock-file-name fn)]
-    #:delay [delay 0.01]
-    #:max-delay [max-delay 0.2])
-
+                                     #:lock-file [lock-file #f]
+                                     #:delay [delay 0.01]
+                                     #:max-delay [max-delay 0.2])
+  
   (unless (or (path-string? fn) (eq? fn #f))
     (raise-type-error 'call-with-file-lock/timeout "path-string? or #f" fn))
   (unless (or (eq? kind 'shared) (eq? kind 'exclusive))
     (raise-type-error 'call-with-file-lock/timeout "'shared or 'exclusive" kind))
-  (unless (= (procedure-arity thunk) 0)
+  (unless (and (procedure? thunk) (= (procedure-arity thunk) 0))
     (raise-type-error 'call-with-file-lock/timeout "procedure (arity 0)" thunk))
-  (unless (= (procedure-arity failure-thunk) 0)
+  (unless (and (procedure? thunk) (= (procedure-arity failure-thunk) 0))
     (raise-type-error 'call-with-file-lock/timeout "procedure (arity 0)" failure-thunk))
-  (unless (or (path-string? get-lock-file)
-              (= (procedure-arity get-lock-file) 0))
-    (raise-type-error 'call-with-file-lock/timeout "procedure (arity 0)" get-lock-file))
+  (unless (or (not lock-file) (path-string? lock-file))
+    (raise-type-error 'call-with-file-lock/timeout "path-string? or #f" lock-file))
   (unless (and (real? delay) (not (negative? delay)))
     (raise-type-error 'call-with-file-lock/timeout "non-negative real" delay))
   (unless (and (real? max-delay) (not (negative? max-delay)))
     (raise-type-error 'call-with-file-lock/timeout "non-negative real" max-delay))
- 
-  (define real-get-lock-file 
-    (if (procedure? get-lock-file) (get-lock-file) get-lock-file))
-  (call-with-file-lock 
-    kind 
-    real-get-lock-file
-    thunk
-    (lambda ()
-      (if (delay . < . max-delay)
-        (begin
-          (sleep delay)
-          (call-with-file-lock/timeout fn kind thunk failure-thunk #:delay (* 2 delay)
-            #:get-lock-file real-get-lock-file 
-            #:max-delay max-delay))
-      (failure-thunk)))))
+  
+  (define real-lock-file (or lock-file (make-lock-file-name fn)))
+  (let loop ([delay delay])
+    (call-with-file-lock 
+     kind 
+     real-lock-file
+     thunk
+     (lambda ()
+       (if (delay . < . max-delay)
+           (begin
+             (sleep delay)
+             (loop (* 2 delay)))
+           (failure-thunk))))))
     
 (define (call-with-preference-file-lock who kind get-lock-file thunk lock-there)
   (define lock-style (preferences-lock-file-mode))
@@ -238,7 +288,9 @@
       (unless (file-exists? lock-file)
         (with-handlers ([exn:fail:filesystem:exists? (lambda (exn) 'ok)])
           (close-output-port (open-output-file lock-file #:exists 'error))))
-      ((call-with-input-file* 
+      (((if (eq? kind 'exclusive)
+            (lambda (fn proc) (call-with-output-file fn proc #:exists 'update))
+            call-with-input-file*)
         lock-file
         (lambda (p)
           (if (port-try-file-lock? p kind)
@@ -302,23 +354,33 @@
                                      #f))))))])
         (let ([prefs (with-pref-params
                       (lambda ()
-                        (if use-lock? 
-                            (call-with-preference-file-lock
-                             'get-preference
-                             'shared
-                             (lambda ()
-                               (make-lock-file-name pref-file))
-                             (lambda ()
-                               (with-input-from-file pref-file read))
-                             lock-there)
-                            (with-input-from-file pref-file read))))])
+                        (with-handlers ([exn:fail:read? (lambda (exn)
+                                                          (log-error 
+                                                           (format "error reading preferences: ~a"
+                                                                   (exn-message exn)))
+                                                          null)])
+                          (if use-lock? 
+                              (call-with-preference-file-lock
+                               'get-preference
+                               'shared
+                               (lambda ()
+                                 (make-lock-file-name pref-file))
+                               (lambda ()
+                                 (with-input-from-file pref-file read))
+                               lock-there)
+                              (with-input-from-file pref-file read)))))])
           ;; Make sure file content had the right shape:
           (if (and (list? prefs)
                    (andmap (lambda (x)
-                             (and (pair? x) (pair? (cdr x)) (null? (cddr x))))
+                             (and (pair? x) 
+                                  (symbol? (car x))
+                                  (pair? (cdr x)) 
+                                  (null? (cddr x))))
                            prefs))
               prefs
-              null)))))
+              (begin
+                (log-error "preference file content is not a list of symbol--value lists")
+                null))))))
   (let* ([fn (path->complete-path
               (or filename
                   (find-system-path 'pref-file)))]

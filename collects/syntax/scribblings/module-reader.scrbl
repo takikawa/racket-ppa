@@ -6,11 +6,11 @@
                               read-syntax-inside read-inside)))
 
 @(begin
-  (define-syntax-rule (define-mb name)
-    (begin
-     (require (for-label scheme/base))
-     (define name @racket[#%module-begin])))
-  (define-mb scheme-#%module-begin))
+   (define-syntax-rule (define-mb name)
+     (begin
+       (require (for-label scheme/base))
+       (define name @racket[#%module-begin])))
+   (define-mb scheme-#%module-begin))
 
 @(define guide-doc '(lib "scribblings/guide/guide.scrbl"))
 
@@ -92,17 +92,6 @@ identifiers used by the @racket[reader-option]s.
        for @racket[read] and @racket[read-syntax] are applied
        repeatedly to the module source until @racket[eof] is produced,
        but see also @racket[#:whole-body-readers?].
-
-       For example, a language built on the @secref[#:doc '(lib
-       "scribblings/honu/honu.scrbl")]{Honu} reader could be
-       implemented with:
-
-        @racketblock[
-          (module reader syntax/module-reader
-            module-path
-            #:read read-honu
-            #:read-syntax read-honu-syntax)
-        ]
 
         See also @racket[#:wrapper1] and @racket[#:wrapper2], which
         support simple parameterization of readers rather than

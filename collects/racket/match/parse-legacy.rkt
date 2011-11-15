@@ -1,17 +1,14 @@
 #lang racket/base
 
 (require (for-template racket/base)
-         syntax/boundmap
-         syntax/stx
-         racket/struct-info
          "patterns.rkt"
-         "compiler.rkt"
          "parse-helper.rkt"
          "parse-quasi.rkt")
 
 (provide parse/legacy)
 
-(define orig-insp (current-code-inspector))
+(define orig-insp (variable-reference->module-declaration-inspector
+                   (#%variable-reference)))
 
 (define (parse/legacy stx)
   (define (rearm new-stx) (syntax-rearm new-stx stx))

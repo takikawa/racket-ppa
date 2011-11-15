@@ -25,6 +25,8 @@
 ;; used to time how long it takes to set a preference; the value is not actually used.
 (preferences:set-default 'drracket:prefs-debug #f (λ (x) #t))
 
+(preferences:set-default 'framework:always-use-platform-specific-linefeed-convention #f boolean?)
+
 (preferences:set-default 'framework:overwrite-mode-keybindings #f boolean?)
 
 (preferences:set-default 'framework:ask-about-paste-normalization #t boolean?)
@@ -196,7 +198,6 @@
                          (λ (x) (or (eq? x 'age) (eq? x 'name))))
 (preferences:set-default 'framework:recent-items-window-w 400 number?)
 (preferences:set-default 'framework:recent-items-window-h 600 number?)
-(preferences:set-default 'framework:open-here? #f boolean?)
 (preferences:set-default 'framework:show-delegate? #f boolean?)
 (preferences:set-default 'framework:windows-mdi #f boolean?)
 (preferences:set-default 'framework:menu-bindings #t boolean?)
@@ -258,6 +259,12 @@
                lambda: λ:
                plambda: opt-lambda: popt-lambda:
 
+               splicing-let splicing-letrec splicing-let-values
+               splicing-letrec-values splicing-let-syntax
+               splicing-letrec-syntax splicing-let-syntaxes
+               splicing-letrec-syntaxes splicing-letrec-syntaxes+values
+               splicing-local               
+               
                for for/list for/hash for/hasheq for/hasheqv for/and for/or 
                for/lists for/first for/last for/fold for/vector for/flvector
                for* for*/list for*/hash for*/hasheq for*/hasheqv for*/and for*/or 

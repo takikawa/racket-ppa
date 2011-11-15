@@ -22,7 +22,7 @@
          "private/universe.rkt"
          "private/universe-image.rkt"
          ;; 
-         (only-in "private/launch-many-worlds.rkt" launch-many-worlds)
+         (only-in "private/launch-many-worlds.rkt" launch-many-worlds launch-many-worlds/proc)
          (only-in "private/stop.rkt" make-stop-the-world)
          (only-in "private/check-aux.rkt" sexp?)
          htdp/error
@@ -33,9 +33,11 @@
 (provide stop-with) ;; World -> STOP
 
 (provide
- launch-many-worlds
  ;; (launch-many-worlds e1 ... e2)
  ;; run expressions e1 through e2 in parallel, produce all values in same order
+ launch-many-worlds
+ ;; launch-many-worlds/proc : (-> Any) *-> [Listof Any]
+ launch-many-worlds/proc
  )
 
 (provide-primitive
@@ -56,7 +58,14 @@
              #'(list 
                 (proc> 'on-tick (f2h f) 1)
                 (num> 'on-tick rate (lambda (x) (and (real? x) (positive? x)))
-                      "positive number" "rate"))])]
+                      "positive number" "rate"))]
+            [(_ f rate limit)
+             #'(list 
+                (proc> 'on-tick (f2h f) 1)
+                (num> 'on-tick rate (lambda (x) (and (real? x) (positive? x)))
+                      "positive number" "rate")
+                (num> 'on-tick limit (lambda (x) (and (integer? x) (positive? x)))
+                      "positive integer" "limit"))])]
   ;; -- state specifies whether to display the current state 
   [state DEFAULT #'#f (expr-with-check any> "expected a boolean or a string")]
   ;; Any -> Boolean 
@@ -84,7 +93,7 @@
   [on-key DEFAULT #f (function-with-arity 2)]
   ;; World KeyEvent -> World 
   ;; on-release must specify a release event handler 
-  [on-release DEFAULT #'K (function-with-arity 2)]
+  [on-release DEFAULT #f (function-with-arity 2)]
   ;; (U #f (World S-expression -> World))
   ;; -- on-receive must specify a receive handler 
   [on-receive DEFAULT #'#f (function-with-arity 2)]
@@ -235,10 +244,12 @@
        (cond
          [(and (not (contains-clause? #'to-draw dom)) (not (contains-clause? #'on-draw dom)))
           (raise-syntax-error #f "expects a [to-draw handler] clause, missing" stx)]
-         [else 
-          (stepper-syntax-property
-           #`(run-it ((new-world (if #,rec? aworld% world%)) w #,@args))
-           'stepper-skip-completely #t)]))]))
+         [else
+	   (syntax-property 
+	     (stepper-syntax-property
+	       #`(run-it ((new-world (if #,rec? aworld% world%)) w #,@args))
+	       'stepper-skip-completely #t)
+	     'disappeared-use (map (lambda (x) (car (syntax->list x))) dom))]))]))
 
 (define (run-simulation f)
   (check-proc 'run-simulation f 1 "first" "one argument")
@@ -325,7 +336,9 @@
          [(not (contains-clause? #'on-msg dom))
           (raise-syntax-error #f "expects a on-msg clause, but found none" stx)]
          [else ; (and (memq #'on-new dom) (memq #'on-msg dom))
-          #`(run-it ((new-universe universe%) u #,@args))]))]))
+          (syntax-property 
+           #`(run-it ((new-universe universe%) u #,@args))
+           'disappeared-use (map (lambda (x) (car (syntax->list x))) dom))]))]))
 
 ;                                          
 ;                                          

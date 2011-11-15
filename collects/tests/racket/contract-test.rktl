@@ -29,15 +29,18 @@
   (define (contract-expand-once x)
     (parameterize ([current-namespace contract-namespace])
       (expand-once x)))
+
+  (define exn:fail:contract:blame-object (contract-eval 'exn:fail:contract:blame-object))
+  (define exn:fail:contract:blame? (contract-eval 'exn:fail:contract:blame?))
   
   (define-syntax (ctest stx)
     (syntax-case stx ()
       [(_ a ...)
        (syntax (contract-eval `(,test a ...)))]))
 
-  (define (contract-error-test exp exn-ok?)
+  (define (contract-error-test name exp exn-ok?)
     (test #t 
-          'contract-error-test 
+          name
           (contract-eval `(with-handlers ((exn? (λ (x) (and (,exn-ok? x) #t)))) ,exp))))
 
   (define (contract-syntax-error-test name exp [reg #rx""])
@@ -51,11 +54,19 @@
   ;; tests a passing specification
   (define (test/spec-passed name expression)
     (printf "testing: ~s\n" name)
-    (contract-eval
-     `(,test 
-        (void)
-        (let ([for-each-eval (lambda (l) (for-each eval l))]) for-each-eval)
-        (list ',expression '(void))))
+    (parameterize ([compile-enforce-module-constants #f])
+      (contract-eval
+       `(,test 
+         (void)
+         (let ([for-each-eval (lambda (l) (for-each eval l))]) for-each-eval)
+         (list ',expression '(void))))
+      (let ([new-expression (rewrite-out expression)])
+        (unless (equal? new-expression expression)
+          (contract-eval
+           `(,test 
+             (void)
+             (let ([for-each-eval (lambda (l) (for-each eval l))]) for-each-eval)
+             (list ',new-expression '(void)))))))
     (let/ec k
       (contract-eval
        `(,test (void)
@@ -73,6 +84,19 @@
           eval
           ',(rewrite expression k)))))
   
+  ;; rewrites `provide/contract' to use `contract-out'
+  (define (rewrite-out exp)
+    (let loop ([exp exp])
+      (cond
+        [(null? exp) null]
+        [(list? exp)
+         (case (car exp)
+           [(provide/contract) `(provide (contract-out . ,(cdr exp)))]
+           [else (map loop exp)])]
+        [(pair? exp) (cons (loop (car exp))
+                           (loop (cdr exp)))]
+        [else exp])))
+
   ;; rewrites `contract' to use opt/c. If there is a module definition in there, we skip that test.
   (define (rewrite exp k)
     (let loop ([exp exp])
@@ -87,22 +111,25 @@
                            (loop (cdr exp)))]
         [else exp])))
   
+  ;; blame : (or/c 'pos 'neg string?)
+  ;;   if blame is a string, expect to find the string (format "blaming: ~a" blame) in the exn message
   (define (test/spec-failed name expression blame)
     (let ()
       (define (has-proper-blame? msg)
         (define reg
-          (case blame
-            [(pos) #rx"self-contract violation"]
-            [(neg) #rx"blaming neg"]
-            [else (error 'test/spec-failed "unknown blame name ~s" blame)]))
-        (regexp-match? reg msg))
+          (cond
+            [(eq? blame 'pos) #rx"self-contract violation[:,].*blaming: pos"]
+            [(eq? blame 'neg) #rx"blaming: neg"]
+            [(string? blame) (string-append "blaming: " (regexp-quote blame))]
+            [else #f]))
+        (and reg (regexp-match? reg msg)))
       (printf "testing: ~s\n" name)
       (contract-eval
        `(,thunk-error-test 
           (lambda () ,expression)
           (datum->syntax #'here ',expression)
           (lambda (exn)
-            (and (exn? exn)
+            (and (exn:fail:contract:blame? exn)
                  (,has-proper-blame? (exn-message exn))))))
       (let/ec k
         (let ([rewritten (rewrite expression k)])
@@ -111,11 +138,11 @@
              (lambda () ,rewritten)
              (datum->syntax #'here ',rewritten)
              (lambda (exn)
-               (and (exn? exn)
+               (and (exn:fail:contract:blame? exn)
                     (,has-proper-blame? (exn-message exn))))))))))
   
-  (define (test/pos-blame name expression) (test/spec-failed name expression "pos"))
-  (define (test/neg-blame name expression) (test/spec-failed name expression "neg"))
+  (define (test/pos-blame name expression) (test/spec-failed name expression 'pos))
+  (define (test/neg-blame name expression) (test/spec-failed name expression 'neg))
   
   (define (test/well-formed stx)
     (contract-eval
@@ -137,7 +164,7 @@
         (contract-eval `(,test #t flat-contract? ,contract))
         (test/spec-failed (format "~a fail" name)
                           `(contract ,contract ',fail 'pos 'neg)
-                          "pos")
+                          'pos)
         (test/spec-passed/result
          (format "~a pass" name)
          `(contract ,contract ',pass 'pos 'neg)
@@ -887,6 +914,15 @@
      1))
 
   (test/pos-blame
+   'contract-arrow-values5
+   '((contract (-> integer? (values integer? integer?))
+               (lambda (x) x)
+               'pos
+               'neg)
+     1))
+
+  
+  (test/pos-blame
    'contract-arrow-keyword1
    '(contract (-> integer? any)
               (λ (x #:y y) x)
@@ -1082,6 +1118,19 @@
                (make-keyword-procedure void)
                'pos 'neg)
      #:a "abcdef"))
+  
+  (contract-error-test
+   'contract-arrow-kwd-name-in-message
+   #'((contract 
+       (-> #:a any/c #:the-missing-keyword-arg-b any/c any)
+       (λ (#:a [a 0] #:the-missing-keyword-arg-b [b 0]) b)
+       'pos
+       'neg)
+      #:a 0)
+   (λ (x)
+     (and (exn:fail:contract:blame? x)
+          (regexp-match #rx"expected keyword argument #:the-missing-keyword-arg-b"
+                        (exn-message x)))))
   
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;
@@ -2111,13 +2160,13 @@
   (test/spec-passed/result
    '->i22
    '(send (contract (object-contract
-					[m (->i ([x any/c] #:y [y any/c]) ([z any/c]) any)])
-				   (new (class object%
-							   (define/public (m x #:y y [z 1]) x)
-							   (super-new)))
-				   'pos
-				   'neg)
-		 m 1 #:y 2)
+                     [m (->i ([x any/c] #:y [y any/c]) ([z any/c]) any)])
+                    (new (class object%
+                           (define/public (m x #:y y [z 1]) x)
+                           (super-new)))
+                    'pos
+                    'neg)
+          m 1 #:y 2)
    1)
 
   (test/spec-passed/result
@@ -2760,6 +2809,16 @@
       1)
      x)
    '(res-check body res-eval arg-eval))
+  
+  (test/spec-passed/result
+   '->i52
+   '((contract (->i ()
+                    ([x integer?])
+                    any)
+               (λ ([x 'qq]) x)
+               'pos
+               'neg))
+   'qq)
 
   (test/pos-blame
    '->i-arity1
@@ -2916,29 +2975,32 @@
   
   ;; test to make sure the values are in the error messages
   (contract-error-test
+   'contract-error-test1
    #'((contract (->i ([x number?]) #:pre (x) #f any)
                 (λ (x) x)
                 'pos
                 'neg)
       123456789)
    (λ (x) 
-     (and (exn? x)
+     (and (exn:fail:contract:blame? x)
           (regexp-match #rx"x: 123456789" (exn-message x)))))
   (contract-error-test
+   'contract-error-test2
    #'((contract (->i ([|x y| number?]) #:pre (|x y|) #f any)
                 (λ (x) x)
                 'pos
                 'neg)
       123456789)
    (λ (x) 
-     (and (exn? x)
+     (and (exn:fail:contract:blame? x)
           (regexp-match (regexp-quote "|x y|: 123456789") (exn-message x)))))
 
   ;; test to make sure the collects directories are appropriately prefixed
   (contract-error-test
+   'contract-error-test3
     #'(contract symbol? "not a symbol" 'pos 'neg 'not-a-symbol #'here)
     (lambda (x)
-      (and (exn? x)
+      (and (exn:fail:contract:blame? x)
         (regexp-match? #px"<collects>"
           (exn-message x)))))
    
@@ -3547,6 +3609,7 @@
    1)
   
   (contract-error-test
+   'contract-error-test4
    #'(contract (or/c (-> integer? integer?) (-> boolean? boolean?))
                (λ (x) x)
                'pos
@@ -4019,6 +4082,7 @@
   (ctest #f impersonator-contract? proj:bad-prime-box-list/c)
   
   (contract-error-test
+   'contract-error-test5
    '(contract proj:bad-prime-box-list/c (list (box 2) (box 3)) 'pos 'neg)
    exn:fail?)
   
@@ -4238,7 +4302,7 @@
 		 (+ n 1))
 	       (foo-dc13 #t)))
       (eval '(require 'foo-dc13)))
-   "'foo-dc13")
+   "foo-dc13")
   
   (test/spec-failed
    'define/contract14
@@ -4253,7 +4317,7 @@
 	       (require 'foo-dc14)
 	       (foo-dc14 #t)))
       (eval '(require 'bar-dc14)))
-   "'foo-dc14")
+   "foo-dc14")
 
   (test/spec-failed
    'define/contract15
@@ -4266,7 +4330,7 @@
 		 (+ n 1))))
       (eval '(require 'foo-dc15))
       (eval '(foo-dc15 #t)))
-   "'foo-dc15")
+   "foo-dc15")
   
   ;; Let's see how units + define/contract interact
   
@@ -9368,6 +9432,19 @@ so that propagation occurs.
                         (struct/c s alpha)))
   
   (ctest #t flat-contract? (set/c integer?))
+  (ctest #f flat-contract? (set/c (-> integer? integer?)))
+  (ctest #t chaperone-contract? (set/c (-> integer? integer?)))
+  
+  ;; Make sure that impersonators cannot be used as the element contract in set/c.
+  (contract-error-test
+   'contract-error-test-set
+   '(let ([proxy-ctc
+           (make-contract
+            #:name 'proxy-ctc
+            #:first-order values
+            #:projection (λ (b) values))])
+      (set/c proxy-ctc))
+   exn:fail?)
           
   ;; Hash contracts with flat domain/range contracts
   (ctest #t contract?              (hash/c any/c any/c #:immutable #f))
@@ -9414,6 +9491,7 @@ so that propagation occurs.
   
   ;; Make sure that proxies cannot be used as the domain contract in hash/c.
   (contract-error-test
+   'contract-error-test6
    '(let ([proxy-ctc
            (make-contract
             #:name 'proxy-ctc
@@ -9923,7 +10001,7 @@ so that propagation occurs.
   (test-name '(set/c boolean? #:cmp 'equal) (set/c boolean? #:cmp 'equal))
   (test-name '(set/c char? #:cmp 'eq) (set/c char? #:cmp 'eq))
   (test-name '(set/c (set/c char?) #:cmp 'eqv) (set/c (set/c char? #:cmp 'dont-care) #:cmp 'eqv))
-  (test-name '(set/c (-> char? char?) #:cmp 'eqv) (set/c (-> char? char?) #:cmp 'eqv))
+  (test-name '(set/c (-> char? char?) #:cmp 'equal) (set/c (-> char? char?) #:cmp 'equal))
   
   ;; NOT YET RELEASED
   #;
@@ -10708,7 +10786,7 @@ so that propagation occurs.
                (provide/contract (x integer?))))
       (eval '(require 'contract-test-suite3))
       (eval 'x))
-   "'contract-test-suite3")
+   "contract-test-suite3")
   
   (test/spec-passed
    'provide/contract4
@@ -10885,7 +10963,7 @@ so that propagation occurs.
                             (make-s 1 2)
                             [s-a #f])))
       (eval '(require 'pc11b-n)))
-   "'n")
+   "n")
 |#
   
   (test/spec-passed
@@ -10937,6 +11015,7 @@ so that propagation occurs.
   
   ;; make sure unbound identifier exception is raised.
   (contract-error-test
+   'contract-error-test7
    #'(begin
        (eval '(module pos scheme/base
                 (require scheme/contract)
@@ -10953,7 +11032,7 @@ so that propagation occurs.
                (define i #f)
                (provide/contract [i integer?])))
       (eval '(require 'pos)))
-   "'pos")
+   "pos")
   
   ;; this is really a positive violation, but name the module `neg' just for an addl test
   (test/spec-failed
@@ -10964,7 +11043,7 @@ so that propagation occurs.
                (define i #f)
                (provide/contract [i integer?])))
       (eval '(require 'neg)))
-   "'neg")
+   "neg")
   
   ;; this test doesn't pass yet ... waiting for support from define-struct
   
@@ -11193,7 +11272,7 @@ so that propagation occurs.
                (require 'provide/contract30-m2)
                (f #f)))
       (eval '(require 'provide/contract30-m3)))
-   "'provide/contract30-m2")
+   "provide/contract30-m2")
   
   (test/spec-passed/result
    'provide/contract31
@@ -11344,7 +11423,53 @@ so that propagation occurs.
       (eval 'provide/contract35-three))
    3)
   
+  (test/spec-passed/result
+   'provide/contract36
+   '(begin
+      
+      (eval '(module provide/contract36-m racket/base
+               (require racket/contract)
+               (struct a (x))
+               (struct b a ())
+               (provide/contract
+                [struct a ((x symbol?))]
+                [struct (b a) ((x symbol?))])))
+
+      (eval '(module provide/contract36-n racket/base
+               (require 'provide/contract36-m)
+               (provide new-b-x)
+               (define new-b-x
+                 (a-x
+                  (struct-copy b (b 'x)
+                               [x #:parent a 'y])))))
+
+      (eval '(require 'provide/contract36-n))
+      (eval 'new-b-x))
+   'y)
+  
+  (test/spec-failed
+   'provide/contract37
+   '(begin
+      
+      (eval '(module provide/contract37-m racket/base
+               (require racket/contract)
+               (struct a (x))
+               (struct b a ())
+               (provide/contract
+                [struct a ((x symbol?))]
+                [struct (b a) ((x symbol?))])))
+
+      (eval '(module provide/contract37-n racket/base
+               (require 'provide/contract37-m)
+               (struct-copy b (b 'x)
+                            [x #:parent a 5])))
+
+      (eval '(require 'provide/contract37-n)))
+   "provide/contract37-n")
+  
+  
   (contract-error-test
+   'contract-error-test8
    #'(begin
        (eval '(module pce1-bug scheme/base
                 (require scheme/contract)
@@ -11352,10 +11477,11 @@ so that propagation occurs.
                 (provide/contract [the-defined-variable1 number?])))
        (eval '(require 'pce1-bug)))
    (λ (x)
-     (and (exn? x)
+     (and (exn:fail:contract:blame? x)
           (regexp-match #rx"the-defined-variable1: self-contract violation" (exn-message x)))))
   
   (contract-error-test
+   'contract-error-test9
    #'(begin
        (eval '(module pce2-bug scheme/base
                 (require scheme/contract)
@@ -11364,10 +11490,11 @@ so that propagation occurs.
        (eval '(require 'pce2-bug))
        (eval '(the-defined-variable2 #f)))
    (λ (x)
-     (and (exn? x)
+     (and (exn:fail:contract:blame? x)
           (regexp-match #rx"the-defined-variable2: contract violation" (exn-message x)))))
   
   (contract-error-test
+   'contract-error-test10
    #'(begin
        (eval '(module pce3-bug scheme/base
                 (require scheme/contract)
@@ -11376,10 +11503,11 @@ so that propagation occurs.
        (eval '(require 'pce3-bug))
        (eval '(the-defined-variable3 #f)))
    (λ (x)
-     (and (exn? x)
+     (and (exn:fail:contract:blame? x)
           (regexp-match #rx"the-defined-variable3" (exn-message x)))))
   
   (contract-error-test
+   'contract-error-test11
    #'(begin
        (eval '(module pce4-bug scheme/base
                 (require scheme/contract)
@@ -11388,10 +11516,11 @@ so that propagation occurs.
        (eval '(require 'pce4-bug))
        (eval '((if #t the-defined-variable4 the-defined-variable4) #f)))
    (λ (x)
-     (and (exn? x)
+     (and (exn:fail:contract:blame? x)
           (regexp-match #rx"^the-defined-variable4" (exn-message x)))))
 
   (contract-error-test
+   'contract-error-test12
    #'(begin
        (eval '(module pce5-bug scheme/base
                 (require scheme/contract)
@@ -11402,10 +11531,11 @@ so that propagation occurs.
                  [struct bad ((string? a) (string? b))])))
        (eval '(require 'pce5-bug)))
    (λ (x)
-     (and (exn? x)
+     (and (exn:fail:syntax? x)
           (regexp-match #rx"expected field name to be b, but found string?" (exn-message x)))))
   
   (contract-error-test
+   'contract-error-test13
    #'(begin
        (eval '(module pce6-bug scheme/base
                 (require scheme/contract)
@@ -11417,10 +11547,11 @@ so that propagation occurs.
                  [struct bad ((a string?) (string? b))])))
        (eval '(require 'pce6-bug)))
    (λ (x)
-     (and (exn? x)
+     (and (exn:fail:syntax? x)
           (regexp-match #rx"expected field name to be b, but found string?" (exn-message x)))))
   
   (contract-error-test
+   'contract-error-test14
    #'(begin
        (eval '(module pce7-bug scheme/base
                 (require scheme/contract)
@@ -11430,10 +11561,11 @@ so that propagation occurs.
                 (require 'pce7-bug)
                 (set! x 5))))
    (λ (x)
-     (and (exn? x)
+     (and (exn:fail:syntax? x)
           (regexp-match #rx"cannot set!" (exn-message x)))))
   
   (contract-error-test
+   'contract-error-test15
    #'(begin
        (eval '(module pce8-bug1 scheme/base
                 (require scheme/contract)
@@ -11441,10 +11573,11 @@ so that propagation occurs.
                 (provide/contract [f (-> integer? integer? integer?)])))
        (eval '(require 'pce8-bug1)))
    (λ (x)
-     (and (exn? x)
+     (and (exn:fail:contract:blame? x)
           (regexp-match #rx"pce8-bug" (exn-message x)))))
 
   (contract-error-test
+   'contract-error-test16
    #'(begin
        (eval '(module pce9-bug scheme
                 (define (f x) "wrong")
@@ -11454,10 +11587,11 @@ so that propagation occurs.
        (eval '(require 'pce9-bug))
        (eval '(g 12)))
    (λ (x)
-     (and (exn? x)
-          (regexp-match #rx"^g.*contract from pce9-bug" (exn-message x)))))
+     (and (exn:fail:contract:blame? x)
+          (regexp-match #rx"^g.*contract from: pce9-bug" (exn-message x)))))
   
   (contract-error-test
+   'contract-error-test17
    #'(begin
        (eval '(module pce10-bug scheme
                 (define (f x) "wrong")
@@ -11467,8 +11601,8 @@ so that propagation occurs.
        (eval '(require 'pce10-bug))
        (eval '(g 'a)))
    (λ (x)
-     (and (exn? x)
-          (regexp-match #rx"^g.*contract from pce10-bug" (exn-message x)))))
+     (and (exn:fail:contract:blame? x)
+          (regexp-match #rx"^g.*contract from: pce10-bug" (exn-message x)))))
    
   (contract-eval
    `(,test
@@ -11476,7 +11610,20 @@ so that propagation occurs.
      (compose blame-positive exn:fail:contract:blame-object)
      (with-handlers ((void values)) (contract not #t 'pos 'neg))))
 
-  
+
+  ;; check that `contract-out' contracts can use contracts
+  ;; defined later in the module
+  (test/spec-passed/result
+   'contract-out1
+   '(begin
+      (eval '(module contract-out1-m racket/base
+               (require racket/contract)
+               (provide (contract-out [f (-> ok? ok?)]))
+               (define (f x) (+ x 1))
+               (define (ok? v) (exact-integer? v))))
+      (eval '(require 'contract-out1-m))
+      (eval '(f 10)))
+   11)
   
 ;                                                            
 ;                                                            
@@ -11495,7 +11642,7 @@ so that propagation occurs.
 ;                                                            
 ;                                                            
 ;                                                            
-
+  
   (let ()
     ;; build-and-run : (listof (cons/c string[filename] (cons/c string[lang-line] (listof sexp[body-of-module]))) -> any
     ;; sets up the files named by 'test-case', dynamically requires the first one, deletes the files
@@ -11517,7 +11664,6 @@ so that propagation occurs.
            (delete-file (build-path dir (car f))))
          (delete-directory dir))))
 
-    (define exn:fail:contract:blame-object (contract-eval 'exn:fail:contract:blame-object))
     (define (get-last-part-of-path sexp)
       (define str (format "orig-blame: ~s" sexp))
       (define m (regexp-match #rx"[/\\]([-a-z0-9.]*)[^/\\]*$" str))
@@ -11526,7 +11672,7 @@ so that propagation occurs.
     ;; basic negative blame case
     (let ([blame
            (exn:fail:contract:blame-object 
-            (with-handlers ((exn? values))
+            (with-handlers ((exn:fail:contract:blame? values))
               (build-and-run 
                (list (list "a.rkt"
                            "#lang racket/base"
@@ -11547,7 +11693,7 @@ so that propagation occurs.
     ;; basic positive blame case
     (let ([blame
            (exn:fail:contract:blame-object 
-            (with-handlers ((exn? values))
+            (with-handlers ((exn:fail:contract:blame? values))
               (build-and-run 
                (list (list "a.rkt"
                            "#lang racket/base"
@@ -11568,7 +11714,7 @@ so that propagation occurs.
     ;; positive blame via a re-provide
     (let ([blame
            (exn:fail:contract:blame-object 
-            (with-handlers ((exn? values))
+            (with-handlers ((exn:fail:contract:blame? values))
               (build-and-run 
                (list (list "a.rkt"
                            "#lang racket/base"
@@ -11593,7 +11739,7 @@ so that propagation occurs.
     ;; negative blame via a re-provide
     (let ([blame
            (exn:fail:contract:blame-object 
-            (with-handlers ((exn? values))
+            (with-handlers ((exn:fail:contract:blame? values))
               (build-and-run 
                (list (list "a.rkt"
                            "#lang racket/base"
@@ -11618,7 +11764,7 @@ so that propagation occurs.
     ;; have some sharing in the require graph
     (let ([blame
            (exn:fail:contract:blame-object 
-            (with-handlers ((exn? values))
+            (with-handlers ((exn:fail:contract:blame? values))
               (build-and-run 
                (list (list "client.rkt"
                            "#lang racket/base"
@@ -11723,7 +11869,7 @@ so that propagation occurs.
   (test/neg-blame
    'make-proj-contract-4
    '((contract proj:add1->sub1 sqrt 'pos 'neg) 'dummy))
-    
+
   (report-errs)
   
 ))

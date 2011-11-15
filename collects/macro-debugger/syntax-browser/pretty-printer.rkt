@@ -1,6 +1,5 @@
 #lang racket/base
-(require racket/list
-         racket/class
+(require racket/class
          racket/pretty
          racket/gui/base
          racket/promise
@@ -10,9 +9,10 @@
 
 ;; FIXME: Need to disable printing of structs with custom-write property
 
-;; pretty-print-syntax : syntax port partition number SuffixOption hasheq number
+;; pretty-print-syntax : syntax port partition number SuffixOption hasheq number bool
 ;;                    -> range%
-(define (pretty-print-syntax stx port primary-partition colors suffix-option styles columns)
+(define (pretty-print-syntax stx port
+                             primary-partition colors suffix-option styles columns abbrev?)
   (define range-builder (new range-builder%))
   (define-values (datum ht:flat=>stx ht:stx=>flat)
     (syntax->datum/tables stx primary-partition colors suffix-option))
@@ -46,6 +46,7 @@
     [pretty-print-size-hook pp-size-hook]
     [pretty-print-print-hook pp-print-hook]
     [pretty-print-remap-stylable pp-remap-stylable]
+    [pretty-print-abbreviate-read-macros abbrev?]
     [pretty-print-current-style-table (pp-better-style-table styles)]
     [pretty-print-columns columns])
    (pretty-print/defaults datum port)
@@ -71,7 +72,10 @@
         [else #f]))
 
 (define (pp-remap-stylable obj)
-  (and (id-syntax-dummy? obj) (id-syntax-dummy-remap obj)))
+  (and (id-syntax-dummy? obj)
+       (let ([remap (id-syntax-dummy-remap obj)])
+         (and (not (memq remap special-expression-keywords))
+              remap))))
 
 (define (pp-better-style-table styles)
   (define style-list (for/list ([(k v) (in-hash styles)]) (cons k v)))

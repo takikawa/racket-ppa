@@ -3,9 +3,10 @@
           scribble/struct
           scribble/decode
           scribble/eval
-          "parse-common.rkt")
+          "parse-common.rkt"
+          (for-label racket/syntax))
 
-@title{Parsing syntax}
+@title{Parsing Syntax}
 
 This section describes @racket[syntax-parse], the
 @racketmodname[syntax/parse] library's facility for parsing
@@ -33,7 +34,7 @@ Two parsing forms are provided: @racket[syntax-parse] and
                             (literal-set-id literal-set-option ...)]
                [literal-set-option (code:line #:at context-id)
                                    (code:line #:phase phase-expr)]
-               [clause (syntax-pattern pattern-directive ... expr ...+)])
+               [clause (syntax-pattern pattern-directive ... body ...+)])
               #:contracts ([stx-expr syntax?]
                            [context-expr syntax?]
                            [phase-expr (or/c exact-integer? #f)])]{
@@ -46,7 +47,7 @@ subterms of the syntax object and that clause's side conditions and
 
 Each clause consists of a @tech{syntax pattern}, an optional sequence
 of @tech{pattern directives}, and a non-empty sequence of body
-expressions.
+forms.
 
 If the syntax object fails to match any of the patterns (or all
 matches fail the corresponding clauses' side conditions), a syntax
@@ -58,7 +59,9 @@ The following options are supported:
              #:contracts ([context-expr syntax?])]{
 
 When present, @racket[context-expr] is used in reporting parse
-failures; otherwise @racket[stx-expr] is used.
+failures; otherwise @racket[stx-expr] is used. The
+@racket[current-syntax-context] parameter is also set to the value of
+@racket[context-expr].
 
 @(myexamples
   (syntax-parse #'(a b 3)

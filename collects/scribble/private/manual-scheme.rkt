@@ -4,9 +4,8 @@
          "../scheme.rkt"
          "../search.rkt"
          "../basic.rkt"
-         racket/list
-         "manual-utils.rkt"
          "manual-style.rkt"
+         "manual-utils.rkt" ;; used via datum->syntax
          (for-syntax racket/base)
          (for-label racket/base))
 
@@ -48,9 +47,6 @@
 (define-code RACKETBLOCK to-block-paragraph UNSYNTAX)
 (define-code RACKETBLOCK0 to-paragraph UNSYNTAX)
 
-(define (code-inset b)
-  (make-blockquote 'code-inset (list b)))
-
 (define (to-block-paragraph v)
   (code-inset (to-paragraph v)))
 
@@ -91,7 +87,7 @@
 
 (define-syntax (racketmod0 stx)
   (syntax-case stx ()
-    [(_ #:file filename lang rest ...)
+    [(_ #:file filename #:escape unsyntax-id lang rest ...)
      (with-syntax ([modtag (datum->syntax
                             #'here
                             `(unsyntax (make-element
@@ -108,8 +104,10 @@
            (quasisyntax/loc stx
              (filebox
               filename
-              #,(syntax/loc stx (racketblock0 modtag rest ...))))
-           (syntax/loc stx (racketblock0 modtag rest ...))))]
+              #,(syntax/loc stx (racketblock0 #:escape unsyntax-id modtag rest ...))))
+           (syntax/loc stx (racketblock0 #:escape unsyntax-id modtag rest ...))))]
+    [(_ #:file filename lang rest ...)
+     (syntax/loc stx (racketmod0 #:file filename #:escape unsyntax lang rest ...))]
     [(_ lang rest ...)
      (syntax/loc stx (racketmod0 #:file #f lang rest ...))]))
 
@@ -122,7 +120,11 @@
   (make-element symbol-color (list (to-element/no-color s))))
 
 (define-syntax (keep-s-expr stx)
-  (syntax-case stx ()
+  (syntax-case stx (quote)
+    [(_ ctx '#t #(src line col pos 5))
+     #'(make-long-boolean #t)]
+    [(_ ctx '#f #(src line col pos 6))
+     #'(make-long-boolean #f)]
     [(_ ctx s srcloc)
      (let ([sv (syntax-e
                 (syntax-case #'s (quote)
@@ -134,10 +136,10 @@
                     (identifier? (car sv))
                     (or (free-identifier=? #'cons (car sv))
                         (free-identifier=? #'list (car sv)))))
-         ;; We know that the context is irrelvant
-         #'s
-         ;; Context may be relevant:
-         #'(*keep-s-expr s ctx)))]))
+           ;; We know that the context is irrelvant
+           #'s
+           ;; Context may be relevant:
+           #'(*keep-s-expr s ctx)))]))
 (define (*keep-s-expr s ctx)
   (if (symbol? s)
     (make-just-context s ctx)

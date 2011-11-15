@@ -506,17 +506,18 @@ in the sequence.
 
 @defproc[(sequence-for-each [f (-> any/c ... any)]
                           [s sequence?])
-         (void)]{
+         void?]{
   Applies @racket[f] to each element of @racket[s].  If @racket[s] is
   infinite, this function does not terminate.}
 
 @defproc[(sequence-fold [f (-> any/c any/c ... any/c)]
                         [i any/c]
                         [s sequence?])
-         (void)]{
+         any/c]{
   Folds @racket[f] over each element of @racket[s] with @racket[i] as
   the initial accumulator.  If @racket[s] is infinite, this function
-  does not terminate.}
+  does not terminate. The @racket[f] function takes the accumulator as its first argument
+  and the next sequence element as its second.}
 
 @defproc[(sequence-count [f procedure?] [s sequence?])
          exact-nonnegative-integer?]{
@@ -649,14 +650,14 @@ when it is evaluated, otherwise the @exnraise[exn:fail:contract?].}
 
 @defproc[(stream-for-each [f (-> any/c ... any)]
                           [s stream?])
-         (void)]{
+         void?]{
   Applies @racket[f] to each element of @racket[s].  If @racket[s] is
   infinite, this function does not terminate.}
 
 @defproc[(stream-fold [f (-> any/c any/c ... any/c)]
                       [i any/c]
                       [s stream?])
-         (void)]{
+         any/c]{
   Folds @racket[f] over each element of @racket[s] with @racket[i] as
   the initial accumulator.  If @racket[s] is infinite, this function
   does not terminate.}
@@ -739,8 +740,8 @@ values from the generator.
                   (if (null? x)
                       0
                       (begin
-                       (yield (car x))
-                       (loop (cdr x)))))))
+                        (yield (car x))
+                        (loop (cdr x)))))))
     (g)
     (g)
     (g)
@@ -812,8 +813,8 @@ Produces a @tech{sequence} that encapsulates the @tech{generator} formed by
                              (if (null? x)
                                  my-stop-value
                                  (begin
-                                  (yield (car x))
-                                  (loop (cdr x)))))))
+                                   (yield (car x))
+                                   (loop (cdr x)))))))
 
     (for/list ([i (in-producer my-generator my-stop-value)])
       i)]}

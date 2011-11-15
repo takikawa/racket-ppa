@@ -9,27 +9,27 @@
 
   ;; hacky?
   (define file-eval
-   (lambda ()
-     (let ([the-eval (make-base-eval)])
-       (the-eval '(require (for-syntax racket/base)
-			   racket/file))
-       (the-eval '(define some-file (make-temporary-file)))
-       (the-eval '(define some-other-file (make-temporary-file)))
-       the-eval)))
+    (lambda ()
+      (let ([the-eval (make-base-eval)])
+        (the-eval '(require (for-syntax racket/base)
+                            racket/file))
+        (the-eval '(define some-file (make-temporary-file)))
+        (the-eval '(define some-other-file (make-temporary-file)))
+        the-eval)))
 
   (define-syntax file-examples
     (syntax-rules ()
       [(_ expr ...)
        (let [(my-eval (file-eval))]
-	 (define (clean)
-	   (my-eval '(for [(i (list some-file some-other-file))]
-			  (when (file-exists? i)
-			    (delete-file i)))))
-	 (clean)
-	 (begin0
-	   (defexamples #:eval my-eval
-			expr ...)
-	   (clean)))]))
+         (define (clean)
+           (my-eval '(for [(i (list some-file some-other-file))]
+                          (when (file-exists? i)
+                            (delete-file i)))))
+         (clean)
+         (begin0
+           (defexamples #:eval my-eval
+                        expr ...)
+           (clean)))]))
 
   "")
 
@@ -301,11 +301,13 @@ the current output port (see @racket[current-output-port]) using
                               [mode (or/c 'shared 'exclusive)])
          boolean?]{
 
-Attempts to acquire a lock on the file using the current platform's 
-facilities for file locking. Multiple
-processes can acquire a @racket['shared] lock on a file, but at most
-one process can hold an @racket['exclusive] lock, and @racket['shared]
-and @racket['exclusive] locks are mutually exclusive.
+Attempts to acquire a lock on the file using the current platform's
+facilities for file locking. Multiple processes can acquire a
+@racket['shared] lock on a file, but at most one process can hold an
+@racket['exclusive] lock, and @racket['shared] and @racket['exclusive]
+locks are mutually exclusive. When @racket[mode] is @racket['shared],
+then @racket[port] must be an input port; when @racket[mode] is
+@racket['exclusive], then @racket[port] must be an output port.
 
 The result is @racket[#t] if the requested lock is acquired,
 @racket[#f] otherwise. When a lock is acquired, it is held until
@@ -315,13 +317,33 @@ either it is released with @racket[port-file-unlock] or the port is closed
 Depending on the platform, locks may be merely advisory (i.e., locks
 affect only the ability of processes to acquire locks) or they may
 correspond to mandatory locks that prevent reads and writes to the
-locked file. Specifically, locks are mandatory on Windows and
-advisory on other platforms.
+locked file. Specifically, locks are mandatory on Windows and advisory
+on other platforms. Multiple tries for a @racket['shared] lock on a
+single port can succeed; on Unix and Mac OS X, a single
+@racket[port-file-unlock] release the lock, while on other Windows, a
+@racket[port-file-unlock] is needed for each successful
+@racket[port-try-file-lock?]. On Unix and Mac OS X, multiple tries for
+a @racket['exclusive] lock can succeed and a single
+@racket[port-file-unlock] releases the lock, while on Windows, a try
+for an @racket['exclusive] lock fails for a given port if the port
+already holds the lock.
 
-Typically, locking is supported only for file ports, and attempting to
+A lock acquired for an input port from @racket[open-input-output-file]
+can be released through @racket[port-file-unlock] on the corresponding
+output port, and vice versa. If the output port from
+@racket[open-input-output-file] holds an @racket['exclusive] lock, the
+corresponding input port can still acquire a @racket['shared] lock,
+even multiple times; on Windows, a @racket[port-file-unlock] is needed
+for each successful lock try, while a single @racket[port-file-unlock]
+balances the lock tries on Unix and Mac OS X. A @racket['shared] lock on
+an input port can be upgraded to an @racket['exclusive] lock through the
+corresponding output port on Unix and Mac OS X, in which case a single
+@racket[port-file-unlock] (on either port) releases the lock, while
+such upgrades are not allowed on Windows.
+
+Locking is normally supported only for file ports, and attempting to
 acquire a lock with other kinds of file-stream ports raises an
-@racket[exn:fail:filesystem] exception. Locking is not supported on Solaris,
-where the @racket[exn:fail:unsupported] exception is raised.}
+@racket[exn:fail:filesystem] exception.}
 
 
 @defproc[(port-file-unlock [port file-stream-port?])

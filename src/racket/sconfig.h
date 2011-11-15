@@ -69,6 +69,7 @@
 # define UNISTD_INCLUDE
 
 # define USE_TM_GMTOFF_FIELD
+# define USE_TM_ZONE_FIELD
 
 # define FLAGS_ALREADY_SET
 
@@ -100,13 +101,16 @@
 #  define SOME_FDS_ARE_NOT_SELECTABLE
 #  define NEED_RESET_STDOUT_BLOCKING
 #  undef USE_FLOCK_FOR_FILE_LOCKS
+#  define USE_FCNTL_AND_FORK_FOR_FILE_LOCKS
 #  define USE_TIMEZONE_AND_ALTZONE_VAR
+#  define USE_TZNAME_VAR
 #  define USE_NULL_TO_DISCONNECT_UDP
 # else
 /* SunOS4 */
 # define SCHEME_PLATFORM_LIBRARY_SUBPATH "sparc-sunos4"
 # define SIGSET_IS_SIGNAL
 # define USE_TM_GMTOFF_FIELD
+# define USE_TM_ZONE_FIELD
 # define NO_STRERROR_AVAILABLE
 # define USE_ON_EXIT_FOR_ATEXIT
 # endif
@@ -145,6 +149,7 @@
 # define USE_FCNTL_O_NONBLOCK
 
 # define USE_TIMEZONE_VAR_W_DLS
+# define USE_TZNAME_VAR
 
 # define FLAGS_ALREADY_SET
 
@@ -207,6 +212,7 @@
 # define USE_DYNAMIC_FDSET_SIZE
 
 # define USE_TIMEZONE_VAR_W_DLS
+# define USE_TZNAME_VAR
 
 # define MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
 
@@ -256,6 +262,7 @@
 # define SIGSET_IS_SIGNAL
 
 # define USE_TM_GMTOFF_FIELD
+# define USE_TM_ZONE_FIELD
 
 #if defined(__alpha__)
 # define USE_DIVIDE_MAKE_INFINITY
@@ -307,6 +314,7 @@
 # define REGISTER_POOR_MACHINE
 
 # define USE_TM_GMTOFF_FIELD
+# define USE_TM_ZONE_FIELD
 
 #if defined(__x86_64__)
 # define MZ_USE_JIT_X86_64
@@ -373,6 +381,7 @@
 # define SIGSET_IS_SIGNAL
 
 # define USE_TM_GMTOFF_FIELD
+# define USE_TM_ZONE_FIELD
 
 # define MZ_JIT_USE_MPROTECT
 
@@ -400,6 +409,7 @@
 # define USE_FCNTL_O_NONBLOCK
 
 # define USE_TIMEZONE_AND_ALTZONE_VAR
+# define USE_TZNAME_VAR
 
 # define FLAGS_ALREADY_SET
 
@@ -463,6 +473,7 @@
 # define USE_ULIMIT
 
 # define USE_TIMEZONE_VAR_W_DLS
+# define USE_TZNAME_VAR
 
 # define FLAGS_ALREADY_SET
 
@@ -525,6 +536,7 @@
 # define TIME_SYNTAX
 # define USE_FTIME
 # define USE_TIMEZONE_VAR_W_DLS
+# define USE_TZNAME_VAR
 # define WINDOWS_GET_PROCESS_TIMES
 # define GETENV_FUNCTION
 # define DIR_FUNCTION
@@ -534,9 +546,9 @@
 
 # define DO_STACK_CHECK
 # define WINDOWS_FIND_STACK_BOUNDS
-/* This value needs to be consistent with the
-   stack size specified at link time: */
-# define WINDOWS_DEFAULT_STACK_SIZE 8388608
+/* Default stack size is 1MB, but we try to read
+   the actual size from the executable on startup: */
+# define WINDOWS_DEFAULT_STACK_SIZE 1048576
 # ifdef _WIN64
 #  define STACK_SAFETY_MARGIN 100000
 # endif
@@ -719,6 +731,7 @@
 # define SIGSET_IS_SIGNAL
 
 # define USE_TM_GMTOFF_FIELD
+# define USE_TM_ZONE_FIELD
 
 # define USE_UNDERSCORE_SETJMP
 
@@ -761,6 +774,7 @@
 # define SIGSET_IS_SIGNAL
 
 # define USE_TM_GMTOFF_FIELD
+# define USE_TM_ZONE_FIELD
 
 # define USE_UNDERSCORE_SETJMP
 
@@ -919,6 +933,37 @@
 
 #endif
 
+  /************ QNX *************/
+
+#if defined(__QNX__)
+
+#if defined(i386)
+# define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-qnx"
+#endif
+# define ASSUME_FIXED_STACK_SIZE
+
+# include "uconfig.h"
+# define SIGSET_IS_SIGNAL
+# define SIGSET_NEEDS_REINSTALL
+
+# define USE_FCNTL_O_NONBLOCK
+
+# define FIXED_STACK_SIZE 524288
+
+# define FLAGS_ALREADY_SET
+
+#if defined(i386)
+# define MZ_USE_JIT_I386
+# define MZ_JIT_USE_MPROTECT
+#endif
+#if defined(__x86_64__)
+# define MZ_USE_JIT_X86_64
+# define MZ_JIT_USE_MPROTECT
+# define MZ_USE_DWARF_LIBUNWIND
+#endif
+
+#endif
+
   /***************************************************/
 
 #endif /* end not OSKit */
@@ -983,6 +1028,10 @@
     USE_TIMEZONE_AND_ALTZONE_VAR is similar, but uses altzone when
      daylight savings is in effect.
     USE_TM_GMTOFF_FIELD gets timezone offset from the tm_gmtoff field
+     of the tm struct. */
+
+ /* USE_TZNAME_VAR gets the timezone name from a tzname global.
+    USE_TM_ZONE_FIELD gets the timezone name from a tm_zone field
      of the tm struct. */
  
 
@@ -1054,6 +1103,9 @@
 
  /* USE_FLOCK_FOR_FILE_LOCKS means that flock() is available and works
     for file locking. */
+
+ /* USE_FCNTL_AND_FORK_FOR_FILE_LOCKS means that fnctl() and fork()
+    should be used to implement file locking. */
 
  /* CLOSE_ALL_FDS_AFTER_FORK means that all fds except 0, 1, and 2
     should be closed after performing a fork() for `process'
