@@ -1,5 +1,6 @@
 #lang scribble/doc
 @(require scribble/manual scribble/eval scribble/bnf "guide-utils.rkt"
+          (only-in scribble/core link-element)
           (for-label racket/enter))
 
 @(define piece-eval (make-base-eval))
@@ -37,11 +38,11 @@ Racket's main tools are
 
 ]
 
-Most likely, you'll want to explore the Racket language using DrRacket,
-especially at the beginning. If you prefer, you can also work with the
-command-line @exec{racket} interpreter and your favorite text
-editor. The rest of this guide presents the language mostly
-independent of your choice of editor.
+Most likely, you'll want to explore the Racket language using
+DrRacket, especially at the beginning. If you prefer, you can also
+work with the command-line @exec{racket} interpreter and your favorite
+text editor; see also @secref["other-editors"]. The rest of this guide
+presents the language mostly independent of your choice of editor.
 
 If you're using DrRacket, you'll need to choose the proper language,
 because DrRacket accommodates many different variants of Racket, as
@@ -134,6 +135,9 @@ the above text in a file using your favorite editor. If you save it as
 @filepath{extract.rkt}, then after starting @exec{racket} in the same
 directory, you'd evaluate the following sequence:
 
+@margin-note{If you use @racketmodname[xrepl], you can use
+  @(link-element "plainlink" (litchar ",enter extract.rkt") `(xrepl "enter")).}
+
 @interaction[
 #:eval piece-eval
 (eval:alts (enter! "extract.rkt") (void))
@@ -158,9 +162,14 @@ racket
 (extract "the cat out of the bag")
 ]
 
-then it is a complete program that prints ``cat'' when run. To
-package this program as an executable, choose one of the following
-options:
+then it is a complete program that prints ``cat'' when run. You can
+run the program within DrRacket or using @racket[enter!] in
+@exec{racket}, but if the program is saved in @nonterm{src-filename},
+you can also run it from a command line with
+
+@commandline{racket @nonterm{src-filename}}
+
+To package the program as an executable, you have a few options:
 
 @itemize[
 

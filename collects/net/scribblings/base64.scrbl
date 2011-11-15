@@ -4,7 +4,7 @@
 @title[#:tag "base64"]{Base 64: Encoding and Decoding}
 
 @defmodule[net/base64]{The @racketmodname[net/base64] library provides
-utilities for Base 64 (mime-standard) encoding and decoding.}
+utilities for Base 64 (MIME-standard) encoding and decoding.}
 
 @section[#:tag "base64-procs"]{Functions}
 
@@ -45,6 +45,10 @@ end-of-file or Base 64 terminator @litchar{=} from @racket[in].}
 @; ----------------------------------------
 
 @section{Base64 Unit}
+
+@margin-note{@racket[base64@] and @racket[base64^] are deprecated.
+They exist for backward-compatibility and will likely be removed in
+the future. New code should use the @racketmodname[net/base64] module.}
 
 @defmodule[net/base64-unit]
 

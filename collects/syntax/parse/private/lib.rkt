@@ -29,11 +29,11 @@
 
 (define-syntax-class keyword
   #:description (quote "keyword")
-  (pattern (~fail #:unless (and (syntax? this-syntax) (keyword? (syntax-e this-syntax))))))
+  (pattern (~fail #:unless (keyword? (syntax-e this-syntax)))))
 
 (define-syntax-class expr
   #:description (quote "expression")
-  (pattern (~fail #:when (and (syntax? this-syntax) (keyword? (syntax-e this-syntax))))))
+  (pattern (~fail #:when (keyword? (syntax-e this-syntax)))))
 
 ;; == Normal syntax classes ==
 
@@ -73,11 +73,3 @@
            #:attr value (syntax-local-value #'x (lambda () notfound))
            #:fail-when (eq? (attribute value) notfound) #f
            #:fail-unless (pred (attribute value)) #f))
-
-#|
-(define-syntax-class expr
-  #:attributes ()
-  #:description "expression"
-  #:commit
-  (pattern (~and x (~fail #:when (keyword? (syntax-e #'x))))))
-|#

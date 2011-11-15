@@ -41,8 +41,8 @@
              parameterize
              define)
 
-  (define-values-for-syntax (here-stx)
-    (quote-syntax here))
+  (begin-for-syntax 
+   (define-values (here-stx) (quote-syntax here)))
 
   (define-syntaxes (unless)
     (lambda (stx)
@@ -179,7 +179,7 @@
 ;; (along with much of '#%kernel)
 
 (module #%utils '#%kernel
-  (#%require '#%min-stx)
+  (#%require '#%min-stx '#%paramz)
 
   (#%provide path-string?
              normal-case-path
@@ -230,6 +230,87 @@
        [(string? s) (string->path s)]
        [else s])))
 
+  ;; ------------------------------ executable path ------------------------------
+
+  (define-values (find-executable-path)
+    (case-lambda 
+     [(program libpath reverse?)
+      (unless (path-string? program) 
+	(raise-type-error 'find-executable-path "path or string (sans nul)" program))
+      (unless (or (not libpath) (and (path-string? libpath) 
+				     (relative-path? libpath)))
+	(raise-type-error 'find-executable-path "#f or relative path or string" libpath))
+      (letrec ([found-exec
+		(lambda (exec-name)
+                  (if libpath
+		      (let-values ([(base name isdir?) (split-path exec-name)])
+			(let ([next
+			       (lambda ()
+				 (let ([resolved (resolve-path exec-name)])
+				   (cond
+				    [(equal? resolved exec-name) #f]
+				    [(relative-path? resolved)
+				     (found-exec (build-path base resolved))]
+				    [else (found-exec resolved)])))])
+			  (or (and reverse? (next))
+			      (if (path? base)
+				  (let ([lib (build-path base libpath)])
+				    (and (or (directory-exists? lib) 
+					     (file-exists? lib))
+					 lib))
+				  #f)
+			      (and (not reverse?) (next)))))
+		      exec-name))])
+	(if (and (relative-path? program)
+		 (let-values ([(base name dir?) (split-path program)])
+		   (eq? base 'relative)))
+	    (let ([paths-str (getenv "PATH")]
+		  [win-add (lambda (s) (if (eq? (system-type) 'windows) 
+					   (cons (bytes->path #".") s) 
+					   s))])
+	      (let loop ([paths (if paths-str 
+				    (win-add (path-list-string->path-list paths-str null))
+				    null)])
+		(if (null? paths)
+		    #f
+		    (let* ([base (path->complete-path (car paths))]
+			   [name (build-path base program)])
+		      (if (file-exists? name)
+			  (found-exec name)
+			  (loop (cdr paths)))))))
+	    (let ([p (path->complete-path program)])
+	      (and (file-exists? p) (found-exec p)))))]
+     [(program libpath) (find-executable-path program libpath #f)]
+     [(program) (find-executable-path program #f #f)]))
+
+  (define-values (path-list-string->path-list)
+    (let ((r (byte-regexp (string->bytes/utf-8
+			   (let ((sep (if (eq? (system-type) 'windows)
+                                          ";"
+                                          ":")))
+			     (format "([^~a]*)~a(.*)" sep sep)))))
+	  (cons-path (lambda (default s l) 
+		       (if (bytes=? s #"")
+			   (append default l)
+                           (cons (bytes->path (if (eq? (system-type) 'windows)
+                                                  (regexp-replace* #rx#"\"" s #"")
+                                                  s))
+                                 l)))))
+      (lambda (s default)
+	(unless (or (bytes? s)
+		    (string? s))
+	  (raise-type-error 'path-list-string->path-list "byte string or string" s))
+	(unless (and (list? default)
+		     (andmap path? default))
+	  (raise-type-error 'path-list-string->path-list "list of paths" default))
+	(let loop ([s (if (string? s)
+			  (string->bytes/utf-8 s)
+			  s)])
+	  (let ([m (regexp-match r s)])
+	    (if m
+		(cons-path default (cadr m) (loop (caddr m)))
+		(cons-path default s null)))))))
+
   ;; ------------------------------ Collections ------------------------------
 
   (define-values (-check-relpath)
@@ -268,45 +349,258 @@
                       file-name)
        file-name)))
 
+  (define-values (user-links-path) (find-system-path 'links-file))
+  (define-values (user-links-cache) (make-hasheq))
+  (define-values (user-links-timestamp) -inf.0)
+
+  (define-values (links-path) (find-links-path!
+                               ;; This thunk is called once per place, and the result
+                               ;; is remembered for later invocations. Otherwise, the
+                               ;; search for the config file can trip over filesystem
+                               ;; restrictions imposed by security guards.
+                               (lambda ()
+                                 (let ([d (let ([c (find-system-path 'collects-dir)])
+                                            (if (absolute-path? c)
+                                                c
+                                                (parameterize ([current-directory (find-system-path 'orig-dir)])
+                                                  (find-executable-path (find-system-path 'exec-file) c))))])
+                                   (and d
+                                        (build-path d "config" "links.rktd"))))))
+  (define-values (links-cache) (make-hasheq))
+  (define-values (links-timestamp) -inf.0)
+
+  (define-values (get-linked-collections)
+    (lambda (user?)
+      (call/ec (lambda (esc)
+                 (define-values (make-handler)
+                   (lambda (ts)
+                     (lambda (exn)
+                       (let ([l (current-logger)])
+                         (when (log-level? l 'error)
+                           (log-message l 'error 
+                                        (format
+                                         "error reading collection links file ~s: ~a"
+                                         (if user? user-links-path links-path)
+                                         (exn-message exn))
+                                        (current-continuation-marks))))
+                       (when ts
+                         (if user?
+                             (begin
+                               (set! user-links-cache (make-hasheq))
+                               (set! user-links-timestamp ts))
+                             (begin
+                               (set! links-cache (make-hasheq))
+                               (set! links-timestamp ts))))
+                       (esc (make-hasheq)))))
+                 (with-continuation-mark
+                     exception-handler-key
+                     (make-handler #f)
+                   (let ([ts (file-or-directory-modify-seconds (if user?
+                                                                   user-links-path
+                                                                   links-path)
+                                                               #f 
+                                                               (lambda () -inf.0))])
+                     (if (ts . > . (if user? user-links-timestamp links-timestamp))
+                         (with-continuation-mark
+                             exception-handler-key
+                             (make-handler ts)
+                           (parameterize ([read-case-sensitive #t]
+                                          [read-square-bracket-as-paren #t]
+                                          [read-curly-brace-as-paren #t]
+                                          [read-accept-box #t]
+                                          [read-accept-compiled #t]
+                                          [read-accept-bar-quote #t]
+                                          [read-accept-graph #t]
+                                          [read-decimal-as-inexact #t]
+                                          [read-accept-dot #t]
+                                          [read-accept-infix-dot #t]
+                                          [read-accept-quasiquote #t]
+                                          [read-accept-reader #t]
+                                          [read-accept-lang #f]
+                                          [current-readtable #f])
+                             (let ([v (let ([p (open-input-file (if user? user-links-path links-path)
+                                                                'binary)])
+                                        (dynamic-wind
+                                            void
+                                            (lambda () 
+                                              (begin0
+                                               (read p)
+                                               (unless (eof-object? (read p))
+                                                 (error "expected a single S-expression"))))
+                                            (lambda () (close-input-port p))))])
+                               (unless (and (list? v)
+                                            (andmap (lambda (p)
+                                                      (and (list? p)
+                                                           (or (= 2 (length p))
+                                                               (= 3 (length p)))
+                                                           (or (string? (car p))
+                                                               (eq? 'root (car p)))
+                                                           (path-string? (cadr p))
+                                                           (or (null? (cddr p))
+                                                               (regexp? (caddr p)))))
+                                                    v))
+                                 (error "ill-formed content"))
+                               (let ([ht (make-hasheq)]
+                                     [dir (let-values ([(base name dir?) (split-path (if user?
+                                                                                         user-links-path
+                                                                                         links-path))])
+                                            base)])
+                                 (for-each
+                                  (lambda (p)
+                                    (when (or (null? (cddr p))
+                                              (regexp-match? (caddr p) (version)))
+                                      (let ([dir (simplify-path
+                                                  (path->complete-path (cadr p) dir))])
+                                        (if (symbol? (car p))
+                                            ;; add to every table element (to keep
+                                            ;; the choices in order); need a better
+                                            ;; data structure
+                                            (begin
+                                              (unless (hash-ref ht #f #f)
+                                                (hash-set! ht #f null))
+                                              (hash-for-each
+                                               ht
+                                               (lambda (k v)
+                                                 (hash-set! ht k (cons dir v)))))
+                                            ;; single collection:
+                                            (let ([s (string->symbol (car p))])
+                                              (hash-set! ht s (cons (box dir)
+                                                                    (hash-ref ht s null))))))))
+                                  v)
+                                 ;; reverse all lists:
+                                 (hash-for-each
+                                  ht
+                                  (lambda (k v) (hash-set! ht k (reverse v))))
+                                 ;; save table & timestamp:
+                                 (if user?
+                                     (begin
+                                       (set! user-links-cache ht)
+                                       (set! user-links-timestamp ts))
+                                     (begin
+                                       (set! links-cache ht)
+                                       (set! links-timestamp ts)))
+                                 ht))))
+                         (if user?
+                             user-links-cache
+                             links-cache))))))))
+
+  (define-values (normalize-collection-reference)
+    (lambda (collection collection-path)
+      ;; make sure that `collection' is a top-level collection name,
+      (cond
+       [(string? collection)
+        (let ([m (regexp-match-positions #rx"/+" collection)])
+          (if m
+              (cond
+               [(= (caar m) (sub1 (string-length collection)))
+                (values (substring collection 0 (caar m)) collection-path)]
+               [else
+                (values (substring collection 0 (caar m))
+                        (cons (substring collection (cdar m))
+                              collection-path))])
+              (values collection collection-path)))]
+       [else
+        (let-values ([(base name dir?) (split-path collection)])
+          (if (eq? base 'relative)
+              (values name collection-path)
+              (normalize-collection-reference base (cons name collection-path))))])))
+
   (define-values (find-col-file)
     (lambda (who fail collection collection-path file-name)
-      (let ([all-paths (current-library-collection-paths)])
-        (let cloop ([paths all-paths][found-col #f])
-          (if (null? paths)
-              (if found-col
-                  found-col
-                  (fail
-                   (format "~a: collection not found: ~s in any of: ~s" 
-                           who (if (null? collection-path)
-                                   collection
-                                   (apply build-path collection collection-path))
-                           all-paths)))
-              (let ([dir (build-path (car paths) collection)])
-                (if (directory-exists? dir)
-                    (let ([cpath (apply build-path dir collection-path)])
-                      (if (directory-exists? cpath)
-                          (if file-name
-                              (if (or (file-exists? (build-path cpath file-name))
-                                      (let ([alt-file-name
-                                             (let* ([file-name (if (path? file-name)
-                                                                   (path->string file-name)
-                                                                   file-name)]
-                                                    [len (string-length file-name)])
-                                               (and (len . >= . 4)
-                                                    (string=? ".rkt" (substring file-name (- len 4)))
-                                                    (string-append (substring file-name 0 (- len 4)) ".ss")))])
-                                        (and alt-file-name
-                                             (file-exists? (build-path cpath alt-file-name)))))
-                                  cpath
-                                  ;; Look further for specific file, but remember
-                                  ;; first found directory
-                                  (cloop (cdr paths) (or found-col cpath)))
-                              ;; Just looking for dir; found it:
-                              cpath)
-                          ;; sub-collection not here; try next instance
-                          ;; of the top-level collection
-                          (cloop (cdr paths) found-col)))
-                    (cloop (cdr paths) found-col))))))))
+      (let-values ([(collection collection-path)
+                    (normalize-collection-reference collection collection-path)])
+        (let ([all-paths (let ([sym (string->symbol (if (path? collection)
+                                                        (path->string collection)
+                                                        collection))]
+                               [links? (use-collection-link-paths)])
+                           (append
+                            ;; list of paths and (box path)s:
+                            (if (and links? (use-user-specific-search-paths))
+                                (let ([ht (get-linked-collections #t)])
+                                  (or (hash-ref ht sym #f)
+                                      (hash-ref ht #f null)))
+                                null)
+                            ;; list of paths and (box path)s:
+                            (if (and links? links-path)
+                                (let ([ht (get-linked-collections #f)])
+                                  (or (hash-ref ht sym #f)
+                                      (hash-ref ht #f null)))
+                                null)
+                            ;; list of paths:
+                            (current-library-collection-paths)))])
+          (define-values (*build-path-rep)
+            (lambda (p c)
+              (if (path? p)
+                  (build-path p c)
+                  ;; box => from links table for c
+                  (unbox p))))
+          (define-values (*directory-exists?)
+            (lambda (orig p)
+              (if (path? orig)
+                  (directory-exists? p)
+                  ;; orig is box => from links table
+                  #t)))
+          (define-values (to-string) (lambda (p) (if (path? p) (path->string p) p)))
+          (let cloop ([paths all-paths] [found-col #f])
+            (if (null? paths)
+                (if found-col
+                    found-col
+                    (let ([rest-coll
+                           (if (null? collection-path)
+                               ""
+                               (apply
+                                string-append
+                                (let loop ([cp collection-path])
+                                  (if (null? (cdr cp))
+                                      (list (to-string (car cp)))
+                                      (list* (to-string (car cp)) "/" (loop (cdr cp)))))))])
+                      (define-values (filter)
+                        (lambda (f l)
+                          (if (null? l)
+                              null
+                              (if (f (car l))
+                                  (cons (car l) (filter f (cdr l)))
+                                  (filter f (cdr l))))))
+                      (fail
+                       (format "~a: collection not found: ~s in any of: ~s~a" 
+                               who
+                               (if (null? collection-path)
+                                   (to-string collection)
+                                   (string-append (to-string collection) "/" rest-coll))
+                               (filter path? all-paths)
+                               (if (ormap box? all-paths)
+                                   (format " or: ~s in any of: ~s" 
+                                           rest-coll 
+                                           (map unbox (filter box? all-paths)))
+                                   "")))))
+                (let ([dir (*build-path-rep (car paths) collection)])
+                  (if (*directory-exists? (car paths) dir)
+                      (let ([cpath (apply build-path dir collection-path)])
+                        (if (if (null? collection-path)
+                                #t
+                                (directory-exists? cpath))
+                            (if file-name
+                                (if (or (file-exists? (build-path cpath file-name))
+                                        (let ([alt-file-name
+                                               (let* ([file-name (if (path? file-name)
+                                                                     (path->string file-name)
+                                                                     file-name)]
+                                                      [len (string-length file-name)])
+                                                 (and (len . >= . 4)
+                                                      (string=? ".rkt" (substring file-name (- len 4)))
+                                                      (string-append (substring file-name 0 (- len 4)) ".ss")))])
+                                          (and alt-file-name
+                                               (file-exists? (build-path cpath alt-file-name)))))
+                                    cpath
+                                    ;; Look further for specific file, but remember
+                                    ;; first found directory
+                                    (cloop (cdr paths) (or found-col cpath)))
+                                ;; Just looking for dir; found it:
+                                cpath)
+                            ;; sub-collection not here; try next instance
+                            ;; of the top-level collection
+                            (cloop (cdr paths) found-col)))
+                      (cloop (cdr paths) found-col)))))))))
 
   (define-values (check-suffix-call)
     (lambda (s sfx who)
@@ -393,85 +687,6 @@
 		      (cons (simplify-path (path->complete-path v (current-directory)))
 			    (loop (cdr l)))
 		      (loop (cdr l)))))))))]))
-  
-  (define-values (path-list-string->path-list)
-    (let ((r (byte-regexp (string->bytes/utf-8
-			   (let ((sep (if (eq? (system-type) 'windows)
-                                          ";"
-                                          ":")))
-			     (format "([^~a]*)~a(.*)" sep sep)))))
-	  (cons-path (lambda (default s l) 
-		       (if (bytes=? s #"")
-			   (append default l)
-                           (cons (bytes->path (if (eq? (system-type) 'windows)
-                                                  (regexp-replace* #rx#"\"" s #"")
-                                                  s))
-                                 l)))))
-      (lambda (s default)
-	(unless (or (bytes? s)
-		    (string? s))
-	  (raise-type-error 'path-list-string->path-list "byte string or string" s))
-	(unless (and (list? default)
-		     (andmap path? default))
-	  (raise-type-error 'path-list-string->path-list "list of paths" default))
-	(let loop ([s (if (string? s)
-			  (string->bytes/utf-8 s)
-			  s)])
-	  (let ([m (regexp-match r s)])
-	    (if m
-		(cons-path default (cadr m) (loop (caddr m)))
-		(cons-path default s null)))))))
-
-  (define-values (find-executable-path)
-    (case-lambda 
-     [(program libpath reverse?)
-      (unless (path-string? program) 
-	(raise-type-error 'find-executable-path "path or string (sans nul)" program))
-      (unless (or (not libpath) (and (path-string? libpath) 
-				     (relative-path? libpath)))
-	(raise-type-error 'find-executable-path "#f or relative path or string" libpath))
-      (letrec ([found-exec
-		(lambda (exec-name)
-                  (if libpath
-		      (let-values ([(base name isdir?) (split-path exec-name)])
-			(let ([next
-			       (lambda ()
-				 (let ([resolved (resolve-path exec-name)])
-				   (cond
-				    [(equal? resolved exec-name) #f]
-				    [(relative-path? resolved)
-				     (found-exec (build-path base resolved))]
-				    [else (found-exec resolved)])))])
-			  (or (and reverse? (next))
-			      (if (path? base)
-				  (let ([lib (build-path base libpath)])
-				    (and (or (directory-exists? lib) 
-					     (file-exists? lib))
-					 lib))
-				  #f)
-			      (and (not reverse?) (next)))))
-		      exec-name))])
-	(if (and (relative-path? program)
-		 (let-values ([(base name dir?) (split-path program)])
-		   (eq? base 'relative)))
-	    (let ([paths-str (getenv "PATH")]
-		  [win-add (lambda (s) (if (eq? (system-type) 'windows) 
-					   (cons (bytes->path #".") s) 
-					   s))])
-	      (let loop ([paths (if paths-str 
-				    (win-add (path-list-string->path-list paths-str null))
-				    null)])
-		(if (null? paths)
-		    #f
-		    (let* ([base (path->complete-path (car paths))]
-			   [name (build-path base program)])
-		      (if (file-exists? name)
-			  (found-exec name)
-			  (loop (cdr paths)))))))
-	    (let ([p (path->complete-path program)])
-	      (and (file-exists? p) (found-exec p)))))]
-     [(program libpath) (find-executable-path program libpath #f)]
-     [(program) (find-executable-path program #f #f)]))
 
   ;; used for the -k command-line argument:
   (define (embedded-load start end str)
@@ -642,7 +857,26 @@
     (lambda (path) path))
 
   (define-values (-module-hash-table-table) (make-weak-hasheq)) ; weak map from namespace to module ht
-  (define-values (-path-cache) (make-weak-hash)) ; weak map from `lib' path + corrent-library-paths to symbols
+
+  ;; weak map from `lib' path + corrent-library-paths to symbols:
+  ;;  We'd like to use a weak `equal?'-based hash table here,
+  ;;  but that's not kill-safe. Instead, we use a non-thread-safe
+  ;;  custom hash table; a race could lose cache entries, but
+  ;;  that's ok.
+  (define CACHE-N 512)
+  (define-values (-path-cache) (make-vector CACHE-N #f)) 
+  (define (path-cache-get p)
+    (let* ([i (modulo (abs (equal-hash-code p)) CACHE-N)]
+           [w (vector-ref -path-cache i)]
+           [l (and w (weak-box-value w))])
+      (and l
+           (let ([a (assoc p l)])
+             (and a (cdr a))))))
+  (define (path-cache-set! p v)
+    (let* ([i (modulo (abs (equal-hash-code p)) CACHE-N)]
+           [w (vector-ref -path-cache i)]
+           [l (and w (weak-box-value w))])
+      (vector-set! -path-cache i (make-weak-box (cons (cons p v) (or l null))))))
   
   (define-values (-loading-filename) (gensym))
   (define-values (-loading-prompt-tag) (make-continuation-prompt-tag 'module-loading))
@@ -748,9 +982,7 @@
                      ;; Non-string result represents an error
                      (cond
                       [(symbol? s)
-                       (or (hash-ref -path-cache
-                                     (cons s (current-library-collection-paths))
-                                     #f)
+                       (or (path-cache-get (cons s (current-library-collection-paths)))
                            (let-values ([(cols file) (split-relative-string (symbol->string s) #f)])
                              (let* ([f-file (if (null? cols)
                                                 "main.rkt"
@@ -763,7 +995,7 @@
                                (build-path p f-file))))]
                       [(string? s)
                        (let* ([dir (get-dir)])
-                         (or (hash-ref -path-cache (cons s dir) #f)
+                         (or (path-cache-get (cons s dir))
                              (let-values ([(cols file) (split-relative-string s #f)])
                                (apply build-path 
                                       dir
@@ -781,9 +1013,7 @@
                            (path-ss->rkt (simplify-path s))
                            (list " (a path must be absolute)"))]
                       [(eq? (car s) 'lib)
-                       (or (hash-ref -path-cache
-                                     (cons s (current-library-collection-paths))
-                                     #f)
+                       (or (path-cache-get (cons s (current-library-collection-paths)))
                            (let*-values ([(cols file) (split-relative-string (cadr s) #f)]
                                          [(old-style?) (if (null? (cddr s))
                                                            (and (null? cols)
@@ -862,13 +1092,15 @@
                           (let ([got (hash-ref ht modname #f)])
                             (unless got
                               ;; Currently loading?
-                              (let ([l (let ([tag (if (continuation-prompt-available? -loading-prompt-tag)
-                                                      -loading-prompt-tag
-                                                      (default-continuation-prompt-tag))])
-                                         (continuation-mark-set->list
-                                          (current-continuation-marks tag)
-                                          -loading-filename
-                                          tag))]
+                              (let ([loading
+                                     (let ([tag (if (continuation-prompt-available? -loading-prompt-tag)
+                                                    -loading-prompt-tag
+                                                    (default-continuation-prompt-tag))])
+                                       (continuation-mark-set-first
+                                        #f
+                                        -loading-filename
+                                        null
+                                        tag))]
                                     [nsr (namespace-module-registry (current-namespace))])
                                 (for-each
                                  (lambda (s)
@@ -878,19 +1110,20 @@
                                       'standard-module-name-resolver
                                       "cycle in loading at ~.s: ~.s"
                                       filename
-                                      (map cdr (reverse (cons s l))))))
-                                 l))
-                              ((if (continuation-prompt-available? -loading-prompt-tag)
-                                   (lambda (f) (f))
-                                   (lambda (f) (call-with-continuation-prompt f -loading-prompt-tag)))
-                               (lambda ()
-                                 (with-continuation-mark -loading-filename (cons 
-                                                                            (namespace-module-registry (current-namespace))
-                                                                            normal-filename)
-                                   (parameterize ([current-module-declare-name modname])
-                                     ((current-load/use-compiled) 
-                                      filename 
-                                      (string->symbol (path->string no-sfx)))))))
+                                      (map cdr (reverse (cons s loading))))))
+                                 loading)
+                                ((if (continuation-prompt-available? -loading-prompt-tag)
+                                     (lambda (f) (f))
+                                     (lambda (f) (call-with-continuation-prompt f -loading-prompt-tag)))
+                                 (lambda ()
+                                   (with-continuation-mark -loading-filename (cons (cons 
+                                                                                    (namespace-module-registry (current-namespace))
+                                                                                    normal-filename)
+                                                                                   loading)
+                                     (parameterize ([current-module-declare-name modname])
+                                       ((current-load/use-compiled) 
+                                        filename 
+                                        (string->symbol (path->string no-sfx))))))))
                               (hash-set! ht modname #t))))
                         ;; If a `lib' path, cache pathname manipulations
                         (when (and (not (vector? s-parsed))
@@ -898,15 +1131,14 @@
                                        (symbol? s)
                                        (and (pair? s)
                                             (eq? (car s) 'lib))))
-                          (hash-set! -path-cache
-                                     (if (string? s)
-                                         (cons s (get-dir))
-                                         (cons s (current-library-collection-paths)))
-                                     (vector filename
-                                             normal-filename
-                                             name
-                                             no-sfx
-                                             modname)))
+                          (path-cache-set! (if (string? s)
+                                               (cons s (get-dir))
+                                               (cons s (current-library-collection-paths)))
+                                           (vector filename
+                                                   normal-filename
+                                                   name
+                                                   no-sfx
+                                                   modname)))
                         ;; Result is the module name:
                         modname))))))])]))
       standard-module-name-resolver))

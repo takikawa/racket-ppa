@@ -199,6 +199,10 @@ typedef struct Scheme_Subprocess {
 # define MZ_FDS
 #endif
 
+#ifdef CLOSE_ALL_FDS_AFTER_FORK
+static void close_fds_after_fork(int skip1, int skip2, int skip3);
+#endif
+
 /******************** refcounts ********************/
 
 #if defined(WINDOWS_FILE_HANDLES) || defined(MZ_USE_PLACES)
@@ -282,6 +286,30 @@ typedef struct Scheme_FD {
 # endif
 } Scheme_FD;
 
+Scheme_Object *scheme_port_name(Scheme_Object *p) {
+  if (p->type == scheme_input_port_type)
+    return ((Scheme_Input_Port *)p)->name;
+  else
+    return ((Scheme_Output_Port *)p)->name;
+}
+
+int scheme_get_serialized_fd_flags(Scheme_Object* p, Scheme_Serialized_File_FD *so) {
+  Scheme_FD *fds;
+  if (p->type == scheme_input_port_type) {
+    fds = (Scheme_FD *) ((Scheme_Input_Port *)p)->port_data;
+    so->name = ((Scheme_Input_Port *)p)->name;
+  }
+  else {
+    fds = (Scheme_FD *) ((Scheme_Output_Port *)p)->port_data;
+    so->name = ((Scheme_Output_Port *)p)->name;
+  }
+  so->regfile = fds->regfile;
+  so->textmode = fds->textmode;
+  so->flush_mode = fds->flush;
+  return 1;
+}
+
+
 #endif
 
 #define MZ_FLUSH_NEVER 0
@@ -313,6 +341,11 @@ THREAD_LOCAL_DECL(Scheme_Object *scheme_orig_stderr_port);
 THREAD_LOCAL_DECL(Scheme_Object *scheme_orig_stdin_port);
 
 THREAD_LOCAL_DECL(struct mz_fd_set *scheme_fd_set);
+
+#ifdef USE_FCNTL_AND_FORK_FOR_FILE_LOCKS
+THREAD_LOCAL_DECL(Scheme_Hash_Table *locked_fd_process_map);
+static void release_lockf(int fd);
+#endif
 
 HOOK_SHARED_OK Scheme_Object *(*scheme_make_stdin)(void) = NULL;
 HOOK_SHARED_OK Scheme_Object *(*scheme_make_stdout)(void) = NULL;
@@ -1158,6 +1191,44 @@ void scheme_collapse_win_fd(void *fds)
   }
 #endif
 }
+
+intptr_t scheme_dup_file(intptr_t fd) {
+#ifdef WINDOWS_FILE_HANDLES
+  HANDLE  newhandle;
+  BOOL rc;
+
+  rc = DuplicateHandle(GetCurrentProcess(), (HANDLE) fd,
+          GetCurrentProcess(), &newhandle,
+          0, FALSE, DUPLICATE_SAME_ACCESS);
+
+  if (rc == FALSE) {
+    return -1;
+  }
+  else {
+    return (intptr_t) newhandle;
+  }
+#else
+  intptr_t nfd;
+  do {
+    nfd = dup(fd);
+  } while (nfd == -1 && errno == EINTR);
+  return nfd;
+#endif
+}
+
+void scheme_close_file_fd(intptr_t fd) {
+#ifdef WINDOWS_FILE_HANDLES
+  CloseHandle((HANDLE)fd);
+#else
+  {
+    intptr_t rc;
+    do {
+      rc = close(fd);
+    } while (rc == -1 && errno == EINTR);
+  }
+#endif
+}
+
 
 /*========================================================================*/
 /*                      Windows thread suspension                         */
@@ -3386,19 +3457,69 @@ scheme_tell_column (Scheme_Object *port)
   return col;
 }
 
+
+static void extract_next_location(const char *who, int argc, Scheme_Object **a, int delta,
+                                  intptr_t *_line, intptr_t *_col, intptr_t *_pos)
+{
+  int i, j;
+  intptr_t v;
+  intptr_t line = -1, col = -1, pos = -1;
+
+  for (j = 0; j < 3; j++) {
+    v = -1;
+    i = j + delta;
+    if (SCHEME_TRUEP(a[i])) {
+      if (scheme_nonneg_exact_p(a[i])) {
+        if (SCHEME_INTP(a[i])) {
+          v = SCHEME_INT_VAL(a[i]);
+          if ((j != 1) && !v) {
+            v = -1;
+          }
+        }
+      }
+      if (v == -1) {
+        if (argc < 0)
+          a[0] = a[i];
+        scheme_wrong_type(who, 
+                          ((j == 1) ? "non-negative exact integer or #f" : "positive exact integer or #f"),
+                          ((argc > 0) ? i : -1), argc, a);
+        return;
+      }
+    }
+
+    switch (j) {
+    case 0:
+      line = v;
+      break;
+    case 1:
+      col = v;
+      break;
+    case 2:
+      pos = v;
+      break;
+    }
+  }
+
+  /* Internally, positions count from 0 instead of 1 */
+  if (pos > -1)
+    pos--;
+
+  if (_line) *_line = line;
+  if (_col) *_col = col;
+  if (_pos) *_pos = pos;
+}
+
 void
 scheme_tell_all (Scheme_Object *port, intptr_t *_line, intptr_t *_col, intptr_t *_pos)
 {
   Scheme_Port *ip;
-  intptr_t line = -1, col = -1, pos = -1;
   
   ip = scheme_port_record(port);
 
   if (ip->count_lines && ip->location_fun) {
     Scheme_Location_Fun location_fun;
     Scheme_Object *r, *a[3];
-    intptr_t v;
-    int got, i;
+    int got;
     
     location_fun = ip->location_fun;
     r = location_fun(ip);
@@ -3416,47 +3537,36 @@ scheme_tell_all (Scheme_Object *port, intptr_t *_line, intptr_t *_col, intptr_t 
     a[1] = scheme_multiple_array[1];
     a[2] = scheme_multiple_array[2];
 
-    for (i = 0; i < 3; i++) {
-      v = -1;
-      if (SCHEME_TRUEP(a[i])) {
-	if (scheme_nonneg_exact_p(a[i])) {
-	  if (SCHEME_INTP(a[i])) {
-	    v = SCHEME_INT_VAL(a[i]);
-	    if ((i != 1) && !v) {
-	      a[0] = a[i];
-	      scheme_wrong_type("user port next-location", 
-				((i == 1) ? "non-negative exact integer or #f" : "positive exact integer or #f"),
-				-1, -1, a);
-	      return;
-	    }
-	  }
-	}
-      }
-      switch(i) {
-      case 0:
-	line = v;
-	break;
-      case 1:
-	col = v;
-	break;
-      case 2:
-	pos = v;
-	break;
-      }
-    }
-
-    /* Internally, positions count from 0 instead of 1 */
-    if (pos > -1)
-      pos--;
+    extract_next_location("user port next-location", -1, a, 0, _line, _col, _pos);
   } else {
+    intptr_t line, col, pos;
+
     line = scheme_tell_line(port);
     col = scheme_tell_column(port);
     pos = scheme_tell(port);
-  }
 
-  if (_line) *_line = line;
-  if (_col) *_col = col;
-  if (_pos) *_pos = pos;  
+    if (_line) *_line = line;
+    if (_col) *_col = col;
+    if (_pos) *_pos = pos;
+  }
+}
+
+void scheme_set_port_location(int argc, Scheme_Object **argv)
+{
+  Scheme_Port *ip;
+  intptr_t line, col, pos;
+  
+  extract_next_location("set-port-next-location!", argc, argv, 
+                        1, &line, &col, &pos);
+
+  
+  ip = scheme_port_record(argv[0]);
+  
+  if (ip->count_lines) {
+    ip->readpos = pos;
+    ip->lineNumber = line;
+    ip->column = col;
+  }
 }
 
 void
@@ -3904,7 +4014,8 @@ static void filename_exn(char *name, char *msg, char *filename, int err)
 }
 
 Scheme_Object *
-scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[], int internal)
+scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[], 
+                          int internal, char **err, int *eerrno)
 {
 #ifdef USE_FD_PORTS
   int fd;
@@ -3973,7 +4084,11 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
   } while ((fd == -1) && (errno == EINTR));
 
   if (fd == -1) {
-    filename_exn(name, "cannot open input file", filename, errno);
+    if (err) {
+      *err = "cannot open source file";
+      *eerrno = errno;
+    } else
+      filename_exn(name, "cannot open input file", filename, errno);
     return NULL;
   } else {
     int ok;
@@ -3987,7 +4102,11 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
       do {
 	cr = close(fd);
       } while ((cr == -1) && (errno == EINTR));
-      filename_exn(name, "cannot open directory as a file", filename, 0);
+      if (err) {
+        *err = "source is a directory";
+        *eerrno = 0;
+      } else
+        filename_exn(name, "cannot open directory as a file", filename, 0);
       return NULL;
     } else {
       regfile = S_ISREG(buf.st_mode);
@@ -4005,7 +4124,13 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
 		   NULL);
 
   if (fd == INVALID_HANDLE_VALUE) {
-    filename_exn(name, "cannot open input file", filename, GetLastError());
+    if (err) {
+      int errv;
+      errv = GetLastError();
+      *err = "cannot open source file";
+      *eerrno = errv;
+    } else
+      filename_exn(name, "cannot open input file", filename, GetLastError());
     return NULL;
   } else
     regfile = (GetFileType(fd) == FILE_TYPE_DISK);
@@ -4019,7 +4144,11 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
   result = make_fd_input_port((int)fd, scheme_make_path(filename), regfile, mode[1] == 't', NULL, internal);
 # else
   if (scheme_directory_exists(filename)) {
-    filename_exn(name, "cannot open directory as a file", filename, 0);
+    if (err) {
+      *err = "source is a directory";
+      *eerrno = 0;
+    } else
+      filename_exn(name, err, filename, 0);
     return NULL;
   }
 
@@ -4027,7 +4156,11 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
 
   fp = fopen(filename, mode);
   if (!fp) {
-    filename_exn(name, "cannot open input file", filename, errno);
+    if (err) {
+      *err = "cannot open source file";
+      *eerrno = errno;
+    } else
+      filename_exn(name, "cannot open input file", filename, errno);
     return NULL;
   }
 
@@ -4039,7 +4172,8 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
 }
 
 Scheme_Object *
-scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv[], int and_read)
+scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv[], int and_read, 
+                           int internal, char **err, int *eerrno)
 {
 #ifdef USE_FD_PORTS
   int fd;
@@ -4144,18 +4278,20 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
 
   filename = scheme_expand_string_filename(argv[0],
 					   name, NULL,
-					   (SCHEME_GUARD_FILE_WRITE
-					    | ((existsok && ((existsok == 1) || (existsok == -2)))
-					       ? SCHEME_GUARD_FILE_DELETE
-					       : 0)
-					    /* append mode: */
-					    | ((mode[0] == 'a')
-					       ? SCHEME_GUARD_FILE_READ
-					       : 0)
-					    /* update mode: */
-					    | ((existsok > 1)
-					       ? SCHEME_GUARD_FILE_READ
-					       : 0)));
+                                           (internal
+                                            ? 0
+                                            : (SCHEME_GUARD_FILE_WRITE
+                                               | ((existsok && ((existsok == 1) || (existsok == -2)))
+                                                  ? SCHEME_GUARD_FILE_DELETE
+                                                  : 0)
+                                               /* append mode: */
+                                               | ((mode[0] == 'a')
+                                                  ? SCHEME_GUARD_FILE_READ
+                                                  : 0)
+                                               /* update mode: */
+                                               | ((existsok > 1)
+                                                  ? SCHEME_GUARD_FILE_READ
+                                                  : 0))));
 
   scheme_custodian_check_available(NULL, name, "file-stream");
 
@@ -4187,14 +4323,24 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
 
   if (fd == -1) {
     if (errno == EISDIR) {
-      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
-		       "%s: \"%q\" exists as a directory",
-		       name, filename);
+      if (err) {
+        *err = "destination exists as a directory";
+        *eerrno = errno;
+        return NULL;
+      } else
+        scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
+                         "%s: \"%q\" exists as a directory",
+                         name, filename);
     } else if (errno == EEXIST) {
-      if (!existsok)
-	scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
-			 "%s: file \"%q\" exists", name, filename);
-      else {
+      if (!existsok) {
+        if (err) {
+          *err = "destination already exists";
+          *eerrno = errno;
+          return NULL;
+        } else
+          scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
+                           "%s: file \"%q\" exists", name, filename);
+      } else {
 	do {
 	  ok = unlink(filename);
 	} while ((ok == -1) && (errno == EINTR));
@@ -4210,8 +4356,12 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
     }
 
     if (fd == -1) {
-      filename_exn(name, "cannot open output file", filename, errno);
-      return NULL; /* shouldn't get here */
+      if (err) {
+        *err = "cannot open destination file";
+        *eerrno = errno;
+      } else
+        filename_exn(name, "cannot open output file", filename, errno);
+      return NULL;
     }
   }
 
@@ -4249,9 +4399,9 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
 		   NULL);
 
   if (fd == INVALID_HANDLE_VALUE) {
-    int err;
-    err = GetLastError();
-    if ((err == ERROR_ACCESS_DENIED) && (existsok < -1)) {
+    int errv;
+    errv = GetLastError();
+    if ((errv == ERROR_ACCESS_DENIED) && (existsok < -1)) {
       /* Delete and try again... */
       if (DeleteFileW(WIDE_PATH(filename))) {
 	fd = CreateFileW(WIDE_PATH(filename),
@@ -4262,21 +4412,29 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
                          0,
                          NULL);
 	if (fd == INVALID_HANDLE_VALUE)
-	  err = GetLastError();
+	  errv = GetLastError();
       } else {
 	scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
 			 "%s: error deleting \"%q\" (%E)",
 			 name, filename, GetLastError());
 	return NULL;
       }
-    } else if (err == ERROR_FILE_EXISTS) {
-      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
-		       "%s: file \"%q\" exists", name, filename);
+    } else if (errv == ERROR_FILE_EXISTS) {
+      if (err) {
+        *err = "destination already exists";
+        *eerrno = errv;
+      } else
+        scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
+                         "%s: file \"%q\" exists", name, filename);
       return NULL;
     }
 
     if (fd == INVALID_HANDLE_VALUE) {
-      filename_exn(name, "cannot open output file", filename, err);
+      if (err) {
+        *err = "cannot open destination";
+        *eerrno = errv;
+      } else
+        filename_exn(name, "cannot open output file", filename, errv);
       return NULL;
     }
   }
@@ -4310,13 +4468,16 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
 			     -1, NULL);
 # else
   if (scheme_directory_exists(filename)) {
-    if (!existsok)
+    if (err) {
+      *err = "destination exists as a directory";
+      *eerrno = 0;
+    } else if (!existsok)
       scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
 		       "%s: \"%q\" exists as a directory",
 		       name, filename);
     else
       filename_exn(name, "cannot open directory as a file", filename, errno);
-    return scheme_void;
+    return NULL;
   }
 
 
@@ -4330,9 +4491,16 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
   if (scheme_file_exists(filename)) {
     int uok;
 
-    if (!existsok)
-      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
-		       "%s: file \"%q\" exists", name, filename);
+    if (!existsok) {
+      if (err) {
+        *err = "destination exists already";
+        *eerrno = 0;
+      } else
+        scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
+                         "%s: file \"%q\" exists", name, filename);
+      return NULL;
+    }
+
     do {
       uok = MSC_IZE(unlink)(filename);
     } while ((uok == -1) && (errno == EINTR));
@@ -4363,8 +4531,14 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
 	}
       }
     }
-    if (!fp)
-      filename_exn(name, "cannot open output file", filename, errno);
+    if (!fp) {
+      if (err) {
+        *err = "cannot open destination";
+        *eerrno = errno;
+      } else
+        filename_exn(name, "cannot open output file", filename, errno);
+      return NULL;
+    }
   }
 
   return scheme_make_file_output_port(fp);
@@ -4377,7 +4551,7 @@ Scheme_Object *scheme_open_input_file(const char *name, const char *who)
   Scheme_Object *a[1];
 
   a[0]= scheme_make_path(name);
-  return scheme_do_open_input_file((char *)who, 0, 1, a, 0);
+  return scheme_do_open_input_file((char *)who, 0, 1, a, 0, NULL, NULL);
 }
 
 Scheme_Object *scheme_open_output_file(const char *name, const char *who)
@@ -4386,7 +4560,7 @@ Scheme_Object *scheme_open_output_file(const char *name, const char *who)
 
   a[0]= scheme_make_path(name);
   a[1] = truncate_replace_symbol;
-  return scheme_do_open_output_file((char *)who, 0, 2, a, 0);
+  return scheme_do_open_output_file((char *)who, 0, 2, a, 0, 0, NULL, NULL);
 }
 
 Scheme_Object *scheme_open_input_output_file(const char *name, const char *who, Scheme_Object **oport)
@@ -4395,7 +4569,7 @@ Scheme_Object *scheme_open_input_output_file(const char *name, const char *who, 
 
   a[0]= scheme_make_path(name);
   a[1] = truncate_replace_symbol;
-  scheme_do_open_output_file((char *)who, 0, 2, a, 1);
+  scheme_do_open_output_file((char *)who, 0, 2, a, 1, 0, NULL, NULL);
   *oport = scheme_multiple_array[1];
   return scheme_multiple_array[0];
 }
@@ -4407,7 +4581,7 @@ Scheme_Object *scheme_open_output_file_with_mode(const char *name, const char *w
   a[0]= scheme_make_path(name);
   a[1] = truncate_replace_symbol;
   a[2] = (text ? text_symbol : binary_symbol);
-  return scheme_do_open_output_file((char *)who, 0, 3, a, 0);
+  return scheme_do_open_output_file((char *)who, 0, 3, a, 0, 0, NULL, NULL);
 }
 
 Scheme_Object *
@@ -4801,10 +4975,136 @@ static int try_lock(int fd, int writer, int *_errid)
     *_errid = errno;
     return 0;
   }
+# elif defined(USE_FCNTL_AND_FORK_FOR_FILE_LOCKS)
+  /* An lockf() is cancelled if *any* file descriptor to the same file
+     is closed within the same process. We avoid that problem by forking
+     a new process whose only job is to use lockf(). */
+  {
+    int ifds[2], ofds[2], cr;
+
+    if (locked_fd_process_map)
+      if (scheme_hash_get(locked_fd_process_map, scheme_make_integer(fd)))
+        /* already have a lock */
+        return 1;
+
+    if (!pipe(ifds)) {
+      if (!pipe(ofds)) {
+        int pid;
+
+        pid = fork();
+      
+        if (pid > 0) {
+          /* Original process: */
+          int errid = 0;
+        
+          do {
+            cr = close(ifds[1]);
+          } while ((cr == -1) && (errno == EINTR));
+          do {
+            cr = close(ofds[0]);
+          } while ((cr == -1) && (errno == EINTR));
+
+          do{
+            cr = read(ifds[0], &errid, sizeof(int));
+          } while ((cr == -1) && (errno == EINTR));
+          if (cr == -1)
+            errid = errno;
+
+          do {
+            cr = close(ifds[0]);
+          } while ((cr == -1) && (errno == EINTR));
+
+          if (errid) {
+            do {
+              cr = close(ofds[1]);
+            } while ((cr == -1) && (errno == EINTR));
+            
+            if (errid == EAGAIN)
+              *_errid = 0;
+            else
+              *_errid = errid;
+
+            return 0;
+          } else {
+            /* got lock; record fd -> pipe mapping */
+            if (!locked_fd_process_map) {
+              REGISTER_SO(locked_fd_process_map);
+              locked_fd_process_map = scheme_make_hash_table(SCHEME_hash_ptr);
+            }
+            scheme_hash_set(locked_fd_process_map, 
+                            scheme_make_integer(fd), 
+                            scheme_make_pair(scheme_make_integer(ofds[1]),
+                                             scheme_make_integer(pid)));
+            return 1;
+          }
+        } else if (!pid) {
+          /* Child process */
+          int ok = 0;
+          struct flock fl;
+
+          do {
+            cr = close(ifds[0]);
+          } while ((cr == -1) && (errno == EINTR));
+          do {
+            cr = close(ofds[1]);
+          } while ((cr == -1) && (errno == EINTR));
+#ifdef CLOSE_ALL_FDS_AFTER_FORK
+          close_fds_after_fork(ifds[1], ofds[0], fd);
+#endif
+   
+          fl.l_start = 0;
+          fl.l_len = 0;
+          fl.l_type = (writer ? F_WRLCK : F_RDLCK);
+          fl.l_whence = SEEK_SET;
+          fl.l_pid = getpid();
+
+          if (!fcntl(fd, F_SETLK, &fl)) {
+            /* report success: */
+            do {
+              cr = write(ifds[1], &ok, sizeof(int));
+            } while ((cr == -1) && (errno == EINTR));
+            /* wait until a signal to exit: */
+            do {
+              cr = read(ofds[0], &ok, sizeof(int));
+            } while ((cr == -1) && (errno == EINTR));
+          }
+
+          if (!ok) {
+            int errid = errno;
+            do {
+              cr = write(ifds[1], &errid, sizeof(int));
+            } while ((cr == -1) && (errno == EINTR));
+          }
+          _exit(0);
+        } else {
+          int i;
+          *_errid = errno;
+          for (i = 0; i < 2; i++) {
+            do {
+              cr = close(ifds[i]);
+            } while ((cr == -1) && (errno == EINTR));
+            do {
+              cr = close(ofds[i]);
+            } while ((cr == -1) && (errno == EINTR));
+          }
+          return 0;
+        }
+      } else {
+        int i;
+        *_errid = errno;
+        for (i = 0; i < 2; i++) {
+          do {
+            cr = close(ifds[i]);
+          } while ((cr == -1) && (errno == EINTR));
+        }
+        return 0;
+      }
+    } else {
+      *_errid = errno;
+      return 0;
+    }
+  }
 # else
-  /* using fcntl(F_SETFL, ...) isn't really an option, since the
-     any-close-release-the-lock semantics of fcntl()-based locks
-     doesn't work with Racket threads that compete for a lock */
   *_errid = ENOTSUP;
   return 0;
 # endif
@@ -4874,6 +5174,15 @@ Scheme_Object *scheme_file_try_lock(int argc, Scheme_Object **argv)
   if (writer == -1)
     scheme_wrong_type("port-try-file-lock?", "'shared or 'exclusive", 1, argc, argv);
 
+  if (writer && !SCHEME_OUTPORTP(argv[0]))
+    scheme_arg_mismatch("port-try-file-lock?",
+                        "port for 'exclusive locking is not an output port: ",
+                        argv[0]);
+  else if (!writer && !SCHEME_INPORTP(argv[0]))
+    scheme_arg_mismatch("port-try-file-lock?",
+                        "port for 'shared locking is not an input port: ",
+                        argv[0]);
+
   check_already_closed("port-try-file-lock?", argv[0]);
 
   if (try_lock(fd, writer, &errid))
@@ -4888,6 +5197,30 @@ Scheme_Object *scheme_file_try_lock(int argc, Scheme_Object **argv)
    
   return scheme_false;
 }
+
+#ifdef USE_FCNTL_AND_FORK_FOR_FILE_LOCKS
+static void release_lockf(int fd)
+{
+  if (locked_fd_process_map) {
+    Scheme_Object *v;
+    v = scheme_hash_get(locked_fd_process_map, scheme_make_integer(fd));
+    if (v) {
+      int fd2, cr, pid, status;
+
+      fd2 = SCHEME_INT_VAL(SCHEME_CAR(v));
+      pid = SCHEME_INT_VAL(SCHEME_CDR(v));
+      scheme_hash_set(locked_fd_process_map, scheme_make_integer(fd), NULL);
+
+      scheme_block_child_signals(1);
+      do {
+	cr = close(fd2); /* makes the fork()ed process exit */
+      } while ((cr == -1) && (errno == EINTR));
+      waitpid(pid, &status, 0);
+      scheme_block_child_signals(0);
+    }
+  }
+}
+#endif
 
 Scheme_Object *scheme_file_unlock(int argc, Scheme_Object **argv)
 {
@@ -4906,6 +5239,10 @@ Scheme_Object *scheme_file_unlock(int argc, Scheme_Object **argv)
   } while ((ok == -1) && (errno == EINTR));
   ok = !ok;
   errid = errno;
+# elif defined(USE_FCNTL_AND_FORK_FOR_FILE_LOCKS)
+  release_lockf(fd);
+  ok = 1;
+  errid = 0;
 # else
   ok = 0;
   errid = ENOTSUP;
@@ -5517,6 +5854,9 @@ fd_close_input(Scheme_Input_Port *port)
      do {
        cr = close(fip->fd);
      } while ((cr == -1) && (errno == EINTR));
+# ifdef USE_FCNTL_AND_FORK_FOR_FILE_LOCKS
+     release_lockf(fip->fd);
+# endif
    }
  }
 #endif
@@ -6796,6 +7136,9 @@ fd_close_output(Scheme_Output_Port *port)
      do {
        cr = close(fop->fd);
      } while ((cr == -1) && (errno == EINTR));
+# ifdef USE_FCNTL_AND_FORK_FOR_FILE_LOCKS
+     release_lockf(fop->fd);
+# endif
    }
  }
 #endif
@@ -7019,14 +7362,14 @@ scheme_make_fd_output_port(int fd, Scheme_Object *name, int regfile, int textmod
 
 #define MZ_FAILURE_STATUS -1
 
-#ifdef PROCESS_FUNCTION
+#if defined(PROCESS_FUNCTION) || defined(MZ_USE_PLACES)
 
 # define USE_CREATE_PIPE
 
 #ifdef WINDOWS_PROCESSES
 # ifdef USE_CREATE_PIPE
 #  define _EXTRA_PIPE_ARGS
-static int MyPipe(int *ph, int near_index) {
+static int MyPipe(intptr_t *ph, int near_index) {
   HANDLE r, w;
   SECURITY_ATTRIBUTES saAttr;
 
@@ -7041,18 +7384,20 @@ static int MyPipe(int *ph, int near_index) {
     a[0] = r;
     a[1] = w;
 
-    /* Change the near end to make it non-inheritable, then
-       close the inheritable one: */
-    if (!DuplicateHandle(GetCurrentProcess(), a[near_index],
-			 GetCurrentProcess(), &naya, 0,
-			 0, /* not inherited */
-			 DUPLICATE_SAME_ACCESS)) {
-      CloseHandle(a[0]);
-      CloseHandle(a[1]);
-      return 1;
-    } else {
-      CloseHandle(a[near_index]);
-      a[near_index] = naya;
+    if (near_index != -1) {
+      /* Change the near end to make it non-inheritable, then
+         close the inheritable one: */
+      if (!DuplicateHandle(GetCurrentProcess(), a[near_index],
+                           GetCurrentProcess(), &naya, 0,
+                           0, /* not inherited */
+                           DUPLICATE_SAME_ACCESS)) {
+        CloseHandle(a[0]);
+        CloseHandle(a[1]);
+        return 1;
+      } else {
+        CloseHandle(a[near_index]);
+        a[near_index] = naya;
+      }
     }
 
     ph[0] = (long)a[0];
@@ -7063,16 +7408,33 @@ static int MyPipe(int *ph, int near_index) {
     return 1;
 }
 #  define PIPE_FUNC MyPipe
+#  define PIPE_HANDLE_t intptr_t
 # else
 #  include <Process.h>
 #  include <fcntl.h>
-# define PIPE_FUNC(pa, nearh) MSC_IZE(pipe)(pa)
+#  define PIPE_FUNC(pa, nearh) MSC_IZE(pipe)(pa)
+#  define PIPE_HANDLE_t int
 #  define _EXTRA_PIPE_ARGS , 256, _O_BINARY
 # endif
 #else
 # define _EXTRA_PIPE_ARGS
 # define PIPE_FUNC(pa, nearh) MSC_IZE(pipe)(pa)
+# define PIPE_HANDLE_t int
 #endif
+
+int scheme_os_pipe(intptr_t *a, int nearh)
+/* If nearh != -1, then the handle at the index
+   other than nearh is made inheritable so that
+   a subprocess can use it. */
+{
+  PIPE_HANDLE_t la[2];
+
+  if (PIPE_FUNC(la, nearh _EXTRA_PIPE_ARGS))
+    return 1;
+  a[0] = la[0];
+  a[1] = la[1];
+  return 0;
+}
 
 #endif
 
@@ -7169,14 +7531,7 @@ static void check_child_done(pid_t pid)
           unused = (void **)next;
         }
 
-        START_XFORM_SKIP;
-        if (WIFEXITED(status))
-          status = WEXITSTATUS(status);
-        else if (WIFSIGNALED(status))
-          status = WTERMSIG(status) + 128;
-        else
-          status = MZ_FAILURE_STATUS;
-        END_XFORM_SKIP;
+        status = scheme_extract_child_status(status);
 
         prev = NULL;
         for (sc = scheme_system_children; sc; prev = sc, sc = sc->next) {
@@ -7208,6 +7563,20 @@ void scheme_check_child_done(void)
   }
 }
 
+#endif
+
+#if defined(UNIX_PROCESSES)
+int scheme_extract_child_status(int status) XFORM_SKIP_PROC
+{
+  if (WIFEXITED(status))
+    status = WEXITSTATUS(status);
+  else if (WIFSIGNALED(status))
+    status = WTERMSIG(status) + 128;
+  else
+    status = MZ_FAILURE_STATUS;
+
+  return status;
+}
 #endif
 
 /*========================================================================*/
@@ -7794,8 +8163,8 @@ static char *cmdline_protect(char *s)
 }
 
 static intptr_t mz_spawnv(char *command, const char * const *argv,
-		      int exact_cmdline, int sin, int sout, int serr, int *pid,
-                      int new_process_group)
+			  int exact_cmdline, intptr_t sin, intptr_t sout, intptr_t serr, int *pid,
+			  int new_process_group)
 {
   int i, l, len = 0;
   intptr_t cr_flag;
@@ -7904,8 +8273,8 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   const char *name = "subprocess";
 #if defined(PROCESS_FUNCTION) && !defined(MAC_CLASSIC_PROCESS_CONTROL)
   char *command;
-  int to_subprocess[2], from_subprocess[2], err_subprocess[2];
-  int i, pid;
+  intptr_t to_subprocess[2], from_subprocess[2], err_subprocess[2];
+  int i, pid, errid;
   char **argv;
   Scheme_Object *in, *out, *err;
 #if defined(UNIX_PROCESSES)
@@ -8084,38 +8453,41 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   /*          Create needed pipes         */
   /*--------------------------------------*/
 
-  if (!inport && PIPE_FUNC(to_subprocess, 1 _EXTRA_PIPE_ARGS)) {
+  if (!inport && scheme_os_pipe(to_subprocess, 1)) {
+    errid = scheme_errno();
     if (outport) { mzCLOSE_FILE_HANDLE(from_subprocess, 1); }
     if (errport) { mzCLOSE_FILE_HANDLE(err_subprocess, 1); }
-    scheme_raise_exn(MZEXN_FAIL, "%s: pipe failed (%e)", name, errno);
+    scheme_raise_exn(MZEXN_FAIL, "%s: pipe failed (%e)", name, errid);
   }
-  if (!outport && PIPE_FUNC(from_subprocess, 0 _EXTRA_PIPE_ARGS)) {
+  if (!outport && scheme_os_pipe(from_subprocess, 0)) {
+    errid = scheme_errno();
     if (!inport) {
-      MSC_IZE(close)(to_subprocess[0]);
-      MSC_IZE(close)(to_subprocess[1]);
+      scheme_close_file_fd(to_subprocess[0]);
+      scheme_close_file_fd(to_subprocess[1]);
     } else {
       mzCLOSE_FILE_HANDLE(to_subprocess, 0);
     }
     if (errport) { mzCLOSE_FILE_HANDLE(err_subprocess, 1); }
-    scheme_raise_exn(MZEXN_FAIL, "%s: pipe failed (%e)", name, errno);
+    scheme_raise_exn(MZEXN_FAIL, "%s: pipe failed (%e)", name, errid);
   }
   if (!errport && stderr_is_stdout) {
     err_subprocess[0] = from_subprocess[0];
     err_subprocess[1] = from_subprocess[1];
-  } else if (!errport && PIPE_FUNC(err_subprocess, 0 _EXTRA_PIPE_ARGS)) {
+  } else if (!errport && scheme_os_pipe(err_subprocess, 0)) {
+    errid = scheme_errno();
     if (!inport) {
-      MSC_IZE(close)(to_subprocess[0]);
-      MSC_IZE(close)(to_subprocess[1]);
+      scheme_close_file_fd(to_subprocess[0]);
+      scheme_close_file_fd(to_subprocess[1]);
     } else {
       mzCLOSE_FILE_HANDLE(to_subprocess, 0);
     }
     if (!outport) {
-      MSC_IZE(close)(from_subprocess[0]);
-      MSC_IZE(close)(from_subprocess[1]);
+      scheme_close_file_fd(from_subprocess[0]);
+      scheme_close_file_fd(from_subprocess[1]);
     } else {
       mzCLOSE_FILE_HANDLE(from_subprocess, 1);
     }
-    scheme_raise_exn(MZEXN_FAIL, "%s: pipe failed (%e)", name, errno);
+    scheme_raise_exn(MZEXN_FAIL, "%s: pipe failed (%e)", name, errid);
   }
 
 #if defined(WINDOWS_PROCESSES)
@@ -8157,7 +8529,6 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
       sc = (void *)spawn_status;
   }
 
-# define mzCLOSE_PIPE_END(x) CloseHandle((HANDLE)(x))
 #else
 
 
@@ -8254,21 +8625,21 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
     case -1:
       /* Close unused descriptors. */
       if (!inport) {
-	MSC_IZE(close)(to_subprocess[0]);
-	MSC_IZE(close)(to_subprocess[1]);
+	scheme_close_file_fd(to_subprocess[0]);
+	scheme_close_file_fd(to_subprocess[1]);
       } else {
 	mzCLOSE_FILE_HANDLE(to_subprocess, 0);
       }
       if (!outport) {
-	MSC_IZE(close)(from_subprocess[0]);
-	MSC_IZE(close)(from_subprocess[1]);
+	scheme_close_file_fd(from_subprocess[0]);
+	scheme_close_file_fd(from_subprocess[1]);
       } else {
 	mzCLOSE_FILE_HANDLE(from_subprocess, 1);
       }
       if (!errport) {
         if (!stderr_is_stdout) {
-          MSC_IZE(close)(err_subprocess[0]);
-          MSC_IZE(close)(err_subprocess[1]);
+          scheme_close_file_fd(err_subprocess[0]);
+          scheme_close_file_fd(err_subprocess[1]);
         }
       } else {
 	mzCLOSE_FILE_HANDLE(err_subprocess, 1);
@@ -8280,40 +8651,34 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
 
       {
 	/* Copy pipe descriptors to stdin and stdout */
-	MSC_IZE(dup2)(to_subprocess[0], 0);
-	MSC_IZE(dup2)(from_subprocess[1], 1);
-	MSC_IZE(dup2)(err_subprocess[1], 2);
+	do {
+	  errid = MSC_IZE(dup2)(to_subprocess[0], 0);
+	} while (errid == -1 && errno == EINTR);
+	do {
+	  errid = MSC_IZE(dup2)(from_subprocess[1], 1);
+	} while (errid == -1 && errno == EINTR);
+	do {
+	  errid = MSC_IZE(dup2)(err_subprocess[1], 2);
+	} while (errid == -1 && errno == EINTR);
 
 	/* Close unwanted descriptors. */
 	if (!inport) {
-	  MSC_IZE(close)(to_subprocess[0]);
-	  MSC_IZE(close)(to_subprocess[1]);
+	  scheme_close_file_fd(to_subprocess[0]);
+	  scheme_close_file_fd(to_subprocess[1]);
 	}
 	if (!outport) {
-	  MSC_IZE(close)(from_subprocess[0]);
-	  MSC_IZE(close)(from_subprocess[1]);
+	  scheme_close_file_fd(from_subprocess[0]);
+	  scheme_close_file_fd(from_subprocess[1]);
 	}
 	if (!errport) {
           if (!stderr_is_stdout) {
-            MSC_IZE(close)(err_subprocess[0]);
-            MSC_IZE(close)(err_subprocess[1]);
+            scheme_close_file_fd(err_subprocess[0]);
+            scheme_close_file_fd(err_subprocess[1]);
           }
 	}
 
 #ifdef CLOSE_ALL_FDS_AFTER_FORK
-	/* Actually, unwanted includes everything
-	   except stdio. */
-#ifdef USE_ULIMIT
-	i = ulimit(4, 0);
-#else
-	i = getdtablesize();
-#endif
-	while (i-- > 3) {
-	  int cr;
-	  do {
-	    cr = close(i);
-	  } while ((cr == -1) && (errno == EINTR));
-	}
+        close_fds_after_fork(0, 1, 2);
 #endif
       }
 
@@ -8375,7 +8740,6 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
 
       break;
     }
-# define mzCLOSE_PIPE_END(x) MSC_IZE(close)(x)
 #endif
 
   /*--------------------------------------*/
@@ -8383,14 +8747,14 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   /*--------------------------------------*/
 
   if (!inport) {
-    mzCLOSE_PIPE_END(to_subprocess[0]);
+    scheme_close_file_fd(to_subprocess[0]);
     out = NULL;
   } else {
     mzCLOSE_FILE_HANDLE(to_subprocess, 0);
     out = scheme_false;
   }
   if (!outport) {
-    mzCLOSE_PIPE_END(from_subprocess[1]);
+    scheme_close_file_fd(from_subprocess[1]);
     in = NULL;
   } else {
     mzCLOSE_FILE_HANDLE(from_subprocess, 1);
@@ -8398,7 +8762,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   }
   if (!errport) {
     if (!stderr_is_stdout)
-      mzCLOSE_PIPE_END(err_subprocess[1]);
+      scheme_close_file_fd(err_subprocess[1]);
     err = NULL;
   } else {
     mzCLOSE_FILE_HANDLE(err_subprocess, 1);
@@ -8528,6 +8892,28 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
 # endif
 #endif
 }
+
+#ifdef CLOSE_ALL_FDS_AFTER_FORK
+static void close_fds_after_fork(int skip1, int skip2, int skip3)
+{
+  int i;
+
+# ifdef USE_ULIMIT
+  i = ulimit(4, 0);
+# else
+  i = getdtablesize();
+# endif
+  while (i--) {
+    int cr;
+    if ((i != skip1) && (i != skip2) && (i != skip3)) {
+      do {
+        cr = close(i);
+      } while ((cr == -1) && (errno == EINTR));
+    }
+  }
+}
+#endif
+
 
 static Scheme_Object *sch_shell_execute(int c, Scheme_Object *argv[])
 {
@@ -9318,6 +9704,7 @@ static void *do_watch(void *other)
 
     pt_sema_post(&done_sema);
   }
+  return NULL;
 }
 
 void scheme_start_sleeper_thread(void (*given_sleep)(float seconds, void *fds), float secs, void *fds, int hit_fd)

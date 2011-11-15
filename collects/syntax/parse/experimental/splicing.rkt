@@ -1,10 +1,19 @@
 #lang racket/base
 (require (for-syntax racket/base
-                     "../../parse.rkt"
-                     "../private/rep-data.rkt"
+                     syntax/parse
+                     unstable/lazy-require
                      "../private/kws.rkt")
-         "../private/runtime.rkt")
+         syntax/parse/private/residual) ;; keep abs. path
 (provide define-primitive-splicing-syntax-class)
+
+(begin-for-syntax
+ (lazy-require
+  [syntax/parse/private/rep-attrs
+   (sort-sattrs)]))
+;; FIXME: workaround for phase>0 bug in racket/runtime-path (and thus lazy-require)
+;; Without this, dependencies don't get collected.
+(require racket/runtime-path (for-meta 2 '#%kernel))
+(define-runtime-module-path-index _unused_ 'syntax/parse/private/rep-attrs)
 
 (define-syntax (define-primitive-splicing-syntax-class stx)
 

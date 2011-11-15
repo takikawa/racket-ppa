@@ -1,7 +1,6 @@
 #lang racket/unit
 
 (require string-constants
-         racket/unit
          racket/class
          racket/match
          racket/path
@@ -10,7 +9,6 @@
          "../preferences.rkt"
          mred/mred-sig
          mrlib/interactive-value-port
-         setup/dirs
          racket/list)
 (require setup/xref
          scribble/xref
@@ -297,10 +295,11 @@
     
     (define/augment (after-load-file success?)
       (inner (void) after-load-file success?)
-      (set! ranges (make-hash))
-      (set! ranges-low 0) 
-      (set! ranges-high 0)
-      (set! ranges-list #f))
+      (when success?
+        (set! ranges (make-hash))
+        (set! ranges-low 0) 
+        (set! ranges-high 0)
+        (set! ranges-list #f)))
     
     (define/public (highlight-range start end color [caret-space? #f] [priority 'low] [style 'rectangle])
       (unless (let ([exact-pos-int?
@@ -500,7 +499,7 @@
      (set! edition (+ edition 1))
      (inner (void) after-delete start len))
     
-    (define/public (move/copy-to-edit dest-edit start end dest-position)
+    (define/public (move/copy-to-edit dest-edit start end dest-position #:try-to-move? [try-to-move? #t])
       (split-snip start)
       (split-snip end)
       (let loop ([snip (find-snip end 'before)])
@@ -509,13 +508,16 @@
            (void)]
           [else
            (let ([prev (send snip previous)]
-                 [released/copied (if (send snip release-from-owner)
-                                      snip
-                                      (let* ([copy (send snip copy)]
-                                             [snip-start (get-snip-position snip)]
-                                             [snip-end (+ snip-start (send snip get-count))])
-                                        (delete snip-start snip-end)
-                                        snip))])
+                 [released/copied 
+                  (if try-to-move?
+                      (if (send snip release-from-owner)
+                          snip
+                          (let* ([copy (send snip copy)]
+                                 [snip-start (get-snip-position snip)]
+                                 [snip-end (+ snip-start (send snip get-count))])
+                            (delete snip-start snip-end)
+                            snip))
+                      (send snip copy))])
              (send dest-edit insert released/copied dest-position dest-position)
              (loop prev))])))
     
@@ -1723,6 +1725,13 @@
     (define/augment (after-set-position)
       (maybe-queue-editor-position-update)
       (inner (void) after-set-position))
+    (define/override use-file-text-mode
+      (case-lambda
+        [() (super use-file-text-mode)]
+        [(x) (super use-file-text-mode x)
+             (enqueue-for-frame
+              (λ (x) (send x use-file-text-mode-changed))
+              'framework:file-text-mode-changed)]))
     
     ;; maybe-queue-editor-position-update : -> void
     ;; updates the editor-position in the frame,
@@ -1753,9 +1762,9 @@
 (define clever-file-format-mixin
   (mixin ((class->interface text%)) (clever-file-format<%>)
     (inherit get-file-format set-file-format find-first-snip)
-
+      
     ;; all-string-snips : -> boolean
-    ;; returns #t when it is safe to save this file in 'text mode.
+    ;; returns #t when it is safe to save this file in regular (non-WXME) mode.
     (define/private (all-string-snips)
       (let loop ([s (find-first-snip)])
         (cond
@@ -1787,8 +1796,49 @@
            (set-file-format 'standard)]
           [else (void)]))
       (inner (void) on-save-file name format))
-    (super-instantiate ())))
+    
+    (super-new)))
 
+(define unix-line-endings-regexp #rx"(^$)|((^|[^\r])\n)")
+(unless (and (regexp-match? unix-line-endings-regexp "")
+             (regexp-match? unix-line-endings-regexp "\n")
+             (regexp-match? unix-line-endings-regexp "a\n")
+             (not (regexp-match? unix-line-endings-regexp "\r\n"))
+             (regexp-match? unix-line-endings-regexp "x\ny\r\nz\n")
+             (regexp-match? unix-line-endings-regexp "\n\r\n")
+             (not (regexp-match? unix-line-endings-regexp "a\r\nb\r\nc\r\n"))
+             (regexp-match? unix-line-endings-regexp "a\r\nb\r\nc\n")
+             (regexp-match? unix-line-endings-regexp "a\nb\r\nc\r\n"))
+  (error 'framework/private/text.rkt "unix-line-endings-regexp test failure"))
+
+(define crlf-line-endings<%> (interface ((class->interface text%))))
+
+(define crlf-line-endings-mixin
+  (mixin ((class->interface text%)) (crlf-line-endings<%>)
+    (inherit get-filename use-file-text-mode)
+    (define/augment (after-load-file success?)
+      (when success?
+        (cond
+          [(preferences:get 'framework:always-use-platform-specific-linefeed-convention)
+           (use-file-text-mode #t)]
+          [else
+           (define unix-endings?
+             (with-handlers ((exn:fail:filesystem? (λ (x) #t)))
+               (call-with-input-file (get-filename)
+                 (λ (port)
+                   (regexp-match? unix-line-endings-regexp port)))))
+           (use-file-text-mode
+            (and (eq? (system-type) 'windows) 
+                 (not unix-endings?)))]))
+      (inner (void) after-load-file success?))
+
+    (super-new)
+    
+    ;; for empty files we want to use LF mode so
+    ;; set it this way until a file is loaded in the editor
+    (when (eq? (system-type) 'windows)
+      (unless (preferences:get 'framework:always-use-platform-specific-linefeed-convention)
+        (use-file-text-mode #f)))))
 
 (define file<%>
   (interface (editor:file<%> basic<%>)
@@ -2108,22 +2158,25 @@
                 (= start end)
                 (submit-to-port? key))
            (insert "\n" (last-position) (last-position))
-           (set-position (last-position) (last-position))
-           (for-each/snips-chars
-            unread-start-point
-            (last-position)
-            (λ (s/c line-col-pos) 
-              (cond
-                [(is-a? s/c snip%)
-                 (channel-put read-chan (cons s/c line-col-pos))]
-                [(char? s/c)
-                 (for-each (λ (b) (channel-put read-chan (cons b line-col-pos)))
-                           (bytes->list (string->bytes/utf-8 (string s/c))))])))
-           (set! unread-start-point (last-position))
-           (set! insertion-point (last-position))
-           (on-submit)]
+           (do-submission)]
           [else
            (super on-local-char key)])))
+    
+    (define/public-final (do-submission)
+      (set-position (last-position) (last-position))
+      (for-each/snips-chars
+       unread-start-point
+       (last-position)
+       (λ (s/c line-col-pos) 
+         (cond
+           [(is-a? s/c snip%)
+            (channel-put read-chan (cons s/c line-col-pos))]
+           [(char? s/c)
+            (for-each (λ (b) (channel-put read-chan (cons b line-col-pos)))
+                      (bytes->list (string->bytes/utf-8 (string s/c))))])))
+      (set! unread-start-point (last-position))
+      (set! insertion-point (last-position))
+      (on-submit))
     
     ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     ;;
@@ -3460,11 +3513,16 @@ designates the character that triggers autocompletion
 (define completion-box% 
   (class* object% (completion-box<%>)
     
-    (init-field completions       ; scroll-manager%       the possible completions (all of which have base-word as a prefix)
-                line-x            ; int                   the x coordinate of the line where the menu goes
-                line-y-above      ; int                   the y coordinate of the top of the line where the menu goes
-                line-y-below      ; int                   the y coordinate of the bottom of the line where the menu goes
-                editor            ; editor<%>             the owner of this completion box
+    (init-field completions       ; scroll-manager%      
+                ;                   the possible completions (all of which have base-word as a prefix)
+                line-x            ; int                  
+                ;                   the x coordinate of the line where the menu goes
+                line-y-above      ; int                   
+                ;                   the y coordinate of the top of the line where the menu goes
+                line-y-below      ; int                  
+                ;                   the y coordinate of the bottom of the line where the menu goes
+                editor            ; editor<%>             
+                ;                   the owner of this completion box
                 )
     
     (define/public (empty?) (send completions empty?))
@@ -3520,7 +3578,9 @@ designates the character that triggers autocompletion
                  (cond
                    [(null? pc)
                     (let-values ([(hidden?) (send completions items-are-hidden?)] 
-                                 [(tw th _1 _2) (send dc get-text-extent hidden-completions-text (get-reg-font))])
+                                 [(tw th _1 _2) (send dc get-text-extent
+                                                      hidden-completions-text
+                                                      (get-reg-font))])
                       (let ([w (if hidden? (max tw w) w)]
                             [h (if hidden? (+ th h) h)])
                         (initialize-mouse-offset-map! coord-map)
@@ -3574,7 +3634,10 @@ designates the character that triggers autocompletion
           [(send completions empty?)
            (let ([font (send dc get-font)])
              (send dc set-font (get-mt-font))
-             (send dc draw-text (string-constant no-completions) (+ mx dx menu-padding-x) (+ menu-padding-y my dy))
+             (send dc draw-text 
+                   (string-constant no-completions) 
+                   (+ mx dx menu-padding-x)
+                   (+ menu-padding-y my dy))
              (send dc set-font font))]
           [else
            (send dc set-font (get-reg-font))
@@ -3637,7 +3700,8 @@ designates the character that triggers autocompletion
          (set! highlighted-menu-item 0)
          (scroll-display-down)]
         [else
-         (set! highlighted-menu-item (modulo (add1 highlighted-menu-item) (send completions get-visible-length)))
+         (set! highlighted-menu-item (modulo (add1 highlighted-menu-item)
+                                             (send completions get-visible-length)))
          (redraw)]))
     
     ;; prev-item : -> void
@@ -3650,7 +3714,8 @@ designates the character that triggers autocompletion
                (sub1 (send completions get-visible-length)))
          (scroll-display-up)]
         [else
-         (set! highlighted-menu-item (modulo (sub1 highlighted-menu-item) (send completions get-visible-length)))
+         (set! highlighted-menu-item (modulo (sub1 highlighted-menu-item)
+                                             (send completions get-visible-length)))
          (redraw)]))
     
     ;; scroll-display-down : -> void
@@ -3693,8 +3758,11 @@ designates the character that triggers autocompletion
     (define/public (handle-mouse-movement x y)
       (let*-values ([(mx my w h) (get-menu-coordinates)])
         (when (and (<= mx x (+ mx w))
-                   (< (+ my menu-padding-y) y (+ my (vector-length (geometry-mouse->menu-item-vector geometry)))))
-          (set! highlighted-menu-item (vector-ref (geometry-mouse->menu-item-vector geometry) (inexact->exact (- y my))))
+                   (< (+ my menu-padding-y)
+                      y 
+                      (+ my (vector-length (geometry-mouse->menu-item-vector geometry)))))
+          (set! highlighted-menu-item (vector-ref (geometry-mouse->menu-item-vector geometry)
+                                                  (inexact->exact (- y my))))
           (redraw))))
     
     ;; get-current-selection : -> string
@@ -4096,7 +4164,7 @@ designates the character that triggers autocompletion
 (define return% (return-mixin -keymap%))
 (define autowrap% (editor:autowrap-mixin -keymap%))
 (define file% (file-mixin (editor:file-mixin autowrap%)))
-(define clever-file-format% (clever-file-format-mixin file%))
+(define clever-file-format% (crlf-line-endings-mixin (clever-file-format-mixin file%)))
 (define backup-autosave% (editor:backup-autosave-mixin clever-file-format%))
 (define searching% (searching-mixin backup-autosave%))
 (define info% (info-mixin (editor:info-mixin searching%)))

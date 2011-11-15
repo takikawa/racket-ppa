@@ -1,10 +1,7 @@
 #lang racket/base
 (require racket/class
-         racket/unit
-         racket/list
          racket/match
          racket/gui/base
-         racket/pretty
          unstable/class-iop
          "interfaces.rkt"
          "extensions.rkt"
@@ -161,6 +158,8 @@
     (send/i sbc sb:controller<%>
            listen-selected-syntax
            (lambda (stx) (send/i macro-hiding-prefs hiding-prefs<%> set-syntax stx)))
+    (send config listen-pretty-abbrev?
+          (lambda (_) (update/preserve-view)))
     (send*/i config config<%>
       (listen-show-hiding-panel?
        (lambda (show?) (show-macro-hiding-panel show?)))

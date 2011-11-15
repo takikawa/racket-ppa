@@ -194,11 +194,13 @@ ROSYM Scheme_Object *scheme_break_enabled_key;
 THREAD_LOCAL_DECL(intptr_t scheme_total_gc_time);
 THREAD_LOCAL_DECL(static intptr_t start_this_gc_time);
 THREAD_LOCAL_DECL(static intptr_t end_this_gc_time);
+THREAD_LOCAL_DECL(static double start_this_gc_real_time);
+THREAD_LOCAL_DECL(static double end_this_gc_real_time);
 static void get_ready_for_GC(void);
 static void done_with_GC(void);
 #ifdef MZ_PRECISE_GC
 static void inform_GC(int master_gc, int major_gc, intptr_t pre_used, intptr_t post_used,
-                      intptr_t pre_admin, intptr_t post_admin);
+                      intptr_t pre_admin, intptr_t post_admin, intptr_t post_child_places_used);
 #endif
 
 THREAD_LOCAL_DECL(static volatile short delayed_break_ready);
@@ -240,6 +242,7 @@ THREAD_LOCAL_DECL(static Scheme_Object *thread_swap_out_callbacks);
 THREAD_LOCAL_DECL(static Scheme_Object *recycle_cell);
 THREAD_LOCAL_DECL(static Scheme_Object *maybe_recycle_cell);
 THREAD_LOCAL_DECL(static int recycle_cc_count);
+THREAD_LOCAL_DECL(static Scheme_Struct_Type *gc_info_prefab);
 
 THREAD_LOCAL_DECL(struct Scheme_Hash_Table *place_local_misc_table);
 
@@ -563,6 +566,8 @@ void scheme_init_thread_places(void) {
   REGISTER_SO(maybe_recycle_cell);
   REGISTER_SO(gc_prepost_callback_descs);
   REGISTER_SO(place_local_misc_table);
+  REGISTER_SO(gc_info_prefab);
+  gc_info_prefab = scheme_lookup_prefab_type(scheme_intern_symbol("gc-info"), 10);
 }
 
 void scheme_init_memtrace(Scheme_Env *env)
@@ -636,6 +641,7 @@ void scheme_init_paramz(Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY("check-for-break"         , check_break_now         , 0,  0, newenv);
   GLOBAL_PRIM_W_ARITY("reparameterize"          , reparameterize          , 1,  1, newenv);
   GLOBAL_PRIM_W_ARITY("make-custodian-from-main", make_custodian_from_main, 0,  0, newenv);
+  GLOBAL_PRIM_W_ARITY("find-links-path!"        , scheme_find_links_path  , 1,  1, newenv);
 
   scheme_finish_primitive_module(newenv);
   scheme_protect_primitive_provide(newenv, NULL);
@@ -987,7 +993,9 @@ static void adjust_custodian_family(void *mgr, void *skip_move)
 	      o = WEAKIFIED(((Scheme_Thread_Custodian_Hop *)o)->p);
 	      if (o)
 		GC_register_thread(o, parent);
-	    }
+	    } else if (SAME_TYPE(SCHEME_TYPE(o), scheme_place_type)) {
+              GC_register_thread(o, parent);
+            }
 	  }
 #endif
 	}
@@ -1453,6 +1461,30 @@ static Scheme_Object *extract_thread(Scheme_Object *o)
   return (Scheme_Object *)WEAKIFIED(((Scheme_Thread_Custodian_Hop *)o)->p);
 }
 
+static void pause_place(Scheme_Object *o)
+{
+#ifdef MZ_USE_PLACES
+  scheme_pause_one_place((Scheme_Place *)o);
+#endif
+}
+
+void scheme_pause_all_places()
+{
+  for_each_managed(scheme_place_type, pause_place);
+}
+
+static void resume_place(Scheme_Object *o)
+{
+#ifdef MZ_USE_PLACES
+  scheme_resume_one_place((Scheme_Place *)o);
+#endif
+}
+
+void scheme_resume_all_places()
+{
+  for_each_managed(scheme_place_type, resume_place);
+}
+
 void scheme_init_custodian_extractors()
 {
   if (!extractors) {
@@ -1766,6 +1798,11 @@ void scheme_schedule_custodian_close(Scheme_Custodian *c)
 
 static void check_scheduled_kills()
 {
+  if (scheme_no_stack_overflow) {
+    /* don't shutdown something that may be in an atomic callback */
+    return;
+  }
+
   while (scheduled_kills && !SCHEME_NULLP(scheduled_kills)) {
     Scheme_Object *k;
     k = SCHEME_CAR(scheduled_kills);
@@ -2375,6 +2412,14 @@ static void do_swap_thread()
   swapping = 1;
 #endif
 
+#ifdef MZ_USE_PLACES
+  if (GC_is_using_master()) {
+    scheme_log_abort("attempted thread swap during master GC use");
+    abort();
+  }
+#endif
+
+
   if (!swap_no_setjmp && SETJMP(scheme_current_thread)) {
     /* We're back! */
     /* See also initial swap in in start_child() */
@@ -2951,6 +2996,10 @@ static Scheme_Object *thread_wait(int argc, Scheme_Object *args[])
   }
 
   return scheme_void;
+}
+
+void scheme_thread_wait(Scheme_Object *thread) {
+  thread_wait(1, &thread);
 }
 
 static void register_thread_sync()
@@ -4074,10 +4123,12 @@ void scheme_thread_block(float sleep_time)
   check_scheduled_kills();
 
 #ifdef MZ_USE_FUTURES
-  scheme_check_future_work();
+  if (!do_atomic)
+    scheme_check_future_work();
 #endif
 #if defined(MZ_USE_MZRT) && !defined(DONT_USE_FOREIGN)
-  scheme_check_foreign_work();
+  if (!do_atomic)
+    scheme_check_foreign_work();
 #endif
 
   if (!do_atomic && (sleep_end >= 0.0)) {
@@ -4194,6 +4245,13 @@ void scheme_thread_block(float sleep_time)
 #if defined(MZ_USE_PLACES)
   if (!do_atomic)
     scheme_place_check_for_interruption();
+#endif
+
+  /* Propagate memory-use information and check for custodian-based
+     GC triggers due to child place memory use: */
+#if defined(MZ_PRECISE_GC) && defined(MZ_USE_PLACES)
+  scheme_place_check_memory_use();
+  check_scheduled_kills();
 #endif
   
   if (sleep_end > 0) {
@@ -6270,7 +6328,7 @@ void scheme_set_param(Scheme_Config *c, int pos, Scheme_Object *o)
 static Scheme_Parameterization *malloc_paramz()
 {
   return (Scheme_Parameterization *)scheme_malloc_tagged(sizeof(Scheme_Parameterization) + 
-                                                         (max_configs - 1) * sizeof(Scheme_Object*));
+                                                         (max_configs - mzFLEX_DELTA) * sizeof(Scheme_Object*));
 }
 
 void scheme_flatten_config(Scheme_Config *orig_c)
@@ -6549,8 +6607,7 @@ static void make_initial_config(Scheme_Thread *p)
   cells = scheme_make_bucket_table(5, SCHEME_hash_weak_ptr);
   p->cell_values = cells;
 
-  paramz = (Scheme_Parameterization *)scheme_malloc_tagged(sizeof(Scheme_Parameterization) + 
-							   (max_configs - 1) * sizeof(Scheme_Object*));
+  paramz = malloc_paramz();
 #ifdef MZTAG_REQUIRED
   paramz->type = scheme_rt_parameterization;
 #endif
@@ -6593,8 +6650,6 @@ static void make_initial_config(Scheme_Thread *p)
   init_param(cells, paramz, MZCONFIG_PRINT_LONG_BOOLEAN, scheme_false);
   init_param(cells, paramz, MZCONFIG_PRINT_AS_QQ, scheme_true);
   init_param(cells, paramz, MZCONFIG_PRINT_SYNTAX_WIDTH, scheme_make_integer(32));
-
-  init_param(cells, paramz, MZCONFIG_HONU_MODE, scheme_false);
 
   init_param(cells, paramz, MZCONFIG_COMPILE_MODULE_CONSTS, scheme_true);
   init_param(cells, paramz, MZCONFIG_USE_JIT, scheme_startup_use_jit ? scheme_true : scheme_false);
@@ -7561,6 +7616,7 @@ void scheme_prepare_this_thread_for_GC(Scheme_Thread *p)
 
 static void get_ready_for_GC()
 {
+  start_this_gc_real_time = scheme_get_inexact_milliseconds();
   start_this_gc_time = scheme_get_process_milliseconds();
 
 #ifdef MZ_USE_FUTURES
@@ -7635,6 +7691,7 @@ static void done_with_GC()
 #endif
 
   end_this_gc_time = scheme_get_process_milliseconds();
+  end_this_gc_real_time = scheme_get_inexact_milliseconds();
   scheme_total_gc_time += (end_this_gc_time - start_this_gc_time);
 
   run_gc_callbacks(0);
@@ -7692,17 +7749,24 @@ static char *gc_num(char *nums, int v)
   return nums + i;
 }
 
+#ifdef MZ_XFORM
+END_XFORM_SKIP;
+#endif
+
 static void inform_GC(int master_gc, int major_gc, 
                       intptr_t pre_used, intptr_t post_used,
-                      intptr_t pre_admin, intptr_t post_admin)
+                      intptr_t pre_admin, intptr_t post_admin,
+                      intptr_t post_child_places_used)
 {
-  Scheme_Logger *logger = scheme_get_main_logger();
-  if (logger) {
+  Scheme_Logger *logger;
+  logger = scheme_get_main_logger();
+  if (logger && scheme_log_level_p(logger, SCHEME_LOG_DEBUG)) {
     /* Don't use scheme_log(), because it wants to allocate a buffer
        based on the max value-print width, and we may not be at a
        point where parameters are available. */
-    char buf[128], nums[128];
+    char buf[256], nums[128];
     intptr_t buflen, delta, admin_delta;
+    Scheme_Object *vec, *v;
 
 #ifdef MZ_USE_PLACES
 # define PLACE_ID_FORMAT "%d:"
@@ -7710,32 +7774,57 @@ static void inform_GC(int master_gc, int major_gc,
 # define PLACE_ID_FORMAT ""
 #endif
 
+    vec = scheme_false;
+    if (!master_gc && gc_info_prefab) {
+      vec = scheme_make_vector(11, scheme_false);
+      SCHEME_VEC_ELS(vec)[1] = (major_gc ? scheme_true : scheme_false);
+      SCHEME_VEC_ELS(vec)[2] = scheme_make_integer(pre_used);
+      SCHEME_VEC_ELS(vec)[3] = scheme_make_integer(pre_admin);
+      SCHEME_VEC_ELS(vec)[4] = scheme_make_integer(scheme_code_page_total);
+      SCHEME_VEC_ELS(vec)[5] = scheme_make_integer(post_used);
+      SCHEME_VEC_ELS(vec)[6] = scheme_make_integer(post_admin);
+      v = scheme_make_integer_value(start_this_gc_time);
+      SCHEME_VEC_ELS(vec)[7] = v;
+      v = scheme_make_integer_value(end_this_gc_time);
+      SCHEME_VEC_ELS(vec)[8] = v;
+      v = scheme_make_double(start_this_gc_real_time);
+      SCHEME_VEC_ELS(vec)[9] = v;
+      v = scheme_make_double(end_this_gc_real_time);
+      SCHEME_VEC_ELS(vec)[10] = v;
+      vec = scheme_make_prefab_struct_instance(gc_info_prefab, vec);
+    }
+
+    START_XFORM_SKIP;
+
     memset(nums, 0, sizeof(nums));
 
     delta = pre_used - post_used;
     admin_delta = (pre_admin - post_admin) - delta;
     sprintf(buf,
-            "GC [" PLACE_ID_FORMAT "%s] at %sK(+%sK)[+%sK];"
-            " freed %sK(%s%sK) in %" PRIdPTR " msec",
+            "GC[" PLACE_ID_FORMAT "%s] @ %sK(+%sK)[+%sK];"
+            " free %sK(%s%sK) %" PRIdPTR "ms @ %" PRIdPTR,
 #ifdef MZ_USE_PLACES
             scheme_current_place_id,
 #endif
-            (master_gc ? "MASTER" : (major_gc ? "MAJOR" : "minor")),
+            (master_gc ? "MST" : (major_gc ? "MAJ" : "min")),
             gc_num(nums, pre_used), gc_num(nums, pre_admin - pre_used),
             gc_num(nums, scheme_code_page_total),
             gc_num(nums, delta), ((admin_delta < 0) ? "" : "+"),  gc_num(nums, admin_delta),
-            (master_gc ? 0 : (end_this_gc_time - start_this_gc_time)));
+            (master_gc ? 0 : (end_this_gc_time - start_this_gc_time)),
+            start_this_gc_time);
     buflen = strlen(buf);
 
-    scheme_log_message(logger, SCHEME_LOG_DEBUG, buf, buflen, NULL);
+    END_XFORM_SKIP;
+
+    scheme_log_message(logger, SCHEME_LOG_DEBUG, buf, buflen, vec);
   }
 
-}
+#ifdef MZ_USE_PLACES
+  if (!master_gc) {
+    scheme_place_set_memory_use(post_used + post_child_places_used);
+  }
 #endif
-
-
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
+}
 #endif
 
 /*========================================================================*/

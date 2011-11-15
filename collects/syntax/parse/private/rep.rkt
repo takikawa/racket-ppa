@@ -1,18 +1,21 @@
 #lang racket/base
 (require (for-template racket/base
                        racket/stxparam
-                       "keywords.rkt"
-                       "runtime.rkt"
-                       (only-in unstable/syntax phase-of-enclosing-module))
+                       syntax/parse/private/keywords
+                       syntax/parse/private/residual ;; keep abs. path
+                       syntax/parse/private/runtime)
          racket/contract/base
          "minimatch.rkt"
-         syntax/id-table
+         syntax/private/id-table
          syntax/stx
          syntax/keyword
          racket/syntax
          unstable/struct
          "txlift.rkt"
+         "rep-attrs.rkt"
          "rep-data.rkt"
+         "rep-patterns.rkt"
+         syntax/parse/private/residual-ct ;; keep abs. path
          "kws.rkt")
 
 ;; Error reporting
@@ -189,7 +192,7 @@
   (define attributes (options-select-value chunks '#:attributes #:default #f))
   (define-values (decls defs) (get-decls+defs chunks strict?))
   (values rest description transparent? attributes auto-nested? colon-notation?
-          decls defs (make options commit? delimit-cut?)))
+          decls defs (options commit? delimit-cut?)))
 
 ;; ----
 
@@ -1301,10 +1304,7 @@ A syntax class is integrable if
 ;; check-literal-entry : stx stx -> (list id id ct-phase ct-phase)
 (define (check-literal-entry stx ctx)
   (define (go internal external phase)
-    (txlift #`(check-literal (quote-syntax #,external)
-                             #,phase
-                             (phase-of-enclosing-module)
-                             (quote-syntax #,ctx)))
+    (txlift #`(check-literal #,external #,phase #,ctx))
     (list internal external phase phase))
   (syntax-case stx ()
     [(internal external #:phase phase)

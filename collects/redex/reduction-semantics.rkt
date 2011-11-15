@@ -13,6 +13,7 @@
          --> fresh with ;; keywords for reduction-relation
          hole in-hole ;; keywords for term
          ::= ;; keywords for language definition
+         I O ;; keyword for define-judgment-form
          extend-reduction-relation
          reduction-relation?
          
@@ -28,6 +29,8 @@
          define-metafunction
          define-metafunction/extension
          define-relation
+         define-judgment-form
+         judgment-holds
          in-domain?
          caching-enabled?
          make-coverage)
@@ -37,6 +40,7 @@
          term-match/single
          redex-let
          redex-let*
+         define-term
          match? match-bindings
          make-bind bind? bind-name bind-exp
          

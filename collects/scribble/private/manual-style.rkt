@@ -5,13 +5,13 @@
          (only-in "../basic.rkt" aux-elem itemize)
          "../scheme.rkt"
          (only-in "../core.rkt" make-style plain
-                  make-nested-flow
+                  make-nested-flow box-mode box-mode*
                   [element? core:element?])
          "manual-utils.rkt"
          "on-demand.rkt"
          "manual-sprop.rkt"
          racket/list
-         racket/contract
+         racket/contract/base
          racket/string)
 
 (provide (rename-out [hyperlink link])
@@ -20,7 +20,8 @@
          image
          (rename-out [image image/plain])
          itemize
-         aux-elem)
+         aux-elem
+         code-inset)
 (provide/contract [filebox ((or/c core:element? string?) pre-flow? . -> . block?)])
 
 (define styling-f/c
@@ -29,7 +30,7 @@
   (provide/contract [id styling-f/c] ...))
 (provide-styling racketmodfont racketoutput
                  racketerror racketfont racketvalfont racketresultfont racketidfont racketvarfont
-                 racketparenfont racketkeywordfont racketmetafont
+                 racketcommentfont racketparenfont racketkeywordfont racketmetafont
                  onscreen defterm filepath exec envvar Flag DFlag PFlag DPFlag math
                  procedure
                  indexed-file indexed-envvar idefterm pidefterm)
@@ -100,6 +101,8 @@
   (make-element paren-color (decode-content str)))
 (define (racketmetafont . str)
   (make-element meta-color (decode-content str)))
+(define (racketcommentfont . str)
+  (make-element comment-color (decode-content str)))
 (define (racketmodfont . str)
   (make-element module-color (decode-content str)))
 (define (racketkeywordfont . str)
@@ -152,6 +155,11 @@
 
 (define (inset-flow . c)
   (make-blockquote "insetpara" (flow-paragraphs (decode-flow c))))
+
+(define code-inset-style 
+  (make-style 'code-inset null))
+(define (code-inset b)
+  (make-blockquote code-inset-style (list b)))
 
 (define (commandline . s)
   (make-paragraph (cons (hspace 2) (map (lambda (s)
@@ -225,7 +233,9 @@
 
 (define (filebox filename . inside)
   (make-nested-flow 
-   (make-style "Rfilebox" scheme-properties)
+   (make-style "Rfilebox" (list* 'multicommand
+                                 (box-mode "RfileboxBoxT" "RfileboxBoxC" "RfileboxBoxB") 
+                                 scheme-properties))
    (list
     (make-styled-paragraph 
      (list (make-element
@@ -233,9 +243,9 @@
             (if (string? filename)
                 (filepath filename)
                 filename)))
-     (make-style "Rfiletitle" scheme-properties))
+     (make-style "Rfiletitle" (cons (box-mode* "RfiletitleBox") scheme-properties)))
     (make-nested-flow 
-     (make-style "Rfilecontent" scheme-properties)
+     (make-style "Rfilecontent" (cons (box-mode* "RfilecontentBox") scheme-properties))
      (decode-flow inside)))))
 
 

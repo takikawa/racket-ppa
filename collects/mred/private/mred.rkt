@@ -242,6 +242,7 @@
 	   play-sound
 	   get-display-size
 	   get-display-left-top-inset
+	   get-display-count
 	   get-color-from-user
 	   get-font-from-user
            append-editor-operation-menu-items
@@ -271,6 +272,7 @@
 	   application-preferences-handler
 	   application-quit-handler
 	   application-file-handler
+	   application-start-empty-handler
 	   current-eventspace-has-standard-menus?
 	   current-eventspace-has-menu-root?
 	   eventspace-handler-thread

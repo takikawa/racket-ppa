@@ -2,8 +2,6 @@
 (require ffi/unsafe
          ffi/unsafe/define
          ffi/unsafe/alloc
-         ffi/unsafe/atomic
-         setup/dirs
          "bstr.rkt"
          "../private/utils.rkt"
          "../private/libs.rkt")
@@ -13,7 +11,8 @@
   [(macosx) 
    ;; for PPC, it's actually version 8!
    (ffi-lib "libjpeg.62.dylib")]
-  [(windows) (ffi-lib "libjpeg-7.dll")])
+  [(win32) (ffi-lib "libjpeg-7.dll")]
+  [(win64) (ffi-lib "libjpeg-8.dll")])
 
 (define-ffi-definer define-jpeg jpeg-lib
   #:provide provide)

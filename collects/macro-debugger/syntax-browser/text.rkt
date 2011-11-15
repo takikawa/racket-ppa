@@ -1,10 +1,9 @@
 #lang racket/base
-(require racket/list
-         racket/class
+(require racket/class
          racket/gui/base
          data/interval-map
          drracket/arrow
-         framework/framework
+         framework
          data/interval-map
          "interfaces.rkt")
 

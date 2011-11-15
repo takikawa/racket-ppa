@@ -23,7 +23,7 @@
     lazy-length lazy-list-ref lazy-list-tail lazy-append lazy-reverse lazy-empty? 
     lazy-assoc lazy-assq lazy-assv lazy-cons? lazy-remove lazy-remq lazy-remv
     lazy-member lazy-memq lazy-memv lazy-filter1 lazy-filter2 lazy-fold
-    lazy-cyclic1))
+    lazy-cyclic1 lazy-fn-app))
 
 (let ((outer-namespace (current-namespace)))
   (parameterize ([display-only-errors #t]
@@ -35,7 +35,7 @@
     #;(namespace-attach-module outer-namespace 'mzlib/pconvert-prop (current-namespace))
     (namespace-require 'test-engine/racket-tests)
     (if (and (run-all-tests-except 
-              (append '(bad-and bad-cons check-error begin-let-bug prims qq-splice time 
+              (append '(bad-and check-error begin-let-bug prims qq-splice time 
                                 set! local-set! local-struct/i local-struct/ilam)
                       lazy-tests))
              (run-tests lazy-tests))

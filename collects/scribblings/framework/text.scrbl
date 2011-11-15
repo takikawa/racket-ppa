@@ -83,16 +83,24 @@
     get-fixed-style].
   }
 
-  @defmethod*[(((move/copy-to-edit (dest-text (is-a?/c text%)) (start exact-integer?) (end exact-integer?) (dest-pos exact-integer?)) void?))]{
+  @defmethod[(move/copy-to-edit [dest-text (is-a?/c text%)]
+                                [start exact-integer?]
+                                [end exact-integer?]
+                                [dest-pos exact-integer?]
+                                [#:try-to-move? try-to-move? boolean? #t])
+             void?]{
     This moves or copies text and snips to another edit.
 
     Moves or copies from the edit starting at @racket[start] and ending at
     @racket[end]. It puts the copied text and snips in @racket[dest-text]
     starting at location @racket[dest-pos].
 
-    If a snip refused to be moved, it will be copied, otherwise it will be
-    moved. A snip may refuse to be moved by returning @racket[#f] from
-    @method[snip% release-from-owner].
+    If @racket[try-to-move] is @racket[#t], then the snips are removed;
+    and if it is @racket[#f], then they are copied.
+    
+    If a snip refused to be moved, it will be copied and deleted from the editor,
+    otherwise it will be moved. A snip may refuse to be moved by returning
+    @racket[#f] from @method[snip% release-from-owner].
   }
 
   @defmethod*[(((initial-autowrap-bitmap) (or/c #f (is-a?/c bitmap%))))]{
@@ -691,6 +699,25 @@
   }
 }
 
+@definterface[text:crlf-line-endings<%> (text%)]{
+  Objects supporting this interface use 
+  @method[editor<%> use-file-text-mode] to
+  change the line ending style under windows. See 
+  @method[text:crlf-line-endings-mixin after-load-file] for more information.
+}
+
+
+@defmixin[text:crlf-line-endings-mixin (text%) (text:crlf-line-endings<%>)]{
+  @defmethod[#:mode override (after-load-file [success? any/c]) void?]{
+    Checks to see if the newly loaded file has any lines terminated with 
+    @racket["\n"] (i.e., not @racket["\r\n"]) or if the file is empty. 
+    If so, and if the @racket[system-type] returns @racket['windows], then
+    this method calls @method[editor<%> use-file-text-mode], passing @racket[#f]. 
+    
+    Otherwise, calls @method[editor<%> use-file-text-mode] with @racket[#t].
+  }
+}
+
 @definterface[text:file<%> (editor:file<%> text:basic<%>)]{
   Mixins that implement this interface lock themselves when the file they are
   editing is read only.
@@ -768,6 +795,11 @@
     Both @racket[start] and @racket[end] must be less than
     @method[text:ports<%> get-insertion-point] (or else it is safe to delete
     them so you don't need this method).
+  }
+  
+  @defmethod[(do-submission) void?]{
+    Triggers a submission to the input port with what is currently pending 
+    in the editor.
   }
 
   @defmethod*[(((get-insertion-point) exact-integer?))]{

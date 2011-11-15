@@ -56,7 +56,9 @@
    (to-paragraph
     (typeset-type (cadr func)))))
 
-(define-syntax-rule (prim-variables (section-prefix) empty true false)
+(define-syntax-rule
+  (prim-variables (section-prefix) empty true false ..2 ..3 ..4 ..5 ..6)
+  ;; ===> 
   (make-splice
    (list
     @section[#:tag (string-append section-prefix " Pre-Defined Variables")]{Pre-Defined Variables}
@@ -71,7 +73,16 @@
 
     @defthing[false boolean?]{
 
-    The false value.})))
+    The false value.}
+
+    @section[#:tag (string-append section-prefix " Template Variables")]{Template Variables}
+    @; MF: I tried abstracting but I failed
+    @defidform[..2]{A placeholder for indicating that a definition is a template.}
+    @defidform[..3]{A placeholder for indicating that a definition is a template.}
+    @defidform[..4]{A placeholder for indicating that a definition is a template.}
+    @defidform[..5]{A placeholder for indicating that a definition is a template.}
+    @defidform[..6]{A placeholder for indicating that a definition is a template.}
+    )))
 
 ;; ----------------------------------------
 
@@ -157,8 +168,8 @@
                         cond-id cond-elem
                         else-id else-elem
                         if-id if-elem
-                        and-id and-elem
                         or-id or-elem
+                        and-id and-elem
                         check-expect-id check-expect-elem
                         check-within-id check-within-elem
                         check-error-id check-error-elem
@@ -268,7 +279,7 @@
 
     Evaluates to @true-elem if all the @racket[expression]s are
     @|true-elem|. If any @racket[expression] is @|false-elem|, the @and-elem
-    expression immediately evaluates to @false-elem (and the expressions to the
+    expression evaluates to @false-elem (and the expressions to the
     right of that expression are not evaluated.)
 
     If any of the expressions evaluate to a value other than @true-elem or

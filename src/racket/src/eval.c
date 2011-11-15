@@ -98,10 +98,10 @@
    lifting (of procedures that close over nothing or only globals).
    Beware that the resulting bytecode object is a graph, not a tree,
    due to sharing (potentially cyclic) of closures that are "empty"
-   but actually refer to other "empty" closures. See "resove.c".
+   but actually refer to other "empty" closures. See "resolve.c".
 
    The fourth pass, "sfs", performs another liveness analysis on stack
-   slows and inserts operations to clear stack slots as necessary to
+   slots and inserts operations to clear stack slots as necessary to
    make execution safe for space. In particular, dead slots need to be
    cleared before a non-tail call into arbitrary Scheme code. This pass
    can mutate the result of the "resolve" pass. See "sfs.c".
@@ -158,8 +158,14 @@
 # include "future.h"
 #endif
 
+#ifdef MZ_USE_JIT
+# define INIT_JIT_ON 1
+#else
+# define INIT_JIT_ON 0
+#endif
+
 /* globals */
-SHARED_OK int scheme_startup_use_jit = 1;
+SHARED_OK int scheme_startup_use_jit = INIT_JIT_ON;
 void scheme_set_startup_use_jit(int v) { scheme_startup_use_jit =  v; }
 
 /* THREAD LOCAL SHARED */
@@ -474,6 +480,77 @@ static uintptr_t adjust_stack_base(uintptr_t bnd) {
 }
 #endif
 
+#ifdef WINDOWS_FIND_STACK_BOUNDS
+intptr_t find_exe_stack_size()
+{
+  intptr_t sz = WINDOWS_DEFAULT_STACK_SIZE;
+  wchar_t *fn;
+  DWORD len = 1024;
+
+  /* Try to read the executable to find out the initial
+     stack size. */
+
+  fn = (wchar_t *)malloc(sizeof(wchar_t) * len);
+  if (GetModuleFileNameW(NULL, fn, len) < len) {
+    HANDLE fd;
+    fd = CreateFileW(fn,
+		     GENERIC_READ,
+		     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+		     NULL,
+		     OPEN_EXISTING,
+		     0,
+		     NULL);
+    if (fd != INVALID_HANDLE_VALUE) {
+      int pos;
+      short kind;
+      DWORD got;
+      /* Skip DOS stub */
+      if (SetFilePointer(fd, 0x3C, NULL, FILE_BEGIN)
+	  != INVALID_SET_FILE_POINTER) {
+	if (ReadFile(fd, &pos, sizeof(int), &got, NULL)
+	    && (got == sizeof(int))) {
+	  /* Read offset to header */
+	  if (SetFilePointer(fd, pos + 20 + 4, NULL, FILE_BEGIN)
+	      != INVALID_SET_FILE_POINTER) {
+	    /* Check magic number */
+	    if (ReadFile(fd, &kind, sizeof(short), &got, NULL)
+		&& (got == sizeof(short))) {
+	      /* Two possible magic numbers: PE32 or PE32+: */
+	      if ((kind == 0x10b) || (kind == 0x20b)) {
+		/* Skip to PE32[+] header's stack reservation value: */
+		if (SetFilePointer(fd, pos + 20 + 4 + 72, NULL, FILE_BEGIN)
+		    != INVALID_SET_FILE_POINTER) {
+		  mzlonglong lsz;
+		  if (kind == 0x10b) {
+		    /* PE32: 32-bit stack size: */
+		    int ssz;
+		    if (ReadFile(fd, &ssz, sizeof(int), &got, NULL)
+			&& (got == sizeof(int))) {
+		      sz = ssz;
+		    }
+		  } else {
+		    /* PE32+: 64-bit stack size: */
+		    mzlonglong lsz;
+		    if (ReadFile(fd, &lsz, sizeof(mzlonglong), &got, NULL)
+			&& (got == sizeof(mzlonglong))) {
+		      sz = lsz;
+		    }
+		  }
+		}
+	      }
+	    }
+	  }
+	}
+      }
+      CloseHandle(fd);
+    }
+  }
+  free(fn);
+
+  return sz;
+}
+#endif
+
 void scheme_init_stack_check()
      /* Finds the C stack limit --- platform-specific. */
 {
@@ -517,7 +594,11 @@ void scheme_init_stack_check()
 
 # ifdef WINDOWS_FIND_STACK_BOUNDS
     scheme_stack_boundary = scheme_get_current_os_thread_stack_base();
-    scheme_stack_boundary += (STACK_SAFETY_MARGIN - WINDOWS_DEFAULT_STACK_SIZE);
+    {
+      intptr_t sz;
+      sz = find_exe_stack_size();
+      scheme_stack_boundary += (STACK_SAFETY_MARGIN - sz);
+    }
 # endif
 
 # ifdef MACOS_FIND_STACK_BOUNDS
@@ -720,7 +801,8 @@ static Scheme_Object *link_module_variable(Scheme_Object *modidx,
 
     if (check_access && !SAME_OBJ(menv, env)) {
       varname = scheme_check_accessible_in_module(menv, insp, NULL, varname, NULL, NULL, 
-                                                  insp, NULL, pos, 0, NULL, NULL, env, NULL);
+                                                  insp, NULL, pos, 0, NULL, NULL, env, NULL,
+                                                  NULL);
     }
   }
 
@@ -1662,10 +1744,7 @@ define_execute_with_dynamic_state(Scheme_Object *vec, int delta, int defmacro,
 
     save_runstack = scheme_push_prefix(dm_env->exp_env, rp, NULL, NULL, 1, 1, NULL, scheme_false);
     vals = scheme_eval_linked_expr_multi_with_dynamic_state(vals_expr, dyn_state);
-    if (defmacro == 2)
-      dm_env = NULL;
-    else
-      scheme_pop_prefix(save_runstack);
+    scheme_pop_prefix(save_runstack);
   } else {
     vals = _scheme_eval_linked_expr_multi(vals_expr);
     dm_env = NULL;
@@ -1701,7 +1780,7 @@ define_execute_with_dynamic_state(Scheme_Object *vec, int delta, int defmacro,
 	  scheme_set_global_bucket("define-values", b, values[i], 1);
 	  scheme_shadow(scheme_get_bucket_home(b), (Scheme_Object *)b->key, 1);
 
-	  if (SCHEME_TOPLEVEL_FLAGS(var) & SCHEME_TOPLEVEL_CONST) {
+	  if (SCHEME_TOPLEVEL_FLAGS(var) & SCHEME_TOPLEVEL_SEAL) {
             ((Scheme_Bucket_With_Flags *)b)->flags |= GLOB_IS_IMMUTATED;
 	  }
 	}
@@ -1733,7 +1812,7 @@ define_execute_with_dynamic_state(Scheme_Object *vec, int delta, int defmacro,
       scheme_set_global_bucket("define-values", b, vals, 1);
       scheme_shadow(scheme_get_bucket_home(b), (Scheme_Object *)b->key, 1);
       
-      if (SCHEME_TOPLEVEL_FLAGS(var) & SCHEME_TOPLEVEL_CONST) {
+      if (SCHEME_TOPLEVEL_FLAGS(var) & SCHEME_TOPLEVEL_SEAL) {
         int flags = GLOB_IS_IMMUTATED;
         if (SCHEME_PROCP(vals_expr) 
             || SAME_TYPE(SCHEME_TYPE(vals_expr), scheme_unclosed_procedure_type)
@@ -1775,16 +1854,13 @@ define_execute_with_dynamic_state(Scheme_Object *vec, int delta, int defmacro,
   } else
     name = NULL;
   
-  if (defmacro > 1)
-    scheme_pop_prefix(save_runstack);
-
   {
     const char *symname;
 
     symname = (show_any ? scheme_symbol_name(name) : "");
 
     scheme_wrong_return_arity((defmacro 
-			       ? (dm_env ? "define-syntaxes" : "define-values-for-syntax")
+			       ? "define-syntaxes"
 			       : "define-values"),
 			      i, g,
 			      (g == 1) ? (Scheme_Object **)vals : scheme_current_thread->ku.multiple.array,
@@ -1826,18 +1902,24 @@ ref_execute (Scheme_Object *data)
 {
   Scheme_Prefix *toplevels;
   Scheme_Object *o;
-  Scheme_Bucket *var;
+  Scheme_Object *var;
   Scheme_Object *tl = SCHEME_PTR1_VAL(data);
   Scheme_Env *env;
 
   toplevels = (Scheme_Prefix *)MZ_RUNSTACK[SCHEME_TOPLEVEL_DEPTH(tl)];
-  var = (Scheme_Bucket *)toplevels->a[SCHEME_TOPLEVEL_POS(tl)];
-  env = scheme_environment_from_dummy(SCHEME_CDR(data));
+  var = toplevels->a[SCHEME_TOPLEVEL_POS(tl)];
+  if (SCHEME_FALSEP(SCHEME_PTR2_VAL(data)))
+    env = NULL;
+  else
+    env = scheme_environment_from_dummy(SCHEME_PTR2_VAL(data));
   
   o = scheme_alloc_object();
   o->type = scheme_global_ref_type;
-  SCHEME_PTR1_VAL(o) = (Scheme_Object *)var;
-  SCHEME_PTR2_VAL(o) = (Scheme_Object *)env;
+  SCHEME_PTR1_VAL(o) = var;
+  SCHEME_PTR2_VAL(o) = (env ? (Scheme_Object *)env : scheme_false);
+
+  if (SCHEME_VARREF_FLAGS(data) & 0x1)
+    SCHEME_VARREF_FLAGS(o) |= 0x1;
 
   return o;
 }
@@ -1919,7 +2001,7 @@ scheme_case_lambda_execute(Scheme_Object *expr)
 
   seqout = (Scheme_Case_Lambda *)
     scheme_malloc_tagged(sizeof(Scheme_Case_Lambda)
-			 + (seqin->count - 1) * sizeof(Scheme_Object *));
+			 + (seqin->count - mzFLEX_DELTA) * sizeof(Scheme_Object *));
   seqout->so.type = scheme_case_closure_type;
   seqout->count = seqin->count;
   seqout->name = seqin->name;
@@ -2021,7 +2103,7 @@ static Scheme_Object *splice_execute(Scheme_Object *data)
   }
 }
 
-static Scheme_Object *do_define_syntaxes_execute(Scheme_Object *expr, Scheme_Env *dm_env, int for_stx);
+static Scheme_Object *do_define_syntaxes_execute(Scheme_Object *expr, Scheme_Env *dm_env);
 
 static void *define_syntaxes_execute_k(void)
 {
@@ -2030,11 +2112,11 @@ static void *define_syntaxes_execute_k(void)
   Scheme_Env *dm_env = (Scheme_Env *)p->ku.k.p2;
   p->ku.k.p1 = NULL;
   p->ku.k.p2 = NULL;
-  return do_define_syntaxes_execute(form, dm_env, p->ku.k.i1);
+  return do_define_syntaxes_execute(form, dm_env);
 }
 
 static Scheme_Object *
-do_define_syntaxes_execute(Scheme_Object *form, Scheme_Env *dm_env, int for_stx)
+do_define_syntaxes_execute(Scheme_Object *form, Scheme_Env *dm_env)
 {
   Scheme_Thread *p = scheme_current_thread;
   Resolve_Prefix *rp;
@@ -2055,7 +2137,6 @@ do_define_syntaxes_execute(Scheme_Object *form, Scheme_Env *dm_env, int for_stx)
       dm_env = scheme_environment_from_dummy(dummy);
     }
     p->ku.k.p2 = (Scheme_Object *)dm_env;
-    p->ku.k.i1 = for_stx;
 
     return (Scheme_Object *)scheme_enlarge_runstack(depth, define_syntaxes_execute_k);
   }
@@ -2082,24 +2163,40 @@ do_define_syntaxes_execute(Scheme_Object *form, Scheme_Env *dm_env, int for_stx)
     scheme_set_cont_mark(scheme_parameterization_key, (Scheme_Object *)config);
 
     scheme_set_dynamic_state(&dyn_state, rhs_env, NULL, scheme_false, dm_env, dm_env->link_midx);
-    result = define_execute_with_dynamic_state(form, 4, for_stx ? 2 : 1, rp, dm_env, &dyn_state);
 
+    if (SAME_TYPE(SCHEME_TYPE(form), scheme_define_syntaxes_type)) {
+      result = define_execute_with_dynamic_state(form, 4, 1, rp, dm_env, &dyn_state);
+    } else {
+      Scheme_Object **save_runstack;
+
+      form = SCHEME_VEC_ELS(form)[0];
+
+      save_runstack = scheme_push_prefix(dm_env->exp_env, rp, NULL, NULL, 1, 1, NULL, scheme_false);
+
+      while (!SCHEME_NULLP(form)) {
+        (void)scheme_eval_linked_expr_multi_with_dynamic_state(SCHEME_CAR(form), &dyn_state);
+        form = SCHEME_CDR(form);
+      }
+      
+      scheme_pop_prefix(save_runstack);
+    }
+    
     scheme_pop_continuation_frame(&cframe);
 
-    return result;
+    return scheme_void;
   }
 }
 
 static Scheme_Object *
 define_syntaxes_execute(Scheme_Object *form)
 {
-  return do_define_syntaxes_execute(form, NULL, 0);
+  return do_define_syntaxes_execute(form, NULL);
 }
 
 static Scheme_Object *
-define_for_syntaxes_execute(Scheme_Object *form)
+begin_for_syntax_execute(Scheme_Object *form)
 {
-  return do_define_syntaxes_execute(form, NULL, 1);
+  return do_define_syntaxes_execute(form, NULL);
 }
 
 /*========================================================================*/
@@ -2147,7 +2244,7 @@ scheme_make_closure(Scheme_Thread *p, Scheme_Object *code, int close)
 
   closure = (Scheme_Closure *)
     scheme_malloc_tagged(sizeof(Scheme_Closure)
-			 + (i - 1) * sizeof(Scheme_Object *));
+			 + (i - mzFLEX_DELTA) * sizeof(Scheme_Object *));
 
   closure->so.type = scheme_closure_type;
   SCHEME_COMPILED_CLOS_CODE(closure) = data;
@@ -2171,7 +2268,7 @@ Scheme_Closure *scheme_malloc_empty_closure()
 {
   Scheme_Closure *cl;
 
-  cl = (Scheme_Closure *)scheme_malloc_tagged(sizeof(Scheme_Closure) - sizeof(Scheme_Object *));
+  cl = (Scheme_Closure *)scheme_malloc_tagged(sizeof(Scheme_Closure) - (mzFLEX_DELTA * sizeof(Scheme_Object *)));
   cl->so.type = scheme_closure_type;
 
   return cl;
@@ -2894,7 +2991,8 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	  app = (Scheme_App_Rec *)obj;
 	  num_rands = app->num_args;
 	  
-	  d_evals = sizeof(Scheme_App_Rec) + (num_rands * sizeof(Scheme_Object *));
+	  d_evals = (sizeof(Scheme_App_Rec) 
+                     + ((num_rands + 1 - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
 #ifndef MZ_XFORM
 	  evals = ((char *)obj) + d_evals;
 #endif
@@ -3431,10 +3529,10 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
           v = define_syntaxes_execute(obj);
           break;
         }
-      case scheme_define_for_syntax_type:
+      case scheme_begin_for_syntax_type:
         {
           UPDATE_THREAD_RSPTR();
-          v = define_for_syntaxes_execute(obj);
+          v = begin_for_syntax_execute(obj);
           break;
         }
       case scheme_set_bang_type:
@@ -3577,7 +3675,7 @@ static Scheme_Object *add_renames_unless_module(Scheme_Object *form, Scheme_Env 
   if (genv->rename_set) {
     form = scheme_add_rename(form, genv->rename_set);
     /* this "phase shift" just attaches the namespace's module registry: */
-    form = scheme_stx_phase_shift(form, 0, NULL, NULL, genv->module_registry->exports, NULL);
+    form = scheme_stx_phase_shift(form, NULL, NULL, NULL, genv->module_registry->exports, NULL);
   }
 
   return form;
@@ -3651,7 +3749,7 @@ static void *compile_k(void)
   if (rename) {
     form = add_renames_unless_module(form, genv);
     if (genv->module) {
-      form = scheme_stx_phase_shift(form, 0, 
+      form = scheme_stx_phase_shift(form, NULL, 
 				    genv->module->me->src_modidx, 
 				    genv->module->self_modidx,
 				    genv->module_registry->exports,
@@ -4058,7 +4156,7 @@ Scheme_Object *scheme_load_compiled_stx_string(const char *str, intptr_t len)
 
   port = scheme_make_sized_byte_string_input_port(str, -len);
 
-  expr = scheme_internal_read(port, NULL, 1, 0, 0, 0, 0, -1, NULL, NULL, NULL, NULL);
+  expr = scheme_internal_read(port, NULL, 1, 0, 0, 0, -1, NULL, NULL, NULL, NULL);
 
   expr = _scheme_eval_compiled(expr, scheme_get_env(NULL));
 
@@ -4087,7 +4185,7 @@ Scheme_Object *scheme_eval_compiled_stx_string(Scheme_Object *expr, Scheme_Env *
     result = scheme_make_vector(len - 1, NULL);
 
     for (i = 0; i < len - 1; i++) {
-      s = scheme_stx_phase_shift(SCHEME_VEC_ELS(expr)[i], shift, orig, modidx, 
+      s = scheme_stx_phase_shift(SCHEME_VEC_ELS(expr)[i], scheme_make_integer(shift), orig, modidx, 
                                  env->module_registry->exports, NULL);
       SCHEME_VEC_ELS(result)[i] = s;
     }
@@ -5149,6 +5247,8 @@ local_eval(int argc, Scheme_Object **argv)
   if (!((void **)SCHEME_PTR1_VAL(argv[2]))[2])
     ((void **)SCHEME_PTR1_VAL(argv[2]))[2] = stx_env;
 
+  SCHEME_EXPAND_OBSERVE_NEXT(observer);
+
   return scheme_void;
 }
 
@@ -5166,7 +5266,7 @@ Scheme_Object *scheme_eval_clone(Scheme_Object *expr)
     return scheme_module_eval_clone(expr);
     break;
   case scheme_define_syntaxes_type:
-  case scheme_define_for_syntax_type:
+  case scheme_begin_for_syntax_type:
     return scheme_syntaxes_eval_clone(expr);
   default:
     return expr;
@@ -5234,7 +5334,7 @@ Scheme_Object **scheme_push_prefix(Scheme_Env *genv, Resolve_Prefix *rp,
     tl_map_len = ((rp->num_toplevels + rp->num_lifts) + 31) / 32;
 
     pf = scheme_malloc_tagged(sizeof(Scheme_Prefix) 
-                              + ((i-1) * sizeof(Scheme_Object *))
+                              + ((i-mzFLEX_DELTA) * sizeof(Scheme_Object *))
                               + (tl_map_len * sizeof(int)));
     pf->so.type = scheme_prefix_type;
     pf->num_slots = i;
@@ -5255,7 +5355,8 @@ Scheme_Object **scheme_push_prefix(Scheme_Env *genv, Resolve_Prefix *rp,
       if (insp && SCHEME_FALSEP(insp))
         insp = scheme_get_current_inspector();
       i = rp->num_toplevels;
-      v = scheme_stx_phase_shift_as_rename(now_phase - src_phase, src_modidx, now_modidx, 
+      v = scheme_stx_phase_shift_as_rename(scheme_make_integer(now_phase - src_phase), 
+                                           src_modidx, now_modidx, 
 					   genv ? genv->module_registry->exports : NULL,
                                            insp);
       if (v || (rp->delay_info_rpair && SCHEME_CDR(rp->delay_info_rpair))) {

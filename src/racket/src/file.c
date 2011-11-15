@@ -131,6 +131,9 @@ long scheme_creator_id = 'MzSc';
 SHARED_OK int scheme_ignore_user_paths;
 void scheme_set_ignore_user_paths(int v) { scheme_ignore_user_paths = v; }
 
+SHARED_OK int scheme_ignore_link_paths;
+void scheme_set_ignore_link_paths(int v) { scheme_ignore_link_paths = v; }
+
 #define CURRENT_WD() scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_DIRECTORY)
 
 #define TO_PATH(x) (SCHEME_GENERAL_PATHP(x) ? x : scheme_char_string_to_path(x))
@@ -200,6 +203,7 @@ static Scheme_Object *file_size(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_library_collection_paths(int argc, Scheme_Object *argv[]);
 static Scheme_Object *use_compiled_kind(int, Scheme_Object *[]);
 static Scheme_Object *use_user_paths(int, Scheme_Object *[]);
+static Scheme_Object *use_link_paths(int, Scheme_Object *[]);
 static Scheme_Object *find_system_path(int argc, Scheme_Object **argv);
 #endif
 
@@ -227,12 +231,15 @@ READ_ONLY static Scheme_Object *doc_dir_symbol, *desk_dir_symbol;
 READ_ONLY static Scheme_Object *init_dir_symbol, *init_file_symbol, *sys_dir_symbol;
 READ_ONLY static Scheme_Object *exec_file_symbol, *run_file_symbol, *collects_dir_symbol;
 READ_ONLY static Scheme_Object *pref_file_symbol, *orig_dir_symbol, *addon_dir_symbol;
+READ_ONLY static Scheme_Object *links_file_symbol;
 
 SHARED_OK static Scheme_Object *exec_cmd;
 SHARED_OK static Scheme_Object *run_cmd;
 SHARED_OK static Scheme_Object *collects_path;
 THREAD_LOCAL_DECL(static Scheme_Object *original_pwd);
 SHARED_OK static Scheme_Object *addon_dir;
+SHARED_OK static Scheme_Object *links_file;
+THREAD_LOCAL_DECL(static Scheme_Object *inst_links_path);
 
 #endif
 READ_ONLY static Scheme_Object *windows_symbol, *unix_symbol;
@@ -251,6 +258,8 @@ SHARED_OK static gid_t egid;
 
 void scheme_init_file(Scheme_Env *env)
 {
+  Scheme_Object *p;
+
   REGISTER_SO(up_symbol);
   REGISTER_SO(relative_symbol);
   REGISTER_SO(same_symbol);
@@ -273,6 +282,7 @@ void scheme_init_file(Scheme_Env *env)
   REGISTER_SO(collects_dir_symbol);
   REGISTER_SO(orig_dir_symbol);
   REGISTER_SO(addon_dir_symbol);
+  REGISTER_SO(links_file_symbol);
 #endif
   REGISTER_SO(windows_symbol);
   REGISTER_SO(unix_symbol);
@@ -300,16 +310,16 @@ void scheme_init_file(Scheme_Env *env)
   collects_dir_symbol = scheme_intern_symbol("collects-dir");
   orig_dir_symbol = scheme_intern_symbol("orig-dir");
   addon_dir_symbol = scheme_intern_symbol("addon-dir");
+  links_file_symbol = scheme_intern_symbol("links-file");
 #endif
 
   windows_symbol = scheme_intern_symbol("windows");
   unix_symbol = scheme_intern_symbol("unix");
 
-  scheme_add_global_constant("path?", 
-			     scheme_make_prim_w_arity(path_p, 
-						      "path?", 
-						      1, 1), 
-			     env);
+  p = scheme_make_prim_w_arity(path_p, "path?", 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("path?", p, env);
+
   scheme_add_global_constant("path-for-some-system?", 
 			     scheme_make_folding_prim(general_path_p, 
                                                       "path-for-some-system?", 
@@ -395,7 +405,7 @@ void scheme_init_file(Scheme_Env *env)
   scheme_add_global_constant("copy-file", 
 			     scheme_make_prim_w_arity(copy_file, 
 						      "copy-file", 
-						      2, 2), 
+						      2, 3), 
 			     env);
   scheme_add_global_constant("build-path", 
 			     scheme_make_prim_w_arity(scheme_build_path,
@@ -542,6 +552,11 @@ void scheme_init_file(Scheme_Env *env)
 			     scheme_register_parameter(use_user_paths,
 						       "use-user-specific-search-paths",
 						       MZCONFIG_USE_USER_PATHS),
+			     env);
+  scheme_add_global_constant("use-collection-link-paths",
+			     scheme_register_parameter(use_link_paths,
+						       "use-collection-link-paths",
+						       MZCONFIG_USE_LINK_PATHS),
 			     env);
 }
 
@@ -3834,7 +3849,7 @@ failed:
 static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
 {
   char *src, *dest, *reason = NULL;
-  int pre_exists = 0, has_err_val = 0, err_val = 0;
+  int pre_exists = 0, has_err_val = 0, err_val = 0, exists_ok = 0;
   Scheme_Object *bss, *bsd;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
@@ -3844,6 +3859,7 @@ static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
 
   bss = argv[0];
   bsd = argv[1];
+  exists_ok = ((argc > 2) && SCHEME_TRUEP(argv[2]));
 
   src = scheme_expand_string_filename(bss,
 				      "copy-file",
@@ -3857,79 +3873,89 @@ static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
 #ifdef UNIX_FILE_SYSTEM
   {
 # define COPY_BUFFER_SIZE 2048
-    FILE *s, *d;
     char b[COPY_BUFFER_SIZE];
     intptr_t len;
     int ok;
     struct stat buf;
+    mz_jmp_buf newbuf, * volatile savebuf;
+    int a_cnt;
+    Scheme_Object *a[2], * volatile in, * volatile out;
 
+    reason = NULL;
+    in = scheme_do_open_input_file("copy-file", 0, 1, argv, 1, &reason, &err_val);
+    if (!in) {
+      has_err_val = !!err_val;
+      goto failed;
+    }
 
     do {
-      ok = stat(src, &buf);
+      ok = fstat(scheme_get_port_fd(in), &buf);
     } while ((ok == -1) && (errno == EINTR));
-
     if (ok || S_ISDIR(buf.st_mode)) {
-      reason = "source file does not exist";
-      goto failed;
-    }
-
-    do {
-      ok = stat(dest, &buf);
-    } while ((ok == -1) && (errno == EINTR));
-
-    if (!ok) {
-      reason = "destination already exists";
-      pre_exists = 1;
-      goto failed;
-    }
-
-    s = fopen(src, "rb");
-    if (!s) {
+      reason = "error getting mode";
       err_val = errno;
       has_err_val = 1;
-      reason = "cannot open source file";
       goto failed;
     }
 
-    d = fopen(dest, "wb");
-    if (!d) {
-      err_val = errno;
-      has_err_val = 1;
-      fclose(s);
-      reason = "cannot open destination file";
+    a[0] = argv[1];
+    if (exists_ok) {
+      a_cnt = 2;
+      a[1] = scheme_intern_symbol("truncate");
+    } else
+      a_cnt = 1;
+    out = scheme_do_open_output_file("copy-file", 0, a_cnt, a, 0, 1, &reason, &err_val);
+    if (!out) {
+      scheme_close_input_port(in);
+      has_err_val = !!err_val;
       goto failed;
     }
-    
-    ok = 1;
-    while ((len = fread(b, 1, COPY_BUFFER_SIZE, s))) {
-      if (fwrite(b, 1, len, d) != len) {
-	ok = 0;
-	break;
+
+    /* catch errors or breaks during read and write to close ports: */
+    savebuf = scheme_current_thread->error_buf;
+    scheme_current_thread->error_buf = &newbuf;
+    if (scheme_setjmp(newbuf)) {
+      scheme_close_input_port(in);
+      scheme_close_output_port(out);
+      scheme_current_thread->error_buf = savebuf;
+      scheme_longjmp(*savebuf, 1);
+      return NULL;
+    } else {
+      ok = 1;
+      while ((len = scheme_get_byte_string("copy-file", in, b, 0, COPY_BUFFER_SIZE, 0, 0, NULL))) {
+        if (len == -1)
+          break;
+        if (scheme_put_byte_string("copy-file", out, b, 0, len, 0) != len) {
+          ok = 0;
+          break;
+        }
       }
     }
-    if (!feof(s))
-      ok = 0;
-
-    fclose(s);
-    fclose(d);
+    scheme_current_thread->error_buf = savebuf;
 
     if (ok) {
-      while (1) {
-	if (!chmod(dest, buf.st_mode))
-	  return scheme_void;
-	else if (errno != EINTR)
-	  break;
+      do {
+        err_val = fchmod(scheme_get_port_fd(out), buf.st_mode);
+      } while ((err_val == -1) && (errno != EINTR));
+      if (err_val) {
+        err_val = errno;
+        has_err_val = 0;
+        reason = "cannot set destination's mode";
+        ok = 0;
       }
-      err_val = errno;
-      has_err_val = 0;
-      reason = "cannot set destination's mode";
     } else
       reason = "read or write failed";
+
+    scheme_close_input_port(in);
+    scheme_close_output_port(out);
+
+    if (ok)
+      return scheme_void;
   }
  failed:
 #endif
 #ifdef DOS_FILE_SYSTEM
-  if (CopyFileW(WIDE_PATH_COPY(src), WIDE_PATH(dest), TRUE))
+  if (CopyFileW(WIDE_PATH_COPY(src), WIDE_PATH(dest), !exists_ok))
     return scheme_void;
   
   reason = "copy failed";
@@ -3941,7 +3967,7 @@ static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
 #endif
 
   scheme_raise_exn(pre_exists ? MZEXN_FAIL_FILESYSTEM_EXISTS : MZEXN_FAIL_FILESYSTEM, 
-		   "copy-file: %s; cannot copy: %q to: %q%s%m%s",
+		   "copy-file: %s; cannot copy: %q to: %q%s%M%s",
 		   reason,
 		   filename_for_error(argv[0]),
 		   filename_for_error(argv[1]),
@@ -4899,6 +4925,8 @@ static Scheme_Object *do_directory_list(int break_ok, int argc, Scheme_Object *a
   while ((e = readdir(dir))) {
 #  ifdef DIRENT_NO_NAMLEN
     nlen = strlen(e->d_name);
+#  elif defined(__QNX__) || defined(__QNXNTO__)
+    nlen = e->d_namelen;
 #  else
     nlen = e->d_namlen;
 #  endif
@@ -5811,6 +5839,14 @@ static Scheme_Object *use_user_paths(int argc, Scheme_Object *argv[])
 			     -1, NULL, NULL, 1);
 }
 
+static Scheme_Object *use_link_paths(int argc, Scheme_Object *argv[])
+{
+  return scheme_param_config("use-collection-link-paths", 
+			     scheme_make_integer(MZCONFIG_USE_LINK_PATHS),
+			     argc, argv,
+			     -1, NULL, NULL, 1);
+}
+
 /********************************************************************************/
 
 #ifndef NO_FILE_SYSTEM_UTILS
@@ -5825,7 +5861,8 @@ enum {
   id_init_dir,
   id_init_file,
   id_sys_dir,
-  id_addon_dir
+  id_addon_dir,
+  id_links_file
 };
 
 Scheme_Object *scheme_get_run_cmd(void)
@@ -5876,6 +5913,15 @@ find_system_path(int argc, Scheme_Object **argv)
   } else if (argv[0] == addon_dir_symbol) {
     if (addon_dir) return addon_dir;
     which = id_addon_dir;
+  } else if (argv[0] == links_file_symbol) {
+    if (links_file) return links_file;
+    if (addon_dir) {
+      Scheme_Object *pa[2];
+      pa[0] = addon_dir;
+      pa[1] = scheme_make_path("links.rktd");
+      return scheme_build_path(2, pa);
+    }
+    which = id_links_file;
   } else {
     scheme_wrong_type("find-system-path", "system-path-symbol",
 		      0, argc, argv);
@@ -5918,9 +5964,11 @@ find_system_path(int argc, Scheme_Object **argv)
 
     if ((which == id_pref_dir) 
 	|| (which == id_pref_file)
-	|| (which == id_addon_dir)) {
+	|| (which == id_addon_dir)
+	|| (which == id_links_file)) {
 #if defined(OS_X) && !defined(XONX)
-      if (which == id_addon_dir)
+      if ((which == id_addon_dir)
+          || (which == id_links_file))
 	home_str = "~/Library/Racket/";
       else
 	home_str = "~/Library/Preferences/";
@@ -5967,6 +6015,8 @@ find_system_path(int argc, Scheme_Object **argv)
       return append_path(home, scheme_make_path("/racket-prefs.rktd" + ends_in_slash));
 #endif
     }
+    if (which == id_links_file)
+      return append_path(home, scheme_make_path("/links.rktd" + ends_in_slash));
   }
 #endif
 
@@ -6004,7 +6054,8 @@ find_system_path(int argc, Scheme_Object **argv)
 
       if ((which == id_addon_dir)
 	  || (which == id_pref_dir)
-	  || (which == id_pref_file)) 
+	  || (which == id_pref_file)
+	  || (which == id_links_file)) 
 	which_folder = CSIDL_APPDATA;
       else if (which == id_doc_dir) {
 #       ifndef CSIDL_PERSONAL
@@ -6108,6 +6159,8 @@ find_system_path(int argc, Scheme_Object **argv)
       return append_path(home, scheme_make_path("\\racketrc.rktl" + ends_in_slash));
     if (which == id_pref_file)
       return append_path(home, scheme_make_path("\\racket-prefs.rktd" + ends_in_slash));
+    if (which == id_links_file)
+      return append_path(home, scheme_make_path("\\links.rktd" + ends_in_slash));
     return home;
   }
 #endif
@@ -6174,6 +6227,26 @@ void scheme_set_addon_dir(Scheme_Object *p)
     REGISTER_SO(addon_dir);
   }
   addon_dir = p;
+}
+
+/* should only called from main */
+void scheme_set_links_file(Scheme_Object *p)
+{
+  if (!links_file) {
+    REGISTER_SO(links_file);
+  }
+  links_file = p;
+}
+
+Scheme_Object *scheme_find_links_path(int argc, Scheme_Object *argv[])
+{
+  if (inst_links_path)
+    return inst_links_path;
+
+  REGISTER_SO(inst_links_path);
+  inst_links_path = scheme_apply(argv[0], 0, NULL);
+
+  return inst_links_path;
 }
 
 /********************************************************************************/

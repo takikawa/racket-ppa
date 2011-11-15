@@ -17,6 +17,7 @@
 #ifdef JIT_TS_PROCS
 define_ts_bsi_v(call_set_global_bucket, FSRC_MARKS)
 define_ts_ss_s(make_global_ref, FSRC_OTHER)
+define_ts_ss_s(make_global_const_ref, FSRC_OTHER)
 define_ts_iiS_v(lexical_binding_wrong_return_arity, FSRC_MARKS)
 define_ts_siS_v(wrong_argument_count, FSRC_MARKS)
 # ifdef JIT_PRECISE_GC
@@ -46,7 +47,7 @@ define_ts_s_s(call_with_values_from_multiple_result, FSRC_MARKS)
 define_ts_S_s(apply_checked_fail, FSRC_MARKS)
 define_ts_Sl_s(scheme_delayed_rename, FSRC_OTHER)
 define_ts_b_v(scheme_unbound_global, FSRC_MARKS)
-define_ts_ss_v(scheme_set_box, FSRC_OTHER)
+define_ts_ss_v(scheme_set_box, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_car, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_cdr, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_caar, FSRC_MARKS)
@@ -84,7 +85,7 @@ define_ts_si_s(scheme_struct_ref, FSRC_MARKS)
 define_ts_sis_v(scheme_struct_set, FSRC_MARKS)
 define_ts_iS_s(scheme_extract_checked_procedure, FSRC_MARKS)
 define_ts_iS_s(scheme_procedure_arity_includes, FSRC_MARKS)
-define_ts_ssi_s(vector_check_chaperone_of, FSRC_OTHER)
+define_ts_ssi_s(vector_check_chaperone_of, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_list_ref, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_list_tail, FSRC_MARKS)
 #endif
@@ -109,7 +110,8 @@ define_ts_ss_s(scheme_jit_make_two_element_vector, FSRC_OTHER)
 define_ts_l_s(scheme_jit_make_ivector, FSRC_OTHER)
 define_ts_l_s(scheme_jit_make_vector, FSRC_OTHER)
 # endif
-define_ts_ss_i(scheme_equal, FSRC_OTHER)
+define_ts_ss_i(scheme_equal, FSRC_MARKS)
+define_ts_sss_s(scheme_extract_one_cc_mark_to_tag, FSRC_MARKS)
 #endif
 
 #ifdef JIT_APPLY_TS_PROCS
@@ -149,6 +151,7 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_call_set_global_bucket call_set_global_bucket
 # define ts_scheme_make_envunbox scheme_make_envunbox
 # define ts_make_global_ref make_global_ref
+# define ts_make_global_const_ref make_global_const_ref
 # define ts_lexical_binding_wrong_return_arity lexical_binding_wrong_return_arity
 # define ts_call_wrong_return_arity call_wrong_return_arity
 # define ts_scheme_unbound_global scheme_unbound_global
@@ -180,6 +183,7 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_scheme_struct_ref scheme_struct_ref
 # define ts_scheme_struct_set scheme_struct_set
 # define ts_scheme_equal scheme_equal
+# define ts_scheme_extract_one_cc_mark_to_tag scheme_extract_one_cc_mark_to_tag
 # define ts_tail_call_with_values_from_multiple_result tail_call_with_values_from_multiple_result
 # define ts_raise_bad_call_with_values raise_bad_call_with_values
 # define ts_call_with_values_from_multiple_result_multi call_with_values_from_multiple_result_multi

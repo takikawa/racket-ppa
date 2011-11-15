@@ -1,6 +1,6 @@
 #lang scheme/base
 
-(require (for-syntax scheme/base syntax/boundmap scheme/list syntax/kerncase)
+(require (for-syntax scheme/base syntax/boundmap)
          scribble/scheme scribble/decode scribble/manual scribble/struct)
 
 (begin-for-syntax
@@ -50,7 +50,6 @@
                      [(rest ...) (if n
                                      #`((subscript #,(format "~a" n)))
                                      #`())])
-         
          #`(begin
              (require (for-label for-label-mod ... ...))
              #,@(if n

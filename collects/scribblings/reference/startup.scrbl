@@ -242,13 +242,27 @@ flags:
   @item{@FlagFirst{X} @nonterm{dir} or @DFlagFirst{collects}
         @nonterm{dir} : Sets @nonterm{dir} as the path to the main
         collection of libraries by making @racket[(find-system-path
-        'collects-dir)] produce @nonterm{dir}.}
+        'collects-dir)] produce @nonterm{dir}. If @nonterm{dir} is an
+        empty string, then @racket[(find-system-path 'collects-dir)]
+        returns @filepath{.}, but
+        @racket[current-library-collection-paths] is initialized to
+        the empty list and @racket[use-collection-link-paths] is
+        initialized to @racket[#f].}
 
   @item{@FlagFirst{S} @nonterm{dir} or @DFlagFirst{search}
         @nonterm{dir} : Adds @nonterm{dir} to the default library
         collection search path after the main collection directory. If
         the @Flag{S}/@DFlag{dir} flag is supplied multiple times, the
         search order is as supplied.}
+
+  @item{@FlagFirst{A} @nonterm{dir} or @DFlagFirst{addon}
+        @nonterm{dir} : Sets the directory that is returned by
+        @racket[(find-system-path 'addon-dir)].}
+
+  @item{@FlagFirst{C} @nonterm{file} or @DFlagFirst{links}
+        @nonterm{file} : Sets the user-specific @tech{collection links file} path
+        that is returned by @racket[(find-system-path 'links-file)];
+        see also @secref["links-file"].}
 
   @item{@FlagFirst{U} or @DFlagFirst{no-user-path} : Omits
         user-specific paths in the search for collections, C
@@ -260,6 +274,12 @@ flags:
         @nonterm{file} : sets the name of the executable as reported
         by @racket[(find-system-path 'run-file)] to
         @nonterm{file}.}
+
+  @item{@FlagFirst{J} @nonterm{name} or @DFlagFirst{wm-class}
+        @nonterm{name} : GRacket, Unix only; sets the @tt{WM_CLASS}
+        program class to @nonterm{name} (while the @tt{WM_CLASS}
+        program name is derived from the executable name or a
+        @Flag{N}/@DFlag{name} argument).}
 
   @item{@FlagFirst{j} or @DFlagFirst{no-jit} : Disables the
         native-code just-in-time compiler by setting the
@@ -405,8 +425,9 @@ language specifies run-time configuration by
 
 A @racket['configure-runtime] query returns a list of vectors, instead
 of directly configuring the environment, so that the indicated modules
-to be bundled with a program when creating a stand-alone
-executable; see @secref[#:doc '(lib "scribblings/raco/raco.scrbl") "exe"].
+to be bundled with a program when creating a stand-alone executable;
+see @secref[#:doc raco-doc "exe"] in
+@other-manual[raco-doc].
 
 For information on defining a new @hash-lang[] language, see
 @racketmodname[syntax/module-reader].

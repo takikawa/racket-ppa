@@ -4,11 +4,11 @@
            "sig.rkt"
            "../preferences.rkt"
            mred/mred-sig
-           scheme/path)
-  
+           racket/path)
   
   (import mred^
-          [prefix keymap: framework:keymap^])
+          [prefix keymap: framework:keymap^]
+          [prefix frame: framework:frame^])
   
   (export (rename framework:finder^
                   [-put-file put-file]
@@ -44,9 +44,10 @@
              [name (or (and (string? name) (file-name-from-path name))
                        name)]
              [f (put-file prompt parent-win directory name
-                          (default-extension) style (default-filters))])
+                          (default-extension) style (default-filters)
+                          #:dialog-mixin frame:focus-table-mixin)])
         (and f (or (not filter) (filter-match? filter f filter-msg))
-             (let* ([f (normal-case-path (normalize-path f))]
+             (let* ([f (normal-case-path (simple-form-path f))]
                     [dir (path-only f)]
                     [name (file-name-from-path f)])
                (cond
@@ -60,6 +61,7 @@
                   #f]
                  [else f]))))))
   
+  (define op (current-output-port))
   (define (*get-file style)
     (lambda ([directory #f]
              [prompt (string-constant select-file)]
@@ -67,25 +69,29 @@
              [filter-msg (string-constant file-wrong-form)]
              [parent-win (dialog-parent-parameter)])
       (let ([f (get-file prompt parent-win directory #f
-                         (default-extension) style (default-filters))])
+                         (default-extension) style (default-filters)
+                         #:dialog-mixin frame:focus-table-mixin)])
         (and f (or (not filter) (filter-match? filter f filter-msg))
-             (let ([f (normalize-path f)])
-               (cond [(directory-exists? f)
-                      (message-box (string-constant error)
-                                   (string-constant that-is-dir-name))
-                      #f]
-                     [(not (file-exists? f))
-                      (message-box (string-constant error) 
-                                   (string-constant file-dne))
-                      #f]
-                     [else f]))))))
+             (cond [(directory-exists? f)
+                    (message-box (string-constant error)
+                                 (string-constant that-is-dir-name))
+                    #f]
+                   [(not (file-exists? f))
+                    (message-box (string-constant error) 
+                                 (string-constant file-dne))
+                    #f]
+                   [else (simple-form-path f)])))))
+  
+  (define-syntax-rule
+    (define/rename id exp)
+    (define id (procedure-rename exp 'id)))
   
   ;; external interfaces to file functions
   
-  (define std-put-file    (*put-file '()))
-  (define std-get-file    (*get-file '()))
-  (define common-put-file (*put-file '(common)))
-  (define common-get-file (*get-file '(common)))
+  (define/rename std-put-file    (*put-file '()))
+  (define/rename std-get-file    (*get-file '()))
+  (define/rename common-put-file (*put-file '(common)))
+  (define/rename common-get-file (*get-file '(common)))
   (define common-get-file-list void)
   
   (define -put-file

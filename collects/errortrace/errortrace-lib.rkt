@@ -5,9 +5,9 @@
 
 (require "stacktrace.rkt"
          "errortrace-key.rkt"
-         racket/contract
+         "private/utils.rkt"
+         racket/contract/base
          racket/unit
-         racket/runtime-path
          (for-template racket/base)
          (for-syntax racket/base))
 
@@ -36,7 +36,8 @@
     (hash-for-each hash (lambda (x y) (unless (eq? x 'base) (set! covered (cons x covered)))))
     (values all covered)))
 
-(define code-insp (current-code-inspector))
+(define code-insp (variable-reference->module-declaration-inspector
+                   (#%variable-reference)))
 (define (disarm stx)
   (syntax-disarm stx code-insp))
     
@@ -44,13 +45,13 @@
   (syntax-case stx ()
     [(mod name init-import mb)
      (syntax-case (disarm #'mb) (#%plain-module-begin)
-       [(#%plain-module-begin b1 b2 body ...)
+       [(#%plain-module-begin b1 body ...)
         (copy-props
          stx
          #`(#,(namespace-module-identifier) name init-import
             #,(syntax-rearm
                #`(#%plain-module-begin
-                  b1 b2 ;; the two requires that were introduced earlier
+                  b1 ;; the requires that were introduced earlier
                   (#%plain-app init-test-coverage '#,(remove-duplicates test-coverage-state))
                   body ...)
                #'mb)))])]))
@@ -198,25 +199,23 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Stacktrace instrumenter
 
-(define-runtime-path key-syntax
-  '(lib "errortrace-key-syntax.rkt" "errortrace"))
-
-(define dynamic-errortrace-key
-  (dynamic-require key-syntax 'errortrace-key-syntax))
+(define base-phase
+  (variable-reference->module-base-phase (#%variable-reference)))
 
 ;; with-mark : stx stx -> stx
-(define (with-mark mark expr)
-  (let ([loc (make-st-mark mark)])
+(define (with-mark mark expr phase)
+  (let ([loc (make-st-mark mark phase)])
     (if loc
         (with-syntax ([expr expr]
                       [loc loc]
-                      [et-key dynamic-errortrace-key])
+                      [et-key (syntax-shift-phase-level #'errortrace-key (- phase base-phase))]
+                      [wcm (syntax-shift-phase-level #'with-continuation-mark (- phase base-phase))])
           (execute-point
            mark
            (syntax
-            (with-continuation-mark et-key
-              loc
-              expr))))
+            (wcm et-key
+                 loc
+                 expr))))
         expr)))
 
 (define-values/invoke-unit/infer stacktrace@)
@@ -415,21 +414,17 @@
                [(mod name init-import mb)
                 (syntax-case (disarm #'mb) (#%plain-module-begin)
                   [(#%plain-module-begin body ...)
-                   (add-test-coverage-init-code
-                    (normal
-                     (copy-props
-                      top-e
-                      #`(#,(namespace-module-identifier) name init-import
-                         #,(syntax-rearm
-                            #`(#%plain-module-begin
-                               #,((make-syntax-introducer)
-                                  (syntax/loc (datum->syntax #f 'x #f)
-                                    (#%require errortrace/errortrace-key)))
-                               #,((make-syntax-introducer)
-                                  (syntax/loc (datum->syntax #f 'x #f)
-                                    (#%require (for-syntax errortrace/errortrace-key))))
-                               body ...)
-                            #'mb)))))])])))]
+                   (let ([meta-depth ((count-meta-levels 0) #'(begin body ...))])
+                     (add-test-coverage-init-code
+                      (normal
+                       (copy-props
+                        top-e
+                        #`(#,(namespace-module-identifier) name init-import
+                           #,(syntax-rearm
+                              #`(#%plain-module-begin
+                                 #,(generate-key-imports meta-depth)
+                                 body ...)
+                              #'mb))))))])])))]
       [_else
        (normal top-e)])))
 

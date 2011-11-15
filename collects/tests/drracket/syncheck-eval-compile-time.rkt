@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require "drracket-test-util.rkt"
+(require "private/drracket-test-util.rkt"
          racket/class
          framework)
 
@@ -10,9 +10,11 @@
      (let ([drs (wait-for-drscheme-frame)])
        (set-module-language!)
        (do-execute drs)
-       (queue-callback/res (λ () (handler:edit-file (collection-file-path "map.rkt" "racket" "private"))))
+       (queue-callback/res
+        (λ () 
+          (preferences:set 'framework:coloring-active #f)
+          (handler:edit-file (collection-file-path "map.rkt" "racket" "private"))))
        
-       (preferences:set 'framework:coloring-active #f)
        (click-check-syntax-and-check-errors drs "syncheck-eval-compile-time.rkt")))))
 
 

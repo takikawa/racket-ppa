@@ -55,6 +55,7 @@ static int place_val_MARK(void *p, struct NewGC *gc) {
   Scheme_Place *pr = (Scheme_Place *)p;
   gcMARK2(pr->channel, gc);
   gcMARK2(pr->mref, gc);
+  gcMARK2(pr->pumper_threads, gc);
 
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Place));
@@ -64,6 +65,7 @@ static int place_val_FIXUP(void *p, struct NewGC *gc) {
   Scheme_Place *pr = (Scheme_Place *)p;
   gcFIXUP2(pr->channel, gc);
   gcFIXUP2(pr->mref, gc);
+  gcFIXUP2(pr->pumper_threads, gc);
 
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Place));
@@ -100,5 +102,55 @@ static int place_async_channel_val_FIXUP(void *p, struct NewGC *gc) {
 
 #define place_async_channel_val_IS_ATOMIC 0
 #define place_async_channel_val_IS_CONST_SIZE 1
+
+
+static int serialized_file_fd_val_SIZE(void *p, struct NewGC *gc) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Serialized_File_FD));
+}
+
+static int serialized_file_fd_val_MARK(void *p, struct NewGC *gc) {
+  Scheme_Serialized_File_FD *ffd = (Scheme_Serialized_File_FD *) p;
+  gcMARK2(ffd->name, gc);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Serialized_File_FD));
+}
+
+static int serialized_file_fd_val_FIXUP(void *p, struct NewGC *gc) {
+  Scheme_Serialized_File_FD *ffd = (Scheme_Serialized_File_FD *) p;
+  gcFIXUP2(ffd->name, gc);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Serialized_File_FD));
+}
+
+#define serialized_file_fd_val_IS_ATOMIC 0
+#define serialized_file_fd_val_IS_CONST_SIZE 1
+
+
+static int serialized_socket_fd_val_SIZE(void *p, struct NewGC *gc) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Serialized_Socket_FD));
+}
+
+static int serialized_socket_fd_val_MARK(void *p, struct NewGC *gc) {
+  Scheme_Serialized_Socket_FD *sfd = (Scheme_Serialized_Socket_FD *) p;
+  gcMARK2(sfd->name, gc);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Serialized_Socket_FD));
+}
+
+static int serialized_socket_fd_val_FIXUP(void *p, struct NewGC *gc) {
+  Scheme_Serialized_Socket_FD *sfd = (Scheme_Serialized_Socket_FD *) p;
+  gcFIXUP2(sfd->name, gc);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Serialized_Socket_FD));
+}
+
+#define serialized_socket_fd_val_IS_ATOMIC 0
+#define serialized_socket_fd_val_IS_CONST_SIZE 1
 
 

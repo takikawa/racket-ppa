@@ -11,19 +11,19 @@ The syntax of a Racket program is defined by
 
 @itemize[
 
- @item{a @deftech{read} phase that processes a character stream into a
+ @item{a @deftech{read} pass that processes a character stream into a
        @tech{syntax object}; and}
 
- @item{an @deftech{expand} phase that processes a syntax object to
+ @item{an @deftech{expand} pass that processes a syntax object to
        produce one that is fully parsed.}
 
 ]
 
-For details on the @tech{read} phase, see @secref["reader"]. Source
+For details on the @tech{read} pass, see @secref["reader"]. Source
 code is normally read in @racket[read-syntax] mode, which produces a
 @tech{syntax object}.
 
-The @tech{expand} phase recursively processes a @tech{syntax object}
+The @tech{expand} pass recursively processes a @tech{syntax object}
 to produce a complete @tech{parse} of the program. @tech{Binding}
 information in a @tech{syntax object} drives the @tech{expansion}
 process, and when the @tech{expansion} process encounters a
@@ -186,7 +186,7 @@ the binding (according to @racket[free-identifier=?]) matters.}
 
 @racketgrammar*[
 #:literals (#%expression module #%plain-module-begin begin #%provide
-            define-values define-syntaxes define-values-for-syntax
+            define-values define-syntaxes begin-for-syntax
             #%require
             #%plain-lambda case-lambda if begin begin0 let-values letrec-values
             set! quote-syntax quote with-continuation-mark
@@ -196,13 +196,14 @@ the binding (according to @racket[free-identifier=?]) matters.}
                 (module id name-id
                   (#%plain-module-begin
                    module-level-form ...))
-                (begin top-level-form ...)]
+                (begin top-level-form ...)
+                (begin-for-syntax top-level-form ...)]
 [module-level-form general-top-level-form
-                   (#%provide raw-provide-spec ...)]
+                   (#%provide raw-provide-spec ...)
+                   (begin-for-syntax module-level-form ...)]
 [general-top-level-form expr
                         (define-values (id ...) expr)
                         (define-syntaxes (id ...) expr)
-                        (define-values-for-syntax (id ...) expr)
                         (#%require raw-require-spec ...)]
 [expr id
       (#%plain-lambda formals expr ...+)
@@ -210,9 +211,9 @@ the binding (according to @racket[free-identifier=?]) matters.}
       (if expr expr expr)
       (begin expr ...+)
       (begin0 expr expr ...)
-      (let-values (((id ...) expr) ...)
+      (let-values ([(id ...) expr] ...)
         expr ...+)
-      (letrec-values (((id ...) expr) ...)
+      (letrec-values ([(id ...) expr] ...)
         expr ...+)
       (set! id expr)
       (@#,racket[quote] datum)
@@ -243,19 +244,20 @@ binding to the @racket[#%plain-lambda] of the
 syntactic-form names refer to the bindings defined in
 @secref["syntax"].
 
-Only @tech{phase levels} 0 and 1 are relevant for the parse of a
-program (though the @racket[_datum] in a @racket[quote-syntax] form
-preserves its information for all @tech{phase level}s). In particular,
-the relevant @tech{phase level} is 0, except for the @racket[_expr]s
-in a @racket[define-syntax], @racket[define-syntaxes],
-@racket[define-for-syntax], or @racket[define-values-for-syntax] form,
-in which case the relevant @tech{phase level} is 1 (for which
-comparisons are made using @racket[free-transformer-identifier=?]
-instead of @racket[free-identifier=?]).
+In a fully expanded program for a namespace whose @tech{base phase} is
+0, the relevant @tech{phase level} for a binding in the program is
+@math{N} if the bindings has @math{N} surrounding
+@racket[begin-for-syntax] and @racket[define-syntaxes] forms---not
+counting any @racket[begin-for-syntax] forms that wrap a
+@racket[module] form for the body of the @racket[module]. The
+@racket[_datum] in a @racket[quote-syntax] form, however, always
+preserves its information for all @tech{phase level}s.
 
 In addition to the grammar above, @racket[letrec-syntaxes+values] can
-appear in a fully local-expanded expression, such as the result from
-@racket[local-expand] when the stop list is empty.
+appear in a fully local-expanded expression, as can
+@racket[#%expression] in any expression position. For example,
+@racket[letrec-syntaxes+values] and @racket[#%expression] can appear
+in the result from @racket[local-expand] when the stop list is empty.
 
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 @subsection[#:tag "expand-steps"]{Expansion Steps}
@@ -425,11 +427,13 @@ core syntactic forms are encountered:
        at @tech{phase level} 0 (i.e., the @tech{base environment} is
        extended).}
 
- @item{When a @racket[define-for-syntax] or
-       @racket[define-values-for-syntax] form is encountered at the
-       top level or module level, bindings are introduced as for
-       @racket[define-values], but at @tech{phase level} 1 (i.e., the
-       @tech{transformer environment} is extended).}
+ @item{When a @racket[begin-for-syntax] form is encountered at the top
+       level or module level, bindings are introduced as for
+       @racket[define-values] and @racket[define-syntaxes], but at
+       @tech{phase level} 1 (i.e., the @tech{transformer environment}
+       is extended). More generally, @racket[begin-for-syntax] forms
+       can be nested, an each @racket[begin-for-syntax] shifts its
+       body definition by one @tech{phase level}.}
 
  @item{When a @racket[let-values] form is encountered, the body of the
        @racket[let-values] form is extended (by creating new
@@ -576,18 +580,18 @@ to its handling of @racket[define-syntaxes]. A
 level @math{n} (not just 0), in which case the expression for the
 @tech{transformer binding} is expanded at @tech{phase level} @math{n+1}.
 
-The expression in a @racket[define-for-syntax] or
-@racket[define-values-for-syntax] form is expanded and evaluated in
-the same way as for @racket[syntax]. However, the introduced binding
-is a variable binding at @tech{phase level} 1 (not a @tech{transformer
-binding} at @tech{phase level} 0).
+The expressions in a @racket[begin-for-syntax] form are expanded and
+evaluated in the same way as for @racket[define-syntaxes]. However,
+any introduced bindings from definition within
+@racket[begin-for-syntax] are at @tech{phase level} 1 (not a
+@tech{transformer binding} at @tech{phase level} 0).
 
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 @subsection[#:tag "partial-expansion"]{Partial Expansion}
 
 In certain contexts, such as an @tech{internal-definition context} or
-@tech{module context}, forms are partially expanded to determine
-whether they represent definitions, expressions, or other declaration
+@tech{module context}, @deftech{partial expansion} is used to determine
+whether forms represent definitions, expressions, or other declaration
 forms. Partial expansion works by cutting off the normal recursion
 expansion when the relevant binding is for a primitive syntactic form.
 
@@ -600,46 +604,35 @@ then expansion stops without adding the identifier.
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 @subsection[#:tag "intdef-body"]{Internal Definitions}
 
-An @tech{internal-definition context} corresponds to a partial expansion step
-(see @secref["partial-expansion"]). Forms that allow internal definitions document
-such positions using the @racket[_body] meta-variable. A form that supports internal
-definitions starts by expanding its first form in an
-internal-definition context, but only partially. That is, it
-recursively expands only until the form becomes one of the following:
+An @tech{internal-definition context} supports local definitions mixed
+with expressions. Forms that allow internal definitions document such
+positions using the @racket[_body] meta-variable. Definitions in an
+internal-definition context are equivalent to local binding via
+@racket[letrec-syntaxes+values]; macro expansion converts internal
+definitions to a @racket[letrec-syntaxes+values] form.
+
+Expansion of an internal-definition context relies on @tech{partial
+expansion} of each @racket[_body] in an internal-definition sequence.
+Partial expansion of each @racket[_body] produces a form matching one
+of the following cases:
 
 @itemize[
 
- @item{A @racket[define-values] or @racket[define-syntaxes] form, for
-       any form other than the last one: The definition form is not
-       expanded further. Instead, the next form is expanded partially,
-       and so on. The content of a @racket[begin] form is spliced into
-       the body-form sequence. After all forms are partially expanded,
-       the accumulated definition forms are converted to a
-       @racket[letrec-values] (if no @racket[define-syntaxes] forms
-       were found) or @racket[letrec-syntaxes+values] form, moving the
-       expression-form tail to the body to be expanded in expression
-       context. An expression @racket[_expr] that appears before a
-       definition is converted to a @racket[letrec-values] clause
-       @racket[[() (begin _expr (values))]], so that the expression
-       can produce any number of values, and its evaluation order is
-       preserved relative to definitions.
+ @item{A @racket[define-values] form: The lexical context of all
+       syntax objects for the body sequence is immediately enriched
+       with bindings for the @racket[define-values] form.  Further
+       expansion of the definition is deferred, and partial expansion
+       continues with the rest of the body.}
 
-       When a @racket[define-values] form is discovered, the lexical
-       context of all syntax objects for the body sequence is
-       immediately enriched with bindings for the
-       @racket[define-values] form before expansion continues. When a
-       @racket[define-syntaxes] form is discovered, the right-hand
-       side is expanded and evaluated (as for a
+ @item{A @racket[define-syntaxes] form: The right-hand side is
+       expanded and evaluated (as for a
        @racket[letrec-syntaxes+values] form), and a transformer
-       binding is installed for the body sequence before expansion
-       continues.}
+       binding is installed for the body sequence before partial
+       expansion continues with the est of the body.}
 
- @item{A primitive expression form other than @racket[begin]: The
-       expression is expanded in an expression context, along with all
-       remaining body forms. If any definitions were found, this
-       expansion takes place after conversion to a
-       @racket[letrec-values] or @racket[letrec-syntaxes+values]
-       form. Otherwise, the expressions are expanded immediately.}
+ @item{A primitive expression form other than @racket[begin]: Further
+       expansion of the expression is deferred, and partial expansion
+       continues with the rest of the body.}
 
  @item{A @racket[begin] form: The sub-forms of the @racket[begin] are
        spliced into the internal-definition sequence, and partial
@@ -648,18 +641,25 @@ recursively expands only until the form becomes one of the following:
 
 ]
 
-If the last expression form turns out to be a @racket[define-values]
-or @racket[define-syntaxes] form, expansion fails with a syntax error.
+After all body forms are partially expanded, if no definitions were
+encountered, then the expressions are collected into a @racket[begin]
+form as he internal-definition context's expansion.  Otherwise, at
+least one expression must appear after the last definition, and any
+@racket[_expr] that appears between definitions is converted to
+@racket[(define-values () (begin _expr (values)))]; the definitions
+are then converted to bindings in a @racket[letrec-syntaxes+values]
+form, and all expressions after the last definition become the body of
+the @racket[letrec-syntaxes+values] form.
 
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 @subsection[#:tag "mod-parse"]{Module Phases and Visits}
 
 A @racket[require] form not only introduces @tech{bindings} at
 expansion time, but also @deftech{visits} the referenced module when
-it is encountered by the expander. That is, the expander
-instantiates any @racket[define-for-syntax]ed variables defined
-in the module, and also evaluates all expressions for
-@racket[define-syntaxes] @tech{transformer bindings}.
+it is encountered by the expander. That is, the expander instantiates
+any variables defined in the module within @racket[begin-for-syntax],
+and it also evaluates all expressions for @racket[define-syntaxes]
+@tech{transformer bindings}.
 
 Module @tech{visits} propagate through @racket[require]s in the same
 way as module @tech{instantiation}. Moreover, when a module is
@@ -675,8 +675,8 @@ implicitly @tech{visit}ed. Thus, when the expander encounters
 @tech{instantiate}s the required module at @tech{phase} 1, in addition
 to adding bindings at @tech{phase level} 1 (i.e., the
 @tech{transformer environment}). Similarly, the expander immediately
-evaluates any @racket[define-values-for-syntax] form that it
-encounters.
+evaluates any form that it encounters within
+@racket[begin-for-syntax].
 
 @tech{Phases} beyond 0 are @tech{visit}ed on demand. For example,
 when the right-hand side of a @tech{phase}-0 @racket[let-syntax] is to
@@ -758,21 +758,21 @@ bucket-2
   (syntax-rules ()
     [(def-and-use)
      (begin
-      (code:comment @#,t{Initial reference to @racket[even] precedes definition:})
-      (define (odd x) (if (zero? x) #f (even (sub1 x))))
-      (define (even x) (if (zero? x) #t (odd (sub1 x))))
-      (odd 17))]))
+       (code:comment @#,t{Initial reference to @racket[even] precedes definition:})
+       (define (odd x) (if (zero? x) #f (even (sub1 x))))
+       (define (even x) (if (zero? x) #t (odd (sub1 x))))
+       (odd 17))]))
 (defs-and-uses/fail)
-     
+
 (define-syntax defs-and-uses
   (syntax-rules ()
     [(def-and-use)
      (begin
-      (code:comment @#,t{Declare before definition via no-values @racket[define-syntaxes]:})
-      (define-syntaxes (odd even) (values))
-      (define (odd x) (if (zero? x) #f (even (sub1 x))))
-      (define (even x) (if (zero? x) #t (odd (sub1 x))))
-      (odd 17))]))
+       (code:comment @#,t{Declare before definition via no-values @racket[define-syntaxes]:})
+       (define-syntaxes (odd even) (values))
+       (define (odd x) (if (zero? x) #f (even (sub1 x))))
+       (define (even x) (if (zero? x) #t (odd (sub1 x))))
+       (odd 17))]))
 (defs-and-uses)
 ]
 

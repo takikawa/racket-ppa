@@ -359,6 +359,15 @@ correspond to the first two elements of a list produced by
 Return @racket[#t] if @racket[v] is a @tech{variable reference}
 produced by @racket[#%variable-reference], @racket[#f] otherwise.}
 
+
+@defproc[(variable-reference-constant? [varref variable-reference?]) boolean?]{
+
+Returns @racket[#t] if the variable represented by @racket[varref]
+will retain its current value (i.e., @racket[varref] refers to a
+variable that cannot be further modified by @racket[set!] or
+@racket[define]), @racket[#f] otherwise.}
+
+
 @defproc[(variable-reference->empty-namespace [varref variable-reference?])
          namespace?]{
 
@@ -402,3 +411,24 @@ result is @racket[#f].}
          exact-nonnegative-integer?]{
 
 Returns the @tech{phase} of the variable referenced by @racket[varref].}
+
+
+@defproc[(variable-reference->module-base-phase [varref variable-reference?])
+         exact-integer?]{
+
+Returns the @tech{phase} in which the module is instantiated for the
+variable referenced by @racket[varref], or @racket[0] if the variable
+for @racket[varref] is not within a module.
+
+For a variable with a module, the result is less than the result of
+@racket[(variable-reference->phase varref)] by @math{n} when the
+variable is bound at @tech{phase level} @math{n} within the module.}
+
+
+@defproc[(variable-reference->module-declaration-inspector [varref variable-reference?])
+         inspector?]{
+
+Returns the declaration @tech{inspector} (see @secref["modprotect"])
+for the module of @racket[varref], where @racket[varref] must refer to
+an anonymous module variable as produced by
+@racket[(#%variable-reference)].}

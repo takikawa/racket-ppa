@@ -2,42 +2,52 @@
 @(require scribble/manual
           scribble/urls
           scribble/eval
+          (only-in scribble/core link-element)
           "../quick/keep.rkt"
+          (only-in xrepl/doc-utils [cmd xreplcmd])
           (for-label scheme
                      racket/enter
+                     xrepl
                      readline
                      net/url
                      xml
                      racket/control))
 
-@(define quick @other-manual['(lib "quick.scrbl" "scribblings/quick")])
-@(define guide @other-manual['(lib "guide.scrbl" "scribblings/guide")])
+@(begin
 
-@(define more-eval (make-base-eval))
-@(interaction-eval #:eval more-eval
-                   (define (show-load re?)
-                     (fprintf (current-error-port) " [~aloading serve.rkt]\n" (if re? "re-" ""))))
-@(interaction-eval #:eval more-eval
-                   (define (serve n) void))
-@(interaction-eval #:eval more-eval
-                   (define (show-break)
-                     (fprintf (current-error-port) "^Cuser break")))
-@(interaction-eval #:eval more-eval
-                   (define (show-fail n)
-                     (error 'tcp-listen
-                            "listen on ~a failed (address already in use)"
-                            n)))
-@(interaction-eval #:eval more-eval (require xml net/url))
+(define quick @other-manual['(lib "quick.scrbl" "scribblings/quick")])
+(define guide @other-manual['(lib "guide.scrbl" "scribblings/guide")])
 
-@(define (whole-prog which [last? #f])
+(define more-eval (make-base-eval))
+(interaction-eval #:eval more-eval
+                  (define (show-load re?)
+                    (fprintf (current-error-port)
+                             " [~aloading serve.rkt]\n" (if re? "re-" ""))))
+(interaction-eval #:eval more-eval
+                  (define (serve n) void))
+(interaction-eval #:eval more-eval
+                  (define (show-break)
+                    (fprintf (current-error-port) "^Cuser break")))
+(interaction-eval #:eval more-eval
+                  (define (show-fail n)
+                    (error 'tcp-listen
+                           "listen on ~a failed (address already in use)"
+                           n)))
+(interaction-eval #:eval more-eval (require xml net/url))
+
+(define (whole-prog which [last? #f])
   (let ([file (format "step~a.txt" which)])
     (margin-note (keep-file file)
                  "Here's the "
-                 (if last? 
+                 (if last?
                      "final program"
                      "whole program so far")
                  " in plain text: "
                  (link file "step " which) ".")))
+
+(define-syntax-rule (REQ m) @racket[(require @#,racketmodname[m])])
+
+)
 
 @title{More: Systems Programming with Racket}
 
@@ -79,20 +89,36 @@ start @exec{racket} with no command-line arguments:
   > 
 }
 
-If you're using a plain terminal, if you have GNU Readline installed
-on your system, and if you'd like Readline support in @exec{racket},
-then evaluate @racket[(require readline)]. If you also evaluate
-@racket[(install-readline!)], then your @filepath{~/.racketrc} is
-updated to load Readline whenever you start @exec{racket} for
-interactive evaluation.  Readline is not needed if you're running a
-shell inside Emacs or if you're on Windows and use a @exec{cmd}
-window.
+For extra read-eval-print loop support, evaluate @REQ[xrepl]
+to enable Readline-based input---assuming that you have GNU Readline
+installed on your system---and comma-prefixed meta-commands that
+support exploration and development. To have @racketmodname[xrepl]
+loaded by default, use the @xreplcmd{install!} command, which updates
+your @filepath{~/.racketrc} to load @racketmodname[xrepl] whenever you
+start @exec{racket} for interactive evaluation.
 
 @margin-note{Unfortunately, for legal reasons related to GPL vs. LGPL,
-             @exec{racket} cannot provide Readline automatically.}
+  @exec{racket} cannot provide Readline automatically.}
 
 @interaction[
-(eval:alts (require readline) (void))
+(eval:alts @#,REQ[xrepl] (void))
+(eval:alts @#,xreplcmd{install!} (void))
+]
+
+@; FIXME: probably needs revisions, and questionable whether readline
+@; should be mentioned by itself.  One thing to consider is that with
+@; readline it's possible to pretend that the whole thing is one
+@; session, whereas xrepl changes the prompt.
+
+If you want @emph{just} readline support in @exec{racket}, evaluate
+@REQ[readline], instead, and then use @racket[(install-readline!)]  to
+adjust @filepath{~/.racketrc} to load @racketmodname[readline].
+Readline is not needed if you're using @racketmodname[xrepl], if
+you're running a shell inside Emacs, or if you're on Windows and use a
+@exec{cmd} window.
+
+@interaction[
+(eval:alts @#,REQ[readline] (void))
 (eval:alts (install-readline!) (void))
 ]
 
@@ -115,6 +141,9 @@ racket
 @section{Go!}
 
 Back in @exec{racket}, try loading the file and running @racket[go]:
+
+@margin-note{If you use @racketmodname[xrepl], you can use
+  @xreplcmd["enter"]{serve.rkt}.}
 
 @interaction[
 #:eval more-eval

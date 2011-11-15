@@ -40,6 +40,7 @@ READ_ONLY Scheme_Object *scheme_recur_symbol;
 READ_ONLY Scheme_Object *scheme_display_symbol;
 READ_ONLY Scheme_Object *scheme_write_special_symbol;
 READ_ONLY Scheme_Object *scheme_app_mark_impersonator_property;
+READ_ONLY Scheme_Object *scheme_liberal_def_ctx_type;;
 
 READ_ONLY static Scheme_Object *location_struct;
 READ_ONLY static Scheme_Object *write_property;
@@ -99,6 +100,8 @@ static Scheme_Object *check_rename_transformer_property_value_ok(int argc, Schem
 static Scheme_Object *check_set_transformer_property_value_ok(int argc, Scheme_Object *argv[]);
 static Scheme_Object *check_checked_proc_property_value_ok(int argc, Scheme_Object *argv[]);
 
+static Scheme_Object *unary_acc(int argc, Scheme_Object **argv, Scheme_Object *self);
+
 static Scheme_Object *make_struct_type(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *make_struct_field_accessor(int argc, Scheme_Object *argv[]);
@@ -155,6 +158,7 @@ Scheme_Object *special_comment_p(int argc, Scheme_Object **argv);
 
 static Scheme_Object *check_arity_at_least_fields(int argc, Scheme_Object **argv);
 static Scheme_Object *check_date_fields(int argc, Scheme_Object **argv);
+static Scheme_Object *check_date_star_fields(int argc, Scheme_Object **argv);
 static Scheme_Object *check_location_fields(int argc, Scheme_Object **argv);
 
 static Scheme_Object *check_exn_source_property_value_ok(int argc, Scheme_Object *argv[]);
@@ -170,6 +174,8 @@ static Scheme_Object *chaperone_struct_type(int argc, Scheme_Object **argv);
 static Scheme_Object *make_chaperone_property(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *make_chaperone_property_from_c(Scheme_Object *name);
+
+static Scheme_Object *is_liberal_def_ctx(int argc, Scheme_Object **argv, Scheme_Object *self);
 
 #define PRE_REDIRECTS 2
 
@@ -222,6 +228,7 @@ scheme_init_struct (Scheme_Env *env)
   READ_ONLY static const char *date_fields[10] = { "second", "minute", "hour",
                                                    "day", "month", "year",
                                                    "week-day", "year-day", "dst?", "time-zone-offset" };
+  READ_ONLY static const char *date_star_fields[2] = { "nanosecond", "time-zone-name" };
 #endif
   READ_ONLY static const char *location_fields[10] = { "source", "line", "column", "position", "span" };
   
@@ -263,6 +270,22 @@ scheme_init_struct (Scheme_Env *env)
 			       env);
   }
 
+  scheme_date = scheme_make_struct_type_from_string("date*", scheme_date, 2, NULL,
+                                                    scheme_make_prim(check_date_star_fields), 1);
+  
+  ts_names = scheme_make_struct_names_from_array("date*",
+						 2, date_star_fields,
+						 BUILTIN_STRUCT_FLAGS, &ts_count);
+
+  ts_values = scheme_make_struct_values(scheme_date, ts_names, ts_count, 
+					BUILTIN_STRUCT_FLAGS);
+  
+  for (i = 0; i < ts_count - 1; i++) {
+    scheme_add_global_constant(scheme_symbol_val(ts_names[i]), ts_values[i], 
+			       env);
+  }
+  
+
 #endif
 
   /* Add location structure: */
@@ -294,7 +317,13 @@ scheme_init_struct (Scheme_Env *env)
                                                       scheme_struct_property_type);
     scheme_add_global_constant("prop:custom-write", write_property, env);
     scheme_add_global_constant("custom-write?", pred, env);
-    scheme_add_global_constant("custom-write-accessor", access, env);
+
+    a[0] = access;
+    scheme_add_global_constant("custom-write-accessor", 
+                               scheme_make_prim_closure_w_arity(unary_acc, 1, a, 
+                                                                "custom-write-accessor",
+                                                                1, 1),
+                               env);
   }
 
   REGISTER_SO(print_attribute_property);
@@ -310,7 +339,13 @@ scheme_init_struct (Scheme_Env *env)
                                                                 scheme_struct_property_type);
     scheme_add_global_constant("prop:custom-print-quotable", print_attribute_property, env);
     scheme_add_global_constant("custom-print-quotable?", pred, env);
-    scheme_add_global_constant("custom-print-quotable-accessor", access, env);
+
+    a[0] = access;
+    scheme_add_global_constant("custom-print-quotable-accessor", 
+                               scheme_make_prim_closure_w_arity(unary_acc, 1, a, 
+                                                                "custom-print-quotable-accessor",
+                                                                1, 1),
+                               env);
   }
   
   REGISTER_SO(evt_property);
@@ -417,6 +452,27 @@ scheme_init_struct (Scheme_Env *env)
     scheme_checked_proc_property = scheme_make_struct_type_property_w_guard(scheme_intern_symbol("checked-procedure"),
                                                                              guard);
     scheme_add_global_constant("prop:checked-procedure", scheme_checked_proc_property, env);
+  }
+
+  REGISTER_SO(scheme_liberal_def_ctx_type);
+  {
+    Scheme_Object *a[1], *prop, *pred, *access;
+    
+    a[0] = scheme_intern_symbol("liberal-define-context");
+    prop = make_struct_type_property_from_c(1, a, &pred, &access,
+                                            scheme_struct_property_type);
+    scheme_add_global_constant("prop:liberal-define-context", prop, env);
+
+    a[0] = prop;
+    scheme_add_global_constant("liberal-define-context?", 
+                               scheme_make_prim_closure_w_arity(is_liberal_def_ctx, 1, a, 
+                                                                "liberal-define-context?",
+                                                                1, 1),
+                               env);
+
+    scheme_liberal_def_ctx_type = scheme_make_struct_type_from_string("liberal-define-context", NULL, 0, 
+                                                                      cons(cons(prop, scheme_true), scheme_null),
+                                                                      NULL, 1);
   }
 
   REGISTER_SO(not_free_id_symbol);
@@ -1100,14 +1156,14 @@ static Scheme_Object *make_struct_type_property_from_c(int argc, Scheme_Object *
 
   v = scheme_make_folding_prim_closure(prop_pred, 1, a, name, 1, 1, 0);
   ((Scheme_Closed_Primitive_Proc *)v)->pp.flags |= (SCHEME_PRIM_IS_STRUCT_OTHER
-                                                    | SCHEME_PRIM_TYPE_STRUCT_PROP_PRED);
+                                                    | SCHEME_PRIM_STRUCT_TYPE_STRUCT_PROP_PRED);
   *predout = v;
 
   name = MALLOC_N_ATOMIC(char, len + 10);
   memcpy(name, SCHEME_SYM_VAL(argv[0]), len);
   memcpy(name + len, "-accessor", 10);
 
-  v = scheme_make_folding_prim_closure(prop_accessor, 1, a, name, 1, 2, 0);
+  v = scheme_make_prim_closure_w_arity(prop_accessor, 1, a, name, 1, 2);
   ((Scheme_Closed_Primitive_Proc *)v)->pp.flags |= (SCHEME_PRIM_IS_STRUCT_OTHER
                                                     | SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER);
   
@@ -1602,6 +1658,13 @@ Scheme_Object *scheme_print_attribute_ref(Scheme_Object *s)
   return scheme_struct_type_property_ref(print_attribute_property, s);
 }
 
+static Scheme_Object *unary_acc(int argc, Scheme_Object **argv, Scheme_Object *self)
+{
+  Scheme_Object *acc = SCHEME_PRIM_CLOSURE_ELS(self)[0];
+
+  return _scheme_apply(acc, argc, argv);
+}
+
 /*========================================================================*/
 /*                  rename and set! transformer properties                */
 /*========================================================================*/
@@ -1786,6 +1849,22 @@ Scheme_Object *scheme_extract_checked_procedure(int argc, Scheme_Object **argv)
   a[1] = argv[3];
   a[2] = argv[4];
   return _scheme_apply(argv[2], 3, a);
+}
+
+/*========================================================================*/
+/*                             liberal-define                             */
+/*========================================================================*/
+
+static Scheme_Object *is_liberal_def_ctx(int argc, Scheme_Object **argv, Scheme_Object *self)
+{
+  Scheme_Object *prop = SCHEME_PRIM_CLOSURE_ELS(self)[0], *val;
+  
+  val = scheme_struct_type_property_ref(prop, argv[0]);
+
+  if (!val || SCHEME_FALSEP(val))
+    return scheme_false;
+  else
+    return scheme_true;
 }
 
 /*========================================================================*/
@@ -2026,7 +2105,7 @@ scheme_make_struct_instance(Scheme_Object *_stype, int argc, Scheme_Object **arg
   c = stype->num_slots;
   inst = (Scheme_Structure *)
     scheme_malloc_tagged(sizeof(Scheme_Structure) 
-			 + ((c - 1) * sizeof(Scheme_Object *)));
+			 + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
   
   inst->so.type = (stype->proc_attr ? scheme_proc_struct_type : scheme_structure_type);
   inst->stype = stype;
@@ -2071,7 +2150,7 @@ Scheme_Object *scheme_make_blank_prefab_struct_instance(Scheme_Struct_Type *styp
   c = stype->num_slots;
   inst = (Scheme_Structure *)
     scheme_malloc_tagged(sizeof(Scheme_Structure) 
-			 + ((c - 1) * sizeof(Scheme_Object *)));
+			 + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
   
   inst->so.type = scheme_structure_type;
   inst->stype = stype;
@@ -2086,7 +2165,7 @@ Scheme_Object *scheme_make_serialized_struct_instance(Scheme_Object *prefab_key,
 
   inst = (Scheme_Serialized_Structure *)
     scheme_malloc_tagged(sizeof(Scheme_Serialized_Structure) 
-			 + ((num_slots - 1) * sizeof(Scheme_Object *)));
+			 + ((num_slots - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
   
   inst->so.type = scheme_serialized_structure_type;
   inst->num_slots = num_slots;
@@ -2105,7 +2184,7 @@ Scheme_Object *scheme_make_prefab_struct_instance(Scheme_Struct_Type *stype,
   c = stype->num_slots;
   inst = (Scheme_Structure *)
     scheme_malloc_tagged(sizeof(Scheme_Structure) 
-			 + ((c - 1) * sizeof(Scheme_Object *)));
+			 + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
   
   inst->so.type = scheme_structure_type;
   inst->stype = stype;
@@ -2131,7 +2210,7 @@ Scheme_Object *scheme_clone_prefab_struct_instance(Scheme_Structure *s)
 
   c = s->stype->num_slots;
   sz = (sizeof(Scheme_Structure) 
-        + ((c - 1) * sizeof(Scheme_Object *)));
+        + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
   inst = (Scheme_Structure *)scheme_malloc_tagged(sz);
   memcpy(inst, s, sz);
 
@@ -2162,7 +2241,7 @@ make_simple_struct_instance(int argc, Scheme_Object **args, Scheme_Object *prim)
   c = stype->num_slots;
   inst = (Scheme_Structure *)
     scheme_malloc_tagged(sizeof(Scheme_Structure) 
-			 + ((c - 1) * sizeof(Scheme_Object *)));
+			 + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
   
   inst->so.type = scheme_structure_type;
   inst->stype = stype;
@@ -2956,8 +3035,10 @@ struct_getter_p(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *v = argv[0];
   if (SCHEME_CHAPERONEP(v)) v = SCHEME_CHAPERONE_VAL(v);
-  return ((STRUCT_PROCP(v, SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER)
-	   || STRUCT_mPROCP(v, 
+  return ((STRUCT_mPROCP(v, 
+                         SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_OTHER_TYPE_MASK,
+                         SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_STRUCT_TYPE_INDEXED_GETTER)
+           || STRUCT_mPROCP(v, 
 			    SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_OTHER_TYPE_MASK,
 			    SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_GETTER))
 	  ? scheme_true : scheme_false);
@@ -2968,7 +3049,9 @@ struct_pred_p(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *v = argv[0];
   if (SCHEME_CHAPERONEP(v)) v = SCHEME_CHAPERONE_VAL(v);
-  return (STRUCT_PROCP(v, SCHEME_PRIM_IS_STRUCT_PRED)
+  return (STRUCT_mPROCP(v, 
+                        SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_OTHER_TYPE_MASK,
+                        SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_STRUCT_TYPE_PRED)
 	  ? scheme_true : scheme_false);
 }
 
@@ -3704,7 +3787,7 @@ make_struct_proc(Scheme_Struct_Type *struct_type,
 					 1, a,
 					 func_name,
 					 1, 1, 1);
-    flags |= SCHEME_PRIM_IS_STRUCT_PRED;
+    flags |= SCHEME_PRIM_STRUCT_TYPE_PRED | SCHEME_PRIM_IS_STRUCT_OTHER;
   } else {
     Struct_Proc_Info *i;
     int need_pos;
@@ -3733,7 +3816,7 @@ make_struct_proc(Scheme_Struct_Type *struct_type,
       if (need_pos)
 	flags |= SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_GETTER | SCHEME_PRIM_IS_STRUCT_OTHER;
       else
-	flags |= SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER;
+	flags |= SCHEME_PRIM_STRUCT_TYPE_INDEXED_GETTER | SCHEME_PRIM_IS_STRUCT_OTHER;
       /* Cache the accessor only if `struct_info' is used.
 	 This avoids keep lots of useless accessors.
 	 if (need_pos) struct_type->accessor = p; */
@@ -3759,20 +3842,23 @@ make_struct_proc(Scheme_Struct_Type *struct_type,
 Scheme_Object *scheme_rename_struct_proc(Scheme_Object *p, Scheme_Object *sym)
 {
   if (SCHEME_PRIMP(p)) {
-    int is_getter = (((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER);
-    int is_setter = (((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER);
-    
-    if (is_getter || is_setter) {
-      const char *func_name;
-      Struct_Proc_Info *i;
-
-      func_name = scheme_symbol_name(sym);
+    unsigned short flags = ((Scheme_Primitive_Proc *)p)->pp.flags;
+    if (flags & SCHEME_PRIM_IS_STRUCT_OTHER) {
+      int is_getter = ((flags & SCHEME_PRIM_OTHER_TYPE_MASK) == SCHEME_PRIM_STRUCT_TYPE_INDEXED_GETTER);
+      int is_setter = ((flags & SCHEME_PRIM_OTHER_TYPE_MASK) == SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER);
       
-      i = (Struct_Proc_Info *)SCHEME_PRIM_CLOSURE_ELS(p)[0];
-      
-      return make_struct_proc(i->struct_type, (char *)func_name, 
-                              is_getter ? SCHEME_GETTER : SCHEME_SETTER,
-                              i->field);
+      if (is_getter || is_setter) {
+        const char *func_name;
+        Struct_Proc_Info *i;
+        
+        func_name = scheme_symbol_name(sym);
+        
+        i = (Struct_Proc_Info *)SCHEME_PRIM_CLOSURE_ELS(p)[0];
+        
+        return make_struct_proc(i->struct_type, (char *)func_name, 
+                                is_getter ? SCHEME_GETTER : SCHEME_SETTER,
+                                i->field);
+      }
     }
   }
 
@@ -3961,7 +4047,7 @@ Scheme_Struct_Type *scheme_make_prefab_struct_type_raw(Scheme_Object *base,
   parent_type = (Scheme_Struct_Type *)parent;
   depth = parent_type ? (1 + parent_type->name_pos) : 0;
   struct_type = (Scheme_Struct_Type *)scheme_malloc_tagged(sizeof(Scheme_Struct_Type)
-                                                           + (depth 
+                                                           + ((depth + 1 - mzFLEX_DELTA)
                                                               * sizeof(Scheme_Struct_Type *)));
   struct_type->iso.so.type = scheme_struct_type_type;
 
@@ -4025,7 +4111,7 @@ static Scheme_Object *_make_struct_type(Scheme_Object *base,
   depth = parent_type ? (1 + parent_type->name_pos) : 0;
 
   struct_type = (Scheme_Struct_Type *)scheme_malloc_tagged(sizeof(Scheme_Struct_Type)
-                                                           + (depth 
+                                                           + ((depth + 1 - mzFLEX_DELTA)
                                                               * sizeof(Scheme_Struct_Type *)));
 
   /* defeats optimizer bug in gcc 2.7.2.3: */
@@ -4954,37 +5040,62 @@ static Scheme_Object *check_date_fields(int argc, Scheme_Object **argv)
 
   a = argv[0];
   if (!SCHEME_INTP(a) || (SCHEME_INT_VAL(a) < 0) || (SCHEME_INT_VAL(a) > 61))
-    scheme_wrong_field_type(argv[10], "integer in [0, 61]", a);
+    scheme_wrong_field_type(argv[10], "exact integer in [0, 61]", a);
   a = argv[1];
   if (!SCHEME_INTP(a) || (SCHEME_INT_VAL(a) < 0) || (SCHEME_INT_VAL(a) > 59))
-    scheme_wrong_field_type(argv[10], "integer in [0, 59]", a);
+    scheme_wrong_field_type(argv[10], "exact integer in [0, 59]", a);
   a = argv[2];
   if (!SCHEME_INTP(a) || (SCHEME_INT_VAL(a) < 0) || (SCHEME_INT_VAL(a) > 23))
-    scheme_wrong_field_type(argv[10], "integer in [0, 23]", a);
+    scheme_wrong_field_type(argv[10], "exact integer in [0, 23]", a);
   a = argv[3];
   if (!SCHEME_INTP(a) || (SCHEME_INT_VAL(a) < 1) || (SCHEME_INT_VAL(a) > 31))
-    scheme_wrong_field_type(argv[10], "integer in [1, 31]", a);
+    scheme_wrong_field_type(argv[10], "exact integer in [1, 31]", a);
   a = argv[4];
   if (!SCHEME_INTP(a) || (SCHEME_INT_VAL(a) < 1) || (SCHEME_INT_VAL(a) > 12))
-    scheme_wrong_field_type(argv[10], "integer in [1, 12]", a);
+    scheme_wrong_field_type(argv[10], "exact integer in [1, 12]", a);
   a = argv[5];
   if (!SCHEME_INTP(a) && !SCHEME_BIGNUMP(a))
     scheme_wrong_field_type(argv[10], "exact integer", a);
   a = argv[6];
   if (!SCHEME_INTP(a) || (SCHEME_INT_VAL(a) < 0) || (SCHEME_INT_VAL(a) > 6))
-    scheme_wrong_field_type(argv[10], "integer in [0, 6]", a);
+    scheme_wrong_field_type(argv[10], "exact integer in [0, 6]", a);
   a = argv[7];
   if (!SCHEME_INTP(a) || (SCHEME_INT_VAL(a) < 0) || (SCHEME_INT_VAL(a) > 365))
-    scheme_wrong_field_type(argv[10], "integer in [0, 365]", a);
+    scheme_wrong_field_type(argv[10], "exact integer in [0, 365]", a);
   a = argv[9];
   if (!SCHEME_INTP(a) && !SCHEME_BIGNUMP(a))
     scheme_wrong_field_type(argv[10], "exact integer", a);
 
-  /* Normalize dst? boolean: */  
+  /* Normalize dst? boolean: */
   memcpy(args, argv, sizeof(Scheme_Object *) * 10);
   args[8] = (SCHEME_TRUEP(argv[8]) ? scheme_true : scheme_false);
-
+  
   return scheme_values(10, args);
+}
+
+static Scheme_Object *check_date_star_fields(int argc, Scheme_Object **argv)
+{
+  Scheme_Object *args[12], *a;
+
+  a = argv[10];
+  if (!SCHEME_INTP(a) || (SCHEME_INT_VAL(a) < 0)
+      || (SCHEME_INT_VAL(a) > 999999999))
+    scheme_wrong_field_type(argv[12], "exact integer in [0, 999999999]", a);
+  
+  a = argv[11];
+  if (!SCHEME_CHAR_STRINGP(a)) 
+    scheme_wrong_field_type(argv[12], "string", a);
+
+  memcpy(args, argv, sizeof(Scheme_Object *) * 12);
+  if (!SCHEME_IMMUTABLEP(argv[11])) {
+    a = argv[11];
+    a = scheme_make_immutable_sized_char_string(SCHEME_CHAR_STR_VAL(a),
+                                                SCHEME_CHAR_STRLEN_VAL(a),
+                                                1);
+    args[11] = a;
+  }
+   
+  return scheme_values(12, args);
 }
 
 /*========================================================================*/

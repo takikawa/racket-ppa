@@ -138,7 +138,9 @@
   (set! icons (cons (make-icon bm x y) icons))
   (refresh-splash))
 
-(define (start-splash splash-draw-spec _splash-title width-default #:allow-funny? [allow-funny? #f])
+(define (start-splash splash-draw-spec _splash-title width-default 
+                      #:allow-funny? [allow-funny? #f]
+                      #:frame-icon [frame-icon #f])
   (unless allow-funny? (set! funny? #f))
   (set! splash-title _splash-title)
   (set! splash-max-width (max 1 (splash-get-preference (get-splash-width-preference-name) width-default)))
@@ -152,6 +154,15 @@
     (on-splash-eventspace/ret
      (send (get-gauge) set-range splash-max-width)
      (send splash-tlw set-label splash-title)
+     
+     (when frame-icon
+       (if (pair? frame-icon)
+         (let ([small (car frame-icon)]
+               [large (cdr frame-icon)])
+           (send splash-tlw set-icon small (send small get-loaded-mask) 'small)
+           (send splash-tlw set-icon large (send large get-loaded-mask) 'large))
+         (send splash-tlw set-icon frame-icon (send frame-icon get-loaded-mask) 'both)))
+     
      (cond
        [(or (path? splash-draw-spec)
             (string? splash-draw-spec))
@@ -308,7 +319,10 @@
    (λ () default)
    #:timeout-lock-there (λ (path) default)))
 (define (splash-set-preference name value)
-  (put-preferences (list name) (list value) void))
+  (with-handlers ((exn:fail?
+                   (λ (exn)
+                     (log-warning (format "splash pref save: ~a" (exn-message exn))))))
+    (put-preferences (list name) (list value) void)))
 
 ;; only modified (or read) on the splash eventspace handler thread
 (define quit-on-close? #t)

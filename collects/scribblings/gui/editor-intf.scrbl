@@ -121,11 +121,9 @@ Does nothing.
 
 @methspec{
 
-Called just after the editor is loaded from a file. 
-
-The argument to the method originally specified whether the save was
-successful, but failures now trigger exceptions such that the method is
-not even called. Consequently, the argument is always @racket[#t].
+Called just after the editor is loaded from a file or during the
+exception escape when an attempt to load fails. The @racket[success?]
+argument indicates whether the load succeeded.
 
 See also
 @method[editor<%> can-load-file?] and
@@ -146,11 +144,9 @@ Does nothing.
 
 @methspec{
 
-Called just after the editor is saved to a file.
-
-The argument to the method originally specified whether the save was
-successful, but failures now trigger exceptions such that the method is
-not even called. Consequently, the argument is always @racket[#t].
+Called just after the editor is saved to a file or during the
+exception escape when a save fails. The @racket[success?] argument
+indicates whether the save succeeded.
 
 See also
 @method[editor<%> can-save-file?] and
@@ -2395,13 +2391,19 @@ See also @method[editor<%> add-undo] .
 @defmethod*[([(use-file-text-mode) boolean?]
              [(use-file-text-mode [on? any/c]) void?])]{
 
-Gets or sets whether the current platform's text mode is used for
-writing files in @racket['text] or @racket['text-force-cr] mode, which
-affects the way that newlines are written. The setting is consulted by
-@method[editor<%> save-file] after @method[editor<%> on-save-file] is
-called. See also @method[editor<%> load-file] for information on file
-modes.
+Gets or sets a boolean that controls if files are saved in
+@racket['text] or @racket['binary] mode (as in @racket[open-input-file]'s
+@racket[#:mode] argument). This flag is consulted only when the
+format is @racket['text] or @racket['text-force-cr]. 
+See @method[editor<%> load-file] for information on 
+formats.
 
+The setting is consulted by
+@method[editor<%> save-file] after @method[editor<%> on-save-file] is
+called.
+
+Overriding this method is a reliable way to detect changes to the internal
+boolean.
 }
 
 

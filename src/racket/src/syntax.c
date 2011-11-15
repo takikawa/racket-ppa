@@ -77,6 +77,8 @@ static Scheme_Object *syntax_property(int argc, Scheme_Object **argv);
 static Scheme_Object *syntax_property_keys(int argc, Scheme_Object **argv);
 static Scheme_Object *syntax_track_origin(int argc, Scheme_Object **argv);
 
+static Scheme_Object *syntax_shift_phase(int argc, Scheme_Object **argv);
+
 static Scheme_Object *bound_eq(int argc, Scheme_Object **argv);
 static Scheme_Object *module_eq(int argc, Scheme_Object **argv);
 static Scheme_Object *module_trans_eq(int argc, Scheme_Object **argv);
@@ -298,10 +300,10 @@ XFORM_NONGCING static int nom_mod_p(Scheme_Object *p)
 typedef struct {
   Scheme_Type type;
   mzshort len;
-  Scheme_Object *a[1];
+  Scheme_Object *a[mzFLEX_ARRAY_DECL];
 } Wrap_Chunk;
 
-#define MALLOC_WRAP_CHUNK(n) (Wrap_Chunk *)scheme_malloc_tagged(sizeof(Wrap_Chunk) + ((n - 1) * sizeof(Scheme_Object *)))
+#define MALLOC_WRAP_CHUNK(n) (Wrap_Chunk *)scheme_malloc_tagged(sizeof(Wrap_Chunk) + ((n - mzFLEX_DELTA) * sizeof(Scheme_Object *)))
 
 /* Macros for iterating over the elements of a wrap. */
 
@@ -358,14 +360,14 @@ XFORM_NONGCING static MZ_INLINE void DO_WRAP_POS_INC(Wrap_Pos *w)
 }
 
 #define WRAP_POS Wrap_Pos
-#define WRAP_POS_INIT(w, wr) w.l = wr; WRAP_POS_SET_FIRST(&w)
+#define WRAP_POS_INIT(w, wr) (w.l = wr, WRAP_POS_SET_FIRST(&w))
 
 #define WRAP_POS_INC(w) DO_WRAP_POS_INC(&w)
 
 #define WRAP_POS_INIT_END(w) (w.l = scheme_null, w.a = NULL, w.is_limb = 0, w.pos = 0)
 #define WRAP_POS_END_P(w) SCHEME_NULLP(w.l)
 #define WRAP_POS_FIRST(w) w.a
-#define WRAP_POS_COPY(w, w2) w.l = (w2).l; w.a = (w2).a; w.is_limb= (w2).is_limb; w.pos = (w2).pos
+#define WRAP_POS_COPY(w, w2) (w.l = (w2).l, w.a = (w2).a, w.is_limb = (w2).is_limb, w.pos = (w2).pos)
 
 /* Walking backwards through one chunk: */
 
@@ -424,9 +426,10 @@ void scheme_init_stx(Scheme_Env *env)
   GLOBAL_IMMED_PRIM("syntax-track-origin"              , syntax_track_origin       , 3, 3, env);
 
   GLOBAL_IMMED_PRIM("make-syntax-delta-introducer"     , scheme_syntax_make_transfer_intro, 2, 3, env);
+  GLOBAL_IMMED_PRIM("syntax-shift-phase-level"         , syntax_shift_phase        , 2, 2, env);
 
-  GLOBAL_IMMED_PRIM("bound-identifier=?"               , bound_eq                  , 2, 3, env);
-  GLOBAL_IMMED_PRIM("free-identifier=?"                , module_eq                 , 2, 3, env);
+  GLOBAL_IMMED_PRIM("bound-identifier=?"               , bound_eq                  , 2, 4, env);
+  GLOBAL_IMMED_PRIM("free-identifier=?"                , module_eq                 , 2, 4, env);
   GLOBAL_IMMED_PRIM("free-transformer-identifier=?"    , module_trans_eq           , 2, 2, env);
   GLOBAL_IMMED_PRIM("free-template-identifier=?"       , module_templ_eq           , 2, 2, env);
   GLOBAL_IMMED_PRIM("free-label-identifier=?"          , module_label_eq           , 2, 2, env);
@@ -437,7 +440,6 @@ void scheme_init_stx(Scheme_Env *env)
   GLOBAL_IMMED_PRIM("identifier-label-binding"         , module_label_binding      , 1, 1, env);
   GLOBAL_IMMED_PRIM("identifier-prune-lexical-context" , identifier_prune          , 1, 2, env);
   GLOBAL_IMMED_PRIM("identifier-prune-to-source-module", identifier_prune_to_module, 1, 1, env);
-
 
   GLOBAL_NONCM_PRIM("syntax-source-module"             , syntax_src_module         , 1, 2, env);
 
@@ -2136,15 +2138,18 @@ void scheme_install_free_id_rename(Scheme_Object *id,
   }
 }
 
-Scheme_Object *scheme_stx_phase_shift_as_rename(intptr_t shift, Scheme_Object *old_midx, Scheme_Object *new_midx,
+Scheme_Object *scheme_stx_phase_shift_as_rename(Scheme_Object *shift, Scheme_Object *old_midx, Scheme_Object *new_midx,
 						Scheme_Hash_Table *export_registry, Scheme_Object *insp)
 {
-  if (shift || new_midx || export_registry || insp) {
+  if (!shift)
+    shift = scheme_make_integer(0);
+
+  if (!SCHEME_INTP(shift) || SCHEME_INT_VAL(shift) || new_midx || export_registry || insp) {
     Scheme_Object *vec;
     
     if (last_phase_shift
 	&& ((vec = SCHEME_BOX_VAL(last_phase_shift)))
-	&& (SCHEME_VEC_ELS(vec)[0] == scheme_make_integer(shift))
+	&& (SCHEME_VEC_ELS(vec)[0] == shift)
 	&& (SCHEME_VEC_ELS(vec)[1] == (new_midx ? old_midx : scheme_false))
 	&& (SCHEME_VEC_ELS(vec)[2] == (new_midx ? new_midx : scheme_false))
 	&& (SCHEME_VEC_ELS(vec)[3] == (export_registry ? (Scheme_Object *)export_registry : scheme_false))
@@ -2152,7 +2157,7 @@ Scheme_Object *scheme_stx_phase_shift_as_rename(intptr_t shift, Scheme_Object *o
       /* use the old one */
     } else {
       vec = scheme_make_vector(5, NULL);
-      SCHEME_VEC_ELS(vec)[0] = scheme_make_integer(shift);
+      SCHEME_VEC_ELS(vec)[0] = shift;
       SCHEME_VEC_ELS(vec)[1] = (new_midx ? old_midx : scheme_false);
       SCHEME_VEC_ELS(vec)[2] = (new_midx ? new_midx : scheme_false);
       SCHEME_VEC_ELS(vec)[3] = (export_registry ? (Scheme_Object *)export_registry : scheme_false);
@@ -2166,7 +2171,7 @@ Scheme_Object *scheme_stx_phase_shift_as_rename(intptr_t shift, Scheme_Object *o
     return NULL;
 }
 
-Scheme_Object *scheme_stx_phase_shift(Scheme_Object *stx, intptr_t shift,
+Scheme_Object *scheme_stx_phase_shift(Scheme_Object *stx, Scheme_Object *shift,
 				      Scheme_Object *old_midx, Scheme_Object *new_midx,
 				      Scheme_Hash_Table *export_registry,
                                       Scheme_Object *insp)
@@ -2181,6 +2186,19 @@ Scheme_Object *scheme_stx_phase_shift(Scheme_Object *stx, intptr_t shift,
     return scheme_add_rename(stx, ps);  
   else
     return stx;
+}
+
+static Scheme_Object *syntax_shift_phase(int argc, Scheme_Object **argv)
+{
+  if (!SCHEME_STXP(argv[0]))
+    scheme_wrong_type("syntax-shift-phase-level", "syntax", 0, argc, argv);
+  if (!scheme_exact_p(argv[1]))
+    scheme_wrong_type("syntax-shift-phase-level", "exact integer", 0, argc, argv);
+
+  if (SCHEME_INTP(argv[1]) && !SCHEME_INT_VAL(argv[1]))
+    return argv[0];
+
+  return scheme_stx_phase_shift(argv[0], argv[1], NULL, NULL, NULL, NULL);
 }
 
 void scheme_clear_shift_cache(void)
@@ -2431,7 +2449,9 @@ static Scheme_Object *taint_intern(Scheme_Object *v)
 {
   Scheme_Bucket *b;
 
+  scheme_start_atomic();
   b = scheme_bucket_from_table(taint_intern_table, (const char *)v);
+  scheme_end_atomic_no_swap();
   if (!b->val)
     b->val = scheme_true;
   v = (Scheme_Object *)HT_EXTRACT_WEAK(b->key);
@@ -3064,7 +3084,7 @@ static Scheme_Object *check_floating_id(Scheme_Object *stx)
 
 #define EXPLAIN_RESOLVE 0
 #if EXPLAIN_RESOLVE
-int scheme_explain_resolves = 0;
+int scheme_explain_resolves = 1;
 # define EXPLAIN(x) if (scheme_explain_resolves) { x; }
 #else
 # define EXPLAIN(x) /* empty */
@@ -3367,6 +3387,7 @@ static Scheme_Object *search_shared_pes(Scheme_Object *shared_pes,
               phase = 0;
 
             EXPLAIN(fprintf(stderr, "%d     srcname %s\n", depth, SCHEME_SYM_VAL(pt->provide_src_names[i])));
+            EXPLAIN(fprintf(stderr, "%d     mod phase %d\n", depth, phase));
             get_names[0] = pt->provide_src_names[i];
             get_names[1] = idx;
             get_names[2] = glob_id;
@@ -3578,8 +3599,7 @@ static void extract_lex_range(Scheme_Object *rename, Scheme_Object *a, int *_ist
    depth is bounded (by the fact that modules can't be nested,
    etc.). */
 
-static Scheme_Object *resolve_env(WRAP_POS *_wraps,
-                                  Scheme_Object *a, Scheme_Object *orig_phase, 
+static Scheme_Object *resolve_env(Scheme_Object *a, Scheme_Object *orig_phase, 
                                   int w_mod, Scheme_Object **get_names,
                                   Scheme_Object *skip_ribs, int *_binding_marks_skipped,
                                   int *_depends_on_unsealed_rib, int depth, 
@@ -3610,14 +3630,11 @@ static Scheme_Object *resolve_env(WRAP_POS *_wraps,
   int mresult_skipped = -1;
   int depends_on_unsealed_rib = 0, mresult_depends_unsealed = 0;
 
-  EXPLAIN(fprintf(stderr, "%d Resolving %s [skips: %s]:\n", depth, SCHEME_SYM_VAL(SCHEME_STX_VAL(a)),
+  EXPLAIN(fprintf(stderr, "%d Resolving %s@%d [skips: %s]: -------------\n", 
+                  depth, SCHEME_SYM_VAL(SCHEME_STX_VAL(a)), SCHEME_INT_VAL(orig_phase),
                   scheme_write_to_string(skip_ribs ? skip_ribs : scheme_false, NULL)));
 
-  if (_wraps) {
-    WRAP_POS_COPY(wraps, *_wraps);
-    WRAP_POS_INC(wraps);
-  } else
-    WRAP_POS_INIT(wraps, ((Scheme_Stx *)a)->wraps);
+  WRAP_POS_INIT(wraps, ((Scheme_Stx *)a)->wraps);
 
   while (1) {
     if (WRAP_POS_END_P(wraps)) {
@@ -3695,7 +3712,7 @@ static Scheme_Object *resolve_env(WRAP_POS *_wraps,
             result = SCHEME_CAR(result_free_rename);
             if (!scheme_hash_get(free_id_recur, result)) {
               scheme_hash_set(free_id_recur, result, scheme_true);
-              result = resolve_env(NULL, result, phase,
+              result = resolve_env(result, phase,
                                    w_mod, get_names,
                                    NULL, _binding_marks_skipped,
                                    &rib_dep, depth + 1, free_id_recur);
@@ -3742,7 +3759,17 @@ static Scheme_Object *resolve_env(WRAP_POS *_wraps,
       if (_depends_on_unsealed_rib)
         *_depends_on_unsealed_rib = depends_on_unsealed_rib;
 
-      EXPLAIN(fprintf(stderr, "%d Result: %s\n", depth, scheme_write_to_string(result, 0)));
+      if (SCHEME_MODIDXP(result)) {
+        EXPLAIN(fprintf(stderr, "%d Result: <%s,%s>\n", depth, 
+                        scheme_write_to_string(((Scheme_Modidx *)result)->path, NULL),
+                        scheme_write_to_string(((Scheme_Modidx *)result)->base, NULL)));
+      } else {
+        EXPLAIN(fprintf(stderr, "%d Result: %s %p\n", depth, scheme_write_to_string(result, NULL), result));
+      }
+      if (get_names) {
+        EXPLAIN(fprintf(stderr, "%d  phase %s\n", depth, scheme_write_to_string(get_names[3], NULL)));
+      }
+        
 
       return result;
     } else if ((SCHEME_RENAMESP(WRAP_POS_FIRST(wraps)) 
@@ -3783,11 +3810,11 @@ static Scheme_Object *resolve_env(WRAP_POS *_wraps,
           }
 
           if (mrn->marked_names) {
-	    /* Resolve based on rest of wraps: */
+	    /* Resolve based on binding ignoring modules: */
             EXPLAIN(fprintf(stderr, "%d  tl_id_sym\n", depth));
 	    if (!bdg) {
               EXPLAIN(fprintf(stderr, "%d   get bdg\n", depth));
-	      bdg = resolve_env(&wraps, a, orig_phase, 0, NULL, recur_skip_ribs, NULL, NULL, depth+1, NULL);
+	      bdg = resolve_env(a, orig_phase, 0, NULL, recur_skip_ribs, NULL, NULL, depth+1, NULL);
               if (SCHEME_FALSEP(bdg)) {
                 if (!floating_checked) {
                   floating = check_floating_id(a);
@@ -3877,10 +3904,15 @@ static Scheme_Object *resolve_env(WRAP_POS *_wraps,
               } else
                 mresult = rename;
 	    
-              if (modidx_shift_from)
+              if (modidx_shift_from) {
+                EXPLAIN(fprintf(stderr, "%d  shift %p->%p: %p\n",
+                                depth, modidx_shift_from, modidx_shift_to,
+                                mresult));
                 mresult = scheme_modidx_shift(mresult,
                                               modidx_shift_from,
                                               modidx_shift_to);
+                EXPLAIN(fprintf(stderr, "%d  = %p\n", depth, mresult));
+              }
 
               if (get_names) {
                 int no_shift = 0;
@@ -3972,10 +4004,11 @@ static Scheme_Object *resolve_env(WRAP_POS *_wraps,
       /* Phase shift */
       Scheme_Object *vec, *n, *dest, *src, *insp;
       
-      EXPLAIN(fprintf(stderr, "%d phase shift\n", depth));
-
       vec = SCHEME_PTR_VAL(WRAP_POS_FIRST(wraps));
       n = SCHEME_VEC_ELS(vec)[0];
+
+      EXPLAIN(fprintf(stderr, "%d phase shift by %d\n", depth, SCHEME_INT_VAL(n)));
+
       if (SCHEME_TRUEP(phase))
         phase = scheme_bin_minus(phase, n);
      
@@ -3989,11 +4022,15 @@ static Scheme_Object *resolve_env(WRAP_POS *_wraps,
 
       if (!SCHEME_FALSEP(src)) {
 	if (!modidx_shift_to) {
+          EXPLAIN(fprintf(stderr, "%d  shift to %p\n", depth, dest));
 	  modidx_shift_to = dest;
 	} else if (!SAME_OBJ(modidx_shift_from, dest)) {
 	  modidx_shift_to = scheme_modidx_shift(dest,
 						modidx_shift_from,
 						modidx_shift_to);
+          EXPLAIN(fprintf(stderr, "%d  shift %p->%p; %d\n", 
+                          depth, modidx_shift_from,
+                          modidx_shift_to, SAME_OBJ(dest, modidx_shift_to)));
 	}
 	modidx_shift_from = src;
       }
@@ -4069,7 +4106,7 @@ static Scheme_Object *resolve_env(WRAP_POS *_wraps,
 	      if (SCHEME_VOIDP(other_env)) {
                 int rib_dep = 0;
 		SCHEME_USE_FUEL(1);
-		other_env = resolve_env(NULL, renamed, 0, 0, NULL, recur_skip_ribs, NULL, &rib_dep, depth+1, NULL);
+		other_env = resolve_env(renamed, 0, 0, NULL, recur_skip_ribs, NULL, &rib_dep, depth+1, NULL);
 		{
                   Scheme_Object *e;
                   e = extend_cached_env(SCHEME_VEC_ELS(rename)[2+c+ri], other_env, recur_skip_ribs,
@@ -4090,8 +4127,9 @@ static Scheme_Object *resolve_env(WRAP_POS *_wraps,
 		WRAP_POS w2;
 		WRAP_POS_INIT(w2, ((Scheme_Stx *)renamed)->wraps);
 		same = same_marks(&w2, &wraps, other_env);
-                if (!same)
+                if (!same) {
                   EXPLAIN(fprintf(stderr, "%d Different marks\n", depth));
+                }
 	      }
 	    }
 	    
@@ -4296,19 +4334,20 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
 	  if (mrn->needs_unmarshal) {
 	    /* Use resolve_env to trigger unmarshal, so that we
 	       don't have to implement top/from shifts here: */
-	    resolve_env(NULL, a, orig_phase, 1, NULL, NULL, NULL, NULL, 0, NULL);
+	    resolve_env(a, orig_phase, 1, NULL, NULL, NULL, NULL, 0, NULL);
 	  }
 
 	  if (mrn->marked_names) {
-	    /* Resolve based on rest of wraps: */
-	    if (!bdg)
-	      bdg = resolve_env(&wraps, a, orig_phase, 0, NULL, NULL, NULL, NULL, 0, NULL);
-            if (SCHEME_FALSEP(bdg))  {
-              if (!floating_checked) {
-                floating = check_floating_id(a);
-                floating_checked = 1;
+	    /* Resolve based on binding ignoring modules: */
+	    if (!bdg) {
+	      bdg = resolve_env(a, orig_phase, 0, NULL, NULL, NULL, NULL, 0, NULL);
+              if (SCHEME_FALSEP(bdg))  {
+                if (!floating_checked) {
+                  floating = check_floating_id(a);
+                  floating_checked = 1;
+                }
+                bdg = floating;
               }
-              bdg = floating;
             }
 	    /* Remap id based on marks and rest-of-wraps resolution: */
 	    glob_id = scheme_tl_id_sym((Scheme_Env *)mrn->marked_names, a, bdg, 0, NULL, NULL);
@@ -4357,8 +4396,11 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
 		result = glob_id;
 	      } else {
 		result = SCHEME_CDR(rename);
-		if (SCHEME_PAIRP(result))
+		if (SCHEME_PAIRP(result)) {
+                  if (SCHEME_INTP(SCHEME_CAR(result))) /* phase? */
+                    result = SCHEME_CDR(result);
 		  result = SCHEME_CAR(result);
+                }
 	      }
 	    } else
 	      result = glob_id;
@@ -4449,7 +4491,7 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
                 names[5] = NULL;
                 names[6] = NULL;
 
-                modname = resolve_env(NULL, a, orig_phase, 1, names, NULL, NULL, &rib_dep, 0, free_id_recur);
+                modname = resolve_env(a, orig_phase, 1, names, NULL, NULL, &rib_dep, 0, free_id_recur);
                 if (rib_dep) {
                   sealed = 0;
                   unsealed_reason = 5;
@@ -4483,7 +4525,9 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
   }
 }
 
-int scheme_stx_module_eq2(Scheme_Object *a, Scheme_Object *b, Scheme_Object *phase, Scheme_Object *asym)
+int scheme_stx_module_eq3(Scheme_Object *a, Scheme_Object *b, 
+                          Scheme_Object *a_phase, Scheme_Object *b_phase, 
+                          Scheme_Object *asym)
 {
   Scheme_Object *bsym;
   Scheme_Hash_Table *free_id_recur;
@@ -4496,7 +4540,7 @@ int scheme_stx_module_eq2(Scheme_Object *a, Scheme_Object *b, Scheme_Object *pha
       free_id_recur = make_recur_table();
     else
       free_id_recur = NULL;
-    bsym = get_module_src_name(b, phase, free_id_recur);
+    bsym = get_module_src_name(b, b_phase, free_id_recur);
     if (!asym)
       release_recur_table(free_id_recur);
   } else
@@ -4504,7 +4548,7 @@ int scheme_stx_module_eq2(Scheme_Object *a, Scheme_Object *b, Scheme_Object *pha
   if (!asym) {
     if (SCHEME_STXP(a)) {
       free_id_recur = make_recur_table();
-      asym = get_module_src_name(a, phase, free_id_recur);
+      asym = get_module_src_name(a, a_phase, free_id_recur);
       release_recur_table(free_id_recur);
     } else
       asym = a;
@@ -4518,11 +4562,11 @@ int scheme_stx_module_eq2(Scheme_Object *a, Scheme_Object *b, Scheme_Object *pha
     return 1;
 
   free_id_recur = make_recur_table();
-  a = resolve_env(NULL, a, phase, 1, NULL, NULL, NULL, NULL, 0, free_id_recur);
+  a = resolve_env(a, a_phase, 1, NULL, NULL, NULL, NULL, 0, free_id_recur);
   release_recur_table(free_id_recur);
 
   free_id_recur = make_recur_table();
-  b = resolve_env(NULL, b, phase, 1, NULL, NULL, NULL, NULL, 0, free_id_recur);
+  b = resolve_env(b, b_phase, 1, NULL, NULL, NULL, NULL, 0, free_id_recur);
   release_recur_table(free_id_recur);
 
   if (SAME_TYPE(SCHEME_TYPE(a), scheme_module_index_type))
@@ -4534,9 +4578,14 @@ int scheme_stx_module_eq2(Scheme_Object *a, Scheme_Object *b, Scheme_Object *pha
   return SAME_OBJ(a, b);
 }
 
+int scheme_stx_module_eq2(Scheme_Object *a, Scheme_Object *b, Scheme_Object *phase, Scheme_Object *asym)
+{
+  return scheme_stx_module_eq3(a, b, phase, phase, NULL);
+}
+
 int scheme_stx_module_eq(Scheme_Object *a, Scheme_Object *b, intptr_t phase)
 {
-  return scheme_stx_module_eq2(a, b, scheme_make_integer(phase), NULL);
+  return scheme_stx_module_eq3(a, b, scheme_make_integer(phase), scheme_make_integer(phase), NULL);
 }
 
 Scheme_Object *scheme_stx_get_module_eq_sym(Scheme_Object *a, Scheme_Object *phase)
@@ -4574,7 +4623,7 @@ Scheme_Object *scheme_stx_module_name(Scheme_Hash_Table *free_id_recur,
     names[5] = NULL;
     names[6] = NULL;
 
-    modname = resolve_env(NULL, *a, phase, 1, names, NULL, NULL, _sealed ? &rib_dep : NULL, 0, free_id_recur);
+    modname = resolve_env(*a, phase, 1, names, NULL, NULL, _sealed ? &rib_dep : NULL, 0, free_id_recur);
     
     if (_sealed) *_sealed = !rib_dep;
 
@@ -4622,8 +4671,8 @@ int scheme_stx_ribs_matter(Scheme_Object *a, Scheme_Object *skip_ribs)
     skip_ribs = SCHEME_CDR(skip_ribs);
   }
 
-  m1 = resolve_env(NULL, a, scheme_make_integer(0), 1, NULL, NULL, NULL, NULL, 0, NULL);
-  m2 = resolve_env(NULL, a, scheme_make_integer(0), 1, NULL, skips, NULL, NULL, 0, NULL);
+  m1 = resolve_env(a, scheme_make_integer(0), 1, NULL, NULL, NULL, NULL, 0, NULL);
+  m2 = resolve_env(a, scheme_make_integer(0), 1, NULL, skips, NULL, NULL, 0, NULL);
 
   return !SAME_OBJ(m1, m2);
 }
@@ -4634,7 +4683,7 @@ Scheme_Object *scheme_stx_moduleless_env(Scheme_Object *a)
   if (SCHEME_STXP(a)) {
     Scheme_Object *r;
 
-    r = resolve_env(NULL, a, scheme_make_integer(0), 0, NULL, NULL, NULL, NULL, 0, NULL);
+    r = resolve_env(a, scheme_make_integer(0), 0, NULL, NULL, NULL, NULL, 0, NULL);
 
     if (SCHEME_FALSEP(r))
       r = check_floating_id(a);
@@ -4645,7 +4694,8 @@ Scheme_Object *scheme_stx_moduleless_env(Scheme_Object *a)
   return scheme_false;
 }
 
-int scheme_stx_env_bound_eq(Scheme_Object *a, Scheme_Object *b, Scheme_Object *uid, Scheme_Object *phase)
+int scheme_stx_env_bound_eq2(Scheme_Object *a, Scheme_Object *b, Scheme_Object *uid, 
+                             Scheme_Object *a_phase, Scheme_Object *b_phase)
      /* If uid is given, it's the environment for b. */
 {
   Scheme_Object *asym, *bsym, *ae, *be;
@@ -4666,13 +4716,13 @@ int scheme_stx_env_bound_eq(Scheme_Object *a, Scheme_Object *b, Scheme_Object *u
   if (!SAME_OBJ(asym, bsym))
     return 0;
 
-  ae = resolve_env(NULL, a, phase, 0, NULL, NULL, NULL, NULL, 0, NULL);
+  ae = resolve_env(a, a_phase, 0, NULL, NULL, NULL, NULL, 0, NULL);
   /* No need to module_resolve ae, because we ignored module renamings. */
 
   if (uid)
     be = uid;
   else {
-    be = resolve_env(NULL, b, phase, 0, NULL, NULL, NULL, NULL, 0, NULL);
+    be = resolve_env(b, b_phase, 0, NULL, NULL, NULL, NULL, 0, NULL);
     /* No need to module_resolve be, because we ignored module renamings. */
   }
 
@@ -4693,16 +4743,21 @@ int scheme_stx_env_bound_eq(Scheme_Object *a, Scheme_Object *b, Scheme_Object *u
   return 1;
 }
 
+int scheme_stx_env_bound_eq(Scheme_Object *a, Scheme_Object *b, Scheme_Object *uid, Scheme_Object *phase)
+{
+  return scheme_stx_env_bound_eq2(a, b, uid, phase, phase);
+}
+
 int scheme_stx_bound_eq(Scheme_Object *a, Scheme_Object *b, Scheme_Object *phase)
 {
-  return scheme_stx_env_bound_eq(a, b, NULL, phase);
+  return scheme_stx_env_bound_eq2(a, b, NULL, phase, phase);
 }
 
 #if EXPLAIN_RESOLVE
 Scheme_Object *scheme_explain_resolve_env(Scheme_Object *a)
 {
   scheme_explain_resolves++;
-  a = resolve_env(NULL, a, 0, 0, NULL, NULL, NULL, NULL, 0, NULL);
+  a = resolve_env(a, 0, 0, NULL, NULL, NULL, NULL, 0, NULL);
   --scheme_explain_resolves;
   return a;
 }
@@ -5020,12 +5075,17 @@ Scheme_Object *scheme_flatten_syntax_list(Scheme_Object *lst, int *islist)
 #define EXPLAIN_SIMP 0
 #if EXPLAIN_SIMP
 #define EXPLAIN_S(x) if (explain_simp) x
-static int explain_simp = 0;
+static int explain_simp = 1;
 static void print_skips(Scheme_Object *skips)
 {
   while (skips) {
-    fprintf(stderr, "  skip %s\n", scheme_write_to_string(SCHEME_CAR(skips), NULL));
-    skips = SCHEME_CDR(skips);
+    if (SCHEME_PAIRP(skips)) {
+      fprintf(stderr, "  skip %s\n", scheme_write_to_string(SCHEME_CAR(skips), NULL));
+      skips = SCHEME_CDR(skips);
+    } else {
+      fprintf(stderr, "  skip val %s\n", scheme_write_to_string(skips, NULL));
+      skips = NULL;
+    }
   }
 }
 #else
@@ -5218,7 +5278,7 @@ static Scheme_Object *simplify_lex_renames(Scheme_Object *wraps, Scheme_Hash_Tab
 
   EXPLAIN_S(fprintf(stderr, "[in simplify]\n"));
 
-  EXPLAIN_R(printf("Simplifying %p\n", lex_cache));
+  EXPLAIN_R(printf("Simplifying %p %s\n", lex_cache, scheme_write_to_string(stx_datum, NULL)));
 
   while (!WRAP_POS_END_P(w)) {
     if (SCHEME_VECTORP(WRAP_POS_FIRST(w))
@@ -5300,7 +5360,7 @@ static Scheme_Object *simplify_lex_renames(Scheme_Object *wraps, Scheme_Hash_Tab
                   other_env = filter_cached_env(other_env, prec_ribs);
                   if (SCHEME_VOIDP(other_env)) {
                     int rib_dep;
-                    other_env = resolve_env(NULL, stx, 0, 0, NULL, prec_ribs, NULL, &rib_dep, 0, NULL);
+                    other_env = resolve_env(stx, 0, 0, NULL, prec_ribs, NULL, &rib_dep, 0, NULL);
                     if (rib_dep) {
                       scheme_signal_error("compile: unsealed local-definition context found in fully expanded form");
                       return NULL;
@@ -5518,7 +5578,7 @@ static Scheme_Object *simplify_lex_renames(Scheme_Object *wraps, Scheme_Hash_Tab
             other_env = filter_cached_env(other_env, prec_ribs);
             if (SCHEME_VOIDP(other_env)) {
               int rib_dep;
-              other_env = resolve_env(NULL, stx, 0, 0, NULL, prec_ribs, NULL, &rib_dep, 0, NULL);
+              other_env = resolve_env(stx, 0, 0, NULL, prec_ribs, NULL, &rib_dep, 0, NULL);
               if (rib_dep) {
                 scheme_signal_error("compile: unsealed local-definition context found in fully expanded form");
                 return NULL;
@@ -6169,7 +6229,6 @@ static Scheme_Object *wraps_to_datum(Scheme_Object *stx_datum,
         return scheme_hash_get(rns, old_key);
       } else {
         a = scheme_marshal_lookup(mt, old_key);
-        scheme_marshal_using_key(mt, old_key);
         if (!mt->same_map) {
           Scheme_Hash_Table *same_map;
           same_map = scheme_make_hash_table(SCHEME_hash_ptr);
@@ -6178,6 +6237,7 @@ static Scheme_Object *wraps_to_datum(Scheme_Object *stx_datum,
         scheme_hash_set(mt->same_map, w_in, old_key);
         /* nevermind references that we saw when creating `stack': */
         scheme_marshal_pop_refs(mt, 0);
+        scheme_marshal_using_key(mt, old_key);
         return a;
       }
     }
@@ -7526,7 +7586,7 @@ void scheme_simplify_stx(Scheme_Object *stx, Scheme_Object *cache)
   if (SAME_OBJ(scheme_intern_symbol("y"), SCHEME_STX_VAL(stx))) {
     fprintf(stderr,
             "simplifying... %s\n",
-            scheme_write_to_string(resolve_env(NULL, stx, 0, 0, NULL, NULL, NULL, NULL, 0, NULL),
+            scheme_write_to_string(resolve_env(stx, 0, 0, NULL, NULL, NULL, NULL, 0, NULL),
                                    NULL));
     explain_simp = 1;
   }
@@ -7544,7 +7604,7 @@ void scheme_simplify_stx(Scheme_Object *stx, Scheme_Object *cache)
   if (explain_simp) {
     explain_simp = 0;
     fprintf(stderr, "simplified: %s\n",
-            scheme_write_to_string(resolve_env(NULL, stx, 0, 0, NULL, NULL, NULL, NULL, 0, NULL),
+            scheme_write_to_string(resolve_env(stx, 0, 0, NULL, NULL, NULL, NULL, 0, NULL),
                                    NULL));
   }
 #endif
@@ -8057,7 +8117,7 @@ Scheme_Object *scheme_syntax_make_transfer_intro(int argc, Scheme_Object **argv)
     int skipped = -1;
     Scheme_Object *mod;
 
-    mod = resolve_env(NULL, argv[0], phase, 1, NULL, NULL, &skipped, NULL, 0, 
+    mod = resolve_env(argv[0], phase, 1, NULL, NULL, &skipped, NULL, 0, 
                       scheme_make_hash_table(SCHEME_hash_ptr));
 
     if ((skipped == -1) && SCHEME_FALSEP(mod)) {
@@ -8098,7 +8158,7 @@ Scheme_Object *scheme_syntax_make_transfer_intro(int argc, Scheme_Object **argv)
   if (scheme_stx_is_clean(argv[0]))
     a[1] = scheme_false;
   else
-    a[2] = scheme_true;
+    a[1] = scheme_true;
 
   return scheme_make_prim_closure_w_arity(delta_introducer, 2, a, "delta-introducer", 1, 1);
 }
@@ -8114,14 +8174,14 @@ static Scheme_Object *bound_eq(int argc, Scheme_Object **argv)
 
   phase = extract_phase("bound-identifier=?", 2, argc, argv, scheme_make_integer(0), 0);
 
-  return (scheme_stx_bound_eq(argv[0], argv[1], phase)
+  return (scheme_stx_env_bound_eq2(argv[0], argv[1], NULL, phase, phase)
 	  ? scheme_true
 	  : scheme_false);
 }
 
 static Scheme_Object *do_module_eq(const char *who, int delta, int argc, Scheme_Object **argv)
 {
-  Scheme_Object *phase;
+  Scheme_Object *phase, *phase2;
 
   if (!SCHEME_STX_IDP(argv[0]))
     scheme_wrong_type(who, "identifier syntax", 0, argc, argv);
@@ -8133,8 +8193,12 @@ static Scheme_Object *do_module_eq(const char *who, int delta, int argc, Scheme_
                          ? scheme_false 
                          : scheme_make_integer(delta)),
                         0);
+  if (argc > 3)
+    phase2 = extract_phase(who, 3, argc, argv, phase, 0);
+  else
+    phase2 = phase;
 
-  return (scheme_stx_module_eq2(argv[0], argv[1], phase, NULL)
+  return (scheme_stx_module_eq3(argv[0], argv[1], phase, phase2, NULL)
 	  ? scheme_true
 	  : scheme_false);
 }
@@ -8525,7 +8589,6 @@ static void register_traversers(void)
   GC_REG_TRAV(scheme_rt_srcloc, mark_srcloc);
   GC_REG_TRAV(scheme_wrap_chunk_type, mark_wrapchunk);
   GC_REG_TRAV(scheme_lexical_rib_type, lex_rib);
-  GC_REG_TRAV(scheme_free_id_info_type, mark_free_id_info);
 }
 
 END_XFORM_SKIP;

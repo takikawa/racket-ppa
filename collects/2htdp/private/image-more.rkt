@@ -76,6 +76,21 @@
     (send bdc set-bitmap #f)
     (send bm save-file filename 'png)))
 
+(define/chk (save-svg-image image
+                            filename 
+                            [width (if (image? image) (image-width image) 0)] 
+                            [height (if (image? image) (image-height image) 0)])
+  (call-with-output-file filename
+    (λ (port)
+      (define sdc (new svg-dc% [width width] [height height] [output port]))
+      (send sdc start-doc "")
+      (send sdc start-page)
+      (send sdc set-smoothing 'aligned)
+      (render-image image sdc 0 0)
+      (send sdc end-page)
+      (send sdc end-doc))
+    #:exists 'truncate))
+
 (define (get-right img) (bb-right (send img get-bb)))
 (define (get-bottom img) (bb-bottom (send img get-bb)))
 (define (get-baseline img) (bb-baseline (send img get-bb)))
@@ -719,7 +734,6 @@
            [flipped? (flip-flipped? atomic-shape)])
        (make-flip flipped?
                   (make-ibitmap (ibitmap-raw-bitmap bitmap)
-                                (ibitmap-raw-mask bitmap)
                                 (bring-between (if flipped? 
                                                    (+ (ibitmap-angle bitmap) θ)
                                                    (- (ibitmap-angle bitmap) θ))
@@ -1065,7 +1079,7 @@
 (define/chk (triangle/ass angle-a side-b side-c mode color)
   (define (triangle-vertices/ass A b c)
     (list (make-posn 0 0) (make-posn c 0) (polar->posn b A)))
-  (polygon (triangle-vertices/ass angle-a side-b side-c) mode color))
+  (polygon (triangle-vertices/ass (radians angle-a) side-b side-c) mode color))
 
 (define/chk (triangle/sas side-a angle-b side-c mode color)
   (define (triangle-vertices/sas a B c)
@@ -1282,7 +1296,7 @@
              (not (file-exists? arg)))
     (error 'bitmap "could not find the file ~a" (path->string arg)))
   ;; the rotate does a coercion to a 2htdp/image image
-  (rotate 0 (make-object image-snip% (make-object bitmap% arg 'unknown/mask))))
+  (rotate 0 (make-object image-snip% (make-object bitmap% arg 'unknown/alpha))))
 
 (define/chk (bitmap/url string)
   ;; the rotate does a coercion to a 2htdp/image image
@@ -1423,6 +1437,7 @@
          
          
          save-image
+         save-svg-image
          bring-between
          
          

@@ -30,7 +30,8 @@ racket
   (if (= 1 x)
       add1
       (lambda (y) (+ x y))))
-(provide/contract [make-adder (-> number? (-> number? number?))])
+(provide (contract-out 
+          [make-adder (-> number? (-> number? number?))]))
 ]
 
 It exports the @racket[make-adder] function that is the usual curried
@@ -81,26 +82,24 @@ streams like this:
 @interaction[
   #:eval e
 (define stream/c
- (promise/c
-  (or/c
-   null?
-   (cons/c number? stream/c))))
+  (promise/c
+   (or/c null?
+         (cons/c number? stream/c))))
 ]
 @close-eval[e]
- 
+
 Unfortunately, this does not work because the value of
 @racket[stream/c] is needed before it is defined. Put another way, all
 of the combinators evaluate their arguments eagerly, even thought the
 values that they accept do not.
 
-Instead, use 
+Instead, use
 @racketblock[
 (define stream/c
- (promise/c
-  (or/c
-   null?
-   (cons/c 1
-           (recursive-contract stream/c)))))
+  (promise/c
+   (or/c
+    null?
+    (cons/c 1 (recursive-contract stream/c)))))
 ]
 
 The use of @racket[recursive-contract] delays the evaluation of the
@@ -109,10 +108,10 @@ checked, long enough to ensure that @racket[stream/c] is defined.
 
 See also @ctc-link["lazy-contracts"].
 
-@ctc-section{Mixing @racket[set!] and @racket[provide/contract]}
+@ctc-section{Mixing @racket[set!] and @racket[contract-out]}
 
 The contract library assumes that variables exported via
-@racket[provide/contract] are not assigned to, but does not enforce
+@racket[contract-out] are not assigned to, but does not enforce
 it. Accordingly, if you try to @racket[set!] those variables, you 
 may be surprised. Consider the following example:
 
@@ -120,8 +119,8 @@ may be surprised. Consider the following example:
 (module server racket
   (define (inc-x!) (set! x (+ x 1)))
   (define x 0)
-  (provide/contract [inc-x! (-> void?)]
-                    [x integer?]))
+  (provide (contract-out [inc-x! (-> void?)]
+                         [x integer?])))
 
 (module client racket
   (require 'server)
@@ -148,8 +147,8 @@ racket
 (define (get-x) x)
 (define (inc-x!) (set! x (+ x 1)))
 (define x 0)
-(provide/contract [inc-x! (-> void?)]
-                  [get-x (-> integer?)])
+(provide (contract-out [inc-x! (-> void?)]
+                       [get-x (-> integer?)]))
 ]
 
 Moral: This is a bug that we will address in a future release.

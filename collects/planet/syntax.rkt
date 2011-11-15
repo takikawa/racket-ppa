@@ -10,7 +10,6 @@
 
 (require racket/match
          planet/util
-         syntax/parse
          racket/syntax
          unstable/syntax
          (for-template racket/base)
@@ -44,7 +43,7 @@
   (match (syntax-source-planet-package stx)
     [(list owner name major minor)
      (string->symbol
-      (format "~a/~a:~a:~a~a"
+      (format "~a/~a:~a:=~a~a"
               owner
               (regexp-replace "\\.plt$" name "")
               major

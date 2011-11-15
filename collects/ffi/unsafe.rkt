@@ -10,7 +10,8 @@
          cpointer? ptr-equal? ptr-add ptr-ref ptr-set! (protect-out cast)
          ptr-offset ptr-add! offset-ptr? set-ptr-offset!
          vector->cpointer flvector->cpointer saved-errno lookup-errno
-         ctype? make-ctype make-cstruct-type make-sized-byte-string ctype->layout
+         ctype? make-ctype make-cstruct-type make-array-type make-union-type
+         make-sized-byte-string ctype->layout
          _void _int8 _uint8 _int16 _uint16 _int32 _uint32 _int64 _uint64
          _fixint _ufixint _fixnum _ufixnum
          _float _double _double*
@@ -90,61 +91,62 @@
 
 (provide (protect-out (rename-out [get-ffi-lib ffi-lib]))
          ffi-lib? ffi-lib-name)
-(define get-ffi-lib
-  (case-lambda
-   [(name) (get-ffi-lib name "")]
-   [(name version/s)
-    (cond
-      [(not name) (ffi-lib name)] ; #f => NULL => open this executable
-      [(not (or (string? name) (path? name)))
-       (raise-type-error 'ffi-lib "library-name" name)]
-      [else
-       ;; A possible way that this might be misleading: say that there is a
-       ;; "foo.so" file in the current directory, which refers to some
-       ;; undefined symbol, trying to use this function with "foo.so" will try
-       ;; a dlopen with "foo.so" which isn't found, then it tries a dlopen with
-       ;; "/<curpath>/foo.so" which fails because of the undefined symbol, and
-       ;; since all fails, it will use (ffi-lib "foo.so") to raise the original
-       ;; file-not-found error.  This is because the dlopen doesn't provide a
-       ;; way to distinguish different errors (only dlerror, but that's
-       ;; unreliable).
-       (let* ([versions (if (list? version/s) version/s (list version/s))]
-              [versions (map (lambda (v)
-                               (if (or (not v) (zero? (string-length v)))
-                                 "" (string-append "." v)))
-                             versions)]
-              [fullpath (lambda (p) (path->complete-path (cleanse-path p)))]
-              [absolute? (absolute-path? name)]
-              [name0 (path->string (cleanse-path name))]     ; orig name
-              [names (map (if (regexp-match lib-suffix-re name0) ; name+suffix
-                            (lambda (v) (string-append name0 v))
-                            (lambda (v) 
-                              (if suffix-before-version?
-                                  (string-append name0 "." lib-suffix v)
-                                  (string-append name0 v "." lib-suffix))))
-                          versions)]
-              [ffi-lib*  (lambda (name) (ffi-lib name #t))])
-         (or ;; try to look in our library paths first
-             (and (not absolute?)
-                  (ormap (lambda (dir)
-                           ;; try good names first, then original
-                           (or (ormap (lambda (name)
-                                        (ffi-lib* (build-path dir name)))
-                                      names)
-                               (ffi-lib* (build-path dir name0))))
-                         (get-lib-search-dirs)))
-             ;; try a system search
-             (ormap ffi-lib* names)    ; try good names first
-             (ffi-lib* name0)          ; try original
-             (ormap (lambda (name)     ; try relative paths
-                      (and (file-exists? name) (ffi-lib* (fullpath name))))
-                    names)
-             (and (file-exists? name0) ; relative with original
-                  (ffi-lib* (fullpath name0)))
-             ;; give up: call ffi-lib so it will raise an error
-             (if (pair? names)
-                 (ffi-lib (car names))
-                 (ffi-lib name0))))])]))
+(define (get-ffi-lib name [version/s ""]
+		     #:fail [fail #f]
+		     #:get-lib-dirs [get-lib-dirs get-lib-search-dirs])
+  (cond
+   [(not name) (ffi-lib name)] ; #f => NULL => open this executable
+   [(not (or (string? name) (path? name)))
+    (raise-type-error 'ffi-lib "library-name" name)]
+   [else
+    ;; A possible way that this might be misleading: say that there is a
+    ;; "foo.so" file in the current directory, which refers to some
+    ;; undefined symbol, trying to use this function with "foo.so" will try
+    ;; a dlopen with "foo.so" which isn't found, then it tries a dlopen with
+    ;; "/<curpath>/foo.so" which fails because of the undefined symbol, and
+    ;; since all fails, it will use (ffi-lib "foo.so") to raise the original
+    ;; file-not-found error.  This is because the dlopen doesn't provide a
+    ;; way to distinguish different errors (only dlerror, but that's
+    ;; unreliable).
+    (let* ([versions (if (list? version/s) version/s (list version/s))]
+	   [versions (map (lambda (v)
+			    (if (or (not v) (zero? (string-length v)))
+				"" (string-append "." v)))
+			  versions)]
+	   [fullpath (lambda (p) (path->complete-path (cleanse-path p)))]
+	   [absolute? (absolute-path? name)]
+	   [name0 (path->string (cleanse-path name))]     ; orig name
+	   [names (map (if (regexp-match lib-suffix-re name0) ; name+suffix
+			   (lambda (v) (string-append name0 v))
+			   (lambda (v) 
+			     (if suffix-before-version?
+				 (string-append name0 "." lib-suffix v)
+				 (string-append name0 v "." lib-suffix))))
+		       versions)]
+	   [ffi-lib*  (lambda (name) (ffi-lib name #t))])
+      (or ;; try to look in our library paths first
+       (and (not absolute?)
+	    (ormap (lambda (dir)
+		     ;; try good names first, then original
+		     (or (ormap (lambda (name)
+				  (ffi-lib* (build-path dir name)))
+				names)
+			 (ffi-lib* (build-path dir name0))))
+		   (get-lib-dirs)))
+       ;; try a system search
+       (ormap ffi-lib* names)    ; try good names first
+       (ffi-lib* name0)          ; try original
+       (ormap (lambda (name)     ; try relative paths
+		(and (file-exists? name) (ffi-lib* (fullpath name))))
+	      names)
+       (and (file-exists? name0) ; relative with original
+	    (ffi-lib* (fullpath name0)))
+       ;; give up: by default, call ffi-lib so it will raise an error
+       (if fail
+	   (fail)
+	   (if (pair? names)
+	       (ffi-lib (car names))
+	       (ffi-lib name0)))))]))
 
 (define (get-ffi-lib-internal x)
   (if (ffi-lib? x) x (get-ffi-lib x)))
@@ -246,30 +248,16 @@
 
   ;; The `_fun' macro tears its input apart and reassemble it using pieces from
   ;; custom function types (macros).  This whole deal needs some work to make
-  ;; it play nicely with taints and code inspectors, so Matthew wrote the following
-  ;; code.  The idea is to create a define-fun-syntax which makes the new
-  ;; syntax transformer be an object that carries extra information, later used
-  ;; by `expand-fun-syntax/fun'.
+  ;; it play nicely with taints and code inspectors, so Matthew wrote the
+  ;; following code.  The idea is to create a define-fun-syntax which makes the
+  ;; new syntax transformer be an object that carries extra information, later
+  ;; used by `expand-fun-syntax/fun'.
 
-  (define orig-inspector (current-code-inspector))
+  (define orig-inspector (variable-reference->module-declaration-inspector
+                          (#%variable-reference)))
 
   (define (disarm stx)
     (syntax-disarm stx orig-inspector))
-
-  ;; bug in begin-for-syntax (PR7104), see below
-  (define foo!!! (make-parameter #f))
-  (define (expand-fun-syntax/normal fun-stx stx)
-    ((foo!!!) fun-stx stx))
-
-  (define-values (make-fun-syntax fun-syntax?
-                  fun-syntax-proc fun-syntax-name)
-    (let-values ([(desc make pred? get set!)
-                  (make-struct-type
-                   'fun-syntax #f 2 0 #f '() (current-inspector)
-                   expand-fun-syntax/normal)])
-      (values make pred?
-              (make-struct-field-accessor get 0 'proc)
-              (make-struct-field-accessor get 1 'name))))
 
   ;; This is used to expand a fun-syntax in a _fun type context.
   (define (expand-fun-syntax/fun stx)
@@ -369,9 +357,7 @@
 
   ;; This is used for a normal expansion of fun-syntax, when not in a _fun type
   ;; context.
-  ;; bug in begin-for-syntax (PR7104), see above
-  ;;   should be (define (expand-fun-syntax/normal fun-stx stx) ...)
-  (foo!!! (lambda (fun-stx stx)
+  (define (expand-fun-syntax/normal fun-stx stx)
     (define (err msg . sub)
       (apply raise-syntax-error (fun-syntax-name fun-stx) msg stx sub))
     (let ([keys (custom-type->keys stx err)])
@@ -403,7 +389,17 @@
             ;; simple type
             type))
         ;; no keys => normal expansion
-        ((fun-syntax-proc fun-stx) stx))))))
+        ((fun-syntax-proc fun-stx) stx))))
+
+  (define-values (make-fun-syntax fun-syntax?
+                  fun-syntax-proc fun-syntax-name)
+    (let-values ([(desc make pred? get set!)
+                  (make-struct-type
+                   'fun-syntax #f 2 0 #f '() (current-inspector)
+                   expand-fun-syntax/normal)])
+      (values make pred?
+              (make-struct-field-accessor get 0 'proc)
+              (make-struct-field-accessor get 1 'name)))))
 
 ;; Use define-fun-syntax instead of define-syntax for forms that
 ;;  are to be expanded by `_fun':
@@ -450,7 +446,7 @@
       (lambda (x)
         (and x
              (let ([cb (ffi-callback (wrap x) itypes otype abi atomic? async-apply)])
-               (cond [(eq? keep #t) (hash-set! held-callbacks x cb)]
+               (cond [(eq? keep #t) (hash-set! held-callbacks x (make-ephemeron x cb))]
                      [(box? keep)
                       (let ([x (unbox keep)])
                         (set-box! keep
@@ -973,6 +969,90 @@
     [(_ . xs) (_bytes . xs)]
     [_ _bytes]))
 
+;; (_array <type> <len> ...+)
+(provide _array
+         array? array-ptr
+         (protect-out array-ref array-set!))
+
+(define _array
+  (case-lambda
+   [(t n)
+    (make-ctype (make-array-type t n)
+                (lambda (v) (array-ptr v))
+                (lambda (v) (make-array v t n)))]
+   [(t n . ns)
+    (_array (apply _array t ns) n)]))
+
+(define-struct array (ptr type len))
+(define array-ref
+  (case-lambda
+   [(a i) 
+    (let ([len (array-len a)])
+      (if (< -1 i len)
+          (ptr-ref (array-ptr a) (array-type a) i)
+          (raise-mismatch-error 'array-ref "index out of bounds: " i)))]
+   [(a . is)
+    (let loop ([a a] [is is])
+      (if (null? is)
+          a
+          (loop (array-ref a (car is)) (cdr is))))]))
+(define array-set!
+  (case-lambda
+   [(a i v)
+    (let ([len (array-len a)])
+      (if (< -1 i len)
+          (ptr-set! (array-ptr a) (array-type a) i v)
+          (raise-mismatch-error 'array-ref "index out of bounds: " i)))]
+   [(a i i1 . is+v)
+    (let ([is+v (reverse (list* i i1 is+v))])
+      (define v (car is+v))
+      (define i (cadr is+v))
+      (let loop ([a a] [is (cddr is+v)])
+        (if (null? is)
+            (array-set! a i v)
+            (loop (array-ref a (car is)) (cdr is)))))]))
+
+;; (_array/list <type> <len> ...+)
+;; Like _list, but for arrays instead of pointers at the C level.
+(provide _array/list)
+(define _array/list 
+  (case-lambda
+   [(t n)
+    (make-ctype (make-array-type t n)
+                (lambda (v) (list->cblock v t n))
+                (lambda (v) (cblock->list v t n)))]
+   [(t n . ns)
+    (_array/list (apply _array/list t ns) n)]))
+
+;; (_array/vector <type> <len> ...+)
+;; Like _vector, but for arrays instead of pointers at the C level.
+(provide _array/vector)
+(define _array/vector
+  (case-lambda
+   [(t n)
+    (make-ctype (make-array-type t n)
+                (lambda (v) (vector->cblock v t n))
+                (lambda (v) (cblock->vector v t n)))]
+   [(t n . ns)
+    (_array/vector (apply _array/vector t ns) n)]))
+
+;; (_union <type> ...+)
+(provide _union
+         union? union-ptr
+         (protect-out union-ref union-set!))
+
+(define (_union t . ts)
+  (let ([ts (cons t ts)])
+    (make-ctype (apply make-union-type ts)
+                (lambda (v) (union-ptr v))
+                (lambda (v) (make-union v ts)))))
+
+(define-struct union (ptr types))
+(define (union-ref u i)
+  (ptr-ref (union-ptr u) (list-ref (union-types u) i)))
+(define (union-set! u i v)
+  (ptr-set! (union-ptr u) (list-ref (union-types u) i) v))
+
 ;; ----------------------------------------------------------------------------
 ;; Tagged pointers
 
@@ -1113,12 +1193,12 @@
        (define (id . strings)
          (datum->syntax
           #'_TYPE (string->symbol (apply string-append strings)) #'_TYPE))
-       (with-syntax ([name-string name]
+       (with-syntax ([TYPE       (id name)]
                      [TYPE?      (id name "?")]
                      [TYPE-tag   (id name "-tag")]
                      [_TYPE/null (id "_" name "/null")])
          #'(define-values (_TYPE _TYPE/null TYPE? TYPE-tag)
-             (let ([TYPE-tag name-string])
+             (let ([TYPE-tag 'TYPE])
                (values (_cpointer      TYPE-tag ptr-type scheme->c c->scheme)
                        (_cpointer/null TYPE-tag ptr-type scheme->c c->scheme)
                        (lambda (x)
@@ -1201,7 +1281,6 @@
       (and (identifier? x) (identifier? y) (free-identifier=? x y)))
     (with-syntax
         ([has-super?           has-super?]
-         [name-string          name]
          [struct-string        (format "struct:~a" name)]
          [(slot ...)           slot-names-stx]
          [(slot-type ...)      slot-types-stx]
@@ -1418,6 +1497,7 @@
     (cond
      [(ctype? b) (ctype->layout b)]
      [(list? b) (map ctype->layout b)]
+     [(vector? b) (vector (ctype->layout (vector-ref b 0)) (vector-ref b 1))]
      [else (hash-ref prim-synonyms b b)])))
 
 ;; ----------------------------------------------------------------------------
@@ -1432,10 +1512,14 @@
       (values x type))))
 
 ;; Converting Scheme lists to/from C vectors (going back requires a length)
-(define* (list->cblock l type)
+(define* (list->cblock l type [need-len #f])
+  (define len (length l))
+  (when need-len
+    (unless (= len need-len)
+      (error 'list->cblock "list does not have the expected length: ~e" l)))
   (if (null? l)
     #f ; null => NULL
-    (let ([cblock (malloc (length l) type)])
+    (let ([cblock (malloc len type)])
       (let loop ([l l] [i 0])
         (unless (null? l)
           (ptr-set! cblock type i (car l))
@@ -1453,8 +1537,11 @@
                      "expecting a non-void pointer, got ~s" cblock)]))
 
 ;; Converting Scheme vectors to/from C vectors
-(define* (vector->cblock v type)
+(define* (vector->cblock v type [need-len #f])
   (let ([len (vector-length v)])
+    (when need-len
+      (unless (= need-len len)
+        (error 'vector->cblock "vector does not have the expected length: ~e" v)))
     (if (zero? len)
       #f ; #() => NULL
       (let ([cblock (malloc len type)])

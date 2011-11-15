@@ -1,6 +1,6 @@
 #lang racket/base
 (require racket/class
-         framework
+         framework/preferences
          "interfaces.rkt"
          unstable/gui/notify
          unstable/gui/prefs)
@@ -29,6 +29,9 @@
   (class object%
     ;; suffix-option : SuffixOption
     (define-notify suffix-option (new notify-box% (value 'over-limit)))
+
+    ;; pretty-abbrev? : boolean
+    (define-notify pretty-abbrev? (new notify-box% (value #t)))
 
     ;; pretty-styles : ImmutableHash[symbol -> symbol]
     (define-notify pretty-styles

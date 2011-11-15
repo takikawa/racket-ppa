@@ -92,9 +92,6 @@
 (define current-version (make-parameter (version)))
 (define current-part-files (make-parameter #f))
 
-(define (toc-part? d)
-  (part-style? d 'toc))
-
 ;; HTML anchors should be case-insensitively unique. To make them
 ;;  distinct, add a "." in front of capital letters.  Also clean up
 ;;  characters that give browers trouble (i.e., the ones that are not
@@ -147,6 +144,24 @@
           (cons `[class ,name]
                 a)
           a))))
+
+;; combine a 'class attribute from both cl and al
+;;  if cl starts with one
+(define (combine-class cl al)
+  (cond
+   [(and (pair? cl)
+         (eq? (caar cl) 'class)
+         (for/or ([i (in-list al)])
+           (and (eq? (car i) 'class) (cadr i))))
+    => (lambda (s)
+         (cons
+          `[class ,(string-append (cadar cl) " " s)]
+          (append
+           (cdr cl)
+           (for/list ([i (in-list al)]
+                      #:unless (eq? 'class (car i)))
+             i))))]
+   [else (append cl al)]))
 
 (define (style->tag style)
   (for/or ([s (in-list (style-properties style))])
@@ -680,6 +695,11 @@
     (define/private (part-parent d ri)
       (collected-info-parent (part-collected-info d ri)))
 
+    (define (toc-part? d ri)
+      (and (part-style? d 'toc)
+           ;; topmost part doesn't count as toc, since it
+           (part-parent d ri)))
+
     (define/private (find-siblings d ri)
       (let ([parent (collected-info-parent (part-collected-info d ri))])
         (let loop ([l (cond
@@ -711,17 +731,19 @@
       (define prev
         (if prev0
           (let loop ([p prev0])
-            (if (and (toc-part? p) (pair? (part-parts p)))
+            (if (and (toc-part? p ri) (pair? (part-parts p)))
               (loop (last (part-parts p)))
               p))
-          (and parent (toc-part? parent) parent)))
+          (and parent (toc-part? parent ri) parent)))
       (define next
-        (cond [(and (toc-part? d) (pair? (part-parts d))) (car (part-parts d))]
+        (cond [(and (toc-part? d ri) (pair? (part-parts d))) (car (part-parts d))]
               [(not next0)
                (let loop ([p parent])
-                 (and p (toc-part? p)
+                 (and p 
+                      (toc-part? p ri)
                       (let-values ([(prev next) (find-siblings p ri)])
-                        (or next (loop (part-parent p ri))))))]
+                        (or next
+                            (loop (part-parent p ri))))))]
               [else next0]))
       (define index
         (let loop ([d d])
@@ -761,7 +783,9 @@
         (make-style
          #f
          (list
-          (make-target-url url)
+          (make-target-url (if (equal? url "")
+                               "#"
+                               url))
           (make-attributes
            `([title . ,(if title* (string-append label " to " title*) label)]
              [pltdoc . "x"]
@@ -804,7 +828,7 @@
                 sep-element
                 (make-element
                  (cond
-                   [(and (part? parent) (toc-part? parent)
+                   [(and (part? parent) (toc-part? parent ri)
                          (part-parent parent ri))
                     (titled-url "up" parent)]
                    [parent (titled-url "up" "index.html" #:title-from parent)]
@@ -926,11 +950,13 @@
                         (if (memq 'div (style-properties style)) 
                             'div 
                             'p))
-                   [,@attrs
-                    ,@(case (style-name style)
-                        [(author) '([class "author"])]
-                        [(pretitle) '([class "SPretitle"])]
-                        [else null])]
+                   [,@(combine-class
+                       (case (style-name style)
+                         [(author) '([class "author"])]
+                         [(pretitle) '([class "SPretitle"])]
+                         [(wraps) null]
+                         [else null])
+                       attrs)]
                    ,@contents))))))
 
     (define/override (render-paragraph p part ri)
@@ -1179,7 +1205,7 @@
                  ,@content))))))
 
     (define/private (element-style->attribs name style)
-      (append
+      (combine-class
        (cond
         [(symbol? name)
          (case name
@@ -1258,11 +1284,27 @@
                 ,@(if starting-item?
                     '([style "display: inline-table; vertical-align: text-top;"])
                     null)
-                ,@(case (style-name (table-style t))
-                    [(boxed)    '([class "boxed"])]
-                    [(centered) '([align "center"])]
-                    [else '()])
-                ,@(style->attribs (table-style t)))
+                ,@(combine-class
+                   (case (style-name (table-style t))
+                     [(boxed)    '([class "boxed"])]
+                     [(centered) '([align "center"])]
+                     [else '()])
+                   (style->attribs (table-style t))))
+          ,@(let ([columns (ormap (lambda (p)
+                                    (and (table-columns? p)
+                                         (map (lambda (s)
+                                                (ormap (lambda (a)
+                                                         (and (column-attributes? a)
+                                                              a))
+                                                       (style-properties s)))
+                                              (table-columns-styles p))))
+                                  (style-properties (table-style t)))])
+              (if (and columns (ormap values columns))
+                  `((colgroup ,@(for/list ([col (in-list columns)])
+                                  `(col ,(if col
+                                             (map (lambda (v) (list (car v) (cdr v))) (column-attributes-assoc col))
+                                             null)))))
+                  null))
           ,@(if (null? (table-blockss t))
                 `((tr (td)))
                 (map make-row
@@ -1270,13 +1312,17 @@
                      (extract-table-cell-styles t))))))
 
     (define/override (render-nested-flow t part ri)
-      `((blockquote [,@(style->attribs (nested-flow-style t))
-                     ,@(if (eq? 'code-inset (style-name (nested-flow-style t)))
-                           `([class "SCodeFlow"])
-                           (if (and (not (string? (style-name (nested-flow-style t))))
-                                    (not (eq? 'inset (style-name (nested-flow-style t)))))
-                               `([class "SubFlow"])
-                               null))]
+      `((blockquote [,@(combine-class
+                        (cond
+                         [(eq? 'code-inset (style-name (nested-flow-style t)))
+                          `([class "SCodeFlow"])]
+                         [(eq? 'vertical-inset (style-name (nested-flow-style t)))
+                          `([class "SVInsetFlow"])]
+                         [(and (not (string? (style-name (nested-flow-style t))))
+                               (not (eq? 'inset (style-name (nested-flow-style t)))))
+                          `([class "SubFlow"])]
+                         [else null])
+                        (style->attribs (nested-flow-style t)))]
                     ,@(append-map (lambda (i) (render-block i part ri #f))
                                   (nested-flow-blocks t)))))
 
@@ -1432,7 +1478,7 @@
 
     (define/override (collect-part d parent ci number)
       (let ([prev-sub (collecting-sub)])
-        (parameterize ([collecting-sub (if (toc-part? d) 
+        (parameterize ([collecting-sub (if (part-style? d 'toc)
                                            1 
                                            (add1 prev-sub))]
                        [collecting-whole-page (prev-sub . <= . 1)])

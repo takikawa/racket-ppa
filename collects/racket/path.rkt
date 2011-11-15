@@ -8,7 +8,8 @@
          file-name-from-path
          path-only
          some-system-path->string
-         string->some-system-path)
+         string->some-system-path
+         path-element?)
 
 (define (simple-form-path p)
   (unless (path-string? p)
@@ -131,14 +132,21 @@
   (do-explode-path 'explode-path orig-path #f))
 
 ;; Arguments must be in simple form
-(define (find-relative-path directory filename)
+(define (find-relative-path directory filename #:more-than-root? [more-than-root? #f])
   (let ([dir (do-explode-path 'find-relative-path directory #t)]
         [file (do-explode-path 'find-relative-path filename #t)])
-    (if (equal? (car dir) (car file))
+    (if (and (equal? (car dir) (car file))
+             (or (not more-than-root?)
+                 (not (eq? 'unix (path-convention-type directory)))
+                 (null? (cdr dir))
+                 (null? (cdr file))
+                 (equal? (cadr dir) (cadr file))))
         (let loop ([dir (cdr dir)]
                    [file (cdr file)])
           (cond [(null? dir) (if (null? file) filename (apply build-path file))]
-                [(null? file) (apply build-path (map (lambda (x) 'up) dir))]
+                [(null? file) (apply build-path/convention-type 
+				     (path-convention-type filename)
+				     (map (lambda (x) 'up) dir))]
                 [(equal? (car dir) (car file))
                  (loop (cdr dir) (cdr file))]
                 [else
@@ -184,4 +192,7 @@
     (raise-type-error 'string->some-system-path "'unix or 'windows" kind))
   (bytes->path (string->bytes/utf-8 path) kind))
 
-
+(define (path-element? path)
+  (and (path-for-some-system? path)
+       (let-values ([(base name d?) (split-path path)])
+         (eq? base 'relative))))

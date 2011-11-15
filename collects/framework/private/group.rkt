@@ -1,13 +1,12 @@
 #lang scheme/unit
 
   (require string-constants
-           mzlib/class
+           racket/class
            "sig.rkt"
            "../preferences.rkt"
            "../gui-utils.rkt"
            mred/mred-sig
-           mzlib/list
-           scheme/path)
+           racket/path)
   
   (import mred^
           [prefix application: framework:application^]
@@ -161,19 +160,6 @@
               (for-each (λ (a-frame)
                           (set-close-menu-item-state! a-frame #t))
                         frames))))
-      
-      (field [open-here-frame #f])
-      (define/public (set-open-here-frame fr) (set! open-here-frame fr))
-      (define/public (get-open-here-frame)
-        (cond
-          [open-here-frame open-here-frame]
-          [else
-           (let ([candidates
-                  (filter (λ (x) (is-a? (frame-frame x) frame:open-here<%>))
-                          frames)])
-             (if (null? candidates)
-                 #f
-                 (frame-frame (car candidates))))]))
       
       (define/public (get-mdi-parent)
         (when (and (eq? (system-type) 'windows)

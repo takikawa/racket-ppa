@@ -1428,10 +1428,14 @@ static void do_next_finalization(void *o, void *_data)
   }
 }
 
-/* Makes gc2 xformer happy: */
 typedef void (*finalizer_function)(void *p, void *data);
-THREAD_LOCAL_DECL(static int traversers_registered);
-THREAD_LOCAL_DECL(static Finalizations **save_fns_ptr);
+
+void scheme_init_finalization() {
+#ifdef MZ_PRECISE_GC
+  GC_REG_TRAV(scheme_rt_finalization, mark_finalization);
+  GC_REG_TRAV(scheme_rt_finalizations, mark_finalizations);
+#endif
+}
 
 static void add_finalizer(void *v, void (*f)(void*,void*), void *data, 
 			  int prim, int ext,
@@ -1444,15 +1448,6 @@ static void add_finalizer(void *v, void (*f)(void*,void*), void *data,
   Finalizations *fns, **fns_ptr, *prealloced;
   Finalization *fn;
 
-  if (!traversers_registered) {
-#ifdef MZ_PRECISE_GC
-    GC_REG_TRAV(scheme_rt_finalization, mark_finalization);
-    GC_REG_TRAV(scheme_rt_finalizations, mark_finalizations);
-    traversers_registered = 1;
-#endif
-    REGISTER_SO(save_fns_ptr);
-  }
-
 #ifndef MZ_PRECISE_GC
   if (v != GC_base(v))
     return;
@@ -1461,11 +1456,7 @@ static void add_finalizer(void *v, void (*f)(void*,void*), void *data,
   /* Allocate everything first so that we're not changing
      finalizations when finalizations could run: */
 
-  if (save_fns_ptr) {
-    fns_ptr = save_fns_ptr;
-    save_fns_ptr = NULL;
-  } else
-    fns_ptr = MALLOC_ONE(Finalizations*);
+  fns_ptr = MALLOC_ONE(Finalizations*);
 
   if (!ext && !rmve) {
     fn = MALLOC_ONE_RT(Finalization);
@@ -1490,12 +1481,10 @@ static void add_finalizer(void *v, void (*f)(void*,void*), void *data,
   if (oldf) {
     if (oldf != do_next_finalization) {
       /* This happens if an extenal use of GC_ routines conflicts with us. */
-      scheme_warning("warning: non-Racket finalization on object dropped! %lx %lx",
-                     (intptr_t)oldf, (intptr_t)olddata);
+      scheme_warning("warning: non-Racket finalization on object dropped! %p %p",
+                     oldf, olddata);
     } else {
       *fns_ptr = *(Finalizations **)olddata;
-      save_fns_ptr = (Finalizations **)olddata;
-      *save_fns_ptr = NULL;
       if (prim && (*fns_ptr)->scheme_first) {
         /* Reset level back to 1: */
         GC_register_eager_finalizer(v, 1, do_next_finalization, fns_ptr, NULL, NULL);
@@ -1503,7 +1492,6 @@ static void add_finalizer(void *v, void (*f)(void*,void*), void *data,
     }
   } else if (rmve) {
     GC_register_finalizer(v, NULL, NULL, NULL, NULL);
-    save_fns_ptr = fns_ptr;
     return;
   }
   
@@ -1524,8 +1512,6 @@ static void add_finalizer(void *v, void (*f)(void*,void*), void *data,
     if (!f && !fns->prim_first && !fns->scheme_first) {
       /* Removed all finalization */
       GC_register_finalizer(v, NULL, NULL, NULL, NULL);
-      save_fns_ptr = fns_ptr;
-      *save_fns_ptr = NULL;
     }
   } else {
     if (prim) {
@@ -1560,8 +1546,6 @@ static void add_finalizer(void *v, void (*f)(void*,void*), void *data,
       /* Removed all finalization? */
       if (!fns->ext_f && !fns->prim_first && !fns->scheme_first) {
 	GC_register_finalizer(v, NULL, NULL, NULL, NULL);
-	save_fns_ptr = fns_ptr;
-	*save_fns_ptr = NULL;
       }
     } else {
       fn->next = fns->scheme_first;
@@ -1657,6 +1641,8 @@ void scheme_enable_garbage_collection(int on)
 #endif
 }
 
+MZ_DO_NOT_INLINE(uintptr_t scheme_get_deeper_address(void))
+
 uintptr_t scheme_get_deeper_address(void)
 {
   int v, *vp;
@@ -1748,7 +1734,7 @@ void count_tagged(void *p, int size, void *data)
       cnt = NUM_RECORDED_APP_SIZES;
     } else {
       int i, devals, kind;
-      devals = sizeof(Scheme_App_Rec) + (app->num_args * sizeof(Scheme_Object *));
+      devals = sizeof(Scheme_App_Rec) + ((app->num_args + 1 - mzFLEX_DELTA) * sizeof(Scheme_Object *));
       for (i = 0; i <= cnt; i++) {
 	kind = ((char *)app + devals)[i];
 	if ((kind >= 0) && (kind <= 4)) {
@@ -2740,7 +2726,7 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
       Scheme_App_Rec *app = (Scheme_App_Rec *)root;
       int i;
 
-      s = sizeof(Scheme_App_Rec) + (app->num_args * sizeof(Scheme_Object *))
+      s = sizeof(Scheme_App_Rec) + ((app->num_args + 1 - mzFLEX_DELTA) * sizeof(Scheme_Object *))
 	+ (app->num_args + 1);
       need_align = 1;
 #if FORCE_KNOWN_SUBPARTS
@@ -2758,7 +2744,7 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
       Scheme_Sequence *seq = (Scheme_Sequence *)root;
       int i;
 
-      s = sizeof(Scheme_Sequence) + (seq->count - 1) * sizeof(Scheme_Object *);
+      s = sizeof(Scheme_Sequence) + (seq->count - mzFLEX_DELTA) * sizeof(Scheme_Object *);
 
 #if FORCE_KNOWN_SUBPARTS
       for (i = e = 0; i < seq->count; i++) {
@@ -3024,7 +3010,7 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
       Scheme_Object **slots = ((Scheme_Structure *)root)->slots;
       int i, count = SCHEME_STRUCT_NUM_SLOTS(root);
 
-      s = sizeof(Scheme_Structure) + (count - 1) * sizeof(Scheme_Object *);
+      s = sizeof(Scheme_Structure) + (count - mzFLEX_DELTA) * sizeof(Scheme_Object *);
 #if FORCE_KNOWN_SUBPARTS
       for (i = e = 0; i < count; i++) {
 	e += COUNT(slots[i]);
@@ -3040,7 +3026,7 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
       if (count < 0)
 	count = -count;
 
-      s = sizeof(Small_Bignum) + (count - 1) * sizeof(bigdig);
+      s = sizeof(Scheme_Bignum) + (count * sizeof(bigdig));
     }
     break;
   case scheme_escaping_cont_type:
@@ -3092,7 +3078,7 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
   case scheme_struct_type_type:
     {
       Scheme_Struct_Type *st = (Scheme_Struct_Type *)root;
-      s = sizeof(Scheme_Struct_Type) + st->name_pos * sizeof(Scheme_Object*);
+      s = sizeof(Scheme_Struct_Type) + (st->name_pos + 1 - mzFLEX_DELTA) * sizeof(Scheme_Object*);
 #if FORCE_KNOWN_SUBPARTS
       e = COUNT(st->name);
       if (st->name_pos)

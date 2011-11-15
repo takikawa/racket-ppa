@@ -18,18 +18,16 @@
 
 (require
   scribble/manual
-  planet/util
   planet/version
   (for-label
     racket/base)
   (for-syntax
     racket/base
-    racket/block
     syntax/parse
     planet/syntax))
 
 (define-syntax-rule (define-syntaxes-with [name ...] body ...)
-  (define-syntaxes [name ...] (block body ... (values name ...))))
+  (define-syntaxes [name ...] (let () body ... (values name ...))))
 
 (define-syntaxes-with
   [ racketmod/this-package
@@ -88,7 +86,7 @@
     (syntax-parser #:literals [unsyntax]
       [(~and orig (_ (unsyntax e:expr)))
        #'(racketmodname
-           (unsyntax `(planet ,(make-planet-symbol (syntax-quote orig) e))))]
+           (unsyntax `(planet ,(make-planet-symbol (quote-syntax orig) e))))]
       [(_ suffix:id/this-package)
        #'(racketmodname (planet suffix.planet-id))]))
 

@@ -59,6 +59,16 @@ static Scheme_Object *make_global_ref(Scheme_Object *var, Scheme_Object *dummy)
   return o;
 }
 
+static Scheme_Object *make_global_const_ref(Scheme_Object *var, Scheme_Object *dummy)
+{
+  GC_CAN_IGNORE Scheme_Object *o;
+
+  o = make_global_ref(var, dummy);
+  SCHEME_VARREF_FLAGS(o) |= 0x1;
+
+  return o;
+}
+
 /*========================================================================*/
 /*                               run time                                 */
 /*========================================================================*/
@@ -68,7 +78,7 @@ static MZ_INLINE Scheme_Object *do_make_native_closure(Scheme_Native_Closure_Dat
   Scheme_Native_Closure *o;
 
   o = (Scheme_Native_Closure *)scheme_malloc_tagged(sizeof(Scheme_Native_Closure)
-						    + ((size - 1) * sizeof(Scheme_Object *)));
+						    + ((size - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
   o->so.type = scheme_native_closure_type;
   o->code = code;
 
@@ -485,16 +495,21 @@ int scheme_is_noncm(Scheme_Object *a, mz_jit_state *jitter, int depth, int stack
   if (SCHEME_PRIMP(a)) {
     int opts;
     opts = ((Scheme_Prim_Proc_Header *)a)->flags & SCHEME_PRIM_OPT_MASK;
-    if (opts >= SCHEME_PRIM_OPT_NONCM)
+    if (opts >= SCHEME_PRIM_OPT_NONCM) {
       /* Structure-type predicates are handled specially, so don't claim NONCM: */
-      if (!(((Scheme_Prim_Proc_Header *)a)->flags & SCHEME_PRIM_IS_STRUCT_PRED))
-        return 1;
+      if (((Scheme_Prim_Proc_Header *)a)->flags & SCHEME_PRIM_IS_STRUCT_OTHER) {
+        if ((((Scheme_Prim_Proc_Header *)a)->flags & SCHEME_PRIM_OTHER_TYPE_MASK)
+            == SCHEME_PRIM_STRUCT_TYPE_PRED)
+          return 0;
+      }
+      return 1;
+    }
   }
 
   if (depth 
       && jitter->nc 
       && SAME_TYPE(SCHEME_TYPE(a), scheme_toplevel_type)
-      && (SCHEME_TOPLEVEL_FLAGS(a) & SCHEME_TOPLEVEL_CONST)) {
+      && ((SCHEME_TOPLEVEL_FLAGS(a) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_CONST)) {
     Scheme_Object *p;
     p = scheme_extract_global(a, jitter->nc);
     p = ((Scheme_Bucket *)p)->val;
@@ -547,6 +562,15 @@ int scheme_is_simple(Scheme_Object *obj, int depth, int just_markless, mz_jit_st
   switch (type) {
   case scheme_case_lambda_sequence_type:
     return 1;
+    break;
+
+  case scheme_sequence_type:
+    if (depth) {
+      Scheme_Sequence *seq = (Scheme_Sequence *)obj;
+
+      return scheme_is_simple(seq->array[seq->count - 1], depth - 1, 
+                              just_markless, jitter, stack_start);
+    }
     break;
 
   case scheme_branch_type:
@@ -703,7 +727,7 @@ static int is_a_procedure(Scheme_Object *v, mz_jit_state *jitter)
     int flags;
     return scheme_mz_is_closure(jitter, SCHEME_LOCAL_POS(v), -1, &flags);
   } else if (t == scheme_toplevel_type) {
-    if (SCHEME_TOPLEVEL_FLAGS(v) & SCHEME_TOPLEVEL_CONST) {
+    if ((SCHEME_TOPLEVEL_FLAGS(v) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_CONST) {
       if (jitter->nc) {
 	Scheme_Object *p;
         
@@ -736,18 +760,26 @@ int scheme_ok_to_delay_local(Scheme_Object *obj)
     return 0;
 }
 
+int scheme_can_delay_and_avoids_r1_r2(Scheme_Object *obj)
+{
+  Scheme_Type t = SCHEME_TYPE(obj);
+
+  if (SAME_TYPE(t, scheme_local_type) && scheme_ok_to_delay_local(obj)) {
+    return 1;
+  } else
+    return (t >= _scheme_compiled_values_types_);
+}
+
 int scheme_can_delay_and_avoids_r1(Scheme_Object *obj)
 {
   Scheme_Type t = SCHEME_TYPE(obj);
 
   if (SAME_TYPE(t, scheme_toplevel_type)) {
-    return ((SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_CONST)
+    return (((SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_FIXED)
             ? 1
             : 0);
-  } else if (SAME_TYPE(t, scheme_local_type) && scheme_ok_to_delay_local(obj)) {
-    return 1;
   } else
-    return (t >= _scheme_compiled_values_types_);
+    return scheme_can_delay_and_avoids_r1_r2(obj);
 }
 
 int scheme_is_constant_and_avoids_r1(Scheme_Object *obj)
@@ -755,7 +787,7 @@ int scheme_is_constant_and_avoids_r1(Scheme_Object *obj)
   Scheme_Type t = SCHEME_TYPE(obj);
 
   if (SAME_TYPE(t, scheme_toplevel_type)) {
-    return ((SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_CONST)
+    return (((SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_FIXED)
             ? 1
             : 0);
   } else if (SAME_TYPE(t, scheme_local_type) && scheme_ok_to_move_local(obj)) {
@@ -819,6 +851,24 @@ int scheme_is_relatively_constant_and_avoids_r1_maybe_fp(Scheme_Object *obj, Sch
 int scheme_is_relatively_constant_and_avoids_r1(Scheme_Object *obj, Scheme_Object *wrt)
 {
   return scheme_is_relatively_constant_and_avoids_r1_maybe_fp(obj, wrt, 0);
+}
+
+int scheme_needs_only_target_register(Scheme_Object *obj, int and_can_reorder)
+{
+  Scheme_Type t;
+
+  if (scheme_is_constant_and_avoids_r1(obj))
+    return 1;
+
+  t = SCHEME_TYPE(obj);
+  if (SAME_TYPE(t, scheme_local_type)) {
+    if (and_can_reorder && SCHEME_GET_LOCAL_FLAGS(obj))
+      return 0;
+    if (SCHEME_GET_LOCAL_FLAGS(obj) == SCHEME_LOCAL_FLONUM)
+      return 0;
+    return 1;
+  } else 
+    return (t >= _scheme_compiled_values_types_);
 }
 
 /*========================================================================*/
@@ -1078,7 +1128,7 @@ static int generate_closure(Scheme_Closure_Data *data,
     int sz;
     intptr_t init_word;
     sz = (sizeof(Scheme_Native_Closure)
-          + ((data->closure_size - 1) * sizeof(Scheme_Object *)));
+          + ((data->closure_size - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
 # ifdef CAN_INLINE_ALLOC
     if (immediately_filled) {
       /* Inlined alloc */
@@ -1340,7 +1390,7 @@ static int generate_non_tail_with_branch(Scheme_Object *obj, mz_jit_state *jitte
     CHECK_LIMIT();
     scheme_mz_flostack_restore(jitter, flostack, flostack_pos, !for_branch, 1);
     FOR_LOG(--jitter->log_depth);
-    /* mz_CLEAR_R0_STATUS(); --- not needed, since stack doesn't change */
+    /* mz_SET_REG_STATUS_VALID(0); --- not needed, since stack doesn't change */
     return v;
   }
 
@@ -1429,7 +1479,7 @@ static int generate_non_tail_with_branch(Scheme_Object *obj, mz_jit_state *jitte
     }
 
     jitter->pushed_marks = save_pushed_marks;
-    mz_CLEAR_R0_STATUS();
+    mz_SET_REG_STATUS_VALID(0);
 
     END_JIT_DATA(21);
   }
@@ -1490,16 +1540,27 @@ static Scheme_Object *generate_k(void)
   Scheme_Thread *p = scheme_current_thread;
   Scheme_Object *obj = (Scheme_Object *)p->ku.k.p1;
   mz_jit_state *jitter = (mz_jit_state *)p->ku.k.p2;
-  Branch_Info *for_branch = (Branch_Info *)p->ku.k.p3;
+  Branch_Info *for_branch = (Branch_Info *)p->ku.k.p3, for_branch_copy;
+  Branch_Info_Addr *for_branch_addrs = (Branch_Info_Addr *)p->ku.k.p4;
   int v;
 
   p->ku.k.p1 = NULL;
   p->ku.k.p2 = NULL;
   p->ku.k.p3 = NULL;
 
-  v = scheme_generate(obj, jitter, p->ku.k.i1, p->ku.k.i4, p->ku.k.i2, p->ku.k.i3, for_branch);
+  if (for_branch) {
+    memcpy(&for_branch_copy, for_branch, sizeof(Branch_Info));
+    for_branch_copy.addrs = for_branch_addrs;
+  }
 
-  return scheme_make_integer(v);
+  v = scheme_generate(obj, jitter, p->ku.k.i1, p->ku.k.i4, p->ku.k.i2, p->ku.k.i3, 
+                      (for_branch ? &for_branch_copy : NULL));
+
+  if (for_branch) {
+    memcpy(for_branch, &for_branch_copy, sizeof(Branch_Info));
+    return scheme_make_raw_pair(scheme_make_integer(v), (Scheme_Object *)for_branch->addrs);
+  } else
+    return scheme_make_integer(v);
 }
 
 #define NUM_QUICK_INFO_ADDRS 6
@@ -1654,7 +1715,7 @@ static int generate_branch(Scheme_Object *obj, mz_jit_state *jitter, int is_tail
     scheme_signal_error("internal error: self position moved across branch");
 
   /* False branch */
-  mz_CLEAR_R0_STATUS();
+  mz_SET_REG_STATUS_VALID(0);
   scheme_mz_runstack_saved(jitter);
   flostack = scheme_mz_flostack_save(jitter, &flostack_pos);
   __START_SHORT_JUMPS__(then_short_ok);
@@ -1718,7 +1779,7 @@ static int generate_branch(Scheme_Object *obj, mz_jit_state *jitter, int is_tail
   if (nsrs1)
     jitter->need_set_rs = 1;
 
-  mz_CLEAR_R0_STATUS();
+  mz_SET_REG_STATUS_VALID(0);
 
   return 1;
 }
@@ -1736,12 +1797,24 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
     Scheme_Object *ok;
     Scheme_Thread *p = scheme_current_thread;
     mz_jit_state *jitter_copy;
+    Branch_Info *for_branch_copy;
+    Branch_Info_Addr *addrs;
+    int *copy_mappings;
 
-    jitter_copy = MALLOC_ONE_RT(mz_jit_state);
-    memcpy(jitter_copy, jitter, sizeof(mz_jit_state));
-#ifdef MZTAG_REQUIRED
-    jitter_copy->type = scheme_rt_jitter_data;
-#endif
+    copy_mappings = (int *)scheme_malloc_atomic(jitter->mappings_size * sizeof(int));
+    memcpy(copy_mappings, jitter->mappings, jitter->mappings_size * sizeof(int));
+    jitter->mappings = copy_mappings;
+
+    jitter_copy = scheme_clone_jitter(jitter);
+    if (for_branch) {
+      for_branch_copy = scheme_malloc_atomic(sizeof(Branch_Info));
+      memcpy(for_branch_copy, for_branch, sizeof(Branch_Info));
+      addrs = scheme_malloc_atomic(sizeof(Branch_Info_Addr) * for_branch->addrs_size);
+      memcpy(addrs, for_branch->addrs, sizeof(Branch_Info_Addr) * for_branch->addrs_count);
+    } else {
+      for_branch_copy = NULL;
+      addrs = NULL;
+    }
 
     p->ku.k.p1 = (void *)obj;
     p->ku.k.p2 = (void *)jitter_copy;
@@ -1749,11 +1822,18 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
     p->ku.k.i4 = wcm_may_replace;
     p->ku.k.i2 = multi_ok;
     p->ku.k.i3 = target;
-    p->ku.k.p3 = (void *)for_branch;
+    p->ku.k.p3 = (void *)for_branch_copy;
+    p->ku.k.p4 = (void *)addrs;
 
     ok = scheme_handle_stack_overflow(generate_k);
 
-    memcpy(jitter, jitter_copy, sizeof(mz_jit_state));
+    scheme_unclone_jitter(jitter, jitter_copy);
+
+    if (for_branch) {
+      memcpy(for_branch, for_branch_copy, sizeof(Branch_Info));
+      for_branch->addrs = (Branch_Info_Addr *)SCHEME_CDR(ok);
+      ok = SCHEME_CAR(ok);
+    }
 
     return SCHEME_INT_VAL(ok);
   }
@@ -1776,8 +1856,7 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
     {
       int can_fail;
       /* Other parts of the JIT rely on this code not modifying R1 */
-      can_fail = !(SCHEME_TOPLEVEL_FLAGS(obj) 
-                   & (SCHEME_TOPLEVEL_CONST | SCHEME_TOPLEVEL_READY));
+      can_fail = ((SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_FLAGS_MASK) < SCHEME_TOPLEVEL_READY);
       if (!can_fail && result_ignored) {
         /* skip */
       } else {
@@ -1820,19 +1899,44 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
       pos = mz_remap(SCHEME_LOCAL_POS(obj));
       LOG_IT(("local %d [%d]\n", pos, SCHEME_LOCAL_FLAGS(obj)));
       if (!result_ignored && (!flonum || !jitter->unbox)) {
-        int old_r0 = -1;
-        if (mz_CURRENT_R0_STATUS_VALID()) old_r0 = mz_CURRENT_R0_STATUS();
-        if (pos != old_r0) {
+        int valid, old_r0 = -1, old_r1 = -1;
+
+        if (mz_CURRENT_REG_STATUS_VALID()) {
+          valid = 1;
+          old_r0 = jitter->r0_status;
+          old_r1 = jitter->r1_status;
+        } else
+          valid = 0;
+
+        if (pos == old_r0) {
+          if (target != JIT_R0) {
+            jit_movr_p(target, JIT_R0);
+            if (target == JIT_R1)
+              jitter->r1_status = pos;
+            mz_SET_REG_STATUS_VALID(1);
+          }
+        } else if (pos == old_r1) {
+          if (target != JIT_R1) {
+            jit_movr_p(target, JIT_R1);
+            if (target == JIT_R0)
+              jitter->r1_status = pos;
+            mz_SET_REG_STATUS_VALID(1);
+          }
+        } else {
           mz_rs_ldxi(target, pos);
           VALIDATE_RESULT(target);
-          if (target == JIT_R0)
-            mz_RECORD_R0_STATUS(pos);
-          else {
-            /* R0 is unchanged */
-            mz_RECORD_R0_STATUS(old_r0);
+          if (target == JIT_R0) {
+            jitter->r0_status = pos;
+            jitter->r1_status = old_r1;
+            mz_SET_REG_STATUS_VALID(1);
+          } else if (target == JIT_R1) {
+            jitter->r1_status = pos;
+            jitter->r0_status = old_r0;
+            mz_SET_REG_STATUS_VALID(1);
+          } else if (valid) {
+            /* R0 and R1 are unchanged */
+            mz_SET_REG_STATUS_VALID(1);
           }
-        } else if (target != JIT_R0) {
-          jit_movr_p(target, JIT_R0);
         }
       }
       if (SCHEME_GET_LOCAL_FLAGS(obj) == SCHEME_LOCAL_CLEAR_ON_READ) {
@@ -2246,9 +2350,11 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
         finish_branch_with_true(jitter, for_branch);
       else {
         Scheme_Object *dummy;
-        int pos;
+        int pos, is_const;
 
         mz_rs_sync();
+
+        is_const = (SCHEME_PAIR_FLAGS(obj) & 0x1);
 
         dummy = SCHEME_PTR2_VAL(obj);
         obj = SCHEME_PTR1_VAL(obj);
@@ -2262,9 +2368,13 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
         CHECK_LIMIT();
 
         /* Load dummy bucket: */
-        pos = SCHEME_TOPLEVEL_POS(dummy);
-        jit_ldxi_p(JIT_R2, JIT_R2, &(((Scheme_Prefix *)0x0)->a[pos]));
-        CHECK_LIMIT();
+        if (SCHEME_FALSEP(dummy)) {
+          (void)jit_movi_p(JIT_R2, scheme_false);
+        } else {
+          pos = SCHEME_TOPLEVEL_POS(dummy);
+          jit_ldxi_p(JIT_R2, JIT_R2, &(((Scheme_Prefix *)0x0)->a[pos]));
+          CHECK_LIMIT();
+        }
 
         JIT_UPDATE_THREAD_RSPTR_IF_NEEDED();
         mz_prepare(2);
@@ -2272,7 +2382,11 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
         jit_pusharg_p(JIT_R1);
         {
           GC_CAN_IGNORE jit_insn *refr;
-          (void)mz_finish_lwe(ts_make_global_ref, refr);
+          if (is_const) {
+            (void)mz_finish_lwe(ts_make_global_const_ref, refr);
+          } else {
+            (void)mz_finish_lwe(ts_make_global_ref, refr);
+          }
         }
         CHECK_LIMIT();
         jit_retval(target);
@@ -2285,7 +2399,7 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
   case scheme_splice_sequence_type:
   case scheme_define_values_type:
   case scheme_define_syntaxes_type:
-  case scheme_define_for_syntax_type:
+  case scheme_begin_for_syntax_type:
   case scheme_require_form_type:
   case scheme_module_type:
     {
@@ -2721,7 +2835,9 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
 
       if (!unused) {
         mz_rs_str(JIT_R0);
-        mz_RECORD_R0_STATUS(0);
+        jitter->r0_status = 0;
+        jitter->r1_status = -1;
+        mz_SET_REG_STATUS_VALID(1);
       }
       
       END_JIT_DATA(17);

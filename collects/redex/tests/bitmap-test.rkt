@@ -78,12 +78,37 @@
 
 (test (render-reduction-relation red2)
       "red2.png")
+
+(let ()
+  (define-judgment-form lang
+    #:mode (id I O)
+    [(id e e)])
+  (test (render-reduction-relation
+         (reduction-relation
+          lang
+          (--> e_1
+               q
+               (where (name q e_2) e_1)
+               (judgment-holds (id e_2 (name r e_3))))))
+        "red-with-where-name.png"))
         
 (define-metafunction lang
   [(S x v e) e])
 
 (test (render-metafunction S)
       "metafunction.png")
+
+(let ()
+  (define-metafunction lang
+    [(f (e_1 e_2))
+     (e_3 e_4)
+     (judgment-holds (J e_1 e_3))
+     (judgment-holds (J e_2 e_4))])
+  (define-judgment-form lang
+    #:mode (J I O)
+    [(J e e)])
+  (test (render-metafunction f)
+        "metafunction-judgment-holds.png"))
 
 (define-metafunction lang
   [(T x y)
@@ -256,6 +281,102 @@
     [(r (name e (λ (x) x)))
      (r x)])
   (test (render-relation r) "relation-with-name.png"))    
+
+;; judgment form
+(let ()
+  (define-language nats
+    (n z (s n)))
+  
+  (define-judgment-form nats
+    #:mode (sum I I O)
+    [(sum z n n)]
+    [(sum (s n_1) n_2 (s n_3))
+     (sum n_1 n_2 n_3)])
+  
+  (test (render-judgment-form sum) "judgment-form-not-rewritten.png")
+  
+  (test (with-compound-rewriter
+         'sum
+         (λ (lws) (list "" (list-ref lws 2) " + " (list-ref lws 3) " = " (list-ref lws 4)))
+         (render-judgment-form sum))
+        "judgment-form-rewritten.png")
+  
+  (define-judgment-form nats
+    #:mode (mfw I O)
+    [(mfw n_1 n_2)
+     (where n_2 (f n_1))])
+  
+  (define-metafunction nats
+    [(f n) n])
+  
+  (test (render-judgment-form mfw) "judgment-form-metafunction-where.png")
+  
+  (define-judgment-form nats
+    #:mode (nps I O)
+    [(nps (name a (s n_1)) n_2)
+     (nps z (name n_1 (s (s n_1))))
+     (where (name b n_2) z)])
+  
+  (test (render-judgment-form nps) "judgment-form-name-patterns.png")
+  
+  (define-judgment-form nats
+    #:mode (lt2 I)
+    [(lt2 z)]
+    [(lt2 (s z))])
+  
+  (define-judgment-form nats
+    #:mode (uses-ellipses I)
+    [(uses-ellipses (n ...))
+     (lt2 n) ...
+     (sum z z z)])
+  
+  (test (render-judgment-form uses-ellipses) "judgment-form-ellipsis.png"))
+
+(let ()
+  (define-language STLC
+    (e (λ (x : τ) e)
+       (e e)
+       x)
+    (x variable-not-otherwise-mentioned)
+    ((τ σ) b
+           (τ → τ))
+    (Γ ([x τ] ...)))
+  
+  (define-judgment-form STLC
+    #:mode (typeof I I O)
+    #:contract (typeof Γ e τ)
+    [(typeof Γ (e_1 e_2) τ)
+     (typeof Γ e_1 (τ_2 → τ))
+     (typeof Γ e_2 τ_2)]
+    [(typeof Γ (λ (x : τ) e) (τ → σ))
+     (typeof (extend Γ x τ) e σ)]
+    [(typeof Γ x τ)
+     (where τ (lookup Γ x))])
+  
+  (define-metafunction STLC
+    extend : Γ x τ -> Γ
+    [(extend ([x_1 τ_1] ...) x_0 τ_0)
+     ([x_0 τ_0] [x_1 τ_1] ...)])
+  
+  (define-metafunction STLC
+    lookup : Γ x -> τ
+    [(lookup ([x_0 τ_0] ... [x_i τ_i] [x_i+1 τ_i+1] ...)) τ_i])
+  
+  (define (rewrite-typeof lws)
+    (list "" (list-ref lws 2) " ⊢ " (list-ref lws 3) " : " (list-ref lws 4)))
+  
+  (define (rewrite-extend lws)
+    (list "" (list-ref lws 2) ", " (list-ref lws 3) ":" (list-ref lws 4)))
+  
+  (define (rewrite-lookup lws)
+    (list "" (list-ref lws 2) "(" (list-ref lws 3) ")"))
+  
+  (test (with-compound-rewriters
+         (['typeof rewrite-typeof]
+          ['extend rewrite-extend]
+          ['lookup rewrite-lookup])
+         (render-judgment-form typeof))
+        "stlc.png"))  
 
 (printf "bitmap-test.rkt: ")
 (done)

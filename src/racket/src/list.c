@@ -148,6 +148,8 @@ static Scheme_Object *table_placeholder_p(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *unsafe_car (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_cdr (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_list_ref (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_list_tail (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_mcar (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_mcdr (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_set_mcar (int argc, Scheme_Object *argv[]);
@@ -639,7 +641,7 @@ scheme_init_list (Scheme_Env *env)
   scheme_add_global_constant("weak-box-value",
 			     scheme_make_immed_prim(weak_box_value,
 						    "weak-box-value",
-						    1, 1),
+						    1, 2),
 			     env);
   scheme_add_global_constant("weak-box?",
 			     scheme_make_folding_prim(weak_boxp,
@@ -655,7 +657,7 @@ scheme_init_list (Scheme_Env *env)
   scheme_add_global_constant("ephemeron-value",
 			     scheme_make_immed_prim(ephemeron_value,
 						    "ephemeron-value",
-						    1, 1),
+						    1, 2),
 			     env);
   scheme_add_global_constant("ephemeron?",
 			     scheme_make_folding_prim(ephemeronp,
@@ -733,12 +735,24 @@ scheme_init_unsafe_list (Scheme_Env *env)
                                 | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_add_global_constant ("unsafe-cdr", p, env);
 
+  p = scheme_make_folding_prim(unsafe_list_ref, "unsafe-list-tail", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
+  scheme_add_global_constant ("unsafe-list-ref", p, env);
+
+  p = scheme_make_folding_prim(unsafe_list_tail, "unsafe-list-tail", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
+  scheme_add_global_constant ("unsafe-list-tail", p, env);
+
   p = scheme_make_immed_prim(unsafe_mcar, "unsafe-mcar", 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_OMITABLE);
   scheme_add_global_constant ("unsafe-mcar", p, env);
 
   p = scheme_make_immed_prim(unsafe_mcdr, "unsafe-mcdr", 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_OMITABLE);
   scheme_add_global_constant ("unsafe-mcdr", p, env);
 
   p = scheme_make_immed_prim(unsafe_set_mcar, "unsafe-set-mcar!", 2, 2);
@@ -750,11 +764,13 @@ scheme_init_unsafe_list (Scheme_Env *env)
   scheme_add_global_constant ("unsafe-set-mcdr!", p, env);
   
   p = scheme_make_immed_prim(unsafe_unbox, "unsafe-unbox", 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_OMITABLE);
   scheme_add_global_constant("unsafe-unbox", p, env);
 
   p = scheme_make_immed_prim(unsafe_unbox_star, "unsafe-unbox*", 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;  
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_OMITABLE);
   scheme_add_global_constant("unsafe-unbox*", p, env);
 
   p = scheme_make_immed_prim(unsafe_set_box, "unsafe-set-box!", 2, 2);
@@ -1097,6 +1113,9 @@ int scheme_is_list(Scheme_Object *obj1)
   }
 
   /* Propagate info further up the chain. */
+  /* We could have a race with JIT-generated code, but the worst
+     should be that we lose a flag setting (dangerous in principle,
+     but not in practice). */
   SCHEME_PAIR_FLAGS(obj2) |= (flags & PAIR_FLAG_MASK);
 
   return (flags & PAIR_IS_LIST);
@@ -3145,7 +3164,7 @@ static Scheme_Object *weak_box_value(int argc, Scheme_Object *argv[])
 
   o = SCHEME_BOX_VAL(argv[0]);
   if (!o)
-    return scheme_false;
+    return ((argc > 1) ? argv[1] : scheme_false);
   else
     return o;
 }
@@ -3399,7 +3418,7 @@ static Scheme_Object *ephemeron_value(int argc, Scheme_Object **argv)
   v = scheme_ephemeron_value(argv[0]);
 
   if (!v)
-    return scheme_false;
+    return ((argc > 1) ? argv[1] : scheme_false);
   else
     return v;
 }
@@ -3455,6 +3474,38 @@ static Scheme_Object *unsafe_cdr (int argc, Scheme_Object *argv[])
 {
   if (scheme_current_thread->constant_folding) return scheme_checked_cdr(argc, argv);
   return SCHEME_CDR(argv[0]);
+}
+
+static Scheme_Object *unsafe_list_ref (int argc, Scheme_Object *argv[])
+{
+  int i;
+  Scheme_Object *v;
+
+  if (scheme_current_thread->constant_folding) return scheme_checked_list_ref(argc, argv);
+  
+  v = argv[0];
+  i = SCHEME_INT_VAL(argv[1]);
+  while (i--) {
+    v = SCHEME_CDR(v);
+  }
+  
+  return SCHEME_CAR(v);
+}
+
+static Scheme_Object *unsafe_list_tail (int argc, Scheme_Object *argv[])
+{
+  int i;
+  Scheme_Object *v;
+
+  if (scheme_current_thread->constant_folding) return scheme_checked_list_tail(argc, argv);
+  
+  v = argv[0];
+  i = SCHEME_INT_VAL(argv[1]);
+  while (i--) {
+    v = SCHEME_CDR(v);
+  }
+  
+  return v;
 }
 
 static Scheme_Object *unsafe_mcar (int argc, Scheme_Object *argv[])

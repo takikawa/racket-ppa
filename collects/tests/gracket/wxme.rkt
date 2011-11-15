@@ -1400,4 +1400,30 @@
 
 ;; ----------------------------------------
 
+(let ()
+  (define t (new text%))
+  (send t insert "1\n12\n123\n")
+  (expect (send t paragraph-start-position 3) 9)
+  (expect (send t paragraph-end-position 3) 9)
+  (expect (send t line-end-position 3) 9))
+
+(let ()
+  (define t (new text%))
+  (send t insert "1\n12\n123\n\n")
+  (expect (send t paragraph-start-position 3) 9)
+  (expect (send t paragraph-end-position 3) 9)
+  (expect (send t line-end-position 3) 9))
+
+;; ----------------------------------------
+;; tabs
+
+(let ([t1 (new text%)])
+  (send t1 set-admin (new test-editor-admin%))  
+  (send t1 set-tabs '(100 200 300 400 500 600 700 800 900 1000 100) 1 #t)
+  (send t1 insert "Hello\tWorld")
+  (send t1 get-extent (box 0) (box 0)))
+
+
+;; ----------------------------------------
+
 (done)

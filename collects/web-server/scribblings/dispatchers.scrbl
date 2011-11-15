@@ -7,7 +7,8 @@
                      web-server/private/servlet
                      racket/date
                      web-server/private/util
-                     web-server/private/connection-manager)
+                     web-server/private/connection-manager
+                     unstable/contract)
           (for-syntax racket/base))
 
 @title[#:tag "dispatchers"
@@ -78,13 +79,13 @@ This module provides a means of mapping
 URLs to paths on the filesystem.
 
 @defthing[url->path/c contract?]{
- This contract is equivalent to @racket[((url?) . ->* . (path? (listof path-element?)))].
+ This contract is equivalent to @racket[((url?) . ->* . (path? (listof path-piece?)))].
  The returned @racket[path?] is the path on disk. The list is the list of
  path elements that correspond to the path of the URL.}
 
 @defproc[(make-url->path (base path-string?))
          url->path/c]{
- The @racket[url-path/c] returned by this procedure considers the root
+ The @racket[url->path/c] returned by this procedure considers the root
  URL to be @racket[base]. It ensures that @racket[".."]s in the URL
  do not escape the @racket[base] and removes them silently otherwise.}
 
@@ -98,16 +99,18 @@ URLs to paths on the filesystem.
  This is primarily useful for dispatchers that allow path information after
  the name of a service to be used for data, but where the service is represented
  by a file. The most prominent example is obviously servlets.}
-                    
+
 @defproc[(filter-url->path [regex regexp?]
                                  [url->path url->path/c])
          url->path/c]{
- Runs the underlying @racket[url->path] but will only return if the path, when considered as a string,
- matches the @racket[regex]. This is useful to disallow strange files, like GIFs, from being considered
- servlets when using the servlet dispatchers. It will return a @racket[exn:fail:filesystem:exists?] exception if
- the path does not match.
+ Runs the underlying @racket[url->path] but will only return if the
+ path, when considered as a string, matches the @racket[regex]. This is
+ useful to disallow strange files, like GIFs, from being considered
+ servlets when using the servlet dispatchers. It will return a
+ @racket[exn:fail:filesystem:exists?] exception if the path does not
+ match.
 }
-                     
+
 }
 
 @; ------------------------------------------------------------
@@ -249,35 +252,37 @@ a URL that refreshes the password file, servlet cache, etc.}
                      web-server/configuration/responders))
 
 @defthing[denied?/c contract?]{
- Equivalent to @racket[(request? . -> . (or/c false/c string?))].
- The return is the authentication realm as a string if the request is not authorized and 
- @racket[#f] if the request @emph{is} authorized.
-}         
-                                                                         
+  Equivalent to @racket[(request? . -> . (or/c false/c string?))].  The
+  return is the authentication realm as a string if the request is not
+  authorized and @racket[#f] if the request @emph{is} authorized.
+}
+
 @defproc[(make [denied? denied?/c]
                [#:authentication-responder
                 authentication-responder
                 (url? header? . -> . response?)
                 (gen-authentication-responder "forbidden.html")])
          dispatcher/c]{
- A dispatcher that checks if the request is denied based on @racket[denied?]. If so, then 
- @racket[authentication-responder] is called with a @racket[header] that
- requests credentials. If not, then @racket[next-dispatcher] is
- invoked.
+  A dispatcher that checks if the request is denied based on
+  @racket[denied?]. If so, then @racket[authentication-responder] is
+  called with a @racket[header] that requests credentials. If not, then
+  @racket[next-dispatcher] is invoked.
 }
-                      
+
 @defthing[authorized?/c contract?]{
- Equivalent to @racket[(string? (or/c false/c bytes?) (or/c false/c bytes?) . -> . (or/c false/c string?))].
- The input is the URI as a string and the username and passwords as bytes.
- The return is the authentication realm as a string if the user is not authorized and 
- @racket[#f] if the request @emph{is} authorized.
-}       
-                      
+ Equivalent to
+ @racket[(string? (or/c false/c bytes?) (or/c false/c bytes?) . -> . (or/c false/c string?))].
+ The input is the URI as a string and the username and passwords as
+ bytes.  The return is the authentication realm as a string if the user
+ is not authorized and @racket[#f] if the request @emph{is} authorized.
+}
+
 @defproc[(make-basic-denied?/path [password-file path-string?])
          (values (-> void)
                  authorized?/c)]{
- Creates an authorization procedure based on the given password file. The first returned value 
- is a procedure that refreshes the password cache used by the authorization procedure.
+ Creates an authorization procedure based on the given password
+ file. The first returned value is a procedure that refreshes the
+ password cache used by the authorization procedure.
 
  @racket[password-file] is parsed as:
  @racketblock[(list ([domain : string?]
@@ -311,7 +316,7 @@ a URL that refreshes the password file, servlet cache, etc.}
                 It defines a dispatcher construction procedure.}]{
 
 @defproc[(make [#:url->path url->path url->path/c]
-               [#:path->mime-type path->mime-type (path? . -> . bytes?) (lambda (path) TEXT/HTML-MIME-TYPE)]
+               [#:path->mime-type path->mime-type (path? . -> . (or/c false/c bytes)?) (lambda (path) #f)]
                [#:indices indices (listof string?) (list "index.html" "index.htm")])
          dispatcher/c]{
  Uses @racket[url->path] to extract a path from the URL in the request
@@ -361,14 +366,14 @@ a URL that refreshes the password file, servlet cache, etc.}
  If @racket[over-limit] is @racket['kill-old], then the oldest request handler is killed---prioritizing new connections over old.
  (This setting is a little dangerous because requests might never finish if there is constant load.)
 }}
-                      
+
 @(require (for-label
            web-server/web-server
            web-server/http
            (prefix-in limit: web-server/dispatchers/limit)
            (prefix-in filter: web-server/dispatchers/dispatch-filter)
            (prefix-in sequencer: web-server/dispatchers/dispatch-sequencer)))
-                                                                                                       
+
 Consider this example:
 @racketmod[
  racket

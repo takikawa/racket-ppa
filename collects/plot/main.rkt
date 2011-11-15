@@ -1,155 +1,71 @@
-#lang scheme/base
+#lang racket/base
 
-(require (prefix-in orig:
-                    (only-in "plot.rkt"
-                             plot plot3d
-                             points line error-bars
-                             vector-field contour
-                             shade surface))
-         (only-in "plot.rkt"
-                  mix
-                  derivative gradient make-vec
-                  mesh3d)
-         (only-in "fit.rkt" fit-int))
+(require racket/contract)
 
-(provide plot
-         plot3d
-         plot-color?
-         points
-         line
-         error-bars
-         vector-field
-         contour
-         shade
-         surface
-         (rename-out [fit-int fit])
-         mix
-         derivative
-         gradient
-         make-vec
-         mesh3d)
+;; ===================================================================================================
+;; Common exports
 
-(define-syntax-rule (out-fit-struct)
-  (begin
-    (require "plot.rkt")
-    (provide (struct-out fit-result))))
+(require "common/parameters.rkt"
+         "common/contract.rkt")
 
-(out-fit-struct)
+(provide (all-from-out "common/parameters.rkt")
+         (all-from-out "common/contract.rkt"))
 
-(define-syntax-rule (define-plot plot orig:plot 
-                      [arg-extra ...]
-                      [init-extra ...])
-  (define (plot data
-                #:width [width 400]
-                #:height [height 400]
-                #:x-min [x-min -5]
-                #:x-max [x-max 5]
-                #:y-min [y-min -5]
-                #:y-max [y-max 5]
-                #:x-label [x-label "X axis"]
-                #:y-label [y-label "Y axis"]
-                #:title [title ""]
-                #:fgcolor [fgcolor '(0 0 0)]
-                #:bgcolor [bgcolor '(255 255 255)]
-                #:lncolor [lncolor '(255 0 0)]
-                #:out-file [out-file #f]
-                arg-extra ...)
-    (orig:plot data
-               [width width]
-               [height height]
-               [x-min x-min]
-               [x-max x-max]
-               [y-min y-min]
-               [y-max y-max]
-               [x-label x-label]
-               [y-label y-label]
-               [title title]
-               [fgcolor fgcolor]
-               [bgcolor bgcolor]
-               [lncolor lncolor]
-               [out-file out-file]
-               init-extra ...)))
+(require "common/axis-transform.rkt")
+(provide invertible-function?
+         id-transform log-transform cbrt-transform hand-drawn-transform)
 
-(define-plot plot orig:plot [] [])
+(require "common/math.rkt")
+(provide (contract-out (struct ivl ([min real?] [max real?]))))
 
-(define-plot plot3d orig:plot3d
-  [#:z-min [z-min -5]
-   #:z-max [z-max 5]
-   #:z-label [z-label "Z axis"]
-   #:alt [alt 30]
-   #:az [az 45]]
-  [[z-min z-min]
-   [z-max z-max]
-   [z-label z-label]
-   [alt alt]
-   [az az]])
+;; ===================================================================================================
+;; 2D exports
 
-(define (plot-color? v)
-  (memq v '(white black yellow green aqua pink
-            wheat grey blown blue violet cyan
-            turquoise magenta salmon red)))
+(require "plot2d/plot.rkt"
+         "plot2d/point.rkt"
+         "plot2d/line.rkt"
+         "plot2d/interval.rkt"
+         "plot2d/contour.rkt"
+         "plot2d/rectangle.rkt"
+         "plot2d/decoration.rkt"
+         "plot2d/kde.rkt")
 
-(define (points vecs 
-                #:sym [sym 'square]
-                #:color [color 'black])
-  (orig:points vecs [sym sym] [color color]))
+(provide (all-from-out "plot2d/plot.rkt")
+         (all-from-out "plot2d/point.rkt")
+         (all-from-out "plot2d/line.rkt")
+         (all-from-out "plot2d/interval.rkt")
+         (all-from-out "plot2d/contour.rkt")
+         (all-from-out "plot2d/rectangle.rkt")
+         (all-from-out "plot2d/decoration.rkt")
+         density)
 
-(define (line f
-              #:samples [samples 150]
-              #:width [width 1]
-              #:color [color 'red]
-              #:mode [mode 'standard]
-              #:mapping [mapping 'cartesian]
-              #:t-min [t-min -5]
-              #:t-max [t-max 5])
-  (orig:line f
-             [samples samples]
-             [width width]
-             [color color]
-             [mode mode]
-             [mapping mapping]
-             [t-min t-min]
-             [t-max t-max]))
+(require "plot2d/renderer.rkt")
+(provide renderer2d?)
 
-(define (error-bars vec
-                    #:color [color 'black])
-  (orig:error-bars vec [color color]))
+;; ===================================================================================================
+;; 3D exports
 
-(define (vector-field f
-                      #:width [width 1]
-                      #:color [color 'red]
-                      #:style [style 'scaled]
-                      #:samples [samples 20])
-  (orig:vector-field f
-                     [width width]
-                     [color color]
-                     [style style]
-                     [samples samples]))
+(require "plot3d/plot.rkt"
+         "plot3d/surface.rkt"
+         "plot3d/contour.rkt"
+         "plot3d/line.rkt"
+         "plot3d/point.rkt"
+         "plot3d/isosurface.rkt"
+         "plot3d/rectangle.rkt")
 
-(define (contour f
-                 #:samples [samples 50]
-                 #:width [width 1]
-                 #:color [color 'black]
-                 #:levels [levels 10])
-  (orig:contour f
-                [samples samples]
-                [width width]
-                [color color]
-                [levels levels]))
+(provide (all-from-out "plot3d/plot.rkt")
+         (all-from-out "plot3d/surface.rkt")
+         (all-from-out "plot3d/contour.rkt")
+         (all-from-out "plot3d/line.rkt")
+         (all-from-out "plot3d/point.rkt")
+         (all-from-out "plot3d/isosurface.rkt")
+         (all-from-out "plot3d/rectangle.rkt"))
 
-(define (shade f
-               #:samples [samples 50]
-               #:levels [levels 10])
-  (orig:shade f
-              [samples samples]
-              [levels levels]))
+(require "plot3d/renderer.rkt")
+(provide renderer3d?)
 
-(define (surface f
-                 #:samples [samples 50]
-                 #:width [width 1]
-                 #:color [color 'black])
-  (orig:surface f
-                [samples samples]
-                [width width]
-                [color color]))
+;; ===================================================================================================
+;; Deprecated functions
 
+(require "deprecated.rkt")
+(provide (all-from-out "deprecated.rkt"))

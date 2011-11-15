@@ -55,49 +55,6 @@
     ((current-compiler-dynamic-require-wrapper)
      (lambda () (get-info/full cp))))
 
-  (define (make-extension-compiler mode prefix)
-    (let ([u (c-dynamic-require 'compiler/private/base 'base@)]
-          [init (unit (import compiler:inner^) (export)
-		  (eval-compile-prefix prefix)
-                  (case mode
-                    [(compile-extension) compile-extension]
-                    [(compile-extension-to-c) compile-extension-to-c]
-                    [(compile-c-extension) compile-c-extension]))])
-      (invoke-unit
-       (compound-unit
-        (import (COMPILE : dynext:compile^)
-                (LINK : dynext:link^)
-                (DFILE : dynext:file^)
-                (OPTION : compiler:option^))
-        (export)
-        (link [((COMPILER : compiler:inner^)) u COMPILE LINK DFILE OPTION]
-              [() init COMPILER]))
-       (import dynext:compile^
-               dynext:link^
-               dynext:file^
-               compiler:option^))))
-
-  (define (make-compiler mode)
-    (lambda (prefix)
-      (let ([c (make-extension-compiler mode prefix)])
-        (lambda (source-files destination-directory)
-          (for ([source-file source-files])
-            (c source-file (or destination-directory 'same)))))))
-
-  (define (make-unprefixed-compiler mode)
-    (let ([f #f])
-      (lambda (source-files destination-directory)
-        (unless f
-          (set! f ((make-compiler mode) '(void))))
-        (f source-files destination-directory))))
-
-  (define compile-extensions
-    (make-compiler 'compile-extension))
-  (define compile-extensions-to-c
-    (make-compiler 'compile-extension-to-c))
-  (define compile-c-extensions
-    (make-unprefixed-compiler 'compile-c-extension))
-
   (define (compile-to-zo src dest namespace eval? verbose? mod?)
     ((if eval? 
          (lambda (t) (parameterize ([read-accept-reader #t])
@@ -144,12 +101,12 @@
         (let ([zo (append-zo-suffix b)])
           (compile-to-zo f zo n prefix verbose? mod?)))))
 
-  (define (compile-directory-visitor dir info worker
-                             #:verbose [verbose? #t] 
-                             #:skip-path [orig-skip-path #f]
-                             #:skip-doc-sources? [skip-docs? #f])
+  (define (compile-directory-visitor dir info worker omit-root
+                                     #:verbose [verbose? #t] 
+                                     #:skip-path [orig-skip-path #f]
+                                     #:skip-doc-sources? [skip-docs? #f])
     (define info* (or info (lambda (key mk-default) (mk-default))))
-    (define omit-paths (omitted-paths dir c-get-info/full))
+    (define omit-paths (omitted-paths dir c-get-info/full omit-root))
     (define skip-path (and orig-skip-path (path->bytes 
                                            (simplify-path (if (string? orig-skip-path)
                                                               (string->path orig-skip-path)
@@ -178,7 +135,8 @@
                       ;; Add specified doc sources:
                       (if skip-docs?
                           null
-                          (map car (info* 'scribblings (lambda () null)))))]
+                          (map (lambda (s) (if (string? s) (string->path s) s))
+                               (map car (info* 'scribblings (lambda () null))))))]
                [sses (remove* omit-paths sses)])
           (worker null sses)))])
       
@@ -189,48 +147,55 @@
                     dir))
           (for/fold ([init init]) ([p (directory-list dir)])
             (let ([p* (build-path dir p)])
-              (worker 
-                (if (and (directory-exists? p*) (not (member p omit-paths)))
-                  (compile-directory-visitor p* (c-get-info/full p*) worker
-                                   #:verbose verbose?
-                                   #:skip-path skip-path
-                                   #:skip-doc-sources? skip-docs?)
-                  null)
-                 init))))
+              (if (and (directory-exists? p*) (not (member p omit-paths)))
+                  (compile-directory-visitor p* (c-get-info/full p*) worker omit-root
+                                             #:verbose verbose?
+                                             #:skip-path skip-path
+                                             #:skip-doc-sources? skip-docs?)
+                  init))))
         init))))
   (define (compile-directory dir info 
                              #:verbose [verbose? #t] 
                              #:skip-path [orig-skip-path #f]
                              #:skip-doc-sources? [skip-docs? #f]
                              #:managed-compile-zo [managed-compile-zo
-                                                   (make-caching-managed-compile-zo)])
+                                                   (make-caching-managed-compile-zo)]
+                             #:omit-root [omit-root dir])
     (define (worker prev sses)
       (for-each managed-compile-zo sses))
-    (compile-directory-visitor dir info worker 
-                             #:verbose verbose?
-                             #:skip-path orig-skip-path
-                             #:skip-doc-sources? skip-docs?))
-
+    (compile-directory-visitor dir info worker omit-root
+                               #:verbose verbose?
+                               #:skip-path orig-skip-path
+                               #:skip-doc-sources? skip-docs?))
+  
   (define (get-compile-directory-srcs dir info 
-                             #:verbose [verbose? #t] 
-                             #:skip-path [orig-skip-path #f]
-                             #:skip-doc-sources? [skip-docs? #f]
-                             #:managed-compile-zo [managed-compile-zo
-                                                   (make-caching-managed-compile-zo)])
-    (compile-directory-visitor dir info append
-                             #:verbose verbose?
-                             #:skip-path orig-skip-path
-                             #:skip-doc-sources? skip-docs?
-                             #:managed-compile-zo managed-compile-zo))
+                                      #:verbose [verbose? #t] 
+                                      #:skip-path [orig-skip-path #f]
+                                      #:skip-doc-sources? [skip-docs? #f]
+                                      #:managed-compile-zo [managed-compile-zo
+                                                            (make-caching-managed-compile-zo)]
+                                      #:omit-root [omit-root dir])
+    (compile-directory-visitor dir info append omit-root
+                               #:verbose verbose?
+                               #:skip-path orig-skip-path
+                               #:skip-doc-sources? skip-docs?
+                               #:managed-compile-zo managed-compile-zo))
+  
+  (define unspec (gensym))
 
   (define (compile-collection-zos collection 
                                   #:skip-path [skip-path #f]
                                   #:skip-doc-sources? [skip-docs? #f]
                                   #:managed-compile-zo [managed-compile-zo
                                                         (make-caching-managed-compile-zo)]
+                                  #:omit-root [omit-root unspec]
                                   . cp)
-    (compile-directory (apply collection-path collection cp)
+    (define dir (apply collection-path collection cp))
+    (compile-directory dir
                        (c-get-info (cons collection cp))
+                       #:omit-root (if (eq? omit-root unspec)
+                                       dir
+                                       omit-root)
                        #:verbose #f
                        #:skip-path skip-path
                        #:skip-doc-sources? skip-docs?

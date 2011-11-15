@@ -1,8 +1,6 @@
 #lang scribble/base
-@(require scribble/manual "guide-utils.rkt")
-
-@(define r6rs @elem{R@superscript{6}RS})
-@(define r5rs @elem{R@superscript{5}RS})
+@(require scribble/manual 
+          "guide-utils.rkt")
 
 @title[#:tag "dialects" #:style 'toc]{Dialects of Racket and Scheme}
 
@@ -44,7 +42,7 @@ including the following:
 
  @item{@racketmodname[typed/racket] --- like
        @racketmodname[racket], but statically typed; see
-       @other-manual['(lib "typed-scheme/scribblings/ts-guide.scrbl")]}
+       @other-manual['(lib "typed-racket/scribblings/ts-guide.scrbl")]}
 
  @item{@racketmodname[lazy] --- like @racketmodname[racket/base], but
        avoids evaluating an expression until its value is needed; see
@@ -83,7 +81,7 @@ language via @seclink["top" #:doc '(lib
 Standard dialects of Scheme include the ones defined by @|r5rs| and
 @|r6rs|.
 
-@subsection{@|r5rs|}
+@subsection[#:tag "r5rs"]{@|r5rs|}
 
 ``@|r5rs|'' stands for @link["../r5rs-std/index.html"]{The
 Revised@superscript{5} Report on the Algorithmic Language Scheme}, and

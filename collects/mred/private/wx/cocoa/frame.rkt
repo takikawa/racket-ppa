@@ -86,6 +86,19 @@
         (when wxb
           (let ([wx (->wx wxb)])
             (when wx
+              ;; Sometimes, a sheet becomes the main window and the parent
+              ;; still thinks that the parent is the main window. Tell
+              ;; the parent otherwise.
+              (let ([p (send wx get-parent)])
+                (when p
+                  (let ([s (send p get-sheet)])
+                    (when (eq? s wx)
+                      (let ([parent (send p get-cocoa)])
+                        (when (tell #:type _BOOL parent isMainWindow)
+                          ;; The Cocoa docs say never to call this method directly,
+                          ;; but we're trying to fix up a case where Cocoa seems
+                          ;; to be confused:
+                          (tellv parent resignMainWindow)))))))
               (set! front wx)
               (send wx install-wait-cursor)
               (send wx install-mb)
@@ -119,6 +132,13 @@
         (let ([wx (->wx wxb)])
           (when wx
             (send wx force-window-focus))))]
+  [-a _void (windowDidEndSheet: [_id notification])
+      ;; In some cases, the window that has a sheet
+      ;; stays main even as its sheet becomes main, so
+      ;; we need to make the containing window become main
+      ;; when the sheet goes away.
+      (when (equal? self (tell app mainWindow))
+        (tell self windowDidBecomeMain: notification))]
   [-a _void (toggleToolbarShown: [_id sender])
       (when wxb
         (let ([wx (->wx wxb)])
@@ -304,8 +324,9 @@
                   (send p set-sheet #f)
                   (tell (tell NSApplication sharedApplication)
                         endSheet: cocoa))))
-            (tellv cocoa deminiaturize: #f)
-            (tellv cocoa orderOut: #f)
+            (when (is-shown?) ; otherwise, `deminiaturize' can show the window
+              (tellv cocoa deminiaturize: #f)
+              (tellv cocoa orderOut: #f))
             (force-window-focus)))
       (register-frame-shown this on?)
       (let ([num (tell #:type _NSInteger cocoa windowNumber)])
@@ -337,7 +358,8 @@
     (define/public (force-window-focus)
       (let ([next (get-app-front-window)])
         (cond
-         [next (tellv next makeKeyWindow)]
+         [next 
+          (tellv next makeKeyWindow)]          
          [root-fake-frame 
           ;; Make key focus shift to root frame:
           (let ([root-cocoa (send root-fake-frame get-cocoa)])
@@ -402,6 +424,10 @@
       (set! saved-child child)
       (on-new-child child #t))
 
+    (define/override (refresh-all-children)
+      (when saved-child
+        (send saved-child refresh)))
+
     (define/override (set-cursor c)
       (when saved-child
         (send saved-child set-cursor c)))
@@ -461,7 +487,7 @@
         (tell cocoa enableCursorRects)))
 
     (define/public (flip-screen y)
-      (let ([f (tell #:type _NSRect (tell cocoa screen) frame)])
+      (let ([f (tell #:type _NSRect (tell NSScreen mainScreen) frame)])
         (- (NSSize-height (NSRect-size f)) y)))
 
     (define/override (flip y h) (flip-screen (+ y h)))

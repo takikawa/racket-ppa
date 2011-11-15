@@ -62,6 +62,7 @@
    bell
    display-size
    display-origin
+   display-count
    flush-display
    fill-private-color
    cancel-quit
@@ -88,4 +89,5 @@
    make-screen-bitmap
    make-gl-bitmap
    check-for-break
-   key-symbol-to-menu-key))
+   key-symbol-to-menu-key
+   needs-grow-box-spacer?))

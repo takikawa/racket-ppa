@@ -329,7 +329,14 @@ result of
 @racketblock[
 (let ([in ((current-get-interaction-input-port))])
   ((current-read-interaction) (object-name in) in))
-]}
+]
+
+If the input and output ports are both terminals (in the sense of
+@racket[terminal-port?]) and if the output port appears to be counting
+lines (because @racket[port-next-location] returns a non-@racket[#f]
+line and column), then the output port's line is incremented and its
+column is reset to @racket[0] via @racket[set-port-next-location!] 
+before returning the read result.}
 
 
 @defparam[current-get-interaction-input-port proc (-> input-port?)]{
@@ -453,11 +460,17 @@ which allows such optimizations.}
 
 @defboolparam[eval-jit-enabled on?]{
 
+@guidealso["JIT"]
+
 A parameter that determines whether the native-code just-in-time
-compiler (JIT) is enabled for code (compiled or not) that is passed to
-the default evaluation handler.  The default is @racket[#t], unless
-the JIT is disabled through the @Flag{j}/@DFlag{no-jit} command-line
-flag to stand-alone Racket (or GRacket), or through the
+compiler (@deftech{JIT}) is enabled for code (compiled or not) that is passed to
+the default evaluation handler. A true parameter value is effective
+only on platforms for which the JIT is supported.
+
+The default is @racket[#t], unless the JIT is not supported by the
+current platform, unless it is disabled through the
+@Flag{j}/@DFlag{no-jit} command-line flag to stand-alone Racket (or
+GRacket), and unless it is disabled through the
 @as-index{@envvar{PLTNOMZJIT}} environment variable (set to any
 value).}
 

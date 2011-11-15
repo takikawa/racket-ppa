@@ -131,8 +131,9 @@ associations in @racket[form-urlencoded->alist],
 
 The default value is @racket['amp-or-semi], which means that both
 @litchar{&} and @litchar{;} are treated as separators when parsing,
-and @litchar{&} is used as a separator when encoding. The other modes
-use/recognize only of the separators.
+and @litchar{&} is used as a separator when encoding. The @racket['semi-or-amp]
+mode is similar, but @litchar{;} is used when encoding. The other modes
+use/recognize only one of the separators.
 
 @examples[
 #:eval uri-codec-eval
@@ -154,3 +155,27 @@ use/recognize only of the separators.
 (form-urlencoded->alist "x=foo;y=bar;z=baz")
 (alist->form-urlencoded ex)
 ]}
+
+@; ----------------------------------------
+
+@section{URI Codec Unit}
+
+@margin-note{@racket[uri-codec@] and @racket[uri-codec^] are deprecated.
+They exist for backward-compatibility and will likely be removed in
+the future. New code should use the @racketmodname[net/uri-codec] module.}
+
+@defmodule[net/uri-codec-unit]
+
+@defthing[uri-codec@ unit?]{
+
+Imports nothing, exports @racket[uri-codec^].}
+
+@; ----------------------------------------
+
+@section{URI Codec Signature}
+
+@defmodule[net/uri-codec-sig]
+
+@defsignature[uri-codec^ ()]{}
+
+Includes everything exported by the @racketmodname[net/uri-codec] module.

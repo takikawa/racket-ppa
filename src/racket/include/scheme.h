@@ -120,6 +120,19 @@ typedef long FILE;
 # define MZ_SIGSET(s, f) sigset(s, f)
 #endif
 
+/* C99 allows an array in a struct to be declared
+   with [] to indicate that its actual size can be
+   any number. The old way was to declare the array
+   of size 1. For now, we support going back to the 
+   old way. */
+#ifdef MZ_USE_OLD_ARRAY_STYLE
+# define mzFLEX_ARRAY_DECL 1
+# define mzFLEX_DELTA 1
+#else
+# define mzFLEX_ARRAY_DECL /* empty */
+# define mzFLEX_DELTA 0
+#endif
+
 #ifdef MZ_XFORM
 # define XFORM_NONGCING __xform_nongcing__
 #else
@@ -166,6 +179,25 @@ typedef struct FSSpec mzFSSpec;
 # else
 # define _W64
 # endif
+#endif
+
+#ifdef MZ_PRECISE_GC
+# ifndef MZ_XFORM
+#  define XFORM_SKIP_PROC /* empty */
+#  define XFORM_CAN_IGNORE /**/
+# endif
+#else
+# define XFORM_HIDE_EXPR(x) x
+# define XFORM_START_SKIP /**/
+# define XFORM_END_SKIP /**/
+# define XFORM_START_SUSPEND /**/
+# define XFORM_END_SUSPEND /**/
+# define XFORM_SKIP_PROC /**/
+# define XFORM_START_TRUST_ARITH /**/
+# define XFORM_END_TRUST_ARITH /**/
+# define XFORM_CAN_IGNORE /**/
+# define XFORM_TRUST_PLUS +
+# define XFORM_TRUST_MINUS -
 #endif
 
 /* PPC Linux plays a slimy trick: it defines strcpy() as a macro that
@@ -305,7 +337,7 @@ typedef struct Scheme_Symbol {
 typedef struct Scheme_Vector {
   Scheme_Inclhash_Object iso; /* 1 in low bit of keyex indicates immutable */
   intptr_t size;
-  Scheme_Object *els[1];
+  Scheme_Object *els[mzFLEX_ARRAY_DECL];
 } Scheme_Vector;
 
 # define SHARED_ALLOCATED 0x2
@@ -315,7 +347,7 @@ typedef struct Scheme_Vector {
 typedef struct Scheme_Double_Vector {
   Scheme_Inclhash_Object iso; /* & 0x2 indicates allocated in the MASTERGC */
   intptr_t size;
-  double els[1];
+  double els[mzFLEX_ARRAY_DECL];
 } Scheme_Double_Vector;
 
 typedef struct Scheme_Print_Params Scheme_Print_Params;
@@ -625,10 +657,9 @@ typedef struct Scheme_Offset_Cptr
    Do not use them directly. */
 #define SCHEME_PRIM_OPT_MASK (1 | 2)
 #define SCHEME_PRIM_IS_PRIMITIVE 4
-#define SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER 8
-#define SCHEME_PRIM_IS_STRUCT_PRED 16
-#define SCHEME_PRIM_IS_STRUCT_OTHER 32
-#define SCHEME_PRIM_OTHER_TYPE_MASK (64 | 128 | 256)
+#define SCHEME_PRIM_IS_UNSAFE_OMITABLE 8
+#define SCHEME_PRIM_IS_STRUCT_OTHER 16
+#define SCHEME_PRIM_OTHER_TYPE_MASK (32 | 64 | 128 | 256)
 #define SCHEME_PRIM_IS_MULTI_RESULT 512
 #define SCHEME_PRIM_IS_BINARY_INLINED 1024
 #define SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL 2048
@@ -650,9 +681,9 @@ typedef struct Scheme_Offset_Cptr
 #define SCHEME_PRIM_TYPE_PARAMETER               64
 #define SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER      (64 | 128)
 #define SCHEME_PRIM_SOMETIMES_INLINED            (64 | 256)
-#define SCHEME_PRIM_TYPE_STRUCT_PROP_PRED        (64 | 128 | 256)
-
-#define SCHEME_PRIM_IS_STRUCT_PROC (SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER | SCHEME_PRIM_IS_STRUCT_PRED | SCHEME_PRIM_IS_STRUCT_OTHER)
+#define SCHEME_PRIM_STRUCT_TYPE_STRUCT_PROP_PRED        (64 | 128 | 256)
+#define SCHEME_PRIM_STRUCT_TYPE_INDEXED_GETTER   32
+#define SCHEME_PRIM_STRUCT_TYPE_PRED             (32 | 64)
 
 #define SCHEME_PRIM_PROC_FLAGS(x) (((Scheme_Prim_Proc_Header *)x)->flags)
 
@@ -698,7 +729,7 @@ typedef struct Scheme_Primitive_Closure {
 #ifdef MZ_PRECISE_GC
   mzshort count;
 #endif
-  Scheme_Object *val[1];
+  Scheme_Object *val[mzFLEX_ARRAY_DECL];
 } Scheme_Primitive_Closure;
 
 #define SCHEME_PRIM_CLOSURE_ELS(p) ((Scheme_Primitive_Closure *)p)->val
@@ -779,7 +810,6 @@ typedef struct {
 #define SCHEME_ECONTP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_escaping_cont_type)
 #define SCHEME_CONT_MARK_SETP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_cont_mark_set_type)
 #define SCHEME_PROC_STRUCTP(obj) SAME_TYPE(SCHEME_TYPE(obj), scheme_proc_struct_type)
-#define SCHEME_STRUCT_PROCP(obj) (SCHEME_PRIMP(obj) && (((Scheme_Primitive_Proc *)(obj))->pp.flags & SCHEME_PRIM_IS_STRUCT_PROC))
 #define SCHEME_CLOSUREP(obj) (SAME_TYPE(SCHEME_TYPE(obj), scheme_closure_type) || SAME_TYPE(SCHEME_TYPE(obj), scheme_case_closure_type))
 
 #define SCHEME_PRIM(obj)     (((Scheme_Primitive_Proc *)(obj))->prim_val)
@@ -862,7 +892,7 @@ typedef mz_one_jit_jmp_buf mz_jit_jmp_buf[1];
 
 #ifdef MZ_PRECISE_GC
 typedef struct {
-  mz_jit_jmp_buf jb;
+  XFORM_CAN_IGNORE mz_jit_jmp_buf jb;
   intptr_t gcvs; /* declared as `intptr_t' to hide pointer from 3m xform */
   intptr_t gcvs_cnt;
 } mz_jmp_buf;
@@ -1224,8 +1254,6 @@ enum {
   MZCONFIG_SQUARE_BRACKETS_ARE_PARENS,
   MZCONFIG_CURLY_BRACES_ARE_PARENS,
 
-  MZCONFIG_HONU_MODE,
-
   MZCONFIG_ERROR_PRINT_WIDTH,
   MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH,
 
@@ -1244,6 +1272,7 @@ enum {
 
   MZCONFIG_USE_COMPILED_KIND,
   MZCONFIG_USE_USER_PATHS,
+  MZCONFIG_USE_LINK_PATHS,
 
   MZCONFIG_LOAD_DIRECTORY,
   MZCONFIG_WRITE_DIRECTORY,
@@ -1691,17 +1720,6 @@ extern void *scheme_malloc_envunbox(size_t);
 # define MZ_GC_NO_VAR_IN_REG(x)          /* empty */
 # define MZ_GC_REG()                     /* empty */
 # define MZ_GC_UNREG()                   /* empty */
-# define XFORM_HIDE_EXPR(x) x
-# define XFORM_START_SKIP /**/
-# define XFORM_END_SKIP /**/
-# define XFORM_START_SUSPEND /**/
-# define XFORM_END_SUSPEND /**/
-# define XFORM_SKIP_PROC /**/
-# define XFORM_START_TRUST_ARITH /**/
-# define XFORM_END_TRUST_ARITH /**/
-# define XFORM_CAN_IGNORE /**/
-# define XFORM_TRUST_PLUS +
-# define XFORM_TRUST_MINUS -
 #endif
 
 /*========================================================================*/
@@ -1729,6 +1747,7 @@ MZ_EXTERN int scheme_hash_percent_globals_only; /* Defaults to 0 */
 MZ_EXTERN int scheme_binary_mode_stdio; /* Windows-specific; Defaults to 0 */
 MZ_EXTERN int scheme_startup_use_jit; /* Defaults to 1 */
 MZ_EXTERN int scheme_ignore_user_paths; /* Defaults to 0 */
+MZ_EXTERN int scheme_ignore_link_paths; /* Defaults to 0 */
 
 MZ_EXTERN void scheme_set_case_sensitive(int);
 MZ_EXTERN void scheme_set_allow_set_undefined(int);
@@ -1736,6 +1755,7 @@ MZ_EXTERN void scheme_set_binary_mode_stdio(int);
 MZ_EXTERN void scheme_set_startup_use_jit(int);
 MZ_EXTERN void scheme_set_startup_load_on_demand(int);
 MZ_EXTERN void scheme_set_ignore_user_paths(int);
+MZ_EXTERN void scheme_set_ignore_link_paths(int);
 MZ_EXTERN void scheme_set_logging(int syslog_level, int stderr_level);
 
 MZ_EXTERN int scheme_get_allow_set_undefined();
@@ -1798,6 +1818,7 @@ MZ_EXTERN Scheme_Object *scheme_set_run_cmd(char *s);
 MZ_EXTERN void scheme_set_collects_path(Scheme_Object *p);
 MZ_EXTERN void scheme_set_original_dir(Scheme_Object *d);
 MZ_EXTERN void scheme_set_addon_dir(Scheme_Object *p);
+MZ_EXTERN void scheme_set_links_file(Scheme_Object *p);
 MZ_EXTERN void scheme_set_command_line_arguments(Scheme_Object *vec);
 MZ_EXTERN void scheme_set_compiled_file_paths(Scheme_Object *list);
 

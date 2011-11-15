@@ -125,6 +125,7 @@ void scheme_init_compile_recs(Scheme_Compile_Info *src, int drec,
     /* should be always NULL */
     dest[i].observer = src[drec].observer;
     dest[i].pre_unwrapped = 0;
+    dest[i].testing_constantness = 0;
     dest[i].env_already = 0;
     dest[i].comp_flags = src[drec].comp_flags;
   }
@@ -144,6 +145,7 @@ void scheme_init_expand_recs(Scheme_Expand_Info *src, int drec,
     dest[i].value_name = scheme_false;
     dest[i].observer = src[drec].observer;
     dest[i].pre_unwrapped = 0;
+    dest[i].testing_constantness = 0;
     dest[i].env_already = 0;
     dest[i].comp_flags = src[drec].comp_flags;
   }
@@ -167,6 +169,7 @@ void scheme_init_lambda_rec(Scheme_Compile_Info *src, int drec,
   lam[dlrec].value_name = scheme_false;
   lam[dlrec].observer = src[drec].observer;
   lam[dlrec].pre_unwrapped = 0;
+  lam[dlrec].testing_constantness = 0;
   lam[dlrec].env_already = 0;
   lam[dlrec].comp_flags = src[drec].comp_flags;
 }
@@ -619,12 +622,38 @@ Scheme_Object *scheme_register_toplevel_in_prefix(Scheme_Object *var, Scheme_Com
   if (o)
     return o;
 
-  o = scheme_make_toplevel(0, cp->num_toplevels, 0, imported ? SCHEME_TOPLEVEL_READY : 0);
+  o = scheme_make_toplevel(0, cp->num_toplevels, 0, 
+                           (imported 
+                            ? ((SCHEME_MODVAR_FLAGS(var) & SCHEME_MODVAR_CONST)
+                               ? SCHEME_TOPLEVEL_CONST
+                               : ((SCHEME_MODVAR_FLAGS(var) & SCHEME_MODVAR_FIXED)
+                                  ? SCHEME_TOPLEVEL_FIXED
+                                  : SCHEME_TOPLEVEL_READY))
+                            : 0));
 
   cp->num_toplevels++;
   scheme_hash_set(ht, var, o);
 
   return o;
+}
+
+void scheme_register_unbound_toplevel(Scheme_Comp_Env *env, Scheme_Object *id)
+{
+  Comp_Prefix *cp = env->prefix;
+
+  if (!cp->unbound) cp->unbound = scheme_null;
+
+  id = scheme_make_pair(id, cp->unbound);
+  cp->unbound = id;
+}
+
+void scheme_merge_undefineds(Scheme_Comp_Env *exp_env, Scheme_Comp_Env *env)
+{
+  if (exp_env->prefix->unbound && (env->genv->disallow_unbound < 0)) {
+    /* adding a list to env->prefix->unbound indicates a
+       phase-1 shift for the identifiers in the list: */
+    scheme_register_unbound_toplevel(env, exp_env->prefix->unbound);
+  }
 }
 
 Scheme_Object *scheme_toplevel_to_flagged_toplevel(Scheme_Object *_tl, int flags)
@@ -851,10 +880,10 @@ static Scheme_Local *get_frame_loc(Scheme_Comp_Env *frame,
 
   u = COMPILE_DATA(frame)->use[i];
   
-  u |= (((flags & (SCHEME_APP_POS | SCHEME_SETTING | SCHEME_REFERENCING))
+  u |= (((flags & (SCHEME_APP_POS | SCHEME_SETTING))
 	 ? CONSTRAINED_USE
 	 : ((u & (ARBITRARY_USE | ONE_ARBITRARY_USE)) ? ARBITRARY_USE : ONE_ARBITRARY_USE))
-	| ((flags & (SCHEME_SETTING | SCHEME_REFERENCING | SCHEME_LINKING_REF))
+	| ((flags & (SCHEME_SETTING | SCHEME_LINKING_REF))
 	   ? WAS_SET_BANGED
 	   : 0));
 
@@ -874,7 +903,8 @@ static Scheme_Local *get_frame_loc(Scheme_Comp_Env *frame,
 
 Scheme_Object *scheme_hash_module_variable(Scheme_Env *env, Scheme_Object *modidx, 
 					   Scheme_Object *stxsym, Scheme_Object *insp,
-					   int pos, intptr_t mod_phase)
+					   int pos, intptr_t mod_phase, int is_constant)
+/* is_constant == 2 => constant over all instantiations and phases */
 {
   Scheme_Object *val;
   Scheme_Hash_Table *ht;
@@ -902,13 +932,18 @@ Scheme_Object *scheme_hash_module_variable(Scheme_Env *env, Scheme_Object *modid
       Module_Variable *mv;
       
       mv = MALLOC_ONE_TAGGED(Module_Variable);
-      mv->so.type = scheme_module_variable_type;
+      mv->iso.so.type = scheme_module_variable_type;
       
       mv->modidx = modidx;
       mv->sym = stxsym;
       mv->insp = insp;
       mv->pos = pos;
       mv->mod_phase = (int)mod_phase;
+
+      if (is_constant > 1)
+        SCHEME_MODVAR_FLAGS(mv) |= SCHEME_MODVAR_CONST;
+      else if (is_constant)
+        SCHEME_MODVAR_FLAGS(mv) |= SCHEME_MODVAR_FIXED;
       
       val = (Scheme_Object *)mv;
       
@@ -1051,10 +1086,13 @@ Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, Scheme_Objec
 	  break;
 	}
       } else {
-        if (!SCHEME_PAIRP(marks)) {
+        if (SCHEME_NULLP(amarks)) {
+          /* can always match empty marks */
+          best_match = SCHEME_CDR(a);
+          best_match_skipped = 0;
+        } else if (!SCHEME_PAIRP(marks)) {
 	  /* To be better than nothing, could only match exactly: */
-	  if (scheme_equal(amarks, marks)
-              || SCHEME_NULLP(amarks)) {
+	  if (scheme_equal(amarks, marks)) {
 	    best_match = SCHEME_CDR(a);
 	    best_match_skipped = 0;
 	  }
@@ -1624,10 +1662,10 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
                       Scheme_Object **_lexical_binding_id)
 {
   Scheme_Comp_Env *frame;
-  int j = 0, p = 0, modpos, skip_stops = 0, module_self_reference = 0;
+  int j = 0, p = 0, modpos, skip_stops = 0, module_self_reference = 0, is_constant;
   Scheme_Bucket *b;
   Scheme_Object *val, *modidx, *modname, *src_find_id, *find_global_id, *mod_defn_phase;
-  Scheme_Object *find_id_sym = NULL, *rename_insp = NULL;
+  Scheme_Object *find_id_sym = NULL, *rename_insp = NULL, *mod_constant = NULL;
   Scheme_Env *genv;
   intptr_t phase;
 
@@ -1824,13 +1862,13 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
     genv = env->genv;
     modname = NULL;
 
-    if (genv->module && genv->disallow_unbound) {
+    if (genv->module && (genv->disallow_unbound > 0)) {
       /* Free identifier. Maybe don't continue. */
       if (flags & (SCHEME_SETTING | SCHEME_REFERENCING)) {
-        scheme_wrong_syntax(((flags & SCHEME_SETTING) 
-			     ? scheme_set_stx_string
-			     : scheme_var_ref_string),
-			    NULL, src_find_id, "unbound identifier in module");
+        scheme_unbound_syntax(((flags & SCHEME_SETTING) 
+                               ? scheme_set_stx_string
+                               : scheme_var_ref_string),
+                              NULL, src_find_id, "unbound identifier in module");
 	return NULL;
       }
       if (flags & SCHEME_NULL_FOR_UNBOUND)
@@ -1848,13 +1886,13 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
 
   /* Try syntax table: */
   if (modname) {
-    val = scheme_module_syntax(modname, env->genv, find_id);
+    val = scheme_module_syntax(modname, env->genv, find_id, SCHEME_INT_VAL(mod_defn_phase));
     if (val && !(flags & SCHEME_NO_CERT_CHECKS))
       scheme_check_accessible_in_module(genv, env->insp, in_modidx, 
 					find_id, src_find_id, NULL, NULL, rename_insp,
                                         -2, 0, 
 					NULL, NULL,
-                                        env->genv, NULL);
+                                        env->genv, NULL, NULL);
   } else {
     /* Only try syntax table if there's not an explicit (later)
        variable mapping: */
@@ -1877,7 +1915,7 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
     else
       pos = scheme_check_accessible_in_module(genv, env->insp, in_modidx, 
 					      find_id, src_find_id, NULL, NULL, rename_insp, -1, 1,
-					      _protected, NULL, env->genv, NULL);
+					      _protected, NULL, env->genv, NULL, &mod_constant);
     modpos = (int)SCHEME_INT_VAL(pos);
   } else
     modpos = -1;
@@ -1890,13 +1928,13 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
   }
 
   if (!modname && (flags & (SCHEME_SETTING | SCHEME_REFERENCING)) 
-      && (genv->module && genv->disallow_unbound)) {
+      && (genv->module && (genv->disallow_unbound > 0))) {
     /* Check for set! of unbound identifier: */    
     if (!scheme_lookup_in_table(genv->toplevel, (const char *)find_global_id)) {
-      scheme_wrong_syntax(((flags & SCHEME_SETTING) 
+      scheme_unbound_syntax(((flags & SCHEME_SETTING) 
 			     ? scheme_set_stx_string
 			     : scheme_var_ref_string), 
-			  NULL, src_find_id, "unbound identifier in module");
+                            NULL, src_find_id, "unbound identifier in module");
       return NULL;
     }
   }
@@ -1912,13 +1950,26 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
         check_taint(src_find_id);
 	return scheme_hash_module_variable(genv, genv->module->self_modidx, find_id, 
 					   genv->module->insp,
-					   -1, genv->mod_phase);
+					   -1, genv->mod_phase, 0);
       }
     } else
       return NULL;
   }
 
   check_taint(src_find_id);
+
+  if (mod_constant) {
+    if (SAME_OBJ(mod_constant, scheme_constant_key))
+      is_constant = 2;
+    else if (SAME_OBJ(mod_constant, scheme_fixed_key))
+      is_constant = 1;
+    else {
+      if (flags & SCHEME_ELIM_CONST) 
+        return mod_constant;
+      is_constant = 2;
+    }
+  } else
+    is_constant = 0;
 
   /* Used to have `&& !SAME_OBJ(modidx, modname)' below, but that was a bad
      idea, because it causes module instances to be preserved. */
@@ -1931,7 +1982,8 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
     /* Create a module variable reference, so that idx is preserved: */
     return scheme_hash_module_variable(env->genv, modidx, find_id, 
 				       (rename_insp ? rename_insp : genv->module->insp),
-				       modpos, SCHEME_INT_VAL(mod_defn_phase));
+				       modpos, SCHEME_INT_VAL(mod_defn_phase),
+                                       is_constant);
   }
 
   if (!modname 
@@ -1941,7 +1993,8 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
     /* Need to return a variable reference in this case, too. */
     return scheme_hash_module_variable(env->genv, genv->module->self_modidx, find_global_id, 
 				       genv->module->insp,
-				       modpos, genv->mod_phase);
+				       modpos, genv->mod_phase,
+                                       is_constant);
   }
 
   b = scheme_bucket_from_table(genv->toplevel, (char *)find_global_id);
@@ -2163,12 +2216,8 @@ scheme_local_lift_context(Scheme_Comp_Env *env)
   return SCHEME_VEC_ELS(COMPILE_DATA(env)->lifts)[4];
 }
 
-Scheme_Object *
-scheme_local_lift_end_statement(Scheme_Object *expr, Scheme_Object *local_mark, Scheme_Comp_Env *env)
+Scheme_Comp_Env *scheme_get_module_lift_env(Scheme_Comp_Env *env)
 {
-  Scheme_Object *pr;
-  Scheme_Object *orig_expr;
-
   while (env) {
     if ((COMPILE_DATA(env)->lifts)
         && SCHEME_TRUEP(SCHEME_VEC_ELS(COMPILE_DATA(env)->lifts)[3]))
@@ -2176,10 +2225,21 @@ scheme_local_lift_end_statement(Scheme_Object *expr, Scheme_Object *local_mark, 
     env = env->next;
   }
 
+  return env;
+}
+
+Scheme_Object *
+scheme_local_lift_end_statement(Scheme_Object *expr, Scheme_Object *local_mark, Scheme_Comp_Env *env)
+{
+  Scheme_Object *pr;
+  Scheme_Object *orig_expr;
+
+  env = scheme_get_module_lift_env(env);
+
   if (!env)
     scheme_raise_exn(MZEXN_FAIL_CONTRACT, 
 		     "syntax-local-lift-module-end-declaration: not currently transforming"
-                     " a run-time expression in a module declaration");
+                     " an expression within a module declaration");
   
   expr = scheme_add_remove_mark(expr, local_mark);
   orig_expr = expr;

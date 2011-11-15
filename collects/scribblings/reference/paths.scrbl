@@ -152,7 +152,7 @@ other path is deconstructed with @racket[split-path] and
 elements is necessary.}
 
 
-@defproc[(path-element->string [path path?]) string?]{
+@defproc[(path-element->string [path path-element?]) string?]{
 
 Like @racket[path->string], except that trailing path separators are
 removed (as by @racket[split-path]). On Windows, any
@@ -168,7 +168,7 @@ The @racket[path-element->string] procedure is generally the best
 choice for presenting a pathless file or directory name to a user.}
 
 
-@defproc[(path-element->bytes [path path-string?]) bytes?]{
+@defproc[(path-element->bytes [path path-element?]) bytes?]{
 
 Like @racket[path->bytes], except that any encoding prefix is removed,
 etc., as for @racket[path-element->string].
@@ -529,14 +529,20 @@ syntactically a directory (see @racket[split-path]) or if the path has
 no extension, @racket[#f] is returned.}
 
 @defproc[(find-relative-path [base (or/c path-string? path-for-some-system?)]
-                             [path (or/c path-string?  path-for-some-system?)])
+                             [path (or/c path-string?  path-for-some-system?)]
+                             [#:more-than-root? more-than-root? any/c #f])
          path-for-some-system?]{
 
 Finds a relative pathname with respect to @racket[base] that names the
 same file or directory as @racket[path]. Both @racket[base] and
-@racket[path] must be simplified in the sense of @racket[simple-form-path].  If
-@racket[path] is not a proper subpath of @racket[base] (i.e., a
-subpath that is strictly longer), @racket[path] is returned.}
+@racket[path] must be simplified in the sense of
+@racket[simple-form-path].  If @racket[path] shares no subpath in
+common with @racket[base], @racket[path] is returned.
+
+If @racket[more-than-root?] is true, if @racket[base] and
+@racket[path] share only a Unix root in common, and if neither
+@racket[base] nor @racket[path] is just a root path, then
+@racket[path] is returned.}
 
 @defproc[(normalize-path [path path-string?]
                          [wrt (and/c path-string? complete-path?)
@@ -562,6 +568,16 @@ directory (i.e., the comparison may produce false negatives).
 An error is signaled by @racket[normalize-path] if the input
 path contains an embedded path for a non-existent directory,
 or if an infinite cycle of soft links is detected.}
+
+
+@defproc[(path-element? [path any/c]) boolean?]{
+
+Returns @racket[#t] if @racket[path] is a path value for some
+platform (see @racket[path-for-some-system?]) such that
+@racket[split-path] applied to @racket[path] would return
+@racket['relative] as its first result and a path as its second
+result. Otherwise, the result is @racket[#f].}
+
 
 @defproc[(path-only [path (or/c path-string? path-for-some-system?)])
          (or/c #f path-for-some-system?)]{

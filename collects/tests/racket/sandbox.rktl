@@ -312,6 +312,15 @@
           (lambda ()
             (printf "~s\n" '(module sandbox-test racket/base
                               (define x 123) (provide x)))))
+        ;; run it
+        (make-module-evaluator! (string->path test-lib))
+        --eval--
+        x => 123
+        (length (with-input-from-file ,test-lib read)) => 5
+        ;; the directory is still not kosher
+        (directory-list ,tmp) =err> "`read' access denied"
+        --top--
+        ;; require it
         (make-base-evaluator/reqs! `(,test-lib))
         --eval--
         x => 123
@@ -493,6 +502,18 @@
         =err> "out of mem+o(?:ry)"
         b => 1))
 
+   --top--
+   (make-base-evaluator!)
+   --eval--
+   (syntax-original? #'x) => #t
+
    ))
+
+(parameterize ([current-module-declare-name (make-resolved-module-path 'junk)])
+  (define (avoid-module-declare-name)
+    (with-handlers ([exn? (lambda (_) #f)])
+      (kill-evaluator (make-evaluator 'racket/base))
+      #t))
+  (test #t avoid-module-declare-name))
 
 (report-errs)

@@ -1,6 +1,10 @@
 #lang scheme/base
 
-(require scheme/match scheme/contract planet/cachepath syntax/modread)
+(require scheme/match 
+         scheme/contract 
+         planet/cachepath 
+         syntax/modread
+         "path-relativize.rkt")
 
 ;; in addition to infodomain/compiled/cache.rktd, getinfo will look in this 
 ;; file to find mappings. PLaneT uses this to put info about installed
@@ -88,6 +92,7 @@
 
 (define preferred-table #f)
 (define all-available-table #f)
+(define no-planet-table #f)
 
 ;; reset-relevant-directories-state! : -> void
 (define (reset-relevant-directories-state!)
@@ -104,7 +109,8 @@
                 (list i)
                 l))))
          #f #f))
-  (set! all-available-table (make-table cons #f #f)))
+  (set! all-available-table (make-table cons #f #f))
+  (set! no-planet-table (make-table cons #f #f)))
 
 (reset-relevant-directories-state!)
 
@@ -116,6 +122,12 @@
     (for ([f+root-dir (reverse (table-paths t))])
       (let ([f (car f+root-dir)]
             [root-dir (cdr f+root-dir)])
+        (define-values (path->info-relative
+                        info-relative->path)
+          (make-relativize (lambda () root-dir)
+                           'info
+                           'path->info-relative
+                           'info-relative->path))
         (when (file-exists? f)
           (for ([i (let ([l (with-input-from-file f read)])
                      (cond [(list? l) l]
@@ -123,7 +135,7 @@
                            [else (error 'find-relevant-directories
                                         "bad info-domain cache file: ~a" f)]))])
             (match i
-              [(list (? bytes? pathbytes)
+              [(list (and pathbytes (or (? bytes?) (list 'info (? bytes?) ...)))
                      (list (? symbol? fields) ...)
                      key ;; anything is okay here
                      (? integer? maj)
@@ -132,10 +144,14 @@
                      [new-item
                       (make-directory-record
                        maj min key
-                       (let ([p (bytes->path pathbytes)])
-                         (if (and (relative-path? p) root-dir)
-                           (build-path root-dir p)
-                            p))
+                       (if (bytes? pathbytes)
+                           (let ([p (bytes->path pathbytes)])
+                             (if (and (relative-path? p) root-dir)
+                                 ;; `raco setup' doesn't generate relative paths anyway,
+                                 ;; but it's ok to support them:
+                                 (build-path root-dir p)
+                                 p))
+                           (info-relative->path pathbytes))
                        fields)])
                  (hash-set! colls key
                             ((table-insert t) new-item old-items)))]
@@ -160,20 +176,23 @@
   (define t
     (cond [(eq? key 'preferred) preferred-table]
           [(eq? key 'all-available) all-available-table]
+          [(eq? key 'no-planet) no-planet-table]
           [else (error 'find-relevant-directories "Invalid key: ~s" key)]))
   ;; A list of (cons cache.rktd-path root-dir-path)
   ;;  If root-dir-path is not #f, then paths in the cache.rktd
   ;;  file are relative to it. #f is used for the planet cache.rktd file.
   (define search-path
-    (cons (cons user-infotable #f)
-          (map (lambda (coll)
-                 (cons (build-path coll "info-domain" "compiled" "cache.rktd")
-                       coll))
-               (current-library-collection-paths))))
-  (unless (equal? (table-paths t) search-path)
-    (set-table-ht! t (make-hasheq))
-    (set-table-paths! t search-path)
-    (populate-table! t))
+    ((if (eq? key 'no-planet) (lambda (a l) l) cons)
+     (cons user-infotable #f)
+     (map (lambda (coll)
+            (cons (build-path coll "info-domain" "compiled" "cache.rktd")
+                  coll))
+          (current-library-collection-paths))))
+  (when t
+    (unless (equal? (table-paths t) search-path)
+      (set-table-ht! t (make-hasheq))
+      (set-table-paths! t search-path)
+      (populate-table! t)))
   (let ([unsorted
          (if (= (length syms) 1)
            ;; Simple case: look up in table
@@ -205,7 +224,7 @@
  (get-info/full ((path?) (#:namespace (or/c namespace? #f)) . ->* . (or/c info? boolean?)))
  (find-relevant-directories
   (->* [(listof symbol?)]
-       [(lambda (x) (memq x '(preferred all-available)))]
+       [(lambda (x) (memq x '(preferred all-available no-planet)))]
        (listof path?)))
  (struct directory-record
          ([maj integer?]
@@ -215,5 +234,5 @@
           [syms (listof symbol?)]))
  (find-relevant-directory-records
   (->* [(listof symbol?)]
-       [(or/c 'preferred 'all-available)]
+       [(or/c 'preferred 'all-available 'no-planet)]
        (listof directory-record?))))

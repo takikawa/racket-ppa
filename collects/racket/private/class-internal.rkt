@@ -5,17 +5,14 @@
          racket/contract/base
          racket/contract/combinator
          (only-in racket/contract/private/arrow making-a-method)
-         racket/list
          racket/stxparam
          racket/unsafe/ops
          "class-events.rkt"
          "serialize-structs.rkt"
-         "define-struct.rkt"
          (for-syntax racket/stxparam
                      syntax/kerncase
                      syntax/stx
                      syntax/name
-                     syntax/context
                      syntax/define
                      syntax/flatten-begin
                      syntax/private/boundmap
@@ -633,9 +630,10 @@
       (syntax-property l 'method-arity-error #t))
 
     ;; `class' wants to be priviledged with respect to
-    ;; syntax taints: save the load-time inspector and use it 
+    ;; syntax taints: save the declaration-time inspector and use it 
     ;; to disarm syntax taints
-    (define method-insp (current-code-inspector))
+    (define method-insp (variable-reference->module-declaration-inspector
+                         (#%variable-reference)))
     (define (disarm stx)
       (syntax-disarm stx method-insp))
     (define (rearm new old)
@@ -3793,10 +3791,8 @@
                      (generate-temporaries (syntax (1 2 3)))])
         (quasisyntax/loc stx
           (let*-values ([(sym) (quasiquote (unsyntax (localize name)))]
-                        [(method receiver)
-                         (find-method/who '(unsyntax form)
-                                          (unsyntax obj)
-                                          sym)])
+                        [(receiver) (unsyntax obj)]
+                        [(method) (find-method/who '(unsyntax form) receiver sym)])
             (unsyntax
              (make-method-call
               traced?
@@ -3824,7 +3820,10 @@
                               (flatten-args #'args) #t)))]
           [(form obj name . args)
            (raise-syntax-error
-            #f "method name is not an identifier" stx #'name)])))
+            #f "method name is not an identifier" stx #'name)]
+          [(form obj)
+           (raise-syntax-error
+            #f "expected a method name" stx)])))
     
     (values
      ;; send
@@ -3862,16 +3861,14 @@
 ;; find-method/who : symbol[top-level-form/proc-name]
 ;;                   any[object] 
 ;;                   symbol[method-name] 
-;;               -> (values method-proc object)
-;; returns the method's procedure and the object.  If the object is a contract
-;; wrapped one and the original class was a primitive one, then the method
-;; will automatically unwrap both the object and any wrapped arguments on entry.
+;;               -> method-proc
+;; returns the method's procedure
 (define (find-method/who who in-object name)
   (let ([cls (object-ref in-object #f)])
     (if cls
         (let ([pos (hash-ref (class-method-ht cls) name #f)])
           (if pos
-              (values (vector-ref (class-methods cls) pos) in-object)
+              (vector-ref (class-methods cls) pos)
               (obj-error who "no such method: ~a~a"
                          name
                          (for-class (class-name cls)))))
@@ -3929,8 +3926,7 @@
                        (string->symbol (format "generic:~a~a" name (for-intf (interface-name intf))))
                        (format "instance~a" (for-intf (interface-name intf)))
                        obj))
-                    (let-values ([(mth ths) (find-method/who 'make-generic obj name)])
-                      mth)))
+                    (find-method/who 'make-generic obj name)))
                 (let* ([pos (hash-ref (class-method-ht class) name
                                       (lambda ()
                                         (obj-error 'make-generic "no such method: ~a~a"
@@ -4168,7 +4164,8 @@
                            [trace-flag (if traced? (syntax/loc stx #t) (syntax/loc stx #f))])
                (syntax/loc stx (let-values ([(method method-obj)
                                              (let ([obj obj-expr])
-                                               (find-method/who 'with-method obj `name))]
+                                               (values (find-method/who 'with-method obj `name)
+                                                       obj))]
                                             ...)
                                  (letrec-syntaxes+values ([(id) (make-with-method-map
                                                                  trace-flag

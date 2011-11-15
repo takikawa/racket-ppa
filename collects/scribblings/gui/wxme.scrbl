@@ -9,11 +9,11 @@
                      (except-in wxme/cache-image reader)))
 
 @(define-syntax-rule (in mod . content)
-  (begin
-   (define-syntax-rule (intro)
-     (begin (require (for-label mod))
-            . content))
-   (intro)))
+   (begin
+     (define-syntax-rule (intro)
+       (begin (require (for-label mod))
+              . content))
+     (intro)))
 
 @title{WXME Decoding}
 
@@ -243,6 +243,16 @@ Reads a nested editor, producing a new input port to extract the
 editor's content.
 
 The @racket[what] argument is as for @method[stream<%> read-integer].}
+}
+
+@defproc[(read-snip-from-port [name string?]
+                              [who any/c]
+                              [stream (is-a?/c stream<%>)])
+         bytes?]{
+  Given @racket[name], which is expected to be the name of a snipclass,
+  uses that snipclass to read from the given stream at the current point
+  in that stream. Returns the processed bytes, much like the
+  @method[snip-reader<%> read-snip] method.
 }
 
 @; ----------------------------------------------------------------------

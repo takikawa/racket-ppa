@@ -7,19 +7,19 @@
          racket/unit
          racket/class
          racket/gui/base
-         "drsig.rkt")
+         "drsig.rkt"
+         "local-member-names.rkt")
 
 (define op (current-output-port))
 (define (oprintf . args) (apply fprintf op args))
 
 (define-unit module-language-tools@
   (import [prefix drracket:unit: drracket:unit^]
-          [prefix drracket:module-language: drracket:module-language^]
+          [prefix drracket:module-language: drracket:module-language/int^]
           [prefix drracket:language: drracket:language^]
-          [prefix drracket:language-configuration: drracket:language-configuration^])
+          [prefix drracket:language-configuration: drracket:language-configuration^]
+          [prefix drracket: drracket:interface^])
   (export drracket:module-language-tools^)
-
-  (define-local-member-name when-initialized move-to-new-language get-in-module-language?)
 
   (define-struct opt-out-toolbar-button (make-button id) #:transparent)
   (define opt-out-toolbar-buttons '())
@@ -29,10 +29,8 @@
           (cons (make-opt-out-toolbar-button make-button id)
                 opt-out-toolbar-buttons)))
     
-  (define tab<%> (interface ()))
-  
   (define tab-mixin
-    (mixin (drracket:unit:tab<%>) (tab<%>)
+    (mixin (drracket:unit:tab<%>) (drracket:module-language-tools:tab<%>)
       (inherit get-frame)
       (define toolbar-buttons '())
       (define/public (get-lang-toolbar-buttons) toolbar-buttons)
@@ -41,12 +39,15 @@
          (λ (old-button) (send (get-frame) remove-toolbar-button old-button))
          toolbar-buttons)
         (set! toolbar-buttons bs)
-        (send (get-frame) register-toolbar-buttons toolbar-buttons))
+        (send (get-frame) register-toolbar-buttons toolbar-buttons)
+        (send (get-frame) when-initialized
+              (λ ()
+                (send (send (get-frame) get-toolbar-button-panel) change-children
+                      (λ (l) toolbar-buttons)))))
       (super-new)))
   
-  (define frame<%> (interface ()))
   (define frame-mixin
-    (mixin (drracket:unit:frame<%>) (frame<%>)
+    (mixin (drracket:unit:frame<%>) (drracket:module-language-tools:frame<%>)
       (inherit unregister-toolbar-button get-definitions-text)
   
       (define toolbar-button-panel #f)
@@ -86,10 +87,9 @@
           (when (send defs get-in-module-language?)
             (send defs move-to-new-language))))))
   
-  (define definitions-text<%> (interface ()))
   (define definitions-text-mixin
-    (mixin (text:basic<%> drracket:unit:definitions-text<%>) (definitions-text<%>)
-      (inherit get-next-settings)
+    (mixin (text:basic<%> drracket:unit:definitions-text<%>) (drracket:module-language-tools:definitions-text<%>)
+      (inherit get-next-settings get-filename)
       (define in-module-language? #f)      ;; true when we are in the module language
       (define hash-lang-last-location #f)  ;; non-false when we know where the hash-lang line ended
       (define hash-lang-language #f)       ;; non-false is the string that was parsed for the language
@@ -101,13 +101,26 @@
         (inner (void) after-delete start len)
         (modification-at start))
       
+      (define last-filename #f)
+      (define/augment (after-save-file success?)
+        (inner (void) after-save-file success?)
+        (define this-filename (get-filename))
+        (unless (equal? last-filename this-filename)
+          (set! last-filename this-filename)
+          (modification-at #f)))
+      
       (define timer #f)
       
+      ;; modification-at : (or/c #f number) -> void
+      ;; checks to see if the lang line has changed when start
+      ;; is in the region of the lang line, or when start is #f, or
+      ;; when there is no #lang line known.
       (define/private (modification-at start)
         (send (send (get-tab) get-frame) when-initialized
               (λ ()
                 (when in-module-language?
-                  (when (or (not hash-lang-last-location)
+                  (when (or (not start)
+                            (not hash-lang-last-location)
                             (<= start hash-lang-last-location))
                     
                     (unless timer
@@ -156,23 +169,27 @@
               (set! hash-lang-language (get-text 0 pos))
               (set! hash-lang-last-location pos)
               (clear-things-out)
+              (define info-proc 
+                (if (vector? info-result)
+                    (vector-ref info-result 0)
+                    info-result))
+              (define (ctc-on-info-proc-result ctc res)
+                (contract ctc 
+                          res
+                          (if (vector? info-result)
+                              'hash-lang-racket
+                              (get-lang-name pos))
+                          'drracket/private/module-language-tools))
               (when info-result
                 (register-new-buttons
-                 (contract (or/c #f (listof (list/c string?
-                                                    (is-a?/c bitmap%)
-                                                    (-> (is-a?/c drracket:unit:frame<%>) any))))
-                           ((if (vector? info-result)
-                                (vector-ref info-result 0)
-                                info-result)
-                            'drscheme:toolbar-buttons #f)
-                           (if (vector? info-result)
-                               'hash-lang-racket
-                               (get-lang-name pos))
-                           'drracket/private/module-language-tools)
-                 ((if (vector? info-result)
-                      (vector-ref info-result 0)
-                      info-result)
-                  'drscheme:opt-out-toolbar-buttons '())))))))
+                 (ctc-on-info-proc-result (or/c #f (listof (list/c string?
+                                                                   (is-a?/c bitmap%)
+                                                                   (-> (is-a?/c drracket:unit:frame<%>) any))))
+                                          (or (info-proc 'drracket:toolbar-buttons #f)
+                                              (info-proc 'drscheme:toolbar-buttons #f)))
+                 (ctc-on-info-proc-result (or/c #f (listof symbol?))
+                                          (or (info-proc 'drracket:opt-out-toolbar-buttons '())
+                                              (info-proc 'drscheme:opt-out-toolbar-buttons '())))))))))
 
       (inherit get-tab)
       
@@ -238,4 +255,27 @@
       (super-new)
       (set! in-module-language? 
             (is-a? (drracket:language-configuration:language-settings-language (get-next-settings))
-                   drracket:module-language:module-language<%>)))))
+                   drracket:module-language:module-language<%>))))
+  
+  
+  (define no-more-online-expansion-handlers? #f)
+  (define (no-more-online-expansion-handlers) (set! no-more-online-expansion-handlers? #t))
+  (struct online-expansion-handler (mod-path id local-handler))
+  (define online-expansion-handlers '())
+  (define (get-online-expansion-handlers) 
+    (cond
+      [no-more-online-expansion-handlers?
+       online-expansion-handlers]
+      [else
+       (error 'get-online-expansion-handlers 
+              "online-expansion-handlers can still be registered")]))
+  (define (add-online-expansion-handler mod-path id local-handler)
+    (cond
+      [no-more-online-expansion-handlers?
+       (error 'add-online-expansion-handler 
+              "no more online-expansion-handlers can be registered; got ~e ~e ~e"
+              mod-path id local-handler)]
+      [else
+       (set! online-expansion-handlers
+             (cons (online-expansion-handler mod-path id local-handler)
+                   online-expansion-handlers))])))

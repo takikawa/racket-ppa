@@ -24,6 +24,10 @@
   
   (define-local-member-name debug-callback)
   
+  (preferences:set-default 'plt:debug-tool:stack/variable-area
+                           9/10 
+                           (λ (x) (and (real? x) (<= 0 x 1))))
+  
   (define tool@
     (unit 
       (import drscheme:tool^)
@@ -132,6 +136,10 @@
                                     (> size (vector-length v)))
                                '...
                                (truncate-value (vector-ref v i) size (sub1 depth)))))]
+          [(bytes? v)
+           (if (> (bytes-length v) size)
+               (bytes-append (subbytes v 0 size) #"...")
+               v)]
           [else v]))
       
       (define filename->defs
@@ -1141,7 +1149,7 @@
             (for-each
              (lambda (name/value)
                (let ([name (format "~a" (syntax-e (first name/value)))]
-                     [value (format " => ~s\n" (second name/value))])
+                     [value (format " => ~s\n" (truncate-value (second name/value) 100 5))])
                  (send variables-text insert name)
                  (send variables-text change-style bold-sd
                        (- (send variables-text last-position) (string-length name))
@@ -1211,8 +1219,21 @@
           (define mouse-over-frame #f)
           (define/override (get-definitions/interactions-panel-parent)
             (set! debug-grandparent-panel
-                  (make-object horizontal-panel%
-                    (super get-definitions/interactions-panel-parent)))
+                  (new (class panel:horizontal-dragable%
+                         (inherit get-percentages)
+                         (define/augment (get-default-percentages i)
+                           (cond
+                             [(= i 2) 
+                              (define p (preferences:get 'plt:debug-tool:stack/variable-area))
+                              (list p (- 1 p))]
+                             [else (build-list i (λ (x) (/ i)))]))
+                         (define/augment (after-percentage-change)
+                           (define ps (get-percentages))
+                           (when (= (length ps) 2)
+                             (preferences:set 'plt:debug-tool:stack/variable-area (car ps)))
+                           (inner (void) after-percentage-change))
+                         (super-new))
+                       [parent (super get-definitions/interactions-panel-parent)]))
             (set! stack-view-panel
                   (new panel:vertical-dragable%
                        [parent debug-grandparent-panel]

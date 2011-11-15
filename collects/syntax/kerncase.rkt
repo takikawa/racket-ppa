@@ -17,11 +17,11 @@
                                            (quote 
                                             quote-syntax #%top
                                             #%plain-lambda case-lambda
-                                            let-values letrec-values
+                                            let-values letrec-values letrec-syntaxes+values
                                             begin begin0 set!
                                             with-continuation-mark
                                             if #%plain-app #%expression
-                                            define-values define-syntaxes define-values-for-syntax
+                                            define-values define-syntaxes begin-for-syntax
                                             module 
                                             #%plain-module-begin 
                                             #%require #%provide 
@@ -32,17 +32,9 @@
                             free-identifier=?]
                            [(and #,(syntax-e #'rel?) (= p 1)) 
                             free-transformer-identifier=?]
-                           [else (let ([id (namespace-module-identifier p)])
-                                   (lambda (a b)
-                                     (free-identifier=? (datum->syntax id 
-                                                                       (let ([s (syntax-e b)])
-                                                                         (case s
-                                                                           [(#%plain-app) '#%app]
-                                                                           [(#%plain-lambda) 'lambda]
-                                                                           [else s])))
-                                                        a
-                                                        p)))]))
-	    clause ...))])))
+                           [else (lambda (a b)
+                                   (free-identifier=? a b p '#,(syntax-local-phase-level)))]))
+            clause ...))])))
   
   (define-syntax kernel-syntax-case
     (lambda (stx)
@@ -78,7 +70,7 @@
                 begin0
                 define-values
                 define-syntaxes
-                define-values-for-syntax
+                begin-for-syntax
                 set!
                 let-values
                 letrec-values

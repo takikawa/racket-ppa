@@ -64,6 +64,57 @@
 (define fx+ unsafe-fx+)
 (define fx* unsafe-fx*)
 
+(define mult-table #f)
+(define unmult-table #f)
+
+(define (get-mult-table)
+  (unless mult-table
+    (set! mult-table (make-bytes (* 256 256)))
+    (for ([a (in-range 256)])
+      (for ([v (in-range 256)])
+        (bytes-set! mult-table
+                    (fx+ (fx* a 256) v)
+                    (unsafe-fl->fx
+                     (unsafe-flround
+                      (unsafe-fl/
+                       (unsafe-fx->fl (fx* a v))
+                       255.0)))))))
+  mult-table)
+
+(define (get-unmult-table)
+  (unless unmult-table
+    (set! unmult-table (make-bytes (* 256 256)))
+    (for ([a (in-range 256)])
+      (for ([v (in-range 256)])
+        (bytes-set! unmult-table
+                    (fx+ (fx* a 256) v)
+                    (if (unsafe-fx<= a v)
+                        255
+                        (unsafe-fl->fx
+                         (unsafe-flround
+                          (unsafe-fl/
+                           (unsafe-fx->fl (fx* 255 v))
+                           (unsafe-fx->fl a)))))))))
+  unmult-table)
+
+(define (alpha-mult al v)
+  (unsafe-fl->fx
+   (unsafe-flround
+    (unsafe-fl/
+     (unsafe-fx->fl (fx* al v))
+     255.0))))
+
+(define (alpha-unmult al v)
+  (if (zero? al)
+      255
+      (unsafe-fxmin 255 
+                    (unsafe-fl->fx
+                     (unsafe-flround
+                      (unsafe-fl/
+                       (unsafe-fx->fl (fx* 255 v))
+                       (unsafe-fx->fl al)))))))
+
+
 (define png-convertible<%>
   (interface* ()
               ([prop:convertible
@@ -391,7 +442,8 @@
       (let* ([dest (begin
                      (cairo_surface_flush s)
                      (cairo_image_surface_get_data s))]
-             [dest-row-width (cairo_image_surface_get_stride s)])
+             [dest-row-width (cairo_image_surface_get_stride s)]
+             [m (and pre? (get-mult-table))])
         (let-values ([(A R G B) (argb-indices)])
           (for ([r (in-vector rows)]
                 [j (in-naturals)])
@@ -421,8 +473,8 @@
                                    (unsafe-bytes-ref r (fx+ spos 3))
                                    255)]
                            [premult (lambda (al v)
-                                      (if pre?
-                                          (unsafe-fxquotient (fx* al v) 255)
+                                      (if m
+                                          (unsafe-bytes-ref m (fx+ (fx* al 256) v))
                                           v))])
                       (unsafe-bytes-set! dest (fx+ pos A) al)
                       (unsafe-bytes-set! dest (fx+ pos R) (premult al (unsafe-bytes-ref r spos)))
@@ -481,8 +533,7 @@
                         row
                         bi
                         (let ([src (+ (* j row-width) (* (* bi 8) 4))])
-                          (for/fold ([v 0]) 
-                              ([k (in-range 8)])
+                          (for/fold ([v 0]) ([k (in-range 8)])
                             (if ((+ (* 8 bi) k) . < . width)
                                 (if (zero? (bytes-ref data (+ src (* 4 k))))
                                     v
@@ -604,7 +655,8 @@
           (cairo_surface_flush s)
           (let ([data (cairo_image_surface_get_data s)]
                 [row-width (cairo_image_surface_get_stride s)]
-                [use-alpha? (or (and alpha-channel? (not pre-mult?)) b&w?)]
+                [um (and (or (and alpha-channel? (not pre-mult?)) b&w?)
+                         (get-unmult-table))]
                 [set-alpha? alpha-channel?])
             (let ([w2 (+ x (min (- width x) w))])
               (for* ([j (in-range y (min (+ y h) height))])
@@ -623,20 +675,14 @@
                                     ;; instead of binding a local variable
                                     (syntax-rules ()
                                       [(_ v)
-                                       (if use-alpha?
-                                           (if (unsafe-fx= 0 a)
-                                               255
-                                               ;; `min' shouldn't be necessary, but it's
-                                               ;; just in case the data is ill-formed
-                                               (unsafe-fxmin 255 (unsafe-fxquotient 
-                                                                  (unsafe-fx* v 255) 
-                                                                  a)))
+                                       (if um
+                                           (unsafe-bytes-ref um (fx+ (fx* a 256) v))
                                            v)])])
-                      (when set-alpha?
-                        (unsafe-bytes-set! bstr pi a))
-                      (unsafe-bytes-set! bstr (+ pi 1) (unmult (unsafe-bytes-ref data (+ ri R))))
-                      (unsafe-bytes-set! bstr (+ pi 2) (unmult (unsafe-bytes-ref data (+ ri G))))
-                      (unsafe-bytes-set! bstr (+ pi 3) (unmult (unsafe-bytes-ref data (+ ri B)))))))))))))
+                        (when set-alpha?
+                          (unsafe-bytes-set! bstr pi a))
+                        (unsafe-bytes-set! bstr (+ pi 1) (unmult (unsafe-bytes-ref data (+ ri R))))
+                        (unsafe-bytes-set! bstr (+ pi 2) (unmult (unsafe-bytes-ref data (+ ri G))))
+                        (unsafe-bytes-set! bstr (+ pi 3) (unmult (unsafe-bytes-ref data (+ ri B)))))))))))))
       (cond
        [get-alpha?
         (get-alphas-as-mask x y w h bstr)]
@@ -666,7 +712,8 @@
           (when (not set-alpha?)
             (cairo_surface_flush s)
             (let ([data (cairo_image_surface_get_data s)]
-                  [row-width (cairo_image_surface_get_stride s)])
+                  [row-width (cairo_image_surface_get_stride s)]
+                  [m (and (not pre-mult?) (get-mult-table))])
               (let ([w2 (+ x (min (- width x) w))])
                 (for ([j (in-range y (min (+ y h) height))]
                       [dj (in-naturals)])
@@ -689,9 +736,9 @@
                             (if alpha-channel?
                                 (let ([a (bytes-ref bstr pi)]
                                       [pm (lambda (a v)
-                                            (if pre-mult?
-                                                (min a v)
-                                                (quotient (* a v) 255)))])
+                                            (if m
+                                                (unsafe-bytes-ref m (fx+ (fx* a 256) v))
+                                                (min a v)))])
                                   (bytes-set! data (+ ri A) a)
                                   (bytes-set! data (+ ri R) (pm a (bytes-ref bstr (+ pi 1))))
                                   (bytes-set! data (+ ri G) (pm a (bytes-ref bstr (+ pi 2))))

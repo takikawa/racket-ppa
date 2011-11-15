@@ -27,7 +27,8 @@ all of the names in the tools library, for use defining keybindings
 (require (for-syntax racket/base))
 
 (require/doc drracket/private/ts ;; probably this also has to be an absolute require
-             racket/base scribble/manual)
+             racket/base scribble/manual
+             scribblings/tools/doc-util)
 
 (require/doc (for-label errortrace/errortrace-key
                         racket/pretty 
@@ -62,13 +63,17 @@ all of the names in the tools library, for use defining keybindings
               (map
                (λ (case)
                  (with-syntax ([(id ctc)
-                                (syntax-case case (proc-doc/names proc-doc)
+                                (syntax-case case (proc-doc/names proc-doc parameter-doc parameter/c)
                                   [(proc-doc/names id ctc . stuff)
                                    (identifier? #'id)
                                    #'(id ctc)]
                                   [(proc-doc id ctc . stuff)
                                    (identifier? #'id)
                                    #'(id ctc)]
+                                  [(parameter-doc id (parameter/c ctc) arg-id . stuff)
+                                   (and (identifier? #'id)
+                                        (identifier? #'arg-id))
+                                   #'(id (parameter/c ctc))]
                                   [_
                                    (raise-syntax-error 'provide/dr/doc "unknown thing" case)])])
                    (with-syntax ([mid (munge-id #'id)])
@@ -94,12 +99,39 @@ all of the names in the tools library, for use defining keybindings
     These buttons are ``opt out'', meaning that if the language doesn't explicitly ask to not
     have this button (or all such buttons), the button will appear.
     
-    See @racket[read-language] for more details on how language's specify how to opt out.
-    DrRacket will invoke the @tt{get-info} proc from @racket[read-language] with
-    @indexed-racket['drscheme:opt-out-toolbar-buttons]. If the result is a list of symbols, the
-    listed symbols are opted out. If the result is @racket[#f], all buttons are opted
-    out. The default is the empty list, meaning that all opt-out buttons appear.
-    })
+    @language-info-def[drracket:opt-out-toolbar-buttons]{
+      See @racket[read-language] for more details on how a language can opt out.
+      DrRacket will invoke the @tt{get-info} proc from @racket[read-language] with
+      @racket['drracket:opt-out-toolbar-buttons] 
+      (and @indexed-racket['drscheme:opt-out-toolbar-buttons] for backwards compatibility).
+      If the result is a list of symbols, the
+      listed symbols are opted out. If the result is @racket[#f], all buttons are opted
+      out. The default is the empty list, meaning that all opt-out buttons appear.}})
+ 
+ (proc-doc/names
+  drracket:module-language-tools:add-online-expansion-handler 
+  (-> path-string? symbol? (-> (is-a?/c drracket:unit:definitions-text<%>) any/c any) void?)
+  (mod-path id local-handler)
+  @{Registers a pair of procedures with DrRacket's online expansion machinery. 
+    
+    The first two arguments name a procedure in a module that is loaded by 
+    @racket[dynamic-require] is a separate place. When DrRacket detects that
+    the editor has been modified, it sends the contents of the editor over to
+    that separate place, @racket[expand]s the program there, and then supplies
+    the fully expanded object to that first procedure. (The procedure is called
+    in the same context as the expansion process.) 
+    
+    Note that the thread that calls this procedure may be
+    killed at anytime: DrRacket may kill it when the user types in the buffer
+    (in order to start a new expansion), but bizarro code may also create a separate
+    thread during expansion that lurks around and then mutates arbitrary things.
+    
+    The result of the procedure is expected to be something that can be sent
+    across a @racket[place-channel], which is then sent back to the original
+    place where DrRacket itself is running and passed to the @racket[local-handler]
+    argument. At this point, the only code running is trusted code (DrRacket itself
+    and other tools), but any long running computations may freeze DrRacket's GUI, 
+    since this procedure is invoked on DrRacket's eventspace's handler thread.})
  
  (proc-doc/names
   drracket:module-language:add-module-language
@@ -832,6 +864,16 @@ all of the names in the tools library, for use defining keybindings
     the values of toplevel expressions in the REPL.
     
     It is only initialized on the user's thread.})
+ 
+ (parameter-doc
+  drracket:rep:after-expression
+  (parameter/c (or/c #f any/c))
+  top-level-expression
+  @{This parameter is used by @method[drracket:rep:text% evaluate-from-port].
+    When it is something other than @racket[#f], then DrRacket passes it to
+    @racket[eval] as the last thing that it does on the user's thread (before
+    cleaning up).})
+  
  
  
  ;                                                                        

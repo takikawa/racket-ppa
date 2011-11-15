@@ -89,7 +89,7 @@ please adhere to these guidelines:
 |#
 
 (module ukrainian-string-constants "string-constant-lang.rkt"
- ;;; when translating this constant, substitute name of actual langauge for `English'
+ ;;; when translating this constant, substitute name of actual language for `English'
  (is-this-your-native-language "Українська - це Ваша рідна мова?")
 
  (are-you-sure-you-want-to-switch-languages
@@ -609,7 +609,6 @@ please adhere to these guidelines:
 
  (open-info "Відкрити файл з диску")
  (open-menu-item "&Відкрити...")
- (open-here-menu-item "&Відкрити тут...")
 
  (open-recent-info "Список останніх відкритих файлів")
  (open-recent-menu-item "Відкрити о&станні")
