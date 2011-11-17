@@ -1,11 +1,10 @@
 #lang racket/unit
 
-  (require mzlib/class
+  (require racket/class
+           racket/list
            "sig.rkt"
-           mred/mred-sig
-           mzlib/list
-           mzlib/etc)
-  
+           mred/mred-sig)
+
   (import [prefix icon: framework:icon^]
           mred^)
   (export framework:panel^)
@@ -171,7 +170,10 @@
       after-percentage-change
       set-percentages
       get-percentages
-      get-vertical?))
+      get-vertical?
+      get-default-percentages
+      right-click-in-gap
+      set-orientation))
   
   (define vertical-dragable<%>
     (interface (dragable<%>)))
@@ -184,7 +186,6 @@
       (init parent)
 
       (init-field vertical?)
-
       (define/public-final (get-vertical?) vertical?)
       (define/public-final (set-orientation h?) 
         (define v? (not h?))
@@ -204,6 +205,8 @@
         (if (get-vertical?)
             (icon:get-up/down-cursor)
             (icon:get-left/right-cursor)))
+      
+      (define/public (right-click-in-gap evt before after) (void))
       
       (inherit get-client-size container-flow-modified)
       
@@ -246,11 +249,22 @@
           (unless (= len-children (length percentages))
             (cond
               [(zero? len-children)
-               '()]
+               (set! percentages '())]
               [else
-               (let ([rat (/ 1 len-children)])
-                 (set! percentages (build-list len-children (λ (i) (make-percentage rat)))))])
+               (set! percentages (map make-percentage (get-default-percentages len-children)))])
             (after-percentage-change))))
+      
+      (define/pubment (get-default-percentages i) 
+        (define res (inner (if (zero? i) '() (make-list i (/ i)))
+                           get-default-percentages i))
+        (unless (and (list? res)
+                     (andmap (λ (x) (and (real? x) (<= 0 x 1))) res)
+                     (= 1 (apply + res))
+                     (= (length res) i))
+          (error 'get-default-percentages 
+                 "expected inner call to return a list of real numbers that sum to 1 and has length ~a"
+                 i))
+        res)
       
       (define/override (after-new-child child)
         (update-percentages))
@@ -274,6 +288,8 @@
                                  (and (send c ok?)
                                       c))))
               (cond
+                [(and gap (send evt button-down? 'right))
+                 (right-click-in-gap evt (gap-before gap) (gap-after gap))]
                 [(and gap (send evt button-down? 'left))
                  (set! resizing-dim (event-get-dim evt))
                  (set! resizing-gap gap)]
@@ -336,7 +352,7 @@
         (update-percentages)
         (dragable-container-size children-info bar-thickness (get-vertical?)))
       
-      (super-instantiate (parent))))
+      (super-new [parent parent])))
 
   ;; this function repeatedly checks to see if the current set of percentages and children
   ;; would violate any minimum size constraints. If not, the percentages are used and the

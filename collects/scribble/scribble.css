@@ -363,6 +363,15 @@ i {
   display: block;
   margin-left: 1em;
   margin-bottom: 0em;
+  margin-right: 1em;
+  margin-top: 0em;
+  white-space: nowrap;  
+}
+
+.SVInsetFlow {
+  display: block;
+  margin-left: 0em;
+  margin-bottom: 0em;
   margin-right: 0em;
   margin-top: 0em;
 }

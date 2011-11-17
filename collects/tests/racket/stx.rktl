@@ -689,8 +689,9 @@
 (test #t has-stx-property? (expand #'(let () (define-struct x (a)) 12)) #f 'define-struct 'origin)
 
 ;; Disappearing syntax decls:
-(test #t has-stx-property? (expand #'(let () (define-syntax x 1) (define y 12) 10)) 'letrec-values 'x 'disappeared-binding)
-(test #t has-stx-property? (expand #'(let () (define-struct s (x)) 10)) 'letrec-values 's 'disappeared-binding)
+(test #t has-stx-property? (expand #'(let () (define-syntax x 1) (define y 12) 10)) 'let-values 'x 'disappeared-binding)
+(test #t has-stx-property? (expand #'(let () (define-syntax x 1) (define y y) 10)) 'letrec-values 'x 'disappeared-binding)
+(test #t has-stx-property? (expand #'(let () (define-struct s (x)) 10)) 'let-values 's 'disappeared-binding)
 (test #t has-stx-property? (expand #'(let () (define-syntax x 1) 10)) 'let-values 'x 'disappeared-binding)
 (test #f has-stx-property? (expand #'(fluid-let-syntax ([x 1]) 10)) 'let-values 'x 'disappeared-binding)
 
@@ -1268,6 +1269,11 @@
           (test #t eval '(free-identifier=? (f) #'x))
           (test #f eval `(free-identifier=? (f) (quote-syntax ,x-id))))))))
 
+(test #t free-identifier=? #'lambda #'lambda 0 1)
+(test #f free-identifier=? #'lambda #'lambda 0 4)
+(require (for-meta 4 racket/base))
+(test #t free-identifier=? #'lambda #'lambda 0 4)
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  certification example from the manual
 
@@ -1556,6 +1562,109 @@
 
 (syntax-test #'(evil-via-shadower (m)))
 (syntax-test #'(evil-via-delta-introducer (m)))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check that a for-syntax reference can precede a
+;;  for-syntax definition
+
+(module pre-definition-reference racket/base
+  (require (for-syntax racket/base))
+  (provide (for-syntax f g))
+  (define-for-syntax (f x) (g (+ x 1)))
+  (define-for-syntax (g y) (+ y 2)))
+
+(require 'pre-definition-reference)
+(test 3 'use (let-syntax ([m (lambda (stx) (datum->syntax stx (f 0)))])
+               m))
+
+(syntax-test #'(module unbound-reference racket/base
+                 (require (for-syntax racket/base))
+                 (define-for-syntax (f x) nonesuch)))
+(syntax-test #'(module unbound-reference racket/base
+                 (require (for-syntax racket/base))
+                 (#%expression
+                  (let-syntax ([g (lambda (stx) nonesuch)])
+                    10))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; `syntax-transforming?' and `syntax-transforming-module-expression?'
+
+(test #f syntax-transforming?)
+(test #f syntax-transforming-module-expression?)
+(test #t 'trans (let-syntax ([m (lambda (stx)
+                                  (datum->syntax stx (syntax-transforming?)))])
+                  (m)))
+(test #f 'trans-mod (let-syntax ([m (lambda (stx)
+                                      (datum->syntax stx (syntax-transforming-module-expression?)))])
+                      (m)))
+(let ([o (open-output-string)])
+  (parameterize ([current-output-port o])
+    (eval `(module m racket/base
+             (require (for-syntax racket/base))
+             (define-syntax (m stx)
+               (displayln (syntax-transforming-module-expression?))
+               #'1)
+             (m)))
+    (eval `(module m racket/base
+             (require (for-syntax racket/base))
+             (begin-for-syntax
+              (displayln (syntax-transforming-module-expression?))))))
+  (test "#t\n#f\n" get-output-string o))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check that a common wraps encoding that is detected only
+;; after simplification and encoding is shared propery. If
+;; it's not shared properly in this example, a gensym for
+;; the internal-definition context gets duplicated.
+
+(parameterize ([current-namespace (make-base-namespace)])
+  (define e
+    (compile '(module producer racket/base
+                (#%module-begin
+
+                 (require (for-syntax racket/base))
+
+                 (define-syntax (compare stx)
+                   (syntax-case stx ()
+                    [(_ formal body)
+                     (let ()
+
+                       (define (internal-definition-context-apply ctx s)
+                         (syntax-case (local-expand #`(quote-syntax #,s)
+                                                    'expression 
+                                                    (list #'quote-syntax)
+                                                    ctx) ()
+                           [(qs e) #'e]))
+
+                       (define ctx (syntax-local-make-definition-context))
+                       (syntax-local-bind-syntaxes (list #'formal) #f ctx)
+                       (internal-definition-context-seal ctx)
+
+                       (with-syntax ([one
+                                      (internal-definition-context-apply ctx #'formal)]
+                                     [two
+                                      (syntax-local-introduce
+                                       (internal-definition-context-apply 
+                                        ctx
+                                        (syntax-local-introduce
+                                         (internal-definition-context-apply ctx #'body))))])
+
+                         (unless (free-identifier=? #'one #'two)
+                           (error 'before
+                                  "identifiers were never the same"))
+                         
+                         #'(begin-for-syntax
+                            (unless (free-identifier=? #'one #'two)
+                              (error 'after
+                                     "identifiers used to be the same, but now are not")))))]))
+
+                 (compare z z)))))
+  (let ([o (open-output-bytes)])
+    (write e o)
+    (parameterize ([read-accept-compiled #t])
+      (eval (read (open-input-bytes (get-output-bytes o))))))
+  (namespace-require ''producer)
+  (eval 10))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

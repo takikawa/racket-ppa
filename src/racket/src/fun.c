@@ -119,7 +119,7 @@ THREAD_LOCAL_DECL(static Scheme_Object *cached_mod_stx);
 THREAD_LOCAL_DECL(static Scheme_Object *cached_mod_beg_stx);
 THREAD_LOCAL_DECL(static Scheme_Object *cached_dv_stx);
 THREAD_LOCAL_DECL(static Scheme_Object *cached_ds_stx);
-THREAD_LOCAL_DECL(static Scheme_Object *cached_dvs_stx);
+THREAD_LOCAL_DECL(static Scheme_Object *cached_bfs_stx);
 THREAD_LOCAL_DECL(static int cached_stx_phase);
 THREAD_LOCAL_DECL(static Scheme_Cont *offstack_cont);
 THREAD_LOCAL_DECL(static Scheme_Overflow *offstack_overflow);
@@ -408,11 +408,13 @@ scheme_init_fun (Scheme_Env *env)
 						      "continuation-mark-set->list*",
 						      2, 4),
 			     env);
-  scheme_add_global_constant("continuation-mark-set-first",
-			     scheme_make_prim_w_arity(extract_one_cc_mark,
-						      "continuation-mark-set-first",
-						      2, 4),
-			     env);
+
+  o = scheme_make_prim_w_arity(extract_one_cc_mark,
+                               "continuation-mark-set-first",
+                               2, 4);
+  SCHEME_PRIM_PROC_FLAGS(o) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("continuation-mark-set-first", o, env);
+
   scheme_add_global_constant("call-with-immediate-continuation-mark",
 			     scheme_make_prim_w_arity2(call_with_immediate_cc_mark,
                                                        "call-with-immediate-continuation-mark",
@@ -622,7 +624,7 @@ scheme_init_fun_places()
   REGISTER_SO(cached_mod_beg_stx);
   REGISTER_SO(cached_dv_stx);
   REGISTER_SO(cached_ds_stx);
-  REGISTER_SO(cached_dvs_stx);
+  REGISTER_SO(cached_bfs_stx);
   REGISTER_SO(offstack_cont);
   REGISTER_SO(offstack_overflow);
 }
@@ -654,7 +656,7 @@ make_prim_closure(Scheme_Prim *fun, int eternal,
 	  ? sizeof(Scheme_Prim_W_Result_Arity) 
 	  : (closed
 	     ? (sizeof(Scheme_Primitive_Closure)
-		+ ((count - 1) * sizeof(Scheme_Object *)))
+		+ ((count - mzFLEX_DELTA) * sizeof(Scheme_Object *)))
 	     : sizeof(Scheme_Primitive_Proc)));
 
   if (eternal && scheme_starting_up && !closed)
@@ -957,6 +959,24 @@ void scheme_really_create_overflow(void *stack_base)
 
       reply = f();
       scheme_overflow_reply = reply;
+
+      /* At the time of writing, there appear to be no GCs on the 
+         longjmp return from stack overflow. Just in case, though,
+         it seems better to protect multiple-value and tail-call 
+         results from any GC that might be introduced one day. */
+      if (reply == SCHEME_MULTIPLE_VALUES) {
+        p = scheme_current_thread;
+        if (SAME_OBJ(p->ku.multiple.array, p->values_buffer))
+          p->values_buffer = NULL;
+      } else if (reply == SCHEME_TAIL_CALL_WAITING) {
+        p = scheme_current_thread;
+        if (p->ku.apply.tail_rands == p->tail_buffer) {
+          GC_CAN_IGNORE Scheme_Object **tb;
+          p->tail_buffer = NULL; /* so args aren't zeroed */
+          tb = MALLOC_N(Scheme_Object *, p->tail_buffer_size);
+          p->tail_buffer = tb;
+        }
+      }
     }
 
     p = scheme_current_thread;
@@ -1548,7 +1568,7 @@ cert_with_specials(Scheme_Object *code,
 /* Arms (insp) or re-arms (old_stx) taints. */
 {
   Scheme_Object *prop;
-  int next_cadr_deflt = 0;
+  int next_cadr_deflt = 0, phase_delta = 0;
 
 #ifdef DO_STACK_CHECK
   {
@@ -1607,7 +1627,7 @@ cert_with_specials(Scheme_Object *code,
         name = scheme_stx_taint_disarm(code, NULL);
         name = SCHEME_STX_CAR(name);
 	if (SCHEME_STX_SYMBOLP(name)) {
-	  Scheme_Object *beg_stx, *mod_stx, *mod_beg_stx, *dv_stx, *ds_stx, *dvs_stx;
+	  Scheme_Object *beg_stx, *mod_stx, *mod_beg_stx, *dv_stx, *ds_stx, *bfs_stx;
 
 	  if (!phase) {
             mod_stx = scheme_module_stx;
@@ -1615,14 +1635,14 @@ cert_with_specials(Scheme_Object *code,
 	    mod_beg_stx = scheme_module_begin_stx;
 	    dv_stx = scheme_define_values_stx;
 	    ds_stx = scheme_define_syntaxes_stx;
-	    dvs_stx = scheme_define_for_syntaxes_stx;
+	    bfs_stx = scheme_begin_for_syntax_stx;
 	  } else if (phase == cached_stx_phase) {
 	    beg_stx = cached_beg_stx;
 	    mod_stx = cached_mod_stx;
 	    mod_beg_stx = cached_mod_beg_stx;
 	    dv_stx = cached_dv_stx;
 	    ds_stx = cached_ds_stx;
-	    dvs_stx = cached_dvs_stx;
+	    bfs_stx = cached_bfs_stx;
 	  } else {
             Scheme_Object *sr;
             sr = scheme_sys_wraps_phase(scheme_make_integer(phase));
@@ -1636,14 +1656,14 @@ cert_with_specials(Scheme_Object *code,
 					    sr, 0, 0);
 	    ds_stx = scheme_datum_to_syntax(SCHEME_STX_VAL(scheme_define_syntaxes_stx), scheme_false, 
 					    sr, 0, 0);
-	    dvs_stx = scheme_datum_to_syntax(SCHEME_STX_VAL(scheme_define_for_syntaxes_stx), scheme_false, 
+	    bfs_stx = scheme_datum_to_syntax(SCHEME_STX_VAL(scheme_begin_for_syntax_stx), scheme_false, 
                                              sr, 0, 0);
 	    cached_beg_stx = beg_stx;
 	    cached_mod_stx = mod_stx;
 	    cached_mod_beg_stx = mod_beg_stx;
 	    cached_dv_stx = dv_stx;
 	    cached_ds_stx = ds_stx;
-	    cached_dvs_stx = dvs_stx;
+	    cached_bfs_stx = bfs_stx;
 	    cached_stx_phase = phase;
 	  }
 
@@ -1652,9 +1672,12 @@ cert_with_specials(Scheme_Object *code,
               || scheme_stx_module_eq(mod_beg_stx, name, phase)) {
 	    trans = 1;
 	    next_cadr_deflt = 0;
+	  } else if (scheme_stx_module_eq(bfs_stx, name, phase)) {
+	    trans = 1;
+	    next_cadr_deflt = 0;
+            phase_delta = 1;
 	  } else if (scheme_stx_module_eq(dv_stx, name, phase)
-		     || scheme_stx_module_eq(ds_stx, name, phase)
-		     || scheme_stx_module_eq(dvs_stx, name, phase)) {
+		     || scheme_stx_module_eq(ds_stx, name, phase)) {
 	    trans = 1;
 	    next_cadr_deflt = 1;
 	  }
@@ -1674,9 +1697,9 @@ cert_with_specials(Scheme_Object *code,
     Scheme_Object *a, *d, *v;
     
     a = SCHEME_STX_CAR(code);
-    a = cert_with_specials(a, insp, old_stx, phase, cadr_deflt, 0);
+    a = cert_with_specials(a, insp, old_stx, phase + phase_delta, cadr_deflt, 0);
     d = SCHEME_STX_CDR(code);
-    d = cert_with_specials(d, insp, old_stx, phase, 1, next_cadr_deflt);
+    d = cert_with_specials(d, insp, old_stx, phase + phase_delta, 1, next_cadr_deflt);
 
     v = scheme_make_pair(a, d);
 
@@ -8201,12 +8224,13 @@ static Scheme_Object *seconds_to_date(int argc, Scheme_Object **argv)
 # endif
 #endif
   CHECK_TIME_T now;
-  Scheme_Object *p[10], *secs;
+  char *tzn;
+  Scheme_Object *p[12], *secs, *nsecs, *zname;
 
   secs = argv[0];
 
-  if (!SCHEME_INTP(secs) && !SCHEME_BIGNUMP(secs)) {
-    scheme_wrong_type("seconds->date", "exact integer", 0, argc, argv);
+  if (!SCHEME_REALP(secs)) {
+    scheme_wrong_type("seconds->date", "real", 0, argc, argv);
     return NULL;
   }
   
@@ -8214,6 +8238,22 @@ static Scheme_Object *seconds_to_date(int argc, Scheme_Object **argv)
     get_gmt = SCHEME_FALSEP(argv[1]);
   else
     get_gmt = 0;
+
+  if (SCHEME_INTP(secs) || SCHEME_BIGNUMP(secs)) {
+    nsecs = scheme_make_integer(0);
+  } else {
+    nsecs = secs;
+    p[0] = secs;
+    secs = scheme_floor(1, p);
+    nsecs = scheme_bin_minus(nsecs, secs);
+    nsecs = scheme_bin_mult(nsecs, scheme_make_integer(1000000000));
+    p[0] = nsecs;
+    nsecs = scheme_floor(1, p);
+    p[0] = nsecs;
+    nsecs = scheme_inexact_to_exact(1, p);
+    p[0] = secs;
+    secs = scheme_inexact_to_exact(1, p);
+  }
 
   if (scheme_get_time_val(secs, &lnow)
       && ((UNBUNDLE_TIME_TYPE)(now = (CHECK_TIME_T)lnow)) == lnow) {
@@ -8336,9 +8376,22 @@ static Scheme_Object *seconds_to_date(int argc, Scheme_Object **argv)
 # ifdef USE_TM_GMTOFF_FIELD
         tzoffset = localTime->tm_gmtoff;
 # endif
-      }
+# ifdef USE_TZNAME_VAR
+        tzn = MSC_IZE(tzname)[localTime->tm_isdst];
+# elif defined(USE_TM_ZONE_FIELD)
+        tzn = localTime->tm_zone;
+# else
+        tzn = NULL;
+# endif
+      } else
+        tzn = "UTC";
 
 #endif
+
+      if (!tzn)
+        tzn = "?";
+      zname = scheme_make_utf8_string(tzn);
+      SCHEME_SET_IMMUTABLE(zname);
 
       p[0] = scheme_make_integer(sec);
       p[1] = scheme_make_integer(min);
@@ -8350,8 +8403,10 @@ static Scheme_Object *seconds_to_date(int argc, Scheme_Object **argv)
       p[7] = scheme_make_integer(yday);
       p[8] = dst ? scheme_true : scheme_false;
       p[9] = scheme_make_integer(tzoffset);
+      p[10] = nsecs;
+      p[11] = zname;
 
-      return scheme_make_struct_instance(scheme_date, 10, p);
+      return scheme_make_struct_instance(scheme_date, 12, p);
     }
   }
 
@@ -8548,7 +8603,7 @@ scheme_default_prompt_read_handler(int argc, Scheme_Object *argv[])
 {
   Scheme_Config *config;
   Scheme_Object *port, *reader, *getter;
-  Scheme_Object *inport, *name, *a[2];
+  Scheme_Object *inport, *name, *a[4], *v;
 
   config = scheme_current_config();
   port = scheme_get_param(config, MZCONFIG_OUTPUT_PORT);
@@ -8569,7 +8624,31 @@ scheme_default_prompt_read_handler(int argc, Scheme_Object *argv[])
 
   a[0] = name;
   a[1] = inport;
-  return _scheme_apply(reader, 2, a);
+  v = _scheme_apply(reader, 2, a);
+
+  a[0] = inport;
+  if (SCHEME_TRUEP(scheme_terminal_port_p(1, a))) {
+    a[0] = port;
+    if (SCHEME_TRUEP(scheme_terminal_port_p(1, a))) {
+      intptr_t line, col, pos;
+      scheme_tell_all(port, &line, &col, &pos);
+      if ((col > 0) && (line > 0)) {
+        /* input and output are terminals (assume the same one), 
+           and the output port counts lines: tell output port
+           that it's on a new line: */
+        a[0] = port;
+        a[1] = scheme_make_integer(line + 1);
+        a[2] = scheme_make_integer(0);
+        if (pos > 0)
+          a[3] = scheme_make_integer(pos + 2); /* incremet plus 0-adjust */
+        else
+          a[3] = scheme_false;
+        scheme_set_port_location(4, a);
+      }
+    }
+  }
+
+  return v;
 }
   
 Scheme_Object *

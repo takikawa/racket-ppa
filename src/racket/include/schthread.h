@@ -122,6 +122,7 @@ typedef struct Thread_Local_Variables {
   uintptr_t GC_gen0_alloc_page_ptr_;
   uintptr_t GC_gen0_alloc_page_end_;
   int GC_gen0_alloc_only_;
+  uintptr_t force_gc_for_place_accounting_;
   void *bignum_cache_[BIGNUM_CACHE_SIZE];
   int cache_count_;
   struct Scheme_Hash_Table *toplevels_ht_;
@@ -149,7 +150,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Object *cached_mod_beg_stx_;
   struct Scheme_Object *cached_dv_stx_;
   struct Scheme_Object *cached_ds_stx_;
-  struct Scheme_Object *cached_dvs_stx_;
+  struct Scheme_Object *cached_bfs_stx_;
   int cached_stx_phase_;
   struct Scheme_Object *cwv_stx_;
   int cwv_stx_phase_;
@@ -173,6 +174,9 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Object *scheme_orig_stderr_port_;
   struct Scheme_Object *scheme_orig_stdin_port_;
   struct mz_fd_set *scheme_fd_set_;
+#ifdef USE_FCNTL_AND_FORK_FOR_FILE_LOCKS
+  struct Scheme_Hash_Table *locked_fd_process_map_;
+#endif
   struct Scheme_Custodian *new_port_cust_;
 #if (defined(__WIN32__) || defined(WIN32) || defined(_WIN32))
   void *scheme_break_semaphore_;
@@ -207,8 +211,6 @@ typedef struct Thread_Local_Variables {
   rxpos *maybep_buffer_cache_;
   rxpos *match_stack_buffer_cache_;
   uintptr_t scheme_os_thread_stack_base_;
-  int traversers_registered_;
-  struct Finalizations **save_fns_ptr_;
   struct Scheme_Object *scheme_system_idle_channel_;
   struct Scheme_Object *system_idle_put_evt_;
   void *stack_copy_cache_[STACK_COPY_CACHE_SIZE];
@@ -272,6 +274,7 @@ typedef struct Thread_Local_Variables {
   int env_uid_counter_;
   int scheme_overflow_count_;
   struct Scheme_Object *original_pwd_;
+  struct Scheme_Object *inst_links_path_;
   void *file_path_wc_buffer_;
   intptr_t scheme_hash_request_count_;
   intptr_t scheme_hash_iteration_count_;
@@ -298,6 +301,9 @@ typedef struct Thread_Local_Variables {
   intptr_t scheme_total_gc_time_;
   intptr_t start_this_gc_time_;
   intptr_t end_this_gc_time_;
+  double start_this_gc_real_time_;
+  double end_this_gc_real_time_;
+  struct Scheme_Struct_Type *gc_info_prefab_;
   volatile short delayed_break_ready_;
   struct Scheme_Thread *main_break_target_thread_;
   intptr_t scheme_code_page_total_;
@@ -330,6 +336,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Hash_Table *fullpath_loaded_extensions_;
   Scheme_Sleep_Proc scheme_place_sleep_;
   struct Scheme_Bucket_Table *taint_intern_table_;
+  struct GHBN_Thread_Data *ghbn_thread_data_;
 } Thread_Local_Variables;
 
 #if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS)
@@ -457,6 +464,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define GC_gen0_alloc_page_end XOA (scheme_get_thread_local_variables()->GC_gen0_alloc_page_end_)
 #define GC_gen0_alloc_only XOA (scheme_get_thread_local_variables()->GC_gen0_alloc_only_)
 #define GC_variable_stack XOA (scheme_get_thread_local_variables()->GC_variable_stack_)
+#define force_gc_for_place_accounting XOA (scheme_get_thread_local_variables()->force_gc_for_place_accounting_)
 #define bignum_cache XOA (scheme_get_thread_local_variables()->bignum_cache_)
 #define cache_count XOA (scheme_get_thread_local_variables()->cache_count_)
 #define toplevels_ht XOA (scheme_get_thread_local_variables()->toplevels_ht_)
@@ -484,7 +492,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define cached_mod_beg_stx XOA (scheme_get_thread_local_variables()->cached_mod_beg_stx_)
 #define cached_dv_stx XOA (scheme_get_thread_local_variables()->cached_dv_stx_)
 #define cached_ds_stx XOA (scheme_get_thread_local_variables()->cached_ds_stx_)
-#define cached_dvs_stx XOA (scheme_get_thread_local_variables()->cached_dvs_stx_)
+#define cached_bfs_stx XOA (scheme_get_thread_local_variables()->cached_bfs_stx_)
 #define cached_stx_phase XOA (scheme_get_thread_local_variables()->cached_stx_phase_)
 #define cwv_stx XOA (scheme_get_thread_local_variables()->cwv_stx_)
 #define cwv_stx_phase XOA (scheme_get_thread_local_variables()->cwv_stx_phase_)
@@ -509,6 +517,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define scheme_orig_stderr_port XOA (scheme_get_thread_local_variables()->scheme_orig_stderr_port_)
 #define scheme_orig_stdin_port XOA (scheme_get_thread_local_variables()->scheme_orig_stdin_port_)
 #define scheme_fd_set XOA (scheme_get_thread_local_variables()->scheme_fd_set_)
+#define locked_fd_process_map XOA (scheme_get_thread_local_variables()->locked_fd_process_map_)
 #define new_port_cust XOA (scheme_get_thread_local_variables()->new_port_cust_)
 #define scheme_break_semaphore XOA (scheme_get_thread_local_variables()->scheme_break_semaphore_)
 #define external_event_fd XOA (scheme_get_thread_local_variables()->external_event_fd_)
@@ -540,8 +549,6 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define maybep_buffer_cache XOA (scheme_get_thread_local_variables()->maybep_buffer_cache_)
 #define match_stack_buffer_cache XOA (scheme_get_thread_local_variables()->match_stack_buffer_cache_)
 #define scheme_os_thread_stack_base XOA (scheme_get_thread_local_variables()->scheme_os_thread_stack_base_)
-#define traversers_registered XOA (scheme_get_thread_local_variables()->traversers_registered_)
-#define save_fns_ptr XOA (scheme_get_thread_local_variables()->save_fns_ptr_)
 #define scheme_system_idle_channel XOA (scheme_get_thread_local_variables()->scheme_system_idle_channel_)
 #define system_idle_put_evt XOA (scheme_get_thread_local_variables()->system_idle_put_evt_)
 #define stack_copy_cache XOA (scheme_get_thread_local_variables()->stack_copy_cache_)
@@ -605,6 +612,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define env_uid_counter XOA (scheme_get_thread_local_variables()->env_uid_counter_)
 #define scheme_overflow_count XOA (scheme_get_thread_local_variables()->scheme_overflow_count_)
 #define original_pwd XOA (scheme_get_thread_local_variables()->original_pwd_)
+#define inst_links_path XOA (scheme_get_thread_local_variables()->inst_links_path_)
 #define file_path_wc_buffer XOA (scheme_get_thread_local_variables()->file_path_wc_buffer_)
 #define scheme_hash_request_count XOA (scheme_get_thread_local_variables()->scheme_hash_request_count_)
 #define scheme_hash_iteration_count XOA (scheme_get_thread_local_variables()->scheme_hash_iteration_count_)
@@ -631,6 +639,9 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define scheme_total_gc_time XOA (scheme_get_thread_local_variables()->scheme_total_gc_time_)
 #define start_this_gc_time XOA (scheme_get_thread_local_variables()->start_this_gc_time_)
 #define end_this_gc_time XOA (scheme_get_thread_local_variables()->end_this_gc_time_)
+#define start_this_gc_real_time XOA (scheme_get_thread_local_variables()->start_this_gc_real_time_)
+#define end_this_gc_real_time XOA (scheme_get_thread_local_variables()->end_this_gc_real_time_)
+#define gc_info_prefab XOA (scheme_get_thread_local_variables()->gc_info_prefab_)
 #define delayed_break_ready XOA (scheme_get_thread_local_variables()->delayed_break_ready_)
 #define main_break_target_thread XOA (scheme_get_thread_local_variables()->main_break_target_thread_)
 #define scheme_code_page_total XOA (scheme_get_thread_local_variables()->scheme_code_page_total_)
@@ -663,6 +674,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define fullpath_loaded_extensions XOA (scheme_get_thread_local_variables()->fullpath_loaded_extensions_)
 #define scheme_place_sleep XOA (scheme_get_thread_local_variables()->scheme_place_sleep_)
 #define taint_intern_table XOA (scheme_get_thread_local_variables()->taint_intern_table_)
+#define ghbn_thread_data XOA (scheme_get_thread_local_variables()->ghbn_thread_data_)
 
 /* **************************************** */
 

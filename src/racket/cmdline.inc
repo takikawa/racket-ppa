@@ -6,7 +6,7 @@
 
 #define SDESC "Set! works on undefined identifiers"
 
-char *cmdline_exe_hack = (char *)
+char * volatile scheme_cmdline_exe_hack = (char *)
   ("[Replace me for EXE hack                                       "
    "                                                              ]");
 
@@ -15,7 +15,7 @@ char *cmdline_exe_hack = (char *)
 #else
 # define GC_PRECISION_TYPE "c"
 #endif
-char *binary_type_hack = "bINARy tYPe:" INITIAL_BIN_TYPE GC_PRECISION_TYPE;
+char * volatile scheme_binary_type_hack = "bINARy tYPe:" INITIAL_BIN_TYPE GC_PRECISION_TYPE;
 /* The format of bINARy tYPe is e?[zr]i[3c].
    e indicates a starter executable
    z/r indicates Racket or GRacket
@@ -30,7 +30,7 @@ char *binary_type_hack = "bINARy tYPe:" INITIAL_BIN_TYPE GC_PRECISION_TYPE;
 # endif
 #endif
 
-static char *_coldir = "coLLECTs dIRECTORy:" /* <- this tag stays, so we can find it again */
+char * volatile scheme_coldir = "coLLECTs dIRECTORy:" /* <- this tag stays, so we can find it again */
                        INITIAL_COLLECTS_DIRECTORY 
                        "\0\0" /* <- 1st nul terminates path, 2nd terminates path list */
                        /* Pad with at least 1024 bytes: */
@@ -121,6 +121,16 @@ static char *make_embedded_load(const char *start, const char *end)
   memcpy(s + slen + 1, end, elen + 1);
 
   return s;
+}
+
+static Scheme_Object *check_make_path(const char *prog, const char *real_switch, char *arg)
+{
+  if (!*arg) {
+    PRINTF("%s: empty path after %s switch\n",
+           prog, real_switch);
+    exit(1);
+  }
+  return scheme_make_path(arg);
 }
 #endif
 
@@ -555,7 +565,9 @@ static int run_from_cmd_line(int argc, char *_argv[],
   Scheme_Env *global_env;
   char *prog, *sprog = NULL;
   Scheme_Object *sch_argv;
+  int skip_coll_dirs = 0;
   Scheme_Object *collects_path = NULL, *collects_extra = NULL, *addon_dir = NULL;
+  Scheme_Object *links_file = NULL;
 #ifndef NO_FILE_SYSTEM_UTILS
   Scheme_Object *collects_paths_l, *collects_paths_r;
 #endif
@@ -578,6 +590,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
 #ifdef CMDLINE_STDIO_FLAG
   int alternate_rep = 0;
   int no_front = 0;
+  char *wm_class = NULL;
 #endif
   char *init_lib = INITIAL_NAMESPACE_MODULE;
   int was_config_flag = 0, saw_nc_flag = 0;
@@ -628,9 +641,9 @@ static int run_from_cmd_line(int argc, char *_argv[],
   }
 #endif
   
-  /* If cmdline_exe_hack is changed, then we extract built-in
+  /* If scheme_cmdline_exe_hack is changed, then we extract built-in
      arguments. */
-  if (cmdline_exe_hack[0] != '[') {
+  if (scheme_cmdline_exe_hack[0] != '[') {
     int n, i;
     long d;
     GC_CAN_IGNORE unsigned char *p;
@@ -638,12 +651,12 @@ static int run_from_cmd_line(int argc, char *_argv[],
     char **argv2;
 
 #ifdef DOS_FILE_SYSTEM
-    if ((cmdline_exe_hack[0] == '?')
-	|| (cmdline_exe_hack[0] == '*')) {
+    if ((scheme_cmdline_exe_hack[0] == '?')
+	|| (scheme_cmdline_exe_hack[0] == '*')) {
       /* This is how we make launchers in Windows.
 	 The cmdline is appended to the end of the binary.
-	 The long integer at cmdline_exe_hack[4] says
-	 where the old end was, and cmdline_exe_hack[8]
+	 The long integer at scheme_cmdline_exe_hack[4] says
+	 where the old end was, and scheme_cmdline_exe_hack[8]
 	 says how long the cmdline string is. It might
 	 be relative to the executable. */
       wchar_t *path;
@@ -662,15 +675,15 @@ static int run_from_cmd_line(int argc, char *_argv[],
       else {
 	long start, len;
 	DWORD got;
-	start = *(long *)&cmdline_exe_hack[4];
-	len = *(long *)&cmdline_exe_hack[8];
+	start = *(long *)&scheme_cmdline_exe_hack[4];
+	len = *(long *)&scheme_cmdline_exe_hack[8];
 	p = (unsigned char *)malloc(len);
 	SetFilePointer(fd, start, 0, FILE_BEGIN);
 	ReadFile(fd, p, len, &got, NULL);
 	CloseHandle(fd);
 	if (got != len)
 	  p = (unsigned char *)"\0\0\0";
-	else if (cmdline_exe_hack[0] == '*') {
+	else if (scheme_cmdline_exe_hack[0] == '*') {
 	  /* "*" means that the first item is argv[0] replacement: */
 	  sprog = prog;
 	  prog = (char *)p + 4;
@@ -714,7 +727,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
       }
     } else
 #endif
-      p = (unsigned char *)cmdline_exe_hack + 1;
+      p = (unsigned char *)scheme_cmdline_exe_hack + 1;
 
     /* Command line is encoded as a sequence of pascal-style strings;
        we use four whole bytes for the length, though, little-endian. */
@@ -804,11 +817,15 @@ static int run_from_cmd_line(int argc, char *_argv[],
       argv[0] = "-S";
     else if (!strcmp("--addon", argv[0]))
       argv[0] = "-A";
+    else if (!strcmp("--links", argv[0]))
+      argv[0] = "-C";
 # ifdef CMDLINE_STDIO_FLAG
     else if (!strcmp("--stdio", argv[0]))
       argv[0] = "-z";
     else if (!strcmp("--back", argv[0]))
       argv[0] = "-K";
+    else if (!strcmp("--wm-class", argv[0]))
+      argv[0] = "-J";
 # endif
 # ifndef NO_YIELD_BEFORE_EXIT
     else if (!strcmp("--no-yield", argv[0]))
@@ -846,7 +863,11 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  }
 	  argv++;
 	  --argc;
-	  collects_path = scheme_make_path(argv[0]);
+          if (!*(argv[0])) {
+            /* #f => no collects path */
+            collects_path = scheme_make_false();
+          } else
+            collects_path = check_make_path(prog, real_switch, argv[0]);
           was_config_flag = 1;
 	  break;
 	case 'A':
@@ -857,7 +878,18 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  }
 	  argv++;
 	  --argc;
-	  addon_dir = scheme_make_path(argv[0]);
+	  addon_dir = check_make_path(prog, real_switch, argv[0]);
+          was_config_flag = 1;
+	  break;
+	case 'C':
+	  if (argc < 2) {
+	    PRINTF("%s: missing path after %s switch\n", 
+		   prog, real_switch);
+	    goto show_need_help;
+	  }
+	  argv++;
+	  --argc;
+	  links_file = check_make_path(prog, real_switch, argv[0]);
           was_config_flag = 1;
 	  break;
 	case 'U':
@@ -885,7 +917,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  --argc;
 	  if (!collects_extra)
 	    collects_extra = scheme_make_null();
-          collects_extra = scheme_make_pair(scheme_make_path(argv[0]), collects_extra);
+          collects_extra = scheme_make_pair(check_make_path(prog, real_switch, argv[0]), collects_extra);
           was_config_flag = 1;
 	  break;
         case 'c':
@@ -1038,6 +1070,18 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  no_front = 1;
           was_config_flag = 1;
 	  break;
+        case 'J':
+          if (argc < 2) {
+	    PRINTF("%s: missing name after %s switch\n", 
+		   prog, 
+		   real_switch);
+	    goto show_need_help;
+	  }
+	  argv++;
+	  --argc;
+          wm_class = argv[0];
+          was_config_flag = 1;
+          break;
 #endif
 #ifdef USE_OSKIT_CONSOLE
 	case 'S':
@@ -1149,10 +1193,20 @@ static int run_from_cmd_line(int argc, char *_argv[],
   
 #ifndef NO_FILE_SYSTEM_UTILS
   /* Setup path for "collects" collection directory: */
-  if (!collects_path)
-    collects_path = scheme_make_path(_coldir XFORM_OK_PLUS _coldir_offset);
-  else
+  if (!collects_path) {
+    if (!scheme_coldir[_coldir_offset])
+      collects_path = scheme_make_false();
+    else
+      collects_path = scheme_make_path(scheme_coldir XFORM_OK_PLUS _coldir_offset);
+  } else if (!SAME_OBJ(collects_path, scheme_make_false()))
     collects_path = scheme_path_to_complete_path(collects_path, NULL);
+  if (SAME_OBJ(collects_path, scheme_make_false())) {
+    /* empty list of directories => don't set collection dirs
+       and don't use collection links files */
+    skip_coll_dirs = 1;
+    scheme_set_ignore_link_paths(1);
+    collects_path = scheme_make_path(".");
+  }
   scheme_set_collects_path(collects_path);
 
   /* Make list of additional collection paths: */
@@ -1166,11 +1220,11 @@ static int run_from_cmd_line(int argc, char *_argv[],
     collects_paths_l = scheme_make_null();
     offset = _coldir_offset;
     while (1) {
-      len = strlen(_coldir XFORM_OK_PLUS offset);
+      len = strlen(scheme_coldir XFORM_OK_PLUS offset);
       offset += len + 1;
-      if (!_coldir[offset])
+      if (!scheme_coldir[offset])
         break;
-      collects_paths_l = scheme_make_pair(scheme_make_path(_coldir XFORM_OK_PLUS offset), 
+      collects_paths_l = scheme_make_pair(scheme_make_path(scheme_coldir XFORM_OK_PLUS offset), 
                                           collects_paths_l);
     }
     collects_paths_l = reverse_path_list(collects_paths_l, 0);
@@ -1204,14 +1258,36 @@ static int run_from_cmd_line(int argc, char *_argv[],
     }
   }
 # endif
-  if (addon_dir) scheme_set_addon_dir(addon_dir);
+  if (addon_dir) {
+    addon_dir = scheme_path_to_complete_path(addon_dir, NULL);
+    scheme_set_addon_dir(addon_dir);
+  }
+#endif /* NO_FILE_SYSTEM_UTILS */
+
+#ifndef NO_FILE_SYSTEM_UTILS
+  /* Setup path for "links" file: */
+# ifdef GETENV_FUNCTION
+  if (!links_file) {
+    char *s;
+    s = getenv("PLTLINKSFILE");
+    if (s) {
+      s = scheme_expand_filename(s, -1, NULL, NULL, 0);
+      if (s) links_file = scheme_make_path(s);
+    }
+  }
+# endif
+  if (links_file) {
+    links_file = scheme_path_to_complete_path(links_file, NULL);
+    scheme_set_links_file(links_file);
+  }
 #endif /* NO_FILE_SYSTEM_UTILS */
 
   /* Creates the main kernel environment */
   global_env = mk_basic_env();
 
 #ifndef NO_FILE_SYSTEM_UTILS
-  scheme_init_collection_paths_post(global_env, collects_paths_l, collects_paths_r);
+  if (!skip_coll_dirs)
+    scheme_init_collection_paths_post(global_env, collects_paths_l, collects_paths_r);
 #endif
 
   scheme_seal_parameters();
@@ -1241,6 +1317,8 @@ static int run_from_cmd_line(int argc, char *_argv[],
   fa->a->no_front = no_front;
   if (no_front)
     scheme_register_process_global("Racket-GUI-no-front", (void *)0x1);
+  if (wm_class)
+    scheme_register_process_global("Racket-GUI-wm-class", (void *)wm_class);
 #endif
   fa->init_lib = init_lib;
   fa->global_env = global_env;
@@ -1289,11 +1367,15 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	 "  -z, --text-repl : Use text `read-eval-print-loop' for -i\n"
 # endif
          "  -I <path> : Set <init-lib> to <path>\n"
-	 "  -X <dir>, --collects <dir> : Main collects at <dir>\n"
+	 "  -X <dir>, --collects <dir> : Main collects at <dir> (or \"\" disables all)\n"
 	 "  -S <dir>, --search <dir> : More collects at <dir> (after main collects)\n"
 	 "  -A <dir>, --addon <dir> : Addon directory at <dir>\n"
+	 "  -C <file>, --links <file> : User-specific collection links at <file>\n"
 	 "  -U, --no-user-path : Ignore user-specific collects, etc.\n"
 	 "  -N <file>, --name <file> : Sets `(find-system-path 'run-file)' to <file>\n"
+# ifdef CMDLINE_STDIO_FLAG
+         "  -J <name>, ---wm-class <name> : Set WM_CLASS class to <name> (Unix)\n"
+# endif
 # ifdef MZ_USE_JIT
 	 "  -j, --no-jit : Disable the just-in-time compiler\n"
 # else

@@ -428,7 +428,7 @@
 (t 'bad-cons m:upto-int/lam
    (cons 1 2)
    :: {(cons 1 2)}
-   -> error: "cons: second argument must be of type <list>, given 1 and 2")
+   -> error: "cons: second argument must be a list, but received 1 and 2")
 
 
 
@@ -2132,8 +2132,16 @@
         -> ,def (+ 1 {1})
         :: ,def {(+ 1 1)} -> ,def {2}))
    
-         
-    
+   ; application in function position -- checks bug fix
+   (let* ([lxx '(lambda (x) x)]
+          [def `(define I ,lxx)])
+     (t 'lazy-fn-app m:lazy
+        ,def ((I I) I)
+        :: ,def (({I} I) I)       -> ,def (({,lxx} I) I)
+        :: ,def ((,lxx {I}) I)    -> ,def ((,lxx {,lxx}) I)
+        :: ,def ({(,lxx ,lxx)} I) -> ,def ({,lxx} I)
+        :: ,def (,lxx {I})        -> ,def (,lxx {,lxx})
+        :: ,def {(,lxx ,lxx)}     -> ,def {,lxx}))
     
    
   #;

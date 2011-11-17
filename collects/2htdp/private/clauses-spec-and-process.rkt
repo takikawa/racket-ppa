@@ -36,12 +36,12 @@
          (syntax-case p ()
            [(_ x) #`(proc> #,tag (f2h x) arity)]
            [_ (err tag p)])))]
-    [(_ arity except extra)
+    [(_ arity except extra ...)
      (lambda (tag)
        (lambda (p)
          (syntax-case p ()
            [(_ x) #`(proc> #,tag (f2h x) arity)]
-           extra
+           extra ...
            [_ (err tag p)])))]))
 
 (define (err spec p . xtras)
@@ -86,7 +86,10 @@
                [(null? spec) #false]
                [(or (free-identifier=? (caar spec) kw)
                     (free-identifier=? (caar spec) kw-alt))
-                (syntax->list (cdar spec))]
+                ; (syntax->list (cdar spec))
+                (for/list ([i (syntax->list (cdar spec))])
+                  (define n  (string->symbol (format "~a handler" (syntax-e (caar spec)))))
+                  (syntax-property  i 'inferred-name n))]
                [else (loop (cdr spec))])))
          (if r ((third s) r) (fourth s)))
        Spec))

@@ -113,9 +113,10 @@ please adhere to these guidelines:
  (untitled-n "Untitled ~a")
  (warning "Warning")
  (error "Error")
- (close "Close") ;; as in, close an open window. must match close-menu-item
+ (close "Close") ;; as in, close an open window or tab. must match close-menu-item
                  ;; in the sense that, when the &s have been stripped from
                  ;; close-menu-item, it must be the same string as this.
+ (close-window "Close Window")
  (stop "Stop")   
  (&stop "&Stop") ;; for use in button and menu item labels, with short cut.
  (are-you-sure-delete? "Are you sure you want to delete ~a?") ;; ~a is a filename or directory name
@@ -155,6 +156,7 @@ please adhere to these guidelines:
  (bug-report-field-environment "Environment")
  (bug-report-field-docs-installed "Docs Installed")
  (bug-report-field-collections "Collections")
+ (bug-report-field-links "Links")  ;; from 'raco link'
  (bug-report-field-human-language "Human Language")
  (bug-report-field-memory-use "Memory Use")
  (bug-report-field-version "Version")
@@ -216,6 +218,25 @@ please adhere to these guidelines:
   (cs-mode-menu-show-client-obligations "Client Contract Obligations")
   (cs-mode-menu-show-syntax "Syntactic Categories")
   
+ ;; the online check syntax status messages (mouse over the bottom right of drracket's window to see the messages during online expansion's various phases)
+ (online-expansion-running "Online expansion running")
+ (only-raw-text-files-supported "Only pure text files supported")
+ (abnormal-termination "Online expansion terminated abnormally")
+ (jump-to-error "Jump to Error")
+ (online-expansion-is-disabled "Online expansion is disabled")
+ (online-expansion-pending "Online expansion pending ...")
+ (online-expansion-finished "Online expansion finished") ;; note: there may still be errors in this case
+  
+ ;; the online expansion preferences pane
+ (online-expansion "Online expansion") ;; title of prefs pane
+ ; the different kinds of errors
+ (online-expansion-show-read-errors-as "Show read-level errors")
+ (online-expansion-show-variable-errors-as "Show unbound identifier errors")
+ (online-expansion-show-other-errors-as "Show other errors")
+ ; locations the errors can be shown
+ (online-expansion-error-in-corner "in the corner of the window")
+ (online-expansion-error-gold-highlight "with gold highlighting")
+ (online-expansion-error-margin "in the margin")
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "GC")
   (read-only "Read only")
@@ -223,7 +244,8 @@ please adhere to these guidelines:
  (overwrite "Overwrite")
  (running "running")
  (not-running "not running")
- 
+  
+
  ;;; misc
  (welcome-to-something "Welcome to ~a")
  
@@ -306,6 +328,7 @@ please adhere to these guidelines:
  
  ;; Help Desk
  (help "Help")
+ (racket-documentation "Racket Documentation")
  (help-desk "Help Desk")
  (plt:hd:search "Search")
  (plt:hd:feeling-lucky "Feeling Lucky")
@@ -644,7 +667,6 @@ please adhere to these guidelines:
 
  (open-info "Open a file from disk")
  (open-menu-item "&Open...")
- (open-here-menu-item "&Open Here...")
 
  (open-recent-info "A list of the recently opened files")
  (open-recent-menu-item "Open Recen&t")
@@ -666,6 +688,7 @@ please adhere to these guidelines:
 
  (close-info "Close this file")
  (close-menu-item "&Close")
+ (close-window-menu-item "&Close Window")
 
  (quit-info "Close all windows")
  (quit-menu-item-windows "E&xit")
@@ -721,6 +744,8 @@ please adhere to these guidelines:
   
   (overwrite-mode "Overwrite Mode")
   (enable-overwrite-mode-keybindings "Enable overwrite mode keybindings")
+  
+  (enable-automatic-parens "Enable automatic parentheses") ; should "and square brackets and quotes" appear here?
   
  (preferences-info "Configure your preferences")
  (preferences-menu-item "Preferences...")
@@ -781,6 +806,11 @@ please adhere to these guidelines:
   "Would you like to create a new window, or clear out the current one?")
  (clear-current "Clear Current")
  (new-window "New Window")
+  
+  ;; popup menu when right-clicking in the gap between
+  ;; the definitions and interactions window
+  (change-to-vertical-alignment "Change to vertical")
+  (change-to-horizontal-alignment "Change to horizontal")
 
  ;;; exiting and quitting ``are you sure'' dialog
  ;;; exit is used on windows, quit on macos, in English. Other
@@ -898,7 +928,8 @@ please adhere to these guidelines:
  ;;; edit menu
  (split-menu-item-label "&Split")
  (collapse-menu-item-label "C&ollapse")
- 
+ (find-longest-line "Find Longest Line")
+  
  ;;; language menu
  (language-menu-name "&Language")
  
@@ -918,6 +949,8 @@ please adhere to these guidelines:
  (limit-memory-megabytes "Megabytes")
  (clear-error-highlight-menu-item-label "Clear Error Highlight")
  (clear-error-highlight-item-help-string "Removes the pink error highlighting")
+ (jump-to-next-error-highlight-menu-item-label "Jump to Next Error Highlight")
+ (jump-to-prev-error-highlight-menu-item-label "Jump to Previous Error Highlight")
  (reindent-menu-item-label "&Reindent")
  (reindent-all-menu-item-label "Reindent &All")
  (semicolon-comment-out-menu-item-label "&Comment Out with Semicolons")
@@ -1603,5 +1636,7 @@ please adhere to these guidelines:
   (normalize-string-info "The string you pasted contains ligatures or other non-normalized characters. Normalize them?")
   (normalize-string-preference "Normalize pasted strings")
   (ask-about-normalizing-strings "Ask about normalizing strings")
+  
+  (always-use-platform-specific-linefeed-convention "Always use the platform-specific linefeed convention")
   
   )

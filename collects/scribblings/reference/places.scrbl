@@ -15,18 +15,20 @@
 
 @; ----------------------------------------------------------------------
 
-@margin-note{Currently, parallel support for places is enabled
-  only for Racket 3m (which is the main variant of Racket), and only
-  by default for Windows, Linux x86/x86_64, and Mac OS X x86/x86_64. To
-  enable support for other platforms, use @DFlag{enable-places} with
-  @exec{configure} when building Racket. The @racket[place-enabled?]
-  function reports whether places run in parallel.}
+@guideintro["effective-places"]{places}
 
 @note-lib[racket/place]
 
 @tech{Places} enable the development of parallel programs that
 take advantage of machines with multiple processors, cores, or
 hardware threads.
+
+@margin-note{Currently, parallel support for places is enabled
+  only for Racket 3m (which is the main variant of Racket), and only
+  by default for Windows, Linux x86/x86_64, and Mac OS X x86/x86_64. To
+  enable support for other platforms, use @DFlag{enable-places} with
+  @exec{configure} when building Racket. The @racket[place-enabled?]
+  function reports whether places run in parallel.}
 
 A @deftech{place} is a parallel task that is effectively a separate
 instance of the Racket virtual machine. Places communicate through
@@ -56,7 +58,7 @@ kinds of data that places share---enable greater parallelism than
 separate places. At the same time, the setup and communication costs
 for places can be higher than for futures.
 
-For example, the following expression lanches two places, echoes a
+For example, the following expression launches two places, echoes a
 message to each, and then waits for the places to terminate:
 
 @racketblock[
@@ -104,7 +106,9 @@ are simulated using @racket[thread].}
 }
 
 
-@defproc[(dynamic-place [module-path module-path?] [start-proc symbol?]) place?]{
+@defproc[(dynamic-place [module-path (or/c module-path? path?)]
+                        [start-proc symbol?])
+                        place?]{
 
  Creates a @tech{place} to run the procedure that is identified by
  @racket[module-path] and @racket[start-proc]. The result is a
@@ -129,8 +133,61 @@ are simulated using @racket[thread].}
 
  If the function indicated by @racket[module-path] and
  @racket[start-proc] returns, then the place terminates with the
- @tech{completion value} @racket[0].}
+ @tech{completion value} @racket[0].
 
+ In the created place, the @racket[current-input-port] parameter 
+ is set to an empty input port, while the values of the
+ @racket[current-output-port] and @racket[current-error-port]
+ parameters are connected to the current ports in the creating
+ place. If the output ports are @tech{file-stream ports}, then the
+ connected ports in the places share the underlying stream, otherwise
+ a @tech{thread} in the creating place pumps bytes to the current
+ ports in the creating place.}
+
+
+@defproc[(dynamic-place* [module-path (or/c module-path? path?)]
+                         [start-proc symbol?]
+                         [#:in in (or/c input-port? #f) #f]
+                         [#:out out (or/c output-port? #f) (current-output-port)]
+                         [#:err err (or/c output-port? #f) (current-error-port)])
+                         (values place? (or/c output-port? #f) (or/c input-port? #f) (or/c input-port? #f))]{
+
+ Like @racket[dynamic-place], but accepts specific ports to the new
+ place's ports, and returns a created port when @racket[#f] is
+ supplied for a port. The @racket[in], @racket[out], and
+ @racket[err] ports are connected to the @racket[current-input-port],
+ @racket[current-output-port], and @racket[current-error-port] ports,
+ respectively, for the
+ @tech{place}.  Any of the ports can be @racket[#f], in which case a
+ @tech{file-stream port} (for an operating-system pipe)
+ is created and returned by @racket[dynamic-place*]. The
+ @racket[err] argument can be @racket['stdout], in which case the
+ same @tech{file-stream port} or that is supplied as standard
+ output is also used for standard error.  For each port or
+ @racket['stdout] that is provided, no pipe is created and the
+ corresponding returned value is @racket[#f].
+
+ The caller of @racket[dynamic-place*] is responsible for closing all
+ returned ports; none are closed automatically.
+
+The @racket[dynamic-place*] procedure returns four values:
+
+@itemize[
+
+ @item{a place descriptor value representing the created place;}
+
+ @item{an output port piped to the place's standard input, or
+ @racket[#f] if @racket[in] was a port;}
+
+ @item{an input port piped from the place's standard output, or
+ @racket[#f] if @racket[out] was a port;}
+
+ @item{an input port piped from the place's standard error, or
+ @racket[#f] if @racket[err] was a port or @racket['stdout].}
+
+]
+
+}
 
 @defform[(place id body ...+)]{
   Creates a place that evaluates @racket[body]
@@ -142,17 +199,40 @@ are simulated using @racket[thread].}
   like the result of @racket[dynamic-place].
 }
 
+@defform/subs[(place* maybe-port ...
+                      id 
+                      body ...+)
+              ([maybe-port code:blank
+                           (code:line #:in in-expr)
+                           (code:line #:out out-expr)
+                           (code:line #:err err-expr)])]{
+ Like @racket[place], but supports optional @racket[#:in], @racket[#:out],
+ and @racket[#:err] expressions (at most one of each) to specify ports in the same way and
+ with the same defaults as @racket[dynamic-place*]. The result of
+ a @racket[place*] form is also the same as for  @racket[dynamic-place*].
+ }
+
 
 @defproc[(place-wait [p place?]) exact-integer?]{
   Returns the @tech{completion value} of the place indicated by @racket[p],
   blocking until the place has terminated.
-}
+
+  If any pumping threads were created to connect a
+  non-@tech{file-stream port} to the ports in the place for @racket[p]
+  (see @racket[dynamic-place]), @racket[place-wait] returns only when
+  the pumping threads have completed.  }
 
 
 @defproc[(place-dead-evt [p place?]) evt?]{
 
 Returns a @tech{synchronizable event} (see @secref["sync"]) that is
-ready if and only if @racket[p] has terminated.}
+ready if and only if @racket[p] has terminated.
+
+If any pumping threads were created to connect a non-@tech{file-stream
+  port} to the ports in the place for @racket[p] (see
+  @racket[dynamic-place]), the event returned by
+  @racket[place-dead-evt] may become ready even if a pumping thread is
+  still running.}
 
 
 @defproc[(place-kill [p place?]) void?]{
@@ -179,7 +259,8 @@ ready if and only if @racket[p] has terminated.}
 }
 
 @defproc[(place-channel-put [pch place-channel?] [v place-message-allowed?]) void]{
-  Sends a message @racket[v] on channel @racket[pch].
+  Sends a message @racket[v] on channel @racket[pch]. Since place channels 
+  are asynchronous, @racket[place-channel-put] calls are non-blocking.
 
  See @racket[place-message-allowed?] form information on automatic
  coercions in @racket[v], such as converting a mutable string to an
@@ -188,12 +269,13 @@ ready if and only if @racket[p] has terminated.}
 }
 
 @defproc[(place-channel-get [pch place-channel?]) place-message-allowed?]{
-  Returns a message received on channel @racket[pch].
+  Returns a message received on channel @racket[pch], blocking until a 
+ message is available.
 }
 
-@defproc[(place-channel-put/get [pch place-channel?] [v any/c]) void]{
+@defproc[(place-channel-put/get [pch place-channel?] [v any/c]) any/c]{
   Sends an immutable message @racket[v] on channel @racket[pch] and then 
-  waits for a reply message on the same channel.
+  waits for a message (perhaps a reply) on the same channel.
 }
 
 @defproc[(place-message-allowed? [v any/c]) boolean?]{
@@ -223,7 +305,14 @@ messages:
        immutable vector;}
 
  @item{@tech{place channels}, where a @tech{place descriptor} is
-       automatically replaced by a plain place channel; and}
+       automatically replaced by a plain place channel;}
+
+ @item{foreign pointers such as @racket[_cpointers] and 
+       cstructs;}
+
+ @item{file ports and tcp ports, the underlying 
+       file descriptor is dupped and a new port is created with the 
+       dupped file descriptor in the destination place; and}
 
  @item{values produced by @racket[shared-flvector],
        @racket[make-shared-flvector], @racket[shared-fxvector],

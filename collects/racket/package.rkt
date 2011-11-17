@@ -4,7 +4,8 @@
                      syntax/kerncase
                      syntax/boundmap
                      syntax/define
-                     syntax/flatten-begin))
+                     syntax/flatten-begin
+                     syntax/context))
 
 (provide define-package
          package-begin
@@ -101,6 +102,17 @@
                  orig
                  orig))
 
+(define-for-syntax code-insp (variable-reference->module-declaration-inspector
+                              (#%variable-reference)))
+(define-for-syntax (disarm* stx)
+  (cond
+   [(and (syntax? stx)
+         (pair? (syntax-e stx)))
+    (let ([stx (syntax-disarm stx code-insp)])
+      (datum->syntax stx (disarm* (syntax-e stx)) stx stx))]
+   [(pair? stx) (cons (disarm* (car stx)) (disarm* (cdr stx)))]
+   [else stx]))
+
 (define-for-syntax (do-define-package stx exp-stx)
   (syntax-case exp-stx ()
     [(_ pack-id mode exports form ...)
@@ -141,11 +153,7 @@
                                          stx
                                          exports)])])
          (let* ([def-ctx (syntax-local-make-definition-context)]
-                [ctx (cons (gensym 'intdef)
-                           (let ([orig-ctx (syntax-local-context)])
-                             (if (pair? orig-ctx)
-                                 orig-ctx
-                                 null)))]
+                [ctx (generate-expand-context #t)]
                 [pre-package-id (lambda (id def-ctxes)
                                   (identifier-remove-from-definition-context 
                                    id 
@@ -158,8 +166,8 @@
                 [new-bindings (make-bound-identifier-mapping)]
                 [fixup-sub-package (lambda (renamed-exports renamed-defines def-ctxes)
                                      (lambda (stx)
-                                       (syntax-case* stx (define-syntaxes #%plain-app make-package quote-syntax 
-                                                           list cons #%plain-lambda)
+                                       (syntax-case* (disarm* stx) (define-syntaxes #%plain-app make-package quote-syntax 
+                                                                     list cons #%plain-lambda)
                                                      free-transformer-identifier=?
                                          [(define-syntaxes (pack-id)
                                             (#%plain-app

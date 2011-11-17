@@ -1,9 +1,6 @@
 #lang racket/base
-
 (require (for-syntax racket/base)
-         "base.rkt"
          "format.rkt"
-         "check-info.rkt"
          "check.rkt")
 
 (provide current-test-name
@@ -29,7 +26,8 @@
 ;; Run a test-case immediately, printing information on failure
 (define (default-test-case-around thunk)
   (with-handlers ([(lambda (e) #t) default-test-case-handler])
-    (thunk)))
+    (parameterize ((current-custodian (make-custodian)))
+      (thunk))))
 
 ;; default-test-case-handler : any -> any
 (define (default-test-case-handler e)

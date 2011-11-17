@@ -22,6 +22,8 @@ A byte string can be used as a single-valued sequence (see
 @secref["sequences"]). The bytes of the string serve as elements
 of the sequence. See also @racket[in-bytes].
 
+@see-read-print["string"]{byte strings}
+
 See also: @racket[immutable?].
 
 @; ----------------------------------------
@@ -174,7 +176,7 @@ string.
 @defproc[(make-shared-bytes [k exact-nonnegative-integer?] [b byte? 0])
 bytes?]{ Returns a new mutable byte string of length @racket[k] where each
 position in the byte string is initialized with the byte @racket[b].
-When @secref["places"] are enabled, the new byte string is allocated in the
+For communication among @tech{places}, the new byte string is allocated in the
 @tech{shared memory space}.
 
 @mz-examples[(make-shared-bytes 5 65)]}
@@ -183,7 +185,7 @@ When @secref["places"] are enabled, the new byte string is allocated in the
 @defproc[(shared-bytes [b byte?] ...) bytes?]{ Returns a new mutable byte
 string whose length is the number of provided @racket[b]s, and whose
 positions are initialized with the given @racket[b]s.
-When @secref["places"] are enabled, the new byte string is allocated in the
+For communication among @tech{places}, the new byte string is allocated in the
 @tech{shared memory space}.
 
 @mz-examples[(shared-bytes 65 112 112 108 101)]}
@@ -280,7 +282,8 @@ When @secref["places"] are enabled, the new byte string is allocated in the
  the other operations.
 @examples[
 (define b
- (bytes->string/utf-8 (bytes #xc3 #xa7 #xc3 #xb0 #xc3 #xb6 #xc2 #xa3)))
+  (bytes->string/utf-8
+   (bytes #xc3 #xa7 #xc3 #xb0 #xc3 #xb6 #xc2 #xa3)))
 
 (string->bytes/utf-8 b)
 (bytes->string/utf-8 (string->bytes/utf-8 b))
@@ -316,7 +319,7 @@ When @secref["places"] are enabled, the new byte string is allocated in the
  
 @examples[
 (define b
- (bytes->string/latin-1 (bytes #xfe #xd3 #xd1 #xa5)))
+  (bytes->string/latin-1 (bytes #xfe #xd3 #xd1 #xa5)))
 
 (string->bytes/latin-1 b)
 (bytes->string/latin-1 (string->bytes/latin-1 b))

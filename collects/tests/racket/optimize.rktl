@@ -31,7 +31,8 @@
                                                          exact-integer?
                                                          exact-nonnegative-integer?
                                                          exact-positive-integer?
-                                                         thing?))
+                                                         thing?
+                                                         continuation-mark-set-first))
 				  (let ([s (with-handlers ([exn? exn-message])
 					     (proc (if fixnum? 10 'bad)))]
 					[name (symbol->string name)])
@@ -68,21 +69,25 @@
 	 [bin0 (lambda (v op arg1 arg2)
 		 ;; (printf "Trying ~a ~a ~a\n" op arg1 arg2);
 		 (let ([name `(,op ,arg1 ,arg2)])
-		   (test v name ((eval `(lambda (x) (,op x ,arg2))) arg1))
-		   (test v name ((eval `(lambda (x) (,op ,arg1 x))) arg2))
+		   (test v name ((eval `(lambda (x) (,op x ',arg2))) arg1))
+		   (test v name ((eval `(lambda (x) (,op ',arg1 x))) arg2))
 		   (test v name ((eval `(lambda (x y) (,op x y))) arg1 arg2))
+		   (test v name ((eval `(lambda (x y) 
+                                          (let ([z 'not-a-legitimate-argument])
+                                            (,op (begin (set! z y) x) z))))
+                                 arg1 arg2))
 		   (when (boolean? v)
 		     ;; (printf " for branch...\n")
-		     (test (if v 'yes 'no) name ((eval `(lambda (x) (if (,op x ,arg2) 'yes 'no))) arg1))
-		     (test (if v 'yes 'no) name ((eval `(lambda (x) (if (,op ,arg1 x) 'yes 'no))) arg2)))))]
+		     (test (if v 'yes 'no) name ((eval `(lambda (x) (if (,op x ',arg2) 'yes 'no))) arg1))
+		     (test (if v 'yes 'no) name ((eval `(lambda (x) (if (,op ',arg1 x) 'yes 'no))) arg2)))))]
 	 [bin-exact (lambda (v op arg1 arg2 [check-fixnum-as-bad? #f])
-		      (check-error-message op (eval `(lambda (x) (,op x ,arg2))))
-		      (check-error-message op (eval `(lambda (x) (,op ,arg1 x))))
+		      (check-error-message op (eval `(lambda (x) (,op x ',arg2))))
+		      (check-error-message op (eval `(lambda (x) (,op ',arg1 x))))
                       (when check-fixnum-as-bad?
-                        (check-error-message op (eval `(lambda (x) (,op x ,arg2))) #t)
+                        (check-error-message op (eval `(lambda (x) (,op x ',arg2))) #t)
                         (check-error-message op (eval `(lambda (x) (,op x 10))) #t)
                         (unless (fixnum? arg2)
-                          (check-error-message op (eval `(lambda (x) (,op ,arg1 x))) #t)))
+                          (check-error-message op (eval `(lambda (x) (,op ',arg1 x))) #t)))
 		      (bin0 v op arg1 arg2))]
 	 [bin-int (lambda (v op arg1 arg2 [check-fixnum-as-bad? #f])
                     (bin-exact v op arg1 arg2 check-fixnum-as-bad?)
@@ -669,6 +674,11 @@
     (bin-exact #f 'procedure-arity-includes? (lambda (x) x) 2)
     (bin-exact #t 'procedure-arity-includes? (lambda x x) 2)
 
+    (bin-exact #f 'continuation-mark-set-first #f 'key)
+    (with-continuation-mark
+        'key 'the-value
+      (bin-exact 'the-value 'continuation-mark-set-first #f 'key))
+
     (un0 'yes 'thing-ref a-rock)
     (bin0 'yes 'thing-ref a-rock 99)
     (bin0 99 'thing-ref 10 99)
@@ -829,6 +839,70 @@
               (let ([x (list (cons 1 (cons w z)))])
                 (car (cdr (car x)))))
            '(lambda (w z) w))
+
+(test-comp '(lambda (w z)
+              (let ([x (list* w z)]
+                    [y (list* z w)])
+                (error "bad")
+                (equal? x y)))
+           '(lambda (w z)
+              (error "bad")
+              (equal? (list* w z) (list* z w))))
+
+;; Ok to move `box' past a side effect:
+(test-comp '(let ([h (box 0.0)])
+              (list (printf "hi\n") h))
+           '(list (printf "hi\n") (box 0.0)))
+
+;; Don't move `box' past a `lambda':
+(test-comp '(let ([h (box 0.0)])
+              (lambda () h))
+           '(lambda () (box 0.0))
+           #f)
+
+;; Make sure that a mutable top-level isn't copy-propagated
+;; across another effect:
+(test-comp '(module m racket/base
+              (define x 10)
+              (define (f y)
+                (let ([old x])
+                  (set! x y)
+                  (set! x old))))
+           '(module m racket/base
+              (define x 10)
+              (define (f y)
+                (let ([old x])
+                   (set! x y)
+                   (set! x x))))
+            #f)
+
+;; Do copy-propagate a reference to a mutable top-level 
+;; across non-effects:
+(test-comp '(module m racket/base
+              (define x 10)
+              (define (f y)
+                (let ([old x])
+                  (list (cons y y)
+                        (set! x old)))))
+           '(module m racket/base
+              (define x 10)
+              (define (f y)
+                (list (cons y y)
+                      (set! x x)))))
+
+;; Treat access to a mutable top-level as an effect:
+(test-comp '(module m racket/base
+              (define x 10)
+              (define (f y)
+                (let ([old x])
+                  (list (cons y x)
+                        (set! x old)))))
+           '(module m racket/base
+              (define x 10)
+              (define (f y)
+                (list (cons y x)
+                      (set! x x))))
+            #f)
 
 (test-comp '(let ([x 1][y 2]) x)
 	   '1)
@@ -1103,6 +1177,41 @@
                          [y (lambda () (x))])
                   (list (x) (y) h)))))
 
+(test-comp '(lambda (f a)
+              (define x (f y))
+              (define y (m))
+              (define-syntax-rule (m) 10)
+              (f "hi!\n")
+              (define z (f (lambda () (+ x y a))))
+              (define q (p))
+              (define p (q))
+              (list x y z))
+           '(lambda (f a)
+              (letrec ([x (f y)]
+                       [y 10])
+                (f "hi!\n")
+                (let ([z (f (lambda () (+ x y a)))])
+                  (letrec ([q (p)]
+                           [p (q)])
+                    (list x y z))))))
+
+(test-comp '(lambda (f a)
+              (#%stratified-body
+               (define x (f y))
+               (define y (m))
+               (define-syntax-rule (m) 10)
+               (define z (f (lambda () (+ x y a))))
+               (define q (p))
+               (define p (q))
+               (list x y z)))
+           '(lambda (f a)
+              (letrec-values ([(x) (f y)]
+                              [(y) 10]
+                              [(z) (f (lambda () (+ x y a)))]
+                              [(q) (p)]
+                              [(p) (q)])
+                (list x y z))))
+
 (test-comp '(procedure? add1)
            #t)
 (test-comp '(procedure? (lambda (x) x))
@@ -1241,6 +1350,88 @@
     (test-multi 'list*)
     (test-multi 'vector)
     (test-multi 'vector-immutable)))
+
+;; + fold to fixnum overflow, fx+ doesn't
+(test-comp `(module m racket/base
+              (+ (sub1 (expt 2 30)) (sub1 (expt 2 30))))
+           `(module m racket/base
+              (- (expt 2 31) 2)))
+(test-comp `(module m racket/base
+              (require racket/fixnum)
+              (fx+ (sub1 (expt 2 30)) (sub1 (expt 2 30))))
+           `(module m racket/base
+              (require racket/fixnum)
+              (- (expt 2 31) 2))
+           #f)
+
+;; simple cross-module inlining
+(test-comp `(module m racket/base 
+              (require racket/bool)
+              (list true))
+           `(module m racket/base 
+              (require racket/bool)
+              (list #t)))
+
+;; check omit & reorder possibilities for unsafe
+;; operations on mutable values:
+(let ()
+  (define (check-omit-ok expr [yes? #t])
+    ;; can omit:
+    (test-comp `(module m racket/base
+                  (require racket/unsafe/ops)
+                  (define (f x)
+                    (f x)))
+               `(module m racket/base
+                  (require racket/unsafe/ops)
+                  (define (f x)
+                    ,expr
+                    (f x)))
+               yes?)
+    ;; cannot reorder:
+    (test-comp `(module m racket/base
+                  (require racket/unsafe/ops)
+                  (define (f x)
+                    (let ([y ,expr])
+                      (vector-ref x x)
+                      (f x y))))
+               `(module m racket/base
+                  (require racket/unsafe/ops)
+                  (define (f x)
+                    (vector-ref x x)
+                    (f x ,expr)))
+               #f))
+  (map check-omit-ok
+       '((unsafe-vector-ref x x)
+         (unsafe-vector*-ref x x)
+         (unsafe-struct-ref x x)
+         (unsafe-struct*-ref x x)
+         (unsafe-mcar x)
+         (unsafe-mcdr x)
+         (unsafe-unbox x)
+         (unsafe-unbox* x)
+         (unsafe-bytes-ref x x)
+         (unsafe-string-ref x x)
+         (unsafe-flvector-ref x x)
+         (unsafe-fxvector-ref x x)
+         (unsafe-f64vector-ref x x)
+         (unsafe-s16vector-ref x x)
+         (unsafe-u16vector-ref x x)))
+  (map (lambda (x) (check-omit-ok x #f))
+       '((unsafe-vector-set! x x x)
+         (unsafe-vector*-set! x x x)
+         (unsafe-struct-set! x x x)
+         (unsafe-struct*-set! x x x)
+         (unsafe-set-mcar! x x)
+         (unsafe-set-mcdr! x x)
+         (unsafe-set-box! x x)
+         (unsafe-set-box*! x x)
+         (unsafe-bytes-set! x x x)
+         (unsafe-string-set! x x x)
+         (unsafe-flvector-set! x x x)
+         (unsafe-fxvector-set! x x x)
+         (unsafe-f64vector-set! x x x)
+         (unsafe-s16vector-set! x x x)
+         (unsafe-u16vector-set! x x x))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Check bytecode verification of lifted functions
@@ -1497,6 +1688,42 @@
            (call-with-values 
                (lambda () (apply values (make-list (add1 (random 1)) '(99))))
              (chaperone-procedure car (lambda (v) v)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; check `fl->fx' on unboxed argument:
+
+(test 1 (lambda (x) (fl->fx (fl/ (fl- x 0.0) 1.0))) 1.0)
+(test 1 (lambda (x) (inexact->exact (fl/ (fl- x 0.0) 1.0))) 1.0)
+(err/rt-test (let ([f (lambda (x) (fl->fx (fl/ (fl- x 0.0) 1.0)))])
+               (set! f f)
+               (f 1e100))
+             ;; make sure that exception reports actual bad argument, and
+             ;; not some bad argument due to the fact that the original
+             ;; was unboxed:
+             (lambda (exn)
+               (regexp-match #rx"1e[+]?100" (exn-message exn))))
+(test (inexact->exact 1e100) (lambda (x) (inexact->exact (fl/ (fl- x 0.0) 1.0))) 1e100)
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check that compiler handles shifting `#%variable-reference'
+
+(test #f
+      'varref-shift
+      (let ()
+        (define (f #:x [x #f]) #f)
+        (define (g #:y [y #f])
+          (begin (f) #f))
+        #f))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Make sure the compiler doesn't end up in an infinite inling loop:
+
+(module unc-small-self-call racket/base
+  (define unc1
+    (let ([x 1])
+      (lambda ()
+        (unc1))))
+  (unc1))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

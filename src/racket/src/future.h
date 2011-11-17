@@ -40,9 +40,17 @@ typedef void (*prim_allocate_values_t)(int, Scheme_Thread *);
 #define WAITING_FOR_FSEMA 6
 #define SUSPENDED 7
 
+/* FSRC_OTHER means: descriptive string is provided for logging,
+   called function *DOES NOT NEED* to lookup continuation marks. */
 #define FSRC_OTHER 0
+/* FSRC_RATOR means: Racket function provided, so use it in logging,
+   called function can lookup continuation marks. */
 #define FSRC_RATOR 1
-#define FSRC_PRIM 2
+/* FSRC_PRIM means: Racket primitive provided, so use it in logging,
+   called function can lookup continuation marks. */
+#define FSRC_PRIM  2
+/* FSRC_MARKS means: like FSRC_OTHER, but
+   called function may need to lookup continuation marks. */
 #define FSRC_MARKS 3
 
 typedef struct future_t {
@@ -67,7 +75,9 @@ typedef struct future_t {
 
   /* Runtime call stuff */
   int want_lw; /* flag to indicate waiting for lw capture */
-  int in_touch_queue; /* flag to indicate waiting for lw capture */
+  /* flag to indicate whether the future is in the "waiting for lwc" queue */
+  int in_queue_waiting_for_lwc;   
+  int in_touch_queue;   
   int rt_prim_is_atomic;
   double time_of_request;
   const char *source_of_request;
@@ -148,6 +158,15 @@ typedef struct fsemaphore_t {
 
 /* Primitive instrumentation stuff */
 
+/* Exceptions */ 
+void scheme_wrong_type_from_ft(const char *who, const char *expected_type, int what, int argc, Scheme_Object **argv);
+
+#define SCHEME_WRONG_TYPE_MAYBE_IN_FT(who, expected_type, what, argc, argv) \
+  if (scheme_use_rtcall) \
+    scheme_wrong_type_from_ft(who, expected_type, what, argc, argv); \
+  else \
+    scheme_wrong_type(who, expected_type, what, argc, argv);
+
 /* Signature flags for primitive invocations */
 #define SIG_ON_DEMAND          1
 #define SIG_ALLOC              2
@@ -161,7 +180,7 @@ typedef struct fsemaphore_t {
 
 extern Scheme_Object *scheme_ts_scheme_force_value_same_mark(Scheme_Object *v);
 
-//Helper macros for argument marshaling
+/* Helper macros for argument marshaling */
 #ifdef MZ_USE_FUTURES
 
 #define IS_WORKER_THREAD (g_rt_threadid != 0 && pthread_self() != g_rt_threadid)
@@ -192,8 +211,8 @@ void scheme_future_gc_pause();
 void scheme_future_check_custodians();
 
 #ifdef UNIT_TEST
-//These forwarding decls only need to be here to make 
-//primitives visible to test cases written in C
+/* These forwarding decls only need to be here to make 
+   primitives visible to test cases written in C */
 extern int future_begin_invoke(void *code);
 extern Scheme_Object *touch(int argc, Scheme_Object **argv);
 extern Scheme_Object *future_touch(int futureid);

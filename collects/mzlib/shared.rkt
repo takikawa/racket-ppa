@@ -1,16 +1,17 @@
-#lang scheme/base
-
-(require (for-syntax scheme/base
-                     syntax/stx
+#lang racket/base
+(require (for-syntax racket/base
                      syntax/kerncase
                      syntax/struct
                      racket/struct-info
-                     scheme/include))
+                     racket/include))
 
 (provide shared)
 
+(define-for-syntax code-insp (variable-reference->module-declaration-inspector
+                              (#%variable-reference)))
+
 (define undefined (letrec ([x x]) x))
-(require (only-in scheme/base [cons the-cons]))
+(require (only-in racket/base [cons the-cons]))
 
 (define-syntax shared
   (lambda (stx)

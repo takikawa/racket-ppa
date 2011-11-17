@@ -37,7 +37,8 @@ profile todo:
           [prefix drracket:unit: drracket:unit^]
           [prefix drracket:language: drracket:language^]
           [prefix drracket:language-configuration: drracket:language-configuration/internal^]
-          [prefix drracket:init: drracket:init^])
+          [prefix drracket:init: drracket:init^]
+          [prefix drracket: drracket:interface^])
   (export drracket:debug^)
   
   ;                                                          
@@ -532,7 +533,7 @@ profile todo:
   ;; a member of stacktrace-imports^
   ;; guarantees that the continuation marks associated with errortrace-key are
   ;; members of the debug-source type, after unwrapped with st-mark-source
-  (define (with-mark src-stx expr)
+  (define (with-mark src-stx expr phase)
     (let ([source (cond
                     [(path? (syntax-source src-stx))
                      (syntax-source src-stx)]
@@ -556,11 +557,13 @@ profile todo:
       (if source
           (with-syntax ([expr expr]
                         [mark (list 'dummy-thing source line column position span)]
-                        [errortrace-key errortrace-key])
+                        [wcm (syntax-shift-phase-level #'with-continuation-mark phase)]
+                        [errortrace-key errortrace-key] ; a symbol
+                        [qte (syntax-shift-phase-level #'quote phase)])
             (syntax
-             (with-continuation-mark 'errortrace-key
-               'mark
-               expr)))
+             (wcm (qte errortrace-key)
+                  (qte mark)
+                  expr)))
           expr)))
   
   ;; current-backtrace-window : (union #f (instanceof frame:basic<%>))
@@ -899,7 +902,8 @@ profile todo:
               (message-box (string-constant drscheme)
                            (string-constant editor-changed-since-srcloc-recorded)
                            frame
-                           '(ok caution))))
+                           '(ok caution)
+                           #:dialog-mixin frame:focus-table-mixin)))
           (when (and rep editor)
             (when (is-a? editor text:basic<%>)
               (send rep highlight-errors same-src-srclocs '())
@@ -1006,7 +1010,8 @@ profile todo:
                     (string-constant test-coverage-clear-and-do-not-ask-again)
                     (send (get-canvas) get-top-level-window)
                     '(default=1)
-                    2)])
+                    2
+                    #:dialog-mixin frame:focus-table-mixin)])
               (case msg-box-result
                 [(1) #t]
                 [(2) #f]
@@ -1418,7 +1423,8 @@ profile todo:
                     (eq? (message-box (string-constant drscheme)
                                       (string-constant profiling-clear?)
                                       frame
-                                      '(yes-no))
+                                      '(yes-no)
+                                      #:dialog-mixin frame:focus-table-mixin)
                          'yes))))))
       
       (define/private (do-reset-profile)
@@ -1547,7 +1553,7 @@ profile todo:
       (define/override (make-root-area-container % parent)
         (set! profile-info-outer-panel
               (super make-root-area-container
-                     vertical-panel%
+                     panel:vertical-dragable%
                      parent))
         (make-object % profile-info-outer-panel))
       
@@ -1560,7 +1566,8 @@ profile todo:
            (send (get-current-tab) refresh-profile)]
           [else
            (message-box (string-constant drscheme)
-                        (string-constant profiling-no-information-available))]))
+                        (string-constant profiling-no-information-available)
+                        #:dialog-mixin frame:focus-table-mixin)]))
       
       (define/public (hide-profile-gui)
         (when profile-gui-constructed?
@@ -1581,6 +1588,8 @@ profile todo:
           (set! profile-info-visible? #t)
           (send profile-info-editor-canvas set-editor (send (get-current-tab) get-profile-info-text))
           (send (get-current-tab) refresh-profile)
+          ;; set to a small percentage so it gets the minimum height
+          (send profile-info-outer-panel set-percentages '(9/10 1/10))
           (update-shown)))
       
       (field (profile-info-visible? #f))

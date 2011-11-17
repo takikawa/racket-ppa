@@ -7,7 +7,8 @@ trigger runtime errors in check syntax.
 
 |#
 
-  (require "drracket-test-util.rkt"
+  (require "private/drracket-test-util.rkt"
+           drracket/private/syncheck/local-member-names
            string-constants/string-constant
            tests/utils/gui
            racket/path
@@ -133,7 +134,7 @@ trigger runtime errors in check syntax.
                   (" ([" default-color)
                   ("x"   lexically-bound-variable)
                   (" "   default-color)
-                  ("x"   error)
+                  ("x"   free-variable)
                   ("]) " default-color)
                   ("x"   lexically-bound-variable)
                   (")"   default-color))
@@ -153,13 +154,13 @@ trigger runtime errors in check syntax.
                  '(("("     default-color) 
                    ("#%top" imported-syntax)
                    (" . "   default-color)
-                   ("x"     error)
+                   ("x"     free-variable)
                    (")"    default-color)))
      (build-test "(set! x 1)"
                 '(("("    default-color)
                   ("set!" imported-syntax)
                   (" "    default-color)
-                  ("x"    error)
+                  ("x"    free-variable)
                   (" "    default-color)
                   ("1"    constant)
                   (")"    default-color)))
@@ -195,7 +196,7 @@ trigger runtime errors in check syntax.
      (build-test "object%"
                 '(("object%" imported-syntax))) ; used to be lexically-bound-variable
      (build-test "unbound-id"
-                '(("unbound-id" error)))
+                '(("unbound-id" free-variable)))
      (build-test "(define bd 1) bd"
                 '(("("       default-color)
                   ("define"  imported-syntax)
@@ -221,9 +222,9 @@ trigger runtime errors in check syntax.
                   (")"                      default-color)))
      (build-test "(f x)"
                 '(("(" default-color)
-                  ("f" error)
+                  ("f" free-variable)
                   (" " default-color)
-                  ("x" error)
+                  ("x" free-variable)
                   (")" default-color)))
      (build-test "(define-syntax (f stx) (syntax 1))"
                 '(("("             default-color)
@@ -284,22 +285,20 @@ trigger runtime errors in check syntax.
                        '((57 58) (59 60) (61 62))))
 
      (build-test "(module m mzscheme)"
-                '(("("        default-color)
-                  ("module"   imported-syntax)
-                  (" m "      default-color)
-                  ("mzscheme" error)
-                  (")"        default-color)))
+                '(("("            default-color)
+                  ("module"       imported-syntax)
+                  (" m mzscheme)" default-color)))
      (build-test "(require-for-syntax mzscheme)"
                 '(("("                  default-color)
                   ("require-for-syntax" imported-syntax)
                   (" "          default-color)
-                  ("mzscheme"   error)
+                  ("mzscheme"   unused-require)
                   (")"          default-color)))
      (build-test "(require mzlib/list)"
                 '(("("                   default-color)
                   ("require"             imported-syntax)
                   (" "                   default-color)
-                  ("mzlib/list"          error)
+                  ("mzlib/list"          unused-require)
                   (")"                   default-color)))
      (build-test "(module m mzscheme (provide x) (define x 1))"
                 '(("("             default-color)
@@ -336,7 +335,7 @@ trigger runtime errors in check syntax.
                   (" m mzscheme ("     default-color)
                   ("require"           imported-syntax)
                   (" "                 default-color)
-                  ("mzlib/list"        error)
+                  ("mzlib/list"        unused-require)
                   ("))"                default-color))
                 (list '((10 18) (20 27))))
      
@@ -542,7 +541,7 @@ trigger runtime errors in check syntax.
                   ("("        default-color)
                   ("1"        constant)
                   (" ,"       default-color)
-                  ("x"        error)
+                  ("x"        free-variable)
                   (" "        default-color)
                   ("2"        constant)
                   (")"        default-color)))
@@ -863,22 +862,44 @@ trigger runtime errors in check syntax.
                     #f)
      
      (build-test "#lang scheme/base\n(require scheme)\n(define-syntax m (lambda (x) #'1))"
-                 '(("#lang "        default-color)
-                   ("scheme/base"   error)
-                   ("\n("           default-color)
-                   ("require"       imported)
-                   (" scheme)\n("   default-color)
-                   ("define-syntax" imported)
-                   (" "             default-color)
-                   ("m"             lexically-bound)
-                   (" ("            default-color)
-                   ("lambda"        imported)
-                   (" ("            default-color)
-                   ("x"             lexically-bound)
-                   (") "            default-color)
-                   ("#'"            imported)
-                   ("1))"           default-color))
+                 '(("#lang scheme/base\n(" default-color)
+                   ("require"              imported)
+                   (" scheme)\n("          default-color)
+                   ("define-syntax"        imported)
+                   (" "                    default-color)
+                   ("m"                    lexically-bound)
+                   (" ("                   default-color)
+                   ("lambda"               imported)
+                   (" ("                   default-color)
+                   ("x"                    lexically-bound)
+                   (") "                   default-color)
+                   ("#'"                   imported)
+                   ("1))"                  default-color))
                  (list '((27 33) (19 26) (36 49) (53 59) (64 66))))
+     
+     (build-test "#lang racket (begin-for-syntax (require (for-syntax racket)) (define x 1) (begin-for-syntax (define x 2) x))"
+                 '(("#lang racket (" default-color)
+                   ("begin-for-syntax" imported)
+                   (" (" default-color)
+                   ("require" imported)
+                   (" (for-syntax " default-color)
+                   ("racket" default-color)
+                   (")) (" default-color)
+                   ("define" imported)
+                   (" " default-color)
+                   ("x" lexically-bound)
+                   (" 1) (" default-color)
+                   ("begin-for-syntax" imported)
+                   (" (" default-color)
+                   ("define" imported)
+                   (" " default-color)
+                   ("x" lexically-bound)
+                   (" 2) " default-color)
+                   ("x" lexically-bound)
+                   ("))" default-color))
+                 (list '((6 12) (14 30) (32 39) (62 68) (75 91))
+                       '((52 58) (93 99))
+                       '((100 101) (105 106))))
      
      (rename-test "(lambda (x) x)"
                   9
@@ -918,6 +939,24 @@ trigger runtime errors in check syntax.
                   "z"
                   "qq"
                   "(define-syntax-rule (m x) (λ (x) x))(m qq)")
+     
+     (rename-test (string-append
+                   "#lang racket/base\n"
+                   "(require (for-syntax racket/base))\n"
+                   "(define-syntax-rule (m x)\n"
+                   "  (begin (λ (x) x) (define x 1) (λ (x) x)))\n"
+                   "(m x)\n"
+                   "x\n")
+                  126
+                  "x"
+                  "y"
+                  (string-append
+                   "#lang racket/base\n"
+                   "(require (for-syntax racket/base))\n"
+                   "(define-syntax-rule (m x)\n"
+                   "  (begin (λ (x) x) (define x 1) (λ (x) x)))\n"
+                   "(m y)\n"
+                   "y\n"))
      
      (rename-test (string-append
                    "#lang racket"
@@ -979,24 +1018,30 @@ trigger runtime errors in check syntax.
   (define (main)
     (fire-up-drscheme-and-run-tests
      (λ ()
-	(let ([drs (wait-for-drscheme-frame)])
-	  (set-language-level! (list "Pretty Big"))
-	  (do-execute drs)
-          (let* ([defs (queue-callback/res (λ () (send drs get-definitions-text)))]
-		 [filename (make-temporary-file "syncheck-test~a")])
-	    (let-values ([(dir _1 _2) (split-path filename)])
-              (queue-callback/res (λ () (send defs save-file filename)))
-	      (preferences:set 'framework:coloring-active #f)
-              (close-the-error-window-test drs)
-              (for-each (run-one-test (normalize-path dir)) tests)
-              (preferences:set 'framework:coloring-active #t)
-	      (queue-callback/res
-               (λ () 
-                 (send defs save-file) ;; clear out autosave
-                 (send defs set-filename #f)))
-              (delete-file filename)
-              
-              (printf "Ran ~a tests.\n" total-tests-run)))))))
+       (let ([drs (wait-for-drscheme-frame)])
+         ;(set-language-level! (list "Pretty Big"))
+         (begin
+           (set-language-level! (list "Pretty Big") #f)
+           (test:set-radio-box-item! "No debugging or profiling")
+           (let ([f (test:get-active-top-level-window)])
+             (test:button-push "OK")
+             (wait-for-new-frame f)))
+         (do-execute drs)
+         (let* ([defs (queue-callback/res (λ () (send drs get-definitions-text)))]
+                [filename (make-temporary-file "syncheck-test~a")])
+           (let-values ([(dir _1 _2) (split-path filename)])
+             (queue-callback/res (λ () (send defs save-file filename)))
+             (preferences:set 'framework:coloring-active #f)
+             (close-the-error-window-test drs)
+             (for-each (run-one-test (normalize-path dir)) tests)
+             (preferences:set 'framework:coloring-active #t)
+             (queue-callback/res
+              (λ () 
+                (send defs save-file) ;; clear out autosave
+                (send defs set-filename #f)))
+             (delete-file filename)
+             
+             (printf "Ran ~a tests.\n" total-tests-run)))))))
   
   (define (close-the-error-window-test drs)
     (clear-definitions drs)
@@ -1024,7 +1069,7 @@ trigger runtime errors in check syntax.
                [relative (find-relative-path save-dir (collection-path "mzlib"))])
            (cond
              [(dir-test? test)
-              (insert-in-definitions drs (format input (path->string relative)))]
+              (insert-in-definitions drs (format input (path->require-string relative)))]
              [else (insert-in-definitions drs input)])
            (click-check-syntax-and-check-errors drs test)
            
@@ -1034,8 +1079,8 @@ trigger runtime errors in check syntax.
                                [(dir-test? test)
                                 (map (lambda (x)
                                        (list (if (eq? (car x) 'relative-path)
-                                               (path->string relative)
-                                               (car x))
+                                                 (path->require-string relative)
+                                                 (car x))
                                              (cadr x)))
                                      expected)]
                                [else
@@ -1084,6 +1129,13 @@ trigger runtime errors in check syntax.
                       "syncheck-test.rkt FAILED\n   test ~s\n  got ~s\n" 
                       test
                       result)))])))
+  
+  (define (path->require-string relative)
+    (define (p->string p)
+      (cond
+        [(eq? p 'up) ".."]
+        [else (path->string p)]))
+    (apply string-append (add-between (map p->string (explode-path relative)) "/"))) 
   
   
   (define remappings

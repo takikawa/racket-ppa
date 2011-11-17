@@ -41,6 +41,8 @@
               (struct-out GtkAllocation) _GtkAllocation-pointer
 
               widget-window
+              widget-allocation
+              widget-parent
 
               the-accelerator-group
               gtk_window_add_accel_group
@@ -50,7 +52,10 @@
               gdk_display_get_default
 
               request-flush-delay
-              cancel-flush-delay)
+              cancel-flush-delay
+	      win-box-valid?
+	      window->win-box
+	      unrealize-win-box)
  gtk->wx
  gtk_widget_show
  gtk_widget_hide)
@@ -100,6 +105,12 @@
 
 (define (widget-window gtk)
   (GtkWidgetT-window (cast gtk _GtkWidget _GtkWidgetT-pointer)))
+
+(define (widget-parent gtk)
+  (GtkWidgetT-parent (cast gtk _GtkWidget _GtkWidgetT-pointer)))
+
+(define (widget-allocation gtk)
+  (GtkWidgetT-alloc (cast gtk _GtkWidget _GtkWidgetT-pointer)))
 
 (define-gtk gtk_drag_dest_add_uri_targets (_fun _GtkWidget -> _void))
 (define-gtk gtk_drag_dest_set (_fun _GtkWidget _int (_pointer = #f) (_int = 0) _int -> _void))
@@ -411,7 +422,8 @@
                 gtk)
     (init [no-show? #f]
           [extra-gtks null]
-          [add-to-parent? #t])
+          [add-to-parent? #t]
+          [connect-size-allocate? #t])
 
     (super-new [gtk gtk]
                [extra-gtks extra-gtks]
@@ -424,7 +436,8 @@
 
     (define/public (get-unset-pos) 0)
 
-    (connect-size-allocate gtk)
+    (when connect-size-allocate?
+      (connect-size-allocate gtk))
 
     (when add-to-parent?
       (gtk_container_add (send parent get-container-gtk) gtk))
@@ -440,8 +453,8 @@
     (define/public (set-size x y w h)
       (unless (and (or (= x -11111) (= save-x x))
                    (or (= y -11111) (= save-y y))
-                   (or (= w -1) (= save-w w))
-                   (or (= h -1) (= save-h h)))
+                   (or (= w -1) (= save-w (max w client-delta-w)))
+                   (or (= h -1) (= save-h (max h client-delta-h))))
         (unless (= x -11111) (set! save-x x))
         (unless (= y -11111) (set! save-y y))
         (unless (= w -1) (set! save-w w))
@@ -462,12 +475,16 @@
       (gtk_widget_set_size_request child-gtk w h)
       (gtk_widget_size_allocate child-gtk (make-GtkAllocation x y w h)))
 
-    (define/public (remember-size w h)
+    (define/public (remember-size x y w h)
       ;; called in event-pump thread
       (unless (and (= save-w w)
-                   (= save-h h))
+                   (= save-h h)
+                   (= save-x x)
+                   (= save-y y))
         (set! save-w w)
         (set! save-h h)
+        (set! save-x x)
+        (set! save-y y)
         (queue-on-size)))
 
     (define/public (queue-on-size) (void))
@@ -495,13 +512,13 @@
           (set! client-delta-h (- (GtkRequisition-height req)
                                   (GtkRequisition-height creq))))))
 
-    (define/public (set-auto-size)
+    (define/public (set-auto-size [dw 0] [dh 0])
       (let ([req (make-GtkRequisition 0 0)])
         (gtk_widget_size_request gtk req)
         (set-size -11111
                   -11111
-                  (GtkRequisition-width req)
-                  (GtkRequisition-height req))))
+                  (+ (GtkRequisition-width req) dw)
+                  (+ (GtkRequisition-height req) dh))))
 
     (define shown? #f)
     (define/public (direct-show on?)
@@ -662,7 +679,9 @@
               (lambda (thunk) (queue-window-event this thunk)))))
 
     (define/public (center a b) (void))
-    (define/public (refresh) (void))
+    (define/public (refresh) (refresh-all-children))
+
+    (define/public (refresh-all-children) (void))
 
     (define/public (screen-to-client x y)
       (let ([xb (box 0)]
@@ -698,20 +717,39 @@
 (define-gdk gdk_window_invalidate_rect (_fun _GdkWindow _pointer _gboolean -> _void))
 (define-gdk gdk_window_process_all_updates (_fun -> _void))
 
-(define (request-flush-delay gtk)
+(define (win-box-valid? win-box)
+  (mcar win-box))
+(define (window->win-box win)
+  (mcons win 0))
+(define (unrealize-win-box win-box)
+  (let ([win (mcar win-box)])
+    (when win
+      (set-mcar! win-box #f)
+      (for ([i (in-range (mcdr win-box))])
+	(gdk_window_thaw_updates win)))))
+
+(define (request-flush-delay win-box)
   (do-request-flush-delay 
-   gtk
-   (lambda (gtk)
-     (let ([win (widget-window gtk)])
+   win-box
+   (lambda (win-box)
+     (let ([win (mcar win-box)])
        (and win
-            (gdk_window_freeze_updates win)
-            #t)))
-   (lambda (gtk)
-     (gdk_window_thaw_updates (widget-window gtk)))))
+       	    (begin
+	      (gdk_window_freeze_updates win)
+	      (set-mcdr! win-box (add1 (mcdr win-box)))
+	      #t))))
+   (lambda (win-box)
+     (let ([win (mcar win-box)])
+       (when win
+         (gdk_window_thaw_updates win)
+         (set-mcdr! win-box (sub1 (mcdr win-box))))))))
 
 (define (cancel-flush-delay req)
   (when req
     (do-cancel-flush-delay 
      req
-     (lambda (gtk)
-       (gdk_window_thaw_updates (widget-window gtk))))))
+     (lambda (win-box)
+       (let ([win (mcar win-box)])
+         (when win
+	   (gdk_window_thaw_updates win)
+           (set-mcdr! win-box (sub1 (mcdr win-box)))))))))

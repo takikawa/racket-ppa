@@ -1,7 +1,6 @@
 #lang racket/base
 
-(require "struct.rkt"
-         "decode.rkt"
+(require "decode.rkt"
          (for-syntax racket/base
                      syntax/kerncase))
 
@@ -54,7 +53,7 @@
                                               provide
                                               define-values
                                               define-syntaxes
-                                              define-values-for-syntax
+                                              begin-for-syntax
                                               #%require
                                               #%provide))))
                  #`(begin #,expanded (doc-begin m-id post-process exprs . body))]

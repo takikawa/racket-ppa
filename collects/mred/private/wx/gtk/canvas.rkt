@@ -100,17 +100,8 @@
 (define-gtk gtk_container_remove (_fun _GtkWidget _GtkWidget -> _void))
 (define-gtk gtk_bin_get_child (_fun _GtkWidget -> _GtkWidget))
 
-(define-gtk gtk_container_set_border_width (_fun _GtkWidget _int -> _void))
-
 (define-gobj g_object_set_bool (_fun _GtkWidget _string _gboolean [_pointer = #f] -> _void)
   #:c-id g_object_set)
-
-(define-gdk gdk_gc_unref (_fun _pointer -> _void)
-  #:wrap (deallocator))
-(define-gdk gdk_gc_new (_fun _GdkWindow -> _pointer)
-  #:wrap (allocator gdk_gc_unref))
-(define-gdk gdk_gc_set_rgb_fg_color (_fun _pointer _GdkColor-pointer -> _void))
-(define-gdk gdk_draw_rectangle (_fun _GdkWindow _pointer _gboolean _int _int _int _int -> _void))
 
 (define _GtkIMContext (_cpointer 'GtkIMContext))
 (define-gtk gtk_im_multicontext_new (_fun -> _GtkIMContext))
@@ -201,22 +192,6 @@
             (not (send wx is-panel?)))
           #f))))
 
-(define-signal-handler connect-expose-border "expose-event"
-  (_fun _GtkWidget _GdkEventExpose-pointer -> _gboolean)
-  (lambda (gtk event)
-    (let* ([win (widget-window gtk)]
-           [gc (gdk_gc_new win)]
-           [gray #x8000])
-      (when gc
-        (gdk_gc_set_rgb_fg_color gc (make-GdkColor 0 gray gray gray))
-        (let ([r (GdkEventExpose-area event)])
-          (gdk_draw_rectangle win gc #t 
-                              (GdkRectangle-x r)
-                              (GdkRectangle-y r)
-                              (GdkRectangle-width r)
-                              (GdkRectangle-height r)))
-        (gdk_gc_unref gc)))))
-
 (define-signal-handler connect-value-changed-h "value-changed"
   (_fun _GtkWidget -> _void)
   (lambda (gtk)
@@ -226,6 +201,20 @@
   (_fun _GtkWidget -> _void)
   (lambda (gtk)
     (do-value-changed gtk 'vertical)))
+
+(define-signal-handler connect-unrealize "unrealize"
+  (_fun _GtkWidget -> _void)
+  (lambda (gtk)
+    (let ([wx (gtk->wx gtk)])
+      (when wx
+        (send wx unrealize)))))
+
+(define-signal-handler connect-unmap "unmap"
+  (_fun _GtkWidget -> _void)
+  (lambda (gtk)
+    (let ([wx (gtk->wx gtk)])
+      (when wx
+        (send wx unrealize)))))
 
 (define (do-value-changed gtk dir)
   (let ([wx (gtk->wx gtk)])
@@ -250,7 +239,7 @@
               set-auto-size 
               adjust-client-delta infer-client-delta
               is-auto-scroll? get-virtual-width get-virtual-height
-              refresh-for-autoscroll
+              refresh-for-autoscroll refresh-all-children
               get-eventspace)
 
      (define is-combo? (memq 'combo style))
@@ -298,7 +287,8 @@
               (unless (eq? client-gtk container-gtk)
                 (gtk_fixed_set_has_window client-gtk #t)) ; imposes clipping
               (when has-border?
-                (gtk_container_set_border_width h margin))
+                (gtk_container_set_border_width h margin)
+                (connect-expose-border h))
               (gtk_box_pack_start h v #t #t 0)
               (gtk_box_pack_start v client-gtk #t #t 0)
               (gtk_box_pack_start h v2 #f #f 0)
@@ -401,6 +391,8 @@
                                                       GTK_CAN_FOCUS)))
      (when combo-button-gtk
        (connect-combo-key-and-mouse combo-button-gtk))
+     (connect-unrealize client-gtk)
+     (connect-unmap client-gtk)
 
      (when hscroll-adj (connect-value-changed-h hscroll-adj))
      (when vscroll-adj (connect-value-changed-v vscroll-adj))
@@ -455,7 +447,7 @@
      ;; are defined by `canvas-mixin' from ../common/canvas-mixin
      (define/public (queue-paint) (void))
      (define/public (request-canvas-flush-delay)
-       (request-flush-delay client-gtk))
+       (request-flush-delay (get-flush-window)))
      (define/public (cancel-canvas-flush-delay req)
        (cancel-flush-delay req))
      (define/public (queue-canvas-refresh-event thunk)
@@ -480,7 +472,19 @@
 
      (define/public (on-paint) (void))
 
-     (define/public (get-flush-window) client-gtk)
+     (define flush-win-box (mcons #f 0))
+     (define/public (get-flush-window) 
+       (atomically
+	(if (zero? (bitwise-and (get-gtk-object-flags client-gtk) 
+				GTK_MAPPED))
+	    (mcons #f #f)
+	    (if (win-box-valid? flush-win-box)
+		flush-win-box
+		(begin
+		  (set! flush-win-box (window->win-box (widget-window client-gtk)))
+		  flush-win-box)))))
+     (define/public (unrealize)
+       (unrealize-win-box flush-win-box))
 
      (define/public (begin-refresh-sequence)
        (send dc suspend-flush))
@@ -492,8 +496,11 @@
      (define/public (flush)
        (flush-display))
 
-     (define/override (refresh)
+     (define/private (refresh-one)
        (queue-paint))
+     (define/override (refresh)
+       (refresh-one)
+       (refresh-all-children))
 
      (define/public (queue-backing-flush)
        ;; called atomically
@@ -508,7 +515,7 @@
 
      (define/private (reset-dc)
        (send dc reset-backing-retained)
-       (refresh)
+       (refresh-one)
        (send dc set-auto-scroll
              (if (get-virtual-width)
                  (gtk_adjustment_get_value hscroll-adj)

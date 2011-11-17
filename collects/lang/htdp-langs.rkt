@@ -16,8 +16,7 @@
          framework/private/bday
          syntax/moddep
          mrlib/cache-image-snip
-         compiler/embed
-         wxme/wxme
+         (prefix-in ic: mrlib/image-core)
          setup/dirs
          test-engine/racket-tests
 
@@ -27,10 +26,13 @@
          "private/rewrite-error-message.rkt"
 
          "private/continuation-mark-key.rkt"
-
+         "private/create-htdp-executable.rkt"
+         
          "stepper-language-interface.rkt"
          "debugger-language-interface.rkt"
          "run-teaching-program.rkt"
+         "htdp-langs-save-file-prefix.rkt"
+         
          stepper/private/shared
 
          (only-in test-engine/scheme-gui make-formatter)
@@ -49,6 +51,7 @@
   
   (define user-installed-teachpacks-collection "installed-teachpacks")
   (define teachpack-installation-dir (build-path (find-user-collects-dir) user-installed-teachpacks-collection))
+  
   
   (define tool@
     (unit 
@@ -192,6 +195,12 @@
 	  ;; set-printing-parameters : settings ( -> TST) -> TST
 	  ;; is implicitly exposed to the stepper.  watch out!  --  john
           (define/public (set-printing-parameters settings thunk)
+            (define img-str "#<image>")
+            (define (is-image? val)
+              (or (is-a? val ic:image%)         ;; 2htdp/image
+                  (is-a? val cache-image-snip%) ;; htdp/image
+                  (is-a? val image-snip%)       ;; literal image constant
+                  (is-a? val bitmap%)))         ;; works in other places, so include it here too
             (parameterize ([pc:booleans-as-true/false #t]
                            [pc:abbreviate-cons-as-list (get-abbreviate-cons-as-list)]
                            [pc:current-print-convert-hook
@@ -202,6 +211,21 @@
                                   [else (ph val basic sub)])))]
                            [pretty-print-show-inexactness #t]
                            [pretty-print-exact-as-decimal #t]
+                           [pretty-print-print-hook
+                            (let ([oh (pretty-print-print-hook)])
+                              (λ (val display? port)
+                                (if (and (not (port-writes-special? port))
+                                         (is-image? val))
+                                    (begin (display img-str port)
+                                           (string-length img-str))
+                                    (oh val display? port))))]
+                           [pretty-print-size-hook
+                            (let ([oh (pretty-print-size-hook)])
+                              (λ (val display? port)
+                                (if (and (not (port-writes-special? port))
+                                         (is-image? val))
+                                    (string-length img-str)
+                                    (oh val display? port))))]
                            [pc:use-named/undefined-handler
                             (lambda (x)
                               (and (get-use-function-output-syntax?)
@@ -456,58 +480,8 @@
                  dist-filename
                  #t
                  (λ (exe-name)
-                   (create-embedding-executable 
-                    exe-name
-                    #:modules `((#f ,program-filename))
-                    #:cmdline `("-l" 
-                                "scheme/base"
-                                "-e"
-                                ,(format "~s" `(#%require ',(filename->require-symbol program-filename))))
-                    #:src-filter
-                    (λ (path) (cannot-compile? path))
-                    #:get-extra-imports
-                    (λ (path cm)
-                      (call-with-input-file path
-                        (λ (port)
-                          (cond
-                            [(is-wxme-stream? port)
-                             (append
-                              ;; Extract snip-related modules:
-                              (let-values ([(snip-class-names data-class-names)
-                                            (extract-used-classes port)])
-                                (define names (append snip-class-names data-class-names))
-                                (list*
-                                 '(lib "wxme/read.ss")
-                                 '(lib "mred/mred.ss")
-                                 reader-module
-                                 (filter
-                                  values
-                                  (append
-                                   (map (λ (x) (string->lib-path x #t))
-                                        names)
-                                   (map (λ (x) (string->lib-path x #f))
-                                        names)))))
-                              ;; Extract reader-related modules:
-                              (begin
-                                (file-position port 0)
-                                (let ([mods null])
-                                  (parameterize ([current-reader-guard
-                                                  (let ([g (current-reader-guard)])
-                                                    (lambda (p)
-                                                      (set! mods (cons p mods))
-                                                      (g p)))])
-                                    (read-language (wxme-port->port port) (lambda () #f)))
-                                  mods)))]
-                            [else
-                             '()]))))
-                    #:mred? #t))))))
+                   (create-htdp-lang-executable program-filename exe-name reader-module))))))
 
-          (define/private (filename->require-symbol fn)
-            (let-values ([(base name dir) (split-path fn)])
-              (string->symbol
-               (path->string
-                (path-replace-suffix name #"")))))
-          
           (define/private (get-export-names sexp)
             (let* ([sym-name ((current-module-name-resolver) sexp #f #f)]
                    [no-ext-name (substring (symbol->string sym-name)
@@ -617,7 +591,8 @@
                            (begin
                              (message-box (string-constant drscheme)
                                           (format (string-constant already-added-teachpack)
-                                                  (cadr teachpack)))
+                                                  (cadr teachpack))
+                                          #:dialog-mixin frame:focus-table-mixin)
                              settings)
                            
                            (let ([new-tps (append old-tps (list teachpack))])
@@ -661,8 +636,9 @@
           (define/override (get-reader-module) reader-module)
           (define/override (get-metadata modname settings)
             (string-append
-             ";; The first three lines of this file were inserted by DrRacket. They record metadata\n"
-             ";; about the language level of this file in a form that our tools can easily process.\n"
+             (apply string-append
+                    (map (λ (x) (string-append x "\n"))
+                         htdp-save-file-prefix))
              (format "#reader~s~s\n"
                      reader-module
                      `((modname ,modname)
@@ -699,27 +675,6 @@
           
           (super-new)))
       
-      ;; cannot-compile? : path -> boolean
-      ;; returns #t if the file cannot be compiled, #f otherwise
-      (define (cannot-compile? path)
-        (call-with-input-file path
-          (λ (port) 
-            (let ([ok-to-compile-names 
-                   (map (λ (x) (format "~s" x))
-                        '(wxtext
-                          (lib "comment-snip.ss" "framework")
-                          (lib "xml-snipclass.ss" "xml")
-                          (lib "scheme-snipclass.ss" "xml")))])
-              (and (is-wxme-stream? port)
-                   (let-values ([(snip-class-names data-class-names)
-                                 (extract-used-classes port)])
-                     (not (and (andmap
-                                (λ (used-name) (member used-name ok-to-compile-names))
-                                snip-class-names)
-                               (andmap
-                                (λ (used-name) (member used-name ok-to-compile-names))
-                                data-class-names)))))))))
-      
       (define (get-teachpack-from-user parent)
         (define tp-dirs (list "htdp" "2htdp"))
         (define labels (list (string-constant teachpack-pre-installed/htdp)
@@ -732,7 +687,7 @@
                           tp-dirs))
         (define sort-order (λ (x y) (string<=? (path->string x) (path->string y))))
         (define pre-installed-tpss (map (λ (tps) (sort tps sort-order)) tpss))
-        (define dlg (new dialog% [parent parent] [label (string-constant drscheme)]))
+        (define dlg (new (frame:focus-table-mixin dialog%) [parent parent] [label (string-constant drscheme)]))
         (define hp (new horizontal-panel% [parent dlg]))
         (define answer #f)
         (define compiling? #f)
@@ -1054,7 +1009,9 @@
                        [(exn:srclocs? exn) 
                         ((exn:srclocs-accessor exn) exn)]
                        [(exn? exn) 
-                        (let ([cms (continuation-mark-set->list (exn-continuation-marks exn) teaching-languages-continuation-mark-key)])
+                        (let ([cms (continuation-mark-set->list 
+                                    (exn-continuation-marks exn)
+                                    teaching-languages-continuation-mark-key)])
 			  (cond
 			   ((not cms) '())
 			   ((findf (lambda (mark)
@@ -1076,11 +1033,11 @@
                      ;; and still running here?
                      (send rep highlight-errors to-highlight #f))))))))
       
-      ;; with-mark : syntax syntax -> syntax
+      ;; with-mark : syntax syntax exact-nonnegative-integer -> syntax
       ;; a member of stacktrace-imports^
       ;; guarantees that the continuation marks associated with teaching-languages-continuation-mark-key are
       ;; members of the debug-source type
-      (define (with-mark source-stx expr)
+      (define (with-mark source-stx expr phase)
         (let ([source (syntax-source source-stx)]
               [line (syntax-line source-stx)]
               [col (syntax-column source-stx)]

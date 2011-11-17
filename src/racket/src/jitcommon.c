@@ -1552,14 +1552,12 @@ static int common4(mz_jit_state *jitter, void *_data)
       mz_patch_branch(ref);
       (void)mz_bnei_t(refslow, JIT_R0, scheme_prim_type, JIT_R2);
       jit_ldxi_s(JIT_R2, JIT_R0, &((Scheme_Primitive_Proc *)0x0)->pp.flags);
-      if (kind == 3) {
-        jit_andi_i(JIT_R2, JIT_R2, SCHEME_PRIM_OTHER_TYPE_MASK);
-        (void)jit_bnei_i(refslow, JIT_R2, SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER);
-      } else {
-        (void)jit_bmci_i(refslow, JIT_R2, ((kind == 1) 
-                                           ? SCHEME_PRIM_IS_STRUCT_PRED
-                                           : SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER));
-      }
+      jit_andi_i(JIT_R2, JIT_R2, SCHEME_PRIM_OTHER_TYPE_MASK);
+      (void)jit_bnei_i(refslow, JIT_R2, ((kind == 3)
+                                         ? SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER
+                                         : ((kind == 1) 
+                                            ? SCHEME_PRIM_STRUCT_TYPE_PRED
+                                            : SCHEME_PRIM_STRUCT_TYPE_INDEXED_GETTER)));
       CHECK_LIMIT();
       /* Check argument: */
       if (kind == 1) {
@@ -1943,6 +1941,25 @@ static int common5(mz_jit_state *jitter, void *_data)
     mz_epilog(JIT_R2);
   }
 
+  /* *** box_flonum_from_reg_code *** */
+  /* JIT_FPR2 (reg-based) or JIT_FPR0 (stack-based) has value */
+  {
+    sjc.box_flonum_from_reg_code = jit_get_ip().ptr;
+
+    mz_prolog(JIT_R2);
+
+    JIT_UPDATE_THREAD_RSPTR();
+
+#ifdef DIRECT_FPR_ACCESS
+    jit_movr_d(JIT_FPR0, JIT_FPR2);
+#endif
+
+    scheme_generate_alloc_double(jitter, 1);
+    CHECK_LIMIT();
+    
+    mz_epilog(JIT_R2);
+  }
+
   /* *** fl1_code *** */
   /* R0 has argument, V1 has primitive proc */
   {
@@ -2239,21 +2256,23 @@ static int common7(mz_jit_state *jitter, void *_data)
 
     jit_ldxi_s(JIT_R2, JIT_R1, &MZ_OPT_HASH_KEY(&((Scheme_Stx *)0x0)->iso));
 #ifdef MZ_USE_FUTURES
-    /* Need an atomic update in case another thread is setting
-       a hash code on the target pair. */
-    /* Assumes little-endian and that a short hash follows a short type tag: */
-    ref5 = jit_bmsi_i(jit_forward(), JIT_R2, PAIR_IS_LIST);
-    jit_rshi_i(JIT_R0, JIT_R2, 16);
-    jit_ori_i(JIT_R0, JIT_R0, scheme_pair_type);
-    jit_ori_i(JIT_R2, JIT_R0, (PAIR_IS_LIST << 16));
-    /* In the unlikely case that the compare-and-swap fails, then it's ok to 
-       lose the caching of the list bit: */
-    jit_lock_cmpxchgr_i(JIT_R1, JIT_R2);
-    mz_patch_branch(ref5);
-#else
-    jit_ori_i(JIT_R2, JIT_R2, PAIR_IS_LIST);
-    jit_stxi_s(&MZ_OPT_HASH_KEY(&((Scheme_Stx *)0x0)->iso), JIT_R1, JIT_R2);
+    if (scheme_is_multiprocessor(0)) {
+      /* Need an atomic update in case another thread is setting
+         a hash code on the target pair. */
+      ref5 = jit_bmsi_i(jit_forward(), JIT_R2, PAIR_IS_LIST);
+      jit_movr_i(JIT_R0, JIT_R2);
+      jit_ori_i(JIT_R2, JIT_R2, PAIR_IS_LIST);
+      jit_addi_p(JIT_R1, JIT_R1, &MZ_OPT_HASH_KEY(&((Scheme_Stx *)0x0)->iso));
+      /* In the unlikely case that the compare-and-swap fails, then it's ok to 
+         lose the caching of the list bit: */
+      jit_lock_cmpxchgr_s(JIT_R1, JIT_R2); /* implicitly uses JIT_R0 */
+      mz_patch_branch(ref5);
+    } else 
 #endif
+      {
+        jit_ori_i(JIT_R2, JIT_R2, PAIR_IS_LIST);
+        jit_stxi_s(&MZ_OPT_HASH_KEY(&((Scheme_Stx *)0x0)->iso), JIT_R1, JIT_R2);
+      }
 
     __END_SHORT_JUMPS__(1);
     CHECK_LIMIT();
@@ -2274,16 +2293,19 @@ static int common7(mz_jit_state *jitter, void *_data)
     jit_ldxi_s(JIT_R2, JIT_R1, &MZ_OPT_HASH_KEY(&((Scheme_Stx *)0x0)->iso));
 #ifdef MZ_USE_FUTURES
     /* As above: */
-    ref5 = jit_bmsi_i(jit_forward(), JIT_R2, PAIR_IS_NON_LIST);
-    jit_rshi_i(JIT_R0, JIT_R2, 16);
-    jit_ori_i(JIT_R0, JIT_R0, scheme_pair_type);
-    jit_ori_i(JIT_R2, JIT_R0, (PAIR_IS_NON_LIST << 16));
-    jit_lock_cmpxchgr_i(JIT_R1, JIT_R2);
-    mz_patch_branch(ref5);
-#else
-    jit_ori_i(JIT_R2, JIT_R2, PAIR_IS_NON_LIST);
-    jit_stxi_s(&MZ_OPT_HASH_KEY(&((Scheme_Stx *)0x0)->iso), JIT_R1, JIT_R2);
+    if (scheme_is_multiprocessor(0)) {
+      ref5 = jit_bmsi_i(jit_forward(), JIT_R2, PAIR_IS_NON_LIST);
+      jit_movr_i(JIT_R0, JIT_R2);
+      jit_ori_i(JIT_R2, JIT_R2, PAIR_IS_NON_LIST);
+      jit_addi_p(JIT_R1, JIT_R1, &MZ_OPT_HASH_KEY(&((Scheme_Stx *)0x0)->iso));
+      jit_lock_cmpxchgr_s(JIT_R1, JIT_R2); /* implicitly uses JIT_R0 */
+      mz_patch_branch(ref5);
+    } else
 #endif
+      {
+        jit_ori_i(JIT_R2, JIT_R2, PAIR_IS_NON_LIST);
+        jit_stxi_s(&MZ_OPT_HASH_KEY(&((Scheme_Stx *)0x0)->iso), JIT_R1, JIT_R2);
+      }
     CHECK_LIMIT();
 
     __END_SHORT_JUMPS__(1);
@@ -2575,7 +2597,8 @@ static int common10(mz_jit_state *jitter, void *_data)
     jit_ldxi_i(JIT_R2, JIT_V1, &((Scheme_Native_Closure_Data *)0x0)->closure_size);
     (void)jit_blti_i(refslow, JIT_R2, 0); /* case lambda */
     jit_ldxi_p(JIT_R2, JIT_V1, &((Scheme_Native_Closure_Data *)0x0)->code);
-    ref_nc = jit_beqi_p(jit_forward(), JIT_R2, scheme_on_demand_jit_code); /* not yet JITted */
+    jit_movi_p(JIT_V1, scheme_on_demand_jit_code); /* movi_p doesn't depends on actual address, which might change size */
+    ref_nc = jit_beqr_p(jit_forward(), JIT_R2, JIT_V1); /* not yet JITted? */
     jit_rshi_l(JIT_V1, JIT_R1, 1);
     jit_addi_l(JIT_V1, JIT_V1, 1);
     CHECK_LIMIT();
@@ -2592,6 +2615,7 @@ static int common10(mz_jit_state *jitter, void *_data)
 
     /* not-yet-JITted native: */
     mz_patch_branch(ref_nc);
+    jit_ldxi_p(JIT_V1, JIT_R0, &((Scheme_Native_Closure *)0x0)->code);
     jit_ldxi_p(JIT_R0, JIT_V1, &((Scheme_Native_Closure_Data *)0x0)->u2.orig_code);
     jit_rshi_l(JIT_V1, JIT_R1, 1);
     jit_ldxi_i(JIT_R2, JIT_R0, &((Scheme_Closure_Data *)0x0)->num_params);

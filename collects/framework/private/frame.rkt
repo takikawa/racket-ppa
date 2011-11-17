@@ -1,16 +1,18 @@
-#lang scheme/unit
+#lang racket/unit
 
 (require string-constants
-         scheme/class
-         mzlib/include
+         racket/class
+         racket/contract/base
+         racket/path
          "search.rkt"
          "sig.rkt"
          "../preferences.rkt"
          "../gui-utils.rkt"
          "bday.rkt"
+         "gen-standard-menus.rkt"
+         framework/private/focus-table
          mrlib/close-icon
-         mred/mred-sig
-         scheme/path)
+         mred/mred-sig)
 
 (import mred^
         [prefix group: framework:group^]
@@ -130,6 +132,26 @@
                    editing-this-file?
                    get-filename
                    make-visible))
+
+(define focus-table<%> (interface (top-level-window<%>)))
+(define focus-table-mixin
+  (mixin (top-level-window<%>) (focus-table<%>)
+    (inherit get-eventspace)
+    
+    (define/override (show on?)
+      (define old (remove this (frame:lookup-focus-table (get-eventspace))))
+      (define new (if on? (cons this old) old))
+      (frame:set-focus-table (get-eventspace) new)
+      (super show on?))
+    
+    (define/augment (on-close)
+      (frame:set-focus-table (get-eventspace) (remove this (frame:lookup-focus-table (get-eventspace))))
+      (inner (void) on-close))
+    
+    (super-new)
+    
+    (frame:set-focus-table (get-eventspace) (frame:lookup-focus-table (get-eventspace)))))
+
 (define basic-mixin
   (mixin ((class->interface frame%)) (basic<%>)
     
@@ -189,12 +211,11 @@
       (λ (% parent)
         (make-object % parent)))
     
-    (inherit can-close? on-close)
-    (define/public close
-      (λ ()
-        (when (can-close?)
-          (on-close)
-          (show #f))))
+    (inherit on-close can-close?)
+    (define/public (close)
+      (when (can-close?)
+        (on-close)
+        (show #f)))
     
     (inherit accept-drop-files)
     
@@ -232,21 +253,134 @@
 
 (define size-pref-mixin
   (mixin (basic<%>) (size-pref<%>)
-    (init-field size-preferences-key)
+    (init-field size-preferences-key
+                [position-preferences-key #f])
+    (inherit is-maximized?)
     (define/override (on-size w h)
-      (preferences:set size-preferences-key (list w h)))
-    (let ([lst (preferences:get size-preferences-key)])
-      (super-new [width (car lst)] [height (cadr lst)]))))
+      (cond
+        [(is-maximized?)
+         (define old (preferences:get size-preferences-key)) 
+         (preferences:set size-preferences-key (cons #t (cdr old)))]
+        [else
+         (preferences:set size-preferences-key (list #f w h))])
+      (super on-size w h))
+    
+    (define on-move-timer-arg-x #f)
+    (define on-move-timer-arg-y #f)
+    (define on-move-timer-arg-max? #f)
+    (define on-move-timer #f)
+    (define/override (on-move x y)
+      (when position-preferences-key
+        (unless on-move-timer
+          (set! on-move-timer 
+                (new timer% 
+                     [notify-callback
+                      (λ () 
+                        (unless on-move-timer-arg-max?
+                          (define-values (monitor delta-x delta-y) (find-closest on-move-timer-arg-x on-move-timer-arg-y))
+                          (preferences:set position-preferences-key (list monitor delta-x delta-y))))])))
+        (set! on-move-timer-arg-x x)
+        (set! on-move-timer-arg-y y)
+        (set! on-move-timer-arg-max? (is-maximized?))
+        (send on-move-timer stop)
+        (send on-move-timer start 250 #t))
+      (super on-move x y))
+    
+    ;; if all of the offsets have some negative direction, then
+    ;; just keep the thing relative to the original montior; otherwise
+    ;; make it relative to whatever origin it is closest to.
+    (define/private (find-closest x y)
+      (define closest 0)
+      (define-values (delta-x delta-y dist) (find-distance x y 0))
+      
+      (for ([m (in-range 1 (get-display-count))])
+        (define-values (new-delta-x new-delta-y new-dist) 
+          (find-distance x y m))
+        (when (and new-delta-x
+                   new-delta-y
+                   (new-delta-x . >= . 0)
+                   (new-delta-y . >= . 0))
+          (when (< new-dist dist)
+            (set! closest m)
+            (set!-values (delta-x delta-y dist) (values new-delta-x new-delta-y new-dist)))))
+      
+      (values closest delta-x delta-y))
+    
+    (define/private (find-distance x y mon)
+      (define-values (delta-x delta-y)
+        (let-values ([(l t) (get-display-left-top-inset #:monitor mon)])
+          (values (+ x l) (+ y t))))
+      (values delta-x
+              delta-y
+              (sqrt (+ (* delta-x delta-x)
+                       (* delta-y delta-y)))))
+    
+    (inherit maximize)
+    (let ()
+      (define-values (maximized? w h) (apply values (preferences:get size-preferences-key)))
+      (define-values (x y origin-still-visible?)
+        (cond
+          [position-preferences-key
+           (define-values (monitor delta-x delta-y) (apply values (preferences:get position-preferences-key)))
+           (define-values (l t) (get-display-left-top-inset #:monitor monitor))
+           (define-values (mw mh) (get-display-size #:monitor monitor))
+           (if (and l t mw mh)
+               (values (- delta-x l) 
+                       (- delta-y t)
+                       (and (<= 0 l mw)
+                            (<= 0 t mh)))
+               (values #f #f #f))]
+          [else
+           (values #f #f #f)]))
+      (define (already-one-there? x y w h)
+        (for/or ([fr (in-list (get-top-level-windows))])
+          (and (equal? x (send fr get-x))
+               (equal? y (send fr get-y))
+               (equal? w (send fr get-width))
+               (equal? h (send fr get-height))
+               (equal? maximized? (send fr is-maximized?)))))
+      (cond
+        [(or (and (already-one-there? x y w h)
+                  (not maximized?))
+             (not origin-still-visible?))
+         ;; these are the situations where we look for a different position of the window
+         (let loop ([n 50]
+                    [x 0]
+                    [y 0])
+           (cond
+             [(zero? n)
+              (super-new)]
+             [(already-one-there? x y w h)
+              (define-values (dw dh) (get-display-size #:monitor 0))
+              (define sw (- dw w))
+              (define sh (- dh h))
+              (if (or (<= sw 0)
+                      (<= sh 0))
+                (super-new)
+                (loop (- n 1) 
+                      (modulo (+ x 20) (- dw w))
+                      (modulo (+ y 20) (- dh h))))]
+             [else
+              (super-new [width w] [height h] [x x] [y y])]))]
+        [else
+         (super-new [width w] [height h] [x x] [y y])])
+      (when maximized?
+        (maximize #t)))))
 
-(define (setup-size-pref size-preferences-key w h)
+(define (setup-size-pref size-preferences-key w h 
+                         #:maximized? [maximized? #f]
+                         #:position-preferences [position-preferences-key #f])
   (preferences:set-default size-preferences-key 
-                           (list w h)
-                           (λ (x)
-                             (and (pair? x)
-                                  (pair? (cdr x))
-                                  (null? (cddr x))
-                                  (number? (car x))
-                                  (number? (cadr x))))))
+                           (list maximized? w h)
+                           (list/c boolean?
+                                   exact-nonnegative-integer?
+                                   exact-nonnegative-integer?))
+  (when position-preferences-key
+    (preferences:set-default position-preferences-key 
+                             (list 0 0 0)
+                             (list/c exact-nonnegative-integer?
+                                     exact-integer?
+                                     exact-integer?))))
 
 (define register-group<%> (interface ()))
 (define register-group-mixin
@@ -787,6 +921,7 @@
                        overwrite-status-changed
                        anchor-status-changed
                        editor-position-changed
+                       use-file-text-mode-changed
                        add-line-number-menu-items))
 (define text-info-mixin
   (mixin (info<%>) (text-info<%>)
@@ -943,12 +1078,24 @@
     (define/public (add-line-number-menu-items menu)
       (void))
     
+    (define/public (use-file-text-mode-changed)
+      (when (object? file-text-mode-msg)
+        (define ed (get-info-editor))
+        (send file-text-mode-msg-parent change-children
+              (λ (l)
+                (if (and (is-a? ed text:info<%>)
+                         (eq? (system-type) 'windows)
+                         (send ed use-file-text-mode))
+                  (list file-text-mode-msg)
+                  '())))))
+    
     (define/override (update-info)
       (super update-info)
       (update-macro-recording-icon)
       (overwrite-status-changed)
       (anchor-status-changed)
-      (editor-position-changed))
+      (editor-position-changed)
+      (use-file-text-mode-changed))
     (super-new)
     
     (inherit get-info-panel)
@@ -959,14 +1106,25 @@
                                  [stretchable-width #f]
                                  [stretchable-height #f]
                                  [extra-menu-items (λ (menu) (add-line-number-menu-items menu))]))
-    (define position-canvas (new position-canvas% [parent position-parent] [init-width "000:00-000:00"]))
+    (define position-canvas (new position-canvas% 
+                                 [parent position-parent] 
+                                 [init-width "000:00-000:00"]))
     (define/private (change-position-edit-contents str)
       (send position-canvas set-str str))
     
     (send (get-info-panel) change-children
           (λ (l)
             (cons position-parent (remq position-parent l))))
-    
+
+    (define file-text-mode-msg-parent (new horizontal-panel%
+                                           [stretchable-width #f]
+                                           [stretchable-height #f]
+                                           [parent (get-info-panel)]))
+    (define file-text-mode-msg (new file-text-mode-msg% [parent file-text-mode-msg-parent]))
+    (send file-text-mode-msg-parent change-children (λ (l) '()))
+    (send (get-info-panel) change-children
+          (λ (l)
+            (cons file-text-mode-msg-parent (remq file-text-mode-msg-parent l))))
     
     (define-values (anchor-message
                     overwrite-message 
@@ -999,7 +1157,28 @@
     (send macro-recording-message show #f)
     (send anchor-message show #f)
     (send overwrite-message show #f)
-    (editor-position-changed)))
+    (editor-position-changed)
+    (use-file-text-mode-changed)))
+
+(define crlf-string "CRLF")
+(define file-text-mode-msg%
+  (class canvas%
+    (inherit min-width min-height get-dc refresh)
+    (define/override (on-paint)
+      (define dc (get-dc))
+      (send dc set-pen "black" 1 'transparent)
+      (send dc set-brush "orange" 'solid)
+      (define-values (w h d a) (send dc get-text-extent crlf-string))
+      (send dc draw-rectangle 0 0 (+ w 4) h)
+      (send dc draw-text crlf-string 2 0))
+    (super-new)
+    (inherit stretchable-width)
+    (stretchable-width #f)
+    (send (get-dc) set-font small-control-font)
+    (let ()
+      (define-values (w h d a) (send (get-dc) get-text-extent crlf-string))
+      (min-width (inexact->exact (ceiling (+ w 4))))
+      (min-height (inexact->exact (ceiling h))))))         
 
 (define click-pref-panel%
   (class horizontal-panel%
@@ -1034,13 +1213,13 @@
   (mixin (basic<%>) (pasteboard-info<%>)
     (super-new)))
 
-(include "standard-menus.rkt")
+(generate-standard-menus-code)
 
 (define -editor<%> (interface (standard-menus<%>)
                      get-entire-label
                      get-label-prefix
                      set-label-prefix
-                     
+
                      get-canvas%
                      get-canvas<%>
                      get-editor%
@@ -1237,7 +1416,7 @@
     
     (inherit get-top-level-window)
     (define/override (file-menu:between-save-as-and-print file-menu)
-      (when (can-get-page-setup-from-user?)
+      (when (and (can-get-page-setup-from-user?) (file-menu:create-print?))
         (new menu-item% 
              [parent file-menu]
              [label (string-constant page-setup-menu-item)]
@@ -1323,133 +1502,46 @@
         ;; it might not yet be implemented
         (send canvas focus)))))
 
-(define open-here<%>
-  (interface (-editor<%>)
-    get-open-here-editor
-    open-here))
-
-(define open-here-mixin
-  (mixin (-editor<%>) (open-here<%>)
-    
-    (define/override (file-menu:new-on-demand item)
-      (super file-menu:new-on-demand item)
-      (send item set-label (if (preferences:get 'framework:open-here?)
-                               (string-constant new-...-menu-item)
-                               (string-constant new-menu-item))))
-    
-    (define/override (file-menu:new-callback item event)
-      (cond
-        [(preferences:get 'framework:open-here?)
-         (let ([clear-current (ask-about-new-here)])
-           (cond
-             [(eq? clear-current 'cancel) (void)]
-             [clear-current
-              (let* ([editor (get-editor)]
-                     [canceled? (cancel-due-to-unsaved-changes editor)])
-                (unless canceled?
-                  (send editor begin-edit-sequence)
-                  (send editor lock #f)
-                  (send editor set-filename #f)
-                  (send editor erase)
-                  (send editor set-modified #f)
-                  (send editor clear-undos)
-                  (send editor end-edit-sequence)))]
-             [else ((handler:current-create-new-window) #f)]))]
-        [else ((handler:current-create-new-window) #f)]))
-    
-    ;; cancel-due-to-unsaved-changes : -> boolean
-    ;; returns #t if the action should be cancelled
-    (define/private (cancel-due-to-unsaved-changes editor)
-      (and (send editor is-modified?)
-           (let ([save (gui-utils:unsaved-warning
-                        (let ([fn (send editor get-filename)])
-                          (if fn 
-                              (path->string fn)
-                              (get-label)))
-                        (string-constant clear-anyway)
-                        #t
-                        this)])
-             (case save
-               [(continue) #f]
-               [(save) (not (send editor save-file/gui-error))]
-               [(cancel) #t]))))
-    
-    ;; ask-about-new-here : -> (union 'cancel boolean?)
-    ;; prompts the user about creating a new window
-    ;; or "reusing" the current one.
-    (define/private (ask-about-new-here)
-      (gui-utils:get-choice
-       (string-constant create-new-window-or-clear-current)
-       (string-constant clear-current)
-       (string-constant new-window)
-       (string-constant warning)
-       'cancel
-       this))
-    
-    (define/override (file-menu:open-on-demand item)
-      (super file-menu:open-on-demand item)
-      (send item set-label (if (preferences:get 'framework:open-here?)
-                               (string-constant open-here-menu-item)
-                               (string-constant open-menu-item))))
-    
-    (define/augment (on-close)
-      (let ([group (group:get-the-frame-group)])
-        (when (eq? this (send group get-open-here-frame))
-          (send group set-open-here-frame #f)))
-      (inner (void) on-close))
-    
-    (define/override (on-activate on?)
-      (super on-activate on?)
-      (when on?
-        (send (group:get-the-frame-group) set-open-here-frame this)))
-    
-    (inherit get-editor)
-    (define/public (get-open-here-editor) (get-editor))
-    (define/public (open-here filename)
-      (let* ([editor (get-open-here-editor)]
-             [okay-to-switch? (user-okays-switch? editor)])
-        (when okay-to-switch?
-          (when (is-a? editor text%)
-            (let* ([b (box #f)]
-                   [filename (send editor get-filename b)])
-              (unless (unbox b)
-                (when filename
-                  (handler:set-recent-position 
-                   filename 
-                   (send editor get-start-position)
-                   (send editor get-end-position))))))
-          (send editor begin-edit-sequence)
-          (send editor lock #f)
-          (send editor load-file/gui-error filename)
-          (send editor end-edit-sequence)
-          (void))))
-    
-    (inherit get-label)
-    (define/private (user-okays-switch? ed)
-      (or (not (send ed is-modified?))
-          (let ([answer
-                 (gui-utils:unsaved-warning
-                  (let ([fn (send ed get-filename)])
-                    (if fn
-                        (path->string fn)
-                        (get-label)))
-                  (string-constant switch-anyway)
-                  #t)])
-            (case answer
-              [(continue)
-               #t]
-              [(save) 
-               (send ed save-file/gui-error)]
-              [(cancel)
-               #f]))))
-    
-    (super-new)))
-
 (define text<%> (interface (-editor<%>)))
 (define text-mixin
   (mixin (-editor<%>) (text<%>)
     (define/override (get-editor<%>) (class->interface text%))
     (init (filename #f) (editor% text:keymap%))
+    
+    (inherit get-editor)
+    (define/override (edit-menu:between-find-and-preferences edit-menu)
+      (when (add-find-longest-line-menu-item?)
+        (new menu-item%
+             [parent edit-menu] 
+             [label (string-constant find-longest-line)]
+             [callback 
+              (λ (x y)
+                (define ed (get-editor))
+                (define (line-len p)
+                  (define ans 
+                    (- (send ed paragraph-end-position p #f)
+                       (send ed paragraph-start-position p #f)))
+                  ans)
+                (when ed
+                  (let loop ([p (- (send ed last-paragraph) 1)]
+                             [longest-size (line-len (send ed last-paragraph))]
+                             [longest (send ed last-paragraph)])
+                    (cond
+                      [(= p -1)
+                       (send ed set-position 
+                             (send ed paragraph-start-position longest #f)
+                             (send ed paragraph-end-position longest #f))]
+                      [else
+                       (define this-size (line-len p))
+                       (cond
+                         [(<= longest-size this-size)
+                          (loop (- p 1) this-size p)]
+                         [else
+                          (loop (- p 1) longest-size longest)])]))))]))
+      (super edit-menu:between-find-and-preferences edit-menu))
+      
+    (define/public (add-find-longest-line-menu-item?) #t)
+    
     (super-new (filename filename) (editor% editor%))))
 
 (define pasteboard<%> (interface (-editor<%>)))
@@ -1846,10 +1938,12 @@
                    #f)]
                 [found
                  (λ (text first-pos)
-                   (let* ([last-pos ((if (eq? searching-direction 'forward) + -)
-                                     first-pos (string-length string))]
-                          [start-pos (min first-pos last-pos)]
-                          [end-pos (max first-pos last-pos)])
+                   (define (thunk)
+                     (define last-pos ((if (eq? searching-direction 'forward) + -)
+                                       first-pos (string-length string)))
+                     (define start-pos (min first-pos last-pos))
+                     (define end-pos (max first-pos last-pos))
+                     
                      (send text begin-edit-sequence)
                      (send text set-caret-owner #f 'display)
                      (send text set-position start-pos end-pos #f #f 'local)
@@ -1881,9 +1975,14 @@
                                    end-pos
                                    start-pos))))
                      
-                     (send text end-edit-sequence)
-                     
-                     #t))])
+                     (send text end-edit-sequence))
+                   
+                   (define owner (or (send text get-active-canvas)
+                                     (send text get-canvas)))
+                   (if owner
+                       (send owner call-as-primary-owner thunk)
+                       (thunk))
+                   #t)])
             
             (if (string=? string "")
                 (not-found top-searching-edit #t)
@@ -2528,27 +2627,28 @@
       (define ec (new editor-canvas% [parent f] [editor t]))
       (send f reflow-container)
       (send t begin-edit-sequence)
-      (parameterize ([current-output-port (open-output-text-editor t)])
-        (define prefs-file (find-system-path 'pref-file))
-        (printf "prefs file:\n  ~a\n\n" (path->string prefs-file))
-        (printf "setting a preference:\n  ")
-        (preferences:set 'drracket:prefs-debug #f)
-        (time (preferences:set 'drracket:prefs-debug #t))
-        (define file-contents (call-with-input-file prefs-file read))
-        (printf "\n~s preference keys\n\n" (length file-contents))
-        
-        (printf "preferences taking the most space:\n")
-        (define sizes (map 
-                       (λ (x) 
-                         (list 
-                          (car x)
-                          (bytes-length (string->bytes/utf-8 (format "~s" x)))))
-                       file-contents))
-        (for ([frame (in-list (sort sizes > #:key cadr))]
-              [x (in-range 0 10)])
-          (define key (list-ref frame 0))
-          (define size (list-ref frame 1))
-          (printf "  ~s (~s bytes)\n" key size)))
+      (define tp (open-output-text-editor t))
+      (define prefs-file (find-system-path 'pref-file))
+      (fprintf tp "prefs file:\n  ~a\n\n" (path->string prefs-file))
+      (fprintf tp "setting a preference:\n  ")
+      (preferences:set 'drracket:prefs-debug #f)
+      (parameterize ([current-output-port tp])
+        (time (preferences:set 'drracket:prefs-debug #t)))
+      (define file-contents (call-with-input-file prefs-file read))
+      (fprintf tp "\n~s preference keys\n\n" (length file-contents))
+      
+      (fprintf tp "preferences taking the most space:\n")
+      (define sizes (map 
+                     (λ (x) 
+                       (list 
+                        (car x)
+                        (bytes-length (string->bytes/utf-8 (format "~s" x)))))
+                     file-contents))
+      (for ([frame (in-list (sort sizes > #:key cadr))]
+            [x (in-range 0 10)])
+        (define key (list-ref frame 0))
+        (define size (list-ref frame 1))
+        (fprintf tp "  ~s (~s bytes)\n" key size))
       (send t auto-wrap #t)
       (send t set-position 0 0)
       (send t lock #t)
@@ -2592,7 +2692,7 @@
     (min-width (+ (inexact->exact (ceiling indicator-width)) 4))
     (min-height (+ (inexact->exact (ceiling indicator-height)) 4))))
 
-(define basic% (register-group-mixin (basic-mixin frame%)))
+(define basic% (focus-table-mixin (register-group-mixin (basic-mixin frame%))))
 (define size-pref% (size-pref-mixin basic%))
 (define info% (info-mixin basic%))
 (define text-info% (text-info-mixin info%))
@@ -2600,10 +2700,9 @@
 (define status-line% (status-line-mixin text-info%))
 (define standard-menus% (standard-menus-mixin status-line%))
 (define editor% (editor-mixin standard-menus%))
-(define open-here% (open-here-mixin editor%))
 
-(define -text% (text-mixin open-here%))
+(define -text% (text-mixin editor%))
 (define searchable% (searchable-text-mixin (searchable-mixin -text%)))
 (define delegate% (delegate-mixin searchable%))
 
-(define -pasteboard% (pasteboard-mixin open-here%))
+(define -pasteboard% (pasteboard-mixin editor%))

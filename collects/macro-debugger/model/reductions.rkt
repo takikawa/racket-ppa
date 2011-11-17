@@ -3,7 +3,6 @@
          racket/match
          syntax/stx
          "../util/eomap.rkt"
-         "stx-util.rkt"
          "deriv-util.rkt"
          "deriv.rkt"
          "reductions-engine.rkt")
@@ -76,11 +75,11 @@
         [#:when (or (not (identifier? e1))
                     (not (bound-identifier=? e1 e2)))
                 [#:walk e2 'resolve-variable]])]
-    [(Wrap p:module (e1 e2 rs ?1 locals tag rename check tag2 ?3 body shift))
+    [(Wrap p:module (e1 e2 rs ?1 prep tag rename check tag2 ?3 body shift))
      (R [#:hide-check rs]
         [! ?1]
         [#:pattern ?form]
-        [LocalActions ?form locals]
+        [PrepareEnv ?form prep]
         [#:pattern (?module ?name ?language . ?body-parts)]
         [#:when tag
                 [#:in-hole ?body-parts
@@ -98,19 +97,17 @@
         [Expr ?body body]
         [#:pattern ?form]
         [#:rename ?form shift])]
-    [(Wrap p:#%module-begin (e1 e2 rs ?1 me pass1 pass2 ?2))
+    [(Wrap p:#%module-begin (e1 e2 rs ?1 me body ?2))
      (R [! ?1]
         [#:pattern ?form]
         [#:rename ?form me]
         [#:pattern (?module-begin . ?forms)]
-        [#:pass1]
-        [ModulePass ?forms pass1]
-        [#:pass2]
-        [#:do (DEBUG (printf "** module begin pass 2\n"))]
-        [ModulePass ?forms pass2]
-        [! ?1])]
-    [(Wrap p:define-syntaxes (e1 e2 rs ?1 rhs locals))
+        [ModuleBegin/Phase ?forms body]
+        [! ?2])]
+    [(Wrap p:define-syntaxes (e1 e2 rs ?1 prep rhs locals))
      (R [! ?1]
+        [#:pattern ?form]
+        [PrepareEnv ?form prep]
         [#:pattern (?define-syntaxes ?vars ?rhs)]
         [#:binders #'?vars]
         [Expr/PhaseUp ?rhs rhs]
@@ -135,7 +132,7 @@
         [#:with-visible-form
          [#:left-foot]
          [#:set-syntax (stx-car (stx-cdr #'?form))]
-         [#:step 'macro]]
+         [#:step 'macro]] ;; FIXME: 'untag-expr
         [#:pass2]
         [#:set-syntax (stx-car (stx-cdr oldform))]
         [#:rename ?form untag])]
@@ -191,15 +188,18 @@
         [Expr (?rhs ...) rhss]
         [Block ?body body])]
     [(Wrap p:letrec-syntaxes+values
-           (e1 e2 rs ?1 srenames srhss vrenames vrhss body tag))
+           (e1 e2 rs ?1 srenames prep srhss vrenames vrhss body tag))
      (R [! ?1]
+        [#:pattern ?form]
+        [PrepareEnv ?form prep]
         [#:pass1]
         [#:pattern (?lsv ([?svars ?srhs] ...) ([?vvars ?vrhs] ...) . ?body)]
         [#:rename (((?svars ?srhs) ...) ((?vvars ?vrhs) ...) . ?body)
                    srenames
                    'rename-lsv]
         [#:binders #'(?svars ... ?vvars ...)]
-        [BindSyntaxes (?srhs ...) srhss]
+        [#:when (pair? srhss) ;; otherwise, we're coming from a block expansion
+                [BindSyntaxes (?srhs ...) srhss]]
         ;; If vrenames is #f, no var bindings to rename
         [#:when vrenames
                 [#:rename (((?vvars ?vrhs) ...) . ?body) vrenames 'rename-lsv]
@@ -269,6 +269,16 @@
         [#:learn id-rs]
         [! ?2]
         [Expr ?rhs rhs])]
+
+    [(Wrap p:begin-for-syntax (e1 e2 rs ?1 prep body))
+     (R [! ?1]
+        [#:pattern ?form]
+        [PrepareEnv ?form prep]
+        [#:pattern (?bfs . ?forms)]
+        [#:parameterize ((phase (add1 (phase))))
+          [#:if (module-begin/phase? body)
+                [[ModuleBegin/Phase ?forms body]]
+                [[BeginForSyntax ?forms body]]]])]
 
     ;; Macros
     [(Wrap mrule (e1 e2 rs ?1 me1 locals me2 ?2 etx next))
@@ -377,6 +387,9 @@
         [Block ?body body]
         [CaseLambdaClauses ?rest rest])]))
 
+(define (PrepareEnv prep)
+  (LocalActions prep))
+
 ;; local-actions-reductions
 (define (LocalActions locals)
   (match locals
@@ -475,8 +488,9 @@
         [#:pattern ?form]
         [#:rename ?form after 'track-origin]]
      |#]
-    [(struct local-value (name ?1 resolves bound?))
+    [(struct local-value (name ?1 resolves bound? binding))
      [R [! ?1]
+        ;; FIXME: notify if binding != current (identifier-binding name)???
         ;; [#:learn (list name)]
         ;; Add remark step?
         ]]
@@ -506,10 +520,12 @@
         [#:pass2]
         [#:if (eq? trans 'letrec)
               (;; FIXME: foci (difficult because of renaming?)
-               [#:walk (wlderiv-es1 pass2) 'block->letrec])
+               [#:walk (list (wderiv-e1 pass2)) 'block->letrec]
+               [#:pattern (?expr)]
+               [Expr ?expr pass2])
               ([#:rename ?block (wlderiv-es1 pass2)]
-               [#:set-syntax (wlderiv-es1 pass2)])]
-        [List ?block pass2])]
+               [#:set-syntax (wlderiv-es1 pass2)]
+               [List ?block pass2])])]
     [#f
      (R)]))
 
@@ -553,7 +569,7 @@
         [#:pass2]
         [#:pattern (?first . ?rest)]
         [BlockPass ?rest rest])]
-    [(cons (Wrap b:defstx (renames head ?1 rename ?2 bindrhs)) rest)
+    [(cons (Wrap b:defstx (renames head ?1 rename ?2 prep bindrhs)) rest)
      (R [#:pattern (?first . ?rest)]
         [#:rename/no-step ?first (car renames) (cdr renames)]
         [#:pass1]
@@ -564,6 +580,8 @@
         [#:binders #'?vars]
         [! ?2]
         [#:pass2]
+        [#:pattern ?form]
+        [PrepareEnv ?form prep]
         [#:pattern ((?define-syntaxes ?vars ?rhs) . ?rest)]
         [BindSyntaxes ?rhs bindrhs]
         [#:pattern (?first . ?rest)]
@@ -583,6 +601,42 @@
         [#:pattern ?form]
         [Expr/PhaseUp ?form rhs]
         [LocalActions ?form locals])]))
+
+(define (BeginForSyntax passes)
+  ;; Note: an lderiv doesn't necessarily cover all stxs, due to lifting.
+  (match/count passes
+    [(cons (? lderiv? lderiv) '())
+     (R [#:pattern ?forms]
+        [List ?forms lderiv])]
+    [(cons (Wrap bfs:lift (lderiv stxs)) rest)
+     (R [#:pattern LDERIV]
+        [#:parameterize ((available-lift-stxs (reverse stxs))
+                         (visible-lift-stxs null))
+          [#:pass1]
+          [List LDERIV lderiv]
+          [#:do (when (pair? (available-lift-stxs))
+                  (lift-error 'bfs:lift "available lifts left over"))]
+          [#:let visible-lifts (visible-lift-stxs)]
+          [#:pattern ?forms]
+          [#:pass2]
+          [#:let old-forms #'?forms]
+          [#:left-foot null]
+          [#:set-syntax (append visible-lifts old-forms)]
+          [#:step 'splice-lifts visible-lifts]
+          [#:set-syntax (append stxs old-forms)]
+          [BeginForSyntax ?forms rest]])]))
+
+(define (ModuleBegin/Phase body)
+  (match/count body
+    [(Wrap module-begin/phase (pass1 pass2 pass3))
+     (R [#:pass1]
+        [#:pattern ?forms]
+        [ModulePass ?forms pass1]
+        [#:pass2]
+        [#:do (DEBUG (printf "** module begin pass 2\n"))]
+        [ModulePass ?forms pass2]
+        ;; ignore pass3 for now: only provides
+        )]))
 
 ;; ModulePass : (list-of MBRule) -> RST
 (define (ModulePass mbrules)

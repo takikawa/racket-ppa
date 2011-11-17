@@ -299,11 +299,22 @@ launcher.}
          (listof (cons/c symbol? any/c))]{
 
 Creates an association list suitable for use with
-@racket[make-gracket-launcher] or @racket[create-embedding-executable].
-It builds associations by adding to @racket[path] suffixes, such as
-@filepath{.icns}, and checking whether such a file exists.
+@racket[make-gracket-launcher] or
+@racket[create-embedding-executable].  It builds associations by
+adding to @racket[path] suffixes, such as @filepath{.icns}, checking
+whether such a file exists, and calling @racket[extract-aux-from-path]
+if so. The results from all recognized suffixes are appended
+together.}
 
-The recognized suffixes are as follows:
+
+@defproc[(extract-aux-from-path [path path-string?])
+         (listof (cons/c symbol? any/c))]{
+
+Creates an association list suitable for use with
+@racket[make-gracket-launcher] or
+@racket[create-embedding-executable].  It builds associations by
+recognizing the suffix of @racket[path], where the recognized suffixes
+are as follows:
 
 @itemize[
 
@@ -328,6 +339,9 @@ The recognized suffixes are as follows:
  @item{@filepath{.utiexports} @'rarr @racket['uti-exports] as
        @racket[read] content (a single S-expression); for use on
        Mac OS X}
+
+ @item{@filepath{.wmclass} @'rarr @racket['wm-class] as the literal
+       content, removing a trailing newline if any; for use on Unix}
 
 ]}
 

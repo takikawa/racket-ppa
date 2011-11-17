@@ -15,7 +15,7 @@
 
 The contract system guards one part of a program from
 another. Programmers specify the behavior of a module's exports via
-@racket[provide/contract], and the contract system enforces those
+@racket[(provide (contract-out ....))], and the contract system enforces those
 constraints.
 
 @(define-syntax-rule
@@ -537,9 +537,22 @@ contract describes the mandatory arguments, and is similar to the
 argument description of a @racket[->] contract. The second clause
 describes the optional arguments. The range of description can either
 be @racket[any] or a sequence of contracts, indicating that the
-function must return multiple values. If present, the
+function must return multiple values. 
+
+If present, the
 @racket[rest-expr] contract governs the arguments in the rest
-parameter.  The @racket[pre-cond-expr] and @racket[post-cond-expr]
+parameter. Note that the @racket[rest-expr] contract governs only
+the arguments in the rest parameter, not those in mandatory arguments.
+For example, this contract:
+@racketblock[(->* () #:rest (cons/c integer? (listof integer?)) any)]
+does not match the function
+@racketblock[(λ (x . rest) x)]
+because the contract insists that the function accept zero arguments 
+(because there are no mandatory arguments listed in the contract). The
+@racket[->i] contract does not know that the contract on the rest argument is
+going to end up disallowing empty argument lists.
+
+The @racket[pre-cond-expr] and @racket[post-cond-expr]
 expressions are checked as the function is called and returns,
 respectively, and allow checking of the environment without an
 explicit connection to an argument (or a result).
@@ -721,13 +734,14 @@ function itself.
 For example, the contract
 
 @racketblock[
-(provide/contract 
- [f (->d ([size natural-number/c]
-          [proc (and/c (unconstrained-domain-> number?)
-                       (lambda (p) 
-                         (procedure-arity-includes? p size)))])
-         ()
-         number?)])
+(provide
+ (contract-out
+  [f (->d ([size natural-number/c]
+           [proc (and/c (unconstrained-domain-> number?)
+                        (lambda (p) 
+                          (procedure-arity-includes? p size)))])
+          ()
+          number?)]))
 ]
 
 says that the function @racket[f] accepts a natural number
@@ -760,7 +774,7 @@ be blamed using the above contract:
 @declare-exporting-ctc[racket/contract/parametric]
 
 The most convenient way to use parametric contract is to use
-@racket[provide/contract]'s @racket[#:exists] keyword.
+@racket[contract-out]'s @racket[#:exists] keyword.
 The @racketmodname[racket/contract/parametric] provides a few more, 
 general-purpose parametric contracts.
 
@@ -920,7 +934,8 @@ racket
             (product (kons-tl l))))]))
  
 (provide kons? kons kons-hd kons-tl)
-(provide/contract [product (-> (sorted-list/gt -inf.0) number?)])
+(provide
+ (contract-out [product (-> (sorted-list/gt -inf.0) number?)]))
 ])
 
 The module provides a single function, @racket[product] whose contract
@@ -940,7 +955,7 @@ lazy contract.
 
 @defform/subs[
 #:literals (struct rename)
-(provide/contract p/c-item ...)
+(contract-out p/c-item ...)
 ([p/c-item
   (struct id ((id contract-expr) ...))
   (struct (id identifier) ((id contract-expr) ...))
@@ -951,25 +966,30 @@ lazy contract.
  [exists-variables identifier
                    (identifier ...)])]{
 
-Can only appear at the top-level of a @racket[module]. As with
-@racket[provide], each @racket[id] is provided from the module. In
+A @racket[_provide-spec] for use in @racket[provide] (currently only for
+the same @tech{phase level} as the @racket[provide] form; for example,
+@racket[contract-out] cannot be nested within @racket[for-syntax]). Each @racket[id] 
+is provided from the module. In
 addition, clients of the module must live up to the contract specified
 by @racket[contract-expr] for each export.
 
-The @racket[provide/contract] form treats modules as units of
+The @racket[contract-out] form treats modules as units of
 blame. The module that defines the provided variable is expected to
 meet the positive (co-variant) positions of the contract. Each module
 that imports the provided variable must obey the negative
-(contra-variant) positions of the contract.
+(contra-variant) positions of the contract. Each @racket[contract-expr]
+in a @racket[contract-out] form is effectively moved to the end of the
+enclosing module, so a @racket[contract-expr] can refer to variables
+that are defined later in the same module.
 
 Only uses of the contracted variable outside the module are
 checked. Inside the module, no contract checking occurs.
 
-The @racket[rename] form of a @racket[provide/contract] exports the
+The @racket[rename] form of @racket[contract-out] exports the
 first variable (the internal name) with the name specified by the
 second variable (the external name).
 
-The @racket[struct] form of a @racket[provide/contract] clause
+The @racket[struct] form of @racket[contract-out]
 provides a structure-type definition, and each field has a contract
 that dictates the contents of the fields. The structure-type
 definition must appear before the @racket[provide] clause within the
@@ -985,11 +1005,11 @@ exported structure-type name always doubles as a constructor, even if
 the original structure-type name does not act as a constructor.
 
 The @racket[#:∃] and @racket[#:exists] clauses define new abstract
-contracts. The variables are bound in the remainder of the @racket[provide/contract]
-expression to new contracts that hide the values they accept and
+contracts. The variables are bound in the remainder of the @racket[contract-out]
+form to new contracts that hide the values they accept and
 ensure that the exported functions are treated parametrically.
 
-The implementation of @racket[provide/contract] attaches uses
+The implementation of @racket[contract-out] attaches uses
 @racket[syntax-property] to attach properties to the code it generates
 that records the syntax of the contracts in the fully expanded program.
 Specifically, the symbol @racket['provide/contract-original-contract]
@@ -997,7 +1017,14 @@ is bound to vectors of two elements, the exported identifier and a
 syntax object for the expression that produces the contract controlling
 the export.
 }
-                                      
+
+@defform[(provide/contract p/c-item ...)]{
+
+A legacy shorthand for @racket[(provide (contract-out p/c-item ...))],
+except that a @racket[_contract-expr] within @racket[provide/contract]
+is evaluated at the position of the @racket[provide/contract] form
+instead of at the end of the enclosing module.}
+
 @subsection{Nested Contract Boundaries}
 @defmodule*/no-declare[(racket/contract/region)]
 @declare-exporting-ctc[racket/contract/region]
@@ -1091,7 +1118,7 @@ The @racket[define-struct/contract] form only allows a subset of the
 
 @subsection{Low-level Contract Boundaries}
 @declare-exporting-ctc[racket/contract/base]
-                                                       
+
 @defform*[[(contract contract-expr to-protect-expr
                      positive-blame-expr negative-blame-expr)
            (contract contract-expr to-protect-expr 
@@ -1808,7 +1835,7 @@ are below):
 @; ------------------------------------------------------------------------
 
 @subsection{Utilities for Building New Combinators}
-                                               
+
 @defproc[(contract-stronger? [x contract?] [y contract?]) boolean?]{
   Returns @racket[#t] if the contract @racket[x] accepts either fewer 
   or the same number of values as @racket[y] does.
@@ -1845,7 +1872,7 @@ contract holds.}
 Produces the first-order test used by @racket[or/c] to match values to
 higher-order contracts.
 }
-                                               
+
 @section{Contract Utilities}
 
 @declare-exporting-ctc[racket/contract/base]

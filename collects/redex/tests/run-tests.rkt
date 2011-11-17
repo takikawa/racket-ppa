@@ -1,6 +1,6 @@
 ;; require this file to run all of the test suites for redex.
 
-#lang scheme/base
+#lang racket/base
 (require scheme/runtime-path
          scheme/cmdline
          scheme/match
@@ -26,10 +26,13 @@
      "pict-test.rkt"
      "hole-test.rkt"
      "stepper-test.rkt"
+     "defined-checks-test.rkt"
+     "check-syntax-test.rkt"
      "test-docs-complete.rkt")
    (if test-bitmaps? '("bitmap-test.rkt") '())
    (if test-examples?
-       '("../examples/stlc.rkt"
+       '("../examples/cbn-letrec.rkt"
+         "../examples/stlc.rkt"
          "../examples/pi-calculus.rkt"
          ("../examples/beginner.rkt" main)
          "../examples/racket-machine/reduction-test.rkt"

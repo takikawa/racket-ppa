@@ -16,16 +16,15 @@
           [prefix drracket:app: drracket:app^]
           [prefix help: drracket:help-desk^]
           [prefix drracket:multi-file-search: drracket:multi-file-search^]
-          [prefix drracket:init: drracket:init^])
+          [prefix drracket:init: drracket:init^]
+          [prefix drracket: drracket:interface^])
   (export (rename drracket:frame^
                   [-mixin mixin]))
-  
-  (define basics<%> (interface (frame:standard-menus<%>)))
   
   (define last-keybindings-planet-attempt "")
   
   (define basics-mixin
-    (mixin (frame:standard-menus<%>) (basics<%>)
+    (mixin (frame:standard-menus<%>) (drracket:frame:basics<%>)
       
       (define/override (on-subwindow-char receiver event)
         (let ([user-key? (send (keymap:get-user) 
@@ -244,6 +243,7 @@
         (new separator-menu-item% (parent menu)))
       
       (define/override (edit-menu:between-find-and-preferences menu)
+        (super edit-menu:between-find-and-preferences menu)
         (make-object separator-menu-item% menu)
         (let ([keybindings-on-demand
                (λ (menu-item)
@@ -296,7 +296,8 @@
                              [else
                               (message-box (string-constant drscheme)
                                            (format (string-constant keybindings-planet-malformed-spec)
-                                                   planet-spec))]))))))
+                                                   planet-spec)
+                                           #:dialog-mixin frame:focus-table-mixin)]))))))
                (let ([ud (preferences:get 'drracket:user-defined-keybindings)])
                  (unless (null? ud)
                    (new separator-menu-item% (parent keybindings-menu))
@@ -344,7 +345,8 @@
                                                  (if (path? item)
                                                      (path->string item)
                                                      (format "~s" item))
-                                                 (exn-message x)))
+                                                 (exn-message x))
+                                         #:dialog-mixin frame:focus-table-mixin)
                             #f)])
       (keymap:add-user-keybindings-file item)
       #t))
@@ -460,15 +462,20 @@
                        (message-box (string-constant drscheme)
                                     (if (exn? exn)
                                         (format "~a" (exn-message exn))
-                                        (format "~s" exn))))])
-      (let* ([url (string->url s-url)]
-             [tmp-filename (make-temporary-file "tmp~a.plt")]
-             [port (get-impure-port url)]
+                                        (format "~s" exn))
+                                    #:dialog-mixin frame:focus-table-mixin))])
+      (define-values (port size)
+        (let-values ([(port header)
+                      (get-pure-port/headers (string->url s-url)
+                                             #:redirections 5)])
+          (define size
+            (let* ([content-header (extract-field "content-length" header)]
+                   [m (and content-header
+                           (regexp-match "[0-9]+" content-header))])
+              (and m (string->number (car m)))))
+          (values port size)))
+      (let* ([tmp-filename (make-temporary-file "tmp~a.plt")]
              [header (purify-port port)]
-             [size (let* ([content-header (extract-field "content-length" header)]
-                          [m (and content-header
-                                  (regexp-match "[0-9]+" content-header))])
-                     (and m (string->number (car m))))]
              [d (make-object dialog% (string-constant downloading) parent)] 
              [message (make-object message% (string-constant downloading-file...) d)] 
              [gauge (if size 
@@ -588,14 +595,8 @@
       (update-bindings)
       (send f show #t)))
   
-  (define <%>
-    (interface (frame:editor<%> basics<%> frame:text-info<%>)
-      get-show-menu
-      update-shown
-      add-show-menu-items))
-  
   (define -mixin
-    (mixin (frame:editor<%> frame:text-info<%> basics<%>) (<%>)
+    (mixin (frame:editor<%> frame:text-info<%> drracket:frame:basics<%>) (drracket:frame:<%>)
       (inherit get-editor get-menu% get-menu-bar)
       (define show-menu #f)
       (define/public get-show-menu (λ () show-menu))
@@ -657,9 +658,11 @@
       (make-help-desk-menu-item help-menu)))
   
   (define (make-help-desk-menu-item help-menu)
-    (make-object menu-item%
-      (string-constant help-desk)
-      help-menu
-      (λ (item evt)
-        (help:help-desk)
-        #t)))
+    (define (docs-menu-item label)
+      (new menu-item%
+           [label label]
+           [parent help-menu]
+           [callback (λ (item evt) (help:help-desk) #t)]))
+    (docs-menu-item (string-constant racket-documentation))
+    (new separator-menu-item% [parent help-menu])
+    (docs-menu-item (string-constant help-desk)))

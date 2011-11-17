@@ -192,13 +192,26 @@ Unsafe variants of @racket[car], @racket[cdr], @racket[mcar],
 
 
 @deftogether[(
+@defproc[(unsafe-list-ref [lst any/c] [pos (and/c exact-nonnegative-integer? fixnum?)]) any/c]
+@defproc[(unsafe-list-tail [lst any/c] [pos (and/c exact-nonnegative-integer? fixnum?)]) any/c]
+)]{
+
+Unsafe variants of @racket[list-ref] and @racket[list-tail], where
+@racket[pos] must be a @tech{fixnum}, and @racket[lst] must start with
+at least @racket[(add1 pos)] (for @racket[unsafe-list-ref]) or
+@racket[pos] (for @racket[unsafe-list-tail]) pairs.}
+
+
+@deftogether[(
 @defproc[(unsafe-unbox [b box?]) fixnum?]
 @defproc[(unsafe-set-box! [b box?] [k fixnum?]) void?]
 @defproc[(unsafe-unbox* [v (and/c box? (not/c impersonator?))]) any/c]
 @defproc[(unsafe-set-box*! [v (and/c box? (not/c impersonator?))] [val any/c]) void?]
 )]{
 
-Unsafe versions of @racket[unbox] and @racket[set-box!].}
+Unsafe versions of @racket[unbox] and @racket[set-box!], where the
+@schemeidfont{box*} variants can be faster but do not work on
+@tech{impersonators}.}
 
 
 @deftogether[(
@@ -211,9 +224,11 @@ Unsafe versions of @racket[unbox] and @racket[set-box!].}
 )]{
 
 Unsafe versions of @racket[vector-length], @racket[vector-ref], and
-@racket[vector-set!]. A vector's size can never be larger than a
-@tech{fixnum} (so even @racket[vector-length] always returns a
-fixnum).}
+@racket[vector-set!], where the @schemeidfont{vector*} variants can be
+faster but do not work on @tech{impersonators}.
+
+A vector's size can never be larger than a @tech{fixnum}, so even
+@racket[vector-length] always returns a fixnum.}
 
 
 @deftogether[(
@@ -289,7 +304,9 @@ Unsafe versions of @racket[u16vector-ref] and
 )]{
 
 Unsafe field access and update for an instance of a structure
-type. The index @racket[k] must be between @racket[0] (inclusive) and
+type, where the @schemeidfont{struct*} variants can be
+faster but do not work on @tech{impersonators}.
+The index @racket[k] must be between @racket[0] (inclusive) and
 the number of fields in the struture (exclusive). In the case of
 @racket[unsafe-struct-set!], the field must be mutable.}
 

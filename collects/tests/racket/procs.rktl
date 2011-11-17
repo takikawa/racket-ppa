@@ -263,5 +263,36 @@
     (try-combos (map add-chaperone procs) add-chaperone)))
 
 ;; ----------------------------------------
+;; Check error reporting of `procedure-reduce-keyword-arity'
+
+(err/rt-test (procedure-reduce-keyword-arity void 1 '(#:b #:a) null)
+             (lambda (exn) (regexp-match #rx"3rd argument" (exn-message exn))))
+(err/rt-test (procedure-reduce-keyword-arity void 1 null '(#:b #:a))
+             (lambda (exn) (regexp-match #rx"4th argument" (exn-message exn))))
+
+;; ----------------------------------------
+;; Check mutation of direct-called keyword procedure
+
+(let ()
+  (define (f #:x x) (list x))
+  (set! f (lambda (#:y y) (box y)))
+  (test (box 8) (lambda () (f #:y 8))))
+
+(let ()
+  (define (f #:x [x 1]) x)
+  (test 7 (lambda () (f #:x 7)))
+  (set! f #f))
+
+;; ----------------------------------------
+;; Check mutation of direct-called keyword procedure
+
+(let ()
+  (define (f1 #:x x) (list x))
+  (test 'f1 object-name f1))
+(let ()
+  (define (f2 #:x [x 8]) (list x))
+  (test 'f2 object-name f2))
+
+;; ----------------------------------------
 
 (report-errs)

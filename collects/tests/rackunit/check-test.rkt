@@ -310,14 +310,16 @@
    ;; Check evaluation contexts
    (test-case
     "current-check-around is used by checks"
-    (check-eq? (parameterize ([current-check-around (lambda (t) 'foo)])
+    (let ([x #f])
+      (parameterize ([current-check-around (lambda (t) (set! x 'foo))])
                  (check-eq? 'a 'b))
-               'foo))
-   
+      (check-eq? x
+                 'foo)))
+
    (test-case
     "current-check-handler is used by checks"
-    (check-eq? (parameterize ([current-check-handler (lambda (e) 'foo)])
-                 (check-eq? 'a 'b))
+    (check-eq? (let/ec escape
+                 (parameterize ([current-check-handler (lambda (e) (escape 'foo))])
+                   (check-eq? 'a 'b)))
                'foo))
    ))
-

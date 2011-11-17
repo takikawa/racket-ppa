@@ -5,7 +5,7 @@
 
 (module stxcase-scheme '#%kernel
   (#%require "small-scheme.rkt" "stx.rkt" "stxcase.rkt" "with-stx.rkt" "stxloc.rkt"
-             (for-syntax '#%kernel "small-scheme.rkt" "stx.rkt" "stxcase.rkt" "with-stx.rkt" 
+             (for-syntax '#%kernel "small-scheme.rkt" "stx.rkt" "stxcase.rkt"
                          "stxloc.rkt"))
 
   (-define (check-duplicate-identifier names)
@@ -25,16 +25,17 @@
 	 names)
 	#f)))
 
-  (define-values-for-syntax (check-sr-rules)
-    (lambda (stx kws)
-      (for-each (lambda (id)
-                  (unless (identifier? id)
-                    (raise-syntax-error
-                     #f
-                     "pattern must start with an identifier, found something else"
-                     stx
-                     id)))
-                (syntax->list kws))))
+  (begin-for-syntax
+   (define-values (check-sr-rules)
+     (lambda (stx kws)
+       (for-each (lambda (id)
+                   (unless (identifier? id)
+                     (raise-syntax-error
+                      #f
+                      "pattern must start with an identifier, found something else"
+                      stx
+                      id)))
+                 (syntax->list kws)))))
   
   ;; From Dybvig, mostly:
   (-define-syntax syntax-rules

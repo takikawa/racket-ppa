@@ -35,7 +35,7 @@ Equivalent to @racket[(between/c 1 65535)].
 Equivalent to @racket[(between/c 0 65535)].
 }
 
-@defthing[path-element? contract?]{
+@defthing[path-piece? contract?]{
 Equivalent to @racket[(or/c path-string? (symbols 'up 'same))].
 }
 
@@ -201,9 +201,17 @@ for instance, a wrapped list is not guaranteed to satisfy @racket[list?].
 #:eval the-eval
 (define/contract predicates
   (sequence/c (-> any/c boolean?))
-  (list integer? string->symbol))
+  (in-list (list integer?
+                 string->symbol)))
 (for ([P predicates])
   (printf "~s\n" (P "cat")))
+(define/contract numbers&strings
+  (sequence/c number? string?)
+  (in-dict (list (cons 1 "one")
+                 (cons 2 "two")
+                 (cons 3 'three))))
+(for ([(N S) numbers&strings])
+  (printf "~s: ~a\n" N S))
 ]
 
 }

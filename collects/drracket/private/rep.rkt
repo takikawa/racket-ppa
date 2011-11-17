@@ -28,6 +28,7 @@ TODO
          framework
          browser/external
          "drsig.rkt"
+         "local-member-names.rkt"
          
          ;; the dynamic-require below loads this module, 
          ;; so we make the dependency explicit here, even
@@ -79,17 +80,18 @@ TODO
   (parameterize-break #f (current-break-parameterization)))
 
 (define-unit rep@
-  (import (prefix drracket:init: drracket:init^)
-          (prefix drracket:language-configuration: drracket:language-configuration/internal^)
-          (prefix drracket:language: drracket:language^)
-          (prefix drracket:app: drracket:app^)
-          (prefix drracket:frame: drracket:frame^)
-          (prefix drracket:unit: drracket:unit^)
-          (prefix drracket:text: drracket:text^)
-          (prefix drracket:help-desk: drracket:help-desk^)
-          (prefix drracket:debug: drracket:debug^)
+  (import [prefix drracket:init: drracket:init^]
+          [prefix drracket:language-configuration: drracket:language-configuration/internal^]
+          [prefix drracket:language: drracket:language^]
+          [prefix drracket:app: drracket:app^]
+          [prefix drracket:frame: drracket:frame^]
+          [prefix drracket:unit: drracket:unit^]
+          [prefix drracket:text: drracket:text^]
+          [prefix drracket:help-desk: drracket:help-desk^]
+          [prefix drracket:debug: drracket:debug^]
           [prefix drracket:eval: drracket:eval^]
-          [prefix drracket:module-language: drracket:module-language^])
+          [prefix drracket:module-language: drracket:module-language/int^]
+          [prefix drracket: drracket:interface^])
   (export (rename drracket:rep^
                   [-text% text%]
                   [-text<%> text<%>]))
@@ -133,58 +135,9 @@ TODO
       
       initialize-console
       
-      reset-pretty-print-width
-      
-      
-      
       get-prompt
       insert-prompt
       get-context))
-  
-  
-  (define context<%>
-    (interface ()
-      ensure-rep-shown   ;; (interactions-text -> void)
-      ;; make the rep visible in the frame
-      
-      repl-submit-happened ;; (-> boolean)
-      ;; notify the context that an evaluation is about to
-      ;; happen in the REPL (so it can show a warning about
-      ;; the language/etc is out of sync if neccessary).
-      
-      enable-evaluation  ;; (-> void)
-      ;; make the context enable all methods of evaluation
-      ;; (disable buttons, menus, etc)
-      
-      disable-evaluation ;; (-> void)
-      ;; make the context disable all methods of evaluation
-      ;; (disable buttons, menus, etc)
-      
-      set-breakables ;; (union thread #f) (union custodian #f) -> void
-      ;; the context might initiate breaks or kills to
-      ;; the thread passed to this function
-      
-      get-breakables ;; -> (values (union thread #f) (union custodian #f))
-      ;; returns the last values passed to set-breakables.
-      
-      reset-offer-kill ;; (-> void)
-      ;; the next time the break button is pushed, it will only
-      ;; break. (if the break button is clicked twice without
-      ;; this method being called in between, it will offer to
-      ;; kill the user's program)
-      
-      update-running        ;; (boolean -> void)
-      ;; a callback to indicate that the repl may have changed its running state
-      ;; use the repls' get-in-evaluation? method to find out what the current state is.
-      
-      clear-annotations  ;; (-> void)
-      ;; clear any error highlighting context
-      
-      get-directory      ;; (-> (union #f string[existing directory]))
-      ;; returns the directory that should be the default for
-      ;; the `current-directory' and `current-load-relative-directory'
-      ;; parameters in the repl.
-      ))
   
   (define sized-snip<%>
     (interface ((class->interface snip%))
@@ -294,13 +247,34 @@ TODO
                          [name (and l (send l get-language-name))])
                     (drracket:help-desk:help-desk
                      str (and ctxt (list ctxt name)))))))))
+    
+    ;; keep this in case people use it in their keymaps
     (add-drs-function "execute"  (λ (frame) (send frame execute-callback)))
+    
+    (add-drs-function "run"  (λ (frame) (send frame execute-callback)))
     (add-drs-function "next-tab" (λ (frame) (send frame next-tab)))
     (add-drs-function "prev-tab" (λ (frame) (send frame prev-tab)))
     (add-drs-function "collapse" (λ (frame) (send frame collapse)))
-    (add-drs-function "split"    (λ (frame) (send frame split))))
+    (add-drs-function "split"    (λ (frame) (send frame split)))
+    
+    (add-drs-function "jump-to-previous-error-loc"
+                      (λ (frame) (send frame jump-to-previous-error-loc)))
+    (add-drs-function "jump-to-next-error-loc"
+                      (λ (frame) (send frame jump-to-next-error-loc)))
+    
+    (add-drs-function "send-toplevel-form-to-repl" (λ (frame) (send frame send-toplevel-form-to-repl #f)))
+    (add-drs-function "send-selection-to-repl" (λ (frame) (send frame send-selection-to-repl #f)))
+    (add-drs-function "send-toplevel-form-to-repl-and-go" (λ (frame) (send frame send-toplevel-form-to-repl #t)))
+    (add-drs-function "send-selection-to-repl-and-go" (λ (frame) (send frame send-selection-to-repl #t)))
+    (add-drs-function "move-to-interactions" (λ (frame) (send frame move-to-interactions))))
   
-  (send drs-bindings-keymap map-function "f5" "execute")
+  (send drs-bindings-keymap map-function "m:p" "jump-to-previous-error-loc")
+  (send drs-bindings-keymap map-function "m:n" "jump-to-next-error-loc")
+  (send drs-bindings-keymap map-function "esc;p" "jump-to-previous-error-loc")
+  (send drs-bindings-keymap map-function "esc;n" "jump-to-next-error-loc")
+  (send drs-bindings-keymap map-function "c:x;`" "jump-to-next-error-loc")
+  
+  (send drs-bindings-keymap map-function "f5" "run")
   (send drs-bindings-keymap map-function "f1" "search-help-desk")
   (send drs-bindings-keymap map-function "c:tab" "next-tab")
   (send drs-bindings-keymap map-function "c:s:tab" "prev-tab")
@@ -310,6 +284,8 @@ TODO
   (send drs-bindings-keymap map-function "c:x;0" "collapse")
   (send drs-bindings-keymap map-function "c:x;2" "split")
 
+  (send drs-bindings-keymap map-function "c:c;c:z" "move-to-interactions")
+  
   (for ([i (in-range 1 10)])
     (send drs-bindings-keymap map-function 
           (format "a:~a" i) 
@@ -328,7 +304,7 @@ TODO
     (mixin (editor:keymap<%>) (editor:keymap<%>)
       (define/override (get-keymaps)
         (editor:add-after-user-keymap drs-bindings-keymap (super get-keymaps)))
-      (super-instantiate ())))
+      (super-new)))
   
   ;; Max length of output queue (user's thread blocks if the
   ;; queue is full):
@@ -473,6 +449,8 @@ TODO
   (define log-max-size 1000)
   (define log-entry-max-size 1000)
   
+  (define after-expression (make-parameter #f))
+  
   (define text-mixin
     (mixin ((class->interface text%)
             text:ports<%>
@@ -553,7 +531,7 @@ TODO
       (define/public (set-definitions-text dt) (set! definitions-text dt))
       (define/public (get-definitions-text) definitions-text)
       
-      (unless (is-a? context context<%>)
+      (unless (is-a? context drracket:rep:context<%>)
         (error 'drracket:rep:text% 
                "expected an object that implements drracket:rep:context<%> as initialization argument, got: ~e"
                context))
@@ -637,6 +615,10 @@ TODO
       ;; error-ranges : (union false? (cons (list file number number) (listof (list file number number))))
       (define error-ranges #f)
       (define/public (get-error-ranges) error-ranges)
+      (define/public (set-error-ranges ranges)
+        (set! error-ranges (and ranges 
+                                (not (null? ranges))
+                                (cleanup-locs ranges))))
       (define internal-reset-callback void)
       (define internal-reset-error-arrows-callback void)
       (define/public (reset-error-ranges) 
@@ -661,105 +643,104 @@ TODO
       ;;                       (union #f (listof srcloc))
       ;;                    -> (void)
       (define/public (highlight-errors raw-locs [raw-error-arrows #f])
-        (let* ([cleanup-locs
-                (λ (locs)
-                  (let ([ht (make-hasheq)])
-                    (filter (λ (loc) (and (is-a? (srcloc-source loc) text:basic<%>)
-                                          (number? (srcloc-position loc))
-                                          (number? (srcloc-span loc))))
-                            (map (λ (srcloc)
-                                   (cond
-                                     [(hash-ref ht (srcloc-source srcloc) #f)
-                                      =>
-                                      (λ (e) 
-                                        (make-srcloc e
-                                                     (srcloc-line srcloc)
-                                                     (srcloc-column srcloc)
-                                                     (srcloc-position srcloc)
-                                                     (srcloc-span srcloc)))]
-                                     [(send definitions-text port-name-matches? (srcloc-source srcloc))
-                                      (hash-set! ht (srcloc-source srcloc) definitions-text)
-                                      (make-srcloc definitions-text
-                                                   (srcloc-line srcloc)
-                                                   (srcloc-column srcloc)
-                                                   (srcloc-position srcloc)
-                                                   (srcloc-span srcloc))]
-                                     [(port-name-matches? (srcloc-source srcloc))
-                                      (hash-set! ht (srcloc-source srcloc) this)
-                                      (make-srcloc this
-                                                   (srcloc-line srcloc)
-                                                   (srcloc-column srcloc)
-                                                   (srcloc-position srcloc)
-                                                   (srcloc-span srcloc))]
-                                     [(and (symbol? (srcloc-source srcloc))
-                                           (text:lookup-port-name (srcloc-source srcloc)))
-                                      =>
-                                      (lambda (editor)
-                                        (make-srcloc editor
-                                                     (srcloc-line srcloc)
-                                                     (srcloc-column srcloc)
-                                                     (srcloc-position srcloc)
-                                                     (srcloc-span srcloc)))]
-                                     [else srcloc]))
-                                 locs))))]
-               [locs (cleanup-locs raw-locs)]
-               [error-arrows (and raw-error-arrows (cleanup-locs raw-error-arrows))])
-          
-          (reset-highlighting)
-          
-          (set! error-ranges locs)
-
-          (for-each (λ (loc) (send (srcloc-source loc) begin-edit-sequence)) locs)
-          
-          (when color?
-            (let ([resets
-                   (map (λ (loc)
-                          (let* ([file (srcloc-source loc)]
-                                 [start (- (srcloc-position loc) 1)]
-                                 [span (srcloc-span loc)]
-                                 [finish (+ start span)])
-                            (send file highlight-range start finish (drracket:debug:get-error-color) #f 'high)))
-                        locs)])
-              
-              (when (and definitions-text error-arrows)
-                (let ([filtered-arrows
-                       (remove-duplicate-error-arrows
-                        (filter
-                         (λ (arr) (embedded-in? (srcloc-source arr) definitions-text))
-                         error-arrows))])
-                  (send definitions-text set-error-arrows filtered-arrows)))
-              
-              (set! internal-reset-callback
-                    (λ ()
-                      (set! error-ranges #f)
-                      (when definitions-text
-                        (send definitions-text set-error-arrows #f))
-                      (set! internal-reset-callback void)
-                      (for-each (λ (x) (x)) resets)))))
-          
-          (let* ([first-loc (and (pair? locs) (car locs))]
-                 [first-file (and first-loc (srcloc-source first-loc))]
-                 [first-start (and first-loc (- (srcloc-position first-loc) 1))]
-                 [first-span (and first-loc (srcloc-span first-loc))])
+        (set-error-ranges raw-locs)
+        (define locs (or (get-error-ranges) '())) ;; calling set-error-range cleans up the locs
+        (define error-arrows (and raw-error-arrows (cleanup-locs raw-error-arrows)))
+        
+        (reset-highlighting)
+        
+        (for-each (λ (loc) (send (srcloc-source loc) begin-edit-sequence)) locs)
+        
+        (when color?
+          (let ([resets
+                 (map (λ (loc)
+                        (let* ([file (srcloc-source loc)]
+                               [start (- (srcloc-position loc) 1)]
+                               [span (srcloc-span loc)]
+                               [finish (+ start span)])
+                          (send file highlight-range start finish (drracket:debug:get-error-color) #f 'high)))
+                      locs)])
             
-            (when (and first-loc first-start first-span)
-              (let ([first-finish (+ first-start first-span)])
-                (when (eq? first-file definitions-text) ;; only move set the cursor in the defs window
-                  (send first-file set-position first-start first-start))
-                (send first-file scroll-to-position first-start #f first-finish)))
+            (when (and definitions-text error-arrows)
+              (let ([filtered-arrows
+                     (remove-duplicate-error-arrows
+                      (filter
+                       (λ (arr) (embedded-in? (srcloc-source arr) definitions-text))
+                       error-arrows))])
+                (send definitions-text set-error-arrows filtered-arrows)))
             
-            (for-each (λ (loc) (send (srcloc-source loc) end-edit-sequence)) locs)
+            (set! internal-reset-callback
+                  (λ ()
+                    (set-error-ranges #f)
+                    (when definitions-text
+                      (send definitions-text set-error-arrows #f))
+                    (set! internal-reset-callback void)
+                    (for-each (λ (x) (x)) resets)))))
+        
+        (let* ([first-loc (and (pair? locs) (car locs))]
+               [first-file (and first-loc (srcloc-source first-loc))]
+               [first-start (and first-loc (- (srcloc-position first-loc) 1))]
+               [first-span (and first-loc (srcloc-span first-loc))])
+          
+          (when (and first-loc first-start first-span)
+            (let ([first-finish (+ first-start first-span)])
+              (when (eq? first-file definitions-text) ;; only move set the cursor in the defs window
+                (send first-file set-position first-start first-start))
+              (send first-file scroll-to-position first-start #f first-finish)))
+          
+          (for-each (λ (loc) (send (srcloc-source loc) end-edit-sequence)) locs)
+          
+          (when first-loc
             
-            (when first-loc
-              
-              (when (eq? first-file definitions-text)
-                ;; when we're highlighting something in the defs window,
-                ;; make sure it is visible
-                (let ([tlw (send first-file get-top-level-window)]) 
-                  (when (is-a? tlw drracket:unit:frame<%>)
-                    (send tlw ensure-defs-shown))))
-              
-              (send first-file set-caret-owner (get-focus-snip) 'global)))))
+            (when (eq? first-file definitions-text)
+              ;; when we're highlighting something in the defs window,
+              ;; make sure it is visible
+              (let ([tlw (send first-file get-top-level-window)]) 
+                (when (is-a? tlw drracket:unit:frame<%>)
+                  (send tlw ensure-defs-shown))))
+            
+            (send first-file set-caret-owner (get-focus-snip) 'global))))
+      
+      (define/private (cleanup-locs locs)
+        (let ([ht (make-hasheq)])
+          (filter (λ (loc) (and (is-a? (srcloc-source loc) text:basic<%>)
+                                (number? (srcloc-position loc))
+                                (number? (srcloc-span loc))))
+                  (map (λ (srcloc)
+                         (cond
+                           [(hash-ref ht (srcloc-source srcloc) #f)
+                            =>
+                            (λ (e) 
+                              (make-srcloc e
+                                           (srcloc-line srcloc)
+                                           (srcloc-column srcloc)
+                                           (srcloc-position srcloc)
+                                           (srcloc-span srcloc)))]
+                           [(send definitions-text port-name-matches? (srcloc-source srcloc))
+                            (hash-set! ht (srcloc-source srcloc) definitions-text)
+                            (make-srcloc definitions-text
+                                         (srcloc-line srcloc)
+                                         (srcloc-column srcloc)
+                                         (srcloc-position srcloc)
+                                         (srcloc-span srcloc))]
+                           [(port-name-matches? (srcloc-source srcloc))
+                            (hash-set! ht (srcloc-source srcloc) this)
+                            (make-srcloc this
+                                         (srcloc-line srcloc)
+                                         (srcloc-column srcloc)
+                                         (srcloc-position srcloc)
+                                         (srcloc-span srcloc))]
+                           [(and (symbol? (srcloc-source srcloc))
+                                 (text:lookup-port-name (srcloc-source srcloc)))
+                            =>
+                            (lambda (editor)
+                              (make-srcloc editor
+                                           (srcloc-line srcloc)
+                                           (srcloc-column srcloc)
+                                           (srcloc-position srcloc)
+                                           (srcloc-span srcloc)))]
+                           [else srcloc]))
+                       locs))))
       
       (define highlights-can-be-reset (make-parameter #t))
       (define/public (reset-highlighting)
@@ -949,7 +930,7 @@ TODO
                                   (floor (/ new-limit 1024 1024))))
                      frame
                      '(default=1 stop)
-                     )])
+                     #:dialog-mixin frame:focus-table-mixin)])
           (when (equal? ans 3)
             (set-custodian-limit new-limit)
             (preferences:set 'drracket:child-only-memory-limit new-limit))
@@ -980,7 +961,8 @@ TODO
                                      (and only-whitespace-afterwards?
                                           (submit-predicate this prompt-position))))])
                         (pred 
-                         ;; no good! giving away the farm here. need to hand over a proxy that is limited to just read access
+                         ;; no good! giving away the farm here. need to hand
+                         ;; over a proxy that is limited to just read access
                          (open-input-text-editor this prompt-position)
                          (only-whitespace-after-insertion-point)))]
                      [else
@@ -1101,6 +1083,7 @@ TODO
         (set! in-evaluation? #t)
         (update-running #t)
         (set! need-interaction-cleanup? #t)
+        (define the-after-expression (after-expression))
         
         (run-in-evaluation-thread
          (λ () ; =User=, =Handler=, =No-Breaks=
@@ -1134,7 +1117,8 @@ TODO
                                   (λ args
                                     (abort-current-continuation 
                                      (default-continuation-prompt-tag))))))
-                          (λ x (for-each (λ (x) ((current-print) x)) x)))
+                          (λ x (parameterize ([pretty-print-columns pretty-print-width])
+                                 (for-each (λ (x) ((current-print) x)) x))))
                          (loop)))))))
               (default-continuation-prompt-tag)
               (λ args (void)))
@@ -1148,6 +1132,11 @@ TODO
                      (send lang front-end/finished-complete-program settings))))
                 (default-continuation-prompt-tag)
                 (λ args (void))))
+             
+             (when the-after-expression 
+               (call-with-continuation-prompt
+                (λ () 
+                  (the-after-expression))))
              
              (set! in-evaluation? #f)
              (update-running #f)
@@ -1168,7 +1157,7 @@ TODO
       
       (define/private shutdown-user-custodian ; =Kernel=, =Handler=
         ; Use this procedure to shutdown when in the middle of other cleanup
-        ;  operations, such as when the user clicks "Execute".
+        ;  operations, such as when the user clicks "Run".
         ; Don't use it to kill a thread where other, external cleanup
         ;  actions must occur (e.g., the exit handler for the user's
         ;  thread). In that case, shut down user-custodian directly.
@@ -1280,7 +1269,8 @@ TODO
                               (queue-callback (λ () (new-log-message vec))))
                             (loop))))))))
                  
-                 (let ([drscheme-exit-handler
+                 (initialize-parameters snip-classes)
+                 (let ([drracket-exit-handler
                         (λ (x)
                           (parameterize-break
                            #f
@@ -1289,15 +1279,13 @@ TODO
                                (queue-callback
                                 (λ ()
                                   (set! user-exit-code 
-                                        (if (and (integer? x)
-                                                 (<= 0 x 255))
-                                            x
+                                        (if (exact-integer? x)
+                                            (modulo x 256)
                                             0))
                                   (semaphore-post s))))
                              (semaphore-wait s)
                              (custodian-shutdown-all user-custodian))))])
-                   (exit-handler drscheme-exit-handler))
-                 (initialize-parameters snip-classes))))
+                   (exit-handler drracket-exit-handler)))))
             
 
             (queue-user/wait
@@ -1337,7 +1325,9 @@ TODO
               (when raised-exn?
                 (fprintf 
                  (current-error-port)
-                 "copied exn raised when setting up snip values (thunk passed as third argume to drracket:language:add-snip-value)\n")
+                 (string-append
+                  "copied exn raised when setting up snip values"
+                  " (thunk passed as third argume to drracket:language:add-snip-value)\n"))
                 (raise exn)))
             
             ;; allow extensions to this class to do some setup work
@@ -1409,7 +1399,8 @@ TODO
                          #f
                          (or (get-top-level-window) (get-can-close-parent))
                          '(default=1 caution)
-                         2)
+                         2
+                         #:dialog-mixin frame:focus-table-mixin)
                         1)]
                [(let ([user-eventspace (get-user-eventspace)])
                   (and user-eventspace
@@ -1423,7 +1414,8 @@ TODO
                          #f
                          (or (get-top-level-window) (get-can-close-parent))
                          '(default=1 caution)
-                         2)
+                         2
+                         #:dialog-mixin frame:focus-table-mixin)
                         1)]
                [else #t])
              (inner #t can-close?)))
@@ -1827,7 +1819,8 @@ TODO
           (set! previous-expr-pos -1)
           (add-to-previous-exprs snips)))
       
-      (define/public (reset-pretty-print-width)
+      (define pretty-print-width (pretty-print-columns))
+      (define/private (reset-pretty-print-width)
         (let* ([standard (send (get-style-list) find-named-style "Standard")])
           (when standard
             (let* ([admin (get-admin)]
@@ -1845,8 +1838,7 @@ TODO
                      [new-columns (max min-columns 
                                        (floor (/ width char-width)))])
                 (send dc set-font old-font)
-                (pretty-print-columns new-columns))))))
-
+                (set! pretty-print-width new-columns))))))
       
       ;; get-frame : -> (or/c #f (is-a?/c frame))
       (define/private (get-frame)
@@ -2055,8 +2047,14 @@ TODO
         (super-new))))
   
   (define -text% 
-    (drs-bindings-keymap-mixin
-     (text-mixin 
+    (text-mixin 
+     ;; drs-bindings-keymap-mixin has to come
+     ;; before text-mixin so that the keymaps 
+     ;; get added in the right order (specifically
+     ;; so that esc;n and esc;p work right in the
+     ;; repl (prev and next interaction) and in the defs
+     ;; (previous and next error))
+     (drs-bindings-keymap-mixin
       (text:ports-mixin
        (scheme:text-mixin
         (color:text-mixin

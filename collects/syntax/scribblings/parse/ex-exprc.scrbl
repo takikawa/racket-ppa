@@ -6,7 +6,7 @@
           "parse-common.rkt"
           (for-label racket/class))
 
-@title[#:tag "exprc"]{Contracts on macro sub-expressions}
+@title[#:tag "exprc"]{Contracts on Macro Sub-expressions}
 
 Just as procedures often expect certain kinds of values as arguments,
 macros often have expectations about the expressions they are
@@ -23,11 +23,11 @@ the parameter expressions.
     [(_ ((p v:expr) ...) body:expr)
      #:declare p (expr/c #'parameter?
                          #:name "parameter argument")
-     #'(parameterize ((p.c v) ...) body)]))
-(myparameterize ((current-input-port
-                  (open-input-string "(1 2 3)")))
+     #'(parameterize ([p.c v] ...) body)]))
+(myparameterize ([current-input-port
+                  (open-input-string "(1 2 3)")])
   (read))
-(myparameterize (('whoops 'something))
+(myparameterize (['whoops 'something])
   'whatever)
 ]
 

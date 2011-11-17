@@ -6,13 +6,14 @@
           (for-label racket/base
                      slideshow
                      unstable/gui/ppict
-                     unstable/gui/pslide))
+                     unstable/gui/pslide
+                     unstable/gui/pict))
 
 @title[#:tag "ppict"]{Progressive Picts and Slides}
 @unstable[@author+email["Ryan Culpepper" "ryanc@racket-lang.org"]]
 
 @(define the-eval (make-base-eval))
-@(the-eval '(require slideshow/pict unstable/gui/ppict))
+@(the-eval '(require slideshow/pict unstable/gui/ppict unstable/gui/private/tag-pict))
 
 @section[#:tag "ppicts"]{Progressive Picts}
 
@@ -143,13 +144,21 @@ Creates a @tech{progressive pict} with the given base pict @racket[p]
 and the placer @racket[pl].
 }
 
+@deftogether[[
 @defproc[(ppict-add [pp ppict?]
-                    [elem (or/c pict? real? #f)] ...)
-         pict?]{
+                    [elem (or/c pict? real? #f 'next)] ...)
+         pict?]
+@defproc[(ppict-add* [pp ppict?]
+                     [elem (or/c pict? real? #f 'next)] ...)
+         (values pict? (listof pict?))]]]{
 
 Creates a new pict by adding each @racket[elem] pict on top of
 @racket[pp] according to @racket[pp]'s placer. The result pict may or
-may not be a @tech{progressive pict}, depending on the placer used.
+may not be a @tech{progressive pict}, depending on the placer
+used. The @racket[ppict-add] function only the final pict; any
+occurrences of @racket['next] are ignored. The @racket[ppict-add*]
+function returns two values: the final pict and a list of all partial
+picts emitted due to @racket['next] (the final pict is not included).
 
 An @racket[elem] that is a real number changes the spacing for
 subsequent additions. A @racket[elem] that is @racket[#f] is
@@ -342,28 +351,6 @@ reference point is computed by @racket[y-placer].
                                 (at-find-pict 'red-fish))
           (text "red fish"))
 ]
-}
-
-
-@subsection{Tagging picts}
-
-@defproc[(tag-pict [p pict?] [tag symbol?]) pict?]{
-
-Returns a pict like @racket[p] that carries a symbolic tag. The tag
-can be used with @racket[find-tag] to locate the pict.
-}
-
-@defproc[(find-tag [p pict?] [find tag-path?])
-         (or/c pict-path? #f)]{
-
-Locates a sub-pict of @racket[p]. Returns a pict-path that can be used
-with functions like @racket[lt-find], etc.
-}
-
-@defproc[(tag-path? [x any/c]) boolean?]{
-
-Returns @racket[#t] if @racket[x] is a symbol or a non-empty list of
-symbols, @racket[#f] otherwise.
 }
 
 

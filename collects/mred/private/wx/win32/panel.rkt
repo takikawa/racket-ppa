@@ -81,6 +81,10 @@
       (for ([c (in-list children)])
         (send c show-children)))
 
+    (define/override (refresh-all-children)
+      (for ([child (in-list children)])
+        (send child refresh)))
+
     (define/override (wants-mouse-capture? control-hwnd)
       (ptr-equal? (get-client-hwnd) control-hwnd))
 
@@ -89,8 +93,6 @@
     (define/public (set-label-position pos) (set! lbl-pos pos))
     
     (define/public (set-item-cursor x y) (void))))
-
-(define WS_EX_STATICEDGE        #x00020000)
 
 (define panel% 
   (class (panel-mixin window%)
@@ -101,14 +103,15 @@
 
     (super-new [parent parent]
                [hwnd 
-                (CreateWindowExW (if (memq 'border style)
-                                     WS_EX_STATICEDGE
-                                     0)
+                (CreateWindowExW 0
                                  (if (send parent is-frame?)
                                      "PLTPanel"
                                      "PLTTabPanel")
                                  #f
-                                 (bitwise-ior WS_CHILD WS_CLIPSIBLINGS)
+                                 (bitwise-ior WS_CHILD WS_CLIPSIBLINGS
+                                              (if (memq 'border style)
+                                                  WS_BORDER
+                                                  0))
                                  0 0 w h
                                  (send parent get-content-hwnd)
                                  #f

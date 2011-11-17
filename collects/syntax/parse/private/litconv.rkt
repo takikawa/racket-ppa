@@ -1,14 +1,25 @@
 #lang racket/base
 (require (for-syntax racket/base
+                     unstable/lazy-require
                      "sc.rkt"
                      "lib.rkt"
+                     "kws.rkt"
                      racket/syntax
-                     syntax/keyword
-                     "rep-data.rkt"
-                     "rep.rkt"
-                     "kws.rkt")
-         "runtime.rkt"
+                     syntax/private/keyword)
+         syntax/parse/private/residual-ct ;; keep abs. path
+         syntax/parse/private/residual    ;; keep abs. path
          (only-in unstable/syntax phase-of-enclosing-module))
+(begin-for-syntax
+ (lazy-require
+  [syntax/parse/private/rep ;; keep abs. path
+   (parse-kw-formals
+    check-conventions-rules
+    create-aux-def)]))
+;; FIXME: workaround for phase>0 bug in racket/runtime-path (and thus lazy-require)
+;; Without this, dependencies don't get collected.
+(require racket/runtime-path (for-meta 2 '#%kernel))
+(define-runtime-module-path-index _unused_ 'syntax/parse/private/rep)
+
 (provide define-conventions
          define-literal-set
          literal-set->predicate
@@ -44,6 +55,8 @@
        (define/with-syntax (class-name ...)
          (map den:delayed-class dens))
 
+       ;; FIXME: could move make-den:delayed to user of conventions
+       ;; and eliminate from residual.rkt
        #'(begin
            (define-syntax h.name
              (make-conventions
@@ -200,7 +213,7 @@ Use cases, explained:
     (for/or ([lit (in-list lits)])
       (let ([lit-id (car lit)]
             [lit-phase (cadr lit)])
-        (free-identifier=?/phases x phase lit-id lit-phase)))))
+        (free-identifier=? x lit-id phase lit-phase)))))
 
 ;; Literal sets
 
@@ -209,7 +222,8 @@ Use cases, explained:
    begin0
    define-values
    define-syntaxes
-   define-values-for-syntax
+   define-values-for-syntax ;; kept for compat.
+   begin-for-syntax
    set!
    let-values
    letrec-values

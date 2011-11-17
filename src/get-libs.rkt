@@ -6,7 +6,7 @@
 ;; without using bytecode.
 
 (define url-host "download.racket-lang.org")
-(define url-path "/libs/3/")
+(define url-path "/libs/4/")
 (define url-base (string-append "http://" url-host url-path))
 
 (provide all-files+sizes)
@@ -22,9 +22,9 @@
       ["libeay32.dll" 1089536]
       ["ssleay32.dll" 237568]]
      [win32/x86_64
-     ["libiconv-2.dll" 1378028]
-     ["libeay32.dll" 1293824]
-     ["ssleay32.dll" 260608]]]
+      ["libiconv-2.dll" 1378028]
+      ["libeay32.dll" 1410560]
+      ["ssleay32.dll" 247808]]]
     ;; GUI Libraries
     [gui
      [i386-macosx
@@ -84,7 +84,6 @@
       ["libpangocairo-1.0-0.dll" 94625]
       ["libpangowin32-1.0-0.dll" 102210]
       ["libpangoft2-1.0-0.dll" 679322]
-      ["libplplot.dll" 245760]
       ["libfit.dll" 73728]
       ,@(if (getenv "PLT_WIN_GTK")
           '(["libatk-1.0-0.dll" 153763]
@@ -96,7 +95,7 @@
             ["gtkrc" 1181])
           '())]
      [win32/x86_64
-      ["libjpeg-7.dll" 224768]
+      ["libjpeg-8.dll" 214016]
       ["libcairo-2.dll" 1266147]
       ["libpango-1.0-0.dll" 423199]
       ["libexpat-1.dll" 263006]
@@ -112,8 +111,13 @@
       ["libpangocairo-1.0-0.dll" 185168]
       ["libpangowin32-1.0-0.dll" 192656]
       ["libpangoft2-1.0-0.dll" 1188615]
-      ["libplplot.dll" 248832]
-      ["libfit.dll" 69120]]]))
+      ["libfit.dll" 69120]]]
+    ;; Databse libraries
+    [db
+     [win32/i386
+      ["sqlite3.dll" 570947]]
+     [win32/x86_64
+      ["sqlite3.dll" 617472]]]))
 
 (define-values [package dest-dir]
   (command-line #:args [package [dest-dir (current-directory)]]

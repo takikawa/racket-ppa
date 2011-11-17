@@ -443,7 +443,9 @@ If a snip class's name is of the form
 
 The second @racket[lib] form in @racket["((lib ...) (lib ...))"]
  supplies a reader for a text-only version of the snip. See
- @racketmodname[wxme] for more information.
+ @secref["snipclassmapping"] for more information on how 
+ such snipclasses work (and generally see the
+ @racketmodname[wxme] library).
 
 A snip class's name can also be just @racket["(lib ...)"], which is
  used like the first part of the two-@racket[lib] form. However, this
@@ -535,10 +537,10 @@ See also @method[editor<%> write-headers-to-file] and
 @section[#:tag "editoreol"]{End of Line Ambiguity}
 
 Because an editor can force a line break even when there is no
- carriage return item, a @techlink{position} alone does not always
+ newline item, a @techlink{position} alone does not always
  specify a @techlink{location} for the caret. Consider the last
- @techlink{position} of a line that is soft-broken (i.e., no carriage
- return is present): there is no @techlink{item} between the last
+ @techlink{position} of a line that is soft-broken (i.e., no newline
+ is present): there is no @techlink{item} between the last
  @techlink{item} of the line and the first @techlink{item} of the next
  line, so two @techlink{location}s (one end-of-line and one
  start-of-line) map to the same @techlink{position}.
@@ -568,8 +570,8 @@ Text can be extracted from an editor in either of two forms:
  @item{@deftech{Simple text}, where there is one character per
  @techlink{item}. @techlink{Item}s that are characters are mapped to
  themselves, and all other @techlink{item}s are mapped to a
- period. Line breaks are represented by carriage-return characters
- (ASCII 13).}
+ period. Line breaks are represented by newline characters
+ (ASCII 10).}
 
  @item{@deftech{Flattened text}, where each @techlink{item} can map to
  an arbitrary string.  @techlink{Item}s that are characters are still

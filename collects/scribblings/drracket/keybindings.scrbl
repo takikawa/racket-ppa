@@ -1,7 +1,9 @@
 #lang scribble/doc
 @(require "common.rkt"
-          scribble/struct scribble/bnf racket/list mrlib/tex-table
-          (for-label racket/gui/base))
+          scribble/struct scribble/bnf
+          racket/list racket/runtime-path racket/port
+          mrlib/tex-table
+          (for-label drracket/tool-lib))
 
 @(define (keybinding key . desc)
    (let* ([keys (if (string? key) (list key) key)]
@@ -9,9 +11,9 @@
      (apply item @index[(map (lambda (x) (format "~a keybinding" x)) keys) key-str] " : " desc)))
 
 @(define-syntax-rule (def-mod-beg id)
-  (begin
-   (require (for-label racket/base))
-   (define id @racket[#%module-begin])))
+   (begin
+     (require (for-label racket/base))
+     (define id @racket[#%module-begin])))
 @(def-mod-beg mz-mod-begin)
 
 @title{Keyboard Shortcuts}
@@ -51,10 +53,11 @@ items.  Those keybindings will behave according to the menus, unless
 the @onscreen{Enable keybindings in menus} preference is unchecked.
 
 @index['("Emacs keybindings")]{If} you are most familiar with
-Emacs-style key bindings, you should uncheck the @onscreen{Enable
+Emacs-style key bindings (especially on windows or some linux installations
+where the control key is, by default, for the menu shortcuts), 
+you should uncheck the @onscreen{Enable
 keybindings in menus} preference. Many of the keybindings below are
-inspired by Emacs.}
-
+inspired by Emacs.
 
 @section{Moving Around}
 
@@ -89,8 +92,7 @@ inspired by Emacs.}
 @keybinding["M-C-down"]{move down into an embedded editor}
 @keybinding["A-C-down"]{move down into an embedded editor}
 
-@keybinding["C-F6"]{move the cursor from the definitions
-window to the interactions window (or the search window, if it is open).}
+@keybinding["C-C C-Z"]{move the cursor to the interactions window}
 ]
 
 @section{Editing Operations}
@@ -150,7 +152,7 @@ window to the interactions window (or the search window, if it is open).}
 @keybinding["C-r"]{search for string backward}
 ]
 
-@section{Miscellaneous}
+@section{Evaluation}
 
 @itemize[
 @keybinding["F5"]{Run}
@@ -227,6 +229,91 @@ s-exp framework/keybinding-lang
 (keybinding "c:a" (λ (editor evt) (send editor insert "!")))
 ]
 
-Note that DrRacket does not reload this file automatically when you
-make a change, so you'll need to restart DrRacket to see changes to
+Since the file contains plain Racket code, you can write keybindings
+files that use DrRacket's @seclink[#:doc '(lib
+"scribblings/tools/tools.scrbl") "implementing-tools"]{Extension API}.
+For example, the following file binds ``control-t'' and ``control-='' to
+a execute the program and open a new tab respectively, as they were used
+before version 5.2.
+
+@racketmod[
+s-exp framework/keybinding-lang
+
+(define modifiers
+  (apply string-append
+         (map (λ (p)
+                (case p
+                  [(ctl) "c:"] [(cmd) "d:"] [(alt meta) "m:"]
+                  [(shift) "s:"] [(option) "a:"]))
+              (get-default-shortcut-prefix))))
+
+(define-syntax-rule (frame-key key command)
+  (keybinding
+   (string-append modifiers key)
+   (λ (ed evt)
+     (when (is-a? ed text:basic<%>)
+       (define fr (send ed get-top-level-window))
+       ;; note: fr could be #f
+       (when fr (send fr command))))))
+
+(frame-key "t" execute-callback)
+(frame-key "=" create-new-tab)
+]
+
+Another example, this file rebinds ``control-w'' to delete the word
+behind the insertion point, but it does it by setting a new key to 
+be an existing keyboard shortcut. If you see a key in the 
+@onscreen{Show Active Keybindings} dialog (in the @onscreen{Keybindings}
+submenu of the @onscreen{Edit} menu), then you can use its
+name with the new keystroke you want, like this:
+
+@racketmod[
+s-exp framework/keybinding-lang
+
+(define (rebind key command)
+  (keybinding
+   key
+   (λ (ed evt)
+     (send (send ed get-keymap) call-function command ed evt #t))))
+
+(rebind "c:w" "backward-kill-word")
+]
+
+Note that DrRacket does not reload keybindings files automatically when you
+make changes, so you'll need to restart DrRacket to see changes to
 the file.
+
+@section{Sending Program Fragments to the REPL}
+
+@index['("Emacs keybindings")]Users comfortable with Emacs and the conventional Lisp/Scheme-style
+of interaction with an ``inferior process'' commonly request
+keybindings in DrRacket that send program fragments to be evaluated
+at the prompt. This style of interaction is fraught with difficulty, 
+especially for beginners, and so DrRacket, by default, does not support
+it. Instead, clicking DrRacket's ``Run'' button starts with a clean slate
+and sends the entire contents of the definitions window, ensuring that
+the state in the REPL matches what you would expect by reading
+the source code of the program.
+
+Based on years of experience with Emacs modes, some of the authors 
+consider this mode of interaction also appropriate for experienced 
+programmers. Indeed, they go through great effort to mimic this 
+behavior in Emacs. 
+
+That said, some people may wish to use such incremental keystroke modes
+anyway. Therefore the remainder of this section illustrates how to add such
+an incremental mode for your personal use with an example keybindings
+file. Specifically, the file shows how to add the ability to send
+expressions piecemeal to the interactions window. It also demonstrates how
+to pull together a bunch of pieces of DrRacket's implementation and its
+libraries to implement keystrokes. 
+
+@(define-runtime-path incremental-keybindings.rkt "incremental-keybindings.rkt")
+@(let ([sp (open-output-string)])
+   (call-with-input-file incremental-keybindings.rkt
+     (λ (port)
+       (copy-port port sp)))
+   (codeblock (get-output-string sp)))
+
+Others may wish to use the above example to invent other keystrokes for
+making work in DrRacket convenient. 

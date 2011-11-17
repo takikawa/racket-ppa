@@ -1,8 +1,10 @@
 #lang racket/base
 
 (require "manual.rkt" "struct.rkt" "scheme.rkt" "decode.rkt"
-         racket/string racket/list racket/file
-         racket/sandbox racket/promise racket/port file/convertible
+         racket/list
+         file/convertible ;; attached into new namespace via anchor
+         racket/sandbox racket/promise racket/port
+         racket/gui/dynamic
          (for-syntax racket/base))
 
 (provide interaction
@@ -40,7 +42,7 @@
 (namespace-require '(for-syntax racket/base))
 
 (define (literal-string style s)
-  (let ([m (regexp-match #rx"^(.*)(  +)(.*)$" s)])
+  (let ([m (regexp-match #rx"^(.*)(  +|^ )(.*)$" s)])
     (if m
       (make-element #f (list (literal-string style (cadr m))
                              (hspace (string-length (caddr m)))
@@ -148,11 +150,11 @@
                           val-list)))])
               (loop (cdr expr-paras) (cdr val-list+outputs) #f))))])
     (if inset?
-      (let ([p (code-inset (make-table #f lines))])
+      (let ([p (code-inset (make-table block-color lines))])
         (if title
-          (make-table #f (list (list.flow.list title) (list.flow.list p)))
+          (make-table block-color (list (list.flow.list title) (list.flow.list p)))
           p))
-      (make-table #f (if title (cons (list.flow.list title) lines) lines)))))
+      (make-table block-color (if title (cons (list.flow.list title) lines) lines)))))
 
 ;; extracts from a datum or syntax object --- while keeping the
 ;; syntax-objectness of the original intact, instead of always
@@ -299,7 +301,12 @@
          e)))))
 
 (define (make-base-eval-factory mod-paths)
-  (let ([ns (delay (let ([ns (make-base-empty-namespace)])
+  (let ([ns (delay (let ([ns 
+                          ;; This namespace-creation choice needs to be consistent
+                          ;; with the sandbox (i.e., with `make-base-eval')
+                          (if gui?
+                              ((gui-dynamic-require 'make-gui-empty-namespace))
+                              (make-base-empty-namespace))])
                      (parameterize ([current-namespace ns])
                        (for ([mod-path (in-list mod-paths)])
                          (dynamic-require mod-path #f)))
@@ -307,22 +314,22 @@
     (lambda ()
       (let ([ev (make-base-eval)]
             [ns (force ns)])
-        ((scribble-eval-handler)
-         ev #f
-         `(,(lambda ()
-              (for ([mod-path (in-list mod-paths)])
-                (namespace-attach-module ns mod-path)))))
+        (call-in-sandbox-context
+         ev
+         (lambda ()
+           (for ([mod-path (in-list mod-paths)])
+             (namespace-attach-module ns mod-path))))
         ev))))
 
 (define (make-eval-factory mod-paths)
   (let ([base-factory (make-base-eval-factory mod-paths)])
     (lambda ()
       (let ([ev (base-factory)])
-        ((scribble-eval-handler)
-         ev #f
-         `(,(lambda ()
-              (for ([mod-path (in-list mod-paths)])
-                (namespace-require mod-path)))))
+        (call-in-sandbox-context
+         ev
+         (lambda ()
+           (for ([mod-path (in-list mod-paths)])
+             (namespace-require mod-path))))
         ev))))
 
 (define (close-eval e)
@@ -380,51 +387,51 @@
 
 (define-syntax racketinput*
   (syntax-rules (eval:alts code:comment)
-    [(_ (code:comment . rest)) (racketblock0 (code:comment . rest))]
-    [(_ (eval:alts a b)) (racketinput* a)]
-    [(_ e) (racketinput0 e)]))
+    [(_ #:escape id (code:comment . rest)) (racketblock0 #:escape id (code:comment . rest))]
+    [(_ #:escape id (eval:alts a b)) (racketinput* #:escape id a)]
+    [(_ #:escape id e) (racketinput0 #:escape id e)]))
 
 (define-code racketblock0+line (to-paragraph/prefix "" "" (list " ")))
 
 (define-syntax (racketdefinput* stx)
   (syntax-case stx (define define-values define-struct)
-    [(_ (define . rest))
+    [(_ #:escape id (define . rest))
      (syntax-case stx ()
-       [(_ e) #'(racketblock0+line e)])]
-    [(_ (define-values . rest))
+       [(_ #:escape _ e) #'(racketblock0+line #:escape id e)])]
+    [(_ #:escape id (define-values . rest))
      (syntax-case stx ()
-       [(_ e) #'(racketblock0+line e)])]
-    [(_ (define-struct . rest))
+       [(_ #:escape _ e) #'(racketblock0+line #:escape id e)])]
+    [(_ #:escape id (define-struct . rest))
      (syntax-case stx ()
-       [(_ e) #'(racketblock0+line e)])]
-    [(_ (code:line (define . rest) . rest2))
+       [(_ #:escape _ e) #'(racketblock0+line #:escape id e)])]
+    [(_ #:escape id (code:line (define . rest) . rest2))
      (syntax-case stx ()
-       [(_ e) #'(racketblock0+line e)])]
-    [(_ e) #'(racketinput* e)]))
+       [(_ #:escape _ e) #'(racketblock0+line #:escape id e)])]
+    [(_ #:escape id e) #'(racketinput* #:escape id e)]))
 
 (define (do-titled-interaction who inset? ev t shows evals)
   (interleave inset? t shows (map (do-eval ev who) evals)))
 
 (define-syntax titled-interaction
   (syntax-rules ()
-    [(_ who inset? #:eval ev t racketinput* e ...)
+    [(_ who inset? t racketinput* #:eval ev #:escape unsyntax-id e ...)
      (do-titled-interaction
-      'who inset? ev t (list (racketinput* e) ...) (list (quote-expr e) ...))]
+      'who inset? ev t (list (racketinput* #:escape unsyntax-id e) ...) (list (quote-expr e) ...))]
+    [(_ who inset? t racketinput* #:eval ev e ...)
+     (titled-interaction
+      who inset? t racketinput* #:eval ev #:escape unsyntax e ...)]
+    [(_ who inset? t racketinput* #:escape unsyntax-id e ...)
+     (titled-interaction
+      who inset? t racketinput* #:eval (make-base-eval) #:escape unsyntax-id e ...)]
     [(_ who inset? t racketinput* e ...)
      (titled-interaction
-      who inset? #:eval (make-base-eval) t racketinput* e ...)]))
+      who inset? t racketinput* #:eval (make-base-eval) e ...)]))
 
 (define-syntax (-interaction stx)
   (syntax-case stx ()
-    [(_ who #:eval ev e ...)
-     (syntax/loc stx
-       (titled-interaction who #f #:eval ev #f racketinput* e ...))]
     [(_ who e ...)
      (syntax/loc stx
        (titled-interaction who #f #f racketinput* e ...))]))
-
-(define (code-inset p)
-  (make-blockquote 'code-inset (list p)))
 
 (define-syntax (interaction stx)
   (syntax-case stx ()
@@ -434,56 +441,69 @@
   (syntax-case stx ()
     [(H e ...) (syntax/loc stx (-interaction H e ...))]))
 
-(define-syntax racketblock+eval
+(define-syntax racketblockX+eval
   (syntax-rules ()
-    [(_ #:eval ev e ...)
+    [(_ racketblock #:eval ev #:escape unsyntax-id e ...)
      (let ([eva ev])
        (#%expression
         (begin (interaction-eval #:eval eva e) ...
-               (racketblock e ...))))]
+               (racketblock #:escape unsyntax-id e ...))))]
+    [(_ racketblock #:eval ev e ...)
+     (racketblockX+eval racketblock #:eval ev #:escape unsyntax e ...)]
+    [(_ racketblock #:escape unsyntax-id e ...)
+     (racketblockX+eval racketblock #:eval (make-base-eval) #:escape unsyntax-id e ...)]
+    [(_ racketblock e ...)
+     (racketblockX+eval racketblock #:eval (make-base-eval) #:escape unsyntax e ...)]))
+
+(define-syntax racketblock+eval
+  (syntax-rules ()
     [(_ e ...)
-     (racketblock+eval #:eval (make-base-eval) e ...)]))
+     (racketblockX+eval racketblock e ...)]))
 
 (define-syntax racketblock0+eval
   (syntax-rules ()
-    [(_ #:eval ev e ...)
-     (let ([eva ev])
-       (#%expression (begin (interaction-eval #:eval eva e) ...
-                            (racketblock0 e ...))))]
     [(_ e ...)
-     (racketblock0+eval #:eval (make-base-eval) e ...)]))
+     (racketblockX+eval racketblock0 e ...)]))
 
 (define-syntax racketmod+eval
   (syntax-rules ()
-    [(_ #:eval ev name e ...)
+    [(_ #:eval ev #:escape unsyntax-id name e ...)
      (let ([eva ev])
        (#%expression
         (begin (interaction-eval #:eval eva e) ...
-               (racketmod name e ...))))]
+               (racketmod #:escape unsyntax-id name e ...))))]
+    [(_ #:eval ev name e ...)
+     (racketmod+eval #:eval ev #:escape unsyntax name e ...)]
+    [(_ #:escape unsyntax-id name e ...)
+     (racketmod+eval #:eval (make-base-eval) #:escape unsyntax-id name e ...)]
     [(_ name e ...)
-     (racketmod+eval #:eval (make-base-eval) name e ...)]))
-
-(define-syntax (def+int stx)
-  (syntax-case stx ()
-    [(H #:eval ev def e ...)
-     (syntax/loc stx
-       (let ([eva ev])
-         (column (list (racketblock0+eval #:eval eva def)
-                       blank-line
-                       (-interaction H #:eval eva e ...)))))]
-    [(_ def e ...)
-     (syntax/loc stx (def+int #:eval (make-base-eval) def e ...))]))
+     (racketmod+eval #:eval (make-base-eval) #:escape unsyntax name e ...)]))
 
 (define-syntax (defs+int stx)
   (syntax-case stx ()
-    [(H #:eval ev [def ...] e ...)
+    [(H #:eval ev #:escape unsyntax-id [def ...] e ...)
      (syntax/loc stx
        (let ([eva ev])
-         (column (list (racketblock0+eval #:eval eva def ...)
+         (column (list (racketblock0+eval #:eval eva #:escape unsyntax-id def ...)
                        blank-line
-                       (-interaction H #:eval eva e ...)))))]
+                       (-interaction H #:eval eva #:escape unsyntax-id e ...)))))]
+    [(H #:eval ev [def ...] e ...)
+     (syntax/loc stx (defs+int #:eval ev #:escape unsyntax [def ...] e ...))]
+    [(_ #:escape unsyntax-id [def ...] e ...)
+     (syntax/loc stx (defs+int #:eval (make-base-eval) #:escape unsyntax-id [def ...] e ...))]
     [(_ [def ...] e ...)
      (syntax/loc stx (defs+int #:eval (make-base-eval) [def ...] e ...))]))
+
+(define-syntax def+int
+  (syntax-rules ()
+    [(H #:eval ev #:escape unsyntax-id def e ...)
+     (defs+int #:eval ev #:escape unsyntax-id [def] e ...)]
+    [(H #:eval ev def e ...)
+     (defs+int #:eval ev [def] e ...)]
+    [(H #:escape unsyntax-id def e ...)
+     (defs+int #:escape unsyntax-id [def] e ...)]
+    [(H def e ...)
+     (defs+int [def] e ...)]))
 
 (define example-title
   (make-paragraph (list "Example:")))
@@ -493,41 +513,30 @@
 (define-syntax pick-example-title
   (syntax-rules ()
     [(_ e) example-title]
+    [(_ #:eval ev e) example-title]
+    [(_ #:escape id e) example-title]
+    [(_ #:eval ev #:escape id e) example-title]
     [(_ . _) examples-title]))
 
 (define-syntax (examples stx)
   (syntax-case stx ()
-    [(H #:eval ev e ...)
-     (syntax/loc stx
-       (titled-interaction
-        H #t #:eval ev (pick-example-title e ...) racketinput* e ...))]
     [(H e ...)
      (syntax/loc stx
        (titled-interaction
         H #t (pick-example-title e ...)  racketinput* e ...))]))
 (define-syntax (examples* stx)
   (syntax-case stx ()
-    [(H #:eval ev example-title e ...)
-     (syntax/loc stx
-       (titled-interaction H #t #:eval ev example-title racketinput* e ...))]
     [(H example-title e ...)
      (syntax/loc stx
        (titled-interaction H #t example-title racketinput* e ...))]))
 (define-syntax (defexamples stx)
   (syntax-case stx ()
-    [(H #:eval ev e ...)
-     (syntax/loc stx
-       (titled-interaction
-        H #t #:eval ev (pick-example-title e ...)  racketdefinput* e ...))]
     [(H e ...)
      (syntax/loc stx
        (titled-interaction
         H #t (pick-example-title e ...)  racketdefinput* e ...))]))
 (define-syntax (defexamples* stx)
   (syntax-case stx ()
-    [(H #:eval ev example-title e ...)
-     (syntax/loc stx
-       (titled-interaction H #t #:eval ev example-title racketdefinput* e ...))]
     [(H example-title e ...)
      (syntax/loc stx
        (titled-interaction H #t example-title racketdefinput* e ...))]))

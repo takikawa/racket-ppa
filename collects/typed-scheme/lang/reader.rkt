@@ -4,5 +4,13 @@ typed-scheme
 
 #:read r:read
 #:read-syntax r:read-syntax
+#:info make-info
 
-(require (prefix-in r: "../typed-reader.rkt"))
+(require (prefix-in r: typed-racket/typed-reader))
+
+(define (make-info key default use-default)
+  (case key
+    [(drscheme:toolbar-buttons)
+     (list (dynamic-require 'typed-racket/optimizer/tool/tool
+                            'performance-report-drracket-button))]
+    [else (use-default key default)]))

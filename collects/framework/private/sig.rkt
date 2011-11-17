@@ -97,7 +97,8 @@
   (define-signature autosave-class^
     (autosavable<%>))
   (define-signature autosave^ extends autosave-class^
-    (register
+    (toc-path
+     register
      restore-autosave-files/gui))
   
   (define-signature exit-class^
@@ -180,6 +181,7 @@
      info<%>
      file<%>
      clever-file-format<%>
+     crlf-line-endings<%>
      ports<%>
      input-box<%>
      autocomplete<%>
@@ -217,6 +219,7 @@
      info-mixin
      file-mixin
      clever-file-format-mixin
+     crlf-line-endings-mixin
      ports-mixin
      input-box-mixin
      autocomplete-mixin))
@@ -256,12 +259,12 @@
   
   (define-signature frame-class^
     (basic<%>
+     focus-table<%>
      size-pref<%>
      register-group<%>
      status-line<%>
      standard-menus<%>
      editor<%>
-     open-here<%>
      text<%>
      pasteboard<%>
      delegate<%>
@@ -279,19 +282,18 @@
      pasteboard-info%
      standard-menus%
      editor%
-     open-here%
      text%
      searchable%
      delegate%
      pasteboard%
      
+     focus-table-mixin
      basic-mixin
      size-pref-mixin
      register-group-mixin
      status-line-mixin
      standard-menus-mixin
      editor-mixin
-     open-here-mixin
      text-mixin
      pasteboard-mixin
      delegate-mixin

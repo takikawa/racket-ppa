@@ -1,12 +1,26 @@
-#lang scheme/gui
+#lang racket/gui
 
-(require mzlib/etc
-         lang/prim
-         htdp/error)
+;; ---------------------------------------------------------------------------------------------------
+;; functions that demonstrate how one and the same function can be used in three different contexts
+
+(require mzlib/etc lang/prim lang/htdp-langs-save-file-prefix htdp/error )
 
 (provide-higher-order-primitive convert-gui (f2c))
 (provide-higher-order-primitive convert-repl (f2c))
 (provide-higher-order-primitive convert-file (_ f2c _))
+
+;; ---------------------------------------------------------------------------------------------------
+
+(define IN-ERROR
+  "The input must be a number. Given: ~e\n")
+
+(define OUT-ERROR
+  "The conversion function must produce a number; but it produced ~e")
+
+(define CONVERT-FILE-MESSAGE
+  "It appears as if you created the input file with DrRacket. Please use a different text editor")
+
+;; ---------------------------------------------------------------------------------------------------
 
 (define black-pen  (send the-pen-list find-or-create-pen "BLACK" 2 'solid))
 (define red-brush  (send the-brush-list find-or-create-brush "RED" 'solid))
@@ -88,10 +102,6 @@
     (let-values ([(w h a d) (send (get-dc) get-text-extent "100100100")])
       (min-width (+ 4 (inexact->exact w)))
       (min-height (+ 4 (inexact->exact (* 2 h)))))))
-
-;; ------------------------------------------------------------------------
-(define OUT-ERROR
-  "The conversion function must produce a number; but it produced ~e")
 
 ;; ============================================================================
 ;; MODEL
@@ -222,38 +232,53 @@
              (repl))]
           [else (error 'convert "can't happen")])))))
 
-;; ============================================================================
+;; ---------------------------------------------------------------------------------------------------
 
-;; make-reader-for-f : (number -> number) -> ( -> void)
+;; convert-file : str (num -> num) str -> void
+;; to read a number from file in, to convert it with f, and to write it to out
+(define (convert-file in f out)
+  (check-arg 'convert-file (path-string? in) "string" "first" in)
+  (check-arg 'convert-file (file-exists? in) 
+             (format "name of existing file in ~a" (current-directory))
+             "first" in)
+  (check-proc 'convert-file f 1 "convert-file" "one argument")
+  (check-arg 'convert-file (path-string? out) "string" "third" out)
+  ;; [ -> Void] -> Void 
+  ;; perform the actual conversion on the file after optionally reading a prelude 
+  (define (convert-file prefix)
+    (with-output-to-file out #:exists 'replace 
+      (lambda () (with-input-from-file in (make-reader-for f prefix)))))
+  (with-handlers ((exn:fail:read?
+                   (lambda (x) 
+                     (define message (exn-message x))
+                     (define reader-exception? (regexp-match "#reader" message))
+                     (cond
+                       [reader-exception? 
+                        (with-handlers ((exn:fail:read? (lambda (y) (raise x))))
+                          (convert-file
+                           (lambda ()
+			     (unless (htdp-file-prefix? (current-input-port)) (raise x)))))]
+                       [else (raise x)]))))
+    (convert-file void)))
+
+(define *debug (current-output-port))
+
+;; make-reader-for-f : [Number -> Number] [ -> Void] -> [ -> void]
 ;; make-reader-for-f creates a function that reads numbers from a file
 ;; converts them according to f, and prints the results
 ;; effect: if any of the S-expressions in the file aren't numbers or
 ;;         if any of f's results aren't numbers,
 ;;         the function signals an error
-(define (make-reader-for f)
-  (local ((define (read-until-eof)
-            (let ([in (read)])
-              (cond
-                [(eof-object? in) (void)]
-                [(number? in) (begin (check-and-print (f in)) (read-until-eof))]
-                [else (error 'convert "The input must be a number. Given: ~e\n" in)])))
-          (define (check-and-print out)
-            (cond
-              [(number? out) (printf "~s\n" out)]
-              [else (error 'convert OUT-ERROR out)])))
-    read-until-eof))
-
-;; convert-file : str (num -> num) str -> void
-;; to read a number from file in, to convert it with f, and to write it to out
-(define (convert-file in f out)
-  (check-arg 'convert-file (string? in) "string" "first" in)
-  (check-arg 'convert-file (file-exists? in) 
-             (format "name of existing file in ~a" (current-directory))
-             "first" in)
-  (check-proc 'convert-file f 1 "convert-file" "one argument")
-  (check-arg 'convert-file (string? out) "string" "third" out)
-  (when (file-exists? out)
-    (delete-file out))
-  (with-output-to-file out
-    (lambda () (with-input-from-file in (make-reader-for f)))))
-;  )
+(define (make-reader-for f prefix)
+  (define (read-until-eof)
+    (prefix)
+    (let read-until-eof ()
+      (define in (read))
+      (cond
+        [(eof-object? in) (void)]
+        [(number? in)
+         (define out (f in))
+         (if (number? out) (printf "~s\n" out) (error 'convert OUT-ERROR out))
+         (read-until-eof)]
+        [else (error 'convert IN-ERROR in)])))
+  read-until-eof)

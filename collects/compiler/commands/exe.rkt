@@ -2,6 +2,7 @@
 (require scheme/cmdline
          raco/command-name
          compiler/private/embed
+         launcher/launcher
          dynext/file)
 
 (define verbose (make-parameter #f))
@@ -14,7 +15,7 @@
 (define exe-embedded-flags (make-parameter '("-U" "--")))
 (define exe-embedded-libraries (make-parameter null))
 (define exe-aux (make-parameter null))
-(define exe-embedded-collects-path (make-parameter #f))
+(define exe-embedded-collects-path (make-parameter null))
 (define exe-embedded-collects-dest (make-parameter #f))
 
 (define source-file
@@ -40,6 +41,11 @@
    [("--cgc") "Generate using CGC variant"
     (3m #f)]
    #:multi
+   [("++aux") aux-file "Extra executable info (based on <aux-file> suffix)"
+    (let ([auxes (extract-aux-from-path (path->complete-path aux-file))])
+      (when (null? auxes)
+        (printf " warning: no recognized information from ~s\n" aux-file))
+      (exe-aux (append auxes (exe-aux))))]
    [("++lib") lib "Embed <lib> in executable"
     (exe-embedded-libraries (append (exe-embedded-libraries) (list lib)))]
    [("++exf") flag "Add flag to embed in executable"

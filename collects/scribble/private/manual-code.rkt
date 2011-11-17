@@ -2,16 +2,17 @@
 (require syntax/strip-context
          syntax-color/module-lexer
          "../racket.rkt"
-         "../core.rkt"
          "../base.rkt"
          "manual-scheme.rkt"
+         "manual-style.rkt"
          scribble/core
          (for-syntax racket/base
                      syntax/parse))
 
 (provide codeblock
          codeblock0
-         typeset-code)
+         typeset-code
+         code)
 
 (define-for-syntax (do-codeblock stx)
   (syntax-parse stx
@@ -44,9 +45,6 @@
                                       #'#f))
                      #:line-numbers line-numbers)]))
 
-(define (code-inset p)
-  (make-nested-flow (make-style 'code-inset '()) (list p)))
-
 (define-syntax (codeblock stx) #`(code-inset #,(do-codeblock stx)))
 (define-syntax (codeblock0 stx) (do-codeblock stx))
 
@@ -55,6 +53,7 @@
                       #:indent [indent 2]
                       #:keep-lang-line? [keep-lang-line? #t]
                       #:line-numbers [line-numbers #f]
+                      #:block? [block? #t]
                       . strs)
   (let* ([str (apply string-append strs)]
          [bstr (string->bytes/utf-8 (regexp-replace* #rx"(?m:^$)" str "\xA0"))]
@@ -157,12 +156,13 @@
                                (and (= (cadr a) (cadr b))
                                     (> (cadddr a) (cadddr b))))))]
            [default-color meta-color])
-      (table
+      ((if block? table (lambda (style lines) (make-element #f lines)))
        block-color
        ((if keep-lang-line? values cdr) ; FIXME: #lang can span lines
         (list->lines
          indent
          #:line-numbers line-numbers
+         #:block? block?
          (let loop ([pos 0]
                     [tokens tokens])
            (cond
@@ -192,6 +192,40 @@
                    (split-lines default-color (substring* bstr pos (cadar tokens)))
                    (loop (cadar tokens) tokens))]))))))))
 
+(define (typeset-code-line context expand lang-line . strs)
+  (typeset-code
+   #:context context
+   #:expand expand
+   #:keep-lang-line? (not lang-line)
+   #:block? #f
+   #:indent 0
+   (let ([s (regexp-replace* #px"(?:\\s*(?:\r|\n|\r\n)\\s*)+" (apply string-append strs) " ")])
+     (if lang-line
+         (string-append "#lang " lang-line "\n" s)
+         s))))
+
+(define-syntax (code stx)
+  (syntax-parse stx
+    [(_ (~seq (~or (~optional (~seq #:expand expand-expr:expr)
+                              #:defaults ([expand-expr #'#f])
+                              #:name "#:expand keyword")
+                   (~optional (~seq #:context context-expr:expr)
+                              #:name "#:context keyword")
+                   (~optional (~seq #:lang lang-line-expr:expr)
+                              #:defaults ([lang-line-expr #'#f])
+                              #:name "#:lang-line keyword"))
+              ...)
+        str ...)
+     #`(typeset-code-line #,(if (attribute context-expr)
+                                #'context-expr
+                                (or
+                                 (let ([v #'(str ...)])
+                                   (and (pair? (syntax-e v))
+                                        #`#'#,(car (syntax-e v))))
+                                 #'#f))
+                          expand-expr
+                          lang-line-expr
+                          str ...)]))
 
 (define (split-lines style s)
   (cond
@@ -209,7 +243,9 @@
 
 (define omitable (make-style #f '(omitable)))
 
-(define (list->lines indent-amt l #:line-numbers [line-numbers #f])
+(define (list->lines indent-amt l 
+                     #:line-numbers line-numbers
+                     #:block? block?)
   (define indent-elem (if (zero? indent-amt)
                           ""
                           (hspace indent-amt)))
@@ -235,11 +271,12 @@
 
   (define (make-line accum-line line-number)
     (define rest (cons indent-elem accum-line))
-    (list (paragraph omitable (if line-numbers
-                                  (prepend-line-number line-number rest)
-                                  rest))))
+    (list ((if block? paragraph (lambda (s e) e))
+           omitable 
+           (if line-numbers
+               (prepend-line-number line-number rest)
+               rest))))
 
   (for/list ([l (break-list l 'newline)]
              [i (in-naturals (or line-numbers 1))])
-            (make-line l i)))
-
+    (make-line l i)))

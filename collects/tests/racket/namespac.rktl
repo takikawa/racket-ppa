@@ -40,6 +40,7 @@
                        (mkp "arity-at-least")
                        (mkp "srcloc")
                        (mkp "date")
+                       (mkp "date*")
                        (mkp "exn")
                        (mkp "exn:fail")
                        (mkp "exn:fail:contract")
@@ -49,6 +50,7 @@
                        (mkp "exn:fail:contract:continuation")
                        (mkp "exn:fail:contract:variable")
                        (mkp "exn:fail:syntax")
+                       (mkp "exn:fail:syntax:unbound")
                        (mkp "exn:fail:read")
                        (mkp "exn:fail:read:eof")
                        (mkp "exn:fail:read:non-char")
@@ -140,9 +142,12 @@
 (module phaser scheme/base 
   (define x (variable-reference->phase
              (#%variable-reference x)))
-  (provide x))
+  (define y (variable-reference->module-base-phase
+             (#%variable-reference y)))
+  (provide x y))
 
 (test 0 dynamic-require ''phaser 'x)
+(test 0 dynamic-require ''phaser 'y)
 
 (let ([s (open-output-string)])
   (parameterize ([current-output-port s])
@@ -157,8 +162,28 @@
             (let ([ns (make-base-namespace)])
               (namespace-attach-module (current-namespace) ''phaser ns)
               (eval '(require 'phaser) ns)
-              (display (eval 'x ns))))))
-  (test "1" get-output-string s))
+              (display (eval 'x ns))
+              (display (eval 'y ns))))))
+  (test "11" get-output-string s))
+
+(let ([s (open-output-string)])
+  (parameterize ([current-output-port s])
+    (let ([ns (make-base-namespace)])
+      (eval '(module m racket/base
+               (require (for-syntax racket/base))
+               (begin-for-syntax
+                (define x 10)
+                (displayln (variable-reference->phase
+                            (#%variable-reference x)))
+                (displayln (variable-reference->module-base-phase
+                            (#%variable-reference x))))))
+      (eval '(require (for-syntax 'm)))
+      (eval '(begin-for-syntax 10))))
+  (test "1\n0\n2\n1\n" get-output-string s))
+
+(err/rt-test (variable-reference->module-declaration-inspector (#%variable-reference)))
+(err/rt-test (variable-reference->module-declaration-inspector (#%variable-reference car)))
+(test (void) eval `(module m racket/base (variable-reference->module-declaration-inspector (#%variable-reference))))
 
 ;; ----------------------------------------
 
@@ -173,6 +198,59 @@
   (define modsrc (variable-reference->module-source (#%variable-reference))))
 
 (test 'va->ms dynamic-require ''va->ms 'modsrc)
+
+;; ----------------------------------------
+;; Check that `namespace-attach-module-declaration' doesn't
+;; trigger the module-name resolver in the wrong namespace:
+
+(let ()
+  (define ns0 (make-base-namespace))
+  (eval '(module sample racket (#%module-begin)) ns0)
+  (define ns1 (make-empty-namespace))
+  (parameterize ([current-namespace ns1])
+    (namespace-attach-module-declaration ns0 ''sample ns1)))
+
+;; ----------------------------------------
+;; Check that `make-base-empty-namespace' is kill-safe,
+;; which amounts to a test that the module-name resolver
+;; is kill-safe. When the test fails, it probably gets
+;; stuck.
+(let ()
+  (for ([i 100])
+    (let ([th (thread (lambda () 
+                        (let loop ()
+                          (make-base-empty-namespace)
+                          ;;(printf "made\n")
+                          (loop))))])
+      (sleep)
+      ;;(printf "~s\n" i)
+      (kill-thread th)))
+  (test #t namespace? (make-base-empty-namespace)))
+
+;; ----------------------------------------
+;; Check module caching by monitoring `current-eval'.
+;; If the module cache works, then it turns out that
+;; the `module-compiled-imports' of modules to evaluate
+;; will be `eq?' the second time around to the first time
+;; around. This is a fragile and imprecise check, but it's
+;; the best idea we have to checking that the module cache
+;; works.
+
+(let ([codes (make-hash)])
+  (define (go-once)
+    (parameterize ([current-namespace (make-base-namespace)]
+                   [current-eval
+                    (let ([orig (current-eval)])
+                      (lambda (x)
+                        (when (syntax? x)
+                          (when (compiled-module-expression? (syntax-e x))
+                            (hash-set! codes (module-compiled-imports (syntax-e x)) #t)))
+                        (orig x)))])
+      (dynamic-require 'racket/string #f)))
+  (go-once)
+  (let ([pre (hash-count codes)])
+    (go-once)
+    (test pre hash-count codes)))
 
 ;; ----------------------------------------
 

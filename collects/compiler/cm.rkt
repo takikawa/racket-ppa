@@ -1,14 +1,15 @@
-#lang scheme/base
+#lang racket/base
 (require syntax/modcode
          syntax/modresolve
          syntax/modread
          setup/main-collects
 	 unstable/file
-         scheme/file
-         scheme/list
-         scheme/path
+         racket/file
+         racket/list
+         racket/path
          racket/promise
-         openssl/sha1)
+         openssl/sha1
+         racket/place)
 
 (provide make-compilation-manager-load/use-compiled-handler
          managed-compile-zo
@@ -22,7 +23,10 @@
          get-file-sha1
          get-compiled-file-sha1
          with-compile-output
-         parallel-lock-client)
+         
+         parallel-lock-client
+         make-compile-lock
+         compile-lock->parallel-lock-client)
 
 (define manager-compile-notify-handler (make-parameter void))
 (define trace (make-parameter void))
@@ -139,11 +143,12 @@
     dir))
 
 (define (touch path)
-  (file-or-directory-modify-seconds 
-   path
-   (current-seconds)
-   (lambda ()
-     (close-output-port (open-output-file path #:exists 'append)))))
+  (with-compiler-security-guard
+   (file-or-directory-modify-seconds 
+    path
+    (current-seconds)
+    (lambda ()
+      (close-output-port (open-output-file path #:exists 'append))))))
 
 (define (try-file-time path)
   (file-or-directory-modify-seconds path #f (lambda () #f)))
@@ -152,7 +157,7 @@
   ;; Attempt to delete, but give up if it doesn't work:
   (with-handlers ([exn:fail:filesystem? void])
     (when noisy? (trace-printf "deleting: ~a" path))
-    (delete-file path)))
+    (with-compiler-security-guard (delete-file path))))
 
 (define (compilation-failure mode path zo-name date-path reason)
   (try-delete-file zo-name)
@@ -165,30 +170,42 @@
 ;;  closed and the file is reliably deleted if there's a break
 (define (with-compile-output path proc)
   (let ([bp (current-break-parameterization)]
-        [tmp-path (make-temporary-file "tmp~a" #f (path-only path))]
+        [tmp-path (with-compiler-security-guard (make-temporary-file "tmp~a" #f (path-only path)))]
         [ok? #f])
     (dynamic-wind
      void
      (lambda ()
        (begin0
-         (let ([out (open-output-file tmp-path #:exists 'truncate/replace)])
+         (let ([out (with-compiler-security-guard (open-output-file tmp-path #:exists 'truncate/replace))])
            (dynamic-wind
             void
             (lambda ()
               (call-with-break-parameterization bp (lambda () (proc out tmp-path))))
             (lambda ()
-              (close-output-port out))))
+              (with-compiler-security-guard (close-output-port out)))))
          (set! ok? #t)))
      (lambda ()
-       (if ok?
-           (if (eq? (system-type) 'windows)
-              (let ([tmp-path2 (make-temporary-file "tmp~a" #f (path-only path))])
-                (with-handlers ([exn:fail:filesystem? void])
-                  (rename-file-or-directory path tmp-path2 #t))
-                (rename-file-or-directory tmp-path path #t)
-                (try-delete-file tmp-path2))
-              (rename-file-or-directory tmp-path path #t))
-           (try-delete-file tmp-path))))))
+       (with-compiler-security-guard
+        (if ok?
+            (if (eq? (system-type) 'windows)
+                (let ([tmp-path2 (make-temporary-file "tmp~a" #f (path-only path))])
+                  (with-handlers ([exn:fail:filesystem? void])
+                    (rename-file-or-directory path tmp-path2 #t))
+                  (rename-file-or-directory tmp-path path #t)
+                  (try-delete-file tmp-path2))
+                (rename-file-or-directory tmp-path path #t))
+            (try-delete-file tmp-path)))))))
+
+(define-syntax-rule
+  (with-compiler-security-guard expr)
+  (parameterize ([current-security-guard (pick-security-guard)]) 
+    expr))
+
+(define compiler-security-guard (make-parameter #f))
+
+(define (pick-security-guard)
+  (or (compiler-security-guard)
+      (current-security-guard)))
 
 (define (get-source-sha1 p)
   (with-handlers ([exn:fail:filesystem? (lambda (exn)
@@ -347,7 +364,7 @@
 
   ;; Write the code and dependencies:
   (when code
-    (make-directory*/ignore-exists-exn code-dir)
+    (with-compiler-security-guard (make-directory*/ignore-exists-exn code-dir))
     (with-compile-output zo-name
       (lambda (out tmp-name)
         (with-handlers ([exn:fail?
@@ -569,16 +586,17 @@
       (begin (trace-printf "checking: ~a" orig-path)
              (do-check))))
 
-(define (managed-compile-zo zo [read-src-syntax read-syntax])
-  ((make-caching-managed-compile-zo read-src-syntax) zo))
+(define (managed-compile-zo zo [read-src-syntax read-syntax] #:security-guard [security-guard #f])
+  ((make-caching-managed-compile-zo read-src-syntax #:security-guard security-guard) zo))
 
-(define (make-caching-managed-compile-zo [read-src-syntax read-syntax])
+(define (make-caching-managed-compile-zo [read-src-syntax read-syntax] #:security-guard [security-guard #f])
   (let ([cache (make-hash)])
     (lambda (src)
       (parameterize ([current-load/use-compiled
                       (make-compilation-manager-load/use-compiled-handler/table
                        cache
-                       #f)])
+                       #f
+                       #:security-guard security-guard)])
         (compile-root (car (use-compiled-file-paths))
                       (path->complete-path src)
                       cache
@@ -586,10 +604,14 @@
                       #f)
         (void)))))
 
-(define (make-compilation-manager-load/use-compiled-handler [delete-zos-when-rkt-file-does-not-exist? #f])
-  (make-compilation-manager-load/use-compiled-handler/table (make-hash) delete-zos-when-rkt-file-does-not-exist?))
+(define (make-compilation-manager-load/use-compiled-handler [delete-zos-when-rkt-file-does-not-exist? #f]
+                                                            #:security-guard 
+                                                            [security-guard #f])
+  (make-compilation-manager-load/use-compiled-handler/table (make-hash) delete-zos-when-rkt-file-does-not-exist?
+                                                            #:security-guard security-guard))
 
-(define (make-compilation-manager-load/use-compiled-handler/table cache delete-zos-when-rkt-file-does-not-exist?)
+(define (make-compilation-manager-load/use-compiled-handler/table cache delete-zos-when-rkt-file-does-not-exist?
+                                                                  #:security-guard [security-guard #f])
   (let ([orig-eval (current-eval)]
         [orig-load (current-load)]
         [orig-registry (namespace-module-registry (current-namespace))]
@@ -608,7 +630,7 @@
                  (define to-delete (path-add-suffix (get-compilation-path (car modes) path) #".zo")) 
                  (when (file-exists? to-delete)
                    (trace-printf "deleting:  ~s" to-delete)
-                 (delete-file to-delete))))]
+                   (with-compiler-security-guard (delete-file to-delete)))))]
             [(or (null? (use-compiled-file-paths))
                  (not (equal? (car modes)
                               (car (use-compiled-file-paths)))))
@@ -633,7 +655,8 @@
                            (namespace-module-registry (current-namespace)))]
             [else
              (trace-printf "processing: ~a" path)
-             (compile-root (car modes) path cache read-syntax #f)
+             (parameterize ([compiler-security-guard security-guard])
+               (compile-root (car modes) path cache read-syntax #f))
              (trace-printf "done: ~a" path)])
       (default-handler path mod-name))
     (when (null? modes)
@@ -649,3 +672,131 @@
 
 (define (get-file-sha1 path)
   (get-source-sha1 path))
+
+(define (make-compile-lock)
+  (define-values (manager-side-chan build-side-chan) (place-channel))
+  (struct pending (response-chan zo-path died-chan-manager-side) #:transparent)
+  (struct running (zo-path died-chan-manager-side) #:transparent)
+  
+  (define currently-locked-files (make-hash))
+  (define pending-requests '())
+  (define running-compiles '())
+  
+  (thread
+   (λ ()
+     (let loop ()
+       (apply
+        sync
+        (handle-evt
+         manager-side-chan
+         (λ (req)
+           (define command (list-ref req 0))
+           (define zo-path (list-ref req 1))
+           (define response-manager-side (list-ref req 2))
+           (define died-chan-manager-side (list-ref req 3))
+           (define compilation-thread-id (list-ref req 4))
+           (case command
+             [(lock)
+              (cond
+                [(hash-ref currently-locked-files zo-path #f)
+                 (log-info (format "compile-lock: ~s ~a already locked" zo-path compilation-thread-id))
+                 (set! pending-requests (cons (pending response-manager-side zo-path died-chan-manager-side)
+                                              pending-requests))
+                 (loop)]
+                [else
+                 (log-info (format "compile-lock: ~s ~a obtained lock" zo-path compilation-thread-id))
+                 (hash-set! currently-locked-files zo-path #t)
+                 (place-channel-put response-manager-side #t)
+                 (set! running-compiles (cons (running zo-path died-chan-manager-side) running-compiles))
+                 (loop)])]
+             [(unlock)
+              (log-info (format "compile-lock: ~s ~a unlocked" zo-path compilation-thread-id))
+              (define (same-pending-zo-path? pending) (equal? (pending-zo-path pending) zo-path))
+              (define to-unlock (filter same-pending-zo-path? pending-requests))
+              (set! pending-requests (filter (compose not same-pending-zo-path?) pending-requests))
+              (for ([pending (in-list to-unlock)])
+                (place-channel-put (pending-response-chan pending) #f))
+              (hash-remove! currently-locked-files zo-path)
+              (set! running-compiles (filter (λ (a-running) (not (equal? (running-zo-path a-running) zo-path)))
+                                             running-compiles))
+              (loop)])))
+        (for/list ([running-compile (in-list running-compiles)])
+          (handle-evt
+           (running-died-chan-manager-side running-compile)
+           (λ (compilation-thread-id)
+             (define zo-path (running-zo-path running-compile))
+             (set! running-compiles (remove running-compile running-compiles))
+             (define same-zo-pending 
+               (filter (λ (pending) (equal? zo-path (pending-zo-path pending)))
+                       pending-requests))
+             (cond
+               [(null? same-zo-pending)
+                (log-info (format "compile-lock: ~s ~a died; no else waiting" zo-path compilation-thread-id))
+                (hash-remove! currently-locked-files zo-path)
+                (loop)]
+               [else
+                (log-info (format "compile-lock: ~s ~a died; someone else waiting" zo-path compilation-thread-id))
+                (define to-be-running (car same-zo-pending))
+                (set! pending-requests (remq to-be-running pending-requests))
+                (place-channel-put (pending-response-chan to-be-running) #t)
+                (set! running-compiles 
+                      (cons (running zo-path (pending-died-chan-manager-side to-be-running))
+                            running-compiles))
+                (loop)]))))))))
+  
+  build-side-chan)
+
+(define (compile-lock->parallel-lock-client build-side-chan [custodian #f])
+  (define monitor-threads (make-hash))
+  (define add-monitor-chan (make-channel))
+  (define kill-monitor-chan (make-channel))
+  
+  (when custodian
+    (parameterize ([current-custodian custodian])
+      (thread
+       (λ () 
+         (let loop ()
+           (sync
+            (handle-evt add-monitor-chan
+                        (λ (arg)
+                          (define-values (zo-path monitor-thread) (apply values arg))
+                          (hash-set! monitor-threads zo-path monitor-thread)
+                          (loop)))
+            (handle-evt kill-monitor-chan
+                        (λ (zo-path)
+                          (define thd/f (hash-ref monitor-threads zo-path #f))
+                          (when thd/f (kill-thread thd/f))
+                          (hash-remove! monitor-threads zo-path)
+                          (loop)))))))))
+  
+  (λ (command zo-path)
+    (define compiling-thread (current-thread))
+    (define-values (response-builder-side response-manager-side) (place-channel))
+    (define-values (died-chan-compiling-side died-chan-manager-side) (place-channel))
+    (place-channel-put build-side-chan (list command 
+                                             zo-path
+                                             response-manager-side
+                                             died-chan-manager-side 
+                                             (eq-hash-code compiling-thread)))
+    (cond
+      [(eq? command 'lock)
+       (define monitor-thread
+        (and custodian
+             (parameterize ([current-custodian custodian])
+               (thread
+                (λ ()
+                  (thread-wait compiling-thread)
+                  ;; compiling thread died; alert the server
+                  ;; & remove this thread from the table
+                  (place-channel-put died-chan-compiling-side (eq-hash-code compiling-thread))
+                  (channel-put kill-monitor-chan zo-path))))))
+       (when monitor-thread (channel-put add-monitor-chan (list zo-path monitor-thread)))
+       (define res (place-channel-get response-builder-side))
+       (when monitor-thread
+         (unless res ;; someone else finished compilation for us; kill the monitor
+           (channel-put kill-monitor-chan zo-path)))
+       res]
+      [(eq? command 'unlock)
+       (when custodian 
+         ;; we finished the compilation; kill the monitor
+         (channel-put kill-monitor-chan zo-path))])))

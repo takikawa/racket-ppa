@@ -482,6 +482,7 @@
 
     (define/public (get-cocoa) cocoa)
     (define/public (get-cocoa-content) cocoa)
+    (define/public (get-cocoa-focus) (get-cocoa-content))
     (define/public (get-cocoa-cursor-content) (get-cocoa-content))
     (define/public (get-cocoa-window) (send parent get-cocoa-window))
     (define/public (get-wx-window) (send parent get-wx-window))
@@ -623,9 +624,12 @@
     (define/public (set-size x y w h)
       (let ([x (if (= x -11111) (get-x) x)]
             [y (if (= y -11111) (get-y) y)])
+        ;; old location will need refresh:
         (tellv cocoa setNeedsDisplay: #:type _BOOL #t)
         (tellv cocoa setFrame: #:type _NSRect (make-NSRect (make-NSPoint x (flip y h))
-                                                           (make-NSSize w h))))
+                                                           (make-NSSize w h)))
+        ;; new location needs refresh:
+        (tellv cocoa setNeedsDisplay: #:type _BOOL #t))
       (queue-on-size))
 
     (define/public (internal-move x y)
@@ -671,7 +675,7 @@
                  (is-enabled-to-root?))
         (let ([w (tell cocoa window)])
           (when w
-            (tellv w makeFirstResponder: (get-cocoa-content))))))
+            (tellv w makeFirstResponder: (get-cocoa-focus))))))
     (define/public (on-set-focus) (void))
     (define/public (on-kill-focus) (void))
 
@@ -771,7 +775,9 @@
               (queue-window-event this thunk))))
 
     (define/public (center a b) (void))
-    (define/public (refresh) (void))
+    (define/public (refresh) (refresh-all-children))
+
+    (define/public (refresh-all-children) (void))
 
     (define/public (screen-to-client xb yb)
       (let ([p (tell #:type _NSPoint (get-cocoa-content) 

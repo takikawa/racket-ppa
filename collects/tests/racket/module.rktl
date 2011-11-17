@@ -194,6 +194,40 @@
 	(eval `(require 'f))
 	(test (list* 'd 'b finished) values l)))))
 
+(let* ([n (make-base-namespace)]
+       [l null]
+       [here (lambda (v)
+	       (set! l (cons v l)))])
+  (parameterize ([current-namespace n])
+    (eval `(module a racket/base
+             (require (for-syntax racket/base)
+                      (for-meta 2 racket/base))
+	     (define a 1)
+             (define-syntax (a-macro stx) #'-1)
+             (begin-for-syntax
+              (,here 'pma))
+             (begin-for-syntax
+              (,here 'ma)
+              (define a-meta 10)
+              (define-syntax (a-meta-macro stx) #'-1)
+              (begin-for-syntax
+               (define a-meta-meta 100)
+               (,here 'mma)))
+	     (,here 'a)
+	     (provide a a-macro (for-syntax a-meta-macro))))
+    (test '(ma mma pma) values l)
+    (set! l null)
+    (dynamic-require ''a #f)
+    (test '(a) values l)
+    (eval `10)
+    (test '(a) values l)
+    (dynamic-require ''a 0) ; => 'a is available...
+    (eval `10)
+    (test '(ma pma a) values l)
+    (eval '(begin-for-syntax)) ; triggers phase-1 visit => phase-2 instantiate
+    (test '(mma ma pma a) values l)
+    (void)))
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Check redundant import and re-provide
 
@@ -525,6 +559,64 @@
   (test '#%network 
         variable-reference->module-source
         (eval (datum->syntax #'here '(#%variable-reference)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check handling of unbound names in local-expand:
+
+(err/rt-test (expand '(module m racket
+                        (require racket/require)
+                        (require (filtered-in (lambda (n) foo) scheme))))
+             exn:fail:contract:variable?)
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check that `quote' can be renamed for use in
+;; require specs
+
+(parameterize ([current-namespace (make-base-namespace)])
+  (map 
+   eval
+   '((module service racket
+       (#%module-begin))
+     
+     (module good-client racket
+       (#%module-begin
+        (require (quote service))))
+     
+     (module another-good-client racket
+       (#%module-begin
+        (require
+         (rename-in racket/base
+                    [quote dynamic-in]))
+        (require
+         (dynamic-in service))))
+     
+     (module also-good-client racket
+       (#%module-begin
+        (require
+         (rename-in racket/base
+                    [quote dynamic-in]))
+        (require
+         (rename-in (dynamic-in service))))))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check phase-1 syntax used via for-template
+;; and other indirections
+
+(module there-and-back-x racket/base
+  (require (for-syntax racket/base))
+  (begin-for-syntax
+   (provide s s?)
+   (struct s (x y))))
+
+(module there-and-back-y racket/base
+  (require (for-template 'there-and-back-x))
+  (s 1 2)
+  (provide s s?))
+
+(module there-and-back-z racket/base
+  (require 'there-and-back-y)
+  (provide f)
+  (define (f) (s 1 2)))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

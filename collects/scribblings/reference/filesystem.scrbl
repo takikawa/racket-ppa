@@ -85,8 +85,17 @@ by @racket[kind], which must be one of the following:
 
   ]}
 
+ @item{@indexed-racket['links-file] --- the user-specific
+ @tech{collection links file} for specifying the location of library
+ @tech{collections}. This file is specified by the
+ @indexed-envvar{PLTLINKSFILE} environment variable, and it can be
+ overridden by the @DFlag{links} or @Flag{C} command-line flag.  If no
+ environment variable or flag is specified, or if the value is not a
+ legal path name, then this file defaults to @filepath{links.rktd} in
+ the directory reported by @racket[(find-system-path 'addon-dir)].}
+
  @item{@indexed-racket['addon-dir] --- a directory for installing
- Racket extensions. This directory is specified by the
+ user-specific Racket extensions. This directory is specified by the
  @indexed-envvar{PLTADDONDIR} environment variable, and it can be
  overridden by the @DFlag{addon} or @Flag{A} command-line flag.  If no
  environment variable or flag is specified, or if the value is not a
@@ -351,14 +360,18 @@ OS X, this size excludes the resource-fork size. On error (e.g., if no
 such file exists), the @exnraise[exn:fail:filesystem].}
 
 
-@defproc[(copy-file [src path-string?] [dest path-string?]) void?]{
+@defproc[(copy-file [src path-string?] [dest path-string?] [exists-ok? any/c #f]) void?]{
 
-Creates the file @racket[dest] as a copy of @racket[src]. If the file
-is not successfully copied, the @exnraise[exn:fail:filesystem]. If
-@racket[dest] already exists, the copy will fail. File permissions are
-preserved in the copy. On Mac OS X, the resource fork is also
-preserved in the copy. If @racket[src] refers to a link, the target of
-the link is copied, rather than the link itself.}
+Creates the file @racket[dest] as a copy of @racket[src], if
+@racket[dest] does not already exist. If @racket[dest] already exists
+and @racket[exists-ok?] is @racket[#f], the copy fails with
+@exnraise[exn:fail:filesystem:exists?]; otherwise, if @racket[dest]
+exists, its content is replaced with the content of @racket[src]. File
+permissions are transferred from @racket[src] to @racket[dest]. If
+@racket[src] refers to a link, the target of the link is copied,
+rather than the link itself; if @racket[dest] refers to a link and
+@racket[exists-ok?] is true, the target of the link is updated.}
+
 
 @defproc[(make-file-or-directory-link [to path-string?] [path path-string?]) 
          void?]{
@@ -859,7 +872,7 @@ Creates directory specified by @racket[path], creating intermediate
 directories as necessary.}
 
 
-@defproc[(make-temporary-file [template string? "mztmp~a"]
+@defproc[(make-temporary-file [template string? "rkttmp~a"]
                               [copy-from-filename (or/c path-string? #f 'directory) #f]
                               [directory (or/c path-string? #f) #f])
          path?]{
@@ -877,6 +890,12 @@ relative path, it is combined with the result of
 provided and non-@racket[#f], in which case the
 file name generated from @racket[template] is combined with
 @racket[directory] to obtain a full path.
+
+The @racket[template] argument's default is only the string @racket["rkttmp~a"]
+when there is no source location information for the callsite of
+@racket[make-temporary-file] (or if @racket[make-temporary-file] is
+used in a higher-order position). If there is such information, then the template
+string is based on the source location.
 
 If @racket[copy-from-filename] is provided as path, the temporary file
 is created as a copy of the named file (using @racket[copy-file]). If
@@ -918,11 +937,13 @@ read an @elemref["old-prefs"]{old preferences file}, and then a
 collection, instead. If none of those files exists, the preference set
 is empty.
 
-The preference file should contain a symbol-keyed association list
-(written to the file with the default parameter settings).  Keys
+The preference file should contain a list of symbol--value lists
+written with the default parameter settings.  Keys
 starting with @racket[racket:], @racket[mzscheme:], @racket[mred:],
 and @racket[plt:] in any letter case are reserved for use by Racket
-implementers.
+implementers. If the preference file does not contain a list
+of symbol--value lists, an error is logged via @racket[log-error]
+and @racket[failure-thunk] is called.
 
 The result of @racket[get-preference] is the value associated with
 @racket[name] if it exists in the association list, or the result of
@@ -931,7 +952,7 @@ calling @racket[failure-thunk] otherwise.
 Preference settings are cached (weakly) across calls to
 @racket[get-preference], using @racket[(path->complete-path filename)]
 as a cache key. If @racket[flush-mode] is provided as @racket[#f], the
-cache is used instead of the re-consulting the preferences file. If
+cache is used instead of re-consulting the preferences file. If
 @racket[flush-mode] is provided as @racket['timestamp] (the default),
 then the cache is used only if the file has a timestamp that is the
 same as the last time the file was read. Otherwise, the file is
@@ -969,7 +990,7 @@ paths are checked for compatibility with old versions of Racket:
 
 @defproc[(put-preferences [names (listof symbol?)]
                           [vals list?]
-                          [locked-proc (path? . -> . any) (lambda (p) (error ....))]
+                          [locked-proc (or/c #f (path? . -> . any)) #f]
                           [filename (or/c #f path-string?) #f])
          void?]{
 
@@ -995,7 +1016,8 @@ not already exist, it is created.
 
 If the write lock is already held, then
 @racket[locked-proc] is called with a single argument: the path of the lock
-file. The default @racket[locked-proc] reports an error; an alternative
+file. The default @racket[locked-proc] (used when the @racket[locked-proc] 
+argument is @racket[#f]) reports an error; an alternative
 thunk might wait a while and try again, or give the user the choice to
 delete the lock file (in case a previous update attempt encountered
 disaster and locks are implemented by the presence of the lock file).
@@ -1044,7 +1066,6 @@ to retry the preferences lookup.
 Before calling @racket[get-preference], the result procedure uses
 @racket[(sleep delay)] to pause. Then, if @racket[(* 2 delay)] is less
 than @racket[max-delay], the result procedure calls
-
 @racket[make-handle-get-preference-locked] to generate a new retry
 procedure to pass to @racket[get-preference], but with a
 @racket[delay] of @racket[(* 2 delay)]. If @racket[(* 2 delay)] is not
@@ -1056,29 +1077,31 @@ with the given @racket[lock-there], instead.}
           [kind (or/c 'shared 'exclusive)]
           [thunk (-> any)]
           [failure-thunk (-> any)]
-          [#:get-lock-file get-lock-file (-> path-string?) (lambda () (make-lock-filename filename))]
-          [#:delay delay real? 0.01]
-          [#:max-delay max-delay real? 0.2])
+          [#:lock-file lock-file (or/c #f path-string?) #f]
+          [#:delay delay (and/c real? (not/c negative?)) 0.01]
+          [#:max-delay max-delay (and/c real? (not/c negative?)) 0.2])
          any]{
 
-Obtains a lock for the filename returned from @racket[(get-lock-file)] and then
-calls @racket[thunk].  When @racket[thunk] returns,
-@racket[call-with-file-lock] releases the lock, returning the result of
+Obtains a lock for the filename @racket[lock-file] and then calls
+@racket[thunk].  The @racket[filename] argument specifies a file path
+prefix that is used only to generate the lock filename when
+@racket[lock-file] is @racket[#f].  Specifically, when
+@racket[lock-file] is @racket[#f], then
+@racket[call-with-file-lock/timeout] uses @racket[make-lock-file-name]
+to build the lock filename. If the lock file does not yet exist, it is
+created; beware that the lock file is @emph{not} deleted by 
+@racket[call-with-file-lock/timeout].
+
+When @racket[thunk] returns, 
+@racket[call-with-file-lock/timeout] releases the lock, returning the result of
 @racket[thunk]. The @racket[call-with-file-lock/timeout] function will retry
-after @racket[#:delay] seconds and continue retrying with exponential backoff
-until delay reaches @racket[#:max-delay]. If
+after @racket[delay] seconds and continue retrying with exponential backoff
+until delay reaches @racket[max-delay]. If
 @racket[call-with-file-lock/timeout] fails to obtain the lock,
 @racket[failure-thunk] is called in tail position.  The @racket[kind] argument
 specifies whether the lock is @racket['shared] or @racket['exclusive]
+in the sense of @racket[port-try-file-lock?].
 
-The @racket[filename] argument specifies a file path prefix that is only used
-to generate the lock filename, when @racket[#:get-lock-file] is not present.
-The @racket[call-with-file-lock/timeout] function uses a separate lock file to
-prevent race conditions on @racket[filename], when @racket[filename] has not yet
-been created.  On the Windows platfom, the @racket[call-with-file-lock/timeout]
-function uses a separate lock file (@racket["_LOCKfilename"]), because a lock
-on @racket[filename] would interfere with replacing @racket[filename] via
-@racket[rename-file-or-directory].
 }
 
 @examples[
@@ -1092,13 +1115,18 @@ on @racket[filename] would interfere with replacing @racket[filename] via
       (call-with-file-lock/timeout filename 'shared
         (lambda () (printf "Shouldn't get here\n"))
         (lambda () (printf "Failed to obtain lock for file\n"))))
-    (lambda () (printf "Shouldn't ger here eithere\n"))
-    #:get-lock-file (lambda () (make-lock-file-name filename)))]
+    (lambda () (printf "Shouldn't get here either\n"))
+    #:lock-file (make-lock-file-name filename))]
 
-@defproc*[([(make-lock-file-name [path path-string?]) path-string?]
-           [(make-lock-file-name [dir path-string?] [name path-string?]) path-string?])]{
-Creates a lock filename by prepending @racket["_LOCK"] on windows or @racket[".LOCK"] on all other platforms
-to the file portion of the path.
+
+@defproc*[([(make-lock-file-name [path (or path-string? path-for-some-system?)]) 
+            path?]
+           [(make-lock-file-name [dir (or path-string? path-for-some-system?)] 
+                                 [name path-element?]) 
+            path?])]{
+
+Creates a lock filename by prepending @racket["_LOCK"] on Windows or
+@racket[".LOCK"] on other platforms to the file portion of the path.
 
 @examples[
   #:eval file-eval
@@ -1121,5 +1149,7 @@ and bitwise operations such as @racket[bitwise-ior], and
 @racket[bitwise-and].}
 
 
-@(interaction-eval #:eval file-eval (delete-file filename))
+@(interaction-eval #:eval file-eval (begin
+                                     (delete-file filename)
+                                     (delete-file (make-lock-file-name filename))))
 @(close-eval file-eval)

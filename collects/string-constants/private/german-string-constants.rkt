@@ -23,7 +23,10 @@
  (untitled-n "Namenlos ~a")
  (warning "Warnung")
  (error "Fehler")
- (close "Schließen") ;; as in, close an open window
+ (close "Schließen") ;; as in, close an open window or tab. must match close-menu-item
+                  ;; in the sense that, when the &s have been stripped from
+                  ;; close-menu-item, it must be the same string as this.
+ (close-window "Fenster schließen")
  (stop "Stop")
  (&stop "&Stop") ;; for use in button and menu item labels, with short cut.
  (are-you-sure-delete? "Sind Sie sicher, dass Sie ~a löschen wollen?") ;; ~a is a filename or directory name
@@ -56,7 +59,8 @@
  (bug-report-field-reproduce2 "reproduzieren")
  (bug-report-field-environment "Umgebung")
  (bug-report-field-docs-installed "Installierte Dokumentation")
- (bug-report-field-collections "Kollektionen")
+ (bug-report-field-collections "Collections")
+ (bug-report-field-links "Links")  ;; from 'raco link'
  (bug-report-field-human-language "Interaktionssprache")	;
  (bug-report-field-memory-use "Speicherverbrauch")
  (bug-report-field-version "Version")
@@ -113,15 +117,34 @@
  (cs-unused-require "unbenutztes require")
  (cs-free-variable "freie Variable")
 
-  ;; mode sub-menu in the "view" menu
-  (cs-check-syntax-mode "Syntax-Check-Modus")
-  (cs-mode-menu-show-my-obligations "Meine Vertragsobligationen")
-  (cs-mode-menu-show-client-obligations "Vertragsobligationen des Klienten")
-  (cs-mode-menu-show-syntax "Syntaktische Kategorien")
+ ;; mode sub-menu in the "view" menu
+ (cs-check-syntax-mode "Syntax-Check-Modus")
+ (cs-mode-menu-show-my-obligations "Meine Vertragsobligationen")
+ (cs-mode-menu-show-client-obligations "Vertragsobligationen des Klienten")
+ (cs-mode-menu-show-syntax "Syntaktische Kategorien")
 
+ ;; the online check syntax status messages (mouse over the bottom right of drracket's window to see the messages during online expansion's various phases)
+ (online-expansion-running "Online-Expansion läuft")
+ (only-raw-text-files-supported "Nur reine Textdateien werden unterstützt")
+ (abnormal-termination "Online-Expansion vorzeitig abgebrochen")
+ (jump-to-error "Zum Fehler springen")
+ (online-expansion-is-disabled "Online-Expansion ist deaktiviert")
+ (online-expansion-pending "Online-Expansion läuft ...")
+ (online-expansion-finished "Online-Expansion fertig") ;; note: there may still be errors in this case
+ 
+ ;; the online expansion preferences pane
+ (online-expansion "Online-Expansion") ;; title of prefs pane
+ ; the different kinds of errors
+ (online-expansion-show-read-errors-as "Reader-Fehler anzeigen")
+ (online-expansion-show-variable-errors-as "Ungebundene Bezeichner anzeigen")
+ (online-expansion-show-other-errors-as "Andere Fehler anzeigen")
+ ; locations the errors can be shown
+ (online-expansion-error-in-corner "in der Ecke des Fensters")
+ (online-expansion-error-gold-highlight "mit goldener Markierung")
+ (online-expansion-error-margin "am Rand")
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "GC")
- (read-only "Lese Modus")
+ (read-only "Nur Lesen")
  (auto-extend-selection "Automatisch erweitern")
  (overwrite "Überschreiben")
  (running "Programm läuft")
@@ -205,6 +228,7 @@
  
  ;; Help Desk
  (help "Hilfe")
+ (racket-documentation "Dokumentation für Racket")
  (help-desk "Hilfezentrum")
  (plt:hd:search "Suchen")
  (plt:hd:feeling-lucky "Auf gut Glück")
@@ -544,7 +568,6 @@
 
  (open-info "Datei öffnen")
  (open-menu-item "&Öffnen...")
- (open-here-menu-item "Hier &öffnen...")
 
  (open-recent-info "Liste kürzlich bearbeiteter Dateien")
  (open-recent-menu-item "Noch einmal öffnen")
@@ -566,6 +589,7 @@
 
  (close-info "Diese Datei schließen")
  (close-menu-item "&Schließen")
+ (close-window-menu-item "Fenster &schließen")
 
  (quit-info "Alle Fenster schließen")
  (quit-menu-item-windows "Be&enden")
@@ -621,6 +645,8 @@
   
  (overwrite-mode "Überschreib-Modus")
  (enable-overwrite-mode-keybindings "Tastenbelegungen für Überschreib-Modus aktivieren")
+
+ (enable-automatic-parens "Automatische Klammerung einschalten") ; should "and square brackets and quotes" appear here?
 
  (preferences-info "Die Einstellungen konfigurieren")
  (preferences-menu-item "Einstellungen...")
@@ -681,6 +707,11 @@
   "Würden Sie gern ein neues Fenster aufmachen oder dieses hier löschen und wiederverwenden?")
  (clear-current "Dieses löschen")
  (new-window "Neues Fenster")
+
+ ;; popup menu when right-clicking in the gap between
+ ;; the definitions and interactions window
+ (change-to-vertical-alignment "Auf vertikal umschalten")
+ (change-to-horizontal-alignment "Auf horizontal umschalten")
 
  ;;; exiting and quitting ``are you sure'' dialog
  ;;; exit is used on windows, quit on macos, in English. Other
@@ -795,6 +826,7 @@
  ;;; edit menu
  (split-menu-item-label "&Splitten")
  (collapse-menu-item-label "Einfalten")
+ (find-longest-line "Längste Zeile finden")
  
  ;;; language menu
  (language-menu-name "&Sprache")
@@ -817,6 +849,8 @@
 
  (clear-error-highlight-menu-item-label "Fehlermarkierung entfernen")
  (clear-error-highlight-item-help-string "Entfernt die rosa Fehlermarkierung")
+ (jump-to-next-error-highlight-menu-item-label "Zur nächsten Fehlermarkierung springen")
+ (jump-to-prev-error-highlight-menu-item-label "Zur vorigen Fehlermarkierung springen")
  (reindent-menu-item-label "&Einrücken")
  (reindent-all-menu-item-label "&Alles einrücken")
  (semicolon-comment-out-menu-item-label "Mit &Semikolon auskommentieren")
@@ -1085,9 +1119,13 @@
   (exited-successfully "Erfolgreich beendet.")
   (exited-with-error-code "Beendet mit Fehlercode ~a.") ;; ~a is filled in with a number between 1 and 255
   (program-ran-out-of-memory "Dem Programm ist der Speicher ausgegangen.")
- (last-stack-frame "letzten Stack-Frame zeigen")
- (last-stack-frames "die letzten ~a Stack-Frames zeigen")
- (next-stack-frames "die nächsten ~a Stack-Frames zeigen")
+  
+  (show-evaluation-terminated-dialog "Den Dialog ‘Auswertung abgebrochen’ zeigen")
+  (evaluation-terminated-ask "Diesen Dialog das nächste Mal anzeigen?")
+  
+  (last-stack-frame "letzten Stack-Frame anzeigen")
+  (last-stack-frames "die letzten ~a Stack-Frames anzeigen")
+  (next-stack-frames "die nächsten ~a Stack-Frames anzeigen")
  
  ;;; welcoming message in repl
  (language "Sprache")
@@ -1500,5 +1538,7 @@
  (normalize-string-preference "Eingefügten Text normalisieren")
  (ask-about-normalizing-strings "Bei Normalisierung nachfragen")
  
+  (always-use-platform-specific-linefeed-convention "Immer die plattformspezifische Linefeed-Konvention verwenden")
+  
 
  )

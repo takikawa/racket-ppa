@@ -1,3 +1,23 @@
+/*
+  Racket
+  Copyright (c) 2009-2011 PLT Scheme Inc.
+ 
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Library General Public
+    License as published by the Free Software Foundation; either
+    version 2 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Library General Public License for more details.
+
+    You should have received a copy of the GNU Library General Public
+    License along with this library; if not, write to the Free
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
+*/
+
 #include "schpriv.h"
 
 #ifdef MZ_USE_MZRT
@@ -5,8 +25,6 @@
 /************************************************************************/
 /************************************************************************/
 /************************************************************************/
-#define MZRT_INTERNAL
-#include "mzrt.h"
 #include "schgc.h"
 
 THREAD_LOCAL_DECL(mz_proc_thread *proc_thread_self);
@@ -121,10 +139,10 @@ void mzrt_sleep(int seconds)
   rem.tv_sec  = 0;
   rem.tv_nsec = 0;
   while ((-1 == nanosleep(&set, &rem))) {
-    //fprintf(stderr, "%i %i INITIAL\n", set.tv_sec, set.tv_nsec);
-    //fprintf(stderr, "%i %i LEFT\n", rem.tv_sec, rem.tv_nsec);
+    /* fprintf(stderr, "%i %i INITIAL\n", set.tv_sec, set.tv_nsec); */
+    /* fprintf(stderr, "%i %i LEFT\n", rem.tv_sec, rem.tv_nsec); */
     set = rem;
-    //fprintf(stderr, "%i %i NOW\n", set.tv_sec, set.tv_nsec);
+    /* fprintf(stderr, "%i %i NOW\n", set.tv_sec, set.tv_nsec); */
   }
 #endif
 }

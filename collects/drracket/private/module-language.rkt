@@ -7,7 +7,9 @@
          racket/path
          racket/contract
          racket/sandbox
-         mred
+         racket/runtime-path
+         racket/math
+         racket/gui/base
          compiler/embed
          compiler/cm
          launcher
@@ -15,8 +17,20 @@
          string-constants
          planet/config
          setup/dirs
+         racket/place
+         mrlib/close-icon
+         "tooltip.rkt"
          "drsig.rkt"
-         "rep.rkt")
+         "rep.rkt"
+         "eval-helpers.rkt"
+         "local-member-names.rkt")
+
+(define-runtime-path expanding-place.rkt "expanding-place.rkt")
+
+(define sc-online-expansion-running (string-constant online-expansion-running))
+(define sc-only-raw-text-files-supported (string-constant only-raw-text-files-supported))
+(define sc-abnormal-termination (string-constant abnormal-termination))
+(define sc-jump-to-error (string-constant jump-to-error))
 
 (define op (current-output-port))
 (define (oprintf . args) (apply fprintf op args))
@@ -26,8 +40,10 @@
           [prefix drracket:language: drracket:language^]
           [prefix drracket:unit: drracket:unit^]
           [prefix drracket:rep: drracket:rep^]
-          [prefix drracket:init: drracket:init^])
-  (export drracket:module-language^)
+          [prefix drracket:init: drracket:init^]
+          [prefix drracket:module-language-tools: drracket:module-language-tools^]
+          [prefix drracket: drracket:interface^])
+  (export drracket:module-language/int^)
   
   (define module-language<%>
     (interface ()
@@ -35,7 +51,7 @@
       get-language-info))
   
   ;; add-module-language : -> void
-  ;; adds the special module-only language to drscheme
+  ;; adds the special module-only language to drracket
   (define (add-module-language)
     (define module-language%
       (module-mixin
@@ -52,9 +68,16 @@
   (define-struct (module-language-settings drracket:language:simple-settings)
     (collection-paths command-line-args auto-text compilation-on? full-trace?))
   
+  (define (module-language-settings->prefab-module-settings settings)
+    (prefab-module-settings (module-language-settings-command-line-args settings)
+                            (module-language-settings-collection-paths settings)
+                            (module-language-settings-compilation-on? settings)
+                            (module-language-settings-full-trace? settings)
+                            (drracket:language:simple-settings-annotations settings)))
+  
   (define default-compilation-on? #t)
   (define default-full-trace? #t)
-  (define default-auto-text "#lang racket\n")  
+  (define (get-default-auto-text) (preferences:get 'drracket:module-language:auto-text))
   
   ;; module-mixin : (implements drracket:language:language<%>)
   ;;             -> (implements drracket:language:language<%>)
@@ -155,7 +178,7 @@
            
            '(default)
            #()
-           default-auto-text
+           (get-default-auto-text)
            default-compilation-on?
            default-full-trace?)))
       
@@ -194,7 +217,7 @@
                     (let ([collection-paths (list-ref marshalled 1)]
                           [command-line-args (list-ref marshalled 2)]
                           [auto-text (if (<= marshalled-len 3)
-                                         default-auto-text
+                                         (get-default-auto-text)
                                          (list-ref marshalled 3))]
                           [compilation-on? (if (<= marshalled-len 4)
                                                default-compilation-on?
@@ -226,7 +249,7 @@
                                                 command-line-args
                                                 auto-text
                                                 
-                                                ;; current versions of drscheme do not allow this combination
+                                                ;; current versions of drracket do not allow this combination
                                                 ;; in the first place (compilation is only allowed in 'none
                                                 ;; and 'debug mode), but older versions might.
                                                 (and (memq (drracket:language:simple-settings-annotations super) 
@@ -245,39 +268,8 @@
         
         (run-in-user-thread
          (λ ()
-           (current-command-line-arguments
-            (module-language-settings-command-line-args settings))
-           (let* ([default (current-library-collection-paths)]
-                  [cpaths (append-map (λ (x) (if (symbol? x) default (list x)))
-                                      (module-language-settings-collection-paths
-                                       settings))])
-             (when (null? cpaths)
-               (fprintf (current-error-port)
-                        "WARNING: your collection paths are empty!\n"))
-             (current-library-collection-paths cpaths))
-           
-           (compile-context-preservation-enabled (module-language-settings-full-trace? settings))
-           
-           (when (module-language-settings-compilation-on? settings)
-             
-             (let ([annotations (drracket:language:simple-settings-annotations settings)])
-               (case annotations
-                 [(none)
-                  (use-compiled-file-paths
-                   (cons (build-path "compiled" "drracket")
-                         (use-compiled-file-paths)))]
-                 [(debug)
-                  (use-compiled-file-paths
-                   (cons (build-path "compiled" "drracket" "errortrace")
-                         (use-compiled-file-paths)))]))
-             
-             (current-load/use-compiled (make-compilation-manager-load/use-compiled-handler #t))
-             (let* ([cd (find-collects-dir)]
-                    [no-dirs (if cd 
-                                 (list (CACHE-DIR) cd)
-                                 (list (CACHE-DIR)))])
-               (manager-skip-file-handler
-                (λ (p) (file-stamp-in-paths p no-dirs))))))))
+           (set-module-language-parameters (module-language-settings->prefab-module-settings settings)
+                                           module-language-parallel-lock-client))))
       
       (define/override (get-one-line-summary)
         (string-constant module-language-one-line-summary))
@@ -326,13 +318,20 @@
                                               (raise-hopeless-exception
                                                e "invalid module text"))])
                    (super-thunk))])
-            (when (eof-object? expr) (raise-hopeless-syntax-error))
+            (when (eof-object? expr)
+              (raise-hopeless-syntax-error (string-append
+                                            "There must be a valid module in the\n"
+                                            "definitions window.  Try starting your program with\n"
+                                            "\n"
+                                            "  #lang racket\n"
+                                            "\n"
+                                            "and clicking ‘Run’.")))
             (let ([more (super-thunk)])
               (unless (eof-object? more)
                 (raise-hopeless-syntax-error
                  "there can only be one expression in the definitions window"
                  more)))
-            (transform-module path expr)))
+            (transform-module path expr raise-hopeless-syntax-error)))
         (define modspec (or path `',(syntax-e name)))
         (define (check-interactive-language)
           (unless (memq '#%top-interaction (namespace-mapped-symbols))
@@ -340,7 +339,7 @@
              #f #f ; no error message, just a suffix
              (format "~s does not support a REPL (no #%top-interaction)"
                      (syntax->datum lang)))))
-        ;; We're about to send the module expression to drscheme now, the rest
+        ;; We're about to send the module expression to drracket now, the rest
         ;; of the setup is done in `front-end/finished-complete-program' below,
         ;; so use `repl-init-thunk' to store an appropriate continuation for
         ;; this setup.  Once we send the expression, we'll be called again only
@@ -487,7 +486,7 @@
   ;; but keep the highlighting of a previous error)
   (define (raise-hopeless-exception exn [prefix #f] [suffix #f])
     (define rep (drracket:rep:current-rep))
-    ;; Throw an error as usual if we don't have the drscheme rep, then we just
+    ;; Throw an error as usual if we don't have the drracket rep, then we just
     ;; raise the exception as normal.  (It can happen in some rare cases like
     ;; having a single empty scheme box in the definitions.)
     (unless rep (if exn (raise exn) (error "\nInteractions disabled")))
@@ -496,7 +495,7 @@
     ;; these are needed, otherwise the warning can appear before the output
     (flush-output (current-output-port))
     (flush-output (current-error-port))
-    ;; do the rep-related work carefully -- using drscheme's eventspace, and
+    ;; do the rep-related work carefully -- using drracket's eventspace, and
     ;; wait for it to finish before we continue.
     (let ([s (make-semaphore 0)]
           [msg (string-append "\nInteractions disabled"
@@ -515,16 +514,8 @@
   (define (raise-hopeless-syntax-error . error-args)
     (with-handlers ([exn:fail? raise-hopeless-exception])
       (apply raise-syntax-error '|Module Language|
-             (if (null? error-args)
-               (list (string-append
-                      "There must be a valid module in the\n"
-                      "definitions window.  Try starting your program with\n"
-                      "\n"
-                      "  #lang racket\n"
-                      "\n"
-                      "and clicking ‘Run’."))
-               error-args))))
-  
+             error-args)))
+    
   ;; module-language-config-panel : panel -> (case-> (-> settings) (settings -> void))
   (define (module-language-config-panel parent)
     (define new-parent
@@ -543,7 +534,9 @@
        new-parent
        #:case-sensitive #t
        
-       #:get-debugging-radio-box (λ (rb-l rb-r) (set! left-debugging-radio-box rb-l) (set! right-debugging-radio-box rb-r))
+       #:get-debugging-radio-box (λ (rb-l rb-r) 
+                                   (set! left-debugging-radio-box rb-l)
+                                   (set! right-debugging-radio-box rb-r))
        
        #:debugging-radio-box-callback
        (λ (debugging-radio-box evt)
@@ -588,7 +581,10 @@
                                     [parent auto-text-panel]
                                     [label #f]
                                     [init-value ""]
-                                    [callback void]))
+                                    [callback 
+                                     (λ (tf evt)
+                                       (preferences:set 'drracket:module-language:auto-text
+                                                        (get-auto-text)))]))
     
     ;; data associated with each item in listbox : boolean
     ;; indicates if the entry is the default paths.
@@ -669,7 +665,8 @@
     
     (define (get-lb-vector)
       (list->vector (for/list ([n (in-range (send collection-paths-lb get-number))])
-                              (cons (send collection-paths-lb get-string n) (send collection-paths-lb get-data n)))))
+                              (cons (send collection-paths-lb get-string n)
+                                    (send collection-paths-lb get-data n)))))
     
     (define (set-lb-vector vec)
       (send collection-paths-lb clear)
@@ -714,7 +711,7 @@
     
     (install-collection-paths '(default))
     (update-buttons)
-    (install-auto-text default-auto-text)
+    (install-auto-text (get-default-auto-text))
     (update-compilation-checkbox left-debugging-radio-box right-debugging-radio-box)
     
     (case-lambda
@@ -741,30 +738,6 @@
        (send save-stacktrace-on-check-box set-value (module-language-settings-full-trace? settings))
        (update-buttons)]))
   
-  ;; transform-module : (union #f path) syntax
-  ;;   -> (values syntax[name-of-module] syntax[lang-of-module] syntax[module])
-  ;; = User =
-  (define (transform-module filename stx)
-    (define-values (mod name lang body)
-      (syntax-case stx ()
-        [(module name lang . body)
-         (eq? 'module (syntax-e #'module))
-         (values #'module #'name #'lang #'body)]
-        [_ (raise-hopeless-syntax-error
-            (string-append "only a module expression is allowed, either\n"
-                           "    #lang <language-name>\n or\n"
-                           "    (module <name> <language> ...)\n")
-            stx)]))
-    (define name* (syntax-e name))
-    (unless (symbol? name*)
-      (raise-hopeless-syntax-error "bad syntax in name position of module"
-                                   stx name))
-    (when filename (check-filename-matches filename name* stx))
-    (let* (;; rewrite the module to use the racket/base version of `module'
-           [mod  (datum->syntax #'here 'module mod)]
-           [expr (datum->syntax stx `(,mod ,name ,lang . ,body) stx stx)])
-      (values name lang expr)))
-  
   ;; get-filename : port -> (union string #f)
   ;; extracts the file the definitions window is being saved in, if any.
   (define (get-filename port)
@@ -785,34 +758,781 @@
                              filename))))))]
         [else #f])))
   
-  ;; check-filename-matches : path datum syntax -> void
-  (define (check-filename-matches filename datum unexpanded-stx)
-    (when #f ; we don't check filename matching anymore
-      (let-values ([(base name dir?) (split-path filename)])
-        (let ([expected (string->symbol
-                         (path->string (path-replace-suffix name #"")))])
-          (unless (equal? expected datum)
-            (raise-hopeless-syntax-error
-             (format
-              "module name doesn't match saved filename, got ~s and expected ~s"
-              datum
-              expected)
-             unexpanded-stx))))))
+  (define-local-member-name
+    show-bkg-running
+    frame-show-bkg-running
+    restart-place
+    set-expand-error/status
+    update-frame-expand-error
+    expand-error-next
+    expand-error-prev)
   
+  (define module-language-online-expand-tab-mixin
+    (mixin (drracket:unit:tab<%>) ()
+      (inherit get-frame)
+      (define bkg-label "")
+      (define bkg-colors '())
+      (define bkg-state 'nothing)
+     
+      (define/public (add-bkg-running-color id color label)
+        (set! bkg-colors
+              (sort
+               (cons (list id color label) bkg-colors)
+               string<=? #:key (compose symbol->string car))))
+      
+      (define/public (remove-bkg-running-color id)
+        (set! bkg-colors (filter (λ (x) (not (eq? (car x) id))) bkg-colors))
+        (send (get-frame) frame-show-bkg-running (get-colors) (get-label)))
+      
+      (define/public (get-bkg-running)
+        (values (get-colors) (get-label)))
+      
+      (define/public (show-bkg-running state label)
+        (set! bkg-state state)
+        (set! bkg-label label)
+        (send (get-frame) frame-show-bkg-running (get-colors) (get-label)))
+      
+      (define/private (get-colors)
+        (case bkg-state
+          [(reader-in-defs-error) 'parens]
+          [(running) (list "blue")]
+          [(nothing) (if (null? bkg-colors)
+                         #f
+                         (map (λ (x) (list-ref x 1)) bkg-colors))]
+          [(failed) (list "red")]
+          [else (error 'show-bkg-running "unknown state ~s\n" bkg-state)]))
+      
+      (define/private (get-label)
+        (if (eq? bkg-state 'nothing)
+            (if (null? bkg-colors)
+                #f
+                (map (λ (x) (list-ref x 2)) bkg-colors))
+            (list bkg-label)))
+      
+      (super-new)))
+  
+  (define module-language-online-expand-frame-mixin
+    (mixin (frame:basic<%> frame:info<%> drracket:unit:frame<%>) ()
+      (inherit get-info-panel get-current-tab)
+      
+      (define expand-error-parent-panel #f)
+      (define expand-error-panel #f)
+      (define expand-error-message #f)
+      (define expand-error-button-parent-panel #f)
+      (define expand-error-single-child #f)
+      (define expand-error-multiple-child #f)
+      (define expand-error-zero-child #f)
+      
+      ;; colors : (or/c #f (listof string?) 'parens)
+      (define colors #f)
+      (define tooltip-labels #f)
+      
+      (super-new)
+      
+      (define/override (make-root-area-container cls parent)
+        (set! expand-error-parent-panel
+              (super make-root-area-container vertical-panel% parent))
+        (define root (make-object cls expand-error-parent-panel))
+        (set! expand-error-panel
+              (new horizontal-panel% 
+                   [stretchable-height #f]
+                   [parent expand-error-parent-panel]))
+        
+        (set! expand-error-message (new error-message%
+                                        [parent expand-error-panel]
+                                        [stretchable-width #t]
+                                        [msg "hi"]
+                                        [err? #f]))
+        (set! expand-error-button-parent-panel
+              (new panel:single% 
+                   [stretchable-width #f]
+                   [stretchable-height #f]
+                   [parent expand-error-panel]))
+        (set! expand-error-single-child
+              (new button% 
+                   [parent expand-error-button-parent-panel]
+                   [stretchable-width #t]
+                   [label sc-jump-to-error]
+                   [font small-control-font]
+                   [callback (λ (b evt) (send (send (get-current-tab) get-defs) expand-error-next))]))
+        (set! expand-error-multiple-child
+              (new horizontal-panel% [parent expand-error-button-parent-panel]))
+        (set! expand-error-zero-child
+              (new horizontal-panel% [parent expand-error-button-parent-panel]))
+        (new button% 
+             [label "<"]
+             [font small-control-font]
+             [callback (λ (b evt) (send (send (get-current-tab) get-defs) expand-error-prev))]
+             [parent expand-error-multiple-child])
+        (new message% 
+             [parent expand-error-multiple-child]
+             [label sc-jump-to-error])
+        (new button% 
+             [label ">"]
+             [font small-control-font]
+             [callback (λ (b evt) (send (send (get-current-tab) get-defs) expand-error-next))]
+             [parent expand-error-multiple-child])
+        (new close-icon% 
+             [parent expand-error-panel]
+             [callback
+              (λ ()
+                (send expand-error-parent-panel change-children
+                      (λ (l) (remq expand-error-panel l))))])
+        (send expand-error-parent-panel change-children (λ (l) (remq expand-error-panel l)))
+        root)
+      
+      (define expand-error-msg #f)
+      (define expand-error-srcloc-count 0)
+      
+      (define/public (set-expand-error/status msg err? srcloc-count)
+        (unless (and (equal? expand-error-msg msg)
+                     (equal? expand-error-srcloc-count srcloc-count))
+          (set! expand-error-msg msg)
+          (set! expand-error-srcloc-count srcloc-count)
+          (when expand-error-message
+            (cond
+              [err?
+               (send expand-error-message set-msg expand-error-msg err?)
+               (send expand-error-parent-panel change-children
+                     (λ (l) (append (remq expand-error-panel l) (list expand-error-panel))))
+               (send expand-error-button-parent-panel active-child
+                     (cond
+                       [(= srcloc-count 0) expand-error-zero-child]
+                       [(= srcloc-count 1) expand-error-single-child]
+                       [else expand-error-multiple-child]))]
+              [else
+               (send expand-error-message set-msg expand-error-msg err?)
+               (send expand-error-button-parent-panel active-child expand-error-zero-child)]))))
+      
+      (define/augment (on-tab-change from-tab to-tab)
+        (send (send to-tab get-defs) restart-place)
+        (send (send to-tab get-defs) update-frame-expand-error)
+        (inner (void) on-tab-change from-tab to-tab))
+
+      (define/override (on-activate active?)
+        (define defs (send (get-current-tab) get-defs))
+        (when active? 
+          (send defs restart-place))
+        (super on-activate active?))
+      
+      (define/public (frame-show-bkg-running new-colors labels)
+        (unless (equal? tooltip-labels labels)
+          (set! tooltip-labels labels)
+          (update-tooltip))
+        (unless (equal? new-colors colors)
+          (set! colors new-colors)
+          (send running-canvas refresh)))
+     
+      (define tooltip-frame #f)
+      (define/private (show-tooltip)
+        (define tooltip-labels-to-show
+          (if (preferences:get 'drracket:online-compilation-default-off)
+              tooltip-labels
+              (list (string-constant online-expansion-is-disabled))))
+        (cond
+          [tooltip-labels-to-show
+           (unless tooltip-frame
+             (set! tooltip-frame (new tooltip-frame%)))
+           (send tooltip-frame set-tooltip tooltip-labels-to-show)
+           (define-values (rx ry) (send running-canvas client->screen 0 0))
+           (define-values (cw ch) (send running-canvas get-client-size))
+           (send tooltip-frame show-over rx ry cw ch #:prefer-upper-left? #t)]
+          [else
+           (when tooltip-frame
+             (send tooltip-frame show #f))]))
+      
+      (define/private (update-tooltip)
+        (when tooltip-frame
+          (cond
+            [(or tooltip-labels
+                 (not (preferences:get 'drracket:online-compilation-default-off)))
+             (when (send tooltip-frame is-shown?)
+               ;; just call this, as it updates the tooltip label already
+               (show-tooltip))]
+            [else
+             (send tooltip-frame show #f)])))
+      
+      (define/private (hide-tooltip)
+        (when tooltip-frame
+          (send tooltip-frame show #f)))
+
+      (define parens-mismatch-str "())")
+      (define ball-size 10)
+      (define parens-mismatch-font
+        (send the-font-list find-or-create-font
+              (send small-control-font get-point-size)
+              (send small-control-font get-face)
+              (send small-control-font get-family)
+              (send small-control-font get-style)
+              'bold
+              (send small-control-font get-underlined)
+              (send small-control-font get-smoothing)
+              (send small-control-font get-size-in-pixels)))
+              
+      (define running-canvas
+        (new (class canvas%
+               (inherit get-dc popup-menu refresh get-client-size)
+               (define/override (on-paint)
+                 (let ([dc (get-dc)])
+                   (define colors-to-draw
+                     (if (preferences:get 'drracket:online-compilation-default-off)
+                         colors
+                         (list "red")))
+                   (when colors-to-draw
+                     (send dc set-smoothing 'aligned)
+                     (send dc set-pen "black" 1 'transparent)
+                     (send dc set-text-foreground "darkred")
+                     (send dc set-font parens-mismatch-font)
+                     (define-values (tw th td ta) (send dc get-text-extent parens-mismatch-str))
+                     (define-values (cw ch) (get-client-size))
+                     (cond
+                       [(list? colors-to-draw)
+                        (define len (length colors-to-draw))
+                        (for ([color (in-list colors-to-draw)]
+                              [i (in-naturals)])
+                          (send dc set-brush color 'solid)
+                          (send dc draw-arc 
+                                (- (/ cw 2) (/ ball-size 2))
+                                (- (/ ch 2) (/ ball-size 2))
+                                ball-size ball-size
+                                (* 2 pi (/ i len))
+                                (* 2 pi (/ (+ i 1) len))))]
+                       [(eq? colors-to-draw 'parens)
+                        (send dc draw-text parens-mismatch-str 
+                              (- (/ cw 2) (/ tw 2))
+                              (- (/ ch 2) (/ th 2)))]))))
+               (define cb-proc (λ (sym new-val)
+                                 (set! colors #f)
+                                 (refresh)))
+               (preferences:add-callback 'drracket:online-compilation-default-off cb-proc #t)
+               (define/override (on-event evt) 
+                 (cond
+                   [(send evt button-down?)
+                    (define menu (new popup-menu%))
+                    (define on? (preferences:get 'drracket:online-compilation-default-off))
+                    (new menu-item% 
+                         [parent menu]
+                         [label (if on?
+                                    "Disable online compilation"
+                                    "Enable online compilation")]
+                         [callback
+                          (λ args
+                            (preferences:set 'drracket:online-compilation-default-off (not on?)))])
+                    (popup-menu menu (send evt get-x) (send evt get-y))]
+                   [(send evt entering?)
+                    (show-tooltip)]
+                   [(send evt leaving?)
+                    (hide-tooltip)]))
+               (super-new [style '(transparent)]
+                          [parent (get-info-panel)]
+                          [stretchable-width #f]
+                          [stretchable-height #f]
+                          [min-width 10]
+                          [min-height 10])
+               
+               (inherit min-width min-height)
+               (let ([dc (get-dc)])
+                 (send dc set-font parens-mismatch-font)
+                 (define-values (w h d a) (send dc get-text-extent parens-mismatch-str))
+                 (min-width (ceiling (inexact->exact (max w ball-size))))
+                 (min-height (ceiling (inexact->exact (max h ball-size))))))))))
+  
+  (define error-message%
+    (class canvas%
+      (init-field msg err?)
+      (inherit refresh get-dc get-client-size)
+      (define/public (set-msg _msg _err?) 
+        (set! msg _msg)
+        (set! err? _err?)
+        (refresh))
+      (define/override (on-paint)
+        (define dc (get-dc))
+        (define-values (cw ch) (get-client-size))
+        (send dc set-font (if err? error-font normal-control-font))
+        (define-values (tw th td ta) (send dc get-text-extent msg))
+        (send dc set-text-foreground (if err? "firebrick" "black"))
+        (send dc draw-text msg 2 (- (/ ch 2) (/ th 2))))
+      (super-new [style '(transparent)])
+      
+      (inherit min-height)
+      (let ()
+        (send (get-dc) set-font (if err? error-font normal-control-font))
+        (define-values (tw th td ta) (send (get-dc) get-text-extent msg))
+        (min-height (inexact->exact (ceiling th))))))
+  
+  (define error-font
+    (let ([base-font normal-control-font])
+      (send the-font-list find-or-create-font
+            (send normal-control-font get-point-size)
+            (send normal-control-font get-family)
+            'italic
+            (send normal-control-font get-weight)
+            (send normal-control-font get-underlined)
+            (send normal-control-font get-smoothing)
+            (send normal-control-font get-size-in-pixels))))
+        
+  (define yellow-message%
+    (class canvas%
+      (inherit get-dc refresh get-client-size
+               min-width min-height
+               get-parent)
+      (define labels '(""))
+      (define/public (set-lab _ls) 
+        (unless (equal? labels _ls)
+          (set! labels _ls)
+          (update-size)
+          (refresh)))
+      (define/private (update-size)
+        (define dc (get-dc))
+        (send dc set-font small-control-font)
+        (define-values (w h _1 _2) (send dc get-text-extent (car labels)))
+        (send (get-parent) begin-container-sequence)
+        (min-width (+ 5 (inexact->exact (ceiling w))))
+        (min-height (+ 5 (* (length labels) (inexact->exact (ceiling h)))))
+        (send (get-parent) end-container-sequence)
+        (send (get-parent) reflow-container))
+      (define/override (on-paint)
+        (define dc (get-dc))
+        (send dc set-font small-control-font)
+        (define-values (w h) (get-client-size))
+        (define-values (tw th _1 _2) (send dc get-text-extent (car labels)))
+        (send dc set-pen "black" 1 'transparent)
+        (send dc set-brush "LemonChiffon" 'solid)
+        (send dc set-pen "black" 1 'solid)
+        (send dc draw-rectangle 0 0 (- w 1) (- h 1))
+        (for ([label (in-list labels)]
+              [i (in-naturals)])
+          (send dc draw-text label 2 (+ 2 (* i th)))))
+      (super-new [stretchable-width #f] [stretchable-height #f])))
+
+  (define expanding-place #f)
+  (define pending-thread #f)
+  
+  (define (send-to-place editor-contents filename prefab-module-settings show-results)
+    (unless expanding-place
+      (set! expanding-place (dynamic-place expanding-place.rkt 'start))
+      (place-channel-put expanding-place module-language-compile-lock)
+      (place-channel-put
+       expanding-place 
+       (for/list ([o-e-h (in-list (drracket:module-language-tools:get-online-expansion-handlers))])
+         (list (drracket:module-language-tools:online-expansion-handler-mod-path o-e-h)
+               (drracket:module-language-tools:online-expansion-handler-id o-e-h)))))
+    (set! pending-thread
+          (thread (λ () 
+                    (define-values (pc-in pc-out) (place-channel))
+                    (define to-send
+                      (vector-immutable editor-contents
+                                        filename
+                                        pc-in 
+                                        prefab-module-settings))
+                    (place-channel-put expanding-place to-send)
+                    (define res (place-channel-get pc-out))
+                    (when res
+                      (let ([t (current-thread)])
+                        (queue-callback
+                         (λ ()
+                           (when (eq? t pending-thread)
+                             (set! pending-thread #f)
+                             (when (getenv "PLTDRPLACEPRINT")
+                               (printf "PLTDRPLACEPRINT: got results back from the place\n"))
+                             (show-results res))))))))))
+  
+  (define (stop-place-running)
+    (when expanding-place
+      (when pending-thread
+        (place-channel-put expanding-place 'abort)
+        (set! pending-thread #f))))
+  
+  (struct error-range (start end [clear-highlight #:mutable]))
+  
+  (define online-compilation-error-pen-width 8)
+  
+  (define module-language-online-expand-text-mixin 
+    (mixin (text:basic<%> 
+            drracket:unit:definitions-text<%>
+            drracket:module-language-tools:definitions-text<%>) ()
+      (inherit last-position find-first-snip get-top-level-window get-filename
+               get-tab get-canvas invalidate-bitmap-cache 
+               set-position get-start-position get-end-position
+               highlight-range dc-location-to-editor-location)
+      
+      (define compilation-out-of-date? #f)
+      
+      (define tmr (new timer% [notify-callback (lambda () (send-off))]))
+      
+      (define cb-proc (λ (sym new-val) 
+                        (when new-val
+                          (queue-callback (λ () (buffer-modified))))))
+      (preferences:add-callback 'drracket:online-compilation-default-off cb-proc #t)
+      
+      ;; buffer-modified and restart-place
+      ;; are the two entry points that might
+      ;; trigger a compilation in a separate
+      ;; place (and thus trigger the creation
+      ;; of the separate place)
+      ;; thus, they are where we check the preference
+      ;; before doing anything
+
+        
+      (define/private (buffer-modified)
+        (when (and (preferences:get 'drracket:online-compilation-default-off)
+                   (> (processor-count) 1))
+          (clear-old-error)
+          (reset-frame-expand-error #t)
+          (let ([tlw (get-top-level-window)])
+            (when (in-module-language tlw)
+              (send (get-tab) show-bkg-running 'nothing #f)
+              (stop-place-running)
+              (set! compilation-out-of-date? #t)
+              (when (eq? (send tlw get-current-tab) (get-tab))
+                (send tmr stop)
+                (send tmr start 250 #t))))))
+      
+      (define/public (restart-place)
+        (when (and (preferences:get 'drracket:online-compilation-default-off)
+                   (> (processor-count) 1))
+          (stop-place-running)
+          (when compilation-out-of-date?
+            (send tmr start 250 #t))))
+      
+      (define/private (send-off)
+        (define tlw (get-top-level-window))
+        ;; make sure the frame's current tab is still this one
+        ;; (we may get #f for the tlw when the tab has been switched)
+        (when (and tlw (eq? (send tlw get-current-tab) (get-tab)))
+          (define settings (in-module-language tlw))
+          (when settings
+            (define-values (editor-contents filename) (fetch-data-to-send))
+            (when editor-contents
+              (send-to-place editor-contents
+                             filename
+                             (module-language-settings->prefab-module-settings settings)
+                             (λ (res) (show-results res)))
+              (when status-line-open?
+                (clear-old-error)
+                (reset-frame-expand-error #t))
+              (send (get-tab) show-bkg-running 'running sc-online-expansion-running)))))
+      
+      (define/private (fetch-data-to-send)
+        (define str (make-string (last-position) #\space))
+        (let/ec k
+          (let loop ([s (find-first-snip)]
+                     [i 0])
+            (cond
+              [(not s) (void)]
+              [(is-a? s string-snip%)
+               (define size (send s get-count))
+               (send s get-text! str 0 size i)
+               (loop (send s next) (+ i size))]
+              [else
+               (send (get-tab) show-bkg-running 'failed sc-only-raw-text-files-supported)
+               (k #f #f)]))
+          (define fn (let* ([b (box #f)]
+                            [n (get-filename b)])
+                       (and (not (unbox b))
+                            n)))
+          (values str fn)))
+      
+      (define status-line-open? #f)
+      
+      (define error/status-message-str "")
+      (define error/status-message-err? #f)
+      (define error-message-srclocs '())
+      (define/private (reset-frame-expand-error pending?)
+        (define new-error/status-message-str
+          (if pending?
+              (string-constant online-expansion-pending)
+              (string-constant online-expansion-finished)))
+        (unless (and (equal? error/status-message-str new-error/status-message-str)
+                     (eq? error-message-srclocs '())
+                     (eq? error/status-message-err? #f))
+          (set! error/status-message-str new-error/status-message-str)
+          (set! error-message-srclocs '())
+          (set! error/status-message-err? #f)
+          (update-frame-expand-error)))
+      (define/public (update-frame-expand-error)
+        (send (send (get-tab) get-frame) set-expand-error/status
+              error/status-message-str 
+              error/status-message-err?
+              (length error-message-srclocs)))
+
+      (define/public (expand-error-next) 
+        (define candidates (filter (λ (error-message-srcloc) 
+                                     (> (- (vector-ref error-message-srcloc 0) 1) 
+                                        (get-end-position)))
+                                   error-message-srclocs))
+        (cond
+          [(null? candidates)
+           (unless (null? error-message-srclocs)
+             (jump-to (car error-message-srclocs)))]
+          [else
+           (jump-to (car candidates))]))
+      
+      (define/public (expand-error-prev) 
+        (define candidates (filter (λ (error-message-srcloc) 
+                                     (< (+ (vector-ref error-message-srcloc 0)
+                                           (vector-ref error-message-srcloc 1)
+                                           -1)
+                                        (get-start-position)))
+                                   error-message-srclocs))
+        (cond
+          [(null? candidates)
+           (unless (null? error-message-srclocs)
+             (jump-to (last error-message-srclocs)))]
+          [else
+           (jump-to (last candidates))]))
+      
+      (define/private (jump-to vec)
+        (set-position (- (vector-ref vec 0) 1))
+        (define cnvs (get-canvas))
+        (when cnvs (send cnvs focus)))
+      
+      (define/private (show-results res)
+        (set! compilation-out-of-date? #f)
+        (case (vector-ref res 0)
+          [(exn)
+           (case (preferences:get 'drracket:online-expansion:other-errors)
+             [(margin) (show-error-in-margin res)]
+             [(gold) (show-error-as-highlighted-regions res)])]
+          [(exn:variable)
+           (case (preferences:get 'drracket:online-expansion:variable-errors)
+             [(margin) (show-error-in-margin res)]
+             [(gold) (show-error-as-highlighted-regions res)])]
+          [(reader-in-defs-error)
+           (case (preferences:get 'drracket:online-expansion:read-in-defs-errors)
+             [(margin) (show-error-in-margin res)]
+             [(gold) (show-error-as-highlighted-regions res)]
+             [(corner) (show-error-as-parens-in-corner res)])]
+          [(access-violation)
+           (send (get-tab) show-bkg-running 'failed (gui-utils:format-literal-label "~a" (vector-ref res 1)))
+           (clear-old-error)
+           (reset-frame-expand-error #f)]
+          [(abnormal-termination)
+           (send (get-tab) show-bkg-running 'failed sc-abnormal-termination)
+           (clear-old-error)
+           (reset-frame-expand-error #f)]
+          [(no-errors)
+           (send (get-tab) show-bkg-running 'nothing #f)
+           (clear-old-error)
+           (reset-frame-expand-error #f)]
+          [(handler-results)
+           (clear-old-error)
+           (reset-frame-expand-error #f)
+           ;; inform the installed handlers that something has come back
+           (for ([key-val (in-list (vector-ref res 1))])
+             (define that-key (list-ref key-val 0))
+             (define val (list-ref key-val 1))
+             (for ([o-e-h (in-list (drracket:module-language-tools:get-online-expansion-handlers))])
+               (define this-key (list (drracket:module-language-tools:online-expansion-handler-mod-path o-e-h)
+                                      (drracket:module-language-tools:online-expansion-handler-id o-e-h)))
+               (when (equal? this-key that-key)
+                 ((drracket:module-language-tools:online-expansion-handler-local-handler o-e-h) this val))))
+           (send (get-tab) show-bkg-running 'nothing #f)]
+          [else
+           (error 'module-language.rkt "unknown response from the expanding place: ~s\n" res)]))
+      
+      (define/private (show-error-as-parens-in-corner res)
+        (send (get-tab) show-bkg-running 'reader-in-defs-error
+              (gui-utils:format-literal-label "~a" (vector-ref res 1)))
+        (clear-old-error)
+        (reset-frame-expand-error #f))
+      
+      (define/private (show-error-in-margin res)
+        (define tlw (send (get-tab) get-frame))
+        (send (get-tab) show-bkg-running 'nothing #f)
+        (set! error/status-message-str (vector-ref res 1))
+        (set! error-message-srclocs (vector-ref res 2))
+        (set! error/status-message-err? #t)
+        (clear-old-error)
+        (set-online-error-ranges
+         (for/list ([range (in-list (vector-ref res 2))])
+           (define pos (vector-ref range 0))
+           (define span (vector-ref range 1))
+           (error-range (- pos 1) (+ pos span -1) #f)))
+        (set-error-ranges-from-online-error-ranges (vector-ref res 2))
+        (invalidate-online-error-ranges)
+        (update-frame-expand-error))
+      
+      (define/private (show-error-as-highlighted-regions res)
+        (define tlw (send (get-tab) get-frame))
+        (send (get-tab) show-bkg-running 'nothing #f)
+        (set! error/status-message-str (vector-ref res 1))
+        (set! error-message-srclocs (vector-ref res 2))
+        (set! error/status-message-err? #t)
+        (clear-old-error)
+        (set! online-highlighted-errors 
+              (for/list ([range (in-list (vector-ref res 2))]) 
+                (define pos (vector-ref range 0))
+                (define span (vector-ref range 1))
+                (highlight-range (- pos 1) (+ pos span -1) "gold")))
+        (set-error-ranges-from-online-error-ranges (vector-ref res 2))
+        (update-frame-expand-error))
+      
+      (define online-error-ranges '())
+      (define online-highlighted-errors '())
+      
+      (define/private (set-online-error-ranges rngs)
+        (unless (equal? online-error-ranges rngs)
+          (invalidate-online-error-ranges)
+          (set! online-error-ranges rngs)
+          (invalidate-online-error-ranges)))
+      
+      (define/private (set-error-ranges-from-online-error-ranges rngs)
+        (define srclocs (for/list ([range (in-list rngs)])
+                          (define pos (vector-ref range 0))
+                          (define span (vector-ref range 1))
+                          (srcloc this #f #f pos span)))
+        (send (send (get-tab) get-ints) set-error-ranges srclocs))
+      
+      (define/private (clear-old-error)
+        (for ([cleanup-thunk (in-list online-highlighted-errors)])
+          (cleanup-thunk))
+        (for ([an-error-range (in-list online-error-ranges)])
+          (when (error-range-clear-highlight an-error-range)
+            ((error-range-clear-highlight an-error-range))
+            (set-error-range-clear-highlight! an-error-range #f)))
+        (invalidate-online-error-ranges)
+        (set-online-error-ranges '()))
+      
+      (define/private (invalidate-online-error-ranges)
+        (when (get-admin)
+          ;; invalidate-online-error-ranges can be called at strange times
+          ;; because it is invoked via a queue-callback thunk; specifically
+          ;; the tab may have changed in drracket, which means that there is
+          ;; no admin and thus there is no reason to invalidate any drawing
+          (for ([an-error-range (in-list online-error-ranges)])
+            (define-values (x y w h) (get-box an-error-range))
+            (invalidate-bitmap-cache x y 'display-end h))))
+      
+      (define byt (box 0.0))
+      (define byb (box 0.0))
+      (define vbx (box 0.0))
+      (define vby (box 0.0))
+      (define vbw (box 0.0))
+      (define vbh (box 0.0))
+    
+      (inherit position-location get-admin)
+      
+      (define/override (on-paint before? dc left top right bottom dx dy draw-caret)
+        (super on-paint before? dc left top right bottom dx dy draw-caret)
+        (unless before?
+          (define saved-brush (send dc get-brush))
+          (define saved-pen (send dc get-pen))
+          (define smoothing (send dc get-smoothing))
+          (send dc set-smoothing 'smoothed)
+          
+          (send dc set-brush "red" 'solid)
+          (send dc set-pen (send the-pen-list find-or-create-pen "red" 1 'transparent))
+          (send dc set-alpha 
+                (if (preferences:get 'framework:white-on-black?)
+                    .5
+                    .25))
+          (define path (new dc-path%))
+            
+          (for ([an-error-range (in-list online-error-ranges)])
+            (define-values (x y w h) (get-box an-error-range))
+            
+            (send path move-to (+ dx x) (+ dy y))
+            (send path line-to (+ dx x w) (+ dy y))
+            (send path line-to (+ dx x w) (+ dy y h))
+            (send path arc (+ dx x) (+ dy y) (* w 2/3) h (* pi 3/2) (* pi 1/2))
+            (send path close))
+          
+          (send dc draw-path path)
+          (send dc set-alpha 1)
+          (send dc set-brush saved-brush)
+          (send dc set-pen saved-pen)
+          (send dc set-smoothing smoothing)))
+      
+      (define/override (on-event evt)
+        (define-values (mx my) 
+          (dc-location-to-editor-location 
+           (send evt get-x)
+           (send evt get-y)))
+        (cond
+          [(or (send evt moving?)
+               (send evt entering?))
+           (for ([an-error-range (in-list online-error-ranges)])
+             (define-values (x y w h) (get-box an-error-range))
+             (cond
+               [(and (<= x mx (+ x w))
+                     (<= y my (+ y h)))
+                (unless (error-range-clear-highlight an-error-range)
+                  (set-error-range-clear-highlight! 
+                   an-error-range
+                   (highlight-range (error-range-start an-error-range)
+                                    (error-range-end an-error-range)
+                                    "pink")))]
+               [else
+                (when (error-range-clear-highlight an-error-range)
+                  ((error-range-clear-highlight an-error-range))
+                  (set-error-range-clear-highlight! an-error-range #f))]))
+           (super on-event evt)]
+          [(send evt leaving?)
+           (for ([an-error-range (in-list online-error-ranges)])
+             (when (error-range-clear-highlight an-error-range)
+               ((error-range-clear-highlight an-error-range))
+               (set-error-range-clear-highlight! an-error-range #f)))
+           (super on-event evt)]
+          [(send evt button-down? 'left)
+           (define used-click? #f)
+           (for ([an-error-range (in-list online-error-ranges)])
+             (define-values (x y w h) (get-box an-error-range))
+             (when (and (<= x mx (+ x w))
+                        (<= y my (+ y h)))
+               (set! used-click? #t)
+               (set-position (error-range-start an-error-range))))
+           (unless used-click?
+             (super on-event evt))]
+          [else
+           (super on-event evt)]))
+      
+      ;; pre: get-admin does not return #f
+      (define/private (get-box an-error-range)
+        (define start-pos (error-range-start an-error-range))
+        (define end-pos (error-range-end an-error-range))
+        (position-location start-pos #f byt)
+        (position-location end-pos #f byb #f)
+        (send (get-admin) get-view vbx vby vbw vbh)
+        
+        (define x (+ (unbox vbx)
+                     (unbox vbw)
+                     (- online-compilation-error-pen-width)
+                     (- online-compilation-error-pen-width)))
+        (define y (unbox byt))
+        (define w (* online-compilation-error-pen-width 2))
+        (define h (- (unbox byb) (unbox byt)))
+        
+        (values x y w h))
+        
+      (define/override (move-to-new-language)
+        ;; this is here to get things running for the initital tab in a new frame
+        (super move-to-new-language)
+        (buffer-modified))
+      
+      (define/augment (after-insert start end) 
+        (buffer-modified)
+        (inner (void) after-insert start end))
+      
+      (define/augment (after-delete start end) 
+        (buffer-modified)
+        (inner (void) after-delete start end))
+      
+      (define/augment (after-load-file success?)
+        (when success? (buffer-modified))
+        (inner (void) after-load-file success?))
+      
+      (super-new)))
+
+    
   (define module-language-put-file-mixin
     (mixin (text:basic<%>) ()
       (inherit get-text last-position get-character get-top-level-window)
+
       (define/override (put-file directory default-name)
         (let ([tlw (get-top-level-window)])
-          (if (and tlw
-                   (is-a? tlw drracket:unit:frame<%>))
-              (let* ([definitions-text (send tlw get-definitions-text)]
-                     [module-language?
-                      (is-a? (drracket:language-configuration:language-settings-language
-                              (send definitions-text get-next-settings))
-                             module-language<%>)]
-                     [module-default-filename
-                      (and module-language? (get-module-filename))])
+          (if (in-module-language tlw)
+              (let ([module-default-filename (get-module-filename)])
                 (super put-file directory module-default-filename))
               (super put-file directory default-name))))
       
@@ -872,4 +1592,78 @@
               [else
                (loop (+ pos 1))]))))
       
-      (super-new))))
+      (super-new)))
+  
+  (define module-language-compile-lock (make-compile-lock))
+  
+  (define module-language-parallel-lock-client
+    (compile-lock->parallel-lock-client
+     module-language-compile-lock
+     (current-custodian)))
+  
+  ;; in-module-language : top-level-window<%> -> module-language-settings or #f
+  (define (in-module-language tlw)
+    (and tlw
+         (is-a? tlw drracket:unit:frame<%>)
+         (let ([settings (send (send tlw get-definitions-text) get-next-settings)])
+           (and (is-a? (drracket:language-configuration:language-settings-language settings)
+                       module-language<%>)
+                (drracket:language-configuration:language-settings-settings settings)))))
+  
+  
+  (define (initialize-prefs-panel)
+    (preferences:add-panel
+     (string-constant online-expansion)
+     (λ (parent)
+       (define parent-vp (new vertical-panel% 
+                              [parent parent]
+                              [alignment '(center top)]))
+       (define vp (new vertical-panel% 
+                       [parent parent-vp]
+                       [stretchable-width #f]
+                       [stretchable-height #f]
+                       [alignment '(left center)]))
+       
+       (define ((make-callback pref-sym) choice evt)
+         (preferences:set pref-sym (index->pref (send choice get-selection))))
+       (define read-choice
+         (new choice% 
+              [parent vp]
+              [label (string-constant online-expansion-show-read-errors-as)]
+              [callback (make-callback 'drracket:online-expansion:read-in-defs-errors)]
+              [choices (list (string-constant online-expansion-error-margin)
+                             (string-constant online-expansion-error-gold-highlight)
+                             (string-constant online-expansion-error-in-corner))]))
+       (define var-choice
+         (new choice% 
+              [parent vp]
+              [label (string-constant online-expansion-show-variable-errors-as)]
+              [callback (make-callback 'drracket:online-expansion:variable-errors)]
+              [choices (list (string-constant online-expansion-error-margin)
+                             (string-constant online-expansion-error-gold-highlight))]))
+       (define other-choice
+         (new choice% 
+              [parent vp]
+              [label (string-constant online-expansion-show-other-errors-as)]
+              [callback (make-callback 'drracket:online-expansion:other-errors)]
+              [choices (list (string-constant online-expansion-error-margin)
+                             (string-constant online-expansion-error-gold-highlight))]))
+       (define (connect-to-prefs choice pref-sym)
+         (preferences:add-callback 
+          pref-sym
+          (λ (pref-sym nv) (send choice set-selection (pref->index nv))))
+         (send choice set-selection (pref->index (preferences:get pref-sym))))
+       (define (index->pref n)
+         (case n
+           [(0) 'margin]
+           [(1) 'gold]
+           [(2) 'corner]))
+       (define (pref->index p)
+         (case p
+           [(margin) 0]
+           [(gold) 1]
+           [(corner) 2]))
+       (connect-to-prefs read-choice 'drracket:online-expansion:read-in-defs-errors)
+       (connect-to-prefs var-choice 'drracket:online-expansion:variable-errors)
+       (connect-to-prefs other-choice 'drracket:online-expansion:other-errors)
+       parent-vp))))

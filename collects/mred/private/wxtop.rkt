@@ -1,11 +1,10 @@
-(module wxtop mzscheme
+(module wxtop racket/base
   (require mzlib/class
            mzlib/class100
-           mzlib/etc
            mzlib/list
-           (prefix wx: "kernel.rkt")
-           (prefix wx: "wxme/editor-canvas.rkt")
-           (prefix wx: "wxme/editor-snip.rkt")
+           (prefix-in wx: "kernel.rkt")
+           (prefix-in wx: "wxme/editor-canvas.rkt")
+           (prefix-in wx: "wxme/editor-snip.rkt")
            "lock.rkt"
            "helper.rkt"
            "const.rkt"
@@ -15,14 +14,15 @@
            "wxwindow.rkt"
            "wxcontainer.rkt")
 
-  (provide (protect active-main-frame
-                    set-root-menu-wx-frame!)
+  (provide (protect-out active-main-frame
+			set-root-menu-wx-frame!)
 	   get-display-size
 	   get-display-left-top-inset
-	   (protect make-top-container%
-		    make-top-level-window-glue%
-		    wx-frame%
-		    wx-dialog%))
+	   get-display-count
+	   (protect-out make-top-container%
+			make-top-level-window-glue%
+			wx-frame%
+			wx-dialog%))
 
   ;; Weak boxed:
   (define active-main-frame (make-weak-box #f))
@@ -32,18 +32,29 @@
     (set! root-menu-wx-frame f))
 
   (define get-display-size
-    (opt-lambda ([full-screen? #f])
-      (let ([xb (box 0)]
-	    [yb (box 0)])
-	(wx:display-size xb yb full-screen?)
-	(values (unbox xb) (unbox yb)))))
+    (lambda ([full-screen? #f] #:monitor [monitor 0])
+      (unless (exact-nonnegative-integer? monitor)
+	(raise-type-error 'get-display-size "exact non-negative integer" monitor))
+      (let/ec esc
+        (let ([xb (box 0)]
+              [yb (box 0)])
+          (wx:display-size xb yb full-screen? monitor
+                           (lambda () (esc #f #f)))
+          (values (unbox xb) (unbox yb))))))
 
   (define get-display-left-top-inset
-    (opt-lambda ([advisory? #f])
-      (let ([xb (box 0)]
-	    [yb (box 0)])
-	(wx:display-origin xb yb advisory?)
-	(values (unbox xb) (unbox yb)))))
+    (lambda ([advisory? #f] #:monitor [monitor 0])
+      (unless (exact-nonnegative-integer? monitor)
+	(raise-type-error 'get-display-left-top-inset "exact non-negative integer" monitor))
+      (let/ec esc
+        (let ([xb (box 0)]
+              [yb (box 0)])
+          (wx:display-origin xb yb advisory? monitor (lambda () (esc #f #f)))
+          (values (unbox xb) (unbox yb))))))
+
+  (define get-display-count
+    (lambda ()
+      (wx:display-count)))
 
   (define-values (left-margin top-margin init-top-x init-top-y)
     (let-values ([(x y) (get-display-left-top-inset #f)]
@@ -55,7 +66,7 @@
 
   (define top-x init-top-x)
   (define top-y init-top-y)
-  (define top-level-windows (make-hash-table 'weak))
+  (define top-level-windows (make-weak-hasheq))
   
   ;; make-top-container%: adds the necessary functionality to wx:frame% and 
   ;; wx:dialog%.
@@ -99,8 +110,8 @@
 
        [parent-for-center parent]
 
-       [show-ht (make-hash-table)]
-       [fake-show-ht (make-hash-table)])
+       [show-ht (make-hasheq)]
+       [fake-show-ht (make-hasheq)])
       
       (override
 	[enable
@@ -192,17 +203,17 @@
 	   (when perform-updates?
 	     (when pending-redraws?
 	       (force-redraw))
-	     (when (positive? (hash-table-count fake-show-ht))
+	     (when (positive? (hash-count fake-show-ht))
 	       (let ([t fake-show-ht])
-		 (set! fake-show-ht (make-hash-table))
-		 (hash-table-for-each
+		 (set! fake-show-ht (make-hasheq))
+		 (hash-for-each
 		  t
 		  (lambda (win v?)
 		    (send win really-show #t)))))
-	     (when (positive? (hash-table-count show-ht))
+	     (when (positive? (hash-count show-ht))
 	       (let ([t show-ht])
-		 (set! show-ht (make-hash-table))
-		 (hash-table-for-each
+		 (set! show-ht (make-hasheq))
+		 (hash-for-each
 		  t
 		  (lambda (win v?)
 		    (send win show v?))))))])]
@@ -221,7 +232,7 @@
 	 (lambda (child show?)
 	   (if perform-updates?
 	       (send child show show?)
-	       (hash-table-put! show-ht child show?)))]
+	       (hash-set! show-ht child show?)))]
 
         [show-control
          (lambda (child on?)
@@ -230,10 +241,10 @@
                    (child . is-a? . wx-frame%)
                    (child . is-a? . wx-dialog%))
 	       (begin
-		 (hash-table-remove! fake-show-ht child)
+		 (hash-remove! fake-show-ht child)
 		 (send child really-show on?))
                (begin
-		 (hash-table-put! fake-show-ht child #t)
+		 (hash-set! fake-show-ht child #t)
                  (send child fake-show on?))))]
 
 	;; force-redraw: receives a message from to redraw the
@@ -353,8 +364,8 @@
            (when on?
              (position-for-initial-show))
 	   (if on?
-	       (hash-table-put! top-level-windows this #t)
-	       (hash-table-remove! top-level-windows this))
+	       (hash-set! top-level-windows this #t)
+	       (hash-remove! top-level-windows this))
 	   (as-exit ; as-exit because there's an implicit wx:yield for dialogs
             do-show))])
       
@@ -399,7 +410,7 @@
 	 (lambda ()
 	   (unless (and already-trying? (not (eq? 'unix (system-type))))
 	     (parameterize ([wx:current-eventspace (get-eventspace)])
-	       (wx:queue-callback (lambda () (resized)) #t))))])
+	       (wx:queue-callback (lambda () (resized)) wx:middle-queue-key))))])
 
       (public
         [position-for-initial-show
@@ -485,12 +496,14 @@
 						(memq code '(right down)))]
 				  [normal-move
 				   (lambda ()
-				     (let* ([o (if (or (is-a? o wx:canvas%) (is-a? o wx:item%)) 
+				     (let* ([o (if (or (is-a? o wx:canvas%) 
+                                                       (is-a? o wx:item%)
+                                                       (is-a? o wx:tab-panel%))
 						   (if (is-a? o wx-group-box<%>)
 						       #f
 						       o)
 						   #f)]
-					    [candidates 
+                                            [candidates 
 					     (map object->position (container->children panel o #t))]
                                             [dests (filter-overlapping candidates)]
 					    [pos (if o (object->position o) (list 'x 0 0 1 1))]
@@ -517,7 +530,7 @@
 						     (as-exit (lambda () (send o on-tab-in))))))))))])
 			     (if (and (not (eqv? code #\tab))
 				      (or (is-a? o wx:radio-box%)
-					  (is-a? o wx-tab-group<%>)))
+					  (is-a? o wx:tab-panel%)))
 				 (let ([n (send o number)]
 				       [s (send o button-focus -1)]
 				       [v-move? (memq code '(up down))]
@@ -713,7 +726,7 @@
 		 (or (send event get-control-down)
 		     (send event get-meta-down)
 		     (send event get-alt-down)
-		     (hash-table-get function-keys (send event get-key-code) #f))
+		     (hash-ref function-keys (send event get-key-code) #f))
 		 (begin
 		   (send menu-bar on-demand)
 		   (send menu-bar handle-key event))))])

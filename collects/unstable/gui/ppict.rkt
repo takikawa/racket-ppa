@@ -1,12 +1,12 @@
 #lang racket/base
 (require (for-syntax racket/base
-                     racket/syntax
                      syntax/parse
                      syntax/parse/experimental/contract
                      "private/ppict-syntax.rkt")
-         racket/contract
+         racket/contract/base
          slideshow/pict
-         "private/ppict.rkt")
+         "private/ppict.rkt"
+         "private/tag-pict.rkt")
 
 (define-for-syntax (ppict-do*-transformer who stx)
   (syntax-parse stx
@@ -32,8 +32,7 @@
 
 (provide ppict?
          placer?
-         refpoint-placer?
-         tag-path?)
+         refpoint-placer?)
 
 (provide/contract
  [ppict-go
@@ -41,8 +40,13 @@
  [ppict-add
   (->* (ppict?)
        ()
-       #:rest (listof (or/c pict? real? #f))
+       #:rest (listof (or/c pict? real? #f 'next))
        pict?)]
+ [ppict-add*
+  (->* (ppict?)
+       ()
+       #:rest (listof (or/c pict? real? #f 'next))
+       (values pict? (listof pict?)))]
  [ppict-placer
   (-> ppict? placer?)]
  [coord
@@ -77,11 +81,4 @@
        refpoint-placer?)]
  [merge-refpoints
   (-> refpoint-placer? refpoint-placer?
-      refpoint-placer?)]
-
- [tag-pict
-  (-> pict? symbol? pict?)]
- [pict-tag
-  (-> pict? (or/c symbol? #f))]
- [find-tag
-  (-> pict? tag-path? (or/c pict-path? #f))])
+      refpoint-placer?)])

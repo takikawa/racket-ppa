@@ -548,5 +548,60 @@
   (test 'ok 'ok (foo)))
 
 ;; ----------------------------------------
+;; Check `#%variable-reference' expansion to make sure
+;;  a lexically bound identifier is made consistent with
+;;  its binding
+
+(module m-check-varref-expand racket
+  (define-syntax (m stx)
+    (syntax-case stx ()
+      [(_ e) 
+       ;; use `local-expand' to trigger re-expansion:
+       (local-expand #'e 'expression null)]))
+  
+  (m
+   (let ([x 10])
+     (define-syntax-rule (q) (#%variable-reference x))
+     ;; `q' introduces a marked `x' under `#%variable-reference':
+     (q))))
+(require 'm-check-varref-expand)
+
+;; ----------------------------------------
+;; Check that a modul-level binding with 0 marks
+;;  but lexical context is found correctly with
+;;  1 and 2 marks (test case by Carl):
+
+(module check-macro-introduced-via-defctx racket/base
+  (require (for-syntax racket/base racket/syntax))
+
+  (begin-for-syntax
+   (define env (box #false)))
+  
+  (define-syntax (one stx)
+    (define ctx (syntax-local-make-definition-context #false))
+    (define id
+      (internal-definition-context-apply 
+       ctx
+       (syntax-local-introduce (datum->syntax #false 'private))))
+    (syntax-local-bind-syntaxes (list id) #false ctx)
+    (internal-definition-context-seal ctx)
+    #`(begin
+        (begin-for-syntax (set-box! env #'#,id))
+        (define #,id #false)))
+  (one)
+  
+  (define-syntax (two stx)
+    (define id ((make-syntax-introducer) (unbox env)))
+    (unless (free-identifier=? id (syntax-local-introduce id))
+      (raise-syntax-error 
+       #false
+       (format "mark changes identifier's binding: ~v / ~v"
+               (identifier-binding id)
+               (identifier-binding (syntax-local-introduce id)))
+       id))
+    #'#f)
+  (two))
+
+;; ----------------------------------------
 
 (report-errs)

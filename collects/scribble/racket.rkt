@@ -4,10 +4,6 @@
            "search.rkt"
            "private/manual-sprop.rkt"
            "private/on-demand.rkt"
-           mzlib/class
-           mzlib/for
-           syntax/modresolve
-           syntax/modcode
            file/convertible
            (for-syntax racket/base))
   
@@ -46,6 +42,7 @@
 
            (struct-out var-id)
            (struct-out shaped-parens)
+           (struct-out long-boolean)
            (struct-out just-context)
            (struct-out alternate-display)
            (struct-out literal-syntax)
@@ -571,10 +568,14 @@
                                                  (if (struct-proxy? (syntax-e c)) 
                                                      (syntax-e (struct-proxy-name (syntax-e c)))
                                                      (object-name (syntax-e c))))])])
-                           (set! src-col (+ src-col (string-length s)))
+                           (set! src-col (+ src-col (if (struct-proxy? (syntax-e c)) 
+                                                        1 
+                                                        (string-length s))))
                            s)
                          symbol-color)
-                    (out " " no-color)))
+                    (unless (and (struct-proxy? (syntax-e c))
+                                 (null? (struct-proxy-content (syntax-e c))))
+                      (out " " no-color))))
                 (when (vector? (syntax-e c))
                   (unless (and expr? (zero? quote-depth))
                     (let ([vec (syntax-e c)])
@@ -910,56 +911,64 @@
                          ,(syntax-column v)
                          ,(syntax-position v)
                          ,(syntax-span v))))
-	   (define (stx->loc-s-expr v)
-             (let ([slv (and (identifier? v)
-                             (syntax-local-value v (lambda () #f)))])
-               (cond
-                [(variable-id? slv)
-                 (wrap-loc v #f `(,#'make-var-id ',(variable-id-sym slv)))]
-                [(element-id-transformer? slv)
-                 (wrap-loc v #f ((element-id-transformer-proc slv) v))]
-                [(syntax? v)
-                 (let ([mk (wrap-loc
-                            v
-                            `(quote-syntax ,(datum->syntax v 'defcode))
-                            (syntax-case v (uncode)
-                              [(uncode e) #'e]
-                              [else (stx->loc-s-expr (syntax-e v))]))])
-                   (let ([prop (syntax-property v 'paren-shape)])
-                     (if prop
-                         `(,#'stx-prop ,mk 'paren-shape ,prop)
-                         mk)))]
-                [(null? v) 'null]
-                [(list? v) `(list . ,(map stx->loc-s-expr v))]
-                [(pair? v) `(cons ,(stx->loc-s-expr (car v))
-                                  ,(stx->loc-s-expr (cdr v)))]
-                [(vector? v) `(vector ,@(map
-                                         stx->loc-s-expr
-                                         (vector->list v)))]
-                [(and (struct? v) (prefab-struct-key v))
-                 `(make-prefab-struct (quote ,(prefab-struct-key v))
-                                      ,@(map
-                                         stx->loc-s-expr
-                                         (cdr (vector->list (struct->vector v)))))]
-                [(box? v) `(box ,(stx->loc-s-expr (unbox v)))]
-                [(hash? v) `(,(cond
-                               [(hash-eq? v) 'make-immutable-hasheq]
-                               [(hash-eqv? v) 'make-immutable-hasheqv]
-                               [else 'make-immutable-hash])
-                             (list
-                              ,@(hash-map
-                                 v
-                                 (lambda (k v)
-                                   `(cons (quote ,k)
-                                          ,(stx->loc-s-expr v))))))]
-                [else `(quote ,v)])))
-	   (define (cvt s)
-	     (datum->syntax #'here (stx->loc-s-expr s) #f))
+           (define (stx->loc-s-expr/esc v uncode-id)
+             (define (stx->loc-s-expr v)
+               (let ([slv (and (identifier? v)
+                               (syntax-local-value v (lambda () #f)))])
+                 (cond
+                  [(variable-id? slv)
+                   (wrap-loc v #f `(,#'make-var-id ',(variable-id-sym slv)))]
+                  [(element-id-transformer? slv)
+                   (wrap-loc v #f ((element-id-transformer-proc slv) v))]
+                  [(syntax? v)
+                   (let ([mk (wrap-loc
+                              v
+                              `(quote-syntax ,(datum->syntax v 'defcode))
+                              (syntax-case v ()
+                                [(esc e) 
+                                 (and (identifier? #'esc)
+                                      (free-identifier=? #'esc uncode-id))
+                                 #'e]
+                                [else (stx->loc-s-expr (syntax-e v))]))])
+                     (let ([prop (syntax-property v 'paren-shape)])
+                       (if prop
+                           `(,#'stx-prop ,mk 'paren-shape ,prop)
+                           mk)))]
+                  [(null? v) 'null]
+                  [(list? v) `(list . ,(map stx->loc-s-expr v))]
+                  [(pair? v) `(cons ,(stx->loc-s-expr (car v))
+                                    ,(stx->loc-s-expr (cdr v)))]
+                  [(vector? v) `(vector ,@(map
+                                           stx->loc-s-expr
+                                           (vector->list v)))]
+                  [(and (struct? v) (prefab-struct-key v))
+                   `(make-prefab-struct (quote ,(prefab-struct-key v))
+                                        ,@(map
+                                           stx->loc-s-expr
+                                           (cdr (vector->list (struct->vector v)))))]
+                  [(box? v) `(box ,(stx->loc-s-expr (unbox v)))]
+                  [(hash? v) `(,(cond
+                                 [(hash-eq? v) 'make-immutable-hasheq]
+                                 [(hash-eqv? v) 'make-immutable-hasheqv]
+                                 [else 'make-immutable-hash])
+                               (list
+                                ,@(hash-map
+                                   v
+                                   (lambda (k v)
+                                     `(cons (quote ,k)
+                                            ,(stx->loc-s-expr v))))))]
+                  [else `(quote ,v)])))
+             (stx->loc-s-expr v))
+	   (define (cvt s uncode-id)
+	     (datum->syntax #'here (stx->loc-s-expr/esc s uncode-id) #f))
            (if (eq? (syntax-local-context) 'expression)
                (syntax-case stx ()
-                 [(_ expr) #`(typeset-code #,(cvt #'expr))]
+                 [(_ #:escape uncode-id expr) #`(typeset-code #,(cvt #'expr #'uncode-id))]
+                 [(_ expr) #`(typeset-code #,(cvt #'expr #'uncode))]
+                 [(_ #:escape uncode-id expr (... ...))
+                  #`(typeset-code #,(cvt #'(code:line expr (... ...)) #'uncode-id))]
                  [(_ expr (... ...))
-                  #`(typeset-code #,(cvt #'(code:line expr (... ...))))])
+                  #`(typeset-code #,(cvt #'(code:line expr (... ...)) #'uncode))])
                (quasisyntax/loc stx
                  (#%expression #,stx)))))]
       [(_ code typeset-code uncode d->s)
@@ -998,6 +1007,7 @@
 
   (define-struct var-id (sym))
   (define-struct shaped-parens (val shape))
+  (define-struct long-boolean (val))
   (define-struct just-context (val ctx))
   (define-struct alternate-display (id string))
   (define-struct literal-syntax (stx))
@@ -1057,6 +1067,10 @@
       (syntax-property (do-syntax-ize (shaped-parens-val v) col line ht #f qq #f)
                        'paren-shape
                        (shaped-parens-shape v))]
+     [(long-boolean? v)
+      (datum->syntax #f
+                     (and (long-boolean-val v) #t) 
+                     (vector #f line col (+ 1 col) (if (long-boolean-val v) 5 6)))]
      [(just-context? v)
       (let ([s (do-syntax-ize (just-context-val v) col line ht #f qq #f)])
         (datum->syntax (just-context-ctx v)

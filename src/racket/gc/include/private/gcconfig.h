@@ -45,6 +45,20 @@
 #  endif
 # endif
 
+/* PLTSCHEME: added QNX: */
+/* And one for QNX: */
+# if defined(__QNX__)
+#    define I386
+#    define OS_TYPE "QNX"
+#    define SA_RESTART 0
+#    define HEURISTIC1
+     extern char etext[];
+#    define DATASTART ((ptr_t)(etext))
+     extern int _end[];
+#    define DATAEND (_end)
+#    define mach_type_known
+# endif
+
 /* And one for NetBSD: */
 # if defined(__NetBSD__)
 #    define NETBSD
@@ -1969,8 +1983,9 @@
 #       define STACKBOTTOM USRSTACK
 #    endif
         extern int __data_start[];
-#       define DATASTART ((ptr_t)(__data_start))
-        extern char _end[];
+/* PLTSCHEME: commented out these two: */
+/*#       define DATASTART ((ptr_t)(__data_start)) */
+/*        extern char _end[]; */
 #       define DATAEND ((ptr_t)(&_end))
 #       define DYNAMIC_LOADING
 #   endif

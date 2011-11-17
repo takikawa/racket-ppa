@@ -1,12 +1,11 @@
 #lang scheme/unit
 
-  (require mzlib/class
-           scheme/file
+  (require racket/class
+           racket/file
            "sig.rkt"
            "../gui-utils.rkt"
            "../preferences.rkt"
            mred/mred-sig
-           mzlib/list
            string-constants)
   
   (import mred^
@@ -26,17 +25,17 @@
   
   (define objects null)
   
-  (define autosave-toc-filename
+  (define toc-path
     (build-path (find-system-path 'pref-dir)
                 (case (system-type)
-                  [(unix) ".plt-autosave-toc"]
-                  [else "PLT-autosave-toc"])))
+                  [(unix) ".plt-autosave-toc.rktd"]
+                  [else "PLT-autosave-toc.rktd"])))
   
   (define autosave-toc-save-filename
     (build-path (find-system-path 'pref-dir)
                 (case (system-type)
-                  [(unix) ".plt-autosave-toc-save"]
-                  [else "PLT-autosave-toc-save"])))
+                  [(unix) ".plt-autosave-toc-save.rktd"]
+                  [else "PLT-autosave-toc-save.rktd"])))
   
   (define autosave-timer%
     (class timer%
@@ -50,9 +49,9 @@
               (set! last-name-mapping new-name-mapping)
               (when (file-exists? autosave-toc-save-filename)
                 (delete-file autosave-toc-save-filename))
-              (when (file-exists? autosave-toc-filename)
-                (copy-file autosave-toc-filename autosave-toc-save-filename))
-              (call-with-output-file autosave-toc-filename
+              (when (file-exists? toc-path)
+                (copy-file toc-path autosave-toc-save-filename))
+              (call-with-output-file toc-path
                 (λ (port)
                   (write new-name-mapping port))
                 #:exists 'truncate
@@ -79,8 +78,11 @@
                        [filename (send object get-filename tmp-box)])
                   (loop (cdr orig-objects)
                         (if new-filename
-                            (cons (list (and (not (unbox tmp-box)) filename)
-                                        new-filename)
+                            (cons (list (and (not (unbox tmp-box)) 
+                                             filename
+                                             (path->bytes filename))
+                                        (and new-filename 
+                                             (path->bytes new-filename)))
                                   name-mapping)
                             name-mapping)
                         (cons object-wb new-objects)))
@@ -89,6 +91,17 @@
                       new-objects))))))
   
   (define timer #f)
+  ;; when the autosave delay is changed then we
+  ;; trigger an autosave right away and let the
+  ;; callback trigger the next one at the right interval
+  (preferences:add-callback
+   'framework:autosave-delay
+   (λ (k v)
+     (when timer
+       (send timer stop)
+       (send timer start 0 #t))))
+  
+
   
   (define (register b)
     (unless timer
@@ -109,37 +122,44 @@
     ;; main : -> void
     ;; start everything going
     (define (main)
-      (when (file-exists? autosave-toc-filename)
+      (when (file-exists? toc-path)
         ;; Load table from file, and check that the file was not corrupted
         (let* ([table (let ([v (with-handlers ([exn:fail? (λ (x) null)])
-                                 (call-with-input-file autosave-toc-filename read))]
-                            [path? (λ (x)
-                                     (and (string? x)
-                                          (absolute-path? x)))])
+                                 (call-with-input-file toc-path read))])
                         (if (and (list? v)
                                  (andmap (λ (i)
                                            (and (list? i) 
                                                 (= 2 (length i))
                                                 (or (not (car i))
-                                                    (path? (car i)))
-                                                (path? (cadr i))))
+                                                    (bytes? (car i)))
+                                                (bytes? (cadr i))))
                                          v))
-                            v
+                            (map (λ (ent) (list (if (bytes? (list-ref ent 0))
+                                                    (bytes->path (list-ref ent 0))
+                                                    #f)
+                                                (bytes->path (list-ref ent 1))))
+                                 v)
                             null))]
                ;; assume that the autosave file was deleted due to the file being saved
                [filtered-table
                 (filter (λ (x) (file-exists? (cadr x))) table)])
           (unless (null? filtered-table)
-            (let* ([f (new final-frame%
-                           (label (string-constant recover-autosave-files-frame-title)))]
+            (let* ([dlg (new dialog%
+                             (label (string-constant recover-autosave-files-frame-title)))]
                    [t (new text% (auto-wrap #t))]
                    [ec (new editor-canvas%
-                            (parent (send f get-area-container))
+                            (parent dlg)
                             (editor t)
                             (line-count 2)
+                            (stretchable-height #f)
                             (style '(no-hscroll)))]
-                   [hp (make-object horizontal-panel% (send f get-area-container))]
-                   [vp (make-object vertical-panel% hp)])
+                   [hp (new horizontal-panel% 
+                            [parent dlg]
+                            [stretchable-height #f])]
+                   [vp (new vertical-panel%
+                            [parent hp]
+                            [stretchable-height #f])]
+                   [details-parent (new horizontal-panel% [parent dlg])])
               (send vp set-alignment 'right 'center)
               (make-object grow-box-spacer-pane% hp)
               (send t insert (string-constant autosave-explanation))
@@ -147,36 +167,24 @@
               (send t set-position 0 0)
               (send t lock #t)
               
-              (for-each (add-table-line vp f) filtered-table)
+              (for-each (add-table-line vp dlg details-parent) filtered-table)
               (make-object button%
                 (string-constant autosave-done)
                 vp
                 (λ (x y)
-                  (when (send f can-close?)
-                    (send f on-close)
-                    (send f show #f))))
-              (send f show #t)
-              (yield done-semaphore)
+                  (when (send dlg can-close?)
+                    (send dlg on-close)
+                    (send dlg show #f))))
+              (send dlg show #t)
               (void))))))
     
-    (define done-semaphore (make-semaphore 0))
-    
-    (define final-frame%
-      (class frame:basic%
-        (define/augment (can-close?) #t)
-        (define/augment (on-close)
-          (inner (void) on-close)
-          (send (group:get-the-frame-group)
-                remove-frame
-                this)
-          (semaphore-post done-semaphore))
-        (super-new)))
-    
-    ;; add-table-line : (is-a? area-container<%>)  (union #f (is-a?/c top-level-window<%>))
-    ;;               -> (list (union #f string[filename]) string[filename-file-exists?])
-    ;;               -> void
+    ;; add-table-line : (is-a? area-container<%>)
+    ;;                  (or/c #f (is-a?/c top-level-window<%>))
+    ;;                  (is-a? area-container<%>)
+    ;;               -> (list/c (or/c #f path?) path?)
+    ;;               -> void?
     ;; adds in a line to the overview table showing this pair of files.
-    (define (add-table-line area-container parent)
+    (define (add-table-line area-container dlg show-details-parent)
       (λ (table-entry)
         (letrec ([orig-file (car table-entry)]
                  [backup-file (cadr table-entry)]
@@ -192,7 +200,7 @@
                                   (parent msg1-panel)
                                   (label (string-constant autosave-original-label:)))]
                  [msg1 (new message%
-                            (label (or orig-file (string-constant autosave-unknown-filename)))
+                            (label (if orig-file (path->string orig-file) (string-constant autosave-unknown-filename)))
                             (stretchable-width #t)
                             (parent msg1-panel))]
                  [msg2-panel (new horizontal-panel%
@@ -201,13 +209,13 @@
                                   (parent msg2-panel)
                                   (label (string-constant autosave-autosave-label:)))]
                  [msg2 (new message%
-                            (label backup-file)
+                            (label (path->string backup-file))
                             (stretchable-width #t)
                             (parent msg2-panel))]
                  [details
                   (make-object button% (string-constant autosave-details) hp
                     (λ (x y)
-                      (show-files table-entry)))]
+                      (show-files table-entry show-details-parent dlg)))]
                  [delete
                   (make-object button%
                     (string-constant autosave-delete-button)
@@ -217,15 +225,17 @@
                         (disable-line)
                         (send msg2 set-label (string-constant autosave-deleted)))))]
                  [recover
-                  (make-object button%
+                  (make-object button% 
                     (string-constant autosave-recover)
                     hp
                     (λ (recover y)
-                      (let ([filename-result (recover-file parent table-entry)])
+                      (let ([filename-result (recover-file dlg table-entry)])
                         (when filename-result
                           (disable-line)
                           (send msg2 set-label (string-constant autosave-recovered!))
-                          (send msg1 set-label filename-result)))))]
+                          (send msg1 set-label (gui-utils:quote-literal-label
+                                                (path->string filename-result)
+                                                #:quote-amp? #f))))))]
                  [disable-line
                   (λ ()
                     (send recover enable #f)
@@ -235,7 +245,7 @@
             (send msg1-label min-width w)
             (send msg2-label min-width w))
           (void))))
-    
+
     ;; delete-autosave : (list (union #f string[filename]) string[filename]) -> boolean
     ;; result indicates if delete occurred
     (define (delete-autosave table-entry)
@@ -260,31 +270,34 @@
                (delete-file autosave-file)
                #t))))
     
-    ;; show-files : (list (union #f string[filename]) string) -> void
-    (define (show-files table-entry)
-      (let ([file1 (car table-entry)]
-            [file2 (cadr table-entry)])
-        (define frame (make-object show-files-frame% 
-                        (if file1
-                            (string-constant autosave-compare-files)
-                            (string-constant autosave-show-autosave))
-                        #f
-                        (if file1 600 300)
-                        600))
-        (define hp (new horizontal-panel%
-                        (parent (send frame get-area-container))))
+    ;; show-files : (list (or/c #f path?) path?) (is-a?/c area-container<%>) (is-a?/c dialog%) -> void
+    (define (show-files table-entry show-details-parent dlg)
+      (let ([file1 (list-ref table-entry 0)]
+            [file2 (list-ref table-entry 1)])
+        (send dlg begin-container-sequence)
+        (define had-children? #f)
+        (send show-details-parent change-children (λ (x) 
+                                                    (set! had-children? (not (null? x)))
+                                                    '()))
         (when file1
-          (add-file-viewer file1 hp (string-constant autosave-original-label)))
-        (add-file-viewer file2 hp (string-constant autosave-autosave-label))
-        (send frame show #t)))
+          (add-file-viewer file1 show-details-parent (string-constant autosave-original-label)))
+        (add-file-viewer file2 show-details-parent (string-constant autosave-autosave-label))
+        (send dlg end-container-sequence)
+        (unless had-children?
+          (send dlg center))))
     
-    ;; add-file-viewer : string[filename] -> void
+    ;; add-file-viewer : path? -> void
     (define (add-file-viewer filename parent label)
       (define vp (make-object vertical-panel% parent))
       (define t (make-object show-files-text%))
       (define msg1 (make-object message% label vp))
-      (define msg2 (make-object message% filename vp))
+      (define msg2 (new message% 
+                        [label (gui-utils:quote-literal-label
+                                (path->string filename)
+                                #:quote-amp? #f)]
+                        [parent vp]))
       (define ec (make-object editor-canvas% vp t))
+      (send ec min-height 400)
       (send t load-file filename)
       (send t hide-caret #t)
       (send t lock #t))

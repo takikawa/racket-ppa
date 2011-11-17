@@ -2,12 +2,12 @@
 
 @(require scribble/manual
           scribble/bnf
+          "common.rkt"
           (for-label racket/gui
                      compiler/compiler
                      compiler/sig
                      compiler/compiler-unit
                      compiler/option-unit
-                     compiler/comp-unit
                      compiler/distribute
                      compiler/bundle-dist
                      compiler/embed
@@ -252,13 +252,16 @@ currently supported keys are as follows:
         executable, instead of a wrapper binary that execs the
         original; the default is @racket[#f].}
 
-  @item{@racket['relative?] (Unix, Windows, Mac OS X): A boolean;
+  @item{@racket['relative?] (Unix, Windows, Mac OS X) : A boolean;
         @racket[#t] means that, to the degree that the generated
         executable must refer to another, it can use a relative path
         (so the executables can be moved together, but not
         separately); a @racket[#f] value (the default) means that
         absolute paths should be used (so the generated executable can
         be moved).}
+
+  @item{@racket['wm-class] (Unix) : A string; used as the default
+        @tt{WM_CLASS} program class for the program's windows.}
 
 ]
 
@@ -271,12 +274,17 @@ collections---which are used to initialize the
 @racket[current-library-collection-paths] list in combination with
 @envvar{PLTCOLLECTS} environment variable.  Otherwise, the argument
 specifies a replacement; it must be either a path, string, or
-non-empty list of paths and strings. In the last case, the first path
+list of paths and strings. In the last case, the first path
 or string specifies the main collection directory, and the rest are
 additional directories for the collection search path (placed, in
 order, after the user-specific @filepath{collects} directory, but
 before the main @filepath{collects} directory; then the search list is
-combined with @envvar{PLTCOLLECTS}, if it is defined).
+combined with @envvar{PLTCOLLECTS}, if it is defined). If the list
+is empty, then @racket[(find-system-path 'collects-dir)] will return
+the directory of the executable, but @racket[current-library-collection-paths] 
+is initialized to an empty list and
+@racket[use-collection-link-paths] is set to false to disable the
+use of @tech[#:doc reference-doc]{collection links files}.
 
 If the @racket[#:launcher?] argument is @racket[#t], then no
 @racket[module]s should be null, @racket[literal-files] should be
@@ -433,7 +441,7 @@ A unit that imports nothing and exports @racket[compiler:embed^].}
 @defproc[(find-exe [gracket? boolean?]
                    [variant (or/c 'cgc '3m) (system-type 'gc)])
          path?]{
-                                                                 
-  Finds the path to the racket (or gracket) executable.                                                                  
+
+  Finds the path to the racket (or gracket) executable.
 }
                

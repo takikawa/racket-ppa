@@ -55,11 +55,11 @@ precise details to @|Racket| and other reference manuals.
 
 @include-section["running.scrbl"]
 
-@include-section["compile.scrbl"]
-
 @include-section["other.scrbl"]
 
 @include-section["dialects.scrbl"]
+
+@include-section["other-editors.scrbl"]
 
 @; ----------------------------------------------------------------------
 

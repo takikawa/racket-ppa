@@ -203,9 +203,8 @@
           ]
          [(define-syntaxes (var ...) expr)
           stx]
-         [(define-values-for-syntax (var ...) expr)
-          ;; define-values-for-syntax's RHS is compile time, so treat it
-          ;; like define-syntaxes
+         [(begin-for-syntax . exprs)
+          ;; compile time, so treat it like define-syntaxes
           stx]
          [(begin . top-level-exprs)
           (quasisyntax/loc stx (begin #,@(map (lambda (expr)
@@ -398,4 +397,5 @@
   (define (disarm stx) (syntax-disarm stx code-insp))
   (define (rearm old new) (syntax-rearm new old))
 
-  (define code-insp (current-code-inspector)))
+  (define code-insp (variable-reference->module-declaration-inspector
+                     (#%variable-reference))))

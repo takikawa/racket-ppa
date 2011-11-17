@@ -34,8 +34,7 @@ the state transitions / contracts are:
            "sig.rkt"
            "../gui-utils.rkt"
            "../preferences.rkt"
-	   mred/mred-sig
-	   mzlib/list)
+	   mred/mred-sig)
   
   (import mred^
           [prefix exit: framework:exit^]
@@ -85,7 +84,6 @@ the state transitions / contracts are:
   (define put-pref-retry-result #f)
   
   (define (put-preferences/gui new-ps new-vs)
-    
     ;; NOTE: old ones must come first in the list, 
     ;; or else multiple sets to the same preference
     ;; will save old values, instead of new ones.
@@ -155,12 +153,11 @@ the state transitions / contracts are:
        #f
        '(stop ok)))
     
-    (with-handlers ((exn? 
-                     (λ (x)
-                       (message-box
-                        (string-constant drscheme)
-                        (format (string-constant error-saving-preferences)
-                                (exn-message x))))))
+    (with-handlers ((exn:fail? 
+                     (λ (exn)
+                       (log-warning (format "preferences: failed to save ~a prefs:\n   ~a" 
+                                            ps
+                                            (exn-message exn))))))
       (begin0
         (put-preferences ps vs fail-func)
         (unless failed
@@ -465,10 +462,6 @@ the state transitions / contracts are:
                                'framework:auto-set-wrap?
                                (string-constant wrap-words-in-editor-buffers)
                                values values)
-                   (make-check editor-panel 
-                               'framework:open-here?
-                               (string-constant reuse-existing-frames)
-                               values values)
                    
                    (make-check editor-panel 
                                'framework:menu-bindings
@@ -497,6 +490,15 @@ the state transitions / contracts are:
                                'framework:overwrite-mode-keybindings
                                (string-constant enable-overwrite-mode-keybindings)
                                values values)
+                   (make-check editor-panel
+                               'framework:automatic-parens
+                               (string-constant enable-automatic-parens)
+                               values values)
+                   (when (eq? (system-type) 'windows)
+                     (make-check editor-panel
+                                 'framework:always-use-platform-specific-linefeed-convention
+                                 (string-constant always-use-platform-specific-linefeed-convention)
+                                 values values))
                    (editor-panel-procs editor-panel))))])
       (add-editor-checkbox-panel)))
   

@@ -77,7 +77,6 @@ static Scheme_Object *bitwise_bit_field (int argc, Scheme_Object *argv[]);
 static Scheme_Object *integer_length (int argc, Scheme_Object *argv[]);
 static Scheme_Object *gcd (int argc, Scheme_Object *argv[]);
 static Scheme_Object *lcm (int argc, Scheme_Object *argv[]);
-static Scheme_Object *floor_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *ceiling (int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_truncate (int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_round (int argc, Scheme_Object *argv[]);
@@ -452,7 +451,7 @@ scheme_init_number (Scheme_Env *env)
 						      0, -1, 1),
 			     env);
   scheme_add_global_constant("floor", 
-			     scheme_make_folding_prim(floor_prim,
+			     scheme_make_folding_prim(scheme_floor,
 						      "floor",
 						      1, 1, 1),
 			     env);
@@ -865,7 +864,7 @@ void scheme_init_unsafe_number(Scheme_Env *env)
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
   else
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_OMITABLE;
   scheme_add_global_constant("unsafe-f64vector-ref", p, env);
   
   p = scheme_make_immed_prim(fl_set, "unsafe-f64vector-set!",
@@ -888,7 +887,7 @@ void scheme_init_unsafe_number(Scheme_Env *env)
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
   else
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_SOMETIMES_INLINED;
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_OMITABLE;
   scheme_add_global_constant("unsafe-flvector-ref", p, env);
 
   p = scheme_make_immed_prim(unsafe_flvector_set, "unsafe-flvector-set!",
@@ -905,7 +904,7 @@ void scheme_init_unsafe_number(Scheme_Env *env)
   p = scheme_make_immed_prim(unsafe_fxvector_ref, "unsafe-fxvector-ref",
                              2, 2);
   SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
-                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
+                                | SCHEME_PRIM_IS_UNSAFE_OMITABLE);
   scheme_add_global_constant("unsafe-fxvector-ref", p, env);
 
   p = scheme_make_immed_prim(unsafe_fxvector_set, "unsafe-fxvector-set!",
@@ -916,7 +915,7 @@ void scheme_init_unsafe_number(Scheme_Env *env)
   p = scheme_make_immed_prim(s16_ref, "unsafe-s16vector-ref",
                              2, 2);
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_OMITABLE;
   scheme_add_global_constant("unsafe-s16vector-ref", p, env);
   
   p = scheme_make_immed_prim(s16_set, "unsafe-s16vector-set!",
@@ -927,7 +926,7 @@ void scheme_init_unsafe_number(Scheme_Env *env)
   p = scheme_make_immed_prim(u16_ref, "unsafe-u16vector-ref",
                              2, 2);
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_OMITABLE;
   scheme_add_global_constant("unsafe-u16vector-ref", p, env);
   
   p = scheme_make_immed_prim(u16_set, "unsafe-u16vector-set!",
@@ -1108,6 +1107,11 @@ int scheme_get_unsigned_long_long_val(Scheme_Object *o, umzlonglong *v)
     return scheme_bignum_get_unsigned_long_long_val(o, v);
   else
     return 0;
+}
+
+int scheme_exact_p(Scheme_Object *n)
+{
+  return (SCHEME_INTP(n) || SCHEME_BIGNUMP(n));
 }
 
 int scheme_nonneg_exact_p(Scheme_Object *n)
@@ -1621,8 +1625,8 @@ bin_lcm (Scheme_Object *n1, Scheme_Object *n2)
   return scheme_abs(1, &ret);
 }
 
-static Scheme_Object *
-floor_prim (int argc, Scheme_Object *argv[])
+Scheme_Object *
+scheme_floor (int argc, Scheme_Object *argv[])
 {
   Scheme_Object *o = argv[0];
   Scheme_Type t;
@@ -2397,10 +2401,10 @@ Scheme_Object *do_int_sqrt (const char *name, int argc, Scheme_Object *argv[], i
     v = scheme_sqrt(1, &v);
     if (SCHEME_COMPLEXP(v)) {
       v = scheme_complex_imaginary_part(v);
-      v = floor_prim(1, &v);
+      v = scheme_floor(1, &v);
       v = scheme_make_complex(scheme_make_integer(0), v);
     } else
-      v = floor_prim(1, &v);
+      v = scheme_floor(1, &v);
     
     if (w_rem) {
       rem = scheme_bin_minus(rem, scheme_bin_mult(v, v));
@@ -2609,6 +2613,8 @@ scheme_expt(int argc, Scheme_Object *argv[])
     if ((d == 0.0)
 #ifdef NAN_EQUALS_ANYTHING
 	&& !MZ_IS_NAN(d)
+#else
+        && 1
 #endif
 	) {
       if (SCHEME_REALP(e)) {
@@ -3331,7 +3337,7 @@ Scheme_Double_Vector *scheme_alloc_flvector(intptr_t size)
 
   vec = (Scheme_Double_Vector *)scheme_malloc_fail_ok(scheme_malloc_atomic_tagged, 
                                                       sizeof(Scheme_Double_Vector) 
-                                                      + ((size - 1) * sizeof(double)));
+                                                      + ((size - mzFLEX_DELTA) * sizeof(double)));
   vec->iso.so.type = scheme_flvector_type;
   vec->size = size;
 
@@ -3515,7 +3521,7 @@ Scheme_Vector *scheme_alloc_fxvector(intptr_t size)
 
   vec = (Scheme_Vector *)scheme_malloc_fail_ok(scheme_malloc_atomic_tagged, 
                                                sizeof(Scheme_Vector) 
-                                               + ((size - 1) * sizeof(Scheme_Object*)));
+                                               + ((size - mzFLEX_DELTA) * sizeof(Scheme_Object*)));
   vec->iso.so.type = scheme_fxvector_type;
   vec->size = size;
 

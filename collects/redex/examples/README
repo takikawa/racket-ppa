@@ -7,6 +7,9 @@ to demonstrate various different uses of PLT Redex:
   beginner.rkt: a PLT Redex implementation of (much of) the
   beginning student teaching language.
 
+  cbn-letrec.rkt: the definition of evaluation contexts in Ariola and
+  Felleisen's call-by-need letrec calculus
+
   church.rkt: Church numerals with call by name
   normal order evaluation
 
@@ -25,6 +28,8 @@ to demonstrate various different uses of PLT Redex:
   contracts.rkt: A core contract calculus, including blame, 
   with function contracts, (eager) pair contracts, 
   and a few numeric predicates
+
+  define-judgment-form: example uses of `define-judgment-form'
 
   delim-cont: The model from Flatt, Yu, Findler, and Felleisen's ICFP
   '07 paper "Adding Delimited and Composable Control to a Production
@@ -47,6 +52,9 @@ to demonstrate various different uses of PLT Redex:
   r6rs: an implementation of the R6RS Scheme formal semantics
 
   semaphores.rkt: a simple threaded language with semaphores
+
+  stlc.rkt: a semantics for a typed CBV language with multi-argument
+  functions, conditionals, and addition
 
   subject-reduction.rkt: demos traces/pred that type checks
   the term.
