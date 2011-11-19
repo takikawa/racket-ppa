@@ -10,6 +10,7 @@ racket (5.2+dfsg1-1) UNRELEASED; urgency=low
     + Remove "use cgc" list from debian/rules
     + Remove "Built with the ... garbage collector" from package description
   * Restrict the architectures we build on to, basically, !ia64.
+  * Remove Ari Pollak as maintainer, with his permission.
 
  -- James McCoy <jamessan@debian.org>  Mon, 14 Nov 2011 21:34:19 -0500
 
