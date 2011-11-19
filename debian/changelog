@@ -1,5 +1,8 @@
-racket (5.1.3+dfsg1-2) UNRELEASED; urgency=low
+racket (5.2+dfsg1-1) UNRELEASED; urgency=low
 
+  [ James McCoy ]
+  * New upstream version
+    + Reimplemented plot libraries.  (Closes: #392598)
   * Pass --enable-noopt to configure when noopt is in DEB_BUILD_OPTIONS
   * Remove powerpc/ppc64 from the "use cgc".  Racket builds fine with 3m on
     powerpc systems and those binaries will run on ppc64-kernel systems.
@@ -8,7 +11,7 @@ racket (5.1.3+dfsg1-2) UNRELEASED; urgency=low
     + Remove "Built with the ... garbage collector" from package description
   * Restrict the architectures we build on to, basically, !ia64.
 
- -- James Vega <jamessan@debian.org>  Fri, 26 Aug 2011 01:08:19 -0400
+ -- James McCoy <jamessan@debian.org>  Mon, 14 Nov 2011 21:34:19 -0500
 
 racket (5.1.3+dfsg1-1) unstable; urgency=low
 
