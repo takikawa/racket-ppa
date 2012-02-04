@@ -2,7 +2,7 @@ Source: racket
 Section: lisp
 Priority: optional
 Maintainer: David Bremner <bremner@debian.org>
-Uploaders: James Vega <jamessan@debian.org>
+Uploaders: James McCoy <jamessan@debian.org>
 Standards-Version: 3.9.2.0
 Build-Depends: cdbs, quilt, debhelper (>= 7.0.0), patchutils, libffi-dev,
  libfreetype6-dev, libjpeg-dev, libpango1.0-dev, libpng12-dev, libssl-dev, 
