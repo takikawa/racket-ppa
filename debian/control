@@ -13,7 +13,7 @@ Vcs-Browser: http://anonscm.debian.org/gitweb/?p=collab-maint/racket.git
 Homepage: http://www.racket-lang.org/
 
 Package: racket
-Architecture: any-alpha any-amd64 any-armel any-i386 any-mips any-mipsel any-powerpc any-s390 any-sparc
+Architecture: any
 Depends: ${misc:Depends}, ${shlibs:Depends}, racket-common (= ${source:Version})
 Recommends: racket-doc (>= ${source:Upstream-Version})
 Breaks: plt-scheme (<<5.0~)
