@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -28,7 +28,7 @@
    the error messages are better this way.
 
    Also, for no particularly good reason, random-number support is
-   here, though the real work is in random.inc (from FreeBSD). */
+   here, though the real work is in newrandom.inc. */
 
 #include "schpriv.h"
 #include <math.h>
@@ -53,6 +53,7 @@ static Scheme_Object *pseudo_random_generator_p(int argc, Scheme_Object **argv);
 static Scheme_Object *sch_unpack(int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_pack(int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_pack_bang(int argc, Scheme_Object *argv[]);
+static Scheme_Object *sch_check_pack(int argc, Scheme_Object *argv[]);
 
 static char *number_to_allocated_string(int radix, Scheme_Object *obj, int alloc);
 
@@ -149,6 +150,11 @@ void scheme_init_numstr(Scheme_Env *env)
   scheme_add_global_constant("pseudo-random-generator->vector",
 			     scheme_make_prim_w_arity(sch_unpack,
 						      "pseudo-random-generator->vector", 
+						      1, 1), 
+			     env);
+  scheme_add_global_constant("pseudo-random-generator-vector?",
+                             scheme_make_prim_w_arity(sch_check_pack,
+						      "pseudo-random-generator-vector?", 
 						      1, 1), 
 			     env);
   scheme_add_global_constant("pseudo-random-generator?", 
@@ -413,7 +419,7 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
   int report, delta;
   Scheme_Object *next_complain;
   int has_hash, has_expt, has_i, has_sign, has_at, has_hash_since_slash;
-  int saw_digit, saw_digit_since_slash, saw_nonzero_digit;
+  int saw_digit_since_slash, saw_nonzero_digit;
   Scheme_Object *o;
 #ifdef MZ_USE_SINGLE_FLOATS
   int sgl;
@@ -936,7 +942,7 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
   }
 
   has_decimal = has_slash = has_hash = has_hash_since_slash = has_expt = 0;
-  saw_digit = saw_digit_since_slash = saw_nonzero_digit = 0;
+  saw_digit_since_slash = saw_nonzero_digit = 0;
   for (i = delta; i < len; i++) {
     mzchar ch = str[i];
     if (ch == '.') {
@@ -1028,7 +1034,6 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
       }
       break;
     } else {
-      saw_digit = 1;
       saw_digit_since_slash = 1;
       if (ch != '0')
 	saw_nonzero_digit = 1;
@@ -1080,6 +1085,7 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     {
       /* We'd like to use strtod() for the common case, but we don't trust it entirely. */
       char ffl_buf[MAX_FAST_FLOATREAD_LEN + 1];
+      GC_CAN_IGNORE char *loc;
 
       {
         int k;
@@ -1095,7 +1101,12 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
       if (has_expt && (str[has_expt] != 'e' && str[has_expt] != 'E')) {
         ffl_buf[has_expt - delta] = 'e';
       }
+
+      loc = scheme_push_c_numeric_locale();
+
       d = STRTOD(ffl_buf, &ptr);
+
+      scheme_pop_c_numeric_locale(loc);
 
       if ((ptr XFORM_OK_MINUS ffl_buf) < (len - delta)) {
         if (report)
@@ -1421,7 +1432,7 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 }
 
 /*========================================================================*/
-/*                           scheme functions                             */
+/*                           Racket functions                             */
 /*========================================================================*/
 
 static Scheme_Object *
@@ -2293,7 +2304,7 @@ sch_random(int argc, Scheme_Object *argv[])
 }
 
 static Scheme_Object *
-do_pack(const char *name, int argc, Scheme_Object *argv[], int set)
+do_pack(const char *name, int argc, Scheme_Object *argv[], int set, int check)
 {
   Scheme_Object *s;
   GC_CAN_IGNORE Scheme_Random_State rs;
@@ -2305,10 +2316,13 @@ do_pack(const char *name, int argc, Scheme_Object *argv[], int set)
     }
   }
 
-  if (SCHEME_VECTORP(argv[set]))
-    s = pack_rand_state(argv[set], (set ? &rs : NULL));
+  if (SCHEME_VECTORP(argv[set]) && (SCHEME_VEC_SIZE(argv[set]) == 6))
+    s = pack_rand_state(argv[set], ((set || check) ? &rs : NULL));
   else
     s = NULL;
+
+  if (check)
+    return (s ? scheme_true : scheme_false);
 
   if (!s)
     scheme_wrong_type(name,
@@ -2334,13 +2348,19 @@ do_pack(const char *name, int argc, Scheme_Object *argv[], int set)
 static Scheme_Object *
 sch_pack(int argc, Scheme_Object *argv[])
 {
-  return do_pack("vector->pseudo-random-generator", argc, argv, 0);
+  return do_pack("vector->pseudo-random-generator", argc, argv, 0, 0);
 }
 
 static Scheme_Object *
 sch_pack_bang(int argc, Scheme_Object *argv[])
 {
-  return do_pack("vector->pseudo-random-generator!", argc, argv, 1);
+  return do_pack("vector->pseudo-random-generator!", argc, argv, 1, 0);
+}
+
+static Scheme_Object *
+sch_check_pack(int argc, Scheme_Object *argv[])
+{
+  return do_pack("pseudo-random-generator-vector?", argc, argv, 0, 1);
 }
 
 static Scheme_Object *

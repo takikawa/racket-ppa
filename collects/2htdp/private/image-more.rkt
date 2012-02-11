@@ -545,7 +545,7 @@
      (let* ([unrotated (translate-shape simple-shape)]
             [rotated (rotate-atomic θ unrotated)])
        (let-values ([(dx dy) 
-                     (c->xy (* (make-polar 1 (degrees->radians θ))
+                     (c->xy (* (degrees->complex θ)
                                (xy->c (translate-dx simple-shape)
                                       (translate-dy simple-shape))))])
          (make-translate dx dy rotated)))]))
@@ -748,8 +748,18 @@
     (make-point x y)))
 
 (define (rotate-c c θ)
-  (* (make-polar 1 (degrees->radians θ)) 
-     c))
+  (* (degrees->complex θ) c))
+
+(define (degrees->complex θ) 
+  (unless (and (<= 0 θ)
+               (< θ 360))
+    (error 'degrees->complex "~s" θ))
+  (case (modulo θ 360)
+    [(0)    1+0i]
+    [(90)   0+1i]
+    [(180) -1+0i]
+    [(270)  0-1i]
+    [else (make-polar 1 (degrees->radians θ))]))
 
 ;; rotate-xy : x,y angle -> x,y
 (define (rotate-xy x y θ)
@@ -1261,25 +1271,18 @@
                     [(null? pieces)
                      (raise-syntax-error 'bitmap "expected a path with a / in it" stx)]
                     [else
-                     (let loop ([cps (current-library-collection-paths)])
-                       (cond
-                         [(null? cps)
-                          (raise-syntax-error 'bitmap
-                                              (format "could not find the ~a collection" (car pieces))
-                                              stx)]
-                         [else
-                          (if (and (directory-exists? (car cps))
-                                   (member (build-path (car pieces))
-                                           (directory-list (car cps))))
-                              (let ([candidate (apply build-path (car cps) pieces)])
-                                (if (file-exists? candidate)
-                                    candidate
-                                    (raise-syntax-error 'bitmap 
-                                                        (format "could not find ~a in the ~a collection"
-                                                                (apply string-append (add-between (cdr pieces) "/"))
-                                                                (car pieces))
-                                                        stx)))
-                              (loop (cdr cps)))]))]))]
+                     (define fn (last pieces))
+                     (define colls (reverse (cdr (reverse pieces))))
+                     (define candidate
+                       (apply collection-file-path fn colls
+                              #:fail
+                              (λ (msg) (raise-syntax-error 'bitmap msg stx))))
+                     (unless (file-exists? candidate)
+                       (raise-syntax-error 'bitmap 
+                                           (format "could not find ~s, expected it to be in ~a"
+                                                   arg candidate)
+                                           stx))
+                     candidate]))]
                [(string? arg)
                 (path->complete-path 
                  arg
@@ -1307,6 +1310,14 @@
                    (λ (port)
                      (make-object bitmap% port 'unknown #f #t)))))
                       
+(define/chk (bitmap/file filename)
+  (unless (file-exists? filename)
+    (error 'bitmap/file 
+           "could not find the file ~a" 
+           filename))
+  (rotate
+   0
+   (read-bitmap filename)))
 
 (define/chk (image->color-list image)
   (let* ([w (image-width image)]
@@ -1485,6 +1496,7 @@
          
          bitmap
          bitmap/url
+         bitmap/file
          
          swizzle
          

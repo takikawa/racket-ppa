@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -112,7 +112,7 @@ static void init_iconv()
   if (iconv) {
     iconv_errno = (errno_proc_t)GetProcAddress(m, "_errno");
     if (!iconv_errno) {
-      /* The iconv.dll distributed with PLT Scheme links to msvcrt.dll.
+      /* The iconv.dll distributed with Racket links to msvcrt.dll.
 	 It's a slighly dangerous assumption that whatever iconv we
 	 found also uses msvcrt.dll. */
       m = LoadLibrary("msvcrt.dll");
@@ -891,9 +891,8 @@ Scheme_Object *scheme_make_sized_offset_utf8_string(char *chars, intptr_t d, int
 			      NULL, 0 /* not UTF-16 */, 0xFFFD);
     us = scheme_malloc_atomic(sizeof(mzchar) * (ulen + 1));
     scheme_utf8_decode((unsigned char *)chars, d, d + len,
-		       us, 0, -1,
-		       NULL, 0 /* not UTF-16 */, 0xFFFD);
-
+                       us, 0, -1,
+                       NULL, 0 /* not UTF-16 */, 0xFFFD);
     us[ulen] = 0;
   } else {
     us = (mzchar *)"\0\0\0";
@@ -2939,7 +2938,7 @@ static char *locale_recase(int to_up,
      multibyte, then convert back. */
 # define MZ_WC_BUF_SIZE 32
   GC_CAN_IGNORE mbstate_t state;
-  size_t wl, wl2, ml, ml2;
+  size_t wl, ml;
   wchar_t *wc, *ws, wcbuf[MZ_WC_BUF_SIZE], cwc;
   const char *s;
   unsigned int j;
@@ -2965,7 +2964,7 @@ static char *locale_recase(int to_up,
   /* Convert */
   memset(&state, 0, sizeof(mbstate_t));
   s = in XFORM_OK_PLUS id;
-  wl2 = mz_mbsnrtowcs(wc, &s, iilen, wl + 1, &state);
+  (void)mz_mbsnrtowcs(wc, &s, iilen, wl + 1, &state);
   s = NULL;
 
   wc[wl] = 0; /* just in case */
@@ -3002,7 +3001,7 @@ static char *locale_recase(int to_up,
   /* Convert */
   memset(&state, 0, sizeof(mbstate_t));
   ws = wc;
-  ml2 = mz_wcsnrtombs(out + od, (const wchar_t **)&ws, wl, ml + 1, &state);
+  (void)mz_wcsnrtombs(out + od, (const wchar_t **)&ws, wl, ml + 1, &state);
   ws = NULL;
 
   out[od + ml] = 0;
@@ -4724,10 +4723,10 @@ byte_converter_p(int argc, Scheme_Object *argv[])
 /**********************************************************************/
 
 static intptr_t utf8_decode_x(const unsigned char *s, intptr_t start, intptr_t end,
-			 unsigned int *us, intptr_t dstart, intptr_t dend,
-			 intptr_t *ipos, intptr_t *jpos,
-			 char compact, char utf16, int *_state,
-			 int might_continue, int permissive)
+                              unsigned int *us, intptr_t dstart, intptr_t dend,
+                              intptr_t *ipos, intptr_t *jpos,
+                              char compact, char utf16, int *_state,
+                              int might_continue, int permissive)
      /* Results:
 	non-negative => translation complete, = number of produced chars
 	-1 => input ended in middle of encoding (only if might_continue)
@@ -5080,16 +5079,16 @@ static intptr_t utf8_decode_x(const unsigned char *s, intptr_t start, intptr_t e
 }
 
 intptr_t scheme_utf8_decode(const unsigned char *s, intptr_t start, intptr_t end,
-		       unsigned int *us, intptr_t dstart, intptr_t dend,
-		       intptr_t *ipos, char utf16, int permissive)
+                            unsigned int *us, intptr_t dstart, intptr_t dend,
+                            intptr_t *ipos, char utf16, int permissive)
 {
   return utf8_decode_x(s, start, end, us, dstart, dend,
 		       ipos, NULL, utf16, utf16, NULL, 0, permissive);
 }
 
 intptr_t scheme_utf8_decode_as_prefix(const unsigned char *s, intptr_t start, intptr_t end,
-				 unsigned int *us, intptr_t dstart, intptr_t dend,
-				 intptr_t *ipos, char utf16, int permissive)
+                                      unsigned int *us, intptr_t dstart, intptr_t dend,
+                                      intptr_t *ipos, char utf16, int permissive)
      /* Always returns number of read characters, not error codes. */
 {
   intptr_t opos;

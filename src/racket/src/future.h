@@ -3,28 +3,7 @@
 
 #ifdef MZ_USE_FUTURES
 
-#ifndef UNIT_TEST
-#include "schpriv.h"
-typedef Scheme_Object*(*prim_t)(int, Scheme_Object**);
-#else
-#define Scheme_Object void
-#define Scheme_Bucket void
-#define Scheme_Env void
-#define Scheme_Type int
-#define scheme_void NULL
-#define scheme_false 0x0
-#define START_XFORM_SKIP
-#define END_XFORM_SKIP 
-#define MZ_MARK_STACK_TYPE intptr_t
-#define Scheme_Native_Closure_Data void
-typedef Scheme_Object*(*prim_t)(int, Scheme_Object**);
-void scheme_add_global(char *name, int arity, Scheme_Env *env);
-int scheme_make_prim_w_arity(prim_t func, char *name, int arg1, int arg2);
-#endif
-
-#include <stdio.h>
-
-typedef Scheme_Object **(*prim_on_demand_t)(Scheme_Object **, Scheme_Object **);
+typedef Scheme_Object **(*prim_on_demand_t)(Scheme_Object **, Scheme_Object **, int);
 typedef Scheme_Object* (*prim_obj_int_pobj_obj_t)(Scheme_Object*, int, Scheme_Object**);
 typedef Scheme_Object* (*prim_int_pobj_obj_t)(int, Scheme_Object**);
 typedef Scheme_Object* (*prim_int_pobj_obj_obj_t)(int, Scheme_Object**, Scheme_Object*);
@@ -59,13 +38,16 @@ typedef struct future_t {
   int id;
   int thread_short_id;
 
+  int status;
   /* The status field is the main locking mechanism. It
      should only be read and written when holding a lock
      (and all associated fields for a status should be 
      set at the same time). */
-  int status;
 
   mzrt_sema *can_continue_sema;
+  /* this semcpahore is non_NULL when a future thread is blocked
+     while trying to run the future; th want_lw flag may be set in
+     that case */
 
   Scheme_Object *orig_lambda;
   void *code;
@@ -74,11 +56,36 @@ typedef struct future_t {
                              thread if this custodian is shut down */
 
   /* Runtime call stuff */
-  int want_lw; /* flag to indicate waiting for lw capture */
-  /* flag to indicate whether the future is in the "waiting for lwc" queue */
-  int in_queue_waiting_for_lwc;   
-  int in_touch_queue;   
-  int rt_prim_is_atomic;
+
+  char want_lw; 
+  /* flag to indicate waiting for lw capture; if this flag is set,
+     then the future thread currently running the future must be
+     blocked, and the runtime thread must not already be working on
+     behalf of the future; since a future thread is blocked on this
+     future, then can_continue_sema is normally set, but the runtime
+     thread sets can_continue_sema to NULL while trying to capture the
+     continuation --- in case anoter thread tries to let the original
+     future thread continue because it was blocked on a touch for a
+     future that completed; the `want_lw' flag should be changed only
+     while holding a lock */
+
+  char in_queue_waiting_for_lwc;
+  /* flag to indicate whether the future is in the "waiting for lwc"
+     queue; the future might be in the queue even if want_lw is set to
+     0, and so this flag just prevents  */
+
+  char in_touch_queue;   
+  /* like `in_queue_waiting_for_lwc' but for being in a `touch'
+     future */
+
+  char in_future_specific_touch_queue; /* a back-door argument */
+
+  char rt_prim_is_atomic;
+  /* when a future thread is blocked on this future, it sets
+     `rt_prim_is_atomic' if the blocking operation can run
+     in any thread atomically (i.e., it's a "synchronizing" 
+     operation insteda of a general blocking operation) */
+
   double time_of_request;
   const char *source_of_request;
   int source_type;
@@ -113,17 +120,32 @@ typedef struct future_t {
   Scheme_Object **arg_S4;
 
   Scheme_Thread *arg_p;
+  /* when a future thread is blocked while running this future,
+     `arg_p' s set along with the blocking-operation arguments to
+     indicate the future thread's (fake) Racket thread, which has the
+     runstack, etc. */
   struct Scheme_Current_LWC *lwc;
+  /* when a future thread is blocked while running this future,
+     if `want_lw' is set, then `lwc' points to information for
+     capturing a lightweight continuation */
   struct Scheme_Future_Thread_State *fts;
+  /* when a future thread is blocked while running this future,
+     `fts' is set to identify the future thread */
 
   struct Scheme_Lightweight_Continuation *suspended_lw;
-  int maybe_suspended_lw; /* set to 1 with suspended_lw untl test in runtime thread */
+  /* holds a lightweight continuation captured for the operation,
+     if any */
+  int maybe_suspended_lw;
+  /* set to 1 with suspended_lw untl test in runtime thread; this
+     extra flag avoids spinning if the suspended continuation
+     cannot be resumed in the main thread for some reason */
 
   Scheme_Object *retval_s;
   void *retval_p; /* use only with conservative GC */
   MZ_MARK_STACK_TYPE retval_m;
   int retval_i;
-  int no_retval, retval_is_rs_argv;
+  char no_retval;
+  char retval_is_rs_plus_two; /* => special result handling for on-demand JIT */
 
   Scheme_Object **multiple_array;
   int multiple_count;
@@ -155,7 +177,6 @@ typedef struct fsemaphore_t {
   future_t *queue_end;
 } fsemaphore_t;
 
-
 /* Primitive instrumentation stuff */
 
 /* Exceptions */ 
@@ -180,16 +201,6 @@ void scheme_wrong_type_from_ft(const char *who, const char *expected_type, int w
 
 extern Scheme_Object *scheme_ts_scheme_force_value_same_mark(Scheme_Object *v);
 
-/* Helper macros for argument marshaling */
-#ifdef MZ_USE_FUTURES
-
-#define IS_WORKER_THREAD (g_rt_threadid != 0 && pthread_self() != g_rt_threadid)
-#define ASSERT_CORRECT_THREAD if (g_rt_threadid != 0 && pthread_self() != g_rt_threadid) \
-															{ \
-																printf("%s invoked on wrong thread!\n", __FUNCTION__); \
-																/*GDB_BREAK;*/ \
-															}
-
 extern Scheme_Object **scheme_rtcall_on_demand(const char *who, int src_type, prim_on_demand_t f, Scheme_Object **argv);
 extern uintptr_t scheme_rtcall_alloc(const char *who, int src_type);
 extern void scheme_rtcall_new_mark_segment(Scheme_Thread *p);
@@ -197,12 +208,6 @@ extern void scheme_rtcall_allocate_values(const char *who, int src_type, int cou
                                           prim_allocate_values_t f);
 extern Scheme_Object *scheme_rtcall_make_fsemaphore(const char *who, int src_type, Scheme_Object *ready);
 extern Scheme_Object *scheme_rtcall_make_future(const char *who, int src_type, Scheme_Object *proc);
-#else
-
-#define IS_WORKER_THREAD 0
-#define ASSERT_CORRECT_THREAD 
-
-#endif 
 
 void scheme_future_block_until_gc();
 void scheme_future_continue_after_gc();
@@ -210,15 +215,6 @@ void scheme_check_future_work();
 void scheme_future_gc_pause();
 void scheme_future_check_custodians();
 
-#ifdef UNIT_TEST
-/* These forwarding decls only need to be here to make 
-   primitives visible to test cases written in C */
-extern int future_begin_invoke(void *code);
-extern Scheme_Object *touch(int argc, Scheme_Object **argv);
-extern Scheme_Object *future_touch(int futureid);
-#endif
-
-#else 
 #endif /* MZ_USE_FUTURES */
 
 /* always defined: */

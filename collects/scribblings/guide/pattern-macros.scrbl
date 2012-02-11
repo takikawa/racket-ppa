@@ -140,7 +140,7 @@ and function calls.
 The @racket[define-syntax-rule] form binds a macro that matches a
 single pattern, but Racket's macro system supports transformers that
 match multiple patterns starting with the same identifier. To write
-such macros, the programmer much use the more general
+such macros, the programmer must use the more general
 @racket[define-syntax] form along with the @racket[syntax-rules]
 transformer form:
 
@@ -268,9 +268,11 @@ it creates a transformer that acts as an identifier macro:
               ...))]
 
 Unlike a @racket[syntax-rules] form, the @racket[_pattern]s are not
-required to start with an open parenthesis. Also, @racket[set!] is
-typically used as a literal to match a use of @racket[set!] in the
-pattern (as opposed to being a pattern variable.
+required to start with an open parenthesis. In addition,
+@racket[syntax-id-rules] cooperates specially with @racket[set!], so
+that @racket[set!] invokes the macro when @racket[_id] is the target
+of an assignment; consequently, @racket[set!] is typically used as a
+literal with @racket[syntax-id-rules] to match such uses of @racket[set!].
 
 @racketblock[
 (define-syntax clock
@@ -278,6 +280,11 @@ pattern (as opposed to being a pattern variable.
     [(set! clock e) (put-clock! e)]
     [(clock a ...) ((get-clock) a ...)]
     [clock (get-clock)]))
+
+(define-values (get-clock put-clock!)
+  (let ([private-clock 0])
+    (values (lambda () private-clock)
+            (lambda (v) (set! private-clock v)))))
 ]
 
 The @racket[(clock a ...)] pattern is needed because, when an

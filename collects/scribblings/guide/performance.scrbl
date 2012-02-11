@@ -1,6 +1,8 @@
 #lang scribble/doc
 @(require scribble/manual "guide-utils.rkt"
-          (for-label racket/flonum racket/unsafe/ops))
+          (for-label racket/flonum
+                     racket/unsafe/ops
+                     racket/performance-hint))
 
 @title[#:tag "performance"]{Performance}
 
@@ -78,10 +80,10 @@ information when compiling procedures, since the code for a given
 module body or @racket[lambda] abstraction is compiled only once. The
 @tech{JIT}'s granularity of compilation is a single procedure body,
 not counting the bodies of any lexically nested procedures. The
-overhead for @tech{JIT}"wwxre xzr[ixzzrizzRQefewr[] compilation is normally so small that it is
-difficult to detect."
+overhead for @tech{JIT} compilation is normally so small that it is
+difficult to detect.
 
-@; ---------------------------------------------------------------;[]\'-------
+@; ----------------------------------------------------------------------
 
 @section[#:tag "modules-performance"]{Modules and Performance}
 
@@ -110,9 +112,11 @@ disables the @tech{JIT} compiler's assumptions about module
 definitions when interactive exploration is more important. See
 @secref["module-set"] for more information.
 
-Currently, the compiler does not attempt to inline or propagate
-constants across module boundaries, except for exports of the built-in
-modules (such as the one that originally provides @racket[+]).
+The compiler may inline functions or propagate constants across module
+boundaries. To avoid generating too much code in the case of function
+inlining, the compiler is conservative when choosing candidates for
+cross-module inlining; see @secref["func-call-performance"] for
+information on providing inlining hints to the compiler.
 
 The later section @secref["letrec-performance"] provides some
 additional caveats concerning inlining of module bindings.
@@ -151,6 +155,25 @@ therefore permit call optimizations, so
 ]
 
 within a module would perform the same as the @racket[letrec] version.
+
+For direct calls to functions with keyword arguments, the compiler can
+typically check keyword arguments statically and generate a direct
+call to a non-keyword variant of the function, which reduces the
+run-time overhead of keyword checking. This optimization applies only
+for keyword-accepting procedures that are bound with @racket[define].
+
+For immediate calls to functions that are small enough, the compiler
+may inline the function call by replacing the call with the body of
+the function. In addition to the size of the target function's body,
+the compiler's heuristics take into account the amount of inlining
+already performed at the call site and whether the called function
+itself calls functions other than simple primitive operations. When a
+module is compiled, some functions defined at the module level are
+determined to be candidates for inlining into other modules; normally,
+only trivial functions are considered candidates for cross-module
+inlining, but a programmer can wrap a function definition with
+@racket[begin-encourage-inline] to encourage inlining
+of the function.
 
 Primitive operations like @racket[pair?], @racket[car], and
 @racket[cdr] are inlined at the machine-code level by the @tech{JIT}

@@ -5,6 +5,7 @@
 
 (require racket/flonum
          racket/fixnum
+         racket/unsafe/ops
          compiler/zo-parse)
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1364,6 +1365,65 @@
               (- (expt 2 31) 2))
            #f)
 
+;; don't duplicate an operation by moving it into a lambda':
+(test-comp '(lambda (x)
+              (let ([y (unsafe-flvector-length x)])
+                (let ([f (lambda () y)])
+                  (+ (f) (f)))))
+           '(lambda (x)
+              (+ (unsafe-flvector-length x) (unsafe-flvector-length x)))
+           #f)
+
+;; don't delay an unsafe car, because it might be space-unsafe
+(test-comp '(lambda (f x)
+              (let ([y (unsafe-car x)])
+                (f)
+                y))
+           '(lambda (f x)
+              (f)
+              (unsafe-car x))
+           #f)
+
+;; it's ok to delay `list', because there's no space-safety issue
+(test-comp '(lambda (f x)
+              (let ([y (list x)])
+                (f)
+                y))
+           '(lambda (f x)
+              (f)
+              (list x)))
+
+;; don't duplicate formerly once-used variable due to inlining
+(test-comp '(lambda (y)
+              (let ([q (unsafe-fl* y y)]) ; => q is known flonum
+                (let ([x (unsafe-fl* q q)]) ; can delay (but don't duplicate)
+                  (define (f z) (unsafe-fl+ z x))
+                  (if y
+                      (f 10)
+                      f))))
+           '(lambda (y)
+              (let ([q (unsafe-fl* y y)])
+                (let ([x (unsafe-fl* q q)])
+                  (define (f z) (unsafe-fl+ z x))
+                  (if y
+                      (unsafe-fl+ 10 x)
+                      f)))))
+;; double-check that previous test doesn't succeed due to copying
+(test-comp '(lambda (y)
+              (let ([q (unsafe-fl* y y)])
+                (let ([x (unsafe-fl* q q)])
+                  (define (f z) (unsafe-fl+ z x))
+                  (if y
+                      (unsafe-fl+ 10 x)
+                      f))))
+           '(lambda (y)
+              (let ([q (unsafe-fl* y y)])
+                (define (f z) (unsafe-fl+ z (unsafe-fl* q q)))
+                (if y
+                    (unsafe-fl+ 10 (unsafe-fl* q q))
+                    f)))
+           #f)
+
 ;; simple cross-module inlining
 (test-comp `(module m racket/base 
               (require racket/bool)
@@ -1371,6 +1431,41 @@
            `(module m racket/base 
               (require racket/bool)
               (list #t)))
+
+(test-comp `(module m racket/base 
+              (require racket/list)
+              empty?
+              (empty? 10))
+           `(module m racket/base 
+              (require racket/list)
+              empty? ; so that it counts as imported
+              (null? 10)))
+
+(module check-inline-request racket/base
+  (require racket/performance-hint)
+  (provide loop)
+  (begin-encourage-inline
+   (define loop
+     ;; large enough that the compiler wouldn't infer inlining:
+     (lambda (f n)
+       (let loop ([i n])
+         (if (zero? i)
+             10
+             (cons (f i) (loop (sub1 n)))))))))
+
+(test-comp `(module m racket/base 
+              (require 'check-inline-request)
+              loop
+              (loop list 1)) ; 1 is small enough to fully unroll
+           `(module m racket/base 
+              (require 'check-inline-request)
+              loop ; so that it counts as imported
+              (let ([f list]
+                    [n 1])
+                (let loop ([i n])
+                  (if (zero? i)
+                      10
+                      (cons (f i) (loop (sub1 n))))))))
 
 ;; check omit & reorder possibilities for unsafe
 ;; operations on mutable values:
@@ -1724,6 +1819,24 @@
       (lambda ()
         (unc1))))
   (unc1))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Regression test related to the `let'-resolve pass:
+
+(module check-against-problem-in-let-resolver racket/base
+  (let-values (((fail2) 12))
+    (let ([debugger-local-bindings
+           (lambda ()
+             (case-lambda ((v) (set! fail2 v))))])
+      (let ([f3 (lambda ()
+                  (let ([debugger-local-bindings
+                         (lambda ()
+                           (debugger-local-bindings))])
+                    '3))])
+        (let ([debugger-local-bindings
+               (lambda ()
+                 (case-lambda ((v) (set! f3 v))))])
+          (f3))))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

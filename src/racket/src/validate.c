@@ -1,8 +1,8 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
- 
+
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -341,6 +341,29 @@ static void apply_values_validate(Scheme_Object *data, Mz_CPort *port,
                        num_toplevels, num_stxes, num_lifts, tl_use_map,
                        NULL, 0, 0, vc, 0, 0, procs);
   scheme_validate_expr(port, e, stack, tls,
+                       depth, letlimit, delta, 
+                       num_toplevels, num_stxes, num_lifts, tl_use_map,
+                       NULL, 0, 0, vc, 0, 0, procs);
+}
+
+static void inline_variant_validate(Scheme_Object *data, Mz_CPort *port, 
+                                    char *stack, Validate_TLS tls,
+                                    int depth, int letlimit, int delta, 
+                                    int num_toplevels, int num_stxes, int num_lifts,
+                                    void *tl_use_map, int result_ignored,
+                                    struct Validate_Clearing *vc, int tailpos,
+                                    Scheme_Hash_Tree *procs)
+{
+  Scheme_Object *f1, *f2;
+
+  f1 = SCHEME_VEC_ELS(data)[0];
+  f2 = SCHEME_VEC_ELS(data)[1];
+  
+  scheme_validate_expr(port, f1, stack, tls,
+                       depth, letlimit, delta, 
+                       num_toplevels, num_stxes, num_lifts, tl_use_map,
+                       NULL, 0, 0, vc, 0, 0, procs);
+  scheme_validate_expr(port, f2, stack, tls,
                        depth, letlimit, delta, 
                        num_toplevels, num_stxes, num_lifts, tl_use_map,
                        NULL, 0, 0, vc, 0, 0, procs);
@@ -770,7 +793,7 @@ static void validate_unclosed_procedure(Mz_CPort *port, Scheme_Object *expr,
     if (q == self_pos)
       self_pos_in_closure = i;
     p = q + delta;
-    if ((q < 0) || (p >= depth) || (stack[p] <= VALID_UNINIT))
+    if ((q < 0) || (p < 0) || (p >= depth) || (stack[p] <= VALID_UNINIT))
       scheme_ill_formed_code(port);
     vld = stack[p];
     if (vld == VALID_VAL_NOCLEAR)
@@ -858,9 +881,12 @@ static void module_validate(Scheme_Object *data, Mz_CPort *port,
 
   m = (Scheme_Module *)data;
 
-# define SCHEME_MODNAMEP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_resolved_module_path_type)
   if (!SCHEME_MODNAMEP(m->modname))
     scheme_ill_formed_code(port);
+
+  validate_toplevel(m->dummy, port, stack, tls, depth, delta, 
+                    num_toplevels, num_stxes, num_lifts, tl_use_map,
+                    0);
 
   scheme_validate_code(port, m->bodies[0], m->max_let_depth,
                        m->prefix->num_toplevels, m->prefix->num_stxes, m->prefix->num_lifts,
@@ -990,7 +1016,7 @@ void scheme_validate_expr(Mz_CPort *port, Scheme_Object *expr,
 
       no_flo(need_flonum, port);
 
-      if ((c < 0) || (p < 0) || (d >= depth)
+      if ((c < 0) || (p < 0) || (d < 0) || (d >= depth)
 	  || (stack[d] != VALID_TOPLEVELS) 
 	  || (p >= (num_toplevels + num_lifts + num_stxes + (num_stxes ? 1 : 0)))
 	  || ((p >= num_toplevels) && (p < num_toplevels + num_stxes + (num_stxes ? 1 : 0))))
@@ -1049,7 +1075,7 @@ void scheme_validate_expr(Mz_CPort *port, Scheme_Object *expr,
       int q = SCHEME_LOCAL_POS(expr);
       int p = q + delta;
 
-      if ((q < 0) || (p >= depth))
+      if ((q < 0) || (p >= depth) || (p < 0))
 	scheme_ill_formed_code(port);
 
       if (SCHEME_GET_LOCAL_FLAGS(expr) != SCHEME_LOCAL_FLONUM)
@@ -1106,8 +1132,9 @@ void scheme_validate_expr(Mz_CPort *port, Scheme_Object *expr,
 
       no_flo(need_flonum, port);
 
-      if ((q < 0) || (p >= depth) || ((stack[p] != VALID_BOX)
-                                      && (stack[p] != VALID_BOX_NOCLEAR)))
+      if ((q < 0) || (p >= depth) || (p < 0)
+          || ((stack[p] != VALID_BOX)
+              && (stack[p] != VALID_BOX_NOCLEAR)))
 	scheme_ill_formed_code(port);
 
       if (SCHEME_GET_LOCAL_FLAGS(expr) == SCHEME_LOCAL_CLEAR_ON_READ) {
@@ -1293,7 +1320,7 @@ void scheme_validate_expr(Mz_CPort *port, Scheme_Object *expr,
 
       no_flo(need_flonum, port);
 
-      if ((c < 0) || (p < 0) || (d >= depth)
+      if ((c < 0) || (p < 0) || (d < 0) || (d >= depth)
 	  || (stack[d] != VALID_TOPLEVELS) 
 	  || (p != num_toplevels)
 	  || (i >= num_stxes))
@@ -1324,6 +1351,7 @@ void scheme_validate_expr(Mz_CPort *port, Scheme_Object *expr,
 
       for (i = 0; i < c; i++, p++) {
 	if ((q < 0) 
+            || (p < 0)
 	    || (SCHEME_LET_AUTOBOX(lv) && ((p >= depth)
 					   || ((stack[p] != VALID_BOX)
                                                && (stack[p] != VALID_BOX_NOCLEAR))))
@@ -1500,6 +1528,12 @@ void scheme_validate_expr(Mz_CPort *port, Scheme_Object *expr,
     module_validate(expr, port, stack, tls, depth, letlimit, delta, 
                     num_toplevels, num_stxes, num_lifts, tl_use_map, 
                     result_ignored, vc, tailpos, procs);
+    break;
+  case scheme_inline_variant_type:
+    no_flo(need_flonum, port);
+    inline_variant_validate(expr, port, stack, tls, depth, letlimit, delta, 
+                            num_toplevels, num_stxes, num_lifts, tl_use_map, 
+                            result_ignored, vc, tailpos, procs);
     break;
   default:
     /* All values are definitely ok, except pre-closed closures. 

@@ -14,7 +14,10 @@
          (prefix-in x: "mred-extensions.rkt")
          "shared.rkt"
          "model-settings.rkt"
-         "xml-sig.rkt")
+         "xml-sig.rkt"
+         images/compile-time
+         images/gui
+         (for-syntax racket/base images/icons/control images/icons/style images/logos))
 
 
 (import drracket:tool^ xml^ stepper-frame^)
@@ -27,6 +30,19 @@
   
 ;; the stored representation of a step
 (define-struct step (text kind posns) #:transparent)
+
+(define (show-about-dialog parent)
+  (define dlg
+    (new logo-about-dialog%
+         [label "About the Stepper"]
+         [parent parent]
+         [bitmap (compiled-bitmap (stepper-logo))]
+         [messages '("The Algebraic Stepper is formalized and proved correct in\n"
+                     "\n"
+                     "    John Clements, Matthew Flatt, Matthias Felleisen\n"
+                     "    Modeling an Algebraic Stepper\n"
+                     "    European Symposium on Programming, 2001\n")]))
+  (send dlg show #t))
 
 (define (go drracket-tab program-expander selection-start selection-end)
   
@@ -63,19 +79,20 @@
   (define view #f)
   
   ;; wait for steps to show up on the channel.  When they do, add them to the list.
-  (define (start-listener-thread)
+  (define (start-listener-thread stepper-frame-eventspace)
     (thread
      (lambda ()
        (let loop ()
          (define new-result (async-channel-get view-channel))
          (define new-step (format-result new-result))
-         (queue-callback
-          (lambda ()
-            (set! view-history (append view-history (list new-step)))
-            (set! num-steps-available (length view-history))
-            ;; this is only necessary the first time, but it's cheap:
-            (semaphore-post first-step-sema)
-            (update-status-bar)))
+         (parameterize ([current-eventspace stepper-frame-eventspace])
+           (queue-callback
+            (lambda ()
+              (set! view-history (append view-history (list new-step)))
+              (set! num-steps-available (length view-history))
+              ;; this is only necessary the first time, but it's cheap:
+              (semaphore-post first-step-sema)
+              (update-status-bar))))
          (loop)))))
     
   
@@ -214,20 +231,39 @@
   ;; GUI ELEMENTS:
   (define s-frame
     (make-object stepper-frame% drracket-tab))
+  
+  (define top-panel
+    (new horizontal-panel% [parent (send s-frame get-area-container)] [horiz-margin 5]
+         ;[style '(border)]  ; for layout testing only
+         [stretchable-width #t]
+         [stretchable-height #f]))
+  
   (define button-panel
-    (make-object horizontal-panel% (send s-frame get-area-container)))
-  (define (add-button name fun)
-    (new button% 
-         [label name] 
-         [parent button-panel] 
-         [callback (lambda (_1 _2) (fun))]
-         [enabled #f]))
-  (define (add-choice-box name fun)
-    (new choice% [label name]
-         [choices (map first pulldown-choices)]
-         [parent button-panel]
-         [callback fun]
-         [enabled #f]))
+    (new horizontal-panel% [parent top-panel] [alignment '(center top)]
+         ;[style '(border)]  ; for layout testing only
+         [stretchable-width #t]
+         [stretchable-height #f]))
+  
+  (define logo-canvas
+    (new (class bitmap-canvas%
+           (super-new [parent top-panel] [bitmap (compiled-bitmap (stepper-logo 32))])
+           (define/override (on-event evt)
+             (when (eq? (send evt get-event-type) 'left-up)
+               (show-about-dialog s-frame))))))
+  
+  (define prev-img (compiled-bitmap (step-back-icon run-icon-color (toolbar-icon-height))))
+  (define previous-button (new button%
+                               [label (list prev-img (string-constant stepper-previous) 'left)]
+                               [parent button-panel]
+                               [callback (λ (_1 _2) (previous))]
+                               [enabled #f]))
+  
+  (define next-img (compiled-bitmap (step-icon run-icon-color (toolbar-icon-height))))
+  (define next-button (new button%
+                           [label (list next-img (string-constant stepper-next) 'right)]
+                           [parent button-panel]
+                           [callback (λ (_1 _2) (next))]
+                           [enabled #f]))
   
   (define pulldown-choices
     `((,(string-constant stepper-jump-to-beginning)            ,jump-to-beginning)
@@ -236,10 +272,12 @@
       (,(string-constant stepper-jump-to-next-application)     ,jump-to-next-application)
       (,(string-constant stepper-jump-to-previous-application) ,jump-to-prior-application)))
   
-  (define previous-button             (add-button (string-constant stepper-previous) previous))
-  (define next-button                 (add-button (string-constant stepper-next) next))
-  (define jump-button                 (add-choice-box (string-constant stepper-jump) jump-to))
-    
+  (define jump-button (new choice%
+                           [label (string-constant stepper-jump)]
+                           [choices (map first pulldown-choices)]
+                           [parent button-panel]
+                           [callback jump-to]
+                           [enabled #f]))
   
   (define canvas
     (make-object x:stepper-canvas% (send s-frame get-area-container)))
@@ -252,6 +290,7 @@
     (new editor-canvas%
          [parent button-panel]
          [editor status-text]
+         [stretchable-width #f]
          [style '(transparent no-border no-hscroll no-vscroll)]
          ;; some way to get the height of a line of text?
          [min-width 100]))
@@ -332,14 +371,13 @@
   
   ;; CONFIGURE GUI ELEMENTS
   (send s-frame set-printing-proc print-current-view)
-  (send button-panel stretchable-width #f)
-  (send button-panel stretchable-height #f)
   (send canvas stretchable-height #t)
   (send (send s-frame edit-menu:get-undo-item) enable #f)
   (send (send s-frame edit-menu:get-redo-item) enable #f)
   
+  (define stepper-frame-eventspace (send s-frame get-eventspace))
   ;; START THE MODEL
-  (start-listener-thread)
+  (start-listener-thread stepper-frame-eventspace)
   (model:go
    program-expander-prime 
    ;; what do do with the results:
@@ -356,8 +394,12 @@
   (thread
    (lambda ()
      (semaphore-wait first-step-sema)
-     (jump-to-beginning)
-     (enable-all-buttons)))
+     (parameterize
+         ([current-eventspace stepper-frame-eventspace])
+       (queue-callback
+        (lambda ()
+          (jump-to-beginning)
+          (enable-all-buttons))))))
   
   s-frame)
 

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1749,6 +1749,18 @@ Scheme_Bucket_Table *scheme_make_weak_equal_table(void)
   return t;
 }
 
+Scheme_Bucket_Table *scheme_make_nonlock_equal_bucket_table(void)
+{
+  Scheme_Bucket_Table *t;
+  
+  t = scheme_make_bucket_table(20, SCHEME_hash_ptr);
+  
+  t->compare = compare_equal;
+  t->make_hash_indices = make_hash_indices_for_equal;
+
+  return t;
+}
+
 Scheme_Bucket_Table *scheme_make_weak_eqv_table(void)
 {
   Scheme_Object *sema;
@@ -2034,7 +2046,7 @@ static Scheme_Object *hash_table_copy(int argc, Scheme_Object *argv[])
     for (i = t->count; i--; ) {
       scheme_hash_tree_index(t, i, &k, &val);
       if (!SAME_OBJ((Scheme_Object *)t, v))
-        val = scheme_chaperone_hash_traversal_get(v, k);
+        val = scheme_chaperone_hash_traversal_get(v, k, &k);
       if (val)
         scheme_hash_set(naya, k, val);
     }
@@ -3000,9 +3012,11 @@ static Scheme_Object *chaperone_hash_key(const char *name, Scheme_Object *table,
   return chaperone_hash_op(name, table, key, NULL, 3);
 }
 
-Scheme_Object *scheme_chaperone_hash_traversal_get(Scheme_Object *table, Scheme_Object *key)
+Scheme_Object *scheme_chaperone_hash_traversal_get(Scheme_Object *table, Scheme_Object *key,
+                                                   Scheme_Object **alt_key)
 {
   key = chaperone_hash_key("hash-table-iterate-key", table, key);
+  *alt_key = key;
   return chaperone_hash_op("hash-ref", table, key, NULL, 0);
 }
 

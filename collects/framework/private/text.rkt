@@ -20,7 +20,7 @@
         [prefix keymap: framework:keymap^]
         [prefix color-model: framework:color-model^]
         [prefix frame: framework:frame^]
-        [prefix scheme: framework:scheme^]
+        [prefix racket: framework:racket^]
         [prefix number-snip: framework:number-snip^]
         [prefix finder: framework:finder^])
 (export (rename framework:text^
@@ -1564,7 +1564,7 @@
     (define/private (refresh-delegate/do-work)
       (send delegate begin-edit-sequence)
       (send delegate lock #f)
-      (when (is-a? this scheme:text<%>)
+      (when (is-a? this racket:text<%>)
         (send delegate set-tabs null (send this get-tab-size) #f))
       (send delegate hide-caret #t)
       (send delegate erase)
@@ -2007,7 +2007,9 @@
              get-focus-snip
              get-view-size
              scroll-to-position
-             position-location)
+             position-location
+             get-styles-fixed
+             set-styles-fixed)
     
     ;; private field
     (define eventspace (current-eventspace))
@@ -2305,9 +2307,11 @@
     ;; do-insertion : (listof (cons (union string snip) style-delta)) boolean -> void
     ;; thread: eventspace main thread
     (define/private (do-insertion txts showing-input?)
-      (let ([locked? (is-locked?)])
+      (let ([locked? (is-locked?)]
+            [sf? (get-styles-fixed)])
         (begin-edit-sequence)
         (lock #f)
+        (set-styles-fixed #f)
         (set! allow-edits? #t)
         (let loop ([txts txts])
           (cond
@@ -2341,6 +2345,7 @@
                  (unless (is-a? str/snp string-snip%)
                    (change-style style old-insertion-point insertion-point))))
              (loop (cdr txts))]))
+        (set-styles-fixed sf?)
         (set! allow-edits? #f)
         (lock locked?)
         (unless showing-input?
@@ -3393,11 +3398,46 @@ designates the character that triggers autocompletion
     
     (init-field word all-words)
     
-    (define/private (starts-with prefix)
-      (let ([re (regexp (string-append "^" (regexp-quote prefix)))])
-        (λ (w) (regexp-match re w))))
+    ;; string -> (values (string -> real) natural)
+    ;; produce a ranking function and a max normal score
+    ;; the ranking function is as follows:
+    ;; w |-> +inf.0 if `prefix' is a prefix of w
+    ;; w |-> 1000 if `prefix' appears in w
+    ;; w |-> n if n parts of `prefix' appear in w
+    ;; the max normal score is the largest n that the last clause can produce
+    (define/private (rank prefix)      
+      (define parts (regexp-split "[-/:_!]" prefix))
+      (define re (regexp (string-append "^" (regexp-quote prefix))))
+      (values (λ (w) (cond [(regexp-match re w) +inf.0]
+                           [(regexp-match (regexp-quote prefix) w) 1000]
+                           [else
+                            (for/fold ([c 0]) 
+                              ([r parts]
+                               #:when (regexp-match (regexp-quote r) w))
+                              (add1 c))]))
+              (length parts)))
     
-    (define all-completions (filter (starts-with word) all-words))
+    ;; all the possible completions for `word', in ranked order
+    (define all-completions 
+      (let ()
+        (define-values (rnk max-count) (rank word))
+        ;; this determines the fuzziness
+        ;; if we set mx to +inf.0, we get just the prefix matches
+        ;; if we set mx to 1000, we get just the matches somewhere in the word
+        ;; this definition is fuzzier the more parts there are in the word
+        (define mx (cond
+                     [(<= max-count 2) max-count]
+                     [(<= max-count 4) (- max-count 1)]
+                     [else (- max-count 2)]))
+        (map car (sort
+                  ;; we don't use `rnk' as the key to avoid
+                  ;; constructing a huge list
+                  (for*/list ([w (in-list all-words)]
+                              [r (in-value (rnk w))]
+                              #:when (>= r mx))
+                    (list w r))
+                  >
+                  #:key cadr))))
     (define all-completions-length (length all-completions))
     
     (define/public (narrow c)
@@ -3756,14 +3796,15 @@ designates the character that triggers autocompletion
     ;; handle-mouse-movement : int int -> bool
     ;; takes an editor coordinate, returns whether it has intercept
     (define/public (handle-mouse-movement x y)
-      (let*-values ([(mx my w h) (get-menu-coordinates)])
-        (when (and (<= mx x (+ mx w))
-                   (< (+ my menu-padding-y)
-                      y 
-                      (+ my (vector-length (geometry-mouse->menu-item-vector geometry)))))
-          (set! highlighted-menu-item (vector-ref (geometry-mouse->menu-item-vector geometry)
-                                                  (inexact->exact (- y my))))
-          (redraw))))
+      (define-values (mx my w h) (get-menu-coordinates))
+      (define index (floor (inexact->exact (- y my))))
+      (when (and (<= mx x (+ mx w))
+                 (< menu-padding-y
+                    index
+                    (vector-length (geometry-mouse->menu-item-vector geometry))))
+        (set! highlighted-menu-item (vector-ref (geometry-mouse->menu-item-vector geometry)
+                                                index))
+        (redraw)))
     
     ;; get-current-selection : -> string
     ;; returns the selected string

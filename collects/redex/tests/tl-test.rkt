@@ -55,6 +55,15 @@
     (UN (add1 UN)
         zero))
   
+  (test (let ([m (redex-match 
+                  empty-language
+                  (side-condition (any_1 ...) #t)
+                  '())])
+          (and m
+               (= 1 (length m))
+               (match-bindings (car m))))
+        (list (make-bind 'any_1 '())))
+  
   (test (pair? (redex-match grammar M '(1 1))) #t)
   (test (pair? (redex-match grammar M '(1 1 1))) #f)
   (test (pair? (redex-match grammar
@@ -281,14 +290,13 @@
   (define-syntax (test-match stx)
     (syntax-case stx ()
       [(_ actual (((var val) ...) ...))
-       #`(test (equal?
-                (apply
-                 set
-                 (for/list ([match actual])
+       (syntax/loc stx
+         (test (apply
+                set
+                (for/list ([match actual])
                   (for/list ([bind (match-bindings match)])
                     (list (bind-name bind) (bind-exp bind)))))
-                (apply set (list (list (list 'var (term val)) ...) ...)))
-               #,(syntax/loc stx #t))]))
+               (apply set (list (list (list 'var (term val)) ...) ...))))]))
   
   ;; cross
   (let ()
@@ -1117,6 +1125,71 @@
             'failed)
           'passed))
   
+  (let ()
+    (define-language types
+      ((τ σ) int
+             num
+             (τ ... → τ)))
+    
+    (define-relation types
+      subtype ⊆ τ × τ
+      [(subtype int num)]
+      [(subtype (τ_1 ..._1 → τ_2) (σ_1 ..._1 → σ_2))
+       (subtype σ_1 τ_1) ...
+       (subtype τ_2 σ_2)]
+      [(subtype τ τ)])
+    
+    (test (term (subtype int int)) #t)
+    (test (term (subtype int num)) #t)
+    (test (term (subtype (int int int → int) (int int → int))) #f)
+    (test (term (subtype (int int → int) (int num → int))) #f)
+    (test (term (subtype (int num → int) (int int → int))) #t)
+    (test (term (subtype (int int → int) (int int → num))) #t))
+  
+  (let ()
+    (define-relation empty-language
+      [(R () ())]
+      [(R (any_a) (any_b)) 
+       (R any_c any_d) 
+       (where any_c any_a)
+       (where any_d any_b)])
+    
+    (test (term (R () ())) #t)
+    (test (term (R (()) (()))) #t)
+    (test (term (R (()) ())) #f))
+  
+  (let ()
+    (define-relation empty-language
+      [(R () ())]
+      [(R (any_a) (any_b)) 
+       (R any_c any_d) 
+       (where/hidden any_c any_a)
+       (where/hidden any_d any_b)])
+    
+    (test (term (R () ())) #t)
+    (test (term (R (()) (()))) #t)
+    (test (term (R (()) ())) #f))
+  
+  (let ()
+    (define-relation empty-language
+      [(R any_a any_b)
+       (side-condition (equal? (term any_a)
+                               (term any_b)))])
+    
+    (test (term (R (xx) (xx))) #t)
+    (test (term (R (()) ())) #f))
+  
+  (let ()
+    (define-relation empty-language
+      [(R any_a any_b)
+       (side-condition/hidden
+        (equal? (term any_a)
+                (term any_b)))])
+    
+    (test (term (R (xx) (xx))) #t)
+    (test (term (R (()) ())) #f))
+
+  
   (exec-syntax-error-tests "syn-err-tests/relation-definition.rktd")
   
 ;                    ;;                         ;                                        ;;                    ;                 
@@ -1288,7 +1361,7 @@
                         (length (term (number_0 ...)))
                         (length (term (number_0* ...)))))))
          '(9 7))
-        '(("(0, 0)" (9 9)) ("(0, 1)" (9 7)) ("(1, 0)" (7 9)) ("(1, 1)" (7 7))))
+        '(("(1, 1)" (7 7)) ("(1, 0)" (7 9)) ("(0, 1)" (9 7)) ("(0, 0)" (9 9))))
   
   (test (apply-reduction-relation/tag-with-names
          (reduction-relation grammar (--> 1 2 (computed-name 3))) 1)
@@ -1953,8 +2026,8 @@
       (test (judgment-holds (sumo n_1 n_2 z) ([,'n_1 n_1] [,'n_2 n_2]))
             (list (term ([n_1 z] [n_2 z]))))
       (test (judgment-holds (sumo n_1 n_2 (s z)) ([,'n_1 n_1] [,'n_2 n_2]))
-            (list (term ([n_1 z] [n_2 (s z)]))
-                  (term ([n_1 (s z)] [n_2 z]))))
+            (list (term ([n_1 (s z)] [n_2 z]))
+                  (term ([n_1 z] [n_2 (s z)]))))
       
       (define-judgment-form nats
         #:mode (sumo-ls O O I)
@@ -1978,7 +2051,7 @@
         [(member n_i (n_0 ... n_i n_i+1 ...))])
       
       (test (judgment-holds (member n (z (s z) z (s (s z)))) n)
-            (list (term z) (term (s z)) (term z) (term (s (s z)))))
+            (list (term (s (s z))) (term (s z)) (term z)))
       
       (define-judgment-form nats
         #:mode (has-zero I)
@@ -2057,8 +2130,10 @@
         [(map-add-some-noz (n ...) (n_+ ...))
          (add-some-noz n n_+) ...])
       
-      (test (judgment-holds (map-add-some-noz (z (s z) (s (s z))) (n ...))
-                            (n ...))
+      (test (sort (judgment-holds (map-add-some-noz (z (s z) (s (s z))) (n ...))
+                                  (n ...))
+                  string<=?
+                  #:key (λ (x) (format "~s" x)))
             (list (term (z (s (s z)) (s (s (s z)))))
                   (term (z (s (s z)) (s (s z))))
                   (term (z (s z) (s (s (s z)))))
@@ -2346,7 +2421,7 @@
                                      (term number_1))])
                  '(1 2 3))
                 x))
-        '((3 2 1) . 3))
+        '((1 2 3) . 3))
   
   (test ((term-match empty-language
                      [number_1
@@ -2419,6 +2494,13 @@
                                   (where any_y x)))
          'x)
         '(x1))
+  
+  (test (let ([not-and
+               (λ () #f)])
+          (redex-match empty-language
+                       (side-condition any_1 (not-and))
+                       1))
+        #f)
 
   (let ()
     ;; tests where's ability to have redex patterns, not just syntax-case patterns
@@ -2432,7 +2514,7 @@
             (where (y ... w z ...) (x ...)))))
     
     (test (apply-reduction-relation red (term (a b c)))
-          (list (term (b c)) (term (a c)) (term (a b)))))
+          (list (term (a b)) (term (a c)) (term (b c)))))
   
   
   (let ([r (reduction-relation
@@ -2459,7 +2541,7 @@
     ; test that names are properly bound for side-conditions in shortcuts
     (let* ([lhs ((rewrite-proc-lhs (first (reduction-relation-make-procs r))) grammar)]
            [proc (third lhs)]
-           [name (cadadr lhs)]
+           [name (cadar (cddadr lhs))]
            [bind (λ (n) (make-bindings (list (make-bind name n))))])
       (test (and (proc (bind 4)) (not (proc (bind 3)))) #t))
     
@@ -2477,7 +2559,7 @@
     
     ; test shortcut in terms of shortcut
     (test (match ((rewrite-proc-lhs (third (reduction-relation-make-procs r))) grammar)
-            [`(((side-condition 5 ,(? procedure?) ,_) 2) 1) #t]
+            [`(list (list (side-condition 5 ,(? procedure?) ,_) 2) 1) #t]
             [else #f])
           #t))
   
@@ -2507,6 +2589,36 @@
         (apply-reduction-relation* R 1)
         (test (sort (covered-cases c) <)
               '(("plain" . 1) ("shortcut" . 1) ("side-condition" . 2)))))
+    
+    (let ()
+      (define-language L
+        (e (e e)
+           (delay e)
+           +inf.0
+           I)
+        (v (delay e)
+           +inf.0
+           I))
+      
+      (define red
+        (compatible-closure
+         (reduction-relation
+          L
+          (--> (+inf.0 +inf.0) (+inf.0 +inf.0))
+          (--> (I e) e))
+         L
+         e))
+      
+      (test (apply-reduction-relation* 
+             red
+             (term (I (delay (+inf.0 +inf.0))))
+             #:stop-when (redex-match L v))
+            (list (term (delay (+inf.0 +inf.0)))))
+      
+      (test (apply-reduction-relation* 
+             red
+             (term (I (delay (+inf.0 +inf.0)))))
+            '()))
     
     (let* ([S (reduction-relation
                empty-language

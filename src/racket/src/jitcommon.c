@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2011 PLT Scheme Inc.
+  Copyright (c) 2006-2012 PLT Scheme Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -184,12 +184,15 @@ static int common0(mz_jit_state *jitter, void *_data)
   /* Called as a function: */
   sjc.check_arity_code = (Native_Check_Arity_Proc)jit_get_ip().ptr;
   jit_prolog(NATIVE_ARG_COUNT); /* only need 2 arguments, but return path overlaps with proc conventions */
+  mz_push_threadlocal_early();
   in = jit_arg_p();
   jit_getarg_p(JIT_R0, in); /* closure */
   in = jit_arg_p();
   jit_getarg_i(JIT_R2, in); /* argc */
+  in = jit_arg_p();
+  jit_getarg_i(JIT_R1, in); /* ignored */
   mz_push_locals();
-  mz_push_threadlocal();
+  mz_push_threadlocal(in);
   jit_movi_i(JIT_R1, -1);
   jit_ldxi_p(JIT_V1, JIT_R0, &((Scheme_Native_Closure *)0x0)->code);
   jit_ldxi_p(JIT_V1, JIT_V1, &((Scheme_Native_Closure_Data *)0x0)->arity_code);
@@ -200,10 +203,15 @@ static int common0(mz_jit_state *jitter, void *_data)
   /* Called as a function: */
   sjc.get_arity_code = (Native_Get_Arity_Proc)jit_get_ip().ptr;
   jit_prolog(NATIVE_ARG_COUNT); /* only need 1 argument, but return path overlaps with proc conventions */
+  mz_push_threadlocal_early();
   in = jit_arg_p();
   jit_getarg_p(JIT_R0, in); /* closure */
+  in = jit_arg_p();
+  jit_getarg_p(JIT_R1, in); /* ignored */
+  in = jit_arg_p();
+  jit_getarg_i(JIT_R1, in); /* ignored */
   mz_push_locals();
-  mz_push_threadlocal();
+  mz_push_threadlocal(in);
   jit_movi_i(JIT_R1, -1);
   (void)jit_movi_p(JIT_R2, 0x0);
   jit_ldxi_p(JIT_V1, JIT_R0, &((Scheme_Native_Closure *)0x0)->code);
@@ -658,6 +666,7 @@ static int common2(mz_jit_state *jitter, void *_data)
      for the state of registers on entry */
   scheme_on_demand_jit_code = jit_get_ip().ptr;
   jit_prolog(NATIVE_ARG_COUNT);
+  mz_push_threadlocal_early();
   in = jit_arg_p();
   jit_getarg_p(JIT_R0, in); /* closure */
   in = jit_arg_i();
@@ -666,7 +675,7 @@ static int common2(mz_jit_state *jitter, void *_data)
   jit_getarg_p(JIT_R2, in); /* argv */
   CHECK_LIMIT();
   mz_push_locals();
-  mz_push_threadlocal();
+  mz_push_threadlocal(in);
   mz_tl_ldi_p(JIT_RUNSTACK, tl_MZ_RUNSTACK);
   sjc.on_demand_jit_arity_code = jit_get_ip().ptr; /* <<<- arity variant starts here */
   jit_subi_p(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES(2));
@@ -2596,8 +2605,8 @@ static int common10(mz_jit_state *jitter, void *_data)
     jit_ldxi_p(JIT_V1, JIT_R0, &((Scheme_Native_Closure *)0x0)->code);
     jit_ldxi_i(JIT_R2, JIT_V1, &((Scheme_Native_Closure_Data *)0x0)->closure_size);
     (void)jit_blti_i(refslow, JIT_R2, 0); /* case lambda */
-    jit_ldxi_p(JIT_R2, JIT_V1, &((Scheme_Native_Closure_Data *)0x0)->code);
-    jit_movi_p(JIT_V1, scheme_on_demand_jit_code); /* movi_p doesn't depends on actual address, which might change size */
+    jit_ldxi_p(JIT_R2, JIT_V1, &((Scheme_Native_Closure_Data *)0x0)->start_code);
+    jit_movi_p(JIT_V1, scheme_on_demand_jit_code); /* movi_p doesn't depend on actual address, which might change size */
     ref_nc = jit_beqr_p(jit_forward(), JIT_R2, JIT_V1); /* not yet JITted? */
     jit_rshi_l(JIT_V1, JIT_R1, 1);
     jit_addi_l(JIT_V1, JIT_V1, 1);
@@ -3198,9 +3207,9 @@ static int more_common1(mz_jit_state *jitter, void *_data)
     
     /* store stack pointer in address given by 5th argument, then jump to
        the address given by the 4th argument */
-    jit_getprearg_pipp_p(JIT_PREARG);
+    jit_getprearg_pippp_p(JIT_PREARG);
     jit_str_p(JIT_PREARG, JIT_SP);
-    jit_getprearg_pip_p(JIT_PREARG);
+    jit_getprearg_pipp_p(JIT_PREARG);
     jit_jmpr(JIT_PREARG);
 
     CHECK_LIMIT();

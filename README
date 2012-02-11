@@ -1,7 +1,7 @@
 The Racket programming language
 ===============================
 
-This is the Racket v5.2 source package for Unix.
+This is the Racket v5.2.1 source package for Unix.
 See the build instructions in src/README.
 
 Important executables:
@@ -28,7 +28,7 @@ License
 -------
 
 Racket
-Copyright (c) 2010-2011 PLT Scheme Inc.
+Copyright (c) 2010-2012 PLT Scheme Inc.
 
 Racket is distributed under the GNU Lesser General Public License
 (LGPL).  This means that you can link Racket into proprietary

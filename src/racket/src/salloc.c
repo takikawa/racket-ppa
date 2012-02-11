@@ -1,8 +1,8 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
- 
+
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -383,7 +383,7 @@ void scheme_init_os_thread_like(void *other) XFORM_SKIP_PROC
 #endif
 }
 
-void scheme_init_os_thread() XFORM_SKIP_PROC
+void scheme_init_os_thread(void) XFORM_SKIP_PROC
 {
   scheme_init_os_thread_like(NULL);
 }
@@ -630,6 +630,17 @@ static void raise_out_of_memory(void)
 {
   GC_out_of_memory = save_oom;
   scheme_raise_out_of_memory(NULL, NULL);
+}
+
+intptr_t scheme_check_overflow(intptr_t n, intptr_t m, intptr_t a)
+{
+  intptr_t v;
+
+  v = (n * m) + a;
+  if ((v < n) || (v < m) || (v < a) || (((v - a) / n) != m))
+    scheme_signal_error("allocation size overflow");
+
+  return v;
 }
 
 void *scheme_malloc_fail_ok(void *(*f)(size_t), size_t s)
@@ -1393,7 +1404,7 @@ static void do_next_finalization(void *o, void *_data)
 
   if (fns->scheme_first) {
     if (fns->scheme_first->next || fns->ext_f || fns->prim_first) {
-      /* Re-install low-level finalizer and run a scheme finalizer */
+      /* Re-install low-level finalizer and run a Racket finalizer */
       GC_register_eager_finalizer(o, fns->scheme_first->next ? 1 : 2, 
 				  do_next_finalization, _data, NULL, NULL);
     }
@@ -1667,6 +1678,13 @@ void scheme_free_key(Scheme_Object *k)
 {
   free(k);
 }
+
+/************************************************************************/
+/*                              Misc                                   */
+/************************************************************************/
+
+void scheme_unused_object(Scheme_Object *o) { }
+void scheme_unused_intptr(intptr_t i) { }
 
 /************************************************************************/
 /*                             GC_dump                                  */

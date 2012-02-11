@@ -65,6 +65,14 @@ struct jit_local_state {
 #ifdef JIT_X86_64
   int   argpushes;
 #endif
+#ifdef JIT_X86_SSE
+  union {
+    int	   i[2];
+    long   l;
+    double d;
+  } d_data;
+  jit_insn *tmp_label;
+#endif
 };
 
 /* 3-parameter operation */
@@ -345,6 +353,7 @@ struct jit_local_state {
 #define jit_rshr_ul(d, r1, r2)	jit_replace((r1), (r2), _ECX, 				jit_qop_ ((d), (r1), SHRQrr(_CL,  (d)) ))
 
 /* Stack */
+#define jit_pushi_i(is)		PUSHLi(is)
 #define jit_pushr_i(rs)		PUSHLr(rs)
 #define jit_popr_i(rs)		POPLr(rs)
 #define jit_pushr_l(rs) jit_pushr_i(rs)
@@ -358,15 +367,20 @@ struct jit_local_state {
 #  define jit_getprearg__p(r) (MOVQrr(_ECX, r))
 #  define jit_getprearg_pip_p(r) (MOVQrr(JIT_R(9), r))
 #  define jit_getprearg_pipp_p(r) (jit_ldxi_p(r, JIT_SP, 40))
+#  define jit_getprearg_pippp_p(r) (jit_ldxi_p(r, JIT_SP, 48))
+#  define JIT_R_ARG4 JIT_R(9)
 # else
 #  define jit_getprearg__p(r) (MOVQrr(_EDI, r))
 #  define jit_getprearg_pip_p(r) (MOVQrr(_ECX, r))
 #  define jit_getprearg_pipp_p(r) (MOVQrr(JIT_R(8), r))
+#  define jit_getprearg_pippp_p(r) (MOVQrr(JIT_R(9), r))
+#  define JIT_R_ARG4 _ECX
 # endif
 #else
 # define jit_getprearg__p(r) (jit_ldxi_p(r, JIT_SP, 4))
 # define jit_getprearg_pip_p(r) (jit_ldxi_p(r, JIT_SP, 16))
 # define jit_getprearg_pipp_p(r) (jit_ldxi_p(r, JIT_SP, 20))
+# define jit_getprearg_pippp_p(r) (jit_ldxi_p(r, JIT_SP, 24))
 #endif
 
 #ifdef JIT_X86_64
@@ -598,14 +612,16 @@ static const int const jit_arg_reg_order[] = { _EDI, _ESI, _EDX, _ECX };
 #define jit_bxeqi_s(label, rs, is) (CMPWim(is, 0, rs, 0, 0), JEm(label,0,0,0), _jit.x.pc)
 #define jit_bxnei_s(label, rs, is) (CMPWim(is, 0, rs, 0, 0), JNEm(label,0,0,0), _jit.x.pc)
 
+#if 0
+XFORM_NONGCING static intptr_t _CHECK_TINY(intptr_t diff) { if ((diff < -128) || (diff > 127)) *(intptr_t *)0x0 = 1; return diff; }
+#else
+# define _CHECK_TINY(x) x
+#endif
+#define jit_patch_tiny_at(jump_pc,v) (*_PSC((jump_pc) - sizeof(char)) = _jit_SC(_CHECK_TINY((jit_insn *)(v) - (jump_pc))))
+
 #ifdef SUPPORT_TINY_JUMPS
-# if 0
-static intptr_t _CHECK_TINY(intptr_t diff) { if ((diff < -128) || (diff > 127)) *(intptr_t *)0x0 = 1; return diff; }
-# else
-#  define _CHECK_TINY(x) x
-# endif
 # define jit_patch_normal_at(jump_pc,v)  (_jitl.tiny_jumps \
-                                          ? (*_PSC((jump_pc) - sizeof(char)) = _jit_SC(_CHECK_TINY((jit_insn *)(v) - (jump_pc)))) \
+                                          ? jit_patch_tiny_at(jump_pc, v)     \
                                           : (*_PSI((jump_pc) - sizeof(int)) = _jit_SI((jit_insn *)(v) - (jump_pc))))
 #else
 # define jit_patch_normal_at(jump_pc,v)  (*_PSI((jump_pc) - sizeof(int)) = _jit_SI((jit_insn *)(v) - (jump_pc)))

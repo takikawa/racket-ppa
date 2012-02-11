@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -55,6 +55,8 @@ static Scheme_Object *read_varref(Scheme_Object *obj);
 static Scheme_Object *write_varref(Scheme_Object *obj);
 static Scheme_Object *read_apply_values(Scheme_Object *obj);
 static Scheme_Object *write_apply_values(Scheme_Object *obj);
+static Scheme_Object *read_inline_variant(Scheme_Object *obj);
+static Scheme_Object *write_inline_variant(Scheme_Object *obj);
 
 static Scheme_Object *write_application(Scheme_Object *obj);
 static Scheme_Object *read_application(Scheme_Object *obj);
@@ -135,6 +137,8 @@ void scheme_init_marshal(Scheme_Env *env)
   scheme_install_type_reader(scheme_varref_form_type, read_varref);
   scheme_install_type_writer(scheme_apply_values_type, write_apply_values);
   scheme_install_type_reader(scheme_apply_values_type, read_apply_values);
+  scheme_install_type_writer(scheme_inline_variant_type, write_inline_variant);
+  scheme_install_type_reader(scheme_inline_variant_type, read_inline_variant);
 
   scheme_install_type_writer(scheme_compilation_top_type, write_top);
   scheme_install_type_reader(scheme_compilation_top_type, read_top);
@@ -271,7 +275,13 @@ static Scheme_Object *read_letrec(Scheme_Object *obj)
   lr->body = SCHEME_CAR(obj);
   obj = SCHEME_CDR(obj);
 
-  sa = MALLOC_N(Scheme_Object*, c);
+  if (c < 0) return NULL;
+  if (c < 4096)
+    sa = MALLOC_N(Scheme_Object*, c);
+  else {
+    sa = scheme_malloc_fail_ok(scheme_malloc, scheme_check_overflow(c, sizeof(Scheme_Object *), 0));
+    if (!sa) scheme_signal_error("out of memory allocating letrec bytecode");
+  }
   lr->procs = sa;
   for (i = 0; i < c; i++) {
     if (!SCHEME_PAIRP(obj)) return NULL;
@@ -308,6 +318,8 @@ static Scheme_Object *read_top(Scheme_Object *obj)
   if (!SCHEME_PAIRP(obj)) return NULL;
   top->prefix = (Resolve_Prefix *)SCHEME_CAR(obj);
   top->code = SCHEME_CDR(obj);
+  if (!SAME_TYPE(SCHEME_TYPE(top->prefix), scheme_resolve_prefix_type)) 
+    return NULL;
 
   return (Scheme_Object *)top;
 }
@@ -518,6 +530,28 @@ Scheme_Object *read_boxenv(Scheme_Object *o)
   return data;
 }
 
+static Scheme_Object *read_inline_variant(Scheme_Object *obj)
+{
+  Scheme_Object *data;
+
+  if (!SCHEME_PAIRP(obj)) return NULL;
+
+  data = scheme_make_vector(3, scheme_false);
+  data->type = scheme_inline_variant_type;
+  SCHEME_VEC_ELS(data)[0] = SCHEME_CAR(obj);
+  SCHEME_VEC_ELS(data)[1] = SCHEME_CDR(obj);
+  /* third slot is filled when module->accessible table is made */
+  
+  return data;
+}
+
+static Scheme_Object *write_inline_variant(Scheme_Object *obj)
+{
+  return scheme_make_pair(SCHEME_VEC_ELS(obj)[0],
+                          SCHEME_VEC_ELS(obj)[1]);
+}
+
+
 #define BOOL(x) (x ? scheme_true : scheme_false)
 
 static Scheme_Object *write_application(Scheme_Object *obj)
@@ -559,6 +593,8 @@ static Scheme_Object *read_sequence_save_first(Scheme_Object *obj)
 static Scheme_Object *read_sequence_splice(Scheme_Object *obj)
 {
   obj = scheme_make_sequence_compilation(obj, 1);
+  if (!obj) return NULL;
+
   if (SAME_TYPE(SCHEME_TYPE(obj), scheme_sequence_type))
     obj->type = scheme_splice_sequence_type;
   return obj;
@@ -932,6 +968,9 @@ static Scheme_Object *read_toplevel(Scheme_Object *obj)
     flags = 0;
   }
 
+  if (depth < 0) return NULL;
+  if (pos < 0) return NULL;
+
   return scheme_make_toplevel(depth, pos, 1, flags);
 }
 
@@ -1003,6 +1042,7 @@ static Scheme_Object *do_read_local(Scheme_Type t, Scheme_Object *obj)
     flags = 0;
 
   n = (int)SCHEME_INT_VAL(obj);
+  if (n < 0) return NULL;
 
   return scheme_make_local(t, n, flags);
 }
@@ -1060,14 +1100,12 @@ static Scheme_Object *write_resolve_prefix(Scheme_Object *obj)
 static Scheme_Object *read_resolve_prefix(Scheme_Object *obj)
 {
   Resolve_Prefix *rp;
-  Scheme_Object *tv, *sv, **a, *stx;
+  Scheme_Object *tv, *sv, **a, *stx, *tl;
   intptr_t i;
-  int uses_unsafe = 0;
 
   if (!SCHEME_PAIRP(obj)) return NULL;
 
   if (!SCHEME_INTP(SCHEME_CAR(obj))) {
-    uses_unsafe = 1;
     obj = SCHEME_CDR(obj);
   }
 
@@ -1095,7 +1133,15 @@ static Scheme_Object *read_resolve_prefix(Scheme_Object *obj)
   i = rp->num_toplevels;
   a = MALLOC_N(Scheme_Object *, i);
   while (i--) {
-    a[i] = SCHEME_VEC_ELS(tv)[i];
+    tl = SCHEME_VEC_ELS(tv)[i];
+    if (!SCHEME_FALSEP(tl)
+        && !SCHEME_SYMBOLP(tl)
+        && (!SCHEME_PAIRP(tl)
+            || !SCHEME_SYMBOLP(SCHEME_CAR(tl)))
+        && !SAME_TYPE(SCHEME_TYPE(tl), scheme_variable_type)
+        && !SAME_TYPE(SCHEME_TYPE(tl), scheme_module_variable_type))
+      return NULL;
+    a[i] = tl;
   }
   rp->toplevels = a;
   
@@ -1326,6 +1372,7 @@ static Scheme_Object *read_module(Scheme_Object *obj)
 
   m = MALLOC_ONE_TAGGED(Scheme_Module);
   m->so.type = scheme_module_type;
+  m->predefined = scheme_starting_up;
 
   me = scheme_make_module_exports();
   m->me = me;
@@ -1344,8 +1391,10 @@ static Scheme_Object *read_module(Scheme_Object *obj)
   if (!SCHEME_PAIRP(obj)) return_NULL();
   me->src_modidx = SCHEME_CAR(obj);
   obj = SCHEME_CDR(obj);
-  ((Scheme_Modidx *)m->me->src_modidx)->resolved = m->modname;
-  m->self_modidx = m->me->src_modidx;
+  if (!SAME_TYPE(SCHEME_TYPE(me->src_modidx), scheme_module_index_type))
+    return_NULL();
+  ((Scheme_Modidx *)me->src_modidx)->resolved = m->modname;
+  m->self_modidx = me->src_modidx;
 
   if (!SCHEME_PAIRP(obj)) return_NULL();
   e = SCHEME_CAR(obj);

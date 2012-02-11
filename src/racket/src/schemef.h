@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -55,6 +55,7 @@ MZ_EXTERN Scheme_Jumpup_Buf_Holder *scheme_new_jmpupbuf_holder(void);
 /*========================================================================*/
 
 MZ_EXTERN Scheme_Config *scheme_current_config(void);
+MZ_EXTERN Scheme_Config *scheme_minimal_config(void);
 MZ_EXTERN Scheme_Config *scheme_extend_config(Scheme_Config *c, int pos, Scheme_Object *init_val);
 MZ_EXTERN void scheme_install_config(Scheme_Config *);
 
@@ -66,6 +67,7 @@ MZ_EXTERN void scheme_set_thread_param(Scheme_Config *c, Scheme_Thread_Cell_Tabl
 
 MZ_EXTERN Scheme_Env *scheme_get_env(Scheme_Config *config);
 
+MZ_EXTERN Scheme_Thread_Cell_Table *scheme_empty_cell_table();
 MZ_EXTERN Scheme_Thread_Cell_Table *scheme_inherit_cells(Scheme_Thread_Cell_Table *cells);
 
 MZ_EXTERN Scheme_Object *scheme_current_break_cell();
@@ -948,6 +950,8 @@ MZ_EXTERN intptr_t scheme_get_port_fd(Scheme_Object *p);
 MZ_EXTERN int scheme_get_port_socket(Scheme_Object *p, intptr_t *_s);
 MZ_EXTERN void scheme_socket_to_ports(intptr_t s, const char *name, int takeover,
                                       Scheme_Object **_inp, Scheme_Object **_outp);
+
+MZ_EXTERN Scheme_Object *scheme_fd_to_semaphore(intptr_t fd, int mode, int is_socket);
 
 MZ_EXTERN void scheme_set_type_printer(Scheme_Type stype, Scheme_Type_Printer printer);
 MZ_EXTERN void scheme_print_bytes(Scheme_Print_Params *pp, const char *str, int offset, int len);

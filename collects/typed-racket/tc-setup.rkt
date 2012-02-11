@@ -2,14 +2,13 @@
 
 (require (rename-in "utils/utils.rkt" [infer r:infer])
          (except-in syntax/parse id)
-         unstable/mutated-vars
          racket/pretty
          (private type-contract)
          (types utils convenience)
          (typecheck typechecker provide-handling tc-toplevel)
          (env tvar-env type-name-env type-alias-env)
          (r:infer infer)
-         (utils tc-utils disarm)
+         (utils tc-utils disarm mutated-vars)
          (rep type-rep)
          (except-in (utils utils) infer)
          (only-in (r:infer infer-dummy) infer-param)
@@ -38,7 +37,7 @@
     (set-box! typed-context? #t)
     ;(start-timing (syntax-property stx 'enclosing-module-name))
     (with-handlers
-        ([(λ (e) (and (exn:fail? e) (not (exn:fail:syntax? e))))
+        ([(λ (e) (and (exn:fail? e) (not (exn:fail:syntax? e)) (not (exn:fail:filesystem? e))))
           (λ (e) (tc-error "Internal Typed Racket Error : ~a" e))])
       (parameterize (;; enable fancy printing?
                      [custom-printer #t]

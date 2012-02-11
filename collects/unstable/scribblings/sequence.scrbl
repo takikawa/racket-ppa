@@ -13,10 +13,9 @@
           " clause.")]))
 
 @title[#:tag "sequence"]{Sequences}
+@unstable[@author+email["Sam Tobin-Hochstadt" "samth@ccs.neu.edu"]]
 
 @defmodule[unstable/sequence]
-
-@unstable[@author+email["Sam Tobin-Hochstadt" "samth@ccs.neu.edu"]]
 
 
 @defproc[(in-syntax [stx syntax?]) sequence?]{
@@ -42,5 +41,19 @@ Produces the sequence of @racket[f] applied to each element of @racket[seq].
 (for/list ([x (sequence-lift add1 (in-range 10))])
   x)]
 }
+
+
+@addition{David Vanderson}
+
+@defproc[(in-slice [length exact-positive-integer?] [seq sequence?])
+         sequence?]{
+  Returns a sequence where each element is a list with @racket[length]
+  elements from the given sequence.
+
+  @examples[#:eval the-eval
+  (for/list ([e (in-slice 3 (in-range 8))]) e)
+  ]
+}
+
 
 @close-eval[the-eval]

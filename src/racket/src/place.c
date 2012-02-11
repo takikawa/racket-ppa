@@ -1,7 +1,7 @@
 /*
   Racket
-  Copyright (c) 2009-2011 PLT Scheme Inc.
- 
+  Copyright (c) 2009-2012 PLT Scheme Inc.
+
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -24,7 +24,9 @@ static Scheme_Object* scheme_place_enabled(int argc, Scheme_Object *args[]);
 static Scheme_Object* scheme_place_shared(int argc, Scheme_Object *args[]);
 
 THREAD_LOCAL_DECL(int scheme_current_place_id);
-ROSYM static Scheme_Object *quote_symbol;
+
+SHARED_OK static intptr_t embedded_load_len;
+SHARED_OK static const char *embedded_load;
 
 #ifdef MZ_USE_PLACES
 
@@ -36,6 +38,8 @@ ROSYM static Scheme_Object *quote_symbol;
 
 READ_ONLY static Scheme_Object *scheme_def_place_exit_proc;
 SHARED_OK static int scheme_places_enabled = 1;
+
+ROSYM static Scheme_Object *quote_symbol;
 
 static int id_counter;
 static mzrt_mutex *id_counter_mutex;
@@ -73,7 +77,8 @@ static void destroy_place_object_locks(Scheme_Place_Object *place_obj);
 
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
 static Scheme_Object *places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Table **ht, 
-                                              int mode, int gcable, int can_raise_exn);
+                                              int mode, int gcable, int can_raise_exn,
+                                              Scheme_Object **master_chain);
 # define mzPDC_CHECK 0
 # define mzPDC_COPY 1
 # define mzPDC_UNCOPY 2
@@ -111,6 +116,7 @@ static void register_traversers(void) { }
 /*========================================================================*/
 /*                             initialization                             */
 /*========================================================================*/
+
 void scheme_init_place(Scheme_Env *env)
 {
   Scheme_Env *plenv;
@@ -156,10 +162,10 @@ void scheme_init_places_once() {
   mzrt_mutex_create(&id_counter_mutex);
   REGISTER_SO(scheme_def_place_exit_proc);
   scheme_def_place_exit_proc = scheme_make_prim_w_arity(def_place_exit_handler_proc, "default-place-exit-handler", 1, 1);
-#endif
 
  REGISTER_SO(quote_symbol);
  quote_symbol = scheme_intern_symbol("quote");
+#endif
 }
 
 int scheme_get_place_id(void)
@@ -169,6 +175,12 @@ int scheme_get_place_id(void)
 #else
   return 0;
 #endif
+}
+
+void scheme_register_embedded_load(intptr_t len, const char *s)
+{
+  embedded_load_len = len;
+  embedded_load = s;
 }
 
 #ifdef MZ_USE_PLACES
@@ -215,6 +227,7 @@ Scheme_Object *scheme_make_place_object() {
   place_obj->so.type = scheme_place_object_type;
   mzrt_mutex_create(&place_obj->lock);
   place_obj->die = 0;
+  place_obj->dead = 0;
   place_obj->refcount = 1;
   place_obj->pbreak = 0;
   place_obj->result = 1;
@@ -299,8 +312,8 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
     out_arg = args[3];
     err_arg = args[4];
 
-    if (!scheme_is_module_path(args[0]) && !SCHEME_PATHP(args[0])) {
-      scheme_wrong_type("dynamic-place", "module-path or path", 0, argc, args);
+    if (!scheme_is_module_path(args[0]) && !SCHEME_PATHP(args[0]) && !SCHEME_MODNAMEP(args[0])) {
+      scheme_wrong_type("dynamic-place", "module-path or path of resolved-module-path", 0, argc, args);
     }
     if (!SCHEME_SYMBOLP(args[1])) {
       scheme_wrong_type("dynamic-place", "symbol", 1, argc, args);
@@ -315,8 +328,10 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
       scheme_wrong_type("dynamic-place", "file-stream-output-port or #f", 4, argc, args);
     }
 
-    if (SCHEME_PAIRP(args[0]) && SAME_OBJ(SCHEME_CAR(args[0]), quote_symbol)) {
-      scheme_arg_mismatch("dynamic-place", "not only a filesystem module-path: ", args[0]);
+    if (SCHEME_PAIRP(args[0]) 
+        && SAME_OBJ(SCHEME_CAR(args[0]), quote_symbol)
+        && !scheme_is_predefined_module_p(args[0])) {
+      scheme_arg_mismatch("dynamic-place", "not a filesystem or predefined module-path: ", args[0]);
     }
 
     so = places_deep_copy_to_master(args[0]);
@@ -567,12 +582,12 @@ static int place_deadp(Scheme_Object *place) {
   {
     mzrt_mutex_lock(place_obj->lock);
 
-    dead = place_obj->die;
+    dead = place_obj->die | place_obj->dead;
 
     mzrt_mutex_unlock(place_obj->lock);
   }
   if (dead) { return 1; }
-  return 9;
+  return 0;
 }
 
 static Scheme_Object *make_place_dead(int argc, Scheme_Object *argv[])
@@ -580,7 +595,7 @@ static Scheme_Object *make_place_dead(int argc, Scheme_Object *argv[])
   Scheme_Object *b;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_place_type))
-    scheme_wrong_type("thread-dead-evt", "place", 0, argc, argv);
+    scheme_wrong_type("place-dead-evt", "place", 0, argc, argv);
 
   b = scheme_alloc_small_object();
   b->type = scheme_place_dead_type;
@@ -1052,17 +1067,19 @@ static Scheme_Object *place_p(int argc, Scheme_Object *args[])
   return SAME_TYPE(SCHEME_TYPE(args[0]), scheme_place_type) ? scheme_true : scheme_false;
 }
 
-static Scheme_Object *do_places_deep_copy(Scheme_Object *so, int mode, int gcable) {
+static Scheme_Object *do_places_deep_copy(Scheme_Object *so, int mode, int gcable, 
+                                          Scheme_Object **master_chain) 
+{
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
   Scheme_Hash_Table *ht = NULL;
-  return places_deep_copy_worker(so, &ht, mode, gcable, gcable);
+  return places_deep_copy_worker(so, &ht, mode, gcable, gcable, master_chain);
 #else
   return so;
 #endif
 }
 
 Scheme_Object *places_deep_uncopy(Scheme_Object *so) {
-  return do_places_deep_copy(so, mzPDC_UNCOPY, 1);
+  return do_places_deep_copy(so, mzPDC_UNCOPY, 1, NULL);
 }
 
 static void bad_place_message(Scheme_Object *so) {
@@ -1111,7 +1128,7 @@ static void push_duped_fd(Scheme_Object **fd_accumulators, intptr_t slot, intptr
   }
 }
 
-static Scheme_Object *trivial_copy(Scheme_Object *so)
+static Scheme_Object *trivial_copy(Scheme_Object *so, Scheme_Object **master_chain)
 {
   switch (SCHEME_TYPE(so)) {
     case scheme_integer_type:
@@ -1120,18 +1137,20 @@ static Scheme_Object *trivial_copy(Scheme_Object *so)
     case scheme_null_type:
     case scheme_void_type:
       return so;
-    case scheme_place_type:
-      scheme_hash_key(((Scheme_Place *) so)->channel);
-      return ((Scheme_Place *) so)->channel;
-      break;
-    case scheme_place_bi_channel_type: /* allocated in the master and can be passed along as is */
-      scheme_hash_key(so);
-      return so;
     case scheme_byte_string_type:
     case scheme_flvector_type:
     case scheme_fxvector_type:
       if (SHARED_ALLOCATEDP(so)) {
         scheme_hash_key(so);
+        if (master_chain) {
+          /* Keep track of all the master-allocated objects that are
+             in a message, so that the corresponding objects can be
+             marked during a master GC, in case on happens before the
+             message is received. */
+          Scheme_Object *mc;
+          mc = scheme_make_raw_pair(so, *master_chain);
+          *master_chain = mc;
+        }
         return so;
     }
   }
@@ -1140,16 +1159,37 @@ static Scheme_Object *trivial_copy(Scheme_Object *so)
 }
 
 static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *ht, 
-    Scheme_Object **fd_accumulators, intptr_t *delayed_errno, int mode, int can_raise_exn) {
+                                         Scheme_Object **fd_accumulators, intptr_t *delayed_errno, 
+                                         int mode, int can_raise_exn,
+                                         Scheme_Object **master_chain) {
   Scheme_Object *new_so;
   int copy_mode = ((mode == mzPDC_COPY) || (mode == mzPDC_UNCOPY));
 
-  new_so = trivial_copy(so);
+  new_so = trivial_copy(so, master_chain);
   if (new_so) return new_so;
 
   new_so = so;
 
   switch (SCHEME_TYPE(so)) {
+    case scheme_place_type:
+      so = ((Scheme_Place *) so)->channel;
+      new_so = so;
+    case scheme_place_bi_channel_type: /* ^^^ fall through ^^* */
+      if (copy_mode) {
+        Scheme_Place_Bi_Channel *ch;
+        ch = MALLOC_ONE_TAGGED(Scheme_Place_Bi_Channel);
+        ch->so.type = scheme_place_bi_channel_type;
+        ch->sendch = ((Scheme_Place_Bi_Channel *)so)->sendch;
+        ch->recvch = ((Scheme_Place_Bi_Channel *)so)->recvch;
+        if (master_chain) {
+          /* See setting of master_chain in trivial_copy(): */
+          new_so = scheme_make_raw_pair((Scheme_Object *)ch->sendch, *master_chain);
+          new_so = scheme_make_raw_pair((Scheme_Object *)ch->recvch, new_so);
+          *master_chain = new_so;
+        }
+        new_so = (Scheme_Object *)ch;
+      }
+      break;
     case scheme_char_type:
       if (copy_mode)
         new_so = scheme_make_char(SCHEME_CHAR_VAL(so));
@@ -1164,8 +1204,8 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
         Scheme_Object *d;
         n = scheme_rational_numerator(so);
         d = scheme_rational_denominator(so);
-        n = shallow_types_copy(n, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn);
-        d = shallow_types_copy(d, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn);
+        n = shallow_types_copy(n, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain);
+        d = shallow_types_copy(d, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain);
         new_so = scheme_make_rational(n, d);
       }
       break;
@@ -1183,8 +1223,8 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
         Scheme_Object *i;
         r = scheme_complex_real_part(so);
         i = scheme_complex_imaginary_part(so);
-        r = shallow_types_copy(r, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn);
-        i = shallow_types_copy(i, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn);
+        r = shallow_types_copy(r, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain);
+        i = shallow_types_copy(i, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain);
         new_so = scheme_make_complex(r, i);
       }
       break;
@@ -1273,12 +1313,14 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
           o->type = scheme_cpointer_type;
           SCHEME_CPTR_FLAGS(o) |= 0x1;
           SCHEME_CPTR_VAL(o) = SCHEME_CPTR_VAL(so);
-          o2 = shallow_types_copy(SCHEME_CPTR_TYPE(so), NULL, fd_accumulators, delayed_errno, mode, can_raise_exn);
+          o2 = shallow_types_copy(SCHEME_CPTR_TYPE(so), NULL, fd_accumulators, delayed_errno, mode, 
+                                  can_raise_exn, master_chain);
           SCHEME_CPTR_TYPE(o) = o2;
 
           new_so = o;
         } else {
-          (void)shallow_types_copy(SCHEME_CPTR_TYPE(so), NULL, fd_accumulators, delayed_errno, mode, can_raise_exn);
+          (void)shallow_types_copy(SCHEME_CPTR_TYPE(so), NULL, fd_accumulators, delayed_errno, mode, 
+                                   can_raise_exn, master_chain);
         }
       }
       else {
@@ -1313,7 +1355,7 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
             ssfd->type = so->type;
             ssfd->fd = dupfd;
             portname = scheme_port_name(so);
-            tmp = shallow_types_copy(portname, ht, fd_accumulators, delayed_errno, mode, can_raise_exn);
+            tmp = shallow_types_copy(portname, ht, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain);
             ssfd->name = tmp;
             return (Scheme_Object *)ssfd;
           }
@@ -1327,7 +1369,8 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
               sffd = scheme_malloc_tagged(sizeof(Scheme_Serialized_File_FD));
               sffd->so.type = scheme_serialized_file_fd_type;
               scheme_get_serialized_fd_flags(so, sffd);
-              tmp = shallow_types_copy(scheme_port_name(so), ht, fd_accumulators, delayed_errno, mode, can_raise_exn);
+              tmp = shallow_types_copy(scheme_port_name(so), ht, fd_accumulators, delayed_errno, mode, 
+                                       can_raise_exn, master_chain);
               sffd->name = tmp;
               dupfd = scheme_dup_file(fd);
               if (dupfd == -1) {
@@ -1442,7 +1485,12 @@ static Scheme_Object* create_infinite_stack(int gcable) {
     /* If a GC is not possible, then we prefer to malloc() the stack
        space so that the space doesn't show up as part of the
        message allocation. */
-    v = GC_malloc(IFS_SIZE * sizeof(Scheme_Object*));
+    if (reusable_ifs_stack) {
+      v = reusable_ifs_stack;
+      reusable_ifs_stack = NULL;
+    } else {
+      v = GC_malloc(IFS_SIZE * sizeof(Scheme_Object*));
+    }
   } else {
     v = malloc(IFS_SIZE * sizeof(Scheme_Object*));
     v[IFS_PREV_SEG_SLOT] = NULL;
@@ -1451,7 +1499,7 @@ static Scheme_Object* create_infinite_stack(int gcable) {
 
   return (Scheme_Object *) v;
 }
-static void  free_infinite_stack(Scheme_Object** st, int gcable) {
+static void  free_infinite_stack(Scheme_Object** st, intptr_t max_depth, int gcable) {
   Scheme_Object **prev;
   if (st[IFS_CACHE_SLOT]) {
     if (!gcable) free(st[IFS_CACHE_SLOT]);
@@ -1462,9 +1510,21 @@ static void  free_infinite_stack(Scheme_Object** st, int gcable) {
     prev[IFS_CACHE_SLOT] = NULL;
   }
   if (!gcable) free(st);
+  else if (!reusable_ifs_stack && (max_depth >= 0)) {
+    if (max_depth > IFS_SIZE)
+      max_depth = IFS_SIZE;
+    memset(st, 0, max_depth * sizeof(Scheme_Object*));
+    reusable_ifs_stack = st;
+  }
 }
 
-static MZ_INLINE void inf_push(Scheme_Object **instack, Scheme_Object *item, uintptr_t *indepth, int gcable) {
+void scheme_clear_place_ifs_stack()
+{
+  reusable_ifs_stack = NULL;
+}
+
+static MZ_INLINE void inf_push(Scheme_Object **instack, Scheme_Object *item, uintptr_t *indepth, 
+                               uintptr_t *maxdepth, int gcable) {
   Scheme_Object **stack = (Scheme_Object **) *instack;
   if (*indepth == IFS_CACHE_SLOT) {
     if (stack[IFS_CACHE_SLOT]) { /* cached */
@@ -1483,6 +1543,8 @@ static MZ_INLINE void inf_push(Scheme_Object **instack, Scheme_Object *item, uin
 
   /* printf("PUSH %p %li %p\n", stack, *indepth, item); */
   stack[((*indepth)++)] = item;
+  if (*indepth > *maxdepth)
+    *maxdepth = *indepth;
   return;
 }
 
@@ -1490,9 +1552,8 @@ static MZ_INLINE Scheme_Object *inf_pop(Scheme_Object **instack, uintptr_t *inde
   Scheme_Object **stack = (Scheme_Object **) *instack;
   Scheme_Object *val;
   if (*indepth == IFS_SEGMENT_BOTTOM) {
-    Scheme_Object *item;
     if (stack[IFS_CACHE_SLOT]) { /* already have cached segment, free it*/
-      free_infinite_stack((Scheme_Object **) stack[IFS_CACHE_SLOT], gcable);
+      free_infinite_stack((Scheme_Object **) stack[IFS_CACHE_SLOT], -1, gcable);
       stack[IFS_CACHE_SLOT] = NULL;
     }
     if (stack[IFS_PREV_SEG_SLOT]) {
@@ -1565,10 +1626,11 @@ static MZ_INLINE Scheme_Object *inf_get(Scheme_Object **instack, int pos, uintpt
    in that case. Therefore, it must use its own stack implementation
    for recursion. */
 static Scheme_Object *places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Table **ht, 
-                                              int mode, int gcable, int can_raise_exn) {
+                                              int mode, int gcable, int can_raise_exn,
+                                              Scheme_Object **master_chain) {
   Scheme_Object *inf_stack = NULL;
   Scheme_Object *reg0 = NULL;
-  uintptr_t inf_stack_depth = 0;
+  uintptr_t inf_stack_depth = 0, inf_max_depth = 0;
 
   Scheme_Object *fd_accumulators = NULL;
   intptr_t delayed_errno = 0;
@@ -1597,7 +1659,7 @@ static Scheme_Object *places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
 #define DEEP_DONE 9 
 #define RETURN do { goto DEEP_RETURN_L; } while(0);
 #define ABORT do { goto DEEP_DONE_L; } while(0);
-#define IFS_PUSH(x) inf_push(&inf_stack, x, &inf_stack_depth, gcable)
+#define IFS_PUSH(x) inf_push(&inf_stack, x, &inf_stack_depth, &inf_max_depth, gcable)
 #define IFS_POP inf_pop(&inf_stack, &inf_stack_depth, gcable)
 #define IFS_POPN(n) do { int N = (n); while (N > 0) { IFS_POP; N--;} } while(0);
 #define IFS_GET(n) inf_get(&inf_stack, (n), &inf_stack_depth)
@@ -1610,7 +1672,7 @@ static Scheme_Object *places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
   int ctr = 0;
 
   /* First, check for simple values that don't need to be hashed: */
-  new_so = shallow_types_copy(so, *ht, &fd_accumulators, &delayed_errno, mode, can_raise_exn);
+  new_so = shallow_types_copy(so, *ht, &fd_accumulators, &delayed_errno, mode, can_raise_exn, master_chain);
   if (new_so) return new_so;
 
   if (*ht) {
@@ -1628,6 +1690,7 @@ static Scheme_Object *places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
 
   inf_stack = create_infinite_stack(gcable);
   inf_stack_depth = 1;
+  inf_max_depth = 1;
 
   IFS_PUSH(scheme_make_integer(DEEP_DONE));
   SET_R0(so);
@@ -1636,7 +1699,7 @@ DEEP_DO:
   ctr++;
     
   so = GET_R0();
-  new_so = trivial_copy(so);
+  new_so = trivial_copy(so, master_chain);
   if (new_so) RETURN;
 
   if (*ht) {
@@ -1646,7 +1709,8 @@ DEEP_DO:
     }
   }
 
-  new_so = shallow_types_copy(so, *ht, &fd_accumulators, &delayed_errno, mode, can_raise_exn);
+  new_so = shallow_types_copy(so, *ht, &fd_accumulators, &delayed_errno, mode, 
+                              can_raise_exn, master_chain);
   if (new_so) RETURN;
   new_so = so;
 
@@ -1915,7 +1979,7 @@ DEEP_RETURN_L:
   }
 
 DEEP_DONE_L:
-  free_infinite_stack((Scheme_Object **) inf_stack, gcable);
+  free_infinite_stack((Scheme_Object **) inf_stack, inf_max_depth, gcable);
   return new_so;
 
 #undef DEEP_DO_CDR
@@ -2132,6 +2196,7 @@ static void place_set_result(Scheme_Object *result)
   scheme_signal_received_at(place_object->parent_signal_handle);
   place_object->parent_signal_handle = NULL;
   place_object->signal_handle = NULL;
+  place_object->dead = 1;
   mzrt_mutex_unlock(place_object->lock);
 }
 
@@ -2148,15 +2213,39 @@ static Scheme_Object *def_place_exit_handler_proc(int argc, Scheme_Object *argv[
 
   return scheme_void; /* Never get here */
 }
-  
+
+static int do_embedded_load()
+{
+  if (embedded_load) {
+    Scheme_Thread * volatile p;
+    mz_jmp_buf * volatile save, newbuf;
+    volatile int rc;
+
+    p = scheme_get_current_thread();
+    save = p->error_buf;
+    p->error_buf = &newbuf;
+    
+    if (!scheme_setjmp(newbuf)) {
+      scheme_embedded_load(embedded_load_len, embedded_load, 1);
+      rc = 1;
+    } else {
+      rc = 0;
+    }
+
+    p->error_buf = save;
+
+    return rc;
+  }
+
+  return 1;
+}
+
 static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
   Place_Start_Data *place_data;
   Scheme_Place_Object *place_obj;
   Scheme_Object *place_main;
   Scheme_Object *a[2], *channel;
   intptr_t mem_limit;
-  mzrt_thread_id ptid;
-  ptid = mz_proc_thread_self();
   
   place_data = (Place_Start_Data *) data_arg;
   data_arg = NULL;
@@ -2182,12 +2271,7 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
   a[0] = places_deep_uncopy(place_data->module);
   a[1] = places_deep_uncopy(place_data->function);
   a[1] = scheme_intern_exact_symbol(SCHEME_SYM_VAL(a[1]), SCHEME_SYM_LEN(a[1]));
-  if (!SAME_TYPE(SCHEME_TYPE(place_data->channel), scheme_place_bi_channel_type)) {
-    channel = places_deep_uncopy(place_data->channel);
-  }
-  else {
-    channel = place_data->channel;
-  }
+  channel = places_deep_uncopy(place_data->channel);
   place_obj = place_data->place_obj;
   REGISTER_SO(place_object);
   place_object = place_obj;
@@ -2239,10 +2323,9 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
 
   scheme_set_root_param(MZCONFIG_EXIT_HANDLER, scheme_def_place_exit_proc);
 
-  
   scheme_log(NULL, SCHEME_LOG_DEBUG, 0, "place %d: started", scheme_current_place_id);
 
-  {
+  if (do_embedded_load()) {
     Scheme_Thread * volatile p;
     mz_jmp_buf * volatile saved_error_buf;
     mz_jmp_buf new_error_buf;
@@ -2267,6 +2350,8 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
     p->error_buf = saved_error_buf;
     
     place_set_result(rc);
+  } else {
+    place_set_result(scheme_make_integer(1));
   }
 
   scheme_log(NULL, SCHEME_LOG_DEBUG, 0, "place %d: exiting", scheme_current_place_id);
@@ -2302,32 +2387,32 @@ Scheme_Object *places_deep_copy_to_master(Scheme_Object *so) {
   void *original_gc;
 
   /* forces hash codes: */
-  (void)places_deep_copy_worker(so, &ht, mzPDC_CHECK, 1, 1);
+  (void)places_deep_copy_worker(so, &ht, mzPDC_CHECK, 1, 1, NULL);
   ht = NULL;
 
   original_gc = GC_switch_to_master_gc();
   scheme_start_atomic();
 
-  o = places_deep_copy_worker(so, &ht, mzPDC_COPY, 1, 0);
+  o = places_deep_copy_worker(so, &ht, mzPDC_COPY, 1, 0, NULL);
 
   scheme_end_atomic_no_swap();
   GC_switch_back_from_master(original_gc);
   return o;
 #else
-  return places_deep_copy_worker(so, &ht, mzPDC_COPY, 1, 1);
+  return places_deep_copy_worker(so, &ht, mzPDC_COPY, 1, 1, NULL);
 #endif
 }
 
-Scheme_Object *scheme_places_serialize(Scheme_Object *so, void **msg_memory) {
+static Scheme_Object *places_serialize(Scheme_Object *so, void **msg_memory, Scheme_Object **master_chain) {
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
   Scheme_Object *new_so;
   Scheme_Object *tmp;
 
-  new_so = trivial_copy(so);
+  new_so = trivial_copy(so, NULL);
   if (new_so) return new_so;
 
   GC_create_message_allocator();
-  new_so = do_places_deep_copy(so, mzPDC_COPY, 0);
+  new_so = do_places_deep_copy(so, mzPDC_COPY, 0, master_chain);
   tmp = GC_finish_message_allocator();
   (*msg_memory) = tmp;
   return new_so;
@@ -2340,18 +2425,18 @@ Scheme_Object *scheme_places_deserialize(Scheme_Object *so, void *msg_memory) {
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
   Scheme_Object *new_so = so;
 
-  new_so = trivial_copy(so);
+  new_so = trivial_copy(so, NULL);
   if (new_so) return new_so;
 
   /* small messages are deemed to be < 1k, this could be tuned in either direction */
-  if (GC_message_allocator_size(msg_memory) < 1024) {
-    new_so = do_places_deep_copy(so, mzPDC_UNCOPY, 1);
+  if (GC_message_objects_size(msg_memory) < 1024) {
+    new_so = do_places_deep_copy(so, mzPDC_UNCOPY, 1, NULL);
     GC_dispose_short_message_allocator(msg_memory);
   }
   else {
     GC_adopt_message_allocator(msg_memory);
 #if !defined(SHARED_TABLES)
-    new_so = do_places_deep_copy(so, mzPDC_DESER, 1);
+    new_so = do_places_deep_copy(so, mzPDC_DESER, 1, NULL);
 #endif
   }
   return new_so;
@@ -2396,7 +2481,7 @@ static Scheme_Object* place_allowed_p(int argc, Scheme_Object *args[])
 {
   Scheme_Hash_Table *ht = NULL;
   
-  if (places_deep_copy_worker(args[0], &ht, mzPDC_CHECK, 1, 0))
+  if (places_deep_copy_worker(args[0], &ht, mzPDC_CHECK, 1, 0, NULL))
     return scheme_true;
   else
     return scheme_false;
@@ -2443,16 +2528,33 @@ static void* GC_master_malloc_tagged(size_t size) {
   return ptr;
 }
 
+static void maybe_report_message_size(Scheme_Place_Async_Channel *ch)
+{
+#ifdef MZ_PRECISE_GC
+  if ((ch->reported_size > (2 * ch->mem_size))
+      || (((ch->reported_size * 2) < ch->mem_size)
+          && ((ch->mem_size - ch->reported_size) > (1 << (LOG_APAGE_SIZE + 1))))) {
+    intptr_t delta = ch->mem_size - ch->reported_size;
+    ch->reported_size = ch->mem_size;
+    GC_report_unsent_message_delta(delta);
+  }
+#endif
+}
+
 static void async_channel_finalize(void *p, void* data) {
   Scheme_Place_Async_Channel *ch;
   int i;
   Scheme_Hash_Table *ht = NULL;
   ch = (Scheme_Place_Async_Channel*)p;
+
+  ch->mem_size = 0;
+  maybe_report_message_size(ch);
+
   mzrt_mutex_destroy(ch->lock);
   for (i = 0; i < ch->size ; i++) {
     ht = NULL;
     if (ch->msgs[i]) {
-      (void)places_deep_copy_worker(ch->msgs[i], &ht, mzPDC_CLEAN, 0, 0);
+      (void)places_deep_copy_worker(ch->msgs[i], &ht, mzPDC_CLEAN, 0, 0, NULL);
       ch->msgs[i] = NULL;
     }
 #ifdef MZ_PRECISE_GC
@@ -2461,6 +2563,7 @@ static void async_channel_finalize(void *p, void* data) {
     }
 #endif
     ch->msg_memory[i] = NULL;
+    ch->msg_chains[i] = NULL;
   }
   ch->in = 0;
   ch->out = 0;
@@ -2507,7 +2610,7 @@ static void async_channel_finalize(void *p, void* data) {
 }
 
 Scheme_Place_Async_Channel *place_async_channel_create() {
-  Scheme_Object **msgs;
+  Scheme_Object **msgs, **msg_chains;
   Scheme_Place_Async_Channel *ch;
   void **msg_memory;
 #ifdef MZ_PRECISE_GC
@@ -2517,6 +2620,7 @@ Scheme_Place_Async_Channel *place_async_channel_create() {
   ch = GC_master_malloc_tagged(sizeof(Scheme_Place_Async_Channel));
   msgs = GC_master_malloc(sizeof(Scheme_Object*) * 8);
   msg_memory = GC_master_malloc(sizeof(void*) * 8);
+  msg_chains = GC_master_malloc(sizeof(Scheme_Object*) * 8);
 
   ch->so.type = scheme_place_async_channel_type;
   ch->in = 0;
@@ -2526,6 +2630,7 @@ Scheme_Place_Async_Channel *place_async_channel_create() {
   mzrt_mutex_create(&ch->lock);
   ch->msgs = msgs;
   ch->msg_memory = msg_memory;
+  ch->msg_chains = msg_chains;
   ch->wakeup_signal = NULL;
 
 #ifdef MZ_PRECISE_GC
@@ -2543,7 +2648,7 @@ Scheme_Place_Bi_Channel *place_bi_channel_create() {
   Scheme_Place_Async_Channel *tmp;
   Scheme_Place_Bi_Channel *ch;
 
-  ch = GC_master_malloc_tagged(sizeof(Scheme_Place_Bi_Channel));
+  ch = MALLOC_ONE_TAGGED(Scheme_Place_Bi_Channel);
   ch->so.type = scheme_place_bi_channel_type;
 
   tmp = place_async_channel_create();
@@ -2556,7 +2661,7 @@ Scheme_Place_Bi_Channel *place_bi_channel_create() {
 Scheme_Place_Bi_Channel *place_bi_peer_channel_create(Scheme_Place_Bi_Channel *orig) {
   Scheme_Place_Bi_Channel *ch;
 
-  ch = GC_master_malloc_tagged(sizeof(Scheme_Place_Bi_Channel));
+  ch = MALLOC_ONE_TAGGED(Scheme_Place_Bi_Channel);
   ch->so.type = scheme_place_bi_channel_type;
 
   ch->sendch = orig->recvch;
@@ -2594,25 +2699,28 @@ static Scheme_Object *GC_master_make_vector(int size) {
 
 static void place_async_send(Scheme_Place_Async_Channel *ch, Scheme_Object *uo) {
   void *msg_memory = NULL;
-  Scheme_Object *o;
+  Scheme_Object *o, *master_chain = NULL;
+  intptr_t sz;
   int cnt;
 
-  o = scheme_places_serialize(uo, &msg_memory);
+  o = places_serialize(uo, &msg_memory, &master_chain);
   if (!o) bad_place_message(uo);
 
   mzrt_mutex_lock(ch->lock);
   {
     cnt = ch->count;
     if (ch->count == ch->size) { /* GROW QUEUE */
-      Scheme_Object **new_msgs;
+      Scheme_Object **new_msgs, **new_chains;
       void **new_msg_memory;
 
       new_msgs = GC_master_malloc(sizeof(Scheme_Object*) * ch->size * 2);
       new_msg_memory = GC_master_malloc(sizeof(void*) * ch->size * 2);
+      new_chains = GC_master_malloc(sizeof(Scheme_Object*) * ch->size * 2);
 
       if (ch->out < ch->in) {
         memcpy(new_msgs, ch->msgs + ch->out, sizeof(Scheme_Object *) * (ch->in - ch->out));
         memcpy(new_msg_memory, ch->msg_memory + ch->out, sizeof(void*) * (ch->in - ch->out));
+        memcpy(new_chains, ch->msg_chains + ch->out, sizeof(void*) * (ch->in - ch->out));
       }
       else {
         int s1 = (ch->size - ch->out);
@@ -2621,10 +2729,14 @@ static void place_async_send(Scheme_Place_Async_Channel *ch, Scheme_Object *uo) 
 
         memcpy(new_msg_memory, ch->msg_memory + ch->out, sizeof(void*) * s1);
         memcpy(new_msg_memory + s1, ch->msg_memory, sizeof(void*) * ch->in);
+
+        memcpy(new_chains, ch->msg_chains + ch->out, sizeof(Scheme_Object *) * s1);
+        memcpy(new_chains + s1, ch->msg_chains, sizeof(Scheme_Object *) * ch->in);
       }
       
       ch->msgs = new_msgs;
       ch->msg_memory = new_msg_memory;
+      ch->msg_chains = new_chains;
       ch->in = ch->size;
       ch->out = 0;
       ch->size *= 2;
@@ -2632,8 +2744,14 @@ static void place_async_send(Scheme_Place_Async_Channel *ch, Scheme_Object *uo) 
 
     ch->msgs[ch->in] = o;
     ch->msg_memory[ch->in] = msg_memory;
+    ch->msg_chains[ch->in] = master_chain;
     ++ch->count;
     ch->in = ((ch->in + 1) % ch->size);
+
+    sz = GC_message_allocator_size(msg_memory);
+    ch->mem_size += sz;
+
+    maybe_report_message_size(ch);
   }
 
   if (!cnt && ch->wakeup_signal) {
@@ -2802,6 +2920,7 @@ static void register_place_object_with_channel(Scheme_Place_Async_Channel *ch, S
 static Scheme_Object *scheme_place_async_try_receive(Scheme_Place_Async_Channel *ch) {
   Scheme_Object *msg = NULL;
   void *msg_memory = NULL;
+  intptr_t sz;
 
   mzrt_mutex_lock(ch->lock);
   {
@@ -2812,13 +2931,19 @@ static Scheme_Object *scheme_place_async_try_receive(Scheme_Place_Async_Channel 
 
       ch->msgs[ch->out] = NULL;
       ch->msg_memory[ch->out] = NULL;
+      ch->msg_chains[ch->out] = NULL;
 
       --ch->count;
       ch->out = ((ch->out + 1) % ch->size);
+
+      sz = GC_message_allocator_size(msg_memory);
+      ch->mem_size -= sz;
+
+      maybe_report_message_size(ch);
     }
   }
   mzrt_mutex_unlock(ch->lock);
-  
+
   if (msg) {
     return scheme_places_deserialize(msg, msg_memory);
   }

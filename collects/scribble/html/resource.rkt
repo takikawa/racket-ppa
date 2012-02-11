@@ -1,9 +1,9 @@
 #lang racket/base
 
-;; Resources are referrable & renderable objects, (most are html pages)
+;; Resources are renderable & referrable objects, (most are html pages).
 
-;; (resource path renderer referrer) creates and returns a new "resource"
-;; value.  The arguments are:
+;; (resource path renderer) creates and returns a new "resource" value.  The
+;; arguments are:
 ;; - `path': the path of the output file, relative to the working directory,
 ;;   indicating where the resource file should be put at, also corresponding to
 ;;   the URL it will be found at.  It must be a `/'-separated relative string,
@@ -13,18 +13,16 @@
 ;;   for the file to be created as an argument.  This path will be different
 ;;   than the `path' argument because this function is invoked in the target
 ;;   directory.
-;; - `referrer': a function accepting one or more arguments (and possibly
-;;   keywords) that produces a value to be used to refer to this resource
-;;   (using `a', `img', etc).  The first value that will be passed to this
-;;   function will be the actual URL path, which depends on the currently
-;;   rendered page path -- the argument will be relative to it.
-;; The resulting resource value is actually a rendering function that is
-;; similar to the `referrer', except without the first URL argument -- when it
-;; is called, it invokes the `referrer' function with the actual (relativized)
-;; URL.  Creating a resource registers the `renderer' to be executed when
-;; rendering is initiated.  Note that more resources can be created while
-;; rendering; they will also be rendered in turn until no more resources are
-;; created.
+;; The resulting resource value is a function that returns the URL for the
+;; resource.  The function takes in an optional boolean which defaults to #f,
+;; and when #t is given, the result will be an absolute full URL.  Note that
+;; the function can be used as a value for output, which will use it as a thunk
+;; (that renders as the relative URL for the resource).  The default relative
+;; resulting URL is, of course, a value that depends on the currently rendered
+;; resource that uses this value.  Creating a resource registers the `renderer'
+;; to be executed when rendering is initiated by `render-all'.  Note that more
+;; resources can be created while rendering; they will also be rendered in turn
+;; until no more resources are created.
 
 (require scribble/text)
 
@@ -51,17 +49,17 @@
   ;; produces an alist with lists of strings for the keys; the prefix-strings
   ;; are split on "/"s, and the url-strings can be anything at all actually
   ;; (they are put as-is before the path with a "/" between them).
-  (let ([roots (url-roots)])
-    (unless (eq? roots (car cached-roots))
-      (set! cached-roots
-            (cons roots
-                  (and (list? roots) (pair? roots)
-                       (map (lambda (root)
-                              (list* (regexp-match* #rx"[^/]+" (car root))
-                                     (regexp-replace #rx"/$" (cadr root) "")
-                                     (cddr root)))
-                            roots)))))
-    (cdr cached-roots)))
+  (define roots (url-roots))
+  (unless (eq? roots (car cached-roots))
+    (set! cached-roots
+          (cons roots
+                (and (list? roots) (pair? roots)
+                     (map (lambda (root)
+                            (list* (regexp-match* #rx"[^/]+" (car root))
+                                   (regexp-replace #rx"/$" (cadr root) "")
+                                   (cddr root)))
+                          roots)))))
+  (cdr cached-roots))
 
 ;; a utility for relative paths, taking the above `default-file' and
 ;; `url-roots' into consideration.
@@ -166,57 +164,54 @@
 ;; `#:exists' determines what happens when the render destination exists, it
 ;; can be one of: #f (do nothing), 'delete-file (delete if a file exists, error
 ;; if exists as a directory)
-(provide resource)
-(define (resource path renderer referrer #:exists [exists 'delete-file])
-  (define (bad reason) (error 'resource "bad path, ~a: ~e" reason path))
-  (unless (string? path) (bad "must be a string"))
+(provide resource resource?)
+;; use a struct to make resources identifiable as such
+(struct resource (url) #:constructor-name make-resource
+        #:property prop:procedure 0 #:omit-define-syntaxes)
+(define (resource path0 renderer #:exists [exists 'delete-file])
+  (define (bad reason) (error 'resource "bad path, ~a: ~e" reason path0))
+  (unless (string? path0) (bad "must be a string"))
   (for ([x (in-list '([#rx"^/" "must be relative"]
                       [#rx"//" "must not have empty elements"]
                       [#rx"(?:^|/)[.][.]?(?:/|$)"
                           "must not contain `.' or `..'"]))])
-    (when (regexp-match? (car x) path) (bad (cadr x))))
-  (let ([path (regexp-replace #rx"(?<=^|/)$" path default-file)])
-    (define-values (dirpathlist filename)
-      (let-values ([(l r) (split-at-right (regexp-split #rx"/" path) 1)])
-        (values l (car r))))
-    (define (render)
-      (let loop ([ps dirpathlist])
-        (if (pair? ps)
-          (begin (unless (directory-exists? (car ps))
-                   (if (or (file-exists? (car ps)) (link-exists? (car ps)))
-                     (bad "exists as a file/link")
-                     (make-directory (car ps))))
-                 (parameterize ([current-directory (car ps)])
-                   (loop (cdr ps))))
-          (begin (cond [(not exists)] ; do nothing
-                       [(or (file-exists? filename) (link-exists? filename))
-                        (delete-file filename)]
-                       [(directory-exists? filename)
-                        (bad "exists as directory")])
-                 (parameterize ([rendered-dirpath dirpathlist])
-                   (printf "  ~a\n" path)
-                   (renderer filename))))))
-    (define (url) (relativize filename dirpathlist (rendered-dirpath)))
-    (define absolute-url
-      (delay (let ([url (relativize filename dirpathlist '())])
-               (if (url-roots)
-                 url
-                 ;; we're in local build mode, and insist on an absolute url,
-                 ;; so construct a `file://' result
-                 (list* "file://" (current-directory) url)))))
-    (add-renderer path render)
-    (make-keyword-procedure
-     (lambda (kws kvs . args) (keyword-apply referrer kws kvs (url) args))
-     (case-lambda [(x) (if (and (pair? x) (eq? (car x) get-path))
-                         (if (cdr x) absolute-url (url))
-                         (referrer (url) x))]
-                  [args (apply referrer (url) args)]))))
-
-;; make it possible to always get the path to a resource
-(provide get-resource-path)
-(define get-path (gensym))
-(define (get-resource-path resource [absolute? #f])
-  (resource (cons get-path absolute?)))
+    (when (regexp-match? (car x) path0) (bad (cadr x))))
+  (define path (regexp-replace #rx"(?<=^|/)$" path0 default-file))
+  (define-values [dirpathlist filename]
+    (let-values ([(l r) (split-at-right (regexp-split #rx"/" path) 1)])
+      (values l (car r))))
+  (define (render)
+    (let loop ([ps dirpathlist])
+      (if (pair? ps)
+        (begin (unless (directory-exists? (car ps))
+                 (if (or (file-exists? (car ps)) (link-exists? (car ps)))
+                   (bad "exists as a file/link")
+                   (make-directory (car ps))))
+               (parameterize ([current-directory (car ps)])
+                 (loop (cdr ps))))
+        (begin (cond [(not exists)] ; do nothing
+                     [(or (file-exists? filename) (link-exists? filename))
+                      (delete-file filename)]
+                     [(directory-exists? filename)
+                      (bad "exists as directory")])
+               (parameterize ([rendered-dirpath dirpathlist])
+                 (printf "  ~a\n" path)
+                 (renderer filename))))))
+  (define absolute-url
+    (lazy (define url (relativize filename dirpathlist '()))
+          (if (url-roots)
+            url
+            ;; we're in local build mode, and insist on an absolute url, so
+            ;; construct a `file://' result
+            (list* "file://" (current-directory) url))))
+  (add-renderer path render)
+  (define (url [absolute? #f])
+    ;; be conservative, in case it needs to be extended in the future
+    (case absolute?
+      [(#f) (relativize filename dirpathlist (rendered-dirpath))]
+      [(#t) (force absolute-url)]
+      [else (error 'resource "bad absolute flag value: ~e" absolute?)]))
+  (make-resource url))
 
 ;; a convenient utility to create renderers from some output function (like
 ;; `output-xml' or `display') and some content

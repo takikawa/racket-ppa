@@ -7,7 +7,7 @@
  string-constants/string-constant
  racket/private/kw racket/file racket/port syntax/parse racket/path
  (for-template (only-in racket/private/kw kw-expander-proc kw-expander-impl)
-               racket/base racket/file racket/port racket/path)
+               racket/base racket/file racket/port racket/path racket/list)
  (utils tc-utils)
  (env init-envs)
  (except-in (rep filter-rep object-rep type-rep) make-arr)
@@ -64,11 +64,17 @@
                              (Un (->* a Univ) (-val #f))
                              (Un (->* (cons Univ a) Univ) (-val #f)))))])
             (cl->*
+             (-> Univ -Byte         (seq-vals (list -Byte)))
+             (-> Univ -Index        (seq-vals (list -Index)))
+             ;; Generous. Negative numbers aren't allowed.
+             (-> Univ -Fixnum       (seq-vals (list -NonNegFixnum)))
+             (-> Univ -Int          (seq-vals (list -Nat)))
              (-> Univ (-seq a) (seq-vals (list a)))
              (-> Univ (-seq a b) (seq-vals (list a b))))))]
   ;; in-range
   [(make-template-identifier 'in-range 'racket/private/for)
-   (cl->* (-PosFixnum -Fixnum [-Nat] . ->opt . (-seq -PosFixnum))
+   (cl->* (-Byte [-Byte -Byte] . ->opt . (-seq -Byte))
+          (-PosFixnum -Fixnum [-Nat] . ->opt . (-seq -PosFixnum))
           (-NonNegFixnum [-Fixnum -Nat] . ->opt . (-seq -NonNegFixnum))
           (-Fixnum [-Fixnum -Int] . ->opt . (-seq -Fixnum))
           (-PosInt -Int [-Nat] . ->opt . (-seq -PosInt))
@@ -305,6 +311,29 @@
             -Boolean -Boolean (a . -> . b) (-val #t)
             (-lst a) (b b . -> . -Boolean)
             (-lst a))))]
+  
+  [((kw-expander-proc (syntax-local-value #'remove-duplicates)))
+   (-poly (a b) (cl->* 
+                 ((-lst a) . -> . (-lst a))
+                 ((-lst a) (a a . -> . Univ)
+                           . -> . (-lst a))
+                 ((-lst a) #:key (a . -> . b) #f
+                           . ->key . (-lst a))                     
+                 ((-lst a) (b b . -> . Univ)
+                           #:key (a . -> . b) #t
+                           . ->key . (-lst a))))]
+  [((kw-expander-impl (syntax-local-value #'remove-duplicates)))
+   (-poly (a b)
+          (cl->*
+           (Univ (-val #f) ;; no key
+            (-lst a) (-val #f) -Boolean
+            . -> . (-lst a))
+           (Univ (-val #f) ;; no key
+            (-lst a) (-> a a Univ) -Boolean
+            . -> . (-lst a))
+           ((a . -> . b) (-val #t) ;; no key
+            (-lst a) (-opt (-> b b Univ)) -Boolean
+            . -> . (-lst a))))]
 
   [((kw-expander-proc (syntax-local-value #'open-input-file)))
    (->key -Pathlike #:mode (one-of/c 'binary 'text) #f -Input-Port)]

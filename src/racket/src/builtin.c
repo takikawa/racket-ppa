@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -26,7 +26,7 @@
 #include "schpriv.h"
 #include "schminc.h"
 
-/* On the Mac, 68K, store the built-in Scheme code as pc-relative */
+/* On the Mac, 68K, store the built-in Racket code as pc-relative */
 #if defined(__MWERKS__)
 #if !defined(__POWERPC__)
 #pragma pcrelstrings on
@@ -38,9 +38,6 @@ Scheme_Object *scheme_eval_compiled_sized_string_with_magic(const char *str, int
 							    int multi_ok)
 {
   Scheme_Object *port, *expr;
-  Scheme_Config *config;
-
-  config = scheme_current_config();
 
   port = scheme_make_sized_byte_string_input_port(str, -len); /* negative means it's constant */
 

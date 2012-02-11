@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -147,7 +147,7 @@ typedef struct Readtable {
   Scheme_Object so;
   Scheme_Hash_Table *mapping; /* pos int -> (cons int proc-or-char); neg int -> proc */
   char *fast_mapping;
-  Scheme_Object *symbol_parser; /* NULL or a Scheme function */
+  Scheme_Object *symbol_parser; /* NULL or a Racket function */
   char **names; /* error-message names */
 } Readtable;
 
@@ -311,6 +311,8 @@ static Scheme_Object *readtable_p(int argc, Scheme_Object **argv);
 static Scheme_Object *readtable_mapping(int argc, Scheme_Object **argv);
 static Scheme_Object *current_readtable(int argc, Scheme_Object **argv);
 static Scheme_Object *current_reader_guard(int argc, Scheme_Object **argv);
+
+static Scheme_Object *read_intern(int argc, Scheme_Object **argv);
 
 /* A list stack is used to speed up the creation of intermediate lists
    during .zo reading. */
@@ -498,6 +500,8 @@ void scheme_init_read(Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY("make-readtable",     make_readtable,     1, -1,      env);
   GLOBAL_FOLDING_PRIM("readtable?",         readtable_p,        1, 1, 1,    env);
   GLOBAL_PRIM_W_ARITY2("readtable-mapping", readtable_mapping,  2, 2, 3, 3, env);
+
+  GLOBAL_NONCM_PRIM("datum-intern-literal", read_intern, 1, 1, env);
 
   if (getenv("PLT_DELAY_FROM_ZO")) {
     use_perma_cache = 0;
@@ -1466,8 +1470,10 @@ read_inner_inner(Scheme_Object *port, Scheme_Object *stxsrc, Scheme_Hash_Table *
 		  return NULL;
 		}
 
-		if (stxsrc)
+		if (stxsrc) {
+                  str = scheme_intern_literal_string(str);
 		  str = scheme_make_stx_w_offset(str, line, col, pos, SPAN(port, pos), stxsrc, STX_SRCTAG);
+                }
 
 		return str;
 	      }
@@ -1612,9 +1618,8 @@ read_inner_inner(Scheme_Object *port, Scheme_Object *stxsrc, Scheme_Hash_Table *
           ch = scheme_getc_special_ok(port);
           if ((ch == ' ') || (ch == '/')) {
             /* line comment, with '\' as a continuation */
-            int was_backslash = 0, was_backslash_cr = 0, prev_backslash_cr;
+            int was_backslash = 0, was_backslash_cr = 0;
             while(1) {
-              prev_backslash_cr = was_backslash_cr;
               was_backslash_cr = 0;
               ch = scheme_getc_special_ok(port);
               if (ch == EOF) {
@@ -3007,8 +3012,11 @@ read_string(int is_byte, Scheme_Object *port,
     s[i] = 0;
     result = scheme_make_immutable_sized_byte_string(s, i, 0);
   }
-  if (stxsrc)
+  if (stxsrc) {
+    result = scheme_intern_literal_string(result);
     result =  scheme_make_stx_w_offset(result, line, col, pos, SPAN(port, pos), stxsrc, STX_SRCTAG);
+  }
+
   return result;
 }
 
@@ -3095,11 +3103,13 @@ read_here_string(Scheme_Object *port, Scheme_Object *stxsrc,
   if (len < 0)
     len = 0;
 
-  str = scheme_make_sized_char_string(s, len, 1);
+  str = scheme_make_immutable_sized_char_string(s, len, 1);
 
-  if (stxsrc)
+  if (stxsrc) {
+    str = scheme_intern_literal_string(str);
     str = scheme_make_stx_w_offset(str, line, col, pos, SPAN(port, pos), stxsrc, STX_SRCTAG);
-  
+  }
+
   return str;
 }
 
@@ -3419,6 +3429,8 @@ read_number_or_symbol(int init_ch, int skip_rt, Scheme_Object *port,
 			   port, NULL, 0,
 			   stxsrc, line, col, pos, SPAN(port, pos),
 			   indentation);
+    if (!SCHEME_INTP(o) && stxsrc)
+      o = scheme_intern_literal_number(o);
   }
 
   if (SAME_OBJ(o, scheme_false)) {
@@ -3553,6 +3565,16 @@ static int u_strcmp(mzchar *s, const char *_t)
   return 0;
 }
 
+static Scheme_Object *make_interned_char(int ch, Scheme_Object *stxsrc)
+{
+  if (ch < 256)
+    return scheme_make_character(ch);
+  else if (stxsrc)
+    return scheme_intern_literal_number(scheme_make_char(ch));
+  else
+    return scheme_make_char(ch);
+}
+
 /* "#\" has been read */
 static Scheme_Object *
 read_character(Scheme_Object *port,
@@ -3591,7 +3613,7 @@ read_character(Scheme_Object *port,
 
     ch = ((ch - '0') << 6) + ((next - '0') << 3) + (last - '0');
 
-    return scheme_make_char(ch);
+    return make_interned_char(ch, stxsrc);
   }
 
   if (((ch == 'u') || (ch == 'U')) && NOT_EOF_OR_SPECIAL(next) && scheme_isxdigit(next)) {
@@ -3691,7 +3713,7 @@ read_character(Scheme_Object *port,
 		    "read: expected a character after #\\");
   }
 
-  return scheme_make_char(ch);
+  return make_interned_char(ch, stxsrc);
 }
 
 /*========================================================================*/
@@ -3798,6 +3820,39 @@ static Scheme_Object *read_hash(Scheme_Object *port, Scheme_Object *stxsrc,
 
     return ph;
   }
+}
+
+/*========================================================================*/
+/*                               intern                                   */
+/*========================================================================*/
+
+static Scheme_Object *read_intern(int argc, Scheme_Object **argv)
+{
+  return scheme_read_intern(argv[0]);
+}
+
+Scheme_Object *scheme_read_intern(Scheme_Object *o)
+{
+  if (!SCHEME_INTP(o) && SCHEME_NUMBERP(o))
+    o = scheme_intern_literal_number(o);
+  else if (SCHEME_CHAR_STRINGP(o)) {
+    if (!SCHEME_IMMUTABLEP(o))
+      o = scheme_make_immutable_sized_char_string(SCHEME_CHAR_STR_VAL(o),
+                                                  SCHEME_CHAR_STRLEN_VAL(o),
+                                                  1);
+    o = scheme_intern_literal_string(o);
+  } else if (SCHEME_BYTE_STRINGP(o)) {
+    if (!SCHEME_IMMUTABLEP(o))
+      o = scheme_make_immutable_sized_byte_string(SCHEME_BYTE_STR_VAL(o),
+                                                  SCHEME_BYTE_STRLEN_VAL(o),
+                                                  1);
+    o = scheme_intern_literal_string(o);
+  } else if (SAME_TYPE(SCHEME_TYPE(o), scheme_regexp_type))
+    o = scheme_intern_literal_string(o);
+  else if (SCHEME_CHARP(o) && (SCHEME_CHAR_VAL(o) >= 256))
+    o = scheme_intern_literal_number(o);
+
+  return o;
 }
 
 /*========================================================================*/
@@ -4014,6 +4069,7 @@ typedef struct Scheme_Load_Delay {
 
 #define ZO_CHECK(x) if (!(x)) scheme_ill_formed_code(port);
 #define RANGE_CHECK(x, y) ZO_CHECK (x y)
+#define RANGE_POS_CHECK(x, y) ZO_CHECK ((x > 0) && (x y))
 #define RANGE_CHECK_GETS(x) RANGE_CHECK(x, <= port->size - port->pos)
 
 typedef struct CPort {
@@ -4127,13 +4183,22 @@ static Scheme_Object *read_compact_svector(CPort *port, int l)
   o->type = scheme_svector_type;
 
   SCHEME_SVEC_LEN(o) = l;
-  if (l > 0)
-    v = MALLOC_N_ATOMIC(mzshort, l);
-  else
+  if (l > 0) {
+    if (l > 4096) {
+      v = (mzshort *)scheme_malloc_fail_ok(scheme_malloc_atomic, 
+                                           scheme_check_overflow(l, sizeof(mzshort), 0));
+      if (!v)
+        scheme_signal_error("out of memory allocating vector");
+    } else {
+      v = MALLOC_N_ATOMIC(mzshort, l);
+    }
+  } else {
     v = NULL;
+    l = 0; /* in case it was negative */
+  }
   SCHEME_SVEC_VEC(o) = v;
 
-  while (l--) {
+  while (l-- > 0) {
     mzshort cn;
     cn = read_compact_number(port);
     v[l] = cn;
@@ -4243,7 +4308,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
       break;
     case CPT_SYMREF:
       l = read_compact_number(port);
-      RANGE_CHECK(l, < port->symtab_size);
+      RANGE_POS_CHECK(l, < port->symtab_size);
       v = port->symtab[l];
       if (v == SYMTAB_IN_PROGRESS) {
         /* there is a cycle */
@@ -4289,6 +4354,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
       RANGE_CHECK_GETS(l);
       s = read_compact_chars(port, buffer, BLK_BUF_SIZE, l);
       v = scheme_make_immutable_sized_byte_string(s, l, l < BLK_BUF_SIZE);
+      v = scheme_intern_literal_string(v);
       break;
     case CPT_CHAR_STRING:
       {
@@ -4298,15 +4364,20 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
 	l = read_compact_number(port);
 	RANGE_CHECK_GETS(el);
 	s = read_compact_chars(port, buffer, BLK_BUF_SIZE, el);
-	us = (mzchar *)scheme_malloc_atomic((l + 1) * sizeof(mzchar));
-	scheme_utf8_decode_all((const unsigned char *)s, el, us, 0);
+        if (l < 4096)
+          us = (mzchar *)scheme_malloc_atomic((l + 1) * sizeof(mzchar));
+        else
+          us = (mzchar *)scheme_malloc_fail_ok(scheme_malloc_atomic, (l + 1) * sizeof(mzchar));
+        if (scheme_utf8_decode((const unsigned char *)s, 0, el, us, 0, l, NULL, 0, 0) != l)
+          scheme_ill_formed_code(port);
 	us[l] = 0;
 	v = scheme_make_immutable_sized_char_string(us, l, 0);
+        v = scheme_intern_literal_string(v);
       }
       break;
     case CPT_CHAR:
       l = read_compact_number(port);
-      return scheme_make_character(l);
+      return make_interned_char(l, scheme_true);
       break;
     case CPT_INT:
       return scheme_make_integer(read_compact_number(port));
@@ -4594,6 +4665,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
         port->symtab[l] = (Scheme_Object *)cl;
         v = read_compact(port, 0);
         if (!SAME_TYPE(SCHEME_TYPE(v), scheme_closure_type)
+            || !((Scheme_Closure *)v)->code
             || ((Scheme_Closure *)v)->code->closure_size) {
           scheme_ill_formed_code(port);
           return NULL;
@@ -4605,7 +4677,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
     case CPT_DELAY_REF:
       {
         l = read_compact_number(port);
-        RANGE_CHECK(l, < port->symtab_size);
+        RANGE_POS_CHECK(l, < port->symtab_size);
         v = port->symtab[l];
         if (!v) {
           if (port->delay_info) {
@@ -4621,6 +4693,9 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
             port->pos = save_pos;
             port->symtab[l] = v;
           }
+        } else if (v == SYMTAB_IN_PROGRESS) {
+          /* there is a cycle */
+          scheme_ill_formed_code(port);
         }
         return v;
         break;
@@ -4929,11 +5004,19 @@ static Scheme_Object *read_compiled(Scheme_Object *port,
   /* Load table mapping symtab indices to stream positions: */
 
   all_short = scheme_get_byte(port);
-  so = (intptr_t *)scheme_malloc_fail_ok(scheme_malloc_atomic, sizeof(intptr_t) * symtabsize);
+  if (symtabsize < 0)
+    so = NULL;
+  else
+    so = (intptr_t *)scheme_malloc_fail_ok(scheme_malloc_atomic, 
+                                           scheme_check_overflow(symtabsize, sizeof(intptr_t), 0));
+  if (!so)
+    scheme_read_err(port, NULL, -1, -1, -1, -1, 0, NULL,
+		    "read (compiled): could not allocate symbol table of size %" PRIdPTR,
+		    symtabsize);
   if ((got = scheme_get_bytes(port, (all_short ? 2 : 4) * (symtabsize - 1), (char *)so, 0)) 
       != ((all_short ? 2 : 4) * (symtabsize - 1)))
     scheme_read_err(port, NULL, -1, -1, -1, -1, 0, NULL,
-		    "read (compiled): ill-formed code (bad table count: %ld != %ld)",
+		    "read (compiled): ill-formed code (bad table count: %" PRIdPTR " != %" PRIdPTR ")",
 		    got, (all_short ? 2 : 4) * (symtabsize - 1));
   offset += got;
 
@@ -5273,6 +5356,8 @@ Scheme_Object *scheme_unmarshal_wrap_get(Scheme_Unmarshal_Tables *ut,
   l = SCHEME_INT_VAL(wraps_key);
 
   if ((l < 0) || ((uintptr_t)l >= ut->rp->symtab_size))
+    scheme_ill_formed_code(ut->rp);
+  if (SAME_OBJ(ut->rp->symtab[l], SYMTAB_IN_PROGRESS))
     scheme_ill_formed_code(ut->rp);
 
   if (!ut->rp->symtab[l]) {

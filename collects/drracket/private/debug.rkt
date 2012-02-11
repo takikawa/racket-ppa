@@ -21,14 +21,20 @@ profile todo:
          "embedded-snip-utils.rkt"
          "drsig.rkt"
          "bindings-browser.rkt"
+         "stack-checkpoint.rkt"
          net/sendurl
          net/url
          racket/match
          mrlib/include-bitmap
+         images/compile-time
+         (for-syntax images/icons/misc images/icons/style images/icons/control images/logos)
          (for-syntax racket/base))
 
 (define orig (current-output-port))
 (define (oprintf . args) (apply fprintf orig args))
+
+(define base-phase
+  (variable-reference->module-base-phase (#%variable-reference)))
 
 (provide debug@)
 (define-unit debug@
@@ -182,10 +188,11 @@ profile todo:
                      (super-make-object bitmap))])
            note%)))
   
-  (define bug-note% (make-note% "stop-multi.png" (include-bitmap (lib "icons/stop-multi.png") 'png/mask)))
+  (define file-note% (make-note% "stop-22x22.png" (compiled-bitmap (stop-sign-icon halt-icon-color))))
+  (define bug-note% (make-note% "stop-multi.png" (compiled-bitmap (stop-signs-icon halt-icon-color))))
+  
   (define mf-note% (make-note% "mf.gif" (include-bitmap (lib "icons/mf.gif") 'gif)))
-  (define file-note% (make-note% "stop-22x22.png" (include-bitmap (lib "icons/stop-22x22.png") 'png/mask)))
-  (define small-planet-bitmap (include-bitmap (lib "icons/small-planet.png") 'png/mask))
+  (define small-planet-bitmap (compiled-bitmap (planet-logo (default-icon-height))))
   (define planet-note% (make-note% "small-planet.png" small-planet-bitmap))
   
   ;; display-stats : (syntax -> syntax)
@@ -277,24 +284,31 @@ profile todo:
            #:definitions-text [defs (let ([rep (drracket:rep:current-rep)])
                                       (and rep
                                            (send rep get-definitions-text)))])
-                                                                     
-    (let* ([stack (or pre-stack
-                      (if (exn? exn)
-                          (map cdr (filter cdr (continuation-mark-set->context (exn-continuation-marks exn))))
-                          '()))]
-           [src-locs (if (exn:srclocs? exn)
-                         ((exn:srclocs-accessor exn) exn)
-                         (if (null? stack)
-                             '()
-                             (list (car stack))))]
+    (let* ([stack1 (or pre-stack '())]
+           [stack2 (if (exn? exn)
+                       (map cdr (filter cdr (cut-stack-at-checkpoint exn)))
+                       '())]
            [port-name-matches-cache (make-hasheq)]
-           [stack-editions (map (λ (x) (srcloc->edition/pair defs ints x port-name-matches-cache)) stack)]
+           [stack1-editions (map (λ (x) (srcloc->edition/pair defs ints x port-name-matches-cache)) stack1)]
+           [stack2-editions (map (λ (x) (srcloc->edition/pair defs ints x port-name-matches-cache)) stack2)]
+           [src-locs (cond
+                       [(exn:srclocs? exn)
+                        ((exn:srclocs-accessor exn) exn)]
+                       [(pick-first-defs port-name-matches-cache defs stack1) => list]
+                       [(pick-first-defs port-name-matches-cache defs stack2) => list]
+                       [(pair? stack1)
+                        (list (car stack1))]
+                       [(pair? stack2)
+                        (list (car stack2))]
+                       [else '()])]
            [src-locs-edition (and (pair? src-locs)
                                   (srcloc->edition/pair defs ints (car src-locs) port-name-matches-cache))])
+
       (print-planet-icon-to-stderr exn)
       (unless (exn:fail:user? exn)
-        (unless (null? stack)
-          (print-bug-to-stderr msg stack stack-editions defs ints))
+        (unless (exn:fail:syntax? exn)
+          (unless (and (null? stack1) (null? stack2))
+            (print-bug-to-stderr msg stack1 stack1-editions stack2 stack2-editions defs ints)))
         (display-srclocs-in-error src-locs src-locs-edition))
       (display msg (current-error-port))
       (when (exn:fail:syntax? exn)
@@ -310,7 +324,9 @@ profile todo:
            (λ ()
              ;; need to make sure that the user's eventspace is still the same
              ;; and still running here?
-             (send ints highlight-errors src-locs stack)))))))
+             (send ints highlight-errors src-locs (if (null? stack1)
+                                                      stack2
+                                                      stack1))))))))
   
   (define (srcloc->edition/pair defs ints srcloc [port-name-matches-cache #f])
     (let ([src (srcloc-source srcloc)])
@@ -318,16 +334,12 @@ profile todo:
         [(and (or (symbol? src)
                   (path? src))
               ints
-              (if port-name-matches-cache
-                  (hash-ref! port-name-matches-cache (cons ints src) (λ () (send ints port-name-matches? src)))
-                  (send ints port-name-matches? src)))
+              (port-name-matches?/use-cache ints src port-name-matches-cache))
          (cons (make-weak-box ints) (send ints get-edition-number))]
         [(and (or (symbol? src)
                   (path? src))
               defs
-              (if port-name-matches-cache
-                  (hash-ref! port-name-matches-cache (cons defs src) (λ () (send defs port-name-matches? src)))
-                  (send defs port-name-matches? src)))
+              (port-name-matches?/use-cache defs src port-name-matches-cache))
          (cons (make-weak-box defs) (send defs get-edition-number))]
         [(path? src)
          (let ([frame (send (group:get-the-frame-group) locate-file src)])
@@ -336,6 +348,17 @@ profile todo:
                 (cons (make-weak-box (send frame get-definitions-text))
                       (send (send frame get-definitions-text) get-edition-number))))]
         [else #f])))
+  
+  (define (pick-first-defs port-name-matches-cache defs stack)
+    (for/or ([srcloc (in-list stack)])
+      (and (srcloc? srcloc)
+           (port-name-matches?/use-cache defs (srcloc-source srcloc) port-name-matches-cache)
+           srcloc)))
+  
+  (define (port-name-matches?/use-cache txt src port-name-matches-cache)
+    (if port-name-matches-cache
+        (hash-ref! port-name-matches-cache (cons txt src) (λ () (send txt port-name-matches? src)))
+        (send txt port-name-matches? src)))
   
   ;; =User=
   (define (print-planet-icon-to-stderr exn)
@@ -397,12 +420,12 @@ profile todo:
       (get-output-string sp)))
   
   ;; =User=
-  (define (print-bug-to-stderr msg cms editions defs ints)
+  (define (print-bug-to-stderr msg cms1 editions1 cms2 editions2 defs ints)
     (when (port-writes-special? (current-error-port))
       (let ([note% (if (mf-bday?) mf-note% bug-note%)])
         (when note%
           (let ([note (new note%)])
-            (send note set-callback (λ () (show-backtrace-window/edition-pairs msg cms editions defs ints)))
+            (send note set-callback (λ () (show-backtrace-window/edition-pairs/two msg cms1 editions1 cms2 editions2 defs ints)))
             (write-special note (current-error-port))
             (display #\space (current-error-port)))))))
   
@@ -429,8 +452,10 @@ profile todo:
                 (λ ()
                   (cond
                     [(path? src)
-                     (display (path->string (find-relative-path (current-directory)
-                                                                (normalize-path src)))
+                     (define-values (n-cd n-src)
+                       (with-handlers ([exn:fail? (λ (x) (values (current-directory) src))])
+                         (values (normalize-path (current-directory)) (normalize-path src))))
+                     (display (path->string (find-relative-path n-cd n-src))
                               (current-error-port))]
                     [else
                      (display "<unsaved editor>" (current-error-port))]))]
@@ -491,27 +516,31 @@ profile todo:
                    (write-special snp (current-error-port)))
                  (display msg (current-error-port))))])
       (send error-text-style-delta set-delta-foreground (make-object color% 200 0 0))
-      (let ([show-one
-             (λ (expr)
-               (display " " (current-error-port))
-               (send-out (format "~s" (syntax->datum expr))
-                         (λ (snp)
-                           (send snp set-style
-                                 (send the-style-list find-or-create-style
-                                       (send snp get-style)
-                                       error-text-style-delta)))))]
-            [exprs (exn:fail:syntax-exprs exn)])
-        (cond
-          [(null? exprs) (void)]
-          [(null? (cdr exprs))
-           (send-out " in:" void)
-           (show-one (car exprs))]
-          [else
-           (send-out " in:" void)
-           (for-each (λ (expr)
-                       (display "\n " (current-error-port))
-                       (show-one expr))
-                     exprs)]))))
+      (define (show-one expr)
+        (display " " (current-error-port))
+        (send-out (format "~s" (syntax->datum expr))
+                  (λ (snp)
+                    (send snp set-style
+                          (send (editor:get-standard-style-list) find-or-create-style
+                                (send (editor:get-standard-style-list) find-named-style "Standard")
+                                error-text-style-delta)))))
+      (define exprs (exn:fail:syntax-exprs exn))
+      (define (show-in)
+        (send-out " in:"
+                  (λ (snp)
+                    (send snp set-style
+                          (send (editor:get-standard-style-list) find-named-style "Standard")))))
+      (cond
+        [(null? exprs) (void)]
+        [(null? (cdr exprs))
+         (show-in)
+         (show-one (car exprs))]
+        [else
+         (show-in)
+         (for-each (λ (expr)
+                     (display "\n " (current-error-port))
+                     (show-one expr))
+                   exprs)])))
   
   
   ;; insert/clickback : (instanceof text%) (union string (instanceof snip%)) (-> void)
@@ -623,16 +652,44 @@ profile todo:
     (show-backtrace-window/edition-pairs error-text dis (map (λ (x) #f) dis) defs rep)))
   
   (define (show-backtrace-window/edition-pairs error-text dis editions defs ints)
+    (show-backtrace-window/edition-pairs/two error-text dis editions '() '() defs ints))
+  
+  (define (show-backtrace-window/edition-pairs/two error-text dis1 editions1 dis2 editions2 defs ints)
     (reset-backtrace-window)
-    (letrec ([text (make-object (text:wide-snip-mixin text:hide-caret/selection%))]
-             [mf-bday-note (when (mf-bday?)
-                             (instantiate message% ()
-                               (label (string-constant happy-birthday-matthias))
-                               (parent (send current-backtrace-window get-area-container))))]
-             [ec (make-object (canvas:color-mixin canvas:wide-snip%)
-                   (send current-backtrace-window get-area-container)
-                   text)]
-             [di-vec (list->vector dis)]
+    (when (mf-bday?)
+      (new message%
+           [label (string-constant happy-birthday-matthias)]
+           [parent (send current-backtrace-window get-area-container)]))
+    (define tab-panel 
+      (if (and (pair? dis1) (pair? dis2))
+          (new tab-panel% 
+               [choices (list "Errortrace" "Builtin")]
+               [parent (send current-backtrace-window get-area-container)]
+               [callback
+                (λ (a b) 
+                  (send tab-panel change-children
+                        (λ (l) (if (zero? (send tab-panel get-selection))
+                                   (list ec1)
+                                   (list ec2)))))])
+          (new vertical-panel% [parent (send current-backtrace-window get-area-container)])))
+    (define ec1 (add-ec/text dis1 editions1 defs ints tab-panel error-text))
+    (define ec2 (add-ec/text dis2 editions2 defs ints tab-panel error-text))
+    (when (and (pair? dis1) (pair? dis2))
+      (send tab-panel change-children (λ (l) (list ec1)))))
+  
+  (define (add-ec/text dis1 editions1 defs ints tab-panel error-text)
+    (cond
+      [(pair? dis1)
+       (define text1 (new (text:wide-snip-mixin text:hide-caret/selection%)))
+       (define ec1 (new (canvas:color-mixin canvas:wide-snip%)
+                        [parent tab-panel]
+                        [editor text1]))
+       (add-one-set-to-frame text1 ec1 error-text dis1 editions1 defs ints)
+       ec1]
+      [else #f]))
+  
+  (define (add-one-set-to-frame text ec error-text dis editions defs ints)
+    (letrec ([di-vec (list->vector dis)]
              [editions-vec (list->vector editions)]
              [index 0]
              [how-many-at-once 15]
@@ -739,8 +796,9 @@ profile todo:
           (send text insert (render-bindings/snip bindings))))
       (send text insert #\newline)
       
-      (insert-context editor-canvas text debug-source start span defs ints)
-      (send text insert #\newline)))
+      (when (and start span)
+        (insert-context editor-canvas text debug-source start span defs ints)
+        (send text insert #\newline))))
   
   ;; insert-context : (instanceof editor-canvas%)
   ;;                  (instanceof text%)

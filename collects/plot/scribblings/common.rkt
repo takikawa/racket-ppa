@@ -4,20 +4,24 @@
          (for-label racket
                     racket/gui/base
                     slideshow/pict
+                    db
                     plot
                     plot/utils)
          plot
          plot/utils
-         plot/common/contract-doc)
+         plot/doc
+         unstable/latent-contract/defthing)
 
 (provide (all-defined-out)
          (all-from-out scribble/eval)
          (for-label (all-from-out racket
                                   racket/gui/base
                                   slideshow/pict
+                                  db
                                   plot
                                   plot/utils))
          (all-from-out plot)
+         (all-from-out plot/doc)
          (all-from-out plot/utils)
          doc-apply)
 

@@ -127,8 +127,9 @@ The step from simulations to interactive programs is relatively
 
 Your program may deal with such events via the @emph{designation} of
  @emph{handler} functions.  Specifically, the teachpack provides for the
- installation of three event handlers: @racket[on-tick], @racket[on-key],
- and @racket[on-mouse]. In addition, a @tech{world} program may specify a
+ installation of four event handlers: @racket[on-tick], @racket[on-key],
+ @racket[on-mouse], and @racket[on-pad]. In addition, a @tech{world}
+ program must specify a
  @racket[draw] function, which is called every time your program should
  visualize the current world, and a @racket[done] predicate, which is used
  to determine when the @tech{world} program should shut down. 
@@ -142,7 +143,7 @@ The following picture provides an intuitive overview of the workings of a
 
 @image["nuworld.png"]
 
- The @racket[big-bang] form installs @racket[World_0] as the initial @tech{WorldState}.
+ The @racket[big-bang] form installs @racket[World_0] as the initial @tech{WorldState}.w
  The handlers @racket[tock], @racket[react], and @racket[click] transform
  one world into another one; each time an event is handled, @racket[done] is
  used to check whether the world is final, in which case the program is
@@ -161,7 +162,7 @@ The design of a world program demands that you come up with a data
 
 @defform/subs[#:id big-bang
               #:literals 
-	      (on-tick to-draw on-draw on-key on-release on-mouse on-receive stop-when
+	      (on-tick to-draw on-draw on-key on-pad on-release on-mouse on-receive stop-when
 	      check-with register record? state name)
               (big-bang state-expr clause ...)
               ([clause
@@ -169,6 +170,7 @@ The design of a world program demands that you come up with a data
 		 (on-tick tick-expr rate-expr)
 		 (on-tick tick-expr rate-expr limit-expr)
 		 (on-key key-expr)
+		 (on-pad pad-expr)
 		 (on-release release-expr)
 		 (on-mouse mouse-expr)
 		 (to-draw draw-expr)
@@ -296,7 +298,9 @@ Second, some keys have multiple-character string representations. Strings
 @item{@racket["cancel"]}
 @item{@racket["clear"]}
 @item{@racket["shift"]}
+@item{@racket["rshift"]}
 @item{@racket["control"]}
+@item{@racket["rcontrol"]}
 @item{@racket["menu"]}
 @item{@racket["pause"]}
 @item{@racket["capital"]}
@@ -356,6 +360,8 @@ Second, some keys have multiple-character string representations. Strings
 @item{@racket["scroll"]}
 @item{@racket["wheel-up"]}
 @item{@racket["wheel-down"]}
+@item{@racket["wheel-left"]}
+@item{@racket["wheel-right"]}
 ]
 
 @defproc[(key-event? [x any]) boolean?]{
@@ -395,6 +401,173 @@ Second, some keys have multiple-character string representations. Strings
  indicates which key has been released. The result of the function call
  becomes the current world.  
 }
+}
+
+@item{A @tech{PadEvent} is a @tech{KeyEvent} for a game-pad simulation via
+@racket[big-bang]. The presence of an @racket[on-pad] clause superimposes
+the game-pad image onto the current scene, suitably scaled to its size: 
+
+@image["gamepad.png"]
+
+@deftech{PadEvent} : @racket[key-event?] 
+
+It is one of the following: 
+@itemize[
+@item{@racket["left"] is the left arrow;}
+@item{@racket["right"] is the right arrow;}
+@item{@racket["up"] is the up arrow;}
+@item{@racket["down"] is the down arrow;}
+@item{@racket["w"] to be interpreted as up arrow;}
+@item{@racket["s"] to be interpreted as down arrow;}
+@item{@racket["a"] to be interpreted as left arrow;}
+@item{@racket["d"] to be interpreted as right arrow;}
+@item{@racket[" "] is the space bar;}
+@item{@racket["shift"] is the left shift key;}
+@item{@racket["rshift"] is the right shift key;}
+]
+
+@defproc[(pad-event? [x any]) boolean?]{
+ determines whether @racket[x] is a @tech{PadEvent}}
+
+@defproc[(pad=? [x pad-event?][y pad-event?]) boolean?]{
+ compares two @tech{PadEvent} for equality}
+
+@defform[(on-pad pad-expr)
+         #:contracts
+	  ([pad-expr (-> (unsyntax @tech{WorldState}) pad-event? (unsyntax @tech{WorldState}))])]{
+ tells DrRacket to call the @racket[pad-expr] function on the current world and the
+ @tech{KeyEvent} for every keystroke that is also a @tech{PadEvent}. The result
+ of the call becomes the current world.
+
+ Here is a typical @tech{PadEvent} handler: 
+@;%
+@(begin
+#reader scribble/comment-reader
+(racketblock
+;; ComplexNumber PadEvent -> ComplexNumber 
+(define (handle-pad-events x k)
+  (case (string->symbol k)
+    [(up    w)      (- x 0+10i)]
+    [(down  s)      (+ x 0+10i)]
+    [(left  a)      (- x 10)]
+    [(right d)      (+ x 10)]
+    [(| |)          x0]
+    [(shift)        (conjugate x)]
+    [(rshift)       (stop-with (conjugate x))]))
+
+))
+@;%
+
+ }
+
+When a @racket[big-bang] expression specifies an @racket[on-pad] clause,
+all @tech{PadEvent}s are sent to the @racket[on-pad] handler. All other
+key events are discarded, unless an @racket[on-key] and/or an
+@racket[on-release] clause are specified, in which case all remaining
+@tech{KeyEvent}s are sent there. 
+
+To facilitate the definition of @racket[on-pad] handlers, the library
+provides the @racket[pad-handler] form. 
+
+@defform/subs[#:id pad-handler
+              #:literals 
+	      (up down left right space shift)
+              (pad-handler clause ...)
+              ([clause
+		 (up up-expr)
+		 (down down-expr)
+		 (left left-expr)
+		 (right right-expr)
+		 (space space-expr)
+		 (shift shift-expr)])]{
+ Creates a function that deals with @tech{PadEvent}s. Each (optional) clause
+ contributes one function that consumes a @tech{World} and produces a
+ world. The name of the clause determines for which kind of @tech{PadEvent}
+ the function is called. 
+
+ Using the form is entirely optional and not required to use
+ @racket[on-pad]. Indeed, @racket[pad-handler] could be used to define a
+ plain @tech{KeyEvent} handler---if we could guarantee that players never
+ hit keys other than @tech{PadEvent} keys.  
+}
+
+All clauses in a @racket[pad-handler] form are optional: 
+@itemize[
+
+@item{
+@defform[(up up-expr) 
+         #:contracts
+         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))])]{
+ Creates a handler for @racket["up"] and @racket["w"] events.}
+}
+
+@item{
+@defform[(down down-expr) 
+         #:contracts
+         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))])]{
+ Creates a handler for @racket["down"] and @racket["s"] events.}
+}
+
+@item{
+@defform[(left left-expr) 
+         #:contracts
+         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax
+	 @tech{WorldState}))])]{
+ Creates a handler for @racket["left"] and @racket["a"] events.}
+}
+
+@item{
+@defform[(right right-expr) 
+         #:contracts
+         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax
+	 @tech{WorldState}))])]{
+ Creates a handler for @racket["right"] and @racket["d"] events.}
+}
+
+@item{
+@defform[(space space-expr) 
+         #:contracts
+         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax
+	 @tech{WorldState}))])]{
+ Creates a handler for space-bar events (@racket[" "]).}
+}
+
+@item{
+@defform[(shift shift-expr) 
+         #:contracts
+         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax
+	 @tech{WorldState}))])]{
+ Creates a handler for @racket["shift"] and @racket["rshift"] events.}
+}
+
+]
+ If a clause is omitted, @racket[pad-handler] installs a default function
+ that maps the existing world to itself. 
+
+ Here is a @tech{PadEvent} handler defined with @racket[pad-handler]:
+@;%
+@(begin
+#reader scribble/comment-reader
+(racketblock
+;; ComplexNumber -> ComplexNumber 
+(define (i-sub1 x) (- x 0+1i))
+
+;; ComplexNumber -> ComplexNumber 
+(define (i-add1 x) (+ x 0+1i))
+
+;; ComplexNumber -> ComplexNumber 
+;; deal with all @tech{PadEvent}s
+(define handler 
+  (pad-handler (left sub1) (right add1)
+               (up i-sub1) (down i-add1)
+               (shift (lambda (w) 0))
+               (space stop-with)))
+
+;; some tests: 
+(check-expect (handler 9 "left") 8)
+(check-expect (handler 8 "up")   8-i)
+))
+@;%
 }
 
 @item{ A @tech{MouseEvent} represents mouse events, e.g., mouse movements
@@ -507,7 +680,7 @@ and @racket[big-bang] will close down all event handling.}
          #:contracts
          ([r-expr any/c])]{
  tells DrRacket to enable a visual replay of the interaction, 
- unless @racket[#false].
+ unless @racket[#f].
  The replay action generates one png image per scene and
  an animated gif for the entire sequence in the directory of the user's
  choice.  If @racket[r-expr] evaluates to the name of an existing
@@ -559,6 +732,7 @@ a short-hand for three lines of code:
 
 Exercise: Add a condition for stopping the flight of the UFO when it
 reaches the bottom. 
+
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "world-example"]{A First Sample World} 
@@ -692,9 +866,10 @@ data; to be precise, an S-expression is one of:
  @item{a number,}
  @item{a boolean,}
  @item{a char, or}
- @item{a list of S-expressions.}
+ @item{a list of S-expressions, or}
+ @item{a prefab struct of S-expressions.}
 ]
-Note the last clause includes @racket[empty] of course. 
+Note the @racket[list] clause includes @racket[empty] of course. 
 
 @defproc[(sexp? [x any/c]) boolean?]{
  determines whether @racket[x] is an @tech{S-expression}.}
@@ -734,7 +909,7 @@ As mentioned, all event handlers may return @tech{WorldState}s or
 }
 
 @defform/none[#:literals (on-tick)
-              (on-tick tick-expr rate-expr)
+              (on-tick tick-expr rate-expr limit-expr)
               #:contracts
               ([tick-expr (-> (unsyntax @tech{WorldState}) (or/c (unsyntax @tech{WorldState}) package?))]
                [rate-expr (and/c real? positive?)]
@@ -1748,7 +1923,7 @@ Finally, here is the third function, which renders the state as a scene:
 	   (register LOCALHOST)))
 ))
 
- Now you can use @racket[(create-world 'carl)] and @racket[(create-world 'same)],
+ Now you can use @racket[(create-world 'carl)] and @racket[(create-world 'sam)],
  respectively, to run two different worlds, after launching a @tech{server}
  first. 
 

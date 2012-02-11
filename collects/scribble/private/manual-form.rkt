@@ -55,7 +55,7 @@
                    (syntax->list #'(lit ...)))
          #'(with-togetherable-racket-variables
             (lit ...)
-            ([form spec] [form spec1] ...
+            ([form [defined-id spec]] [form [defined-id spec1]] ...
              [non-term (non-term-id non-term-form ...)] ...)
             (*defforms defined-id-expr
                        '(spec spec1 ...)
@@ -326,7 +326,7 @@
             (if kw-id
                 (list (make-index-element
                        #f content tag
-                       (list (symbol->string (syntax-e kw-id)))
+                       (list (datum-intern-literal (symbol->string (syntax-e kw-id))))
                        content
                        (with-exporting-libraries
                         (lambda (libs)

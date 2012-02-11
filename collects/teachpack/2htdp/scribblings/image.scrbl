@@ -17,6 +17,24 @@
 @(interaction-eval #:eval img-eval (require 2htdp/image))
 @(interaction-eval #:eval img-eval (require lang/posn))
 
+@(interaction-eval
+  #:eval
+  img-eval
+  (let ([ce (current-eval)])
+    (define (adjust-image i)
+      (if (image? i)
+          (overlay/xy i 
+                      0 0
+                      (rectangle 
+                       (+ (image-width i) 1)
+                       (+ (image-height i) 1)
+                       'solid
+                       (color 0 0 0 0)))
+          i))
+    (current-eval
+     (λ (exp)
+       (adjust-image (ce exp))))))
+
 @(define-syntax-rule 
    (image-examples exp ...)
    (examples #:eval img-eval exp ...))
@@ -1206,6 +1224,8 @@ are represented as bitmaps, i.e., an array of colors (that can be quite large in
 This means that scaling and rotating them loses fidelity in the image and is significantly
 more expensive than with the other shapes.
 
+See also the @racketmodname[2htdp/planetcute] library.
+
 @defform/subs[(bitmap bitmap-spec)
               ([bitmap-spec rel-string
                             id])]{
@@ -1226,6 +1246,16 @@ more expensive than with the other shapes.
   you may find it simpler to download the image once with a browser 
   and then paste it into your program or download it and use @racket[bitmap].
 }
+
+@defproc[(bitmap/file [ps path-string?]) image?]{
+  Loads the image from @racket[ps].
+
+  If @racket[ps] is a relative path, the file is relative to
+  the current directory. (When running in DrRacket, the current
+  directory is set to the place where the definitions window is
+  saved, but in general this can be an arbitrary directory.)
+}
+
 
 @defproc[(image->color-list [image image?]) (listof color?)]{
   Returns a list of colors that correspond to the colors in the
