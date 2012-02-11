@@ -27,14 +27,39 @@
              racket/udp
              '#%builtin) ; so it's attached
 
+  (define new:collection-path
+    (let ([collection-path (lambda (collection . collections)
+                             (apply collection-path
+                                    (lambda (s)
+                                      (raise
+                                       (exn:fail:filesystem
+                                        (string-append "collection-path: " s)
+                                        (current-continuation-marks))))
+                                    collection collections))])
+      collection-path))
+
+  (define new:collection-file-path
+    (let ([collection-file-path (lambda (file-name collection . collections)
+                                  (apply collection-file-path
+                                         (lambda (s)
+                                           (raise
+                                            (exn:fail:filesystem
+                                             (string-append "collection-file-path: " s)
+                                             (current-continuation-marks))))
+                                         file-name collection collections))])
+      collection-file-path))
+
+
   (#%provide require require-for-syntax require-for-template require-for-label
              provide provide-for-syntax provide-for-label
              (all-from-except racket/private/more-scheme case old-case 
                               log-fatal log-error log-warning log-info log-debug
                               hash-update hash-update!)
              (rename old-case case)
-             (all-from racket/private/misc)
-             (all-from-except racket/private/stxcase-scheme _)
+             (all-from-except racket/private/misc collection-path collection-file-path)
+             (rename new:collection-path collection-path)
+             (rename new:collection-file-path collection-file-path)
+             (all-from-except racket/private/stxcase-scheme _ datum datum-case with-datum)
              (all-from-except racket/private/letstx-scheme 
                               -define -define-syntax -define-struct
                               cond old-cond else =>)
@@ -42,7 +67,7 @@
              define-struct let-struct
              identifier? ;; from racket/private/stx
              (all-from racket/private/cert)
-             (all-from racket/private/qqstx)
+             (all-from-except racket/private/qqstx quasidatum undatum undatum-splicing)
              (all-from racket/private/define)
              (all-from racket/private/kernstruct)
              force delay promise?
@@ -98,7 +123,7 @@
              #%top-interaction
              map for-each andmap ormap
              assq assv assoc reverse memq memv member
-             (rename datum #%datum)
+             (rename old-datum #%datum)
              (rename mzscheme-in-stx-module-begin #%module-begin)
              (rename #%module-begin #%plain-module-begin)
              (rename lambda #%plain-lambda)

@@ -147,7 +147,10 @@
 			     (if (file-exists? f)
 				 (format template filename-version-part)
 				 (format template "xxxxxxx"))))])
-	 (map copy-dll '("iconv.dll"))
+	 (map copy-dll (list
+                        (if (equal? "win32\\x86_64" (path->string (system-library-subpath #f)))
+                            "libiconv-2.dll"
+                            "iconv.dll")))
 	 (when (or (memq 'racketcgc types)
 		   (memq 'gracketcgc types))
 	   (map copy-dll
@@ -310,7 +313,8 @@
 			  (error 'patch-stub-exe-paths
 				 "cannot find config info"))
 			(read-byte i)
-			(read-one-int i) ; start of prog
+			(read-one-int i) ; start of decls
+			(read-one-int i) ; start of program
 			(let ([start (read-one-int i)] ; start of data
 			      [end (read-one-int i)]) ; end of data
 			  (file-position i start)
@@ -333,7 +337,7 @@
 	    #:exists 'update
 	    (lambda ()
 	      (let ([o (current-output-port)])
-		(file-position o (+ config-pos 8)) ; update the end of the program data
+		(file-position o (+ config-pos 12)) ; update the end of the program data
 		(write-one-int (- end delta) o)
 		(flush-output o)
 		(file-position o start)

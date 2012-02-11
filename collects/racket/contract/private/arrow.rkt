@@ -18,11 +18,14 @@ v4 todo:
 
 |#
 
+
 (require "guts.rkt"
          "blame.rkt"
          "prop.rkt"
          "misc.rkt"
-         racket/stxparam)
+         "generate.rkt"
+         racket/stxparam
+         racket/performance-hint)
 (require (for-syntax racket/base)
          (for-syntax "helpers.rkt")
          (for-syntax syntax/stx)
@@ -30,11 +33,15 @@ v4 todo:
          (for-syntax "arr-util.rkt"))
 
 (provide ->
+         base->?
          ->*
          ->d
          case->
+         base->-rngs/c
+         base->-doms/c
          unconstrained-domain->
          the-unsupplied-arg
+         (rename-out [-predicate/c predicate/c])
          unsupplied-arg?
          making-a-method
          procedure-accepts-and-more?
@@ -68,22 +75,23 @@ v4 todo:
           #,(call-gen #'())]
          [else #,(call-gen rng-checkers)]))))
 
-(define tail-marks-match?
-  (case-lambda
-    [(m) (and m (null? m))]
-    [(m rng-ctc) (and m
-                      (not (null? m))
-                      (null? (cdr m))
-                      (procedure-closure-contents-eq? (car m) rng-ctc))]
-    [(m rng-ctc1 rng-ctc2)
-     (and m
-          (= (length m) 2)
-          (procedure-closure-contents-eq? (car m) rng-ctc1)
-          (procedure-closure-contents-eq? (cadr m) rng-ctc1))]
-    [(m . rng-ctcs)
-     (and m
-          (= (length m) (length rng-ctcs))
-          (andmap procedure-closure-contents-eq? m rng-ctcs))]))
+(begin-encourage-inline
+ (define tail-marks-match?
+    (case-lambda
+      [(m) (and m (null? m))]
+      [(m rng-ctc) (and m
+                        (not (null? m))
+                        (null? (cdr m))
+                        (procedure-closure-contents-eq? (car m) rng-ctc))]
+      [(m rng-ctc1 rng-ctc2)
+       (and m
+            (= (length m) 2)
+            (procedure-closure-contents-eq? (car m) rng-ctc1)
+            (procedure-closure-contents-eq? (cadr m) rng-ctc1))]
+      [(m . rng-ctcs)
+       (and m
+            (= (length m) (length rng-ctcs))
+            (andmap procedure-closure-contents-eq? m rng-ctcs))])))
 
 (define-syntax (unconstrained-domain-> stx)
   (syntax-case stx ()
@@ -519,13 +527,54 @@ v4 todo:
        (= (length (base->-rngs/c that)) (length (base->-rngs/c this)))
        (andmap contract-stronger? (base->-rngs/c this) (base->-rngs/c that))))
 
+(define (->-generate ctc)
+  (let ([doms-l (length (base->-doms/c ctc))])
+    (λ (fuel)
+       (let ([rngs-gens (map (λ (c) (generate/choose c (/ fuel 2)))
+                             (base->-rngs/c ctc))])
+         (if (member #t (map generate-ctc-fail? rngs-gens))
+           (make-generate-ctc-fail)
+           (procedure-reduce-arity
+             (λ args
+                ; Make sure that the args match the contract
+                (begin (unless ((contract-struct-exercise ctc) args (/ fuel 2))
+                           (error "Arg(s) ~a do(es) not match contract ~a\n" ctc))
+                       ; Stash the valid value
+                       ;(env-stash (generate-env) ctc args)
+                       (apply values rngs-gens)))
+             doms-l))))))
+
+(define (->-exercise ctc) 
+  (λ (args fuel)
+     (let* ([new-fuel (/ fuel 2)]
+            [gen-if-fun (λ (c v)
+                           ; If v is a function we need to gen the domain and call
+                           (if (procedure? v)
+                             (let ([newargs (map (λ (c) (contract-random-generate c new-fuel))
+                                                 (base->-doms/c c))])
+                               (let* ([result (call-with-values 
+                                                (λ () (apply v newargs))
+                                                list)]
+                                      [rngs (base->-rngs/c c)])
+                                 (andmap (λ (c v) 
+                                            ((contract-struct-exercise c) v new-fuel))
+                                         rngs 
+                                         result)))
+                             ; Delegate to check-ctc-val
+                             ((contract-struct-exercise c) v new-fuel)))])
+       (andmap gen-if-fun (base->-doms/c ctc) args))))
+
+
+
 (define-struct (chaperone-> base->) ()
   #:property prop:chaperone-contract
   (build-chaperone-contract-property
    #:projection (->-proj chaperone-procedure)
    #:name ->-name
    #:first-order ->-first-order
-   #:stronger ->-stronger?))
+   #:stronger ->-stronger?
+   #:generate ->-generate
+   #:exercise ->-exercise))
 
 (define-struct (impersonator-> base->) ()
   #:property prop:contract
@@ -533,7 +582,9 @@ v4 todo:
    #:projection (->-proj impersonate-procedure)
    #:name ->-name
    #:first-order ->-first-order
-   #:stronger ->-stronger?))
+   #:stronger ->-stronger?
+   #:generate ->-generate
+   #:exercise ->-exercise))
 
 (define (build--> name
                   pre post
@@ -658,9 +709,9 @@ v4 todo:
                         #f))]))))]))
 
 (define-for-syntax (maybe-a-method/name stx)
-   (if (syntax-parameter-value #'making-a-method)
-       (syntax-property stx 'method-arity-error #t)
-       stx))
+  (if (syntax-parameter-value #'making-a-method)
+      (syntax-property stx 'method-arity-error #t)
+      stx))
 
 ;; ->/proc/main : syntax -> (values syntax[contract-record] syntax[args/lambda-body] syntax[names])
 (define-for-syntax (->/proc/main stx)
@@ -1950,3 +2001,25 @@ v4 todo:
                       'pos
                       'neg)])
      (λ (x) (send o m x)))))
+
+
+(define predicate/c-private->ctc 
+  (let ([predicate/c (-> any/c boolean?)])
+    predicate/c))
+
+(struct predicate/c ()
+  #:property prop:chaperone-contract
+  (build-chaperone-contract-property
+   #:projection (let ([pc (contract-struct-projection predicate/c-private->ctc)])
+                  (λ (ctc)
+                    (λ (blame)
+                      (let ([proj (pc blame)])
+                        (λ (val)
+                          (if (struct-predicate-procedure? val)
+                              val
+                              (proj val)))))))
+   #:name (lambda (ctc) 'predicate/c)
+   #:first-order (let ([f (contract-struct-first-order predicate/c-private->ctc)]) (λ (ctc) f))
+   #:stronger (λ (this that) (contract-struct-stronger? predicate/c-private->ctc that))))
+
+(define -predicate/c (predicate/c))

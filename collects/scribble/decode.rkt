@@ -81,6 +81,8 @@
  [decode-string (-> string? content?)]
  [clean-up-index-string (-> string? string?)])
 
+(define the-part-index-desc (make-part-index-desc))
+
 (define (clean-up-index-string s)
   ;; Collapse whitespace, and remove leading or trailing spaces, which
   ;; might appear there due to images or something else that gets
@@ -88,7 +90,7 @@
   (let* ([s (regexp-replace* #px"\\s+" s " ")]
          [s (regexp-replace* #rx"^ " s "")]
          [s (regexp-replace* #rx" $" s "")])
-    s))
+    (datum-intern-literal s)))
 
 (define (decode-string s)
   (let loop ([l '((#rx"---" mdash)
@@ -99,9 +101,10 @@
     (cond [(null? l) (list s)]
           [(regexp-match-positions (caar l) s)
            => (lambda (m)
-                (append (decode-string (substring s 0 (caar m)))
-                        (cdar l)
-                        (decode-string (substring s (cdar m)))))]
+                (datum-intern-literal
+                 (append (decode-string (substring s 0 (caar m)))
+                         (cdar l)
+                         (decode-string (substring s (cdar m))))))]
           [else (loop (cdr l))])))
 
 (define (line-break? v)
@@ -150,7 +153,7 @@
                             (regexp-replace #px"^\\s+(?:(?:A|An|The)\\s)?"
                                             (content->string title) "")))
                      (list (make-element #f title))
-                     (make-part-index-desc))
+                     the-part-index-desc)
                     l)
               l))
           (decode-accum-para accum)

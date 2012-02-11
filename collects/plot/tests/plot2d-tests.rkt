@@ -1,7 +1,6 @@
 #lang racket
 
-(require "../main.rkt"
-         "../utils.rkt")
+(require rackunit plot plot/utils)
 
 ;(plot-new-window? #t)
 
@@ -9,7 +8,21 @@
  (define xs (build-list 10000 (λ _ (random))))
  (plot (density xs 1/2)))
 
-(plot empty #:x-min -1 #:x-max 1 #:y-min -1 #:y-max 1)
+(time
+ (plot empty #:x-min -1 #:x-max 1 #:y-min -1 #:y-max 1))
+
+(time
+ (plot (points empty) #:x-min -1 #:x-max 1 #:y-min -1 #:y-max 1))
+
+(plot (list (function values -4 4) (axes 1 2)))
+
+(time (plot (function values 0 1000)))
+
+(parameterize ([plot-x-transform  log-transform]
+               [plot-x-ticks      (log-ticks #:base 4)]
+               [plot-y-transform  log-transform]
+               [plot-y-ticks      (linear-ticks #:number 10)])
+  (plot (function values 1 243)))
 
 (plot (list (axes 1 2) (function values -4 4)))
 
@@ -137,9 +150,14 @@
                       #:color "blue")
             (axes 1 0 #:y-ticks? #f)))
 
-#;; error: could not determine x bounds
+;; error: could not determine x bounds
+(check-exn exn:fail?
+           (λ () (plot (list (function sqr #f -1)
+                             (function sqr 1 #f)))))
+
+; draws both functions with x in [-1,2] (meaning nothing is drawn)
 (plot (list (function sqr #f -1)
-            (function sqr 1 #f)))
+            (function sqr 2 #f)))
 
 ; draws first function with x in [-2,-1]
 (plot (list (function sqr #f -1)
@@ -155,6 +173,10 @@
 (plot (list (function sqr #f -1)
             (function sqr 1 #f))
       #:x-min -2 #:x-max 2)
+
+; draws both in full (particularly, without chopping off the top of the parabola), in [-2,2]
+(plot (list (function sqr)
+            (function sin -2 2)))
 
 (time
  (plot (list (discrete-histogram
@@ -176,6 +198,41 @@
        #:x-label "Widget"
        #:y-label "Widgetyness"
        #:legend-anchor 'bottom-right))
+
+(time
+ (plot (stacked-histogram '(#(a (1 1 1)) #(b (1.5 3)) #(c ()) #(d (1/2)))
+                          #:labels '("Red" #f "Blue"))))
+
+(time
+ (parameterize ([discrete-histogram-gap  0]
+                [discrete-histogram-skip  3]
+                [rectangle-line-width 2])
+   (plot (list (discrete-histogram '(#(a 1) #(b 2.5) #(c 2)) #:label "Blue")
+               (discrete-histogram '(#(a 2) #(b 4) #(c 1)) #:x-min 2/3 #:color 1 #:line-color 1
+                                   #:label "Red")
+               (discrete-histogram '(#(a 3) #(b 3) #(c 2.5)) #:x-min 4/3 #:color 2 #:line-color 2
+                                   #:label "Green")))))
+
+(time
+ (parameterize ([discrete-histogram-gap  0]
+                [discrete-histogram-skip  2]
+                [stacked-histogram-line-widths '(3)])
+   (plot (list (stacked-histogram '(#(a (0.2 1)) #(b (2.5 1.2)) #(c (2 0))))
+               (stacked-histogram '(#(a (2 1)) #(b (1.1 0.9)) #(c (1 1.1))) #:x-min 7/8
+                                  #:colors '(3 4)
+                                  #:line-colors '(3 4))))))
+
+(time
+ (parameterize ([plot-x-ticks  (currency-ticks)])
+   (plot (discrete-histogram (list (vector '(a . a) 1) (vector '(a . b) 2)
+                                   (vector '(b . b) 3) (vector '(b . a) 4))
+                             #:invert? #t))))
+
+(time
+ (parameterize ([plot-x-ticks  (currency-ticks)])
+   (plot (stacked-histogram (list (vector '(a . a) '(1 2 1)) (vector '(a . b) '(2 1 3))
+                                  (vector '(b . b) '()) (vector '(b . a) '(4 4 2)))
+                            #:invert? #t))))
 
 (time
  (plot (rectangles
@@ -266,7 +323,7 @@
 (time (plot (list (tick-grid)
                   (contour-intervals f1 -5 2 -5 2
                                      #:levels '(0.25 0.5 0.75 1.0 1.25 1.5 1.75)
-                                     #:colors default-contour-colors
+                                     #:colors (compose default-contour-colors (curry map ivl-center))
                                      #:styles '(0 1 2 3 4 5 6)
                                      #:contour-styles '(transparent)
                                      #:label "z")
@@ -280,29 +337,6 @@
   (define (f x y) (sqr (sin (- x y))))
   (time (plot (contour-intervals f)
               #:x-min -5 #:x-max 5 #:y-min -5 #:y-max 5)))
-
-(parameterize ([plot-title  "Survival Rate of Torsion Widgets"]
-               [plot-x-label "Torsion"]
-               [plot-y-label "Widgetyness"])
-  (time
-   (plot (contour-intervals f1 #:alphas '(0.5))
-         #:x-min -5 #:x-max 5 #:y-min -5 #:y-max 5
-         #:out-file "contour-test.png"))
-  
-  (time
-   (plot (contour-intervals f1)
-         #:x-min -5 #:x-max 5 #:y-min -5 #:y-max 5
-         #:out-file "contour-test.ps"))
-  
-  (time
-   (plot (contour-intervals f1 #:alphas '(0.5))
-         #:x-min -5 #:x-max 5 #:y-min -5 #:y-max 5
-         #:out-file "contour-test.pdf"))
-  
-  (time
-   (plot (contour-intervals f1)
-         #:x-min -5 #:x-max 5 #:y-min -5 #:y-max 5
-         #:out-file "contour-test.svg")))
 
 (time
  (define (f2 x) (sin (* x pi)))
@@ -422,3 +456,15 @@
           13 (λ (n) (function (make-fun n) 0 2
                               #:color n #:width 2 #:style n))))
         #:x-min -2 #:x-max 2)))
+
+(time
+ (define (f x) (/ (sin x) x))
+ (parameterize ([plot-x-transform  (stretch-transform -1 1 10)]
+                [plot-x-ticks      (ticks-add (plot-x-ticks) '(-1 1))]
+                [plot-y-ticks      (fraction-ticks)])
+   (plot (list (y-axis -1 #:ticks? #f) (y-axis 1 #:ticks? #f)
+               (function f -1 1 #:width 2 #:color 4)
+               (function f -14 -1 #:color 4 #:label "y = sin(x)/x")
+               (function f 1 14 #:color 4)
+               (point-label (vector 0 1) "y → 1 as x → 0" #:anchor 'bottom-right))
+         #:y-max 1.2)))

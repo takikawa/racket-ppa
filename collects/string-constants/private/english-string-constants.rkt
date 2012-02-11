@@ -220,10 +220,13 @@ please adhere to these guidelines:
   
  ;; the online check syntax status messages (mouse over the bottom right of drracket's window to see the messages during online expansion's various phases)
  (online-expansion-running "Online expansion running")
- (only-raw-text-files-supported "Only pure text files supported")
- (abnormal-termination "Online expansion terminated abnormally")
+ (online-expansion-only-raw-text-files-supported "Only pure text files supported")
+ (online-expansion-abnormal-termination "Online expansion terminated abnormally")
+ (online-expansion-finished-successfully "Online expansion finished successfully")
+
  (jump-to-error "Jump to Error")
  (online-expansion-is-disabled "Online expansion is disabled")
+ ;; these next two show up in the bar along the bottom of the drracket window
  (online-expansion-pending "Online expansion pending ...")
  (online-expansion-finished "Online expansion finished") ;; note: there may still be errors in this case
   
@@ -461,7 +464,7 @@ please adhere to these guidelines:
  (give-up-and-use-the-default "Give up and use the default") ;; button label
   
  (prefs-file-still-locked "The preferences file is still locked (because the file ~a exists), so your preference change will not be saved.")
- (prefs-file-locked-nothing-doing "The preferences file is locked (via ~s) so changes to the preferences not be saved.") ;; the  ~s is filled with the lockfile; this string is (currently) used only on windows where lockfiles are less friendly (and there is no steal fallback)
+ (prefs-file-locked-nothing-doing "The preferences file is locked (via ~s) so changes to the preferences cannot be saved.") ;; the  ~s is filled with the lockfile; this string is (currently) used only on windows where lockfiles are less friendly (and there is no steal fallback)
  (scheme-prefs-panel-label "Racket")
  (warnings-prefs-panel-label "Warnings")
  (editor-prefs-panel-label "Editing")
@@ -903,6 +906,8 @@ please adhere to these guidelines:
  (definitions-menu-item-help-string "Show/Hide the definitions window")
  (show-interactions-menu-item-label "Show &Interactions")
  (hide-interactions-menu-item-label "Hide &Interactions")
+ (use-horizontal-layout "Use Horizontal Layout")
+ (use-vertical-layout "Use Vertical Layout")
  (interactions-menu-item-help-string "Show/Hide the interactions window")
  (toolbar "Toolbar")
  (toolbar-on-top "Toolbar On Top")
@@ -1218,9 +1223,13 @@ please adhere to these guidelines:
   (exited-successfully "Exited successfully.")
   (exited-with-error-code "Exited with error code ~a.") ;; ~a is filled in with a number between 1 and 255
   (program-ran-out-of-memory "The program ran out of memory.")
- (last-stack-frame "show the last stack frame")
- (last-stack-frames "show the last ~a stack frames")
- (next-stack-frames "show the next ~a stack frames")
+  
+  (show-evaluation-terminated-dialog "Show the ‘evaluation terminated’ dialog")
+  (evaluation-terminated-ask "Show this dialog next time")
+  
+  (last-stack-frame "show the last stack frame")
+  (last-stack-frames "show the last ~a stack frames")
+  (next-stack-frames "show the next ~a stack frames")
  
  ;;; welcoming message in repl
  (language "Language")
@@ -1339,8 +1348,8 @@ please adhere to these guidelines:
  (stepper-language-level-message "The stepper does not work for language \"~a\".")
  (stepper-button-label "Step")
 
- (stepper-previous "< Step")
- (stepper-next "Step >")
+ (stepper-previous "Step")
+ (stepper-next "Step")
  (stepper-jump "Jump...")
  (stepper-jump-to-beginning "to beginning")
  (stepper-jump-to-end "to end")

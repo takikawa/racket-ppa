@@ -48,7 +48,8 @@
            (define path (vector-ref message 1))
            (define response-pc (vector-ref message 2))
            (define settings (vector-ref message 3))
-           (loop (new-job program-as-string path response-pc settings)
+           (define pc-status-expanding-place (vector-ref message 4))
+           (loop (new-job program-as-string path response-pc settings pc-status-expanding-place)
                  old-registry)]))))))
 
 (define (abort-job job)
@@ -66,7 +67,7 @@
 
 (struct exn:access exn:fail ())
 
-(define (new-job program-as-string path response-pc settings)
+(define (new-job program-as-string path response-pc settings pc-status-expanding-place)
   (define cust (make-custodian))
   (define exn-chan (make-channel))
   (define result-chan (make-channel))
@@ -88,10 +89,9 @@
                                          module-language-parallel-lock-client
                                          #:use-use-current-security-guard? #t)
          (log-info "expanding-place.rkt: 04 setting directories")
-         (when path
-           (let-values ([(base name dir?) (split-path path)])
-             (current-directory base)
-             (current-load-relative-directory base)))
+         (let ([init-dir (get-init-dir path)])
+           (current-directory init-dir))
+         (current-load-relative-directory #f)
          (define sp (open-input-string program-as-string))
          (port-count-lines! sp)
          (log-info "expanding-place.rkt: 05 installing security guard")
@@ -121,6 +121,7 @@
            (define expanded (expand transformed-stx))
            (channel-put old-registry-chan 
                         (namespace-module-registry (current-namespace)))
+           (place-channel-put pc-status-expanding-place (void))
            (log-info "expanding-place.rkt: 10 expanded")
            (define handler-results
              (for/list ([handler (in-list handlers)])

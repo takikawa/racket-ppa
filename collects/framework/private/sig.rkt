@@ -383,7 +383,9 @@
      call/text-keymap-initializer
      
      add-user-keybindings-file
-     remove-user-keybindings-file))
+     remove-user-keybindings-file
+     
+     region-click))
   
   (define-signature color-class^
     (text<%>
@@ -409,7 +411,7 @@
      white-on-black
      black-on-white))
   
-  (define-signature scheme-class^
+  (define-signature racket-class^
     (text<%>
      text-mixin
      text%
@@ -422,7 +424,7 @@
      
      sexp-snip%
      sexp-snip<%>))
-  (define-signature scheme^ extends scheme-class^
+  (define-signature racket^ extends racket-class^
     (get-wordbreak-map
      init-wordbreak-map
      get-keymap
@@ -485,5 +487,5 @@
      (open (prefix panel: panel^))
      (open (prefix frame: frame^))
      (open (prefix handler: handler^))
-     (open (prefix scheme: scheme^))
+     (open (prefix racket: racket^))
      (open (prefix main: main^))))

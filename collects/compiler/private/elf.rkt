@@ -185,7 +185,7 @@
    (lambda (in)
      (read-elf
       in
-      (lambda () (values #f #f #f))
+      (lambda () (values #f #f #f #f))
       (lambda (elf sections programs str-section strs)
         (let ([new-sec-pos (+ (elf-sh-offset elf)
                               (* (elf-sh-esize elf) (elf-sh-ecount elf)))]
@@ -203,7 +203,7 @@
                                     new-str-pos new-str-delta)
                             (values new-str-pos new-str-delta
                                     new-sec-pos new-sec-delta))]
-		       [(data mid) (get-data (+ total-size new-str-delta new-sec-delta))])
+		       [(data decl-len mid) (get-data (+ total-size new-str-delta new-sec-delta))])
             (call-with-output-file*
              dest-file
              #:exists 'truncate
@@ -313,4 +313,4 @@
                    (file-position out dest)
                    (write-bytes data out)
                    
-                   (values dest (+ dest (bytes-length data)) mid))))))))))))
+                   (values dest (+ dest (bytes-length data)) decl-len mid))))))))))))

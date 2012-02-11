@@ -38,6 +38,18 @@ Reading is defined in terms of Unicode characters; see
 @secref["ports"] for information on how a byte stream is converted
 to a character stream.
 
+Symbols, keywords, strings, byte strings, regexps, characters, and
+numbers produced by the reader in @racket[read-syntax] mode are
+@deftech{interned}, which means that such values in the result of
+@racket[read-syntax] are always @racket[eq?] when they are
+@racket[equal?] (whether from the same call or different calls to
+@racket[read-syntax]). Symbols and keywords are @tech{interned} in
+both @racket[read] and @racket[read-syntax] mode. Sending an
+@tech{interned} value across a @tech{place channel} does not
+necessarily produce an @tech{interned} value at the receiving
+@tech{place}. See also @racket[datum-intern-literal] and
+@racket[datum->syntax].
+
 @;------------------------------------------------------------------------
 @section[#:tag "default-readtable-dispatch"]{Delimiters and Dispatch}
 
@@ -159,11 +171,11 @@ on the next character or characters in the input stream as follows:
 
 A sequence that does not start with a delimiter or @litchar{#} is
 parsed as either a @tech{symbol} or a @tech{number} (see
-@secref["parse-number"]), except that @litchar{.} by itself is
-never parsed as a symbol or character (unless the
-@racket[read-accept-dot] parameter is set to @racket[#f]). A
-@as-index{@litchar{#%}} also starts a symbol. A successful number
-parse takes precedence over a symbol parse.
+@secref["parse-number"]), except that @litchar{.} by itself is never
+parsed as a symbol or character (unless the @racket[read-accept-dot]
+parameter is set to @racket[#f]). A @as-index{@litchar{#%}} also
+starts a symbol. The resulting symbol is @tech{interned}. A successful
+number parse takes precedence over a symbol parse.
 
 @index["case-sensitivity"]{@index["case-insensitive"]{When}} the
 @racket[read-case-sensitive] @tech{parameter} is set to @racket[#f],
@@ -198,7 +210,8 @@ case-sensitive mode.
 A sequence that does not start with a delimiter is parsed as a @tech{number}
 when it matches the following grammar case-insenstively for
 @nonterm{number@sub{10}} (decimal), where @metavar{n} is a
-meta-meta-variable in the grammar.
+meta-meta-variable in the grammar. The resulting number is @tech{interned} in 
+@racket[read-syntax] mode.
 
 A number is optionally prefixed by an exactness specifier,
 @as-index{@litchar{#e}} (exact) or @as-index{@litchar{#i}} (inexact),
@@ -383,7 +396,8 @@ exception, instead of the infix conversion.
 When the reader encounters @as-index{@litchar{"}}, it begins parsing
 characters to form a @tech{string}. The string continues until it is
 terminated by another @litchar{"} (that is not escaped by
-@litchar{\}).
+@litchar{\}). The resulting string is @tech{interned} in 
+@racket[read-syntax] mode.
 
 Within a string sequence, the following escape sequences are
  recognized:
@@ -455,7 +469,9 @@ constant, the @exnraise[exn:fail:read].
 A string constant preceded by @litchar{#} is parsed as a
 @tech{byte string}. (That is, @as-index{@litchar{#"}} starts a byte-string
 literal.) See @secref["bytestrings"] for information on byte
-strings. Byte-string constants support the same escape sequences as
+strings. The resulting byte string is @tech{interned} in 
+@racket[read-syntax] mode.
+Byte-string constants support the same escape sequences as
 character strings, except @litchar{\u} and @litchar{\U}.
 
 When the reader encounters @as-index{@litchar{#<<}}, it starts parsing a
@@ -712,7 +728,8 @@ one of the following forms:
 A @as-index{@litchar{#:}} starts a @tech{keyword}. The parsing of a keyword
 after the @litchar{#:} is the same as for a symbol, including
 case-folding in case-insensitive mode, except that the part after
-@litchar{#:} is never parsed as a number.
+@litchar{#:} is never parsed as a number. The resulting keyword is 
+@tech{interned}. 
 
 @reader-examples[
 "#:Apple"
@@ -728,7 +745,8 @@ A @as-index{@litchar{#rx}} or @as-index{@litchar{#px}} starts a
 expression as would be constructed by @racket[regexp], @litchar{#px}
 as constructed by @racket[pregexp], @litchar{#rx#} as constructed by
 @racket[byte-regexp], and @litchar{#px#} as constructed by
-@racket[byte-pregexp].
+@racket[byte-pregexp]. The resulting regular expression is @tech{interned} in 
+@racket[read-syntax] mode. 
 
 @reader-examples[
 "#rx\".*\""
@@ -865,9 +883,14 @@ _form ...
 is equivalent to
 
 @racketblock[
-(module _name _module-path
+(module _name-id _module-path
   _form ...)
 ]
+
+where @racket[_name-id] is derived from the source input port's name:
+if the port name is a filename path, the filename without its
+directory path and extension is used for @racket[_name-id], otherwise
+@racket[_name-id] is @racket[anonymous-module].
 
 @subsection{Chaining Reader Language}
 

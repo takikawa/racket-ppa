@@ -67,6 +67,7 @@
              (void)
              (let ([for-each-eval (lambda (l) (for-each eval l))]) for-each-eval)
              (list ',new-expression '(void)))))))
+    
     (let/ec k
       (contract-eval
        `(,test (void)
@@ -85,16 +86,40 @@
           ',(rewrite expression k)))))
   
   ;; rewrites `provide/contract' to use `contract-out'
-  (define (rewrite-out exp)
-    (let loop ([exp exp])
-      (cond
-        [(null? exp) null]
-        [(list? exp)
-         (case (car exp)
-           [(provide/contract) `(provide (contract-out . ,(cdr exp)))]
-           [else (map loop exp)])]
-        [(pair? exp) (cons (loop (car exp))
-                           (loop (cdr exp)))]
+  (define (rewrite-out orig-exp)
+    (let loop ([exp orig-exp])
+      (match exp
+        [`(module ,modname ,lang ,bodies ...)
+         (define at-beginning '()) 
+         
+         ;; remove (and save) the provide/contract declarations
+         (define removed-bodies
+           (apply 
+            append
+            (for/list ([body (in-list bodies)])
+              (match body
+                [`(provide/contract . ,args)
+                 (set! at-beginning (cons `(provide (contract-out . ,args)) 
+                                          at-beginning))
+                 (list)]
+                [else
+                 (list body)]))))
+         
+         ;; insert the provide/contract (rewrite to contract-out) after the
+         ;; first require that has 'contract' in it
+         (define inserted-bodies
+           (apply
+            append
+            (for/list ([body (in-list removed-bodies)])
+              (match body
+                [`(require ,(? (λ (x) (and (symbol? x) (regexp-match #rx"contract" (symbol->string x)))) mod))
+                 (cons body (reverse at-beginning))]
+                [else
+                 (list body)]))))
+         
+         `(module ,modname ,lang ,@inserted-bodies)]
+        [(? list?)
+         (map loop exp)]
         [else exp])))
 
   ;; rewrites `contract' to use opt/c. If there is a module definition in there, we skip that test.
@@ -1132,6 +1157,30 @@
           (regexp-match #rx"expected keyword argument #:the-missing-keyword-arg-b"
                         (exn-message x)))))
   
+  (test/pos-blame
+   'predicate/c1
+   '(contract predicate/c 1 'pos 'neg))
+  (test/pos-blame
+   'predicate/c2
+   '(contract predicate/c (λ (x y) 1) 'pos 'neg))
+  (test/pos-blame
+   'predicate/c3
+   '((contract predicate/c (λ (x) 1) 'pos 'neg) 12))
+  (test/spec-passed
+   'predicate/c4
+   '((contract predicate/c (λ (x) #t) 'pos 'neg) 12))
+  
+  ;; this test ensures that no contract wrappers
+  ;; are created for struct predicates
+  (test/spec-passed/result
+   'predicate/c5
+   '(let ()
+      (struct x (a))
+      (eq? (contract predicate/c x? 'pos 'neg) x?))
+   #t)
+  
+
+
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;
   ;; procedure accepts-and-more
@@ -1151,7 +1200,6 @@
   (ctest #t procedure-accepts-and-more? (case-lambda [(x y . z) 1] [(x) 1]) 1)
   (ctest #f procedure-accepts-and-more? (case-lambda [(x y . z) 1] [(x) 1]) 0)
   
-
 ;                         
 ;                         
 ;                         
@@ -9435,6 +9483,9 @@ so that propagation occurs.
   (ctest #f flat-contract? (set/c (-> integer? integer?)))
   (ctest #t chaperone-contract? (set/c (-> integer? integer?)))
   
+  (ctest #t flat-contract? (list/c integer?))
+  (ctest #t chaperone-contract? (list/c (-> integer? integer?)))
+  
   ;; Make sure that impersonators cannot be used as the element contract in set/c.
   (contract-error-test
    'contract-error-test-set
@@ -11624,6 +11675,26 @@ so that propagation occurs.
       (eval '(require 'contract-out1-m))
       (eval '(f 10)))
    11)
+  
+  (test/spec-passed/result
+   'contract-out2
+   '(begin
+      (eval '(module contract-out2-m racket/base
+               (require racket/contract)
+               (provide (contract-out (struct s ([x integer?]))))
+               (struct s (x))))
+      (eval '(require 'contract-out2-m))
+      (eval '(s-x (s 11))))
+   11)
+  
+  ;; expect the syntax errors in the right order
+  (contract-syntax-error-test
+   'contract-out3
+   '(eval '(module contract-out3-m racket/base
+             (require racket/contract)
+             (provide (contract-out garbage))
+             (λ)))
+   #rx"contract-out")
   
 ;                                                            
 ;                                                            

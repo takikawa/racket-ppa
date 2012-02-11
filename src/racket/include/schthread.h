@@ -71,7 +71,7 @@ extern "C" {
 # define MZ_THREAD_EXTERN MZ_EXTERN
 #endif
 
-MZ_EXTERN void scheme_init_os_thread();
+MZ_EXTERN void scheme_init_os_thread(void);
 
 /* **************************************************************** */
 /* Declarations that we wish were elsewhere, but are needed here to */
@@ -105,6 +105,8 @@ typedef intptr_t objhead;
 
 typedef void (*Scheme_Sleep_Proc)(float seconds, void *fds);
 
+typedef void (*Scheme_On_Atomic_Timeout_Proc)(int must_give_up);
+
 /* **************************************** */
 
 #ifndef USE_THREAD_LOCAL
@@ -123,6 +125,7 @@ typedef struct Thread_Local_Variables {
   uintptr_t GC_gen0_alloc_page_end_;
   int GC_gen0_alloc_only_;
   uintptr_t force_gc_for_place_accounting_;
+  int scheme_starting_up_;
   void *bignum_cache_[BIGNUM_CACHE_SIZE];
   int cache_count_;
   struct Scheme_Hash_Table *toplevels_ht_;
@@ -174,6 +177,9 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Object *scheme_orig_stderr_port_;
   struct Scheme_Object *scheme_orig_stdin_port_;
   struct mz_fd_set *scheme_fd_set_;
+  struct mz_fd_set *scheme_semaphore_fd_set_;
+  struct Scheme_Hash_Table *scheme_semaphore_fd_mapping_;
+  int scheme_semaphore_fd_kqueue_;
 #ifdef USE_FCNTL_AND_FORK_FOR_FILE_LOCKS
   struct Scheme_Hash_Table *locked_fd_process_map_;
 #endif
@@ -244,6 +250,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Custodian *main_custodian_;
   struct Scheme_Custodian *last_custodian_;
   struct Scheme_Hash_Table *limited_custodians_;
+  struct Scheme_Config *initial_config_;
   struct Scheme_Thread *swap_target_;
   struct Scheme_Object *scheduled_kills_;
   int do_atomic_;
@@ -322,12 +329,15 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Hash_Table *place_local_symbol_table_;
   struct Scheme_Hash_Table *place_local_keyword_table_;
   struct Scheme_Hash_Table *place_local_parallel_symbol_table_;
+  struct Scheme_Bucket_Table *literal_string_table_;
+  struct Scheme_Bucket_Table *literal_number_table_;
   struct FFI_Sync_Queue *ffi_sync_queue_;
   struct Scheme_GC_Pre_Post_Callback_Desc *gc_prepost_callback_descs_;
   struct Scheme_Hash_Table *place_local_misc_table_;
   int place_evts_array_size_;
   struct Evt **place_evts_;
   struct Scheme_Place_Object *place_object_;
+  struct Scheme_Object **reusable_ifs_stack_;
   struct Scheme_Object *empty_self_shift_cache_;
   struct Scheme_Bucket_Table *scheme_module_code_cache_;
   struct Scheme_Object *group_member_cache_;
@@ -337,6 +347,9 @@ typedef struct Thread_Local_Variables {
   Scheme_Sleep_Proc scheme_place_sleep_;
   struct Scheme_Bucket_Table *taint_intern_table_;
   struct GHBN_Thread_Data *ghbn_thread_data_;
+  Scheme_On_Atomic_Timeout_Proc on_atomic_timeout_;
+  int atomic_timeout_auto_suspend_;
+  int atomic_timeout_atomic_level_;
 } Thread_Local_Variables;
 
 #if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS)
@@ -355,8 +368,8 @@ XFORM_GC_VARIABLE_STACK_THROUGH_GETSPECIFIC;
 #  ifdef MZ_XFORM
 START_XFORM_SKIP;
 #  endif
-static inline Thread_Local_Variables *scheme_get_thread_local_variables() __attribute__((used));
-static inline Thread_Local_Variables *scheme_get_thread_local_variables() {
+static inline Thread_Local_Variables *scheme_get_thread_local_variables(void) __attribute__((used));
+static inline Thread_Local_Variables *scheme_get_thread_local_variables(void) {
   Thread_Local_Variables *x = NULL;
 #  if defined(__APPLE__) && defined(__MACH__)
 #   if defined(__x86_64__)
@@ -389,7 +402,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_FUNCTION;
 # endif
 #elif defined(IMPLEMENT_THREAD_LOCAL_VIA_PROCEDURE)
 /* Using external scheme_get_thread_local_variables() procedure */
-MZ_EXTERN Thread_Local_Variables *scheme_get_thread_local_variables();
+MZ_EXTERN Thread_Local_Variables *scheme_get_thread_local_variables(void);
 # ifdef MZ_XFORM
 XFORM_GC_VARIABLE_STACK_THROUGH_FUNCTION;
 # endif
@@ -397,14 +410,14 @@ XFORM_GC_VARIABLE_STACK_THROUGH_FUNCTION;
 # ifdef MZ_XFORM
 START_XFORM_SKIP;
 # endif
-MZ_EXTERN Thread_Local_Variables *scheme_external_get_thread_local_variables();
+MZ_EXTERN Thread_Local_Variables *scheme_external_get_thread_local_variables(void);
 # ifdef __mzscheme_private__
 /* In the Racket DLL, need thread-local to be fast: */
 MZ_EXTERN uintptr_t scheme_tls_delta;
 #  ifdef MZ_USE_WIN_TLS_VIA_DLL
 MZ_EXTERN int scheme_tls_index;
 #  endif
-static __inline Thread_Local_Variables **scheme_get_thread_local_variables_ptr() {
+static __inline Thread_Local_Variables **scheme_get_thread_local_variables_ptr(void) {
   __asm { mov eax, FS:[0x2C]
 #  ifdef MZ_USE_WIN_TLS_VIA_DLL
           add eax, scheme_tls_index
@@ -413,12 +426,12 @@ static __inline Thread_Local_Variables **scheme_get_thread_local_variables_ptr()
           add eax, scheme_tls_delta }
   /* result is in eax */
 }
-static __inline Thread_Local_Variables *scheme_get_thread_local_variables() {
+static __inline Thread_Local_Variables *scheme_get_thread_local_variables(void) {
   return *scheme_get_thread_local_variables_ptr();
 }
 # else
 /* Outside the Racket DLL, slower thread-local is ok: */
-static __inline Thread_Local_Variables *scheme_get_thread_local_variables() {
+static __inline Thread_Local_Variables *scheme_get_thread_local_variables(void) {
   return scheme_external_get_thread_local_variables();
 }
 # endif
@@ -432,8 +445,8 @@ XFORM_GC_VARIABLE_STACK_THROUGH_FUNCTION;
 #  ifdef MZ_XFORM
 START_XFORM_SKIP;
 #  endif
-MZ_EXTERN Thread_Local_Variables *scheme_external_get_thread_local_variables();
-static __inline Thread_Local_Variables *scheme_get_thread_local_variables() {
+MZ_EXTERN Thread_Local_Variables *scheme_external_get_thread_local_variables(void);
+static __inline Thread_Local_Variables *scheme_get_thread_local_variables(void) {
   return scheme_external_get_thread_local_variables();
 }
 #  ifdef MZ_XFORM
@@ -465,6 +478,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define GC_gen0_alloc_only XOA (scheme_get_thread_local_variables()->GC_gen0_alloc_only_)
 #define GC_variable_stack XOA (scheme_get_thread_local_variables()->GC_variable_stack_)
 #define force_gc_for_place_accounting XOA (scheme_get_thread_local_variables()->force_gc_for_place_accounting_)
+#define scheme_starting_up XOA (scheme_get_thread_local_variables()->scheme_starting_up_)
 #define bignum_cache XOA (scheme_get_thread_local_variables()->bignum_cache_)
 #define cache_count XOA (scheme_get_thread_local_variables()->cache_count_)
 #define toplevels_ht XOA (scheme_get_thread_local_variables()->toplevels_ht_)
@@ -517,6 +531,9 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define scheme_orig_stderr_port XOA (scheme_get_thread_local_variables()->scheme_orig_stderr_port_)
 #define scheme_orig_stdin_port XOA (scheme_get_thread_local_variables()->scheme_orig_stdin_port_)
 #define scheme_fd_set XOA (scheme_get_thread_local_variables()->scheme_fd_set_)
+#define scheme_semaphore_fd_set XOA (scheme_get_thread_local_variables()->scheme_semaphore_fd_set_)
+#define scheme_semaphore_fd_mapping XOA (scheme_get_thread_local_variables()->scheme_semaphore_fd_mapping_)
+#define scheme_semaphore_fd_kqueue XOA (scheme_get_thread_local_variables()->scheme_semaphore_fd_kqueue_)
 #define locked_fd_process_map XOA (scheme_get_thread_local_variables()->locked_fd_process_map_)
 #define new_port_cust XOA (scheme_get_thread_local_variables()->new_port_cust_)
 #define scheme_break_semaphore XOA (scheme_get_thread_local_variables()->scheme_break_semaphore_)
@@ -582,6 +599,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define main_custodian XOA (scheme_get_thread_local_variables()->main_custodian_)
 #define last_custodian XOA (scheme_get_thread_local_variables()->last_custodian_)
 #define limited_custodians XOA (scheme_get_thread_local_variables()->limited_custodians_)
+#define initial_config XOA (scheme_get_thread_local_variables()->initial_config_)
 #define swap_target XOA (scheme_get_thread_local_variables()->swap_target_)
 #define scheduled_kills XOA (scheme_get_thread_local_variables()->scheduled_kills_)
 #define do_atomic XOA (scheme_get_thread_local_variables()->do_atomic_)
@@ -660,12 +678,15 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define place_local_symbol_table XOA (scheme_get_thread_local_variables()->place_local_symbol_table_)
 #define place_local_keyword_table XOA (scheme_get_thread_local_variables()->place_local_keyword_table_)
 #define place_local_parallel_symbol_table XOA (scheme_get_thread_local_variables()->place_local_parallel_symbol_table_)
+#define literal_string_table XOA (scheme_get_thread_local_variables()->literal_string_table_)
+#define literal_number_table XOA (scheme_get_thread_local_variables()->literal_number_table_)
 #define ffi_sync_queue XOA (scheme_get_thread_local_variables()->ffi_sync_queue_)
 #define gc_prepost_callback_descs XOA (scheme_get_thread_local_variables()->gc_prepost_callback_descs_)
 #define place_local_misc_table XOA (scheme_get_thread_local_variables()->place_local_misc_table_)
 #define place_evts_array_size XOA (scheme_get_thread_local_variables()->place_evts_array_size_)
 #define place_evts XOA (scheme_get_thread_local_variables()->place_evts_)
 #define place_object XOA (scheme_get_thread_local_variables()->place_object_)
+#define reusable_ifs_stack XOA (scheme_get_thread_local_variables()->reusable_ifs_stack_)
 #define empty_self_shift_cache XOA (scheme_get_thread_local_variables()->empty_self_shift_cache_)
 #define scheme_module_code_cache XOA (scheme_get_thread_local_variables()->scheme_module_code_cache_)
 #define group_member_cache XOA (scheme_get_thread_local_variables()->group_member_cache_)
@@ -675,6 +696,9 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define scheme_place_sleep XOA (scheme_get_thread_local_variables()->scheme_place_sleep_)
 #define taint_intern_table XOA (scheme_get_thread_local_variables()->taint_intern_table_)
 #define ghbn_thread_data XOA (scheme_get_thread_local_variables()->ghbn_thread_data_)
+#define on_atomic_timeout XOA (scheme_get_thread_local_variables()->on_atomic_timeout_)
+#define atomic_timeout_auto_suspend XOA (scheme_get_thread_local_variables()->atomic_timeout_auto_suspend_)
+#define atomic_timeout_atomic_level XOA (scheme_get_thread_local_variables()->atomic_timeout_atomic_level_)
 
 /* **************************************** */
 

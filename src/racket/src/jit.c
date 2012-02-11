@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2011 PLT Scheme Inc.
+  Copyright (c) 2006-2012 PLT Scheme Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -120,10 +120,6 @@ static Scheme_Object *clear_rs_arguments(Scheme_Object *v, int size, int delta) 
   return v;
 }
 
-#ifdef JIT_THREAD_LOCAL
-void *scheme_jit_get_threadlocal_table() XFORM_SKIP_PROC { return &BOTTOM_VARIABLE; }
-#endif
-
 #define JIT_TS_PROCS
 #define JIT_BOX_TS_PROCS
 #include "jit_ts.c"
@@ -134,14 +130,20 @@ void *scheme_jit_get_threadlocal_table() XFORM_SKIP_PROC { return &BOTTOM_VARIAB
 
 THREAD_LOCAL_DECL(Scheme_Current_LWC *scheme_current_lwc);
 
-Scheme_Object *scheme_call_as_lightweight_continuation(Scheme_Closed_Prim *code,
+Scheme_Object *scheme_call_as_lightweight_continuation(Scheme_Native_Proc *code,
                                                        void *data,
                                                        int argc, 
                                                        Scheme_Object **argv)
 {
+#ifdef JIT_THREAD_LOCAL
+# define THDLOC &BOTTOM_VARIABLE
+#else
+# define THDLOC NULL
+#endif
   scheme_current_lwc->runstack_start = MZ_RUNSTACK;
   scheme_current_lwc->cont_mark_stack_start = MZ_CONT_MARK_STACK;
-  return sjc.native_starter_code(data, argc, argv, code, (void **)&scheme_current_lwc->stack_start);
+  return sjc.native_starter_code(data, argc, argv, THDLOC, code, (void **)&scheme_current_lwc->stack_start);
+#undef THDLOC
 }
 
 void scheme_fill_stack_lwc_end(void) XFORM_SKIP_PROC
@@ -483,7 +485,7 @@ Scheme_Object *scheme_extract_closure_local(Scheme_Object *obj, mz_jit_state *ji
          a closure element into an argument */
       pos -= jitter->closure_to_args_delta;
       if (pos < jitter->example_argc)
-        return jitter->example_argv[pos];
+        return jitter->example_argv[pos + jitter->example_argv_delta];
     }
   }
 
@@ -1118,8 +1120,7 @@ static int generate_closure(Scheme_Closure_Data *data,
                             int immediately_filled)
 {
   Scheme_Native_Closure_Data *code;
-  int retptr;
-  
+
   ensure_closure_native(data, NULL);
   code = data->u.native_code;
 
@@ -1156,8 +1157,7 @@ static int generate_closure(Scheme_Closure_Data *data,
         jit_movi_l(JIT_R1, init_word);
         jit_str_l(JIT_R0, JIT_R1); 
       }
-    retptr = mz_retain(code);
-    scheme_mz_load_retained(jitter, JIT_R1, retptr);
+    scheme_mz_load_retained(jitter, JIT_R1, code);
     jit_stxi_p((intptr_t)&((Scheme_Native_Closure *)0x0)->code, JIT_R0, JIT_R1);
 
     return 1;
@@ -1167,12 +1167,7 @@ static int generate_closure(Scheme_Closure_Data *data,
   JIT_UPDATE_THREAD_RSPTR_IF_NEEDED();
 
   mz_prepare(1);
-  retptr = mz_retain(code);
-#ifdef JIT_PRECISE_GC
-  scheme_mz_load_retained(jitter, JIT_R0, retptr);
-#else
-  (void)jit_patchable_movi_p(JIT_R0, code); /* !! */
-#endif
+  scheme_mz_load_retained(jitter, JIT_R0, code);
   jit_pusharg_p(JIT_R0);
   {
     GC_CAN_IGNORE jit_insn *refr;
@@ -1295,7 +1290,7 @@ static int generate_case_closure(Scheme_Object *obj, mz_jit_state *jitter, int t
   Scheme_Native_Closure_Data *ndata;
   Scheme_Closure_Data *data;
   Scheme_Object *o;
-  int i, offset, count, retptr;
+  int i, offset, count;
 
   ensure_case_closure_native(c);
   ndata = c->native_code;
@@ -1304,12 +1299,7 @@ static int generate_case_closure(Scheme_Object *obj, mz_jit_state *jitter, int t
 
   JIT_UPDATE_THREAD_RSPTR_IF_NEEDED();
   mz_prepare(1);
-  retptr = mz_retain(ndata);
-#ifdef JIT_PRECISE_GC
-  scheme_mz_load_retained(jitter, JIT_R0, retptr);
-#else
-  (void)jit_patchable_movi_p(JIT_R0, ndata); /* !! */
-#endif
+  scheme_mz_load_retained(jitter, JIT_R0, ndata);
   jit_pusharg_p(JIT_R0);
   {
     GC_CAN_IGNORE jit_insn *refr;
@@ -2402,6 +2392,7 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
   case scheme_begin_for_syntax_type:
   case scheme_require_form_type:
   case scheme_module_type:
+  case scheme_inline_variant_type:
     {
       scheme_signal_error("internal error: cannot JIT a top-level form");
       return 0;
@@ -2946,7 +2937,6 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
 
       return 1;
     } else if (!result_ignored) {
-      int retptr;
       Scheme_Type type = SCHEME_TYPE(obj);
       START_JIT_DATA();
 
@@ -2965,21 +2955,7 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
 	}
       }
 
-      if (!SCHEME_INTP(obj)
-	  && !SAME_OBJ(obj, scheme_true)
-	  && !SAME_OBJ(obj, scheme_false)
-	  && !SAME_OBJ(obj, scheme_void)
-	  && !SAME_OBJ(obj, scheme_null)) {
-	retptr = mz_retain(obj);
-      } else
-	retptr = 0;
-
-#ifdef JIT_PRECISE_GC
-      if (retptr)
-	scheme_mz_load_retained(jitter, target, retptr);
-      else
-#endif
-	(void)jit_patchable_movi_p(target, obj); /* !! */
+      scheme_mz_load_retained(jitter, target, obj);
 
       END_JIT_DATA(19);
       return 1;
@@ -3000,6 +2976,8 @@ static void generate_function_prolog(mz_jit_state *jitter, void *code, int max_l
 
   jit_prolog(NATIVE_ARG_COUNT);
   
+  mz_push_threadlocal_early();
+
   in = jit_arg_p();
   jit_getarg_p(JIT_R0, in); /* closure */
   in = jit_arg_i();
@@ -3008,7 +2986,7 @@ static void generate_function_prolog(mz_jit_state *jitter, void *code, int max_l
   jit_getarg_p(JIT_R2, in); /* argv */
   
   mz_push_locals();
-  mz_push_threadlocal();
+  mz_push_threadlocal(in);
 
   mz_tl_ldi_p(JIT_RUNSTACK, tl_MZ_RUNSTACK);
 
@@ -3018,7 +2996,28 @@ static void generate_function_prolog(mz_jit_state *jitter, void *code, int max_l
 static int generate_function_getarg(mz_jit_state *jitter, int has_rest, int num_params)
 {
   int i, cnt;
-  GC_CAN_IGNORE jit_insn *ref;
+  GC_CAN_IGNORE jit_insn *ref, *ref2;
+
+  /* Normalize the argument array by making sure that it's at the
+     start of the runstack, and set runstack base to be at the end of
+     the arguments.  Rest arguments to be collected into a list remain
+     in their original location. Note that tail calls modify the
+     runstack below runstack base, which is why all parts of the
+     runteim system that call scheme_apply() with an arrayu of
+     arguments on the runstack must be prepared for that array to
+     change during the call. */
+
+  if (!num_params && !has_rest) {
+    /* No arguments, so simply set runstack base to runstack. If it
+       turns out that arguments are provided, then we'll abort through
+       an arity exception, anyway. */
+#ifdef JIT_RUNSTACK_BASE
+    jit_movr_p(JIT_RUNSTACK_BASE, JIT_RUNSTACK);
+#else
+    mz_set_local_p(JIT_RUNSTACK, JIT_RUNSTACK_BASE_LOCAL);
+#endif
+    return 1;
+  }
 
   /* If rands == runstack, set runstack base to runstack + rands (and
      don't copy rands), otherwise set base to runstack and copy
@@ -3033,6 +3032,16 @@ static int generate_function_getarg(mz_jit_state *jitter, int has_rest, int num_
   ref = jit_beqr_p(jit_forward(), JIT_RUNSTACK, JIT_R2);
   __END_TINY_OR_SHORT_JUMPS__(num_params < 10, num_params < 100);
 
+  /* Since we're going to copy arguments, make sure argument
+     count is right; otherwise, the arity error can use the
+     arguments in the original location. */
+  __START_TINY_OR_SHORT_JUMPS__(num_params < 10, num_params < 100);
+  if (!has_rest)
+    ref2 = jit_bnei_i(jit_forward(), JIT_R1, num_params);
+  else
+    ref2 = jit_blti_i(jit_forward(), JIT_R1, (num_params - 1));
+  __END_TINY_OR_SHORT_JUMPS__(num_params < 10, num_params < 100);
+
 #ifdef JIT_RUNSTACK_BASE
   jit_movr_p(JIT_RUNSTACK_BASE, JIT_RUNSTACK);
 #else
@@ -3045,8 +3054,10 @@ static int generate_function_getarg(mz_jit_state *jitter, int has_rest, int num_
     CHECK_LIMIT();
     jit_subi_p(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES(cnt));
     CHECK_RUNSTACK_OVERFLOW();
-    if (has_rest)
+    if (has_rest) {
       --cnt;
+      scheme_stack_safety(jitter, 1, cnt);
+    }
   }
   
   /* Extract arguments to runstack: */
@@ -3058,6 +3069,7 @@ static int generate_function_getarg(mz_jit_state *jitter, int has_rest, int num_
 
   __START_TINY_OR_SHORT_JUMPS__(num_params < 10, num_params < 100);
   mz_patch_branch(ref);
+  mz_patch_branch(ref2);
   __END_TINY_OR_SHORT_JUMPS__(num_params < 10, num_params < 100);
 
   return cnt;
@@ -3065,10 +3077,10 @@ static int generate_function_getarg(mz_jit_state *jitter, int has_rest, int num_
 
 typedef struct {
   Scheme_Closure_Data *data;
-  void *arity_code, *code, *tail_code, *code_end, **patch_depth;
+  void *arity_code, *start_code, *tail_code, *code_end, **patch_depth;
   int max_extra, max_depth, max_tail_depth;
   Scheme_Native_Closure *nc;
-  int argc;
+  int argc, argv_delta;
   Scheme_Object **argv;
 } Generate_Closure_Data;
 
@@ -3076,18 +3088,19 @@ static int do_generate_closure(mz_jit_state *jitter, void *_data)
 {
   Generate_Closure_Data *gdata = (Generate_Closure_Data *)_data;
   Scheme_Closure_Data *data = gdata->data;
-  void *code, *tail_code, *code_end, *arity_code;
-  int i, r, cnt, has_rest, is_method, num_params, to_args, argc;
+  void *start_code, *tail_code, *code_end, *arity_code;
+  int i, r, cnt, has_rest, is_method, num_params, to_args, argc, argv_delta;
   Scheme_Object **argv;
 
-  code = jit_get_ip().ptr;
+  start_code = jit_get_ip().ptr;
 
   jitter->nc = gdata->nc;
 
   argc = gdata->argc;
   argv = gdata->argv;
+  argv_delta = gdata->argv_delta;
 
-  generate_function_prolog(jitter, code, 
+  generate_function_prolog(jitter, start_code, 
 			   /* max_extra_pushed may be wrong the first time around,
 			      but it will be right the last time around */
 			   WORDS_TO_BYTES(data->max_let_depth + jitter->max_extra_pushed));
@@ -3100,7 +3113,7 @@ static int do_generate_closure(mz_jit_state *jitter, void *_data)
   CHECK_LIMIT();
 
   /* A tail call with arity checking can start here.
-     (This is a little reundant checking when `code' is the
+     (This is a little reundant checking when `start_code' is the
      entry point, but that's the slow path anyway.) */
   
   has_rest = ((SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_REST) ? 1 : 0);
@@ -3127,10 +3140,10 @@ static int do_generate_closure(mz_jit_state *jitter, void *_data)
   } else
     arity_code = generate_lambda_simple_arity_check(num_params, has_rest, is_method, 0);
 
-  /* A tail call starts here. Caller must ensure that the
-     stack is big enough, right number of arguments, closure
-     is in R0. If the closure has a rest arg, also ensure
-     argc in R1 and argv in R2. */
+  /* A tail call starts here. Caller must ensure that the stack is big
+     enough, right number of arguments (at start of runstack), closure
+     is in R0. If the closure has a rest arg, also ensure argc in R1
+     and argv in R2. */
   tail_code = jit_get_ip().ptr;
 
   /* 0 params and has_rest => (lambda args E) where args is not in E,
@@ -3146,8 +3159,11 @@ static int do_generate_closure(mz_jit_state *jitter, void *_data)
     
     __START_SHORT_JUMPS__(cnt < 100);
 
+    /* check whether argv == runstack: */
     ref = jit_bner_p(jit_forward(), JIT_RUNSTACK, JIT_R2);
+    /* check whether we have at least one rest arg: */
     ref3 = jit_bgti_p(jit_forward(), JIT_R1, cnt);
+    /* yes and yes: make room for the copy */
     jit_subi_p(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES(cnt+1));
     CHECK_RUNSTACK_OVERFLOW();
     for (i = cnt; i--; ) {
@@ -3214,8 +3230,10 @@ static int do_generate_closure(mz_jit_state *jitter, void *_data)
       /* if we get here, the rest argument isn't used */
       GC_CAN_IGNORE jit_insn *ref;
       __START_TINY_JUMPS__(1);
+      /* check whether argv == runstack: */
       ref = jit_bner_p(jit_forward(), JIT_RUNSTACK, JIT_R2);
       __END_TINY_JUMPS__(1);
+      /* yes, so clear rest args (for space safety): */
       mz_rs_sync();
       JIT_UPDATE_THREAD_RSPTR();
       CHECK_LIMIT();
@@ -3373,6 +3391,7 @@ static int do_generate_closure(mz_jit_state *jitter, void *_data)
   jitter->closure_to_args_delta = to_args;
   jitter->example_argc = argc;
   jitter->example_argv = argv;
+  jitter->example_argv_delta = argv_delta;
 
   /* Generate code for the body: */
   jitter->need_set_rs = 1;
@@ -3394,7 +3413,7 @@ static int do_generate_closure(mz_jit_state *jitter, void *_data)
 
   if (jitter->retain_start) {
     gdata->arity_code = arity_code;
-    gdata->code = code;
+    gdata->start_code = start_code;
     gdata->tail_code = tail_code;
     gdata->max_extra = jitter->max_extra_pushed;
     gdata->max_depth = jitter->max_depth;
@@ -3406,12 +3425,12 @@ static int do_generate_closure(mz_jit_state *jitter, void *_data)
   return 1;
 }
 
-static void on_demand_generate_lambda(Scheme_Native_Closure *nc, int argc, Scheme_Object **argv)
+static void on_demand_generate_lambda(Scheme_Native_Closure *nc, int argc, Scheme_Object **argv, int argv_delta)
 {
   Scheme_Native_Closure_Data *ndata = nc->code;
   Scheme_Closure_Data *data;
   Generate_Closure_Data gdata;
-  void *code, *tail_code, *arity_code;
+  void *start_code, *tail_code, *arity_code;
   int max_depth;
 
   data = ndata->u2.orig_code;
@@ -3420,12 +3439,13 @@ static void on_demand_generate_lambda(Scheme_Native_Closure *nc, int argc, Schem
   gdata.nc = nc;
   gdata.argc = argc;
   gdata.argv = argv;
+  gdata.argv_delta = argv_delta;
 
   /* This action is not atomic: */
   scheme_delay_load_closure(data);
 
   /* So, check again whether we still need to generate: */
-  if (ndata->code != scheme_on_demand_jit_code)
+  if (ndata->start_code != scheme_on_demand_jit_code)
     return;
 
   ndata->arity_code = sjc.in_progress_on_demand_jit_arity_code; /* => in progress */
@@ -3443,14 +3463,14 @@ static void on_demand_generate_lambda(Scheme_Native_Closure *nc, int argc, Schem
     SCHEME_NATIVE_CLOSURE_DATA_FLAGS(ndata) |= NATIVE_IS_SINGLE_RESULT;
 
   arity_code = gdata.arity_code;
-  code = gdata.code;
+  start_code = gdata.start_code;
   tail_code = gdata.tail_code;
   
   if (data->name) {
-    scheme_jit_add_symbol((uintptr_t)code, (uintptr_t)gdata.code_end - 1, data->name, 1);
+    scheme_jit_add_symbol((uintptr_t)start_code, (uintptr_t)gdata.code_end - 1, data->name, 1);
   } else {
 #ifdef MZ_USE_DWARF_LIBUNWIND
-    scheme_jit_add_symbol((uintptr_t)code, (uintptr_t)gdata.code_end - 1, scheme_null, 1);
+    scheme_jit_add_symbol((uintptr_t)start_code, (uintptr_t)gdata.code_end - 1, scheme_null, 1);
 #endif
   }
   
@@ -3479,7 +3499,7 @@ static void on_demand_generate_lambda(Scheme_Native_Closure *nc, int argc, Schem
     jit_patch_movi(((jit_insn *)(*pd)), (void *)(intptr_t)max_depth);
   }
 
-  ndata->code = code;
+  ndata->start_code = start_code;
   ndata->u.tail_code = tail_code;
   ndata->arity_code = arity_code;
   ndata->u2.name = data->name;
@@ -3487,28 +3507,28 @@ static void on_demand_generate_lambda(Scheme_Native_Closure *nc, int argc, Schem
   ndata->max_let_depth = max_depth;
 }
 
-void scheme_on_demand_generate_lambda(Scheme_Native_Closure *nc, int argc, Scheme_Object **argv)
+void scheme_on_demand_generate_lambda(Scheme_Native_Closure *nc, int argc, Scheme_Object **argv, int argv_delta)
 {
-  on_demand_generate_lambda(nc, argc, argv);
+  on_demand_generate_lambda(nc, argc, argv, argv_delta);
 }
 
-Scheme_Object **scheme_on_demand_with_args(Scheme_Object **in_argv, Scheme_Object **argv)
+Scheme_Object **scheme_on_demand_with_args(Scheme_Object **in_argv, Scheme_Object **argv, int argv_delta)
 {
-  /* On runstack: closure (nearest), argc, argv (deepest) */
+  /* On runstack: closure (nearest), argc, probably argv (deepest) */
   Scheme_Object *c, *argc;
 
   c = in_argv[0];
   argc = in_argv[1];
 
-  if (((Scheme_Native_Closure *)c)->code->code == scheme_on_demand_jit_code)
-    scheme_on_demand_generate_lambda((Scheme_Native_Closure *)c, SCHEME_INT_VAL(argc), argv);
+  if (((Scheme_Native_Closure *)c)->code->start_code == scheme_on_demand_jit_code)
+    scheme_on_demand_generate_lambda((Scheme_Native_Closure *)c, SCHEME_INT_VAL(argc), argv, argv_delta);
 
   return argv;
 }
 
 Scheme_Object **scheme_on_demand(Scheme_Object **rs)
 {
-  return scheme_on_demand_with_args(MZ_RUNSTACK, rs);
+  return scheme_on_demand_with_args(MZ_RUNSTACK, rs, 0);
 }
 
 static Scheme_Native_Closure_Data *create_native_lambda(Scheme_Closure_Data *data, int clear_code_after_jit,
@@ -3537,7 +3557,7 @@ static Scheme_Native_Closure_Data *create_native_lambda(Scheme_Closure_Data *dat
     ndata->iso.so.type = scheme_rt_native_code_plus_case;
 #endif
   }
-  ndata->code = scheme_on_demand_jit_code;
+  ndata->start_code = scheme_on_demand_jit_code;
   ndata->u.tail_code = sjc.on_demand_jit_arity_code;
   ndata->arity_code = sjc.on_demand_jit_arity_code;
   ndata->u2.orig_code = data;
@@ -3701,14 +3721,11 @@ static int generate_case_lambda_dispatch(mz_jit_state *jitter, Scheme_Case_Lambd
     if (has_rest && num_params)
       --num_params;
 
-    /* Check for arity match - not needed in getarg mode if this
-       is the last case, since the arity check as already done. */
-    if (!do_getarg || (i < cnt - 1)) {
-      if (!has_rest)
-	ref = jit_bnei_i(jit_forward(), JIT_R1, num_params);
-      else
-	ref = jit_blti_i(jit_forward(), JIT_R1, num_params);
-    }
+    /* Check for arity match. */
+    if (!has_rest)
+      ref = jit_bnei_i(jit_forward(), JIT_R1, num_params);
+    else
+      ref = jit_blti_i(jit_forward(), JIT_R1, num_params);
 
     /* Function-argument handling for this case: */
     if (do_getarg) {
@@ -3724,9 +3741,7 @@ static int generate_case_lambda_dispatch(mz_jit_state *jitter, Scheme_Case_Lambd
     jit_jmpr(JIT_V1);
     CHECK_LIMIT();
     
-    if (!do_getarg || (i < cnt - 1)) {
-      mz_patch_branch(ref);
-    }
+    mz_patch_branch(ref);
     /* Try the next one... */
   }
 
@@ -3754,17 +3769,17 @@ typedef struct {
 static int do_generate_case_lambda_dispatch(mz_jit_state *jitter, void *_data)
 {
   Generate_Case_Dispatch_Data *data = (Generate_Case_Dispatch_Data *)_data;
-  void *code, *arity_code;
+  void *start_code, *arity_code;
 
-  code = jit_get_ip().ptr;
+  start_code = jit_get_ip().ptr;
   
-  generate_function_prolog(jitter, code, data->ndata->max_let_depth);
+  generate_function_prolog(jitter, start_code, data->ndata->max_let_depth);
   CHECK_LIMIT();
   
   if (generate_case_lambda_dispatch(jitter, data->c, data->ndata, 1)) {
     arity_code = jit_get_ip().ptr;
     if (generate_case_lambda_dispatch(jitter, data->c, data->ndata, 0)) {
-      data->ndata->code = code;
+      data->ndata->start_code = start_code;
       data->ndata->arity_code = arity_code;
       
       return 1;
@@ -3819,7 +3834,7 @@ static void generate_case_lambda(Scheme_Case_Lambda *c, Scheme_Native_Closure_Da
 XFORM_NONGCING static int lambda_has_been_jitted(Scheme_Native_Closure_Data *ndata)
 /* called by scheme_native_arity_check(), which is not XFORMed */
 {
-  return (ndata->code != scheme_on_demand_jit_code);
+  return (ndata->start_code != scheme_on_demand_jit_code);
 }
 
 int scheme_native_arity_check(Scheme_Object *closure, int argc)
@@ -3863,7 +3878,7 @@ int scheme_native_arity_check(Scheme_Object *closure, int argc)
     return 1;
   }
 
-  return sjc.check_arity_code(closure, argc + 1, 0);
+  return sjc.check_arity_code(closure, argc + 1, 0 EXTRA_NATIVE_ARGUMENT);
 }
 
 Scheme_Object *scheme_get_native_arity(Scheme_Object *closure)
@@ -3906,7 +3921,7 @@ Scheme_Object *scheme_get_native_arity(Scheme_Object *closure)
     return a;
   }
 
-  return sjc.get_arity_code(closure, 0, 0);
+  return sjc.get_arity_code(closure, 0, 0 EXTRA_NATIVE_ARGUMENT);
 }
 
 /**********************************************************************/

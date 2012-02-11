@@ -4,6 +4,8 @@
          racket/place
          racket/promise
          racket/serialize
+         racket/runtime-path
+         (for-syntax (only-in racket/base quote))
          ffi/unsafe/atomic
          "interfaces.rkt"
          "prepared.rkt")
@@ -14,6 +16,9 @@
   (place-channel-put chan (serialize datum)))
 (define (pchan-get chan)
   (deserialize (place-channel-get chan)))
+
+(define-runtime-module-path-index _place-server
+  'db/private/generic/place-server)
 
 (define connection-server-channel
   (delay/sync
@@ -74,10 +79,10 @@
       (call 'prepare fsym stmt close-on-exec?))
     (define/public (transaction-status fsym)
       (call 'transaction-status fsym))
-    (define/public (start-transaction fsym iso)
-      (call 'start-transaction fsym iso))
-    (define/public (end-transaction fsym mode)
-      (call 'end-transaction fsym mode))
+    (define/public (start-transaction fsym iso cwt?)
+      (call 'start-transaction fsym iso cwt?))
+    (define/public (end-transaction fsym mode cwt?)
+      (call 'end-transaction fsym mode cwt?))
     (define/public (list-tables fsym schema)
       (call 'list-tables fsym schema))
 

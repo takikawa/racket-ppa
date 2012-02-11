@@ -31,7 +31,6 @@ AC_ARG_ENABLE(jit,     [  --enable-jit            support JIT compiler (enabled 
 AC_ARG_ENABLE(foreign, [  --enable-foreign        support foreign calls (enabled by default)], , enable_foreign=yes)
 AC_ARG_ENABLE(places,  [  --enable-places         support places (3m only; usually enabled by default)])
 AC_ARG_ENABLE(futures, [  --enable-futures        support futures (usually enabled by default)])
-AC_ARG_ENABLE(plot,    [  --enable-plot           support plot libraries (enabled by default)], , enable_plot=yes )
 AC_ARG_ENABLE(float,   [  --enable-float          support single-precision floats (enabled by default)], , enable_float=yes)
 AC_ARG_ENABLE(floatinstead, [  --enable-floatinstead   use single-precision by default])
 
@@ -52,7 +51,7 @@ AC_ARG_ENABLE(xonx,    [  --enable-xonx           use Unix style (e.g., use Gtk)
 AC_ARG_ENABLE(libfw,   [  --enable-libfw          install Mac OS X frameworks to /Library/Frameworks])
 AC_ARG_ENABLE(libfw,   [  --enable-userfw         install Mac OS X frameworks to ~/Library/Frameworks])
 AC_ARG_ENABLE(macprefix, [  --enable-macprefix      allow --prefix with a Mac OS X install])
-AC_ARG_ENABLE(mac64,   [  --enable-mac64          do not force 32-bit build])
+AC_ARG_ENABLE(mac64,   [  --enable-mac64          allow 64-bit Mac OS X build (enabled by default)], , enable_mac64=yes)
 
 AC_ARG_ENABLE(cgcdefault, [  --enable-cgcdefault     use CGC (Boehm or Senora) as default build])
 AC_ARG_ENABLE(sgc,     [  --enable-sgc            use Senora GC instead of the Boehm GC])
@@ -239,7 +238,6 @@ show_explicitly_enabled "${enable_xonx}" "Unix style"
 show_explicitly_enabled "${enable_shared}" "Shared libraries"
 
 show_explicitly_disabled "${enable_gracket}" GRacket
-show_explicitly_disabled "${enable_plot}" Plot fit library
 
 if test "$LIBTOOLPROG" != "" ; then
   echo "=== Libtool program: $LIBTOOLPROG"
@@ -272,7 +270,7 @@ show_explicitly_enabled "${enable_gcov}" "gcov"
 
 show_explicitly_enabled "${enable_noopt}" "No-optimization"
 
-show_explicitly_enabled "${enable_mac64}" "64-bit Mac OS X"
+show_explicitly_disabled "${enable_mac64}" "64-bit Mac OS X"
 
 show_explicitly_enabled "${enable_libfw}" "Frameworks-to-system"
 show_explicitly_enabled "${enable_userfw}" "Frameworks-to-user"
@@ -473,13 +471,16 @@ case "$host_os" in
     LIBS="$LIBS -rdynamic"
     DYN_CFLAGS="-fPIC"
     enable_pthread=yes
+    try_kqueue_syscall=yes
     ;;
   openbsd*)
     LIBS="$LIBS -rdynamic -Wl,--export-dynamic"
     enable_pthread=yes
+    try_kqueue_syscall=yes
     ;;
   netbsd*)
     LIBS="$LIBS -rdynamic"
+    try_kqueue_syscall=yes
     ;;
   irix*)
     enable_cgcdefault="yes"
@@ -493,6 +494,8 @@ case "$host_os" in
     LIBS="$LIBS -ldl -lm -rdynamic"
     DYN_CFLAGS="-fPIC"
     STRIP_DEBUG="strip -S"
+    try_poll_syscall=yes
+    try_epoll_syscall=yes
     case "$host_cpu" in
       #Required for CentOS 4.6
       x86_64)
@@ -575,6 +578,7 @@ case "$host_os" in
     esac
 
     PREFLAGS="$PREFLAGS -DOS_X -D_DARWIN_UNLIMITED_SELECT"
+    try_kqueue_syscall=yes
 
     STRIP_DEBUG="/usr/bin/strip -S"
 
@@ -784,6 +788,66 @@ if test "$mbsrtowcs" = "no" ; then
   MZOPTIONS="$MZOPTIONS -DNO_MBTOWC_FUNCTIONS"
 fi
 AC_MSG_RESULT($mbsrtowcs)
+
+if test "${try_poll_syscall}" = "yes" ; then
+  [ msg="for poll" ]
+  AC_MSG_CHECKING($msg)
+  AC_TRY_RUN(
+  [  #include <poll.h> ]
+     int main() {
+      struct pollfd pfd;
+      int r;
+      pfd.fd = 0;
+      pfd.events = POLLIN;
+      r = poll(&pfd, 1, 0);
+      return 0;
+     }, use_poll=yes, use_poll=no, use_poll=no)
+  AC_MSG_RESULT($use_poll)
+  if test "${use_poll}" = "yes" ; then
+     AC_DEFINE(HAVE_POLL_SYSCALL,1,[Have poll])
+  fi
+fi
+
+if test "${try_epoll_syscall}" = "yes" ; then
+  [ msg="for epoll" ]
+  AC_MSG_CHECKING($msg)
+  AC_TRY_RUN(
+  [  #include <sys/epoll.h> ]
+    int main() {
+      int fd;
+      struct epoll_event ev;
+      fd = epoll_create(5);
+      ev.events = EPOLLIN | EPOLLONESHOT;
+      epoll_ctl(fd, EPOLL_CTL_ADD, 0, &ev);
+      return 0;
+    }, use_epoll=yes, use_epoll=no, use_epoll=no)
+  AC_MSG_RESULT($use_epoll)
+  if test "${use_epoll}" = "yes" ; then
+     AC_DEFINE(HAVE_EPOLL_SYSCALL,1,[Have epoll])
+  fi
+fi
+
+if test "${try_kqueue_syscall}" = "yes" ; then
+  [ msg="for kqueue" ]
+  AC_MSG_CHECKING($msg)
+  AC_TRY_RUN(
+  [  #include <sys/types.h> ]
+  [  #include <sys/event.h> ]
+  [  #include <sys/time.h> ]
+     int main() {
+        int kq;
+        struct kevent kev;
+  [    struct timespec timeout = {0, 0}; ]
+        kq = kqueue();
+        EV_SET(&kev, 0, EVFILT_READ, EV_ADD, 0, 0, NULL);
+        kevent(kq, &kev, 1, NULL, 0, &timeout);
+        return 0;
+     }, use_kqueue=yes, use_kqueue=no, use_kqueue=no)
+  AC_MSG_RESULT($use_kqueue)
+  if test "${use_kqueue}" = "yes" ; then
+     AC_DEFINE(HAVE_KQUEUE_SYSCALL,1,[Have kqueue])
+  fi
+fi
 
 if test "${enable_libffi}" = "yes" ; then
  if test "${enable_foreign}" = "yes" ; then
@@ -1196,7 +1260,6 @@ AC_SUBST(MRLIBINSTALL)
 AC_SUBST(LIBFINISH)
 
 AC_SUBST(MAKE_GRACKET)
-AC_SUBST(MAKE_FIT)
 AC_SUBST(MAKE_COPYTREE)
 AC_SUBST(MAKE_FINISH)
 
@@ -1274,14 +1337,6 @@ fi
 makefiles="$makefiles foreign/Makefile"
 ac_configure_args="$ac_configure_args$SUB_CONFIGURE_EXTRAS"
 
-if test -d "${srcdir}/fit" && test "${enable_plot}" = "yes" ; then
-  makefiles="$makefiles
-             fit/Makefile"
-  MAKE_FIT=fit
-else
-  MAKE_FIT=no
-fi
-
 if test "${enable_gracket}" = "yes" ; then
   makefiles="$makefiles
              gracket/Makefile
@@ -1306,7 +1361,7 @@ if test "${inplacebuild}" = "yes" ; then
 else
   echo ">>> Installation targets:"
   echo " executables  : ${bindir}/..."
-  echo " Scheme code  : ${collectsdir}/..."
+  echo " Racket code  : ${collectsdir}/..."
   echo " core docs    : ${docdir}/..."
   echo " C libraries  : ${libdir}/..."
   echo " C headers    : ${includepltdir}/..."

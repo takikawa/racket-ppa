@@ -3,27 +3,18 @@
           scribble/manual
           "utils.rkt"
           (for-label unstable/string
-                     racket/serialize
                      racket/contract
                      racket/base))
 
 @title[#:tag "string"]{Strings}
+@unstable-header[]
 
 @defmodule[unstable/string]
 
-@unstable-header[]
+@addition{Vincent St-Amour}
 
-@defproc[(lowercase-symbol! [sb (or/c string? bytes?)])
-         symbol?]{
- Returns @racket[sb] as a lowercase symbol.
-}
-
-@defproc[(read/string [s string?])
-         serializable?]{
- @racket[read]s a value from @racket[s] and returns it.
-}
-
-@defproc[(write/string [v serializable?])
-         string?]{
- @racket[write]s @racket[v] to a string and returns it.
+@defproc[(regexp-filter [pattern (or/c string? bytes? regexp? byte-regexp?)]
+                        [lst (listof (or/c string? bytes? path? input-port?))])
+         (listof (or/c string? bytes? path? input-port?))]{
+Keeps only the elements of @racket[lst] that match @racket[pattern].
 }

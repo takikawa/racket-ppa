@@ -25,6 +25,7 @@
          (only-in "private/launch-many-worlds.rkt" launch-many-worlds launch-many-worlds/proc)
          (only-in "private/stop.rkt" make-stop-the-world)
          (only-in "private/check-aux.rkt" sexp?)
+         (only-in "private/pad.rkt" pad-event? pad=?)
          htdp/error
          (rename-in lang/prim (first-order->higher-order f2h)))
 
@@ -88,15 +89,18 @@
   ;; World Nat Nat MouseEvent -> World 
   ;; on-mouse must specify a mouse event handler 
   [on-mouse DEFAULT #f (function-with-arity 4)]
-  ;; World KeyEvent -> World 
+  ;; (U #f (World KeyEvent -> World))
   ;; on-key must specify a key event handler 
   [on-key DEFAULT #f (function-with-arity 2)]
-  ;; World KeyEvent -> World 
+  ;; (U #f (World PadEvent -> World))
+  ;; on-pad must specify a pad event handler 
+  [on-pad DEFAULT #f (function-with-arity 2)]
+  ;; (U #f (World KeyEvent -> World))
   ;; on-release must specify a release event handler 
   [on-release DEFAULT #f (function-with-arity 2)]
-  ;; (U #f (World S-expression -> World))
+  ;; (World S-expression -> World)
   ;; -- on-receive must specify a receive handler 
-  [on-receive DEFAULT #'#f (function-with-arity 2)]
+  [on-receive DEFAULT #'(lambda (w m) w) (function-with-arity 2)]
   ;; World -> Boolean 
   ;; -- stop-when must specify a predicate; it may specify a rendering function
   [stop-when DEFAULT #'False
@@ -112,7 +116,7 @@
   [record? DEFAULT #'#f (expr-with-check any> "")]
   ;; (U #f String)
   ;; -- name specifies one string 
-  [name DEFAULT #'#f (expr-with-check string> "expected a string")]
+  [name DEFAULT #'#f (expr-with-check string-or-symbol> "expected a string")]
   ;; (U #f IP)  
   ;; -- register must specify the internet address of a host (e.g., LOCALHOST)
   [register DEFAULT #'#f (expr-with-check ip> "expected a host (ip address)")])
@@ -158,18 +162,24 @@
 ;                                     
 ;                                     
 
-(provide big-bang     ;; <syntax> : see below 
-         )
+(provide 
+ big-bang     ;; <syntax> : see below 
+ pad-handler  ;; <syntax> : see below 
+ )
 
 (provide-primitives
- make-package ;; World Sexp -> Package
- package?     ;; Any -> Boolean 
- run-movie    ;; [r Positive] [m [Listof Image]] -> true
+ make-package  ;; World Sexp -> Package
+ package?      ;; Any -> Boolean 
+ run-movie     ;; [r Positive] [m [Listof Image]] -> true
  ;; run movie m at rate r images per second 
  mouse-event?  ;; Any -> Boolean : MOUSE-EVTS
  mouse=?       ;; MOUSE-EVTS MOUSE-EVTS -> Boolean 
  key-event?    ;; Any -> Boolean : KEY-EVTS
  key=?         ;; KEY-EVTS KEY-EVTS -> Boolean
+ pad-event?    ;; KeyEvent -> Boolean
+ ;; is the given key-event also a pad-event? 
+ pad=?         ;; PadEvent PadEvent -> Boolean 
+ ;; ---
  ;; IP : a string that points to a machine on the net 
  )
 
@@ -201,7 +211,9 @@
     "cancel"
     "clear"
     "shift"
+    "rshift"
     "control"
+    "rcontrol"
     "menu"
     "pause"
     "capital"
@@ -224,7 +236,10 @@
     "numlock"
     "scroll"
     "wheel-up"
-    "wheel-down"))
+    "wheel-down"
+    "wheel-left"
+    "wheel-right"
+    ))
 
 (define-syntax (big-bang stx)
   (define world0 "expects an expression for the initial world and at least one clause")
@@ -250,6 +265,49 @@
 	       #`(run-it ((new-world (if #,rec? aworld% world%)) w #,@args))
 	       'stepper-skip-completely #t)
 	     'disappeared-use (map (lambda (x) (car (syntax->list x))) dom))]))]))
+
+(define-keywords Pad1Specs '() _init-not-needed
+  [up    DEFAULT #'#f (function-with-arity 1)]
+  [down  DEFAULT #'#f (function-with-arity 1)]
+  [left  DEFAULT #'#f (function-with-arity 1)]
+  [right DEFAULT #'#f (function-with-arity 1)]
+  [space DEFAULT #'#f (function-with-arity 1)]
+  [shift DEFAULT #'#f (function-with-arity 1)])
+
+(define-syntax (pad-handler stx)
+  (syntax-case stx ()
+    [(pad1 clause ...)
+     (let* ([args (->args 'pad-one-player stx #'w #'(clause ...) Pad1Specs void)]
+            ; [_ (displayln args)]
+            [keys (map (lambda (x) 
+                         (syntax-case x () 
+                           [(proc> (quote s) _f _d) (symbol->string (syntax-e #'s))]
+                           [else "not present"]))
+                       (filter values args))]
+            [doms (map (lambda (x) (car (syntax->list x))) (syntax->list #'(clause ...)))])
+       (syntax-property 
+        (stepper-syntax-property
+         #`(produce-handler '#,keys (list #,@args))
+         'stepper-skip-completely #t)
+        'disappeared-use doms))]))
+
+(define (produce-handler keys args)
+  (define (check k one other)
+    (or (and (string=? k one) (not (member other keys)))
+        (and (string=? k other) (not (member one keys)))))
+  (define quasi-methods
+    (for/fold ((m '())) ((k keys) (a args))
+      (cond
+        [(check k "w"     "up") (list* (cons "w" a) (cons "up" a) m)]
+        [(check k "s"     "down") (list* (cons "s" a) (cons "down" a) m)]
+        [(check k "a"     "left") (list* (cons "a" a) (cons "left" a) m)]
+        [(check k "d"     "right") (list* (cons "d" a) (cons "right" a) m)]
+        [(check k "shift" "rshift") (list* (cons "shift" a) (cons "rshift" a) m)]
+        [else (cons (cons "space" a) m)])))
+  (define quasi-object (make-immutable-hash quasi-methods))
+  (define (the-handler* world key-event)
+    ((hash-ref quasi-object key-event (lambda () values)) world))
+  the-handler*)
 
 (define (run-simulation f)
   (check-proc 'run-simulation f 1 "first" "one argument")

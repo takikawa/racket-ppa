@@ -29,6 +29,7 @@ TODO
          browser/external
          "drsig.rkt"
          "local-member-names.rkt"
+         "stack-checkpoint.rkt"
          
          ;; the dynamic-require below loads this module, 
          ;; so we make the dependency explicit here, even
@@ -40,42 +41,6 @@ TODO
 (define orig-output-port (current-output-port))
 (define (oprintf . args) (apply fprintf orig-output-port args))
  
-
-;; run a thunk, and if an exception is raised, make it possible to cut the
-;; stack so that the surrounding context is hidden
-(define checkpoints (make-weak-hasheq))
-(define (call-with-stack-checkpoint thunk)
-  (define checkpoint #f)
-  (call-with-exception-handler
-   (λ (exn)
-     (when (and checkpoint ; just in case there's an exception before it's set
-                (not (hash-has-key? checkpoints exn)))
-       (hash-set! checkpoints exn checkpoint))
-     exn)
-   (lambda ()
-     (set! checkpoint (current-continuation-marks))
-     (thunk))))
-;; returns the stack of the input exception, cutting off any tail that was
-;; registered as a checkpoint
-(define (cut-stack-at-checkpoint exn)
-  (define stack (continuation-mark-set->context (exn-continuation-marks exn)))
-  (define checkpoint
-    (cond [(hash-ref checkpoints exn #f) => continuation-mark-set->context]
-          [else #f]))
-  (if (not checkpoint)
-    stack
-    (let loop ([st stack]
-               [sl (length stack)]
-               [cp checkpoint]
-               [cl (length checkpoint)])
-      (cond [(sl . > . cl) (cons (car st) (loop (cdr st) (sub1 sl) cp cl))]
-            [(sl . < . cl) (loop st sl (cdr cp) (sub1 cl))]
-            [(equal? st cp) '()]
-            [else (loop st sl (cdr cp) (sub1 cl))]))))
-
-(define-syntax-rule (with-stack-checkpoint expr)
-  (call-with-stack-checkpoint (lambda () expr)))
-
 (define no-breaks-break-parameterization
   (parameterize-break #f (current-break-parameterization)))
 
@@ -100,7 +65,7 @@ TODO
     (interface ((class->interface text%)
                 text:ports<%>
                 editor:file<%>
-                scheme:text<%>
+                racket:text<%>
                 color:text<%>)
       reset-highlighting
       highlight-errors
@@ -164,37 +129,7 @@ TODO
   ;; the highlight must be set after the error message, because inserting into the text resets
   ;;     the highlighting.
   (define (drracket-error-display-handler msg exn)
-    (let* ([cut-stack (if (and (exn? exn)
-                               (main-user-eventspace-thread?))
-                          (cut-stack-at-checkpoint exn)
-                          '())]
-           [srclocs-stack (filter values (map cdr cut-stack))]
-           [stack 
-            (filter
-             values
-             (map (λ (srcloc)
-                    (let ([source (srcloc-source srcloc)]
-                          [pos (srcloc-position srcloc)]
-                          [span (srcloc-span srcloc)])
-                      (and source pos span 
-                           srcloc)))
-                  srclocs-stack))]
-           [src-locs (if (exn:srclocs? exn)
-                         ((exn:srclocs-accessor exn) exn)
-                         (if (null? stack)
-                             '()
-                             (list (car srclocs-stack))))])
-      
-      ;; for use in debugging the stack trace stuff
-      #;
-      (when (exn? exn)
-        (parameterize ([print-struct #t])
-          (for-each 
-           (λ (frame) (printf " ~s\n" frame))
-           (continuation-mark-set->context (exn-continuation-marks exn)))
-          (printf "\n")))
-      
-      (drracket:debug:error-display-handler/stacktrace msg exn stack)))
+    (drracket:debug:error-display-handler/stacktrace msg exn))
   
   (define (main-user-eventspace-thread?)
     (let ([rep (current-rep)])
@@ -434,17 +369,16 @@ TODO
   
   
   ;; insert/delta : (instanceof text%) (union snip string) (listof style-delta%) *-> (values number number)
-  ;; inserts the string/stnip into the text at the end and changes the
+  ;; inserts the string/snip into the text at the end and changes the
   ;; style of the newly inserted text based on the style deltas.
   (define (insert/delta text s . deltas)
-    (let ([before (send text last-position)])
-      (send text insert s before before #f)
-      (let ([after (send text last-position)])
-        (for-each (λ (delta)
-                    (when (is-a? delta style-delta%)
-                      (send text change-style delta before after)))
-                  deltas)
-        (values before after))))
+    (define before (send text last-position))
+    (send text insert s before before #f)
+    (define after (send text last-position))
+    (for ([delta (in-list deltas)])
+      (when (is-a? delta style-delta%)
+        (send text change-style delta before after)))
+    (values before after))
   
   (define log-max-size 1000)
   (define log-entry-max-size 1000)
@@ -455,7 +389,7 @@ TODO
     (mixin ((class->interface text%)
             text:ports<%>
             editor:file<%>
-            scheme:text<%>
+            racket:text<%>
             color:text<%>
             text:ports<%>)
       (-text<%>)
@@ -501,7 +435,6 @@ TODO
                insert-before
                insert-between
                invalidate-bitmap-cache
-               is-frozen?
                is-locked?
                last-position
                line-location
@@ -612,18 +545,18 @@ TODO
       ;;;                                            ;;;
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       
-      ;; error-ranges : (union false? (cons (list file number number) (listof (list file number number))))
+      ;; error-ranges : (union false? (cons srcloc (listof srcloc)))
       (define error-ranges #f)
       (define/public (get-error-ranges) error-ranges)
       (define/public (set-error-ranges ranges)
         (set! error-ranges (and ranges 
                                 (not (null? ranges))
                                 (cleanup-locs ranges))))
-      (define internal-reset-callback void)
-      (define internal-reset-error-arrows-callback void)
+      (define clear-error-highlighting void)
       (define/public (reset-error-ranges) 
-        (internal-reset-callback)
-        (internal-reset-error-arrows-callback))
+        (set-error-ranges #f)
+        (when definitions-text (send definitions-text set-error-arrows #f))
+        (clear-error-highlighting))
       
       ;; highlight-error : file number number -> void
       (define/public (highlight-error file start end)
@@ -643,11 +576,11 @@ TODO
       ;;                       (union #f (listof srcloc))
       ;;                    -> (void)
       (define/public (highlight-errors raw-locs [raw-error-arrows #f])
+        (clear-error-highlighting)
+        (when definitions-text (send definitions-text set-error-arrows #f))
         (set-error-ranges raw-locs)
         (define locs (or (get-error-ranges) '())) ;; calling set-error-range cleans up the locs
         (define error-arrows (and raw-error-arrows (cleanup-locs raw-error-arrows)))
-        
-        (reset-highlighting)
         
         (for-each (λ (loc) (send (srcloc-source loc) begin-edit-sequence)) locs)
         
@@ -660,7 +593,6 @@ TODO
                                [finish (+ start span)])
                           (send file highlight-range start finish (drracket:debug:get-error-color) #f 'high)))
                       locs)])
-            
             (when (and definitions-text error-arrows)
               (let ([filtered-arrows
                      (remove-duplicate-error-arrows
@@ -669,14 +601,11 @@ TODO
                        error-arrows))])
                 (send definitions-text set-error-arrows filtered-arrows)))
             
-            (set! internal-reset-callback
+            (set! clear-error-highlighting
                   (λ ()
-                    (set-error-ranges #f)
-                    (when definitions-text
-                      (send definitions-text set-error-arrows #f))
-                    (set! internal-reset-callback void)
+                    (set! clear-error-highlighting void)
                     (for-each (λ (x) (x)) resets)))))
-        
+
         (let* ([first-loc (and (pair? locs) (car locs))]
                [first-file (and first-loc (srcloc-source first-loc))]
                [first-start (and first-loc (- (srcloc-position first-loc) 1))]
@@ -700,7 +629,47 @@ TODO
                   (send tlw ensure-defs-shown))))
             
             (send first-file set-caret-owner (get-focus-snip) 'global))))
-      
+
+      ;; unlike highlight-error just above, this function does not change 
+      ;; what the currently noted errors locations are, it just highlights 
+      ;; one of them.
+      (define/public (highlight-a-single-error raw-loc)
+        (define loc (car (cleanup-locs (list raw-loc))))
+        (define source (srcloc-source loc))
+        (when (and (is-a? source text%)
+                   (srcloc-position loc)
+                   (srcloc-span loc))
+          (send source begin-edit-sequence)
+          
+          (clear-error-highlighting) ;; clear the 'highlight-range' from previous errors
+          
+          (define start (- (srcloc-position loc) 1))
+          (define span (srcloc-span loc))
+          (define finish (+ start span))
+          
+          (let ([reset (send source highlight-range start finish (drracket:debug:get-error-color) #f 'high)])
+            (set! clear-error-highlighting
+                  (λ ()
+                    (set! clear-error-highlighting void)
+                    (reset))))
+          
+          (when (and start span)
+            (let ([finish (+ start span)])
+              (when (eq? source definitions-text) ;; only move set the cursor in the defs window
+                (send source set-position start span))
+              (send source scroll-to-position start #f finish)))
+          
+          (send source end-edit-sequence)
+          
+          (when (eq? source definitions-text)
+            ;; when we're highlighting something in the defs window,
+            ;; make sure it is visible
+            (let ([tlw (send source get-top-level-window)]) 
+              (when (is-a? tlw drracket:unit:frame<%>)
+                (send tlw ensure-defs-shown))))
+          
+          (send source set-caret-owner (get-focus-snip) 'global)))
+        
       (define/private (cleanup-locs locs)
         (let ([ht (make-hasheq)])
           (filter (λ (loc) (and (is-a? (srcloc-source loc) text:basic<%>)
@@ -905,37 +874,43 @@ TODO
       (field (need-interaction-cleanup? #f))
       
       (define/private (no-user-evaluation-message frame exit-code memory-killed?)
-        (let* ([new-limit (and custodian-limit (+ custodian-limit custodian-limit))]
-               [ans (message-box/custom
-                     (string-constant evaluation-terminated)
-                     (string-append
-                      (string-constant evaluation-terminated-explanation)
-                      (if exit-code
-                          (string-append
-                           "\n\n"
-                           (if (zero? exit-code)
-                               (string-constant exited-successfully)
-                               (format (string-constant exited-with-error-code) exit-code)))
-                          "")
-                      (if memory-killed?
-                          (string-append 
-                           "\n\n"
-                           (string-constant program-ran-out-of-memory))
-                          ""))
-                     (string-constant ok)
-                     #f
-                     (and memory-killed?
-                          new-limit
-                          (format "Increase memory limit to ~a megabytes" 
-                                  (floor (/ new-limit 1024 1024))))
-                     frame
-                     '(default=1 stop)
-                     #:dialog-mixin frame:focus-table-mixin)])
-          (when (equal? ans 3)
-            (set-custodian-limit new-limit)
-            (preferences:set 'drracket:child-only-memory-limit new-limit))
-          (set-insertion-point (last-position))
-          (insert-warning "\nInteractions disabled")))
+        (define new-limit (and custodian-limit (+ custodian-limit custodian-limit)))
+        (define-values (ans checked?)
+          (if (preferences:get 'drracket:show-killed-dialog)
+              (message+check-box/custom
+               (string-constant evaluation-terminated)
+               (string-append
+                (string-constant evaluation-terminated-explanation)
+                (if exit-code
+                    (string-append
+                     "\n\n"
+                     (if (zero? exit-code)
+                         (string-constant exited-successfully)
+                         (format (string-constant exited-with-error-code) exit-code)))
+                    "")
+                (if memory-killed?
+                    (string-append 
+                     "\n\n"
+                     (string-constant program-ran-out-of-memory))
+                    ""))
+               (string-constant evaluation-terminated-ask)
+               (string-constant ok)
+               #f
+               (and memory-killed?
+                    new-limit
+                    (format "Increase memory limit to ~a megabytes" 
+                            (floor (/ new-limit 1024 1024))))
+               frame
+               '(default=1 stop checked)
+               #:dialog-mixin frame:focus-table-mixin)
+              (values 1 #t)))
+        (unless checked?
+          (preferences:set 'drracket:show-killed-dialog #f))
+        (when (equal? ans 3)
+          (set-custodian-limit new-limit)
+          (preferences:set 'drracket:child-only-memory-limit new-limit))
+        (set-insertion-point (last-position))
+        (insert-warning "\nInteractions disabled"))
       
       (define/private (cleanup-interaction) ; =Kernel=, =Handler=
         (set! need-interaction-cleanup? #f)
@@ -1108,17 +1083,38 @@ TODO
                    (let loop ()
                      (let ([sexp/syntax/eof (with-stack-checkpoint (get-sexp/syntax/eof))])
                        (unless (eof-object? sexp/syntax/eof)
-                         (call-with-values
-                          (λ () 
-                            (call-with-continuation-prompt
-                             (λ () (with-stack-checkpoint (eval-syntax sexp/syntax/eof)))
-                             (default-continuation-prompt-tag)
-                             (and complete-program?
-                                  (λ args
-                                    (abort-current-continuation 
-                                     (default-continuation-prompt-tag))))))
-                          (λ x (parameterize ([pretty-print-columns pretty-print-width])
-                                 (for-each (λ (x) ((current-print) x)) x))))
+                         (define results
+                           ;; we duplicate the 'expand-syntax-to-top-form' dance that eval-syntax
+                           ;; does here, so that we can put 'with-stack-checkpoint's in to limit
+                           ;; the amount of DrRacket code we see in stacktraces
+                           (let loop ([stx sexp/syntax/eof])
+                             (define top-expanded (with-stack-checkpoint (expand-syntax-to-top-form stx)))
+                             (syntax-case top-expanded (begin)
+                               [(begin a1 . args)
+                                (let lloop ([args (syntax->list #'(a1 . args))])
+                                  (cond
+                                    [(null? (cdr args))
+                                     (loop (car args))]
+                                    [else
+                                     (loop (car args))
+                                     (lloop (cdr args))]))]
+                               [_ 
+                                (let ([expanded (with-stack-checkpoint (expand-syntax top-expanded))])
+                                  (call-with-values
+                                   (λ () 
+                                     (call-with-continuation-prompt
+                                      (λ ()
+                                        (with-stack-checkpoint (eval-syntax expanded)))
+                                      (default-continuation-prompt-tag)
+                                      (λ args
+                                        (apply
+                                         abort-current-continuation 
+                                         (default-continuation-prompt-tag)
+                                         args))))
+                                   list))])))
+                         (parameterize ([pretty-print-columns pretty-print-width])
+                           (for ([x (in-list results)])
+                             ((current-print) x)))
                          (loop)))))))
               (default-continuation-prompt-tag)
               (λ args (void)))
@@ -1645,9 +1641,9 @@ TODO
                          (λ args (drracket:app:about-drscheme))
                          click-delta))
         (set! setting-up-repl? #f)
-        (thaw-colorer)
         (send context disable-evaluation)
         (reset-console)
+        (thaw-colorer)
         (insert-prompt)
         
         ;; call the first-opened method on the user's thread, but wait here for that to terminate
@@ -1714,7 +1710,9 @@ TODO
              obj
              (if (eq? (car i) sp-err-other-end)
                  (get-err-port)
-                 (get-out-port)))))
+                 (get-out-port))))
+          (flush-output (get-err-port))
+          (flush-output (get-out-port)))
         
         (send context enable-evaluation)
         (end-edit-sequence)
@@ -2056,7 +2054,7 @@ TODO
      ;; (previous and next error))
      (drs-bindings-keymap-mixin
       (text:ports-mixin
-       (scheme:text-mixin
+       (racket:text-mixin
         (color:text-mixin
          (text:info-mixin
           (editor:info-mixin

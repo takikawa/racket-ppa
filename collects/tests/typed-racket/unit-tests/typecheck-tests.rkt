@@ -16,7 +16,7 @@
                     [-> t:->])
          (except-in (utils tc-utils utils) infer)
          typed-racket/infer/infer-dummy typed-racket/infer/infer
-         unstable/mutated-vars
+         (utils mutated-vars)
          (env type-name-env type-env-structs init-envs)
          rackunit rackunit/text-ui
          syntax/parse
@@ -172,6 +172,16 @@
         (tc-e (- -23524623547234734568) -PosInt)
         (tc-e (- 241.3) -NegFlonum)
         (tc-e (- -24.3) -PosFlonum)
+
+        (tc-e (gcd 1/2) -PosRat)
+        (tc-e (gcd 3 1/2) -PosRat)
+        (tc-e (gcd (ann 3 Integer) 1/2) -NonNegRat)
+        (tc-e (gcd (ann 3 Integer) -1/2) -NonNegRat)
+        (tc-e (lcm 1/2) -PosRat)
+        (tc-e (lcm 3 1/2) -PosRat)
+        (tc-e (lcm (ann 3 Integer) 1/2) -NonNegRat)
+        (tc-e (lcm (ann 3 Integer) -1/2) -NonNegRat)
+
         [tc-e/t (lambda: () 3) (t:-> -PosByte : -true-lfilter)]
         [tc-e/t (lambda: ([x : Number]) 3) (t:-> N -PosByte : -true-lfilter)]
         [tc-e/t (lambda: ([x : Number] [y : Boolean]) 3) (t:-> N B -PosByte : -true-lfilter)]
@@ -265,6 +275,9 @@
         [tc-e (let: ([x : Number 3])
                     (when (boolean? x) #t))
               -Void]
+
+        [tc-e (integer-bytes->integer '#"abcd" #t) -Nat]
+        [tc-e (integer-bytes->integer '#"abcd" #f) -Int]
 
         [tc-e/t (let: ([x : Any 3])
                     (if (list? x)
@@ -1372,6 +1385,16 @@
                 (for/and: : Any ([i (in-range 4)])
                           (my-pred)))
               #:ret (ret Univ (-FS -top -top) (make-NoObject))]
+        [tc-e
+         (let ()
+           (define: long : (List 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 Integer)
+             (list 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1))
+           
+           (define-syntax-rule (go acc ...)
+             (begin (ann (acc long) One) ...))
+           
+           (go first second third fourth fifth sixth seventh eighth ninth tenth))
+         (-val 1)]
         )
   (test-suite
    "check-type tests"

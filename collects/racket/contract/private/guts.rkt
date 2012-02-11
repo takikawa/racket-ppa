@@ -1,6 +1,11 @@
 #lang racket/base
 
-(require "prop.rkt")
+(require "helpers.rkt"
+         "blame.rkt"
+         "prop.rkt"
+         "rand.rkt"
+         "generate-base.rkt"
+         racket/pretty)
 
 (require (for-syntax racket/base))
 
@@ -148,7 +153,7 @@
   (cond
     [(contract-struct? x) x]
     [(and (procedure? x) (procedure-arity-includes? x 1)) 
-     (make-predicate-contract (or (object-name x) '???) x)]
+     (make-predicate-contract (or (object-name x) '???) x (make-generate-ctc-fail))]
     [(or (symbol? x) (boolean? x) (char? x) (null? x)) (make-eq-contract x)]
     [(or (bytes? x) (string? x)) (make-equal-contract x)]
     [(number? x) (make-=-contract x)]
@@ -237,10 +242,6 @@
     (if (contract-struct? sub) (contract-struct-name sub) sub)))
 
 
-
-
-
-
 ;                                                                                                                 
 ;                                                                                                                 
 ;                                                                                                                 
@@ -268,6 +269,8 @@
       (if (symbol? (eq-contract-val ctc))
         `',(eq-contract-val ctc)
         (eq-contract-val ctc)))
+   #:generate
+   (λ (ctc) (λ (fuel) (eq-contract-val ctc)))
    #:stronger
    (λ (this that)
       (and (eq-contract? that)
@@ -281,7 +284,9 @@
    #:stronger
    (λ (this that)
       (and (equal-contract? that)
-           (equal? (equal-contract-val this) (equal-contract-val that))))))
+           (equal? (equal-contract-val this) (equal-contract-val that))))
+   #:generate
+   (λ (ctc) (λ (fuel) (equal-contract-val ctc)))))
 
 (define-struct =-contract (val)
   #:property prop:flat-contract
@@ -291,7 +296,9 @@
    #:stronger
    (λ (this that)
       (and (=-contract? that)
-           (= (=-contract-val this) (=-contract-val that))))))
+           (= (=-contract-val this) (=-contract-val that))))
+   #:generate
+   (λ (ctc) (λ (fuel) (=-contract-val ctc)))))
 
 (define-struct regexp/c (reg)
   #:property prop:flat-contract
@@ -308,7 +315,7 @@
       (and (regexp/c? that) (eq? (regexp/c-reg this) (regexp/c-reg that))))))
 
 
-(define-struct predicate-contract (name pred)
+(define-struct predicate-contract (name pred generate)
   #:property prop:flat-contract
   (build-flat-contract-property
    #:stronger
@@ -317,7 +324,18 @@
            (procedure-closure-contents-eq? (predicate-contract-pred this)
                                            (predicate-contract-pred that))))
    #:name (λ (ctc) (predicate-contract-name ctc))
-   #:first-order (λ (ctc) (predicate-contract-pred ctc))))
+   #:first-order (λ (ctc) (predicate-contract-pred ctc))
+   #:generate (λ (ctc)
+                 (let ([generate (predicate-contract-generate ctc)])
+                   (if (generate-ctc-fail? generate)
+                     (let ([fn (predicate-contract-pred ctc)])
+                       (find-generate fn (predicate-contract-name ctc)))
+                     generate)))
+   #:exercise (λ (ctc)
+                 (λ (val fuel) 
+                    ((predicate-contract-pred ctc) val)))))
 
 (define (check-flat-named-contract predicate) (coerce-flat-contract 'flat-named-contract predicate))
 (define (check-flat-contract predicate) (coerce-flat-contract 'flat-contract predicate))
+(define (build-flat-contract name pred [generate (make-generate-ctc-fail)])
+  (make-predicate-contract name pred generate))

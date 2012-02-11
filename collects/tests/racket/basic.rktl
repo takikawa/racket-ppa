@@ -272,8 +272,11 @@
 (test-mem memv 'memv)
 (test-mem member 'member)
 
-(test #f memq "apple" '("apple"))
-(test #f memv "apple" '("apple"))
+(test '("apple") memq "apple" '("apple")) ; literals are interned
+(test '(#"apple") memq #"apple" '(#"apple")) ; literals are interned
+(test #f memq (list->string (string->list "apple")) '("apple"))
+(test #f memq (list->bytes (bytes->list #"apple")) '(#"apple"))
+(test #f memv (list->string (string->list "apple")) '("apple"))
 (test '("apple") member "apple" '("apple"))
 
 ; (test #f memq 1/2 '(1/2)) ; rationals are immutable and we may want to optimize
@@ -2069,6 +2072,7 @@
       (test #t eq? (equal-hash-code l) (equal-hash-code (list 1 2 3)))
       (hash-set! h1 l 'ok)
       (test 'ok hash-ref h1 l)
+      (err/rt-test (hash-ref h1 'nonesuch (lambda (x) 'bad-proc)) exn:fail:contract:arity?)
       (test #t hash-has-key? h1 l)
       (test #f hash-has-key? h1 (cdr l))
       (when hash-ref!
@@ -2364,7 +2368,8 @@
 (test '((1 . 2)) hash-map im-t cons)
 (test 2 hash-ref im-t 1)
 (define im-t (make-immutable-hasheq '(("hello" . 2))))
-(test 'none hash-ref im-t "hello" (lambda () 'none))
+(test 2 hash-ref im-t "hello" (lambda () 'none)) ; literals interned
+(test 'none hash-ref im-t (list->string (string->list "hello")) (lambda () 'none))
 (define im-t (make-immutable-hash '(("hello" . 2))))
 (test 2 hash-ref im-t "hello" (lambda () 'none))
 (test #f hash-eq? im-t)
@@ -2500,6 +2505,7 @@
   (test (equal-hash-code ht) values (equal-hash-code ht2))
   (test (equal-hash-code wht) values (equal-hash-code wht2))
   (test (equal-secondary-hash-code ht) values (equal-secondary-hash-code ht2))
+  (test (equal-secondary-hash-code wht) values (equal-secondary-hash-code wht2))
 
   (let ([ht (for/hash ([i (in-list l)])
               (values (a i) (a (a i))))]

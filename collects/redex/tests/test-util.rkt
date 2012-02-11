@@ -29,7 +29,7 @@
 (define-syntax (test stx)
   (syntax-case stx ()
     [(_ expected got)
-     (with-syntax ([line (syntax-line (syntax got))]
+     (with-syntax ([line (syntax-line stx)]
                    [fn (if (path? (syntax-source (syntax got)))
                            (path->string (syntax-source (syntax got)))
                            "<unknown file>")])
@@ -83,7 +83,8 @@
                                (syntax-case stx ()
                                  [(_ loc-name ... non-loc-name ...)
                                   #'body]))])
-                 (subst loc-piece ... non-loc-piece ...)))]))
+                 (subst loc-piece ... non-loc-piece ...)
+                 (void)))]))
 
 (define (source-location stx)
   (list (syntax-source stx) 
@@ -141,7 +142,7 @@
                  (matches? got expected))
       (set! failures (+ 1 failures))
       (fprintf (current-error-port)
-               "test/proc: file ~a line ~a:\n     got ~s\nexpected ~s\n\n" 
+               "test: file ~a line ~a:\n     got ~s\nexpected ~s\n\n" 
                filename 
                line
                got

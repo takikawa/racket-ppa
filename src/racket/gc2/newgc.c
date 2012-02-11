@@ -48,7 +48,6 @@ intptr_t mp_ac_freed;
 
 #if 0
 #define POINTER_OWNERSHIP_CHECK
-#define LOCK_PAGE_TABLES_FOR_DEBUG
 #endif
 
 #define MZ_PRECISE_GC /* required for mz includes to work right */
@@ -168,6 +167,11 @@ struct Log_Master_Info {
   int ran, full;
   intptr_t pre_used, post_used, pre_admin, post_admin;
 };
+#else
+# define premaster_or_master_gc(gc)   1
+# define premaster_or_place_gc(gc)    1
+# define postmaster_and_master_gc(gc) 0
+# define postmaster_and_place_gc(gc)  1
 #endif
 
 inline static size_t real_page_size(mpage* page);
@@ -373,23 +377,85 @@ inline static void check_used_against_max(NewGC *gc, size_t len)
 
 #include "vm.c"
 
+#ifdef POINTER_OWNERSHIP_CHECK
+# define SHARED_PAGE_ORPHANED ((NewGC *)0x1)
+static mzrt_mutex *lock;
+static PageMap shared_pagemap;
+inline static void pagemap_set(PageMap page_maps1, void *p, mpage *value);
+inline static mpage *pagemap_find_page(PageMap page_maps1, const void *p);
+void shared_pagemap_set(void *ptr, size_t len, NewGC *owner)
+{
+  if (!lock) {
+    mzrt_mutex_create(&lock);
+# ifdef SIXTY_FOUR_BIT_INTEGERS
+    shared_pagemap = ofm_malloc_zero(PAGEMAP64_LEVEL1_SIZE * sizeof (mpage***)); 
+# else
+    shared_pagemap = ofm_malloc_zero(PAGEMAP32_SIZE * sizeof (mpage*)); 
+# endif
+  }
+
+  mzrt_mutex_lock(lock);
+  while (len > 0) {
+    pagemap_set(shared_pagemap, ptr, (mpage*)owner);
+    len -= APAGE_SIZE;
+    ptr = (char *)ptr + APAGE_SIZE;
+  }
+  mzrt_mutex_unlock(lock);
+}
+void check_page_owner(NewGC *gc, const void *p)
+{
+  NewGC *owner;
+  owner = (NewGC *)pagemap_find_page(shared_pagemap, p);
+  if (owner && (owner != gc) && (owner != MASTERGC) && (owner != SHARED_PAGE_ORPHANED)) {
+    mzrt_mutex_lock(lock);
+    owner = (NewGC *)pagemap_find_page(shared_pagemap, p);
+    if (owner && (owner != gc) && (owner != MASTERGC) && (owner != SHARED_PAGE_ORPHANED)) {
+      printf("%p is owned by place %i not the current place %i\n", p, owner->place_id, gc->place_id);  
+      abort();
+    }
+    mzrt_mutex_unlock(lock);
+  }
+}
+#endif
+
 static void *malloc_pages(NewGC *gc, size_t len, size_t alignment, int dirty, int type, int expect_mprotect, void **src_block)
 {
   void *ptr;
   check_used_against_max(gc, len);
   ptr = mmu_alloc_page(gc->mmu, len, alignment, dirty, type, expect_mprotect, src_block);
   if (!ptr) out_of_memory();
+
+#ifdef POINTER_OWNERSHIP_CHECK
+  shared_pagemap_set(ptr, len, gc);
+#endif
+
   return ptr;
 }
 
 static void free_pages(NewGC *gc, void *p, size_t len, int type, int expect_mprotect, void **src_block)
 {
+#ifdef POINTER_OWNERSHIP_CHECK
+  shared_pagemap_set(p, len, NULL);
+#endif
+
   gc->used_pages -= size_to_apage_count(len);
   mmu_free_page(gc->mmu, p, len, type, expect_mprotect, src_block, 1);
 }
 
+static void check_excessive_free_pages(NewGC *gc) {
+  /* If we have too many idle pages --- 4 times used pages --- then flush.
+     We choose 4 instead of 2 for "excessive" because a block cache (when 
+     available) has a fill factor of 2, and flushing will not reduce that. */
+  if (mmu_memory_allocated(gc->mmu) > ((gc->used_pages << (LOG_APAGE_SIZE + 2)))) {
+    mmu_flush_freed_pages(gc->mmu);
+  }
+}
 
 static void free_orphaned_page(NewGC *gc, mpage *tmp) {
+#ifdef POINTER_OWNERSHIP_CHECK
+  shared_pagemap_set(tmp->addr, round_to_apage_size(tmp->size), NULL);
+#endif
+
   /* free_pages decrements gc->used_pages which is incorrect, since this is an orphaned page,
    * so we use mmu_free_page directly */
   mmu_free_page(gc->mmu, tmp->addr, round_to_apage_size(tmp->size),
@@ -398,6 +464,7 @@ static void free_orphaned_page(NewGC *gc, mpage *tmp) {
                 &tmp->mmu_src_block,
                 0); /* don't adjust count, since we're failing to adopt it */
   free_mpage(tmp);
+  check_excessive_free_pages(gc);
 }
 
 
@@ -409,6 +476,11 @@ static void orphan_page_accounting(NewGC *gc, size_t allocate_size) {
 inline static void pagemap_add_with_size(PageMap pagemap, mpage *page, intptr_t size);
 static void adopt_page_accounting(NewGC *gc, mpage* tmp) {
   size_t realpagesize = real_page_size(tmp);
+
+#ifdef POINTER_OWNERSHIP_CHECK
+  shared_pagemap_set(tmp->addr, realpagesize, gc);
+#endif
+
   pagemap_add_with_size(gc->page_maps, tmp, realpagesize);
   mmu_memory_allocated_inc(gc->mmu, realpagesize);
   gc->used_pages += size_to_apage_count(realpagesize);
@@ -466,10 +538,6 @@ inline static void free_page_maps(PageMap page_maps1) {
 /* the page map makes a nice mapping from addresses to pages, allowing
    fairly fast lookup. this is useful. */
 inline static void pagemap_set(PageMap page_maps1, void *p, mpage *value) {
-#ifdef LOCK_PAGE_TABLES_FOR_DEBUG
-  NewGC *gc = GC_get_GC();
-  mzrt_mutex_lock(gc->pagetable_lock);
-#endif
 #ifdef SIXTY_FOUR_BIT_INTEGERS
   uintptr_t pos;
   mpage ***page_maps2;
@@ -491,34 +559,9 @@ inline static void pagemap_set(PageMap page_maps1, void *p, mpage *value) {
 #else
   page_maps1[PAGEMAP32_BITS(p)] = value;
 #endif
-#ifdef LOCK_PAGE_TABLES_FOR_DEBUG
-  mzrt_mutex_unlock(gc->pagetable_lock);
-#endif
 }
 
 inline static mpage *pagemap_find_page(PageMap page_maps1, const void *p) {
-#ifdef LOCK_PAGE_TABLES_FOR_DEBUG
-
-  mpage *result = NULL;
-  NewGC *gc = GC_get_GC();
-  mzrt_mutex_lock(gc->pagetable_lock);
-#ifdef SIXTY_FOUR_BIT_INTEGERS
-  mpage ***page_maps2;
-  mpage **page_maps3;
-
-  page_maps2 = page_maps1[PAGEMAP64_LEVEL1_BITS(p)];
-  if (!page_maps2) goto done;
-  page_maps3 = page_maps2[PAGEMAP64_LEVEL2_BITS(p)];
-  if (!page_maps3) goto done;
-  result = page_maps3[PAGEMAP64_LEVEL3_BITS(p)];
- done:
-#else
-  result = page_maps1[PAGEMAP32_BITS(p)];
-#endif
-  mzrt_mutex_unlock(gc->pagetable_lock);
-  return result;
-#else
-
 #ifdef SIXTY_FOUR_BIT_INTEGERS
   mpage ***page_maps2;
   mpage **page_maps3;
@@ -530,8 +573,6 @@ inline static mpage *pagemap_find_page(PageMap page_maps1, const void *p) {
   return page_maps3[PAGEMAP64_LEVEL3_BITS(p)];
 #else
   return page_maps1[PAGEMAP32_BITS(p)];
-#endif
-
 #endif
 }
 
@@ -844,8 +885,20 @@ static inline void* REMOVE_BIG_PAGE_PTR_TAG(void *p) {
 
 void GC_check_master_gc_request() {
 #ifdef MZ_USE_PLACES 
-  if (MASTERGC && MASTERGC->major_places_gc == 1) {
-    GC_gcollect();
+  NewGC *mgc = MASTERGC;
+
+  if (mgc) {
+    /* check for GC needed due to GC_report_unsent_message_delta(): */
+    if ((mgc->gen0.current_size + mgc->pending_msg_size) >= mgc->gen0.max_size) {
+      NewGC *saved_gc;
+      saved_gc = GC_switch_to_master_gc();    
+      master_collect_initiate(mgc);
+      GC_switch_back_from_master(saved_gc);
+    }
+  
+    if (mgc->major_places_gc == 1) {
+      GC_gcollect();
+    }
   }
 #endif
 }
@@ -861,14 +914,12 @@ static inline void gc_if_needed_account_alloc_size(NewGC *gc, size_t allocate_si
 #ifdef MZ_USE_PLACES 
     if (postmaster_and_master_gc(gc)) {
       master_collect_initiate(gc);
-    }
-    else {
+    } else
 #endif
-    if (!gc->dumping_avoid_collection)
-      garbage_collect(gc, 0, 0, NULL);
-#ifdef MZ_USE_PLACES 
-    }
-#endif
+      {
+        if (!gc->dumping_avoid_collection)
+          garbage_collect(gc, 0, 0, NULL);
+      }
   }
   gc->gen0.current_size += allocate_size;
 }
@@ -886,17 +937,13 @@ static void *allocate_big(const size_t request_size_bytes, int type)
 
 #ifdef NEWGC_BTC_ACCOUNT
   if(GC_out_of_memory) {
-#ifdef MZ_USE_PLACES 
     if (premaster_or_place_gc(gc)) {
-#endif
       if (BTC_single_allocation_limit(gc, request_size_bytes)) {
         /* We're allowed to fail. Check for allocations that exceed a single-time
            limit. See BTC_single_allocation_limit() for more information. */
         GC_out_of_memory();
       }
-#ifdef MZ_USE_PLACES 
     }
-#endif
   }
 #endif
 
@@ -938,6 +985,9 @@ static void *allocate_big(const size_t request_size_bytes, int type)
        page is going to be sent to a different place, so don't account
        for it here, and don't put it in the page_map */
     orphan_page_accounting(gc, allocate_size);
+#ifdef POINTER_OWNERSHIP_CHECK
+    shared_pagemap_set(bpage->addr, round_to_apage_size(allocate_size), SHARED_PAGE_ORPHANED);
+#endif
   } else
     pagemap_add(gc->page_maps, bpage);
   
@@ -974,9 +1024,12 @@ inline static mpage *create_new_medium_page(NewGC *gc, const int sz, const int p
   gc->med_pages[pos] = page;
   gc->med_freelist_pages[pos] = page;
 
-  if (gc->saved_allocator) /* see MESSAGE ALLOCATION above */
+  if (gc->saved_allocator) { /* see MESSAGE ALLOCATION above */
     orphan_page_accounting(gc, APAGE_SIZE);
-  else
+#ifdef POINTER_OWNERSHIP_CHECK
+    shared_pagemap_set(page->addr, APAGE_SIZE, SHARED_PAGE_ORPHANED);
+#endif    
+  } else
     pagemap_add(gc->page_maps, page);
 
   return page;
@@ -1085,9 +1138,12 @@ inline static mpage *gen0_create_new_nursery_mpage(NewGC *gc, const size_t page_
   page->size = PREFIX_SIZE;
   GEN0_ALLOC_SIZE(page) = page_size;
 
-  if (gc->saved_allocator)  /* see MESSAGE ALLOCATION above */
+  if (gc->saved_allocator) { /* see MESSAGE ALLOCATION above */
     orphan_page_accounting(gc, page_size);
-  else
+#ifdef POINTER_OWNERSHIP_CHECK
+    shared_pagemap_set(page->addr, page_size, SHARED_PAGE_ORPHANED);
+#endif    
+  } else
     pagemap_add_with_size(gc->page_maps, page, page_size);
 
   GCVERBOSEPAGE(gc, "NEW gen0", page);
@@ -1439,6 +1495,20 @@ void GC_create_message_allocator() {
   gc->dumping_avoid_collection++;
 }
 
+void GC_report_unsent_message_delta(intptr_t amt)
+{
+#ifdef MZ_USE_PLACES
+  NewGC *mgc = MASTERGC;
+
+  if (!mgc) return;
+
+  while (!mzrt_cas(&mgc->pending_msg_size,
+                   mgc->pending_msg_size,
+                   mgc->pending_msg_size + amt)) {
+  }
+#endif
+}
+
 void *GC_finish_message_allocator() {
   NewGC *gc = GC_get_GC();
   Allocator *a = gc->saved_allocator;
@@ -1517,7 +1587,7 @@ void GC_adopt_message_allocator(void *param) {
   gc_if_needed_account_alloc_size(gc, 0);
 }
 
-uintptr_t GC_message_allocator_size(void *param) {
+intptr_t GC_message_objects_size(void *param) {
   MsgMemory *msgm = (MsgMemory *) param;
   if (!msgm) { return sizeof(param); }
   if (msgm->big_pages && msgm->size < 1024) {
@@ -1525,6 +1595,13 @@ uintptr_t GC_message_allocator_size(void *param) {
     exit(1);
   }
   return msgm->size;
+}
+
+intptr_t GC_message_allocator_size(void *param) {
+  MsgMemory *msgm = (MsgMemory *) param;
+  if (!msgm) { return sizeof(param); }
+  /* approximate extra size in allocation page by just adding one: */
+  return msgm->size + APAGE_SIZE;
 }
 
 void GC_dispose_short_message_allocator(void *param) {
@@ -2376,9 +2453,6 @@ static void NewGCMasterInfo_initialize() {
   MASTERGCINFO->alive = 0;
   MASTERGCINFO->ready = 0;
   MASTERGCINFO->signal_fds = realloc(MASTERGCINFO->signal_fds, sizeof(void*) * MASTERGCINFO->size);
-#ifdef POINTER_OWNERSHIP_CHECK
-  MASTERGCINFO->places_gcs = ofm_malloc_zero(sizeof(NewGC*) * MASTERGCINFO->size);
-#endif
   for (i=0; i < 32; i++ ) {
     MASTERGCINFO->signal_fds[i] = (void *)REAPED_SLOT_AVAILABLE;
   }
@@ -2523,9 +2597,6 @@ static intptr_t NewGCMasterInfo_find_free_id() {
     MASTERGCINFO->size++;
     MASTERGCINFO->alive++;
     MASTERGCINFO->signal_fds = realloc(MASTERGCINFO->signal_fds, sizeof(void*) * MASTERGCINFO->size);
-#ifdef POINTER_OWNERSHIP_CHECK
-    MASTERGCINFO->places_gcs= realloc(MASTERGCINFO->places_gcs, sizeof(NewGC*) * MASTERGCINFO->size);
-#endif
     return MASTERGCINFO->size - 1;
   }
   else {
@@ -2549,9 +2620,6 @@ static void NewGCMasterInfo_register_gc(NewGC *newgc) {
     intptr_t newid = NewGCMasterInfo_find_free_id();
     newgc->place_id = newid;
     MASTERGCINFO->signal_fds[newid] = (void *) CREATED_BUT_NOT_REGISTERED;
-#ifdef POINTER_OWNERSHIP_CHECK
-    MASTERGCINFO->places_gcs[newid] = newgc;
-#endif
   }
   GC_LOCK_DEBUG("UNMGCLOCK NewGCMasterInfo_register_gc\n");
   mzrt_rwlock_unlock(MASTERGCINFO->cangc);
@@ -2624,9 +2692,6 @@ static NewGC *init_type_tags_worker(NewGC *inheritgc, NewGC *parentgc,
   NewGC *gc;
 
   gc = ofm_malloc_zero(sizeof(NewGC));
-#ifdef LOCK_PAGE_TABLES_FOR_DEBUG
-  mzrt_mutex_create(&gc->pagetable_lock);
-#endif
 
   /* NOTE sets the constructed GC as the new Thread Specific GC. */
   GC_set_GC(gc);
@@ -2701,9 +2766,6 @@ void GC_destruct_child_gc() {
     waiting = MASTERGC->major_places_gc;
     if (!waiting) {
       MASTERGCINFO->signal_fds[gc->place_id] = (void *) REAPED_SLOT_AVAILABLE;
-#ifdef POINTER_OWNERSHIP_CHECK
-      MASTERGCINFO->places_gcs[gc->place_id] = NULL;
-#endif
       gc->place_id = -1;
       MASTERGCINFO->alive--;
     }
@@ -2815,6 +2877,19 @@ void GC_gcollect(void)
     garbage_collect(gc, 1, 0, NULL);
 }
 
+void GC_gcollect_minor(void)
+{
+  NewGC *gc = GC_get_GC();
+
+  if (gc->dumping_avoid_collection) return;
+
+#ifdef MZ_USE_PLACES
+  if (postmaster_and_master_gc(gc)) return;
+#endif
+
+  garbage_collect(gc, 0, 0, NULL);
+}
+
 void GC_enable_collection(int on)
 {
   NewGC *gc = GC_get_GC();
@@ -2906,9 +2981,7 @@ static void promote_marked_gen0_big_page(NewGC *gc, mpage *page) {
 /* This is the first mark routine. It's a bit complicated. */
 void GC_mark2(const void *const_p, struct NewGC *gc)
 {
-#ifdef MZ_USE_PLACES
   int is_a_master_page = 0;
-#endif
   mpage *page;
   void *p = (void*)const_p;
 
@@ -2919,44 +2992,44 @@ void GC_mark2(const void *const_p, struct NewGC *gc)
 
   if(!(page = pagemap_find_page(gc->page_maps, p))) {
 #ifdef MZ_USE_PLACES
-    if (!MASTERGC || !MASTERGC->major_places_gc || !(page = pagemap_find_page(MASTERGC->page_maps, p)))
+    if (MASTERGC && MASTERGC->major_places_gc && (page = pagemap_find_page(MASTERGC->page_maps, p))) {
+      is_a_master_page = 1;
+    } else
 #endif
-    {
-#ifdef POINTER_OWNERSHIP_CHECK
-      mzrt_rwlock_wrlock(MASTERGCINFO->cangc);
       {
-        int i;
-        int size = MASTERGCINFO->size;
-        for (i = 1; i < size; i++) {
-          if (gc->place_id != i 
-              && MASTERGCINFO->signal_fds[i] != (void*) REAPED_SLOT_AVAILABLE
-              && MASTERGCINFO->signal_fds[i] != (void*) CREATED_BUT_NOT_REGISTERED
-              && MASTERGCINFO->signal_fds[i] != (void*) SIGNALED_BUT_NOT_REGISTERED) {
-            if((page = pagemap_find_page(MASTERGCINFO->places_gcs[i]->page_maps, p))) {
-              printf("%p is owned by place %i not the current place %i\n", p, i, gc->place_id);  
-              asm("int3");
-            }
-          }
-        }
+#ifdef POINTER_OWNERSHIP_CHECK
+        check_page_owner(gc, p);
+#endif
+        GCDEBUG((DEBUGOUTF,"Not marking %p (no page)\n",p));
+        return;
       }
-      mzrt_rwlock_unlock(MASTERGCINFO->cangc);
-#endif
-      GCDEBUG((DEBUGOUTF,"Not marking %p (no page)\n",p));
-      return;
-    }
-#ifdef MZ_USE_PLACES
-    else {
-      is_a_master_page = 1;      
-    }
-#endif
   }
 
+#if 0
+  if (page->size_class < 2) {
+    if (page->page_type == PAGE_TAGGED) {
+      void *q;
+      if (page->size_class)
+        q = MED_OBJHEAD(p, page->size) + 1;
+      else
+        q = p;
+      if (((objhead *)q)[-1].type == PAGE_TAGGED) {
+        if (!((objhead *)q)[-1].moved) {
+          if ((*(short *)q < 0) || (*(short *)q > 1000))
+            abort();
+        }
+      }
+    }
+  }
+#endif
+
+#ifdef NEWGC_BTC_ACCOUNT
   /* toss this over to the BTC mark routine if we're doing accounting */
   if(gc->doing_memory_accounting) { 
-#ifdef NEWGC_BTC_ACCOUNT
-    BTC_memory_account_mark(gc, page, p); return; 
-#endif
+    BTC_memory_account_mark(gc, page, p, is_a_master_page); 
+    return;
   }
+#endif
 
   /* MED OR BIG PAGE */
   if(page->size_class) {
@@ -2972,14 +3045,8 @@ void GC_mark2(const void *const_p, struct NewGC *gc)
       page->size_class = 3;
 
       /* if this is in the nursery, we want to move it out of the nursery */
-#ifdef MZ_USE_PLACES
       if(!page->generation && !is_a_master_page) 
-#else
-      if(!page->generation) 
-#endif
-      {
         promote_marked_gen0_big_page(gc, page);
-      }
 
       page->marked_on = 1;
       record_backtrace(page, BIG_PAGE_TO_OBJECT(page));
@@ -3270,7 +3337,12 @@ void GC_fixup2(void *pp, struct NewGC *gc)
     if(info->mark && info->moved) 
       *(void**)pp = *(void**)p;
     else GCDEBUG((DEBUGOUTF, "Not repairing %p from %p (not moved)\n",p,pp));
-  } else GCDEBUG((DEBUGOUTF, "Not repairing %p from %p (no page)\n", p, pp));
+  } else {
+#ifdef POINTER_OWNERSHIP_CHECK
+    check_page_owner(gc, p);
+#endif
+    GCDEBUG((DEBUGOUTF, "Not repairing %p from %p (no page)\n", p, pp));
+  }
 }
 
 void GC_fixup(void *pp)
@@ -4416,9 +4488,7 @@ static void garbage_collect(NewGC *gc, int force_full, int switching_master, Log
   mark_roots(gc);
   mark_immobiles(gc);
   TIME_STEP("rooted");
-#ifdef MZ_USE_PLACES
   if (premaster_or_place_gc(gc))
-#endif
     GC_mark_variable_stack(GC_variable_stack, 0, get_stack_base(gc), NULL);
 #ifdef MZ_USE_PLACES
   if (postmaster_and_master_gc(gc))
@@ -4471,9 +4541,7 @@ static void garbage_collect(NewGC *gc, int force_full, int switching_master, Log
   TIME_STEP("finalized2");
 
   if(gc->gc_full)
-#ifdef MZ_USE_PLACES
   if (premaster_or_place_gc(gc) || switching_master)
-#endif
     do_heap_compact(gc);
   TIME_STEP("compacted");
 
@@ -4487,9 +4555,7 @@ static void garbage_collect(NewGC *gc, int force_full, int switching_master, Log
   repair_finalizer_structs(gc);
   repair_roots(gc);
   repair_immobiles(gc);
-#ifdef MZ_USE_PLACES
   if (premaster_or_place_gc(gc))
-#endif
     GC_fixup_variable_stack(GC_variable_stack, 0, get_stack_base(gc), NULL);
   TIME_STEP("reparied roots");
   repair_heap(gc);
@@ -4505,7 +4571,7 @@ static void garbage_collect(NewGC *gc, int force_full, int switching_master, Log
     reset_nursery(gc);
   TIME_STEP("reset nursurey");
 #ifdef NEWGC_BTC_ACCOUNT
-  if (gc->gc_full)
+  if (gc->gc_full && postmaster_and_place_gc(gc))
     BTC_do_accounting(gc);
 #endif
   TIME_STEP("accounted");
@@ -4537,10 +4603,7 @@ static void garbage_collect(NewGC *gc, int force_full, int switching_master, Log
 
   gc->no_further_modifications = 0;
 
-  /* If we have too many idle pages, flush: */
-  if (mmu_memory_allocated(gc->mmu) > ((gc->used_pages << (LOG_APAGE_SIZE + 1)))) {
-    mmu_flush_freed_pages(gc->mmu);
-  }
+  check_excessive_free_pages(gc);
 
   /* update some statistics */
   if(gc->gc_full) gc->num_major_collects++; else gc->num_minor_collects++;

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2011 PLT Scheme Inc.
+  Copyright (c) 2006-2012 PLT Scheme Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -952,7 +952,8 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
     jitter->unbox_depth -= flonum_depth;
     if (!jitter->unbox && jitter->unbox_depth && rand)
       scheme_signal_error("internal error: broken unbox depth");
-    if (for_branch)
+    if (for_branch
+        || (arith == ARITH_INEX_EX)) /* has slow path */
       mz_rs_sync(); /* needed if arguments were unboxed */
 
     generate_double_arith(jitter, rator, arith, cmp, reversed, !!rand2, 0,
@@ -1048,11 +1049,19 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
       if (rand2) {
         simple_rand = (scheme_ok_to_move_local(rand)
                        || SCHEME_INTP(rand));
-        if (!simple_rand)
-          simple_rand2 = (SAME_TYPE(SCHEME_TYPE(rand2), scheme_local_type)
-                          && (SCHEME_GET_LOCAL_FLAGS(rand2) != SCHEME_LOCAL_FLONUM));
-        else
-          simple_rand2 = 0;
+        simple_rand2 = (SAME_TYPE(SCHEME_TYPE(rand2), scheme_local_type)
+                        && (SCHEME_GET_LOCAL_FLAGS(rand2) != SCHEME_LOCAL_FLONUM));
+        if (simple_rand && simple_rand2) {
+          if (mz_CURRENT_REG_STATUS_VALID()
+              && (jitter->r0_status >= 0)
+              && !(SAME_TYPE(SCHEME_TYPE(rand), scheme_local_type)
+                   && SCHEME_LOCAL_POS(rand) == SCHEME_LOCAL_POS(rand2))) {
+            /* prefer to evaluate the rand2 second, so that we can use R0 if 
+               it's helpful to set up R1 as rand */
+            simple_rand = 0;
+          } else
+            simple_rand2 = 0;
+        }
       } else {
         simple_rand = 0;
         simple_rand2 = 0;
@@ -1628,14 +1637,19 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
         /* If second is constant, first arg is in JIT_R0. */
         /* Otherwise, first arg is in JIT_R1, second is in JIT_R0 */
         /* Jump to ref3 to produce false */
+        int rs_valid, rs_can_keep = 0;
+
         if (for_branch) {
           scheme_prepare_branch_jump(jitter, for_branch);
           CHECK_LIMIT();
         }
 
+        rs_valid = mz_CURRENT_REG_STATUS_VALID();
+
         switch (cmp) {
         case CMP_ODDP:
           ref3 = jit_bmci_l(jit_forward(), JIT_R0, 0x2);
+          rs_can_keep = 1;
           break;
         case -CMP_BIT:
           if (rand2) {
@@ -1660,6 +1674,7 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
           } else {
             ref3 = jit_bgei_l(jit_forward(), JIT_R0, (intptr_t)scheme_make_integer(v));
           }
+          rs_can_keep = 1;
           break;
         case CMP_LEQ:
           if (rand2) {
@@ -1667,6 +1682,7 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
           } else {
             ref3 = jit_bgti_l(jit_forward(), JIT_R0, (intptr_t)scheme_make_integer(v));
           }
+          rs_can_keep = 1;
           break;
         case CMP_EQUAL:
           if (rand2) {
@@ -1674,6 +1690,7 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
           } else {
             ref3 = jit_bnei_l(jit_forward(), JIT_R0, (intptr_t)scheme_make_integer(v));
           }
+          rs_can_keep = 1;
           break;
         case CMP_GEQ:
           if (rand2) {
@@ -1681,6 +1698,7 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
           } else {
             ref3 = jit_blti_l(jit_forward(), JIT_R0, (intptr_t)scheme_make_integer(v));
           }
+          rs_can_keep = 1;
           break;
         case CMP_GT:
           if (rand2) {
@@ -1688,6 +1706,7 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
           } else {
             ref3 = jit_blei_l(jit_forward(), JIT_R0, (intptr_t)scheme_make_integer(v));
           }
+          rs_can_keep = 1;
           break;
         default:
         case CMP_BIT:
@@ -1703,12 +1722,16 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
             ref3 = jit_bmcr_l(jit_forward(), JIT_R1, JIT_R0);
           } else {
             ref3 = jit_bmci_l(jit_forward(), JIT_R0, 1 << (v+1));
+            rs_can_keep = 1;
           }
           break;
         case CMP_EVENP:
           ref3 = jit_bmsi_l(jit_forward(), JIT_R0, 0x2);
+          rs_can_keep = 1;
           break;
         }
+
+        mz_SET_REG_STATUS_VALID(rs_valid && rs_can_keep);
       }
     } else {
       ref3 = NULL;
@@ -1816,7 +1839,7 @@ static void patch_nary_branches(mz_jit_state *jitter, Branch_Info *for_nary_bran
 int scheme_generate_nary_arith(mz_jit_state *jitter, Scheme_App_Rec *app,
                                int arith, int cmp, Branch_Info *for_branch, int branch_short)
 {
-  int c, i, non_simple_c = 0, stack_c, use_fl = 1, use_fx = 1, trigger_arg = 0;
+  int c, i, non_simple_c = 0, stack_c, use_fx = 1, trigger_arg = 0;
   Scheme_Object *non_simples[1+MAX_NON_SIMPLE_ARGS], **alt_args, *v;
   Branch_Info for_nary_branch;
   Branch_Info_Addr nary_addrs[3];
@@ -1825,6 +1848,10 @@ int scheme_generate_nary_arith(mz_jit_state *jitter, Scheme_App_Rec *app,
 #ifdef INLINE_FP_OPS
   int args_unboxed;
   GC_CAN_IGNORE jit_insn *reffl, *refdone2;
+  int use_fl = 1;
+# define mzSET_USE_FL(x) x
+#else
+# define mzSET_USE_FL(x) /* empty */
 #endif
 
   if (arith == ARITH_DIV) {
@@ -1834,7 +1861,7 @@ int scheme_generate_nary_arith(mz_jit_state *jitter, Scheme_App_Rec *app,
              || (arith == ARITH_IOR)
              || (arith == ARITH_XOR)) {
     /* bitwise operators are fixnum, only */
-    use_fl = 0;
+    mzSET_USE_FL(use_fl = 0);
   }
 
   c = app->num_args;
@@ -1846,7 +1873,7 @@ int scheme_generate_nary_arith(mz_jit_state *jitter, Scheme_App_Rec *app,
       non_simple_c++;
     }
     if (SCHEME_INTP(v)) {
-      use_fl = 0;
+      mzSET_USE_FL(use_fl = 0);
       if (trigger_arg == i)
         trigger_arg++;
     } else if (SCHEME_FLOATP(v)) {
@@ -1855,7 +1882,7 @@ int scheme_generate_nary_arith(mz_jit_state *jitter, Scheme_App_Rec *app,
         trigger_arg++;
     } else if (SCHEME_TYPE(v) >= _scheme_compiled_values_types_) {
       use_fx = 0;
-      use_fl = 0;
+      mzSET_USE_FL(use_fl = 0);
     }
   }
 

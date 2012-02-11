@@ -28,9 +28,10 @@
 (define-runtime-path expanding-place.rkt "expanding-place.rkt")
 
 (define sc-online-expansion-running (string-constant online-expansion-running))
-(define sc-only-raw-text-files-supported (string-constant only-raw-text-files-supported))
-(define sc-abnormal-termination (string-constant abnormal-termination))
+(define sc-only-raw-text-files-supported (string-constant online-expansion-only-raw-text-files-supported))
+(define sc-abnormal-termination (string-constant online-expansion-abnormal-termination))
 (define sc-jump-to-error (string-constant jump-to-error))
+(define sc-finished-successfully (string-constant online-expansion-finished-successfully))
 
 (define op (current-output-port))
 (define (oprintf . args) (apply fprintf op args))
@@ -765,7 +766,8 @@
     set-expand-error/status
     update-frame-expand-error
     expand-error-next
-    expand-error-prev)
+    expand-error-prev
+    hide-module-language-error-panel)
   
   (define module-language-online-expand-tab-mixin
     (mixin (drracket:unit:tab<%>) ()
@@ -796,6 +798,11 @@
         (case bkg-state
           [(reader-in-defs-error) 'parens]
           [(running) (list "blue")]
+          [(finished-expansion) (list "purple")]
+          [(completed-successfully)
+           (if (null? bkg-colors)
+               (list "forestgreen")
+               (map (λ (x) (list-ref x 1)) bkg-colors))]
           [(nothing) (if (null? bkg-colors)
                          #f
                          (map (λ (x) (list-ref x 1)) bkg-colors))]
@@ -874,34 +881,39 @@
              [parent expand-error-multiple-child])
         (new close-icon% 
              [parent expand-error-panel]
-             [callback
-              (λ ()
-                (send expand-error-parent-panel change-children
-                      (λ (l) (remq expand-error-panel l))))])
+             [callback (λ () (send (send (get-current-tab) get-defs) hide-module-language-error-panel))])
         (send expand-error-parent-panel change-children (λ (l) (remq expand-error-panel l)))
         root)
       
       (define expand-error-msg #f)
       (define expand-error-srcloc-count 0)
+      (define expand-error-hidden? #f)
       
-      (define/public (set-expand-error/status msg err? srcloc-count)
-        (unless (and (equal? expand-error-msg msg)
+      (define/public (set-expand-error/status hidden? msg err? srcloc-count)
+        (unless (and (equal? expand-error-hidden? hidden?)
+                     (equal? expand-error-msg msg)
                      (equal? expand-error-srcloc-count srcloc-count))
+          (set! expand-error-hidden? hidden?)
           (set! expand-error-msg msg)
           (set! expand-error-srcloc-count srcloc-count)
           (when expand-error-message
+            (send expand-error-parent-panel change-children
+                  (λ (l) (if hidden?
+                             (if (memq expand-error-panel l)
+                                 (remq expand-error-panel l)
+                                 l)
+                             (if (memq expand-error-panel l)
+                                 l
+                                 (append l (list expand-error-panel))))))
+            (send expand-error-message set-msg expand-error-msg err?)
             (cond
               [err?
-               (send expand-error-message set-msg expand-error-msg err?)
-               (send expand-error-parent-panel change-children
-                     (λ (l) (append (remq expand-error-panel l) (list expand-error-panel))))
                (send expand-error-button-parent-panel active-child
                      (cond
                        [(= srcloc-count 0) expand-error-zero-child]
                        [(= srcloc-count 1) expand-error-single-child]
                        [else expand-error-multiple-child]))]
               [else
-               (send expand-error-message set-msg expand-error-msg err?)
                (send expand-error-button-parent-panel active-child expand-error-zero-child)]))))
       
       (define/augment (on-tab-change from-tab to-tab)
@@ -970,72 +982,78 @@
               (send small-control-font get-size-in-pixels)))
               
       (define running-canvas
-        (new (class canvas%
-               (inherit get-dc popup-menu refresh get-client-size)
-               (define/override (on-paint)
+        (let ([tlw this])
+          (new (class canvas%
+                 (inherit get-dc popup-menu refresh get-client-size)
+                 (define/override (on-paint)
+                   (let ([dc (get-dc)])
+                     (define colors-to-draw
+                       (cond
+                         [(not (in-module-language tlw)) #f]
+                         [(preferences:get 'drracket:online-compilation-default-off)
+                          colors]
+                         [else (list "red")]))
+                     (when colors-to-draw
+                       (send dc set-smoothing 'aligned)
+                       (send dc set-pen "black" 1 'transparent)
+                       (send dc set-text-foreground "darkred")
+                       (send dc set-font parens-mismatch-font)
+                       (define-values (tw th td ta) (send dc get-text-extent parens-mismatch-str))
+                       (define-values (cw ch) (get-client-size))
+                       (cond
+                         [(list? colors-to-draw)
+                          (define len (length colors-to-draw))
+                          (for ([color (in-list colors-to-draw)]
+                                [i (in-naturals)])
+                            (if color
+                                (send dc set-brush color 'solid)
+                                (send dc set-brush "black" 'transparent))
+                            (send dc draw-arc 
+                                  (- (/ cw 2) (/ ball-size 2))
+                                  (- (/ ch 2) (/ ball-size 2))
+                                  ball-size ball-size
+                                  (+ (* pi 1/2) (* 2 pi (/ i len)))
+                                  (+ (* pi 1/2) (* 2 pi (/ (+ i 1) len)))))]
+                         [(eq? colors-to-draw 'parens)
+                          (send dc draw-text parens-mismatch-str 
+                                (- (/ cw 2) (/ tw 2))
+                                (- (/ ch 2) (/ th 2)))]))))
+                 (define cb-proc (λ (sym new-val)
+                                   (set! colors #f)
+                                   (refresh)))
+                 (preferences:add-callback 'drracket:online-compilation-default-off cb-proc #t)
+                 (define/override (on-event evt) 
+                   (cond
+                     [(not (in-module-language tlw)) (void)]
+                     [(send evt button-down?)
+                      (define menu (new popup-menu%))
+                      (define on? (preferences:get 'drracket:online-compilation-default-off))
+                      (new menu-item% 
+                           [parent menu]
+                           [label (if on?
+                                      "Disable online compilation"
+                                      "Enable online compilation")]
+                           [callback
+                            (λ args
+                              (preferences:set 'drracket:online-compilation-default-off (not on?)))])
+                      (popup-menu menu (send evt get-x) (send evt get-y))]
+                     [(send evt entering?)
+                      (show-tooltip)]
+                     [(send evt leaving?)
+                      (hide-tooltip)]))
+                 (super-new [style '(transparent)]
+                            [parent (get-info-panel)]
+                            [stretchable-width #f]
+                            [stretchable-height #f]
+                            [min-width 10]
+                            [min-height 10])
+                 
+                 (inherit min-width min-height)
                  (let ([dc (get-dc)])
-                   (define colors-to-draw
-                     (if (preferences:get 'drracket:online-compilation-default-off)
-                         colors
-                         (list "red")))
-                   (when colors-to-draw
-                     (send dc set-smoothing 'aligned)
-                     (send dc set-pen "black" 1 'transparent)
-                     (send dc set-text-foreground "darkred")
-                     (send dc set-font parens-mismatch-font)
-                     (define-values (tw th td ta) (send dc get-text-extent parens-mismatch-str))
-                     (define-values (cw ch) (get-client-size))
-                     (cond
-                       [(list? colors-to-draw)
-                        (define len (length colors-to-draw))
-                        (for ([color (in-list colors-to-draw)]
-                              [i (in-naturals)])
-                          (send dc set-brush color 'solid)
-                          (send dc draw-arc 
-                                (- (/ cw 2) (/ ball-size 2))
-                                (- (/ ch 2) (/ ball-size 2))
-                                ball-size ball-size
-                                (* 2 pi (/ i len))
-                                (* 2 pi (/ (+ i 1) len))))]
-                       [(eq? colors-to-draw 'parens)
-                        (send dc draw-text parens-mismatch-str 
-                              (- (/ cw 2) (/ tw 2))
-                              (- (/ ch 2) (/ th 2)))]))))
-               (define cb-proc (λ (sym new-val)
-                                 (set! colors #f)
-                                 (refresh)))
-               (preferences:add-callback 'drracket:online-compilation-default-off cb-proc #t)
-               (define/override (on-event evt) 
-                 (cond
-                   [(send evt button-down?)
-                    (define menu (new popup-menu%))
-                    (define on? (preferences:get 'drracket:online-compilation-default-off))
-                    (new menu-item% 
-                         [parent menu]
-                         [label (if on?
-                                    "Disable online compilation"
-                                    "Enable online compilation")]
-                         [callback
-                          (λ args
-                            (preferences:set 'drracket:online-compilation-default-off (not on?)))])
-                    (popup-menu menu (send evt get-x) (send evt get-y))]
-                   [(send evt entering?)
-                    (show-tooltip)]
-                   [(send evt leaving?)
-                    (hide-tooltip)]))
-               (super-new [style '(transparent)]
-                          [parent (get-info-panel)]
-                          [stretchable-width #f]
-                          [stretchable-height #f]
-                          [min-width 10]
-                          [min-height 10])
-               
-               (inherit min-width min-height)
-               (let ([dc (get-dc)])
-                 (send dc set-font parens-mismatch-font)
-                 (define-values (w h d a) (send dc get-text-extent parens-mismatch-str))
-                 (min-width (ceiling (inexact->exact (max w ball-size))))
-                 (min-height (ceiling (inexact->exact (max h ball-size))))))))))
+                   (send dc set-font parens-mismatch-font)
+                   (define-values (w h d a) (send dc get-text-extent parens-mismatch-str))
+                   (min-width (ceiling (inexact->exact (max w ball-size))))
+                   (min-height (ceiling (inexact->exact (max h ball-size)))))))))))
   
   (define error-message%
     (class canvas%
@@ -1108,7 +1126,12 @@
   (define expanding-place #f)
   (define pending-thread #f)
   
-  (define (send-to-place editor-contents filename prefab-module-settings show-results)
+  (define (send-to-place editor-contents 
+                         filename 
+                         prefab-module-settings 
+                         show-results 
+                         tell-the-tab-show-bkg-running)
+    (tell-the-tab-show-bkg-running 'running sc-online-expansion-running)
     (unless expanding-place
       (set! expanding-place (dynamic-place expanding-place.rkt 'start))
       (place-channel-put expanding-place module-language-compile-lock)
@@ -1120,22 +1143,32 @@
     (set! pending-thread
           (thread (λ () 
                     (define-values (pc-in pc-out) (place-channel))
+                    (define-values (pc-status-drracket-place pc-status-expanding-place) (place-channel))
                     (define to-send
                       (vector-immutable editor-contents
                                         filename
                                         pc-in 
-                                        prefab-module-settings))
+                                        prefab-module-settings
+                                        pc-status-expanding-place))
                     (place-channel-put expanding-place to-send)
+                    (define us (current-thread))
+                    (thread (λ () 
+                              (define got-status-update (place-channel-get pc-status-drracket-place))
+                              (queue-callback
+                               (λ ()
+                                 (when (eq? us pending-thread)
+                                   (tell-the-tab-show-bkg-running
+                                    'finished-expansion
+                                    sc-online-expansion-running))))))
                     (define res (place-channel-get pc-out))
                     (when res
-                      (let ([t (current-thread)])
-                        (queue-callback
-                         (λ ()
-                           (when (eq? t pending-thread)
-                             (set! pending-thread #f)
-                             (when (getenv "PLTDRPLACEPRINT")
-                               (printf "PLTDRPLACEPRINT: got results back from the place\n"))
-                             (show-results res))))))))))
+                      (queue-callback
+                       (λ ()
+                         (when (eq? us pending-thread)
+                           (set! pending-thread #f)
+                           (when (getenv "PLTDRPLACEPRINT")
+                             (printf "PLTDRPLACEPRINT: got results back from the place\n"))
+                           (show-results res)))))))))
   
   (define (stop-place-running)
     (when expanding-place
@@ -1173,20 +1206,23 @@
       ;; thus, they are where we check the preference
       ;; before doing anything
 
-        
       (define/private (buffer-modified)
         (when (and (preferences:get 'drracket:online-compilation-default-off)
                    (> (processor-count) 1))
           (clear-old-error)
           (reset-frame-expand-error #t)
           (let ([tlw (get-top-level-window)])
-            (when (in-module-language tlw)
-              (send (get-tab) show-bkg-running 'nothing #f)
-              (stop-place-running)
-              (set! compilation-out-of-date? #t)
-              (when (eq? (send tlw get-current-tab) (get-tab))
-                (send tmr stop)
-                (send tmr start 250 #t))))))
+            (cond
+              [(in-module-language tlw)
+               (send (get-tab) show-bkg-running 'nothing #f)
+               (stop-place-running)
+               (set! compilation-out-of-date? #t)
+               (when (eq? (send tlw get-current-tab) (get-tab))
+                 (send tmr stop)
+                 (send tmr start 250 #t))]
+              [else
+               (send (get-tab) show-bkg-running 'nothing #f)
+               (hide-module-language-error-panel)]))))
       
       (define/public (restart-place)
         (when (and (preferences:get 'drracket:online-compilation-default-off)
@@ -1207,11 +1243,11 @@
               (send-to-place editor-contents
                              filename
                              (module-language-settings->prefab-module-settings settings)
-                             (λ (res) (show-results res)))
+                             (λ (res) (show-results res))
+                             (λ (a b) (send (get-tab) show-bkg-running a b)))
               (when status-line-open?
                 (clear-old-error)
-                (reset-frame-expand-error #t))
-              (send (get-tab) show-bkg-running 'running sc-online-expansion-running)))))
+                (reset-frame-expand-error #t))))))
       
       (define/private (fetch-data-to-send)
         (define str (make-string (last-position) #\space))
@@ -1235,6 +1271,7 @@
       
       (define status-line-open? #f)
       
+      (define error/status-message-hidden? #f)
       (define error/status-message-str "")
       (define error/status-message-err? #f)
       (define error-message-srclocs '())
@@ -1252,9 +1289,13 @@
           (update-frame-expand-error)))
       (define/public (update-frame-expand-error)
         (send (send (get-tab) get-frame) set-expand-error/status
+              error/status-message-hidden?
               error/status-message-str 
               error/status-message-err?
               (length error-message-srclocs)))
+      (define/public (hide-module-language-error-panel)
+        (set! error/status-message-hidden? #t)
+        (update-frame-expand-error))
 
       (define/public (expand-error-next) 
         (define candidates (filter (λ (error-message-srcloc) 
@@ -1312,7 +1353,7 @@
            (clear-old-error)
            (reset-frame-expand-error #f)]
           [(no-errors)
-           (send (get-tab) show-bkg-running 'nothing #f)
+           (send (get-tab) show-bkg-running 'completed-successfully sc-finished-successfully)
            (clear-old-error)
            (reset-frame-expand-error #f)]
           [(handler-results)
@@ -1327,7 +1368,7 @@
                                       (drracket:module-language-tools:online-expansion-handler-id o-e-h)))
                (when (equal? this-key that-key)
                  ((drracket:module-language-tools:online-expansion-handler-local-handler o-e-h) this val))))
-           (send (get-tab) show-bkg-running 'nothing #f)]
+           (send (get-tab) show-bkg-running 'completed-successfully sc-finished-successfully)]
           [else
            (error 'module-language.rkt "unknown response from the expanding place: ~s\n" res)]))
       
@@ -1351,6 +1392,7 @@
            (error-range (- pos 1) (+ pos span -1) #f)))
         (set-error-ranges-from-online-error-ranges (vector-ref res 2))
         (invalidate-online-error-ranges)
+        (set! error/status-message-hidden? #f)
         (update-frame-expand-error))
       
       (define/private (show-error-as-highlighted-regions res)
@@ -1366,6 +1408,7 @@
                 (define span (vector-ref range 1))
                 (highlight-range (- pos 1) (+ pos span -1) "gold")))
         (set-error-ranges-from-online-error-ranges (vector-ref res 2))
+        (set! error/status-message-hidden? #f)
         (update-frame-expand-error))
       
       (define online-error-ranges '())
@@ -1521,6 +1564,10 @@
       (define/augment (after-load-file success?)
         (when success? (buffer-modified))
         (inner (void) after-load-file success?))
+      
+      (define/augment (after-set-next-settings new-settings)
+        (buffer-modified)
+        (inner (void) after-set-next-settings new-settings))
       
       (super-new)))
 

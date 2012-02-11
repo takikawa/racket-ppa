@@ -80,7 +80,9 @@ with fixnums. See also the @racketmodname[racket/fixnum] module, below.
 
 Two fixnums that are @racket[=] are also the same
 according to @racket[eq?]. Otherwise, the result of @racket[eq?]
-applied to two numbers is undefined.
+applied to two numbers is undefined, except that numbers produced
+by the default reader in @racket[read-syntax] mode are @tech{interned} and therefore @racket[eq?]
+when they are @racket[eqv?].
 
 Two numbers are @racket[eqv?] when they are both inexact with the same precision or both
 exact, and when they are @racket[=] (except for @racket[+nan.0], @racket[+nan.f],
@@ -361,23 +363,28 @@ Returns the smallest of the @racket[x]s, or @racket[+nan.0] if any
 @mz-examples[(min 1 3 2) (min 1 3 2.0)]}
 
 
-@defproc[(gcd [n integer?] ...) integer?]{
+@defproc[(gcd [n rational?] ...) rational?]{
 
 Returns the @as-index{greatest common divisor} (a non-negative
- number) of the @racket[n]s. If no arguments are provided, the result
+ number) of the @racket[n]s; for non-integer @racket[n]s, the result
+ is the @racket[gcd] of the numerators divided
+ by the @racket[lcm] of the denominators. 
+ If no arguments are provided, the result
  is @racket[0]. If all arguments are zero, the result is zero.
 
-@mz-examples[(gcd 10) (gcd 12 81.0)]}
+@mz-examples[(gcd 10) (gcd 12 81.0) (gcd 1/2 1/3)]}
 
 
-@defproc[(lcm [n integer?] ...) integer?]{
+@defproc[(lcm [n rational?] ...) rational?]{
 
 Returns the @as-index{least common multiple} (a non-negative number)
- of the @racket[n]s. If no arguments are provided, the result is
+ of the @racket[n]s; non-integer @racket[n]s, the result is
+ the absolute value of the product divided by the
+ @racket[gcd]. If no arguments are provided, the result is
  @racket[1]. If any argument is zero, the result is zero; furthermore,
  if any argument is exact @racket[0], the result is exact @racket[0].
 
-@mz-examples[(lcm 10) (lcm 3 4.0)]}
+@mz-examples[(lcm 10) (lcm 3 4.0) (lcm 1/2 2/3)]}
 
 
 @defproc[(round [x real?]) (or/c integer? +inf.0 -inf.0 +nan.0)]{
@@ -789,7 +796,13 @@ Seeds the current pseudo-random number generator with
 @racket[k]. Seeding a generator sets its internal state
 deterministically; that is, seeding a generator with a particular
 number forces it to produce a sequence of pseudo-random numbers that
-is the same across runs and across platforms.}
+is the same across runs and across platforms.
+
+The @racket[random-seed] function is convenient for some purposes, but
+note that the space of states for a pseudo-random number generator is
+much larger that the space of allowed values for @racket[k]. Use
+@racket[vector->pseudo-random-generator!] to set a pseudo-random
+number generator to any of its possible states.}
 
 
 @defproc[(make-pseudo-random-generator) pseudo-random-generator?]{
@@ -811,7 +824,7 @@ used by @racket[random].}
 
 
 @defproc[(pseudo-random-generator->vector [generator pseudo-random-generator?])
-         vector?]{
+         pseudo-random-generator-vector?]{
 
 Produces a vector that represents the complete internal state of
 @racket[generator]. The vector is suitable as an argument to
@@ -819,24 +832,29 @@ Produces a vector that represents the complete internal state of
 its current state (across runs and across platforms).}
 
 
-@defproc[(vector->pseudo-random-generator [vec vector?])
+@defproc[(vector->pseudo-random-generator [vec pseudo-random-generator-vector?])
          pseudo-random-generator?]{
 
 Produces a pseudo-random number generator whose internal state
-corresponds to @racket[vec]. The vector @racket[vec] must contain six
-exact integers; the first three integers must be in the range
-@racket[0] to @racket[4294967086], inclusive; the last three integers
-must be in the range @racket[0] to @racket[4294944442], inclusive; at
-least one of the first three integers must be non-zero; and at least
-one of the last three integers must be non-zero.}
+corresponds to @racket[vec].}
 
 @defproc[(vector->pseudo-random-generator! [generator pseudo-random-generator?]
-                                           [vec vector?])
+                                           [vec pseudo-random-generator-vector?])
          void?]{
 
 Like @racket[vector->pseudo-random-generator], but changes
 @racket[generator] to the given state, instead of creating a new
 generator.}
+
+
+@defproc[(pseudo-random-generator-vector? [v any/c]) boolean?]{
+
+Returns @racket[#t] if @racket[v] is a vector of six exact integers,
+where the first three integers are in the range @racket[0] to
+@racket[4294967086], inclusive; the last three integers are in the
+range @racket[0] to @racket[4294944442], inclusive; at least one of
+the first three integers is non-zero; and at least one of the last
+three integers is non-zero. Otherwise, the result is @racket[#f].}
 
 @; ------------------------------------------------------------------------
 @subsection{Number--String Conversions}
@@ -865,7 +883,8 @@ Reads and returns a number datum from @racket[s] (see
 parse exactly as a number datum (with no whitespace). The optional
 @racket[radix] argument specifies the default base for the number,
 which can be overridden by @litchar{#b}, @litchar{#o}, @litchar{#d}, or
-@litchar{#x} in the string.
+@litchar{#x} in the string. The @racket[read-decimal-as-inexact]
+parameter affects @racket[string->number] in the same as way as @racket[read].
 
 @mz-examples[(string->number "3.0+2.5i") (string->number "hello")
           (string->number "111" 7)  (string->number "#b111" 7)]

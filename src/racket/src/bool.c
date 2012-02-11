@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -485,6 +485,14 @@ int is_equal (Scheme_Object *obj1, Scheme_Object *obj2, Equal_Info *eql)
     l2 = SCHEME_CHAR_STRTAG_VAL(obj2);
     return ((l1 == l2)
 	    && !memcmp(SCHEME_CHAR_STR_VAL(obj1), SCHEME_CHAR_STR_VAL(obj2), l1 * sizeof(mzchar)));
+  } else if (t1 == scheme_regexp_type) {
+    if (scheme_regexp_is_byte(obj1) != scheme_regexp_is_byte(obj2))
+      return 0;
+    if (scheme_regexp_is_pregexp(obj1) != scheme_regexp_is_pregexp(obj2))
+      return 0;
+    obj1 = scheme_regexp_source(obj1);
+    obj2 = scheme_regexp_source(obj2);
+    goto top;
   } else if ((t1 == scheme_structure_type)
              || (t1 == scheme_proc_struct_type)) {
     Scheme_Struct_Type *st1, *st2;
@@ -618,6 +626,12 @@ int is_equal (Scheme_Object *obj1, Scheme_Object *obj2, Equal_Info *eql)
     obj1 = SCHEME_PTR_VAL(obj1);
     obj2 = SCHEME_PTR_VAL(obj2);
     goto top;
+  } else if (t1 == scheme_place_bi_channel_type) {
+    Scheme_Place_Bi_Channel *bc1, *bc2;
+    bc1 = (Scheme_Place_Bi_Channel *)obj1;
+    bc2 = (Scheme_Place_Bi_Channel *)obj2;
+   return (SAME_OBJ(bc1->recvch, bc2->recvch)
+           && SAME_OBJ(bc1->sendch, bc2->sendch));
   } else if (!eql->for_chaperone && ((t1 == scheme_chaperone_type)
                                      || (t1 == scheme_proc_chaperone_type))) {
     /* both chaperones */

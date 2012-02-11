@@ -603,5 +603,83 @@
   (two))
 
 ;; ----------------------------------------
+;; Check `free-identifier=?' propagation,
+;; definition contexts, and `syntax-local-bind-syntaxes'
+
+(let ()
+  (define-syntax (compare stx)
+    (define id0 (cadr (syntax->list stx)))
+    (unless (free-identifier=? id0 #'compare)
+      (error "`free-identifier=? test failed on int-def binding"))
+    #'10)
+  
+  (define-syntax (invoke stx)
+    (define id1 (cadr (syntax->list stx)))
+    (define id2 ((make-syntax-introducer) (datum->syntax #false 'dummy)))
+    (define d-ctx (syntax-local-make-definition-context #false))
+    (define e-ctx (list (gensym)))
+    (syntax-local-bind-syntaxes
+     (list id2)
+     #`(make-rename-transformer #'#,id1)
+     d-ctx)
+    (internal-definition-context-seal d-ctx)
+    (local-expand #`(#,id2 #,id2) e-ctx (list #'quote) d-ctx))
+
+  (test 10 'ten (invoke compare)))
+
+;; ----------------------------------------
+;; Check zo marshaling of prefab in a list:
+
+(let ([s #'(quote-syntax (#s(foo bar)))])
+  (define-values (i o) (make-pipe))
+  (parameterize ([current-namespace (make-base-namespace)]
+                 [read-accept-compiled #t])
+    (write (compile s) o)
+    (test (syntax->datum (eval (read i))) values '(#s(foo bar)))))
+
+;; ----------------------------------------
+;; Check require & provide of marked names in various phases:
+
+(module phase-providing-check racket/base
+  (define-syntax-rule (bounce phase phase+1)
+    (begin
+      (#%require (for-meta phase racket/base))
+      (#%provide (for-meta phase printf)
+                 (for-meta phase+1 syntax-rules))
+      (define (expect f v) 
+        (unless (f v)
+          (error 'marks "failure at phase ~s: ~s vs. ~s"
+                 phase f v)))
+      (expect list? (identifier-binding #'printf phase))
+      (expect list? (identifier-binding #'syntax-rules phase+1))
+      (unless (or (eq? phase phase+1)
+                  (eq? phase+1 0))
+        (expect not (identifier-binding #'printf phase+1)))))
+
+  (bounce 0 1)
+  (bounce 1 2)
+  (bounce 2 3)
+  (bounce -2 -1)
+  (bounce -1 0)
+  (bounce #f #f)
+  (define printf 'ok!))
+(require 'phase-providing-check)
+
+;; ----------------------------------------
+;; Check reconstruction of `provide' forms:
+
+(test #t
+      'provide
+      (syntax-case (expand '(module m racket 
+                              (define-for-syntax x 8) 
+                              (provide (for-meta 1 x)))) ()
+        [(module m racket
+           (#%module-begin
+            defn
+            (#%provide (for-meta 1 x))))
+         #t]
+        [else #f]))
+
+;; ----------------------------------------
 
 (report-errs)

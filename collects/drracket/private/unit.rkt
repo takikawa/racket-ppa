@@ -36,8 +36,9 @@ module browser threading seems wrong.
          "insert-large-letters.rkt"
          "get-defs.rkt"
          "local-member-names.rkt"
+         "eval-helpers.rkt"
          (prefix-in drracket:arrow: "../arrow.rkt")
-         
+         (prefix-in icons: images/compile-time)
          mred
          (prefix-in mred: mred)
          
@@ -65,6 +66,46 @@ module browser threading seems wrong.
       (with-handlers ([exn:fail:filesystem? (λ (x) #f)])
         (let ([fw (collection-path "framework")])
           (directory-exists? (build-path fw 'up 'up ".git"))))))
+
+;; ===================================================================================================
+;; Compiled bitmaps
+
+(require (for-syntax
+          racket/base
+          (prefix-in icons: (combine-in images/icons/file images/icons/control images/icons/style
+                                        images/icons/stickman images/logos))))
+
+(define execute-bitmap
+  (icons:compiled-bitmap (icons:play-icon icons:run-icon-color (icons:toolbar-icon-height))))
+(define break-bitmap
+  (icons:compiled-bitmap (icons:stop-icon icons:halt-icon-color (icons:toolbar-icon-height))))
+(define small-save-bitmap
+  (icons:compiled-bitmap (icons:small-save-icon icons:syntax-icon-color "gold"
+                                                (icons:toolbar-icon-height))))
+(define save-bitmap
+  (icons:compiled-bitmap (icons:save-icon icons:syntax-icon-color "gold"
+                                          (icons:toolbar-icon-height))))
+
+(begin-for-syntax
+  (define stickman-height 18)
+  (define num-running-frames 12))
+
+(define running-frame-list
+  (icons:compiled-bitmap-list
+   (for/list ([t  (in-range 0 1 (/ 1 num-running-frames))])
+     (icons:running-stickman-icon t icons:run-icon-color "white" icons:run-icon-color
+                                  stickman-height))))
+(define running-frames (list->vector running-frame-list))
+
+(define standing-frame
+  (icons:compiled-bitmap
+   (icons:standing-stickman-icon icons:run-icon-color "white" icons:run-icon-color
+                                 stickman-height)))
+
+(define very-small-planet-bitmap
+  (icons:compiled-bitmap (icons:planet-logo (icons:toolbar-icon-height))))
+
+;; ===================================================================================================
 
 (define-unit unit@
   (import [prefix help-desk: drracket:help-desk^]
@@ -201,9 +242,8 @@ module browser threading seems wrong.
   ;; finds the symbol around the position `pos' (approx)
   (define (find-symbol text pos)
     (cond
-      [(and (is-a? text scheme:text<%>)
-            (not (send text is-stopped?))
-            (not (send text is-frozen?)))
+      [(and (is-a? text racket:text<%>)
+            (not (send text is-stopped?)))
        (let* ([before (send text get-backward-sexp pos)]
               [before+ (and before (send text get-forward-sexp before))]
               [after (send text get-forward-sexp pos)]
@@ -384,10 +424,6 @@ module browser threading seems wrong.
                    frame
                    program-filename)))])))
   
-  (define execute-bitmap (make-object bitmap% (collection-file-path "run.png" "icons") 'png/mask))
-  (define break-bitmap (make-object bitmap% (collection-file-path "break.png" "icons") 'png/mask))
-  (define save-bitmap (make-object bitmap% (collection-file-path "save.png" "icons") 'png/mask))
-  
   (define-values (get-program-editor-mixin add-to-program-editor-mixin)
     (let* ([program-editor-mixin
             (mixin (editor:basic<%> (class->interface text%)) () 
@@ -483,7 +519,7 @@ module browser threading seems wrong.
             (text:line-numbers-mixin
              (text:first-line-mixin
               (drracket:module-language:module-language-put-file-mixin
-               (scheme:text-mixin
+               (racket:text-mixin
                 (color:text-mixin
                  (drracket:rep:drs-bindings-keymap-mixin
                   (mode:host-text-mixin
@@ -1200,12 +1236,10 @@ module browser threading seems wrong.
                   (send (send frame get-current-tab) clear-execution-state)))))
       
       (define/public (get-directory)
-        (let ([filename (send defs get-filename)])
-          (if (and (path? filename)
-                   (file-exists? filename))
-              (let-values ([(base _1 _2) (split-path (normalize-path filename))])
-                base)
-              #f)))
+        (define bx (box #f))
+        (define filename (send defs get-filename bx))
+        (get-init-dir 
+         (and (not (unbox bx)) filename)))
       
       (define/pubment (can-close?)
         (and (send defs can-close?)
@@ -1380,12 +1414,19 @@ module browser threading seems wrong.
       ;; so it stays alive as long 
       ;; as the frame stays alive
       (define show-line-numbers-pref-fn
-        (let ([fn (lambda (pref value) (show-line-numbers! value))])
+        (let ([fn (lambda (pref value)
+                    (when show-line-numbers-menu-item
+                      (send show-line-numbers-menu-item set-label
+                            (if value
+                                (string-constant hide-line-numbers/menu)
+                                (string-constant show-line-numbers/menu))))
+                    (show-line-numbers! value))])
           (preferences:add-callback
            'drracket:show-line-numbers?
            fn
            #t)
           fn))
+      (define show-line-numbers-menu-item #f)
       
       (define/override (add-line-number-menu-items menu)
         (define on? (preferences:get 'drracket:show-line-numbers?))
@@ -2790,8 +2831,8 @@ module browser threading seems wrong.
                        (get-defs-tab-label defs #f))
                    200))
             (init-definitions-text new-tab)
-            (change-to-nth-tab (- (send tabs-panel get-number) 1))
             (when filename (send defs load-file filename))
+            (change-to-nth-tab (- (send tabs-panel get-number) 1))
             (send ints initialize-console)
             (send tabs-panel set-selection (- (send tabs-panel get-number) 1))
             (set! newest-frame this)
@@ -3101,6 +3142,30 @@ module browser threading seems wrong.
                 (string-constant interactions-menu-item-help-string)))
         
         (new menu:can-restore-menu-item%
+             [label (string-constant use-horizontal-layout)]
+             [parent (get-show-menu)]
+             [callback (λ (x y) 
+                         (define vertical? (send resizable-panel get-vertical?)) 
+                         (preferences:set 'drracket:defs/ints-horizontal vertical?)
+                         (send resizable-panel set-orientation vertical?)
+                         (define update-shown? (or (not interactions-shown?)
+                                                   (not definitions-shown?)))
+                         (unless interactions-shown?
+                           (toggle-show/hide-interactions))
+                         (unless definitions-shown?
+                           (toggle-show/hide-definitions))
+                         (when update-shown?
+                           (update-shown)))]
+             [demand-callback
+              (λ (mi) (send mi set-label (if (send resizable-panel get-vertical?)
+                                             (string-constant use-horizontal-layout)
+                                             (string-constant use-vertical-layout))))]
+             [shortcut #\l]
+             [shortcut-prefix (cons 'shift (get-default-shortcut-prefix))])
+        
+        (new separator-menu-item% [parent (get-show-menu)])
+        
+        (new menu:can-restore-menu-item%
              (shortcut #\u)
              (label 
               (if (delegated-text-shown?)
@@ -3341,18 +3406,6 @@ module browser threading seems wrong.
             (send module-browser-planet-path-check-box enable #t)
             (send module-browser-name-length-choice enable #t)
             (close-status-line 'plt:module-browser))))
-      
-      ;; set-directory : text -> void
-      ;; sets the current-directory and current-load-relative-directory
-      ;; based on the file saved in the definitions-text
-      (define/private (set-directory definitions-text)
-        (let* ([tmp-b (box #f)]
-               [fn (send definitions-text get-filename tmp-b)])
-          (unless (unbox tmp-b)
-            (when fn
-              (let-values ([(base name dir?) (split-path fn)])
-                (current-directory base)
-                (current-load-relative-directory base))))))
       
       
       ;                                            
@@ -3653,7 +3706,7 @@ module browser threading seems wrong.
                 (λ (method)
                   (λ (_1 _2)
                     (let ([text (get-focus-object)])
-                      (when (is-a? text scheme:text<%>)
+                      (when (is-a? text racket:text<%>)
                         (method text)))))]
                [show/hide-capability-menus
                 (λ ()
@@ -3877,7 +3930,7 @@ module browser threading seems wrong.
                             (let ([es-admin (send es get-admin)])
                               (when es-admin
                                 (let ([ed (send es-admin get-editor)])
-                                  (when (is-a? ed scheme:text<%>)
+                                  (when (is-a? ed racket:text<%>)
                                     (send ed uncomment-box/selection)))))]
                            [else (send text uncomment-selection)]))]
                       [else (send text uncomment-selection)]))))))
@@ -3958,19 +4011,16 @@ module browser threading seems wrong.
               has-editor-on-demand)
             (register-capability-menu-item 'drscheme:special:insert-lambda insert-menu))
           
-          (new menu:can-restore-menu-item%
-               [label (if (show-line-numbers?)
-                          (string-constant hide-line-numbers/menu)
-                          (string-constant show-line-numbers/menu))]
-               [parent (get-show-menu)]
-               [callback (lambda (self event)
-                           (define value (preferences:get 'drracket:show-line-numbers?))
-                           (send self set-label
-                                 (if value
-                                     (string-constant show-line-numbers/menu)
-                                     (string-constant hide-line-numbers/menu)))
-                           (preferences:set 'drracket:show-line-numbers? (not value))
-                           (show-line-numbers! (not value)))])
+          (set! show-line-numbers-menu-item
+                (new menu:can-restore-menu-item%
+                     [label (if (show-line-numbers?)
+                                (string-constant hide-line-numbers/menu)
+                                (string-constant show-line-numbers/menu))]
+                     [parent (get-show-menu)]
+                     [callback (lambda (self event)
+                                 (define value (preferences:get 'drracket:show-line-numbers?))
+                                 (preferences:set 'drracket:show-line-numbers? (not value))
+                                 (show-line-numbers! (not value)))]))
           
           (make-object separator-menu-item% (get-show-menu))
           
@@ -4028,7 +4078,8 @@ module browser threading seems wrong.
       (define/private (jump-to-source-loc srcloc)
         (define ed (srcloc-source srcloc))
         (send ed set-position (- (srcloc-position srcloc) 1))
-        (send ed set-caret-owner #f 'global))
+        (send ed set-caret-owner #f 'global)
+        (send (get-interactions-text) highlight-a-single-error srcloc))
       
       (define/public (move-to-interactions) 
         (ensure-rep-shown (get-interactions-text))
@@ -4160,12 +4211,13 @@ module browser threading seems wrong.
                                     (save)
                                     (send definitions-canvas focus)))]
                  [bitmap save-bitmap]
+                 [alternate-bitmap small-save-bitmap]
                  [label (string-constant save-button-label)]))
       (register-toolbar-button save-button)
       
       (set! name-message (new drs-name-message% [parent name-panel]))
       (send name-message stretchable-width #t)
-      (send name-message set-allow-shrinking 200)
+      (send name-message set-allow-shrinking 160)
       [define teachpack-items null]
       [define break-button (void)]
       [define execute-button (void)]
@@ -4374,66 +4426,43 @@ module browser threading seems wrong.
   ;                                                   
   ;                                                   
   
-  
-  (define running-bitmap (include-bitmap (lib "icons/b-run.png")))
-  (define waiting-bitmap (include-bitmap (lib "icons/b-wait.png")))
-  (define waiting2-bitmap (include-bitmap (lib "icons/b-wait2.png")))
-  (define running/waiting-bitmaps (list running-bitmap waiting-bitmap waiting2-bitmap))
   (define running-canvas%
     (class canvas%
       (inherit get-dc refresh get-client-size)
-      (define/public (set-running r?) 
-        (unless (eq? r? is-running?)
-          (set! is-running? r?)
-          (refresh)))
-      (define is-running? #f)
-      (define toggle? #t)
-      (define timer #f)
-      (define inside? #f)
       
-      (define/override (on-event evt)
-        (let-values ([(w h) (get-client-size)])
-          (let ([new-inside?
-                 (and (< 0 (send evt get-x) w)
-                      (< 0 (send evt get-y) h))]
-                [old-inside? inside?])
-            (set! inside? new-inside?)
-            (cond
-              [(and new-inside? (not old-inside?))
-               (unless is-running?
-                 (set! timer
-                       (new timer%
-                            [notify-callback 
-                             (λ ()
-                               (set! toggle? (not toggle?))
-                               (refresh))]
-                            [interval 200])))]
-              [(and (not new-inside?) old-inside? timer)
-               (send timer stop)
-               (set! timer #f)]))))
+      (define running-frame-delay 200)  ; 5 FPS at the most (if user program is blocked or waiting)
+      (define num-running-frames (vector-length running-frames))
+      (define is-running? #f)
+      (define frame 0)
+      (define timer (make-object timer% (λ () (refresh) (yield)) #f))
+      
+      (define/public (set-running r?)
+        (cond [r?    (unless is-running? (set! frame 4))
+                     (send timer start running-frame-delay #f)]
+              [else  (send timer stop)
+                     (refresh)])
+        (set! is-running? r?))
       
       (define/override (on-paint) 
-        (let ([dc (get-dc)]
-              [bm 
-               (if is-running?
-                   running-bitmap
-                   (if toggle?
-                       waiting-bitmap
-                       waiting2-bitmap))])
-          (let-values ([(cw ch) (get-client-size)])
-            (send dc draw-bitmap bm 
-                  (- (/ cw 2) (/ (send bm get-width) 2))
-                  (- (/ ch 2) (/ (send bm get-height) 2))
-                  'solid
-                  (send the-color-database find-color "black")
-                  (send bm get-loaded-mask)))))
+        (define dc (get-dc))
+        (define bm (cond [is-running?  (define bm (vector-ref running-frames frame))
+                                       (set! frame (modulo (+ frame 1) num-running-frames))
+                                       bm]
+                         [else  standing-frame]))
+        (define-values (w h) (get-client-size))
+        (send dc draw-bitmap bm 
+              (- (/ w 2) (/ (send bm get-width) 2))
+              (- (/ h 2) (/ (send bm get-height) 2))))
       
       (super-new [stretchable-width #f]
                  [stretchable-height #f]
                  [style '(transparent no-focus)])
+      
       (inherit min-width min-height)
-      (min-width (apply max (map (λ (x) (send x get-width)) running/waiting-bitmaps)))
-      (min-height (apply max (map (λ (x) (send x get-height)) running/waiting-bitmaps)))))
+      
+      (define all-running-frames (cons standing-frame running-frame-list))
+      (min-width (apply max (map (λ (x) (send x get-width)) all-running-frames)))
+      (min-height (apply max (map (λ (x) (send x get-height)) all-running-frames)))))
   
   ;; get-mbytes : top-level-window -> (union #f  ;; cancel
   ;;                                         integer[>=100] ;; a limit
@@ -4675,8 +4704,6 @@ module browser threading seems wrong.
         [(zero? n) '()]
         [(null? l) '()]
         [else (cons (car l) (loop (cdr l) (- n 1)))])))
-  
-  (define very-small-planet-bitmap (include-bitmap (lib "icons/very-small-planet.png") 'png/mask))
   
   (define saved-bug-reports-window #f)
   (define saved-bug-reports-panel #f)

@@ -356,7 +356,6 @@
                ,(if (assume-primitives)
                     '(void)
                     '(namespace-require/copy 'scheme))
-               (require compiler/cffi)
                ,@(map (lambda (s) `(load ,s)) prefixes)
                (void)))))))
    (list "file/directory/collection")))
@@ -365,7 +364,7 @@
   (parse-options (current-command-line-arguments)))
 
 (when (compiler:option:somewhat-verbose)
-  (printf "mzc v~a [~a], Copyright (c) 2004-2011 PLT Scheme Inc.\n"
+  (printf "mzc v~a [~a], Copyright (c) 2004-2012 PLT Scheme Inc.\n"
           (version)
           (system-type 'gc)))
 

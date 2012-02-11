@@ -14,9 +14,14 @@
      is related to the way the x86_64 port shuffles arguments into
      temporary registers.
 
-  5) On x86_64, arguments are delivered in JIT_V2, JIT_V3, and JIT_R2,
-     in that order. So don't set JIT_R2 before getting the third
-     argument, etc.
+  5) On non-Win64 x86_64, arguments are delivered in JIT_V2, JIT_V3,
+     JIT_R2, and JIT_R1 in that order. So don't set JIT_R2 before
+     getting the third argument, etc.
+  
+     On non-Win64 x86_64, arguments are delivered in JIT_R1, JIT_R2,
+     and other registers. So don't set JIT_R2 before getting the
+     second argument, etc.
+
 */
 
 #ifdef __APPLE__
@@ -43,11 +48,20 @@ END_XFORM_ARITH;
 #ifdef MZ_USE_JIT_X86_64
 # define MZ_USE_JIT_I386
 # define JIT_X86_64
+# ifndef MZ_NO_JIT_SSE
+#  define JIT_X86_SSE
+# endif
 #endif
 
 #ifdef MZ_USE_JIT_I386
 # ifndef JIT_X86_64
 #  define JIT_X86_PLAIN
+# endif
+#endif
+
+#ifdef MZ_USE_JIT_SSE
+# ifndef JIT_X86_SSE
+#  define JIT_X86_SSE
 # endif
 #endif
 
@@ -74,7 +88,11 @@ END_XFORM_ARITH;
 #define WORDS_TO_BYTES(x) ((x) << JIT_LOG_WORD_SIZE)
 #define MAX_TRY_SHIFT 30
 
-#define NATIVE_ARG_COUNT 3
+#ifdef USE_THREAD_LOCAL
+# define NATIVE_ARG_COUNT 4
+#else
+# define NATIVE_ARG_COUNT 3
+#endif
 
 #define JIT_LOG_DOUBLE_SIZE 3
 #define JIT_DOUBLE_SIZE (1 << JIT_LOG_DOUBLE_SIZE)
@@ -157,12 +175,13 @@ extern int scheme_jit_malloced;
 THREAD_LOCAL_DECL(extern double scheme_jit_save_fp);
 #endif
 
-typedef int (*Native_Check_Arity_Proc)(Scheme_Object *o, int argc, int dummy);
-typedef Scheme_Object *(*Native_Get_Arity_Proc)(Scheme_Object *o, int dumm1, int dummy2);
+typedef int (*Native_Check_Arity_Proc)(Scheme_Object *o, int argc, int dummy EXTRA_NATIVE_ARGUMENT_TYPE);
+typedef Scheme_Object *(*Native_Get_Arity_Proc)(Scheme_Object *o, int dumm1, int dummy2 EXTRA_NATIVE_ARGUMENT_TYPE);
 typedef Scheme_Object *(*LWC_Native_Starter)(void *data,
                                              int argc,
                                              Scheme_Object **argv,
-                                             Scheme_Closed_Prim *chain_to,
+                                             void *thdloc,
+                                             Scheme_Native_Proc *chain_to,
                                              void **save_pos);
 
 typedef struct Apply_LWC_Args {
@@ -275,7 +294,7 @@ extern struct scheme_jit_common_record scheme_jit_common;
 
 #define sjc scheme_jit_common
 
-typedef struct {
+typedef struct mz_jit_state {
   MZTAG_IF_REQUIRED
   GC_CAN_IGNORE jit_state js;
   char *limit;
@@ -304,7 +323,7 @@ typedef struct {
   int self_pos, self_closure_size, self_toplevel_pos;
   int self_to_closure_delta, closure_to_args_delta;
   int closure_self_on_runstack;
-  int example_argc;
+  int example_argc, example_argv_delta;
   Scheme_Object **example_argv;
   void *self_restart_code;
   void *self_nontail_code;
@@ -365,7 +384,6 @@ typedef struct {
 #endif
 
 #ifdef JIT_THREAD_LOCAL
-# define BOTTOM_VARIABLE GC_variable_stack
 # define tl_delta(id) ((uintptr_t)&(id) - (uintptr_t)&BOTTOM_VARIABLE)
 # define tl_MZ_RUNSTACK                    tl_delta(MZ_RUNSTACK)
 # define tl_MZ_RUNSTACK_START              tl_delta(MZ_RUNSTACK_START)
@@ -624,7 +642,7 @@ int check_location;
    circumstances:
 
    * They can only be used within a function (normally corresponding
-     to a Scheme lambda) where mz_push_locals() has been called after
+     to a Racket lambda) where mz_push_locals() has been called after
      jit_prolog(), and where mz_pop_locals() is called before
      jit_ret().
 
@@ -778,19 +796,16 @@ void scheme_jit_prolog_again(mz_jit_state *jitter, int n, int ret_addr_reg)
 #endif
 
 #ifdef JIT_THREAD_LOCAL
-# define mz_get_threadlocal() (mz_prepare(0), (void)mz_finish(scheme_jit_get_threadlocal_table), jit_retval(JIT_R0))
 # ifdef JIT_X86_64
 #  define mz_pop_threadlocal() mz_get_local_p(JIT_R14, JIT_LOCAL4)
-#  define mz_push_threadlocal() (mz_set_local_p(JIT_R14, JIT_LOCAL4), \
-                                 PUSHQr(JIT_R0), PUSHQr(JIT_R1), PUSHQr(JIT_R2), PUSHQr(JIT_R2), \
-                                 mz_get_threadlocal(), jit_retval(JIT_R0), jit_movr_p(JIT_R14, JIT_R0), \
-                                 POPQr(JIT_R2), POPQr(JIT_R2), POPQr(JIT_R1), POPQr(JIT_R0))
+#  define mz_push_threadlocal(in) /* empty */
+#  define mz_push_threadlocal_early() (mz_set_local_p(JIT_R14, JIT_LOCAL4), jit_movr_p(JIT_R14, JIT_R_ARG4))
 #  define mz_repush_threadlocal() mz_set_local_p(JIT_R14, JIT_LOCAL4)
 # else
 #  define mz_pop_threadlocal() /* empty */
 #  ifdef THREAD_LOCAL_USES_JIT_V2
 #   define _mz_install_threadlocal(reg) jit_movr_p(JIT_V2, reg)
-#   define mz_repush_threadlocal() /* empty */
+#   define mz_repush_threadlocal(in) /* empty */
 #  else
 #   define _mz_install_threadlocal(reg) mz_set_local_p(reg, JIT_LOCAL4)
 #   define mz_repush_threadlocal() (PUSHQr(JIT_R0), jit_ldr_p(JIT_R0, _EBP), \
@@ -798,13 +813,13 @@ void scheme_jit_prolog_again(mz_jit_state *jitter, int n, int ret_addr_reg)
                                     jit_stxi_p(JIT_LOCAL4, _EBP, JIT_R0), \
                                     POPQr(JIT_R0))
 #  endif
-#  define mz_push_threadlocal() (PUSHQr(JIT_R0), PUSHQr(JIT_R1), PUSHQr(JIT_R2), PUSHQr(JIT_R2), \
-                                 mz_get_threadlocal(), jit_retval(JIT_R0), _mz_install_threadlocal(JIT_R0), \
-                                 POPQr(JIT_R2), POPQr(JIT_R2), POPQr(JIT_R1), POPQr(JIT_R0))
+#  define mz_push_threadlocal(in) (in = jit_arg_p(), jit_getarg_p(JIT_V2, in), _mz_install_threadlocal(JIT_V2))
+#  define mz_push_threadlocal_early() /* empty */
 # endif
 #else
 # define mz_pop_threadlocal() /* empty */
-# define mz_push_threadlocal() /* empty */
+# define mz_push_threadlocal(in) /* empty */
+# define mz_push_threadlocal_early() /* empty */
 # define mz_repush_threadlocal() /* empty */
 #endif
 
@@ -835,7 +850,7 @@ void scheme_jit_prolog_again(mz_jit_state *jitter, int n, int ret_addr_reg)
 #define __START_TINY_OR_SHORT_JUMPS__(tcond, cond) if (tcond) { __START_TINY_JUMPS__(1); } else { __START_SHORT_JUMPS__(cond); }
 #define __END_TINY_OR_SHORT_JUMPS__(tcond, cond) if (tcond) { __END_TINY_JUMPS__(1); } else { __END_SHORT_JUMPS__(cond); }
 
-#ifdef JIT_X86_64
+#if defined(JIT_X86_64) || defined(JIT_X86_SSE)
 # define __START_TINY_JUMPS_IF_COMPACT__(cond) /* empty */
 # define __END_TINY_JUMPS_IF_COMPACT__(cond) /* empty */
 #else
@@ -941,7 +956,7 @@ static void emit_indentation(mz_jit_state *jitter)
    pushes and pops much balance. The popping branch operations pop
    both arguments before branching. */
 
-#if !defined(MZ_USE_JIT_I386)
+#if !defined(MZ_USE_JIT_I386) || defined(JIT_X86_SSE)
 /* Not FP stack, so use normal variants. */
 #define DIRECT_FPR_ACCESS
 #define jit_movi_d_fppush(rd,immd)    jit_movi_d(rd,immd)
@@ -959,7 +974,7 @@ static void emit_indentation(mz_jit_state *jitter)
 #define jit_abs_d_fppop(rd,rs)        jit_abs_d(rd,rs)
 #define jit_sqrt_d_fppop(rd,rs)       jit_sqrt_d(rd,rs)
 #define jit_sti_d_fppop(id, rs)       jit_sti_d(id, rs)
-#define jit_str_d_fppop(id, rd, rs)   jit_str_d(id, rd, rs)
+#define jit_str_d_fppop(id, rd)       jit_str_d(id, rd)
 #define jit_stxi_d_fppop(id, rd, rs)  jit_stxi_d(id, rd, rs)
 #define jit_stxr_d_fppop(id, rd, rs)  jit_stxr_d(id, rd, rs)
 #define jit_bger_d_fppop(d, s1, s2)   jit_bger_d(d, s1, s2)
@@ -1101,9 +1116,7 @@ int scheme_stack_safety(mz_jit_state *jitter, int cnt, int offset);
 #ifdef USE_FLONUM_UNBOXING
 int scheme_mz_flonum_pos(mz_jit_state *jitter, int i);
 #endif
-#ifdef JIT_PRECISE_GC
-void scheme_mz_load_retained(mz_jit_state *jitter, int rs, int retptr);
-#endif
+void scheme_mz_load_retained(mz_jit_state *jitter, int rs, void *o);
 
 void scheme_mz_runstack_skipped(mz_jit_state *jitter, int n);
 void scheme_mz_runstack_unskipped(mz_jit_state *jitter, int n);
@@ -1235,7 +1248,7 @@ int scheme_generate_non_tail_mark_pos_prefix(mz_jit_state *jitter);
 void scheme_generate_non_tail_mark_pos_suffix(mz_jit_state *jitter);
 
 Scheme_Object **scheme_on_demand(Scheme_Object **argv);
-Scheme_Object **scheme_on_demand_with_args(Scheme_Object **in_argv, Scheme_Object **argv);
+Scheme_Object **scheme_on_demand_with_args(Scheme_Object **in_argv, Scheme_Object **argv, int argv_delta);
 
 void scheme_prepare_branch_jump(mz_jit_state *jitter, Branch_Info *for_branch);
 void scheme_branch_for_true(mz_jit_state *jitter, Branch_Info *for_branch);

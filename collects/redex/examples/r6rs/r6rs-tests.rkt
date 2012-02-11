@@ -2118,3 +2118,4 @@ of digits with deconv-base
          ;; compared with equal? to the elements of `expected'
          
          (struct-out r6test))
+

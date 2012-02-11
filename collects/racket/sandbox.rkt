@@ -878,20 +878,6 @@
    (;; create a sandbox context first
     [current-custodian user-cust]
     [current-thread-group (make-thread-group)]
-    [current-namespace (make-evaluation-namespace)]
-    ;; set up the IO context
-    [current-input-port
-     (let ([inp (sandbox-input)])
-       (cond [(not inp) null-input]
-             [(input->port inp) => values]
-             [(and (procedure? inp) (procedure-arity-includes? inp 0)) (inp)]
-             [(eq? 'pipe inp)
-              (let-values ([(i o) (make-pipe)]) (set! input o) i)]
-             [else (error who "bad sandbox-input: ~e" inp)]))]
-    [current-output-port (make-output 'output (sandbox-output)
-                                      (lambda (o) (set! output o)))]
-    [current-error-port (make-output 'error-output (sandbox-error-output)
-                                     (lambda (o) (set! error-output o)))]
     ;; paths
     [current-library-collection-paths
      (filter directory-exists?
@@ -906,11 +892,6 @@
        (read ,(find-lib-dir))
        ,@(compute-permissions allow)
        ,@(sandbox-path-permissions))]
-    ;; general info
-    [current-command-line-arguments '#()]
-    ;; prevent a potential value here from messing up creating the sandboxed
-    ;; module
-    [current-module-declare-name #f]
     ;; restrict the sandbox context from this point
     [current-security-guard
      (let ([g (sandbox-security-guard)]) (if (security-guard? g) g (g)))]
@@ -934,20 +915,40 @@
              (handler path modname))
            ;; otherwise, just let the old handler throw a proper error
            (handler path modname))))]
+    ;; prevent a potential value here from messing up creating the sandboxed
+    ;; module
+    [current-module-declare-name #f]
+    ;; set up the IO context
+    [current-input-port
+     (let ([inp (sandbox-input)])
+       (cond [(not inp) null-input]
+             [(input->port inp) => values]
+             [(and (procedure? inp) (procedure-arity-includes? inp 0)) (inp)]
+             [(eq? 'pipe inp)
+              (let-values ([(i o) (make-pipe)]) (set! input o) i)]
+             [else (error who "bad sandbox-input: ~e" inp)]))]
+    [current-output-port (make-output 'output (sandbox-output)
+                                      (lambda (o) (set! output o)))]
+    [current-error-port (make-output 'error-output (sandbox-error-output)
+                                     (lambda (o) (set! error-output o)))]
+    ;; no exiting
     [exit-handler
      (let ([h (sandbox-exit-handler)])
        (if (eq? h default-sandbox-exit-handler)
          (lambda _ (terminate+kill! 'exited #f))
          h))]
+    ;; general info
+    [current-command-line-arguments '#()]
+    ;; Finally, create the namespace in the restricted environment (in
+    ;; particular, it must be created under the new code inspector)
+    [current-namespace (make-evaluation-namespace)]
     ;; Note the above definition of `current-eventspace': in Racket, it
     ;; is an unused parameter.  Also note that creating an eventspace
     ;; starts a thread that will eventually run the callback code (which
     ;; evaluates the program in `run-in-bg') -- so this parameterization
     ;; must be nested in the above (which is what paramaterize* does), or
     ;; it will not use the new namespace.
-    [current-eventspace (parameterize-break
-                         #f
-                         (make-eventspace))])
+    [current-eventspace (parameterize-break #f (make-eventspace))])
    (define t (bg-run->thread (run-in-bg user-process)))
    (set! user-done-evt (handle-evt t (lambda (_) (terminate+kill! #t #t))))
    (set! user-thread t))
@@ -975,6 +976,10 @@
                    (init-hook-for-language lang)
                    (append (extract-required (or (decode-language lang) lang)
                                              reqs)
+                           (if (and (= 1 (length input-program))
+                                    (path? (car input-program)))
+                             (list (car input-program))
+                             '())
                            allow)
                    (lambda () (build-program lang reqs input-program))))
 

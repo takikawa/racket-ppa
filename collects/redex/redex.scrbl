@@ -389,7 +389,17 @@ nested lists.
 }
 
 @defproc[(set-cache-size! [size positive-integer?]) void?]{
-Changes the size of the per-pattern and per-metafunction caches. The default size is @racket[350].
+Changes the size of the per-pattern and per-metafunction caches.
+
+The default size is @racket[350].
+}
+
+@defparam[check-redudancy check? boolean?]{
+  Ambiguous patterns can slow down
+  Redex's pattern matching implementation significantly. To help debug
+  such performance issues, set the @racket[check-redundancy]
+  parameter to @racket[#t]. This causes Redex to, at runtime,
+  report any redundant matches that it encounters.
 }
 
 @section{Terms}
@@ -701,14 +711,14 @@ otherwise.
                                   shortcuts)
               ([domain (code:line) (code:line #:domain @#,ttpattern)]
                [base-arrow (code:line) (code:line #:arrow base-arrow-name)]
-               [reduction-case (arrow-name @#,ttpattern @#,tttterm extras ...)]
-               [extras rule-name
-                       (fresh fresh-clause ...)
-                       (side-condition racket-expression)
-                       (where @#,ttpattern @#,tttterm)
-                       (judgment-holds (judgment-form-id pat/term ...))
-                       (side-condition/hidden racket-expression)
-                       (where/hidden @#,ttpattern @#,tttterm)]
+               [reduction-case (arrow-name @#,ttpattern @#,tttterm red-extras ...)]
+               [red-extras rule-name
+                           (fresh fresh-clause ...)
+                           (side-condition racket-expression)
+                           (where @#,ttpattern @#,tttterm)
+                           (judgment-holds (judgment-form-id pat/term ...))
+                           (side-condition/hidden racket-expression)
+                           (where/hidden @#,ttpattern @#,tttterm)]
                [shortcuts (code:line)
                           (code:line with shortcut ...)]
                [shortcut [(old-arrow-name @#,ttpattern @#,tttterm)
@@ -908,7 +918,8 @@ names of the reductions that were used.
 @defproc[(apply-reduction-relation*
           [r reduction-relation?]
           [t any/c]
-          [#:cache-all? cache-all? boolean? (current-cache-all?)])
+          [#:cache-all? cache-all? boolean? (current-cache-all?)]
+          [#:stop-when stop-when (-> any/c any) (λ (x) #f)])
          (listof any/c)]{
 
 Accepts a reduction relation and a
@@ -923,6 +934,13 @@ keeps a cache of all visited terms when traversing the graph and does not revisi
 any of them. This cache can, in some cases, use a lot of memory, so it is off by
 default and the cycle checking happens by keeping track only of the current path
 it is traversing through the reduction graph.
+
+The @racket[stop-when] argument controls the stopping criterion. Specifically, it is
+called with each term that @racket[apply-reduction-relation*] encounters. If it
+ever returns a true value (anything except @racket[#f]), then @racket[apply-reduction-relation*]
+considers the term to be irreducible (and so returns it and does not try to
+reduce it further).
+
 }
 
 @defparam[current-cache-all? cache-all? boolean?]{
@@ -966,7 +984,7 @@ it is traversing through the reduction graph.
                           judgment-holds)
              (define-metafunction language
                metafunction-contract
-               [(name @#,ttpattern ...) @#,tttterm extras ...] 
+               [(name @#,ttpattern ...) @#,tttterm metafunction-extras ...] 
                ...)
              ([metafunction-contract (code:line) 
                                      (code:line id : @#,ttpattern ... -> range)]
@@ -974,12 +992,12 @@ it is traversing through the reduction graph.
                      (code:line @#,ttpattern or range)
                      (code:line @#,ttpattern ∨ range)
                      (code:line @#,ttpattern ∪ range)]
-              [extras (side-condition racket-expression)
-                      (side-condition/hidden racket-expression)
-                      (where pat @#,tttterm)
-                      (where/hidden pat @#,tttterm)
-                      (judgment-holds 
-                       (judgment-form-id pat/term ...))])]{
+              [metafunction-extras (side-condition racket-expression)
+                                   (side-condition/hidden racket-expression)
+                                   (where pat @#,tttterm)
+                                   (where/hidden pat @#,tttterm)
+                                   (judgment-holds 
+                                    (judgment-form-id pat/term ...))])]{
 
 The @racket[define-metafunction] form builds a function on
 sexpressions according to the pattern and right-hand-side
@@ -1053,7 +1071,7 @@ match.
 
 @defform[(define-metafunction/extension f language 
            metafunction-contract
-           [(g @#,ttpattern ...) @#,tttterm extras ...] 
+           [(g @#,ttpattern ...) @#,tttterm metafunction-extras ...] 
            ...)]{
 
 Defines a metafunction @racket[g] as an extension of an existing
@@ -1263,7 +1281,9 @@ is an error elsewhere.
 @defform/subs[#:literals (⊂ ⊆ × x)
               (define-relation language
                 relation-contract
-                [(name @#,ttpattern ...) @#,tttterm ...] ...)
+                [(name @#,ttpattern ...) 
+                 @#,tttterm ...
+                 metafunction-extras ...] ...)
               ([relation-contract (code:line)
                                   (code:line form-id ⊂ @#,ttpattern x ... x @#,ttpattern)
                                   (code:line form-id ⊆ @#,ttpattern × ... × @#,ttpattern)])]{

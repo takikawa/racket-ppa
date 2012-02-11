@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2011 PLT Scheme Inc.
+  Copyright (c) 2006-2012 PLT Scheme Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -105,7 +105,7 @@ static Scheme_Object *touch(int argc, Scheme_Object *argv[])
       mz_jmp_buf newbuf, * volatile savebuf;
       Scheme_Thread *p = scheme_current_thread;
       
-      /* In case another Scheme thread touches the future. */
+      /* In case another Racket thread touches the future. */
       sema = scheme_make_sema(0);
       ft->running_sema = sema;
 
@@ -264,19 +264,15 @@ void scheme_end_futures_per_place()
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef DEBUG_FUTURES 
-#define DO_LOG(pr) do { pthread_t self; self = pthread_self(); fprintf(stderr, "%x:%s:%s:%d ", (unsigned) self, __FILE__, __FUNCTION__, __LINE__); pr; fprintf(stderr, "\n"); fflush(stdout); } while(0)
-#define LOG0(t) DO_LOG(fprintf(stderr, t))
-#define LOG(t, a) DO_LOG(fprintf(stderr, t, a))
-#define LOG2(t, a, b) DO_LOG(fprintf(stderr, t, a, b))
-#define LOG3(t, a, b, c) DO_LOG(fprintf(stderr, t, a, b, c))
-#define LOG4(t, a, b, c, d) DO_LOG(fprintf(stderr, t, a, b, c, d))
+#ifdef OS_X
+# define CHECK_FUTURE_ASSERTS
+#endif
+
+#ifdef CHECK_FUTURE_ASSERTS
+# include <assert.h>
+# define FUTURE_ASSERT(x) assert(x)
 #else
-#define LOG0(t)
-#define LOG(t, a)
-#define LOG2(t, a, b)
-#define LOG3(t, a, b, c)
-#define LOG4(t, a, b, c, d)
+# define FUTURE_ASSERT(x) /* empty */
 #endif
 
 static Scheme_Object *make_fsemaphore(int argc, Scheme_Object *argv[]);
@@ -289,9 +285,9 @@ static void future_do_runtimecall(struct Scheme_Future_Thread_State *fts,
                                   void *func,
                                   int is_atomic,
                                   int can_suspend);
-static int capture_future_continuation(future_t *ft, void **storage);
+static int capture_future_continuation(struct Scheme_Future_State *fs, future_t *ft, void **storage, int need_lock);
 
-#define INITIAL_C_STACK_SIZE 500000
+#define FUTURE_C_STACK_SIZE 500000
 #define FUTURE_RUNSTACK_SIZE 2000
 
 #define FEVENT_BUFFER_SIZE    512
@@ -655,10 +651,9 @@ static void init_future_thread(Scheme_Future_State *fs, int i)
   fts->thread = skeleton;
 
   {
-    Scheme_Object **rs_start, **rs;
+    Scheme_Object **rs_start;
     intptr_t init_runstack_size = FUTURE_RUNSTACK_SIZE;
     rs_start = scheme_alloc_runstack(init_runstack_size);
-    rs = rs_start XFORM_OK_PLUS init_runstack_size;
     runstack_start = rs_start;
     fts->runstack_size = init_runstack_size;
   }
@@ -668,7 +663,7 @@ static void init_future_thread(Scheme_Future_State *fs, int i)
   params.runstack_start = runstack_start;
 
   mzrt_sema_create(&params.ready_sema, 0);
-  t = mz_proc_thread_create_w_stacksize(worker_thread_future_loop, &params, INITIAL_C_STACK_SIZE);
+  t = mz_proc_thread_create_w_stacksize(worker_thread_future_loop, &params, FUTURE_C_STACK_SIZE);
   mzrt_sema_wait(params.ready_sema);
   mzrt_sema_destroy(params.ready_sema);
 
@@ -824,7 +819,7 @@ void scheme_future_block_until_gc()
       *(fs->pool_threads[i]->need_gc_pointer) = 1;
       if (*(fs->pool_threads[i]->fuel_pointer)) {
         *(fs->pool_threads[i]->fuel_pointer) = 0;
-        *(fs->pool_threads[i]->stack_boundary_pointer) += INITIAL_C_STACK_SIZE;
+        *(fs->pool_threads[i]->stack_boundary_pointer) += FUTURE_C_STACK_SIZE;
       }
     }
   }
@@ -889,7 +884,7 @@ void scheme_future_continue_after_gc()
       if (!fs->pool_threads[i]->thread->current_ft
           || scheme_custodian_is_available(fs->pool_threads[i]->thread->current_ft->cust)) {
         *(fs->pool_threads[i]->fuel_pointer) = 1;
-        *(fs->pool_threads[i]->stack_boundary_pointer) -= INITIAL_C_STACK_SIZE;
+        *(fs->pool_threads[i]->stack_boundary_pointer) -= FUTURE_C_STACK_SIZE;
       } else {
         /* leave fuel exhausted, which will force the thread into a slow 
            path when it resumes to suspend the computation */
@@ -1184,15 +1179,15 @@ static Scheme_Object *make_future(Scheme_Object *lambda)
    
   /* JIT the code if not already JITted */
   if (ncd) {
-    if (ncd->code == scheme_on_demand_jit_code)
-      scheme_on_demand_generate_lambda(nc, 0, NULL);
+    if (ncd->start_code == scheme_on_demand_jit_code)
+      scheme_on_demand_generate_lambda(nc, 0, NULL, 0);
   
     if (ncd->max_let_depth > FUTURE_RUNSTACK_SIZE * sizeof(void*)) {
       /* Can't even call it in a future thread */
       ft->status = PENDING_OVERSIZE;
     }
 
-    ft->code = (void*)ncd->code;
+    ft->code = (void*)ncd->start_code;
   } else
     ft->status = PENDING_OVERSIZE;
 
@@ -1225,7 +1220,7 @@ Scheme_Object *scheme_future(int argc, Scheme_Object *argv[])
     Scheme_Object *proc = argv[0];
     if (SAME_TYPE(SCHEME_TYPE(proc), scheme_native_closure_type)
         && scheme_native_arity_check(proc, 0)
-        && (((Scheme_Native_Closure *)proc)->code->code != scheme_on_demand_jit_code)
+        && (((Scheme_Native_Closure *)proc)->code->start_code != scheme_on_demand_jit_code)
         && (((Scheme_Native_Closure *)proc)->code->max_let_depth < FUTURE_RUNSTACK_SIZE * sizeof(void*))) {
       /* try to alocate a future in the future thread */
       future_t *ft;
@@ -1237,7 +1232,7 @@ Scheme_Object *scheme_future(int argc, Scheme_Object *argv[])
         ft->orig_lambda = proc;
         ft->status = PENDING;
         ft->cust = scheme_current_thread->current_ft->cust;
-        ft->code = ((Scheme_Native_Closure *)proc)->code->code;
+        ft->code = ((Scheme_Native_Closure *)proc)->code->start_code;
 
         mzrt_mutex_lock(fs->future_mutex);
         ft->id = ++fs->next_futureid;
@@ -1277,7 +1272,7 @@ Scheme_Object *scheme_make_fsemaphore_inl(Scheme_Object *ready)
   sema->so.type = scheme_fsemaphore_type;
   
   mzrt_mutex_create(&sema->mut);
-  sema->ready = SCHEME_INT_VAL(ready);
+  sema->ready = v;
 
   scheme_register_finalizer((void*)sema, fsemaphore_finalize, NULL, NULL, NULL);
 
@@ -1305,6 +1300,8 @@ Scheme_Object *scheme_fsemaphore_count(int argc, Scheme_Object **argv)
 }
 
 static void requeue_future_within_lock(future_t *future, Scheme_Future_State *fs) 
+  XFORM_SKIP_PROC
+/* called in any thread with lock held */
 {
   if (scheme_custodian_is_available(future->cust)) {
     future->status = PENDING;
@@ -1327,20 +1324,22 @@ static int try_resume_future_from_fsema_wait(fsemaphore_t *sema, Scheme_Future_S
   XFORM_SKIP_PROC
 {
   future_t *ft;
-  if (!sema->queue_front) { 
+
+  if (!sema->queue_front)
     return 0;
-  }
 
   ft = sema->queue_front;
   sema->queue_front = ft->next_in_fsema_queue;
   ft->next_in_fsema_queue = NULL;
-  if (!sema->queue_front) { 
+
+  if (!sema->queue_front)
     sema->queue_end = NULL;
-  } else { 
+  else
     sema->queue_front->prev_in_fsema_queue = NULL;
-  }
 
   sema->ready--;
+
+  ft->retval_s = scheme_void;
     
   /* Place the waiting future back on the run queue */
   requeue_future(ft, fs);
@@ -1453,22 +1452,25 @@ Scheme_Object *scheme_fsemaphore_wait(int argc, Scheme_Object **argv)
       scheme_fill_lwc_end();
       future->lwc = scheme_current_lwc;
       future->fts = fts;
-      future->arg_p = scheme_current_thread;   
+      future->prim_protocol = SIG_s_s;
 
       /* Try to capture it locally (on this thread) */
       if (GC_gen0_alloc_page_ptr 
-          && capture_future_continuation(future, storage)) {
-        /* This will set fts->thread->current_ft to NULL */
+          && capture_future_continuation(fs, future, storage, 0)) {
+        /* capture sets fts->thread->current_ft to NULL */
         mzrt_mutex_lock(fs->future_mutex);
-        future->status = WAITING_FOR_FSEMA;
       } else { 
         /* Can't capture the continuation locally, so ask the runtime 
             thread to do it */
         mzrt_mutex_lock(fs->future_mutex);
-        future->next_waiting_lwc = fs->future_waiting_lwc;
-        fs->future_waiting_lwc = future;
+        if (!future->in_queue_waiting_for_lwc) { 
+          future->next_waiting_lwc = fs->future_waiting_lwc;
+          fs->future_waiting_lwc = future;
+          future->in_queue_waiting_for_lwc = 1;
+        }
         future->want_lw = 1;
       }   
+      future->status = WAITING_FOR_FSEMA;
 
       scheme_signal_received_at(fs->signal_handle);
       if (fts->thread->current_ft) { 
@@ -1486,15 +1488,14 @@ Scheme_Object *scheme_fsemaphore_wait(int argc, Scheme_Object **argv)
       }
       mzrt_mutex_unlock(fs->future_mutex);
 
-      if (fts->thread->current_ft) { 
-        /* Should never get here, cont. capture should remove it */ 
-        scheme_log_abort("fsemaphore-wait: current_ft was not NULL after continuation capture.");
-        abort();
-      }
+      FUTURE_ASSERT(!fts->thread->current_ft);
 
       /* Fetch the future and sema pointers again, in case moved by a GC */
       sema = (fsemaphore_t*)jit_future_storage[0];
       future = (future_t*)jit_future_storage[1];
+
+      FUTURE_ASSERT(future->suspended_lw);
+      FUTURE_ASSERT(!future->can_continue_sema);
 
       /* Check again to see whether the sema has become ready */ 
       mzrt_mutex_lock(sema->mut);
@@ -1545,7 +1546,7 @@ Scheme_Object *scheme_fsemaphore_try_wait(int argc, Scheme_Object **argv)
 }
 
 static int fsemaphore_ready(Scheme_Object *obj) 
-/* Called in runtime thread by Scheme scheduler */
+/* Called in runtime thread by Racket scheduler */
 {
   int ret = 0;
   fsemaphore_t *fsema = (fsemaphore_t*)obj;
@@ -1557,7 +1558,7 @@ static int fsemaphore_ready(Scheme_Object *obj)
 
 
 int future_ready(Scheme_Object *obj)
-/* Called in runtime thread by Scheme scheduler */
+/* Called in runtime thread by Racket scheduler */
 {
   Scheme_Future_State *fs = scheme_future_state;
   int ret = 0;
@@ -1595,6 +1596,8 @@ static void dequeue_future(Scheme_Future_State *fs, future_t *ft)
 }
 
 static void complete_rtcall(Scheme_Future_State *fs, future_t *future)
+  XFORM_SKIP_PROC
+/* called in any thread with lock held */
 {
   if (future->suspended_lw) {
     /* Re-enqueue the future so that some future thread can continue */
@@ -1602,7 +1605,7 @@ static void complete_rtcall(Scheme_Future_State *fs, future_t *future)
   } else {
     /* Signal the waiting worker thread that it
        can continue running machine code */
-    future->want_lw = 0;
+    future->want_lw = 0; /* needed if we get here via direct_future_to_future_touch() */
     if (future->can_continue_sema) {
       mzrt_sema_post(future->can_continue_sema);
       future->can_continue_sema = NULL;
@@ -1611,6 +1614,8 @@ static void complete_rtcall(Scheme_Future_State *fs, future_t *future)
 }
 
 static void direct_future_to_future_touch(Scheme_Future_State *fs, future_t *ft, future_t *t_ft)
+  XFORM_SKIP_PROC
+/* called in any thread with lock held */
 {
   Scheme_Object *retval = ft->retval;
 
@@ -1619,6 +1624,7 @@ static void direct_future_to_future_touch(Scheme_Future_State *fs, future_t *ft,
   send_special_result(t_ft, retval);
 
   t_ft->arg_S1 = NULL;
+  t_ft->status = HANDLING_PRIM; /* handled as if by runtime thread */
 
   complete_rtcall(fs, t_ft);
 }
@@ -1643,6 +1649,7 @@ static void trigger_added_touches(Scheme_Future_State *fs, future_t *ft)
 {
   if (ft->touching) {
     Scheme_Object *touching = ft->touching;
+    ft->touching = NULL;
     while (!SCHEME_NULLP(touching)) {
       Scheme_Object *wb = SCHEME_CAR(touching);
       future_t *t_ft = (future_t *)SCHEME_WEAK_BOX_VAL(wb);
@@ -1654,6 +1661,16 @@ static void trigger_added_touches(Scheme_Future_State *fs, future_t *ft)
       touching = SCHEME_CDR(touching);
     }
   }
+}
+
+static Scheme_Object *shallower_apply_future_lw_k(void)
+{
+  Scheme_Thread *p = scheme_current_thread;
+  future_t *ft = (future_t *)p->ku.k.p1;
+
+  p->ku.k.p1 = NULL;
+
+  return apply_future_lw(ft);
 }
 
 static void future_in_runtime(Scheme_Future_State *fs, future_t * volatile ft, int what)
@@ -1676,7 +1693,11 @@ static void future_in_runtime(Scheme_Future_State *fs, future_t * volatile ft, i
     retval = NULL;
   } else {
     if (ft->suspended_lw) {
-      retval = apply_future_lw(ft);
+      if (scheme_can_apply_lightweight_continuation(ft->suspended_lw, 1) > 1) {
+        p->ku.k.p1 = ft;
+        retval = scheme_handle_stack_overflow(shallower_apply_future_lw_k);
+      } else
+        retval = apply_future_lw(ft);
     } else {
       retval = scheme_apply_multi(ft->orig_lambda, 0, NULL);
     }
@@ -1728,50 +1749,33 @@ Scheme_Object *general_touch(int argc, Scheme_Object *argv[])
 
   ft = (future_t*)argv[0];
 
-#ifdef DEBUG_FUTURES 
-  LOG("touch (future %d)", futureid);	
-  dump_state();
-#endif
-
-  mzrt_mutex_lock(fs->future_mutex);
-  if ((((ft->status == PENDING) 
-        && prefer_to_apply_future_in_runtime())
-       || (ft->status == PENDING_OVERSIZE)
-       || (ft->status == SUSPENDED))
-      && (!ft->suspended_lw
-          || scheme_can_apply_lightweight_continuation(ft->suspended_lw))) {
-    int what = FEVENT_START_WORK;
-    if (ft->status == PENDING_OVERSIZE) {
-      what = FEVENT_START_RTONLY_WORK;
-    } else if (ft->status != SUSPENDED) {
-      dequeue_future(fs, ft);
-    }
-    ft->status = RUNNING;
-    mzrt_mutex_unlock(fs->future_mutex);
-
-    future_in_runtime(fs, ft, what);
-
-    retval = ft->retval;
-    
-    receive_special_result(ft, retval, 0);
-
-    flush_future_logs(fs);
-
-    return retval;
-  }
-  mzrt_mutex_unlock(fs->future_mutex);
-
   /* Spin waiting for primitive calls or a return value from
      the worker thread */
   while (1) {
-    if (!future_ready((Scheme_Object *)ft)) {
-      record_fevent(FEVENT_TOUCH_PAUSE, ft->id);
-      scheme_block_until(future_ready, NULL, (Scheme_Object*)ft, 0);
-      record_fevent(FEVENT_TOUCH_RESUME, ft->id);
-    }
-
     mzrt_mutex_lock(fs->future_mutex);
-    if ((ft->status == RUNNING)
+    if ((((ft->status == PENDING)
+          && prefer_to_apply_future_in_runtime())
+         || (ft->status == PENDING_OVERSIZE)
+         || (ft->status == SUSPENDED))
+        && (!ft->suspended_lw
+            || scheme_can_apply_lightweight_continuation(ft->suspended_lw, 0))) 
+      {
+        int what = FEVENT_START_WORK;
+        if (ft->status == PENDING_OVERSIZE) {
+          what = FEVENT_START_RTONLY_WORK;
+        } else if (ft->status != SUSPENDED) {
+          dequeue_future(fs, ft);
+        }
+        ft->status = RUNNING;
+        mzrt_mutex_unlock(fs->future_mutex);
+
+        future_in_runtime(fs, ft, what);
+
+        retval = ft->retval;
+
+        break;
+      } 
+    else if ((ft->status == RUNNING)
         || (ft->status == WAITING_FOR_FSEMA)
         || (ft->status == HANDLING_PRIM)) 
       {
@@ -1780,11 +1784,7 @@ Scheme_Object *general_touch(int argc, Scheme_Object *argv[])
       } 
     else if (ft->status == FINISHED)
       {
-        int id;
-
         retval = ft->retval;
-
-        id = ft->id;
 
         mzrt_mutex_unlock(fs->future_mutex);
         
@@ -1796,16 +1796,15 @@ Scheme_Object *general_touch(int argc, Scheme_Object *argv[])
            Release the lock so other threads can manipulate the queue
            while the runtime call executes. */
         ft->status = HANDLING_PRIM;
+        ft->want_lw = 0;
         mzrt_mutex_unlock(fs->future_mutex);
-        LOG("Invoking primitive on behalf of future %d...", ft->id);
         invoke_rtcall(fs, ft, 0);
-        LOG0("done.\n");
       }
     else if (ft->maybe_suspended_lw && (ft->status != WAITING_FOR_FSEMA))
       {
         ft->maybe_suspended_lw = 0;
         if (ft->suspended_lw) {
-          if (scheme_can_apply_lightweight_continuation(ft->suspended_lw)
+          if (scheme_can_apply_lightweight_continuation(ft->suspended_lw, 0)
               && prefer_to_apply_future_in_runtime()) {
             if (ft->status != SUSPENDED)
               dequeue_future(fs, ft);
@@ -1827,6 +1826,12 @@ Scheme_Object *general_touch(int argc, Scheme_Object *argv[])
       {
         mzrt_mutex_unlock(fs->future_mutex);
       }
+
+    scheme_thread_block(0.0); /* to ensure check for futures work */
+
+    record_fevent(FEVENT_TOUCH_PAUSE, ft->id);
+    scheme_block_until(future_ready, NULL, (Scheme_Object*)ft, 0);
+    record_fevent(FEVENT_TOUCH_RESUME, ft->id);
   }
 
   if (!retval) {
@@ -1877,7 +1882,7 @@ Scheme_Object *touch(int argc, Scheme_Object *argv[])
               if (ft->touching)
                 SCHEME_CDR(pr) = ft->touching;
               ft->touching = pr;
-              current_ft->in_touch_queue = 1;
+              current_ft->in_future_specific_touch_queue = 1;
               mzrt_mutex_unlock(fs->future_mutex);
             } else {
               /* `ft' switched to FINISHED while we were trying add,
@@ -1969,7 +1974,7 @@ void *worker_thread_future_loop(void *arg)
   Scheme_Future_Thread_State *fts = params->fts;
   Scheme_Future_State *fs = params->fs;
   Scheme_Object *v;
-  Scheme_Closed_Prim *jitcode;
+  Scheme_Native_Proc *jitcode;
   future_t *ft;
   mz_jmp_buf newbuf;
   int fid;
@@ -2002,7 +2007,7 @@ void *worker_thread_future_loop(void *arg)
   scheme_current_thread = fts->thread;
 
   scheme_fuel_counter = 1;
-  scheme_jit_stack_boundary = ((uintptr_t)&v) - INITIAL_C_STACK_SIZE;
+  scheme_jit_stack_boundary = ((uintptr_t)&v) - FUTURE_C_STACK_SIZE;
 
   fts->need_gc_pointer = &scheme_future_need_gc_pause;
   fts->fuel_pointer = &scheme_fuel_counter;
@@ -2029,8 +2034,6 @@ void *worker_thread_future_loop(void *arg)
     ft = get_pending_future(fs);
 
     if (ft) {
-      LOG0("Got a signal that a future is pending...");
-        
       fid = ft->id;
       record_fevent(FEVENT_START_WORK, fid);
 
@@ -2070,7 +2073,6 @@ void *worker_thread_future_loop(void *arg)
            including runtime calls. 
            If jitcode asks the runtime thread to do work, then
            a GC can occur. */
-        LOG("Running JIT code at %p...\n", ft->code);
 
         scheme_current_thread->error_buf = &newbuf;
         if (scheme_future_setjmp(newbuf)) {
@@ -2083,8 +2085,6 @@ void *worker_thread_future_loop(void *arg)
             v = scheme_ts_scheme_force_value_same_mark(v);
           }
         }
-
-        LOG("Finished running JIT code at %p.\n", ft->code);
       }
 
       /* Get future again, since a GC may have occurred or
@@ -2097,17 +2097,21 @@ void *worker_thread_future_loop(void *arg)
         /* continuation of future will be requeued, and this future
            thread can do something else */
       } else {
-        /* Set the return val in the descriptor */
-        ft->retval = v;
+        FUTURE_ASSERT(v || ft->no_retval);
 
-        /* In case of multiple values: */
-        send_special_result(ft, v);
+        if (ft->no_retval >= 0) {
+          /* Set the return val in the descriptor */
+          ft->retval = v;
+          
+          /* In case of multiple values: */
+          send_special_result(ft, v);
         
-        /* Update the status */
-        ft->status = FINISHED;
-        trigger_added_touches(fs, ft);
+          /* Update the status */
+          ft->status = FINISHED;
+          trigger_added_touches(fs, ft);
 
-        record_fevent(FEVENT_COMPLETE, fid);
+          record_fevent(FEVENT_COMPLETE, fid);
+        }
 
         fts->thread->current_ft = NULL;
       }
@@ -2135,21 +2139,24 @@ static Scheme_Object *_apply_future_lw(future_t *ft)
 {
   struct Scheme_Lightweight_Continuation *lw = ft->suspended_lw;
   Scheme_Object *v;
-  int result_is_rs_argv;
+  int result_is_rs_plus_two;
 
   ft->suspended_lw = NULL;
   
   v = ft->retval_s;
-  if (ft->retval_is_rs_argv) {
-    result_is_rs_argv = 1;
-    ft->retval_is_rs_argv = 0;
+  if (ft->retval_is_rs_plus_two) {
+    result_is_rs_plus_two = 1;
+    ft->retval_is_rs_plus_two = 0;
   } else {
     ft->retval_s = NULL;
     receive_special_result(ft, v, 1);
-    result_is_rs_argv = 0;
+    result_is_rs_plus_two = 0;
   }
 
-  v = scheme_apply_lightweight_continuation(lw, v, result_is_rs_argv, 
+  FUTURE_ASSERT((ft->prim_protocol != SIG_ON_DEMAND) == !result_is_rs_plus_two);
+  FUTURE_ASSERT(v || (ft->prim_protocol != SIG_ALLOC));
+
+  v = scheme_apply_lightweight_continuation(lw, v, result_is_rs_plus_two, 
                                             FUTURE_RUNSTACK_SIZE);
   
   if (SAME_OBJ(v, SCHEME_TAIL_CALL_WAITING)) {
@@ -2178,34 +2185,45 @@ static Scheme_Object *apply_future_lw(future_t *ft)
   return (Scheme_Object *)scheme_top_level_do(apply_future_lw_k, 0);
 }
 
-static int capture_future_continuation(future_t *ft, void **storage)
+static int capture_future_continuation(Scheme_Future_State *fs, future_t *ft, void **storage, int need_lock)
   XFORM_SKIP_PROC
-/* This function explicitly cooperates with the GC by storing the
+/* The lock is *not* help when calling this function.
+   This function explicitly cooperates with the GC by storing the
    pointers it needs to save across a collection in `storage', so
    it can be used in a future thread. If future-thread-local 
-   allocation fails, the result is 0.
-
-   It also grabs the future-modification lock as needed to modify the
-   future. */
+   allocation fails, the result is 0. */
 {
   Scheme_Lightweight_Continuation *lw;
   Scheme_Object **arg_S;
 
   storage[2] = ft;
 
-  lw = scheme_capture_lightweight_continuation(ft->arg_p, ft->lwc, storage);
+  lw = scheme_capture_lightweight_continuation(ft->fts->thread, ft->lwc, storage);
   if (!lw) return 0;
        
   ft = (future_t *)storage[2];
 
-  ft->suspended_lw = lw;
-  ft->maybe_suspended_lw = 1;
+  if (need_lock) {
+    mzrt_mutex_lock(fs->future_mutex);
   
-  ft->want_lw = 0;
+    if (!ft->want_lw) {
+      /* Future can already continue. This can only happen
+         if ft was blocked on another future, and the other
+         future decided that it could continue while we were
+         trying to grab the continuation. Drop the captured
+         continuation. */
+      return 1;
+    }
+
+    ft->want_lw = 0;
+  }
+   
   ft->fts->thread->current_ft = NULL; /* tells worker thread that it no longer
                                          needs to handle the future */
   
-
+  ft->suspended_lw = lw;
+  ft->maybe_suspended_lw = 1;
+  
   if (ft->arg_S0) {
     arg_S = scheme_adjust_runstack_argument(lw, ft->arg_S0);
     ft->arg_S0 = arg_S;
@@ -2226,10 +2244,11 @@ void scheme_check_future_work()
 /* Called in the runtime thread by the scheduler */
 {
   /* Check for work that future threads need from the runtime thread
-     and that can be done in any Scheme thread (e.g., get a new page
+     and that can be done in any Racket thread (e.g., get a new page
      for allocation). */
   future_t *ft, *other_ft;
   Scheme_Future_State *fs = scheme_future_state;
+  mzrt_sema *can_continue_sema;
   int more;
 
   if (!fs) return;
@@ -2237,6 +2256,8 @@ void scheme_check_future_work()
   flush_future_logs(fs);
 
   check_future_thread_creation(fs);
+
+  if (!fs->future_threads_created) return;
 
   more = 1;
   while (more) {
@@ -2246,7 +2267,6 @@ void scheme_check_future_work()
     if (ft) {
       fs->future_waiting_atomic = ft->next_waiting_atomic;
       ft->next_waiting_atomic = NULL;
-      ft->in_queue_waiting_for_lwc = 0;
       if ((ft->status == WAITING_FOR_PRIM) && ft->rt_prim_is_atomic) {
         ft->status = HANDLING_PRIM;
         ft->want_lw = 0; /* we expect to handle it quickly,
@@ -2270,6 +2290,7 @@ void scheme_check_future_work()
     if (ft) {
       fs->future_waiting_touch = ft->next_waiting_touch;
       ft->next_waiting_touch = NULL;
+      ft->in_touch_queue = 0;
       other_ft = get_future_for_touch(ft);
       more = 1;
     } else {
@@ -2281,30 +2302,21 @@ void scheme_check_future_work()
     if (other_ft) {
       /* Chain to `ft' from `other_ft': */
       Scheme_Object *wb, *pr;
-      int was_done;
       
       wb = scheme_make_weak_box((Scheme_Object *)ft);
       pr = scheme_make_pair(wb, scheme_null);
 
       mzrt_mutex_lock(fs->future_mutex);
       if (other_ft->status == FINISHED) {
-        /* Completed while we tried to allocated a chain link. */
-        ft->status = HANDLING_PRIM;
-        ft->want_lw = 0;
-        was_done = 1;
+        /* Completed while we tried to allocate a chain link. */
+        direct_future_to_future_touch(fs, other_ft, ft);
       } else {
         /* enqueue */
         if (other_ft->touching)
           SCHEME_CDR(pr) = other_ft->touching;
         other_ft->touching = pr;
-        was_done = 0;
       }
       mzrt_mutex_unlock(fs->future_mutex);
-
-      if (was_done) {
-        /* other_ft is done: */
-        direct_future_to_future_touch(fs, other_ft, ft);
-      }
     }
   }
 
@@ -2315,24 +2327,42 @@ void scheme_check_future_work()
     if (ft) {
       fs->future_waiting_lwc = ft->next_waiting_lwc;
       ft->next_waiting_lwc = NULL;
+      ft->in_queue_waiting_for_lwc = 0;
       if (!ft->want_lw)
         ft = NULL;
+      else {
+        /* If ft is touching another future, then the other
+           future may resume ft while we grab the continuation. 
+           Withold ft->can_continue_sema for now, so that we can
+           capture the continuation, and then double-check 
+           afterward whether the continuation wants a lwc: */
+        can_continue_sema = ft->can_continue_sema;
+        ft->can_continue_sema = NULL;
+      }
     }
     mzrt_mutex_unlock(fs->future_mutex);
 
     if (ft) {
       void *storage[3];
 
-      if (capture_future_continuation(ft, storage)) {
-        /* Signal the waiting worker thread that it
-           can continue doing other things: */
-        mzrt_mutex_lock(fs->future_mutex);
-        if (ft->can_continue_sema) {
-          mzrt_sema_post(ft->can_continue_sema);
-          ft->can_continue_sema = NULL;
-        }
+      if (capture_future_continuation(fs, ft, storage, 1)) {
+        /* capture performs mzrt_mutex_lock(fs->future_mutex) on success. */
+        if (ft->suspended_lw)
+          FUTURE_ASSERT((ft->status == WAITING_FOR_PRIM) 
+                        || (ft->status == WAITING_FOR_FSEMA));
+        else
+          FUTURE_ASSERT(ft->status != RUNNING);
         mzrt_mutex_unlock(fs->future_mutex);
+      } else {
+        /* Must have been handled, but no future thread should be
+           running the future, yet. */
+        FUTURE_ASSERT(ft->status != RUNNING);
       }
+      /* Signal the waiting worker thread that it can continue, since
+         we either captured the continuation or the result became
+         available meanwhile: */
+      if (can_continue_sema)
+        mzrt_sema_post(can_continue_sema);
     } else
       break;
   }
@@ -2349,7 +2379,7 @@ void scheme_check_future_work()
         if (!*(fs->pool_threads[i]->fuel_pointer)
             && !fs->pool_threads[i]->thread->current_ft) {
           *(fs->pool_threads[i]->fuel_pointer) = 1;
-          *(fs->pool_threads[i]->stack_boundary_pointer) -= INITIAL_C_STACK_SIZE;
+          *(fs->pool_threads[i]->stack_boundary_pointer) -= FUTURE_C_STACK_SIZE;
         }
       }
     }
@@ -2374,7 +2404,6 @@ static void future_do_runtimecall(Scheme_Future_Thread_State *fts,
   scheme_fill_lwc_end();
   future->lwc = scheme_current_lwc;
   future->fts = fts;
-  future->arg_p = scheme_current_thread;
 
   fid = future->id;
 
@@ -2403,7 +2432,7 @@ static void future_do_runtimecall(Scheme_Future_Thread_State *fts,
 
   if (prefer_to_suspend
       && GC_gen0_alloc_page_ptr
-      && capture_future_continuation(future, storage)) {
+      && capture_future_continuation(fs, future, storage, 0)) {
     /* this future thread will suspend handling the future
        continuation until the result of the blocking call is ready;
        fts->thread->current_ft was set to NULL */
@@ -2437,19 +2466,21 @@ static void future_do_runtimecall(Scheme_Future_Thread_State *fts,
         fs->future_waiting_lwc = future;
         future->in_queue_waiting_for_lwc = 1;
       }
-
       future->want_lw = 1;
     }
   }
 
   if (func == touch) {
-    if (!future->in_touch_queue) {
+    if (!future->in_future_specific_touch_queue) {
       /* Ask the runtime thread to put this future on the queue
          of the future being touched: */
-      future->next_waiting_touch = fs->future_waiting_touch;
-      fs->future_waiting_touch = future;
+      if (!future->in_touch_queue) {
+        future->next_waiting_touch = fs->future_waiting_touch;
+        fs->future_waiting_touch = future;
+        future->in_touch_queue = 1;
+      }
     } else {
-      future->in_touch_queue = 0; /* done with back-door argument */
+      future->in_future_specific_touch_queue = 0; /* done with back-door argument */
     }
   }
 
@@ -2472,11 +2503,15 @@ static void future_do_runtimecall(Scheme_Future_Thread_State *fts,
      or the future has been requeued. */
   future = fts->thread->current_ft;
 
+  FUTURE_ASSERT(!future || !future->can_continue_sema);
+
   if (future) {
     future->want_lw = 0;
+    FUTURE_ASSERT(future->status == HANDLING_PRIM);
     if (future->no_retval) {
       record_fevent(FEVENT_RTCALL_ABORT, fid);
       future->status = FINISHED;
+      trigger_added_touches(fs, future);
     } else {
       record_fevent(FEVENT_RTCALL_RESULT, fid);
       future->status = RUNNING;
@@ -2492,8 +2527,10 @@ static void future_do_runtimecall(Scheme_Future_Thread_State *fts,
     scheme_future_longjmp(*scheme_current_thread->error_buf, 1);
   } else if (future->no_retval) {
     /* there was an error => abort the future */
-    future->no_retval = 0;
+    future->no_retval = -1;
     scheme_future_longjmp(*scheme_current_thread->error_buf, 1);
+  } else {
+    FUTURE_ASSERT(future->status == RUNNING);
   }
 }
 
@@ -2531,10 +2568,7 @@ Scheme_Object **scheme_rtcall_on_demand(const char *who, int src_type, prim_on_d
 
   future->prim_protocol = SIG_ON_DEMAND;
 
-  if ((MZ_RUNSTACK + 2) != argv) {
-    fprintf(stderr, "internal error: expected arguments on runstack");
-    abort();
-  }
+  FUTURE_ASSERT(argv == (MZ_RUNSTACK + 2));
 
   future->arg_S0 = MZ_RUNSTACK;
 
@@ -2548,7 +2582,7 @@ Scheme_Object **scheme_rtcall_on_demand(const char *who, int src_type, prim_on_d
   future = fts->thread->current_ft;
 
   future->arg_S0 = NULL;
-  future->retval_is_rs_argv = 0;
+  future->retval_is_rs_plus_two = 0;
 
   return MZ_RUNSTACK + 2;
 }
@@ -2727,8 +2761,8 @@ static int push_marks(future_t *f, Scheme_Cont_Frame_Data *d)
 {
   if (f->suspended_lw) {
     return scheme_push_marks_from_lightweight_continuation(f->suspended_lw, d);
-  } else if (f->arg_p) {
-    return scheme_push_marks_from_thread(f->arg_p, d);
+  } else if (f->fts->thread) {
+    return scheme_push_marks_from_thread(f->fts->thread, d);
   }
 
   return 0;
@@ -2785,6 +2819,17 @@ static void send_special_result(future_t *f, Scheme_Object *retval)
     f->num_tail_rands = p->ku.apply.tail_num_rands;
     p->ku.apply.tail_rator = NULL;
     p->ku.apply.tail_rands = NULL;
+
+    if (f->tail_rands == p->tail_buffer) {
+      /* This only happens in the runtime thread; we need to
+         disconnect the tail buffer from `f->tail_rands' in
+         case of a GC. Beware that XFORM is disabled here. */
+      Scheme_Object **tb;
+      p->tail_buffer = NULL; /* so args aren't zeroed */
+      tb = MALLOC_N(Scheme_Object *, p->tail_buffer_size);
+      p = scheme_current_thread; /* in case GC moves the thread */
+      p->tail_buffer = tb;
+    }
   }
 }
 
@@ -2838,7 +2883,6 @@ static void do_invoke_rtcall(Scheme_Future_State *fs, future_t *future, int is_a
     need_pop = push_marks(future, &mark_d);
   else
     need_pop = 0;
-  future->arg_p = NULL;
 
   switch (future->prim_protocol)
     {
@@ -2851,9 +2895,9 @@ static void do_invoke_rtcall(Scheme_Future_State *fs, future_t *future, int is_a
 
         ADJUST_RS_ARG(future, arg_S0);
 
-        func(arg_S0, arg_S0 + 2);
+        func(arg_S0, arg_S0, 2);
 
-        future->retval_is_rs_argv = 1;
+        future->retval_is_rs_plus_two = 1;
 
         break;
       }
@@ -2976,6 +3020,8 @@ static void invoke_rtcall(Scheme_Future_State * volatile fs, future_t * volatile
   Scheme_Thread *p = scheme_current_thread;
   mz_jmp_buf newbuf, * volatile savebuf;
 
+  FUTURE_ASSERT(!future->want_lw);
+
   savebuf = p->error_buf;
   p->error_buf = &newbuf;
   if (scheme_setjmp(newbuf)) {
@@ -2987,6 +3033,7 @@ static void invoke_rtcall(Scheme_Future_State * volatile fs, future_t * volatile
       future->status = FINISHED;
       future->retval = 0;
       future->suspended_lw = NULL;
+      trigger_added_touches(fs, future);
       mzrt_mutex_unlock(fs->future_mutex);
     } else {
       /* Signal the waiting worker thread that it
@@ -3021,7 +3068,8 @@ static void invoke_rtcall(Scheme_Future_State * volatile fs, future_t * volatile
 /**********************************************************************/
 
 future_t *enqueue_future(Scheme_Future_State *fs, future_t *ft)
-/* Called in runtime thread */
+  XFORM_SKIP_PROC
+/* called in any thread with lock held */
 {
   if (fs->future_queue_end) {
     fs->future_queue_end->next = ft;

@@ -272,6 +272,8 @@
                       (if (ctrl . < . 0) "~c:" "")
                       (if (shift . > . 0) "s:" "")
                       (if (shift . < . 0) "~s:" "")
+                      (if (caps . > . 0) "l:" "")
+                      (if (caps . < . 0) "~l:" "")
                       (or (hash-ref rev-keylist code)
                           (format "~c" code)))])
                 (error (method-name 'keymap% 'map-function)
@@ -384,7 +386,7 @@
                                             (values downs code)])
                                           (values downs code))])
                           (let ([newkey
-                                 (let ([modval (lambda (c)
+                                 (let ([modval (lambda (c [default-off? default-off?])
                                                  (cond
                                                   [(memq c downs) 1]
                                                   [(memq c ups) -1]
@@ -395,7 +397,7 @@
                                                     (modval #\a)
                                                     (modval #\m)
                                                     (modval #\d)
-                                                    (modval #\l)
+                                                    (modval #\l #f)
                                                     others?
                                                     fname
                                                     prev-key
@@ -443,7 +445,9 @@
   (def/public (handle-key-event [any? obj] [key-event% event])
     (let ([code (send event get-key-code)])
       (or (eq? code 'shift)
+          (eq? code 'rshift)
           (eq? code 'control)
+          (eq? code 'rcontrol)
           (eq? code 'release)
           (let ([score (get-best-score 
                         code

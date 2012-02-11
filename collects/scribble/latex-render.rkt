@@ -40,6 +40,9 @@
       (define/override (render-part-depth) n)
       (super-new))))
 
+(define-runtime-path skull-tex "scribble-skull.tex")
+(define skull-style (make-style #f (list (tex-addition skull-tex))))
+
 (define (render-mixin %)
   (class %
     (inherit-field prefix-file style-file style-extra-files)
@@ -667,7 +670,7 @@
          [else (printf "\\end{~a}" kind)])
         null))
 
-    (define/override (render-nested-flow t part ri)
+    (define/override (render-nested-flow t part ri starting-item?)
       (do-render-nested-flow t part ri #f #f))
 
     (define/override (render-compound-paragraph t part ri starting-item?)
@@ -705,6 +708,12 @@
                     [else (error 'render "unknown symbol element: ~e" i)]))]
         [else (display-protected (format "~s" i))])
       null)
+
+    (define/override (string-to-implicit-styles e)
+      (for/fold ([ses null]) ([ch (in-string e)])
+        (case ch
+          [(#\☠) (cons skull-style ses)]
+          [else ses])))
 
     (define/private (display-protected s)
       (if (eq? (rendering-tt) 'exact)
@@ -892,7 +901,7 @@
                             [(#\∝) "$\\propto$"]
                             [(#\⊢) "$\\vdash$"]
                             [(#\⊣) "$\\dashv$"]    
-                            [(#\☠) "$\\skull$"] 
+                            [(#\☠) "$\\skull$"]
                             [(#\☺) "$\\smiley$"]
                             [(#\☻) "$\\blacksmiley$"]
                             [(#\☹) "$\\frownie$"]
@@ -936,6 +945,18 @@
                             [(#\⊤) "$\\top$"]
                             [(#\¥) "{\\textyen}"]
                             [(#\™) "{\\texttrademark}"]
+                            [(#\u2070) "$^0$"]
+                            [(#\u00b9) "$^1$"]
+                            [(#\u00b2) "$^2$"]
+                            [(#\u00b3) "$^3$"]
+                            [(#\u2074) "$^4$"]
+                            [(#\u2075) "$^5$"]
+                            [(#\u2076) "$^6$"]
+                            [(#\u2077) "$^7$"]
+                            [(#\u2078) "$^8$"]
+                            [(#\u2079) "$^9$"]
+                            [(#\u207a) "$^+$"]
+                            [(#\u207b) "$^-$"]
                             [else c])
                           c)])))
                 (loop (add1 i)))))))

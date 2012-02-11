@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1180,6 +1180,11 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
       
       return k;
     }
+  case scheme_regexp_type:
+    {
+      o = scheme_regexp_source(o);
+      break;
+    }
   case scheme_structure_type:
   case scheme_proc_struct_type:
     {
@@ -1375,6 +1380,14 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
     {
       k += 7;
       o = SCHEME_PTR_VAL(o);
+    }
+    break;
+  case scheme_place_bi_channel_type:
+    {
+      k += 7;
+      /* a bi channel has sendch and recvch, but
+         sends are the same iff recvs are the same: */
+      o = (Scheme_Object *)((Scheme_Place_Bi_Channel *)o)->sendch;
     }
     break;
   default:    
@@ -1597,6 +1610,11 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
     
       return k;
     }
+  case scheme_regexp_type:
+    {
+      o = scheme_regexp_source(o);
+      goto top;
+    }
   case scheme_structure_type:
   case scheme_proc_struct_type:
     {
@@ -1741,7 +1759,7 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
 	  if (key) {
 	    k += equal_hash_key2((Scheme_Object *)bucket->val, hi);
 	    k += equal_hash_key2((Scheme_Object *)key, hi);
-            old_depth = hi->depth;
+            hi->depth = old_depth;
 	  }
 	}
       }
@@ -1751,6 +1769,11 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
   case scheme_resolved_module_path_type:
     /* Needed for interning */
     o = SCHEME_PTR_VAL(o);
+    goto top;
+  case scheme_place_bi_channel_type:
+    /* a bi channel has sendch and recvch, but
+       sends are the same iff recvs are the same: */
+    o = (Scheme_Object *)((Scheme_Place_Bi_Channel *)o)->sendch;
     goto top;
   default:
     {
@@ -1778,7 +1801,7 @@ intptr_t scheme_recur_equal_hash_key2(Scheme_Object *o, void *cycle_data)
 /*========================================================================*/
 
 /* Direct port of red-black trees in Jens Axel Soegaard's "galore" package,
-   which implemented in Scheme (5th may 2006 version) and says:
+   which implemented in Racket (5th may 2006 version) and says:
    
    ; This is direct port of Jean-Christophe Filliatre's implementation
    ; of red-black trees in Ocaml. */
@@ -1795,8 +1818,10 @@ typedef struct RBNode {
 
 #if 0
 # define RB_ASSERT(p) if (p) { } else { scheme_signal_error("hash-tree assert failure %d", __LINE__); }
+# define RB_ASSERT_ONLY(x) x
 #else
 # define RB_ASSERT(p) /* empty */
+# define RB_ASSERT_ONLY(x) /* empty */
 #endif
 
 static RBNode *make_rb(int red, 
@@ -2145,7 +2170,7 @@ static RBNode *remove_min(RBNode *s, RBNode **_m, int *_bh_dec)
     *_m = s;
     return s->right;
   }
-  /* covers last two cases of Scheme code: */
+  /* covers last two cases of Racket code: */
   {
     int left_bh_dec;
     RBNode *l1, *t;
@@ -2550,9 +2575,9 @@ int scheme_hash_tree_index(Scheme_Hash_Tree *tree, intptr_t pos, Scheme_Object *
   else
     elems = NULL;
   if (!elems) {
-    int total_pos;
+    RB_ASSERT_ONLY(int total_pos);
     elems = scheme_make_vector(tree->count * 2, NULL);
-    total_pos = fill_elems(tree->root, elems, 0, tree->count);
+    RB_ASSERT_ONLY(total_pos = ) fill_elems(tree->root, elems, 0, tree->count);
     RB_ASSERT(total_pos == tree->count);
     elems_box = scheme_make_weak_box(elems);
     tree->elems_box = elems_box;

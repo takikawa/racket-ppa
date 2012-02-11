@@ -3,35 +3,32 @@
 ;; A compatibility module for the old 'plot'.
 
 (require racket/contract racket/class racket/snip racket/draw racket/vector
+         unstable/latent-contract unstable/latent-contract/defthing
          ;; Plotting
+         "common/math.rkt"
          "common/contract.rkt"
-         "common/contract-doc.rkt"
-         "common/ticks.rkt"
-         "plot2d/area.rkt"
-         "plot2d/renderer.rkt"
-         "plot3d/area.rkt"
-         "plot3d/renderer.rkt"
+         "common/plot-element.rkt"
+         "plot2d/plot-area.rkt"
+         "plot3d/plot-area.rkt"
          (prefix-in new. (only-in "main.rkt"
                                   x-axis y-axis
+                                  plot-x-ticks plot-y-ticks plot-z-ticks
                                   points error-bars vector-field
                                   plot-title plot-x-label plot-y-label plot-z-label
                                   plot-foreground plot-background
                                   plot3d-angle plot3d-altitude))
          "deprecated/renderers.rkt"
-         ;; Curve fitting
-         "deprecated/fit.rkt"
          ;; Miscellaneous
          "deprecated/math.rkt")
 
-(provide mix plot-color?
-         plot plot3d
-         points vector-field error-bars
-         line
-         contour shade
-         surface
-         ;; Curve fitting
-         (rename-out [fit-int fit])
-         (struct-out fit-result)
+(provide mix
+         (activate-contract-out plot-color?
+                                plot plot3d
+                                points vector-field error-bars
+                                line
+                                contour shade
+                                surface)
+         (only-doc-out (all-defined-out))
          ;; Miscellaneous
          make-vec derivative gradient)
 
@@ -72,8 +69,9 @@
                [#:lncolor lncolor (list/c byte? byte? byte?) '(255 0 0)]
                [#:out-file out-file (or/c path-string? output-port? #f) #f]
                ) (is-a?/c image-snip%)
-  (define x-ticks (default-ticks-fun x-min x-max))
-  (define y-ticks (default-ticks-fun y-min y-max))
+  (define x-ticks ((new.plot-x-ticks) x-min x-max))
+  (define y-ticks ((new.plot-y-ticks) y-min y-max))
+  (define bounds-rect (vector (ivl x-min x-max) (ivl y-min y-max)))
   
   (parameterize ([new.plot-title       title]
                  [new.plot-x-label     x-label]
@@ -82,12 +80,15 @@
                  [new.plot-background  bgcolor])
     (define bm (make-bitmap (ceiling width) (ceiling height)))
     (define dc (make-object bitmap-dc% bm))
-    (define area (make-object 2d-plot-area% x-ticks y-ticks x-min x-max y-min y-max
-                   dc 0 0 width height))
+    (define area (make-object 2d-plot-area%
+                   bounds-rect x-ticks x-ticks y-ticks y-ticks dc 0 0 width height))
+    
+    (define data+axes (mix x-axis-data y-axis-data data))
     
     (send area start-plot)
-    (send area start-renderer x-min x-max y-min y-max)
-    ((mix x-axis-data y-axis-data data) area)
+    (send area start-renderer bounds-rect)
+    (data+axes area)
+    (send area end-renderers)
     (send area end-plot)
     
     (when out-file (send bm save-file out-file 'png))
@@ -110,9 +111,10 @@
                  [#:lncolor lncolor (list/c byte? byte? byte?) '(255 0 0)]
                  [#:out-file out-file (or/c path-string? output-port? #f) #f]
                  ) (is-a?/c image-snip%)
-  (define x-ticks (default-ticks-fun x-min x-max))
-  (define y-ticks (default-ticks-fun y-min y-max))
-  (define z-ticks (default-ticks-fun z-min z-max))
+  (define x-ticks ((new.plot-x-ticks) x-min x-max))
+  (define y-ticks ((new.plot-y-ticks) y-min y-max))
+  (define z-ticks ((new.plot-z-ticks) z-min z-max))
+  (define bounds-rect (vector (ivl x-min x-max) (ivl y-min y-max) (ivl z-min z-max)))
   
   (parameterize ([new.plot-title       title]
                  [new.plot-x-label     x-label]
@@ -124,13 +126,13 @@
                  [new.plot3d-altitude  alt])
     (define bm (make-bitmap (ceiling width) (ceiling height)))
     (define dc (make-object bitmap-dc% bm))
-    (define area
-      (make-object 3d-plot-area% x-ticks y-ticks z-ticks x-min x-max y-min y-max z-min z-max
-        dc 0 0 width height))
+    (define area (make-object 3d-plot-area%
+                   bounds-rect x-ticks x-ticks y-ticks y-ticks z-ticks z-ticks dc 0 0 width height))
     
     (send area start-plot)
-    (send area start-renderer x-min x-max y-min y-max z-min z-max)
+    (send area start-renderer bounds-rect)
     (data area)
+    (send area end-renderers)
     (send area end-plot)
     
     (when out-file (send bm save-file out-file 'png))
