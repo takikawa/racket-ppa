@@ -21,8 +21,6 @@ reader are @tech{interned} in @racket[read-syntax] mode.
 
 @see-read-print["character"]{characters}
 
-@see-read-print["character"]{characters}
-
 @; ----------------------------------------
 @section{Characters and Scalar Values}
 

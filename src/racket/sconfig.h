@@ -979,17 +979,6 @@
 #endif
 
 #endif
-#if defined(__x86_64__)
-# define MZ_USE_JIT_X86_64
-# define MZ_JIT_USE_MPROTECT
-# define MZ_USE_DWARF_LIBUNWIND
-#endif
-
-#endif
-
-  /***************************************************/
-
-#endif /* end not OSKit */
 
   /***************************************************/
 

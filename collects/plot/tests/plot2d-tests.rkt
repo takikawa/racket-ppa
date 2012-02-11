@@ -24,10 +24,6 @@
                [plot-y-ticks      (linear-ticks #:number 10)])
   (plot (function values 1 243)))
 
-(plot (list (axes 1 2) (function values -4 4)))
-
-(time (plot (function values 0 1000)))
-
 (parameterize ([plot-background  "black"]
                [plot-foreground  "white"]
                [plot-background-alpha  1/2]

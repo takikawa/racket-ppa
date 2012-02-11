@@ -84,10 +84,6 @@ This returns @racket[samples] when @racket[plot-animating?] is @racket[#f].
 When @(racket #f), axes, axis labels, ticks, tick labels, and the title are not drawn.
 }
 
-@doc-apply[plot-animating?]{
-When @(racket #t), certain renderers draw simplified plots to speed up drawing. PLoT sets it to @(racket #t), for example, when a user is clicking and dragging a 3D plot to rotate it.
-}
-
 @section{Lines}
 
 @doc-apply[line-samples]
