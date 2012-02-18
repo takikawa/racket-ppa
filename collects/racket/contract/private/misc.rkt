@@ -4,7 +4,9 @@
          racket/promise
          "prop.rkt"
          "blame.rkt"
-         "guts.rkt")
+         "guts.rkt"
+         "rand.rkt"
+         "generate.rkt")
 
 (provide flat-rec-contract
          flat-murec-contract
@@ -295,7 +297,12 @@
                           that-ctcs)))))
 
    #:first-order
-   (λ (ctc) (flat-or/c-pred ctc))))
+   (λ (ctc) (flat-or/c-pred ctc))
+   #:generate
+   (λ (ctc)
+      (λ (fuel)
+         (generate/direct (oneof (flat-or/c-flat-ctcs ctc)) fuel)))
+         ))
 
 
 (define (and-name ctc)
@@ -482,7 +489,20 @@
             [m (between/c-high ctc)])
         (λ (x) 
            (and (real? x)
-                (<= n x m)))))))
+                (<= n x m)))))
+   #:generate
+   (λ (ctc)
+      (λ (fuel)
+         (let* ([max-n 2147483647]
+                [min-n -2147483648]
+                [upper (if (> (between/c-high ctc) max-n)
+                         max-n
+                         (between/c-high ctc))]
+                [lower (if (< (between/c-low ctc) min-n)
+                         min-n
+                         (between/c-low ctc))])
+           (+ (random (- upper lower))
+              lower))))))
 
 (define-syntax (check-unary-between/c stx)
   (syntax-case stx ()
@@ -514,11 +534,28 @@
 (define (</c x)
   (flat-named-contract
    `(</c ,x)
-   (λ (y) (and (real? y) (< y x)))))
+   (λ (y) (and (real? y) (< y x)))
+   (λ (fuel)
+      (let* ([max-n 2147483647]
+             [min-n -2147483648]
+             [upper (if (> x max-n)
+                      max-n
+                      x)])
+        (+ (random (- upper min-n))
+           min-n)))))
+
 (define (>/c x)
   (flat-named-contract
-   `(>/c ,x)
-   (λ (y) (and (real? y) (> y x)))))
+    `(>/c ,x)
+    (λ (y) (and (real? y) (> y x)))
+    (λ (fuel) 
+       (let* ([max-n 2147483647]
+              [min-n -2147483648]
+              [lower (if (< x min-n)
+                       min-n
+                       x)])
+         (+ (random (- max-n lower))
+            lower)))))
 
 (define/final-prop (integer-in start end)
   (unless (and (integer? start)
@@ -546,9 +583,22 @@
      (build-compound-type-name 'not/c ctc)
      (λ (x) (not (pred x))))))
 
+(define (listof-generate elem-ctc)
+  (λ (fuel)
+     (define (mk-rand-list so-far)
+       (rand-choice
+         [1/5 so-far]
+         [else (mk-rand-list (cons (generate/direct elem-ctc fuel)
+                                   so-far))]))
+     (mk-rand-list (list))))
+
+(define (listof-exercise el-ctc)
+  (λ (f n-tests size env)
+    #t))
+
 (define-syntax (*-listof stx)
   (syntax-case stx ()
-    [(_ predicate? type-name name)
+    [(_ predicate? type-name name generate)
      (identifier? (syntax predicate?))
      (syntax
       (λ (input)
@@ -572,23 +622,25 @@
              (make-flat-contract
               #:name ctc-name
               #:first-order fo-check
-              #:projection (ho-check (λ (p v) (for-each p v) v)))]
+              #:projection (ho-check (λ (p v) (for-each p v) v))
+              #:generate (generate ctc))]
             [(chaperone-contract? ctc)
              (make-chaperone-contract
               #:name ctc-name
               #:first-order fo-check
-              #:projection (ho-check (λ (p v) (map p v))))]
+              #:projection (ho-check (λ (p v) (map p v)))
+              #:generate (generate ctc))]
             [else
              (make-contract
               #:name ctc-name
               #:first-order fo-check
               #:projection (ho-check (λ (p v) (map p v))))]))))]))
 
-(define listof-func (*-listof list? list listof))
+(define listof-func (*-listof list? list listof listof-generate))
 (define/subexpression-pos-prop (listof x) (listof-func x))
 
 (define (non-empty-list? x) (and (pair? x) (list? (cdr x))))
-(define non-empty-listof-func (*-listof non-empty-list? non-empty-list non-empty-listof))
+(define non-empty-listof-func (*-listof non-empty-list? non-empty-list non-empty-listof (λ (ctc) (make-generate-ctc-fail))))
 (define/subexpression-pos-prop (non-empty-listof a) (non-empty-listof-func a))
 
 (define cons/c-main-function
@@ -629,75 +681,82 @@
 (define/subexpression-pos-prop (cons/c a b) (cons/c-main-function a b))
 
 (define/subexpression-pos-prop (list/c . args)
-  (let* ([args (coerce-contracts 'list/c args)])
-    (if (andmap flat-contract? args)
-      (flat-list/c args)
-      (higher-order-list/c args))))
+  (define ctc-args (coerce-contracts 'list/c args))
+  (cond
+    [(andmap flat-contract? ctc-args)
+     (flat-list/c ctc-args)]
+    [(andmap chaperone-contract? ctc-args)
+     (chaperone-list/c ctc-args)]
+    [else
+     (higher-order-list/c ctc-args)]))
 
-(struct flat-list/c [args]
-        #:property prop:flat-contract
-        (build-flat-contract-property
-         #:name
-         (lambda (c)
-           (apply build-compound-type-name
-             'list/c (flat-list/c-args c)))
-         #:first-order
-         (lambda (c)
-           (lambda (x)
-             (and (list? x)
-                  (= (length x) (length (flat-list/c-args c)))
-                  (for/and ([arg/c (in-list (flat-list/c-args c))]
-                            [v (in-list x)])
-                    (arg/c v)))))
-         #:projection
-         (lambda (c)
-           (lambda (b)
-             (lambda (x)
-               (unless (list? x)
-                 (raise-blame-error b x "expected a list, got: ~e" x))
-               (let* ([args (flat-list/c-args c)]
-                      [expected (length args)]
-                      [actual (length x)])
-                 (unless (= actual expected)
-                   (raise-blame-error
-                    b x
-                    "expected a list of ~a elements, but got ~a elements in: ~e"
-                    expected actual x))
-                 (for ([arg/c (in-list args)] [v (in-list x)])
-                   (((contract-projection arg/c) b) v))
-                 x))))))
+(define (list/c-name-proc c) 
+  (apply build-compound-type-name
+         'list/c (generic-list/c-args c)))
+(define ((list/c-first-order c) x)
+  (and (list? x)
+       (= (length x) (length (generic-list/c-args c)))
+       (for/and ([arg/c (in-list (generic-list/c-args c))]
+                 [v (in-list x)])
+         (arg/c v))))
 
-(struct higher-order-list/c [args]
-        #:property prop:contract
-        (build-contract-property
-         #:name
-         (lambda (c)
-           (apply build-compound-type-name
-             'list/c (higher-order-list/c-args c)))
-         #:first-order
-         (lambda (c)
-           (lambda (x)
-             (and (list? x)
-                  (= (length x) (length (higher-order-list/c-args c)))
-                  (for/and ([arg/c (in-list (higher-order-list/c-args c))]
-                            [v (in-list x)])
-                    (contract-first-order-passes? arg/c v)))))
-         #:projection
-         (lambda (c)
-           (lambda (b)
-             (lambda (x)
-               (unless (list? x)
-                 (raise-blame-error b x "expected a list, got: ~e" x))
-               (let* ([args (higher-order-list/c-args c)]
-                      [expected (length args)]
-                      [actual (length x)])
-                 (unless (= actual expected)
-                   (raise-blame-error
-                    b x
-                    "expected a list of ~a elements, but got ~a elements in: ~e"
-                    expected actual x))
-                 (for/list ([arg/c (in-list args)] [v (in-list x)])
-                   (((contract-projection arg/c) b) v))))))))
+(struct generic-list/c (args))
+
+(struct flat-list/c generic-list/c ()
+  #:property prop:flat-contract
+  (build-flat-contract-property
+   #:name list/c-name-proc
+   #:first-order list/c-first-order
+   #:projection
+   (lambda (c)
+     (lambda (b)
+       (lambda (x)
+         (unless (list? x)
+           (raise-blame-error b x "expected a list, got: ~e" x))
+         (let* ([args (generic-list/c-args c)]
+                [expected (length args)]
+                [actual (length x)])
+           (unless (= actual expected)
+             (raise-blame-error
+              b x
+              "expected a list of ~a elements, but got ~a elements in: ~e"
+              expected actual x))
+           (for ([arg/c (in-list args)] [v (in-list x)])
+             (((contract-projection arg/c) b) v))
+           x))))))
+
+(define (list/c-chaperone/other-projection c)
+  (define args (map contract-projection (generic-list/c-args c)))
+  (define expected (length args))
+  (λ (b)
+    (define projs (for/list ([arg/c (in-list args)])
+                    (arg/c b)))
+    (λ (x)
+      (unless (list? x)
+        (raise-blame-error b x "expected a list, got: ~e" x))
+      (define actual (length x))
+      (unless (= actual expected)
+        (raise-blame-error
+         b x
+         "expected a list of ~a elements, but got ~a elements in: ~e"
+         expected actual x))
+      (for/list ([item (in-list x)]
+                 [proj (in-list projs)])
+        (proj item)))))
+
+(struct chaperone-list/c generic-list/c ()
+  #:property prop:chaperone-contract
+  (build-chaperone-contract-property
+   #:name list/c-name-proc
+   #:first-order list/c-first-order
+   #:projection list/c-chaperone/other-projection))
+
+(struct higher-order-list/c generic-list/c ()
+  #:property prop:contract
+  (build-contract-property
+   #:name list/c-name-proc
+   #:first-order list/c-first-order
+   #:projection list/c-chaperone/other-projection))
 
 (define/subexpression-pos-prop (syntax/c ctc-in)
   (let ([ctc (coerce-contract 'syntax/c ctc-in)])
@@ -844,19 +903,18 @@
    (coerce-contract 'contract-projection ctc)))
 
 (define (flat-contract predicate) (coerce-flat-contract 'flat-contract predicate))
-(define (flat-named-contract name predicate)
-  (cond
-    [(and (procedure? predicate)
-          (procedure-arity-includes? predicate 1))
-     (make-predicate-contract name predicate)]
-    [(flat-contract? predicate)
-     (make-predicate-contract name (flat-contract-predicate predicate))]
-    [else
-     (error 'flat-named-contract 
-            "expected a flat contract or procedure of arity 1 as second argument, got ~e" 
-            predicate)]))
-
-
+(define (flat-named-contract name predicate [generate #f])
+  (let ([generate (or generate (make-generate-ctc-fail))])
+    (cond
+      [(and (procedure? predicate)
+            (procedure-arity-includes? predicate 1))
+       (make-predicate-contract name predicate generate)]
+      [(flat-contract? predicate)
+       (make-predicate-contract name (flat-contract-predicate predicate) generate)]
+      [else
+       (error 'flat-named-contract 
+              "expected a flat contract or procedure of arity 1 as second argument, got ~e" 
+              predicate)])))
 
 (define printable/c
   (flat-named-contract

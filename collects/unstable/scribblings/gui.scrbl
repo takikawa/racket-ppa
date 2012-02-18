@@ -3,11 +3,10 @@
           scribble/manual
           (for-label scribble/base))
 
-@title[#:style '(toc) #:tag "unstable-gui"]{GUI libraries}
+@title[#:style '(toc) #:tag "unstable-gui"]{GUI Libraries}
 
 @local-table-of-contents[#:style 'immediate-only]
 
-@include-section["gui/language-level.scrbl"]
 @include-section["gui/notify.scrbl"]
 @include-section["gui/prefs.scrbl"]
 @include-section["gui/pict.scrbl"]

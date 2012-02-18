@@ -10,7 +10,8 @@
                      racket/provide
                      racket/package
                      racket/splicing
-                     racket/runtime-path))
+                     racket/runtime-path
+                     racket/performance-hint))
 
 @(define require-eval (make-base-eval))
 @(define syntax-eval
@@ -1648,7 +1649,7 @@ within the @racket[body]s to the procedure itself.}
 
 @defform[(let* ([id val-expr] ...) body ...+)]{
 
-Similar to @racket[let], but evaluates the @racket[val-expr]s one by
+Like @racket[let], but evaluates the @racket[val-expr]s one by
 one, creating a @tech{location} for each @racket[id] as soon as the value is
 available. The @racket[id]s are bound in the remaining @racket[val-expr]s
 as well as the @racket[body]s, and the @racket[id]s need not be
@@ -1662,10 +1663,12 @@ distinct; later bindings shadow earlier bindings.
 
 @defform[(letrec ([id val-expr] ...) body ...+)]{
 
-Similar to @racket[let], but the @tech{locations} for all @racket[id]s are
-created first and filled with @|undefined-const|, and all
+Like @racket[let], including left-to-right evaluation of the @racket[val-expr]s,
+but the @tech{locations} for all @racket[id]s are
+created first and filled with @|undefined-const|, all
 @racket[id]s are bound in all @racket[val-expr]s as well as the
-@racket[body]s. The @racket[id]s must be distinct according to
+@racket[body]s, and each @racket[id] is set immediately after the
+corresponding @racket[val-expr] is evaluated. The @racket[id]s must be distinct according to
 @racket[bound-identifier=?].
 
 @mz-examples[
@@ -2080,7 +2083,13 @@ the binding at the same time.
 (define-values (x y z) (values 1 2 3))
 z
 ]
-}
+
+If a @racket[define-values] form for a function definition in a module
+body has a @indexed-racket['compiler-hint:cross-module-inline]
+@tech{syntax property} with a true value, then the Racket treats the
+property as a performance hint.  See
+@guidesecref["func-call-performance"] in @|Guide| for more
+information, and see also @racket[begin-encourage-inline].}
 
 
 @defform*[[(define-syntax id expr)
@@ -2585,3 +2594,14 @@ syntactic forms or languages that supply a more limited kind of
 
 @close-eval[require-eval]
 @close-eval[meta-in-eval]
+
+@;------------------------------------------------------------------------
+@section[#:tag "performance-hint"]{Performance Hints: @racket[begin-encourage-inline]}
+
+@note-lib-only[racket/performance-hint]
+
+@defform[(begin-encourage-inline form ...)]{
+
+Attaches a @racket['compiler-hint:cross-module-inline]
+@tech{syntax property} to each @racket[form], which is useful when a
+@racket[form] is a function definition. See @racket[define-values].}

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2011 PLT Scheme Inc.
+  Copyright (c) 2006-2012 PLT Scheme Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -78,7 +78,8 @@ static jit_insn *generate_proc_struct_retry(mz_jit_state *jitter, int num_rands,
   CHECK_LIMIT();
 
   /* It's a native closure, but we can't just jump to it, in case
-     the arity is wrong. */
+     the arity is wrong and an error needs to be reported using
+     the original wrapper. */
   mz_prepare(2);
   jit_movi_i(JIT_R0, num_rands);
   jit_pusharg_i(JIT_R0); /* argc */
@@ -161,6 +162,10 @@ static Scheme_Object *_scheme_tail_apply_from_native_fixup_args(Scheme_Object *r
   for (i = 0; i < argc; i++) {
     base[already + i] = argv[i];
   }
+
+  /* In futures mode, it's important that the argument array matches
+     runstack: */
+  MZ_RUNSTACK = base;
 
   return ts__scheme_tail_apply_from_native(rator, argc + already, base);
 }
@@ -375,16 +380,9 @@ int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
     JIT_UPDATE_THREAD_RSPTR();
   }
   if (direct_native && direct_to_code) {
-    int retptr;
     __END_SHORT_JUMPS__(num_rands < 100);
     /* load closure pointer into R0: */
-    retptr = mz_retain(direct_to_code);
-#ifdef JIT_PRECISE_GC
-    if (retptr)
-      scheme_mz_load_retained(jitter, JIT_R0, retptr);
-    else
-#endif
-      (void)jit_patchable_movi_p(JIT_R0, direct_to_code);
+    scheme_mz_load_retained(jitter, JIT_R0, direct_to_code);
     /* jump directly: */
     (void)jit_jmpi(direct_to_code->code->u.tail_code);
     /* no slow path in this mode */
@@ -680,7 +678,7 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
     jit_base_prolog();
 #else
     refr = jit_patchable_movi_p(JIT_R1, jit_forward());
-    _jit_prolog_again(jitter, 3, JIT_R1); /* saves V registers (or copied V registers) */
+    _jit_prolog_again(jitter, NATIVE_ARG_COUNT, JIT_R1); /* saves V registers (or copied V registers) */
 #endif
     if (num_rands >= 0) {
       if (nontail_self) { jit_movr_p(JIT_R1, JIT_R0); }
@@ -923,8 +921,9 @@ static int generate_self_tail_call(Scheme_Object *rator, mz_jit_state *jitter, i
   GC_CAN_IGNORE jit_insn *refslow, *refagain;
   int i, jmp_tiny, jmp_short;
   int closure_size = jitter->self_closure_size;
-  int space, offset, arg_offset, arg_tmp_offset;
+  int space, offset;
 #ifdef USE_FLONUM_UNBOXING
+  int arg_offset = 1, arg_tmp_offset;
   Scheme_Object *rand;
 #endif
 
@@ -949,10 +948,11 @@ static int generate_self_tail_call(Scheme_Object *rator, mz_jit_state *jitter, i
 
   __END_TINY_OR_SHORT_JUMPS__(jmp_tiny, jmp_short);
 
-  arg_tmp_offset = offset = jitter->flostack_offset;
+  offset = jitter->flostack_offset;
   space = jitter->flostack_space;
-
-  arg_offset = 1;
+#ifdef USE_FLONUM_UNBOXING
+  arg_tmp_offset = offset;
+#endif
 
   /* Copy args to runstack after closure data: */
   mz_ld_runstack_base_alt(JIT_R2);
@@ -1454,12 +1454,12 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
                of the call. */
             Scheme_Native_Closure *nc;
             nc = (Scheme_Native_Closure *)scheme_jit_closure((Scheme_Object *)data, NULL);
-            if (nc->code->code == scheme_on_demand_jit_code) {
+            if (nc->code->start_code == scheme_on_demand_jit_code) {
               if (nc->code->arity_code != sjc.in_progress_on_demand_jit_arity_code) {
-                scheme_on_demand_generate_lambda(nc, 0, NULL);
+                scheme_on_demand_generate_lambda(nc, 0, NULL, 0);
               }
             }
-            if (nc->code->code != scheme_on_demand_jit_code) {
+            if (nc->code->start_code != scheme_on_demand_jit_code) {
               if (nc->code->max_let_depth > jitter->max_tail_depth)
                 jitter->max_tail_depth = nc->code->max_let_depth;
 

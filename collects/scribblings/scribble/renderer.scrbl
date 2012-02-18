@@ -48,7 +48,7 @@ function to render a document.
                  [#:style-extra-files style-extra-files (listof path-string?) #f]
                  [#:extra-files extra-files (listof path-string?) #f]
                  [#:xrefs xrefs (listof xref?) null]
-                 [#:info-in-files info-in-files (listof path?) null]
+                 [#:info-in-files info-in-files (listof path-string?) null]
                  [#:info-out-file info-out-file (or/c #f path-string?) #f]
                  [#:redirect redirect (or/c #f string?) #f]
                  [#:redirect-main redirect-main (or/c #f string?) #f]
@@ -128,6 +128,11 @@ Creates a renderer whose output will go to @racket[dest-dir]. For
 example, @racket[dest-dir] could name the directory containing the
 output Latex file, the HTML file for a single-file output, or the
 output sub-directory for multi-file HTML output.
+
+If @racket[refer-to-existing-files] is true, then when a document
+refers to external files, such as an image or a style file, then the
+file is referenced from its source location instead of copied to the
+document destination.
 
 If @racket[root-path] is not @racket[#f], it is normally the same as
 @racket[dest-dir] or a parent of @racket[dest-dir]. It causes

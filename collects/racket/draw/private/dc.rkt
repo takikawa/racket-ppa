@@ -32,7 +32,8 @@
 
 (define-local-member-name
   do-set-pen!
-  do-set-brush!)
+  do-set-brush!
+  text-path)
 
 (define 2pi (* 2 pi))
 
@@ -758,6 +759,16 @@
           (cairo_set_source cr p)
           (cairo_pattern_destroy p))))
 
+    (define/private (install-transformation transformation cr)
+      (when transformation
+        (cairo_identity_matrix cr)
+        (init-cr-matrix cr)
+        (cairo_translate cr scroll-dx scroll-dy)        
+        (cairo_transform cr (vector->matrix (vector-ref transformation 0)))
+        (cairo_translate cr (vector-ref transformation 1) (vector-ref transformation 2))
+        (cairo_scale cr (vector-ref transformation 3) (vector-ref transformation 4))
+        (cairo_rotate cr (- (vector-ref transformation 5)))))
+
     (define/private (make-gradient-pattern cr gradient transformation)
       (define p 
         (if (is-a? gradient linear-gradient%)
@@ -772,14 +783,7 @@
                  [b (norm (color-blue c))]
                  [a (color-alpha c)])
             (cairo_pattern_add_color_stop_rgba p offset r g b a)))
-      (when transformation
-        (cairo_identity_matrix cr)
-        (init-cr-matrix cr)
-        (cairo_translate cr scroll-dx scroll-dy)        
-        (cairo_transform cr (vector->matrix (vector-ref transformation 0)))
-        (cairo_translate cr (vector-ref transformation 1) (vector-ref transformation 2))
-        (cairo_scale cr (vector-ref transformation 3) (vector-ref transformation 4))
-        (cairo_rotate cr (- (vector-ref transformation 5))))
+      (install-transformation transformation cr)
       (cairo_set_source cr p)
       (when transformation
         (do-reset-matrix cr))
@@ -787,7 +791,7 @@
 
     ;; Stroke, fill, and flush the current path
     (define/private (draw cr brush? pen?)
-      (define (install-stipple st col mode get put)
+      (define (install-stipple st col mode transformation get put)
         (let ([s (cond
                   [(get) => (lambda (s) s)]
                   [(and (not (send st is-color?))
@@ -815,7 +819,10 @@
                               get-cairo-surface))])])
           (let* ([p (cairo_pattern_create_for_surface s)])
             (cairo_pattern_set_extend p CAIRO_EXTEND_REPEAT)
+            (install-transformation transformation cr)
             (cairo_set_source cr p)
+            (when transformation
+              (do-reset-matrix cr))
             (cairo_pattern_destroy p))))
       (cairo_set_antialias cr (case (dc-adjust-smoothing smoothing)
                                 [(unsmoothed) CAIRO_ANTIALIAS_NONE]
@@ -831,6 +838,7 @@
                   (make-gradient-pattern cr gradient (send brush get-transformation))
                   (if st
                       (install-stipple st col s 
+                                       (send brush get-transformation)
                                        (lambda () brush-stipple-s)
                                        (lambda (v) (set! brush-stipple-s v) v))
                       (let ([horiz (lambda (cr2)
@@ -896,6 +904,7 @@
                   [col (send pen get-color)])
               (if st
                   (install-stipple st col s
+                                   #f
                                    (lambda () pen-stipple-s)
                                    (lambda (v) (set! pen-stipple-s v) v))
                   (install-color cr 
@@ -1153,8 +1162,15 @@
       (with-cr
        (check-ok 'draw-text)
        cr
-       (do-text cr #t s x y font combine? offset angle)
+       (do-text cr 'draw s x y font combine? offset angle)
        (flush-cr)))
+
+    (define/public (text-path s x y combine?)
+      (with-cr
+       (check-ok 'draw-text)
+       cr
+       (do-text cr 'path s x y font combine? 0 0.0)
+       (cairo_copy_path cr)))
 
     (define size-cache (make-weak-hasheq))
 
@@ -1203,12 +1219,32 @@
                cr
                (do-text cr #f s 0 0 use-font combine? offset 0.0))))))
 
-    (define/private (do-text cr draw? s x y font combine? offset angle)
+    (define/private (get-smoothing-index)
+      (case (dc-adjust-smoothing (send font get-smoothing))
+	[(default) 0]
+	[(unsmoothed) 1]
+	[(partly-smoothed) 2]
+	[(smoothed) 3]))
+
+    (define/private (get-context cr smoothing-index)
+      (or (vector-ref contexts smoothing-index)
+	  (let ([c (pango_font_map_create_context
+		    (let ([fm (vector-ref font-maps smoothing-index)])
+		      (or fm
+			  (let ([fm (pango_cairo_font_map_new)])
+			    (vector-set! font-maps smoothing-index fm)
+			    fm))))])
+	    (pango_cairo_update_context cr c)
+	    (vector-set! contexts smoothing-index c)
+	    (set-font-antialias c (dc-adjust-smoothing (send font get-smoothing)))
+	    c)))
+
+    (define/private (do-text cr draw-mode s x y font combine? offset angle)
       (let* ([s (if (zero? offset) 
                     s 
                     (substring s offset))]
              [blank? (string=? s "")]
-             [s (if (and (not draw?) blank?) " " s)]
+             [s (if (and (not draw-mode) blank?) " " s)]
              [s (if (for/or ([c (in-string s)])
                       (or (eqv? c #\uFFFE) (eqv? c #\uFFFF)))
                     ;; Since \uFFFE and \uFFFF are not supposed to be in any
@@ -1216,24 +1252,10 @@
                     ;; string to Pango:
                     (regexp-replace* #rx"[\uFFFE\uFFFF]" s "\uFFFD")
                     s)]
-             [rotate? (and draw? (not (zero? angle)))]
-             [smoothing-index (case (dc-adjust-smoothing (send font get-smoothing))
-                                [(default) 0]
-                                [(unsmoothed) 1]
-                                [(partly-smoothed) 2]
-                                [(smoothed) 3])]
-             [context (or (vector-ref contexts smoothing-index)
-                          (let ([c (pango_font_map_create_context
-                                    (let ([fm (vector-ref font-maps smoothing-index)])
-                                      (or fm
-                                          (let ([fm (pango_cairo_font_map_new)])
-                                            (vector-set! font-maps smoothing-index fm)
-                                            fm))))])
-                            (pango_cairo_update_context cr c)
-                            (vector-set! contexts smoothing-index c)
-                            (set-font-antialias c (dc-adjust-smoothing (send font get-smoothing)))
-                            c))])
-        (when draw?
+             [rotate? (and draw-mode (not (zero? angle)))]
+             [smoothing-index (get-smoothing-index)]
+             [context (get-context cr smoothing-index)])
+        (when draw-mode
           (when (eq? text-mode 'solid)
             (unless rotate?
               (let-values ([(w h d a) (do-text cr #f s 0 0 font combine? 0 0.0)])
@@ -1262,7 +1284,7 @@
               ;; This is combine mode. It has to be a little complicated, after all,
               ;; because we may need to implement font substitution ourselves, which
               ;; breaks the string into multiple layouts.
-              (let loop ([s s] [draw? draw?] [measured? #f] [w 0.0] [h 0.0] [d 0.0] [a 0.0])
+              (let loop ([s s] [draw-mode draw-mode] [measured? #f] [w 0.0] [h 0.0] [d 0.0] [a 0.0])
                 (cond
                  [(not s)
                   (when rotate? (cairo_restore cr))
@@ -1299,11 +1321,11 @@
                                    (install-alternate-face (string-ref s 0) layout font desc attrs context))
                                  (substring s (max 1 ok-count))))])
                       (cond
-                       [(and draw? next-s (not measured?))
+                       [(and draw-mode next-s (not measured?))
                         ;; It's going to take multiple layouts, so first gather measurements.
                         (let-values ([(w2 h d a) (loop s #f #f w h d a)])
                           ;; draw again, supplying `h', `d', and `a' for the whole line
-                          (loop s #t #t w h d a))]
+                          (loop s draw-mode #t w h d a))]
                        [else
                         (let ([logical (make-PangoRectangle 0 0 0 0)])
                           (pango_layout_get_extents layout #f logical)
@@ -1311,16 +1333,19 @@
                                 [nd (/ (- (PangoRectangle-height logical)
                                           (pango_layout_get_baseline layout))
                                        (exact->inexact PANGO_SCALE))])
-                            (when draw?
+                            (when draw-mode
                               (let ([bl (if measured? (- h d) (- nh nd))])
                                 (pango_layout_get_extents layout #f logical)
                                 (cairo_move_to cr 
                                                (text-align-x/delta (+ x w) 0) 
                                                (text-align-y/delta (+ y bl) 0))
                                 ;; Draw the text:
-                                (pango_cairo_show_layout_line cr (pango_layout_get_line_readonly layout 0))))
+                                (let ([line (pango_layout_get_line_readonly layout 0)])
+                                  (if (eq? draw-mode 'draw)
+                                      (pango_cairo_show_layout_line cr line)
+                                      (pango_cairo_layout_line_path cr line)))))
                             (cond
-                             [(and draw? (not next-s))
+                             [(and draw-mode (not next-s))
                               (g_object_unref layout)
                               (when rotate? (cairo_restore cr))]
                              [else
@@ -1328,7 +1353,7 @@
                                             0.0
                                             (integral (/ (PangoRectangle-width logical) (exact->inexact PANGO_SCALE))))]
                                     [na 0.0])
-                                (loop next-s measured? draw? (+ w nw) (max h nh) (max d nd) (max a na)))])))])))]))
+                                (loop next-s draw-mode measured? (+ w nw) (max h nh) (max d nd) (max a na)))])))])))]))
               ;; This is character-by-character mode. It uses a cached per-character+font layout
               ;;  object.
               (let ([cache (if (or combine?
@@ -1383,7 +1408,7 @@
                 ;; character or if we're just measuring text.
                 (begin0
                  (unless (and
-                          draw?
+                          (eq? draw-mode 'draw)
                           cache
                           (not attrs) ; fast path doesn't handle underline
                           ((string-length s) . > . 1)
@@ -1475,13 +1500,16 @@
                                                                         ;; unrounded height, for slow-path alignment
                                                                         flh)))
                                                    (values lw lh ld la flh)))))))])
-                         (when draw?
+                         (when draw-mode
                            (cairo_move_to cr 
                                           (text-align-x/delta (+ x w) 0) 
                                           (let ([bl (- flh ld)])
                                             (text-align-y/delta (+ y bl) 0)))
                            ;; Here's the draw command, which uses most of the time in this mode:
-                           (pango_cairo_show_layout_line cr (pango_layout_get_line_readonly layout 0)))
+                           (let ([line (pango_layout_get_line_readonly layout 0)])
+                             (if (eq? draw-mode 'draw)
+                                 (pango_cairo_show_layout_line cr line)
+                                 (pango_cairo_layout_line_path cr line))))
                          (values (if blank? 0.0 (+ w lw)) (max h lh) (max d ld) (max a la))))))
                  (when rotate? (cairo_restore cr))))))))
 
@@ -1504,7 +1532,7 @@
               (vector-set! vec 2 #f)
               (vector-set! vec 3 #f)
               (vector-set! vec 4 #f)))))
-    
+
     (def/public (start-doc [string? desc])
       (check-ok 'start-doc))
     (def/public (end-doc)
@@ -1790,23 +1818,29 @@
             h)))
 
     (define/private (get-font-metric cr sel)
-      (let ([desc (get-pango font)]
-            [attrs (send font get-pango-attrs)]
-            [context+fontmap (or (for/or ([c (in-vector contexts)]
-                                          [fm (in-vector font-maps)])
-                                   (and c (cons c fm)))
-                                 (cons
-                                  (pango_cairo_create_context cr)
-                                  (pango_cairo_font_map_get_default)))])
-        (let ([font (pango_font_map_load_font (cdr context+fontmap)
-                                              (car context+fontmap)
-                                              desc)])
+      (let* ([desc (get-pango font)]
+	     [attrs (send font get-pango-attrs)]
+	     [index (get-smoothing-index)]
+	     [context (get-context cr index)]
+	     [fontmap (vector-ref font-maps index)]
+	     [font (pango_font_map_load_font fontmap context desc)])
           (and font ;; else font match failed
                (let ([metrics (pango_font_get_metrics font (pango_language_get_default))])
                  (let ([v (sel metrics)])
                    (pango_font_metrics_unref metrics)
-                   (/ v (exact->inexact PANGO_SCALE))))))))
+                   (/ v (exact->inexact PANGO_SCALE)))))))
 
     (void))
 
   dc%)
+
+(set-text-to-path!
+ (lambda (font str x y combine?)
+   (define tmp-bm (make-object bitmap% 10 10))
+   (define tmp-dc (make-object -bitmap-dc% tmp-bm))
+   (send tmp-dc set-font font)
+   (define path (send tmp-dc text-path str x y combine?))
+   (begin0
+    (cairo-path->list path)
+    (cairo_path_destroy path))))
+

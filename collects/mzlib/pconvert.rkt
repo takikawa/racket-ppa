@@ -14,6 +14,7 @@
            booleans-as-true/false
            named/undefined-handler
            use-named/undefined-handler
+           add-make-prefix-to-constructor
            
            print-convert
            print-convert-expr
@@ -45,6 +46,7 @@
   (define booleans-as-true/false (make-parameter #t boolean-filter))
   (define use-named/undefined-handler (make-parameter (lambda (x) #f)))
   (define named/undefined-handler (make-parameter (lambda (x) #f)))
+  (define add-make-prefix-to-constructor (make-parameter #f))
   
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; share-hash is the hash-table containing info on what cons cells
@@ -142,6 +144,7 @@
                       (hash-table-for-each 
                        expr
                        (lambda (key value)
+                         (build key)
                          (build value))))]
                    [(pair? expr)  
                     (unless (build-sub expr)
@@ -452,11 +455,14 @@
                                 (let ([constructor
 				       (if (print-convert-named-constructor? expr)
 					   (print-convert-constructor-name expr)
-					   (let* ([name (object-name expr)]
-						  [str-name (if (string? name)
-								name
-								(symbol->string name))])
-					     (string->symbol (string-append "make-" str-name))))])
+					   (let ([name (object-name expr)])
+                                             (if (and (symbol? name)
+                                                      (not (add-make-prefix-to-constructor)))
+                                                 name
+                                                 (let ([str-name (if (string? name)
+                                                                     name
+                                                                     (symbol->string name))])
+                                                   (string->symbol (string-append "make-" str-name))))))])
                                   `(,constructor
                                     ,@(map (lambda (x) 
                                              (if (eq? uniq x)

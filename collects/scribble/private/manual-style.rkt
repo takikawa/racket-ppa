@@ -112,8 +112,9 @@
 (define (indexed-file . str)
   (let* ([f (apply filepath str)]
          [s (element->string f)])
-    (index* (list (clean-up-index-string
-                   (substring s 1 (sub1 (string-length s)))))
+    (index* (list (datum-intern-literal
+                   (clean-up-index-string
+                    (substring s 1 (sub1 (string-length s))))))
             (list f)
             f)))
 (define (exec . str)
@@ -187,10 +188,10 @@
 
 (define-on-demand void-const
   (make-v+u-link
-   (racketresultfont "#<void>")))
+   (nonbreaking (racketresultfont "#<void>"))))
 (define-on-demand undefined-const
   (make-v+u-link
-   (racketresultfont "#<undefined>")))
+   (nonbreaking (racketresultfont "#<undefined>"))))
 
 (define (link url 
               #:underline? [underline? #t]

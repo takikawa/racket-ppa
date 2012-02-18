@@ -31,42 +31,6 @@ The quality of JPEG images written by @(racket plot-file) and @(racket plot3d-fi
 If @(racket #t), @(racket plot-file) and @(racket plot3d-file) open a dialog when writing PostScript or PDF files. See @(racket post-script-dc%) and @(racket pdf-dc%).
 }
 
-@section{Axis Transforms}
-
-@doc-apply[plot-x-transform]
-@doc-apply[plot-y-transform]
-@doc-apply[plot-z-transform]{
-Per-axis, nonlinear transforms. Set these, for example, to plot with log-scale axes. See @(racket log-transform).
-}
-
-@doc-apply[id-transform]{
-The default transform for all axes.
-}
-
-@doc-apply[log-transform]{
-A log transform. Use this to generate plots with log-scale axes. Any log-scaled axis must be on a positive interval.
-
-@examples[#:eval plot-eval
-                 (parameterize ([plot-y-transform  log-transform])
-                   (plot (function (λ (x) x) 0.01 1)))
-                 (parameterize ([plot-x-transform  log-transform])
-                   (plot (function (λ (x) x) -1 1)))]
-}
-
-@doc-apply[cbrt-transform]{
-A "cube-root" transform. Unlike the log transform, it is defined on the entire real line, making it better for testing the appearance of plots with nonlinearly transformed axes.
-}
-
-@doc-apply[hand-drawn-transform]{
-An @italic{extremely important} test case, which makes sure that @(plot-name) can use any monotone, invertible function as an axis transform.
-
-The @(racket freq) parameter controls the ``shakiness'' of the transform. At high values, it makes plots look like Peanuts cartoons. For example,
-
-@interaction[#:eval plot-eval (parameterize ([plot-x-transform  (hand-drawn-transform 200)]
-                                             [plot-y-transform  (hand-drawn-transform 200)])
-                                (plot (function sqr -1 1)))]
-}
-
 @section{General Appearance}
 
 @doc-apply[plot-foreground]
@@ -90,9 +54,34 @@ See @(racket ->pen-color) and @(racket ->brush-color) for details on how PLoT in
 @doc-apply[plot-y-label]
 @doc-apply[plot-z-label]{The title and axis labels. A @(racket #f) value means the label is not drawn and takes no space. A @(racket "") value effectively means the label is not drawn, but it takes space.
 }
+@doc-apply[plot-x-far-label]
+@doc-apply[plot-y-far-label]
+@doc-apply[plot-z-far-label]{
+The tick labels for ``far'' axes. See @racket[plot-x-ticks] for a discussion of near and far axes.
+}
+
+@doc-apply[plot-x-axis?]
+@doc-apply[plot-x-far-axis?]
+@doc-apply[plot-y-axis?]
+@doc-apply[plot-y-far-axis?]
+@doc-apply[plot-z-axis?]
+@doc-apply[plot-z-far-axis?]{
+When any of these is @racket[#f], the corresponding axis is not drawn.
+
+Use these along with @racket[x-axis] and @racket[y-axis] if you want axes that intersect the origin or some other point.
+}
 
 @doc-apply[plot-animating?]{
 When @(racket #t), certain renderers draw simplified plots to speed up drawing. PLoT sets it to @(racket #t), for example, when a user is clicking and dragging a 3D plot to rotate it.
+}
+
+@doc-apply[animated-samples]{
+Given a number of samples, returns the number of samples to use.
+This returns @racket[samples] when @racket[plot-animating?] is @racket[#f].
+}
+
+@doc-apply[plot-decorations?]{
+When @(racket #f), axes, axis labels, ticks, tick labels, and the title are not drawn.
 }
 
 @section{Lines}
@@ -132,6 +121,8 @@ When @(racket #t), certain renderers draw simplified plots to speed up drawing. 
 @doc-apply[vector-field-scale]
 @doc-apply[vector-field-alpha]
 
+@doc-apply[vector-field3d-samples]
+
 @section{Error Bars}
 
 @doc-apply[error-bar-width]
@@ -168,17 +159,41 @@ When @(racket #t), certain renderers draw simplified plots to speed up drawing. 
 @doc-apply[rectangle3d-line-width]
 
 @doc-apply[discrete-histogram-gap]
+@doc-apply[discrete-histogram-skip]
+@doc-apply[discrete-histogram-invert?]
+
+@doc-apply[stacked-histogram-alphas]
+@doc-apply[stacked-histogram-colors]
+@doc-apply[stacked-histogram-line-colors]
+@doc-apply[stacked-histogram-line-styles]
+@doc-apply[stacked-histogram-line-widths]
+@doc-apply[stacked-histogram-styles]
 
 @section{Decorations}
 
-These parameters do not control the @italic{typical} appearance of plots. Instead, they control the look of renderers that add specific decorations, such as labeled points.
+These parameters do not control the @italic{typical} appearance of plots.
+Instead, they control the look of renderers that add specific decorations, such as labeled points.
+
+@doc-apply[x-axis-alpha]
+@doc-apply[y-axis-alpha]
+@doc-apply[z-axis-alpha]
+
+@doc-apply[x-axis-far?]
+@doc-apply[y-axis-far?]
+@doc-apply[z-axis-far?]
 
 @doc-apply[x-axis-ticks?]
 @doc-apply[y-axis-ticks?]
 @doc-apply[z-axis-ticks?]
 
+@doc-apply[x-axis-labels?]
+@doc-apply[y-axis-labels?]
+@doc-apply[z-axis-labels?]
+
 @doc-apply[polar-axes-number]
+@doc-apply[polar-axes-alpha]
 @doc-apply[polar-axes-ticks?]
+@doc-apply[polar-axes-labels?]
 
 @doc-apply[label-anchor]
 @doc-apply[label-angle]
@@ -213,13 +228,15 @@ Contour surface renderers use shared contour parameters except for the following
 
 @section{Isosurfaces}
 
-Single isosurfaces (@(racket isosurface3d)) use surface parameters. Nested isosurfaces (@(racket isosurfaces3d)) use the following.
+Single isosurfaces (@(racket isosurface3d)) use surface parameters.
+Nested isosurfaces (@(racket isosurfaces3d)) use the following.
 
 @doc-apply[default-isosurface-colors]
 @doc-apply[default-isosurface-line-colors]
 
 @doc-apply[isosurface-levels]
 @doc-apply[isosurface-colors]
+@doc-apply[isosurface-styles]
 @doc-apply[isosurface-line-colors]
 @doc-apply[isosurface-line-widths]
 @doc-apply[isosurface-line-styles]

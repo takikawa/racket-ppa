@@ -24,7 +24,9 @@
 (define black (send the-color-database find-color "black"))
 
 (define (clone-point p)
-  (make-object point% (point-x p) (point-y p)))
+  (if (pair? p)
+      p
+      (make-object point% (point-x p) (point-y p))))
 
 (define (clone-color c)
   (if (string? c)
@@ -54,12 +56,21 @@
     (if s
         (let ([b (make-object brush% 
                               (send b get-color)
-                              (send b get-style))])
-          (send b set-stipple (clone-bitmap s))
+                              (send b get-style))]
+              [t (send b get-transformation)])
+          (send b set-stipple (clone-bitmap s) t)
           b)
-        (send the-brush-list find-or-create-brush
-              (send b get-color)
-              (send b get-style)))))
+        (let ([g (send b get-gradient)])
+          (if g
+              (make-object brush% 
+                           (send b get-color)
+                           (send b get-style)
+                           #f
+                           g
+                           (send b get-transformation))
+              (send the-brush-list find-or-create-brush
+                    (send b get-color)
+                    (send b get-style)))))))
 
 (define (region-maker r)
   (if (send r internal-get-dc)
@@ -91,6 +102,11 @@
 (define (record-dc-mixin %)
   (class %
     (super-new)
+
+    (inherit get-origin get-scale get-rotation get-initial-matrix 
+             get-pen get-brush get-font
+             get-smoothing get-text-mode 
+             get-alpha get-clipping-region)
 
     (define record-limit +inf.0)
     (define current-size 0)
@@ -124,7 +140,30 @@
       (start-atomic)
       (set! procs null)
       (set! current-size 0)
-      (end-atomic))
+      (end-atomic)
+      ;; install current configuration explicitly (so it gets recorded):
+      (let-values ([(ox oy) (get-origin)]
+                   [(sx sy) (get-scale)]
+                   [(r) (get-rotation)]
+                   [(m) (get-initial-matrix)]
+                   [(p) (get-pen)]
+                   [(b) (get-brush)]
+                   [(s) (get-smoothing)]
+                   [(f) (get-font)]
+                   [(tm) (get-text-mode)]
+                   [(a) (get-alpha)]
+                   [(cr) (get-clipping-region)])
+        (unless (and (zero? ox) (zero? oy)) (set-origin ox oy))
+        (unless (and (= 1 sx) (= 1 sy)) (set-scale sx sy))
+        (unless (zero? r) (set-rotation r))
+        (unless (equal? m '#(1.0 0.0 0.0 1.0 0.0 0.0)) (set-initial-matrix m))
+        (do-set-pen! p)
+        (do-set-brush! b)
+        (set-font f)
+        (unless (eq? s 'unsmoothed) (set-smoothing s))
+        (unless (eq? tm 'transparent) (set-text-mode tm))
+        (unless (= a 1.0) (set-alpha a))
+        (when cr (set-clipping-region cr))))
 
     (define clones (make-hasheq))
     (define/private (clone clone-x x)

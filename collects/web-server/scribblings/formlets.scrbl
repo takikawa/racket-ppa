@@ -92,7 +92,12 @@ bindings for these names to @racket[formlet-process], the following list is retu
       (list 10 6))
 ]
 
-The rest of the manual gives the details of @tech{formlet} usage and extension.
+In all these examples, we used the @racket[input-int] and
+@racket[input-string] formlets. Any value with the @tech{formlet}
+contract can be used in these positions. For example,
+@racket[(to-string (required (text-input)))] could be used as
+well. The rest of the manual gives the details of @tech{formlet}
+usage, extension, and existing formlet combinators.
 
 @section{Static Syntactic Shorthand}
 
@@ -331,6 +336,34 @@ These @tech{formlet}s are the main combinators for form input.
                 [#:attributes attrs (listof (list/c symbol? string?)) empty])
          (formlet/c (or/c false/c binding?))]{
  This @tech{formlet} renders using an INPUT element with the RADIO type and the attributes given in the arguments.
+}
+
+@defproc[(radio-group [l sequence?]
+                      [#:attributes attrs (any/c . -> . (listof (list/c symbol? string?))) (λ (x) empty)]
+                      [#:checked? checked? (any/c . -> . boolean?) (λ (x) #f)]
+                      [#:display display (any/c . -> . xexpr/c) (λ (x) x)])
+        (formlet/c any/c)]{
+
+  This @tech{formlet} renders using a sequence of INPUT elements of
+RADIO type where each element gets its attributes from @racket[attrs]
+that share a single NAME. An element is checked if @racket[checked?]
+returns @racket[#t]. Elements are followed by the results of
+@racket[display]. The result of processing this formlet is a single
+element of the sequence.
+}
+
+@defproc[(checkbox-group [l sequence?]
+                      [#:attributes attrs (any/c . -> . (listof (list/c symbol? string?))) (λ (x) empty)]
+                      [#:checked? checked? (any/c . -> . boolean?) (λ (x) #f)]
+                      [#:display display (any/c . -> . xexpr/c) (λ (x) x)])
+        (formlet/c (listof any/c))]{
+
+  This @tech{formlet} renders using a sequence of INPUT elements of
+CHECKBOX type where each element gets its attributes from
+@racket[attrs] that share a single NAME. An element is checked if
+@racket[checked?]  returns @racket[#t]. Elements are followed by the
+results of @racket[display]. The result of processing this formlet is
+a list of elements of the sequence.
 }
 
 @defproc[(submit [value bytes?]

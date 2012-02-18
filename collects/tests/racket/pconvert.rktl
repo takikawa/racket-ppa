@@ -10,6 +10,7 @@
 
 (constructor-style-printing #t)
 (quasi-read-style-printing #f)
+(add-make-prefix-to-constructor #t)
 
 (define (xl) 1)
 (define (xc) (class object% (sequence (super-init))))
@@ -318,7 +319,15 @@
                               (-4- `(1 . ,-5-))
                               (-5- `(2 3))
                               (-8- `(,-4- ,-5- (2 3))))
-                           -0-))))
+                           -0-))
+     (make-pctest (read (open-input-string "#hasheq((#0=(1 . #0#) . a))"))
+                  '(shared ((-1- (cons 1 -1-))) (make-hasheq (list (cons -1- 'a))))
+                  '(shared ((-1- (cons 1 -1-))) (make-hasheq (list (cons -1- 'a))))
+                  '(shared ((-1- (cons 1 -1-))) (make-hasheq (list (cons -1- 'a))))
+                  '(shared ((-1- `(1 unquote -1-))) (make-hasheq (list (cons -1- 'a))))
+                  '(shared ((-1- `(1 unquote -1-))) (make-hasheq (list (cons -1- 'a))))
+                  '(shared ((-1- `(1 unquote -1-))) (make-hasheq (list (cons -1- 'a))))
+                  '(shared ((-1- (cons 1 -1-))) (make-hasheq (list (cons -1- 'a)))))))
   (for-each run-test tests))
 
 (let ()
@@ -388,6 +397,15 @@
   (test 'true (pc #t) #t)
   (test #f (pc #f) #f)
   (test #t (pc #f) #t))
+
+(let ([pc
+       (λ (prefix?)
+         (λ (x)
+           (parameterize ([add-make-prefix-to-constructor prefix?])
+             (print-convert x))))])
+  (struct s (x) #:transparent)
+  (test '(s 1) (pc #f) (s 1))
+  (test '(make-s 1) (pc #t) (s 1)))
 
 (let ([pc
        (lambda (pv)

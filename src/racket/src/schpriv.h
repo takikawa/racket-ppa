@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -179,7 +179,7 @@ void scheme_clear_ephemerons(void);
 /*                             initialization                             */
 /*========================================================================*/
 
-extern int scheme_starting_up;
+THREAD_LOCAL_DECL(extern int scheme_starting_up);
 
 void scheme_init_finalization(void);
 void scheme_init_portable_case(void);
@@ -593,13 +593,12 @@ typedef struct Scheme_Security_Guard {
 
 /* Always allocated on the stack: */
 typedef struct {
-  Scheme_Thread *false_positive_ok;  /* non-zero => return 1 to swap in thread rather than running Scheme code */
+  Scheme_Thread *false_positive_ok;  /* non-zero => return 1 to swap in thread rather than running Racket code */
   int potentially_false_positive; /* => returning 1 to swap thread in, but truth may be 0 */
   Scheme_Object *current_syncing;
   double sleep_end;
   int w_i;
-  short spin;
-  short is_poll;
+  char spin, is_poll, no_redirect;
 } Scheme_Schedule_Info;
 
 typedef Scheme_Object *(*Scheme_Accept_Sync)(Scheme_Object *wrap);
@@ -611,6 +610,8 @@ struct Syncing;
 void scheme_accept_sync(struct Syncing *syncing, int i);
 
 typedef int (*Scheme_Ready_Fun_FPC)(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
+typedef int (*Scheme_Out_Ready_Fun_FPC)(Scheme_Output_Port *port, Scheme_Schedule_Info *sinfo);
+typedef int (*Scheme_In_Ready_Fun_FPC)(Scheme_Input_Port *port, Scheme_Schedule_Info *sinfo);
 
 void scheme_check_break_now(void);
 
@@ -653,7 +654,7 @@ Scheme_Custodian* scheme_custodian_extract_reference(Scheme_Custodian_Reference 
 #define GLOB_HAS_REF_ID 16
 /* can cast to Scheme_Bucket_With_Home: */
 #define GLOB_HAS_HOME_PTR 32
-/* Scheme-level constant (cannot be changed further): */
+/* Racket-level constant (cannot be changed further): */
 #define GLOB_IS_IMMUTATED 64
 /* Linked from other (cannot be undefined): */
 #define GLOB_IS_LINKED 128
@@ -690,6 +691,9 @@ struct Scheme_Hash_Tree
 };
 
 #define SCHEME_HASHTR_FLAGS(tr) MZ_OPT_HASH_KEY(&(tr)->iso)
+
+Scheme_Object *scheme_intern_literal_string(Scheme_Object *str);
+Scheme_Object *scheme_intern_literal_number(Scheme_Object *num);
 
 /*========================================================================*/
 /*                              structs                                   */
@@ -854,12 +858,13 @@ typedef struct Scheme_Chaperone {
 Scheme_Object *scheme_chaperone_vector_ref(Scheme_Object *o, int i);
 void scheme_chaperone_vector_set(Scheme_Object *o, int i, Scheme_Object *v);
 
-Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object **argv, Scheme_Object *auto_val);
+Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object **argv, 
+                                      Scheme_Object *auto_val, int checks);
 
 Scheme_Hash_Tree *scheme_parse_chaperone_props(const char *who, int start_at, int argc, Scheme_Object **argv);
 
 Scheme_Object *scheme_chaperone_hash_get(Scheme_Object *table, Scheme_Object *key);
-Scheme_Object *scheme_chaperone_hash_traversal_get(Scheme_Object *table, Scheme_Object *key);
+Scheme_Object *scheme_chaperone_hash_traversal_get(Scheme_Object *table, Scheme_Object *key, Scheme_Object **alt_key);
 void scheme_chaperone_hash_set(Scheme_Object *table, Scheme_Object *key, Scheme_Object *val);
 
 /*========================================================================*/
@@ -1095,6 +1100,8 @@ void scheme_populate_pt_ht(struct Scheme_Module_Phase_Exports * pt);
 
 Scheme_Object *scheme_transfer_srcloc(Scheme_Object *to, Scheme_Object *from);
 
+int scheme_is_predefined_module_p(Scheme_Object *name);
+
 /*========================================================================*/
 /*                   syntax run-time structures                           */
 /*========================================================================*/
@@ -1329,6 +1336,18 @@ void scheme_clean_cust_box_list(void);
 #ifndef MZ_PRECISE_GC
 void scheme_notify_code_gc(void);
 #endif
+
+#ifdef USE_THREAD_LOCAL
+# define BOTTOM_VARIABLE GC_variable_stack
+# define EXTRA_NATIVE_ARGUMENT , &BOTTOM_VARIABLE
+# define EXTRA_NATIVE_ARGUMENT_TYPE , void* thdloc
+#else
+# define EXTRA_NATIVE_ARGUMENT /* empty */
+# define EXTRA_NATIVE_ARGUMENT_TYPE /* empty */
+#endif
+
+typedef struct Scheme_Object *(Scheme_Native_Proc)(void *d, int argc, struct Scheme_Object *argv[] 
+                                                   EXTRA_NATIVE_ARGUMENT_TYPE);
 
 /*========================================================================*/
 /*                              control flow                              */
@@ -1652,14 +1671,15 @@ typedef struct Scheme_Channel_Put {
 #define SLEEP_BLOCKED 1
 
 typedef struct Evt_Set {
-  Scheme_Object so;
-
+  Scheme_Inclhash_Object iso; /* 0x1 => unflattened */
   int argc;
   Scheme_Object **argv; /* no evt sets; nested sets get flattened */
   struct Evt **ws;
 } Evt_Set;
 
 #define SCHEME_EVTSETP(o) SAME_TYPE(SCHEME_TYPE(o), scheme_evt_set_type)
+#define SCHEME_EVTSET_UNFLATTENEDP(o) SCHEME_IMMUTABLEP(o)
+#define SCHEME_SET_EVTSET_UNFLATTENED(o) SCHEME_SET_IMMUTABLE(o)
 
 typedef struct Syncing {
   MZTAG_IF_REQUIRED
@@ -2118,6 +2138,7 @@ void scheme_install_type_reader(Scheme_Type type, Scheme_Type_Reader f);
 void scheme_install_type_writer(Scheme_Type type, Scheme_Type_Writer f);
 
 Scheme_Object *scheme_make_default_readtable(void);
+Scheme_Object *scheme_read_intern(Scheme_Object *o);
 
 Scheme_Object *_scheme_apply_from_native(Scheme_Object *rator,
 					 int argc,
@@ -2156,6 +2177,7 @@ typedef struct Comp_Prefix
   MZTAG_IF_REQUIRED
   int num_toplevels, num_stxes;
   Scheme_Hash_Table *toplevels; /* buckets for toplevel/module variables */
+  Scheme_Hash_Table *inline_variants; /* position -> inline_variant */
   Scheme_Object *unbound; /* identifiers (and lists of phase-1 shifted unbounds) that were unbound at compile */
   Scheme_Hash_Table *stxes;     /* syntax objects */
   Scheme_Object *uses_unsafe;   /* NULL, inspector, or hashtree of inspectors */
@@ -2312,8 +2334,8 @@ typedef struct {
 typedef struct Scheme_Native_Closure_Data {
   Scheme_Inclhash_Object iso; /* type tag only set when needed, but
                                  flags always needed */
-  Scheme_Closed_Prim *code; /* When not yet JITted, this is = to
-                               scheme_on_demand_jit_code */  
+  Scheme_Native_Proc *start_code; /* When not yet JITted, this is = to
+                                     scheme_on_demand_jit_code */  
   union {
     void *tail_code;                       /* For non-case-lambda */
     mzshort *arities;                      /* For case-lambda */
@@ -2370,7 +2392,7 @@ void scheme_clear_lwc(void);
 
 THREAD_LOCAL_DECL(MZ_EXTERN Scheme_Current_LWC *scheme_current_lwc);
 
-Scheme_Object *scheme_call_as_lightweight_continuation(Scheme_Closed_Prim *code,
+Scheme_Object *scheme_call_as_lightweight_continuation(Scheme_Native_Proc *code,
                                                        void *data,
                                                        int argc, 
                                                        Scheme_Object **argv);
@@ -2389,7 +2411,8 @@ Scheme_Object *scheme_apply_lightweight_continuation(Scheme_Lightweight_Continua
 Scheme_Object **scheme_adjust_runstack_argument(Scheme_Lightweight_Continuation *captured,
                                                 Scheme_Object **arg);
 
-int scheme_can_apply_lightweight_continuation(Scheme_Lightweight_Continuation *captured);
+int scheme_can_apply_lightweight_continuation(Scheme_Lightweight_Continuation *captured,
+                                              int check_overflow);
 
 int scheme_push_marks_from_thread(Scheme_Thread *p2, Scheme_Cont_Frame_Data *d);
 int scheme_push_marks_from_lightweight_continuation(Scheme_Lightweight_Continuation *captured, 
@@ -2464,7 +2487,8 @@ Scheme_Comp_Env *scheme_require_renames(Scheme_Comp_Env *env);
 Scheme_Object *scheme_lookup_binding(Scheme_Object *symbol, Scheme_Comp_Env *env, int flags, 
 				     Scheme_Object *in_modidx, 
 				     Scheme_Env **_menv, int *_protected,
-                                     Scheme_Object **_lexical_binding_id);
+                                     Scheme_Object **_lexical_binding_id,
+                                     Scheme_Object **_inline_variant);
 int scheme_is_imported(Scheme_Object *var, Scheme_Comp_Env *env);
 
 Scheme_Object *scheme_extract_unsafe(Scheme_Object *o);
@@ -2525,7 +2549,9 @@ int scheme_check_top_identifier_bound(Scheme_Object *symbol, Scheme_Env *genv, i
 
 Scheme_Object *scheme_register_toplevel_in_prefix(Scheme_Object *var, Scheme_Comp_Env *env,
 						  Scheme_Compile_Info *rec, int drec,
-                                                  int imported);
+                                                  int imported, Scheme_Object *inline_variant);
+Scheme_Object *scheme_register_toplevel_in_comp_prefix(Scheme_Object *var, Comp_Prefix *cp,
+                                                       int imported, Scheme_Object *inline_variant);
 void scheme_register_unbound_toplevel(Scheme_Comp_Env *env, Scheme_Object *id);
 Scheme_Object *scheme_register_stx_in_prefix(Scheme_Object *var, Scheme_Comp_Env *env,
 					     Scheme_Compile_Info *rec, int drec);
@@ -2595,6 +2621,9 @@ Scheme_Object *scheme_make_noninline_proc(Scheme_Object *e);
 
 Scheme_Object *scheme_resolve_expr(Scheme_Object *, Resolve_Info *);
 Scheme_Object *scheme_resolve_list(Scheme_Object *, Resolve_Info *);
+Scheme_Object *scheme_unresolve(Scheme_Object *, int argv, int *_has_cases);
+
+int scheme_check_leaf_rator(Scheme_Object *le, int *_flags);
 
 int scheme_is_compiled_procedure(Scheme_Object *o, int can_be_closed, int can_be_liftable);
 
@@ -2611,7 +2640,7 @@ int scheme_resolve_info_use_jit(Resolve_Info *ri);
 void scheme_enable_expression_resolve_lifts(Resolve_Info *ri);
 Scheme_Object *scheme_merge_expression_resolve_lifts(Scheme_Object *expr, Resolve_Prefix *rp, Resolve_Info *ri);
 
-Optimize_Info *scheme_optimize_info_create(void);
+Optimize_Info *scheme_optimize_info_create(Comp_Prefix *cp);
 void scheme_optimize_info_enforce_const(Optimize_Info *, int enforce_const);
 void scheme_optimize_info_set_context(Optimize_Info *, Scheme_Object *ctx);
 void scheme_optimize_info_never_inline(Optimize_Info *);
@@ -2676,7 +2705,7 @@ Scheme_Object *scheme_jit_closure(Scheme_Object *, Scheme_Object *context);
 void scheme_jit_fill_threadlocal_table();
 
 #ifdef MZ_USE_JIT
-void scheme_on_demand_generate_lambda(Scheme_Native_Closure *nc, int argc, Scheme_Object **argv);
+void scheme_on_demand_generate_lambda(Scheme_Native_Closure *nc, int argc, Scheme_Object **argv, int delta);
 #endif
 
 struct Start_Module_Args;
@@ -2993,6 +3022,7 @@ typedef struct Scheme_Module_Export_Info {
 typedef struct Scheme_Module
 {
   Scheme_Object so; /* scheme_module_type */
+  short predefined;
 
   Scheme_Object *code_key;
 
@@ -3010,8 +3040,6 @@ typedef struct Scheme_Module
 
   Scheme_Object **bodies; /* array `num_phases' long */
 
-  char no_cert;
-  
   struct Scheme_Module_Exports *me;
 
   int num_phases;
@@ -3163,6 +3191,8 @@ Scheme_Object *scheme_modidx_shift(Scheme_Object *modidx,
 				   Scheme_Object *shift_to_modidx);
 
 #define SCHEME_RMPP(o) (SAME_TYPE(SCHEME_TYPE((o)), scheme_resolved_module_path_type))
+#define SCHEME_MODNAMEP(obj)  (SAME_TYPE(SCHEME_TYPE(obj), scheme_resolved_module_path_type))
+
 Scheme_Object *scheme_intern_resolved_module_path(Scheme_Object *o);
 Scheme_Object *scheme_resolved_module_path_value(Scheme_Object *rmp);
 int scheme_resolved_module_path_value_matches(Scheme_Object *rmp, Scheme_Object *o);
@@ -3479,6 +3509,12 @@ Scheme_Object *scheme_file_unlock(int argc, Scheme_Object **argv);
 void scheme_reserve_file_descriptor(void);
 void scheme_release_file_descriptor(void);
 
+void scheme_init_kqueue(void);
+void scheme_release_kqueue(void);
+
+THREAD_LOCAL_DECL(extern struct mz_fd_set *scheme_semaphore_fd_set);
+THREAD_LOCAL_DECL(extern Scheme_Hash_Table *scheme_semaphore_fd_mapping);
+
 intptr_t scheme_get_byte_string_or_ch_put(const char *who,
 				      Scheme_Object *port,
 				      char *buffer, intptr_t offset, intptr_t size,
@@ -3595,6 +3631,8 @@ void scheme_bad_vec_index(char *name, Scheme_Object *i,
                           intptr_t bottom, intptr_t len);
 
 Scheme_Bucket_Table *scheme_make_weak_equal_table(void);
+Scheme_Bucket_Table *scheme_make_weak_eqv_table(void);
+Scheme_Bucket_Table *scheme_make_nonlock_equal_bucket_table(void);
 
 int scheme_hash_table_equal_rec(Scheme_Hash_Table *t1, Scheme_Hash_Table *t2, void *eql);
 int scheme_bucket_table_equal_rec(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *t2, void *eql);
@@ -3610,6 +3648,7 @@ void scheme_reset_hash_table(Scheme_Hash_Table *ht, int *history);
 
 Scheme_Object *scheme_regexp_source(Scheme_Object *re);
 int scheme_regexp_is_byte(Scheme_Object *re);
+int scheme_regexp_is_pregexp(Scheme_Object *re);
 Scheme_Object *scheme_make_regexp(Scheme_Object *str, int byte, int pcre, int * volatile result_is_err_string);
 int scheme_is_pregexp(Scheme_Object *o);
 void scheme_clear_rx_buffers(void);
@@ -3633,6 +3672,12 @@ int scheme_can_inline_fp_comp();
 # define scheme_can_inline_fp_op() 0
 # define scheme_can_inline_fp_comp() 0
 #endif
+
+/* To suppress compiler warnings when it's difficult to avoid them otherwise: */
+void scheme_unused_object(Scheme_Object*);
+void scheme_unused_intptr(intptr_t);
+
+intptr_t scheme_check_overflow(intptr_t n, intptr_t m, intptr_t a);
 
 /*========================================================================*/
 /*                           places                                       */
@@ -3673,6 +3718,9 @@ typedef struct Scheme_Place_Async_Channel {
 #endif
   Scheme_Object **msgs;
   void **msg_memory;
+  Scheme_Object **msg_chains;
+  intptr_t mem_size;
+  intptr_t reported_size; /* size reported to master GC; avoid reporting too often */
   void *wakeup_signal;
 } Scheme_Place_Async_Channel;
 
@@ -3701,6 +3749,7 @@ typedef struct Scheme_Place_Object {
   mzrt_sema *pause;
 #endif
   char die;
+  char dead;
   char pbreak;
   char pausing;
   intptr_t refcount;
@@ -3756,6 +3805,7 @@ void scheme_place_check_for_interruption();
 void scheme_check_place_port_ok();
 void scheme_place_set_memory_use(intptr_t amt);
 void scheme_place_check_memory_use();
+void scheme_clear_place_ifs_stack();
 
 void scheme_pause_all_places();
 void scheme_pause_one_place(Scheme_Place *p);

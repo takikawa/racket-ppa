@@ -19,9 +19,9 @@ This file defines two sorts of primitives. All of them are provided into any mod
 |#
 
 
-(provide (except-out (all-defined-out) dtsi* let-internal: define-for-variants define-for*-variants with-handlers: for/annotation for*/annotation)
+(provide (except-out (all-defined-out) dtsi* let-internal: define-for-variants define-for*-variants with-handlers: for/annotation for*/annotation define-for/sum:-variants)
          :
-	 (rename-out [define-typed-struct define-struct:]
+         (rename-out [define-typed-struct define-struct:]
                      [lambda: λ:]
                      [with-handlers: with-handlers]
                      [define-typed-struct/exec define-struct/exec:]
@@ -42,11 +42,11 @@ This file defines two sorts of primitives. All of them are provided into any mod
           racket/base
           racket/struct-info
           syntax/struct
-          "../rep/type-rep.rkt"          
+          "../rep/type-rep.rkt"
           "annotate-classes.rkt"
           "internal.rkt"
           "../utils/tc-utils.rkt"
-          "../env/type-name-env.rkt"          
+          "../env/type-name-env.rkt"
           "for-clauses.rkt")
          "../types/numeric-predicates.rkt")
 (provide index?) ; useful for assert, and racket doesn't have it
@@ -66,8 +66,8 @@ This file defines two sorts of primitives. All of them are provided into any mod
     (pattern nm:id
              #:with spec #'nm)
     (pattern (orig-nm:id internal-nm:id)
-	     #:with spec #'(orig-nm internal-nm)
-	     #:with nm #'internal-nm))
+             #:with spec #'(orig-nm internal-nm)
+             #:with nm #'internal-nm))
 
   (define-syntax-class opt-parent
     #:attributes (nm parent)
@@ -471,7 +471,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
                          (require (only-in lib type-des (nm orig-struct-info)))
 
                          (define-for-syntax si
-                           (let () 
+                           (let ()
                             (define-values (orig-type-des orig-maker orig-pred orig-sels orig-muts orig-parent)
                              (apply values (extract-struct-info (syntax-local-value (quote-syntax orig-struct-info)))))
 
@@ -484,7 +484,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
                                 ((not (car sels)) (values sels muts))
                                 (else (id-drop (cdr sels) (cdr muts) (sub1 num)))))
                               (else (int-err "id-drop: Not a list"))))
-                            
+
                            (make-struct-info
                             (lambda ()
                               #,(if (syntax-e #'parent)
@@ -642,7 +642,6 @@ This file defines two sorts of primitives. All of them are provided into any mod
   (for/last: for/last)
   (for/vector: for/vector)
   (for/flvector: for/flvector)
-  (for/sum: for/sum)
   (for/product: for/product))
 
 ;; Unlike with the above, the inferencer can handle any number of #:when
@@ -694,6 +693,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
       'type-ascription
       #'(values var.ty ...))]))
 
+
 (define-syntax (for*: stx)
   (syntax-parse stx #:literals (:)
     [(_ (~seq : Void) ...
@@ -733,7 +733,6 @@ This file defines two sorts of primitives. All of them are provided into any mod
   (for*/last: for*/last)
   (for*/vector: for*/vector)
   (for*/flvector: for*/flvector)
-  (for*/sum: for*/sum)
   (for*/product: for*/product))
 
 ;; Like for/lists: and for/fold:, the inferencer can handle these correctly.
@@ -784,6 +783,32 @@ This file defines two sorts of primitives. All of them are provided into any mod
       'type-ascription
       #'(values var.ty ...))]))
 
+
+(define-for-syntax (define-for/sum:-variant for/folder)
+  (lambda (stx)
+    (syntax-parse stx #:literals (:)
+      [(_ : ty
+          (clause:for-clause ...)
+          c:expr ...)
+       ;; ty has to include exact 0, the initial value of the accumulator
+       ;; (to be consistent with Racket semantics).
+       ;; We can't just change the initial value to be 0.0 if we expect a
+       ;; Float result. This is problematic in some cases e.g:
+       ;; (for/sum: : Float ([i : Float '(1.1)] #:when (zero? (random 1))) i)
+       (quasisyntax/loc stx
+         (#,for/folder : ty ([acc : ty 0])
+                       (clause.expand ... ...)
+                       (let ([new (let () c ...)])
+                         (+ acc new))))])))
+(define-syntax (define-for/sum:-variants stx)
+  (syntax-parse stx
+    [(_ (name for/folder) ...)
+     (quasisyntax/loc stx
+       (begin (define-syntax name (define-for/sum:-variant #'for/folder))
+              ...))]))
+(define-for/sum:-variants (for/sum: for/fold:) (for*/sum: for*/fold:))
+
+
 (define-syntax (provide: stx)
   (syntax-parse stx
     [(_ [i:id t] ...)
@@ -822,3 +847,14 @@ This file defines two sorts of primitives. All of them are provided into any mod
         (cond c.cond-clause
               ...
               [else body ...]))]))
+
+(define-syntax (typecheck-fail stx)
+  (syntax-parse stx
+    [(_ orig msg:str #:covered-id var:id)
+     #'(quote-syntax (typecheck-fail-internal orig msg var))]
+    [(_ orig msg:str)
+     #'(quote-syntax (typecheck-fail-internal orig msg #f))]
+    [(_ orig #:covered-id var:id)
+     #'(quote-syntax (typecheck-fail-internal orig "Incomplete case coverage" var))]
+    [(_ orig)
+     #'(quote-syntax (typecheck-fail-internal orig "Incomplete case coverage" #f))]))

@@ -595,6 +595,7 @@ input_port {
   gcMARK2(ip->peeked_read, gc);
   gcMARK2(ip->peeked_write, gc);
   gcMARK2(ip->read_handler, gc);
+  gcMARK2(ip->closed_evt, gc);
   gcMARK2(ip->mref, gc);
   gcMARK2(ip->output_half, gc);
   gcMARK2(ip->special, gc);
@@ -621,6 +622,7 @@ output_port {
   gcMARK2(op->display_handler, gc);
   gcMARK2(op->write_handler, gc);
   gcMARK2(op->print_handler, gc);
+  gcMARK2(op->closed_evt, gc);
   gcMARK2(op->mref, gc);
   gcMARK2(op->input_half, gc);
 
@@ -638,7 +640,7 @@ syntax_compiler {
 thread_val {
  mark:
   Scheme_Thread *pr = (Scheme_Thread *)p;
-  
+
   gcMARK2(pr->next, gc);
   gcMARK2(pr->prev, gc);
 
@@ -956,6 +958,7 @@ comp_prefix_val {
  mark:
   Comp_Prefix *cp = (Comp_Prefix *)p;
   gcMARK2(cp->toplevels, gc);
+  gcMARK2(cp->inline_variants, gc);
   gcMARK2(cp->unbound, gc);
   gcMARK2(cp->stxes, gc);
   gcMARK2(cp->uses_unsafe, gc);
@@ -1230,6 +1233,19 @@ mark_resolve_info {
   gcBYTES_TO_WORDS(sizeof(Resolve_Info));
 }
 
+mark_unresolve_info {
+ mark:
+  Unresolve_Info *i = (Unresolve_Info *)p;
+  
+  gcMARK2(i->flags, gc);
+  gcMARK2(i->depths, gc);
+  gcMARK2(i->prefix, gc);
+  gcMARK2(i->closures, gc);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Unresolve_Info));
+}
+
 END resolve;
 
 /**********************************************************************/
@@ -1263,6 +1279,7 @@ mark_optimize_info {
   gcMARK2(i->next, gc);
   gcMARK2(i->use, gc);
   gcMARK2(i->consts, gc);
+  gcMARK2(i->cp, gc);
   gcMARK2(i->top_level_consts, gc);
   gcMARK2(i->transitive_use, gc);
   gcMARK2(i->transitive_use_len, gc);
@@ -1468,9 +1485,24 @@ place_val {
 place_async_channel_val {
  mark:
   Scheme_Place_Async_Channel *pac = (Scheme_Place_Async_Channel *)p;
+  Scheme_Object *pr;
+  int i, j, sz;
   gcMARK2(pac->msgs, gc);
   gcMARK2(pac->msg_memory, gc);
+  gcMARK2(pac->msg_chains, gc);
   gcMARK2(pac->wakeup_signal, gc);
+
+  /* mark master-allocated objects within each messages: */
+  j = pac->out;
+  sz = pac->size;
+  for (i = pac->count; i--; ) {
+    pr = pac->msg_chains[j];
+    while (pr) {
+      gcMARK2(SCHEME_CAR(pr), gc);
+      pr = SCHEME_CDR(pr);
+    }
+    j = ((j + 1) & sz);
+  }
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Place_Async_Channel));
@@ -1699,6 +1731,9 @@ mark_listener {
  mark:
 
   gcMARK2(l->mref, gc);
+# ifdef HAVE_POLL_SYSCALL
+  gcMARK2(l->pfd, gc);
+# endif
 
  size:
   gcBYTES_TO_WORDS(sizeof(listener_t) + ((l->count - mzFLEX_DELTA) * sizeof(tcp_t)));
@@ -2409,7 +2444,6 @@ future {
   gcMARK2(f->arg_S1, gc);
   gcMARK2(f->arg_s2, gc);
   gcMARK2(f->arg_S2, gc);
-  gcMARK2(f->arg_p, gc);
   gcMARK2(f->arg_S4, gc);
   gcMARK2(f->retval_s, gc);
   gcMARK2(f->retval, gc);

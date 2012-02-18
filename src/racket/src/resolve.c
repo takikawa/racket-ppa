@@ -1,8 +1,8 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
- 
+
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -40,7 +40,7 @@
 struct Resolve_Info
 {
   MZTAG_IF_REQUIRED
-  char use_jit, in_module, in_proc, enforce_const;
+  char use_jit, in_module, in_proc, enforce_const, no_lift;
   int size, oldsize, count, pos;
   int max_let_depth; /* filled in by sub-expressions */
   Resolve_Prefix *prefix;
@@ -623,6 +623,29 @@ static void resolve_lift_definition(Resolve_Info *info, Scheme_Object *var, Sche
 }
 
 static Scheme_Object *
+inline_variant_resolve(Scheme_Object *data, Resolve_Info *rslv)
+{
+  Scheme_Object *a;
+  char no_lift;
+
+  a = SCHEME_VEC_ELS(data)[0];
+  a = scheme_resolve_expr(a, rslv);
+  SCHEME_VEC_ELS(data)[0] = a;
+
+  /* Don't lift closures in the inline variant, since that
+     just creates lifted bindings and closure cycles that we
+     don't want to deal with when inlining. */
+  a = SCHEME_VEC_ELS(data)[1];
+  no_lift = rslv->no_lift;
+  rslv->no_lift = 1;
+  a = scheme_resolve_expr(a, rslv);
+  rslv->no_lift = no_lift;
+  SCHEME_VEC_ELS(data)[1] = a;
+  
+  return data;
+}
+
+static Scheme_Object *
 set_resolve(Scheme_Object *data, Resolve_Info *rslv)
 {
   Scheme_Set_Bang *sb = (Scheme_Set_Bang *)data;
@@ -993,7 +1016,6 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
       num_rec_procs = 0;
   } else {
     /* Sequence of single-value, non-assigned lets? */
-    int some_used = 0;
 
     clv = (Scheme_Compiled_Let_Value *)head->body;
     for (i = head->num_clauses; i--; clv = (Scheme_Compiled_Let_Value *)clv->body) {
@@ -1001,8 +1023,6 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
 	break;
       if (clv->flags[0] & SCHEME_WAS_SET_BANGED)
 	break;
-      if (clv->flags[0] & SCHEME_WAS_USED)
-        some_used = 1;
     }
 
     if (i < 0) {
@@ -1236,7 +1256,9 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
      Then fall back to assuming no lifts. */
   
   linfo = 0;
-  for (resolve_phase = ((num_rec_procs && !rec_proc_nonapply) ? 0 : 2); resolve_phase < 3; resolve_phase++) {
+  for (resolve_phase = ((num_rec_procs && !rec_proc_nonapply && !info->no_lift) ? 0 : 2); 
+       resolve_phase < 3; 
+       resolve_phase++) {
 
     /* Don't try plain lifting if we're not inside a proc: */
     if ((resolve_phase == 1) && !resolve_is_inside_proc(info))
@@ -1272,10 +1294,9 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
         resolve_info_add_mapping(linfo, opos, 0, 0, NULL);
       } else {
         for (j = 0; j < clv->count; j++) {
-          int p, skip;
+          int p;
           Scheme_Object *lift;
 
-          skip = 0;
           if (num_rec_procs 
               && (clv->count == 1)
               && is_nonconstant_procedure(clv->value, info, head->count)) {
@@ -1429,7 +1450,7 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
       if (!clv->value)
         isproc = 1;
       else if (clv->count == 1)
-        isproc = is_nonconstant_procedure(clv->value, info, head->count);
+        isproc = is_nonconstant_procedure(clv->value, info, post_bind ? 0 : head->count);
       else
         isproc = 0;
       if (num_rec_procs && isproc) {
@@ -2326,6 +2347,8 @@ Scheme_Object *scheme_resolve_expr(Scheme_Object *expr, Resolve_Info *info)
     return 0;
   case scheme_define_values_type:
     return define_values_resolve(expr, info);
+  case scheme_inline_variant_type:
+    return inline_variant_resolve(expr, info);
   case scheme_define_syntaxes_type:
     return define_syntaxes_resolve(expr, info);
   case scheme_begin_for_syntax_type:
@@ -2566,6 +2589,7 @@ static Resolve_Info *resolve_info_extend(Resolve_Info *info, int size, int oldsi
   naya->pos = 0;
   naya->toplevel_pos = -1;
   naya->lifts = info->lifts;
+  naya->no_lift = info->no_lift;
 
   if (mapc) {
     int i, *ia;
@@ -2984,6 +3008,559 @@ static int resolving_in_procedure(Resolve_Info *info)
 }
 
 /*========================================================================*/
+/*                             uresolve                                   */
+/*========================================================================*/
+
+#if 0
+# define return_NULL return (printf("%d\n", __LINE__), NULL)
+#else
+# define return_NULL return NULL
+#endif
+
+typedef struct Unresolve_Info {
+  MZTAG_IF_REQUIRED
+  int stack_pos; /* stack in resolved coordinates */
+  int depth;     /* stack in unresolved coordinates */
+  int stack_size;
+  int *flags;
+  mzshort *depths;
+  Scheme_Prefix *prefix;
+  Scheme_Hash_Table *closures; /* handle cycles */
+  int has_non_leaf, body_size;
+} Unresolve_Info;
+
+static Scheme_Object *unresolve_expr(Scheme_Object *e, Unresolve_Info *ui, int as_rator);
+
+static Unresolve_Info *new_unresolve_info(Scheme_Prefix *prefix)
+{
+  Unresolve_Info *ui;
+  int *f, *d;
+
+  ui = MALLOC_ONE_RT(Unresolve_Info);
+  SET_REQUIRED_TAG(ui->type = scheme_rt_unresolve_info);
+
+  ui->stack_pos = 0;
+  ui->stack_size = 10;
+  f = (int *)scheme_malloc_atomic(sizeof(int) * ui->stack_size);
+  ui->flags = f;
+  d = (mzshort *)scheme_malloc_atomic(sizeof(mzshort) * ui->stack_size);
+  ui->depths = d;
+
+  return ui;
+}
+
+static int unresolve_stack_push(Unresolve_Info *ui, int n, int r_only)
+{
+  int pos, *f, i;
+  mzshort *d;
+
+  pos = ui->stack_pos;
+
+  if (pos + n > ui->stack_size) {
+    f = (int *)scheme_malloc_atomic(sizeof(int) * ((2 * ui->stack_size) + n));
+    memcpy(f, ui->flags, sizeof(int) * pos);
+    
+    d = (mzshort *)scheme_malloc_atomic(sizeof(mzshort) * ((2 * ui->stack_size) + n));
+    memcpy(d, ui->depths, sizeof(mzshort) * pos);
+
+    ui->flags = f;
+    ui->depths = d;
+
+    ui->stack_size = (2 * ui->stack_size) + n;
+  }
+  memset(ui->flags + pos, 0, sizeof(int) * n);
+  if (!r_only) {
+    for (i = 0; i < n; i++) {
+      ui->depths[pos + i] = ui->depth++;
+    }
+  }
+
+  ui->stack_pos += n;
+
+  return pos;
+}
+
+static int *unresolve_stack_pop(Unresolve_Info *ui, int pos, int n)
+{
+  int *f;
+
+  ui->stack_pos = pos;
+
+  if (n) {
+    f = (int *)scheme_malloc_atomic(sizeof(int) * n);
+    memcpy(f, ui->flags + pos, n * sizeof(int));
+    ui->depth -= n;
+  } else
+    f = NULL;
+
+  return f;
+}
+
+XFORM_NONGCING static int combine_flags(int a, int b)
+{
+  int ac, bc;
+
+  /* We don't currently try to support SCHEME_WAS_APPLIED_EXCEPT_ONCE,
+     since that's to detect ((letrec ([f ....]) f) ....) patterns
+     that would have been converted away already for code to inline
+     across a module boundary. We do need to track SCHEME_WAS_ONLY_APPLIED,
+     so that the resolver can ultimately lift expressions. */
+
+  if ((b & SCHEME_WAS_ONLY_APPLIED) && !(a & SCHEME_WAS_ONLY_APPLIED)) {
+    bc = b;
+    b = a;
+    a = bc;
+  }
+
+  if (a & SCHEME_WAS_ONLY_APPLIED) {
+    if ((b & SCHEME_WAS_USED) && !(b & SCHEME_WAS_ONLY_APPLIED))
+      a -= SCHEME_WAS_ONLY_APPLIED;
+  }
+
+  ac = (a & SCHEME_USE_COUNT_MASK) >> SCHEME_USE_COUNT_SHIFT;
+  bc = (b & SCHEME_USE_COUNT_MASK) >> SCHEME_USE_COUNT_SHIFT;
+
+  ac += bc;
+  if (ac > SCHEME_USE_COUNT_INF)
+    ac = SCHEME_USE_COUNT_INF;
+
+  a |= b;
+  a = (a - (a & SCHEME_USE_COUNT_MASK)) | (ac << SCHEME_USE_COUNT_SHIFT);
+
+  return a;
+}
+
+static int unresolve_set_flag(Unresolve_Info *ui, int pos, int flag)
+{
+  int old_flag, i = ui->stack_pos - pos - 1;
+
+  if ((pos < 0) || (pos >= ui->stack_pos))
+    scheme_signal_error("internal error: unresolve out of bounds");
+
+  old_flag = ui->flags[i];
+  flag = combine_flags(flag | (1 << SCHEME_USE_COUNT_SHIFT), old_flag);
+  ui->flags[i] = flag;
+
+  return ui->depth - ui->depths[i] - 1;
+}
+
+Scheme_Object *unresolve_closure(Scheme_Closure_Data *rdata, Unresolve_Info *ui)
+{
+  Scheme_Closure_Data *data;
+  Scheme_Object *body;
+  Closure_Info *cl;
+  int i, pos, data_pos, *flags, init_size, has_non_leaf;
+
+  scheme_delay_load_closure(rdata);
+
+  if (rdata->closure_size) {
+    for (i = rdata->closure_size; i--; ) {
+      if (rdata->closure_map[i] > ui->stack_pos)
+        return_NULL; /* needs something (perhaps prefix) beyond known stack */
+    }
+  }
+
+  data  = MALLOC_ONE_TAGGED(Scheme_Closure_Data);
+  
+  data->iso.so.type = scheme_compiled_unclosed_procedure_type;
+
+  SCHEME_CLOSURE_DATA_FLAGS(data) = (SCHEME_CLOSURE_DATA_FLAGS(rdata) 
+                                     & (CLOS_HAS_REST | CLOS_IS_METHOD));
+
+  data->num_params = rdata->num_params;
+  data->name = rdata->name;
+
+  pos = unresolve_stack_push(ui, data->num_params, 0);
+
+  if (rdata->closure_size) {
+    data_pos = unresolve_stack_push(ui, rdata->closure_size, 1);
+    /* remap closure slots: */
+    for (i = rdata->closure_size; i--; ) {
+      int mp;
+      mp = ui->depths[pos - rdata->closure_map[i] - 1];
+      ui->depths[ui->stack_pos - i - 1] = mp;
+    }
+  } else
+    data_pos = 0;
+
+  init_size = ui->body_size;
+  has_non_leaf = ui->has_non_leaf;
+  ui->has_non_leaf = 0;
+
+  body = unresolve_expr(rdata->code, ui, 0);
+  if (!body) return_NULL;
+
+  data->code = body;
+
+  cl = MALLOC_ONE_RT(Closure_Info);
+  SET_REQUIRED_TAG(cl->type = scheme_rt_closure_info);
+  data->closure_map = (mzshort *)cl;
+
+  cl->body_size = (ui->body_size - init_size);
+  cl->has_nonleaf = ui->has_non_leaf;
+
+  ui->has_non_leaf = has_non_leaf;
+
+  if (rdata->closure_size) {
+    /* copy flags from unpacked closure to original slots */
+    for (i = rdata->closure_size; i--; ) {
+      int a, b;
+      a = ui->flags[pos - rdata->closure_map[i] - 1];
+      b = ui->flags[ui->stack_pos - i - 1];
+      a = combine_flags(a, b);
+      ui->flags[pos - rdata->closure_map[i] - 1] = a;
+    }
+    (void)unresolve_stack_pop(ui, data_pos, 0);
+  }
+
+  flags = unresolve_stack_pop(ui, pos, data->num_params);
+  cl->local_flags = flags;
+
+  return (Scheme_Object *)data;
+}
+
+static Scheme_Object *unresolve_expr_k(void)
+{
+  Scheme_Thread *p = scheme_current_thread;
+  Scheme_Object *e = (Scheme_Object *)p->ku.k.p1;
+  Unresolve_Info *ui = (Unresolve_Info *)p->ku.k.p2;
+
+  p->ku.k.p1 = NULL;
+  p->ku.k.p2 = NULL;
+
+  return unresolve_expr(e, ui, p->ku.k.i1);
+}
+
+static void check_nonleaf_rator(Scheme_Object *rator, Unresolve_Info *ui)
+{
+  if (!scheme_check_leaf_rator(rator, NULL))
+    ui->has_non_leaf = 1;
+}
+
+
+static Scheme_Object *unresolve_expr(Scheme_Object *e, Unresolve_Info *ui, int as_rator)
+{
+#ifdef DO_STACK_CHECK
+  {
+# include "mzstkchk.h"
+    {
+      Scheme_Thread *p = scheme_current_thread;
+
+      p->ku.k.p1 = (void *)e;
+      p->ku.k.p2 = (void *)ui;
+      p->ku.k.i1 = as_rator;
+
+      return scheme_handle_stack_overflow(unresolve_expr_k);
+    }
+  }
+#endif
+
+  ui->body_size++;
+
+  switch (SCHEME_TYPE(e)) {
+  case scheme_local_type:
+    return scheme_make_local(scheme_local_type,
+                             unresolve_set_flag(ui, 
+                                                SCHEME_LOCAL_POS(e), 
+                                                (SCHEME_WAS_USED
+                                                 | (as_rator 
+                                                    ? SCHEME_WAS_ONLY_APPLIED
+                                                    : 0))),
+                             0);
+  case scheme_local_unbox_type:
+    return scheme_make_local(scheme_local_type,
+                             unresolve_set_flag(ui, SCHEME_LOCAL_POS(e), 
+                                                (SCHEME_WAS_SET_BANGED | SCHEME_WAS_USED)),
+                             0);
+  case scheme_sequence_type:
+    {
+      Scheme_Sequence *seq = (Scheme_Sequence *)e, *seq2;
+      int i;
+
+      seq2 = scheme_malloc_sequence(seq->count);
+      seq2->so.type = scheme_sequence_type;
+      seq2->count = seq->count;
+      for (i = seq->count; i--; ) {
+        e = unresolve_expr(seq->array[i], ui, 0);
+        if (!e) return_NULL;
+        seq2->array[i] = e;
+      }
+
+      return (Scheme_Object *)seq2;
+    }
+    break;
+  case scheme_application_type:
+    {
+      Scheme_App_Rec *app = (Scheme_App_Rec *)e, *app2;
+      Scheme_Object *a;
+      int pos, i;
+
+      ui->body_size += app->num_args;
+      check_nonleaf_rator(app->args[0], ui);
+
+      pos = unresolve_stack_push(ui, app->num_args, 1);
+
+      app2 = scheme_malloc_application(app->num_args+1);
+
+      for (i = app->num_args + 1; i--; ) {
+        a = unresolve_expr(app->args[i], ui, !i);
+        if (!a) return_NULL;
+        app2->args[i] = a;
+      }
+
+      (void)unresolve_stack_pop(ui, pos, 0);
+
+      return (Scheme_Object *)app2;
+    }
+  case scheme_application2_type:
+    {
+      Scheme_App2_Rec *app = (Scheme_App2_Rec *)e, *app2;
+      Scheme_Object *rator, *rand;
+      int pos;
+
+      ui->body_size += 1;
+      check_nonleaf_rator(app->rator, ui);
+
+      pos = unresolve_stack_push(ui, 1, 1);
+
+      rator = unresolve_expr(app->rator, ui, 1);
+      if (!rator) return_NULL;
+      rand = unresolve_expr(app->rand, ui, 0);
+      if (!rand) return_NULL;
+
+      (void)unresolve_stack_pop(ui, pos, 0);
+
+      app2 = MALLOC_ONE_TAGGED(Scheme_App2_Rec);
+      app2->iso.so.type = scheme_application2_type;
+      app2->rator = rator;
+      app2->rand = rand;
+
+      return (Scheme_Object *)app2;
+    }
+  case scheme_application3_type:
+    {
+      Scheme_App3_Rec *app = (Scheme_App3_Rec *)e, *app2;
+      Scheme_Object *rator, *rand1, *rand2;
+      int pos;
+
+      ui->body_size += 2;
+      check_nonleaf_rator(app->rator, ui);
+
+      pos = unresolve_stack_push(ui, 2, 1);
+
+      rator = unresolve_expr(app->rator, ui, 1);
+      if (!rator) return_NULL;
+      rand1 = unresolve_expr(app->rand1, ui, 0);
+      if (!rand1) return_NULL;
+      rand2 = unresolve_expr(app->rand2, ui, 0);
+      if (!rand2) return_NULL;
+
+      (void)unresolve_stack_pop(ui, pos, 0);
+
+      app2 = MALLOC_ONE_TAGGED(Scheme_App3_Rec);
+      app2->iso.so.type = scheme_application3_type;
+      app2->rator = rator;
+      app2->rand1 = rand1;
+      app2->rand2 = rand2;
+
+      return (Scheme_Object *)app2;
+    }
+  case scheme_branch_type:
+    {
+      Scheme_Branch_Rec *b = (Scheme_Branch_Rec *)e, *b2;
+      Scheme_Object *tst, *thn, *els;
+
+      tst = unresolve_expr(b->test, ui, 0);
+      if (!tst) return_NULL;
+      thn = unresolve_expr(b->tbranch, ui, 0);
+      if (!thn) return_NULL;
+      els = unresolve_expr(b->fbranch, ui, 0);
+      if (!els) return_NULL;
+
+      b2 = MALLOC_ONE_TAGGED(Scheme_Branch_Rec);
+      b2->so.type = scheme_branch_type;
+      b2->test = tst;
+      b2->tbranch = thn;
+      b2->fbranch = els;
+
+      return (Scheme_Object *)b2;
+    }
+  case scheme_let_void_type:
+    {
+      Scheme_Let_Void *lv = (Scheme_Let_Void *)e;
+
+      if (SAME_TYPE(SCHEME_TYPE(lv->body), scheme_letrec_type)) {
+        Scheme_Letrec *lr = (Scheme_Letrec *)lv->body;
+
+        if (lv->count == lr->count) {
+          Scheme_Let_Header *lh;
+          Scheme_Compiled_Let_Value *clv, *prev = NULL;
+          Scheme_Object *rhs, *body;
+          int i, pos, *all_flags, *flags;
+
+          lh = MALLOC_ONE_TAGGED(Scheme_Let_Header);
+          lh->iso.so.type = scheme_compiled_let_void_type;
+          lh->count = lv->count;
+          lh->num_clauses = lv->count;
+          SCHEME_LET_FLAGS(lh) += SCHEME_LET_RECURSIVE;
+
+          pos = unresolve_stack_push(ui, lv->count, 0);
+
+          for (i = lv->count; i--; ) {
+            rhs = unresolve_expr(lr->procs[i], ui, 0);
+            if (!rhs) return_NULL;
+
+            clv = MALLOC_ONE_TAGGED(Scheme_Compiled_Let_Value);
+            clv->iso.so.type = scheme_compiled_let_value_type;
+            clv->count = 1;
+            clv->position = i;
+            clv->value = rhs;
+
+            if (prev)
+              prev->body = (Scheme_Object *)clv;
+            else
+              lh->body = (Scheme_Object *)clv;
+            prev = clv;
+          }
+
+          body = unresolve_expr(lr->body, ui, 0);
+          if (!body) return_NULL;
+          if (prev)
+            prev->body = body;
+          else
+            lh->body = body;
+
+          all_flags = unresolve_stack_pop(ui, pos, lv->count);
+          
+          clv = (Scheme_Compiled_Let_Value *)lh->body;
+          for (i = lv->count; i--; ) {
+            flags = (int *)scheme_malloc_atomic(sizeof(int));
+            flags[0] = all_flags[i];
+            clv->flags = flags;
+            clv = (Scheme_Compiled_Let_Value *)clv->body;
+          }
+      
+          return (Scheme_Object *)lh;
+        }
+      }
+
+      return_NULL;
+    }
+  case scheme_let_one_type:
+    {
+      Scheme_Let_One *lo = (Scheme_Let_One *)e;
+      Scheme_Object *rhs, *body;
+      Scheme_Let_Header *lh;
+      Scheme_Compiled_Let_Value *clv;
+      int *flags, pos;
+
+      pos = unresolve_stack_push(ui, 1, 1 /* => post-bind RHS */);
+      rhs = unresolve_expr(lo->value, ui, 0);
+      if (!rhs) return_NULL;
+      (void)unresolve_stack_pop(ui, pos, 0);
+
+      pos = unresolve_stack_push(ui, 1, 0);
+      body = unresolve_expr(lo->body, ui, 0);
+      if (!body) return_NULL;
+      flags = unresolve_stack_pop(ui, pos, 1);
+
+      lh = MALLOC_ONE_TAGGED(Scheme_Let_Header);
+      lh->iso.so.type = scheme_compiled_let_void_type;
+      lh->count = 1;
+      lh->num_clauses = 1;
+
+      clv = MALLOC_ONE_TAGGED(Scheme_Compiled_Let_Value);
+      clv->iso.so.type = scheme_compiled_let_value_type;
+      clv->count = 1;
+      clv->position = 0;
+      clv->value = rhs;
+      clv->flags = flags;
+      clv->body = body;
+
+      lh->body = (Scheme_Object *)clv;
+
+      return (Scheme_Object *)lh;
+    }
+  case scheme_closure_type:
+    {
+      Scheme_Object *r;
+
+      if (!ui->closures) {
+        Scheme_Hash_Table *ht;
+        ht = scheme_make_hash_table(SCHEME_hash_ptr);
+        ui->closures = ht;
+      }
+      if (scheme_hash_get(ui->closures, e))
+        return_NULL; /* can't handle cyclic closures */
+
+      scheme_hash_set(ui->closures, e, scheme_true);
+
+      r = unresolve_closure(SCHEME_COMPILED_CLOS_CODE(e), ui);
+
+      scheme_hash_set(ui->closures, e, NULL);
+
+      return r;
+    }
+  case scheme_unclosed_procedure_type:
+    {
+      return unresolve_closure((Scheme_Closure_Data *)e, ui);
+    }
+  default:
+    if (SCHEME_TYPE(e) > _scheme_values_types_) {
+      if (scheme_compiled_duplicate_ok(e, 1))
+        return e;
+    }
+    return_NULL;
+  }
+}
+
+Scheme_Object *scheme_unresolve(Scheme_Object *iv, int argc, int *_has_cases)
+{
+  Scheme_Object *o;
+  Scheme_Closure_Data *data = NULL;
+
+  o = SCHEME_VEC_ELS(iv)[1];
+
+  if (SAME_TYPE(SCHEME_TYPE(o), scheme_closure_type))
+    data = ((Scheme_Closure *)o)->code;
+  else if (SAME_TYPE(SCHEME_TYPE(o), scheme_unclosed_procedure_type))
+    data = (Scheme_Closure_Data *)o;
+  else if (SAME_TYPE(SCHEME_TYPE(o), scheme_case_lambda_sequence_type)
+           || SAME_TYPE(SCHEME_TYPE(o), scheme_case_closure_type)) {
+    Scheme_Case_Lambda *seqin = (Scheme_Case_Lambda *)o;
+    int i, cnt;
+    cnt = seqin->count;
+    if (cnt > 1) *_has_cases = 1;
+    for (i = 0; i < cnt; i++) {
+      if (SAME_TYPE(SCHEME_TYPE(seqin->array[i]), scheme_closure_type)) {
+        /* An empty closure, created at compile time */
+        data = ((Scheme_Closure *)seqin->array[i])->code;
+      } else {
+        data = (Scheme_Closure_Data *)seqin->array[i];
+      }
+      if ((!(SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_REST) 
+           && (data->num_params == argc))
+          || ((SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_REST)
+              && (data->num_params - 1 <= argc)))
+        break;
+      else
+        data = NULL;
+    }
+  } else
+    data = NULL;
+
+  if (!data)
+    return_NULL;
+
+  if (data->closure_size)
+    return_NULL;
+
+  /* convert an optimized & resolved closure back to compiled form: */
+  return unresolve_closure(data, 
+                           new_unresolve_info((Scheme_Prefix *)SCHEME_VEC_ELS(iv)[2]));
+}
+
+/*========================================================================*/
 /*                         precise GC traversers                          */
 /*========================================================================*/
 
@@ -2996,6 +3573,7 @@ START_XFORM_SKIP;
 static void register_traversers(void)
 {
   GC_REG_TRAV(scheme_rt_resolve_info, mark_resolve_info);
+  GC_REG_TRAV(scheme_rt_unresolve_info, mark_unresolve_info);
 }
 
 END_XFORM_SKIP;

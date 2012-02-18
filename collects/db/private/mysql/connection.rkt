@@ -24,7 +24,8 @@
     (inherit call-with-lock
              call-with-lock*
              add-delayed-call!
-             check-valid-tx-status)
+             check-valid-tx-status
+             check-statement/tx)
     (inherit-field tx-status)
 
     (super-new)
@@ -38,12 +39,10 @@
 
     ;; == Debugging
 
-    (define DEBUG-RESPONSES #f)
-    (define DEBUG-SENT-MESSAGES #f)
+    (define DEBUG? #f)
 
-    (define/public (debug incoming? [outgoing? incoming?])
-      (set! DEBUG-RESPONSES incoming?)
-      (set! DEBUG-SENT-MESSAGES outgoing?))
+    (define/public (debug debug?)
+      (set! DEBUG? debug?))
 
     ;; ========================================
 
@@ -62,7 +61,7 @@
 
     ;; buffer-message : message -> void
     (define/private (buffer-message msg)
-      (when DEBUG-SENT-MESSAGES
+      (when DEBUG?
         (fprintf (current-error-port) "  >> ~s\n" msg))
       (with-disconnect-on-error
        (write-packet outport msg next-msg-num)
@@ -79,8 +78,6 @@
       (define r
         (with-disconnect-on-error
          (recv* fsym expectation field-dvecs)))
-      (when DEBUG-RESPONSES
-        (eprintf "  << ~s\n" r))
       (when (error-packet? r)
         (raise-backend-error fsym r))
       r)
@@ -95,6 +92,8 @@
         (error/comm fsym))
       (let-values ([(msg-num next) (parse-packet inport expectation field-dvecs)])
         (set! next-msg-num (add1 msg-num))
+        (when DEBUG?
+          (eprintf "  << ~s\n" next))
         ;; Update transaction status (see Transactions below)
         (when (ok-packet? next)
           (set! tx-status
@@ -111,6 +110,8 @@
            (advance 'handshake)]
           [(? ok-packet?)
            (advance)]
+          [(? change-plugin-packet?)
+           (advance 'auth)]
           [(? error-packet?)
            (advance)]
           [(struct result-set-header-packet (field-count _))
@@ -127,6 +128,8 @@
            (advance 'prep-params)]
           [(? eof-packet?)
            (advance 'field 'data 'binary-data 'prep-params)]
+          [(struct unknown-packet (expected contents))
+           (error/comm fsym expected)]
           [else
            (err next)])
         next))
@@ -141,7 +144,7 @@
 
     (define/private (disconnect* lock-not-held?)
       (define (go politely?)
-        (when DEBUG-SENT-MESSAGES
+        (when DEBUG?
           (eprintf "  ** Disconnecting\n"))
         (let ([outport* outport]
               [inport* inport])
@@ -180,7 +183,7 @@
       (set! inport in)
       (set! outport out))
 
-    ;; start-connection-protocol : string string string/#f -> void
+    ;; start-connection-protocol : string/#f string string/#f -> void
     (define/public (start-connection-protocol dbname username password ssl ssl-context)
       (with-disconnect-on-error
         (fresh-exchange)
@@ -188,33 +191,47 @@
           (match r
             [(struct handshake-packet (pver sver tid scramble capabilities charset status auth))
              (check-required-flags capabilities)
-             (unless (equal? auth "mysql_native_password")
+             (unless (member auth '("mysql_native_password" #f))
                (uerror 'mysql-connect "unsupported authentication plugin: ~s" auth))
              (define do-ssl?
                (and (case ssl ((yes optional) #t) ((no) #f))
                     (memq 'ssl capabilities)))
              (when (and (eq? ssl 'yes) (not do-ssl?))
                (uerror 'mysql-connect "server refused SSL connection"))
+             (define wanted-capabilities (desired-capabilities capabilities do-ssl? dbname))
              (when do-ssl?
-               (send-message
-                (make-abbrev-client-authentication-packet
-                 (desired-capabilities capabilities #t)))
+               (send-message (make-abbrev-client-auth-packet wanted-capabilities))
                (let-values ([(sin sout)
                              (ports->ssl-ports inport outport
                                                #:mode 'connect
                                                #:context ssl-context
                                                #:close-original? #t)])
                  (attach-to-ports sin sout)))
-             (send-message
-              (make-client-authentication-packet
-               (desired-capabilities capabilities do-ssl?)
-               MAX-PACKET-LENGTH
-               'utf8-general-ci ;; charset
-               username
-               (scramble-password scramble password)
-               dbname))
-             (expect-auth-confirmation)]
+             (authenticate wanted-capabilities username password dbname
+                           (or auth "mysql_native_password") scramble)]
             [_ (error/comm 'mysql-connect "during authentication")]))))
+
+    (define/private (authenticate capabilities username password dbname auth-plugin scramble)
+      (let loop ([auth-plugin auth-plugin] [scramble scramble] [first? #t])
+        (define (auth data)
+          (if first?
+              (make-client-auth-packet capabilities MAX-PACKET-LENGTH 'utf8-general-ci
+                                       username data dbname auth-plugin)
+              (make-auth-followup-packet data)))
+        (cond [(equal? auth-plugin "mysql_native_password")
+               (send-message (auth (scramble-password scramble password)))]
+              [(equal? auth-plugin "mysql_old_password")
+               (send-message (auth (bytes-append (old-scramble-password scramble password)
+                                                 (bytes 0))))]
+              [else (uerror 'mysql-connect
+                            "server does not support authentication plugin: ~s"
+                            auth-plugin)])
+        (match (recv 'mysql-connect 'auth)
+          [(struct ok-packet (_ _ status warnings message))
+           (after-connect)]
+          [(struct change-plugin-packet (plugin data))
+           ;; if plugin = #f, means "mysql_old_password"
+           (loop (or plugin "mysql_old_password") (or data scramble) #f)])))
 
     (define/private (check-required-flags capabilities)
       (for-each (lambda (rf)
@@ -224,21 +241,11 @@
                             rf)))
                 REQUIRED-CAPABILITIES))
 
-    (define/private (desired-capabilities capabilities ssl?)
-      (let ([base
-             (cons 'interactive
-                   (filter (lambda (c) (memq c DESIRED-CAPABILITIES))
-                           capabilities))])
-        (cond [ssl? (cons 'ssl base)]
-              [else base])))
-
-    ;; expect-auth-confirmation : -> void
-    (define/private (expect-auth-confirmation)
-      (let ([r (recv 'mysql-connect 'auth)])
-        (match r
-          [(struct ok-packet (_ _ status warnings message))
-           (after-connect)]
-          [_ (error/comm 'mysql-connect "after authentication")])))
+    (define/private (desired-capabilities capabilities ssl? dbname)
+      (append (if ssl?   '(ssl)             '())
+              (if dbname '(connect-with-db) '())
+              '(interactive)
+              (filter (lambda (c) (memq c DESIRED-CAPABILITIES)) capabilities)))
 
     ;; Set connection to use utf8 encoding
     (define/private (after-connect)
@@ -250,18 +257,22 @@
 
     ;; == Query
 
-    ;; name-counter : number
-    (define name-counter 0)
-
     ;; query : symbol Statement -> QueryResult
     (define/public (query fsym stmt)
       (check-valid-tx-status fsym)
       (let*-values ([(stmt result)
                      (call-with-lock fsym
                        (lambda ()
-                         (let ([stmt (check-statement fsym stmt)])
+                         (let* ([stmt (check-statement fsym stmt)]
+                                [stmt-type
+                                 (cond [(statement-binding? stmt)
+                                        (send (statement-binding-pst stmt) get-stmt-type)]
+                                       [(string? stmt)
+                                        (classify-my-sql stmt)])])
+                           (check-statement/tx fsym stmt-type)
                            (values stmt (query1 fsym stmt #t)))))])
-        ;; For some reason, *really* slow: (statement:after-exec stmt)
+        (when #f ;; DISABLED---for some reason, *really* slow
+          (statement:after-exec stmt))
         (query1:process-result fsym result)))
 
     ;; query1 : symbol Statement -> QueryResult
@@ -365,6 +376,7 @@
                   (close-on-exec? close-on-exec?)
                   (param-typeids (map field-dvec->typeid param-dvecs))
                   (result-dvecs field-dvecs)
+                  (stmt-type (classify-my-sql stmt))
                   (owner this)))])))
 
     (define/private (prepare1:get-field-descriptions fsym)
@@ -417,33 +429,41 @@
     ;;   - transaction deadlock = 1213 (ER_LOCK_DEADLOCK)
     ;;   - lock wait timeout (depends on config) = 1205 (ER_LOCK_WAIT_TIMEOUT)
 
-    (define/public (transaction-status fsym)
-      (call-with-lock fsym (lambda () tx-status)))
+    (define/override (start-transaction* fsym isolation)
+      (cond [(eq? isolation 'nested)
+             (let ([savepoint (generate-name)])
+               (query1 fsym (format "SAVEPOINT ~a" savepoint) #t)
+               savepoint)]
+            [else
+             (let ([isolation-level (isolation-symbol->string isolation)])
+               (when isolation-level
+                 (query1 fsym (format "SET TRANSACTION ISOLATION LEVEL ~a" isolation-level) #t))
+               (query1 fsym "START TRANSACTION" #t)
+               #f)]))
 
-    (define/public (start-transaction fsym isolation)
-      (call-with-lock fsym
-        (lambda ()
-          (when tx-status
-            (error/already-in-tx fsym))
-          ;; SET TRANSACTION ISOLATION LEVEL sets mode for *next* transaction
-          ;; so need lock around both statements
-          (let* ([isolation-level (isolation-symbol->string isolation)]
-                 [set-stmt "SET TRANSACTION ISOLATION LEVEL "])
-            (when isolation-level
-              (query1 fsym (string-append set-stmt isolation-level) #t)))
-          (query1 fsym "START TRANSACTION" #t)
-          (void))))
+    (define/override (end-transaction* fsym mode savepoint)
+      (case mode
+        ((commit)
+         (cond [savepoint
+                (query1 fsym (format "RELEASE SAVEPOINT ~a" savepoint) #t)]
+               [else
+                (query1 fsym "COMMIT" #t)]))
+        ((rollback)
+         (cond [savepoint
+                (query1 fsym (format "ROLLBACK TO SAVEPOINT ~a" savepoint) #t)
+                (query1 fsym (format "RELEASE SAVEPOINT ~a" savepoint) #t)]
+               [else
+                (query1 fsym "ROLLBACK" #t)])))
+      (void))
 
-    (define/public (end-transaction fsym mode)
-      (call-with-lock fsym
-        (lambda ()
-          (unless (eq? mode 'rollback)
-            (check-valid-tx-status fsym))
-          (let ([stmt (case mode
-                        ((commit) "COMMIT")
-                        ((rollback) "ROLLBACK"))])
-            (query1 fsym stmt #t)
-            (void)))))
+    ;; name-counter : number
+    (define name-counter 0)
+
+    ;; generate-name : -> string
+    (define/private (generate-name)
+      (let ([n name-counter])
+        (set! name-counter (add1 name-counter))
+        (format "λmz_~a" n)))
 
     ;; Reflection
 
@@ -453,11 +473,7 @@
               (string-append "SELECT table_name FROM information_schema.tables "
                              "WHERE table_schema = schema()")]
              [rows
-              (vector-ref
-               (call-with-lock fsym
-                 (lambda ()
-                   (query1 fsym stmt #t)))
-               2)])
+              (vector-ref (call-with-lock fsym (lambda () (query1 fsym stmt #t))) 2)])
         (for/list ([row (in-list rows)])
           (vector-ref row 0))))
 
@@ -493,6 +509,65 @@
         (loop (add1 i))))
     c))
 
+;; =======================================
+
+(provide old-scramble-password
+         hash323
+         hash323->string)
+
+(define (old-scramble-password scramble password)
+  (define (xor a b) (bitwise-xor a b))
+  (define RMAX #x3FFFFFFF)
+  (and scramble password
+       (let* ([scramble (subbytes scramble 0 8)]
+              [password (string->bytes/utf-8 password)]
+              [hp (hash323 password)]
+              [hm (hash323 scramble)]
+              [r1 (modulo (xor (car hp) (car hm)) RMAX)]
+              [r2 (modulo (xor (cdr hp) (cdr hm)) RMAX)]
+              [out (make-bytes 8 0)])
+         (define (rnd)
+           (set! r1 (modulo (+ (* 3 r1) r2) RMAX))
+           (set! r2 (modulo (+ r1 r2 33) RMAX))
+           (/ (exact->inexact r1) (exact->inexact RMAX)))
+         (for ([i (in-range (bytes-length scramble))])
+           (let ([b (+ (inexact->exact (floor (* (rnd) 31))) 64)])
+             (bytes-set! out i b)
+             (values r1 r2)))
+         (let ([extra (inexact->exact (floor (* (rnd) 31)))])
+           (for ([i (in-range (bytes-length scramble))])
+             (bytes-set! out i (xor (bytes-ref out i) extra))))
+         out)))
+
+(define (hash323 bs)
+  (define (xor a b) (bitwise-xor a b))
+  (define-syntax-rule (normalize! var)
+    (set! var (bitwise-and var (sub1 (arithmetic-shift 1 64)))))
+  (let ([nr 1345345333]
+        [add 7]
+        [nr2 #x12345671])
+    (for ([i (in-range (bytes-length bs))]
+          #:when (not (memv (bytes-ref bs i) '(#\space #\tab))))
+      (let ([tmp (bytes-ref bs i)])
+        (set! nr  (xor nr
+                       (+ (* (+ (bitwise-and nr 63) add) tmp)
+                          (arithmetic-shift nr 8))))
+        (normalize! nr)
+        (set! nr2 (+ nr2
+                     (xor (arithmetic-shift nr2 8) nr)))
+        (normalize! nr2)
+        (set! add (+ add tmp))
+        (normalize! add)))
+    (cons (bitwise-and nr  (sub1 (arithmetic-shift 1 31)))
+          (bitwise-and nr2 (sub1 (arithmetic-shift 1 31))))))
+
+(define (hash323->string bs)
+  (let ([p (hash323 bs)])
+    (bytes-append (integer->integer-bytes (car p) 4 #f #f)
+                  (integer->integer-bytes (cdr p) 4 #f #f))))
+
+;; ========================================
+
 (define REQUIRED-CAPABILITIES
   '(long-flag
     connect-with-db
@@ -505,7 +580,7 @@
     transactions
     protocol-41
     secure-connection
-    connect-with-db))
+    plugin-auth))
 
 ;; raise-backend-error : symbol ErrorPacket -> raises exn
 (define (raise-backend-error who r)
@@ -531,34 +606,8 @@ On the other hand, we want to force all rows-returning statements
 through the prepared-statement path to use the binary data
 protocol. That would seem to be the following:
 
-  CALL (?) and SELECT
-
-The following bit of heinously offensive code determines the kind of
-SQL statement is contained in a string.
-
-----
-
-3 kinds of comments in mysql SQL:
-  - "#" to end of line
-  - "-- " to end of line
-  - "/*" to next "*/" (not nested), except some weird conditional-inclusion stuff
-
-I'll ignore the third kind.
+  SELECT and SHOW
 |#
 
 (define (force-prepare-sql? fsym stmt)
-  (let ([kw (get-sql-keyword stmt)])
-    (cond [(not kw)
-           ;; better to have unpreparable stmt rejected than
-           ;; to have SELECT return unconvered types
-           #t]
-          [(string-ci=? kw "select") #t]
-          [(string-ci=? kw "call") #t]
-          [else #f])))
-
-(define sql-statement-rx
-  #rx"^(?:(?:#[^\n\r]*[\n\r])|(?:-- [^\n\r]*[\n\r])|[ \t\n\r])*([A-Za-z]+)")
-
-(define (get-sql-keyword stmt)
-  (let ([m (regexp-match sql-statement-rx stmt)])
-    (and m (cadr m))))
+  (memq (classify-my-sql stmt) '(select show)))

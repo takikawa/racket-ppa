@@ -257,8 +257,8 @@
 
 (drracket:font:setup-preferences)
 (color-prefs:add-background-preferences-panel)
-(scheme:add-preferences-panel)
-(scheme:add-coloring-preferences-panel)
+(racket:add-preferences-panel)
+(racket:add-coloring-preferences-panel)
 (preferences:add-editor-checkbox-panel)
 (preferences:add-warnings-checkbox-panel)
 (preferences:add-scheme-checkbox-panel)
@@ -348,7 +348,11 @@
                      warnings-panel)
      (make-check-box 'drracket:test-coverage-ask-about-clearing?
                      (string-constant test-coverage-ask?)
+                     warnings-panel)
+     (make-check-box 'drracket:show-killed-dialog
+                     (string-constant show-evaluation-terminated-dialog)
                      warnings-panel))))
+
 (drracket:debug:add-prefs-panel)
 (install-help-browser-preference-panel)
 (drracket:tools:add-prefs-panel)
@@ -499,6 +503,8 @@
   (preferences:set-default 'drracket:online-expansion:other-errors
                            'margin
                            (or/c 'margin 'gold))
+  
+  (preferences:set-default 'drracket:show-killed-dialog #t boolean?)
   
   (drr:set-default 'drracket:multi-file-search:recur? #t boolean?)
   (drr:set-default 'drracket:multi-file-search:filter? #t boolean?)

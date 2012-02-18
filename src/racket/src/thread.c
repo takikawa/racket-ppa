@@ -1,8 +1,8 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
- 
+
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -56,6 +56,18 @@
 # ifdef USE_BEOS_SOCKET_INCLUDE
 #  include <be/net/socket.h>
 # endif
+# ifdef HAVE_POLL_SYSCALL
+#  include <poll.h>
+# endif
+# ifdef HAVE_EPOLL_SYSCALL
+#  include <sys/epoll.h>
+# endif
+# ifdef HAVE_KQUEUE_SYSCALL
+#  include <sys/types.h>
+#  include <sys/event.h>
+#  include <sys/time.h>
+# endif
+# include <errno.h>
 #endif
 #ifdef USE_WINSOCK_TCP
 # ifdef USE_TCP
@@ -100,7 +112,7 @@ THREAD_LOCAL_DECL(extern void *scheme_break_semaphore;)
 # define SENORA_GC_NO_FREE
 #endif
 
-/* If a finalization callback invokes Scheme code,
+/* If a finalization callback invokes Racket code,
    we can end up with a thread swap in the middle of a thread
    swap (where the outer swap was interrupted by GC). The
    following is a debugging flag to help detect and fix
@@ -172,10 +184,14 @@ THREAD_LOCAL_DECL(MZ_MARK_STACK_TYPE scheme_current_cont_mark_stack);
 THREAD_LOCAL_DECL(MZ_MARK_POS_TYPE scheme_current_cont_mark_pos);
 #endif
 
+THREAD_LOCAL_DECL(int scheme_semaphore_fd_kqueue);
+
 THREAD_LOCAL_DECL(static Scheme_Custodian *main_custodian);
 THREAD_LOCAL_DECL(static Scheme_Custodian *last_custodian);
 THREAD_LOCAL_DECL(static Scheme_Hash_Table *limited_custodians = NULL);
 READ_ONLY static Scheme_Object *initial_inspector;
+
+THREAD_LOCAL_DECL(Scheme_Config *initial_config);
 
 #ifndef MZ_PRECISE_GC
 static int cust_box_count, cust_box_alloc;
@@ -211,9 +227,9 @@ HOOK_SHARED_OK void (*scheme_sleep)(float seconds, void *fds);
 HOOK_SHARED_OK void (*scheme_notify_multithread)(int on);
 HOOK_SHARED_OK void (*scheme_wakeup_on_input)(void *fds);
 HOOK_SHARED_OK int (*scheme_check_for_break)(void);
-HOOK_SHARED_OK Scheme_On_Atomic_Timeout_Proc scheme_on_atomic_timeout;
-HOOK_SHARED_OK static int atomic_timeout_auto_suspend;
-HOOK_SHARED_OK static int atomic_timeout_atomic_level;
+THREAD_LOCAL_DECL(static Scheme_On_Atomic_Timeout_Proc on_atomic_timeout);
+THREAD_LOCAL_DECL(static int atomic_timeout_auto_suspend);
+THREAD_LOCAL_DECL(static int atomic_timeout_atomic_level);
 
 THREAD_LOCAL_DECL(struct Scheme_GC_Pre_Post_Callback_Desc *gc_prepost_callback_descs);
 
@@ -567,6 +583,7 @@ void scheme_init_thread_places(void) {
   REGISTER_SO(gc_prepost_callback_descs);
   REGISTER_SO(place_local_misc_table);
   REGISTER_SO(gc_info_prefab);
+  REGISTER_SO(initial_config);
   gc_info_prefab = scheme_lookup_prefab_type(scheme_intern_symbol("gc-info"), 10);
 }
 
@@ -592,7 +609,7 @@ void scheme_init_memtrace(Scheme_Env *env)
 void scheme_init_inspector() {
   REGISTER_SO(initial_inspector);
   initial_inspector = scheme_make_initial_inspectors();
-  /* Keep the initial inspector in case someone resets Scheme (by
+  /* Keep the initial inspector in case someone resets Racket (by
      calling scheme_basic_env() a second time. Using the same
      inspector after a reset lets us use the same initial module
      instances. */
@@ -660,13 +677,13 @@ static Scheme_Object *current_memory_use(int argc, Scheme_Object *args[])
   intptr_t retval = 0;
 
   if (argc) {
-    if(SAME_TYPE(SCHEME_TYPE(args[0]), scheme_custodian_type)) {
+    if (SCHEME_FALSEP(args[0])) {
       arg = args[0];
-    } else if(SCHEME_PROCP(args[0])) {
+    } else if (SAME_TYPE(SCHEME_TYPE(args[0]), scheme_custodian_type)) {
       arg = args[0];
     } else {
       scheme_wrong_type("current-memory-use", 
-			"custodian or memory-trace-function", 
+			"custodian or #f", 
 			0, argc, args);
     }
   }
@@ -674,6 +691,7 @@ static Scheme_Object *current_memory_use(int argc, Scheme_Object *args[])
 #ifdef MZ_PRECISE_GC
   retval = GC_get_memory_use(arg);
 #else
+  scheme_unused_object(arg);
   retval = GC_get_memory_use();
 #endif
   
@@ -750,6 +768,8 @@ static Scheme_Object *custodian_require_mem(int argc, Scheme_Object *args[])
 #ifdef MZ_PRECISE_GC
   if (GC_set_account_hook(MZACCT_REQUIRE, c1, lim, c2))
     return scheme_void;
+#else
+  scheme_unused_intptr(lim);
 #endif
 
   scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
@@ -792,6 +812,8 @@ static Scheme_Object *custodian_limit_mem(int argc, Scheme_Object *args[])
 #ifdef MZ_PRECISE_GC
   if (GC_set_account_hook(MZACCT_LIMIT, args[0], lim, (argc > 2) ? args[2] : args[0]))
     return scheme_void;
+#else
+  scheme_unused_intptr(lim);
 #endif
 
   scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
@@ -3030,35 +3052,18 @@ void scheme_add_swap_out_callback(Scheme_Closure_Func f, Scheme_Object *data)
 
 #ifdef DO_STACK_CHECK
 # define THREAD_STACK_SPACE (STACK_SAFETY_MARGIN / 2)
-void scheme_check_stack_ok(char *s); /* prototype, needed for PalmOS */
-
-void scheme_check_stack_ok(char *s) {
-# include "mzstkchk.h"
-  {
-    s[THREAD_STACK_SPACE] = 1;
-  } else {
-    s[THREAD_STACK_SPACE] = 0;
-  }
-}
-
-static int is_stack_too_shallow2(void)
-{
-  char s[THREAD_STACK_SPACE+1];
-  
-  scheme_check_stack_ok(s);
-  return s[THREAD_STACK_SPACE];
-}
 
 int scheme_is_stack_too_shallow(void)
 /* Make sure this function insn't inlined, mainly because
    is_stack_too_shallow2() can get inlined, and it adds a lot
    to the stack. */
 {
-#  include "mzstkchk.h"
+# define SCHEME_PLUS_STACK_DELTA(x) ((x) - THREAD_STACK_SPACE)
+# include "mzstkchk.h"
   {
     return 1;
   }
-  return is_stack_too_shallow2();
+  return 0;
 }
 
 static Scheme_Object *thread_k(void)
@@ -3100,7 +3105,9 @@ Scheme_Object *scheme_thread_w_details(Scheme_Object *thunk,
 				       int suspend_to_kill)
 {
   Scheme_Object *result;
+#ifndef MZ_PRECISE_GC
   void *stack_marker;
+#endif
 
 #ifdef DO_STACK_CHECK
   /* Make sure the thread starts out with a reasonable stack size, so
@@ -3385,12 +3392,446 @@ static Scheme_Object *call_as_nested_thread(int argc, Scheme_Object *argv[])
 /*                     thread scheduling and termination                  */
 /*========================================================================*/
 
+void scheme_init_kqueue(void)
+{
+#if defined(HAVE_KQUEUE_SYSCALL) || defined(HAVE_EPOLL_SYSCALL)
+  scheme_semaphore_fd_kqueue = -1;
+#endif
+}
+
+void scheme_release_kqueue(void)
+{
+#if defined(HAVE_KQUEUE_SYSCALL) || defined(HAVE_EPOLL_SYSCALL)
+  if (scheme_semaphore_fd_kqueue >= 0) {
+    intptr_t rc;
+    do {
+      rc = close(scheme_semaphore_fd_kqueue);
+    } while ((rc == -1) && (errno == EINTR));
+  }
+#endif
+}
+
+#if defined(HAVE_KQUEUE_SYSCALL) || defined(HAVE_EPOLL_SYSCALL)
+static void log_kqueue_error(const char *action, int kr)
+{
+  if (kr < 0) {
+    Scheme_Logger *logger;
+    logger = scheme_get_main_logger();
+    scheme_log(logger, SCHEME_LOG_WARNING, 0, 
+#ifdef HAVE_KQUEUE_SYSCALL
+	       "kqueue"
+#else
+	       "epoll"
+#endif
+	       " error at %s: %E", 
+	       action, errno);
+  }
+}
+
+static void log_kqueue_fd(int fd, int flags)
+{
+  Scheme_Logger *logger;
+  logger = scheme_get_main_logger();
+  scheme_log(logger, SCHEME_LOG_WARNING, 0, 
+#ifdef HAVE_KQUEUE_SYSCALL
+             "kqueue"
+#else
+             "epoll"
+#endif
+             " expected event %d %d", 
+             fd, flags);
+}
+#endif
+
+Scheme_Object *scheme_fd_to_semaphore(intptr_t fd, int mode, int is_socket)
+{
+#ifdef USE_WINSOCK_TCP
+  return NULL;
+#else
+  Scheme_Object *key, *v, *s;
+#if defined(HAVE_KQUEUE_SYSCALL) || defined(HAVE_EPOLL_SYSCALL)
+# else
+  void *r, *w, *e;
+# endif
+
+  if (!scheme_semaphore_fd_mapping)
+    return NULL;
+
+# ifdef HAVE_KQUEUE_SYSCALL
+  if (!is_socket)
+    return NULL; /* kqueue() might not work on devices, such as ttys */
+  if (scheme_semaphore_fd_kqueue < 0) {
+    scheme_semaphore_fd_kqueue = kqueue();
+    if (scheme_semaphore_fd_kqueue < 0) {
+      log_kqueue_error("create", scheme_semaphore_fd_kqueue);
+      return NULL;
+    }
+  }
+# endif
+# ifdef HAVE_EPOLL_SYSCALL
+  if (scheme_semaphore_fd_kqueue < 0) {
+    scheme_semaphore_fd_kqueue = epoll_create(5);
+    if (scheme_semaphore_fd_kqueue < 0) {
+      log_kqueue_error("create", scheme_semaphore_fd_kqueue);
+      return NULL;
+    }
+  }
+# endif
+
+  key = scheme_make_integer_value(fd);
+  v = scheme_hash_get(scheme_semaphore_fd_mapping, key);
+  if (!v && ((mode == MZFD_CHECK_READ)
+             || (mode == MZFD_CHECK_WRITE)
+             || (mode == MZFD_REMOVE)))
+    return NULL;
+
+  if (!v) {
+    v = scheme_make_vector(2, scheme_false);
+    scheme_hash_set(scheme_semaphore_fd_mapping, key, v);
+  }
+
+# if !defined(HAVE_KQUEUE_SYSCALL) && !defined(HAVE_EPOLL_SYSCALL)
+  r = MZ_GET_FDSET(scheme_semaphore_fd_set, 0);
+  w = MZ_GET_FDSET(scheme_semaphore_fd_set, 1);
+  e = MZ_GET_FDSET(scheme_semaphore_fd_set, 2);
+# endif
+
+  if (mode == MZFD_REMOVE) {
+    s = SCHEME_VEC_ELS(v)[0];
+    if (!SCHEME_FALSEP(s))
+      scheme_post_sema_all(s);
+    s = SCHEME_VEC_ELS(v)[1];
+    if (!SCHEME_FALSEP(s))
+      scheme_post_sema_all(s);
+    s = NULL;
+    scheme_hash_set(scheme_semaphore_fd_mapping, key, NULL);
+# ifdef HAVE_KQUEUE_SYSCALL
+    {
+      GC_CAN_IGNORE struct kevent kev[2];
+      struct timespec timeout = {0, 0};
+      int kr;
+      EV_SET(kev, fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
+      EV_SET(&kev[1], fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
+      do {
+        kr = kevent(scheme_semaphore_fd_kqueue, kev, 2, NULL, 0, &timeout);
+      } while ((kr == -1) && (errno == EINTR));
+      log_kqueue_error("remove", kr);
+    }
+# elif defined(HAVE_EPOLL_SYSCALL)
+    {
+      int kr;
+      kr = epoll_ctl(scheme_semaphore_fd_kqueue, EPOLL_CTL_DEL, fd, NULL);
+      log_kqueue_error("remove", kr);
+    }
+# else
+    MZ_FD_CLR(fd, r);
+    MZ_FD_CLR(fd, w);
+    MZ_FD_CLR(fd, e);
+# endif
+    s = NULL;
+  } else if ((mode == MZFD_CHECK_READ)
+             || (mode == MZFD_CREATE_READ)) {
+    s = SCHEME_VEC_ELS(v)[0];
+    if (SCHEME_FALSEP(s)) {
+      if (mode == MZFD_CREATE_READ) {
+        s = scheme_make_sema(0);
+        SCHEME_VEC_ELS(v)[0] = s;
+# ifdef HAVE_KQUEUE_SYSCALL
+        {
+          GC_CAN_IGNORE struct kevent kev;
+          struct timespec timeout = {0, 0};
+          int kr;
+          EV_SET(&kev, fd, EVFILT_READ, EV_ADD | EV_ONESHOT, 0, 0, NULL);
+          do {
+            kr = kevent(scheme_semaphore_fd_kqueue, &kev, 1, NULL, 0, &timeout);
+          } while ((kr == -1) && (errno == EINTR));
+	  log_kqueue_error("read", kr);
+        }
+# elif defined(HAVE_EPOLL_SYSCALL)
+	{
+	  GC_CAN_IGNORE struct epoll_event ev;
+	  int already = !SCHEME_FALSEP(SCHEME_VEC_ELS(v)[1]), kr;
+	  ev.data.fd = fd;
+	  ev.events = EPOLLIN | (already ? EPOLLOUT : 0);
+	  kr = epoll_ctl(scheme_semaphore_fd_kqueue, 
+			 (already ? EPOLL_CTL_MOD : EPOLL_CTL_ADD), fd, &ev);
+	  log_kqueue_error("read", kr);
+	}
+# else
+        MZ_FD_SET(fd, r);
+        MZ_FD_SET(fd, e);
+#endif
+      } else
+        s = NULL;
+    }
+  } else {
+    s = SCHEME_VEC_ELS(v)[1];
+    if (SCHEME_FALSEP(s)) {
+      if (mode == MZFD_CREATE_WRITE) {
+        s = scheme_make_sema(0);
+        SCHEME_VEC_ELS(v)[1] = s;
+# ifdef HAVE_KQUEUE_SYSCALL
+        {
+          GC_CAN_IGNORE struct kevent kev;
+          struct timespec timeout = {0, 0};
+          int kr;
+          EV_SET(&kev, fd, EVFILT_WRITE, EV_ADD | EV_ONESHOT, 0, 0, NULL);
+          do {
+            kr = kevent(scheme_semaphore_fd_kqueue, &kev, 1, NULL, 0, &timeout);
+          } while ((kr == -1) && (errno == EINTR));
+	  log_kqueue_error("write", kr);
+        }
+
+# elif defined(HAVE_EPOLL_SYSCALL)
+	{
+	  GC_CAN_IGNORE struct epoll_event ev;
+	  int already = !SCHEME_FALSEP(SCHEME_VEC_ELS(v)[0]), kr;
+	  ev.data.fd = fd;
+	  ev.events = EPOLLOUT | (already ? EPOLLIN : 0);
+	  kr = epoll_ctl(scheme_semaphore_fd_kqueue, 
+			 (already ? EPOLL_CTL_MOD : EPOLL_CTL_ADD), fd, &ev);
+	  log_kqueue_error("write", kr);
+	}
+# else
+        MZ_FD_SET(fd, w);
+        MZ_FD_SET(fd, e);
+#endif
+      } else
+        s = NULL;
+    }
+  }
+
+  return s;
+#endif
+}
+
+static int check_fd_semaphores()
+{
+#ifdef USE_WINSOCK_TCP
+  return 0;
+#elif defined(HAVE_KQUEUE_SYSCALL)
+  Scheme_Object *v, *s, *key;
+  GC_CAN_IGNORE struct kevent kev;
+  struct timespec timeout = {0, 0};
+  int kr, hit = 0;
+
+  if (!scheme_semaphore_fd_mapping || (scheme_semaphore_fd_kqueue < 0))
+    return 0;
+
+  while (1) {
+    do {
+      kr = kevent(scheme_semaphore_fd_kqueue, NULL, 0, &kev, 1, &timeout);
+    } while ((kr == -1) && (errno == EINTR));
+    log_kqueue_error("wait", kr);
+ 
+    if (kr > 0) {
+      key = scheme_make_integer_value(kev.ident);
+      v = scheme_hash_get(scheme_semaphore_fd_mapping, key);
+      if (v) {
+        if (kev.filter == EVFILT_READ) {
+          s = SCHEME_VEC_ELS(v)[0];
+          if (!SCHEME_FALSEP(s)) {
+            scheme_post_sema_all(s);
+            hit = 1;
+            SCHEME_VEC_ELS(v)[0] = scheme_false;
+          }
+        } else if (kev.filter == EVFILT_WRITE) {
+          s = SCHEME_VEC_ELS(v)[1];
+          if (!SCHEME_FALSEP(s)) {
+            scheme_post_sema_all(s);
+            hit = 1;
+            SCHEME_VEC_ELS(v)[1] = scheme_false;
+          }
+        }
+        if (SCHEME_FALSEP(SCHEME_VEC_ELS(v)[0])
+            && SCHEME_FALSEP(SCHEME_VEC_ELS(v)[1]))
+          scheme_hash_set(scheme_semaphore_fd_mapping, key, NULL);
+      } else {
+        log_kqueue_fd(kev.ident, kev.filter);
+      }
+    } else
+      break;
+  }
+
+  return hit;
+#elif defined(HAVE_EPOLL_SYSCALL)
+  Scheme_Object *v, *s, *key;
+  int kr, hit = 0;
+  GC_CAN_IGNORE struct epoll_event ev;
+
+  if (!scheme_semaphore_fd_mapping || (scheme_semaphore_fd_kqueue < 0))
+    return 0;
+
+  while (1) {
+    
+    do {
+      kr = epoll_wait(scheme_semaphore_fd_kqueue, &ev, 1, 0);
+    } while ((kr == -1) && (errno == EINTR));
+    log_kqueue_error("wait", kr);
+ 
+    if (kr > 0) {
+      key = scheme_make_integer_value(ev.data.fd);
+      v = scheme_hash_get(scheme_semaphore_fd_mapping, key);
+      if (v) {
+	if (ev.events & (POLLIN | POLLHUP | POLLERR)) {
+	  s = SCHEME_VEC_ELS(v)[0];
+          if (!SCHEME_FALSEP(s)) {
+            scheme_post_sema_all(s);
+            hit = 1;
+            SCHEME_VEC_ELS(v)[0] = scheme_false;
+          }
+	}
+	if (ev.events & (POLLOUT | POLLHUP | POLLERR)) {
+	  s = SCHEME_VEC_ELS(v)[1];
+          if (!SCHEME_FALSEP(s)) {
+            scheme_post_sema_all(s);
+            hit = 1;
+            SCHEME_VEC_ELS(v)[1] = scheme_false;
+          }
+	}
+        if (SCHEME_FALSEP(SCHEME_VEC_ELS(v)[0])
+            && SCHEME_FALSEP(SCHEME_VEC_ELS(v)[1])) {
+          scheme_hash_set(scheme_semaphore_fd_mapping, key, NULL);
+	  kr = epoll_ctl(scheme_semaphore_fd_kqueue, EPOLL_CTL_DEL, ev.data.fd, NULL);
+	  log_kqueue_error("remove*", kr);
+	} else {
+	  ev.events = ((SCHEME_FALSEP(SCHEME_VEC_ELS(v)[0]) ? 0 : POLLIN)
+		       | (SCHEME_FALSEP(SCHEME_VEC_ELS(v)[1]) ? 0 : POLLOUT));
+	  kr = epoll_ctl(scheme_semaphore_fd_kqueue, EPOLL_CTL_MOD, ev.data.fd, &ev);
+	  log_kqueue_error("update", kr);
+	}
+      } else {
+        log_kqueue_fd(ev.data.fd, ev.events);
+      }
+    } else
+      break;
+  }
+
+  return hit;
+#elif defined(HAVE_POLL_SYSCALL)
+  struct pollfd *pfd;
+  intptr_t i, c;
+  Scheme_Object *v, *s, *key;
+  int sr, hit = 0;
+
+  if (!scheme_semaphore_fd_mapping || !scheme_semaphore_fd_mapping->count)
+    return 0;
+
+  scheme_clean_fd_set(scheme_semaphore_fd_set);
+  c = SCHEME_INT_VAL(scheme_semaphore_fd_set->data->count);
+  pfd = scheme_semaphore_fd_set->data->pfd;
+
+  do {
+    sr = poll(pfd, c, 0);
+  } while ((sr == -1) && (errno == EINTR));  
+
+  if (sr > 0) {
+    for (i = 0; i < c; i++) {
+      if (pfd[i].revents) {
+        key = scheme_make_integer_value(pfd[i].fd);
+        v = scheme_hash_get(scheme_semaphore_fd_mapping, key);
+        if (v) {
+          if (pfd[i].revents & (POLLIN | POLLHUP | POLLERR)) {
+            s = SCHEME_VEC_ELS(v)[0];
+            if (!SCHEME_FALSEP(s)) {
+              scheme_post_sema_all(s);
+              hit = 1;
+              SCHEME_VEC_ELS(v)[0] = scheme_false;
+            }
+            pfd[i].revents -= (pfd[i].revents & POLLIN);
+          }
+          if (pfd[i].revents & (POLLOUT | POLLHUP | POLLERR)) {
+            s = SCHEME_VEC_ELS(v)[1];
+            if (!SCHEME_FALSEP(s)) {
+              scheme_post_sema_all(s);
+              hit = 1;
+              SCHEME_VEC_ELS(v)[1] = scheme_false;
+            }
+            pfd[i].revents -= (pfd[i].revents & POLLOUT);
+          }
+          if (SCHEME_FALSEP(SCHEME_VEC_ELS(v)[0])
+              && SCHEME_FALSEP(SCHEME_VEC_ELS(v)[1]))
+            scheme_hash_set(scheme_semaphore_fd_mapping, key, NULL);
+        }
+      }
+    }
+  }
+
+  return hit;
+#else
+  void *fds;
+  struct timeval time = {0, 0};
+  int i, actual_limit, r, w, e, sr, hit = 0;
+  Scheme_Object *key, *v, *s;
+  DECL_FDSET(set, 3);
+  fd_set *set1, *set2;
+
+  if (!scheme_semaphore_fd_mapping || !scheme_semaphore_fd_mapping->count)
+    return 0;
+
+  INIT_DECL_FDSET(set, set1, set2);
+  set1 = (fd_set *) MZ_GET_FDSET(set, 1);
+  set2 = (fd_set *) MZ_GET_FDSET(set, 2);
+  
+  fds = (void *)set;
+  MZ_FD_ZERO(set);
+  MZ_FD_ZERO(set1);
+  MZ_FD_ZERO(set2);
+
+  scheme_merge_fd_sets(fds, scheme_semaphore_fd_set);
+
+  actual_limit = scheme_get_fd_limit(fds);
+
+  do {
+    sr = select(actual_limit, set, set1, set2, &time);
+  } while ((sr == -1) && (errno == EINTR));
+
+  if (sr > 0) {
+    for (i = 0; i < actual_limit; i++) {
+      r = MZ_FD_ISSET(i, set);
+      w = MZ_FD_ISSET(i, set1);
+      e = MZ_FD_ISSET(i, set2);
+      if (r || w || e) {
+        key = scheme_make_integer_value(i);
+        v = scheme_hash_get(scheme_semaphore_fd_mapping, key);
+        if (v) {
+          if (r || e) {
+            s = SCHEME_VEC_ELS(v)[0];
+            if (!SCHEME_FALSEP(s)) {
+              scheme_post_sema_all(s);
+              hit = 1;
+              SCHEME_VEC_ELS(v)[0] = scheme_false;
+            }
+            MZ_FD_CLR(i, MZ_GET_FDSET(scheme_semaphore_fd_set, 0));
+          }
+          if (w || e) {
+            s = SCHEME_VEC_ELS(v)[1];
+            if (!SCHEME_FALSEP(s)) {
+              scheme_post_sema_all(s);
+              hit = 1;
+              SCHEME_VEC_ELS(v)[1] = scheme_false;
+            }
+            MZ_FD_CLR(i, MZ_GET_FDSET(scheme_semaphore_fd_set, 1));
+          }
+          if (SCHEME_FALSEP(SCHEME_VEC_ELS(v)[0])
+              && SCHEME_FALSEP(SCHEME_VEC_ELS(v)[1])) {
+            MZ_FD_CLR(i, MZ_GET_FDSET(scheme_semaphore_fd_set, 2));
+            scheme_hash_set(scheme_semaphore_fd_mapping, key, NULL);
+          }
+        }
+      }
+    }
+  }
+
+  return hit;
+#endif
+}
+
 static int check_sleep(int need_activity, int sleep_now)
 /* Signals should be suspended */
 {
   Scheme_Thread *p, *p2;
   int end_with_act;
-
 #if defined(USING_FDS)
   DECL_FDSET(set, 3);
   fd_set *set1, *set2;
@@ -3505,7 +3946,18 @@ static int check_sleep(int need_activity, int sleep_now)
     if (post_system_idle()) {
       return 0;
     }
-  
+
+# if defined(HAVE_KQUEUE_SYSCALL) || defined(HAVE_EPOLL_SYSCALL) 
+    if (scheme_semaphore_fd_mapping && (scheme_semaphore_fd_kqueue >= 0)) {
+      MZ_FD_SET(scheme_semaphore_fd_kqueue, set);
+      MZ_FD_SET(scheme_semaphore_fd_kqueue, set2);
+    }
+# else
+    fds = scheme_merge_fd_sets(fds, scheme_semaphore_fd_set); 
+# endif
+
+    scheme_clean_fd_set(fds);
+ 
     if (sleep_now) {
       float mst = (float)max_sleep_time;
 
@@ -3579,13 +4031,14 @@ void scheme_out_of_fuel(void)
 }
 
 static void init_schedule_info(Scheme_Schedule_Info *sinfo, Scheme_Thread *false_pos_ok, 
-			       double sleep_end)
+			       int no_redirect, double sleep_end)
 {
   sinfo->false_positive_ok = false_pos_ok;
   sinfo->potentially_false_positive = 0;
   sinfo->current_syncing = NULL;
   sinfo->spin = 0;
   sinfo->is_poll = 0;
+  sinfo->no_redirect = no_redirect;
   sinfo->sleep_end = sleep_end;
 }
 
@@ -3829,6 +4282,11 @@ void scheme_set_break_main_target(Scheme_Thread *p)
 
 static void check_ready_break()
 {
+#if defined(MZ_USE_PLACES)
+  if (!do_atomic)
+    scheme_place_check_for_interruption();
+#endif
+
   if (delayed_break_ready) {
     if (scheme_main_thread) {
       delayed_break_ready = 0;
@@ -3877,9 +4335,10 @@ static void call_on_atomic_timeout(int must)
   Scheme_Kill_Action_Func private_on_kill;
   void *private_kill_data;
   void **private_kill_next;
+  Scheme_On_Atomic_Timeout_Proc oat;
 
   /* Save any state that has to do with the thread blocking or 
-     sleeping, in case scheme_on_atomic_timeout() runs Racket code. */
+     sleeping, in case on_atomic_timeout() runs Racket code. */
 
   running = p->running;
   sleep_end = p->sleep_end;
@@ -3899,7 +4358,11 @@ static void call_on_atomic_timeout(int must)
   p->block_check = NULL;
   p->block_needs_wakeup = NULL;
 
-  scheme_on_atomic_timeout(must);
+  /* When on_atomic_timeout is thread-local, need a
+     local variable so that the function call isn't
+     obscured to xform: */
+  oat = on_atomic_timeout;
+  oat(must);
 
   p->running = running;
   p->sleep_end = sleep_end;
@@ -3985,7 +4448,7 @@ static void find_next_thread(Scheme_Thread **return_arg) {
         if (next->block_check) {
           Scheme_Ready_Fun_FPC f = (Scheme_Ready_Fun_FPC)next->block_check;
           Scheme_Schedule_Info sinfo;
-          init_schedule_info(&sinfo, next, next->sleep_end);
+          init_schedule_info(&sinfo, next, 1, next->sleep_end);
           if (f(next->blocker, &sinfo))
             break;
           next->sleep_end = sinfo.sleep_end;
@@ -4061,6 +4524,7 @@ void scheme_thread_block(float sleep_time)
   double sleep_end;
   Scheme_Thread *next;
   Scheme_Thread *p = scheme_current_thread;
+  int skip_sleep;
 
   if (p->return_marks_to) /* just in case we get here */
     return;
@@ -4131,6 +4595,24 @@ void scheme_thread_block(float sleep_time)
     scheme_check_foreign_work();
 #endif
 
+  skip_sleep = 0;
+  if (check_fd_semaphores()) {
+    /* double check whether a semaphore for this thread woke up: */
+    if (!do_atomic && (p->block_descriptor == GENERIC_BLOCKED)) {
+      if (p->block_check) {
+        Scheme_Ready_Fun_FPC f = (Scheme_Ready_Fun_FPC)p->block_check;
+        Scheme_Schedule_Info sinfo;
+        init_schedule_info(&sinfo, p, 1, sleep_end);
+        if (f(p->blocker, &sinfo)) {
+          sleep_end = 0;
+          skip_sleep = 1;
+        } else {
+          sleep_end = sinfo.sleep_end;
+        }
+      }
+    }
+  }
+
   if (!do_atomic && (sleep_end >= 0.0)) {
     find_next_thread(&next);
   } else
@@ -4184,7 +4666,7 @@ void scheme_thread_block(float sleep_time)
     swap_target = next;
     next = NULL;
     do_swap_thread();
-  } else if (do_atomic && scheme_on_atomic_timeout
+  } else if (do_atomic && on_atomic_timeout
              && (atomic_timeout_auto_suspend < 2)) {
     if (!atomic_timeout_auto_suspend
         || (do_atomic <= atomic_timeout_atomic_level)) {
@@ -4199,7 +4681,7 @@ void scheme_thread_block(float sleep_time)
     }
   } else {
     /* If all processes are blocked, check for total process sleeping: */
-    if (p->block_descriptor != NOT_BLOCKED) {
+    if ((p->block_descriptor != NOT_BLOCKED) && !skip_sleep) {
       check_sleep(1, 1);
     }
   }
@@ -4242,10 +4724,6 @@ void scheme_thread_block(float sleep_time)
   if (!do_atomic)
     GC_check_master_gc_request(); 
 #endif
-#if defined(MZ_USE_PLACES)
-  if (!do_atomic)
-    scheme_place_check_for_interruption();
-#endif
 
   /* Propagate memory-use information and check for custodian-based
      GC triggers due to child place memory use: */
@@ -4262,7 +4740,7 @@ void scheme_thread_block(float sleep_time)
 	if (p->block_check) {
 	  Scheme_Ready_Fun_FPC f = (Scheme_Ready_Fun_FPC)p->block_check;
 	  Scheme_Schedule_Info sinfo;
-	  init_schedule_info(&sinfo, p, sleep_end);
+	  init_schedule_info(&sinfo, p, 1, sleep_end);
 	  if (f(p->blocker, &sinfo)) {
 	    sleep_end = 0;
 	  } else {
@@ -4311,12 +4789,12 @@ int scheme_block_until(Scheme_Ready_Fun _f, Scheme_Needs_Wakeup_Fun fdf,
 
   /* We make an sinfo to be polite, but we also assume
      that f will not generate any redirections! */
-  init_schedule_info(&sinfo, NULL, sleep_end);
+  init_schedule_info(&sinfo, NULL, 1, sleep_end);
 
   while (!(result = f((Scheme_Object *)data, &sinfo))) {
     sleep_end = sinfo.sleep_end;
     if (sinfo.spin) {
-      init_schedule_info(&sinfo, NULL, 0.0);
+      init_schedule_info(&sinfo, NULL, 1, 0.0);
       scheme_thread_block(0.0);
       scheme_current_thread->ran_some = 1;
     } else {
@@ -4364,11 +4842,10 @@ int scheme_block_until_enable_break(Scheme_Ready_Fun _f, Scheme_Needs_Wakeup_Fun
 
 static int ready_unless(Scheme_Object *o)
 {
-  Scheme_Object *unless_evt, *data;
+  Scheme_Object *data;
   Scheme_Ready_Fun f;
 
   data = (Scheme_Object *)((void **)o)[0];
-  unless_evt = (Scheme_Object *)((void **)o)[1];
   f = (Scheme_Ready_Fun)((void **)o)[2];
 
   return f(data);
@@ -4470,7 +4947,7 @@ int scheme_wait_until_suspend_ok(void)
 {
   int did = 0;
 
-  if (scheme_on_atomic_timeout) {
+  if (on_atomic_timeout) {
     /* new-style atomic timeout */
     if (do_atomic > atomic_timeout_atomic_level) {
       scheme_log_abort("attempted to wait for suspend in nested atomic mode");
@@ -4478,7 +4955,7 @@ int scheme_wait_until_suspend_ok(void)
     }
   }
 
-  while (do_atomic && scheme_on_atomic_timeout) {
+  while (do_atomic && on_atomic_timeout) {
     did = 1;
     if (atomic_timeout_auto_suspend)
       atomic_timeout_auto_suspend++;
@@ -4499,8 +4976,8 @@ Scheme_On_Atomic_Timeout_Proc scheme_set_on_atomic_timeout(Scheme_On_Atomic_Time
 {
   Scheme_On_Atomic_Timeout_Proc old;
 
-  old = scheme_on_atomic_timeout;
-  scheme_on_atomic_timeout = p;
+  old = on_atomic_timeout;
+  on_atomic_timeout = p;
   if (p) {
     atomic_timeout_auto_suspend = 1;
     atomic_timeout_atomic_level = do_atomic;
@@ -5635,7 +6112,7 @@ static int syncing_ready(Scheme_Object *s, Scheme_Schedule_Info *sinfo)
     if (ready) {
       int yep;
 
-      init_schedule_info(&r_sinfo, sinfo->false_positive_ok, sleep_end);
+      init_schedule_info(&r_sinfo, sinfo->false_positive_ok, 0, sleep_end);
 
       r_sinfo.current_syncing = (Scheme_Object *)syncing;
       r_sinfo.w_i = i;
@@ -5770,16 +6247,43 @@ static Scheme_Object *evt_p(int argc, Scheme_Object *argv[])
 	  : scheme_false);
 }
 
-Evt_Set *make_evt_set(const char *name, int argc, Scheme_Object **argv, int delta)
+static int evt_set_flatten(Evt_Set *e, int pos, Scheme_Object **args, Evt **ws)
+{
+  Scheme_Object *stack = scheme_null;
+  int i;
+
+  while (1) {
+    for (i = e->argc; i--; ) {
+      if (!SCHEME_EVTSETP(e->argv[i])) {
+        if (args) {
+          args[pos] = e->argv[i];
+          ws[pos] = e->ws[i];
+        }
+        pos++;
+      } else
+        stack = scheme_make_pair(e->argv[i], stack);
+    }
+
+    if (!SCHEME_NULLP(stack)) {
+      e = (Evt_Set *)SCHEME_CAR(stack);
+      stack = SCHEME_CDR(stack);
+    } else
+      break;
+  }
+
+  return pos;
+}
+
+Evt_Set *make_evt_set(const char *name, int argc, Scheme_Object **argv, int delta, int flatten)
 {
   Evt *w, **iws, **ws;
   Evt_Set *evt_set, *subset;
   Scheme_Object **args;
-  int i, j, count = 0, reuse = 1;
+  int i, j, count = 0, reuse = 1, unflattened = 0;
 
   iws = MALLOC_N(Evt*, argc-delta);
   
-  /* Find Evt record for each non-set argument, and compute flattened size. */
+  /* Find Evt record for each non-set argument, and compute size --- possibly flattened. */
   for (i = 0; i < (argc - delta); i++) {
     if (!SCHEME_EVTSETP(argv[i+delta])) {
       w = find_evt(argv[i+delta]);
@@ -5789,18 +6293,27 @@ Evt_Set *make_evt_set(const char *name, int argc, Scheme_Object **argv, int delt
       }
       iws[i] = w;
       count++;
-    } else {
+    } else if (flatten) {
       int n;
-      n = ((Evt_Set *)argv[i+delta])->argc;
+      if (SCHEME_EVTSET_UNFLATTENEDP(argv[i+delta])) {
+        n = evt_set_flatten((Evt_Set *)argv[i+delta], 0, NULL, NULL);
+      } else {
+        n = ((Evt_Set *)argv[i+delta])->argc;
+      }
       if (n != 1)
         reuse = 0;
       count += n;
+    } else {
+      count++;
+      unflattened = 1;
     }
   }
 
   evt_set = MALLOC_ONE_TAGGED(Evt_Set);
-  evt_set->so.type = scheme_evt_set_type;
+  evt_set->iso.so.type = scheme_evt_set_type;
   evt_set->argc = count;
+  if (unflattened)
+    SCHEME_SET_EVTSET_UNFLATTENED(evt_set);
 
   if (reuse && (count == (argc - delta)))
     ws = iws;
@@ -5809,15 +6322,20 @@ Evt_Set *make_evt_set(const char *name, int argc, Scheme_Object **argv, int delt
 
   args = MALLOC_N(Scheme_Object*, count);
   for (i = delta, j = 0; i < argc; i++, j++) {
-    if (SCHEME_EVTSETP(argv[i])) {
-      int k, n;
-      subset = (Evt_Set *)argv[i];
-      n = subset->argc;
-      for (k = 0; k < n; k++, j++) {
-	args[j] = subset->argv[k];
-	ws[j] = subset->ws[k];
+    if (flatten && SCHEME_EVTSETP(argv[i])) {
+      if (SCHEME_EVTSET_UNFLATTENEDP(argv[i])) {
+        j = evt_set_flatten((Evt_Set *)argv[i], j, args, ws);
+        j--;
+      } else {
+        int k, n;
+        subset = (Evt_Set *)argv[i];
+        n = subset->argc;
+        for (k = 0; k < n; k++, j++) {
+          args[j] = subset->argv[k];
+          ws[j] = subset->ws[k];
+        }
+        --j;
       }
-      --j;
     } else {
       ws[j] = iws[i-delta];
       args[j] = argv[i];
@@ -5832,7 +6350,7 @@ Evt_Set *make_evt_set(const char *name, int argc, Scheme_Object **argv, int delt
 
 Scheme_Object *scheme_make_evt_set(int argc, Scheme_Object **argv)
 {
-  return (Scheme_Object *)make_evt_set("internal-make-evt-set", argc, argv, 0);
+  return (Scheme_Object *)make_evt_set("internal-make-evt-set", argc, argv, 0, 1);
 }
 
 void scheme_post_syncing_nacks(Syncing *syncing)
@@ -5900,7 +6418,9 @@ static Scheme_Object *do_sync(const char *name, int argc, Scheme_Object *argv[],
   evt_set = NULL;
 
   /* Special case: only argument is an immutable evt set: */
-  if ((argc == (with_timeout + 1)) && SCHEME_EVTSETP(argv[with_timeout])) {
+  if ((argc == (with_timeout + 1)) 
+      && SCHEME_EVTSETP(argv[with_timeout])
+      && !SCHEME_EVTSET_UNFLATTENEDP(argv[with_timeout])) {
     int i;
     evt_set = (Evt_Set *)argv[with_timeout];
     for (i = evt_set->argc; i--; ) {
@@ -5913,7 +6433,7 @@ static Scheme_Object *do_sync(const char *name, int argc, Scheme_Object *argv[],
   }
 
   if (!evt_set)
-    evt_set = make_evt_set(name, argc, argv, with_timeout);
+    evt_set = make_evt_set(name, argc, argv, with_timeout, 1);
 
   if (with_break) {
     scheme_push_break_enable(&cframe, 1, 1);
@@ -6096,7 +6616,7 @@ static Scheme_Object *sch_sync_timeout_enable_break(int argc, Scheme_Object *arg
 
 static Scheme_Object *evts_to_evt(int argc, Scheme_Object *argv[])
 {
-  return (Scheme_Object *)make_evt_set("choice-evt", argc, argv, 0);
+  return (Scheme_Object *)make_evt_set("choice-evt", argc, argv, 0, 0);
 }
 
 /*========================================================================*/
@@ -6138,6 +6658,11 @@ void scheme_thread_cell_set(Scheme_Object *cell, Scheme_Thread_Cell_Table *cells
   scheme_add_to_table(cells, (const char *)cell, (void *)v, 0);
 }
 
+Scheme_Thread_Cell_Table *scheme_empty_cell_table(void)
+{
+  return scheme_make_bucket_table(20, SCHEME_hash_weak_ptr);
+}
+
 static Scheme_Thread_Cell_Table *inherit_cells(Scheme_Thread_Cell_Table *cells,
 					       Scheme_Thread_Cell_Table *t,
 					       int inherited)
@@ -6150,7 +6675,7 @@ static Scheme_Thread_Cell_Table *inherit_cells(Scheme_Thread_Cell_Table *cells,
     cells = scheme_current_thread->cell_values;
   
   if (!t)
-    t = scheme_make_bucket_table(20, SCHEME_hash_weak_ptr);
+    t = scheme_empty_cell_table();
   
   for (i = cells->size; i--; ) {
     bucket = cells->buckets[i];
@@ -6370,7 +6895,7 @@ static Scheme_Object *extend_parameterization(int argc, Scheme_Object *argv[])
       key = argv[i + 1];
       if (SCHEME_CHAPERONEP(param)) {
         a[0] = key;
-        key = scheme_apply_chaperone(param, 1, a, scheme_void);
+        key = scheme_apply_chaperone(param, 1, a, scheme_void, 0);
         param = SCHEME_CHAPERONE_VAL(param);
       }
       a[0] = key;
@@ -6401,7 +6926,7 @@ static Scheme_Object *extend_parameterization(int argc, Scheme_Object *argv[])
 static Scheme_Object *reparameterize(int argc, Scheme_Object **argv)
 {
   /* Clones values of all built-in parameters in a new parameterization.
-     This could be implemented in Scheme by enumerating all built-in parameters,
+     This could be implemented in Racket by enumerating all built-in parameters,
      but it's easier and faster here. We need this for the Planet resolver. */
   Scheme_Config *c, *naya;
   Scheme_Parameterization *pz, *npz;
@@ -6791,6 +7316,13 @@ static void make_initial_config(Scheme_Thread *p)
 	init_param(cells, paramz, i, scheme_false);      
     }
   }
+
+  initial_config = config;
+}
+
+Scheme_Config *scheme_minimal_config(void)
+{
+  return initial_config;
 }
 
 void scheme_set_startup_load_on_demand(int on)
@@ -7633,6 +8165,9 @@ static void get_ready_for_GC()
   scheme_clear_rx_buffers();
   scheme_clear_bignum_cache();
   scheme_clear_delayed_load_cache();
+#ifdef MZ_USE_PLACES
+  scheme_clear_place_ifs_stack();
+#endif
 
 #ifdef RUNSTACK_IS_GLOBAL
   if (scheme_current_thread->running) {

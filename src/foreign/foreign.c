@@ -494,9 +494,8 @@ static unsigned short *ucs4_string_or_null_to_utf16_pointer(Scheme_Object *ucs)
 
 Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 {
-  intptr_t ulen;
+  intptr_t ulen, end;
   mzchar *res;
-  int end;
   if (!utf) return scheme_false;
   for (end=0; utf[end] != 0; end++) { /**/ }
   res = scheme_utf16_to_ucs4(utf, 0, end, NULL, -1, &ulen, 1);
@@ -1078,7 +1077,7 @@ ffi_abi sym_to_abi(char *who, Scheme_Object *sym)
 /* (make-cstruct-type types [abi alignment]) -> ctype */
 /* This creates a new primitive type that is a struct.  This type can be used
  * with cpointer objects, except that the contents is used rather than the
- * pointer value.  Marshaling to lists or whatever should be done in Scheme. */
+ * pointer value.  Marshaling to lists or whatever should be done in Racket. */
 #define MYNAME "make-cstruct-type"
 static Scheme_Object *foreign_make_cstruct_type(int argc, Scheme_Object *argv[])
 {
@@ -1155,7 +1154,7 @@ static Scheme_Object *foreign_make_cstruct_type(int argc, Scheme_Object *argv[])
 /* This creates a new primitive type that is an array. An array is the
  * same as a cpointer as an argument, but it behave differently within
  * a struct or for allocation. Marshaling to lists or whatever should
- * be done in Scheme. */
+ * be done in Racket. */
 #define MYNAME "make-array-type"
 static Scheme_Object *foreign_make_array_type(int argc, Scheme_Object *argv[])
 {
@@ -1223,7 +1222,7 @@ static Scheme_Object *foreign_make_array_type(int argc, Scheme_Object *argv[])
 /* (make-union-type type ...+) -> ctype */
 /* This creates a new primitive type that is a union. All unions
  * behave like structs. Marshaling to lists or whatever should
- * be done in Scheme. */
+ * be done in Racket. */
 #define MYNAME "make-union-type"
 static Scheme_Object *foreign_make_union_type(int argc, Scheme_Object *argv[])
 {
@@ -1415,7 +1414,7 @@ void *scheme_extract_pointer(Scheme_Object *v) {
 #endif
 
 static Scheme_Object *C2SCHEME(Scheme_Object *type, void *src,
-                               int delta, int args_loc, int gcsrc)
+                               intptr_t delta, int args_loc, int gcsrc)
 {
   Scheme_Object *res;
   if (!SCHEME_CTYPEP(type))
@@ -1945,12 +1944,14 @@ static Scheme_Object *foreign_compiler_sizeof(int argc, Scheme_Object *argv[])
   int basetype = 0; /* 1=int, 2=char, 3=void, 4=float, 5=double */
   int intsize = 0;  /* "short" => decrement, "long" => increment */
   int stars = 0;    /* number of "*"s */
+  int must_list = 0;
   Scheme_Object *l = argv[0], *p;
   while (!SAME_OBJ(l, scheme_null)) {
-    if (SCHEME_PAIRP(l)) { p = SCHEME_CAR(l); l = SCHEME_CDR(l); }
+    if (SCHEME_PAIRP(l)) { p = SCHEME_CAR(l); l = SCHEME_CDR(l); must_list = 1;}
+    else if (must_list) { p = scheme_false; l = scheme_null; }
     else { p = l; l = scheme_null; }
     if (!SCHEME_SYMBOLP(p)) {
-      scheme_wrong_type(MYNAME, "list of symbols", 0, argc, argv);
+      scheme_wrong_type(MYNAME, "symbol or list of symbols", 0, argc, argv);
     } else if (!strcmp(SCHEME_SYM_VAL(p),"int")) {
       if (basetype==0) basetype=1;
       else scheme_signal_error(MYNAME": extraneous type: %V", p);
@@ -1977,7 +1978,7 @@ static Scheme_Object *foreign_compiler_sizeof(int argc, Scheme_Object *argv[])
     } else if (!strcmp(SCHEME_SYM_VAL(p),"*")) {
       stars++;
     } else {
-      scheme_wrong_type(MYNAME, "list of C type symbols", 0, argc, argv);
+      scheme_wrong_type(MYNAME, "C type symbol or list of C type symbols", 0, argc, argv);
     }
   }
   if (stars > 1)
@@ -2061,7 +2062,8 @@ static Scheme_Object *fail_ok_sym;
 #define MYNAME "malloc"
 static Scheme_Object *foreign_malloc(int argc, Scheme_Object *argv[])
 {
-  int i, size=0, num=0, failok=0;
+  int i, failok=0;
+  intptr_t size=0, num=0;
   void *from = NULL, *res = NULL;
   intptr_t foff = 0;
   Scheme_Object *mode = NULL, *a, *base = NULL;
@@ -2073,7 +2075,7 @@ static Scheme_Object *foreign_malloc(int argc, Scheme_Object *argv[])
         scheme_signal_error(MYNAME": specifying a second integer size: %V", a);
       num = SCHEME_INT_VAL(a);
       if (num <= 0)
-        scheme_wrong_type(MYNAME, "positive-integer", 0, argc, argv);
+        scheme_wrong_type(MYNAME, "positive fixnum", 0, argc, argv);
     } else if (SCHEME_CTYPEP(a)) {
       if (size != 0)
         scheme_signal_error(MYNAME": specifying a second type: %V", a);
@@ -2115,7 +2117,8 @@ static Scheme_Object *foreign_malloc(int argc, Scheme_Object *argv[])
     scheme_signal_error(MYNAME": bad allocation mode: %V", mode);
     return NULL; /* hush the compiler */
   }
-  if (failok) res = scheme_malloc_fail_ok(mf,size); else res = mf(size);
+  res = scheme_malloc_fail_ok(mf,size);
+  if (failok && (res == NULL)) scheme_signal_error("malloc: out of memory");
   if (((from != NULL) || (foff != 0)) && (res != NULL))
     memcpy(res, W_OFFSET(from, foff), size);
   if (SAME_OBJ(mode, raw_sym))
@@ -2465,11 +2468,11 @@ static Scheme_Object *foreign_ptr_ref(int argc, Scheme_Object *argv[])
     if (!SAME_OBJ(argv[2],abs_sym))
       scheme_wrong_type(MYNAME, "abs-flag", 2, argc, argv);
     if (!SCHEME_INTP(argv[3]))
-      scheme_wrong_type(MYNAME, "integer", 3, argc, argv);
+      scheme_wrong_type(MYNAME, "fixnum", 3, argc, argv);
     delta += SCHEME_INT_VAL(argv[3]);
   } else if (argc > 2) {
     if (!SCHEME_INTP(argv[2]))
-      scheme_wrong_type(MYNAME, "integer", 2, argc, argv);
+      scheme_wrong_type(MYNAME, "fixnum", 2, argc, argv);
     if (!size)
       scheme_signal_error(MYNAME": cannot multiply fpointer type by offset");
     delta += (size * SCHEME_INT_VAL(argv[2]));
@@ -2510,11 +2513,11 @@ static Scheme_Object *foreign_ptr_set_bang(int argc, Scheme_Object *argv[])
     if (!SAME_OBJ(argv[2],abs_sym))
       scheme_wrong_type(MYNAME, "'abs", 2, argc, argv);
     if (!SCHEME_INTP(argv[3]))
-      scheme_wrong_type(MYNAME, "integer", 3, argc, argv);
+      scheme_wrong_type(MYNAME, "fixnum", 3, argc, argv);
     delta += SCHEME_INT_VAL(argv[3]);
   } else if (argc > 3) {
     if (!SCHEME_INTP(argv[2]))
-      scheme_wrong_type(MYNAME, "integer", 2, argc, argv);
+      scheme_wrong_type(MYNAME, "fixnum", 2, argc, argv);
     if (!size)
       scheme_signal_error(MYNAME": cannot multiply fpointer type by offset");
     delta += (size * SCHEME_INT_VAL(argv[2]));
@@ -2559,8 +2562,8 @@ static Scheme_Object *foreign_make_sized_byte_string(int argc, Scheme_Object *ar
 }
 #undef MYNAME
 
-/* *** Calling Scheme code while the GC is working leads to subtle bugs, so
-   *** this is implemented now in Scheme using will executors. */
+/* *** Calling Racket code while the GC is working leads to subtle bugs, so
+   *** this is implemented now in Racket using will executors. */
 
 /* internal: apply Scheme finalizer */
 void do_scm_finalizer(void *p, void *finalizer)
@@ -2694,7 +2697,7 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
    * overwritten, but from that point on it is all C code so there is no
    * problem.  Hopefully.
    * (Things get complicated if the C call can involve GC (usually due to a
-   * Scheme callback), but then the programmer need to arrange for pointers
+   * Racket callback), but then the programmer need to arrange for pointers
    * that cannot move.  Because of all this, the *only* array that should not
    * be ignored by the GC is avalues.)
    */
@@ -2887,7 +2890,7 @@ static Scheme_Object *foreign_ffi_call(int argc, Scheme_Object *argv[])
 #undef MYNAME
 
 /*****************************************************************************/
-/* Scheme callbacks */
+/* Racket callbacks */
 
 typedef void (*ffi_callback_t)(ffi_cif* cif, void* resultp, void** args, void *userdata);
 
@@ -2943,7 +2946,7 @@ void ffi_do_callback(ffi_cif* cif, void* resultp, void** args, void *userdata)
 #ifdef MZ_USE_MZRT
 
 /* When OS-level thread support is avaiable, support callbacks
-   in foreign threads that are executed on the main Scheme thread. */
+   in foreign threads that are executed on the main Racket thread. */
 
 typedef struct Queued_Callback {
   ffi_cif* cif;
@@ -3137,7 +3140,7 @@ static Scheme_Object *foreign_ffi_callback(int argc, Scheme_Object *argv[])
      * problem is that memory that is GC-visible can move at any time.  The
      * solution is to use an immobile-box, which an immobile pointer (in a simple
      * malloced block), which points to the ffi_callback_struct that contains the
-     * relevant Scheme call details.  Another minor complexity is that an
+     * relevant Racket call details.  Another minor complexity is that an
      * immobile box serves as a reference for the GC, which means that nothing
      * will ever get collected: and the solution for this is to stick a weak-box
      * in the chain.  Users need to be aware of GC issues, and need to keep a
@@ -3158,7 +3161,7 @@ static Scheme_Object *foreign_ffi_callback(int argc, Scheme_Object *argv[])
      *      |                 :     |          |
      *      |                 :     \--> ffi_callback_struct
      *      |                 :               |  |
-     *      V                 :               |  \-----> Scheme Closure
+     *      V                 :               |  \-----> Racket Closure
      *     cif ---> atypes    :               |
      *                        :               \--------> input/output types
      */

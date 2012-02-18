@@ -178,11 +178,12 @@
     (use-style-background #t)))
 
 (define size-text%
-  (scheme:set-mode-mixin
-   (scheme:text-mixin
-    (color:text-mixin
-     (text:autocomplete-mixin
-      (mode:host-text-mixin
-       (editor:standard-style-list-mixin
-        text:basic%)))))))
+  (racket:set-mode-mixin
+   (racket:text-mixin
+    (editor:keymap-mixin
+     (color:text-mixin
+      (text:autocomplete-mixin
+       (mode:host-text-mixin
+        (editor:standard-style-list-mixin
+         text:basic%))))))))
 

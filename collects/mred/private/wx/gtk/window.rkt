@@ -76,8 +76,6 @@
                                 [width _int]
                                 [height _int]))
 
-(define _GdkEventFocus-pointer _pointer)
-
 (define-gtk gtk_widget_size_request (_fun _GtkWidget _GtkRequisition-pointer -> _void))
 (define-gtk gtk_widget_size_allocate (_fun _GtkWidget _GtkAllocation-pointer -> _void))
 (define-gtk gtk_widget_set_size_request (_fun _GtkWidget _int _int -> _void))
@@ -145,10 +143,10 @@
   (_fun _GtkWidget _GdkEventFocus-pointer -> _gboolean)
   (lambda (gtk event)
     (let ([wx (gtk->wx gtk)])
-      (when wx
+      (when wx 
         (send wx focus-change #t)
-        (send (send wx get-top-win) on-focus-child #t)
-        (queue-window-event wx (lambda () (send wx on-set-focus))))
+        (when (send wx on-focus? #t)
+	  (queue-window-event wx (lambda () (send wx on-set-focus)))))
       #f)))
 (define-signal-handler connect-focus-out "focus-out-event"
   (_fun _GtkWidget _GdkEventFocus-pointer -> _gboolean)
@@ -156,8 +154,8 @@
     (let ([wx (gtk->wx gtk)])
       (when wx
         (send wx focus-change #f)
-        (send (send wx get-top-win) on-focus-child #f)
-        (queue-window-event wx (lambda () (send wx on-kill-focus))))
+        (when (send wx on-focus? #f)
+          (queue-window-event wx (lambda () (send wx on-kill-focus)))))
       #f)))
 (define (connect-focus gtk)
   (connect-focus-in gtk)
@@ -619,6 +617,8 @@
     (define/public (focus-change on?) (void))
     (define/public (filter-key-event e) 'none)
 
+    (define/public (on-focus? on?) #t)
+
     (define/private (pre-event-refresh)
       ;; Since we break the connection between the
       ;; Gtk queue and event handling, we
@@ -716,6 +716,7 @@
 (define-gdk gdk_window_thaw_updates (_fun _GdkWindow -> _void))
 (define-gdk gdk_window_invalidate_rect (_fun _GdkWindow _pointer _gboolean -> _void))
 (define-gdk gdk_window_process_all_updates (_fun -> _void))
+(define-gdk gdk_window_ensure_native (_fun _GdkWindow -> _gboolean))
 
 (define (win-box-valid? win-box)
   (mcar win-box))
@@ -734,6 +735,11 @@
    (lambda (win-box)
      (let ([win (mcar win-box)])
        (and win
+	    ;; The freeze/thaw state is actually with the window's
+	    ;; implementation, so force a native implementation of the
+	    ;; window to try to avoid it changing out from underneath
+	    ;; us between the freeze and thaw actions.
+	    (gdk_window_ensure_native win)
        	    (begin
 	      (gdk_window_freeze_updates win)
 	      (set-mcdr! win-box (add1 (mcdr win-box)))

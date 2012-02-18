@@ -1,8 +1,8 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
- 
+
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -3090,14 +3090,35 @@ int scheme_explain_resolves = 1;
 # define EXPLAIN(x) /* empty */
 #endif
 
+XFORM_NONGCING static int is_from_rib(Scheme_Object *other_env) 
+{
+  /* The symbol for a renaming starts with "e" for a normal one
+     or "r" for one within a rib. */
+  if (SCHEME_SYMBOLP(other_env) && (SCHEME_SYM_VAL(other_env)[0] == 'r'))
+    return 1;
+  else
+    return 0;
+}
+
 static int same_marks(WRAP_POS *_awl, WRAP_POS *_bwl, Scheme_Object *barrier_env)
-/* Compares the marks in two wraps lists. A result of 2 means that the
-   result depended on a barrier env. For a rib-based renaming, we need
-   to check only up to the rib, and the barrier effect important for
-   when a rib-based renaming is layered with another renaming (such as
-   when an internal-definition-base local-expand is used to form a new
-   set of bindings, as in the unit form); simplification cleans up the
-   layers, so that we only need to check in ribs. */
+/* Compares the marks in two wraps lists. The `barrier_env' argument cuts
+   off the mark list if a rib containing a `barrier_env' renaming is found;
+   effectively, the barrier causes marks between the first and last instance
+   of the rib to be discarded, which is how re-expansion correctly matches
+   uses (perhaps macro-introduced) that have extra marks relative to their
+   bindings. For example, in
+       (begin-with-definitions
+         (define x 1)
+         (define-syntax-rule (m) x)
+         (m))
+   the expansion of `m' will have an extra mark relative to the binding. That
+   extra mark shouldn't prevent `(letrec ([x 1]) ...)' from binding the use of
+   `x' as expansion continues with the result of `begin-with-definitions'. Since
+   `local-expand' adds the int-def context before and after an expansion, the
+    extra mark can be discarded when checking the `letrec' layer of marks.
+   Note that it's ok to just cut off the marks at the ribs, because any
+   further differences in the mark lists would correspond to different renamings
+   within the rib. */
 {
   WRAP_POS awl;
   WRAP_POS bwl;
@@ -3110,6 +3131,8 @@ static int same_marks(WRAP_POS *_awl, WRAP_POS *_bwl, Scheme_Object *barrier_env
 
   WRAP_POS_COPY(awl, *_awl);
   WRAP_POS_COPY(bwl, *_bwl);
+
+  if (!is_from_rib(barrier_env)) barrier_env = scheme_false;
 
   /* A simple way to compare marks would be to make two lists of
      marks.  The loop below attempts to speed up that process by
@@ -4238,6 +4261,8 @@ static Scheme_Object *resolve_env(Scheme_Object *a, Scheme_Object *orig_phase,
     } else if (SCHEME_PRUNEP(WRAP_POS_FIRST(wraps))) {
       if (!is_member(SCHEME_STX_VAL(a), SCHEME_BOX_VAL(WRAP_POS_FIRST(wraps)))) {
         /* Doesn't match pruned-to sym; already produce #f */
+        if (_depends_on_unsealed_rib)
+          *_depends_on_unsealed_rib = depends_on_unsealed_rib;
         return scheme_false;
       }
     }
@@ -4256,9 +4281,9 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
         we can normally cache the result. */
 {
   WRAP_POS wraps;
-  Scheme_Object *result, *result_from;
+  Scheme_Object *result;
   int is_in_module = 0, skip_other_mods = 0, sealed = STX_SEAL_ALL, floating_checked = 0;
-  int no_lexical = !free_id_recur, unsealed_reason = 0;
+  int no_lexical = !free_id_recur;
   Scheme_Object *phase = orig_phase;
   Scheme_Object *bdg = NULL, *floating = NULL;
 
@@ -4284,9 +4309,9 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
 	result = SCHEME_STX_VAL(a);
 
 #if 0
-      printf("%p %p %s (%d) %d %p %d\n", 
+      printf("%p %p %s (%d) %d %p\n", 
              a, orig_phase, SCHEME_SYMBOLP(result) ? SCHEME_SYM_VAL(result) : "!?", 
-             can_cache, sealed, free_id_recur, unsealed_reason);
+             can_cache, sealed, free_id_recur);
 #endif 
 
       if (can_cache && SAME_OBJ(orig_phase, scheme_make_integer(0)))
@@ -4308,10 +4333,8 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
         
         if ((!is_in_module || (mrns->kind != mzMOD_RENAME_TOPLEVEL))
             && !skip_other_mods) {
-          if (mrns->sealed < sealed) {
+          if (mrns->sealed < sealed)
             sealed = mrns->sealed;
-            unsealed_reason = 2;
-          }
         }
 
         mrn = extract_renames(mrns, phase);
@@ -4326,10 +4349,8 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
 	  /* Module rename: */
 	  Scheme_Object *rename, *glob_id;
 
-          if (mrn->sealed < sealed) {
+          if (mrn->sealed < sealed)
             sealed = mrn->sealed;
-            unsealed_reason = 3;
-          }
           
 	  if (mrn->needs_unmarshal) {
 	    /* Use resolve_env to trigger unmarshal, so that we
@@ -4369,10 +4390,8 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
                                                       rename,
                                                       &sd,
                                                       free_id_recur);
-              if (!sd) {
+              if (!sd)
                 sealed = 0;
-                unsealed_reason = 4;
-              }
             }
           } else
             rename = NULL;
@@ -4405,8 +4424,6 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
 	    } else
 	      result = glob_id;
 	  }
-
-          result_from = WRAP_POS_FIRST(wraps);
 	}
       }
     } else if (SCHEME_BOXP(WRAP_POS_FIRST(wraps))) {
@@ -4444,7 +4461,7 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
 
       do {
         if (rib) {
-          if (!*rib->sealed) { sealed = 0; unsealed_reason = 1; }
+          if (!*rib->sealed) sealed = 0;
           rename = rib->rename;
           rib = rib->next;
         }
@@ -4482,7 +4499,7 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
                 /* Has a relevant-looking free-id mapping. 
                    Give up on the "fast" traversal. */
                 Scheme_Object *modname, *names[7];
-                int rib_dep;
+                int rib_dep = 0;
 
                 names[0] = NULL;
                 names[1] = NULL;
@@ -4492,10 +4509,8 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
                 names[6] = NULL;
 
                 modname = resolve_env(a, orig_phase, 1, names, NULL, NULL, &rib_dep, 0, free_id_recur);
-                if (rib_dep) {
+                if (rib_dep)
                   sealed = 0;
-                  unsealed_reason = 5;
-                }
 
                 if (!SCHEME_FALSEP(modname)
                     && !SAME_OBJ(names[0], scheme_undefined)) {
@@ -6315,7 +6330,7 @@ static Scheme_Object *extract_for_common_wrap(Scheme_Object *a, int get_mark, in
         else
           return SCHEME_CDR(v);
       }
-    } else if (!SCHEME_BOXP(v) && !SCHEME_VECTORP(v)) {
+    } else if (!SCHEME_BOXP(v) && !SCHEME_VECTORP(v) && !prefab_p(v)) {
       /* It's atomic. */
       if (get_mark)
         return SCHEME_CDR(a);
@@ -7264,6 +7279,7 @@ static Scheme_Object *datum_to_syntax_inner(Scheme_Object *o,
 
 	--cnt;
       }
+      if (!first) return_NULL;
       if (!SCHEME_NULLP(o)) {
 	o = datum_to_syntax_inner(o, ut, stx_src, sub_stx_wraps, ht, tainted);
 	if (!o) return_NULL;
@@ -7320,7 +7336,7 @@ static Scheme_Object *datum_to_syntax_inner(Scheme_Object *o,
     while (i != -1) {
       scheme_hash_tree_index(ht1, i, &key, &val);
       if (!SAME_OBJ((Scheme_Object *)ht1, o))
-        val = scheme_chaperone_hash_traversal_get(o, key);
+        val = scheme_chaperone_hash_traversal_get(o, key, &key);
       val = datum_to_syntax_inner(val, ut, stx_src, stx_wraps, ht, tainted);
       if (!val) return NULL;
       ht2 = scheme_hash_tree_set(ht2, key, val);
@@ -7344,6 +7360,8 @@ static Scheme_Object *datum_to_syntax_inner(Scheme_Object *o,
 
     result = (Scheme_Object *)s;
   } else {
+    if (!wraps)
+      o = scheme_read_intern(o);
     result = o;
   }
 
@@ -7611,7 +7629,7 @@ void scheme_simplify_stx(Scheme_Object *stx, Scheme_Object *cache)
 }
 
 /*========================================================================*/
-/*                    Scheme functions and helpers                        */
+/*                    Racket functions and helpers                        */
 /*========================================================================*/
 
 static Scheme_Object *syntax_p(int argc, Scheme_Object **argv)
@@ -8337,12 +8355,11 @@ static Scheme_Object *identifier_prune_to_module(int argc, Scheme_Object **argv)
   while (!WRAP_POS_END_P(w)) {
     if (SCHEME_BOXP(WRAP_POS_FIRST(w))) {
       /* Phase shift: */
-      Scheme_Object *vec, *dest, *src;
+      Scheme_Object *vec, *src;
 
       vec = SCHEME_PTR_VAL(WRAP_POS_FIRST(w));
       
       src = SCHEME_VEC_ELS(vec)[1];
-      dest = SCHEME_VEC_ELS(vec)[2];
 
       /* If src is #f, shift is just for phase; no redirection */
       if (!SCHEME_FALSEP(src)) {

@@ -1,6 +1,5 @@
 #lang racket/base
-(require racket/contract/base
-         unstable/prop-contract)
+(require racket/contract/base)
 
 ;; ============================================================
 
@@ -9,7 +8,8 @@
 
 (provide (struct-out simple-result)
          (struct-out rows-result)
-         statement-binding?)
+         statement-binding?
+         (struct-out exn:fail:sql))
 
 (provide sql-null
          sql-null?
@@ -146,7 +146,7 @@
  [call-with-transaction
   (->* (connection? (-> any))
        (#:isolation (or/c 'serializable 'repeatable-read 'read-committed 'read-uncommitted #f))
-       void?)]
+       any)]
 
  [prop:statement
   (struct-type-property/c
@@ -218,17 +218,19 @@
         #:allow-cleartext-password? boolean?
         #:ssl (or/c 'yes 'optional 'no)
         #:notice-handler (or/c 'output 'error)
-        #:notification-handler (or/c 'output 'error))
+        #:notification-handler (or/c 'output 'error)
+        #:debug? any/c)
        data-source?)]
  [mysql-data-source
   (->* ()
        (#:user string?
-        #:database string?
+        #:database (or/c string? #f)
         #:server string?
         #:port exact-positive-integer?
         #:socket (or/c string? 'guess)
         #:password (or/c string? #f)
-        #:notice-handler (or/c 'output 'error))
+        #:notice-handler (or/c 'output 'error)
+        #:debug? any/c)
        data-source?)]
  [sqlite3-data-source
   (->* ()

@@ -7,10 +7,9 @@
 @(the-eval '(require unstable/syntax (for-syntax racket/base unstable/syntax)))
 
 @title[#:tag "syntax"]{Syntax}
+@unstable[@author+email["Ryan Culpepper" "ryanc@racket-lang.org"]]
 
 @defmodule[unstable/syntax]
-
-@unstable[@author+email["Ryan Culpepper" "ryanc@racket-lang.org"]]
 
 @defproc[(explode-module-path-index [mpi module-path-index?])
          (listof (or/c module-path? resolved-module-path? #f))]{
@@ -75,18 +74,6 @@ Performs @racket[(map f (syntax->list stxl) ...)].
 }
 
 @addition[@author+email["Carl Eastlund" "cce@racket-lang.org"]]
-
-@defform[(syntax-list template ...)]{
-
-This form constructs a list of syntax objects based on the given templates.  It
-is equivalent to @racket[(syntax->list (syntax (template ...)))].
-
-@defexamples[
-#:eval the-eval
-(with-syntax ([(x ...) (syntax (1 2 3))]) (syntax-list x ...))
-]
-}
-
 
 @section{Syntax Object Source Locations}
 

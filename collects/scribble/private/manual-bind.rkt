@@ -4,6 +4,8 @@
          "../search.rkt"
          "../basic.rkt"
          "../manual-struct.rkt"
+         (only-in "../core.rkt" make-style)
+         "../html-properties.rkt"
          "manual-ex.rkt"
          racket/contract/base
          (for-syntax scheme/base)
@@ -43,32 +45,38 @@
               [vtag (and tag `(sig-val ,taglet))]
               [stag (and tag `(sig-form ,taglet))]
               [sd (and stag (resolve-get/tentative sec ri stag))])
-         (list
-          (make-element
-           symbol-color
-           (list
-            (cond [sd (make-link-element  syntax-link-color (list s) stag)]
-                  [vtag (make-link-element value-link-color (list s) vtag)]
-                  [else s]))))))
+         (make-element
+          symbol-color
+          (list
+           (cond [sd (make-link-element  syntax-link-color (list s) stag)]
+                 [vtag (make-link-element value-link-color (list s) vtag)]
+                 [else s])))))
      (lambda () s)
      (lambda () s))))
+
+(define hovers (make-weak-hasheq))
+(define (intern-hover-style text)
+  (let ([text (datum-intern-literal text)])
+    (or (hash-ref hovers text #f)
+        (let ([s (make-style #f (list (make-hover-property text)))])
+          (hash-set! hovers text s)
+          s))))
 
 (define (annote-exporting-library e)
   (make-delayed-element
    (lambda (render p ri)
      (let ([from (resolve-get/tentative p ri '(exporting-libraries #f))])
        (if (and from (pair? from))
-         (list (make-hover-element
-                #f
-                (list e)
-                (intern-taglet
-                 (string-append
-                  "Provided from: "
-                  (let loop ([from from])
-                    (if (null? (cdr from))
-                      (format "~s" (car from))
-                      (format "~s, ~a" (car from) (loop (cdr from)))))))))
-         (list e))))
+           (make-element
+            (intern-hover-style
+             (string-append
+              "Provided from: "
+              (let loop ([from from])
+                (if (null? (cdr from))
+                    (format "~s" (car from))
+                    (format "~s, ~a" (car from) (loop (cdr from)))))))
+            e)
+           e)))
    (lambda () e)
    (lambda () e)))
 
@@ -154,15 +162,12 @@
                                   ,@(if sig (list (syntax-e (sig-id sig))) null)
                                   ,(syntax-e id))))])
                (if (or sig (not dep?))
-                 (list (mk tag))
-                 (list (make-target-element
-                        #f
-                        (list (mk tag))
-                        (intern-taglet
-                         `(dep ,(list lib-taglet (syntax-e id))))))))
+                   (mk tag)
+                   (make-dep (list lib-taglet (syntax-e id))
+                             (mk tag))))
              content)))
-       (lambda () (car content))
-       (lambda () (car content))))))
+       (lambda () content)
+       (lambda () content)))))
 
 (define (defidentifier id 
                        #:form? [form? #f]
@@ -178,13 +183,13 @@
                     (definition-site (syntax-e id) id form?)
                     (to-element id))])
       (if maker
-          (maker (list elem)
+          (maker elem
                  (lambda (tag)
                    (let ([elem
                           (if index?
                               (make-index-element
                                #f (list elem) tag
-                               (list (symbol->string (syntax-e id)))
+                               (list (datum-intern-literal (symbol->string (syntax-e id))))
                                (list elem)
                                (and show-libs?
                                     (with-exporting-libraries
@@ -217,24 +222,36 @@
             (make-element
              #f
              (list (make-one (if form? 'form 'def))
-                   (make-one 'dep)
-                   (make-index-element #f
-                                       null
-                                       (list (if form? 'form 'def)
-                                             (list taglet id))
-                                       (list (symbol->string id))
-                                       (list
-                                        (make-element
-                                         symbol-color
+                   (make-dep (list taglet id) null)
+                   (let ([str (datum-intern-literal (symbol->string id))])
+                     (make-index-element #f
+                                         null
+                                         (intern-taglet
+                                          (list (if form? 'form 'def)
+                                                (list taglet id)))
+                                         (list str)
                                          (list
                                           (make-element
-                                           (if form?
-                                             syntax-link-color
-                                             value-link-color)
-                                           (list (symbol->string id))))))
-                                       ((if form?
-                                          make-form-index-desc
-                                          make-procedure-index-desc)
-                                        id
-                                        (list mod-path))))))))
+                                           symbol-color
+                                           (list
+                                            (make-element
+                                             (if form?
+                                                 syntax-link-color
+                                                 value-link-color)
+                                             (list str)))))
+                                         ((if form?
+                                              make-form-index-desc
+                                              make-procedure-index-desc)
+                                          id
+                                          (list mod-path)))))))))
       redirects))))
+
+
+(define (make-dep t content)
+  (make-collect-element
+   #f
+   content
+   (lambda (ci)
+     (collect-put! ci 
+                   (intern-taglet (list 'dep t))
+                   #t))))

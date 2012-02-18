@@ -1,8 +1,8 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
- 
+
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -314,7 +314,45 @@ static Scheme_Object *sfs_application3(Scheme_Object *o, SFS_Info *info)
   return o;
 }
 
-static Scheme_Object *sfs_sequence(Scheme_Object *o, SFS_Info *info)
+static Scheme_Object *flatten_sequence(Scheme_Object *o)
+{
+  /* At this point, we sometimes have (begin ... (begin ... (begin ...))).
+     Flatten those out. */
+  Scheme_Sequence *s = (Scheme_Sequence *)o, *s2;
+  int i, extra = 0;
+
+  o = s->array[s->count - 1];
+
+  while (SAME_TYPE(SCHEME_TYPE(o), scheme_sequence_type)) {
+    s2 = (Scheme_Sequence *)o;
+    extra += s2->count - 1;
+    o = s2->array[s2->count - 1];
+  }
+
+  if (extra) {
+    s2 = scheme_malloc_sequence(s->count + extra);
+    s2->so.type = scheme_sequence_type;
+    s2->count = s->count + extra;
+
+    extra = 0;
+    o = (Scheme_Object *)s;
+    while (SAME_TYPE(SCHEME_TYPE(o), scheme_sequence_type)) {
+      s = (Scheme_Sequence *)o;
+      for (i = 0; i < s->count - 1; i++) {
+        s2->array[extra++] = s->array[i];
+      }
+      o = s->array[i];
+    }
+    s2->array[extra++] = o;
+
+    if (extra != s2->count) scheme_signal_error("internal error: flatten failed");
+
+    return (Scheme_Object *)s2;
+  } else
+    return (Scheme_Object *)s;
+}
+
+static Scheme_Object *sfs_sequence(Scheme_Object *o, SFS_Info *info, int can_flatten)
 {
   Scheme_Object *orig, *naya;
   Scheme_Sequence *seq;
@@ -327,9 +365,12 @@ static Scheme_Object *sfs_sequence(Scheme_Object *o, SFS_Info *info)
 
   for (i = 0; i < n; i++) {
     orig = seq->array[i];
-    naya = scheme_sfs_expr(orig, info, -1);
+    naya = scheme_sfs_expr(orig, info, -2);
     seq->array[i] = naya;
   }
+
+  if (can_flatten && info->pass)
+    o = flatten_sequence(o);
 
   return o;
 }
@@ -782,6 +823,17 @@ define_values_sfs(Scheme_Object *data, SFS_Info *info)
 }
 
 static Scheme_Object *
+inline_variant_sfs(Scheme_Object *data, SFS_Info *info)
+{
+  Scheme_Object *e;
+  scheme_sfs_start_sequence(info, 1, 0);
+  e = scheme_sfs_expr(SCHEME_VEC_ELS(data)[0], info, -1);
+  SCHEME_VEC_ELS(data)[0] = e;
+  /* we don't bother with inlinable variant, since it isn't called directly */
+  return data;
+}
+
+static Scheme_Object *
 set_sfs(Scheme_Object *data, SFS_Info *info)
 {
   Scheme_Set_Bang *sb = (Scheme_Set_Bang *)data;
@@ -1117,6 +1169,7 @@ top_level_require_sfs(Scheme_Object *data, SFS_Info *rslv)
 /*========================================================================*/
 
 Scheme_Object *scheme_sfs_expr(Scheme_Object *expr, SFS_Info *info, int closure_self_pos)
+/* closure_self_pos == -2 => immediately in sequence */
 {
   Scheme_Type type = SCHEME_TYPE(expr);
   int seqn, stackpos, tp;
@@ -1164,8 +1217,10 @@ Scheme_Object *scheme_sfs_expr(Scheme_Object *expr, SFS_Info *info, int closure_
     expr = sfs_application3(expr, info);
     break;
   case scheme_sequence_type:
+    expr = sfs_sequence(expr, info, closure_self_pos != -2);
+    break;
   case scheme_splice_sequence_type:
-    expr = sfs_sequence(expr, info);
+    expr = sfs_sequence(expr, info, 0);
     break;
   case scheme_branch_type:
     expr = sfs_branch(expr, info);
@@ -1249,6 +1304,9 @@ Scheme_Object *scheme_sfs_expr(Scheme_Object *expr, SFS_Info *info, int closure_
     break;
   case scheme_module_type:
     expr = module_sfs(expr, info);
+    break;
+  case scheme_inline_variant_type:
+    expr = inline_variant_sfs(expr, info);
     break;
   default:
     break;

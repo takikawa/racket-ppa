@@ -1,3 +1,31 @@
+Version 5.2.1, January 2012
+Changed I/O scheduling to use epoll()/kqueue() when available
+Cross-module inline trivial functions, plus map, for-each,
+ andmap, and ormap; 'compiler-hint:cross-module-inline hint
+Intern numbers, characters, strings, byte strings, and regexps in
+ read and datum->syntax
+Added datum-intern-literal
+Regexps are `equal?' when they have the same source [byte] string
+ and mode
+Added pseudo-random-generator-vector?
+Added port-closed-evt
+Generalized gcd and lcm to work on rationals
+Added module-predefined?
+Added optional #:fail argument to collection-file-path and
+ collection-path
+Changed the racket -k command-line flag
+racket/class: added send/keyword-apply and dynamic-send
+racket/draw: added get-names to color-database<%>
+mzlib/pconvert: added add-make-prefix-to-constructor parameter,
+ which changes the default constructor-style printing in DrRacket
+ to avoid a make- prefix; the HtDP languages set the parameter to #t
+at-exp, scribble: dropped distinctness of @{}-introduced newline strings
+racket/draw: add text-outline to dc-path%
+net/mime: allow any subtype in input; made exception structs a
+ subtype of exn:fail
+compiler/zo-structs: added inline-variant
+racket/stream: added stream constructor
+
 Version 5.2, November 2011
 Generalized begin-with-syntax to allow phase-N definitions,
  both variable and syntax, within a module for all N >= 0;

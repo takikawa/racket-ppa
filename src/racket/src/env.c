@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -43,7 +43,7 @@
 SHARED_OK int scheme_allow_set_undefined;
 void scheme_set_allow_set_undefined(int v) { scheme_allow_set_undefined =  v; }
 int scheme_get_allow_set_undefined() { return scheme_allow_set_undefined; }
-SHARED_OK int scheme_starting_up;
+THREAD_LOCAL_DECL(int scheme_starting_up);
 
 /* globals READ-ONLY SHARED */
 Scheme_Object *scheme_varref_const_p_proc;
@@ -55,6 +55,9 @@ READ_ONLY static Scheme_Env    *futures_env;
 
 THREAD_LOCAL_DECL(static int builtin_ref_counter);
 THREAD_LOCAL_DECL(static int intdef_counter);
+
+THREAD_LOCAL_DECL(static Scheme_Bucket_Table *literal_string_table);
+THREAD_LOCAL_DECL(static Scheme_Bucket_Table *literal_number_table);
 
 /* local functions */
 static void make_kernel_env(void);
@@ -200,9 +203,7 @@ Scheme_Env *scheme_restart_instance() {
   scheme_init_port_fun_config();
   scheme_init_error_config();
   scheme_init_logger_config();
-#ifndef NO_SCHEME_EXNS
   scheme_init_exn_config();
-#endif
 
   boot_module_resolver();
 
@@ -453,6 +454,7 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
   scheme_init_stx_places(initial_main_os_thread);
   scheme_init_sema_places();
   scheme_init_gmp_places();
+  scheme_init_kqueue();
   scheme_alloc_global_fdset();
   scheme_init_file_places();
 #ifndef DONT_USE_FOREIGN
@@ -488,12 +490,18 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
 
   scheme_init_foreign(env);
 
+  REGISTER_SO(literal_string_table);
+  REGISTER_SO(literal_number_table);
+  literal_string_table = scheme_make_weak_equal_table();
+  literal_number_table = scheme_make_weak_eqv_table();
+
+  scheme_starting_up = 1; /* in case it's not set already */
+
   scheme_add_embedded_builtins(env);
 
   boot_module_resolver();
 
   scheme_save_initial_module_set(env);
-
 
   scheme_starting_up = 0;
 
@@ -558,6 +566,7 @@ void scheme_place_instance_destroy(int force)
 #endif
   scheme_free_all_code();
   scheme_free_ghbn_data();
+  scheme_release_kqueue();
 }
 
 static void make_kernel_env(void)
@@ -1129,7 +1138,10 @@ Scheme_Object *scheme_get_home_weak_link(Scheme_Env *e)
 {
   if (!e->weak_self_link) {
     Scheme_Object *wb;
-    wb = scheme_make_weak_box((Scheme_Object *)e);
+    if (scheme_starting_up)
+      wb = scheme_box((Scheme_Object *)e);
+    else
+      wb = scheme_make_weak_box((Scheme_Object *)e);
     e->weak_self_link = wb;
   }
 
@@ -1338,6 +1350,10 @@ Scheme_Object **scheme_make_builtin_references_table(void)
   scheme_misc_count += sizeof(Scheme_Object *) * (builtin_ref_counter + 1);
 #endif
 
+  for (j = builtin_ref_counter + 1; j--; ) {
+    t[j] = scheme_false;
+  }
+
   for (j = 0; j < 4; j++) {
     if (!j)
       kenv = kernel_env;
@@ -1433,7 +1449,37 @@ const char *scheme_look_for_primitive(void *code)
 }
 
 /*========================================================================*/
-/*             run-time and expansion-time Scheme interface               */
+/*                  intern literal strings and numbers                    */
+/*========================================================================*/
+
+Scheme_Object *scheme_intern_literal_string(Scheme_Object *str)
+{
+  Scheme_Bucket *b;
+
+  scheme_start_atomic();
+  b = scheme_bucket_from_table(literal_string_table, (const char *)str);
+  scheme_end_atomic_no_swap();
+  if (!b->val)
+    b->val = scheme_true;
+
+  return(Scheme_Object *)HT_EXTRACT_WEAK(b->key);
+}
+
+Scheme_Object *scheme_intern_literal_number(Scheme_Object *num)
+{
+  Scheme_Bucket *b;
+
+  scheme_start_atomic();
+  b = scheme_bucket_from_table(literal_number_table, (const char *)num);
+  scheme_end_atomic_no_swap();
+  if (!b->val)
+    b->val = scheme_true;
+
+  return(Scheme_Object *)HT_EXTRACT_WEAK(b->key);
+}
+
+/*========================================================================*/
+/*             run-time and expansion-time Racket interface               */
 /*========================================================================*/
 
 static Scheme_Object *
@@ -1869,7 +1915,7 @@ do_local_exp_time_value(const char *name, int argc, Scheme_Object *argv[], int r
 			       + SCHEME_APP_POS + SCHEME_ENV_CONSTANTS_OK
 			       + SCHEME_OUT_OF_CONTEXT_OK + SCHEME_ELIM_CONST),
 			      scheme_current_thread->current_local_modidx, 
-			      &menv, NULL, NULL);
+			      &menv, NULL, NULL, NULL);
 
     SCHEME_EXPAND_OBSERVE_RESOLVE(observer, sym);
 
@@ -2283,7 +2329,7 @@ local_make_delta_introduce(int argc, Scheme_Object *argv[])
 			       + SCHEME_APP_POS + SCHEME_ENV_CONSTANTS_OK
 			       + SCHEME_OUT_OF_CONTEXT_OK + SCHEME_ELIM_CONST),
 			      scheme_current_thread->current_local_modidx, 
-			      NULL, NULL, &binder);
+			      NULL, NULL, &binder, NULL);
     
     /* Deref globals */
     if (v && SAME_TYPE(SCHEME_TYPE(v), scheme_variable_type))

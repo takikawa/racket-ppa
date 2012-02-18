@@ -1,7 +1,7 @@
 /*
  * @(#)regexp.c 1.3 of 18 April 87
  * Revised for PLT Racket, 1995-2001
- * Copyright (c) 2004-2011 PLT Scheme Inc.
+ * Copyright (c) 2004-2012 PLT Scheme Inc.
  *
  * Copyright (c) 1986 by University of Toronto.
  * Written by Henry Spencer.  Not derived from licensed software.
@@ -1771,7 +1771,12 @@ regranges(int parse_flags, int at_start)
 {
   int c;
   rxpos ret, save_regparse = 0;
-  int count, all_ci, num_ci, off_ranges, on_ranges, now_on, last_on, prev_last_on, use_ci;
+  int count, off_ranges, on_ranges, now_on, last_on, prev_last_on;
+#ifdef COUNT_CI_CHARS
+  /* These could be used to pick an encoding as a _CI variant, but
+     _CI variants are not picked currently: */
+  int all_ci, num_ci;
+#endif
   char *new_map = NULL, *accum_map = NULL;
 
   count = 0;
@@ -1869,13 +1874,14 @@ regranges(int parse_flags, int at_start)
   if (!accum_map)
     FAIL("should have found one range!");
 
-  use_ci = 0;
   while (1) {
     /* Collect stats to pick the best run-time implementation for a range.
        We may do this twice if we decide to use a _CI variant. */
     count = 0;
+#ifdef COUNT_CI_CHARS
     num_ci = 0;
     all_ci = 1;
+#endif
     on_ranges = 0;
     off_ranges = 0;
     now_on = 0;
@@ -1890,6 +1896,7 @@ regranges(int parse_flags, int at_start)
 	prev_last_on = last_on;
 	last_on = c;
 
+#ifdef COUNT_CI_CHARS
 	if (c != rx_tolower(c)) {
 	  if (accum_map[rx_tolower(c)] != accum_map[c])
 	    all_ci = 0;
@@ -1899,6 +1906,7 @@ regranges(int parse_flags, int at_start)
 	    all_ci = 0;
 	  num_ci++;
 	}
+#endif
       } else {
 	if (now_on > 0)
 	  on_ranges++;
@@ -2658,7 +2666,6 @@ regexec(const char *who,
 	if (!peek) {
 	  /* Need to consume matched chars: */
 	  char *drain;
-	  intptr_t got;
 
 	  if (discard_oport && *startp)
 	    scheme_put_byte_string(who, discard_oport, *stringp, 0, *startp, 0);
@@ -2668,7 +2675,7 @@ regexec(const char *who,
 	  else
 	    /* Allocate fresh in case we get different results from previous peek: */
 	    drain = (char *)scheme_malloc_atomic(*endp);
-	  got = scheme_get_byte_string(who, port, drain, 0, *endp, 0, 0, 0);
+	  (void)scheme_get_byte_string(who, port, drain, 0, *endp, 0, 0, 0);
 	}
 
 	*_dropped = dropped;
@@ -5015,7 +5022,7 @@ static int translate(unsigned char *s, int len, char **result, int pcre)
 }
 
 /************************************************************/
-/*                   Scheme front end                       */
+/*                   Racket front end                       */
 /************************************************************/
 
 int scheme_is_pregexp(Scheme_Object *o)
@@ -5947,6 +5954,11 @@ Scheme_Object *scheme_regexp_source(Scheme_Object *re)
 int scheme_regexp_is_byte(Scheme_Object *re)
 {
   return !(((regexp *)re)->flags & REGEXP_IS_UTF8);
+}
+
+int scheme_regexp_is_pregexp(Scheme_Object *re)
+{
+  return !!(((regexp *)re)->flags & REGEXP_IS_PCRE);
 }
 
 #ifdef MZ_PRECISE_GC

@@ -3,7 +3,7 @@
  * Purpose:     GRacket main file, including a hodge-podge of global stuff
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2011 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2012 PLT Scheme Inc.
  * Copyright:   (c) 1995-2000, Matthew Flatt
  */
 
@@ -45,7 +45,7 @@ static void pre_filter_cmdline_arguments(int *argc, char ***argv);
 #define INITIAL_BIN_TYPE "ri"
 
 #define CMDLINE_STDIO_FLAG
-#define INITIAL_NAMESPACE_MODULE "scheme/gui/init"
+#define INITIAL_NAMESPACE_MODULE "racket/gui/init"
 #define GRAPHICAL_REPL
 
 # include "../racket/main.c"

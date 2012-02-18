@@ -58,6 +58,21 @@
          (send k chain-to-keymap k1 #t)
          (hash-map (send k get-map-function-table) list)))))
   
+  (test
+   'keymap:aug-keymap%/get-table/normalize-case
+   (lambda (x)
+     (equal? x '((|esc;p| "abc-k2"))))
+   (lambda ()
+     (queue-sexp-to-mred
+      '(let ([k (make-object keymap:aug-keymap%)]
+             [k1 (make-object keymap:aug-keymap%)])
+         (send k1 add-function "abc-k1" void)
+         (send k1 map-function "esc;p" "abc-k1")
+         (send k add-function "abc-k2" void)
+         (send k map-function "ESC;p" "abc-k2")
+         (send k chain-to-keymap k1 #t)
+         (hash-map (send k get-map-function-table) list)))))
+  
   (define (test-canonicalize name str1 str2)
     (test
      (string->symbol (format "keymap:canonicalize-keybinding-string/~a" name))
@@ -79,6 +94,7 @@
   (test-canonicalize 10 ":d:a" "~a:~c:d:~m:~s:a")
   (test-canonicalize 11 "esc;s:a" "esc;s:a")
   (test-canonicalize 12 "s:a;esc" "s:a;esc")
+  (test-canonicalize 13 "ESC;p" "esc;p")
   
   
   ;; a key-spec is (make-key-spec buff-spec buff-spec (listof ?) (listof ?) (listof ?))
@@ -87,7 +103,7 @@
   ;; buffer after the keypress.  The keypress(es) in question are specified
   ;; independently for the three platforms by the respective 'macos', 'unix',
   ;; and 'windows' fields.
-  (define-struct key-spec (before after macos unix windows))
+  (define-struct key-spec (before after macos unix windows) #:prefab)
   
   ;; an abstraction to use when all platforms have the same sequence of keys
   (define (make-key-spec/allplatforms before after keys)
@@ -96,7 +112,7 @@
   ;; a buff-spec is (make-buff-spec string nat nat)
   ;; a buff-spec represents a buffer state; the content of the buffer,
   ;; and the start and end of the highlighted region.
-  (define-struct buff-spec (string start end))
+  (define-struct buff-spec (string start end) #:prefab)
   
   ;; the keybindings test cases applied to frame:text% editors
   (define global-specs
@@ -137,7 +153,7 @@
                    (list (list (list #\[)))
                    (list (list (list #\[)))))
   
-  ;; the keybindings test cases applied to scheme:text% editors
+  ;; the keybindings test cases applied to racket:text% editors
   (define scheme-specs
     (list 
      (make-key-spec (make-buff-spec "(abc (def))" 4 4)
@@ -257,10 +273,25 @@
      (make-key-spec/allplatforms
       (make-buff-spec "[a]" 3 3)
       (make-buff-spec "[a]" 3 3)
-      (list '((#\c control) (#\[ control))))
-     ))
+      (list '((#\c control) (#\[ control))))))
   
-  (queue-sexp-to-mred `(preferences:set 'framework:fixup-open-parens #t))
+  (define automatic-scheme-specs
+    (list (make-key-spec/allplatforms (make-buff-spec "" 0 0) 
+                                      (make-buff-spec "()" 1 1)
+                                      '(((#\())))
+          (make-key-spec/allplatforms (make-buff-spec "" 0 0) 
+                                      (make-buff-spec "[]" 1 1)
+                                      '(((#\[))))
+          (make-key-spec/allplatforms (make-buff-spec "" 0 0) 
+                                      (make-buff-spec "{}" 1 1)
+                                      '(((#\{))))
+          (make-key-spec/allplatforms (make-buff-spec "" 0 0) 
+                                      (make-buff-spec "\"\"" 1 1)
+                                      '(((#\"))))
+          (make-key-spec/allplatforms (make-buff-spec "" 0 0) 
+                                      (make-buff-spec "||" 1 1)
+                                      '(((#\|))))))
+  
   (queue-sexp-to-mred `(send (make-object frame:basic% "dummy to trick frame group") show #t))
   (wait-for-frame "dummy to trick frame group")
   
@@ -307,9 +338,18 @@
       (test-key spec i))
     (queue-sexp-to-mred `(send (get-top-level-focus-window) close)))
   
+  (queue-sexp-to-mred `(preferences:set 'framework:fixup-open-parens #t))
+  (queue-sexp-to-mred `(preferences:set 'framework:automatic-parens #f))
   (test-specs "global keybindings test" 'frame:text% global-specs)
   (test-specs "scheme mode keybindings test" 
               '(class frame:editor%
-                 (define/override (get-editor%) scheme:text%)
+                 (define/override (get-editor%) racket:text%)
                  (super-new))
               scheme-specs)
+  (queue-sexp-to-mred `(preferences:set 'framework:automatic-parens #t))
+  (queue-sexp-to-mred `(preferences:set 'framework:fixup-open-parens #f))
+  (test-specs "scheme mode automatic-parens on keybindings test" 
+              '(class frame:editor%
+                 (define/override (get-editor%) racket:text%)
+                 (super-new))
+              automatic-scheme-specs)

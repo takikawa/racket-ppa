@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -31,6 +31,7 @@ Scheme_Jumpup_Buf_Holder *(*scheme_new_jmpupbuf_holder)(void);
 /*                                parameters                              */
 /*========================================================================*/
 Scheme_Config *(*scheme_current_config)(void);
+Scheme_Config *(*scheme_minimal_config)(void);
 Scheme_Config *(*scheme_extend_config)(Scheme_Config *c, int pos, Scheme_Object *init_val);
 void (*scheme_install_config)(Scheme_Config *);
 Scheme_Object *(*scheme_get_param)(Scheme_Config *c, int pos);
@@ -38,6 +39,7 @@ void (*scheme_set_param)(Scheme_Config *c, int pos, Scheme_Object *o);
 Scheme_Object *(*scheme_get_thread_param)(Scheme_Config *c, Scheme_Thread_Cell_Table *cells, int pos);
 void (*scheme_set_thread_param)(Scheme_Config *c, Scheme_Thread_Cell_Table *cells, int pos, Scheme_Object *o);
 Scheme_Env *(*scheme_get_env)(Scheme_Config *config);
+Scheme_Thread_Cell_Table *(*scheme_empty_cell_table)();
 Scheme_Thread_Cell_Table *(*scheme_inherit_cells)(Scheme_Thread_Cell_Table *cells);
 Scheme_Object *(*scheme_current_break_cell)();
 /*========================================================================*/
@@ -780,6 +782,7 @@ intptr_t (*scheme_get_port_fd)(Scheme_Object *p);
 int (*scheme_get_port_socket)(Scheme_Object *p, intptr_t *_s);
 void (*scheme_socket_to_ports)(intptr_t s, const char *name, int takeover,
                                       Scheme_Object **_inp, Scheme_Object **_outp);
+Scheme_Object *(*scheme_fd_to_semaphore)(intptr_t fd, int mode, int is_socket);
 void (*scheme_set_type_printer)(Scheme_Type stype, Scheme_Type_Printer printer);
 void (*scheme_print_bytes)(Scheme_Print_Params *pp, const char *str, int offset, int len);
 void (*scheme_print_utf8)(Scheme_Print_Params *pp, const char *str, int offset, int len);

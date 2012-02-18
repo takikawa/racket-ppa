@@ -5,12 +5,11 @@
 @(the-eval '(require unstable/port))
 
 @title{Ports}
+@unstable[@author+email["Carl Eastlund" "cce@racket-lang.org"]]
 
 @defmodule[unstable/port]
 
 This module provides tools for port I/O.
-
-@unstable[@author+email["Carl Eastlund" "cce@racket-lang.org"]]
 
 @defproc[(read-all [reader (-> any/c) read]
                    [port input-port? (current-input-port)])
@@ -47,27 +46,6 @@ of the result spans the entire portion of the port that was read.
 (port-count-lines! port2)
 (parameterize ([current-input-port port2])
   (read-all-syntax))
-]
-
-}
-
-@defproc[(port->srcloc [port port?]
-                       [source any/c (object-name port)]
-                       [span exact-nonnegative-integer? 0])
-         srcloc?]{
-
-Produces a @racket[srcloc] structure representing the current position of a
-port, using the provided @racket[source] and @racket[span] values to fill in
-missing fields.  This function relies on @racket[port-next-location], so line
-counting must be enabled for @racket[port] to get meaningful results.
-
-@defexamples[
-#:eval the-eval
-(define port (open-input-string "1 2 3"))
-(port-count-lines! port)
-(read port)
-(port->srcloc port)
-(port->srcloc port "1 2 3" 1)
 ]
 
 }

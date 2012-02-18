@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2011 PLT Scheme Inc.
+  Copyright (c) 2004-2012 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -1374,8 +1374,10 @@ struct Scheme_Port
 struct Scheme_Input_Port
 {
   struct Scheme_Port p;
+  char slow; /* 0 => no line count, no ungotten, etc.: can call get_string_fun directly */
   char closed, pending_eof;
   Scheme_Object *sub_type;
+  Scheme_Object *closed_evt;
   Scheme_Custodian_Reference *mref;
   void *port_data;
   Scheme_Get_String_Fun get_string_fun;
@@ -1401,6 +1403,7 @@ struct Scheme_Output_Port
   struct Scheme_Port p;
   short closed;
   Scheme_Object *sub_type;
+  Scheme_Object *closed_evt;
   Scheme_Custodian_Reference *mref;
   void *port_data;
   Scheme_Write_String_Evt_Fun write_string_evt_fun;
@@ -1726,8 +1729,6 @@ extern void *scheme_malloc_envunbox(size_t);
 /*                   embedding configuration and hooks                    */
 /*========================================================================*/
 
-typedef void (*Scheme_On_Atomic_Timeout_Proc)(int must_give_up);
-
 #if SCHEME_DIRECT_EMBEDDED
 
 #if defined(_IBMR2)
@@ -1769,6 +1770,8 @@ XFORM_NONGCING MZ_EXTERN intptr_t scheme_get_multiple_count();
 XFORM_NONGCING MZ_EXTERN Scheme_Object **scheme_get_multiple_array();
 XFORM_NONGCING MZ_EXTERN void scheme_set_current_thread_ran_some();
 
+MZ_EXTERN void scheme_embedded_load(intptr_t len, const char *s, int predefined);
+MZ_EXTERN void scheme_register_embedded_load(intptr_t len, const char *s);
 
 /* Set these global hooks (optionally): */
 typedef void (*Scheme_Exit_Proc)(int v);
@@ -1865,8 +1868,6 @@ MZ_EXTERN void scheme_register_static(void *ptr, intptr_t size);
 #else
 # define MZ_REGISTER_STATIC(x) /* empty */
 #endif
-
-MZ_EXTERN Scheme_On_Atomic_Timeout_Proc scheme_on_atomic_timeout;
 
 MZ_EXTERN void scheme_immediate_exit(int status);
 
@@ -1985,6 +1986,9 @@ extern Scheme_Extension_Table *scheme_extension_table;
 #ifdef USE_BEOS_PORT_THREADS
 # define USE_FAR_MZ_FDCALLS
 #endif
+#ifdef HAVE_POLL_SYSCALL
+# define USE_FAR_MZ_FDCALLS
+#endif
 
 #ifdef USE_FAR_MZ_FDCALLS
 # define MZ_GET_FDSET(p, n) scheme_get_fdset(p, n)
@@ -1999,6 +2003,13 @@ extern Scheme_Extension_Table *scheme_extension_table;
 # define MZ_FD_CLR(n, p) FD_CLR(n, p)
 # define MZ_FD_ISSET(n, p) FD_ISSET(n, p)
 #endif
+
+/* For scheme_fd_to_semaphore(): */
+#define MZFD_CREATE_READ  1
+#define MZFD_CREATE_WRITE 2
+#define MZFD_CHECK_READ   3
+#define MZFD_CHECK_WRITE  4
+#define MZFD_REMOVE       5
 
 /*========================================================================*/
 

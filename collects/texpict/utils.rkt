@@ -5,6 +5,7 @@
            racket/draw
            racket/math
            racket/gui/dynamic
+           racket/snip
            "mrpict.rkt")
 
   ;; Utilities for use with mrpict
@@ -44,7 +45,6 @@
 	   add-arrow-line
 	   add-arrows-line
 
-	   bitmap
 	   bitmap-draft-mode
 
            find-pen
@@ -99,7 +99,12 @@
                            boolean?
                            #:style (or/c false/c symbol?)
                            #:hide-arrowhead? any/c)
-                          pict?)])
+                          pict?)]
+   [bitmap (-> (or/c path-string?
+                     (is-a?/c bitmap%)
+                     (is-a?/c image-snip%))
+               pict?)]
+   )
 
 
 
@@ -308,18 +313,22 @@
             w
             h))))
   
-  (define (filled-rounded-rectangle w h [corner-radius -0.25] #:angle [angle 0])
+  (define (filled-rounded-rectangle w h [corner-radius -0.25] #:angle [angle 0] #:draw-border? [draw-border? #t])
     (let ([dc-path (new dc-path%)])
       (send dc-path rounded-rectangle 0 0 w h corner-radius)
       (send dc-path rotate angle)
       (let-values ([(x y w h) (send dc-path get-bounding-box)])
         (dc (λ (dc dx dy) 
-              (let ([brush (send dc get-brush)])
+              (let ([brush (send dc get-brush)]
+                    [pen (send dc get-pen)])
                 (send dc set-brush (send the-brush-list find-or-create-brush
                                          (send (send dc get-pen) get-color)
                                          'solid))
+                (unless draw-border?
+                  (send dc set-pen "black" 1 'transparent))
                 (send dc draw-path dc-path (- dx x) (- dy y))
-                (send dc set-brush brush)))
+                (send dc set-brush brush)
+                (send dc set-pen pen)))
             w
             h))))
   

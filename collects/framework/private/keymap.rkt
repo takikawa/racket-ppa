@@ -150,18 +150,15 @@
         (get-map-function-table/ht (make-hasheq)))
       
       (define/public (get-map-function-table/ht table)
-        (hash-for-each
-         function-table
-         (λ (keyname fname)
-           (unless (hash-ref table keyname (λ () #f))
-             (let ([cs (canonicalize-keybinding-string (format "~a" keyname))])
-               (when (on-this-platform? cs)
-                 (hash-set! table keyname fname))))))
-        (for-each
-         (λ (chained-keymap)
-           (when (is-a? chained-keymap aug-keymap<%>)
-             (send chained-keymap get-map-function-table/ht table)))
-         chained-keymaps)
+        (for ([(keyname fname) (in-hash function-table)])
+          (define cs (canonicalize-keybinding-string (format "~a" keyname)))
+          (define key (string->symbol cs))
+          (unless (hash-ref table key #f)
+            (when (on-this-platform? cs)
+              (hash-set! table key fname))))
+        (for ([chained-keymap (in-list chained-keymaps)])
+          (when (is-a? chained-keymap aug-keymap<%>)
+            (send chained-keymap get-map-function-table/ht table)))
         table)
       
       (define/private (on-this-platform? cs)
@@ -387,29 +384,7 @@
                         bottom-pos)))
               #t)]
            
-           [make-insert-brace-pair
-            (λ (open-brace close-brace)
-              (λ (edit event)
-                (send edit begin-edit-sequence)
-                (let ([selection-start (send edit get-start-position)])
-                  (send edit set-position (send edit get-end-position))
-                  (send edit insert close-brace)
-                  (send edit set-position selection-start)
-                  (send edit insert open-brace))
-                (send edit end-edit-sequence)))]
-           
-           [insert-lambda-template
-            (λ (edit event)
-              (send edit begin-edit-sequence)
-              (let ([selection-start (send edit get-start-position)])
-                (send edit set-position (send edit get-end-position))
-                (send edit insert ")")
-                (send edit set-position selection-start)
-                (send edit insert ") ")
-                (send edit set-position selection-start)
-                (send edit insert "(λ ("))
-              (send edit end-edit-sequence))]
-           
+                      
            [collapse-variable-space
             ;; As per emacs: collapse tabs & spaces around the point,
             ;; perhaps leaving a single space.
@@ -645,39 +620,20 @@
                 (let ([start-box (box sel-start)])
                   (send edit find-wordbreak start-box #f 'caret)
                   (send edit kill 0 (unbox start-box) sel-end))))]
-           
-           [region-click
-            (λ (edit event f)
-              (when (and (send event button-down?)
-                         (is-a? edit text%))
-                (let ([x-box (box (send event get-x))]
-                      [y-box (box (send event get-y))]
-                      [eol-box (box #f)])
-                  (send edit global-to-local x-box y-box)
-                  (let ([click-pos (send edit find-position 
-                                         (unbox x-box)
-                                         (unbox y-box)
-                                         eol-box)]
-                        [start-pos (send edit get-start-position)]
-                        [end-pos (send edit get-end-position)])
-                    (let ([eol (unbox eol-box)])
-                      (if (< start-pos click-pos)
-                          (f click-pos eol start-pos click-pos)
-                          (f click-pos eol click-pos end-pos)))))))]
            [copy-click-region
             (λ (edit event)
-              (region-click edit event
+              (region-click/internal edit event
                             (λ (click eol start end)
                               (send edit flash-on start end)
                               (send edit copy #f 0 start end))))]
            [cut-click-region
             (λ (edit event)
-              (region-click edit event
+              (region-click/internal edit event
                             (λ (click eol start end)
                               (send edit cut #f 0 start end))))]
            [paste-click-region
             (λ (edit event)
-              (region-click edit event
+              (region-click/internal edit event
                             (λ (click eol start end)
                               (send edit set-position click)
                               (send edit paste-x-selection 0 click))))]
@@ -697,7 +653,7 @@
            [select-click-word
             (λ (edit event)
               (region-click edit event
-                            (λ (click eol start end)
+                            (λ (click eol)
                               (let ([start-box (box click)]
                                     [end-box (box click)])
                                 (send edit find-wordbreak 
@@ -710,7 +666,7 @@
            [select-click-line
             (λ (edit event)
               (region-click edit event
-                            (λ (click eol start end)
+                            (λ (click eol)
                               (let* ([line (send edit position-line 
                                                  click eol)]
                                      [start (send edit line-start-position
@@ -1093,22 +1049,7 @@
           
           (add "ring-bell" ring-bell)
           
-          (add "insert-()-pair" (make-insert-brace-pair "(" ")"))
-          (add "insert-[]-pair" (make-insert-brace-pair "[" "]"))
-          (add "insert-{}-pair" (make-insert-brace-pair "{" "}"))
-          (add "insert-\"\"-pair" (make-insert-brace-pair "\"" "\""))
-          (add "insert-||-pair" (make-insert-brace-pair "|" "|"))
-          (add "insert-lambda-template" insert-lambda-template)
-          ;; HACK: in order to allow disabling of insert-pair bindings,
-          ;; I'm adding functions that simply insert the corresponding
-          ;; character. I bet there's a much cleaner way to do this;
-          ;; there may be existing functions that insert single characters,
-          ;; or a way to "pop" bindings off of a keybindings.
-          (add "insert (" (lambda (txt evt) (send txt insert #\()))
-          (add "insert {" (lambda (txt evt) (send txt insert #\{)))
-          (add "insert \"" (lambda (txt evt) (send txt insert #\")))
-         
-          
+                    
           (add "toggle-anchor" toggle-anchor)
           (add "center-view-on-line" center-view-on-line)
           (add "collapse-space" collapse-space)
@@ -1197,13 +1138,6 @@
           (map "a:c:left" "back-to-prev-embedded-editor")
           
           (map "c:c;c:g" "ring-bell")
-          
-          (map-meta "(" "insert-()-pair")
-          (map-meta "[" "insert-[]-pair")
-          (map-meta "{" "insert-{}-pair")
-          (map-meta "\"" "insert-\"\"-pair")
-          (map-meta "|" "insert-||-pair")
-          (map-meta "s:l" "insert-lambda-template")
           
           (map "c:p" "previous-line")
           (map "up" "previous-line")
@@ -1354,28 +1288,7 @@
           (map "c:x;p" "shift-focus-backwards")
           (map "c:f6" "shift-focus")
           (map "a:tab" "shift-focus")
-          (map "a:s:tab" "shift-focus-backwards")
-          
-          (let ()
-            (define (add-automatic-paren-bindings)
-              (map "~c:s:(" "insert-()-pair")
-              (map "~c:s:{" "insert-{}-pair")
-              (map "~c:s:\"" "insert-\"\"-pair"))
-            (define (remove-automatic-paren-bindings)
-              ;; how the heck is this going to work? we want to "pop" these bindings off...
-              ;; this is a crude approximation:
-              (map "~c:s:(" "insert (")
-              (map "~c:s:{" "insert {")
-              (map "~c:s:\"" "insert \""))
-            (when (preferences:get 'framework:automatic-parens)
-              (add-automatic-paren-bindings))
-            (preferences:add-callback 
-             'framework:automatic-parens
-             (lambda (id new-val)
-               (cond [new-val (add-automatic-paren-bindings)]
-                     [else    (remove-automatic-paren-bindings)])))
-            (void))
-          ))))
+          (map "a:s:tab" "shift-focus-backwards")))))
   
   (define setup-search
     (let* ([send-frame
@@ -1538,3 +1451,27 @@
                         (send keymap chain-to-keymap global #t)
                         (ctki keymap))])
         (thunk))))
+
+  (define (region-click text event f)
+    (region-click/internal text event 
+                           (λ (click-pos eol start end) (f click-pos eol))))
+  
+  (define (region-click/internal text event f)
+    (when (and (is-a? event mouse-event%)
+               (send event button-down?)
+               (is-a? text text%))
+      (define x-box (box (send event get-x)))
+      (define y-box (box (send event get-y)))
+      (define eol-box (box #f))
+      (send text global-to-local x-box y-box)
+      (define click-pos (send text find-position 
+                              (unbox x-box)
+                              (unbox y-box)
+                              eol-box))
+      (define start-pos (send text get-start-position))
+      (define end-pos (send text get-end-position))
+      (define eol (unbox eol-box))
+      (if (< start-pos click-pos)
+          (f click-pos eol start-pos click-pos)
+          (f click-pos eol click-pos end-pos))))
+  

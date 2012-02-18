@@ -1352,9 +1352,11 @@
   (-NonPosInt -Int . -> . (-values (list -Int -NonPosInt)))
   (-Int -Int . -> . (-values (list -Int -Int))))]
 
-[arithmetic-shift (cl->* (-Zero (Un -NegFixnum -Zero) . -> . -Zero)
-                         (-NonNegFixnum (Un -NegFixnum -Zero) . -> . -NonNegFixnum)
-                         (-Fixnum (Un -NegFixnum -Zero) . -> . -Fixnum)
+[arithmetic-shift (cl->* (-Zero -NonPosInt . -> . -Zero)
+                         (-Byte -NonPosInt . -> . -Byte)
+                         (-Index -NonPosInt . -> . -Index)
+                         (-NonNegFixnum -NonPosInt . -> . -NonNegFixnum)
+                         (-Fixnum -NonPosInt . -> . -Fixnum)
                          (-Nat -Int . -> . -Nat)
                          (-Int -Int . -> . -Int))]
 
@@ -1639,6 +1641,7 @@
       (-SingleFlonum . -> . (Un -SingleFlonum -SingleFlonumComplex))
       (-InexactRealZero . -> . -NegInexactReal)
       (-NonNegInexactReal . -> . -InexactReal)
+      (-NonNegReal . -> . -Real)
       (-ExactNumber . -> . (Un -ExactNumber -FloatComplex))
       (-FloatComplex . -> . -FloatComplex)
       (-SingleFlonumComplex . -> . -SingleFlonumComplex)
@@ -1675,7 +1678,7 @@
        (map binop (list -Flonum -SingleFlonum -InexactReal -Real)))]
 
 [gcd (from-cases (varop -Zero)
-                 (varop -One)
+                 (varop-1+ -One)
                  (varop-1+ -PosByte)
                  (varop -Byte)
                  (varop-1+ -PosIndex)
@@ -1684,6 +1687,8 @@
                  (varop -Fixnum -NonNegFixnum)
                  (varop-1+ -PosInt)
                  (varop -Int -Nat)
+                 (varop-1+ -PosRat)
+                 (varop -Rat -NonNegRat)
                  ;; also supports inexact integers
                  (varop-1+ -PosFlonum)
                  (commutative-case -PosFlonum -PosReal -PosFlonum)
@@ -1710,6 +1715,8 @@
                  (binop -Byte -Index)
                  (varop (Un -PosInt -NegInt) -PosInt)
                  (varop -Int -Nat)
+                 (varop (Un -PosRat -NegRat) -PosRat)
+                 (varop -Rat -NonNegRat)
                  ;; also supports inexact integers
                  (commutative-case -FlonumZero -Real -FlonumPosZero)
                  (commutative-case -SingleFlonumZero -Real -SingleFlonumPosZero)

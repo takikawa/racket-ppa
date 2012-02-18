@@ -721,7 +721,6 @@ ICP
 MRLIBINSTALL
 LIBFINISH
 MAKE_GRACKET
-MAKE_FIT
 MAKE_COPYTREE
 MAKE_FINISH
 WXPRECOMP
@@ -1333,7 +1332,6 @@ Optional Features:
   --enable-foreign        support foreign calls (enabled by default)
   --enable-places         support places (3m only; usually enabled by default)
   --enable-futures        support futures (usually enabled by default)
-  --enable-plot           support plot libraries (enabled by default)
   --enable-float          support single-precision floats (enabled by default)
   --enable-floatinstead   use single-precision by default
   --enable-racket=<path>  use <path> as Racket executable to build Racket
@@ -1349,7 +1347,7 @@ Optional Features:
   --enable-libfw          install Mac OS X frameworks to /Library/Frameworks
   --enable-userfw         install Mac OS X frameworks to ~/Library/Frameworks
   --enable-macprefix      allow --prefix with a Mac OS X install
-  --enable-mac64          do not force 32-bit build
+  --enable-mac64          allow 64-bit Mac OS X build (enabled by default)
   --enable-cgcdefault     use CGC (Boehm or Senora) as default build
   --enable-sgc            use Senora GC instead of the Boehm GC
   --enable-sgcdebug       use Senora GC for debugging
@@ -1986,13 +1984,6 @@ if test "${enable_futures+set}" = set; then
   enableval=$enable_futures;
 fi
 
-# Check whether --enable-plot was given.
-if test "${enable_plot+set}" = set; then
-  enableval=$enable_plot;
-else
-  enable_plot=yes
-fi
-
 # Check whether --enable-float was given.
 if test "${enable_float+set}" = set; then
   enableval=$enable_float;
@@ -2084,6 +2075,8 @@ fi
 # Check whether --enable-mac64 was given.
 if test "${enable_mac64+set}" = set; then
   enableval=$enable_mac64;
+else
+  enable_mac64=yes
 fi
 
 
@@ -2312,7 +2305,6 @@ show_explicitly_enabled "${enable_xonx}" "Unix style"
 show_explicitly_enabled "${enable_shared}" "Shared libraries"
 
 show_explicitly_disabled "${enable_gracket}" GRacket
-show_explicitly_disabled "${enable_plot}" Plot fit library
 
 if test "$LIBTOOLPROG" != "" ; then
   echo "=== Libtool program: $LIBTOOLPROG"
@@ -2345,7 +2337,7 @@ show_explicitly_enabled "${enable_gcov}" "gcov"
 
 show_explicitly_enabled "${enable_noopt}" "No-optimization"
 
-show_explicitly_enabled "${enable_mac64}" "64-bit Mac OS X"
+show_explicitly_disabled "${enable_mac64}" "64-bit Mac OS X"
 
 show_explicitly_enabled "${enable_libfw}" "Frameworks-to-system"
 show_explicitly_enabled "${enable_userfw}" "Frameworks-to-user"
@@ -3941,13 +3933,16 @@ case "$host_os" in
     LIBS="$LIBS -rdynamic"
     DYN_CFLAGS="-fPIC"
     enable_pthread=yes
+    try_kqueue_syscall=yes
     ;;
   openbsd*)
     LIBS="$LIBS -rdynamic -Wl,--export-dynamic"
     enable_pthread=yes
+    try_kqueue_syscall=yes
     ;;
   netbsd*)
     LIBS="$LIBS -rdynamic"
+    try_kqueue_syscall=yes
     ;;
   irix*)
     enable_cgcdefault="yes"
@@ -3961,6 +3956,8 @@ case "$host_os" in
     LIBS="$LIBS -ldl -lm -rdynamic"
     DYN_CFLAGS="-fPIC"
     STRIP_DEBUG="strip -S"
+    try_poll_syscall=yes
+    try_epoll_syscall=yes
     case "$host_cpu" in
       #Required for CentOS 4.6
       x86_64)
@@ -4043,6 +4040,7 @@ case "$host_os" in
     esac
 
     PREFLAGS="$PREFLAGS -DOS_X -D_DARWIN_UNLIMITED_SELECT"
+    try_kqueue_syscall=yes
 
     STRIP_DEBUG="/usr/bin/strip -S"
 
@@ -5149,6 +5147,210 @@ if test "$mbsrtowcs" = "no" ; then
 fi
 { echo "$as_me:$LINENO: result: $mbsrtowcs" >&5
 echo "${ECHO_T}$mbsrtowcs" >&6; }
+
+if test "${try_poll_syscall}" = "yes" ; then
+   msg="for poll"
+  { echo "$as_me:$LINENO: checking $msg" >&5
+echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
+  if test "$cross_compiling" = yes; then
+  use_poll=no
+else
+  cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+  #include <poll.h>
+     int main() {
+      struct pollfd pfd;
+      int r;
+      pfd.fd = 0;
+      pfd.events = POLLIN;
+      r = poll(&pfd, 1, 0);
+      return 0;
+     }
+_ACEOF
+rm -f conftest$ac_exeext
+if { (ac_try="$ac_link"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_link") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
+  { (case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  use_poll=yes
+else
+  echo "$as_me: program exited with status $ac_status" >&5
+echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+( exit $ac_status )
+use_poll=no
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
+fi
+
+
+  { echo "$as_me:$LINENO: result: $use_poll" >&5
+echo "${ECHO_T}$use_poll" >&6; }
+  if test "${use_poll}" = "yes" ; then
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_POLL_SYSCALL 1
+_ACEOF
+
+  fi
+fi
+
+if test "${try_epoll_syscall}" = "yes" ; then
+   msg="for epoll"
+  { echo "$as_me:$LINENO: checking $msg" >&5
+echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
+  if test "$cross_compiling" = yes; then
+  use_epoll=no
+else
+  cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+  #include <sys/epoll.h>
+    int main() {
+      int fd;
+      struct epoll_event ev;
+      fd = epoll_create(5);
+      ev.events = EPOLLIN | EPOLLONESHOT;
+      epoll_ctl(fd, EPOLL_CTL_ADD, 0, &ev);
+      return 0;
+    }
+_ACEOF
+rm -f conftest$ac_exeext
+if { (ac_try="$ac_link"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_link") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
+  { (case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  use_epoll=yes
+else
+  echo "$as_me: program exited with status $ac_status" >&5
+echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+( exit $ac_status )
+use_epoll=no
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
+fi
+
+
+  { echo "$as_me:$LINENO: result: $use_epoll" >&5
+echo "${ECHO_T}$use_epoll" >&6; }
+  if test "${use_epoll}" = "yes" ; then
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_EPOLL_SYSCALL 1
+_ACEOF
+
+  fi
+fi
+
+if test "${try_kqueue_syscall}" = "yes" ; then
+   msg="for kqueue"
+  { echo "$as_me:$LINENO: checking $msg" >&5
+echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
+  if test "$cross_compiling" = yes; then
+  use_kqueue=no
+else
+  cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+  #include <sys/types.h>
+    #include <sys/event.h>
+    #include <sys/time.h>
+     int main() {
+        int kq;
+        struct kevent kev;
+      struct timespec timeout = {0, 0};
+        kq = kqueue();
+        EV_SET(&kev, 0, EVFILT_READ, EV_ADD, 0, 0, NULL);
+        kevent(kq, &kev, 1, NULL, 0, &timeout);
+        return 0;
+     }
+_ACEOF
+rm -f conftest$ac_exeext
+if { (ac_try="$ac_link"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_link") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
+  { (case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  use_kqueue=yes
+else
+  echo "$as_me: program exited with status $ac_status" >&5
+echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+( exit $ac_status )
+use_kqueue=no
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
+fi
+
+
+  { echo "$as_me:$LINENO: result: $use_kqueue" >&5
+echo "${ECHO_T}$use_kqueue" >&6; }
+  if test "${use_kqueue}" = "yes" ; then
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_KQUEUE_SYSCALL 1
+_ACEOF
+
+  fi
+fi
 
 if test "${enable_libffi}" = "yes" ; then
  if test "${enable_foreign}" = "yes" ; then
@@ -8737,7 +8939,6 @@ LIBS="$LIBS $EXTRALIBS"
 
 
 
-
 mk_needed_dir()
 {
   if test ! -d "$1" ; then
@@ -8802,14 +9003,6 @@ else
 fi
 makefiles="$makefiles foreign/Makefile"
 ac_configure_args="$ac_configure_args$SUB_CONFIGURE_EXTRAS"
-
-if test -d "${srcdir}/fit" && test "${enable_plot}" = "yes" ; then
-  makefiles="$makefiles
-             fit/Makefile"
-  MAKE_FIT=fit
-else
-  MAKE_FIT=no
-fi
 
 if test "${enable_gracket}" = "yes" ; then
   makefiles="$makefiles
@@ -9582,7 +9775,6 @@ ICP!$ICP$ac_delim
 MRLIBINSTALL!$MRLIBINSTALL$ac_delim
 LIBFINISH!$LIBFINISH$ac_delim
 MAKE_GRACKET!$MAKE_GRACKET$ac_delim
-MAKE_FIT!$MAKE_FIT$ac_delim
 MAKE_COPYTREE!$MAKE_COPYTREE$ac_delim
 MAKE_FINISH!$MAKE_FINISH$ac_delim
 WXPRECOMP!$WXPRECOMP$ac_delim
@@ -9620,7 +9812,7 @@ LIBOBJS!$LIBOBJS$ac_delim
 LTLIBOBJS!$LTLIBOBJS$ac_delim
 _ACEOF
 
-  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 46; then
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 45; then
     break
   elif $ac_last_try; then
     { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5
@@ -10244,7 +10436,7 @@ if test "${inplacebuild}" = "yes" ; then
 else
   echo ">>> Installation targets:"
   echo " executables  : ${bindir}/..."
-  echo " Scheme code  : ${collectsdir}/..."
+  echo " Racket code  : ${collectsdir}/..."
   echo " core docs    : ${docdir}/..."
   echo " C libraries  : ${libdir}/..."
   echo " C headers    : ${includepltdir}/..."
