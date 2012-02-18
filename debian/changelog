@@ -1,6 +1,8 @@
-racket (5.2+dfsg1-2) UNRELEASED; urgency=low
+racket (5.2.1+dfsg1-1) UNRELEASED; urgency=low
 
   * Revert the Architecture limiting in favor of adding ia64 to P-a-s.
+  * New upstream version.
+    + Update d/copyright for new files in src/racket/lightning
 
  -- James McCoy <jamessan@debian.org>  Sat, 04 Feb 2012 16:17:21 -0500
 
