@@ -1,3 +1,10 @@
+racket (5.2.1+dfsg1-2) unstable; urgency=low
+
+  * Cherry pick patch from upstream to fix FTBFS on architectures where char
+    is unsigned by default.  (Closes: #654789, #654827)
+
+ -- James McCoy <jamessan@debian.org>  Sun, 19 Feb 2012 09:26:23 -0500
+
 racket (5.2.1+dfsg1-1) unstable; urgency=low
 
   * Revert the Architecture limiting in favor of adding ia64 to P-a-s.
