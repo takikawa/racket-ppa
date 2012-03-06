@@ -1,4 +1,4 @@
-racket (5.2.1+dfsg1-3) UNRELEASED; urgency=low
+racket (5.2.1+dfsg1-3) unstable; urgency=low
 
   * Change libpng12-dev Build-Depends to libpng-dev to prepare for transition.
     (Closes: #662489)
@@ -6,7 +6,7 @@ racket (5.2.1+dfsg1-3) UNRELEASED; urgency=low
   * Add racket Recommends to racket-common to satisfy
     missing-dep-for-interpreter.
 
- -- James McCoy <jamessan@debian.org>  Mon, 05 Mar 2012 19:38:02 -0500
+ -- James McCoy <jamessan@debian.org>  Mon, 05 Mar 2012 22:06:10 -0500
 
 racket (5.2.1+dfsg1-2) unstable; urgency=low
 
