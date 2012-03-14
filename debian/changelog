@@ -1,9 +1,9 @@
-racket (5.2.1+dfsg1-4) UNRELEASED; urgency=low
+racket (5.2.1+dfsg1-4) unstable; urgency=low
 
   * Cherry-pick patch from upstream to fix dynamic loading of libjpeg.
   * Move plt-scheme(-doc) to oldlibs/extra
 
- -- James McCoy <jamessan@debian.org>  Tue, 13 Mar 2012 21:24:57 -0400
+ -- James McCoy <jamessan@debian.org>  Tue, 13 Mar 2012 22:35:06 -0400
 
 racket (5.2.1+dfsg1-3) unstable; urgency=low
 
