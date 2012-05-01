@@ -10,11 +10,13 @@
   [(unix) 
    ;; Most Linux distros supply "libpng12", while other Unix
    ;; variants often have just "libpng":
-   (with-handlers ([exn:fail:filesystem?
-                    (lambda (exn) (ffi-lib "libpng"))])
-     (ffi-lib "libpng12" '("0" "")))]
-  [(macosx) (ffi-lib "libpng14.14.dylib")]
-  [(windows) 
+   (ffi-lib "libpng12" '("0" "")
+	    #:fail (lambda ()
+		     (ffi-lib "libpng15" '("15" "")
+			      #:fail (lambda ()
+				       (ffi-lib "libpng")))))]
+  [(macosx) (ffi-lib "libpng15.15.dylib")]
+  [(windows)
    (ffi-lib "zlib1.dll")
    (ffi-lib "libpng14-14.dll")])
 
