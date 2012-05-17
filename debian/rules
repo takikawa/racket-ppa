@@ -26,11 +26,7 @@ SOURCEPKG=$(shell dpkg-parsechangelog | sed  -n 's/^Source: \(.*\)/\1/p')
 UPSTREAM=$(shell dpkg-parsechangelog |  sed -n 's/^Version: \(.*\)-[^-]*/\1/p')
 ORIG=${SOURCEPKG}_${UPSTREAM}.orig.tar.gz
 
-# Upstream does funky things with assembly, so we'll have to trust their
-# compilation settings and override cdbs/dpkg-buildpackage defaults for
-# configure and make
-DEB_CONFIGURE_SCRIPT_ENV = CFLAGS="-g" CXXFLAGS=""
-DEB_MAKE_ENVVARS = CFLAGS="-g" CXXFLAGS="" HOME=/nonexistant PLT_SETUP_OPTIONS="-j $(NUMJOBS) $(PLT_EXTRA)"
+DEB_MAKE_ENVVARS += HOME=/nonexistant PLT_SETUP_OPTIONS="-j $(NUMJOBS) $(PLT_EXTRA)"
 
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
 

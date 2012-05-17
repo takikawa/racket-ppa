@@ -3,6 +3,7 @@ racket (5.2.1+dfsg1-5) UNRELEASED; urgency=low
   * Cherry-pick patches from upstream to use libpng15 when it's available.
   * Lintian cleanups:
     + menu-icon-too-big: Use mini-plt.xpm instead of plt.xpm
+  * Use default buildflags.
 
  -- James McCoy <jamessan@debian.org>  Thu, 17 May 2012 06:30:50 -0400
 
