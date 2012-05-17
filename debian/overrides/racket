@@ -1,4 +1,2 @@
 # Stripping mzscheme makes it stop working
 racket: unstripped-binary-or-object usr/bin/mzscheme
-# Shipped in racket-common
-racket: menu-icon-missing usr/share/racket/collects/icons/plt.xpm
