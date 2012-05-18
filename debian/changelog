@@ -6,6 +6,7 @@ racket (5.2.1+dfsg1-5) UNRELEASED; urgency=low
     + Remove menu-icon-missing override, cross-binary package checks now work
       in Lintian
   * Use default buildflags.
+  * Exclude tests from being installed.
 
  -- James McCoy <jamessan@debian.org>  Thu, 17 May 2012 06:30:50 -0400
 

@@ -30,7 +30,7 @@ DEB_MAKE_ENVVARS += HOME=/nonexistant PLT_SETUP_OPTIONS="-j $(NUMJOBS) $(PLT_EXT
 
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
 
-DEB_DH_INSTALL_ARGS_racket-common := -X${RACKET_ARCH} -X$(MZDYN)
+DEB_DH_INSTALL_ARGS_racket-common := -X${RACKET_ARCH} -X$(MZDYN) -X/tests/
 DEB_DH_INSTALL_ARGS_racket-doc := -Xdoc/release-notes
 
 # do not strip mzscheme, as this causes it to stop working
