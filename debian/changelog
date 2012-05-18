@@ -1,4 +1,4 @@
-racket (5.2.1+dfsg1-5) UNRELEASED; urgency=low
+racket (5.2.1+dfsg1-5) unstable; urgency=low
 
   * Cherry-pick patches from upstream to use libpng15 when it's available.
   * Lintian cleanups:
@@ -8,7 +8,7 @@ racket (5.2.1+dfsg1-5) UNRELEASED; urgency=low
   * Use default buildflags.
   * Exclude tests from being installed.
 
- -- James McCoy <jamessan@debian.org>  Thu, 17 May 2012 06:30:50 -0400
+ -- James McCoy <jamessan@debian.org>  Fri, 18 May 2012 08:09:15 -0400
 
 racket (5.2.1+dfsg1-4) unstable; urgency=low
 
