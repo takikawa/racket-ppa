@@ -1,3 +1,12 @@
+racket (5.2.1+g6~92c8784+dfsg1-1) unstable; urgency=low
+
+  * Upstream re-release of 5.2.1, with a fix for an "Easter Egg" bug that
+    make DrRacket unusable twice a year. See message
+    <DF3E772B-EFAA-4818-A8B5-383472B8C9EF@ccs.neu.edu> from
+    Matthias Felleisen for more details.
+
+ -- David Bremner <bremner@debian.org>  Mon, 11 Jun 2012 21:12:09 -0300
+
 racket (5.2.1+dfsg1-5) unstable; urgency=low
 
   * Cherry-pick patches from upstream to use libpng15 when it's available.
