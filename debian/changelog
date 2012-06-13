@@ -1,3 +1,10 @@
+racket (5.2.1+g6~92c8784+dfsg2-1) unstable; urgency=low
+
+  * Add back inadvertantly dropped patches.
+  * Re-repack to remove non-dfsg material.
+
+ -- David Bremner <bremner@debian.org>  Tue, 12 Jun 2012 21:01:06 -0300
+
 racket (5.2.1+g6~92c8784+dfsg1-1) unstable; urgency=low
 
   * Upstream re-release of 5.2.1, with a fix for an "Easter Egg" bug that
