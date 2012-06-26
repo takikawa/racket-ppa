@@ -1,3 +1,11 @@
+racket (5.2.1+g6~92c8784+dfsg2-2) unstable; urgency=low
+
+  * Update description to use Racket in place of scheme (Closes: #679000).
+  * Generally reword and streamline description. 
+  * Mention R6R6 (Closes: #577816).
+
+ -- David Bremner <bremner@debian.org>  Tue, 26 Jun 2012 19:46:16 -0300
+
 racket (5.2.1+g6~92c8784+dfsg2-1) unstable; urgency=low
 
   * Add back inadvertantly dropped patches.

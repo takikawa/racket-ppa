@@ -20,20 +20,18 @@ Breaks: plt-scheme (<<5.0~)
 Replaces: plt-scheme (<<5.0~)
 Provides: plt-scheme
 Description: extensible programming language in the Scheme family
- Racket (previously PLT Scheme) is an innovative programming language
- that builds on a rich academic and practical tradition.
+ Racket (previously PLT Scheme) is a programming language suitable for
+ scripting and application development, including GUIs and web
+ services.
  .
- It is suitable for implementation tasks ranging from scripting to
- application development, including GUIs, web services, etc.
+ It supports the creation of new programming languages through a rich,
+ expressive syntax system. Supplied languages include Typed Racket,
+ ACL2, FrTime, and Lazy Racket, and R6RS Scheme.
  .
- It includes the DrRacket programming environment, a virtual machine with
- a just-in-time compiler, tools for creating stand-alone executables, the
- PLT Scheme web server, extensive libraries, documentation for both
- beginners and experts, and more.
- .
- It supports the creation of new programming languages through a
- rich, expressive syntax system. Example languages include Typed Scheme,
- ACL2, FrTime, and Lazy Scheme.
+ Racket includes the DrRacket programming environment, a virtual
+ machine with a just-in-time compiler, tools for creating stand-alone
+ executables, the Racket web server, extensive libraries, and
+ documentation for both beginners and experts.
 
 Package: racket-common
 Architecture: all
@@ -65,18 +63,6 @@ Depends: racket, ${misc:Depends}
 Description: Racket Programming Environment (transitional package)
  Racket (previously PLT Scheme) is an innovative programming language
  that builds on a rich academic and practical tradition.
- .
- It is suitable for implementation tasks ranging from scripting to
- application development, including GUIs, web services, etc.
- .
- It includes the DrRacket programming environment, a virtual machine with
- a just-in-time compiler, tools for creating stand-alone executables, the
- PLT Scheme web server, extensive libraries, documentation for both
- beginners and experts, and more.
- .
- It supports the creation of new programming languages through a
- rich, expressive syntax system. Example languages include Typed Scheme,
- ACL2, FrTime, and Lazy Scheme.
  .
  This is a dummy package to aid in transitioning from the plt-scheme package
  to the racket package.
