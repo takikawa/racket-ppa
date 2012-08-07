@@ -320,17 +320,6 @@ The heights of each bar section are given as a list.
                        #:legend-anchor 'top-right)]
 }
 
-@doc-apply[stacked-histogram]{
-Returns a renderer that draws a stacked histogram.
-The heights of each bar section are given as a list.
-@examples[#:eval plot-eval
-                 (plot (stacked-histogram (list #(a (1 1 1)) #(b (1.5 3))
-                                                #(c ()) #(d (1/2)))
-                                          #:invert? #t
-                                          #:labels '("Red" #f "Blue"))
-                       #:legend-anchor 'top-right)]
-}
-
 @section{2D Plot Decoration Renderers}
 
 @doc-apply[x-axis]{

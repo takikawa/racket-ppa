@@ -567,13 +567,8 @@
    
    (flomap-pin* 1/2 3/4 (if open? 1 1/2) 0 shackle-rfm body-rfm)))
 
-(define-icon-wrappers
-  ([frame-color (or/c string? (is-a?/c color%))]
-   [handle-color (or/c string? (is-a?/c color%))]
-   [height (and/c rational? (>=/c 0)) (default-icon-height)]
-   [material deep-flomap-material-value? (default-icon-material)])
-  [magnifying-glass-icon magnifying-glass-flomap]
-  [left-magnifying-glass-icon  left-magnifying-glass-flomap])
+;; ===================================================================================================
+;; Bitmaps (icons)
 
 (define-icon-wrappers
   ([sides exact-positive-integer?]
