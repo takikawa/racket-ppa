@@ -6,16 +6,7 @@ It was downloaded from http://racket-lang.org/download
 The following were removed from the upstream tarball because of licensing
 concerns
 
-	collects/scribble/jfp/
-	collects/scribble/sigplan/sigplanconf.cls
-	collects/tests/racket/benchmarks/common/maze.sch
-	collects/tests/racket/benchmarks/common/maze2.sch
-	collects/tests/racket/benchmarks/common/psyntax-input.txt
-	collects/tests/racket/benchmarks/common/types/maze2.rktl
-	collects/tests/racket/testing.rktl
-	collects/tests/utils/mz-testing.rkt
-	collects/tests/utils/sexp-diff.rkt
-	collects/tests/xml/clark-tests/
+	collects/tests/xml/xmltest.zip
 
 readline collection notes:
 GNU's readline library is covered by the GPL (found at
@@ -373,6 +364,15 @@ Files: collects/tests/srfi/13/string-test.rkt,
 Copyright: © 2002 by Francisco Solsona.
 License: LGPL 2.1+
 
+
+Files: collects/scribble/sigplan/sigplanconf.cls
+Copyright: © 2004 by Paul C. Anagnostopoulos
+License: CC-BY-3.0
+    This work is licensed under the Creative Commons Attribution License.
+    To view a copy of this license, visit
+      http://creativecommons.org/licenses/by/3.0/
+    or send a letter to Creative Commons, 171 2nd Street, Suite 300,
+    San Francisco, California, 94105, U.S.A.
 
 License: SRFI
     Permission to copy this software, to modify it, to redistribute it,
