@@ -33,6 +33,8 @@ DEB_BUILDDIR := $(DEB_SRCDIR)/build
 DEB_DH_INSTALL_ARGS_racket-common := -X${RACKET_ARCH} -X$(MZDYN) -X/tests/
 DEB_DH_INSTALL_ARGS_racket-doc := -Xdoc/release-notes
 
+DEB_DH_BUILDDEB_ARGS := -- -Zxz
+
 # do not strip mzscheme, as this causes it to stop working
 DEB_DH_STRIP_ARGS_racket := -Xbin/mzscheme
 

@@ -1,6 +1,7 @@
 racket (5.3+dfsg1-1) UNRELEASED; urgency=low
 
   * New upstream version
+  * Build debs with xz compression
 
  -- James McCoy <jamessan@debian.org>  Tue, 07 Aug 2012 03:06:30 -0400
 
