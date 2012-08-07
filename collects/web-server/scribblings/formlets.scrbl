@@ -18,7 +18,7 @@ their paper @link["http://groups.inf.ed.ac.uk/links/formlets/"]{The Essence of F
 @section{Basic Formlet Usage}
 
 Suppose we want to create an abstraction of entering a date in an HTML form. The following
-@tech{formlet} captures this idea:
+@deftech{formlet} captures this idea:
 
 @racketblock[
 (define date-formlet
@@ -194,7 +194,7 @@ to be @emph{syntactically} an @|xexpr|. You may discover you want to use a more 
 @(require (for-label web-server/formlets/lib))
 @defmodule[web-server/formlets/lib]{
 
-The syntactic shorthand abbreviates the construction of @deftech{formlet}s with the following library.
+The syntactic shorthand abbreviates the construction of @tech{formlet}s with the following library.
 These combinators may be used directly to construct low-level formlets, such as those for new INPUT element
 types. Refer to @secref["input-formlets"] for example low-level formlets using these combinators.
 
@@ -502,17 +502,22 @@ a list of elements of the sequence.
 A few utilities are provided for using @tech{formlet}s in Web applications.
 
 @defproc[(send/formlet [f (formlet/c any/c ...)]
+                       [#:method method
+                                 (or/c "GET" "POST" "get" "post")
+                                 "POST"]
                        [#:wrap wrapper
                                (xexpr/c . -> . xexpr/c)
                                (lambda (form-xexpr)
                                  `(html (head (title "Form Entry"))
                                         (body ,form-xexpr)))])
          (values any/c ...)]{
+
   Uses @racket[send/suspend] and @racket[response/xexpr] to send
-  @racket[f]'s rendering (wrapped in a FORM tag whose action is the
-  continuation URL (wrapped again by @racket[wrapper])) to the client.
-  When the form is submitted, the request is passed to the processing
-  stage of @racket[f].
+  @racket[f]'s rendering (wrapped in a FORM tag with method
+  @racket[method] whose action is the continuation URL (wrapped again
+  by @racket[wrapper])) to the client.  When the form is submitted,
+  the request is passed to the processing stage of @racket[f].
+
 }
 
 @defproc[(embed-formlet [embed/url ((request? . -> . any) . -> . string?)]

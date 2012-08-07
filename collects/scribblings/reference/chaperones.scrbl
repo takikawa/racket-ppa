@@ -11,10 +11,10 @@
 @title[#:tag "chaperones"]{Impersonators and Chaperones}
 
 An @deftech{impersonator} is a wrapper for a value where the wrapper
-redirects certain of the value's operations. Impersonators apply only to procedures,
+redirects some of the value's operations. Impersonators apply only to procedures,
 @tech{structures} for which an accessor or mutator is available,
 @tech{structure types}, @tech{hash tables}, @tech{vectors},
-and @tech{box}es. An impersonator is @racket[equal?] to the original
+@tech{box}es, and @tech{prompt tag}s. An impersonator is @racket[equal?] to the original
 value, but not @racket[eq?] to the original value.
 
 A @deftech{chaperone} is a kind of impersonator whose refinement of a value's
@@ -28,23 +28,25 @@ slot, but it cannot redirect @racket[vector-ref] to produce a value
 that is arbitrarily different from the value in the vector slot.
 
 A non-@tech{chaperone} @tech{impersonator}, in contrast, can refine an operation to swap one
-value for any another. An impersonator cannot be applied to an immutable value
+value for any other. An impersonator cannot be applied to an immutable value
 or refine the access to an immutable field in an instance of a @tech{structure
-type}, since arbitrary replacement of an operation's value amounts to
+type}, since arbitrary redirection of an operation amounts to
 mutation of the impersonated value.
 
-Beware that each of the following operations can be redirected to
-arbitrary procedure through impersonators on the operation's
+Beware that each of the following operations can be redirected to an
+arbitrary procedure through an impersonator on the operation's
 argument---assuming that the operation is available to the creator of
 the impersonator:
 
-@operations[@t{a structure-field accesor}
+@operations[@t{a structure-field accessor}
             @t{a structure-field mutator}
             @t{a structure type property accessor}
             @t{application of a procedure}
             unbox set-box!
             vector-ref vector-set!
-            hash-ref hash-set hash-set! hash-remove hash-remove!]
+            hash-ref hash-set hash-set! hash-remove hash-remove!
+            call-with-continuation-prompt
+            abort-current-continuation]
 
 Derived operations, such as printing a value, can be redirected
 through impersonators due to their use of accessor functions. The
@@ -174,7 +176,7 @@ of impersonators with respect to wrapping impersonators to be detected within
                              [prop-val any] ... ...)
           any/c]{
 
-Returns an impersonator of @racket[v], with redirect certain
+Returns an impersonator of @racket[v], which redirects certain
 operations on the impersonated value. The @racket[orig-proc]s
 indicate the operations to redirect, and the corresponding
 @racket[redirect-proc]s supply the redirections.
@@ -189,7 +191,10 @@ The protocol for a @racket[redirect-proc] depends on the corresponding
       @racket[_field-v] that @racket[orig-proc] produces for
       @racket[v]; it must return a replacement for
       @racket[_field-v]. The corresponding field must not be
-      immutable.}
+      immutable, and either the field's structure type must be
+      accessible via the current @tech{inspector} or one of the other
+      @racket[orig-proc]s must be a structure-field mutator for the
+      same field.}
 
  @item{A structure-field mutator: @racket[redirect-proc] must accept
       two arguments, @racket[v] and the value @racket[_field-v]
@@ -206,7 +211,12 @@ The protocol for a @racket[redirect-proc] depends on the corresponding
 
 Pairs of @racket[prop] and @racket[prop-val] (the number of arguments
 to @racket[impersonate-struct] must be odd) add impersonator properties
-or override impersonator-property values of @racket[v].}
+or override impersonator-property values of @racket[v].
+
+Each @racket[orig-proc] must indicate a distinct operation. If no
+@racket[orig-proc]s are supplied, then no @racket[prop]s must be
+supplied, and @racket[v] is returned unimpersonated.}
+
 
 @defproc[(impersonate-vector [vec (and/c vector? (not/c immutable?))]
                              [ref-proc (vector? exact-nonnegative-integer? any/c . -> . any/c)]
@@ -241,22 +251,21 @@ or override impersonator-property values of @racket[vec].}
                           [prop-val any] ... ...)
           (and/c box? impersonator?)]{
 
-Returns an impersonator of @racket[bx], which redirects the
+Returns an impersonator of @racket[box], which redirects the
 @racket[unbox] and @racket[set-box!] operations.
 
-The @racket[unbox-proc] must accept @racket[bx] and the value that
-@racket[unbox] on @racket[bx] produces index; it must produce a replacement
-value, which is the result of
-@racket[unbox] on the impersonator.
+The @racket[unbox-proc] must accept @racket[box] and the value that
+@racket[unbox] produces on @racket[box]; it must produce a replacement
+value, which is the result of @racket[unbox] on the impersonator.
 
-The @racket[set-proc] must accept @racket[bx] and the value passed to
+The @racket[set-proc] must accept @racket[box] and the value passed to
 @racket[set-box!]; it must produce a replacement
 value, which is used with @racket[set-box!] on the original
-@racket[bx] to install the value.
+@racket[box] to install the value.
 
 Pairs of @racket[prop] and @racket[prop-val] (the number of arguments
 to @racket[impersonate-box] must be odd) add impersonator properties
-or override impersonator-property values of @racket[bx].}
+or override impersonator-property values of @racket[box].}
 
 
 @defproc[(impersonate-hash [hash (and/c hash? (not/c immutable?))]
@@ -273,7 +282,7 @@ or override impersonator-property values of @racket[bx].}
 Returns an impersonator of @racket[hash], which redirects the
 @racket[hash-ref], @racket[hash-set!] or @racket[hash-set] (as
 applicable), and @racket[hash-remove] or @racket[hash-remove!] (as
-application) operations. When
+applicable) operations. When
 @racket[hash-set] or @racket[hash-remove] is used on an impersonator of a hash
 table, the result is an impersonator with the same redirecting procedures. 
 In addition, operations like
@@ -284,7 +293,7 @@ from the table. Operations like @racket[hash-iterate-value] or
 therefore redirect through @racket[ref-proc].
 
 The @racket[ref-proc] must accept @racket[hash] and a key passed
-@racket[hash-ref]. It must return a replacement key
+to @racket[hash-ref]. It must return a replacement key
 as well as a procedure. The returned procedure is called only if the
 returned key is found in @racket[hash] via @racket[hash-ref], in which
 case the procedure is called with @racket[hash], the previously
@@ -319,6 +328,84 @@ produced by @racket[key-proc] does not yield a value through
 Pairs of @racket[prop] and @racket[prop-val] (the number of arguments
 to @racket[impersonate-hash] must be odd) add impersonator properties
 or override impersonator-property values of @racket[hash].}
+
+
+@defproc[(impersonate-prompt-tag [prompt-tag continuation-prompt-tag?]
+                                 [handle-proc procedure?]
+                                 [abort-proc procedure?]
+                                 [prop impersonator-property?]
+                                 [prop-val any] ... ...)
+          (and/c continuation-prompt-tag? impersonator?)]{
+
+Returns an impersonator of @racket[prompt-tag], which redirects
+the @racket[call-with-continuation-prompt] and
+@racket[abort-current-continuation] operations.
+
+The @racket[handle-proc] must accept the values that the handler
+of a continuation prompt would take and it must produce replacement
+values, which will be passed to the handler.
+
+The @racket[abort-proc] must accept the values passed to
+@racket[abort-current-continuation]; it must produce replacement
+values, which are aborted to the appropriate prompt.
+
+Pairs of @racket[prop] and @racket[prop-val] (the number of arguments
+to @racket[impersonate-prompt-tag] must be odd) add impersonator properties
+or override impersonator-property values of @racket[prompt-tag].
+
+@examples[
+  (define tag
+    (impersonate-prompt-tag
+     (make-continuation-prompt-tag)
+     (lambda (n) (* n 2))
+     (lambda (n) (+ n 1))))
+
+  (call-with-continuation-prompt
+    (lambda ()
+      (abort-current-continuation tag 5))
+    tag
+    (lambda (n) n))
+]
+}
+
+
+@defproc[(impersonate-continuation-mark-key
+          [key continuation-mark-key?]
+          [get-proc procedure?]
+          [set-proc procedure?]
+          [prop impersonator-property?]
+          [prop-val any] ... ...)
+         (and/c continuation-mark? impersonator?)]{
+
+Returns an impersonator of @racket[key], which redirects
+@racket[with-continuation-mark] and continuation mark accessors such
+as @racket[continuation-mark-set->list].
+
+The @racket[get-proc] must accept the value attached to a
+continuation mark and it must produce a replacement
+value, which will be returned by the continuation mark accessor.
+
+The @racket[set-proc] must accept a value passed to
+@racket[with-continuation-mark]; it must produce a replacement
+value, which is attached to the continuation frame.
+
+Pairs of @racket[prop] and @racket[prop-val] (the number of arguments
+to @racket[impersonate-prompt-tag] must be odd) add impersonator properties
+or override impersonator-property values of @racket[key].
+
+@examples[
+  (define mark-key
+    (impersonate-continuation-mark-key
+     (make-continuation-mark-key)
+     (lambda (l) (map char-upcase l))
+     (lambda (s) (string->list s))))
+
+  (with-continuation-mark mark-key "quiche"
+    (continuation-mark-set-first
+     (current-continuation-marks)
+     mark-key))
+]
+}
 
 
 @defthing[prop:impersonator-of struct-type-property?]{
@@ -400,16 +487,13 @@ Like @racket[impersonate-struct], but with the following refinements:
        corresponding @racket[redirect-proc] must accept two values,
        which are the results of @racket[struct-info] on @racket[v]; it
        must return each values or a chaperone of each value. The
-       @racket[redirect-proc] is not called if @racket[struct-info] would
-       return @racket[#f] as its first argument.}
+       @racket[redirect-proc] is not called if @racket[struct-info]
+       would return @racket[#f] as its first argument. An
+       @racket[orig-proc] can be @racket[struct-info] only if some
+       other @racket[orig-proc] is supplied.}
 
-]
+]}
 
-An @racket[orig-proc] can be @racket[struct-info] only if some other
-@racket[orig-proc] is supplied, and each @racket[orig-proc] must
-indicate a distinct operation. If no @racket[orig-proc]s are supplied,
-then no @racket[prop]s must be supplied, and @racket[v] is returned
-unchaperoned.}
 
 @defproc[(chaperone-vector [vec vector?]
                            [ref-proc (vector? exact-nonnegative-integer? any/c . -> . any/c)]
@@ -424,7 +508,7 @@ of the original value, and @racket[set-proc] must produce the value
 that is given or a chaperone of the value. The @racket[set-proc] will
 not be used if @racket[vec] is immutable.}
 
-@defproc[(chaperone-box [bx box?]
+@defproc[(chaperone-box [box box?]
                         [unbox-proc (box? any/c . -> . any/c)]
                         [set-proc (box? any/c . -> . any/c)]
                         [prop impersonator-property?]
@@ -435,7 +519,7 @@ Like @racket[impersonate-box], but with support for immutable boxes. The
 @racket[unbox-proc] procedure must produce the same value or a
 chaperone of the original value, and @racket[set-proc] must produce
 the same value or a chaperone of the value that it is given.  The
-@racket[set-proc] will not be used if @racket[bx] is immutable.}
+@racket[set-proc] will not be used if @racket[box] is immutable.}
 
 
 @defproc[(chaperone-hash [hash hash?]
@@ -516,6 +600,90 @@ and it must return a chaperone of that value.
 Pairs of @racket[prop] and @racket[prop-val] (the number of arguments
 to @racket[chaperone-evt] must be even) add impersonator properties
 or override impersonator-property values of @racket[evt].}
+
+@defproc[(chaperone-prompt-tag [prompt-tag continuation-prompt-tag?]
+                               [handle-proc procedure?]
+                               [abort-proc procedure?]
+                               [prop impersonator-property?]
+                               [prop-val any] ... ...)
+          (and/c continuation-prompt-tag? chaperone?)]{
+
+Like @racket[impersonate-prompt-tag], but produces a chaperoned value.
+The @racket[handle-proc] procedure must produce the same values or
+chaperones of the original values, and @racket[abort-proc] must produce
+the same values or chaperones of the values that it is given.
+
+@examples[
+  (define bad-chaperone
+    (chaperone-prompt-tag
+     (make-continuation-prompt-tag)
+     (lambda (n) (* n 2))
+     (lambda (n) (+ n 1))))
+
+  (call-with-continuation-prompt
+    (lambda ()
+      (abort-current-continuation bad-chaperone 5))
+    bad-chaperone
+    (lambda (n) n))
+
+  (define good-chaperone
+    (chaperone-prompt-tag
+     (make-continuation-prompt-tag)
+     (lambda (n) (if (even? n) n (error "not even")))
+     (lambda (n) (if (even? n) n (error "not even")))))
+
+  (call-with-continuation-prompt
+    (lambda ()
+      (abort-current-continuation good-chaperone 2))
+    good-chaperone
+    (lambda (n) n))
+]
+}
+
+
+@defproc[(chaperone-continuation-mark-key
+          [key continuation-mark-key?]
+          [get-proc procedure?]
+          [set-proc procedure?]
+          [prop impersonator-property?]
+          [prop-val any] ... ...)
+         (and/c continuation-mark-key? chaperone?)]{
+
+Like @racket[impersonate-continuation-mark-key], but produces a
+chaperoned value.  The @racket[get-proc] procedure must produce the
+same value or a chaperone of the original value, and @racket[set-proc]
+must produce the same value or a chaperone of the value that it is
+given.
+
+@examples[
+  (define bad-chaperone
+    (chaperone-continuation-mark-key
+     (make-continuation-mark-key)
+     (lambda (l) (map char-upcase l))
+     string->list))
+
+  (with-continuation-mark bad-chaperone "timballo"
+    (continuation-mark-set-first
+     (current-continuation-marks)
+     bad-chaperone))
+
+  (define (checker s)
+    (if (> (string-length s) 5)
+        s
+        (error "expected string of length at least 5")))
+
+  (define good-chaperone
+    (chaperone-continuation-mark-key
+     (make-continuation-mark-key)
+     checker
+     checker))
+
+  (with-continuation-mark good-chaperone "zabaione"
+    (continuation-mark-set-first
+     (current-continuation-marks)
+     good-chaperone))
+]
+}
 
 @; ------------------------------------------------------------
 @section{Impersonator Properties}

@@ -2730,7 +2730,14 @@ of the contract library does not change over time.
             m
             1
             2))
-   "procedure m method: expects 1 argument, given 2: 1 2")
+   (string-append
+    "m method: arity mismatch;\n"
+    " the expected number of arguments does not match the given number\n"
+    "  expected: 1\n"
+    "  given: 2\n"
+    "  arguments...:\n"
+    "   1\n"
+    "   2"))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;
@@ -4169,8 +4176,8 @@ so that propagation occurs.
   (test-name 'natural-number/c natural-number/c)
   (test-name #f false/c)
   (test-name 'printable/c printable/c)
-  (test-name '(symbols 'a 'b 'c) (symbols 'a 'b 'c))
-  (test-name '(one-of/c 1 2 3) (one-of/c 1 2 3))
+  (test-name '(or/c 'a 'b 'c) (symbols 'a 'b 'c))
+  (test-name '(or/c 1 2 3) (one-of/c 1 2 3))
   (test-name '(one-of/c '() 'x 1 #f #\a (void) (letrec ([x x]) x)) 
              (one-of/c '() 'x 1 #f #\a (void) (letrec ([x x]) x)))
   

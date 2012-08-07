@@ -24,12 +24,12 @@
                        [sliderec? slide?]
                        [just-a-comment? comment?])
            comment
-           most-recent-slide retract-most-recent-slide re-slide start-at-recent-slide
+           most-recent-slide retract-most-recent-slide re-slide slide->pict start-at-recent-slide
 	   make-outline
 	   (rename-out [item/kw item]
                        [subitem/kw subitem]
                        [para/kw para])
-	   gap-size current-font-size current-line-sep
+	   gap-size current-gap-size current-font-size current-line-sep
 	   current-main-font current-title-color
 	   size-in-pixels
 	   t it bt bit tt titlet tt* rt

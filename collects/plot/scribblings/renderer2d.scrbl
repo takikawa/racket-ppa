@@ -272,16 +272,52 @@ The @(racket #:samples) argument determines the accuracy of the calculated areas
 @doc-apply[discrete-histogram]{
 Returns a renderer that draws a discrete histogram.
 
-Each bar takes up exactly one plot unit; e.g. the first bar in a histogram uses the space between @(racket 0) and @(racket 1).
-To plot histograms side-by-side, pass the appropriate @(racket #:x-min) value to the second renderer. For example,
+@examples[#:eval plot-eval
+                 (plot (discrete-histogram (list #(A 1) #(B 2) #(B 3)
+                                                 (vector 'C (ivl 0.5 1.5)))))]
+
+Use @racket[#:invert? #t] to draw horizontal bars. See @racket[stacked-histogram] for an example.
+
+Each bar takes up exactly one plot unit, and is drawn with @racket[(* 1/2 gap)] empty space on each side.
+Bar number @racket[i] is drawn at @racket[(+ x-min (* i skip))].
+Thus, the first bar (@racket[i] = @racket[0]) is drawn in the interval between @racket[x-min] (default @racket[0]) and @racket[(+ x-min 1)].
+
+To plot two histograms side-by-side, pass the appropriate @racket[x-min] value to the second renderer. For example,
 @interaction[#:eval plot-eval
                     (plot (list (discrete-histogram (list #(a 1) #(b 2) #(c 3) #(d 2)
                                                           #(e 4) #(f 2.5) #(g 1))
                                                     #:label "Numbers per letter")
                                 (discrete-histogram (list #(1 1) #(4 2) #(3 1.5))
                                                     #:x-min 8
-                                                    #:color 2 #:line-color 2
-                                                    #:label "Numbers per number")))]
+                                                    #:label "Numbers per number"
+                                                    #:color 2 #:line-color 2)))]
+Here, the first histogram has @racket[7] bars, so the second is drawn starting at @racket[x-min] = @racket[8].
+
+To interleave histograms, such as when plotting benchmark results, use a @racket[skip] value larger than or equal to the number of histograms, and give each histogram a different @racket[x-min].
+For example,
+@interaction[#:eval plot-eval
+                    (plot (list (discrete-histogram
+                                 '(#(Eggs 1.5) #(Bacon 2.5) #(Pancakes 3.5))
+                                 #:skip 2.5 #:x-min 0
+                                 #:label "AMD")
+                                (discrete-histogram
+                                 '(#(Eggs 1.4) #(Bacon 2.3) #(Pancakes 3.1))
+                                 #:skip 2.5 #:x-min 1
+                                 #:label "Intel" #:color 2 #:line-color 2))
+                          #:x-label "Breakfast Food" #:y-label "Cooking Time (minutes)"
+                          #:title "Cooking Times For Breakfast Food, Per Processor")]
+When interleaving many histograms, consider setting the @racket[discrete-histogram-skip] parameter to change @racket[skip]'s default value.
+}
+
+@doc-apply[stacked-histogram]{
+Returns a list of renderers that draw parts of a stacked histogram.
+The heights of each bar section are given as a list.
+@examples[#:eval plot-eval
+                 (plot (stacked-histogram (list #(a (1 1 1)) #(b (1.5 3))
+                                                #(c ()) #(d (1/2)))
+                                          #:invert? #t
+                                          #:labels '("Red" #f "Blue"))
+                       #:legend-anchor 'top-right)]
 }
 
 @doc-apply[stacked-histogram]{

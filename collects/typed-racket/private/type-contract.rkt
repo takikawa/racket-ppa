@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 
 (provide type->contract define/fixup-contract? change-contract-fixups)
 
@@ -12,12 +12,12 @@
  (types resolve utils)
  (prefix-in t: (types convenience abbrev))
  (private parse-type)
- racket/match unstable/match syntax/struct syntax/stx mzlib/trace racket/syntax scheme/list
- (only-in scheme/contract -> ->* case-> cons/c flat-rec-contract provide/contract any/c)
- (for-template scheme/base racket/contract racket/set (utils any-wrap)
+ racket/match unstable/match syntax/struct syntax/stx racket/syntax racket/list
+ (only-in racket/contract -> ->* case-> cons/c flat-rec-contract provide/contract any/c)
+ (for-template racket/base racket/contract racket/set (utils any-wrap)
                (prefix-in t: (types numeric-predicates))
                (only-in unstable/contract sequence/c)
-	       (only-in scheme/class object% is-a?/c subclass?/c object-contract class/c init object/c class?)))
+	       (only-in racket/class object% is-a?/c subclass?/c object-contract class/c init object/c class?)))
 
 (define (define/fixup-contract? stx)
   (or (syntax-property stx 'typechecker:contract-def)
@@ -150,15 +150,15 @@
         [(== t:-NonNegFlonum type-equal?) #'(flat-named-contract 'Nonnegative-Float (and/c flonum? (lambda (x) (>= x 0))))]
         [(== t:-NonPosFlonum type-equal?) #'(flat-named-contract 'Nonpositive-Float (and/c flonum? (lambda (x) (<= x 0))))]
         [(== t:-Flonum type-equal?) #'(flat-named-contract 'Float flonum?)]
-        [(== t:-SingleFlonumZero type-equal?) #'(flat-named-contract 'Single-Flonum-Zero (and/c t:single-flonum? zero?))]
+        [(== t:-SingleFlonumZero type-equal?) #'(flat-named-contract 'Single-Flonum-Zero (and/c single-flonum? zero?))]
         [(== t:-InexactRealZero type-equal?) #'(flat-named-contract 'Inexact-Real-Zero (and/c inexact-real? zero?))]
         [(== t:-PosInexactReal type-equal?) #'(flat-named-contract 'Positive-Inexact-Real (and/c inexact-real? positive?))]
-        [(== t:-NonNegSingleFlonum type-equal?) #'(flat-named-contract 'Nonnegative-Single-Flonum (and/c t:single-flonum? (lambda (x) (>= x 0))))]
+        [(== t:-NonNegSingleFlonum type-equal?) #'(flat-named-contract 'Nonnegative-Single-Flonum (and/c single-flonum? (lambda (x) (>= x 0))))]
         [(== t:-NonNegInexactReal type-equal?) #'(flat-named-contract 'Nonnegative-Inexact-Real (and/c inexact-real? (lambda (x) (>= x 0))))]
         [(== t:-NegInexactReal type-equal?) #'(flat-named-contract 'Negative-Inexact-Real (and/c inexact-real? negative?))]
-        [(== t:-NonPosSingleFlonum type-equal?) #'(flat-named-contract 'Nonpositive-Single-Flonum (and/c t:single-flonum? (lambda (x) (<= x 0))))]
+        [(== t:-NonPosSingleFlonum type-equal?) #'(flat-named-contract 'Nonpositive-Single-Flonum (and/c single-flonum? (lambda (x) (<= x 0))))]
         [(== t:-NonPosInexactReal type-equal?) #'(flat-named-contract 'Nonpositive-Inexact-Real (and/c inexact-real? (lambda (x) (<= x 0))))]
-        [(== t:-SingleFlonum type-equal?) #'(flat-named-contract 'Single-Flonum t:single-flonum?)]
+        [(== t:-SingleFlonum type-equal?) #'(flat-named-contract 'Single-Flonum single-flonum?)]
         [(== t:-InexactReal type-equal?) #'(flat-named-contract 'Inexact-Real inexact-real?)]
         [(== t:-RealZero type-equal?) #'(flat-named-contract 'Real-Zero (and/c real? zero?))]
         [(== t:-PosReal type-equal?) #'(flat-named-contract 'Positive-Real (and/c real? positive?))]
@@ -188,13 +188,11 @@
 	[(Set: t) #`(set/c #,(t->c t))]
         [(Sequence: ts) #`(sequence/c #,@(map t->c ts))]
         [(Vector: t)
-         (if flat?
-             #`(vectorof #,(t->c t #:flat #t) #:flat? #t)
-             #`(vectorof #,(t->c t)))]
+         (when flat? (exit (fail)))
+         #`(vectorof #,(t->c t))]
         [(Box: t)
-         (if flat?
-             #`(box/c #,(t->c t #:flat #t) #:flat? #t)
-             #`(box/c #,(t->c t)))]
+         (when flat? (exit (fail)))
+         #`(box/c #,(t->c t))]
         [(Pair: t1 t2)
          #`(cons/c #,(t->c t1) #,(t->c t2))]
         [(Opaque: p? cert)
@@ -216,7 +214,8 @@
          (match-let ([(Mu-name: n-nm _) ty])
            (with-syntax ([(n*) (generate-temporaries (list n-nm))])
              (parameterize ([vars (cons (list n #'n* #'n*) (vars))])
-               #`(flat-rec-contract n* #,(t->c b #:flat #t)))))]
+               #`(letrec ([n* (recursive-contract #,(t->c b))])
+                   n*))))]
         [(Value: #f) #'false/c]
         [(Instance: (Class: _ _ (list (list name fcn) ...)))
          (when flat? (exit (fail)))
@@ -238,6 +237,8 @@
             =>
             cdr]
            [proc (exit (fail))]
+           [(and flat? (ormap values mut?))
+            (exit (fail))]
            [poly?
             (with-syntax* ([(rec blame val) (generate-temporaries '(rec blame val))]
                            [maker maker-id]
@@ -283,9 +284,8 @@
         [(Value: v) #`(flat-named-contract #,(format "~a" v) (lambda (x) (equal? x '#,v)))]
         [(Param: in out) #`(parameter/c #,(t->c out))]
 	[(Hashtable: k v)
-         (if flat?
-             #`(hash/c #,(t->c k #:flat #t) #,(t->c v #:flat #t) #:flat? #t #:immutable 'dont-care)
-             #`(hash/c #,(t->c k) #,(t->c v) #:immutable 'dont-care))]
+         (when flat? (exit (fail)))                  
+         #`(hash/c #,(t->c k) #,(t->c v) #:immutable 'dont-care)]
         [else
          (exit (fail))]))))
 

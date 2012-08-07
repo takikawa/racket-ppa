@@ -63,20 +63,54 @@
                                          -> (or r (failed 'CreateIconIndirect)))
   #:wrap (allocator DestroyIcon))
 
+(define-cstruct _MONITORINFO ([cbSize _DWORD]
+			      [rcMonitor _RECT]
+			      [rcWork _RECT]
+			      [dwFlags _DWORD]))
+
+(define-user32 GetMonitorInfoW (_wfun _pointer _MONITORINFO-pointer 
+				      -> (r : _BOOL)
+				      -> (unless r (failed 'GetMonitorInfoW))))
+
 (define SPI_GETWORKAREA            #x0030)
 
+(define MA_NOACTIVATEANDEAT 4)
+
+(define MONITORINFOF_PRIMARY 1)
+
 (define (get-all-screen-rects)
-  (let ([rects null])
+  (let ([rects null]
+	[pos 0])
     (EnumDisplayMonitors #f #f (lambda (mon dc r ptr)
+				 (define mi (cast (malloc _MONITORINFO)
+						  _pointer
+						  _MONITORINFO-pointer))
+				 (set-MONITORINFO-cbSize! mi (ctype-sizeof _MONITORINFO))
+				 (GetMonitorInfoW mon mi)
+				 (set! pos (add1 pos))
 				 (set! rects (cons
-					      (list (RECT-left r)
-						    (RECT-top r)
-						    (RECT-right r)
-						    (RECT-bottom r))
+					      (list*
+					       ;; sort first by main monitor:
+					       (positive?
+						(bitwise-and MONITORINFOF_PRIMARY
+							     (MONITORINFO-dwFlags mi)))
+					       ;; otherwise, preserve order:
+					       pos
+					       ;; monitor rectangle, which is the goal:
+					       (list (RECT-left r)
+						     (RECT-top r)
+						     (RECT-right r)
+						     (RECT-bottom r)))
 					      rects))
 				 #t)
 			 #f)
-    (reverse rects)))
+    (map
+     cddr
+     (sort rects (lambda (a b)
+		   (cond
+		    [(and (car a) (not (car b))) #t]
+		    [(and (car b) (not (car a))) #f]
+		    [else (< (cadr a) (cadr b))]))))))
 
 (define (display-size xb yb all? num fail)
   (cond
@@ -268,10 +302,11 @@
   (define/override (wndproc w msg wParam lParam default)
     (cond
      [(= msg WM_CLOSE)
-      (queue-window-event this (lambda () 
-				 (when (on-close)
-                                   (atomically
-                                    (direct-show #f)))))
+      (unless (other-modal? this)
+        (queue-window-event this (lambda () 
+                                   (when (on-close)
+                                     (atomically
+                                      (direct-show #f))))))
       0]
      [(and (= msg WM_SIZE)
            (not (= wParam SIZE_MINIMIZED)))
@@ -283,7 +318,8 @@
 			 (void))
       (stdret 0 1)]
      [(= msg WM_MOVE)
-      (queue-window-event this (lambda () (queue-on-size)))
+      (unless (iconized?)
+        (queue-window-event this (lambda () (queue-on-size))))
       (stdret 0 1)]
      [(= msg WM_ACTIVATE)
       (let ([state (LOWORD wParam)]
@@ -386,6 +422,19 @@
     (pre-on-event w e))
   (define/override (call-pre-on-char w e)
     (pre-on-char w e))
+
+  (define modal-enabled? #t)
+  (define otherwise-enabled? #t)
+  (define/public (modal-enable ignoring)
+    (define on? (not (other-modal? this #f ignoring)))
+    (unless (eq? modal-enabled? on?)
+      (set! modal-enabled? on?)
+      (update-enabled)))
+  (define/override (internal-enable on?)
+    (set! otherwise-enabled? on?)
+    (update-enabled))
+  (define/private (update-enabled)
+    (super internal-enable (and modal-enabled? otherwise-enabled?)))
 
   (define/override (generate-parent-mouse-ins mk)
     ;; assert: in-window is always the panel child

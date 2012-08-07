@@ -241,6 +241,21 @@
                                           (lambda (b v) v)
                                           (lambda (b v) v)))
 
+  (let ([b (box 0)]
+        [b2 (box 1)])    
+    ;; success
+    (test-tri (list #true 1)
+              'unsafe-box*-cas! b 0 1
+              #:pre (lambda () (set-box! b 0))
+              #:post (lambda (x) (list x (unbox b)))
+              #:literal-ok? #f)
+    ;; failure
+    (test-tri (list #false 1)
+              'unsafe-box*-cas! b2 0 7
+              #:pre (lambda () (set-box! b2 1))
+              #:post (lambda (x) (list x (unbox b2)))
+              #:literal-ok? #f))
+  
   (for ([star (list values (add-star "vector"))])
     (test-bin 5 (star 'unsafe-vector-ref) #(1 5 7) 1)
     (test-un 3 (star 'unsafe-vector-length) #(1 5 7))
@@ -314,22 +329,27 @@
   (test-bin 65535 'unsafe-u16vector-ref (u16vector 10 65535 187) 1)
 
   (let ()
-    (define-struct posn (x [y #:mutable] z))
-    (for ([star (list values (add-star "star"))])
-      (test-bin 'a unsafe-struct-ref (make-posn 'a 'b 'c) 0 #:literal-ok? #f)
-      (test-bin 'b unsafe-struct-ref (make-posn 'a 'b 'c) 1 #:literal-ok? #f)
-      (let ([p (make-posn 100 200 300)])
-        (test-tri 500 (star 'unsafe-struct-set!) p 1 500
+    (define (try-struct prop prop-val)
+      (define-struct posn (x [y #:mutable] z)
+        #:property prop prop-val)
+      (for ([star (list values (add-star "star"))])
+        (test-bin 'a unsafe-struct-ref (make-posn 'a 'b 'c) 0 #:literal-ok? #f)
+        (test-bin 'b unsafe-struct-ref (make-posn 'a 'b 'c) 1 #:literal-ok? #f)
+        (let ([p (make-posn 100 200 300)])
+          (test-tri 500 (star 'unsafe-struct-set!) p 1 500
+                    #:pre (lambda () (set-posn-y! p 0)) 
+                    #:post (lambda (x) (posn-y p))
+                    #:literal-ok? #f)))
+      (let ([p (chaperone-struct (make-posn 100 200 300)
+                                 posn-y (lambda (p v) v)
+                                 set-posn-y! (lambda (p v) v))])
+        (test-tri 500 'unsafe-struct-set! p 1 500
                   #:pre (lambda () (set-posn-y! p 0)) 
                   #:post (lambda (x) (posn-y p))
                   #:literal-ok? #f)))
-    (let ([p (chaperone-struct (make-posn 100 200 300)
-                               posn-y (lambda (p v) v)
-                               set-posn-y! (lambda (p v) v))])
-      (test-tri 500 'unsafe-struct-set! p 1 500
-                #:pre (lambda () (set-posn-y! p 0)) 
-                #:post (lambda (x) (posn-y p))
-                #:literal-ok? #f)))
+    (define-values (prop:nothing nothing? nothing-ref) (make-struct-type-property 'nothing))
+    (try-struct prop:nothing 5)
+    (try-struct prop:procedure (lambda (s) 'hi!)))
     
   ;; test unboxing:
   (test-tri 5.4 '(lambda (x y z) (unsafe-fl+ x (unsafe-f64vector-ref y z))) 1.2 (f64vector 1.0 4.2 6.7) 1)

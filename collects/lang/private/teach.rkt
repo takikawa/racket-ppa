@@ -70,7 +70,7 @@
                       (only racket/base syntax->datum datum->syntax)
                       (rename racket/base kw-app #%app)
                       racket/struct-info
-                      stepper/private/shared
+                      stepper/private/syntax-property
                       test-engine/racket-tests)
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1428,7 +1428,7 @@
 				where
 				stx
 				#f
-                                (argcount-error-message 2 n #t)))
+                                (argcount-error-message #f 2 n #t)))
 			     (let loop ([clauses-consumed 0]
 					[remaining (syntax->list #`clauses)])
 			       (if (null? remaining)

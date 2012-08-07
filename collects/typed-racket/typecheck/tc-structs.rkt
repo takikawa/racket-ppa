@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 
 (require "../utils/utils.rkt"
 	 (except-in (rep type-rep free-variance) Dotted)
@@ -8,9 +8,7 @@
 	 (utils tc-utils)
          "def-binding.rkt"
          syntax/kerncase
-         syntax/struct
-         mzlib/trace
-
+         syntax/struct         
          racket/function
          racket/match
          (only-in racket/contract
@@ -19,10 +17,10 @@
                   [-> c->])
          (for-syntax
           syntax/parse
-          scheme/base))
+          racket/base))
 
 
-(require (for-template scheme/base
+(require (for-template racket/base
                        "internal-forms.rkt"))
 
 (provide tc/struct tc/poly-struct names-of-struct d-s)
@@ -144,7 +142,7 @@
 
 ;; generate names, and register the approriate types give field types and structure type
 ;; optionally wrap things
-;; identifier Type Listof[identifer] Listof[Type] Listof[Type] #:wrapper (Type -> Type) #:maker identifier
+;; identifier Type Listof[identifier] Listof[Type] Listof[Type] #:wrapper (Type -> Type) #:maker identifier
 (define/cond-contract (register-struct-types nm sty flds external-fld-types external-fld-types/no-parent setters?
                                              #:wrapper [wrapper values]
                                              #:struct-info [si #f]
@@ -240,6 +238,7 @@
   (mk/register-sty nm flds parent-name parent-field-types types
                    #:maker maker
                    #:mutable mutable
+                   #:struct-info (syntax-property nm/par 'struct-info)
                    ;; wrap everything in the approriate forall
                    #:wrapper (λ (t) (make-Poly tvars t))
                    #:type-wrapper (λ (t) (make-App t new-tvars #f))

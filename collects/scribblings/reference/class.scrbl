@@ -13,12 +13,13 @@
 
 (define-syntax (defclassforms stx)
   (syntax-case stx (*)
-    [(_ [* (form ...) (also ...)])
+    [(_ [* (form ...) (also ...) more ...])
      #'(defform* (form  ...)
          "See " @racket[class*] (sees also ...) "; use"
-         " outside the body of a " @racket[class*] " form is a syntax error.")]
-    [(_ [form (also ...)])
-     #'(defclassforms [* (form) (also ...)])]
+         " outside the body of a " @racket[class*] " form is a syntax error."
+         more ...)]
+    [(_ [form (also ...) more ...])
+     #'(defclassforms [* (form) (also ...) more ...])]
     [(_ form ...)
      #'(begin (defclassforms form) ...)]))
 
@@ -66,10 +67,14 @@
       #'(begin (defdefshorthands form) ...)]))
 
 (define class-eval (make-base-eval))
+(define class-ctc-eval (make-base-eval))
 
 )
 
 @(interaction-eval #:eval class-eval (require racket/class))
+@(interaction-eval
+  #:eval class-ctc-eval
+  (require racket/class racket/contract))
 
 
 @title[#:tag "mzlib:class" #:style 'toc]{Classes and Objects}
@@ -159,7 +164,10 @@ interface is not an object (i.e., there are no ``meta-classes'' or
 
 @guideintro["classes"]{classes, objects, and interfaces}
 
-@defform[(interface (super-interface-expr ...) id ...)]{
+@defform/subs[(interface (super-interface-expr ...) name-clause ...)
+              ([name-clause
+                id
+                (id contract-expr)])]{
 
 Produces an interface. The @racket[id]s must be mutually distinct.
 
@@ -177,7 +185,8 @@ includes all of the specified @racket[id]s, plus all identifiers from
 the superinterfaces. Duplicate identifier names among the
 superinterfaces are ignored, but if a superinterface contains one of
 the @racket[id]s in the @racket[interface] expression, the
-@exnraise[exn:fail:object].
+@exnraise[exn:fail:object]. A given @racket[id] may be paired with
+a corresponding @racket[contract-expr].
 
 If no @racket[super-interface-expr]s are provided, then the derivation
 requirement of the resulting interface is trivial: any class that
@@ -188,16 +197,21 @@ superinterfaces specify inconsistent derivation requirements, the
 @exnraise[exn:fail:object].
 
 @defexamples[
-#:eval class-eval
-(define file-interface
+#:eval class-ctc-eval
+(define file-interface<%>
   (interface () open close read-byte write-byte))
-(define directory-interface
-  (interface (file-interface) file-list parent-directory))
+(define directory-interface<%>
+  (interface (file-interface<%>)
+    [file-list (-> (listof (is-a?/c file-interface<%>)))]
+    parent-directory))
 ]}
 
-@defform[(interface* (super-interface-expr ...) 
-                     ([property-expr val-expr] ...)
-           id ...)]{
+@defform/subs[(interface* (super-interface-expr ...)
+                          ([property-expr val-expr] ...)
+                name-clause ...)
+              ([name-clause
+                id
+                (id contract-expr)])]{
 
 Like @racket[interface], but also associates to the interface the
 structure-type properties produced by the @racket[property-expr]s with
@@ -214,9 +228,9 @@ structure type property's guard, if any).
 
 @defexamples[
 #:eval class-eval
-(define i (interface* () ([prop:custom-write 
-                           (lambda (obj port mode) (void))])
-            method1 method2 method3))
+(define i<%> (interface* () ([prop:custom-write
+                              (lambda (obj port mode) (void))])
+               method1 method2 method3))
 ]}
 
 @; ------------------------------------------------------------------------
@@ -236,8 +250,8 @@ interface @racket[(class->interface object%)], and is transparent
 @defform/subs[
 #:literals (inspect init init-field field inherit-field init-rest init-rest
             public pubment public-final override override-final overment augment augride
-            augment-final private inherit inherit/super inherit/inner rename-super
-            rename-inner begin lambda case-lambda let-values letrec-values
+            augment-final private abstract inherit inherit/super inherit/inner
+            rename-super rename-inner begin lambda case-lambda let-values letrec-values
             define-values #%plain-lambda)
 (class* superclass-expr (interface-expr ...)
   class-clause
@@ -260,6 +274,7 @@ interface @racket[(class->interface object%)], and is transparent
   (augride maybe-renamed ...)
   (augment-final maybe-renamed ...)
   (private id ...)
+  (abstract id ...)
   (inherit maybe-renamed ...)
   (inherit/super maybe-renamed ...)
   (inherit/inner maybe-renamed ...)
@@ -272,7 +287,7 @@ interface @racket[(class->interface object%)], and is transparent
 
 [init-decl
   id
-  (maybe-renamed)
+  (renamed)
   (maybe-renamed default-value-expr)]
 
 [field-decl
@@ -372,7 +387,7 @@ Like @racket[class*], but omits the @racket[_interface-expr]s, for the case that
 
 @defexamples[
 #:eval class-eval
-(define book-class
+(define book-class%
   (class object%
     (field (pages 5))
     (define/public (letters)
@@ -391,12 +406,12 @@ a syntax error.
 #:eval class-eval
 (define (describe obj)
   (printf "Hello ~a\n" obj))
-(define table
+(define table%
   (class object%
     (define/public (describe-self)
       (describe this))
     (super-new)))
-(send (new table) describe-self)
+(send (new table%) describe-self)
 ]}
 
 @defidform[this%]{
@@ -429,22 +444,199 @@ a syntax error.
 
 @defclassforms[
   [(inspect inspector-expr) ()]
-  [(init init-decl ...) ("clinitvars")]
-  [(init-field init-decl ...) ("clinitvars" "clfields")]
-  [(field field-decl ...) ("clfields")]
-  [(inherit-field maybe-renamed ...) ("clfields")]
-  [* ((init-rest id) (init-rest)) ("clinitvars")]
-  [(public maybe-renamed ...) ("clmethoddefs")]
-  [(pubment maybe-renamed ...) ("clmethoddefs")]
-  [(public-final maybe-renamed ...) ("clmethoddefs")]
-  [(override maybe-renamed ...) ("clmethoddefs")]
-  [(overment maybe-renamed ...) ("clmethoddefs")]
-  [(override-final maybe-renamed ...) ("clmethoddefs")]
-  [(augment maybe-renamed ...) ("clmethoddefs")]
+  [(init init-decl ...) ("clinitvars")
+   @defexamples[#:eval class-eval
+     (class object%
+       (super-new)
+       (init turnip
+             [(internal-potato potato)]
+             [carrot 'good]
+             [(internal-rutabaga rutabaga) 'okay]))]]
+  [(init-field init-decl ...) ("clinitvars" "clfields")
+   @defexamples[#:eval class-eval
+     (class object%
+       (super-new)
+       (init-field turkey
+                   [(internal-ostrich ostrich)]
+                   [chicken 7]
+                   [(internal-emu emu) 13]))]]
+  [(field field-decl ...) ("clfields")
+   @defexamples[#:eval class-eval
+     (class object%
+       (super-new)
+       (field [minestrone 'ready]
+              [(internal-coq-au-vin coq-au-vin) 'stewing]))]]
+  [(inherit-field maybe-renamed ...) ("clfields")
+   @defexamples[#:eval class-eval
+     (define cookbook%
+       (class object%
+         (super-new)
+         (field [recipes '(caldo-verde oyakodon eggs-benedict)]
+                [pages 389])))
+     (class cookbook%
+       (super-new)
+       (inherit-field recipes
+                      [internal-pages pages]))]]
+  [* ((init-rest id) (init-rest)) ("clinitvars")
+   @defexamples[#:eval class-eval
+     (define fruit-basket%
+       (class object%
+         (super-new)
+         (init-rest fruits)
+         (displayln fruits)))
+     (make-object fruit-basket% 'kiwi 'lychee 'melon)]]
+  [(public maybe-renamed ...) ("clmethoddefs")
+    @defexamples[#:eval class-eval
+      (define jumper%
+        (class object%
+          (super-new)
+          (define (skip) 'skip)
+          (define (hop) 'hop)
+          (public skip [hop jump])))
+      (send (new jumper%) skip)
+      (send (new jumper%) jump)]]
+  [(pubment maybe-renamed ...) ("clmethoddefs")
+    @defexamples[#:eval class-eval
+      (define runner%
+        (class object%
+          (super-new)
+          (define (run) 'run)
+          (define (trot) 'trot)
+          (pubment run [trot jog])))
+      (send (new runner%) run)
+      (send (new runner%) jog)]]
+  [(public-final maybe-renamed ...) ("clmethoddefs")
+    @defexamples[#:eval class-eval
+      (define point%
+        (class object%
+          (super-new)
+          (init-field [x 0] [y 0])
+          (define (get-x) x)
+          (define (do-get-y) y)
+          (public-final get-x [do-get-y get-y])))
+      (send (new point% [x 1] [y 3]) get-y)
+      (class point%
+        (super-new)
+        (define (get-x) 3.14)
+        (override get-x))]]
+  [(override maybe-renamed ...) ("clmethoddefs")
+    @defexamples[#:eval class-eval
+      (define sheep%
+        (class object%
+          (super-new)
+          (define/public (bleat)
+            (displayln "baaaaaaaaah"))))
+      (define confused-sheep%
+        (class sheep%
+          (super-new)
+          (define (bleat)
+            (super bleat)
+            (displayln "???"))
+          (override bleat)))
+      (send (new sheep%) bleat)
+      (send (new confused-sheep%) bleat)]]
+  [(overment maybe-renamed ...) ("clmethoddefs")
+    @defexamples[#:eval class-eval
+      (define turkey%
+        (class object%
+          (super-new)
+          (define/public (gobble)
+            (displayln "gobble gobble"))))
+      (define extra-turkey%
+        (class turkey%
+          (super-new)
+          (define (gobble)
+            (super gobble)
+            (displayln "gobble gobble gobble")
+            (inner (void) gobble))
+          (overment gobble)))
+      (define cyborg-turkey%
+        (class extra-turkey%
+          (super-new)
+          (define/augment (gobble)
+            (displayln "110011111011111100010110001011011001100101"))))
+      (send (new extra-turkey%) gobble)
+      (send (new cyborg-turkey%) gobble)]]
+  [(override-final maybe-renamed ...) ("clmethoddefs")
+    @defexamples[#:eval class-eval
+      (define meeper%
+        (class object%
+          (super-new)
+          (define/public (meep)
+            (displayln "meep"))))
+      (define final-meeper%
+        (class meeper%
+          (super-new)
+          (define (meep)
+            (super meep)
+            (displayln "This meeping ends with me"))
+          (override-final meep)))
+      (send (new meeper%) meep)
+      (send (new final-meeper%) meep)]]
+  [(augment maybe-renamed ...) ("clmethoddefs")
+    @defexamples[#:eval class-eval
+      (define buzzer%
+        (class object%
+          (super-new)
+          (define/pubment (buzz)
+            (displayln "bzzzt")
+            (inner (void) buzz))))
+      (define loud-buzzer%
+        (class buzzer%
+          (super-new)
+          (define (buzz)
+            (displayln "BZZZZZZZZZT"))
+          (augment buzz)))
+      (send (new buzzer%) buzz)
+      (send (new loud-buzzer%) buzz)]]
   [(augride maybe-renamed ...) ("clmethoddefs")]
   [(augment-final maybe-renamed ...) ("clmethoddefs")]
-  [(private id ...) ("clmethoddefs")]
-  [(inherit maybe-renamed ...) ("classinherit")]
+  [(private id ...) ("clmethoddefs")
+    @defexamples[#:eval class-eval
+      (define light%
+        (class object%
+          (super-new)
+          (define on? #t)
+          (define (toggle) (set! on? (not on?)))
+          (private toggle)
+          (define (flick) (toggle))
+          (public flick)))
+      (send (new light%) toggle)
+      (send (new light%) flick)]]
+  [(abstract id ...) ("clmethoddefs")
+    @defexamples[#:eval class-eval
+      (define train%
+        (class object%
+          (super-new)
+          (abstract get-speed)
+          (init-field [position 0])
+          (define/public (move)
+            (new this% [position (+ position (get-speed))]))))
+      (define acela%
+        (class train%
+          (super-new)
+          (define/override (get-speed) 241)))
+      (define talgo-350%
+        (class train%
+          (super-new)
+          (define/override (get-speed) 330)))
+      (new train%)
+      (send (new acela%) move)]]
+  [(inherit maybe-renamed ...) ("classinherit")
+    @defexamples[#:eval class-eval
+      (define alarm%
+        (class object%
+          (super-new)
+          (define/public (alarm)
+            (displayln "beeeeeeeep"))))
+      (define car-alarm%
+        (class alarm%
+          (super-new)
+          (init-field proximity)
+          (inherit alarm)
+          (when (< proximity 10)
+            (alarm))))
+      (new car-alarm% [proximity 5])]]
   [(inherit/super maybe-renamed ...)  ("classinherit")]
   [(inherit/inner maybe-renamed ...) ("classinherit")]
   [(rename-super renamed ...) ("classinherit")]
@@ -636,9 +828,9 @@ external names.
 Each @racket[public], @racket[override], @racket[augment],
 @racket[pubment], @racket[overment], @racket[augride],
 @racket[public-final], @racket[override-final],
-@racket[augment-final], and @racket[private] clause in a class
-declares one or more method names. Each method name must have a
-corresponding @racket[_method-definition]. The order of
+@racket[augment-final], and @racket[private]
+clause in a class declares one or more method names. Each method name
+must have a corresponding @racket[_method-definition]. The order of
 @racket[public], @|etc|, clauses and their corresponding definitions
 (among themselves, and with respect to other clauses in the class)
 does not matter.
@@ -705,6 +897,12 @@ using the @racket[inner] form. The only difference between
 @racket[public-final] and @racket[pubment] without a corresponding
 @racket[inner] is that @racket[public-final] prevents the declaration
 of augmenting methods that would be ignored.
+
+A method declared with @racket[abstract] must be declared without
+an implementation. Subclasses may implement abstract methods via the
+@racket[override], @racket[overment], or @racket[override-final]
+forms. Any class that contains or inherits any abstract methods is
+considered abstract and cannot be instantiated.
 
 @defform*[[(super id arg ...)
            (super id arg ... . arg-list-expr)]]{
@@ -1062,7 +1260,7 @@ initialization variables can be mutated with @racket[set!].
 
 @subsection[#:tag "methodcalls"]{Methods}
 
-Method names within a class can only be used in the procedure position
+Method names used within a class can only be used in the procedure position
 of an application expression; any other use is a syntax error.
 
 To allow methods to be applied to lists of arguments, a method
@@ -1115,7 +1313,7 @@ Calls the method on @racket[obj] whose name matches
 @racket[kw-arg]s.}
 
 
-@defform/subs[(send* obj-expr msg ...)
+@defform/subs[(send* obj-expr msg ...+)
               ([msg (method-id arg ...)
                     (method-id arg ... . arg-list-expr)])]{
 
@@ -1139,6 +1337,33 @@ is the same as
   (send o insert "Hello")
   (send o insert #\newline)
   (send o end-edit-sequence))
+]}
+
+@defform/subs[(send+ obj-expr msg ...)
+              ([msg (method-id arg ...)
+                    (method-id arg ... . arg-list-expr)])]{
+
+Calls methods (in order) starting with the object produced by
+@racket[obj-expr]. Each method call will be invoked on the result of
+the last method call, which is expected to be an object. Each
+@racket[msg] corresponds to a use of @racket[send].
+
+This is the functional analogue of @racket[send*].
+
+@defexamples[#:eval class-eval
+(define point%
+  (class object%
+    (super-new)
+    (init-field [x 0] [y 0])
+    (define/public (move-x dx)
+      (new this% [x (+ x dx)]))
+    (define/public (move-y dy)
+      (new this% [y (+ y dy)]))))
+
+(send+ (new point%)
+       (move-x 5)
+       (move-y 7)
+       (move-x 12))
 ]}
 
 @defform[(with-method ((id (obj-expr method-id)) ...)
@@ -1181,7 +1406,7 @@ Extracts the field with (external) name @racket[id] from the value of
 @racket[obj-expr].
 
 If @racket[obj-expr] does not produce an object, the
-@exnraise[exn:fail:contract]. If the object has no @racket[id] method,
+@exnraise[exn:fail:contract]. If the object has no @racket[id] field,
 the @exnraise[exn:fail:object].}
 
 @defform[(set-field! id obj-expr expr)]{
@@ -1494,9 +1719,13 @@ resulting trait are the same as for @racket[trait-sum], otherwise the
 @defform/subs[
 #:literals (field init init-field inherit inherit-field super inner override augment augride absent)
 
-(class/c member-spec ...)
+(class/c maybe-opaque member-spec ...)
 
-([member-spec
+([maybe-opaque
+  (code:line)
+  (code:line #:opaque)]
+
+ [member-spec
   method-spec
   (field field-spec ...)
   (init field-spec ...)
@@ -1537,6 +1766,12 @@ contract forms, such as @racket[->m], are provided as a shorthand
 for writing method contracts.
 
 Methods and fields listed in an @racket[absent] clause must @emph{not} be present in the class.
+
+A class contract can be specified to be @emph{opaque} with the @racket[#:opaque]
+keyword. An opaque class contract will only accept a class that defines
+exactly the methods and fields specified by the contract. A contract error
+is raised if the contracted class contains any methods or fields that are
+not specified.
 
 The external contracts are as follows:
 
@@ -1929,77 +2164,179 @@ A @racket[print] request is directed to @racket[custom-write].}
 
 @defproc[(object? [v any/c]) boolean?]{
 
-Returns @racket[#t] if @racket[v] is an object, @racket[#f] otherwise.}
+Returns @racket[#t] if @racket[v] is an object, @racket[#f] otherwise.
+
+@defexamples[#:eval class-eval
+  (object? (new object%))
+  (object? object%)
+  (object? "clam chowder")
+]}
 
 
 @defproc[(class? [v any/c]) boolean?]{
 
-Returns @racket[#t] if @racket[v] is a class, @racket[#f] otherwise.}
+Returns @racket[#t] if @racket[v] is a class, @racket[#f] otherwise.
+
+@defexamples[#:eval class-eval
+  (class? object%)
+  (class? (class object% (super-new)))
+  (class? (new object%))
+  (class? "corn chowder")
+]}
 
 
 @defproc[(interface? [v any/c]) boolean?]{
 
-Returns @racket[#t] if @racket[v] is an interface, @racket[#f] otherwise.}
+Returns @racket[#t] if @racket[v] is an interface, @racket[#f] otherwise.
+
+@defexamples[#:eval class-eval
+  (interface? (interface () empty cons first rest))
+  (interface? object%)
+  (interface? "gazpacho")
+]}
 
 
 @defproc[(generic? [v any/c]) boolean?]{
 
-Returns @racket[#t] if @racket[v] is a @tech{generic}, @racket[#f] otherwise.}
+Returns @racket[#t] if @racket[v] is a @tech{generic}, @racket[#f] otherwise.
+
+@defexamples[#:eval class-eval
+  (define c%
+    (class object%
+      (super-new)
+      (define/public (m x)
+        (+ 3.14 x))))
+
+  (generic? (generic c% m))
+  (generic? c%)
+  (generic? "borscht")
+]}
 
 
 @defproc[(object=? [a object?] [b object?]) boolean?]{
 
 Determines if two objects are the same object, or not; this procedure uses
-@racket[eq?], but also works properly with contracts.}
+@racket[eq?], but also works properly with contracts.
+
+@defexamples[#:eval class-ctc-eval
+  (define obj-1 (new object%))
+  (define/contract obj-2 (object/c) obj-1)
+  (object=? obj-1 obj-1)
+  (object=? (new object%) obj-1)
+  (object=? obj-1 obj-2)
+  (object=? obj-1 (new (class object% (super-new))))
+]}
 
 
 @defproc[(object->vector [object object?] [opaque-v any/c #f]) vector?]{
 
 Returns a vector representing @racket[object] that shows its
-inspectable fields, analogous to @racket[struct->vector].}
+inspectable fields, analogous to @racket[struct->vector].
+
+@defexamples[#:eval class-eval
+  (object->vector (new object%))
+  (object->vector (new (class object%
+                         (super-new)
+                         (field [x 5] [y 10]))))
+]}
 
 
 @defproc[(class->interface [class class?]) interface?]{
 
-Returns the interface implicitly defined by @racket[class].}
+Returns the interface implicitly defined by @racket[class].
+
+@defexamples[#:eval class-eval
+  (class->interface object%)
+]}
 
 
 @defproc[(object-interface [object object?]) interface?]{
 
 Returns the interface implicitly defined by the class of
-@racket[object].}
+@racket[object].
+
+@defexamples[#:eval class-eval
+  (object-interface (new object%))
+]}
 
  
 @defproc[(is-a? [v any/c] [type (or/c interface? class?)]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is an instance of a class
 @racket[type] or a class that implements an interface @racket[type],
-@racket[#f] otherwise.}
+@racket[#f] otherwise.
+
+@defexamples[#:eval class-eval
+  (define point<%> (interface () get-x get-y))
+  (define 2d-point%
+    (class* object% (point<%>)
+      (super-new)
+      (field [x 0] [y 0])
+      (define/public (get-x) x)
+      (define/public (get-y) y)))
+
+  (is-a? (new 2d-point%) 2d-point%)
+  (is-a? (new 2d-point%) point<%>)
+  (is-a? (new object%) 2d-point%)
+  (is-a? (new object%) point<%>)
+]}
 
 
 @defproc[(subclass? [v any/c] [class class?]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is a class derived from (or equal
-to) @racket[class], @racket[#f] otherwise.}
+to) @racket[class], @racket[#f] otherwise.
+
+@defexamples[#:eval class-eval
+  (subclass? (class object% (super-new)) object%)
+  (subclass? object% (class object% (super-new)))
+  (subclass? object% object%)
+]}
 
 
 @defproc[(implementation? [v any/c] [interface interface?]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is a class that implements
-@racket[interface], @racket[#f] otherwise.}
+@racket[interface], @racket[#f] otherwise.
+
+@defexamples[#:eval class-eval
+  (define i<%> (interface () go))
+  (define c%
+    (class* object% (i<%>)
+      (super-new)
+      (define/public (go) 'go)))
+
+  (implementation? c% i<%>)
+  (implementation? object% i<%>)
+]}
 
 
 @defproc[(interface-extension? [v any/c] [interface interface?]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is an interface that extends
-@racket[interface], @racket[#f] otherwise.}
+@racket[interface], @racket[#f] otherwise.
+
+@defexamples[#:eval class-eval
+  (define point<%> (interface () get-x get-y))
+  (define colored-point<%> (interface (point<%>) color))
+
+  (interface-extension? colored-point<%> point<%>)
+  (interface-extension? point<%> colored-point<%>)
+  (interface-extension? (interface () get-x get-y get-z) point<%>)
+]}
 
 
 @defproc[(method-in-interface? [sym symbol?] [interface interface?]) boolean?]{
 
 Returns @racket[#t] if @racket[interface] (or any of its ancestor
 interfaces) includes a member with the name @racket[sym], @racket[#f]
-otherwise.}
+otherwise.
+
+@defexamples[#:eval class-eval
+  (define i<%> (interface () get-x get-y))
+  (method-in-interface? 'get-x i<%>)
+  (method-in-interface? 'get-z i<%>)
+]}
 
 
 @defproc[(interface->method-names [interface interface?]) (listof symbol?)]{
@@ -2007,14 +2344,32 @@ otherwise.}
 Returns a list of symbols for the method names in @racket[interface],
 including methods inherited from superinterfaces, but not including
 methods whose names are local (i.e., declared with
-@racket[define-local-member-names]).}
+@racket[define-local-member-names]).
+
+@defexamples[#:eval class-eval
+  (define i<%> (interface () get-x get-y))
+  (interface->method-names i<%>)
+]}
 
 
 @defproc[(object-method-arity-includes? [object object?] [sym symbol?] [cnt exact-nonnegative-integer?])
          boolean?]{
 
 Returns @racket[#t] if @racket[object] has a method named @racket[sym]
-that accepts @racket[cnt] arguments, @racket[#f] otherwise.}
+that accepts @racket[cnt] arguments, @racket[#f] otherwise.
+
+@defexamples[#:eval class-eval
+(define c%
+  (class object%
+    (super-new)
+    (define/public (m x [y 0])
+      (+ x y))))
+
+(object-method-arity-includes? (new c%) 'm 1)
+(object-method-arity-includes? (new c%) 'm 2)
+(object-method-arity-includes? (new c%) 'm 3)
+(object-method-arity-includes? (new c%) 'n 1)
+]}
 
 
 @defproc[(field-names [object object?]) (listof symbol?)]{
@@ -2022,7 +2377,12 @@ that accepts @racket[cnt] arguments, @racket[#f] otherwise.}
 Returns a list of all of the names of the fields bound in
 @racket[object], including fields inherited from superinterfaces, but
 not including fields whose names are local (i.e., declared with
-@racket[define-local-member-names]).}
+@racket[define-local-member-names]).
+
+@defexamples[#:eval class-eval
+  (field-names (new object%))
+  (field-names (new (class object% (super-new) (field [x 0] [y 0]))))
+]}
 
 
 @defproc[(object-info [object any/c]) (values (or/c class? #f) boolean?)]{

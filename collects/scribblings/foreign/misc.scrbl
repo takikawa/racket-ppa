@@ -3,41 +3,6 @@
 
 @title{Miscellaneous Support}
 
-
-@defproc[(regexp-replaces [objname (or/c string? bytes? symbol?)]
-                          [substs (listof (list regexp? string?))])
-         string?]{
-
-A function that is convenient for many interfaces where the foreign
-library has some naming convention that you want to use in your
-interface as well.  The @racket[objname] argument can be any value
-that will be used to name the foreign object; it is first converted
-into a string, and then modified according to the given
-@racket[substs] list in sequence, where each element in this list is a
-list of a regular expression and a substitution string.  Usually,
-@racket[regexp-replace*] is used to perform the substitution, except
-for cases where the regular expression begins with a @litchar{^} or
-ends with a @litchar{$}, in which case @racket[regexp-replace] is
-used.
-
-For example, the following makes it convenient to define Racket
-bindings such as @racket[foo-bar] for foreign names like
-@racket[MyLib_foo_bar]:
-
-@racketblock[
-(define mylib (ffi-lib "mylib"))
-(define-syntax defmyobj
-  (syntax-rules (:)
-    [(_ name : type ...)
-     (define name
-       (get-ffi-obj 
-        (regexp-replaces 'name '((#rx"-" "_") 
-                                 (#rx"^" "MyLib_")))
-        mylib (_fun type ...)))]))
-(defmyobj foo-bar : _int -> _int)
-]}
-
-
 @defproc[(list->cblock [lst list?] [type ctype?]) any]{
 
 Allocates a memory block of an appropriate size, and initializes it
@@ -87,7 +52,27 @@ The conversion is equivalent to
   (let ([p (malloc from-type)])
     (ptr-set! p from-type v)
     (ptr-ref p to-type))
+]
+
+Beware of potential pitfalls with @racket[cast]:
+
+@itemlist[
+
+ @item{If @racket[v] is a pointer that refers to memory that is
+       managed by the garbage collector, @racket[from-type] and
+       @racket[to-type] normally should be based on
+       @racket[_gcpointer], not @racket[_pointer]; see also
+       @racket[_gcable].}
+
+ @item{If @racket[v] is a pointer with an offset component (e.g., from
+       @racket[ptr-add]), the offset is folded into the pointer base
+       for the result. Consequently, @racket[cast] generally should
+       not be used on a source pointer that refers to memory that is
+       managed by the garbage collector and that has an offset, unless
+       the memory is specially allocated to allow interior pointers.}
+
 ]}
+
 
 @defproc[(cblock->list [cblock any/c] [type ctype?] [length exact-nonnegative-integer?])
          list?]{

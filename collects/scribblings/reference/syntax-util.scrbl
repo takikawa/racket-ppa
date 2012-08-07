@@ -144,7 +144,7 @@ forms like @racket[with-disappeared-uses].
          #:contracts ([stx-expr syntax?])]{
 
 Evaluates the @racket[stx-expr], catching identifiers looked up using
-@racket[syntax-local-value/catch]. Adds the caught identifiers to the
+@racket[syntax-local-value/record]. Adds the caught identifiers to the
 @racket['disappeared-uses] syntax property of the resulting syntax
 object.
 }
@@ -202,7 +202,7 @@ environment (that is, at phase level 1), optionally extended with
      (begin
        (printf "at compile time produces ~s\n"
                (syntax-local-eval #'expr))
-       #'(printf "at run time produes ~s\n"
+       #'(printf "at run time produces ~s\n"
                  expr))]))
 (show-me (+ 2 5))
 (define-for-syntax fruit 'apple)

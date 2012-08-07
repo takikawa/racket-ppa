@@ -1,6 +1,9 @@
 #lang scribble/doc
 @(require "mz.rkt")
 
+@(define bool-eval (make-base-eval))
+@(bool-eval '(require racket/bool))
+
 @title[#:tag "booleans"]{Booleans and Equality}
 
 True and false @deftech{booleans} are represented by the values
@@ -47,7 +50,7 @@ strings, byte strings, pairs, mutable pairs, vectors, boxes, hash
 tables, and inspectable structures. In the last six cases, equality
 is recursively defined; if both @racket[v1] and @racket[v2] contain
 reference cycles, they are equal when the infinite unfoldings of the
-values would be equal. See also @racket[prop:equal+hash] and @racket[prop:impersonator-of].
+values would be equal. See also @racket[gen:equal+hash] and @racket[prop:impersonator-of].
 
 @examples[
 (equal? 'yes 'yes)
@@ -121,19 +124,18 @@ Returns @racket[#t] if @racket[v] is an immutable @tech{string},
 (immutable? (make-immutable-hash '([a b])))
 ]}
 
-@defthing[prop:equal+hash struct-type-property?]{
-
-A @tech{structure type property} (see @secref["structprops"]) that
+@defthing[gen:equal+hash any/c]{
+A @tech{generic interface} (see @secref["struct-generics"]) that
 supplies an equality predicate and hashing functions for a structure
-type. The property value must be a list of three procedures:
+type. The following methods must be implemented:
 
 @itemize[
 
  @item{@racket[_equal-proc : (any/c any/c (any/c any/c . ->
         . boolean?)  . -> . any/c)] --- tests whether the first two
         arguments are equal, where both values are instances of the
-        structure type to which the property is associated (or a
-        subtype of the structure type).
+        structure type to which the generic interface is associated
+        (or a subtype of the structure type).
 
         The third argument is an @racket[equal?]  predicate to use for
         recursive equality checks; use the given predicate instead of
@@ -146,7 +148,7 @@ type. The property value must be a list of three procedures:
 
         The @racket[_equal-proc] is called for a pair of structures
         only when they are not @racket[eq?], and only when they both
-        have a @racket[prop:equal+hash] value inherited from the same
+        have a @racket[gen:equal+hash] value inherited from the same
         structure type. With this strategy, the order in which
         @racket[equal?] receives two structures does not matter. It
         also means that, by default, a structure sub-type inherits the
@@ -156,7 +158,7 @@ type. The property value must be a list of three procedures:
        . exact-integer?)] --- computes a hash code for the given
        structure, like @racket[equal-hash-code]. The first argument is
        an instance of the structure type (or one of its subtypes) to
-       which the property is associated.
+       which the generic interface is associated.
 
        The second argument is an @racket[equal-hash-code]-like
        procedure to use for recursive hash-code computation; use the
@@ -176,7 +178,7 @@ are consistent with @racket[_equal-proc]. Specifically,
 value for any two structures for which @racket[_equal-proc] produces a
 true value.
 
-When a structure type has no @racket[prop:equal+hash] property, then
+When a structure type has no @racket[gen:equal+hash] implementation, then
 transparent structures (i.e., structures with an @tech{inspector} that
 is controlled by the current @tech{inspector}) are @racket[equal?]
 when they are instances of the same structure type (not counting
@@ -188,7 +190,7 @@ values. For opaque structure types, @racket[equal?] is the same as
 @racket[equal-secondary-hash-code] results are based only on
 @racket[eq-hash-code]. If a structure has a @racket[prop:impersonator-of]
 property, then the @racket[prop:impersonator-of] property takes precedence over
-@racket[prop:equal+hash] if the property value's procedure returns a
+@racket[gen:equal+hash] if the property value's procedure returns a
 non-@racket[#f] value when applied to the structure.
 
 @examples[
@@ -210,8 +212,10 @@ non-@racket[#f] value when applied to the structure.
      (* 1 (farm-oranges farm))))
 
 (define-struct farm (apples oranges sheep)
-               #:property prop:equal+hash
-               (list farm=? farm-hash-1 farm-hash-2))
+               #:methods gen:equal+hash
+	       [(define equal-proc farm=?)
+                (define hash-proc  farm-hash-1)
+		(define hash2-proc farm-hash-2)])
 (define east (make-farm 5 2 20))
 (define west (make-farm 18 6 14))
 (define north (make-farm 5 20 20))
@@ -221,6 +225,14 @@ non-@racket[#f] value when applied to the structure.
 (equal? east north)
 (equal? west south)
 ]}
+
+@defthing[prop:equal+hash struct-type-property?]{
+
+A deprecated @tech{structure type property} (see @secref["structprops"])
+that supplies an equality predicate and hashing functions for a structure
+type. @racket[gen:equal+hash] should be used instead. Accepts a list of
+three procedures that correspond to the methods of @racket[gen:equal+hash].
+}
 
 @section{Boolean Aliases}
 
@@ -232,12 +244,66 @@ non-@racket[#f] value when applied to the structure.
 
 @defproc[(symbol=? [a symbol?] [b symbol?]) boolean?]{
 
-Returns @racket[(equal? a b)].}
+Returns @racket[(equal? a b)] (if @racket[a] and @racket[b] are symbols).}
 
 @defproc[(boolean=? [a boolean?] [b boolean?]) boolean?]{
 
-Returns @racket[(equal? a b)].}
+Returns @racket[(equal? a b)] (if @racket[a] and @racket[b] are booleans).}
 
 @defproc[(false? [v any/c]) boolean?]{
 
 Returns @racket[(not v)].}
+
+@defform[(nand expr ...)]{
+  Same as @racket[(not (and expr ...))].
+
+  @examples[#:eval 
+            bool-eval
+            (nand #f #t)
+            (nand #f (error 'ack "we don't get here"))]
+}
+
+@defform[(nor expr ...)]{
+  Same as @racket[(not (or expr ...))].
+
+  In the two argument case, returns @racket[#t] if neither of the
+  arguments is a true value.
+  
+  @examples[#:eval 
+            bool-eval
+            (nor #f #t)
+            (nor #t (error 'ack "we don't get here"))]
+
+          
+}
+
+@defform[(implies expr1 expr2)]{
+  Checks to be sure that the first
+  expression implies the second.
+  
+  Same as @racket[(if expr1 expr2 #t)].
+  
+  @examples[#:eval 
+            bool-eval
+            (implies #f #t)
+            (implies #f #f)
+            (implies #t #f)
+            (implies #f (error 'ack "we don't get here"))]
+
+}
+
+@defproc[(xor [b1 any/c] [b2 any/c]) any]{
+  Returns the exclusive or of @racket[b1] and @racket[b2].
+
+  If exactly one of @racket[b1] and @racket[b2] is
+  not @racket[#f], then return it. Otherwise, returns
+  @racket[#f].
+  
+  @examples[#:eval
+            bool-eval
+            (xor 11 #f)
+            (xor #f 22)
+            (xor 11 22)
+            (xor #f #f)]
+
+}

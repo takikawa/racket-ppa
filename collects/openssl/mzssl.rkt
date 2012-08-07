@@ -37,19 +37,14 @@
 	   ssl-load-verify-root-certificates!
 	   ssl-load-suggested-certificate-authorities!
 
-     ssl-set-verify!
-           
-     ;sets the ssl server to try an verify certificates
-     ;it does not require verification though.
-     ssl-try-verify!
+           ssl-set-verify!
+           ssl-try-verify!
 
-     ;call on an ssl port, this will return true if the peer
-     ;presented a valid certificate and was verified
-     ssl-peer-verified?
-     ssl-peer-subject-name
-     ssl-peer-issuer-name
+           ssl-peer-verified?
+           ssl-peer-subject-name
+           ssl-peer-issuer-name
 
-     ports->ssl-ports
+           ports->ssl-ports
 
 	   ssl-listen
 	   ssl-close
@@ -138,6 +133,11 @@
   (define-ssl SSL_shutdown (_fun _SSL* -> _int))
   (define-ssl SSL_get_verify_result (_fun _SSL* -> _long))
   (define-ssl SSL_get_peer_certificate (_fun _SSL* -> _X509*))
+  (define-ssl SSL_set_verify (_fun _SSL* _int _pointer -> _void))
+  (define-ssl SSL_set_session_id_context (_fun _SSL* _bytes _int -> _int))
+  (define-ssl SSL_renegotiate (_fun _SSL* -> _int))
+  (define-ssl SSL_renegotiate_pending (_fun _SSL* -> _int))
+  (define-ssl SSL_do_handshake (_fun _SSL* -> _int))
   
   (define-crypto X509_get_subject_name (_fun _X509* -> _X509_NAME*))
   (define-crypto X509_get_issuer_name (_fun _X509* -> _X509_NAME*))
@@ -153,6 +153,7 @@
   
   (define X509_V_OK 0)
 
+  (define SSL_ERROR_SSL 1)
   (define SSL_ERROR_WANT_READ 2)
   (define SSL_ERROR_WANT_WRITE 3)
   (define SSL_ERROR_SYSCALL 5)
@@ -187,6 +188,26 @@
   ;; to #t to obey the manpage and retry without doing other things, which
   ;; has an implicitation for clients as noted at the top of this file.
   (define enforce-retry? #f)
+
+  ;; Needed for `renegotiate':
+  (define-cstruct _ssl_struct ([version _int]
+                               [type _int]
+                               [method _pointer]
+                               [rbio _pointer]
+                               [wbio _pointer]
+                               [bbio _pointer]
+                               [rwstate _int]
+                               [in_handshake _int]
+                               [handshake_func _fpointer]
+                               [server _int]
+                               [new_session _int]
+                               [quiet_shutdown _int]
+                               [shutdown _int]
+                               [state _int]
+                               ;; ...
+                               ))
+
+  (define SSL_ST_ACCEPT #x2000)
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Error handling
@@ -284,6 +305,33 @@
 	(make-bytes n)))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;; Errors
+
+  (define (do-save-errors thunk ssl)
+    ;; Atomically run a function and get error results
+    ;; so that this library is thread-safe (at the level of Racket threads)
+    (atomically
+     (define v (thunk))
+     (define e (if (positive? v)
+                   0
+                   (SSL_get_error ssl v)))
+     (define unknown "(unknown error)")
+     (define estr
+       (cond
+        [(= e SSL_ERROR_SSL)
+         (get-error-message (ERR_get_error))]
+        [(= e SSL_ERROR_SYSCALL)
+         (define v (ERR_get_error))
+         (if (zero? v)
+             unknown
+             (get-error-message v))]
+        [else unknown]))
+     (values v e estr)))
+
+  (define-syntax-rule (save-errors e ssl)
+    (do-save-errors (lambda () e) ssl))
+
+  ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Contexts, certificates, etc.
 
   (define default-encrypt 'sslv2-or-v3)
@@ -304,9 +352,9 @@
 		  TLSv1_server_method)]
        [else (escape-atomic
 	      (lambda ()
-		(raise-type-error 
+		(raise-argument-error 
 		 who
-		 (string-append also-expect "'sslv2-or-v3, 'sslv2, 'sslv3, or 'tls")
+		 (format "(or/c ~a'sslv2-or-v3 'sslv2 'sslv3 'tls)" also-expect)
 		 e)))])))
 
   (define (make-context who protocol-symbol also-expected client?)
@@ -328,36 +376,39 @@
   (define (get-context who context-or-encrypt-method client?)
     (if (ssl-context? context-or-encrypt-method)
 	(ssl-context-ctx context-or-encrypt-method)
-	(let ([ctx (SSL_CTX_new (encrypt->method who "context" context-or-encrypt-method client?))])
+	(let ([ctx (SSL_CTX_new (encrypt->method who "ssl-context? " context-or-encrypt-method client?))])
 	  (SSL_CTX_set_mode ctx SSL_MODE_ENABLE_PARTIAL_WRITE)
 	  ctx)))
 
-  (define (get-context/listener who ssl-context-or-listener)
+  (define (get-context/listener who ssl-context-or-listener [fail? #t])
     (cond
      [(ssl-context? ssl-context-or-listener)
       (ssl-context-ctx ssl-context-or-listener)]
      [(ssl-listener? ssl-context-or-listener)
       (ssl-context-ctx (ssl-listener-mzctx ssl-context-or-listener))]
      [else
-      (raise-type-error who
-			"SSL context or listener"
-			ssl-context-or-listener)]))
+      (if fail?
+          (raise-argument-error who
+                                "(or/c ssl-context? ssl-listener?)"
+                                ssl-context-or-listener)
+          #f)]))
 
   (define (ssl-load-... who load-it ssl-context-or-listener pathname)
     (let ([ctx (get-context/listener 'ssl-load-certificate-chain!
 				     ssl-context-or-listener)])
       (unless (path-string? pathname)
-	(raise-type-error 'ssl-load-certificate-chain!
-			  "path or string"
-			  pathname))
+	(raise-argument-error 'ssl-load-certificate-chain!
+                              "path-string?"
+                              pathname))
       (let ([path (path->bytes
 		   (path->complete-path (cleanse-path pathname)
 					(current-directory)))])
-	(let ([n (load-it ctx path)])
-	  (unless (= n 1)
-	    (error who "load failed from: ~e ~a"
-		   pathname
-		   (get-error-message (ERR_get_error))))))))
+        (atomically ;; for to connect ERR_get_error to `load-it'
+         (let ([n (load-it ctx path)])
+           (unless (= n 1)
+             (error who "load failed from: ~e ~a"
+                    pathname
+                    (get-error-message (ERR_get_error)))))))))
 
   (define (ssl-load-certificate-chain! ssl-context-or-listener pathname)
     (ssl-load-... 'ssl-load-certificate-chain! 
@@ -390,31 +441,79 @@
         (if asn1? SSL_FILETYPE_ASN1 SSL_FILETYPE_PEM)))
      ssl-context-or-listener pathname))
 
-  (define (ssl-set-verify! ssl-context-or-listener on?)
-    (let ([ctx (get-context/listener 'ssl-set-verify!
-				     ssl-context-or-listener)])
-      (SSL_CTX_set_verify ctx
-			  (if on?
-			      (bitwise-ior SSL_VERIFY_PEER 
-					   SSL_VERIFY_FAIL_IF_NO_PEER_CERT)
-			      SSL_VERIFY_NONE)
-			  #f)))
-   
-  (define (ssl-try-verify! ssl-context-or-listener on?)
-    (let ([ctx (get-context/listener 'ssl-set-verify!
-				     ssl-context-or-listener)])
-      
-      ;required by openssl. This is more for when calling i2d_SSL_SESSION/d2i_SSL_SESSION
-      ;for instance if we were saving sessions in a database etc... We aren't using that
-      ;so a generic session name should be fine.
-      (let ([bytes #"racket"])
-        (SSL_CTX_set_session_id_context ctx bytes (bytes-length bytes)))
-      
-      (SSL_CTX_set_verify ctx
-                          (if on?
-                              SSL_VERIFY_PEER
-                              SSL_VERIFY_NONE)
-                          #f)))
+  (define (ssl-try-verify! ssl-context-or-listener-or-port on?)
+    (do-ssl-set-verify! ssl-context-or-listener-or-port on?
+                        'ssl-try-verify!
+                        SSL_VERIFY_PEER))
+
+  (define (ssl-set-verify! ssl-context-or-listener-or-port on?)
+    (do-ssl-set-verify! ssl-context-or-listener-or-port on?
+                        'ssl-set-verify!
+                        (bitwise-ior SSL_VERIFY_PEER
+                                     SSL_VERIFY_FAIL_IF_NO_PEER_CERT)))
+
+  (define (do-ssl-set-verify! ssl-context-or-listener-or-port on? who mode)
+    (cond
+     [(get-context/listener who
+                            ssl-context-or-listener-or-port
+                            #f)
+      => (lambda (ctx)
+           ;; required by openssl. This is more for when calling i2d_SSL_SESSION/d2i_SSL_SESSION
+           ;; for instance if we were saving sessions in a database etc... We aren't using that
+           ;; so a generic session name should be fine.
+           (let ([bytes #"racket"])
+             (SSL_CTX_set_session_id_context ctx bytes (bytes-length bytes)))
+           
+           (SSL_CTX_set_verify ctx
+                               (if on?
+                                   mode
+                                   SSL_VERIFY_NONE)
+                               #f))]
+     [else
+      (let-values ([(mzssl input?) (lookup who "(or/c ssl-context? ssl-listener? ssl-port?)"
+                                           ssl-context-or-listener-or-port)])
+        (SSL_set_verify (mzssl-ssl mzssl)
+                        (if on?
+                            mode
+                            SSL_VERIFY_NONE)
+                        #f)
+        (let ([bytes #"racket"])
+          (SSL_set_session_id_context (mzssl-ssl mzssl) bytes (bytes-length bytes)))
+        (when on? (renegotiate who mzssl)))]))
+
+  (define (renegotiate who mzssl)
+    (define (check-err thunk) 
+      (let loop ()
+        (define-values (v err estr) (save-errors (thunk) (mzssl-ssl mzssl)))
+        (when (negative? v)
+          (cond
+           [(= err SSL_ERROR_WANT_READ)
+            (let ([n (pump-input-once mzssl #f)])
+              (if (eq? n 0)
+                  (let ([out-blocked? (pump-output mzssl)])
+                    (sync (mzssl-i mzssl) 
+                          (if out-blocked?
+                              (mzssl-o mzssl) 
+                              never-evt))
+                    (loop))
+                  (loop)))]
+           [(= err SSL_ERROR_WANT_WRITE)
+            (if (pump-output-once mzssl #f #f)
+                (loop)
+                (begin
+                  (sync (mzssl-o mzssl))
+                  (loop)))]
+           [else
+            (error who "failed: ~a" estr)]))))
+    (check-err (lambda () (SSL_renegotiate (mzssl-ssl mzssl))))
+    (check-err (lambda () (SSL_do_handshake (mzssl-ssl mzssl))))
+    ;; Really demanding a negotiation from the server side
+    ;; requires a hacky little dance:
+    (when (positive? (ssl_struct-server
+                      (cast (mzssl-ssl mzssl) _pointer _ssl_struct-pointer)))
+      (set-ssl_struct-state! (cast (mzssl-ssl mzssl) _pointer _ssl_struct-pointer)
+                             SSL_ST_ACCEPT)
+      (check-err (lambda () (SSL_do_handshake (mzssl-ssl mzssl))))))
   
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; SSL ports
@@ -499,10 +598,11 @@
        ;; read proc:
        (letrec ([do-read
 		 (lambda (buffer)
-		   (let ([out-blocked? (pump-output mzssl)]
-			 [len (or must-read-len (min (bytes-length xfer-buffer)
+		   (let ([len (or must-read-len (min (bytes-length xfer-buffer)
 						     (bytes-length buffer)))])
-		     (let ([n (SSL_read (mzssl-ssl mzssl) xfer-buffer len)])
+		     (let-values ([(n err estr) (save-errors
+                                                 (SSL_read (mzssl-ssl mzssl) xfer-buffer len)
+                                                 (mzssl-ssl mzssl))])
 		       (if (n . >= . 1)
 			   (begin
 			     (set! must-read-len #f)
@@ -516,7 +616,7 @@
 				     (write-bytes buffer got-w orig-n n)))
 				 (bytes-copy! buffer 0 xfer-buffer 0 n))
 			     n)
-			   (let ([err (SSL_get_error (mzssl-ssl mzssl) n)])
+			   (let ()
 			     (cond
 			      [(or (= err SSL_ERROR_ZERO_RETURN)
 				   (and (= err SSL_ERROR_SYSCALL) (zero? n)))
@@ -528,7 +628,7 @@
                                  (set! must-read-len len))
 			       (let ([n (pump-input-once mzssl #f)])
 				 (if (eq? n 0)
-				     (begin
+				     (let ([out-blocked? (pump-output mzssl)])
                                        (when enforce-retry?
                                          (set-mzssl-must-read! mzssl (make-semaphore)))
 				       (wrap-evt (choice-evt
@@ -551,7 +651,7 @@
                                (set! must-read-len #f)
 			       ((mzssl-error mzssl) 'read-bytes 
                                 "SSL read failed ~a"
-                                (get-error-message (ERR_get_error)))]))))))]
+                                estr)]))))))]
 		[top-read
 		 (lambda (buffer)
 		   (cond
@@ -663,7 +763,8 @@
 			   0)
 			 ;; Write request; even if blocking is ok, we treat
 			 ;;  it as non-blocking and let Racket handle blocking
-			 (let ([n (SSL_write (mzssl-ssl mzssl) xfer-buffer len)])
+			 (let-values ([(n err estr) (save-errors (SSL_write (mzssl-ssl mzssl) xfer-buffer len)
+                                                                 (mzssl-ssl mzssl))])
 			   (if (n . > . 0)
 			       (begin
 				 (set! must-write-len #f)
@@ -680,14 +781,14 @@
 				   ;;  through (even though we're allowed to buffer):
 				   (flush-ssl mzssl enable-break?)])
 				 n)
-			       (let ([err (SSL_get_error (mzssl-ssl mzssl) n)])
+			       (let ()
 				 (cond
 				  [(= err SSL_ERROR_WANT_READ)
                                    (when enforce-retry?
                                      (set! must-write-len len))
 				   (let ([n (pump-input-once mzssl #f)])
 				     (if (eq? n 0)
-					 (begin
+					 (let ([out-blocked? (pump-output mzssl)])
                                            (when enforce-retry?
                                              (set-mzssl-must-write! mzssl (make-semaphore)))
 					   (wrap-evt (choice-evt
@@ -702,15 +803,18 @@
                                      (set! must-write-len len))
 				   (if (pump-output-once mzssl #f #f)
 				       (do-write len non-block? enable-break?)
-				       (begin
-                                         (when enforce-retry?
-                                           (set-mzssl-must-write! mzssl (make-semaphore)))
-					 (wrap-evt (mzssl-o mzssl) (lambda (x) #f))))]
+                                       (let ([n (pump-input-once mzssl #f)])
+                                         (if (positive? n)
+                                             (do-write len non-block? enable-break?)
+                                             (begin
+                                               (when enforce-retry?
+                                                 (set-mzssl-must-write! mzssl (make-semaphore)))
+                                               (wrap-evt (mzssl-o mzssl) (lambda (x) #f))))))]
 				  [else
 				   (set! must-write-len #f)
 				   ((mzssl-error mzssl) 'write-bytes 
                                     "SSL write failed ~a"
-                                    (get-error-message (ERR_get_error)))])))))))]
+                                    estr)])))))))]
 		[top-write
 		 (lambda (buffer s e non-block? enable-break?)
 		   (cond
@@ -776,27 +880,33 @@
 		     ;; issue shutdown (i.e., EOF on read end)
 		     (when (mzssl-shutdown-on-close? mzssl)
 		       (let loop ([cnt 0])
-			 (let ([out-blocked? (flush-ssl mzssl #f)])
-			   (let ([n (SSL_shutdown (mzssl-ssl mzssl))])
-			     (unless (= n 1)
-			       (let ([err (SSL_get_error (mzssl-ssl mzssl) n)])
-				 (cond
-				  [(= err SSL_ERROR_WANT_READ)
-				   (pump-input-once mzssl (if out-blocked? (mzssl-o mzssl) #t))
-				   (loop cnt)]
-				  [(= err SSL_ERROR_WANT_WRITE)
-				   (pump-output-once mzssl #t #f)
-				   (loop cnt)]
-				  [else
-				   (if (= n 0)
-				       ;; When 0 is returned, the SSL object doesn't correctly
-				       ;; report what it wants (e.g., a write). Send everything
-				       ;; out that we have and try again, up to 10 times.
-				       (unless (cnt . >= . 10)
-					 (loop (add1 cnt)))
-				       ((mzssl-error mzssl) 'read-bytes 
+			 (let ()
+                           (flush-ssl mzssl #f)
+			   (let-values ([(n err estr) (save-errors (SSL_shutdown (mzssl-ssl mzssl))
+                                                                   (mzssl-ssl mzssl))])
+                             
+                             (if (= n 1)
+                                 (flush-ssl mzssl #f)
+                                 (cond
+                                  [(= err SSL_ERROR_WANT_READ)
+                                   (let ([out-blocked? (pump-output mzssl)])
+                                     (pump-input-once mzssl (if out-blocked? (mzssl-o mzssl) #t)))
+                                   (loop cnt)]
+                                  [(= err SSL_ERROR_WANT_WRITE)
+                                   (pump-output-once mzssl #t #f)
+                                   (loop cnt)]
+                                  [else
+                                   (if (= n 0)
+                                       ;; When 0 is returned, a shutdown depends on
+                                       ;; input from the peer. If we've already tried twice,
+                                       ;; wait for some input and try again.
+                                       (begin
+                                         (when (cnt . >= . 2)
+                                           (pump-input-once mzssl #t))
+                                         (loop (add1 cnt)))
+                                       ((mzssl-error mzssl) 'read-bytes 
                                         "SSL shutdown failed ~a"
-                                        (get-error-message (ERR_get_error))))])))))))
+                                        estr))]))))))
 		     (set-mzssl-w-closed?! mzssl #t)
 		     (mzssl-release mzssl)
 		     #f]))]
@@ -844,8 +954,8 @@
 			  [else
 			   (escape-atomic
 			    (lambda ()
-			      (raise-type-error who "'connect or 'accept" 
-						connect/accept)))])]
+			      (raise-argument-error who "(or/c 'connect 'accept)"
+                                                    connect/accept)))])]
 	      [r-bio (BIO_new (BIO_s_mem))]
 	      [w-bio (BIO_new (BIO_s_mem))]
 	      [free-bio? #t])
@@ -887,9 +997,9 @@
 
   (define (wrap-ports who i o context-or-encrypt-method connect/accept close? shutdown-on-close? error/ssl)
     (unless (input-port? i)
-      (raise-type-error who "input port" i))
+      (raise-argument-error who "input-port?" i))
     (unless (output-port? o)
-      (raise-type-error who "output port" o))
+      (raise-argument-error who "output-port?" o))
     ;; Create the SSL connection:
     (let-values ([(ssl cancel r-bio w-bio connect?)
 		  (create-ssl who context-or-encrypt-method connect/accept error/ssl)])
@@ -905,12 +1015,13 @@
 				 cancel
                                  error/ssl)])
 	  (let loop ()
-	    (let ([status (if connect?
-			      (SSL_connect ssl)
-			      (SSL_accept ssl))])
+	    (let-values ([(status err estr) (save-errors (if connect?
+                                                             (SSL_connect ssl)
+                                                             (SSL_accept ssl))
+                                                         ssl)])
 	      (let ([out-blocked? (pump-output mzssl)])
 		(when (status . < . 1)
-		  (let ([err (SSL_get_error ssl status)])
+		  (let ()
 		    (cond
 		     [(= err SSL_ERROR_WANT_READ)
 		      (let ([n (pump-input-once mzssl (if out-blocked? o #t))])
@@ -924,7 +1035,7 @@
 		     [else
 		      (error/ssl who "~a failed ~a"
                                  (if connect? "connect" "accept")
-                                 (get-error-message (ERR_get_error)))]))))))
+                                 estr)]))))))
 	  ;; Connection complete; make ports
 	  (values (register (make-ssl-input-port mzssl) mzssl #t)
 		  (register (make-ssl-output-port mzssl) mzssl #f))))))
@@ -941,31 +1052,31 @@
   (define (lookup who what port)
     (let ([v (hash-ref ssl-ports port #f)])
       (unless v
-	(raise-type-error who what port))
+	(raise-argument-error who what port))
       (let ([p (ephemeron-value v)])
 	(values (car p) (cdr p)))))
 
   (define (ssl-addresses p [port-numbers? #f])
-    (let-values ([(mzssl input?) (lookup 'ssl-addresses "SSL port or listener" p)])
+    (let-values ([(mzssl input?) (lookup 'ssl-addresses "(or/c ssl-port? ssl-listener?)" p)])
       (tcp-addresses (if (eq? 'listener input?)
                          (ssl-listener-l mzssl)
                          (if input? (mzssl-i mzssl) (mzssl-o mzssl)))
                      port-numbers?)))
 
   (define (ssl-abandon-port p)
-    (let-values ([(mzssl input?) (lookup 'ssl-abandon-port "SSL output port" p)])
+    (let-values ([(mzssl input?) (lookup 'ssl-abandon-port "(and/c ssl-port? output-port?)" p)])
       (when input?
-	(raise-type-error 'ssl-abandon-port "SSL output port" p))
+	(raise-argument-error 'ssl-abandon-port "(and/c ssl-port? output-port?)" p))
       (set-mzssl-shutdown-on-close?! mzssl #f)))
   
   (define (ssl-peer-verified? p)
-    (let-values ([(mzssl input?) (lookup 'ssl-peer-verified? "SSL port" p)])
+    (let-values ([(mzssl input?) (lookup 'ssl-peer-verified? "ssl-port?" p)])
       (and (eq? X509_V_OK (SSL_get_verify_result (mzssl-ssl mzssl)))
            (SSL_get_peer_certificate (mzssl-ssl mzssl))
            #t)))
   
   (define (ssl-peer-subject-name p)
-    (let-values ([(mzssl input?) (lookup 'ssl-peer-subject-name "SSL port" p)])
+    (let-values ([(mzssl input?) (lookup 'ssl-peer-subject-name "ssl-port?" p)])
       (let ([cert (SSL_get_peer_certificate (mzssl-ssl mzssl))])
         (if cert
             (let ([bytes (make-bytes 1024 0)])
@@ -973,7 +1084,7 @@
             #f))))
   
   (define (ssl-peer-issuer-name p)
-    (let-values ([(mzssl input?) (lookup 'ssl-peer-subject-name "SSL port" p)])
+    (let-values ([(mzssl input?) (lookup 'ssl-peer-subject-name "ssl-port?" p)])
       (let ([cert (SSL_get_peer_certificate (mzssl-ssl mzssl))])
         (if cert
             (let ([bytes (make-bytes 1024 0)])
@@ -999,7 +1110,7 @@
 
   (define (ssl-close l)
     (unless (ssl-listener? l)
-      (raise-type-error 'ssl-close "SSL listener" l))
+      (raise-argument-error 'ssl-close "ssl-listener?" l))
     (tcp-close (ssl-listener-l l)))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

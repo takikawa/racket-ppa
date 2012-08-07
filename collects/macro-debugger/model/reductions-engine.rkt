@@ -540,17 +540,13 @@
            [expected-datum (stx->datum expected)]
            [same-form? (equal? actual-datum expected-datum)])
       (if same-form?
-          (fprintf (current-error-port)
-                   "same form but wrong wrappings:\n~.s\nwrongness:\n~.s\n"
+          (eprintf "same form but wrong wrappings:\n~.s\nwrongness:\n~.s\n"
                    actual-datum
                    (wrongness actual expected))
-          (fprintf (current-error-port)
-                   "got:\n~.s\n\nexpected:\n~.s\n"
+          (eprintf "got:\n~.s\n\nexpected:\n~.s\n"
                    actual-datum
                    expected-datum))
-      (for ([d derivs])
-        (fprintf (current-error-port)
-                 "\n~.s\n" d))
+      (for ([d derivs]) (eprintf "\n~.s\n" d))
       (error function
              (if same-form?
                  "wrong starting point (wraps)!"
@@ -573,7 +569,7 @@
     [id (identifier? #'id) (list #'id)]
     [() null]
     [(x . y) (append (flatten-identifiers #'x) (flatten-identifiers #'y))]
-    [else (error 'flatten-identifers "neither syntax list nor identifier: ~s"
+    [else (error 'flatten-identifiers "neither syntax list nor identifier: ~s"
                  (if (syntax? stx)
                      (syntax->datum stx)
                      stx))]))

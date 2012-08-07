@@ -28,6 +28,11 @@
                "")
            index)))
 
+(define (check-nonempty who n)
+  (unless (> n 0)
+    (error who "empty")))
+
+
 (define ((bad-index-error who index))
   (raise-mismatch-error who "index out of range" index))
 
@@ -66,6 +71,16 @@
            (set-gvector-n! gv (sub1 n))
            (vector-copy! v index v (add1 index) n)
            (vector-set! v (sub1 n) #f)])))
+
+(define (gvector-remove-last! gv)
+  (let ([n (gvector-n gv)]
+        [v (gvector-vec gv)])
+    (check-nonempty 'gvector-remove-last! n)
+    (define last-val (vector-ref v (sub1 n)))
+    (set-gvector-n! gv (sub1 n))
+    (vector-set! v (sub1 n) #f)
+    last-val))
+
 
 (define (gvector-count gv)
   (gvector-n gv))
@@ -177,25 +192,24 @@
                                      any/c
                                      exact-nonnegative-integer?
                                      #f #f #f))
-  #:property prop:equal+hash
-             (let ([equals
-                    (lambda (x y recursive-equal?)
-                      (let ([vx (gvector-vec x)]
-                            [vy (gvector-vec y)]
-                            [nx (gvector-n x)]
-                            [ny (gvector-n y)])
-                        (and (= nx ny)
-                             (for/and ([index (in-range nx)])
-                               (recursive-equal? (vector-ref vx index)
-                                                 (vector-ref vy index))))))]
-                   [hash-code
-                    (lambda (x hc)
-                      (let ([v (gvector-vec x)]
-                            [n (gvector-n x)])
-                        (for/fold ([h 1]) ([i (in-range n)])
-                          ;; FIXME: better way of combining hashcodes
-                          (+ h (hc (vector-ref v i))))))])
-               (list equals hash-code hash-code))
+  #:methods gen:equal+hash
+  [(define (equal-proc x y recursive-equal?)
+     (let ([vx (gvector-vec x)]
+           [vy (gvector-vec y)]
+           [nx (gvector-n x)]
+           [ny (gvector-n y)])
+       (and (= nx ny)
+            (for/and ([index (in-range nx)])
+              (recursive-equal? (vector-ref vx index)
+                                (vector-ref vy index))))))
+   (define (hash-code x hc)
+     (let ([v (gvector-vec x)]
+           [n (gvector-n x)])
+       (for/fold ([h 1]) ([i (in-range n)])
+         ;; FIXME: better way of combining hashcodes
+         (+ h (hc (vector-ref v i))))))
+   (define hash-proc  hash-code)
+   (define hash2-proc hash-code)]
   #:property prop:sequence in-gvector)
 
 (provide/contract
@@ -213,6 +227,8 @@
   (->* (gvector?) () #:rest any/c any)]
  [gvector-remove!
   (-> gvector? exact-nonnegative-integer? any)]
+ [gvector-remove-last!
+  (-> gvector? any)]
  [gvector-count
   (-> gvector? any)]
  [gvector->vector

@@ -1,10 +1,9 @@
 #lang scheme/base
 (require "test-utils.rkt" (for-syntax scheme/base)
-         racket/set
          (utils tc-utils)
          (env type-alias-env type-env-structs tvar-env type-name-env init-envs)
          (rep type-rep)
-         (rename-in (types comparison subtype union utils convenience)
+         (rename-in (types subtype union utils convenience)
                     [Un t:Un] [-> t:->] [->* t:->*])
          (base-env base-types base-types-extra colon)
          (for-template (base-env base-types base-types-extra base-env colon))
@@ -29,6 +28,8 @@
   (let ([nm (car pr)]
         [ty (cdr pr)])
     (register-resolved-type-alias (datum->syntax #'here (syntax->datum nm)) ty)))
+
+(dynamic-require '(submod typed-racket/base-env/base-types #%type-decl) #f)
 
 (define-syntax (run-one stx)
   (syntax-case stx ()
@@ -108,7 +109,7 @@
 
    [(Listof Number) (make-Listof  N)]
 
-   [a (-v a) (set-add initial-tvar-env 'a)]
+   [a (-v a) (cons 'a initial-tvar-env)]
    [(All (a ...) (a ... -> Number))
     (-polydots (a) ((list) [a a] . ->... . N))]
 

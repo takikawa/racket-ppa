@@ -12,9 +12,13 @@
 (provide (activate-contract-out
           plt-logo plt-flomap
           planet-logo planet-flomap
+          racket-logo racket-flomap
           stepper-logo stepper-flomap
           macro-stepper-logo macro-stepper-logo-flomap)
          (only-doc-out (all-defined-out)))
+
+;; ===================================================================================================
+;; PLT logo
 
 (define glass-logo-material
   (deep-flomap-material-value
@@ -106,32 +110,32 @@
   (match-define (flomap _ c w h) fm)
   (fm+ fm (fm* z-amt (make-random-flomap c w h))))
 
-(defproc (plt-flomap [height (and/c rational? (>=/c 0)) 256]) flomap?
+(defproc (plt-flomap [#:height height (and/c rational? (>=/c 0)) 256]) flomap?
   (make-cached-flomap
    [height]
    (define scale (/ height 256))
    (define bulge-fm
      (draw-icon-flomap
-      256 256 (λ (dc)
-                (send dc set-pen logo-red-color 2 'transparent)
-                (send dc set-brush logo-red-color 'solid)
-                (send dc draw-path (make-arc-path 8 8 239 239 blue-θ-end blue-θ-start))
-                (send dc set-pen logo-blue-color 2 'transparent)
-                (send dc set-brush logo-blue-color 'solid)
-                (send dc draw-path (make-arc-path 8 8 239 239 blue-θ-start blue-θ-end))
-                (send dc set-pen (lambda-pen lambda-outline-color 10))
-                (send dc set-brush lambda-outline-color 'solid)
-                (draw-lambda dc 8 8 240 240))
-      scale))
+      (λ (dc)
+        (send dc set-pen logo-red-color 2 'transparent)
+        (send dc set-brush logo-red-color 'solid)
+        (send dc draw-path (make-arc-path 8 8 239 239 blue-θ-end blue-θ-start))
+        (send dc set-pen logo-blue-color 2 'transparent)
+        (send dc set-brush logo-blue-color 'solid)
+        (send dc draw-path (make-arc-path 8 8 239 239 blue-θ-start blue-θ-end))
+        (send dc set-pen (lambda-pen lambda-outline-color 10))
+        (send dc set-brush lambda-outline-color 'solid)
+        (draw-lambda dc 8 8 240 240))
+      256 256 scale))
    
    (define (lambda-flomap color pen-width)
      (draw-icon-flomap
-      256 256 (λ (dc)
-                (send dc set-scale scale scale)
-                (send dc set-pen (lambda-pen color pen-width))
-                (send dc set-brush color 'solid)
-                (draw-lambda dc 8 8 240 240))
-      scale))
+      (λ (dc)
+        (send dc set-scale scale scale)
+        (send dc set-pen (lambda-pen color pen-width))
+        (send dc set-brush color 'solid)
+        (draw-lambda dc 8 8 240 240))
+      256 256 scale))
    
    (let* ([bulge-dfm  (flomap->deep-flomap bulge-fm)]
           [bulge-dfm  (deep-flomap-bulge-spheroid bulge-dfm (* 112 scale))]
@@ -146,15 +150,19 @@
                 lambda-fm)]
           [fm  (flomap-cc-superimpose
                 (draw-icon-flomap
-                 256 256 (λ (dc)
-                           (send dc set-pen "lightblue" 2 'solid)
-                           (send dc set-brush "white" 'transparent)
-                           (send dc draw-ellipse 7 7 242 242)
-                           (send dc set-pen lambda-outline-color 4 'solid)
-                           (send dc draw-ellipse 2 2 252 252))
-                 scale)
+                 (λ (dc)
+                   (send dc set-pen lambda-outline-color 1/2 'solid)
+                   (send dc set-brush "white" 'solid)
+                   (send dc draw-ellipse -0.25 -0.25 31.5 31.5)
+                   (send dc set-pen "lightblue" 1/2 'solid)
+                   (send dc set-brush "white" 'transparent)
+                   (send dc draw-ellipse 0.5 0.5 30 30))
+                 32 32 (/ height 32))
                 fm)])
      fm)))
+
+;; ===================================================================================================
+;; Planet logo
 
 (define continents-path-commands
   '((m 11.526653 18.937779)
@@ -244,32 +252,31 @@
 (define (continents-flomap color height)
   (define scale (/ height 32))
   (draw-icon-flomap
-   32 32 (λ (dc)
-           (send dc set-pen lambda-outline-color 3/8 'solid)
-           (send dc set-brush color 'solid)
-           (draw-path-commands dc continents-path-commands 0 -17))
-   scale))
+   (λ (dc)
+     (send dc set-pen lambda-outline-color 3/8 'solid)
+     (send dc set-brush color 'solid)
+     (draw-path-commands dc continents-path-commands 0 -17))
+   32 32 scale))
 
-(defproc (planet-flomap [height (and/c rational? (>=/c 0)) 256]) flomap?
+(defproc (planet-flomap [#:height height (and/c rational? (>=/c 0)) 256]) flomap?
   (make-cached-flomap
    [height]
    (define scale (/ height 32))
-   (define-values (earth-fm earth-z)
+   (define earth-fm
      (let* ([indent-fm  (continents-flomap logo-red-color height)]
             [indent-dfm  (flomap->deep-flomap indent-fm)]
             [indent-dfm  (deep-flomap-raise indent-dfm (* -1/8 scale))]
             [indent-dfm  (deep-flomap-smooth-z indent-dfm (* 1 scale))]
             [earth-fm  (draw-icon-flomap
-                        32 32 (λ (dc)
-                                (send dc set-pen logo-water-color 1/2 'solid)
-                                (send dc set-brush logo-water-color 'solid)
-                                (draw-ellipse/smoothed dc 0.75 0.75 30.5 30.5))
-                        scale)]
+                        (λ (dc)
+                          (send dc set-pen logo-water-color 1/2 'solid)
+                          (send dc set-brush logo-water-color 'solid)
+                          (send dc draw-ellipse 0.75 0.75 29.5 29.5))
+                        32 32 scale)]
             [earth-dfm  (flomap->deep-flomap earth-fm)]
             [earth-dfm  (deep-flomap-bulge-spheroid earth-dfm (* 16 scale))]
             [earth-dfm  (deep-flomap-cc-superimpose 'add earth-dfm indent-dfm)])
-       (values (deep-flomap-render-icon earth-dfm water-logo-material)
-               (deep-flomap-z earth-dfm))))
+       (deep-flomap-render-icon earth-dfm water-logo-material)))
    
    (define land-fm
      (let* ([land-fm  (continents-flomap logo-continents-color height)]
@@ -281,34 +288,131 @@
    
    (flomap-cc-superimpose
     (draw-icon-flomap
-     32 32 (λ (dc)
-             (send dc set-pen "lightblue" 1/2 'solid)
-             (send dc set-brush "white" 'transparent)
-             (send dc draw-ellipse 0.5 0.5 31 31)
-             (send dc set-pen lambda-outline-color 1/2 'solid)
-             (send dc draw-ellipse -0.25 -0.25 32.5 32.5))
-     scale)
+     (λ (dc)
+       (send dc set-pen lambda-outline-color 1/2 'solid)
+       (send dc set-brush "white" 'solid)
+       (send dc draw-ellipse -0.25 -0.25 31.5 31.5)
+       (send dc set-pen "lightblue" 1/2 'solid)
+       (send dc set-brush "white" 'transparent)
+       (send dc draw-ellipse 0.5 0.5 30 30))
+     32 32 scale)
     earth-fm
     land-fm)))
 
-(defproc (stepper-flomap [height (and/c rational? (>=/c 0)) 96]) flomap?
+;; ===================================================================================================
+;; Algebraic stepper logo
+
+(defproc (stepper-flomap [#:height height (and/c rational? (>=/c 0)) 96]) flomap?
   (flomap-pin*
    1/2 20/32 1/2 1/2
-   (foot-flomap "forestgreen" height glass-icon-material)
-   (lambda-flomap light-metal-icon-color (* 5/8 height) metal-icon-material)))
+   (foot-flomap #:color "forestgreen" #:height height #:material glass-icon-material)
+   (lambda-flomap #:color light-metal-icon-color
+                  #:height (* 5/8 height) #:material metal-icon-material)))
 
-(defproc (macro-stepper-logo-flomap [height (and/c rational? (>=/c 0)) 96]) flomap?
+;; ===================================================================================================
+;; Macro stepper logo
+
+(defproc (macro-stepper-logo-flomap [#:height height (and/c rational? (>=/c 0)) 96]) flomap?
   (flomap-pin*
    1/2 20/32 15/36 1/2
-   (foot-flomap (make-object color% 34 42 160) height glass-icon-material)
-   (hash-quote-flomap light-metal-icon-color (* 1/2 height) metal-icon-material)))
+   (foot-flomap #:color (make-object color% 34 42 160) #:height height #:material glass-icon-material)
+   (hash-quote-flomap #:color light-metal-icon-color
+                      #:height (* 1/2 height)
+                      #:material metal-icon-material)))
+
+;; ===================================================================================================
+;; Racket logo
+
+(define racket-r-commands
+  (scale-path-commands
+   '((m 4 76)
+     (c 12 28 20 56 28 92
+        5.560411 25.02185 4 44.00002 12 76.00002
+        20 0 39.835333 -8 56 -24
+        -20 -36.00004 -28 -72.00002 -28 -108.00002
+        60 -40 96 -44 144 -40
+        6 -12 16.19861 -35.94773 16 -48
+        -60 -4 -112 4 -168 48
+        -1 -12 -0.958295 -20 0 -28
+        -28 4 -44 12 -60 32))
+   1/8 1/8))
+
+(define racket-r-outline-color (make-object color% 64 16 16))
+
+(define (racket-r-flomap color height)
+  (draw-icon-flomap
+   (λ (dc)
+     (set-icon-pen dc racket-r-outline-color 3/8 'solid)
+     (send dc set-brush color 'solid)
+     (draw-path-commands dc racket-r-commands 0 0))
+   32 32 (/ height 32)))
+
+(define racket-sphere-material
+  (deep-flomap-material-value
+   'cubic-zirconia 0.75 0.75 0.75
+   3.5 0.25 0.25
+   0.5 0.25 0.0
+   0.01))
+
+(defproc (racket-flomap [#:height height (and/c rational? (>=/c 0)) 256]) flomap?
+  (make-cached-flomap
+   [height]
+   (define scale (/ height 32))
+   (define sphere-fm
+     (let* ([indent-fm  (racket-r-flomap racket-r-outline-color height)]
+            [indent-dfm  (flomap->deep-flomap indent-fm)]
+            [indent-dfm  (deep-flomap-raise indent-dfm (* -0.75 scale))]
+            [indent-dfm  (deep-flomap-smooth-z indent-dfm (* 0.5 scale))]
+            [sphere-fm  (draw-icon-flomap
+                         (λ (dc)
+                           (define top-rgn (make-object region% dc))
+                           (send top-rgn set-polygon
+                                 '((0 . 0) (31 . 0) (31 . 4) (5 . 13) (8 . 31) (0 . 31)))
+                           
+                           (send dc set-pen logo-blue-color 1/2 'solid)
+                           (send dc set-brush logo-blue-color 'solid)
+                           (send dc draw-ellipse 0.75 0.75 29.5 29.5)
+                           
+                           (send dc set-clipping-region top-rgn)
+                           (send dc set-pen logo-red-color 1/2 'solid)
+                           (send dc set-brush logo-red-color 'solid)
+                           (send dc draw-ellipse 0.75 0.75 29.5 29.5))
+                         32 32 scale)]
+            [sphere-dfm  (flomap->deep-flomap sphere-fm)]
+            [sphere-dfm  (deep-flomap-bulge-spheroid sphere-dfm (* 14 scale))]
+            [sphere-dfm  (deep-flomap-cc-superimpose 'add sphere-dfm indent-dfm)])
+       (deep-flomap-render-icon sphere-dfm glass-logo-material)))
+   
+   (define r-fm
+     (let* ([r-fm  (racket-r-flomap light-metal-icon-color height)]
+            [r-dfm  (flomap->deep-flomap r-fm)]
+            [r-dfm  (deep-flomap-bulge-round r-dfm (* 48 scale))]
+            [r-dfm  (deep-flomap-smooth-z r-dfm (* 1/2 scale))])
+       (deep-flomap-render-icon r-dfm metal-material)))
+   
+   (flomap-cc-superimpose
+    (draw-icon-flomap
+     (λ (dc)
+       (send dc set-pen racket-r-outline-color 1/2 'solid)
+       (send dc set-brush "white" 'solid)
+       (send dc draw-ellipse -0.25 -0.25 31.5 31.5)
+       (send dc set-pen "lightblue" 1/2 'solid)
+       (send dc set-brush "white" 'transparent)
+       (send dc draw-ellipse 0.5 0.5 30 30))
+     32 32 scale)
+    sphere-fm
+    r-fm)))
+
+;; ===================================================================================================
+;; Bitmaps
 
 (define-icon-wrappers
-  ([height (and/c rational? (>=/c 0)) 256])
-  [plt-logo plt-flomap])
+  ([#:height height (and/c rational? (>=/c 0)) 256])
+  [plt-logo plt-flomap]
+  [racket-logo racket-flomap])
 
 (define-icon-wrappers
-  ([height (and/c rational? (>=/c 0)) 96])
+  ([#:height height (and/c rational? (>=/c 0)) 96])
   [planet-logo planet-flomap]
   [stepper-logo stepper-flomap]
   [macro-stepper-logo macro-stepper-logo-flomap])

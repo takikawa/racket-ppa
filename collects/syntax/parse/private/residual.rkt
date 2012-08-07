@@ -48,6 +48,7 @@
 (provide (all-from-out "runtime-progress.rkt")
 
          this-syntax
+         this-role
          this-context-syntax
          attribute
          attribute-binding
@@ -67,6 +68,10 @@
 ;; this-syntax
 ;; Bound to syntax being matched inside of syntax class
 (define-syntax-parameter this-syntax
+  (lambda (stx)
+    (raise-syntax-error #f "used out of context: not within a syntax class" stx)))
+
+(define-syntax-parameter this-role
   (lambda (stx)
     (raise-syntax-error #f "used out of context: not within a syntax class" stx)))
 
@@ -192,3 +197,30 @@
 (lazy-require
  ["runtime-report.rkt"
   (syntax-patterns-fail)])
+
+;; == specialized ellipsis parser
+;; returns (values 'ok attr-values) or (values 'fail failure)
+
+(provide predicate-ellipsis-parser)
+
+(define (predicate-ellipsis-parser x cx pr es pred? desc rl)
+  (let ([elems (stx->list x)])
+    (if (and elems (list? elems) (andmap pred? elems))
+        (values 'ok elems)
+        (let loop ([x x] [cx cx] [i 0])
+          (cond [(syntax? x)
+                 (loop (syntax-e x) x i)]
+                [(pair? x)
+                 (if (pred? (car x))
+                     (loop (cdr x) cx (add1 i))
+                     (let* ([pr (ps-add-cdr pr i)]
+                            [pr (ps-add-car pr)]
+                            [es (es-add-thing pr desc #t rl es)])
+                       (values 'fail (failure pr es))))]
+                [else ;; not null, because stx->list failed
+                 (let ([pr (ps-add-cdr pr i)]
+                       #|
+                       ;; Don't extend es! That way we don't get spurious "expected ()"
+                       ;; that *should* have been cancelled out by ineffable pair failures.
+                       |#)
+                   (values 'fail (failure pr es)))])))))

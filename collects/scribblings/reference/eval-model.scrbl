@@ -137,7 +137,7 @@ Most @tech{continuations} expect a particular number of result
 2))] accepts any number of result @tech{values}, because it ignores
 the result(s).
 
-In general, the specification of a syntactic form inidicates the
+In general, the specification of a syntactic form indicates the
 number of @tech{values} that it produces and the number that it
 expects from each of its sub-expression. In addition, some procedures
 (notably @racket[values]) produce multiple @tech{values}, and some
@@ -502,7 +502,7 @@ both @racket[y] and @racket[x] are @tech{variables}. The @racket[y]
 a @tech{local variable}. When this code is evaluated, a
 @tech{location} is created for @racket[x] to hold the value
 @racket[5], and a @tech{location} is also created for @racket[y] to
-hold the value @racket[6].
+hold the value @racket[11].
 
 The replacement of a @tech{variable} with a @tech{location} during
 evaluation implements Racket's @deftech{lexical scoping}. For example,
@@ -595,7 +595,7 @@ within modules. For example, @racket[define] within @racket[begin-for-syntax] cr
 @tech{phase} 1 variable. Furthermore, reflective operations like
 @racket[make-base-namespace] and @racket[eval] provide access to
 top-level variables in higher @tech{phases}, while module
-@tech{instantiations} (triggered by with @racket[require]) relative to such
+@tech{instantiations} (triggered by @racket[require]) relative to such
 top-levels are in corresponding higher @tech{phase}s.
 
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -614,6 +614,32 @@ declaration, it effectively assigns to the old variable.
 If a module is @tech{instantiate}d in any @tech{phase}s before it is
 re-declared, each re-declaration of the module is immediately
 @tech{instantiate}d in the same @tech{phase}s.
+
+@;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+@subsection[#:tag "submodules"]{Submodules}
+
+A @racket[module] or @racket[module*] form within a top-level
+@racket[module] form declares a @deftech{submodule}. A submodule is
+accessed relative to its enclosing module, usually with a
+@racket[submod] path. Submodules can be nested to any depth.
+
+Although a submodule is lexically nested within a module, it cannot
+necessarily access the bindings of its enclosing module directly.
+More specifically, a submodule declared with @racket[module] cannot
+@racket[require] from its enclosing module, but the enclosing module
+can @racket[require] the submodule. In contrast, a submodule declared
+with @racket[module*] conceptually follows its enclosing module, so
+can @racket[require] from its enclosing module, but the enclosing
+module cannot @racket[require] the submodule. Unless a submodule
+imports from its enclosing module or vice-versa, then @tech{visits} or
+@tech{instantiations} of the two modules are independent, and thier
+implementations may even be loaded from bytecode at different times.
+
+When a submodule declaration has the form @racket[(module* _name #f
+....)], then all of the bindings of the enclosing module's bodies are
+visible in the submodule's body, and the submodule implicitly imports
+the enclosing module. The submodule can @racket[provide] any bindings
+that it inherits from its enclosing module.
 
 @;------------------------------------------------------------------------
 @section[#:tag "mark-model"]{Continuation Frames and Marks}

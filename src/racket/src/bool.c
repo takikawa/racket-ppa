@@ -83,20 +83,24 @@ void scheme_init_bool (Scheme_Env *env)
 
   p = scheme_make_folding_prim(not_prim, "not", 1, 1, 1);
   scheme_not_prim = p;
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("not", p, env);
 
   p = scheme_make_folding_prim(boolean_p_prim, "boolean?", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("boolean?", p, env);
 
   p = scheme_make_folding_prim(eq_prim, "eq?", 2, 2, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_eq_prim = p;
   scheme_add_global_constant("eq?", p, env);
 
   p = scheme_make_folding_prim(eqv_prim, "eqv?", 2, 2, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_eqv_prim = p;
   scheme_add_global_constant("eqv?", scheme_eqv_prim, env);
   
@@ -110,11 +114,13 @@ void scheme_init_bool (Scheme_Env *env)
                              env);
 
   p = scheme_make_immed_prim(chaperone_p, "chaperone?", 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("chaperone?", p, env);
 
   p = scheme_make_immed_prim(impersonator_p, "impersonator?", 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("impersonator?", p, env);
 
   scheme_add_global_constant("chaperone-of?",
@@ -764,18 +770,22 @@ static Scheme_Object *apply_impersonator_of(int for_chaperone, Scheme_Object *pr
   
   oprocs = scheme_struct_type_property_ref(scheme_impersonator_of_property, v);  
   if (!oprocs || !SAME_OBJ(SCHEME_CAR(oprocs), SCHEME_CAR(procs)))
-    scheme_arg_mismatch((for_chaperone ? "impersonator-of?" : "equal?"),
-                        "impersonator-of property procedure returned a value with a different prop:impersonator-of source: ",
-                        v);
+    scheme_contract_error((for_chaperone ? "impersonator-of?" : "equal?"),
+                          "impersonator-of property procedure returned a value with a different prop:impersonator-of source",
+                          "original value", 1, obj,
+                          "returned value", 1, v,
+                          NULL);
 
   procs = scheme_struct_type_property_ref(scheme_equal_property, obj);
   oprocs = scheme_struct_type_property_ref(scheme_equal_property, v);  
   if (procs || oprocs)
     if (!procs || !oprocs || !SAME_OBJ(SCHEME_VEC_ELS(oprocs)[0], 
                                        SCHEME_VEC_ELS(procs)[0]))
-      scheme_arg_mismatch((for_chaperone ? "impersonator-of?" : "equal?"),
-                          "impersonator-of property procedure returned a value with a different prop:equal+hash source: ",
-                          v);
+      scheme_contract_error((for_chaperone ? "impersonator-of?" : "equal?"),
+                            "impersonator-of property procedure returned a value with a different prop:equal+hash source",
+                            "original value", 1, obj,
+                            "returned value", 1, v,
+                            NULL);
 
   return v;
 }

@@ -286,7 +286,7 @@
     (go-stream #t #t #t #t)))
 
 ;; make-input-port/read-to-peek
-(define (make-list-port . l)
+(define (make-list-port #:eof-as-special? [eof-as-special? #f] . l)
   (make-input-port/read-to-peek 
    'list-port
    (lambda (bytes)
@@ -301,6 +301,10 @@
        (bytes-set! bytes 0 (char->integer (car l)))
        (set! l (cdr l))
        1]
+      [(and (not eof-as-special?)
+            (eof-object? (car l)))
+       (set! l (cdr l))
+       eof]
       [else
        (let ([v (car l)])
 	 (set! l (cdr l))
@@ -345,10 +349,22 @@
   (test 'lo read p)
   (test eof read p)
   (test eof read p))
+(let ([p (make-list-port #:eof-as-special? #t #\h #\e #\l eof #\l #\o)])
+  (test 'hel read p)
+  (test eof read p)
+  (test 'lo read p)
+  (test eof read p)
+  (test eof read p))
 (let ([p (make-list-port #\h #\e #\l #\u7238 #\l #\o)])
   (test 'hel read p)
   (test #\u7238 read p)
   (test 'lo read p))
+
+(let ([p (make-list-port 65 eof 66 67)])
+  (test 65 peek-byte p 0)
+  (test eof peek-byte p 1)
+  (test #t port-commit-peeked 2 (port-progress-evt p) always-evt p)
+  (test 66 peek-byte p 0))
 
 ;; Check that make-input-port/read-to-peek isn't trying
 ;; to use chars when it should use bytes:
@@ -840,42 +856,146 @@
     
 ;; --------------------------------------------------
 
-;; check that commit-based reading counts against a port limit:
-(let* ([p (make-limited-input-port
-           (open-input-string "A\nB\nC\nD\n") 
-           4)]
-       [N 6]
-       [chs (for/list ([i N])
-              (let ([ch (make-channel)])
-                (thread
-                 (lambda ()
-                   (channel-put ch (list (sync (read-bytes-line-evt p))
-                                         (file-position p)))))
-                ch))]
-       [r (for/list ([ch chs])
-            (channel-get ch))])
-  r)
+;; check that commit-based reading counts against a port limit;
+;; this test also checks an interaction of `make-limited-input-port'
+;; and progress evts, so run it several times
+(for ([i 100])
+  (let* ([p (make-limited-input-port
+             (open-input-string "A\nB\nC\nD\n") 
+             4)]
+         [N 6]
+         [chs (for/list ([i N])
+                (let ([ch (make-channel)])
+                  (thread
+                   (lambda ()
+                     (channel-put ch (list (sync (read-bytes-line-evt p))
+                                           (file-position p)))))
+                  ch))]
+         [r (for/list ([ch chs])
+              (channel-get ch))])
+    (test #t list? r)))
 
-;; check proper locking for concurrent access:    
-(let* ([p (make-limited-input-port
-           (open-input-string "A\nB\nC\nD\n") 
-           4)]
-       [N 6]
-       [chs (for/list ([i N])
-              (let ([ch (make-channel)])
-                (thread
-                 (lambda ()
-                   (when (even? i) (sleep))
-                   (channel-put ch (list (sync (read-bytes-line-evt p))
-                                         (file-position p)))))
-                ch))]
-       [rs (for/list ([ch chs])
-             (channel-get ch))])
-  (test 2 apply + (for/list ([r rs]) (if (bytes? (car r)) 1 0)))
-  (test #t values (for/and ([r rs]) 
-                    (if (eof-object? (car r))
-                        (eq? (cadr r) 4)
-                        (memq (cadr r) '(2 4))))))
+;; check proper locking for concurrent access:
+(for ([i 100])
+  (let* ([p (make-limited-input-port
+             (open-input-string "A\nB\nC\nD\n") 
+             4)]
+         [N 6]
+         [chs (for/list ([i N])
+                (let ([ch (make-channel)])
+                  (thread
+                   (lambda ()
+                     (when (even? i) (sleep))
+                     (channel-put ch (list (sync (read-bytes-line-evt p))
+                                           (file-position p)))))
+                  ch))]
+         [rs (for/list ([ch chs])
+               (channel-get ch))])
+    (test 2 apply + (for/list ([r rs]) (if (bytes? (car r)) 1 0)))
+    (test #t values (for/and ([r rs]) 
+                      (if (eof-object? (car r))
+                          (eq? (cadr r) 4)
+                          (and (memq (cadr r) '(2 4)) #t))))))
+
+
+(let-values ([(in out) (make-pipe-with-specials)])
+  (struct str (v)    
+          #:property prop:custom-write
+          (lambda (a-str port mode)
+            (let ([recur (case mode
+                           [(#t) write]
+                           [(#f) display]
+                           [else
+                            (lambda (p port)
+                              (print p port mode))])])
+              (recur (str-v a-str) port))))
+    (write (str "hello world") out)
+    (flush-output out)
+    (test "hello world" read in))
+
+;; --------------------------------------------------
+;; check that `read-bytes-evt' gets
+
+(let ()
+  (define-values (i o) (make-pipe))
+  (define res #f)
+  
+  (define t
+    (thread
+     (lambda ()
+       (set! res (sync (read-bytes-evt 2 i))))))
+  
+  (write-bytes #"1" o)
+  (sleep 0.1)
+  (write-bytes #"2" o)
+  (test #"1" read-bytes 1 i)
+  (sleep)
+  (write-bytes #"34" o)
+  
+  (sync t)
+  (test #"23" values res))
+
+;; --------------------------------------------------
+;; check that string and byte-string evts can be reused
+
+(let ()
+  (define (check-can-reuse read-bytes-evt read-bytes write-bytes integer->byte list->bytes bytes?)
+    (define N 10)
+    (define M 160)
+    (define PORT 5999)
+
+    (define (make-alarm-e)
+      (alarm-evt (+ (current-inexact-milliseconds) 5)))
+
+    (define ((connection-handler in out with-alarm?))
+      (let loop ((alarm-e (make-alarm-e))
+                 (read-e (read-bytes-evt 16 in)))
+        (sync (if with-alarm?
+                  (wrap-evt alarm-e (lambda (_) (loop (make-alarm-e) read-e)))
+                  never-evt)
+              (wrap-evt read-e
+                        (lambda (bs)
+                          (when (bytes? bs)
+                            (sleep 0.01)
+                            (write-bytes bs out)
+                            (flush-output out))
+                          (loop alarm-e read-e)))
+              (wrap-evt (eof-evt in)
+                        (lambda (_)
+                          (close-input-port in)
+                          (close-output-port out))))))
+
+    (define listener (tcp-listen PORT 4 #t))
+    (define server
+      (thread
+       (lambda ()
+         (for ([i N])
+           (define-values (in out) (tcp-accept listener))
+           ((connection-handler in out #t))))))
+
+    (let ([s (list->bytes
+              (for/list ([i M])
+                (integer->byte (random 512))))])
+      (for ([i N])
+        (define-values (i o) (tcp-connect "localhost" PORT))
+        (write-bytes s o)
+        (close-output-port o)
+        (test s read-bytes M i)
+        (close-input-port i)))
+
+    (sync server)
+    (tcp-close listener))
+
+  (let ([integer->byte (lambda (s) (bitwise-and s #xFF))])
+    (check-can-reuse read-bytes-evt read-bytes write-bytes integer->byte list->bytes bytes?)
+    ;; the following should work because we use the same evt only after
+    ;; success or to start at the same point in the input stream:
+    (check-can-reuse (lambda (n in)
+                       (define bstr (make-bytes n))
+                       (wrap-evt (read-bytes!-evt bstr in)
+                                 (lambda (v) (if (eof-object? v) v bstr))))
+                     read-bytes write-bytes integer->byte list->bytes bytes?))
+  (check-can-reuse read-string-evt read-string write-string integer->char list->string string?))
 
 ;; --------------------------------------------------
 

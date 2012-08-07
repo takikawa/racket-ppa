@@ -19,6 +19,7 @@
          setup/dirs
          racket/place
          mrlib/close-icon
+         mrlib/name-message
          "tooltip.rkt"
          "drsig.rkt"
          "rep.rkt"
@@ -67,7 +68,7 @@
   ;; command-line-args : (vectorof string)
   ;; auto-text : string
   (define-struct (module-language-settings drracket:language:simple-settings)
-    (collection-paths command-line-args auto-text compilation-on? full-trace?))
+    (collection-paths command-line-args auto-text compilation-on? full-trace? submodules-to-run))
   
   (define (module-language-settings->prefab-module-settings settings)
     (prefab-module-settings (module-language-settings-command-line-args settings)
@@ -78,6 +79,7 @@
   
   (define default-compilation-on? #t)
   (define default-full-trace? #t)
+  (define default-submodules-to-run (list '(main) '(test)))
   (define (get-default-auto-text) (preferences:get 'drracket:module-language:auto-text))
   
   ;; module-mixin : (implements drracket:language:language<%>)
@@ -100,10 +102,17 @@
                 (parameterize ([current-security-guard drracket:init:system-security-guard])
                   (((dynamic-require mp name) val) key default)))))]
           [else default]))
-      (define (init-sandbox)
+      (define/private (init-sandbox)
         (unless sandbox
           (when language-info
-            (set! sandbox (make-evaluator 'racket/base)))))
+            ;; creating a sanbox can fail in strange ways so we just
+            ;; swallow the failures so as to not wreck DrRacket
+            (with-handlers ((exn:fail? (λ (x) 
+                                         (log-error (exn-message x))
+                                         (for ([x (in-list (continuation-mark-set->context
+                                                            (exn-continuation-marks x)))])
+                                           (log-error (format "  ~s" x))))))
+              (set! sandbox (make-evaluator 'racket/base))))))
       
       (define/override (first-opened settings)
         (define ns (with-handlers ((exn:fail? (lambda (x) #f)))
@@ -181,7 +190,8 @@
            #()
            (get-default-auto-text)
            default-compilation-on?
-           default-full-trace?)))
+           default-full-trace?
+           default-submodules-to-run)))
       
       ;; default-settings? : -> boolean
       (define/override (default-settings? settings)
@@ -199,7 +209,9 @@
              (equal? (module-language-settings-compilation-on? settings)
                      default-compilation-on?)
              (equal? (module-language-settings-full-trace? settings)
-                     default-full-trace?)))
+                     default-full-trace?)
+             (equal? (module-language-settings-submodules-to-run settings)
+                     default-submodules-to-run)))
       
       (define/override (marshall-settings settings)
         (let ([super-marshalled (super marshall-settings settings)])
@@ -208,7 +220,8 @@
                 (module-language-settings-command-line-args settings)
                 (module-language-settings-auto-text settings)
                 (module-language-settings-compilation-on? settings)
-                (module-language-settings-full-trace? settings))))
+                (module-language-settings-full-trace? settings)
+                (module-language-settings-submodules-to-run settings))))
       
       (define/override (unmarshall-settings marshalled)
         (and (list? marshalled)
@@ -225,7 +238,10 @@
                                                (list-ref marshalled 4))]
                           [full-trace? (if (<= marshalled-len 5)
                                            default-full-trace?
-                                           (list-ref marshalled 5))])
+                                           (list-ref marshalled 5))]
+                          [submodules-to-run (if (<= marshalled-len 6)
+                                                 default-submodules-to-run
+                                                 (list-ref marshalled 6))])
                       (and (list? collection-paths)
                            (andmap (λ (x) (or (string? x) (symbol? x)))
                                    collection-paths)
@@ -233,6 +249,7 @@
                            (andmap string? (vector->list command-line-args))
                            (string? auto-text)
                            (boolean? compilation-on?)
+                           ((listof (listof symbol?)) submodules-to-run)
                            (let ([super (super unmarshall-settings 
                                                (let ([p (car marshalled)])
                                                  ;; Convert 'write to 'print:
@@ -257,7 +274,8 @@
                                                            '(none debug))
                                                      compilation-on?)
                                                 
-                                                full-trace?)))))))))))
+                                                full-trace?
+                                                submodules-to-run)))))))))))
       
       (define/override (on-execute settings run-in-user-thread)
         (super on-execute settings run-in-user-thread)
@@ -355,7 +373,7 @@
         (define (*post)
           (current-module-declare-name #f)
           (current-module-declare-source #f)
-          (when path ((current-module-name-resolver) resolved-modpath))
+          (when path ((current-module-name-resolver) resolved-modpath #f))
           (thread-cell-set! repl-init-thunk *init))
         (define (*error)
           (current-module-declare-name #f)
@@ -374,7 +392,11 @@
              (λ () (with-stack-checkpoint 
                     (begin
                       (*do-module-specified-configuration)
-                      (namespace-require modspec))))))
+                      (namespace-require modspec)
+                      (for ([submod (in-list (module-language-settings-submodules-to-run settings))])
+                        (define submod-spec `(submod ,modspec ,@submod))
+                        (when (module-declared? submod-spec #t)
+                          (dynamic-require submod-spec #f))))))))
           (current-namespace (module->namespace modspec))
           (check-interactive-language))
         (define (*do-module-specified-configuration)
@@ -491,7 +513,7 @@
     ;; raise the exception as normal.  (It can happen in some rare cases like
     ;; having a single empty scheme box in the definitions.)
     (unless rep (if exn (raise exn) (error "\nInteractions disabled")))
-    (when prefix (fprintf (current-error-port) "Module Language: ~a\n" prefix))
+    (when prefix (eprintf "Module Language: ~a\n" prefix))
     (when exn ((error-display-handler) (exn-message exn) exn))
     ;; these are needed, otherwise the warning can appear before the output
     (flush-output (current-output-port))
@@ -528,8 +550,20 @@
     (define compilation-on-check-box #f)
     (define compilation-on? #t)
     (define save-stacktrace-on-check-box #f)
+    (define run-submodules-choice #f)
     (define left-debugging-radio-box #f)
     (define right-debugging-radio-box #f)
+    (define submodules-to-run #f)
+    
+    (define (sort-submodules-to-run!)
+      (define ht (make-hash))
+      (for ([submod (in-list (preferences:get 'drracket:submodules-to-choose-from))]
+            [x (in-naturals)])
+        (hash-set! ht submod x))
+      (set! submodules-to-run (sort submodules-to-run
+                                    < 
+                                    #:key (λ (x) (hash-ref ht x)))))
+    
     (define simple-case-lambda
       (drracket:language:simple-module-based-language-config-panel
        new-parent
@@ -553,7 +587,36 @@
                      (λ (_1 _2) (set! compilation-on? (send compilation-on-check-box get-value)))]))
          (set! save-stacktrace-on-check-box (new check-box%
                                                  [label (string-constant preserve-stacktrace-information)]
-                                                 [parent dynamic-panel])))))
+                                                 [parent dynamic-panel]))
+         (set! run-submodules-choice 
+               (new (class name-message%
+                      (define/override (fill-popup menu reset)
+                        (for ([item (in-list (preferences:get 'drracket:submodules-to-choose-from))]
+                              [x (in-naturals)])
+                          (new checkable-menu-item%
+                               [label (apply string-append (add-between (map symbol->string item) " "))]
+                               [checked (member item submodules-to-run)]
+                               [callback 
+                                (λ (a b)
+                                  (if (member item submodules-to-run)
+                                      (set! submodules-to-run (remove item submodules-to-run))
+                                      (begin
+                                        (set! submodules-to-run (cons item submodules-to-run))
+                                        (sort-submodules-to-run!))))]
+                               [parent menu]))
+                        (new separator-menu-item% [parent menu])
+                        (new menu-item% 
+                             [parent menu]
+                             [callback (λ (a b)
+                                         (define new-submod (add-another-possible-submodule parent))
+                                         (when new-submod
+                                           (set! submodules-to-run (cons new-submod submodules-to-run))
+                                           (sort-submodules-to-run!)))]
+                             [label (string-constant add-submodule)]))
+                      (super-new
+                       [font normal-control-font]
+                       [parent dynamic-panel]
+                       [label (string-constant submodules-to-run)])))))))
     (define (update-compilation-checkbox left-debugging-radio-box right-debugging-radio-box)
       (case (send left-debugging-radio-box get-selection)
         [(0 1)
@@ -727,7 +790,8 @@
                        (case (send left-debugging-radio-box get-selection)
                          [(0 1) compilation-on?]
                          [(#f) #f])
-                       (send save-stacktrace-on-check-box get-value)))))]
+                       (send save-stacktrace-on-check-box get-value)
+                       submodules-to-run))))]
       [(settings)
        (simple-case-lambda settings)
        (install-collection-paths (module-language-settings-collection-paths settings))
@@ -737,7 +801,36 @@
        (send compilation-on-check-box set-value (module-language-settings-compilation-on? settings))
        (update-compilation-checkbox left-debugging-radio-box right-debugging-radio-box)
        (send save-stacktrace-on-check-box set-value (module-language-settings-full-trace? settings))
+       (set! submodules-to-run (module-language-settings-submodules-to-run settings))
        (update-buttons)]))
+  
+  (define (add-another-possible-submodule parent)
+    (define (get-sexp x)
+      (with-handlers ((exn:fail:read? (λ (x) #f)))
+        (define p (open-input-string (string-append "(" x ")")))
+        (define sexp (read p))
+        (and (eof-object? (read-char p))
+             (list? sexp)
+             (andmap symbol? sexp)
+             sexp)))
+    (define msg (get-text-from-user (string-constant add-submodule-title) 
+                                    "submodule"
+                                    (let loop ([parent parent])
+                                      (define p (send parent get-parent))
+                                      (if p
+                                          (loop p)
+                                          parent))
+                                    #:validate (λ (x) (get-sexp x))))
+    (define submods
+      (and msg
+           (get-sexp msg)))
+    (cond
+      [submods
+       (preferences:set 'drracket:submodules-to-choose-from
+                        (append (preferences:get 'drracket:submodules-to-choose-from)
+                                (list submods)))
+       submods]
+      [else #f]))
   
   ;; get-filename : port -> (union string #f)
   ;; extracts the file the definitions window is being saved in, if any.
@@ -1058,11 +1151,28 @@
   (define error-message%
     (class canvas%
       (init-field msg err?)
-      (inherit refresh get-dc get-client-size)
+      (inherit refresh get-dc get-client-size popup-menu)
       (define/public (set-msg _msg _err?) 
         (set! msg _msg)
         (set! err? _err?)
         (refresh))
+      (define/override (on-event evt)
+        (cond
+          [(and (send evt button-down?) err?)
+           (define m (new popup-menu%))
+           (define itm (new menu-item% 
+                            [label (string-constant copy-menu-item)]
+                            [parent m]
+                            [callback
+                             (λ (itm evt)
+                               (send the-clipboard set-clipboard-string 
+                                     msg
+                                     (send evt get-time-stamp)))]))
+           (popup-menu m 
+                       (+ (send evt get-x) 1)
+                       (+ (send evt get-y) 1))]
+          [else
+           (super on-event evt)]))
       (define/override (on-paint)
         (define dc (get-dc))
         (define-values (cw ch) (get-client-size))

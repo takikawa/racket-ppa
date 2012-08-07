@@ -3,8 +3,8 @@
 (require "../utils/utils.rkt"
          (rep type-rep rep-utils)
          (utils tc-utils)
-         (contract-req)
-         (types utils subtype abbrev printer comparison)
+         (prefix-in c: (contract-req))
+         (types utils subtype abbrev)
          racket/match)
 
 

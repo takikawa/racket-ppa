@@ -72,7 +72,7 @@ structures that are produced by @racket[zo-parse] and consumed by
             ([modidx module-path-index?]
              [sym symbol?]
              [pos exact-integer?]
-             [phase (or/c 0 1)])]{
+             [phase exact-nonnegative-integer?])]{
   Represents a top-level variable, and used only in a @racket[prefix].
   The @racket[pos] may record the variable's offset within its module,
   or it can be @racket[-1] if the variable is always located by name.
@@ -154,7 +154,7 @@ structures that are produced by @racket[zo-parse] and consumed by
  be used for cross-module inlining of the function.}
 
 @defstruct+[(mod form)
-            ([name symbol?]
+            ([name (or/c symbol? (listof symbol?))]
              [srcname symbol?]
              [self-modidx module-path-index?]
              [prefix prefix?]
@@ -173,7 +173,9 @@ structures that are produced by @racket[zo-parse] and consumed by
              [max-let-depth exact-nonnegative-integer?]
              [dummy toplevel?]
              [lang-info (or/c #f (vector/c module-path? symbol? any/c))]
-             [internal-context (or/c #f #t stx?)])]{
+             [internal-context (or/c #f #t stx? (vectorof stx?))]
+             [pre-submodules (listof mod?)]
+             [post-submodules (listof mod?)])]{
   Represents a @racket[module] declaration.
 
   The @racket[provides] and @racket[requires] lists are each an
@@ -527,9 +529,10 @@ structures that are produced by @racket[zo-parse] and consumed by
 
 
 @defstruct+[(phase-shift wrap)
-            ([amt exact-integer?]
+            ([amt (or/c exact-integer? #f)]
              [src module-path-index?]
-             [dest module-path-index?])]{
+             [dest module-path-index?]
+             [cancel-id (or/c exact-integer? #f)])]{
   Shifts module bindings later in the wrap set.}
 
 @defstruct+[(module-rename wrap)
@@ -546,8 +549,11 @@ structures that are produced by @racket[zo-parse] and consumed by
             ([path module-path-index?]
              [phase (or/c exact-integer? #f)]
              [src-phase (or/c exact-integer? #f)]
-             [exceptions (listof (or/c symbol? number?))]
-             [prefix (or/c symbol? #f)])]{
+             [exceptions (listof symbol?)]
+             [prefix (or/c symbol? #f)]
+             [context (or/c (listof exact-integer?) 
+                            (vector/c (listof exact-integer?) any/c) 
+                            #f)])]{
   Represents a set of simple imports from one module within a
   @racket[module-rename].}
 

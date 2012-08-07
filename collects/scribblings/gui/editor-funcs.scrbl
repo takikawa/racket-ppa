@@ -93,7 +93,7 @@ See also
 
 @defproc[(append-editor-font-menu-items [menu (or/c (is-a?/c menu%) (is-a?/c popup-menu%))])
          void?]{
-Appends menu items to a given menu (not a popup menu) to implement a
+Appends menu items to @racket[menu] to implement a
  standard set of font-manipulation operations, such as changing the
  font face or style. The callback for each menu item uses
 @xmethod[top-level-window<%> get-edit-target-object] (finding the frame by following a chain of parents until a frame is
@@ -105,7 +105,7 @@ Appends menu items to a given menu (not a popup menu) to implement a
 @defproc[(append-editor-operation-menu-items [menu (or/c (is-a?/c menu%) (is-a?/c popup-menu%))]
                                              [text-only? any/c #t])
          void?]{
-Appends menu items to a given menu (not a popup menu) to implement the
+Appends menu items to @racket[menu] to implement the
  standard editor operations, such as cut and paste. The callback for
  each menu item uses
 @xmethod[top-level-window<%> get-edit-target-object] (finding the frame by following a chain of parents until a frame is
@@ -266,7 +266,8 @@ if using those methods are always safe.)
 @defproc[(open-output-text-editor [text-editor (is-a?/c text%)]
                                   [start-position (or/c exact-nonnegative-integer? (one/of 'end)) 'end]
                                   [special-filter (any/c . -> . any/c) (lambda (x) x)]
-                                  [port-name any/c text-editor])
+                                  [port-name any/c text-editor]
+                                  [#:eventspace eventspace (or/c eventspace? #f) (current-eventspace)])
          output-port]{
 
 Creates an output port that delivers its content to @racket[text-editor].
@@ -284,9 +285,20 @@ If line counting is enabled for the resulting output port, then the
  port will report the line, offset from the line's start, and position
  within the editor at which the port writes data.
 
+If @racket[eventspace] is not @racket[#f], then when the output port
+ is used in a thread other than @racket[eventspace]'s handler thread,
+ content is delivered to @racket[text-editor] through a low-priority
+ callback in @racket[eventspace].  Thus, if @racket[eventspace]
+ corresponds to the eventspace for the editor's @tech{displays},
+ writing to the output port is safe from any thread.
 
+If @racket[eventspace] is @racket[#f], beware that the port is only
+ weakly thread-safe. Content is delivered to @racket[text-editor] in
+ an @tech{edit sequence}, but an edit sequence is not enough
+ synchronization if, for example, the editor is displayed in an
+ enabled @racket[editor-canvas%]. See @secref["editorthreads"] for
+ more information.}
 
-}
 
 @defproc[(read-editor-global-footer [in (is-a?/c editor-stream-in%)])
          boolean?]{

@@ -12,13 +12,14 @@
    [set-module-language! (->* () (boolean?) void?)])
   
   (provide queue-callback/res
-           fire-up-drscheme-and-run-tests
-           save-drscheme-window-as
+           fire-up-drracket-and-run-tests
+           fire-up-separate-drracket-and-run-tests
+           save-drracket-window-as
            do-execute
            test-util-error
            poll-until
            wait-for-computation
-           wait-for-drscheme-frame
+           wait-for-drracket-frame
            wait-for-new-frame
            clear-definitions
            type-in-definitions
@@ -39,11 +40,11 @@
            run-one/sync
            alt-return-in-interactions)
   
-  ;; save-drscheme-window-as : string -> void
-  ;; use the "save as" dialog in drscheme to save the definitions
+  ;; save-drracket-window-as : string -> void
+  ;; use the "save as" dialog in drracket to save the definitions
   ;; window to a file.
-  (define (save-drscheme-window-as filename)
-    (not-on-eventspace-handler-thread 'save-drscheme-window-as)
+  (define (save-drracket-window-as filename)
+    (not-on-eventspace-handler-thread 'save-drracket-window-as)
     (use-get/put-dialog
      (lambda ()
        (fw:test:menu-select "File" "Save Definitions As..."))
@@ -53,7 +54,7 @@
   ;; filename is a string naming a file that should be typed into the dialog
   (define (use-get/put-dialog open-dialog filename)
     (not-on-eventspace-handler-thread 'use-get/put-dialog)
-    (let ([drs (wait-for-drscheme-frame)])
+    (let ([drs (wait-for-drracket-frame)])
       (with-handlers ([(lambda (x) #t)
 		       (lambda (x)
 			 (fw:preferences:set 'framework:file-dialogs 'std)
@@ -95,22 +96,22 @@
                     (sleep step)
                     (loop (- counter step)))))))))
   
-  (define (drscheme-frame? frame)
+  (define (drracket-frame? frame)
     (method-in-interface? 'get-execute-button (object-interface frame)))
   
-  (define (wait-for-drscheme-frame [print-message? #f])
-    (let ([wait-for-drscheme-frame-pred
+  (define (wait-for-drracket-frame [print-message? #f])
+    (let ([wait-for-drracket-frame-pred
            (lambda ()
              (let ([active (fw:test:get-active-top-level-window)])
                (if (and active
-                        (drscheme-frame? active))
+                        (drracket-frame? active))
                    active
                    #f)))])
-      (or (wait-for-drscheme-frame-pred)
+      (or (wait-for-drracket-frame-pred)
           (begin
             (when print-message?
               (printf "Select DrRacket frame\n"))
-            (poll-until wait-for-drscheme-frame-pred)))))
+            (poll-until wait-for-drracket-frame-pred)))))
   
   ;; wait-for-new-frame : frame [(listof eventspace) = null] -> frame
   ;; returns the newly opened frame, waiting until old-frame
@@ -137,7 +138,7 @@
 	(poll-until wait-for-new-frame-pred timeout))]))
 
   ;; wait-for-computation : frame -> void
-  ;; waits until the drscheme frame finishes some computation.
+  ;; waits until the drracket frame finishes some computation.
   ;; uses the state of the execute button to indicate when the
   ;; computations is finished. That is, waits for the execute
   ;; button to dim, indicating a computation is running. Then,
@@ -145,7 +146,7 @@
   ;; is complete.
   (define (wait-for-computation frame)
     (not-on-eventspace-handler-thread 'wait-for-computation)
-    (queue-callback/res (λ () (verify-drscheme-frame-frontmost 'wait-for-computation frame)))
+    (queue-callback/res (λ () (verify-drracket-frame-frontmost 'wait-for-computation frame)))
     (let* ([wait-for-computation-to-start
 	    (lambda ()
 	      (fw:test:reraise-error)
@@ -164,21 +165,21 @@
       (do-execute frame #t)]
      [(frame wait-for-finish?)
       (not-on-eventspace-handler-thread 'do-execute)
-      (queue-callback/res (λ () (verify-drscheme-frame-frontmost 'do-execute frame)))
+      (queue-callback/res (λ () (verify-drracket-frame-frontmost 'do-execute frame)))
       (let ([button (queue-callback/res (λ () (send frame get-execute-button)))])
 	(fw:test:run-one (lambda () (send button command)))
 	(when wait-for-finish?
-	  (wait-for-computation frame)))]))
+          (wait-for-computation frame)))]))
   
-  (define (verify-drscheme-frame-frontmost function-name frame)
-    (on-eventspace-handler-thread 'verify-drscheme-frame-frontmost)
+  (define (verify-drracket-frame-frontmost function-name frame)
+    (on-eventspace-handler-thread 'verify-drracket-frame-frontmost)
     (let ([tl (fw:test:get-active-top-level-window)])
       (unless (and (eq? frame tl)
-                   (drscheme-frame? tl))
-        (error function-name "drscheme frame not frontmost: ~e (found ~e)" frame tl))))
+                   (drracket-frame? tl))
+        (error function-name "drracket frame not frontmost: ~e (found ~e)" frame tl))))
   
   (define (clear-definitions frame)
-    (queue-callback/res (λ () (verify-drscheme-frame-frontmost 'clear-definitions frame)))
+    (queue-callback/res (λ () (verify-drracket-frame-frontmost 'clear-definitions frame)))
     (fw:test:new-window (queue-callback/res (λ () (send frame get-definitions-canvas))))
     (let ([window (queue-callback/res (λ () (send frame get-edit-target-window)))])
       (let-values ([(cw ch) (queue-callback/res (λ () (send window get-client-size)))]
@@ -214,7 +215,7 @@
 		     (parameterize ([current-output-port port])
 		       (write str/sexp port))
 		     (get-output-string port)))])
-      (queue-callback/res (λ () (verify-drscheme-frame-frontmost who frame)))
+      (queue-callback/res (λ () (verify-drracket-frame-frontmost who frame)))
       (let ([canvas (queue-callback/res (λ () (get-canvas frame)))])
 	(fw:test:new-window canvas)
 	(let ([editor (queue-callback/res (λ () (send canvas get-editor)))])
@@ -242,7 +243,7 @@
 
   (define (alt-return-in-interactions frame)
     (not-on-eventspace-handler-thread 'alt-return-in-interactions)
-    (queue-callback/res (λ () (verify-drscheme-frame-frontmost 'alt-return-in-interactions frame)))
+    (queue-callback/res (λ () (verify-drracket-frame-frontmost 'alt-return-in-interactions frame)))
     (let ([canvas (send frame get-interactions-canvas)])
       (fw:test:new-window canvas)
       (let ([editor (send canvas get-editor)])
@@ -406,7 +407,7 @@
             (let ([new-frame (wait-for-new-frame language-dialog)])
               (unless (eq? new-frame drs-frame)
                 (error 'set-language-level! 
-                       "didn't get drscheme frame back, got: ~s (drs-frame ~s)\n"
+                       "didn't get drracket frame back, got: ~s (drs-frame ~s)\n"
                        new-frame
                        drs-frame)))))))) 
   (define (set-module-language! [close-dialog? #t])
@@ -426,16 +427,16 @@
           (let ([new-frame (wait-for-new-frame language-dialog)])
             (unless (eq? new-frame drs-frame)
               (error 'set-language-level! 
-                     "didn't get drscheme frame back, got: ~s (drs-frame ~s)\n"
+                     "didn't get drracket frame back, got: ~s (drs-frame ~s)\n"
                      new-frame
                      drs-frame)))))))
   
   (provide/contract [check-language-level ((or/c string? regexp?) . -> . void?)])
-  ;; checks that the language in the drscheme window is set to the given one.
+  ;; checks that the language in the drracket window is set to the given one.
   ;; clears the definitions, clicks execute and checks the interactions window.
   (define (check-language-level lang-spec)
     (not-on-eventspace-handler-thread 'check-language-level!)
-    (let* ([drs-frame (wait-for-drscheme-frame)]
+    (let* ([drs-frame (wait-for-drracket-frame)]
            [interactions (send drs-frame get-interactions-text)]
            [definitions-canvas (send drs-frame get-definitions-canvas)])
       (fw:test:new-window definitions-canvas)
@@ -454,7 +455,7 @@
   
   (define (repl-in-edit-sequence?)
     (not-on-eventspace-handler-thread 'repl-in-edit-sequence?)
-    (let ([drr (wait-for-drscheme-frame)])
+    (let ([drr (wait-for-drracket-frame)])
       (queue-callback/res
        (λ ()
          (send (send drr get-interactions-text) refresh-delayed?)))))
@@ -466,7 +467,7 @@
     (not-on-eventspace-handler-thread 'repl-in-edit-sequence?)
     (run-one/sync
      (lambda ()
-       (verify-drscheme-frame-frontmost 'had-error? frame)
+       (verify-drracket-frame-frontmost 'had-error? frame)
        (let* ([interactions-text (send frame get-interactions-text)]
               [last-para (send interactions-text last-paragraph)])
          (unless (>= last-para 2)
@@ -508,7 +509,7 @@
        (not-on-eventspace-handler-thread 'fetch-output)
        (run-one/sync
         (lambda ()
-          (verify-drscheme-frame-frontmost 'fetch-output frame)
+          (verify-drracket-frame-frontmost 'fetch-output frame)
           (let-values ([(start end)
                         (if (and _start _end)
                             (values _start _end)
@@ -562,6 +563,12 @@
                                           (send snip get-text 0 (send snip get-count))
                                           (send snip get-fraction-view))
                                   strings))]
+                     [;; this test is an approximation of
+                      ;; (is-a? snip pict-snip%) from drracket/private/pict-snip%
+                      (let ([sc (send snip get-snipclass)])
+                        (and sc (regexp-match #rx"pict-snip.rkt" (send sc get-classname))))
+                      (loop (send snip previous)
+                            (cons "{pict-snip}" strings))]
                      
                      [else
                       (loop (send snip previous)
@@ -594,28 +601,15 @@
   ;; but just to print and return.
   (define orig-display-handler (error-display-handler))
   
-  (define (fire-up-drscheme-and-run-tests #:use-focus-table? [use-focus-table? #t] run-test)
-    (on-eventspace-handler-thread 'fire-up-drscheme-and-run-tests)
+  (define (fire-up-drracket-and-run-tests #:use-focus-table? [use-focus-table? #t] run-test)
+    (on-eventspace-handler-thread 'fire-up-drracket-and-run-tests)
     (let ()
-      ;; change the preferences system so that it doesn't write to 
-      ;; a file; partly to avoid problems of concurrency in drdr
-      ;; but also to make the test suite easier for everyone to run.
-      (let ([prefs-table (make-hash)])
-	(fw:preferences:low-level-put-preferences
-	 (lambda (names vals)
-	   (for-each (lambda (name val) (hash-set! prefs-table name val))
-		     names vals)))
-	(fw:preferences:low-level-get-preference 
-	 (lambda (name [fail (lambda () #f)])
-	   (hash-ref prefs-table name fail))))
-	 
+      (use-hash-for-prefs fw:preferences:low-level-get-preference
+                          fw:preferences:low-level-put-preferences
+                          fw:preferences:restore-defaults)
+      
       (parameterize ([current-command-line-arguments #()])
-        (dynamic-require 'drscheme #f))
-
-      ;; set all preferences to their defaults (some pref values may have
-      ;; been read by this point, but hopefully that won't affect much
-      ;; of the startup of drscheme)
-      (fw:preferences:restore-defaults)
+        (dynamic-require 'drracket #f))
       
       (fw:test:use-focus-table use-focus-table?)
       
@@ -625,12 +619,69 @@
 		    (λ (x)
 		       (if (exn? x)
 			   (orig-display-handler (exn-message x) x)
-			   (fprintf (current-error-port) "uncaught exception ~s\n" x))
+			   (eprintf "uncaught exception ~s\n" x))
 		       (exit 1))))
 		 (run-test)
 		 (exit)))
       (yield (make-semaphore 0))))
+  
+  ;; fire-up-separate-drracket-and-run-tests : (-> any) -> any
+  ;; creates a separate custodian, eventspace, namespace, etc to
+  ;; start up a new DrRacket. This has the advantage over fire-up-drracket-and-run-tests
+  ;; that a single test suite can start up DrRacket multiple times, but it has the 
+  ;; disadvantage that there is little sharing between the test suite implementation code and
+  ;; DrRacket, so writing the testing code is more painful
+  ;;
+  ;; the only things shared are mred/mred (and its dependencies).
+  (define (fire-up-separate-drracket-and-run-tests run-test)
+    (define c (make-custodian))
+    (define s (make-semaphore 0))
+    (define orig-ns (current-namespace))
+    (parameterize ([current-custodian c])
+      (parameterize ([exit-handler (λ (v) 
+                                     (semaphore-post s)
+                                     (custodian-shutdown-all c))]
+                     [current-namespace (make-empty-namespace)]
+                     [current-command-line-arguments #()])
+        (parameterize ([current-eventspace (make-eventspace)])
+          (namespace-attach-module orig-ns 'mred/mred)
+          
+          ;; do this now so that dynamically requiring framework
+          ;; exports during the call to 'run-test' is safe
+          (namespace-require 'framework)
+          
+          (queue-callback
+           (λ ()
+             (use-hash-for-prefs (dynamic-require 'framework 'preferences:low-level-get-preference)
+                                 (dynamic-require 'framework 'preferences:low-level-put-preferences)
+                                 (dynamic-require 'framework 'preferences:restore-defaults))
+             (dynamic-require 'drracket #f)
+             (thread (λ ()
+                       (run-test)
+                       (exit)))
+             (yield (make-semaphore 0)))))))
+    (semaphore-wait s))
 
+  (define (use-hash-for-prefs preferences:low-level-get-preference 
+                              preferences:low-level-put-preferences
+                              preferences:restore-defaults)
+    ;; change the preferences system so that it doesn't write to 
+    ;; a file; partly to avoid problems of concurrency in drdr
+    ;; but also to make the test suite easier for everyone to run.
+    (let ([prefs-table (make-hash)])
+      (preferences:low-level-put-preferences
+       (lambda (names vals)
+         (for-each (lambda (name val) (hash-set! prefs-table name val))
+                   names vals)))
+      (preferences:low-level-get-preference 
+       (lambda (name [fail (lambda () #f)])
+         (hash-ref prefs-table name fail)))
+      
+      ;; set all preferences to their defaults (some pref values may have
+      ;; been read by this point, but hopefully that won't affect the
+      ;; startup of drracket)
+      (preferences:restore-defaults)))
+  
 (define (not-on-eventspace-handler-thread fn)
   (when (eq? (current-thread) (eventspace-handler-thread (current-eventspace)))
     (error fn "expected to be run on some thread other than the eventspace handler thread")))

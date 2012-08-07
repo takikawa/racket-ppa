@@ -238,10 +238,53 @@
 
 ;; ---------- add-between ----------
 (let ()
-  (test '()          add-between '() 1)
-  (test '(9)         add-between '(9) 1)
-  (test '(9 1 8 1 7) add-between '(9 8 7) 1)
-  (test '(9 (1) 8)   add-between '(9 8) '(1)))
+  ;; simple cases
+  (for ([l  (in-list '(() (x) (x y) (x y z) (x y z w)))]
+        [r1 (in-list '(() (x) (x 5 y) (x 5 y 5 z) (x 5 y 5 z 5 w)))]
+        [r2 (in-list '(() (x) (x 7 y) (x 5 y 7 z) (x 5 y 5 z 7 w)))]
+        [r3 (in-list '(() (x) (x (5) y) (x (5) y (5) z)
+                       (x (5) y (5) z (5) w)))])
+    (test r1 add-between l 5)
+    ;; (test `(0 ,@r1) add-between l 5 #:before-first 0)
+    ;; (test `(,@r1 9) add-between l 5 #:after-last 9)
+    ;; (test `(0 ,@r1 9) add-between l 5 #:before-first 0 #:after-last 9)
+    (test r2 add-between l 5 #:before-last 7)
+    ;; (test `(0 ,@r2) add-between l 5 #:before-first 0 #:before-last 7)
+    ;; (test `(,@r2 9) add-between l 5 #:after-last 9 #:before-last 7)
+    ;; (test `(0 ,@r2 9) add-between l 5 #:before-first 0 #:after-last 9 #:before-last 7)
+    (test r3 add-between l '(5))
+    ;; (test `(0 ,@r3) add-between l '(5) #:before-first 0)
+    ;; (test `(,@r3 9) add-between l '(5) #:after-last 9)
+    ;; (test `(0 ,@r3 9) add-between l '(5) #:before-first 0 #:after-last 9)
+    ;; (test r1 add-between l 5 #:nothing #f #:before-first #f)
+    ;; (test r1 add-between l 5 #:nothing #f #:after-last #f)
+    )
+  ;; spliced cases
+  (for* ([x (in-list '(() (4) (4 5)))]
+         [y (in-list '(() (6) (6 7)))])
+    (for ([l  (in-list '(() (x) (x y) (x y z) (x y z w)))]
+          [r1 (in-list `(() (x) (x ,@x y) (x ,@x y ,@x z)
+                         (x ,@x y ,@x z ,@x w)))]
+          [r2 (in-list `(() (x) (x ,@y y) (x ,@x y ,@y z)
+                         (x ,@x y ,@x z ,@y w)))])
+      (test r1 add-between l x #:splice? #t)
+      (test r2 add-between l x #:splice? #t #:before-last y)
+      (for ([fst (in-list '(() (0) (0 1)))])
+        (test `(,@fst ,@r1) add-between l x
+              #:splice? #t #:before-first fst)
+        (test `(,@fst ,@r2) add-between l x
+              #:splice? #t #:before-first fst #:before-last y))
+      (for ([lst (in-list '(() (9) (8 9)))])
+        (test `(,@r1 ,@lst) add-between l x
+              #:splice? #t #:after-last lst)
+        (test `(,@r2 ,@lst) add-between l x
+              #:splice? #t #:after-last lst #:before-last y))
+      (for* ([fst (in-list '(() (0) (0 1)))]
+             [lst (in-list '(() (9) (8 9)))])
+        (test `(,@fst ,@r1 ,@lst) add-between l x
+              #:splice? #t #:before-first fst #:after-last lst)
+        (test `(,@fst ,@r2 ,@lst) add-between l x
+              #:splice? #t #:before-first fst #:after-last lst #:before-last y)))))
 
 ;; ---------- remove-duplicates ----------
 (let ()
@@ -348,13 +391,13 @@
 
   (test '(1 banana) argmin car '((3 pears) (1 banana) (2 apples)))
 
-  (err/rt-test (argmin 1 (list 1)) (check-regs #rx"argmin" #rx"procedure"))
+  (err/rt-test (argmin 1 (list 1)) (check-regs #rx"argmin" #rx"any/c . -> . real[?]"))
   (err/rt-test (argmin (lambda (x) x) 3) (check-regs #rx"argmin" #rx"list"))
-  (err/rt-test (argmin (lambda (x) x) (list 1 #f)) (check-regs #rx"argmin" #rx"procedure that returns real numbers"))
-  (err/rt-test (argmin (lambda (x) x) (list #f)) (check-regs #rx"argmin" #rx"procedure that returns real numbers"))
+  (err/rt-test (argmin (lambda (x) x) (list 1 #f)) (check-regs #rx"argmin" #rx"real"))
+  (err/rt-test (argmin (lambda (x) x) (list #f)) (check-regs #rx"argmin" #rx"real"))
 
-  (err/rt-test (argmin (lambda (x) x) (list +i)) (check-regs #rx"argmin" #rx"procedure that returns real numbers"))
-  (err/rt-test (argmin (lambda (x) x) (list)) (check-regs #rx"argmin" #rx"non-empty list"))
+  (err/rt-test (argmin (lambda (x) x) (list +i)) (check-regs #rx"argmin" #rx"real"))
+  (err/rt-test (argmin (lambda (x) x) (list)) (check-regs #rx"argmin" #rx".and/c list[?] .not/c empty[?].."))
 
   (test 'argmax object-name argmax)
   (test 1 argmax (lambda (x) 0) (list 1))
@@ -370,15 +413,31 @@
 
   (test '(3 pears) argmax car '((3 pears) (1 banana) (2 apples)))
 
-  (err/rt-test (argmax 1 (list 1)) (check-regs #rx"argmax" #rx"procedure"))
+  (err/rt-test (argmax 1 (list 1)) (check-regs #rx"argmax" #rx"any/c . -> . real[?]"))
   (err/rt-test (argmax (lambda (x) x) 3) (check-regs #rx"argmax" #rx"list"))
-  (err/rt-test (argmax (lambda (x) x) (list 1 #f)) (check-regs #rx"argmax" #rx"procedure that returns real numbers"))
-  (err/rt-test (argmax (lambda (x) x) (list #f)) (check-regs #rx"argmax" #rx"procedure that returns real numbers"))
+  (err/rt-test (argmax (lambda (x) x) (list 1 #f)) (check-regs #rx"argmax" #rx"real"))
+  (err/rt-test (argmax (lambda (x) x) (list #f)) (check-regs #rx"argmax" #rx"real"))
 
-  (err/rt-test (argmax (lambda (x) x) (list +i)) (check-regs #rx"argmax" #rx"procedure that returns real numbers"))
-  (err/rt-test (argmax (lambda (x) x) (list)) (check-regs #rx"argmax" #rx"non-empty list")))
+  (err/rt-test (argmax (lambda (x) x) (list +i)) (check-regs #rx"argmax" #rx"real?"))
+  (err/rt-test (argmax (lambda (x) x) (list)) (check-regs #rx"argmax" #rx".and/c list[?] .not/c empty[?]..")))
 
+;; ---------- range ----------
 
+(let ()
+  (test '(0 1 2 3) range 4)
+  (test '() range 0)
+  (test '(0 1 2 3 4 5 6 7) range 8)
+  (test '() range 3 2)
+  (test '(3) range 3 2 -1)
+  (test '(3 4 5 6 7 8) range 3 9)
+  (test '(3 5 7) range 3 9 2)
+  (test '(3 3.5 4.0 4.5 5.0 5.5 6.0 6.5 7.0 7.5 8.0 8.5) range 3 9 0.5)
+  (test '(9 7 5) range 9 3 -2)
+  (test '(0 1 2 3 4 5 6 7 8 9) range 10)
+  (test '(10 11 12 13 14 15 16 17 18 19) range 10 20)
+  (test '(20 22 24 26 28 30 32 34 36 38) range 20 40 2)
+  (test '(20 19 18 17 16 15 14 13 12 11) range 20 10 -1)
+  (test '(10 11.5 13.0 14.5) range 10 15 1.5))
 
 ;; ---------- check no collisions with srfi/1 ----------
 (test (void)

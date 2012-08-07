@@ -14,13 +14,18 @@
          "../bmp.rkt"
          "../gif.rkt"
          "local.rkt"
-         "color.rkt")
+         "color.rkt"
+         "lock.rkt")
 
 (provide bitmap%
          make-bitmap
+         make-platform-bitmap
          read-bitmap
          make-monochrome-bitmap
-         (protect-out make-alternate-bitmap-kind))
+         (protect-out make-alternate-bitmap-kind
+                      build-cairo-surface
+                      quartz-bitmap%
+                      win32-no-hwnd-bitmap%))
 
 ;; FIXME: there must be some way to abstract over all many of the
 ;; ARGB/RGBA/BGRA iterations.
@@ -260,7 +265,7 @@
     (def/public (get-height) (max 1 height))
     (def/public (get-depth) (if b&w? 1 32))
     (def/public (is-color?) (not b&w?))
-    (def/public (has-alpha-channel?) alpha-channel?)
+    (def/public (has-alpha-channel?) (and alpha-channel? #t))
 
     (define/private (check-alternate who)
       (when alt?
@@ -281,10 +286,10 @@
     (define/public (get-bitmap-gl-context)
       #f)
 
-    (def/public (load-file [(make-alts path-string? input-port?) in]
-                           [bitmap-file-kind-symbol? [kind 'unknown]]
-                           [(make-or-false color%) [bg #f]]
-                           [any? [complain-on-failure? #f]])
+    (define/public (load-file in
+                              [kind 'unknown]
+                              [bg #f]
+                              [complain-on-failure? #f])
       (check-alternate 'load-file)
       (release-bitmap-storage)
       (set!-values (s b&w?) (do-load-bitmap in kind bg complain-on-failure?))
@@ -497,9 +502,7 @@
         (proc bm)
         (send bm release-bitmap-storage)))
 
-    (def/public (save-file [(make-alts path-string? output-port?) out]
-                           [bitmap-save-kind-symbol? [kind 'unknown]]
-                           [quality-integer? [quality 75]])
+    (define/public (save-file out [kind 'unknown] [quality 75])
       (and (ok?)
            (begin
              (if alt?
@@ -542,10 +545,10 @@
                  (let ([w (create-png-writer out width height #t #f)])
                    (write-png w rows)
                    (destroy-png-writer w)))]
-              [(and (not alpha-channel?) 
-                    loaded-mask
-                    (= width (send loaded-mask get-width))
-                    (= height (send loaded-mask get-height)))
+              [else #;(and (not alpha-channel?) 
+                           loaded-mask
+                           (= width (send loaded-mask get-width))
+                           (= height (send loaded-mask get-height)))
                (let ([bstr (make-bytes (* width height 4))])
                  (get-argb-pixels 0 0 width height bstr)
                  (when loaded-mask
@@ -565,6 +568,7 @@
                    (let ([w (create-png-writer out width height #f #t)])
                      (write-png w rows)
                      (destroy-png-writer w))))]
+              #;
               [else
                ;; Use Cairo built-in support:
                (let ([proc (lambda (ignored bstr len)
@@ -618,13 +622,11 @@
                 alpha-s))
           (get-empty-surface)))
 
-    (def/public (get-argb-pixels [exact-nonnegative-integer? x]
-                                 [exact-nonnegative-integer? y]
-                                 [exact-nonnegative-integer? w]
-                                 [exact-nonnegative-integer? h]
-                                 [bytes? bstr]
-                                 [any? [get-alpha? #f]]
-                                 [any? [pre-mult? #f]])
+    (define/public (get-handle) s)
+
+    (define/public (get-argb-pixels x y w h bstr
+                                    [get-alpha? #f]
+                                    [pre-mult? #f])
       (unless ((bytes-length bstr) . >=  . (* w h 4))
         (raise-mismatch-error (method-name 'bitmap% 'get-argb-pixels)
                               "byte string is too short: "
@@ -694,13 +696,9 @@
               (let ([p (+ (* 4 i) row)])
                 (bytes-set! bstr p 255)))))]))
 
-    (def/public (set-argb-pixels [exact-nonnegative-integer? x]
-                                 [exact-nonnegative-integer? y]
-                                 [exact-nonnegative-integer? w]
-                                 [exact-nonnegative-integer? h]
-                                 [bytes? bstr]
-                                 [any? [set-alpha? #f]]
-                                 [any? [pre-mult? #f]])
+    (define/public (set-argb-pixels x y w h bstr
+                                    [set-alpha? #f]
+                                    [pre-mult? #f])
       (unless ((bytes-length bstr) . >=  . (* w h 4))
         (raise-mismatch-error (method-name 'bitmap% 'set-argb-pixels)
                               "byte string is too short: "
@@ -850,3 +848,77 @@
   (if bits
       (make-object bitmap% bits w h)
       (make-object bitmap% w h #t)))
+
+(define/top (make-platform-bitmap [exact-positive-integer? w]
+                                  [exact-positive-integer? h])
+  (case (system-type)
+    [(macosx) (make-object quartz-bitmap% w h)]
+    [(windows) (make-object win32-no-hwnd-bitmap% w h)]
+    [(unix) (make-bitmap w h)]))
+
+(define-local-member-name build-cairo-surface)
+(define win32-no-hwnd-bitmap%
+  (class bitmap%
+    (init w h)
+    (super-make-object (make-alternate-bitmap-kind w h))
+    
+    (define s (build-cairo-surface w h))
+    ;; erase the bitmap
+    (let ([cr (cairo_create s)])
+      (cairo_set_source_rgba cr 1.0 1.0 1.0 1.0)
+      (cairo_paint cr)
+      (cairo_destroy cr))
+    
+    (define/public (build-cairo-surface w h) 
+      (cairo_win32_surface_create_with_dib CAIRO_FORMAT_RGB24 w h))
+    
+    (define/override (ok?) #t)
+    (define/override (is-color?) #t)
+    (define/override (has-alpha-channel?) #f)
+    
+    (define/override (get-cairo-surface) s)
+    
+    (define/override (release-bitmap-storage)
+      (atomically
+       (cairo_surface_destroy s)
+       (set! s #f)))))
+
+(define quartz-bitmap%
+  (class bitmap%
+    (init w h [with-alpha? #t])
+    (super-make-object (make-alternate-bitmap-kind w h))
+    
+    (define s
+      (let ([s (cairo_quartz_surface_create (if with-alpha?
+                                                CAIRO_FORMAT_ARGB32
+                                                CAIRO_FORMAT_RGB24)
+                                            w
+                                            h)])
+        ;; initialize bitmap to empty - needed?
+        (let ([cr (cairo_create s)])
+          (cairo_set_operator cr (if with-alpha?
+                                     CAIRO_OPERATOR_CLEAR
+                                     CAIRO_OPERATOR_SOURCE))
+          (cairo_set_source_rgba cr 1.0 1.0 1.0 1.0)
+          (cairo_paint cr)
+          (cairo_destroy cr))
+        s))
+    
+    (define/override (ok?) (and s #t))
+    
+    (define/override (is-color?) #t)
+    
+    (define has-alpha? with-alpha?)
+    (define/override (has-alpha-channel?) has-alpha?)
+    
+    (define/override (get-cairo-surface) s)
+    (define/override (get-cairo-alpha-surface) 
+      (if has-alpha?
+          s
+          (super get-cairo-alpha-surface)))
+    
+    (define/override (release-bitmap-storage)
+      (atomically
+       (when s
+         (cairo_surface_destroy s)
+         (set! s #f))))))

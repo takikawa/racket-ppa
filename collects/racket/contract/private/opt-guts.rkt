@@ -1,7 +1,7 @@
 #lang racket/base
 (require syntax/private/boundmap ;; needs to be the private one, since the public one has contracts
-         (for-template racket/base)
-         (for-template "guts.rkt"
+         (for-template racket/base
+                       "guts.rkt"
                        "blame.rkt"
                        "misc.rkt")
          (for-syntax racket/base))
@@ -22,7 +22,93 @@
          opt/info-swap-blame
          opt/info-change-val
          
-         opt/unknown)
+         opt/unknown
+         
+         optres-exp
+         optres-lifts
+         optres-superlifts
+         optres-partials
+         optres-flat
+         optres-opt
+         optres-stronger-ribs
+         optres-chaperone
+         optres-no-negative-blame?
+         build-optres
+         
+         combine-two-chaperone?s
+         combine-two-no-negative-blame)
+
+;; (define/opter (<contract-combinator> opt/i opt/info stx) body)
+;;
+;; An opter is to a function with the following signature: 
+;;
+;; opter : (syntax opt/info -> <opter-results>) opt/info list-of-ids -> opt-res
+;;
+;; The first argument can be used to recursively process sub-contracts
+;; It returns what an opter returns and its results should be accumulated
+;; into the opter's results.
+;;
+;; The opt/info struct has a number of identifiers that get used to build
+;; contracts; see opt-guts.rkt for the selectors.
+;;
+;; The last argument is a list of free-variables if the calling context
+;; was define/opt, otherwise it is null.
+;;
+;; The fields of the optres struct are:
+;;  - the optimized syntax
+;;  - lifted variables: a list of (id, sexp) pairs
+;;  - super-lifted variables: functions or the such defined at the toplevel of the
+;;                            calling context of the opt routine.
+;;                            Currently this is only used for struct contracts.
+;;  - partially applied contracts: a list of (id, sexp) pairs
+;;  - if the contract being optimized is flat,
+;;    then an sexp that evals to bool, indicating if the contract passed or not,
+;;    else #f
+;;    This is used in conjunction with optimizing flat contracts into one boolean
+;;    expression when optimizing or/c.
+;;  - if the contract can be optimized,
+;;    then #f (that is, it is not unknown)
+;;    else the symbol of the lifted variable
+;;    This is used for contracts with subcontracts (like cons) doing checks.
+;;  - a list of stronger-ribs
+;;  - a boolean or a syntax object; if it is a boolean,
+;;    the boolean indicaties if this contract is a chaperone contract
+;;    if it is a syntax object, then evaluating its contents determines
+;;    if this is a chaperone contract
+;;  - #f -- indicating that negative blame is impossible
+;;    #t -- indicating that negative blame may be possible
+;;    (listof identifier) -- indicating that negative blame is possible 
+;;        if it is possible in any of the identifiers in the list
+;;        each identifier is expected to be an identifier bound by
+;;        the define-opt/c 
+
+(struct optres (exp 
+                lifts
+                superlifts
+                partials
+                flat
+                opt
+                stronger-ribs
+                chaperone
+                no-negative-blame?))
+(define (build-optres #:exp exp
+                      #:lifts lifts
+                      #:superlifts superlifts
+                      #:partials partials
+                      #:flat flat
+                      #:opt opt
+                      #:stronger-ribs stronger-ribs
+                      #:chaperone chaperone
+                      #:no-negative-blame? [no-negative-blame? (syntax? flat)])
+  (optres exp 
+          lifts
+          superlifts
+          partials
+          flat
+          opt
+          stronger-ribs
+          chaperone
+          no-negative-blame?))
 
 ;; a hash table of opters
 (define opters-table
@@ -131,14 +217,21 @@
 ;; the initial lifts
 (define empty-lifts '())
 
-(define (bind-lifts lifts stx) (do-bind-lifts lifts stx #'let*))
-(define (bind-superlifts lifts stx) (do-bind-lifts lifts stx #'letrec))
+(define (bind-lifts lifts stx) (do-bind-lifts lifts stx #'let*-values))
+(define (bind-superlifts lifts stx) (do-bind-lifts lifts stx #'letrec-values))
 
 (define (do-bind-lifts lifts stx binding-form)
   (if (null? lifts)
       stx
       (with-syntax ([((lifts-x . lift-e) ...) lifts])
-        (with-syntax ([(lifts-x ...) (map (λ (x) (if (identifier? x) x (car (generate-temporaries '(junk)))))
+        (with-syntax ([(lifts-x ...) (map (λ (x) (cond
+                                                   [(identifier? x) (list x)]
+                                                   [(let ([lst (syntax->list x)])
+                                                      (and lst
+                                                           (andmap identifier? lst)))
+                                                    x]
+                                                   [else
+                                                    (generate-temporaries '(junk))]))
                                           (syntax->list (syntax (lifts-x ...))))]
                       [binding-form binding-form])
           #`(binding-form ([lifts-x lift-e] ...)
@@ -149,37 +242,56 @@
 ;;
 ;; opt/unknown : opt/i id id syntax
 ;;
-(define (opt/unknown opt/i opt/info uctc)
-  (let* ((lift-var (car (generate-temporaries (syntax (lift)))))
-         (partial-var (car (generate-temporaries (syntax (partial)))))
-         (partial-flat-var (car (generate-temporaries (syntax (partial-flat))))))
-    (values
-     (with-syntax ((partial-var partial-var)
-                   (lift-var lift-var)
-                   (uctc uctc)
-                   (val (opt/info-val opt/info)))
-       (syntax (partial-var val)))
-     (list (cons lift-var 
-                 ;; FIXME needs to get the contract name somehow
-                 (with-syntax ((uctc uctc))
-                   (syntax (coerce-contract 'opt/c uctc)))))
-     null
+(define (opt/unknown opt/i opt/info uctc [extra-warning ""])
+  (log-warning (string-append (format "warning in ~a:~a: opt/c doesn't know the contract ~s" 
+                                      (syntax-source uctc)
+                                      (if (syntax-line uctc)
+                                          (format "~a:~a" (syntax-line uctc) (syntax-column uctc))
+                                          (format ":~a" (syntax-position uctc)))
+                                      (syntax->datum uctc))
+                              extra-warning))
+  (with-syntax ([(lift-var partial-var partial-flat-var)
+                 (generate-temporaries '(lift partial partial-flat))]
+                [val (opt/info-val opt/info)]
+                [uctc uctc]
+                [blame (opt/info-blame opt/info)])
+    (build-optres
+     #:exp #'(partial-var val)
+     #:lifts (list (cons #'lift-var 
+                         #'(coerce-contract 'opt/c uctc)))
+     #:superlifts null
+     #:partials
      (list (cons
-            partial-var
-            (with-syntax ((lift-var lift-var)
-                          (blame (opt/info-blame opt/info)))
-              (syntax ((contract-projection lift-var) blame))))
+            #'partial-var
+            #'((contract-projection lift-var) blame))
            (cons
-            partial-flat-var
-            (with-syntax ((lift-var lift-var))
-              (syntax (if (flat-contract? lift-var)
-                          (flat-contract-predicate lift-var)
-                          (lambda (x) (error 'opt/unknown "flat called on an unknown that had no flat pred ~s ~s"
-                                             lift-var
-                                             x)))))))
-     (with-syntax ([val (opt/info-val opt/info)]
-                   [partial-flat-var partial-flat-var])
-       #'(partial-flat-var val))
-     lift-var
-     null
-     #f)))
+            #'partial-flat-var
+            #'(if (flat-contract? lift-var)
+                  (flat-contract-predicate lift-var)
+                  (lambda (x) (error 'opt/unknown "flat called on an unknown that had no flat pred ~s ~s"
+                                     lift-var
+                                     x)))))
+     #:flat #f
+     #:opt #'lift-var
+     #:stronger-ribs null
+     #:chaperone #'(chaperone-contract? lift-var))))
+
+;; combine-two-chaperone?s : (or/c boolean? syntax?) (or/c boolean? syntax?) -> (or/c boolean? syntax?)
+(define (combine-two-chaperone?s chaperone-a? chaperone-b?)
+  (cond
+    [(and (boolean? chaperone-a?) (boolean? chaperone-b?))
+     (and chaperone-a? chaperone-b?)]
+    [(boolean? chaperone-a?)
+     (and chaperone-a? chaperone-b?)]
+    [(boolean? chaperone-b?)
+     (and chaperone-b? chaperone-a?)]
+    [else
+     #`(and #,chaperone-a? #,chaperone-b?)]))
+
+(define (combine-two-no-negative-blame a b)
+  (cond
+    [(eq? a #t) b]
+    [(eq? a #f) #f]
+    [(eq? b #t) a]
+    [(eq? b #f) #f]
+    [else (append a b)]))

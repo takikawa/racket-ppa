@@ -143,7 +143,8 @@ int scheme_can_unbox_inline(Scheme_Object *obj, int fuel, int regs, int unsafely
    just unbox it without using more than `regs' registers? There
    cannot be any errors or function calls, unless we've specifically
    instrumented them to save/pop floating-point values before
-   jumping. */
+   jumping. If the result is true, then arguments must be evaluated in
+   order. */
 {
   Scheme_Type t;
 
@@ -361,6 +362,11 @@ DECL_FP_GLUE(ceiling)
 DECL_FP_GLUE(truncate)
 DECL_FP_GLUE(round)
 typedef void (*call_fp_proc)(void);
+
+#define DECL_BIN_FP_GLUE(op) static void call_ ## op(void) XFORM_SKIP_PROC {  \
+    scheme_jit_save_fp = scheme_double_ ## op(scheme_jit_save_fp, scheme_jit_save_fp2); }
+DECL_BIN_FP_GLUE(expt)
+typedef void (*call_fp_bin_proc)(void);
 # endif
 #endif
 
@@ -369,7 +375,7 @@ int scheme_generate_unboxing(mz_jit_state *jitter, int target)
   int fpr0;
 
   fpr0 = JIT_FPR_0(jitter->unbox_depth);
-  jit_ldxi_d_fppush(fpr0, target, &((Scheme_Double *)0x0)->double_val);  
+  jit_ldxi_d_fppush(fpr0, target, &((Scheme_Double *)0x0)->double_val);
   jitter->unbox_depth++;
 
   return 1;
@@ -624,6 +630,20 @@ static int generate_double_arith(mz_jit_state *jitter, Scheme_Object *rator,
           mz_prepare(0);
           (void)mz_finish(f);
           (void)mz_tl_ldi_d_fppush(JIT_FPR0, tl_scheme_jit_save_fp, JIT_R2);
+        }
+        break;
+      case ARITH_EXPT: /* flexpt */
+        {
+          if (!reversed) {
+            (void)mz_tl_sti_d_fppop(tl_scheme_jit_save_fp2, JIT_FPR0, JIT_R2);
+            (void)mz_tl_sti_d_fppop(tl_scheme_jit_save_fp, JIT_FPR1, JIT_R2);
+          } else {
+            (void)mz_tl_sti_d_fppop(tl_scheme_jit_save_fp, JIT_FPR0, JIT_R2);
+            (void)mz_tl_sti_d_fppop(tl_scheme_jit_save_fp2, JIT_FPR1, JIT_R2);
+          }
+          mz_prepare(0);
+          (void)mz_finish(call_expt);
+          (void)mz_tl_ldi_d_fppush(JIT_FPR0, tl_scheme_jit_save_fp, JIT_R2);          
         }
         break;
 # endif
@@ -913,11 +933,9 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
       if (!(inlined_flonum1 && inlined_flonum2)) {
         if ((can_direct1 || (unsafe_fl > 0)) && !inlined_flonum2) {
 #ifdef USE_FLONUM_UNBOXING
-          int aoffset;
           int fpr0;
           fpr0 = JIT_FPR_0(jitter->unbox_depth);
-          aoffset = JIT_FRAME_FLONUM_OFFSET - (jitter->flostack_offset * sizeof(double));
-          jit_ldxi_d_fppush(fpr0, JIT_FP, aoffset);
+          mz_ld_fppush(fpr0, jitter->flostack_offset);
           scheme_mz_flostack_restore(jitter, flostack, flopos, 1, 1);
           CHECK_LIMIT();
           jitter->unbox_depth++;
@@ -1903,9 +1921,10 @@ int scheme_generate_nary_arith(mz_jit_state *jitter, Scheme_App_Rec *app,
 
   __START_SHORT_JUMPS__(c < 100);
 
-  if (trigger_arg > c) {
-    /* we don't expect this to happen, since constant-folding would
-       have collapsed it */
+  if (trigger_arg >= c) {
+    /* we don't expect this to happen, since constant-folding normally
+       would have collapsed it --- but a division by zero, for example,
+       might block constant folding */
     trigger_arg = 0;
   }
 

@@ -123,7 +123,7 @@ rename transformer:
 
 @itemlist[
 
- @item{The parser to installs a @racket[free-identifier=?] and
+ @item{The parser installs a @racket[free-identifier=?] and
        @racket[identifier-binding] equivalence between @racket[_id]
        and @racket[_id-stx], as long as @racket[id-stx] does not have
        a true value for the @indexed-racket['not-free-identifier=?]
@@ -200,7 +200,7 @@ information on the form of the list is below.
 
 When an identifier in @racket[stop-ids] is encountered by the expander
 in a sub-expression, expansions stops for the sub-expression. If
-@racket[stop-ids] is a non-empty list, then
+@racket[stop-ids] is a non-empty list and does not contain just @racket[module*], then
 @racket[begin], @racket[quote], @racket[set!], @racket[lambda],
 @racket[case-lambda], @racket[let-values], @racket[letrec-values],
 @racket[if], @racket[begin0], @racket[with-continuation-mark],
@@ -217,6 +217,14 @@ proceed to sub-expressions). A fully expanded form can include the
 bindings listed in @secref["fully-expanded"] plus the
 @racket[letrec-syntaxes+values] form and @racket[#%expression]
 in any expression position.
+
+When @racket[#%plain-module-begin] is not itself in @racket[stop-ids]
+and @racket[module*] is in @racket[stop-ids], then the
+@racket[#%plain-module-begin] transformer refrains from expanding
+@racket[module*] sub-forms. Otherwise, the
+@racket[#%plain-module-begin] transformer detects and expands sub-forms
+(such as @racket[define-values]) independent of the correspond
+identifier's presence in @racket[stop-ids].
 
 The optional @racket[intdef-ctx] argument must be either @racket[#f],
 the result of @racket[syntax-local-make-definition-context], or a list
@@ -602,15 +610,25 @@ by the expander, the result is the @tech{phase level} of the form
 being expanded. Otherwise, the result is @racket[0].}
 
 
-@defproc[(syntax-local-module-exports [mod-path module-path?]) 
-         (values (listof symbol?) (listof symbol?) (listof symbol?))]{
+@defproc[(syntax-local-module-exports [mod-path (or/c module-path?
+                                                      (and/c syntax?
+                                                             (lambda (stx)
+                                                               (module-path? (syntax->datum stx)))))])
+         (listof (cons/c (or/c exact-integer? #f) (listof symbol?)))]{
 
-Returns three lists of symbols that represent the @racket[provide]d
-bindings of the module named by @racket[mod-path]. The first list
-corresponds to the @tech{phase level} 0 exports of the module, the
-second list corresponds to the @tech{phase level} -1 exports of the
-module, and the last list corresponds to the @tech{label phase level}
-exports of the module.
+Returns an association list from @tech{phase-level} numbers (or
+@racket[#f] for the @tech{label phase level}) to lists of symbols,
+where the symbols are the names of @racket[provide]d
+bindings from @racket[mod-path] at the corresponding @tech{phase level}.
+
+@transform-time[]}
+
+
+@defproc[(syntax-local-submodules) (listof symbol?)]{
+
+Returns a list of submodule names that are declared via
+@racket[module] (as opposed to @racket[module*]) in the current
+expansion context.
 
 @transform-time[]}
 
@@ -856,7 +874,8 @@ transformer.}
 @defthing[prop:require-transformer struct-type-property?]{
 
 A property to identify @tech{require transformers}. The property
-value must be a procedure that takes a syntax object and returns
+value must be a procedure that takes the structure and returns a transformer
+procedure; the returned transformer procedure takes a syntax object and returns
 import and import-source lists.}
 
 
@@ -919,6 +938,44 @@ into a module.
  @item{@racket[mode] --- the @tech{phase level} shift of the import.}
 
 ]}
+
+
+@defparam[current-require-module-path module-path (or/c #f module-path-index?)]{
+
+A parameter that determines how relative @racket[require]-level module
+paths are expanded to @racket[#%require]-level module paths by
+@racket[convert-relative-module-path] (which is used implicitly by all
+built-in @racket[require] sub-forms).
+
+When the value of @racket[current-require-module-path] is @racket[#f],
+relative module paths are left as-is, which means that the
+@racket[require] context determines the resolution of the module
+path.
+
+The @racket[require] form @racket[parameterize]s
+@racket[current-require-module-path] as @racket[#f] while invoking
+sub-form transformers, while @racket[relative-in] @racket[parameterize]s
+to a given module path.}
+
+
+@defproc[(convert-relative-module-path [module-path
+                                        (or/c module-path?
+                                              (and/c syntax?
+                                                     (lambda (stx)
+                                                       (module-path? (syntax-e stx)))))])
+          (or/c module-path?
+                (and/c syntax?
+                       (lambda (stx)
+                         (module-path? (syntax-e stx)))))]{
+
+Converts @racket[module-path] according to @racket[current-require-module-path].
+
+If @racket[module-path] is not relative or if the value of
+@racket[current-require-module-path] is @racket[#f], then
+@racket[module-path] is returned. Otherwise, @racket[module-path] is
+converted to an absolute module path that is equivalent to
+@racket[module-path] relative to the value of
+@racket[current-require-module-path].}
 
 
 @defproc[(syntax-local-require-certifier)
@@ -1018,14 +1075,16 @@ Like @racket[make-provide-transformer], but for a value that is a
 @defthing[prop:provide-transformer struct-type-property?]{
 
 A property to identify @tech{provide transformers}. The property
-value must be a procedure that takes a syntax object and mode list and
+value must be a procedure that takes the structure and returns a transformer
+procedure; the returned transformer procedure takes a syntax object and mode list and
 returns an export list.}
 
 
 @defthing[prop:provide-pre-transformer struct-type-property?]{
 
 A property to identify @tech{provide pre-transformers}. The property
-value must be a procedure that takes a syntax object and mode list and
+value must be a procedure that takes the structure and returns a transformer
+procedure; the returned transformer procedure takes a syntax object and mode list and
 returns a syntax object.}
 
 
@@ -1074,6 +1133,38 @@ A structure representing a single imported identifier:
 
 For backward compatibility only; returns a procedure that returns its
 first argument.}
+
+@; ----------------------------------------------------------------------
+
+@section[#:tag "keyword-trans"]{Keyword-Argument Conversion Introspection}
+
+@note-lib-only[racket/keyword-transform]
+
+@deftogether[(
+@defproc[(syntax-procedure-alias-property [stx syntax?])
+         (or/c #f 
+               (letrec ([val? (recursive-contract
+                               (or/c (cons/c identifier? identifier?)
+                                     (cons/c val? val?)))])
+                 val?))]
+@defproc[(syntax-procedure-converted-arguments-property [stx syntax?])
+         (or/c #f 
+               (letrec ([val? (recursive-contract
+                               (or/c (cons/c identifier? identifier?)
+                                     (cons/c val? val?)))])
+                 val?))]
+)]{
+
+At expansion time, reports the value of a syntax property that can be
+attached to an identifier by the expansion of a keyword-application
+form during the same expansion time. See @racket[lambda] for more
+information about the property.
+
+The property value is normally a pair consisting of the original
+identifier and an identifier that appears in the
+expansion. Property-value merging via @racket[syntax-track-origin] can make
+the value a pair of such values, and so on.}
+
 
 @; ----------------------------------------------------------------------
 

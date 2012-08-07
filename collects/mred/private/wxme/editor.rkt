@@ -1,11 +1,11 @@
-#lang scheme/base
-(require scheme/class
-         (for-syntax scheme/base)
-         scheme/file
+#lang racket/base
+(require racket/class
+         (for-syntax racket/base)
+         racket/file
          racket/port
          "../syntax.rkt"
          "private.rkt"
-         racket/snip
+         racket/snip/private/snip
          racket/snip/private/private
          racket/snip/private/style
          racket/snip/private/snip-flags
@@ -1380,9 +1380,12 @@
     (semaphore-post seq-lock))
 
   (def/public (wait-sequence-lock)
-    (when seq-lock
+    (cond
+     [seq-lock
       (sync seq-lock)
-      (semaphore-post seq-lock)))
+      (lambda ()
+        (semaphore-post seq-lock))]
+     [else void]))
 
   (def/public (get-file [(make-or-false path-string?) path])
     (editor-get-file "choose a file" (extract-parent) #f path))

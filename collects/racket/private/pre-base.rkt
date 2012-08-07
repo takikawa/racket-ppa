@@ -1,5 +1,4 @@
-
-;; A sane "core" for finishing up the "scheme/base" library
+;; A sane "core" for finishing up the "racket/base" library
 
 (module pre-base '#%kernel
   (#%require (for-syntax '#%kernel))
@@ -49,10 +48,11 @@
                                           (ormap (lambda (x) (keyword? (syntax-e x))) l)
                                           #t)
                                       'new-apply-proc
-                                      'apply)])
+                                      'apply)]
+                           [(fst) (car (syntax-e stx))])
                 (datum->syntax
                  stx
-                 (cons (datum->syntax here app (car l) (car l))
+                 (cons (datum->syntax here app fst fst)
                        (cdr (syntax-e stx)))
                  stx
                  stx)))))))
@@ -166,7 +166,7 @@
                               define-in-vector-like
                               define-:vector-like-gen
                               make-in-vector-like
-                              stream? stream-empty? stream-first stream-rest 
+                              stream? stream-ref stream-empty? stream-first stream-rest
                               prop:stream in-stream empty-stream make-do-stream)
              (all-from "kernstruct.rkt")
              #%top-interaction

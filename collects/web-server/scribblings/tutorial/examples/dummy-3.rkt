@@ -1,11 +1,13 @@
-#lang racket
-(require "../dummy-sqlite.rkt")
+#lang racket/base
+(require racket/list
+         racket/local
+         "../dummy-sqlite.rkt")
 
-;; A blog is a (make-blog db)
+;; A blog is a (blog db)
 ;; where db is an sqlite database handle
 (struct blog (db))
 
-;; A post is a (make-post blog id)
+;; A post is a (post blog id)
 ;; where blog is a blog and id is an integer?
 (struct post (blog id))
 

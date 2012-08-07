@@ -1,7 +1,7 @@
 (module runtime-path racket/base
-  (require mzlib/etc
-	   setup/dirs
+  (require "private/this-expression-source-directory.rkt"
            racket/list
+           setup/dirs
            (only-in "private/runtime-path-table.rkt" table)
            (for-syntax racket/base))
 
@@ -72,7 +72,7 @@
 		      ((length p) . > . 1)
 		      (eq? 'lib (car p))
 		      (andmap string? (cdr p)))
-		 (let* ([strs (regexp-split #rx"/" 
+                 (let* ([strs (regexp-split #rx"/" 
                                             (let ([s (cadr p)])
                                               (if (regexp-match? #rx"[./]" s)
                                                   s
@@ -92,8 +92,14 @@
                        [vr (caddr p)])
                    (unless (module-path? p)
                      (error 'runtime-path "not a module path: ~.s" p))
-                   (module-path-index-join p (and vr
-                                                  (variable-reference->resolved-module-path vr))))]
+                   (let ([base (and vr
+                                    (variable-reference->resolved-module-path vr))])
+                     (if (and (pair? p)
+                              (eq? (car p) 'submod)
+                              (path? (cadr p)))
+                         (module-path-index-join `(submod "." ,@(cddr p)) 
+                                                 (module-path-index-join (cadr p) base))
+                         (module-path-index-join p base))))]
                 [else (error 'runtime-path "unknown form: ~.s" p)])))
            paths)))
   
@@ -154,9 +160,13 @@
        #`(quote
           #,(hash-ref
              ext-file-table
-             (module-path-index-resolve (module-path-index-join
-                                         (syntax->datum #'mp)
-                                         (syntax-source-module stx)))
+             (module-path-index-resolve 
+              (let ([p (syntax->datum #'mp)]
+                    [base (syntax-source-module stx)])
+                (if (and (pair? p) (eq? (car p) 'submod) (path? (cadr p)))
+                    (module-path-index-join `(submod "." ,@(cddr p))
+                                            (module-path-index-join (cadr p) base))
+                    (module-path-index-join p base))))
              null))]))
 
   )

@@ -35,6 +35,7 @@
       (code:line @#,elem{@racketvalfont{'}@racket[_quoted]})
       (code:line @#,elem{@racketvalfont{`}@racket[_quasiquoted]})
       number
+      boolean 
       string
       character]
 [expr-for-let (lambda (variable variable ...) expr)
@@ -94,7 +95,10 @@ did in the @secref["beginner-abbr"] level.
 
 
 
-@section[#:tag "intermediate-pre-defined"]{Pre-defined Functions}
+@section[#:tag "intermediate-pre-defined" ]{Pre-defined Functions}
 
-@prim-op-defns['(lib "htdp-intermediate.rkt" "lang") #'here '()]
+@(require (submod lang/htdp-intermediate procedures))
+@(render-sections (docs) #'here "htdp-intermediate")
+
+@;prim-op-defns['(lib "htdp-intermediate.rkt" "lang") #'here '()]
 

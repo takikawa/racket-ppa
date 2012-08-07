@@ -1,5 +1,12 @@
 #lang at-exp racket/base
 
+;; General note for anyone who tries to run these tests: since the tests check
+;; interactions it can be hard to find the problem, and sometimes it's best to
+;; just comment a suffix of the tests to find it.  In addition, when it fails
+;; it tries to provide information that helps finding the problem, but
+;; sometimes there's very little help, and it might also fail by just getting
+;; stuck.
+
 (define verbose? (make-parameter #f))
 
 (define global-ns (current-namespace))
@@ -22,7 +29,7 @@
                 (dynamic-require 'xrepl #f)
                 (parameterize ([current-namespace
                                 (module->namespace 'xrepl/xrepl)])
-                  ((namespace-variable-value 'wrap-column) 77))
+                  ((namespace-variable-value 'wrap-width) 77))
                 (read-eval-print-loop)))))
   (define (repl-> expected)
     (define output (read-string (string-length expected) Oi))
@@ -36,7 +43,7 @@
       [(and (pair? strs) (equal? "" (car strs)))
        (loop (cdr strs) input?)]
       [(and (thread-dead? repl-thread) (null? strs))
-       (printf "~a interaction tests passed.\n" tests-num)]
+       (printf "~a interaction tests passed\n" tests-num)]
       [(thread-dead? repl-thread)
        (error 'xrepl "test failure, repl thread died unexpectedly")]
       [(null? strs)
@@ -70,9 +77,12 @@
        (repl-> (car strs))
        (loop (cdr strs) #f)])))
 
+(require setup/dirs)
 (define tmp (path->string (find-system-path 'temp-dir)))
+(define collects (path->string (find-collects-dir)))
 
 (provide test-xrepl)
+(module+ main (test-xrepl))
 (define test-xrepl @make-xrepl-test{
   -> «^»
   ; ^: no saved values, yet [,bt for context]
@@ -99,15 +109,19 @@
   'foo> «,top»
   -> «(define enter! 123)»
   -> «(enter! 'foo)»
-  ; procedure application: expected procedure, given: 123; arguments were: 'foo
-  ;   [,bt for context]
+  ; application: not a procedure;
+  ;  expected a procedure that can be applied to arguments
+  ;   given: 123
+  ; [,bt for context]
   -> «(enter! 'fooo)»
-  ; procedure application: expected procedure, given: 123; arguments were:
-  ;   'fooo [,bt for context]
+  ; application: not a procedure;
+  ;  expected a procedure that can be applied to arguments
+  ;   given: 123
+  ; [,bt for context]
   -> «,en foo»                          ⇒ but this still works
   'foo> «,top»
   -> «,switch foo»
-  ; *** Initializing a new `foo' namespace with "racket/init.rkt" ***
+  ; *** Initializing a new `foo' namespace with 'foo ***
   ; *** Switching to the `foo' namespace ***
   foo::-> «,switch typed/racket»
   ; *** Initializing a new `typed/racket' namespace with typed/racket ***
@@ -118,7 +132,9 @@
   typed/racket::-> «,switch *»
   ; *** Switching to the `*' namespace ***
   -> «bleh»
-  ; reference to undefined identifier: bleh [,bt for context]
+  ; bleh: undefined;
+  ;  cannot reference undefined identifier
+  ; [,bt for context]
   -> «,ap BLEH»
   ; No matches found.
   -> «,ap path->»
@@ -153,5 +169,20 @@
   'broken> «foo»
   123                                   ⇒ ...but we still got in
   'broken> «,top»
+  -> «string->jsexpr»
+  ; string->jsexpr: undefined;
+  ;  cannot reference undefined identifier
+  ; [,bt for context]
+  -> «,r (only-in json string->jsexpr)» ⇒ works with an expression
+  -> «string->jsexpr»
+  #<procedure:string->jsexpr>
+  -> «jsexpr->string»                   ⇒ didn't get this
+  ; jsexpr->string: undefined;
+  ;  cannot reference undefined identifier
+  ; [,bt for context]
+  -> «,en json»
+  json/main> «,sh echo $F»
+  @|collects|/json/main.rkt
+  json/main> «,top»
   -> «,ex»
   @||})

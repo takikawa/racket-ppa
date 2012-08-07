@@ -8,6 +8,7 @@
          (for-syntax (only-in racket/base quote))
          ffi/unsafe/atomic
          "interfaces.rkt"
+         "common.rkt"
          "prepared.rkt")
 (provide place-connect
          place-proxy-connection%)
@@ -48,18 +49,20 @@
     (define/private (call* method-name args need-connected?)
       (cond [channel
              (pchan-put channel (cons method-name args))
-             (match (pchan-get channel)
-               [(cons 'values vals)
-                (apply values (for/list ([val (in-list vals)]) (sexpr->result val)))]
-               [(list 'error message)
-                (raise (make-exn:fail message (current-continuation-marks)))])]
+             (let* ([response (pchan-get channel)]
+                    [still-connected? (car response)])
+               (when (not still-connected?) (set! channel #f))
+               (match (cdr response)
+                 [(cons 'values vals)
+                  (apply values (for/list ([val (in-list vals)]) (sexpr->result val)))]
+                 [(list 'error message)
+                  (raise (make-exn:fail message (current-continuation-marks)))]))]
             [need-connected?
              (unless channel
                (error/not-connected method-name))]
             [else (void)]))
 
     (define/override (connected?)
-      ;; FIXME: can underlying connection disconnect w/o us knowing?
       (and channel #t))
 
     (define/public (disconnect)
@@ -69,14 +72,17 @@
     (define/public (get-dbsystem) (error 'get-dbsystem "not implemented"))
     (define/public (get-base) this)
 
-    (define/public (query fsym stmt)
+    (define/public (query fsym stmt cursor?)
       (call 'query fsym
             (match stmt
               [(? string?) (list 'string stmt)]
-              [(statement-binding pst meta params)
-               (list 'statement-binding (send pst get-handle) meta params)])))
+              [(statement-binding pst params)
+               (list 'statement-binding (send pst get-handle) params)])
+            cursor?))
     (define/public (prepare fsym stmt close-on-exec?)
       (call 'prepare fsym stmt close-on-exec?))
+    (define/public (fetch/cursor fsym cursor fetch-size)
+      (call 'fetch/cursor fsym (cursor-result-extra cursor) fetch-size))
     (define/public (transaction-status fsym)
       (call 'transaction-status fsym))
     (define/public (start-transaction fsym iso cwt?)
@@ -86,13 +92,13 @@
     (define/public (list-tables fsym schema)
       (call 'list-tables fsym schema))
 
-    (define/public (free-statement pst)
+    (define/public (free-statement pst need-lock?)
       (start-atomic)
       (let ([handle (send pst get-handle)])
         (send pst set-handle #f)
         (end-atomic)
         (when channel
-          (call/d 'free-statement handle))))
+          (call/d 'free-statement handle need-lock?))))
 
     (define/private (sexpr->result x)
       (match x
@@ -100,6 +106,8 @@
          (simple-result y)]
         [(list 'rows-result h rows)
          (rows-result h rows)]
+        [(list 'cursor-result info handle)
+         (cursor-result info #f handle)]
         [(list 'prepared-statement handle close-on-exec? param-typeids result-dvecs)
          (new prepared-statement%
               (handle handle)

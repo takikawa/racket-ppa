@@ -229,6 +229,16 @@
 (test-rename #'rename-super #'object%)
 (test-rename #'rename-inner #'object%)
 
+(define (test-abstract object%)
+  (syntax-test #`(class #,object% (abstract . x)))
+  (syntax-test #`(class #,object% (abstract 1)))
+  (syntax-test #`(class #,object% (abstract [x 1])))
+  (syntax-test #`(class #,object% (abstract [x y])))
+  (syntax-test #`(class #,object% (abstract [x 1 2])))
+  (syntax-test #`(class #,object% (abstract [x] [y]))))
+
+(test-abstract #'object%)
+
 (define (class-keyword-test kw)
   (syntax-test kw)
   (syntax-test #`(#,kw (x) 10)))
@@ -254,6 +264,7 @@
 (class-keyword-test #'overment*)
 (class-keyword-test #'augment*)
 (class-keyword-test #'augride*)
+(class-keyword-test #'abstract)
 (class-keyword-test #'define/public)
 (class-keyword-test #'define/private)
 (class-keyword-test #'define/pubment)
@@ -766,6 +777,79 @@
   )
 
 ;; ------------------------------------------------------------
+;; Test abstract clauses
+
+;; examples taken from the DPC book
+(define bt%
+  (class object%
+    (super-new)
+    (init-field number)
+    (abstract count sum)
+    (define/public (double n)
+      (new node% [number n] [left this] [right this]))))
+
+(define leaf%
+  (class bt%
+    (super-new)
+    (inherit-field number)
+    (define/override (sum) number)
+    (define/override (count) 1)))
+
+(define node%
+  (class bt%
+    (super-new)
+    (init-field left right)
+    (inherit-field number)
+    (define/override (sum) (+ number
+                              (send left sum)
+                              (send right sum)))
+    (define/override (count) (+ 1
+                                (send left count)
+                                (send right count)))))
+
+(err/rt-test (new bt% [number 5]) exn:fail:object?)
+(test 22 'bt (send (send (new leaf% [number 7]) double 8) sum))
+(test 3 'bt (send (send (new leaf% [number 7]) double 8) count))
+
+;; calling abstracts from concrete methods
+(let* ([foo% (class (class object%
+                      (super-new)
+                      (abstract foo)
+                      (define/public (bar)
+                        (add1 (foo)))
+                      (define/public (baz) 15))
+               (super-new)
+               (define/override (foo) 10))]
+       [o (new foo%)])
+      (test 10 'abstract (send o foo))
+      (test 11 'abstract (send o bar))
+      (test 15 'abstract (send o baz)))
+
+;; super calls to an abstract should just be (void)
+(let ([foo% (class (class object%
+                     (super-new)
+                     (abstract m))
+              (super-new)
+              (define/override (m) (super m)))])
+  (test (void) 'super (send (new foo%) m)))
+
+;; failing to implement abstract methods
+(define bad-leaf% (class bt% (inherit-field number)))
+(define bad-leaf2% (class bt% (inherit-field number)
+                     (define/override (sum) number)))
+
+(err/rt-test (new bad-leaf% [number 5]) exn:fail:object?)
+(err/rt-test (new bad-leaf2% [number 10]) exn:fail:object?)
+
+;; cannot define publics over abstracts
+(err/rt-test (class bt% (inherit-field number)
+               (define/public (sum) number))
+             exn:fail:object?)
+(err/rt-test (class bt% (inherit-field number)
+               (define/pubment (sum) number))
+             exn:fail:object?)
+
+;; ------------------------------------------------------------
 ;; Test send/apply dotted send and method-call forms:
 
 (define dotted% (class object%
@@ -1105,6 +1189,7 @@
                          (super-make-object))])
 	      (test 100 'priv (send (make-object c% 100) priv))
 	      (test 100 'priv (send* (make-object c% 100) (priv)))
+              (test 100 'priv (send+ (make-object c% 100) (priv)))
 	      (test 100 'priv (with-method ([p ((make-object c% 100) priv)]) (p)))
 	      (test 100 'gen-priv-cls (send-generic (make-object c% 100) (generic c% priv)))
               (test 100 'gen-priv-intf (send-generic (make-object c% 100) (generic i<%> priv)))
@@ -1113,6 +1198,7 @@
   (test #t object? (make-object c% 10))
   (err/rt-test (send (make-object c% 10) priv) exn:fail:object?)
   (err/rt-test (send* (make-object c% 10) (priv)) exn:fail:object?)
+  (err/rt-test (send+ (make-object c% 10) (priv)) exn:fail:object?)
   (err/rt-test (with-method ([p ((make-object c% 100) priv)]) (p)) exn:fail:object?)
   (err/rt-test (generic c% priv) exn:fail:object?)
   (err/rt-test (make-generic c% 'priv) exn:fail:object?))
@@ -1126,6 +1212,19 @@
 	      (define/public (pub y) (send this priv (* 2 y)))
 	      (super-new)))])
   (test 16 'send-using-local (send (new c%) pub 3)))
+
+;; ------------------------------------------------------------
+;; `send+' tests
+
+(let ([c% (class object%
+            (define/public (m . args) this)
+            (super-new))])
+  (syntax-test #'(send+ (new c%) (m 5) (m 10)))
+  (syntax-test #'(send+ (new c%) (m . (1 2 3))))
+  (syntax-test #'(send+ (new c%) (m 5) (m . (1 2 3))))
+
+  (test #t object? (send+ (new c%) (m 5) (m 15)))
+  (test #t object? (send+ (new c%) (m 5) (m . (1 2 3 4)))))
 
 ;; ------------------------------------------------------------
 ;; `new' tests
@@ -1148,17 +1247,17 @@
 (syntax-test #'(get-field 1 b))
 (syntax-test #'(get-field a b c))
 
-(error-test #'(get-field x 1) exn:application:mismatch?)
-(error-test #'(get-field x (new object%)) exn:application:mismatch?)
+(error-test #'(get-field x 1) exn:fail:contract?)
+(error-test #'(get-field x (new object%)) exn:fail:object?)
 (error-test #'(get-field x (new (class object% (define x 1) (super-new))))
-            exn:application:mismatch?)
+            exn:fail:object?)
 (error-test #'(let ([o (let ()
                          (define-local-member-name f)
                          (new (class object%
                                 (field [f 0])
                                 (super-new))))])
                 (get-field f o))
-            exn:application:mismatch?)
+            exn:fail:object?)
 (test 0 'get-field1 (get-field x (new (class object% (field [x 0]) (super-new)))))
 (test 0 'get-field2 (let ()
                       (define-local-member-name f)
@@ -1175,16 +1274,17 @@
 (syntax-test #'(set-field! 1 b c))
 (syntax-test #'(set-field! a b c d))
 
-(error-test #'(set-field! x 1 2) exn:application:mismatch?)
-(error-test #'(set-field! x (new object%) 2) exn:application:mismatch?)
+(error-test #'(set-field! x 1 2))
+(error-test #'(set-field! x (new object%) 2) exn:fail:object?)
 (error-test #'(set-field! x (new (class object% (define x 1) (super-new))) 2)
-            exn:application:mismatch?)
+            exn:fail:object?)
 (error-test #'(let ([o (let ()
                          (define-local-member-name f)
                          (new (class object%
                                 (field [f 0])
                                 (super-new))))])
-                (set-field! f o 2)))
+                (set-field! f o 2))
+            exn:fail:object?)
 (test 1 'set-field!1 (let ([o (new (class object% (field [x 0]) (super-new)))])
                        (set-field! x o 1)
                        (get-field x o)))
@@ -1281,8 +1381,8 @@
 		   (eval (syntax-property #'(lambda (a b) a) 'method-arity-error #t)))]
 	   [check-arity-error
 	    (lambda (f cl?)
-	      (test (if cl? '("no clause matching 0 arguments")  '("expects 1 argument") )
-		    regexp-match #rx"expects 1 argument|no clause matching 0 arguments"
+	      (test (if cl? '("given: 0")  '("expected: 1\n"))
+                    regexp-match #rx"expected: 1\n|given: 0$"
 		    (exn-message (with-handlers ([values values])
 				   ;; Use `apply' to avoid triggering
 				   ;; compilation of f:
@@ -1305,8 +1405,8 @@
             [meth (procedure->method f)]
             [check-arity-error
              (lambda (f cl?)
-               (test (if cl? '("no clause matching 0 arguments")  '("expects 1 argument") )
-                     regexp-match #rx"expects 1 argument|no clause matching 0 arguments"
+               (test (if cl? '("given: 0")  '("expected: 1\n"))
+                    regexp-match #rx"expected: 1\n|given: 0$"
                      (exn-message (with-handlers ([values values])
                                     ;; Use `apply' to avoid triggering
                                     ;; compilation of f:

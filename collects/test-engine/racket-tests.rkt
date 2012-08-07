@@ -4,13 +4,13 @@
          (for-syntax lang/private/rewrite-error-message)
          scheme/class
          scheme/match
-	 lang/private/continuation-mark-key
+	 lang/private/continuation-mark-key         
+         lang/private/rewrite-error-message
          (only-in scheme/base for memf findf)
          "test-engine.rkt"
-	 "test-info.scm"
-         )
+	 "test-info.scm")
 
-(require (for-syntax stepper/private/shared))
+(require (for-syntax stepper/private/syntax-property))
 
 (provide
  check-expect ;; syntax : (check-expect <expression> <expression>)
@@ -140,7 +140,8 @@
     (memq c '(module top-level))))
 
 (define-for-syntax (argcount-error-message/stx arity stx [at-least #f])
-  (argcount-error-message arity (sub1 (length (syntax->list stx))) at-least))
+  (define ls (syntax->list stx))
+  (argcount-error-message #f arity (if ls (sub1 (length ls)) 0) at-least))
 
 ;; check-expect
 (define-syntax (check-expect stx)
@@ -290,7 +291,7 @@
                                 (lambda (e)
                                   (let ([display (error-display-handler)])
                                     (list (make-unexpected-error src (test-format) expect
-                                                                 (exn-message e) 
+                                                                 (get-rewriten-error-message e)
                                                                  e)
                                           'error
                                           e)))])

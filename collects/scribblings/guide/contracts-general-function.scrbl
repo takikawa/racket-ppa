@@ -273,7 +273,12 @@ The following is an excerpt from an imaginary numerics module:
   [real-sqrt (->i ([argument (>=/c 1)])
                   [result (argument) (<=/c argument)])]))
 ]
-
+ 
+@margin-note{The word ``indy'' is meant to suggest that blame may be
+ assigned to the contract itself, because the contract must be considered an
+ independent component. The name was chosen in
+ response to two existing labels---``lax'' and ``picky''---for different
+ semantics of function contracts in the research literature.}
 The contract for the exported function @racket[real-sqrt] uses the
 @racket[->i] rather than @racket[->*] function contract. The ``i''
 stands for an @italic{indy dependent} contract, meaning the contract for the
@@ -297,7 +302,7 @@ and make them more accessible to potential clients.
 
 Going back to the bank-account example, suppose that we generalize the
 module to support multiple accounts and that we also include a
-withdrawal operation. The improved bank-account module includes a
+withdrawal operation. The improved bank-account module includes an
 @racket[account] structure type and the following functions:
 
 @racketblock[
@@ -308,7 +313,7 @@ withdrawal operation. The improved bank-account module includes a
 ]
 
 Besides requiring that a client provide a valid amount for a
-withdrawal, however, the amount should be less than the specified
+withdrawal, however, the amount should be less than or equal to the specified
 account's balance, and the resulting account will have less money than
 it started with. Similarly, the module might promise that a deposit
 produces an account with money added to the account. The following

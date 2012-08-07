@@ -25,7 +25,7 @@
 	 lang/debugger-language-interface
 	 lang/run-teaching-program
 	 lang/private/continuation-mark-key
-	 stepper/private/shared
+         lang/private/rewrite-error-message
 	 
 	 (only-in test-engine/scheme-gui make-formatter)
 	 test-engine/scheme-tests
@@ -762,7 +762,6 @@
                                      (get-reader)
                                      (get-module)
                                      (deinprogramm-lang-settings-teachpacks settings)
-                                     (drscheme:rep:current-rep)
 				     '#%deinprogramm))
 
           (define/override (front-end/interaction port settings)
@@ -1189,9 +1188,9 @@
       (define (teaching-languages-error-display-handler msg exn)
           
           (if (exn? exn)
-              (display (exn-message exn) (current-error-port))
-              (fprintf (current-error-port) "uncaught exception: ~e" exn))
-          (fprintf (current-error-port) "\n")
+              (display (get-rewriten-error-message exn) (current-error-port))
+              (eprintf "uncaught exception: ~e" exn))
+          (eprintf "\n")
 
           ;; need to flush here so that error annotations inserted in next line
           ;; don't get erased if this output were to happen after the insertion

@@ -48,7 +48,9 @@
          racket/runtime-path
          racket/class
          racket/file
-         racket/gui/base
+         (except-in racket/gui/base
+                    make-color
+                    make-pen)
          racket/port
          wxme
          rackunit
@@ -119,6 +121,25 @@
           (struct-type-make-constructor struct-type)
           (map loop (cdr (vector->list (struct->vector x))))))]
       [else x])))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; predicates
+;;
+
+(test (mode? "outline") => #t)
+(test (mode? 'outline) => #t)
+(test (mode? 'oooutlineh) => #f)
+(test (pen-style? 'solid) => #t)
+(test (pen-style? 'solidd) => #f)
+(test (pen-cap? 'round) => #t)
+(test (pen-cap? 'roound) => #f)
+(test (pen-join? 'round) => #t)
+(test (pen-join? 'roound) => #f)
+(test (x-place? 'left) => #t)
+(test (x-place? 'zuo) => #f)
+(test (y-place? 'top) => #t)
+(test (y-place? 'shang) => #f)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -866,6 +887,11 @@
                .1)
       =>
       #t)
+
+;; make sure rotate can get non-integral arguments
+(test (rotate -90.5 (rotate 90.5 (rectangle 20 100 'solid 'orange)))
+      =>
+      (rectangle 20 100 'solid 'orange))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;

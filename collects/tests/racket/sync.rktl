@@ -13,6 +13,10 @@
 (let* ([s (make-semaphore)]
        [p (semaphore-peek-evt s)]
        [ch (make-channel)])
+  (test #t semaphore? s)
+  (test #t semaphore-peek-evt? p)
+  (test #f semaphore? p)
+  (test #f semaphore-peek-evt? s)
   (test #f sync/timeout 0 s p)
   (test #f sync/timeout 0 s p)
   (test 'nope sync/timeout (lambda () 'nope) s p)
@@ -60,6 +64,8 @@
   (test #f sync/timeout 0 c)
   (test 11 sync c)
   (let ([p (channel-put-evt c 45)])
+    (test #t channel-put-evt? p)
+    (test #f channel-put-evt? c)
     (thread (lambda () (sync (system-idle-evt)) (set! v (sync c))))
     (test #f sync/timeout 0 p)
     (test p sync p)
@@ -268,6 +274,35 @@
 (test 78 sync 
       (wrap-evt (choice-evt (make-semaphore 1) (make-semaphore 1))
 			     (lambda (x) 78)))
+
+;; ----------------------------------------
+;; handle evt
+
+(test 10 sync (handle-evt always-evt (lambda (x) 10)))
+(test 11 sync (handle-evt (wrap-evt always-evt (lambda (x) 10)) add1))
+(test-values '(1 2) (lambda () (sync (handle-evt always-evt (lambda (x) (values 1 2))))))
+;; check tail call via loop:
+(test 'ok sync (let loop ([n 1000000])
+                 (if (zero? n)
+                     (handle-evt always-evt (lambda (x) 'ok))
+                     (sync
+                      (handle-evt always-evt (lambda (x) (loop (sub1 n))))))))
+
+;; cannot wrap a `handle-evt' returns with a wrap or another handle:
+(err/rt-test (handle-evt (handle-evt always-evt void) void))
+(err/rt-test (wrap-evt (handle-evt always-evt void) void))
+(err/rt-test (handle-evt (choice-evt (handle-evt always-evt void) void)))
+
+;; can handle a wrap evt:
+(test #t evt? (handle-evt (wrap-evt always-evt void) void))
+(test #t evt? (handle-evt (choice-evt (wrap-evt always-evt void)
+                                      (wrap-evt never-evt void))
+                          void))
+
+(test #t handle-evt? (handle-evt always-evt void))
+(test #t handle-evt? (choice-evt (wrap-evt always-evt void) (handle-evt always-evt void)))
+(test #f handle-evt? (wrap-evt always-evt void))
+(test #f handle-evt? (choice-evt (wrap-evt always-evt void) (wrap-evt always-evt void)))
 
 ;; ----------------------------------------
 ;; Nack waitables
@@ -1147,6 +1182,37 @@
    (sync
     (for/fold ([e (wrap-evt always-evt (lambda (x) 0))]) ([i (in-range N)])
       (choice-evt (wrap-evt always-evt (lambda (x) i)) e)))))
+
+;; ----------------------------------------
+ ;; box-cas! tests
+
+;; successful cas
+(let ()
+  (define b (box #f))
+  (test #true box-cas! b #f #true)
+  (test #true unbox b))
+
+;; unsuccessful cas
+(let ()
+  (define b (box #f))
+  (test #f box-cas! b #true #f)
+  (test #f unbox b))
+
+;; cas using allocated data
+(let ()
+  (define b (box '()))
+  (define x (cons 1 (unbox b)))
+  (test #true box-cas! b '() x)
+  (test x unbox b)
+  (test #true box-cas! b x '())
+  (test '() unbox b)
+  (test #f box-cas! b x '())
+  (test '() unbox b))
+
+(let ([g (lambda (x y) y)])
+  (err/rt-test (box-cas! (impersonate-box (box 1) g g) 1 2))
+  (err/rt-test (box-cas! (chaperone-box (box 1) g g) 1 2))
+  (err/rt-test (box-cas! (box-immutable 1) 1 2)))
 
 ;; ----------------------------------------
 

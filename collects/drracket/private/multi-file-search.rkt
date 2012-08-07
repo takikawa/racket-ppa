@@ -57,8 +57,12 @@
   ;; opens a window and creates the thread that does the search
   (define (open-search-window search-info)
     (define frame (new search-size-frame%
-                       [name (format (string-constant mfs-drscheme-multi-file-search-title)
-                                      (search-info-search-string search-info))]))
+                       [name 
+                        (let ([fmt-s (string-constant mfs-drscheme-multi-file-search-title)])
+                          (format 
+                           fmt-s
+                           (gui-utils:trim-string (search-info-search-string search-info)
+                                                  (- 200 (string-length fmt-s)))))]))
     (define panel (make-object saved-vertical-resizable% (send frame get-area-container)))
     (define button-panel (make-object horizontal-panel% (send frame get-area-container)))
     (define open-button (make-object button% (string-constant mfs-open-file) button-panel
@@ -124,10 +128,11 @@
   
   (define results-super-text% 
     (text:hide-caret/selection-mixin
-     (text:basic-mixin 
-      (editor:standard-style-list-mixin 
-       (editor:basic-mixin
-        text%)))))
+     (text:line-spacing-mixin
+      (text:basic-mixin
+       (editor:standard-style-list-mixin 
+        (editor:basic-mixin
+         text%))))))
   
   ;; results-text% : derived from text%
   ;; init args: zoom-text
@@ -235,7 +240,8 @@
                     (set-position new-line-position new-line-position)
                     (send zoom-text begin-edit-sequence)
                     (send zoom-text lock #f)
-                    (send zoom-text load-file/gui-error full-filename)
+                    (unless (really-same-file? full-filename (send zoom-text get-filename))
+                      (send zoom-text load-file/gui-error full-filename))
                     (send zoom-text set-position (send zoom-text paragraph-start-position line-number))
                     (let ([start (+ (send zoom-text paragraph-start-position line-number)
                                     col-number)])
@@ -293,6 +299,20 @@
       (send zoom-text lock #t)
       (set-styles-sticky #f)
       (insert (string-constant mfs-searching...))))
+  
+  (define (really-same-file? fn1 fn2)
+    (define p1 (with-handlers ((exn:fail? (λ (x) #f))) (open-input-file fn1)))
+    (define p2 (with-handlers ((exn:fail? (λ (x) #f))) (open-input-file fn2)))
+    (cond
+      [(and p1 p2)
+       (begin0
+         (= (port-file-identity p1) (port-file-identity p2))
+         (close-input-port p1)
+         (close-input-port p2))]
+      [else
+       (when p1 (close-input-port p1))
+       (when p2 (close-input-port p2))
+       #f]))
   
   ;; collaborates with search-size-frame%
   (define searching-canvas%
@@ -407,7 +427,7 @@
     (define searcher #f)
     
     ;; initialized to a regexp if the user wants to filter filenames,
-    ;; during the ok-button-callback, so errors can be signalled.
+    ;; during the ok-button-callback, so errors can be signaled.
     (define filter #f)
     
     ;; title for message box that signals error messages
@@ -527,6 +547,8 @@
     (set-method (preferences:get 'drracket:multi-file-search:search-type)) 
         
     (send search-text-field focus)
+    (let ([t (send search-text-field get-editor)])
+      (send t set-position 0 (send t last-position)))
     (send dialog show #t)
     
     (and
@@ -631,7 +653,7 @@
   (define (exact-match-searcher params key)        ;; thread: main eventspace thread
     (let ([case-sensitive? (car params)])
       (λ (filename add-entry)                 ;; thread: searching thread
-        (let ([text (make-object text:basic%)])
+        (let ([text (make-object text:line-spacing%)])
           (send text load-file filename)
           (let loop ([pos 0])
             (let ([found (send text find-string key 'forward pos 'eof #t case-sensitive?)])

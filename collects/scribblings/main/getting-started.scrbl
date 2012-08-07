@@ -3,6 +3,27 @@
 
 @title{Getting Started with Racket}
 
+To get started with Racket,
+@link["http://www.racket-lang.org/download/"]{download it} from the webpage and
+install it. If you are a beginner or would like to use a graphical environment
+to run programs, run the @tt{DrRacket} executable. Otherwise, the @tt{racket}
+executable will run a command-line Read-Eval-Print-Loop
+(@tech[#:doc '(lib "scribblings/guide/guide.scrbl")]{REPL}).
+
+On Windows, you can start DrRacket from the @onscreen{Racket} entry in the
+Start menu, in Windows Vista or newer you can just type @tt{DrRacket}.  You can
+also run it from its folder, which you can find in @onscreen{Program Files} →
+@onscreen{Racket} → @onscreen{DrRacket}.
+
+On Mac OS, double click on the @tt{DrRacket} icon. It may be in your
+Applications folder, or in the @tt{.dmg} that you downloaded.
+
+On Linux or Unix, the @tt{drracket} binary can be run directly from the
+command-line if it is in your path. This should be the case if you chose a
+Unix-style distribution when installing. Otherwise, navigate to the directory
+where the Racket distribution is installed. The @tt{drracket} binary will be
+in the @tt{bin} subdirectory.
+
 If you are new to programming or if you have the patience to work
 through a textbook:
 

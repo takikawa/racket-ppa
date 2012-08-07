@@ -6,8 +6,8 @@
 
 ;; ----------------------------------------
 
-(define-struct collect-info (fp ht ext-ht parts tags gen-prefix relatives parents))
-(define-struct resolve-info (ci delays undef searches))
+(define-struct collect-info (fp ht ext-ht parts tags gen-prefix relatives parents) #:transparent)
+(define-struct resolve-info (ci delays undef searches) #:transparent)
 
 (define (part-collected-info part ri)
   (hash-ref (collect-info-parts (resolve-info-ci ri))
@@ -17,8 +17,7 @@
   (let ([ht (collect-info-ht ci)])
     (let ([old-val (hash-ref ht key #f)])
       (when old-val
-        (fprintf (current-error-port)
-                 "WARNING: collected information for key multiple times: ~e; values: ~e ~e\n"
+        (eprintf "WARNING: collected information for key multiple times: ~e; values: ~e ~e\n"
                  key old-val val))
     (hash-set! ht key val))))
 
@@ -136,6 +135,12 @@
   (and (string? s)
        (not (regexp-match? #rx"\n" s))))
 
+(define (same-lengths? ls)
+  (or (null? ls)
+      (let ([l1 (length (car ls))])
+        (andmap (λ (l) (= l1 (length l)))
+                (cdr ls)))))
+
 (provide-structs
  [part ([tag-prefix (or/c false/c string?)]
         [tags (listof tag?)]
@@ -147,7 +152,8 @@
  [paragraph ([style style?]
              [content content?])]
  [table ([style style?]
-         [blockss (listof (listof (or/c block? (one-of/c 'cont))))])]
+         [blockss (and/c (listof (listof (or/c block? (one-of/c 'cont))))
+                         same-lengths?)])]
  [delayed-block ([resolve (any/c part? resolve-info? . -> . block?)])]
  [itemization ([style style?]
                [blockss (listof (listof block?))])]
@@ -220,7 +226,8 @@
        (vector (traverse-block-block d ri))))
    #'deserialize-traverse-block
    #f
-   (or (current-load-relative-directory) (current-directory))))
+   (or (current-load-relative-directory) (current-directory)))
+  #:transparent)
 
 (define block-traverse-procedure/c
   (recursive-contract
@@ -269,7 +276,8 @@
        (vector (traverse-element-content d ri))))
    #'deserialize-traverse-element
    #f
-   (or (current-load-relative-directory) (current-directory))))
+   (or (current-load-relative-directory) (current-directory)))
+  #:transparent)
 
 (define element-traverse-procedure/c
   (recursive-contract
@@ -323,7 +331,8 @@
          (vector (delayed-element-content d ri)))))
    #'deserialize-delayed-element
    #f
-   (or (current-load-relative-directory) (current-directory))))
+   (or (current-load-relative-directory) (current-directory)))
+  #:transparent)
 
 (provide/contract
  (struct delayed-element ([resolve (any/c part? resolve-info? . -> . content?)]
@@ -366,7 +375,8 @@
           (part-relative-element-content d ri)))))
    #'deserialize-part-relative-element
    #f
-   (or (current-load-relative-directory) (current-directory))))
+   (or (current-load-relative-directory) (current-directory)))
+  #:transparent)
 
 (provide/contract
  (struct part-relative-element ([collect (collect-info? . -> . content?)]
@@ -408,7 +418,8 @@
           (delayed-element-content d ri)))))
    #'deserialize-delayed-index-desc
    #f
-   (or (current-load-relative-directory) (current-directory))))
+   (or (current-load-relative-directory) (current-directory)))
+  #:transparent)
 
 (provide/contract
  (struct delayed-index-desc ([resolve (any/c part? resolve-info? . -> . any)])))
@@ -430,7 +441,8 @@
               (element-content d))))
    #'deserialize-collect-element
    #f
-   (or (current-load-relative-directory) (current-directory))))
+   (or (current-load-relative-directory) (current-directory)))
+  #:transparent)
 
 (provide deserialize-collect-element)
 (define deserialize-collect-element
@@ -453,7 +465,8 @@
               (element-content d))))
    #'deserialize-render-element
    #f
-   (or (current-load-relative-directory) (current-directory))))
+   (or (current-load-relative-directory) (current-directory)))
+  #:transparent)
 
 (provide deserialize-render-element)
 (define deserialize-render-element
@@ -482,7 +495,8 @@
                   "serialization failed (wrong resolve info?)")))))
    #'deserialize-generated-tag
    #f
-   (or (current-load-relative-directory) (current-directory))))
+   (or (current-load-relative-directory) (current-directory)))
+  #:transparent)
 
 (provide (struct-out generated-tag))
 
@@ -525,46 +539,74 @@
 (provide content->string
          strip-aux)
 
-(define content->string
+;; content->port: output-port content -> void
+;; Writes the string content of content into op.
+(define content->port
   (case-lambda
-    [(c)
+    [(op c)
      (cond
-       [(element? c) (content->string (element-content c))]
-       [(multiarg-element? c) (content->string (multiarg-element-contents c))]
-       [(list? c) (apply string-append (map content->string c))]
-       [(part-relative-element? c) (content->string ((part-relative-element-plain c)))]
-       [(delayed-element? c) (content->string ((delayed-element-plain c)))]
-       [(string? c) c]
-       [else (case c
-               [(mdash) "---"]
-               [(ndash) "--"]
-               [(ldquo rdquo) "\""]
-               [(rsquo) "'"]
-               [(rarr) "->"]
-               [(lang) "<"]
-               [(rang) ">"]
-               [else (format "~s" c)])])]
-    [(c renderer sec ri)
+       [(element? c) (content->port op (element-content c))]
+       [(multiarg-element? c) (content->port op (multiarg-element-contents c))]
+       [(list? c) (for-each (lambda (e) (content->port op e)) c)]
+       [(part-relative-element? c) (content->port op ((part-relative-element-plain c)))]
+       [(delayed-element? c) (content->port op ((delayed-element-plain c)))]
+       [(string? c) (display c op)]
+       [else (display (case c
+                        [(mdash) "---"]
+                        [(ndash) "--"]
+                        [(ldquo rdquo) "\""]
+                        [(rsquo) "'"]
+                        [(rarr) "->"]
+                        [(lang) "<"]
+                        [(rang) ">"]
+                        [else (format "~s" c)])
+                      op)])]
+    [(op c renderer sec ri)
      (cond
        [(and (link-element? c)
              (null? (element-content c)))
         (let ([dest (resolve-get sec ri (link-element-tag c))])
           ;; FIXME: this is specific to renderer
           (if dest
-            (content->string (strip-aux
-                              (if (pair? dest) (cadr dest) (vector-ref dest 1)))
-                             renderer sec ri)
-            "???"))]
-       [(element? c) (content->string (element-content c) renderer sec ri)]
-       [(multiarg-element? c) (content->string (multiarg-element-contents c) renderer sec ri)]
-       [(list? c) (apply string-append
-                         (map(lambda (e) (content->string e renderer sec ri))
-                             c))]
+            (content->port op
+                           (strip-aux
+                            (if (pair? dest) (cadr dest) (vector-ref dest 1)))
+                           renderer sec ri)
+            (display "???" op)))]
+       [(element? c) (content->port op (element-content c) renderer sec ri)]
+       [(multiarg-element? c) (content->port op (multiarg-element-contents c) renderer sec ri)]
+       [(list? c) (for-each (lambda (e)
+                              (content->port op e renderer sec ri))
+                             c)]
        [(delayed-element? c)
-        (content->string (delayed-element-content c ri) renderer sec ri)]
+        (content->port op (delayed-element-content c ri) renderer sec ri)]
        [(part-relative-element? c)
-        (content->string (part-relative-element-content c ri) renderer sec ri)]
-       [else (content->string c)])]))
+        (content->port op (part-relative-element-content c ri) renderer sec ri)]
+       [else (content->port op c)])]))
+
+(define (simple-content->string c)
+  ;; `content->string' is commonly used on a list containing a single string
+  (cond
+   [(string? c) c]
+   [(and (pair? c)
+         (string? (car c))
+         (null? (cdr c)))
+    (car c)]
+   [else #f]))
+
+(define content->string
+  (case-lambda
+    [(c)
+     (or (simple-content->string c)
+         (let ([op (open-output-string)])
+           (content->port op c)
+           (get-output-string op)))]
+    [(c renderer sec ri)
+     (or (simple-content->string c)
+         (let ([op (open-output-string)])
+           (content->port op c renderer sec ri)
+           (get-output-string op)))]))
+
 
 (define (aux-element? e)
   (and (element? e)

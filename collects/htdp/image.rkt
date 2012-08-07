@@ -8,13 +8,15 @@ plt/collects/tests/mzscheme/htdp-image.rkt
 |#
 
 
-(require mred
+(require (except-in mred
+                    make-color)
          mzlib/class
          mrlib/cache-image-snip
          mzlib/math
          lang/prim
          lang/posn
          lang/private/imageeq
+         "color-structs.rkt"
          "error.rkt")
 
 (provide-primitives
@@ -75,9 +77,6 @@ plt/collects/tests/mzscheme/htdp-image.rkt
   (and (list? l) (andmap image-color? l)))
 (define (alpha-color-list? l)
   (and (list? l) (andmap alpha-color? l)))
-
-(define-struct color (red green blue) #:inspector (make-inspector))
-(define-struct alpha-color (alpha red green blue) #:inspector (make-inspector))
 
 ;; ----------------------------------------
 

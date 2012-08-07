@@ -171,6 +171,23 @@
   }
 }
 
+@definterface[text:line-spacing<%> (text:basic<%>)]{
+   Objects implementing this interface adjust their
+   spacing based on the @racket['framework:line-spacing-add-gap?]
+   preference.
+}
+
+@defmixin[text:line-spacing-mixin (text:basic<%>) (text:line-spacing<%>)]{
+  Calls @method[text% set-line-spacing] to either @racket[0] or @racket[1]
+  when an object is created, based
+  on the @racket['framework:line-spacing-add-gap?]
+  preference.
+  
+  Also registers a callback (via @racket[preferences:add-callback]) to call
+  @method[text% set-line-spacing] when the @racket['framework:line-spacing-add-gap?]
+  preference changes.
+}
+
 @definterface[text:first-line<%> (text%)]{
 
   Objects implementing this interface, when @method[text:first-line<%>
@@ -360,7 +377,12 @@
     found last time that a search happened.
   }
 
-  @defmethod[(set-replace-start [pos (or/c false/c number?)]) void?]{
+  @defmethod[(get-replace-search-hit) (or/c number? #f)]{
+    Returns the position of the nearest search hit that comes after the
+    position set by the @method[text:searching<%> set-replace-start] method.
+  }
+
+  @defmethod[(set-replace-start [pos (or/c number? #f)]) void?]{
     Sets the position where replacement next occurs. This is equivalent to
     calling @method[text:searching<%> set-searching-state] with a new
     @racket[replace-start] argument, but the other arguments the same as the
@@ -1086,11 +1108,12 @@
 }
 
 @defclass[text:basic% (text:basic-mixin (editor:basic-mixin text%)) ()]{}
-@defclass[text:hide-caret/selection% (text:hide-caret/selection-mixin text:basic%) ()]{}
-@defclass[text:nbsp->space% (text:nbsp->space-mixin text:basic%) ()]{}
-@defclass[text:normalize-paste% (text:normalize-paste-mixin text:basic%) ()]{}
-@defclass[text:delegate% (text:delegate-mixin text:basic%) ()]{}
-@defclass[text:wide-snip% (text:wide-snip-mixin text:basic%) ()]{}
+@defclass[text:line-spacing% (text:line-spacing-mixin text:basic%) ()]{}
+@defclass[text:hide-caret/selection% (text:hide-caret/selection-mixin text:line-spacing%) ()]{}
+@defclass[text:nbsp->space% (text:nbsp->space-mixin text:line-spacing%) ()]{}
+@defclass[text:normalize-paste% (text:normalize-paste-mixin text:line-spacing%) ()]{}
+@defclass[text:delegate% (text:delegate-mixin text:line-spacing%) ()]{}
+@defclass[text:wide-snip% (text:wide-snip-mixin text:line-spacing%) ()]{}
 @defclass[text:standard-style-list% (editor:standard-style-list-mixin text:wide-snip%) ()]{}
 @defclass[text:input-box% (text:input-box-mixin text:standard-style-list%) ()]{}
 @defclass[text:keymap% (editor:keymap-mixin text:standard-style-list%) ()]{}

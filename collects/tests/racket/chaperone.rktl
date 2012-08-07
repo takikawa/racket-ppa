@@ -414,12 +414,18 @@
    (define-values (prop:green green? green-ref) (make-struct-type-property 'green 'can-impersonate))
    (define-struct a ([x #:mutable] y))
    (define-struct (b a) ([z #:mutable]))
+   (define-struct (c b) ([n #:mutable]) #:transparent)
    (define-struct p (u) #:property prop:green 'green)
    (define-struct (q p) (v w))
-   (test #t chaperone?/impersonator (chaperone-struct (make-a 1 2) a-x (lambda (a v) v)))
-   (test #t chaperone?/impersonator (chaperone-struct (make-b 1 2 3) a-x (lambda (a v) v)))
+   (test #t chaperone?/impersonator (chaperone-struct (make-a 1 2) a-x (lambda (a v) v)
+                                                      set-a-x! (lambda (a v) v)))
+   (test #t chaperone?/impersonator (chaperone-struct (make-b 1 2 3) a-x (lambda (a v) v)
+                                                      set-a-x! (lambda (a v) v)))
    (test #t chaperone?/impersonator (chaperone-struct (make-p 1) green-ref (lambda (a v) v)))
-   (test #t chaperone?/impersonator (chaperone-struct (make-a 1 2) a-x (lambda (a v) v) prop:blue 'blue))
+   (test #t chaperone?/impersonator (chaperone-struct (make-a 1 2) a-x (lambda (a v) v)
+                                                      set-a-x! (lambda (a v) v)
+                                                      prop:blue 'blue))
+   (test #t chaperone?/impersonator (chaperone-struct (make-c 1 2 3 4) c-n (lambda (b v) v)))
    (when is-chaperone
      (test #t chaperone?/impersonator (chaperone-struct 
                                        (chaperone-struct (make-a 1 2) a-x (lambda (a v) v) prop:blue 'blue)
@@ -555,10 +561,11 @@
   ([chaperone-procedure impersonate-procedure])
   (let ()
     (define (test-sub linear? rev?)
-      (define-struct a (x [y #:mutable]) #:property prop:procedure 0)  
+      (define-struct a (x [y #:mutable]) #:property prop:procedure 0)
       (let* ([a1 (make-a (lambda (x) (list x x)) 10)]
              [get #f]
-             [a2 (chaperone-struct a1 a-y (lambda (a v) (set! get v) v))]
+             [a2 (chaperone-struct a1 a-y (lambda (a v) (set! get v) v)
+                                   set-a-y! (lambda (a v) v))]
              [pre #f]
              [post #f]
              [a3 (chaperone-procedure (if linear? a2 a1)
@@ -569,7 +576,8 @@
                                                   r)
                                                 z)))]
              [a2 (if rev?
-                     (chaperone-struct a3 a-y (lambda (a v) (set! get v) v))
+                     (chaperone-struct a3 a-y (lambda (a v) (set! get v) v)
+                                       set-a-y! (lambda (a v) v))
                      a2)])
         (test #t a? a1)
         (test #t a? a2)
@@ -1237,6 +1245,37 @@
   (test "'#hash(((x) . (y)))" 'print (let ([o (open-output-bytes)])
                                        (print ht o)
                                        (get-output-string o))))
+
+;; ----------------------------------------
+;; Check that only key-proc is called during hash-keys
+
+(as-chaperone-or-impersonator
+ ([chaperone-hash impersonate-hash])
+ (let* ([h1 (make-hash (list (cons 1 2) (cons 3 4) (cons 5 6) (cons 7 8)))]
+        [res1 (hash-keys h1)]
+        [ref-proc #f]
+        [set-proc #f]
+        [remove-proc #f]
+        [key-proc #f]
+        [h2 (chaperone-hash h1
+                            (λ (h k)
+                              (set! ref-proc #t)
+                              (values k (λ (h k v) v)))
+                            (λ (h k v)
+                              (set! set-proc #t)
+                              (values k v))
+                            (λ (h k)
+                              (set! remove-proc #t)
+                              k)
+                            (λ (h k)
+                              (set! key-proc #t)
+                              k))]
+        [res2 (hash-keys h2)])
+   (test #t equal? res1 res2)
+   (test #t values key-proc)
+   (test #f values ref-proc)
+   (test #f values set-proc)
+   (test #f values remove-proc)))
 
 ;; ----------------------------------------
 

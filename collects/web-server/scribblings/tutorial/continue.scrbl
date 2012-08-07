@@ -1,15 +1,15 @@
 #lang scribble/doc
 @(require scribble/manual
-          (for-label racket)
-          (for-label web-server/servlet)
-          (for-label db)
+          (for-label racket
+                     (except-in web-server/servlet make-url)
+                     db)
           "tutorial-util.rkt")
 
 @(define xexpr @tech[#:doc '(lib "xml/xml.scrbl")]{X-expression})
 
 @title{Continue: Web Applications in Racket}
 
-@author[(author+email "Danny Yoo" "dyoo@cs.wpi.edu")
+@author[(author+email "Danny Yoo" "dyoo@hashcollision.org")
         (author+email "Jay McCarthy" "jay@cs.byu.edu")]
 
 How do we make dynamic web applications?
@@ -207,9 +207,6 @@ to produce:
    '(div ((class "post")) "First post!" (p "This is a first post."))
 ]
 
-@bold{Exercise.} Revise @racket[render-post] to show the number of comments attached
-to a post.
-
 @centerline{------------}
 
 We will sometimes want to embed a list of @|xexpr|s into
@@ -217,22 +214,24 @@ another list that acts as a template.  For example, given the list of
 @|xexpr|s @racket['((li "Larry") (li "Curly") (li "Moe"))], we may want
 to create the single @|xexpr|
 
-@racket['(ul (li "Larry")
-	     (li "Curly")
-	     (li "Moe"))]
+@racketblock[
+'(ul (li "Larry")
+     (li "Curly")
+     (li "Moe"))
+]
 
-This can't be done using plain unquoting, because placing a comma in front of
-@racket['("Larry" "Curly" "Moe")] will unquote the entire list, yielding
-the malformed expression @racket['(ul ((li "Larry") (li "Curly") (li
+This can't be done using plain unquoting, because placing a comma in
+front of @racket['((li "Larry") (li "Curly") (li "Moe"))] will unquote
+the entire list, yielding the malformed expression
+@racket['(ul ((li "Larry") (li "Curly") (li
 "Moe")))].
 
 Instead, we must splice the list in, like so: @racket[`(ul ,@((li "Larry") (li "Curly") (li
 "Moe")))]. The unquote-splicing form, @racket[,@expression],
 allows us conveniently to splice a list of @|xexpr| fragments into a
-larger template list. To generalize 
-the example, here are two helper functions that convert any list of
-@|xexpr|s into one 
-@|xexpr| representing an unordered, itemized HTML list:
+larger template list. To generalize the example, here are two helper
+functions that convert any list of @|xexpr|s into one @|xexpr|
+representing an unordered, itemized HTML list:
 
 @racketblock[
 @code:comment{render-as-itemized-list: (listof xexpr) -> xexpr}
@@ -276,8 +275,8 @@ should produce
 
 @racketblock[
 '(div ((class "posts"))
-      (div ((class "post")) "Post 1" "Body 1")
-      (div ((class "post")) "Post 2" "Body 2"))
+      (div ((class "post")) "Post 1" (p "Body 1"))
+      (div ((class "post")) "Post 2" (p "Body 2")))
 ]
 
 @centerline{------------}
@@ -469,20 +468,23 @@ in a new browser window.  What happens when you try this?
 @section{Share and Share Alike}
 @declare-exporting[#:use-sources (web-server/scribblings/tutorial/examples/iteration-4)]
 
-The problem with our application is that each browser
-window keeps track of its own distinct blog.  For most people, this defeats
-the purpose of a blog, which is to share with others!  When we insert a
-new post, rather than creating a new blog value, we'd like to make a
-structural change to the existing
-blog. (@italic{@link["http://www.htdp.org/"]{How to Design Programs}},
-Chapter 41).  So let's add mutation to the mix.
+The problem with our application is that each browser window keeps
+track of its own distinct blog.  For most people, this defeats the
+purpose of a blog, which is to share with others!  When we insert a
+new post, rather than creating a new blog value, we'd like to modify
+@emph{the} blog. In other words, we'd like to make a structural
+change. (@italic{@link["http://www.htdp.org/"]{How to Design
+Programs}}, Chapter 41).  So let's switch from just the @racket[BLOG]
+binding to a list and instead bind it to a mutable structure. If we
+were to just use a structure, we'd write the following:
 
-There's one small detail we need to touch on: by default, structures in the
-@racket[web-server] language are immutable.  To gain access to structure
-mutators, we'll need to override this default, by adding the @racket[#:mutable]
-keyword to some of our structure definitions. In particular, if we want to
-allow changes to a blog, we must change our definition of the blog structure to
-the following:
+@racketblock[(struct blog (posts))]
+
+But, by default, structures in Racket are immutable.  To gain access
+to structure mutators, we'll need to override this default, by adding
+the @racket[#:mutable] keyword to some of our structure
+definitions. In particular, if we want to allow changes to a blog, we
+must change our definition of the blog structure to the following:
 
 @racketblock[(struct blog (posts) #:mutable)]
 
@@ -500,7 +502,7 @@ which allows us to change the posts of a blog:
 
 @defthing[blog-insert-post! (blog? post? . -> . void)]
 
-whose intended side effect is to extend a blog's post.
+whose intended side effect is to extend a blog's posts.
 
 @centerline{------------}
 
@@ -1166,6 +1168,9 @@ web-server/insta
 ....
 ]
 
+See @secref[#:doc '(lib "db/scribblings/db.scrbl") "intro-servlets"]
+for more information on writing database-backed web servlets.
+
 @section{Using Formlets}
 
 @(require (for-label web-server/formlets))
@@ -1179,14 +1184,14 @@ element in the rendering code, and the name used for it in the extracting code:
 @code:comment{Send an HTML page of the content of the}
 @code:comment{blog.}
 (define (render-blog-page a-blog request)
-  (local [(define (response-generator make-url) 
+  (local [(define (response-generator embed/url) 
             (response/xexpr
              `(html (head (title "My Blog"))
                     (body 
                      (h1 "My Blog")
-                     ,(render-posts a-blog make-url)
+                     ,(render-posts a-blog embed/url)
                      (form ((action 
-                             ,(make-url insert-post-handler)))
+                             ,(embed/url insert-post-handler)))
                            @code:comment{"title" is used here}
                            (input ((name "title")))
                            (input ((name "body")))
@@ -1281,14 +1286,14 @@ Finally, here is how to use @racket[new-post-formlet] in @racket[render-blog-pag
 @code:comment{Sends an HTML page of the content of the}
 @code:comment{blog.}
 (define (render-blog-page a-blog request)
-  (local [(define (response-generator make-url)
+  (local [(define (response-generator embed/url)
             (response/xexpr
              `(html (head (title "My Blog"))
                     (body 
                      (h1 "My Blog")
-                     ,(render-posts a-blog make-url)
+                     ,(render-posts a-blog embed/url)
                      (form ([action 
-                             ,(make-url insert-post-handler)])
+                             ,(embed/url insert-post-handler)])
                            ,@(formlet-display new-post-formlet)
                            (input ([type "submit"])))))))
           
@@ -1299,6 +1304,29 @@ Finally, here is how to use @racket[new-post-formlet] in @racket[render-blog-pag
             (render-blog-page a-blog (redirect/get)))]
     
     (send/suspend/dispatch response-generator)))
+]
+
+@bold{Alternative.} The formlet shown above uses the
+@racket[input-string] combinator, which combines a bunch of other
+formlets into one container with sensible defaults. Sometimes it is
+useful to break it apart to provide different arguments to the
+subpieces. For example, suppose we wanted to add a CSS class to the
+form elements? Here's how we'd do that:
+
+@racketblock[
+(define new-post-formlet
+  (formlet
+   (#%# ,((to-string 
+           (required 
+            (text-input
+             #:attributes '([class "form-text"]))))
+          . => . title)
+        ,((to-string
+           (required
+            (text-input
+             #:attributes '([class "form-text"]))))
+          . => . body))
+   (values title body)))
 ]
 
 @bold{Exercise.} Write a @formlet and use it in @racket[render-post-detail-page].

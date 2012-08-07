@@ -45,7 +45,8 @@ its file suffix:
 Use @DFlag{dest-name} to specify a @|fn| other than the default name,
 but only when a single source file is provided. Use the @DFlag{dest}
 flag to specify a destination directory (for any number of source
-files).
+files). Use @DFlag{dest-base} to add a prefix to the name of each
+support file that is generated or copied to the destination.
 
 After all flags, provide one or more document sources. When multiple
 documents are rendered at the same time, cross-reference information
@@ -77,7 +78,7 @@ content of @filepath{scribble.css} or @filepath{scribble.tex} is
 weakly specified; replacements must define all of the same styles, and
 the set of styles can change across versions of Racket.
 
-Use @DFlag{prefix} to specify an alternate format-specific to start of
+Use @DFlag{prefix} to specify an alternate format-specific start of
 the output file. For HTML output, the starting file specifies the
 @tt{DOCTYPE} declaration of each output HTML file as a substitute for
 @filepath{scribble-prefix.html} in the @filepath{scribble}
@@ -96,8 +97,9 @@ the file automatically).
 
 Cross references within a document or documents rendered together are
 always resolved. When cross references span documents that are
-rendered separately, format-specific cross-reference information needs
-to be saved and loaded explicitly.
+rendered separately, cross-reference information needs to be saved and
+loaded explicitly. Cross-reference information is format-specific, but
+HTML-format information is usable for Latex (or PDF) or text rendering.
 
 A Racket installation includes HTML-format cross-reference information
 for all installed documentation. Each document's information is in a

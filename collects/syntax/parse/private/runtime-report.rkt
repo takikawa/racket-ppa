@@ -1,11 +1,27 @@
 #lang racket/base
 (require racket/list
+         syntax/stx
+         unstable/struct
          "minimatch.rkt"
          (except-in syntax/parse/private/residual
                     syntax-patterns-fail)
          "kws.rkt")
 (provide syntax-patterns-fail
-         current-failure-handler)
+         current-failure-handler
+         maximal-failures
+
+         exn:syntax-parse?
+         exn:syntax-parse-info
+
+         invert-ps
+         ps->stx+index
+         )
+
+#|
+TODO: given (expect:thing _ D _ R) and (expect:thing _ D _ #f),
+  simplify to (expect:thing _ D _ #f)
+  thus, "expected D" rather than "expected D or D for R" (?)
+|#
 
 #|
 Note: there is a cyclic dependence between residual.rkt and this module,
@@ -27,6 +43,19 @@ broken by a lazy-require of this module into residual.rkt
 (define current-failure-handler
   (make-parameter default-failure-handler))
 
+;; Hack: alternative to new (primitive) phase-crossing exn type is to
+;; store extra information in exn continuation marks.
+
+(define (exn:syntax-parse? x)
+  (and (exn:fail:syntax? x)
+       (pair? (continuation-mark-set-first
+               (exn-continuation-marks x)
+               'exn:syntax-parse))))
+
+;; exn:syntax-parse-info : exn:syntax-parse -> (cons syntax failureset)
+(define (exn:syntax-parse-info x)
+  (continuation-mark-set-first (exn-continuation-marks x) 'exn:syntax-parse))
+
 #|
 Reporting
 ---------
@@ -36,14 +65,14 @@ grouped into equivalence classes. In principle, each failure in an
 equivalence class complains about the same term, but in practice,
 special handling of failures like "unexpected term" make things more
 complicated.
-
 |#
 
 ;; report-failureset : stx FailureSet -> escapes
 (define (report-failureset stx0 fs)
   (let* ([classes (maximal-failures fs)]
          [reports (apply append (map report/class classes))])
-    (raise-syntax-error/reports stx0 reports)))
+    (with-continuation-mark 'exn:syntax-parse (cons stx0 fs)
+      (raise-syntax-error/reports stx0 reports))))
 
 ;; A Report is
 ;;   - (report string stx)
@@ -68,7 +97,7 @@ complicated.
            (let ([frame-stx
                   (let-values ([(x cx) (stx-list-drop/cx stx stx index)])
                     (datum->syntax cx x cx))])
-             (cond [(equal? frame-expect (expect:atom '()))
+             (cond [(equal? frame-expect (expect:atom '() #f))
                     (syntax-case frame-stx ()
                       [(one . more)
                        (report "unexpected term" #'one)]
@@ -80,6 +109,7 @@ complicated.
                     (report/expects (list frame-expect) frame-stx)]))])))
 
 ;; report/expects : (listof Expect) syntax -> Report
+;; FIXME: partition by role first?
 (define (report/expects expects frame-stx)
   (report (join-sep (for/list ([expect expects])
                       (prose-for-expect expect))
@@ -89,16 +119,18 @@ complicated.
 ;; prose-for-expect : Expect -> string
 (define (prose-for-expect e)
   (match e
-    [(expect:thing description transparent?)
-     (format "expected ~a" description)]
-    [(expect:atom atom)
+    [(expect:thing stx+index description transparent? role _)
+     (if role
+         (format "expected ~a for ~a" description role)
+         (format "expected ~a" description))]
+    [(expect:atom atom _)
      (format "expected the literal ~a~s~a"
              (if (symbol? atom) "symbol `" "")
              atom
              (if (symbol? atom) "'" ""))]
-    [(expect:literal literal)
+    [(expect:literal literal _)
      (format "expected the identifier `~s'" (syntax-e literal))]
-    [(expect:message message)
+    [(expect:message message _)
      (format "~a" message)]))
 
 ;; == Do Report ==
@@ -133,7 +165,6 @@ complicated.
 
 ;; ==== Failure analysis ====
 
-
 ;; == Failure simplification ==
 
 ;; maximal-failures : FailureSet -> (listof (listof Failure))
@@ -145,35 +176,32 @@ complicated.
 
 ;; == Expectation simplification ==
 
-;; normalize-expectstack : ExpectStack -> ExpectStack
-(define (normalize-expectstack es)
-  (filter-expectstack (truncate-opaque-expectstack es)))
-
-;; truncate-opaque-expectstack : ExpectStack -> ExpectStack
-;; Eliminates expectations on top of opaque (ie, transparent=#f) frames.
-(define (truncate-opaque-expectstack es)
+;; normalize-expectstack : ExpectStack(parsing) -> ExpectStack(reporting)
+;; Converts internal-chaining to list, converts expect:thing term rep,
+;; and truncates expectstack after opaque (ie, transparent=#f) frames.
+(define (normalize-expectstack es [truncate-opaque? #t])
+  (define (convert-ps ps)
+    (let-values ([(stx index) (ps->stx+index ps)])
+      (cons stx index)))
   (let/ec return
     (let loop ([es es])
       (match es
-        ['() '()]
-        [(cons (expect:thing description '#f) rest-es)
-         ;; Tricky! If multiple opaque frames, multiple "returns",
-         ;; but innermost one called first, so jumps past the rest.
-         (return (cons (car es) (loop rest-es)))]
-        [(cons expect rest-es)
-         (cons expect (loop rest-es))]))))
-
-;; filter-expectstack : ExpectStack -> ExpectStack
-;; Eliminates missing (ie, #f) messages and descriptions
-(define (filter-expectstack es)
-  (filter (lambda (expect)
-            (match expect
-              [(expect:thing '#f _)
-               #f]
-              [(expect:message '#f)
-               #f]
-              [_ #t]))
-          es))
+        ['#f '()]
+        [(expect:thing ps desc tr? role rest-es)
+         (cond [(and truncate-opaque? (not tr?))
+                ;; Tricky! If multiple opaque frames, multiple 'return' calls,
+                ;; but innermost one called first, so jumps past the rest.
+                ;; Also, flip opaque to transparent for sake of equality.
+                (return
+                 (cons (expect:thing (convert-ps ps) desc #t role #f) (loop rest-es)))]
+               [else
+                (cons (expect:thing (convert-ps ps) desc tr? role #f) (loop rest-es))])]
+        [(expect:message message rest-es)
+         (cons (expect:message message #f) (loop rest-es))]
+        [(expect:atom atom rest-es)
+         (cons (expect:atom atom #f) (loop rest-es))]
+        [(expect:literal literal rest-es)
+         (cons (expect:literal literal #f) (loop rest-es))]))))
 
 #|
 Simplification dilemma
@@ -193,7 +221,6 @@ So we go with option 2.
 |#
 
 ;; simplify-common-expectstacks : (listof ExpectStack) -> (listof ExpectStack)
-;; Should call remove-duplicates first.
 (define (simplify-common-expectstacks ess)
   ;; simplify : (listof ReversedExpectStack) -> (listof ReversedExpectStack)
   (define (simplify ress)
@@ -213,7 +240,7 @@ So we go with option 2.
              (let* ([frames (map car ress)])
                (list (list (if (singleton? frames)
                                (car frames)
-                               (expect:disj frames)))))]
+                               (expect:disj frames #f)))))]
             [else ress])))
   ;; singleton? : list -> boolean
   (define (singleton? res)
@@ -258,6 +285,28 @@ Progress equality
 If ps1 = ps2 then both must "blame" the same term,
 ie (ps->stx+index ps1) = (ps->stx+index ps2).
 |#
+
+;; An Inverted PS (IPS) is a PS inverted for easy comparison.
+;; An IPS may not contain any 'opaque frames.
+
+;; invert-ps : PS -> IPS
+(define (invert-ps ps)
+  (reverse (ps-truncate-opaque ps)))
+
+;; ps-truncate-opaque : PS -> PS
+(define (ps-truncate-opaque ps)
+  (let/ec return
+    (let loop ([ps ps])
+      (cond [(null? ps)
+             null]
+            [(eq? (car ps) 'opaque)
+             ;; Tricky! We only jump after loop returns,
+             ;; so jump closest to end wins.
+             (return (loop (cdr ps)))]
+            [else
+             ;; Either (loop _) jumps, or it is identity
+             (loop (cdr ps))
+             ps]))))
 
 ;; maximal/progress : (listof (cons A IPS)) -> (listof (listof A))
 ;; Returns a list of equivalence sets.
@@ -343,9 +392,78 @@ ie (ps->stx+index ps1) = (ps->stx+index ps2).
         [ips (cdr a+ips)])
     (cons a (cdr ips))))
 
+;; ps->stx+index : Progress -> (values stx nat)
+;; Gets the innermost stx that should have a real srcloc, and the offset
+;; (number of cdrs) within that where the progress ends.
+(define (ps->stx+index ps)
+  (define (interp ps)
+    (match ps
+      [(cons (? syntax? stx) _) stx]
+      [(cons 'car parent)
+       (let* ([d (interp parent)]
+              [d (if (syntax? d) (syntax-e d) d)])
+         (cond [(pair? d) (car d)]
+               [(vector? d) (vector->list d)]
+               [(box? d) (unbox d)]
+               [(prefab-struct-key d) (struct->list d)]
+               [else (error 'ps->stx+index "INTERNAL ERROR: unexpected: ~e" d)]))]
+      [(cons (? exact-positive-integer? n) parent)
+       (for/fold ([stx (interp parent)]) ([i (in-range n)])
+         (stx-cdr stx))]
+      [(cons 'post parent)
+       (interp parent)]))
+  (let ([ps (ps-truncate-opaque ps)])
+    (match ps
+      [(cons (? syntax? stx) _)
+       (values stx 0)]
+      [(cons 'car parent)
+       (values (interp ps) 0)]
+      [(cons (? exact-positive-integer? n) parent)
+       (values (interp parent) n)]
+      [(cons 'post parent)
+       (ps->stx+index parent)])))
+
 (define (rmap f xs)
   (let rmaploop ([xs xs] [accum null])
     (cond [(pair? xs)
            (rmaploop (cdr xs) (cons (f (car xs)) accum))]
           [else
            accum])))
+
+
+;; ==== Debugging
+
+(provide failureset->sexpr
+         failure->sexpr
+         expectstack->sexpr
+         expect->sexpr)
+
+(define (failureset->sexpr fs)
+  (let ([fs (flatten fs)])
+    (case (length fs)
+      ((1) (failure->sexpr (car fs)))
+      (else `(union ,@(map failure->sexpr fs))))))
+
+(define (failure->sexpr f)
+  (match f
+    [(failure progress expectstack)
+     `(failure ,(progress->sexpr progress)
+               #:expected ,(expectstack->sexpr expectstack))]))
+
+(define (expectstack->sexpr es)
+  (map expect->sexpr (normalize-expectstack es #f)))
+
+(define (expect->sexpr e)
+  (match e
+    [(expect:thing stx+index description transparent? role _)
+     (expect:thing '<Term> description transparent? role '_)]
+    [else e]))
+
+(define (progress->sexpr ps)
+  (for/list ([pf (in-list (reverse ps))])
+    (match pf
+      [(? syntax? stx) 'stx]
+      ['car 'car]
+      ['post 'post]
+      [(? exact-positive-integer? n) n]
+      ['opaque 'opaque])))

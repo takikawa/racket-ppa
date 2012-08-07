@@ -29,6 +29,7 @@
       name
       (code:line @#,elem{@racketvalfont{'}@racket[name]})
       number
+      boolean 
       string
       character]
 ]
@@ -76,4 +77,7 @@ A quoted @racket[name] is a symbol. A symbol is a value, just like
              
 @section[#:tag "beginner-pre-defined"]{Pre-defined Functions}
 
-@prim-op-defns['(lib "htdp-beginner.rkt" "lang") #'here '()]
+@(require (submod lang/htdp-beginner procedures))
+@(render-sections (docs) #'here "htdp-beginner")
+
+@;prim-op-defns[ #'here '()]

@@ -56,13 +56,17 @@
   ;;  then it can cause simplified module paths to be paths;
   ;;  keep the literal path, but marshal it to bytes.
   (define (protect-path p)
-    (if (path? p)
-	(path->bytes p)
-	p))
+    (cond
+     [(path? p) (path->bytes p)]
+     [(and (pair? p) (eq? (car p) 'submod) (path? (cadr p)))
+      `(submod ,(protect-path (cadr p)) . ,(cddr p))]
+     [else p]))
   (define (unprotect-path p)
-    (if (bytes? p)
-	(bytes->path p)
-	p))
+    (cond
+     [(bytes? p) (bytes->path p)]
+     [(and (pair? p) (eq? (car p) 'submod) (bytes? (cadr p)))
+      `(submod ,(unprotect-path (cadr p)) . ,(cddr p))]
+     [else p]))
 
   (define (revive-symbol s)
     (if (string? s)
@@ -244,9 +248,9 @@
             (let-values ([(path base) (module-path-index-split v)])
               (loop path)
               (loop base))]
-	   [else (raise-type-error
+	   [else (raise-argument-error
 		  'serialize
-		  "serializable object"
+		  "serializable?"
 		  v)])
 	  ;; No more possibility for this object in
 	  ;;  a cycle:

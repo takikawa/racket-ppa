@@ -81,12 +81,12 @@ opposed to @tech{syntax object}s inserted by macros.}
 
 
 @defproc[(syntax-source-module [stx syntax?] [source? any/c #f])
-         (or/c module-path-index? symbol? path? #f)]{
+         (or/c module-path-index? symbol? path? resolved-module-path? #f)]{
 
 Returns an indication of the module whose source contains
 @racket[stx], or @racket[#f] if @racket[stx] has no source module.  If
 @racket[source?] is @racket[#f], then result is a module path index or
-symbol (see @secref["modpathidx"]); if @racket[source?] is true, the
+symbol (see @secref["modpathidx"]) or a @tech{resolved module path}; if @racket[source?] is true, the
 result is a path or symbol corresponding to the loaded module's
 source in the sense of @racket[current-module-declare-source].}
 
@@ -265,13 +265,14 @@ if a former representative becomes otherwise unreachable, then
 
 
 @defproc[(syntax-shift-phase-level [stx syntax?]
-                                   [shift exact-integer?])
+                                   [shift (or/c exact-integer? #f)])
          syntax?]{
 
 Returns a syntax object that is like @racket[stx], but with all of its
 top-level and module binding shifted by @racket[shift] @tech{phase
-levels}. If @racket[shift] is @racket[0], then the result is
-@racket[stx].}
+levels}. If @racket[shift] is @racket[#f], then only bindings
+at @tech{phase level} 0 are shifted to the @tech{label phase level}.
+If @racket[shift] is @racket[0], then the result is @racket[stx].}
 
 
 @defproc[(generate-temporaries [stx-pair (or syntax? list?)]) 
@@ -284,9 +285,10 @@ must be a syntax pair that can be flattened into a list. The elements
 of @racket[stx-pair] can be anything, but string, symbol, keyword
 (possibly wrapped as syntax), and identifier elements will be embedded
 in the corresponding generated name, which is useful for debugging
-purposes. The generated identifiers are built with interned symbols
-(not @racket[gensym]s), so the limitations described with
-@racket[current-compile] do not apply.}
+purposes.
+
+The generated identifiers are built with interned symbols (not
+@racket[gensym]s); see also @secref["print-compiled"].}
 
 
 @defproc[(identifier-prune-lexical-context [id-stx identifier?]

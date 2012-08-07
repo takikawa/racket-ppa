@@ -1,9 +1,9 @@
-#lang scheme/base
-(require scheme/class
+#lang racket/base
+(require racket/class
          "../syntax.rkt"
          "private.rkt"
          racket/snip/private/private
-         racket/snip
+         racket/snip/private/snip
          "editor-data.rkt"
          (only-in "cycle.rkt"
                   set-editor-stream-in%!

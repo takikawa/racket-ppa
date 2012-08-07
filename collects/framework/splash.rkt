@@ -53,7 +53,13 @@
        #'(begin
            (printf "starting ~a\n" line)
            (begin0 
-             (on-splash-eventspace/ret/proc (λ () e ...))
+             (on-splash-eventspace/ret/proc (λ () (with-handlers ((exn:fail? (λ (x) 
+                                                                               (printf "~a\n" (exn-message x)) 
+                                                                               (for ([x (in-list (continuation-mark-set->context
+                                                                                                  (exn-continuation-marks x)))])
+                                                                                 (printf "  ~s\n" x))
+                                                                               (void))))
+                                                    e ...)))
              (printf "finishing ~a\n" line))))]))
 
 (define (get-splash-bitmap) splash-bitmap)
@@ -146,14 +152,14 @@
   (unless allow-funny? (set! funny? #f))
   (set! splash-title _splash-title)
   (set! splash-max-width (max 1 (splash-get-preference (get-splash-width-preference-name) width-default)))
-  (let/ec k
-    (define (no-splash)
-      (set! splash-bitmap #f)
-      (set! splash-canvas #f)
-      (set! splash-eventspace #f)
-      (k (void)))
     
-    (on-splash-eventspace/ret
+  (on-splash-eventspace/ret
+   (let/ec k
+     (define (no-splash)
+       (set! splash-bitmap #f)
+       (set! splash-canvas #f)
+       (set! splash-eventspace #f)
+       (k (void)))
      (send (get-gauge) set-range splash-max-width)
      (send splash-tlw set-label splash-title)
      
@@ -173,7 +179,7 @@
           [(or (path? splash-draw-spec)
                (string? splash-draw-spec))
            (unless (file-exists? splash-draw-spec)
-             (fprintf (current-error-port) "WARNING: bitmap path ~s not found\n" splash-draw-spec)
+             (eprintf "WARNING: bitmap path ~s not found\n" splash-draw-spec)
              (no-splash))
            
            (set! splash-bitmap (make-object bitmap% splash-draw-spec))]
@@ -181,7 +187,7 @@
            (set! splash-bitmap splash-draw-spec)])
         
         (unless (send splash-bitmap ok?)
-          (fprintf (current-error-port) "WARNING: bad bitmap ~s\n" splash-draw-spec)
+          (eprintf "WARNING: bad bitmap ~s\n" splash-draw-spec)
           (no-splash))
         
         (send splash-canvas min-width (send splash-bitmap get-width))
@@ -202,8 +208,7 @@
        [(not splash-draw-spec)
         (no-splash)]
        [else
-        (fprintf (current-error-port)
-                 "WARNING: unknown splash spec: ~s" splash-draw-spec)
+        (eprintf "WARNING: unknown splash spec: ~s" splash-draw-spec)
         (no-splash)])
      
      (refresh-splash)
@@ -234,7 +239,10 @@
   (set! splash-load-handler (λ (old-load f expected) (old-load f expected))))
 
 (define funny?
-  (let ([date (seconds->date (current-seconds))])
+  (let ([date (seconds->date (let ([ssec (getenv "PLTDREASTERSECONDS")])
+                               (if ssec
+                                   (string->number ssec)
+                                   (current-seconds))))])
     (and (with-handlers ([exn:fail:filesystem? (λ (x) #f)])
            (collection-path "icons")
            #t)

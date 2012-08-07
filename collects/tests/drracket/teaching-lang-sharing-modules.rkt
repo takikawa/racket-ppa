@@ -32,10 +32,10 @@ Of course, other (similar) things can go wrong, too.
 (define first-line-output (format "All ~a tests passed!" (length things-to-try)))
 
 (define (go)
-  (fire-up-drscheme-and-run-tests
+  (fire-up-drracket-and-run-tests
    (λ ()
      (putenv "PLTDRHTDPNOCOMPILED" "yes")
-     (define drs-frame (wait-for-drscheme-frame))
+     (define drs-frame (wait-for-drracket-frame))
      (set-language-level! '("How to Design Programs" "Beginning Student"))
      (clear-definitions drs-frame)
      (for ([exp (in-list things-to-try)])
@@ -46,8 +46,7 @@ Of course, other (similar) things can go wrong, too.
          [(equal? output first-line-output)
           (try-interaction-test drs-frame)]
          [else
-          (fprintf (current-error-port)
-                   "teaching-lang-sharing-modules.rkt: got bad output from execute: ~s"
+          (eprintf "teaching-lang-sharing-modules.rkt: got bad output from execute: ~s"
                    output)])))))
 
 (define (try-interaction-test drs-frame)

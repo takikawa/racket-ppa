@@ -59,7 +59,7 @@
 (define (location? v)
   (if (vector? (current-heap))
       (and (exact-nonnegative-integer? v) (< v (vector-length (current-heap))))
-      (error "Heap is unintialized")))
+      (error "Heap is uninitialized")))
 
 (provide/contract (init-heap! (exact-nonnegative-integer? . -> . void?)))
 (define (init-heap! size)
@@ -174,7 +174,7 @@
             (make-root 'vector
                        (λ () 
                           (vector-ref v i))
-                       (λ (ne) (vector-set! v ne)))))
+                       (λ (ne) (vector-set! v i ne)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Environments of closures

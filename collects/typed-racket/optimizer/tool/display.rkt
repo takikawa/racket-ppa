@@ -3,7 +3,8 @@
 (require racket/string racket/class racket/gui/base racket/match racket/port
          framework syntax/to-string
          "report.rkt"
-         unstable/sequence unstable/pretty)
+         unstable/sequence unstable/pretty
+         images/icons/symbol)
 
 (provide popup-callback make-color-table)
 
@@ -15,7 +16,7 @@
 
 (define ((popup-callback entry) ed start end)
   (match-define (report-entry subs start end badness) entry)
-  (define win (new frame% [label "Performance Report"]
+  (define win (new frame% [label "Optimization Coach"]
                    [width popup-width] [height popup-height]))
   (define pane (new text% [auto-wrap #t]))
   (define canvas
@@ -28,7 +29,9 @@
 ;; each sub-entry is displayed in its own text%, contained in the main
 ;; editor, to simplify irritant highlighting
 (define ((format-sub-report-entry pane) s)
-  (match-define (sub-report-entry stx msg) s)
+  (match-define (sub-report-entry stx msg provenance) s)
+
+  (define usable-width (- popup-width 20)) ; minus the scrollbar
 
   ;; the location, the syntax and the message are in separate editors
   (define location-text (new text:basic% [auto-wrap #t]))
@@ -56,7 +59,7 @@
       ;; located version of irritants available, this is the best we can do
       (send syntax-text highlight-range
             start (+ start len) "pink" #f 'high 'rectangle)))
-  (send syntax-text set-max-width (- popup-width 20)) ; minus the scrollbar
+  (send syntax-text set-max-width usable-width)
   (send syntax-text auto-wrap #t)
   (send syntax-text lock #t)
   (send pane insert
@@ -65,9 +68,14 @@
   (send pane insert-port (open-input-string "\n"))
 
   (define message-text (new text:basic% [auto-wrap #t]))
-  (send message-text insert-port (open-input-string msg))
+  (send message-text insert
+        (make-object image-snip% (if (missed-opt-report-entry? s)
+                                     (x-icon #:height 20)
+                                     (check-icon #:height 20))))
+  (send message-text insert-port
+        (open-input-string (string-append "  " msg)))
   ;; adjust display
-  (send message-text set-max-width (- popup-width 20)) ; minus the scrollbar
+  (send message-text set-max-width usable-width)
   (send message-text auto-wrap #t)
   (send message-text lock #t)
   (send pane insert
@@ -75,6 +83,11 @@
              [with-border? #f] [top-margin 10] [bottom-margin 15]))
 
   ;; to place the next sub-entry below
+  (send pane insert-port (open-input-string "\n\n"))
+  (define line-bitmap (make-object bitmap% usable-width 5))
+  (define bitmap-dc (make-object bitmap-dc% line-bitmap))
+  (send bitmap-dc draw-line 0 2.5 usable-width 2.5)
+  (send pane insert (make-object image-snip% line-bitmap))
   (send pane insert-port (open-input-string "\n\n")))
 
 (define lowest-badness-color  (make-object color% "pink"))

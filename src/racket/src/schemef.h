@@ -231,10 +231,17 @@ MZ_EXTERN void scheme_case_lambda_wrong_count(const char *name, int argc,
 MZ_EXTERN void scheme_wrong_type(const char *name, const char *expected,
 				 int which, int argc,
 				 Scheme_Object **argv);
+MZ_EXTERN void scheme_wrong_contract(const char *name, const char *expected,
+                                     int which, int argc,
+                                     Scheme_Object **argv);
 MZ_EXTERN void scheme_wrong_field_type(Scheme_Object *c_name,
 				       const char *expected,
 				       Scheme_Object *o);
+MZ_EXTERN void scheme_wrong_field_contract(Scheme_Object *c_name,
+                                           const char *expected,
+                                           Scheme_Object *o);
 MZ_EXTERN void scheme_arg_mismatch(const char *name, const char *msg, Scheme_Object *o);
+MZ_EXTERN void scheme_contract_error(const char *name, const char *msg, ...);
 MZ_EXTERN void scheme_wrong_return_arity(const char *where,
 					 int expected, int got,
 					 Scheme_Object **argv,
@@ -254,6 +261,7 @@ MZ_EXTERN Scheme_Object *scheme_dynamic_wind(void (*pre)(void *),
 MZ_EXTERN Scheme_Type scheme_make_type(const char *name);
 
 MZ_EXTERN char *scheme_get_type_name(Scheme_Type type);
+MZ_EXTERN char *scheme_get_type_name_or_null(Scheme_Type type);
 
 /*========================================================================*/
 /*                              constants                                 */
@@ -617,12 +625,14 @@ XFORM_NONGCING MZ_EXTERN int scheme_get_unsigned_int_val(Scheme_Object *o, uintp
 XFORM_NONGCING MZ_EXTERN int scheme_get_long_long_val(Scheme_Object *o, mzlonglong *v);
 XFORM_NONGCING MZ_EXTERN int scheme_get_unsigned_long_long_val(Scheme_Object *o, umzlonglong *v);
 
-XFORM_NONGCING MZ_EXTERN double scheme_real_to_double(Scheme_Object *r);
+MZ_EXTERN double scheme_real_to_double(Scheme_Object *r);
 
 MZ_EXTERN Scheme_Object *scheme_make_cptr(void *cptr, Scheme_Object *typetag);
 MZ_EXTERN Scheme_Object *scheme_make_offset_cptr(void *cptr, intptr_t offset, Scheme_Object *typetag);
 MZ_EXTERN Scheme_Object *scheme_make_external_cptr(void *cptr, Scheme_Object *typetag);
 MZ_EXTERN Scheme_Object *scheme_make_offset_external_cptr(void *cptr, intptr_t offset, Scheme_Object *typetag);
+
+MZ_EXTERN int scheme_is_cpointer(Scheme_Object *cp);
 
 MZ_EXTERN const char *scheme_get_proc_name(Scheme_Object *p, int *len, int for_error);
 
@@ -675,10 +685,10 @@ MZ_EXTERN Scheme_Object *scheme_make_bignum(intptr_t v);
 MZ_EXTERN Scheme_Object *scheme_make_bignum_from_unsigned(uintptr_t v);
 MZ_EXTERN Scheme_Object *scheme_make_bignum_from_long_long(mzlonglong v);
 MZ_EXTERN Scheme_Object *scheme_make_bignum_from_unsigned_long_long(umzlonglong v);
-MZ_EXTERN double scheme_bignum_to_double(const Scheme_Object *n);
+XFORM_NONGCING MZ_EXTERN double scheme_bignum_to_double(const Scheme_Object *n);
 MZ_EXTERN Scheme_Object *scheme_bignum_from_double(double d);
 #ifdef MZ_USE_SINGLE_FLOATS
-MZ_EXTERN float scheme_bignum_to_float(const Scheme_Object *n);
+XFORM_NONGCING MZ_EXTERN float scheme_bignum_to_float(const Scheme_Object *n);
 MZ_EXTERN Scheme_Object *scheme_bignum_from_float(float d);
 #else
 # define scheme_bignum_to_float scheme_bignum_to_double
@@ -908,6 +918,7 @@ MZ_EXTERN Scheme_Object *scheme_split_path(const char *path, int len, Scheme_Obj
 MZ_EXTERN Scheme_Object *scheme_build_path(int argc, Scheme_Object **argv);
 MZ_EXTERN Scheme_Object *scheme_path_to_directory_path(Scheme_Object *p);
 MZ_EXTERN Scheme_Object *scheme_path_to_complete_path(Scheme_Object *path, Scheme_Object *relto_path);
+MZ_EXTERN Scheme_Object *scheme_simplify_path(int argc, Scheme_Object *argv[]);
 
 MZ_EXTERN Scheme_Object *scheme_make_path(const char *chars);
 MZ_EXTERN Scheme_Object *scheme_make_sized_path(char *chars, intptr_t len, int copy);
@@ -1002,6 +1013,8 @@ MZ_EXTERN Scheme_Object *scheme_namespace_require(Scheme_Object *);
 MZ_EXTERN int scheme_is_module_path(Scheme_Object *);
 
 MZ_EXTERN Scheme_Object *scheme_datum_to_kernel_stx(Scheme_Object *e);
+
+MZ_EXTERN int scheme_module_is_declared(Scheme_Object *name, int try_load);
 
 /*========================================================================*/
 /*                                symbols                                 */
@@ -1135,10 +1148,10 @@ MZ_EXTERN Scheme_Object *scheme_load_extension(const char *filename, Scheme_Env 
 MZ_EXTERN void scheme_register_extension_global(void *ptr, intptr_t size);
 
 MZ_EXTERN intptr_t scheme_get_seconds(void);
-MZ_EXTERN intptr_t scheme_get_milliseconds(void);
-MZ_EXTERN double scheme_get_inexact_milliseconds(void);
-MZ_EXTERN intptr_t scheme_get_process_milliseconds(void);
-MZ_EXTERN intptr_t scheme_get_thread_milliseconds(Scheme_Object *thrd);
+XFORM_NONGCING MZ_EXTERN intptr_t scheme_get_milliseconds(void);
+XFORM_NONGCING MZ_EXTERN double scheme_get_inexact_milliseconds(void);
+XFORM_NONGCING MZ_EXTERN intptr_t scheme_get_process_milliseconds(void);
+XFORM_NONGCING MZ_EXTERN intptr_t scheme_get_thread_milliseconds(Scheme_Object *thrd);
 
 MZ_EXTERN char *scheme_banner(void);
 MZ_EXTERN char *scheme_version(void);
@@ -1150,13 +1163,15 @@ MZ_EXTERN int scheme_check_proc_arity2(const char *where, int a,
 				       int false_ok);
 
 MZ_EXTERN char *scheme_make_provided_string(Scheme_Object *o, int count, intptr_t *len);
-MZ_EXTERN char *scheme_make_args_string(char *s, int which, int argc, Scheme_Object **argv, intptr_t *len);
+MZ_EXTERN char *scheme_make_args_string(const char *s, int which, int argc, Scheme_Object **argv, intptr_t *len);
+MZ_EXTERN char *scheme_make_arg_lines_string(const char *s, int which, int argc, Scheme_Object **argv, intptr_t *len);
 
 MZ_EXTERN const char *scheme_system_library_subpath();
 
 MZ_EXTERN void scheme_signal_received(void);
 MZ_EXTERN void scheme_signal_received_at(void *);
 MZ_EXTERN void *scheme_get_signal_handle();
+MZ_EXTERN void scheme_wait_until_signal_received(void);
 
 MZ_EXTERN intptr_t scheme_char_strlen(const mzchar *s);
 

@@ -434,9 +434,8 @@
            
            (for-each display (reverse announcements))
            (newline)
-           (for-each
-            (λ (s) (fprintf (current-error-port) "WARNING:\n\t~a\n" s))
-            (reverse warnings))))
+           (for-each (λ (s) (eprintf "WARNING:\n\t~a\n" s))
+                     (reverse warnings))))
        
        (simple-form-path archive-name))]))
 
@@ -712,9 +711,10 @@
                        (λ (x) (and (list? x) 
                                    (srfi1:lset<= equal? x '("3xx" "4.x"))))
                        (announce "Repositories: ~s\n" repositories)
-                       (warn (string-append
-                              "Package's info.rkt does not contain a repositories field."
-                              " The package will be listed in all repositories by default."))]
+                       (unless repositories
+                         (warn (string-append
+                                "Package's info.rkt does not contain a repositories field."
+                                " The package will be listed in all repositories by default.")))]
                       [version
                        string?
                        (announce "Version description: ~a\n" version)]))])
@@ -800,8 +800,7 @@
   (unless (directory-exists? path)
     (if (file-exists? path)
         (error 'add-hard-link "Hard links must point to directories, not files")
-        (fprintf (current-error-port) 
-                 "Warning: directory ~a does not exist\n"
+        (eprintf "Warning: directory ~a does not exist\n"
                  (path->string path))))
   (add-hard-link! pkg-name (list owner) maj min path))
 

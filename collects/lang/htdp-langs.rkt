@@ -32,8 +32,6 @@
          "debugger-language-interface.rkt"
          "run-teaching-program.rkt"
          "htdp-langs-save-file-prefix.rkt"
-         
-         stepper/private/shared
 
          (only-in test-engine/scheme-gui make-formatter)
          (only-in test-engine/scheme-tests
@@ -180,9 +178,10 @@
             ;; set the global-port-print-handler after the super class because the super sets it too
             (run-in-user-thread
              (lambda ()
+               (define my-setup-printing-parameters (drscheme:language:make-setup-printing-parameters))
                (global-port-print-handler
                 (λ (value port [depth 0])
-                  (teaching-language-render-value/format value settings port 'infinity))))))
+                  (teaching-language-render-value/format my-setup-printing-parameters value settings port 'infinity))))))
           
           (define/private (teaching-languages-error-value->string settings v len)
             (let ([sp (open-output-string)])
@@ -240,13 +239,13 @@
               (thunk)))
           
           (define/override (render-value/format value settings port width)
-            (teaching-language-render-value/format value settings port width))
+            (teaching-language-render-value/format drscheme:language:setup-printing-parameters value settings port width))
           (define/override (render-value value settings port)
-            (teaching-language-render-value/format value settings port 'infinity))
+            (teaching-language-render-value/format drscheme:language:setup-printing-parameters value settings port 'infinity))
           
-          (define/private (teaching-language-render-value/format value settings port width)
+          (define/private (teaching-language-render-value/format setup-printing-parameters value settings port width)
             ;; set drscheme's printing parameters
-            (drscheme:language:setup-printing-parameters
+            (setup-printing-parameters
              (λ ()
                ;; then adjust the settings for the teaching languages
                (set-printing-parameters
@@ -534,8 +533,7 @@
             (expand-teaching-program port  
                                      (get-reader)
                                      (get-module)
-                                     (htdp-lang-settings-teachpacks settings)
-                                     (drscheme:rep:current-rep)))
+                                     (htdp-lang-settings-teachpacks settings)))
           
           (define/override (front-end/interaction port settings)
             (let ([t (super front-end/interaction port settings)]
@@ -573,7 +571,7 @@
                       [m (and m (regexp-match #rx"^(lang/[^/.]+).ss$" m))]
                       [m (and m (cadr m))])
                  (if m
-                   (format "O:{ L:~a T:teachpack }" m)
+                   (format "O:{ L:~a T:teachpack T:picturing-programs }" m)
                    (error 'drscheme:help-context-term
                           "internal error: unexpected module spec")))]
               [(tests:test-menu tests:dock-menu) #t]
@@ -997,8 +995,8 @@
       (define (teaching-languages-error-display-handler msg exn)
           (if (exn? exn)
               (display (get-rewriten-error-message exn) (current-error-port))
-              (fprintf (current-error-port) "uncaught exception: ~e" exn))
-          (fprintf (current-error-port) "\n")
+              (eprintf "uncaught exception: ~e" exn))
+          (eprintf "\n")
 
           ;; need to flush here so that error annotations inserted in next line
           ;; don't get erased if this output were to happen after the insertion
@@ -1051,11 +1049,16 @@
                    (number? span))
               (with-syntax ([expr expr]
                             [mark (list source line col start-position span)]
-                            [teaching-languages-continuation-mark-key teaching-languages-continuation-mark-key])
-                #`(with-continuation-mark 'teaching-languages-continuation-mark-key
-                    'mark
+                            [teaching-languages-continuation-mark-key teaching-languages-continuation-mark-key]
+                            [wcm (syntax-shift-phase-level #'with-continuation-mark (- phase base-phase))]
+                            [quot (syntax-shift-phase-level #'quote (- phase base-phase))])
+                #`(wcm (quot teaching-languages-continuation-mark-key)
+                    (quot mark)
                     expr))
               expr)))
+
+      (define base-phase
+        (variable-reference->module-base-phase (#%variable-reference)))
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;

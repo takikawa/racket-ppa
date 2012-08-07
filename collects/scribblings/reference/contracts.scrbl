@@ -35,7 +35,7 @@ constraints.
        racket/contract/private/box
        racket/contract/private/hash
        racket/contract/private/vector
-       racket/contract/private/struct)))
+       racket/contract/private/struct-dc)))
 
 @(define-syntax-rule
    (declare-exporting-ctc mod)
@@ -47,7 +47,7 @@ constraints.
 various operations listed in this section of the manual, and various
 ordinary Racket values that double as contracts, including 
 @itemize[
-@item{@tech{symbols}, @tech{booleans}, @tech{characters}, and
+@item{@tech{symbols}, @tech{booleans}, @tech{characters}, @tech{keywords}, and
 @racket[null], which are treated as contracts that recognize
 themselves, using @racket[eq?], }
 
@@ -243,13 +243,22 @@ recognizes those values, using @racket[eqv?]  as the comparison
 predicate.  For the purposes of @racket[one-of/c], atomic values are
 defined to be: @tech{characters}, @tech{symbols}, @tech{booleans},
 @racket[null], @tech{keywords}, @tech{numbers},
-@|void-const|, and @|undefined-const|.}
+@|void-const|, and @|undefined-const|.
+
+This is a backwards compatibility contract constructor. If
+neither @|void-const| nor @|undefined-const| are arguments,
+it simply passes its arguments to @racket[or/c].
+}
 
 
 @defproc[(symbols [sym symbol?] ...+) flat-contract?]{
 
 Accepts any number of symbols and returns a flat contract that
-recognizes those symbols.}
+recognizes those symbols.
+
+This is a backwards compatibility constructor; it merely
+passes its arguments to @racket[or/c].
+}
 
 @defproc[(vectorof [c contract?] 
                    [#:immutable immutable (or/c #t #f 'dont-care) 'dont-care]
@@ -376,13 +385,84 @@ Contracts for mutable fields may be impersonator contracts.
 If all fields are immutable and the @racket[contract-expr]s evaluate
 to flat contracts, a flat contract is produced.  If all the
 @racket[contract-expr]s are chaperone contracts, a chaperone contract is
-produced.  Otherwise, an impersonator contract is produced.}
+produced.  Otherwise, an impersonator contract is produced.
+}
+
+
+@defform/subs[(struct/dc struct-id field-spec ...)
+              ([field-spec [field-id maybe-lazy contract-expr]
+                           [field-id (dep-field-id ...) 
+                                     maybe-lazy
+                                     maybe-flat-or-impersonator
+                                     maybe-dep-state
+                                     contract-expr]]
+               [maybe-lazy (code:line) #:lazy]
+               [maybe-flat-or-impersonator (code:line) #:flat #:impersonator]
+               [maybe-dep-state (code:line) #:depends-on-state])]{
+Produces a contract that recognizes instances of the structure
+type named by @racket[struct-id], and whose field values match the
+contracts produced by the @racket[field-spec]s.
+
+If the @racket[field-spec] lists the names of other fields,
+then the contract depends on values in those fields, and the @racket[contract-expr]
+expression is evaluated each time a selector is applied, building a new contract
+for the fields based on the values of the @racket[dep-field-id] fields.
+If the field is a dependent field, then it is assumed that the contract is
+a chaperone, but not always a flat contract (and theus the entire @racket[struct/dc] 
+contract is not a flat contract). 
+If this is not the case, and the contract is
+always flat then the field must be annotated with
+the @racket[#:flat], or the field must be annotated with
+@racket[#:chaperone] (in which case, it must be a mutable field).
+
+If the @racket[#:lazy] keyword appears, then the contract
+on the field is check lazily (only when a selector is applied);
+@racket[#:lazy] contracts cannot be put on mutable fields.
+
+If a dependent contract depends on some mutable state, then use the 
+@racket[#:depends-on-state] keyword argument (if a field's dependent contract
+depends on a mutable field, this keyword is automatically inferred). 
+The presence of this keyword means that the contract expression is evaluated
+each time the corresponding field is accessed (or mutated, if it is a mutable
+field). Otherwise, the contract expression for a dependent field contract
+is evaluated when the contract is applied to a value.
+
+Contracts for immutable fields must be either flat or chaperone contracts.
+Contracts for mutable fields may be impersonator contracts.
+If all fields are immutable and the @racket[contract-expr]s evaluate
+to flat contracts, a flat contract is produced.  If all the
+@racket[contract-expr]s are chaperone contracts, a chaperone contract is
+produced.  Otherwise, an impersonator contract is produced.
+
+As an example, the function @racket[bst/c] below 
+returns a contract for binary search trees whose values
+are all between @racket[lo] and @racket[hi].
+The lazy annotations ensure that this contract does not
+change the running time of operations that do not
+inspect the entire tree.
+
+@racketblock[(struct bt (val left right))
+             (define (bst/c lo hi)
+               (or/c #f
+                     (struct/dc bt
+                                [val (between/c lo hi)]
+                                [left (val) #:lazy (bst lo val)]
+                                [right (val) #:lazy (bst val hi)])))]
+
+}
 
 
 @defproc[(parameter/c [c contract?]) contract?]{
 
 Produces a contract on parameters whose values must match
 @racket[contract].}
+
+
+@defproc[(procedure-arity-includes/c [n exact-nonnegative-integer?]) flat-contract?]{
+
+Produces a contract for procedures that accept @racket[n] argument
+(i.e,. the @racket[procedure?] contract is implied).}
+
 
 @defproc[(hash/c [key chaperone-contract?]
                  [val contract?] 
@@ -407,6 +487,60 @@ can only be applied to @racket[equal?]-based hash tables.  When a higher-order
 @racket[hash/c] contract is applied to a hash table, the result is not @racket[eq?]
 to the input.  The result will be a copy for immutable hash tables, and either a
 @tech{chaperone} or @tech{impersonator} of the input for mutable hash tables.
+}
+
+
+@defproc[(prompt-tag/c [contract contract?] ...) contract?]{
+Takes any number of contracts and returns a contract that recognizes
+continuation prompt tags and will check any aborts or prompt handlers that
+use the contracted prompt tag.
+
+Each @racket[contract] will check the corresponding value passed to
+an @racket[abort-current-continuation] and handled by the handler of a
+call to @racket[call-with-continuation-prompt].
+
+If all of the @racket[contract]s are chaperone contracts, the resulting
+contract will also be a @tech{chaperone} contract. Otherwise, the contract is
+an @tech{impersonator} contract.
+
+@examples[#:eval (contract-eval)
+  (define/contract tag
+    (prompt-tag/c (-> number? string?))
+    (make-continuation-prompt-tag))
+
+  (call-with-continuation-prompt
+    (lambda ()
+      (number->string
+        (call-with-composable-continuation
+          (lambda (k)
+            (abort-current-continuation tag k)))))
+    tag
+    (lambda (k) (k "not a number")))
+]
+}
+
+
+@defproc[(continuation-mark-key/c [contract contract?]) contract?]{
+Takes a single contract and returns a contract that recognizes
+continuation marks and will check any mappings of marks to values
+or any accesses of the mark value.
+
+If the argument @racket[contract] is a chaperone contract, the resulting
+contract will also be a @tech{chaperone} contract. Otherwise, the contract is
+an @tech{impersonator} contract.
+
+@examples[#:eval (contract-eval)
+  (define/contract mark-key
+    (continuation-mark-key/c (-> symbol? (listof symbol?)))
+    (make-continuation-mark-key))
+
+  (with-continuation-mark
+    mark-key
+    (lambda (s) (append s '(truffle fudge ganache)))
+    (let ([mark-value (continuation-mark-set-first
+                       (current-continuation-marks) mark-key)])
+      (mark-value "chocolate-bar")))
+]
 }
 
 
@@ -748,7 +882,7 @@ For example, the contract
                         (lambda (p) 
                           (procedure-arity-includes? p size)))])
           ()
-          number?)]))
+          [_ number?])]))
 ]
 
 says that the function @racket[f] accepts a natural number
@@ -880,6 +1014,12 @@ if they do not, a contract violation is signaled.
 
 @defform[(contract-struct id (field-id ...))]{
 
+  @deprecated[@racket[struct]]{Lazy struct contracts no longer require a separate
+              struct declaration; instead @racket[struct/dc]
+              and @racket[struct/c] work directly with
+              @racket[struct] and @racket[define-struct]. 
+  }
+                                              
 Like @racket[struct], but with two differences: 
 they do not
 define field mutators, and they define two contract constructors:
@@ -914,56 +1054,15 @@ indicate which fields it depends on; these dependencies can only be to
 earlier fields.}}
  
 @defform[(define-contract-struct id (field-id ...))]{
+  @deprecated[@racket[struct]]{Lazy struct contracts no longer require a separate
+              struct declaration; instead @racket[struct/dc]
+              and @racket[struct/c] work directly with
+              @racket[struct] and @racket[define-struct]. 
+  }
+                                                     
   Like @racket[contract-struct], but where the constructor's name is
   @racketidfont["make-"]@racket[id], much like @racket[define-struct].
 }
-
-As an example of lazy contract checking, consider the following module:
-
-@(begin
-#reader scribble/comment-reader
-[racketmod
-racket
-
-(contract-struct kons (hd tl))
-  
-;; @racket[sorted-list/gt : number -> contract]
-;; produces a contract that accepts
-;; sorted kons-lists whose elements
-;; are all greater than @racket[num].
-(define (sorted-list/gt num)
-  (or/c null?
-        (kons/dc [hd (>=/c num)]
-                 [tl (hd) (sorted-list/gt hd)])))
-  
-;; @racket[product : kons-list -> number]
-;; computes the product of the values
-;; in the list. if the list contains
-;; zero, it avoids traversing the rest
-;; of the list.
-(define (product l)
-  (cond
-    [(null? l) 1]
-    [else
-     (if (zero? (kons-hd l))
-         0
-         (* (kons-hd l) 
-            (product (kons-tl l))))]))
- 
-(provide kons? kons kons-hd kons-tl)
-(provide
- (contract-out [product (-> (sorted-list/gt -inf.0) number?)]))
-])
-
-The module provides a single function, @racket[product] whose contract
-indicates that it accepts sorted lists of numbers and produces
-numbers. Using an ordinary flat contract for sorted lists, the product
-function cannot avoid traversing having its entire argument be
-traversed, since the contract checker will traverse it before the
-function is called. As written above, however, when the product
-function aborts the traversal of the list, the contract checking also
-stops, since the @racket[kons/dc] contract constructor generates a
-lazy contract.
 
 @; ------------------------------------------------------------------------
 
@@ -1059,8 +1158,9 @@ instead of at the end of the enclosing module.}
    (code:line #:result contract-expr)
    (code:line #:results (contract-expr ...))]
   [free-var-list
-   (code:line #:freevars ([id contract-expr] ...))
-   (code:line #:freevar id contract-expr)])]{
+   (code:line)
+   (code:line #:freevar id contract-expr)
+   (code:line #:freevars ([id contract-expr] ...))])]{
 Generates a local contract boundary.
 
 The first @racket[with-contract] form cannot appear in expression position.
@@ -1168,7 +1268,7 @@ produces @racket[#f], no name is printed.  Otherwise, it is also formatted as by
 @racket[display].
 
 If specified, @racket[source-location-expr] indicates the source location
-reported by contract violations.  The expession must produce a @racket[srcloc]
+reported by contract violations.  The expression must produce a @racket[srcloc]
 structure, @tech{syntax object}, @racket[#f], or a list or vector in the format
 accepted by the third argument to @racket[datum->syntax].
 
@@ -1235,7 +1335,7 @@ use in the contract system:
         (raise-blame-error
          blame
          val
-         "expected <integer>, given: ~e"
+         '(expected "<integer>," given: "~e")
          val))))
 ]
 The new argument specifies who is to be blamed for
@@ -1266,7 +1366,7 @@ Compare that to the projection for our function contract:
           (raise-blame-error
            blame
            val
-           "expected a procedure of one argument, given: ~e"
+           '(expected "a procedure of one argument," given: "~e")
            val)))))
 ]
 
@@ -1294,7 +1394,7 @@ modules. First, one module defines a function, and then that
 module is required by another. So, far the function itself
 has to go from the original, providing module to the
 requiring module. Now, imagine that the providing module
-invokes the function, suppying it an argument. At this
+invokes the function, supplying it an argument. At this
 point, the flow of values reverses. The argument is
 traveling back from the requiring module to the providing
 module! And finally, when the function produces a result,
@@ -1307,11 +1407,15 @@ We can use this insight to generalize the function contracts
 and build a function that accepts any two contracts and
 returns a contract for functions between them.
 
+This projection also goes further and uses 
+@racket[blame-add-context] to improve the error messages
+when a contract violation is detected.
+
 @racketblock[
 (define (make-simple-function-contract dom-proj range-proj)
   (lambda (blame)
-    (let ([dom (dom-proj (blame-swap blame))]
-          [rng (range-proj blame)])
+    (let ([dom (dom-proj (blame-add-context blame "the argument of" #:swap? #t))]
+          [rng (range-proj (blame-add-context blame "the range of"))])
       (lambda (f)
         (if (and (procedure? f)
                  (procedure-arity-includes? f 1))
@@ -1320,7 +1424,7 @@ returns a contract for functions between them.
             (raise-blame-error
              blame
              val
-             "expected a procedure of one argument, given: ~e"
+             '(expected "a procedure of one argument," given: "~e")
              val))))))
 ]
 
@@ -1338,7 +1442,9 @@ the contract library primitives below.
                (if (test x)
                  x
                  (raise-blame-error
-                  b x "expected <~a>, given: ~e" name x))))]
+                  b x
+                  '(expected "<~a>," given: "~e")
+                  name x))))]
           [#:stronger stronger (-> contract? contract? boolean?)])
          contract?]
 @defproc[(make-chaperone-contract
@@ -1350,7 +1456,9 @@ the contract library primitives below.
                (if (test x)
                  x
                  (raise-blame-error
-                  b x "expected <~a>, given: ~e" name x))))]
+                  b x
+                  '(expected "<~a>," given: "~e")
+                  name x))))]
           [#:stronger stronger (-> contract? contract? boolean?)])
          chaperone-contract?]
 @defproc[(make-flat-contract
@@ -1362,7 +1470,9 @@ the contract library primitives below.
                (if (test x)
                  x
                  (raise-blame-error
-                  b x "expected <~a>, given: ~e" name x))))]
+                  b x
+                  '(expected "<~a>," given: "~e")
+                  name x))))]
           [#:stronger stronger (-> contract? contract? boolean?)])
          flat-contract?]
 )]{
@@ -1426,7 +1536,7 @@ was passed as the second argument to @racket[contract-stronger?].
            (λ (x) (range (f (domain x))))
            (raise-blame-error
             b f
-            "expected a function of one argument, got: ~e"
+            '(expected "a function of one argument," 'given: "~e")
             f)))))))
 (contract int->int/c "not fun" 'positive 'negative)
 (define halve 
@@ -1494,6 +1604,53 @@ contracts.  The error messages assume that the function named by
 This predicate recognizes @tech{blame objects}.
 }
 
+@defproc[(blame-add-context [blame blame?]
+                            [context (or/c string? #f)]
+                            [#:important important (or/c string? #f) #f]
+                            [#:swap? swap? boolean? #f])
+         blame?]{
+  Adds some context information to blame error messages
+  that explicates which portion of the contract failed
+  (and that gets rendered by @racket[raise-blame-error]).
+  
+  The @racket[context] argument describes one layer of the 
+  portion of the contract, typically of the form @racket["the 1st argument of"]
+  (in the case of a function contract)
+  or @racket["a conjunct of"] (in the case of an @racket[and/c] contract).
+  
+  For example, consider this contract violation:
+  @interaction[#:eval (contract-eval)
+(define/contract f
+  (list/c (-> integer? integer?))
+  (list (λ (x) x)))
+
+((car f) #f)
+]
+It shows that the portion of the contract being violated is the first 
+occurrence of @racket[integer?], because the @racket[->] and 
+the @racket[list/c] combinators each internally called
+@racket[blame-add-context] to add the two lines following
+``in'' in the error message.
+
+The @racket[important] argument is used to build the beginning part
+of the contract violation. The last @racket[important] argument that
+gets added to a blame object is used. The @racket[class/c] contract
+adds an important argument, as does the @racket[->] contract (when
+@racket[->] knows the name of the function getting the contract).
+
+The @racket[swap?] argument has the effect of calling @racket[blame-swap]
+while adding the layer of context, but without creating an extra
+blame object.
+
+The context information recorded in blame structs keeps track of
+combinators that do not add information, and add the string @racket["..."]
+for them, so programmers at least see that there was some context 
+they are missing in the error messages. Accordingly, since there are
+combinators that should not add any context (e.g., @racket[recursive-contract]),
+passing @racket[#f] as the context string argument avoids adding the
+@racket["..."] string.
+}
+
 @deftogether[(
 @defproc[(blame-positive [b blame?]) any/c]
 @defproc[(blame-negative [b blame?]) any/c]
@@ -1520,6 +1677,7 @@ source location was provided, all fields of the structure will contain
 
 @defproc[(blame-swap [b blame?]) blame?]{
 This function swaps the positive and negative parties of a @tech{blame object}.
+(See also @racket[blame-add-context].)
 }
 
 @deftogether[(
@@ -1540,22 +1698,37 @@ the other; both are provided for convenience and clarity.
              position @racket[b] has.
 }
   
-@defproc[(raise-blame-error [b blame?] [x any/c] [fmt string?] [v any/c] ...)
+@defproc[(raise-blame-error [b blame?] 
+                            [x any/c] 
+                            [fmt (or/c string?
+                                       (listof (or/c string?
+                                                     'given 'given:
+                                                     'expected 'expected:)))]
+                            [v any/c] ...)
          none/c]{
 
 Signals a contract violation.  The first argument, @racket[b], records the
 current blame information, including positive and negative parties, the name of
 the contract, the name of the value, and the source location of the contract
 application.  The second argument, @racket[x], is the value that failed to
-satisfy the contract.  The remaining arguments are a format string,
+satisfy the contract.  
+
+The remaining arguments are a format string,
 @racket[fmt], and its arguments, @racket[v ...], specifying an error message
 specific to the precise violation.
+
+If @racket[fmt] is a list, then the elements are concatenated together 
+(with spaces added, unless there are already spaces at the ends of the strings),
+after first replacing symbols with either their string counterparts, or
+replacing @racket['given] with @racket["produced"] and 
+@racket['expected] with @racket["promised"], depending on whether or not
+the @racket[b] argument has been swapped or not (see @racket[blame-swap]).
 
 }
 
 @defstruct[(exn:fail:contract:blame exn:fail:contract) ([object blame?])]{
-  This exception is raised to signal a contract error. The @racket[blame]
-  field extracts the @racket[blame?] object associated with a contract violation.
+  This exception is raised to signal a contract error. The @racket[object]
+  field contains a @tech{blame object} associated with a contract violation.
 }
 
 @defparam[current-blame-format
@@ -1630,7 +1803,8 @@ constructed by @racket[build-flat-contract-property].
 These properties attach a contract value to the protected structure,
 chaperone, or impersonator value.  The function @racket[has-contract?]
 returns @racket[#t] for values that have one of these properties, and
-@racket[value-contract] extracts the contract value.
+@racket[value-contract] extracts the value from the property (which
+is expected to be the contract on the value).
 }
 
 @deftogether[(
@@ -1836,7 +2010,7 @@ are below):
                  or not this module exports anything matching the contract)
                  can be blamed for violating the contract. This comes into play
                  for @racket[->i] contracts, since the contract itself has
-                 acceess to values under contract via the dependency. 
+                 access to values under contract via the dependency.
                  }
          ]
 
@@ -1947,11 +2121,17 @@ Produces the name used to describe the contract in error messages.
 @defproc[(value-contract [v has-contract?]) contract?]{
   Returns the contract attached to @racket[v], if recorded.
   Otherwise it returns @racket[#f].
+  
+  To support @racket[value-contract] and @racket[has-contract?]
+  in your own contract combinators, use @racket[prop:contracted] or
+  @racket[impersonator-prop:contracted].
 }
 
 @defproc[(has-contract? [v any/c]) boolean?]{
   Returns @racket[#t] if @racket[v] is a value that
   has a recorded contract attached to it.
+  
+  See also @racket[value-contract].
 }
 
 

@@ -22,6 +22,10 @@
 
 (application-preferences-handler (λ () (preferences:show-dialog)))
 
+(preferences:set-default 'framework:line-spacing-add-gap?
+                         (not (eq? (system-type) 'windows))
+                         boolean?)
+
 ;; used to time how long it takes to set a preference; the value is not actually used.
 (preferences:set-default 'drracket:prefs-debug #f (λ (x) #t))
 
@@ -86,19 +90,33 @@
 (preferences:set-default 'framework:square-bracket:local
                          '("local")
                          (λ (x) (and (list? x) (andmap string? x))))
+
+(define all-fors
+  (let ()
+    (define base-fors
+      '(for for/list for/hash for/hasheq for/hasheqv for/and for/or 
+         for/lists for/first for/last for/fold for/vector for/flvector
+         for/sum for/product))
+    (define untyped-fors
+      (append base-fors
+              (map (λ (x) (string->symbol (regexp-replace #rx"^for" (symbol->string x) "for*")))
+                   base-fors)))
+    (define all-fors
+      (append untyped-fors
+              (map (λ (x) (string->symbol (string-append (symbol->string x) ":")))
+                   untyped-fors)))
+    all-fors))
+
 (preferences:set-default 'framework:square-bracket:letrec
-                         (let ([fors '("for" "for/fold" "for/list" "for/hash" "for/and" "for/or" "for/first" "for/last")])
-                           (append fors
-                                   (map (λ (x) (regexp-replace #rx"for" x "for*"))
-                                        fors)
-                                   '("let" 
-                                     "let*" "let-values" "let*-values"
-                                     "let-syntax" "let-struct" "let-syntaxes"
-                                     "match-let" "match-let*" "match-letrec"
-                                     "letrec"
-                                     "letrec-syntaxes" "letrec-syntaxes+values" "letrec-values"
-                                     "parameterize"
-                                     "with-syntax")))
+                         (append (map symbol->string all-fors)
+                                 '("let" 
+                                   "let*" "let-values" "let*-values"
+                                   "let-syntax" "let-struct" "let-syntaxes"
+                                   "match-let" "match-let*" "match-letrec"
+                                   "letrec"
+                                   "letrec-syntaxes" "letrec-syntaxes+values" "letrec-values"
+                                   "parameterize"
+                                   "with-syntax"))
                          (λ (x) (and (list? x) (andmap string? x))))
 
 (preferences:set-default 'framework:white-on-black? #f boolean?)
@@ -237,7 +255,7 @@
                inherit sequence))
   (for-each (λ (x) 
               (hash-set! hash-table x 'lambda))
-            '(
+            `(
               cases
                  instantiate super-instantiate
                syntax/loc quasisyntax/loc
@@ -248,7 +266,7 @@
                letrec-values
                with-syntax
                with-continuation-mark
-               module
+               module module* module+
                match match-let match-let* match-letrec
                let/cc let/ec letcc catch
                let-syntax letrec-syntax fluid-let-syntax letrec-syntaxes+values
@@ -263,17 +281,10 @@
                splicing-letrec-values splicing-let-syntax
                splicing-letrec-syntax splicing-let-syntaxes
                splicing-letrec-syntaxes splicing-letrec-syntaxes+values
-               splicing-local               
-               
-               for for/list for/hash for/hasheq for/hasheqv for/and for/or 
-               for/lists for/first for/last for/fold for/vector for/flvector
-               for* for*/list for*/hash for*/hasheq for*/hasheqv for*/and for*/or 
-               for*/lists for*/first for*/last for*/fold for*/vector for*/flvector
+               splicing-local splicing-syntax-parameterize
 
-               for: for/list: for/hash: for/hasheq: for/hasheqv: for/and: for/or:
-               for/lists: for/first: for/last: for/fold: for/vector: for/flvector:
-               for*: for*/list: for*/hash: for*/hasheq: for*/hasheqv: for*/and: for*/or:
-               for*/lists: for*/first: for*/last: for*/fold: for*/vector: for*/flvector:
+               ,@all-fors
+
                do:
                
                kernel-syntax-case

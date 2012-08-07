@@ -3,6 +3,7 @@
 
 @(define rackunit-eval (make-base-eval))
 @(interaction-eval #:eval rackunit-eval (require rackunit))
+@(interaction-eval #:eval rackunit-eval (error-print-context-length 0))
 
 @title{Checks}
 
@@ -15,7 +16,7 @@ information detailing the failure.
 Although checks are implemented as macros, which is
 necessary to grab source location, they are conceptually
 functions.  This means, for instance, checks always evaluate
-their arguments.  You can use check as first class
+their arguments.  You can use checks as first class
 functions, though you will lose precision in the reported
 source locations if you do so.
 
@@ -67,7 +68,7 @@ The following check fails:
 @defproc[(check-= (v1 any) (v2 any) (epsilon number?) (message string? ""))
          void?]{
 
-Checks that @racket[v1] and @racket[v2] are within
+Checks that @racket[v1] and @racket[v2] are numbers within
 @racket[epsilon] of one another.  The optional
 @racket[message] is included in the output if the check
 fails.

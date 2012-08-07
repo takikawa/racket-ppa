@@ -7,7 +7,7 @@
                         [stdin (or/c (and/c input-port? file-stream-port?) #f)]
                         [stderr (or/c (and/c output-port? file-stream-port?) #f 'stdout)]
                         [command path-string?]
-                        [arg (or/c path? string? bytes?)] ...)
+                        [arg (or/c path? string-no-nuls? bytes-no-nuls?)] ...)
             (values subprocess?
                     (or/c (and/c input-port? file-stream-port?) #f)
                     (or/c (and/c output-port? file-stream-port?) #f)
@@ -28,9 +28,11 @@ Creates a new process in the underlying operating system to execute
 @racket[process] from @racketmodname[racket/system].
 
 The @racket[command] argument is a path to a program executable, and
-the @racket[arg]s are command-line arguments for the program. On
+the @racket[arg]s are command-line arguments for the program. See
+@racket[find-executable-path] for locating an executable based on
+the @envvar{PATH} environment variable. On
 Unix and Mac OS X, command-line arguments are passed as byte strings,
-and string @racket[args] are converted using the current locale's
+and string @racket[arg]s are converted using the current locale's
 encoding (see @secref["encodings"]). On Windows, command-line
 arguments are passed as strings, and bytes strings are converted using
 UTF-8.
@@ -215,7 +217,7 @@ interactive shell, since job control is based on process groups.}
                         [target string?]
                         [parameters string?]
                         [dir path-string?]
-                        [show-mode symbol?]) 
+                        [show-mode symbol?])
          #f]{
 
 @index['("ShellExecute")]{Performs} the action specified by @racket[verb]
@@ -316,24 +318,40 @@ real process ID).}
 
 @note-lib[racket/system]
 
-@defproc[(system [command (or/c string? bytes?)]) boolean?]{
+@defproc[(system [command (or/c string-no-nuls? bytes-no-nuls?)]) boolean?]{
 
 Executes a Unix, Mac OS X, or Windows shell command synchronously
 (i.e., the call to @racket[system] does not return until the
-subprocess has ended). The @racket[command] argument is a string
-or byte string containing no nul characters. If the command succeeds, the return
-value is @racket[#t], @racket[#f] otherwise.
+subprocess has ended). The @racket[command] argument is a string or
+byte string containing no nul characters. If the command succeeds, the
+return value is @racket[#t], @racket[#f] otherwise.
 
 See also @racket[current-subprocess-custodian-mode] and
 @racket[subprocess-group-enabled], which affect the subprocess used to
-implement @racket[system].}
+implement @racket[system].
+
+The resulting process writes to @racket[(current-output-port)], reads
+from @racket[(current-input-port)], and logs errors to
+@racket[(current-error-port)]. To gather the process's non-error
+output to a string, for example, use @racket[with-output-to-string],
+which sets @racket[current-output-port] while calling the given
+function:
+
+@racketblock[
+(with-output-to-string (lambda () (system "date")))
+]}
 
 
-@defproc*[([(system* [command path-string?] [arg (or/c path? string? bytes?)] ...) boolean?]
-           [(system* [command path-string?] [exact 'exact] [arg string?]) boolean?])]{
+@defproc*[([(system* [command path-string?]
+                     [arg (or/c path? string-no-nuls? bytes-no-nuls?)] ...)
+            boolean?]
+           [(system* [command path-string?] [exact 'exact] [arg string?])
+            boolean?])]{
 
 Like @racket[system], except that @racket[command] is a filename that
-is executed directly (instead of through a shell command), and the
+is executed directly (instead of through a shell command; see
+@racket[find-executable-path] for locating an executable based on
+the @envvar{PATH} environment variable), and the
 @racket[arg]s are the arguments. The executed file is passed the
 specified string arguments (which must contain no nul
 characters).
@@ -343,20 +361,25 @@ On Windows, the first argument after @racket[command] can be
 line. See @racket[subprocess] for details.}
 
 
-@defproc[(system/exit-code [command (or/c string? bytes?)]) (integer-in 0 255)]{
+@defproc[(system/exit-code [command (or/c string-no-nuls? bytes-no-nuls?)])
+         byte?]{
 
 Like @racket[system], except that the result is the exit code returned
 by the subprocess. A @racket[0] result normally indicates success.}
 
 
-@defproc*[([(system*/exit-code [command path-string?] [arg (or/c path? string? bytes?)] ...) (integer-in 0 255)]
-           [(system*/exit-code [command path-string?] [exact 'exact] [arg string?]) (integer-in 0 255)])]{
+@defproc*[([(system*/exit-code [command path-string?]
+                               [arg (or/c path? string-no-nuls? bytes-no-nuls?)] ...)
+            byte?]
+           [(system*/exit-code [command path-string?]
+                               [exact 'exact] [arg string?])
+            byte?])]{
 
 Like @racket[system*], but returns the exit code like
 @racket[system/exit-code].}
- 
 
-@defproc[(process [command string?])
+
+@defproc[(process [command (or/c string-no-nuls? bytes-no-nuls?)])
          (list input-port?
                output-port?
                exact-nonnegative-integer?
@@ -423,13 +446,16 @@ implement @racket[process]. In particular, the @racket['interrupt] and
 @racket['kill] process-control messages are implemented via
 @racket[subprocess-kill], so they can affect a process group instead
 of a single process.}
- 
 
-@defproc*[([(process* [command path-string?] [arg (or/c path? string? bytes?)] ...) list?]
-           [(process* [command path-string?] [exact 'exact] [arg string?]) list?])]{
+
+@defproc*[([(process* [command path-string?]
+                      [arg (or/c path? string-no-nuls? bytes-no-nuls?)] ...)
+            list?]
+           [(process* [command path-string?] [exact 'exact] [arg string?])
+            list?])]{
 
 Like @racket[process], except that @racket[command] is a filename that
-is executed directly, and the @racket[arg]s are the arguments. On
+is executed directly like @racket[system*], and the @racket[arg]s are the arguments. On
 Windows, as for @racket[system*], the first @racket[arg] can be
 replaced with @racket['exact].}
 
@@ -437,7 +463,7 @@ replaced with @racket['exact].}
 @defproc[(process/ports [out (or/c #f output-port?)]
                         [in (or/c #f input-port?)]
                         [error-out (or/c #f output-port? 'stdout)]
-                        [command string?])
+                        [command (or/c path? string-no-nuls? bytes-no-nuls?)])
          list?]{
 
 Like @racket[process], except that @racket[out] is used for the
@@ -454,7 +480,8 @@ returned list is @racket[#f].}
                             [in (or/c #f input-port?)]
                             [error-out (or/c #f output-port? 'stdout)]
                             [command path-string?]
-                            [arg (or/c path? string? bytes?)] ...)
+                            [arg (or/c path? string-no-nuls? bytes-no-nuls?)]
+                            ...)
             list?]
            [(process*/ports [out (or/c #f output-port?)]
                             [in (or/c #f input-port?)]
@@ -467,3 +494,17 @@ returned list is @racket[#f].}
 Like @racket[process*], but with the port handling of
 @racket[process/ports].}
 
+@; ----------------------------------------------------------------------
+
+@;section{Contract Auxiliaries}
+
+@;note-lib[racket/system]
+
+The contracts of @racket[system] and related functions may signal a
+contract error with references to the following functions.
+
+@defproc[(string-no-nuls? [x any/c]) boolean?]{
+Ensures that @racket[x] is a string and does not contain @racket["\0"].}
+
+@defproc[(bytes-no-nuls? [x any/c]) boolean?]{
+Ensures that @racket[x] is a byte-string and does not contain @racket[#"\0"].}

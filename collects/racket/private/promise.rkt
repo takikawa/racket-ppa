@@ -8,6 +8,7 @@
 (#%provide force promise? promise-forced? promise-running?
            ;; provided to create extensions
            (struct promise ()) pref pset! prop:force reify-result
+           promise-forcer
            promise-printer
            (struct running ()) (struct reraise ())
            (for-syntax make-delayer))
@@ -146,12 +147,7 @@
 ;; property value for the right forcer to use
 (define-values [prop:force promise-forcer]
   (let-values ([(prop pred? get) ; no need for the predicate
-                (make-struct-type-property 'forcer
-                  (lambda (v info)
-                    (unless (and (procedure? v)
-                                 (procedure-arity-includes? v 1))
-                      (raise-type-error 'prop:force "a unary function" v))
-                    v))])
+                (make-struct-type-property 'forcer 'can-impersonate)])
     (values prop get)))
 
 ;; A promise value can hold
@@ -174,7 +170,7 @@
   ;; stepper-syntax-property : like syntax property, but adds properties to an
   ;; association list associated with the syntax property 'stepper-properties
   ;; Had to re-define this because of circular dependencies
-  ;; (also defined in stepper/private/shared.rkt)
+  ;; (also defined in stepper/private/syntax-property.rkt)
   (define-for-syntax stepper-syntax-property
     (case-lambda 
       [(stx tag) 
@@ -282,12 +278,12 @@
   (if (promise? promise)
     (let ([v (pref promise)])
       (or (not (procedure? v)) (reraise? v))) ; #f when running
-    (raise-type-error 'promise-forced? "promise" promise)))
+    (raise-argument-error 'promise-forced? "promise?" promise)))
 
 (define (promise-running? promise)
   (if (promise? promise)
     (running? (pref promise))
-    (raise-type-error 'promise-running? "promise" promise)))
+    (raise-argument-error 'promise-running? "promise?" promise)))
 
 )
 

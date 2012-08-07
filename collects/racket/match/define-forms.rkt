@@ -1,6 +1,6 @@
-#lang scheme/base
+#lang racket/base
 
-(require (for-syntax scheme/base
+(require (for-syntax racket/base
                      racket/syntax
                      (only-in racket/list append* remove-duplicates)
                      unstable/sequence
@@ -44,10 +44,10 @@
 
      (define-syntax (match/values stx)
        (syntax-parse stx
-         [(_ arg:expr [(pats ...) rhs:expr] [(patss ...) rhss:expr] ...)
+         [(_ arg:expr (~and cl0 [(pats ...) rhs ...]) clauses ...)
           (with-syntax ([(ids ...) (generate-temporaries #'(pats ...))])
             #`(let-values ([(ids ...) arg])
-                (match*/derived (ids ...) #,stx [(pats ...) rhs] [(patss ...) rhss] ...)))]))
+                (match*/derived (ids ...) #,stx cl0 clauses ...)))]))
 
      (define-syntax (match-lambda stx)
        (syntax-parse stx

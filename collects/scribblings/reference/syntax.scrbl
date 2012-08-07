@@ -1,11 +1,13 @@
 #lang scribble/doc
 @(require "mz.rkt" scribble/bnf scribble/core
           (for-label (only-in racket/require-transform
-                              make-require-transformer)
+                              make-require-transformer
+                              current-require-module-path)
                      racket/require-syntax
                      racket/require
                      (only-in racket/provide-transform
                               make-provide-transformer)
+                     racket/keyword-transform
                      racket/provide-syntax
                      racket/provide
                      racket/package
@@ -102,20 +104,23 @@ Within such specifications,
        the expression @racket[_thing-expr] must produce a number.}]
 
 @;------------------------------------------------------------------------
-@section[#:tag "module"]{Modules: @racket[module], ...}
+@section[#:tag "module"]{Modules: @racket[module], @racket[module*], ...}
 
 @guideintro["module-syntax"]{@racket[module]}
 
 @defform[(module id module-path form ...)]{
 
-Declares a top-level module. If the
-@racket[current-module-declare-name] parameter is set, the parameter
-value is used for the module name and @racket[id] is ignored,
-otherwise @racket[(#,(racket quote) id)] is the name of the declared
-module.
+Declares a top-level module or a @tech{submodule}. For a top-level
+module, if the @racket[current-module-declare-name] parameter is set,
+the parameter value is used for the module name and @racket[id] is
+ignored, otherwise @racket[(#,(racket quote) id)] is the name of the
+declared module. For a @tech{submodule}, @racket[id] is the name of
+the submodule to be used as an element within a @racket[submod] module
+path.
 
-@margin-note/ref{For a @racket[module]-like form for use @emph{within}
-modules and other contexts, see @racket[define-package].}
+@margin-note/ref{For a @racket[module]-like form that works in
+definitions context other than the top level or a module body, see
+@racket[define-package].}
 
 The @racket[module-path] form must be as for @racket[require], and it
 supplies the initial bindings for the body @racket[form]s. That is, it
@@ -179,6 +184,13 @@ action depends on the shape of the form:
    is installed immediately, but the right-hand expression is not
    expanded further.}
 
+ @item{If the form is a @racket[module] form, then it is immediately
+   expanded and declared for the extent of the current top-level
+   enclosing module's expansion.}
+
+ @item{If the form is a @racket[module*] form, then it is not
+   expanded further.}
+
  @item{Similarly, if the form is an expression, it is
    not expanded further.}
 
@@ -186,12 +198,20 @@ action depends on the shape of the form:
 
 After all @racket[form]s have been partially expanded this way, then
 the remaining expression forms (including those on the right-hand side
-of a definition) are expanded in an expression context. Finally,
-@racket[#%provide] forms are processed in the order in which they
-appear (independent of @tech{phase}) in the expanded module.
+of a definition) are expanded in an expression context. After all
+expression forms, @racket[#%provide] forms are processed in the order
+in which they appear (independent of @tech{phase}) in the expanded
+module. Finally, all @racket[module*] forms are expanded in order, so
+that each becomes available for use by subsequent @racket[module*]
+forms; the enclosing module itself is also available for use by
+@racket[module*] @tech{submodules}.
 
-The scope of all imported identifiers covers the entire module body,
-as does the scope of any identifier defined within the module body.
+The scope of all imported identifiers covers the entire module body, 
+except for nested @racket[module] and @racket[module*] forms (assuming 
+a non-@racket[#f] @racket[module-path] in the latter case).
+The scope of any identifier defined within the module body similarly
+covers the entire module body except for such nested @racket[module] 
+and @racket[module*] forms.
 The ordering of syntax definitions does not affect the scope of the
 syntax names; a transformer for @racket[A] can produce expressions
 containing @racket[B], while the transformer for @racket[B] produces
@@ -200,17 +220,24 @@ declarations for @racket[A] and @racket[B]. However, a syntactic form
 that produces syntax definitions must be defined before it is used.
 
 No identifier can be imported or defined more than once at any
-@tech{phase level}. Every exported identifier must be imported or
+@tech{phase level} within a single module. Every exported identifier must be imported or
 defined. No expression can refer to a @tech{top-level variable}.
+A @racket[module*] form in which the enclosing module's bindings are visible
+(i.e., a nested @racket[module*] with @racket[#f] instead of a @racket[module-path])
+can define or import bindings that @tech{shadow} the enclosing module's bindings.
 
 The evaluation of a @racket[module] form does not evaluate the
 expressions in the body of the module. Evaluation merely declares a
 module, whose full name depends both on @racket[id] or
 @racket[(current-module-declare-name)].
 
-The module body is executed only when the module is explicitly
+A module body is executed only when the module is explicitly
 @techlink{instantiate}d via @racket[require] or
-@racket[dynamic-require]. On invocation, expressions and definitions
+@racket[dynamic-require]. On invocation, imported modules are
+instantiated in the order in which they are @racket[require]d
+into the module (although earlier instantiations or transitive
+@racket[require]s can trigger the instantiation of a module before
+its order within a given module). Then, expressions and definitions
 are evaluated in order as they appear within the module. Each
 evaluation of an expression or definition is wrapped with a
 continuation prompt (see @racket[call-with-continuation-prompt]) for
@@ -237,7 +264,22 @@ and @racketmodname[racket] languages attach
 @racket['#(racket/language-info get-info #f)] to a @racket[module]
 form. See also @racket[module-compiled-language-info],
 @racket[module->language-info], and
-@racketmodname[racket/language-info].}
+@racketmodname[racket/language-info].
+
+If a @racket[module] form has a single body @racket[form] and if the
+form is a @racket[#%plain-module-begin] form, then the body
+@racket[form] is traversed to find @racket[module] and
+@racket[module*] forms that are either immediate, under
+@racket[begin], or under @racket[begin-for-syntax]. (That is, the 
+body is searched before adding
+any lexical context due to the module's initial @racket[module-path]
+import.) Each such module form is given a @indexed-racket['submodule]
+@tech{syntax property} that whose value is the initial module form.
+Then, when @racket[module] or @racket[module*] is expanded in a
+submodule position, if the form has a @indexed-racket['submodule]
+@tech{syntax property}, the property value is used as the form to
+expand. This protocol avoids the contamination of submodule lexical
+scope when re-expanding @racket[module] forms that contain submodules.
 
 See also @secref["module-eval-model"] and @secref["mod-parse"].
 
@@ -249,12 +291,50 @@ See also @secref["module-eval-model"] and @secref["mod-parse"].
     (unless (zero? n)
       (printf "quack\n")
       (quack (sub1 n)))))
-]
+]}
+
+
+@defform*[((module* id module-path form ...)
+           (module* id #f form ...))]{
+
+@guideintro["submodules"]{@racket[module*]}
+
+Like @racket[module], but only for declaring a @tech{submodule} within
+a module, and for submodules that may @racket[require] the enclosing module.
+
+Instead of a @racket[module-path] after @racket[id], @racket[#f]
+indicates that all bindings from the enclosing module are visible in
+the submodule; @racket[begin-for-syntax] forms that wrap the
+@racket[module*] form shift the @tech{phase level} of the enclosing
+module's bindings relative to the submodule.  When a
+@racket[module*] form has a @racket[module-path], the submodule
+starts with an empty lexical context in the same way as a top-level
+@racket[module] form, and enclosing @racket[begin-for-syntax] forms
+have no effect on the submodule.}
+
+
+@defform[(module+ id form ...)]{
+
+@guideintro["main-and-test"]{@racket[module+]}
+
+Declares and/or adds to a @tech{submodule} named @racket[id].
+
+Each addition for @racket[id] is combined in order to form the entire
+submodule using @racket[(module* id #f ....)] at the end of the
+enclosing module. If there is only one @racket[module+] for a given
+@racket[id], then @racket[(module+ id form ...)] is equivalent to
+@racket[(module* id #f form ...)].
+
+A submodule must not be defined using @racket[module+] @emph{and}
+@racket[module] or @racket[module*]. That is, if a submodule is made
+of @racket[module+] pieces, then it must be made @emph{only} of
+@racket[module+] pieces. }
+
 
 @defform[(#%module-begin form ...)]{
 
 Legal only in a @tech{module begin context}, and handled by the
-@racket[module] form.
+@racket[module] and @racket[module*] forms.
 
 The @racket[#%module-begin] form of @racketmodname[racket/base] wraps
 every top-level expression to print non-@|void-const| results using
@@ -263,7 +343,8 @@ every top-level expression to print non-@|void-const| results using
 @defform[(#%plain-module-begin form ...)]{
 
 Legal only in a @tech{module begin context}, and handled by the
-@racket[module] form.}
+@racket[module] and @racket[module*] forms.}
+
 
 @;------------------------------------------------------------------------
 @section[#:tag '("require" "provide")]{Importing and Exporting: @racket[require] and @racket[provide]}
@@ -273,8 +354,9 @@ Legal only in a @tech{module begin context}, and handled by the
 
 @guideintro["module-require"]{@racket[require]}
 
-@defform/subs[#:literals (only-in prefix-in except-in rename-in lib file planet + - =
-                          for-syntax for-template for-label for-meta only-meta-in combine-in quote)
+@defform/subs[#:literals (only-in prefix-in except-in rename-in lib file planet submod + - =
+                          for-syntax for-template for-label for-meta only-meta-in combine-in 
+                          relative-in quote)
               (require require-spec ...)
               ([require-spec module-path
                              (only-in require-spec id-maybe-renamed ...)
@@ -282,13 +364,18 @@ Legal only in a @tech{module begin context}, and handled by the
                              (prefix-in prefix-id require-spec)
                              (rename-in require-spec [orig-id bind-id] ...)
                              (combine-in require-spec ...)
+                             (relative-in module-path require-spec ...)
                              (only-meta-in phase-level require-spec ...)
                              (for-syntax require-spec ...)
                              (for-template require-spec ...)
                              (for-label require-spec ...)
                              (for-meta phase-level require-spec ...)
                              derived-require-spec]
-               [module-path (#,(racket quote) id)
+               [module-path root-module-path
+                            (submod root-module-path submod-path-element ...)
+                            (submod "." submod-path-element ...)
+                            (submod ".." submod-path-element ...)]
+               [root-module-path (#,(racket quote) id)
                             rel-string
                             (lib rel-string ...+)
                             id
@@ -298,6 +385,8 @@ Legal only in a @tech{module begin context}, and handled by the
                             (planet rel-string
                                     (user-string pkg-string vers)
                                     rel-string ...)]
+               [submod-path-element id
+                                    ".."]
                [id-maybe-renamed id
                                  [orig-id bind-id]]
                [phase-level exact-integer #f]
@@ -325,6 +414,12 @@ particular export of a particular module; the identifier to bind may
 be different from the symbolic name of the originally exported
 identifier. Each identifier also binds at a particular @tech{phase
 level}.
+
+No identifier can be bound multiple times in a given @tech{phase
+level} by an import, unless all of the bindings refer to the same
+original definition in the same module.  In a @tech{module context},
+an identifier can be either imported or defined for a given
+@tech{phase level}, but not both.
 
 The syntax of @racket[require-spec] can be extended via
 @racket[define-require-syntax], and when multiple
@@ -405,6 +500,16 @@ bindings of each @racket[require-spec] are visible for expanding later
     tcp-listen
   ]}
 
+ @defsubform[(relative-in module-path require-spec ...)]{
+  Like the union of the @racket[require-spec]s, but each
+  relative module path in a @racket[require-spec] is treated
+  as relative to @racket[module-path] instead of the enclosing
+  context.
+
+  The @tech{require transformer} that implements @racket[relative-in]
+  sets @racket[current-require-module-path] to adjust module paths
+  in the @racket[require-spec]s.}
+
  @defsubform[(only-meta-in phase-level require-spec ...)]{
   Like the combination of @racket[require-spec]s, but removing any
   binding that is not for @racket[phase-level], where @racket[#f] for
@@ -477,18 +582,23 @@ bindings of each @racket[require-spec] are visible for expanding later
 
 @guideintro["module-paths"]{module paths}
 
-A @racket[module-path] identifies a module, either through a concrete
+A @racket[module-path] identifies a module, either a root module or
+a @tech{submodule} that is declared lexically within another module.
+A root module is identified either through a concrete
 name in the form of an identifier, or through an indirect name that
 can trigger automatic loading of the module declaration. Except for
-the @racket[id] case below, the actual resolution is up to the current
+the @racket[(#,(racket quote) id)] case below, the actual resolution 
+of a root module path is up to the current
 @tech{module name resolver} (see
 @racket[current-module-name-resolver]), and the description below
 corresponds to the default @tech{module name resolver}.
 
  @specsubform[#:literals (quote)
               (#,(racket quote) id)]{
- Refers to a module previously declared interactively with the name
- @racket[id].
+ Refers to a submodule previously declared with the name
+ @racket[id] or a module previously declared interactively with the name
+ @racket[id]. When @racket[id] refers to a submodule, @racket[(#,(racket quote) id)]
+ is equivalent to @racket[(submod "." id)].
 
  @examples[
  (code:comment @#,t{a module declared interactively as @racketidfont{test}:})
@@ -676,11 +786,20 @@ corresponds to the default @tech{module name resolver}.
  (eval:alts (require (planet mcdonald/farm:2:5/duck)) (void))
  ]}
 
-No identifier can be bound multiple times in a given @tech{phase
-level} by an import, unless all of the bindings refer to the same
-original definition in the same module.  In a @tech{module context},
-an identifier can be either imported or defined for a given
-@tech{phase level}, but not both.}
+ @defsubform*[((submod root-module submod-path-element ...)
+               (submod "." submod-path-element ...)
+               (submod ".." submod-path-element ...))]{
+  Identifies a @tech{submodule} within the module specified by @racket[root-module]
+  or relative to the current module in the case of @racket[(submod "." ....)],
+  where  @racket[(submod ".." submod-path-element ...)] is equivalent to
+  @racket[(submod "." ".." submod-path-element ...)].
+  Submodules have symbolic names, and a sequence of identifiers as @racket[submod-path-element]s
+  determine a path of successively nested submodules with the given names.
+  A @racket[".."] as a @racket[submod-path-element] names the enclosing module
+  of a submodule, and it's intended for use in @racket[(submod "." ....)] 
+  and @racket[(submod ".." ....)] forms.}
+
+}
 
 @defform[(local-require require-spec ...)]{
 
@@ -883,7 +1002,13 @@ as follows.
    (define weak-inspector (make-inspector (current-code-inspector)))
    (define (weak-eval x)
      (parameterize ([current-code-inspector weak-inspector])
-       (eval x)))
+       (define weak-ns (make-base-namespace))
+       (namespace-attach-module (current-namespace)
+                                ''nest
+                                weak-ns)
+       (parameterize ([current-namespace weak-ns])
+         (namespace-require ''nest)
+         (eval x))))
    (require 'nest)
    (list num-eggs num-chicks)
    (weak-eval 'num-eggs)
@@ -979,13 +1104,16 @@ multiple symbolic names.}
                                (#,(racketidfont "prefix-all-except") prefix-id 
                                                                      raw-module-path id ...)
                                (#,(racketidfont "rename") raw-module-path local-id exported-id)]
-               [raw-module-path (#,(racketidfont "quote") id)
-                                rel-string
-                                (#,(racketidfont "lib") rel-string ...)
-                                id
-                                (#,(racketidfont "file") string)
-                                (#,(racketidfont "planet") rel-string
-                                                           (user-string pkg-string vers ...))])]{
+               [raw-module-path (#,(racketidfont "submod") raw-root-module-path id ...+)
+                                (#,(racketidfont "submod") "." id ...+)]
+               [raw-root-module-path (#,(racketidfont "quote") id)
+                                    rel-string
+                                    (#,(racketidfont "lib") rel-string ...)
+                                    id
+                                    (#,(racketidfont "file") string)
+                                    (#,(racketidfont "planet") rel-string
+                                                               (user-string pkg-string vers ...))
+                                    literal-path])]{
 
 The primitive import form, to which @racket[require] expands. A
 @racket[raw-require-spec] is similar to a @racket[_require-spec] in a
@@ -1003,7 +1131,14 @@ identifiers in reverse order compared to @racket[rename-in].
 For most @racket[raw-require-spec]s, the lexical context of the
 @racket[raw-require-spec] determines the context of introduced
 identifiers. The exception is the @racketidfont{rename} sub-form,
-where the lexical context of the @racket[local-id] is preserved.}
+where the lexical context of the @racket[local-id] is preserved.
+
+A @racket[literal-path] as a @racket[raw-root-module-path] corresponds
+to a path in the sense of @racket[path?]. Since path values are never
+produced by @racket[read-syntax], they appear only in programmatically
+constructed expressions. They also appear naturally as arguments to
+functions such as @racket[namespace-require], with otherwise take a
+quoted @racket[raw-module-spec].}
 
 
 @defform/subs[(#%provide raw-provide-spec ...)
@@ -1207,7 +1342,7 @@ In other words, the previous method requires only a single unique name.}
 
 Specifies multiple files to be required from a hierarchy of
 directories or collections. The set of required module paths is computed
-as the cartesian product of the @racket[subs] groups, where each
+as the Cartesian product of the @racket[subs] groups, where each
 @racket[sub-path] is combined with other @racket[sub-path]s in order
 using a @litchar{/} separator. A @racket[sub-path] as a @racket[subs]
 is equivalent to @racket[(sub-path)]. All @racket[sub-path]s in a given
@@ -1575,7 +1710,29 @@ will hide the first argument, if one was provided. (Hiding the first
 argument is useful when the procedure implements a method, where the
 first argument is implicit in the original source). The property
 affects only the format of @racket[exn:fail:contract:arity]
-exceptions, not the result of @racket[procedure-arity].}
+exceptions, not the result of @racket[procedure-arity].
+
+When a keyword-accepting procedure is bound to an identifier in
+certain ways, and when the identifier is used in the function position
+of an application form, then the application form may be expanded in
+such a way that the original binding is obscured as the target of the
+application. To help expose the connection between the function
+application and function declaration, an identifier in the expansion
+of the function application is tagged with a @tech{syntax property}
+accessible via @racket[syntax-procedure-alias-property] if it is effectively an alias
+for the original identifier. An identifier in the expansion is tagged with a
+@tech{syntax property} accessible via @racket[syntax-procedure-converted-arguments-property] if it
+is like the original identifier except that the arguments are converted to a
+flattened form: keyword arguments, required by-position arguments,
+by-position optional arguments, and rest arguments---all as required,
+by-position arguments; the keyword arguments are sorted by keyword
+name, each optional keyword argument is followed by a boolean to
+indicate whether a value is provided, and @racket[#f] is used for an
+optional keyword argument whose value is not provided; optional
+by-position arguments include @racket[#f] for each non-provided
+argument, and then the sequence of optional-argument values is
+followed by a parallel sequence of booleans to indicate whether each
+optional-argument value was provided.}
 
 
 @defform/subs[(case-lambda [formals body ...+] ...)
@@ -2388,7 +2545,7 @@ by @racket[make-rename-transformer] or as an instance of a structure
 type with the @racket[prop:rename-transformer] property, then this
 form is expanded by replacing @racket[id] with the target identifier
 (e.g., the one provided to @racket[make-rename-transformer]). If a
-transformer binding has both @racket[prop:set!-transformer] ad
+transformer binding has both @racket[prop:set!-transformer] and
 @racket[prop:rename-transformer] properties, the latter takes
 precedence.
 

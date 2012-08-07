@@ -52,7 +52,8 @@
     (let-values ([(base name dir?)
                   (split-path
                    (resolved-module-path-name
-                    (module-path-index-resolve (syntax-source-module (quote-syntax here)))))])
+                    (module-path-index-resolve 
+                     (syntax-source-module (quote-syntax here)))))])
       (build-path base rel-dir)))
 
   (if (string=? "--setup"
@@ -92,7 +93,7 @@
                         (lambda ()
                           (close-output-port (open-output-file lock-file 'error)))
                         (lambda ()
-                          (namespace-require 'scheme/base)
+                          (namespace-require 'racket/base)
                           (load (build-path here-dir "setup.rkt"))
                           void)
                         (lambda ()

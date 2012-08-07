@@ -1,11 +1,14 @@
 #lang scribble/doc
-@(require "common.rkt")
+@(require "common.rkt"
+          (for-label (only-in ffi/unsafe cpointer?)))
 
 @defclass/title[bitmap% object% ()]{
 
-A @racket[bitmap%] object is a pixel-based image, either
- monochrome, color, or color with an alpha channel. See also
- @racket[make-screen-bitmap] and @xmethod[canvas% make-bitmap].
+A @racket[bitmap%] object is a pixel-based image, either monochrome,
+ color, or color with an alpha channel. See also @racket[make-bitmap],
+ @racket[make-platform-bitmap], @racket[make-screen-bitmap] (from
+ @racketmodname[racket/gui/base]), @xmethod[canvas% make-bitmap] (from
+ @racketmodname[racket/gui/base]), and @secref["Portability"].
 
 A bitmap is convertible to @racket['png-bytes] through the
 @racketmodname[file/convertible] protocol.
@@ -16,12 +19,12 @@ A bitmap is convertible to @racket['png-bytes] through the
                         [monochrome? any/c #f]
                         [alpha? any/c #f])
                        ([in (or/c path-string? input-port?)]
-                        [kind (one-of/c 'unknown 'unknown/mask 'unknown/alpha
-                                        'gif 'gif/mask 'gif/alpha 
-                                        'jpeg 'jpeg/alpha
-                                        'png 'png/mask 'png/alpha
-                                        'xbm 'xbm/alpha 'xpm 'xpm/alpha
-                                        'bmp 'bmp/alpha)
+                        [kind (or/c 'unknown 'unknown/mask 'unknown/alpha
+                                    'gif 'gif/mask 'gif/alpha 
+                                    'jpeg 'jpeg/alpha
+                                    'png 'png/mask 'png/alpha
+                                    'xbm 'xbm/alpha 'xpm 'xpm/alpha
+                                    'bmp 'bmp/alpha)
                               'unknown]
                         [bg-color (or/c (is-a?/c color%) #f) #f]
                         [complain-on-failure? any/c #f])
@@ -30,17 +33,17 @@ A bitmap is convertible to @racket['png-bytes] through the
                         [height exact-positive-integer?]))]{
 
 The @racket[make-bitmap], @racket[make-monochrome-bitmap], and
- @racket[read-bitmap] functions are preferred over using
- @racket[make-object] with @racket[bitmap%], because the functions are
+ @racket[read-bitmap] functions create @racket[bitmap%] instances, but
+ they are also preferred over using @racket[make-object] 
+ with @racket[bitmap%] directly, because the functions are
  less overloaded and they enable alpha channels by default.
-
+ See also @secref["Portability"].
+ 
 When @racket[width] and @racket[height] are provided: Creates a new
  bitmap. If @racket[monochrome?] is true, the bitmap is monochrome; if
  @racket[monochrome?] is @racket[#f] and @racket[alpha?] is true, the
  bitmap has an alpha channel; otherwise, the bitmap is color without
- an alpha channel.
-
-The initial content of the bitmap is ``empty'': all white, and with
+ an alpha channel. The initial content of the bitmap is ``empty'': all white, and with
  zero alpha in the case of a bitmap with an alpha channel.
 
 When @racket[in] is provided: Creates a bitmap from a file format,
@@ -81,6 +84,15 @@ monochrome bitmap and @racket[32] for a color bitmap. See also
 @method[bitmap% is-color?].
 
 }
+
+
+@defmethod[(get-handle) cpointer?]{
+
+Returns a low-level handle to the bitmap content. Currently, on all
+platforms, a handle is a @tt{cairo_surface_t}. For a bitmap created
+with @racket[make-bitmap], the handle is specifically a Cairo
+image surface.}
+
 
 @defmethod[(get-height)
            exact-positive-integer?]{
@@ -148,20 +160,20 @@ Returns @racket[#f] if the bitmap is monochrome, @racket[#t] otherwise.
 }
 
 @defmethod[(load-file [in (or/c path-string? input-port?)]
-                      [kind (one-of/c 'unknown 'unknown/mask 'unknown/alpha
-                                      'gif 'gif/mask 'gif/alpha 
-                                      'jpeg 'jpeg/alpha
-                                      'png 'png/mask 'png/alpha
-                                      'xbm 'xbm/alpha 'xpm 'xpm/alpha
-                                      'bmp 'bmp/alpha)
+                      [kind (or/c 'unknown 'unknown/mask 'unknown/alpha
+                                  'gif 'gif/mask 'gif/alpha 
+                                  'jpeg 'jpeg/alpha
+                                  'png 'png/mask 'png/alpha
+                                  'xbm 'xbm/alpha 'xpm 'xpm/alpha
+                                  'bmp 'bmp/alpha)
                             'unknown]
                       [bg-color (or/c (is-a?/c color%) #f) #f]
                       [complain-on-failure? any/c #f])
            boolean?]{
 
 Loads a bitmap from a file format that read from @racket[in], unless
- the bitmap was produced by @racket[make-screen-bitmap] or 
- @xmethod[canvas% make-bitmap] (in which case @|MismatchExn|).
+ the bitmap was produced by @racket[make-platform-bitmap], @racket[make-screen-bitmap],
+ or @xmethod[canvas% make-bitmap] (in which case @|MismatchExn|).
  If the bitmap is in use by a
  @racket[bitmap-dc%] object or a control, the image data is not
  loaded. The bitmap changes its size and depth to match that of 
@@ -240,7 +252,7 @@ Returns @racket[#t] if the bitmap is valid in the sense that an image
 
 
 @defmethod[(save-file [name (or/c path-string? output-port?)]
-                      [kind (one-of/c 'png 'jpeg 'xbm 'xpm 'bmp)]
+                      [kind (or/c 'png 'jpeg 'xbm 'xpm 'bmp)]
                       [quality (integer-in 0 100) 75])
            boolean?]{
 

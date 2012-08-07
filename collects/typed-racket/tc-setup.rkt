@@ -2,13 +2,13 @@
 
 (require (rename-in "utils/utils.rkt" [infer r:infer])
          (except-in syntax/parse id)
-         racket/pretty
+         racket/pretty racket/promise
          (private type-contract)
          (types utils convenience)
          (typecheck typechecker provide-handling tc-toplevel)
-         (env tvar-env type-name-env type-alias-env)
+         (env tvar-env type-name-env type-alias-env env-req)
          (r:infer infer)
-         (utils tc-utils disarm mutated-vars)
+         (utils tc-utils disarm mutated-vars debug)
          (rep type-rep)
          (except-in (utils utils) infer)
          (only-in (r:infer infer-dummy) infer-param)
@@ -32,12 +32,12 @@
           (do-time "Optimized")))
       body))
 
-(define-syntax-rule (tc-setup orig-stx stx expand-ctxt fully-expanded-stx init checker result . body)
+(define-syntax-rule (tc-setup orig-stx stx expand-ctxt fully-expanded-stx init checker pre-result post-result . body)
   (let ()
     (set-box! typed-context? #t)
     ;(start-timing (syntax-property stx 'enclosing-module-name))
     (with-handlers
-        ([(λ (e) (and (exn:fail? e) (not (exn:fail:syntax? e)) (not (exn:fail:filesystem? e))))
+        (#;[(λ (e) (and (exn:fail? e) (not (exn:fail:syntax? e)) (not (exn:fail:filesystem? e))))
           (λ (e) (tc-error "Internal Typed Racket Error : ~a" e))])
       (parameterize (;; enable fancy printing?
                      [custom-printer #t]
@@ -50,7 +50,7 @@
                      ;; this parameter is just for printing types
                      ;; this is a parameter to avoid dependency issues
                      [current-type-names
-                      (lambda ()
+                      (lazy
                         (append
                          (type-name-env-map (lambda (id ty)
                                               (cons (syntax-e id) ty)))
@@ -58,8 +58,8 @@
                                                (cons (syntax-e id) ty)))))]
                      ;; reinitialize disappeared uses
                      [disappeared-use-todo      null]
-                     [disappeared-bindings-todo null])        
-        (define fully-expanded-stx (disarm* (local-expand stx expand-ctxt null)))
+                     [disappeared-bindings-todo null])
+        (define fully-expanded-stx (disarm* (local-expand stx expand-ctxt (list #'module*))))
         (when (show-input?)
           (pretty-print (syntax->datum fully-expanded-stx)))
         (do-time "Local Expand Done")
@@ -70,6 +70,6 @@
                        [expanded-module-stx fully-expanded-stx]
                        [debugging? #f])
           (do-time "Starting `checker'")
-          (define result (checker fully-expanded-stx))
+          (define-values (pre-result post-result) (checker fully-expanded-stx))
           (do-time "Typechecking Done")
           (let () . body))))))

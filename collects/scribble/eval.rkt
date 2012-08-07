@@ -1,12 +1,14 @@
 #lang racket/base
 
 (require "manual.rkt" "struct.rkt" "scheme.rkt" "decode.rkt"
+         (only-in "core.rkt" content?)
          racket/list
          file/convertible ;; attached into new namespace via anchor
          racket/pretty ;; attached into new namespace via anchor
          racket/sandbox racket/promise racket/port
          racket/gui/dynamic
-         (for-syntax racket/base))
+         (for-syntax racket/base)
+         scribble/text/wrap)
 
 (provide interaction
          interaction0
@@ -38,9 +40,6 @@
 (define maxlen 60)
 
 (define-namespace-anchor anchor)
-
-(namespace-require 'racket/base)
-(namespace-require '(for-syntax racket/base))
 
 (define (literal-string style s)
   (let ([m (regexp-match #rx"^(.*)(  +|^ )(.*)$" s)])
@@ -102,19 +101,17 @@
          (loop #f (cons v (or (add-string string-accum line-accum) null))
                flow-accum)]))))
 
-;; This is probably good to make into some library function at some
-;; point (but in that case will need to improve, eg, wrapped lines
-;; should start at the same indentation level, etc)
 (define (string->wrapped-lines str)
-  (define (wrap-line str)
-    (if ((string-length str) . <= . maxlen)
-      (if (equal? str "") '() (list str))
-      (let* ([m (cond [(regexp-match-positions #px"^.*\\S(\\s+).*" str 0 maxlen)
-                       => cadr]
-                      [else (cons maxlen maxlen)])]
-             [r (wrap-line (substring str (cdr m)))])
-        (if (= 0 (car m)) r (cons (substring str 0 (car m)) r)))))
-  (append-map wrap-line (regexp-split #px"\\s*\n" str)))
+  (apply
+   append
+   (for/list ([line-str (regexp-split #rx"\n" str)])
+     (wrap-line line-str maxlen
+                (λ (word fits)
+                   (if ((string-length word) . > . maxlen)
+                       (values (substring word 0 fits) (substring word fits) #f)
+                       (values #f word #f)))))))
+
+(struct formatted-result (content))
 
 (define (interleave inset? title expr-paras val-list+outputs)
   (let ([lines
@@ -131,7 +128,11 @@
               (cond
                 [(string? (caar val-list+outputs))
                  ;; Error result case:
-                 (map (lambda (s) (car (format-output s error-color)))
+                 (map (lambda (s) 
+                        (define p (format-output s error-color))
+                        (if (null? p)
+                            (list null)
+                            (car p)))
                       (string->wrapped-lines (caar val-list+outputs)))]
                 [(box? (caar val-list+outputs))
                  ;; Output written to a port
@@ -145,9 +146,11 @@
                      (map (lambda (v)
                             (list.flow.list
                              (make-paragraph
-                              (list (elem #:style result-color
-                                          (to-element/no-color
-                                           v #:expr? (print-as-expression)))))))
+                              (list (if (formatted-result? v)
+                                        (formatted-result-content v)
+                                        (elem #:style result-color
+                                              (to-element/no-color
+                                               v #:expr? (print-as-expression))))))))
                           val-list)))])
               (loop (cdr expr-paras) (cdr val-list+outputs) #f))))])
     (if inset?
@@ -167,6 +170,25 @@
           [else (loop ((car ops) s) (cdr ops))])))
 
 (struct nothing-to-eval ())
+
+(struct eval-results (contents out err))
+(define (make-eval-results contents out err)
+  (unless (and (list? contents)
+               (andmap content? contents))
+    (raise-argument-error 'eval:results "(listof content?)" contents))
+  (unless (string? out)
+    (raise-argument-error 'eval:results "string?" out))
+  (unless (string? err)
+    (raise-argument-error 'eval:results "string?" err))
+  (eval-results contents out err))
+(define (make-eval-result content out err)
+  (unless (content? content)
+    (raise-argument-error 'eval:result "content?" content))
+  (unless (string? out)
+    (raise-argument-error 'eval:result "string?" out))
+  (unless (string? err)
+    (raise-argument-error 'eval:result "string?" err))
+  (eval-results (list content) out err))
 
 (define (extract-to-evaluate s)
   (let loop ([s s] [expect #f])
@@ -233,10 +255,14 @@
           (raise-syntax-error 'eval "example result check failed" s))))
     r)
   (lambda (str)
-    (let-values ([(s expect) (extract-to-evaluate str)])
-      (if (nothing-to-eval? s)
-        (values (list (list (void)) "" ""))
-        (do-ev/expect s expect)))))
+    (if (eval-results? str)
+        (list (map formatted-result (eval-results-contents str))
+              (eval-results-out str)
+              (eval-results-err str))
+        (let-values ([(s expect) (extract-to-evaluate str)])
+          (if (nothing-to-eval? s)
+              (list (list (void)) "" "")
+              (do-ev/expect s expect))))))
 
 ;; Since we evaluate everything in an interaction before we typeset,
 ;;  copy each value to avoid side-effects.
@@ -372,17 +398,30 @@
                     (syntax-case s (module)
                       [(module . _rest) (syntax->datum s)]
                       [_else s])]
-                   [(bytes? s) `(begin ,s)]
-                   [(string? s) `(begin ,s)]
+                   ;; a sandbox treats strings and byte strings as code
+                   ;; streams, so protect them as syntax objects:
+                   [(string? s) (datum->syntax #f s)]
+                   [(bytes? s) (datum->syntax #f s)]
                    [else s]))))
         list)))
 
-;; Quote an expression to be evaluated:
-(define-syntax-rule (quote-expr e) 'e)
-;; This means that sandbox evaluation always works on sexprs, to get
-;; it to work on syntaxes, use this definition:
-;;   (require syntax/strip-context)
-;;   (define-syntax-rule (quote-expr e) (strip-context (quote-syntax e)))
+;; Quote an expression to be evaluated or wrap as escaped:
+(define-syntax quote-expr
+  (syntax-rules (eval:alts eval:result eval:results)
+    [(_ (eval:alts e1 e2)) (quote-expr e2)]
+    [(_ (eval:result e)) (make-eval-result (list e) "" "")]
+    [(_ (eval:result e out)) (make-eval-result (list e) out "")]
+    [(_ (eval:result e out err)) (make-eval-result (list e) out err)]
+    [(_ (eval:results es)) (make-eval-results es "" "")]
+    [(_ (eval:results es out)) (make-eval-results es out "")]
+    [(_ (eval:results es out err)) (make-eval-results es out err)]
+    [(_ e)
+     ;; Using quote means that sandbox evaluation works on
+     ;; sexprs; to get it to work on syntaxes, use
+     ;;   (strip-context (quote-syntax e)))
+     ;; while importing
+     ;;   (require syntax/strip-context)
+     'e]))
 
 (define (do-interaction-eval ev e)
   (let-values ([(e expect) (extract-to-evaluate e)])

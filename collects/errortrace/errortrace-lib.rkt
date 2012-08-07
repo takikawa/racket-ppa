@@ -40,21 +40,56 @@
                    (#%variable-reference)))
 (define (disarm stx)
   (syntax-disarm stx code-insp))
-    
-(define (add-test-coverage-init-code stx)
+
+(define (transform-all-modules stx proc [in-mod-id (namespace-module-identifier)])
   (syntax-case stx ()
     [(mod name init-import mb)
      (syntax-case (disarm #'mb) (#%plain-module-begin)
-       [(#%plain-module-begin b1 body ...)
-        (copy-props
-         stx
-         #`(#,(namespace-module-identifier) name init-import
-            #,(syntax-rearm
-               #`(#%plain-module-begin
-                  b1 ;; the requires that were introduced earlier
-                  (#%plain-app init-test-coverage '#,(remove-duplicates test-coverage-state))
-                  body ...)
-               #'mb)))])]))
+       [(#%plain-module-begin body ...)
+        (let ()
+          (define ((handle-top-form phase) expr)
+            (syntax-case* (disarm expr) (begin-for-syntax module module*) 
+                          (lambda (a b)
+                            (free-identifier=? a b phase 0))
+              [(begin-for-syntax body ...)
+               (syntax-rearm
+                #`(begin-for-syntax
+                   #,@(map (handle-top-form (add1 phase)) 
+                           (syntax->list #'(body ...))))
+                expr)]
+              [(module . _)
+               (transform-all-modules expr proc #f)]
+              [(module* . _)
+               (transform-all-modules expr proc #f)]
+              [else expr]))
+          (define mod-id (or in-mod-id #'mod))
+          (proc
+           (copy-props
+            stx
+            #`(#,mod-id name init-import
+                        #,(syntax-rearm
+                           #`(#%plain-module-begin
+                              . #,(map (handle-top-form 0) (syntax->list #'(body ...))))
+                           #'mb)))
+           mod-id))])]))
+    
+(define (add-test-coverage-init-code stx)
+  (transform-all-modules
+   stx
+   (lambda (stx mod-id)
+     (syntax-case stx ()
+       [(mod name init-import mb)
+        (syntax-case (disarm #'mb) (#%plain-module-begin)
+          [(#%plain-module-begin b1 body ...)
+           (copy-props
+            stx
+            #`(#,mod-id name init-import
+               #,(syntax-rearm
+                  #`(#%plain-module-begin
+                     b1 ;; the requires that were introduced earlier
+                     (#%plain-app init-test-coverage '#,(remove-duplicates test-coverage-state))
+                     body ...)
+                  #'mb)))])]))))
 
 (define (annotate-covered-file filename-path [display-string #f])
   (annotate-file filename-path
@@ -352,7 +387,7 @@
               [line (syntax-line stx)]
               [col (syntax-column stx)]
               [pos (syntax-position stx)])
-         (fprintf p "~a~a: ~.s\n"
+         (fprintf p "\n   ~a~a: ~.s"
                   (or file "[unknown source]")
                   (cond [line (format ":~a:~a" line col)]
                         [pos (format "::~a" pos)]
@@ -408,23 +443,25 @@
                                (namespace-base-phase)))
        (if (eq? (syntax-e #'name) 'errortrace-key)
            top-e
-           (let ([top-e (expand-syntax top-e)])
+           (let ([top-e (normal (expand-syntax top-e))])
              (initialize-test-coverage)
-             (syntax-case top-e (#%plain-module-begin)
-               [(mod name init-import mb)
-                (syntax-case (disarm #'mb) (#%plain-module-begin)
-                  [(#%plain-module-begin body ...)
-                   (let ([meta-depth ((count-meta-levels 0) #'(begin body ...))])
-                     (add-test-coverage-init-code
-                      (normal
-                       (copy-props
-                        top-e
-                        #`(#,(namespace-module-identifier) name init-import
-                           #,(syntax-rearm
-                              #`(#%plain-module-begin
-                                 #,(generate-key-imports meta-depth)
-                                 body ...)
-                              #'mb))))))])])))]
+             (add-test-coverage-init-code
+              (transform-all-modules 
+               top-e
+               (lambda (top-e mod-id)
+                 (syntax-case top-e ()
+                   [(mod name init-import mb)
+                    (syntax-case (disarm #'mb) (#%plain-module-begin)
+                      [(#%plain-module-begin body ...)
+                       (let ([meta-depth ((count-meta-levels 0) #'(begin body ...))])
+                         (copy-props
+                          top-e
+                          #`(#,mod-id name init-import
+                                      #,(syntax-rearm
+                                         #`(#%plain-module-begin
+                                            #,(generate-key-imports meta-depth)
+                                            body ...)
+                                         #'mb))))])]))))))]
       [_else
        (let ([e (normal top-e)])
          (let ([meta-depth ((count-meta-levels 0) e)])
@@ -436,7 +473,8 @@
                       
 (define (make-errortrace-compile-handler)
   (let ([orig (current-compile)]
-        [reg (namespace-module-registry (current-namespace))])
+        [reg (namespace-module-registry (current-namespace))]
+        [phase (namespace-base-phase (current-namespace))])
     (namespace-attach-module (namespace-anchor->namespace orig-namespace) 'racket/base)
     (namespace-attach-module (namespace-anchor->namespace orig-namespace) 'errortrace/errortrace-key)
     (lambda (e immediate-eval?)
@@ -444,6 +482,8 @@
        (if (and (instrumenting-enabled)
                 (eq? reg
                      (namespace-module-registry (current-namespace)))
+                (equal? phase
+                        (namespace-base-phase (current-namespace)))
                 (not (compiled-expression? (if (syntax? e)
                                                (syntax-e e)
                                                e))))
@@ -464,7 +504,7 @@
       (if (exn? exn)
           (let ([p (open-output-string)])
             (display (exn-message exn) p)
-            (newline p)
+            (display "\n  errortrace...:" p)
             (print-error-trace p exn)
             (orig (get-output-string p) exn))
           (orig msg exn)))))

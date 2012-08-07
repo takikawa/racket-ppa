@@ -12,9 +12,10 @@
              define-struct/derived
              struct-field-index
              struct-copy
-             (for-syntax 
-	      (rename checked-struct-info-rec? checked-struct-info?)))
-  
+             define/generic
+             (for-syntax
+              (rename checked-struct-info-rec? checked-struct-info?)))
+
   (define-values-for-syntax
     (struct:struct-auto-info 
      make-struct-auto-info 
@@ -40,17 +41,17 @@
                       (lambda (v stx)
                         (raise-syntax-error
                          #f
-                         "identifier for static struct-type information cannot be used as an expression"
+                         "bad syntax;\n identifier for static struct-type information cannot be used as an expression"
                          stx))
                       null
                       (lambda (proc autos info)
                         (if (and (procedure? proc)
                                  (procedure-arity-includes? proc 0))
                             (values proc autos)
-                            (raise-type-error 'make-struct-info
-                                              "procedure (arity 0)"
-                                              proc)))))
-
+                            (raise-argument-error 'make-struct-info
+                                                  "(procedure-arity-includes/c 0)"
+                                                  proc)))))
+  
   (define-for-syntax (self-ctor-transformer orig stx)
     (define (transfer-srcloc orig stx)
       (datum->syntax orig (syntax-e orig) stx orig))
@@ -90,19 +91,23 @@
   (define (check-struct-type name what)
     (when what
       (unless (struct-type? what)
-        (raise-type-error name "struct-type or #f" what)))
+        (raise-argument-error name "(or/c struct-type? #f)" what)))
     what)
 
   (define (check-inspector name what)
     (when what
       (unless (inspector? what)
-        (raise-type-error name "inspector or #f" what)))
+        (raise-argument-error name "(or/c inspector? #f)" what)))
     what)
 
   (define (check-reflection-name name what)
     (unless (symbol? what)
-      (raise-type-error name "symbol" what))
+      (raise-argument-error name "symbol?" what))
     what)
+
+  (define-syntax-parameter define/generic
+    (lambda (stx)
+      (raise-syntax-error 'define/generic "only allowed inside methods" stx)))
 
   (define-syntax (define-struct* stx)
     (syntax-case stx ()
@@ -148,7 +153,7 @@
                        (not (keyword? (syntax-e (car nps)))))
             (raise-syntax-error
              #f
-             (format "expected ~a ~a~a after keyword~a"
+             (format "bad syntax;\n expected ~a ~a~a after keyword~a"
                      orig-n
                      (or what "expression")
                      (if (= orig-n 1) "" "s")
@@ -198,7 +203,7 @@
         [_else
          (raise-syntax-error
           #f
-          "expected a field identifier or a parenthesized identifier and field-specification sequence"
+          "bad syntax;\n expected a field identifier or a parenthesized identifier and field-specification sequence"
           stx
           f)]))
 
@@ -239,8 +244,9 @@
             (raise-syntax-error
              #f
              (string-append
-              "#:super specification disallowed because a struct supertype id"
-              " was supplied with the struct type id")
+              "bad syntax;\n"
+              " #:super specification disallowed because a struct supertype id was\n"
+              " supplied with the struct type id")
              stx
              (car p)))
           (loop (cddr p)
@@ -268,6 +274,59 @@
                                (cons (cons (cadr p) (caddr p))
                                      (lookup config '#:props)))
                 nongen?)]
+         [(eq? '#:methods (syntax-e (car p)))
+          ;; #:methods gen:foo [(define (meth1 x ...) e ...) ...]
+          ;; `gen:foo' is bound to (prop:foo generic ...)
+          (define (build-method-table gen specs mthds) ; mthds is syntax
+            (with-syntax ([(generic ...)
+                           specs]
+                          [(mthd-generic ...)
+                           (map (λ (g) (datum->syntax mthds (syntax->datum g)))
+                                specs)])
+              (quasisyntax/loc gen
+                (let ([mthd-generic #f]
+                      ...)
+                  (syntax-parameterize
+                   ([define/generic
+                      (lambda (stx)
+                        (syntax-case stx (mthd-generic ...)
+                          [(_ new-name mthd-generic)
+                           (syntax/loc stx
+                             (define new-name generic))]
+                          ...
+                          [(_ new-name method-name)
+                           (raise-syntax-error 'define/generic
+                             (format "~.s not a method of ~.s"
+                                     (syntax->datum #'method-name)
+                                     '#,gen)
+                             stx
+                             #'method-name)]))])
+                   (let ()
+                     #,@mthds
+                     (vector mthd-generic ...)))))))
+          (define gen:foo (cadr p))
+          (define (bad-generics)
+            (raise-syntax-error #f
+                                "not a name for a generics group"
+                                gen:foo gen:foo))
+          (unless (identifier? gen:foo) (bad-generics))
+          (define gen:foo-val (syntax-local-value gen:foo))
+          (unless (and (list? gen:foo-val)
+                       (>= (length gen:foo-val) 1))
+            (bad-generics))
+          (define prop:foo    (car gen:foo-val))
+          (define meth-specs  (cdr gen:foo-val))
+          (unless (and (identifier? prop:foo)
+                       (list? meth-specs)
+                       (andmap identifier? meth-specs))
+            (bad-generics))
+          (define meths       (caddr p))
+          (loop (cons #'#:property
+                      (cons prop:foo
+                            (cons (build-method-table gen:foo meth-specs meths)
+                                  (cdddr p)))) ; post #:generics args
+                config
+                nongen?)]
          [(eq? '#:inspector (syntax-e (car p)))
           (check-exprs 1 p #f)
           (when (lookup config '#:inspector)
@@ -286,7 +345,7 @@
               (eq? '#:extra-constructor-name (syntax-e (car p))))
           (check-exprs 1 p "identifier")
           (when (lookup config '#:constructor-name)
-            (bad "multiple" "#:constructor-name or #:extra-constructor-name keys" (car p)))
+            (bad "multiple" "#:constructor-name or #:extra-constructor-name" "s" (car p)))
           (unless (identifier? (cadr p))
             (bad "need an identifier after" (car p) (cadr p)))
           (loop (cddr p)
@@ -344,7 +403,7 @@
                            [else
                             (raise-syntax-error 
                              #f
-                             "bad syntax; expected <id> for structure-type name or (<id> <id>) for name and supertype name"
+                             "bad syntax;\n expected <id> for structure-type name or (<id> <id>) for name and supertype\n name"
                              stx
                              #'id)]))])
          (let-values ([(super-info super-autos super-info-checked?)
@@ -360,8 +419,7 @@
 				  #f
 				  (format "parent struct type not defined~a"
 					  (if v
-					      (format " (~a does not name struct type information)"
-						      (syntax-e super-id))
+					      ";\n identifier does not name struct type information"
 					      ""))
 				  stx
 				  super-id)))
@@ -623,7 +681,7 @@
                      (andmap identifier? (syntax->list #'id)))))
        (raise-syntax-error
         #f
-        "bad syntax; expected <id> for structure-type name or (<id> <id>) for name and supertype name"
+        "bad syntax;\n expected <id> for structure-type name or (<id> <id>) for name and supertype\n name"
         stx
         #'id)]
       [(_ _ id (field ...) . _)
@@ -636,13 +694,13 @@
       [(_ _ id fields . _)
        (raise-syntax-error
         #f
-        "bad syntax; expected a parenthesized sequence of field descriptions"
+        "bad syntax;\n expected a parenthesized sequence of field descriptions"
         stx
         #'fields)]
       [(_ _ id)
        (raise-syntax-error
         #f
-        "bad syntax; missing fields"
+        "bad syntax;\n missing fields"
         stx)]
       [_
        (raise-syntax-error
@@ -680,7 +738,10 @@
                                                   #'field))]
                            [_
                             (raise-syntax-error #f
-                                                "expected a field update of the form (<field-id> <expr>) or (<field-id> #:parent <parent-id> <expr>)"
+                                                (string-append
+                                                 "bad syntax;\n"
+                                                 " expected a field update of the form (<field-id> <expr>)\n"
+                                                 " or (<field-id> #:parent <parent-id> <expr>)")
                                                 stx
                                                 an)]))
                        ans)
@@ -795,6 +856,6 @@
                                   (lambda (field) (or (new-binding-for field) 
                                                       #`(#,field the-struct)))
                                   (reverse accessors))))
-                           (raise-type-error 'form-name 
-                                             #,(format "~a" (syntax-e #'info))
-                                             the-struct)))))))]))))
+                           (raise-argument-error 'form-name 
+                                                 #,(format "~a?" (syntax-e #'info))
+                                                 the-struct)))))))]))))

@@ -19,10 +19,15 @@ This file defines two sorts of primitives. All of them are provided into any mod
 |#
 
 
-(provide (except-out (all-defined-out) dtsi* let-internal: define-for-variants define-for*-variants with-handlers: for/annotation for*/annotation define-for/sum:-variants)
+(provide (except-out (all-defined-out) dtsi* let-internal: define-for-variants define-for*-variants 
+                     with-handlers: for/annotation for*/annotation define-for/sum:-variants
+                     -lambda -define)
          :
          (rename-out [define-typed-struct define-struct:]
                      [lambda: λ:]
+                     [-lambda lambda]
+                     [-lambda λ]
+                     [-define define]
                      [with-handlers: with-handlers]
                      [define-typed-struct/exec define-struct/exec:]
                      [for/annotation for]
@@ -34,30 +39,36 @@ This file defines two sorts of primitives. All of them are provided into any mod
          (rename-in racket/contract/base [-> c->] [case-> c:case->])
          "base-types.rkt"
          "base-types-extra.rkt"
-         racket/flonum ; for for/flvector and for*/flvector
-         mzlib/etc
+         racket/flonum ; for for/flvector and for*/flvector         
          (for-syntax
+          unstable/lazy-require
           syntax/parse
           racket/syntax
           racket/base
           racket/struct-info
           syntax/struct
-          "../rep/type-rep.rkt"
           "annotate-classes.rkt"
           "internal.rkt"
           "../utils/tc-utils.rkt"
-          "../env/type-name-env.rkt"
           "for-clauses.rkt")
          "../types/numeric-predicates.rkt")
 (provide index?) ; useful for assert, and racket doesn't have it
+
+(begin-for-syntax 
+  (lazy-require ["../rep/type-rep.rkt" (make-Opaque)]
+                [syntax/define (normalize-definition)]))
 
 (define-for-syntax (ignore stx) (syntax-property stx 'typechecker:ignore #t))
 
 ;; dynamically loaded b/c they're only used at the top-level, so we save a lot
 ;; of loading by not having them when we're in a module
 (define-for-syntax (parse-type stx) ((dynamic-require 'typed-racket/private/parse-type 'parse-type) stx))
-(define-for-syntax (type->contract stx) ((dynamic-require 'typed-racket/private/type-contract 'type->contract) stx))
-
+(define-for-syntax type->contract
+  (make-keyword-procedure
+   (lambda (kws kw-args . rest)
+     (keyword-apply
+      (dynamic-require 'typed-racket/private/type-contract 'type->contract)
+      kws kw-args rest))))
 
 (define-syntaxes (require/typed-legacy require/typed)
  (let ()
@@ -150,6 +161,21 @@ This file defines two sorts of primitives. All of them are provided into any mod
                                   'typechecker:ignore #t)))))]))
   (values (r/t-maker #t) (r/t-maker #f))))
 
+(define-syntax-rule (require/typed/provide lib [nm t] ...)
+  (begin
+    (require/typed lib [nm t] ...)
+    (provide nm ...)))
+
+(define-syntax require-typed-struct/provide
+  (syntax-rules ()
+    [(_ (nm par) . rest)
+     (begin (require-typed-struct (nm par) . rest)
+            (provide (struct-out nm)))]
+    [(_ nm . rest)
+     (begin (require-typed-struct nm . rest)
+            (provide (struct-out nm)))]))
+
+
 (define-syntax (define-predicate stx)
   (syntax-parse stx
     [(_ name:id ty:expr)
@@ -182,7 +208,8 @@ This file defines two sorts of primitives. All of them are provided into any mod
     (pattern #:name-exists))
   (syntax-parse stx
     [(_ ty:id pred:id lib (~optional ne:name-exists-kw) ...)
-     (register-type-name #'ty (make-Opaque #'pred (syntax-local-certifier)))
+     ((dynamic-require 'typed-racket/env/type-name-env 'register-type-name)
+      #'ty (make-Opaque #'pred (syntax-local-certifier)))
      (with-syntax ([hidden (generate-temporary #'pred)])
        (quasisyntax/loc stx
          (begin
@@ -265,7 +292,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
 (define-syntax (lambda: stx)
   (syntax-parse stx
     [(lambda: formals:annotated-formals . body)
-     (syntax/loc stx (lambda formals.ann-formals . body))]))
+     (syntax/loc stx (-lambda formals.ann-formals . body))]))
 
 (define-syntax (case-lambda: stx)
   (syntax-parse stx
@@ -275,7 +302,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
 (define-syntax (opt-lambda: stx)
   (syntax-parse stx
     [(opt-lambda: formals:opt-lambda-annotated-formals . body)
-     (syntax/loc stx (opt-lambda formals.ann-formals . body))]))
+     (syntax/loc stx (-lambda formals.ann-formals . body))]))
 
 (define-syntaxes (let-internal: let*: letrec:)
   (let ([mk (lambda (form)
@@ -394,7 +421,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
        (syntax-parse stx
          [(_ vars:maybe-type-vars nm:struct-name/new (fs:fld-spec ...) . opts)
           (let ([mutable (mutable? #'opts)]
-                [cname (datum->syntax #f (syntax-e #'nm.name))])
+                [cname (datum->syntax #f (format-symbol "make-~a" (syntax-e #'nm.name)))])
             (with-syntax ([d-s (syntax-property (quasisyntax/loc stx
                                                   (struct #,@(attribute nm.new-spec) (fs.fld ...)
                                                           #:extra-constructor-name #,cname
@@ -828,6 +855,20 @@ This file defines two sorts of primitives. All of them are provided into any mod
        [(_ (~var k (param-annotated-name (lambda (s) #`(#,s -> (U))))) . body)
 	(quasisyntax/loc stx (#,l/c k.ann-name . body))]))
     (values (mk #'let/cc) (mk #'let/ec))))
+
+;; annotation to help tc-expr pick out keyword functions
+(define-syntax (-lambda stx)
+  (syntax-parse stx
+    [(_ formals . body)
+     (define d (datum->syntax stx `(,#'λ ,#'formals . ,#'body)
+                              stx stx))
+     (syntax-property d 'kw-lambda #t)]))
+
+;; do this ourselves so that we don't get the static bindings,
+;; which are harder to typecheck
+(define-syntax (-define stx)
+  (define-values (i b) (normalize-definition stx #'-lambda #t #t))
+  (datum->syntax stx `(,#'define ,i ,b) stx stx))
 
 (define-syntax (with-asserts stx)
   (define-syntax-class with-asserts-clause

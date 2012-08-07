@@ -1,9 +1,9 @@
-#lang scheme/base
+#lang racket/base
 
 (require "../utils/utils.rkt"
          (rep type-rep rep-utils)
          (types union subtype resolve convenience utils)
-         racket/match mzlib/trace)
+         racket/match)
 
 (provide (rename-out [*remove remove]) overlap)
 
@@ -60,11 +60,16 @@
          [(list (Pair: a b) (Pair: a* b*))
           (and (overlap a a*)
                (overlap b b*))]
+         ;; lots of things are sequences
+         [(list (Sequence: _) _) #t]
+         [(list _ (Sequence: _)) #t]
          [(or (list (Pair: _ _) _)
               (list _ (Pair: _ _)))
           #f]
-         [(or (list (Value: '()) (Struct: n _ flds _ _ _ _ _))
-              (list (Struct: n _ flds _ _ _ _ _) (Value: '())))
+         [(or (list (Value: (? (λ (e) (or (null? e) (symbol? e) (number? e) (boolean? e) (pair? e) (keyword? e)))))
+                    (Struct: n _ flds _ _ _ _ _))
+              (list (Struct: n _ flds _ _ _ _ _) 
+                    (Value: (? (λ (e) (or (null? e) (symbol? e) (number? e) (boolean? e) (pair? e) (keyword? e)))))))
           #f]
          [(list (Struct: n _ flds _ _ _ _ _)
                 (Struct: n* _ flds* _ _ _ _ _)) (=> nevermind)

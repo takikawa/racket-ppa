@@ -61,7 +61,7 @@ In more detail, patterns match as follows:
        (match '(1 2 3)
          [(list a b a) (list a b)]
          [(list a b c) (list c b a)])
-       (match '(1 '(x y z) 1)
+       (match '(1 (x y z) 1)
          [(list a b a) (list a b)]
          [(list a b c) (list c b a)])
        ]}
@@ -315,7 +315,7 @@ In more detail, patterns match as follows:
 
  @item{@racket[(#,(racketidfont "app") _expr _pat)] --- applies
        @racket[_expr] to the value to be matched; the result of the
-       application is matched againt @racket[_pat].
+       application is matched against @racket[_pat].
 
        @examples[
        #:eval match-eval

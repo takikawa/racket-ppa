@@ -116,13 +116,17 @@
   scheme_extension_table->scheme_wrong_count_m = scheme_wrong_count_m;
   scheme_extension_table->scheme_case_lambda_wrong_count = scheme_case_lambda_wrong_count;
   scheme_extension_table->scheme_wrong_type = scheme_wrong_type;
+  scheme_extension_table->scheme_wrong_contract = scheme_wrong_contract;
   scheme_extension_table->scheme_wrong_field_type = scheme_wrong_field_type;
+  scheme_extension_table->scheme_wrong_field_contract = scheme_wrong_field_contract;
   scheme_extension_table->scheme_arg_mismatch = scheme_arg_mismatch;
+  scheme_extension_table->scheme_contract_error = scheme_contract_error;
   scheme_extension_table->scheme_wrong_return_arity = scheme_wrong_return_arity;
   scheme_extension_table->scheme_unbound_global = scheme_unbound_global;
   scheme_extension_table->scheme_dynamic_wind = scheme_dynamic_wind;
   scheme_extension_table->scheme_make_type = scheme_make_type;
   scheme_extension_table->scheme_get_type_name = scheme_get_type_name;
+  scheme_extension_table->scheme_get_type_name_or_null = scheme_get_type_name_or_null;
   scheme_extension_table->scheme_eof = scheme_eof;
   scheme_extension_table->scheme_make_eof = scheme_make_eof;
   scheme_extension_table->scheme_null = scheme_null;
@@ -369,6 +373,7 @@
   scheme_extension_table->scheme_make_offset_cptr = scheme_make_offset_cptr;
   scheme_extension_table->scheme_make_external_cptr = scheme_make_external_cptr;
   scheme_extension_table->scheme_make_offset_external_cptr = scheme_make_offset_external_cptr;
+  scheme_extension_table->scheme_is_cpointer = scheme_is_cpointer;
   scheme_extension_table->scheme_get_proc_name = scheme_get_proc_name;
   scheme_extension_table->scheme_utf8_decode = scheme_utf8_decode;
   scheme_extension_table->scheme_utf8_decode_as_prefix = scheme_utf8_decode_as_prefix;
@@ -531,6 +536,7 @@
   scheme_extension_table->scheme_build_path = scheme_build_path;
   scheme_extension_table->scheme_path_to_directory_path = scheme_path_to_directory_path;
   scheme_extension_table->scheme_path_to_complete_path = scheme_path_to_complete_path;
+  scheme_extension_table->scheme_simplify_path = scheme_simplify_path;
   scheme_extension_table->scheme_make_path = scheme_make_path;
   scheme_extension_table->scheme_make_sized_path = scheme_make_sized_path;
   scheme_extension_table->scheme_make_sized_offset_path = scheme_make_sized_offset_path;
@@ -589,6 +595,7 @@
   scheme_extension_table->scheme_namespace_require = scheme_namespace_require;
   scheme_extension_table->scheme_is_module_path = scheme_is_module_path;
   scheme_extension_table->scheme_datum_to_kernel_stx = scheme_datum_to_kernel_stx;
+  scheme_extension_table->scheme_module_is_declared = scheme_module_is_declared;
   scheme_extension_table->scheme_intern_symbol = scheme_intern_symbol;
   scheme_extension_table->scheme_intern_exact_symbol = scheme_intern_exact_symbol;
   scheme_extension_table->scheme_intern_exact_char_symbol = scheme_intern_exact_char_symbol;
@@ -670,10 +677,12 @@
   scheme_extension_table->scheme_check_proc_arity2 = scheme_check_proc_arity2;
   scheme_extension_table->scheme_make_provided_string = scheme_make_provided_string;
   scheme_extension_table->scheme_make_args_string = scheme_make_args_string;
+  scheme_extension_table->scheme_make_arg_lines_string = scheme_make_arg_lines_string;
   scheme_extension_table->scheme_system_library_subpath = scheme_system_library_subpath;
   scheme_extension_table->scheme_signal_received = scheme_signal_received;
   scheme_extension_table->scheme_signal_received_at = scheme_signal_received_at;
   scheme_extension_table->scheme_get_signal_handle = scheme_get_signal_handle;
+  scheme_extension_table->scheme_wait_until_signal_received = scheme_wait_until_signal_received;
   scheme_extension_table->scheme_char_strlen = scheme_char_strlen;
   scheme_extension_table->scheme_stx_extract_marks = scheme_stx_extract_marks;
   scheme_extension_table->scheme_get_place_id = scheme_get_place_id;

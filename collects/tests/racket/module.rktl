@@ -140,6 +140,9 @@
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Check namespace-attach-module:
 
+(require (only-in scheme/base)
+         (only-in mzscheme))
+
 (let* ([n (make-empty-namespace)]
        [l null]
        [here (lambda (v)
@@ -179,7 +182,7 @@
     (test '(d b c) values l)
     (eval `(module f mzscheme
 	     (,here 'f)
-	     (require 'b 'e)))
+	     (require 'e 'b)))
     (test '(d b d b c) values l)
     (eval `(require 'f))
     (let ([finished '(f b e  a d b  d b d b c)])
@@ -272,7 +275,6 @@
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Test `require' scoping
-
 
 (module fake-prefix-in scheme
   (require scheme/require-syntax)
@@ -389,6 +391,9 @@
 (test #t module-path? "x/.")
 (test #t module-path? "x/..")
 
+(test #t module-path? (collection-file-path "module.rktl" "tests" "racket"))
+(test #t module-path? (string->path "x"))
+
 (test #t module-path? 'hello)
 (test #f module-path? 'hello/)
 (test #f module-path? 'hello.rkt)
@@ -466,6 +471,27 @@
 (test #t module-path? '(planet "foo%2e.rkt" ("robby%2e" "redex%2e.plt") "sub%2e" "%2edeeper"))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; check `relative-in'
+
+(let ([check
+       (lambda (path)
+         (parameterize ([current-namespace (make-base-namespace)])
+           (eval
+            `(module relative-in-test racket/base
+               (require ,path)
+               (provide x)
+               (define x (string-join '("a" "b" "c") "."))))
+           (test "a.b.c" dynamic-require ''relative-in-test 'x)))])
+  (check 'racket/string)
+  (check '(relative-in racket/delay "string.rkt"))
+  (check '(relative-in racket "string.rkt"))
+  (check '(relative-in (lib "racket/main.rkt") "string.rkt"))
+  (check '(relative-in (lib "racket") "string.rkt"))
+  (check '(relative-in (lib "main.rkt" "racket") "string.rkt"))
+  (check `(relative-in ,(collection-file-path "delay.rkt" "racket") "string.rkt"))
+  (check '(relative-in racket (relative-in "private/reqprov.rkt" "../string.rkt"))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; check collection-path details
 
 (test-values '(not there) (lambda ()
@@ -502,7 +528,7 @@
            (read-syntax path
                         (open-input-string "#lang tests/racket (provide x) (define x 1)"
                                            path)))
-          ((current-module-name-resolver) (current-module-declare-name))))
+          ((current-module-name-resolver) (current-module-declare-name) #f)))
       (test '#(tests/racket/lang/getinfo get-info closure-data)
             module->language-info 'tests/racket/langm))))
 
@@ -590,7 +616,8 @@
   (map 
    eval
    '((module service racket
-       (#%module-begin))
+       (#%module-begin
+        (module s racket/base)))
      
      (module good-client racket
        (#%module-begin
@@ -610,7 +637,24 @@
          (rename-in racket/base
                     [quote dynamic-in]))
         (require
-         (rename-in (dynamic-in service))))))))
+         (rename-in (dynamic-in service)))))
+     
+     (module submodule-good-client racket
+       (#%module-begin
+        (require
+         (rename-in racket/base
+                    [quote dynamic-in]))
+        (require
+         (rename-in (submod (dynamic-in service) s)))))
+     
+     (module another-submodule-good-client racket
+       (#%module-begin
+        (require
+         (rename-in racket/base
+                    [quote dynamic-in]
+                    [submod alt:submod]))
+        (require
+         (rename-in (alt:submod (dynamic-in service) s))))))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Check phase-1 syntax used via for-template
@@ -631,6 +675,207 @@
   (require 'there-and-back-y)
   (provide f)
   (define (f) (s 1 2)))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check printing of an error message:
+
+(err/rt-test (eval '(module bad-module racket/base
+                      (require (for-meta -1 (only-in racket cons) (only-in r5rs cons)))))
+             (lambda (exn) (regexp-match? #rx"phase -1" (exn-message exn))))
+
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check renames and lifts:
+
+(module post-ex-rename-example-1 racket/base
+  (require (for-syntax racket/base))
+  (provide go)
+  (define-syntax (go stx)
+    (syntax-local-lift-module-end-declaration
+     #'(define-stuff))
+    #'(define-syntax (define-stuff stx)
+        #'(define x #f))))
+
+(module post-ex-rename-example-2 racket/base
+  (require 'post-ex-rename-example-1)
+  (go))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check interaction of binding-context and mark:
+
+(module binding-context-a racket
+  (provide q)
+
+  (define-syntax (q stx)
+    (syntax-case stx ()
+      [(_ f) (with-syntax ([x (syntax-local-introduce #'x)])
+               #'(f x))])))
+
+(module binding-context-b racket
+  (require 'binding-context-a)
+
+  (define-syntax-rule (go id)
+    (begin
+      (define id 5)
+      (define-syntax-rule (prov)
+        (provide id))
+      (prov)))
+  
+  (q go))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check modidx for 'origin items
+
+(syntax-case (parameterize ([current-namespace (make-base-namespace)])
+               (expand
+                '(module m racket/base
+                   (define-syntax-rule (m x) 1)
+                   (m x)))) ()
+  [(_ name lang (mb ds (app cwv (lam () (qt one)) pnt)))
+   (begin
+     (test 1 syntax-e #'one)
+     (test #t identifier? (car (syntax-property #'one 'origin)))
+     (test #t symbol? 
+           (resolved-module-path-name
+            (module-path-index-resolve
+             (car (identifier-binding (car (syntax-property #'one 'origin))))))))])
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check that set! of an unbound for-syntax variable is a syntax error
+
+(err/rt-test (expand '(module m racket/base
+                        (require (for-syntax racket/base))
+                        (begin-for-syntax
+                         (lambda () (set! x 6)))))
+             exn:fail:syntax?)
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check that an exception during a `provide' expansion
+;; doesn't leave the thread in the during-expansion state:
+
+(with-handlers ([exn? void])
+  (eval '(module m racket
+           (require (for-syntax racket/provide-transform))
+           (define-syntax ex
+             (make-provide-transformer
+              (lambda args
+                (/ 0))))
+           (provide (ex)))))
+
+(err/rt-test (eval '(define-syntax m (syntax-local-module-defined-identifiers))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check that invocation order matches `require' order:
+
+(module order-check-module-a racket/base 'a)
+(module order-check-module-b racket/base 'b)
+(module order-check-module racket/base (require 'order-check-module-a
+                                                'order-check-module-b))
+(let ([o (open-output-string)])
+  (parameterize ([current-output-port o])
+    (dynamic-require ''order-check-module #f))
+  (test "'a\n'b\n" get-output-string o))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check phase-shifted, compile-time use of `variable-reference->namespace'
+
+(module uses-variable-reference->namespace racket/base
+  (require (for-syntax racket/base))
+  (begin-for-syntax
+   (variable-reference->namespace (#%variable-reference))))
+(module uses-uses-variable-reference->namespace racket/base
+  (require (for-template 'uses-variable-reference->namespace)))
+
+(require 'uses-uses-variable-reference->namespace)
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check reference to phase-2 definition:
+
+(let ()
+  (define m1-expr
+    '(module m1 racket/base
+       (require (for-syntax racket/base))
+       (begin-for-syntax
+        (require (for-syntax racket/base))
+        (begin-for-syntax
+         (define m1 2)
+         (provide m1)))))
+  
+  (define m2-expr
+    '(module m2 racket/base
+       (require (for-meta -2 'm1))
+       m1))
+
+  (parameterize ([current-namespace (make-base-namespace)])
+    (eval m1-expr)
+    (eval m2-expr))
+
+  (parameterize ([current-namespace (make-base-namespace)])
+    (define (compile-eval e)
+      (define-values (i o) (make-pipe))
+      (write (compile e) o)
+      (parameterize ([read-accept-compiled #t])
+        (eval (read i))))
+    (compile-eval m1-expr)
+    (compile-eval m2-expr)))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check JIT treatement of seemingly constant imports
+
+(let ()
+  (define (a-expr mut?)
+    `(module a racket/base
+       ,(if mut?
+            `(define a 5)
+            `(define (a x)
+               ;; long enough to not be inlined:
+               (list x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x)))
+       (provide a)))
+  (define b-expr
+    `(module b racket/base
+       (require 'a)
+       (define (b q) (a q))
+       (provide b)))
+
+  (define (compile-m e strs)
+    (parameterize ([current-namespace (make-base-namespace)])
+      (for ([str (in-list strs)])
+        (parameterize ([read-accept-compiled #t])
+          (eval (read (open-input-bytes str)))))
+      (define o (open-output-bytes))
+      (write (compile e) o)
+      (define s (get-output-bytes o))
+      (define vlen (bytes-ref s 2))
+      ;; Add a hash, so that loading this module in two contexts tries to
+      ;; use the same loaded bytecode and same JIT-generated code:
+      (bytes-copy! s (+ 4 vlen)
+                   (subbytes
+                    (bytes-append (string->bytes/utf-8 (format "~s" (bytes-length s)))
+                                  (make-bytes 20 0))
+                    0
+                    20))
+      s))
+
+  (define a-s (compile-m (a-expr #f) '()))
+  (define am-s (compile-m (a-expr #t) '()))
+  (define b-s (compile-m b-expr (list a-s)))
+
+  (define (go a-s)
+    (parameterize ([current-namespace (make-base-namespace)])
+      (parameterize ([read-accept-compiled #t])
+        (eval (read (open-input-bytes a-s)))
+        (define temp-dir (find-system-path 'temp-dir))
+        (define dir (build-path temp-dir "compiled"))
+        (make-directory* dir)
+        (with-output-to-file (build-path dir "check-gen_rkt.zo")
+          #:exists 'truncate
+          (lambda () (write-bytes b-s)))
+        ((dynamic-require (build-path temp-dir "check-gen.rkt") 'b) 10)
+        (delete-file (build-path dir "check-gen_rkt.zo")))))
+  ;; Triger JIT generation with constant function as `a':
+  (go a-s)
+  ;; Check that we don't crash when trying to use a different `a':
+  (err/rt-test (go am-s)))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

@@ -1,5 +1,12 @@
 #lang racket/unit
 
+;; this module implements the UI side of the stepper; it 
+;; opens a window, starts the stepper thread running, 
+;; and handles the resulting calls to 'break'.
+
+;; this module lies outside of the "testing boundary"
+;; of through-tests; it is not tested automatically at all.
+
 ;; this version of the view-controller just collects the steps up front rather
 ;; than blocking until the user presses the "next" button.
 
@@ -47,21 +54,31 @@
 (define (go drracket-tab program-expander selection-start selection-end)
   
   ;; get the language-level:
-  (define language-settings (definitions-text->settings (send drracket-tab get-defs)))
-  (define language-level (drracket:language-configuration:language-settings-language language-settings))
-  (define simple-settings (drracket:language-configuration:language-settings-settings language-settings))
+  (define language-settings 
+    (definitions-text->settings
+      (send drracket-tab get-defs)))
+  
+  (define language-level 
+    (drracket:language-configuration:language-settings-language 
+     language-settings))
+  
+  (define simple-settings
+    (drracket:language-configuration:language-settings-settings
+     language-settings))
   
   ;; VALUE CONVERSION CODE:
   
   ;; render-to-string : TST -> string
   (define (render-to-string val)
     (let ([string-port (open-output-string)])
-      (send language-level render-value val simple-settings string-port)
+      (send language-level render-value 
+            val simple-settings string-port)
       (get-output-string string-port)))
   
   ;; render-to-sexp : TST -> sexp
   (define (render-to-sexp val)
-    (send language-level stepper:render-to-sexp val simple-settings language-level))
+    (send language-level stepper:render-to-sexp
+          val simple-settings language-level))
   
   ;; channel for incoming views
   (define view-channel (make-async-channel))
@@ -78,36 +95,54 @@
   ;; the view in the stepper window
   (define view #f)
   
-  ;; wait for steps to show up on the channel.  When they do, add them to the list.
+  ;; wait for steps to show up on the channel.  
+  ;; When they do, add them to the list.
   (define (start-listener-thread stepper-frame-eventspace)
+    ;; as of 2012-06-20, I no longer believe there's any
+    ;; need for this thread, as the queue-callback handles
+    ;; the needed separation.
     (thread
      (lambda ()
        (let loop ()
          (define new-result (async-channel-get view-channel))
-         (define new-step (format-result new-result))
-         (parameterize ([current-eventspace stepper-frame-eventspace])
-           (queue-callback
-            (lambda ()
-              (set! view-history (append view-history (list new-step)))
-              (set! num-steps-available (length view-history))
-              ;; this is only necessary the first time, but it's cheap:
-              (semaphore-post first-step-sema)
-              (update-status-bar))))
+         (receive-result-from-target new-result)
          (loop)))))
+  
+  ;; handles an incoming result. Either adds it to the list of 
+  ;; steps, or prompts user to see whether to continue running.
+  (define (receive-result-from-target result)
+    (cond [(runaway-process? result)
+           (parameterize ([current-eventspace stepper-frame-eventspace])
+             (queue-callback
+              (lambda ()
+                (when (confirm-running)
+                  (semaphore-post (runaway-process-sema result)))
+                (void))))]
+          [else
+           (define new-step (format-result result))
+           (parameterize ([current-eventspace stepper-frame-eventspace])
+             (queue-callback
+              (lambda ()
+                (set! view-history (append view-history (list new-step)))
+                (set! num-steps-available (length view-history))
+                ;; this is only necessary the first time, but it's cheap:
+                (semaphore-post first-step-sema)
+                (update-status-bar))))]))
     
   
   ;; find-later-step : given a predicate on history-entries, search through
   ;; the history for the first step that satisfies the predicate and whose 
   ;; number is greater than n (or -1 if n is #f), return # of step on success,
-  ;; on failure return (list 'nomatch last-step) or (list 'nomatch/seen-final last-step) 
-  ;; if we went past the final step
+  ;; on failure return (list 'nomatch last-step) or (list 'nomatch/seen-final
+  ;; last-step) if we went past the final step
   (define (find-later-step p n)
     (let* ([n-as-num (or n -1)])
       (let loop ([step 0] 
                  [remaining view-history]
                  [seen-final? #f])
-        (cond [(null? remaining) (cond [seen-final? (list `nomatch/seen-final (- step 1))]
-                                       [else (list `nomatch (- step 1))])]
+        (cond [(null? remaining) 
+               (cond [seen-final? (list `nomatch/seen-final (- step 1))]
+                     [else (list `nomatch (- step 1))])]
               [(and (> step n-as-num) (p (car remaining))) step]
               [else (loop (+ step 1)
                           (cdr remaining)
@@ -117,7 +152,8 @@
   ;; the given step.
   (define (find-earlier-step p n)
     (unless (number? n)
-      (error 'find-earlier-step "can't find earlier step when no step is displayed."))
+      (error 'find-earlier-step 
+             "can't find earlier step when no step is displayed."))
     (let* ([to-search (reverse (take view-history n))])
       (let loop ([step (- n 1)]
                  [remaining to-search])
@@ -152,12 +188,13 @@
   (define (next-of-specified-kind right-kind? msg)
     (next-of-specified-kind/helper right-kind? view msg))
   
-  ;; first-of-specified-kind : similar to next-of-specified-kind, but always start at zero
+  ;; first-of-specified-kind : similar to next-of-specified-kind, but 
+  ;; always start at zero
   (define (first-of-specified-kind right-kind? msg)
     (next-of-specified-kind/helper right-kind? #f msg))
   
-  ;; next-of-specified-kind/helper : if the desired step is already in the list, display
-  ;; it; otherwise, give up.
+  ;; next-of-specified-kind/helper : if the desired step 
+  ;; is already in the list, display it; otherwise, give up.
   (define (next-of-specified-kind/helper right-kind? starting-step msg)
     (match (find-later-step right-kind? starting-step)
       [(? number? n)
@@ -225,7 +262,8 @@
   ;; choice box option
   (define (jump-to-prior-application)
     (prior-of-specified-kind application-step?
-                             (string-constant stepper-no-earlier-application-step)))
+                             (string-constant 
+                              stepper-no-earlier-application-step)))
   
   
   ;; GUI ELEMENTS:
@@ -246,19 +284,21 @@
   
   (define logo-canvas
     (new (class bitmap-canvas%
-           (super-new [parent top-panel] [bitmap (compiled-bitmap (stepper-logo 32))])
+           (super-new [parent top-panel] [bitmap (compiled-bitmap (stepper-logo #:height 32))])
            (define/override (on-event evt)
              (when (eq? (send evt get-event-type) 'left-up)
                (show-about-dialog s-frame))))))
   
-  (define prev-img (compiled-bitmap (step-back-icon run-icon-color (toolbar-icon-height))))
+  (define prev-img (compiled-bitmap (step-back-icon #:color run-icon-color
+                                                    #:height (toolbar-icon-height))))
   (define previous-button (new button%
                                [label (list prev-img (string-constant stepper-previous) 'left)]
                                [parent button-panel]
                                [callback (λ (_1 _2) (previous))]
                                [enabled #f]))
   
-  (define next-img (compiled-bitmap (step-icon run-icon-color (toolbar-icon-height))))
+  (define next-img (compiled-bitmap (step-icon #:color run-icon-color
+                                               #:height (toolbar-icon-height))))
   (define next-button (new button%
                            [label (list next-img (string-constant stepper-next) 'right)]
                            [parent button-panel]
@@ -315,7 +355,8 @@
     (send status-text lock #f)
     (send status-text delete 0 (send status-text last-position))
     ;; updated to yield 1-based step numbering rather than 0-based numbering.
-    (send status-text insert (format "~a/~a" (if view (+ 1 view) "none") (length view-history)))
+    (send status-text insert 
+          (format "~a/~a" (if view (+ 1 view) "none") (length view-history)))
     (send status-text lock #t)
     (send status-text end-edit-sequence))
   
@@ -329,30 +370,85 @@
   
   (define (print-current-view item evt)
     (send (send canvas get-editor) print))
+  
+  ;; code for dealing with runaway processes:
+  
+  (define runaway-counter-limit 500)
+  (define disable-runaway-counter #f)
+  (define runaway-counter 0)
+
+  ;; runs on the stepped-process side.
+  ;; checks to see if the process has taken too
+  ;; many steps. If so, send a message and block
+  ;; for a response, then send the result. Otherwise,
+  ;; just send the result.
+  (define (deliver-result-to-gui result)
+    (when (not disable-runaway-counter)
+      (set! runaway-counter (+ runaway-counter 1)))
+    (when (= runaway-counter runaway-counter-limit)
+      (define runaway-semaphore (make-semaphore 0))
+      (async-channel-put view-channel 
+                         (runaway-process runaway-semaphore))
+      ;; wait for a signal to continue running:
+      (semaphore-wait runaway-semaphore))
+    (async-channel-put view-channel result))
+  
+  (define keep-running-message
+    (string-append 
+     "The program running in the stepper has taken a whole bunch of steps. "
+     "Do you want to continue running it for now, halt, or let it run "
+     "without asking again?"))
+  
+  (define (confirm-running)
+    (define message-box-result
+      (message-box/custom
+       "Keep Running Program?"
+       keep-running-message
+       "Continue for now"
+       "Halt"
+       "Continue uninterrupted"
+       #f ;; use the stepper window instead?
+       '(stop disallow-close default=1)
+       ))
+    (match message-box-result
+      ;; continue-for-now:
+      [1 (set! runaway-counter 0)
+         #t]
+      ;; halt:
+      [2 #f]
+      ;; continue-forever:
+      [3 (set! runaway-counter 0)
+         (set! disable-runaway-counter #t)
+         #t]))
+  
+  
 
   ;; translates a result into a step
-  ;; format-result : result -> step?
+  ;; format-result : step-result -> step?
   (define (format-result result)
     (match result
       [(struct before-after-result (pre-exps post-exps kind pre-src post-src))
        (make-step (new x:stepper-text% 
                        [left-side pre-exps]
                        [right-side post-exps]
-                       [show-inexactness? (send language-level stepper:show-inexactness?)])
+                       [show-inexactness? 
+                        (send language-level stepper:show-inexactness?)])
                   kind 
                   (list pre-src post-src))]
       [(struct before-error-result (pre-exps err-msg pre-src))
        (make-step (new x:stepper-text%
                        [left-side pre-exps] 
                        [right-side err-msg]
-                       [show-inexactness? (send language-level stepper:show-inexactness?)])
+                       [show-inexactness?
+                        (send language-level stepper:show-inexactness?)])
                   'finished-or-error 
                   (list pre-src))]
       [(struct error-result (err-msg))
        (make-step (new x:stepper-text% 
                        [left-side null]
                        [right-side err-msg]
-                       [show-inexactness? (send language-level stepper:show-inexactness?)]) 
+                       [show-inexactness?
+                        (send language-level stepper:show-inexactness?)]) 
                   'finished-or-error 
                   (list))]
       [(struct finished-stepping ())
@@ -381,7 +477,7 @@
   (model:go
    program-expander-prime 
    ;; what do do with the results:
-   (lambda (result) (async-channel-put view-channel result))
+   deliver-result-to-gui
    (get-render-settings render-to-string
                         render-to-sexp 
                         (send language-level stepper:enable-let-lifting?)
@@ -430,15 +526,17 @@
                      (< overlap-begin overlap-end))])))]))
 
 ;; a few unit tests.  Use them if changing span-overlap.
-#;(and
-;; zero-length selection cases:
-(equal? ((span-overlap 13 13) (model:make-posn-info 14 4)) #f)
-(equal? ((span-overlap 14 14) (model:make-posn-info 14 4)) #t)
-(equal? ((span-overlap 18 18) (model:make-posn-info 14 4)) #f)
-;; nonzero-length selection cases:
-(equal? ((span-overlap 13 14) (model:make-posn-info 14 4)) #f)
-(equal? ((span-overlap 13 15) (model:make-posn-info 14 4)) #t)
-(equal? ((span-overlap 13 23) (model:make-posn-info 14 4)) #t)
-(equal? ((span-overlap 16 17) (model:make-posn-info 14 4)) #t)
-(equal? ((span-overlap 16 24)  (model:make-posn-info 14 4)) #t)
-(equal? ((span-overlap 18 21)  (model:make-posn-info 14 4)) #f))
+;; ...oops, can't use module+ inside of a unit.
+#;(module+ test
+  (require rackunit)
+  ;; zero-length selection cases:
+  (check-equal? ((span-overlap 13 13) (model:make-posn-info 14 4)) #f)
+  (check-equal? ((span-overlap 14 14) (model:make-posn-info 14 4)) #t)
+  (check-equal? ((span-overlap 18 18) (model:make-posn-info 14 4)) #f)
+  ;; nonzero-length selection cases:
+  (check-equal? ((span-overlap 13 14) (model:make-posn-info 14 4)) #f)
+  (check-equal? ((span-overlap 13 15) (model:make-posn-info 14 4)) #t)
+  (check-equal? ((span-overlap 13 23) (model:make-posn-info 14 4)) #t)
+  (check-equal? ((span-overlap 16 17) (model:make-posn-info 14 4)) #t)
+  (check-equal? ((span-overlap 16 24)  (model:make-posn-info 14 4)) #t)
+  (check-equal? ((span-overlap 18 21)  (model:make-posn-info 14 4)) #f))

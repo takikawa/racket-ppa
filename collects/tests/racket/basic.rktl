@@ -1100,7 +1100,7 @@
         (string-append (string-downcase one) "y"
                        (string-upcase two))))
 (test #"fox in socks, blue seal. trout in socks, blue fish!"
-      regexp-replace*                                     
+      regexp-replace*
       #rx#"([a-z]+) ([a-z]+)"
       #"red fox, blue seal. red trout, blue trout!"
       (lambda (total color what)
@@ -1110,6 +1110,11 @@
          (else (bytes-append color #" " what)))))
 
 (test "foofoo" regexp-replace* #px"(.)?" "a" (lambda args "foo"))
+
+(test "xxxxx world" regexp-replace* #px"\\w" "hello world" "x" 0 5)
+(test "HELLO world" regexp-replace* #px"\\w" "hello world" string-upcase 0 5)
+(test "hello world" regexp-replace* #px"o" "ohello world" "" 0 3)
+(test "hell world" regexp-replace* #px"o" "ohello world" "" 0 6)
 
 ;; Test weird port offsets:
 (define (test-weird-offset regexp-match regexp-match-positions)
@@ -1312,7 +1317,7 @@
 (arity-test regexp-match-peek 2 6)
 (arity-test regexp-match-peek-positions 2 6)
 (arity-test regexp-replace 3 4)
-(arity-test regexp-replace* 3 4)
+(arity-test regexp-replace* 3 6)
 
 (test #t procedure? car)
 (test #f procedure? 'car)
@@ -1413,6 +1418,11 @@
 (test 4 list-length '(1 2 3 4))
 (test #f list-length '(a b . c))
 (test '() map cadr '())
+
+(arity-test map 2 -1)
+(arity-test for-each 2 -1)
+(arity-test andmap 2 -1)
+(arity-test ormap 2 -1)
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; exceptions

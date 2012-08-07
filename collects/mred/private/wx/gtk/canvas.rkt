@@ -3,7 +3,8 @@
          racket/class
          racket/draw
          ffi/unsafe/alloc
-         racket/draw/private/color
+         (except-in racket/draw/private/color
+                    color% make-color)
          racket/draw/private/local
          "../common/backing-dc.rkt"
          "../common/canvas-mixin.rkt"

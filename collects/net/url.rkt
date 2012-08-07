@@ -16,6 +16,16 @@
 ;;   "pure" = the MIME headers have been read
 
 (define-struct (url-exception exn:fail) ())
+(define (-url-exception? x)
+  (or (url-exception? x)
+      
+      ;; two of the errors that string->url can raise are
+      ;; now contract violations instead of url-expcetion
+      ;; structs. since only the url-exception? predicate
+      ;; was exported, we just add this in to the predicate
+      ;; to preserve backwards compatibility
+      (and (exn:fail:contract:blame? x)
+           (regexp-match? #rx"^string->url:" (exn-message x)))))
 
 (define file-url-path-convention-type (make-parameter (system-path-convention-type)))
 
@@ -209,7 +219,7 @@
 (define (get-pure-port/headers url [strings '()] #:redirections [redirections 0])
   (let redirection-loop ([redirections redirections] [url url])
     (define ip
-      (http://getpost-impure-port #t url #f '()))
+      (http://getpost-impure-port #t url #f strings))
     (define status (read-line ip 'return-linefeed))
     (define-values (new-url chunked? headers)
       (let loop ([new-url #f] [chunked? #f] [headers '()])
@@ -433,7 +443,7 @@
 ;; `*' instead of `+' for the scheme part (it is checked later anyway, and
 ;; we don't want to parse it as a path element), and the user@host:port is
 ;; parsed here.
-(define url-rx
+(define url-regexp
   (regexp (string-append
            "^"
            "(?:"              ; / scheme-colon-opt
@@ -488,8 +498,7 @@
               [query    (if query (form-urlencoded->alist query) '())]
               [fragment (uri-decode/maybe fragment)])
          (make-url scheme user host port abs? path query fragment))))
-   (cdr (or (regexp-match url-rx str)
-            (url-error "Invalid URL string: ~e" str)))))
+   (cdr (regexp-match url-regexp str))))
 
 (define (uri-decode/maybe f) (friendly-decode/maybe f uri-decode))
 
@@ -661,7 +670,10 @@
 (provide (struct-out url) (struct-out path/param))
 
 (provide/contract
- (string->url ((or/c bytes? string?) . -> . url?))
+ (string->url (-> (and/c string?
+                         (or/c #rx"^[a-zA-Z][a-zA-Z0-9+.-]*:"
+                               (not/c #rx"^[^:/?#]*:")))
+                  url?))
  (path->url ((or/c path-string? path-for-some-system?) . -> . url?))
  (url->string (url? . -> . string?))
  (url->path (->* (url?) ((one-of/c 'unix 'windows)) path-for-some-system?))
@@ -691,7 +703,7 @@
                              (listof string?)
                              any)))
  (combine-url/relative (url? string? . -> . url?))
- (url-exception? (any/c . -> . boolean?))
+ (rename -url-exception? url-exception? (any/c . -> . boolean?))
  (current-proxy-servers
   (parameter/c (or/c false/c (listof (list/c string? string? number?)))))
  (file-url-path-convention-type

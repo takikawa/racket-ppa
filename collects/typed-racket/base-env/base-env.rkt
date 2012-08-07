@@ -13,11 +13,12 @@
   (only-in '#%kernel [apply kernel:apply] [reverse kernel:reverse]
            [memq kernel:memq] [memv kernel:memv] [member kernel:member])
   (only-in racket/private/pre-base new-apply-proc)
-  scheme/promise scheme/system
+  racket/promise racket/system
   racket/function
   racket/mpair
   racket/base
   racket/set
+  racket/place
   syntax/stx racket/private/stx
   (only-in string-constants/private/only-once maybe-print-message)
   (only-in mzscheme make-namespace)
@@ -25,16 +26,19 @@
  racket/file
  (only-in racket/private/pre-base new-apply-proc)
  (only-in (types abbrev numeric-tower) [-Number N] [-Boolean B] [-Symbol Sym])
- (only-in (rep type-rep) make-MPairTop
+ (only-in (rep type-rep)
+          make-MPairTop
           make-BoxTop make-ChannelTop make-VectorTop
           make-ThreadCellTop
           make-Ephemeron
           make-CustodianBox
-          make-HeterogenousVector))
+          make-HeterogenousVector
+          make-ListDots))
 
 ;Section 9.2
 
-[raise (Univ . -> . (Un))]
+[raise (cl->* (Univ . -> . (Un))
+	      (Univ Univ . -> . (Un)))]
 
 [error
  (cl->* (-> Sym (Un))
@@ -232,7 +236,7 @@
 [prop:equal+hash -Struct-Type-Property]
 
 
-;; scheme/bool
+;; racket/bool
 [true (-val #t)]
 [false (-val #f)]
 [boolean=? (B B . -> . B)]
@@ -248,11 +252,11 @@
 [defined? (->* (list Univ) -Boolean : (-FS (-not-filter -Undefined 0 null) (-filter -Undefined 0 null)))]
 
 
-[ormap (-polydots (a c b) (->... (list (->... (list a) (b b) c) (-lst a)) ((-lst b) b) c))]
+[ormap (-polydots (a c b) (->... (list (->... (list a) (b b) c) (-lst a)) ((-lst b) b) (Un c (-val #f))))]
 [andmap (-polydots (a c d b) (cl->*
                               ;; 1 means predicate on second argument
                               (make-pred-ty (list (make-pred-ty (list a) c d) (-lst a)) c (-lst d) 1)
-                              (->... (list (->... (list a) (b b) c) (-lst a)) ((-lst b) b) c)))]
+                              (->... (list (->... (list a) (b b) c) (-lst a)) ((-lst b) b) (Un c (-val #t)))))]
 
 [box (-poly (a) (a . -> . (-box a)))]
 [box-immutable (-poly (a) (a . -> . (-box a)))]
@@ -360,7 +364,10 @@
  (cl->* (-> (-lst -String) -String)
         (-> -String (-lst -String) -String))]
 
-[string-join (-> (-lst -String) -String -String)]
+[string-join
+ (->optkey (-lst -String) [-String]
+           #:before-last -String #f #:before-first -String #f #:after-last -String #f
+           -String)]
 
 
 ;Section 3.6
@@ -404,7 +411,7 @@
                      [((a b c . -> . c) c (-lst a) (-lst b)) c]
                      [((a b c d . -> . d) d (-lst a) (-lst b) (-lst d)) d]))]
 [filter (-poly (a b) (cl->*
-                      ((make-pred-ty (list a) Univ b)
+                      ((asym-pred a -Boolean (-FS (-filter b 0) -top))
                        (-lst a)
                        . -> .
                        (-lst b))
@@ -509,7 +516,7 @@
 [kernel:memq (-poly (a) (-> a (-lst a) (-opt (-lst a))))]
 [memv (-poly (a) (-> a (-lst a) (-opt (-lst a))))]
 [kernel:memv (-poly (a) (-> a (-lst a) (-opt (-lst a))))]
-[memf (-poly (a) ((a . -> . B) (-lst a) . -> . (-opt (-lst a))))]
+[memf (-poly (a) ((a . -> . Univ) (-lst a) . -> . (-opt (-lst a))))]
 [member (-poly (a) (a (-lst a) . -> . (-opt (-lst a))))]
 [kernel:member (-poly (a) (a (-lst a) . -> . (-opt (-lst a))))]
 [findf (-poly (a) ((a . -> . B) (-lst a) . -> . (-opt a)))]
@@ -563,20 +570,12 @@
 [apply        (-poly (a b) (((list) a . ->* . b) (-lst a) . -> . b))]
 [new-apply-proc (-poly (a b) (((list) a . ->* . b) (-lst a) . -> . b))]
 [kernel:apply (-poly (a b) (((list) a . ->* . b) (-lst a) . -> . b))]
-[time-apply (-poly (a b c)
-                   (cl->*
-                    (->
-                     (-> a)
-                     (-Tuple (list))
-                     (-values (list (-pair a (-val '())) -Nat -Nat -Nat)))
-                    (->
-                     (-> b a)
-                     (-Tuple (list b))
-                     (-values (list (-pair a (-val '())) -Nat -Nat -Nat)))
-                    (->
-                     (-> b c a)
-                     (-Tuple (list b c))
-                     (-values (list (-pair a (-val '())) -Nat -Nat -Nat)))))]
+[time-apply
+ (-polydots (b a) (cl->*
+                   (-> (-> b) (-val '()) (-values (list (-pair b (-val '())) -Nat -Nat -Nat)))
+                   (-> (->... '() (a a) b)
+                       (make-ListDots a 'a)
+                       (-values (list (-pair b (-val '())) -Nat -Nat -Nat)))))]
 
 [call/cc (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
 [call/ec (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
@@ -789,7 +788,9 @@
 ;; path manipulation
 
 [path? (make-pred-ty -Path)]
-[path-string? (-> Univ B)]
+[path-string? (asym-pred Univ B 
+                         (-FS (-filter (Un -Path -String) 0)
+                              (-not-filter -Path 0)))]
 [path-for-some-system? (make-pred-ty -SomeSystemPath)]
 
 [string->path (-> -String -Path)]
@@ -924,6 +925,36 @@
 [make-custom-hash (->opt (-> Univ Univ Univ) (-> Univ -Nat) [(-> Univ -Nat)] Univ)]
 [make-immutable-custom-hash (->opt (-> Univ Univ Univ) (-> Univ -Nat) [(-> Univ -Nat)] Univ)]
 [make-weak-custom-hash (->opt (-> Univ Univ Univ) (-> Univ -Nat) [(-> Univ -Nat)] Univ)]
+
+;Section 3.14 (Sequences and Streams)
+[sequence? (make-pred-ty (-seq Univ))]
+[stop-before (-poly (a) ((-seq a) (a . -> . Univ) . -> . (-seq a)))]
+[stop-after (-poly (a) ((-seq a) (a . -> . Univ) . -> . (-seq a)))]
+[make-do-sequence (-poly (a b) ((-> (-values (list (a . -> . b)
+                                                   (a . -> . a)
+                                                   a
+                                                   (Un (a . -> . Univ) (-val #f))
+                                                   (Un (b . -> . Univ) (-val #f))
+                                                   (Un (a b . -> . Univ) (-val #f)))))
+                                . -> . (-seq b)))]
+[sequence-generate (-poly (a) ((-seq a) . -> . (-values (list (-> -Boolean) (-> a)))))]
+;; Doesn't work (mu types are single-valued only):
+;[sequence-generate*  (-poly (a) ((-seq a) . -> . (-mu t (-values (list (Un (-lst a) (-val #f)) t)))))]
+;; Doesn't render nicely (but seems to work fine):
+[empty-sequence (-poly (a) (-seq a))]
+[sequence->list (-poly (a) ((-seq a) . -> . (-lst a)))]
+[sequence-length (-poly (a) ((-seq a) . -> . -Nat))]
+[sequence-ref (-poly (a) ((-seq a) -Integer . -> . a))]
+[sequence-tail (-poly (a) ((-seq a) -Integer . -> . (-seq a)))]
+[sequence-append (-poly (a) (->* (list) (-seq a) (-seq a)))]
+[sequence-map (-poly (a b) ((a . -> . b) (-seq a) . -> . (-seq b)))]
+[sequence-andmap (-poly (a b) ((a . -> . b) (-seq a) . -> . (Un b (-val #t))))]
+[sequence-ormap (-poly (a b) ((a . -> . b) (-seq a) . -> . (Un b (-val #f))))]
+[sequence-for-each (-poly (a) ((a . -> . Univ) (-seq a) . -> . -Void))]
+[sequence-fold (-poly (a b) ((b a . -> . b) b (-seq a) . -> . b))]
+[sequence-count (-poly (a) ((a . -> . Univ) (-seq a) . -> . -Nat))]
+[sequence-filter (-poly (a) ((a . -> . Univ) (-seq a) . -> . (-seq a)))]
+[sequence-add-between (-poly (a) ((-seq a) a . -> . (-seq a)))]
 
 ;Section 3.16 (Sets)
 [set (-poly (e) (->* (list) e (-set e)))]
@@ -1335,7 +1366,8 @@
 
 
 
-[values (-polydots (a) (null (a a) . ->... . (make-ValuesDots null a 'a)))]
+[values (-polydots (b a) (cl->* (->acc (list b) b null)
+                                (null (a a) . ->... . (make-ValuesDots null a 'a))))]
 [call-with-values (-polydots (b a) ((-> (make-ValuesDots null a 'a)) (null (a a) . ->... . b) . -> .  b))]
 
 [read-accept-reader (-Param B B)]
@@ -1353,8 +1385,8 @@
 |#
 
 
-;; scheme/function
-[identity (-poly (a) (-> a a))]
+;; racket/function
+[identity (-poly (a) (->acc (list a) a null))]
 [const (-poly (a) (-> a (->* '() Univ a)))]
 [negate (-polydots (b) (-> ((list) [b b] . ->... . Univ)
                            ((list) [b b] . ->... . -Boolean)))]
@@ -1362,7 +1394,7 @@
 (primitive-closure? (-> Univ B))
 
 
-;; scheme/cmdline
+;; racket/cmdline
 
 [parse-command-line
  (let ([mode-sym (one-of/c 'once-each 'once-any 'multi 'final 'help-labels)])
@@ -1374,7 +1406,7 @@
                       (-lst -String)
                       . -> . b))))]
 
-;; scheme/list
+;; racket/list
 [filter-map (-polydots (c a b)
                        ((list
                          ((list a) (b b) . ->... . (-opt c))
@@ -1392,7 +1424,12 @@
                      (-> (make-pred-ty a) (-lst b) (-values (list (-lst a) (-lst b))))))]
 
 [last   (-poly (a) ((-lst a) . -> . a))]
-[add-between (-poly (a b) ((-lst a) b . -> . (-lst (Un a b))))]
+[add-between (-poly (a b) ((-lst a) b
+                           #:splice? -Boolean #f
+                           #:before-first (-lst b) #f
+                           #:before-last b #f
+                           #:after-last (-lst b) #f
+                           . ->key . (-lst (Un a b))))]
 
 [last-pair (-poly (a) ((-mu x (Un a (-val '()) (-pair a x)))
                        . -> .
@@ -1463,7 +1500,7 @@
 
 
 
-;; scheme/path
+;; racket/path
 
 [explode-path (-SomeSystemPathlike . -> . (-lst (Un -SomeSystemPath (one-of/c 'up 'same))))]
 [simple-form-path (-Pathlike . -> . -Path)]
@@ -1492,7 +1529,7 @@
                     (->* (list (-lst a)) (-lst a))))]
 
 
-;; scheme/vector
+;; racket/vector
 [vector-count (-polydots (a b)
                          ((list
                            ((list a) (b b) . ->... . Univ)
@@ -1790,13 +1827,13 @@
 [resolved-module-path-name (-> -Resolved-Module-Path (Un -Path -Symbol))]
 [module-path? (asym-pred Univ B (-FS (-filter -Module-Path 0) -top))]
 
-[current-module-name-resolver (-Param (cl->* (-Resolved-Module-Path . -> . Univ)
+[current-module-name-resolver (-Param (cl->* (-Resolved-Module-Path Univ . -> . Univ)
                                              ((Un -Module-Path -Path)
                                               (-opt -Resolved-Module-Path)
                                               (-opt (-Syntax Univ))
                                               -Boolean
                                               . -> . -Resolved-Module-Path))
-                                      (cl->* (-Resolved-Module-Path . -> . Univ)
+                                      (cl->* (-Resolved-Module-Path Univ . -> . Univ)
                                              ((Un -Module-Path -Path)
                                               (-opt -Resolved-Module-Path)
                                               (-opt (-Syntax Univ))
@@ -2398,7 +2435,7 @@
 ; Writing
 [write   (Univ [-Output-Port] . ->opt . -Void)]
 [display (Univ [-Output-Port] . ->opt . -Void)]
-[print   (Univ [-Output-Port] . ->opt . -Void)]
+[print   (Univ [-Output-Port (one-of/c 0 1)] . ->opt . -Void)]
 [displayln (Univ [-Output-Port] . ->opt . -Void)]
 [fprintf (->* (list -Output-Port -String) Univ -Void)]
 [printf (->* (list -String) Univ -Void)]
@@ -2452,7 +2489,7 @@
 [pretty-format (Univ [-Output-Port] . ->opt . -Void)]
 [pretty-print-handler (-> Univ -Void)]
 
-[pretty-print-columns (-Param (-opt -Nat) (-opt -Nat))]
+[pretty-print-columns (-Param (Un -Nat (-val 'infinity)) (Un -Nat (-val 'infinity)))]
 [pretty-print-depth (-Param (-opt -Nat) (-opt -Nat))]
 [pretty-print-exact-as-decimal (-Param Univ B)]
 [pretty-print-.-symbol-without-bars (-Param Univ B)]
@@ -2548,7 +2585,8 @@
 
 [place? (make-pred-ty -Place)]
 [place-channel? (make-pred-ty -Place-Channel)]
-[dynamic-place (-> -Module-Path Sym -Place)]
+;; FIXME: the `#:at` keyword is for remote places, not supported yet
+[dynamic-place (->key -Module-Path Sym #:at (-val #f) #f -Place)]
 [place-wait (-> -Place -Int)]
 [place-break (-> -Place -Void)]
 [place-kill (-> -Place -Void)]
@@ -2574,3 +2612,264 @@
 
 ;; reader graphs
 [make-reader-graph (-> Univ Univ)]
+
+;; keyword functions moved back to here:
+
+[file->string
+ (->key -Pathlike #:mode (one-of/c 'binary 'text) #f -String)]
+(file->bytes (->key -Pathlike #:mode (one-of/c 'binary 'text) #f -Bytes))
+(file->value (->key -Pathlike #:mode (one-of/c 'binary 'text) #f Univ))
+(file->lines
+ (->key
+  -Pathlike
+  #:mode
+  (one-of/c 'binary 'text)
+  #f
+  #:line-mode
+  (one-of/c 'linefeed 'return 'return-linefeed 'any 'any-one)
+  #f
+  (-lst -String)))
+(file->bytes-lines
+ (->key
+  -Pathlike
+  #:line-mode
+  (one-of/c 'linefeed 'return 'return-linefeed 'any 'any-one)
+  #f
+  #:mode
+  (one-of/c 'binary 'text)
+  #f
+  (-lst -Bytes)))
+(display-to-file
+ (->key
+  Univ
+  -Pathlike
+  #:exists
+  (one-of/c 'error 'append 'update 'replace 'truncate 'truncate/replace)
+  #f
+  #:mode
+  (one-of/c 'binary 'text)
+  #f
+  -Void))
+(display-lines-to-file
+ (->key
+  (-lst Univ)
+  -Pathlike
+  #:separator
+  Univ
+  #f
+  #:mode
+  (one-of/c 'binary 'text)
+  #f
+  #:exists
+  (one-of/c 'error 'append 'update 'replace 'truncate 'truncate/replace)
+  #f
+  -Void))
+(write-to-file
+ (->key
+  Univ
+  -Pathlike
+  #:exists
+  (one-of/c 'error 'append 'update 'replace 'truncate 'truncate/replace)
+  #f
+  #:mode
+  (one-of/c 'binary 'text)
+  #f
+  -Void))
+(file->list
+ (-poly (a)
+  (cl->*
+   (->optkey -Pathlike [(-> -Input-Port (Un))] #:mode (one-of/c 'binary 'text) #f (-lst Univ))
+   (->optkey -Pathlike [(-> -Input-Port a)] #:mode (one-of/c 'binary 'text) #f (-lst a)))))
+(get-preference
+ (let ((use-lock-type Univ)
+       (timeout-lock-there-type (-opt (-> -Path Univ)))
+       (lock-there-type (-opt (-> -Path Univ))))
+   (cl->*
+    (->key
+     -Symbol
+     #:use-lock?
+     use-lock-type
+     #f
+     #:timeout-lock-there
+     timeout-lock-there-type
+     #f
+     #:lock-there
+     lock-there-type
+     #f
+     Univ)
+    (->key
+     -Symbol
+     (-> Univ)
+     #:use-lock?
+     use-lock-type
+     #f
+     #:timeout-lock-there
+     timeout-lock-there-type
+     #f
+     #:lock-there
+     lock-there-type
+     #f
+     Univ)
+    (->key
+     -Symbol
+     (-> Univ)
+     Univ
+     #:use-lock?
+     use-lock-type
+     #f
+     #:timeout-lock-there
+     timeout-lock-there-type
+     #f
+     #:lock-there
+     lock-there-type
+     #f
+     Univ)
+    (->key
+     -Symbol
+     (-> Univ)
+     Univ
+     (-opt -Pathlike)
+     #:use-lock?
+     use-lock-type
+     #f
+     #:timeout-lock-there
+     timeout-lock-there-type
+     #f
+     #:lock-there
+     lock-there-type
+     #f
+     Univ))))
+(make-handle-get-preference-locked
+ (let ((lock-there-type (-opt (-> -Path Univ)))
+       (max-delay-type -Real))
+   (->optkey -Real -Symbol [(-> Univ) Univ (-opt -Pathlike)]
+             #:lock-there lock-there-type #f #:max-delay max-delay-type #f 
+             (-> -Pathlike Univ))))
+(call-with-file-lock/timeout
+ (-poly
+  (a)
+  (->key
+   (-opt -Pathlike)
+   (one-of/c 'shared 'exclusive)
+   (-> a)
+   (-> a)
+   #:lock-file
+   (-opt -Pathlike)
+   #f
+   #:delay
+   -Real
+   #f
+   #:max-delay
+   -Real
+   #f
+   a)))
+(sort
+ (-poly
+  (a b)
+  (cl->*
+   (->key (-lst a) (-> a a -Boolean) #:key (-> a a) #f #:cache-keys? -Boolean #f (-lst a))
+   (->key (-lst a) (-> b b -Boolean) #:key (-> a b) #f #:cache-keys? -Boolean #f (-lst a)))))
+(remove-duplicates
+ (-poly
+  (a b)
+  (cl->*
+   (->optkey (-lst a) ((-> a a Univ)) #:key (-> a a) #f (-lst a))
+   (->optkey (-lst a) ((-> b b Univ)) #:key (-> a b) #f (-lst a)))))
+(open-input-file (->key -Pathlike #:mode (one-of/c 'binary 'text) #f -Input-Port))
+(open-output-file
+ (->key
+  -Pathlike
+  #:mode
+  (one-of/c 'binary 'text)
+  #f
+  #:exists
+  (one-of/c 'error 'append 'update 'can-update 'replace 'truncate 'must-truncate 'truncate/replace)
+  #f
+  -Output-Port))
+(open-input-output-file
+ (->key
+  -Pathlike
+  #:mode
+  (one-of/c 'binary 'text)
+  #f
+  #:exists
+  (one-of/c 'error 'append 'update 'can-update 'replace 'truncate 'must-truncate 'truncate/replace)
+  #f
+  (-values (list -Input-Port -Output-Port))))
+(call-with-input-file
+    (-poly (a) (->key -Pathlike (-> -Input-Port a) #:mode (Un (-val 'binary) (-val 'text)) #f a)))
+(call-with-output-file    
+    (-poly (a)
+     (->key
+      -Pathlike
+      (-> -Output-Port a)
+      #:exists
+      (one-of/c 'error 'append 'update 'replace 'truncate 'truncate/replace 'can-update 'must-truncate)
+      #f
+      #:mode
+      (one-of/c 'binary 'text)
+      #f
+      a)))
+(call-with-input-file* (-poly (a) (->key -Pathlike (-> -Input-Port a) #:mode (Un (-val 'binary) (-val 'text)) #f a)))
+(call-with-output-file*
+ (-poly
+  (a)
+  (->key
+   -Pathlike
+   (-> -Output-Port a)
+   #:exists
+   (one-of/c 'error 'append 'update 'replace 'truncate 'truncate/replace 'can-update 'must-truncate)
+   #f
+   #:mode
+   (one-of/c 'binary 'text)
+   #f
+   a)))
+(with-input-from-file (-poly (a) (->key -Pathlike (-> a) #:mode (Un (-val 'binary) (-val 'text)) #f a)))
+(with-output-to-file
+    (-poly
+     (a)
+     (->key
+      -Pathlike
+      (-> a)
+      #:exists
+      (one-of/c 'error 'append 'update 'can-update 'replace 'truncate 'must-truncate 'truncate/replace)
+      #f
+      #:mode
+      (one-of/c 'binary 'text)
+      #f
+      a)))
+(port->lines  
+ (->optkey [-Input-Port] #:line-mode (one-of/c 'linefeed 'return 'return-linefeed 'any 'any-one) #f (-lst -String)))
+(port->bytes-lines
+  (->optkey [-Input-Port] #:line-mode (one-of/c 'linefeed 'return 'return-linefeed 'any 'any-one) #f (-lst -Bytes)))
+(display-lines
+ (->optkey (-lst Univ) [-Output-Port] #:separator Univ #f -Void))
+(find-relative-path (->key -SomeSystemPathlike -SomeSystemPathlike #:more-than-root? Univ #f -SomeSystemPath))
+(regexp-match*
+ (let ((N -Integer)
+       (?N (-opt -Integer))
+       (-StrRx (Un -String -Regexp))
+       (-BtsRx (Un -Bytes -Byte-Regexp))
+       (-StrInput (Un -String -Path))
+       (-BtsInput (Un -Input-Port -Bytes))
+       (sel (λ (t) (-opt (-> (-lst t) t)))))
+   (cl->*
+    (->optkey -StrRx -StrInput (N ?N -Bytes)
+              #:match-select (sel -String) #f #:gap-select Univ #f
+              (-lst -String))
+    (->optkey -BtsRx (Un -StrInput -BtsInput) (N ?N -Bytes) 
+              #:match-select (sel -Bytes) #f #:gap-select Univ #f
+              (-lst -Bytes))
+    (->optkey -Pattern -BtsInput (N ?N -Bytes)
+              #:match-select (sel -Bytes) #f #:gap-select Univ #f
+              (-lst -Bytes)))))
+(regexp-match-positions*
+ (let* ((?outp (-opt -Output-Port))
+        (B -Boolean)
+        (N -Integer)
+        (?N (-opt -Integer))
+        (ind-pair (-pair -Index -Index))
+        (sel (-> (-lst (-opt ind-pair)) (-opt ind-pair)))
+        (output (-opt (-pair ind-pair (-lst (-opt ind-pair)))))
+        (-Input (Un -String -Input-Port -Bytes -Path)))
+   (->optkey -Pattern -Input (N ?N -Bytes) #:match-select sel #f output)))

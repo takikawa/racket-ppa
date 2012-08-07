@@ -46,7 +46,18 @@ the resolvers behavior.
 }
 
 @defproc[(resolve-planet-path [planet-path any/c]) path?]{
-  Returns the path where the file named by the require spec @racket[planet-path] is located in the current installation.
+Returns the file system path to the file specified by the given quoted 
+@|PLaneT| require specification. This function downloads and installs the
+specified package if necessary, but does not verify that the actual
+file within it actually exists.
+
+If the @|PLaneT| package is not actually installed, then this function expects
+to be called with a very powerful security guard, one that is available to
+the built-in module name resolver, but not generally available to user code.
+So probably this function will fail (possibly deadlock).
+
+This is the same function as the one with the same name,
+exported by @racketmodname[planet/util].
 }
 
 @defparam[download? dl? boolean?]{
@@ -336,8 +347,10 @@ See also @racket[build-scribble-docs?] and @racket[force-package-building?]
 }
 
 @defparam[force-package-building? b boolean?]{
-  Determines if @racket[make-planet-archive] is more strict and thus
-  aborts more often.
+  Determines if @racket[make-planet-archive] signals an error and refuses
+  to continue packaging for certain, more significant errors.
+  
+  Defaults to @racket[#t], and thus packaging will signal errors.
 }
 
 @defproc[(download-package [pkg-spec pkg-spec?]) 
@@ -453,10 +466,9 @@ procedure signals an error if no such link exists, unless
 
 @defproc[(resolve-planet-path [spec quoted-planet-require-spec?])
 	 path?]{
-Returns the file system path to the file specified by the given quoted 
-planet require specification. This function downloads and installs the
-specified package if necessary, but does not verify that the actual
-file within it actually exists.}
+This is the same function as the one with the same name,
+exported by @racketmodname[planet/resolver].
+}
 
 @defproc[(path->package-version [p path?])
          (or/c (list/c string? string? natural-number/c natural-number/c) #f)]{

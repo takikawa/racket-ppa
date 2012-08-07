@@ -53,6 +53,7 @@
       (code:line @#,elem{@racketvalfont{'}@racket[_quoted]})
       (code:line @#,elem{@racketvalfont{`}@racket[_quasiquoted]})
       number
+      boolean
       string
       character]
 [choice (code:line name)
@@ -312,4 +313,7 @@ level as they did in the @secref["intermediate-lam"] level.
 
 @section[#:tag "advanced-pre-defined"]{Pre-Defined Functions}
 
-@prim-op-defns['(lib "htdp-advanced.rkt" "lang") #'here '()]
+@(require (submod lang/htdp-advanced procedures))
+@(render-sections (docs) #'here "htdp-advanced")
+
+@;prim-op-defns['(lib "htdp-advanced.rkt" "lang") #'here '()]

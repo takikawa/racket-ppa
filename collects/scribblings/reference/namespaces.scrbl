@@ -246,18 +246,28 @@ undefined.}
 
 Attaches the instantiated module named by @racket[modname] in
 @racket[src-namespace] (at its @tech{base phase}) to the @tech{module
-registry} of @racket[dest-namespace]. If @racket[modname] is not a
-symbol, the current module name resolver is called to resolve the
-path, but no module is loaded; the resolved form of @racket[modname]
-is used as the module name in @racket[dest-namespace]. In addition to
-@racket[modname], every module that it imports (directly or
-indirectly) is also recorded in the current namespace's @tech{module
-registry}, and instances at the same @tech{phase} or lower are also
-attached to @racket[dest-namespace] (while @tech{visits} at the
-module's phase and instances at higher phases are not attached, nor
-even made @tech{available} for on-demand @tech{visits}). The inspector
-of the module invocation in @racket[dest-namespace] is the same as
-inspector of the invocation in @racket[src-namespace].
+registry} of @racket[dest-namespace].
+
+In addition to @racket[modname], every module that it imports
+(directly or indirectly) is also recorded in the current namespace's
+@tech{module registry}, and instances at the same @tech{phase} or
+lower are also attached to @racket[dest-namespace] (while
+@tech{visits} at the module's phase and instances at higher phases are
+not attached, nor even made @tech{available} for on-demand
+@tech{visits}). The inspector of the module invocation in
+@racket[dest-namespace] is the same as inspector of the invocation in
+@racket[src-namespace].
+
+If @racket[modname] is not a symbol, the current module name resolver
+is called to resolve the path, but no module is loaded; the resolved
+form of @racket[modname] is used as the module name in
+@racket[dest-namespace].
+
+If @racket[modname] refers to a submodule or a module with submodules,
+unless the module was loaded from bytecode (i.e., a @filepath{.zo}
+file) independently from submodules within the same top-level module,
+then declarations for all submodules within the module's top-level
+module are also attached to @racket[dest-namespace].
 
 If @racket[modname] does not refer to an @tech{instantiate}d module in
 @racket[src-namespace], or if the name of any module to be attached
@@ -397,15 +407,29 @@ result is a @tech{resolved module path} naming the module.
 If @racket[varref] refers to a @tech{top-level variable}, then the
 result is @racket[#f].}
 
+
+@defproc[(variable-reference->module-path-index [varref variable-reference?])
+         (or/c module-path-index? #f)]{
+
+If @racket[varref] refers to a @tech{module-level variable}, the
+result is a @tech{module path index} naming the module.
+
+If @racket[varref] refers to a @tech{top-level variable}, then the
+result is @racket[#f].}
+
+
 @defproc[(variable-reference->module-source [varref variable-reference?])
          (or/c symbol? (and/c path? complete-path?) #f)]{
 
 If @racket[varref] refers to a @tech{module-level variable}, the
 result is a path or symbol naming the module's source (which is
-typically, but not always, the same as in the resolved module path).
+typically, but not always, the same as in the @tech{resolved module
+path}).  If the relevant module is a @tech{submodule}, the result
+corresponds to the enclosing top-level module's source.
 
 If @racket[varref] refers to a @tech{top-level variable}, then the
 result is @racket[#f].}
+
 
 @defproc[(variable-reference->phase [varref variable-reference?])
          exact-nonnegative-integer?]{

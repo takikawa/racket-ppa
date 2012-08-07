@@ -38,21 +38,8 @@ namespace.
   (lambda (x)
     (or (null? x) (pair? x))))
 
-;; Don't need this anymore, since we just check for pairs:
-#;
-(define cyclic-list?
-  (lambda (l)
-    (or (list? l)
-        (and (pair? l)
-             (let loop ([hare (cdr l)][turtle l])
-               (cond
-                 [(eq? hare turtle) #t]
-                 [(not (pair? hare)) #f]
-                 [(eq? (cdr hare) turtle) #t]
-                 [(not (pair? (cdr hare))) #f]
-                 [else (loop (cddr hare) (cdr turtle))]))))))
-
 (define cyclic-list? beginner-list?)
+;; don't need a special  anymore, since we just check for pairs:
 
 (define (build-arg-list args)
   (let loop ([args args][n 0])
@@ -189,6 +176,13 @@ namespace.
     (check-last 'list* x)
     (apply list* x)))
 
+(define-teach beginner range
+  (lambda (start end step)
+    (cerr 'range (real? start) "real" start)
+    (cerr 'range (real? end) "real" end)
+    (cerr 'range (real? step) "real" step)
+    (range start end step)))
+    
 (define-teach beginner append
   (lambda (a b . x)
     (check-last 'append (cons a (cons b x)))
@@ -415,6 +409,7 @@ namespace.
  beginner-first
  beginner-rest
  beginner-list*
+ beginner-range
  beginner-append
  intermediate-append
  beginner-error
@@ -572,6 +567,14 @@ namespace.
     (cerr 'string-lower-case? (string? s) "string" s)
     (andmap char-lower-case? (string->list s))))
 
+;; -----------------------------------------------------------------------------
+
+(define-teach beginner string-contains? 
+  (lambda (s t)
+    (cerr 'string-contains? (string? s) "string" s)
+    (cerr 'string-contains? (string? t) "string" t)
+    (cons? (regexp-match s t))))
+
 (provide
  beginner-string-ith
  beginner-replicate
@@ -583,4 +586,6 @@ namespace.
  beginner-string-alphabetic?
  beginner-string-whitespace?
  beginner-string-upper-case?
- beginner-string-lower-case?)
+ beginner-string-lower-case?
+ beginner-string-contains?
+ )

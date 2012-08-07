@@ -79,10 +79,6 @@ If the namespace does not, they are colored the unbound color.
 ;; be < 50ms)
 (define syncheck-arrow-delay 100)
 
-(preferences:set-default 'drracket:syncheck-mode 'default-mode
-                         (λ (x) (memq x '(default-mode 
-                                           my-obligations-mode 
-                                           client-obligations-mode))))
 (let ([number-between-zero-and-one?
        (λ (x) (and (number? x) (<= 0 x 1)))])
   (preferences:set-default 
@@ -181,7 +177,8 @@ If the namespace does not, they are colored the unbound color.
               (alternate-bitmap syncheck-small-bitmap)
               (parent parent)
               (callback (λ (button) (send frame syncheck:button-callback)))))
-       'drracket:syncheck)
+       'drracket:syncheck
+       #:number 50)
       (drracket:unit:add-to-program-editor-mixin clearing-text-mixin))
     (define (phase2) (void))
     
@@ -224,16 +221,28 @@ If the namespace does not, they are colored the unbound color.
     ;; filename : path
     (define-struct def-link (id filename) #:inspector (make-inspector))
     
-    (define tacked-var-brush (send the-brush-list find-or-create-brush "BLUE" 'solid))
-    (define var-pen (send the-pen-list find-or-create-pen "BLUE" 1 'solid))
+    (define (get-tacked-var-brush white-on-black?)
+      (if white-on-black?
+          (send the-brush-list find-or-create-brush "LightSteelBlue" 'solid)
+          (send the-brush-list find-or-create-brush "BLUE" 'solid)))
+    (define (get-var-pen white-on-black?)
+      (if white-on-black?
+          (send the-pen-list find-or-create-pen "LightSteelBlue" 1 'solid)
+          (send the-pen-list find-or-create-pen "BLUE" 1 'solid)))
     
     (define templ-color (send the-color-database find-color "purple"))
-    (define templ-pen (send the-pen-list find-or-create-pen templ-color 1 'solid))
-    (define tacked-templ-brush (send the-brush-list find-or-create-brush templ-color 'solid))
+    (define (get-templ-pen white-on-black?)
+      (if white-on-black?
+          (send the-pen-list find-or-create-pen "orchid" 1 'solid)
+          (send the-pen-list find-or-create-pen templ-color 1 'solid)))
+    (define (get-tacked-templ-brush white-on-black?) 
+      (if white-on-black?
+          (send the-brush-list find-or-create-brush "orchid" 'solid)
+          (send the-brush-list find-or-create-brush templ-color 'solid)))
     
-    (define tail-pen (send the-pen-list find-or-create-pen "orchid" 1 'solid))
-    (define tacked-tail-brush (send the-brush-list find-or-create-brush "orchid" 'solid))
-    (define untacked-brush (send the-brush-list find-or-create-brush "WHITE" 'solid))
+    (define (get-tail-pen white-on-black?) (send the-pen-list find-or-create-pen "orchid" 1 'solid))
+    (define (get-tacked-tail-brush white-on-black?) (send the-brush-list find-or-create-brush "orchid" 'solid))
+    (define (get-untacked-brush white-on-black?) (send the-brush-list find-or-create-brush "WHITE" 'solid))
         
     ;; clearing-text-mixin : (mixin text%)
     ;; overrides methods that make sure the arrows go away appropriately.
@@ -341,7 +350,6 @@ If the namespace does not, they are colored the unbound color.
             
             ;; cleanup-texts : (or/c #f (listof text))
             (define cleanup-texts #f)
-            (define style-mapping #f)
             
             ;; bindings-table : hash-table[(list text number number) -o> (listof (list text number number))]
             ;; this is a private field
@@ -477,8 +485,7 @@ If the namespace does not, they are colored the unbound color.
               (set! tacked-hash-table (make-hasheq))
               (set! arrow-records (make-hasheq))
               (set! bindings-table (make-hash))
-              (set! cleanup-texts '())
-              (set! style-mapping (make-hash)))
+              (set! cleanup-texts '()))
             
             (define/public (syncheck:arrows-visible?)
               (or arrow-records cursor-pos cursor-text cursor-eles cursor-tooltip))
@@ -491,7 +498,6 @@ If the namespace does not, they are colored the unbound color.
                 (when (update-latent-arrows #f #f)
                   (update-drawn-arrows))
                 (syncheck:clear-coloring)
-                (set! style-mapping #f)
                 (invalidate-bitmap-cache)))
             
             (define/public (syncheck:clear-coloring)
@@ -501,19 +507,15 @@ If the namespace does not, they are colored the unbound color.
               (set! cleanup-texts #f))
             
             ;; syncheck:apply-style/remember : (is-a?/c text%) number number style% symbol -> void
-            (define/public (syncheck:apply-style/remember txt start finish style mode)
-              (when (eq? mode syncheck-mode)
-                (add-to-cleanup/apply-style txt start finish style))
-              (when cleanup-texts
-                (hash-set! style-mapping mode (cons (list txt start finish style)
-                                                    (hash-ref style-mapping mode '())))))
+            (define/public (syncheck:apply-style/remember txt start finish style)
+              (add-to-cleanup/apply-style txt start finish style))
             
-            (define/public (syncheck:color-range source start finish style-name mode)
+            (define/public (syncheck:color-range source start finish style-name)
               (when (is-a? source text%)
-                (define (apply-style/remember ed start finish style mode)
+                (define (apply-style/remember ed start finish style)
                   (let ([outermost (find-outermost-editor ed)])
                     (and (is-a? outermost syncheck-text<%>)
-                         (send outermost syncheck:apply-style/remember ed start finish style mode))))
+                         (send outermost syncheck:apply-style/remember ed start finish style))))
                 
                 (define (find-outermost-editor ed)
                   (let loop ([ed ed])
@@ -527,7 +529,7 @@ If the namespace does not, they are colored the unbound color.
                 (let ([style (send (send source get-style-list)
                                    find-named-style
                                    style-name)])
-                  (apply-style/remember source start finish style mode))))
+                  (apply-style/remember source start finish style))))
 
             ;; add-to-cleanup/apply-style : (is-a?/c text%) number number style% symbol -> boolean
             (define/private (add-to-cleanup/apply-style txt start finish style)
@@ -832,7 +834,8 @@ If the namespace does not, they are colored the unbound color.
                       [old-font  (send dc get-font)]
                       [old-text-foreground (send dc get-text-foreground)]
                       [old-text-mode (send dc get-text-mode)]
-                      [old-alpha (send dc get-alpha)])
+                      [old-alpha (send dc get-alpha)]
+                      [white-on-black? (preferences:get 'framework:white-on-black?)]) 
                   (send dc set-font
                         (send the-font-list find-or-create-font
                               (send old-font get-point-size)
@@ -847,13 +850,13 @@ If the namespace does not, they are colored the unbound color.
                                       (cond
                                        [(var-arrow? arrow)
                                         (if (var-arrow-actual? arrow)
-                                            (begin (send dc set-pen var-pen)
-                                                   (send dc set-brush tacked-var-brush))
-                                            (begin (send dc set-pen templ-pen)
-                                                   (send dc set-brush tacked-templ-brush)))]
+                                            (begin (send dc set-pen (get-var-pen white-on-black?))
+                                                   (send dc set-brush (get-tacked-var-brush white-on-black?)))
+                                            (begin (send dc set-pen (get-templ-pen white-on-black?))
+                                                   (send dc set-brush (get-tacked-templ-brush white-on-black?))))]
                                        [(tail-arrow? arrow)
-                                        (send dc set-pen tail-pen)
-                                        (send dc set-brush tacked-tail-brush)])
+                                        (send dc set-pen (get-tail-pen white-on-black?))
+                                        (send dc set-brush (get-tacked-tail-brush white-on-black?))])
                                       (draw-arrow2 arrow))))
                   (when (and cursor-pos
                              cursor-text)
@@ -863,16 +866,16 @@ If the namespace does not, they are colored the unbound color.
                       (for ([ele (in-list (interval-map-ref arrow-record cursor-pos null))])
                         (cond [(var-arrow? ele)
                                (if (var-arrow-actual? ele)
-                                   (begin (send dc set-pen var-pen)
-                                          (send dc set-brush untacked-brush))
-                                   (begin (send dc set-pen templ-pen)
-                                          (send dc set-brush untacked-brush)))
+                                   (begin (send dc set-pen (get-var-pen white-on-black?))
+                                          (send dc set-brush (get-untacked-brush white-on-black?)))
+                                   (begin (send dc set-pen (get-templ-pen white-on-black?))
+                                          (send dc set-brush (get-untacked-brush white-on-black?))))
                                (draw-arrow2 ele)]
                               [(tail-arrow? ele)
                                (set! tail-arrows (cons ele tail-arrows))])))
                     
-                    (send dc set-pen tail-pen)
-                    (send dc set-brush untacked-brush)
+                    (send dc set-pen (get-tail-pen white-on-black?))
+                    (send dc set-brush (get-untacked-brush white-on-black?))
                     (for-each-tail-arrows draw-arrow2 tail-arrows))
                   (send dc set-brush old-brush)
                   (send dc set-pen old-pen)
@@ -1376,47 +1379,6 @@ If the namespace does not, they are colored the unbound color.
                 (when frame
                   (send frame update-button-visibility/settings settings)))
               (inner (void) after-set-next-settings settings))
-            
-            (define syncheck-mode 'default-mode)
-            (define/public (set-syncheck-mode m) 
-              (let ([old-mode syncheck-mode])
-                (set! syncheck-mode m)
-                (when style-mapping
-                  (unless (eq? old-mode syncheck-mode)
-                    (apply-syncheck-mode)))))
-            (define/public (get-syncheck-mode) (if style-mapping
-                                                   syncheck-mode
-                                                   #f))
-            
-            (define/private (apply-syncheck-mode)
-              (let ([edit-sequences '()])
-                
-                ;; we need to reset the colors in every editor we can find, not just those that have new colors
-                (for ([(k v) (in-hash style-mapping)])
-                  (for ((l (in-list v)))
-                    (let-values ([(txt start finish style) (apply values l)])
-                      (unless (memq txt edit-sequences)
-                        (send txt begin-edit-sequence #f)
-                        
-                        ;; this little dance resets the 
-                        ;; colors to their natural values
-                        (begin
-                          (cond
-                            [(send txt is-frozen?)
-                             (send txt thaw-colorer)]
-                            [else
-                             (send txt freeze-colorer)
-                             (send txt thaw-colorer)])
-                          (send txt freeze-colorer))
-                        
-                        (set! edit-sequences (cons txt edit-sequences))))))
-                
-                (for ((l (in-list (reverse (hash-ref style-mapping syncheck-mode '())))))
-                  (let-values ([(txt start finish style) (apply values l)])
-                    (add-to-cleanup/apply-style txt start finish style)))
-                
-                (for ((txt (in-list edit-sequences)))
-                  (send txt end-edit-sequence))))
 
             (define/public (syncheck:find-source-object stx)
               (cond
@@ -1483,8 +1445,7 @@ If the namespace does not, they are colored the unbound color.
           (when error-report-visible?
             (cond
               [(is-current-tab?)
-               (send (get-frame) hide-error-report)
-               (send (get-frame) update-menu-status this)]
+               (send (get-frame) hide-error-report)]
               [else
                (set! error-report-visible? #f)])))
         
@@ -1526,20 +1487,21 @@ If the namespace does not, they are colored the unbound color.
               (show-error-report)
               (hide-error-report))
           (send report-error-canvas set-editor (send new-tab get-error-report-text))
-          (update-menu-status new-tab)
           (update-button-visibility/tab new-tab))
         
         (define/private (update-button-visibility/tab tab)
           (update-button-visibility/settings (send (send tab get-defs) get-next-settings)))
+        (inherit sort-toolbar-buttons-panel)
         (define/public (update-button-visibility/settings settings)
           (let* ([lang (drracket:language-configuration:language-settings-language settings)]
                  [visible? (and (not (is-a? lang drracket:module-language:module-language<%>))
                                 (send lang capability-value 'drscheme:check-syntax-button))])
-            (send check-syntax-button-parent-panel change-children
+            (send (get-button-panel) change-children
                   (λ (l)
                     (if visible?
-                        (list check-syntax-button)
-                        '())))))
+                        (cons check-syntax-button (remq check-syntax-button l))
+                        (remq check-syntax-button l))))
+            (sort-toolbar-buttons-panel)))
         
         ;; set-syncheck-running-mode : (or/c (box boolean?) 'button #f) -> boolean
         ;; records how a particular check syntax is being played out in the editor right now.
@@ -1630,7 +1592,21 @@ If the namespace does not, they are colored the unbound color.
             [`(syncheck:add-docs-menu ,text ,start-pos ,end-pos ,key ,the-label ,path ,tag)
              (send defs-text syncheck:add-docs-menu defs-text start-pos end-pos key the-label path tag)]
             [`(syncheck:add-rename-menu ,id-as-sym ,to-be-renamed/poss ,name-dup-pc ,name-dup-id)
-             (define (name-dup? name) (place-channel-put/get name-dup-pc (list name-dup-id name)))
+             (define other-side-dead? #f)
+             (define (name-dup? name) 
+               (cond
+                 [other-side-dead? 
+                  ;; just give up here ...
+                  #f]
+                 [else
+                  (place-channel-put name-dup-pc (list name-dup-id name))
+                  (define res (sync/timeout .5 (handle-evt name-dup-pc list)))
+                  (cond
+                    [(list? res) (car res)]
+                    [else
+                     (printf "other side died\n")
+                     (set! other-side-dead? #t)
+                     #f])]))
              (define to-be-renamed/poss/fixed
                (for/list ([lst (in-list to-be-renamed/poss)])
                  (list defs-text (list-ref lst 1) (list-ref lst 2))))
@@ -1639,13 +1615,9 @@ If the namespace does not, they are colored the unbound color.
         
         (define/augment (enable-evaluation)
           (send check-syntax-button enable #t)
-          (send mode-menu-item1 enable #t)
-          (send mode-menu-item2 enable #t)
           (inner (void) enable-evaluation))
         
         (define/augment (disable-evaluation)
-          (send mode-menu-item1 enable #f)
-          (send mode-menu-item2 enable #f)
           (send check-syntax-button enable #f)
           (inner (void) disable-evaluation))
         
@@ -1726,55 +1698,11 @@ If the namespace does not, they are colored the unbound color.
             (set! super-root s-root)
             (set! rest-panel r-root)
             r-root))
-        
-        (define mode-menu-item1 #f)
-        (define mode-menu-item2 #f)
-        (define mode-menu-item3 #f)
-        
-        (define/override (add-show-menu-items show-menu)
-          (define (start-checking mode)
-            (let* ([tab (get-current-tab)]
-                   [defs (send tab get-defs)])
-              (preferences:set 'drracket:syncheck-mode mode)
-              (cond
-                [(send defs get-syncheck-mode)
-                 (send defs set-syncheck-mode mode)
-                 (update-menu-status tab)]
-                [else
-                 (syncheck:button-callback #f mode)])))
-          
-          (super add-show-menu-items show-menu)
-          (let ([p (new menu%
-                        [parent show-menu]
-                        [label cs-check-syntax-mode])])
-            (set! mode-menu-item1
-                  (new checkable-menu-item% 
-                       [parent p]
-                       [label cs-mode-menu-show-syntax]
-                       [callback (λ (a b) (start-checking 'default-mode))]))
-            (set! mode-menu-item2
-                  (new checkable-menu-item% 
-                       [parent p]
-                       [label cs-mode-menu-show-my-obligations]
-                       [callback (λ (a b) (start-checking 'my-obligations-mode))]))
-            (set! mode-menu-item3
-                  (new checkable-menu-item%
-                       [parent p]
-                       [label cs-mode-menu-show-client-obligations]
-                       [callback (λ (a b) (start-checking 'client-obligations-mode))]))))
-        
-        (define/public (update-menu-status tab)
-          (when mode-menu-item1
-            (let ([mode (send (send (get-current-tab) get-defs) get-syncheck-mode)])
-              (send mode-menu-item1 check (eq? mode 'default-mode))
-              (send mode-menu-item2 check (eq? mode 'my-obligations-mode))
-              (send mode-menu-item3 check (eq? mode 'client-obligations-mode)))))
                 
         (inherit open-status-line close-status-line update-status-line ensure-rep-hidden)
         ;; syncheck:button-callback : (case-> (-> void) ((union #f syntax) -> void)
         ;; this is the only function that has any code running on the user's thread
-        (define/public (syncheck:button-callback [jump-to-id #f] 
-                                                 [mode (preferences:get 'drracket:syncheck-mode)])
+        (define/public (syncheck:button-callback [jump-to-id #f])
           (when (send check-syntax-button is-enabled?)
             (open-status-line 'drracket:check-syntax:status)
             (update-status-line 'drracket:check-syntax:status status-init)
@@ -1922,8 +1850,6 @@ If the namespace does not, they are colored the unbound color.
                            (λ ()
                              (parameterize ([current-annotations definitions-text])
                                (expansion-completed))
-                             (send (send (get-current-tab) get-defs) set-syncheck-mode mode)
-                             (update-menu-status (get-current-tab))
                              (send definitions-text syncheck:sort-bindings-table)))
                           (cleanup)
                           (custodian-shutdown-all user-custodian))))]
@@ -2010,25 +1936,16 @@ If the namespace does not, they are colored the unbound color.
                 
         (super-new)
         
-        (define check-syntax-button-parent-panel 
-          (new horizontal-panel%
-               [parent (get-button-panel)]
-               [stretchable-width #f]
-               [stretchable-height #f]))
         (define check-syntax-button
           (new switchable-button%
-               (label (string-constant check-syntax))
-               (bitmap syncheck-bitmap)
-               (alternate-bitmap syncheck-small-bitmap)
-               (parent check-syntax-button-parent-panel)
-               (callback (λ (button) (syncheck:button-callback)))))
+               [label (string-constant check-syntax)]
+               [bitmap syncheck-bitmap]
+               [alternate-bitmap syncheck-small-bitmap]
+               [parent (get-button-panel)]
+               [callback (λ (button) (syncheck:button-callback))]))
         (inherit register-toolbar-button)
-        (register-toolbar-button check-syntax-button)
+        (register-toolbar-button check-syntax-button #:number 50)
         (define/public (syncheck:get-button) check-syntax-button)
-        (send (get-button-panel) change-children
-              (λ (l)
-                (cons check-syntax-button-parent-panel
-                      (remove check-syntax-button-parent-panel l))))
         (update-button-visibility/tab (get-current-tab))))
     
     (define report-error-style (make-object style-delta% 'change-style 'italic))

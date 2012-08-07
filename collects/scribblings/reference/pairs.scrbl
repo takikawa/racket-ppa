@@ -206,7 +206,7 @@ Returns the number of elements in @racket[lst].
 ]}
 
 
-@defproc[(list-ref [lst any/c] [pos exact-nonnegative-integer?])
+@defproc[(list-ref [lst pair?] [pos exact-nonnegative-integer?])
          any/c]{
 
 Returns the element of @racket[lst] at position @racket[pos], where
@@ -860,15 +860,34 @@ except that it can be faster.
 (split-at-right '(1 2 3 4 5 6) 4)
 ]}
 
-@defproc[(add-between [lst list?] [v any/c]) list?]{
+
+@defproc[(add-between [lst list?] [v any/c]
+                      [#:before-first before-first list? '()]
+                      [#:before-last  before-last  any/c v]
+                      [#:after-last   after-last   list? '()]
+                      [#:splice? splice? any/c #f])
+         list?]{
 
 Returns a list with the same elements as @racket[lst], but with
-@racket[v] between each pair of items in @racket[lst].
+@racket[v] between each pair of elements in @racket[lst]; the last
+pair of elements will have @racket[before-last] between them, instead
+of @racket[v] (but @racket[before-last] defaults to @racket[v]).
+
+If @racket[splice?] is true, then @racket[v] and @racket[before-last]
+should be lists, and the list elements are spliced into the result.  In
+addition, when @racket[splice?] is true, @racket[before-first] and
+@racket[after-last] are inserted before the first element and after the
+last element respectively.
 
 @mz-examples[#:eval list-eval
-  (add-between '(x y z) 'or)
-  (add-between '(x) 'or)
+  (add-between '(x y z) 'and)
+  (add-between '(x) 'and)
+  (add-between '("a" "b" "c" "d") "," #:before-last "and")
+  (add-between '(x y z) '(-) #:before-last '(- -)
+               #:before-first '(begin) #:after-last '(end LF)
+               #:splice? #t)
 ]}
+
 
 @defproc*[([(append* [lst list?] ... [lsts (listof list?)]) list?]
            [(append* [lst list?] ... [lsts list?]) any/c])]{
@@ -1011,6 +1030,23 @@ the result of @racket[proc]. Signals an error on an empty list.
 (argmax car '((3 pears) (1 banana) (2 apples)))
 (argmax car '((3 pears) (3 oranges)))
 ]}
+
+@defproc*[([(range [end real?]) list?]
+           [(range [start real?] [end real?] [step real? 1]) list?])]{
+  Similar to @racket[in-range], but returns lists.
+  Returns a list of numbers starting at @racket[start] and whose successive
+  elements are computed by adding @racket[step] to their predecessor until
+  @racket[end] (excluded) is reached.
+  If no starting point is provided, @racket[0] is used. If no @racket[step]
+  argument is provided, @racket[1] is used.
+@mz-examples[#:eval list-eval
+(range 10)
+(range 10 20)
+(range 20 40 2)
+(range 20 10 -1)
+(range 10 15 1.5)
+]}
+
 
 @close-eval[list-eval]
 

@@ -94,7 +94,12 @@ identifiers used by the @racket[reader-option]s.
        @racket[read-syntax], respectively. Normally, the replacements
        for @racket[read] and @racket[read-syntax] are applied
        repeatedly to the module source until @racket[eof] is produced,
-       but see also @racket[#:whole-body-readers?].
+       but see also @racket[#:whole-body-readers?]. 
+
+       Unless @racket[#:whole-body-readers?] specifies a true value,
+       the repeated use of @racket[read] or @racket[read-syntax] is
+       @racket[parameterize]d to set @racket[read-accept-lang] to
+       @racket[#f], which disables nested uses of @hash-lang[].
 
         See also @racket[#:wrapper1] and @racket[#:wrapper2], which
         support simple parameterization of readers rather than
@@ -334,7 +339,8 @@ reading of the module language.}
 @defproc[(make-meta-reader [self-sym symbol?]
                            [path-desc-str string?]
                            [#:read-spec read-spec (input-port? . -> . any/c) (lambda (in) ....)]
-                           [module-path-parser (any/c . -> . (or/c module-path? #f))]
+                           [module-path-parser (any/c . -> . (or/c module-path? #f 
+                                                                   (vectorof module-path?)))]
                            [convert-read (procedure? . -> . procedure?)]
                            [convert-read-syntax (procedure? . -> . procedure?)]
                            [convert-get-info  (procedure? . -> . procedure?)])
@@ -367,6 +373,8 @@ description of the expected language form in the error message.
 
 The result of @racket[read-spec] is converted to a module path using
 @racket[module-path-parser]. If @racket[module-path-parser] produces
+a vector of module paths, they are tried in order using 
+@racket[module-declared?]. If @racket[module-path-parser] produces
 @racket[#f], a reader exception is raised in the same way as when
 @racket[read-spec] produces a @racket[#f]. The @racketmodname[planet]
 languages supply a @racket[module-path-parser] that converts a byte

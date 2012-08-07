@@ -171,6 +171,12 @@
                  (lambda (idx . elems) #t)))))))
      sequence?)))
 
+;; Added by ntoronto
+
+(define (treeof elem-contract)
+  (or/c elem-contract
+        (listof (recursive-contract (treeof elem-contract) #:flat))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;;  Exports
@@ -192,4 +198,7 @@
  [truth/c flat-contract?]
 
  [sequence/c (->* [] [] #:rest (listof contract?) contract?)]
+ 
+ [treeof (contract? . -> . contract?)]
  )
+

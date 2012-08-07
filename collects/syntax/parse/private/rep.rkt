@@ -27,9 +27,6 @@
   (-> syntax? (or/c false/c (listof sattr?)) boolean?
       #:context (or/c false/c syntax?)
       rhs?)]
- [optimize-rhs
-  (-> rhs? any/c
-      (or/c #f (list/c rhs? syntax?)))]
  [parse-pattern+sides
   (-> syntax? syntax?
       #:splicing? boolean?
@@ -76,7 +73,10 @@
         (boolean? datum)
         (string? datum)
         (number? datum)
-        (keyword? datum))))
+        (keyword? datum)
+        (bytes? datum)
+        (char? datum)
+        (regexp? datum))))
 
 (define (id-predicate kw)
   (lambda (stx)
@@ -196,63 +196,6 @@
 
 ;; ----
 
-#|
-A syntax class is integrable if
-  - only positional params without defaults
-  - no attributes
-  - description is a string constant
-  - one variant: (~fail #:when/unless cond) ... no message
-  - and thus no txlifted definitions, no convention definitions, etc
-  - don't care about commit?, delimit-cut?, transparent?
-    because other restrictions make them irrelevant
-|#
-
-;; optimize-rhs : RHS stxlist -> (list RHS stx)/#f
-;; Returns #f to indicate cannot integrate.
-(define (optimize-rhs rhs0 params)
-  (define (check-stx-string x)
-    (syntax-case x (quote)
-      [(quote str) (string? (syntax-e #'str)) #'str]
-      [_ #f]))
-  (define (stx-false? x)
-    (syntax-case x (quote)
-      [(quote #f) #t]
-      [_ #f]))
-  (match rhs0
-    [(rhs _o '() _trans? (? check-stx-string description) (list variant0) '() _opts '#f)
-     (match variant0
-       [(variant _o '() pattern0 '())
-        (match pattern0
-          [(pat:action '() (action:fail '() cond-stx msg-stx) (pat:any '()))
-           (cond [(stx-false? msg-stx)
-                  ;; Yes!
-                  (with-syntax ([(predicate) (generate-temporaries #'(predicate))]
-                                [(param ...) params]
-                                [fail-condition cond-stx])
-                    (let* ([predicate-def
-                            #'(define (predicate x param ...)
-                                (syntax-parameterize ((this-syntax
-                                                       (make-rename-transformer
-                                                        (quote-syntax x))))
-                                  (#%expression (not fail-condition))))]
-                           [integrate* (make integrate #'predicate
-                                             (check-stx-string description))]
-                           [pattern*
-                            (create-pat:action
-                             (create-action:fail #'(not (predicate this-syntax param ...)) #'#f)
-                             (create-pat:any))]
-                           [variant*
-                            (variant _o '() pattern* '())])
-                      (list
-                       (make rhs _o '() _trans? description (list variant*) '() _opts integrate*)
-                       predicate-def)))]
-                 [else #f])]
-          [_ #f])]
-       [_ #f])]
-    [_ #f]))
-
-;; ----
-
 (define (parse-variants rest decls splicing? expected-attrs)
   (define (gather-variants stx)
     (syntax-case stx (pattern)
@@ -315,11 +258,11 @@ A syntax class is integrable if
 ;; FIXME: replace with txlift mechanism
 (define (create-aux-def entry)
   (match entry
-    [(struct den:lit (_i _e _ip _lp))
+    [(den:lit _i _e _ip _lp)
      (values entry null)]
-    [(struct den:magic-class (name class argu))
+    [(den:magic-class name class argu role)
      (values entry null)]
-    [(struct den:class (name class argu))
+    [(den:class name class argu)
      ;; FIXME: integrable syntax classes?
      (cond [(identifier? name)
             (let* ([pos-count (length (arguments-pargs argu))]
@@ -340,9 +283,9 @@ A syntax class is integrable if
               (values (make den:delayed #'parser class)
                       (list #`(define-values (parser)
                                 (curried-stxclass-parser #,class #,argu)))))])]
-    [(struct den:parser (_p _a _sp _c _dc?))
+    [(den:parser _p _a _sp _c _dc?)
      (values entry null)]
-    [(struct den:delayed (_p _c))
+    [(den:delayed _p _c)
      (values entry null)]))
 
 (define (append-lits+litsets lits litsets)
@@ -418,18 +361,18 @@ A syntax class is integrable if
     (create-action:and
      (for/list ([side (in-list sides)])
        (match side
-         [(make clause:fail condition message)
+         [(clause:fail condition message)
           (create-action:post
            (create-action:fail condition message))]
-         [(make clause:with wpat expr defs)
+         [(clause:with wpat expr defs)
           (let ([ap (create-action:post
                      (create-action:parse wpat expr))])
             (if (pair? defs)
                 (create-action:and (list (create-action:do defs) ap))
                 ap))]
-         [(make clause:attr attr expr)
+         [(clause:attr attr expr)
           (create-action:bind (list side))]
-         [(make clause:do stmts)
+         [(clause:do stmts)
           (create-action:do stmts)]))))
   (define dummy-pattern
     (and (pair? sides)
@@ -612,7 +555,7 @@ A syntax class is integrable if
          (let* ([iattrs (id-pattern-attrs (eh-alternative-attrs alt) prefix)]
                 [attr-count (length iattrs)])
            (list (make ehpat (repc-adjust-attrs iattrs (eh-alternative-repc alt))
-                       (create-hpat:var #f (eh-alternative-parser alt) no-arguments iattrs attr-count #f)
+                       (create-hpat:var #f (eh-alternative-parser alt) no-arguments iattrs attr-count #f #f)
                        (eh-alternative-repc alt))
                  (replace-eh-alternative-attrs
                   alt (iattrs->sattrs iattrs))))))]
@@ -664,61 +607,35 @@ A syntax class is integrable if
 (define (parse-pat:id id decls allow-head?)
   (define entry (declenv-lookup decls id))
   (match entry
-    [(struct den:lit (internal literal input-phase lit-phase))
+    [(den:lit internal literal input-phase lit-phase)
      (create-pat:literal literal input-phase lit-phase)]
-    [(struct den:magic-class (name class argu))
+    [(den:magic-class name class argu role)
      (let* ([pos-count (length (arguments-pargs argu))]
             [kws (arguments-kws argu)]
-            [sc (get-stxclass/check-arity class class pos-count kws)]
-            [splicing? (stxclass-splicing? sc)]
-            [attrs (stxclass-attrs sc)]
-            [parser (stxclass-parser sc)]
-            [commit? (stxclass-commit? sc)]
-            [delimit-cut? (stxclass-delimit-cut? sc)])
-       (check-no-delimit-cut-in-not id delimit-cut?)
-       (if splicing?
-           (begin
-             (unless allow-head?
-               (wrong-syntax id "splicing syntax class not allowed here"))
-             (parse-pat:id/h id parser argu attrs commit?))
-           (parse-pat:id/s id parser argu attrs commit?)))]
-    [(struct den:class (_n _c _a))
+            [sc (get-stxclass/check-arity class class pos-count kws)])
+       (parse-pat:var* id allow-head? id sc argu "." role #f))]
+    [(den:class _n _c _a)
      (error 'parse-pat:id
             "(internal error) decls had leftover stxclass entry: ~s"
             entry)]
-    [(struct den:parser (parser attrs splicing? commit? delimit-cut?))
-     (begin
-       (check-no-delimit-cut-in-not id delimit-cut?)
-       (if splicing?
-           (begin
-             (unless allow-head?
-               (wrong-syntax id "splicing syntax class not allowed here"))
-             (parse-pat:id/h id parser no-arguments attrs commit?))
-           (parse-pat:id/s id parser no-arguments attrs commit?)))]
-    [(struct den:delayed (parser class))
+    [(den:parser parser attrs splicing? commit? delimit-cut?)
+     (check-no-delimit-cut-in-not id delimit-cut?)
+     (cond [splicing?
+            (unless allow-head?
+              (wrong-syntax id "splicing syntax class not allowed here"))
+            (parse-pat:id/h id parser no-arguments attrs commit? "." #f)]
+           [else
+            (parse-pat:id/s id parser no-arguments attrs commit? "." #f)])]
+    [(den:delayed parser class)
      (let ([sc (get-stxclass class)])
-       (check-no-delimit-cut-in-not id (stxclass-delimit-cut? sc))
-       (cond [(stxclass/s? sc)
-              (parse-pat:id/s id
-                              parser
-                              no-arguments
-                              (stxclass-attrs sc)
-                              (stxclass-commit? sc))]
-             [(stxclass/h? sc)
-              (unless allow-head?
-                (wrong-syntax id "splicing syntax class not allowed here"))
-              (parse-pat:id/h id
-                              parser
-                              no-arguments
-                              (stxclass-attrs sc)
-                              (stxclass-commit? sc))]))]
+       (parse-pat:var* id allow-head? id sc no-arguments "." #f parser))]
     ['#f
      (unless (safe-name? id)
        (wrong-syntax id "expected identifier not starting with ~~ character"))
      (let-values ([(name sc) (split-id/get-stxclass id decls)])
        (if sc
-           (parse-pat:var* id allow-head? name sc no-arguments)
-           (create-pat:var name #f no-arguments null #f #t)))]))
+           (parse-pat:var* id allow-head? name sc no-arguments "." #f #f)
+           (create-pat:var name #f no-arguments null #f #t #f)))]))
 
 (define (parse-pat:var stx decls allow-head?)
   (define name0
@@ -729,10 +646,10 @@ A syntax class is integrable if
        #'name]
       [_
        (wrong-syntax stx "bad ~~var form")]))
-  (define-values (scname sc+args-stx argu pfx)
+  (define-values (scname sc+args-stx argu pfx role)
     (syntax-case stx (~var)
       [(~var _name)
-       (values #f #f null #f)]
+       (values #f #f null #f #f)]
       [(~var _name sc/sc+args . rest)
        (let-values ([(sc argu)
                      (let ([p (check-stxclass-application #'sc/sc+args stx)])
@@ -743,7 +660,8 @@ A syntax class is integrable if
                                       #:context stx))
          (define sep
            (options-select-value chunks '#:attr-name-separator #:default #f))
-         (values sc #'sc/sc+args argu (if sep (syntax-e sep) ".")))]
+         (define role (options-select-value chunks '#:role #:default #'#f))
+         (values sc #'sc/sc+args argu (if sep (syntax-e sep) ".") role))]
       [_
        (wrong-syntax stx "bad ~~var form")]))
   (cond [(and (epsilon? name0) (not scname))
@@ -754,46 +672,51 @@ A syntax class is integrable if
          (let ([sc (get-stxclass/check-arity scname sc+args-stx
                                              (length (arguments-pargs argu))
                                              (arguments-kws argu))])
-           (parse-pat:var* stx allow-head? name0 sc argu pfx))]
+           (parse-pat:var* stx allow-head? name0 sc argu pfx role #f))]
         [else ;; Just proper name
-         (create-pat:var name0 #f (arguments null null null) null #f #t)]))
+         (create-pat:var name0 #f (arguments null null null) null #f #t #f)]))
 
-(define (parse-pat:var* stx allow-head? name sc argu [pfx "."])
+(define (parse-pat:var* stx allow-head? name sc argu pfx role parser*)
+  ;; if parser* not #f, overrides sc parser
   (check-no-delimit-cut-in-not stx (stxclass-delimit-cut? sc))
-  (cond [(stxclass/s? sc)
-         (if (and (stxclass-integrate sc) (null? (arguments-kws argu)))
-             (parse-pat:id/s/integrate name (stxclass-integrate sc) argu)
-             (parse-pat:id/s name
-                             (stxclass-parser sc)
-                             argu
-                             (stxclass-attrs sc)
-                             (stxclass-commit? sc)
-                             pfx))]
+  (cond [(and (stxclass/s? sc)
+              (stxclass-integrate sc)
+              (equal? argu no-arguments))
+         (parse-pat:id/s/integrate name (stxclass-integrate sc) role)]
+        [(stxclass/s? sc)
+         (parse-pat:id/s name
+                         (or parser* (stxclass-parser sc))
+                         argu
+                         (stxclass-attrs sc)
+                         (stxclass-commit? sc)
+                         pfx
+                         role)]
         [(stxclass/h? sc)
          (unless allow-head?
            (wrong-syntax stx "splicing syntax class not allowed here"))
          (parse-pat:id/h name
-                         (stxclass-parser sc)
+                         (or parser* (stxclass-parser sc))
                          argu
                          (stxclass-attrs sc)
                          (stxclass-commit? sc)
-                         pfx)]))
+                         pfx
+                         role)]))
 
-(define (parse-pat:id/s name parser argu attrs commit? [pfx "."])
+(define (parse-pat:id/s name parser argu attrs commit? pfx role)
   (define prefix (name->prefix name pfx))
   (define bind (name->bind name))
-  (create-pat:var bind parser argu (id-pattern-attrs attrs prefix) (length attrs) commit?))
+  (create-pat:var bind parser argu (id-pattern-attrs attrs prefix) (length attrs) commit? role))
 
-(define (parse-pat:id/s/integrate name integrate argu)
+(define (parse-pat:id/s/integrate name integrate role)
   (define bind (name->bind name))
-  (create-pat:integrated bind argu
-                         (integrate-predicate integrate)
-                         (integrate-description integrate)))
+  (let ([predicate (integrate-predicate integrate)]
+        [description (integrate-description integrate)])
+    (create-pat:integrated bind predicate description role)))
 
-(define (parse-pat:id/h name parser argu attrs commit? [pfx "."])
+(define (parse-pat:id/h name parser argu attrs commit? pfx role)
   (define prefix (name->prefix name pfx))
   (define bind (name->bind name))
-  (create-hpat:var bind parser argu (id-pattern-attrs attrs prefix) (length attrs) commit?))
+  (create-hpat:var bind parser argu (id-pattern-attrs attrs prefix) (length attrs) commit? role))
 
 (define (name->prefix id pfx)
   (cond [(wildcard? id) #f]
@@ -867,12 +790,13 @@ A syntax class is integrable if
                                           #:no-duplicates? #t
                                           #:context stx)])
        (define transparent? (not (assq '#:opaque chunks)))
+       (define role (options-select-value chunks '#:role #:default #'#f))
        (syntax-case rest ()
          [(description pattern)
           (let ([p (parse-*-pattern #'pattern decls allow-head? #f)])
             (if (head-pattern? p)
-                (create-hpat:describe #'description transparent? p)
-                (create-pat:describe #'description transparent? p)))]))]))
+                (create-hpat:describe p #'description transparent? role)
+                (create-pat:describe p #'description transparent? role)))]))]))
 
 (define (parse-pat:delimit stx decls allow-head?)
   (syntax-case stx ()
@@ -1070,15 +994,15 @@ A syntax class is integrable if
 
 (define (check-list-pattern pattern stx)
   (match pattern
-    [(make pat:datum _base '())
+    [(pat:datum _base '())
      #t]
-    [(make pat:head _base _head tail)
+    [(pat:head _base _head tail)
      (check-list-pattern tail stx)]
-    [(make pat:action _base _action tail)
+    [(pat:action _base _action tail)
      (check-list-pattern tail stx)]
-    [(make pat:dots _base _head tail)
+    [(pat:dots _base _head tail)
      (check-list-pattern tail stx)]
-    [(make pat:pair _base _head tail)
+    [(pat:pair _base _head tail)
      (check-list-pattern tail stx)]
     [_
      (wrong-syntax stx "expected proper list pattern")]))
@@ -1212,6 +1136,9 @@ A syntax class is integrable if
     [(cons (list '#:declare declare-stx _ _) rest)
      (wrong-syntax declare-stx
                    "#:declare can only follow pattern or #:with clause")]
+    [(cons (list '#:role role-stx _) rest)
+     (wrong-syntax role-stx
+                   "#:role can only follow immediately after #:declare clause")]
     [(cons (list '#:fail-when fw-stx when-condition expr) rest)
      (cons (make clause:fail when-condition expr)
            (parse-pattern-sides rest decls))]
@@ -1239,23 +1166,30 @@ A syntax class is integrable if
 ;; grab-decls : (listof chunk) DeclEnv
 ;;           -> (values DeclEnv (listof chunk))
 (define (grab-decls chunks decls0)
-  (define (add-decl stx decls)
-    (syntax-case stx ()
-      [(#:declare name sc)
-       (identifier? #'sc)
-       (add-decl* decls #'name #'sc (parse-argu null))]
-      [(#:declare name (sc expr ...))
-       (identifier? #'sc)
-       (add-decl* decls #'name #'sc (parse-argu (syntax->list #'(expr ...))))]
-      [(#:declare name bad-sc)
-       (wrong-syntax #'bad-sc
-                     "expected syntax class name (possibly with parameters)")]))
-  (define (add-decl* decls id sc-name argu)
-    (declenv-put-stxclass decls id sc-name argu))
+  (define (add-decl stx role-stx decls)
+    (let ([role
+           (and role-stx
+                (syntax-case role-stx ()
+                  [(#:role role) #'role]))])
+      (syntax-case stx ()
+        [(#:declare name sc)
+         (identifier? #'sc)
+         (add-decl* decls #'name #'sc (parse-argu null) role)]
+        [(#:declare name (sc expr ...))
+         (identifier? #'sc)
+         (add-decl* decls #'name #'sc (parse-argu (syntax->list #'(expr ...))) role)]
+        [(#:declare name bad-sc)
+         (wrong-syntax #'bad-sc
+                       "expected syntax class name (possibly with parameters)")])))
+  (define (add-decl* decls id sc-name argu role)
+    (declenv-put-stxclass decls id sc-name argu role))
   (define (loop chunks decls)
     (match chunks
+      [(cons (cons '#:declare decl-stx)
+             (cons (cons '#:role role-stx) rest))
+       (loop rest (add-decl decl-stx role-stx decls))]
       [(cons (cons '#:declare decl-stx) rest)
-       (loop rest (add-decl decl-stx decls))]
+       (loop rest (add-decl decl-stx #f decls))]
       [_ (values decls chunks)]))
   (loop chunks decls0))
 
@@ -1572,6 +1506,7 @@ A syntax class is integrable if
 ;; pattern-directive-table
 (define pattern-directive-table
   (list (list '#:declare check-identifier check-expression)
+        (list '#:role check-expression) ;; attached to preceding #:declare
         (list '#:fail-when check-expression check-expression)
         (list '#:fail-unless check-expression check-expression)
         (list '#:when check-expression)
@@ -1586,7 +1521,8 @@ A syntax class is integrable if
 
 ;; describe-option-table
 (define describe-option-table
-  (list (list '#:opaque)))
+  (list (list '#:opaque)
+        (list '#:role check-expression)))
 
 ;; eh-optional-directive-table
 (define eh-optional-directive-table
@@ -1609,4 +1545,5 @@ A syntax class is integrable if
 
 ;; var-pattern-directive-table
 (define var-pattern-directive-table
-  (list (list '#:attr-name-separator check-stx-string)))
+  (list (list '#:attr-name-separator check-stx-string)
+        (list '#:role check-expression)))

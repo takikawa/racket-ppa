@@ -1,36 +1,16 @@
-#lang scheme/base
+#lang racket/base
 (require ffi/unsafe
          ffi/unsafe/define
          ffi/unsafe/alloc
+         "cairo-lib.rkt"
          "../private/libs.rkt"
          "../private/utils.rkt")
-
-(define-runtime-lib cairo-lib
-  [(unix) (ffi-lib "libcairo" '("2" ""))]
-  [(macosx) 
-   (ffi-lib "libpixman-1.0.dylib")
-   (ffi-lib "libpng14.14.dylib")
-   (ffi-lib "libcairo.2.dylib")]
-  [(win32) 
-   (ffi-lib "zlib1.dll")
-   (ffi-lib "libpng14-14.dll")
-   (ffi-lib "libexpat-1.dll")
-   (ffi-lib "freetype6.dll")
-   (ffi-lib "libfontconfig-1.dll")
-   (ffi-lib "libcairo-2.dll")]
-  [(win64) 
-   (ffi-lib "zlib1.dll")
-   (ffi-lib "libintl-8.dll")
-   (ffi-lib "libpng14-14.dll")
-   (ffi-lib "libexpat-1.dll")
-   (ffi-lib "libfreetype-6.dll")
-   (ffi-lib "libfontconfig-1.dll")
-   (ffi-lib "libcairo-2.dll")])
 
 (define-ffi-definer define-cairo cairo-lib
   #:provide provide-protected)
 
 (provide _cairo_t
+         _cairo_surface_t
          _cairo_font_options_t)
 
 (define _cairo_surface_t (_cpointer 'cairo_surface_t))
@@ -326,7 +306,7 @@
                                                                      -> _int)
                                                                (_pointer = #f)
                                                                -> _cairo_surface_t/null))
-
+;; Not recommended, unless it makes sense to make the allback atomic:
 (define-cairo cairo_surface_write_to_png_stream (_fun _cairo_surface_t
                                                       (_fun _pointer
                                                             (s : _pointer)

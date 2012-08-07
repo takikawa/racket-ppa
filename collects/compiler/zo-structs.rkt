@@ -43,7 +43,7 @@
 (define-form-struct module-variable ([modidx module-path-index?] 
                                      [sym symbol?] 
                                      [pos exact-integer?] 
-                                     [phase (or/c 0 1)])) ; direct access to exported id
+                                     [phase exact-nonnegative-integer?]))
 
 ;; Syntax object
 (define ((alist/c k? v?) l)
@@ -106,7 +106,7 @@
                                          [max-let-depth exact-nonnegative-integer?]
                                          [dummy (or/c toplevel? #f)]))
 
-(define-form-struct (mod form) ([name symbol?] 
+(define-form-struct (mod form) ([name (or/c symbol? (listof symbol?))]
                                 [srcname symbol?]
                                 [self-modidx module-path-index?] 
                                 [prefix prefix?] 
@@ -124,7 +124,9 @@
                                 [max-let-depth exact-nonnegative-integer?]
                                 [dummy toplevel?]
                                 [lang-info (or/c #f (vector/c module-path? symbol? any/c))]
-                                [internal-context (or/c #f #t stx?)]))
+                                [internal-context (or/c #f #t stx? (vectorof stx?))]
+                                [pre-submodules (listof mod?)]
+                                [post-submodules (listof mod?)]))
 
 (define-form-struct (lam expr) ([name (or/c symbol? vector? empty?)]
                                 [flags (listof (or/c 'preserves-marks 'is-method 'single-result
@@ -191,15 +193,20 @@
                                                              (or/c
                                                               (cons/c symbol? (or/c symbol? #f))
                                                               free-id-info?)))))])) 
-(define-form-struct (phase-shift wrap) ([amt exact-integer?] [src (or/c module-path-index? #f)] [dest (or/c module-path-index? #f)]))
+(define-form-struct (phase-shift wrap) ([amt (or/c exact-integer? #f)] 
+                                        [src (or/c module-path-index? #f)] 
+                                        [dest (or/c module-path-index? #f)]
+                                        [cancel-id (or/c exact-integer? #f)]))
 (define-form-struct (wrap-mark wrap) ([val exact-integer?]))
 (define-form-struct (prune wrap) ([sym any/c]))
 
 (define-form-struct all-from-module ([path module-path-index?] 
                                      [phase (or/c exact-integer? #f)] 
-                                     [src-phase any/c] ; should be (or/c exact-integer? #f)
-                                     [exceptions (or/c (listof (or/c symbol? number?)) #f)] ; should be (listof symbol?)
-                                     [prefix (or/c (vector/c (or/c symbol? #f)) #f)])) ; should be (or/c symbol? #f)
+                                     [src-phase (or/c exact-integer? #f)]
+                                     [exceptions (listof symbol?)]
+                                     [prefix (or/c symbol? #f)]
+                                     [context (or/c (listof exact-integer?) 
+                                                    (vector/c (listof exact-integer?) any/c))]))
 
 (define-form-struct nominal-path ())
 (define-form-struct (simple-nominal-path nominal-path) ([value module-path-index?]))
