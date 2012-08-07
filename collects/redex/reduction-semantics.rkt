@@ -1,7 +1,8 @@
-#lang scheme/base
-(require scheme/contract)
+#lang racket/base
+(require racket/contract)
 
 (require "private/reduction-semantics.rkt"
+         "private/judgment-form.rkt"
          "private/matcher.rkt"
          "private/term.rkt"
          "private/rg.rkt"
@@ -22,6 +23,7 @@
          
          define-language
          define-extended-language
+         define-union-language
          plug
          compiled-lang?
          term
@@ -30,6 +32,7 @@
          define-metafunction/extension
          define-relation
          define-judgment-form
+         define-extended-judgment-form
          judgment-holds
          in-domain?
          caching-enabled?
@@ -37,6 +40,7 @@
          check-redudancy)
 
 (provide (rename-out [test-match redex-match])
+         (rename-out [test-match? redex-match?])
          term-match
          term-match/single
          redex-let

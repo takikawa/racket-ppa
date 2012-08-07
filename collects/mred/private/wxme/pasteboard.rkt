@@ -1,7 +1,7 @@
-#lang scheme/base
-(require scheme/class
-         scheme/port
-         scheme/file
+#lang racket/base
+(require racket/class
+         racket/port
+         racket/file
          "../syntax.rkt"
          "const.rkt"
          "private.rkt"
@@ -9,8 +9,9 @@
          "editor.rkt"
          "editor-data.rkt"
          "undo.rkt"
-         racket/snip
+         racket/snip/private/snip
          racket/snip/private/snip-flags
+         racket/snip/private/style
          "standard-snip-admin.rkt"
          "keymap.rkt"
          (only-in "cycle.rkt"
@@ -1985,14 +1986,15 @@
   ;; ----------------------------------------
 
   (def/override (begin-edit-sequence [any? [undoable? #t]] [any? [interrupt-seqs? #t]])
-    (wait-sequence-lock)
+    (define ready! (wait-sequence-lock))
     (when (or (positive? s-noundomode)
               (not undoable?))
       (set! s-noundomode (add1 s-noundomode)))
     (when (and (zero? sequence)
                (zero? write-locked))
       (on-edit-sequence))
-    (set! sequence (add1 sequence)))
+    (set! sequence (add1 sequence))
+    (ready!))
 
   (def/override (end-edit-sequence)
     (set! sequence (sub1 sequence))

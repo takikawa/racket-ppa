@@ -73,7 +73,7 @@ same structure type, no fields are opaque, and the results of applying
 @racket[equal?]. (Consequently, @racket[equal?]  testing for
 structures may depend on the current inspector.) A structure type can
 override the default @racket[equal?] definition through the
-@racket[prop:equal+hash] property.
+@racket[gen:equal+hash] @tech{generic interface}.
 
 @local-table-of-contents[]
 
@@ -287,6 +287,9 @@ For examples, see @racket[make-struct-type].}
 @;------------------------------------------------------------------------
 @section[#:tag "structprops"]{Structure Type Properties}
 
+@margin-note{@secref{struct-generics} provide a high-level API on top of
+structure type properties.}
+
 A @deftech{structure type property} allows per-type information to be
  associated with a structure type (as opposed to per-instance
  information associated with a structure value). A property value is
@@ -400,6 +403,9 @@ descriptor} value, @racket[#f] otherwise.}
 
 Returns @racket[#t] if @racket[v] is an accessor procedure produced
 by @racket[make-struct-type-property], @racket[#f] otherwise.}
+
+@;------------------------------------------------------------------------
+@include-section["generic.scrbl"]
 
 @;------------------------------------------------------------------------
 @section[#:tag "struct-copy"]{Copying and Updating Structures}
@@ -529,7 +535,7 @@ of the structure type.
 ]}
 
 
-@defproc[(make-prefab-struct [key (or/c symbol? list?)] [v any/c] ...) struct?]{
+@defproc[(make-prefab-struct [key prefab-key?] [v any/c] ...) struct?]{
 
 Creates an instance of a @tech{prefab} structure type, using the
 @racket[v]s as field values. The @racket[key] and the number of
@@ -583,7 +589,8 @@ supplied @racket[v]s, the @exnraise[exn:fail:contract].
 (make-prefab-struct '(clown 1 (1 #f) #(0)) "Binky" "pie")
 ]}
 
-@defproc[(prefab-key->struct-type [key (or/c symbol? list?)]
+
+@defproc[(prefab-key->struct-type [key prefab-key?]
                                   [field-count (integer-in 0 32768)])
          struct-type?]{
 
@@ -593,6 +600,14 @@ structure type specified by the combination of @racket[key] and
 
 If the number of fields indicated by @racket[key] is inconsistent with
 @racket[field-count], the @exnraise[exn:fail:contract].}
+
+
+@defproc[(prefab-key? [v any/c]) boolean?]{
+
+Return @racket[#t] if @racket[v] can be a @tech{prefab} structure type
+key, @racket[#f] otherwise.
+
+See @racket[make-prefab-struct] for a description of valid key shapes.}
 
 @;------------------------------------------------------------------------
 @section[#:tag "structinfo"]{Structure Type Transformer Binding}

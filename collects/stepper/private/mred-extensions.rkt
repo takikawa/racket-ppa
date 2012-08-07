@@ -1,11 +1,9 @@
-#lang scheme
-
-(require mzlib/class
-         mred
+#lang racket
+ 
+(require mred
          (prefix-in f: framework)
-         mzlib/pretty
-         #;"testing-shared.rkt"
-         "shared.rkt"
+         racket/pretty
+         "syntax-property.rkt"
          images/compile-time
          (for-syntax images/icons/control images/icons/style))
 
@@ -237,7 +235,7 @@
            ;; jbc : this could be fixed in the same way that inexact-number printing is handled....
            [read-case-sensitive #t]
            )
-        (pretty-print sexp text-port)))
+        (pretty-write sexp text-port)))
     
     (define/public (format-whole-step)
       (lock #f)
@@ -518,7 +516,7 @@
   (strip-regular stx))
 
 ;; the bitmap to use in a horizontal or vertical toolbar:
-(define step-img (compiled-bitmap (step-icon run-icon-color (toolbar-icon-height))))
+(define step-img (compiled-bitmap (step-icon #:color run-icon-color #:height (toolbar-icon-height))))
 
 ;; testing code
 

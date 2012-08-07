@@ -6,7 +6,10 @@
          system
          system*
          system/exit-code
-         system*/exit-code)
+         system*/exit-code
+
+	 string-no-nuls?
+	 bytes-no-nuls?)
 
 (require "private/streams.rkt")
 
@@ -35,21 +38,19 @@
 
 (define (check-exe who exe)
   (unless (path-string? exe)
-    (raise-type-error who "path or string" exe))
+    (raise-argument-error who "path-string?" exe))
   exe)
 
 (define (path-or-ok-string? s)
   ;; use `path-string?' t check for nul characters in a string,
   ;; but allow the empty string (which is not an ok path), too:
-  (or (path-string? s)
-      (equal? "" s)))
+  (or (path-string? s) (equal? "" s)))
 
 (define (string-no-nuls? s)
   (and (string? s) (path-or-ok-string? s)))
 
 (define (bytes-no-nuls? s)
-  (and (bytes? s)
-       (not (regexp-match? #rx#"\0" s))))
+  (and (bytes? s) (not (regexp-match? #rx#"\0" s))))
 
 (define (check-args who args)
   (cond
@@ -59,7 +60,7 @@
       (raise-mismatch-error 
        who
        "expected a single string argument after: "
-       (car args)))
+       (car args))) 
     (unless (and (>= 2 (length args))
                  (string? (cadr args))
                  (path-or-ok-string? (cadr args)))
@@ -73,16 +74,13 @@
        (caddr args)))]
    [else
     (for ([s (in-list args)])
-      (unless (or (path-or-ok-string? s)
-                  (bytes-no-nuls? s))
-        (raise-type-error who "path, string, or byte string (without nuls)"
-                          s)))])
+      (unless (or (path-or-ok-string? s) (bytes-no-nuls? s))
+        (raise-argument-error who "(or/c path-string? bytes-no-nuls?)" s)))])
   args)
 
 (define (check-command who str)
-  (unless (or (string-no-nuls? str)
-              (bytes-no-nuls? str))
-    (raise-type-error who "string or byte string (without nuls)" str)))
+  (unless (or (string-no-nuls? str) (bytes-no-nuls? str))
+    (raise-argument-error who "(or/c string-no-nuls? bytes-no-nuls?)" str)))
 
 ;; Old-style functions: ----------------------------------------
 
@@ -131,9 +129,9 @@
                (twait se))]
             [(interrupt) (subprocess-kill subp #f)]
             [(kill) (subprocess-kill subp #t)]
-            [else (raise-type-error
+            [else (raise-argument-error
                    'control-process
-                   "'status, 'exit-code, 'wait, 'interrupt, or 'kill" m)]))
+                   "(or/c 'status 'exit-code 'wait 'interrupt 'kill)" m)]))
         (list (aport so)
               (aport si)
               (subprocess-pid subp)

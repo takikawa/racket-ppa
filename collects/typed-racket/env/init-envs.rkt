@@ -1,14 +1,16 @@
 #lang racket/base
 (provide (all-defined-out))
 (require "../utils/utils.rkt"
+         "../utils/tc-utils.rkt"
          "global-env.rkt"
 	 "type-name-env.rkt"
 	 "type-alias-env.rkt"
          (rep type-rep object-rep filter-rep rep-utils)
 	 (for-template (rep type-rep object-rep filter-rep)
-		       (types union)
+		       (types union numeric-tower)
 		       racket/shared racket/base)
 	 (types union convenience)
+         racket/syntax
 	 mzlib/pconvert racket/match)
 
 (define (initialize-type-name-env initial-type-names)
@@ -78,8 +80,7 @@
   (parameterize ((current-print-convert-hook converter)
                  (show-sharing #f)
                  (booleans-as-true/false #f))
-    (with-syntax ([registers (filter (lambda (x) x) (type-name-env-map f))])
-      #'(begin-for-syntax  . registers))))
+    #`(begin #,@(filter values (type-name-env-map f)))))
 
 (define (talias-env-init-code)
   (define (f id ty)
@@ -89,21 +90,17 @@
   (parameterize ((current-print-convert-hook converter)
                  (show-sharing #f)
                  (booleans-as-true/false #f))
-    (with-syntax ([registers (filter (lambda (x) x) (type-alias-env-map f))])
-      #'(begin-for-syntax  . registers))))
+    #`(begin #,@(filter values (type-alias-env-map f)))))
 
 (define (env-init-code syntax-provide? provide-tbl def-tbl)
   (define (f id ty)
-    (if (and (bound-in-this-module id)
-             ;; if there are no syntax provides, then we only need this identifier if it's provided
-             #;(or syntax-provide? (dict-ref provide-tbl id #f)))
+    (if (bound-in-this-module id)
         #`(register-type #'#,id #,(datum->syntax #'here (print-convert ty)))
         #f))
   (parameterize ((current-print-convert-hook converter)
                  (show-sharing #f)
                  (booleans-as-true/false #f))
-    (with-syntax ([registers (filter values (type-env-map f))])
-      #'(begin-for-syntax . registers))))
+    #`(begin #,@(filter values (type-env-map f)))))
 
 
 

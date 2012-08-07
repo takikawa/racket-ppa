@@ -28,7 +28,8 @@ has been moved out).
 |#
 
 (require racket/class
-         racket/draw
+         (except-in racket/draw 
+                    make-pen make-color)
          (for-syntax racket/base)
          file/convertible
          racket/math
@@ -1130,9 +1131,6 @@ the mask bitmap and the original bitmap are all together in a single bytes!
             [rotated-width  (- (* ew (cos θ) (cos t2)) (* eh (sin θ) (sin t2)))])
        (values (abs rotated-width)
                (abs rotated-height)))]))
-
-(define (degrees->radians θ)
-  (* θ 2 pi (/ 360)))
 
 (define (mode-color->smoothing mode color)
   (cond

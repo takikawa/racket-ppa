@@ -3,7 +3,11 @@
          "interfaces.rkt"
          "sql-data.rkt")
 (provide prepared-statement%
-         statement:after-exec)
+         statement:after-exec
+         apply-type-handlers)
+
+;; A dvec is an opaque value that describes a parameter or result field's type
+;; information. (Usually a vector, thus "dvec" for "description vector".)
 
 ;; prepared-statement%
 (define prepared-statement%
@@ -12,7 +16,8 @@
     (init-field handle            ;; handle, determined by database system, #f means closed
                 close-on-exec?    ;; boolean
                 param-typeids     ;; (listof typeid)
-                result-dvecs      ;; (listof vector), layout depends on dbsys
+                result-dvecs      ;; (listof dvec)
+                [stmt #f]         ;; string/#f
                 [stmt-type #f])   ;; usually symbol or #f (see classify-*-sql)
 
     (define owner (make-weak-box -owner))
@@ -24,9 +29,13 @@
     (define/public (get-handle) handle)
     (define/public (set-handle h) (set! handle h))
 
-    (define/public (after-exec)
+    (define/public (get-close-on-exec?) close-on-exec?)
+    (define/public (after-exec need-lock?)
       (when close-on-exec? ;; indicates ad-hoc prepared statement
-        (finalize)))
+        (finalize need-lock?)))
+
+    (define/public (get-stmt) stmt)
+    (define/public (get-stmt-type) stmt-type)
 
     (define/public (get-param-count) (length param-typeids))
     (define/public (get-param-typeids) param-typeids)
@@ -36,21 +45,19 @@
     (define/public (get-result-typeids) result-typeids)
 
     (define/public (get-param-types)
-      (send dbsystem describe-typeids param-typeids))
+      (send dbsystem describe-params param-typeids))
     (define/public (get-result-types)
-      (send dbsystem describe-typeids result-typeids))
-
-    (define/public (get-stmt-type) stmt-type)
+      (send dbsystem describe-fields result-dvecs))
 
     ;; checktype is either #f, 'rows, or exact-positive-integer
     (define/public (check-results fsym checktype obj)
       (cond [(eq? checktype 'rows)
              (unless (positive? (get-result-count))
-               (when close-on-exec? (finalize))
+               (when close-on-exec? (finalize #t))
                (error fsym "expected statement producing rows, got ~e" obj))]
             [(exact-positive-integer? checktype)
              (unless (= (get-result-count) checktype)
-               (when close-on-exec? (finalize))
+               (when close-on-exec? (finalize #t))
                (error fsym
                       "expected statement producing rows with ~a ~a, got ~e"
                       checktype
@@ -59,40 +66,41 @@
             [else (void)]))
 
     (define/public (check-owner fsym c obj)
+      (unless handle
+        (error fsym "prepared statement is closed"))
       (unless (eq? c (weak-box-value owner))
         (error fsym "prepared statement owned by another connection: ~e" obj)))
 
     (define/public (bind fsym params)
-      (check-param-count fsym params param-typeids)
-      (let* ([params
-              (for/list ([handler (in-list param-handlers)]
-                         [index (in-naturals)]
-                         [param (in-list params)])
-                (cond [(sql-null? param) sql-null]
-                      [else (handler fsym index param)]))])
-        (statement-binding this #f params)))
+      (statement-binding this (apply-type-handlers fsym params param-handlers)))
 
-    (define/private (check-param-count fsym params param-typeids)
-      (define len (length params))
-      (define tlen (length param-typeids))
-      (when (not (= len tlen))
-        (error fsym "prepared statement requires ~s parameters, given ~s" tlen len)))
-
-    (define/public (finalize)
-      (let ([owner (weak-box-value owner)])
-        (when owner
-          (send owner free-statement this))))
+    (define/public (finalize need-lock?)
+      (when handle
+        (let ([owner (weak-box-value owner)])
+          (when owner
+            (send owner free-statement this need-lock?)))))
 
     (define/public (register-finalizer)
       (thread-resume finalizer-thread (current-thread))
-      (will-register will-executor this (lambda (pst) (send pst finalize))))
+      (will-register will-executor this (lambda (pst) (send pst finalize #t))))
 
     (super-new)
     (register-finalizer)))
 
-(define (statement:after-exec stmt)
+(define (statement:after-exec stmt need-lock?)
   (when (statement-binding? stmt)
-    (send (statement-binding-pst stmt) after-exec)))
+    (send (statement-binding-pst stmt) after-exec need-lock?)))
+
+(define (apply-type-handlers fsym params param-handlers)
+  (let ([given-len (length params)]
+        [expected-len (length param-handlers)])
+    (when (not (= given-len expected-len))
+      (uerror fsym "statement requires ~s parameters, given ~s" expected-len given-len)))
+  (for/list ([handler (in-list param-handlers)]
+             [index (in-naturals)]
+             [param (in-list params)])
+    (cond [(sql-null? param) sql-null]
+          [else (handler fsym index param)])))
 
 ;; ----
 

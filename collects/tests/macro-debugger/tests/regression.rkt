@@ -205,4 +205,22 @@
                       (equal? (syntax->datum (state-e (step-s2 step)))
                               '(define y 12)))
                     "looking for m => define")))
-      ))
+
+    ;; Added 3/12/2012 based on bug from cce
+    (test-case "begin-for-syntax ends with phase1 eval"
+      (let ([d (trace '(module m '#%kernel
+                         (#%module-begin
+                          (#%require (for-syntax '#%kernel))
+                          (begin-for-syntax
+                           (syntax-local-value (quote-syntax lambda) void)))))])
+        (check-pred deriv? d)
+        (check-pred ok-node? d)))
+    (test-case "syntax-local-value in provide"
+      (let ([d (trace '(module m racket/base
+                         (#%plain-module-begin
+                          (provide (except-out (all-defined-out) x y))
+                          (define-values (x) 1)
+                          (define-values (y) 2))))])
+        (check-pred deriv? d)
+        (check-pred ok-node? d)))
+    ))

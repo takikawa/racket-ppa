@@ -1,10 +1,10 @@
-#lang mzscheme
+#lang racket
 
 (require "datatype.rkt"
          "private/sllgen.rkt"
          mzlib/trace
          mzlib/pretty)
-(require-for-syntax "private/slldef.rkt")
+(require (for-syntax "private/slldef.rkt"))
 
 (provide define-datatype
          cases)
@@ -18,20 +18,20 @@
      (syntax/loc stx
        (begin
          (begin-for-syntax
-           (hash-table-put! sllgen-def 'name (quote-syntax def)))
+           (hash-set! sllgen-def 'name (quote-syntax def)))
          (define name (quote def))))]
     [(_ . rest)
      (syntax/loc stx (define . rest))]))
 
-(provide (rename eopl-define define))
+(provide (rename-out [eopl-define define]))
 
-(provide (all-from "private/sllgen.rkt"))
+(provide (all-from-out "private/sllgen.rkt"))
 
-(provide (rename error eopl:error)
-         (rename printf eopl:printf)
-         (rename pretty-print eopl:pretty-print)
-         (rename eopl:call-with-current-continuation
-                 call-with-current-continuation))
+(provide (rename-out [error eopl:error]
+                     [printf eopl:printf]
+                     [pretty-print eopl:pretty-print]
+                     [eopl:call-with-current-continuation
+                      call-with-current-continuation]))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -141,19 +141,26 @@
          empty           ;; for constructor-based printing
          trace untrace   ;; debugging
          require module  ;; we allow full use of modules
+         only-in
+	 prefix-in
          provide         ;; in case someone wants to use a module
+	 all-defined-out
+         all-from-out    ;; surely some subforms are missing
+	 rename-out
          make-parameter
          parameterize
          print-struct)
 
+(require mzlib/transcr)
+
 (provide unquote unquote-splicing
-         quote quasiquote if
+         quote quasiquote if when unless
          lambda letrec define-syntax delay let let* let-syntax letrec-syntax
          and or cond case do
          begin set!
-         ;; => else  ;  not bound in `mzscheme'
+         => else
 
-         (rename #%plain-module-begin #%module-begin)
+         (rename-out [#%plain-module-begin #%module-begin])
          #%app #%datum #%top #%top-interaction
          #%require #%provide #%expression
 

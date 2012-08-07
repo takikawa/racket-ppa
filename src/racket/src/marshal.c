@@ -297,9 +297,10 @@ static Scheme_Object *write_top(Scheme_Object *obj)
   Scheme_Compilation_Top *top = (Scheme_Compilation_Top *)obj;
 
   if (!top->prefix)
-    scheme_raise_exn(MZEXN_FAIL, 
-                     "write: cannot marshal shared compiled code: %V",
-                     obj);
+    scheme_contract_error("write",
+                          "cannot marshal shared compiled code",
+                          "compiled code", 1, obj,
+                          NULL);
 
   return cons(scheme_make_integer(top->max_let_depth),
 	      cons((Scheme_Object *)top->prefix,
@@ -311,7 +312,7 @@ static Scheme_Object *read_top(Scheme_Object *obj)
   Scheme_Compilation_Top *top;
 
   top = MALLOC_ONE_TAGGED(Scheme_Compilation_Top);
-  top->so.type = scheme_compilation_top_type;
+  top->iso.so.type = scheme_compilation_top_type;
   if (!SCHEME_PAIRP(obj)) return NULL;
   top->max_let_depth = SCHEME_INT_VAL(SCHEME_CAR(obj));
   obj = SCHEME_CDR(obj);
@@ -1172,11 +1173,6 @@ static Scheme_Object *read_resolve_prefix(Scheme_Object *obj)
   return (Scheme_Object *)rp;
 }
 
-XFORM_NONGCING static Scheme_Object *wrap_mod_stx(Scheme_Object *stx)
-{
-  return (stx ? stx : scheme_false);
-}
-
 static Scheme_Object *write_module(Scheme_Object *obj)
 {
   Scheme_Module *m = (Scheme_Module *)obj;
@@ -1322,7 +1318,12 @@ static Scheme_Object *write_module(Scheme_Object *obj)
 
   l = cons(scheme_make_integer(m->max_let_depth), l);
 
-  l = cons(wrap_mod_stx(m->rn_stx), l);
+  v = m->rn_stx;
+  if (!v)
+    v = scheme_false;
+  else if (SCHEME_PAIRP(v))
+    v = scheme_list_to_vector(v);
+  l = cons(v, l);
 
   /* previously recorded "functional?" info: */
   l = cons(scheme_false, l);
@@ -1333,9 +1334,28 @@ static Scheme_Object *write_module(Scheme_Object *obj)
   else
     l = cons(scheme_false, l);
 
+  for (k = 0; k < 2; k++) {
+    v = (k ? m->pre_submodules : m->post_submodules);
+    if (v && !SCHEME_NULLP(v)) {
+      Scheme_Object *l2 = scheme_null;
+      while (!SCHEME_NULLP(v)) {
+        l2 = scheme_make_pair(write_module(SCHEME_CAR(v)),
+                              l2);
+        v = SCHEME_CDR(v);
+      }
+      l = cons(l2, l);
+    } else
+      l = cons(scheme_null, l);
+  }
+
   l = cons(m->me->src_modidx, l);
   l = cons(scheme_resolved_module_path_value(m->modsrc), l);
   l = cons(scheme_resolved_module_path_value(m->modname), l);
+
+  if (m->submodule_path)
+    l = cons(m->submodule_path, l);
+  else
+    l = cons(scheme_null, l);
 
   return l;
 }
@@ -1378,6 +1398,16 @@ static Scheme_Object *read_module(Scheme_Object *obj)
   m->me = me;
 
   if (!SCHEME_PAIRP(obj)) return_NULL();
+  e = SCHEME_CAR(obj);
+  m->submodule_path = e;
+  if (!scheme_is_list(e)) return_NULL();
+  while (!SCHEME_NULLP(e)) {
+    if (!SCHEME_SYMBOLP(SCHEME_CAR(e))) return_NULL();
+    e = SCHEME_CDR(e);
+  }
+  obj = SCHEME_CDR(obj);
+
+  if (!SCHEME_PAIRP(obj)) return_NULL();
   e = scheme_intern_resolved_module_path(SCHEME_CAR(obj));
   m->modname = e;
   obj = SCHEME_CDR(obj);
@@ -1395,6 +1425,23 @@ static Scheme_Object *read_module(Scheme_Object *obj)
     return_NULL();
   ((Scheme_Modidx *)me->src_modidx)->resolved = m->modname;
   m->self_modidx = me->src_modidx;
+
+  for (i = 0; i < 2; i++) {
+    if (!SCHEME_PAIRP(obj)) return_NULL();
+    e = SCHEME_CAR(obj);
+    obj = SCHEME_CDR(obj);
+    nve = scheme_null;
+    while (!SCHEME_NULLP(e)) {
+      if (!SCHEME_PAIRP(e)) return_NULL();
+      ne = read_module(SCHEME_CAR(e));
+      nve = scheme_make_pair(ne, nve);
+      e = SCHEME_CDR(e);
+    }
+    if (i)
+      m->post_submodules = nve;
+    else
+      m->pre_submodules = nve;
+  }
 
   if (!SCHEME_PAIRP(obj)) return_NULL();
   e = SCHEME_CAR(obj);
@@ -1439,9 +1486,9 @@ static Scheme_Object *read_module(Scheme_Object *obj)
   obj = SCHEME_CDR(obj);
 
   if (cnt < 1) return_NULL();
-
+  
   m->num_phases = cnt;
-  exp_infos = MALLOC_N(Scheme_Module_Export_Info *, cnt);
+  exp_infos = (Scheme_Module_Export_Info **)scheme_malloc_fail_ok(scheme_malloc, scheme_check_overflow(cnt, sizeof(Scheme_Module_Export_Info *), 0));
   while (cnt--) {
     exp_info = MALLOC_ONE_RT(Scheme_Module_Export_Info);
     SET_REQUIRED_TAG(exp_info->type = scheme_rt_export_info);
@@ -1453,6 +1500,8 @@ static Scheme_Object *read_module(Scheme_Object *obj)
   if (!SCHEME_PAIRP(obj)) return_NULL();
   cnt = SCHEME_INT_VAL(SCHEME_CAR(obj));
   obj = SCHEME_CDR(obj);
+
+  if (cnt < 0) return_NULL();
   
   while (cnt--) {
     Scheme_Object *phase;

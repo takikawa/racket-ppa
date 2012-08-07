@@ -140,7 +140,11 @@
 		   (test v name ((eval `(lambda (y) ,(wrap `(,op (,get-arg1) _arg2 y)))) arg3))
                    (check-effect)
 		   (test v name ((eval `(lambda (x y z) ,(wrap `(,op x y z)))) (get-arg1) arg2 arg3))
-		   (check-effect)))]
+		   (check-effect)
+		   (when (boolean? v)
+		     ;; (printf " for branch...\n")
+		     (test (if v 'yes 'no) name ((eval `(lambda (x y z) (if ,(wrap `(,op x y z)) 'yes 'no))) (get-arg1) arg2 arg3))
+                     (check-effect))))]
          [tri (lambda (v op get-arg1 arg2 arg3 check-effect #:wrap [wrap values])
                 (define (e->i n) (if (number? n) (exact->inexact n) n))
                 (tri0 v op get-arg1 arg2 arg3 check-effect #:wrap wrap)
@@ -386,6 +390,26 @@
       (test-trig atan 'flatan)
       (test-trig log 'fllog)
       (test-trig exp 'flexp))
+
+    (for-each
+     (lambda (v)
+       (define (once v)
+         (un-exact (round v) 'flround v #t)
+         (un-exact (ceiling v) 'flceiling v #t)
+         (un-exact (floor v) 'flfloor v #t)
+         (un-exact (truncate v) 'fltruncate v #t))
+       (once v)
+       (once (- v)))
+     '(3.0 3.1 3.5 3.8 4.0 4.1 4.5 4.8 0.0))
+
+    (bin-exact 9.0 'flexpt 3.0 2.0 #t)
+    (bin-exact (expt 3.1 2.5) 'flexpt 3.1 2.5 #t)
+    (bin-exact -1.0 'flexpt -1.0 3.0 #t)
+    (bin-exact -0.125 'flexpt -2.0 -3.0 #t)
+    (bin-exact +nan.0 'flexpt -1.0 3.1 #t)
+    (bin-exact 0.0 'flexpt 0.0 10.0 #t)
+    (bin-exact +nan.0 'flexpt 0.0 -1.0 #t)
+    (bin-exact +nan.0 'flexpt 0.0 0.0 #t)
     
     (un 1.0 'exact->inexact 1)
     (un 1073741823.0 'exact->inexact (sub1 (expt 2 30)))
@@ -665,6 +689,16 @@
       (tri0 (void) '(lambda (b i v) (set-box! b v))
             (lambda () v) 0 "other"
             (lambda () (test "other" unbox v))))
+
+    (let ([v (box 10)])
+      (check-error-message 'box-cas! (eval `(lambda (x) (box-cas! x 10 11))))
+      (tri0 #t '(lambda (b i v) (box-cas! b (unbox b) v))
+            (lambda () v) 0 "other"
+            (lambda () (test "other" unbox v)))
+      (set-box! v 77)
+      (tri0 #f '(lambda (b i v) (box-cas! b (gensym) v))
+            (lambda () v) 0 "other"
+            (lambda () (test 77 unbox v))))
 
     (bin-exact #t 'procedure-arity-includes? cons 2)
     (bin-exact #f 'procedure-arity-includes? cons 1)
@@ -1346,11 +1380,65 @@
            (test-dropped cons-name 1 2)
            (test-dropped cons-name 1 2 3)
            (test-dropped cons-name 1)
-           (test-dropped cons-name))])
+           (unless (eq? cons-name 'list*)
+             (test-dropped cons-name)))])
     (test-multi 'list)
     (test-multi 'list*)
     (test-multi 'vector)
     (test-multi 'vector-immutable)))
+(test-comp `(let ([x 5])
+              (let ([y (list*)])
+                x))
+           5
+           #f)
+
+(let ([test-pred
+       (lambda (pred-name)
+         (test-comp `(lambda (z)
+                       (let ([x ',pred-name])
+                         (let ([y (,pred-name z)])
+                           x)))
+                    `(lambda (z) ',pred-name)))])
+  (test-pred 'pair?)
+  (test-pred 'mpair?)
+  (test-pred 'list?)
+  (test-pred 'box?)
+  (test-pred 'number?)
+  (test-pred 'real?)
+  (test-pred 'complex?)
+  (test-pred 'rational?)
+  (test-pred 'integer?)
+  (test-pred 'exact-integer?)
+  (test-pred 'exact-nonnegative-integer?)
+  (test-pred 'exact-positive-integer?)
+  (test-pred 'inexact-real?)
+  (test-pred 'fixnum?)
+  (test-pred 'flonum?)
+  (test-pred 'single-flonum?)
+  (test-pred 'null?)
+  (test-pred 'void?)
+  (test-pred 'symbol?)
+  (test-pred 'string?)
+  (test-pred 'bytes?)
+  (test-pred 'path?)
+  (test-pred 'char?)
+  (test-pred 'boolean?)
+  (test-pred 'chaperone?)
+  (test-pred 'impersonator?)
+  (test-pred 'procedure?)
+  (test-pred 'eof-object?)
+  (test-pred 'not))
+
+(let ([test-bin
+       (lambda (bin-name)
+         (test-comp `(lambda (z)
+                       (let ([x ',bin-name])
+                         (let ([y (,bin-name z z)])
+                           x)))
+                    `(lambda (z) ',bin-name)))])
+  (test-bin 'eq?)
+  (test-bin 'eqv?))
+
 
 ;; + fold to fixnum overflow, fx+ doesn't
 (test-comp `(module m racket/base
@@ -1837,6 +1925,209 @@
                (lambda ()
                  (case-lambda ((v) (set! f3 v))))])
           (f3))))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Make sure that certain lifting operations
+;;  do not lose track of flonum-ness of a variable:
+
+(let ([e '(let ([f (random)])
+            (define (s t)
+              (cons
+               (lambda () (s (fl+ t 1.0)))
+               (lambda () f)))
+            (s 0.0))]
+      [ns (make-base-namespace)]
+      [o (open-output-bytes)])
+  (parameterize ([current-namespace ns])
+    (namespace-require 'racket/flonum)
+    (write (compile e) o))
+  ;; bytecode validation can catch the relevant mistake:
+  (parameterize ([read-accept-compiled #t])
+    (read (open-input-bytes (get-output-bytes o)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check compilation of an example that triggers
+;; shifting of a closure's coordinates during
+;; optimization without reoptimization:
+
+(let ([ns (make-base-namespace)])
+  (parameterize ([current-namespace ns])
+    (namespace-require 'racket/unsafe/ops)
+    (compile '(lambda (a)
+                (unsafe-fl- a
+                            (lambda ()
+                              (set! a 'v)))))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check compilation of an n-ary `/' that isn't
+;; constant folded due to a divide-by-zero:
+
+(err/rt-test (call/cc (lambda (k) (/ 1 2 0))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check slow path on `list-tail', where
+;; index is > 10000:
+
+(test 4.8
+      'list-ref-test
+      (let loop ((line 0))
+        (let* ((numlist (build-list 20004 (lambda (x) 2.4)))
+               (n (length numlist)))
+          (let* ((mid (/ n 2))
+                 (n1 (car numlist))
+                 (n2 (list-ref numlist mid)))
+            (for-each values numlist)
+            (+ n1 n2)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check JIT handling of unboxed arguments in loops,
+;;   including a loop starts in tail and non-tail positions.
+
+(let ()
+  (define N 100000)
+
+  (define (non-tail)
+    (define-values (a b)
+      (let loop ([n N] [x -1.0] [y 1.0])
+        (cond
+         [(zero? n) (values x y)]
+         [else (loop (sub1 n)
+                     (fl+ x -1.0)
+                     (fl+ y 1.0))])))
+    (values a b))
+
+  (define (non-tail2)
+    (for/fold ([v 0.0]) ([i (in-range N)])
+      (define-values (a b)
+        (let loop ([n 10] [x -1.0] [y 1.0])
+          (cond
+           [(zero? n) (values x y)]
+           [else (loop (sub1 n)
+                       (fl+ x -1.0)
+                       (fl+ y 1.0))])))
+      (fl+ v (fl- a b))))
+
+  (define (tail)
+    (let loop ([n N] [x -1.0] [y 1.0])
+      (cond
+       [(zero? n) (values x y)]
+       [else (loop (sub1 n)
+                   (fl+ x -1.0)
+                   (fl+ y 1.0))])))
+
+  (define x-tail #f)
+  (define x-non-tail #f)
+  (define x-non-tail2 #f)
+  (set! x-tail tail)
+  (set! x-non-tail non-tail)
+  (set! x-non-tail2 non-tail2)
+
+  (test-values '(-100001.0 100001.0) non-tail)
+  (test -2200000.0 non-tail2)
+  (test-values '(-100001.0 100001.0) tail))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check for corect fixpoint calculation when lifting
+
+;; This test is especilly fragile. It's a minimized(?) variant
+;; of PR 12910, where just enbought `with-continuation-mark's
+;; are needed to thwart inlining, and enough functions are 
+;; present in the right order to require enough fixpoint
+;; iterations.
+
+(define a-top-level-variable 5)
+(define (do-test-of-lift-fixpoint)
+  (define-syntax-rule (wcm e) (with-continuation-mark a-top-level-variable 'e e))
+  (define (parse-string input-string)
+
+    (let* ((nextTokenIsReady #f)
+
+           (nextCharacter #\space)
+           (nextCharacterIsReady #f)
+           (count 0)
+
+           (input-index 0)
+
+           (input-length (string-length input-string)))
+      
+      (define (scanner0)
+        (state0 (wcm (scanchar))))
+      
+      (define (state0 c)
+        (if (eq? c #\()
+            (begin
+              (consumechar)
+              'lparen)
+            (if (eq? c #\,)
+                (wcm (state1 (scanchar)))
+                (void))))
+      (define (state1 c)
+        (wcm (consumechar)))
+
+      (define (parse-datum)
+        (let ([t (next-token)])
+          (if (eq? t 'lparen)
+              (parse-compound-datum)
+              (wcm (parse-simple-datum)))))
+      
+      (define (parse-simple-datum)
+        (wcm (next-token)))
+      
+      (define (parse-compound-datum)
+        (wcm
+         (begin
+           (consume-token!)
+           (parse-datum))))
+
+      (define (next-token)
+        (wcm (scanner0)))
+      
+      (define (consume-token!)
+        (set! nextTokenIsReady #f))
+      
+      (define (scanchar)
+        (when (= count 4) (error "looped correctly"))
+        (begin
+          (set! count (add1 count))
+          (if nextCharacterIsReady
+              nextCharacter
+              (begin
+                (if (< input-index input-length)
+                    (set! nextCharacter
+                          (wcm (string-ref input-string input-index)))
+                    (set! nextCharacter #\~))
+                (set! nextCharacterIsReady #t)
+                (scanchar)))))
+      
+      (define (consumechar)
+        (when (wcm (not nextCharacterIsReady))
+          (scanchar)))
+
+      (parse-datum)))
+  (set! parse-string parse-string)
+  (parse-string "()"))
+(err/rt-test (do-test-of-lift-fixpoint) exn:fail?)
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; generate byecode with a lifted function that has
+;; a boxed argument and rest args, to test that case
+;; of the validator
+
+(parameterize ([current-namespace (make-base-namespace)])
+  (define o (open-output-bytes))
+  (write
+   (compile
+    '(lambda (x)
+       (define (g . y) (if (zero? (random 1))
+                           (reverse (cons x y))
+                           (g y y y y y y y y y)))
+       (set! x x)
+       (g 12 13)))
+   o)
+  (test '(13 12 10)
+        (parameterize ([read-accept-compiled #t])
+          (eval (read (open-input-bytes (get-output-bytes o)))))
+        10))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

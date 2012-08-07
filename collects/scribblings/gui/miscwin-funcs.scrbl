@@ -53,7 +53,7 @@ The get operation always returns @racket[#"????"] and @racket[#"????"] for
  Windows.
 }
 
-@defproc[(find-graphical-system-path [what (one-of/c 'init-file 'x-display)])
+@defproc[(find-graphical-system-path [what (or/c 'init-file 'x-display)])
          (or/c path? #f)]{
 
 Finds a platform-specific (and possibly user- or machine-specific)
@@ -88,7 +88,7 @@ The result depends on @racket[what], and a @racket[#f] result is only
 
 
 @defproc[(get-default-shortcut-prefix)
-         (listof (one-of/c 'alt 'cmd 'meta 'ctl 'shift 'option))]{
+         (listof (or/c 'alt 'cmd 'meta 'ctl 'shift 'option))]{
 Returns an immutable list specifying the default prefix for menu
 shortcuts. See also
 @xmethod[selectable-menu-item<%> get-shortcut-prefix].
@@ -227,7 +227,7 @@ Creates a bitmap that supports both normal @racket[dc<%>] drawing an
 OpenGL drawing through a context returned by @xmethod[dc<%> get-gl-context].
 
 For @racket[dc<%>] drawing, an OpenGL-supporting bitmap draws like a
-bitmap frmo @racket[make-screen-bitmap] on some platforms, while it
+bitmap from @racket[make-screen-bitmap] on some platforms, while it
 draws like a bitmap instantiated directly from @racket[bitmap%] on
 other platforms.}
 
@@ -252,8 +252,8 @@ environment of the result namespace.}
 Creates a bitmap that draws in a way that is the same as drawing to a
 canvas in its default configuration.
 
-A normal @racket[bitmap%] draws in a more platform-independent way and
-may use fewer constrained resources, particularly on Windows.}
+See also @secref[#:doc '(lib "scribblings/draw/draw.scrbl") "Portability"].
+}
 
 
 @defproc[(play-sound [filename path-string?]

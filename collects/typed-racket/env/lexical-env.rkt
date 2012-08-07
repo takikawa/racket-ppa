@@ -1,17 +1,19 @@
-#lang scheme/base
+#lang racket/base
 
 ;; this environment maps *lexical* variables to types
 ;; it also contains the proposition environment
 
-;; these environments are unified in "Logical Types for Scheme"
+;; these environments are unified in "Logical Types for Untyped Languages"
 ;; but split here for performance
 
 (require "../utils/utils.rkt"
 	 "type-env-structs.rkt"
          "global-env.rkt"
+         "../types/kw-types.rkt"
 	 syntax/id-table
+         racket/keyword-transform racket/list
          (for-syntax syntax/parse syntax/parse/experimental/contract racket/base)
-         (only-in scheme/contract ->* -> or/c any/c listof cons/c)
+         (only-in racket/contract ->* -> or/c any/c listof cons/c)
          (utils tc-utils mutated-vars)
          (only-in (rep type-rep) Type/c)
          (typecheck tc-metafunctions)
@@ -38,9 +40,23 @@
   (with-lexical-env (replace-props (extend/values is ts (lexical-env)) ps) . b))
 
 ;; find the type of identifier i, looking first in the lexical env, then in the top-level env
-;; identifer -> Type
+;; identifier -> Type
 (define (lookup-type/lexical i [env (lexical-env)] #:fail [fail #f])
-  (lookup env i (λ (i) (lookup-type i (λ () ((or fail lookup-fail) i))))))
+  (lookup env i (λ (i) (lookup-type i (λ () 
+                                        (cond 
+                                          [(syntax-procedure-alias-property i) 
+                                           => (λ (prop)
+                                                (define orig (car (flatten prop)))
+                                                (define t (lookup-type/lexical orig env))
+                                                (register-type i t)
+                                                t)]
+                                          [(syntax-procedure-converted-arguments-property i)
+                                           => (λ (prop)
+                                                (define orig (car (flatten prop)))
+                                                (define t (kw-convert (lookup-type/lexical orig env)))
+                                                (register-type i t)
+                                                t)]
+                                          [else ((or fail lookup-fail) i)]))))))
 
 ;; refine the type of i in the lexical env
 ;; (identifier type -> type) identifier -> environment

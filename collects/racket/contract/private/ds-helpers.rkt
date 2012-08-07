@@ -4,7 +4,8 @@
          build-clauses
          build-enforcer-clauses
          generate-arglists
-         (struct-out contract-struct-transformer))
+         (struct-out contract-struct-transformer)
+         defeat-inlining)
 
 (require racket/struct-info "opt-guts.rkt")
 (require (for-template racket/base))
@@ -47,19 +48,7 @@ which are then called when the contract's fields are explored
                                              "expected a field name and a contract together"
                                              stx
                                              clause)]))]))]
-         [all-ac-ids (generate-temporaries field-names)]
-         [defeat-inlining 
-           ;; makes the procedure confusing enough so that
-           ;; inlining doesn't consider it. this makes the 
-           ;; call to procedure-closure-contents-eq? work 
-           ;; properly
-           (λ (e)
-             (let loop ([n 30])
-               (if (zero? n)
-                   e
-                   #`(if (zero? (random 1))
-                         #,(loop (- n 1))
-                         (/ 1 0)))))])
+         [all-ac-ids (generate-temporaries field-names)])
     (let loop ([clauses (syntax->list clauses)]
                [ac-ids all-ac-ids]
                [prior-ac-ids '()]
@@ -82,11 +71,14 @@ which are then called when the contract's fields are explored
                   [(id (x ...) ctc-exp)
                    (and (identifier? (syntax id))
                         (andmap identifier? (syntax->list (syntax (x ...)))))
-                   (let ([maker-arg #`(λ #,(match-up (reverse prior-ac-ids)
-                                                     (syntax (x ...))
-                                                     field-names)
-                                        #,(defeat-inlining
-                                            #`(#,coerce-contract '#,name ctc-exp)))])
+                   (let* ([proc-name (string->symbol (string-append (symbol->string (syntax-e #'id)) "-dep-proc"))]
+                          [maker-arg #`(let ([#,proc-name
+                                              (λ #,(match-up (reverse prior-ac-ids)
+                                                             (syntax (x ...))
+                                                             field-names)
+                                                #,(defeat-inlining
+                                                    #`(#,coerce-contract '#,name ctc-exp)))])
+                                         #,proc-name)])
                      (loop (cdr clauses)
                            (cdr ac-ids)
                            (cons (car ac-ids) prior-ac-ids)
@@ -108,6 +100,18 @@ which are then called when the contract's fields are explored
                    (raise-syntax-error name "expected identifier" stx (syntax id))]
                   [_
                    (raise-syntax-error name "expected name/identifier binding" stx clause)]))]))]))))
+
+;; makes the procedure confusing enough so that
+;; inlining doesn't consider it. this makes the 
+;; call to procedure-closure-contents-eq? work 
+;; properly
+(define (defeat-inlining e)
+  (let loop ([n 30])
+    (if (zero? n)
+        e
+        #`(if (zero? (random 1))
+              #,(loop (- n 1))
+              (/ 1 0)))))
 
 (define (build-clauses/where name stx clauses field-names maker-args)
   (with-syntax ([(field-names ...) field-names])
@@ -140,16 +144,18 @@ which are then called when the contract's fields are explored
     (syntax-case stx ()
       [(f arg ...)
        ;; we need to override the default optimization of recursive calls to use our helper
-       (and (opt/info-recf opt/info) (free-identifier=? (opt/info-recf opt/info) #'f))
-       (values
-        #`(f #,id arg ...)
-        null
-        null
-        null
-        #f
-        #f
-        null
-        #f)]
+       (and (identifier? #'f) 
+            (opt/info-recf opt/info)
+            (free-identifier=? (opt/info-recf opt/info) #'f))
+       (build-optres
+        #:exp #`(f #,id arg ...)
+        #:lifts null
+        #:superlifts null
+        #:partials null
+        #:flat #f
+        #:opt #f
+        #:stronger-ribs null
+        #:chaperone #f)]
       [else (opt/i (opt/info-change-val id opt/info)
                    stx)]))
   
@@ -187,8 +193,7 @@ which are then called when the contract's fields are explored
              [(id (x ...) ctc-exp)
               (and (identifier? (syntax id))
                    (andmap identifier? (syntax->list (syntax (x ...)))))
-              (let*-values ([(next lifts superlifts partials _ _2 _3 chaperone?)
-                             (opt/enforcer-clause let-var (syntax ctc-exp))]
+              (let*-values ([(an-optres) (opt/enforcer-clause let-var (syntax ctc-exp))]
                             [(maker-arg)
                              (with-syntax ([val (opt/info-val opt/info)]
                                            [(new-let-bindings ...) 
@@ -198,11 +203,12 @@ which are then called when the contract's fields are explored
                                                            arglist)])
                                #`(#,let-var
                                   #,(bind-lifts
-                                     superlifts
+                                     (optres-superlifts an-optres)
                                      #`(let (new-let-bindings ...)
                                          #,(bind-lifts 
-                                            (append lifts partials)
-                                            next)))))])
+                                            (append (optres-lifts an-optres) 
+                                                    (optres-partials an-optres))
+                                            (optres-exp an-optres))))))])
                 (loop (cdr clauses)
                       (cdr let-vars)
                       (cdr arglists)
@@ -221,23 +227,22 @@ which are then called when the contract's fields are explored
                           (syntax->list (syntax (x ...)))))]
              [(id ctc-exp)
               (identifier? (syntax id))
-              (let*-values ([(next lifts superlifts partials _ __ stronger-ribs chaperone?)
-                             (opt/enforcer-clause let-var (syntax ctc-exp))]
+              (let*-values ([(an-optres) (opt/enforcer-clause let-var (syntax ctc-exp))]
                             [(maker-arg)
                              (with-syntax ((val (opt/info-val opt/info)))
                                #`(#,let-var
                                   #,(bind-lifts
-                                     partials
-                                     next)))])
+                                     (optres-partials an-optres)
+                                     (optres-exp an-optres))))])
                 (loop (cdr clauses)
                       (cdr let-vars)
                       (cdr arglists)
                       (cdr ac-ids)
                       (cons (car ac-ids) prior-ac-ids)
                       (cons maker-arg maker-args)
-                      (append lifts-ps lifts)
-                      (append superlifts-ps superlifts)
-                      (append stronger-ribs-ps stronger-ribs)))]
+                      (append lifts-ps (optres-lifts an-optres))
+                      (append superlifts-ps (optres-superlifts an-optres))
+                      (append stronger-ribs-ps (optres-stronger-ribs an-optres))))]
              [(id ctc-exp)
               (raise-syntax-error name "expected identifier" stx (syntax id))]))]))))
 

@@ -3,6 +3,7 @@
 ;; Procedures that plot 2D renderers.
 
 (require racket/draw racket/snip racket/contract racket/list racket/class racket/match
+         unstable/contract
          slideshow/pict
          unstable/parameter-group
          unstable/lazy-require
@@ -20,7 +21,7 @@
 ;; Require lazily: without this, Racket complains while generating documentation:
 ;;   cannot instantiate `racket/gui/base' a second time in the same process
 (lazy-require ["snip.rkt" (make-2d-plot-snip)]
-              ["../common/gui.rkt" (make-snip-frame)])
+              ["../common/gui.rkt" (make-snip-frame with-new-eventspace)])
 
 (provide (except-out (all-defined-out) get-renderer-list get-bounds-rect get-ticks plot-dc))
 
@@ -161,10 +162,11 @@
     (define renderer-list (get-renderer-list renderer-tree))
     (define bounds-rect (get-bounds-rect renderer-list x-min x-max y-min y-max))
     
-    (define (make-plot bounds-rect)
+    (define (make-bm anim? bounds-rect width height)
       (define area #f)
       (define bm
-        (parameterize/group ([plot-parameters  saved-plot-parameters])
+        (parameterize/group ([plot-parameters  saved-plot-parameters]
+                             [plot-animating?  (if anim? #t (plot-animating?))])
           ((if (plot-animating?) draw-bitmap draw-bitmap/supersampling)
            (λ (dc)
              (define-values (x-ticks x-far-ticks y-ticks y-far-ticks)
@@ -199,11 +201,12 @@
       
       (values bm (send area get-area-bounds-rect) area-bounds->plot-bounds))
     
-    (define-values (bm area-bounds-rect area-bounds->plot-bounds) (make-plot bounds-rect))
+    (define-values (bm area-bounds-rect area-bounds->plot-bounds)
+      (make-bm #f bounds-rect width height))
     
     (make-2d-plot-snip
      bm saved-plot-parameters
-     make-plot bounds-rect area-bounds-rect area-bounds->plot-bounds)))
+     make-bm bounds-rect area-bounds-rect area-bounds->plot-bounds width height)))
 
 ;; Plot to a frame
 (defproc (plot-frame [renderer-tree (treeof (or/c renderer2d? nonrenderer?))]
@@ -298,7 +301,7 @@
     (when out-file
       (call plot-file out-file out-kind))
     
-    (cond [(plot-new-window?)  (define frame (call plot-frame))
+    (cond [(plot-new-window?)  (define frame (with-new-eventspace (λ () (call plot-frame))))
                                (send frame show #t)
                                (void)]
           [else  (call plot-snip)])))

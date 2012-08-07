@@ -1,5 +1,6 @@
-#lang racket
-(require "structures.rkt")
+#lang racket/base
+(require racket/contract
+         "structures.rkt")
 
 (provide/contract
  [write-xml ((document?) (output-port?) . ->* . void?)]
@@ -9,15 +10,17 @@
  [empty-tag-shorthand (parameter/c (or/c (symbols 'always 'never) (listof symbol?)))]
  [html-empty-tags (listof symbol?)])
 
+(define html-empty-tags
+  '(param meta link isindex input img hr frame col br basefont base area))
+
 ;; (empty-tag-shorthand) : (U 'always 'never (listof Symbol))
 (define empty-tag-shorthand
-  (make-parameter 'always
-                  (lambda (x)
-                    (if (or (eq? x 'always) (eq? x 'never) (and (list? x) (andmap symbol? x)))
-                        x
-                        (error 'empty-tag-shorthand "expected 'always, 'never, or a list of symbols: received ~e" x)))))
-
-(define html-empty-tags '(param meta link isindex input img hr frame col br basefont base area))
+  (make-parameter 
+   html-empty-tags
+   (lambda (x)
+     (if (or (eq? x 'always) (eq? x 'never) (and (list? x) (andmap symbol? x)))
+         x
+         (error 'empty-tag-shorthand "expected 'always, 'never, or a list of symbols: received ~e" x)))))
 
 ;; gen-write/display-xml/content : (Nat Output-port -> Void) -> Content [Output-Port]-> Void
 (define (gen-write/display-xml/content dent)

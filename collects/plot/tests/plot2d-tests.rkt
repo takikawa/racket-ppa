@@ -101,10 +101,11 @@
 ;; an exact rational function and a floating-point function
 ;; the plot of the exact rational function's graph should be smooth
 (time
- (plot (list (function (λ (x) x) #:label "Exact")
-             (function (λ (x) (exact->inexact x)) #:color 2 #:label "Inexact"))
-       #:x-min #e100000000000000.0 #:x-max #e100000000000000.1
-       #:width 450))
+ (parameterize ([plot-x-tick-label-angle 15])
+   (plot (list (function (λ (x) x) #:label "Exact")
+               (function (λ (x) (exact->inexact x)) #:color 2 #:label "Inexact"))
+         #:x-min #e100000000000000.0 #:x-max #e100000000000000.1
+         #:width 450)))
 
 (time
  (plot (function cos 0 0.0000001)
@@ -222,13 +223,13 @@
  (parameterize ([plot-x-ticks  (currency-ticks)])
    (plot (discrete-histogram (list (vector '(a . a) 1) (vector '(a . b) 2)
                                    (vector '(b . b) 3) (vector '(b . a) 4))
-                             #:invert? #t))))
+                             #:invert? #t #:add-ticks? #f))))
 
 (time
  (parameterize ([plot-x-ticks  (currency-ticks)])
    (plot (stacked-histogram (list (vector '(a . a) '(1 2 1)) (vector '(a . b) '(2 1 3))
                                   (vector '(b . b) '()) (vector '(b . a) '(4 4 2)))
-                            #:invert? #t))))
+                            #:invert? #t #:add-ticks? #f))))
 
 (time
  (plot (rectangles
@@ -306,6 +307,14 @@
             #:x-min -5 #:x-max 5 #:y-min -5 #:y-max 5))
 
 (time (plot (contour-intervals f1 -5 5 -5 5 #:label "z")))
+
+(time (plot (contour-intervals
+             (λ (x y)
+               (define z (- x y))
+               (cond [(< z -1) -1]
+                     [(> z 1)   1]
+                     [else      z]))
+             -2 2 -2 2)))
 
 (time (plot (list (tick-grid)
                   (contour-intervals f1 -5 2 -5 2

@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 (require ffi/unsafe
          ffi/unsafe/define
          "../private/libs.rkt")
@@ -8,24 +8,32 @@
           define-gmodule
           define-gobj))
 
-(define-runtime-lib glib-lib 
+(define-runtime-lib glib-lib
   [(unix) (ffi-lib "libglib-2.0" '("0" ""))]
-  [(macosx) (ffi-lib "libglib-2.0.0")]
-  [(windows) (ffi-lib "libglib-2.0-0.dll")])
-
-(define-runtime-lib gmodule-lib 
-  [(unix) (ffi-lib "libgmodule-2.0" '("0" ""))]
-  [(macosx) 
-   (ffi-lib "libgmodule-2.0.0.dylib")]
-  [(win32) 
-   (ffi-lib "libgmodule-2.0-0.dll")]
+  [(macosx)
+   (ffi-lib "libintl.8.dylib")
+   (ffi-lib "libglib-2.0.0.dylib")]
+  [(win32) (ffi-lib "libglib-2.0-0.dll")]
   [(win64) 
+   (ffi-lib "libintl-8.dll")
+   (ffi-lib "libglib-2.0-0.dll")])
+
+(define-runtime-lib gmodule-lib
+  [(unix) (ffi-lib "libgmodule-2.0" '("0" ""))]
+  [(macosx)
+   (ffi-lib "libgthread-2.0.0.dylib")
+   (ffi-lib "libgmodule-2.0.0.dylib")]
+  [(win32)
+   (ffi-lib "libgmodule-2.0-0.dll")]
+  [(win64)
    (ffi-lib "libgthread-2.0-0.dll")
    (ffi-lib "libgmodule-2.0-0.dll")])
 
-(define-runtime-lib gobj-lib 
+(define-runtime-lib gobj-lib
   [(unix) (ffi-lib "libgobject-2.0" '("0" ""))]
-  [(macosx) (ffi-lib "libgobject-2.0.0")]
+  [(macosx)
+   (ffi-lib "libffi.5.dylib")
+   (ffi-lib "libgobject-2.0.0.dylib")]
   [(windows) (ffi-lib "libgobject-2.0-0.dll")])
 
 (define-ffi-definer define-glib glib-lib)

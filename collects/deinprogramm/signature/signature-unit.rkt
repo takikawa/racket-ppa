@@ -7,7 +7,7 @@
 	 mzlib/struct
          (only-in mzlib/list first rest)
 	 (for-syntax scheme/base)
-	 (for-syntax stepper/private/shared))
+	 (for-syntax stepper/private/syntax-property))
 
 (require deinprogramm/signature/signature)
 
@@ -92,10 +92,10 @@
 (define (make-property-signature name access signature syntax)
   (let ((enforce (signature-enforcer signature)))
     (make-signature name
-		   (lambda (self obj)
-		     (enforce self (access obj)) ; #### problematic: enforcement doesn't stick
-		     obj)
-		   syntax)))
+		    (lambda (self obj)
+		      (enforce self (access obj)) ; #### problematic: enforcement doesn't stick
+		      obj)
+		    (delay syntax))))
 
 (define (make-predicate-signature name predicate-promise syntax)
   (make-signature
@@ -135,7 +135,7 @@
   (make-signature
    name
    (lambda (self obj)
-     ;;(write (list 'list obj) (current-error-port)) (newline (current-error-port))
+     ;;(eprintf "~s\n" (list 'list obj))
      (let recur ((l obj))
 
        (define (go-on)
@@ -153,13 +153,13 @@
 	 obj)
 	((hash-ref lists-table l #f)
 	 => (lambda (seen)
-	      ;;(write (list 'seen seen (eq? self (car seen))) (current-error-port)) (newline (current-error-port))
+	      ;;(eprintf "~s\n" (list 'seen seen (eq? self (car seen))))
 	      (if (eq? self (car seen))
 		  (cdr seen)
 		  (go-on))))
 	(else
 	 (go-on)))))
-   syntax
+   (delay syntax)
    #:arbitrary-promise
    (delay
      (lift->arbitrary arbitrary-list arg-signature))
@@ -211,7 +211,7 @@
 		(check old-sigs))))
       (else
        (check '()))))
-   syntax
+   (delay syntax)
    #:arbitrary-promise
    (delay
      (lift->arbitrary arbitrary-vector arg-signature))

@@ -117,6 +117,11 @@
  (cs-unused-require "unbenutztes require")
  (cs-free-variable "freie Variable")
 
+ (cs-contract-my-obligation "Vertrag: Obliation dieses Moduls")
+ (cs-contract-their-obligation "Vertrag: Obligation des Klientenmoduls")
+ (cs-contract-both-obligation "Vertrag: Obligation sowohl dieses Moduls als auch des Klientenmoduls")
+ (cs-contract-unk-obligation "Vertrag: Oblikation unbekannt")
+
  ;; mode sub-menu in the "view" menu
  (cs-check-syntax-mode "Syntax-Check-Modus")
  (cs-mode-menu-show-my-obligations "Meine Vertragsobligationen")
@@ -408,6 +413,8 @@
 
   (black-on-white-color-scheme "Schwarz auf Weiß") ;; these two appear in the color preferences dialog on butttons
   (white-on-black-color-scheme "Weiß auf Schwarz") ;; clicking the buttons changes the color schemes to some defaults that've been set up.
+
+  (add-spacing-between-lines "Ein Pixel Extra-Platz zwischen den Zeilen")
 
  ; title of the color choosing dialog
 
@@ -955,7 +962,7 @@
   (add-teachpack-to-list... "Teachpack zu Liste hinzufügen...")
   (teachpack-already-installed "Ein Teachpack names '~a' ist schon installiert. Überschreiben?")
   ; ~a is filled with a list of language names. Each name is separated by a newline and is indented two spaces (no commas, no 'and')
-  (teachpacks-only-in-languages "Die Teachpacks sind nur in diesen Sprachen verfügbar: ~a")
+  (teachpacks-only-in-languages "Die Teachpacks sind nur in diesen Sprachen verfügbar: ~a}\n\nIn anderen Sprachen ist `require' vorgesehen.")
 
  ;;; Language dialog
  (introduction-to-language-dialog
@@ -993,6 +1000,9 @@
  (preserve-stacktrace-information "Stack-Trace behalten (einige Optimierungen werden abgeschaltet)")
  (expression-level-stacktrace "Stack-Trace mit Ausdrücken")
  (function-level-stacktrace "Stack-Trace mit Funktionen")
+ (submodules-to-run "Submodule zum Ausführen")
+ (add-submodule "Submodul-Option hinzufügen ...") ;; menu item
+ (add-submodule-title "Submodul hinzufügen") ;; title of dialog opened by above menu item
 
  ;; used in the bottom left of the drscheme frame as the label
  ;; above the programming language's name
@@ -1544,6 +1554,11 @@
  (ask-about-normalizing-strings "Bei Normalisierung nachfragen")
  
   (always-use-platform-specific-linefeed-convention "Immer die plattformspezifische Linefeed-Konvention verwenden")
+
+
+  ;; optimization coach
+  (hide-optimization-coach "Optimierungs-Coach ausblenden")
+  (show-optimization-coach "Optimierungs-Coach einblenden")
   
 
  )

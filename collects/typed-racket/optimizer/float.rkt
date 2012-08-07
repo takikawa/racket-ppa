@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 
 (require syntax/parse
          racket/dict racket/flonum
@@ -8,7 +8,7 @@
          (types numeric-tower type-table)
          (optimizer utils numeric-utils logging fixnum))
 
-(provide float-opt-expr float-arg-expr)
+(provide float-opt-expr float-arg-expr int-expr)
 
 
 (define (mk-float-tbl generic)
@@ -80,10 +80,10 @@
   (log-missed-optimization
    "all args float-arg-expr, result not Float"
    (string-append
-    "This expression has a Real type. It would be better optimized if it had a Float type."
+    "This expression has a Real type. The optimizer could optimize it if it had type Float."
     (if (null? irritants)
         ""
-        "To fix this, change the highlighted expression(s) to have Float type(s)."))
+        "To fix, change the highlighted expression(s) to have Float type(s)."))
    stx irritants))
 
 (define float-opt-msg "Float arithmetic specialization.")
@@ -168,23 +168,7 @@
                         fs:float-expr ...)
            #:with opt
            (begin (log-optimization "multi float comp" float-opt-msg this-syntax)
-                  ;; First, generate temps to bind the result of each f2 fs ...
-                  ;; to avoid computing them multiple times.
-                  (define lifted (map (lambda (x) (unboxed-gensym)) (syntax->list #'(f2 fs ...))))
-                  ;; Second, build the list ((op f1 tmp2) (op tmp2 tmp3) ...)
-                  (define tests
-                    (let loop ([res  (list #`(op.unsafe f1.opt #,(car lifted)))]
-                               [prev (car lifted)]
-                               [l    (cdr lifted)])
-                      (cond [(null? l) (reverse res)]
-                            [else (loop (cons #`(op.unsafe #,prev #,(car l)) res)
-                                        (car l)
-                                        (cdr l))])))
-                  ;; Finally, build the whole thing.
-                  #`(let #,(for/list ([lhs (in-list lifted)]
-                                      [rhs (in-list (syntax->list #'(f2.opt fs.opt ...)))])
-                             #`(#,lhs #,rhs))
-                      (and #,@tests))))
+                  (n-ary-comp->binary #'op.unsafe #'f1.opt #'f2.opt #'(fs.opt ...))))
 
   (pattern (#%plain-app (~and op (~literal -)) f:float-expr)
            #:with opt

@@ -55,7 +55,7 @@
      slide/center/timeout
      slide/title/center/timeout
      
-     most-recent-slide retract-most-recent-slide re-slide start-at-recent-slide
+     most-recent-slide retract-most-recent-slide re-slide slide->pict start-at-recent-slide
      scroll-transition pause-transition
      comment make-outline
      item/kw item item* page-item page-item*
@@ -64,7 +64,7 @@
      itemize itemize* page-itemize page-itemize*
      para/kw para para* page-para page-para*
      para/c para/r para*/c para*/r page-para/c page-para/r page-para*/c page-para*/r
-     font-size gap-size current-font-size current-line-sep line-sep title-size 
+     font-size gap-size current-gap-size current-font-size current-line-sep line-sep title-size 
      main-font current-main-font with-font current-title-color
      red green blue purple orange size-in-pixels
      t it bt bit tt titlet tt* rt

@@ -1,9 +1,13 @@
 #lang racket/base
 
 (require tests/eli-tester
-         "reader.rkt" "text-lang.rkt" "collect.rkt" "docs.rkt")
+         "reader.rkt" "text-collect.rkt" "text-lang.rkt" "text-wrap.rkt"
+         "docs.rkt" "render.rkt" "xref.rkt")
 
 (test do (reader-tests)
       do (begin/collect-tests)
       do (text-lang-tests)
-      do (docs-tests))
+      do (wrap-tests)
+      do (docs-tests)
+      do (render-tests)
+      do (xref-tests))

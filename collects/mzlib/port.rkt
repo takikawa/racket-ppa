@@ -34,12 +34,12 @@
     [(a b) (merge-input a b 4096)]
     [(a b limit)
      (or (input-port? a)
-         (raise-type-error 'merge-input "input-port" a))
+         (raise-argument-error 'merge-input "input-port?" a))
      (or (input-port? b)
-         (raise-type-error 'merge-input "input-port" b))
+         (raise-argument-error 'merge-input "input-port?" b))
      (or (not limit)
          (and (number? limit) (positive? limit) (exact? limit) (integer? limit))
-         (raise-type-error 'merge-input "positive exact integer or #f" limit))
+         (raise-argument-error 'merge-input "(or/c exact-positive-integer #f)" limit))
      (let-values ([(rd wt) (make-pipe-with-specials limit)]
                   [(other-done?) #f]
                   [(sema) (make-semaphore 1)])
@@ -437,7 +437,7 @@
    (lambda (s)
      (let ([r (peek-bytes-avail!* s delta #f orig-in)])
        (set! delta (+ delta (if (number? r) r 1)))
-       (if (eq? r 0) (handle-evt orig-in (lambda (v) 0)) r)))
+       (if (eq? r 0) (wrap-evt orig-in (lambda (v) 0)) r)))
    (lambda (s skip default)
      (peek-bytes-avail!* s (+ delta skip) #f orig-in))
    void
@@ -710,7 +710,7 @@
          ;; write
          (lambda (str start end buffer? w/break?)
            (if (= start end)
-             #t
+             0
              (begin
                (resume-mgr)
                (call-with-semaphore
@@ -852,7 +852,10 @@
       (define (do-peek str skip progress-evt)
         (let ([count (max 0 (min (- limit got skip) (bytes-length str)))])
           (if (zero? count)
-              eof
+              (if (and progress-evt
+                       (sync/timeout 0 progress-evt))
+                  #f
+                  eof)
               (let ([n (peek-bytes-avail!* str skip progress-evt port 0 count)])
                 (if (eq? n 0)
                     (wrap-evt port (lambda (x) 0))
@@ -898,10 +901,10 @@
 (define special-filter-input-port
   (lambda (p filter [close? #t])
     (unless (input-port? p)
-      (raise-type-error 'special-filter-input-port "input port" p))
+      (raise-argument-error 'special-filter-input-port "input-port?" p))
     (unless (and (procedure? filter)
                  (procedure-arity-includes? filter 2))
-      (raise-type-error 'special-filter-input-port "procedure (arity 2)" filter))
+      (raise-argument-error 'special-filter-input-port "(any/c bytes? . -> . any/c)" filter))
     (make-input-port
      (object-name p)
      (lambda (s)
@@ -959,21 +962,31 @@
   ;; go is the main reading function, either called directly for
   ;; a poll, or called in a thread for a non-poll read
   (define (go nack ch poll?)
-    (let try-again ([pos 0][bstr orig-bstr])
-      (let* ([progress-evt (or prog-evt (port-progress-evt input-port))]
-             [v ((if poll? peek-bytes-avail!* peek-bytes-avail!)
-                 bstr (+ pos (or peek-offset 0)) progress-evt input-port pos)])
+    ;; FIXME - what if the input port is closed?
+    (let try-again ([pos 0] [bstr orig-bstr] [progress-evt #f])
+      (let* ([progress-evt 
+              ;; if no progress event is given, get one to ensure that
+              ;; consecutive bytes are read and can be committed:
+              (or progress-evt prog-evt (port-progress-evt input-port))]
+             [v (and 
+                 ;; to implement weak support for reusing the buffer in `read-bytes!-evt',
+                 ;; need to check nack after getting progress-evt:
+                 (not (sync/timeout 0 nack)) 
+                 ;; try to get bytes:
+                 ((if poll? peek-bytes-avail!* peek-bytes-avail!)
+                  bstr (+ pos (or peek-offset 0)) progress-evt input-port pos))])
         (cond
           ;; the first two cases below are shortcuts, and not
           ;;  strictly necessary
-          [(sync/timeout 0 nack) (void)]
+          [(sync/timeout 0 nack)
+           (void)]
           [(sync/timeout 0 progress-evt)
            (cond [poll? #f]
                  [prog-evt (void)]
-                 [else (try-again pos bstr)])]
+                 [else (try-again 0 bstr #f)])]
           [(and poll? (equal? v 0)) #f]
           [(and (number? v) (need-more? bstr (+ pos v)))
-           => (lambda (bstr) (try-again (+ v pos) bstr))]
+           => (lambda (bstr) (try-again (+ v pos) bstr progress-evt))]
           [else
            (let* ([v2 (cond [(number? v) (shrink bstr (+ v pos))]
                             [(positive? pos) pos]
@@ -992,14 +1005,15 @@
                                       (channel-put-evt ch result))
                                     input-port)
                 result]
-               [(and (eof-object? eof)
+
+               [(and (eof-object? v)
                      (zero? pos)
                      (not (sync/timeout 0 progress-evt)))
-                ;; Must be a true end-of-file
+                ;; Must be a true end-of-file, since commit failed
                 (let ([result (combo bstr eof)])
                   (if poll? result (channel-put ch result)))]
                [poll? #f]
-               [else (try-again 0 orig-bstr)]))]))))
+               [else (try-again 0 orig-bstr #f)]))]))))
   (if (zero? (bytes-length orig-bstr))
     (wrap-evt always-evt (lambda (x) 0))
     (poll-or-spawn go)))
@@ -1025,20 +1039,22 @@
                             (lambda (bstr v) v)
                             peek-offset prog-evt))
 
-(define (read-bytes!-evt bstr input-port)
-  (-read-bytes!-evt bstr input-port #f #f))
+(define (read-bytes!-evt bstr input-port [progress-evt #f])
+  (-read-bytes!-evt bstr input-port #f progress-evt))
 
 (define (peek-bytes!-evt bstr peek-offset prog-evt input-port)
   (-read-bytes!-evt bstr input-port peek-offset prog-evt))
 
 (define (-read-bytes-evt len input-port peek-offset prog-evt)
-  (let ([bstr (make-bytes len)])
-    (wrap-evt
-     (-read-bytes!-evt bstr input-port peek-offset prog-evt)
-     (lambda (v)
-       (if (number? v)
-         (if (= v len) bstr (subbytes bstr 0 v))
-         v)))))
+  (guard-evt
+   (lambda ()
+     (let ([bstr (make-bytes len)])
+       (wrap-evt
+        (-read-bytes!-evt bstr input-port peek-offset prog-evt)
+        (lambda (v)
+          (if (number? v)
+              (if (= v len) bstr (subbytes bstr 0 v))
+              v)))))))
 
 (define (read-bytes-evt len input-port)
   (-read-bytes-evt len input-port #f #f))
@@ -1049,44 +1065,46 @@
 (define (-read-string-evt goal input-port peek-offset prog-evt)
   (if (zero? goal)
     (wrap-evt always-evt (lambda (x) ""))
-    (let ([bstr (make-bytes goal)]
-          [c (bytes-open-converter "UTF-8-permissive" "UTF-8")])
-      (wrap-evt
-       (read-at-least-bytes!-evt
-        bstr input-port
-        (lambda (bstr v)
-          (if (= v (bytes-length bstr))
-            ;; We can't easily use bytes-utf-8-length here,
-            ;; because we may need more bytes to figure out
-            ;; the true role of the last byte. The
-            ;; `bytes-convert' function lets us deal with
-            ;; the last byte properly.
-            (let-values ([(bstr2 used status)
-                          (bytes-convert c bstr 0 v)])
-              (let ([got (bytes-utf-8-length bstr2)])
-                (if (= got goal)
-                  ;; Done:
-                  #f
-                  ;; Need more bytes:
-                  (let ([bstr2 (make-bytes (+ v (- goal got)))])
-                    (bytes-copy! bstr2 0 bstr)
-                    bstr2))))
-            ;; Need more bytes in bstr:
-            bstr))
-        (lambda (bstr v)
-          ;; We may need one less than v,
-          ;; because we may have had to peek
-          ;; an extra byte to discover an
-          ;; error in the stream.
-          (if ((bytes-utf-8-length bstr #\? 0 v) . > . goal) (sub1 v) v))
-        cons
-        peek-offset prog-evt)
-       (lambda (bstr+v)
-         (let ([bstr (car bstr+v)]
-               [v (cdr bstr+v)])
-           (if (number? v)
-             (bytes->string/utf-8 bstr #\? 0 v)
-             v)))))))
+    (guard-evt
+     (lambda ()
+       (let ([bstr (make-bytes goal)]
+             [c (bytes-open-converter "UTF-8-permissive" "UTF-8")])
+         (wrap-evt
+          (read-at-least-bytes!-evt
+           bstr input-port
+           (lambda (bstr v)
+             (if (= v (bytes-length bstr))
+                 ;; We can't easily use bytes-utf-8-length here,
+                 ;; because we may need more bytes to figure out
+                 ;; the true role of the last byte. The
+                 ;; `bytes-convert' function lets us deal with
+                 ;; the last byte properly.
+                 (let-values ([(bstr2 used status)
+                               (bytes-convert c bstr 0 v)])
+                   (let ([got (bytes-utf-8-length bstr2)])
+                     (if (= got goal)
+                         ;; Done:
+                         #f
+                         ;; Need more bytes:
+                         (let ([bstr2 (make-bytes (+ v (- goal got)))])
+                           (bytes-copy! bstr2 0 bstr)
+                           bstr2))))
+                 ;; Need more bytes in bstr:
+                 bstr))
+           (lambda (bstr v)
+             ;; We may need one less than v,
+             ;; because we may have had to peek
+             ;; an extra byte to discover an
+             ;; error in the stream.
+             (if ((bytes-utf-8-length bstr #\? 0 v) . > . goal) (sub1 v) v))
+           cons
+           peek-offset prog-evt)
+          (lambda (bstr+v)
+            (let ([bstr (car bstr+v)]
+                  [v (cdr bstr+v)])
+              (if (number? v)
+                  (bytes->string/utf-8 bstr #\? 0 v)
+                  v)))))))))
 
 (define (read-string-evt goal input-port)
   (-read-string-evt goal input-port #f #f))

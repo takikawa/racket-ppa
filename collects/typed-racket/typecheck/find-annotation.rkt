@@ -1,11 +1,11 @@
-#lang scheme/base
+#lang racket/base
 
 (require "../utils/utils.rkt" syntax/parse
-         scheme/contract
+         racket/contract
          (rep type-rep)
          (env lexical-env)
          (private type-annotation)
-         (for-template scheme/base))
+         (for-template racket/base))
 
 (provide/cond-contract [find-annotation (syntax? identifier? . -> . (or/c #f Type/c))])
 
@@ -71,6 +71,3 @@
 	 (find #'body))]
     [e:core-expr
      (ormap find (syntax->list #'(e.expr ...)))]))
-
-; (require racket/trace)
-; (trace find-annotation)

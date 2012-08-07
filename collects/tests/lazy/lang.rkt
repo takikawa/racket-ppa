@@ -28,8 +28,8 @@
 
 (define (list-tests)
   (test
-   (! (car 0)) =error> "car: expects argument of type <pair>"
-   (! (cdr 0)) =error> "cdr: expects argument of type <pair>"
+   (! (car 0)) =error> "car: contract violation\n  expected: pair?"
+   (! (cdr 0)) =error> "cdr: contract violation\n  expected: pair?"
    (! (car (cons 1 (/ 1 0)))) => 1
    (! (cdr (cons (/ 1 0) 1))) => 1
    (! (list-ref (list (/ 1 0) 1 (/ 1 0)) 1)) => 1
@@ -40,7 +40,7 @@
    (!! (member 1 (cons 0 (cons 1 2)))) => '(1 . 2)
    (!! (memq   1 (cons 0 (cons 1 2)))) => '(1 . 2)
    (!! (memv   1 (cons 0 (cons 1 2)))) => '(1 . 2)
-   (! (second (map car (list 1 2 3)))) =error> "expects argument of type"
+   (! (second (map car (list 1 2 3)))) =error> "contract violation"
    (! (second (map car (list 1 '(2) 3)))) => 2
    ))
 
@@ -161,9 +161,7 @@
    (!! (list-ref h 10000)) => 288555831593533440
    (!! (take 10 FACT)) => '(1 1 2 6 24 120 720 5040 40320 362880)
    (!! (take 10 (entrelacer NAT PAIR))) => '(0 0 1 2 2 4 3 6 4 8)
-   (!! (take 10 F)) => '(0 0 1 0 2 1 3 0 4 2)
-   )
-  )
+   (!! (take 10 F)) => '(0 0 1 0 2 1 3 0 4 2)))
 
 (define (strictness-tests)
   (test
@@ -202,8 +200,9 @@
    (! (andmap (/ 1 0) '(1))) =error> "/: division by zero"
    (! (andmap 1 (/ 1 0))) =error> "/: division by zero"
    ))
-  
+
 (provide lang-tests)
+(module+ main (lang-tests))
 (define (lang-tests)
   (! (begin (basic-tests)
             (list-tests)

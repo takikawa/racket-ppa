@@ -1,5 +1,6 @@
 #lang scribble/doc
-@(require "mz.rkt" (for-syntax racket/base) (for-label racket/serialize))
+@(require "mz.rkt" (for-syntax racket/base) (for-label racket/serialize
+                                                       racket/generic))
 
 @(define posn-eval (make-base-eval))
 @(interaction-eval #:eval posn-eval (require (for-syntax racket/base)))
@@ -25,10 +26,14 @@
                               (code:line #:constructor-name constructor-id)
                               (code:line #:extra-constructor-name constructor-id)
                               (code:line #:reflection-name symbol-expr)
+                              (code:line #:methods gen:name method-defs)
                               #:omit-define-syntaxes
                               #:omit-define-values]
                [field-option #:mutable
-                             #:auto])]{
+                             #:auto]
+               [method-defs (definition ...)])
+               #:contracts
+               ([gen:name identifier?])]{
 
 Creates a new @techlink{structure type} (or uses a pre-existing
 structure type if @racket[#:prefab] is specified), and binds
@@ -136,7 +141,9 @@ includes @racket[constructor-id] as an export. If
 @racket[constructor-id] is supplied via @racket[#:constructor-name]
 and it is not the same as @racket[id], then @racket[id] does not serve
 as a constructor, and @racket[object-name] on the constructor produces
-the symbolic form of @racket[constructor-id].
+the symbolic form of @racket[constructor-id]. Only one of 
+@racket[#:extra-constructor-name] and @racket[#:constructor-name]
+can be provided within a @racket[struct] form.
 
 If @racket[#:reflection-name symbol-expr] is provided, then
 @racket[symbol-expr] must produce a symbol that is used to identify
@@ -144,6 +151,16 @@ the structure type in reflective operations such as
 @racket[struct-type-info]. It corresponds to the first argument of
 @racket[make-struct-type]. Structure printing uses the reflective
 name, as do the various procedures that are bound by @racket[struct].
+
+If @racket[#:methods gen:name method-defs] is provided, then
+@racket[gen:name] must be a transformer binding for the static
+information about a generic group produced by @racket[define-generics].
+The @racket[method-defs] define the methods of @racket[gen:name].
+If any method of @racket[gen:name] is not defined, then @racket[#f] is used
+to signify that the structure type does not implement the particular
+method. At least one method definition must be provided if this keyword
+is used. A @racket[define/generic] form may appear in @racket[method-defs].
+Auxiliary definitions and expressions may also appear in @racket[method-defs].
 
 If the @racket[#:omit-define-syntaxes] option is supplied, then
 @racket[id] is not bound as a transformer. If the
@@ -215,9 +232,11 @@ position within the structure declaration of the field named by
                                (id super-id)])]{
 
 Like @racket[struct], except that the syntax for supplying a
-@racket[super-id] is different, and a @racket[_constructor-id] that has
-a @racketidfont{make-} prefix on @racket[id] is implicitly supplied
-via @racket[#:extra-constructor-name].
+@racket[super-id] is different, and a @racket[_constructor-id] that
+has a @racketidfont{make-} prefix on @racket[id] is implicitly
+supplied via @racket[#:extra-constructor-name] if neither
+@racket[#:extra-constructor-name] nor @racket[#:constructor-name] is
+provided.
 
 This form is provided for backwards compatibility; @racket[struct] is
 preferred.

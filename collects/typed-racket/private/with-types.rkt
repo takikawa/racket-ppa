@@ -1,11 +1,11 @@
 #lang racket/base
 
-(require racket/require
+(require racket/require racket/promise
          (for-template
-          (except-in racket/base for for* with-handlers)
+          (except-in racket/base for for* with-handlers lambda λ define)
           "../base-env/prims.rkt"
           (prefix-in c: (combine-in racket/contract/region racket/contract/base)))
-         "../base-env/extra-procs.rkt" (except-in "../base-env/prims.rkt" with-handlers)
+         "../base-env/extra-procs.rkt" (except-in "../base-env/prims.rkt" with-handlers λ lambda define)
          "../tc-setup.rkt"
          syntax/parse racket/match
          unstable/sequence  "../base-env/base-types-extra.rkt"
@@ -79,8 +79,8 @@
                  ;; this parameter is just for printing types
                  ;; this is a parameter to avoid dependency issues
                  [current-type-names
-                  (lambda ()
-                    (append
+                  (lazy
+                    (append 
                      (type-name-env-map (lambda (id ty)
                                           (cons (syntax-e id) ty)))
                      (type-alias-env-map (lambda (id ty)

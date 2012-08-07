@@ -6,7 +6,7 @@
          "private/box.rkt"
          "private/hash.rkt"
          "private/vector.rkt"
-         "private/struct.rkt"
+         "private/struct-dc.rkt"
          "private/struct-prop.rkt"
          "private/misc.rkt"
          "private/provide.rkt"
@@ -30,7 +30,7 @@
                "private/box.rkt"
                "private/hash.rkt"
                "private/vector.rkt"
-               "private/struct.rkt"
+               "private/struct-dc.rkt"
                "private/struct-prop.rkt")
  (except-out (all-from-out "private/base.rkt")
              current-contract-region)

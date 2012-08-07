@@ -97,13 +97,14 @@
         [Expr ?body body]
         [#:pattern ?form]
         [#:rename ?form shift])]
-    [(Wrap p:#%module-begin (e1 e2 rs ?1 me body ?2))
+    [(Wrap p:#%module-begin (e1 e2 rs ?1 me body ?2 subs))
      (R [! ?1]
         [#:pattern ?form]
         [#:rename ?form me]
         [#:pattern (?module-begin . ?forms)]
         [ModuleBegin/Phase ?forms body]
-        [! ?2])]
+        [! ?2]
+        [Submodules ?forms subs])]
     [(Wrap p:define-syntaxes (e1 e2 rs ?1 prep rhs locals))
      (R [! ?1]
         [#:pattern ?form]
@@ -252,6 +253,13 @@
         [#:pattern ?form]
         [#:walk e2 'macro])]
 
+    [(Wrap p:submodule* (e1 e2 rs ?1))
+     (R [! ?1])]
+    [(Wrap p:submodule (e1 e2 rs ?1 exp))
+     (R [! ?1]
+        [#:pattern ?form]
+        [Expr ?form exp])]
+
     [(Wrap p:stop (e1 e2 rs ?1))
      (R [! ?1])]
 
@@ -270,7 +278,7 @@
         [! ?2]
         [Expr ?rhs rhs])]
 
-    [(Wrap p:begin-for-syntax (e1 e2 rs ?1 prep body))
+    [(Wrap p:begin-for-syntax (e1 e2 rs ?1 prep body locals))
      (R [! ?1]
         [#:pattern ?form]
         [PrepareEnv ?form prep]
@@ -278,7 +286,8 @@
         [#:parameterize ((phase (add1 (phase))))
           [#:if (module-begin/phase? body)
                 [[ModuleBegin/Phase ?forms body]]
-                [[BeginForSyntax ?forms body]]]])]
+                [[BeginForSyntax ?forms body]]]]
+        [LocalActions ?forms locals])]
 
     ;; Macros
     [(Wrap mrule (e1 e2 rs ?1 me1 locals me2 ?2 etx next))
@@ -500,6 +509,18 @@
     [#f
      (R)]))
 
+(define (Submodules subs)
+  (match subs
+    ['()
+     (R)]
+    [(cons sub rest)
+     (R [#:pattern ?form]
+        [#:new-local-context
+         [#:pattern ?form]
+         [#:set-syntax (wderiv-e1 sub)]
+         [Expr ?form sub]]
+        [Submodules ?form rest])]))
+
 ;; List : ListDerivation -> RST
 (define (List ld)
   (match ld
@@ -668,7 +689,7 @@
         [#:step 'splice-module (stx->list (stx-cdr begin-form))]
         [#:rename ?forms tail]
         [ModulePass ?forms rest])]
-    [(cons (Wrap mod:lift (head renames stxs)) rest)
+    [(cons (Wrap mod:lift (head locals renames stxs)) rest)
      (R [#:pattern (?firstL . ?rest)]
         ;; renames has form (head-e2 . ?rest)
         ;; stxs has form (lifted ...),
@@ -677,6 +698,7 @@
                          (visible-lift-stxs null))
           [#:pass1]
           [Expr ?firstL head]
+          [LocalActions ?firstL locals]
           [#:do (when (pair? (available-lift-stxs))
                   (lift-error 'mod:lift "available lifts left over"))]
           [#:let visible-lifts (visible-lift-stxs)]
@@ -700,9 +722,10 @@
     [(cons (Wrap mod:skip ()) rest)
      (R [#:pattern (?firstS . ?rest)]
         [ModulePass ?rest rest])]
-    [(cons (Wrap mod:cons (head)) rest)
+    [(cons (Wrap mod:cons (head locals)) rest)
      (R [#:pattern (?firstC . ?rest)]
         [Expr ?firstC head]
+        [LocalActions ?firstC locals]
         [ModulePass ?rest rest])]))
 
 ;; Lifts
@@ -757,7 +780,7 @@
 
 ;; lift-error
 (define (lift-error sym . args)
-  (apply fprintf (current-error-port) args)
+  (apply eprintf args)
   (newline (current-error-port))
   (when #f
     (apply error sym args)))

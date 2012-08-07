@@ -3,7 +3,7 @@
 (require string-constants racket/gui/base
          racket/contract/base racket/class)
 (require scribble/srcdoc)
-(require/doc scheme/base scribble/manual)
+(require/doc racket/base scribble/manual)
 
 (define (trim-string str size)
   (let ([str-size (string-length str)])
@@ -476,7 +476,7 @@
     
     The string, @racket[action], indicates what action is about to
     take place, without saving. For example, if the application
-    is about to close a file, a good action is @racket["Close" "Anyway"].
+    is about to close a file, a good action is @racket["Close Anyway"].
     The result symbol indicates the user's choice. If
     @racket[can-save-now?] is @racket[#f], this function does not
     give the user the ``Save'' option and thus will not return

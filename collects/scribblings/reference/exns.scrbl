@@ -21,6 +21,56 @@ particular required arity (e.g., @racket[call-with-input-file],
 @racket[call/cc]) check the argument's arity immediately, raising
 @racket[exn:fail:contract] if the arity is incorrect.
 
+@;----------------------------------------------------------------------
+@section{Error Message Conventions}
+
+Racket's @deftech{error message convention} is to produce error
+messages with the following shape:
+
+@racketblock[
+  @#,nonterm{srcloc}: @#,nonterm{name}: @#,nonterm{message}@#,tt{;}
+   @#,nonterm{continued-message} ...
+    @#,nonterm{field}: @#,nonterm{detail}
+    ...
+]
+
+The message starts with an optional source location, @nonterm{srcloc},
+which is followed by a colon and space when present. The message
+continues with an optional @nonterm{name} that usually identifies the
+complaining function, syntactic form, or other entity, but may also
+refer to an entity being complained about; the @nonterm{name} is also
+followed by a colon and space when present.
+
+The @nonterm{message} should be relatively short, and it should be
+largely independent of specific values that triggered the error. More
+detailed explanation that requires multiple lines should continue with
+each line indented by a single space, in which case @nonterm{message}
+should end in a semi-colon (but the semi-colon should be omitted if
+@nonterm{continued-message} is not present). Message text should be
+lowercase---using semi-colons to separate sentences if needed,
+although long explanations may be better deferred to extra fields.
+
+Specific values that triggered the error or other helpful information
+should appear in separate @nonterm{field} lines, each of which is
+indented by two spaces. If a @nonterm{detail} is especially long or
+takes multiple lines, it should start on its own line after the
+@nonterm{field} label, and each of its lines should be indented by
+three spaces. Field names should be all lowercase.
+
+A @nonterm{field} name should end with @litchar{...} if the field
+provides relatively detailed information that might be distracting in
+common cases but useful in others. For example, when a contract
+failure is reported for a particular argument of a function, other
+arguments to the function might be shown in an ``other arguments...''
+field. The intent is that fields whose names end in @litchar{...}
+might be hidden by default in an environment such as DrRacket.
+
+Make @nonterm{field} names as short as possible, relying on
+@nonterm{message} or @nonterm{continued message} text to clarify the
+meaning for a field. For example, prefer ``given'' to ``given turtle''
+as a field name, where @nonterm{message} is something like ``given
+turtle is too sleepy'' to clarify that ``given'' refers to a turtle.
+
 @;------------------------------------------------------------------------
 @section[#:tag "errorproc"]{Raising Exceptions}
 
@@ -56,7 +106,7 @@ exception handler obtains control, and the handler itself is
 
 @defproc*[([(error [sym symbol?]) any]
            [(error [msg string?] [v any/c] ...) any]
-           [(error [src symbol?] [frmat string?] [v any/c] ...) any])]{
+           [(error [src symbol?] [format string?] [v any/c] ...) any])]{
 
 Raises the exception @racket[exn:fail], which contains an error
 string. The different forms produce the error string in different
@@ -65,20 +115,27 @@ ways:
 @itemize[
 
  @item{@racket[(error sym)] creates a message string by concatenating
-  @racket["error: "] with the string form of @racket[sym].}
+  @racket["error: "] with the string form of @racket[sym]. Use this
+  form sparingly.}
 
  @item{@racket[(error msg v ...)] creates a message string by
  concatenating @racket[msg] with string versions of the @racket[v]s
  (as produced by the current error value conversion handler; see
  @racket[error-value->string-handler]). A space is inserted before
- each @racket[v].}
+ each @racket[v]. Use this form sparingly, because it does not conform
+ well to Racket's @tech{error message conventions}; consider
+ @racket[raise-arguments-error], instead. }
 
  @item{@racket[(error src frmat v ...)] creates a
  message string equivalent to the string created by
 
   @racketblock[
   (format (string-append "~s: " frmat) src v ...)
-  ]}
+  ]
+
+ When possible, use functions such as @racket[raise-argument-error],
+ instead, which construct messages that follow Racket's @tech{error message
+ conventions}.}
 
 ]
 
@@ -91,6 +148,7 @@ In all cases, the constructed message string is passed to
 (error 'method-a "failed because ~a" "no argument supplied")
 ]}
 
+
 @defproc*[([(raise-user-error [sym symbol?]) any]
            [(raise-user-error [msg string?] [v any/c] ...) any]
            [(raise-user-error [src symbol?] [format string?] [v any/c] ...) any])]{
@@ -100,22 +158,17 @@ Like @racket[error], but constructs an exception with
 default @tech{error display handler} does not show a ``stack trace'' for
 @racket[exn:fail:user] exceptions (see @secref["contmarks"]), so
 @racket[raise-user-error] should be used for errors that are intended
-for end users.
-
-@examples[
-(raise-user-error 'failed)
-(raise-user-error "failed" 23 'pizza (list 1 2 3))
-(raise-user-error 'method-a "failed because ~a" "no argument supplied")
-]}
+for end users.}
 
 
-@defproc*[([(raise-type-error [name symbol?] [expected string?] [v any/c]) any]
-           [(raise-type-error [name symbol?] [expected string?] [bad-pos exact-nonnegative-integer?] [v any/c] ...) any])]{
+@defproc*[([(raise-argument-error [name symbol?] [expected string?] [v any/c]) any]
+           [(raise-argument-error [name symbol?] [expected string?] [bad-pos exact-nonnegative-integer?] [v any/c] ...) any])]{
 
 Creates an @racket[exn:fail:contract] value and @racket[raise]s it as
 an exception.  The @racket[name] argument is used as the source
 procedure's name in the error message. The @racket[expected] argument
-is used as a description of the expected type.
+is used as a description of the expected contract (i.e., as a string,
+but the string is intended to contain a contract expression).
 
 In the first form, @racket[v] is the value received by the procedure
 that does not have the expected type.
@@ -128,33 +181,97 @@ message names the bad argument and also lists the other arguments. If
 @exnraise[exn:fail:contract].
 
 @examples[
+(define (feed-machine bits)
+  (if (not (integer? bits))
+    (raise-argument-error 'feed-machine "integer?" bits)
+    "fed the machine"))
+(feed-machine 'turkey)
 (define (feed-cow animal)
   (if (not (eq? animal 'cow))
-    (raise-type-error 'feed-cow "cow" animal)
+    (raise-argument-error 'feed-cow "'cow" animal)
     "fed the cow"))
 (feed-cow 'turkey)
 (define (feed-animals cow sheep goose cat)
   (if (not (eq? goose 'goose))
-    (raise-type-error 'feed-animals "goose" 2 cow sheep goose cat)
+    (raise-argument-error 'feed-animals "'goose" 2 cow sheep goose cat)
     "fed the animals"))
 (feed-animals 'cow 'sheep 'dog 'cat)
 ]}
 
-@defproc[(raise-mismatch-error [name symbol?] [message string?] [v any/c] 
-                               ...+ ...+) any]{
+
+@defproc*[([(raise-result-error [name symbol?] [expected string?] [v any/c]) any]
+           [(raise-result-error [name symbol?] [expected string?] [bad-pos exact-nonnegative-integer?] [v any/c] ...) any])]{
+
+Like @racket[raise-argument-error], but the error message describe @racket[v]
+as a ``result'' instead of an ``argument.''}
+
+
+@defproc[(raise-arguments-error [name symbol?] [message string?]
+                                [field string?] [v any/c] 
+                                ... ...) any]{
 
 Creates an @racket[exn:fail:contract] value and @racket[raise]s it as
 an exception.  The @racket[name] is used as the source procedure's
 name in the error message. The @racket[message] is the error
-message. The @racket[v] argument is the improper argument received by
-the procedure. The printed form of @racket[v] is appended to
-@racket[message] (using the error value conversion handler; see
+message; if @racket[message] contains newline characters, each extra line should be
+suitably indented (with one extra space at the start of each line), but it should not end with a newline character.
+Each @racket[field] must have a corresponding @racket[v],
+and the two are rendered on their own
+line in the error message, with each @racket[v] formatted 
+using the error value conversion handler (see
 @racket[error-value->string-handler]).
 
-Additional arguments are concatenated to the error message like
-@racket[message] and @racket[v]. Every other additional argument
-(starting with the argument after @racket[v]) must be a string, but a
-string need not have a following value argument.}
+@examples[
+  (raise-arguments-error 'eat 
+                         "fish is smaller than its given meal"
+                         "fish" 12
+                         "meal" 13)
+]}
+
+
+@defproc[(raise-range-error [name symbol?] [type-description string?] [index-prefix string?]
+                            [index exact-integer?] [in-value any/c]
+                            [lower-bound exact-integer?] [upper-bound exact-integer?]
+                            [alt-lower-bound (or/c #f exact-integer?)])
+         any]{
+
+Creates an @racket[exn:fail:contract] value and @racket[raise]s it as
+an exception to report an out-of-range error. The @racket[type-description]
+string describes the value for which the index is meant to select an element,
+and @racket[index-prefix] is a prefix for the word ``index.'' The @racket[index]
+argument is the rejected index. The @racket[in-value] argument is the value
+for which the index was meant. The @racket[lower-bound] and @racket[upper-bound]
+arguments specify the valid range of indices, inclusive. If @racket[alt-lower-bound]
+is not @racket[#f], and if @racket[index] is between @racket[alt-lower-bound]
+and @racket[upper-bound], then the error is report as @racket[index] being less
+than the ``starting'' index @racket[lower-bound].
+
+@examples[
+(raise-range-error 'vector-ref "vector" "starting " 5 #(1 2 3) 0 3)
+(raise-range-error 'vector-ref "vector" "ending " 5 #(1 2 3) 0 3)
+(raise-range-error 'vector-ref "vector" "ending " 1 #(1 2 3) 2 3 0)
+]}
+
+
+
+@defproc*[([(raise-type-error [name symbol?] [expected string?] [v any/c]) any]
+           [(raise-type-error [name symbol?] [expected string?] [bad-pos exact-nonnegative-integer?] [v any/c] ...) any])]{
+
+Like @racket[raise-argument-error], but with Racket's old formatting
+conventions, and where @racket[expected] is used as a ``type''
+description instead of a contract expression. Use @racket[raise-argument-error]
+or @racket[raise-result-error], instead.}
+
+
+@defproc[(raise-mismatch-error [name symbol?] [message string?] [v any/c] 
+                               ...+ ...+) any]{
+
+Similar to @racket[raise-arguments-error], but using Racket's old
+formatting conventions, with a required @racket[v] immediately
+after the first @racket[message] string, and with further @racket[message]
+strings that are spliced into the message without line breaks or
+space. Use @racket[raise-arguments-error], instead.}
+
 
 @defproc[(raise-arity-error [name (or/c symbol? procedure?)]
                             [arity-v (or/c exact-nonnegative-integer?
@@ -195,7 +312,9 @@ exception.  Macros use this procedure to report syntax errors.
 
 The @racket[name] argument is usually @racket[#f] when @racket[expr]
 is provided; it is described in more detail below. The
-@racket[message] is used as the main body of the error message.
+@racket[message] is used as the main body of the error message; if
+@racket[message] contains newline characters, each new line should be
+suitably indented (with one space at the start), and it should not end with a newline character.
 
 The optional @racket[expr] argument is the erroneous source syntax
 object or S-expression (but the expression @racket[#f] cannot be
@@ -248,32 +367,41 @@ Installs @racket[f] as the @tech{exception handler} for the
 is raised during the evaluation of @racket[thunk] (in an extension of
 the current continuation that does not have its own exception
 handler), then @racket[f] is applied to the @racket[raise]d value in
-the continuation of the @racket[raise] call (but normally extended
+the continuation of the @racket[raise] call (but the continuation is 
+normally extended
 with a @tech{continuation barrier}; see @secref["prompt-model"] and
 @racket[raise]).
 
-Any procedure that takes one argument can be an exception handler.  If
-the exception handler returns a value when invoked by @racket[raise],
-then @racket[raise] propagates the value to the ``previous'' exception
-handler (still in the dynamic extent of the call to @racket[raise],
-and under the same barrier, if any). The previous exception handler is
-the exception handler associated with the rest of the continuation
-after the point where the called exception handler was associated with
-the continuation; if no previous handler is available, the
-uncaught-exception handler is used (see below). In all cases, a call
-to an exception handler is @racket[parameterize-break]ed to disable
-breaks, and it is wrapped with @racket[call-with-exception-handler] to
-install the exception handler that reports both the original and
-newly raised exceptions.}
+Any procedure that takes one argument can be an exception handler.
+Normally, an exception handler escapes from the context of the
+@racket[raise] call via @racket[abort-current-continuation] or some other escape
+mechanism. To propagate an exception to the ``previous'' exception
+handler---that is, the exception handler associated with the rest of
+the continuation after the point where the called exception handler
+was associated with the continuation---an exception handler can simply
+return a result instead of escaping, in which case the @racket[raise] call
+propagates the value to the previous exception handler (still in the
+dynamic extent of the call to @racket[raise], and under the same
+barrier, if any). If an exception handler returns a result and no
+previous handler is available, the @tech{uncaught-exception handler}
+is used.
+
+A call to an exception handler is @racket[parameterize-break]ed to
+disable breaks, and it is wrapped with
+@racket[call-with-exception-handler] to install an exception handler
+that reports both the original and newly raised exceptions via the
+@tech{error display handler} and then escapes via the @tech{error
+escape handler}.}
+
 
 @defparam[uncaught-exception-handler f (any/c . -> . any)]{
 
-A @tech{parameter} that determines an exception handler used by
+A @tech{parameter} that determines an @deftech{uncaught-exception handler} used by
 @racket[raise] when the relevant continuation has no exception handler
 installed with @racket[call-with-exception-handler] or
 @racket[with-handlers]. Unlike exception handlers installed with
-@racket[call-with-exception-handler], the handler for uncaught
-exceptions must not return a value when called by @racket[raise]; if
+@racket[call-with-exception-handler], the uncaught-exception
+handler must not return a value when called by @racket[raise]; if
 it returns, an exception is raised (to be handled by an exception
 handler that reports both the original and newly raised exception).
 
@@ -292,6 +420,7 @@ When the current @tech{error display handler} is the default handler, then the
 error-display call is parameterized to install an emergency error
 display handler that logs an error (see @racket[log-error]) and never
 fails.}
+
 
 @defform[(with-handlers ([pred-expr handler-expr] ...)
            body ...+)]{

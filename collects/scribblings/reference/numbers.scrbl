@@ -487,7 +487,7 @@ Among the real numbers within @racket[(abs tolerance)] of @racket[x],
  the arguments in the given order are strictly decreasing,
  @racket[#f] otherwise.
 
-@mz-examples[(> 1 1) (> 3 2 1) (> +inf.0 1) (< +nan.0 1)]}
+@mz-examples[(> 1 1) (> 3 2 1) (> +inf.0 1) (> +nan.0 1)]}
 
 
 @defproc[(>= [x real?] [y real?] ...+) boolean?]{ Returns @racket[#t]
@@ -557,7 +557,7 @@ Returns the natural logarithm of @racket[z].  The result is normally
 
 
 @; ------------------------------------------------------------------------
-@subsection{Trignometric Functions}
+@subsection{Trigonometric Functions}
 
 @defproc[(sin [z number?]) number?]{
 
@@ -664,8 +664,12 @@ Returns the imaginary part of the complex number @racket[z] in
 
 @defproc[(angle [z number?]) real?]{ Returns the angle of
  the complex number @racket[z] in polar coordinates.
+ 
+ The result is guaranteed to be between @racket[(- pi)] and
+ @racket[pi], possibly equal to @racket[pi] (but never equal
+ to @racket[(- pi)]).
 
-@mz-examples[(angle -3) (angle 3.0) (angle 3+4i) (angle +inf.0+inf.0i)]}
+@mz-examples[(angle -3) (angle 3.0) (angle 3+4i) (angle +inf.0+inf.0i) (angle -1)]}
 
 @; ------------------------------------------------------------------------
 @subsection{Bitwise Operations}
@@ -1007,10 +1011,43 @@ is little-endian.}
 
 @note-lib[racket/math]
 
-@defthing[pi real?]{
+@defthing[pi flonum?]{
 
-An approximation to the ratio of a circle's circumference to its
-diameter: @number->string[pi].}
+An approximation of π, the ratio of a circle's circumference to its
+diameter.
+@examples[
+#:eval math-eval
+pi
+(cos pi)
+]}
+
+@defthing[pi.f single-flonum?]{
+
+Like @racket[pi], but in single precision.
+@examples[
+#:eval math-eval
+pi.f
+(* 2.0f0 pi)
+(* 2.0f0 pi.f)
+]}
+
+@defproc[(degrees->radians [x real?]) real?]{
+
+Converts an @racket[x]-degree angle to radians.
+@mz-examples[
+#:eval math-eval
+(degrees->radians 180)
+(sin (degrees->radians 45))
+]}
+
+@defproc[(radians->degrees [x real?]) real?]{
+
+Converts @racket[x] radians to degrees.
+@mz-examples[
+#:eval math-eval
+(radians->degrees pi)
+(radians->degrees (* 1/4 pi))
+]}
 
 @defproc[(sqr [z number?]) number?]{
 
@@ -1050,6 +1087,26 @@ Returns the hyperbolic cosine of @racket[z].}
 
 Returns the hyperbolic tangent of @racket[z].}
 
+@defproc[(exact-round [x rational?]) exact-integer?]{
+
+Equivalent to @racket[(inexact->exact (round x))].
+}
+
+@defproc[(exact-floor [x rational?]) exact-integer?]{
+
+Equivalent to @racket[(inexact->exact (floor x))].
+}
+
+@defproc[(exact-ceiling [x rational?]) exact-integer?]{
+
+Equivalent to @racket[(inexact->exact (ceiling x))].
+}
+
+@defproc[(exact-truncate [x rational?]) exact-integer?]{
+
+Equivalent to @racket[(inexact->exact (truncate x))].
+}
+
 @defproc[(order-of-magnitude [r (and/c real? positive?)]) (and/c exact? integer?)]{
 Computes the greatest exact integer @racket[m] such that:
 @racketblock[(<= (expt 10 m)
@@ -1064,6 +1121,14 @@ Hence also:
                     (order-of-magnitude 1/100)
                     (order-of-magnitude 1/101)]
 }
+
+@defproc[(nan? [x real?]) boolean?]{
+
+Returns @racket[#t] if @racket[x] is @racket[eqv?] to @racket[+nan.0] or @racket[+nan.f]; otherwise @racket[#f].}
+
+@defproc[(infinite? [x real?]) boolean?]{
+
+Returns @racket[#t] if @racket[z] is @racket[+inf.0], @racket[-inf.0], @racket[+inf.f], @racket[-inf.f]; otherwise @racket[#f].}
 
 @; ----------------------------------------------------------------------
 @close-eval[math-eval]

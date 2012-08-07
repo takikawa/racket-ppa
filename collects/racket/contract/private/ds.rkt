@@ -22,7 +22,7 @@ it around flattened out.
          "blame.rkt"
          "opt.rkt"
          "misc.rkt")
-(require (for-syntax scheme/base)
+(require (for-syntax racket/base)
          (for-syntax "ds-helpers.rkt")
          (for-syntax "helpers.rkt")
          (for-syntax "opt-guts.rkt"))
@@ -232,9 +232,16 @@ it around flattened out.
           
           (define (stronger-lazy-contract? a b)
             (and (contract-predicate b)
-                 (contract-stronger? 
-                  (contract-get a selector-indices)
-                  (contract-get b selector-indices)) ...))
+                 (let ([a-sel (contract-get a selector-indices)]
+                       [b-sel (contract-get b selector-indices)])
+                   (if (contract-struct? a-sel)
+                       (if (contract-struct? b-sel)
+                           (contract-stronger? a-sel b-sel)
+                           #f)
+                       (if (contract-struct? b-sel)
+                           #f
+                           (procedure-closure-contents-eq? a-sel b-sel))))
+                 ...))
           
           (define (lazy-contract-proj ctc)
             (λ (blame)
@@ -246,7 +253,7 @@ it around flattened out.
                     (raise-blame-error
                      blame
                      val
-                     "expected: ~s, got ~e" 'name val))
+                     '(expected: "~s," given: "~e") 'name val))
                   (cond
                     [(already-there? contract/info val lazy-depth-to-look)
                      val]
@@ -360,8 +367,7 @@ it around flattened out.
                             [enforcer-id enforcer-id-var]
                             [helper-id helper-id-var]
                             [((free-var free-var-val) (... ...))
-                             (make-free-vars (append (opt/info-free-vars opt/info)) #'freev)]
-                            [(saved-lifts (... ...)) (lifts-to-save lifts)])
+                             (make-free-vars (append (opt/info-free-vars opt/info)) #'freev)])
                 (values
                  #`(λ (stct f-x ...)
                      (let ((free-var free-var-val) (... ...))
@@ -421,7 +427,8 @@ it around flattened out.
                                       (cons contract/info-var
                                             (syntax 
                                              (make-opt-contract/info ctc enforcer-id id))))])
-                           (values
+                           (build-optres
+                            #:exp
                             (syntax 
                              (cond
                                [(opt-wrap-predicate val)
@@ -452,18 +459,16 @@ it around flattened out.
                                 (raise-blame-error
                                  blame
                                  val
-                                 "expected: ~s, got ~e"
+                                 '(expected: "~s," given: "~e")
                                  (contract-name ctc)
                                  val)]))
-                            lifts
-                            superlifts
-                            partials
-                            #f
-                            #f
-                            stronger-ribs
-                            ;; opt'd struct contracts don't use chaperones yet
-                            #f)))))))]))
-          )))))
+                            #:lifts lifts
+                            #:superlifts superlifts
+                            #:partials partials
+                            #:flat #f
+                            #:opt #f
+                            #:stronger-ribs stronger-ribs
+                            #:chaperone #f)))))))])))))))
 
 (define-syntax (define-contract-struct stx)
   (syntax-case stx ()
@@ -530,7 +535,8 @@ it around flattened out.
     (raise-blame-error
      (contract/info-blame contract/info)
      stct
-     "failed `and' clause, got ~e" stct)))
+     '("failed `and' clause," given: "~e")
+     stct)))
 
 (define-values (evaluate-attr-prop evaluate-attr-prop-predicate evaluate-attr-prop-accessor)
   (make-struct-type-property 'evaluate-attr-prop))

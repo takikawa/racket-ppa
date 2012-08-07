@@ -5,8 +5,8 @@ This file is for utilities that are only useful for Typed Racket, but
 don't depend on any other portion of the system
 |#
 
-(provide (all-defined-out))
-(require "syntax-traversal.rkt" racket/dict
+(provide (all-defined-out) (all-from-out "disappeared-use.rkt"))
+(require "syntax-traversal.rkt" racket/dict "disappeared-use.rkt" racket/promise
 	 syntax/parse (for-syntax racket/base syntax/parse) racket/match)
 
 ;; a parameter representing the original location of the syntax being
@@ -151,7 +151,7 @@ don't depend on any other portion of the system
 
 ;; parameter for currently-defined type aliases
 ;; this is used only for printing type names
-(define current-type-names (make-parameter (lambda () '())))
+(define current-type-names (make-parameter (lazy '())))
 
 ;; for reporting internal errors in the type checker
 (define-struct (exn:fail:tc exn:fail) ())
@@ -180,14 +180,6 @@ don't depend on any other portion of the system
 ;; are we currently expanding in a typed module (or top-level form)?
 (define typed-context? (box #f))
 
-;; list of syntax objects that should count as disappeared uses
-(define disappeared-use-todo (make-parameter '()))
-(define (add-disappeared-use t)
-  (disappeared-use-todo (cons t (disappeared-use-todo))))
-(define disappeared-bindings-todo (make-parameter '()))
-(define (add-disappeared-binding t)
-  (disappeared-bindings-todo (cons t (disappeared-bindings-todo))))
-
 ;; environment constructor
 (define-syntax (make-env stx)
   (define-syntax-class spec
@@ -205,7 +197,7 @@ don't depend on any other portion of the system
 
 ;; id: identifier
 ;; sym: a symbol
-;; mod: a quoted require spec like 'scheme/base
+;; mod: a quoted require spec like 'racket/base
 ;; is id the name sym defined in mod?
 (define (id-from? id sym mod)
   (and (eq? (syntax-e id) sym)

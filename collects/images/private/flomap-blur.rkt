@@ -1,8 +1,7 @@
 #lang typed/racket/base
 
-(require racket/flonum
-         (except-in racket/fixnum fl->fx fx->fl)
-         racket/match racket/math
+(require racket/match racket/math
+         (only-in racket/unsafe/ops unsafe-flvector-ref)
          "flonum.rkt"
          "flomap-struct.rkt")
 
@@ -19,14 +18,15 @@
   (case-lambda
     [(fm xσ)  (flomap-gaussian-blur fm xσ xσ)]
     [(fm xσ yσ)
-     (flomap-gaussian-blur-y (flomap-gaussian-blur-x fm (abs (exact->inexact xσ)))
-                             (abs (exact->inexact yσ)))]))
+     (flomap-gaussian-blur-y (flomap-gaussian-blur-x fm (abs (real->double-flonum xσ)))
+                             (abs (real->double-flonum yσ)))]))
 
-(: flomap-gaussian-blur-x (flomap Flonum -> flomap))
-(define (flomap-gaussian-blur-x fm σ)
+(: flomap-gaussian-blur-x (flomap Real -> flomap))
+(define (flomap-gaussian-blur-x fm σ*)
   (cond
-    [(σ . = . 0.0)  fm]
+    [(σ* . = . 0)  fm]
     [else
+     (define σ (abs (real->double-flonum σ*)))
      (define dx-min (fl->fx (floor (* (- 3.0) σ))))
      (define dx-max (fx+ 1 (fl->fx (ceiling (* 3.0 σ)))))
      (define ss (gaussian-kernel-1d dx-min dx-max σ))
@@ -38,18 +38,19 @@
         (define dx-start (fx- (fxmax (fx+ x dx-min) 0) x))
         (define dx-end (fx- (fxmin (fx+ x dx-max) w) x))
         (define j (fx+ i (fx* c dx-start)))
-        (let: src-loop : Flonum ([sum : Flonum  0.0] [dx : Fixnum  dx-start] [j : Fixnum  j])
+        (let: src-loop : Float ([sum : Float  0.0] [dx : Fixnum  dx-start] [j : Fixnum  j])
           (cond [(dx . fx< . dx-end)  (define s (unsafe-flvector-ref ss (fx- dx dx-min)))
                                       (src-loop (+ sum (* s (unsafe-flvector-ref vs j)))
                                                 (fx+ dx 1)
                                                 (fx+ j c))]
                 [else  sum]))))]))
 
-(: flomap-gaussian-blur-y (flomap Flonum -> flomap))
-(define (flomap-gaussian-blur-y fm σ)
+(: flomap-gaussian-blur-y (flomap Real -> flomap))
+(define (flomap-gaussian-blur-y fm σ*)
   (cond
-    [(σ . = . 0.0)  fm]
+    [(σ* . = . 0)  fm]
     [else
+     (define σ (abs (real->double-flonum σ*)))
      (define dy-min (fl->fx (floor (* (- 3.0) σ))))
      (define dy-max (fx+ 1 (fl->fx (ceiling (* 3.0 σ)))))
      (define ss (gaussian-kernel-1d dy-min dy-max σ))
@@ -62,25 +63,25 @@
         (define dy-start (fx- (fxmax (fx+ y dy-min) 0) y))
         (define dy-end (fx- (fxmin (fx+ y dy-max) h) y))
         (define j (fx+ i (fx* cw dy-start)))
-        (let: src-loop : Flonum ([sum : Flonum  0.0] [dy : Fixnum  dy-start] [j : Fixnum  j])
+        (let: src-loop : Float ([sum : Float  0.0] [dy : Fixnum  dy-start] [j : Fixnum  j])
           (cond [(dy . fx< . dy-end)  (define s (unsafe-flvector-ref ss (fx- dy dy-min)))
                                       (src-loop (+ sum (* s (unsafe-flvector-ref vs j)))
                                                 (fx+ dy 1)
                                                 (fx+ j cw))]
                 [else  sum]))))]))
 
-(: gaussian-kernel-1d (Fixnum Fixnum Flonum -> FlVector))
+(: gaussian-kernel-1d (Fixnum Fixnum Float -> FlVector))
 (define (gaussian-kernel-1d mn mx σ)
   (define n (fx- mx mn))
   (define ys (make-flvector n))
   (define sum
-    (let: loop : Flonum ([i : Fixnum  0] [sum : Flonum  0.0])
+    (let: loop : Float ([i : Fixnum  0] [sum : Float  0.0])
       (cond [(i . fx< . n)  (define v (flgaussian (fx->fl (fx+ i mn)) σ))
-                            (unsafe-flvector-set! ys i v)
+                            (flvector-set! ys i v)
                             (loop (fx+ i 1) (+ sum v))]
             [else  sum])))
   (let: loop : FlVector ([i : Integer  0])
-    (cond [(i . fx< . n)  (unsafe-flvector-set! ys i (/ (unsafe-flvector-ref ys i) sum))
+    (cond [(i . fx< . n)  (flvector-set! ys i (/ (flvector-ref ys i) sum))
                           (loop (fx+ i 1))]
           [else  ys])))
 
@@ -103,11 +104,11 @@
                  (cond [(k . fx< . c)
                         (define j00 (coords->index c w+1 k x y))
                         (define j01 (fx+ j00 c*w+1))
-                        (unsafe-flvector-set! new-vs (fx+ j01 c)
-                                              (- (+ (unsafe-flvector-ref vs i)
-                                                    (unsafe-flvector-ref new-vs j01)
-                                                    (unsafe-flvector-ref new-vs (fx+ j00 c)))
-                                                 (unsafe-flvector-ref new-vs j00)))
+                        (flvector-set! new-vs (fx+ j01 c)
+                                       (- (+ (flvector-ref vs i)
+                                             (flvector-ref new-vs j01)
+                                             (flvector-ref new-vs (fx+ j00 c)))
+                                          (flvector-ref new-vs j00)))
                         (k-loop (fx+ k 1) (fx+ i 1))]
                        [else  (x-loop (fx+ x 1) i)]))]
               [else  (y-loop (fx+ y 1) i)]))))
@@ -126,8 +127,8 @@
                  (cond [(k . fx< . c)
                         (define j0 (coords->index c w+1 k x y))
                         (define j1 (fx+ j0 c))
-                        (unsafe-flvector-set! new-vs j1 (+ (unsafe-flvector-ref vs i)
-                                                           (unsafe-flvector-ref new-vs j0)))
+                        (flvector-set! new-vs j1 (+ (flvector-ref vs i)
+                                                    (flvector-ref new-vs j0)))
                         (k-loop (fx+ k 1) (fx+ i 1))]
                        [else  (x-loop (fx+ x 1) i)]))]
               [else  (y-loop (fx+ y 1) i)]))))
@@ -147,8 +148,8 @@
                  (cond [(k . fx< . c)
                         (define j0 (coords->index c w k x y))
                         (define j1 (fx+ j0 cw))
-                        (unsafe-flvector-set! new-vs j1 (+ (unsafe-flvector-ref vs j0)
-                                                           (unsafe-flvector-ref new-vs j0)))
+                        (flvector-set! new-vs j1 (+ (flvector-ref vs j0)
+                                                    (flvector-ref new-vs j0)))
                         (k-loop (fx+ k 1))]
                        [else  (x-loop (fx+ x 1))]))]
               [else  (y-loop (fx+ y 1))]))))
@@ -156,7 +157,7 @@
 
 (: raw-flomap-integral-sum (FlVector Integer Integer Integer
                                      Integer Integer Integer Integer Integer
-                                     -> Flonum))
+                                     -> Float))
 (define (raw-flomap-integral-sum vs c w h k x-start y-start x-end y-end)
   (define w-1 (fx- w 1))
   (define h-1 (fx- h 1))
@@ -164,28 +165,28 @@
   (define x2 (fxmax 0 (fxmin x-end w-1)))
   (define y1 (fxmax 0 (fxmin y-start h-1)))
   (define y2 (fxmax 0 (fxmin y-end h-1)))
-  (- (+ (unsafe-flvector-ref vs (coords->index c w k x1 y1))
-        (unsafe-flvector-ref vs (coords->index c w k x2 y2)))
-     (+ (unsafe-flvector-ref vs (coords->index c w k x1 y2))
-        (unsafe-flvector-ref vs (coords->index c w k x2 y1)))))
+  (- (+ (flvector-ref vs (coords->index c w k x1 y1))
+        (flvector-ref vs (coords->index c w k x2 y2)))
+     (+ (flvector-ref vs (coords->index c w k x1 y2))
+        (flvector-ref vs (coords->index c w k x2 y1)))))
 
 (: raw-flomap-integral-x-sum (FlVector Integer Integer
-                                       Integer Integer Integer Integer -> Flonum))
+                                       Integer Integer Integer Integer -> Float))
 (define (raw-flomap-integral-x-sum vs c w k x-start x-end y)
   (define w-1 (fx- w 1))
   (define x1 (fxmax 0 (fxmin x-start w-1)))
   (define x2 (fxmax 0 (fxmin x-end w-1)))
-  (- (unsafe-flvector-ref vs (coords->index c w k x2 y))
-     (unsafe-flvector-ref vs (coords->index c w k x1 y))))
+  (- (flvector-ref vs (coords->index c w k x2 y))
+     (flvector-ref vs (coords->index c w k x1 y))))
 
 (: raw-flomap-integral-y-sum (FlVector Integer Integer Integer
-                                       Integer Integer Integer Integer -> Flonum))
+                                       Integer Integer Integer Integer -> Float))
 (define (raw-flomap-integral-y-sum vs c w h k x y-start y-end)
   (define h-1 (fx- h 1))
   (define y1 (fxmax 0 (fxmin y-start h-1)))
   (define y2 (fxmax 0 (fxmin y-end h-1)))
-  (- (unsafe-flvector-ref vs (coords->index c w k x y2))
-     (unsafe-flvector-ref vs (coords->index c w k x y1))))
+  (- (flvector-ref vs (coords->index c w k x y2))
+     (flvector-ref vs (coords->index c w k x y1))))
 
 ;; ===================================================================================================
 ;; Box blur
@@ -196,7 +197,8 @@
   (case-lambda
     [(fm xr)  (flomap-box-blur fm xr xr)]
     [(fm xr yr)
-     (let ([xr  (abs (exact->inexact xr))] [yr  (abs (exact->inexact yr))])
+     (let ([xr  (abs (real->double-flonum xr))]
+           [yr  (abs (real->double-flonum yr))])
        (cond [(and (integer? xr) (integer? yr))
               (let ([xr  (fl->fx xr)] [yr  (fl->fx yr)])
                 (with-asserts ([xr  nonnegative-fixnum?] [yr  nonnegative-fixnum?])
@@ -204,8 +206,9 @@
              [else
               (flomap-box-blur-y (flomap-box-blur-x fm xr) yr)]))]))
 
-(: flomap-box-blur-x (flomap Flonum -> flomap))
-(define (flomap-box-blur-x fm r)
+(: flomap-box-blur-x (flomap Real -> flomap))
+(define (flomap-box-blur-x fm r*)
+  (define r (abs (real->double-flonum r*)))
   (cond
     [(integer? r)  (let ([r  (fl->fx r)])
                      (with-asserts ([r  nonnegative-fixnum?])
@@ -230,8 +233,9 @@
            (* norm2 (raw-flomap-integral-x-sum int-vs int-c int-w k (fx- x r2) (fx+ x r2+1) y))
            )))]))
 
-(: flomap-box-blur-y (flomap Flonum -> flomap))
-(define (flomap-box-blur-y fm r)
+(: flomap-box-blur-y (flomap Real -> flomap))
+(define (flomap-box-blur-y fm r*)
+  (define r (abs (real->double-flonum r*)))
   (cond
     [(integer? r)  (let ([r  (fl->fx r)])
                      (with-asserts ([r  nonnegative-fixnum?])
@@ -295,11 +299,11 @@
 ;; ===================================================================================================
 ;; Default blur
 
-(: box-radius->variance (Flonum -> Flonum))
+(: box-radius->variance (Float -> Float))
 (define (box-radius->variance r)
   (* 1/12 (sqr (+ 1 (* 2 r)))))
 
-(: variance->box-radius (Flonum -> Flonum))
+(: variance->box-radius (Float -> Float))
 (define (variance->box-radius σ^2)
   (* 1/2 (- (flsqrt (* 12 σ^2)) 1)))
 
@@ -309,7 +313,8 @@
   (case-lambda
     [(fm σ)  (flomap-blur fm σ σ)]
     [(fm xσ yσ)
-     (let ([xσ  (abs (exact->inexact xσ))] [yσ  (abs (exact->inexact yσ))])
+     (let ([xσ  (abs (real->double-flonum xσ))]
+           [yσ  (abs (real->double-flonum yσ))])
        (cond
          [(and (xσ . >= . 1.5) (yσ . >= . 1.5))
           (define xσ^2 (sqr xσ))
@@ -323,7 +328,7 @@
           (flomap-blur-x (flomap-blur-y fm yσ) xσ)]))]))
 
 (: make-flomap-blur-dimension
-   ((flomap Flonum -> flomap) (flomap Flonum -> flomap) -> (flomap Flonum -> flomap)))
+   ((flomap Float -> flomap) (flomap Float -> flomap) -> (flomap Float -> flomap)))
 (define ((make-flomap-blur-dimension gaussian-blur box-blur) fm σ)
   (cond
     [(σ . = . 0.0)  fm]

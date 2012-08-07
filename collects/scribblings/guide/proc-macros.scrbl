@@ -30,7 +30,7 @@ procedure:
 
 Instead of using @racket[syntax-rules], you can write your own macro
 transformer procedure directly using @racket[lambda]. The argument to
-the procedure is a values that represents the source form, and the
+the procedure is a value that represents the source form, and the
 result of the procedure must be a value that represents the
 replacement form.
 
@@ -487,6 +487,10 @@ identifiers in the syntax will need bindings at @deftech{phase level
 -1}, also known as the @deftech{template phase level}, to have any
 binding at the run-time phase level relative to the module that
 defines the macro.
+
+@; ----------------------------------------
+
+@include-section["phases.scrbl"]
 
 @; ----------------------------------------
 

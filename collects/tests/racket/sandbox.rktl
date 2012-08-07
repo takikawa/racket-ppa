@@ -35,15 +35,21 @@
   (test 'kill (lambda () (nested* (kill))))
   (test 'shut (lambda () (nested* (shut)))))
 
-(let ([ev void])
-  (define (make-evaluator! . args)
-    (set! ev (apply make-evaluator args)))
+(let ([ev void]
+      [old-port #f])
+  (define (make-evaluator! #:requires [reqs null] . args)
+    (set! ev (apply make-evaluator args #:requires reqs)))
   (define (make-base-evaluator! . args)
     (set! ev (apply make-evaluator 'racket/base args)))
   (define (make-base-evaluator/reqs! reqs . args)
     (set! ev (apply make-evaluator 'racket/base #:requires reqs args)))
-  (define (make-module-evaluator! . args)
-    (set! ev (apply make-module-evaluator args)))
+  (define (make-module-evaluator! #:allow-read [allow null] . args)
+    ;; Close port from old evaluation, if any, to avoid later Windows
+    ;; problems deleting an open file:
+    (when old-port (close-input-port old-port) (set! old-port #f))
+    (when (input-port? (car args)) (set! old-port (car args)))
+    ;; Create and install the evaluator:
+    (set! ev (apply make-module-evaluator args #:allow-read allow)))
   (define (run thunk)
     (with-handlers ([void (lambda (e) (list 'exn: e))])
       (call-with-values thunk (lambda vs (cons 'vals: vs)))))
@@ -160,12 +166,21 @@
    =err> "out of time"
    (when (custodian-memory-accounting-available?)
      (t --top--
-        (parameterize ([sandbox-eval-limits '(2 2)])
+        (parameterize ([sandbox-eval-limits '(20 2)])
           (make-base-evaluator! '(define a (for/list ([i (in-range 10)])
                                              (collect-garbage)
                                              (make-bytes 500000)))))
         =err> "out of memor(?:y)"))
 
+   ;; check non-propagation of errors
+   --top--
+   (parameterize ([sandbox-propagate-exceptions #f]
+                  [sandbox-error-output 'string])
+     (make-base-evaluator! '(void)))
+   --eval--
+   (/ 0) => (void)
+   --top--
+   (regexp-match #rx"^.*?\n" (get-error-output ev)) => '("/: division by zero\n")
    ;; i/o
    --top--
    (parameterize ([sandbox-input "3\n"]
@@ -248,7 +263,7 @@
    ;; test source locations too
    --top--
    (make-base-evaluator! 0 1 2 '(define foo))
-   =err> "program:4:0: define"
+   =err> "^program:4:0: define:"
 
    ;; empty program for clean repls
    --top--
@@ -281,6 +296,13 @@
    x => 1
    (define x 2) =err> "cannot re-define a constant"
 
+   ;; `for-syntax' is allowed in #:requires:
+   --top--
+   (make-evaluator! 'scheme/base #:requires '((for-syntax racket/base)))
+   --eval--
+   (define-syntax (m stx) #'10)
+   m => 10
+
    ;; limited FS access, allowed for requires
    --top--
    (let* ([tmp       (make-temporary-file "sandboxtest~a" 'directory)]
@@ -291,14 +313,30 @@
           [test-lib  (strpath tmp "sandbox-test.rkt")]
           [test-zo   (strpath tmp "compiled" "sandbox-test_rkt.zo")]
           [test2-lib (strpath tmp "sandbox-test2.rkt")]
-          [test2-zo  (strpath tmp "compiled" "sandbox-test2_rkt.zo")])
+          [test2-zo  (strpath tmp "compiled" "sandbox-test2_rkt.zo")]
+          [test3-file "sandbox-test3.rkt"]
+          [test3-lib  (strpath tmp test3-file)]
+          [make-module-evaluator/rel (lambda (mod
+                                              #:allow-read [allow null] 
+                                              #:allow-for-require [allow-for-require null] 
+                                              #:allow-for-load [allow-for-load null])
+                                       (parameterize ([current-directory tmp]
+                                                      [current-load-relative-directory tmp])
+                                         (make-module-evaluator mod
+                                                                #:allow-read allow
+                                                                #:allow-for-require allow-for-require
+                                                                #:allow-for-load allow-for-load)))]
+          [make-evaluator/rel (lambda (lang)
+                                (parameterize ([current-directory tmp]
+                                               [current-load-relative-directory tmp])
+                                  (make-evaluator lang)))])
      (t --top--
         (make-base-evaluator!)
         --eval--
         ;; reading from collects is allowed
         (list? (directory-list ,racketlib))
         (file-exists? ,list-lib) => #t
-        (input-port? (open-input-file ,list-lib)) => #t
+        (let ([p (open-input-file ,list-lib)]) (begin0 (input-port? p) (close-input-port p))) => #t
         ;; writing is forbidden
         (open-output-file ,list-lib) =err> "`write' access denied"
         ;; reading from other places is forbidden
@@ -319,6 +357,47 @@
         (length (with-input-from-file ,test-lib read)) => 5
         ;; the directory is still not kosher
         (directory-list ,tmp) =err> "`read' access denied"
+        --top--
+        ;; ports, strings, and bytes are also allowed, but in the case
+        ;; of ports, we have to specificaly enable access to the
+        ;; enclosing directory, since the port name connects it to the
+        ;; directory, and some part of the module infrastructure exploits that:
+        (make-module-evaluator!
+         (open-input-file (string->path test-lib))) =err> "`exists' access denied"
+        (make-module-evaluator! (open-input-file (string->path test-lib))
+                                ;; allowing a file read indirectly allows containing-directory
+                                ;; existence check:
+                                #:allow-read (list (string->path test-lib)))
+        (make-module-evaluator! (file->string (string->path test-lib)))
+        (make-module-evaluator! (file->bytes (string->path test-lib)))
+        --top--
+        ;; a relative-path string should work as a module to be `require'd,
+        ;; as opposed to a module to be `load'ed:
+        (with-output-to-file test3-lib
+          (lambda ()
+            (printf "~s\n" '(module sandbox-test racket/base
+                              (provide #%module-begin)))))
+        (make-module-evaluator/rel `(module m ,test3-file)
+                                   #:allow-read (list test3-file))
+        ;; for-require is more clear:
+        (make-module-evaluator/rel `(module m ,test3-file)
+                                   #:allow-for-require (list test3-file))
+        ;; for-load isn't ok:
+        (make-module-evaluator/rel `(module m ,test3-file)
+                                   #:allow-for-load (list test3-file))
+        =err> "`read' access denied"
+        ;; an absolute path is treated like `for-load':
+        (make-module-evaluator/rel `(module m ,test3-file)
+                                   #:allow-read (list test3-lib))
+        =err> "`read' access denied"
+        (make-module-evaluator/rel `(module m ,test3-file)
+                                   #:allow-read (list (string->path test3-lib)))
+        =err> "`read' access denied"
+        ;; an absolute path with `for-require' is ok:
+        (make-module-evaluator/rel `(module m ,test3-file)
+                                   #:allow-for-require (list (string->path test3-lib)))
+        ;; make sure that the language is treated as a require:
+        (make-evaluator/rel test3-file)
         --top--
         ;; require it
         (make-base-evaluator/reqs! `(,test-lib))
@@ -350,11 +429,15 @@
         (open-output-file ,(build-path tmp "blah")) =err> "access denied"
         (delete-directory ,(build-path tmp "blah")) =err> "access denied"
         (list? (directory-list ,racketlib))
-        ;; we can read/write/delete list-zo, but we can't load bytecode from
+        ;; we can read/write/delete list-zo, but we can't run bytecode from
         ;; it due to the code inspector
         (copy-file ,list-zo ,test-zo) => (void)
         (copy-file ,test-zo ,list-zo) =err> "access denied"
+        ;; timestamp .zo file (needed under Windows):
+        (file-or-directory-modify-seconds ,test-zo (current-seconds))
+        ;; loading test gets 'list module declaration via ".zo":
         (load/use-compiled ,test-lib) => (void)
+        ;; but the module declaration can't execute due to the inspector:
         (require 'list) =err> "access disallowed by code inspector"
         (delete-file ,test-zo) => (void)
         (delete-file ,test-lib) =err> "`delete' access denied"
@@ -388,7 +471,7 @@
    (make-base-evaluator! "(define l null)")
    --eval--
    (cond [null? l 0]) => 0
-   (last-pair l) =err> "reference to an identifier"
+   (last-pair l) =err> "last-pair: undefined"
    --top--
    (make-evaluator! '(special beginner)
                     (make-prog "(define l null)" "(define x 3.5)"))
@@ -401,7 +484,7 @@
    (make-base-evaluator/reqs! '(racket/list))
    --eval--
    (last-pair '(1 2 3)) => '(3)
-   (last-pair null) =err> "expected argument of type"
+   (last-pair null) =err> "contract violation"
 
    ;; coverage
    --top--
@@ -527,5 +610,16 @@
         #rx"access disallowed by code inspector to protected variable"
         r1)
   (test #t equal? r1 r2))
+
+;; ----------------------------------------
+
+;; Backup test for one in "thread.rktl", since this sandbox test
+;; originally exposed it:
+(let ()
+  (define sandbox (make-evaluator 'racket/base))
+  (sandbox "(define result (call/cc (lambda (x) (lambda () (x 5)))))")
+  (sandbox "(if (procedure? result) (result) result)"))
+
+;; ----------------------------------------
 
 (report-errs)

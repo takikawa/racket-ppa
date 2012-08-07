@@ -1,6 +1,7 @@
 #lang racket/base
 (require racket/class
-         "../generic/interfaces.rkt")
+         "../generic/interfaces.rkt"
+         "../generic/common.rkt")
 (provide dbsystem
          classify-sl-sql)
 
@@ -18,9 +19,11 @@
       (map (lambda (dvec) (vector-ref dvec 0))
            dvecs))
 
-    (define/public (describe-typeids typeids)
-      (map (lambda _ '(#t any #f))
-           typeids))
+    (define/public (describe-params typeids)
+      (map (lambda _ '(#t any #f)) typeids))
+
+    (define/public (describe-fields dvecs)
+      (map (lambda _ '(#t any #f)) dvecs))
 
     (super-new)))
 
@@ -38,14 +41,19 @@
 
 ;; ========================================
 
-
 ;; SQL "parsing"
 ;; We just care about detecting commands that affect transaction status.
 
 ;; classify-sl-sql : string [nat] -> symbol/#f
 (define classify-sl-sql
   (make-sql-classifier
-   '(;; Explicit transaction commands
+   '(;; Statements that do not invalidate the statement cache
+     ("SELECT" select)
+     ("INSERT" insert)
+     ("UPDATE" update)
+     ("DELETE" delete)
+
+     ;; Explicit transaction commands
      ("ROLLBACK TRANSACTION TO"  rollback-savepoint)
      ("ROLLBACK TO"       rollback-savepoint)
      ("RELEASE"           release-savepoint)

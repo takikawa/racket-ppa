@@ -23,12 +23,19 @@ for the common use case where sandboxes are very limited.
                                             (list/c 'special symbol?)
                                             (cons/c 'begin list?))]
                             [input-program any/c] ...
-                            [#:requires requires (listof (or/c module-path? path?))]
-                            [#:allow-read allow (listof (or/c module-path? path?))])
+                            [#:requires requires 
+                                        (listof (or/c module-path? path-string? 
+                                                      (cons/c 'for-syntax (listof module-path?))))
+                                        null]
+                            [#:allow-for-require allow-for-require (listof (or/c module-path? path?)) null]
+                            [#:allow-for-load allow-for-load (listof path-string?) null]
+                            [#:allow-read allow-read (listof (or/c module-path? path-string?)) null])
             (any/c . -> . any)]
-           [(make-module-evaluator [module-decl (or/c syntax? pair?)]
-                                   [#:language   lang  (or/c #f module-path?)]
-                                   [#:allow-read allow (listof (or/c module-path? path?))])
+           [(make-module-evaluator [module-decl (or/c syntax? pair? path? input-port? string? bytes?)]
+                                   [#:language   lang  (or/c #f module-path?) #f]
+                                   [#:allow-for-require allow-for-require (listof (or/c module-path? path?)) null]
+                                   [#:allow-for-load allow-for-load (listof path-string?) null]
+                                   [#:allow-read allow-read (listof (or/c module-path? path-string?)) null])
             (any/c . -> . any)])]{
 
 The @racket[make-evaluator] function creates an evaluator with a
@@ -39,12 +46,16 @@ works in the context of a given module. The result in either case is a
 function for further evaluation.
 
 The returned evaluator operates in an isolated and limited
-environment.  In particular, filesystem access is restricted.  The
-@racket[allow] argument extends the set of files that are readable by
-the evaluator to include the specified modules and their imports
-(transitively). When @racket[language] is a module path and when
-@racket[requires] is provided, the indicated modules are implicitly
-included in the @racket[allow] list.
+environment. In particular, filesystem access is restricted, which may
+interfere with using modules from the filesystem.  See below for
+information on the @racket[allow-for-require],
+@racket[allow-for-load], and @racket[allow-read] arguments.  When
+@racket[language] is a module path or when @racket[requires] is
+provided, the indicated modules are implicitly included in the
+@racket[allow-for-require] list. (For backward compatibility,
+non-@racket[module-path?] path strings are allowed in
+@racket[requires]; they are implicitly converted to paths before
+addition to @racket[allow-for-require].)
 
 Each @racket[input-program] or @racket[module-decl] argument provides
 a program in one of the following forms:
@@ -117,8 +128,10 @@ argument:
 
        In this case, a new namespace is created using
        @racket[sandbox-namespace-specs], which by default creates a
-       new namespace using @racket[make-base-namespace] or
-       @racket[make-gui-namespace] (depending on @racket[gui?]).
+       new namespace using @racket[sandbox-make-namespace] (which, in
+       turn, uses @racket[make-base-namespace] or
+       @racket[make-gui-namespace] depending on
+       @racket[sandbox-gui-available] and @racket[gui-available?]).
 
        In the new namespace, @racket[language] is evaluated as an
        expression to further initialize the namespace.}
@@ -154,10 +167,11 @@ top-level namespace:
 The @racket[make-module-evaluator] function is essentially a
 restriction of @racket[make-evaluator], where the program must be a
 module, and all imports are part of the program.  In some cases it is
-useful to restrict the program to be a module using a spcific module
+useful to restrict the program to be a module using a specific module
 in its language position --- use the optional @racket[lang] argument
 to specify such a restriction (the default, @racket[#f], means no
-restriction is enforced).
+restriction is enforced). When the program is specified as a path, then
+the path is implicitly added to the @racket[allow-for-load] list.
 
 @racketblock[
 (define base-module-eval2
@@ -167,8 +181,8 @@ restriction is enforced).
                             (define later 5))))
 ]
 
-@racket[make-module-evaluator] can be very convenient for testing
-module files: all you need to do is pass in a path value for the file
+The @racket[make-module-evaluator] function can be convenient for testing
+module files: pass in a path value for the file
 name, and you get back an evaluator in the module's context which you
 can use with your favorite test facility.
 
@@ -176,7 +190,8 @@ In all cases, the evaluator operates in an isolated and limited
 environment:
 @itemize[
 
- @item{It uses a new custodian and namespace. When @racket[gui?] is
+ @item{It uses a new custodian and namespace. When 
+       @racket[gui-available?] and @racket[sandbox-gui-available] produce
        true, it is also runs in its own eventspace.}
 
  @item{The evaluator works under the @racket[sandbox-security-guard],
@@ -193,7 +208,19 @@ environment too --- so, for example, if the memory that is required to
 create the sandbox is higher than the limit, then
 @racket[make-evaluator] will fail with a memory limit exception.
 
-The sandboxed evironment is well isolated, and the evaluator function
+The @racket[allow-for-require] and @racket[allow-for-load] arguments
+adjust filesystem permissions to extend the set of files that
+are usable by the evaluator. The @racket[allow-for-require] argument lists
+modules that can be @racket[require]d along with their imports
+(transitively). The @racket[allow-for-load] argument lists files that can
+be @racket[load]ed. (The precise permissions needed for
+@racket[require] versus @racket[load] can differ.)  The
+@racket[allow-read] argument is for backward compatibility, only; each
+@racket[module-path?] element of @racket[allow-read] is effectively
+moved to @racket[allow-for-require], while other elements are moved to
+@racket[all-for-load].
+
+The sandboxed environment is well isolated, and the evaluator function
 essentially sends it an expression and waits for a result.  This form
 of communication makes it impossible to have nested (or concurrent)
 calls to a single evaluator.  Usually this is not a problem, but in
@@ -203,15 +230,16 @@ sandboxed code, for example:
 (let ([e (make-evaluator 'racket/base)])
   (e (,e 1)))
 ]
-An error will be signalled in such cases.
+An error will be signaled in such cases.
 
-Evaluation can also be instrumented to track coverage information when
-@racket[sandbox-coverage-enabled] is set. Exceptions (both syntax and
+If the value of @racket[sandbox-propagate-exceptions] is true (the
+default) when the sandbox is created, then exceptions (both syntax and
 run-time) are propagated as usual to the caller of the evaluation
-function (i.e., catch it with @racket[with-handlers]).  However, note
-that a sandboxed evaluator is convenient for testing, since all
-exceptions happen in the same way, so you don't need special code to
-catch syntax errors.
+function (i.e., catch them with @racket[with-handlers]).  If the value
+of @racket[sandbox-propagate-exceptions] is @racket[#f] when the
+sandbox is created, then uncaught exceptions in a sandbox evaluation
+cause the error to be printed to the sandbox's error port, and the
+caller of the evaluation receives @|void-const|.
 
 Finally, the fact that a sandboxed evaluator accept syntax objects
 makes it usable as the value for @racket[current-eval], which means
@@ -363,7 +391,7 @@ which creates an empty port.  The following other values are allowed:
 
 A parameter that determines the initial @racket[current-output-port]
 setting for a newly created evaluator. It defaults to @racket[#f],
-which creates a port that discrds all data.  The following other
+which creates a port that discards all data.  The following other
 values are allowed:
 
 @itemize[
@@ -429,6 +457,17 @@ the evaluator (or the break is lost if the evaluator is not used
 further). The default is @racket[#t].}
 
 
+@defboolparam[sandbox-propagate-exceptions propagate?]{
+
+A parameter that controls how uncaught exceptions during a sandbox
+evaluation are treated. When the parameter value is @racket[#t], 
+then the exception is propagated to the caller of sandbox.
+When the parameter value is @racket[#f], the exception message
+is printed to the sandbox's error port, and the caller of the
+sandbox receives @|void-const| for the evaluation. The default
+is @racket[#t].}
+
+
 @defparam[sandbox-namespace-specs spec (cons/c (-> namespace?) 
                                                (listof module-path?))]{
 
@@ -439,9 +478,7 @@ that creates the namespace, and the rest are module paths for modules
 to be attached to the created namespace using
 @racket[namespace-attach-module].
 
-The default is @racket[(list make-base-namespace)] if @racket[gui?] is
-@racket[#f], @racket[(list make-gui-namespace)] if @racket[gui?] is
-@racket[#t].
+The default is @racket[(list sandbox-make-namespace)].
 
 The module paths are needed for sharing module instantiations between
 the sandbox and the caller.  For example, sandbox code that returns
@@ -460,8 +497,26 @@ of code can be helpful:
    `(,(car specs)
      ,@(cdr specs)
      lang/posn
-     ,@(if gui? '(mrlib/cache-image-snip) '()))))
+     ,@(if (gui-available?) '(mrlib/cache-image-snip) '()))))
 ]}
+
+
+@defproc[(sandbox-make-namespace) namespace?]{
+
+Calls @racket[make-gui-namespace] when @racket[(sandbox-gui-available)]
+produces true, @racket[make-base-namespace] otherwise.}
+
+
+@defboolparam[sandbox-gui-available avail?]{
+
+Determines whether the @racketmodname[racket/gui] module can be used
+when a sandbox evaluator is created. If @racket[gui-available?]
+produces @racket[#f] during the creation of a sandbox evaluator, this
+parameter is forced to @racket[#f] during initialization of the
+sandbox. The default value of the parameter is @racket[#t].
+
+Various aspects of the library change when the GUI library is
+available, such as using a new eventspace for each evaluator.}
 
 
 @defparam[sandbox-override-collection-paths paths (listof path-string?)]{
@@ -529,7 +584,7 @@ The default value is null, but when an evaluator is created, it is
 augmented by @racket['read-bytecode] permissions that make it possible
 to use collection libraries (including
 @racket[sandbox-override-collection-paths]). See
-@racket[make-evalautor] for more information.}
+@racket[make-evaluator] for more information.}
 
 
 @defparam[sandbox-network-guard proc
@@ -539,7 +594,7 @@ to use collection libraries (including
            (or/c 'server 'client)
            . -> . any)]{
 
-A parameter that specifieds a procedure to be used (as is) by the
+A parameter that specifies a procedure to be used (as is) by the
 default @racket[sandbox-security-guard].  The default forbids all
 network connection.}
 
@@ -898,12 +953,13 @@ your own permissions, for example,
 
 @defthing[gui? boolean?]{
 
-True if the @racketmodname[racket/gui] module can be used, @racket[#f]
-otherwise; see @racket[gui-available?].
+For backward compatibility, only: the result of @racket[gui-available?]
+at the time that @racketmodname[racket/sandbox] was instantiated.
 
-Various aspects of the @racketmodname[racket/sandbox] library change
-when the GUI library is available, such as using a new eventspace for
-each evaluator.}
+The value of @racket[gui?] is no longer used by
+@racketmodname[racket/sandbox] itself. Instead,
+@racket[gui-available?]  and @racket[sandbox-gui-available] are
+checked at the time that a sandbox evaluator is created.}
 
 
 @defproc[(call-with-limits [secs (or/c exact-nonnegative-integer? #f)]

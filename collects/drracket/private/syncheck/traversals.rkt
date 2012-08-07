@@ -144,7 +144,6 @@
                             phase-to-requires)
       
       (let ([maybe-jump (λ (vars) (visit-id vars))])
-
         (let level+tail-loop ([stx-obj stx-obj]
                               [level 0]
                               [tail-parent-src #f]
@@ -545,7 +544,7 @@
                            (define fin (+ start span))
                            (send defs-text syncheck:add-background-color
                                  source-editor start fin "firebrick")))
-                       (color stx unused-require-style-name 'default-mode)))
+                       (color stx unused-require-style-name)))
                    (hash-ref requires k 
                              (λ ()
                                (error 'syncheck/traversals.rkt "requires doesn't have a mapping for ~s" k)))))))
@@ -576,10 +575,9 @@
                                 phase-level user-namespace user-directory actual?)
       (let ([binders (get-ids all-binders var)])
         (when binders
-          (for-each (λ (x)
-                      (when (syntax-original? x)
-                        (connect-syntaxes x var actual? (id-level phase-level x))))
-                    binders))
+          (for ([x (in-list binders)])
+            (when (syntax-original? x)
+              (connect-syntaxes x var actual? (id-level phase-level x)))))
         
         (when (and unused/phases phase-to-requires)
           (let ([req-path/pr (get-module-req-path var phase-level)]
@@ -669,10 +667,10 @@
                      #t)))])
         (cond
           [top-bound?
-           (color var lexically-bound-variable-style-name 'default-mode)]
+           (color var lexically-bound-variable-style-name)]
           [else
            (add-mouse-over var (format "~s is a free variable" (syntax-e var)))
-           (color var free-variable-style-name 'default-mode)])
+           (color var free-variable-style-name)])
         (connect-identifier var binders #f #f 0 user-namespace user-directory #t)))
     
     ;; color-variable : syntax phase-level identifier-mapping -> void
@@ -687,9 +685,10 @@
                               (self-module? path)))))])
         (cond
           [(get-ids varsets var)
-           (color var set!d-variable-style-name 'default-mode)]
-          [lexical? (color var lexically-bound-variable-style-name 'default-mode)]
-          [(pair? b) (color var imported-variable-style-name 'default-mode)])))
+           (add-mouse-over var (string-constant cs-set!d-variable))
+           (color var set!d-variable-style-name)]
+          [lexical? (color var lexically-bound-variable-style-name)]
+          [(pair? b) (color var imported-variable-style-name)])))
     
     ;; add-var : hash-table -> syntax -> void
     ;; adds the variable to the hash table.
@@ -720,21 +719,6 @@
                         from-source from-pos-left from-pos-right
                         to-source to-pos-left to-pos-right
                         actual? level))))))))
-    
-    ;; add-mouse-over : syntax[original] string -> void
-    ;; registers the range in the editor so that a mouse over
-    ;; this area shows up in the status line.
-    (define (add-mouse-over stx str)
-      (let* ([source (find-source-editor stx)]
-             [defs-text (current-annotations)])
-        (when (and defs-text 
-                   source
-                   (syntax-position stx)
-                   (syntax-span stx))
-          (let* ([pos-left (- (syntax-position stx) 1)]
-                 [pos-right (+ pos-left (syntax-span stx))])
-            (send defs-text syncheck:add-mouse-over-status
-                  source pos-left pos-right str)))))
     
     ;; add-jump-to-definition : syntax symbol path -> void
     ;; registers the range in the editor so that the
@@ -864,15 +848,15 @@
     ;; trim-require-prefix : syntax -> syntax
     (define (trim-require-prefix require-spec)
       (syntax-case* require-spec (only prefix all-except prefix-all-except rename just-meta) symbolic-compare?
-        [(only module-name identifer ...)
+        [(only module-name identifier ...)
          (syntax module-name)]
-        [(prefix identifier module-name) 
+        [(prefix identifier module-name)
          (syntax module-name)]
-        [(all-except module-name identifer ...)
+        [(all-except module-name identifier ...)
          (syntax module-name)]
-        [(prefix-all-except module-name identifer ...)
+        [(prefix-all-except module-name identifier ...)
          (syntax module-name)]
-        [(rename module-name local-identifer exported-identifer)
+        [(rename module-name local-identifier exported-identifier)
          (syntax module-name)]
         [_ require-spec]))
     

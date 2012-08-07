@@ -6,18 +6,18 @@
 (define toplevel-prefix       (make-parameter "-")) ; when not in a module
 (define saved-values-number   (make-parameter 5))
 (define saved-values-patterns (make-parameter '("^" "$~a")))
-(define wrap-column           (make-parameter 79))
 ;; TODO: when there's a few more of these, make them come from the prefs
 
 ;; ----------------------------------------------------------------------------
 
-(require racket/list racket/match)
+(require racket/list racket/match scribble/text/wrap)
 
 ;; ----------------------------------------------------------------------------
 ;; utilities
 
 (define home-dir (find-system-path 'home-dir))
 
+(define-namespace-anchor anchor)
 (define (here-namespace) (namespace-anchor->namespace anchor))
 
 ;; autoloads: avoid loading a ton of stuff to minimize startup penalty
@@ -39,7 +39,6 @@
 (defautoload racket/path            find-relative-path)
 
 ;; similar, but just for identifiers
-(define-namespace-anchor anchor)
 (define hidden-namespace (make-base-namespace))
 (define initial-namespace (current-namespace))
 ;; when `racket/enter' initializes, it grabs the `current-namespace' to get
@@ -64,12 +63,62 @@
 (define (eval-sexpr-for-user form)
   (eval (namespace-syntax-introduce (datum->syntax #f form))))
 
-(define (modspec->path modspec) ; returns a symbol for 'foo specs
-  (resolved-module-path-name ((current-module-name-resolver) modspec #f #f)))
+;; If `mod' is a known module, return it; if it's a symbol and 'mod is
+;; known, return 'mod; otherwise return #f.  If `mode' is 'path, return
+;; a path for modules that come from files and #f otherwise, and if it's
+;; 'path/sym return a path for the same and a symbolic name for known
+;; modules with that name.
+(define (known-module mod [mode #f])
+  (define (known-top mod)
+    (and (not (eq? mode 'path))
+         (with-handlers ([exn:fail? (λ (_) #f)])
+           (module->imports mod)
+           (if (eq? mode 'path/sym) (cadr mod) mod))))
+  (match mod
+    [(list 'quote (? symbol?)) (known-top mod)]
+    [_ (or (with-handlers ([exn:fail? (λ (_) #f)])
+             (define r
+               (resolved-module-path-name
+                ((current-module-name-resolver) mod #f #f)))
+             (if (not mode)
+               (and r mod)
+               ;; sanity check that path results exists
+               (and (or (and (path? r) (file-exists? r))
+                        (and (eq? mode 'path/sym) (symbol? r)))
+                    r)))
+           ;; for symbols, try also 'mod
+           (and (symbol? mod) (known-top `',mod)))]))
+(define (module->path module)
+  (resolved-module-path-name ((current-module-name-resolver) module #f #f)))
+
 (define (mpi->name mpi)
   (resolved-module-path-name (module-path-index-resolve mpi)))
 (define (->relname x)
-  (if (path-string? x) (path->relative-string/setup x) x))
+  (cond [(path-string? x) (path->relative-string/setup x)]
+        [x]))
+
+(define (module-displayable-name mod)
+  (define (choose-path x)
+    ;; choose the shortest from an absolute path, a relative path, and a
+    ;; "~/..." path.
+    (if (not (complete-path? x)) ; shouldn't happen
+      x
+      (let* ([r (path->string (find-relative-path (current-directory) x))]
+             [h (path->string (build-path (string->path-element "~")
+                                          (find-relative-path home-dir x)))]
+             [best (if (< (string-length r) (string-length h)) r h)]
+             [best (if (< (string-length best) (string-length x)) best x)])
+        best)))
+  (define (get-prefix* path)
+    (define x (path->string path))
+    (define y (->relname path))
+    (if (equal? x y)
+      (format "~s" (choose-path x))
+      (regexp-replace #rx"[.]rkt$" y "")))
+  (match mod
+    [(? symbol?) (symbol->string mod)]
+    [(list 'quote (? symbol? s)) (format "'~a" s)]
+    [_ (get-prefix* mod)]))
 
 (define (here-source) ; returns a path, a symbol, or #f (= not in a module)
   (variable-reference->module-source
@@ -84,7 +133,7 @@
   (cond [(not fmt) s] [s (format fmt s)] [else ""]))
 
 ;; true if (quote sym) is a known module name
-(define (module-name? sym)
+(define (known-module-name? sym)
   (and (symbol? sym)
        (with-handlers ([exn? (λ (_) #f)]) (module->imports `',sym) #t)))
 
@@ -115,41 +164,52 @@
   (set-port-next-location! last-output-port line 0 pos))
 
 ;; wrapped output
-(define-syntax-rule (wrapped-output body ...)
-  (do-wrapped-output (λ () body ...)))
-(define (append-two-spaces s) (string-append s "  "))
-(define (do-wrapped-output thunk [prefix-rx #rx#"^; *"]
-                           [make-soft-prefix append-two-spaces])
+(define-syntax-rule (with-wrapped-output body ...)
+  (do-xrepl-wrapped-output (λ () body ...)))
+(define (do-xrepl-wrapped-output thunk)
+  (do-wrapped-output thunk #:indent-first -2 #:line-prefix #rx"^;+ *"))
+;; maybe move this into scribble/text/wrap
+(define (do-wrapped-output thunk
+                           #:wrap-width   [width (wrap-width)]
+                           #:line-prefix  [prefix-rx #f] ; not including spaces
+                           #:indent-first [fst-indent 0] ; can be negative
+                           #:split-word   [split-word #f])
   (define-values [ip op] (make-pipe))
-  (define th (thread (λ () (parameterize ([current-output-port op]) (thunk))
-                           (close-output-port op))))
-  (define o    (current-output-port))
-  (define wcol (wrap-column))
-  (let loop ()
-    (define prefix (let ([m (regexp-try-match prefix-rx ip)])
-                     (if m (bytes->string/utf-8 (car m)) "")))
-    (write-string prefix o)
-    (define soft-prefix #f)
-    (define (soft-newline)
-      (unless soft-prefix (set! soft-prefix (make-soft-prefix prefix)))
-      (newline) (write-string soft-prefix o) (string-length soft-prefix))
-    (let line-loop ([col (string-length prefix)])
-      (define m (regexp-match #rx#"^( +)?(\n|[^ \n]+)" ip))
-      (when m ; #f => at end
-        (define spaces (and (cadr m) (bytes->string/utf-8 (cadr m))))
-        (define str (bytes->string/utf-8 (caddr m)))
-        (if (equal? "\n" str)
-          (begin (newline o) (loop))
-          (let* ([strlen (string-length str)]
-                 [spclen (if spaces (string-length spaces) 0)]
-                 [nextcol (+ col strlen spclen)])
-            (line-loop
-             (if (nextcol . > . wcol)
-               (let ([col (soft-newline)]) (write-string str o) (+ col strlen))
-               (begin (when spaces (write-string spaces o))
-                      (write-string str o) nextcol)))))))
-    (unless (eof-object? (peek-char ip)) (loop)))
-  (thread-wait th)) ; just in case
+  (define widths
+    (cond [(fst-indent . > . 0) (cons (- width fst-indent) width)]
+          [(fst-indent . < . 0) (cons width (+ width fst-indent))]
+          [else (cons width width)]))
+  (define indents
+    (let ([spaces (make-bytes (abs fst-indent) (char->integer #\space))])
+      (cond [(fst-indent . > . 0) (cons spaces #"")]
+            [(fst-indent . < . 0) (cons #"" spaces)]
+            [else (cons #"" #"")])))
+  (define out (current-output-port))
+  (define (wrapper)
+    (define m (cond [(regexp-match #rx#"^(?:\n|[^\n]+)" ip) => car] [else #f]))
+    (when m ; #f => we're at the end
+      (if (equal? #"\n" m)
+        (newline out)
+        (let* ([i (cdar (regexp-match-positions #rx#"^ *" m))]
+               [p (regexp-match-positions prefix-rx m i)]
+               [i (if (and p (= (caar p) i)) (cdar p) i)]
+               [j (caar (regexp-match-positions #rx" *$" m))]
+               [widths (cons (- (car widths) i) (- (cdr widths) i))]
+               [lines  (wrap-line (bytes->string/utf-8 (subbytes m i j))
+                                  widths split-word)])
+          (write-bytes m out 0 i)
+          (write-bytes (car indents) out)
+          (write-string (car lines) out)
+          (for ([l (in-list (cdr lines))])
+            (newline out)
+            (write-bytes m out 0 i)
+            (write-bytes (cdr indents) out)
+            (write-string l out))))
+      (wrapper)))
+  (define th (thread wrapper))
+  (parameterize ([current-output-port op]) (thunk))
+  (close-output-port op)
+  (thread-wait th))
 
 ;; ----------------------------------------------------------------------------
 ;; toplevel "," commands management
@@ -194,7 +254,7 @@
     (if (not x)
       eof
       (datum->syntax #f
-        (cond [(symbol? x) (and (module-name? x) `',x)]
+        (cond [(symbol? x) `',x]
               [(path? x)   (let ([s (path->string x)])
                              (if (absolute-path? x) `(file ,s) s))]
               [else (error 'here-mod-or-eof "internal error: ~s" x)])))))
@@ -232,30 +292,37 @@
       (if m (bytes->string/locale m) eof)))
   (define (read-line-arg)
     (regexp-replace* #px"^\\s+|\\s+$" (read-line) ""))
-  (define (process-modspec spec)
-    ;; convenience: symbolic modspecs that name a file turn to a `file' spec,
-    ;; and those that name a known module turn to a (quote sym) spec
-    (define dtm (if (syntax? spec) (syntax->datum spec) spec))
+  (define (symbolic-shorthand x)
+    ;; convenience: symbolic requires that name a file turn to a `file'
+    ;; require, and those that name a known module turn to a (quote sym)
+    (define dtm (if (syntax? x) (syntax->datum x) x))
     (if (not (symbol? dtm))
-      spec
+      x
       (let* (;; try a file
              [f (expand-user-path (symbol->string dtm))]
              [f (and (file-exists? f) (path->string f))]
              [f (and f (if (absolute-path? f) `(file ,f) f))]
              ;; try a quoted one if the above failed
-             [m (or f (and (module-name? dtm) `',dtm))]
-             [m (and m (if (syntax? spec) (datum->syntax spec m spec) m))])
-        (or m spec))))
+             [m (or f (and (known-module-name? dtm) `',dtm))]
+             [m (and m (if (syntax? x) (datum->syntax x m x) m))])
+        (or m x))))
+  (define (process-require req)
+    ;; no verification of requires -- let the usual error happen if needed
+    (symbolic-shorthand req))
+  (define (process-module mod)
+    (or (known-module (symbolic-shorthand mod))
+        (cmderror "unknown module: ~s" mod)))
   (define (translate arg convert)
     (and arg (if (memq flag '(list list+)) (map convert arg) (convert arg))))
   (let loop ([kind kind])
     (case kind
-      [(line)     (get read-line-arg)]
-      [(string)   (get read-string-arg)]
-      [(path)     (translate (loop 'string) expand-user-path)]
-      [(sexpr)    (get read)]
-      [(syntax)   (translate (get read-syntax) namespace-syntax-introduce)]
-      [(modspec)  (translate (loop 'syntax) process-modspec)]
+      [(line)    (get read-line-arg)]
+      [(string)  (get read-string-arg)]
+      [(path)    (translate (loop 'string) expand-user-path)]
+      [(sexpr)   (get read)]
+      [(syntax)  (translate (get read-syntax) namespace-syntax-introduce)]
+      [(require) (translate (loop 'syntax) process-require)]
+      [(module)  (translate (loop 'sexpr) process-module)]
       [else (error 'getarg "unknown arg kind: ~e" kind)])))
 
 (define (run-command cmd)
@@ -280,7 +347,7 @@
     (printf "~a~s" indent (car names))
     (when (pair? (cdr names)) (printf " ~s" (cdr names)))
     (printf ": ~a\n" (command-blurb cmd)))
-  (wrapped-output
+  (with-wrapped-output
     (if cmd
       (begin (show-cmd cmd "; ")
              (printf ";   usage: ,~a" arg)
@@ -351,7 +418,8 @@
                             [(not arg) cmd]
                             [else (string-append cmd " " arg)]))
         (eprintf "; (exit with an error status)\n"))
-      (when here (putenv "F" "")))))
+      (when here (putenv "F" ""))
+      (void))))
 
 (defcommand (edit e) "<file> ..."
   "edit files in your $EDITOR"
@@ -518,7 +586,7 @@
          [syms (if look (filter (λ (s) (look (cdr s))) syms) syms)]
          [syms (sort syms string<? #:key cdr)]
          [syms (map car syms)])
-    (wrapped-output
+    (with-wrapped-output
       (if (null? syms)
         (printf "; No matches found")
         (begin (printf "; Matches: ~s" (car syms))
@@ -536,19 +604,10 @@
       (if (and (pair? xs) (number? (syntax-e (car xs))))
         (values #f (syntax-e (car xs)) (cdr xs))
         (values #t 0 xs))))
-  (wrapped-output
+  (with-wrapped-output
     (for ([id/mod (in-list ids/mods)])
       (define dtm (syntax->datum id/mod))
-      (define mod
-        (and try-mods?
-             (match dtm
-               [(list 'quote (and sym (? module-name?))) sym]
-               [(? module-name?) dtm]
-               [_ (let ([x (with-handlers ([exn:fail? (λ (_) #f)])
-                             (modspec->path dtm))])
-                    (cond [(or (not x) (path? x)) x]
-                          [(symbol? x) (and (module-name? x) `',x)]
-                          [else (error 'describe "internal error: ~s" x)]))])))
+      (define mod (and try-mods? (known-module dtm 'path/sym)))
       (define bind
         (cond [(identifier? id/mod) (identifier-binding id/mod level)]
               [mod #f]
@@ -662,32 +721,32 @@
 ;; ----------------------------------------------------------------------------
 ;; require/load commands
 
-(defcommand (require req r) "<module-spec> ...+"
+(defcommand (require req r) "<require-spec> ...+"
   "require a module"
   ["The arguments are usually passed to `require', unless an argument"
    "specifies an existing filename -- in that case, it's like using a"
    "\"string\" or a (file \"...\") in `require'.  (Note: this does not"
    "work in subforms.)"]
-  (more-inputs #`(require #,@(getarg 'modspec 'list+)))) ; use *our* `require'
+  (more-inputs #`(require #,@(getarg 'require 'list+)))) ; use *our* `require'
 
 (define rr-modules (make-hash)) ; hash to remember reloadable modules
 
-(define last-rr-specs '())
+(define last-rr-modules '())
 
-(defcommand (require-reloadable reqr rr) "<simple-module-spec> ..."
+(defcommand (require-reloadable reqr rr) "<module> ..."
   "require a module, make it reloadable"
   ["Same as ,require but the module is required in a way that makes it"
    "possible to reload later.  If it was already loaded then it is reloaded."
    "Note that this is done by setting `compile-enforce-module-constants' to"
    "#f, which prohibits some optimizations."]
-  (let ([s (getarg 'modspec 'list)]) (when (pair? s) (set! last-rr-specs s)))
-  (when (null? last-rr-specs) (cmderror "missing modspec arguments"))
+  (let ([ms (getarg 'module 'list)])
+    (when (pair? ms) (set! last-rr-modules ms)))
+  (when (null? last-rr-modules) (cmderror "missing module argument(s)"))
   (parameterize ([compile-enforce-module-constants
                   (compile-enforce-module-constants)])
     (compile-enforce-module-constants #f)
-    (for ([spec (in-list last-rr-specs)])
-      (define datum    (syntax->datum spec))
-      (define resolved ((current-module-name-resolver) datum #f #f #f))
+    (for ([mod (in-list last-rr-modules)])
+      (define resolved ((current-module-name-resolver) mod #f #f #f))
       (define path     (resolved-module-path-name resolved))
       (if (hash-ref rr-modules resolved #f)
         ;; reload
@@ -697,12 +756,12 @@
         ;; require
         (begin (hash-set! rr-modules resolved #t)
                (printf "; requiring ~a\n" path)
-               ;; (namespace-require spec)
-               (eval #`(require #,spec)))))))
+               ;; (namespace-require mod)
+               (eval #`(require #,mod)))))))
 
 (define enter!-id (make-lazy-identifier 'enter! 'racket/enter))
 
-(defcommand (enter en) "[<simple-module-spec>] [noisy?]"
+(defcommand (enter en) "[<module>] [noisy?]"
   "require a module and go into its namespace"
   ["Uses `enter!' to go into the module's namespace.  A module name can"
    "specify an existing file as with the ,require command.  If no module is"
@@ -710,7 +769,7 @@
    "is used with that module, causing it to reload if needed.  (Note that this"
    "can be used even in languages that don't have the `enter!' binding.)"]
   (eval-sexpr-for-user `(,(enter!-id)
-                         ,(getarg 'modspec #:default here-mod-or-eof)
+                         ,(getarg 'module #:default here-mod-or-eof)
                          ,@(getarg 'syntax 'list)
                          #:dont-re-require-enter)))
 
@@ -915,25 +974,29 @@
 (defcommand (switch-namespace switch) "[<name>] [? | - | ! [<init>]]"
   "switch to a different repl namespace"
   ["Switch to the <name> namespace, creating it if needed.  The <name> of a"
-   "namespace is a symbol or an integer where a `*' indicates the initial one;"
-   "it is only used to identify namespaces for this command (so don't confuse"
-   "it with racket bindings).  A new namespace is initialized using the name"
-   "of the namespace (if it's require-able), or using the same initial module"
-   "that was used for the current namespace.  If `! <init>' is used, it"
-   "indicates that a new namespace will be created even if it exists, using"
-   "`<init>' as the initial module, and if just `!' is used, then this happens"
-   "with the existing namespace's init or with the current one's.  You can"
-   "also use `-' and a name to drop the corresponding namespace (allowing it"
-   "to be garbage-collected), and `?' to list all known namespaces."
+   "namespace is a symbol or an integer; `*' indicates the initial namespace."
+   "These names are used only by this command, they're not bindings.  A new"
+   "namespace is initialized using the name of the namespace if it names a"
+   "module, or using the same initial module that was used for the current"
+   "namespace."
+   "If `! <init>' is used, the new namespace will be created even if it"
+   "exists, using `<init>' as the initial module.  If `!' is used without an"
+   "<init> to reset an existing namespace its initial module is used again,"
+   "and if it is used to create a new namespace, the initial module in current"
+   "namespace used."
+   "You can also use `-' and a name to drop the corresponding namespace"
+   "(allowing it to be garbage-collected), and `?' to list all known"
+   "namespaces."
    "A few examples:"
    "  ,switch !             reset the current namespace"
    "  ,switch ! racket      reset it using the `racket' language"
-   "  ,switch r5rs          switch to a new `r5rs' namespace"
+   "  ,switch r5rs          switch to a new `r5rs' namespace, initializing it"
+   "                        with `r5rs'"
    "  ,switch foo           switch to `foo', creating it if it doesn't exist"
    "  ,switch foo ! racket  switch to newly made `foo', even if it exists"
    "  ,switch foo !         same, but using the same <init> as it was created"
-   "                        with, or same as the current if it's new"
-   "  ,switch ?             list known namespaces, showing the above two"
+   "                        with, or as the current namespace if `foo' is new"
+   "  ,switch ?             list known namespaces and their initial modules"
    "  ,switch - r5rs        drop the `r5rs' namespace"
    "(Note that you can use `^' etc to communicate values between namespaces.)"]
   (define (list-namespaces)
@@ -960,10 +1023,6 @@
     (unless (or (not name) (symbol? name) (fixnum? name))
       (cmderror "bad namespace name, must be symbol or fixnum"))
     (define old-namespace (current-namespace))
-    (define (is-require-able? name)
-      (with-handlers ([void (λ (_) #f)])
-        ;; name is not a string => no need to set the current directory
-        (file-exists? (modspec->path name))))
     ;; if there's an <init>, then it must be forced
     (let* ([name (or name (current-namespace-name))]
            [init
@@ -974,18 +1033,22 @@
                      ;; possible to ,en xrepl/xrepl to change options etc
                      (cmderror "cannot reset the default namespace"))
                    (cdr (or (hash-ref namespaces name #f)
-                            (and (is-require-able? name) (cons #f name))
+                            (let ([k (known-module name)]) (and k (cons #f k)))
                             (hash-ref namespaces (current-namespace-name) #f)
                             ;; just in case
                             (hash-ref namespaces default-namespace-name #f)))]
                   [else #f])])
       (when init
-        (printf "; *** ~a `~s' namespace with ~s ***\n"
+        (printf "; *** ~a `~s' namespace with ~a ***\n"
                 (if (hash-ref namespaces name #f)
                   "Resetting the" "Initializing a new")
                 name
-                (->relname init))
+                (module-displayable-name init))
         (current-namespace (make-base-empty-namespace))
+        (unless (known-module init)
+          (parameterize ([current-namespace old-namespace])
+            (dynamic-require init #f)) ; instantiate it if needed
+          (namespace-attach-module old-namespace init))
         (namespace-require init)
         (hash-set! namespaces name (cons (current-namespace) init))))
     (when (and name (not (eq? name (current-namespace-name))))
@@ -1077,22 +1140,22 @@
          (cmderror "internal error: ~s ~s" stx (syntax? stx)))])))
 
 (defautoload macro-debugger/analysis/check-requires show-requires)
-(defcommand (check-requires ckreq) "[<simple-module-spec>]"
+(defcommand (check-requires ckreq) "[<module>]"
   "check the `require's of a module"
   ["Uses `macro-debugger/analysis/check-requires', see the docs for more"
    "information."]
-  (define mod (syntax->datum (getarg 'modspec #:default here-mod-or-eof)))
+  (define mod (getarg 'module #:default here-mod-or-eof))
   (define rs (show-requires mod))
-  (wrapped-output
-   (for ([decision (in-list '(keep bypass drop))])
-     (define all (filter (λ (x) (eq? decision (car x))) rs))
-     (unless (null? all)
-       (define names (map cadr all))
-       ;; doesn't print the phase number (third element of all members)
-       (printf "; ~a: ~a"
-               (string-titlecase (symbol->string decision)) (car names))
-       (for ([n (in-list (cdr names))]) (printf ", ~a" n))
-       (printf ".\n")))))
+  (with-wrapped-output
+    (for ([decision (in-list '(keep bypass drop))])
+      (define all (filter (λ (x) (eq? decision (car x))) rs))
+      (unless (null? all)
+        (define names (map cadr all))
+        ;; doesn't print the phase number (third element of all members)
+        (printf "; ~a: ~a"
+                (string-titlecase (symbol->string decision)) (car names))
+        (for ([n (in-list (cdr names))]) (printf ", ~a" n))
+        (printf ".\n")))))
 
 ;; ----------------------------------------------------------------------------
 ;; dynamic log output control
@@ -1162,7 +1225,8 @@
   (define expr  "(require xrepl)")
   (define dexpr "(dynamic-require 'xrepl #f)")
   (define contents (if (file-exists? init-file) (file->string init-file) ""))
-  (read-line) ; discard the newline for further input
+  ;; discard the newline for further input
+  (let loop () (when (byte-ready?) (read-byte)))
   (define (look-for comment-rx expr)
     (let ([m (regexp-match-positions
               (format "(?<=\r?\n|^) *;+ *~a *\r?\n *~a *(?=\r?\n|$)"
@@ -1173,16 +1237,16 @@
   (define existing-readline?
     (look-for "load readline support[^\r\n]*" "(require readline/rep)"))
   (define (yes? question)
-    (define qtext (format "; ~a? " question))
+    (define qtext (string->bytes/utf-8 (format "; ~a? " question)))
     (define inp
       (case (object-name (current-input-port))
         [(readline-input)
          (parameterize ([(dynamic-require
                           (collection-file-path "pread.rkt" "readline")
-                          'current-prompt)
+                          'readline-prompt)
                          qtext])
            (read-line))]
-        [else (display qtext) (flush-output) (read-line)]))
+        [else (write-bytes qtext) (flush-output) (read-line)]))
     (and (string? inp) (regexp-match? #px"^[[:space:]]*[yY]" inp)))
   (cond
     [existing?
@@ -1210,10 +1274,10 @@
      (if (yes? "OK to continue")
        (begin
          (call-with-output-file* init-file #:exists 'truncate
-           (λ (o) (write-string
-                   (string-append (regexp-replace #rx"(?:\r?\n)+$" contents "")
-                                  (format "\n\n;; ~a\n~a\n" comment expr))
-                   o)))
+           (λ (o) (define new (regexp-replace #rx"(?:\r?\n)+$" contents ""))
+                  (write-string new o)
+                  (unless (equal? "" new) (write-string "\n\n" o))
+                  (fprintf o ";; ~a\n~a\n" comment expr)))
          (printf "; new contents written to ~a\n" init-file))
        (printf "; ~a was not updated\n" init-file))])
   (void))
@@ -1288,26 +1352,9 @@
 
 (define get-prefix ; to show before the "> " prompt
   (let ()
-    (define (choose-path x)
-      ;; choose the shortest from an absolute path, a relative path, and a
-      ;; "~/..." path.
-      (if (not (complete-path? x)) ; shouldn't happen
-        x
-        (let* ([r (path->string (find-relative-path (current-directory) x))]
-               [h (path->string (build-path (string->path-element "~")
-                                            (find-relative-path home-dir x)))]
-               [best (if (< (string-length r) (string-length h)) r h)]
-               [best (if (< (string-length best) (string-length x)) best x)])
-          best)))
-    (define (get-prefix* path)
-      (define x (path->string path))
-      (define y (->relname path))
-      (if (equal? x y)
-        (format "~s" (choose-path x))
-        (regexp-replace #rx"[.]rkt$" y "")))
     (define (get-prefix)
       (let* ([x (here-source)]
-             [x (and x (if (symbol? x) (format "'~s" x) (get-prefix* x)))]
+             [x (and x (module-displayable-name (if (symbol? x) `',x x)))]
              [x (or x (toplevel-prefix))]
              [x (let ([ph (namespace-base-phase)])
                   (if (eq? 0 ph) x (format "~a[~a]" x ph)))])
@@ -1412,12 +1459,20 @@
       (let* ([s (get-output-string (current-error-port))]
              [s (regexp-replace* #rx"^\n+|\n+$" s "")]
              [s (regexp-replace* #rx"\n\n+" s "\n")])
-        (and (not (equal? str s))
+        ;; temporary hack: this is always on since it shows all fields,
+        ;; so ",bt" is now really a generic "more info"
+        (and ; (not (equal? str s))
              (begin (set! last-backtrace s) #t)))))
   (define msg "[,bt for context]")
   (parameterize ([current-output-port (current-error-port)])
-    (wrapped-output
-      (if backtrace? (printf "; ~a ~a\n" str msg) (printf "; ~a\n" str)))))
+    (let* ([s (regexp-replace* #rx"^\n+|\n+$" str "")]
+           [s (regexp-replace* #rx"\n\n+" s "\n")]
+           [s (regexp-replace* #rx"\n  [^\n]+\\.\\.\\.:(?:[^\n]+|\n   )+" s "")]
+           [s (regexp-replace* #rx"\n" s "\n; ")]
+           [s (if backtrace?
+                (string-append s (if (regexp-match? #rx"\n" s) "\n; " " ") msg)
+                s)])
+      (with-wrapped-output (printf "; ~a\n" s)))))
 
 ;; ----------------------------------------------------------------------------
 ;; set up the xrepl environment

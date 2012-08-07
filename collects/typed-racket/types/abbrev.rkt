@@ -3,22 +3,25 @@
 (require "../utils/utils.rkt")
 
 (require (rename-in (rep type-rep object-rep filter-rep rep-utils) [make-Base make-Base*])
-         "resolve.rkt"
          (utils tc-utils)
          racket/list
          racket/match
          racket/function
          racket/pretty
-         racket/place
+         ;; avoid the other dependencies of `racket/place`
+         '#%place
          unstable/function
          racket/udp
+         unstable/lazy-require
          (except-in racket/contract/base ->* ->)
          (prefix-in c: racket/contract/base)
-         (for-syntax racket/base syntax/parse)
+         (for-syntax racket/base syntax/parse racket/list)
 	 (for-template racket/base racket/contract/base racket/promise racket/tcp racket/flonum)
-         racket/pretty racket/udp racket/place
+         racket/pretty racket/udp
          ;; for base type predicates
          racket/promise racket/tcp racket/flonum)
+
+(lazy-require ["resolve.rkt" (resolve)])
 
 (provide (except-out (all-defined-out) Promise make-Base)
          (rename-out [make-Listof -lst]
@@ -55,9 +58,8 @@
 ;; Simple union constructor.
 ;; Flattens nested unions and sorts types, but does not check for
 ;; overlapping subtypes.
-(define-syntax *Un
-  (syntax-rules ()
-    [(_ . args) (make-Union (remove-dups (sort (apply append (map flat (list . args))) type<?)))]))
+(define (*Un . args)
+  (make-Union (remove-dups (sort (apply append (map flat args)) type<?))))
 
 
 (define (make-Listof elem) (-mu list-rec (*Un (-val null) (-pair elem list-rec))))
@@ -73,7 +75,6 @@
   (foldr -pair b l))
 
 (define (untuple t)
-  ;; FIXME - do we really need resolution here?
   (match (resolve t)
     [(Value: '()) null]
     [(Pair: a b) (cond [(untuple b) => (lambda (l) (cons a l))]
@@ -120,7 +121,7 @@
 
 (define -Listof (-poly (list-elem) (make-Listof list-elem)))
 
-(define -Boolean (make-Base 'Boolean #'boolean? boolean? #'-Boolean))
+(define -Boolean (*Un (-val #t) (-val #f)))
 (define -Symbol (make-Base 'Symbol #'symbol? symbol? #'-Symbol))
 (define -Void (make-Base 'Void #'void? void? #'-Void))
 (define -Undefined
@@ -190,6 +191,7 @@
 (define -Promise make-promise-ty)
 
 (define -HashTop (make-HashtableTop))
+(define -VectorTop (make-VectorTop))
 
 (define Univ (make-Univ))
 (define Err (make-Error))
@@ -399,7 +401,25 @@
                     (list
                      (make-arr* (list ty ...)
                                 rng
-                                #:kws (list (make-Keyword 'k kty opt) ...))))]))
+                                #:kws (sort #:key (match-lambda [(Keyword: kw _ _) kw])
+                                            (list (make-Keyword 'k kty opt) ...)
+                                            keyword<?))))]))
+
+(define-syntax (->optkey stx)
+  (syntax-parse stx
+                [(_ ty:expr ... [oty:expr ...] (~seq k:keyword kty:expr opt:boolean) ... rng)
+                 (let ([l (syntax->list #'(oty ...))])
+                   (with-syntax ([((extra ...) ...)
+                                  (for/list ([i (in-range (add1 (length l)))])
+                                    (take l i))])
+                   #'(make-Function
+                      (list
+                       (make-arr* (list ty ... extra ...)
+                                  rng
+                                  #:kws (sort #:key (match-lambda [(Keyword: kw _ _) kw])
+                                              (list (make-Keyword 'k kty opt) ...)
+                                              keyword<?))
+                       ...))))]))
 
 (define (make-arr-dots dom rng dty dbound)
   (make-arr* dom rng #:drest (cons dty dbound)))

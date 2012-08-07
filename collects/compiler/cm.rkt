@@ -3,6 +3,7 @@
          syntax/modresolve
          syntax/modread
          setup/main-collects
+         setup/dirs
 	 unstable/file
          racket/file
          racket/list
@@ -120,11 +121,21 @@
       (t (string-append (indent) (apply format fmt args))))))
 
 (define (get-deps code path)
-  (filter-map (lambda (x)
-                (let ([r (resolve-module-path-index x path)])
-                  (and (path? r) 
-                       (path->bytes r))))
-              (append-map cdr (module-compiled-imports code))))
+  (define ht
+    (let loop ([code code] [ht (hash)])
+      (define new-ht
+        (for*/fold ([ht ht]) ([imports (in-list (module-compiled-imports code))]
+                              [x (in-list (cdr imports))])
+          (let* ([r (resolve-module-path-index x path)]
+                 [r (if (pair? r) (cadr r) r)])
+            (if (and (path? r) 
+                     (not (equal? path r)))
+                (hash-set ht (path->bytes r) #t)
+                ht))))
+      (for*/fold ([ht new-ht]) ([non-star? (in-list '(#f #t))]
+                                [subcode (in-list (module-compiled-submodules code non-star?))])
+        (loop subcode ht))))
+  (for/list ([k (in-hash-keys ht)]) k))
 
 (define (get-compilation-dir+name mode path)
   (let-values ([(base name must-be-dir?) (split-path path)])
@@ -346,9 +357,17 @@
                          ;; guards.
                          (let ([d (rg d)])
                            (when (module-path? d)
-                             (let ([p (resolved-module-path-name
-                                       (module-path-index-resolve
-                                        (module-path-index-join d #f)))])
+                             (let* ([p (resolved-module-path-name
+                                        (module-path-index-resolve
+                                         (module-path-index-join d #f)))]
+                                    [p (if (pair? p)
+                                           ;; Create a dependency only if 
+                                           ;; the corresponding submodule is
+                                           ;; declared:
+                                           (if (module-declared? d #t)
+                                               (car p)
+                                               #f)
+                                           p)])
                                (when (path? p) (reader-dep! p))))
                            d))
                        rg))]
@@ -374,19 +393,28 @@
                                                 (exn-message ex))
                            (raise ex))])
           (parameterize ([current-write-relative-directory
-                          (let-values ([(base name dir?) (split-path path)])
-                            (if (eq? base 'relative)
-                              (current-directory)
-                              (path->complete-path base (current-directory))))])
+                          (let* ([dir
+                                  (let-values ([(base name dir?) (split-path path)])
+                                    (if (eq? base 'relative)
+                                        (current-directory)
+                                        (path->complete-path base (current-directory))))]
+                                 [collects-dir (find-collects-dir)]
+                                 [e-dir (explode-path dir)]
+                                 [e-collects-dir (explode-path collects-dir)])
+                            (if (and ((length e-dir) . > . (length e-collects-dir))
+                                     (for/and ([a (in-list e-dir)]
+                                               [b (in-list e-collects-dir)])
+                                       (equal? a b)))
+                                ;; `dir' extends `collects-dir':
+                                (cons dir collects-dir)
+                                ;; `dir' doesn't extend `collects-dir':
+                                dir))])
             (let ([b (open-output-bytes)])
               ;; Write bytecode into string
               (write code b)
-              ;; Compute SHA1 over bytecode so far
-              (let* ([s (get-output-bytes b)]
-                     [h (sha1-bytes (open-input-bytes s))]
-                     [delta (+ 3 (bytes-ref s 2))])
-                ;; Use sha1 for module hash in string form of bytecode
-                (bytes-copy! s delta h)
+              ;; Compute SHA1 over modules within bytecode
+              (let* ([s (get-output-bytes b)])
+                (install-module-hashes! s 0 (bytes-length s))
                 ;; Write out the bytecode with module hash
                 (write-bytes s out)))))
         ;; redundant, but close as early as possible:
@@ -395,6 +423,37 @@
         ;; with-compile-output...
         (verify-times path tmp-name)
         (write-deps code mode path src-sha1 external-deps reader-deps up-to-date read-src-syntax)))))
+
+(define (install-module-hashes! s start len)
+  (define vlen (bytes-ref s (+ start 2)))
+  (define mode (integer->char (bytes-ref s (+ start 3 vlen))))
+  (case mode
+    [(#\T)
+     ;; A single module:
+     (define h (sha1-bytes (open-input-bytes (if (and (zero? start)
+                                                      (= len (bytes-length s)))
+                                                 s
+                                                 (subbytes s start (+ start len))))))
+     ;; Write sha1 for module hash:
+     (bytes-copy! s (+ start 4 vlen) h)]
+    [(#\D)
+     ;; A directory form modules and submodules. The format starts with <count>,
+     ;; and then it's <count> records of the format:
+     ;;  <name-len> <name-bytes> <mod-pos> <mod-len> <left-pos> <right-pos>
+     (define (read-num rel-pos)
+       (define pos (+ start rel-pos))
+       (integer-bytes->integer s #t #f pos (+ pos 4)))
+     (define count (read-num (+ 4 vlen)))
+     (for/fold ([pos (+ 8 vlen)]) ([i (in-range count)])
+       (define pos-pos (+ pos 4 (read-num pos)))
+       (define mod-start (read-num pos-pos))
+       (define mod-len (read-num (+ pos-pos 4)))
+       (install-module-hashes! s (+ start mod-start) mod-len)
+       (+ pos-pos 16))
+     (void)]
+    [else 
+     ;; ?? unknown mode
+     (void)]))
 
 (define (actual-source-path path)
   (if (file-exists? path) 
@@ -618,7 +677,10 @@
         [default-handler (current-load/use-compiled)]
         [modes (use-compiled-file-paths)])
     (define (compilation-manager-load-handler path mod-name)
-      (cond [(not mod-name)
+      (cond [(or (not mod-name)
+                 ;; Don't trigger compilation if we're not supposed to work with source:
+                 (and (pair? mod-name)
+                      (not (car mod-name))))
              (trace-printf "skipping:  ~a mod-name ~s" path mod-name)]
             [(not (or (file-exists? path)
                       (let ([p2 (rkt->ss path)])

@@ -97,6 +97,8 @@ Float-Positive-Zero
 Flonum-Positive-Zero
 Float-Zero
 Flonum-Zero
+Float-Nan
+Flonum-Nan
 Positive-Single-Flonum
 Nonnegative-Single-Flonum
 Negative-Single-Flonum
@@ -104,6 +106,7 @@ Nonpositive-Single-Flonum
 Single-Flonum-Negative-Zero
 Single-Flonum-Positive-Zero
 Single-Flonum-Zero
+Single-Flonum-Nan
 Positive-Inexact-Real
 Nonnegative-Inexact-Real
 Negative-Inexact-Real
@@ -111,6 +114,7 @@ Nonpositive-Inexact-Real
 Inexact-Real-Negative-Zero
 Inexact-Real-Positive-Zero
 Inexact-Real-Zero
+Inexact-Real-Nan
 Positive-Exact-Rational
 Nonnegative-Exact-Rational
 Negative-Exact-Rational
@@ -178,7 +182,6 @@ needed to check the desired bounds at runtime.
 @defidform[Output-Port]
 @defidform[Port]
 @defidform[Path]
-@defidform[Path-String]
 @defidform[Path-For-Some-System]
 @defidform[Regexp]
 @defidform[PRegexp]
@@ -240,6 +243,18 @@ These types represent primitive Racket data.
 (thread (lambda () (add1 7)))
 ]
 }
+
+@defidform[Path-String]{
+The union of the @racket[Path] and
+@racket[String] types.  Note that this does not
+match exactly what the predicate @racket[path-string?]
+recognizes. For example, strings
+that contain the character @racket[#\nul] have the type
+@racket[Path-String] but @racket[path-string?] returns
+@racket[#f] for those strings. For a complete specification
+of which strings @racket[path-string?] accepts, see its
+documentation.}
+
 
 @section{Singleton Types}
 
@@ -325,8 +340,8 @@ corresponding to @racket[trest], where @racket[bound]
 
 @defform[(Futureof t)]{A @rtech{future} which produce a value of type @racket[t] when touched.}
 
-@defform[(Sequenceof t ...)]{A @rtech{sequence} that produces values of the
-types @racket[_t ...] on each iteration.}
+@defform[(Sequenceof t)]{A @rtech{sequence} that produces values of
+type @racket[_t] on each iteration.}
 
 @defform[(Custodian-Boxof t)]{A @rtech{custodian box} of @racket[t].}
 @defform[(Thread-Cellof t)]{A @rtech{thread cell} of @racket[t].}
@@ -429,7 +444,13 @@ recursive type in the body @racket[t]
 
     (define-type (List A) (Rec List (Pair A (U List Null))))]}
 
+@defform[(Struct st)]{is a type which is a supertype of all instances of the
+potentially-polymorphic structure type @racket[_st].  Note that structure
+accessors for @racket[_st] will @emph{not} accept @racket[(Struct st)] as an
+argument.}
+
 @defalias[→ ->]
+@defalias[case→ case->]
 @defalias[∀ All]
 
 @section{Other Types}

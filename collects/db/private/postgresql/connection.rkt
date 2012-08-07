@@ -5,6 +5,7 @@
          file/md5
          openssl
          "../generic/interfaces.rkt"
+         "../generic/common.rkt"
          "../generic/sql-data.rkt"
          "../generic/prepared.rkt"
          "message.rkt"
@@ -22,7 +23,7 @@
     start-connection-protocol))  ;; string string string/#f -> void
 
 (define connection-base%
-  (class* transactions% (connection<%> connector<%>)
+  (class* statement-cache% (connection<%> connector<%>)
     (init-private notice-handler
                   notification-handler
                   allow-cleartext-password?)
@@ -33,41 +34,69 @@
     (inherit call-with-lock
              call-with-lock*
              add-delayed-call!
+             get-tx-status
+             set-tx-status!
              check-valid-tx-status
              check-statement/tx
-             transaction-nesting
-             tx-state->string)
-    (inherit-field tx-status)
+             tx-state->string
+             dprintf
+             prepare1
+             check/invalidate-cache)
 
     (super-new)
-
-    ;; with-disconnect-on-error
-    (define-syntax-rule (with-disconnect-on-error . body)
-      (with-handlers ([exn:fail? (lambda (e) (disconnect* #f) (raise e))])
-        . body))
-
-    ;; ========================================
-
-    ;; == Debugging
-
-    ;; Debugging
-    (define DEBUG? #f)
-
-    (define/public (debug debug?)
-      (set! DEBUG? debug?))
 
     ;; ========================================
 
     ;; == Communication
-    ;; (Must be called with lock acquired.)
+    #|
+    During initial setup, okay to send and recv directly, since reference
+    to connection does not escape to user. In particular, no danger of trying
+    to start a new exchange on top of an incomplete failed one.
 
-    ;; raw-recv : -> message
-    (define/private (raw-recv)
-      (with-disconnect-on-error
-       (let ([r (parse-server-message inport)])
-         (when DEBUG?
-           (fprintf (current-error-port) "  << ~s\n" r))
-         r)))
+    After initial setup, communication can only happen within lock, and any
+    error (other than exn:fail:sql) that occurs between sending the message
+    buffer (flush-message-buffer) and receiving the last message (recv-message)
+    must cause the connection to disconnect. Such errors include communication
+    errors and breaks.
+    |#
+
+    ;; message-buffer : reversed list of messages
+    (define message-buffer null)
+
+    ;; fresh-exchange : -> void
+    (define/private (fresh-exchange)
+      (set! message-buffer null))
+
+    ;; buffer-message : message -> void
+    (define/private (buffer-message msg)
+      (dprintf "  >> ~s\n" msg)
+      (set! message-buffer (cons msg message-buffer)))
+
+    ;; flush-message-buffer : -> void
+    (define/private (flush-message-buffer)
+      (for ([msg (in-list (reverse message-buffer))])
+        (write-message msg outport))
+      (set! message-buffer null)
+      (flush-output outport))
+
+    ;; send-message : message -> void
+    (define/private (send-message msg)
+      (buffer-message msg)
+      (flush-message-buffer))
+
+    (define/private (call-with-sync fsym proc)
+      (buffer-message (make-Sync))
+      (with-handlers ([(lambda (e) #t)
+                       (lambda (e)
+                         ;; Anything but exn:fail:sql (raised by recv-message) indicates
+                         ;; a communication error.
+                         ;; FIXME: alternatively, have check-ready-for-query set an ok flag
+                         (unless (exn:fail:sql? e)
+                           (disconnect* #f))
+                         (raise e))])
+        (flush-message-buffer)
+        (begin0 (proc)
+          (check-ready-for-query fsym #f))))
 
     ;; recv-message : symbol -> message
     (define/private (recv-message fsym)
@@ -82,34 +111,24 @@
                (recv-message fsym)]
               [else r])))
 
-    ;; send-message : message -> void
-    (define/private (send-message msg)
-      (buffer-message msg)
-      (flush-message-buffer))
-
-    ;; buffer-message : message -> void
-    (define/private (buffer-message msg)
-      (when DEBUG?
-        (fprintf (current-error-port) "  >> ~s\n" msg))
-      (with-disconnect-on-error
-       (write-message msg outport)))
-
-    ;; flush-message-buffer : -> void
-    (define/private (flush-message-buffer)
-      (with-disconnect-on-error
-       (flush-output outport)))
+    ;; raw-recv : -> message
+    (define/private (raw-recv)
+      (let ([r (parse-server-message inport)])
+        (dprintf "  << ~s\n" r)
+        r))
 
     ;; check-ready-for-query : symbol -> void
     (define/private (check-ready-for-query fsym or-eof?)
       (let ([r (recv-message fsym)])
         (cond [(ReadyForQuery? r)
                ;; Update transaction status
-               (case (ReadyForQuery-transaction-status r)
-                 ((idle) (set! tx-status #f))
-                 ((transaction) (set! tx-status #t))
-                 ((failed) (set! tx-status 'invalid)))]
+               (set-tx-status! fsym
+                               (case (ReadyForQuery-transaction-status r)
+                                 ((idle) #f)
+                                 ((transaction) #t)
+                                 ((failed) 'invalid)))]
               [(and or-eof? (eof-object? r)) (void)]
-              [else (error/comm fsym)])))
+              [else (error/comm fsym "expected ready")])))
 
     ;; == Asynchronous messages
 
@@ -135,33 +154,19 @@
 
     ;; == Connection management
 
-    ;; disconnect : [boolean] -> (void)
-    (define/public (disconnect)
-      (disconnect* #t))
-
     ;; disconnect* : boolean -> void
-    (define/private (disconnect* no-lock-held?)
-      (define (go politely?)
-        (when DEBUG?
-          (fprintf (current-error-port) "  ** Disconnecting\n"))
-        (let ([outport* outport]
-              [inport* inport])
-          (when outport*
-            (when politely?
-              (send-message (make-Terminate)))
-            (close-output-port outport*)
-            (set! outport #f))
-          (when inport*
-            (close-input-port inport*)
-            (set! inport #f))))
-      ;; If we don't hold the lock, try to acquire it and disconnect politely.
-      ;; Except, if already disconnected, no need to acquire lock.
-      (cond [(and no-lock-held? (connected?))
-             (call-with-lock* 'disconnect
-               (lambda () (go #t))
-               (lambda () (go #f))
-               #f)]
-            [else (go #f)]))
+    (define/override (disconnect* politely?)
+      (super disconnect* politely?)
+      (let ([outport* outport]
+            [inport* inport])
+        (when outport*
+          (when politely?
+            (send-message (make-Terminate)))
+          (close-output-port outport*)
+          (set! outport #f))
+        (when inport*
+          (close-input-port inport*)
+          (set! inport #f))))
 
     ;; connected? : -> boolean
     (define/override (connected?)
@@ -184,8 +189,7 @@
 
     ;; start-connection-protocol : string string string/#f -> void
     (define/public (start-connection-protocol dbname username password)
-      (with-disconnect-on-error
-       (call-with-lock 'postgresql-connect
+      (call-with-lock 'postgresql-connect
         (lambda ()
           (send-message
            (make-StartupMessage
@@ -193,7 +197,7 @@
                   (cons "database" dbname)
                   (cons "client_encoding" "UTF8")
                   (cons "DateStyle" "ISO, MDY"))))
-          (connect:expect-auth username password)))))
+          (connect:expect-auth username password))))
 
     ;; connect:expect-auth : string/#f -> ConnectionResult
     (define/private (connect:expect-auth username password)
@@ -238,60 +242,82 @@
 
     ;; == Query
 
-    ;; query : symbol Statement -> QueryResult
-    (define/public (query fsym stmt0)
-      (let-values ([(stmt result)
-                    (call-with-lock fsym
-                      (lambda ()
-                        (check-valid-tx-status fsym)
-                        (let* ([stmt (check-statement fsym stmt0)]
-                               [stmt-type (send (statement-binding-pst stmt) get-stmt-type)])
-                          (check-statement/tx fsym stmt-type)
-                          (values stmt (query1 fsym stmt #f)))))])
-        (statement:after-exec stmt)
+    ;; query : symbol Statement boolean -> QueryResult
+    (define/public (query fsym stmt cursor?)
+      (let ([result
+             (call-with-lock fsym
+               (lambda ()
+                 (check-valid-tx-status fsym)
+                 (let* ([stmt (check-statement fsym stmt cursor?)]
+                        [pst (statement-binding-pst stmt)]
+                        [stmt-type (send pst get-stmt-type)]
+                        [close-on-exec? (and (not cursor?) (send pst get-close-on-exec?))])
+                   (check-statement/tx fsym stmt-type)
+                   (when cursor?
+                     (unless (eq? (get-tx-status) #t)
+                       (error fsym "cursor allowed only within transaction")))
+                   (query1 fsym stmt close-on-exec? cursor?))))])
         (query1:process-result fsym result)))
 
-    (define/private (query1 fsym stmt simple?)
-      ;; if simple?: stmt must be string, no params, & results must be binary-readable
-      (query1:enqueue stmt)
-      (send-message (make-Sync))
-      (begin0 (query1:collect fsym simple?)
-        (check-ready-for-query fsym #f)
-        (when DEBUG?
-          (fprintf (current-error-port) "  ** ~a\n" (tx-state->string)))))
+    (define/private (query1 fsym stmt close-on-exec? cursor?)
+      ;; if stmt is string, must take no params & results must be binary-readable
+      (fresh-exchange)
+      (let* ([delenda (check/invalidate-cache stmt)]
+             [portal (query1:enqueue delenda stmt close-on-exec? cursor?)])
+        (call-with-sync fsym
+          (lambda ()
+            (query1:collect fsym delenda stmt portal (string? stmt) close-on-exec? cursor?)))))
 
     ;; check-statement : symbol statement -> statement-binding
     ;; Convert to statement-binding; need to prepare to get type information, used to
     ;; choose result formats.
     ;; FIXME: if text format eliminated, can skip prepare
     ;; FIXME: can use classify-pg-sql to avoid preparing stmts with no results
-    (define/private (check-statement fsym stmt)
+    (define/private (check-statement fsym stmt cursor?)
       (cond [(statement-binding? stmt)
              (let ([pst (statement-binding-pst stmt)])
                (send pst check-owner fsym this stmt)
                stmt)]
             [(string? stmt)
-             (let ([pst (prepare1 fsym stmt #t)])
+             (let ([pst (prepare1 fsym stmt (not cursor?))])
                (send pst bind fsym null))]))
 
-    ;; query1:enqueue : Statement -> void
-    (define/private (query1:enqueue stmt)
-      (cond [(statement-binding? stmt)
-             (let* ([pst (statement-binding-pst stmt)]
-                    [pst-name (send pst get-handle)]
-                    [params (statement-binding-params stmt)])
-               (buffer-message (make-Bind "" pst-name
-                                          (map typeid->format (send pst get-param-typeids))
-                                          params
-                                          (map typeid->format (send pst get-result-typeids)))))]
-            [(string? stmt)
-             (buffer-message (make-Parse "" stmt '()))
-             (buffer-message (make-Bind "" "" '() '() '(1)))])
-      (buffer-message (make-Describe 'portal ""))
-      (buffer-message (make-Execute "" 0))
-      (buffer-message (make-Close 'portal "")))
+    ;; query1:enqueue : Statement boolean boolean -> string
+    (define/private (query1:enqueue delenda stmt close-on-exec? cursor?)
+      (when delenda
+        (for ([(_sql pst) (in-hash delenda)])
+          (buffer-message (make-Close 'statement (send pst get-handle)))
+          (send pst set-handle #f)))
+      (let ([portal (if cursor? (generate-name) "")])
+        (cond [(statement-binding? stmt)
+               (let* ([pst (statement-binding-pst stmt)]
+                      [pst-name (send pst get-handle)]
+                      [params (statement-binding-params stmt)])
+                 (unless pst-name
+                   (error/internal 'query1:enqueue "statement was deleted: ~s" (send pst get-stmt)))
+                 (buffer-message (make-Bind portal pst-name
+                                            (map typeid->format (send pst get-param-typeids))
+                                            params
+                                            (map typeid->format (send pst get-result-typeids)))))]
+              [(string? stmt)
+               (buffer-message (make-Parse "" stmt '()))
+               (buffer-message (make-Bind portal "" '() '() '(1)))])
+        (buffer-message (make-Describe 'portal portal))
+        (unless cursor?
+          (buffer-message (make-Execute portal 0))
+          (buffer-message (make-Close 'portal portal))
+          (when close-on-exec?
+            (let ([pst (statement-binding-pst stmt)])
+              (buffer-message (make-Close 'statement (send pst get-handle)))
+              (send pst set-handle #f))))
+        portal))
 
-    (define/private (query1:collect fsym simple?)
+    (define/private (query1:collect fsym delenda stmt portal simple? close-on-exec? cursor?)
+      (when delenda
+        (for ([(_sql _pst) (in-hash delenda)])
+          (match (recv-message fsym)
+            [(struct CloseComplete ()) (void)]
+            [other-r (query1:error fsym other-r)])))
       (when simple?
         (match (recv-message fsym)
           [(struct ParseComplete ()) (void)]
@@ -301,20 +327,27 @@
         [other-r (query1:error fsym other-r)])
       (match (recv-message fsym)
         [(struct RowDescription (field-dvecs))
-         (let* ([rows (query1:data-loop fsym)])
-           (query1:expect-close-complete fsym)
-           (vector 'rows field-dvecs rows))]
+         (cond [cursor?
+                (vector 'cursor field-dvecs stmt portal)]
+               [else
+                (let* ([rows (query1:data-loop fsym #f)])
+                  (query1:expect-close-complete fsym close-on-exec?)
+                  (vector 'rows field-dvecs rows))])]
         [(struct NoData ())
          (let* ([command (query1:expect-completion fsym)])
-           (query1:expect-close-complete fsym)
+           (query1:expect-close-complete fsym close-on-exec?)
            (vector 'command command))]
         [other-r (query1:error fsym other-r)]))
 
-    (define/private (query1:data-loop fsym)
+    (define/private (query1:data-loop fsym end-box)
       (match (recv-message fsym)
         [(struct DataRow (row))
-         (cons row (query1:data-loop fsym))]
-        [(struct CommandComplete (command)) null]
+         (cons row (query1:data-loop fsym end-box))]
+        [(struct CommandComplete (command))
+         (when end-box (set-box! end-box #t))
+         null]
+        [(struct PortalSuspended ())
+         null]
         [other-r (query1:error fsym other-r)]))
 
     (define/private (query1:expect-completion fsym)
@@ -323,9 +356,10 @@
         [(struct EmptyQueryResponse ()) '()]
         [other-r (query1:error fsym other-r)]))
 
-    (define/private (query1:expect-close-complete fsym)
+    (define/private (query1:expect-close-complete fsym close-on-exec?)
       (match (recv-message fsym)
-        [(struct CloseComplete ()) (void)]
+        [(struct CloseComplete ())
+         (when close-on-exec? (query1:expect-close-complete fsym #f))]
         [other-r (query1:error fsym other-r)]))
 
     (define/private (query1:error fsym r)
@@ -334,22 +368,30 @@
          (uerror fsym (nosupport "COPY IN statements"))]
         [(struct CopyOutResponse (format column-formats))
          (uerror fsym (nosupport "COPY OUT statements"))]
-        [_ (error/comm fsym)]))
+        [_ (error/comm fsym (format "got: ~e" r))]))
+
+    (define/private (get-convert-row! fsym field-dvecs)
+      (let* ([type-reader-v
+              (list->vector (query1:get-type-readers fsym field-dvecs))])
+        (lambda (row)
+          (vector-map! (lambda (value type-reader)
+                         (cond [(sql-null? value) sql-null]
+                               [else (type-reader value)]))
+                       row
+                       type-reader-v))))
 
     (define/private (query1:process-result fsym result)
       (match result
         [(vector 'rows field-dvecs rows)
-         (let* ([type-reader-v
-                 (list->vector (query1:get-type-readers fsym field-dvecs))]
-                [convert-row!
-                 (lambda (row)
-                   (vector-map! (lambda (value type-reader)
-                                  (cond [(sql-null? value) sql-null]
-                                        [else (type-reader value)]))
-                                row
-                                type-reader-v))])
-           (for-each convert-row! rows)
-           (rows-result (map field-dvec->field-info field-dvecs) rows))]
+         (for-each (get-convert-row! fsym field-dvecs) rows)
+         (rows-result (map field-dvec->field-info field-dvecs) rows)]
+        [(vector 'cursor field-dvecs stmt portal)
+         (let* ([convert-row! (get-convert-row! fsym field-dvecs)]
+                [pst (statement-binding-pst stmt)])
+           ;; FIXME: register finalizer to close portal?
+           (cursor-result (map field-dvec->field-info field-dvecs)
+                          pst
+                          (list portal convert-row! (box #f))))]
         [(vector 'command command)
          (simple-result command)]))
 
@@ -359,28 +401,57 @@
                (typeid->type-reader fsym typeid)))
            field-dvecs))
 
+    ;; == Cursor
+
+    (define/public (fetch/cursor fsym cursor fetch-size)
+      (let ([pst (cursor-result-pst cursor)]
+            [extra (cursor-result-extra cursor)])
+        (send pst check-owner fsym this pst)
+        (let ([portal (car extra)]
+              [convert-row! (cadr extra)]
+              [end-box (caddr extra)])
+          (let ([rows
+                 (call-with-lock fsym
+                   (lambda ()
+                     (cond [(unbox end-box) #f]
+                           [else
+                            (fresh-exchange)
+                            (buffer-message (make-Execute portal fetch-size))
+                            (let ([rows
+                                   (call-with-sync fsym
+                                     (lambda () (query1:data-loop fsym end-box)))])
+                              (when (unbox end-box)
+                                (cursor:close fsym pst portal))
+                              rows)])))])
+            (and rows (begin (for-each convert-row! rows) rows))))))
+
+    (define/private (cursor:close fsym pst portal)
+      (let ([close-on-exec? (send pst get-close-on-exec?)])
+        (fresh-exchange)
+        (buffer-message (make-Close 'portal portal))
+        (when close-on-exec?
+          (buffer-message (make-Close 'statement (send pst get-handle)))
+          (send pst set-handle #f))
+        (call-with-sync fsym
+          (lambda () (query1:expect-close-complete fsym close-on-exec?)))))
 
     ;; == Prepare
 
-    (define/public (prepare fsym stmt close-on-exec?)
-      (call-with-lock fsym
-        (lambda ()
-          (check-valid-tx-status fsym)
-          (prepare1 fsym stmt close-on-exec?))))
+    (define/override (classify-stmt sql) (classify-pg-sql sql))
 
-    (define/private (prepare1 fsym stmt close-on-exec?)
+    (define/override (prepare1* fsym stmt close-on-exec? stmt-type)
       ;; name generation within exchange: synchronized
       (let ([name (generate-name)])
+        (fresh-exchange)
         (prepare1:enqueue name stmt)
-        (send-message (make-Sync))
-        (begin0 (prepare1:collect fsym name close-on-exec? (classify-pg-sql stmt))
-          (check-ready-for-query fsym #f))))
+        (call-with-sync fsym
+          (lambda () (prepare1:collect fsym stmt name close-on-exec? stmt-type)))))
 
     (define/private (prepare1:enqueue name stmt)
       (buffer-message (make-Parse name stmt null))
       (buffer-message (make-Describe 'statement name)))
 
-    (define/private (prepare1:collect fsym name close-on-exec? stmt-type)
+    (define/private (prepare1:collect fsym stmt name close-on-exec? stmt-type)
       (match (recv-message fsym)
         [(struct ParseComplete ()) (void)]
         [other-r (prepare1:error fsym other-r)])
@@ -391,6 +462,7 @@
              (close-on-exec? close-on-exec?)
              (param-typeids param-typeids)
              (result-dvecs field-dvecs)
+             (stmt stmt)
              (stmt-type stmt-type)
              (owner this))))
 
@@ -420,27 +492,36 @@
     (define/public (get-base) this)
 
     ;; free-statement : prepared-statement -> void
-    (define/public (free-statement pst)
-      (call-with-lock* 'free-statement
-        (lambda ()
-          (let ([name (send pst get-handle)])
-            (when (and name outport) ;; outport = connected?
-              (send pst set-handle #f)
-              (buffer-message (make-Close 'statement name))
-              (buffer-message (make-Sync))
-              (let ([r (recv-message 'free-statement)])
-                (cond [(CloseComplete? r) (void)]
-                      [else (error/comm 'free-statement)])
-                (check-ready-for-query 'free-statement #t)))))
-        void
-        #f))
+    (define/public (free-statement pst need-lock?)
+      (define (do-free-statement)
+        (let ([name (send pst get-handle)])
+          (when (and name outport) ;; outport = connected?
+            (send pst set-handle #f)
+            (fresh-exchange)
+            (buffer-message (make-Close 'statement name))
+            (call-with-sync 'free-statement
+             (lambda ()
+               (let ([r (recv-message 'free-statement)])
+                 (cond [(CloseComplete? r) (void)]
+                       [else (error/comm 'free-statement)])))))))
+      (if need-lock?
+          (call-with-lock* 'free-statement
+                           do-free-statement
+                           void
+                           #f)
+          (do-free-statement)))
+
+    ;; == Internal query
+
+    (define/private (internal-query1 fsym sql)
+      (query1 fsym sql #f #f))
 
     ;; == Transactions
 
     (define/override (start-transaction* fsym isolation)
       (cond [(eq? isolation 'nested)
              (let ([savepoint (generate-name)])
-               (query1 fsym (format "SAVEPOINT ~a" savepoint) #t)
+               (internal-query1 fsym (format "SAVEPOINT ~a" savepoint))
                savepoint)]
             [else
              (let* ([isolation-level (isolation-symbol->string isolation)]
@@ -450,22 +531,22 @@
                ;; FIXME: also support
                ;;   'read-only  => "READ ONLY"
                ;;   'read-write => "READ WRITE"
-               (query1 fsym stmt #t)
+               (internal-query1 fsym stmt)
                #f)]))
 
     (define/override (end-transaction* fsym mode savepoint)
       (case mode
         ((commit)
          (cond [savepoint
-                (query1 fsym (format "RELEASE SAVEPOINT ~a" savepoint) #t)]
+                (internal-query1 fsym (format "RELEASE SAVEPOINT ~a" savepoint))]
                [else
-                (query1 fsym "COMMIT WORK" #t)]))
+                (internal-query1 fsym "COMMIT WORK")]))
         ((rollback)
          (cond [savepoint
-                (query1 fsym (format "ROLLBACK TO SAVEPOINT ~a" savepoint) #t)
-                (query1 fsym (format "RELEASE SAVEPOINT ~a" savepoint) #t)]
+                (internal-query1 fsym (format "ROLLBACK TO SAVEPOINT ~a" savepoint))
+                (internal-query1 fsym (format "RELEASE SAVEPOINT ~a" savepoint))]
                [else
-                (query1 fsym "ROLLBACK WORK" #t)])))
+                (internal-query1 fsym "ROLLBACK WORK")])))
       (void))
 
     ;; == Reflection
@@ -479,7 +560,7 @@
                   "table_schema = SOME (current_schemas(false))")
                  ((current)
                   "table_schema = current_schema")))]
-             [result (call-with-lock fsym (lambda () (query1 fsym stmt #t)))]
+             [result (call-with-lock fsym (lambda () (internal-query1 fsym stmt)))]
              [rows (vector-ref result 2)])
         (for/list ([row (in-list rows)])
           (bytes->string/utf-8 (vector-ref row 0)))))

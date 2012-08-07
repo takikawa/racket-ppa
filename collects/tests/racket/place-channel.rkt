@@ -8,8 +8,6 @@
          rackunit
          (for-syntax racket/base))
 
-(provide main)
-
 (define-syntax-rule (define-place (name ch) body ...)
   (define name (lambda () (place ch body ...))))
 
@@ -43,7 +41,8 @@
     (printf "~s\n" res)
     (let ([ok? (equal? expect res)])
       (unless ok?
-        (printf "  BUT EXPECTED ~s\n" expect))
+        (printf "  BUT EXPECTED ~s\n" expect)
+        (eprintf "ERROR\n"))
       ok?)))
 
 (define (echo ch) (place-channel-put ch (place-channel-get ch)))
@@ -52,6 +51,9 @@
 (define-struct building (rooms location) #:prefab)
 (define-struct (house building) (occupied ) #:prefab)
 (define h1 (make-house 5 'factory 'yes))
+(define l1 (list (cons 1 2) (cons 'red "green") (cons (hash) 1) (cons (vector 1) #s(blue 2))))
+(define l2 (list (cons 1 2) (cons 3 4) (cons #\a 5)))
+(define l3 (list (cons 1 2) (cons 3 4) (cons #\a 5) (cons 3.1415 12)))
 
 (define-syntax (test-place-channel-get/put stx)
   (syntax-case stx ()
@@ -82,7 +84,12 @@
       (list (car x) 'b (cadr x))
       (vector (vector-ref x 0) 'b (vector-ref x 1))
       #s((abuilding 1 building 2) 6 'utah 'no)
-      `(,x))))
+      `(,x)
+      (make-immutable-hash (list (cons 'red 'der)))
+      (make-immutable-hash l1)
+      (make-immutable-hasheq l2)
+      (make-immutable-hasheqv l3)
+      )))
 
 (define (channel-test-basic-types-master sender ch)
   (define-syntax-rule (test-place-channel-put-receive sender ch (send expect) ...) 
@@ -103,7 +110,12 @@
     ((list 'a 'a) (list 'a 'b 'a))
     (#(a a) #(a b a))
     (h1 #s((abuilding 1 building 2) 6 'utah 'no))
-    ('(printf "Hello") '((printf "Hello")))))
+    ('(printf "Hello") '((printf "Hello")))
+    ((make-hash (list (cons 'red 'der))) (make-immutable-hash (list (cons 'red 'der))))
+    ((make-hash l1) (make-immutable-hash l1))
+    ((make-hasheq l2) (make-immutable-hasheq l2))
+    ((make-hasheqv l3) (make-immutable-hasheqv l3))
+    ))
 
 (define-place (place-worker ch)
   (channel-test-basic-types-worker normal-receiver ch)
@@ -167,8 +179,42 @@
       (raise (format "~a master length ~a != worker length ~a\n" desc ll wlen))
     (place-wait p))))
 
+(module+ test
+  (main))
 
 (define (main)
+  
+  ;test breaks in BEGIN_ESCAPABLE during scheme_place_async_try_receive
+  (let ()
+    (for ([i 25])
+      (let ()
+        (define-values (ch1 ch2) (place-channel))
+        (define mt 
+          (thread 
+            (lambda ()
+              (let loop () (loop)))))
+        (define t
+          (thread
+            (lambda ()
+              (for ([i 100000])
+                ;(place-channel-put ch1 (list "foo" 1 "bar"))
+                (place-channel-put ch1 (make-list 7000 'foo))
+                ))))
+        (define t2
+          (thread
+            (lambda ()
+              (time (for ([i 100000])
+                (sync ch2))))))
+
+        (define ti (/ (+ (random 100) 1) 100))
+        (sleep ti)
+        (kill-thread mt) 
+        (kill-thread t2)
+        (kill-thread t)
+        ;(displayln (exact->inexact ti))
+        (thread-wait t)
+        (thread-wait t2))))
+
   (let ()
     (define flx (make-shared-fxvector 10 0))
     (define flv (make-shared-flvector 10 0.0))

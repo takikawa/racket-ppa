@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 
 (require (rename-in "../utils/utils.rkt" [infer infer-in]))
 (require (rename-in (types subtype convenience remove-intersect union)
@@ -11,10 +11,10 @@
          (types resolve)
          (only-in (env type-env-structs lexical-env)
                   env? update-type/lexical env-map env-props replace-props)
-         scheme/contract racket/match
-         mzlib/trace  unstable/struct
+         racket/contract racket/match
+         unstable/struct
          "tc-metafunctions.rkt"
-         (for-syntax scheme/base))
+         (for-syntax racket/base))
 
 ;(trace replace-nth)
 

@@ -7,9 +7,11 @@
          syntax/moddep
          racket/gui/dynamic
          planet/config
-         setup/dirs)
+         setup/dirs
+         setup/link)
 
 (provide gui?
+         sandbox-gui-available
          sandbox-init-hook
          sandbox-reader
          sandbox-input
@@ -23,12 +25,14 @@
          sandbox-security-guard
          sandbox-network-guard
          sandbox-exit-handler
+         sandbox-make-namespace
          sandbox-make-inspector
          sandbox-make-code-inspector
          sandbox-make-logger
          sandbox-memory-limit
          sandbox-eval-limits
          sandbox-eval-handlers
+         sandbox-propagate-exceptions
          call-with-trusted-sandbox-configuration
          evaluator-alive?
          kill-evaluator
@@ -53,12 +57,16 @@
          exn:fail:resource?
          exn:fail:resource-resource)
 
+; for backward compatibility; maybe it should be removed:
 (define gui? (gui-available?))
+
+;; When this parameter is #t, it is adjusted when creating a sandbox:
+(define sandbox-gui-available (make-parameter #t (lambda (v) (and v #t))))
 
 (define-syntax mz/mr ; use a value for plain racket, or pull a gui binding
   (syntax-rules ()
     [(mz/mr mzval mrsym)
-     (if gui? (gui-dynamic-require 'mrsym) mzval)]))
+     (if (sandbox-gui-available) (gui-dynamic-require 'mrsym) mzval)]))
 
 ;; Configuration ------------------------------------------------------------
 
@@ -71,6 +79,7 @@
 (define sandbox-eval-limits  (make-parameter '(30 20))) ; 30sec, 20mb
 (define sandbox-propagate-breaks (make-parameter #t))
 (define sandbox-coverage-enabled (make-parameter #f))
+(define sandbox-propagate-exceptions (make-parameter #t))
 
 (define (call-with-trusted-sandbox-configuration thunk)
   (parameterize ([sandbox-propagate-breaks    #t]
@@ -85,8 +94,11 @@
                  [sandbox-eval-handlers       '(#f #f)])
     (thunk)))
 
+(define (sandbox-make-namespace)
+  ((mz/mr make-base-namespace make-gui-namespace)))
+
 (define sandbox-namespace-specs
-  (make-parameter `(,(mz/mr make-base-namespace make-gui-namespace)
+  (make-parameter `(,sandbox-make-namespace
                     #| no modules here by default |#)))
 
 (define (default-sandbox-reader source)
@@ -193,9 +205,9 @@
       (if (or (security-guard? x)
               (and (procedure? x) (procedure-arity-includes? x 0)))
         x
-        (raise-type-error
+        (raise-argument-error
          'sandbox-security-guard
-         "security-guard or a security-guard translator procedure" x)))))
+         "(or/c security-guard? (-> security-guard?))" x)))))
 
 ;; this is never really used (see where it's used in the evaluator)
 (define (default-sandbox-exit-handler _) (error 'exit "sandbox exits"))
@@ -210,11 +222,12 @@
 
 (define sandbox-make-logger (make-parameter current-logger))
 
-(define (compute-permissions paths+require-perms)
-  (define-values [paths require-perms] (partition path? paths+require-perms))
-  (define cpaths (map path->complete-path paths))
+(define (compute-permissions for-require for-load)
+  ;; `for-require' is a list of module paths and paths that will be `reqiure'd,
+  ;; while `for-load' is a list of path (strings) that will be `load'ed.
+  (define cpaths (map path->complete-path for-load))
   (append (map (lambda (p) `(read ,(path->bytes p))) cpaths)
-          ;; when reading a file from "/foo/bar/baz.rkt" racket will try to see
+          ;; when loading a module from "/foo/bar/baz.rkt" racket will try to see
           ;; if "/foo/bar" exists, so allow these paths too; it might be needed
           ;; to allow 'exists on any parent path, but I'm not sure that this is
           ;; safe in terms of security, so put just the immediate parent dir in
@@ -222,7 +235,7 @@
                         (let ([p (and (file-exists? p) (path-only p))])
                           (and p `(exists ,(path->bytes p)))))
                       cpaths)
-          (module-specs->path-permissions require-perms)))
+          (module-specs->path-permissions for-require)))
 
 ;; computes permissions that are needed for require specs (`read-bytecode' for
 ;; all files and "compiled" subdirs, `exists' for the base-dir)
@@ -252,6 +265,8 @@
     (cond [(and (pair? mod) (eq? 'lib (car mod))) #f]
           [(module-path? mod)
            (simplify-path* (resolve-module-path mod #f))]
+          [(path? mod)
+           (simplify-path* mod)]
           [(not (and (pair? mod) (pair? (cdr mod))))
            ;; don't know what this is, leave as is
            #f]
@@ -491,6 +506,12 @@
 
 (define (add-location x loc)
   (cond [(null? x) null]
+        [(list? x)
+         ;; For a list, generate a syntax-object wrapper consistent with 
+         ;; an absence of `.'s in the reader's input:
+         (make-orig (for/list ([i (in-list x)])
+                      (add-location i loc))
+                    loc)]
         [(pair? x) (make-orig (cons (add-location (car x) loc) 
                                     (add-location (cdr x) loc))
                               loc)]
@@ -610,15 +631,7 @@
     (uncovered! (list (get) get)))
   (when (namespace? ns) (current-namespace ns)))
 
-(define current-eventspace (mz/mr (make-parameter #f) current-eventspace))
-(define make-eventspace    (mz/mr void make-eventspace))
-(define run-in-bg          (mz/mr thread queue-callback))
 (define null-input         (open-input-bytes #""))
-(define bg-run->thread
-  (if gui?
-    (lambda (ignored)
-      ((mz/mr void eventspace-handler-thread) (current-eventspace)))
-    values))
 
 ;; special message values for the evaluator procedure, also inside the user
 ;; context they're used for function applications.
@@ -659,7 +672,7 @@
    (current-continuation-marks)
    reason))
 
-(define (make-evaluator* who init-hook allow program-maker)
+(define (make-evaluator* who init-hook allow-for-require allow-for-load program-maker)
   (define orig-code-inspector (current-code-inspector))
   (define orig-security-guard (current-security-guard))
   (define orig-cust     (current-custodian))
@@ -668,6 +681,7 @@
   (define user-cust     (make-custodian memory-cust))
   (define user-cust-box (make-custodian-box user-cust #t))
   (define coverage?     (sandbox-coverage-enabled))
+  (define propagate-exceptions? (sandbox-propagate-exceptions))
   (define uncovered     #f)
   (define default-coverage-source-filter #f)
   (define input-ch      (make-channel))
@@ -748,7 +762,13 @@
        (when (eof-object? expr)
          (terminated! 'eof) (channel-put result-ch expr) (user-kill))
        (with-handlers ([void (lambda (exn)
-                               (channel-put result-ch (cons 'exn exn)))])
+                               (if propagate-exceptions?
+                                   (channel-put result-ch (cons 'exn exn))
+                                   (begin
+                                     (call-with-continuation-prompt
+                                      (lambda ()
+                                        (raise exn)))
+                                     (channel-put result-ch (cons 'vals (list (void)))))))])
          (define run
            (if (evaluator-message? expr)
              (case (evaluator-message-msg expr)
@@ -876,6 +896,8 @@
      memory-cust))
   (parameterize* ; the order in these matters
    (;; create a sandbox context first
+    [sandbox-gui-available (and (sandbox-gui-available)
+                                (gui-available?))]
     [current-custodian user-cust]
     [current-thread-group (make-thread-group)]
     ;; paths
@@ -885,12 +907,17 @@
                      (current-library-collection-paths)))]
     [sandbox-path-permissions
      `(,@(map (lambda (p) `(read-bytecode ,p))
-              (current-library-collection-paths))
+              (append
+               (current-library-collection-paths)
+               (links #:root? #t #:user? #f)
+               (links #:root? #t #:user? #t)
+               (map cdr (links #:user? #f #:with-path? #t))
+               (map cdr (links #:user? #t #:with-path? #t))))
        (read-bytecode ,(PLANET-BASE-DIR))
        (exists ,(find-system-path 'addon-dir))
        (read ,(find-system-path 'links-file))
        (read ,(find-lib-dir))
-       ,@(compute-permissions allow)
+       ,@(compute-permissions allow-for-require allow-for-load)
        ,@(sandbox-path-permissions))]
     ;; restrict the sandbox context from this point
     [current-security-guard
@@ -941,17 +968,24 @@
     [current-command-line-arguments '#()]
     ;; Finally, create the namespace in the restricted environment (in
     ;; particular, it must be created under the new code inspector)
-    [current-namespace (make-evaluation-namespace)]
+    [current-namespace (make-evaluation-namespace)])
+   (define current-eventspace (mz/mr (make-parameter #f) current-eventspace))
+   (parameterize*
     ;; Note the above definition of `current-eventspace': in Racket, it
     ;; is an unused parameter.  Also note that creating an eventspace
     ;; starts a thread that will eventually run the callback code (which
     ;; evaluates the program in `run-in-bg') -- so this parameterization
     ;; must be nested in the above (which is what paramaterize* does), or
     ;; it will not use the new namespace.
-    [current-eventspace (parameterize-break #f (make-eventspace))])
-   (define t (bg-run->thread (run-in-bg user-process)))
-   (set! user-done-evt (handle-evt t (lambda (_) (terminate+kill! #t #t))))
-   (set! user-thread t))
+    ([current-eventspace (parameterize-break #f ((mz/mr void make-eventspace)))])
+    (define run-in-bg (mz/mr thread queue-callback))
+    (define bg-run->thread (if (sandbox-gui-available)
+                               (lambda (ignored)
+                                 ((mz/mr void eventspace-handler-thread) (current-eventspace)))
+                               values))
+    (define t (bg-run->thread (run-in-bg user-process)))
+    (set! user-done-evt (handle-evt t (lambda (_) (terminate+kill! #t #t))))
+    (set! user-thread t)))
   (define r (get-user-result))
   (if (eq? r 'ok)
     ;; initial program executed ok, so return an evaluator
@@ -959,32 +993,78 @@
     ;; program didn't execute
     (raise r)))
 
+(define (check-and-combine-allows who allow allow-for-require allow-for-load)
+  (define (check-arg-list arg what ok?)
+    (unless (and (list? arg) (andmap ok? arg))
+      (error who "bad ~a: ~e" what arg)))
+  (check-arg-list allow "allows"
+                  (lambda (x) (or (path? x) (module-path? x) (path-string? x))))
+  (check-arg-list allow-for-require "allow-for-requires"
+                  (lambda (x) (or (path? x) (module-path? x))))
+  (check-arg-list allow-for-load "allow-for-loads" path-string?)
+  ;; This split of `allow' is ugly but backward-compatible:
+  (define-values (more-allow-for-load more-allow-for-require)
+    (partition (lambda (p) (or (path? p) 
+                               ;; strings that can be treated as paths:
+                               (not (module-path? p)))) 
+               allow))
+  (values (append allow-for-require
+                  more-allow-for-require)
+          (append allow-for-load
+                  more-allow-for-load)))
+
 (define (make-evaluator lang
-                        #:requires [requires null] #:allow-read [allow null]
+                        #:requires [requires null] 
+                        #:allow-read [allow null]
+                        #:allow-for-require [allow-for-require null]
+                        #:allow-for-load [allow-for-load null]
                         . input-program)
   ;; `input-program' is either a single argument specifying a file/string, or
-  ;; multiple arguments for a sequence of expressions
-  ;; make it possible to use simple paths to files to require
-  (define reqs (if (not (list? requires))
-                 (error 'make-evaluator "bad requires: ~e" requires)
-                 (map (lambda (r)
-                        (if (or (pair? r) (symbol? r))
-                          r
-                          `(file ,(path->string (simplify-path* r)))))
-                      requires)))
+  ;;  multiple arguments for a sequence of expressions
+  (define all-requires
+    (extract-required (or (decode-language lang) lang) 
+                      requires))
+  (unless (and (list? requires) 
+               (andmap (lambda (x) (or (path-string? x) 
+                                       (module-path? x)
+                                       (and (list? x)
+                                            (pair? x)
+                                            (eq? (car x) 'for-syntax)
+                                            (andmap module-path? (cdr x)))))
+                       requires))
+    (error 'make-evaluator "bad requires: ~e" requires))
+  (define-values (all-for-require all-for-load)
+    (check-and-combine-allows 'make-evaluator allow allow-for-require allow-for-load))
+  (define (normalize-require-for-syntax r)
+    (if (or (path? r) (and (string? r) 
+                           (not (module-path? r))))
+        `(file ,(path->string (simplify-path* r)))
+        r))
+  (define (normalize-require-for-allow r)
+    (cond
+     [(and (string? r) (not (module-path? r))) (list (string->path r))]
+     [(and (pair? r) (eq? (car r) 'for-syntax))
+      (cdr r)]
+     [else (list r)]))
   (make-evaluator* 'make-evaluator
                    (init-hook-for-language lang)
-                   (append (extract-required (or (decode-language lang) lang)
-                                             reqs)
-                           (if (and (= 1 (length input-program))
+                   (append (apply append
+                                  (map normalize-require-for-allow all-requires))
+                           all-for-require)
+                   (append (if (and (= 1 (length input-program))
                                     (path? (car input-program)))
-                             (list (car input-program))
-                             '())
-                           allow)
-                   (lambda () (build-program lang reqs input-program))))
+                               (list (car input-program))
+                               '())
+                           all-for-load)
+                   (lambda () (build-program lang 
+                                             (map normalize-require-for-syntax all-requires)
+                                             input-program))))
 
-(define (make-module-evaluator
-         input-program #:allow-read [allow null] #:language [reqlang #f])
+(define (make-module-evaluator input-program 
+                               #:allow-read [allow null] 
+                               #:allow-for-require [allow-for-require null]
+                               #:allow-for-load [allow-for-load null]
+                               #:language [reqlang #f])
   ;; this is for a complete module input program
   (define (make-program)
     (define-values [prog source]
@@ -1004,7 +1084,10 @@
       [_else (error 'make-module-evaluator
                     "expecting a `module' program; got ~.s"
                     (syntax->datum (car prog)))]))
+  (define-values (all-for-require all-for-load)
+    (check-and-combine-allows 'make-module-evaluator allow allow-for-require allow-for-load))
   (make-evaluator* 'make-module-evaluator
                    void
-                   (if (path? input-program) (cons input-program allow) allow)
+                   all-for-require
+                   (if (path? input-program) (cons input-program all-for-load) all-for-load)
                    make-program))

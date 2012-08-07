@@ -1,8 +1,8 @@
-#lang scheme/base
+#lang racket/base
 
 (require "patterns.rkt" "compiler.rkt"
          syntax/stx scheme/nest syntax/parse
-         (for-template scheme/base (only-in "runtime.rkt" match:error)))
+         (for-template racket/base (only-in "runtime.rkt" match:error)))
 
 (provide go go/one)
 
@@ -10,6 +10,7 @@
 ;; go : syntax syntax syntax -> syntax
 (define (go/one parse stx expr clauses)
   (define-syntax-class cl
+    #:description "a clause with a pattern and a result"
     (pattern [p . rhs]
              #:with res (syntax/loc this-syntax [(p) . rhs])))
   (syntax-parse clauses

@@ -84,7 +84,7 @@ above call to @racket[go] can be equivalently written
 The syntax for function calls supports any number of arguments, but a
 specific call always specifies a fixed number of arguments. As a
 result, a function that takes a list of arguments cannot directly
-apply a function like @racket[+] to all of the items in the list:
+apply a function like @racket[+] to all of the items in a list:
 
 @def+int[
 (define (avg lst) (code:comment @#,elem{doesn't work...})
@@ -101,8 +101,8 @@ apply a function like @racket[+] to all of the items in the list:
 ]
 
 The @racket[apply] function offers a way around this restriction. It
-takes a function and a @italic{list} arguments, and it applies the
-function to the arguments:
+takes a function and a @italic{list} argument, and it applies the
+function to the values in the list:
 
 @def+int[
 (define (avg lst)
@@ -122,9 +122,19 @@ are effectively @racket[cons]ed onto the argument list:
 (anti-sum '(1 2 3))
 ]
 
-The @racket[apply] function supports only by-position arguments. To
-apply a function with keyword arguments, use the
-@racket[keyword-apply] function, which accepts a function to apply
+The @racket[apply] function accepts keyword arguments, too, and it
+passes them along to the called function:
+
+@racketblock[
+(apply go #:mode 'fast '("super.rkt"))
+(apply go '("super.rkt") #:mode 'fast)
+]
+
+Keywords that are included in @racket[apply]'s list argument do not
+count as keyword arguments for the called function; instead, all arguments in
+this list are treated as by-position arguments. To pass a list of
+keyword arguments to a function, use
+the @racket[keyword-apply] function, which accepts a function to apply
 and three lists. The first two lists are in parallel, where the first
 list contains keywords (sorted by @racket[keyword<]), and the second
 list contains a corresponding argument for each keyword. The third

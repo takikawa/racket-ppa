@@ -1,7 +1,7 @@
 #lang scribble/doc
 
 @(require scribble/manual
-          (for-label racket/base profile profile/sampler
+          (for-label racket/base racket/contract profile profile/sampler
                      (only-in profile/analyzer analyze-samples profile?)
                      (prefix-in text: profile/render-text)))
 
@@ -16,12 +16,13 @@ intended as a convenient tool for profiling code.
 
 @defproc[(profile-thunk
           [thunk (-> any/c)]
-          [#:delay   delay      nonnegative-number?        0.05]
+          [#:delay   delay      (>=/c 0.0)        0.05]
           [#:repeat  iterations exact-nonnegative-integer? 1]
           [#:threads threads?   any/c                      #f]
           [#:render  renderer   (profile? . -> . any/c)    text:render]
           [#:periodic-renderer periodic-renderer
-           (or/c #f (list/c nonnegative-number? (profile? . -> . any/c)))
+           (or/c #f (list/c (>=/c 0.0)
+                            (profile? . -> . any/c)))
            #f])
          void?]{
 
@@ -59,9 +60,11 @@ can customize the profiling:
   accumulated data is analyzed (by @racket[analyze-samples]) and the
   resulting profile value is sent to the @racket[renderer] function.
   See @secref["renderers"] for available renderers.  You can also use
-  @racket[values] as a ``renderer''---in this case the
+  @racket[values] as a ``renderer''---in this case
   @racket[profile-thunk] returns the analyzed information which can
-  now be rendered multiple times, or saved for future rendering.}
+  now be rendered multiple times, or saved for rendering directly
+  using one of the renderers, perhaps multiple times for different
+  views.}
 
 @item{To provide feedback information during execution, specify a
   @racket[periodic-renderer].  This should be a list holding a delay

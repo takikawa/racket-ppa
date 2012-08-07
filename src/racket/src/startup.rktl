@@ -207,7 +207,7 @@
     (lambda (s)
       (unless (or (path-for-some-system? s)
                   (path-string? s))
-        (raise-type-error 'normal-path-case "path (for any system) or valid-path string" s))
+        (raise-argument-error 'normal-path-case "(or/c path-for-some-system? path-string?)" s))
       (cond
        [(if (path-for-some-system? s)
             (eq? (path-convention-type s) 'windows)
@@ -236,10 +236,10 @@
     (case-lambda 
      [(program libpath reverse?)
       (unless (path-string? program) 
-	(raise-type-error 'find-executable-path "path or string (sans nul)" program))
+	(raise-argument-error 'find-executable-path "path-string?" program))
       (unless (or (not libpath) (and (path-string? libpath) 
 				     (relative-path? libpath)))
-	(raise-type-error 'find-executable-path "#f or relative path or string" libpath))
+	(raise-argument-error 'find-executable-path "(or/c #f (and/c path-string? relative-path?))" libpath))
       (letrec ([found-exec
 		(lambda (exec-name)
                   (if libpath
@@ -268,9 +268,10 @@
 		  [win-add (lambda (s) (if (eq? (system-type) 'windows) 
 					   (cons (bytes->path #".") s) 
 					   s))])
-	      (let loop ([paths (if paths-str 
-				    (win-add (path-list-string->path-list paths-str null))
-				    null)])
+	      (let loop ([paths (win-add 
+                                 (if paths-str 
+                                     (path-list-string->path-list paths-str null)
+                                     null))])
 		(if (null? paths)
 		    #f
 		    (let* ([base (path->complete-path (car paths))]
@@ -299,10 +300,10 @@
       (lambda (s default)
 	(unless (or (bytes? s)
 		    (string? s))
-	  (raise-type-error 'path-list-string->path-list "byte string or string" s))
+	  (raise-argument-error 'path-list-string->path-list "(or/c bytes? string?)" s))
 	(unless (and (list? default)
 		     (andmap path? default))
-	  (raise-type-error 'path-list-string->path-list "list of paths" default))
+	  (raise-argument-error 'path-list-string->path-list "(listof path?)" default))
 	(let loop ([s (if (string? s)
 			  (string->bytes/utf-8 s)
 			  s)])
@@ -316,12 +317,11 @@
   (define-values (-check-relpath)
     (lambda (who s)
       (unless (path-string? s)
-        (raise-type-error who "path or valid-path string" s))
+        (raise-argument-error who "path-string?" s))
       (unless (relative-path? s)
-        (raise (exn:fail:contract
-                (string->immutable-string
-                 (format "~a: invalid relative path: ~s" who s))
-                (current-continuation-marks))))))
+        (raise-arguments-error who
+                               "invalid relative path"
+                               "path" s))))
 
   (define-values (-check-collection)
     (lambda (who collection collection-path)
@@ -332,7 +332,7 @@
     (lambda (who fail)
       (unless (and (procedure? fail)
                    (procedure-arity-includes? fail 1))
-        (raise-type-error who "procedure (arity 1)" fail))))
+        (raise-argument-error who "(any/c . -> . any)" fail))))
 
   (define-values (collection-path)
     (lambda (fail collection . collection-path) 
@@ -567,15 +567,23 @@
                                   (cons (car l) (filter f (cdr l)))
                                   (filter f (cdr l))))))
                       (fail
-                       (format "collection not found: ~s in any of: ~s~a" 
+                       (format "collection not found\n  collection: ~s\n  in collection directories:~a~a" 
                                (if (null? collection-path)
                                    (to-string collection)
                                    (string-append (to-string collection) "/" rest-coll))
-                               (filter path? all-paths)
+                               (apply
+                                string-append
+                                (map (lambda (p)
+                                       (format "\n   ~a" p))
+                                     (filter path? all-paths)))
                                (if (ormap box? all-paths)
-                                   (format " or: ~s in any of: ~s" 
+                                   (format "\n   sub-collection: ~s\n  in parent directories:~a"
                                            rest-coll 
-                                           (map unbox (filter box? all-paths)))
+                                           (apply
+                                            string-append
+                                            (map (lambda (p)
+                                                   (format "\n   ~a" (unbox p))))
+                                            (filter box? all-paths)))
                                    "")))))
                 (let ([dir (*build-path-rep (car paths) collection)])
                   (if (*directory-exists? (car paths) dir)
@@ -610,9 +618,9 @@
     (lambda (s sfx who)
       (unless (or (path-for-some-system? s)
                   (path-string? s))
-        (raise-type-error who "path (for any system) or valid-path string" 0 s sfx))
+        (raise-argument-error who "(or/c path-for-some-system? path-string?)" 0 s sfx))
       (unless (or (string? sfx) (bytes? sfx))
-        (raise-type-error who "string or byte string" 1 s sfx))
+        (raise-argument-error who "(or/c string? bytes?)" 1 s sfx))
       (let-values ([(base name dir?) (split-path s)])
         (when (not base)
           (raise-mismatch-error who "cannot add a suffix to a root path: " s))
@@ -706,7 +714,9 @@
                         (read-bytes (max 0 (- end start)))))))]
            [p (open-input-bytes s)])
       (let loop ()
-        (let ([e (parameterize ([read-accept-compiled #t])
+        (let ([e (parameterize ([read-accept-compiled #t]
+                                [read-accept-reader #t]
+                                [read-accept-lang #t])
                    (read p))])
           (unless (eof-object? e)
             (eval e)
@@ -767,100 +777,131 @@
               (and a
                    (let ([am (date-of a modes)])
                      (or (and (not bm) am) 
-                         (and am bm (>= (cdr am) (cdr bm)) am)))))])
+                         (and am bm (>= (cdr am) (cdr bm)) am)))))]
+           [with-dir* (lambda (base t) 
+                        (parameterize ([current-load-relative-directory 
+                                        (if (path? base) 
+                                            base 
+                                            (current-directory))])
+                          (t)))])
       (lambda (path expect-module)
         (unless (path-string? path)
-          (raise-type-error 'load/use-compiled "path or valid-path string" path))
-        (let*-values ([(orig-path) (resolve path)]
-                      [(base orig-file dir?) (split-path path)]
-                      [(file alt-file) (if expect-module
-                                           (let* ([b (path->bytes orig-file)]
-                                                  [len (bytes-length b)])
-                                             (cond
-                                              [(and (len . >= . 4)
-                                                    (bytes=? #".rkt" (subbytes b (- len 4))))
-                                               ;; .rkt => try .rkt then .ss
-                                               (values orig-file
-                                                       (bytes->path (bytes-append (subbytes b 0 (- len 4)) #".ss")))]
-                                              [else
-                                               ;; No search path
-                                               (values orig-file #f)]))
-                                           (values orig-file #f))]
-                      [(path) (if (eq? file orig-file)
-                                  orig-path
-                                  (build-path base file))]
-                      [(alt-path) (and alt-file
-                                       (if (eq? alt-file orig-file)
-                                           orig-path
-                                           (build-path base alt-file)))]
-                      [(base) (if (eq? base 'relative) 'same base)]
-                      [(modes) (use-compiled-file-paths)])
-          (let* ([main-path-d (date-of-1 path)]
-                 [alt-path-d (and alt-path 
-                                  (not main-path-d)
-                                  (date-of-1 alt-path))]
-                 [path-d (or main-path-d alt-path-d)]
-                 [get-so (lambda (file rep-sfx?)
-                           (lambda (compiled-dir)
-                             (build-path base
-                                         compiled-dir
-                                         "native"
-                                         (system-library-subpath)
-                                         (if rep-sfx?
-                                             (path-add-suffix
-                                              file
-                                              dll-suffix)
-                                             file))))]
-                 [zo (lambda (compiled-dir)
-                       (build-path base
-                                   compiled-dir
-                                   (path-add-suffix file #".zo")))]
-                 [alt-zo (lambda (compiled-dir)
+          (raise-argument-error 'load/use-compiled "path-string?" path))
+        (unless (or (not expect-module)
+                    (symbol? expect-module)
+                    (and (list? expect-module)
+                         ((length expect-module) . > . 1)
+                         (or (symbol? (car expect-module))
+                             (not (car expect-module)))
+                         (andmap symbol? (cdr expect-module))))
+          (raise-argument-error 'load/use-compiled "(or/c #f symbol? (cons/c (or/c #f symbol?) (non-empty-listof symbol?)))" path))
+        (define name (and expect-module (current-module-declare-name)))
+        (define ns-hts (and name
+                            (hash-ref -module-hash-table-table
+                                      (namespace-module-registry (current-namespace))
+                                      #f)))
+        (define use-path/src (and ns-hts (hash-ref (cdr ns-hts) name #f)))
+        (if use-path/src
+            ;; Use previous decision of .zo vs. source:
+            (parameterize ([current-module-declare-source (cadr use-path/src)])
+              (with-dir* (caddr use-path/src)
+                         (lambda () ((current-load) (car use-path/src) expect-module))))
+            ;; Check .zo vs. src dates, etc.:
+            (let*-values ([(orig-path) (resolve path)]
+                          [(base orig-file dir?) (split-path path)]
+                          [(file alt-file) (if expect-module
+                                               (let* ([b (path->bytes orig-file)]
+                                                      [len (bytes-length b)])
+                                                 (cond
+                                                  [(and (len . >= . 4)
+                                                        (bytes=? #".rkt" (subbytes b (- len 4))))
+                                                   ;; .rkt => try .rkt then .ss
+                                                   (values orig-file
+                                                           (bytes->path (bytes-append (subbytes b 0 (- len 4)) #".ss")))]
+                                                  [else
+                                                   ;; No search path
+                                                   (values orig-file #f)]))
+                                               (values orig-file #f))]
+                          [(path) (if (eq? file orig-file)
+                                      orig-path
+                                      (build-path base file))]
+                          [(alt-path) (and alt-file
+                                           (if (eq? alt-file orig-file)
+                                               orig-path
+                                               (build-path base alt-file)))]
+                          [(base) (if (eq? base 'relative) 'same base)]
+                          [(modes) (use-compiled-file-paths)])
+              (let* ([main-path-d (date-of-1 path)]
+                     [alt-path-d (and alt-path 
+                                      (not main-path-d)
+                                      (date-of-1 alt-path))]
+                     [path-d (or main-path-d alt-path-d)]
+                     [get-so (lambda (file rep-sfx?)
+                               (lambda (compiled-dir)
+                                 (build-path base
+                                             compiled-dir
+                                             "native"
+                                             (system-library-subpath)
+                                             (if rep-sfx?
+                                                 (path-add-suffix
+                                                  file
+                                                  dll-suffix)
+                                                 file))))]
+                     [zo (lambda (compiled-dir)
                            (build-path base
                                        compiled-dir
-                                       (path-add-suffix alt-file #".zo")))]
-                 [so (get-so file #t)]
-                 [alt-so (get-so alt-file #t)]
-                 [with-dir (lambda (t) 
-                             (parameterize ([current-load-relative-directory 
-                                             (if (path? base) 
-                                                 base 
-                                                 (current-directory))])
-                               (t)))]
-                 [try-main? (or main-path-d (not alt-path-d))]
-                 [try-alt? (and alt-file (or alt-path-d (not main-path-d)))])
-            (cond
-             [(and try-main?
-                   (date>=? modes so path-d))
-              => (lambda (so-d)
-                   (parameterize ([current-module-declare-source #f])
-                     (with-dir (lambda () ((current-load-extension) (car so-d) expect-module)))))]
-             [(and try-alt?
-                   (date>=? modes alt-so alt-path-d))
-              => (lambda (so-d)
-                   (parameterize ([current-module-declare-source alt-path])
-                     (with-dir (lambda () ((current-load-extension) (car so-d) expect-module)))))]
-             [(and try-main?
-                   (date>=? modes zo path-d))
-              => (lambda (zo-d)
-                   (parameterize ([current-module-declare-source #f])
-                     (with-dir (lambda () ((current-load) (car zo-d) expect-module)))))]
-             [(and try-alt?
-                   (date>=? modes alt-zo path-d))
-              => (lambda (zo-d)
-                   (parameterize ([current-module-declare-source alt-path])
-                     (with-dir (lambda () ((current-load) (car zo-d) expect-module)))))]
-             [else
-              (let ([p (if try-main? path alt-path)])
-                (parameterize ([current-module-declare-source (and expect-module 
-                                                                   (not try-main?)
-                                                                   p)])
-                  (with-dir (lambda () ((current-load) p expect-module)))))]))))))
+                                       (path-add-suffix file #".zo")))]
+                     [alt-zo (lambda (compiled-dir)
+                               (build-path base
+                                           compiled-dir
+                                           (path-add-suffix alt-file #".zo")))]
+                     [so (get-so file #t)]
+                     [alt-so (get-so alt-file #t)]
+                     [try-main? (or main-path-d (not alt-path-d))]
+                     [try-alt? (and alt-file (or alt-path-d (not main-path-d)))]
+                     [with-dir (lambda (t) (with-dir* base t))])
+                (cond
+                 [(and try-main?
+                       (date>=? modes so path-d))
+                  => (lambda (so-d)
+                       (parameterize ([current-module-declare-source #f])
+                         (with-dir (lambda () ((current-load-extension) (car so-d) expect-module)))))]
+                 [(and try-alt?
+                       (date>=? modes alt-so alt-path-d))
+                  => (lambda (so-d)
+                       (parameterize ([current-module-declare-source alt-path])
+                         (with-dir (lambda () ((current-load-extension) (car so-d) expect-module)))))]
+                 [(and try-main?
+                       (date>=? modes zo path-d))
+                  => (lambda (zo-d)
+                       (register-zo-path name ns-hts (car zo-d) #f base)
+                       (parameterize ([current-module-declare-source #f])
+                         (with-dir (lambda () ((current-load) (car zo-d) expect-module)))))]
+                 [(and try-alt?
+                       (date>=? modes alt-zo path-d))
+                  => (lambda (zo-d)
+                       (register-zo-path name ns-hts (car zo-d) alt-path base)
+                       (parameterize ([current-module-declare-source alt-path])
+                         (with-dir (lambda () ((current-load) (car zo-d) expect-module)))))]
+                 [(or (not (pair? expect-module))
+                      (car expect-module))
+                  (let ([p (if try-main? path alt-path)])
+                    ;; "quiet" failure when asking for a submodule:
+                    (unless (and (pair? expect-module)
+                                 (not (file-exists? p)))
+                      (parameterize ([current-module-declare-source (and expect-module 
+                                                                         (not try-main?)
+                                                                         p)])
+                        (with-dir (lambda () ((current-load) p expect-module))))))])))))))
+
+  (define (register-zo-path name ns-hts path src-path base)
+    (when ns-hts
+      (hash-set! (cdr ns-hts) name (list path src-path base))))
 
   (define-values (default-reader-guard)
     (lambda (path) path))
 
-  (define-values (-module-hash-table-table) (make-weak-hasheq)) ; weak map from namespace to module ht
+  (define-values (-module-hash-table-table) (make-weak-hasheq)) ; weak map from namespace to pair of module-name hts
 
   ;; weak map from `lib' path + corrent-library-paths to symbols:
   ;;  We'd like to use a weak `equal?'-based hash table here,
@@ -908,60 +949,123 @@
   (define-values (standard-module-name-resolver)
     (let-values ()
       (define-values (planet-resolver) #f)
+      (define-values (prep-planet-resolver!)
+        (lambda ()
+          (unless planet-resolver
+            (with-continuation-mark
+                parameterization-key
+                orig-paramz
+              (set! planet-resolver (dynamic-require '(lib "planet/resolver.rkt") 'planet-module-name-resolver))))))
       (define-values (standard-module-name-resolver)
         (case-lambda 
-         [(s) 
+         [(s from-namespace) 
           (unless (resolved-module-path? s)
-            (raise-type-error 'standard-module-name-resolver
-                              "resolved-module-path"
-                              s))
-          ;; Just register s as loaded
+            (raise-argument-error 'standard-module-name-resolver
+                                  "resolved-module-path?"
+                                  s))
+          (unless (or (not from-namespace) (namespace? from-namespace))
+            (raise-argument-error 'standard-module-name-resolver
+                                  "(or/c #f namespace?)"
+                                  from-namespace))
           (when planet-resolver
             ;; Let planet resolver register, too:
             (planet-resolver s))
-          (let ([ht (or (hash-ref -module-hash-table-table
-                                  (namespace-module-registry (current-namespace))
-                                  #f)
-                        (let ([ht (make-hasheq)])
-                          (hash-set! -module-hash-table-table
-                                     (namespace-module-registry (current-namespace))
-                                     ht)
-                          ht))])
-            (hash-set! ht s 'attach))]
-         [(s relto stx) (standard-module-name-resolver s relto stx #t)]
+          ;; Register s as loaded:
+          (let ([hts (or (hash-ref -module-hash-table-table
+                                   (namespace-module-registry (current-namespace))
+                                   #f)
+                         (let ([hts (cons (make-hasheq) (make-hasheq))])
+                           (hash-set! -module-hash-table-table
+                                      (namespace-module-registry (current-namespace))
+                                      hts)
+                           hts))])
+            (hash-set! (car hts) s 'declared)
+            ;; If attach from another namespace, copy over source-file path, if any:
+            (when from-namespace
+              (let ([root-name (if (pair? (resolved-module-path-name s))
+                                   (make-resolved-module-path (car (resolved-module-path-name s)))
+                                   s)]
+                    [from-hts (hash-ref -module-hash-table-table
+                                        (namespace-module-registry from-namespace)
+                                        #f)])
+                (when from-hts
+                  (let ([use-path/src (hash-ref (cdr from-hts) root-name #f)])
+                    (when use-path/src
+                      (hash-set! (cdr hts) root-name use-path/src)))))))]
+         [(s relto stx) ; for backward-compatibility
+          (standard-module-name-resolver s relto stx #t)]          
          [(s relto stx load?)
           ;; If stx is not #f, raise syntax error for ill-formed paths
-          ;; If s is #f, call to resolver is a notification from namespace-attach-module
-          (unless (or (path? s)
-                      (module-path? s))
+          (unless (module-path? s)
             (if stx
                 (raise-syntax-error #f
                                     "bad module path"
                                     stx)
-                (raise-type-error 'standard-module-name-resolver
-                                  "module-path or path"
-                                  s)))
+                (raise-argument-error 'standard-module-name-resolver
+                                      "module-path?"
+                                      s)))
+          (define (flatten-sub-path base orig-l)
+            (let loop ([a null] [l orig-l])
+              (cond
+               [(null? l) (if (null? a)
+                              base
+                              (cons base (reverse a)))]
+               [(equal? (car l) "..")
+                (if (null? a)
+                    (error
+                     'standard-module-name-resolver
+                     "too many \"..\"s in submodule path: ~.s"
+                     (list* 'submod
+                            (if (equal? base ".") 
+                                base 
+                                (if (path? base)
+                                    base
+                                    (list (if (symbol? base) 'quote 'file) base)))
+                            orig-l))
+                    (loop (cdr a) (cdr l)))]
+               [else (loop (cons (car l) a) (cdr l))])))
           (cond
            [(and (pair? s) (eq? (car s) 'quote))
             (make-resolved-module-path (cadr s))]
+           [(and (pair? s) (eq? (car s) 'submod)
+                 (pair? (cadr s)) (eq? (caadr s) 'quote))
+            (make-resolved-module-path (flatten-sub-path (cadadr s) (cddr s)))]
+           [(and (pair? s) (eq? (car s) 'submod)
+                 (or (equal? (cadr s) ".")
+                     (equal? (cadr s) ".."))
+                 (and relto
+                      (let ([p (resolved-module-path-name relto)])
+                        (or (symbol? p)
+                            (and (pair? p) (symbol? (car p)))))))
+            (define rp (resolved-module-path-name relto))
+            (make-resolved-module-path (flatten-sub-path (if (pair? rp) (car rp) rp)
+                                                         (let ([r (if (equal? (cadr s) "..")
+                                                                      (cdr s)
+                                                                      (cddr s))])
+                                                           (if (pair? rp)
+                                                               (append (cdr rp) r)
+                                                               r))))]
            [(and (pair? s) (eq? (car s) 'planet))
-            (unless planet-resolver
-              (with-continuation-mark
-                  parameterization-key
-                  orig-paramz
-                (set! planet-resolver (dynamic-require '(lib "planet/resolver.rkt") 'planet-module-name-resolver))))
-            (planet-resolver s relto stx load? orig-paramz)]
+            (prep-planet-resolver!)
+            (planet-resolver s relto stx load? #f orig-paramz)]
+           [(and (pair? s)
+                 (eq? (car s) 'submod)
+                 (pair? (cadr s))
+                 (eq? (caadr s) 'planet))
+            (prep-planet-resolver!)
+            (planet-resolver (cadr s) relto stx load? (cddr s) orig-paramz)]
            [else
             (let ([get-dir (lambda ()
                              (or (and relto
                                       (if (eq? relto -prev-relto)
                                           -prev-relto-dir
                                           (let ([p (resolved-module-path-name relto)])
-                                            (and (path? p)
-                                                 (let-values ([(base n d?) (split-path p)])
-                                                   (set! -prev-relto relto)
-                                                   (set! -prev-relto-dir base)
-                                                   base)))))
+                                            (let ([p (if (pair? p) (car p) p)])
+                                              (and (path? p)
+                                                   (let-values ([(base n d?) (split-path p)])
+                                                     (set! -prev-relto relto)
+                                                     (set! -prev-relto-dir base)
+                                                     base))))))
                                  (current-load-relative-directory)
                                  (current-directory)))]
                   [show-collection-err (lambda (s)
@@ -982,7 +1086,42 @@
                                   (let-values ([(base name dir?) (split-path p)])
                                     (if (regexp-match #rx"[.]ss$" (path->bytes name))
                                         (path-replace-suffix p #".rkt")
-                                        p)))])
+                                        p)))]
+                  [s (if (and (pair? s) (eq? 'submod (car s)))
+                         (let ([v (cadr s)])
+                           (if (or (equal? v ".")
+                                   (equal? v ".."))
+                               (if relto
+                                   ;; must have a path inside, or we wouldn't get here
+                                   (let ([p (resolved-module-path-name relto)])
+                                     (if (pair? p)
+                                         (car p)
+                                         p))
+                                   (error 'standard-module-name-resolver
+                                          "no base path for relative submodule path: ~.s"
+                                          s))
+                               v))
+                         s)]
+                  [subm-path (if (and (pair? s) (eq? 'submod (car s)))
+                                 (let ([p (if (and (or (equal? (cadr s) ".")
+                                                       (equal? (cadr s) ".."))
+                                                   relto)
+                                              (let ([p (resolved-module-path-name relto)]
+                                                    [r (if (equal? (cadr s) "..")
+                                                           (cdr s)
+                                                           (cddr s))])
+                                                (if (pair? p)
+                                                    (flatten-sub-path (car p) (append (cdr p) r))
+                                                    (flatten-sub-path p r)))
+                                              (flatten-sub-path "." 
+                                                                (if (equal? (cadr s) "..")
+                                                                    (cdr s)
+                                                                    (cddr s))))])
+                                   ;; flattening may erase the submodule path:
+                                   (if (pair? p)
+                                       (cdr p)
+                                       #f))
+                                 #f)])
               (let ([s-parsed
                      ;; Non-string result represents an error
                      (cond
@@ -1011,10 +1150,10 @@
                                             cols)
                                        (list (ss->rkt file)))))))]
                       [(path? s) 
-                       (if (absolute-path? s)
-                           ;; Use filesystem-sensitive `simplify-path' here:
-                           (path-ss->rkt (simplify-path s))
-                           (list " (a path must be absolute)"))]
+                       ;; Use filesystem-sensitive `simplify-path' here:
+                       (path-ss->rkt (simplify-path (if (complete-path? s)
+                                                        s
+                                                        (path->complete-path s (get-dir)))))]
                       [(eq? (car s) 'lib)
                        (or (path-cache-get (cons s (current-library-collection-paths)))
                            (let*-values ([(cols file) (split-relative-string (cadr s) #f)]
@@ -1049,7 +1188,7 @@
                        ;; Use filesystem-sensitive `simplify-path' here:
                        (path-ss->rkt 
                         (simplify-path (path->complete-path (expand-user-path (cadr s)) (get-dir))))])])
-                (unless (or (path? s-parsed)			  
+                (unless (or (path? s-parsed)
                             (vector? s-parsed))
                   (if stx
                       (raise-syntax-error
@@ -1058,11 +1197,9 @@
                                                        (car s-parsed)
                                                        ""))
                        stx)
-                      (raise-type-error 
+                      (raise-argument-error 
                        'standard-module-name-resolver
-                       (format "module path~a" (if s-parsed
-                                                   (car s-parsed)
-                                                   ""))
+                       "module-path?"
                        s)))
                 ;; At this point, s-parsed is a complete path (or a cached vector)
                 (let* ([filename (if (vector? s-parsed)
@@ -1077,20 +1214,25 @@
                     (let* ([no-sfx (if (vector? s-parsed)
                                        (vector-ref s-parsed 3)
                                        (path-replace-suffix name #""))])
-                      (let ([modname (if (vector? s-parsed)
-                                         (vector-ref s-parsed 4)
-                                         (make-resolved-module-path filename))]
-                            [ht (or (hash-ref -module-hash-table-table
-                                              (namespace-module-registry (current-namespace))
-                                              #f)
-                                    (let ([ht (make-hasheq)])
-                                      (hash-set! -module-hash-table-table
-                                                 (namespace-module-registry (current-namespace))
-                                                 ht)
-                                      ht))])
+                      (let* ([root-modname (if (vector? s-parsed)
+                                               (vector-ref s-parsed 4)
+                                               (make-resolved-module-path filename))]
+                             [hts (or (hash-ref -module-hash-table-table
+                                                (namespace-module-registry (current-namespace))
+                                                #f)
+                                      (let ([hts (cons (make-hasheq) (make-hasheq))])
+                                        (hash-set! -module-hash-table-table
+                                                   (namespace-module-registry (current-namespace))
+                                                   hts)
+                                        hts))]
+                             [modname (if subm-path
+                                          (make-resolved-module-path 
+                                           (cons (resolved-module-path-name root-modname)
+                                                 subm-path))
+                                          root-modname)])
                         ;; Loaded already?
                         (when load?
-                          (let ([got (hash-ref ht modname #f)])
+                          (let ([got (hash-ref (car hts) modname #f)])
                             (unless got
                               ;; Currently loading?
                               (let ([loading
@@ -1109,9 +1251,13 @@
                                               (eq? (car s) nsr))
                                      (error
                                       'standard-module-name-resolver
-                                      "cycle in loading at ~.s: ~.s"
+                                      "cycle in loading\n  at path: ~a\n  paths:~a"
                                       filename
-                                      (map cdr (reverse (cons s loading))))))
+                                      (apply string-append
+                                             (let loop ([l (reverse loading)])
+                                               (if (null? l)
+                                                   '()
+                                                   (list* "\n   " (path->string (cdar l)) (loop (cdr l)))))))))
                                  loading)
                                 ((if (continuation-prompt-available? -loading-prompt-tag)
                                      (lambda (f) (f))
@@ -1121,11 +1267,17 @@
                                                                                     (namespace-module-registry (current-namespace))
                                                                                     normal-filename)
                                                                                    loading)
-                                     (parameterize ([current-module-declare-name modname])
+                                     (parameterize ([current-module-declare-name root-modname])
                                        ((current-load/use-compiled) 
                                         filename 
-                                        (string->symbol (path->string no-sfx))))))))
-                              (hash-set! ht modname #t))))
+                                        (let ([sym (string->symbol (path->string no-sfx))])
+                                          (if subm-path
+                                              (if (hash-ref (car hts) root-modname #f)
+                                                  ;; Root is already loaded, so only use .zo
+                                                  (cons #f subm-path)
+                                                  ;; Root isn't loaded, so it's ok to load form source:
+                                                  (cons sym subm-path))
+                                              sym)))))))))))
                         ;; If a `lib' path, cache pathname manipulations
                         (when (and (not (vector? s-parsed))
                                    (or (string? s)
@@ -1139,7 +1291,7 @@
                                                    normal-filename
                                                    name
                                                    no-sfx
-                                                   modname)))
+                                                   root-modname)))
                         ;; Result is the module name:
                         modname))))))])]))
       standard-module-name-resolver))

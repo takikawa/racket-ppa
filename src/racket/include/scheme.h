@@ -450,6 +450,9 @@ typedef intptr_t (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_d
 #define SCHEME_MUTABLE_BOXP(obj)  (SCHEME_BOXP(obj) && SCHEME_MUTABLEP(obj))
 #define SCHEME_IMMUTABLE_BOXP(obj)  (SCHEME_BOXP(obj) && SCHEME_IMMUTABLEP(obj))
 
+#define SCHEME_PROMPT_TAGP(obj) SAME_TYPE(SCHEME_TYPE(obj), scheme_prompt_tag_type)
+#define SCHEME_CONTINUATION_MARK_KEYP(obj) SAME_TYPE(SCHEME_TYPE(obj), scheme_continuation_mark_key_type)
+
 #define SCHEME_BUCKTP(obj) SAME_TYPE(SCHEME_TYPE(obj),scheme_bucket_table_type)
 #define SCHEME_HASHTP(obj) SAME_TYPE(SCHEME_TYPE(obj),scheme_hash_table_type)
 #define SCHEME_HASHTRP(obj) SAME_TYPE(SCHEME_TYPE(obj),scheme_hash_tree_type)
@@ -658,7 +661,7 @@ typedef struct Scheme_Offset_Cptr
 #define SCHEME_PRIM_OPT_MASK (1 | 2)
 #define SCHEME_PRIM_IS_PRIMITIVE 4
 #define SCHEME_PRIM_IS_UNSAFE_OMITABLE 8
-#define SCHEME_PRIM_IS_STRUCT_OTHER 16
+#define SCHEME_PRIM_IS_OMITABLE 16
 #define SCHEME_PRIM_OTHER_TYPE_MASK (32 | 64 | 128 | 256)
 #define SCHEME_PRIM_IS_MULTI_RESULT 512
 #define SCHEME_PRIM_IS_BINARY_INLINED 1024
@@ -674,7 +677,7 @@ typedef struct Scheme_Offset_Cptr
 #define SCHEME_PRIM_OPT_NONCM      1
 
 /* Values with SCHEME_PRIM_OTHER_TYPE_MASK */
-#define SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_GETTER 0
+#define SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_GETTER (32 | 256)
 #define SCHEME_PRIM_STRUCT_TYPE_CONSTR           128
 #define SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_SETTER 256
 #define SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER   (128 | 256)
@@ -901,7 +904,7 @@ typedef struct {
 #endif
 
 /* Like setjmp & longjmp, but you can jmp to a deeper stack position */
-/* Intialize a Scheme_Jumpup_Buf record before using it */
+/* Initialize a Scheme_Jumpup_Buf record before using it */
 typedef struct Scheme_Jumpup_Buf {
   void *stack_from, *stack_copy;
   intptr_t stack_size, stack_max_size;
@@ -1144,9 +1147,13 @@ typedef struct Scheme_Thread {
 
   long saved_errno;
 
+  int futures_slow_path_tracing;
+
 #ifdef MZ_PRECISE_GC
   struct GC_Thread_Info *gc_info; /* managed by the GC */
+  void *place_channel_msg_in_flight;
 #endif
+
 } Scheme_Thread;
 
 #include "schthread.h"
@@ -1998,10 +2005,10 @@ extern Scheme_Extension_Table *scheme_extension_table;
 # define MZ_FD_ISSET(n, p) scheme_fdisset(p, n)
 #else
 # define MZ_GET_FDSET(p, n) ((void *)(((fd_set *)p) + n))
-# define MZ_FD_ZERO(p) FD_ZERO(p)
-# define MZ_FD_SET(n, p) FD_SET(n, p)
-# define MZ_FD_CLR(n, p) FD_CLR(n, p)
-# define MZ_FD_ISSET(n, p) FD_ISSET(n, p)
+# define MZ_FD_ZERO(p) FD_ZERO((fd_set *)(p))
+# define MZ_FD_SET(n, p) FD_SET(n, (fd_set *)(p))
+# define MZ_FD_CLR(n, p) FD_CLR(n, (fd_set *)(p))
+# define MZ_FD_ISSET(n, p) FD_ISSET(n, (fd_set *)(p))
 #endif
 
 /* For scheme_fd_to_semaphore(): */

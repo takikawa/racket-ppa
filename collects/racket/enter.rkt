@@ -61,8 +61,7 @@
   (define notify
     (if (or (memq '#:verbose flags) (and re? (memq '#:verbose-reload flags)))
       (lambda (path)
-        (fprintf (current-error-port)
-                 "  [~aloading ~a]\n" (if re? "re-" "") path))
+        (eprintf "  [~aloading ~a]\n" (if re? "re-" "") path))
       void))
   (lambda (path name)
     (if name
@@ -108,7 +107,8 @@
   (define done (make-hash))
   (let loop ([mpi mpi])
     (define rpath (module-path-index-resolve mpi))
-    (define path (resolved-module-path-name rpath))
+    (define path (let ([p (resolved-module-path-name rpath)])
+                   (if (pair? p) (car p) p)))
     (when (path? path)
       (define npath (normal-case-path path))
       (unless (hash-ref done npath #f)

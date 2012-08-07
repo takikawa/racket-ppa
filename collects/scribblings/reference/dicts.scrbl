@@ -1,8 +1,8 @@
 #lang scribble/doc
-@(require "mz.rkt" scribble/eval)
+@(require "mz.rkt" scribble/eval (for-label racket/generic))
 
 @(define dict-eval (make-base-eval))
-@(interaction-eval #:eval dict-eval (require racket/dict))
+@(interaction-eval #:eval dict-eval (require racket/dict racket/generic))
 
 @title[#:tag "dicts"]{Dictionaries}
 
@@ -18,8 +18,8 @@ values. The following datatypes are all dictionaries:
  @item{@techlink{lists} of @techlink{pairs} (an @deftech{association
        list} using @racket[equal?] to compare keys); and}
 
- @item{@techlink{structures} whose types have the @racket[prop:dict]
-       property.}
+ @item{@techlink{structures} whose types implement the @racket[gen:dict]
+       @tech{generic interface}.}
 
 ]
 
@@ -182,7 +182,7 @@ earlier mappings.
 (dict-set* #hash((a . "apple") (b . "beer")) 'b "banana" 'a "anchor")
 (dict-set* '() 'a "apple" 'b "beer")
 (dict-set* '((a . "apple") (b . "beer")) 'b "banana" 'a "anchor")
-(dict-set* '((a . "apple") (b . "beer")) 'b "banana" 'b "balistic")
+(dict-set* '((a . "apple") (b . "beer")) 'b "banana" 'b "ballistic")
 ]}
 
 @defproc[(dict-has-key? [dict dict?] [key any/c])
@@ -527,57 +527,78 @@ Returns a list of the associations from
 (dict->list h)
 ]}
 
-@defthing[prop:dict struct-type-property?]{
+@defthing[gen:dict any/c]{
 
-A @tech{structure type property} (see @secref["structprops"]) that
-supplies dictionary-operation implementations for a structure
-type. The property value must be a vector of ten procedures (some
-optional) that are applied only to instances of the structure type
-that has the property:
-     
+A @tech{generic interface} (see @secref["struct-generics"]) that
+supplies dictionary method implementations for a structure type.
+To supply method implementations, the @racket[#:methods] form should be used.
+The provided implementations are applied only to instances of the structure
+type. The following methods can be implemented:
+
 @itemize[
 
- @item{@racket[_ref] : a procedure like @racket[dict-ref] that accepts
-       either two or three arguments}
+ @item{@racket[dict-ref] : accepts either two or three arguments}
 
- @item{@racket[_set!] : a procedure like @racket[dict-set!] that accepts
-       three arguments, or @racket[#f] if mutation is not supported}
+ @item{@racket[dict-set!] : accepts three arguments, left unimplemented if
+       mutation is not supported}
 
- @item{@racket[_set] : a procedure like @racket[dict-set] that accepts
-       three arguments and returns an updated dictionary, or
-       @racket[#f] if functional update is not supported}
+ @item{@racket[dict-set] : accepts three arguments and returns an updated
+       dictionary, left unimplemented if functional update is not supported}
 
- @item{@racket[_remove!] : a procedure like @racket[dict-remove!] that
-       accepts two arguments, or @racket[#f] if mutation is not
-       supported or if key removal is not supported}
+ @item{@racket[dict-remove!] : accepts two arguments, left unimplemented if
+       mutation is not supported or if key removal is not supported}
 
- @item{@racket[_remove] : a procedure like @racket[dict-remove] that
-       accepts two arguments and returns an updated dictionary, or
-       @racket[#f] if functional update or key removal is not
-       supported}
+ @item{@racket[dict-remove] : accepts two arguments and returns an updated
+       dictionary, left unimplemented if functional update or key removal is
+       not supported}
 
- @item{@racket[_count] : a procedure like @racket[dict-count] that accepts
-       one argument}
+ @item{@racket[dict-count] : accepts one argument}
 
- @item{@racket[_iterate-first] : a procedure like
-       @racket[dict-iterate-first] that accepts one argument}
+ @item{@racket[dict-iterate-first] : accepts one argument}
 
- @item{@racket[_iterate-next] : a procedure like
-       @racket[dict-iterate-next] that accepts two arguments; the
+ @item{@racket[dict-iterate-next] : accepts two arguments; the
        procedure is responsible for checking that the second argument
        is a valid position for the first argument}
 
- @item{@racket[_iterate-key] : a procedure like
-       @racket[dict-iterate-key] that accepts two arguments; the
+ @item{@racket[dict-iterate-key] : accepts two arguments; the
        procedure is responsible for checking that the second argument
        is a valid position for the first argument}
 
- @item{@racket[_iterate-value] : a procedure like
-       @racket[dict-iterate-value] that accepts two arguments; the
+ @item{@racket[dict-iterate-value] : accepts two arguments; the
        procedure is responsible for checking that the second argument
        is a valid position for the first argument}
+]
 
-]}
+@examples[#:eval dict-eval
+(struct alist (v)
+  #:methods gen:dict
+  [(define (dict-ref dict key
+                     [default (lambda () (error "key not found" key))])
+     (cond [(assoc key (alist-v dict)) => cdr]
+           [else (if (procedure? default) (default) default)]))
+   (define (dict-set dict key val)
+     (alist (cons (cons key val) (alist-v dict))))
+   (define (dict-remove dict key)
+     (define al (alist-v dict))
+     (remove* (assoc key al) al))
+   (define (dict-count dict #:default [x #f])
+     (or x
+         (length (remove-duplicates (alist-v dict) #:key car))))
+   (code:comment "etc. other methods")])
+
+  (define d1 '((1 . a) (2 . b)))
+  (dict? d1)
+  (dict-ref d1 1)
+]
+
+}
+
+@defthing[prop:dict struct-type-property?]{
+  A deprecated structure type property used to define custom extensions
+  to the dictionary API. Use @racket[gen:dict] instead. Accepts a vector
+  of 10 procedures with the same arguments as the methods of
+  @racket[gen:dict].
+}
 
 @defthing[prop:dict/contract struct-type-property?]{
 
@@ -595,12 +616,13 @@ be a list of two immutable vectors:
               _instance-iter-contract))
 ]
 
-The first vector must be suitable as a value for @racket[prop:dict]
-(in addition, it must be an immutable vector). The second vector must
-contain six elements; each of the first three is a contract for the
-dictionary type's keys, values, and positions, respectively. Each of
-the second three is either @racket[#f] or a procedure used to extract
-the contract from a dictionary instance.
+The first vector must be a vector of 10 procedures which match the
+@racket[gen:dict] @tech{generic interface} (in addition, it must be an
+immutable vector). The second vector must contain six elements; each
+of the first three is a contract for the dictionary type's keys,
+values, and positions, respectively. Each of the second three is
+either @racket[#f] or a procedure used to extract the contract from
+a dictionary instance.
 }
 
 @deftogether[[
@@ -633,7 +655,7 @@ iterators, respectively, if @racket[d] implements the
 Creates a dictionary that is implemented in terms of a hash table
 where keys are compared with @racket[eql?] and hashed with
 @racket[hash-proc] and @racket[hash2-proc]. See
-@racket[prop:equal+hash] for information on suitable equality and
+@racket[gen:equal+hash] for information on suitable equality and
 hashing functions.
 
 The @racket[make-custom-hash] and @racket[make-weak-custom-hash]

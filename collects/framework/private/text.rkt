@@ -7,6 +7,7 @@
          "sig.rkt"
          "../gui-utils.rkt"
          "../preferences.rkt"
+         "autocomplete.rkt"
          mred/mred-sig
          mrlib/interactive-value-port
          racket/list)
@@ -54,10 +55,6 @@
            (weak-box-value a-weak-box)])))
     
     (values register-port-name! lookup-port-name)))
-
-
-;; wx: `default-wrapping?', add as the initial value for auto-wrap bitmap,
-;; unless matthew makes it primitive
 
 (define basic<%>
   (interface (editor:basic<%> (class->interface text%))
@@ -544,6 +541,23 @@
 
 (define (hash-cons! h k v) (hash-set! h k (cons v (hash-ref h k '()))))
 
+(define line-spacing<%> (interface ()))
+
+(define line-spacing-mixin
+  (mixin (basic<%>) (line-spacing<%>)
+    (super-new)
+    (inherit set-line-spacing)
+    ;; this is a field so that the weakly
+    ;; held callback works out properly
+    (define (pref-cb-func sym val)
+      (set-line-spacing (if val 1 0)))
+    (preferences:add-callback 'framework:line-spacing-add-gap?
+                              pref-cb-func
+                              #t)
+    (set-line-spacing (if (preferences:get 'framework:line-spacing-add-gap?)
+                          1
+                          0))))
+
 (define first-line<%>
   (interface ()
     highlight-first-line
@@ -557,7 +571,7 @@
 (define first-line-mixin
   (mixin ((class->interface text%)) (first-line<%>)
     (inherit get-text paragraph-end-position get-admin invalidate-bitmap-cache position-location
-             scroll-to local-to-global get-dc)
+             scroll-to local-to-global get-dc get-padding)
     (define bx (box 0))
     (define by (box 0))
     (define bw (box 0))
@@ -645,80 +659,87 @@
              [else         
               (super on-event event)]))]))
     
-    
     (define/override (on-paint before? dc left top right bottom dx dy draw-caret)
       (unless before?
         (when (show-first-line?) 
-          (let ([admin (get-admin)])
-            (when admin
-              (send admin get-view bx by bw #f #f)
-              (unless (= (unbox by) 0)
-                (let ([first-line (get-text 0 (paragraph-end-position 0))]
-                      [old-pen (send dc get-pen)]
-                      [old-brush (send dc get-brush)]
-                      [old-smoothing (send dc get-smoothing)]
-                      [old-α (send dc get-alpha)]
-                      [old-font (send dc get-font)]
-                      [old-text-foreground (send dc get-text-foreground)]
-                      [w-o-b? (preferences:get 'framework:white-on-black?)])
-                  (send dc set-font (get-font))
-                  (send dc set-smoothing 'aligned)
-                  (let-values ([(tw th _1 _2) (send dc get-text-extent first-line)])
-                    (let ([line-height (+ (unbox by) dy th 1)]
-                          [line-left (+ (unbox bx) dx)]
-                          [line-right (+ (unbox bx) dx (unbox bw))])
-                      
-                      (if w-o-b?
-                          (send dc set-pen "white" 1 'solid)
-                          (send dc set-pen "black" 1 'solid))
-                      (send dc draw-line line-left line-height line-right line-height)
-                      
-                      (when (eq? (send dc get-smoothing) 'aligned)
-                        (let ([start (if w-o-b? 6/10 3/10)]
-                              [end 0]
-                              [steps 10])
-                        (send dc set-pen 
-                              (if w-o-b? dark-wob-first-line-color dark-first-line-color) 
-                              1
-                              'solid)
-                        (let loop ([i steps])
-                          (unless (zero? i)
-                            (let ([alpha-value (+ start (* (- end start) (/ i steps)))])
-                              (send dc set-alpha alpha-value)
-                              (send dc draw-line 
-                                    line-left
-                                    (+ line-height i)
-                                    line-right
-                                    (+ line-height i))
-                              (loop (- i 1))))))))
-                    
-                    (send dc set-alpha 1)
-                    (send dc set-pen "gray" 1 'transparent)
-                    (send dc set-brush (if w-o-b? "black" "white") 'solid)
-                    (send dc draw-rectangle 
-                          (+ (unbox bx) dx)
-                          (+ (unbox by) dy)
-                          (unbox bw)
-                          th)
-                    (send dc set-text-foreground
-                          (send the-color-database find-color
-                                (if w-o-b? "white" "black")))
-                    (send dc draw-text first-line (+ (unbox bx) dx) (+ (unbox by) dy)))
-                  
-                  (send dc set-text-foreground old-text-foreground)
-                  (send dc set-font old-font)
-                  (send dc set-pen old-pen)
-                  (send dc set-brush old-brush)
-                  (send dc set-alpha old-α)
-                  (send dc set-smoothing old-smoothing)))))))
+          (define admin (get-admin))
+          (when admin
+            (send admin get-view bx by bw #f #f)
+            (unless (= (unbox by) 0)
+              (define draw-first-line-number?
+                (and (is-a? this line-numbers<%>)
+                     (send this showing-line-numbers?)))
+              (define first-line (get-text 0 (paragraph-end-position 0)))
+              (define old-pen (send dc get-pen))
+              (define old-brush (send dc get-brush))
+              (define old-smoothing (send dc get-smoothing))
+              (define old-α (send dc get-alpha))
+              (define old-font (send dc get-font))
+              (define old-text-foreground (send dc get-text-foreground))
+              (define w-o-b? (preferences:get 'framework:white-on-black?))
+              (send dc set-font (get-font))
+              (send dc set-smoothing 'aligned)
+              (define-values (tw th _1 _2) (send dc get-text-extent first-line))
+              (define line-height (+ (unbox by) dy th 1))
+              (define line-left (+ (unbox bx) dx))
+              (define line-right (+ (unbox bx) dx (unbox bw)))
+              
+              (if w-o-b?
+                  (send dc set-pen "white" 1 'solid)
+                  (send dc set-pen "black" 1 'solid))
+              (send dc draw-line line-left line-height line-right line-height)
+              
+              (when (eq? (send dc get-smoothing) 'aligned)
+                (define start (if w-o-b? 6/10 3/10))
+                (define end 0)
+                (define steps 10)
+                (send dc set-pen 
+                      (if w-o-b? dark-wob-first-line-color dark-first-line-color) 
+                      1
+                      'solid)
+                (let loop ([i steps])
+                  (unless (zero? i)
+                    (define alpha-value (+ start (* (- end start) (/ i steps))))
+                    (send dc set-alpha alpha-value)
+                    (send dc draw-line 
+                          line-left
+                          (+ line-height i)
+                          line-right
+                          (+ line-height i))
+                    (loop (- i 1)))))
+              
+              (send dc set-alpha 1)
+              (send dc set-pen "gray" 1 'transparent)
+              (send dc set-brush (if w-o-b? "black" "white") 'solid)
+              (send dc draw-rectangle (+ (unbox bx) dx) (+ (unbox by) dy) (unbox bw) th)
+              (send dc set-text-foreground
+                    (send the-color-database find-color
+                          (if w-o-b? "white" "black")))
+              (define x-start
+                (cond
+                  [draw-first-line-number?
+                   (send this do-draw-single-line dc dx dy 0 (unbox by) #f)
+                   (send dc set-pen (if w-o-b? "white" "black") 1 'solid)
+                   (send this draw-separator dc (unbox by) (+ (unbox by) line-height) dx dy)
+                   (define-values (padding-left padding-top padding-right padding-bottom) (get-padding))
+                   padding-left]
+                  [else 0]))
+              (send dc draw-text first-line (+ x-start (+ (unbox bx) dx)) (+ (unbox by) dy))
+              
+              (send dc set-text-foreground old-text-foreground)
+              (send dc set-font old-font)
+              (send dc set-pen old-pen)
+              (send dc set-brush old-brush)
+              (send dc set-alpha old-α)
+              (send dc set-smoothing old-smoothing)))))
       (super on-paint before? dc left top right bottom dx dy draw-caret))
     
     (inherit get-style-list)
     (define/private (get-font)
-      (let* ([style-list (get-style-list)]
-             [std (or (send style-list find-named-style "Standard")
-                      (send style-list basic-style))])
-        (send std get-font)))
+      (define style-list (get-style-list))
+      (define std (or (send style-list find-named-style "Standard")
+                      (send style-list basic-style)))
+      (send std get-font))
     
     (super-new)))
 
@@ -860,6 +881,8 @@
 
 (define searching<%> 
   (interface (editor:keymap<%> basic<%>)
+    set-replace-start
+    get-replace-search-hit
     set-searching-state
     set-search-anchor
     get-search-bubbles
@@ -3374,17 +3397,6 @@ designates the character that triggers autocompletion
     
     (super-new)))
 
-;; ============================================================
-;; autocompletion-cursor<%> implementations
-
-(define autocompletion-cursor<%>
-  (interface ()
-    get-completions  ;      -> (listof string) 
-    get-length       ;      -> int
-    empty?           ;      -> boolean
-    narrow           ; char -> autocompletion-cursor<%>
-    widen))          ;      -> autocompletion-cursor<%> | #f
-
 (define scrolling-cursor<%>
   (interface (autocompletion-cursor<%>)
     items-are-hidden?
@@ -3392,73 +3404,6 @@ designates the character that triggers autocompletion
     get-visible-length
     scroll-down
     scroll-up))
-
-(define autocompletion-cursor%
-  (class* object% (autocompletion-cursor<%>)
-    
-    (init-field word all-words)
-    
-    ;; string -> (values (string -> real) natural)
-    ;; produce a ranking function and a max normal score
-    ;; the ranking function is as follows:
-    ;; w |-> +inf.0 if `prefix' is a prefix of w
-    ;; w |-> 1000 if `prefix' appears in w
-    ;; w |-> n if n parts of `prefix' appear in w
-    ;; the max normal score is the largest n that the last clause can produce
-    (define/private (rank prefix)      
-      (define parts (regexp-split "[-/:_!]" prefix))
-      (define re (regexp (string-append "^" (regexp-quote prefix))))
-      (values (λ (w) (cond [(regexp-match re w) +inf.0]
-                           [(regexp-match (regexp-quote prefix) w) 1000]
-                           [else
-                            (for/fold ([c 0]) 
-                              ([r parts]
-                               #:when (regexp-match (regexp-quote r) w))
-                              (add1 c))]))
-              (length parts)))
-    
-    ;; all the possible completions for `word', in ranked order
-    (define all-completions 
-      (let ()
-        (define-values (rnk max-count) (rank word))
-        ;; this determines the fuzziness
-        ;; if we set mx to +inf.0, we get just the prefix matches
-        ;; if we set mx to 1000, we get just the matches somewhere in the word
-        ;; this definition is fuzzier the more parts there are in the word
-        (define mx (cond
-                     [(<= max-count 2) max-count]
-                     [(<= max-count 4) (- max-count 1)]
-                     [else (- max-count 2)]))
-        (map car (sort
-                  ;; we don't use `rnk' as the key to avoid
-                  ;; constructing a huge list
-                  (for*/list ([w (in-list all-words)]
-                              [r (in-value (rnk w))]
-                              #:when (>= r mx))
-                    (list w r))
-                  >
-                  #:key cadr))))
-    (define all-completions-length (length all-completions))
-    
-    (define/public (narrow c)
-      (new autocompletion-cursor%
-           [word (string-append word (list->string (list c)))]
-           [all-words all-words]))
-    
-    (define/public (widen)
-      (let ([strlen (string-length word)])
-        (cond
-          [(< strlen 2) #f]
-          [else 
-           (new autocompletion-cursor%
-                [word (substring word 0 (- (string-length word) 1))]
-                [all-words all-words])])))
-    
-    (define/public (get-completions) all-completions)
-    (define/public (get-length) all-completions-length)
-    (define/public (empty?) (eq? (get-length) 0))
-    
-    (super-new)))
 
 (define scroll-manager% 
   (class* object% ()
@@ -3903,6 +3848,8 @@ designates the character that triggers autocompletion
              showing-line-numbers?
              set-line-numbers-color))
 
+(define-local-member-name do-draw-single-line draw-separator)
+
 ;; draws line numbers on the left hand side of a text% object
 (define line-numbers-mixin
   (mixin ((class->interface text%) editor:standard-style-list<%>) (line-numbers<%>)
@@ -4088,37 +4035,36 @@ designates the character that triggers autocompletion
       (setup-padding))
 
     (define/private (draw-numbers dc top bottom dx dy start-line end-line)
-      (define (draw-text . args)
-        (send/apply dc draw-text args))
-
-      (define right-space (text-width dc (number-space)))
-      (define single-space (text-width dc "0"))
-
       (define last-paragraph #f)
       (for ([line (in-range start-line end-line)])
         (define y (line-location line))
         (define yb (line-location line #f))
-
         (when (and (y . <= . bottom) (yb . >= . top))
-          (define view (number->string (add1 (line-paragraph line))))
-          (define final-x
-            (+ (left-space dc dx)
-               (case alignment
-                 [(left) 0]
-                 [(right) (- right-space (text-width dc view) single-space)]
-                 [else 0])))
-          (define final-y (+ dy y))
-          (if (and last-paragraph (= last-paragraph (line-paragraph line)))
-            (begin
-              (send dc set-text-foreground (lighter-color (send dc get-text-foreground)))
-              (draw-text view final-x final-y)
-              (send dc set-text-foreground (get-foreground)))
-            (draw-text view final-x final-y)))
-
+          (do-draw-single-line dc dx dy line y last-paragraph))
         (set! last-paragraph (line-paragraph line))))
+    
+    (define/public (do-draw-single-line dc dx dy line y last-paragraph)
+      (define single-space (text-width dc "0"))
+      (define right-space (text-width dc (number-space)))
+      (define view (number->string (add1 (line-paragraph line))))
+      (define final-x
+        (+ (left-space dc dx)
+           (case alignment
+             [(left) 0]
+             [(right) (- right-space (text-width dc view) single-space)]
+             [else 0])))
+      (define final-y (+ dy y))
+      (cond
+        [(and last-paragraph (= last-paragraph (line-paragraph line)))
+         (send dc set-text-foreground (lighter-color (send dc get-text-foreground)))
+         (send dc draw-text view final-x final-y)
+         (send dc set-text-foreground (get-foreground))]
+        [else
+         (send dc draw-text view final-x final-y)]))
 
     ;; draw the line between the line numbers and the actual text
-    (define/private (draw-separator dc top bottom dx dy x)
+    (define/public (draw-separator dc top bottom dx dy)
+      (define x (text-width dc (number-space)))
       (define line-x (+ (left-space dc dx) x))
       (define line-y1 (+ dy top))
       (define line-y2 (+ dy bottom))
@@ -4144,7 +4090,7 @@ designates the character that triggers autocompletion
       ; (printf "dx ~a\n" dx)
       ;; draw it!
       (draw-numbers dc top bottom dx dy (unbox start-line) (add1 (unbox end-line)))
-      (draw-separator dc top bottom dx dy (text-width dc (number-space)))
+      (draw-separator dc top bottom dx dy)
       (restore-dc-state dc saved-dc))
 
     (define/private (text-width dc stuff)
@@ -4159,46 +4105,44 @@ designates the character that triggers autocompletion
 
     (define old-clipping #f)
     (define/override (on-paint before? dc left top right bottom dx dy draw-caret)
-      (if show-line-numbers?
-        (begin
-          (if before?
-            (let ()
-              (define left-most (left-space dc dx))
-              (set! old-clipping (send dc get-clipping-region))
-              (define saved-dc (save-dc-state dc))
-              (setup-dc dc)
-              (define clipped (make-object region% dc))
-              (define all (make-object region% dc))
-              (define copy (make-object region% dc))
-              (send all set-rectangle
-                    (+ dx left) (+ dy top)
-                    (- right left) (- bottom top))
-              (if old-clipping
-                (send copy union old-clipping)
-                (send copy union all))
-              (send clipped set-rectangle
-                    0 (+ dy top)
-                    (text-width dc (number-space+1))
-                    (- bottom top))
-              (restore-dc-state dc saved-dc)
-              (send copy subtract clipped)
-              (send dc set-clipping-region copy))
-            (begin
-              (send dc set-clipping-region old-clipping)
-              (draw-line-numbers dc left top right bottom dx dy))))
-          (void))
-      (void)
+      (when show-line-numbers?
+        (cond
+          [before?
+           (define left-most (left-space dc dx))
+           (set! old-clipping (send dc get-clipping-region))
+           (define saved-dc (save-dc-state dc))
+           (setup-dc dc)
+           (define clipped (make-object region% dc))
+           (define copy (make-object region% dc))
+           (if old-clipping
+               (send copy union old-clipping)
+               (let ([all (make-object region% dc)])
+                 (send all set-rectangle
+                       (+ dx left) (+ dy top)
+                       (- right left) (- bottom top))
+                 (send copy union all)))
+           (send clipped set-rectangle
+                 0 (+ dy top)
+                 (text-width dc (number-space+1))
+                 (- bottom top))
+           (restore-dc-state dc saved-dc)
+           (send copy subtract clipped)
+           (send dc set-clipping-region copy)]
+          [else
+           (send dc set-clipping-region old-clipping)
+           (draw-line-numbers dc left top right bottom dx dy)]))
       (super on-paint before? dc left top right bottom dx dy draw-caret))
 
     (super-new)
     (setup-padding)))
 
 (define basic% (basic-mixin (editor:basic-mixin text%)))
-(define hide-caret/selection% (hide-caret/selection-mixin basic%))
-(define nbsp->space% (nbsp->space-mixin basic%))
-(define normalize-paste% (normalize-paste-mixin basic%))
-(define delegate% (delegate-mixin basic%))
-(define wide-snip% (wide-snip-mixin basic%))
+(define line-spacing% (line-spacing-mixin basic%))
+(define hide-caret/selection% (hide-caret/selection-mixin line-spacing%))
+(define nbsp->space% (nbsp->space-mixin line-spacing%))
+(define normalize-paste% (normalize-paste-mixin line-spacing%))
+(define delegate% (delegate-mixin line-spacing%))
+(define wide-snip% (wide-snip-mixin line-spacing%))
 (define standard-style-list% (editor:standard-style-list-mixin wide-snip%))
 (define input-box% (input-box-mixin standard-style-list%))
 (define -keymap% (editor:keymap-mixin standard-style-list%))

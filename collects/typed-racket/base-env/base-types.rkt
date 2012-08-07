@@ -1,5 +1,14 @@
 #lang s-exp "type-env-lang.rkt"
 
+;; This require is necessary, otherwise a somewhat random
+;; selection of unit tests fail.
+;; 
+;; I don't understand this at all. :(
+;; -- STH, 6/26/12
+(require (for-syntax "../env/global-env.rkt"))
+(require "../types/abbrev.rkt" "../types/convenience.rkt" "../types/numeric-tower.rkt"
+         "../rep/type-rep.rkt")
+
 [Complex -Number]
 [Number -Number]
 [Inexact-Complex -InexactComplex]
@@ -22,9 +31,11 @@
 [Nonnegative-Single-Flonum -NonNegSingleFlonum]
 [Positive-Inexact-Real -PosInexactReal]
 [Positive-Single-Flonum -PosSingleFlonum]
+[Inexact-Real-Nan -InexactRealNan]
 [Inexact-Real-Zero -InexactRealZero]
 [Inexact-Real-Negative-Zero -InexactRealNegZero]
 [Inexact-Real-Positive-Zero -InexactRealPosZero]
+[Single-Flonum-Nan -SingleFlonumNan]
 [Single-Flonum-Zero -SingleFlonumZero]
 [Single-Flonum-Negative-Zero -SingleFlonumNegZero]
 [Single-Flonum-Positive-Zero -SingleFlonumPosZero]
@@ -39,6 +50,8 @@
 [Nonnegative-Flonum -NonNegFlonum]
 [Positive-Float -PosFlonum] ; both of these are valid
 [Positive-Flonum -PosFlonum]
+[Float-Nan -FlonumNan]
+[Flonum-Nan -FlonumNan]
 [Float-Zero -FlonumZero] ; both of these are valid
 [Flonum-Zero -FlonumZero]
 [Float-Negative-Zero -FlonumNegZero] ; both of these are valid
@@ -149,7 +162,7 @@
 [False (-val #f)]
 [True (-val #t)]
 [Null (-val null)]
-[Nothing (Un)]
+[Nothing (*Un)]
 [Futureof (-poly (a) (-future a))]
 [Pairof (-poly (a b) (-pair a b))]
 [MPairof (-poly (a b) (-mpair a b))]

@@ -6,7 +6,7 @@
          net/url
          web-server/private/util)
 
-(define-serializable-struct header (field value))
+(define-serializable-struct header (field value) #:transparent)
 (define (headers-assq* f hs)
   (match hs
     [(list)
@@ -22,16 +22,19 @@
     [(list-rest (and h (struct header (af av))) hs)
      (if (bytes=? af f)
          h
-         (headers-assq f hs))]))       
+         (headers-assq f hs))]))
 (provide/contract
  [headers-assq (bytes? (listof header?) . -> . (or/c false/c header?))]
  [headers-assq* (bytes? (listof header?) . -> . (or/c false/c header?))]
  [struct header ([field bytes?]
                  [value bytes?])])
 
-(define-serializable-struct binding (id))
-(define-serializable-struct (binding:form binding) (value))
-(define-serializable-struct (binding:file binding) (filename headers content))
+(define-serializable-struct binding
+  (id) #:transparent)
+(define-serializable-struct (binding:form binding)
+  (value) #:transparent)
+(define-serializable-struct (binding:file binding)
+  (filename headers content) #:transparent)
 (define (bindings-assq ti bs)
   (match bs
     [(list)
@@ -40,8 +43,15 @@
      (if (equal? ti i)
          b
          (bindings-assq ti bs))]))
+
+(define (bindings-assq-all ti bs)
+  (for/list ([b (in-list bs)]
+             #:when (and (binding? b) (equal? ti (binding-id b))))
+    b))
+
 (provide/contract
  [bindings-assq (bytes? (listof binding?) . -> . (or/c false/c binding?))]
+ [bindings-assq-all (bytes? (listof binding?) . -> . (listof binding?))]
  [struct binding ([id bytes?])]
  [struct (binding:form binding) ([id bytes?]
                                  [value bytes?])]
@@ -50,14 +60,18 @@
                                  [headers (listof header?)]
                                  [content bytes?])])
 
-(define-serializable-struct request (method uri headers/raw bindings/raw-promise post-data/raw host-ip host-port client-ip))
+(define-serializable-struct
+  request
+  (method uri headers/raw bindings/raw-promise post-data/raw 
+          host-ip host-port client-ip)
+  #:transparent)
 (define (request-bindings/raw r)
   (force (request-bindings/raw-promise r)))
 
 (provide/contract
  [request-bindings/raw (request? . -> . (listof binding?))]
  [struct request ([method bytes?]
-                  [uri url?] 
+                  [uri url?]
                   [headers/raw (listof header?)]
                   [bindings/raw-promise (promise/c (listof binding?))]
                   [post-data/raw (or/c false/c bytes?)]

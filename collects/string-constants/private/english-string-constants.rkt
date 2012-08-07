@@ -212,6 +212,11 @@ please adhere to these guidelines:
  (cs-unused-require "unused require")
  (cs-free-variable "free variable")
 
+  (cs-contract-my-obligation "Contract: this module's obligation")
+  (cs-contract-their-obligation "Contract: clients modules' obligation")
+  (cs-contract-both-obligation "Contract: both this module and client modules' obligation")
+  (cs-contract-unk-obligation "Contract: unknown obligation")
+  
   ;; mode sub-menu in the "view" menu
   (cs-check-syntax-mode "Check Syntax Mode")
   (cs-mode-menu-show-my-obligations "My Contract Obligations")
@@ -509,6 +514,8 @@ please adhere to these guidelines:
   (black-on-white-color-scheme "Black on White") ;; these two appear in the color preferences dialog on butttons
   (white-on-black-color-scheme "White on Black") ;; clicking the buttons changes the color schemes to some defaults that've been set up.
   
+  (add-spacing-between-lines "Add one pixel of extra space between lines")
+  
  ; title of the color choosing dialog
 
  ; should have entire alphabet
@@ -587,7 +594,7 @@ please adhere to these guidelines:
   (undock "Undock")
   
  ;;; multi-file-search
- (mfs-multi-file-search-menu-item "Search in Files...")
+ (mfs-multi-file-search-menu-item "Search in &Files...")
  (mfs-string-match/graphics "String match (handles files with graphics)")
  (mfs-regexp-match/no-graphics "Regular Expression (only raw text files)")
  (mfs-searching... "Searching...")
@@ -1055,7 +1062,7 @@ please adhere to these guidelines:
   (add-teachpack-to-list... "Add Teachpack to List...")
   (teachpack-already-installed "A teachpack with the name '~a' has already been installed. Overwrite it?")
   ; ~a is filled with a list of language names. Each name is separated by a newline and is indented two spaces (no commas, no 'and')
-  (teachpacks-only-in-languages "Teachpacks are only available in these languages: ~a")
+  (teachpacks-only-in-languages "The Teachpack menu is only available in these languages: ~a\n\nIn other languages, use 'require' instead.")
   
   
  ;;; Language dialog
@@ -1093,6 +1100,9 @@ please adhere to these guidelines:
  (preserve-stacktrace-information "Preserve stacktrace (disable some optimizations)")
  (expression-level-stacktrace "Expression-level stacktrace")
  (function-level-stacktrace "Function-level stacktrace")
+ (submodules-to-run "Submodules to Run")
+ (add-submodule "Add Submodule Option ...") ;; menu item
+ (add-submodule-title "Add Submodule") ;; title of dialog opened by above menu item
   
   
   ; used in the bottom left of the drscheme frame 
@@ -1647,5 +1657,9 @@ please adhere to these guidelines:
   (ask-about-normalizing-strings "Ask about normalizing strings")
   
   (always-use-platform-specific-linefeed-convention "Always use the platform-specific linefeed convention")
+
+  ;; optimization coach
+  (hide-optimization-coach "Hide Optimization Coach")
+  (show-optimization-coach "Show Optimization Coach")
   
   )

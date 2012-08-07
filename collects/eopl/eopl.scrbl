@@ -6,11 +6,11 @@
                      scheme/contract
                      (only-in scheme printf pretty-print delay force)))
 
-@(define-syntax-rule (def-mz id)
+@(define-syntax-rule (def-rkt id)
    (begin
-     (require (for-label mzscheme))
+     (require (for-label racket))
      (define id (racket provide))))
-@(def-mz mzscheme-provide)
+@(def-rkt racket-provide)
 
 @(define-syntax-rule (reprovide id ...)
    (*threecolumns (list (racket id) ... 'nbsp 'nbsp)))
@@ -37,14 +37,14 @@
 
 The @italic{Essentials of Programming Languages} language in DrRacket
 provides a subset of functions and syntactic forms of
-@racketmodname[mzscheme]---mostly the ones that correspond to
+@racketmodname[racket]---mostly the ones that correspond to
 @racket[r5rs] forms. See below for a complete list. The
 language is intended for use with the textbook @cite["EoPL"].
 
 @defmodulelang[eopl #:use-sources (eopl/eopl)]
 
 The following bindings are re-@racket[provide]d from
-@racketmodname[mzscheme]:
+@racketmodname[racket]:
 
 @reprovide[
            make-parameter
@@ -204,8 +204,8 @@ The following bindings are re-@racket[provide]d from
 @defform[(provide provide-spec ...)]{
 
   Useful only with a module that uses @racketmodname[eopl] as a
-  language: exports identifiers from the module. See @mzscheme-provide
-  from @racketmodname[mzscheme] for more information.}
+  language: exports identifiers from the module. See @racket-provide
+  from @racketmodname[racket] for more information.}
 
 @defthing[eopl:error-stop (-> any/c)]{
 

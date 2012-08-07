@@ -405,6 +405,35 @@
         (::= () (number ::=)))
       (test (and (redex-match L ::= '(1 ())) #t) #t)))
   
+  (let ()
+    (define-language L1
+      ((q x) 1 2 3)
+      ((y w) 4 5 6 x)
+      (z 7 8 9))
+    
+    (define-language L2
+      ((x y) 100 101 102)
+      (b 103 x))
+    
+    (define-union-language L L1 (- L2))
+    
+    (test (and (redex-match L x 3) #t) #t)
+    (test (and (redex-match L y 2) #t) #t)
+    (test (redex-match L x 100) #f)
+    (test (and (redex-match L -x 100) #t) #t)
+    (test (and (redex-match L -b 100) #t) #t)
+    (test (redex-match L -b 3) #f))
+
+  (let ()
+    (test (redex-match empty-language number 'a) #f)
+    (test (redex-match empty-language (in-hole hole number) 'a) #f))
+
+  (parameterize ([current-namespace (make-base-namespace)])
+    (eval '(require redex/reduction-semantics redex/pict))
+    (eval '(define-language L
+             (s a b c)))
+    (exec-runtime-error-tests "run-err-tests/define-union-language.rktd"))
+  
   (exec-syntax-error-tests "syn-err-tests/language-definition.rktd")
 ;                                                                                             
 ;                                                                                             
@@ -1006,7 +1035,7 @@
     (test (with-handlers ([exn:fail:redex? exn-message])
             (term (f (s (s z))))
             "")
-          #rx"different ways and returned different results"))
+          #rx"returned different results"))
   
   (parameterize ([current-namespace (make-base-namespace)])
     (eval '(require redex/reduction-semantics))
@@ -2215,6 +2244,67 @@
                                   
                                   })))
     
+    
+    
+    (let ()
+      (define-judgment-form empty-language
+        #:mode (R I I)
+        [(side-condition (different any_a any_b))
+         -----
+         (R any_a any_b)])
+      (define-metafunction empty-language
+        [(different any_a any_a) #f]
+        [(different any_a any_b) #t])
+      (test (judgment-holds (R 1 2)) #t)
+      (test (judgment-holds (R 1 1)) #f))
+    
+    (let ()
+      (define-judgment-form empty-language
+        #:mode (J I O)
+        [(J any_2 any_3)
+         -----------------
+         (J (any_2) any_3)]
+        [---------------------
+         (J variable variable)])
+      
+      
+      (define-extended-judgment-form empty-language J 
+        #:mode (J2 I O)
+        
+        [------------------
+         (J2 number number)]
+        
+        [(J2 any_1 any_3)
+         ------------------------
+         (J2 (any_1 any_2) any_3)])
+      
+      (test (judgment-holds (J (x) any) any) '(x))
+      (test (judgment-holds (J2 (1 y) any) any) '(1))
+      (test (judgment-holds (J2 (x y) any) any) '(x))
+      (test (judgment-holds (J2 ((((x) z) y)) any) any) '(x))
+      (test (judgment-holds (J2 ((((11) z) y)) any) any) '(11)))
+    
+    (let ()
+      
+      (define-language L1
+        (n 1 2 3))
+      
+      (define-extended-language L2 L1
+        (n .... 4 5 6))
+      
+      (define-judgment-form L1
+        #:mode (J1 I O)
+        [-----------
+         (J1 n_1 n_1)])
+      
+      (define-extended-judgment-form L2 J1 
+        #:mode (J2 I O))
+      
+      (test (judgment-holds (J1 1 any) any) '(1))
+      (test (judgment-holds (J2 1 any) any) '(1))
+      (test (judgment-holds (J2 4 any) any) '(4)))
+
+    
     (parameterize ([current-namespace (make-base-namespace)])
       (eval '(require errortrace))
       (eval '(require redex/reduction-semantics))
@@ -2739,7 +2829,7 @@
     (test (capture-output (test-->> red 1 2) (test-results))
           "One test passed.\n")
     (test (capture-output (test-->> red 2 3) (test-results))
-          #rx"FAILED tl-test.(?:.+):[0-9.]+\nexpected: 3\n  actual: 2\n1 test failed \\(out of 1 total\\).\n"))
+          #rx"FAILED .*tl-test.(?:.+):[0-9.]+\nexpected: 3\n  actual: 2\n1 test failed \\(out of 1 total\\).\n"))
     
   (let ()
     (define red-share (reduction-relation 
@@ -2758,7 +2848,7 @@
     (test (capture-output (test-->> red-cycle #:cycles-ok (term a)) (test-results))
           "One test passed.\n")
     (test (capture-output (test-->> red-cycle (term a)) (test-results))
-          #rx"FAILED tl-test.(?:.+):[0-9.]+\nfound a cycle in the reduction graph\n1 test failed \\(out of 1 total\\).\n"))
+          #rx"FAILED .*tl-test.(?:.+):[0-9.]+\nfound a cycle in the reduction graph\n1 test failed \\(out of 1 total\\).\n"))
   
   (let ()
     (define subred (reduction-relation empty-language (--> natural ,(- (term natural) 1))))
@@ -2767,7 +2857,7 @@
     (test (capture-output (test-->> subred #:pred number? 1 -1) (test-results))
           "One test passed.\n")
     (test (capture-output (test-->> subred #:pred odd? 1 -1) (test-results))
-         #rx"FAILED tl-test.rkt:[0-9.]+\nfound a term that failed #:pred: 0\n1 test failed \\(out of 1 total\\).\n"))
+         #rx"FAILED .*tl-test.rkt:[0-9.]+\nfound a term that failed #:pred: 0\n1 test failed \\(out of 1 total\\).\n"))
   
   (let ()
     (define-metafunction empty-language [(f any) ((any))])
@@ -2810,7 +2900,7 @@
     (test (capture-output (test--> R #:equiv mod2=? 7 1 0) (test-results))
           "One test passed.\n")
     (test (capture-output (test--> R #:equiv mod2=? 7 1) (test-results))
-          #rx"FAILED tl-test\\.(?:.+):[0-9.]+\nexpected: 1\n  actual: 8\n  actual: 7\n1 test failed \\(out of 1 total\\).\n"))
+          #rx"FAILED .*tl-test\\.(?:.+):[0-9.]+\nexpected: 1\n  actual: 8\n  actual: 7\n1 test failed \\(out of 1 total\\).\n"))
   
   (let-syntax ([test-bad-equiv-arg
                 (λ (stx)

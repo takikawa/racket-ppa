@@ -44,7 +44,7 @@ On start-up, the top-level environment contains no bindings---not even
 that start with @racketidfont{#%} are defined, but they are not meant
 for direct use, and the set of such modules can change.  For example,
 the @indexed-racket['#%kernel] module is eventually used to bootstrap
-the implemetation of @racketmodname[racket/base].
+the implementation of @racketmodname[racket/base].
 
 The first action of Racket or GRacket is to initialize
 @racket[current-library-collection-paths] to the result of
@@ -139,22 +139,27 @@ flags:
         evaluated from standard input.}
 
   @item{@FlagFirst{t} @nonterm{file} or @DFlagFirst{require}
-        @nonterm{file} : @racket[require]s @nonterm{file}.}
+        @nonterm{file} : @racket[require]s @nonterm{file}, and then
+        @racket[require]s @racket[(submod (file @#,nontermstr{file})
+        main)] if available.}
 
   @item{@FlagFirst{l} @nonterm{path} or @DFlagFirst{lib}
        @nonterm{path} : @racket[require]s @racket[(lib
-       @#,nontermstr{path})].}
+       @#,nontermstr{path})], and then @racket[require]s
+       @racket[(submod (lib @#,nontermstr{path}) main)] if available.}
 
   @item{@FlagFirst{p} @nonterm{package} :
-       @racket[require]s @racket[(planet @#,nontermstr{package})].
-
-       @margin-note{Despite its name, @DFlag{script} is not usually
-       used for Unix scripts. See @guidesecref["scripts"] for more
-       information on scripts.}}
+       @racket[require]s @racket[(planet @#,nontermstr{package})],
+       and then 
+        @racket[require]s @racket[(submod (planet @#,nontermstr{package})
+        main)] if available.}
 
   @item{@FlagFirst{r} @nonterm{file} or @DFlagFirst{script}
-        @nonterm{file} : @racket[load]s @nonterm{file} as a
-        script. This flag is like @Flag{t} @nonterm{file} plus
+        @nonterm{file} : @racket[load]s @nonterm{file}
+       @margin-note*{Despite its name, @DFlag{script} is not usually
+       used for Unix scripts. See @guidesecref["scripts"] for more
+       information on scripts.}
+        as a script. This flag is like @Flag{t} @nonterm{file} plus
         @Flag{N} @nonterm{file} to set the program name and @Flag{-}
         to cause all further command-line elements to be treated as
         non-flag arguments.}
@@ -168,12 +173,13 @@ flags:
 
   @item{@FlagFirst{k} @nonterm{n} @nonterm{m} @nonterm{p} : Loads code
         embedded in the executable from file position @nonterm{n} to
-        @nonterm{m} and from @nonterm{m} to @nonterm{p}. The first
-        range is loaded in every new @tech{place}, and any modules
-        declared in that range are considered predefined in the sense
-        of @racket[module-predefined?]. This option is normally
-        embedded in a stand-alone binary that also embeds Racket
-        code.}
+        @nonterm{m} and from @nonterm{m} to @nonterm{p}. (On Mac OS X,
+        @nonterm{n}, @nonterm{m}, and @nonterm{p} are relative to a
+        @tt{__PLTSCHEME} segment in the executable.) The first range
+        is loaded in every new @tech{place}, and any modules declared
+        in that range are considered predefined in the sense of
+        @racket[module-predefined?]. This option is normally embedded
+        in a stand-alone binary that also embeds Racket code.}
 
   @item{@FlagFirst{m} or @DFlagFirst{main} : Evaluates a call to
         @racketidfont{main} as bound in the top-level environment. All
@@ -196,7 +202,7 @@ flags:
 
  @itemize[
 
-  @item{@FlagFirst{i} or @DFlagFirst{repl} : Runs interactive read-eval-print
+  @item{@FlagFirst{i} or @DFlagFirst{repl} : Runs an interactive read-eval-print
         loop, using either @racket[read-eval-print-loop] (Racket) or
         @racket[graphical-read-eval-print-loop] (GRacket) after showing
         @racket[(banner)] and loading @racket[(find-system-path
@@ -241,7 +247,9 @@ flags:
 
   @item{@FlagFirst{I} @nonterm{path} : Sets @racket[(lib
         @#,nontermstr{path})] as the path to @racket[require] to initialize
-        the namespace, unless namespace initialization is disabled.}
+        the namespace, unless namespace initialization is disabled. Using
+        this flag can effectively set the language for the read-eval-print
+        loop and other top-level evaluation.}
 
   @item{@FlagFirst{X} @nonterm{dir} or @DFlagFirst{collects}
         @nonterm{dir} : Sets @nonterm{dir} as the path to the main

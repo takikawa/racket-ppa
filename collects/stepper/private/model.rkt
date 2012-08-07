@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 
 ;step collector state machine (not yet implemented):
 ;
@@ -38,13 +38,13 @@
 ;  late-let(x) : ERROR
 
 
-(require scheme/contract
-         scheme/match
-         scheme/class
-         scheme/list
+(require racket/contract
+         racket/match 
+         racket/list 
          (prefix-in a: "annotate.rkt")
          (prefix-in r: "reconstruct.rkt")
          "shared.rkt"
+         "syntax-property.rkt"
          "marks.rkt"
          "model-settings.rkt"
          "macro-unwind.rkt"
@@ -269,13 +269,20 @@
         ;  - lhs = ellipses, rhs = last-rhs-exps
         ; when lhs = ellipses, and highlight-stack != null,
         ; pop step from stack and use lhs
-        (define (send-step lhs-exps lhs-finished-exps 
-                           rhs-exps rhs-finished-exps
-                           step-kind lhs-posn-info rhs-posn-info)
+        (define/contract 
+          (send-step lhs-exps lhs-finished-exps 
+                     rhs-exps rhs-finished-exps
+                     step-kind lhs-posn-info rhs-posn-info)
+          (-> (listof syntax?)
+              (listof syntax?)
+              (listof syntax?)
+              (listof syntax?)
+              any/c any/c any/c 
+              any)
           
           (define (send-it)
             (receive-result
-             (make-before-after-result
+             (before-after-result
               (append lhs-finished-exps lhs-exps)
               (append rhs-finished-exps rhs-exps)
               step-kind
@@ -308,7 +315,8 @@
                [(step=? rhs-exps last-rhs-exps)
                 (when DEBUG 
                   (printf "SKIPPING STEP (LHS = ellipses and RHS = last RHS)\n"))]
-               ; SKIPPING step, lhs = ellipses and highlight-stack = null and last-rhs = null
+               ; SKIPPING step, lhs = ellipses and highlight-stack = null and 
+               ; last-rhs = null
                ; if last-rhs != null, send step (lhs = ...)
                [(null? highlight-stack)
                 (if (not (null? last-rhs-exps))
@@ -384,8 +392,11 @@
                            (λ ()
                              (when DEBUG
                                (printf "\nforcing saved MARKLIST\n")
-                               (for-each (λ (x) (printf "~a\n" (display-mark x))) mark-list)
-                               (printf "saved RETURNED VALUE LIST: ~a\n" returned-value-list))
+                               (for-each (λ (x) 
+                                           (printf "~a\n" (display-mark x)))
+                                         mark-list)
+                               (printf "saved RETURNED VALUE LIST: ~a\n"
+                                       returned-value-list))
                              (map (λ (exp) (unwind exp render-settings)) 
                                   (maybe-lift 
                                    (r:reconstruct-left-side 
@@ -396,29 +407,27 @@
                 
                 ; CASE: result-exp-break or result-value-break ----------------
                 [(result-exp-break result-value-break)
-                 (let ([reconstruct
-                        (lambda ()
-                          (let* ([rhs-reconstructed
-                                  (r:reconstruct-right-side 
-                                   mark-list returned-value-list render-settings)]
-                                 [print-rhs-recon
-                                  (when DEBUG
-                                    (printf "RHS (pre-unwound):\n  ~a\n" 
-                                            (syntax->hilite-datum rhs-reconstructed)))]
-                                 [rhs-unwound
-                                  (map (λ (exp) (unwind exp render-settings))
-                                       (maybe-lift rhs-reconstructed #f))]
-                                 [print-rhs-unwound
-                                  (when DEBUG
-                                    (for-each 
-                                     (λ (x) (printf "RHS (unwound): ~a\n" 
-                                                    (syntax->hilite-datum x)))
-                                     rhs-unwound))])
-                            rhs-unwound))])
+                 (define (reconstruct)
+                   (define rhs-reconstructed
+                     (r:reconstruct-right-side 
+                      mark-list returned-value-list render-settings))
+                   (when DEBUG
+                     (printf "RHS (pre-unwound):\n  ~a\n" 
+                             (syntax->hilite-datum 
+                              rhs-reconstructed)))
+                   (define rhs-unwound
+                     (map (λ (exp) (unwind exp render-settings))
+                          (maybe-lift rhs-reconstructed #f)))
+                   (when DEBUG
+                     (for-each 
+                      (λ (x) (printf "RHS (unwound): ~a\n" 
+                                     (syntax->hilite-datum x)))
+                      rhs-unwound))
+                   rhs-unwound)
                  (match held-exp-list
                    [(struct skipped-step ())
                     (when DEBUG (printf "LHS = skipped, so skipping RHS\n"))
-                     ;; don't render if before step was a skipped-step
+                    ;; don't render if before step was a skipped-step
                     (reset-held-exp-list)]
                    [(struct no-sexp ())
                     (when DEBUG (printf "LHS = none\n"))
@@ -437,7 +446,7 @@
                                (reconstruct) (reconstruct-all-completed)
                                (compute-step-kind held-step-was-app?)
                                held-posn-info (compute-posn-info))
-                    (reset-held-exp-list)]))]
+                    (reset-held-exp-list)])]
                 
                 ; CASE: double-break ------------------------------------------
                 [(double-break)
@@ -447,31 +456,31 @@
                    (error
                     'break-reconstruction
                     "held-exp-list not empty when a double-break occurred"))
-                 (let* ([new-finished-list (reconstruct-all-completed)]
-                        [reconstruct-result
-                         (r:reconstruct-double-break mark-list render-settings)]
-                        [print-recon
-                         (when DEBUG
-                           (printf "LHS (pre-unwound):\n  ~a\n"
-                                   (syntax->hilite-datum (car reconstruct-result)))
-                           (printf "RHS (pre-unwound):\n  ~a\n"
-                                   (syntax->hilite-datum (cadr reconstruct-result))))]
-                        [lhs-unwound (map (lambda (exp) (unwind exp render-settings))
-                                          (maybe-lift (car reconstruct-result) #f))]
-                        [rhs-unwound (map (lambda (exp) (unwind exp render-settings))
-                                          (maybe-lift (cadr reconstruct-result) #t))]
-                        [print-unwound
-                         (when DEBUG
-                           (for-each (λ (x) (printf "LHS (unwound):\n  ~a\n" 
-                                                    (syntax->hilite-datum x)))
-                                     lhs-unwound)
-                           (for-each (λ (x) (printf "right side (unwound):\n  ~a\n" 
-                                                    (syntax->hilite-datum x)))
-                                     rhs-unwound))])
-                   (send-step lhs-unwound new-finished-list
-                              rhs-unwound new-finished-list
-                              'normal
-                              (compute-posn-info) (compute-posn-info)))]
+                 (define new-finished-list (reconstruct-all-completed))
+                 (define reconstruct-result
+                         (r:reconstruct-double-break mark-list render-settings))
+                 (when DEBUG
+                   (printf "LHS (pre-unwound):\n  ~a\n"
+                           (syntax->hilite-datum (car reconstruct-result)))
+                   (printf "RHS (pre-unwound):\n  ~a\n"
+                           (syntax->hilite-datum (cadr reconstruct-result))))
+                 (define lhs-unwound 
+                   (map (lambda (exp) (unwind exp render-settings))
+                        (maybe-lift (car reconstruct-result) #f)))
+                 (define rhs-unwound 
+                   (map (lambda (exp) (unwind exp render-settings))
+                        (maybe-lift (cadr reconstruct-result) #t)))
+                 (when DEBUG
+                   (for-each (λ (x) (printf "LHS (unwound):\n  ~a\n" 
+                                            (syntax->hilite-datum x)))
+                             lhs-unwound)
+                   (for-each (λ (x) (printf "right side (unwound):\n  ~a\n" 
+                                            (syntax->hilite-datum x)))
+                             rhs-unwound))
+                 (send-step lhs-unwound new-finished-list
+                            rhs-unwound new-finished-list
+                            'normal
+                            (compute-posn-info) (compute-posn-info))]
                 
                 ; CASE: expr-finished-break -----------------------------------
                 [(expr-finished-break)
@@ -489,7 +498,8 @@
                       (printf "  source: ~a\n" (syntax->hilite-datum ((car x))))
                       (printf "  index: ~a\n" (second x))
                       (printf "  getter: ")
-                      (if (stepper-syntax-property ((car x)) 'stepper-black-box-expr)
+                      (if (stepper-syntax-property ((car x)) 
+                                                   'stepper-black-box-expr)
                           (printf "no getter for term with stepper-black-box-expr property\n")
                           (printf "~a\n" ((third x)))))
                     returned-value-list))
@@ -502,7 +512,8 @@
   (define maybe-lift
     (if (render-settings-lifting? render-settings)
         lift
-        ;; ... oh dear; model.rkt should disable the double-break & late-let break when lifting is off.
+        ;; ... oh dear; model.rkt should disable the double-break & late-let 
+        ;; break when lifting is off.
         (lambda (stx dont-care) (list stx))))
   
   (define (step-through-expression expanded expand-next-expression)
@@ -517,11 +528,11 @@
   (define (err-display-handler message exn)
     (match held-exp-list
       [(struct no-sexp ())
-        (receive-result (make-error-result message))]
+        (receive-result (error-result message))]
       [(struct held (exps dc posn-info))
        (begin
          (receive-result
-          (make-before-error-result (append held-finished-list exps)
+          (before-error-result (append held-finished-list exps)
                                     message
                                     posn-info))
          (set! held-exp-list the-no-sexp))]))
@@ -534,7 +545,7 @@
      (r:reset-special-values)
      (if (eof-object? expanded)
          (begin
-           (receive-result (make-finished-stepping)))
+           (receive-result (finished-stepping)))
          (step-through-expression expanded continue-thunk)))))
 
 

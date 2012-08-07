@@ -1,8 +1,6 @@
 #lang typed/racket/base
 
-(require racket/flonum
-         (except-in racket/fixnum fx->fl fl->fx)
-         racket/match racket/math
+(require racket/match racket/math
          "flonum.rkt"
          "flomap.rkt")
 
@@ -33,8 +31,7 @@
     (match-define (flomap _ 4 w h) argb-fm)
     (match-define (flomap _ 1 zw zh) z-fm)
     (unless (and (= w zw) (= h zh))
-      (error 'deep-flomap
-             "expected flomaps of equal dimension; given dimensions ~e×~e and ~e×~e" w h zw zh))
+      (error 'deep-flomap "expected same-size flomaps; given sizes ~e×~e and ~e×~e" w h zw zh))
     (values argb-fm z-fm)))
 
 (: flomap->deep-flomap (flomap -> deep-flomap))
@@ -84,7 +81,7 @@
 
 (: deep-flomap-smooth-z (deep-flomap Real -> deep-flomap))
 (define (deep-flomap-smooth-z dfm σ)
-  (let ([σ  (exact->inexact σ)])
+  (let ([σ  (real->double-flonum σ)])
     (match-define (deep-flomap argb-fm z-fm) dfm)
     (define new-z-fm (flomap-blur z-fm σ))
     (deep-flomap argb-fm new-z-fm)))
@@ -120,14 +117,14 @@
 
 (: deep-flomap-bulge (deep-flomap (Flonum Flonum -> Real) -> deep-flomap))
 (define (deep-flomap-bulge dfm f)
-  (inline-deep-flomap-bulge dfm (λ (cx cy) (exact->inexact (f cx cy)))))
+  (inline-deep-flomap-bulge dfm (λ (cx cy) (real->double-flonum (f cx cy)))))
 
 (: deep-flomap-tilt (deep-flomap Real Real Real Real -> deep-flomap))
 (define (deep-flomap-tilt dfm left-z-amt top-z-amt right-z-amt bottom-z-amt)
-  (let ([l  (exact->inexact left-z-amt)]
-        [t  (exact->inexact top-z-amt)]
-        [r  (exact->inexact right-z-amt)]
-        [b  (exact->inexact bottom-z-amt)])
+  (let ([l  (real->double-flonum left-z-amt)]
+        [t  (real->double-flonum top-z-amt)]
+        [r  (real->double-flonum right-z-amt)]
+        [b  (real->double-flonum bottom-z-amt)])
     (define: (f [x : Flonum] [y : Flonum]) : Flonum
       (define α (/ (+ x 1.0) 2.0))
       (define β (/ (+ y 1.0) 2.0))
@@ -137,7 +134,7 @@
 
 (: deep-flomap-bulge-round (deep-flomap Real -> deep-flomap))
 (define (deep-flomap-bulge-round dfm z-amt)
-  (let ([z-amt  (exact->inexact z-amt)])
+  (let ([z-amt  (real->double-flonum z-amt)])
     (define: (f [x : Flonum] [y : Flonum]) : Flonum
       (define d^2 (+ (* x x) (* y y)))
       (* z-amt (flsqrt (/ (- 2.0 d^2) 2.0))))
@@ -145,7 +142,7 @@
 
 (: deep-flomap-bulge-round-rect (deep-flomap Real -> deep-flomap))
 (define (deep-flomap-bulge-round-rect dfm z-amt)
-  (let ([z-amt  (exact->inexact z-amt)])
+  (let ([z-amt  (real->double-flonum z-amt)])
     (define: (f [x : Flonum] [y : Flonum]) : Flonum
       (* z-amt (flsqrt (* (- 1.0 (* x x))
                           (- 1.0 (* y y))))))
@@ -153,7 +150,7 @@
 
 (: deep-flomap-bulge-spheroid (deep-flomap Real -> deep-flomap))
 (define (deep-flomap-bulge-spheroid dfm z-amt)
-  (let ([z-amt  (exact->inexact z-amt)])
+  (let ([z-amt  (real->double-flonum z-amt)])
     (define: (f [x : Flonum] [y : Flonum]) : Flonum
       (define d^2 (+ (* x x) (* y y)))
       (if (d^2 . < . 1.0) (* z-amt (flsqrt (- 1.0 d^2))) 0.0))
@@ -161,22 +158,22 @@
 
 (: deep-flomap-bulge-horizontal (deep-flomap Real -> deep-flomap))
 (define (deep-flomap-bulge-horizontal dfm z-amt)
-  (let ([z-amt  (exact->inexact z-amt)])
+  (let ([z-amt  (real->double-flonum z-amt)])
     (define: (f [x : Flonum] [y : Flonum]) : Flonum
       (* z-amt (flsqrt (- 1.0 (* x x)))))
     (inline-deep-flomap-bulge dfm f)))
 
 (: deep-flomap-bulge-vertical (deep-flomap Real -> deep-flomap))
 (define (deep-flomap-bulge-vertical dfm z-amt)
-  (let ([z-amt  (exact->inexact z-amt)])
+  (let ([z-amt  (real->double-flonum z-amt)])
     (define: (f [x : Flonum] [y : Flonum]) : Flonum
       (* z-amt (flsqrt (- 1.0 (* y y)))))
     (inline-deep-flomap-bulge dfm f)))
 
 (: deep-flomap-bulge-ripple (deep-flomap Real Real -> deep-flomap))
 (define (deep-flomap-bulge-ripple dfm freq z-amt)
-  (let ([freq   (exact->inexact freq)]
-        [z-amt  (exact->inexact z-amt)])
+  (let ([freq   (real->double-flonum freq)]
+        [z-amt  (real->double-flonum z-amt)])
     (define: (f [x : Flonum] [y : Flonum]) : Flonum
       (define d^2 (+ (* x x) (* y y)))
       (define d (* freq pi (flsqrt d^2)))
@@ -201,7 +198,7 @@
 (: deep-flomap-trim (deep-flomap -> deep-flomap))
 (define (deep-flomap-trim dfm)
   (define-values (w h) (deep-flomap-size dfm))
-  (define-values (_k-min x-min y-min _k-max x-max y-max)
+  (define-values (x-min y-min x-max y-max)
     (flomap-nonzero-rect (deep-flomap-alpha dfm)))
   (deep-flomap-inset dfm (- x-min) (- y-min) (- x-max w) (- y-max h)))
 
@@ -244,7 +241,8 @@
     [else
      (define-values (w1 h1) (deep-flomap-size dfm1))
      (define-values (w2 h2) (deep-flomap-size dfm2))
-     (let ([x1  (exact->inexact x1)] [y1  (exact->inexact y1)])
+     (let ([x1  (real->double-flonum x1)]
+           [y1  (real->double-flonum y1)])
        ;; dfm1 and dfm2 offsets, in final image coordinates
        (define dx1 (fl->fx (round (max 0.0 (- x1)))))
        (define dy1 (fl->fx (round (max 0.0 (- y1)))))
@@ -273,16 +271,18 @@
   (define z1-vs (flomap-values z1-fm))
   (define z2-vs (flomap-values z2-fm))
   
-  (define-syntax-rule (get-argbz-pixel argb-vs z-vs dx dy w h x y)
+  (: get-argbz-pixel (FlVector FlVector Integer Integer Integer Integer Integer Integer
+                               -> (values Flonum Flonum Flonum Flonum Flonum)))
+  (define (get-argbz-pixel argb-vs z-vs dx dy w h x y)
     (let ([x  (fx- x dx)] [y  (fx- y dy)])
       (cond [(and (x . fx>= . 0) (x . fx< . w) (y . fx>= . 0) (y . fx< . h))
              (define i (fx+ x (fx* y w)))
              (define j (fx* 4 i))
-             (values (unsafe-flvector-ref argb-vs j)
-                     (unsafe-flvector-ref argb-vs (fx+ j 1))
-                     (unsafe-flvector-ref argb-vs (fx+ j 2))
-                     (unsafe-flvector-ref argb-vs (fx+ j 3))
-                     (unsafe-flvector-ref z-vs i))]
+             (values (flvector-ref argb-vs j)
+                     (flvector-ref argb-vs (fx+ j 1))
+                     (flvector-ref argb-vs (fx+ j 2))
+                     (flvector-ref argb-vs (fx+ j 3))
+                     (flvector-ref z-vs i))]
             [else
              (values 0.0 0.0 0.0 0.0 0.0)])))
   
@@ -297,13 +297,13 @@
                
                (define i (fx+ x (fx* y w)))
                (define j (fx* 4 i))
-               (unsafe-flvector-set! argb-vs j (fl-alpha-blend a1 a2 a2))
-               (unsafe-flvector-set! argb-vs (fx+ j 1) (fl-alpha-blend r1 r2 a2))
-               (unsafe-flvector-set! argb-vs (fx+ j 2) (fl-alpha-blend g1 g2 a2))
-               (unsafe-flvector-set! argb-vs (fx+ j 3) (fl-alpha-blend b1 b2 a2))
-               (unsafe-flvector-set! z-vs i (case z-mode
-                                              [(replace)  (fl-alpha-blend z1 z2 a2)]
-                                              [else       (+ z1 z2)]))
+               (flvector-set! argb-vs j (fl-alpha-blend a1 a2 a2))
+               (flvector-set! argb-vs (fx+ j 1) (fl-alpha-blend r1 r2 a2))
+               (flvector-set! argb-vs (fx+ j 2) (fl-alpha-blend g1 g2 a2))
+               (flvector-set! argb-vs (fx+ j 3) (fl-alpha-blend b1 b2 a2))
+               (flvector-set! z-vs i (case z-mode
+                                       [(replace)  (fl-alpha-blend z1 z2 a2)]
+                                       [else       (+ z1 z2)]))
                (x-loop (fx+ x 1))]
               [else
                (y-loop (fx+ y 1))]))))
@@ -322,16 +322,20 @@
   (match-define (flomap z1-vs 1 z1-w z1-h) z1-fm)
   (match-define (flomap z2-vs 1 z2-w z2-h) z2-fm)
   
-  (define-syntax-rule (get-alpha-pixel vs dx dy w h x y)
+  (: get-alpha-pixel (FlVector Integer Integer Integer Integer Integer Integer
+                               -> Flonum))
+  (define (get-alpha-pixel vs dx dy w h x y)
     (let ([x  (fx- x dx)] [y  (fx- y dy)])
       (cond [(and (x . fx>= . 0) (x . fx< . w) (y . fx>= . 0) (y . fx< . h))
-             (unsafe-flvector-ref vs (fx* 4 (fx+ x (fx* y w))))]
+             (flvector-ref vs (fx* 4 (fx+ x (fx* y w))))]
             [else  0.0])))
   
-  (define-syntax-rule (get-z-pixel vs dx dy w h x y)
+  (: get-z-pixel (FlVector Integer Integer Integer Integer Integer Integer
+                           -> Flonum))
+  (define (get-z-pixel vs dx dy w h x y)
     (let ([x  (fx- x dx)] [y  (fx- y dy)])
       (cond [(and (x . fx>= . 0) (x . fx< . w) (y . fx>= . 0) (y . fx< . h))
-             (unsafe-flvector-ref vs (fx+ x (fx* y w)))]
+             (flvector-ref vs (fx+ x (fx* y w)))]
             [else  0.0])))
   
   (define z1-max -inf.0)
@@ -369,18 +373,21 @@
   (define u2-vs (flomap-values u2-fm))
   (define v2-vs (flomap-values v2-fm))
   
-  (define-syntax-rule (get-argbzuv-pixel argb-vs z-vs u-vs v-vs dx dy w h x y)
+  (: get-argbzuv-pixel (FlVector FlVector FlVector FlVector
+                                 Integer Integer Integer Integer Integer Integer
+                                 -> (values Flonum Flonum Flonum Flonum Flonum Flonum Flonum)))
+  (define (get-argbzuv-pixel argb-vs z-vs u-vs v-vs dx dy w h x y)
     (let ([x  (fx- x dx)] [y  (fx- y dy)])
       (cond [(and (x . fx>= . 0) (x . fx< . w) (y . fx>= . 0) (y . fx< . h))
              (define i (fx+ x (fx* y w)))
              (define j (fx* 4 i))
-             (values (unsafe-flvector-ref argb-vs j)
-                     (unsafe-flvector-ref argb-vs (fx+ j 1))
-                     (unsafe-flvector-ref argb-vs (fx+ j 2))
-                     (unsafe-flvector-ref argb-vs (fx+ j 3))
-                     (unsafe-flvector-ref z-vs i)
-                     (unsafe-flvector-ref u-vs i)
-                     (unsafe-flvector-ref v-vs i))]
+             (values (flvector-ref argb-vs j)
+                     (flvector-ref argb-vs (fx+ j 1))
+                     (flvector-ref argb-vs (fx+ j 2))
+                     (flvector-ref argb-vs (fx+ j 3))
+                     (flvector-ref z-vs i)
+                     (flvector-ref u-vs i)
+                     (flvector-ref v-vs i))]
             [else
              (values 0.0 0.0 0.0 0.0 0.0 0.0 0.0)])))
   
@@ -409,11 +416,11 @@
                
                (define i (fx+ x (fx* y w)))
                (define j (fx* 4 i))
-               (unsafe-flvector-set! argb-vs j (fl-convex-combination a1 a2 α))
-               (unsafe-flvector-set! argb-vs (fx+ j 1) (fl-convex-combination r1 r2 α))
-               (unsafe-flvector-set! argb-vs (fx+ j 2) (fl-convex-combination g1 g2 α))
-               (unsafe-flvector-set! argb-vs (fx+ j 3) (fl-convex-combination b1 b2 α))
-               (unsafe-flvector-set! z-vs i (fl-convex-combination z1 z2 α))
+               (flvector-set! argb-vs j (fl-convex-combination a1 a2 α))
+               (flvector-set! argb-vs (fx+ j 1) (fl-convex-combination r1 r2 α))
+               (flvector-set! argb-vs (fx+ j 2) (fl-convex-combination g1 g2 α))
+               (flvector-set! argb-vs (fx+ j 3) (fl-convex-combination b1 b2 α))
+               (flvector-set! z-vs i (fl-convex-combination z1 z2 α))
                (x-loop (fx+ x 1))]
               [else
                (y-loop (fx+ y 1))]))))

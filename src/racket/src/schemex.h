@@ -170,10 +170,17 @@ void (*scheme_case_lambda_wrong_count)(const char *name, int argc,
 void (*scheme_wrong_type)(const char *name, const char *expected,
 				 int which, int argc,
 				 Scheme_Object **argv);
+void (*scheme_wrong_contract)(const char *name, const char *expected,
+                                     int which, int argc,
+                                     Scheme_Object **argv);
 void (*scheme_wrong_field_type)(Scheme_Object *c_name,
 				       const char *expected,
 				       Scheme_Object *o);
+void (*scheme_wrong_field_contract)(Scheme_Object *c_name,
+                                           const char *expected,
+                                           Scheme_Object *o);
 void (*scheme_arg_mismatch)(const char *name, const char *msg, Scheme_Object *o);
+void (*scheme_contract_error)(const char *name, const char *msg, ...);
 void (*scheme_wrong_return_arity)(const char *where,
 					 int expected, int got,
 					 Scheme_Object **argv,
@@ -189,6 +196,7 @@ Scheme_Object *(*scheme_dynamic_wind)(void (*pre)(void *),
 /*========================================================================*/
 Scheme_Type (*scheme_make_type)(const char *name);
 char *(*scheme_get_type_name)(Scheme_Type type);
+char *(*scheme_get_type_name_or_null)(Scheme_Type type);
 /*========================================================================*/
 /*                              constants                                 */
 /*========================================================================*/
@@ -499,6 +507,7 @@ Scheme_Object *(*scheme_make_cptr)(void *cptr, Scheme_Object *typetag);
 Scheme_Object *(*scheme_make_offset_cptr)(void *cptr, intptr_t offset, Scheme_Object *typetag);
 Scheme_Object *(*scheme_make_external_cptr)(void *cptr, Scheme_Object *typetag);
 Scheme_Object *(*scheme_make_offset_external_cptr)(void *cptr, intptr_t offset, Scheme_Object *typetag);
+int (*scheme_is_cpointer)(Scheme_Object *cp);
 const char *(*scheme_get_proc_name)(Scheme_Object *p, int *len, int for_error);
 /*========================================================================*/
 /*                               strings                                  */
@@ -747,6 +756,7 @@ Scheme_Object *(*scheme_split_path)(const char *path, int len, Scheme_Object **b
 Scheme_Object *(*scheme_build_path)(int argc, Scheme_Object **argv);
 Scheme_Object *(*scheme_path_to_directory_path)(Scheme_Object *p);
 Scheme_Object *(*scheme_path_to_complete_path)(Scheme_Object *path, Scheme_Object *relto_path);
+Scheme_Object *(*scheme_simplify_path)(int argc, Scheme_Object *argv[]);
 Scheme_Object *(*scheme_make_path)(const char *chars);
 Scheme_Object *(*scheme_make_sized_path)(char *chars, intptr_t len, int copy);
 Scheme_Object *(*scheme_make_sized_offset_path)(char *chars, intptr_t d, intptr_t len, int copy);
@@ -816,6 +826,7 @@ Scheme_Object *(*scheme_dynamic_require)(int argc, Scheme_Object *argv[]);
 Scheme_Object *(*scheme_namespace_require)(Scheme_Object *);
 int (*scheme_is_module_path)(Scheme_Object *);
 Scheme_Object *(*scheme_datum_to_kernel_stx)(Scheme_Object *e);
+int (*scheme_module_is_declared)(Scheme_Object *name, int try_load);
 /*========================================================================*/
 /*                                symbols                                 */
 /*========================================================================*/
@@ -936,11 +947,13 @@ int (*scheme_check_proc_arity2)(const char *where, int a,
 				       int which, int argc, Scheme_Object **argv,
 				       int false_ok);
 char *(*scheme_make_provided_string)(Scheme_Object *o, int count, intptr_t *len);
-char *(*scheme_make_args_string)(char *s, int which, int argc, Scheme_Object **argv, intptr_t *len);
+char *(*scheme_make_args_string)(const char *s, int which, int argc, Scheme_Object **argv, intptr_t *len);
+char *(*scheme_make_arg_lines_string)(const char *s, int which, int argc, Scheme_Object **argv, intptr_t *len);
 const char *(*scheme_system_library_subpath)();
 void (*scheme_signal_received)(void);
 void (*scheme_signal_received_at)(void *);
 void *(*scheme_get_signal_handle)();
+void (*scheme_wait_until_signal_received)(void);
 intptr_t (*scheme_char_strlen)(const mzchar *s);
 Scheme_Object *(*scheme_stx_extract_marks)(Scheme_Object *stx);
 int (*scheme_get_place_id)(void);

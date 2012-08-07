@@ -1,9 +1,8 @@
 #lang racket/base
-
 (require syntax/srcloc racket/pretty setup/path-to-relative)
 
 (provide blame?
-         make-blame
+         (rename-out [-make-blame make-blame])
          blame-source
          blame-positive
          blame-negative
@@ -13,10 +12,14 @@
          blame-swapped?
          blame-swap
          blame-replace-negative ;; used for indy blame
-
+         blame-add-context
+         blame-add-unknown-context
+         blame-context 
+         
          raise-blame-error
          current-blame-format
-         (struct-out exn:fail:contract:blame))
+         (struct-out exn:fail:contract:blame)
+         blame-fmt->-string)
 
 (define (blame=? a b equal?/recur)
   (and (equal?/recur (blame-source a) (blame-source b))
@@ -35,9 +38,37 @@
                (hash/recur (blame-original? b))))
 
 (define-struct blame
-  [source value contract positive negative original?]
+  [source value build-name positive negative original? context top-known? important]
   #:property prop:equal+hash
   (list blame=? blame-hash blame-hash))
+
+(define -make-blame
+  (let ([make-blame
+         (λ (source value build-name positive negative original?)
+           (make-blame source value build-name positive negative original? '() #t #f))])
+    make-blame))
+
+;; s : (or/c string? #f)
+(define (blame-add-context b s #:important [important #f] #:swap? [swap? #f])
+  (struct-copy
+   blame b
+   [original? (if swap? (not (blame-original? b)) (blame-original? b))]
+   [positive (if swap? (blame-negative b) (blame-positive b))]
+   [negative (if swap? (blame-positive b) (blame-negative b))]
+   [important (or important (blame-important b))]
+   [context (if s (cons s (blame-context b)) (blame-context b))]
+   [top-known? #t]))
+
+(define (blame-add-unknown-context b)
+  (define old (blame-context b))
+  (struct-copy
+   blame b
+   [top-known? #f]
+   [context (if (blame-top-known? b)
+                (blame-context b)
+                (cons "..." (blame-context b)))]))
+
+(define (blame-contract b) ((blame-build-name b)))
 
 (define (blame-swap b)
   (struct-copy
@@ -55,81 +86,131 @@
 (define-struct (exn:fail:contract:blame exn:fail:contract) [object]
   #:transparent)
 
-(define (raise-blame-error b x fmt . args)
+(define (raise-blame-error blame x fmt . args)
   (raise
    (make-exn:fail:contract:blame
-    ((current-blame-format) b x (apply format fmt args))
+    ((current-blame-format) 
+     blame x 
+     (apply format (blame-fmt->-string blame fmt) args))
     (current-continuation-marks)
-    b)))
+    blame)))
 
-(define (default-blame-format b x custom-message)
-  (let* ([source-message (source-location->string (blame-source b))]
-         [positive-message (show/display (convert-blame-party (blame-positive b)))]
-         
-         [contract-message (format "  contract: ~a" (show/write (blame-contract b)))]
-         [contract-message+at (if (regexp-match #rx"\n$" contract-message)
-                                  (string-append contract-message
-                                                 (if (string=? source-message "")
-                                                     ""
-                                                     (format "  at: ~a" source-message)))
-                                  (string-append contract-message
-                                                 "\n"
-                                                 (if (string=? source-message "")
-                                                     ""
-                                                     (format "        at: ~a" source-message))))])
-    ;; use (regexp-match #rx"\n" ...) to find out if show/display decided that this
-    ;; is a multiple-line message and adjust surrounding formatting accordingly
+(define (blame-fmt->-string blame fmt)
+  (cond
+    [(string? fmt) fmt]
+    [else
+     (let loop ([strs fmt]
+                [so-far '()]
+                [last-ended-in-whitespace? #t])
+       (cond
+         [(null? strs)
+          (apply string-append (reverse so-far))]
+         [else
+          (define fst (car strs))
+          (define nxt
+            (cond
+              [(eq? 'given: fst) (if (blame-original? blame)
+                                     "produced:"
+                                     "given:")]
+              [(eq? 'given fst) (if (blame-original? blame)
+                                    "produced"
+                                    "given")]
+              [(eq? 'expected: fst) (if (blame-original? blame)
+                                        "promised:"
+                                        "expected:")]
+              [(eq? 'expected fst) (if (blame-original? blame)
+                                       "promised"
+                                       "expected")]
+              [else fst]))
+          (define new-so-far
+            (if (or last-ended-in-whitespace?
+                    (regexp-match #rx"^ " nxt))
+                (cons nxt so-far)
+                (list* nxt " " so-far)))
+          (loop (cdr strs)
+                new-so-far
+                (regexp-match #rx" $" nxt))]))]))
+              
+(define (default-blame-format blme x custom-message)
+  (define source-message (source-location->string (blame-source blme)))
+  (define positive-message (show/display (convert-blame-party (blame-positive blme))))
+  
+  (define context (blame-context blme))
+  (define context-lines (if (null? context)
+                            #f
+                            (apply string-append 
+                                   (for/list ([context (in-list context)]
+                                              [n (in-naturals)])
+                                     (format (if (zero? n)
+                                                 "  in: ~a\n"
+                                                 "      ~a\n")
+                                             context)))))
+  (define contract-line (show/write (blame-contract blme) #:alone? #t))
+  (define at-line (if (string=? source-message "")
+                      #f
+                      (format "  at: ~a" source-message)))
+  
+  (define self-or-not (if (blame-original? blme)
+                          "broke its contract"
+                          "contract violation"))
+  
+  (define start-of-message
     (cond
-      [(blame-original? b)
-       (define start-of-message
-         (if (blame-value b)
-             (format "~a: self-contract violation," (blame-value b))
-             "self-contract violation:"))
-       (string-append
-        (format "~a ~a\n" start-of-message custom-message)
-        (format "  contract from: ~a~a blaming: ~a~a" 
-                positive-message
-                (if (regexp-match #rx"\n" positive-message)
-                    " "
-                    ",")
-                positive-message
-                (if (regexp-match #rx"\n" positive-message)
-                    ""
-                    "\n"))
-        contract-message+at)]
+      [(blame-important blme)
+       (format "~a: ~a" (blame-important blme) self-or-not)]
+      [(blame-value blme)
+       (format "~a: ~a" (blame-value blme) self-or-not)]
       [else
-       (define negative-message (show/display (convert-blame-party (blame-negative b))))
-       (define start-of-message
-         (if (blame-value b)
-             (format "~a: contract violation," (blame-value b))
-             "contract violation:"))
+       (format "~a:" self-or-not)]))
+  
+  (define blaming-line (format "  blaming: ~a" positive-message))
+  
+  (define from-line 
+    (if (blame-original? blme)
+        (format "  contract from: ~a" positive-message)
+        (let ([negative-message (show/display (convert-blame-party (blame-negative blme)))])
+          (format "  contract from: ~a" negative-message))))
+  
+  (combine-lines
+   start-of-message
+   (format "  ~a"  custom-message)
+   context-lines
+   (if context-lines
+       contract-line
        (string-append
-        (format "~a ~a\n" start-of-message custom-message)
-        (format "  contract from: ~a~a blaming: ~a~a" 
-                negative-message 
-                (if (regexp-match #rx"\n" negative-message)
-                    " "
-                    ",")
-                positive-message
-                (if (regexp-match #rx"\n" positive-message)
-                    ""
-                    "\n"))
-        contract-message+at)])))
+        "  in:" 
+        (substring contract-line 5 (string-length contract-line))))
+   from-line
+   blaming-line
+   at-line))
 
-(define (add-newline str)
-  (if (regexp-match #rx"\n$" str)
-      str
-      (string-append str "\n")))
+;; combine-lines : (->* #:rest (listof (or/c string? #f))) string?)
+;; combines each of 'lines' into a single message, dropping #fs,
+;; and otherwise guaranteeing that each string is on its own line,
+;; with no ending newline.
+(define (combine-lines . lines)
+  (regexp-replace
+   #rx"\n$"
+   (apply 
+    string-append
+    (for/list ([line (in-list lines)]
+               #:when (string? line))
+      (if (regexp-match #rx"\n$" line)
+          line
+          (string-append line "\n"))))
+   ""))
 
-(define ((show f) v)
+(define ((show f) v #:alone? [alone? #f])
   (let* ([line
           (parameterize ([pretty-print-columns 'infinity])
             (f v))])
     (if (< (string-length line) 30)
-      line
-      (parameterize ([pretty-print-print-line show-line-break]
-                     [pretty-print-columns 50])
-        (f v)))))
+        (cond
+          [alone? (string-append spacer line)]
+          [else line])
+        (parameterize ([pretty-print-print-line (show-line-break alone?)]
+                       [pretty-print-columns 50])
+          (f v)))))
 
 (define (pretty-format/display v [columns (pretty-print-columns)])
   (let ([port (open-output-string)])
@@ -149,11 +230,17 @@
 (define show/display (show pretty-format/display))
 (define show/write (show pretty-format/write))
 
-(define (show-line-break line port len cols)
-  (newline port)
+
+(define ((show-line-break alone?) line port len cols)
+  (if alone?
+      (unless (equal? line 0) (newline port))
+      (newline port))
   (if line
-    (begin (display "    " port) 4)
-    0))
+      (begin (display spacer port) 6)
+      0))
+
+(define spacer "      ")
 
 (define current-blame-format
   (make-parameter default-blame-format))
+

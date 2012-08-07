@@ -238,14 +238,6 @@ Integer brush styles repeat starting at @(racket 7).
 @;----------------------------------------------------------------------------------------------------
 @subsection{Real Functions}
 
-@doc-apply[degrees->radians]{
-Converts degrees to radians.
-}
-
-@doc-apply[radians->degrees]{
-Converts radians to degrees.
-}
-
 @doc-apply[polar->cartesian]{
 Converts 2D polar coordinates to 3D cartesian coordinates.
 }
@@ -255,32 +247,24 @@ Converts 3D polar coordinates to 3D cartesian coordinates.
 See @racket[parametric3d] for an example of use.
 }
 
-@doc-apply[infinite?]{
-Returns @racket[#t] if @racket[x] is either @racket[+inf.0] or @racket[-inf.0].
-@examples[#:eval plot-eval
-                 (map infinite? (list +inf.0 -inf.0 0 'bob))]
-}
-
-@doc-apply[nan?]{
-Returns @racket[#t] if @racket[x] is @racket[+nan.0].
-@examples[#:eval plot-eval
-                 (map nan? (list +nan.0 +inf.0 0 'bob))]
-}
-
 @doc-apply[ceiling-log/base]{
-Like @racket[(ceiling (/ (log x) (log b)))], but @racket[ceiling-log/base] is not susceptible to floating-point error when given an exact @racket[x].
+Like @racket[(ceiling (/ (log x) (log b)))], but @racket[ceiling-log/base] is not susceptible to floating-point error.
 @examples[#:eval plot-eval
+                 (ceiling (/ (log 100) (log 10)))
+                 (ceiling-log/base 10 100)
                  (ceiling (/ (log 1/1000) (log 10)))
                  (ceiling-log/base 10 1/1000)]
 Various number-formatting functions use this.
 }
 
 @doc-apply[floor-log/base]{
-Like @racket[(floor (/ (log x) (log b)))], but @racket[floor-log/base] is not susceptible to floating-point error when given an exact @racket[x].
+Like @racket[(floor (/ (log x) (log b)))], but @racket[floor-log/base] is not susceptible to floating-point error.
 @examples[#:eval plot-eval
+                 (floor (/ (log 100) (log 10)))
+                 (floor-log/base 10 100)
                  (floor (/ (log 1000) (log 10)))
                  (floor-log/base 10 1000)]
-Various number-formatting functions use this.
+This is a generalization of @racket[order-of-magnitude].
 }
 
 @doc-apply[maybe-inexact->exact]{
@@ -457,6 +441,9 @@ Use this to construct inputs for @(racket rectangles) and @(racket rectangles3d)
 @examples[#:eval plot-eval (bounds->intervals (linear-seq 0 1 5))]
 }
 
+@doc-apply[clamp-real]{
+}
+
 @;----------------------------------------------------------------------------------------------------
 @;{
 @subsection[#:tag "math.rectangles"]{Rectangles and Rectangle Functions}
@@ -506,10 +493,6 @@ See @racket[date-ticks] for more information.
 
 To plot a time series using dates pulled from an SQL database, simply set the relevant axis ticks (probably @racket[plot-x-ticks]) to @racket[date-ticks], and convert the dates to seconds using @racket[datetime->real] before passing them to @racket[lines].
 To keep time zone offsets from influencing the plot, set them to @racket[0] first.
-
-Does @racket[sql-time?] work?
-
-@racketmodname[db/base]
 }
 
 @defstruct[plot-time ([second (and/c (>=/c 0) (</c 60))]

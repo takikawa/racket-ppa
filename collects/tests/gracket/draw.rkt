@@ -1,4 +1,5 @@
 #lang scheme/gui
+(require "unsafe-draw.rkt")
 
 (define manual-chinese? #f)
 
@@ -220,6 +221,9 @@
        [clock-clip? #f]
        [do-clock #f]
        [use-bitmap? #f]
+       [platform-bitmap? #f]
+       [use-record? #f]
+       [serialize-record? #f]
        [use-bad? #f]
        [depth-one? #f]
        [cyan? #f]
@@ -229,6 +233,7 @@
        [save-file-format #f]
        [clip 'none]
        [current-alpha 1.0]
+       [current-c-alpha 1.0]
        [current-rotation 0.0]
        [current-skew? #f])
   (send hp0 stretchable-height #f)
@@ -248,19 +253,26 @@
 	    (define pixel-copy? #f)
 	    (define kern? #f)
 	    (define clip-pre-scale? #f)
+            (define c-clip? #f)
 	    (define mask-ex-mode 'mred)
 	    (define xscale 1)
 	    (define yscale 1)
 	    (define offset 0)
+	    (define c-xscale 1)
+	    (define c-yscale 1)
+	    (define c-offset 0)
 	    (public*
 	     [set-bitmaps (lambda (on?) (set! no-bitmaps? (not on?)) (refresh))]
 	     [set-stipples (lambda (on?) (set! no-stipples? (not on?)) (refresh))]
 	     [set-pixel-copy (lambda (on?) (set! pixel-copy? on?) (refresh))]
 	     [set-kern (lambda (on?) (set! kern? on?) (refresh))]
 	     [set-clip-pre-scale (lambda (on?) (set! clip-pre-scale? on?) (refresh))]
+	     [set-canvas-clip (lambda (on?) (set! c-clip? on?) (refresh))]
 	     [set-mask-ex-mode (lambda (mode) (set! mask-ex-mode mode) (refresh))]
+	     [set-canvas-scale (lambda (xs ys) (set! c-xscale xs) (set! c-yscale ys) (refresh))]
 	     [set-scale (lambda (xs ys) (set! xscale xs) (set! yscale ys) (refresh))]
-	     [set-offset (lambda (o) (set! offset o) (refresh))])
+	     [set-offset (lambda (o) (set! offset o) (refresh))]
+	     [set-canvas-offset (lambda (o) (set! c-offset o) (refresh))])
 	    (override*
 	     [on-paint
 	      (case-lambda
@@ -285,7 +297,11 @@
 		       [bm (if use-bitmap?
 			       (if use-bad?
 				   (make-object bitmap% "no such file")
-				   (make-object bitmap% (* xscale DRAW-WIDTH) (* yscale DRAW-HEIGHT) depth-one?))
+                                   (let ([w (ceiling (* xscale DRAW-WIDTH))]
+                                         [h (ceiling (* yscale DRAW-HEIGHT))])
+                                     (if platform-bitmap?
+                                         (make-platform-bitmap w h)
+                                         (make-object bitmap% w h depth-one?))))
 			       #f)]
 		       [draw-series
 			(lambda (dc pens pent penx size x y flevel last?)
@@ -957,6 +973,12 @@
                                 (send dc set-pen p))
 
                               (let ([p (send dc get-pen)])
+                                (send dc set-pen "black" 1 'solid)
+                                (send dc set-brush surface-brush)
+                                (send dc draw-rectangle 400 320 30 40)
+                                (send dc set-pen p))
+
+                              (let ([p (send dc get-pen)])
                                 (send dc set-pen "white" 1 'transparent)
                                 (send dc set-brush (new brush%
                                                         [gradient
@@ -996,10 +1018,30 @@
 				(send dc draw-rectangle 187 310 20 20)
 				(send dc set-pen p)))
 			      
-			    (when (and last? (not (or kind (eq? dc can-dc)))
-				       (send mem-dc get-bitmap))
-			      (send can-dc draw-bitmap (send mem-dc get-bitmap) 0 0 'opaque)))
-			  
+                            (when (and last? 
+                                       (or (and (not (or kind (eq? dc can-dc)))
+                                                (send mem-dc get-bitmap))
+                                           use-record?))
+                              (send can-dc set-origin c-offset c-offset)
+                              (send can-dc set-scale c-xscale c-yscale)
+                              (send can-dc set-alpha current-c-alpha)
+                              (when c-clip?
+                                (define r (new region%))
+                                (send r set-rectangle 0 0 200 200)
+                                (send can-dc set-clipping-region r))
+                              (if use-record?
+                                  (if serialize-record?
+                                      (let ()
+                                        (define-values (i o) (make-pipe))
+                                        (write (send dc get-recorded-datum) o)
+                                        ((recorded-datum->procedure (read i)) can-dc))
+                                      ((send dc get-recorded-procedure) can-dc))
+                                  (send can-dc draw-bitmap (send mem-dc get-bitmap) 0 0 'opaque))
+                              (send can-dc set-origin 0 0)
+                              (send can-dc set-scale 1 1)
+                              (send can-dc set-alpha 1.0)
+                              (send can-dc set-clipping-region #f)))
+
 			  'done)])
 
 		  (send (get-dc) set-scale 1 1)
@@ -1031,11 +1073,13 @@
                                                     [as-eps (not page?)]
                                                     [use-paper-bbox page?]))])])
 				  (and (send dc ok?) dc))
-				(if (and use-bitmap?)
-				    (begin
-				      (send mem-dc set-bitmap bm)
-				      mem-dc)
-				    (get-dc)))])
+                                (if use-record?
+                                    (make-object record-dc% (* xscale DRAW-WIDTH) (* yscale DRAW-HEIGHT))
+                                    (if (and use-bitmap?)
+                                        (begin
+                                          (send mem-dc set-bitmap bm)
+                                          mem-dc)
+                                        (get-dc))))])
 		    (when dc
                       (send dc start-doc "Draw Test")
 		      (send dc start-page)
@@ -1156,7 +1200,18 @@
                             (when (send r get-dc)
                               (unless (eq? (send r is-empty?) (eq? clip 'empty))
                                 (show-error 'draw-text "region `is-empty?' mismatch"))))))
-		      
+                      
+                      (define (mutate-region)
+                        (when (and (not clock-clip?)
+                                   (not (eq? clip 'none)))
+                          ;; To be uncooperative, mutate the clipping region:
+                          (define r (send dc get-clipping-region))
+                          (define r2 (make-object region% (send r get-dc)))
+                          (send r2 union r)
+                          (send dc set-clipping-region #f)
+                          (send r set-rectangle 0 0 10 10)
+                          (send dc set-clipping-region r2)))
+
 		      ;; check default pen/brush:
 		      (send dc draw-rectangle 0 0 5 5)
 		      (send dc draw-line 0 0 20 6)
@@ -1164,6 +1219,8 @@
 		      (send dc set-font (make-object font% 10 'default))
 
 		      (draw-series dc pen0s pen0t pen0x "0 x 0" 5 0 0 #f)
+
+                      (mutate-region)
 		      
 		      (draw-series dc pen1s pen1t pen1x "1 x 1" 70 0 1 #f)
 		      
@@ -1205,15 +1262,14 @@
 			(unless (cond
 				 [kind #t]
 				 [use-bad? #t]
-				 [use-bitmap? (and (= w (* xscale DRAW-WIDTH)) (= h (* yscale DRAW-HEIGHT)))]
+				 [use-bitmap? (and (= w (ceiling (* xscale DRAW-WIDTH))) (= h (ceiling (* yscale DRAW-HEIGHT))))]
 				 [else (and (= w (* 2 DRAW-WIDTH)) (= h (* 2 DRAW-HEIGHT)))])
 			  (show-error 'x "wrong size reported by get-size: ~a ~a (not ~a)" w h
                                       (if use-bitmap?
                                           (list (* xscale DRAW-WIDTH) (* yscale DRAW-HEIGHT))
                                           (list (* 2 DRAW-WIDTH) (* 2 DRAW-HEIGHT))))))
 
-		      (send dc set-clipping-region #f)
-
+                      (send dc set-clipping-region #f)
 
                       (send dc end-page)
                       (when (and kind multi-page?)
@@ -1230,13 +1286,15 @@
 	    (super-new [parent parent][style '(hscroll vscroll)])
 	    (init-auto-scrollbars (* 2 DRAW-WIDTH) (* 2 DRAW-HEIGHT) 0 0))
 	  vp)])
-    (make-object radio-box% #f '("Canvas" "Pixmap" "Bitmap" "Bad") hp0
+    (make-object choice% #f '("Canvas" "Pixmap" "Bitmap" "Platform" "Record" "Serialize" "Bad") hp0
 		 (lambda (self event)
 		   (set! use-bitmap? (< 0 (send self get-selection)))
 		   (set! depth-one? (< 1 (send self get-selection)))
-		   (set! use-bad? (< 2 (send self get-selection)))
-		   (send canvas refresh))
-		 '(horizontal))
+		   (set! platform-bitmap? (= 3 (send self get-selection)))
+		   (set! use-record? (<= 4 (send self get-selection) 5))
+		   (set! serialize-record? (= 5 (send self get-selection)))
+		   (set! use-bad? (< 5 (send self get-selection)))
+		   (send canvas refresh)))
     (make-object button% "PS" hp
 		 (lambda (self event)
 		   (send canvas on-paint 'ps)))
@@ -1265,14 +1323,6 @@
 			 (set! save-filename f)
 			 (set! save-file-format format)
 			 (send canvas refresh))))))
-    (make-object choice% #f '("1" "*2" "/2" "1,*2" "*2,1") hp
-		 (lambda (self event)
-		   (send canvas set-scale 
-			 (list-ref '(1 2 1/2 1 2) (send self get-selection))
-			 (list-ref '(1 2 1/2 2 1) (send self get-selection)))))
-    (make-object check-box% "+10" hp
-		 (lambda (self event)
-		   (send canvas set-offset (if (send self get-value) 10 0))))
     (make-object check-box% "Cyan" hp
 		 (lambda (self event)
 		   (set! cyan? (send self get-value))
@@ -1309,6 +1359,22 @@
     (make-object check-box% "Kern" hp2.5
 		 (lambda (self event)
 		   (send canvas set-kern (send self get-value))))
+    (make-object choice% #f '("1" "*2" "/2" "1,*2" "*2,1") hp3
+		 (lambda (self event)
+		   (send canvas set-scale 
+			 (list-ref '(1 2 1/2 1 2) (send self get-selection))
+			 (list-ref '(1 2 1/2 2 1) (send self get-selection)))))
+    (make-object check-box% "+10" hp3
+		 (lambda (self event)
+		   (send canvas set-offset (if (send self get-value) 10 0))))
+    (make-object choice% #f '("Cvs 1" "Cvs *2" "Cvs /2" "Cvs 1,*2" "Cvs *2,1") hp3
+		 (lambda (self event)
+		   (send canvas set-canvas-scale 
+			 (list-ref '(1 2 1/2 1 2) (send self get-selection))
+			 (list-ref '(1 2 1/2 2 1) (send self get-selection)))))
+    (make-object check-box% "Cvs +10" hp3
+		 (lambda (self event)
+		   (send canvas set-canvas-offset (if (send self get-value) 10 0))))
     (make-object choice% "Clip" 
 		 '("None" "Rectangle" "Rectangle2" "Octagon" 
 		   "Circle" "Wedge" "Round Rectangle" "Lambda" "A"
@@ -1326,6 +1392,9 @@
     (make-object check-box% "Clip Pre-Scale" hp3
 		 (lambda (self event)
 		   (send canvas set-clip-pre-scale (send self get-value))))
+    (make-object check-box% "Cvs Clip" hp3
+		 (lambda (self event)
+		   (send canvas set-canvas-clip (send self get-value))))
     (let ([clock (lambda (clip?)
 		   (thread (lambda ()
 			     (set! clock-clip? clip?)
@@ -1357,6 +1426,10 @@
                          (set! current-alpha a)
                          (send canvas refresh))))
                    10 '(horizontal plain))
+      (make-object check-box% "Cvs Fade" hp4
+                   (lambda (c e)
+                     (set! current-c-alpha (if (send c get-value) 0.5 1.0))
+                     (send canvas refresh)))
       (make-object slider% "Rotation" 0 100 hp4
                    (lambda (s e)
                      (let ([a (* pi 1/4 (/ (send s get-value) 100.0))])
@@ -1370,9 +1443,3 @@
                      (send canvas refresh)))))
 
   (send f show #t))
-
-; Canvas, Pixmaps, and Bitmaps:
-;  get-pixel
-;  begin-set-pixel
-;  end-set-pixel
-;  set-pixel

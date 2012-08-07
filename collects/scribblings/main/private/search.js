@@ -246,30 +246,36 @@ function AdjustResultsNum() {
   }
 }
 
-// Terms are compared using Compare(), which returns one of several constants:
-// - C_fail: there was no match
-// - C_match: there was a match somewhere in the string
-// - C_prefix: there was a prefix match (starts at 0)
-// - C_rexact: there was a ("real") exact match
-// There is also C_exact which can be returned by some of the X: operators.
-// It's purpose is to be able to return a result that doesn't affect the
-// exactness of the search (for example L:foo searches for a source module that
-// is exactly `foo', but it will return C_exact which means that it doesn't
-// change whether the match is considered exact or not).  Note that these
-// constants are ordered, so:
-// - < exact => this match is inexact
-// - = exact => does not affect the exactness of this match
-// - > exact => this is an exact match as far as this predicate goes
-// Finally, there is also a C_wordmatch that is used when there is no proper
-// match, but all the words in the term match (where a word is an alphanumeric
-// sequence or a punctuation, for example, "foo-bar!!" has these words: "foo",
-// "-", "bar", "!!")
+// Terms are compared using Compare(pat,str), which returns one of several
+// constants, in increasing order of success:
+// - C_fail: no match
+// - C_words1: all of the "subwords" in pat matched, where a word is an
+//   alphanumeric or a punctuation substring (for example, "foo-bar!!" has
+//   these words: "foo", "-", "bar", "!!"), and a match means a prefix of a
+//   subword in str matched one of pat's subwords
+// - C_words2: same, but all of the subwords in str were matched (so both str
+//   and pat have the same number of subwords)
+// - C_words3: same, but all matches were complete (so str is a permutation of
+//   pat)
+// - C_match: pat matched somewhere in str
+// - C_prefix: pat is a prefix of str
+// - C_exact: pat is equal to str
+// - C_rexact: there was a ("real") exact match, see below
+// Note that the value is searched from the last one and going back, so, for
+// example, if pat is a prefix of str the result is C_prefix, and no subword
+// matching is attempted.  A result of C_exact can be returned by some of the
+// `X:' operators: its purpose is to be able to return a result that doesn't
+// affect the exactness of the search (for example L:foo searches for a source
+// module that is exactly `foo', but it will return C_exact which means that it
+// doesn't change whether the match is considered exact or not).
 var C_fail   = 0, C_min = 0,
-    C_wordmatch = 1,
-    C_match  = 2,
-    C_prefix = 3,
-    C_exact  = 4,
-    C_rexact = 5, C_max = 5;
+    C_words1 = 1,
+    C_words2 = 2,
+    C_words3 = 3,
+    C_match  = 4,
+    C_prefix = 5,
+    C_exact  = 6,
+    C_rexact = 7, C_max = 7;
 
 function Compare(pat, str) {
   var i = str.indexOf(pat);
@@ -278,30 +284,84 @@ function Compare(pat, str) {
   if (pat.length == str.length) return C_rexact;
   return C_prefix;
 }
-function CompareRx(pat, str) {
-  if (!(pat instanceof RegExp)) return Compare(pat,str);
-  var r = str.match(pat);
-  if (r == null || r.length == 0) return C_fail;
-  if (r[0] == str) return C_rexact;
-  if (str.indexOf(r[0]) == 0) return C_prefix;
-  return C_match;
-}
 function MaxCompares(pat, strs) {
-  var r = C_min;
+  var r = C_min, c;
   for (var i=0; i<strs.length; i++) {
-    r = Math.max(r, Compare(pat,strs[i]));
-    if (r >= C_max) return r;
+    c = Compare(pat,strs[i]);
+    if (c > r) { if (c >= C_max) return c; else r = c; }
   }
   return r;
 }
-function MinComparesRx(pats, str) {
-  var r = C_max;
-  for (var i=0; i<pats.length; i++) {
-    r = Math.min(r, CompareRx(pats[i],str));
-    if (r <= C_min) return r;
-  }
-  return r;
+
+// Utilities for dealing with "subword" searches
+function SortByLength(x, y) {
+  // use this to sort with descending length and otherwise lexicographically
+  var xlen = x.length, ylen = y.length;
+  if (xlen != ylen) return ylen - xlen;
+  else if (x < y) return -1;
+  else if (x > y) return +1;
+  else return 0;
 }
+function CompileWordCompare(term) {
+  var words = term.split(/\b/).sort(SortByLength);
+  var word_num = words.length;
+  var is_word = new Array(word_num);
+  for (var i=0; i<word_num; i++) is_word[i] = (words[i].search(/\w/) >= 0);
+  return function (str) {
+    var str_words = str.split(/\b/).sort(SortByLength);
+    var str_word_num = str_words.length;
+    if (str_word_num < word_num) return C_fail; // can't work
+    var r = C_words3;
+    for (var i=0; i<word_num; i++) {
+      var word = words[i];
+      var found = -1;
+      for (var j=0; j<str_word_num; j++) {
+        var str_word = str_words[j];
+        if (str_word != null) {
+          if (word == str_word) {
+            found = j;
+            break;
+          } else {
+            var k = str_word.indexOf(word);
+            if (k == 0 || (k > 0 && !is_word[i])) {
+              found = j;
+              r = C_words2;
+              break;
+            }
+          }
+        }
+      }
+      if (found >= 0) str_words[found] = null;
+      else return C_fail;
+    }
+    // either C_words3 for a complete permutation, or C_words2 when all of the
+    // subwords in str were matched
+    if (word_num == str_word_num) return r;
+    // otherwise return C_words1 regardless of whether all of the words in term
+    // matched exactly words in str
+    else return C_words1;
+  }
+}
+// Tests:
+// console.log("testing...");
+// function t(x,y,e) {
+//   var r = CompileWordCompare(x)(y);
+//   if (e != r) {
+//     console.log('CompileWordCompare("'+x+'")("'+y+'")'+
+//                 " => "+r+" but expected "+e);
+//   }
+// }
+// t("x-y","x-y",C_words3);
+// t("x-y","y-x",C_words3);
+// t("x-y","y--x",C_words2);
+// t("x-y","y=-x",C_words2);
+// t("xx-yy","x-y",C_fail);
+// t("xx-yy","xxx-yyy",C_words2);
+// t("x-y-x","xxx-yyy",C_fail);
+// t("x-y-x","xxx-yyy-xxx",C_words2);
+// t("x-y-x","yyy-xxx-xxx",C_words2);
+// t("x-y-xx","xx-y-xxx",C_words2);
+// console.log("done");
 
 function NormalizeSpaces(str) {
   // use single spaces first, then trim edge spaces
@@ -329,9 +389,10 @@ function UrlToManual(url) {
 
 // Tests for matches and highlights:
 //   "append"
-//   "L:scheme append"
-//   "L:scheme" (no exact matches except for the `scheme' module)
-//   "L:schem" (only module names that match `schem')
+//   "L:racket append"
+//   "L:racket" (no exact matches except for the `racket' module)
+//   "L:racke" (only module names that match `racke')
+//   "edi" and "edit" (the top few should be the same)
 
 // Additional "hidden" operators:
 //   "A:{ foo bar }" -- an `and' query
@@ -370,28 +431,23 @@ function CompileTerm(term) {
     }
   /* a case for "Q" is not needed -- same as the default case below */
   default:
-    var words = term.split(/\b/);
-    for (var i=0; i<words.length; i++)
-      if (words[i].search(/^\w/) >= 0) words[i] = new RegExp("\\b"+words[i]);
-    // (note: seems like removing duplicates is not important since search
-    // strings will not have them, except, maybe, for an occasional x-y-z)
+    var compare_words = CompileWordCompare(term);
     return function(x) {
       var r = Compare(term,x[0]);
-      // only bindings can be used for exact matches
-      if (r >= C_exact) return (x[3] ? C_rexact : C_match);
-      if (r >= C_match) return r;
-      if (MinComparesRx(words,x[0]) > C_fail) return C_wordmatch;
-      return r;
+      // only bindings can be used for rexact matches
+      if (r >= C_rexact) return (x[3] ? r : C_exact);
+      if (r > C_words3) return r;
+      else return compare_words(x[0]);
     }
   }
 }
 
 function CompileAndTerms(preds) {
   return function(x) {
-    var r = C_max;
+    var r = C_max, c;
     for (var i=0; i<preds.length; i++) {
-      r = Math.min(r, preds[i](x));
-      if (r <= C_min) return r;
+      c = preds[i](x);
+      if (c < r) { if (c <= C_min) return c; else r = c; }
     }
     return r;
   };
@@ -399,10 +455,10 @@ function CompileAndTerms(preds) {
 
 function CompileOrTerms(preds) {
   return function(x) {
-    var r = C_min;
+    var r = C_min, c;
     for (var i=0; i<preds.length; i++) {
-      r = Math.max(r, preds[i](x));
-      if (r >= C_max) return r;
+      c = preds[i](x);
+      if (c > r) { if (c >= C_max) return c; else r = c; }
     }
     return r;
   };
@@ -471,27 +527,32 @@ function Search(data, term, is_pre, K) {
     if (K) { K(ret); return killer; }
     else return ret;
   }
-  var matches = new Array(), exacts = new Array(), wordmatches = new Array();
   var i = 0;
+  var matches = new Array(C_max-C_min);
+  for (i=0; i<matches.length; i++) matches[i] = new Array();
   var chunk_fuel = K ? Math.round(data.length/10) : data.length;
   var progress = K ? MakeShowProgress() : Id;
+  i = 0;
   var DoChunk = function() {
     var fuel = Math.min(chunk_fuel, data.length-i);
     progress(i+fuel);
     while (fuel > 0) {
       var r, min = C_max, max = C_min;
       for (var j=0; j<preds.length; j++) {
-        r = preds[j](data[i]); min = Math.min(r, min); max = Math.max(r, max);
-        if (min <= C_min) break; // get out if it's hopeless
+        r = preds[j](data[i]);
+        if (r < min) {
+          min = r;
+          if (r <= C_min) break; // get out if it's hopeless
+        }
+        if (r > max) max = r;
       }
-      if (max >= C_rexact && min >= C_exact) exacts.push(data[i]);
-      else if (min > C_wordmatch) matches.push(data[i]);
-      else if (min > C_fail)  wordmatches.push(data[i]);
+      if (max >= C_rexact && min >= C_exact) min = C_rexact;
+      if (min > C_min) matches[C_max - min].push(data[i]);
       fuel--; i++;
     }
     if (i<data.length) t = setTimeout(DoChunk,5);
     else {
-      r = [exacts.length, exacts.concat(matches).concat(wordmatches)];
+      r = [matches[0].length, [].concat.apply([],matches)];
       if (K) K(r); else return r;
     }
   };

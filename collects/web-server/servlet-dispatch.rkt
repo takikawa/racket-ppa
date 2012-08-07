@@ -1,7 +1,9 @@
 ; Derived from plai/web/server, which was based on an older version of this
 ; Also derived from planet/untyped/instaservlet
-#lang racket
+#lang racket/base
 (require (prefix-in net: net/sendurl)
+         racket/match
+         racket/local
          racket/contract
          racket/async-channel
          racket/list
@@ -9,12 +11,14 @@
          racket/serialize
          net/tcp-unit
          net/tcp-sig
+         net/url
          unstable/contract
          net/ssl-tcp-unit)
 (require web-server/web-server
          web-server/managers/lru
          web-server/managers/manager
          web-server/configuration/namespace
+         web-server/configuration/responders
          web-server/http
          web-server/stuffers
          web-server/servlet/setup
@@ -31,7 +35,9 @@
                               #:current-directory path-string?
                               #:stateless? boolean?
                               #:stuffer (stuffer/c serializable? bytes?)
-                              #:manager manager?)
+                              #:manager manager?
+                              #:responders-servlet-loading (url? any/c . -> . can-be-response?)
+                              #:responders-servlet (url? any/c . -> . can-be-response?))
                     . ->* .
                     dispatcher/c)]
  [serve/launch/wait (((semaphore? . -> . dispatcher/c))
@@ -55,6 +61,10 @@
          [stateless? #f]
          #:stuffer
          [stuffer default-stuffer]
+         #:responders-servlet-loading
+         [responders-servlet-loading servlet-loading-responder]
+         #:responders-servlet 
+         [responders-servlet servlet-error-responder]
          #:manager
          [manager
           (make-threshold-LRU-manager
@@ -67,6 +77,8 @@
   (filter:make
    servlet-regexp
    (servlets:make
+    #:responders-servlet-loading responders-servlet-loading
+    #:responders-servlet responders-servlet
     (lambda (url)
       (or (unbox servlet-box)
           (let ([servlet

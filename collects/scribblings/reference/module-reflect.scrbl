@@ -24,11 +24,16 @@ to another module.
 Returns @racket[#f] if @racket[v] is a @tech{resolved module path},
 @racket[#f] otherwise.}
 
-@defproc[(make-resolved-module-path [path (or/c symbol? (and/c path? complete-path?))])
+@defproc[(make-resolved-module-path [path (or/c symbol? 
+                                                (and/c path? complete-path?)
+                                                (cons/c (or/c symbol?
+                                                              (and/c path? complete-path?))
+                                                        (non-empty-listof symbol?)))])
          resolved-module-path?]{
 
-Returns a @tech{resolved module path} that encapsulates @racket[path].
-If @racket[path] is not a symbol, it normally should be
+Returns a @tech{resolved module path} that encapsulates @racket[path],
+where a list @racket[path] corresponds to a @tech{submodule} path.
+If @racket[path] is a path or starts with a path, the path normally should be
 @tech{cleanse}d (see @racket[cleanse-path]) and simplified (see
 @racket[simplify-path]).
 
@@ -38,22 +43,28 @@ A @tech{resolved module path} is interned. That is, if two
 @racket[eq?].}
 
 @defproc[(resolved-module-path-name [module-path resolved-module-path?])
-         (or/c path? symbol?)]{
+         (or/c symbol? 
+               (and/c path? complete-path?)
+               (cons/c (or/c symbol?
+                             (and/c path? complete-path?))
+                       (non-empty-listof symbol?)))]{
 
-Returns the path or symbol encapsulated by a @tech{resolved module path}.}
+Returns the path or symbol encapsulated by a @tech{resolved module path}.
+A list result corresponds to a @tech{submodule} path.}
 
 
 @defproc[(module-path? [v any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[v] corresponds to a datum that matches
 the grammar for @racket[_module-path] for @racket[require],
-@racket[#f] otherwise.}
+@racket[#f] otherwise. Note that a path (in the sense of
+@racket[path?]) is a module path.}
 
 
 @defparam[current-module-name-resolver proc
            (case->
-            (resolved-module-path? . -> . any)
-            ((or/c module-path? path?)
+            (resolved-module-path? (or/c #f namespace?) . -> . any)
+            (module-path?
              (or/c #f resolved-module-path?)
              (or/c #f syntax?)
              boolean?
@@ -71,19 +82,29 @@ module, the @deftech{module path resolver} is also given the name of
 the enclosing module, so that a relative reference can be converted to
 an absolute symbol or @tech{resolved module path}.
 
-A @tech{module name resolver} takes one and four arguments:
+A @tech{module name resolver} takes two and four arguments:
 @itemize[
 
-  @item{When given one argument, it is a name for a module declaration
-  that is already loaded. Such a call to the module name resolver is a
-  notification that the corresponding module does not need to be
-  loaded (for the current namespace, or any other namespace that
-  shares the same module registry). The module name resolver's result
-  is ignored.}
+  @item{When given two arguments, the first is a name for a module that
+  is now declared in the current namespace, and the second is optionally
+  a namespace from which the declaration was copied.
+  The module name resolver's result in this case is ignored.
+
+  The current module name resolver is called with two arguments by
+  @racket[namespace-attach-module] or
+  @racket[namespace-attach-module-declaration] to notify the resolver
+  that a module declaration was attached to the current namespace (and
+  should not be loaded in the future for the namespace's @tech{module registry}).
+  Evaluation of a module declaration also calls the current module
+  name resolver with two arguments, where the first is the declared
+  module and the second is @racket[#f]. No other Racket operation
+  invokes the module name resolver with two arguments, but other tools
+  (such as DrRacket) might call this resolver in this mode to avoid
+  redundant module loads.}
  
-  @item{When given four arguments, the first is a module path, either
-  equivalent to a quoted @racket[_module-path] for @racket[require] or
-  a file system path.  The second is name for the source module, if
+  @item{When given four arguments, the first is a module path,
+  equivalent to a quoted @racket[_module-path] for @racket[require].
+  The second is name for the source module, if
   any, to which the path is relative; if the second argument is
   @racket[#f], the module path is relative to @racket[(or
   (current-load-relative-directory) (current-directory))].  The third
@@ -96,8 +117,8 @@ A @tech{module name resolver} takes one and four arguments:
 ]
 
 For the second case, the standard module name resolver keeps a
-per-registry table of loaded module name. If a resolved module path is
-not in the table, and @racket[#f] is not provided as the third
+table per @tech{module registry} containing loaded module name. If a resolved module path is
+not in the table, and @racket[#f] is not provided as the fourth
 argument to the @tech{module name resolver}, then the name is put into
 the table and the corresponding file is loaded with a variant of
 @racket[load/use-compiled] that passes the expected module name to the
@@ -113,20 +134,18 @@ already exists; if such a continuation mark does exist in the current
 continuation, then the @exnraise[exn:fail] with a message about a
 dependency cycle.
 
-Module loading is suppressed (i.e., @racket[#f] is supplied as a third
+The default module name resolver cooperates with the default
+@tech{compiled-load handler}: on a module-attach notification,
+bytecode-file information recorded by the @tech{compiled-load handler}
+for the source namespace's @tech{module registry} is transferred to
+the target namespace's @tech{module registry}.
+
+Module loading is suppressed (i.e., @racket[#f] is supplied as a fourth
 argument to the module name resolver) when resolving module paths in
 @tech{syntax objects} (see @secref["stxobj-model"]). When a
 @tech{syntax object} is manipulated, the current namespace might not
 match the original namespace for the syntax object, and the module
-should not necessarily be loaded in the current namespace.
-
-The current module name resolver is called with a single argument by
-@racket[namespace-attach-module] to notify the resolver that a module
-was attached to the current namespace (and should not be loaded in the
-future for the namespace's registry). No other Racket operation
-invokes the module name resolver with a single argument, but other
-tools (such as DrRacket) might call this resolver in this mode to
-avoid redundant module loads.}
+should not necessarily be loaded in the current namespace.}
 
 
 @defparam[current-module-declare-name name (or/c resolved-module-path? #f)]{
@@ -135,7 +154,12 @@ A parameter that determines a module name that is used when evaluating
 a @racket[module] declaration (when the parameter value is not
 @racket[#f]). In that case, the @racket[_id] from the @racket[module]
 declaration is ignored, and the parameter's value is used as the name
-of the declared module.}
+of the declared module.
+
+When declaring @tech{submodules}, @racket[current-module-declare-name]
+determines the name used for the submodule's root module, while its
+submodule path relative to the root module is unaffected.}
+
 
 @defparam[current-module-declare-source src (or/c symbol? (and/c path? complete-path?) #f)]{
 
@@ -180,8 +204,9 @@ path index}. If the identifier is instead defined in a module that is
 imported via a module path (as opposed to a literal module name), then
 the identifier's source module will be reported using a @tech{module
 path index} that contains the @racket[require]d module path and the
-``self'' @tech{module path index}.
-
+``self'' @tech{module path index}. A ``self'' @tech{module path index}
+has a submodule path when the module that it refers to is a
+@tech{submodule}.
 
 A @tech{module path index} has state. When it is @deftech{resolved} to
 a @tech{resolved module path}, then the @tech{resolved module path} is
@@ -218,8 +243,9 @@ resolved name can depend on the value of
          (values (or/c module-path? #f)
                  (or/c module-path-index? resolved-module-path? #f))]{
 
-Returns two values: a module path, and a base @tech{module path index}
-or @racket[#f] to which the module path is relative.
+Returns two values: a module path, and a base path---either a
+@tech{module path index}, @tech{resolved module path}, or
+@racket[#f]---to which the first path is relative.
 
 A @racket[#f] second result means that the path is relative to an
 unspecified directory (i.e., its resolution depends on the value of
@@ -228,15 +254,29 @@ unspecified directory (i.e., its resolution depends on the value of
 
 A @racket[#f] for the first result implies a @racket[#f] for the
 second result, and means that @racket[mpi] represents ``self'' (see
-above).}
+above). Such a @tech{module path index} may have a non-@racket[#f]
+submodule path as reported by @racket[module-path-index-submodule].}
+
+
+@defproc[(module-path-index-submodule [mpi module-path-index?])
+         (or/c #f (non-empty-listof symbol?))]{
+
+Returns a non-empty list of symbols if @racket[mpi] is a ``self'' (see
+above) @tech{module path index} that refers to a @tech{submodule}. The
+result is always @racket[#f] if either result of
+@racket[(module-path-index-split mpi)] is non-@racket[#f].}
+
 
 @defproc[(module-path-index-join [path (or/c module-path? #f)]
-                                 [mpi (or/c module-path-index? resolved-module-path? #f)])
+                                 [base (or/c module-path-index? resolved-module-path? #f)]
+                                 [submod (or/c #f (non-empty-listof symbol?)) #f])
          module-path-index?]{
 
-Combines @racket[path] and @racket[mpi] to create a new @tech{module
-path index}. The @racket[path] argument can @racket[#f] only if
-@racket[mpi] is also @racket[#f].}
+Combines @racket[path], @racket[base], and @racket[submod] to create a
+new @tech{module path index}. The @racket[path] argument can
+@racket[#f] only if @racket[base] is also @racket[#f]. The
+@racket[submod] argument can be a list only when @racket[path] and
+@racket[base] are both @racket[#f].}
 
 @defproc[(compiled-module-expression? [v any/c]) boolean?]{
 
@@ -245,11 +285,36 @@ declaration, @racket[#f] otherwise. See also
 @racket[current-compile].}
 
 
-@defproc[(module-compiled-name [compiled-module-code compiled-module-expression?])
-         symbol?]{
+@defproc*[([(module-compiled-name [compiled-module-code compiled-module-expression?])
+            (or/c symbol? (cons/c symbol? (non-empty-listof symbol?)))]
+           [(module-compiled-name [compiled-module-code compiled-module-expression?]
+                                  [name (or/c symbol? (cons/c symbol? (non-empty-listof symbol?)))])
+            compiled-module-expression?])]{
 
-Takes a module declaration in compiled form and returns a symbol for
-the module's declared name.}
+Takes a module declaration in compiled form and either gets the
+module's declared name (when @racket[name] is not provided) or returns
+a revised module declaration with the given @racket[name].
+
+The name is a symbol for a top-level module, and it list of symbols
+for a @tech{submodule}, where a list reflects the submodule path to
+the module starting with the top-level module's declared name.}
+
+
+@defproc*[([(module-compiled-submodules [compiled-module-code compiled-module-expression?]
+                                        [non-star? any/c])
+            (listof compiled-module-expression?)]
+           [(module-compiled-submodules [compiled-module-code compiled-module-expression?]
+                                        [non-star? any/c]
+                                        [submodules (listof compiled-module-expression?)])
+            compiled-module-expression?])]{
+
+Takes a module declaration in compiled form and either gets the
+module's @tech{submodules} (when @racket[submodules] is not provided) or
+returns a revised module declaration with the given
+@racket[submodules]. The @racket[pre-module?] argument determines
+whether the result or new submodule list corresponds to
+@racket[module] declarations (when @racket[non-star?] is true)
+or @racket[module*] declarations (when @racket[non-star?] is @racket[#f]).}
 
 
 @defproc[(module-compiled-imports [compiled-module-code compiled-module-expression?])
@@ -384,13 +449,34 @@ Like @racket[dynamic-require], but in a @tech{phase} that is @math{1}
 more than the namespace's @tech{base phase}.}
 
 
+@defproc[(module-declared?
+          [mod (or/c module-path? module-path-index? 
+                     resolved-module-path?)]
+          [load? any/c #f])
+         boolean?]{
+
+Returns @racket[#t] if the module indicated by @racket[mod] is
+declared (but not necessarily @tech{instantiate}d or @tech{visit}ed)
+in the current namespace, @racket[#f] otherwise.
+
+If @racket[load?] is @racket[#t] and @racket[mod] is not a
+@tech{resolved module path}, the module is loaded in the process of
+resolving @racket[mod] (as for @racket[dynamic-require] and other
+functions). Checking for the declaration of a @tech{submodule} does
+not trigger an exception if the submodule cannot be loaded because
+it does not exist, either within a root module that does exist or
+because the root module does not exist.}
+
+
 @defproc[(module->language-info
-          [mod (or/c module-path? path? resolved-module-path?)]
+          [mod (or/c module-path? module-path-index?
+                     resolved-module-path?)]
           [load? any/c #f])
          (or/c #f (vector/c module-path? symbol? any/c))]{
 
 Returns information intended to reflect the ``language'' of the
-implementation of @racket[mod]. If @racket[load?] is @racket[#f], the
+implementation of @racket[mod]. If @racket[mod] is a 
+@tech{resolved module path} or @racket[load?] is @racket[#f], the
 module named by @racket[mod] must be declared (but not necessarily
 @tech{instantiate}d or @tech{visit}ed) in the current namespace;
 otherwise, @racket[mod] may be loaded (as for @racket[dynamic-require]
@@ -401,7 +487,8 @@ implementation as compiled code.}
 
 
 @defproc[(module->imports
-          [mod (or/c module-path? path? resolved-module-path?)])
+          [mod (or/c module-path? module-path-index?
+                     resolved-module-path?)])
          (listof (cons/c (or/c exact-integer? #f) 
                          (listof module-path-index?)))]{
 
@@ -411,7 +498,7 @@ Like @racket[module-compiled-imports], but produces the imports of
 
 
 @defproc[(module->exports
-          [mod (or/c module-path? path? resolved-module-path?)])
+          [mod (or/c module-path? resolved-module-path?)])
          (values (listof (cons/c (or/c exact-integer? #f) list?))
                  (listof (cons/c (or/c exact-integer? #f) list?)))]{
 
@@ -420,7 +507,7 @@ Like @racket[module-compiled-exports], but produces the exports of
 @tech{instantiate}d or @tech{visit}ed) in the current namespace.}
 
 @defproc[(module-predefined?
-          [mod (or/c module-path? path? resolved-module-path?)])
+          [mod (or/c module-path? resolved-module-path?)])
          boolean?]{
 
 Reports whether @racket[mod] refers to a module that is predefined for

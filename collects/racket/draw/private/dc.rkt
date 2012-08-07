@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 
 (require "syntax.rkt"
          ffi/unsafe/atomic
@@ -237,7 +237,8 @@
 ;; time a font is used in a given map seems to stick,
 ;; at least for the Quartz and Win32 back-ends.
 ;; (But we create the font maps on demand.)
-(define font-maps (make-vector 4 #f))
+;; We fold hinting in, too, as an extra factor of 2.
+(define font-maps (make-vector 8 #f))
 
 (define (dc-mixin backend%)
   (defclass* dc% backend% (dc<%>)
@@ -310,6 +311,15 @@
             (begin
               (set! x-align-delta (/ (bitwise-and 1 (max 1 (inexact->exact (floor (* effective-scale-x w))))) 2.0))
               (set! y-align-delta (/ (bitwise-and 1 (max 1 (inexact->exact (floor (* effective-scale-y w))))) 2.0))))))
+
+    (define/private (sub1w w)
+      (if (aligned? smoothing)
+          (max 0.0 (- w (/ effective-scale-x)))
+          w))
+    (define/private (sub1h h)
+      (if (aligned? smoothing)
+          (max 0.0 (- h (/ effective-scale-y)))
+          h))
 
     (def/public (set-font [font% f])
       (set! font f))
@@ -546,7 +556,7 @@
 
     (define current-smoothing #f)
 
-    (define (set-font-antialias context smoothing)
+    (define (set-font-antialias context smoothing hinting)
       (let ([o (pango_cairo_context_get_font_options context)]
             [o2 (cairo_font_options_create)])
         (when o
@@ -560,8 +570,13 @@
            [(unsmoothed) CAIRO_ANTIALIAS_NONE]
            [(partly-smoothed) CAIRO_ANTIALIAS_GRAY]
            [(smoothed) CAIRO_ANTIALIAS_SUBPIXEL]))
-        (cairo_font_options_set_hint_metrics o2 CAIRO_HINT_METRICS_OFF)
-        ;; good idea?: (cairo_font_options_set_hint_style o2 CAIRO_HINT_STYLE_NONE)
+        (case hinting
+          [(aligned)
+           (cairo_font_options_set_hint_metrics o2 CAIRO_HINT_METRICS_ON)
+           (cairo_font_options_set_hint_style o2 CAIRO_HINT_STYLE_DEFAULT)]
+          [(unaligned)
+           (cairo_font_options_set_hint_metrics o2 CAIRO_HINT_METRICS_OFF)
+           (cairo_font_options_set_hint_style o2 CAIRO_HINT_STYLE_NONE)])
         (pango_cairo_context_set_font_options context o2)
         (cairo_font_options_destroy o2)))
 
@@ -575,17 +590,17 @@
       (let ([o pen])
         (send p adjust-lock 1)
         (set! pen p)
-        (send o adjust-lock -1)))
+        (send o adjust-lock -1))
+      (reset-align!))
 
     (define/public (set-pen . args)
       (case-args
        args
-       [([pen% p]) (do-set-pen! p) (reset-align!)]
+       [([pen% p]) (do-set-pen! p)]
        [([(make-alts string? color%) col]
          [pen-width? width]
          [pen-style-symbol? style])
-        (do-set-pen! (send the-pen-list find-or-create-pen col width style))
-        (reset-align!)]
+        (do-set-pen! (send the-pen-list find-or-create-pen col width style))]
        (method-name 'dc<%> 'set-pen)))
 
     (define/public (get-pen) pen)
@@ -817,13 +832,15 @@
                                (send st get-width) (send st get-height) 
                                0 0 mode col alpha #f)
                               get-cairo-surface))])])
-          (let* ([p (cairo_pattern_create_for_surface s)])
-            (cairo_pattern_set_extend p CAIRO_EXTEND_REPEAT)
-            (install-transformation transformation cr)
-            (cairo_set_source cr p)
-            (when transformation
-              (do-reset-matrix cr))
-            (cairo_pattern_destroy p))))
+          (install-surface s transformation)))
+      (define (install-surface s transformation)
+        (let* ([p (cairo_pattern_create_for_surface s)])
+          (cairo_pattern_set_extend p CAIRO_EXTEND_REPEAT)
+          (install-transformation transformation cr)
+          (cairo_set_source cr p)
+          (when transformation
+            (do-reset-matrix cr))
+          (cairo_pattern_destroy p)))
       (cairo_set_antialias cr (case (dc-adjust-smoothing smoothing)
                                 [(unsmoothed) CAIRO_ANTIALIAS_NONE]
                                 [else CAIRO_ANTIALIAS_GRAY]))
@@ -832,85 +849,100 @@
           (unless (eq? 'transparent s)
             (let ([st (send brush get-stipple)]
                   [col (send brush get-color)]
-                  [gradient (send brush get-gradient)])
-              (if (and gradient
-                       (not (collapse-bitmap-b&w?)))
-                  (make-gradient-pattern cr gradient (send brush get-transformation))
-                  (if st
-                      (install-stipple st col s 
-                                       (send brush get-transformation)
-                                       (lambda () brush-stipple-s)
-                                       (lambda (v) (set! brush-stipple-s v) v))
-                      (let ([horiz (lambda (cr2)
-                                     (cairo_move_to cr2 0 3.5)
-                                     (cairo_line_to cr2 12 3.5)
-                                     (cairo_move_to cr2 0 7.5)
-                                     (cairo_line_to cr2 12 7.5)
-                                     (cairo_move_to cr2 0 11.5)
-                                     (cairo_line_to cr2 12 11.5))]
-                            [vert (lambda (cr2)
-                                    (cairo_move_to cr2 3.5 0)
-                                    (cairo_line_to cr2 3.5 12)
-                                    (cairo_move_to cr2 7.5 0)
-                                    (cairo_line_to cr2 7.5 12)
-                                    (cairo_move_to cr2 11.5 0)
-                                    (cairo_line_to cr2 11.5 12))]
-                            [bdiag (lambda (cr2)
-                                     (for ([i (in-range -2 3)])
-                                       (let ([y (* i 6)])
-                                         (cairo_move_to cr2 -1 (+ -1 y))
-                                         (cairo_line_to cr2 13 (+ 13 y)))))]
-                            [fdiag (lambda (cr2)
-                                     (for ([i (in-range -2 3)])
-                                       (let ([y (* i 6)])
-                                         (cairo_move_to cr2 13 (+ -1 y))
-                                         (cairo_line_to cr2 -1 (+ 13 y)))))])
-                        
-                        (case s
-                          [(horizontal-hatch)
-                           (make-pattern-surface
-                            cr col
-                            horiz)]
-                          [(vertical-hatch)
-                           (make-pattern-surface
-                            cr col
-                            vert)]
-                          [(cross-hatch)
-                           (make-pattern-surface
-                            cr col
-                            (lambda (cr) (horiz cr) (vert cr)))]
-                          [(bdiagonal-hatch)
-                           (make-pattern-surface
-                            cr col
-                            bdiag)]
-                          [(fdiagonal-hatch)
-                           (make-pattern-surface
-                            cr col
-                            fdiag)]
-                          [(crossdiag-hatch)
-                           (make-pattern-surface
-                            cr col
-                            (lambda (cr) (bdiag cr) (fdiag cr)))]
-                          [else
-                           (install-color cr 
-                                          (if (eq? s 'hilite) hilite-color col)
-                                          alpha
-                                          #f)])))))
+                  [gradient (send brush get-gradient)]
+                  [handle-info (send brush get-surface-handle-info)])
+              (cond
+               [handle-info
+                (if (collapse-bitmap-b&w?)
+                    ;; convert surface to a stipple:
+                    (install-stipple (surface-handle-info->bitmap handle-info) col s
+                                     (send brush get-transformation)
+                                     (lambda () brush-stipple-s)
+                                     (lambda (v) (set! brush-stipple-s v) v))
+                    ;; normal use of surface:
+                    (install-surface (vector-ref handle-info 0) 
+                                     (send brush get-transformation)))]
+               [(and gradient
+                     (not (collapse-bitmap-b&w?)))
+                (make-gradient-pattern cr gradient (send brush get-transformation))]
+               [st
+                (install-stipple st col s 
+                                 (send brush get-transformation)
+                                 (lambda () brush-stipple-s)
+                                 (lambda (v) (set! brush-stipple-s v) v))]
+               [else
+                (let ([horiz (lambda (cr2)
+                               (cairo_move_to cr2 0 3.5)
+                               (cairo_line_to cr2 12 3.5)
+                               (cairo_move_to cr2 0 7.5)
+                               (cairo_line_to cr2 12 7.5)
+                               (cairo_move_to cr2 0 11.5)
+                               (cairo_line_to cr2 12 11.5))]
+                      [vert (lambda (cr2)
+                              (cairo_move_to cr2 3.5 0)
+                              (cairo_line_to cr2 3.5 12)
+                              (cairo_move_to cr2 7.5 0)
+                              (cairo_line_to cr2 7.5 12)
+                              (cairo_move_to cr2 11.5 0)
+                              (cairo_line_to cr2 11.5 12))]
+                      [bdiag (lambda (cr2)
+                               (for ([i (in-range -2 3)])
+                                 (let ([y (* i 6)])
+                                   (cairo_move_to cr2 -1 (+ -1 y))
+                                   (cairo_line_to cr2 13 (+ 13 y)))))]
+                      [fdiag (lambda (cr2)
+                               (for ([i (in-range -2 3)])
+                                 (let ([y (* i 6)])
+                                   (cairo_move_to cr2 13 (+ -1 y))
+                                   (cairo_line_to cr2 -1 (+ 13 y)))))])
+                  
+                  (case s
+                    [(horizontal-hatch)
+                     (make-pattern-surface
+                      cr col
+                      horiz)]
+                    [(vertical-hatch)
+                     (make-pattern-surface
+                      cr col
+                      vert)]
+                    [(cross-hatch)
+                     (make-pattern-surface
+                      cr col
+                      (lambda (cr) (horiz cr) (vert cr)))]
+                    [(bdiagonal-hatch)
+                     (make-pattern-surface
+                      cr col
+                      bdiag)]
+                    [(fdiagonal-hatch)
+                     (make-pattern-surface
+                      cr col
+                      fdiag)]
+                    [(crossdiag-hatch)
+                     (make-pattern-surface
+                      cr col
+                      (lambda (cr) (bdiag cr) (fdiag cr)))]
+                    [else
+                     (install-color cr 
+                                    (if (eq? s 'hilite) hilite-color col)
+                                    alpha
+                                    #f)]))]))
             (cairo_fill_preserve cr))))
       (when pen?
         (let ([s (send pen get-style)])
           (unless (eq? 'transparent s)
             (let ([st (send pen get-stipple)]
                   [col (send pen get-color)])
-              (if st
-                  (install-stipple st col s
-                                   #f
-                                   (lambda () pen-stipple-s)
-                                   (lambda (v) (set! pen-stipple-s v) v))
-                  (install-color cr 
-                                 (if (eq? s 'hilite) hilite-color col)
-                                 alpha
-                                 #f)))
+              (cond
+               [st
+                (install-stipple st col s
+                                 #f
+                                 (lambda () pen-stipple-s)
+                                 (lambda (v) (set! pen-stipple-s v) v))]
+               [else
+                (install-color cr 
+                               (if (eq? s 'hilite) hilite-color col)
+                               alpha
+                               #f)]))
             (cairo_set_line_width cr (let* ([v (send pen get-width)]
                                             [align? (aligned? smoothing)]
                                             [v (if align?
@@ -971,15 +1003,15 @@
       (with-cr 
        (check-ok who)
        cr
-       (let ([draw-one (lambda (align-x align-y brush? pen? d)
+       (let ([draw-one (lambda (align-x align-y brush? pen? sub1w sub1h)
                          (let* ([orig-x x]
                                 [orig-y y]
                                 [x (align-x x)]
                                 [y (align-y y)]
                                 [width (- (align-x (+ orig-x width)) x)]
-                                [width (if (width . >= . d) (- width d) width)]
+                                [width (sub1w width)]
                                 [height (- (align-y (+ orig-y height)) y)]
-                                [height (if (height . >= . d) (- height d) height)]
+                                [height (sub1h height)]
                                 [radius-x (/ width 2)]
                                 [radius-y (/ height 2)]
                                 [center-x (+ x radius-x)]
@@ -1001,9 +1033,10 @@
                              (cairo_restore cr)
                              (draw cr brush? pen?))))])
          (when (brush-draws?)
-           (draw-one (lambda (x) x) (lambda (y) y) #t #f 0.0))
+           (draw-one (lambda (x) x) (lambda (y) y) #t #f (lambda (x) x) (lambda (x) x)))
          (when (pen-draws?)
-           (draw-one (lambda (x) (align-x x)) (lambda (y) (align-y y)) #f #t 1.0)))))
+           (draw-one (lambda (x) (align-x x)) (lambda (y) (align-y y)) #f #t 
+                     (lambda (x) (sub1w x)) (lambda (x) (sub1h x)))))))
 
     (def/public (draw-arc [real? x] [real? y] [nonnegative-real? width] [nonnegative-real? height]
                           [real? start-radians] [real? end-radians])
@@ -1077,8 +1110,8 @@
          (cairo_new_path cr)
          (cairo_rectangle cr x y width height)
          (draw cr #t #f)
-         (let ([w2 (- (align-x (+ x (sub1 width))) ax)]
-               [h2 (- (align-y (+ y (sub1 height))) ay)])
+         (let ([w2 (- (align-x (+ x (sub1w width))) ax)]
+               [h2 (- (align-y (+ y (sub1h height))) ay)])
            (when (and (positive? w2)
                       (positive? h2))
              (cairo_new_path cr)
@@ -1102,7 +1135,7 @@
            (rounded-rect x y width height (lambda (x) x) (lambda (y) y))
            (draw cr #t #f))
          (when (pen-draws?)
-           (rounded-rect x y (sub1 width) (sub1 height)
+           (rounded-rect x y (sub1w width) (sub1h height)
                          (lambda (x) (align-x x)) (lambda (y) (align-y y)))
            (draw cr #f #t)))))
 
@@ -1140,18 +1173,17 @@
                                    CAIRO_FILL_RULE_WINDING
                                    CAIRO_FILL_RULE_EVEN_ODD))
        (cairo_new_path cr)
-       (cairo_translate cr dx dy)
        (if (aligned? smoothing)
            (begin
              (when (brush-draws?)
-               (send path do-path cr (lambda (x) x) (lambda (y) y))
+               (send path do-path cr (lambda (x) (+ dx x)) (lambda (y) (+ dy y)))
                (draw cr #t #f))
              (cairo_new_path cr)
              (when (pen-draws?)
-               (send path do-path cr (lambda (x) (align-x x)) (lambda (y) (align-y y)))
+               (send path do-path cr (lambda (x) (align-x (+ dx x))) (lambda (y) (align-y (+ dy y))))
                (draw cr #f #t)))
            (begin
-             (send path do-path cr (lambda (x) x) (lambda (y) y))
+             (send path do-path cr (lambda (x) (+ dx x)) (lambda (y) (+ dy y)))
              (draw cr #t #t)))
        (cairo_restore cr)))
 
@@ -1219,14 +1251,17 @@
                cr
                (do-text cr #f s 0 0 use-font combine? offset 0.0))))))
 
-    (define/private (get-smoothing-index)
-      (case (dc-adjust-smoothing (send font get-smoothing))
-	[(default) 0]
-	[(unsmoothed) 1]
-	[(partly-smoothed) 2]
-	[(smoothed) 3]))
+    (define/private (get-smoothing-index font)
+      (+ (case (dc-adjust-smoothing (send font get-smoothing))
+           [(default) 0]
+           [(unsmoothed) 1]
+           [(partly-smoothed) 2]
+           [(smoothed) 3])
+         (case (send font get-hinting)
+           [(aligned) 0]
+           [(unaligned) 4])))
 
-    (define/private (get-context cr smoothing-index)
+    (define/private (get-context cr smoothing-index font)
       (or (vector-ref contexts smoothing-index)
 	  (let ([c (pango_font_map_create_context
 		    (let ([fm (vector-ref font-maps smoothing-index)])
@@ -1236,7 +1271,9 @@
 			    fm))))])
 	    (pango_cairo_update_context cr c)
 	    (vector-set! contexts smoothing-index c)
-	    (set-font-antialias c (dc-adjust-smoothing (send font get-smoothing)))
+	    (set-font-antialias c 
+                                (dc-adjust-smoothing (send font get-smoothing)) 
+                                (send font get-hinting))
 	    c)))
 
     (define/private (do-text cr draw-mode s x y font combine? offset angle)
@@ -1253,8 +1290,8 @@
                     (regexp-replace* #rx"[\uFFFE\uFFFF]" s "\uFFFD")
                     s)]
              [rotate? (and draw-mode (not (zero? angle)))]
-             [smoothing-index (get-smoothing-index)]
-             [context (get-context cr smoothing-index)])
+             [smoothing-index (get-smoothing-index font)]
+             [context (get-context cr smoothing-index font)])
         (when draw-mode
           (when (eq? text-mode 'solid)
             (unless rotate?
@@ -1271,7 +1308,9 @@
           (cairo_rotate cr (- angle)))
         (let ([desc (get-pango font)]
               [attrs (send font get-pango-attrs)]
-              [integral round]
+              [force-hinting (case (send font get-hinting)
+                               [(aligned) round]
+                               [else values])]
               [x (if rotate? 0.0 (exact->inexact x))]
               [y (if rotate? 0.0 (exact->inexact y))])
           ;; We have two ways to draw text:
@@ -1286,7 +1325,8 @@
               ;; breaks the string into multiple layouts.
               (let loop ([s s] [draw-mode draw-mode] [measured? #f] [w 0.0] [h 0.0] [d 0.0] [a 0.0])
                 (cond
-                 [(not s)
+                 [(or (not s)
+                      (equal? s "")) ; can happen if last char is substituted
                   (when rotate? (cairo_restore cr))
                   (values w h d a)]
                  [else
@@ -1351,7 +1391,8 @@
                              [else
                               (let ([nw (if blank?
                                             0.0
-                                            (integral (/ (PangoRectangle-width logical) (exact->inexact PANGO_SCALE))))]
+                                            (force-hinting
+                                             (/ (PangoRectangle-width logical) (exact->inexact PANGO_SCALE))))]
                                     [na 0.0])
                                 (loop next-s draw-mode measured? (+ w nw) (max h nh) (max d nd) (max a na)))])))])))]))
               ;; This is character-by-character mode. It uses a cached per-character+font layout
@@ -1444,10 +1485,10 @@
                                             (memcpy glyph-infos i glyphs 1 _PangoGlyphInfo)
                                             ;; Every glyph is is own cluster:
                                             (ptr-set! log-clusters _int i i)
-                                            ;; Adjust width to be consistent with integral widths
+                                            ;; Adjust width to be consistent with measured widths
                                             ;; used when drawing individual characters.
                                             ;; This is `set-PangoGlyphInfo-width!', but without
-                                            ;; computing a 
+                                            ;; computing an intermediate pointer:
                                             (ptr-set! glyph-infos _uint32 'abs (+ (* i pgi-size) 4) (vector-ref v 5))
                                             (loop (add1 i))))))
                                ;; If we get here, we can use the fast way:
@@ -1481,10 +1522,9 @@
                                              (pango_layout_get_extents layout #f logical)
                                              (let ([baseline (pango_layout_get_baseline layout)]
                                                    [orig-h (PangoRectangle-height logical)])
-                                               ;; We keep integer width & height to pixel-align each individual character,
-                                               ;; but we keep non-integral lh & ld to pixel-align the baseline.
-                                               (let ([lw (integral (/ (PangoRectangle-width logical) 
-                                                                      (exact->inexact PANGO_SCALE)))]
+                                               (let ([lw (force-hinting
+                                                          (/ (PangoRectangle-width logical) 
+                                                             (exact->inexact PANGO_SCALE)))]
                                                      [flh (/ orig-h (exact->inexact PANGO_SCALE))]
                                                      [ld (/ (- orig-h baseline) (exact->inexact PANGO_SCALE))]
                                                      [la 0.0])
@@ -1820,8 +1860,8 @@
     (define/private (get-font-metric cr sel)
       (let* ([desc (get-pango font)]
 	     [attrs (send font get-pango-attrs)]
-	     [index (get-smoothing-index)]
-	     [context (get-context cr index)]
+	     [index (get-smoothing-index font)]
+	     [context (get-context cr index font)]
 	     [fontmap (vector-ref font-maps index)]
 	     [font (pango_font_map_load_font fontmap context desc)])
           (and font ;; else font match failed

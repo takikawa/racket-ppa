@@ -109,7 +109,9 @@ embedded in an object when the object is no longer used.
 
 Calling the @racket[will-execute] or @racket[will-try-execute]
 procedure executes a will that is ready in the specified will
-executor. Wills are not executed automatically, because certain
+executor. A will executor is also a @tech{synchronizable event}, so @racket[sync]
+or @racket[sync/timeout] can be used to detect when a will executor has
+ready wills. Wills are not executed automatically, because certain
 programs need control to avoid race conditions. However, a program can
 create a thread whose sole job is to execute wills for a particular
 executor.
@@ -175,7 +177,7 @@ value) before Racket starts to disable @tech{garbage collection}.
 
 In Racket 3m (the main variant of Racket), each garbage collection
 logs a message (see @secref["logging"]) at the @racket['debug] level.
-The data portion of the message is an instance of a @racket[gc-info]
+The data portion of the message is an instance of a @indexed-racket[gc-info]
 @tech{prefab} structure type with 10 fields as follows, but future
 versions of Racket may use a @racket[gc-info] @tech{prefab} structure
 with additional fields:
@@ -227,7 +229,7 @@ this procedure is never called (unless garbage collection is disabled).}
 
 Returns an estimate of the number of bytes of memory occupied by
 reachable data from @racket[cust].  This estimate is calculated by the
-last garbage colection, and can be 0 if none occurred (or if none occurred
+last garbage collection, and can be 0 if none occurred (or if none occurred
 since the given custodian was created).  The @racket[current-memory-use]
 function does @italic{not} perform a collection by itself; doing one
 before the call will generally decrease the result (or increase it from
@@ -240,7 +242,13 @@ When Racket is compiled without support for memory accounting, the
 estimate is the same (i.e., all memory) for any individual custodian;
 see also @racket[custodian-memory-accounting-available?].}
 
-@defproc[(dump-memory-stats) any]{
+@defproc[(dump-memory-stats [v any/c] ...) any]{
 
-Dumps information about memory usage to the (low-level) standard
-output port.}
+Dumps information about memory usage to the low-level error port
+ or console.
+
+Various combinations of @racket[v] arguments can control the
+information in a dump. The information that is available depends on
+your Racket build; check the end of a dump from a particular build to
+see if it offers additional information; otherwise, all @racket[v]s are
+ignored.}

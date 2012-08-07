@@ -1,6 +1,6 @@
 #lang racket/base
 (require racket/class
-         "syntax.rkt")
+         racket/contract/base)
 
 (provide gl-context%
          gl-context<%>
@@ -12,19 +12,16 @@
   do-call-as-current
   do-swap-buffers)
 
-(define (procedure-arity-0? v) 
-  (and (procedure? v)
-       (procedure-arity-includes? v 0)))
-
 (define lock-ch (make-channel))
 (define lock-holder-ch (make-channel))
 (define (lock-manager)
+  (define none '#(#f #f #f))
   (let loop ()
     (sync (handle-evt
            lock-ch
            (lambda (p)
-             (let ([t (car p)]
-                   [ch (cdr p)])
+             (let ([t (vector-ref p 0)]
+                   [ch (vector-ref p 2)])
                (let waiting-loop ()
                  (sync (handle-evt
                         (thread-dead-evt t)
@@ -33,43 +30,56 @@
                         ch
                         (lambda (v) (loop)))
                        (handle-evt
-                        (channel-put-evt lock-holder-ch t)
+                        (channel-put-evt lock-holder-ch p)
                         (lambda (v) (waiting-loop))))))))
           (handle-evt
-           (channel-put-evt lock-holder-ch #f)
+           (channel-put-evt lock-holder-ch none)
            (lambda (v) (loop))))))
 (define manager-t (thread/suspend-to-kill lock-manager))
 
+(define gl-context<%>
+  (interface ()
+    [call-as-current (->*m [(-> any)] [evt? any/c] any)]
+    [ok? (->m boolean?)]
+    [swap-buffers (->m any)]))
+
 ;; Implemented by subclasses:
-(defclass gl-context% object%
-  
-  (define/private (with-gl-lock t)
-    (thread-resume manager-t (current-thread))
-    (if (eq? (current-thread) (channel-get lock-holder-ch))
-        (t)
-        (let ([ch (make-channel)])
-          (dynamic-wind
-              (lambda ()
-                (channel-put lock-ch (cons (current-thread) ch)))
-              t
-              (lambda ()
-                (channel-put ch #t))))))
+(define gl-context%
+  (class* object% (gl-context<%>)
+    (define/private (with-gl-lock t alternate-evt enable-break?)
+      (thread-resume manager-t (current-thread))
+      (define current (channel-get lock-holder-ch))
+      (if (and (eq? (vector-ref current 0) (current-thread))
+               (eq? (vector-ref current 1) this))
+          (t)
+          ((if enable-break? sync/enable-break sync)
+           (let ([ch (make-channel)])
+             (handle-evt (channel-put-evt lock-ch (vector (current-thread) this ch))
+                         (lambda (val)
+                           (dynamic-wind
+                               void
+                               t
+                               (lambda ()
+                                 (channel-put ch #t))))))
+           alternate-evt)))
+    
+    (define/public (call-as-current t [alternate-evt never-evt] [enable-breaks? #f])
+      (with-gl-lock
+       (lambda ()
+         (do-call-as-current t))
+       alternate-evt
+       enable-breaks?))
 
-  (def/public (call-as-current [procedure-arity-0? t])
-    (with-gl-lock
-     (lambda ()
-       (do-call-as-current t))))
-        
-  (define/public (swap-buffers)
-    (with-gl-lock
-     (lambda ()
-       (do-swap-buffers))))
+    (define/public (swap-buffers)
+      (with-gl-lock
+       (lambda ()
+         (do-swap-buffers))
+       never-evt
+       #f))
 
-  (define/public (ok?) #t)
+    (define/public (ok?) #t)
 
-  (define/public (do-call-as-current t) (t))
-  (define/public (do-swap-buffers t) (void))
+    (define/public (do-call-as-current t) (t))
+    (define/public (do-swap-buffers t) (void))
 
-  (super-new))
-
-(define gl-context<%> (class->interface gl-context%))
+    (super-new)))

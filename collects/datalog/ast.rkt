@@ -3,16 +3,23 @@
          racket/match)
 
 (define srcloc/c
-  (or/c syntax?
-        false/c
+  (or/c #f
         (list/c any/c
                 (or/c exact-positive-integer? #f)
                 (or/c exact-nonnegative-integer? #f)
                 (or/c exact-nonnegative-integer? #f)
                 (or/c exact-positive-integer? #f))))
 
-(define datum/c (or/c string? symbol?))
-(define datum-equal? equal?)
+(define-struct predicate-sym (srcloc sym) #:prefab)
+(define datum/c (or/c string? symbol? predicate-sym?))
+(define (datum-equal? x y)
+  (match* (x y)
+    [((predicate-sym _ x) y)
+     (datum-equal? x y)]
+    [(x (predicate-sym _ y))
+     (datum-equal? x y)]
+    [(x y)
+     (equal? x y)]))
 
 (define-struct variable (srcloc sym) #:prefab)  
 (define (variable-equal? v1 v2)
@@ -78,6 +85,7 @@
  [srcloc/c contract?]
  [datum/c contract?]
  [datum-equal? (datum/c datum/c . -> . boolean?)]
+ [struct predicate-sym ([srcloc srcloc/c] [sym symbol?])]
  [struct variable ([srcloc srcloc/c]
                    [sym symbol?])]
  [variable-equal? (variable? variable? . -> . boolean?)]
@@ -87,7 +95,7 @@
  [term/c contract?]
  [term-equal? (term/c term/c . -> . boolean?)]
  [struct literal ([srcloc srcloc/c]
-                  [predicate datum/c]
+                  [predicate (or/c predicate-sym? string? symbol?)]
                   [terms (listof term/c)])]
  [literal-equal? (literal? literal? . -> . boolean?)]
  [struct external ([srcloc srcloc/c]

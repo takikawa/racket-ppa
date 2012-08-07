@@ -66,14 +66,16 @@ Draws a counter-clockwise circular arc, a part of the ellipse
 The current pen is used for the arc. If the current brush is not
  transparent, it is used to fill the wedge bounded by the arc plus
  lines (not drawn) extending to the center of the inscribed ellipse.
+ If both the pen and brush are non-transparent, the wedge is filled
+ with the brush before the arc is drawn with the pen. 
 
-If both the pen and brush are non-transparent, the wedge is filled
- with the brush before the arc is drawn with the pen. The wedge and
- arc meet so that no space is left between them, but the precise
- overlap between the wedge and arc is platform- and size-specific.
- Typically, the regions drawn by the brush and pen overlap.  More
- generally, the pen is centered over the outline of the arc, rounding
- toward the center in unsmoothed mode.
+The wedge and arc meet so that no space is left between them, but the
+ precise overlap between the wedge and arc is platform- and
+ size-specific.  Typically, the regions drawn by the brush and pen
+ overlap.  In unsmoothed or aligned mode, the path for the outline is
+ adjusted by shrinking the bounding ellipse width and height by one
+ drawing unit after scaling.
+
 
 @|DrawSizeNote|
 
@@ -83,7 +85,7 @@ If both the pen and brush are non-transparent, the wedge is filled
 @defmethod[(draw-bitmap [source (is-a?/c bitmap%)]
                         [dest-x real?]
                         [dest-y real?]
-                        [style (one-of/c 'solid 'opaque 'xor) 'solid]
+                        [style (or/c 'solid 'opaque 'xor) 'solid]
                         [color (is-a?/c color%) (send the-color-database find-color "black")]
                         [mask (or/c (is-a?/c bitmap%) #f) #f])
            boolean?]{
@@ -155,7 +157,7 @@ See also @method[dc<%> draw-bitmap-section].
                                 [src-y real?]
                                 [src-width (and/c real? (not/c negative?))]
                                 [src-height (and/c real? (not/c negative?))]
-                                [style (one-of/c 'solid 'opaque 'xor) 'solid]
+                                [style (or/c 'solid 'opaque 'xor) 'solid]
                                 [color (is-a?/c color%) (send the-color-database find-color "black")]
                                 [mask (or/c (is-a?/c bitmap%) #f) #f])
            boolean?]{
@@ -179,15 +181,16 @@ See @method[dc<%> draw-bitmap] for information about @racket[dest-x],
 
 Draws an ellipse contained in a rectangle with the given top-left
  corner and size. The current pen is used for the outline, and the
- current brush is used for filling the shape.
+ current brush is used for filling the shape. If both the pen and
+ brush are non-transparent, the ellipse is filled with the brush
+ before the outline is drawn with the pen.
 
-If both the pen and brush are non-transparent, the ellipse is filled
- with the brush before the outline is drawn with the pen. The filling
- and outline meet so that no space is left between them, but the
- precise overlap between the filling and outline is platform- and
- size-specific.  Typically, the regions drawn by the brush and pen
- overlap.  More generally, the pen is centered over the outline of the
- ellipse, rounding toward the center in unsmoothed mode.
+Brush filling and pen outline meet so that no space is left between
+ them, but the precise overlap between the filling and outline is
+ platform- and size-specific.  Thus, the regions drawn by the brush
+ and pen may partially overlap. In unsmoothed or aligned mode, the
+ path for the outline is adjusted by shrinking the ellipse width and
+ height by one drawing unit after scaling.
 
 @|DrawSizeNote|
 
@@ -236,7 +239,7 @@ See also @method[dc<%> set-smoothing] for information on the
 @defmethod[(draw-path [path (is-a?/c dc-path%)]
                       [xoffset real? 0]
                       [yoffset real? 0]
-                      [fill-style (one-of/c 'odd-even 'winding) 'odd-even])
+                      [fill-style (or/c 'odd-even 'winding) 'odd-even])
            void?]{
 
 Draws the sub-paths of the given @racket[dc-path%] object, adding
@@ -281,7 +284,7 @@ Plots a single point using the current pen.
                                        (listof (cons/c real? real?)))]
                          [xoffset real? 0]
                          [yoffset real? 0]
-                         [fill-style (one-of/c 'odd-even 'winding) 'odd-even])
+                         [fill-style (or/c 'odd-even 'winding) 'odd-even])
            void?]{
 
 Draw a filled polygon using a list @racket[points] of points, adding
@@ -324,17 +327,15 @@ See also @method[dc<%> set-smoothing] for information on the
 
 Draws a rectangle with the given top-left corner and size.  The
  current pen is used for the outline and the current brush for filling
- the shape.
+ the shape. If both the pen and brush are non-transparent, the
+ rectangle is filled with the brush before the outline is drawn with
+ the pen.
 
-If both the pen and brush are non-transparent, the rectangle is filled
- with the brush before the outline is drawn with the pen. In
- unsmoothed mode, when the pen is size 0 or 1, the filling precisely
- overlaps the entire outline. As a result, if a rectangle is drawn
- with a size-0 or size-1 @racket['xor] @racket[pen%] and an
- @racket['xor] @racket[brush%], the outline is xored twice (first by
- the brush, then by the pen), leaving it unchanged. More generally,
- the pen is centered over the outline of the rectangle, rounding
- toward the center in unsmoothed mode.
+In unsmoothed or aligned mode, when the pen is size 0 or 1, the
+ filling precisely overlaps the entire outline. More generally, in
+ unsmoothed or aligned mode, the path for the outline is adjusted by
+ shrinking the rectangle width and height by one drawing unit after
+ scaling.
 
 See also @method[dc<%> set-smoothing] for information on the
 @racket['aligned] smoothing mode.
@@ -354,7 +355,8 @@ See also @method[dc<%> set-smoothing] for information on the
 Draws a rectangle with the given top-left corner, and with the given
  size. The corners are quarter-circles using the given radius.  The
  current pen is used for the outline and the current brush for filling
- the shape.
+ the shape. If both the pen and brush are non-transparent, the rectangle is filled
+ with the brush before the outline is drawn with the pen.
 
 If @racket[radius] is positive, the value is used as the radius of the
  rounded corner. If @racket[radius] is negative, the absolute value is
@@ -364,14 +366,12 @@ If @racket[radius] is positive, the value is used as the radius of the
 If @racket[radius] is less than @racket[-0.5] or more than half of
  @racket[width] or @racket[height], @|MismatchExn|.
 
-If both the pen and brush are non-transparent, the rectangle is filled
- with the brush before the outline is drawn with the pen. The filling
- and outline meet so that no space is left between them, but the
- precise overlap between the filling and outline is platform- and
- size-specific.  Thus, the regions drawn by the brush and pen may
- partially overlap. More generally, the pen is centered over the
- outline of the rounded rectangle, rounding toward the center in
- unsmoothed mode.
+Brush filling and pen outline meet so that no space is left between
+ them, but the precise overlap between the filling and outline is
+ platform- and size-specific.  Thus, the regions drawn by the brush
+ and pen may partially overlap. In unsmoothed or aligned mode, the
+ path for the outline is adjusted by shrinking the rectangle width and
+ height by one drawing unit after scaling.
 
 See also @method[dc<%> set-smoothing] for information on the
 @racket['aligned] smoothing mode.
@@ -658,7 +658,7 @@ Gets the size of the destination drawing area. For a @racket[dc<%>]
 }
 
 @defmethod[(get-smoothing)
-           (one-of/c 'unsmoothed 'smoothed 'aligned)]{
+           (or/c 'unsmoothed 'smoothed 'aligned)]{
 
 Returns the current smoothing mode. See @method[dc<%> set-smoothing].
 
@@ -736,7 +736,7 @@ set-text-foreground].
 
 
 @defmethod[(get-text-mode)
-           (one-of/c 'solid 'transparent)]{
+           (or/c 'solid 'transparent)]{
 Reports how text is drawn; see
 @method[dc<%> set-text-mode].}
 
@@ -850,18 +850,18 @@ treated as white.
 @defmethod*[([(set-brush [brush (is-a?/c brush%)])
               void?]
              [(set-brush [color (is-a?/c color%)]
-                         [style (one-of/c 'transparent 'solid 'opaque 
-                                          'xor 'hilite 'panel 
-                                          'bdiagonal-hatch 'crossdiag-hatch
-                                          'fdiagonal-hatch 'cross-hatch 
-                                          'horizontal-hatch 'vertical-hatch)])
+                         [style (or/c 'transparent 'solid 'opaque 
+                                      'xor 'hilite 'panel 
+                                      'bdiagonal-hatch 'crossdiag-hatch
+                                      'fdiagonal-hatch 'cross-hatch 
+                                      'horizontal-hatch 'vertical-hatch)])
               void?]
              [(set-brush [color-name string?]
-                         [style (one-of/c 'transparent 'solid 'opaque 
-                                          'xor 'hilite 'panel
-                                          'bdiagonal-hatch 'crossdiag-hatch
-                                          'fdiagonal-hatch 'cross-hatch
-                                          'horizontal-hatch 'vertical-hatch)])
+                         [style (or/c 'transparent 'solid 'opaque 
+                                      'xor 'hilite 'panel
+                                      'bdiagonal-hatch 'crossdiag-hatch
+                                      'fdiagonal-hatch 'cross-hatch
+                                      'horizontal-hatch 'vertical-hatch)])
               void?])]{
 
 Sets the current brush for drawing in this object.  While a brush is
@@ -947,17 +947,17 @@ See also @method[dc<%> translate], which adds a translation to the
               void?]
              [(set-pen [color (is-a?/c color%)]
                        [width (real-in 0 255)]
-                       [style (one-of/c 'transparent 'solid 'xor 'hilite
-                                        'dot 'long-dash 'short-dash 'dot-dash 
-                                        'xor-dot 'xor-long-dash 'xor-short-dash 
-                                        'xor-dot-dash)])
+                       [style (or/c 'transparent 'solid 'xor 'hilite
+                                    'dot 'long-dash 'short-dash 'dot-dash 
+                                    'xor-dot 'xor-long-dash 'xor-short-dash 
+                                    'xor-dot-dash)])
               void?]
              [(set-pen [color-name string?]
                        [width (real-in 0 255)]
-                       [style (one-of/c 'transparent 'solid 'xor 'hilite 
-                                        'dot 'long-dash 'short-dash 'dot-dash 
-                                        'xor-dot 'xor-long-dash 'xor-short-dash 
-                                        'xor-dot-dash)])
+                       [style (or/c 'transparent 'solid 'xor 'hilite 
+                                    'dot 'long-dash 'short-dash 'dot-dash 
+                                    'xor-dot 'xor-long-dash 'xor-short-dash 
+                                    'xor-dot-dash)])
               void?])]{
 
 Sets the current pen for this object. When a color, width, and style
@@ -1001,7 +1001,7 @@ See also @method[dc<%> scale], which adds a scale to the current
 
 }
 
-@defmethod[(set-smoothing [mode (one-of/c 'unsmoothed 'smoothed 'aligned)])
+@defmethod[(set-smoothing [mode (or/c 'unsmoothed 'smoothed 'aligned)])
            void?]{
 
 Enables or disables anti-aliased smoothing for drawing. (Text
@@ -1061,7 +1061,7 @@ For monochrome drawing, all non-black colors are treated as
 
 }
 
-@defmethod[(set-text-mode [mode (one-of/c 'solid 'transparent)])
+@defmethod[(set-text-mode [mode (or/c 'solid 'transparent)])
            void?]{
 
 Determines how text is drawn:
@@ -1091,7 +1091,7 @@ get-transformation] for information about @racket[t].}
 
 
 @defmethod[(start-doc [message string?])
-           boolean?]{
+           void?]{
 
 Starts a document, relevant only when drawing to a printer,
  PostScript, PDF, or SVG device.  For some

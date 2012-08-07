@@ -1,10 +1,11 @@
-#lang scheme/base
-(require scheme/class
+#lang racket/base
+(require racket/class
          "../syntax.rkt"
          "private.rkt"
          racket/snip/private/private
          "const.rkt"
-         racket/snip
+         racket/snip/private/snip
+         racket/snip/private/snip-admin
          racket/snip/private/snip-flags
          "standard-snip-admin.rkt"
          "editor.rkt"

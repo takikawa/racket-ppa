@@ -208,7 +208,7 @@ case-sensitive mode.
 @section-index["numbers" "parsing"]
 
 A sequence that does not start with a delimiter is parsed as a @tech{number}
-when it matches the following grammar case-insenstively for
+when it matches the following grammar case-insensitively for
 @nonterm{number@sub{10}} (decimal), where @metavar{n} is a
 meta-meta-variable in the grammar. The resulting number is @tech{interned} in 
 @racket[read-syntax] mode.
@@ -349,7 +349,7 @@ elements are themselves in @racket[read-syntax] mode, so that the
 result is a list or pair of syntax objects that is itself wrapped as a
 syntax object. If the reader constructs nested pairs because the input
 included a single delimited @litchar{.}, then only the innermost pair
-and outtermost pair are wrapped as syntax objects. Whether wrapping a
+and outermost pair are wrapped as syntax objects. Whether wrapping a
 pair or list, if the pair or list was formed with @litchar{[} and
 @litchar{]}, then a @indexed-racket['paren-shape] property is attached
 to the result with the value @racket[#\[]; if the list or pair was
@@ -438,11 +438,21 @@ Within a string sequence, the following escape sequences are
        takes precedence over the shorter form.}
 
  @item{@as-index{@litchar{\u}@kleenerange[1
-       4]{@nonterm{digit@sub{16}}}}: like @litchar{\x}, but with up
-       to four hexadecimal digits (longer sequences take precedence).
+       4]{@nonterm{digit@sub{16}}}}: like @litchar{\x}, but with up to
+       four hexadecimal digits (longer sequences take precedence).
        The resulting hexadecimal number must be a valid argument to
        @racket[integer->char], otherwise the
-       @exnraise[exn:fail:read].}
+       @exnraise[exn:fail:read]---unless the encoding continues with
+       another @litchar{\u} to form a surrogate-style encoding.}
+
+ @item{@as-index{@litchar{\u}@kleenerange[4
+       4]{@nonterm{digit@sub{16}}}@litchar{\u}@kleenerange[4
+       4]{@nonterm{digit@sub{16}}}}: like @litchar{\u}, but for two
+       hexadecimal numbers, where the first is in the range
+       @code{#xD800} to @code{#xDBFF} and the second is in the
+       range @code{#xDC00} to @code{#xDFFF}; the resulting
+       character is the one represented by the numbers as a UTF-16
+       surrogate pair.}
 
  @item{@as-index{@litchar{\U}@kleenerange[1
        8]{@nonterm{digit@sub{16}}}}: like @litchar{\x}, but with up
@@ -458,7 +468,7 @@ Within a string sequence, the following escape sequences are
 
 ]
 
-If the reader encounteres any other use of a backslash in a string
+If the reader encounters any other use of a backslash in a string
 constant, the @exnraise[exn:fail:read].
 
 @guideintro["bytestrings"]{the syntax of byte strings}
@@ -499,7 +509,7 @@ encountered before a terminating line, the @exnraise[exn:fail:read].
 
 @section[#:tag "parse-quote"]{Reading Quotes}
 
-When the reader enounters @as-index{@litchar{'}}, it recursively
+When the reader encounters @as-index{@litchar{'}}, it recursively
 reads one datum and forms a new list containing the @tech{symbol}
 @racket['quote] and the following datum. This convention is mainly
 useful for reading Racket code, where @racket['s] can be used as a
@@ -837,8 +847,13 @@ of alphanumeric ASCII, @litchar{+}, @litchar{-}, @litchar{_}, and/or
 @litchar{/} characters terminated by
 @racketlink[char-whitespace?]{whitespace} or an end-of-file.  The
 sequence must not start or end with @litchar{/}. A sequence
-@litchar{#lang }@nonterm{name} is equivalent to
-@litchar{#reader }@nonterm{name}@litchar{/lang/reader}. Note
+@litchar{#lang }@nonterm{name} is equivalent to either
+@litchar{#reader (submod }@nonterm{name}@litchar{ reader)} or
+@litchar{#reader }@nonterm{name}@litchar{/lang/reader}, where the
+former is tried first guarded by a @racket[module-declared?] 
+check (but after filtering by
+@racket[current-reader-guard], so both are passed to the
+value of @racket[current-reader-guard] if the latter is used). Note
 that the terminating whitespace (if any) is not consumed before the
 external reading procedure is called.
 

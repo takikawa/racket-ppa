@@ -44,6 +44,7 @@
 
       (define font-size base-font-size)
       (define gap-size (* 3/4 font-size))
+      (define current-gap-size (make-parameter gap-size))
       (define line-sep 2)
       (define title-size (+ font-size 4))
       (define main-font (if (and (not printing?)
@@ -79,7 +80,7 @@
 						(integer? x)
 						(exact? x)
 						(positive? x))
-				     (raise-type-error 'current-font-size "exact non-negative integer" x))
+				     (raise-argument-error 'current-font-size "nonnegative-exact-integer?" x))
 				   x)))
 
       (define current-title-color (make-parameter
@@ -87,9 +88,9 @@
 				   (lambda (x)
 				     (unless (or (string? x)
 						 (x . is-a? . color%))
-				       (raise-type-error 'current-title-color
-							 "string or color% object"
-							 x))
+				       (raise-argument-error 'current-title-color
+                                                             "(or/c string? (is-a?/c color%))"
+                                                             x))
 				     x)))
 
       (define (t s) (text s (current-main-font) (current-font-size)))
@@ -165,19 +166,19 @@
 	 (make-object font% 10 'default 'normal 'normal)
 	 (lambda (f)
 	   (unless (f . is-a? . font%)
-	     (raise-type-error 'current-page-number-font "font%" f))
+	     (raise-argument-error 'current-page-number-font "(is-a?/c font%)" f))
 	   f)))
       (define current-page-number-color 
 	(make-parameter (make-object color% "black")
 			(lambda (s)
 			  (unless (s . is-a? . color%)
-			    (raise-type-error 'current-page-number-color "color%" s))
+			    (raise-argument-error 'current-page-number-color "(is-a?/c color%)" s))
 			  s)))
       (define current-page-number-adjust (make-parameter 
                                           (λ (n s) s)
                                           (lambda (f)
                                             (unless (procedure-arity-includes? f 2)
-                                              (raise-type-error 'current-page-number-adjust "procedure that accepts 2 arguments" f))
+                                              (raise-argument-error 'current-page-number-adjust "(procedure-arity-includes/c 2)" f))
                                             f)))
       
       (define page-number 1)
@@ -268,7 +269,7 @@
       (define-struct name-only (title))
       (define-struct name+title (name title))
 
-      (define (one-slide/title/inset do-add-slide! use-assem? process v-sep skipped-pages s inset timeout . x) 
+      (define (one-slide/title/inset do-add-slide! use-assem? process v-sep skipped-pages s inset timeout a-gap-size . x) 
 	(let-values ([(x c)
 		      (let loop ([x x][c #f][r null])
 			(cond
@@ -286,7 +287,7 @@
                                    s))
 			  v-sep
 			  (apply vc-append 
-				 gap-size
+				 a-gap-size
 				 (map evenize-width (process x))))])
 	    (do-add-slide!
 	     content
@@ -308,7 +309,8 @@
 	       string
 	       args))
 
-      (define (do-slide/title/tall/inset do-add-slide! use-assem? skip-ok? skip-all? process v-sep s inset timeout . x)
+      (define (do-slide/title/tall/inset do-add-slide! use-assem? skip-ok? skip-all? process v-sep s 
+                                         inset timeout a-gap-size . x)
 	;; Check slides:
 	(let loop ([l x][nested null])
 	  (or (null? l)
@@ -341,7 +343,8 @@
              (if skip-all?
                  (add1 skipped)
                  (begin
-                   (apply one-slide/title/inset do-add-slide! use-assem? process v-sep skipped s inset timeout (reverse r))
+                   (apply one-slide/title/inset do-add-slide! use-assem? process v-sep skipped s 
+                          inset timeout a-gap-size (reverse r))
                    0))]
             [(memq (car l) '(nothing))
              (loop (cdr l) r comment skip-all? skipped)]
@@ -350,7 +353,8 @@
                (let ([skipped (if skip?
                                   (add1 skipped)
                                   (begin
-                                    (apply one-slide/title/inset do-add-slide! use-assem? process v-sep skipped s inset timeout (reverse r))
+                                    (apply one-slide/title/inset do-add-slide! use-assem? process v-sep skipped s 
+                                           inset timeout a-gap-size (reverse r))
                                     0))])
                  (loop (cdr l) r comment skip-all? skipped)))]
             [(memq (car l) '(alts alts~)) 
@@ -374,6 +378,7 @@
                                       #:timeout [timeout #f]
                                       #:layout [layout 'auto]
                                       #:condense? [condense-this? timeout]
+                                      #:gap-size [a-gap-size (current-gap-size)]
                                       . body)
                        (let ([t (if s
                                     (if (equal? name s)
@@ -392,19 +397,21 @@
                             (apply do-slide/title/tall/inset 
                                    do-add-slide! #t #t (and condense? condense-this?) values
                                    (if (eq? layout 'tall)
-                                       gap-size 
-                                       (* 2 gap-size))
+                                       a-gap-size 
+                                       (* 2 a-gap-size))
                                    t
-                                   inset 
-                                   timeout 
+                                   inset
+                                   timeout
+                                   a-gap-size
                                    body)]
                            [else ; center, auto
-                            (apply slide/title/center/inset/timeout 
+                            (apply slide/title/center/inset/timeout/gap 
                                    (or (not s) (eq? layout 'center))
                                    (and condense? condense-this?)
                                    t
                                    inset 
                                    timeout 
+                                   a-gap-size
                                    body)]))
                        (void))])
           slide))
@@ -413,7 +420,7 @@
 	(make-sinset l t r b))
 
       (define (slide/title/tall/inset/gap v-sep s inset . x)
-	(apply do-slide/title/tall/inset do-add-slide! #t #t #f values v-sep s inset #f x))
+	(apply do-slide/title/tall/inset do-add-slide! #t #t #f values v-sep s inset #f gap-size x))
 
       (define (slide/title/tall/inset s inset . x)
 	(apply slide/title/tall/inset/gap gap-size s inset x))
@@ -422,7 +429,7 @@
 	(apply slide/title/tall/inset (make-name-only s) inset x))
 
       (define (slide/title/tall/gap v-sep s timeout . x)
-	(apply do-slide/title/tall/inset do-add-slide! #t #t #f values v-sep s zero-inset timeout x))
+	(apply do-slide/title/tall/inset do-add-slide! #t #t #f values v-sep s zero-inset timeout gap-size x))
 
       (define (slide/title/tall s . x)
 	(apply slide/title/tall/gap gap-size s #f x))
@@ -452,10 +459,13 @@
         (apply slide/title/center/inset/timeout #t #f s inset #f x))
 
       (define (slide/title/center/inset/timeout always-center? skip-all? s inset timeout . x)
+        (apply slide/title/center/inset/timeout/gap always-center? skip-all? s inset timeout gap-size x))
+
+      (define (slide/title/center/inset/timeout/gap always-center? skip-all? s inset timeout a-gap-size . x)
 	(let ([max-width 0]
 	      [max-height 0]
 	      [combine (lambda (x)
-			 (apply vc-append gap-size
+			 (apply vc-append a-gap-size
 				(map
 				 evenize-width
 				 x)))])
@@ -468,11 +478,11 @@
 		 #f
                  #f
 		 (lambda (x) (list (combine x)))
-		 0 #f inset timeout x)
+		 0 #f inset timeout a-gap-size x)
           (let ([center? (or always-center?
                              (max-height . < . (- client-h 
                                                   (* 2
-                                                     (+ (* 2 gap-size)
+                                                     (+ (* 2 a-gap-size)
                                                         title-h)))))])
             (apply do-slide/title/tall/inset
                    do-add-slide!
@@ -490,8 +500,8 @@
                             (blank max-width max-height)
                             (combine x)))))
                        values)
-                   (if center? 0 (* 2 gap-size))
-                   s inset timeout x))))
+                   (if center? 0 (* 2 a-gap-size))
+                   s inset timeout a-gap-size x))))
 
       (define (slide/name/center/inset s inset . x)
 	(apply slide/title/center/inset (make-name-only s) inset x))
@@ -530,7 +540,7 @@
       (define re-slide
 	(lambda (s [addition #f])
 	  (unless (sliderec? s)
-	    (raise-type-error 're-slide "slide" s))
+	    (raise-argument-error 're-slide "slide?" s))
 	  (viewer:add-talk-slide!
 	   (make-sliderec
 	    (let ([orig (sliderec-drawer s)]
@@ -550,6 +560,12 @@
 	    null
             (sliderec-timeout s)))
 	  (set! page-number (+ page-number 1))))
+      
+      (define (slide->pict s)
+        (unless (sliderec? s)
+          (raise-argument-error 'slide->pict "slide?" s))
+        (let ([orig (sliderec-drawer s)])
+          (dc orig client-w client-h)))
 
       (define (start-at-recent-slide)
 	(viewer:set-init-page! (max 0 (- page-number 2))))
@@ -831,17 +847,20 @@
       ;; ----------------------------------------
 
       (define item/kw
-        (let ([item (lambda (#:bullet [bullet bullet]
-                                      #:width [width (current-para-width)]
-                                      #:align [align 'left]
-                                      #:fill? [fill? #t]
-                                      #:decode? [decode? #t]
+        (let ([item (lambda (#:gap-size [a-gap-size (current-gap-size)]
+                                        #:bullet [bullet (if (eq? a-gap-size gap-size)
+                                                             bullet
+                                                             (scale bullet (/ a-gap-size gap-size)))]
+                                        #:width [width (current-para-width)]
+                                        #:align [align 'left]
+                                        #:fill? [fill? #t]
+                                        #:decode? [decode? #t]
                                       . s)
-                      (htl-append (/ gap-size 2)
+                      (htl-append (/ a-gap-size 2)
                                   bullet 
                                   (para/kw #:width (- width
                                                       (pict-width bullet) 
-                                                      (/ gap-size 2)) 
+                                                      (/ a-gap-size 2)) 
                                            #:align align
                                            #:fill? fill?
                                            #:decode? decode?
@@ -882,23 +901,26 @@
       ;; ----------------------------------------
 
       (define subitem/kw
-        (let ([subitem (lambda (#:bullet [bullet o-bullet]
-                                         #:width [width (current-para-width)]
-                                         #:align [align 'left]
-                                         #:fill? [fill? #t]
-                                         #:decode? [decode? #t]
-                                         . s)
-                         (inset (htl-append (/ gap-size 2)
+        (let ([subitem (lambda (#:gap-size [a-gap-size (current-gap-size)]
+                                           #:bullet [bullet (if (eq? gap-size a-gap-size)
+                                                                o-bullet
+                                                                (scale o-bullet (/ a-gap-size gap-size)))]
+                                           #:width [width (current-para-width)]
+                                           #:align [align 'left]
+                                           #:fill? [fill? #t]
+                                           #:decode? [decode? #t]
+                                           . s)
+                         (inset (htl-append (/ a-gap-size 2)
                                             bullet 
                                             (para/kw #:width (- width
-                                                                (* 2 gap-size)
+                                                                (* 2 a-gap-size)
                                                                 (pict-width bullet) 
-                                                                (/ gap-size 2)) 
+                                                                (/ a-gap-size 2)) 
                                                      #:align align
                                                      #:fill? fill?
                                                      #:decode? decode?
                                                      s))
-                                (* 2 gap-size) 0 0 0))])
+                                (* 2 a-gap-size) 0 0 0))])
           subitem))
 
       (define (subitem* w . s)

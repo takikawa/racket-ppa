@@ -8,13 +8,9 @@
 
 (provide bitmap->flomap flomap->bitmap draw-flomap)
 
-(define-syntax-rule (unsafe-fl->byte y)
-  (let ([x  (unsafe-flmax 0.0 (unsafe-flmin 255.0 y))])
-    (cond [(and (x . unsafe-fl> . -inf.0) (x . unsafe-fl< . +inf.0))
-           (unsafe-fl->fx (unsafe-flround x))]
-          [else  0.0])))
-
 (define (bitmap->flomap bm)
+  (unless (is-a? bm bitmap%)
+    (raise-type-error 'bitmap->flomap "bitmap% instance" bm))
   (define w (send bm get-width))
   (define h (send bm get-height))
   (define bs (make-bytes (* 4 w h)))
@@ -37,6 +33,11 @@
     (unsafe-flvector-set! argb-vs i3 (unsafe-fl/ (unsafe-fx->fl b) 255.0)))
   
   argb-fm)
+
+(define (unsafe-fl->byte x)
+  (unsafe-fl->fx
+   (unsafe-flround
+    (unsafe-flmax 0.0 (unsafe-flmin 255.0 (unsafe-fl* x 255.0))))))
 
 (define (flomap->bitmap fm)
   (match-define (flomap vs c w h) fm)
@@ -62,17 +63,17 @@
       (define r (unsafe-flvector-ref vs i1))
       (define g (unsafe-flvector-ref vs i2))
       (define b (unsafe-flvector-ref vs i3))
-      (unsafe-bytes-set! bs i0 (unsafe-fl->byte (unsafe-fl* 255.0 a)))
-      (unsafe-bytes-set! bs i1 (unsafe-fl->byte (unsafe-fl* 255.0 r)))
-      (unsafe-bytes-set! bs i2 (unsafe-fl->byte (unsafe-fl* 255.0 g)))
-      (unsafe-bytes-set! bs i3 (unsafe-fl->byte (unsafe-fl* 255.0 b))))
+      (unsafe-bytes-set! bs i0 (unsafe-fl->byte a))
+      (unsafe-bytes-set! bs i1 (unsafe-fl->byte r))
+      (unsafe-bytes-set! bs i2 (unsafe-fl->byte g))
+      (unsafe-bytes-set! bs i3 (unsafe-fl->byte b)))
     
     (define bm (make-bitmap w h))
     (send bm set-argb-pixels 0 0 w h bs #t #t)
     (send bm set-argb-pixels 0 0 w h bs #f #t)
     bm))
 
-(define (draw-flomap w h draw-proc)
+(define (draw-flomap draw-proc w h)
   (unless (w . >= . 0) (raise-type-error 'draw-flomap "nonnegative fixnum" 0 w h draw-proc))
   (unless (h . >= . 0) (raise-type-error 'draw-flomap "nonnegative fixnum" 1 w h draw-proc))
   

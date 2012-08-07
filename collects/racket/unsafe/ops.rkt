@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 (require '#%unsafe
          '#%flfxnum)
 
@@ -7,4 +7,4 @@
                      (combine-out flsin flcos fltan
                                   flasin flacos flatan
                                   fltruncate flround flfloor flceiling
-                                  flexp fllog)))
+                                  flexp fllog flexpt)))

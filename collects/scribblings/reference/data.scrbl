@@ -3,6 +3,8 @@
 
 @title[#:style 'toc #:tag "data"]{Datatypes}
 
+@guideintro["datatypes"]{Datatypes}
+
 Each pre-defined datatype comes with a set of procedures for
 manipulating instances of the datatype.
 
@@ -114,6 +116,27 @@ For any @racket[v], @racket[(unbox (box v))] returns @racket[v].
                    [v any/c]) void?]{
 
 Sets the content of @racket[box] to @racket[v].}
+
+
+@defproc[(box-cas! [box (and/c box? (not/c immutable?) (not/c impersonator?))]
+                   [old any/c] 
+                   [new any/c]) 
+         boolean?]{
+  Atomically updates the contents of @racket[box] to @racket[new], provided
+  that @racket[box] currently contains a value that is @racket[eq?] to
+  @racket[old], and returns @racket[#t] in that case.  If @racket[box] 
+  does not contain @racket[old], then the result is @racket[#f].
+
+  If no other @tech{threads} or @tech{futures} attempt to access
+  @racket[box], the operation is equivalent to 
+
+  @racketblock[
+  (and (eq? old (unbox loc)) (set-box! loc new) #t)]
+
+  When Racket is compiled with support for @tech{futures},
+  @racket[box-cas!] uses a hardware @emph{compare and set} operation.
+  Uses of @racket[box-cas!] be performed safely in a @tech{future} (i.e.,
+  allowing the future thunk to continue in parallel). }
 
 @; ----------------------------------------------------------------------
 @include-section["hashes.scrbl"]

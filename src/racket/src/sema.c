@@ -33,10 +33,12 @@ static Scheme_Object *block_sema_p(int n, Scheme_Object **p);
 static Scheme_Object *block_sema(int n, Scheme_Object **p);
 static Scheme_Object *block_sema_breakable(int n, Scheme_Object **p);
 static Scheme_Object *make_sema_repost(int n, Scheme_Object **p);
+static Scheme_Object *is_sema_repost(int n, Scheme_Object **p);
 
 static Scheme_Object *make_channel(int n, Scheme_Object **p);
 static Scheme_Object *make_channel_put(int n, Scheme_Object **p);
 static Scheme_Object *channel_p(int n, Scheme_Object **p);
+static Scheme_Object *channel_put_p(int n, Scheme_Object **p);
 
 static Scheme_Object *thread_send(int n, Scheme_Object **p);
 static Scheme_Object *thread_receive(int n, Scheme_Object **p);
@@ -126,6 +128,11 @@ void scheme_init_sema(Scheme_Env *env)
 						      "semaphore-peek-evt", 
 						      1, 1), 
 			     env);
+  scheme_add_global_constant("semaphore-peek-evt?", 
+			     scheme_make_folding_prim(is_sema_repost,
+						      "semaphore-peek-evt?", 
+						      1, 1, 1), 
+			     env);
 
   scheme_add_global_constant("make-channel", 
 			     scheme_make_prim_w_arity(make_channel,
@@ -142,6 +149,11 @@ void scheme_init_sema(Scheme_Env *env)
 						      "channel?",
 						      1, 1, 1), 
 			     env);  
+  scheme_add_global_constant("channel-put-evt?", 
+			     scheme_make_folding_prim(channel_put_p,
+                                                      "channel-put-evt?",
+                                                      1, 1, 1), 
+			     env);
 
   scheme_add_global_constant("thread-send", 
 			     scheme_make_prim_w_arity(thread_send,
@@ -230,7 +242,7 @@ intptr_t scheme_get_semaphore_init(const char *who, int n, Scheme_Object **p)
   if (n) {
     if (!SCHEME_INTP(p[0])) {
       if (!SCHEME_BIGNUMP(p[0]) || !SCHEME_BIGPOS(p[0]))
-	scheme_wrong_type(who, "non-negative exact integer", 0, n, p);
+	scheme_wrong_contract(who, "exact-nonnegative-integer?", 0, n, p);
     }
 
     if (!scheme_get_int_val(p[0], &v)) {
@@ -239,7 +251,7 @@ intptr_t scheme_get_semaphore_init(const char *who, int n, Scheme_Object **p)
                        who,
 		       scheme_make_provided_string(p[0], 0, NULL));
     } else if (v < 0)
-      scheme_wrong_type(who, "non-negative exact integer", 0, n, p);
+      scheme_wrong_contract(who, "exact-nonnegative-integer?", 0, n, p);
   } else
     v = 0;
   
@@ -256,7 +268,7 @@ static Scheme_Object *make_sema(int n, Scheme_Object **p)
 static Scheme_Object *make_sema_repost(int n, Scheme_Object **p)
 {
   if (!SCHEME_SEMAP(p[0]))
-    scheme_wrong_type("semaphore-peek-evt", "semaphore", 0, n, p);
+    scheme_wrong_contract("semaphore-peek-evt", "semaphore?", 0, n, p);
  
   return scheme_make_sema_repost(p[0]);
 }
@@ -270,6 +282,13 @@ Scheme_Object *scheme_make_sema_repost(Scheme_Object *sema)
   SCHEME_PTR_VAL(o) = sema;
 
   return o;
+}
+
+static Scheme_Object *is_sema_repost(int n, Scheme_Object **p)
+{
+  return (SAME_TYPE(SCHEME_TYPE(p[0]), scheme_semaphore_repost_type)
+          ? scheme_true
+          : scheme_false);
 }
 
 static Scheme_Object *semap(int n, Scheme_Object **p)
@@ -355,7 +374,7 @@ void scheme_post_sema_all(Scheme_Object *o)
 static Scheme_Object *hit_sema(int n, Scheme_Object **p)
 {
   if (!SCHEME_SEMAP(p[0]))
-    scheme_wrong_type("semaphore-post", "semaphore", 0, n, p);
+    scheme_wrong_contract("semaphore-post", "semaphore?", 0, n, p);
 
   scheme_post_sema(p[0]);
 
@@ -909,7 +928,7 @@ int scheme_wait_sema(Scheme_Object *o, int just_try)
 static Scheme_Object *block_sema_p(int n, Scheme_Object **p)
 {
   if (!SCHEME_SEMAP(p[0]))
-    scheme_wrong_type("semaphore-try-wait?", "sema", 0, n, p);
+    scheme_wrong_contract("semaphore-try-wait?", "semaphore?", 0, n, p);
 
   return scheme_wait_sema(p[0], 1) ? scheme_true : scheme_false;
 }
@@ -917,7 +936,7 @@ static Scheme_Object *block_sema_p(int n, Scheme_Object **p)
 static Scheme_Object *block_sema(int n, Scheme_Object **p)
 {
   if (!SCHEME_SEMAP(p[0]))
-    scheme_wrong_type("semaphore-wait", "sema", 0, n, p);
+    scheme_wrong_contract("semaphore-wait", "semaphore?", 0, n, p);
 
   scheme_wait_sema(p[0], 0);
 
@@ -931,7 +950,7 @@ static Scheme_Object *block_sema(int n, Scheme_Object **p)
 static Scheme_Object *block_sema_breakable(int n, Scheme_Object **p)
 {
   if (!SCHEME_SEMAP(p[0]))
-    scheme_wrong_type("semaphore-wait/enable-break", "sema", 0, n, p);
+    scheme_wrong_contract("semaphore-wait/enable-break", "semaphore?", 0, n, p);
 
   scheme_wait_sema(p[0], -1);
 
@@ -1010,7 +1029,7 @@ int scheme_try_channel_put(Scheme_Object *ch, Scheme_Object *v)
 static Scheme_Object *make_channel_put(int argc, Scheme_Object **argv)
 {
   if (!SCHEME_CHANNELP(argv[0]))
-    scheme_wrong_type("channel-put-evt", "channel", 0, argc, argv);
+    scheme_wrong_contract("channel-put-evt", "channel?", 0, argc, argv);
 
   return scheme_make_channel_put_evt(argv[0], argv[1]);
 }
@@ -1018,6 +1037,13 @@ static Scheme_Object *make_channel_put(int argc, Scheme_Object **argv)
 static Scheme_Object *channel_p(int n, Scheme_Object **p)
 {
   return (SCHEME_CHANNELP(p[0])
+	  ? scheme_true
+	  : scheme_false);
+}
+
+static Scheme_Object *channel_put_p(int n, Scheme_Object **p)
+{
+  return (SAME_TYPE(SCHEME_TYPE(p[0]), scheme_channel_put_type)
 	  ? scheme_true
 	  : scheme_false);
 }
@@ -1169,7 +1195,7 @@ static Scheme_Object *thread_send(int argc, Scheme_Object **argv)
         scheme_raise_exn(MZEXN_FAIL_CONTRACT, "thread-send: target thread is not running");
     }
   } else 
-    scheme_wrong_type("thread-send", "thread", 0, argc, argv);
+    scheme_wrong_contract("thread-send", "thread?", 0, argc, argv);
 
   return NULL;
 }
@@ -1234,7 +1260,7 @@ static Scheme_Object *thread_rewind_receive(int argc, Scheme_Object **argv)
     mbox_push_front(scheme_current_thread, argv[0]);
     return scheme_void;
   } else
-    scheme_wrong_type("thread-rewind", "list", 0, argc, argv);
+    scheme_wrong_contract("thread-rewind-receive", "list?", 0, argc, argv);
 
   return NULL;
 }
@@ -1249,7 +1275,7 @@ static Scheme_Object *make_alarm(int argc, Scheme_Object **argv)
   double sleep_end;
 
   if (!SCHEME_REALP(argv[0])) {
-    scheme_wrong_type("alarm-evt", "real number", 0, argc, argv);
+    scheme_wrong_contract("alarm-evt", "real?", 0, argc, argv);
   }
 
   sleep_end = scheme_get_val_as_double(argv[0]);

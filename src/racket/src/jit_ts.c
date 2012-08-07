@@ -88,10 +88,13 @@ define_ts_iS_s(scheme_procedure_arity_includes, FSRC_MARKS)
 define_ts_ssi_s(vector_check_chaperone_of, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_list_ref, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_list_tail, FSRC_MARKS)
+define_ts_iSs_s(scheme_struct_getter, FSRC_MARKS)
+define_ts_iSs_s(scheme_struct_setter, FSRC_MARKS)
+define_ts_iS_s(scheme_box_cas, FSRC_MARKS)
+define_ts__v(chaperone_set_mark, FSRC_MARKS)
 #endif
 
 #ifdef JITCALL_TS_PROCS
-define_ts_siS_s(_scheme_tail_apply_from_native, FSRC_RATOR)
 define_ts_s_s(scheme_force_value_same_mark, FSRC_MARKS)
 define_ts_s_s(scheme_force_one_value_same_mark, FSRC_MARKS)
 #endif
@@ -126,8 +129,6 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 #else
 # define ts__scheme_apply_multi_from_native _scheme_apply_multi_from_native
 # define ts__scheme_apply_from_native _scheme_apply_from_native
-# define ts__scheme_tail_apply_from_native _scheme_tail_apply_from_native
-# define ts__scheme_tail_apply_from_native_fixup_args _scheme_tail_apply_from_native_fixup_args
 # define ts_scheme_force_value_same_mark scheme_force_value_same_mark
 # define ts_scheme_force_one_value_same_mark scheme_force_one_value_same_mark
 # define ts_scheme_force_value_same_mark scheme_force_value_same_mark
@@ -177,6 +178,8 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_scheme_make_complex scheme_make_complex
 # define ts_scheme_unbox scheme_unbox
 # define ts_scheme_set_box scheme_set_box
+# define ts_scheme_box_cas scheme_box_cas
+# define ts_chaperone_set_mark chaperone_set_mark
 # define ts_scheme_vector_length scheme_vector_length
 # define ts_scheme_flvector_length scheme_flvector_length
 # define ts_scheme_fxvector_length scheme_fxvector_length
@@ -207,4 +210,6 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_vector_check_chaperone_of vector_check_chaperone_of
 # define ts_scheme_checked_list_ref scheme_checked_list_ref
 # define ts_scheme_checked_list_tail scheme_checked_list_tail
+# define ts_scheme_struct_getter scheme_struct_getter
+# define ts_scheme_struct_setter scheme_struct_setter
 #endif

@@ -1,6 +1,8 @@
 
 (load-relative "loadtest.rktl")
 
+(require racket/gui/base)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;                               DC Tests                                     ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -491,6 +493,108 @@
 
   (void))
 
+;; ----------------------------------------
+
+(let ()
+  (define bm (make-screen-bitmap 100 100))
+  (define dc (make-object bitmap-dc% bm))
+  (define-values (aw ah aa ad) (send dc get-text-extent "x " #f #t))
+  (define-values (bw bh ba bd) (send dc get-text-extent "x ⇒ y" #f #t))
+  (test #t 'no-missing-glyph-truncation (bw . > . aw)))
+
+;; ----------------------------------------
+
+(test #f 'no-commas (ormap (lambda (s) (regexp-match? #rx"," s)) (get-face-list)))
+(test #t 'all-commas (andmap (lambda (s) (regexp-match? #rx"," s)) (get-face-list #:all-variants? #t)))
+
+;; ----------------------------------------
+
+(define (check-immutable v)
+  (test 'immutable 'immutable
+        (with-handlers ([exn:fail? (lambda (x) 
+                                     (if (regexp-match #rx"immutable" (exn-message x))
+                                         'immutable
+                                         x))])
+          (send v set-color "red"))))
+
+(check-immutable (send the-brush-list find-or-create-brush "white" 'solid))
+(check-immutable (send the-pen-list find-or-create-pen "white" 1 'solid))
+
+;; ----------------------------------------
+
+(let ([color (new color%)])
+  (test #f 'color (send color is-immutable?))
+  (test 0 'color (send color red))
+  (test 0 'color (send color green))
+  (test 0 'color (send color blue))
+  (test 1.0 'color (send color alpha)))
+
+(let ([color (make-color 101 102 103 0.9)])
+  (test #t 'color (send color is-immutable?))
+  (test 101 'color (send color red))
+  (test 102 'color (send color green))
+  (test 103 'color (send color blue))
+  (test 0.9 'color (send color alpha)))
+
+(let ([color (make-color 0 0 0)])
+  (test #t 'color (send color is-immutable?))
+  (test 0 'color (send color red))
+  (test 0 'color (send color green))
+  (test 0 'color (send color blue))
+  (test 1.0 'color (send color alpha)))
+
+;; ----------------------------------------
+
+(let ([brush (new brush%)])
+  (test #f 'brush (send brush is-immutable?)))
+
+(let ([brush (make-brush)])
+  (test #t 'brush (send brush is-immutable?))
+  (test #t 'brush (eq? brush (send the-brush-list find-or-create-brush "black" 'solid))))
+
+(let ([brush (make-brush #:immutable? #f)])
+  (test #f 'brush (send brush is-immutable?)))
+
+;; ----------------------------------------
+
+(let ([pen (new pen%)])
+  (test #f 'pen (send pen is-immutable?)))
+
+(let ([pen (make-pen)])
+  (test #t 'pen (send pen is-immutable?))
+  (test #t 'pen (eq? pen (send the-pen-list find-or-create-pen "black" 0 'solid))))
+
+(let ([pen (make-pen #:immutable? #f)])
+  (test #f 'pen (send pen is-immutable?)))
+
+;; ----------------------------------------
+
+(let ()
+  (define config (new gl-config%))
+  (define bm1 (make-gl-bitmap 100 100 config))
+  (define bm2 (make-gl-bitmap 100 100 config))
+  (define dc1 (make-object bitmap-dc% bm1))
+  (define dc2 (make-object bitmap-dc% bm2))
+  (define gl1 (send dc1 get-gl-context))
+  (define gl2 (send dc2 get-gl-context))
+  (when (and gl1 gl2)
+    (send gl1 call-as-current
+          (lambda ()
+            (test 5 'alt (send gl2 call-as-current
+                               (lambda () (error "not in this context!"))
+                               (wrap-evt always-evt (lambda (v) 5))))
+            (sync
+             (thread
+              (lambda ()
+                (test 8 'thread/alts
+                      (send gl1 call-as-current
+                            (lambda () (error "not in this thread!"))
+                            (wrap-evt always-evt (lambda (v) 8)))))))
+            (test 8 'reenter (send gl1 call-as-current
+                                   (lambda () 8)))))
+    (with-handlers ([exn? void])
+      (send gl1 call-as-current (lambda () (error "fail"))))
+    (test 12 'post-exn (send gl1 call-as-current (lambda () 12)))))
 
 ;; ----------------------------------------
 

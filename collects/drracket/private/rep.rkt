@@ -758,38 +758,25 @@ TODO
         (inner (void) after-insert start len)
         (cond
           [(in-edit-sequence?) 
-           (set! had-an-insert (cons (cons start len) had-an-insert))]
-          [else (update-after-insert start len)]))
+           (set! had-an-insert (cons start had-an-insert))]
+          [else (update-after-inserts (list start))]))
       
       ;; private field
       (define had-an-insert '())
       
       (define/augment (after-edit-sequence)
         (inner (void) after-edit-sequence)
-        (let ([to-clean had-an-insert])
-          (set! had-an-insert '())
-          (for-each
-           (lambda (pr)
-             (update-after-insert (car pr) (cdr pr)))
-           to-clean)))
+        (unless (null? had-an-insert)
+          (let ([to-clean had-an-insert])
+            (set! had-an-insert '())
+            (update-after-inserts to-clean))))
       
-      (define/private (update-after-insert start len)
+      (define/private (update-after-inserts starts)
         (unless inserting-prompt?
           (reset-highlighting))
-        (when (and prompt-position (< start prompt-position))
-          
-          ;; trim extra space, according to preferences
-          #;
-          (let* ([start (get-repl-header-end)]
-                 [end (get-insertion-point)]
-                 [space (- end start)]
-                 [pref (preferences:get 'drracket:repl-buffer-size)])
-            (when (car pref)
-              (let ([max-space (* 1000 (cdr pref))])
-                (when (space . > . max-space)
-                  (let ([to-delete-end (+ start (- space max-space))])
-                    (delete/io start to-delete-end))))))
-          
+        (when (and prompt-position 
+		   (ormap (λ (start) (< start prompt-position))
+			  starts))
           (set! prompt-position (get-unread-start-point))
           (reset-regions (append (all-but-last (get-regions))
                                  (list (list prompt-position 'end))))))
@@ -1075,49 +1062,63 @@ TODO
              ;   breaks as we go in and turn them off as we go out.
              ;   (Actually, we adjust breaks however the user wanted it.)
              
-             (call-with-continuation-prompt
-              (λ ()
-                (call-with-break-parameterization
-                 user-break-parameterization
-                 (λ ()
-                   (let loop ()
-                     (let ([sexp/syntax/eof (with-stack-checkpoint (get-sexp/syntax/eof))])
-                       (unless (eof-object? sexp/syntax/eof)
-                         (define results
-                           ;; we duplicate the 'expand-syntax-to-top-form' dance that eval-syntax
-                           ;; does here, so that we can put 'with-stack-checkpoint's in to limit
-                           ;; the amount of DrRacket code we see in stacktraces
-                           (let loop ([stx sexp/syntax/eof])
-                             (define top-expanded (with-stack-checkpoint (expand-syntax-to-top-form stx)))
-                             (syntax-case top-expanded (begin)
-                               [(begin a1 . args)
-                                (let lloop ([args (syntax->list #'(a1 . args))])
-                                  (cond
-                                    [(null? (cdr args))
-                                     (loop (car args))]
-                                    [else
-                                     (loop (car args))
-                                     (lloop (cdr args))]))]
-                               [_ 
-                                (let ([expanded (with-stack-checkpoint (expand-syntax top-expanded))])
-                                  (call-with-values
-                                   (λ () 
-                                     (call-with-continuation-prompt
-                                      (λ ()
-                                        (with-stack-checkpoint (eval-syntax expanded)))
-                                      (default-continuation-prompt-tag)
-                                      (λ args
-                                        (apply
-                                         abort-current-continuation 
-                                         (default-continuation-prompt-tag)
-                                         args))))
-                                   list))])))
-                         (parameterize ([pretty-print-columns pretty-print-width])
-                           (for ([x (in-list results)])
-                             ((current-print) x)))
-                         (loop)))))))
-              (default-continuation-prompt-tag)
-              (λ args (void)))
+             
+             ;; this binding of last-results is to catch the results 
+             ;; that come from throwing to the prompt instead of
+             ;; a normal exit
+             (define last-results
+               (call-with-values
+                (λ ()
+                  (call-with-continuation-prompt
+                   (λ ()
+                     (call-with-break-parameterization
+                      user-break-parameterization
+                      (λ ()
+                        (let loop ()
+                          (define sexp/syntax/eof (with-stack-checkpoint (get-sexp/syntax/eof)))
+                          (cond
+                            [(eof-object? sexp/syntax/eof) (abort-current-continuation 
+                                                            (default-continuation-prompt-tag)
+                                                            (λ () (values)))]
+                            [else
+                             (define results
+                               (call-with-values
+                                (λ ()
+                                  ;; we duplicate the 'expand-syntax-to-top-form' dance that eval-syntax
+                                  ;; does here, so that we can put 'with-stack-checkpoint's in to limit
+                                  ;; the amount of DrRacket code we see in stacktraces
+                                  (let loop ([stx sexp/syntax/eof])
+                                    (define top-expanded (with-stack-checkpoint (expand-syntax-to-top-form stx)))
+                                    (syntax-case top-expanded (begin)
+                                      [(begin a1 . args)
+                                       (let lloop ([args (syntax->list #'(a1 . args))])
+                                         (cond
+                                           [(null? (cdr args))
+                                            (loop (car args))]
+                                           [else
+                                            (loop (car args))
+                                            (lloop (cdr args))]))]
+                                      [_ 
+                                       (let ([expanded (with-stack-checkpoint (expand-syntax top-expanded))])
+                                         (call-with-continuation-prompt
+                                          (λ ()
+                                            (with-stack-checkpoint (eval-syntax expanded)))
+                                          (default-continuation-prompt-tag)
+                                          (λ args
+                                            (apply
+                                             abort-current-continuation 
+                                             (default-continuation-prompt-tag)
+                                             args))))])))
+                                list))
+                             (parameterize ([pretty-print-columns pretty-print-width])
+                               (for ([x (in-list results)])
+                                 ((current-print) x)))
+                             (loop)])))))))
+                list))
+             
+             (parameterize ([pretty-print-columns pretty-print-width])
+               (for ([x (in-list last-results)])
+                 ((current-print) x)))
              
              (when complete-program?
                (call-with-continuation-prompt
@@ -1319,8 +1320,7 @@ TODO
                                          (set! raised-exn? #t))))
                    (drracket:language:setup-setup-values))))
               (when raised-exn?
-                (fprintf 
-                 (current-error-port)
+                (eprintf
                  (string-append
                   "copied exn raised when setting up snip values"
                   " (thunk passed as third argume to drracket:language:add-snip-value)\n"))
@@ -1978,7 +1978,7 @@ TODO
                 (insert/delta text " in: ")
                 (insert/delta text (format "~s" (syntax->datum expr)) error-text-style-delta))
               (insert/delta text "\n")
-              (when (and (is-a? src text:basic%)
+              (when (and (is-a? src text:basic<%>)
                          (number? pos)
                          (number? span))
                 (highlight-errors (list (list src (- pos 1) (+ pos -1 span)))))))
@@ -1997,7 +1997,7 @@ TODO
               (insert-file-name/icon src pos span line col))
             (insert/delta text (format "~a" (exn-message exn)) error-delta)
             (insert/delta text "\n")
-            (when (and (is-a? src text:basic%)
+            (when (and (is-a? src text:basic<%>)
                        (number? pos)
                        (number? span))
               (highlight-errors (list (list src (- pos 1) (+ pos -1 span))))))]
