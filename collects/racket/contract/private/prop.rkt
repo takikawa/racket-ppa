@@ -1,7 +1,8 @@
 #lang racket/base
 
 (require "blame.rkt"
-         "generate-base.rkt")
+         "generate-base.rkt"
+         racket/performance-hint)
 
 (provide prop:contract
          contract-struct?
@@ -11,7 +12,7 @@
          contract-struct-stronger?
          contract-struct-generate
          contract-struct-exercise
-
+         
          prop:flat-contract
          flat-contract-struct?
          
@@ -29,7 +30,13 @@
 
          make-contract
          make-chaperone-contract
-         make-flat-contract)
+         make-flat-contract
+         
+         skip-projection-wrapper?
+         
+         prop:opt-chaperone-contract
+         prop:opt-chaperone-contract? 
+         prop:opt-chaperone-contract-get-test)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -124,6 +131,15 @@
    chaperone-contract-property-guard
    (list (cons prop:contract chaperone-contract-property->contract-property))))
 
+;; this property is so the opt'd contracts can
+;; declare that they are chaperone'd; the property
+;; is a function that extracts a boolean from the 
+;; original struct
+(define-values (prop:opt-chaperone-contract
+                prop:opt-chaperone-contract? 
+                prop:opt-chaperone-contract-get-test)
+  (make-struct-type-property 'prop:opt-chaperone-contract))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;;  Flat Contract Property
@@ -167,6 +183,8 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define skip-projection-wrapper? (make-parameter #f))
+
 (define ((build-property mk default-name projection-wrapper)
          #:name [get-name #f]
          #:first-order [get-first-order #f]
@@ -179,7 +197,11 @@
          [get-first-order (or get-first-order get-any?)]
          [get-projection
           (cond
-            [get-projection (projection-wrapper get-projection)]
+            [get-projection 
+             (blame-context-projection-wrapper
+              (if (skip-projection-wrapper?)
+                  get-projection
+                  (projection-wrapper get-projection)))]
             [else (get-first-order-projection
                    get-name get-first-order)])]
          [stronger (or stronger weakest)])
@@ -214,6 +236,12 @@
                 (error 'prop:chaperone-contract (format "expected a chaperone of ~v, got ~v" v v*)))
               v*)))))))
 
+(define (blame-context-projection-wrapper proj)
+  (λ (ctc)
+    (define c-proj (proj ctc))
+    (λ (blame)
+      (c-proj (blame-add-unknown-context blame)))))
+
 (define build-chaperone-contract-property
   (build-property (compose make-chaperone-contract-property make-contract-property)
                   'anonymous-chaperone-contract
@@ -227,10 +255,16 @@
 (define ((get-first-order-projection get-name get-first-order) c)
   (first-order-projection (get-name c) (get-first-order c)))
 
-(define (((first-order-projection name first-order) b) x)
-  (if (first-order x)
-    x
-    (raise-blame-error b x "expected: ~s, given: ~e" name x)))
+(begin-encourage-inline
+  (define (first-order-projection name first-order)
+    (λ (b)
+      (λ (x)
+        (if (first-order x)
+            x
+            (raise-blame-error b x
+                               '(expected: "~s," given: "~e")
+                               name 
+                               x))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -299,4 +333,3 @@
 
 (define make-flat-contract
   (build-contract make-make-flat-contract 'anonymous-flat-contract))
-

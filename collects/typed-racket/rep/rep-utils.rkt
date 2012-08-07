@@ -1,17 +1,16 @@
 #lang racket/base
-(require "../utils/utils.rkt"
-         mzlib/pconvert
+(require "../utils/utils.rkt"         
          racket/match
+         (contract-req)
          "free-variance.rkt"
-         "interning.rkt"
-         unstable/match unstable/struct
+         "interning.rkt" unstable/struct
          racket/stxparam
          (for-syntax
           racket/match
           (except-in syntax/parse id identifier keyword)
           racket/base
           syntax/struct
-          racket/contract
+          (contract-req)
           racket/syntax
           (rename-in (except-in (utils stxclass-util) bytes byte-regexp regexp byte-pregexp pregexp)
                      [id* id]
@@ -368,6 +367,7 @@
 (define (replace-syntax rep stx)
   (replace-field rep stx 3))
 
+;; useful for debugging printing only
 (define (converter v basic sub)
   (define (gen-constructor sym)
     (string->symbol (string-append "make-" (substring (symbol->string sym) 7))))
@@ -375,11 +375,13 @@
     [(? (lambda (e) (or (Filter? e)
                         (Object? e)
                         (PathElem? e)))
-        (app (lambda (v) (vector->list (struct->vector v))) (list-rest tag seq fv fi stx vals)))
+        (app (lambda (v) (vector->list (struct->vector v)))
+             (list-rest tag seq fv fi stx vals)))
      `(,(gen-constructor tag) ,@(map sub vals))]
     [(? Type?
         (app (lambda (v) (vector->list (struct->vector v))) (list-rest tag seq fv fi stx key vals)))
      `(,(gen-constructor tag) ,@(map sub vals))]
     [_ (basic v)]))
 
-(current-print-convert-hook converter)
+;(require mzlib/pconvert)
+;(current-print-convert-hook converter)

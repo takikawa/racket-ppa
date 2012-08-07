@@ -7,9 +7,9 @@
 
 (require tests/drracket/private/drracket-test-util)
 
-(fire-up-drscheme-and-run-tests
+(fire-up-drracket-and-run-tests
  (λ ()
-   (let* ([drr-frame (wait-for-drscheme-frame)]
+   (let* ([drr-frame (wait-for-drracket-frame)]
           [fn (make-temporary-file "save-teaching-lang-test~a")])
      (test:menu-select "File" "New Tab")
      
@@ -26,9 +26,9 @@
        (unless (call-with-input-file fn
                  (λ (p) (regexp-match #rx";;[^\n]*metadata" p)))
          
-         (fprintf (current-error-port) "---- saved file, cut here ----\n")
+         (eprintf "---- saved file, cut here ----\n")
          (call-with-input-file fn (λ (p) (copy-port p (current-error-port))))
-         (fprintf (current-error-port) "---- saved file, cut here ----\n")
+         (eprintf "---- saved file, cut here ----\n")
          (error 'save-teaching-lang-file.rkt
                 "expected the saved file to contain the word 'metadata' in a comment"))
        (do-execute drr-frame)

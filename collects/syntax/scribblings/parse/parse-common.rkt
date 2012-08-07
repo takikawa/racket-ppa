@@ -19,25 +19,28 @@
          (exn:fail:syntax-exprs exn))
         exn)))
 (define the-eval
-  (parameterize ((sandbox-output 'string)
-                 (sandbox-error-output 'string)
-                 (sandbox-make-code-inspector current-code-inspector)
-                 (sandbox-eval-handlers
-                  (list #f
-                        (lambda (thunk)
-                          (with-handlers ([exn:fail:syntax?
-                                           (lambda (e) (raise (fixup e)))])
-                            (thunk))))))
-    (make-evaluator 'racket/base
-                    #:requires (let ([mods '(syntax/parse
-                                             syntax/parse/debug
-                                             syntax/parse/experimental/splicing
-                                             syntax/parse/experimental/contract
-                                             syntax/parse/experimental/reflect
-                                             syntax/parse/experimental/specialize
-                                             syntax/parse/experimental/eh)])
-                                 `((for-syntax racket/base ,@mods)
-                                   ,@mods)))))
+  (call-with-trusted-sandbox-configuration
+   (lambda ()
+     (parameterize ([sandbox-output 'string]
+                    [sandbox-error-output 'string]
+                    [sandbox-propagate-breaks #f]
+                    [sandbox-eval-handlers
+                     (list #f
+                           (lambda (thunk)
+                             (with-handlers ([exn:fail:syntax?
+                                              (lambda (e) (raise (fixup e)))])
+                               (thunk))))])
+       (make-evaluator 'racket/base
+                       #:requires (let ([mods '(syntax/parse
+                                                syntax/parse/debug
+                                                syntax/parse/experimental/splicing
+                                                syntax/parse/experimental/contract
+                                                syntax/parse/experimental/reflect
+                                                syntax/parse/experimental/specialize
+                                                syntax/parse/experimental/template
+                                                syntax/parse/experimental/eh)])
+                                    `((for-syntax racket/base ,@mods)
+                                      ,@mods)))))))
 (the-eval '(error-print-source-location #f))
 
 (define-syntax-rule (myexamples e ...)
@@ -104,6 +107,7 @@
                     syntax/parse/experimental/reflect
                     syntax/parse/experimental/provide
                     syntax/parse/experimental/specialize
+                    syntax/parse/experimental/template
                     syntax/parse/experimental/eh
                     "parse-dummy-bindings.rkt"))
 (provide (for-label (all-from-out racket/base)
@@ -115,5 +119,6 @@
                     (all-from-out syntax/parse/experimental/reflect)
                     (all-from-out syntax/parse/experimental/provide)
                     (all-from-out syntax/parse/experimental/specialize)
+                    (all-from-out syntax/parse/experimental/template)
                     (all-from-out syntax/parse/experimental/eh)
                     (all-from-out "parse-dummy-bindings.rkt")))

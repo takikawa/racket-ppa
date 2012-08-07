@@ -719,8 +719,8 @@ Methods that report @techlink{location}-independent information about an
 
 An editor is not tied to any particular thread or eventspace, except
  to the degree that it is displayed in a canvas (which has an
- eventspace). Concurrent access of an editor is always safe, in the
- sense that the editor will not become corrupted. However, because
+ eventspace). Concurrent access of an editor is always safe in the
+ weak sense that the editor will not become corrupted. However, because
  editor access can trigger locks, concurrent access can produce 
  contract failures or unexpected results.
 
@@ -735,7 +735,7 @@ An editor supports certain concurrent patterns
 @itemize[
 
  @item{When an editor's @method[editor<%> refresh] method is
- called during an edit sequence (which is started by
+ called during an @deftech{edit sequence} (which is started by
  @method[editor<%> begin-edit-sequence] and ended with
  @method[editor<%> end-edit-sequence]), the requested refresh
  region is recorded, but the refresh is not performed. Instead, the

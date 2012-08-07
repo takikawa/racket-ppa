@@ -367,7 +367,7 @@ cont_proc {
   gcMARK2(c->native_trace, gc);
 #endif
 
-  MARK_jmpup(&c->buf, gc);
+  gcMARK2(c->buf_ptr, gc);
   MARK_cjs(&c->cjs, gc);
   MARK_stack_state(&c->ss, gc);
   gcMARK2(c->barrier_prompt, gc);
@@ -389,6 +389,16 @@ cont_proc {
   
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Cont));
+}
+
+cont_jmp_proc {
+ mark:
+  Scheme_Cont_Jmp *c = (Scheme_Cont_Jmp *)p;
+
+  MARK_jmpup(&c->buf, gc);
+  
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Cont_Jmp));
 }
 
 meta_cont_proc {
@@ -868,6 +878,7 @@ namespace_val {
 
   gcMARK2(e->module, gc);
   gcMARK2(e->module_registry, gc);
+  gcMARK2(e->module_pre_registry, gc);
   gcMARK2(e->insp, gc);
 
   gcMARK2(e->rename_set, gc);
@@ -935,6 +946,7 @@ prefix_val {
   int i;
   for (i = pf->num_slots; i--; )
     gcMARK2(pf->a[i], gc);
+  gcMARK2(pf->import_map, gc);
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Prefix) 
 		    + ((pf->num_slots-mzFLEX_DELTA) * sizeof(Scheme_Object *))
@@ -1028,12 +1040,19 @@ module_val {
 
   gcMARK2(m->hints, gc);
   gcMARK2(m->ii_src, gc);
+  gcMARK2(m->super_bxs_info, gc);
 
   gcMARK2(m->comp_prefix, gc);
   gcMARK2(m->prefix, gc);
   gcMARK2(m->dummy, gc);
 
   gcMARK2(m->rn_stx, gc);
+
+  gcMARK2(m->submodule_path, gc);
+  gcMARK2(m->pre_submodules, gc);
+  gcMARK2(m->post_submodules, gc);
+  gcMARK2(m->supermodule, gc);
+  gcMARK2(m->submodule_ancestry, gc);
 
   gcMARK2(m->primitive, gc);
  size:
@@ -1431,22 +1450,22 @@ hash_tree_val {
   gcBYTES_TO_WORDS(sizeof(Scheme_Hash_Tree));
 }
 
-mark_rb_node {
+mark_avl_node {
  mark:
-  RBNode *rb = (RBNode *)p;
+  AVLNode *avl = (AVLNode *)p;
 
   /* Short-circuit on NULL pointers, which are especially likely */
-  if (rb->left) {
-    gcMARK2(rb->left, gc);
+  if (avl->left) {
+    gcMARK2(avl->left, gc);
   }
-  if (rb->right) {
-    gcMARK2(rb->right, gc);
+  if (avl->right) {
+    gcMARK2(avl->right, gc);
   }
-  gcMARK2(rb->key, gc);
-  gcMARK2(rb->val, gc);
+  gcMARK2(avl->key, gc);
+  gcMARK2(avl->val, gc);
 
  size:
-  gcBYTES_TO_WORDS(sizeof(RBNode));
+  gcBYTES_TO_WORDS(sizeof(AVLNode));
 }
 
 END hash;
@@ -1477,6 +1496,7 @@ place_val {
   gcMARK2(pr->channel, gc);
   gcMARK2(pr->mref, gc);
   gcMARK2(pr->pumper_threads, gc);
+  gcMARK2(pr->place_obj, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Place));
@@ -1541,7 +1561,6 @@ mark_load_handler_data {
   gcMARK2(d->p, gc);
   gcMARK2(d->stxsrc, gc);
   gcMARK2(d->expected_module, gc);
-  gcMARK2(d->delay_load_info, gc);
   
  size:
   gcBYTES_TO_WORDS(sizeof(LoadHandlerData));
@@ -1907,6 +1926,7 @@ mark_syncing {
   gcMARK2(w->reposts, gc);
   gcMARK2(w->accepts, gc);
   gcMARK2(w->disable_break, gc);
+  gcMARK2(w->thread, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Syncing));
@@ -2456,6 +2476,7 @@ future {
   gcMARK2(f->next_waiting_lwc, gc);
   gcMARK2(f->next_waiting_touch, gc);
   gcMARK2(f->suspended_lw, gc);
+  gcMARK2(f->suspended_lw_stack, gc);
   gcMARK2(f->prev_in_fsema_queue, gc);
   gcMARK2(f->next_in_fsema_queue, gc);
   gcMARK2(f->touching, gc);

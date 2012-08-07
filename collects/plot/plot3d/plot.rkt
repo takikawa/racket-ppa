@@ -3,6 +3,7 @@
 ;; Procedures that plot 3D renderers.
 
 (require racket/draw racket/snip racket/match racket/list racket/class racket/contract
+         unstable/contract
          slideshow/pict
          unstable/parameter-group
          unstable/lazy-require
@@ -20,7 +21,7 @@
 ;; Require lazily: without this, Racket complains while generating documentation:
 ;;   cannot instantiate `racket/gui/base' a second time in the same process
 (lazy-require ["snip.rkt" (make-3d-plot-snip)]
-              ["../common/gui.rkt" (make-snip-frame)])
+              ["../common/gui.rkt" (make-snip-frame with-new-eventspace)])
 
 (provide (except-out (all-defined-out) get-renderer-list get-bounds-rect get-ticks plot3d-dc))
 
@@ -192,7 +193,7 @@
     (define render-list-hash (make-hash))
     (define legend-entries-hash (make-hash))
     
-    (define (make-bm anim? angle altitude)
+    (define (make-bm anim? angle altitude width height)
       (parameterize/group ([plot-parameters  saved-plot-parameters]
                            [plot-animating?  (if anim? #t (plot-animating?))]
                            [plot3d-angle     angle]
@@ -228,8 +229,8 @@
          width height)))
     
     (make-3d-plot-snip
-     (make-bm #f angle altitude) saved-plot-parameters
-     make-bm angle altitude)))
+     (make-bm #f angle altitude width height) saved-plot-parameters
+     make-bm angle altitude width height)))
 
 ;; Plot to a frame
 (defproc (plot3d-frame [renderer-tree (treeof (or/c renderer3d? nonrenderer?))]
@@ -345,7 +346,7 @@
     (when out-file
       (call plot3d-file out-file out-kind))
     
-    (cond [(plot-new-window?)  (define frame (call plot3d-frame))
+    (cond [(plot-new-window?)  (define frame (with-new-eventspace (λ () (call plot3d-frame))))
                                (send frame show #t)
                                (void)]
           [else  (call plot3d-snip)])))

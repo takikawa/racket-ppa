@@ -58,7 +58,7 @@
                             body ...
                             #:handlers
                             (λ (_ . formals) final-expr)
-                            (pimap symbol->string 'formals)
+                            (ensure-list (pimap symbol->string 'formals))
                             (λ (help-string)
                               (for-each (λ (l) (display l) (newline)) (wrap-to-count long-description 80))
                               (newline)
@@ -97,6 +97,11 @@
   (let* ([l (string-length str)]
          [extra (build-string (- n l) (λ (n) #\space))])
     (string-append str extra)))
+
+(define (ensure-list x)
+  (if (or (null? x) (pair? x))
+      x
+      (list x)))
 
 ;; pimap : (A -> B) improper-listof A -> improper-listof B 
 (define (pimap f pil)

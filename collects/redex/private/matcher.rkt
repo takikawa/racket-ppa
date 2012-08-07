@@ -4,9 +4,6 @@
 ;;
 ;; -- jay's idea
 ;;
-;; -- when a pattern has no bindings, just use 'and's
-;;    and 'or's to check for the match (no allocation)
-;;
 ;; -- when a list pattern has only a single repeat,
 ;;    don't search for matches, just count
 ;;
@@ -25,15 +22,15 @@
 ;;    we don't return all of the bogus matches that show up
 ;;    by treating the hole as 'any'. 
 ;;
+;;    (this one turns out not to be so great because it
+;;     makes caching less effective)
+;;
 ;; -- combine the left-hand sides of a reduction relation
 ;;    so to avoid re-doing decompositions over and over
 ;;    (maybe....)
 ;;
-;; -- parallelism? but what about the hash-table?
+;; -- parallelism? but what about the hash-table cache?
 ;; 
-;; -- double check the caching code to make sure it makes 
-;;    sense in the current uni-hole world
-
 #|
 
 Note: the patterns described in the documentation are
@@ -68,7 +65,7 @@ See match-a-pattern.rkt for more details
 
 ;; bindings = (make-bindings (listof rib))
 ;; rib = (make-bind sym sexp)
-;; if a rib has a pair, the first element of the pair should be treated as a prefix on the identifer
+;; if a rib has a pair, the first element of the pair should be treated as a prefix on the identifier
 ;; NOTE: the bindings may contain mismatch-ribs temporarily, but they are all removed
 ;;       by merge-multiples/remove, a helper function called from match-pattern
 (define-values (make-bindings bindings-table bindings? empty-bindings)
@@ -259,6 +256,38 @@ See match-a-pattern.rkt for more details
            (unless (regexp-match #rx"^\\.\\.\\." (symbol->string pat))
              (unless (memq pat nts)
                (hash-set! ht pat #t)))))])))
+
+;; prefix-nts : string pat -> pat
+(define (prefix-nts prefix pat)
+  (let loop ([pat pat])
+    (match-a-pattern pat
+      [`any pat]
+      [`number pat]
+      [`string pat]
+      [`natural pat]
+      [`integer pat]
+      [`real pat]
+      [`variable pat]
+      [`(variable-except ,s ...) pat]
+      [`(variable-prefix ,s) pat]
+      [`variable-not-otherwise-mentioned pat]
+      [`hole pat]
+      [`(nt ,id) `(nt ,(string->symbol (string-append prefix (symbol->string id))))]
+      [`(name ,name ,pat) `(name , name ,(loop pat))]
+      [`(mismatch-name ,name ,pat) `(mismatch-name ,name ,(loop pat))]
+      [`(in-hole ,p1 ,p2) `(in-hole ,(loop p1) ,(loop p2))]
+      [`(hide-hole ,p) `(hide-hole ,(loop p))]
+      [`(side-condition ,p ,g ,e) `(side-condition ,(loop p) ,g ,e)]
+      [`(cross ,s) pat]
+      [`(list ,sub-pats ...)
+       `(list ,@(for/list ([sub-pat (in-list sub-pats)])
+                  (match sub-pat
+                    [`(repeat ,pat ,name ,mismatch)
+                     `(repeat ,(loop pat) ,name ,mismatch)]
+                    [else
+                     (loop sub-pat)])))]
+      [(? (compose not pair?)) 
+       pat])))
 
 ; build-has-hole-or-hide-hole-ht : (listof nt) -> hash[symbol -o> boolean]
 ; produces a map of nonterminal -> whether that nonterminal could produce a hole
@@ -571,6 +600,11 @@ See match-a-pattern.rkt for more details
       [`(cross ,nt) #t]
       [`(list ,pats ...) #f]
       [(? (compose not pair?)) #t])))
+
+;; match-pattern? : compiled-pattern exp -> boolean
+(define (match-pattern? compiled-pattern exp)
+  (let ([results ((compiled-pattern-cp compiled-pattern) exp #f)])
+    (and results #t)))
 
 ;; match-pattern : compiled-pattern exp -> (union #f (listof bindings))
 (define (match-pattern compiled-pattern exp)
@@ -1295,7 +1329,10 @@ See match-a-pattern.rkt for more details
             (let loop ([mtches mtches]
                        [acc null])
               (cond
-                [(null? mtches) acc]
+                [(null? mtches) 
+                 (if (null? acc)
+                   #f
+                   acc)]
                 [else 
                  (let* ([mtch (car mtches)]
                         [bindings (mtch-bindings mtch)]
@@ -1920,6 +1957,7 @@ See match-a-pattern.rkt for more details
 
 (provide/contract
  (match-pattern (compiled-pattern? any/c . -> . (or/c false/c (listof mtch?))))
+ (match-pattern? (compiled-pattern? any/c . -> . boolean?))
  (compile-pattern (-> compiled-lang? any/c boolean?
                       compiled-pattern?))
  
@@ -1970,4 +2008,5 @@ See match-a-pattern.rkt for more details
          rewrite-ellipses
          build-compatible-context-language
          caching-enabled?
-         check-redudancy)
+         check-redudancy
+         prefix-nts)

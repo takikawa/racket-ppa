@@ -80,9 +80,9 @@
 (define (find-uncovered-text string/style-desc)
   (map car (filter is-uncovered? string/style-desc)))
 
-(fire-up-drscheme-and-run-tests
+(fire-up-drracket-and-run-tests
  (λ ()
-   (let* ([drr-frame (wait-for-drscheme-frame)]
+   (let* ([drr-frame (wait-for-drracket-frame)]
           [definitions-text (send drr-frame get-definitions-text)]
           [interactions-text (send drr-frame get-interactions-text)])
        
@@ -107,15 +107,13 @@
                         (send interactions-text paragraph-start-position 2)
                         (send interactions-text last-position))])
            (unless (regexp-match #rx"^[ \n\t0-9>]*$" result)
-             (fprintf (current-error-port)
-                      "FAILED line ~a, got ~s for the output, but expected only digits and whitespace"
+             (eprintf "FAILED line ~a, got ~s for the output, but expected only digits and whitespace"
                       (test-line t)
                       result)))
 
          (let ([got (find-uncovered-text (get-annotated-output drr-frame))])
            (unless (equal? got (test-uncovered t))
-             (fprintf (current-error-port)
-                      "FAILED line ~a\n     got: ~s\nexpected: ~s\n"
+             (eprintf "FAILED line ~a\n     got: ~s\nexpected: ~s\n"
                       (test-line t)
-                      got 
+                      got
                       (test-uncovered t)))))))))

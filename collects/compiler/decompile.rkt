@@ -1,9 +1,11 @@
-#lang scheme/base
+#lang racket/base
 (require compiler/zo-parse
          syntax/modcollapse
-         scheme/port
-         scheme/match
-         racket/set)
+         racket/port
+         racket/match
+         racket/list
+         racket/set
+         racket/path)
 
 (provide decompile)
 
@@ -143,8 +145,8 @@
                                   ignored
                                   alist)
                   `(,(if has-free-id-renames? 'lexical/free-id=? 'lexical) . ,alist)]
-                 [(phase-shift amt src dest)
-                  `(phase-shift ,amt ,src ,dest)]
+                 [(phase-shift amt src dest cancel-id)
+                  `(phase-shift ,amt ,src ,dest, cancel-id)]
                  [(wrap-mark val)
                   val]
                  [(prune sym)
@@ -160,17 +162,47 @@
 (define (mpi->string modidx)
   (cond
    [(symbol? modidx) modidx]
-   [else (collapse-module-path-index modidx (current-directory))]))
+   [else 
+    (collapse-module-path-index modidx (build-path
+                                        (or (current-load-relative-directory)
+                                            (current-directory))
+                                        "here.rkt"))]))
 
-(define (decompile-module mod-form stack stx-ht)
+(define (decompile-module mod-form orig-stack stx-ht mod-name)
   (match mod-form
     [(struct mod (name srcname self-modidx prefix provides requires body syntax-bodies unexported 
-                       max-let-depth dummy lang-info internal-context))
+                       max-let-depth dummy lang-info internal-context pre-submodules post-submodules))
      (let-values ([(globs defns) (decompile-prefix prefix stx-ht)]
-                  [(stack) (append '(#%modvars) stack)]
+                  [(stack) (append '(#%modvars) orig-stack)]
                   [(closed) (make-hasheq)])
-       `(module ,name ....
+       `(,mod-name ,(if (symbol? name) name (last name)) ....
+           ,@(let ([l (apply
+                       append
+                       (for/list ([req (in-list requires)]
+                                  #:when (pair? (cdr req)))
+                         (define l (for/list ([mpi (in-list (cdr req))])
+                                     (define p (mpi->string mpi))
+                                     (if (path? p)
+                                         (let ([d (current-load-relative-directory)])
+                                           (path->string (if d
+                                                             (find-relative-path (simplify-path d #t)
+                                                                                 (simplify-path p #f) 
+                                                                                 #:more-than-root? #t)
+                                                             p)))
+                                         p)))
+                         (if (eq? 0 (car req))
+                             l
+                             `((,@(case (car req)
+                                    [(#f) `(for-label)]
+                                    [(1) `(for-syntax)]
+                                    [else `(for-meta ,(car req))])
+                                ,@l)))))])
+               (if (null? l)
+                   null
+                   `((require ,@l))))
           ,@defns
+          ,@(for/list ([submod (in-list pre-submodules)])
+              (decompile-module submod orig-stack stx-ht 'module))
           ,@(for/list ([b (in-list syntax-bodies)])
               (let loop ([n (sub1 (car b))])
                 (if (zero? n)
@@ -180,13 +212,15 @@
                     (list 'begin-for-syntax (loop (sub1 n))))))
           ,@(map (lambda (form)
                    (decompile-form form globs stack closed stx-ht))
-                 body)))]
+                 body)
+          ,@(for/list ([submod (in-list post-submodules)])
+              (decompile-module submod orig-stack stx-ht 'module*))))]
     [else (error 'decompile-module "huh?: ~e" mod-form)]))
 
 (define (decompile-form form globs stack closed stx-ht)
   (match form
     [(? mod?)
-     (decompile-module form stack stx-ht)]
+     (decompile-module form stack stx-ht 'module)]
     [(struct def-values (ids rhs))
      `(define-values ,(map (lambda (tl)
                              (match tl

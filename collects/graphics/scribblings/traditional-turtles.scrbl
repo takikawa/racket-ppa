@@ -5,6 +5,9 @@
 
 @defmodule[graphics/turtles]
 
+To use any of the turtle drawing functions, you first need to
+initialize the turtles by calling @racket[(turtles #t)].
+
 @defproc*[([(turtles [on? any/c]) void?]
            [(turtles) void?])]{
 
@@ -84,7 +87,7 @@ and one at @math["\u3C0/3"], evaluate
 
 @defform[(tprompt expr ...)]{
 
-Limits the splitting of the turtles. Before@racket[expr] is evaluated,
+Limits the splitting of the turtles. Before @racket[expr] is evaluated,
 the state of the turtles (how many, their positions and headings) is
 ``checkpointed.'' Then @racket[expr] is evaluated, and then the state
 of the turtles is restored, but all drawing that may have occurred
@@ -126,7 +129,8 @@ The fern functions below demonstrate more advanced use of
 @defmodule[graphics/turtle-examples]
 
 The @racketmodname[graphics/turtle-examples] library's source is meant
-to be read, but it also exports the following examples.
+to be read, but it also exports the following examples. To display these
+examples, first initialize the turtle window with @racket[(turtles #t)].
 
 @defproc[(regular-poly [sides exact-nonnegative-integer?] [radius real?])
          void?]{
@@ -171,16 +175,16 @@ As the name says...}
   Draws a fractal that came up on an exam given at Rice in 1997 or so.
 }
 
-@defthing[serp-size real?]{
- 
-A constant that is a good size for the @racket[serp] procedures.}
+@defthing[sierp-size real?]{
+
+A constant that is a good size for the @racket[sierp] procedures.}
 
 @deftogether[(
-@defproc[(serp [serp-size real?]) void?]
-@defproc[(serp-nosplit [serp-size real?]) void?]
+@defproc[(sierp [sierp-size real?]) void?]
+@defproc[(sierp-nosplit [sierp-size real?]) void?]
 )]{
 
-Draws the @as-index{Serpinski triangle} in two different ways, the
+Draws the @as-index{Sierpinski triangle} in two different ways, the
 first using @racket[split] heavily. After running the first one, try
 executing @racket[(draw 10)].}
 

@@ -56,6 +56,12 @@ static int _coldir_offset = 19; /* Skip permanent tag */
 # define XFORM_OK_PLUS +
 #endif
 
+#ifdef OS_X
+# include <mach-o/getsect.h>
+# include <mach-o/dyld.h>
+# include <fcntl.h>
+#endif
+
 #ifdef DOS_FILE_SYSTEM
 # include <Windows.h>
 
@@ -85,6 +91,22 @@ END_XFORM_SKIP;
 # endif
 #endif
 
+#ifdef OS_X
+static long get_segment_offset()
+{
+# ifdef __x86_64__
+  const struct segment_command_64 *seg;
+# else
+  const struct segment_command *seg;
+#endif
+  seg = getsegbyname("__PLTSCHEME");
+  if (seg)
+    return seg->fileoff;
+  else
+    return 0;
+}
+#endif
+
 #ifndef DONT_PARSE_COMMAND_LINE
 static int is_number_arg(const char *s)
 {
@@ -108,10 +130,30 @@ static int is_number_arg(const char *s)
   return 1;
 }
 
+#ifdef OS_X
+char *add_to_str(const char *addr, long amt)
+{
+  long addr_v;
+  char buf[32];
+  addr_v = atoi(addr) + amt;
+  sprintf(buf, "%ld", addr_v);
+  return strdup(buf);
+}
+#endif
+
 static char *make_embedded_load(const char *start, const char *end)
 {
   char *s;
   int slen, elen;
+
+#ifdef OS_X
+  {
+    long fileoff;
+    fileoff = get_segment_offset();
+    start = add_to_str(start, fileoff);
+    end = add_to_str(end, fileoff);
+  }
+#endif
 
   slen = strlen(start);
   elen = strlen(end);
@@ -303,7 +345,7 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
           } else if (fa->eval_kind[i] == mzcmd_EMBEDDED) {
             scheme_embedded_load(-1, fa->evals_and_loads[i], 0);
           } else {
-            Scheme_Object *a[1], *nsreq;
+            Scheme_Object *a[2], *nsreq, *mpi;
             char *name;
             nsreq = scheme_builtin_value("namespace-require");
             if (fa->eval_kind[i] == mzcmd_REQUIRE_LIB) {
@@ -321,9 +363,25 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
                                   a[0],
                                   fa->evals_and_loads[i]);
             }
+            /* Use a module path index so that multiple resolutions are no unduly
+               sensitive to changes in the current directory or other configurations: */
+            mpi = scheme_make_modidx(a[0], scheme_make_false(), scheme_make_false());
             if (!did_config)
-              configure_environment(a[0]);
+              configure_environment(mpi);
+            /* Run the module: */
+            a[0] = mpi;
             scheme_apply(nsreq, 1, a);
+            /* If there's a `main' submodule, run it: */
+            a[0] = scheme_make_modidx(scheme_make_pair(scheme_intern_symbol("submod"),
+                                                       scheme_make_pair(scheme_make_utf8_string("."),
+                                                                        scheme_make_pair(scheme_intern_symbol("main"),
+                                                                                         scheme_make_null()))),
+                                      mpi,
+                                      scheme_make_false());
+            if (scheme_module_is_declared(a[0], 1)) {
+              a[1] = scheme_make_false();
+              scheme_apply(scheme_builtin_value("dynamic-require"), 2, a);
+            }
           }
         } else {
 	  exit_val = 1;
@@ -638,7 +696,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
     }
   }
 #endif
-  
+
   /* If scheme_cmdline_exe_hack is changed, then we extract built-in
      arguments. */
   if (scheme_cmdline_exe_hack[0] != '[') {
@@ -648,6 +706,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
     GC_CAN_IGNORE unsigned char *orig_p;
     char **argv2;
 
+    p = NULL;
 #ifdef DOS_FILE_SYSTEM
     if ((scheme_cmdline_exe_hack[0] == '?')
 	|| (scheme_cmdline_exe_hack[0] == '*')) {
@@ -723,8 +782,33 @@ static int run_from_cmd_line(int argc, char *_argv[],
 		+ 4);
 	}
       }
-    } else
+    }
 #endif
+#ifdef OS_X
+    if (scheme_cmdline_exe_hack[0] == '?') {
+      long fileoff, cmdoff, cmdlen;
+      int fd;
+      fileoff = get_segment_offset();
+
+      p = (unsigned char *)scheme_cmdline_exe_hack + 4;
+      cmdoff = (p[0]
+                + (((long)p[1]) << 8)
+                + (((long)p[2]) << 16)
+                + (((long)p[3]) << 24));
+      cmdlen = (p[4]
+                + (((long)p[5]) << 8)
+                + (((long)p[6]) << 16)
+                + (((long)p[7]) << 24));
+      p = malloc(cmdlen);
+      
+      fd = open(_dyld_get_image_name(0), O_RDONLY);
+      lseek(fd, fileoff + cmdoff, 0);
+      read(fd, p, cmdlen);
+      close(fd);
+    }
+#endif
+     
+    if (!p)
       p = (unsigned char *)scheme_cmdline_exe_hack + 1;
 
     /* Command line is encoded as a sequence of pascal-style strings;
@@ -1346,13 +1430,14 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	 " File and expression options:\n"
 	 "  -e <exprs>, --eval <exprs> : Evaluate <exprs>, prints results\n"
 	 "  -f <file>, --load <file> : Like -e '(load \"<file>\")' without printing\n"
-	 "  -t <file>, --require <file> : Like -e '(require (file \"<file>\"))'\n"
-	 "  -l <path>, --lib <path> : Like -e '(require (lib \"<path>\"))'\n"
-	 "  -p <package> : Like -e '(require (planet \"<package>\")'\n"
+	 "  -t <file>, --require <file> : Like -e '(require (file \"<file>\"))' [*]\n"
+	 "  -l <path>, --lib <path> : Like -e '(require (lib \"<path>\"))' [*]\n"
+	 "  -p <package> : Like -e '(require (planet \"<package>\")' [*]\n"
 	 "  -r <file>, --script <file> : Same as -f <file> -N <file> --\n" 
 	 "  -u <file>, --require-script <file> : Same as -t <file> -N <file> --\n" 
 	 "  -k <n> <m> <p> : Load executable-embedded code from offset <n> to <p>\n"
 	 "  -m, --main : Call `main' with command-line arguments, print results\n"
+         "  [*] Also `require's a `main' submodule, if any\n"
 	 " Interaction options:\n"
          "  -i, --repl : Run interactive read-eval-print loop; implies -v\n"
          "  -n, --no-lib : Skip `(require (lib \"<init-lib>\"))' for -i/-e/-f/-r\n"
@@ -1369,7 +1454,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
 # ifdef CMDLINE_STDIO_FLAG
 	 "  -z, --text-repl : Use text `read-eval-print-loop' for -i\n"
 # endif
-         "  -I <path> : Set <init-lib> to <path>\n"
+         "  -I <path> : Set <init-lib> to <path> (sets language)\n"
 	 "  -X <dir>, --collects <dir> : Main collects at <dir> (or \"\" disables all)\n"
 	 "  -S <dir>, --search <dir> : More collects at <dir> (after main collects)\n"
 	 "  -A <dir>, --addon <dir> : Addon directory at <dir>\n"

@@ -373,6 +373,7 @@ static Scheme_Object *thread_cell_p(int argc, Scheme_Object *args[]);
 static Scheme_Object *thread_cell_get(int argc, Scheme_Object *args[]);
 static Scheme_Object *thread_cell_set(int argc, Scheme_Object *args[]);
 static Scheme_Object *thread_cell_values(int argc, Scheme_Object *args[]);
+static Scheme_Object *is_thread_cell_values(int argc, Scheme_Object *args[]);
 
 static Scheme_Object *make_security_guard(int argc, Scheme_Object *argv[]);
 static Scheme_Object *security_guard_p(int argc, Scheme_Object *argv[]);
@@ -454,10 +455,6 @@ extern BOOL WINAPI DllMain(HINSTANCE inst, ULONG reason, LPVOID reserved);
 
 #ifndef MZ_PRECISE_GC
 # define scheme_thread_hop_type scheme_thread_type
-#endif
-
-#ifdef MZ_PRECISE_GC
-uintptr_t scheme_get_current_thread_stack_start(void);
 #endif
 
 SHARED_OK Scheme_Object *initial_cmdline_vec;
@@ -548,6 +545,7 @@ void scheme_init_thread(Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY("thread-cell-ref"                     , thread_cell_get   , 1, 1, env);
   GLOBAL_PRIM_W_ARITY("thread-cell-set!"                    , thread_cell_set   , 2, 2, env);
   GLOBAL_PRIM_W_ARITY("current-preserved-thread-cell-values", thread_cell_values, 0, 1, env);
+  GLOBAL_FOLDING_PRIM("thread-cell-values?"                 , is_thread_cell_values, 1, 1, 1, env);
 
   GLOBAL_PRIM_W_ARITY("make-will-executor", make_will_executor, 0, 0, env);
   GLOBAL_PRIM_W_ARITY("will-executor?"    , will_executor_p   , 1, 1, env);
@@ -682,9 +680,9 @@ static Scheme_Object *current_memory_use(int argc, Scheme_Object *args[])
     } else if (SAME_TYPE(SCHEME_TYPE(args[0]), scheme_custodian_type)) {
       arg = args[0];
     } else {
-      scheme_wrong_type("current-memory-use", 
-			"custodian or #f", 
-			0, argc, args);
+      scheme_wrong_contract("current-memory-use", 
+                            "(or/c custodian? #f)", 
+                            0, argc, args);
     }
   }
 
@@ -731,7 +729,7 @@ static Scheme_Object *custodian_require_mem(int argc, Scheme_Object *args[])
   Scheme_Custodian *c1, *c2, *cx;
 
   if(NOT_SAME_TYPE(SCHEME_TYPE(args[0]), scheme_custodian_type)) {
-    scheme_wrong_type("custodian-require-memory", "custodian", 0, argc, args);
+    scheme_wrong_contract("custodian-require-memory", "custodian?", 0, argc, args);
     return NULL;
   }
 
@@ -740,12 +738,12 @@ static Scheme_Object *custodian_require_mem(int argc, Scheme_Object *args[])
   } else if (SCHEME_BIGNUMP(args[1]) && SCHEME_BIGPOS(args[1])) {
     lim = 0x3fffffff; /* more memory than we actually have */
   } else {
-    scheme_wrong_type("custodian-require-memory", "positive exact integer", 1, argc, args);
+    scheme_wrong_contract("custodian-require-memory", "exact-positive-integer?", 1, argc, args);
     return NULL;
   }
 
   if(NOT_SAME_TYPE(SCHEME_TYPE(args[2]), scheme_custodian_type)) {
-    scheme_wrong_type("custodian-require-memory", "custodian", 2, argc, args);
+    scheme_wrong_contract("custodian-require-memory", "custodian?", 2, argc, args);
     return NULL;
   }
 
@@ -773,7 +771,7 @@ static Scheme_Object *custodian_require_mem(int argc, Scheme_Object *args[])
 #endif
 
   scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
-		   "custodian-require-memory: not supported");
+		   "custodian-require-memory: " NOT_SUPPORTED_STR);
   return NULL; /* doesn't get here */
 }
 
@@ -782,7 +780,7 @@ static Scheme_Object *custodian_limit_mem(int argc, Scheme_Object *args[])
   intptr_t lim;
   
   if (NOT_SAME_TYPE(SCHEME_TYPE(args[0]), scheme_custodian_type)) {
-    scheme_wrong_type("custodian-limit-memory", "custodian", 0, argc, args);
+    scheme_wrong_contract("custodian-limit-memory", "custodian?", 0, argc, args);
     return NULL;
   }
 
@@ -791,13 +789,13 @@ static Scheme_Object *custodian_limit_mem(int argc, Scheme_Object *args[])
   } else if (SCHEME_BIGNUMP(args[1]) && SCHEME_BIGPOS(args[1])) {
     lim = 0x3fffffff; /* more memory than we actually have */
   } else {
-    scheme_wrong_type("custodian-limit-memory", "positive exact integer", 1, argc, args);
+    scheme_wrong_contract("custodian-limit-memory", "positive-exact-integer?", 1, argc, args);
     return NULL;
   }
 
   if (argc > 2) {
     if (NOT_SAME_TYPE(SCHEME_TYPE(args[2]), scheme_custodian_type)) {
-      scheme_wrong_type("custodian-require-memory", "custodian", 2, argc, args);
+      scheme_wrong_contract("custodian-require-memory", "custodian?", 2, argc, args);
       return NULL;
     }
   }
@@ -817,7 +815,7 @@ static Scheme_Object *custodian_limit_mem(int argc, Scheme_Object *args[])
 #endif
 
   scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
-		   "custodian-limit-memory: not supported");
+		   "custodian-limit-memory: " NOT_SUPPORTED_STR);
   return NULL; /* doesn't get here */
 }
 
@@ -1152,8 +1150,9 @@ void scheme_custodian_check_available(Scheme_Custodian *m, const char *who, cons
     m = (Scheme_Custodian *)scheme_get_param(scheme_current_config(), MZCONFIG_CUSTODIAN);
   
   if (!scheme_custodian_is_available(m))
-    scheme_arg_mismatch(who, "the custodian has been shut down: ",
-                        (Scheme_Object *)m);
+    scheme_contract_error(who, "the custodian has been shut down",
+                          "custodian", 1, m,
+                          NULL);
 }
 
 Scheme_Custodian_Reference *scheme_add_managed(Scheme_Custodian *m, Scheme_Object *o, 
@@ -1435,15 +1434,16 @@ static Scheme_Object *make_custodian(int argc, Scheme_Object *argv[])
 
   if (argc) {
     if (!SCHEME_CUSTODIANP(argv[0]))
-      scheme_wrong_type("make-custodian", "custodian", 0, argc, argv);
+      scheme_wrong_contract("make-custodian", "custodian?", 0, argc, argv);
     m = (Scheme_Custodian *)argv[0];
   } else
     m = (Scheme_Custodian *)scheme_get_param(scheme_current_config(), MZCONFIG_CUSTODIAN);
 
   if (m->shut_down)
-    scheme_arg_mismatch("make-custodian", 
-			"the custodian has been shut down: ", 
-			(Scheme_Object *)m);
+    scheme_contract_error("make-custodian", 
+                          "the custodian has been shut down", 
+                          "custodian", 1, m,
+                          NULL);
 
   return (Scheme_Object *)scheme_make_custodian(m);
 }
@@ -1461,7 +1461,7 @@ static Scheme_Object *custodian_p(int argc, Scheme_Object *argv[])
 static Scheme_Object *custodian_close_all(int argc, Scheme_Object *argv[])
 {
   if (!SCHEME_CUSTODIANP(argv[0]))
-    scheme_wrong_type("custodian-shutdown-all", "custodian", 0, argc, argv);
+    scheme_wrong_contract("custodian-shutdown-all", "custodian?", 0, argc, argv);
 
   scheme_close_managed((Scheme_Custodian *)argv[0]);
 
@@ -1535,9 +1535,9 @@ static Scheme_Object *custodian_to_list(int argc, Scheme_Object *argv[])
   Scheme_Custodian_Extractor ex;
 
   if (!SCHEME_CUSTODIANP(argv[0]))
-    scheme_wrong_type("custodian-managed-list", "custodian", 0, argc, argv);
+    scheme_wrong_contract("custodian-managed-list", "custodian?", 0, argc, argv);
   if (!SCHEME_CUSTODIANP(argv[1]))
-    scheme_wrong_type("custodian-managed-list", "custodian", 1, argc, argv);
+    scheme_wrong_contract("custodian-managed-list", "custodian?", 1, argc, argv);
 
   m = (Scheme_Custodian *)argv[0];
   m2 = (Scheme_Custodian *)argv[1];
@@ -1548,10 +1548,12 @@ static Scheme_Object *custodian_to_list(int argc, Scheme_Object *argv[])
     c = CUSTODIAN_FAM(c->parent);
   }
   if (!c) {
-    scheme_arg_mismatch("custodian-managed-list",
-			"the second custodian does not "
-			"manage the first custodian: ",
-			argv[0]);
+    scheme_contract_error("custodian-managed-list",
+                                 "the second custodian does not "
+                                 "manage the first custodian",
+                                 "first custodian", 1, argv[0],
+                                 "second custodian", 1, argv[1],
+                                 NULL);
   }
 
   /* Init extractors: */
@@ -1617,7 +1619,7 @@ static Scheme_Object *make_custodian_box(int argc, Scheme_Object *argv[])
   Scheme_Custodian_Box *cb;
 
   if (!SCHEME_CUSTODIANP(argv[0]))
-    scheme_wrong_type("make-custodian-box", "custodian", 0, argc, argv);
+    scheme_wrong_contract("make-custodian-box", "custodian?", 0, argc, argv);
 
   cb = MALLOC_ONE_TAGGED(Scheme_Custodian_Box);
   cb->so.type = scheme_cust_box_type;
@@ -1676,7 +1678,7 @@ static Scheme_Object *custodian_box_value(int argc, Scheme_Object *argv[])
   Scheme_Custodian_Box *cb;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_cust_box_type))
-    scheme_wrong_type("custodian-box-value", "custodian-box", 0, argc, argv);
+    scheme_wrong_contract("custodian-box-value", "custodian-box?", 0, argc, argv);
 
   cb = (Scheme_Custodian_Box *)argv[0];
   if (cb->cust->shut_down)
@@ -1868,10 +1870,11 @@ static void check_current_custodian_allows(const char *who, Scheme_Thread *p)
   return;
 
  bad:
-  scheme_arg_mismatch(who,
-		      "the current custodian does not "
-		      "solely manage the specified thread: ",
-		      (Scheme_Object *)p);  
+  scheme_contract_error(who,
+                        "the current custodian does not "
+                        "solely manage the specified thread",
+                        "thread", 1, p,
+                        NULL);
 }
 
 void scheme_free_all(void)
@@ -1909,7 +1912,7 @@ static Scheme_Object *make_thread_set(int argc, Scheme_Object *argv[])
 
   if (argc) {
     if (!(SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_thread_set_type)))
-      scheme_wrong_type("make-thread-group", "thread-group", 0, argc, argv);
+      scheme_wrong_contract("make-thread-group", "thread-group?", 0, argc, argv);
     parent = (Scheme_Thread_Set *)argv[0];
   } else
     parent = (Scheme_Thread_Set *)scheme_get_param(scheme_current_config(), MZCONFIG_THREAD_SET);
@@ -2528,6 +2531,11 @@ static void do_swap_thread()
     scheme_current_thread->cont_mark_stack = MZ_CONT_MARK_STACK;
     scheme_current_thread->cont_mark_pos = MZ_CONT_MARK_POS;
 #endif
+
+#ifdef MZ_USE_FUTURES
+    scheme_use_rtcall = new_thread->futures_slow_path_tracing;
+#endif
+
     scheme_current_thread = new_thread;
 
     /* Fixup current pointers in thread sets */
@@ -2969,7 +2977,7 @@ static Scheme_Object *thread_running_p(int argc, Scheme_Object *args[])
   int running;
 
   if (!SCHEME_THREADP(args[0]))
-    scheme_wrong_type("thread-running?", "thread", 0, argc, args);
+    scheme_wrong_contract("thread-running?", "thread?", 0, argc, args);
 
   running = ((Scheme_Thread *)args[0])->running;
 
@@ -2983,7 +2991,7 @@ static Scheme_Object *thread_dead_p(int argc, Scheme_Object *args[])
   int running;
 
   if (!SCHEME_THREADP(args[0]))
-    scheme_wrong_type("thread-running?", "thread", 0, argc, args);
+    scheme_wrong_contract("thread-running?", "thread?", 0, argc, args);
 
   running = ((Scheme_Thread *)args[0])->running;
 
@@ -3009,7 +3017,7 @@ static Scheme_Object *thread_wait(int argc, Scheme_Object *args[])
   Scheme_Thread *p;
 
   if (!SCHEME_THREADP(args[0]))
-    scheme_wrong_type("thread-wait", "thread", 0, argc, args);
+    scheme_wrong_contract("thread-wait", "thread?", 0, argc, args);
 
   p = (Scheme_Thread *)args[0];
 
@@ -3169,7 +3177,7 @@ Scheme_Object *scheme_call_as_nested_thread(int argc, Scheme_Object *argv[], voi
     if (SCHEME_CUSTODIANP(argv[1]))
       mgr = (Scheme_Custodian *)argv[1];
     else {
-      scheme_wrong_type("call-in-nested-thread", "custodian", 1, argc, argv);
+      scheme_wrong_contract("call-in-nested-thread", "custodian?", 1, argc, argv);
       return NULL;
     }
   } else
@@ -3341,6 +3349,11 @@ Scheme_Object *scheme_call_as_nested_thread(int argc, Scheme_Object *argv[], voi
   np->prev = NULL;
 
   unschedule_in_set((Scheme_Object *)np, np->t_set_parent);
+
+  if (np->cont_mark_stack_owner
+      && ((*np->cont_mark_stack_owner) == np)) {
+    *np->cont_mark_stack_owner = NULL;
+  }
 
   np->running = 0;
 
@@ -3962,8 +3975,8 @@ static int check_sleep(int need_activity, int sleep_now)
       float mst = (float)max_sleep_time;
 
       /* Make sure that mst didn't go to infinity: */
-      if ((double)mst > (2 * max_sleep_time)) {
-	mst = 100000000.0;
+      if (mst && !((double)mst < (2 * max_sleep_time))) {
+        mst = 1000000.0;
       }
 
       {
@@ -4722,7 +4735,7 @@ void scheme_thread_block(float sleep_time)
   /* Check for major GC request from master GC */
 #if defined(MZ_PRECISE_GC) && defined(MZ_USE_PLACES)
   if (!do_atomic)
-    GC_check_master_gc_request(); 
+    GC_check_master_gc_request();
 #endif
 
   /* Propagate memory-use information and check for custodian-based
@@ -5045,12 +5058,12 @@ sch_sleep(int argc, Scheme_Object *args[])
   float t;
 
   if (argc && !SCHEME_REALP(args[0]))
-    scheme_wrong_type("sleep", "non-negative real number", 0, argc, args);
+    scheme_wrong_contract("sleep", "(>=/c 0.0)", 0, argc, args);
 
   if (argc) {
     t = (float)scheme_real_to_double(args[0]);
     if (t < 0)
-      scheme_wrong_type("sleep", "non-negative real number", 0, argc, args);
+      scheme_wrong_contract("sleep", "(>=/c 0.0)", 0, argc, args);
   } else
     t = 0;
 
@@ -5065,7 +5078,7 @@ static Scheme_Object *break_thread(int argc, Scheme_Object *args[])
   Scheme_Thread *p;
 
   if (!SAME_TYPE(SCHEME_TYPE(args[0]), scheme_thread_type))
-    scheme_wrong_type("break-thread", "thread", 0, argc, args);
+    scheme_wrong_contract("break-thread", "thread?", 0, argc, args);
 
   p = (Scheme_Thread *)args[0];
 
@@ -5165,7 +5178,7 @@ static Scheme_Object *kill_thread(int argc, Scheme_Object *argv[])
   Scheme_Thread *p = (Scheme_Thread *)argv[0];
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_thread_type))
-    scheme_wrong_type("kill-thread", "thread", 0, argc, argv);
+    scheme_wrong_contract("kill-thread", "thread?", 0, argc, argv);
 
   if (!MZTHREAD_STILL_RUNNING(p->running))
     return scheme_void;
@@ -5225,7 +5238,7 @@ static Scheme_Object *thread_suspend(int argc, Scheme_Object *argv[])
   Scheme_Thread *p;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_thread_type))
-    scheme_wrong_type("thread-suspend", "thread", 0, argc, argv);
+    scheme_wrong_contract("thread-suspend", "thread?", 0, argc, argv);
 
   p = (Scheme_Thread *)argv[0];
 
@@ -5554,7 +5567,7 @@ static Scheme_Object *thread_resume(int argc, Scheme_Object *argv[])
   Scheme_Custodian *promote_c = NULL;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_thread_type))
-    scheme_wrong_type("thread-resume", "thread", 0, argc, argv);
+    scheme_wrong_contract("thread-resume", "thread?", 0, argc, argv);
 
   p = (Scheme_Thread *)argv[0];
 
@@ -5566,7 +5579,7 @@ static Scheme_Object *thread_resume(int argc, Scheme_Object *argv[])
       if (promote_c->shut_down)
 	promote_c = NULL;
     } else {
-      scheme_wrong_type("thread-resume", "thread or custodian", 1, argc, argv);
+      scheme_wrong_contract("thread-resume", "(or/c thread? custodian?)", 1, argc, argv);
       return NULL;
     }
   }
@@ -5642,7 +5655,7 @@ static Scheme_Object *make_thread_suspend(int argc, Scheme_Object *argv[])
   Scheme_Thread *p;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_thread_type))
-    scheme_wrong_type("thread-suspend-evt", "thread", 0, argc, argv);
+    scheme_wrong_contract("thread-suspend-evt", "thread?", 0, argc, argv);
 
   p = (Scheme_Thread *)argv[0];
 
@@ -5673,7 +5686,7 @@ static Scheme_Object *make_thread_resume(int argc, Scheme_Object *argv[])
   Scheme_Thread *p;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_thread_type))
-    scheme_wrong_type("thread-resume-evt", "thread", 0, argc, argv);
+    scheme_wrong_contract("thread-resume-evt", "thread?", 0, argc, argv);
 
   p = (Scheme_Thread *)argv[0];
 
@@ -5711,7 +5724,7 @@ static int resume_suspend_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
 static Scheme_Object *make_thread_dead(int argc, Scheme_Object *argv[])
 {
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_thread_type))
-    scheme_wrong_type("thread-dead-evt", "thread", 0, argc, argv);
+    scheme_wrong_contract("thread-dead-evt", "thread?", 0, argc, argv);
 
   return scheme_get_thread_dead((Scheme_Thread *)argv[0]);
 }
@@ -5887,6 +5900,7 @@ static Syncing *make_syncing(Evt_Set *evt_set, float timeout, double start_time)
     pos = scheme_rand((Scheme_Random_State *)rand_state);
     syncing->start_pos = (pos % evt_set->argc);
   }
+  syncing->thread = scheme_current_thread;
 
   return syncing;
 }
@@ -6122,6 +6136,13 @@ static int syncing_ready(Scheme_Object *s, Scheme_Schedule_Info *sinfo)
 
       sleep_end = r_sinfo.sleep_end;
 
+      /* Calling a guard can allow thread swap, which might choose a
+         semaphore or a channel, so check for a result: */
+      if (syncing->result) {
+        result = 1;
+        goto set_sleep_end_and_return;
+      }
+
       if ((i > r_sinfo.w_i) && sinfo->false_positive_ok) {
 	/* There was a redirection. Assert: !yep. 
 	   Give up if we've chained too much. */
@@ -6167,6 +6188,9 @@ static int syncing_ready(Scheme_Object *s, Scheme_Schedule_Info *sinfo)
       set_sync_target(syncing, i, sema, o, NULL, repost, 1, NULL);
       j--; /* try again with this sema */
     }
+
+    if (syncing->result)
+      scheme_signal_error("internal error: sync result set unexpectedly");
   }
 
   if (syncing->timeout >= 0.0) {
@@ -6288,7 +6312,7 @@ Evt_Set *make_evt_set(const char *name, int argc, Scheme_Object **argv, int delt
     if (!SCHEME_EVTSETP(argv[i+delta])) {
       w = find_evt(argv[i+delta]);
       if (!w) {
-	scheme_wrong_type(name, "evt", i+delta, argc, argv);
+	scheme_wrong_contract(name, "evt?", i+delta, argc, argv);
 	return NULL;
       }
       iws[i] = w;
@@ -6380,6 +6404,22 @@ void scheme_post_syncing_nacks(Syncing *syncing)
   }
 }
 
+static void escape_during_sync(Syncing *syncing) {
+#ifdef MZ_PRECISE_GC
+  Scheme_Thread *p = syncing->thread;
+#endif
+
+scheme_post_syncing_nacks(syncing);
+
+#ifdef MZ_PRECISE_GC
+  if (p && p->place_channel_msg_in_flight) {
+    GC_destroy_orphan_msg_memory(p->place_channel_msg_in_flight);
+    p->place_channel_msg_in_flight = NULL;
+  }
+  syncing->thread = NULL;
+#endif
+}
+
 static Scheme_Object *do_sync(const char *name, int argc, Scheme_Object *argv[], 
 			      int with_break, int with_timeout, int _tailok)
 {
@@ -6398,7 +6438,7 @@ static Scheme_Object *do_sync(const char *name, int argc, Scheme_Object *argv[],
         timeout = 0.0;
       
       if (timeout < 0.0) {
-	scheme_wrong_type(name, "non-negative real number", 0, argc, argv);
+	scheme_wrong_contract(name, "(>=/c 0.0)", 0, argc, argv);
 	return NULL;
       }
       
@@ -6477,7 +6517,7 @@ static Scheme_Object *do_sync(const char *name, int argc, Scheme_Object *argv[],
     syncing->disable_break = scheme_current_thread;
   }
 
-  BEGIN_ESCAPEABLE(scheme_post_syncing_nacks, syncing);
+  BEGIN_ESCAPEABLE(escape_during_sync, syncing);
   scheme_block_until((Scheme_Ready_Fun)syncing_ready, syncing_needs_wakeup, 
 		     (Scheme_Object *)syncing, timeout);
   END_ESCAPEABLE();
@@ -6702,7 +6742,7 @@ static Scheme_Object *thread_cell_values(int argc, Scheme_Object *argv[])
     Scheme_Thread_Cell_Table *naya;
 
     if (!SAME_TYPE(scheme_thread_cell_values_type, SCHEME_TYPE(argv[0]))) {
-      scheme_wrong_type("current-preserved-thread-cell-values", "thread cell values", 0, argc, argv);
+      scheme_wrong_contract("current-preserved-thread-cell-values", "thread-cell-values?", 0, argc, argv);
       return NULL;
     }
 
@@ -6725,6 +6765,13 @@ static Scheme_Object *thread_cell_values(int argc, Scheme_Object *argv[])
   }
 }
 
+static Scheme_Object *is_thread_cell_values(int argc, Scheme_Object *argv[])
+{
+  return (SAME_TYPE(scheme_thread_cell_values_type, SCHEME_TYPE(argv[0]))
+          ? scheme_true
+          : scheme_false);
+}
+
 static Scheme_Object *make_thread_cell(int argc, Scheme_Object *argv[])
 {
   return scheme_make_thread_cell(argv[0], (argc > 1) && SCHEME_TRUEP(argv[1]));
@@ -6740,14 +6787,14 @@ static Scheme_Object *thread_cell_p(int argc, Scheme_Object *argv[])
 static Scheme_Object *thread_cell_get(int argc, Scheme_Object *argv[])
 {
   if (!SCHEME_THREAD_CELLP(argv[0]))
-    scheme_wrong_type("thread-cell-ref", "thread cell", 0, argc, argv);
+    scheme_wrong_contract("thread-cell-ref", "thread-cell?", 0, argc, argv);
   return scheme_thread_cell_get(argv[0], scheme_current_thread->cell_values);
 }
 
 static Scheme_Object *thread_cell_set(int argc, Scheme_Object *argv[])
 {
   if (!SCHEME_THREAD_CELLP(argv[0]))
-    scheme_wrong_type("thread-cell-set!", "thread cell", 0, argc, argv);
+    scheme_wrong_contract("thread-cell-set!", "thread-cell?", 0, argc, argv);
   scheme_thread_cell_set(argv[0], scheme_current_thread->cell_values, argv[1]);
   return scheme_void;
 }
@@ -6889,7 +6936,8 @@ static Scheme_Object *extend_parameterization(int argc, Scheme_Object *argv[])
       param = argv[i];
       if (!SCHEME_PARAMETERP(param)
           && !(SCHEME_CHAPERONEP(param) && SCHEME_PARAMETERP(SCHEME_CHAPERONE_VAL(param)))) {
-	scheme_wrong_type("parameterize", "parameter", i, argc, argv);
+        a[0] = param;
+	scheme_wrong_contract("parameterize", "parameter?", -2, 1, a);
 	return NULL;
       }
       key = argv[i + 1];
@@ -6935,7 +6983,7 @@ static Scheme_Object *reparameterize(int argc, Scheme_Object **argv)
   int i;
 
   if (!SCHEME_CONFIGP(argv[0]))
-    scheme_wrong_type("reparameterize", "parameterization", 0, argc, argv);
+    scheme_wrong_contract("reparameterize", "parameterization?", 0, argc, argv);
   
   c = (Scheme_Config *)argv[0];
   scheme_flatten_config(c);
@@ -7053,7 +7101,7 @@ static Scheme_Object *make_derived_parameter(int argc, Scheme_Object **argv)
   ParamData *data;
 
   if (!SCHEME_PARAMETERP(argv[0]))
-    scheme_wrong_type("make-derived-parameter", "unchaperoned parameter", 0, argc, argv);
+    scheme_wrong_contract("make-derived-parameter", "(and/c parameter? (not/c impersonator?))", 0, argc, argv);
 
   scheme_check_proc_arity("make-derived-parameter", 1, 1, argc, argv);
   scheme_check_proc_arity("make-derived-parameter", 1, 2, argc, argv);
@@ -7085,9 +7133,9 @@ static Scheme_Object *parameter_procedure_eq(int argc, Scheme_Object **argv)
   if (SCHEME_CHAPERONEP(b)) b = SCHEME_CHAPERONE_VAL(b);
 
   if (!SCHEME_PARAMETERP(a))
-    scheme_wrong_type("parameter-procedure=?", "parameter-procedure", 0, argc, argv);
+    scheme_wrong_contract("parameter-procedure=?", "parameter?", 0, argc, argv);
   if (!SCHEME_PARAMETERP(b))
-    scheme_wrong_type("parameter-procedure=?", "parameter-procedure", 1, argc, argv);
+    scheme_wrong_contract("parameter-procedure=?", "parameter?", 1, argc, argv);
 
   return (SAME_OBJ(a, b)
 	  ? scheme_true
@@ -7517,7 +7565,7 @@ static Scheme_Object *make_security_guard(int argc, Scheme_Object *argv[])
   Scheme_Security_Guard *sg;
 
   if (!(SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_security_guard_type)))
-    scheme_wrong_type("make-security-guard", "security-guard", 0, argc, argv);
+    scheme_wrong_contract("make-security-guard", "security-guard?", 0, argc, argv);
   scheme_check_proc_arity("make-security-guard", 3, 1, argc, argv);
   scheme_check_proc_arity("make-security-guard", 4, 2, argc, argv);
   if (argc > 3)
@@ -7734,7 +7782,7 @@ static Scheme_Object *register_will(int argc, Scheme_Object **argv)
   Scheme_Object *e;
 
   if (NOT_SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_will_executor_type))
-    scheme_wrong_type("will-register", "will-executor", 0, argc, argv);
+    scheme_wrong_contract("will-register", "will-executor?", 0, argc, argv);
   scheme_check_proc_arity("will-register", 1, 2, argc, argv);
 
   if (((WillExecutor *)argv[0])->is_stubborn) {
@@ -7755,7 +7803,7 @@ static Scheme_Object *will_executor_try(int argc, Scheme_Object **argv)
   WillExecutor *w;
 
   if (NOT_SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_will_executor_type))
-    scheme_wrong_type("will-try-execute", "will-executor", 0, argc, argv);
+    scheme_wrong_contract("will-try-execute", "will-executor?", 0, argc, argv);
   
   w = (WillExecutor *)argv[0];
 
@@ -7770,7 +7818,7 @@ static Scheme_Object *will_executor_go(int argc, Scheme_Object **argv)
   WillExecutor *w;
 
   if (NOT_SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_will_executor_type))
-    scheme_wrong_type("will-execute", "will-executor", 0, argc, argv);
+    scheme_wrong_contract("will-execute", "will-executor?", 0, argc, argv);
   
   w = (WillExecutor *)argv[0];
 
@@ -8386,11 +8434,11 @@ static Scheme_Object *current_stats(int argc, Scheme_Object *argv[])
     v = SCHEME_CHAPERONE_VAL(v);
 
   if (!SCHEME_MUTABLE_VECTORP(v))
-    scheme_wrong_type("vector-set-performance-stats!", "mutable vector", 0, argc, argv);
+    scheme_wrong_contract("vector-set-performance-stats!", "(and/c vector? (not/c immutable?))", 0, argc, argv);
   if (argc > 1) {
     if (!SCHEME_FALSEP(argv[1])) {
       if (!SCHEME_THREADP(argv[1]))
-	scheme_wrong_type("vector-set-performance-stats!", "thread or #f", 0, argc, argv);
+	scheme_wrong_contract("vector-set-performance-stats!", "(or/c thread? #f)", 0, argc, argv);
       t = (Scheme_Thread *)argv[1];
     }
   }

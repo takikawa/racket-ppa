@@ -14,8 +14,15 @@
 ; function x and y or not, depending on their arity.  This way one
 ; can write a function from color to color, and immediately map it
 ; onto an image.
+; Apr 27, 2012: get-pixel-color has long had a "cache" of one image so it doesn't need
+; to keep re-rendering.  Experimenting with increasing this cache to two images, so we
+; can call get-pixel-color on two images in alternation without thrashing.  The cache
+; itself seems to work, and having the cache size >= the number of images DOES improve
+; performance for a series of get-pixel-color calls rotating among several images (each
+; render seems to take about a ms).
+; Apr 28, 2012: added fold-image and fold-image/extra.
 
-(require racket/draw
+(require (except-in racket/draw make-color make-pen)
         racket/snip
         racket/class
         2htdp/image
@@ -37,6 +44,7 @@
                     ;pixel-visible?
                     ; change-to-color
                     color=?
+;                    show-cache
                     )
 (provide-higher-order-primitive map-image (f _))
 (provide-higher-order-primitive map3-image (rfunc gfunc bfunc _))
@@ -48,6 +56,8 @@
 ;(provide-higher-order-primitive build-masked-image (_ _ f))
 (provide-higher-order-primitive build-image/extra (_ _ f _))
 (provide-higher-order-primitive map-image/extra (f _ _))
+(provide-higher-order-primitive fold-image (f _ _))
+(provide-higher-order-primitive fold-image/extra (f _ _ _))
 
 ; check-procedure-arity : alleged-function nat-num symbol string
 ; Note: if you invoke these things from a BSL or BSLL program, the syntax checker will
@@ -158,50 +168,68 @@
   (bytes-set! bytes (+ offset 3) (color-blue new-color)))
 
 ; get-pixel-color : x y image -> color
-; This will remember the last image on which it was called.
+; This will remember the last CACHE-SIZE images on which it was called.
 ; Really terrible performance if you call it in alternation
-; on two different images, but should be OK if you call it
+; on CACHE-SIZE+1 different images, but should be OK if you call it
 ; lots of times on the same image.
 ; Returns transparent if you ask about a position outside the picture.
-(define get-pixel-color
-  (let [[last-image #f]
-        [last-bytes #f]]
-    (lambda (x y pic)
-      (define w (image-width pic))
-      (define h (image-height pic))
-      (unless (eqv? pic last-image)
-        ; assuming nobody mutates an image between one get-pixel-color and the next
-        (set! last-image pic)
-        (define bm (make-bitmap w h))
-        (define bmdc (make-object bitmap-dc% bm))
-        (set! last-bytes (make-bytes (* 4 w h)))
-        (render-image pic bmdc 0 0)
-        (send bmdc set-bitmap #f)
-        (send bm get-argb-pixels 0 0 w h last-bytes))
-      (if (and (<= 0 x (sub1 w))
-               (<= 0 y (sub1 h)))
-          (get-px x y w h last-bytes)
-          transparent))))
 
-;; pixel-visible? : nat(x) nat(y) image -> boolean
-;; similar
-;(define pixel-visible?
-;  (let [[last-image #f]
-;        [last-bm #f]
-;        [last-bmdc #f]]
-;    (lambda (x y pic)
+(define CACHE-SIZE 3)
+(define-struct ib (image bytes) #:transparent)
+; A cache is a list of at most CACHE-SIZE ib's.
+; search-cache: image cache -> bytes or #f
+(define (search-cache pic cache)
+  (cond [(null? cache) #f]
+        [(eqv? pic (ib-image (car cache))) (ib-bytes (car cache))]
+        [else (search-cache pic (cdr cache))]))
+
+; We'll do a simple LRU cache-replacement.
+
+; add-and-drop : ib cache -> cache
+; preserves size
+(define (add-and-drop new-ib cache)
+  (cons new-ib (drop-last cache)))
+
+; drop-last : non-empty list -> list
+(define (drop-last L)
+  (cond [(null? L) (error 'drop-last "list is empty")]
+        [(null? (cdr L)) '()]
+        [else (cons (car L) (drop-last (cdr L)))]))
+
+(define cache (build-list CACHE-SIZE (lambda (n) (ib #f #f))))
+
+(define (show-cache) (map ib-image cache)) ; exported temporarily for debugging
+
+(define get-pixel-color
+  (let [;(cache (build-list CACHE-SIZE (lambda (n) (ib #f #f))))
+        ]
+    (lambda (x y pic)
+      (let* [(w (image-width pic))
+             (h (image-height pic))
+             (bytes
+              (or (search-cache pic cache)
+                  (let* [(bm (make-bitmap w h))
+                         (bmdc (make-object bitmap-dc% bm))
+                         (new-bytes (make-bytes (* 4 w h)))]
+                    (render-image pic bmdc 0 0)
+                    (send bmdc set-bitmap #f)
+                    (send bm get-argb-pixels 0 0 w h new-bytes)
+                    (set! cache (add-and-drop (ib pic new-bytes) cache))
+                    new-bytes)))]
 ;      (unless (eqv? pic last-image)
+;        ; assuming nobody mutates an image between one get-pixel-color and the next
 ;        (set! last-image pic)
-;        (set! last-bm (get-mask pic))
-;        (set! last-bmdc (make-object bitmap-dc% last-bm)))
-;      (let [[mask-pix (get-px x y last-bmdc)]] ; assumes this doesn't crash if out of bounds
-;        (and (equal? mask-pix (make-color 0 0 0)) ; treat anything else as transparent
-;             (>= x 0)
-;             (>= y 0)
-;             (< x (image-width pic))
-;             (< y (image-height pic))
-;            )))))
-;
+;        (define bm (make-bitmap w h))
+;        (define bmdc (make-object bitmap-dc% bm))
+;        (set! last-bytes (make-bytes (* 4 w h)))
+;        (render-image pic bmdc 0 0)
+;        (send bmdc set-bitmap #f)
+;        (send bm get-argb-pixels 0 0 w h last-bytes))
+        (if (and (<= 0 x (sub1 w))
+                 (<= 0 y (sub1 h)))
+            (get-px x y w h bytes)
+            transparent))))
+  )
 
 ; build-image-internal : natural(width) natural(height) (nat nat -> color) -> image
 (define (build-image-internal w h f)
@@ -360,3 +388,43 @@
                       (bfunc x y (color-red c) (color-green c) (color-blue c) (color-alpha c))
                       (afunc x y (color-red c) (color-green c) (color-blue c) (color-alpha c))))
       pic))
+
+; fold-image : ([x y] c X -> X) X image -> X
+; fold-image-internal : (nat nat color X -> X) X image -> image
+(define (fold-image-internal f init img)
+  (define w (image-width img))
+  (define h (image-height img))
+  (define bm (make-bitmap w h))
+  (define bdc (make-object bitmap-dc% bm))
+  (render-image img bdc 0 0)
+  (send bdc set-bitmap #f)
+  (define bytes (make-bytes (* w h 4)))
+  (send bm get-argb-pixels 0 0 w h bytes)
+  (define answer init)
+  (for* ((y (in-range 0 h))
+         (x (in-range 0 w)))
+        (set! answer  (f x y (get-px x y w h bytes) answer)))
+  answer)
+
+(define (fold-image f init img)
+  (unless (image? img)
+    (error 'fold-image
+	(format "Expected an image as third argument, but received ~v" img)))
+  (cond [(procedure-arity-includes? f 4)
+         (fold-image-internal f init img)]
+        [(procedure-arity-includes? f 2)            ; allow f : color X->X as a simple case
+         (fold-image-internal (lambda (x y c old-value) (f c old-value)) init img)]
+        [else (error 'fold-image "Expected a function of two or four parameters as first argument")]))
+
+; fold-image/extra : ([x y] c X Y -> X) X image Y -> X
+(define (fold-image/extra f init img extra)
+  (unless (image? img)
+    (error 'fold-image/extra
+	(format "Expected an image as third argument, but received ~v" img)))
+  (cond [(procedure-arity-includes? f 5)
+         (fold-image-internal (lambda (x y c old-value) (f x y c old-value extra)) init img)]
+        [(procedure-arity-includes? f 3)
+         (fold-image-internal (lambda (x y c old-value) (f c old-value extra)) init img)]
+        [else (error 'fold-image/extra "Expected a function taking three or five parameters as first argument")]
+        ))
+

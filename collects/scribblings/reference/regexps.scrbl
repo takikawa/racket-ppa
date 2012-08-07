@@ -153,7 +153,7 @@ syntactic restrictions:
 
 ]
 
-These contraints are checked syntactically by the following type
+These constraints are checked syntactically by the following type
 system. A type [@math{n}, @math{m}] corresponds to an expression that
 matches between @math{n} and @math{m} characters. In the rule for
 @litchar{(}@nonterm{Regexp}@litchar{)}, @math{N} means the number such
@@ -400,26 +400,29 @@ bytes. To avoid such interleaving, use @racket[regexp-match-peek]
                         [input (or/c string? bytes? path? input-port?)]
                         [start-pos exact-nonnegative-integer? 0]
                         [end-pos (or/c exact-nonnegative-integer? #f) #f]
-                        [input-prefix bytes? #""])
+                        [input-prefix bytes? #""]
+                        [#:match-select match-select
+                         (or/c (list? . -> . (or/c any/c list?))
+                               #f)
+                         car]
+                        [#:gap-select? gap-select any/c #f])
          (if (and (or (string? pattern) (regexp? pattern))
                   (or (string? input) (path? input)))
-             (listof string?)
-             (listof bytes?))]{
+             (listof (or/c string? (listof (or/c #f string?))))
+             (listof (or/c bytes? (listof (or/c #f bytes?)))))]{
 
 Like @racket[regexp-match], but the result is a list of strings or
 byte strings corresponding to a sequence of matches of
-@racket[pattern] in @racket[input]. (Unlike @racket[regexp-match],
-results for parenthesized sub-patterns in @racket[pattern] are not
-returned.)
+@racket[pattern] in @racket[input].
 
 The @racket[pattern] is used in order to find matches, where each
 match attempt starts at the end of the last match, and @litchar{^} is
 allowed to match the beginning of the input (if @racket[input-prefix]
 is @racket[#""]) only for the first match.  Empty matches are handled
 like other matches, returning a zero-length string or byte sequence
-(they are more useful in the complementing @racket[regexp-split]
-function), but @racket[pattern] is restricted from matching an empty
-sequence immediately after an empty match.
+(they are more useful in making this a complement of
+@racket[regexp-split]), but @racket[pattern] is restricted from
+matching an empty sequence immediately after an empty match.
 
 If @racket[input] contains no matches (in the range @racket[start-pos]
 to @racket[end-pos]), @racket[null] is returned. Otherwise, each item
@@ -432,6 +435,35 @@ port).
 @examples[
 (regexp-match* #rx"x." "12x4x6")
 (regexp-match* #rx"x*" "12x4x6")
+]
+
+@racket[match-select] specifies the collected results.  The default of
+@racket[car] means that the result is the list of matches without
+returning parenthesized sub-patterns.  It can be given as a `selector'
+function which chooses an item from a list, or it can choose a list of
+items.  For example, you can use @racket[cdr] to get a list of lists
+of parenthesized sub-patterns matches, or @racket[values] (as an
+identity function) to get the full matches as well.  (Note that the
+selector must choose an element of its input list or a list of
+elements, but it must not inspect its input as they can be either a
+list of strings or a list of position pairs.  Furthermore, the
+selector must be consistent in its choice(s).)
+
+@examples[
+(regexp-match* #rx"x(.)" "12x4x6" #:match-select cadr)
+(regexp-match* #rx"x(.)" "12x4x6" #:match-select values)
+]
+
+In addition, specifying @racket[gap-select] as a non-@racket[#f] value
+will make the result an interleaved list of the matches as well as the
+separators between them matches, starting and ending with a separator.
+In this case, @racket[match-select] can be given as @racket[#f] to
+return @emph{only} the separators, making such uses equivalent to
+@racket[regexp-split].
+
+@examples[
+(regexp-match* #rx"x(.)" "12x4x6" #:match-select cadr #:gap-select? #t)
+(regexp-match* #rx"x(.)" "12x4x6" #:match-select #f #:gap-select? #t)
 ]}
 
 
@@ -494,16 +526,27 @@ positions indicate the number of bytes that were read, including
                                   [input (or/c string? bytes? path? input-port?)]
                                   [start-pos exact-nonnegative-integer? 0]
                                   [end-pos (or/c exact-nonnegative-integer? #f) #f]
-                                  [input-prefix bytes? #""])
-         (listof (cons/c exact-nonnegative-integer?
-                         exact-nonnegative-integer?))]{
+                                  [input-prefix bytes? #""]
+                                  [#:match-select match-select
+                                   (list? . -> . (or/c any/c list?))
+                                   car])
+         (or/c (listof (cons/c exact-nonnegative-integer?
+                               exact-nonnegative-integer?))
+               (listof (listof (or/c #f (cons/c exact-nonnegative-integer?
+                                                exact-nonnegative-integer?)))))]{
 
 Like @racket[regexp-match-positions], but returns multiple matches
 like @racket[regexp-match*].
 
 @examples[
 (regexp-match-positions* #rx"x." "12x4x6")
-]}
+(regexp-match-positions* #rx"x(.)" "12x4x6" #:match-select cadr)
+]
+
+Note that unlike @racket[regexp-match*], there is no
+@racket[#:gap-select?] input keyword, as this information can be easily
+inferred from the resulting matches.
+}
 
 
 @defproc[(regexp-match? [pattern (or/c string? bytes? regexp? byte-regexp?)]
@@ -618,16 +661,22 @@ blocking. The match fails if not-yet-available characters might be
 used to match @racket[pattern].}
 
 
-@defproc[(regexp-match-peek-positions* [pattern (or/c string? bytes? regexp? byte-regexp?)]
+@defproc[(regexp-match-peek-positions*
+                            [pattern (or/c string? bytes? regexp? byte-regexp?)]
                             [input input-port?]
                             [start-pos exact-nonnegative-integer? 0]
                             [end-pos (or/c exact-nonnegative-integer? #f) #f]
-                            [input-prefix bytes? #""])
-         (listof (cons/c exact-nonnegative-integer?
-                         exact-nonnegative-integer?))]{
+                            [input-prefix bytes? #""]
+                            [#:match-select match-select
+                             (list? . -> . (or/c any/c list?))
+                             car])
+         (or/c (listof (cons/c exact-nonnegative-integer?
+                               exact-nonnegative-integer?))
+               (listof (listof (or/c #f (cons/c exact-nonnegative-integer?
+                                                exact-nonnegative-integer?)))))]{
 
 Like @racket[regexp-match-peek-positions], but returns multiple matches like
-@racket[regexp-match*].}
+@racket[regexp-match-positions*].}
 
 @defproc[(regexp-match/end [pattern (or/c string? bytes? regexp? byte-regexp?)]
                        [input (or/c string? bytes? path? input-port?)]
@@ -736,6 +785,7 @@ an end-of-file if @racket[input] is an input port).
 (regexp-split #rx"" "12  34")
 (regexp-split #rx" *" "12  34")
 (regexp-split #px"\\b" "12, 13 and 14.")
+(regexp-split #rx" +" "")
 ]}
 
 @;------------------------------------------------------------------------
@@ -743,7 +793,7 @@ an end-of-file if @racket[input] is an input port).
 
 @defproc[(regexp-replace [pattern (or/c string? bytes? regexp? byte-regexp?)]
                          [input (or/c string? bytes?)]
-                         [insert (or/c string? bytes? 
+                         [insert (or/c string? bytes?
                                        ((string?) () #:rest (listof string?) . ->* . string?)
                                        ((bytes?) () #:rest (listof bytes?) . ->* . bytes?))]
                          [input-prefix bytes? #""])
@@ -811,9 +861,11 @@ before the @litchar{\}. For example, the Racket constant
 
 @defproc[(regexp-replace* [pattern (or/c string? bytes? regexp? byte-regexp?)]
                           [input (or/c string? bytes?)]
-                          [insert (or/c string? bytes? 
+                          [insert (or/c string? bytes?
                                         ((string?) () #:rest (listof string?) . ->* . string?)
                                         ((bytes?) () #:rest (listof bytes?) . ->* . bytes?))]
+                          [start-pos exact-nonnegative-integer? 0]
+                          [end-pos (or/c exact-nonnegative-integer? #f) #f]
                           [input-prefix bytes? #""])
          (or/c string? bytes?)]{
 
@@ -825,14 +877,40 @@ instead of just the first match. Only non-overlapping instances of
 recursively. Zero-length matches are treated the same as in
 @racket[regexp-match*].
 
+The optional @racket[start-pos] and @racket[end-pos] arguments select
+a portion of @racket[input] for matching; the default is the entire
+string or the stream up to an end-of-file.
+
 @examples[
-(regexp-replace* "([Mm])i ([a-zA-Z]*)" "mi cerveza Mi Mi Mi" 
+(regexp-replace* "([Mm])i ([a-zA-Z]*)" "mi cerveza Mi Mi Mi"
                  "\\1y \\2")
-(regexp-replace* "([Mm])i ([a-zA-Z]*)" "mi cerveza Mi Mi Mi" 
+(regexp-replace* "([Mm])i ([a-zA-Z]*)" "mi cerveza Mi Mi Mi"
                  (lambda (all one two)
                    (string-append (string-downcase one) "y"
                                   (string-upcase two))))
+(regexp-replace* #px"\\w" "hello world" string-upcase 0 5)
 (display (regexp-replace* #rx"x" "12x4x6" "\\\\"))
+]}
+
+@defproc[(regexp-replaces [input (or/c string? bytes?)]
+                          [replacements
+                           (listof
+                            (list/c (or/c string? bytes? regexp? byte-regexp?)
+                                    (or/c string? bytes?
+                                        ((string?) () #:rest (listof string?) . ->* . string?)
+                                        ((bytes?) () #:rest (listof bytes?) . ->* . bytes?))))])
+         (or/c string? bytes?)]{
+
+Performs a chain of @racket[regexp-replace*] operations, where each
+element in @racket[replacements] specifies a replacement as a
+@racket[(list pattern replacement)].  The replacements are done in
+order, so later replacements can apply to previous insertions.
+
+@examples[
+(regexp-replaces "zero-or-more?"
+                  '([#rx"-" "_"] [#rx"(.*)\\?$" "is_\\1"]))
+(regexp-replaces "zero-or-more?"
+                  '(["e" "o"] ["o" "oo"]))
 ]}
 
 @defproc*[([(regexp-replace-quote [str string?]) string?]
@@ -848,4 +926,3 @@ Concretely, every @litchar{\} and @litchar{&} in @racket[str] or
 (regexp-replace "UT" "Go UT!" "A&M")
 (regexp-replace "UT" "Go UT!" (regexp-replace-quote "A&M"))
 ]}
-

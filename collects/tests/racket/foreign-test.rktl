@@ -6,6 +6,32 @@
 (require mzlib/foreign)
 (unsafe!)
 
+(test #f malloc 0)
+(test #f malloc 0 _int)
+(test #f malloc _int 0)
+
+;; Check integer-range checking:
+(let ()
+  (define (try-int-boundary N _int _uint)
+    (test (- (expt 2 N)) cast (- (expt 2 N)) _int _int)
+    (test (sub1 (expt 2 N)) cast (sub1 (expt 2 N)) _int _int)
+    (test (expt 2 N) cast (expt 2 N) _uint _uint)
+    (test (sub1 (expt 2 (add1 N))) cast (sub1 (expt 2 (add1 N))) _uint _uint)
+    (err/rt-test (cast (expt 2 N) _int _int))
+    (err/rt-test (cast (sub1 (- (expt 2 N))) _int _int))
+    (err/rt-test (cast -1 _uint _uint))
+    (err/rt-test (cast (- (expt 2 N)) _uint _uint)))
+  (try-int-boundary 7 _int8 _uint8)
+  (try-int-boundary 7 _sbyte _ubyte)
+  (test 128 cast -128 _byte _byte)
+  (test 239 cast -17 _byte _byte)
+  (try-int-boundary 15 _int16 _uint16)
+  (try-int-boundary 15 _sword _uword)
+  (try-int-boundary 15 _short _ushort)
+  (test (expt 2 15) cast (- (expt 2 15)) _word _word)
+  (try-int-boundary 31 _int32 _uint32)
+  (try-int-boundary 63 _int64 _uint64))
+
 (let ([big/little (if (system-big-endian?) (lambda (x y) x) (lambda (x y) y))]
       [p (malloc _int32)])
   (ptr-set! p _int32 0)
@@ -19,28 +45,55 @@
   (test (big/little 4 1) ptr-ref p _int8 3))
 (flush-output)
 
+(err/rt-test (_array _byte 1024 1024 1024 1024 1024 1024 1200 2)
+             (lambda (exn) (regexp-match? #rx"arithmetic overflow" (exn-message exn))))
+
 (when (eq? 'windows (system-type))
-  (let* ([concat string-append]
-         [studio  "c:/Program Files/Microsoft Visual Studio 10.0"]
-         [scommon (concat studio "/Common7")]
-         [vc      (concat studio "/VC")])
-    (when (directory-exists? studio)
-      (putenv "PATH"    (concat (getenv "PATH")
-				";" vc "/bin"
-				";" scommon "/IDE"
-				";" scommon "/Tools"
-				";" scommon "/Tools/bin"))
-      (putenv "INCLUDE" (concat ";" vc "/include"
-				";" vc "/atlmfc/include"
-				";" vc "/PlatformSDK/Include"))
-      (putenv "LIB"     (concat ";" vc "/lib"
-				";" vc "/atlmfc/lib"
-				";" vc "/PlatformSDK/lib")))))
+  (define concat string-append)
+  (define 64bit? (= 8 (compiler-sizeof '(* void))))
+  (define (find-dir what . dirs)
+    (or (for/or ([d (in-list dirs)]) (and (directory-exists? d) d))
+        (error (format "Could not find a directory: ~a" what))))
+  (define progfiles
+    (find-dir "Program Files" "C:/Program Files (x86)" "C:/Program Files"))
+  (define studio
+    (and progfiles (concat progfiles "/Microsoft Visual Studio 10.0")))
+  (when (and studio (directory-exists? studio))
+    (define (paths-env var . ps)
+      (define val
+        (apply concat (for/list ([p (in-list ps)]
+                                 #:when (and p (directory-exists? p)))
+                        (concat p ";"))))
+      (printf ">>> $~a = ~s\n" var val)
+      (putenv var val))
+    (define (vc p)     (concat studio "/VC/" p))
+    (define (common p) (concat studio "/Common7/" p))
+    (define (winsdk p) (concat progfiles "/Microsoft SDKs/Windows/v7.0A/" p))
+    (paths-env "PATH"
+               (getenv "PATH")
+               (vc (if 64bit? "BIN/amd64" "BIN"))
+               (vc "IDE") (vc "Tools") (vc "Tools/bin")
+               (common "Tools") (common "IDE"))
+    (paths-env "INCLUDE"
+               (vc "INCLUDE") (vc "ATLMFC/INCLUDE") (vc "PlatformSDK/INCLUDE")
+               (winsdk "include"))
+    (paths-env "LIB"
+               (vc (if 64bit? "LIB/amd64" "LIB"))
+               (vc (if 64bit? "ATLMFC/LIB/amd64" "ATLMFC/LIB"))
+               (vc "PlatformSDK/LIB")
+               (winsdk (if 64bit? "Lib/x64" "Lib")))
+    (putenv "LIBPATH" (getenv "LIB"))
+    (define tmp (getenv "TEMP"))
+    (unless (and tmp (directory-exists? tmp))
+      (putenv "TEMP" (find-dir "Temporary directory" "C:/Temp" "C:/tmp")))
+    (when 64bit? (putenv "Platform" "X64"))))
 
 (require dynext/compile dynext/link mzlib/etc)
 (define delete-test-files
   (let ([c  (build-path (this-expression-source-directory) "foreign-test.c")]
-        [o  (build-path (current-directory) "foreign-test.o")]
+        [o  (build-path (current-directory)
+                        (if (eq? 'windows (system-type))
+                          "foreign-test.obj" "foreign-test.o"))]
         [so (build-path (current-directory)
                         (bytes->path (bytes-append #"foreign-test"
                                                    (system-type 'so-suffix))))])
@@ -51,7 +104,11 @@
       (link-extension #t (list o) so))
     (lambda ()
       (when (file-exists? o) (delete-file o))
-      (when (file-exists? so) (delete-file so)))))
+      (when (file-exists? so)
+        (with-handlers ([exn:fail:filesystem?
+                         (lambda (e)
+                           (eprintf "warning: could not delete ~e\n" so))])
+          (delete-file so))))))
 
 ;; Test arrays
 (define _c7_list (_array/list _byte 7))
@@ -97,16 +154,23 @@
   (t 12 'decimal_int_byte_byte  (_fun _int  _byte -> _byte) 1 2)
   (t 12 'decimal_byte_byte_byte (_fun _byte _byte -> _byte) 1 2)
   ;; ---
-  (t  9 'callback3_int_int_int    (_fun (_fun _int  -> _int ) -> _int ) sqr)
-  (t  79 'callback3_int_int_int   (_fun (_fun _int  -> _int ) -> _int ) #f) ; NULL allowed as function pointer
-  (t  9 'callback3_int_int_int    (_fun _pointer -> _int ) (function-ptr sqr (_fun _int  -> _int ))) ; callback allowed as pointer
-  (t  9 'callback3_byte_int_int   (_fun (_fun _byte -> _int ) -> _int ) sqr)
-  (t  9 'callback3_int_byte_int   (_fun (_fun _int  -> _byte) -> _int ) sqr)
-  (t  9 'callback3_byte_byte_int  (_fun (_fun _byte -> _byte) -> _int ) sqr)
-  (t  9 'callback3_int_int_byte   (_fun (_fun _int  -> _int ) -> _byte) sqr)
-  (t  9 'callback3_byte_int_byte  (_fun (_fun _byte -> _int ) -> _byte) sqr)
-  (t  9 'callback3_int_byte_byte  (_fun (_fun _int  -> _byte) -> _byte) sqr)
-  (t  9 'callback3_byte_byte_byte (_fun (_fun _byte -> _byte) -> _byte) sqr)
+  (t  9 'callback3_int_int_int     (_fun (_fun _int  -> _int ) -> _int ) sqr)
+  (t  79 'callback3_int_int_int    (_fun (_fun _int  -> _int ) -> _int ) #f) ; NULL allowed as function pointer
+  (t  9 'callback3_int_int_int     (_fun _pointer -> _int ) (function-ptr sqr (_fun _int  -> _int ))) ; callback allowed as pointer
+  (t  9 'callback3_byte_int_int    (_fun (_fun _byte -> _int ) -> _int ) sqr)
+  (t  9 'callback3_short_int_int   (_fun (_fun _short -> _int ) -> _int ) sqr)
+  (t  9 'callback3_int_byte_int    (_fun (_fun _int  -> _byte) -> _int ) sqr)
+  (t  9 'callback3_int_short_int   (_fun (_fun _int  -> _short) -> _int ) sqr)
+  (t  9 'callback3_byte_byte_int   (_fun (_fun _byte -> _byte) -> _int ) sqr)
+  (t  9 'callback3_short_short_int (_fun (_fun _short -> _short) -> _int ) sqr)
+  (t  9 'callback3_int_int_byte    (_fun (_fun _int  -> _int ) -> _byte) sqr)
+  (t  9 'callback3_int_int_short   (_fun (_fun _int  -> _int ) -> _short) sqr)
+  (t  9 'callback3_byte_int_byte   (_fun (_fun _byte -> _int ) -> _byte) sqr)
+  (t  9 'callback3_short_int_short (_fun (_fun _short -> _int ) -> _short) sqr)
+  (t  9 'callback3_int_byte_byte   (_fun (_fun _int  -> _byte) -> _byte) sqr)
+  (t  9 'callback3_int_short_short (_fun (_fun _int  -> _short) -> _short) sqr)
+  (t  9 'callback3_byte_byte_byte  (_fun (_fun _byte -> _byte) -> _byte) sqr)
+  (t  9 'callback3_short_short_short (_fun (_fun _short -> _short) -> _short) sqr)
   ;; ---
   (tc 3 'curry_int_int_int    (_fun _int  -> (_fun _int  -> _int )) 1 2)
   (tc 3 'curry_byte_int_int   (_fun _byte -> (_fun _int  -> _int )) 1 2)
@@ -131,8 +195,9 @@
   (test* 4 'g3 _pointer (lambda (p) ((function-ptr p (_fun _int -> _int)) 3)))
   ;; Equivalentlly, 'g3 is a static variable that holds a function pointer. By
   ;; looking it up with _fpointer, we get its address, which then works
-  ;; with ptr-ref to extract the function.
-  (test* 7 'g3 _fpointer (lambda (p) ((ptr-ref p (_fun _int -> _int)) 6)))
+  ;; with ptr-ref to extract the function. (This pattern isn't a good idea, but
+  ;; it's a useful extra check here.)
+  (test* 7 'g3 _fpointer (lambda (p) ((ptr-ref (cast p _fpointer _pointer) (_fun _int -> _int)) 6)))
   ;; ---
   (test ((lambda (x f) ((f (+ x 1)) (- x 1)))
          3 (lambda (x) (lambda (y) (+ y (* x x)))))
@@ -140,18 +205,20 @@
         ((ffi 'hoho (_fun _int (_fun _int -> (_fun _int -> _int)) -> _int))
          3 (lambda (x) (lambda (y) (+ y (* x x))))))
   ;; ---
-  (test '(0 1 2 3 4 5 6 7 8 9)
-        'qsort
-        ((get-ffi-obj 'qsort #f
-                      (_fun (l    : (_list io _int len))
-                            (len  : _int = (length l))
-                            (size : _int = (ctype-sizeof _int))
-                            (compare : (_fun _pointer _pointer -> _int))
-                            -> _void -> l))
-         '(7 1 2 3 5 6 4 8 0 9)
-         (lambda (x y)
-           (let ([x (ptr-ref x _int)] [y (ptr-ref y _int)])
-             (cond [(< x y) -1] [(> x y) +1] [else 0])))))
+  (let ([qsort (get-ffi-obj 'qsort #f
+                            (_fun (l    : (_list io _int len))
+                                  (len  : _int = (length l))
+                                  (size : _int = (ctype-sizeof _int))
+                                  (compare : (_fun _pointer _pointer -> _int))
+                                  -> _void -> l))])
+    (test '(0 1 2 3 4 5 6 7 8 9)
+          'qsort
+          (qsort
+           '(7 1 2 3 5 6 4 8 0 9)
+           (lambda (x y)
+             (let ([x (ptr-ref x _int)] [y (ptr-ref y _int)])
+               (cond [(< x y) -1] [(> x y) +1] [else 0])))))
+    (test '() 'qsort (qsort '() (lambda (x y) (error "bad!")))))
   ;; ---
   ;; test vectors
   (t 55 'grab7th (_fun _pointer -> _int ) #"012345678")
@@ -195,37 +262,45 @@
     (test (for/list ([i 7]) (+ i 10)) cast p _pointer (_list o _byte 7))
     (t (for/list ([i 7]) (+ i 11)) 'increment_c_array (_fun _pointer -> (_list o _byte 7)) p)
     (let ([a (ptr-ref p (_array _byte 7))])
+      (test 7 array-length a)
       (test 12 array-ref a 1)
       (ptr-set! p _byte 1 17)
       (test 17 array-ref a 1)))
-  (let ([v (for/list ([i 7]) i)])
-    ;; pass array as pointer:
-    ;; FIXME: these tests wrap the result pointer as non-GCable,
-    ;; but _c7_list allocates the argument array as GCable.
-    (t (for/list ([i 7]) (add1 i)) 'increment_c_array (_fun _c7_list -> (_list o _byte 7)) v)
-    (t (for/list ([i 7]) (add1 i)) 'increment_c_array (_fun _c7_list -> _c7_list) v)
-    (let ([r ((ffi 'increment_c_array (_fun _c7_list -> (_array _byte 7))) v)])
-      (test 2 array-ref r 1))
-    ;; Array within struct argument and result:
-    (let* ([ic7i (make-ic7i 13 v 14)]
-           [ic7i-2 ((ffi 'increment_ic7i (_fun _ic7i -> _ic7i)) ic7i)])
-      (test v ptr-ref (cast ic7i _ic7i-pointer _pointer) _c7_list 'abs (ctype-sizeof _int))
-      (test 13 ic7i-i1 ic7i)
-      (test v ic7i-c7 ic7i)
-      (test 14 ic7i-i2 ic7i)
-      (test 14 ic7i-i1 ic7i-2)
-      (test (map add1 v) ic7i-c7 ic7i-2)
-      (test 15 ic7i-i2 ic7i-2)
-      (let ([ic7i-3 ((ffi 'ic7i_cb (_fun _ic7i (_fun _ic7i -> _ic7i) -> _ic7i))
-                     ic7i
-                     (lambda (ic7i-4)
-                       (test 12 ic7i-i1 ic7i-4)
-                       (test (cons 255 (map sub1 (cdr v))) ic7i-c7 ic7i-4)
-                       (test 13 ic7i-i2 ic7i-4)
-                       (make-ic7i 2 (map (lambda (x) (- 252 x)) v) 9)))])
-        (test 3 ic7i-i1 ic7i-3)
-        (test (map add1 (map (lambda (x) (- 252 x)) v)) ic7i-c7 ic7i-3)
-        (test 10 ic7i-i2 ic7i-3))))
+  ;; Disable these tests on Windows/i386 where they fail (and crash the process
+  ;; killing all other tests).  Matthew said: There's no consistent spec for
+  ;; functions that return structures in i386 Windows.  Historically, gcc does
+  ;; it one way, and MSVC another.  I think libffi expects the gcc protocol.
+  ;; Newer versions of gcc may agree with msvc, so this may change in the
+  ;; future.
+  (unless (and (eq? 'windows (system-type)) (= 4 (compiler-sizeof '(* void))))
+    (let ([v (for/list ([i 7]) i)])
+      ;; pass array as pointer:
+      ;; FIXME: these tests wrap the result pointer as non-GCable,
+      ;; but _c7_list allocates the argument array as GCable.
+      (t (for/list ([i 7]) (add1 i)) 'increment_c_array (_fun _c7_list -> (_list o _byte 7)) v)
+      (t (for/list ([i 7]) (add1 i)) 'increment_c_array (_fun _c7_list -> _c7_list) v)
+      (let ([r ((ffi 'increment_c_array (_fun _c7_list -> (_array _byte 7))) v)])
+        (test 2 array-ref r 1))
+      ;; Array within struct argument and result:
+      (let* ([ic7i (make-ic7i 13 v 14)]
+             [ic7i-2 ((ffi 'increment_ic7i (_fun _ic7i -> _ic7i)) ic7i)])
+        (test v ptr-ref (cast ic7i _ic7i-pointer _pointer) _c7_list 'abs (ctype-sizeof _int))
+        (test 13 ic7i-i1 ic7i)
+        (test v ic7i-c7 ic7i)
+        (test 14 ic7i-i2 ic7i)
+        (test 14 ic7i-i1 ic7i-2)
+        (test (map add1 v) ic7i-c7 ic7i-2)
+        (test 15 ic7i-i2 ic7i-2)
+        (let ([ic7i-3 ((ffi 'ic7i_cb (_fun _ic7i (_fun _ic7i -> _ic7i) -> _ic7i))
+                       ic7i
+                       (lambda (ic7i-4)
+                         (test 12 ic7i-i1 ic7i-4)
+                         (test (cons 255 (map sub1 (cdr v))) ic7i-c7 ic7i-4)
+                         (test 13 ic7i-i2 ic7i-4)
+                         (make-ic7i 2 (map (lambda (x) (- 252 x)) v) 9)))])
+          (test 3 ic7i-i1 ic7i-3)
+          (test (map add1 (map (lambda (x) (- 252 x)) v)) ic7i-c7 ic7i-3)
+          (test 10 ic7i-i2 ic7i-3)))))
   ;; Two-dimensional array:
   ;; FIXME: same allocation bug for result as above
   (let ([v (for/list ([j 3]) (for/list ([i 7]) (+ i j)))]
@@ -365,6 +440,14 @@
                                              4
                                              0))
     (test 44 values (cast d _gcpointer _intptr))))
+
+;; test multi-dimension arrays
+(let ([_t (_array _int 20 10 5)])
+  (define ar (ptr-ref (malloc _t) _t))
+  (define (t n)
+    (test (void) array-set! ar 19 9 4 n)
+    (test n      array-ref ar 19 9 4))
+  (for-each t '(1 2 3)))
 
 (delete-test-files)
 

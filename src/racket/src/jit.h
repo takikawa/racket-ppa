@@ -173,6 +173,7 @@ extern int scheme_direct_call_count, scheme_indirect_call_count;
 extern int scheme_jit_malloced;
 #ifdef JIT_USE_FP_OPS
 THREAD_LOCAL_DECL(extern double scheme_jit_save_fp);
+THREAD_LOCAL_DECL(extern double scheme_jit_save_fp2);
 #endif
 
 typedef int (*Native_Check_Arity_Proc)(Scheme_Object *o, int argc, int dummy EXTRA_NATIVE_ARGUMENT_TYPE);
@@ -209,7 +210,7 @@ struct scheme_jit_common_record {
 
 #define MAX_SHARED_CALL_RANDS 25
   void *shared_tail_code[4][MAX_SHARED_CALL_RANDS];
-  void *shared_non_tail_code[4][MAX_SHARED_CALL_RANDS][2];
+  void *shared_non_tail_code[5][MAX_SHARED_CALL_RANDS][2];
   void *shared_non_tail_retry_code[2];
   void *shared_non_tail_argc_code[2];
   void *shared_tail_argc_code;
@@ -234,7 +235,7 @@ struct scheme_jit_common_record {
   void *bad_set_mcar_code, *bad_set_mcdr_code;
   void *imag_part_code, *real_part_code, *make_rectangular_code;
   void *bad_flimag_part_code, *bad_flreal_part_code, *bad_make_flrectangular_code;
-  void *unbox_code, *set_box_code;
+  void *unbox_code, *set_box_code, *box_cas_fail_code;
   void *bad_vector_length_code;
   void *bad_flvector_length_code;
   void *bad_fxvector_length_code;
@@ -267,7 +268,7 @@ struct scheme_jit_common_record {
   void *module_run_start_code, *module_exprun_start_code, *module_start_start_code;
   void *box_flonum_from_stack_code, *box_flonum_from_reg_code;
   void *fl1_fail_code, *fl2rr_fail_code[2], *fl2fr_fail_code[2], *fl2rf_fail_code[2];
-  void *wcm_code, *wcm_nontail_code;
+  void *wcm_code, *wcm_nontail_code, *wcm_chaperone;
   void *apply_to_list_tail_code, *apply_to_list_code, *apply_to_list_multi_ok_code;
   void *eqv_code, *eqv_branch_code;
   void *proc_arity_includes_code;
@@ -396,6 +397,7 @@ typedef struct {
 # define tl_fixup_runstack_base            tl_delta(fixup_runstack_base)
 # define tl_fixup_already_in_place         tl_delta(fixup_already_in_place)
 # define tl_scheme_jit_save_fp             tl_delta(scheme_jit_save_fp)
+# define tl_scheme_jit_save_fp2            tl_delta(scheme_jit_save_fp2)
 # define tl_scheme_fuel_counter            tl_delta(scheme_fuel_counter)
 # define tl_scheme_jit_stack_boundary      tl_delta(scheme_jit_stack_boundary)
 # define tl_jit_future_storage             tl_delta(jit_future_storage)
@@ -415,6 +417,9 @@ void *scheme_jit_get_threadlocal_table();
 #  define _mz_tl_str_p(addr, tmp_reg, reg) jit_str_p(tmp_reg, reg)
 #  define _mz_tl_str_l(addr, tmp_reg, reg) jit_str_l(tmp_reg, reg)
 #  define _mz_tl_str_i(addr, tmp_reg, reg) jit_str_i(tmp_reg, reg)
+#  define mz_tl_addr_tmp_i(tmp_reg, addr) (jit_movr_l(JIT_R10, tmp_reg), mz_tl_addr(tmp_reg, addr))
+#  define mz_tl_addr_untmp_i(tmp_reg) jit_movr_l(tmp_reg, JIT_R10)
+#  define mz_tl_tmp_reg_i(tmp_reg) tmp_reg
 # else
 #  define THREAD_LOCAL_USES_JIT_V2
 #  ifdef THREAD_LOCAL_USES_JIT_V2
@@ -434,12 +439,15 @@ void *scheme_jit_get_threadlocal_table();
 #   define _mz_tl_str_l(addr, tmp_reg, reg) jit_str_l(tmp_reg, reg)
 #   define _mz_tl_str_i(addr, tmp_reg, reg) jit_str_i(tmp_reg, reg)
 #  endif
+#  define mz_tl_addr_tmp_i(tmp_reg, addr) mz_tl_addr_tmp(tmp_reg, addr)
+#  define mz_tl_addr_untmp_i(tmp_reg) mz_tl_addr_untmp(tmp_reg)
+#  define mz_tl_tmp_reg_i(tmp_reg) mz_tl_tmp_reg(tmp_reg)
 # endif
 
 /* A given tmp_reg doesn't have to be unused; it just has to be distinct from other arguments. */
 # define mz_tl_sti_p(addr, reg, tmp_reg) (mz_tl_addr_tmp(tmp_reg, addr), _mz_tl_str_p(addr, mz_tl_tmp_reg(tmp_reg), reg), mz_tl_addr_untmp(tmp_reg))
 # define mz_tl_sti_l(addr, reg, tmp_reg) (mz_tl_addr_tmp(tmp_reg, addr), _mz_tl_str_l(addr, mz_tl_tmp_reg(tmp_reg), reg), mz_tl_addr_untmp(tmp_reg))
-# define mz_tl_sti_i(addr, reg, tmp_reg) (mz_tl_addr_tmp(tmp_reg, addr), _mz_tl_str_i(addr, mz_tl_tmp_reg(tmp_reg), reg), mz_tl_addr_untmp(tmp_reg))
+# define mz_tl_sti_i(addr, reg, tmp_reg) (mz_tl_addr_tmp_i(tmp_reg, addr), _mz_tl_str_i(addr, mz_tl_tmp_reg_i(tmp_reg), reg), mz_tl_addr_untmp_i(tmp_reg))
 # define mz_tl_ldi_p(reg, addr) (mz_tl_addr(reg, addr), jit_ldr_p(reg, reg))
 # define mz_tl_ldi_l(reg, addr) (mz_tl_addr(reg, addr), jit_ldr_l(reg, reg))
 # define mz_tl_ldi_i(reg, addr) (mz_tl_addr(reg, addr), jit_ldr_i(reg, reg))
@@ -465,6 +473,7 @@ void *scheme_jit_get_threadlocal_table();
 # define tl_fixup_runstack_base (&fixup_runstack_base)
 # define tl_fixup_already_in_place (&fixup_already_in_place)
 # define tl_scheme_jit_save_fp (&scheme_jit_save_fp)
+# define tl_scheme_jit_save_fp2 (&scheme_jit_save_fp2)
 # define tl_scheme_fuel_counter (&scheme_fuel_counter)
 # define tl_scheme_jit_stack_boundary (&scheme_jit_stack_boundary)
 #endif
@@ -529,7 +538,7 @@ static void *top4;
    mostly improves code size, rather than speed. Functions that cause
    the register to be de-sync'd are marked as such. Functions that can
    accommodate a de-sync'd register on entry are marked as such. All
-   other fuctions can assume a sync'd regsiter and ensure a sync'd
+   other functions can assume a sync'd regsiter and ensure a sync'd
    register. Note that branches and calls normally require a sync'd
    register. */
 
@@ -680,13 +689,16 @@ int check_location;
 # define NEED_LOCAL4
 #endif
 
+#define mz_set_local_p(x, l) mz_set_local_p_x(x, l, JIT_FP)
+#define mz_get_local_p(x, l) mz_get_local_p_x(x, l, JIT_FP)
+
 #ifdef MZ_USE_JIT_PPC
 /* JIT_LOCAL1, JIT_LOCAL2, and JIT_LOCAL3 are offsets in the stack frame. */
 # define JIT_LOCAL1 56
 # define JIT_LOCAL2 60
 # define JIT_LOCAL3 64
-# define mz_set_local_p(x, l) jit_stxi_p(l, JIT_FP, x)
-# define mz_get_local_p(x, l) jit_ldxi_p(x, JIT_FP, l)
+# define mz_set_local_p_x(x, l, FP) jit_stxi_p(l, FP, x)
+# define mz_get_local_p_x(x, l, FP) jit_ldxi_p(x, FP, l)
 # define mz_patch_branch_at(a, v) (_jitl.long_jumps ? (void)jit_patch_movei(a-4, a-3, v) : (void)jit_patch_branch(a-1, v))
 # define mz_patch_ucbranch_at(a, v) (_jitl.long_jumps ? (void)jit_patch_movei(a-4, a-3, v) : (void)jit_patch_ucbranch(a-1, v))
 # define mz_prolog(x) (MFLRr(x), mz_set_local_p(x, JIT_LOCAL2))
@@ -738,8 +750,8 @@ void scheme_jit_prolog_again(mz_jit_state *jitter, int n, int ret_addr_reg)
    1 word (for the return address) below alignment. */
 # define JIT_LOCAL1 -(JIT_WORD_SIZE * 4)
 # define JIT_LOCAL2 -(JIT_WORD_SIZE * 5)
-# define mz_set_local_p(x, l) jit_stxi_p((l), JIT_FP, (x))
-# define mz_get_local_p(x, l) jit_ldxi_p((x), JIT_FP, (l))
+# define mz_set_local_p_x(x, l, FP) jit_stxi_p((l), FP, (x))
+# define mz_get_local_p_x(x, l, FP) jit_ldxi_p((x), FP, (l))
 # define mz_patch_branch_at(a, v) jit_patch_branch_at(a, v)
 # define mz_patch_ucbranch_at(a, v) jit_patch_ucbranch_at(a, v)
   /* The ABI for _CALL_DARWIN or JIT_X86_64 requires alignment. Even
@@ -805,7 +817,7 @@ void scheme_jit_prolog_again(mz_jit_state *jitter, int n, int ret_addr_reg)
 #  define mz_pop_threadlocal() /* empty */
 #  ifdef THREAD_LOCAL_USES_JIT_V2
 #   define _mz_install_threadlocal(reg) jit_movr_p(JIT_V2, reg)
-#   define mz_repush_threadlocal(in) /* empty */
+#   define mz_repush_threadlocal() /* empty */
 #  else
 #   define _mz_install_threadlocal(reg) mz_set_local_p(reg, JIT_LOCAL4)
 #   define mz_repush_threadlocal() (PUSHQr(JIT_R0), jit_ldr_p(JIT_R0, _EBP), \
@@ -822,6 +834,24 @@ void scheme_jit_prolog_again(mz_jit_state *jitter, int n, int ret_addr_reg)
 # define mz_push_threadlocal_early() /* empty */
 # define mz_repush_threadlocal() /* empty */
 #endif
+
+#if 0
+static jit_insn *fp_tmpr;
+# define check_fp_depth(i, FP) \
+  (jit_addi_l(FP, FP, (JIT_FRAME_FLONUM_OFFSET - ((i) * sizeof(double)))), \
+   fp_tmpr = jit_bger_l(0, FP, JIT_SP),                               \
+   jit_ldi_p(FP, 0),                                                    \
+   mz_patch_branch(fp_tmpr),                                            \
+   jit_subi_l(FP, FP, (JIT_FRAME_FLONUM_OFFSET - ((i) * sizeof(double)))))
+#else
+# define check_fp_depth(i, FP) (void)0
+#endif
+
+#define FLOSTACK_SPACE_CHUNK 4
+# define mz_ld_fppush_x(r, i, FP) (check_fp_depth(i, FP), jit_ldxi_d_fppush(r, FP, (JIT_FRAME_FLONUM_OFFSET - ((i) * sizeof(double)))))
+# define mz_ld_fppush(r, i) mz_ld_fppush_x(r, i, JIT_FP) 
+# define mz_st_fppop_x(i, r, FP) (check_fp_depth(i, FP), (void)jit_stxi_d_fppop((JIT_FRAME_FLONUM_OFFSET - ((i) * sizeof(double))), FP, r))
+# define mz_st_fppop(i, r) mz_st_fppop_x(i, r, JIT_FP) 
 
 #define mz_patch_branch(a) mz_patch_branch_at(a, (_jit.x.pc))
 #define mz_patch_ucbranch(a) mz_patch_ucbranch_at(a, (_jit.x.pc))
@@ -900,7 +930,7 @@ void scheme_jit_prolog_again(mz_jit_state *jitter, int n, int ret_addr_reg)
      (Other JIT constraints imply that it isn't a pointer to GCable memory.)
 
    * Relevant thread-local state is confined to the C stack, runstack,
-     mark stack, and tl_save_fp.
+     mark stack, and tl_save_fp[2].
 
    * A pointer to the runstack can be used as a Scheme_Object** argument, but
      only when it points to MZ_RUNSTACK.
@@ -1193,14 +1223,14 @@ int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
 typedef struct jit_direct_arg jit_direct_arg;
 
 void *scheme_generate_shared_call(int num_rands, mz_jit_state *old_jitter, int multi_ok, int is_tail, 
-				  int direct_prim, int direct_native, int nontail_self);
+				  int direct_prim, int direct_native, int nontail_self, int unboxed_args);
 void scheme_ensure_retry_available(mz_jit_state *jitter, int multi_ok);
 int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_rands, 
 			mz_jit_state *jitter, int is_tail, int multi_ok, int no_call);
 int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_native, int need_set_rs, 
                               int is_inline, Scheme_Native_Closure *direct_to_code, jit_direct_arg *direct_arg);
 int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direct_native, int need_set_rs, 
-				  int multi_ok, int nontail_self, int pop_and_jump, int is_inlined);
+				  int multi_ok, int nontail_self, int pop_and_jump, int is_inlined, int unboxed_args);
 int scheme_generate_finish_tail_call(mz_jit_state *jitter, int direct_native);
 void scheme_jit_register_sub_func(mz_jit_state *jitter, void *code, Scheme_Object *protocol);
 void scheme_jit_register_helper_func(mz_jit_state *jitter, void *code);
@@ -1237,11 +1267,10 @@ int scheme_generate_non_tail_with_branch(Scheme_Object *obj, mz_jit_state *jitte
 int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int tail_ok, int wcm_may_replace, int multi_ok, int target,
                     Branch_Info *for_branch);
 int scheme_generate_unboxed(Scheme_Object *obj, mz_jit_state *jitter, int inlined_ok, int unbox_anyway);
-void *scheme_generate_shared_call(int num_rands, mz_jit_state *old_jitter, int multi_ok, int is_tail, 
-				  int direct_prim, int direct_native, int nontail_self);
 
 #ifdef USE_FLONUM_UNBOXING
 int scheme_generate_flonum_local_unboxing(mz_jit_state *jitter, int push);
+int scheme_generate_flonum_local_boxing(mz_jit_state *jitter, int pos, int offset, int target);
 #endif
 int scheme_generate_unboxed(Scheme_Object *obj, mz_jit_state *jitter, int inlined_ok, int unbox_anyway);
 int scheme_generate_non_tail_mark_pos_prefix(mz_jit_state *jitter);
@@ -1249,6 +1278,8 @@ void scheme_generate_non_tail_mark_pos_suffix(mz_jit_state *jitter);
 
 Scheme_Object **scheme_on_demand(Scheme_Object **argv);
 Scheme_Object **scheme_on_demand_with_args(Scheme_Object **in_argv, Scheme_Object **argv, int argv_delta);
+
+void scheme_jit_allocate_values(int count, Scheme_Thread *p);
 
 void scheme_prepare_branch_jump(mz_jit_state *jitter, Branch_Info *for_branch);
 void scheme_branch_for_true(mz_jit_state *jitter, Branch_Info *for_branch);
@@ -1277,7 +1308,7 @@ int scheme_jit_check_closure_flonum_bit(Scheme_Closure_Data *data, int pos, int 
 # define CLOSURE_CONTENT_IS_FLONUM(data, pos) scheme_jit_check_closure_flonum_bit(data, pos, data->num_params)
 #endif
 
-Scheme_Object *scheme_extract_global(Scheme_Object *o, Scheme_Native_Closure *nc);
+Scheme_Object *scheme_extract_global(Scheme_Object *o, Scheme_Native_Closure *nc, int local_only);
 Scheme_Object *scheme_extract_closure_local(Scheme_Object *obj, mz_jit_state *jitter, int extra_push);
 
 void scheme_jit_register_traversers(void);
@@ -1331,7 +1362,8 @@ Scheme_Object *scheme_jit_continuation_apply_install(Apply_LWC_Args *args);
 #define ARITH_FLUNOP   14
 /*  inexact->exact, unsafe-fl->fx, fl->exact-integer, fl->fx */
 #define ARITH_INEX_EX  15
-
+/*  flexpt */
+#define ARITH_EXPT     16
 
 /* Comparison codes. Used in jitarith.c and jitinline.c. */
 

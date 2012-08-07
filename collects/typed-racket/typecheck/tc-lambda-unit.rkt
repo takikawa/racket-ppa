@@ -1,13 +1,13 @@
-#lang scheme/unit
+#lang racket/unit
 
 (require (rename-in "../utils/utils.rkt" [infer r:infer])
          "signatures.rkt"
          "tc-metafunctions.rkt"
          "tc-subst.rkt" "check-below.rkt"
-         mzlib/trace racket/dict
-         scheme/list syntax/parse "parse-cl.rkt"
+         racket/dict
+         racket/list syntax/parse "parse-cl.rkt"
          racket/syntax unstable/struct syntax/stx
-         (rename-in scheme/contract [-> -->] [->* -->*] [one-of/c -one-of/c])
+         (rename-in racket/contract [-> -->] [->* -->*] [one-of/c -one-of/c])
          (except-in (rep type-rep) make-arr)
          (rename-in (types convenience utils union)
                     [make-arr* make-arr])
@@ -17,7 +17,7 @@
 	 (utils tc-utils)
 
          racket/match)
-(require (for-template scheme/base "internal-forms.rkt"))
+(require (for-template racket/base "internal-forms.rkt"))
 
 (import tc-expr^)
 (export tc-lambda^)
@@ -271,9 +271,12 @@
 
 (define (tc/mono-lambda/type formals bodies expected)
   (define t (make-Function (map lam-result->type (tc/mono-lambda formals bodies expected))))
-  (if expected
-      (and (check-below (ret t true-filter) expected) t)
-      t))
+  (cond-check-below (ret t true-filter) expected)
+  t)
+
+(define (plambda-prop stx)
+  (define d (syntax-property stx 'typechecker:plambda))
+  (and d (car (flatten d))))
 
 ;; tc/plambda syntax syntax-list syntax-list type -> Poly
 ;; formals and bodies must by syntax-lists
@@ -290,7 +293,7 @@
       [_ (int-err "expected not an appropriate tc-result: ~a" expected)]))
   (match expected
     [(tc-result1: (and t (Poly-names: ns expected*)))
-     (let* ([tvars (let ([p (syntax-property form 'typechecker:plambda)])
+     (let* ([tvars (let ([p (plambda-prop form)])
                      (when (and (pair? p) (eq? '... (car (last p))))
                        (tc-error
                         "Expected a polymorphic function without ..., but given function had ..."))
@@ -303,7 +306,7 @@
     [(tc-result1: (and t (PolyDots-names: (list ns ... dvar) expected*)))
      (let-values
          ([(tvars dotted)
-           (let ([p (syntax-property form 'typechecker:plambda)])
+           (let ([p (plambda-prop form)])
              (if p
                  (match (map syntax-e (syntax->list p))
                    [(list var ... dvar '...)
@@ -316,7 +319,7 @@
            (maybe-loop form formals bodies (ret expected*))))
        t)]
     [#f
-     (match (map syntax-e (syntax->list (syntax-property form 'typechecker:plambda)))
+     (match (map syntax-e (syntax->list (plambda-prop form)))
        [(list tvars ... dotted-var '...)
         (let* ([ty (extend-indexes dotted-var
                      (extend-tvars tvars
@@ -328,16 +331,13 @@
           ;(printf "plambda: ~a ~a ~a \n" literal-tvars new-tvars ty)
           (make-Poly tvars ty))])]
     [(tc-result1: t)
-     (unless (check-below (tc/plambda form formals bodies #f) t)
-       (tc-error/expr #:return expected
-                      "Expected a value of type ~a, but got a polymorphic function." t))
-     t]
+     (check-below (tc/plambda form formals bodies #f) t)]
     [_ (int-err "not a good expected value: ~a" expected)]))
 
 ;; typecheck a sequence of case-lambda clauses, which is possibly polymorphic
 ;; tc/lambda/internal syntax syntax-list syntax-list option[type] -> tc-result
 (define (tc/lambda/internal form formals bodies expected)
-  (if (or (syntax-property form 'typechecker:plambda)
+  (if (or (plambda-prop form)
           (match expected
             [(tc-result1: t) (or (Poly? t) (PolyDots? t))]
             [_ #f]))

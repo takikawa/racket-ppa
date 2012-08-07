@@ -1,6 +1,7 @@
 #lang racket/base
 (require racket/unit racket/contract
-         "../utils/utils.rkt" (rep type-rep) (types utils))
+         "../utils/utils.rkt" "../utils/unit-utils.rkt"
+         (rep type-rep) (types utils))
 (provide (all-defined-out))
 
 (define-signature tc-expr^
@@ -29,6 +30,9 @@
 (define-signature tc-app^
   ([cond-contracted tc/app (syntax? . -> . tc-results?)]
    [cond-contracted tc/app/check (syntax? tc-results? . -> . tc-results?)]))
+
+(define-signature tc-app-hetero^
+  ([cond-contracted tc/app-hetero (syntax? (or/c #f tc-results?). -> . (or/c #f tc-results?))]))
 
 (define-signature tc-apply^
   ([cond-contracted tc/apply (syntax? syntax? . -> . tc-results?)]))

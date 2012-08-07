@@ -927,7 +927,7 @@ static int cont_proc_MARK(void *p, struct NewGC *gc) {
   gcMARK2(c->native_trace, gc);
 #endif
 
-  MARK_jmpup(&c->buf, gc);
+  gcMARK2(c->buf_ptr, gc);
   MARK_cjs(&c->cjs, gc);
   MARK_stack_state(&c->ss, gc);
   gcMARK2(c->barrier_prompt, gc);
@@ -969,7 +969,7 @@ static int cont_proc_FIXUP(void *p, struct NewGC *gc) {
   gcFIXUP2(c->native_trace, gc);
 #endif
 
-  FIXUP_jmpup(&c->buf, gc);
+  gcFIXUP2(c->buf_ptr, gc);
   FIXUP_cjs(&c->cjs, gc);
   FIXUP_stack_state(&c->ss, gc);
   gcFIXUP2(c->barrier_prompt, gc);
@@ -995,6 +995,33 @@ static int cont_proc_FIXUP(void *p, struct NewGC *gc) {
 
 #define cont_proc_IS_ATOMIC 0
 #define cont_proc_IS_CONST_SIZE 1
+
+
+static int cont_jmp_proc_SIZE(void *p, struct NewGC *gc) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Cont_Jmp));
+}
+
+static int cont_jmp_proc_MARK(void *p, struct NewGC *gc) {
+  Scheme_Cont_Jmp *c = (Scheme_Cont_Jmp *)p;
+
+  MARK_jmpup(&c->buf, gc);
+  
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Cont_Jmp));
+}
+
+static int cont_jmp_proc_FIXUP(void *p, struct NewGC *gc) {
+  Scheme_Cont_Jmp *c = (Scheme_Cont_Jmp *)p;
+
+  FIXUP_jmpup(&c->buf, gc);
+  
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Cont_Jmp));
+}
+
+#define cont_jmp_proc_IS_ATOMIC 0
+#define cont_jmp_proc_IS_CONST_SIZE 1
 
 
 static int meta_cont_proc_SIZE(void *p, struct NewGC *gc) {
@@ -2161,6 +2188,7 @@ static int namespace_val_MARK(void *p, struct NewGC *gc) {
 
   gcMARK2(e->module, gc);
   gcMARK2(e->module_registry, gc);
+  gcMARK2(e->module_pre_registry, gc);
   gcMARK2(e->insp, gc);
 
   gcMARK2(e->rename_set, gc);
@@ -2202,6 +2230,7 @@ static int namespace_val_FIXUP(void *p, struct NewGC *gc) {
 
   gcFIXUP2(e->module, gc);
   gcFIXUP2(e->module_registry, gc);
+  gcFIXUP2(e->module_pre_registry, gc);
   gcFIXUP2(e->insp, gc);
 
   gcFIXUP2(e->rename_set, gc);
@@ -2327,6 +2356,7 @@ static int prefix_val_MARK(void *p, struct NewGC *gc) {
   int i;
   for (i = pf->num_slots; i--; )
     gcMARK2(pf->a[i], gc);
+  gcMARK2(pf->import_map, gc);
   return
   gcBYTES_TO_WORDS((sizeof(Scheme_Prefix) 
 		    + ((pf->num_slots-mzFLEX_DELTA) * sizeof(Scheme_Object *))
@@ -2339,6 +2369,7 @@ static int prefix_val_FIXUP(void *p, struct NewGC *gc) {
   int i;
   for (i = pf->num_slots; i--; )
     gcFIXUP2(pf->a[i], gc);
+  gcFIXUP2(pf->import_map, gc);
   return
   gcBYTES_TO_WORDS((sizeof(Scheme_Prefix) 
 		    + ((pf->num_slots-mzFLEX_DELTA) * sizeof(Scheme_Object *))
@@ -2532,12 +2563,19 @@ static int module_val_MARK(void *p, struct NewGC *gc) {
 
   gcMARK2(m->hints, gc);
   gcMARK2(m->ii_src, gc);
+  gcMARK2(m->super_bxs_info, gc);
 
   gcMARK2(m->comp_prefix, gc);
   gcMARK2(m->prefix, gc);
   gcMARK2(m->dummy, gc);
 
   gcMARK2(m->rn_stx, gc);
+
+  gcMARK2(m->submodule_path, gc);
+  gcMARK2(m->pre_submodules, gc);
+  gcMARK2(m->post_submodules, gc);
+  gcMARK2(m->supermodule, gc);
+  gcMARK2(m->submodule_ancestry, gc);
 
   gcMARK2(m->primitive, gc);
   return
@@ -2572,12 +2610,19 @@ static int module_val_FIXUP(void *p, struct NewGC *gc) {
 
   gcFIXUP2(m->hints, gc);
   gcFIXUP2(m->ii_src, gc);
+  gcFIXUP2(m->super_bxs_info, gc);
 
   gcFIXUP2(m->comp_prefix, gc);
   gcFIXUP2(m->prefix, gc);
   gcFIXUP2(m->dummy, gc);
 
   gcFIXUP2(m->rn_stx, gc);
+
+  gcFIXUP2(m->submodule_path, gc);
+  gcFIXUP2(m->pre_submodules, gc);
+  gcFIXUP2(m->post_submodules, gc);
+  gcFIXUP2(m->supermodule, gc);
+  gcFIXUP2(m->submodule_ancestry, gc);
 
   gcFIXUP2(m->primitive, gc);
   return

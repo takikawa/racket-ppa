@@ -13,19 +13,29 @@
                    (->* (path-string?
                          any/c
                          any/c
-                         (listof (list/c (or/c boolean? symbol?) any/c))
+                         (listof (or/c (list/c (or/c symbol? #f #t)
+                                               (or/c path? module-path?))
+                                       (list/c (or/c symbol? #f #t)
+                                               (or/c path? module-path?)
+                                               (listof symbol?))))
                          (listof path-string?)
                          any/c
                          (listof string?))
                         ((listof (cons/c symbol? any/c))
                          any/c
-                         symbol?)
+                         symbol?
+                         (or/c #f
+                               path-string?
+                               (listof path-string?)))
                         void?)]
                   [create-embedding-executable
                    (->* (path-string?)
                         (#:modules 
-                         (listof (list/c (or/c symbol? #f #t)
-                                         (or/c path? module-path?)))
+                         (listof (or/c (list/c (or/c symbol? #f #t)
+                                               (or/c path? module-path?))
+                                       (list/c (or/c symbol? #f #t)
+                                               (or/c path? module-path?)
+                                               (listof symbol?))))
                          #:configure-via-first-module? any/c	 
                          #:literal-files (listof path-string?)	 
                          #:literal-expression any/c	 

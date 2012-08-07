@@ -1,11 +1,13 @@
 ; Derived from plai/web/server, which was based on an older version of this
 ; Also derived from planet/untyped/instaservlet
-#lang racket
+#lang racket/base
 (require racket/contract
          racket/list
          racket/serialize
-         racket/runtime-path)
-(require web-server/managers/lru
+         racket/runtime-path
+         (for-syntax racket/base))
+(require net/url
+         web-server/managers/lru
          web-server/managers/manager
          web-server/configuration/namespace
          web-server/http
@@ -60,6 +62,8 @@
                   #:servlets-root path-string?
                   #:servlet-current-directory path-string?
                   #:file-not-found-responder (request? . -> . can-be-response?)
+                  #:servlet-loading-responder (url? any/c . -> . can-be-response?)
+                  #:servlet-responder (url? any/c . -> . can-be-response?)
                   #:mime-types-path path-string?
                   #:servlet-path string?
                   #:servlet-regexp regexp?
@@ -126,6 +130,11 @@
          [file-not-found-responder
           (gen-file-not-found-responder
            (build-path server-root-path "conf" "not-found.html"))]
+         #:servlet-loading-responder
+         [responders-servlet-loading servlet-loading-responder]
+         #:servlet-responder 
+         [responders-servlet servlet-error-responder]
+
          #:mime-types-path
          [mime-types-path (let ([p (build-path server-root-path "mime.types")])
                             (if (file-exists? p)
@@ -157,7 +166,11 @@
       #:stateless? stateless?
       #:stuffer stuffer
       #:current-directory servlet-current-directory
-      #:manager manager)
+      #:manager manager
+      #:responders-servlet-loading
+      responders-servlet-loading
+      #:responders-servlet 
+      responders-servlet)
      (let-values ([(clear-cache! url->servlet)
                    (servlets:make-cached-url->servlet
                     (fsmap:filter-url->path

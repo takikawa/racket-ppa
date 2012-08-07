@@ -1,7 +1,8 @@
 #lang racket/base
 (require syntax/srcloc
          (for-syntax racket/base syntax/srcloc setup/path-to-relative))
-(provide quote-srcloc
+(provide (protect-out module-name-fixup)
+         quote-srcloc
          quote-source-file
          quote-line-number
          quote-column-number
@@ -46,21 +47,57 @@
   [quote-character-position source-location-position]
   [quote-character-span source-location-span])
 
-(define-syntax-rule (quote-module-name)
-  (module-source->module-name
-   (variable-reference->module-source
-    (#%variable-reference))))
+(define (variable-reference->module-source/submod vr)
+  (define src (variable-reference->module-source vr))
+  (define rname (variable-reference->resolved-module-path vr))
+  (define name (and rname (resolved-module-path-name rname)))
+  (if (pair? name)
+      (cons src (cdr name))
+      src))
 
-(define-syntax-rule (quote-module-path)
-  (module-source->module-path
-   (variable-reference->module-source
-    (#%variable-reference))))
+(define-syntax-rule (module-source)
+ (variable-reference->module-source/submod
+  (#%variable-reference)))
 
-(define (module-source->module-name src)
-  (or src 'top-level))
+(define-for-syntax (do-quote-module stx fixup)
+  (syntax-case stx ()
+    [(_ path ...) 
+     (for ([path (in-list (syntax->list #'(path ...)))]
+           [i (in-naturals)])
+       (unless (or (symbol? (syntax-e path))
+                   (equal? (syntax-e path) ".."))
+         (raise-syntax-error #f "not a submodule path element" stx path)))
+     (with-syntax ([fixup fixup])
+       #'(fixup (module-source) (list 'path ...)))]))
 
-(define (module-source->module-path src)
-  (cond
-   [(path? src) `(file ,(path->string src))]
-   [(symbol? src) `(quote ,src)]
-   [else 'top-level]))
+(define-syntax (quote-module-name stx)
+  (do-quote-module stx #'module-name-fixup))
+
+(define (module-name-fixup src path)
+  (do-fixup src path #f))
+
+(define-syntax (quote-module-path stx)
+  (do-quote-module stx #'module-path-fixup))
+    
+(define (module-path-fixup src path)
+  (do-fixup src path #t))
+
+(define (do-fixup src path as-modpath?)
+  (define (last-pass src)
+    (cond
+     [(path? src) src]
+     [(symbol? src) (if as-modpath?
+                        `(quote ,src)
+                        src)]
+     [(list? src) 
+      (define base (last-pass (car src)))
+      (define sm (cdr src))
+      (if as-modpath?
+          `(submod ,base ,@sm)
+          (cons base sm))]
+     [else 'top-level]))
+  (last-pass
+    (cond 
+      [(null? path) src]
+      [(pair? src) (append src path)]
+      [else (cons src path)])))

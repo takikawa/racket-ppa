@@ -40,7 +40,7 @@ static Scheme_Object *ts_scheme_make_fsemaphore(int argc, Scheme_Object **argv)
   XFORM_SKIP_PROC
 {
   if (scheme_use_rtcall) { 
-    return scheme_rtcall_make_fsemaphore("[make_fsemaphore]", FSRC_OTHER, argv[0]);
+    return scheme_rtcall_make_fsemaphore(argv[0]);
   } 
   
   return scheme_make_fsemaphore_inl(argv[0]);
@@ -66,7 +66,7 @@ static Scheme_Object *cont_mark_set_first_try_fast(Scheme_Object *cms, Scheme_Ob
 {
   Scheme_Object *nullableCms;
   Scheme_Object *prompt_tag; 
-  
+ 
   prompt_tag = SCHEME_PTR_VAL(scheme_default_prompt_tag);
   if (key == scheme_parameterization_key || key == scheme_break_enabled_key) 
     prompt_tag = NULL;
@@ -74,6 +74,7 @@ static Scheme_Object *cont_mark_set_first_try_fast(Scheme_Object *cms, Scheme_Ob
   nullableCms = SCHEME_FALSEP(cms) ? NULL : cms;
   
   /*Fast path here */
+  
   if (!nullableCms) { 
     intptr_t findpos, bottom, startpos, minbottom; 
     intptr_t pos; 
@@ -108,6 +109,7 @@ static Scheme_Object *cont_mark_set_first_try_fast(Scheme_Object *cms, Scheme_Ob
     }
   }
 
+  
   /* Otherwise, slow path. This must be a "tail call", because the
      calling context may be captured as a lightweight continuation. */
   return ts_extract_one_cc_mark_to_tag(nullableCms, key, prompt_tag);
@@ -120,25 +122,21 @@ static int check_val_struct_prim(Scheme_Object *p, int arity)
 {
   if (p && SCHEME_PRIMP(p)) {
     if (arity == 1) {
-      if (((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_IS_STRUCT_OTHER) {
-        int t = (((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_OTHER_TYPE_MASK);
-        if (t == SCHEME_PRIM_STRUCT_TYPE_PRED)
-          return 1;
-        if (t == SCHEME_PRIM_STRUCT_TYPE_INDEXED_GETTER)
-          return 2;
-        else if (t == SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER)
-          return 4;
-        else if (t == SCHEME_PRIM_STRUCT_TYPE_STRUCT_PROP_PRED)
-          return 6;
-      }
+      int t = (((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_OTHER_TYPE_MASK);
+      if (t == SCHEME_PRIM_STRUCT_TYPE_PRED)
+        return 1;
+      if (t == SCHEME_PRIM_STRUCT_TYPE_INDEXED_GETTER)
+        return 2;
+      else if (t == SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER)
+        return 4;
+      else if (t == SCHEME_PRIM_STRUCT_TYPE_STRUCT_PROP_PRED)
+        return 6;
     } else if (arity == 2) {
-      if ((((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_IS_STRUCT_OTHER)) {
-        int t = (((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_OTHER_TYPE_MASK);
-        if (t == SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER)
-          return 3;
-        else if (t == SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER)
-          return 5;
-      }
+      int t = (((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_OTHER_TYPE_MASK);
+      if (t == SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER)
+        return 3;
+      else if (t == SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER)
+        return 5;
     }
   }
   return 0;
@@ -149,7 +147,7 @@ static int inlineable_struct_prim(Scheme_Object *o, mz_jit_state *jitter, int ex
   if (jitter->nc) {
     if (SAME_TYPE(SCHEME_TYPE(o), scheme_toplevel_type)) {
       Scheme_Object *p;
-      p = scheme_extract_global(o, jitter->nc);
+      p = scheme_extract_global(o, jitter->nc, 0);
       p = ((Scheme_Bucket *)p)->val;
       return check_val_struct_prim(p, arity);
     } else if (SAME_TYPE(SCHEME_TYPE(o), scheme_local_type)) {
@@ -453,7 +451,7 @@ static int generate_inlined_constant_varref_test(mz_jit_state *jitter, Scheme_Ob
 
   /* Load global array: */
   pos = mz_remap(SCHEME_TOPLEVEL_DEPTH(obj));
-  jit_ldxi_p(JIT_R2, JIT_RUNSTACK, WORDS_TO_BYTES(pos));
+  mz_rs_ldxi(JIT_R2, pos);
   /* Load bucket: */
   pos = SCHEME_TOPLEVEL_POS(obj);
   jit_ldxi_p(JIT_R1, JIT_R2, &(((Scheme_Prefix *)0x0)->a[pos]));
@@ -535,6 +533,9 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
     return 1;
   } else if (IS_NAMED_PRIM(rator, "null?")) {
     generate_inlined_constant_test(jitter, app, scheme_null, NULL, for_branch, branch_short, need_sync);
+    return 1;
+  } else if (IS_NAMED_PRIM(rator, "void?")) {
+    generate_inlined_constant_test(jitter, app, scheme_void, NULL, for_branch, branch_short, need_sync);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "pair?")) {
     generate_inlined_type_test(jitter, app, scheme_pair_type, scheme_pair_type, 0, for_branch, branch_short, need_sync);
@@ -1604,6 +1605,8 @@ static int generate_vector_op(mz_jit_state *jitter, int set, int int_ready, int 
 
     __START_TINY_JUMPS__(1);
     mz_patch_branch(ref);
+    if (for_struct && unsafe && can_chaperone) 
+      (void)mz_beqi_t(reffail, JIT_R0, scheme_proc_chaperone_type, JIT_R2);
     if (!unsafe) {
       if (!int_ready)
         (void)jit_bmci_ul(reffail, JIT_R1, 0x1);
@@ -2182,6 +2185,9 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
     } else if (IS_NAMED_PRIM(rator, "fxrshift")) {
       scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_RSH, 0, 0, NULL, 1, -1, 0, NULL);
       return 1;
+    } else if (IS_NAMED_PRIM(rator, "flexpt")) {
+      scheme_generate_arith(jitter, rator, app->rand1, app->rand2, 2, ARITH_EXPT, 0, 0, NULL, 1, 0, -1, NULL);
+      return 1;
     } else if (IS_NAMED_PRIM(rator, "vector-ref")
                || IS_NAMED_PRIM(rator, "unsafe-vector-ref")
                || IS_NAMED_PRIM(rator, "unsafe-vector*-ref")
@@ -2421,6 +2427,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
                || IS_NAMED_PRIM(rator, "list-tail")) {
       generate_two_args(app->rand1, app->rand2, jitter, 1, 2);
 
+      mz_rs_sync();
       if (IS_NAMED_PRIM(rator, "list-ref"))
         (void)jit_calli(sjc.list_ref_code);
       else
@@ -2818,6 +2825,91 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
     mz_prepare(0);
     (void)mz_finish(scheme_current_future);
     jit_retval(JIT_R0);
+    return 1;
+  } else if (IS_NAMED_PRIM(rator, "box-cas!") || (IS_NAMED_PRIM(rator, "unsafe-box*-cas!"))) { 
+
+    GC_CAN_IGNORE jit_insn *ref, *reffail, *reffalse, *reftrue;
+    int unsafe = 0;
+
+    if (IS_NAMED_PRIM(rator, "unsafe-box*-cas!")) {
+      unsafe = 1;
+    }
+
+    /* generate code to evaluate the arguments */
+    scheme_generate_app(app, NULL, 3, jitter, 0, 0, 2);
+    CHECK_LIMIT();
+    mz_rs_sync();
+
+    mz_rs_ldr(JIT_R1);
+
+    if (!unsafe) {
+      __START_TINY_JUMPS__(1);
+      /* Fail if this isn't a pointer (0x1 is the integer tag) */
+      ref = jit_bmci_ul(jit_forward(), JIT_R1, 0x1);
+      reffail = _jit.x.pc;
+      __END_TINY_JUMPS__(1);
+
+      (void)jit_calli(sjc.box_cas_fail_code);
+
+      __START_TINY_JUMPS__(1);
+      /* jump to here if the type tag tests succeed */
+      mz_patch_branch(ref);
+
+      /* Get the type tag, fail if it isn't a box */
+      (void)mz_bnei_t(reffail, JIT_R1, scheme_box_type, JIT_R2);
+      /* fail if immutable: */
+      jit_ldxi_s(JIT_R2, JIT_R1, &MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)0x0));
+      (void)jit_bmsi_ul(reffail, JIT_R2, 0x1);
+      __END_TINY_JUMPS__(1);
+    }
+    CHECK_LIMIT();
+
+    /* box is in JIT_R1 */
+    jit_addi_l(JIT_R1, JIT_R1, (intptr_t)&SCHEME_BOX_VAL(0x0));
+    mz_rs_ldxi(JIT_R0, 1); /* old val */
+    mz_rs_ldxi(JIT_V1, 2); /* new val */
+
+    /* pop off 3 arguments */
+    mz_rs_inc(3);
+    mz_runstack_popped(jitter, 3);
+
+    if (for_branch) {
+      __START_SHORT_JUMPS__(branch_short);
+      scheme_prepare_branch_jump(jitter, for_branch);
+      CHECK_LIMIT();
+    } else {
+      __START_TINY_JUMPS__(1);
+    }
+
+    /* This is the actual CAS: */
+#ifdef MZ_USE_FUTURES
+    if (scheme_is_multiprocessor(0)) {
+      jit_lock_cmpxchgr_l(JIT_R1, JIT_V1); /* implicitly uses JIT_R0 */
+      reffalse = (JNEm(jit_forward(), 0,0,0), _jit.x.pc);
+    } else
+#endif
+      {
+        jit_ldr_p(JIT_R2, JIT_R1);
+        reffalse = jit_bner_p(jit_forward(), JIT_R2, JIT_R0);
+        jit_str_p(JIT_R1, JIT_V1);
+      }
+
+    /* Branch or set true/false: */
+    if (for_branch) {
+      scheme_branch_for_true(jitter, for_branch);
+      scheme_add_branch_false(for_branch, reffalse);
+      __END_SHORT_JUMPS__(branch_short);
+    } else {
+      jit_movi_p(JIT_R0, scheme_true);
+      reftrue = jit_jmpi(jit_forward());
+        
+      mz_patch_branch(reffalse);
+      jit_movi_p(JIT_R0, scheme_false);
+        
+      mz_patch_branch(reftrue);
+      __END_TINY_JUMPS__(1);
+    }
+
     return 1;
   } else if (!for_branch) {
     if (IS_NAMED_PRIM(rator, "vector-set!")

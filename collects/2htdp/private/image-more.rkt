@@ -5,7 +5,8 @@
          racket/match
          racket/contract
          racket/class
-         racket/draw
+         (except-in racket/draw
+                    make-pen make-color)
          ;(only-in racket/gui/base frame% canvas% slider% horizontal-panel% button%)
          htdp/error
          racket/math
@@ -650,9 +651,9 @@
                                                        (ibitmap-angle bitmap))])
          (values l t r b)))]
     [else
-     (fprintf (current-error-port) "using bad bounding box for ~s\n" atomic-shape)
+     (eprintf "using bad bounding box for ~s\n" atomic-shape)
      (values 0 0 100 100)]))
-  
+
 (define (rotated-rectangular-bounding-box w h θ)
   (let*-values ([(ax ay) (rotate-xy (- (/ w 2)) (- (/ h 2)) θ)]
                 [(bx by) (rotate-xy (- (/ w 2)) (/ h 2) θ)]
@@ -754,7 +755,7 @@
   (unless (and (<= 0 θ)
                (< θ 360))
     (error 'degrees->complex "~s" θ))
-  (case (modulo θ 360)
+  (case (and (integer? θ) (modulo θ 360))
     [(0)    1+0i]
     [(90)   0+1i]
     [(180) -1+0i]
@@ -1260,7 +1261,7 @@
   (syntax-case stx ()
     [(_ arg)
      (let* ([arg (syntax->datum #'arg)]
-            [path
+            [path/lst
              (cond
                [(and (pair? arg)
                      (eq? (car arg) 'planet))
@@ -1282,7 +1283,7 @@
                                            (format "could not find ~s, expected it to be in ~a"
                                                    arg candidate)
                                            stx))
-                     candidate]))]
+                     (cons fn colls)]))]
                [(string? arg)
                 (path->complete-path 
                  arg
@@ -1292,14 +1293,19 @@
                       'bitmap 
                       "expected the argument to specify a local path (via a string) or a module path (e.g. `icons/b-run.png')"
                       stx)])])
-       #`(bitmap/proc #,path))]))
+       #`(bitmap/proc '#,path/lst))]))
 
 (define (bitmap/proc arg)
-  (when (and (path? arg)
-             (not (file-exists? arg)))
-    (error 'bitmap "could not find the file ~a" (path->string arg)))
+  (define pth (if (path? arg)
+                  arg
+                  (apply collection-file-path arg
+                         #:fail
+                         (λ (msg) (error 'bitmap msg)))))
+  (when (and (path? pth)
+             (not (file-exists? pth)))
+    (error 'bitmap "could not find the file ~a" (path->string pth)))
   ;; the rotate does a coercion to a 2htdp/image image
-  (rotate 0 (make-object image-snip% (make-object bitmap% arg 'unknown/alpha))))
+  (rotate 0 (make-object image-snip% (make-object bitmap% pth 'unknown/alpha))))
 
 (define/chk (bitmap/url string)
   ;; the rotate does a coercion to a 2htdp/image image

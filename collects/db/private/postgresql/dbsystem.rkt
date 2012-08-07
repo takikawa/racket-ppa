@@ -5,6 +5,7 @@
          racket/match
          (prefix-in srfi: srfi/19)
          "../generic/interfaces.rkt"
+         "../generic/common.rkt"
          "../generic/sql-data.rkt"
          "../generic/sql-convert.rkt"
          "../../util/datetime.rkt"
@@ -36,8 +37,12 @@
     (define/public (field-dvecs->typeids dvecs)
       (map field-dvec->typeid dvecs))
 
-    (define/public (describe-typeids typeids)
+    (define/public (describe-params typeids)
       (map describe-typeid typeids))
+
+    (define/public (describe-fields field-dvecs)
+      (for/list ([dvec (in-list field-dvecs)])
+        (describe-typeid (field-dvec->typeid dvec))))
 
     (super-new)))
 
@@ -47,13 +52,24 @@
 ;; ========================================
 
 ;; SQL "parsing"
-;; We just care about detecting commands that affect transaction status.
+
+;; We care about detecting:
+;;  - statements that affect transaction status
+;;  - statements that are safe for (vs invalidate) the statement cache
 
 ;; classify-pg-sql : string [nat] -> symbol/#f
 (define classify-pg-sql
   ;; Source: http://www.postgresql.org/docs/current/static/sql-commands.html
   (make-sql-classifier
-   `(("ABORT"                        rollback)
+   `(;; Statements that do not invalidate previously prepared statements
+     ("SELECT" select)
+     ("INSERT" insert)
+     ("UPDATE" update)
+     ("DELETE" delete)
+     ("WITH"   with)
+
+     ;; Transactional statements
+     ("ABORT"                        rollback)
      ("BEGIN"                        start)
      ;; COMMIT PREPARED itself is harmless.
      ("COMMIT PREPARED"              #f) ;; Note: before COMMIT

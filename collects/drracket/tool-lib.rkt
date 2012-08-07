@@ -26,15 +26,14 @@ all of the names in the tools library, for use defining keybindings
 
 (require (for-syntax racket/base))
 
-(require/doc drracket/private/ts ;; probably this also has to be an absolute require
-             racket/base scribble/manual
-             scribblings/tools/doc-util)
-
-(require/doc (for-label errortrace/errortrace-key
-                        racket/pretty 
-                        mzlib/pconvert
-                        syntax/toplevel
-                        ))
+(generate-delayed-documents) ; avoids a distribution dependency on `scribblings/tools/doc-util'
+(require (for-doc drracket/private/ts
+                  racket/base scribble/manual
+                  scribblings/tools/doc-util
+                  (for-label errortrace/errortrace-key
+                             racket/pretty 
+                             mzlib/pconvert
+                             syntax/toplevel)))
 
 (define-values/invoke-unit/infer drracket@)
 (provide-signature-elements drracket:tool-cm^) ;; provide all of the classes & interfaces
@@ -77,7 +76,7 @@ all of the names in the tools library, for use defining keybindings
                                   [_
                                    (raise-syntax-error 'provide/dr/doc "unknown thing" case)])])
                    (with-syntax ([mid (munge-id #'id)])
-                     #'(thing-doc mid ctc ("This is provided for backwards compatibility; new code should use " (racket id) " instead.")))))
+                     #`(thing-doc mid ctc (@undefined-const "This is provided for backwards compatibility; new code should use " (racket id) " instead.")))))
                (syntax->list #'(case ...)))])])
     (syntax-case stx ()
       [(_  rst ...)
@@ -87,18 +86,22 @@ all of the names in the tools library, for use defining keybindings
  
  (proc-doc/names
   drracket:module-language-tools:add-opt-out-toolbar-button
-  (-> (-> (is-a?/c top-level-window<%>)
-          (is-a?/c area-container<%>) 
-          (is-a?/c switchable-button%))
-      symbol?
-      void?)
-  (make-button id)
+  (->* ((-> (is-a?/c top-level-window<%>)
+            (is-a?/c area-container<%>) 
+            (is-a?/c switchable-button%))
+        symbol?)
+       (#:number (or/c real? #f))
+       void?)
+  ((make-button id) ((number #f)))
   @{Call this function to add another button to DrRacket's toolbar. When buttons are added this way,
     DrRacket monitors the @tt{#lang} line at the top of the file; when it changes DrRacket queries
     the language to see if this button should be included.
     These buttons are ``opt out'', meaning that if the language doesn't explicitly ask to not
     have this button (or all such buttons), the button will appear.
     
+    The @racket[number] argument is the same as the @racket[number] argument
+    to @method[drracket:unit:frame<%> register-toolbar-button].
+
     @language-info-def[drracket:opt-out-toolbar-buttons]{
       See @racket[read-language] for more details on how a language can opt out.
       DrRacket will invoke the @tt{get-info} proc from @racket[read-language] with
@@ -110,7 +113,10 @@ all of the names in the tools library, for use defining keybindings
  
  (proc-doc/names
   drracket:module-language-tools:add-online-expansion-handler 
-  (-> path-string? symbol? (-> (is-a?/c drracket:unit:definitions-text<%>) any/c any) void?)
+  (-> path-string? symbol? (-> (is-a?/c drracket:unit:definitions-text<%>)
+                               any/c
+                               any)
+      void?)
   (mod-path id local-handler)
   @{Registers a pair of procedures with DrRacket's online expansion machinery. 
     
@@ -121,10 +127,33 @@ all of the names in the tools library, for use defining keybindings
     the fully expanded object to that first procedure. (The procedure is called
     in the same context as the expansion process.) 
     
-    Note that the thread that calls this procedure may be
-    killed at anytime: DrRacket may kill it when the user types in the buffer
+    The contract for that procedure is
+    @racketblock[(-> syntax? path? any/c custodian? 
+                     any)]
+    There are three other arguments.
+    
+    @itemize[
+      @item{
+    The @racket[path?] argument is the path that was the @racket[current-directory]
+    when the code was expanded. This directory should be used as the 
+    @racket[current-directory] when resolving module paths obtained from
+    the syntax object.}
+    
+      @item{
+    The third argument is the source object used in the syntax objects that
+    come from the definitions window in DrRacket. It may be a path (if the file
+    was saved), but it also might not be. Use @racket[equal?] to compare it
+    with the @racket[syntax-source] field of syntax objects to determine if
+    they come from the definitions window.}
+    
+      @item{ Note that the thread that calls this procedure may be
+    killed at any time: DrRacket may kill it when the user types in the buffer
     (in order to start a new expansion), but bizarro code may also create a separate
     thread during expansion that lurks around and then mutates arbitrary things.
+    
+    Some code, however, should be longer running, surviving such custodian
+    shutdowns. To support this, the procedure called in the separate place is
+    supplied with a more powerful custodian that is not shut down. }]
     
     The result of the procedure is expected to be something that can be sent
     across a @racket[place-channel], which is then sent back to the original
@@ -1536,7 +1565,7 @@ all of the names in the tools library, for use defining keybindings
     
     The @racket[init-code] argument is an s-expression representing
     the code for a module. This module is expected to provide
-    the identifer @racket[init-code], bound to a procedure of no
+    the identifier @racket[init-code], bound to a procedure of no
     arguments. That module is required and the @racket[init-code]
     procedure is executed to initialize language-specific
     settings before the code in @racket[program-filename] runs.
@@ -1627,9 +1656,23 @@ all of the names in the tools library, for use defining keybindings
   drracket:language:setup-printing-parameters
   (-> (-> any) drracket:language:simple-settings? (or/c number? 'infinity) any)
   (thunk settings width)
-  @{Sets all of the @racket[pretty-print] and @racket[print-convert] parameters
+  @{Equivalent to @racket[(drracket:language:make-setup-printing-parameters)].})
+ 
+ (proc-doc/names
+  drracket:language:make-setup-printing-parameters
+  (-> (-> (-> any) drracket:language:simple-settings? (or/c number? 'infinity) any))
+  ()
+  @{Returns a procedure that accepts three arguments: a thunk, settings, and 
+    a pretty-print width. The result procedure, when invoked sets all of the 
+    @racket[pretty-print] and @racket[print-convert] parameters
     either to the defaults to values based on @racket[settings]
-    and then invokes @racket[thunk], returning what it returns.})
+    and then invokes @racket[thunk], returning what it returns.
+    
+    When @racket[drracket:language:make-setup-printing-parameters] is invoked,
+    it @racket[dynamic-require]s @racketmodname[slideshow/pict-convert] and
+    closes over the results, using them to convert values when the resulting
+    procedure is invoked.
+    })
  
  (proc-doc/names
   drracket:language:text/pos-text

@@ -11,6 +11,7 @@
          racket/path
          racket/file
          racket/dict
+         racket/set
          browser/external
          setup/plt-installer)
 
@@ -62,6 +63,12 @@
    ,@(finder:default-filters)))
 
 (application:current-app-name (string-constant drscheme))
+
+(preferences:set-default 'drracket:submodules-to-choose-from 
+                         '((main) (test)) 
+                         (cons/c (list/c 'main)
+                                 (cons/c (list/c 'test)
+                                         (listof (listof symbol?)))))
 
 (drr:set-default 'drracket:language-dialog:hierlist-default #f (λ (x) (or (not x) (and (list? x) (andmap string? x)))))
 
@@ -399,17 +406,15 @@
  drracket:unit:open-drscheme-window)
 
 ;; add a handler to open .plt files.
-(handler:insert-format-handler 
+(handler:insert-format-handler
  "PLT Files"
  (λ (filename)
-   (let ([ext (filename-extension filename)])
-     (and ext
-          (or (bytes=? #"PLT" ext)
-              (bytes=? #"plt" ext))
-          (gui-utils:get-choice 
-           (format (string-constant install-plt-file) filename)
-           (string-constant install-plt-file/yes)
-           (string-constant install-plt-file/no)))))
+   (and (regexp-match? #rx"^(?i:plt)$"
+                       (or (filename-extension filename) #""))
+        (gui-utils:get-choice
+         (format (string-constant install-plt-file) filename)
+         (string-constant install-plt-file/yes)
+         (string-constant install-plt-file/no))))
  (λ (filename)
    (run-installer filename)
    #f))
@@ -702,10 +707,6 @@
 ;;   not going to be exiting yet.
 (autosave:restore-autosave-files/gui)
 
-;; install user's keybindings
-(for-each drracket:frame:add-keybindings-item 
-          (preferences:get 'drracket:user-defined-keybindings))
-
 ;; the initial window doesn't set the 
 ;; unit object's state correctly, yet.
 (define (make-basic)
@@ -727,9 +728,12 @@
                 (loop (cdr files))
                 (cons (car files) (loop (cdr files))))])))
 
-;; we queue a callback here to open the first frame
-;; so that the modules that are being loaded by drracket
-;; are all finished before we trigger the dynamic 
+;; Queue a callback here to open the first frame
+;; and install the user's keybindings so that the modules
+;; that are being loaded by drracket are all finished.
+;; This makes sure that drracket exports
+;; are all set up a) in case a user keybinding file uses
+;; them, and b) before we trigger the dynamic 
 ;; requires that can happen when the module language looks
 ;; at the #lang line (which can end up loading drracket itself
 ;; in a bad way leading to errors like this:
@@ -739,6 +743,11 @@
 
 (queue-callback
  (λ ()
+   
+   ;; install user's keybindings
+   (for-each drracket:frame:add-keybindings-item 
+             (preferences:get 'drracket:user-defined-keybindings))
+   
    ;; NOTE: drscheme-normal.rkt sets current-command-line-arguments to
    ;; the list of files to open, after parsing out flags like -h
    (let* ([files-to-open 

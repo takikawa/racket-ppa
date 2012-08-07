@@ -7,7 +7,8 @@
 
 (provide ctype-sizeof ctype-alignof compiler-sizeof
          malloc free end-stubborn-change
-         cpointer? ptr-equal? ptr-add ptr-ref ptr-set! (protect-out cast)
+         cpointer? prop:cpointer
+         ptr-equal? ptr-add ptr-ref ptr-set! (protect-out cast)
          ptr-offset ptr-add! offset-ptr? set-ptr-offset!
          vector->cpointer flvector->cpointer saved-errno lookup-errno
          ctype? make-ctype make-cstruct-type make-array-type make-union-type
@@ -37,13 +38,23 @@
 
 ;; _byte etc is a convenient name for _uint8 & _sint8
 ;; (_byte is unsigned)
-(define* _byte  _uint8)
+(define* _byte  (make-ctype _uint8
+                            (lambda (i) (if (and (exact-integer? i)
+                                                 (<= -128 i -1))
+                                            (+ i 256)
+                                            i))
+                            (lambda (v) v)))
 (define* _ubyte _uint8)
 (define* _sbyte _int8)
 
 ;; _word etc is a convenient name for _uint16 & _sint16
 ;; (_word is unsigned)
-(define* _word  _uint16)
+(define* _word (make-ctype _uint16
+                           (lambda (i) (if (and (exact-integer? i)
+                                                (<= (- (expt 2 15)) i -1))
+                                           (+ i (expt 2 16))
+                                           i))
+                           (lambda (v) v)))
 (define* _uword _uint16)
 (define* _sword _int16)
 
@@ -93,11 +104,12 @@
          ffi-lib? ffi-lib-name)
 (define (get-ffi-lib name [version/s ""]
 		     #:fail [fail #f]
-		     #:get-lib-dirs [get-lib-dirs get-lib-search-dirs])
+		     #:get-lib-dirs [get-lib-dirs get-lib-search-dirs]
+                     #:global? [global? #f])
   (cond
    [(not name) (ffi-lib name)] ; #f => NULL => open this executable
    [(not (or (string? name) (path? name)))
-    (raise-type-error 'ffi-lib "library-name" name)]
+    (raise-argument-error 'ffi-lib "(or/c string? path?)" name)]
    [else
     ;; A possible way that this might be misleading: say that there is a
     ;; "foo.so" file in the current directory, which refers to some
@@ -123,7 +135,7 @@
 				 (string-append name0 "." lib-suffix v)
 				 (string-append name0 v "." lib-suffix))))
 		       versions)]
-	   [ffi-lib*  (lambda (name) (ffi-lib name #t))])
+	   [ffi-lib*  (lambda (name) (ffi-lib name #t global?))])
       (or ;; try to look in our library paths first
        (and (not absolute?)
 	    (ormap (lambda (dir)
@@ -145,8 +157,8 @@
        (if fail
 	   (fail)
 	   (if (pair? names)
-	       (ffi-lib (car names))
-	       (ffi-lib name0)))))]))
+	       (ffi-lib (car names) #f global?)
+	       (ffi-lib name0 #f global?)))))]))
 
 (define (get-ffi-lib-internal x)
   (if (ffi-lib? x) x (get-ffi-lib x)))
@@ -235,7 +247,7 @@
   (cond [(bytes? objname) objname]
         [(symbol? objname) (get-ffi-obj-name who (symbol->string objname))]
         [(string? objname) (string->bytes/utf-8 objname)]
-        [else (raise-type-error who "object-name" objname)]))
+        [else (raise-argument-error who "(or/c bytes? symbol? string?)" objname)]))
 
 ;; This table keeps references to values that are set in foreign libraries, to
 ;; avoid them being GCed.  See set-ffi-obj! above.
@@ -305,11 +317,8 @@
             [else (loop (cdr args)
                         (cons (cons (car args) (car r)) (cdr r)))])))
 
-  (define (add-renamer body from to)
-    (with-syntax ([body body] [from from] [to to])
-      #'(let-syntax ([to (syntax-id-rules ()
-                           [(_?_ . _rest_) (from . _rest_)] [_?_ from])])
-          body)))
+  (define (with-renamer to from body)
+    #`(let-syntax ([#,to (make-rename-transformer #'#,from)]) #,body))
 
   (define (custom-type->keys type err)
     (define stops (map (lambda (s) (datum->syntax type s #f))
@@ -413,9 +422,9 @@
          (unless (or (and (procedure? xformer)
                           (procedure-arity-includes? xformer 1))
                      set!-trans?)
-           (raise-type-error 'define-fun-syntax
-                             "procedure (arity 1) or set!-transformer"
-                             xformer))
+           (raise-argument-error 'define-fun-syntax
+                                 "(or/c (procedure-arity-includes/c 1) set!-transformer?)"
+                                 xformer))
          (let ([f (make-fun-syntax (if set!-trans?
                                      (set!-transformer-procedure xformer)
                                      xformer)
@@ -524,17 +533,17 @@
             (err "got an expression for a custom type that do not use it"
                  clause)
             (set! expr (void))))
-        (set! x (if use-expr? (add-renamer (cadr x) name (car x)) x))
+        (when use-expr? (set! x (with-renamer (car x) name (cadr x))))
         (cond [(getkey '1st) =>
                (lambda (v)
                  (if 1st-arg
-                   (set! x (add-renamer x 1st-arg v))
+                   (set! x (with-renamer v 1st-arg x))
                    (err "got a custom type that wants 1st arg too early"
                         clause)))])
         (cond [(getkey 'prev) =>
                (lambda (v)
                  (if prev-arg
-                   (set! x (add-renamer x prev-arg v))
+                   (set! x (with-renamer v prev-arg x))
                    (err "got a custom type that wants prev arg too early"
                         clause)))])
         x)
@@ -673,11 +682,11 @@
 (define (function-ptr p fun-ctype)
   (if (or (cpointer? p) (procedure? p))
       (if (eq? (ctype->layout fun-ctype) 'fpointer)
-           (if (procedure? p)
-               ((ctype-scheme->c fun-ctype) p)
-               ((ctype-c->scheme fun-ctype) p))
-          (raise-type-error 'function-ptr "function ctype" fun-ctype))
-      (raise-type-error 'function-ptr "cpointer" p)))
+          (if (procedure? p)
+              ((ctype-scheme->c fun-ctype) p)
+              ((ctype-c->scheme fun-ctype) p))
+          (raise-argument-error 'function-ptr "(and ctype? (lambda (ct) (eq? 'fpointer (ctype->layout ct))))" fun-ctype))
+      (raise-argument-error 'function-ptr "(or/c cpointer? procedure?)" p)))
 
 ;; ----------------------------------------------------------------------------
 ;; String types
@@ -782,7 +791,8 @@
       (let ([a (assq x sym->int)])
         (if a
           (cdr a)
-          (raise-type-error s->c (format "~a" (or name "enum")) x))))
+          (raise-arguments-error s->c (format "argument does not fit ~a" (or name "enum")) 
+                                 "argument" x))))
     (lambda (x)
       (cond [(assq x int->sym) => cdr]
             [(eq? unknown _enum)
@@ -827,8 +837,8 @@
           (cond [(null? xs) n]
                 [(assq (car xs) symbols->integers) =>
                  (lambda (x) (loop (cdr xs) (bitwise-ior (cadr x) n)))]
-                [else (raise-type-error s->c (format "~a" (or name "bitmask"))
-                                        symbols)]))))
+                [else (raise-arguments-error s->c (format "argument does not fit ~a" (or name "bitmask"))
+                                             "argument" symbols)]))))
     (lambda (n)
       (if (zero? n) ; probably common
         '()
@@ -924,7 +934,8 @@
 ;; (_list <mode> <type> [<len>])
 ;; Similar to _ptr, except that it is used for converting lists to/from C
 ;; vectors.  The length is needed for output values where it is used in the
-;; post code, and in the pre code of an output mode to allocate the block.  In
+;; post code, and in the pre code of an output mode to allocate the block.  (If
+;; the length is 0, then NULL is passed in and an empty list is returned.)  In
 ;; any case it can refer to a previous binding for the length of the list which
 ;; the C function will most likely require.
 (provide _list)
@@ -971,7 +982,7 @@
 
 ;; (_array <type> <len> ...+)
 (provide _array
-         array? array-ptr
+         array? array-length array-ptr
          (protect-out array-ref array-set!))
 
 (define _array
@@ -983,14 +994,14 @@
    [(t n . ns)
     (_array (apply _array t ns) n)]))
 
-(define-struct array (ptr type len))
+(define-struct array (ptr type length))
 (define array-ref
   (case-lambda
-   [(a i) 
-    (let ([len (array-len a)])
-      (if (< -1 i len)
-          (ptr-ref (array-ptr a) (array-type a) i)
-          (raise-mismatch-error 'array-ref "index out of bounds: " i)))]
+   [(a i)
+    (define len (array-length a))
+    (if (< -1 i len)
+        (ptr-ref (array-ptr a) (array-type a) i)
+        (raise-range-error 'array-ref "array" "" i a 0 (sub1 len)))]
    [(a . is)
     (let loop ([a a] [is is])
       (if (null? is)
@@ -999,15 +1010,15 @@
 (define array-set!
   (case-lambda
    [(a i v)
-    (let ([len (array-len a)])
-      (if (< -1 i len)
-          (ptr-set! (array-ptr a) (array-type a) i v)
-          (raise-mismatch-error 'array-ref "index out of bounds: " i)))]
+    (define len (array-length a))
+    (if (< -1 i len)
+        (ptr-set! (array-ptr a) (array-type a) i v)
+        (raise-range-error 'array-set! "array" "" i a 0 (sub1 len)))]
    [(a i i1 . is+v)
     (let ([is+v (reverse (list* i i1 is+v))])
       (define v (car is+v))
       (define i (cadr is+v))
-      (let loop ([a a] [is (cddr is+v)])
+      (let loop ([a a] [is (reverse (cddr is+v))])
         (if (null? is)
             (array-set! a i v)
             (loop (array-ref a (car is)) (cdr is)))))]))
@@ -1066,7 +1077,11 @@
   (syntax-case stx ()
     [(_ cptr tag)
      #'(let ([ptag (cpointer-tag cptr)])
-         (if (pair? ptag) (memq tag ptag) (eq? tag ptag)))]
+         (if (pair? ptag) 
+             (if (null? (cdr ptag))
+                 (eq? tag (car ptag))
+                 (and (memq tag ptag) #t))
+             (eq? tag ptag)))]
     [id (identifier? #'id)
      #'(lambda (cptr tag) (cpointer-has-tag? cptr tag))]))
 (define-syntax (cpointer-push-tag! stx)
@@ -1086,9 +1101,9 @@
    [(tag ptr-type) ((cpointer-maker nullable?) tag ptr-type #f #f)]
    [(tag ptr-type scheme->c c->scheme)
     (let* ([tag->C (string->symbol (format "~a->C" tag))]
-           [error-str (format "~a`~a' pointer"
+           [error-str (format "argument is not ~a`~a' pointer"
                               (if nullable? "" "non-null ") tag)]
-           [error* (lambda (p) (raise-type-error tag->C error-str p))])
+           [error* (lambda (p) (raise-arguments-error tag->C error-str "argument" p))])
       (define-syntax-rule (tag-or-error ptr t)
         (let ([p ptr])
           (if (cpointer? p)
@@ -1099,7 +1114,10 @@
           (if (cpointer? p)
             (and p (if (cpointer-has-tag? p t) p (error* p)))
             (error* p))))
-      (make-ctype (or ptr-type _pointer)
+      (make-ctype (cond
+                   [(and nullable? ptr-type) (_or-null ptr-type)]
+                   [ptr-type]
+                   [else _pointer])
         ;; bad hack: `if's outside the lambda for efficiency
         (if nullable?
           (if scheme->c
@@ -1132,15 +1150,15 @@
 
 (define (cast p from-type to-type)
   (unless (ctype? from-type)
-    (raise-type-error 'cast "ctype" from-type))
+    (raise-argument-error 'cast "ctype?" from-type))
   (unless (ctype? to-type)
-    (raise-type-error 'cast "ctype" to-type))
+    (raise-argument-error 'cast "ctype?" to-type))
   (unless (= (ctype-sizeof to-type)
              (ctype-sizeof from-type))
-    (raise-mismatch-error 'cast
-                          (format "representation sizes of from and to types differ: ~e and "
-                                  (ctype-sizeof from-type))
-                          (ctype-sizeof to-type)))
+    (raise-arguments-error 'cast
+                           "representation sizes of from and to types differ"
+                           "size of from type" (ctype-sizeof from-type)
+                           "size of to size" (ctype-sizeof to-type)))
   (let ([p2 (malloc from-type)])
     (ptr-set! p2 from-type p)
     (ptr-ref p2 to-type)))
@@ -1148,7 +1166,7 @@
 (define* (_or-null ctype)
   (let ([coretype (ctype-coretype ctype)])
     (unless (memq coretype '(pointer gcpointer fpointer))
-      (raise-type-error '_or-null "ctype buit on pointer, gcpointer, or fpointer" ctype))
+      (raise-argument-error '_or-null "(and/c ctype? (lambda (ct) (memq (ctype-coretype ct) '(pointer gcpointer fpointer))))" ctype))
     (make-ctype
      (case coretype
        [(pointer) _pointer]
@@ -1159,7 +1177,7 @@
 
 (define* (_gcable ctype)
   (unless (memq (ctype-coretype ctype) '(pointer gcpointer))
-    (raise-type-error '_or-null "pointer ctype" ctype))
+    (raise-argument-error '_or-null "(and/c ctype? (lambda (ct) (memq (ctype-coretype ct) '(pointer gcpointer))))" ctype))
   (let loop ([ctype ctype])
      (if (eq? ctype 'pointer)
          _gcpointer
@@ -1231,8 +1249,13 @@
         [len     (length types)])
     (make-ctype stype
       (lambda (vals)
-        (unless (and (list vals) (= len (length vals)))
-          (raise-type-error 'list-struct (format "list of ~a items" len) vals))
+        (unless (list? vals)
+          (raise-argument-error 'list-struct "list?" vals))
+        (unless (= len (length vals))
+          (raise-arguments-error 'list-struct "bad list length" 
+                                 "expected length" len
+                                 "list length" (length vals)
+                                 "list" vals))
         (let ([block (malloc stype)])
           (for-each (lambda (type ofs val) (ptr-set! block type 'abs ofs val))
                     types offsets vals)
@@ -1260,7 +1283,8 @@
 ;; type.
 (provide define-cstruct)
 (define-syntax (define-cstruct stx)
-  (define (make-syntax _TYPE-stx has-super? slot-names-stx slot-types-stx alignment-stx)
+  (define (make-syntax _TYPE-stx has-super? slot-names-stx slot-types-stx 
+                       alignment-stx property-stxes)
     (define name
       (cadr (regexp-match #rx"^_(.+)$" (symbol->string (syntax-e _TYPE-stx)))))
     (define slot-names (map (lambda (x) (symbol->string (syntax-e x)))
@@ -1281,10 +1305,11 @@
       (and (identifier? x) (identifier? y) (free-identifier=? x y)))
     (with-syntax
         ([has-super?           has-super?]
-         [struct-string        (format "struct:~a" name)]
+         [struct-string        (format "~a?" name)]
          [(slot ...)           slot-names-stx]
          [(slot-type ...)      slot-types-stx]
          [TYPE                 (id name)]
+         [cpointer:TYPE        (id "cpointer:"name)]
          [_TYPE                _TYPE-stx]
          [_TYPE-pointer        (id "_"name"-pointer")]
          [_TYPE-pointer/null   (id "_"name"-pointer/null")]
@@ -1292,6 +1317,12 @@
          [_TYPE*               (id "_"name"*")]
          [TYPE?                (id name"?")]
          [make-TYPE            (id "make-"name)]
+         [make-wrap-TYPE       (if (null? property-stxes)
+                                   #'values
+                                   (id "make-wrap-"name))]
+         [wrap-TYPE-type       (if (null? property-stxes)
+                                   #'values
+                                   (id "wrap-"name "-type"))]
          [list->TYPE           (id "list->"name)]
          [list*->TYPE          (id "list*->"name)]
          [TYPE->list           (id name"->list")]
@@ -1309,7 +1340,24 @@
                              (safe-id=? 1st-type #'_TYPE-pointer))
                        #'(values #f '() #f #f #f #f)
                        #`(cstruct-info #,1st-type
-                           (lambda () (values #f '() #f #f #f #f))))])
+                           (lambda () (values #f '() #f #f #f #f))))]
+                    [define-wrapper-struct (if (null? property-stxes)
+                                               #'(begin)
+                                               (with-syntax ([(prop ...) property-stxes])
+                                                 #'(define make-wrap-TYPE
+                                                     (let ()
+                                                       (struct cpointer:TYPE (ptr)
+                                                         #:property prop:cpointer 0
+                                                         prop ...)
+                                                       cpointer:TYPE))))]
+                    [define-wrap-type (if (null? property-stxes)
+                                        #'(begin)
+                                        #'(define (wrap-TYPE-type t)
+                                            (make-ctype t
+                                                        values
+                                                        (lambda (p)
+                                                          (and p
+                                                               (make-wrap-TYPE p))))))])
         #'(begin
             (define-syntax TYPE
               (make-struct-info
@@ -1327,103 +1375,106 @@
                                            super->list* list*->super)
                             get-super-info])
                 (define-cpointer-type _TYPE super-pointer)
-                ;; these makes it possible to use recursive pointer definitions
-                (define _TYPE-pointer      _TYPE)
-                (define _TYPE-pointer/null _TYPE/null)
-                (let*-values ([(stype ...)  (values slot-type ...)]
-                              [(types)      (list stype ...)]
-                              [(alignment-v) alignment]
-                              [(offsets)    (compute-offsets types alignment-v)]
-                              [(offset ...) (apply values offsets)])
-                  (define all-tags (cons TYPE-tag super-tags))
-                  (define _TYPE*
-                    ;; c->scheme adjusts all tags
-                    (let* ([cst (make-cstruct-type types #f alignment-v)]
-                           [t (_cpointer TYPE-tag cst)]
-                           [c->s (ctype-c->scheme t)])
-                      (make-ctype cst (ctype-scheme->c t)
-                                  ;; hack: modify & reuse the procedure made by _cpointer
-                                  (lambda (p)
-                                    (if p (set-cpointer-tag! p all-tags) (c->s p))
-                                    p))))
-                  (define-values (all-types all-offsets)
-                    (if (and has-super? super-types super-offsets)
-                        (values (append super-types   (cdr types))
-                                (append super-offsets (cdr offsets)))
-                        (values types offsets)))
-                  (define (TYPE-SLOT x)
-                    (unless (TYPE? x)
-                      (raise-type-error 'TYPE-SLOT struct-string x))
-                    (ptr-ref x stype 'abs offset))
-                  ...
-                  (define (set-TYPE-SLOT! x slot)
-                    (unless (TYPE? x)
-                      (raise-type-error 'set-TYPE-SLOT! struct-string 0 x slot))
-                    (ptr-set! x stype 'abs offset slot))
-                  ...
-                  (define make-TYPE
-                    (if (and has-super? super-types super-offsets)
-                        ;; init using all slots
-                        (lambda vals
-                          (if (= (length vals) (length all-types))
-                              (let ([block (malloc _TYPE*)])
-                                (set-cpointer-tag! block all-tags)
-                                (for-each (lambda (type ofs value)
-                                            (ptr-set! block type 'abs ofs value))
-                                          all-types all-offsets vals)
-                                block)
-                              (error '_TYPE "expecting ~s values, got ~s: ~e"
-                                     (length all-types) (length vals) vals)))
-                        ;; normal initializer
-                        (lambda (slot ...)
-                          (let ([block (malloc _TYPE*)])
-                            (set-cpointer-tag! block all-tags)
-                            (ptr-set! block stype 'abs offset slot)
-                            ...
-                            block))))
-                  (define (list->TYPE vals) (apply make-TYPE vals))
-                  (define (list*->TYPE vals)
-                    (cond
-                     [(TYPE? vals) vals]
-                     [(= (length vals) (length all-types))
-                      (let ([block (malloc _TYPE*)])
-                        (set-cpointer-tag! block all-tags)
-                        (for-each
-                         (lambda (type ofs value)
-                           (let-values
-                               ([(ptr tags types offsets T->list* list*->T)
-                                 (cstruct-info
-                                  type
-                                  (lambda () (values #f '() #f #f #f #f)))])
-                             (ptr-set! block type 'abs ofs
-                                       (if list*->T (list*->T value) value))))
-                         all-types all-offsets vals)
-                        block)]
-                     [else (error '_TYPE "expecting ~s values, got ~s: ~e"
-                                  (length all-types) (length vals) vals)]))
-                  (define (TYPE->list x)
-                    (unless (TYPE? x)
-                      (raise-type-error 'TYPE-list struct-string x))
-                    (map (lambda (type ofs) (ptr-ref x type 'abs ofs))
-                         all-types all-offsets))
-                  (define (TYPE->list* x)
-                    (unless (TYPE? x)
-                      (raise-type-error 'TYPE-list struct-string x))
-                    (map (lambda (type ofs)
-                           (let-values
-                               ([(v) (ptr-ref x type 'abs ofs)]
-                                [(ptr tags types offsets T->list* list*->T)
-                                 (cstruct-info
-                                  type
-                                  (lambda () (values #f '() #f #f #f #f)))])
-                             (if T->list* (T->list* v) v)))
-                         all-types all-offsets))
-                  (cstruct-info
-                   _TYPE* 'set!
-                   _TYPE all-tags all-types all-offsets TYPE->list* list*->TYPE)
-                  (values _TYPE* _TYPE-pointer _TYPE-pointer/null TYPE? TYPE-tag
-                          make-TYPE TYPE-SLOT ... set-TYPE-SLOT! ...
-                          list->TYPE list*->TYPE TYPE->list TYPE->list*))))))))
+                define-wrap-type
+                ;; these make it possible to use recursive pointer definitions
+                (define _TYPE-pointer      (wrap-TYPE-type _TYPE))
+                (define _TYPE-pointer/null (wrap-TYPE-type _TYPE/null))
+                (define-values (stype ...)  (values slot-type ...))
+                (define types (list stype ...))
+                (define alignment-v alignment)
+                (define offsets (compute-offsets types alignment-v))
+                (define-values (offset ...) (apply values offsets))
+                (define all-tags (cons TYPE-tag super-tags))
+                (define _TYPE*
+                  ;; c->scheme adjusts all tags
+                  (let* ([cst (make-cstruct-type types #f alignment-v)]
+                         [t (_cpointer TYPE-tag cst)]
+                         [c->s (ctype-c->scheme t)])
+                    (wrap-TYPE-type
+                     (make-ctype cst (ctype-scheme->c t)
+                                 ;; hack: modify & reuse the procedure made by _cpointer
+                                 (lambda (p)
+                                   (if p (set-cpointer-tag! p all-tags) (c->s p))
+                                   p)))))
+                (define-values (all-types all-offsets)
+                  (if (and has-super? super-types super-offsets)
+                      (values (append super-types   (cdr types))
+                              (append super-offsets (cdr offsets)))
+                      (values types offsets)))
+                (define (TYPE-SLOT x)
+                  (unless (TYPE? x)
+                    (raise-argument-error 'TYPE-SLOT struct-string x))
+                  (ptr-ref x stype 'abs offset))
+                ...
+                (define (set-TYPE-SLOT! x slot)
+                  (unless (TYPE? x)
+                    (raise-argument-error 'set-TYPE-SLOT! struct-string 0 x slot))
+                  (ptr-set! x stype 'abs offset slot))
+                ...
+                (define make-TYPE
+                  (if (and has-super? super-types super-offsets)
+                      ;; init using all slots
+                      (lambda vals
+                        (if (= (length vals) (length all-types))
+                            (let ([block (make-wrap-TYPE (malloc _TYPE*))])
+                              (set-cpointer-tag! block all-tags)
+                              (for-each (lambda (type ofs value)
+                                          (ptr-set! block type 'abs ofs value))
+                                        all-types all-offsets vals)
+                              block)
+                            (error '_TYPE "expecting ~s values, got ~s: ~e"
+                                   (length all-types) (length vals) vals)))
+                      ;; normal initializer
+                      (lambda (slot ...)
+                        (let ([block (make-wrap-TYPE (malloc _TYPE*))])
+                          (set-cpointer-tag! block all-tags)
+                          (ptr-set! block stype 'abs offset slot)
+                          ...
+                          block))))
+                define-wrapper-struct
+                (define (list->TYPE vals) (apply make-TYPE vals))
+                (define (list*->TYPE vals)
+                  (cond
+                   [(TYPE? vals) vals]
+                   [(= (length vals) (length all-types))
+                    (let ([block (malloc _TYPE*)])
+                      (set-cpointer-tag! block all-tags)
+                      (for-each
+                       (lambda (type ofs value)
+                         (let-values
+                             ([(ptr tags types offsets T->list* list*->T)
+                               (cstruct-info
+                                type
+                                (lambda () (values #f '() #f #f #f #f)))])
+                           (ptr-set! block type 'abs ofs
+                                     (if list*->T (list*->T value) value))))
+                       all-types all-offsets vals)
+                      block)]
+                   [else (error '_TYPE "expecting ~s values, got ~s: ~e"
+                                (length all-types) (length vals) vals)]))
+                (define (TYPE->list x)
+                  (unless (TYPE? x)
+                    (raise-argument-error 'TYPE-list struct-string x))
+                  (map (lambda (type ofs) (ptr-ref x type 'abs ofs))
+                       all-types all-offsets))
+                (define (TYPE->list* x)
+                  (unless (TYPE? x)
+                    (raise-argument-error 'TYPE-list struct-string x))
+                  (map (lambda (type ofs)
+                         (let-values
+                             ([(v) (ptr-ref x type 'abs ofs)]
+                              [(ptr tags types offsets T->list* list*->T)
+                               (cstruct-info
+                                type
+                                (lambda () (values #f '() #f #f #f #f)))])
+                           (if T->list* (T->list* v) v)))
+                       all-types all-offsets))
+                (cstruct-info
+                 _TYPE* 'set!
+                 _TYPE all-tags all-types all-offsets TYPE->list* list*->TYPE)
+                (values _TYPE* _TYPE-pointer _TYPE-pointer/null TYPE? TYPE-tag
+                        make-TYPE TYPE-SLOT ... set-TYPE-SLOT! ...
+                        list->TYPE list*->TYPE TYPE->list TYPE->list*)))))))
   (define (err what . xs)
     (apply raise-syntax-error #f
            (if (list? what) (apply string-append what) what)
@@ -1434,15 +1485,23 @@
                    (syntax-case #'type ()
                      [(t s) (values #'t #'s)]
                      [_ (values #'type #f)])]
-                  [(alignment)
-                   (syntax-case #'more ()
-                     [() #'#f]
-                     [(#:alignment) (err "missing expression for #:alignment")]
-                     [(#:alignment a) #'a]
-                     [(#:alignment a x . _) (err "unexpected form" #'x)]
-                     [(x . _) (err (if (keyword? (syntax-e #'x))
-                                     "unknown keyword" "unexpected form")
-                                   #'x)])])
+                  [(alignment properties)
+                   (let loop ([more #'more] [alignment #f] [properties null])
+                     (define (head) (syntax-case more () [(x . _) #'x]))
+                     (syntax-case more ()
+                       [() (values alignment (reverse properties))]
+                       [(#:alignment) (err "missing expression for #:alignment" (head))]
+                       [(#:alignment a . rest) 
+                        (not alignment)
+                        (loop #'rest #'a properties)]
+                       [(#:property) (err "missing property expression for #:property" (head))]
+                       [(#:property prop) (err "missing value expression for #:property" (head))]
+                       [(#:property prop val . rest)
+                        (loop #'rest alignment (list* #'val #'prop (head) properties))]
+                       [(x . _) (err (if (keyword? (syntax-e #'x))
+                                         "unknown keyword" "unexpected form")
+                                     #'x)]
+                       [else (err "bad syntax")]))])
        (unless (identifier? _TYPE)
          (err "bad type, expecting a _name identifier or (_name super-ctype)"
               _TYPE))
@@ -1455,8 +1514,10 @@
          (make-syntax _TYPE #t
                       #`(#,(datum->syntax _TYPE 'super _TYPE) slot ...)
                       #`(#,_SUPER slot-type ...)
-                      alignment)
-         (make-syntax _TYPE #f #'(slot ...) #`(slot-type ...) alignment)))]
+                      alignment
+                      properties)
+         (make-syntax _TYPE #f #'(slot ...) #`(slot-type ...) 
+                      alignment properties)))]
     ;; specific errors for bad slot specs, leave the rest for a generic error
     [(_ type (bad ...) . more)
      (err "bad slot specification, expecting [name ctype]"
@@ -1562,20 +1623,6 @@
            v)]
         [else (error 'cblock->vector
                      "expecting a non-void pointer, got ~s" cblock)]))
-
-;; Useful for automatic definitions
-;; If a provided regexp begins with a "^" or ends with a "$", then
-;; `regexp-replace' is used, otherwise use `regexp-replace*'.
-(define* (regexp-replaces x rs)
-  (let loop ([str (if (bytes? x) (bytes->string/utf-8 x) (format "~a" x))]
-             [rs rs])
-    (if (null? rs)
-      str
-      (loop ((if (regexp-match #rx"^\\^|\\$$"
-                               (if (regexp? (caar rs))
-                                 (object-name (caar rs)) (caar rs)))
-               regexp-replace regexp-replace*)
-             (caar rs) str (cadar rs)) (cdr rs)))))
 
 (define killer-thread #f)
 

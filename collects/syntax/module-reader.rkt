@@ -175,12 +175,13 @@
     (let* ([lang (if stx? (datum->syntax #f lang modpath modpath) lang)]
            [body (lambda ()
                    (if whole?
-                     (read port)
-                     (let loop ([a null])
-                       (let ([v (read port)])
-                         (if (eof-object? v)
-                             (reverse a)
-                             (loop (cons v a)))))))]
+                       (read port)
+                       (parameterize ([read-accept-lang #f])
+                         (let loop ([a null])
+                           (let ([v (read port)])
+                             (if (eof-object? v)
+                                 (reverse a)
+                                 (loop (cons v a))))))))]
            [body (cond [(not wrapper)   (body)]
                        [(ar? wrapper 2) (wrapper body stx?)]
                        [else            (wrapper body)])]
@@ -234,17 +235,23 @@
             (bad #f (eof-object? (peek-byte in)))
             (let ([parsed-spec (spec->module-path spec)])
               (if parsed-spec
-                  (begin 
-                    ((current-reader-guard) parsed-spec)
-                    (values
-                     (dynamic-require parsed-spec export-sym
-                                      (mk-fail-thunk spec))
-                     (if spec-as-stx?
-                         (datum->syntax #f
-                                        parsed-spec
-                                        (vector src spec-line spec-col spec-pos
-                                                (- spec-end-pos spec-pos)))
-                         parsed-spec)))
+                  (let loop ([specs (if (vector? parsed-spec)
+                                        (vector->list parsed-spec)
+                                        (list parsed-spec))])
+                    (define parsed-spec (car specs))
+                    (define guarded-spec ((current-reader-guard) parsed-spec))
+                    (if (or (null? (cdr specs))
+                            (module-declared? guarded-spec #t))
+                        (values
+                         (dynamic-require guarded-spec export-sym
+                                          (mk-fail-thunk spec))
+                         (if spec-as-stx?
+                             (datum->syntax #f
+                                            guarded-spec
+                                            (vector src spec-line spec-col spec-pos
+                                                    (- spec-end-pos spec-pos)))
+                             guarded-spec))
+                        (loop (cdr specs))))
                   (bad spec #f))))))
 
     (define (-get-info inp mod line col pos)

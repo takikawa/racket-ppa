@@ -8,8 +8,47 @@
 
 @defmodule[scriblib/autobib]
 
+This library provides support for bibliography management in a Scribble
+document. The @racket[define-cite] form is used to bind procedures
+that create in-line citations and generate the bibilography in the
+document.
 
-@defform[(define-cite ~cite-id citet-id generate-bibliography-id)]{
+Individual bibliography entries are created with the @racket[make-bib]
+function. See below for an example.
+
+@codeblock|{
+  #lang scribble/base
+
+  @(require scriblib/autobib)
+
+  @(define-cite ~cite citet generate-bibliography)
+
+  @(define plt-tr1
+     (make-bib
+      #:title    "Reference: Racket"
+      #:author   (authors "Matthew Flatt" "PLT")
+      #:date     "2010"
+      #:location (techrpt-location #:institution "PLT Inc." 
+                                   #:number "PLT-TR-2010-1")
+      #:url      "http://racket-lang.org/tr1/"))
+
+  Racket is fun@~cite[plt-tr1].
+
+  @(generate-bibliography)
+}|
+
+@defform/subs[(define-cite ~cite-id citet-id generate-bibliography-id
+                           option ...)
+              ([option (code:line #:style style-expr)
+                       (code:line #:disambiguate disambiguator-expr)
+                       (code:line #:render-date-bib render-date-expr)
+                       (code:line #:render-date-cite render-date-expr)
+                       (code:line #:date<? date-compare-expr)
+                       (code:line #:date=? date-compare-expr)])
+              #:contracts ([style-expr (or/c author+date-style number-style)]
+                           [disambiguator-expr (or/c #f (-> exact-nonnegative-integer? element?))]
+                           [render-date-expr (or/c #f (-> date? element?))]
+                           [date-compare-expr (or/c #f (-> date? date? boolean?))])]{
 
 Binds @racket[~cite-id], @racket[citet-id], and
 @racket[generate-bibliography-id], which share state to accumulate and
@@ -41,7 +80,29 @@ section for the bibliography. It has the contract
 
 The default value for the @racket[#:tag] argument is @racket["doc-bibliography"]
 and for @racket[#:sec-title] is @racket["Bibliography"].
-}
+
+The optional @racket[style-expr] determines the way that citations and
+the bibliography are rendered.@margin-note*{Programmer-defined styles
+may be supported in the future.} Currently, two built-in style are
+provided, and @racket[author+date-style] is the default.
+
+For @racket[author+date-style], 
+if two citations' references would render the same (as judged by equal
+authors and dates that are considered the same) but are different, the
+optionally provided function from @racket[disambiguator-expr] is used
+to add an extra element after the date; the default disambiguator adds
+@litchar{a}, @litchar{b}, @etc until @litchar{z}, and anything more
+ambiguous raises an exception. Date comparison is controlled by
+@racket[date-compare-expr]s. Dates in citations and dates in the
+bibliography may be rendered differently, as specified by the
+optionally given @racket[render-date-expr] functions.}
+
+@deftogether[(
+@defthing[author+date-style any/c]
+@defthing[number-style any/c]
+)]{
+
+Styles for use with @racket[define-cite].}
 
 
 @defproc[(bib? [v any/c]) boolean?]{
@@ -54,7 +115,7 @@ Returns @racket[#t] if @racket[v] is a value produced by
                    [#:author author any/c #f]
                    [#:is-book? is-book? any/c #f]
                    [#:location location any/c #f]
-                   [#:date date any/c #f]
+                   [#:date date (or/c #f date? exact-nonnegative-integer? string?) #f]
                    [#:url url string? #f])
          bib?]{
 
@@ -64,6 +125,9 @@ elements, except that @racket[#f] means that the information is not
 supplied. Functions like @racket[proceedings-location],
 @racket[author-name], and @racket[authors] help produce elements in a
 standard format.
+
+Dates are internally represented as @racket[date] values, so a @racket[date]
+may be given, or a number or string that represent the year.
 
 An element produced by a function like @racket[author-name] tracks
 first, last names, and name suffixes separately, so that names can be

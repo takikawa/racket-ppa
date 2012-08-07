@@ -34,7 +34,7 @@
            description)
          (define parser
            (let ([permute (mk-permute '(a.name ...))])
-             (lambda (x cx pr es fh cp success param ...)
+             (lambda (x cx pr es fh _cp rl success param ...)
                (let ([stx (datum->syntax cx x cx)])
                  (let ([result
                         (let/ec escape
@@ -45,13 +45,12 @@
                    (case (car result)
                      ((ok)
                       (apply success
-                             ((mk-check-result pr 'name (length '(a.name ...)) permute x cx fh cp)
+                             ((mk-check-result pr 'name (length '(a.name ...)) permute x cx fh)
                               (cdr result))))
                      ((error)
                       (let ([es
-                             (list* (expect:message (cadr result))
-                                    (expect:thing (get-description param ...) #f)
-                                    es)])
+                             (es-add-message (cadr result)
+                                             (es-add-thing pr (get-description param ...) #f rl es))])
                         (fh (failure pr es))))))))))
          (define-syntax name
            (stxclass 'name (arity (length '(param ...)) (length '(param ...)) '() '())
@@ -76,7 +75,7 @@
             (for/list ([index (in-vector indexes)])
               (list-ref result index)))))))
 
-(define (mk-check-result pr name attr-count permute x cx fh cp)
+(define (mk-check-result pr name attr-count permute x cx fh)
   (lambda (result)
     (unless (list? result)
       (error name "parser returned non-list"))
@@ -91,5 +90,5 @@
           (error name "expected exact nonnegative integer for first element of result list, got ~e"
                  skip))
         (let-values ([(rest-x rest-cx) (stx-list-drop/cx x cx skip)])
-          (list* fh cp rest-x rest-cx (ps-add-cdr pr skip)
+          (list* fh rest-x rest-cx (ps-add-cdr pr skip)
                  (permute (cdr result))))))))

@@ -76,18 +76,37 @@ and its lexical context is not enriched before it is passed to the
 @tech{evaluation handler}.}
 
 
-@defparam[current-load proc (path? (or/c symbol? #f) . -> . any)]{
+@defparam[current-load proc (path? (or/c #f
+                                         symbol?
+                                         (cons/c (or/c #f symbol?)
+                                                 (non-empty-listof symbol?)))
+                                   . -> . 
+                                   any)]{
 
 A parameter that determines the current @deftech{load handler} to load
 top-level forms from a file. The @tech{load handler} is called by
 @racket[load], @racket[load-relative], @racket[load/cd], and the
 default @tech{compiled-load handler}.
 
-A load handler takes two arguments: a path (see
-@secref["pathutils"]) and an expected module name. The expected
-module name is a symbol when the call is to load a module declaration
-in response to a @racket[require] (in which case the file should
-contain a module declaration), or @racket[#f] for any other load.
+A load handler takes two arguments: a path (see @secref["pathutils"])
+and an expected module name. The expected module name is a symbol or a
+list when the call is to load a module declaration in response to a
+@racket[require] (in which case the file should contain a module
+declaration), or @racket[#f] for any other load.
+
+When loading a module from a stream that starts with a compiled module
+that contains submodules, the load handler should load only the
+requested module, where a symbol as the load handler's indicates the
+root module and a list indicates a submodule whose path relative to
+the root module is given by the @racket[cdr] of the list. The list
+starts with @racket[#f] when a submodule should be loaded @emph{only}
+if it can be loaded independently (i.e., from compiled form---never
+from source); if the submodule cannot be loaded independently, the
+load handler should return without loading from a file. When the
+expected module name is a list that starts with a symbol, the root
+module and any other submodules can be loaded from the given file,
+which might be from source, and the load handler still should not
+complain if the expected submodule is not found.
  
 The default load handler reads forms from the file in
 @racket[read-syntax] mode with line-counting enabled for the file
@@ -95,7 +114,7 @@ port, unless the path has a @racket[".zo"] suffix. It also
 @racket[parameterize]s each read to set @racket[read-accept-compiled],
 @racket[read-accept-reader], and @racket[read-accept-lang] to
 @racket[#t]. In addition, if @racket[load-on-demand-enabled] is
-@racket[#t], then @racket[read-on-demand-source] is effectively set to
+@racket[#t], then @racket[read-on-demand-source] is set to
 the @tech{cleanse}d, absolute form of @racket[path] during the
 @racket[read-syntax] call. After reading a single form, the form is
 passed to the current @tech{evaluation handler}, wrapping the
@@ -207,11 +226,15 @@ calls the @tech{extension-load handler} in tail position.}
 
 @defproc[(load-relative-extension [file path-string?]) any]{
 
-Like @racket[load-exension], but resolves @racket[file] using
+Like @racket[load-extension], but resolves @racket[file] using
 @racket[current-load-relative-directory] like @racket[load-relative].}
 
 
-@defparam[current-load/use-compiled proc (path? (or/c symbol? #f) . -> . any)]{
+@defparam[current-load/use-compiled proc (path? (or/c #f
+                                                      symbol?
+                                                      (cons/c (or/c #f symbol?)
+                                                              (non-empty-listof symbol?)))
+                                                . -> . any)]{
 
 A parameter that determines the current @deftech{compiled-load
 handler} to load from a file that may have a compiled form. The
@@ -265,7 +288,21 @@ path of the loaded file, otherwise the
 If the original @racket[_file] is loaded or a @filepath{.zo} variant is
 loaded, the @tech{load handler} is called to load the file. If any
 other kind of file is loaded, the @tech{extension-load handler} is
-called.}
+called.
+
+When the default @tech{compiled-load handler} loads a module from a
+bytecode (i.e., @filepath{.zo}) file, the handler records the bytecode
+file path in the current namespace's @tech{module registry}. More
+specifically, the handler records the path for the top-level module of
+the loaded module, which is an enclosing module if the loaded module
+is a submodule. Thereafter, loads via the default @tech{compiled-load
+handler} for modules within the same top-level module use the recorded
+file, independent of the file that otherwise would be selected by the
+@tech{compiled-load handler} (e.g., even if the
+@racket[use-compiled-file-paths] parameter value changes). The default
+@tech{module name resolver} transfers bytecode-file information when a
+module declaration is attached to a new namespace. This protocol supports
+independent but consistent loading of submodules from bytecode files.}
 
 
 @defproc[(load/use-compiled [file path-string?]) any]{
@@ -386,7 +423,7 @@ The default @tech{print handler} @racket[print]s the value to the
 
 A parameter that determines the current @deftech{compilation handler}.
 The @tech{compilation handler} is a procedure that takes a top-level form and
-returns a compiled form; see see @secref["compilation-model"] for
+returns a compiled form; see @secref["compilation-model"] for
 more information on compilation.
 
 The @tech{compilation handler} is called by @racket[compile], and
@@ -400,7 +437,12 @@ optimized for the special case of immediate evaluation.
 
 When a compiled form is written to an output port, the written form
 starts with @litchar{#~}. See @secref["print-compiled"] for more
-information.}
+information.
+
+For internal testing purposes, when the
+@as-index{@envvar{PLT_VALIDATE_COMPILE}} environment variable is set,
+the default compilation handler runs a bytecode validator on its own
+compilation results.}
 
 
 @defproc[(compile [top-level-form any/c]) compiled-expression?]{

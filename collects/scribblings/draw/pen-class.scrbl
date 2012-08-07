@@ -65,17 +65,19 @@ When drawing in @racket['smoothed] or @racket['aligned] mode, a pen's
  canvas and bitmap contexts, a zero-width pen behaves the same as a
  pen of size @racket[1].
 
+See also @racket[make-pen].
+
 
 @defconstructor[([color (or/c string? (is-a?/c color%)) "black"]
                  [width (real-in 0 255) 0]
-                 [style (one-of/c 'transparent 'solid 'xor 'hilite 
-                                  'dot 'long-dash 'short-dash 'dot-dash 
-                                  'xor-dot 'xor-long-dash 'xor-short-dash 
-                                  'xor-dot-dash)
+                 [style (or/c 'transparent 'solid 'xor 'hilite 
+                              'dot 'long-dash 'short-dash 'dot-dash 
+                              'xor-dot 'xor-long-dash 'xor-short-dash 
+                              'xor-dot-dash)
                         'solid]
-                 [cap (one-of/c 'round 'projecting 'butt)
+                 [cap (or/c 'round 'projecting 'butt)
                       'round]
-                 [join (one-of/c 'round 'bevel 'miter)
+                 [join (or/c 'round 'bevel 'miter)
                        'round]
                  [stipple (or/c #f (is-a?/c bitmap%)) 
                           #f])]{
@@ -88,7 +90,7 @@ Creates a pen with the given color, width, @tech{pen style}, @tech{cap style}, @
 }
 
 @defmethod[(get-cap)
-           (one-of/c 'round 'projecting 'butt)]{
+           (or/c 'round 'projecting 'butt)]{
 
 Returns the pen @deftech{cap style}, which determines the shape of a line at
 each of its ending points when drawn by @method[dc<%> draw-line] or at the
@@ -138,7 +140,7 @@ Returns the pen's color object.
 }
 
 @defmethod[(get-join)
-           (one-of/c 'round 'bevel 'miter)]{
+           (or/c 'round 'bevel 'miter)]{
 
 Returns the pen @deftech{join style} that is used between multiple lines
 connected through @method[dc<%> draw-lines], @method[dc<%>
@@ -203,10 +205,10 @@ Gets the current @tech{pen stipple} bitmap, or returns @racket[#f] if no stipple
 }
 
 @defmethod[(get-style)
-           (one-of/c 'transparent 'solid 'xor 'hilite 
-                     'dot 'long-dash 'short-dash 'dot-dash 
-                     'xor-dot 'xor-long-dash 'xor-short-dash 
-                     'xor-dot-dash)]{
+           (or/c 'transparent 'solid 'xor 'hilite 
+                 'dot 'long-dash 'short-dash 'dot-dash 
+                 'xor-dot 'xor-long-dash 'xor-short-dash 
+                 'xor-dot-dash)]{
 
 Returns the @tech{pen style}. See @racket[pen%] for information about
 possible styles.
@@ -220,7 +222,14 @@ Returns the pen width.
 
 }
 
-@defmethod[(set-cap [cap-style (one-of/c 'round 'projecting 'butt)])
+@defmethod[(is-immutable?)
+           boolean?]{
+
+Returns @racket[#t] if the pen object is immutable.
+
+}
+
+@defmethod[(set-cap [cap-style (or/c 'round 'projecting 'butt)])
            void?]{
 
 Sets the pen @tech{cap style}. See @method[pen% get-cap] for information about cap
@@ -247,7 +256,7 @@ A pen cannot be modified if it was obtained from a
 
 }
 
-@defmethod[(set-join [join-style (one-of/c 'round 'bevel 'miter)])
+@defmethod[(set-join [join-style (or/c 'round 'bevel 'miter)])
            void?]{
 
 Sets the pen @tech{join style}. See @method[pen% get-join] for information about join
@@ -270,10 +279,10 @@ If @racket[bitmap] is modified while is associated with a pen, the
 
 }
 
-@defmethod[(set-style [style (one-of/c 'transparent 'solid 'xor 'hilite 
-                                       'dot 'long-dash 'short-dash 'dot-dash 
-                                       'xor-dot 'xor-long-dash 'xor-short-dash 
-                                       'xor-dot-dash)])
+@defmethod[(set-style [style (or/c 'transparent 'solid 'xor 'hilite 
+                                   'dot 'long-dash 'short-dash 'dot-dash 
+                                   'xor-dot 'xor-long-dash 'xor-short-dash 
+                                   'xor-dot-dash)])
            void?]{
 
 Sets the @tech{pen style}. See @racket[pen%] for information about the

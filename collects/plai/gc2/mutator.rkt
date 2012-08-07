@@ -145,16 +145,21 @@
            (syntax/loc stx
              (let*-values ([(tmp ...) 
                             (syntax-parameterize ([mutator-env-roots 
-                                                   (list* #'previous-tmp ...
-                                                          (syntax-parameter-value #'mutator-env-roots))]
+                                                   (append
+                                                    (find-referenced-locals
+                                                     (list #'previous-tmp ...)
+                                                     #'expr)
+                                                    (syntax-parameter-value #'mutator-env-roots))]
                                                   [mutator-tail-call? #f])
                                                  expr)]
                            ...)
                (let-values ([(id ...) (values tmp ...)]
                             ...)
                  (syntax-parameterize ([mutator-env-roots 
-                                        (list* #'id ... ...
-                                               (syntax-parameter-value #'mutator-env-roots))])
+                                        (append (find-referenced-locals
+                                                 (list #'id ... ...)
+                                                 #'body-expr)
+                                                (syntax-parameter-value #'mutator-env-roots))])
                                       (->address body-expr))))))))]
     [(_ ([(id ...) expr]
          ...)
@@ -168,7 +173,7 @@
   (syntax-case stx ()
     [(_ (id ...) body)
      (let ([env-roots (syntax-parameter-value #'mutator-env-roots)])
-       (with-syntax ([(free-id ...) (find-referenced-locals env-roots stx)]
+       (with-syntax ([(free-id ...) (map syntax-local-introduce (find-referenced-locals env-roots stx))]
                      [(env-id ...) env-roots]
                      [closure (or (syntax-parameter-value #'mutator-name)
                                   (syntax-local-name)
@@ -182,12 +187,17 @@
            (let ([closure 
                   (closure-code
                    #,(length (syntax->list #'(free-id ...)))
-                   (lambda (free-id ... id ...) 
-                     (syntax-parameterize ([mutator-env-roots 
-                                            (list #'id ...
-                                                  #'free-id ...)]
-                                           [mutator-tail-call? #t])
-                                          (->address body))))])
+                   (let ([closure
+                          (lambda (free-id ... id ...) 
+                            (syntax-parameterize ([mutator-env-roots 
+                                                   (append
+                                                    (find-referenced-locals
+                                                     (list #'id ...)
+                                                     #'body)
+                                                    (list #'free-id ...))]
+                                                  [mutator-tail-call? #t])
+                                                 (->address body)))])
+                     closure))])
              #,(if (syntax-parameter-value #'mutator-tail-call?)
                    (syntax/loc stx
                      (#%app collector:closure closure (vector free-id ...)))
@@ -199,14 +209,16 @@
     [(_ (id ...) body ...)
      (syntax/loc stx
        (mutator-lambda (id ...) (mutator-begin body ...)))]))
+
 (define-syntax (mutator-app stx)
   (syntax-case stx ()
     [(_ e ...)
      (local [(define (do-not-expand? exp)
                (and (identifier? exp)
-                    (free-identifier=? exp #'empty)))
-             (define exps
-               (syntax->list #'(e ...)))
+                    (or (free-identifier=? exp #'empty)
+                        (ormap (λ (x) (free-identifier=? x exp))
+                               prim-ids))))
+             (define exps (syntax->list #'(e ...)))
              (define tmps
                (generate-temporaries #'(e ...)))]
        (with-syntax ([(ne ...)
@@ -223,16 +235,22 @@
 (define-syntax (mutator-anf-app stx)
   (syntax-case stx ()
     [(_ fe ae ...)
-     (with-syntax ([(env-id ...) (syntax-parameter-value #'mutator-env-roots)])
-       (if (syntax-parameter-value #'mutator-tail-call?)
-           ; If this call is in tail position, we will not need access
-           ; to its environment when it returns.
-           (syntax/loc stx ((deref-proc fe) ae ...))
-           ; If this call is not in tail position, we make the
-           ; environment at the call site reachable.
-           #`(with-continuation-mark gc-roots-key 
-               (list (make-env-root env-id) ...)
-               #,(syntax/loc stx ((deref-proc fe) ae ...)))))]))
+     (let ()
+       (define prim-app? (ormap (λ (x) (free-identifier=? x #'fe))
+                                prim-ids))
+       (with-syntax ([(env-id ...) (syntax-parameter-value #'mutator-env-roots)]
+                     [app-exp (if prim-app?
+                                  (syntax/loc stx (collector:alloc-flat (fe (collector:deref ae) ...)))
+                                  (syntax/loc stx ((deref-proc fe) ae ...)))])
+         (if (syntax-parameter-value #'mutator-tail-call?)
+             ; If this call is in tail position, we will not need access
+             ; to its environment when it returns.
+             #'app-exp
+             ; If this call is not in tail position, we make the
+             ; environment at the call site reachable.
+             #`(with-continuation-mark gc-roots-key 
+                 (list (make-env-root env-id) ...)
+                 app-exp))))]))
 (define-syntax mutator-quote
   (syntax-rules ()
     [(_ (a . d))
@@ -275,7 +293,7 @@
           [(result-addr)
            (cond
              [(procedure? result-addr)
-              (printf "Imported procedure\n")
+              (printf "Imported procedure:\n")
               result-addr]
              [(location? result-addr)
               (printf "Value at location ~a:\n" result-addr)
@@ -388,49 +406,29 @@
      (raise-syntax-error #f "expected list of identifiers to import" stx)]
     [_ (raise-syntax-error #f "expected open parenthesis before import-primitive")]))
 
-; User Functions
-(define (mutator-lift f) 
-  (lambda args
-    (let ([result (apply f (map collector:deref args))])
-      (if (void? result)
-          (void)
-          (collector:alloc-flat result)))))
-(define-syntax (provide/lift stx)
+(define-for-syntax ((mk-id-macro p-id) stx)
   (syntax-case stx ()
-    [(_ id ...)
+    [id
+     (identifier? #'id)
+     (raise-syntax-error (syntax-e stx)
+                         "primitive must appear in the function position of an application"
+                         stx)]
+    [(id exp ...)
+     #`(mutator-app #,p-id exp ...)]))
+    
+(define-syntax (provide-flat-prims/lift stx)
+  (syntax-case stx ()
+    [(_ prim-ids id ...)
      (andmap identifier? (syntax->list #'(id ...)))
-     (with-syntax ([(lifted-id ...) (generate-temporaries #'(id ...))])
+     (with-syntax ([(id2 ...) (generate-temporaries #'(id ...))]
+                   [(p ...) (generate-temporaries #'(id ...))])
        #'(begin
-           (define-syntax lifted-id
-             (make-set!-transformer
-              (lambda (stx)
-                (syntax-case stx (set!)
-                  ;; Redirect mutation of x to y
-                  [(set! x v)
-                   (raise-syntax-error 'id "Cannot mutate primitive functions")]
-                  [(x (... ...))
-                   #'(mutator-app x (... ...))]
-                  [x (identifier? #'x)
-                     ;; XXX Make a macro to unify this and mutator-lambda
-                     (with-syntax 
-                      ([(env-id (... ...)) (syntax-parameter-value #'mutator-env-roots)])
-                      (if (syntax-parameter-value #'mutator-tail-call?)
-                          (syntax/loc stx
-                                      (#%app collector:closure
-                                             (closure-code 0 (mutator-lift id))
-                                             (vector)))
-                          (syntax/loc stx
-                                      (with-continuation-mark 
-                                       gc-roots-key 
-                                       (list (make-env-root env-id) (... ...))
-                                       (#%app collector:closure
-                                              (closure-code 0 (mutator-lift id))
-                                              (vector))))))]))))
-           ...
-           (provide (rename-out [lifted-id id]
-                                ...))))]))
+           (define-for-syntax prim-ids (syntax->list #'(id ...)))
+           (provide (rename-out [id2 id] ...))
+           (define-syntax id2 (mk-id-macro #'id)) ...))]))
 
-(provide/lift 
+(provide-flat-prims/lift
+ prim-ids
  symbol? boolean? number? symbol=?
  add1 sub1 zero? + - * / even? odd? = < > <= >=)
 
@@ -497,16 +495,13 @@
     [(_ arg) #'(#%app print-only-errors (#%datum . arg))]))
 
 ; Implementation Functions
-(define (deref-proc proc-or-loc)
-  (define (deref proc/loc)
+(define (deref-proc proc/loc)
+  (define v
     (cond
-     [(procedure? proc/loc) proc/loc]
-     [(location? proc/loc) (collector:closure-code-ptr proc/loc)]
-     [else (error 'deref "expected <location?> or <procedure?>; received ~a" proc/loc)]))
-  (define v 
-    (with-handlers ([exn? (lambda (x) 
-                            (error 'procedure-application "expected procedure, given something else"))])
-      (deref proc-or-loc)))
+      [(procedure? proc/loc) proc/loc]
+      [(location? proc/loc) (collector:closure-code-ptr proc/loc)]
+      [else 
+       (error 'procedure-application "expected procedure, given something else")]))
   (cond
    [(procedure? v)
     v]
@@ -515,7 +510,7 @@
       (apply (closure-code-proc v) 
              (append 
               (for/list ([i (in-range (closure-code-env-count v))])
-                        (collector:closure-env-ref proc-or-loc i))
+                        (collector:closure-env-ref proc/loc i))
               args)))]
    [else
     (error 'procedure-application "expected procedure, given ~e" v)]))

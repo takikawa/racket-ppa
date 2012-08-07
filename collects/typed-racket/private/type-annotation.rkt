@@ -4,10 +4,11 @@
 	 (rep type-rep)
 	 (utils tc-utils)
 	 (env global-env)
-         (except-in (types subtype union convenience resolve utils comparison) -> ->*)
+         (except-in (types subtype union convenience resolve utils generalize) -> ->* one-of/c)
          (private parse-type)
          (contract-req)
-         racket/match mzlib/trace)
+         racket/match)
+
 (provide type-annotation
          get-type
          get-types
@@ -113,7 +114,7 @@
       [else
        (tc-error "no type information on variable ~a" (syntax-e stx))])))
 
-;; Listof[identifer] #:default Type -> Listof[Type]
+;; Listof[identifier] #:default Type -> Listof[Type]
 (define (get-types stxs #:default [default #f])
   (map (lambda (e) (get-type e #:default default)) stxs))
 

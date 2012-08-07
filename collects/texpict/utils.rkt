@@ -40,6 +40,7 @@
 	   angel-wing
 	   desktop-machine
 	   standard-fish
+           thermometer
            
 	   add-line
 	   add-arrow-line
@@ -343,16 +344,21 @@
 	    (send dc set-brush b)))
 	width height))
 
-  (define (disk size) (filled-ellipse size size))
+  (define (disk size #:draw-border? [draw-border? #t])
+    (filled-ellipse size size #:draw-border? draw-border?))
   
-  (define (filled-ellipse width height)
+  (define (filled-ellipse width height #:draw-border? [draw-border? #t])
     (dc (lambda (dc x y)
-	  (let ([b (send dc get-brush)])
-	    (send dc set-brush (send the-brush-list find-or-create-brush
-				     (send (send dc get-pen) get-color)
-				     'solid))
-	    (send dc draw-ellipse x y width height)
-	    (send dc set-brush b)))
+	  (define b (send dc get-brush))
+          (define p (send dc get-pen))
+          (send dc set-brush (send the-brush-list find-or-create-brush
+                                   (send (send dc get-pen) get-color)
+                                   'solid))
+          (unless draw-border?
+            (send dc set-pen "black" 1 'transparent))
+          (send dc draw-ellipse x y width height)
+          (send dc set-brush b)
+          (send dc set-pen p))
 	width height))
 
   (define cloud
@@ -389,6 +395,92 @@
 	   (send dc set-brush b)
 	   (send dc set-pen p)))
        w h)]))
+  
+  (define (thermometer #:height-% [height-% 1]
+                       #:color-% [color-% height-%]
+                       #:ticks [ticks 4]
+                       #:start-color [_start-color "lightblue"]
+                       #:end-color [_end-color "lightcoral"]
+                       #:top-circle-diameter [top-circle-diameter 40]
+                       #:bottom-circle-diameter [bottom-circle-diameter 80]
+                       #:stem-height [stem-height 180]
+                       #:mercury-inset [mercury-inset 8])
+    (define (to-color s)
+      (if (string? s)
+          (or (send the-color-database find-color s) 
+              (send the-color-database find-color "white"))
+          s))
+    (define start-color (to-color _start-color))
+    (define end-color (to-color _end-color))
+    (define (between lo hi) (round (+ lo (* (- hi lo) color-%))))
+    (define fill-color (make-object color%
+                         (between (send start-color red) (send end-color red))
+                         (between (send start-color green) (send end-color green))
+                         (between (send start-color blue) (send end-color blue))))
+    (define tw bottom-circle-diameter)
+    (define th
+      (+ stem-height 
+         (/ top-circle-diameter 2)
+         (/ bottom-circle-diameter 2)))
+    
+    (define (make-region dc dx dy offset %)
+      (define top (new region% [dc dc]))
+      (define bottom (new region% [dc dc]))
+      (define middle (new region% [dc dc]))
+      (send top set-ellipse 
+            (+ dx 
+               (/ (- bottom-circle-diameter top-circle-diameter) 2)
+               offset)
+            (+ dy offset (* (- 1 %) stem-height))
+            (- top-circle-diameter offset offset)
+            (- top-circle-diameter offset offset))
+      (send middle set-rectangle 
+            (+ dx 
+               (/ (- bottom-circle-diameter top-circle-diameter) 2)
+               offset)
+            (+ dy (/ top-circle-diameter 2) (* (- 1 %) stem-height))
+            (- top-circle-diameter offset offset)
+            (* % stem-height))
+      (send bottom set-ellipse 
+            (+ dx offset)
+            (+ dy (+ (/ top-circle-diameter 2) 
+                     stem-height
+                     (- (/ bottom-circle-diameter 2)))
+               offset)
+            (- bottom-circle-diameter offset offset)
+            (- bottom-circle-diameter offset offset))
+      (send top union middle)
+      (send top union bottom)
+      top)
+    
+    (dc
+     (λ (dc dx dy)
+       (define old-pen (send dc get-pen))
+       (define old-brush (send dc get-brush))
+       (define boundary (make-region dc dx dy 0 1))
+       (define fill (make-region dc dx dy mercury-inset height-%))
+       (define old-rgn (send dc get-clipping-region))
+       (send dc set-clipping-region boundary)
+       (send dc set-brush "black" 'solid)
+       (send dc draw-rectangle dx dy tw th)
+       (send dc set-clipping-region fill)
+       (send dc set-brush fill-color 'solid)
+       (send dc draw-rectangle dx dy tw th)
+       (send dc set-pen "black" mercury-inset 'solid)
+       (for ([x (in-range ticks)])
+         (define y (+ (/ top-circle-diameter 2)
+                      (* (/ (+ x 1/2) ticks) 
+                         (- stem-height (/ bottom-circle-diameter 3)))))
+         (send dc draw-line 
+               dx
+               (+ dy y)
+               (+ dx (/ tw 2))
+               (+ dy y)))
+       
+       (send dc set-clipping-region old-rgn)
+       (send dc set-brush old-brush)
+       (send dc set-pen old-pen))
+     tw th))
 
   (define file-icon
     (lambda (w h gray [fancy? #f])
@@ -698,7 +790,7 @@
                           (if (eq? direction 'left)
                               x0
                               (+ x (- w (- x0 x) w0))))]
-		  [set-rgn (lambda (rgn flip?)
+		  [set-rgn (lambda (rgn flip? old-rgn)
                              (let ([dy (if flip? (/ h 2) 0)]
                                    [wf (λ (x) (* (if (eq? 'left direction) x (+ 1 (* x -1))) w))])
 			       (if mouth-open?
@@ -714,7 +806,9 @@
 					 x (+ y dy))
 				   (send rgn set-rectangle 
 					 x (+ y dy)
-					 w (/ h 2)))))])
+					 w (/ h 2))))
+                             (when old-rgn
+                               (send rgn intersect old-rgn)))])
               (send dc set-pen no-pen)
               (color-series
                dc 4 1
@@ -735,7 +829,7 @@
                        x y))
                #f #t)
 
-	      (set-rgn rgn #f)
+	      (set-rgn rgn #f old-rgn)
 	      (send dc set-clipping-region rgn)
               (color-series
                dc 4 1
@@ -746,7 +840,7 @@
                #f #t)
               (send dc set-clipping-region old-rgn)
 
-              (set-rgn rgn #t)
+              (set-rgn rgn #t old-rgn)
               (send dc set-clipping-region rgn)
               (color-series
                dc 4 1

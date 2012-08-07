@@ -1,7 +1,6 @@
 #lang scheme/unit
 
-  (require mzlib/class
-           mzlib/etc)
+  (require racket/class)
 
   (require racket/draw/draw-sig
            racket/gui/dynamic)
@@ -16,7 +15,7 @@
           texpict-common-setup^)
 
       (define show-pict
-        (opt-lambda (p [w #f] [h #f])
+        (λ (p [w #f] [h #f])
           (define the-pict p)
           (define pict-drawer (make-pict-drawer the-pict))
           (define no-redraw? #f)
@@ -91,7 +90,7 @@
 		(memq* a (cdr l)))
 	    #f))
 
-      (define (extend-font font size style weight)
+      (define (extend-font font size style weight hinting)
 	(if (send font get-face)
 	    (send the-font-list find-or-create-font
 		  size 
@@ -101,7 +100,8 @@
 		  weight
 		  #f
 		  'default
-		  #t)
+		  #t
+                  hinting)
 	    (send the-font-list find-or-create-font
 		  size 
 		  (send font get-family)
@@ -109,7 +109,8 @@
 		  weight
 		  #f
 		  'default
-		  #t)))
+		  #t
+                  hinting)))
 
   (define text
     (case-lambda
@@ -143,25 +144,26 @@
 		   (cond
 		    [(null? style) 
 		     (send the-font-list find-or-create-font
-			   size 'default 'normal 'normal #f 'default #t)]
+			   size 'default 'normal 'normal #f 'default #t 'unaligned)]
 		    [(is-a? style font%)
 		     style]
 		    [(memq style families)
 		     (send the-font-list find-or-create-font
-			   size style 'normal 'normal #f 'default #t)]
+			   size style 'normal 'normal #f 'default #t 'unaligned)]
 		    [(string? style)
 		     (send the-font-list find-or-create-font
-			   size style 'default 'normal 'normal #f 'default #t)]
+			   size style 'default 'normal 'normal #f 'default #t 'unaligned)]
                     [(and (pair? style)
                           (string? (car style))
                           (memq (cdr style) families))
                      (send the-font-list find-or-create-font
-			   size (car style) (cdr style) 'normal 'normal #f 'default #t)]
+			   size (car style) (cdr style) 'normal 'normal #f 'default #t 'unaligned)]
 		    [(and (pair? style)
 			  (memq (car style)
 				'(superscript 
 				  subscript
-				  bold italic)))
+				  bold italic
+                                  aligned unaligned)))
 		     (let ([font (loop (cdr style))]
 			   [style (car style)])
 		       (cond
@@ -169,12 +171,21 @@
 			 (extend-font font
 				      (send font get-point-size)
 				      (send font get-style)
-				      'bold)]
+				      'bold
+                                      (send font get-hinting))]
 			[(eq? style 'italic)
 			 (extend-font font
 				      (send font get-point-size)
 				      'italic
-				      (send font get-weight))]
+				      (send font get-weight)
+                                      (send font get-hinting))]
+			[(or (eq? style 'aligned)
+                             (eq? style 'unaligned))
+			 (extend-font font
+				      (send font get-point-size)
+				      (send font get-style)
+				      (send font get-weight)
+                                      style)]
 			[else font]))]
 		    [(and (pair? style)
 			  (memq (car style) '(combine no-combine)))
@@ -195,7 +206,8 @@
 			      (extend-font font
 					   (floor (* 6/10 (send font get-point-size)))
 					   (send font get-style)
-					   (send font get-weight))
+					   (send font get-weight)
+                                           (send font get-hinting))
 			      font)]
 		  [dc (dc-for-text-size)])
 	      (unless dc
@@ -269,7 +281,7 @@
 	 [(string style) (caps-text string style 12)]
 	 [(string style size)
 	  (let ([strings
-		 (let loop ([l (string->list string)][this null][results null][up? #f])
+		 (let loop ([l (string->list string)] [this null] [results null] [up? #f])
 		   (if (null? l)
 		       (reverse (cons (reverse this) results))
 		       (if (eq? up? (char-upper-case? (car l)))
@@ -290,14 +302,36 @@
 		    [else s]))]
 		[cap-size (floor (* 8/10 size))])
 	    (let ([picts
-		   (let loop ([l strings][up? #f])
+		   (let loop ([l strings] [up? #f])
 		     (if (null? l)
 			 null
-			 (cons (not-caps-text (list->string (map char-upcase (car l)))
-                                              (if up? style cap-style)
-                                              (if up? size cap-size)
-                                              0)
-			       (loop (cdr l) (not up?)))))])
+                         (let* ([first-string (list->string (map char-upcase (car l)))]
+                                [first
+                                 (not-caps-text first-string
+                                                (if up? style cap-style)
+                                                (if up? size cap-size)
+                                                0)]
+                               [rest (loop (cdr l) (not up?))])
+                           (if (and up? (pair? (cdr l)))
+                               ;; kern capital followed by non-captial
+                               (let ([plain-first (not-caps-text first-string
+                                                                 cap-style
+                                                                 cap-size
+                                                                 0)]
+                                     [together (not-caps-text (string-append
+                                                               first-string
+                                                               (list->string (map char-upcase (cadr l))))
+                                                              cap-style
+                                                              cap-size
+                                                              0)])
+                                 (cons (hbl-append (- (pict-width together)
+                                                      (+ (pict-width plain-first)
+                                                         (pict-width (car rest))))
+                                                   first
+                                                   (car rest))
+                                       (cdr rest)))
+                               ;; no kerning needed:
+                               (cons first rest)))))])
 	      (apply hbl-append 0 picts)))]))
 
       (define (linewidth n p) (line-thickness n p))
@@ -414,8 +448,7 @@
 				    [color (or requested-color 
 					       (send the-color-database find-color "BLACK"))])
 			       (unless requested-color
-				 (fprintf (current-error-port)
-					  "WARNING: couldn't find color: ~s\n" (cadr x)))
+				 (eprintf "WARNING: couldn't find color: ~s\n" (cadr x)))
                                (set-pen (find-or-create-pen color (send p get-width) (send p get-style)))
 			       (set-brush (find-or-create-brush color 'solid))
 			       (set-text-foreground color))
@@ -471,8 +504,9 @@
       (define (convert-pict/bytes p format default)
         (case format
           [(png-bytes)
-           (let* ([bm (make-bitmap (max 1 (inexact->exact (ceiling (pict-width p))))
-                                   (max 1 (inexact->exact (ceiling (pict-height p)))))]
+           (let* ([bm (make-bitmap
+                       (max 1 (inexact->exact (ceiling (pict-width p))))
+                       (max 1 (inexact->exact (ceiling (pict-height p)))))]
                   [dc (make-object bitmap-dc% bm)])
              (send dc set-smoothing 'aligned)
              (draw-pict p dc 0 0)
@@ -491,6 +525,7 @@
                             [width (* (pict-width p) (unbox xs))]
                             [height (* (pict-height p) (unbox ys))]
                             [output s])])
+               (send dc set-smoothing 'smoothed)
                (send dc start-doc "pict")
                (send dc start-page)
                (draw-pict p dc 0 0)

@@ -1,17 +1,18 @@
+#lang racket/base
+
 ;; require this file to run all of the test suites for redex.
 
-#lang racket/base
-(require scheme/runtime-path
-         scheme/cmdline
-         scheme/match
-         "test-util.rkt")
+(require racket/runtime-path
+         racket/cmdline
+         racket/match
+         "test-util.rkt"
+         "bitmap-test-util.rkt")
 
-(define test-bitmaps? #t)
 (define test-examples? #f)
 
 (command-line
  #:once-each
- [("--no-bitmaps") "executes bitmap-test.rkt" (set! test-bitmaps? #f)]
+ [("--no-bitmap-gui") "skips the GUI for bitmap-test.rkt" (show-bitmap-test-gui? #f)]
  [("--examples") "executes the tests in the examples directory" (set! test-examples? #t)])
 
 (define test-files
@@ -29,8 +30,9 @@
      "stepper-test.rkt"
      "defined-checks-test.rkt"
      "check-syntax-test.rkt"
-     "test-docs-complete.rkt")
-   (if test-bitmaps? '("bitmap-test.rkt") '())
+     "test-docs-complete.rkt"
+     "tut-subst-test.rkt"
+     "bitmap-test.rkt")
    (if test-examples?
        '("../examples/cbn-letrec.rkt"
          "../examples/stlc.rkt"
@@ -62,7 +64,7 @@
                    [(? string?) 
                     (values test-file #f values)])])
      (flush)
-     (printf "testing ~a\n" file)
+     (printf "running ~a\n" file)
      (flush)
      (action (dynamic-require (build-path here file) provided))
      (flush)))

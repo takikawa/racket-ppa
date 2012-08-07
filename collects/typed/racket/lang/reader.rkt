@@ -11,7 +11,7 @@ typed/racket
   (case key
     [(drscheme:toolbar-buttons)
      (list (dynamic-require 'typed-racket/optimizer/tool/tool
-                            'performance-report-drracket-button))]
+                            'optimization-coach-drracket-button))]
     [else (use-default key default)]))
 
 (define make-language-info

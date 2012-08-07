@@ -7,18 +7,19 @@
 
 Returns @racket[#t] if @racket[v] is a C pointer or a value that can
 be used as a pointer: @racket[#f] (used as a @cpp{NULL} pointer), byte
-strings (used as memory blocks), or some additional internal objects
-(@racket[ffi-obj]s and callbacks, see @secref["foreign:c-only"]).
-Returns @racket[#f] for other values.}
+strings (used as memory blocks), or a structure instance with the
+@racket[prop:cpointer] @tech[#:doc reference.scrbl]{structure type
+property}.  Returns @racket[#f] for other values.}
 
 @defproc[(ptr-equal? [cptr1 cpointer?] [cptr2 cpointer?]) boolean?]{
 
 Compares the values of the two pointers. Two different Racket
 pointer objects can contain the same pointer.
 
-If the values are both C pointers---as opposed to @racket[#f], a byte
-string, @racket[ffi-obj], or callback---this comparison is the same as
-@racket[equal?].}
+If the values are both pointers that are not represented by
+@racket[#f], a byte string, a callback, or a pointer based on
+@racket[_fpointer], then the @racket[ptr-equal?] comparison is the
+same as using @racket[equal?].}
 
 
 @defproc[(ptr-add [cptr cpointer?] [offset exact-integer?] [type ctype? _byte]) 
@@ -217,8 +218,11 @@ can contain other information).}
 For general information on C-level memory management with Racket,
 see @|InsideRacket|.
 
-@defproc[(malloc [bytes-or-type (or/c exact-nonnegative-integer? ctype?)]
-                 [type-or-bytes (or/c exact-nonnegative-integer? ctype?) @#,elem{absent}]
+@defproc[(malloc [bytes-or-type (or/c (and/c exact-nonnegative-integer? fixnum?) 
+                                      ctype?)]
+                 [type-or-bytes (or/c (and/c exact-nonnegative-integer? fixnum?) 
+                                      ctype?) 
+                                @#,elem{absent}]
                  [cptr cpointer? @#,elem{absent}]
                  [mode (one-of/c 'nonatomic 'stubborn 'uncollectable
                                  'eternal 'interior 'atomic-interior
@@ -229,8 +233,9 @@ see @|InsideRacket|.
 
 Allocates a memory block of a specified size using a specified
 allocation. The result is a @racket[cpointer] to the allocated
-memory.  Although not reflected above, the four arguments can appear in
-any order since they are all different types of Racket objects; a size
+memory, or @racket[#f] if the requested size is zero.  Although 
+not reflected above, the four arguments can appear in
+any order, since they are all different types of Racket objects; a size
 specification is required at minimum:
 
 @itemize[
@@ -373,3 +378,22 @@ offset is immediately added to the pointer. Thus, this function cannot
 be used with @racket[ptr-add] to create a substring of a Racket byte
 string, because the offset pointer would be to the middle of a
 collectable object (which is not allowed).}
+
+@; ----------------------------------------------------------------------
+
+@section{Pointer Structure Property}
+
+@defthing[prop:cpointer struct-type-property?]{
+
+A @tech[#:doc reference.scrbl]{structure type property} that causes
+instances of a structure type to work as C pointer values. The
+property value must be either an exact non-negative integer indicating
+an immutable field in the structure (which must, in turn, be
+initialized to a C pointer value), a procedure that takes the
+structure instance and returns a C pointer value, or a C pointer
+value.
+
+The @racket[prop:cpointer] property allows a structure instance to be
+used transparently as a C pointer value, or it allows a C pointer
+value to be transparently wrapped by a structure that may have
+additional values or properties.}

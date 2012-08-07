@@ -189,11 +189,11 @@ standard library collection directory (see @secref["collects"]).  In
 this case, @racket[program] is the name used to start Racket and
 @racket[related] is @racket["collects"].  The @racket[related-sub]
 argument is used because, on @|AllUnix|, @racket[program-sub] may
-involve to a sequence of soft links; in this case,
+involve a sequence of soft links; in this case,
 @racket[related-sub] determines which link in the chain is relevant.
 
 If @racket[related-sub] is not @racket[#f], then when
-@racket[find-executable-path] does not finds a @racket[program-sub]
+@racket[find-executable-path] does not find a @racket[program-sub]
 that is a link to another file path, the search can continue with the
 destination of the link. Further links are inspected until
 @racket[related-sub] is found or the end of the chain of links is
@@ -281,12 +281,13 @@ existing @racket[new].}
                                            [fail-thunk (-> any) (lambda () (raise (make-exn:fail:filesystem ....)))])
          any]{
 
-Returns the file or directory's last modification date as
-platform-specific seconds (see also @secref["time"]) when
-@racket[secs-n] is not provided or is @racket[#f]. (For FAT
-filesystems on Windows, directories do not have modification
+Returns the file or directory's last modification date in seconds
+since midnight UTC, January 1, 1970 (see also @secref["time"]) when
+@racket[secs-n] is not provided or is @racket[#f].
+
+For FAT filesystems on Windows, directories do not have modification
 dates. Therefore, the creation date is returned for a directory, but
-the modification date is returned for a file.)
+the modification date is returned for a file.
 
 If @racket[secs-n] is provided and not @racket[#f], the access and
 modification times of @racket[path] are set to the given time.
@@ -367,7 +368,8 @@ Creates the file @racket[dest] as a copy of @racket[src], if
 and @racket[exists-ok?] is @racket[#f], the copy fails with
 @exnraise[exn:fail:filesystem:exists?]; otherwise, if @racket[dest]
 exists, its content is replaced with the content of @racket[src]. File
-permissions are transferred from @racket[src] to @racket[dest]. If
+permissions are transferred from @racket[src] to @racket[dest]; on Windows,
+the modification time of @racket[src] is also transferred to @racket[dest]. If
 @racket[src] refers to a link, the target of the link is copied,
 rather than the link itself; if @racket[dest] refers to a link and
 @racket[exists-ok?] is true, the target of the link is updated.}
@@ -431,13 +433,17 @@ directory is not deleted successfully, the
 @exnraise[exn:fail:filesystem].}
 
 
-@defproc[(directory-list [path path-string? (current-directory)]) 
+@defproc[(directory-list [path path-string? (current-directory)]
+                         [#:build? build? any/c #f])
          (listof path?)]{
 
 @margin-note{See also the @racket[in-directory] sequence constructor.}
 
 Returns a list of all files and directories in the directory specified
-by @racket[path]. On Windows, an element of the list may start with
+by @racket[path]. If @racket[build?] is @racket[#f], the resulting
+paths are all @tech{path elements}; otherwise, the individual results
+are combined with @racket[path] using @racket[build-path].
+On Windows, an element of the result list may start with
 @litchar{\\?\REL\\}.}
 
 
@@ -941,7 +947,7 @@ The preference file should contain a list of symbol--value lists
 written with the default parameter settings.  Keys
 starting with @racket[racket:], @racket[mzscheme:], @racket[mred:],
 and @racket[plt:] in any letter case are reserved for use by Racket
-implementers. If the preference file does not contain a list
+implementors. If the preference file does not contain a list
 of symbol--value lists, an error is logged via @racket[log-error]
 and @racket[failure-thunk] is called.
 

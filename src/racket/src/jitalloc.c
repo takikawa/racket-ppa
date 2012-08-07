@@ -42,6 +42,7 @@ THREAD_LOCAL_DECL(static void *retry_alloc_r1); /* set by prepare_retry_alloc() 
 
 #ifdef JIT_USE_FP_OPS
 THREAD_LOCAL_DECL(double scheme_jit_save_fp);
+THREAD_LOCAL_DECL(double scheme_jit_save_fp2);
 #endif
 
 static void *prepare_retry_alloc(void *p, void *p2)
@@ -76,7 +77,7 @@ static void *ts_prepare_retry_alloc(void *p, void *p2) XFORM_SKIP_PROC
   
     jit_future_storage[0] = p;
     jit_future_storage[1] = p2;
-    ret = scheme_rtcall_alloc("[allocate memory]", FSRC_OTHER);
+    ret = scheme_rtcall_alloc();
     GC_gen0_alloc_page_ptr = ret;
     retry_alloc_r1 = jit_future_storage[1];
     p = jit_future_storage[0];

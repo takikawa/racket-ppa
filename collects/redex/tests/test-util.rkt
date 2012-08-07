@@ -1,9 +1,8 @@
 #lang scheme
 
 (require "../private/matcher.rkt"
-         (for-syntax syntax/parse)
-         errortrace/errortrace-lib
-         errortrace/errortrace-key
+         (for-syntax syntax/parse setup/path-to-relative)
+         setup/path-to-relative
          racket/runtime-path)
 (provide test test-syn-err tests reset-count
          syn-err-test-namespace
@@ -31,7 +30,7 @@
     [(_ expected got)
      (with-syntax ([line (syntax-line stx)]
                    [fn (if (path? (syntax-source (syntax got)))
-                           (path->string (syntax-source (syntax got)))
+                           (path->relative-string/library (syntax-source (syntax got)))
                            "<unknown file>")])
        (syntax/loc stx (test/proc (λ () expected) got line fn)))]))
 
@@ -43,14 +42,20 @@
                                (map source-location (exn:fail:syntax-exprs exn))))])
       (thunk))))
 (define (runtime-error-test-setup thunk)
-  (parameterize ([current-compile (make-errortrace-compile-handler)])
+  (define errortrace-key (dynamic-require 'errortrace/errortrace-key 'errortrace-key))
+  (parameterize ([current-compile ((dynamic-require 'errortrace/errortrace-lib 'make-errortrace-compile-handler))])
     (with-handlers ([exn:fail? 
                      (λ (exn) 
                        (values (exn-message exn)
-                               (let ([marks (continuation-mark-set->list
-                                             (exn-continuation-marks exn)
-                                             errortrace-key)])
-                                 (if (null? marks) '() (list (cdar marks))))))])
+                               (let ([ans (let ([marks (continuation-mark-set->list
+                                                        (exn-continuation-marks exn)
+                                                        errortrace-key)])
+                                            (if (null? marks) '() (list (cdar marks))))])
+                                 (let loop ([ans ans])
+                                   (cond
+                                     [(pair? ans) (cons (loop (car ans)) (loop (cdr ans)))]
+                                     [(path? ans) (path->relative-string/library ans)]
+                                     [else ans])))))])
       (thunk))))
 
 (define ((exec-error-tests setup exec) path)
@@ -74,7 +79,8 @@
     [(message named-pieces body)
      (make-error-test (syntax/loc spec (message named-pieces () body)))]
     [(message ([loc-name loc-piece] ...) ([non-loc-name non-loc-piece] ...) body)
-     (values (syntax-source spec)
+     (values (and (path? (syntax-source spec))
+                  (path->relative-string/library (syntax-source spec)))
              (syntax-line spec)
              (syntax-e #'message)
              (map source-location (syntax->list #'(loc-piece ...)))
@@ -87,7 +93,8 @@
                  (void)))]))
 
 (define (source-location stx)
-  (list (syntax-source stx) 
+  (list (and (path? (syntax-source stx))
+             (path->relative-string/library (syntax-source stx))) 
         (syntax-line stx) 
         (syntax-column stx) 
         (syntax-position stx)
@@ -141,9 +148,8 @@
     (unless (and (not (exn? got))
                  (matches? got expected))
       (set! failures (+ 1 failures))
-      (fprintf (current-error-port)
-               "test: file ~a line ~a:\n     got ~s\nexpected ~s\n\n" 
-               filename 
+      (eprintf "test: file ~a line ~a:\n     got ~s\nexpected ~s\n\n"
+               filename
                line
                got
                expected))))

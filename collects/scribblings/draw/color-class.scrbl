@@ -12,7 +12,7 @@ A color is an object representing a red-green-blue (RGB) combination
  0, 0.5) is translucent red.
 
 See @racket[color-database<%>] for information about obtaining a color
-object using a color name.
+object using a color name, and see also @racket[make-color].
 
 
 @defconstructor*/make[(()
@@ -55,6 +55,13 @@ Copies the RGB values of another color object to this one, returning
            (integer-in 0 255)]{
 
 Returns the green component of the color.
+
+}
+
+@defmethod[(is-immutable?)
+           boolean?]{
+
+Returns @racket[#t] if the color object is immutable.
 
 }
 

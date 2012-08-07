@@ -76,15 +76,15 @@ module browser threading seems wrong.
                                         images/icons/stickman images/logos))))
 
 (define execute-bitmap
-  (icons:compiled-bitmap (icons:play-icon icons:run-icon-color (icons:toolbar-icon-height))))
+  (icons:compiled-bitmap (icons:play-icon #:color icons:run-icon-color
+                                          #:height (icons:toolbar-icon-height))))
 (define break-bitmap
-  (icons:compiled-bitmap (icons:stop-icon icons:halt-icon-color (icons:toolbar-icon-height))))
+  (icons:compiled-bitmap (icons:stop-icon #:color icons:halt-icon-color
+                                          #:height (icons:toolbar-icon-height))))
 (define small-save-bitmap
-  (icons:compiled-bitmap (icons:small-save-icon icons:syntax-icon-color "gold"
-                                                (icons:toolbar-icon-height))))
+  (icons:compiled-bitmap (icons:small-save-icon #:height (icons:toolbar-icon-height))))
 (define save-bitmap
-  (icons:compiled-bitmap (icons:save-icon icons:syntax-icon-color "gold"
-                                          (icons:toolbar-icon-height))))
+  (icons:compiled-bitmap (icons:save-icon #:height (icons:toolbar-icon-height))))
 
 (begin-for-syntax
   (define stickman-height 18)
@@ -93,17 +93,15 @@ module browser threading seems wrong.
 (define running-frame-list
   (icons:compiled-bitmap-list
    (for/list ([t  (in-range 0 1 (/ 1 num-running-frames))])
-     (icons:running-stickman-icon t icons:run-icon-color "white" icons:run-icon-color
-                                  stickman-height))))
+     (icons:running-stickman-icon t #:height stickman-height))))
 (define running-frames (list->vector running-frame-list))
 
 (define standing-frame
   (icons:compiled-bitmap
-   (icons:standing-stickman-icon icons:run-icon-color "white" icons:run-icon-color
-                                 stickman-height)))
+   (icons:standing-stickman-icon #:height stickman-height)))
 
 (define very-small-planet-bitmap
-  (icons:compiled-bitmap (icons:planet-logo (icons:toolbar-icon-height))))
+  (icons:compiled-bitmap (icons:planet-logo #:height (icons:toolbar-icon-height))))
 
 ;; ===================================================================================================
 
@@ -1531,7 +1529,7 @@ module browser threading seems wrong.
              (member logger-panel (send logger-parent-panel get-children))))
       
       (define/private (new-logger-text)
-        (set! logger-gui-text (new (text:hide-caret/selection-mixin text:basic%)))
+        (set! logger-gui-text (new (text:hide-caret/selection-mixin text:line-spacing%)))
         (send logger-gui-text lock #t))
       
       (define/public (update-logger-window command)
@@ -1886,12 +1884,11 @@ module browser threading seems wrong.
               (when (or (is-a? obj vertical-panel%)
                         (is-a? obj horizontal-panel%))
                 (unless (equal? (send obj get-orientation) (not vertical?))
-                  (send obj set-orientation (not vertical?))
-                  ;; have to be careful to avoid reversing the list when the orientation is already proper
-                  (send obj change-children reverse)))
+                  (send obj set-orientation (not vertical?))))
               (for-each loop (send obj get-children))))
+          (sort-toolbar-buttons-panel)
           
-          (orient)
+          (set-toolbar-label-visibilities/check-registered)
           
           (send top-outer-panel stretchable-height vertical?)
           (send top-outer-panel stretchable-width (not vertical?))
@@ -1918,31 +1915,102 @@ module browser threading seems wrong.
               (send name-panel set-alignment 'left 'center))
           (end-container-sequence)))
       
-      (define toolbar-buttons '())
-      (define/public (register-toolbar-button b)
-        (set! toolbar-buttons (cons b toolbar-buttons))
-        (orient))
+      ;; this table uses object identity on buttons(!)
+      (define toolbar-buttons (make-hasheq))
+      (define smallest #f)
       
-      (define/public (register-toolbar-buttons bs)
-        (set! toolbar-buttons (append bs toolbar-buttons))
-        (orient))
+      (define/public (register-toolbar-button b #:number [number/f #f])
+        (add-to-toolbar-buttons 'register-toolbar-button b number/f)
+        (set-toolbar-label-visibilities/check-registered)
+        (sort-toolbar-buttons-panel))
+      
+      (define/public (register-toolbar-buttons bs #:numbers [numbers/fs (make-list (length bs) #f)])
+        (for ([b (in-list bs)]
+              [n (in-list numbers/fs)]) 
+          (add-to-toolbar-buttons 'register-toolbar-buttons b n))
+        (set-toolbar-label-visibilities/check-registered)
+        
+        ;; sort panel contents
+        (define panels '())
+        (for ([tb (in-list bs)])
+          (define parent (send tb get-parent))
+          (unless (memq parent panels)
+            (set! panels (cons parent panels))))
+        (for ([panel (in-list panels)])
+          (sort-toolbar-buttons-panel)))
+      
+      (define/private (add-to-toolbar-buttons who button number/f)
+        (define number (or number/f (if smallest (- smallest 1) 100)))
+        (define prev (hash-ref toolbar-buttons button #f))
+        (when (and prev (not (= prev number)))
+          (error who "cannot add toolbar button ~s with number ~a; already added with ~a"
+                 (send button get-label)
+                 number
+                 prev))
+        (when (or (not smallest) (< number smallest))
+          (set! smallest number))
+        (hash-set! toolbar-buttons button number))
+      
+      (define/private (in-toolbar-list? b) (hash-ref toolbar-buttons b #f))
       
       (define/public (unregister-toolbar-button b)
-        (set! toolbar-buttons (remq b toolbar-buttons))
+        (hash-remove! toolbar-buttons b)
+        (set! smallest
+              (if (zero? (hash-count toolbar-buttons))
+                  #f
+                  (apply min (hash-map toolbar-buttons (λ (x y) y)))))
         (void))
       
-      (define/private (orient)
+      (define/public (sort-toolbar-buttons-panel)
+        (define bp (get-button-panel))
+        (when (is-a? bp panel%)
+          (let sort-loop ([panel bp])
+            (define min #f)
+            (send panel change-children
+                  (λ (l)
+                    (define sub-panel-nums (make-hash))
+                    (for ([x (in-list l)])
+                      (when (is-a? x area-container<%>)
+                        (hash-set! sub-panel-nums x (sort-loop x))))
+                    (define (key i)
+                      (or (let loop ([item i])
+                            (cond
+                              [(is-a? item area-container<%>)
+                               (hash-ref sub-panel-nums item)]
+                              [else
+                               (hash-ref toolbar-buttons item #f)]))
+                          -5000))
+                    (define (min/f a b)
+                      (cond
+                        [(and a b) (min a b)]
+                        [else (or a b)]))
+                    (define cmp
+                      (cond
+                        [(is-a? panel vertical-pane%) >=]
+                        [(is-a? panel horizontal-pane%) <=]
+                        [else
+                         (if (send panel get-orientation) ;; horizontal is #t
+                             <=
+                             >=)]))
+                    (define ans (sort l cmp #:key key))
+                    (set! min (if (null? ans)
+                                  #f
+                                  (key (car ans))))
+                    ans))
+            min)
+          (void)))
+
+      (define/private (set-toolbar-label-visibilities/check-registered)
         (let ([vertical? (or (toolbar-is-left?) (toolbar-is-right?))])
-          (for-each
-           (λ (obj) (send obj set-label-visible (not vertical?)))
-           toolbar-buttons))
+          (for ([(button number) (in-hash toolbar-buttons)])
+            (send button set-label-visible (not vertical?))))
         
         (let loop ([obj button-panel])
           (cond
             [(is-a? obj area-container<%>)
              (for-each loop (send obj get-children))]
             [(is-a? obj switchable-button%)
-             (unless (memq obj toolbar-buttons)
+             (unless (in-toolbar-list? obj)
                (error 'register-toolbar-button 
                       "found a switchable-button% that is not registered, label ~s"
                       (send obj get-label)))]
@@ -2743,7 +2811,10 @@ module browser threading seems wrong.
                 text-port
                 #t
                 (λ ()
-                  (send interactions-text clear-undos)))))
+                  (parameterize ([current-eventspace drracket:init:system-eventspace])
+                    (queue-callback 
+                     (λ ()
+                       (send interactions-text clear-undos))))))))
       
       (inherit revert save)
       (define/private (check-if-save-file-up-to-date)
@@ -3119,7 +3190,8 @@ module browser threading seems wrong.
       (define/public (get-definitions/interactions-panel-parent)
         toolbar/rest-panel)
       
-      (inherit delegated-text-shown? hide-delegated-text show-delegated-text)
+      (inherit delegated-text-shown? hide-delegated-text show-delegated-text
+               set-show-menu-sort-key)
       (define/override (add-show-menu-items show-menu)
         (super add-show-menu-items show-menu)
         (set! definitions-item
@@ -3131,6 +3203,7 @@ module browser threading seems wrong.
                   (update-shown))
                 #\d
                 (string-constant definitions-menu-item-help-string)))
+        (set-show-menu-sort-key definitions-item 101)
         (set! interactions-item
               (make-object menu:can-restore-menu-item%
                 (string-constant show-interactions-menu-item-label)
@@ -3140,49 +3213,52 @@ module browser threading seems wrong.
                   (update-shown))
                 #\e
                 (string-constant interactions-menu-item-help-string)))
+        (set-show-menu-sort-key interactions-item 102)
         
-        (new menu:can-restore-menu-item%
-             [label (string-constant use-horizontal-layout)]
-             [parent (get-show-menu)]
-             [callback (λ (x y) 
-                         (define vertical? (send resizable-panel get-vertical?)) 
-                         (preferences:set 'drracket:defs/ints-horizontal vertical?)
-                         (send resizable-panel set-orientation vertical?)
-                         (define update-shown? (or (not interactions-shown?)
-                                                   (not definitions-shown?)))
-                         (unless interactions-shown?
-                           (toggle-show/hide-interactions))
-                         (unless definitions-shown?
-                           (toggle-show/hide-definitions))
-                         (when update-shown?
-                           (update-shown)))]
-             [demand-callback
-              (λ (mi) (send mi set-label (if (send resizable-panel get-vertical?)
-                                             (string-constant use-horizontal-layout)
-                                             (string-constant use-vertical-layout))))]
-             [shortcut #\l]
-             [shortcut-prefix (cons 'shift (get-default-shortcut-prefix))])
+        (let ([layout-item
+               (new menu:can-restore-menu-item%
+                    [label (string-constant use-horizontal-layout)]
+                    [parent (get-show-menu)]
+                    [callback (λ (x y) 
+                                (define vertical? (send resizable-panel get-vertical?)) 
+                                (preferences:set 'drracket:defs/ints-horizontal vertical?)
+                                (send resizable-panel set-orientation vertical?)
+                                (define update-shown? (or (not interactions-shown?)
+                                                          (not definitions-shown?)))
+                                (unless interactions-shown?
+                                  (toggle-show/hide-interactions))
+                                (unless definitions-shown?
+                                  (toggle-show/hide-definitions))
+                                (when update-shown?
+                                  (update-shown)))]
+                    [demand-callback
+                     (λ (mi) (send mi set-label (if (send resizable-panel get-vertical?)
+                                                    (string-constant use-horizontal-layout)
+                                                    (string-constant use-vertical-layout))))]
+                    [shortcut #\l]
+                    [shortcut-prefix (cons 'shift (get-default-shortcut-prefix))])])
+          (set-show-menu-sort-key layout-item 103))
         
-        (new separator-menu-item% [parent (get-show-menu)])
-        
-        (new menu:can-restore-menu-item%
-             (shortcut #\u)
-             (label 
-              (if (delegated-text-shown?)
-                  (string-constant hide-overview)
-                  (string-constant show-overview)))
-             (parent (get-show-menu))
-             (callback
-              (λ (menu evt)
-                (if (delegated-text-shown?)
-                    (begin
-                      (send menu set-label (string-constant show-overview))
-                      (preferences:set 'framework:show-delegate? #f)
-                      (hide-delegated-text))
-                    (begin
-                      (send menu set-label (string-constant hide-overview))
-                      (preferences:set 'framework:show-delegate? #t)
-                      (show-delegated-text))))))
+        (let ([overview-menu-item 
+               (new menu:can-restore-menu-item%
+                    (shortcut #\u)
+                    (label 
+                     (if (delegated-text-shown?)
+                         (string-constant hide-overview)
+                         (string-constant show-overview)))
+                    (parent (get-show-menu))
+                    (callback
+                     (λ (menu evt)
+                       (if (delegated-text-shown?)
+                           (begin
+                             (send menu set-label (string-constant show-overview))
+                             (preferences:set 'framework:show-delegate? #f)
+                             (hide-delegated-text))
+                           (begin
+                             (send menu set-label (string-constant hide-overview))
+                             (preferences:set 'framework:show-delegate? #t)
+                             (show-delegated-text))))))])
+          (set-show-menu-sort-key overview-menu-item 301))
         
         (set! module-browser-menu-item
               (new menu:can-restore-menu-item%
@@ -3195,10 +3271,12 @@ module browser threading seems wrong.
                       (if module-browser-shown?
                           (hide-module-browser)
                           (show-module-browser))))))
+        (set-show-menu-sort-key module-browser-menu-item 401)
         
         (set! toolbar-menu (new menu% 
                                 [parent show-menu]
                                 [label (string-constant toolbar)]))
+        (set-show-menu-sort-key toolbar-menu 1)
         (set! toolbar-left-menu-item
               (new checkable-menu-item%
                    [label (string-constant toolbar-on-left)]
@@ -3229,7 +3307,43 @@ module browser threading seems wrong.
                    [label (string-constant show-log)]
                    [parent show-menu]
                    [callback
-                    (λ (x y) (send current-tab toggle-log))])))
+                    (λ (x y) (send current-tab toggle-log))]))
+        (set-show-menu-sort-key logger-menu-item 205)
+        
+        
+        
+          
+        (set! show-line-numbers-menu-item
+              (new menu:can-restore-menu-item%
+                   [label (if (show-line-numbers?)
+                              (string-constant hide-line-numbers/menu)
+                              (string-constant show-line-numbers/menu))]
+                   [parent (get-show-menu)]
+                   [callback (lambda (self event)
+                               (define value (preferences:get 'drracket:show-line-numbers?))
+                               (preferences:set 'drracket:show-line-numbers? (not value))
+                               (show-line-numbers! (not value)))]))
+        (set-show-menu-sort-key show-line-numbers-menu-item 302)
+        
+        (let ([split
+               (new menu:can-restore-menu-item%
+                    (shortcut (if (eq? (system-type) 'macosx) #f #\m))
+                    (label (string-constant split-menu-item-label))
+                    (parent (get-show-menu))
+                    (callback (λ (x y) (split)))
+                    (demand-callback (λ (item) (split-demand item))))]
+              [collapse
+               (new menu:can-restore-menu-item% 
+                    (shortcut (if (eq? (system-type) 'macosx) #f #\m))
+                    (shortcut-prefix (if (eq? (system-type) 'macosx) 
+                                         (get-default-shortcut-prefix)
+                                         (cons 'shift (get-default-shortcut-prefix))))
+                    (label (string-constant collapse-menu-item-label))
+                    (parent (get-show-menu))
+                    (callback (λ (x y) (collapse)))
+                    (demand-callback (λ (item) (collapse-demand item))))])
+          (set-show-menu-sort-key split 2)
+          (set-show-menu-sort-key collapse 3)))
       
       
       ;                                                                                                       
@@ -4011,35 +4125,6 @@ module browser threading seems wrong.
               has-editor-on-demand)
             (register-capability-menu-item 'drscheme:special:insert-lambda insert-menu))
           
-          (set! show-line-numbers-menu-item
-                (new menu:can-restore-menu-item%
-                     [label (if (show-line-numbers?)
-                                (string-constant hide-line-numbers/menu)
-                                (string-constant show-line-numbers/menu))]
-                     [parent (get-show-menu)]
-                     [callback (lambda (self event)
-                                 (define value (preferences:get 'drracket:show-line-numbers?))
-                                 (preferences:set 'drracket:show-line-numbers? (not value))
-                                 (show-line-numbers! (not value)))]))
-          
-          (make-object separator-menu-item% (get-show-menu))
-          
-          (new menu:can-restore-menu-item%
-               (shortcut (if (eq? (system-type) 'macosx) #f #\m))
-               (label (string-constant split-menu-item-label))
-               (parent (get-show-menu))
-               (callback (λ (x y) (split)))
-               (demand-callback (λ (item) (split-demand item))))
-          (new menu:can-restore-menu-item% 
-               (shortcut (if (eq? (system-type) 'macosx) #f #\m))
-               (shortcut-prefix (if (eq? (system-type) 'macosx) 
-                                    (get-default-shortcut-prefix)
-                                    (cons 'shift (get-default-shortcut-prefix))))
-               (label (string-constant collapse-menu-item-label))
-               (parent (get-show-menu))
-               (callback (λ (x y) (collapse)))
-               (demand-callback (λ (item) (collapse-demand item))))
-          
           (frame:reorder-menus this)))
       
       (define/public (jump-to-previous-error-loc)
@@ -4293,7 +4378,7 @@ module browser threading seems wrong.
                  [callback (λ (x) (execute-callback))]
                  [bitmap execute-bitmap]
                  [label (string-constant execute-button-label)]))
-      (register-toolbar-button execute-button)
+      (register-toolbar-button execute-button #:number 100)
       
       (set! break-button
             (new switchable-button%
@@ -4301,7 +4386,7 @@ module browser threading seems wrong.
                  [callback (λ (x) (send current-tab break-callback))]
                  [bitmap break-bitmap]
                  [label (string-constant break-button-label)]))
-      (register-toolbar-button break-button)
+      (register-toolbar-button break-button #:number 101)
       
       (send button-panel stretchable-height #f)
       (send button-panel stretchable-width #f) 

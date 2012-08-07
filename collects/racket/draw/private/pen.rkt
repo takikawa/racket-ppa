@@ -1,5 +1,5 @@
-#lang scheme/base
-(require scheme/class
+#lang racket/base
+(require racket/class
          ffi/unsafe/atomic
          "color.rkt"
          "syntax.rkt"
@@ -7,6 +7,7 @@
          "bitmap.rkt")
 
 (provide pen%
+         make-pen
          pen-list% the-pen-list
          pen-width?
          pen-style-symbol?)
@@ -30,7 +31,9 @@
 
 (define black (send the-color-database find-color "black"))
 
-(define-local-member-name s-set-key)
+(define-local-member-name
+  s-set-key
+  set-immutable)
 
 (defclass pen% object%
   (define key #f)
@@ -125,9 +128,26 @@
 
   (define stipple #f)
   (def/public (get-stipple) stipple)
-  (def/public (set-stipple [(make-or-false bitmap%) s]) 
+  (define/public (set-stipple s)
     (check-immutable 'set-stipple)
     (set! stipple s)))
+
+;; color width style cap join stipple -> pen%
+;; produce an immutable pen% object
+(define (make-pen #:color [color black]
+                  #:width [width 0]
+                  #:style [style 'solid]
+                  #:cap [cap 'round]
+                  #:join [join 'round]
+                  #:stipple [stipple #f]
+                  #:immutable? [immutable? #t])
+  (or (and (not (or stipple (not immutable?)))
+           (send the-pen-list find-or-create-pen color width style cap join))
+      (let ()
+        (define pen (make-object pen% color width style cap join stipple))
+        (when immutable?
+          (send pen set-immutable))
+        pen)))
 
 ;; ----------------------------------------
 
@@ -164,6 +184,7 @@
                     (ephemeron-value e))
                (let* ([f (make-object pen% col w s c j)]
                       [e (make-ephemeron key f)])
+                 (send f set-immutable)
                  (send f s-set-key key)
                  (hash-set! pens key e)
                  f)))

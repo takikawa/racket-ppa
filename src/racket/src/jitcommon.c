@@ -40,7 +40,7 @@ static void raise_bad_call_with_values(Scheme_Object *f)
 {
   Scheme_Object *a[1];
   a[0] = f;
-  scheme_wrong_type("call-with-values", "procedure", -1, 1, a);    
+  scheme_wrong_contract("call-with-values", "procedure?", -1, 1, a);    
 }
 
 static Scheme_Object *call_with_values_from_multiple_result(Scheme_Object *f)
@@ -92,11 +92,12 @@ static void apply_prim_to_fail(int argc, Scheme_Object **argv, void *_p)
 static Scheme_Object *vector_check_chaperone_of(Scheme_Object *o, Scheme_Object *orig, int setter)
 {
   if (!scheme_chaperone_of(o, orig))
-    scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-                     "%s: chaperone produced a result: %V that is not a chaperone of the original result: %V",
-                     (setter ? "vector-set!" : "vector-ref"),
-                     o, 
-                     orig);
+    scheme_contract_error((setter ? "vector-set!" : "vector-ref"),
+                          "chaperone produced a result that is not a chaperone of the original result",
+                          "chaperone result", 1, o,
+                          "original result", 1, o,
+                          NULL);
+  
   return o;
 }
 
@@ -140,6 +141,11 @@ static void allocate_values(int count, Scheme_Thread *p)
   p->values_buffer_size = count;
 }
 
+void scheme_jit_allocate_values(int count, Scheme_Thread *p)
+{
+  allocate_values(count, p);
+}
+
 #ifdef MZ_USE_FUTURES
 static void ts_allocate_values(int count, Scheme_Thread *p) XFORM_SKIP_PROC
 {
@@ -151,13 +157,22 @@ static void ts_allocate_values(int count, Scheme_Thread *p) XFORM_SKIP_PROC
       p->values_buffer = a;
       p->values_buffer_size = count;
     } else
-      scheme_rtcall_allocate_values("[allocate_values]", FSRC_OTHER, count, p, allocate_values);
+      scheme_rtcall_allocate_values(count, p);
   } else
     allocate_values(count, p);
 }
 #else
 # define ts_allocate_values allocate_values
 #endif
+
+static void chaperone_set_mark()
+/* arguments are on runstack; result goes there, too */
+{
+  Scheme_Object *v;
+  v = scheme_chaperone_do_continuation_mark("with-continuation-mark", 0, MZ_RUNSTACK[1], MZ_RUNSTACK[0]);
+  MZ_RUNSTACK[0] = v;
+  MZ_RUNSTACK[1] = SCHEME_CHAPERONE_VAL(MZ_RUNSTACK[1]);
+}
 
 #define JITCOMMON_TS_PROCS
 #define JIT_APPLY_TS_PROCS
@@ -167,7 +182,7 @@ static void ts_allocate_values(int count, Scheme_Thread *p) XFORM_SKIP_PROC
 static Scheme_Object **ts_scheme_on_demand(Scheme_Object **rs) XFORM_SKIP_PROC
 {
   if (scheme_use_rtcall) {
-    return scheme_rtcall_on_demand("[jit_on_demand]", FSRC_OTHER, scheme_on_demand_with_args, rs);
+    return scheme_rtcall_on_demand(rs);
   } else
     return scheme_on_demand(rs);
 }
@@ -511,6 +526,22 @@ static int common1b(mz_jit_state *jitter, void *_data)
   /* returns if proxied */
   mz_epilog(JIT_R2);
   scheme_jit_register_sub_func(jitter, sjc.set_box_code, scheme_false);
+
+  /* *** box_cas_fail_code *** */
+  /* Arguments are on runstack; */
+  /* call scheme_box_cas to raise the exception,
+     we use mz_finish_lwe because it will capture the stack,
+     and the ts_ version because we may be in a future */
+  sjc.box_cas_fail_code = jit_get_ip().ptr;
+  mz_prolog(JIT_R2);
+  JIT_UPDATE_THREAD_RSPTR_IF_NEEDED();
+  jit_movi_l(JIT_R0, 3);
+  mz_prepare(2);
+  jit_pusharg_p(JIT_RUNSTACK);
+  jit_pusharg_l(JIT_R0);
+  CHECK_LIMIT();      
+  (void)mz_finish_lwe(ts_scheme_box_cas, ref); /* doesn't return */
+  scheme_jit_register_sub_func(jitter, sjc.box_cas_fail_code, scheme_false);
 
   /* *** bad_vector_length_code *** */
   /* R0 is argument */
@@ -940,7 +971,7 @@ static int generate_apply_proxy(mz_jit_state *jitter, int setter)
   CHECK_LIMIT();
   JIT_UPDATE_THREAD_RSPTR();
   __END_SHORT_JUMPS__(1);
-  scheme_generate_non_tail_call(jitter, 3, 0, 0, 0, 0, 0, 1);
+  scheme_generate_non_tail_call(jitter, 3, 0, 0, 0, 0, 0, 1, 0);
   __START_SHORT_JUMPS__(1);
   CHECK_LIMIT();
   if (setter) {
@@ -1324,6 +1355,67 @@ static int common3(mz_jit_state *jitter, void *_data)
   return 1;
 }
 
+static int gen_struct_slow(mz_jit_state *jitter, int kind, int ok_proc, 
+                           int for_branch, int multi_ok,
+                           GC_CAN_IGNORE jit_insn **_bref5,
+                           GC_CAN_IGNORE jit_insn **_bref6)
+{
+  GC_CAN_IGNORE jit_insn *bref5, *bref6, *refrts;
+
+  jit_subi_p(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES((kind == 3) ? 2 : 1));
+  CHECK_RUNSTACK_OVERFLOW();
+  JIT_UPDATE_THREAD_RSPTR();
+  jit_str_p(JIT_RUNSTACK, JIT_R1);
+  if (kind == 3) {
+    restore_struct_temp(jitter, JIT_V1);        
+    jit_stxi_p(WORDS_TO_BYTES(1), JIT_RUNSTACK, JIT_V1);
+  }
+  jit_movi_i(JIT_V1, ((kind == 3) ? 2 : 1));
+  jit_prepare(3);
+  if (!ok_proc) {
+    jit_pusharg_p(JIT_RUNSTACK);
+    jit_pusharg_i(JIT_V1);
+    jit_pusharg_p(JIT_R0);
+    if (multi_ok) {
+      (void)mz_finish_lwe(ts__scheme_apply_multi_from_native, refrts);
+    } else {
+      (void)mz_finish_lwe(ts__scheme_apply_from_native, refrts);
+    }
+  } else {
+    /* The proc is a setter or getter, but the argument is
+       bad or chaperoned. We can take a shortcut by using
+       scheme_struct_getter() or scheme_struct_setter() instead
+       of going through scheme_apply(). */
+    jit_pusharg_p(JIT_R0);
+    jit_pusharg_p(JIT_RUNSTACK);
+    jit_pusharg_i(JIT_V1);
+    if (kind == 2)
+      (void)mz_finish_lwe(ts_scheme_struct_getter, refrts);
+    else
+      (void)mz_finish_lwe(ts_scheme_struct_setter, refrts);
+  }
+  jit_retval(JIT_R0);
+  VALIDATE_RESULT(JIT_R0);
+  jit_addi_p(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES((kind == 3) ? 2 : 1));
+  JIT_UPDATE_THREAD_RSPTR();
+  if (!for_branch) {
+    mz_epilog(JIT_V1);
+    bref5 = NULL;
+    bref6 = NULL;
+  } else {
+    /* Need to check for true or false. */
+    bref5 = jit_beqi_p(jit_forward(), JIT_R0, scheme_false);
+    bref6 = jit_jmpi(jit_forward());
+  }
+
+  if (_bref5) {
+    *_bref5 = bref5;
+    *_bref6 = bref6;
+  }
+
+  return 1;
+}
+
 static int common4(mz_jit_state *jitter, void *_data)
 {
   int i, ii, iii;
@@ -1476,8 +1568,8 @@ static int common4(mz_jit_state *jitter, void *_data)
     for (i = 0; i < 4; i++) {
       void *code;
       int kind, for_branch;
-      GC_CAN_IGNORE jit_insn *ref, *ref2, *ref3, *refslow, *bref1, *bref2, *refretry;
-      GC_CAN_IGNORE jit_insn *bref3, *bref4, *bref5, *bref6, *bref8, *ref9, *refrts;
+      GC_CAN_IGNORE jit_insn *ref, *ref2, *ref3, *refslow, *refslow2, *bref1, *bref2, *refretry;
+      GC_CAN_IGNORE jit_insn *bref3, *bref4, *bref5, *bref6, *bref8, *ref9;
 
       if ((ii == 1) && (i == 1)) continue; /* no multi variant of pred branch */
 
@@ -1521,41 +1613,18 @@ static int common4(mz_jit_state *jitter, void *_data)
       ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
       CHECK_LIMIT();
 
-      /* Slow path: non-struct proc, or argument type is
-	 bad for a getter. */
+      /* Slow path: non-struct proc. */
       refslow = _jit.x.pc;
-      jit_subi_p(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES((kind == 3) ? 2 : 1));
-      CHECK_RUNSTACK_OVERFLOW();
-      JIT_UPDATE_THREAD_RSPTR();
-      jit_str_p(JIT_RUNSTACK, JIT_R1);
-      if (kind == 3) {
-        restore_struct_temp(jitter, JIT_V1);        
-        jit_stxi_p(WORDS_TO_BYTES(1), JIT_RUNSTACK, JIT_V1);
-      }
-      jit_movi_i(JIT_V1, ((kind == 3) ? 2 : 1));
-      jit_prepare(3);
-      jit_pusharg_p(JIT_RUNSTACK);
-      jit_pusharg_i(JIT_V1);
-      jit_pusharg_p(JIT_R0);
-      if (ii == 1) {
-        (void)mz_finish_lwe(ts__scheme_apply_multi_from_native, refrts);
-      } else {
-        (void)mz_finish_lwe(ts__scheme_apply_from_native, refrts);
-      }
-      jit_retval(JIT_R0);
-      VALIDATE_RESULT(JIT_R0);
-      jit_addi_p(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES((kind == 3) ? 2 : 1));
-      JIT_UPDATE_THREAD_RSPTR();
-      if (!for_branch) {
-	mz_epilog(JIT_V1);
-	bref5 = NULL;
-	bref6 = NULL;
-      } else {
-	/* Need to check for true or false. */
-	bref5 = jit_beqi_p(jit_forward(), JIT_R0, scheme_false);
-	bref6 = jit_jmpi(jit_forward());
-      }
+      gen_struct_slow(jitter, kind, 0, for_branch, ii == 1, &bref5, &bref6);
       CHECK_LIMIT();
+
+      if ((kind == 2) || (kind == 3)) {
+        /* Slow path: argument type is bad for a getter/setter. */
+        refslow2 = _jit.x.pc;
+        gen_struct_slow(jitter, kind, 1, 0, 0, NULL, NULL);
+        CHECK_LIMIT();
+      } else
+        refslow2 = refslow;
 
       /* Continue trying fast path: check proc */
       mz_patch_branch(ref);
@@ -1587,12 +1656,12 @@ static int common4(mz_jit_state *jitter, void *_data)
         mz_patch_branch(ref3);
         __END_INNER_TINY__(1);
       } else {
-	(void)jit_bmsi_ul(refslow, JIT_R1, 0x1);
+	(void)jit_bmsi_ul(refslow2, JIT_R1, 0x1);
 	jit_ldxi_s(JIT_R2, JIT_R1, &((Scheme_Object *)0x0)->type);
         __START_INNER_TINY__(1);
 	ref2 = jit_beqi_i(jit_forward(), JIT_R2, scheme_structure_type);
         __END_INNER_TINY__(1);
-	(void)jit_bnei_i(refslow, JIT_R2, scheme_proc_struct_type);
+	(void)jit_bnei_i(refslow2, JIT_R2, scheme_proc_struct_type);
 	bref1 = bref2 = NULL;
       }
       __START_INNER_TINY__(1);
@@ -1622,7 +1691,7 @@ static int common4(mz_jit_state *jitter, void *_data)
       if (kind == 1) {
 	bref3 = jit_bltr_i(jit_forward(), JIT_R2, JIT_V1);
       } else {
-	(void)jit_bltr_i(refslow, JIT_R2, JIT_V1);
+	(void)jit_bltr_i(refslow2, JIT_R2, JIT_V1);
 	bref3 = NULL;
       }
       CHECK_LIMIT();
@@ -1670,7 +1739,7 @@ static int common4(mz_jit_state *jitter, void *_data)
 	  mz_epilog(JIT_V1);
 	}
       } else {
-	(void)jit_bner_p(refslow, JIT_R2, JIT_V1);
+	(void)jit_bner_p(refslow2, JIT_R2, JIT_V1);
 	bref4 = NULL;
         __START_INNER_TINY__(1);
         mz_patch_branch(bref8);
@@ -2198,6 +2267,21 @@ static int common6(mz_jit_state *jitter, void *_data)
     scheme_jit_register_sub_func(jitter, sjc.wcm_code, scheme_false);
   }
 
+  /* wcm_chaperone */
+  /* key and value are on runstack and are updated there */
+  {
+    GC_CAN_IGNORE jit_insn *ref2;
+    sjc.wcm_chaperone = jit_get_ip().ptr;
+
+    mz_prolog(JIT_R2);
+    JIT_UPDATE_THREAD_RSPTR();
+    jit_prepare(0);
+    (void)mz_finish_lwe(ts_chaperone_set_mark, ref2);
+    mz_epilog(JIT_R2);
+
+    scheme_jit_register_sub_func(jitter, sjc.wcm_chaperone, scheme_false);
+  }
+
   return 1;
 }
 
@@ -2606,7 +2690,8 @@ static int common10(mz_jit_state *jitter, void *_data)
     jit_ldxi_i(JIT_R2, JIT_V1, &((Scheme_Native_Closure_Data *)0x0)->closure_size);
     (void)jit_blti_i(refslow, JIT_R2, 0); /* case lambda */
     jit_ldxi_p(JIT_R2, JIT_V1, &((Scheme_Native_Closure_Data *)0x0)->start_code);
-    jit_movi_p(JIT_V1, scheme_on_demand_jit_code); /* movi_p doesn't depend on actual address, which might change size */
+    /* patchable_movi_p doesn't depend on actual address, which might change size: */
+    (void)jit_patchable_movi_p(JIT_V1, scheme_on_demand_jit_code);
     ref_nc = jit_beqr_p(jit_forward(), JIT_R2, JIT_V1); /* not yet JITted? */
     jit_rshi_l(JIT_V1, JIT_R1, 1);
     jit_addi_l(JIT_V1, JIT_V1, 1);
@@ -2759,7 +2844,7 @@ static int more_common0(mz_jit_state *jitter, void *_data)
     mz_rs_sync();
 
     __END_SHORT_JUMPS__(1);
-    scheme_generate_non_tail_call(jitter, 2, 0, 1, 0, 0, 0, 0);
+    scheme_generate_non_tail_call(jitter, 2, 0, 1, 0, 0, 0, 0, 0);
     CHECK_LIMIT();
     __START_SHORT_JUMPS__(1);
 
@@ -3194,7 +3279,7 @@ static int more_common1(mz_jit_state *jitter, void *_data)
 
       __END_SHORT_JUMPS__(1);
     
-      scheme_generate_non_tail_call(jitter, -1, 0, 1, multi_ok, 0, 1, 0);
+      scheme_generate_non_tail_call(jitter, -1, 0, 1, multi_ok, 0, 1, 0, 0);
 
       scheme_jit_register_sub_func(jitter, code, scheme_false);
     }

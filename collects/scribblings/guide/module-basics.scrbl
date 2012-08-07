@@ -52,8 +52,8 @@ racket
 The relative reference @racket["cake.rkt"] in the import
 @racket[(require "cake.rkt")] works if the @filepath{cake.rkt} and
 @filepath{random-cake.rkt} modules are in the same
-directory. (Unix-style relative paths are used for relative module
-references on all platforms, much like relative URLs in HTML pages.)
+directory. Unix-style relative paths are used for relative module
+references on all platforms, much like relative URLs in HTML pages.
 
 @; ----------------------------------------
 @section[#:tag "module-org"]{Organizing Modules}
@@ -214,28 +214,35 @@ sense. In that case, you have two options:
        unquoted path, just like libraries that are included with the
        Racket distribution.}
 
- @item{Add the library a new or existing @|PLaneT| package. Libraries
+ @item{Add the library to a new or existing @|PLaneT| package. Libraries
        in a @|PLaneT| package are referenced with a path of the form
        @racket[(planet ....)] path.
-
-       @margin-note{See @other-doc['(lib "planet/planet.scrbl")]
+       @margin-note*{See @other-doc['(lib "planet/planet.scrbl")]
        for more information on @|PLaneT|.}}
 
 ]
 
 The simplest option is to add a new collection. You could add a new
 collection by placing files in the Racket installation or one of the
-directories reported by @racket[(get-collects-search-dirs)]---perhaps
-setting the @envvar{PLTCOLLECTS} environment variable to extend the
-search path---but using @exec{raco link} is usually the best approach.
+directories reported by
+@racket[(get-collects-search-dirs)]. Alternatively, you could add to
+the list of searched directories by setting the @envvar{PLTCOLLECTS}
+environment variable; if you set @envvar{PLTCOLLECTS}, include an
+empty path in by starting the value with a colon (Unix and Mac OS X)
+or semicolon (Windows) so that the original search paths are
+preserved. Finally, instead of using one of the default directories or
+setting @envvar{PLTCOLLECTS}, you can use @exec{raco link}.
 
-The @exec{raco link} command-line tool creates a link from a collection
-name to a directory for the collection's modules. For example, suppose
-you have a directory @filepath{/usr/molly/bakery} that contains the
-@filepath{cake.rkt} module (from the
+The @exec{raco link} command-line tool creates a link from a
+collection name to a directory for the collection's modules. For
+example, suppose you have a directory @filepath{/usr/molly/bakery}
+that contains the @filepath{cake.rkt} module (from the
 @seclink["module-basics"]{beginning} of this section) and other
 related modules. To make the modules available as a @filepath{bakery}
-collection, use
+collection, use @margin-note*{Instead of installing a single
+collection directory, the @DFlag{root} or @Flag{d} flag for @exec{raco
+link} can install a directory that contains collections, much like
+adding to @envvar{PLTCOLLECTS}.}
 
 @commandline{raco link /usr/molly/bakery}
 
@@ -262,7 +269,7 @@ top-level name like @filepath{molly} that identifies the producer.
 Use a collection name like @filepath{bakery} when producing the
 definitive collection of baked-goods libraries.
 
-After your libraries are in a @tech{collection}, then you can still
+After your libraries are put in a @tech{collection} you can still
 use @exec{raco make} to compile the library sources, but it's better
 and more convenient to use @exec{raco setup}. The @exec{raco setup}
 command takes a collection name (as opposed to a file name) and

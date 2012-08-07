@@ -1,5 +1,5 @@
-#lang scheme/base
-(require file/gzip file/gunzip scheme/file tests/eli-tester)
+#lang racket/base
+(require file/gzip file/gunzip racket/file tests/eli-tester)
 
 (define ((io->str-op io) buf [check-ratio #f])
   (let* ([b? (bytes? buf)]
@@ -31,9 +31,18 @@
   (define (rand-bytes)
     (list->bytes (for/list ([j (in-range (random 1000))]) (random 256))))
   (test-big-file)
-  (for ([i (in-range 100)]) (id* (rand-bytes))))
+  (for ([i (in-range 100)]) (id* (rand-bytes)))
+  (regression-test))
+
+(define (regression-test)
+  ;; check for an out-of-range buffer access:
+  (call-with-input-file* 
+   (collection-file-path "deflate-me.dat" "tests/file")
+   (lambda (in)
+     (gzip-through-ports in (open-output-bytes) "defalte-me.dat" (current-seconds)))))
 
 (provide tests)
+(module+ main (tests))
 (define (tests) (test do (run-tests)))
 
 

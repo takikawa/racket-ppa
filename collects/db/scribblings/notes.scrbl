@@ -61,10 +61,11 @@ file. This library currently supports only cleartext and md5-hashed
 passwords, and it does not send cleartext passwords unless explicitly
 ordered to (see @racket[postgresql-connect]). These correspond to the
 @tt{md5} and @tt{password} authentication methods in the parlance of
-@tt{pg_hba.conf}, respectively. On Linux, @tt{ident} authentication is
-automatically supported for local sockets, but not TCP sockets. The
-@tt{gss}, @tt{sspi}, @tt{krb5}, @tt{pam}, and @tt{ldap} methods are
-not supported.
+@tt{pg_hba.conf}, respectively. On Linux and Mac OS X, @tt{ident}
+authentication is automatically supported for local sockets (as of
+PostgreSQL 9.1, this authentication method has been renamed
+@tt{peer}). The @tt{gss}, @tt{sspi}, @tt{krb5}, @tt{pam}, and
+@tt{ldap} methods are not supported.
 
 
 @section{MySQL Authentication}
@@ -93,6 +94,21 @@ included (in @tt{/usr/lib}) in Mac OS X version 10.4 onwards.}
 the @tt{libsqlite3-0} package in Debian/Ubuntu and in the @tt{sqlite}
 package in Red Hat.}
 ]
+
+
+@section[#:tag "ffi-concurrency"]{FFI-Based Connections and Concurrency}
+
+@tech{Wire-based connections} communicate using
+@tech/reference{ports}, which do not cause other Racket threads to
+block. In contrast, an FFI call causes all Racket threads to block
+until it completes, so @tech{FFI-based connections} can degrade the
+interactivity of a Racket program, particularly if long-running
+queries are performed using the connection. This problem can be
+avoided by creating the FFI-based connection in a separate
+@tech/reference{place} using the @racket[#:use-place] keyword
+argument. Such a connection will not block all Racket threads during
+queries; the disadvantage is the cost of creating and communicating
+with a separate @tech/reference{place}.
 
 
 @section[#:tag "odbc-requirements"]{ODBC Requirements}

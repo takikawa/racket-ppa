@@ -274,6 +274,7 @@ scheme_init_type ()
   set_name(scheme_thread_cell_values_type, "<thread-cell-values>");
 
   set_name(scheme_prompt_tag_type, "<continuation-prompt-tag>");
+  set_name(scheme_continuation_mark_key_type, "<continuation-mark-key>");
 
   set_name(scheme_string_converter_type, "<string-converter>");
 
@@ -390,18 +391,18 @@ Scheme_Type scheme_make_type(const char *name)
   return newtype;
 }
 
+char *scheme_get_type_name_or_null(Scheme_Type t)
+{
+  if (t < 0 || t >= maxtype)
+    return "<bad-value>";
+  return type_names[t];
+}
+
 char *scheme_get_type_name(Scheme_Type t)
 {
   char *s;
-  if (t < 0 || t >= maxtype)
-    return "<bad-value>";
-  s = type_names[t];
-#ifndef MZ_GC_BACKTRACE
-  if (!s)
-    return "???";
-  else
-#endif
-    return s;
+  s = scheme_get_type_name_or_null(t);
+  return s ? s : "???";
 }
 
 void scheme_install_type_reader(Scheme_Type t, Scheme_Type_Reader f)
@@ -590,6 +591,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_rt_overflow_jmp, mark_overflow_jmp);
   GC_REG_TRAV(scheme_rt_meta_cont, meta_cont_proc);
   GC_REG_TRAV(scheme_escaping_cont_type, escaping_cont_proc);
+  GC_REG_TRAV(scheme_rt_cont_jmp, cont_jmp_proc);
 
   GC_REG_TRAV(scheme_char_type, char_obj);
   GC_REG_TRAV(scheme_integer_type, bad_trav);
@@ -631,6 +633,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_thread_type, thread_val);
   GC_REG_TRAV(scheme_prompt_type, prompt_val);
   GC_REG_TRAV(scheme_prompt_tag_type, cons_cell);
+  GC_REG_TRAV(scheme_continuation_mark_key_type, small_object);
   GC_REG_TRAV(scheme_cont_mark_set_type, cont_mark_set_val);
   GC_REG_TRAV(scheme_sema_type, sema_val);
   GC_REG_TRAV(scheme_channel_type, channel_val);

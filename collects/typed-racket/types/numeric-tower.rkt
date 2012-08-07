@@ -13,9 +13,9 @@
          -PosFixnum -NonNegFixnum -NegFixnum -NonPosFixnum -Fixnum
          -PosInt -Nat -NegInt -NonPosInt -Int
          -PosRat -NonNegRat -NegRat -NonPosRat -Rat
-         -FlonumPosZero -FlonumNegZero -FlonumZero -PosFlonum -NonNegFlonum -NegFlonum -NonPosFlonum -Flonum
-         -SingleFlonumPosZero -SingleFlonumNegZero -SingleFlonumZero -PosSingleFlonum -NonNegSingleFlonum -NegSingleFlonum -NonPosSingleFlonum -SingleFlonum
-         -InexactRealPosZero -InexactRealNegZero -InexactRealZero -PosInexactReal -NonNegInexactReal -NegInexactReal -NonPosInexactReal -InexactReal
+         -FlonumPosZero -FlonumNegZero -FlonumZero -FlonumNan -PosFlonum -NonNegFlonum -NegFlonum -NonPosFlonum -Flonum
+         -SingleFlonumPosZero -SingleFlonumNegZero -SingleFlonumZero -SingleFlonumNan -PosSingleFlonum -NonNegSingleFlonum -NegSingleFlonum -NonPosSingleFlonum -SingleFlonum
+         -InexactRealPosZero -InexactRealNegZero -InexactRealZero -InexactRealNan -PosInexactReal -NonNegInexactReal -NegInexactReal -NonPosInexactReal -InexactReal
          -RealZero -PosReal -NonNegReal -NegReal -NonPosReal -Real
          -ExactNumber -FloatComplex -SingleFlonumComplex -InexactComplex -Number
          (rename-out (-Int -Integer)))
@@ -149,13 +149,13 @@
              #'(and/c flonum? positive?)
              (lambda (x) (and (flonum? x) (positive? x)))
              #'-PosFlonum))
-(define -NonNegFlonum (*Un -PosFlonum -FlonumPosZero))
+(define -NonNegFlonum (*Un -PosFlonum -FlonumZero))
 (define -NegFlonum
   (make-Base 'Negative-Float
              #'(and/c flonum? negative?)
              (lambda (x) (and (flonum? x) (negative? x)))
              #'-NegFlonum))
-(define -NonPosFlonum (*Un -NegFlonum -FlonumNegZero))
+(define -NonPosFlonum (*Un -NegFlonum -FlonumZero))
 (define -Flonum (*Un -NegFlonum -FlonumNegZero -FlonumPosZero -PosFlonum -FlonumNan)) ; 64-bit floats
 ;; inexact reals can be flonums (64-bit floats) or 32-bit floats
 (define -SingleFlonumPosZero ; disjoint from Flonum 0s
@@ -173,30 +173,30 @@
 	     #'-SingleFlonumNegZero))
 (define -SingleFlonumZero (*Un -SingleFlonumPosZero -SingleFlonumNegZero))
 (define -SingleFlonumNan (make-Base 'Single-Flonum-Nan
-                                  #'(and/c single-flonum?
-                                           ;; eqv? equates single and double precision nans
-                                           (lambda (x) (eqv? x +nan.0)))
-                                  (lambda (x) #f)
-				  #'-SingleFlonumNan))
+                                    #'(and/c single-flonum? (lambda (x) (eqv? x +nan.f)))
+                                    (lambda (x) (and (single-flonum? x) (eqv? x +nan.f)))
+                                    #'-SingleFlonumNan))
 (define -InexactRealPosZero (*Un -SingleFlonumPosZero -FlonumPosZero))
 (define -InexactRealNegZero (*Un -SingleFlonumNegZero -FlonumNegZero))
-(define -InexactRealZero    (*Un -InexactRealPosZero -InexactRealNegZero))
+(define -InexactRealZero    (*Un -InexactRealPosZero
+                                 -InexactRealNegZero))
+(define -InexactRealNan     (*Un -FlonumNan -SingleFlonumNan))
 (define -PosSingleFlonum
   (make-Base 'Positive-Single-Flonum
              #'(and/c single-flonum? positive?)
              (lambda (x) #f)
 	     #'-PosSingleFlonum))
 (define -PosInexactReal     (*Un -PosSingleFlonum -PosFlonum))
-(define -NonNegSingleFlonum (*Un -PosSingleFlonum -SingleFlonumPosZero))
-(define -NonNegInexactReal  (*Un -PosInexactReal -InexactRealPosZero))
+(define -NonNegSingleFlonum (*Un -PosSingleFlonum -SingleFlonumZero))
+(define -NonNegInexactReal  (*Un -PosInexactReal -InexactRealZero))
 (define -NegSingleFlonum
   (make-Base 'Negative-Single-Flonum
              #'(and/c single-flonum? negative?)
              (lambda (x) #f)
 	     #'-NegSingleFlonum))
 (define -NegInexactReal     (*Un -NegSingleFlonum -NegFlonum))
-(define -NonPosSingleFlonum (*Un -NegSingleFlonum -SingleFlonumNegZero))
-(define -NonPosInexactReal  (*Un -NegInexactReal -InexactRealNegZero))
+(define -NonPosSingleFlonum (*Un -NegSingleFlonum -SingleFlonumZero))
+(define -NonPosInexactReal  (*Un -NegInexactReal -InexactRealZero))
 (define -SingleFlonum       (*Un -NegSingleFlonum -SingleFlonumNegZero -SingleFlonumPosZero -PosSingleFlonum -SingleFlonumNan))
 (define -InexactReal        (*Un -SingleFlonum -Flonum))
 

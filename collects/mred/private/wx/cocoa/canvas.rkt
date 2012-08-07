@@ -4,14 +4,15 @@
          racket/class
          racket/draw
          racket/draw/private/gl-context
-         racket/draw/private/color
+         (except-in racket/draw/private/color
+                    color% make-color)
+         (only-in racket/draw/private/bitmap quartz-bitmap%)
          "pool.rkt"
          "utils.rkt"
          "const.rkt"
          "types.rkt"
          "window.rkt"
          "dc.rkt"
-         "bitmap.rkt"
          "cg.rkt"
          "queue.rkt"
          "item.rkt"
@@ -61,7 +62,7 @@
                                                  (make-NSSize 32000 32000))))
             (tellv ctx restoreGraphicsState)))))))
 
-(define-objc-mixin (MyViewMixin Superclass)
+(define-objc-mixin (RacketViewMixin Superclass)
   #:mixins (KeyMouseTextResponder CursorDisplayer FocusResponder) 
   [wxb]
   (-a _void (drawRect: [_NSRect r])
@@ -86,12 +87,12 @@
         (let ([wx (->wx wxb)])
           (when wx (send wx do-scroll 'vertical scroller))))))
 
-(define-objc-class MyView NSView 
-  #:mixins (MyViewMixin)
+(define-objc-class RacketView NSView 
+  #:mixins (RacketViewMixin)
   [wxb])
 
-(define-objc-class MyGLView NSOpenGLView
-  #:mixins (MyViewMixin)
+(define-objc-class RacketGLView NSOpenGLView
+  #:mixins (RacketViewMixin)
   [wxb])
 
 (define-objc-class CornerlessFrameView NSView 
@@ -148,7 +149,7 @@
                                       (- (NSSize-height (NSRect-size r)) 4)))))
           (tellv ctx restoreGraphicsState)))))
 
-(define-objc-class MyComboBox NSComboBox
+(define-objc-class RacketComboBox NSComboBox
   #:mixins (FocusResponder KeyMouseTextResponder CursorDisplayer) 
   #:protocols (NSComboBoxDelegate)
   [wxb]
@@ -346,12 +347,12 @@
                                           (max 0 (- h (if hscroll? scroll-width 0) (* 2 y-margin)))))])
          (as-objc-allocation
           (if (or is-combo? (not (memq 'gl style)))
-              (tell (tell (if is-combo? MyComboBox MyView)
+              (tell (tell (if is-combo? RacketComboBox RacketView)
                           alloc)
                     initWithFrame: #:type _NSRect r)
               (let ([pf (gl-config->pixel-format gl-config)])
                 (begin0
-                 (tell (tell MyGLView alloc) 
+                 (tell (tell RacketGLView alloc) 
                        initWithFrame: #:type _NSRect r
                        pixelFormat: pf)
                  (tellv pf release)))))))

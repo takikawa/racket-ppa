@@ -102,7 +102,8 @@
                (alternate-bitmap small-macro-debugger-bitmap)
                (parent parent)
                (callback (lambda (button) (send frame run-macro-stepper)))))
-       'macro-stepper)
+       'macro-stepper
+       #:number 70)
       (drracket:language:register-capability
        'macro-stepper:enabled
        boolean?
@@ -138,7 +139,7 @@
                (parent macro-debug-panel)
                (callback (lambda (button) (run-macro-stepper)))))
         (inherit register-toolbar-button)
-        (register-toolbar-button macro-debug-button)
+        (register-toolbar-button macro-debug-button #:number 70)
 
         (define/augment (enable-evaluation)
           (send macro-debug-button enable #t)
@@ -268,14 +269,8 @@
             (set! user-custodian (current-custodian)))
 
           (define (uncaught-exception-raised) ;; =user=
-            (set! normal-termination? #t)
-            (parameterize ([current-eventspace drs-eventspace])
-              (queue-callback
-               (λ () ;;  =drs=
-                  (yield error-display-semaphore) ;; let error display go first
-                  (send the-tab syncheck:clear-highlighting)
-                  (cleanup)
-                  (custodian-shutdown-all user-custodian)))))
+            ;; formerly shut down user custodian
+            (void))
           (define (show-error-report/tab) ;; =drs=
             (send the-tab turn-on-error-report)
             (send (send the-tab get-error-report-text) scroll-to-position 0)

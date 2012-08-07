@@ -1,11 +1,11 @@
-#lang scheme/base
+#lang racket/base
 (require "../utils/utils.rkt")
 
 (require (utils tc-utils)
 	 "rep-utils.rkt" "object-rep.rkt" "filter-rep.rkt" "free-variance.rkt"
-         mzlib/trace racket/match mzlib/etc
-         scheme/contract
-         (for-syntax scheme/base syntax/parse))
+         racket/match ;mzlib/etc
+         racket/contract
+         (for-syntax racket/base syntax/parse))
 
 (define name-table (make-weak-hasheq))
 
@@ -83,11 +83,11 @@
           (hash-ref t n))))]))
 
 (define (apply-variance v tbl)
-  (evcase v
-    [(Constant) (make-constant tbl)]
-    [(Covariant) tbl]
-    [(Invariant) (make-invariant tbl)]
-    [(Contravariant) (flip-variances tbl)]))
+  (match v
+    [(== Constant) (make-constant tbl)]
+    [(== Covariant) tbl]
+    [(== Invariant) (make-invariant tbl)]
+    [(== Contravariant) (flip-variances tbl)]))
 
 ;; left and right are Types
 (def-type Pair ([left Type/c] [right Type/c]) [#:key 'pair])
@@ -307,7 +307,12 @@
                   [pred-id identifier?]
                   [cert procedure?]
                   [maker-id identifier?])
-  [#:intern (list name (and parent (Rep-seq parent)) (map Rep-seq flds) (and proc (Rep-seq proc)))]
+  [#:intern (list (hash-id name)
+                  (hash-id pred-id)
+                  (hash-id maker-id)
+                  (and parent (Rep-seq parent))
+                  (map Rep-seq flds)
+                  (and proc (Rep-seq proc)))]
   [#:frees (λ (f) (combine-frees (map f (append (if proc (list proc) null)
                                                 (if parent (list parent) null)
                                                 flds))))]
@@ -334,7 +339,7 @@
 (def-type StructTop ([name Struct?]) [#:key 'struct])
 (def-type ThreadCellTop () [#:fold-rhs #:base] [#:key 'thread-cell])
 
-;; v : Scheme Value
+;; v : Racket Value
 (def-type Value (v) [#:frees #f] [#:fold-rhs #:base] [#:key (cond [(number? v) 'number]
                                                                   [(boolean? v) 'boolean]
                                                                   [(null? v) 'null]
@@ -366,7 +371,7 @@
 ;; in : Type
 ;; out : Type
 (def-type Param ([in Type/c] [out Type/c])
-  [#:key 'parameter]
+  [#:key 'procedure]
   [#:frees (λ (f) (combine-frees (list (f out) (flip-variances (f in)))))])
 
 ;; key : Type
@@ -374,7 +379,7 @@
 (def-type Hashtable ([key Type/c] [value Type/c]) [#:key 'hash]
   [#:frees (λ (f) (combine-frees (list (make-invariant (f key)) (make-invariant (f value)))))])
 
-(def-type Refinement ([parent Type/c] [pred identifier?] [cert certifier?])
+(def-type Refinement ([parent Type/c] [pred identifier?] [cert procedure?])
   [#:key (Type-key parent)]
   [#:intern (list (Rep-seq parent) (hash-id pred))]
   [#:fold-rhs (*Refinement (type-rec-id parent) pred cert)]

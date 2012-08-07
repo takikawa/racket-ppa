@@ -188,11 +188,13 @@ profile todo:
                      (super-make-object bitmap))])
            note%)))
   
-  (define file-note% (make-note% "stop-22x22.png" (compiled-bitmap (stop-sign-icon halt-icon-color))))
-  (define bug-note% (make-note% "stop-multi.png" (compiled-bitmap (stop-signs-icon halt-icon-color))))
+  (define file-note%
+    (make-note% "stop-22x22.png" (compiled-bitmap (stop-sign-icon #:color halt-icon-color))))
+  (define bug-note%
+    (make-note% "stop-multi.png" (compiled-bitmap (stop-signs-icon #:color halt-icon-color))))
   
   (define mf-note% (make-note% "mf.gif" (include-bitmap (lib "icons/mf.gif") 'gif)))
-  (define small-planet-bitmap (compiled-bitmap (planet-logo (default-icon-height))))
+  (define small-planet-bitmap (compiled-bitmap (planet-logo #:height (default-icon-height))))
   (define planet-note% (make-note% "small-planet.png" small-planet-bitmap))
   
   ;; display-stats : (syntax -> syntax)
@@ -212,7 +214,7 @@ profile todo:
   ;         (for-each loop (syntax->list stx))]
   ;        [exp
   ;         (set! exps (+ exps 1))]))
-  ;    (fprintf (current-error-port) "exps: ~v\nwcms: ~v\n" exps wcms))
+  ;    (eprintf "exps: ~v\nwcms: ~v\n" exps wcms))
   ;  stx)
   
   ;; make-debug-eval-handler : (sexp -> value) -> sexp -> value
@@ -459,8 +461,8 @@ profile todo:
                               (current-error-port))]
                     [else
                      (display "<unsaved editor>" (current-error-port))]))]
-               [do-line/col (λ () (fprintf (current-error-port) ":~a:~a" line col))]
-               [do-pos (λ () (fprintf (current-error-port) "::~a" pos))]
+               [do-line/col (λ () (eprintf ":~a:~a" line col))]
+               [do-pos (λ () (eprintf "::~a" pos))]
                [src-loc-in-defs/ints?
                 (let ([rep (drracket:rep:current-rep)])
                   (and rep
@@ -1577,7 +1579,7 @@ profile todo:
   (define profile-unit-frame-mixin
     (mixin (drracket:unit:frame<%> drracket:frame:<%>) ()
       
-      (inherit get-interactions-text get-current-tab)
+      (inherit get-interactions-text get-current-tab set-show-menu-sort-key)
       
       ;; update-shown : -> void
       ;; updates the state of the profile item's show menu
@@ -1598,7 +1600,8 @@ profile todo:
                 (parent show-menu)
                 (callback
                  (λ (x y)
-                   (show-profile-menu-callback))))))
+                   (show-profile-menu-callback)))))
+        (set-show-menu-sort-key show-profile-menu-item 207))
       
       (define show-profile-menu-item #f)
       (define profile-gui-constructed? #f)
@@ -1765,7 +1768,7 @@ profile todo:
   ;; GUI. They only manage the profiling information reported
   ;; in the bottom window
   (define profile-text% 
-    (class text:basic%
+    (class text:line-spacing%
       (init-field tab)
       
       ;; clear-profile-display : -> void

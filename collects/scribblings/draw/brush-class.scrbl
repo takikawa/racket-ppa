@@ -1,5 +1,8 @@
 #lang scribble/doc
-@(require "common.rkt" scribble/eval)
+@(require "common.rkt"
+          scribble/eval
+          (for-label racket/draw/unsafe/brush
+                     (only-in ffi/unsafe cpointer?)))
 
 @(define class-eval (make-base-eval))
 @(interaction-eval #:eval class-eval (require racket/class racket/draw))
@@ -85,13 +88,15 @@ To avoid creating multiple brushes with the same characteristics, use
  @indexed-racket[the-brush-list], or provide a color and style to
  @xmethod[dc<%> set-brush].
 
+See also @racket[make-brush].
+
 
 @defconstructor[([color (or/c string? (is-a?/c color%)) "black"]
-                 [style (one-of/c 'transparent 'solid 'opaque 
-                                  'xor 'hilite 'panel 
-                                  'bdiagonal-hatch 'crossdiag-hatch 
-                                  'fdiagonal-hatch 'cross-hatch
-                                  'horizontal-hatch 'vertical-hatch)
+                 [style (or/c 'transparent 'solid 'opaque 
+                              'xor 'hilite 'panel 
+                              'bdiagonal-hatch 'crossdiag-hatch 
+                              'fdiagonal-hatch 'cross-hatch
+                              'horizontal-hatch 'vertical-hatch)
                          'solid]
                  [stipple (or/c #f (is-a?/c bitmap%))
                           #f]
@@ -101,7 +106,8 @@ To avoid creating multiple brushes with the same characteristics, use
                            #f]
                  [transformation (or/c #f (vector/c (vector/c real? real? real? 
                                                               real? real? real?)
-                                                     real? real? real? real? real?))])]{
+                                                     real? real? real? real? real?))
+                                 #f])]{
 
 Creates a brush with the given color, @tech{brush style}, @tech{brush
  stipple}, @tech{gradient}, and @tech{brush transformation} (which is
@@ -110,19 +116,12 @@ Creates a brush with the given color, @tech{brush style}, @tech{brush
  @racket[color-database<%>] for information about color names; if the
  name is not known, the brush's color is black.}
 
-
 @defmethod[(get-color)
            (is-a?/c color%)]{
 
 Returns the brush's color.
 
 }
-
-@defmethod[(get-stipple)
-           (or/c (is-a?/c bitmap%) #f)]{
-
-Gets the @tech{brush stipple} bitmap, or @racket[#f] if the brush has no stipple.}
-
 
 @defmethod[(get-gradient)
            (or/c (is-a?/c linear-gradient%)
@@ -132,12 +131,24 @@ Gets the @tech{brush stipple} bitmap, or @racket[#f] if the brush has no stipple
 Gets the @tech{gradient}, or @racket[#f] if the brush has no gradient.}
 
 
+@defmethod[(get-handle) (or/c cpointer? #f)]{
+
+Returns a low-level handle for the brush content, but only for brushes
+created with @racket[make-handle-brush]; otherwise, the result is @racket[#f].}
+
+
+@defmethod[(get-stipple)
+           (or/c (is-a?/c bitmap%) #f)]{
+
+Gets the @tech{brush stipple} bitmap, or @racket[#f] if the brush has no stipple.}
+
+
 @defmethod[(get-style)
-           (one-of/c 'transparent 'solid 'opaque 
-                     'xor 'hilite 'panel 
-                     'bdiagonal-hatch 'crossdiag-hatch
-                     'fdiagonal-hatch 'cross-hatch 
-                     'horizontal-hatch 'vertical-hatch)]{
+           (or/c 'transparent 'solid 'opaque 
+                 'xor 'hilite 'panel 
+                 'bdiagonal-hatch 'crossdiag-hatch
+                 'fdiagonal-hatch 'cross-hatch 
+                 'horizontal-hatch 'vertical-hatch)]{
 
 Returns the @tech{brush style}. See @racket[brush%] for information about
 brush styles.}
@@ -152,6 +163,14 @@ If a brush with a stipple or gradient also has a transformation, then the
 transformation applies to the stipple or gradient's coordinates instead of the
 target drawing context's transformation; otherwise, the target drawing
 context's transformation applies to stipple and gradient coordinates.}
+
+
+@defmethod[(is-immutable?)
+           boolean?]{
+
+Returns @racket[#t] if the brush object is immutable.
+
+}
 
 
 @defmethod*[([(set-color [color (is-a?/c color%)])
@@ -191,11 +210,11 @@ If @racket[bitmap] is modified while is associated with a brush, the
 
 }
 
-@defmethod[(set-style [style (one-of/c 'transparent 'solid 'opaque
-                                       'xor 'hilite 'panel 
-                                       'bdiagonal-hatch 'crossdiag-hatch
-                                       'fdiagonal-hatch 'cross-hatch
-                                       'horizontal-hatch 'vertical-hatch)])
+@defmethod[(set-style [style (or/c 'transparent 'solid 'opaque
+                                   'xor 'hilite 'panel 
+                                   'bdiagonal-hatch 'crossdiag-hatch
+                                   'fdiagonal-hatch 'cross-hatch
+                                   'horizontal-hatch 'vertical-hatch)])
            void?]{
 
 Sets the @tech{brush style}. See

@@ -3,14 +3,14 @@
            racket/port
            syntax/moddep
            (prefix-in wx: "kernel.rkt")
-           (prefix-in wx: racket/snip)
+	   (prefix-in wx: racket/snip/private/snip)
            "check.rkt"
            "editor.rkt")
 
   (provide open-input-text-editor
            open-input-graphical-file
            text-editor-load-handler
-           open-output-text-editor )
+           open-output-text-editor)
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -176,48 +176,140 @@
 		      (update-str-to-snip empty-string))
 		  port)))))))
 
+  (define (jump-to-submodule in-port expected-module k)
+    (let ([header (bytes-append #"^#~"
+                                (bytes (string-length (version)))
+                                (regexp-quote (string->bytes/utf-8 (version)))
+                                #"D")])
+      (cond
+       [(regexp-match-peek header in-port)
+        ;; The input has a submodule table:
+        (define encoded-expected
+          (apply bytes-append
+                 (for/list ([n (in-list (if (pair? expected-module)
+                                            (cdr expected-module)
+                                            '()))])
+                   (define s (string->bytes/utf-8 (symbol->string n)))
+                   (define l (bytes-length s))
+                   (bytes-append (if (l . < . 255)
+                                     (bytes l)
+                                     (bytes 255 
+                                            (bitwise-and l 255)
+                                            (bitwise-and (arithmetic-shift l -8) 255)
+                                            (bitwise-and (arithmetic-shift l -16) 255)
+                                            (bitwise-and (arithmetic-shift l -24) 255)))
+                                 s))))
+        (define (skip-bytes amt)
+          (if (file-stream-port? in-port)
+              (file-position in-port (+ (file-position in-port) amt))
+              (read-bytes amt in-port)))
+        (define len (+ 2 1 (string-length (version)) 1 4)) ; 4 for table count
+        (skip-bytes len)
+        (let loop ([pos len])
+          ;; Each node in the table's btree is <name-len> <name> <start> <len> <left> <right>
+          (define (read-num)
+            (integer-bytes->integer (read-bytes 4 in-port) #f #f))
+          (define len (read-num))
+          (define new-pos (+ pos 4))
+          (define name (read-bytes len in-port))
+          (define code-start (read-num))
+          (define code-len (read-num))
+          (define left (read-num))
+          (define right (read-num))
+          (define after-pos (+ new-pos len 16))
+          (cond
+           [(bytes=? encoded-expected name)
+            (skip-bytes (- code-start after-pos))
+            (k #f)]
+           [(bytes<? encoded-expected name)
+            (if (zero? left)
+                (void)
+                (begin
+                  (skip-bytes (- left after-pos))
+                  (loop left)))]
+           [else
+            (if (zero? right)
+                (void)
+                (begin
+                  (skip-bytes (- right after-pos))
+                  (loop right)))]))]
+       [(or (not (pair? expected-module))
+            (car expected-module))
+        ;; No table; ok to load source or full bytecode:
+        (k #t)]
+       [else
+        ;; don't load the file from source or reload useless bytecode:
+        (void)])))
+
+  (define original-load-handler (current-load))
+
   (define (text-editor-load-handler filename expected-module)
     (unless (path? filename)
-      (raise-type-error 'text-editor-load-handler "path" filename))
-    (let-values ([(in-port src) (build-input-port filename)])
-      (dynamic-wind
-	  (lambda () (void))
-	  (lambda ()
-	    (parameterize ([read-accept-compiled #t]
-                           [read-on-demand-source (and (load-on-demand-enabled)
-                                                       (path->complete-path filename))])
-	      (if expected-module
-		  (with-module-reading-parameterization 
-		   (lambda ()
-		     (let* ([first (read-syntax src in-port)]
-			    [module-ized-exp (check-module-form first expected-module filename)]
-			    [second (read in-port)])
-		       (unless (eof-object? second)
-			 (raise-syntax-error
-			  'text-editor-load-handler
-			  (format "expected only a `module' declaration for `~s', but found an extra expression"
-				  expected-module)
-			  second))
-		       (eval module-ized-exp))))
-		  (let loop ([last-time-values (list (void))])
-		    (let ([exp (read-syntax src in-port)])
-		      (if (eof-object? exp)
-			  (apply values last-time-values)
-			  (call-with-values (lambda () (call-with-continuation-prompt
-                                                        (lambda () (eval 
-                                                                    (datum->syntax
-                                                                     #f
-                                                                     (cons '#%top-interaction exp)
-                                                                     exp)))
-                                                        (default-continuation-prompt-tag)
-                                                        (lambda args
-                                                          (apply
-                                                           abort-current-continuation
-                                                           (default-continuation-prompt-tag)
-                                                           args))))
-			    (lambda x (loop x)))))))))
-	  (lambda ()
-	    (close-input-port in-port)))))
+      (raise-argument-error 'text-editor-load-handler "path?" filename))
+    (unless (or (not expected-module)
+                (symbol? expected-module)
+                (and (pair? expected-module)
+                     (list? expected-module)
+                     (pair? (cdr expected-module))
+                     (or (not (car expected-module))
+                         (symbol? (car expected-module)))
+                     (andmap symbol? (cdr expected-module))))
+      (raise-argument-error 'text-editor-load-handler 
+                            "(or/c #f symbol? (cons/c (or/c #f symbol?) (non-empty-listof symbol?)))"
+                            expected-module))
+    (let-values ([(in-port src wxme?) (build-input-port filename)])
+      (if wxme?
+          (dynamic-wind
+              (lambda () (void))
+              (lambda ()
+                (parameterize ([read-accept-compiled #t]
+                               [read-accept-reader #t]
+                               [read-accept-lang #t]
+                               [read-on-demand-source (and (load-on-demand-enabled)
+                                                           (path->complete-path filename))])
+                  (if expected-module
+                      (with-module-reading-parameterization
+                       (lambda ()
+                         (jump-to-submodule
+                          in-port
+                          expected-module
+                          (lambda (check-second?)
+                            (with-module-reading-parameterization 
+                             (lambda ()
+                               (let* ([first (read-syntax src in-port)]
+                                      [module-ized-exp (check-module-form first expected-module filename)]
+                                      [second (if check-second?
+                                                  (read in-port)
+                                                  eof)])
+                                 (unless (eof-object? second)
+                                   (raise-syntax-error
+                                    'text-editor-load-handler
+                                    (format "expected only a `module' declaration for `~s', but found an extra expression"
+                                            expected-module)
+                                    second))
+                                 (eval module-ized-exp))))))))
+                      (let loop ([last-time-values (list (void))])
+                        (let ([exp (read-syntax src in-port)])
+                          (if (eof-object? exp)
+                              (apply values last-time-values)
+                              (call-with-values (lambda () (call-with-continuation-prompt
+                                                            (lambda () (eval 
+                                                                        (datum->syntax
+                                                                         #f
+                                                                         (cons '#%top-interaction exp)
+                                                                         exp)))
+                                                            (default-continuation-prompt-tag)
+                                                            (lambda args
+                                                              (apply
+                                                               abort-current-continuation
+                                                               (default-continuation-prompt-tag)
+                                                               args))))
+                                (lambda x (loop x)))))))))
+              (lambda ()
+                (close-input-port in-port)))
+          (begin
+            (close-input-port in-port)
+            (original-load-handler filename expected-module)))))
 
 
   ;; build-input-port : string -> (values input any)
@@ -226,22 +318,25 @@
   (define (build-input-port filename)
     (let ([p (open-input-file filename)])
       (port-count-lines! p)
-      (let ([p (cond
-		[(regexp-match-peek #rx#"^(?:#reader[(]lib\"read[.]ss\"\"wxme\"[)])?WXME01[0-9][0-9] ##[ \r\n]" p)
-		 (let ([t (make-object text%)])
-		   (send t insert-port p 'standard)
-		   (close-input-port p)
-		   (open-input-text-editor t 0 'end values filename))]
-		[else p])])
-	(port-count-lines! p) ; in case it's new
-	(values p filename))))
+      (define-values (new-p changed?)
+        (cond
+         [(regexp-match-peek #rx#"^(?:#reader[(]lib\"read[.]ss\"\"wxme\"[)])?WXME01[0-9][0-9] ##[ \r\n]" p)
+          (let ([t (make-object text%)])
+            (send t insert-port p 'standard)
+            (close-input-port p)
+            (values (open-input-text-editor t 0 'end values filename) #t))]
+         [else (values p #f)]))
+      (when changed?
+	(port-count-lines! new-p)) ; in case it's new
+      (values new-p filename changed?)))
 
   (define (open-input-graphical-file filename)
-    (let-values ([(p name) (build-input-port filename)])
+    (let-values ([(p name wxme?) (build-input-port filename)])
       p))
 
   (define open-output-text-editor 
-    (lambda (text [start 'end] [special-filter values] [port-name text])
+    (lambda (text [start 'end] [special-filter values] [port-name text]
+                  #:eventspace [eventspace (wx:current-eventspace)])
       (define pos (if (eq? start 'end)
 		      (send text last-position)
 		      (min start
@@ -251,7 +346,16 @@
       (define raw-buffer (make-bytes 128))
       (define utf8-buffer (make-bytes 128))
       (define (show s)
-	(send text insert s pos)
+        (define (insert)
+          (send text begin-edit-sequence)
+          (send text insert s pos)
+          (send text end-edit-sequence))
+        (if (and eventspace
+                 (and (not (eq? (current-thread) 
+                                (wx:eventspace-handler-thread eventspace)))))
+            (parameterize ([wx:current-eventspace eventspace])
+              (wx:queue-callback insert #f))
+            (insert))
 	(set! pos (+ (string-length s) pos)))
       (define (flush-text)
 	(let ([cnt (peek-bytes-avail!* raw-buffer 0 #f in)])

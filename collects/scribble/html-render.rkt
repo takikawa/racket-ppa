@@ -141,8 +141,13 @@
                  (style-properties style)))])
     (let ([name (style-name style)])
       (if (string? name)
-          (cons `[class ,name]
-                a)
+          (if (assq 'class a)
+              (for/list ([i (in-list a)])
+                (if (eq? (car i) 'class)
+                    (list 'class (string-append name " " (cadr i)))
+                    i))
+              (cons `[class ,name]
+                    a))
           a))))
 
 ;; combine a 'class attribute from both cl and al
@@ -190,6 +195,12 @@
                       " this.value=\""emptylabel"\"; }")])))))
 (define search-box (make-search-box "../"))
 (define top-search-box (make-search-box ""))
+
+(define (part-tags/nonempty p)
+  (define l (part-tags p))
+  (if (null? l)
+      (list `(part "???"))
+      l))
 
 ;; ----------------------------------------
 ;;  main mixin
@@ -267,8 +278,8 @@
            fns))
 
     (define/public (part-whole-page? p ri)
-      (let ([dest (resolve-get p ri (car (part-tags p)))])
-        (dest-page? dest)))
+      (let ([dest (resolve-get p ri (car (part-tags/nonempty p)))])
+        (and dest (dest-page? dest))))
 
     (define/public (current-part-whole-page? d)
       (eq? d (current-top-part)))
@@ -284,48 +295,42 @@
       (for ([t (part-tags d)])
         (let ([key (generate-tag t ci)])
           (collect-put! ci key
-                        (vector (and (current-output-file)
+                        (vector (or (part-title-content d) '("???"))
+                                (add-current-tag-prefix key)
+                                number ; for consistency with base
+                                (and (current-output-file)
                                      (path->relative (current-output-file)))
-                                (or (part-title-content d) '("???"))
-                                (current-part-whole-page? d)
-                                (add-current-tag-prefix key))))))
+                                (current-part-whole-page? d))))))
 
     (define/override (collect-target-element i ci)
       (let ([key (generate-tag (target-element-tag i) ci)])
         (collect-put! ci key
-           (vector (path->relative
-                    (let ([p (current-output-file)])
-                      (if (redirect-target-element? i)
-                        (let-values ([(base name dir?) (split-path p)])
-                          (build-path base
-                                      (redirect-target-element-alt-path i)))
-                        p)))
-                   (let ([tag (target-element-tag i)])
-                     (if (and (pair? tag) (eq? 'part (car tag)))
-                         (element-content i)
-                         #f))
-                   (page-target-element? i)
-                   (if (redirect-target-element? i)
-                     (make-literal-anchor
-                      (redirect-target-element-alt-anchor i))
-                     (add-current-tag-prefix key))))))
+                      (vector (let ([tag (target-element-tag i)])
+                                (if (and (pair? tag) (eq? 'part (car tag)))
+                                    (element-content i)
+                                    #f))
+                              (if (redirect-target-element? i)
+                                  (make-literal-anchor
+                                   (redirect-target-element-alt-anchor i))
+                                  (add-current-tag-prefix key))
+                              #f ; for consistency with 'part info
+                              (path->relative
+                               (let ([p (current-output-file)])
+                                 (if (redirect-target-element? i)
+                                     (let-values ([(base name dir?) (split-path p)])
+                                       (build-path base
+                                                   (redirect-target-element-alt-path i)))
+                                     p)))
+                              (page-target-element? i)))))
 
     (define (dest-path dest)
-      (if (vector? dest) ; temporary
-        (vector-ref dest 0)
-        (list-ref dest 0)))
+      (vector-ref dest 3))
     (define (dest-title dest)
-      (if (vector? dest)
-        (vector-ref dest 1)
-        (list-ref dest 1)))
+      (vector-ref dest 0))
     (define (dest-page? dest)
-      (if (vector? dest)
-        (vector-ref dest 2)
-        (list-ref dest 2)))
+      (vector-ref dest 4))
     (define (dest-anchor dest)
-      (if (vector? dest)
-        (vector-ref dest 3)
-        (list-ref dest 3)))
+      (vector-ref dest 1))
 
     ;; ----------------------------------------
 
@@ -381,15 +386,17 @@
       null)
 
     (define/private (dest->url dest)
-      (format "~a~a~a"
-              (let ([p (relative->path (dest-path dest))])
-                (if (equal? p (current-output-file))
-                    ""
-                    (from-root p (get-dest-directory))))
-              (if (dest-page? dest) "" "#")
-              (if (dest-page? dest)
-                  ""
-                  (anchor-name (dest-anchor dest)))))
+      (if dest
+          (format "~a~a~a"
+                  (let ([p (relative->path (dest-path dest))])
+                    (if (equal? p (current-output-file))
+                        ""
+                        (from-root p (get-dest-directory))))
+                  (if (dest-page? dest) "" "#")
+                  (if (dest-page? dest)
+                      ""
+                      (anchor-name (dest-anchor dest))))
+          "???"))
 
     (define/public (render-toc-view d ri)
       (define has-sub-parts?
@@ -407,7 +414,7 @@
       (define top (car toc-chain))
       (define (toc-item->title+num t show-mine?)
         (values
-         `((a ([href ,(dest->url (resolve-get t ri (car (part-tags t))))]
+         `((a ([href ,(dest->url (resolve-get t ri (car (part-tags/nonempty t))))]
                [class ,(if (or (eq? t d) (and show-mine? (memq t toc-chain)))
                          "tocviewselflink"
                          "tocviewlink")]
@@ -592,7 +599,7 @@
                                                  (anchor-name
                                                   (add-tag-prefixes
                                                    (tag-key (if (part? p)
-                                                                (car (part-tags p))
+                                                                (car (part-tags/nonempty p))
                                                                 (target-element-tag p))
                                                             ri)
                                                    prefixes)))]
@@ -656,8 +663,7 @@
                (lambda (in)
                  (copy-port in (current-output-port)))))
           (parameterize ([xml:empty-tag-shorthand xml:html-empty-tags])
-            (xml:write-xml/content
-             (xml:xexpr->xml
+            (xml:write-xexpr
               `(html ()
                  (head ()
                    (meta ([http-equiv "content-type"]
@@ -679,7 +685,8 @@
                                    css-addition-path)
                                   (list style-file)
                                   style-extra-files))
-                   ,(scribble-js-contents script-file (lookup-path script-file alt-paths)))
+                   ,(scribble-js-contents script-file (lookup-path script-file alt-paths))
+                   ,(xml:comment "[if IE 6]><style type=\"text/css\">.SIEHidden { overflow: hidden; }</style><![endif]"))
                  (body ([id ,(or (extract-part-body-id d ri)
                                  "scribble-racket-lang-org")])
                    ,@(render-toc-view d ri)
@@ -690,7 +697,7 @@
                        ,@(navigation d ri #t)
                        ,@(render-part d ri)
                        ,@(navigation d ri #f)))
-                   (div ([id "contextindicator"]) nbsp)))))))))
+                   (div ([id "contextindicator"]) nbsp))))))))
 
     (define/private (part-parent d ri)
       (collected-info-parent (part-collected-info d ri)))
@@ -761,7 +768,7 @@
         (define-values (url title)
           (cond [(part? x)
                  (values
-                  (dest->url (resolve-get x ri (car (part-tags x))))
+                  (dest->url (resolve-get x ri (car (part-tags/nonempty x))))
                   (string-append
                    "\""
                    (content->string
@@ -811,7 +818,7 @@
               ;; sep-element
               ;; (if (or (not index) (eq? d index))
               ;;   (make-element "nonavigation" index-content)
-              ;;   (make-link-element #f index-content (car (part-tags index))))
+              ;;   (make-link-element #f index-content (car (part-tags/nonempty index))))
               )))
       (define navright
         (if (not (or parent up-path next))
@@ -1127,16 +1134,13 @@
                           (render-content (element-content e) part ri))))
                (begin
                  (when #f
-                   (fprintf (current-error-port)
-                            "Undefined link: ~s\n"
+                   (eprintf "Undefined link: ~s\n"
                             (tag-key (link-element-tag e) ri)))
                  `((font ([class "badlink"])
                      ,@(if (empty-content? (element-content e))
                          `(,(format "~s" (tag-key (link-element-tag e) ri)))
                          (render-plain-content e part ri))))))))]
         [else 
-         (when (render-element? e)
-           ((render-element-render e) this part ri))
          (render-plain-content e part ri)]))
 
     (define/private (render-plain-content e part ri)
@@ -1172,13 +1176,18 @@
                                   [else null]))
                                properties))
                (attribs))]
-             [newline? (eq? name 'newline)])
+             [newline? (eq? name 'newline)]
+             [check-render
+              (lambda ()
+                (when (render-element? e)
+                  ((render-element-render e) this part ri)))])
         (let-values ([(content) (cond
                                  [link?
                                   (parameterize ([current-no-links #t])
                                     (super render-content e part ri))]
-                                 [newline? null]
+                                 [newline? (check-render) null]
                                  [(eq? 'hspace name)
+                                  (check-render)
                                   (let ([str (content->string e)])
                                     (map (lambda (c) 'nbsp) (string->list str)))]
                                  [else
@@ -1312,19 +1321,20 @@
                      (extract-table-cell-styles t))))))
 
     (define/override (render-nested-flow t part ri starting-item?)
-      `((blockquote [,@(combine-class
-                        (cond
-                         [(eq? 'code-inset (style-name (nested-flow-style t)))
-                          `([class "SCodeFlow"])]
-                         [(eq? 'vertical-inset (style-name (nested-flow-style t)))
-                          `([class "SVInsetFlow"])]
-                         [(and (not (string? (style-name (nested-flow-style t))))
-                               (not (eq? 'inset (style-name (nested-flow-style t)))))
-                          `([class "SubFlow"])]
-                         [else null])
-                        (style->attribs (nested-flow-style t)))]
-                    ,@(apply append
-                             (super render-nested-flow t part ri starting-item?)))))
+      `((,(or (style->tag (nested-flow-style t)) 'blockquote)
+         [,@(combine-class
+             (cond
+              [(eq? 'code-inset (style-name (nested-flow-style t)))
+               `([class "SCodeFlow"])]
+              [(eq? 'vertical-inset (style-name (nested-flow-style t)))
+               `([class "SVInsetFlow"])]
+              [(and (not (string? (style-name (nested-flow-style t))))
+                    (not (eq? 'inset (style-name (nested-flow-style t)))))
+               `([class "SubFlow"])]
+              [else null])
+             (style->attribs (nested-flow-style t)))]
+         ,@(apply append
+                  (super render-nested-flow t part ri starting-item?)))))
 
     (define/override (render-compound-paragraph t part ri starting-item?)
       (let ([style (compound-paragraph-style t)])
@@ -1378,12 +1388,14 @@
          (list (format "~s" i))]))
     
     (define/private (ascii-ize s)
-      (let ([m (regexp-match-positions #rx"[^\u01-\u7E]" s)])
-        (if m
-          (append (ascii-ize (substring s 0 (caar m)))
-                  (list (char->integer (string-ref s (caar m))))
-                  (ascii-ize (substring s (cdar m))))
-          (list s))))
+      (if (= (string-utf-8-length s) (string-length s))
+          (list s)
+          (let ([m (regexp-match-positions #rx"[^\u01-\u7E]" s)])
+            (if m
+                (append (ascii-ize (substring s 0 (caar m)))
+                        (list (char->integer (string-ref s (caar m))))
+                        (ascii-ize (substring s (cdar m))))
+                (list s)))))
 
     ;; ----------------------------------------
 
@@ -1435,7 +1447,7 @@
                          "[^-a-zA-Z0-9_=]"
                          (string-append
                           (append-part-prefixes d ci ri)
-                          (let ([s (cadr (car (part-tags d)))])
+                          (let ([s (cadr (car (part-tags/nonempty d)))])
                             (cond [(string? s) s]
                                   [(part-title-content d)
                                    (content->string (part-title-content d))]

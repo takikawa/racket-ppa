@@ -1,11 +1,12 @@
-#lang scheme/unit
+#lang racket/unit
 
 
 (require (rename-in "../utils/utils.rkt" [private private-in])
-         racket/match (prefix-in - scheme/contract)
+         racket/match (prefix-in - racket/contract)
          "signatures.rkt" "tc-envops.rkt" "tc-metafunctions.rkt" "tc-subst.rkt"
-         "check-below.rkt" "tc-funapp.rkt"
-         (types utils convenience union subtype remove-intersect type-table filter-ops)
+         "check-below.rkt" "tc-funapp.rkt" "tc-app-helper.rkt" "../types/kw-types.rkt"
+         (types utils convenience union subtype remove-intersect 
+                type-table filter-ops generalize)
          (private-in parse-type type-annotation)
          (rep type-rep)
          (only-in (infer infer) restrict)
@@ -17,98 +18,111 @@
          (only-in srfi/1 split-at)
          (for-template "internal-forms.rkt"))
 
-(require (for-template scheme/base racket/private/class-internal))
+(require (for-template racket/base racket/private/class-internal))
 
 (import tc-if^ tc-lambda^ tc-app^ tc-let^ check-subforms^)
 (export tc-expr^)
 
 ;; return the type of a literal value
-;; scheme-value -> type
+;; racket-value [type] -> type
 (define (tc-literal v-stx [expected #f])
   (define-syntax-class exp
-    (pattern i
+    (pattern (~and i (~or :number :str :bytes))
              #:fail-unless expected #f
-             #:attr datum (syntax-e #'i)
-             #:fail-unless (subtype (-val (attribute datum)) expected) #f))
-  (syntax-parse v-stx
-    [i:exp expected]
-    [i:boolean (-val (syntax-e #'i))]
-    [i:identifier (-val (syntax-e #'i))]
-
-    ;; Numbers
-    [0 -Zero]
-    [1 -One]
-    [(~var i (3d (conjoin byte? positive?))) -PosByte]
-    [(~var i (3d byte?)) -Byte]
-    [(~var i (3d (conjoin portable-index? positive?))) -PosIndex]
-    [(~var i (3d (conjoin portable-fixnum? positive?))) -PosFixnum]
-    [(~var i (3d (conjoin portable-fixnum? negative?))) -NegFixnum]
-    [(~var i (3d exact-positive-integer?)) -PosInt]
-    [(~var i (3d (conjoin exact-integer? negative?))) -NegInt]
-    [(~var i (3d (conjoin number? exact? rational? positive?))) -PosRat]
-    [(~var i (3d (conjoin number? exact? rational? negative?))) -NegRat]
-    [(~var i (3d (lambda (x) (eq? x 0.0)))) -FlonumPosZero]
-    [(~var i (3d (lambda (x) (eq? x -0.0)))) -FlonumNegZero]
-    [(~var i (3d (conjoin flonum? positive?))) -PosFlonum]
-    [(~var i (3d (conjoin flonum? negative?))) -NegFlonum]
-    [(~var i (3d flonum?)) -Flonum] ; for nan
-    [(~var i (3d (lambda (x) (eq? x 0.0f0)))) -SingleFlonumPosZero]
-    [(~var i (3d (lambda (x) (eq? x -0.0f0)))) -SingleFlonumNegZero]
-    [(~var i (3d (conjoin single-flonum? positive?))) -PosSingleFlonum]
-    [(~var i (3d (conjoin single-flonum? negative?))) -NegSingleFlonum]
-    [(~var i (3d single-flonum?)) -SingleFlonum] ; for nan
-    [(~var i (3d inexact-real?)) -InexactReal] ; catch-all, just in case
-    [(~var i (3d real?)) -Real] ; catch-all, just in case
-    ;; a complex number can't have a float imaginary part and an exact real part
-    [(~var i (3d (conjoin number? exact?)))
-     -ExactNumber]
-    [(~var i (3d (conjoin number? (lambda (x) (and (flonum? (imag-part x))
-                                                   (flonum? (real-part x)))))))
-     -FloatComplex]
-    [(~var i (3d (conjoin number? (lambda (x) (and (single-flonum? (imag-part x))
-                                                   (single-flonum? (real-part x)))))))
-     -InexactComplex]
-    [(~var i (3d number?)) -Number] ; otherwise, Number
-
-    [i:str -String]
-    [i:char -Char]
-    [i:keyword (-val (syntax-e #'i))]
-    [i:bytes -Bytes]
-    [i:byte-pregexp -Byte-PRegexp]
-    [i:byte-regexp -Byte-Regexp]
-    [i:pregexp -PRegexp]
-    [i:regexp  -Regexp]
-    [(i ...)
-     (match expected
-       [(Mu: var (Union: (list (Value: '()) (Pair: elem-ty (F: var)))))
-        (-Tuple
-         (for/list ([l (in-list (syntax->list #'(i ...)))])
-           (tc-literal l elem-ty)))]
-       ;; errors are handled elsewhere
-       [_ (-Tuple
-           (for/list ([l (in-list (syntax->list #'(i ...)))])
-             (tc-literal l #f)))])]
-    [(~var i (3d vector?))
-     (match expected
-       [(Vector: t)
-        (make-Vector (apply Un
-                            (for/list ([l (in-vector (syntax-e #'i))])
-                              (tc-literal l t))))]
-       [(HeterogenousVector: ts)
-        (make-HeterogenousVector
-         (for/list ([l (in-vector (syntax-e #'i))]
-                    [t (in-list ts)])
-           (tc-literal l t)))]
-       ;; errors are handled elsewhere
-       [_ (make-HeterogenousVector (for/list ([l (syntax-e #'i)])
-                                     (generalize (tc-literal l #f))))])]
-    [(~var i (3d hash?))
-     (let* ([h (syntax-e #'i)]
-            [ks (hash-map h (lambda (x y) (tc-literal x)))]
-            [vs (hash-map h (lambda (x y) (tc-literal y)))])
-       (make-Hashtable (generalize (apply Un ks)) (generalize (apply Un vs))))]
-    [(a . b) (-pair (tc-literal #'a) (tc-literal #'b))]
-    [_ Univ]))
+             #:fail-unless (subtype (-val (syntax-e #'i)) expected) #f))
+  (define r
+    (syntax-parse v-stx
+      [i:exp expected]
+      [i:boolean (-val (syntax-e #'i))]
+      [i:identifier (-val (syntax-e #'i))]
+      
+      ;; Numbers
+      [0 -Zero]
+      [1 -One]
+      [(~var i (3d (conjoin byte? positive?))) -PosByte]
+      [(~var i (3d byte?)) -Byte]
+      [(~var i (3d (conjoin portable-index? positive?))) -PosIndex]
+      [(~var i (3d (conjoin portable-fixnum? positive?))) -PosFixnum]
+      [(~var i (3d (conjoin portable-fixnum? negative?))) -NegFixnum]
+      [(~var i (3d exact-positive-integer?)) -PosInt]
+      [(~var i (3d (conjoin exact-integer? negative?))) -NegInt]
+      [(~var i (3d (conjoin number? exact? rational? positive?))) -PosRat]
+      [(~var i (3d (conjoin number? exact? rational? negative?))) -NegRat]
+      [(~var i (3d (lambda (x) (eqv? x 0.0)))) -FlonumPosZero]
+      [(~var i (3d (lambda (x) (eqv? x -0.0)))) -FlonumNegZero]
+      [(~var i (3d (lambda (x) (eqv? x +nan.0)))) -FlonumNan]
+      [(~var i (3d (conjoin flonum? positive?))) -PosFlonum]
+      [(~var i (3d (conjoin flonum? negative?))) -NegFlonum]
+      [(~var i (3d flonum?)) -Flonum] ; for nan
+      [(~var i (3d (lambda (x) (eqv? x 0.0f0)))) -SingleFlonumPosZero]
+      [(~var i (3d (lambda (x) (eqv? x -0.0f0)))) -SingleFlonumNegZero]
+      [(~var i (3d (lambda (x) (eqv? x +nan.f)))) -SingleFlonumNan]
+      [(~var i (3d (conjoin single-flonum? positive?))) -PosSingleFlonum]
+      [(~var i (3d (conjoin single-flonum? negative?))) -NegSingleFlonum]
+      [(~var i (3d single-flonum?)) -SingleFlonum] ; for nan
+      [(~var i (3d inexact-real?)) -InexactReal] ; catch-all, just in case
+      [(~var i (3d real?)) -Real] ; catch-all, just in case
+      ;; a complex number can't have a float imaginary part and an exact real part
+      [(~var i (3d (conjoin number? exact?)))
+       -ExactNumber]
+      [(~var i (3d (conjoin number? (lambda (x) (and (flonum? (imag-part x))
+                                                     (flonum? (real-part x)))))))
+       -FloatComplex]
+      [(~var i (3d (conjoin number? (lambda (x) (and (single-flonum? (imag-part x))
+                                                     (single-flonum? (real-part x)))))))
+       -SingleFlonumComplex]
+      ;; can't have real and imaginary parts that are both inexact, but not the same precision
+      [(~var i (3d number?)) -Number] ; otherwise, Number
+      
+      [i:str -String]
+      [i:char -Char]
+      [i:keyword (-val (syntax-e #'i))]
+      [i:bytes -Bytes]
+      [i:byte-pregexp -Byte-PRegexp]
+      [i:byte-regexp -Byte-Regexp]
+      [i:pregexp -PRegexp]
+      [i:regexp  -Regexp]
+      [(~and i ()) (-val '())]
+      [(i . r)
+       (match (and expected (restrict expected (-pair Univ Univ) 'orig))
+         [(Pair: a-ty d-ty)
+          (-pair
+           (tc-literal #'i a-ty)
+           (tc-literal #'r d-ty))]
+         [(Union: '())
+          (tc-error/expr "expected ~a, but got" expected #:return expected)]
+         ;; errors are handled elsewhere
+         [t 
+          (-pair (tc-literal #'i) (tc-literal #'r))])]
+      [(~var i (3d vector?))
+       (match (and expected (restrict expected (-vec Univ) 'orig))
+         [(Vector: t)
+          (make-Vector (apply Un
+                              t ;; so that this isn't (Un) when we get no elems
+                              (for/list ([l (in-vector (syntax-e #'i))])
+                                (tc-literal l t))))]
+         [(HeterogenousVector: ts)
+          (make-HeterogenousVector
+           (for/list ([l (in-vector (syntax-e #'i))]
+                      [t (in-list ts)])
+             (tc-literal l t)))]
+         ;; errors are handled elsewhere
+         [_ (make-HeterogenousVector (for/list ([l (syntax-e #'i)])
+                                       (generalize (tc-literal l #f))))])]
+      [(~var i (3d hash?))
+       (match expected
+         [(Hashtable: k v)
+          (let* ([h (syntax-e #'i)]
+                 [ks (hash-map h (lambda (x y) (tc-literal x k)))]
+                 [vs (hash-map h (lambda (x y) (tc-literal y v)))])
+            (make-Hashtable (generalize (check-below (apply Un ks) k)) (generalize (check-below (apply Un vs) v))))]
+         [_ (let* ([h (syntax-e #'i)]
+                   [ks (hash-map h (lambda (x y) (tc-literal x)))]
+                   [vs (hash-map h (lambda (x y) (tc-literal y)))])
+              (make-Hashtable (generalize (apply Un ks)) (generalize (apply Un vs))))])]
+      [_ Univ]))
+  
+  (cond-check-below r expected))
 
 
 ;; do-inst : syntax type -> type
@@ -130,17 +144,18 @@
         ([inst (in-improper-stx inst)])
         (cond [(not inst) ty]
               [(not (or (Poly? ty) (PolyDots? ty)))
-               (tc-error/expr #:return (Un) "Cannot instantiate non-polymorphic type ~a" ty)]
+               (tc-error/expr #:return (Un) "Cannot instantiate non-polymorphic type ~a"
+                              (cleanup-type ty))]
               [(and (Poly? ty)
                     (not (= (length (syntax->list inst)) (Poly-n ty))))
                (tc-error/expr #:return (Un)
                               "Wrong number of type arguments to polymorphic type ~a:\nexpected: ~a\ngot: ~a"
-                              ty (Poly-n ty) (length (syntax->list inst)))]
+                              (cleanup-type ty) (Poly-n ty) (length (syntax->list inst)))]
               [(and (PolyDots? ty) (not (>= (length (syntax->list inst)) (sub1 (PolyDots-n ty)))))
                ;; we can provide 0 arguments for the ... var
                (tc-error/expr #:return (Un)
                               "Wrong number of type arguments to polymorphic type ~a:\nexpected at least: ~a\ngot: ~a"
-                              ty (sub1 (PolyDots-n ty)) (length (syntax->list inst)))]
+                              (cleanup-type ty) (sub1 (PolyDots-n ty)) (length (syntax->list inst)))]
               [(PolyDots? ty)
                ;; In this case, we need to check the last thing.  If it's a dotted var, then we need to
                ;; use instantiate-poly-dotted, otherwise we do the normal thing.
@@ -226,9 +241,10 @@
                [ty (add-typeof-expr form ty) ty])]
             ;; nothing to see here
             [checked? expected]
-            [else (let ([t (tc-expr/check/internal form* expected)])
-                    (add-typeof-expr form t)
-                    t)]))))
+            [else 
+             (define t (tc-expr/check/internal form* expected))
+             (add-typeof-expr form t)
+             t]))))
 
 (define (explicit-fail stx msg var)
   (cond [(and (identifier? var) (lookup-type/lexical var #:fail (λ _ #f)))
@@ -238,6 +254,15 @@
                           (string-append (syntax-e msg) "; missing coverage of ~a")
                           t))]
          [else (tc-error/expr #:return (ret (Un)) #:stx stx (syntax-e msg))]))
+
+;; check that `expr` doesn't evaluate any references 
+;; to `name` that aren't under `lambda`
+;; value-restriction? : syntax identifier -> boolean
+(define (value-restriction? expr name)
+  (syntax-parse expr
+    [((~literal #%plain-lambda) . _) #true]
+    [((~literal case-lambda) . _) #true]
+    [_ #false]))
 
 ;; tc-expr/check : syntax tc-results -> tc-results
 (define/cond-contract (tc-expr/check/internal form expected)
@@ -273,7 +298,9 @@
         [(quote #t) (ret (-val #t) true-filter)]
         [(quote val)  (match expected
                         [(tc-result1: t)
-                         (ret (tc-literal #'val t) true-filter)])]
+                         (ret (tc-literal #'val t) true-filter)]
+                        [_ ;; this isn't going to work, defer error handling
+                         (check-below (ret (tc-literal #'val #f)) expected)])]
         ;; syntax
         [(quote-syntax datum) (ret (-Syntax (tc-literal #'datum)) true-filter)]
         ;; mutation!
@@ -322,11 +349,23 @@
              (let-values (((_) (~and find-app (#%plain-app find-method/who _ _ _))))
                (#%plain-app _ _ args ...))))
          (tc/send #'find-app #'rcvr #'meth #'(args ...) expected)]
+        ;; kw function def
+        [(let-values ([(_) fun])
+           . body)
+         #:when (syntax-property form 'kw-lambda)
+         (match expected
+           [(tc-result1: (and f (Function: _))) 
+            (tc-expr/check/type #'fun (kw-convert f #:split #t))]
+           [(tc-result1: (Poly-names: names (and f (Function: _))))
+            (tc-expr/check/type #'fun (make-Poly names (kw-convert f #:split #t)))]
+           [(tc-result1: _) (tc-error/expr "Keyword functions must have function type, given ~a" expected)])
+         expected]
         ;; let
         [(let-values ([(name ...) expr] ...) . body)
          (tc/let-values #'((name ...) ...) #'(expr ...) #'body form expected)]
         [(letrec-values ([(name) expr]) name*)
-         #:when (and (identifier? #'name*) (free-identifier=? #'name #'name*))
+         #:when (and (identifier? #'name*) (free-identifier=? #'name #'name*)
+                     (value-restriction? #'expr #'name))
          (match expected
            [(tc-result1: t)
             (with-lexical-env/extend (list #'name) (list t) (tc-expr/check #'expr expected))]
@@ -456,9 +495,7 @@
         (let* ([ftype (cond [(assq s methods) => cadr]
                             [else (tc-error/expr "send: method ~a not understood by class ~a" s c)])]
                [ret-ty (tc/funapp rcvr args (ret ftype) (map tc-expr (syntax->list args)) expected)]
-               [retval (if expected
-                           (begin (check-below ret-ty expected) expected)
-                           ret-ty)])
+               [retval (cond-check-below ret-ty expected)])
           (add-typeof-expr form retval)
           retval)]
        [(tc-result1: t) (int-err "non-symbol methods not supported by Typed Racket: ~a" t)])]

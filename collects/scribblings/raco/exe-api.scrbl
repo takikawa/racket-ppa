@@ -14,7 +14,8 @@
                      compiler/embed-sig
                      compiler/embed-unit
                      racket/runtime-path
-                     launcher/launcher))
+                     launcher/launcher
+                     compiler/find-exe))
 
 @title{API for Creating Executables}
 
@@ -43,9 +44,11 @@ parameter is true.
 
 @defproc[(create-embedding-executable [dest path-string?]
                                [#:modules mod-list 
-                                          (listof (list/c (or/c symbol? #t #f)
-                                                          (or/c path? module-path?)))
-                                          null]
+                                         (listof (or/c (list/c (or/c symbol? (one-of/c #t #f)) 
+                                                               (or/c module-path? path?))
+                                                       (list/c (or/c symbol? (one-of/c #t #f)) 
+                                                               (or/c module-path? path?)
+                                                               (listof symbol?))))]
                                [#:configure-via-first-module? config-via-first? 
                                                               any/c 
                                                               #f]
@@ -140,17 +143,21 @@ evaluates an expression or loads a file will be executed after the
 embedded code is loaded.
 
 Each element of the @racket[#:modules] argument @racket[mod-list] is a
-two-item list, where the first item is a prefix for the module name,
-and the second item is a module path datum (that's in the format
-understood by the default module name resolver). The prefix can be a
-symbol, @racket[#f] to indicate no prefix, or @racket[#t] to indicate
-an auto-generated prefix. For example,
+two- or three-item list, where the first item is a prefix for the
+module name, and the second item is a module path datum (that's in the
+format understood by the default module name resolver), and the third
+is a list of submodule names to be included if they are available. The
+prefix can be a symbol, @racket[#f] to indicate no prefix, or
+@racket[#t] to indicate an auto-generated prefix. For example,
 
 @racketblock['((#f "m.rkt"))]
 
 embeds the module @racket[m] from the file @filepath{m.rkt}, without
 prefixing the name of the module; the @racket[literal-sexpr] argument
-to go with the above might be @racket['(require m)].
+to go with the above might be @racket['(require m)]. When submodules
+are available and included, the submodule is given a name by
+symbol-appending the @racket[write] form of submodule path to the
+enclosing module's name.
 
 Modules are normally compiled before they are embedded into the target
 executable; see also @racket[#:compiler] and @racket[#:src-filter]
@@ -286,8 +293,8 @@ is initialized to an empty list and
 @racket[use-collection-link-paths] is set to false to disable the
 use of @tech[#:doc reference-doc]{collection links files}.
 
-If the @racket[#:launcher?] argument is @racket[#t], then no
-@racket[module]s should be null, @racket[literal-files] should be
+If the @racket[#:launcher?] argument is @racket[#t], then
+@racket[lid-list] should be null, @racket[literal-files] should be
 null, @racket[literal-sexp] should be @racket[#f], and the platform
 should be Windows or Mac OS X. The embedding executable is created in
 such a way that @racket[(find-system-path 'exec-file)] produces the
@@ -348,22 +355,32 @@ have been applied as needed to refer to the existing file).}
 @defproc[(make-embedding-executable [dest path-string?]
                                [mred? any/c]
                                [verbose? any/c]
-                               [mod-list (listof (list/c (or/c symbol? (one-of/c #t #f)) 
-                                                         module-path?))]
+                               [mod-list (listof (or/c (list/c (or/c symbol? (one-of/c #t #f)) 
+                                                               (or/c module-path? path?))
+                                                       (list/c (or/c symbol? (one-of/c #t #f)) 
+                                                               (or/c module-path? path?)
+                                                               (listof symbol?))))]
                                [literal-files (listof path-string?)]
                                [literal-sexp any/c]
                                [cmdline (listof string?)]
                                [aux (listof (cons/c symbol? any/c)) null]
                                [launcher? any/c #f]
-                               [variant (one-of/c 'cgc '3m) (system-type 'gc)])
+                               [variant (one-of/c 'cgc '3m) (system-type 'gc)]
+                               [collects-path (or/c #f
+                                                    path-string? 
+                                                    (listof path-string?))
+                                              #f])
          void?]{
 
 Old (keywordless) interface to @racket[create-embedding-executable].}
 
 
 @defproc[(write-module-bundle [verbose? any/c]
-                              [mod-list (listof (list/c (or/c symbol? (one-of/c #t #f)) 
-                                                        module-path?))]
+                               [mod-list (listof (or/c (list/c (or/c symbol? (one-of/c #t #f)) 
+                                                               (or/c module-path? path?))
+                                                       (list/c (or/c symbol? (one-of/c #t #f)) 
+                                                               (or/c module-path? path?)
+                                                               (listof symbol?))))]
                               [literal-files (listof path-string?)]
                               [literal-sexp any/c])
          void?]{
@@ -434,14 +451,13 @@ Includes the identifiers provided by @racketmodname[compiler/embed].}
 
 A unit that imports nothing and exports @racket[compiler:embed^].}
 
-@section{Finding the name of the executable}
+@section{Finding the Racket Executable}
 
 @defmodule[compiler/find-exe]
 
-@defproc[(find-exe [gracket? boolean?]
+@defproc[(find-exe [gracket? any/c #f]
                    [variant (or/c 'cgc '3m) (system-type 'gc)])
          path?]{
 
-  Finds the path to the racket (or gracket) executable.
-}
-               
+  Finds the path to the @exec{racket} or @exec{gracket} (when
+  @racket[gracket?] is true) executable.}

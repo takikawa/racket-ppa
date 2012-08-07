@@ -2,6 +2,7 @@
 
 (require "test-util.rkt"
          "../private/reduction-semantics.rkt"
+         "../private/judgment-form.rkt"
          "../private/matcher.rkt"
          "../private/term.rkt"
          "../private/rg.rkt"
@@ -225,7 +226,7 @@
   (test (with-handlers ([exn:fail:syntax? exn-message])
           (parameterize ([current-namespace ns])
             (expand #'(generate-term M n))))
-        #rx"generate-term: expected an identifier defined by define-language( in: M)?$")
+        #rx"generate-term: expected an identifier defined by define-language([\n ]+in: M)?(\n|$)")
   (test-contract-violation/client (generate-term L n 1.5))
   (test-contract-violation/client (generate-term L n 1 #:retries .5))
   (test-contract-violation/client (generate-term L n 1 #:attempt-num .5))

@@ -77,6 +77,7 @@
 
 (test 12 (if #f + *) 3 4)
 (syntax-test #'(+ 3 . 4))
+(syntax-test #'(apply + 1 . 2))
 
 (test 8 (lambda (x) (+ x x)) 4)
 (define reverse-subtract
@@ -632,6 +633,15 @@
 (syntax-test #'(delay . 1))
 (syntax-test #'(delay 1 . 2))
 
+(let ([p (delay/sync 12)]
+      [v #f])
+  (thread (lambda () (set! v (force p))))
+  (sync (system-idle-evt))
+  (test 12 force p)
+  (test 12 values v)
+  (test (void) sync p)
+  (test (list (void)) sync (wrap-evt p list)))
+
 (test '(list 3 4) 'quasiquote `(list ,(+ 1 2) 4))
 (test '(list a (quote a)) 'quasiquote (let ((name 'a)) `(list ,name ',name)))
 (test '(a 3 4 5 6 b) 'quasiquote `(a ,(+ 1 2) ,@(map abs '(4 -5 6)) b))
@@ -968,23 +978,10 @@
 (error-test #'(parameterize ((x . 9)) 8) syntaxe?)
 
 (error-test #'(parameterize ([10 10]) 8))
+(error-test #'(parameterize ([10 10]) 8) (lambda (exn) (not (regexp-match #rx"argument" (exn-message exn)))))
 (error-test #'(parameterize ([(lambda () 10) 10]) 8))
 (error-test #'(parameterize ([(lambda (a) 10) 10]) 8))
 (error-test #'(parameterize ([(lambda (a b) 10) 10]) 8))
-
-#|
-(test #t procedure? (check-parameter-procedure current-directory))
-(test #t procedure? (check-parameter-procedure (case-lambda
-						[() 0]
-						[(x) 0])))
-(test 'exn 'not-param (with-handlers ([void (lambda (x) 'exn)])
-		    (check-parameter-procedure (lambda () 10))))
-(test 'exn 'not-param (with-handlers ([void (lambda (x) 'exn)])
-			(check-parameter-procedure (lambda (x) 10))))
-(test 'exn 'not-param (with-handlers ([void (lambda (x) 'exn)])
-			(check-parameter-procedure (lambda (x y) 10))))
-(arity-test check-parameter-procedure 1 1)
-|#
 
 (test 1 'time (time 1))
 (test -1 'time (time (cons 1 2) -1))
@@ -1435,6 +1432,69 @@
                 (rs #f)))))
         p))
 
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check that `syntax/loc' preserves the 'parent-shape property
+
+(test #\[ syntax-property (syntax/loc #'a [b c]) 'paren-shape)
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check that inlining expansion of keyword-argument calls
+;; attaches 'alias-of and 'converted-arguments-variant-of
+;; syntax properties:
+
+(parameterize ([current-namespace (make-base-namespace)])
+  (eval '(require (for-syntax racket/base
+                              racket/keyword-transform)))
+  (eval '(module m racket/base (provide f) (define (f #:x [x 2]) x)))
+  (eval '(require 'm))
+  (eval '(define-syntax (extract stx)
+           (syntax-case stx ()
+             [(_ form pattern var alias?)
+              (with-syntax ([e (local-expand #'form 'top-level '())])
+                #'(let-syntax ([m (lambda (stx)
+                                    (syntax-case (quote-syntax e) ()
+                                      [pattern
+                                       #`(quote-syntax (var
+                                                        .
+                                                        #,((if alias?
+                                                               syntax-procedure-alias-property
+                                                               syntax-procedure-converted-arguments-property)
+                                                           #'var)))]))])
+                    (define p (m))
+                    (and (free-identifier=? (car (syntax-e p))
+                                            (cdr (syntax-e (cdr (syntax-e p)))))
+                         (car (syntax-e (cdr (syntax-e p)))))))])))
+  (define f-id (eval '(quote-syntax f)))
+  (test
+   #t
+   free-identifier=?
+   f-id
+   (eval '(extract (f #:x 8)
+                   (lv ([(proc) f2] . _) (if const? (app f3 . _) . _))
+                   f3
+                   #f)))
+  (test
+   #t
+   free-identifier=?
+   f-id
+   (eval '(extract (f #:x 8)
+                   (lv ([(proc) f2] . _) (if const? (app f3 . _) . _))
+                   f2
+                   #t)))
+  (test
+   #t
+   free-identifier=?
+   f-id
+   (eval '(extract (f #:y 9)
+                   (lv ([(proc) f2] . _) . _)
+                   f2
+                   #t)))
+  (test
+   #t
+   free-identifier=?
+   f-id
+   (eval '(extract f f2 f2 #t))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

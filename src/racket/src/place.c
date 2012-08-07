@@ -19,7 +19,6 @@
 */
 
 #include "schpriv.h"
-
 static Scheme_Object* scheme_place_enabled(int argc, Scheme_Object *args[]);
 static Scheme_Object* scheme_place_shared(int argc, Scheme_Object *args[]);
 
@@ -78,7 +77,8 @@ static void destroy_place_object_locks(Scheme_Place_Object *place_obj);
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
 static Scheme_Object *places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Table **ht, 
                                               int mode, int gcable, int can_raise_exn,
-                                              Scheme_Object **master_chain);
+                                              Scheme_Object **master_chain,
+                                              Scheme_Object **invalid_object);
 # define mzPDC_CHECK 0
 # define mzPDC_COPY 1
 # define mzPDC_UNCOPY 2
@@ -245,7 +245,7 @@ Scheme_Object *place_pumper_threads(int argc, Scheme_Object *args[]) {
 
   place = (Scheme_Place *) args[0];
   if (!SAME_TYPE(SCHEME_TYPE(args[0]), scheme_place_type))
-    scheme_wrong_type("place-pumper-threads", "place", 0, argc, args);
+    scheme_wrong_contract("place-pumper-threads", "place?", 0, argc, args);
 
   if (argc == 2) {
     tmp = args[1];
@@ -313,25 +313,27 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
     err_arg = args[4];
 
     if (!scheme_is_module_path(args[0]) && !SCHEME_PATHP(args[0]) && !SCHEME_MODNAMEP(args[0])) {
-      scheme_wrong_type("dynamic-place", "module-path or path of resolved-module-path", 0, argc, args);
+      scheme_wrong_contract("dynamic-place", "(or/c module-path? path? resolved-module-path?)", 0, argc, args);
     }
     if (!SCHEME_SYMBOLP(args[1])) {
-      scheme_wrong_type("dynamic-place", "symbol", 1, argc, args);
+      scheme_wrong_contract("dynamic-place", "symbol?", 1, argc, args);
     }
     if (SCHEME_TRUEP(in_arg) && !SCHEME_TRUEP(scheme_file_stream_port_p(1, &in_arg))) {
-      scheme_wrong_type("dynamic-place", "file-stream-input-port or #f", 2, argc, args);
+      scheme_wrong_contract("dynamic-place", "(or/c (and/c file-stream-port? input-port?) #f)", 2, argc, args);
     }
     if (SCHEME_TRUEP(out_arg) && !SCHEME_TRUEP(scheme_file_stream_port_p(1, &out_arg))) {
-      scheme_wrong_type("dynamic-place", "file-stream-output-port or #f", 3, argc, args);
+      scheme_wrong_contract("dynamic-place", "(or/c (and/c file-stream-port? input-port?) #f)", 3, argc, args);
     }
     if (SCHEME_TRUEP(err_arg) && !SCHEME_TRUEP(scheme_file_stream_port_p(1, &err_arg))) {
-      scheme_wrong_type("dynamic-place", "file-stream-output-port or #f", 4, argc, args);
+      scheme_wrong_contract("dynamic-place", "(or/c (and/c file-stream-port? input-port?) #f)", 4, argc, args);
     }
 
     if (SCHEME_PAIRP(args[0]) 
         && SAME_OBJ(SCHEME_CAR(args[0]), quote_symbol)
         && !scheme_is_predefined_module_p(args[0])) {
-      scheme_arg_mismatch("dynamic-place", "not a filesystem or predefined module-path: ", args[0]);
+      scheme_contract_error("dynamic-place", "not a filesystem or predefined module-path", 
+                            "module path", 1, args[0],
+                            NULL);
     }
 
     so = places_deep_copy_to_master(args[0]);
@@ -367,61 +369,67 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
     if (SCHEME_TRUEP(in_arg)) {
       if (scheme_port_closed_p(in_arg)) {
         close_six_fds(rw);
-        scheme_arg_mismatch("dynamic-place", "port is closed: ", in_arg);
+        scheme_contract_error("dynamic-place", "port is closed", 
+                              "port", 1, in_arg,
+                              NULL);
       }
       scheme_get_port_file_descriptor(in_arg, &tmpfd);
       tmpfd = scheme_dup_file(tmpfd);
       if (tmpfd == -1) {
         errorno = scheme_errno();
         close_six_fds(rw);
-        scheme_raise_exn(MZEXN_FAIL, "dup: error duplicating file descriptor (%e)", errorno);
+        scheme_system_error("dynamic-place", "stdin dup", errorno);
       }
       rw[0] = tmpfd;
     }
     else if (scheme_os_pipe(rw, -1)) {
       errorno = scheme_errno();
       close_six_fds(rw);
-      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM, "pipe: error creating place standard input streams (%e)", errorno);
+      scheme_system_error("dynamic-place", "stdin pipe", errorno);
     }
 
     if (SCHEME_TRUEP(out_arg)) {
       if (scheme_port_closed_p(out_arg)) {
         close_six_fds(rw);
-        scheme_arg_mismatch("dynamic-place", "port is closed: ", out_arg);
+        scheme_contract_error("dynamic-place", "port is closed", 
+                              "port", 1, out_arg,
+                              NULL);
       }
       scheme_get_port_file_descriptor(out_arg, &tmpfd);
       tmpfd = scheme_dup_file(tmpfd);
       if (tmpfd == -1) {
         errorno = scheme_errno();
         close_six_fds(rw);
-        scheme_raise_exn(MZEXN_FAIL, "dup: error duplicating file descriptor (%e)", errorno);
+        scheme_system_error("dynamic-place", "stdout dup", errorno);
       }
       rw[3] = tmpfd;
     }
     else if (scheme_os_pipe(rw + 2, -1)) {
       errorno = scheme_errno();
       close_six_fds(rw);
-      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM, "pipe: error creating place standard output streams (%e)", errorno);
+      scheme_system_error("dynamic-place", "stdout pipe", errorno);
     }
 
     if (SCHEME_TRUEP(err_arg)) {
       if (scheme_port_closed_p(err_arg)) {
         close_six_fds(rw);
-        scheme_arg_mismatch("dynamic-place", "port is closed: ", err_arg);
+        scheme_contract_error("dynamic-place", "port is closed", 
+                              "port", 1, err_arg,
+                              NULL);
       }
       scheme_get_port_file_descriptor(err_arg, &tmpfd);
       tmpfd = scheme_dup_file(tmpfd);
       if (tmpfd == -1) {
         errorno = scheme_errno();
         close_six_fds(rw);
-        scheme_raise_exn(MZEXN_FAIL, "dup: error duplicating file descriptor (%e)", errorno);
+        scheme_system_error("dynamic-place", "stderr dup", errorno);
       }
       rw[5] = tmpfd;
     }
     else if (scheme_os_pipe(rw + 4, -1)) {
       errorno = scheme_errno();
       close_six_fds(rw);
-      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM, "pipe: error creating place standard error streams (%e)", errorno);
+      scheme_system_error("dynamic-place", "stderr pipe", errorno);
     }
 
     {
@@ -504,7 +512,8 @@ static void do_place_kill(Scheme_Place *place)
   {
     mzrt_mutex_lock(place_obj->lock);
 
-    place_obj->die = 1;
+    if (!place_obj->die)
+      place_obj->die = 1;
     place_obj->refcount--;
     refcount = place_obj->refcount;
 
@@ -554,7 +563,7 @@ static Scheme_Object *place_kill(int argc, Scheme_Object *args[]) {
   place = (Scheme_Place *) args[0];
 
   if (!SAME_TYPE(SCHEME_TYPE(args[0]), scheme_place_type))
-    scheme_wrong_type("place-kill", "place", 0, argc, args);
+    scheme_wrong_contract("place-kill", "place?", 0, argc, args);
 
   do_place_kill(place);
   return scheme_void;
@@ -565,7 +574,7 @@ static Scheme_Object *place_break(int argc, Scheme_Object *args[]) {
   place = (Scheme_Place *) args[0];
 
   if (!SAME_TYPE(SCHEME_TYPE(args[0]), scheme_place_type))
-    scheme_wrong_type("place-break", "place", 0, argc, args);
+    scheme_wrong_contract("place-break", "place?", 0, argc, args);
 
   return scheme_make_integer(do_place_break(place));
 }
@@ -595,7 +604,7 @@ static Scheme_Object *make_place_dead(int argc, Scheme_Object *argv[])
   Scheme_Object *b;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_place_type))
-    scheme_wrong_type("place-dead-evt", "place", 0, argc, argv);
+    scheme_wrong_contract("place-dead-evt", "place?", 0, argc, argv);
 
   b = scheme_alloc_small_object();
   b->type = scheme_place_dead_type;
@@ -843,8 +852,28 @@ static void *mz_proc_thread_signal_worker(void *data) {
             unused_pid_statuses = next;
           free(unused_status);
           unused_status = next;
-        } else
-          add_child_status(pid, scheme_extract_child_status(status));
+        } else {
+          /* Double-check for pid in unused_pid_statuses, since
+             it may have completed between the pid-specific waitpid and the
+             non-group waitpid: */
+          prev_unused = NULL;
+          for (unused_status = unused_pid_statuses; unused_status; unused_status = unused_status->next_unused) {
+            if (unused_status->pid == pid)
+              break;
+            prev_unused = unused_status;
+          }
+          if (!unused_status) {
+            /* not in unused_pid_statuses: */
+            add_child_status(pid, scheme_extract_child_status(status));
+          } else {
+            if (prev_unused)
+              prev_unused->next_unused = unused_status->next_unused;
+            else
+              unused_pid_statuses = next;
+            free(unused_status);
+            unused_status = NULL;
+          }
+        }
       } else {
         if (is_group) {
           prev_unused = unused_status;
@@ -882,7 +911,7 @@ void scheme_done_with_process_id(int pid, int is_group)
       break;
     }
   }
-      
+
   if (st && (keep_unused || st->done)) {
     /* remove it from normal list: */
     raw_get_child_status(pid, NULL, 0, 1, st->done);
@@ -980,6 +1009,7 @@ static void add_group_signal_fd(void *signal_fd)
     a = (Group_Signal_FD *)malloc(sizeof(Group_Signal_FD) * signal_fd_count);
     memset(a, 0, sizeof(Group_Signal_FD) * signal_fd_count);
     memcpy(a, signal_fds, sizeof(Group_Signal_FD) * count);
+    if (signal_fds) free(signal_fds);
     signal_fds = a;
   }
 
@@ -1045,7 +1075,7 @@ static Scheme_Object *place_wait(int argc, Scheme_Object *args[]) {
   place = (Scheme_Place *) args[0];
 
   if (!SAME_TYPE(SCHEME_TYPE(args[0]), scheme_place_type))
-    scheme_wrong_type("place-wait", "place", 0, argc, args);
+    scheme_wrong_contract("place-wait", "place?", 0, argc, args);
   
   scheme_block_until(place_wait_ready, NULL, (Scheme_Object*)place, 0);
 
@@ -1068,24 +1098,26 @@ static Scheme_Object *place_p(int argc, Scheme_Object *args[])
 }
 
 static Scheme_Object *do_places_deep_copy(Scheme_Object *so, int mode, int gcable, 
-                                          Scheme_Object **master_chain) 
+                                          Scheme_Object **master_chain,
+                                          Scheme_Object **invalid_object) 
 {
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
   Scheme_Hash_Table *ht = NULL;
-  return places_deep_copy_worker(so, &ht, mode, gcable, gcable, master_chain);
+  return places_deep_copy_worker(so, &ht, mode, gcable, gcable, master_chain, invalid_object);
 #else
   return so;
 #endif
 }
 
 Scheme_Object *places_deep_uncopy(Scheme_Object *so) {
-  return do_places_deep_copy(so, mzPDC_UNCOPY, 1, NULL);
+  return do_places_deep_copy(so, mzPDC_UNCOPY, 1, NULL, NULL);
 }
 
 static void bad_place_message(Scheme_Object *so) {
-  scheme_arg_mismatch("place-channel-put", 
-                      "value not allowed in a message: ", 
-                      so);
+  scheme_contract_error("place-channel-put", 
+                        "value not allowed in a message", 
+                        "value", 1, so,
+                        NULL);
 }
 
 static void bad_place_message2(Scheme_Object *so, Scheme_Object *o, int can_raise_exn) {
@@ -1101,7 +1133,7 @@ static void bad_place_message2(Scheme_Object *so, Scheme_Object *o, int can_rais
       }
     }
     if (SCHEME_VEC_ELS(v)[1]) {
-      l = SCHEME_VEC_ELS(v)[0];
+      l = SCHEME_VEC_ELS(v)[1];
       while (SCHEME_PAIRP(l)) {
         scheme_close_socket_fd(SCHEME_INT_VAL(SCHEME_CAR(l)));
         l = SCHEME_CDR(l);
@@ -1161,7 +1193,8 @@ static Scheme_Object *trivial_copy(Scheme_Object *so, Scheme_Object **master_cha
 static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *ht, 
                                          Scheme_Object **fd_accumulators, intptr_t *delayed_errno, 
                                          int mode, int can_raise_exn,
-                                         Scheme_Object **master_chain) {
+                                         Scheme_Object **master_chain,
+                                         Scheme_Object **invalid_object) {
   Scheme_Object *new_so;
   int copy_mode = ((mode == mzPDC_COPY) || (mode == mzPDC_UNCOPY));
 
@@ -1204,8 +1237,8 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
         Scheme_Object *d;
         n = scheme_rational_numerator(so);
         d = scheme_rational_denominator(so);
-        n = shallow_types_copy(n, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain);
-        d = shallow_types_copy(d, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain);
+        n = shallow_types_copy(n, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain, invalid_object);
+        d = shallow_types_copy(d, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain, invalid_object);
         new_so = scheme_make_rational(n, d);
       }
       break;
@@ -1223,8 +1256,8 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
         Scheme_Object *i;
         r = scheme_complex_real_part(so);
         i = scheme_complex_imaginary_part(so);
-        r = shallow_types_copy(r, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain);
-        i = shallow_types_copy(i, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain);
+        r = shallow_types_copy(r, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain, invalid_object);
+        i = shallow_types_copy(i, NULL, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain, invalid_object);
         new_so = scheme_make_complex(r, i);
       }
       break;
@@ -1248,22 +1281,30 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
                                                     SCHEME_TYPE(so));
       break;
     case scheme_symbol_type:
-      if (SCHEME_SYM_UNINTERNEDP(so)) {
-        bad_place_message2(so, *fd_accumulators, can_raise_exn);
-        return NULL;
-      } else {
-        if (mode == mzPDC_COPY) {
-          new_so = scheme_make_sized_offset_byte_string((char *)so, SCHEME_SYMSTR_OFFSET(so), SCHEME_SYM_LEN(so), 1);
-          new_so->type = scheme_serialized_symbol_type;
-        } else if (mode != mzPDC_CHECK) {
-          scheme_log_abort("encountered symbol in bad mode");
-          abort();
+      if (mode == mzPDC_COPY) {
+        new_so = scheme_make_sized_offset_byte_string((char *)so, SCHEME_SYMSTR_OFFSET(so), SCHEME_SYM_LEN(so), 1);
+        if (SCHEME_SYM_UNINTERNEDP(so)) {
+          MZ_OPT_HASH_KEY(&((Scheme_Symbol*)new_so)->iso) = 0x1;
+        } else if (SCHEME_SYM_PARALLELP(so)) {
+          MZ_OPT_HASH_KEY(&((Scheme_Symbol*)new_so)->iso) = 0x2;
         }
+        new_so->type = scheme_serialized_symbol_type;
+      } else if (mode != mzPDC_CHECK) {
+        scheme_log_abort("encountered symbol in bad mode");
+        abort();
       }
       break;
     case scheme_serialized_symbol_type:
       if ((mode == mzPDC_UNCOPY) || (mode == mzPDC_DESER))
-        new_so = scheme_intern_exact_symbol(SCHEME_BYTE_STR_VAL(so), SCHEME_BYTE_STRLEN_VAL(so));
+        if (SCHEME_SYM_UNINTERNEDP(so)) {
+          new_so = scheme_make_exact_symbol(SCHEME_BYTE_STR_VAL(so), SCHEME_BYTE_STRLEN_VAL(so));
+        }
+        else if (SCHEME_SYM_PARALLELP(so)) {
+          new_so = scheme_intern_exact_parallel_symbol(SCHEME_BYTE_STR_VAL(so), SCHEME_BYTE_STRLEN_VAL(so));
+        }
+        else {
+          new_so = scheme_intern_exact_symbol(SCHEME_BYTE_STR_VAL(so), SCHEME_BYTE_STRLEN_VAL(so));
+        }
       else if (mode != mzPDC_CLEAN) {
         scheme_log_abort("encountered serialized symbol in bad mode");
         abort();
@@ -1314,17 +1355,18 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
           SCHEME_CPTR_FLAGS(o) |= 0x1;
           SCHEME_CPTR_VAL(o) = SCHEME_CPTR_VAL(so);
           o2 = shallow_types_copy(SCHEME_CPTR_TYPE(so), NULL, fd_accumulators, delayed_errno, mode, 
-                                  can_raise_exn, master_chain);
+                                  can_raise_exn, master_chain, invalid_object);
           SCHEME_CPTR_TYPE(o) = o2;
 
           new_so = o;
         } else {
           (void)shallow_types_copy(SCHEME_CPTR_TYPE(so), NULL, fd_accumulators, delayed_errno, mode, 
-                                   can_raise_exn, master_chain);
+                                   can_raise_exn, master_chain, invalid_object);
         }
       }
       else {
         bad_place_message2(so, *fd_accumulators, can_raise_exn);
+        if (invalid_object) *invalid_object = so;
         return NULL;
       }
       break;
@@ -1341,7 +1383,7 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
             dupfd = scheme_dup_socket(fd);
             if (dupfd == -1) {
               if (can_raise_exn)
-                scheme_raise_exn(MZEXN_FAIL_NETWORK, "dup: error duplicating socket (%e)", scheme_socket_errno());
+                scheme_system_error("dynamic-place", "socket dup", scheme_socket_errno());
               if (delayed_errno) {
                 intptr_t tmp;
                 tmp = scheme_socket_errno();
@@ -1355,7 +1397,8 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
             ssfd->type = so->type;
             ssfd->fd = dupfd;
             portname = scheme_port_name(so);
-            tmp = shallow_types_copy(portname, ht, fd_accumulators, delayed_errno, mode, can_raise_exn, master_chain);
+            tmp = shallow_types_copy(portname, ht, fd_accumulators, delayed_errno, mode, can_raise_exn,
+                                     master_chain, invalid_object);
             ssfd->name = tmp;
             return (Scheme_Object *)ssfd;
           }
@@ -1370,12 +1413,12 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
               sffd->so.type = scheme_serialized_file_fd_type;
               scheme_get_serialized_fd_flags(so, sffd);
               tmp = shallow_types_copy(scheme_port_name(so), ht, fd_accumulators, delayed_errno, mode, 
-                                       can_raise_exn, master_chain);
+                                       can_raise_exn, master_chain, invalid_object);
               sffd->name = tmp;
               dupfd = scheme_dup_file(fd);
               if (dupfd == -1) {
                 if (can_raise_exn)
-                  scheme_raise_exn(MZEXN_FAIL_FILESYSTEM, "dup: error duplicating file descriptor (%e)", scheme_errno());
+                  scheme_system_error("dynamic-place", "port dup", scheme_errno());
                 if (delayed_errno) {
                   intptr_t tmp;
                   tmp = scheme_errno();
@@ -1391,11 +1434,13 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
           }
           else {
             bad_place_message2(so, *fd_accumulators, can_raise_exn);
+            if (invalid_object) *invalid_object = so;
             return NULL;
           }
         }
         else {
           bad_place_message2(so, *fd_accumulators, can_raise_exn);
+          if (invalid_object) *invalid_object = so;
           return NULL;
         }
       }
@@ -1627,7 +1672,8 @@ static MZ_INLINE Scheme_Object *inf_get(Scheme_Object **instack, int pos, uintpt
    for recursion. */
 static Scheme_Object *places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Table **ht, 
                                               int mode, int gcable, int can_raise_exn,
-                                              Scheme_Object **master_chain) {
+                                              Scheme_Object **master_chain,
+                                              Scheme_Object **invalid_object) {
   Scheme_Object *inf_stack = NULL;
   Scheme_Object *reg0 = NULL;
   uintptr_t inf_stack_depth = 0, inf_max_depth = 0;
@@ -1640,6 +1686,9 @@ static Scheme_Object *places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
   /* lifted variables for xform*/
   Scheme_Object *pair;
   Scheme_Object *vec;
+  Scheme_Object *nht;
+  Scheme_Object *hti;
+  Scheme_Object *htk;
   intptr_t i;
   intptr_t size;
   Scheme_Structure *st;
@@ -1648,15 +1697,17 @@ static Scheme_Object *places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
   Scheme_Struct_Type *ptype;
   int local_slots;
 
-#define DEEP_DO_CDR 1
-#define DEEP_DO_FIN_PAIR 2
-#define DEEP_VEC1 3
-#define DEEP_ST1 4   
-#define DEEP_ST2 5      
-#define DEEP_SST1 6
-#define DEEP_SST2 7      
-#define DEEP_RETURN 8
-#define DEEP_DONE 9 
+#define DEEP_DO_CDR       1
+#define DEEP_DO_FIN_PAIR  2
+#define DEEP_VEC1         3
+#define DEEP_ST1          4   
+#define DEEP_ST2          5
+#define DEEP_SST1         6
+#define DEEP_SST2         7      
+#define DEEP_HT1          8
+#define DEEP_HT2          9      
+#define DEEP_RETURN      10
+#define DEEP_DONE        11
 #define RETURN do { goto DEEP_RETURN_L; } while(0);
 #define ABORT do { goto DEEP_DONE_L; } while(0);
 #define IFS_PUSH(x) inf_push(&inf_stack, x, &inf_stack_depth, &inf_max_depth, gcable)
@@ -1672,7 +1723,8 @@ static Scheme_Object *places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
   int ctr = 0;
 
   /* First, check for simple values that don't need to be hashed: */
-  new_so = shallow_types_copy(so, *ht, &fd_accumulators, &delayed_errno, mode, can_raise_exn, master_chain);
+  new_so = shallow_types_copy(so, *ht, &fd_accumulators, &delayed_errno, mode, can_raise_exn, master_chain,
+                              invalid_object);
   if (new_so) return new_so;
 
   if (*ht) {
@@ -1710,7 +1762,7 @@ DEEP_DO:
   }
 
   new_so = shallow_types_copy(so, *ht, &fd_accumulators, &delayed_errno, mode, 
-                              can_raise_exn, master_chain);
+                              can_raise_exn, master_chain, invalid_object);
   if (new_so) RETURN;
   new_so = so;
 
@@ -1820,12 +1872,14 @@ DEEP_VEC2:
 
       if (!stype->prefab_key) {
         bad_place_message2(so, fd_accumulators, can_raise_exn);
+        if (invalid_object) *invalid_object = so;
         new_so = NULL;
         ABORT;
       }
       for (i = 0; i < local_slots; i++) {
         if (!stype->immutables || stype->immutables[i] != 1) {
           bad_place_message2(so, fd_accumulators, can_raise_exn);
+          if (invalid_object) *invalid_object = so;
           new_so = NULL;
           ABORT;
         }
@@ -1949,10 +2003,107 @@ DEEP_SST2_L:
         RETURN;
       }
       break;
+    case scheme_hash_table_type:  
+    case scheme_hash_tree_type:  
+      /* if ((mode == mzPDC_COPY) || (mode == mzPDC_UNCOPY)) { */
+      if (set_mode) {
+        if (scheme_true == scheme_hash_eq_p(1, &so)) {
+          nht = scheme_make_immutable_hasheq(0, NULL);
+        }
+        else if ( scheme_true == scheme_hash_eqv_p(1, &so)) {
+          nht = scheme_make_immutable_hasheqv(0, NULL);
+        }
+        else if ( scheme_true == scheme_hash_equal_p(1, &so)) {
+          nht = scheme_make_immutable_hash(0, NULL);
+        }
+      }
+      else
+        nht = so;
+
+      /* handle cycles: */
+      scheme_hash_set(*ht, so, nht);
+      hti = scheme_hash_table_iterate_start(1,&so);
+      i = 0;
+      
+      IFS_PUSH(nht);
+      IFS_PUSH(so);
+      IFS_PUSH(hti);
+      
+      if (SCHEME_INTP(hti)) {
+        Scheme_Object *a[2];
+        a[0] = so;
+        a[1] = hti;
+        SET_R0(scheme_hash_table_iterate_key(2, a));
+        GOTO_NEXT_CONT(DEEP_DO, DEEP_HT1);
+      }
+      else {
+        goto DEEP_HT3;
+      }
+
+DEEP_HT1_L:
+      /* hash table loop*/
+      hti  = IFS_GET(0);
+      so   = IFS_GET(1);
+      nht  = IFS_GET(2);
+      IFS_PUSH(GET_R0());
+
+      {
+        Scheme_Object *a[2];                                                                                  
+        a[0] = so;                                                                                            
+        a[1] = hti;                                                                                           
+        SET_R0(scheme_hash_table_iterate_value(2, a));                                                                 
+        GOTO_NEXT_CONT(DEEP_DO, DEEP_HT2);
+      }
+
+DEEP_HT2_L:
+      htk  = IFS_POP;
+      hti  = IFS_GET(0);
+      so   = IFS_GET(1);
+      nht  = IFS_GET(2);
+
+      if (set_mode) {
+        Scheme_Object *a[3];                                                                                  
+        a[0] = nht;                                                                                            
+        a[1] = htk;                                                                                           
+        a[2] = GET_R0();                                                                                           
+        nht = scheme_hash_table_put(3, a);
+        IFS_SET(2, nht);
+      }
+      {
+        Scheme_Object *a[3];                                                                                  
+        a[0] = so;                                                                                            
+        a[1] = hti;                                                                                            
+        hti = scheme_hash_table_iterate_next(2, a);
+      }
+
+      if (SCHEME_INTP(hti)) {
+        Scheme_Object *a[2];
+        IFS_SET(0, hti);
+        a[0] = so;
+        a[1] = hti;
+        SET_R0(scheme_hash_table_iterate_key(2, a));
+        GOTO_NEXT_CONT(DEEP_DO, DEEP_HT1);
+      }
+      else {
+        goto DEEP_HT3;
+      }
+
+DEEP_HT3:
+      hti  = IFS_POP;
+      so   = IFS_POP;
+      nht  = IFS_POP;
+
+      if (set_mode) {
+        new_so = nht;
+      }
+      RETURN;
+      break;
+
     default:
       if (delayed_errno)
         scheme_warning("Error serializing place message: %e", delayed_errno);
       bad_place_message2(so, fd_accumulators, can_raise_exn);
+      if (invalid_object) *invalid_object = so;
       new_so = NULL;
       ABORT;
       break;
@@ -1970,6 +2121,8 @@ DEEP_RETURN_L:
       case DEEP_ST2:         goto DEEP_ST2_L;
       case DEEP_SST1:        goto DEEP_SST1_L;
       case DEEP_SST2:        goto DEEP_SST2_L;
+      case DEEP_HT1:         goto DEEP_HT1_L;
+      case DEEP_HT2:         goto DEEP_HT2_L;
       case DEEP_RETURN:      goto DEEP_RETURN_L;
       case DEEP_DONE:        goto DEEP_DONE_L;
       default:
@@ -1987,6 +2140,10 @@ DEEP_DONE_L:
 #undef DEEP_VEC1
 #undef DEEP_ST1
 #undef DEEP_ST2
+#undef DEEP_SST1
+#undef DEEP_SST2
+#undef DEEP_HT1
+#undef DEEP_TT2
 #undef DEEP_RETURN
 #undef DEEP_DONE
 #undef RETURNS
@@ -2113,6 +2270,8 @@ void scheme_place_check_for_interruption()
     local_die = place_obj->die;
     local_break = place_obj->pbreak;
     local_pause = place_obj->pause;
+    if (local_die)
+      place_obj->die = -1;
     place_obj->pbreak = 0;
     if (local_pause)
       place_obj->pausing = 1;
@@ -2128,7 +2287,7 @@ void scheme_place_check_for_interruption()
       break;
   }
   
-  if (local_die)
+  if (local_die > 0)
     scheme_kill_thread(scheme_main_thread);
   if (local_break)
     scheme_break_thread(NULL);
@@ -2200,14 +2359,41 @@ static void place_set_result(Scheme_Object *result)
   mzrt_mutex_unlock(place_object->lock);
 }
 
+static void terminate_current_place()
+{
+  intptr_t place_obj_die;
+  intptr_t refcount;
+  Scheme_Place_Object *place_obj;
+  
+  place_obj = place_object;
+
+  mzrt_mutex_lock(place_obj->lock);
+  
+  place_obj_die = place_obj->die;
+  place_obj->refcount--;
+  refcount = place_obj->refcount;
+  
+  mzrt_mutex_unlock(place_obj->lock);
+  
+  if (!refcount)
+    destroy_place_object_locks(place_obj);
+  
+  place_object = NULL;
+  
+  /*printf("Leavin place: proc thread id%u\n", ptid);*/
+
+  /* Beware that the destroy operation might trigger a GC to cooperate
+     with the master GC: */
+  scheme_place_instance_destroy(place_obj_die);
+}
+
 static Scheme_Object *def_place_exit_handler_proc(int argc, Scheme_Object *argv[])
 {
   scheme_log(NULL, SCHEME_LOG_DEBUG, 0, "place %d: exiting via (exit)", scheme_current_place_id);
 
   place_set_result(argv[0]);
 
-  /*printf("Leavin place: proc thread id%u\n", ptid);*/
-  scheme_place_instance_destroy(0);
+  terminate_current_place();
 
   mz_proc_thread_exit(NULL);
 
@@ -2356,26 +2542,7 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
 
   scheme_log(NULL, SCHEME_LOG_DEBUG, 0, "place %d: exiting", scheme_current_place_id);
 
-  {
-    intptr_t place_obj_die;
-    intptr_t refcount;
-
-    mzrt_mutex_lock(place_obj->lock);
-
-    place_obj_die = place_obj->die;
-    place_obj->refcount--;
-    refcount = place_obj->refcount;
-
-    mzrt_mutex_unlock(place_obj->lock);
-
-    if(!refcount) {
-      destroy_place_object_locks(place_obj);
-      place_object = NULL;
-    }
-
-    /*printf("Leavin place: proc thread id%u\n", ptid);*/
-    scheme_place_instance_destroy(place_obj_die);
-  }
+  terminate_current_place();
 
   return NULL;
 }
@@ -2387,23 +2554,24 @@ Scheme_Object *places_deep_copy_to_master(Scheme_Object *so) {
   void *original_gc;
 
   /* forces hash codes: */
-  (void)places_deep_copy_worker(so, &ht, mzPDC_CHECK, 1, 1, NULL);
+  (void)places_deep_copy_worker(so, &ht, mzPDC_CHECK, 1, 1, NULL, NULL);
   ht = NULL;
 
   original_gc = GC_switch_to_master_gc();
   scheme_start_atomic();
 
-  o = places_deep_copy_worker(so, &ht, mzPDC_COPY, 1, 0, NULL);
+  o = places_deep_copy_worker(so, &ht, mzPDC_COPY, 1, 0, NULL, NULL);
 
   scheme_end_atomic_no_swap();
   GC_switch_back_from_master(original_gc);
   return o;
 #else
-  return places_deep_copy_worker(so, &ht, mzPDC_COPY, 1, 1, NULL);
+  return places_deep_copy_worker(so, &ht, mzPDC_COPY, 1, 1, NULL, NULL);
 #endif
 }
 
-static Scheme_Object *places_serialize(Scheme_Object *so, void **msg_memory, Scheme_Object **master_chain) {
+static Scheme_Object *places_serialize(Scheme_Object *so, void **msg_memory, Scheme_Object **master_chain,
+                                       Scheme_Object **invalid_object) {
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
   Scheme_Object *new_so;
   Scheme_Object *tmp;
@@ -2412,7 +2580,7 @@ static Scheme_Object *places_serialize(Scheme_Object *so, void **msg_memory, Sch
   if (new_so) return new_so;
 
   GC_create_message_allocator();
-  new_so = do_places_deep_copy(so, mzPDC_COPY, 0, master_chain);
+  new_so = do_places_deep_copy(so, mzPDC_COPY, 0, master_chain, invalid_object);
   tmp = GC_finish_message_allocator();
   (*msg_memory) = tmp;
   return new_so;
@@ -2421,7 +2589,11 @@ static Scheme_Object *places_serialize(Scheme_Object *so, void **msg_memory, Sch
 #endif
 }
 
-Scheme_Object *scheme_places_deserialize(Scheme_Object *so, void *msg_memory) {
+Scheme_Object *scheme_places_deserialize(Scheme_Object *so, void *msg_memory) 
+/* The caller must immediately drop any reference to `so' and
+   `msg_memory' after this function returns; otherwise, since the
+   `msg_memory' page may be deallocated, a GC could crash. */
+{
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
   Scheme_Object *new_so = so;
 
@@ -2430,13 +2602,17 @@ Scheme_Object *scheme_places_deserialize(Scheme_Object *so, void *msg_memory) {
 
   /* small messages are deemed to be < 1k, this could be tuned in either direction */
   if (GC_message_objects_size(msg_memory) < 1024) {
-    new_so = do_places_deep_copy(so, mzPDC_UNCOPY, 1, NULL);
+    new_so = do_places_deep_copy(so, mzPDC_UNCOPY, 1, NULL, NULL);
     GC_dispose_short_message_allocator(msg_memory);
+    /* from this point, we must return immediately, so that any
+       reference to `so' can be dropped before GC. */
+    msg_memory = NULL;
   }
   else {
     GC_adopt_message_allocator(msg_memory);
+    msg_memory = NULL;
 #if !defined(SHARED_TABLES)
-    new_so = do_places_deep_copy(so, mzPDC_DESER, 1, NULL);
+    new_so = do_places_deep_copy(so, mzPDC_DESER, 1, NULL, NULL);
 #endif
   }
   return new_so;
@@ -2456,7 +2632,7 @@ Scheme_Object *place_send(int argc, Scheme_Object *args[])
   }
   else {
     ch = NULL;
-    scheme_wrong_type("place-channel-put", "place-channel", 0, argc, args);
+    scheme_wrong_contract("place-channel-put", "place-channel?", 0, argc, args);
   }
   place_async_send((Scheme_Place_Async_Channel *) ch->sendch, args[1]);
   return scheme_void;
@@ -2472,7 +2648,7 @@ Scheme_Object *place_receive(int argc, Scheme_Object *args[]) {
   }
   else {
     ch = NULL;
-    scheme_wrong_type("place-channel-get", "place-channel", 0, argc, args);
+    scheme_wrong_contract("place-channel-get", "place-channel?", 0, argc, args);
   }
   return place_async_receive((Scheme_Place_Async_Channel *) ch->recvch);
 }
@@ -2481,7 +2657,7 @@ static Scheme_Object* place_allowed_p(int argc, Scheme_Object *args[])
 {
   Scheme_Hash_Table *ht = NULL;
   
-  if (places_deep_copy_worker(args[0], &ht, mzPDC_CHECK, 1, 0, NULL))
+  if (places_deep_copy_worker(args[0], &ht, mzPDC_CHECK, 1, 0, NULL, NULL))
     return scheme_true;
   else
     return scheme_false;
@@ -2554,7 +2730,7 @@ static void async_channel_finalize(void *p, void* data) {
   for (i = 0; i < ch->size ; i++) {
     ht = NULL;
     if (ch->msgs[i]) {
-      (void)places_deep_copy_worker(ch->msgs[i], &ht, mzPDC_CLEAN, 0, 0, NULL);
+      (void)places_deep_copy_worker(ch->msgs[i], &ht, mzPDC_CLEAN, 0, 0, NULL, NULL);
       ch->msgs[i] = NULL;
     }
 #ifdef MZ_PRECISE_GC
@@ -2699,12 +2875,21 @@ static Scheme_Object *GC_master_make_vector(int size) {
 
 static void place_async_send(Scheme_Place_Async_Channel *ch, Scheme_Object *uo) {
   void *msg_memory = NULL;
-  Scheme_Object *o, *master_chain = NULL;
+  Scheme_Object *o, *master_chain = NULL, *invalid_object = NULL;
   intptr_t sz;
   int cnt;
 
-  o = places_serialize(uo, &msg_memory, &master_chain);
-  if (!o) bad_place_message(uo);
+  o = places_serialize(uo, &msg_memory, &master_chain, &invalid_object);
+  if (!o) {
+    if (invalid_object) {
+      scheme_contract_error("place-channel-put",
+                            "value not allowed in a message", 
+                            "value", 1, invalid_object,
+                            "message", 1, uo,
+                            NULL);
+    }
+    else bad_place_message(uo);
+  }
 
   mzrt_mutex_lock(ch->lock);
   {
@@ -2917,7 +3102,9 @@ static void register_place_object_with_channel(Scheme_Place_Async_Channel *ch, S
   }
 }
 
-static Scheme_Object *scheme_place_async_try_receive(Scheme_Place_Async_Channel *ch) {
+static Scheme_Object *scheme_place_async_try_receive_raw(Scheme_Place_Async_Channel *ch, void **msg_memory_ptr) 
+/* The result must not be retained past extraction from `*msg_memory_ptr'! */
+{
   Scheme_Object *msg = NULL;
   void *msg_memory = NULL;
   intptr_t sz;
@@ -2944,9 +3131,30 @@ static Scheme_Object *scheme_place_async_try_receive(Scheme_Place_Async_Channel 
   }
   mzrt_mutex_unlock(ch->lock);
 
-  if (msg) {
-    return scheme_places_deserialize(msg, msg_memory);
+  *msg_memory_ptr = msg_memory;
+  return msg;
+}
+
+static void cleanup_msg_memmory(void *thread) {
+  Scheme_Thread *p = thread;
+  if (p->place_channel_msg_in_flight) {
+    GC_destroy_orphan_msg_memory(p->place_channel_msg_in_flight);
+    p->place_channel_msg_in_flight = NULL;
   }
+}
+
+static Scheme_Object *scheme_place_async_try_receive(Scheme_Place_Async_Channel *ch) {
+  Scheme_Object *msg = NULL;
+  Scheme_Thread *p = scheme_current_thread;
+  GC_CAN_IGNORE void *msg_memory;
+  BEGIN_ESCAPEABLE(cleanup_msg_memmory, p);
+  msg = scheme_place_async_try_receive_raw(ch, &msg_memory);
+  if (msg) {
+    p->place_channel_msg_in_flight = msg_memory;
+    msg = scheme_places_deserialize(msg, msg_memory);
+    p->place_channel_msg_in_flight = NULL;
+  }
+  END_ESCAPEABLE();
   return msg;
 }
 
@@ -2961,19 +3169,48 @@ static int scheme_place_async_ch_ready(Scheme_Place_Async_Channel *ch) {
   return ready;
 }
 
+static Scheme_Object *place_channel_finish_ready(void *d, int argc, struct Scheme_Object *argv[]) 
+{
+  Scheme_Object *msg;
+  Scheme_Thread *p = scheme_current_thread;                                                                 
+
+  msg = *(Scheme_Object **)d;
+
+  BEGIN_ESCAPEABLE(cleanup_msg_memmory, p);
+  msg = scheme_places_deserialize(msg, p->place_channel_msg_in_flight);
+  p->place_channel_msg_in_flight = NULL;
+  END_ESCAPEABLE();
+
+  return msg;
+}
+
 static int place_channel_ready(Scheme_Object *so, Scheme_Schedule_Info *sinfo) {
   Scheme_Place_Bi_Channel *ch;
   Scheme_Object *msg = NULL;
+  Scheme_Object *wrapper;
+  void *msg_memory = NULL;
   if (SAME_TYPE(SCHEME_TYPE(so), scheme_place_type)) {
     ch = (Scheme_Place_Bi_Channel *) ((Scheme_Place *) so)->channel;
   }
   else {
     ch = (Scheme_Place_Bi_Channel *)so;
   }
-  
-  msg = scheme_place_async_try_receive((Scheme_Place_Async_Channel *) ch->recvch);
+
+  msg = scheme_place_async_try_receive_raw((Scheme_Place_Async_Channel *) ch->recvch, &msg_memory);
   if (msg != NULL) {
-    scheme_set_sync_target(sinfo, msg, NULL, NULL, 0, 0, NULL);
+    Scheme_Object **msg_holder;
+    Scheme_Thread *p = ((Syncing *)(sinfo->current_syncing))->thread;
+
+    /* Hold `msg' in atomic memory, because we're not allowed to hold onto
+       it beyond release of msg_memory, and `wrapper' and the result
+       flow into the evt system in general. */
+    msg_holder = (Scheme_Object **)scheme_malloc_atomic(sizeof(Scheme_Object*));
+    *msg_holder = msg;
+
+    p->place_channel_msg_in_flight = msg_memory;
+    wrapper = scheme_make_closed_prim(place_channel_finish_ready, msg_holder);
+    scheme_set_sync_target(sinfo, scheme_void, wrapper, NULL, 0, 0, NULL);
+
     return 1;
   }
   return 0;

@@ -2,6 +2,7 @@
 (require racket/match
          racket/contract/base
          racket/dict
+         racket/generic
          "order.rkt")
 ;; owned by ryanc
 
@@ -350,20 +351,18 @@ Levels are indexed starting at 1, as in the paper.
                     skip-list-iterate-key
                     skip-list-iterate-value))
 
-(define ordered-dict-methods
-  (vector-immutable skip-list-iterate-least
-                    skip-list-iterate-greatest
-                    skip-list-iterate-least/>?
-                    skip-list-iterate-least/>=?
-                    skip-list-iterate-greatest/<?
-                    skip-list-iterate-greatest/<=?))
-
 (struct skip-list ([head #:mutable] [num-entries #:mutable] =? <?)
         #:property prop:dict/contract
         (list dict-methods
               (vector-immutable any/c any/c skip-list-iter?
                                 #f #f #f))
-        #:property prop:ordered-dict ordered-dict-methods)
+        #:methods gen:ordered-dict
+        [(define dict-iterate-least skip-list-iterate-least)
+         (define dict-iterate-greatest skip-list-iterate-greatest)
+         (define dict-iterate-least/>? skip-list-iterate-least/>?)
+         (define dict-iterate-least/>=? skip-list-iterate-least/>=?)
+         (define dict-iterate-greatest/<? skip-list-iterate-greatest/<?)
+         (define dict-iterate-greatest/<=? skip-list-iterate-greatest/<=?)])
 
 (struct skip-list* skip-list (key-c value-c)
         #:property prop:dict/contract
@@ -372,7 +371,13 @@ Levels are indexed starting at 1, as in the paper.
                                 (lambda (s) (skip-list*-key-c s))
                                 (lambda (s) (skip-list*-value-c s))
                                 #f))
-        #:property prop:ordered-dict ordered-dict-methods)
+        #:methods gen:ordered-dict
+        [(define dict-iterate-least skip-list-iterate-least)
+         (define dict-iterate-greatest skip-list-iterate-greatest)
+         (define dict-iterate-least/>? skip-list-iterate-least/>?)
+         (define dict-iterate-least/>=? skip-list-iterate-least/>=?)
+         (define dict-iterate-greatest/<? skip-list-iterate-greatest/<?)
+         (define dict-iterate-greatest/<=? skip-list-iterate-greatest/<=?)])
 
 (struct adjustable-skip-list skip-list ()
         #:property prop:dict/contract
@@ -387,7 +392,13 @@ Levels are indexed starting at 1, as in the paper.
                                 (lambda (s) (adjustable-skip-list*-key-c s))
                                 (lambda (s) (adjustable-skip-list*-value-c s))
                                 #f))
-        #:property prop:ordered-dict ordered-dict-methods)
+        #:methods gen:ordered-dict
+        [(define dict-iterate-least skip-list-iterate-least)
+         (define dict-iterate-greatest skip-list-iterate-greatest)
+         (define dict-iterate-least/>? skip-list-iterate-least/>?)
+         (define dict-iterate-least/>=? skip-list-iterate-least/>=?)
+         (define dict-iterate-greatest/<? skip-list-iterate-greatest/<?)
+         (define dict-iterate-greatest/<=? skip-list-iterate-greatest/<=?)])
 
 (define (make-skip-list [ord datum-order]
                         #:key-contract [key-contract any/c]

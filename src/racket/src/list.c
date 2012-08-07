@@ -88,6 +88,7 @@ static Scheme_Object *immutable_box (int argc, Scheme_Object *argv[]);
 static Scheme_Object *box_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unbox (int argc, Scheme_Object *argv[]);
 static Scheme_Object *set_box (int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_box_cas (int argc, Scheme_Object *argv[]);
 static Scheme_Object *chaperone_box(int argc, Scheme_Object **argv);
 static Scheme_Object *impersonate_box(int argc, Scheme_Object **argv);
 
@@ -97,30 +98,30 @@ static Scheme_Object *make_hasheqv(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_weak_hash(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_weak_hasheq(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_weak_hasheqv(int argc, Scheme_Object *argv[]);
-static Scheme_Object *make_immutable_hash(int argc, Scheme_Object *argv[]);
-static Scheme_Object *make_immutable_hasheq(int argc, Scheme_Object *argv[]);
-static Scheme_Object *make_immutable_hasheqv(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_make_immutable_hash(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_make_immutable_hasheq(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_make_immutable_hasheqv(int argc, Scheme_Object *argv[]);
 static Scheme_Object *direct_hash(int argc, Scheme_Object *argv[]);
 static Scheme_Object *direct_hasheq(int argc, Scheme_Object *argv[]);
 static Scheme_Object *direct_hasheqv(int argc, Scheme_Object *argv[]);
 static Scheme_Object *hash_table_count(int argc, Scheme_Object *argv[]);
 static Scheme_Object *hash_table_copy(int argc, Scheme_Object *argv[]);
 static Scheme_Object *hash_p(int argc, Scheme_Object *argv[]);
-static Scheme_Object *hash_eq_p(int argc, Scheme_Object *argv[]);
-static Scheme_Object *hash_eqv_p(int argc, Scheme_Object *argv[]);
-static Scheme_Object *hash_equal_p(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_hash_eq_p(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_hash_eqv_p(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_hash_equal_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *hash_weak_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *hash_table_put_bang(int argc, Scheme_Object *argv[]);
-static Scheme_Object *hash_table_put(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_hash_table_put(int argc, Scheme_Object *argv[]);
 static Scheme_Object *hash_table_get(int argc, Scheme_Object *argv[]);
 static Scheme_Object *hash_table_remove_bang(int argc, Scheme_Object *argv[]);
 static Scheme_Object *hash_table_remove(int argc, Scheme_Object *argv[]);
 static Scheme_Object *hash_table_map(int argc, Scheme_Object *argv[]);
 static Scheme_Object *hash_table_for_each(int argc, Scheme_Object *argv[]);
-static Scheme_Object *hash_table_iterate_start(int argc, Scheme_Object *argv[]);
-static Scheme_Object *hash_table_iterate_next(int argc, Scheme_Object *argv[]);
-static Scheme_Object *hash_table_iterate_value(int argc, Scheme_Object *argv[]);
-static Scheme_Object *hash_table_iterate_key(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_hash_table_iterate_start(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_hash_table_iterate_next(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_hash_table_iterate_value(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_hash_table_iterate_key(int argc, Scheme_Object *argv[]);
 static Scheme_Object *eq_hash_code(int argc, Scheme_Object *argv[]);
 static Scheme_Object *equal_hash_code(int argc, Scheme_Object *argv[]);
 static Scheme_Object *equal_hash2_code(int argc, Scheme_Object *argv[]);
@@ -177,17 +178,20 @@ scheme_init_list (Scheme_Env *env)
   scheme_add_global_constant ("null", scheme_null, env);
 
   p = scheme_make_folding_prim(pair_p_prim, "pair?", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant ("pair?", p, env);
 
   p = scheme_make_folding_prim(mpair_p_prim, "mpair?", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant ("mpair?", p, env);
 
   REGISTER_SO(scheme_cons_proc);
   p = scheme_make_immed_prim(cons_prim, "cons", 2, 2);
   scheme_cons_proc = p;
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant ("cons", p, env);
 
   p = scheme_make_folding_prim(scheme_checked_car, "car", 1, 1, 1);
@@ -201,7 +205,8 @@ scheme_init_list (Scheme_Env *env)
   REGISTER_SO(scheme_mcons_proc);
   p = scheme_make_immed_prim(mcons_prim, "mcons", 2, 2);
   scheme_mcons_proc = p;
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant ("mcons", p, env);
 
   p = scheme_make_immed_prim(scheme_checked_mcar, "mcar", 1, 1);
@@ -221,11 +226,13 @@ scheme_init_list (Scheme_Env *env)
   scheme_add_global_constant ("set-mcdr!", p, env);
 
   p = scheme_make_folding_prim(null_p_prim, "null?", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant ("null?", p, env);
 
   p = scheme_make_folding_prim(list_p_prim, "list?", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant ("list?", p, env);
 
   REGISTER_SO(scheme_list_proc);
@@ -233,7 +240,8 @@ scheme_init_list (Scheme_Env *env)
   scheme_list_proc = p;
   SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
                                 | SCHEME_PRIM_IS_BINARY_INLINED
-                                | SCHEME_PRIM_IS_NARY_INLINED);
+                                | SCHEME_PRIM_IS_NARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant ("list", p, env);
 
   REGISTER_SO(scheme_list_star_proc);
@@ -241,7 +249,8 @@ scheme_init_list (Scheme_Env *env)
   scheme_list_star_proc = p;
   SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
                                 | SCHEME_PRIM_IS_BINARY_INLINED
-                                | SCHEME_PRIM_IS_NARY_INLINED);
+                                | SCHEME_PRIM_IS_NARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant ("list*", p, env);
 
   scheme_add_global_constant("immutable?",
@@ -419,17 +428,17 @@ scheme_init_list (Scheme_Env *env)
   REGISTER_SO(scheme_box_proc);
   p = scheme_make_immed_prim(box, BOX, 1, 1);
   scheme_box_proc = p;
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;  
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant(BOX, p, env);
 
-  scheme_add_global_constant("box-immutable",
-			     scheme_make_immed_prim(immutable_box,
-						    "box-immutable",
-						    1, 1),
-			     env);
+  p = scheme_make_immed_prim(immutable_box, "box-immutable", 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_OMITABLE;
+  scheme_add_global_constant("box-immutable", p, env);
   
   p = scheme_make_folding_prim(box_p, BOXP, 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;  
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant(BOXP, p, env);
 
   p = scheme_make_noncm_prim(unbox, UNBOX, 1, 1);
@@ -439,6 +448,10 @@ scheme_init_list (Scheme_Env *env)
   p = scheme_make_immed_prim(set_box, SETBOX, 2, 2);
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;  
   scheme_add_global_constant(SETBOX, p, env);
+
+  p = scheme_make_immed_prim(scheme_box_cas, "box-cas!", 3, 3);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_NARY_INLINED;  
+  scheme_add_global_constant("box-cas!", p, env);
 
   scheme_add_global_constant("chaperone-box",
                              scheme_make_prim_w_arity(chaperone_box,
@@ -482,17 +495,17 @@ scheme_init_list (Scheme_Env *env)
 						    0, 1),
 			     env);
   scheme_add_global_constant("make-immutable-hash",
-			     scheme_make_immed_prim(make_immutable_hash,
+			     scheme_make_immed_prim(scheme_make_immutable_hash,
 						    "make-immutable-hash",
 						    0, 1),
 			     env);
   scheme_add_global_constant("make-immutable-hasheq",
-			     scheme_make_immed_prim(make_immutable_hasheq,
+			     scheme_make_immed_prim(scheme_make_immutable_hasheq,
 						    "make-immutable-hasheq",
 						    0, 1),
 			     env);
   scheme_add_global_constant("make-immutable-hasheqv",
-			     scheme_make_immed_prim(make_immutable_hasheqv,
+			     scheme_make_immed_prim(scheme_make_immutable_hasheqv,
 						    "make-immutable-hasheqv",
 						    0, 1),
 			     env);
@@ -517,17 +530,17 @@ scheme_init_list (Scheme_Env *env)
 						      1, 1, 1),
 			     env);
   scheme_add_global_constant("hash-eq?",
-			     scheme_make_folding_prim(hash_eq_p,
+			     scheme_make_folding_prim(scheme_hash_eq_p,
 						      "hash-eq?",
 						      1, 1, 1),
 			     env);
   scheme_add_global_constant("hash-eqv?",
-			     scheme_make_folding_prim(hash_eqv_p,
+			     scheme_make_folding_prim(scheme_hash_eqv_p,
 						      "hash-eqv?",
 						      1, 1, 1),
 			     env);
   scheme_add_global_constant("hash-equal?",
-			     scheme_make_folding_prim(hash_equal_p,
+			     scheme_make_folding_prim(scheme_hash_equal_p,
 						      "hash-equal?",
 						      1, 1, 1),
 			     env);
@@ -552,7 +565,7 @@ scheme_init_list (Scheme_Env *env)
 						    3, 3),
 			     env);
   scheme_add_global_constant("hash-set",
-			     scheme_make_noncm_prim(hash_table_put,
+			     scheme_make_noncm_prim(scheme_hash_table_put,
 						    "hash-set",
 						    3, 3),
 			     env);
@@ -581,22 +594,22 @@ scheme_init_list (Scheme_Env *env)
 			     env);
 
   scheme_add_global_constant("hash-iterate-first",
-			     scheme_make_immed_prim(hash_table_iterate_start,
+			     scheme_make_immed_prim(scheme_hash_table_iterate_start,
 						    "hash-iterate-first",
                                                     1, 1),
 			     env);
   scheme_add_global_constant("hash-iterate-next",
-			     scheme_make_immed_prim(hash_table_iterate_next,
+			     scheme_make_immed_prim(scheme_hash_table_iterate_next,
 						    "hash-iterate-next",
                                                     2, 2),
 			     env);
   scheme_add_global_constant("hash-iterate-value",
-			     scheme_make_noncm_prim(hash_table_iterate_value,
+			     scheme_make_noncm_prim(scheme_hash_table_iterate_value,
 						    "hash-iterate-value",
                                                     2, 2),
 			     env);
   scheme_add_global_constant("hash-iterate-key",
-			     scheme_make_noncm_prim(hash_table_iterate_key,
+			     scheme_make_noncm_prim(scheme_hash_table_iterate_key,
 						    "hash-iterate-key",
                                                     2, 2),
 			     env);
@@ -735,7 +748,7 @@ scheme_init_unsafe_list (Scheme_Env *env)
                                 | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_add_global_constant ("unsafe-cdr", p, env);
 
-  p = scheme_make_folding_prim(unsafe_list_ref, "unsafe-list-tail", 2, 2, 1);
+  p = scheme_make_folding_prim(unsafe_list_ref, "unsafe-list-ref", 2, 2, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
                                 | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_add_global_constant ("unsafe-list-ref", p, env);
@@ -747,12 +760,14 @@ scheme_init_unsafe_list (Scheme_Env *env)
 
   p = scheme_make_immed_prim(unsafe_mcar, "unsafe-mcar", 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
-                                | SCHEME_PRIM_IS_UNSAFE_OMITABLE);
+                                | SCHEME_PRIM_IS_UNSAFE_OMITABLE
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant ("unsafe-mcar", p, env);
 
   p = scheme_make_immed_prim(unsafe_mcdr, "unsafe-mcdr", 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
-                                | SCHEME_PRIM_IS_UNSAFE_OMITABLE);
+                                | SCHEME_PRIM_IS_UNSAFE_OMITABLE
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant ("unsafe-mcdr", p, env);
 
   p = scheme_make_immed_prim(unsafe_set_mcar, "unsafe-set-mcar!", 2, 2);
@@ -765,12 +780,14 @@ scheme_init_unsafe_list (Scheme_Env *env)
   
   p = scheme_make_immed_prim(unsafe_unbox, "unsafe-unbox", 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
-                                | SCHEME_PRIM_IS_UNSAFE_OMITABLE);
+                                | SCHEME_PRIM_IS_UNSAFE_OMITABLE
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("unsafe-unbox", p, env);
 
   p = scheme_make_immed_prim(unsafe_unbox_star, "unsafe-unbox*", 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
-                                | SCHEME_PRIM_IS_UNSAFE_OMITABLE);
+                                | SCHEME_PRIM_IS_UNSAFE_OMITABLE
+                                | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("unsafe-unbox*", p, env);
 
   p = scheme_make_immed_prim(unsafe_set_box, "unsafe-set-box!", 2, 2);
@@ -780,6 +797,11 @@ scheme_init_unsafe_list (Scheme_Env *env)
   p = scheme_make_immed_prim(unsafe_set_box_star, "unsafe-set-box*!", 2, 2);
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
   scheme_add_global_constant("unsafe-set-box*!", p, env);
+
+  p = scheme_make_prim_w_arity(scheme_box_cas, "unsafe-box*-cas!", 3, 3);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_NARY_INLINED;
+  scheme_add_global_constant("unsafe-box*-cas!", p, env);
+
 }
 
 Scheme_Object *scheme_make_pair(Scheme_Object *car, Scheme_Object *cdr)
@@ -996,7 +1018,7 @@ Scheme_Object *
 scheme_checked_car (int argc, Scheme_Object *argv[])
 {
   if (!SCHEME_PAIRP(argv[0]))
-    scheme_wrong_type("car", "pair", 0, argc, argv);
+    scheme_wrong_contract("car", "pair?", 0, argc, argv);
   return (SCHEME_CAR (argv[0]));
 }
 
@@ -1004,7 +1026,7 @@ Scheme_Object *
 scheme_checked_cdr (int argc, Scheme_Object *argv[])
 {
   if (!SCHEME_PAIRP(argv[0]))
-    scheme_wrong_type("cdr", "pair", 0, argc, argv);
+    scheme_wrong_contract("cdr", "pair?", 0, argc, argv);
 
   return (SCHEME_CDR (argv[0]));
 }
@@ -1013,7 +1035,7 @@ Scheme_Object *
 scheme_checked_mcar (int argc, Scheme_Object *argv[])
 {
   if (!SCHEME_MPAIRP(argv[0]))
-    scheme_wrong_type("mcar", "mutable-pair", 0, argc, argv);
+    scheme_wrong_contract("mcar", "mpair?", 0, argc, argv);
   return (SCHEME_MCAR (argv[0]));
 }
 
@@ -1021,7 +1043,7 @@ Scheme_Object *
 scheme_checked_mcdr (int argc, Scheme_Object *argv[])
 {
   if (!SCHEME_MUTABLE_PAIRP(argv[0]))
-    scheme_wrong_type("mcdr", "mutable-pair", 0, argc, argv);
+    scheme_wrong_contract("mcdr", "mpair?", 0, argc, argv);
 
   return (SCHEME_MCDR (argv[0]));
 }
@@ -1030,7 +1052,7 @@ Scheme_Object *
 scheme_checked_set_mcar (int argc, Scheme_Object *argv[])
 {
   if (!SCHEME_MPAIRP(argv[0]))
-    scheme_wrong_type("set-mcar!", "mutable-pair", 0, argc, argv);
+    scheme_wrong_contract("set-mcar!", "mpair?", 0, argc, argv);
 
   SCHEME_MCAR(argv[0]) = argv[1];
   return scheme_void;
@@ -1040,7 +1062,7 @@ Scheme_Object *
 scheme_checked_set_mcdr (int argc, Scheme_Object *argv[])
 {
   if (!SCHEME_MPAIRP(argv[0]))
-    scheme_wrong_type("set-mcdr!", "mutable-pair", 0, argc, argv);
+    scheme_wrong_contract("set-mcdr!", "mpair?", 0, argc, argv);
 
   SCHEME_MCDR(argv[0]) = argv[1];
   return scheme_void;
@@ -1181,7 +1203,7 @@ length_prim (int argc, Scheme_Object *argv[])
   int l;
 
   if (!scheme_is_list(argv[0]))
-    scheme_wrong_type("length", "proper list", 0, argc, argv);
+    scheme_wrong_contract("length", "list?", 0, argc, argv);
 
   l = scheme_list_length(argv[0]);
 
@@ -1214,7 +1236,7 @@ scheme_append(Scheme_Object *l1, Scheme_Object *l2)
   }
 
   if (!SCHEME_NULLP(l1))
-    scheme_wrong_type("append", "proper list", -1, 0, &orig1);
+    scheme_wrong_contract("append", "list?", -1, 0, &orig1);
 
   if (!last)
     return l2;
@@ -1257,13 +1279,24 @@ reverse_prim (int argc, Scheme_Object *argv[])
   lst = argv[0];
   while (!SCHEME_NULLP (lst)) {
     if (!SCHEME_PAIRP(lst))
-      scheme_wrong_type("reverse", "proper list", 0, argc, argv);
+      scheme_wrong_contract("reverse", "list?", 0, argc, argv);
     last = cons(SCHEME_CAR (lst), last);
     lst = SCHEME_CDR (lst);
 
     SCHEME_USE_FUEL(1);
   }
   return (last);
+}
+
+static void past_end(const char *name, Scheme_Object *lst, Scheme_Object *index, Scheme_Object *orig_lst)
+{
+  scheme_contract_error(name,
+                        (SCHEME_NULLP(lst) 
+                         ? "index too large for list"
+                         : "index reaches a non-pair"),
+                        "index", 1, index,
+                        "in", 1, orig_lst,
+                        NULL);
 }
 
 #define OCCASIONAL_CHECK ((int)0xFF)
@@ -1279,23 +1312,27 @@ do_list_ref(char *name, int takecar, int argc, Scheme_Object *argv[])
   intptr_t i, k;
   Scheme_Object *lst, *index, *bnindex;
 
-  if (SCHEME_BIGNUMP(argv[1])) {
-    bnindex = argv[1];
-    k = 0;
-  } else if (!SCHEME_INTP(argv[1])) {
-    scheme_wrong_type(name, "non-negative exact integer", 1, argc, argv);
-    return NULL;
-  } else {
-    bnindex = NULL;
-    k = SCHEME_INT_VAL(argv[1]);
-  }
-
   lst = argv[0];
   index = argv[1];
 
+  if (takecar && !SCHEME_PAIRP(lst)) {
+    scheme_wrong_contract(name, "pair?", 0, argc, argv);;
+  }
+
+  if (SCHEME_BIGNUMP(index)) {
+    bnindex = index;
+    k = 0;
+  } else if (!SCHEME_INTP(index)) {
+    scheme_wrong_contract(name, "exact-nonnegative-integer?", 1, argc, argv);
+    return NULL;
+  } else {
+    bnindex = NULL;
+    k = SCHEME_INT_VAL(index);
+  }
+
   if ((bnindex && !SCHEME_BIGPOS(bnindex))
       || (!bnindex && (k < 0))) {
-    scheme_wrong_type(name, "non-negative exact integer", 1, argc, argv);
+    scheme_wrong_contract(name, "exact-nonnegative-integer?", 1, argc, argv);
     return NULL;
   }
 
@@ -1312,15 +1349,7 @@ do_list_ref(char *name, int takecar, int argc, Scheme_Object *argv[])
 
     for (i = 0; i < k; i++) {
       if (!SCHEME_PAIRP(lst)) {
-	char *lstr;
-	intptr_t llen;
-
-	lstr = scheme_make_provided_string(argv[0], 2, &llen);
-	scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-			 "%s: index %s too large for list%s: %t", name,
-			 scheme_make_provided_string(index, 2, NULL),
-			 SCHEME_NULLP(lst) ? "" : " (not a proper list)",
-			 lstr, llen);
+        past_end(name, lst, index, argv[0]);
 	return NULL;
       }
       lst = SCHEME_CDR(lst);
@@ -1331,15 +1360,7 @@ do_list_ref(char *name, int takecar, int argc, Scheme_Object *argv[])
 
   if (takecar) {
     if (!SCHEME_PAIRP(lst)) {
-      char *lstr;
-      intptr_t llen;
-
-      lstr = scheme_make_provided_string(argv[0], 2, &llen);
-      scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-		       "%s: index %s too large for list%s: %t", name,
-		       scheme_make_provided_string(index, 2, NULL),
-		       SCHEME_NULLP(lst) ? "" : " (not a proper list)",
-		       lstr, llen);
+      past_end(name, lst, index, argv[0]);
       return NULL;
     }
 
@@ -1360,6 +1381,14 @@ scheme_checked_list_ref(int argc, Scheme_Object *argv[])
   return do_list_ref("list-ref", 1, argc, argv);
 }
 
+static void mem_past_end(const char *name, Scheme_Object *s_arg, Scheme_Object *arg)
+{
+  scheme_contract_error(name,
+                        "reached a non-pair",
+                        "in", 1, arg,
+                        "looking for", 1, s_arg,
+                        NULL);
+}
 
 #define GEN_MEM(name, scheme_name, comp) \
 static Scheme_Object * \
@@ -1386,9 +1415,7 @@ name (int argc, Scheme_Object *argv[]) \
       } \
     } \
   if (!SCHEME_NULLP(list)) { \
-    scheme_raise_exn(MZEXN_FAIL_CONTRACT, \
-		     "%s: not a proper list: %V", #scheme_name, \
-		     argv[1]); \
+    mem_past_end(#scheme_name, argv[0], argv[1]);        \
   } \
   return (scheme_false); \
 }
@@ -1396,6 +1423,16 @@ name (int argc, Scheme_Object *argv[]) \
 GEN_MEM(memv, memv, scheme_eqv)
 GEN_MEM(memq, memq, SAME_OBJ)
 GEN_MEM(member, member, scheme_equal)
+
+static void ass_non_pair(const char *name, Scheme_Object *np, Scheme_Object *s_arg, Scheme_Object *arg)
+{
+  scheme_contract_error(name,
+                        "found a non-pair element",
+                        "at", 1, np,
+                        "in", 1, arg,
+                        "looking for", 1, s_arg,
+                        NULL);
+}
 
 #define GEN_ASS(name, scheme_name, comp) \
 static Scheme_Object * \
@@ -1407,15 +1444,7 @@ name (int argc, Scheme_Object *argv[]) \
     { \
       pair = SCHEME_CAR (list); \
       if (!SCHEME_PAIRP (pair)) {\
-        char *npstr, *lstr; \
-        intptr_t nplen, llen; \
-        npstr = scheme_make_provided_string(pair, 2, &nplen); \
-        lstr = scheme_make_provided_string(argv[1], 2, &llen); \
-	scheme_raise_exn(MZEXN_FAIL_CONTRACT, \
-			 "%s: non-pair found in list: %t in %t", #scheme_name, \
-			 npstr, nplen, \
-			 lstr, llen); \
-	return NULL; \
+        ass_non_pair(#scheme_name, pair, argv[0], argv[1]); \
       } \
       if (comp (argv[0], SCHEME_CAR (pair))) \
 	{ \
@@ -1435,9 +1464,7 @@ name (int argc, Scheme_Object *argv[]) \
       } \
     } \
   if (!SCHEME_NULLP(list)) {\
-    scheme_raise_exn(MZEXN_FAIL_CONTRACT, \
-		     "%s: not a proper list: %V", #scheme_name, \
-		     argv[1]); \
+    mem_past_end(#scheme_name, argv[0], argv[1]); \
   } \
   return (scheme_false); \
 }
@@ -1446,46 +1473,46 @@ GEN_ASS(assv, assv, scheme_eqv)
 GEN_ASS(assq, assq, SAME_OBJ)
 GEN_ASS(assoc, assoc, scheme_equal)
 
-#define LISTFUNC2(name, C, D) \
+#define LISTFUNC2(name, C, D, pred)                  \
 Scheme_Object * \
 scheme_checked_ ## name (int argc, Scheme_Object *argv[]) \
 { \
   if (!(SCHEME_PAIRP(argv[0]) \
 	&& SCHEME_PAIRP(D(argv[0])))) \
-      scheme_wrong_type(#name, #name "able value", 0, argc, argv); \
+      scheme_wrong_contract(#name, pred, 0, argc, argv); \
   return C(D(argv[0])); \
 }
 
-LISTFUNC2(cddr, SCHEME_CDR, SCHEME_CDR)
-LISTFUNC2(cadr, SCHEME_CAR, SCHEME_CDR)
-LISTFUNC2(cdar, SCHEME_CDR, SCHEME_CAR)
-LISTFUNC2(caar, SCHEME_CAR, SCHEME_CAR)
+LISTFUNC2(cddr, SCHEME_CDR, SCHEME_CDR, "(cons/c any/c pair?)")
+LISTFUNC2(cadr, SCHEME_CAR, SCHEME_CDR, "(cons/c any/c pair?)")
+LISTFUNC2(cdar, SCHEME_CDR, SCHEME_CAR, "(cons/c pair? any/c)")
+LISTFUNC2(caar, SCHEME_CAR, SCHEME_CAR, "(cons/c pair? any/c)")
 
-#define LISTFUNC3(name, B, C, D) \
+#define LISTFUNC3(name, B, C, D, pred)               \
 static Scheme_Object * \
 name ## _prim (int argc, Scheme_Object *argv[]) \
 { \
   if (!((SCHEME_PAIRP(argv[0])) \
 	&& SCHEME_PAIRP(D(argv[0])) \
 	&& SCHEME_PAIRP(C(D(argv[0]))))) \
-    scheme_wrong_type(#name, #name "able value", 0, argc, argv); \
+    scheme_wrong_contract(#name, pred, 0, argc, argv); \
   return B (C (D (argv[0]))); \
 }
 
-LISTFUNC3(cdddr, SCHEME_CDR, SCHEME_CDR, SCHEME_CDR)
+LISTFUNC3(cdddr, SCHEME_CDR, SCHEME_CDR, SCHEME_CDR, "(cons/c any/c (cons/c any/c pair?))")
 
-LISTFUNC3(caddr, SCHEME_CAR, SCHEME_CDR, SCHEME_CDR)
-LISTFUNC3(cdadr, SCHEME_CDR, SCHEME_CAR, SCHEME_CDR)
-LISTFUNC3(cddar, SCHEME_CDR, SCHEME_CDR, SCHEME_CAR)
+LISTFUNC3(caddr, SCHEME_CAR, SCHEME_CDR, SCHEME_CDR, "(cons/c (cons/c any/c pair?) any/c)")
+LISTFUNC3(cdadr, SCHEME_CDR, SCHEME_CAR, SCHEME_CDR, "(cons/c any/c (cons/c pair? any/c))")
+LISTFUNC3(cddar, SCHEME_CDR, SCHEME_CDR, SCHEME_CAR, "(cons/c any/c (cons/c any/c pair?))")
 
-LISTFUNC3(cdaar, SCHEME_CDR, SCHEME_CAR, SCHEME_CAR)
-LISTFUNC3(cadar, SCHEME_CAR, SCHEME_CDR, SCHEME_CAR)
-LISTFUNC3(caadr, SCHEME_CAR, SCHEME_CAR, SCHEME_CDR)
+LISTFUNC3(cdaar, SCHEME_CDR, SCHEME_CAR, SCHEME_CAR, "(cons/c any/c (cons/c pair? any/c))")
+LISTFUNC3(cadar, SCHEME_CAR, SCHEME_CDR, SCHEME_CAR, "(cons/c (cons/c any/c pair?) any/c)")
+LISTFUNC3(caadr, SCHEME_CAR, SCHEME_CAR, SCHEME_CDR, "(cons/c (cons/c pair? any/c) any/c)")
 
-LISTFUNC3(caaar, SCHEME_CAR, SCHEME_CAR, SCHEME_CAR)
+LISTFUNC3(caaar, SCHEME_CAR, SCHEME_CAR, SCHEME_CAR, "(cons/c (cons/c pair? any/c) any/c)")
 
 
-#define LISTFUNC4(name, A, B, C, D) \
+#define LISTFUNC4(name, A, B, C, D, pred)            \
 static Scheme_Object * \
 name ## _prim (int argc, Scheme_Object *argv[]) \
 { \
@@ -1493,30 +1520,30 @@ name ## _prim (int argc, Scheme_Object *argv[]) \
 	&& SCHEME_PAIRP(D (argv[0])) \
 	&& SCHEME_PAIRP(C(D(argv[0]))) \
 	&&SCHEME_PAIRP(B(C(D(argv[0]))))))\
-    scheme_wrong_type(#name, #name "able value", 0, argc, argv); \
+    scheme_wrong_contract(#name, pred, 0, argc, argv); \
   return A(B(C(D(argv[0]))));\
 }
 
-LISTFUNC4(cddddr, SCHEME_CDR, SCHEME_CDR, SCHEME_CDR, SCHEME_CDR)
+LISTFUNC4(cddddr, SCHEME_CDR, SCHEME_CDR, SCHEME_CDR, SCHEME_CDR, "(cons/c any/c (cons/c any/c (cons/c any/c pair?)))")
 
-LISTFUNC4(cadddr, SCHEME_CAR, SCHEME_CDR, SCHEME_CDR, SCHEME_CDR)
-LISTFUNC4(cdaddr, SCHEME_CDR, SCHEME_CAR, SCHEME_CDR, SCHEME_CDR)
-LISTFUNC4(cddadr, SCHEME_CDR, SCHEME_CDR, SCHEME_CAR, SCHEME_CDR)
-LISTFUNC4(cdddar, SCHEME_CDR, SCHEME_CDR, SCHEME_CDR, SCHEME_CAR)
+LISTFUNC4(cadddr, SCHEME_CAR, SCHEME_CDR, SCHEME_CDR, SCHEME_CDR, "(cons/c (cons/c any/c (cons/c any/c pair?)) any/c)")
+LISTFUNC4(cdaddr, SCHEME_CDR, SCHEME_CAR, SCHEME_CDR, SCHEME_CDR, "(cons/c any/c (cons/c (cons/c any/c pair?) any/c))")
+LISTFUNC4(cddadr, SCHEME_CDR, SCHEME_CDR, SCHEME_CAR, SCHEME_CDR, "(cons/c any/c (cons/c any/c (cons/c pair? any/c)))")
+LISTFUNC4(cdddar, SCHEME_CDR, SCHEME_CDR, SCHEME_CDR, SCHEME_CAR, "(cons/c any/c (cons/c any/c (cons/c any/c pair?)))")
 
-LISTFUNC4(caaddr, SCHEME_CAR, SCHEME_CAR, SCHEME_CDR, SCHEME_CDR)
-LISTFUNC4(cadadr, SCHEME_CAR, SCHEME_CDR, SCHEME_CAR, SCHEME_CDR)
-LISTFUNC4(caddar, SCHEME_CAR, SCHEME_CDR, SCHEME_CDR, SCHEME_CAR)
-LISTFUNC4(cdaadr, SCHEME_CDR, SCHEME_CAR, SCHEME_CAR, SCHEME_CDR)
-LISTFUNC4(cdadar, SCHEME_CDR, SCHEME_CAR, SCHEME_CDR, SCHEME_CAR)
-LISTFUNC4(cddaar, SCHEME_CDR, SCHEME_CDR, SCHEME_CAR, SCHEME_CAR)
+LISTFUNC4(caaddr, SCHEME_CAR, SCHEME_CAR, SCHEME_CDR, SCHEME_CDR, "(cons/c (cons/c (cons/c any/c pair?) any/c) any/c)")
+LISTFUNC4(cadadr, SCHEME_CAR, SCHEME_CDR, SCHEME_CAR, SCHEME_CDR, "(cons/c (cons/c any/c (cons/c pair? any/c)) any/c)")
+LISTFUNC4(caddar, SCHEME_CAR, SCHEME_CDR, SCHEME_CDR, SCHEME_CAR, "(cons/c (cons/c any/c (cons/c any/c pair?)) any/c)")
+LISTFUNC4(cdaadr, SCHEME_CDR, SCHEME_CAR, SCHEME_CAR, SCHEME_CDR, "(cons/c any/c (cons/c (cons/c pair? any/c) any/c))")
+LISTFUNC4(cdadar, SCHEME_CDR, SCHEME_CAR, SCHEME_CDR, SCHEME_CAR, "(cons/c any/c (cons/c (cons/c any/c pair?) any/c))")
+LISTFUNC4(cddaar, SCHEME_CDR, SCHEME_CDR, SCHEME_CAR, SCHEME_CAR, "(cons/c any/c (cons/c any/c (cons/c pair? any/c)))")
 
-LISTFUNC4(cdaaar, SCHEME_CDR, SCHEME_CAR, SCHEME_CAR, SCHEME_CAR)
-LISTFUNC4(cadaar, SCHEME_CAR, SCHEME_CDR, SCHEME_CAR, SCHEME_CAR)
-LISTFUNC4(caadar, SCHEME_CAR, SCHEME_CAR, SCHEME_CDR, SCHEME_CAR)
-LISTFUNC4(caaadr, SCHEME_CAR, SCHEME_CAR, SCHEME_CAR, SCHEME_CDR)
+LISTFUNC4(cdaaar, SCHEME_CDR, SCHEME_CAR, SCHEME_CAR, SCHEME_CAR, "(cons/c any/c (cons/c (cons/c pair? any/c) any/c))")
+LISTFUNC4(cadaar, SCHEME_CAR, SCHEME_CDR, SCHEME_CAR, SCHEME_CAR, "(cons/c (cons/c any/c (cons/c pair? any/c)) any/c)")
+LISTFUNC4(caadar, SCHEME_CAR, SCHEME_CAR, SCHEME_CDR, SCHEME_CAR, "(cons/c (cons/c (cons/c any/c pair?) any/c) any/c)")
+LISTFUNC4(caaadr, SCHEME_CAR, SCHEME_CAR, SCHEME_CAR, SCHEME_CDR, "(cons/c (cons/c (cons/c pair? any/c) any/c) any/c)")
 
-LISTFUNC4(caaaar, SCHEME_CAR, SCHEME_CAR, SCHEME_CAR, SCHEME_CAR)
+LISTFUNC4(caaaar, SCHEME_CAR, SCHEME_CAR, SCHEME_CAR, SCHEME_CAR, "(cons/c (cons/c (cons/c pair? any/c) any/c) any/c)")
 
 Scheme_Object *scheme_box(Scheme_Object *v)
 {
@@ -1573,10 +1600,7 @@ static Scheme_Object *chaperone_unbox(Scheme_Object *obj)
 
   if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_IMPERSONATOR))
     if (!scheme_chaperone_of(obj, orig))
-      scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-                       "unbox: chaperone produced a result: %V that is not a chaperone of the original result: %V",
-                       obj,
-                       orig);
+      scheme_wrong_chaperoned("unbox", "result", orig, obj);
 
   return obj;
 }
@@ -1588,10 +1612,40 @@ Scheme_Object *scheme_unbox(Scheme_Object *obj)
         && SCHEME_BOXP(SCHEME_CHAPERONE_VAL(obj)))
       return chaperone_unbox(obj);
 
-    scheme_wrong_type(UNBOX, "box", 0, 1, &obj);
+    scheme_wrong_contract(UNBOX, "box?", 0, 1, &obj);
   }
 
   return (Scheme_Object *)SCHEME_BOX_VAL(obj);
+}
+
+Scheme_Object *scheme_box_cas(int argc, Scheme_Object *argv[])
+XFORM_SKIP_PROC
+{
+  Scheme_Object *box = argv[0];
+  Scheme_Object *ov = argv[1];
+  Scheme_Object *nv = argv[2];
+
+  /* This procedure is used for both the safe and unsafe version, but
+   * the JIT elides the checking for the unsafe version.
+   */
+
+  if (!SCHEME_MUTABLE_BOXP(box)) {
+    scheme_wrong_contract("box-cas!", "(and/c box? (not immutable?) (not impersonator?))", 0, 1, &box);
+  }
+
+#ifdef MZ_USE_FUTURES
+  return mzrt_cas((volatile size_t *)(&SCHEME_BOX_VAL(box)), 
+		  (size_t)ov, (size_t)nv)
+    ? scheme_true : scheme_false;
+#else
+  /* For cooperative threading, no atomicity required */
+  if (SCHEME_BOX_VAL(box) == ov) {
+    SCHEME_BOX_VAL(box) = nv;
+    return scheme_true;
+  } else {
+    return scheme_false;
+  }
+#endif
 }
 
 static void chaperone_set_box(Scheme_Object *obj, Scheme_Object *v)
@@ -1613,10 +1667,7 @@ static void chaperone_set_box(Scheme_Object *obj, Scheme_Object *v)
 
       if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_IMPERSONATOR))
         if (!scheme_chaperone_of(v, a[1]))
-          scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-                           "vector-set!: chaperone produced a result: %V that is not a chaperone of the original result: %V",
-                           v,
-                           a[1]);
+          scheme_wrong_chaperoned("set-box!", "value", a[1], v);
     }
   }
 }
@@ -1630,7 +1681,7 @@ void scheme_set_box(Scheme_Object *b, Scheme_Object *v)
       return;
     }
 
-    scheme_wrong_type(SETBOX, "mutable box", 0, 1, &b);
+    scheme_wrong_contract(SETBOX, "(and/c box? (not/c immutable?))", 0, 1, &b);
   }
   SCHEME_BOX_VAL(b) = v;
 }
@@ -1677,7 +1728,7 @@ static Scheme_Object *do_chaperone_box(const char *name, int is_impersonator, in
     val = SCHEME_CHAPERONE_VAL(val);
 
   if (!SCHEME_BOXP(val) || (is_impersonator && !SCHEME_MUTABLEP(val)))
-    scheme_wrong_type(name, is_impersonator ? "mutable box" : "box", 0, argc, argv);
+    scheme_wrong_contract(name, is_impersonator ? "(and/c box? (not/c immutable?))" : "box?", 0, argc, argv);
   scheme_check_proc_arity(name, 2, 1, argc, argv);
   scheme_check_proc_arity(name, 2, 2, argc, argv);
 
@@ -1792,7 +1843,7 @@ static Scheme_Object *fill_table(Scheme_Object *ht, const char *who,
     }
     
     if (!SCHEME_NULLP(l))
-      scheme_wrong_type(who, "list of pairs", 0, argc, argv);
+      scheme_wrong_contract(who, "(listof pair?)", 0, argc, argv);
     
     args[0] = ht;
 
@@ -1863,7 +1914,7 @@ static Scheme_Object *make_immutable_table(const char *who, int kind, int argc, 
   }
 
   if (!SCHEME_NULLP(l))
-    scheme_wrong_type(who, "list of pairs", 0, argc, argv);
+    scheme_wrong_contract(who, "(listof pair?)", 0, argc, argv);
 
   ht = scheme_make_hash_tree(kind);
 
@@ -1875,17 +1926,17 @@ static Scheme_Object *make_immutable_table(const char *who, int kind, int argc, 
   return (Scheme_Object *)ht;
 }
 
-static Scheme_Object *make_immutable_hash(int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_make_immutable_hash(int argc, Scheme_Object *argv[])
 {
   return make_immutable_table("make-immutable-hash", 1, argc, argv);
 }
 
-static Scheme_Object *make_immutable_hasheq(int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_make_immutable_hasheq(int argc, Scheme_Object *argv[])
 {
   return make_immutable_table("make-immutable-hasheq", 0, argc, argv);
 }
 
-static Scheme_Object *make_immutable_hasheqv(int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_make_immutable_hasheqv(int argc, Scheme_Object *argv[])
 {
   return make_immutable_table("make-immutable-hasheqv", 2, argc, argv);
 }
@@ -1896,9 +1947,10 @@ static Scheme_Object *direct_table(const char *who, int kind, int argc, Scheme_O
   Scheme_Hash_Tree *ht;
 
   if (argc & 0x1) {
-    scheme_arg_mismatch(who,
-                        "key does not have a value (i.e., an odd number of arguments were provided): ",
-                        argv[argc-1]);
+    scheme_contract_error(who,
+                          "key does not have a value (i.e., an odd number of arguments were provided)",
+                          "key", 1, argv[argc-1],
+                          NULL);
     return NULL;
   }
 
@@ -1998,7 +2050,7 @@ static Scheme_Object *hash_table_count(int argc, Scheme_Object *argv[])
 
     return scheme_make_integer(count);
   } else {
-    scheme_wrong_type("hash-count", "hash", 0, argc, argv);
+    scheme_wrong_contract("hash-count", "hash?", 0, argc, argv);
     return NULL;
   }
 }
@@ -2053,7 +2105,7 @@ static Scheme_Object *hash_table_copy(int argc, Scheme_Object *argv[])
 
     return (Scheme_Object *)naya;
   } else {
-    scheme_wrong_type("hash-copy", "hash", 0, argc, argv);
+    scheme_wrong_contract("hash-copy", "hash?", 0, argc, argv);
     return NULL;
   }
 }
@@ -2071,7 +2123,7 @@ static Scheme_Object *hash_p(int argc, Scheme_Object *argv[])
     return scheme_false;
 }
 
-static Scheme_Object *hash_eq_p(int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_hash_eq_p(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *o = argv[0];
 
@@ -2090,13 +2142,13 @@ static Scheme_Object *hash_eq_p(int argc, Scheme_Object *argv[])
         && (((Scheme_Bucket_Table *)o)->compare != compare_eqv))
       return scheme_true;
   } else {
-    scheme_wrong_type("hash-eq?", "hash", 0, argc, argv);
+    scheme_wrong_contract("hash-eq?", "hash?", 0, argc, argv);
   }
   
   return scheme_false;
 }
 
-static Scheme_Object *hash_eqv_p(int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_hash_eqv_p(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *o = argv[0];
 
@@ -2113,13 +2165,13 @@ static Scheme_Object *hash_eqv_p(int argc, Scheme_Object *argv[])
     if (((Scheme_Bucket_Table *)o)->compare == compare_eqv)
       return scheme_true;
   } else {
-    scheme_wrong_type("hash-eqv?", "hash", 0, argc, argv);
+    scheme_wrong_contract("hash-eqv?", "hash?", 0, argc, argv);
   }
   
   return scheme_false;
 }
 
-static Scheme_Object *hash_equal_p(int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_hash_equal_p(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *o = argv[0];
 
@@ -2136,7 +2188,7 @@ static Scheme_Object *hash_equal_p(int argc, Scheme_Object *argv[])
     if (((Scheme_Bucket_Table *)o)->compare == compare_equal)
       return scheme_true;
   } else {
-    scheme_wrong_type("hash-equal?", "hash", 0, argc, argv);
+    scheme_wrong_contract("hash-equal?", "hash?", 0, argc, argv);
   }
   
   return scheme_false;
@@ -2154,7 +2206,7 @@ static Scheme_Object *hash_weak_p(int argc, Scheme_Object *argv[])
   else if (SCHEME_HASHTP(o) || SCHEME_HASHTRP(o))
     return scheme_false;
   
-  scheme_wrong_type("hash-eq?", "hash", 0, argc, argv);
+  scheme_wrong_contract("hash-eq?", "hash?", 0, argc, argv);
    
   return NULL;
 }
@@ -2192,7 +2244,7 @@ static Scheme_Object *hash_table_put_bang(int argc, Scheme_Object *argv[])
     scheme_add_to_table(t, (char *)argv[1], (void *)argv[2], 0);
     if (t->mutex) scheme_post_sema(t->mutex);
   } else if (!SCHEME_HASHTP(v) || !SCHEME_MUTABLEP(v)) {
-    scheme_wrong_type("hash-set!", "mutable table", 0, argc, argv);
+    scheme_wrong_contract("hash-set!", "(and/c hash? (not/c immutable?))", 0, argc, argv);
   } else if (((Scheme_Hash_Table *)v)->mutex) {
     Scheme_Hash_Table *t = (Scheme_Hash_Table *)v;
     scheme_wait_sema(t->mutex, 0);
@@ -2205,7 +2257,7 @@ static Scheme_Object *hash_table_put_bang(int argc, Scheme_Object *argv[])
   return scheme_void;
 }
 
-static Scheme_Object *hash_table_put(int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_hash_table_put(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *v = argv[0];
 
@@ -2213,7 +2265,7 @@ static Scheme_Object *hash_table_put(int argc, Scheme_Object *argv[])
     return chaperone_hash_tree_set(v, argv[1], argv[2]);
 
   if (!SCHEME_HASHTRP(v)) {
-    scheme_wrong_type("hash-set", "immutable hash", 0, argc, argv);
+    scheme_wrong_contract("hash-set", "(and hash? immutable?)", 0, argc, argv);
     return NULL;
   }
   
@@ -2231,9 +2283,10 @@ static Scheme_Object *hash_failed(int argc, Scheme_Object *argv[])
     else
       return v;
   } else {
-    scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-		     "hash-ref: no value found for key: %V",
-		     argv[1]);
+    scheme_contract_error("hash-ref",
+                          "no value found for key",
+                          "key", 1, argv[1],
+                          NULL);
     return scheme_void;
   }
 }
@@ -2265,7 +2318,7 @@ static Scheme_Object *gen_hash_table_get(int argc, Scheme_Object *argv[])
     v = (Scheme_Object *)scheme_lookup_in_table(t, (char *)argv[1]);
     if (t->mutex) scheme_post_sema(t->mutex);
   } else {
-    scheme_wrong_type("hash-ref", "hash", 0, argc, argv);
+    scheme_wrong_contract("hash-ref", "hash?", 0, argc, argv);
     return NULL;
   }
 
@@ -2315,7 +2368,7 @@ static Scheme_Object *hash_table_remove_bang(int argc, Scheme_Object *argv[])
   }
   
   if (!(SCHEME_HASHTP(v) && SCHEME_MUTABLEP(v)) && !SCHEME_BUCKTP(v))
-    scheme_wrong_type("hash-remove!", "mutable table", 0, argc, argv);
+    scheme_wrong_contract("hash-remove!", "(and/c hash? (not/c immutable?))", 0, argc, argv);
 
   if (SCHEME_BUCKTP(v)) {
     Scheme_Bucket *b;
@@ -2345,9 +2398,19 @@ static Scheme_Object *hash_table_remove(int argc, Scheme_Object *argv[])
     return chaperone_hash_tree_set(v, argv[1], NULL);
 
   if (!SCHEME_HASHTRP(v))
-    scheme_wrong_type("hash-remove", "immutable hash", 0, argc, argv);
+    scheme_wrong_contract("hash-remove", "(and/c hash? immutable?)", 0, argc, argv);
 
   return (Scheme_Object *)scheme_hash_tree_set((Scheme_Hash_Tree *)v, argv[1], NULL);
+}
+
+static void no_post_key(const char *name, Scheme_Object *key, int chap)
+{
+  scheme_contract_error(name,
+                        (chap
+                         ? "no value found for post-chaperone key"
+                         : "no value found for post-impersonator key"),
+                        "key", 1, key,
+                        NULL);
 }
 
 static Scheme_Object *do_map_hash_table(int argc,
@@ -2367,7 +2430,7 @@ static Scheme_Object *do_map_hash_table(int argc,
     chaperone = NULL;
 
   if (!(SCHEME_HASHTP(obj) || SCHEME_BUCKTP(obj) || SCHEME_HASHTRP(obj)))
-    scheme_wrong_type(name, "hash", 0, argc, argv);
+    scheme_wrong_contract(name, "hash?", 0, argc, argv);
   scheme_check_proc_arity(name, 2, 1, argc, argv);
 
   f = argv[1];
@@ -2395,10 +2458,7 @@ static Scheme_Object *do_map_hash_table(int argc,
           p[0] = v;
           v = scheme_chaperone_hash_get(chaperone, v);
           if (!v)
-            scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-                             "%s: no value found for post-impersonator key: %V",
-                             name,
-                             p[0]);
+            no_post_key(name, p[0], 0);
         } else
           v = (Scheme_Object *)bucket->val;
         if (v) {
@@ -2429,10 +2489,7 @@ static Scheme_Object *do_map_hash_table(int argc,
           p[0] = v;
           v = scheme_chaperone_hash_get(chaperone, v);
           if (!v)
-            scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-                             "%s: no value found for post-impersonator key: %V",
-                             name,
-                             p[0]);
+            no_post_key(name, p[0], 0);
         } else {
           v = hash->vals[i];
         }
@@ -2466,10 +2523,7 @@ static Scheme_Object *do_map_hash_table(int argc,
         ik = chaperone_hash_key(name, chaperone, ik);
         iv = scheme_chaperone_hash_get(chaperone, ik);
         if (!iv)
-          scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-                           "%s: no value found for post-chaperone key: %V",
-                           name,
-                           ik);
+          no_post_key(name, ik, 1);
       }
       if (iv) {
         p[1] = iv;
@@ -2557,17 +2611,17 @@ static Scheme_Object *hash_table_next(const char *name, int start, int argc, Sch
 
     return scheme_false;
   } else {
-    scheme_wrong_type(name, "hash", 0, argc, argv);
+    scheme_wrong_contract(name, "hash?", 0, argc, argv);
     return NULL;
   }
 }
 
-static Scheme_Object *hash_table_iterate_start(int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_hash_table_iterate_start(int argc, Scheme_Object *argv[])
 {
   return hash_table_next("hash-iterate-first", -1, argc, argv);
 }
 
-static Scheme_Object *hash_table_iterate_next(int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_hash_table_iterate_next(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *p = argv[1], *v;
   int pos;
@@ -2594,9 +2648,11 @@ static Scheme_Object *hash_table_iterate_next(int argc, Scheme_Object *argv[])
   }
 
   if (p)
-    scheme_wrong_type("hash-iterate-next", "exact non-negative integer", 1, argc, argv);  
+    scheme_wrong_contract("hash-iterate-next", "exact-nonnegative-integer?", 1, argc, argv);  
 
-  scheme_arg_mismatch("hash-iterate-next", "no element at index: ", argv[1]);
+  scheme_contract_error("hash-iterate-next", "no element at index", 
+                        "index", 1, argv[1],
+                        NULL);
 
   return NULL;
 }
@@ -2634,9 +2690,7 @@ static Scheme_Object *hash_table_index(const char *name, int argc, Scheme_Object
             key = chaperone_hash_key(name, chaperone, hash->keys[pos]);
             obj = scheme_chaperone_hash_get(chaperone, key);
             if (!obj)
-              scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-                               "hash-iterate-value: no value found for post-impersonator key: %V",
-                               key);
+              no_post_key("hash-iterate-value", key, 0);
             return obj;
           } else
             return chaperone_hash_key(name, chaperone, hash->keys[pos]);
@@ -2654,9 +2708,7 @@ static Scheme_Object *hash_table_index(const char *name, int argc, Scheme_Object
           key = chaperone_hash_key(name, chaperone, k);
           obj = scheme_chaperone_hash_get(chaperone, key);
           if (!obj)
-            scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-                             "hash-iterate-value: no value found for post-chaperone key: %V",
-                             key);
+            no_post_key("hash-iterate-value", key, 1);
           return obj;
         } else
           return chaperone_hash_key(name, chaperone, k);
@@ -2686,9 +2738,7 @@ static Scheme_Object *hash_table_index(const char *name, int argc, Scheme_Object
               key = chaperone_hash_key(name, chaperone, obj);
               obj = scheme_chaperone_hash_get(chaperone, key);
               if (!obj)
-                scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-                                 "hash-iterate-value: no value found for post-impersonator key: %V",
-                                 key);
+                no_post_key("hash-iterate-value", key, 0);
               return obj;
             } else
               return chaperone_hash_key(name, chaperone, obj);
@@ -2698,7 +2748,7 @@ static Scheme_Object *hash_table_index(const char *name, int argc, Scheme_Object
       }
     }
   } else {
-    scheme_wrong_type(name, "hash", 0, argc, argv);
+    scheme_wrong_contract(name, "hash?", 0, argc, argv);
     return NULL;
   }
 
@@ -2706,20 +2756,22 @@ static Scheme_Object *hash_table_index(const char *name, int argc, Scheme_Object
        && (SCHEME_INT_VAL(p) >= 0))
       || (SCHEME_BIGNUMP(p)
           && SCHEME_BIGPOS(p))) {
-    scheme_arg_mismatch(name, "no element at index: ", p);
+    scheme_contract_error(name, "no element at index",
+                          "index", 1, p,
+                          NULL);
     return NULL;
   }
 
-  scheme_wrong_type(name, "exact non-negative integer", 1, argc, argv);  
+  scheme_wrong_contract(name, "exact-nonnegative-integer?", 1, argc, argv);  
   return NULL;
 }
 
-static Scheme_Object *hash_table_iterate_value(int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_hash_table_iterate_value(int argc, Scheme_Object *argv[])
 {
   return hash_table_index("hash-iterate-value", argc, argv, 1);
 }
 
-static Scheme_Object *hash_table_iterate_key(int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_hash_table_iterate_key(int argc, Scheme_Object *argv[])
 {
   return hash_table_index("hash-iterate-key", argc, argv, 0);
 }
@@ -2737,7 +2789,7 @@ static Scheme_Object *do_chaperone_hash(const char *name, int is_impersonator, i
   if (!SCHEME_HASHTP(val) 
       && (is_impersonator || !SCHEME_HASHTRP(val))
       && !SCHEME_BUCKTP(val))
-    scheme_wrong_type(name, is_impersonator ? "mutable hash" : "hash", 0, argc, argv);
+    scheme_wrong_contract(name, is_impersonator ? "(and/c hash? (not/c immutable?))" : "hash?", 0, argc, argv);
   scheme_check_proc_arity(name, 2, 1, argc, argv); /* ref */
   scheme_check_proc_arity(name, 3, 2, argc, argv); /* set! */
   scheme_check_proc_arity(name, 2, 3, argc, argv); /* remove */
@@ -2927,18 +2979,16 @@ static Scheme_Object *chaperone_hash_op(const char *who, Scheme_Object *o, Schem
 
           if (cnt != 2)
             scheme_raise_exn(MZEXN_FAIL_CONTRACT_ARITY,
-                             "%s: chaperone: %V: returned %d values, expected 2",
+                             "%s: chaperone did not return 2 values\n"
+                             "  chaperone procedure: %V\n"
+                             "  number of returned values: %d",
                              who,
                              red,
                              cnt);
 
           if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_IMPERSONATOR))
             if (!scheme_chaperone_of(vals[0], k))
-              scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-                               "%s: chaperone produced a key: %V that is not a chaperone of the original key: %V",
-                               who,
-                               vals[0],
-                               k);
+              scheme_wrong_chaperoned(who, "key", k, vals[0]);
           k = vals[0];
           o = vals[1];
 
@@ -2947,7 +2997,9 @@ static Scheme_Object *chaperone_hash_op(const char *who, Scheme_Object *o, Schem
             red = o;
             if (!scheme_check_proc_arity(NULL, 3, 1, 2, vals))
               scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-                               "%s: chaperone produced second value that is not a procedure (arity 3): %V",
+                               "%s: chaperone produced a second value that does not match the expected contract\n"
+                               "  expected: (procedure-arity-includes/c 2)\n"
+                               "  received: %V", 
                                who,
                                red);
 
@@ -2970,11 +3022,7 @@ static Scheme_Object *chaperone_hash_op(const char *who, Scheme_Object *o, Schem
 
         if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_IMPERSONATOR))
           if (!scheme_chaperone_of(o, orig))
-            scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-                             "%s: chaperone produced a %s: %V that is not a chaperone of the original %s: %V",
-                             who, what,
-                             o, 
-                             what, orig);
+            scheme_wrong_chaperoned(who, what, orig, o);
       }
 
       if ((mode == 0) || (mode == 3))
@@ -3028,8 +3076,8 @@ Scheme_Object *scheme_chaperone_hash_table_copy(Scheme_Object *obj)
   v = SCHEME_CHAPERONE_VAL(obj);
 
   a[0] = obj;
-  is_eq = SCHEME_TRUEP(hash_eq_p(1, a));
-  is_eqv = SCHEME_TRUEP(hash_eqv_p(1, a));
+  is_eq = SCHEME_TRUEP(scheme_hash_eq_p(1, a));
+  is_eqv = SCHEME_TRUEP(scheme_hash_eqv_p(1, a));
   
   if (SCHEME_HASHTP(obj)) {
     if (is_eq)
@@ -3040,11 +3088,11 @@ Scheme_Object *scheme_chaperone_hash_table_copy(Scheme_Object *obj)
       v2 = make_hash(0, NULL);
   } else if (SCHEME_HASHTRP(obj)) {
     if (is_eq)
-      v2 = make_immutable_hasheq(0, NULL);
+      v2 = scheme_make_immutable_hasheq(0, NULL);
     else if (is_eqv)
-      v2 = make_immutable_hasheqv(0, NULL);
+      v2 = scheme_make_immutable_hasheqv(0, NULL);
     else
-      v2 = make_immutable_hash(0, NULL);
+      v2 = scheme_make_immutable_hash(0, NULL);
   } else {
     if (is_eq)
       v2 = make_weak_hasheq(0, NULL);
@@ -3054,11 +3102,11 @@ Scheme_Object *scheme_chaperone_hash_table_copy(Scheme_Object *obj)
       v2 = make_weak_hash(0, NULL);
   }
 
-  idx = hash_table_iterate_start(1, a);
+  idx = scheme_hash_table_iterate_start(1, a);
   while (SCHEME_TRUEP(idx)) {
     a[0] = v;
     a[1] = idx;
-    key = hash_table_iterate_key(2, a);
+    key = scheme_hash_table_iterate_key(2, a);
 
     val = scheme_chaperone_hash_get(obj, key);
     if (val) {
@@ -3066,14 +3114,14 @@ Scheme_Object *scheme_chaperone_hash_table_copy(Scheme_Object *obj)
       a[1] = key;
       a[2] = val;
       if (SCHEME_HASHTRP(v2))
-        v2 = hash_table_put(2, a);
+        v2 = scheme_hash_table_put(2, a);
       else
         (void)hash_table_put_bang(2, a);
     }
 
     a[0] = v;
     a[1] = idx;
-    idx = hash_table_iterate_next(2, a);
+    idx = scheme_hash_table_iterate_next(2, a);
   }
 
   return v2;
@@ -3174,7 +3222,7 @@ static Scheme_Object *weak_box_value(int argc, Scheme_Object *argv[])
   Scheme_Object *o;
 
   if (!SCHEME_WEAKP(argv[0]))
-    scheme_wrong_type("weak-box-value", "weak-box", 0, argc, argv);
+    scheme_wrong_contract("weak-box-value", "weak-box?", 0, argc, argv);
 
   o = SCHEME_BOX_VAL(argv[0]);
   if (!o)
@@ -3212,7 +3260,7 @@ static Scheme_Object *make_placeholder(int argc, Scheme_Object *argv[])
 static Scheme_Object *placeholder_set(int argc, Scheme_Object *argv[])
 {
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_placeholder_type))
-    scheme_wrong_type("placeholder-set!", "placeholder", 0, argc, argv);
+    scheme_wrong_contract("placeholder-set!", "placeholder?", 0, argc, argv);
   SCHEME_PTR_VAL(argv[0]) = argv[1];
   return scheme_void;
 }
@@ -3220,7 +3268,7 @@ static Scheme_Object *placeholder_set(int argc, Scheme_Object *argv[])
 static Scheme_Object *placeholder_get(int argc, Scheme_Object *argv[])
 {
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_placeholder_type))
-    scheme_wrong_type("placeholder-get", "placeholder", 0, argc, argv);
+    scheme_wrong_contract("placeholder-get", "placeholder?", 0, argc, argv);
   return SCHEME_PTR_VAL(argv[0]);
 }
 
@@ -3242,7 +3290,7 @@ static Scheme_Object *do_make_hash_placeholder(const char *who, int kind, int ar
   }
 
   if (!SCHEME_NULLP(l)) {
-    scheme_wrong_type(who, "list of pairs", 0, argc, argv);
+    scheme_wrong_contract(who, "(listof pair?)", 0, argc, argv);
   }
 
   ph = scheme_alloc_object();
@@ -3428,7 +3476,7 @@ static Scheme_Object *ephemeron_value(int argc, Scheme_Object **argv)
   Scheme_Object *v;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_ephemeron_type))
-    scheme_wrong_type("ephemeron-value", "ephemeron", 0, argc, argv);
+    scheme_wrong_contract("ephemeron-value", "ephemeron?", 0, argc, argv);
   v = scheme_ephemeron_value(argv[0]);
 
   if (!v)

@@ -1,8 +1,8 @@
-#lang scheme
+#lang racket/base
 
-(require syntax/parse
+(require syntax/parse racket/dict
          "../utils/utils.rkt"
-         (for-template scheme/base scheme/fixnum scheme/unsafe/ops)
+         (for-template racket/base racket/fixnum racket/unsafe/ops)
          (utils tc-utils)
          (types numeric-tower)
          (optimizer utils logging))
@@ -23,18 +23,22 @@
      (dict-set
       (dict-set
        (dict-set
-        (mk-fixnum-tbl (list #'= #'<= #'< #'> #'>= #'min #'max))
+        (mk-fixnum-tbl (list #'min #'max))
         #'bitwise-and #'unsafe-fxand)
        #'fxand #'unsafe-fxand)
       #'bitwise-ior #'unsafe-fxior)
      #'fxior #'unsafe-fxior)
     #'bitwise-xor #'unsafe-fxxor)
    #'fxxor #'unsafe-fxxor))
+
+(define binary-fixnum-comps (mk-fixnum-tbl (list #'= #'<= #'< #'> #'>=)))
+
 (define-syntax-class fixnum-unary-op
   #:commit
   (pattern (~or (~literal bitwise-not) (~literal fxnot))
            #:with unsafe (begin (add-disappeared-use this-syntax)
                                 #'unsafe-fxnot)))
+
 ;; closed on fixnums, but 2nd argument must not be 0
 (define-syntax-class nonzero-fixnum-binary-op
   #:commit
@@ -80,7 +84,7 @@
 (define (log-fixnum-missed-opt stx)
   (log-missed-optimization
    "out of fixnum range"
-   "This expression has all fixnum arguments but is not guaranteed to itself return a fixnum. Therefore, it cannot be safely optimized. Constraining the arguments to be of Byte or Index types may help."
+   "This expression consists of all fixnum arguments but is not guaranteed to produce a fixnum. Therefore it cannot be safely optimized. Constraining the arguments to be of Byte or Index types may help."
    stx))
 
 ;; general-purpose safety check for fixnum opts
@@ -106,6 +110,19 @@
            #:with opt
            (begin (log-optimization "binary fixnum" fixnum-opt-msg this-syntax)
                   (n-ary->binary #'op.unsafe #'n1.opt #'n2.opt #'(ns.opt ...))))
+  (pattern (#%plain-app (~var op (fixnum-op binary-fixnum-comps))
+                        n1:fixnum-expr n2:fixnum-expr)
+           #:with opt
+           (begin (log-optimization "binary fixnum comp" fixnum-opt-msg this-syntax)
+                  #'(op.unsafe n1.opt n2.opt)))
+  (pattern (#%plain-app (~var op (fixnum-op binary-fixnum-comps))
+                        n1:fixnum-expr
+                        n2:fixnum-expr
+                        ns:fixnum-expr ...)
+           #:with opt
+           (begin (log-optimization "multi fixnum comp" fixnum-opt-msg this-syntax)
+                  (n-ary-comp->binary #'op.unsafe #'n1.opt #'n2.opt #'(ns.opt ...))))
+
   (pattern (#%plain-app op:nonzero-fixnum-binary-op
                         n1:fixnum-expr
                         n2:nonzero-fixnum-expr)

@@ -1,15 +1,3 @@
-----
-
-Testing
-
-- run ODBC tests on Mac
-- run ODBC DB2, Oracle tests on win32; also test SQL Server ?
-- test util/connect features
-- test transaction functions
-
-----
-
-Types
 
 - type annotations
   - two modes: mandatory and opportunistic
@@ -21,63 +9,16 @@ Types
 - postgresql record type: docs, send
 - postgresql domain types, table record types, etc
 
-- util/postgresql: add inet types
-- util/geometry: add WKT functions
-
-- add support for ODBC intervals (no point w/o driver to test with)
-
-----
-
-Misc
-
-- internal docs
-
-- use ffi/unsafe/alloc to simplify odbc handle allocation
-
-- add ODBC-like functions for inspecting schemas (list-tables, etc)
-
 - for wrapped/managed connections, detect if underlying connection gets
   disconnected by server (eg, times out after 10 minutes of inactivity)
   - at least, pool should make sure connection is alive when gotten from idle list
   - add {keepalive : -> boolean} method to connection<%> (?)
-
-- document/enumerate errors
-- document exn:fail:sql, when used, when not used, links to SQLSTATE docs?
 
 - disconnect on custudian shutdown (?)
 
 - disconnect should always work, even on thread-damaged connections
   - but might need version with timeout and/or rudely? flag, because
     I can't think of a way to solve the lock problem that doesn't involve aux thread.
-
-- finish transaction api: tests, custom sqlite options (?), custom mysql options (?)
-  - add connect option #:rollback-invalid-transactions? (?)
-
-- identify common ODBC errors that can't possibly rollback transaction
-  - test with PostgreSQL ODBC driver using "rollback on all errors" mode
-
-- more ODBC information (?)
-  SQLGetInfo:
-  - SQL_CONVERT_<datatype> - use to refine supported types (?)
-  - SQL_CURSOR_{COMMIT,ROLLBACK}_BEHAVIOR - check that commit/rollback doesn't delete pstmts!
-  - SQL_MAX_{CATALOG,COLUMN,IDENTIFIER,SCHEMA_NAME,TABLE_NAME}_NAME (min 128)
-
-- cursors? (Olin thinks cursors are important. I'm not sure.)
-  - how do people want to use cursors?
-  - how about implicit support only in 'in-query'?
-
-- add evt versions of functions
-  - for query functions (?)
-  - connection-pool-lease-evt
-  - when is it useful in practice?
-    - would make it easier to handle timeouts...
-
-- on insert, return last inserted id
-  - postgresql: parse CommandComplete msg tag
-  - mysql: in ok-packet (what conditions, though?)
-  - sqlite3: sqlite3_last_insert_rowid(), use sqlite3_changes() to see if insert succeeded,
-    but still need to tell if stmt was even insert (parse sql?)
-  - odbc: ???
 
 - add recursive locking?
   - cons: - considered by experts to be bad design, sloppy
@@ -87,21 +28,9 @@ Misc
             (but this could also be done by two locks: outer "ownership" lock 
             and inner "invariant-protecting" lock)
 
-- audit code for break-safety, disable breaks as needed
+- make implementation notes section of docs
+  - explain nested tx impl
 
-- dialect info for ODBC
-  - can get some tx data from ODBC...
-  - on the other hand, not supposed to do tx-SQL in ODBC anyway, so low-priority
+- invalidate statement cache on query error
 
-- postgresql query path optimizations
-  - once all types have binary readers...
-  - can eliminate prepare step when args given (use unnamed statement)
-  - then, can remember what SQL in unnamed statement, avoid re-parse
-
-- mysql, sqlite3, odbc query path optimization
-  - can do something similar, but messier because no unnamed statement
-  - might make close-on-exec? obsolete
-  - add sql field to pstmt%, add sql=>pstmt hash in connection (update on pstmt finalize)
-    - use as stmt cache, avoid re-prepare
-    - sql field would be good for eventually implementing cursors, too
-  - PROBLEM: if schema changes, may invalidate pstmt, change types, etc
+- 2 call-with-transactions from separate threads can conflict

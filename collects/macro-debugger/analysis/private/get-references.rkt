@@ -123,15 +123,15 @@
        (void)]
       [(p:module z1 z2 rs ?1 locals tag rename check tag2 ?3 body shift)
        (recur locals check body)]
-      [(p:#%module-begin z1 z2 rs ?1 me body ?2)
-       (recur body)]
+      [(p:#%module-begin z1 z2 rs ?1 me body ?2 subs)
+       (recur body subs)]
       [(p:define-syntaxes z1 z2 rs ?1 prep rhs locals)
        (recur prep locals)
        (recur/phase-up rhs)]
       [(p:define-values z1 z2 rs ?1 rhs)
        (recur rhs)]
-      [(p:begin-for-syntax z1 z2 rs ?1 prep body)
-       (recur prep)
+      [(p:begin-for-syntax z1 z2 rs ?1 prep body locals)
+       (recur prep locals)
        (recur/phase-up body)]
       [(p:#%expression z1 z2 rs ?1 inner untag)
        (recur inner)]
@@ -164,6 +164,10 @@
        (recur inners)]
       [(p:require _ _ _ _ locals)
        (recur locals)]
+      [(p:submodule _ _ _ _ exp)
+       (recur exp)]
+      [(p:submodule* _ _ _ _)
+       (void)]
       [(p:#%stratified-body _ _ _ _ bderiv)
        (recur bderiv)]
       [(p:stop _ _ _ _) (void)]
@@ -201,12 +205,12 @@
        (recur head prim)]
       [(mod:splice head rename ?1 tail)
        (recur head)]
-      [(mod:lift head renames tail)
-       (recur head)]
+      [(mod:lift head locals renames tail)
+       (recur head locals)]
       [(mod:lift-end tail)
        (void)]
-      [(mod:cons head)
-       (recur head)]
+      [(mod:cons head locals)
+       (recur head locals)]
       [(mod:skip)
        (void)]
       ;; Shouldn't occur in module expansion.

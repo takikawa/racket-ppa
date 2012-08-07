@@ -148,13 +148,6 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Prompt *available_regular_prompt_;
   struct Scheme_Dynamic_Wind *available_prompt_dw_;
   struct Scheme_Meta_Continuation *available_prompt_mc_;
-  struct Scheme_Object *cached_beg_stx_;
-  struct Scheme_Object *cached_mod_stx_;
-  struct Scheme_Object *cached_mod_beg_stx_;
-  struct Scheme_Object *cached_dv_stx_;
-  struct Scheme_Object *cached_ds_stx_;
-  struct Scheme_Object *cached_bfs_stx_;
-  int cached_stx_phase_;
   struct Scheme_Object *cwv_stx_;
   int cwv_stx_phase_;
   struct Scheme_Cont *offstack_cont_;
@@ -169,7 +162,9 @@ typedef struct Thread_Local_Variables {
   int fixup_already_in_place_;
   void *retry_alloc_r1_;
   double scheme_jit_save_fp_;
+  double scheme_jit_save_fp2_;
   struct Scheme_Bucket_Table *starts_table_;
+  struct Scheme_Bucket_Table *submodule_empty_modidx_table_;
   struct Scheme_Modidx *modidx_caching_chain_;
   struct Scheme_Object *global_shift_cache_;
   struct mz_proc_thread *proc_thread_self_;
@@ -194,6 +189,7 @@ typedef struct Thread_Local_Variables {
   struct ITimer_Data *itimerdata_;
   char *quick_buffer_;
   char *quick_encode_buffer_;
+  char *quick_print_buffer_;
   struct Scheme_Hash_Table *cache_ht_;
   char *regstr_;
   char *regparsestr_;
@@ -242,7 +238,7 @@ typedef struct Thread_Local_Variables {
   int scheme_did_gc_count_;
   struct Scheme_Future_State *scheme_future_state_;
   struct Scheme_Future_Thread_State *scheme_future_thread_state_;
-  void *jit_future_storage_[2];
+  void *jit_future_storage_[4];
   struct Scheme_Object **scheme_current_runstack_start_;
   struct Scheme_Object **scheme_current_runstack_;
   intptr_t scheme_current_cont_mark_stack_;
@@ -501,13 +497,6 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define available_regular_prompt XOA (scheme_get_thread_local_variables()->available_regular_prompt_)
 #define available_prompt_dw XOA (scheme_get_thread_local_variables()->available_prompt_dw_)
 #define available_prompt_mc XOA (scheme_get_thread_local_variables()->available_prompt_mc_)
-#define cached_beg_stx XOA (scheme_get_thread_local_variables()->cached_beg_stx_)
-#define cached_mod_stx XOA (scheme_get_thread_local_variables()->cached_mod_stx_)
-#define cached_mod_beg_stx XOA (scheme_get_thread_local_variables()->cached_mod_beg_stx_)
-#define cached_dv_stx XOA (scheme_get_thread_local_variables()->cached_dv_stx_)
-#define cached_ds_stx XOA (scheme_get_thread_local_variables()->cached_ds_stx_)
-#define cached_bfs_stx XOA (scheme_get_thread_local_variables()->cached_bfs_stx_)
-#define cached_stx_phase XOA (scheme_get_thread_local_variables()->cached_stx_phase_)
 #define cwv_stx XOA (scheme_get_thread_local_variables()->cwv_stx_)
 #define cwv_stx_phase XOA (scheme_get_thread_local_variables()->cwv_stx_phase_)
 #define offstack_cont XOA (scheme_get_thread_local_variables()->offstack_cont_)
@@ -523,7 +512,9 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define fixup_already_in_place XOA (scheme_get_thread_local_variables()->fixup_already_in_place_)
 #define retry_alloc_r1 XOA (scheme_get_thread_local_variables()->retry_alloc_r1_)
 #define scheme_jit_save_fp XOA (scheme_get_thread_local_variables()->scheme_jit_save_fp_)
+#define scheme_jit_save_fp2 XOA (scheme_get_thread_local_variables()->scheme_jit_save_fp2_)
 #define starts_table XOA (scheme_get_thread_local_variables()->starts_table_)
+#define submodule_empty_modidx_table XOA (scheme_get_thread_local_variables()->submodule_empty_modidx_table_)
 #define modidx_caching_chain XOA (scheme_get_thread_local_variables()->modidx_caching_chain_)
 #define global_shift_cache XOA (scheme_get_thread_local_variables()->global_shift_cache_)
 #define proc_thread_self XOA (scheme_get_thread_local_variables()->proc_thread_self_)
@@ -543,6 +534,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define itimerdata XOA (scheme_get_thread_local_variables()->itimerdata_)
 #define quick_buffer XOA (scheme_get_thread_local_variables()->quick_buffer_)
 #define quick_encode_buffer XOA (scheme_get_thread_local_variables()->quick_encode_buffer_)
+#define quick_print_buffer XOA (scheme_get_thread_local_variables()->quick_print_buffer_)
 #define cache_ht XOA (scheme_get_thread_local_variables()->cache_ht_)
 #define regstr XOA (scheme_get_thread_local_variables()->regstr_)
 #define regparsestr XOA (scheme_get_thread_local_variables()->regparsestr_)

@@ -30,7 +30,7 @@
             (src-pos)
             (tokens basic-empty-tokens basic-tokens prim-tokens renames-tokens)
             (end EOF)
-            #|(debug "/tmp/ryan/DEBUG-PARSER.txt")|#
+            #| (debug "/tmp/DEBUG-PARSER.txt") |#
             (error deriv-error))
 
    ;; tokens
@@ -164,9 +164,7 @@
      [(enter-prim (? Prim) exit-prim return)
       (begin
         (unless (eq? $3 $4)
-          (fprintf (current-error-port)
-                   "warning: exit-prim and return differ:\n~s\n~s\n"
-                   $3 $4))
+          (eprintf "warning: exit-prim and return differ:\n~s\n~s\n" $3 $4))
         ($2 $1 $3 rs))]
      [((? MacroStep) (? EE))
       ($1 e1 rs $2)])
@@ -288,10 +286,29 @@
      [() #f]
      [((? CheckImmediateMacro)) $1])
 
+    ;; FIXME: workaround for problem in expander instrumentation:
+    ;;   observer not propagated correctly to expand_all_provides
+    ;;   so local actions that should be within prim-provide's EE 
+    ;;   instead appear directly here
     (Prim#%ModuleBegin
      (#:args e1 e2 rs)
-     [(prim-#%module-begin ! rename-one (? ModuleBegin/Phase) !)
+     [(prim-#%module-begin ! rename-one (? ModuleBegin/Phase) (? Eval) next (? ExpandSubmodules))
+      (make p:#%module-begin e1 e2 rs $2 $3 $4
+            (for/or ([la (in-list $5)])
+              (and (local-exn? la) (local-exn-exn la)))
+            $7)])
+    #|
+    ;; restore this version when expander fixed
+    (Prim#%ModuleBegin-REAL
+     (#:args e1 e2 rs)
+     [(prim-#%module-begin ! rename-one (? ModuleBegin/Phase) ! (? ExpandSubmodules))
       (make p:#%module-begin e1 e2 rs $2 $3 $4 $5)])
+    |#
+    (ExpandSubmodules
+     (#:skipped null)
+     [(enter-prim (? PrimModule) exit-prim (? ExpandSubmodules))
+      (cons ($2 $1 $3 null) $4)]
+     [() null])
 
     (ModuleBegin/Phase
      [((? ModulePass1) next-group (? ModulePass2) next-group (? ModulePass3))
@@ -311,7 +328,7 @@
      [(EE rename-one ! splice)
       (make mod:splice $1 $2 $3 $4)]
      [(EE rename-list module-lift-loop)
-      (make mod:lift $1 $2 $3)])
+      (make mod:lift $1 null $2 $3)])
 
     (ModulePass1/Prim
      (#:args e1)
@@ -321,10 +338,14 @@
                   phase-up (? EE/LetLifts) (? Eval) exit-prim)
       (make p:define-syntaxes $1 $8 null $3 $4 $6 $7)]
      [(enter-prim prim-begin-for-syntax ! (? PrepareEnv)
-                  phase-up (? ModuleBegin/Phase) exit-prim)
-      (make p:begin-for-syntax $1 $7 null $3 $4 $6)]
+                  phase-up (? ModuleBegin/Phase) (? Eval) exit-prim)
+      (make p:begin-for-syntax $1 $7 null $3 $4 $6 $7)]
      [(enter-prim prim-require (? Eval) exit-prim)
       (make p:require $1 $4 null #f $3)]
+     [(enter-prim prim-submodule ! (? ExpandSubmodules #|one|#) exit-prim)
+      (make p:submodule $1 $5 null $3 (car $4))]
+     [(enter-prim prim-submodule* ! exit-prim)
+      (make p:submodule* $1 $4 null $3)]
      [()
       (make p:stop e1 e1 null #f)])
 
@@ -341,11 +362,14 @@
      [()
       (make mod:skip)]
      ;; normal: expand completely
-     [((? EE))
-      (make mod:cons $1)]
+     [((? EE) (? Eval))
+      ;; after expansion, may compile => may eval letstx rhss again!
+      ;; need to include those evals too (for errors, etc)
+      (make mod:cons $1 $2)]
      ;; catch lifts
-     [(EE module-lift-loop)
-      (make mod:lift $1 #f $2)])
+     [(EE Eval module-lift-loop)
+      ;; same as above: after expansion, may compile => may eval
+      (make mod:lift $1 $2 #f $3)])
 
     (ModulePass3
      (#:skipped null)
@@ -504,8 +528,8 @@
 
     (PrimBeginForSyntax
      (#:args e1 e2 rs)
-     [(prim-begin-for-syntax ! (? PrepareEnv) (? BeginForSyntax*))
-      (make p:begin-for-syntax e1 e2 rs $2 $3 $4)])
+     [(prim-begin-for-syntax ! (? PrepareEnv) (? BeginForSyntax*) (? Eval))
+      (make p:begin-for-syntax e1 e2 rs $2 $3 $4 $5)])
     (BeginForSyntax*
      [((? EL))
       (list $1)]

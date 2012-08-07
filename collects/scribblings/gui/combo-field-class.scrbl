@@ -12,15 +12,16 @@ A @racket[combo-field%] object is a @racket[text-field%]
 
 
 
-@defconstructor[([label (or/c label-string? false/c)]
+@defconstructor[([label (or/c label-string? #f)]
                  [choices (listof label-string?)]
                  [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) 
                                (is-a?/c panel%) (is-a?/c pane%))]
-                 [callback ((is-a?/c combo-field%) (is-a?/c control-event%) . -> . any) 
+                 [callback ((is-a?/c combo-field%) (is-a?/c control-event%)
+                            . -> . any) 
                            (lambda (c e) (void))]
                  [init-value string ""]
-                 [style (listof (one-of/c 'horizontal-label 'vertical-label 
-                                          'deleted)) 
+                 [style (listof (or/c 'horizontal-label 'vertical-label 
+                                      'deleted)) 
                         null]
                  [font (is-a?/c font%) normal-control-font]
                  [enabled any/c #t]
@@ -76,7 +77,7 @@ Adds a new item to the combo's popup menu. The given label is used for
 @defmethod[(get-menu)
            (is-a?/c popup-menu%)]{
 Returns a @racket[popup-menu%] that is effectively copied into the
- combo's popup menu when the combo is clicked. Only the labels can
+ combo's popup menu when the combo is clicked. Only the labels and
  callbacks of the menu's items are used; the enable state, submenus,
  or separators are ignored.
 }

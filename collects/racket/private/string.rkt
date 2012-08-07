@@ -9,14 +9,15 @@
            regexp-split
            regexp-match-exact?
            regexp-try-match
-           -regexp-replace*)
+           -regexp-replace*
+           regexp-replaces)
   (require (for-syntax "stxcase-scheme.rkt"))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   (define (real->decimal-string n [digits 2])
     (unless (exact-nonnegative-integer? digits)
-      (raise-type-error 'real->decimal-string "exact-nonnegative-integer"
-                        digits))
+      (raise-argument-error 'real->decimal-string "exact-nonnegative-integer?"
+                            digits))
     (let* ([e (expt 10 digits)]
            [num (round (abs (* e (inexact->exact n))))])
       (format
@@ -40,8 +41,8 @@
   (define (regexp-quote s [case-sens? #t])
     (let* ([b? (cond [(bytes? s) #t]
                      [(string? s) #f]
-                     [else (raise-type-error 'regexp-quote
-                                             "string or byte string" s)])]
+                     [else (raise-argument-error 'regexp-quote
+                                                 "(or/c string? bytes?)" s)])]
            [s (if b?
                 (regexp-replace* regexp-quote-chars:b s #"\\\\&")
                 (regexp-replace* regexp-quote-chars:s s "\\\\&"))])
@@ -52,8 +53,8 @@
   (define (regexp-replace-quote s)
     (cond [(bytes?  s) (regexp-replace* #rx#"[&\\]" s #"\\\\&")]
           [(string? s) (regexp-replace* #rx"[&\\]"  s "\\\\&")]
-          [else (raise-type-error 'regexp-replace-quote
-                                  "string or byte string" s)]))
+          [else (raise-argument-error 'regexp-replace-quote
+                                      "(or/c string? bytes?)" s)]))
 
   ;; This was originally intended to be general, but it has become specialized
   ;; to deal with the combination of a regexp and a number:
@@ -78,9 +79,9 @@
                 ;; because of the intermediate regexp being recreated
                 [(string? rx) (tweak (lambda (x) x) regexp      ->str)]
                 [(bytes?  rx) (tweak (lambda (x) x) byte-regexp ->bts)]
-                [else (raise-type-error
+                [else (raise-argument-error
                        'regexp-tweaker
-                       "regexp, byte regexp, string, or byte string"
+                       "(or/c regexp? byte-regexp? string? bytes?)"
                        rx)]))
         (let ([key (cons n rx)])
           (or (hash-ref t key #f)
@@ -89,9 +90,9 @@
   (define (regexp-try-match pattern input-port [start-k 0] [end-k #f] [out #f]
                             [prefix #""])
     (unless (input-port? input-port)
-      (raise-type-error 'regexp-try-match "input port" input-port))
+      (raise-argument-error 'regexp-try-match "input-port?" input-port))
     (unless (or (not out) (output-port? out))
-      (raise-type-error 'regexp-try-match "output port or #f" out))
+      (raise-argument-error 'regexp-try-match "(or/c output-port? #f)" out))
     (let ([m (regexp-match-peek-positions pattern input-port start-k end-k #f
                                           prefix)])
       (and m
@@ -136,26 +137,26 @@
                   [(string? pattern) (regexp pattern)]
                   [(regexp? pattern) pattern]
                   [(byte-regexp? pattern) pattern]
-                  [else (raise-type-error
+                  [else (raise-argument-error
                          'name
-                         "regexp, byte regexp, string, or byte string"
+                         "(or/c regexp? byte-regexp? string? bytes?)"
                          pattern)])]
            [max-lookbehind (regexp-max-lookbehind orig-rx)])
       (if peek?
         (unless (input-port? string)
-          (raise-type-error 'name "input port" string))
+          (raise-argument-error 'name "input-port?" string))
         (unless (or len (input-port? string))
-          (raise-type-error
-           'name "string, byte string, path, or input port" string)))
+          (raise-argument-error
+           'name "(or/c string? bytes? path? input-port?)" string)))
       (unless (and (number? start) (exact? start) (integer? start)
                    (start . >= . 0))
-        (raise-type-error 'name "non-negative exact integer" start))
+        (raise-argument-error 'name "exact-nonnegative-integer?" start))
       (unless (or (not end)
                   (and (number? end) (exact? end) (integer? end)
                        (end . >= . 0)))
-        (raise-type-error 'name "non-negative exact integer or false" end))
+        (raise-argument-error 'name "(or/c exact-nonnegative-integer? #f)" end))
       (unless (bytes? ipre)
-        (raise-type-error 'name "byte string" ipre))
+        (raise-argument-error 'name "bytes?" ipre))
       (unless (or (input-port? string) (and len (start . <= . len)))
         (raise-mismatch-error
          'name
@@ -229,47 +230,99 @@
                  (let* ([mstart (caar m)]
                         [mend (cdar m)]
                         [0-ok? (not (= mstart mend))])
-                   (if port-success-k
+                   (if (and port-success-k (input-port? string))
                      (port-success-k
                       (lambda (acc new-start new-end)
                         (loop acc new-start new-end ipre 0-ok?))
-                      acc start end mstart mend)
+                      acc start end m)
                      (loop (success-choose start m acc)
                            mend end ipre 0-ok?)))))))))))
 
   ;; Returns all the positions at which the pattern matched.
-  (define (regexp-match-positions* pattern string [start 0] [end #f] [ipre #""])
-    (regexp-loop regexp-match-positions* loop start end pattern string ipre
-      ;; success-choose:
-      (lambda (start ms acc) (cons (car ms) acc))
-      ;; failure-k:
-      (lambda (acc start end) acc)
-      ;; port-success-k: need to shift index of rest as reading; cannot
-      ;; do a tail call without adding another state variable to the
-      ;; regexp loop, so this remains inefficient
-      (and (input-port? string)
-           (lambda (loop acc start end mstart mend)
-             (append (map (lambda (p)
-                            (cons (+ mend (car p)) (+ mend (cdr p))))
-                          (loop '() 0 (and end (- end mend))))
-                     (cons (cons mstart mend) acc))))
-      ;; other port functions: use string case
-      #f #f
-      ;; flags
-      #f #f))
+  (define (regexp-match-positions* pattern string [start 0] [end #f] [ipre #""]
+                                   #:match-select [match-select car])
+    (unless (procedure? match-select)
+      (raise-argument-error 'regexp-match-positions* "procedure?" match-select))
+    ;; Note: no need for a #:gap-select?, since it is easily inferred from the
+    ;; resulting matches
+    (if (eq? match-select car)
+      ;; common case
+      (regexp-loop regexp-match-positions* loop start end pattern string ipre
+        ;; success-choose:
+        (lambda (start ms acc) (cons (car ms) acc))
+        ;; failure-k:
+        (lambda (acc start end) acc)
+        ;; port-success-k: need to shift index of rest as reading; cannot
+        ;; do a tail call without adding another state variable to the
+        ;; regexp loop, so this remains inefficient
+        (lambda (loop acc start end ms)
+          (let ([mstart (caar ms)] [mend (cdar ms)])
+            (append (map (lambda (p) (cons (+ mend (car p)) (+ mend (cdr p))))
+                         (loop '() 0 (and end (- end mend))))
+                    (cons (car ms) acc))))
+        ;; other port functions: use string case
+        #f #f
+        ;; flags
+        #f #f)
+      ;; using some selector
+      (regexp-loop regexp-match-positions* loop start end pattern string ipre
+        ;; success-choose:
+        (lambda (start ms acc) (cons (match-select ms) acc))
+        ;; failure-k:
+        (lambda (acc start end) acc)
+        ;; port-success-k: need to shift index of rest as reading; cannot
+        ;; do a tail call without adding another state variable to the
+        ;; regexp loop, so this remains inefficient
+        (lambda (loop acc start end ms)
+          (let* ([mend (cdar ms)]
+                 [rest (loop '() 0 (and end (- end mend)))]
+                 [s    (match-select ms)])
+            ;; assumes that it's a valid selector (and always works the same,
+            ;; ie, does not return a single pair sometimes a list of pairs at
+            ;; other times)
+            (append
+             (map (if (or (and (pair? s) (exact-integer? (car s))) (not s))
+                    ;; assume that it returns a single match
+                    (lambda (p) (cons (+ mend (car p)) (+ mend (cdr p))))
+                    ;; assume that it returns a list
+                    (lambda (ps)
+                      (map (lambda (p)
+                             (and p (cons (+ mend (car p)) (+ mend (cdr p)))))
+                           ps)))
+                  rest)
+             (cons s acc))))
+        ;; other port functions: use string case
+        #f #f
+        ;; flags
+        #f #f)))
 
   ;; Returns all the positions at which the pattern matched.
   (define (regexp-match-peek-positions* pattern string [start 0] [end #f]
-                                        [ipre #""])
-    (regexp-loop regexp-match-peek-positions* loop start end pattern string ipre
-      ;; success-choose:
-      (lambda (start ms acc) (cons (car ms) acc))
-      ;; failure-k:
-      (lambda (acc start end) acc)
-      ;; port functions: use string case
-      #f #f #f
-      ;; flags
-      #f #t))
+                                        [ipre #""]
+                                        #:match-select [match-select car])
+    (unless (procedure? match-select)
+      (raise-argument-error 'regexp-match-peek-positions* "procedure?" match-select))
+    (if (eq? match-select car)
+      ;; common case
+      (regexp-loop regexp-match-peek-positions* loop start end pattern string ipre
+        ;; success-choose:
+        (lambda (start ms acc) (cons (car ms) acc))
+        ;; failure-k:
+        (lambda (acc start end) acc)
+        ;; port functions: use string case
+        #f #f #f
+        ;; flags
+        #f #t)
+      ;; using some selector
+      (regexp-loop regexp-match-peek-positions* loop start end pattern string ipre
+        ;; success-choose:
+        (lambda (start ms acc) (cons (match-select ms) acc))
+        ;; failure-k:
+        (lambda (acc start end) acc)
+        ;; port functions: use string case
+        #f #f #f
+        ;; flags
+        #f #t)))
 
   ;; Small helper for the functions below
   (define (get-buf+sub string pattern)
@@ -306,10 +359,8 @@
   ;; Like splitting, but insert a replacement between matches
   (define -regexp-replace*
     (let ([regexp-replace*
-           (lambda (pattern string orig-replacement [ipre #""])
+           (lambda (pattern string orig-replacement [start 0] [end #f] [ipre #""])
              (define-values [buf sub] (get-buf+sub string pattern))
-             (define start 0)
-             (define end #f)
              (define needs-string?
                (and (or (string? pattern) (regexp? pattern)) (string? string)))
              (define replacement
@@ -379,57 +430,132 @@
                        (regexp? pattern) (byte-regexp? pattern))
                (unless (or (string? string)
                            (bytes? string))
-                 (raise-type-error 'regexp-replace* "string or byte string"
-                                   string))
+                 (raise-argument-error 'regexp-replace* "(or/c string? bytes?)"
+                                       string))
                (unless (or (string? replacement)
                            (bytes? replacement)
                            (procedure? replacement))
-                 (raise-type-error 'regexp-replace*
-                                   "string, byte string, or procedure"
-                                   replacement))
+                 (raise-argument-error 'regexp-replace*
+                                       "(or/c string? bytes? procedure?)"
+                                       replacement))
                (when (and needs-string? (bytes? replacement))
                  (raise-mismatch-error
                   'regexp-replace*
                   "cannot replace a string with a byte string: "
                   replacement)))
+             (define r
+               (regexp-loop regexp-replace* loop start end pattern buf ipre
+                 ;; success-choose:
+                 (lambda (start ms acc)
+                   (list* (if (procedure? replacement)
+                            (check
+                             replacement
+                             (for/list ([m ms])
+                               (and m (sub buf (car m) (cdr m)))))
+                            (replac ms replacement))
+                          (sub buf start (caar ms))
+                          acc))
+                 ;; failure-k:
+                 (lambda (acc start end)
+                   (cons (if end (sub buf start end) (sub buf start)) acc))
+                 ;; port functions: use string case
+                 #f #f #f
+                 ;; flags
+                 #t #f))
              (apply
               (if (bytes? buf) bytes-append string-append)
-              (regexp-loop regexp-replace* loop start end pattern buf ipre
-                ;; success-choose:
-                (lambda (start ms acc)
-                  (list* (if (procedure? replacement)
-                           (check
-                            replacement
-                            (for/list ([m ms])
-                              (and m (sub buf (car m) (cdr m)))))
-                           (replac ms replacement))
-                         (sub buf start (caar ms))
-                         acc))
-                ;; failure-k:
-                (lambda (acc start end)
-                  (cons (if end (sub buf start end) (sub buf start)) acc))
-                ;; port functions: use string case
-                #f #f #f
-                ;; flags
-                #t #f)))])
+              (cond [(and (= start 0) (not end)) r]
+                    [(not end) (cons (sub string 0 start) r)]
+                    [else `(,(sub string 0 start) ,@r ,(sub string end))])))])
       regexp-replace*))
 
-  ;; Returns all the matches for the pattern in the string.
-  (define (regexp-match* pattern string [start 0] [end #f] [ipre #""])
-    (define-values [buf sub] (get-buf+sub string pattern))
-    (regexp-loop regexp-match* loop start end pattern buf ipre
-      ;; success-choose:
-      (lambda (start ms acc) (cons (sub buf (caar ms) (cdar ms)) acc))
-      ;; failure-k:
-      (lambda (acc start end) acc)
-      ;; port-success-k:
-      #f
-      ;; port-success-choose:
-      (lambda (leftovers ms acc) (cons (car ms) acc))
-      ;; port-failure-k:
-      (lambda (acc leftover) acc)
-      ;; flags
-      #f #f))
+  ;; Returns all the matches for the pattern in the string, optionally
+  ;; other submatches and/or gap strings too.
+  (define (regexp-match* pattern string [start 0] [end #f] [ipre #""]
+                         #:match-select [match-select car]
+                         #:gap-select?  [gap-select   #f])
+    (cond
+      ;; nonsensical case => throw an error
+      [(and (not match-select) (not gap-select))
+       ;; An alternative would be to throw '(), but that's non-uniform in that
+       ;; it wouldn't consume the contents of a port.  Another alternative is
+       ;; to do the full code to consume what's needed, but that's spending
+       ;; cycles to always get a '() result.
+       (raise
+        (exn:fail:contract
+         "regexp-match*: one of `match-select' or `gap-select' must be non-#f"
+         (current-continuation-marks)))]
+      ;; no match-select => same as `regexp-split'
+      [(not match-select) (regexp-split pattern string start end ipre)]
+      [(not (procedure? match-select))
+       (raise-argument-error 'regexp-match* "(or/c procedure? #f)" match-select)]
+      ;; uncommon case => full code
+      [(not (eq? match-select car))
+       (define-values [buf sub] (get-buf+sub string pattern))
+       (regexp-loop regexp-explode loop start end pattern buf ipre
+         ;; success-choose:
+         (lambda (start ms acc)
+           (cons (let ([s (match-select ms)])
+                   ;; assumes a valid selector
+                   (cond [(not (pair? s)) s] ; #f or '()
+                         [(integer? (car s)) (sub buf (car s) (cdr s))]
+                         [else (map (lambda (m)
+                                      (and m (sub buf (car m) (cdr m))))
+                                    s)]))
+                 (if gap-select (cons (sub buf start (caar ms)) acc) acc)))
+         ;; failure-k:
+         (lambda (acc start end)
+           (if gap-select
+             (cons (if end (sub buf start end) (sub buf start)) acc)
+             acc))
+         ;; port-success-k:
+         #f
+         ;; port-success-choose:
+         (lambda (leftovers ms acc)
+           ;; assumes a valid selector too: here it's used with a bytes list so
+           ;; it's simple
+           (cons (match-select ms) (if gap-select (cons leftovers acc) acc)))
+         ;; port-failure-k:
+         (lambda (acc leftover)
+           (if (and gap-select leftover) (cons leftover acc) acc))
+         ;; flags
+         gap-select #f)]
+      ;; default for matches, but also include gaps
+      [gap-select
+       (define-values [buf sub] (get-buf+sub string pattern))
+       (regexp-loop regexp-explode loop start end pattern buf ipre
+         ;; success-choose:
+         (lambda (start ms acc)
+           (cons (sub buf (caar ms) (cdar ms))
+                 (cons (sub buf start (caar ms)) acc)))
+         ;; failure-k:
+         (lambda (acc start end)
+           (cons (if end (sub buf start end) (sub buf start)) acc))
+         ;; port-success-k:
+         #f
+         ;; port-success-choose:
+         (lambda (leftovers ms acc) (cons (car ms) (cons leftovers acc)))
+         ;; port-failure-k:
+         (lambda (acc leftover) (if leftover (cons leftover acc) acc))
+         ;; flags
+         gap-select #f)]
+      ;; default case => optimized with specific code (this is the previous
+      ;; functionality of `regexp-explode*' too)
+      [else
+       (define-values [buf sub] (get-buf+sub string pattern))
+       (regexp-loop regexp-match* loop start end pattern buf ipre
+         ;; success-choose:
+         (lambda (start ms acc) (cons (sub buf (caar ms) (cdar ms)) acc))
+         ;; failure-k:
+         (lambda (acc start end) acc)
+         ;; port-success-k:
+         #f
+         ;; port-success-choose:
+         (lambda (leftovers ms acc) (cons (car ms) acc))
+         ;; port-failure-k:
+         (lambda (acc leftover) acc)
+         ;; flags
+         #f #f)]))
 
   (define (regexp-match-exact? p s)
     (let ([m (regexp-match-positions p s)])
@@ -444,5 +570,11 @@
                      (if (path? s)
                        (string-length (path->string s))
                        (string-length s))])))))
+
+  (define (regexp-replaces string replacements)
+    (let loop ([str string] [rs replacements])
+      (if (null? rs)
+        str
+        (loop (regexp-replace* (caar rs) str (cadar rs)) (cdr rs)))))
 
   )

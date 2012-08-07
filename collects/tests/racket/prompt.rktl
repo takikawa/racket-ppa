@@ -145,5 +145,103 @@
   (test (void) go 100000))
 
 ;; ----------------------------------------
+;; A GC test:
+
+(require racket/control)
+
+(let ()
+  (define (loop n)
+    (shift s (if (zero? n)
+                 (void)
+                 (loop (sub1 n)))))
+  (define (overflow-prompt-go)
+    (reset (loop 50000)))
+  (test (void) overflow-prompt-go))
+
+;; ----------------------------------------
+;; control proxies
+
+(define imp-tag
+  (impersonate-prompt-tag
+   (make-continuation-prompt-tag)
+   (lambda (x) (* x 2))
+   (lambda (x) (+ x 1))))
+
+(define imp-tag-2
+  (impersonate-prompt-tag
+   (make-continuation-prompt-tag)
+   (lambda (x y) (values (* x 2) (* y 2)))
+   (lambda (x y) (values (+ x 1) (+ y 1)))))
+
+(define imp-tag-3
+  (impersonate-prompt-tag
+   (make-continuation-prompt-tag)
+   (lambda (x y) (values (* x 2) (* y 2)))
+   (lambda (x y) x)))
+
+(define imp-tag-4
+  (impersonate-prompt-tag
+   (make-continuation-prompt-tag)
+   (lambda (x y) (values x x x))
+   (lambda (x y) (values x y))))
+
+(define cha-tag
+  (chaperone-prompt-tag
+   (make-continuation-prompt-tag)
+   (lambda (x) (if (number? x) x (error "fail")))
+   (lambda (x) x)))
+
+(define bad-tag
+  (chaperone-prompt-tag
+   (make-continuation-prompt-tag)
+   (lambda (x) 42)
+   (lambda (x) x)))
+
+(define (do-test tag . rst)
+  (call-with-continuation-prompt
+    (lambda ()
+      (apply abort-current-continuation
+             (cons tag rst)))
+    tag
+    (lambda x x)))
+
+(define (in-prompt tag k . vs)
+  (call-with-continuation-prompt
+    (lambda () (apply k vs))
+    tag))
+
+;; make sure proxied tags are still tags
+(test #t continuation-prompt-tag? imp-tag)
+
+;; make sure proxies do the right thing
+(test '(12) do-test imp-tag 5)
+(test '(12 14) do-test imp-tag-2 5 6)
+(err/rt-test (do-test imp-tag-2 5) exn:fail?)
+(err/rt-test (do-test imp-tag-3 10 11) exn:fail?)
+(err/rt-test (do-test imp-tag-4 10 11) exn:fail?)
+(test '(7) do-test cha-tag 7)
+(err/rt-test (do-test cha-tag "bad") exn:fail?)
+(err/rt-test (do-test bad-tag 5) exn:fail?)
+
+;; sanity checks
+(test 5 in-prompt imp-tag call/cc (lambda (k) (k 5)) imp-tag)
+(test 5 in-prompt imp-tag
+      call-with-composable-continuation
+      (lambda (k) (k 5))
+      imp-tag)
+(test #t in-prompt imp-tag
+      continuation-prompt-available? imp-tag)
+
+(call-with-continuation-prompt
+  (lambda ()
+    (with-continuation-mark 'mark 'val
+      (test
+        'val
+        (compose (lambda (s) (continuation-mark-set-first s 'mark))
+                 current-continuation-marks)
+        imp-tag)))
+  imp-tag)
+
+;;----------------------------------------
 
 (report-errs)

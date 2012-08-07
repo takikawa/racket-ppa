@@ -16,12 +16,12 @@
                                            (send dc set-bitmap #f))
                                           bm)))]
 @interaction-eval[#:eval draw-eval (define (line-bitmap mode)
-                                      (let* ([bm (make-bitmap 30 4)]
+                                     (let* ([bm (make-bitmap 30 4)]
                                             [dc (make-object bitmap-dc% bm)])
-                                        (send dc set-smoothing mode)
-                                        (send dc draw-line 0 2 30 2)
+                                       (send dc set-smoothing mode)
+                                       (send dc draw-line 0 2 30 2)
                                        (send dc set-bitmap #f)
-                                       bm))]
+                                       (copy-bitmap bm)))]
 @interaction-eval[#:eval draw-eval (define (path-bitmap zee join brush?)
                                      (let* ([bm (make-bitmap 40 40)]
                                             [dc (new bitmap-dc% [bitmap bm])])
@@ -32,7 +32,7 @@
                                            (send dc set-brush "white" 'transparent))
                                        (send dc draw-path zee 5 5)
                                        (send dc set-bitmap #f)
-                                       bm))]
+                                       (copy-bitmap bm)))]
 
 @(define-syntax-rule (define-linked-method name interface)
    (define-syntax name 
@@ -363,7 +363,7 @@ and a transparent brush produces
 
 Drawing a single path with three line segments is not the same as
 drawing three separate lines. When multiple line segments are drawn at
-once, the corner frm one line to the next is shaped according to the
+once, the corner from one line to the next is shaped according to the
 pen's join style. The image above uses the default @racket['round]
 join style. With @racket['miter], line lines are joined with sharp
 corners:
@@ -634,16 +634,132 @@ filling or drawing with stipples. Conversely, stippled drawing can be
 viewed as a convenience alternative to clipping repeated calls of
 @racket[draw-bitmap].
 
+Combining regions with @racket[pen%] objects that have gradients, however,
+is more than just a convenience, as it allows us to draw shapes in combinations
+we could not otherwise draw. To illustrate, here is some code that draws
+text with its reflection below it.
+
+@racketblock+eval[
+#:eval draw-eval
+(code:comment "First compute the size of the text we're going to draw,")
+(code:comment "using a small bitmap that we never draw into.")
+(define bdc (new bitmap-dc% [bitmap (make-bitmap 1 1)]))
+(define str "Racketeers, ho!")
+(define the-font (send the-font-list find-or-create-font 
+                       24 'swiss 'normal 'bold))
+(define-values (tw th)
+  (let-values ([(tw th _1 _2)
+                (send dc get-text-extent str the-font)])
+    (values (inexact->exact (ceiling tw))
+            (inexact->exact (ceiling th)))))
+
+(code:comment "Now we can create a correctly sized bitmap to")
+(code:comment "actually draw into and enable smoothing.")
+(send bdc set-bitmap (make-bitmap tw (* th 2)))
+(send bdc set-smoothing 'smoothed)
+
+(code:comment "next, build a path that contains the outline of the text")
+(define upper-path (new dc-path%))
+(send upper-path text-outline the-font str 0 0)
+
+(code:comment "next, build a path that contains the mirror image")
+(code:comment "outline of the text")
+(define lower-path (new dc-path%))
+(send lower-path text-outline the-font str 0 0)
+(send lower-path transform (vector 1 0 0 -1 0 0))
+(send lower-path translate 0 (* 2 th))
+
+(code:comment "This helper accepts a path, sets the clipping region")
+(code:comment "of bdc to be the path (but in region form), and then")
+(code:comment "draws a big rectangle over the whole bitmap.")
+(code:comment "The brush will be set differently before each call to")
+(code:comment "draw-path, in order to draw the text and then to draw")
+(code:comment "the shadow.")
+(define (draw-path path)
+  (define rgn (new region%))
+  (send rgn set-path path)
+  (send bdc set-clipping-region rgn)
+  (send bdc set-pen "white" 1 'transparent)
+  (send bdc draw-rectangle 0 0 tw (* th 2))
+  (send bdc set-clipping-region #f))
+
+(code:comment "Now we just draw the upper-path with a solid brush")
+(send bdc set-brush "black" 'solid)
+(draw-path upper-path)
+
+(code:comment "To draw the shadow, we set up a brush that has a")
+(code:comment "linear gradient over the portion of the bitmap")
+(code:comment "where the shadow goes")
+(define stops
+  (list (list 0 (make-object color% 0 0 0 0.4))
+        (list 1 (make-object color% 0 0 0 0.0))))
+(send bdc set-brush 
+      (new brush% 
+           [gradient 
+            (new linear-gradient% 
+                 [x0 0]
+                 [y0 th]
+                 [x1 0]
+                 [y1 (* th 2)]
+                 [stops stops])]))
+(draw-path lower-path)                 
+]
+
+And now the bitmap in @racket[bdc] has ``Racketeers, ho!'' with
+a mirrored version below it.
+
+@centered{@interaction-eval-show[#:eval draw-eval (copy-bitmap (send bdc get-bitmap))]}
+
 
 @; ------------------------------------------------------------
-@section{Portability}
+@section[#:tag "Portability"]{Portability and Bitmap Variants}
 
-Drawing effects are not completely portable across platforms or across
-types of DC. For example. drawing to a bitmap produced by
-@racket[make-bitmap] may produce slightly different results than
-drawing to one produced by @racketmodname[racket/gui]'s
-@racket[make-screen-bitmap], but drawing to a bitmap from
-@racket[make-screen-bitmap] should be the same as drawing to an
-onscreen @racket[canvas%]. Fonts and text, especially, can vary across
+Drawing effects are not completely portable across platforms, across
+different classes that implement @racket[dc<%>], or different
+kinds of bitmaps. Fonts and text, especially, can vary across
 platforms and types of @tech{DC}, but so can the precise set of pixels
 touched by drawing a line.
+
+Different kinds of bitmaps can produce different results:
+
+@itemlist[
+
+ @item{Drawing to a bitmap produced by @racket[make-bitmap] (or
+       instantiated from @racket[bitmap%]) draws in the most
+       consistent way across platforms.}
+
+ @item{Drawing to a bitmap produced by @racket[make-platform-bitmap]
+       uses platform-specific drawing operations as much as possible.
+       On Windows, however, a bitmap produced by
+       @racket[make-platform-bitmap] has no alpha channel, and it uses
+       more constrained resources than one produced by
+       @racket[make-bitmap] (due to a system-wide, per-process GDI limit).
+
+       As an example of platform-specific difference, text is smoothed
+       by default with sub-pixel anti-aliasing on Mac OS X, while text
+       smoothing in a @racket[make-bitmap] result uses only grays.
+       Line or curve drawing may touch different pixels than in a
+       bitmap produced by @racket[make-bitmap], and bitmap scaling may
+       differ.
+
+       A possible approach to dealing with the GDI limit under Windows
+       is to draw into the result of a @racket[make-platform-bitmap]
+       and then copy the contents of the drawing into the result of a
+       @racket[make-bitmap]. This approach preserves the drawing
+       results of @racket[make-platform-bitmap], but it retains
+       constrained resources only during the drawing process.}
+
+ @item{Drawing to a bitmap produced by @racket[make-screen-bitmap]
+       from @racketmodname[racket/gui/base] or by @xmethod[canvas%
+       make-bitmap] uses the same platform-specific drawing operations
+       as drawing into a @racket[canvas%] instance. A bitmap produced
+       by @racket[make-screen-bitmap] is the same as one produced by
+       @racket[make-platform-bitmap] on Windows or Mac OS X, but it may
+       be sensitive to the X11 server on Unix.
+
+       Use @racket[make-screen-bitmap] when drawing to a bitmap as an
+       offscreen buffer before transferring an image to the screen, or
+       when consistency with screen drawing is needed for some other
+       reason.}
+
+]

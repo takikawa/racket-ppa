@@ -66,13 +66,13 @@ A Reified is
                   [else
                    (loop (cdr result) indexes (add1 i))])))
         (make-keyword-procedure
-         (lambda (kws kwargs x cx pr es fh cp success . rest)
-           (keyword-apply parser kws kwargs x cx pr es fh cp
+         (lambda (kws kwargs x cx pr es fh cp rl success . rest)
+           (keyword-apply parser kws kwargs x cx pr es fh cp rl
                           (if splicing?
-                              (lambda (fh cp x cx . result)
-                                (apply success fh cp x cx (take-indexes result indexes)))
-                              (lambda (fh cp . result)
-                                (apply success fh cp (take-indexes result indexes))))
+                              (lambda (fh x cx pr . result)
+                                (apply success fh x cx pr (take-indexes result indexes)))
+                              (lambda (fh . result)
+                                (apply success fh (take-indexes result indexes))))
                           rest))))))
 
 (define (wrong-depth who a b)

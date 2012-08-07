@@ -1,12 +1,17 @@
 #lang racket/base
 
+(require (for-syntax typed-racket/env/global-env) typed-racket/env/global-env
+         (for-template typed-racket/env/global-env)
+         (for-meta 2 typed-racket/env/global-env))
 (require "test-utils.rkt"
-         (for-syntax scheme/base)
-         (for-template scheme/base))
+         (for-syntax racket/base)
+         (for-template racket/base))
 (require (private type-annotation parse-type)
-         (base-env prims
-                   base-types-extra
-                   base-env-indexing base-structs)
+         (except-in 
+          (base-env prims
+                    base-types-extra
+                    base-env-indexing base-structs)
+          define lambda λ)
          (typecheck typechecker)
          (rep type-rep filter-rep object-rep)
          (rename-in (types utils union convenience abbrev filter-ops)
@@ -24,7 +29,9 @@
                      (typecheck typechecker)
                      (env global-env)
                      (base-env base-env-indexing))
-         racket/file racket/port
+         racket/file racket/port racket/flonum
+         (env global-env)
+         (for-meta 2 (env global-env))
          (for-template
           racket/file racket/port
             (base-env base-types base-types-extra base-env-indexing))
@@ -35,7 +42,8 @@
 
 (provide typecheck-tests g tc-expr/expand)
 
-(b:init) (n:init) (initialize-structs) (initialize-indexing)
+(b:init) (n:init) (initialize-structs) (initialize-indexing) 
+(dynamic-require '(submod typed-racket/base-env/base-types #%type-decl) #f)
 
 (define N -Number)
 (define B -Boolean)
@@ -173,6 +181,23 @@
         (tc-e (- 241.3) -NegFlonum)
         (tc-e (- -24.3) -PosFlonum)
 
+        (tc-e (- (ann 1000 Index) 1) -Fixnum)
+        (tc-e (- (ann 1000 Positive-Index) 1) -Index)
+        (tc-e (- (ann 1000 Fixnum) 1) -Int)
+        (tc-e (- (ann 1000 Nonnegative-Fixnum) 1) -Fixnum)
+        (tc-e (- (ann 1000 Positive-Fixnum) 1) -NonNegFixnum)
+        (tc-e (- (ann 1000 Exact-Positive-Integer) 1) -Nat)
+
+        (tc-e (fx- (ann 1000 Index) 1) -Fixnum)
+        (tc-e (fx- (ann 1000 Positive-Index) 1) -Index)
+        (tc-e (fx- (ann 1000 Fixnum) 1) -Fixnum)
+        (tc-e (fx- (ann 1000 Nonnegative-Fixnum) 1) -Fixnum)
+        (tc-e (fx- (ann 1000 Positive-Fixnum) 1) -NonNegFixnum)
+        (tc-e (fx- (ann 1000 Exact-Positive-Integer) 1) -NonNegFixnum)
+
+
+        (tc-e (*) -One)
+
         (tc-e (gcd 1/2) -PosRat)
         (tc-e (gcd 3 1/2) -PosRat)
         (tc-e (gcd (ann 3 Integer) 1/2) -NonNegRat)
@@ -181,6 +206,12 @@
         (tc-e (lcm 3 1/2) -PosRat)
         (tc-e (lcm (ann 3 Integer) 1/2) -NonNegRat)
         (tc-e (lcm (ann 3 Integer) -1/2) -NonNegRat)
+        (tc-e (expt 0.5 0.3) -PosFlonum)
+        (tc-e (expt 0.5 2) -PosFlonum)
+        (tc-e (expt 0.5 0) -PosReal)
+        (tc-e (flexpt 0.5 0.3) -NonNegFlonum)
+        (tc-e (flexpt 0.00000000001 100000000000.0) -NonNegFlonum)
+        (tc-e (flexpt -2.0 -0.5) -Flonum) ; NaN
 
         [tc-e/t (lambda: () 3) (t:-> -PosByte : -true-lfilter)]
         [tc-e/t (lambda: ([x : Number]) 3) (t:-> N -PosByte : -true-lfilter)]
@@ -198,6 +229,12 @@
         [tc-e/t #(2 3 #t) (make-HeterogenousVector (list -Integer -Integer -Boolean))]
         [tc-e (vector 2 "3" #t) (make-HeterogenousVector (list -Integer -String -Boolean))]
         [tc-e (vector-immutable 2 "3" #t) (make-HeterogenousVector (list -Integer -String -Boolean))]
+        [tc-e (make-vector 4 1) (-vec -Integer)]
+        [tc-e (build-vector 4 (lambda (x) 1)) (-vec -Integer)]
+        [tc-e (range 4) (-lst -Byte)]
+        [tc-e (range 2 4 1) (-lst -PosByte)]
+        [tc-e (range 0 4 1) (-lst -Byte)]
+        [tc-e (range 0.0 4/2 0.5) (-lst -Flonum)]
         [tc-e/t '(#t #f) (-lst* (-val #t) (-val #f))]
         [tc-e/t (plambda: (a) ([l : (Listof a)]) (car l))
                 (make-Poly '(a) (t:-> (make-Listof (-v a)) (-v a)))]
@@ -212,6 +249,8 @@
         [tc-e (values) #:ret (ret null)]
         [tc-e (values 3 #f) #:ret (ret (list -PosByte (-val #f)) (list (-FS -top -bot) (-FS -bot -top)))]
         [tc-e (map #{values @ Symbol} '(a b c)) (-pair Sym (make-Listof  Sym))]
+        [tc-e (andmap add1 (ann '() (Listof Number))) (t:Un (-val #t) N)]
+        [tc-e (ormap add1 (ann '() (Listof Number))) (t:Un (-val #f) N)]
         [tc-e (letrec: ([fact : (Number -> Number) (lambda: ([n : Number]) (if (zero? n) 1 (* n (fact (- n 1)))))])
                        (fact 20))
               N]
@@ -324,6 +363,12 @@
            (let: ([v : String "a"])
                  (string-append "foo" (a v))))
          -String]
+        [tc-e (string-join '("hello" "world") " ") -String]
+        [tc-e (string-join '("hello" "world")) -String]
+        [tc-e (string-join '("hello" "world") #:before-first "a") -String]
+        [tc-e (add-between '(1 2 3) 0) (-lst -Byte)]
+        [tc-e (add-between '(1 2 3) 'a) (-lst (t:Un -PosByte (-val 'a)))]
+        [tc-e ((inst add-between Positive-Byte Symbol) '(1 2 3) 'a #:splice? #t #:before-first '(b)) (-lst (t:Un -PosByte -Symbol))]
 
         [tc-e (apply (plambda: (a) [x : a *] x) '(5)) (-lst -PosByte)]
         [tc-e (apply append (list '(1 2 3) '(4 5 6))) (-lst -PosByte)]
@@ -813,7 +858,15 @@
 
 
         [tc-e
-         (call-with-values (lambda () (time-apply + (list 1 2)))
+         (call-with-values (lambda () ((inst time-apply Number Number Number) + (list 1 2)))
+                           (lambda: ([v : (Listof Number)]
+                                     [cpu : Number]
+                                     [user : Number]
+                                     [gc : Number])
+                             'whatever))
+         #:ret (ret (-val 'whatever) -true-filter)]
+        [tc-e
+         (call-with-values (lambda () ((inst time-apply Number Number Number Number Number Number Number) + (list 1 2 3 4 5 6)))
                            (lambda: ([v : (Listof Number)]
                                      [cpu : Number]
                                      [user : Number]
@@ -829,9 +882,9 @@
               #:ret (ret -Number -true-filter))
         [tc-e (let ([x 1]) (if x x (add1 x)))
               #:ret (ret -One (-FS -top -top))]
-        [tc-e (let: ([x : (U (Vectorof Number) String) (vector 1 2 3)])
+        [tc-e (let: ([x : (U (Vectorof Integer) String) (vector 1 2 3)])
                 (if (vector? x) (vector-ref x 0) (string-length x)))
-         -Number]
+         -Integer]
         [tc-e (let ()
                 (define: foo : (Integer * -> Integer) +)
                 (foo 1 2 3 4 5))
@@ -875,6 +928,8 @@
 
  
         ;;Path tests
+        (tc-e (path-string? "foo") B)
+        (tc-e (path-string? (string->path "foo")) #:ret (ret B (-FS -top -bot)))
         (tc-e (bytes->path #"foo" 'unix) -SomeSystemPath)
         (tc-e (bytes->path #"foo") -Path)
         (tc-e (bytes->path-element #"foo") -Path)
@@ -1012,12 +1067,6 @@
         (tc-e (regexp-match #"foo" (string->path "tmp")) (-opt (-pair -Bytes (-lst (-opt -Bytes)))))
         (tc-e (regexp-match "foo" (open-input-string "tmp")) (-opt (-pair -Bytes (-lst (-opt -Bytes)))))
         (tc-e (regexp-match #"foo" (open-input-string "tmp")) (-opt (-pair -Bytes (-lst (-opt -Bytes)))))
-
-        (tc-e (regexp-match* "foo" "foobar") (-lst -String))
-        (tc-e (regexp-match* "foo" #"foobar") (-lst -Bytes))
-        (tc-e (regexp-match* #"foo" "foobar") (-lst -Bytes))
-        (tc-e (regexp-match* #"foo" #"foobar") (-lst -Bytes))
-
 
         (tc-err (regexp-try-match "foo" "foobar"))
         (tc-e (regexp-try-match "foo" (open-input-string "foobar")) (-opt (-pair -Bytes (-lst (-opt -Bytes)))))
@@ -1395,6 +1444,63 @@
            
            (go first second third fourth fifth sixth seventh eighth ninth tenth))
          (-val 1)]
+        
+        [tc-e (vector-append #(1) #(2))
+              (-vec -Integer)]
+	[tc-e/t (ann #() (Vectorof Integer))
+                (-vec -Integer)]
+        
+        [tc-e (let: ([x : Float 0.0])
+                (= 0 x))
+              #:ret (ret -Boolean (-FS -top -top) (make-Empty))]
+        
+        [tc-e/t (ann (lambda: ([x : Boolean]) (if x x #t)) (Boolean -> #t)) (t:-> -Boolean (-val #t))]
+        
+        [tc-e (sequence? 'foo)
+              -Boolean]
+        [tc-err (stop-before (inst empty-sequence Symbol) zero?)]
+        [tc-e (stop-before (inst empty-sequence Integer) zero?)
+              (-seq -Int)]
+        [tc-e (stop-after (inst empty-sequence Integer) zero?)
+              (-seq -Int)]
+        [tc-e (sequence->list (inst empty-sequence Symbol))
+              (-lst -Symbol)]
+        [tc-e (sequence-length (inst empty-sequence Symbol))
+              -Nat]
+        [tc-e (sequence-ref (inst empty-sequence Symbol) 0)
+              -Symbol]
+        [tc-e (sequence-tail (inst empty-sequence Symbol) 0)
+              (-seq -Symbol)]
+        [tc-e (sequence-append empty-sequence (inst empty-sequence Symbol))
+              (-seq -Symbol)]
+        [tc-e (sequence-append (inst empty-sequence Symbol) (inst empty-sequence Integer))
+              (-seq (t:Un -Symbol -Int))]
+        [tc-e (sequence-map add1 (inst empty-sequence Integer))
+              (-seq -Int)]
+        [tc-err (sequence-andmap zero? (inst empty-sequence Symbol))]
+        [tc-e (sequence-andmap zero? (inst empty-sequence Integer))
+              -Boolean]
+        [tc-e (sequence-andmap add1 (inst empty-sequence Integer))
+              (t:Un -Int (-val #t))]
+        [tc-e (sequence-ormap zero? (inst empty-sequence Integer))
+              -Boolean]
+        [tc-e (sequence-ormap add1 (inst empty-sequence Integer))
+              (t:Un -Int (-val #f))]
+        [tc-e (sequence-fold (lambda: ([y : (Listof Symbol)] [x : Symbol]) (cons x y))
+                             null empty-sequence)
+              (-lst -Symbol)]
+        [tc-e (sequence-count zero? (inst empty-sequence Integer))
+              -Nat]
+        [tc-e (sequence-filter zero? (inst empty-sequence Integer))
+              (-seq -Int)]
+        [tc-e (sequence-add-between (inst empty-sequence Integer) 'foo)
+              (-seq (t:Un -Int (-val 'foo)))]
+        [tc-e (let ()
+                (define: x : Any (vector 1 2 3))
+                (if (vector? x) (vector-ref x 0) #f))
+              Univ]
+        [tc-e ((inst vector Index) 0)
+              (-vec -Index)]
         )
   (test-suite
    "check-type tests"

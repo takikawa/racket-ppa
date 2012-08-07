@@ -1,24 +1,27 @@
-#lang scheme/base
+#lang racket/base
 
 (require "syntax.rkt"
-         scheme/math
-         scheme/class
+         racket/math
+         racket/class
          "../unsafe/cairo.rkt"
          "fmod.rkt"
          "point.rkt"
          "transform.rkt"
          "font.rkt"
-         (only-in scheme/base 
-                  [append s:append]
-                  [reverse s:reverse]))
+         (only-in racket/base [append r:append] [reverse r:reverse]))
 
 (provide dc-path%
          (protect-out do-path
-                      set-text-to-path!))
+                      set-text-to-path!
+                      
+                      get-closed-points
+                      get-open-points
+                      set-closed+open-points))
 
 (define-local-member-name
   get-closed-points
   get-open-points
+  set-closed+open-points
   do-path)
 
 (define 2pi (* 2.0 pi))
@@ -41,19 +44,44 @@
 
     (define/private (flatten-open!)
       (unless (null? rev-open-points)
-        (set! open-points (s:append open-points (s:reverse rev-open-points)))
+        (set! open-points (r:append open-points (r:reverse rev-open-points)))
         (set! rev-open-points null)))
 
     (define/private (flatten-closed!)
       (unless (null? rev-closed-points)
-        (set! closed-points (s:append closed-points (s:reverse rev-closed-points)))
+        (set! closed-points (r:append closed-points (r:reverse rev-closed-points)))
         (set! rev-closed-points null)))
     
     (define/public (get-closed-points) (flatten-closed!) closed-points)
     (define/public (get-open-points) (flatten-open!) open-points)
 
+    (define/public (set-closed+open-points c o)
+      (define (ok-points? l)
+        (let loop ([l l])
+          (cond
+           [(null? l) #t]
+           [(pair? l)
+            (let ([p (car l)])
+              (if (pair? p)
+                  (and (real? (car p))
+                       (real? (cdr p))
+                       (loop (cdr l)))
+                  (and (vector? p)
+                       (= (vector-length p) 4)
+                       (real? (vector-ref p 0))
+                       (real? (vector-ref p 1))
+                       (real? (vector-ref p 2))
+                       (real? (vector-ref p 3))
+                       (pair? (cdr l))
+                       (pair? (cadr l))
+                       (loop (cdr l)))))])))
+      (unless (and (andmap ok-points? c) (ok-points? o))
+        (error "invalid path points"))
+      (set! closed-points c)
+      (set! open-points o))
+
     (define/private (do-points cr l align-x align-y)
-      (let loop ([l l][first? #t])
+      (let loop ([l l] [first? #t])
         (cond
          [(null? l) (void)]
          [else
@@ -79,11 +107,11 @@
         (cairo_close_path cr))
       (do-points cr open-points align-x align-y))
 
-    (def/public (append [dc-path% path])
+    (define/public (append path)
       (flatten-closed!)
       (flatten-open!)
-      (set! closed-points (s:append closed-points (send path get-closed-points)))
-      (set! open-points (s:append open-points (send path get-open-points))))
+      (set! closed-points (r:append closed-points (send path get-closed-points)))
+      (set! open-points (r:append open-points (send path get-open-points))))
 
     (def/public (reset)
       (set! open-points null)
@@ -101,8 +129,8 @@
                                   (vector (vector-ref p 2) (vector-ref p 3)
                                           (vector-ref p 0) (vector-ref p 1))))
                             l))])
-        (set! open-points (rev-one (s:reverse open-points)))
-        (set! closed-points (map rev-one (map s:reverse closed-points)))))
+        (set! open-points (rev-one (r:reverse open-points)))
+        (set! closed-points (map rev-one (map r:reverse closed-points)))))
 
     (def/public (close)
       (flatten-open!)
@@ -145,7 +173,7 @@
                                            (max b (vector-ref p 1) (vector-ref p 3)))]))])
               (values l t (- r l) (- b t))))))
     
-    (def/public (move-to [real? x] [real? y])
+    (define/public (move-to x y)
       (when (or (pair? open-points)
                 (pair? rev-open-points))
         (close))
@@ -154,7 +182,7 @@
     (define/private (do-move-to x y)
       (set! rev-open-points (list (cons (exact->inexact x) (exact->inexact y)))))
 
-    (def/public (line-to [real? x] [real? y])
+    (define/public (line-to x y)
       (unless (or (pair? open-points)
                   (pair? rev-open-points))
         (error (method-name 'dc-path% 'line-to) "path not yet open"))
@@ -163,9 +191,7 @@
     (define/private (do-line-to x y)
       (set! rev-open-points (cons (cons (exact->inexact x) (exact->inexact y)) rev-open-points)))
 
-    (def/public (lines [(make-alts (make-list point%) list-of-pair-of-real?) pts]
-                       [real? [x 0.0]]
-                       [real? [y 0.0]])
+    (define/public (lines pts [x 0.0] [y 0.0])
       (unless (or (pair? open-points)
                   (pair? rev-open-points))
         (error (method-name 'dc-path% 'lines) "path not yet open"))
@@ -174,7 +200,7 @@
             (do-line-to (+ x (car p)) (+ y (cdr p)))
             (do-line-to (+ x (point-x p)) (+ y (point-y p))))))
 
-    (def/public (curve-to [real? x1] [real? y1] [real? x2] [real? y2] [real? x3] [real? y3])
+    (define/public (curve-to x1 y1 x2 y2 x3 y3)
       (unless (or (pair? open-points)
                   (pair? rev-open-points))
         (error (method-name 'dc-path% 'curve-to) "path not yet open"))
@@ -189,9 +215,7 @@
                                            (exact->inexact y2))
                                    rev-open-points)))
 
-    (def/public (arc [real? x] [real? y] 
-                     [real? w] [real? h]
-                     [real? start] [real? end] [any? [ccw? #t]])
+    (define/public (arc x y w h start end [ccw? #t])
       (do-arc x y w h start end ccw?))
     
     (define/private (do-arc x y w h start end ccw?)
@@ -265,7 +289,7 @@
                                    pts))
                             (loop (+ start angle)
                                   (- delta angle)))))))))
-              (for ([v (in-list (if ccw? (s:reverse pts) pts))])
+              (for ([v (in-list (if ccw? (r:reverse pts) pts))])
                 (if (or (pair? open-points)
                         (pair? rev-open-points))
                     (do-line-to (vector-ref v 0) (vector-ref v 1))
@@ -276,13 +300,12 @@
                                  (vector-ref v 4) (vector-ref v 5)
                                  (vector-ref v 6) (vector-ref v 7)))))))))
 
-    (def/public (ellipse [real? x] [real? y] 
-                         [nonnegative-real? w] [nonnegative-real? h])
+    (define/public (ellipse x y w h)
       (when (open?) (close))
       (do-arc x y w h 0 2pi #f)
       (close))
 
-    (def/public (text-outline [font% font] [string? str] [real? x] [real? y] [any? [combine? #f]])
+    (define/public (text-outline font str x y [combine? #f])
       (when (open?) (close))
       (let ([p (text-to-path font str x y combine?)])
         (for ([a (in-list p)])
@@ -295,7 +318,7 @@
             [(close) (close)])))
       (close))
 
-    (def/public (scale [real? x][real? y])
+    (define/public (scale x y)
       (unless (and (= x 1.0) (= y 1.0))
         (flatten-open!)
         (flatten-closed!)
@@ -313,7 +336,7 @@
                     (* (vector-ref p 2) x)
                     (* (vector-ref p 3) y)))))
   
-    (def/public (translate [real? x][real? y])
+    (define/public (translate x y)
       (unless (and (zero? x) (zero? y))
         (flatten-open!)
         (flatten-closed!)
@@ -331,7 +354,7 @@
                     (+ (vector-ref p 2) x)
                     (+ (vector-ref p 3) y)))))
 
-    (def/public (rotate [real? th])
+    (define/public (rotate th)
       (flatten-open!)
       (flatten-closed!)
       (set! open-points (rotate-points open-points th))
@@ -353,7 +376,7 @@
              [cx (make-polar (magnitude cx) (+ (angle cx) (- th)))])
         (values (real-part cx) (imag-part cx))))
 
-    (def/public (transform [matrix-vector? m])
+    (define/public (transform m)
       (flatten-open!)
       (flatten-closed!)
       (set! open-points (transform-points open-points m))
@@ -376,7 +399,7 @@
                  (* y (vector-ref m 3))
                  (vector-ref m 5))))
 
-    (def/public (rectangle [real? x] [real? y] [real? w] [real? h])
+    (define/public (rectangle x y w h)
       (when (open?) (close))
       (move-to x y)
       (line-to (+ x w) y)
@@ -384,8 +407,7 @@
       (line-to x (+ y h))
       (close))
 
-    (def/public (rounded-rectangle [real? x] [real? y] [real? w] [real? h]
-                                   [real? [radius -0.25]])
+    (define/public (rounded-rectangle x y w h [radius -0.25])
       (when (open?) (close))
       (let ([dx (min (/ w 2)
                      (if (negative? radius)

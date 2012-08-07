@@ -459,6 +459,42 @@
   (define q 8)
   (nab h))
 
+;; #'module* in stop list shouldn't add all the rest:
+(let ()
+  (define-syntax (m stx) (syntax-case stx () 
+                           [(_ e) 
+                            (let ([e (local-expand #'e 'expression (list #'module*))])
+                              (syntax-case e  (#%plain-app quote)
+                                [(#%plain-app + (quote 1) (quote 2)) 'ok]
+                                [else (error 'test "bad local-expand result: ~e" e)])
+                              #'(void))]))
+  (m (+ 1 2)))
+
+;; #'module* in stop list should stop:
+(module m1-for-local-expand racket/base
+  (require (for-syntax racket/base))
+  (provide (rename-out [mb #%module-begin])
+           (except-out (all-from-out racket/base) #%module-begin))
+  (define-syntax (mb stx)
+    (syntax-case stx ()
+      [(_ 10) #'(#%plain-module-begin 10)]
+      [(_ 11) #'(#%plain-module-begin 11)]
+      [(_ form ...)
+       (let ([e (local-expand #'(#%plain-module-begin form ...)
+                              'module-begin
+                              (list #'module*))])
+         (syntax-case e (module module* quote #%plain-app)
+           [(mod-beg
+             (#%plain-app + (quote 1) (quote 2))
+             (module* q #f 10)
+             (module* z #f 11))
+            'ok]
+           [else (error 'test "bad local-expand result: ~s" (syntax->datum e))])
+         e)])))
+(module m2-for-local-expand 'm1-for-local-expand
+  (+ 1 2)
+  (module* q #f 10) (module* z #f 11))
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (module rename-transformer-tests scheme/base
@@ -603,6 +639,33 @@
   (two))
 
 ;; ----------------------------------------
+;; Related: check that matching no marks is considered less
+;; of a match than matching with marks:
+
+(module another-test-empty-marks-with-context racket/base
+  (require (for-syntax racket/base))
+
+  (define-for-syntax count 0)
+  (define-for-syntax (inc-count!) (set! count (add1 count)))
+  
+  (define-syntax (foo stx)
+    (syntax-case stx ()
+      [(_ x e)
+       (let ([cid-marker (make-syntax-introducer)])
+         (with-syntax ([y (cid-marker #'x)])
+           #'(begin
+               (define y e)
+               (+ y 1)
+               (define-syntax x
+                 (lambda (stx) 
+                   (inc-count!)
+                   (when (= count 5) (error "stop"))
+                   #'y)))))]))
+  
+  (module* test #f
+    (foo eX 3)))
+
+;; ----------------------------------------
 ;; Check `free-identifier=?' propagation,
 ;; definition contexts, and `syntax-local-bind-syntaxes'
 
@@ -679,6 +742,28 @@
             (#%provide (for-meta 1 x))))
          #t]
         [else #f]))
+
+;; ----------------------------------------
+;; Check that `syntax-local-bind-syntaxes' and others 
+;; in module for-syntax top level don't crash due to
+;; the lack of a mark:
+
+(for ([e (list
+          '(syntax-local-bind-syntaxes
+            '()
+            #'(syntax-local-make-delta-introducer #'dummy)
+            (syntax-local-make-definition-context))
+          '(let-values ([(x y) (syntax-local-expand-expression #'1)])
+             (eval y)))])
+  (err/rt-test (eval `(module m racket/base
+                        (require (for-syntax racket/base))
+                        (begin-for-syntax
+                         ,e)))
+               exn:fail?))
+
+;; ----------------------------------------
+
+(err/rt-test (syntax-local-lift-require 'abc #'def))
 
 ;; ----------------------------------------
 

@@ -123,7 +123,7 @@ determine the url for downloading the package.
 To find the url for version @tt{(1 1)} of the plai package,
 do this:
 
-@tt{% planet url plai plai.plt 1 1}
+@tt{% raco planet url plai plai.plt 1 1}
 
 and get this as a response:
 
@@ -136,7 +136,7 @@ call the file something else. Rename it to @tt{plai.plt}.}
 
 @item{Now run the command-line tool one more time to install the plt file:
 
-@tt{% planet fileinject plai plai.plt 1 1}
+@tt{% raco planet fileinject plai plai.plt 1 1}
 
 This command should be run from the same directory where you saved @tt{plai.plt}.
 
@@ -751,10 +751,10 @@ though it had been downloaded from the PLaneT server with the given
 owner name and major and minor versions. After you run this command,
 you can require your package on your local machine using
 
-@racket[(require (planet <file> (<owner> <.plt file name without path> <maj> <min>)))]
+@racket[(require (planet <file> (<owner> <.plt file name> <maj> <min>)))]
 
 to verify everything works. After you do so, you can use
-@commandline{raco planet remove <owner> <.plt file name without path> <maj> <min>}
+@commandline{raco planet remove <owner> <.plt file name> <maj> <min>}
 to remove the test package from your local cache. (Not removing it is
 safe as long as you use the same name and version numbers the package
 will have on the PLaneT server; otherwise you may experience

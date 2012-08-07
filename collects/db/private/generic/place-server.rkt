@@ -68,8 +68,8 @@ where <connect-spec> ::= (list 'sqlite3 path/sym mode-sym delay-num limit-num)
 Connection methods protocol
 
 client -> server: (list '<method-name> arg ...)
-server -> client: (or (list 'values result ...)
-                      (list 'error string))
+server -> client: (or (list boolean 'values result ...)
+                      (list boolean 'error string))
 |#
 
 (define proxy-server%
@@ -78,28 +78,33 @@ server -> client: (or (list 'values result ...)
                 channel)
     (super-new)
 
-    (define pstmt-table (make-hash)) ;; int => prepared-statement
-    (define pstmt-counter 0)
+    ;; FIXME: need to collect cursors, too
+    (define table (make-hash)) ;; int => prepared-statement/cursor-result
+    (define counter 0)
 
     (define/public (serve)
       (serve1)
       (when connection (serve)))
 
+    (define/private (still-connected?) (and connection (send connection connected?)))
+
     (define/private (serve1)
       (with-handlers ([exn?
                        (lambda (e)
-                         (pchan-put channel (list 'error (exn-message e))))])
+                         (pchan-put channel (list (still-connected?) 'error (exn-message e))))])
         (call-with-values
             (lambda ()
               (match (pchan-get channel)
                 [(list 'disconnect)
                  (send connection disconnect)
                  (set! connection #f)]
-                [(list 'free-statement pstmt-index)
-                 (send connection free-statement (hash-ref pstmt-table pstmt-index))
-                 (hash-remove! pstmt-table pstmt-index)]
-                [(list 'query fsym stmt)
-                 (send connection query fsym (sexpr->statement stmt))]
+                [(list 'free-statement pstmt-index need-lock?)
+                 (send connection free-statement (hash-ref table pstmt-index) need-lock?)
+                 (hash-remove! table pstmt-index)]
+                [(list 'query fsym stmt cursor?)
+                 (send connection query fsym (sexpr->statement stmt) cursor?)]
+                [(list 'fetch/cursor fsym cursor-index fetch-size)
+                 (send connection fetch/cursor fsym (hash-ref table cursor-index) fetch-size)]
                 [msg
                  (define-syntax-rule (forward-methods (method arg ...) ...)
                    (match msg
@@ -114,13 +119,13 @@ server -> client: (or (list 'values result ...)
                                   (transaction-status w))]))
           (lambda results
             (let ([results (for/list ([result (in-list results)]) (result->sexpr result))])
-              (pchan-put channel (cons 'values results)))))))
+              (pchan-put channel (cons (still-connected?) (cons 'values results))))))))
 
     (define/private (sexpr->statement x)
       (match x
         [(list 'string s) s]
-        [(list 'statement-binding pstmt-index meta args)
-         (statement-binding (hash-ref pstmt-table pstmt-index) meta args)]))
+        [(list 'statement-binding pstmt-index args)
+         (statement-binding (hash-ref table pstmt-index) args)]))
 
     (define/private (result->sexpr x)
       (match x
@@ -128,12 +133,16 @@ server -> client: (or (list 'values result ...)
          (list 'simple-result y)]
         [(rows-result h rows)
          (list 'rows-result h rows)]
+        [(cursor-result h pst extra)
+         (let ([index (begin (set! counter (add1 counter)) counter)])
+           (hash-set! table index x)
+           (list 'cursor-result h index))]
         ;; FIXME: Assumes prepared-statement is concrete class, not interface.
         [(? (lambda (x) (is-a? x prepared-statement%)))
-         (let ([pstmt-index (begin (set! pstmt-counter (add1 pstmt-counter)) pstmt-counter)])
-           (hash-set! pstmt-table pstmt-index x)
+         (let ([index (begin (set! counter (add1 counter)) counter)])
+           (hash-set! table index x)
            (list 'prepared-statement
-                 pstmt-index
+                 index
                  (get-field close-on-exec? x)
                  (get-field param-typeids x)
                  (get-field result-dvecs x)))]

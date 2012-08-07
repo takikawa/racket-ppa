@@ -63,7 +63,10 @@
                                  [(#\;) "semicolon"]
                                  [(#\:) "colon"]
                                  [(#\space) "space"]
-                                 [else (string short-cut)]))))])
+                                 [else 
+                                  (cond
+                                    [(symbol? short-cut) (symbol->string short-cut)]
+                                    [(char? short-cut) (string short-cut)])]))))])
                        (hash-set! name-ht keyname (send item get-plain-label))))))
                (when (is-a? item menu-item-container<%>)
                  (loop item)))
@@ -218,18 +221,18 @@
                                   [callback void])
                              enable #f)]
                       [else
-                       (new menu-item%
-                            [parent saved-bug-reports-menu]
-                            [label (string-constant disacard-all-saved-bug-reports)]
-                            [callback (λ (x y) (discard-all-saved-bug-reports))])
-                       (new separator-menu-item% [parent saved-bug-reports-menu])
                        (for ([a-brinfo (in-list this-time)])
                          (new menu-item%
                            [parent saved-bug-reports-menu]
                            [label (brinfo-title a-brinfo)]
                            [callback
                             (λ (x y)
-                              (help-desk:report-bug (brinfo-id a-brinfo) #:frame-mixin basics-mixin))]))]))))])
+                              (help-desk:report-bug (brinfo-id a-brinfo) #:frame-mixin basics-mixin))]))
+                       (new separator-menu-item% [parent saved-bug-reports-menu])
+                       (new menu-item%
+                            [parent saved-bug-reports-menu]
+                            [label (string-constant disacard-all-saved-bug-reports)]
+                            [callback (λ (x y) (discard-all-saved-bug-reports))])]))))])
         (drracket:app:add-language-items-to-help-menu menu))
       
       (define/override (file-menu:new-string) (string-constant new-menu-item))
@@ -350,15 +353,16 @@
   ;; add-keybindings-item : keybindings-item[path or planet spec] -> boolean
   ;; boolean indicates if the addition happened sucessfully
   (define (add-keybindings-item item)
-    (with-handlers ([exn? (λ (x)
-                            (message-box (string-constant drscheme)
-                                         (format (string-constant keybindings-error-installing-file)
-                                                 (if (path? item)
-                                                     (path->string item)
-                                                     (format "~s" item))
-                                                 (exn-message x))
-                                         #:dialog-mixin frame:focus-table-mixin)
-                            #f)])
+    (with-handlers ([exn:fail?
+                     (λ (x)
+                       (message-box (string-constant drscheme)
+                                    (format (string-constant keybindings-error-installing-file)
+                                            (if (path? item)
+                                                (path->string item)
+                                                (format "~s" item))
+                                            (exn-message x))
+                                    #:dialog-mixin frame:focus-table-mixin)
+                       #f)])
       (keymap:add-user-keybindings-file item)
       #t))
   
@@ -624,10 +628,74 @@
       (define/public get-show-menu (λ () show-menu))
       (define/public update-shown (λ () (void)))
       (define/public (add-show-menu-items show-menu) (void))
+      (define sort-menu-sort-keys (make-hasheq))
+      (define/public (set-show-menu-sort-key item val)
+        (cond
+          [sort-menu-sort-keys 
+           (for ([(k v) (in-hash sort-menu-sort-keys)])
+             (when (eq? k item)
+               (error 'set-show-menu-sort-key
+                      "set menu item ~s twice, to ~s and ~s"
+                      (send item get-label)
+                      v val))
+             (when (= v val)
+               (error 'set-show-menu-sort-key
+                      "two menu items have the same val: ~s and ~s"
+                      (send k get-label)
+                      (send item get-label))))
+           (hash-set! sort-menu-sort-keys item val)]
+          [else
+           (error 'set-show-menu-sort-key 
+                  "the sort menu has already been created and its order has been set")]))
       (super-new)
       (set! show-menu (make-object (get-menu%) (string-constant view-menu-label)
                         (get-menu-bar)))
-      (add-show-menu-items show-menu)))
+      (add-show-menu-items show-menu)
+      (sort-show-menu-items show-menu sort-menu-sort-keys)
+      (set! sort-menu-sort-keys #f)))
+  
+  (define (sort-show-menu-items show-menu show-menu-sort-keys)
+    (define items (send show-menu get-items))
+    (for ([itm (in-list items)])
+      (send itm delete))
+    (define (get-key item)
+      (hash-ref show-menu-sort-keys item 
+                (λ () 
+                  (define lab
+                    (cond
+                      [(is-a? item labelled-menu-item<%>)
+                       (send item get-label)]
+                      [else ""]))
+                  (cond 
+                    [(regexp-match #rx"^Show (.*)$" lab)
+                     => (λ (x) (list-ref x 1))]
+                    [(regexp-match #rx"^Hide (.*)$" lab)
+                     => (λ (x) (list-ref x 1))]
+                    [else lab]))))
+    (define (cmp item-x item-y)
+      (define x (get-key item-x))
+      (define y (get-key item-y))
+      (cond
+        [(and (number? x) (number? y)) (< x y)]
+        [(and (string? x) (string? y)) (string<=? x y)]
+        [(and (number? x) (string? y)) #t]
+        [(and (string? x) (number? y)) #f]))
+    (define sorted-items (sort items cmp))
+    (for ([item (in-list sorted-items)]
+          [next-item (in-list (append (cdr sorted-items) (list #f)))])
+      (define item-key (get-key item))
+      (define next-item-key (and next-item (get-key next-item)))
+      (define add-sep?
+        (cond
+          [(and (number? item-key) (number? next-item-key))
+           (not (= (quotient item-key 100) (quotient next-item-key 100)))]
+          [(or (and (string? item-key) (string? next-item-key))
+               (not next-item-key))
+           #f]
+          [else #t]))
+      (send item restore)  
+      (when add-sep?
+        (new separator-menu-item% [parent show-menu]))))
   
   
   (define (create-root-menubar)

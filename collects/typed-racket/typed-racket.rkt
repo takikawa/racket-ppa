@@ -1,17 +1,16 @@
 #lang racket/base
 
 (require
- (for-syntax racket/base "utils/utils.rkt") ;; only for timing/debugging
+ (for-syntax racket/base  "env/env-req.rkt")
+ (for-syntax "utils/timing.rkt") ;; only for timing/debugging
  ;; the below requires are needed since they provide identifiers
  ;; that may appear in the residual program
- (for-syntax "typecheck/renamer.rkt" "types/type-table.rkt")
- "utils/any-wrap.rkt" unstable/contract)
+ "utils/utils.rkt"
+ (for-syntax "utils/utils.rkt")
+ "utils/any-wrap.rkt" unstable/contract racket/contract/parametric)
 
 (provide (rename-out [module-begin #%module-begin]
-                     [top-interaction #%top-interaction]
-                     [#%plain-lambda lambda]
-                     [#%app #%app]
-                     [require require])
+                     [top-interaction #%top-interaction])
          with-type
          (for-syntax do-standard-inits))
 
@@ -29,7 +28,10 @@
     (do-time "Finshed base-env-numeric")
     ((dynamic-require 'typed-racket/base-env/base-special-env 'initialize-special))
     (do-time "Finished base-special-env")
-    (set! initialized #t)))
+    (dynamic-require '(submod typed-racket/base-env/base-types #%type-decl) #f)
+    (do-time "Finished base-types")
+    (set! initialized #t))
+  (do-requires))
 
 (define-syntax-rule (drivers [name sym] ...)
   (begin

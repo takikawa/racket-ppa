@@ -184,7 +184,7 @@ mode but with a @litchar{'} prefix; the pair's content is printed with
 @racket[cdr] is not @tech{quotable}, then pair prints with either
 @litchar{cons} (when the @racket[cdr] is not a pair), @litchar{list}
 (when the pair is a list), or @litchar{list*} (otherwise) after the
-openining @litchar{(}, any @litchar{.} that would otherwise be printed
+opening @litchar{(}, any @litchar{.} that would otherwise be printed
 is suppressed, and the pair content is printed at @tech{quoting depth}
 @racket[0]. In all cases, when @racket[print-as-expression] is
 @racket[#t] for @racket[print] mode, then the value of
@@ -527,14 +527,26 @@ representation. @tech{Unreadable symbols}, which are typically
 generated indirectly during expansion and compilation, are saved and
 restored consistently through @litchar{#~}.
 
-Due to the restrictions on @tech{uninterned} symbols in @litchar{#~},
-do not use @racket[gensym] or @racket[string->uninterned-symbol] to
-construct an identifier for a top-level or module binding. Instead,
-generate distinct identifiers either with
-@racket[generate-temporaries] or by applying the result of
-@racket[make-syntax-introducer] to an existing identifier; those
-functions will lead to top-level and module bindings with
-@tech{unreadable symbol}ic names.
+The dynamic nature of @tech{uninterned} symbols and their localization
+within @litchar{#~} can cause problems when @racket[gensym] or
+@racket[string->uninterned-symbol] is used to construct an identifier
+for a top-level or module binding (depending on how the identifier and
+its references are compiled). To avoid problems, generate distinct
+identifiers either with @racket[generate-temporaries] or by applying
+the result of @racket[make-syntax-introducer] to an existing
+identifier; those functions lead to top-level and module variables
+with @tech{unreadable symbol}ic names, and the names are deterministic
+as long as expansion is otherwise deterministic. 
+
+Despite the problems inherent with @tech{uninterned} symbols as
+variable names, they are partially supported even across multiple
+@litchar{#~}s: When compiled code contains a reference to a module-defined
+variable whose name is an @tech{uninterned} symbol, the relative
+position of the variable among the module's definitions is recorded,
+and the reference can be linked back to the definition based on its
+position and the characters in its name. This accommodation works only
+for variable references in compiled code; it does not work for
+@racket[syntax]-quoted identifiers, for example.
 
 Finally, a compiled form may contain path literals. Although paths are
 not normally printed in a way that can be read back in, path literals

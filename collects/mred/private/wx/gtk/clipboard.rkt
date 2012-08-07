@@ -127,6 +127,8 @@
   (_fun _GtkClipboard (_fpointer = string_request_received) _pointer -> _void))
 (define-gtk gtk_clipboard_request_image 
   (_fun _GtkClipboard (_fpointer = image_request_received) _pointer -> _void))
+(define-gtk gtk_clipboard_set_image 
+  (_fun _GtkClipboard _GdkPixbuf -> _void))
 
 ;; ----------------------------------------
 
@@ -178,7 +180,8 @@
               [targets (malloc _GtkTargetEntry (length types))])
           (for/fold ([offset 0]) ([str (in-list types)]
                                   [i (in-naturals)])
-            (let ([t (cast (ptr-add targets i _GtkTargetEntry) _pointer _GtkTargetEntry-pointer)])
+            (let ([t (ptr-add targets i _GtkTargetEntry)])
+              (cpointer-push-tag! t 'GtkTargetEntry)
               (set-GtkTargetEntry-target! t (ptr-add target-strings offset))
               (set-GtkTargetEntry-flags! t 0)
               (set-GtkTargetEntry-info! t i))
@@ -294,6 +297,10 @@
       (let-values ([(l backref) (make-request-backref)])
 	(gtk_clipboard_request_image cb backref)
 	l))))
+
+  (define/public (set-bitmap-data bm timestamp)
+    (define pb (bitmap->pixbuf bm))
+    (gtk_clipboard_set_image cb pb))
   
   (super-new))
 

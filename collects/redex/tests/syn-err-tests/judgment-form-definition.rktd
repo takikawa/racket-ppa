@@ -157,7 +157,7 @@
      [(uses-unquote n unq)])
    (void)))
 
-(#rx"missing ellipses"
+(#rx"missing ellipsis"
  ([use any_0]) ([ellipsis ...] [def any_0])
  (let ()
    (define-judgment-form syn-err-lang
@@ -206,4 +206,16 @@
      [(K a any_1 x)
       (K b (use) (name inner-def any))]
      [(K b any K-b-out)])
+   (void)))
+
+(#rx"does not match original mode"
+ ([mode2 (J2 I O O)]) ([J2 J2])
+ (let ()
+   (define-language L)
+   (define-judgment-form L
+     #:mode (J1 I I O)
+     [(J1 any_1 any_2 any_2)])
+   (define-extended-judgment-form L J1
+     #:mode mode2
+     [(J2 any_1 17 any_1)])
    (void)))

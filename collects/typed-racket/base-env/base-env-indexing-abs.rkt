@@ -75,18 +75,6 @@
        (-BtsRx (Un -StrInput -BtsInput) [N ?N ?outp -Bytes] . ->opt . (optlist -Bytes))
        (-Pattern -BtsInput    [N ?N ?outp -Bytes] . ->opt . (optlist -Bytes))))]
 
-   [regexp-match*
-    (let ([N       index-type]
-          [?N      (-opt index-type)]
-          [-StrRx  (Un -String -Regexp)]
-          [-BtsRx  (Un -Bytes  -Byte-Regexp)]
-          [-StrInput (Un -String -Path)]
-          [-BtsInput (Un -Input-Port -Bytes)])
-      (cl->*
-       (-StrRx -StrInput [N ?N -Bytes] . ->opt . (-lst -String))
-       (-BtsRx (Un -StrInput -BtsInput) [N ?N -Bytes] . ->opt . (-lst -Bytes))
-       (-Pattern -BtsInput [N ?N -Bytes] . ->opt . (-lst -Bytes))))]
-
    [regexp-try-match
     (let ([?outp   (-opt -Output-Port)]
           [N       index-type]
@@ -106,25 +94,12 @@
            [-Input (Un -String -Input-Port -Bytes -Path)])
       (->opt -Pattern -Input [N ?N ?outp -Bytes] output))]
 
-
-   [regexp-match-positions*
-    (let* ([?outp   (-opt -Output-Port)]
-           [N       index-type]
-           [?N      (-opt index-type)]
-           [ind-pair (-pair -Index -Index)]
-           [output (-lst ind-pair)]
-           [-Input (Un -String -Input-Port -Bytes -Path)])
-      (->opt -Pattern -Input [N ?N ?outp -Bytes] output))]
-
-
    [regexp-match?
     (let ([?outp   (-opt -Output-Port)]
           [N       index-type]
           [?N      (-opt index-type)]
           [-Input (Un -String -Input-Port -Bytes -Path)])
        (-Pattern -Input [N ?N ?outp -Bytes] . ->opt . B))]
-
-
 
 
    [regexp-match-peek
@@ -240,6 +215,29 @@
 
 
 
+   [range (cl->* (-> (Un -Zero -NegInt) (-val '()))
+                 (-> -One  (-pair -One (-val '())))
+                 (-> -Byte (-lst -Byte))
+                 (-> -Index (-lst -Index))
+                 (-> -Fixnum (-lst -Fixnum))
+                 (-> -Real (-lst -Int))
+                 (->opt -PosInt -Byte [-Int] (-lst -PosByte))
+                 (->opt -Nat -Byte [-Int] (-lst -Byte))
+                 (->opt -PosInt -Index [-Int] (-lst -PosIndex))
+                 (->opt -Nat -Index [-Int] (-lst -Index))
+                 (->opt -Nat -NonNegFixnum [-Int] (-lst -NonNegFixnum))
+                 (->opt -PosInt -Fixnum [-Nat] (-lst -PosFixnum))
+                 (->opt -Nat -Fixnum [-Nat] (-lst -NonNegFixnum))
+                 (->opt -Nat -Nat [-Int] (-lst -Nat))
+                 (->opt -PosInt -Int [-Nat] (-lst -PosInt))
+                 (->opt -Nat -Int [-Nat] (-lst -Nat))
+                 ;; could add cases that guarantee lists of negatives, etc.
+                 (->opt -Int -Real [-Int] (-lst -Int))
+                 (->opt -Rat -Real [-Rat] (-lst -Rat))
+                 (->opt -Flonum -Real [-Flonum] (-lst -Flonum))
+                 (->opt -SingleFlonum -Real [-SingleFlonum] (-lst -SingleFlonum))
+                 (->opt -InexactReal -Real [-InexactReal] (-lst -InexactReal))
+                 (->opt -Real -Real [-Real] (-lst -Real)))]
    [take   (-poly (a) ((-lst a) index-type . -> . (-lst a)))]
    [drop   (-poly (a) ((-lst a) index-type . -> . (-lst a)))]
    [take-right   (-poly (a) ((-lst a) index-type . -> . (-lst a)))]
@@ -249,9 +247,12 @@
    [split-at-right
     (-poly (a) ((list (-lst a)) index-type . ->* . (-values (list (-lst a) (-lst a)))))]
 
-   [vector-ref (-poly (a) ((-vec a) index-type . -> . a))]
-   [unsafe-vector-ref (-poly (a) ((-vec a) index-type . -> . a))]
-   [unsafe-vector*-ref (-poly (a) ((-vec a) index-type . -> . a))]
+   [vector-ref (-poly (a) (cl->* ((-vec a) index-type . -> . a)
+                                 (-VectorTop index-type . -> . Univ)))]
+   [unsafe-vector-ref (-poly (a) (cl->* ((-vec a) index-type . -> . a)
+                                        (-VectorTop index-type . -> . Univ)))]
+   [unsafe-vector*-ref (-poly (a) (cl->* ((-vec a) index-type . -> . a)
+                                         (-VectorTop index-type . -> . Univ)))]
    [build-vector (-poly (a) (index-type (-Index . -> . a) . -> . (-vec a)))]
    [vector-set! (-poly (a) (-> (-vec a) index-type a -Void))]
    [unsafe-vector-set! (-poly (a) (-> (-vec a) index-type a -Void))]

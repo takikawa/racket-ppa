@@ -1,8 +1,8 @@
-#lang scheme/base
+#lang racket/base
 
 (require syntax/parse unstable/syntax
          racket/match
-         (for-template scheme/base scheme/unsafe/ops)
+         (for-template racket/base racket/unsafe/ops racket/list)
          "../utils/utils.rkt"
          (utils tc-utils)
          (rep type-rep)
@@ -48,9 +48,8 @@
 (define-syntax-class pair-opt-expr
   #:commit
   (pattern e:pair-derived-opt-expr
-           #:with opt
-           (begin (log-optimization "derived pair" pair-opt-msg this-syntax)
-                  #'e.opt))
+           ;; no logging here, redundant with actual pair opt
+           #:with opt #'e.opt)
   (pattern (#%plain-app op:pair-op p:expr)
            #:when (or (has-pair-type? #'p)
                       ;; in this case, we have a potentially empty list, but
@@ -131,6 +130,7 @@
  (cdddar #'cdr #'cdr #'cdr #'car)
  (cddddr #'cdr #'cdr #'cdr #'cdr)
  (first   #'car)
+ (rest    #'cdr)
  (second  #'car #'cdr)
  (third   #'car #'cdr #'cdr)
  (fourth  #'car #'cdr #'cdr #'cdr)

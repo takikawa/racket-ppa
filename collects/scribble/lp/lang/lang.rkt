@@ -1,18 +1,10 @@
-#lang scheme/base
+#lang racket/base
 
-(provide (except-out (all-from-out scheme/base) #%module-begin)
+(provide (except-out (all-from-out racket/base) #%module-begin)
          (rename-out [module-begin #%module-begin]))
 
-(require (for-syntax scheme/base syntax/boundmap scheme/list
+(require (for-syntax racket/base syntax/boundmap racket/list
                      syntax/strip-context))
-
-;; --- MF: bad hack for getting rid of comments
-(provide code:comment)
-(define-syntax (code:comment stx)
-  (if (eq? (syntax-local-context) 'expression)
-      (syntax (void))
-      (syntax (define (f x) x))))
-;; --- MF
 
 (begin-for-syntax
   (define first-id #f)

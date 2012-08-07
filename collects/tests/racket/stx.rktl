@@ -516,6 +516,22 @@
     (test '(lib "lang/htdp-intermediate.rkt") values nominal)
     (test 'cons cadddr b)))
 
+(let ()
+  (define (check wrap)
+    (test #f identifier-binding (wrap (datum->syntax #f 'lambda)))
+    (test #f identifier-template-binding (wrap #'lambda))
+    (test (identifier-binding #'lambda) identifier-template-binding (wrap (syntax-shift-phase-level #'lambda -1)))
+    (test #f identifier-label-binding (wrap #'lambda))
+    (test (identifier-binding #'lambda) identifier-label-binding (wrap (syntax-shift-phase-level #'lambda #f)))
+    (test #f identifier-binding (wrap (syntax-shift-phase-level #'lambda #f)))
+    (test #f identifier-template-binding (wrap (syntax-shift-phase-level #'lambda #f))))
+  (check values)
+  (check (lambda (s)
+           (define-values (i o) (make-pipe))
+           (write (compile-syntax #`(quote-syntax #,s)) o)
+           (parameterize ([read-accept-compiled #t])
+             (eval (read i))))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; eval versus eval-syntax, etc.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1218,10 +1234,10 @@
   (parameterize ([current-namespace (make-base-namespace)]
                  [current-module-name-resolver
                   (case-lambda
-                   [(name)
+                   [(name ns)
                     (if (equal? name "a")
                         (void)
-                        (old name))]
+                        (old name ns))]
                    [(name _ __) (make-resolved-module-path 'huh?)]
                    [(name base stx load?)
                     (if (equal? name "a")
@@ -1665,6 +1681,35 @@
       (eval (read (open-input-bytes (get-output-bytes o))))))
   (namespace-require ''producer)
   (eval 10))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check handling of module context
+
+(module mm-context-m1 racket/base
+  (require (for-syntax racket/base))
+  (provide m1)
+  (define-syntax (m1 stx)
+    #`(begin
+        (define #,(syntax-local-introduce #'x) 1)
+        #,(syntax-local-introduce #'x))))
+
+(module mm-context-m2 racket/base
+  (require (for-syntax racket/base))
+  (provide m2)
+  (define-syntax (m2 stx)
+    #`(begin
+        (define #,(syntax-local-introduce #'x) 2)
+        #,(syntax-local-introduce #'x))))
+
+(module mm-context-m3 racket/base
+  (require 'mm-context-m1 'mm-context-m2)
+  (m1)
+  (m2))
+
+(let ([o (open-output-bytes)])
+  (parameterize ([current-output-port o])
+    (dynamic-require ''mm-context-m3 #f))
+  (test #"1\n2\n" get-output-bytes o))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

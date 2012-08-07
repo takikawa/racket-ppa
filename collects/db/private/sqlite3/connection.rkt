@@ -3,6 +3,7 @@
          ffi/unsafe
          ffi/unsafe/atomic
          "../generic/interfaces.rkt"
+         "../generic/common.rkt"
          "../generic/prepared.rkt"
          "../generic/sql-data.rkt"
          "ffi.rkt"
@@ -13,23 +14,27 @@
 ;; == Connection
 
 (define connection%
-  (class* transactions% (connection<%>)
+  (class* statement-cache% (connection<%>)
     (init db)
     (init-private busy-retry-limit
                   busy-retry-delay)
 
     (define -db db)
-    (define statement-table (make-hasheq))
     (define saved-tx-status #f) ;; set by with-lock, only valid while locked
 
     (inherit call-with-lock*
              add-delayed-call!
+             get-tx-status
+             set-tx-status!
              check-valid-tx-status
-             check-statement/tx)
-    (inherit-field tx-status)
+             check-statement/tx
+             dprintf
+             prepare1
+             check/invalidate-cache)
+    (inherit-field DEBUG?)
 
     (define/override (call-with-lock fsym proc)
-      (call-with-lock* fsym (lambda () (set! saved-tx-status tx-status) (proc)) #f #t))
+      (call-with-lock* fsym (lambda () (set! saved-tx-status (get-tx-status)) (proc)) #f #t))
 
     (define/private (get-db fsym)
       (or -db (error/not-connected fsym)))
@@ -37,46 +42,70 @@
     (define/public (get-dbsystem) dbsystem)
     (define/override (connected?) (and -db #t))
 
-    (define/public (query fsym stmt)
-      (let-values ([(stmt* result)
-                    (call-with-lock fsym
-                      (lambda ()
-                        (check-valid-tx-status fsym)
-                        (query1 fsym stmt #t)))])
-        (statement:after-exec stmt)
-        result))
+    (define/public (query fsym stmt cursor?)
+      (call-with-lock fsym
+        (lambda ()
+          (check-valid-tx-status fsym)
+          (query1 fsym stmt #t cursor?))))
 
-    (define/private (query1 fsym stmt check-tx?)
-      (let* ([stmt (cond [(string? stmt)
-                          (let* ([pst (prepare1 fsym stmt #t)])
-                            (send pst bind fsym null))]
-                         [(statement-binding? stmt)
-                          stmt])]
+    (define/private (query1 fsym stmt check-tx? cursor?)
+      (let* ([stmt (check-statement fsym stmt cursor?)]
              [pst (statement-binding-pst stmt)]
              [params (statement-binding-params stmt)])
-        (send pst check-owner fsym this stmt)
         (when check-tx? (check-statement/tx fsym (send pst get-stmt-type)))
         (let ([db (get-db fsym)]
+              [delenda (check/invalidate-cache stmt)]
               [stmt (send pst get-handle)])
+          (when DEBUG?
+            (dprintf "  >> query statement #x~x with ~e\n" (cast stmt _pointer _uintptr) params))
+          (when delenda
+            (for ([pst (in-hash-values delenda)])
+              (send pst finalize #f)))
           (HANDLE fsym (sqlite3_reset stmt))
           (HANDLE fsym (sqlite3_clear_bindings stmt))
           (for ([i (in-naturals 1)]
                 [param (in-list params)])
             (load-param fsym db stmt i param))
-          (let* ([info
-                  (for/list ([i (in-range (sqlite3_column_count stmt))])
-                    `((name . ,(sqlite3_column_name stmt i))
-                      (decltype . ,(sqlite3_column_decltype stmt i))))]
-                 [rows (step* fsym db stmt)])
-            (HANDLE fsym (sqlite3_reset stmt))
-            (HANDLE fsym (sqlite3_clear_bindings stmt))
-            (unless (eq? tx-status 'invalid)
-              (set! tx-status (get-tx-status)))
-            (values stmt
-                    (cond [(pair? info)
-                           (rows-result info rows)]
-                          [else
-                           (simple-result '())]))))))
+          (let ([info
+                 (for/list ([i (in-range (sqlite3_column_count stmt))])
+                   `((name . ,(sqlite3_column_name stmt i))
+                     (decltype . ,(sqlite3_column_decltype stmt i))))]
+                [result
+                 (or cursor?
+                     (step* fsym db stmt #f +inf.0))])
+            (unless (eq? (get-tx-status) 'invalid)
+              (set-tx-status! fsym (read-tx-status)))
+            (unless cursor? (send pst after-exec #f))
+            (cond [(and (pair? info) (not cursor?))
+                   (rows-result info result)]
+                  [(and (pair? info) cursor?)
+                   (cursor-result info pst (box #f))]
+                  [else
+                   (simple-result '())])))))
+
+    (define/public (fetch/cursor fsym cursor fetch-size)
+      (let ([pst (cursor-result-pst cursor)]
+            [end-box (cursor-result-extra cursor)])
+        (send pst check-owner fsym this pst)
+        (call-with-lock fsym
+          (lambda ()
+            (cond [(unbox end-box) #f]
+                  [else
+                   (begin0 (step* fsym (get-db fsym) (send pst get-handle) end-box fetch-size)
+                     (when (unbox end-box)
+                       (send pst after-exec #f)))])))))
+
+    (define/private (check-statement fsym stmt cursor?)
+      (cond [(statement-binding? stmt)
+             (let ([pst (statement-binding-pst stmt)])
+               (send pst check-owner fsym this stmt)
+               (cond [cursor?
+                      (let ([pst* (prepare1 fsym (send pst get-stmt) #f)])
+                        (statement-binding pst* (statement-binding-params stmt)))]
+                     [else stmt]))]
+            [(string? stmt)
+             (let* ([pst (prepare1 fsym stmt (not cursor?))])
+               (send pst bind fsym null))]))
 
     (define/private (load-param fsym db stmt i param)
       (HANDLE fsym
@@ -93,9 +122,17 @@
              [else
               (error/internal fsym "bad parameter: ~e" param)])))
 
-    (define/private (step* fsym db stmt)
-      (let ([c (step fsym db stmt)])
-        (if c (cons c (step* fsym db stmt)) null)))
+    (define/private (step* fsym db stmt end-box fetch-limit)
+      (if (zero? fetch-limit)
+          null
+          (let ([c (step fsym db stmt)])
+            (cond [c
+                   (cons c (step* fsym db stmt end-box (sub1 fetch-limit)))]
+                  [else
+                   (HANDLE fsym (sqlite3_reset stmt))
+                   (HANDLE fsym (sqlite3_clear_bindings stmt))
+                   (when end-box (set-box! end-box #t))
+                   null]))))
 
     (define/private (step fsym db stmt)
       (let ([s (HANDLE fsym (sqlite3_step stmt))])
@@ -121,26 +158,23 @@
                                           fsym "unknown column type: ~e" type)]))))
                  vec)])))
 
-    (define/public (prepare fsym stmt close-on-exec?)
-      (call-with-lock fsym
-        (lambda ()
-          (check-valid-tx-status fsym)
-          (prepare1 fsym stmt close-on-exec?))))
+    (define/override (classify-stmt sql) (classify-sl-sql sql))
 
-    (define/private (prepare1 fsym sql close-on-exec?)
+    (define/override (prepare1* fsym sql close-on-exec? stmt-type)
       ;; no time between sqlite3_prepare and table entry
+      (dprintf "  >> prepare ~e~a\n" sql (if close-on-exec? " close-on-exec" ""))
       (let*-values ([(db) (get-db fsym)]
                     [(prep-status stmt)
                      (HANDLE fsym
                       (let-values ([(prep-status stmt tail?)
                                     (sqlite3_prepare_v2 db sql)])
-                        (define (free!) (when stmt (sqlite3_finalize stmt)))
-                        (unless stmt
-                          (uerror fsym "SQL syntax error in ~e" sql))
                         (when tail?
-                          (free!) (uerror fsym "multiple SQL statements given: ~e" sql))
+                          (when stmt (sqlite3_finalize stmt))
+                          (uerror fsym "multiple SQL statements given: ~e" sql))
                         (values prep-status stmt)))])
-        (unless stmt (error/internal fsym "prepare failed"))
+        (when DEBUG?
+          (dprintf "  << prepared statement #x~x\n" (cast stmt _pointer _uintptr)))
+        (unless stmt (uerror fsym "SQL syntax error in ~e" sql))
         (let* ([param-typeids
                 (for/list ([i (in-range (sqlite3_bind_parameter_count stmt))])
                   'any)]
@@ -152,47 +186,56 @@
                          (close-on-exec? close-on-exec?)
                          (param-typeids param-typeids)
                          (result-dvecs result-dvecs)
-                         (stmt-type (classify-sl-sql sql))
+                         (stmt-type stmt-type)
+                         (stmt sql)
                          (owner this))])
-          (hash-set! statement-table pst #t)
           pst)))
 
-    (define/public (disconnect)
-      (define (go)
-        (start-atomic)
-        (let ([db -db])
-          (set! -db #f)
-          (end-atomic)
-          (when db
-            (let ([statements (hash-map statement-table (lambda (k v) k))])
-              (for ([pst (in-list statements)])
-                (do-free-statement 'disconnect pst))
-              (HANDLE 'disconnect2 (sqlite3_close db))
-              (void)))))
-      (call-with-lock* 'disconnect go go #f))
+    (define/override (disconnect* _politely?)
+      (super disconnect* _politely?)
+      (call-as-atomic
+       (lambda ()
+         (let ([db -db])
+           (set! -db #f)
+           (when db
+             ;; Free all of connection's prepared statements. This will leave
+             ;; pst objects with dangling foreign objects, so don't try to free
+             ;; them again---check that -db is not-#f.
+             (let loop ()
+               (let ([stmt (sqlite3_next_stmt db #f)])
+                 (when stmt
+                   (HANDLE 'disconnect (sqlite3_finalize stmt))
+                   (loop))))
+             (HANDLE 'disconnect (sqlite3_close db))
+             (void))))))
 
     (define/public (get-base) this)
 
-    (define/public (free-statement pst)
+    (define/public (free-statement pst need-lock?)
       (define (go) (do-free-statement 'free-statement pst))
-      (call-with-lock* 'free-statement go go #f))
+      (if need-lock?
+          (call-with-lock* 'free-statement go go #f)
+          (go)))
 
     (define/private (do-free-statement fsym pst)
-      (start-atomic)
-      (let ([stmt (send pst get-handle)])
-        (send pst set-handle #f)
-        (end-atomic)
-        (hash-remove! statement-table pst)
-        (when stmt
-          (HANDLE fsym (sqlite3_finalize stmt))
-          (void))))
+      (call-as-atomic
+       (lambda ()
+         (let ([stmt (send pst get-handle)])
+           (send pst set-handle #f)
+           (when (and stmt -db)
+             (HANDLE fsym (sqlite3_finalize stmt)))
+           (void)))))
 
+    ;; Internal query
+
+    (define/private (internal-query1 fsym sql)
+      (query1 fsym sql #f #f))
 
     ;; == Transactions
 
     ;; http://www.sqlite.org/lang_transaction.html
 
-    (define/private (get-tx-status)
+    (define/private (read-tx-status)
       (not (sqlite3_get_autocommit -db)))
 
     (define/override (start-transaction* fsym isolation)
@@ -201,27 +244,27 @@
       ;; FIXME: modes are DEFERRED | IMMEDIATE | EXCLUSIVE
       (cond [(eq? isolation 'nested)
              (let ([savepoint (generate-name)])
-               (query1 fsym (format "SAVEPOINT ~a" savepoint) #f)
+               (internal-query1 fsym (format "SAVEPOINT ~a" savepoint))
                savepoint)]
             [else
-             (query1 fsym "BEGIN TRANSACTION" #f)
+             (internal-query1 fsym "BEGIN TRANSACTION")
              #f]))
 
     (define/override (end-transaction* fsym mode savepoint)
       (case mode
         ((commit)
          (cond [savepoint
-                (query1 fsym (format "RELEASE SAVEPOINT ~a" savepoint) #f)]
+                (internal-query1 fsym (format "RELEASE SAVEPOINT ~a" savepoint))]
                [else
-                (query1 fsym "COMMIT TRANSACTION" #f)]))
+                (internal-query1 fsym "COMMIT TRANSACTION")]))
         ((rollback)
          (cond [savepoint
-                (query1 fsym (format "ROLLBACK TO SAVEPOINT ~a" savepoint) #f)
-                (query1 fsym (format "RELEASE SAVEPOINT ~a" savepoint) #f)]
+                (internal-query1 fsym (format "ROLLBACK TO SAVEPOINT ~a" savepoint))
+                (internal-query1 fsym (format "RELEASE SAVEPOINT ~a" savepoint))]
                [else
-                (query1 fsym "ROLLBACK TRANSACTION" #f)])
+                (internal-query1 fsym "ROLLBACK TRANSACTION")])
          ;; remove 'invalid status, if necessary
-         (set! tx-status (get-tx-status))))
+         (set-tx-status! fsym (read-tx-status))))
       (void))
 
     ;; name-counter : number
@@ -240,10 +283,7 @@
              ;; schema ignored, because sqlite doesn't support
              (string-append "SELECT tbl_name from sqlite_master "
                             "WHERE type = 'table' or type = 'view'")])
-        (let-values ([(stmt result)
-                      (call-with-lock fsym
-                        (lambda () (query1 fsym stmt #f)))])
-          (statement:after-exec stmt)
+        (let ([result (call-with-lock fsym (lambda () (internal-query1 fsym stmt)))])
           (for/list ([row (in-list (rows-result-rows result))])
             (vector-ref row 0)))))
 
@@ -267,8 +307,8 @@
     ;; Can't figure out how to test...
     (define/private (handle-status who s)
       (when (memv s maybe-rollback-status-list)
-        (when (and saved-tx-status -db (not (get-tx-status))) ;; was in trans, now not
-          (set! tx-status 'invalid)))
+        (when (and saved-tx-status -db (not (read-tx-status))) ;; was in trans, now not
+          (set-tx-status! who 'invalid)))
       (handle-status* who s -db))
 
     ;; ----
@@ -307,7 +347,7 @@
     [,SQLITE_EMPTY . "database is empty"]
     [,SQLITE_SCHEMA . "database schema changed"]
     [,SQLITE_TOOBIG . "too much data for one row of a table"]
-    [,SQLITE_CONSTRAINT . "abort due to contraint violation"]
+    [,SQLITE_CONSTRAINT . "abort due to constraint violation"]
     [,SQLITE_MISMATCH . "data type mismatch"]
     [,SQLITE_MISUSE . "library used incorrectly"]
     [,SQLITE_NOLFS . "uses OS features not supported on host"]

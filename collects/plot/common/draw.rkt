@@ -71,21 +71,15 @@
 ;; Returns an immutable instance of color%. Immutable colors are faster because they don't have to
 ;; have immutable copies made when they're used in a dc.
 (define (make-color% r g b)
-  (define color (make-object color% r g b))
-  (send color set-immutable)
-  color)
+  (make-color r g b))
 
 ;; Returns an immutable instance of pen%. Same reasoning as for make-color%.
 (define (make-pen% r g b w s)
-  (define pen (make-object pen% (make-color% r g b) w s))
-  (send pen set-immutable)
-  pen)
+  (make-pen #:color (make-color% r g b) #:width w #:style s))
 
 ;; Returns an immutable instance of brush%. Same reasoning as for make-color%.
 (define (make-brush% r g b s)
-  (define brush (make-object brush% (make-color% r g b) s))
-  (send brush set-immutable)
-  brush)
+  (make-brush #:color (make-color% r g b) #:style s))
 
 (define (color%? c) (is-a? c color%))
 
@@ -305,6 +299,15 @@
       (define new-right (round (- right (- (sub1 x-max) param-x-max))))
       (define new-top (round (+ top (- y-min param-y-min))))
       (define new-bottom (round (- bottom (- (sub1 y-max) param-y-max))))
+      
+      ;; Not enough space?
+      (define area-x-min (+ x-min new-left))
+      (define area-x-max (- x-max new-right))
+      (define area-y-min (+ y-min new-top))
+      (define area-y-max (- y-max new-bottom))
+      (when (or (area-x-min . > . area-x-max)
+                (area-y-min . > . area-y-max))
+        (return init-left init-right init-top init-bottom))
       
       ;; Early out: if the margins haven't changed much, another iteration won't change them more
       ;; (hopefully)

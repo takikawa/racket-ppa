@@ -108,13 +108,17 @@ scheme_wrong_count
 scheme_wrong_count_m
 scheme_case_lambda_wrong_count
 scheme_wrong_type
+scheme_wrong_contract
 scheme_wrong_field_type
+scheme_wrong_field_contract
 scheme_arg_mismatch
+scheme_contract_error
 scheme_wrong_return_arity
 scheme_unbound_global
 scheme_dynamic_wind
 scheme_make_type
 scheme_get_type_name
+scheme_get_type_name_or_null
 scheme_eof
 scheme_make_eof
 scheme_null
@@ -335,6 +339,7 @@ scheme_make_cptr
 scheme_make_offset_cptr
 scheme_make_external_cptr
 scheme_make_offset_external_cptr
+scheme_is_cpointer
 scheme_get_proc_name
 scheme_utf8_decode
 scheme_utf8_decode_as_prefix
@@ -483,6 +488,7 @@ scheme_split_path
 scheme_build_path
 scheme_path_to_directory_path
 scheme_path_to_complete_path
+scheme_simplify_path
 scheme_make_path
 scheme_make_sized_path
 scheme_make_sized_offset_path
@@ -537,6 +543,7 @@ scheme_dynamic_require
 scheme_namespace_require
 scheme_is_module_path
 scheme_datum_to_kernel_stx
+scheme_module_is_declared
 scheme_intern_symbol
 scheme_intern_exact_symbol
 scheme_intern_exact_char_symbol
@@ -615,10 +622,12 @@ scheme_check_proc_arity
 scheme_check_proc_arity2
 scheme_make_provided_string
 scheme_make_args_string
+scheme_make_arg_lines_string
 scheme_system_library_subpath
 scheme_signal_received
 scheme_signal_received_at
 scheme_get_signal_handle
+scheme_wait_until_signal_received
 scheme_char_strlen
 scheme_stx_extract_marks
 scheme_get_place_id

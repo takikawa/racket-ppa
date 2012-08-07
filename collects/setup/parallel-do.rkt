@@ -210,7 +210,10 @@
 
   (define log-exn (lambda (exn [msg #f])
                     (log-error (let ([s (if (exn? exn)
-                                            (exn-message exn)
+                                            (let ([p (open-output-string)])
+                                              (parameterize ([current-error-port p])
+                                                ((error-display-handler) (exn-message exn) exn))
+                                              (get-output-string p))
                                             (format "exception: ~v" exn))])
                                  (if msg
                                      (format "~a; ~a" msg s)
@@ -425,16 +428,19 @@
                           (send/resp (list 'ERROR message)))
                         (define (send/reportp message)
                           (send/resp (list 'REPORT message)))
-                        (with-handlers* ([exn:fail? (lambda (x) 
-                                                      (send/errorp (exn-message x))
-                                                      (loop (add1 i)))])
-                          (parameterize ([current-output-port out-str-port]
-                                         [current-error-port err-str-port])
-                            (let ([msg (pdo-recv)])
-                              (match msg
-                                [(list 'DIE) (void)]
-                                [_ (msg-proc msg send/successp send/errorp send/reportp)
-                                   (loop (add1 i))])))))))))))
+                        ((with-handlers* ([exn:fail? (lambda (x) 
+                                                       (define sp (open-output-string))
+                                                       (parameterize ([current-error-port sp])
+                                                         ((error-display-handler) (exn-message x) x))
+                                                       (send/errorp (get-output-string sp))
+                                                       (lambda () (loop (add1 i))))])
+                           (parameterize ([current-output-port out-str-port]
+                                          [current-error-port err-str-port])
+                             (let ([msg (pdo-recv)])
+                               (match msg
+                                 [(list 'DIE) void]
+                                 [_ (msg-proc msg send/successp send/errorp send/reportp)
+                                    (lambda () (loop (add1 i)))]))))))))))))
 
 (define-syntax (lambda-worker stx)
   (syntax-parse stx #:literals (match-message-loop)

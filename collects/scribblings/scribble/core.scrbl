@@ -1,5 +1,6 @@
 #lang scribble/doc
 @(require scribble/manual "utils.rkt"
+          "struct-hierarchy.rkt" 
           (for-label scribble/manual-struct
                      file/convertible
                      setup/main-collects
@@ -48,9 +49,37 @@ None of the passes mutate the document representation. Instead, the
  @tech{resolve pass} are effectively specialized version of
  @tech{traverse pass} that work across separately built documents.
 
+ 
 @; ------------------------------------------------------------------------
 
-@section[#:tag "parts"]{Parts}
+@section[#:tag "parts"]{Parts, Flows, Blocks, and Paragraphs}
+
+This diagram shows the large-scale structure of the
+type hierarchy for Scribble documents. A box represents
+a struct or a built-in Racket type; for example @racket[part] is a struct.
+The bottom portion of a box shows the fields; for example
+@racket[part] has three fields, @racket[title], @racket[blocks], 
+and @racket[subparts].
+The substruct relationship
+is shown vertically with navy blue lines connected by a triangle;
+for example, a @racket[compound-paragraph] is a @racket[block]. 
+The types of values on fields are shown via dark red lines in the diagram.
+Doubled lines represent lists and tripled lines represent lists
+of lists; for example, the @racket[blocks] field of 
+@racket[compound-paragraph] is a list of @racket[blocks].
+Dotted lists represent functions that compute elements of
+a given field; for example, the @racket[block] field of 
+a @racket[traverse-block] struct is a function that
+computes a @racket[block]. 
+
+The diagram is not completely
+accurate: a @racket[table] may have @racket['cont]
+in place of a block in its @racket[cells] field, and
+the types of fields are only shown if they are other structs
+in the diagram.
+A prose description with more detail follows the diagram.
+
+@(mk-diagram)
 
 A @deftech{part} is an instance of @racket[part]; among other things,
  it has a title @techlink{content}, an initial @techlink{flow}, and a
@@ -308,7 +337,8 @@ The @racket[tag-prefix] field determines the optional @techlink{tag
 prefix} for the part.
 
 The @racket[tags] indicates a list of @techlink{tags} that each link
-to the section.
+to the section. Normally, @racket[tags] should be a non-empty list, so
+that hyperlinks can target the section.
 
 The @racket[title-content] field holds the part's title, if any.
 
@@ -341,7 +371,8 @@ The recognized @tech{style properties} are as follows:
        normally shows only the top-level sections).}
 
  @item{@racket['hidden] --- The part title is not shown in rendered
-       HTML output. The @racket['toc-hidden] style usually should be
+       HTML output, and the part title is not shown in Latex output if it
+       is empty. The @racket['toc-hidden] style usually should be
        included with @racket['hidden].}
 
  @item{@racket['toc-hidden] --- The part title is not shown in tables
@@ -476,6 +507,8 @@ recognized:
 
  @item{@racket['centered] --- Centers HTML output horizontally.}
 
+ @item{@racket['block] --- Prevents pages breaks in Latex output.}
+
 ]
 
 The following @tech{style properties} are currently recognized:
@@ -602,6 +635,9 @@ The following @tech{style properties} are currently recognized:
  @item{@racket[box-mode] --- For Latex output, uses an alternate
        rendering form for @tech{boxing contexts} (such as a table cell); see
        @racket[box-mode].}
+
+ @item{@racket['decorative] --- The content of the nested flow is intended
+       for decoration. Text output skips a decorative nested flow.}
 
 ]}
 
@@ -1347,11 +1383,14 @@ script alternative to the element content.}
 
 
 @defstruct[css-addition ([path (or/c path-string? 
-                                     (cons/c 'collects (listof bytes?)))])]{
+                                     (cons/c 'collects (listof bytes?))
+                                     bytes?)])]{
 
-Used as a @tech{style property} to supply a CSS file to be referenced
-in the generated HTML. This property can be attached to any style, and
-all additions are collected to the top of the generated HTML page.
+Used as a @tech{style property} to supply a CSS file (if @racket[path]
+is a path, string, or list) or content (if @racket[path] is a byte
+string) to be referenced or included in the generated HTML. This
+property can be attached to any style, and all additions are collected
+to the top of the generated HTML page.
 
 The @racket[path] field can be a result of
 @racket[path->main-collects-relative].}
@@ -1385,12 +1424,14 @@ Like @racket[latex-defaults], but use for the
 
 
 @defstruct[tex-addition ([path (or/c path-string? 
-                                     (cons/c 'collects (listof bytes?)))])]{
+                                     (cons/c 'collects (listof bytes?))
+                                     bytes?)])]{
 
-Used as a @tech{style property} to supply a @filepath{.tex} file to be
-included in the generated Latex. This property can be attached to any
-style, and all additions are collected to the top of the generated
-Latex file.
+Used as a @tech{style property} to supply a @filepath{.tex} file (if
+@racket[path] is a path, string, or list) or content (if @racket[path]
+is a byte string) to be included in the generated Latex. This property
+can be attached to any style, and all additions are collected to the
+top of the generated Latex file.
 
 The @racket[path] field can be a result of
 @racket[path->main-collects-relative].}

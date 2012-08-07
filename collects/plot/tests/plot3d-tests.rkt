@@ -56,6 +56,11 @@
                               #:labels '("Red" #f "Blue") #:alphas '(2/3))))
 
 (time
+ (plot3d (stacked-histogram3d '(#(a a (1 1 1)) #(a b (1.5 3)) #(b b ()) #(b a (1/2)))
+                              #:labels '("Red" #f "Blue") #:alphas '(2/3)
+                              #:add-x-ticks? #f #:add-y-ticks? #f)))
+
+(time
  (plot3d (surface3d + 0 10 0 1)
          #:angle 10 #:z-label "z axis"))
 
@@ -183,6 +188,14 @@
                           #:label "z")))
 
 (time (plot3d (contour-intervals3d f5 -4 4 -4 4 #:label "z")))
+
+(time (plot3d (contour-intervals3d
+               (λ (x y)
+                 (define z (- x y))
+                 (cond [(< z -1) -1]
+                       [(> z 1)   1]
+                       [else      z]))
+               -2 2 -2 2)))
 
 (time
  (plot3d (contour-intervals3d (λ (x y) (+ x y)))

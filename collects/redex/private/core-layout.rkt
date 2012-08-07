@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 
 (require "loc-wrapper.rkt"
          "matcher.rkt"
@@ -7,12 +7,14 @@
          texpict/utils
          texpict/mrpict
         
-         scheme/match
+         racket/match
          racket/draw
-         scheme/class)
+         racket/class
+         
+         (for-syntax racket/base))
 
-(require (for-syntax scheme/base))
-  
+(define pink-code-font 'modern)
+
 (provide find-enclosing-loc-wrapper
          render-lw
          lw->pict
@@ -53,15 +55,15 @@
          (struct-out line)
          current-text)
   
-  
   (define STIX? #f)
   
   ;; atomic-rewrite-table : (parameter (listof (list symbol (union string pict))))
   (define atomic-rewrite-table 
     (make-parameter 
-     `((... ,(if STIX?
-                 (basic-text "\u22ef" (default-style))
-                 "..."))
+     `((... ,(λ ()
+               (if STIX?
+                   (basic-text "\u22ef" (default-style))
+                   (basic-text "..." (default-style)))))
        (hole "[]"))))
   
   (define-syntax (with-atomic-rewriter stx)
@@ -477,7 +479,7 @@
           (make-pict-token col col-span (blank))
           (let ([str (apply string (build-list col-span (λ (x) #\space)))])
             (if unquoted?
-                (make-pict-token col col-span (pink-background ((current-text) str 'modern (default-font-size))))
+                (make-pict-token col col-span (pink-background ((current-text) str pink-code-font (default-font-size))))
                 (make-string-token col col-span str (default-style))))))
     
     (define (handle-loc-wrapped lw)
@@ -592,17 +594,18 @@
   (define (split-token offset tok new-token)
     (cond
       [(string-token? tok)
+       (define len (string-length (string-token-string tok)))
        (list (make-string-token (token-column tok)
                                 offset
                                 (substring (string-token-string tok)
-                                           0 offset)
+                                           0 (min len offset))
                                 (string-token-style tok))
              new-token
              (make-string-token (+ (token-column tok) offset)
                                 (- (token-span tok) offset)
                                 (substring (string-token-string tok)
-                                           offset 
-                                           (string-length (string-token-string tok)))
+                                           (min offset len)
+                                           len)
                                 (string-token-style tok)))]
       [(pict-token? tok)
        (list new-token)]))
@@ -687,7 +690,7 @@
        (list (make-pict-token col span 
                               (pink-background 
                                ((current-text) (if (string? atom) atom (format "~a" atom))
-                                               'modern
+                                               pink-code-font
                                                (default-font-size)))))]
       [(and (symbol? atom)
             (regexp-match #rx"^([^_^]*)_([^^]*)\\^?(.*)$" (symbol->string atom)))
@@ -745,7 +748,7 @@
 
   (define (basic-text str style) ((current-text) str style (default-font-size)))
   (define (non-terminal str) ((current-text) str (non-terminal-style) (default-font-size)))
-  (define (unksc str) (pink-background ((current-text) str 'modern (default-font-size))))
+  (define (unksc str) (pink-background ((current-text) str pink-code-font (default-font-size))))
   (define non-terminal-style (make-parameter '(italic . roman)))
   (define non-terminal-subscript-style (make-parameter `(subscript . ,(non-terminal-style))))
   (define non-terminal-superscript-style (make-parameter `(superscript . ,(non-terminal-style))))

@@ -31,18 +31,19 @@ For a family without a face string, the corresponding font ID has a
  @racket[printer-dc%]).
 
 Currently, on all platforms, a face string is interpreted as a
- @hyperlink["http://www.pango.org"]{Pango} font description. A
- description can be a family name such as @racket["Helvetica"], a face
- name such as @racket["Helvetica Bold"], or a list of comma-separated
- families followed by space-separated font options such as
- @racket["Helvetica,Arial bold italic"]. Any size in a font
+ @hyperlink["http://www.pango.org"]{Pango} font description when it
+ contains a comma, otherwise it is treated as a family name. A
+ face can thus be just a family name such as @racket["Helvetica"], a family
+ followed by a comma and font modifiers as in @racket["Helvetica, Bold"], or a sequence of comma-separated
+ familie names followed by space-separated font options as an
+ @racket["Helvetica, Arial, bold italic"]. Any size in a font
  description is overridden by a given @racket[font%]'s size. Any
  (slant) style or weight options in a font description are overridden
- by a non-@racket['normal] value for a given @racket[font%]'s style
- or weight, respectively.
+ by a non-@racket['normal] value for a given @racket[font%]'s style or
+ weight, respectively.
 
-@defmethod[(find-family-default-font-id [family (one-of/c 'default 'decorative 'roman 'script 
-                                                          'swiss 'modern 'symbol 'system)])
+@defmethod[(find-family-default-font-id [family (or/c 'default 'decorative 'roman 'script 
+                                                      'swiss 'modern 'symbol 'system)])
            exact-integer?]{
 
 Gets the font ID representing the default font for a family. See
@@ -51,8 +52,8 @@ Gets the font ID representing the default font for a family. See
 }
 
 @defmethod[(find-or-create-font-id [name string?]
-                                   [family (one-of/c 'default 'decorative 'roman 'script 
-                                                     'swiss 'modern 'symbol 'system)])
+                                   [family (or/c 'default 'decorative 'roman 'script 
+                                                 'swiss 'modern 'symbol 'system)])
            exact-integer?]{
 
 Gets the face name for a font ID, initializing the mapping for
@@ -64,7 +65,7 @@ Font ID are useful only as mapping indices for
 }
 
 @defmethod[(get-face-name [font-id exact-integer?])
-           (or/c string? false/c)]{
+           (or/c string? #f)]{
 
 Gets the face name for a font ID. If the font ID corresponds to
  the default font for a particular family, @racket[#f] is returned.
@@ -72,8 +73,8 @@ Gets the face name for a font ID. If the font ID corresponds to
 }
 
 @defmethod[(get-family [font-id exact-integer?])
-           (one-of/c 'default 'decorative 'roman 'script 
-                     'swiss 'modern 'symbol 'system)]{
+           (or/c 'default 'decorative 'roman 'script 
+                 'swiss 'modern 'symbol 'system)]{
 
 Gets the family for a font ID. See
 @racket[font%] for information about font families.
@@ -81,8 +82,8 @@ Gets the family for a font ID. See
 }
 
 @defmethod[(get-font-id [name string?]
-                        [family (one-of/c 'default 'decorative 'roman 'script 
-                                          'swiss 'modern 'symbol 'system)])
+                        [family (or/c 'default 'decorative 'roman 'script 
+                                      'swiss 'modern 'symbol 'system)])
            exact-integer?]{
 
 Gets the font ID for a face name paired with a default family. If the
@@ -96,9 +97,9 @@ Font ID are useful only as mapping indices for
 }
 
 @defmethod[(get-post-script-name [font-id exact-integer?]
-                                 [weight (one-of/c 'normal 'bold 'light)]
-                                 [style (one-of/c 'normal 'italic 'slant)])
-           (or/c string? false/c)]{
+                                 [weight (or/c 'normal 'bold 'light)]
+                                 [style (or/c 'normal 'italic 'slant)])
+           (or/c string? #f)]{
 
 Gets a PostScript font description for a font ID, weight, and style
  combination.
@@ -109,9 +110,9 @@ See @racket[font%] for information about @racket[weight] and
 }
 
 @defmethod[(get-screen-name [font-id exact-integer?]
-                            [weight (one-of/c 'normal 'bold 'light)]
-                            [style (one-of/c 'normal 'italic 'slant)])
-           (or/c string? false/c)]{
+                            [weight (or/c 'normal 'bold 'light)]
+                            [style (or/c 'normal 'italic 'slant)])
+           (or/c string? #f)]{
 
 Gets a platform-dependent screen font description (used for drawing to a
  canvas's @racket[dc<%>], a @racket[bitmap-dc%], or a
@@ -123,8 +124,8 @@ See @racket[font%] for information about @racket[weight] and
 }
 
 @defmethod[(set-post-script-name [font-id exact-integer?]
-                                 [weight (one-of/c 'normal 'bold 'light)]
-                                 [style (one-of/c 'normal 'italic 'slant)]
+                                 [weight (or/c 'normal 'bold 'light)]
+                                 [style (or/c 'normal 'italic 'slant)]
                                  [name string?])
            void?]{
 
@@ -137,8 +138,8 @@ See @racket[font%] for information about @racket[weight] and @racket[style].
 }
 
 @defmethod[(set-screen-name [font-id exact-integer?]
-                            [weight (one-of/c 'normal 'bold 'light)]
-                            [style (one-of/c 'normal 'italic 'slant)]
+                            [weight (or/c 'normal 'bold 'light)]
+                            [style (or/c 'normal 'italic 'slant)]
                             [name string?])
            void?]{
 

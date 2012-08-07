@@ -3,7 +3,8 @@
           (for-label data/order
                      racket/contract
                      racket/dict
-                     racket/base))
+                     racket/base
+		     racket/generic))
 
 @title{Orders and Ordered Dictionaries}
 
@@ -23,15 +24,14 @@ Contract for orderings, represented by the symbols @racket['=],
 @racket['<], and @racket['>].
 }
 
-@defthing[prop:ordered-dict
-          (struct-type-property/c
-           (vector-immutableof _e/c _e/c _s/c _s/c _s/c _s/c))]{
+@defthing[gen:ordered-dict any/c]{
 
-Struct-type property for defining new ordered dictionary types. The
-value associated with @racket[prop:ordered-dict] should be an
-immutable vector of six procedures, two ``extrema'' procedures and
-four ``search'' procedures. The extrema procedures must satisfy
-@racket[_e/c] and the search procedures must satisfy @racket[_s/c]:
+A generic interface for defining new ordered dictionary types.
+Methods can be attached to the @racket[gen:ordered-dict] interface
+using the @racket[#:methods] keyword in a structure type definition.
+Two ``extrema'' methods and four ``search'' methods should be
+implemented. The extrema methods must satisfy @racket[_e/c] and the search
+methods must satisfy @racket[_s/c]:
 
 @racketblock[
 _e/c = (->i ([d ordered-dict?])
@@ -41,7 +41,7 @@ _s/c = (->i ([d ordered-dict?]
             [_ (d) (or/c #f (dict-iter-contract d))])
 ]
 
-The procedures are implementations of the following generic functions:
+The methods are implementations of the following generic functions:
 
 @itemize[
 @item{@racket[dict-iterate-least]}
@@ -52,15 +52,24 @@ The procedures are implementations of the following generic functions:
 @item{@racket[dict-iterate-greatest/<=?]}
 ]
 
-A struct type that implements @racket[prop:ordered-dict] must also
-implement @racket[prop:dict].
+A struct type that implements @racket[gen:ordered-dict] must also
+implement @racket[gen:dict].
+}
+
+@defthing[prop:ordered-dict
+          (struct-type-property/c
+           (vectorof _e/c _e/c _s/c _s/c _s/c _s/c))]{
+  A deprecated structure type property used to defined custom
+  ordered dictionaries. Use @racket[gen:ordered-dict] instead.
+  Accepts a vector of 6 procedures with the same arguments as
+  the methods of @racket[gen:ordered-dict].
 }
 
 @defproc[(ordered-dict? [x any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[x] is an instance of a struct
 implementing the @tech{ordered dictionary} interface (via
-@racket[prop:ordered-dict]).
+@racket[gen:ordered-dict]).
 }
 
 @deftogether[[

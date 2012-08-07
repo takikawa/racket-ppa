@@ -36,6 +36,7 @@
       (code:line @#,elem{@racketvalfont{'}@racket[_quoted]})
       (code:line @#,elem{@racketvalfont{`}@racket[_quasiquoted]})
       number
+      boolean 
       string
       character]
 ]
@@ -95,6 +96,8 @@ level as they did in the @secref["intermediate"] level.
 
 @(define-forms/normal define)
 
+@(beginner-abbr-forms quote quasiquote unquote unquote-splicing)
+
 @(prim-forms ("intermediate-lam")
              define 
              lambda
@@ -116,4 +119,7 @@ level as they did in the @secref["intermediate"] level.
 
 @section[#:tag "intm-w-lambda-pre-defined"]{Pre-defined Functions}
 
-@prim-op-defns['(lib "htdp-intermediate-lambda.rkt" "lang") #'here '()]
+@(require (submod lang/htdp-intermediate-lambda procedures))
+@(render-sections (docs) #'here "htdp-intermediate-lambda")
+
+@;prim-op-defns['(lib "htdp-intermediate-lambda.rkt" "lang") #'here '()]

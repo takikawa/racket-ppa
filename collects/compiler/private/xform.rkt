@@ -423,7 +423,7 @@
           (if (eq? (system-type) 'windows)
               (lambda (s)
                 (let ([split (let loop ([s s])
-                               (let ([m (regexp-match #rx"([^ ]*) (.*)" s)])
+                               (let ([m (regexp-match #rx"([^ ]*) +(.*)" s)])
                                  (if m
                                      (cons (cadr m) (loop (caddr m)))
                                      (list s))))])
@@ -459,7 +459,7 @@
                     (let loop ()
                       (let ([l (read-bytes-line (list-ref proc 3) 'any)])
                         (unless (eof-object? l)
-                          (fprintf (current-error-port) "~a\n" l)
+                          (eprintf "~a\n" l)
                           (loop))))
                     (close-input-port (list-ref proc 3)))))
         
@@ -569,8 +569,8 @@
         (define exit-with-error? #f)
         
         (define (log-error format . args)
-          (fprintf (current-error-port) "Error ")
-          (apply fprintf (current-error-port) format args)
+          (eprintf "Error ")
+          (apply eprintf format args)
           (newline (current-error-port))
           (set! exit-with-error? #t))
         
@@ -886,9 +886,6 @@
                __error __errno_location __toupper __tolower
                __attribute__ __mode__ ; not really functions in gcc
                __iob_func ; VC 8
-               scheme_get_milliseconds scheme_get_process_milliseconds
-               scheme_rational_to_double scheme_bignum_to_double
-               scheme_rational_to_float scheme_bignum_to_float
                |GetStdHandle| |__CFStringMakeConstantString|
                _vswprintf_c
                
@@ -2475,8 +2472,7 @@
 				  name))
 		     (unless saw-gcing-call
 		       '
-		       (fprintf (current-error-port)
-				"[SUGGEST] Consider declaring ~a as __xform_nongcing__.\n"
+		       (eprintf "[SUGGEST] Consider declaring ~a as __xform_nongcing__.\n"
 				name)))
                  (if (and (not important-conversion?)
                           (not (and function-name
@@ -3466,15 +3462,13 @@
                                                 ;; local vars taken in the function.
                                                 (not (or (ormap (lambda (var)
                                                                   (and (array-type? (cdr var))
-                                                                       '(fprintf (current-error-port)
-                                                                                 "Optwarn [return] ~a in ~a: tail-push blocked by ~s[].\n"
+                                                                       '(eprintf "Optwarn [return] ~a in ~a: tail-push blocked by ~s[].\n"
                                                                                  (tok-line (car func)) (tok-file (car func))
                                                                                  (car var))))
                                                                 (live-var-info-vars live-vars))
                                                          (ormap (lambda (&-var)
                                                                   (and (assq &-var vars)
-                                                                       '(fprintf (current-error-port)
-                                                                                 "Optwarn [return] ~a in ~a: tail-push blocked by &~s.\n"
+                                                                       '(eprintf "Optwarn [return] ~a in ~a: tail-push blocked by &~s.\n"
                                                                                  (tok-line (car func)) (tok-file (car func))
                                                                                  &-var)))
                                                                 &-vars))))]

@@ -263,6 +263,8 @@
 # define USE_IEEE_FP_PREDS
 # define POW_HANDLES_INF_CORRECTLY
 
+# define USE_DYNAMIC_FDSET_SIZE
+
 # define SIGSET_IS_SIGNAL
 
 # define USE_TM_GMTOFF_FIELD
@@ -595,7 +597,9 @@
 # define NO_SLEEP
 # define WINDOWS_PROCESSES
 # define WINDOWS_FILE_HANDLES
-# define USE_WIN32_THREAD_TIMER
+# ifndef MZ_USE_DETERMINSTIC_FUEL
+#  define USE_WIN32_THREAD_TIMER
+# endif
 
 # define SIGSET_IS_SIGNAL
 # define SIGSET_NEEDS_REINSTALL
@@ -726,8 +730,10 @@
 # define SYSTEM_TYPE_NAME "macosx"
 #endif
 
-# undef USE_ITIMER
-# define USE_PTHREAD_THREAD_TIMER
+# ifndef MZ_USE_DETERMINSTIC_FUEL
+#  undef USE_ITIMER
+#  define USE_PTHREAD_THREAD_TIMER
+# endif
 
 # define USE_MAP_ANON
 
@@ -761,15 +767,14 @@
 # define MZ_USE_JIT_I386
 # ifndef MZ_NO_JIT_SSE
 #  define MZ_USE_JIT_SSE
-#  define ASM_DBLPREC_CONTROL_87
 # endif
 #endif
-# define MZ_JIT_USE_MPROTECT
 
-#if defined(__x86_64__)
-/* work around a bug in localtime() in 10.6.8 */
-# define MIN_VALID_DATE_SECONDS -67768040609715600
+#ifdef MZ_NO_JIT_SSE
+# define ASM_DBLPREC_CONTROL_87
 #endif
+
+# define MZ_JIT_USE_MPROTECT
 
 # define FLAGS_ALREADY_SET
 
@@ -1318,7 +1323,7 @@
     SunOS/Solaris, and HP/UX by explicit pre-checking the form of the 
     number and looking for values that are obviously +inf.0 or -inf.0 */
 
- /* POW_HANDLES_INF_CORRECTLY inidicates that thw pow() library procedure
+ /* POW_HANDLES_INF_CORRECTLY indicates that thw pow() library procedure
     handles +/-inf.0 correctly. Otherwise, code in inserted to specifically
     check for infinite arguments. */
     

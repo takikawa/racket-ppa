@@ -103,7 +103,9 @@
                     (lambda ()
                       (copy-port (current-input-port) (current-output-port))))))
             (for ([style-file (in-list all-style-files)])
-              (install-file style-file)))
+              (if (bytes? style-file)
+                  (display style-file)
+                  (install-file style-file))))
         (when whole-doc?
           (printf "\\begin{document}\n\\preDoc\n")
           (when (part-title-content d)
@@ -120,6 +122,8 @@
                       (if (null? auths) "Empty" ""))
               (render-content (part-title-content d) d ri)
               (printf "}{~a}{" vers)
+              (unless (null? auths)
+                (printf "\\SNumberOfAuthors{~a}" (length auths)))
               (for/fold ([first? #t]) ([auth (in-list auths)])
                 (unless first? (printf "\\SAuthorSep{}"))
                 (do-render-paragraph auth d ri #t #f)
@@ -130,7 +134,10 @@
           (printf "\n\n\\postDoc\n\\end{document}\n"))))
 
     (define/override (render-part-content d ri)
-      (let ([number (collected-info-number (part-collected-info d ri))])
+      (let ([number (collected-info-number (part-collected-info d ri))]
+            [completely-hidden?
+             (and (part-style? d 'hidden)
+                  (equal? "" (content->string (part-title-content d))))])
         (when (and (part-title-content d) 
                    (or (pair? number)
                        (let ([d (render-part-depth)])
@@ -141,30 +148,35 @@
             (for ([pre (in-list pres)])
               (printf "\n\n")
               (do-render-paragraph pre d ri #t #f)))
-          (let ([no-number? (and (pair? number) 
-                                 (or (not (car number))
-                                     ((length number) . > . 3)))])
-            (printf "\n\n\\~a~a~a"
-                    (case (+ (length number) (or (render-part-depth) 0))
-                      [(0 1) "sectionNewpage\n\n\\section"]
-                      [(2) "subsection"]
-                      [(3) "subsubsection"]
-                      [else "subsubsection"])
-                    (if (and (part-style? d 'hidden) (not no-number?))
-                      "hidden" "")
-                    (if no-number? "*" ""))
-            (when (not (or (part-style? d 'hidden) no-number?))
-              (printf "[")
-              (parameterize ([disable-images #t]
-                             [escape-brackets #t])
-                (render-content (part-title-content d) d ri))
-              (printf "]")))
-          (printf "{")
-          (render-content (part-title-content d) d ri)
-          (printf "}")
-          (when (eq? (style-name (part-style d)) 'index) (printf "\n\n")))
+          (cond
+           [completely-hidden?
+            (printf "\n\n\\notitlesection")]
+           [else
+            (let ([no-number? (and (pair? number) 
+                                   (or (not (car number))
+                                       ((length number) . > . 3)))])
+              (printf "\n\n\\~a~a~a"
+                      (case (+ (length number) (or (render-part-depth) 0))
+                        [(0 1) "sectionNewpage\n\n\\section"]
+                        [(2) "subsection"]
+                        [(3) "subsubsection"]
+                        [else "subsubsection"])
+                      (if (and (part-style? d 'hidden) (not no-number?))
+                          "hidden" "")
+                      (if no-number? "*" ""))
+              (when (not (or (part-style? d 'hidden) no-number?))
+                (printf "[")
+                (parameterize ([disable-images #t]
+                               [escape-brackets #t])
+                  (render-content (part-title-content d) d ri))
+                (printf "]")))
+            (printf "{")
+            (render-content (part-title-content d) d ri)
+            (printf "}")
+            (when (eq? (style-name (part-style d)) 'index) (printf "\n\n"))]))
         (for ([t (part-tags d)])
-          (printf "\\label{t:~a}\n\n" (t-encode (add-current-tag-prefix (tag-key t ri)))))
+          (printf "\\label{t:~a}~a" (t-encode (add-current-tag-prefix (tag-key t ri)))
+                  (if completely-hidden? "" "\n\n")))
         (render-flow (part-blocks d) d ri #f)
         (for ([sec (part-parts d)]) (render-part sec ri))
         (when (eq? (style-name (part-style d)) 'index) (printf "\\onecolumn\n\n"))
@@ -235,8 +247,6 @@
       (super render-intrapara-block p part ri first? last? starting-item?))
 
     (define/override (render-content e part ri)
-      (when (render-element? e)
-        ((render-element-render e) this part ri))
       (let ([part-label? (and (link-element? e)
                               (pair? (link-element-tag e))
                               (eq? 'part (car (link-element-tag e)))
@@ -247,9 +257,10 @@
             (printf "\\label{t:~a}"
                     (t-encode (add-current-tag-prefix (tag-key (target-element-tag e) ri)))))
           (when part-label?
-            (let ([dest (resolve-get part ri (link-element-tag e))])
+            (let* ([dest (resolve-get part ri (link-element-tag e))]
+                   [number (and dest (vector-ref dest 2))])
               (printf "\\~aRef~a{"
-                      (case (and dest (length (cadr dest)))
+                      (case (and dest (length number))
                         [(0) "Book"]
                         [(1) "Chap"]
                         [else "Sec"])
@@ -259,10 +270,9 @@
                           ""))
               (render-content
                (if dest
-                   (if (list? (cadr dest))
-                       (format-number (cadr dest) null)
-                       (begin (fprintf (current-error-port)
-                                       "Internal tag error: ~s -> ~s\n"
+                   (if (list? number)
+                       (format-number number null)
+                       (begin (eprintf "Internal tag error: ~s -> ~s\n"
                                        (link-element-tag e)
                                        dest)
                               '("!!!")))
@@ -277,10 +287,15 @@
                                  (style-name es)
                                  es)]
                  [style (and (style? es) es)]
+                 [check-render
+                  (lambda ()
+                    (when (render-element? e)
+                      ((render-element-render e) this part ri)))]
                  [core-render (lambda (e tt?)
                                 (cond
                                  [(and (image-element? e)
                                        (not (disable-images)))
+                                  (check-render)
                                   (let ([fn (install-file
                                              (select-suffix 
                                               (main-collects-relative->path
@@ -298,15 +313,20 @@
                                              (ftag (xlist (convert e 'eps-bytes)) ".ps")
                                              (ftag (xlist (convert e 'png-bytes)) ".png"))))
                                   => (lambda (bstr+info+suffix)
+                                       (check-render)
                                        (let* ([bstr (list-ref (list-ref bstr+info+suffix 0) 0)]
                                               [suffix (list-ref bstr+info+suffix 1)]
+                                              [width (list-ref (list-ref bstr+info+suffix 0) 1)]
                                               [height (list-ref (list-ref bstr+info+suffix 0) 2)]
                                               [descent (and height
                                                             (+ (list-ref (list-ref bstr+info+suffix 0) 3)
                                                                (- (ceiling height) height)))]
                                               [fn (install-file (format "pict~a" suffix) bstr)])
                                          (if descent
-                                             (printf "\\raisebox{-~apx}{\\includegraphics{~a}}" descent fn)
+                                             (printf "\\raisebox{-~apx}{\\makebox[~apx][l]{\\includegraphics{~a}}}" 
+                                                     descent
+                                                     width 
+                                                     fn)
                                              (printf "\\includegraphics{~a}" fn))))]
                                  [else
                                   (parameterize ([rendering-tt (or tt? (rendering-tt))])
@@ -330,14 +350,17 @@
                   [(smaller) (wrap e "Smaller" #f)]
                   [(larger) (wrap e "Larger" #f)]
                   [(hspace)
+                   (check-render)
                    (let ([s (content->string e)])
                      (case (string-length s)
                        [(0) (void)]
                        [else
                         (printf "\\mbox{\\hphantom{\\Scribtexttt{~a}}}"
                                 (regexp-replace* #rx"." s "x"))]))]
-                  [(newline) (unless (suppress-newline-content)
-                               (printf "\\\\"))]
+                  [(newline) 
+                   (check-render)
+                   (unless (suppress-newline-content)
+                     (printf "\\\\"))]
                   [else (error 'latex-render
                                "unrecognzied style symbol: ~s" style)])]
                [(string? style-name)
@@ -348,6 +371,7 @@
                              [else tt?])])
                   (cond
                    [(multiarg-element? e)
+                    (check-render)
                     (printf "\\~a" style-name)
                     (if (null? (multiarg-element-contents e))
                         (printf "{}")
@@ -358,7 +382,7 @@
                           (printf "}")))]
                    [else
                     (wrap e style-name tt?)]))]
-               [else 
+               [else
                 (core-render e tt?)]))
             (let loop ([l (if style (style-properties style) null)] [tt? #f])
               (if (null? l)
@@ -366,7 +390,12 @@
                   (let ([v (car l)])
                     (cond
                      [(target-url? v)
-                      (printf "\\href{~a}{" (regexp-replace* #rx"%" (target-url-addr v) "\\\\%"))
+                      (printf "\\href{~a}{" (regexp-replace* #rx"%"
+                                                             (let ([p (target-url-addr v)])
+                                                               (if (path? p)
+                                                                   (path->string p)
+                                                                   p))
+                                                             "\\\\%"))
                       (loop (cdr l) #t)
                       (printf "}")]
                      [(color-property? v)
@@ -390,7 +419,7 @@
           (printf ", \\pageref{t:~a}"
                   (t-encode 
                    (let ([v (resolve-get part ri (link-element-tag e))])
-                     (and v (last v))))))
+                     (and v (vector-ref v 1))))))
         null))
 
     (define/private (t-encode s)
@@ -428,6 +457,7 @@
              [index? (eq? 'index s-name)]
              [tableform
               (cond [index? "list"]
+                    [(eq? 'block s-name) "tabular"]
                     [(not (current-table-mode)) "bigtabular"]
                     [else "tabular"])]
              [opt (cond [(equal? tableform "bigtabular") ""]
@@ -731,9 +761,9 @@
                                 "{\\char`\\_}"
                                 "$\\_$")]
                      [(#\^) "{\\char'136}"]
-                     [(#\>) (if (rendering-tt) "{\\texttt >}" "$>$")]
-                     [(#\<) (if (rendering-tt) "{\\texttt <}" "$<$")]
-                     [(#\|) (if (rendering-tt) "{\\texttt |}" "$|$")]
+                     [(#\>) (if (rendering-tt) "{\\Stttextmore}" "$>$")]
+                     [(#\<) (if (rendering-tt) "{\\Stttextless}" "$<$")]
+                     [(#\|) (if (rendering-tt) "{\\Stttextbar}" "$|$")]
                      [(#\-) "{-}"] ;; avoid en- or em-dash
                      [(#\`) "{`}"] ;; avoid double-quotes
                      [(#\') "{'}"] ;; avoid double-quotes
@@ -937,7 +967,10 @@
                             [(#\Ø) "{\\O}"]
                             [(#\ł) "{\\l}"]
                             [(#\Ł) "{\\L}"]
+                            [(#\ř) "{\\v r}"]
+                            [(#\Ř) "{\\v R}"]
                             [(#\š) "{\\v s}"]
+                            [(#\Š) "{\\v S}"]
                             [(#\uA7) "{\\S}"]
                             [(#\〚) "$[\\![$"]
                             [(#\〛) "$]\\!]$"]

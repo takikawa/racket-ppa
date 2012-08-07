@@ -100,7 +100,7 @@
   (let ([error-has-occurred-box (box #f)])
     (test-sequence/many models exp-str expected-steps extra-files error-has-occurred-box)
     (if (unbox error-has-occurred-box)
-        (begin (fprintf (current-error-port) "...Error has occurred during test: ~v\n" name)
+        (begin (eprintf "...Error has occurred during test: ~v\n" name)
                #f)
         #t)))
 
@@ -157,7 +157,7 @@
          (let* (#;[port (open-input-file filename)]
                 [module-id (gensym "stepper-module-name-")])
            ;; thunk this so that syntax errors happen within the error handlers:
-           (lambda () (expand-teaching-program port read-syntax namespace-spec '() #f module-id enable-testing?))))])))
+           (lambda () (expand-teaching-program port read-syntax namespace-spec '() module-id enable-testing?))))])))
 
 ;; test-sequence/core : render-settings? boolean? syntax? steps?
 ;; this is a front end for calling the stepper's "go"; the main 
@@ -230,7 +230,7 @@
 
 (define (warn error-box who fmt . args)
   (set-box! error-box #t)
-  (fprintf (current-error-port) "~a: ~a\n" who (apply format fmt args)))
+  (eprintf "~a: ~a\n" who (apply format fmt args)))
 
 
 ;; (-> step-result? sexp? boolean?)

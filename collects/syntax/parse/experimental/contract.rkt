@@ -1,17 +1,19 @@
 #lang racket/base
-(require "../private/sc.rkt"
-         "../private/lib.rkt"
+(require syntax/parse/pre
          "provide.rkt"
          unstable/wrapc
          (only-in syntax/parse/private/residual ;; keep abs. path
-                  this-context-syntax)
+                  this-context-syntax
+                  this-role)
          racket/contract/base)
+
+(define not-given (gensym))
 
 (define-syntax-class (expr/c ctc-stx
                              #:positive [pos-blame 'use-site]
                              #:negative [neg-blame 'from-macro]
                              #:macro [macro-name #f]
-                             #:name [expr-name #f]
+                             #:name [expr-name not-given]
                              #:context [ctx #f])
   #:attributes (c)
   (pattern y:expr
@@ -20,7 +22,9 @@
                           #'y
                           #:positive pos-blame
                           #:negative neg-blame
-                          #:name expr-name
+                          #:name (if (eq? expr-name not-given)
+                                     this-role
+                                     expr-name)
                           #:macro macro-name
                           #:context (or ctx (this-context-syntax)))))
 

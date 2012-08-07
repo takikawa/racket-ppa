@@ -294,9 +294,9 @@
                                               longest-match-length)))))))))))))
       (lambda (ip)
         (unless (input-port? ip)
-          (raise-type-error 
+          (raise-argument-error 
            'lexer 
-           "input-port"
+           "input-port?"
            0
            ip))
         (lexer ip))))
@@ -315,9 +315,9 @@
     (let ((match (read-string longest-match-length lb)))
       ;(printf "(read-string ~e port) = ~e\n" longest-match-length match)
       (do-match lb first-pos longest-match-action match)))
-      
+
   (define file-path (make-parameter #f))
-                   
+
   (define (do-match ip first-pos action value)
     #;(printf "(action ~a ~a ~a ~a)\n" 
             (position-offset first-pos) (position-offset (get-position ip)) value ip)

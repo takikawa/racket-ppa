@@ -247,17 +247,25 @@
       
 (define (read-module v)
   (match v
-    [`(,name ,srcname ,self-modidx ,lang-info ,functional? ,et-functional?
-             ,rename ,max-let-depth ,dummy
-             ,prefix ,num-phases
-             ,provide-phase-count . ,rest)
+    [`(,submod-path 
+       ,name ,srcname ,self-modidx 
+       ,pre-submods ,post-submods
+       ,lang-info ,functional? ,et-functional?
+       ,rename ,max-let-depth ,dummy
+       ,prefix ,num-phases
+       ,provide-phase-count . ,rest)
      (let*-values ([(phase-data rest-module) (split-phase-data rest provide-phase-count)]
                    [(bodies rest-module) (values (take rest-module num-phases)
                                                  (drop rest-module num-phases))])
        (match rest-module
          [`(,requires ,syntax-requires ,template-requires ,label-requires
                       ,more-requires-count . ,more-requires)
-          (make-mod name srcname self-modidx
+          (make-mod (if (null? submod-path)
+                        name 
+                        (if (symbol? name)
+                            (cons name submod-path)
+                            (cons (car name) submod-path)))
+                    srcname self-modidx
                     prefix
                     ;; provides:
                     (for/list ([l (in-list phase-data)])
@@ -325,7 +333,9 @@
                     max-let-depth
                     dummy
                     lang-info
-                    rename)]))]))
+                    rename
+                    (map read-module pre-submods)
+                    (map read-module post-submods))]))]))
 (define (read-module-wrap v)
   v)
 
@@ -436,8 +446,8 @@
   r)
 
 (define small-list-max 65)
-(define cpt-table
-  ;; The "schcpt.h" mapping
+(define raw-cpt-table
+  ;; The "schcpt.h" mapping, earlier entries override later ones
   `([0  escape]
     [1  symbol]
     [2  symref]
@@ -486,14 +496,15 @@
     [249 small-application3]
     [247 255 small-application]))
 
-(define (cpt-table-lookup i)
-  (for/or ([ent cpt-table])
-    (match ent
-      [(list k sym) (and (= k i) (cons k sym))]
-      [(list k k* sym)
-       (and (<= k i)
-            (< i k*)
-            (cons k sym))])))
+;; To accelerate cpt-table lookup, we flatten out the above
+;; list into a vector:
+(define cpt-table (make-vector 256 #f))
+(for ([ent (in-list (reverse raw-cpt-table))])
+  ;; reverse order so that early entries override later ones.
+  (match ent
+    [(list k sym)    (vector-set! cpt-table k (cons k sym))]
+    [(list k k* sym) (for ([i (in-range k k*)])
+                       (vector-set! cpt-table i (cons k sym)))]))
 
 (define (read-compact-bytes port c)
   (begin0
@@ -675,12 +686,20 @@
       [(box? a)
        (match (unbox a)
          [(list (? symbol?) ...) (make-prune (unbox a))]
-         [`#(,amt ,src ,dest #f #f) 
+         [`#(,amt ,src ,dest #f #f ,cancel-id) 
           (make-phase-shift amt 
                             (parse-module-path-index cp src)
-                            (parse-module-path-index cp dest))]
+                            (parse-module-path-index cp dest)
+                            cancel-id)]
          [else (error 'parse "bad phase shift: ~e" a)])]
       [else (error 'decode-wraps "bad wrap element: ~e" a)])))
+
+(define (afm-context? v)
+  (or (and (list? v) (andmap exact-integer? v))
+      (and (vector? v) 
+           (= 2 (vector-length v))
+           (list? (vector-ref v 0))
+           (andmap exact-integer? (vector-ref v 0)))))
 
 (define all-from-module-memo (make-memo))
 (define (decode-all-from-module cp afm)
@@ -688,19 +707,18 @@
     (or (number? v) (not v)))
   (with-memo all-from-module-memo afm
     (match afm
-      [(list* path (? phase? phase) (? phase? src-phase) 
-              (list exn ...) prefix)
+      [(list* path (? phase? phase) (? phase? src-phase) (list exn ...) prefix)
        (make-all-from-module
         (parse-module-path-index cp path)
-        phase src-phase exn (vector prefix))]
-      [(list* path (? phase? phase) (list exn ...) (? phase? src-phase))
+        phase src-phase exn prefix null)]
+      [(list* path (? phase? phase) (? afm-context? context) (? phase? src-phase))
        (make-all-from-module
         (parse-module-path-index cp path)
-        phase src-phase exn #f)]
+        phase src-phase null #f context)]
       [(list* path (? phase? phase) (? phase? src-phase))
        (make-all-from-module
         (parse-module-path-index cp path)
-        phase src-phase #f #f)])))
+        phase src-phase null #f null)])))
 
 (define wraps-memo (make-memo))
 (define (decode-wraps cp w)
@@ -772,10 +790,9 @@
 (define (read-compact cp)
   (let loop ([need-car 0] [proper #f])
     (define ch (cp-getc cp))
-    (define-values (cpt-start cpt-tag) 
-      (let ([x (cpt-table-lookup ch)])
-        (unless x
-          (error 'read-compact "unknown code : ~a" ch))
+    (define-values (cpt-start cpt-tag)
+      (let ([x (vector-ref cpt-table ch)])
+        (unless x (error 'read-compact "unknown code : ~a" ch))
         (values (car x) (cdr x))))
     (define v
       (case cpt-tag
@@ -830,14 +847,19 @@
                        (eq? cpt-tag 'let-one-unused))]
         [(branch)
          (make-branch (read-compact cp) (read-compact cp) (read-compact cp))]
-        [(module-index) (module-path-index-join (read-compact cp) (read-compact cp))]
+        [(module-index) 
+         (define name (read-compact cp))
+         (define base (read-compact cp))
+         (if (or name base)
+             (module-path-index-join name base)
+             (module-path-index-join #f #f (read-compact cp)))]
         [(module-var)
          (let ([mod (read-compact cp)]
                [var (read-compact cp)]
                [pos (read-compact-number cp)])
            (let-values ([(mod-phase pos)
                          (if (= pos -2)
-                           (values 1 (read-compact-number cp))
+                           (values (read-compact-number cp) (read-compact-number cp))
                            (values 0 pos))])
              (make-module-variable mod var pos mod-phase)))]
         [(local-unbox)
@@ -1029,14 +1051,100 @@
             (set-cport-pos! cp save-pos)))
         (placeholder-get ph))))
 
-;; path -> bytes
-;; implementes read.c:read_compiled
-(define (zo-parse [port (current-input-port)])
+(define (read-prefix port)
   ;; skip the "#~"
   (unless (equal? #"#~" (read-bytes 2 port))
     (error 'zo-parse "not a bytecode stream"))
 
   (define version (read-bytes (min 63 (read-byte port)) port))
+
+  (read-char port))
+
+;; path -> bytes
+;; implementes read.c:read_compiled
+(define (zo-parse [port (current-input-port)])
+  (define init-pos (file-position port))
+
+  (define mode (read-prefix port))
+
+  (case mode
+    [(#\T) (zo-parse-top port)]
+    [(#\D)
+     (struct mod-info (name start len))
+     (define mod-infos
+       (sort
+        (for/list ([i (in-range (read-simple-number port))])
+          (define size (read-simple-number port))
+          (define name (read-bytes size port))
+          (define start (read-simple-number port))
+          (define len (read-simple-number port))
+          (define left (read-simple-number port))
+          (define right (read-simple-number port))
+          (define name-p (open-input-bytes name))
+          (mod-info (let loop ()
+                      (define c (read-byte name-p))
+                      (if (eof-object? c)
+                          null
+                          (cons (string->symbol
+                                 (bytes->string/utf-8 (read-bytes (if (= c 255)
+                                                                      (read-simple-number port)
+                                                                      c)
+                                                                  name-p)))
+                                (loop))))
+                    start
+                    len))
+        <
+        #:key mod-info-start))
+     (define tops
+       (for/list ([mod-info (in-list mod-infos)])
+         (define pos (file-position port))
+         (unless (= (- pos init-pos) (mod-info-start mod-info))
+           (error 'zo-parse 
+                  "next module expected at ~a, currently at ~a"
+                  (+ init-pos (mod-info-start mod-info)) pos))
+         (unless (eq? (read-prefix port) #\T)
+           (error 'zo-parse "expected a module"))
+         (define top (zo-parse-top port #f))
+         (define m (compilation-top-code top))
+         (unless (mod? m)
+           (error 'zo-parse "expected a module"))
+         (unless (equal? (mod-info-name mod-info)
+                         (if (symbol? (mod-name m))
+                             '()
+                             (cdr (mod-name m))))
+           (error 'zo-parse "module name mismatch"))
+         top))
+     (define avail (for/hash ([mod-info (in-list mod-infos)]
+                              [top (in-list tops)])
+                     (values (mod-info-name mod-info) top)))
+     (unless (hash-ref avail '() #f)
+       (error 'zo-parse "no root module in directory"))
+     (define-values (pre-subs post-subs seen)
+       (for/fold ([pre-subs (hash)] [post-subs (hash)] [seen (hash)]) ([mod-info (in-list mod-infos)])
+         (if (null? (mod-info-name mod-info))
+             (values pre-subs post-subs (hash-set seen '() #t))
+             (let ()
+               (define name (mod-info-name mod-info))
+               (define prefix (take name (sub1 (length name))))
+               (unless (hash-ref avail prefix #f)
+                 (error 'zo-parse "no parent module for ~s" name))
+               (define (add subs)
+                 (hash-set subs prefix (cons name (hash-ref subs prefix '()))))
+               (define new-seen (hash-set seen name #t))
+               (if (hash-ref seen prefix #f)
+                   (values pre-subs (add post-subs) new-seen)
+                   (values (add pre-subs) post-subs new-seen))))))
+     (define (get-all prefix)
+       (struct-copy mod 
+                    (compilation-top-code (hash-ref avail prefix))
+                    [pre-submodules (map get-all (reverse (hash-ref pre-subs prefix '())))]
+                    [post-submodules (map get-all (reverse (hash-ref post-subs prefix '())))]))
+     (struct-copy compilation-top (hash-ref avail '())
+                  [code (get-all '())])]
+    [else
+     (error 'zo-parse "bad file format specifier")]))
+
+(define (zo-parse-top [port (current-input-port)] [check-end? #t])
 
   ;; Skip module hash code
   (read-bytes 20 port)
@@ -1062,8 +1170,9 @@
 
   (file-position port (+ rst-start size*))
  
-  (unless (eof-object? (read-byte port))
-    (error 'zo-parse "File too big"))
+  (when check-end?
+    (unless (eof-object? (read-byte port))
+      (error 'zo-parse "File too big")))
 
   (define nr (make-not-ready))
   (define symtab
