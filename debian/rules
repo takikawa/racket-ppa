@@ -46,6 +46,7 @@ common-install-indep:: do-install-indep
 do-install-arch: PLT_EXTRA=--no-docs --no-zo
 do-install-arch:
 	$(DEB_MAKE_ENVVARS) $(MAKE) -C $(DEB_BUILDDIR) install DESTDIR=$(CURDIR)/debian/tmp
+	rm -f $(CURDIR)/debian/tmp/usr/bin/planet
 
 do-install-indep: PLT_EXTRA=--no-launcher --no-install --no-post-install
 do-install-indep:
