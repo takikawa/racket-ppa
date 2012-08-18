@@ -1,4 +1,4 @@
-racket (5.3+dfsg1-1) UNRELEASED; urgency=low
+racket (5.3+dfsg1-1) unstable; urgency=low
 
   The planet binary is no longer provided with racket.  Uses of it should be
   replaced with “raco planet”.
