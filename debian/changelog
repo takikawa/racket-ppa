@@ -1,8 +1,8 @@
-racket (5.2.1+g6~92c8784+dfsg2-2+wheezy1) UNRELEASED; urgency=low
+racket (5.2.1+g6~92c8784+dfsg2-2+deb7u1) testing; urgency=low
 
   * Stop shipping /usr/bin/planet.  (Closes: #680685)
 
- -- James McCoy <jamessan@debian.org>  Tue, 07 Aug 2012 03:06:30 -0400
+ -- James McCoy <jamessan@debian.org>  Sun, 26 Aug 2012 10:58:44 -0400
 
 racket (5.2.1+g6~92c8784+dfsg2-2) unstable; urgency=low
 

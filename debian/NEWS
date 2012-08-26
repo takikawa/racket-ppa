@@ -1,4 +1,4 @@
-racket (5.2.1+g6~92c8784+dfsg2-2+wheezy1) UNRELEASED; urgency=low
+racket (5.2.1+g6~92c8784+dfsg2-2+deb7u1) testing; urgency=low
 
   The planet binary is no longer provided with racket.  Uses of it should be
   replaced with “raco planet”.
@@ -6,4 +6,4 @@ racket (5.2.1+g6~92c8784+dfsg2-2+wheezy1) UNRELEASED; urgency=low
   This removal is planned upstream as well, but it is being performed earlier
   in Debian's packaging due to #680685.
 
- -- James McCoy <jamessan@debian.org>  Fri, 10 Aug 2012 16:34:33 -0400
+ -- James McCoy <jamessan@debian.org>  Sun, 26 Aug 2012 10:58:49 -0400
