@@ -9,7 +9,7 @@
          racket/vector
          racket/place/private/th-place
          racket/place/private/prop
-         mzlib/private/streams
+         racket/private/streams
          unstable/lazy-require
 
 

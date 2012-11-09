@@ -1,10 +1,13 @@
 #lang racket/base
 
-(require mzlib/port
+;; Additional I/O functions for Racket
+
+(require (for-syntax racket/base)
+         racket/contract/base
+         "private/port.rkt"
          "private/portlines.rkt")
-(provide (except-out (all-from-out mzlib/port)
-                     strip-shell-command-start)
-         port->string
+
+(provide port->string
          port->bytes
          port->lines
          port->bytes-lines
@@ -19,7 +22,66 @@
          with-input-from-string
          with-input-from-bytes
          call-with-input-string
-         call-with-input-bytes)
+         call-with-input-bytes
+
+         ;; `mzlib/port` exports
+         open-output-nowhere
+         make-pipe-with-specials
+         make-input-port/read-to-peek
+         peeking-input-port
+         relocate-input-port
+         transplant-input-port
+         filter-read-input-port
+         special-filter-input-port
+         relocate-output-port
+         transplant-output-port
+         merge-input
+         copy-port
+         input-port-append
+         convert-stream
+         make-limited-input-port
+         reencode-input-port
+         reencode-output-port
+         dup-input-port
+         dup-output-port
+
+         (contract-out
+           [read-bytes-avail!-evt (mutable-bytes? input-port-with-progress-evts?
+                                   . -> . evt?)]
+           [peek-bytes-avail!-evt (mutable-bytes? exact-nonnegative-integer? evt?/false
+                                   input-port-with-progress-evts?
+                                   . -> . evt?)]
+           [read-bytes!-evt (mutable-bytes? input-port-with-progress-evts? . -> . evt?)]
+           [peek-bytes!-evt (mutable-bytes? exact-nonnegative-integer? evt?/false
+                             input-port-with-progress-evts?
+                             . -> . evt?)]
+           [read-bytes-evt (exact-nonnegative-integer? input-port-with-progress-evts?
+                            . -> . evt?)]
+           [peek-bytes-evt (exact-nonnegative-integer? exact-nonnegative-integer?
+                            evt?/false input-port-with-progress-evts?
+                            . -> . evt?)]
+           [read-string!-evt (mutable-string? input-port-with-progress-evts?
+                              . -> . evt?)]
+           [peek-string!-evt (mutable-string? exact-nonnegative-integer? evt?/false
+                              input-port-with-progress-evts?
+                              . -> . evt?)]
+           [read-string-evt (exact-nonnegative-integer? input-port-with-progress-evts?
+                             . -> . evt?)]
+           [peek-string-evt (exact-nonnegative-integer? exact-nonnegative-integer?
+                             evt?/false input-port-with-progress-evts?
+                             . -> . evt?)]
+           [regexp-match-evt ((or/c regexp? byte-regexp? string? bytes?)
+                              input-port-with-progress-evts?
+                              . -> . evt?)]
+           [read-bytes-line-evt (case-> (input-port-with-progress-evts? . -> . evt?)
+                                        (input-port-with-progress-evts? line-mode-symbol?
+                                         . -> . evt?))]
+           [read-line-evt (case-> (input-port-with-progress-evts? . -> . evt?)
+                                  (input-port-with-progress-evts? line-mode-symbol?
+                                   . -> . evt?))]
+           [eof-evt (input-port-with-progress-evts? . -> . evt?)]))
+
+;; ----------------------------------------
 
 (define (port->string-port who p)
   (unless (input-port? p) (raise-argument-error who "input-port?" p))
