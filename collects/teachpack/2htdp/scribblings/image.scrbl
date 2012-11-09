@@ -208,7 +208,20 @@ Unlike @racket[scene+curve], if the line passes outside of @racket[image], the i
                                  (rectangle 10 10 "solid" "red"))
                           (beside empty-image
                                   (rectangle 10 10 "solid" "red")))]
-}
+  
+  
+  In most cases, combining an image with @racket[empty-image] produces the
+  original image (as shown in the above example). In some situations,
+  however, the combination can cause the resulting pict to have a different
+  baseline (see @racket[image-baseline]) and thus not
+  be equal.
+  
+  @image-examples[(image-baseline (above (text "Hello" 24 "olive") empty-image))
+                  (image-baseline (text "Hello" 24 "olive"))
+                  (equal? (above (text "Hello" 24 "olive") empty-image)
+                          (text "Hello" 24 "olive"))]
+  
+  }
 
 @section{Polygons}
 
@@ -542,9 +555,10 @@ other. The top and bottom pair of angles is @racket[angle] and the left and righ
   Constructs an arbitrary regular star polygon (a generalization of the regular polygons). 
   The polygon is enclosed by a regular polygon with @racket[side-count] sides each
   @racket[side-length] long. The polygon is actually constructed by going from vertex to
-  vertex around the regular polgon, but skipping over every @racket[step-count] vertices.
+  vertex around the regular polgon, but connecting every @racket[step-count]-th vertex
+  (i.e., skipping every @racket[(- step-count 1)] verticies).
   
-  For examples, if @racket[side-count] is @racket[5] and @racket[step-count] is @racket[2],
+  For example, if @racket[side-count] is @racket[5] and @racket[step-count] is @racket[2],
   then this function produces a shape just like @racket[star].
   
   @mode/color-text
@@ -1324,6 +1338,9 @@ See also the @racketmodname[2htdp/planetcute] library.
 
 @defproc[(image-baseline [i image?]) (and/c integer? (not/c negative?) exact?)]{
   Returns the distance from the top of the image to its baseline. 
+  The baseline of an image is the place where the bottoms any letters line up, 
+  but without counting the descenders, e.g. the tail on ``y'' or ``g'' or ``j''.
+  
   Unless the image was constructed with @racket[text], @racket[text/font] 
   or, in some cases, @racket[crop], this will be the same as its height.
   
@@ -1430,9 +1447,9 @@ This section lists predicates for the basic structures provided by the image lib
 @racket["pinhole"], or
 @racket['pinhole].
 
-The baseline of an image is the place where the bottoms any letters line up, not counting descenders, e.g. the tail on ``y'' or ``g'' or ``j''.
-
 Using @racket["pinhole"] or @racket['pinhole] is only allowed when all of the image arguments have @seclink["pinholes"]{pinholes}.
+
+See also @racket[image-baseline] for more discussion of baselines.
 
 }
 

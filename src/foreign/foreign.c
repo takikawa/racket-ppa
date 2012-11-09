@@ -470,7 +470,7 @@ static Scheme_Object *foreign_ffi_obj_name(int argc, Scheme_Object *argv[])
 /* These will make sense in Racket when longs are longer than ints (needed
  * for libffi's int32 types).  There is no need to deal with bignums because
  * mzscheme's fixnums are longs. */
-MZ_INLINE int scheme_get_realint_val(Scheme_Object *o, int *v)
+XFORM_NONGCING MZ_INLINE int scheme_get_realint_val(Scheme_Object *o, int *v)
 {
   if (SCHEME_INTP(o)) {
     uintptr_t lv = SCHEME_INT_VAL(o);
@@ -481,7 +481,7 @@ MZ_INLINE int scheme_get_realint_val(Scheme_Object *o, int *v)
     return 1;
   } else return 0;
 }
-MZ_INLINE int scheme_get_unsigned_realint_val(Scheme_Object *o, unsigned int *v)
+XFORM_NONGCING MZ_INLINE int scheme_get_unsigned_realint_val(Scheme_Object *o, unsigned int *v)
 {
   if (SCHEME_INTP(o)) {
     uintptr_t lv = SCHEME_INT_VAL(o);
@@ -499,7 +499,7 @@ MZ_INLINE int scheme_get_unsigned_realint_val(Scheme_Object *o, unsigned int *v)
 
 #endif /* SIXTY_FOUR_BIT_INTEGERS */
 
-MZ_INLINE static int get_byte_val(Scheme_Object *o, Tsint8 *_v)
+XFORM_NONGCING MZ_INLINE static int get_byte_val(Scheme_Object *o, Tsint8 *_v)
 {
   if (SCHEME_INTP(o)) {
     intptr_t v = SCHEME_INT_VAL(o);
@@ -511,7 +511,7 @@ MZ_INLINE static int get_byte_val(Scheme_Object *o, Tsint8 *_v)
   return 0;
 }
 
-MZ_INLINE static int get_ubyte_val(Scheme_Object *o, Tuint8 *_v)
+XFORM_NONGCING MZ_INLINE static int get_ubyte_val(Scheme_Object *o, Tuint8 *_v)
 {
   if (SCHEME_INTP(o)) {
     intptr_t v = SCHEME_INT_VAL(o);
@@ -523,7 +523,7 @@ MZ_INLINE static int get_ubyte_val(Scheme_Object *o, Tuint8 *_v)
   return 0;
 }
 
-MZ_INLINE static int get_short_val(Scheme_Object *o, Tsint16 *_v)
+XFORM_NONGCING MZ_INLINE static int get_short_val(Scheme_Object *o, Tsint16 *_v)
 {
   if (SCHEME_INTP(o)) {
     intptr_t v = SCHEME_INT_VAL(o);
@@ -535,7 +535,7 @@ MZ_INLINE static int get_short_val(Scheme_Object *o, Tsint16 *_v)
   return 0;
 }
 
-MZ_INLINE static int get_ushort_val(Scheme_Object *o, Tuint16 *_v)
+XFORM_NONGCING MZ_INLINE static int get_ushort_val(Scheme_Object *o, Tuint16 *_v)
 {
   if (SCHEME_INTP(o)) {
     intptr_t v = SCHEME_INT_VAL(o);
@@ -558,7 +558,7 @@ MZ_INLINE static int get_ushort_val(Scheme_Object *o, Tuint16 *_v)
 
 #define SCHEME_FALSEP_OR_CHAR_STRINGP(o) (SCHEME_FALSEP(o) || SCHEME_CHAR_STRINGP(o))
 
-static mzchar *ucs4_string_or_null_to_ucs4_pointer(Scheme_Object *ucs)
+XFORM_NONGCING static mzchar *ucs4_string_or_null_to_ucs4_pointer(Scheme_Object *ucs)
 {
   if (SCHEME_FALSEP(ucs)) return NULL;
   return SCHEME_CHAR_STR_VAL(ucs);
@@ -938,7 +938,7 @@ typedef union _ForeignAny {
 #define FOREIGN_array (28)
 #define FOREIGN_union (29)
 
-static int is_gcable_pointer(Scheme_Object *o) {
+XFORM_NONGCING static int is_gcable_pointer(Scheme_Object *o) {
   if (SCHEME_FFIOBJP(o)) return 0;
   return (!SCHEME_CPTRP(o)
           || !(SCHEME_CPTR_FLAGS(o) & 0x1));
@@ -1039,7 +1039,7 @@ static Scheme_Object *foreign_ctype_c_to_scheme(int argc, Scheme_Object *argv[])
 #undef MYNAME
 
 /* Returns a primitive type, or NULL if not a type */
-static Scheme_Object *get_ctype_base(Scheme_Object *type)
+XFORM_NONGCING static Scheme_Object *get_ctype_base(Scheme_Object *type)
 {
   if (!SCHEME_CTYPEP(type)) return NULL;
   while (CTYPE_USERP(type)) { type = CTYPE_BASETYPE(type); }
@@ -1047,7 +1047,7 @@ static Scheme_Object *get_ctype_base(Scheme_Object *type)
 }
 
 /* Returns the size, 0 for void, -1 if no such type */
-static intptr_t ctype_sizeof(Scheme_Object *type)
+XFORM_NONGCING static intptr_t ctype_sizeof(Scheme_Object *type)
 {
   type = get_ctype_base(type);
   if (type == NULL) return -1;
@@ -1585,9 +1585,31 @@ static Scheme_Object *foreign_set_cpointer_tag_bang(int argc, Scheme_Object *arg
   Scheme_Object *cp;
   cp = unwrap_cpointer_property(argv[0]);
   if (!SCHEME_CPTRP(cp))
-    scheme_wrong_contract(MYNAME, "propert-cpointer?", 0, argc, argv);
+    scheme_wrong_contract(MYNAME, "proper-cpointer?", 0, argc, argv);
   SCHEME_CPTR_TYPE(cp) = argv[1];
   return scheme_void;
+}
+#undef MYNAME
+
+#define MYNAME "cpointer-gcable?"
+static Scheme_Object *foreign_cpointer_gcable_p(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *cp;
+  cp = unwrap_cpointer_property(argv[0]);
+  if (SCHEME_CPTRP(cp)) {
+    return ((SCHEME_CPTR_FLAGS(cp) & 0x1)
+            ? scheme_false
+            : scheme_true);
+  } else if (SCHEME_FALSEP(cp)
+             || SCHEME_FFIOBJP(cp)
+             || SCHEME_FFICALLBACKP(cp))
+    return scheme_false;
+  else if (SCHEME_BYTE_STRINGP(cp))
+    return scheme_true;
+  else {
+    scheme_wrong_contract(MYNAME, "cpointer?", 0, argc, argv);
+    return NULL;
+  }
 }
 #undef MYNAME
 
@@ -2887,6 +2909,8 @@ static mzrt_mutex *orig_place_mutex;
 static FFI_Orig_Place_Call *orig_place_calls, *orig_place_calls_tail;
 static void *orig_place_signal_handle;
 
+static void check_foreign_work(int check_for_in_original);
+
 static void ffi_call_in_orig_place(ffi_cif *cif, void *c_func, intptr_t cfoff,
                                    int nargs, GC_CAN_IGNORE ForeignAny *ivals, void **avalues,
                                    intptr_t *offsets, void *p)
@@ -2976,6 +3000,13 @@ static void ffi_call_in_orig_place(ffi_cif *cif, void *c_func, intptr_t cfoff,
       scheme_start_atomic();
       scheme_thread_block(0.0);
       scheme_end_atomic_no_swap();
+
+      /* Since we called scheme_thread_block() in atomic mode,
+         it doesn't check for foreign callbacks. We'd like
+         to handle those anyway, since the call in the original
+         place may lead to a callback that should run in
+         this place. */
+      check_foreign_work(0);
     }
   }
 }
@@ -3024,7 +3055,7 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
 #ifdef MZ_USE_PLACES
   int           orig_place = SCHEME_TRUEP(SCHEME_VEC_ELS(data)[7]);
 #endif
-  int           nargs   = cif->nargs;
+  int           nargs /* = cif->nargs, after checking cif */;
   /* When the foreign function is called, we need an array (ivals) of nargs
    * ForeignAny objects to store the actual C values that are created, and we
    * need another array (avalues) for the pointers to these values (this is
@@ -3051,6 +3082,13 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
   if (orig_place && (scheme_current_place_id == 0))
     orig_place = 0;
 #endif
+  if (!cif) {
+    scheme_signal_error("ffi-call: foreign-function reference was already finalized%s%s",
+                        name ? "\n  name: " : "",
+                        name ? name : "");
+    return NULL;
+  }
+  nargs =  cif->nargs;
   if ((nargs <= MAX_QUICK_ARGS)) {
     ivals   = stack_ivals;
     avalues = stack_avalues;
@@ -3120,8 +3158,9 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
 }
 
 /* see below */
-void free_fficall_data(void *ignored, void *p)
+void free_fficall_data(void *data, void *p)
 {
+  SCHEME_VEC_ELS(data)[4] = NULL;
   free(((ffi_cif*)p)->arg_types);
   free(p);
 }
@@ -3308,7 +3347,7 @@ static Scheme_Object *callback_thunk(void *_qc, int argc, Scheme_Object *argv[])
   return scheme_void;
 }
 
-void scheme_check_foreign_work(void)
+static void check_foreign_work(int check_for_in_original)
 {
   GC_CAN_IGNORE Queued_Callback *qc;
   ffi_callback_struct *data;
@@ -3343,7 +3382,7 @@ void scheme_check_foreign_work(void)
   }
 
 #ifdef MZ_USE_PLACES
-  if ((scheme_current_place_id == 0) && orig_place_mutex) {
+  if (check_for_in_original && (scheme_current_place_id == 0) && orig_place_mutex) {
     FFI_Orig_Place_Call *todo;
     void *sh;
 
@@ -3374,6 +3413,11 @@ void scheme_check_foreign_work(void)
     }
   }
 #endif
+}
+
+void scheme_check_foreign_work(void)
+{
+  check_foreign_work(1);
 }
 
 #endif
@@ -3805,6 +3849,8 @@ void scheme_init_foreign(Scheme_Env *env)
     scheme_make_prim_w_arity(foreign_cpointer_tag, "cpointer-tag", 1, 1), menv);
   scheme_add_global("set-cpointer-tag!",
     scheme_make_prim_w_arity(foreign_set_cpointer_tag_bang, "set-cpointer-tag!", 2, 2), menv);
+  scheme_add_global("cpointer-gcable?",
+    scheme_make_prim_w_arity(foreign_cpointer_gcable_p, "cpointer-gcable?", 1, 1), menv);
   scheme_add_global("ctype-sizeof",
     scheme_make_prim_w_arity(foreign_ctype_sizeof, "ctype-sizeof", 1, 1), menv);
   scheme_add_global("ctype-alignof",
@@ -4128,6 +4174,8 @@ void scheme_init_foreign(Scheme_Env *env)
    scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "cpointer-tag", 1, 1), menv);
   scheme_add_global("set-cpointer-tag!",
    scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "set-cpointer-tag!", 2, 2), menv);
+  scheme_add_global("cpointer-gcable?",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "cpointer-gcable?", 1, 1), menv);
   scheme_add_global("ctype-sizeof",
    scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "ctype-sizeof", 1, 1), menv);
   scheme_add_global("ctype-alignof",

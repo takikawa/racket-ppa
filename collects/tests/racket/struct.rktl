@@ -7,7 +7,7 @@
 	     [(prop:p2 p2? p2-ref) (make-struct-type-property 'prop2)]
 	     [(insp1) (make-inspector)]
 	     [(insp2) (make-inspector)])
-  (arity-test make-struct-type-property 1 3)
+  (arity-test make-struct-type-property 1 4)
   (test 3 primitive-result-arity make-struct-type-property)
   (arity-test p? 1 1)
   (arity-test p-ref 1 2)
@@ -638,7 +638,7 @@
 ;; ------------------------------------------------------------
 ;; Property accessor errors
 
-(let-values ([(prop:p p? p-ref) (make-struct-type-property 'prop1 'can-impersonate '())])
+(let-values ([(prop:p p? p-ref) (make-struct-type-property 'prop1 #f '() #t)])
   (test 42 p-ref 5 42)
   (test 17 p-ref 5 (lambda () (* 1 17)))
   (err/rt-test (p-ref 5) exn:fail:contract?))
@@ -1070,6 +1070,31 @@
 (test #t prefab-key? 'apple)
 (test #f prefab-key? '#(apple))
 (test #t prefab-key? '(apple 4))
+
+;; ----------------------------------------
+;; We can make a bogus mutator, but we can't apply it:
+
+(let ()
+  ;; Test based on code from dmarshall:
+  (define-values (struct:thing make-thing thing? thing-ref thing-set!)
+    (make-struct-type
+     'thing #f 1 0  
+     #f               ; auto val
+     (list)           ; property list
+     #f               ; inspector
+     #f               ; proc-spec
+     (list 0)))       ; immutables
+  
+  (define thing.id  (make-struct-field-accessor thing-ref 0))
+  (define thing.id! (make-struct-field-mutator thing-set! 0))
+
+  (test #t struct-mutator-procedure? thing.id!)
+  (err/rt-test (thing.id!  'new-val))
+  
+  (let ([f #f])
+    ;; defeat inlining to ensure that thunk is JITted:
+    (set! f (lambda () (thing.id! (make-thing 1) 'new-val)))
+    (err/rt-test (f))))
 
 ;; ----------------------------------------
 

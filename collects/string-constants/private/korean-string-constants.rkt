@@ -356,7 +356,6 @@
  (show-line-and-column-numbers "행번호 && 열번호 표시") ; used for popup menu; right click on line/column box in bottom of drs window
  (show-character-offsets "글자수 보기") ; used for popup menu; right click on line/column box in bottom of drs window
  (enable-keybindings-in-menus "메뉴 단축키 사용")
- (automatically-to-ps "PostScript 파일로 자동 출력")
  (command-as-meta "명령 키 메타로 취급") ;; macos/macos x only
  (reuse-existing-frames "새로운 파일을 열 때 기존 프레임 사용")
  (default-fonts "기본 글꼴")
@@ -799,7 +798,7 @@
  (force-quit-menu-item-label "프로그램 강제중단")
  (force-quit-menu-item-help-string "작업관리자를 사용하여 현재 계산을 중단")
  (limit-memory-menu-item-label "메모리 제한")
- (limit-memory-msg-1 "메모리 제한은 1MB 이상이어야 하며, 바꾼 제한 설")
+ (limit-memory-msg-1 "메모리 제한은 8MB 이상이어야 하며, 바꾼 제한 설")
  (limit-memory-msg-2 "정은 프로그램을 다시 시작할 때부터 적용됩니다.")
  (limit-memory-unlimited "제한없음")
  (limit-memory-limited "제한있음")

@@ -408,8 +408,11 @@
     (bin-exact -0.125 'flexpt -2.0 -3.0 #t)
     (bin-exact +nan.0 'flexpt -1.0 3.1 #t)
     (bin-exact 0.0 'flexpt 0.0 10.0 #t)
-    (bin-exact +nan.0 'flexpt 0.0 -1.0 #t)
-    (bin-exact +nan.0 'flexpt 0.0 0.0 #t)
+    (bin-exact +inf.0 'flexpt 0.0 -1.0 #t)
+    (bin-exact +1.0 'flexpt 0.0 0.0 #t)
+    (bin-exact +nan.0 'flexpt +nan.0 2.7 #t)
+    (bin-exact +nan.0 'flexpt 2.7 +nan.0 #t)
+    (bin-exact +nan.0 'flexpt +nan.0 +nan.0 #t)
     
     (un 1.0 'exact->inexact 1)
     (un 1073741823.0 'exact->inexact (sub1 (expt 2 30)))
@@ -1555,6 +1558,53 @@
                       10
                       (cons (f i) (loop (sub1 n))))))))
 
+(test-comp `(module m racket/base
+              (require racket/unsafe/ops)
+              (define (f x)
+                (let-values ([(a b) (values x (unsafe-fx+ x x))])
+                  (list a b))))
+           `(module m racket/base
+              (require racket/unsafe/ops)
+              (define (f x)
+                (let ([a x]
+                      [b (unsafe-fx+ x x)])
+                  (list a b)))))
+
+(test-comp `(module m racket/base
+              (define (f x)
+                (let-values ([(a b) (values x (+ x x))])
+                  (list a b))))
+           `(module m racket/base
+              (define (f x)
+                (let ([a x]
+                      [b (+ x x)])
+                  (list a b)))))
+
+(test-comp `(module m racket/base
+              (define (f x)
+                (let*-values ([(a b) (values x (+ x x))])
+                  (list a b))))
+           `(module m racket/base
+              (define (f x)
+                (let* ([a x]
+                       [b (+ x x)])
+                  (list a b)))))
+
+(test-comp `(module m racket/base
+              (define (f x)
+                (let*-values ([(a b) (values x (+ x x))])
+                  (set! a 5)
+                  (/ a b))))
+           `(module m racket/base
+              (define (f x)
+                ;; Not equivalent if a continuation capture
+                ;; during `+' somehow exposes the shared `a'?
+                (let* ([a x]
+                       [b (+ x x)])
+                  (set! a 5)
+                  (/ a b))))
+           #f)
+
 ;; check omit & reorder possibilities for unsafe
 ;; operations on mutable values:
 (let ()
@@ -1615,6 +1665,21 @@
          (unsafe-f64vector-set! x x x)
          (unsafe-s16vector-set! x x x)
          (unsafe-u16vector-set! x x x))))
+
+(test-comp '(lambda (x)
+              (hash-ref '#hash((x . y)) x (lambda () 10)))
+           '(lambda (x)
+              (hash-ref '#hash((x . y)) x 10)))
+(test-comp '(lambda (x)
+              (hash-ref x x (lambda () 10)))
+           '(lambda (x)
+              (hash-ref x x 10))
+           #f)
+(test-comp '(lambda (x)
+              (hash-ref '#hash((x . y)) x (lambda () add1)))
+           '(lambda (x)
+              (hash-ref '#hash((x . y)) x add1))
+           #f)
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Check bytecode verification of lifted functions

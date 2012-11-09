@@ -10,11 +10,11 @@
          "typechecker.rkt"
          ;; to appease syntax-parse
          "internal-forms.rkt"
-         (rep type-rep)
-         (types utils convenience type-table)
+         (rep type-rep free-variance)
+         (types utils abbrev type-table)
          (private parse-type type-annotation type-contract)
-         (env global-env init-envs type-name-env type-alias-env lexical-env env-req)
-	 syntax/id-table
+         (env global-env init-envs type-name-env type-alias-env lexical-env env-req mvar-env)
+         syntax/id-table
          (utils tc-utils mutated-vars)
          "provide-handling.rkt"
          "def-binding.rkt"
@@ -36,23 +36,69 @@
 (define unann-defs (make-free-id-table))
 
 (define-splicing-syntax-class dtsi-fields
- #:attributes (mutable type-only maker constructor-return predicate)
+ #:attributes (mutable type-only maker)
  (pattern
   (~seq
     (~or (~optional (~and #:mutable (~bind (mutable #t))))
          (~optional (~and #:type-only (~bind (type-only #t))))
-         (~optional (~seq #:maker maker))
-         (~optional (~seq #:predicate predicate))
-         (~optional (~seq #:constructor-return constructor-return))) ...)))
+         (~optional (~seq #:maker maker))) ...)))
+
+(define-syntax-class struct-name
+ (pattern nm:id)
+ (pattern (nm:id parent:id)))
+
+
+(define-syntax-class define-typed-struct
+  #:attributes (name mutable type-only maker nm (tvars 1) (fld 1) (ty 1))
+  (pattern ((~optional (tvars:id ...) #:defaults (((tvars 1) null)))
+            nm:struct-name ([fld:id : ty:expr] ...) fields:dtsi-fields)
+           #:attr name #'nm.nm
+           #:attr mutable (attribute fields.mutable)
+           #:attr type-only (attribute fields.type-only)
+           #:attr maker (attribute fields.maker)))
+
+(define (parse-define-struct-internal form)
+  (parameterize ([current-orig-stx form])
+    (syntax-parse form
+      #:literals (values define-typed-struct-internal
+                  define-typed-struct/exec-internal quote-syntax #%plain-app)
+
+      ;; define-typed-struct
+      [(define-values () (begin (quote-syntax (define-typed-struct-internal ~! . dts:define-typed-struct)) (#%plain-app values)))
+       (tc/struct (attribute dts.tvars) #'dts.nm (syntax->list #'(dts.fld ...)) (syntax->list #'(dts.ty ...))
+                  #:mutable (attribute dts.mutable)
+                  #:maker (attribute dts.maker)
+                  #:type-only (attribute dts.type-only))]
+
+      ;; executable structs - this is a big hack
+      [(define-values () (begin (quote-syntax (define-typed-struct/exec-internal ~! nm ([fld : ty] ...) proc-ty)) (#%plain-app values)))
+       (tc/struct null #'nm (syntax->list #'(fld ...)) (syntax->list #'(ty ...)) #:proc-ty #'proc-ty)])))
+
+(define (add-constant-variance! form)
+  (parameterize ([current-orig-stx form])
+    (syntax-parse form
+      #:literals (values define-typed-struct-internal quote-syntax #%plain-app)
+      ;; define-typed-struct
+      [(define-values () (begin (quote-syntax (define-typed-struct-internal ~! . dts:define-typed-struct)) (#%plain-app values)))
+       ;; TODO make constant
+       (unless (null? (attribute dts.tvars))
+         (register-type-variance! #'dts.name (map (lambda (_) Covariant) (attribute dts.tvars))))]
+      [(define-values () (begin (quote-syntax (define-typed-struct/exec-internal ~! nm ([fld : ty] ...) proc-ty)) (#%plain-app values)))
+       ;; Not polymorphic
+       (void)])))
+
+
+
+
 
 
 (define (tc-toplevel/pass1 form)
   (parameterize ([current-orig-stx form])
     (syntax-parse form
       #:literals (values define-type-alias-internal define-typed-struct-internal define-type-internal
-			 define-typed-struct/exec-internal :-internal assert-predicate-internal
-			 require/typed-internal declare-refinement-internal
-			 define-values quote-syntax #%plain-app begin define-syntaxes)
+                         define-typed-struct/exec-internal :-internal assert-predicate-internal
+                         require/typed-internal declare-refinement-internal
+                         define-values quote-syntax #%plain-app begin define-syntaxes)
       ;#:literal-sets (kernel-literals)
 
       ;; forms that are handled in other ways
@@ -60,7 +106,7 @@
        #:when (or (syntax-property form 'typechecker:ignore)
                   (syntax-property form 'typechecker:ignore-some))
        (list)]
-      
+
       [((~literal module) n:id spec ((~literal #%plain-module-begin) body ...))
        (list)]
        ;; module* is not expanded, so it doesn't have a `#%plain-module-begin`
@@ -96,36 +142,13 @@
          (register-type #'nm mk-ty)
          (list (make-def-binding #'nm mk-ty)))]
 
-      ;; define-typed-struct
-      [(define-values () (begin (quote-syntax (define-typed-struct-internal nm ([fld : ty] ...))) (#%plain-app values)))
-       (tc/struct #'nm (syntax->list #'(fld ...)) (syntax->list #'(ty ...)))]
-      [(define-values () (begin (quote-syntax (define-typed-struct-internal nm ([fld : ty] ...) #:mutable)) (#%plain-app values)))
-       (tc/struct #'nm (syntax->list #'(fld ...)) (syntax->list #'(ty ...)) #:mutable #t)]
-
-      [(define-values () (begin (quote-syntax (define-typed-struct-internal nm ([fld : ty] ...) fields:dtsi-fields)) (#%plain-app values)))
-       (tc/struct #'nm (syntax->list #'(fld ...)) (syntax->list #'(ty ...))
-            #:mutable (attribute fields.mutable)
-            #:maker (attribute fields.maker)
-            #:constructor-return (attribute fields.constructor-return)
-            #:predicate (attribute fields.predicate)
-            #:type-only (attribute fields.type-only))]
-
-      ;; define-typed-struct w/ polymorphism
-      [(define-values () (begin (quote-syntax (define-typed-struct-internal (vars ...) nm ([fld : ty] ...) #:maker m)) (#%plain-app values)))
-       (tc/poly-struct (syntax->list #'(vars ...)) #'nm (syntax->list #'(fld ...)) (syntax->list #'(ty ...)) #:maker #'m)]
-      [(define-values () (begin (quote-syntax (define-typed-struct-internal (vars ...) nm ([fld : ty] ...) #:maker m #:mutable)) (#%plain-app values)))
-       (tc/poly-struct (syntax->list #'(vars ...)) #'nm (syntax->list #'(fld ...)) (syntax->list #'(ty ...)) #:maker #'m #:mutable #t)]
-      [(define-values () (begin (quote-syntax (define-typed-struct-internal (vars ...) nm ([fld : ty] ...) #:mutable)) (#%plain-app values)))
-       (tc/poly-struct (syntax->list #'(vars ...)) #'nm (syntax->list #'(fld ...)) (syntax->list #'(ty ...)) #:mutable #t)]
-      [(define-values () (begin (quote-syntax (define-typed-struct-internal (vars ...) nm ([fld : ty] ...))) (#%plain-app values)))
-       (tc/poly-struct (syntax->list #'(vars ...)) #'nm (syntax->list #'(fld ...)) (syntax->list #'(ty ...)))]
-      ;; error in other cases
+      ;; define-typed-struct (handled earlier)
       [(define-values () (begin (quote-syntax (define-typed-struct-internal . _)) (#%plain-app values)))
-       (int-err "unknown structure form")]
+       (list)]
 
-      ;; executable structs - this is a big hack
-      [(define-values () (begin (quote-syntax (define-typed-struct/exec-internal nm ([fld : ty] ...) proc-ty)) (#%plain-app values)))
-       (tc/struct #'nm (syntax->list #'(fld ...)) (syntax->list #'(ty ...)) #'proc-ty)]
+      ;; executable structs (handled earlier)
+      [(define-values () (begin (quote-syntax (define-typed-struct/exec-internal . _)) (#%plain-app values)))
+       (list)]
 
       ;; predicate assertion - needed for define-type b/c or doesn't work
       [(define-values () (begin (quote-syntax (assert-predicate-internal ty pred)) (#%plain-app values)))
@@ -153,10 +176,10 @@
            [else
             (match (get-type/infer vars #'expr tc-expr tc-expr/check)
               [(tc-results: ts)
-	       (for/list ([i (in-list vars)] [t (in-list ts)])
-		 (register-type i t)
-		 (free-id-table-set! unann-defs i #t)
-		 (make-def-binding i t))])]))]
+               (for/list ([i (in-list vars)] [t (in-list ts)])
+                 (register-type i t)
+                 (free-id-table-set! unann-defs i #t)
+                 (make-def-binding i t))])]))]
 
       ;; to handle the top-level, we have to recur into begins
       [(begin . rest)
@@ -205,8 +228,8 @@
        (void)]
       [(define-values () (begin (quote-syntax (define-typed-struct-internal . rest)) (#%plain-app values)))
        (void)]
-      
-      ;; submodules take care of themselves:      
+
+      ;; submodules take care of themselves:
       [(module n spec (#%plain-module-begin body ...))
        (void)]
       ;; module* is not expanded, so it doesn't have a `#%plain-module-begin`
@@ -282,24 +305,43 @@
      provide?
      define/fixup-contract?))
   (do-time "Form splitting done")
+  ;(printf "before parsing type aliases~n")
   (for-each (compose register-type-alias parse-type-alias) type-aliases)
-  ;; add the struct names to the type table
+  ;; Add the struct names to the type table, but not with a type
+  ;(printf "before adding type names~n")
   (for-each (compose add-type-name! names-of-struct) struct-defs)
+  (for-each add-constant-variance! struct-defs)
+  ;(printf "after adding type names~n")
   ;; resolve all the type aliases, and error if there are cycles
   (resolve-type-aliases parse-type)
-  (do-time "Starting pass1")
+  ;; Parse and register the structure types
+  (define parsed-structs
+    (for/list ((def struct-defs))
+      (define parsed (parse-define-struct-internal def))
+      (register-parsed-struct-sty! parsed)
+      parsed))
+
+  (refine-struct-variance! parsed-structs)
+
+  ;; register the bindings of the structs
+  (define struct-bindings (map register-parsed-struct-bindings! parsed-structs))
+  ;(printf "after resolving type aliases~n")
+  ;(displayln "Starting pass1")
   ;; do pass 1, and collect the defintions
-  (define defs (apply append (filter list? (map tc-toplevel/pass1 forms))))
-  (do-time "Finished pass1")
+  (define defs (apply append 
+                      (append
+                       struct-bindings
+                       (filter list? (map tc-toplevel/pass1 forms)))))
+  ;(displayln "Finished pass1")
   ;; separate the definitions into structures we'll handle for provides
   (define def-tbl
     (for/fold ([h (make-immutable-free-id-table)])
       ([def (in-list defs)])
       (dict-set h (binding-name def) def)))
   ;; typecheck the expressions and the rhss of defintions
-  (do-time "Starting pass2")
+  ;(displayln "Starting pass2")
   (for-each tc-toplevel/pass2 forms)
-  (do-time "Finished pass2")
+  ;(displayln "Finished pass2")
   ;; check that declarations correspond to definitions
   (check-all-registered-types)
   ;; report delayed errors
@@ -343,13 +385,15 @@
      (values
       #`(begin
           (begin-for-syntax
-            (module* #%type-decl #f    
+            (module* #%type-decl #f
               (require typed-racket/types/numeric-tower typed-racket/env/type-name-env
                        typed-racket/env/global-env typed-racket/env/type-alias-env
                        typed-racket/types/type-table)
-              #,(env-init-code syntax-provide? provide-tbl def-tbl)              
-              #,(talias-env-init-code)              
+              #,(env-init-code syntax-provide? provide-tbl def-tbl)
+              #,(talias-env-init-code)
               #,(tname-env-init-code)
+              #,(tvariance-env-init-code)
+              #,(mvar-env-init-code mvar-env)
               #,(make-struct-table-code)
               #,@(for/list ([a (in-list aliases)])
                    (match a
@@ -372,7 +416,7 @@
 
 ;; typecheck a top-level form
 ;; used only from #%top-interaction
-;; syntax -> void
+;; syntax -> (values #f (or/c void? tc-results?))
 (define (tc-toplevel-form form)
   (tc-toplevel/pass1 form)
   (begin0 (values #f (tc-toplevel/pass2 form))

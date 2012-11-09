@@ -937,6 +937,7 @@
         (set! f (* 2 f)))))
   (let* ([factory-derived (send (new derived%) factory)])
     (test 4 'factory-derived-f (get-field f factory-derived))
+    (test 4 dynamic-get-field 'f factory-derived)
     (send factory-derived double)
     (test 8 'factory-derived-f-doubled (get-field f factory-derived))))
 
@@ -1299,7 +1300,9 @@
   (test 12 'set-field!3 (begin (set-field! f o 12)
                                (get-field f o)))
   (test 14 'set-field!4 (begin (set-field! g o 14)
-                               (get-field g o))))
+                               (get-field g o)))
+  (test 18 'set-field!5 (begin (dynamic-set-field! 'g o 18)
+                               (dynamic-get-field 'g o))))
 
 (syntax-test #'(field-bound?))
 (syntax-test #'(field-bound? a))
@@ -1673,6 +1676,153 @@
       (super-new)))
   (test '(applied-to 1 2 3) (new c%) 1 2 3))
 
+;; ----------------------------------------
+;; Method error reporting:
+
+(let ()
+  (define required% (class object%
+                      (define/public (m x #:y y) 1)
+                      (super-new)))
+
+  (define optional% (class object%
+                      (define/public (m x #:y [y 1]) 1)
+                      (super-new)))
+  (define (given-3? exn) 
+    (regexp-match? "given: 3" (exn-message exn)))
+
+  (err/rt-test (send (new required%) m 1 2 3) given-3?)
+  (err/rt-test (send (new optional%) m 1 2 3) given-3?))
+
+;; ----------------------------------------
+;; Origin tracking
+
+(let ()
+  ;; tries to find each of 'searching-for' in the
+  ;; origin property of the fully expanded version
+  ;; of stx. Returns the ones it cannot find.
+  (define (search-prop property stx . searching-for)
+    (define (check-prop o)
+      (let loop ([o o])
+        (cond
+          [(pair? o)
+           (loop (car o))
+           (loop (cdr o))]
+          [(identifier? o)
+           (set! searching-for 
+                 (filter (λ (x) (not (free-identifier=? x o)))
+                         searching-for))])))
+    
+    (let loop ([stx (expand stx)])
+      (cond
+        [(pair? stx)
+         (loop (car stx))
+         (loop (cdr stx))]
+        [(syntax? stx)
+         (check-prop (syntax-property stx property))
+         (loop (syntax-e stx))]))
+    
+    searching-for)
+  
+  (test '() search-prop 'origin
+        '(class object%)
+        #'class)
+  (test '() search-prop 'disappeared-use
+        '(class object% (inherit m)) 
+        #'inherit)
+  (test '() search-prop 'origin
+        '(class object% (super-new)) #'super-new)
+  (test '() search-prop 'disappeared-use
+        '(class* object% () (inherit m))
+        #'inherit)
+  (test '() search-prop 'origin
+        '(mixin () () (define/private (m x) x))
+        #'define/private)
+  (test '() search-prop 'origin
+        '(class object% (super-make-object))
+        #'super-make-object)
+  (test '() search-prop 'origin
+        '(class object% (define/public (m x) x))
+        #'define/public)
+  (test '() search-prop 'origin
+        '(class object% (define/public m (lambda (x) x)))
+        #'define/public
+        #'lambda)
+  (test '() search-prop 'origin
+        '(class object% (define/augment m (lambda (x) x)))
+        #'define/augment
+        #'lambda)
+  (test '() search-prop 'origin
+        '(class object% (define/override (m x) (super m x)))
+        #'define/override
+        #'super)
+  (test '() search-prop 'origin 
+        '(class object% (define/augment (m x) (inner 1 m x)))
+        #'define/augment
+        #'inner)
+  (test '() search-prop 'origin
+        '(class object% (define f 11))
+        #'define)
+  (test '() search-prop 'origin
+        '(class object% (public f) (define f (λ (x) x)))
+        #'define
+        #'λ)
+  (test '() search-prop 'disappeared-use
+        '(class object% (public f) (define f (λ (x) x)))
+        #'public)
+  (test '() search-prop 'origin
+        '(class object% (private f) (define f (λ (x) x)))
+        #'define
+        #'λ)
+  (test '() search-prop 'disappeared-use
+        '(class object% (private f) (define f (λ (x) x)))
+        #'private)
+  (test '() search-prop 'origin
+        '(class object%
+           (begin
+             (define/public (m x) x)
+             (define/private (n x) x)))
+        #'begin
+        #'define/public
+        #'define/private)
+  (test '() search-prop 'disappeared-use
+        '(class object% (inspect #f))
+        #'inspect)
+  (test '() search-prop 'origin
+        '(class object% (field [x #f]))
+        #'field)
+  (test '() search-prop 'origin
+        '(class object% (init x))
+        #'init)
+  (test '() search-prop 'origin
+        '(class object% (init-field x))
+        #'init-field)
+  (test '() search-prop 'origin
+        '(class object% (init-rest args))
+        #'init-rest)
+  (test '() search-prop 'origin
+        '(class object% (init-rest))
+        #'init-rest))
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; ----------------------------------------
+;; Mixins
+
+(let ()
+  (define-local-member-name m)
+  (define i<%> (interface () m n))
+  (define mix
+    (mixin (i<%>) ()
+      (inherit m n)
+      (super-new)
+      (define/public (x) (+ (m) (n)))))
+  (define c%
+    (class* object% (i<%>)
+      (define/public (m) 1)
+      (define/public (n) 2)
+      (super-new)))
+  (test 3 'mixin-with-local-member-names (send (new (mix c%)) x)))
+  
+
 
 (report-errs)

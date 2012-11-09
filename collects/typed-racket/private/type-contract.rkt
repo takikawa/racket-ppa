@@ -10,38 +10,68 @@
  (utils tc-utils require-contract)
  (env type-name-env)
  (types resolve utils)
- (prefix-in t: (types convenience abbrev))
+ (prefix-in t: (types abbrev numeric-tower))
  (private parse-type)
  racket/match unstable/match syntax/struct syntax/stx racket/syntax racket/list
  (only-in racket/contract -> ->* case-> cons/c flat-rec-contract provide/contract any/c)
  (for-template racket/base racket/contract racket/set (utils any-wrap)
                (prefix-in t: (types numeric-predicates))
                (only-in unstable/contract sequence/c)
-	       (only-in racket/class object% is-a?/c subclass?/c object-contract class/c init object/c class?)))
+               (only-in racket/class object% is-a?/c subclass?/c object-contract class/c init object/c class?)))
+
+;; These check if either the define form or the body form has the syntax
+;; property. Normally the define form will have the property but lifting an
+;; expression to the module level will put the property on the body.
+(define-values (typechecker:contract-def
+                typechecker:flat-contract-def
+                typechecker:contract-def/maker)
+  (let ()
+    (define ((get-contract-def property) stx)
+      (or (syntax-property stx property)
+          (syntax-case stx (define-values)
+            ((define-values (name) body)
+             (syntax-property #'body property))
+            (_ #f))))
+    (values
+      (get-contract-def 'typechecker:contract-def)
+      (get-contract-def 'typechecker:flat-contract-def)
+      (get-contract-def 'typechecker:contract-def/maker))))
 
 (define (define/fixup-contract? stx)
-  (or (syntax-property stx 'typechecker:contract-def)
-      (syntax-property stx 'typechecker:flat-contract-def)
-      (syntax-property stx 'typechecker:contract-def/maker)))
+  (or (typechecker:contract-def stx)
+      (typechecker:flat-contract-def stx)
+      (typechecker:contract-def/maker stx)))
+
 
 (define (generate-contract-def stx)
   (define prop (define/fixup-contract? stx))
-  (define maker? (syntax-property stx 'typechecker:contract-def/maker))
-  (define flat? (syntax-property stx 'typechecker:flat-contract-def))
+  (define maker? (typechecker:contract-def/maker stx))
+  (define flat? (typechecker:flat-contract-def stx))
   (define typ (parse-type prop))
+  (define kind (if flat? 'flat 'impersonator))
   (syntax-parse stx #:literals (define-values)
     [(define-values (n) _)
      (let ([typ (if maker?
                     ((map fld-t (Struct-flds (lookup-type-name (Name-id typ)))) #f . t:->* . typ)
                     typ)])
-       (with-syntax ([cnt (type->contract
-                           typ
-                           ;; this is for a `require/typed', so the value is not from the typed side
-                           #:typed-side #f
-                           #:flat flat?
-                           (lambda () (tc-error/stx prop "Type ~a could not be converted to a contract." typ)))])
-         (quasisyntax/loc stx (define-values (n) (recursive-contract cnt #,(if flat? #'#:flat #'#:impersonator))))))]
-    [_ (int-err "should never happen - not a define-values: ~a" (syntax->datum stx))]))
+         (with-syntax ([cnt (type->contract
+                             typ
+                             ;; this is for a `require/typed', so the value is not from the typed side
+                             #:typed-side #f
+                             #:kind kind
+                             (λ () 
+                               (tc-error/stx 
+                                prop 
+				"Type ~a could not be converted to a contract."
+				typ)))])
+           (quasisyntax/loc 
+	    stx
+	    (define-values (n) 
+	      (recursive-contract 
+	       cnt
+	       #,(contract-kind->keyword kind))))))]
+    [_ (int-err "should never happen - not a define-values: ~a"
+		(syntax->datum stx))]))
 
 (define (change-contract-fixups forms)
   (map (lambda (e)
@@ -53,28 +83,111 @@
 (define (no-duplicates l)
   (= (length l) (length (remove-duplicates l))))
 
+;; To avoid misspellings
+(define impersonator-sym 'impersonator)
+(define chaperone-sym 'chaperone)
+(define flat-sym 'flat)
 
-(define (type->contract ty fail #:out [out? #f] #:typed-side [from-typed? #t] #:flat [flat? #f])
-  (define vars (make-parameter '()))
+(define (contract-kind-max i . args)
+  (define (contract-kind-max2 x y)
+    (cond
+      ((equal? flat-sym x) y)
+      ((equal? flat-sym y) x)
+      ((equal? chaperone-sym x) y)
+      ((equal? chaperone-sym y) x)
+      (else impersonator-sym)))
+  (for/fold ((acc i)) ((v args))
+    (contract-kind-max2 v acc)))
+
+(define (contract-kind-min i . args)
+  (define (contract-kind-min2 x y)
+    (cond
+      ((equal? flat-sym x) x)
+      ((equal? flat-sym y) y)
+      ((equal? chaperone-sym x) x)
+      ((equal? chaperone-sym y) y)
+      (else impersonator-sym)))
+  (for/fold ((acc i)) ((v args))
+    (contract-kind-min2 v acc)))
+
+
+(define (contract-kind->keyword sym)
+  (string->keyword (symbol->string sym)))
+
+(define (type->contract ty fail #:out [out? #f] #:typed-side [from-typed? #t] #:kind [kind 'impersonator])
+  (define vars (make-parameter '()))  
+  (define current-contract-kind (make-parameter flat-sym))
+  (define (increase-current-contract-kind! kind)
+    (current-contract-kind (contract-kind-max (current-contract-kind) kind)))
   (let/ec exit
-    (let loop ([ty ty] [pos? #t] [from-typed? from-typed?] [structs-seen null] [flat? flat?])
-      (define (t->c t #:seen [structs-seen structs-seen] #:flat [flat? flat?])
-        (loop t pos? from-typed? structs-seen flat?))
-      (define (t->c/neg t #:seen [structs-seen structs-seen] #:flat [flat? flat?])
-        (loop t (not pos?) (not from-typed?) structs-seen flat?))
+    (let loop ([ty ty] [pos? #t] [from-typed? from-typed?] [structs-seen null] [kind kind])
+      (define (t->c t #:seen [structs-seen structs-seen] #:kind [kind kind])
+        (loop t pos? from-typed? structs-seen kind))
+      (define (t->c/neg t #:seen [structs-seen structs-seen] #:flat [kind kind])
+        (loop t (not pos?) (not from-typed?) structs-seen kind))
       (define (t->c/fun f #:method [method? #f])
         (match f
           [(Function: (list (top-arr:))) #'procedure?]
           [(Function: arrs)
-           (when flat? (exit (fail)))
-           (let ()
+           (set-chaperone!)
+           ;; Try to generate a single `->*' contract if possible.
+           ;; This allows contracts to be generated for functions with both optional and keyword args.
+           ;; (and don't otherwise require full `case->')
+           (define conv (match-lambda [(Keyword: kw kty _) (list kw (t->c/neg kty))]))
+           (define (partition-kws kws) (partition (match-lambda [(Keyword: _ _ mand?) mand?]) kws))
+           (define (process-dom dom*)  (if method? (cons #'any/c dom*) dom*))
+           (define (process-rngs rngs*)
+             (match rngs*
+               [(list r) r]
+               [_ #`(values #,@rngs*)]))
+           (cond
+            ;; To generate a single `->*', everything must be the same for all arrs, except for positional
+            ;; arguments which only need to be monotonically increasing.
+            ;; TODO sufficient condition, but may not be necessary
+            [(and
+              (> (length arrs) 1)
+              ;; Keyword args, range and rest specs all the same.
+              (let ([xs (map (match-lambda [(arr: _ rng rest-spec _ kws)
+					    (list rng rest-spec kws)])
+			     arrs)])
+                (foldl equal? (first xs) (rest xs)))
+              ;; Positionals are monotonically increasing.
+              (let-values ([(_ ok?)
+                            (for/fold ([positionals '()]
+                                       [ok-so-far?  #t])
+                                ([arr (in-list arrs)])
+                              (match arr
+                                [(arr: dom _ _ _ _)
+                                 (values dom
+                                         (and ok-so-far?
+                                              (>= (length dom) (length positionals))
+                                              (equal? positionals (take dom (length positionals)))))]))])
+                ok?))
+             (match* ((first arrs) (last arrs))
+               [((arr: first-dom (Values: (list (Result: rngs (FilterSet: (Top:) (Top:)) (Empty:)) ...)) rst #f kws)
+                 (arr: last-dom _ _ _ _)) ; all but dom is the same for all
+                (with-syntax
+                    ([(dom* ...)
+                      ;; Mandatory arguments are positionals of the first arr
+                      ;; (smallest set, since postitionals are monotonically increasing)
+                      ;; and mandatory kw args.
+                      (let*-values ([(mand-kws opt-kws) (partition-kws kws)])
+                        (process-dom (append (map t->c/neg first-dom)
+                                             (append-map conv mand-kws))))]
+                     [(opt-dom* ...)
+                      (let-values ([(mand-kws opt-kws) (partition-kws kws)])
+                        (append (map t->c/neg (drop last-dom (length first-dom)))
+                                (append-map conv opt-kws)))]
+                     [rng* (process-rngs (map t->c rngs))]
+                     [(rst-spec ...) (if rst #'(#:rest (listof #,(t->c/neg rest))) #'())])
+                  #'((dom* ...) (opt-dom* ...) rst-spec ... . ->* . rng*))])]
+            [else
              (define ((f [case-> #f]) a)
                (define-values (dom* opt-dom* rngs* rst)
                  (match a
                    ;; functions with no filters or objects
                    [(arr: dom (Values: (list (Result: rngs (FilterSet: (Top:) (Top:)) (Empty:)) ...)) rst #f kws)
-                    (let-values ([(mand-kws opt-kws) (partition (match-lambda [(Keyword: _ _ mand?) mand?]) kws)]
-                                 [(conv) (match-lambda [(Keyword: kw kty _) (list kw (t->c/neg kty))])])
+                    (let-values ([(mand-kws opt-kws) (partition-kws kws)])
                       (values (append (map t->c/neg dom) (append-map conv mand-kws))
                               (append-map conv opt-kws)
                               (map t->c rngs)
@@ -88,21 +201,20 @@
                                 (and rst (t->c/neg rst)))
                         (exit (fail)))]
                    [_ (exit (fail))]))
-               (with-syntax
-                   ([(dom* ...) (if method? (cons #'any/c dom*) dom*)]
-                    [(opt-dom* ...) opt-dom*]
-                    [rng* (match rngs*
-                            [(list r) r]
-                            [_ #`(values #,@rngs*)])]
-                    [rst* rst])
-		 ;; Garr, I hate case->!
-		 (if (and (pair? (syntax-e #'(opt-dom* ...))) case->)
-		     (exit (fail))
-		     (if (or rst (pair? (syntax-e #'(opt-dom* ...))))
-			 (if case->
-			     #'(dom* ... #:rest (listof rst*) . -> . rng*)
-			     #'((dom* ...) (opt-dom* ...) #:rest (listof rst*) . ->* . rng*))
-			 #'(dom* ... . -> . rng*)))))
+               (with-syntax*
+                ([(dom* ...)     (process-dom dom*)]
+                 [(opt-dom* ...) opt-dom*]
+                 [rng*           (process-rngs rngs*)]
+                 [rst*           rst]
+                 [(rst-spec ...) (if rst #'(#:rest (listof rst*)) #'())])
+                ;; Garr, I hate case->!
+                (if (and (pair? (syntax-e #'(opt-dom* ...))) case->)
+                    (exit (fail))
+                    (if (or rst (pair? (syntax-e #'(opt-dom* ...))))
+                        (if case->
+                            #'(dom* ... rst-spec ... . -> . rng*)
+                            #'((dom* ...) (opt-dom* ...) rst-spec ... . ->* . rng*))
+                        #'(dom* ... . -> . rng*)))))
              (unless (no-duplicates (for/list ([t arrs])
                                       (match t
                                         [(arr: dom _ _ _ _) (length dom)]
@@ -111,12 +223,26 @@
                (exit (fail)))
              (match (map (f (not (= 1 (length arrs)))) arrs)
                [(list e) e]
-               [l #`(case-> #,@l)]))]
+               [l #`(case-> #,@l)])])]
           [_ (int-err "not a function" f)]))
+
+      ;; Helpers for contract requirements
+      (define (set-impersonator!)
+        (when (not (equal? kind impersonator-sym)) (exit (fail)))
+        (increase-current-contract-kind! impersonator-sym))
+      (define (set-chaperone!)
+        (when (equal? kind flat-sym) (exit (fail)))
+        (increase-current-contract-kind! chaperone-sym))
+
+
       (match ty
         [(or (App: _ _ _) (Name: _)) (t->c (resolve-once ty))]
         ;; any/c doesn't provide protection in positive position
-        [(Univ:) (if from-typed? #'any-wrap/c #'any/c)]
+        [(Univ:)
+         (cond [from-typed? 
+                (set-chaperone!)
+                #'any-wrap/c]
+               [else #'any/c])]
         ;; we special-case lists:
         [(Mu: var (Union: (list (Value: '()) (Pair: elem-ty (F: var)))))
          (if (and (not from-typed?) (type-equal? elem-ty t:Univ))
@@ -185,21 +311,29 @@
                ([cnts (append (map t->c vars) (map t->c notvars))])
              #'(or/c . cnts)))]
         [(and t (Function: _)) (t->c/fun t)]
-	[(Set: t) #`(set/c #,(t->c t))]
+        [(Set: t)
+         #`(set/c #,(t->c t #:kind (contract-kind-min kind chaperone-sym)))]
         [(Sequence: ts) #`(sequence/c #,@(map t->c ts))]
         [(Vector: t)
-         (when flat? (exit (fail)))
+         (set-chaperone!)
          #`(vectorof #,(t->c t))]
+        [(HeterogenousVector: ts)
+         (set-chaperone!)
+         #`(vector/c #,@(map t->c ts))]
         [(Box: t)
-         (when flat? (exit (fail)))
+         (set-chaperone!)
          #`(box/c #,(t->c t))]
         [(Pair: t1 t2)
          #`(cons/c #,(t->c t1) #,(t->c t2))]
+        [(Promise: t)
+         (set-chaperone!)
+         #`(promise/c #,(t->c t))]
         [(Opaque: p? cert)
          #`(flat-named-contract (quote #,(syntax-e p?)) #,(cert p?))]
+        ;; TODO
         [(F: v) (cond [(assoc v (vars)) => second]
                       [else (int-err "unknown var: ~a" v)])]
-	[(Poly: vs b)
+        [(Poly: vs b)
          (if from-typed?
              ;; in positive position, no checking needed for the variables
              (parameterize ([vars (append (for/list ([v vs]) (list v #'any/c)) (vars))])
@@ -207,85 +341,73 @@
              ;; in negative position, use `parameteric/c'
              (match-let ([(Poly-names: vs-nm _) ty])
                (with-syntax ([(v ...) (generate-temporaries vs-nm)])
+                 (set-impersonator!)
                  (parameterize ([vars (append (map list vs (syntax->list #'(v ...)))
                                               (vars))])
                    #`(parametric->/c (v ...) #,(t->c b))))))]
         [(Mu: n b)
          (match-let ([(Mu-name: n-nm _) ty])
            (with-syntax ([(n*) (generate-temporaries (list n-nm))])
-             (parameterize ([vars (cons (list n #'n* #'n*) (vars))])
-               #`(letrec ([n* (recursive-contract #,(t->c b))])
+             (parameterize ([vars (cons (list n #'n*) (vars))]
+                            [current-contract-kind
+			     (contract-kind-min kind chaperone-sym)])
+               (define ctc (t->c b))
+               #`(letrec ([n* (recursive-contract
+                                #,ctc
+                                #,(contract-kind->keyword
+				   (current-contract-kind)))])
                    n*))))]
         [(Value: #f) #'false/c]
+        [(Instance: (? Mu? t))
+         (t->c (make-Instance (resolve-once t)))]
         [(Instance: (Class: _ _ (list (list name fcn) ...)))
-         (when flat? (exit (fail)))
+         (set-impersonator!)
          (with-syntax ([(fcn-cnts ...) (for/list ([f fcn]) (t->c/fun f #:method #t))]
                        [(names ...) name])
            #'(object/c (names fcn-cnts) ...))]
         ;; init args not currently handled by class/c
         [(Class: _ (list (list by-name-init by-name-init-ty _) ...) (list (list name fcn) ...))
-         (when flat? (exit (fail)))
+         (set-impersonator!)
          (with-syntax ([(fcn-cnt ...) (for/list ([f fcn]) (t->c/fun f #:method #t))]
                        [(name ...) name]
                        [(by-name-cnt ...) (for/list ([t by-name-init-ty]) (t->c/neg t))]
                        [(by-name-init ...) by-name-init])
            #'(class/c (name fcn-cnt) ... (init [by-name-init by-name-cnt] ...)))]
         [(Value: '()) #'null?]
-        [(Struct: nm par (list (fld: flds acc-ids mut?) ...) proc poly? pred? cert maker-id)
+        [(Struct: nm par (list (fld: flds acc-ids mut?) ...) proc poly? pred?)
          (cond
            [(assf (λ (t) (type-equal? t ty)) structs-seen)
             =>
             cdr]
            [proc (exit (fail))]
-           [(and flat? (ormap values mut?))
+           [(and (equal? kind flat-sym) (ormap values mut?))
             (exit (fail))]
            [poly?
-            (with-syntax* ([(rec blame val) (generate-temporaries '(rec blame val))]
-                           [maker maker-id]
-                           [cnt-name nm])
-              ;If it should be a flat contract, we make flat contracts for the type of each field,
-              ;extract the predicates, and apply the predicates to the corresponding field value
-              (if flat?
-                #`(letrec ([rec
-                            (make-flat-contract
-                             #:name 'cnt-name
-                             #:first-order
-                              (lambda (val)
-                               (and
-                                (#,pred? val)
-                                #,@(for/list ([fty flds] [f-acc acc-ids])
-                                    #`((flat-contract-predicate
-                                       #,(t->c fty #:seen (cons (cons ty #'(recursive-contract rec)) structs-seen)))
-                                       (#,f-acc val))))))])
-                    rec)
-                ;Should make this case a chaperone/impersonator contract
-                (with-syntax ([(fld-cnts ...)
-                              (for/list ([fty flds]
-                                       [f-acc acc-ids]
-                                       [m? mut?])
-                               #`(((contract-projection
-                                    #,(t->c fty #:seen (cons (cons ty #'(recursive-contract rec)) structs-seen)))
-                                   blame)
-                                  (#,f-acc val)))])
-                  #`(letrec ([rec
-                              (make-contract
-                               #:name 'cnt-name
-                               #:first-order #,pred?
-                               #:projection
-                               (lambda (blame)
-                                 (lambda (val)
-                                   (unless (#,pred? val)
-                                     (raise-blame-error blame val "expected ~a value, got ~v" 'cnt-name val))
-                                   (maker fld-cnts ...))))])
-                      rec))))]
-           [else #`(flat-named-contract '#,(syntax-e pred?) #,(cert pred?))])]
+            (with-syntax* ([struct-ctc (generate-temporary 'struct-ctc)])
+              (define field-contracts
+                (for/list ([fty flds] [mut? mut?])
+                  (with-syntax* ([rec (generate-temporary 'rec)])
+                    (define required-recursive-kind
+                       (contract-kind-min kind (if mut? impersonator-sym chaperone-sym)))
+                    ;(printf "kind: ~a mut-k: ~a req-rec-kind: ~a\n" kind (if mut? impersonator-sym chaperone-sym) required-recursive-kind)
+                    (parameterize ((current-contract-kind (contract-kind-min kind chaperone-sym)))
+                      (let ((fld-ctc (t->c fty #:seen (cons (cons ty #'rec) structs-seen)
+                                           #:kind required-recursive-kind)))
+                        #`(let ((rec (recursive-contract struct-ctc #,(contract-kind->keyword (current-contract-kind)))))
+                            #,fld-ctc))))))
+              #`(letrec ((struct-ctc (struct/c #,nm #,@field-contracts))) struct-ctc))]
+           [else #`(flat-named-contract '#,(syntax-e pred?) #,pred?)])]
         [(Syntax: (Base: 'Symbol _ _ _ _)) #'identifier?]
-        [(Syntax: t) #`(syntax/c #,(t->c t))]
+        [(Syntax: t)
+         #`(syntax/c #,(t->c t #:kind flat-sym))]
         [(Value: v) #`(flat-named-contract #,(format "~a" v) (lambda (x) (equal? x '#,v)))]
-        [(Param: in out) #`(parameter/c #,(t->c out))]
-	[(Hashtable: k v)
-         (when flat? (exit (fail)))                  
-         #`(hash/c #,(t->c k) #,(t->c v) #:immutable 'dont-care)]
+        ;; TODO Is this sound?
+	[(Param: in out) 
+	 (set-impersonator!)
+	 #`(parameter/c #,(t->c out))]
+        [(Hashtable: k v)
+         (when (equal? kind flat-sym) (exit (fail)))
+         #`(hash/c #,(t->c k #:kind chaperone-sym) #,(t->c v) #:immutable 'dont-care)]
         [else
          (exit (fail))]))))
 

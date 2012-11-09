@@ -28,6 +28,8 @@ makes just a few special text conversions:
 
  @item{@litchar{'}: converted to @racket['rsquo], which is a fancy apostrophe: '}
 
+ @item{@litchar{`}: converted to @racket['lsquo], which is a fancy quote: `}
+
 ]
 
 Some functions @deftech{decode} a sequence of @racket[_pre-flow] or
@@ -203,6 +205,12 @@ See @racket[decode].}
 @defstruct[splice ([run list?])]{
 
 See @racket[decode], @racket[decode-part], and @racket[decode-flow].}
+
+
+@defproc[(spliceof [ctc flat-contract?]) flat-contract?]{
+
+Produces a contract for a @racket[splice] instance whose
+@racketidfont{run} elements satisfy @racket[ctc].}
 
 
 @defproc[(clean-up-index-string [str string?]) string?]{

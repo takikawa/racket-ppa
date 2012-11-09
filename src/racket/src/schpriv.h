@@ -287,11 +287,14 @@ void scheme_init_gmp_places(void);
 void scheme_init_print_global_constants(void);
 void scheme_init_variable_references_constants(void);
 void scheme_init_logger(void);
+void scheme_init_logging_once(void);
 void scheme_init_file_places(void);
 void scheme_init_foreign_places(void);
 void scheme_init_place_local_symbol_table(void);
 
 Scheme_Logger *scheme_get_main_logger(void);
+Scheme_Logger *scheme_get_gc_logger(void);
+Scheme_Logger *scheme_get_future_logger(void);
 void scheme_init_logger_config(void);
 
 void register_network_evts();
@@ -300,7 +303,7 @@ void scheme_free_dynamic_extensions(void);
 void scheme_free_all_code(void);
 void scheme_free_ghbn_data(void);
 
-XFORM_NONGCING int scheme_is_multiprocessor(int now);
+XFORM_NONGCING int scheme_is_multithreaded(int now);
 
 /* Type readers & writers for compiled code data */
 typedef Scheme_Object *(*Scheme_Type_Reader)(Scheme_Object *list);
@@ -529,7 +532,7 @@ extern void scheme_check_foreign_work(void);
 #endif
 
 #ifndef DONT_USE_FOREIGN
-extern void *scheme_extract_pointer(Scheme_Object *v);
+XFORM_NONGCING extern void *scheme_extract_pointer(Scheme_Object *v);
 #endif
 
 void scheme_kickoff_green_thread_time_slice_timer(intptr_t usec);
@@ -729,6 +732,7 @@ typedef struct Scheme_Inspector {
 
 typedef struct Scheme_Struct_Property {
   Scheme_Object so;
+  char can_impersonate; /* 1 if impersonatable property, 0 otherwise */
   Scheme_Object *name; /* a symbol */
   Scheme_Object *guard; /* NULL, a procedure, or 'can-impersonate */
   Scheme_Object *supers; /* implied properties: listof (cons <prop> <proc>) */
@@ -846,6 +850,8 @@ Scheme_Object *scheme_make_serialized_struct_instance(Scheme_Object *s, int num_
 
 Scheme_Object *scheme_struct_getter(int argc, Scheme_Object **args, Scheme_Object *prim);
 Scheme_Object *scheme_struct_setter(int argc, Scheme_Object **args, Scheme_Object *prim);
+
+void scheme_force_struct_type_info(Scheme_Struct_Type *stype);
 
 Scheme_Object *scheme_extract_checked_procedure(int argc, Scheme_Object **argv);
 
@@ -2700,14 +2706,17 @@ int scheme_resolve_info_use_jit(Resolve_Info *ri);
 void scheme_enable_expression_resolve_lifts(Resolve_Info *ri);
 Scheme_Object *scheme_merge_expression_resolve_lifts(Scheme_Object *expr, Resolve_Prefix *rp, Resolve_Info *ri);
 
-Optimize_Info *scheme_optimize_info_create(Comp_Prefix *cp);
+Optimize_Info *scheme_optimize_info_create(Comp_Prefix *cp, int get_logger);
 void scheme_optimize_info_enforce_const(Optimize_Info *, int enforce_const);
 void scheme_optimize_info_set_context(Optimize_Info *, Scheme_Object *ctx);
 void scheme_optimize_info_never_inline(Optimize_Info *);
 
+char *scheme_optimize_info_context(Optimize_Info *);
+Scheme_Logger *scheme_optimize_info_logger(Optimize_Info *);
+
 Scheme_Object *scheme_toplevel_to_flagged_toplevel(Scheme_Object *tl, int flags);
 
-int scheme_wants_flonum_arguments(Scheme_Object *rator, int argpos, int rotate_mode);
+int scheme_wants_flonum_arguments(Scheme_Object *rator, int argpos);
 int scheme_expr_produces_flonum(Scheme_Object *expr);
 
 Scheme_Object *scheme_make_compiled_syntax(Scheme_Syntax *syntax,
@@ -2878,8 +2887,8 @@ int scheme_is_env_variable_boxed(Scheme_Comp_Env *env, int which);
 
 int scheme_get_eval_type(Scheme_Object *obj);
 
-Scheme_Object *scheme_make_application(Scheme_Object *v);
-Scheme_Object *scheme_try_apply(Scheme_Object *f, Scheme_Object *args, Scheme_Object *context);
+Scheme_Object *scheme_make_application(Scheme_Object *v, Optimize_Info *info);
+Scheme_Object *scheme_try_apply(Scheme_Object *f, Scheme_Object *args, Optimize_Info *info);
 
 Scheme_Object *scheme_get_stop_expander(void);
 
@@ -3020,8 +3029,9 @@ struct Scheme_Env {
 
   Scheme_Module_Registry *module_registry;
   Scheme_Module_Registry *module_pre_registry; /* for expanding submodules */
-  Scheme_Object *insp; /* instantiation-time inspector, for granting
+  Scheme_Object *guard_insp; /* instantiation-time inspector, for granting
 			  protected access */
+  Scheme_Object *access_insp; /* for graining protected access */
 
   Scheme_Object *rename_set;
   Scheme_Hash_Table *temp_marked_names; /* used to correlate imports with re-exports */
@@ -3306,6 +3316,8 @@ void scheme_prep_namespace_rename(Scheme_Env *menv);
 Scheme_Object *scheme_string_to_submodule_path(char *_s, intptr_t len);
 char *scheme_submodule_path_to_string(Scheme_Object *p, intptr_t *_len);
 
+Scheme_Object *scheme_annotate_existing_submodules(Scheme_Object *orig_fm, int incl_star);
+
 /*========================================================================*/
 /*                         errors and exceptions                          */
 /*========================================================================*/
@@ -3411,16 +3423,19 @@ struct Scheme_Logger {
   Scheme_Logger *parent;
   int want_level;
   intptr_t *timestamp, local_timestamp; /* determines when want_level is up-to-date */
-  int syslog_level, stderr_level;
+  Scheme_Object *syslog_level; /* (list* <level-int> <name-sym> ... <level-int>) */
+  Scheme_Object *stderr_level;
   Scheme_Object *readers; /* list of (cons (make-weak-box <reader>) <sema>) */
 };
 
 typedef struct Scheme_Log_Reader {
   Scheme_Object so;
-  int want_level;
+  Scheme_Object *level; /* (list* <level-int> <name-sym> ... <level-int>) */
   Scheme_Object *sema;
   Scheme_Object *head, *tail;
 } Scheme_Log_Reader;
+
+Scheme_Logger *scheme_make_logger(Scheme_Logger *parent, Scheme_Object *name);
 
 char *scheme_optimize_context_to_string(Scheme_Object *context);
 
@@ -3575,6 +3590,7 @@ Scheme_Object *scheme_do_open_input_file(char *name, int offset, int argc, Schem
 Scheme_Object *scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv[], int and_read, 
                                           int internal, char **err, int *eerrno);
 Scheme_Object *scheme_file_position(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_file_position_star(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_file_buffer(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_file_identity(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_file_try_lock(int argc, Scheme_Object **argv);
@@ -3627,6 +3643,18 @@ intptr_t scheme_port_closed_p (Scheme_Object *port);
 #endif
 
 #define MAX_UTF8_CHAR_BYTES 6
+
+intptr_t scheme_redirect_write_bytes(Scheme_Output_Port *op,
+                                     const char *str, intptr_t d, intptr_t len,
+                                     int rarely_block, int enable_break);
+int scheme_redirect_write_special (Scheme_Output_Port *op, Scheme_Object *v, int nonblock);
+intptr_t scheme_redirect_get_or_peek_bytes(Scheme_Input_Port *orig_port,
+                                           Scheme_Input_Port *port,
+                                           char *buffer, intptr_t offset, intptr_t size,
+                                           int nonblock,
+                                           int peek, Scheme_Object *peek_skip,
+                                           Scheme_Object *unless,
+                                           Scheme_Schedule_Info *sinfo);
 
 /*========================================================================*/
 /*                         memory debugging                               */
@@ -3727,6 +3755,10 @@ Scheme_Object *scheme_make_regexp(Scheme_Object *str, int byte, int pcre, int * 
 int scheme_is_pregexp(Scheme_Object *o);
 void scheme_clear_rx_buffers(void);
 
+int scheme_regexp_match_p(Scheme_Object *regexp, Scheme_Object *target);
+
+Scheme_Object *scheme_symbol_to_string(Scheme_Object *sym);
+
 #ifdef SCHEME_BIG_ENDIAN
 # define MZ_UCS4_NAME "UCS-4BE"
 #else
@@ -3738,6 +3770,7 @@ void scheme_clear_rx_buffers(void);
 #define SCHEME_SYM_WEIRDP(o) (MZ_OPT_HASH_KEY(&((Scheme_Symbol *)(o))->iso) & 0x3)
 
 Scheme_Object *scheme_current_library_collection_paths(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_compiled_file_roots(int argc, Scheme_Object *argv[]);
 
 #ifdef MZ_USE_JIT
 int scheme_can_inline_fp_op();
@@ -3814,6 +3847,8 @@ typedef struct Scheme_Place {
   struct GC_Thread_Info *gc_info; /* managed by the GC */
 #endif
   Scheme_Object *pumper_threads; /* Scheme_Vector of scheme threads */
+
+  struct Scheme_Place *prev, *next; /* keeping a list of child places */
 } Scheme_Place;
 
 typedef struct Scheme_Place_Object {
@@ -3880,10 +3915,5 @@ void scheme_check_place_port_ok();
 void scheme_place_set_memory_use(intptr_t amt);
 void scheme_place_check_memory_use();
 void scheme_clear_place_ifs_stack();
-
-void scheme_pause_all_places();
-void scheme_pause_one_place(Scheme_Place *p);
-void scheme_resume_all_places();
-void scheme_resume_one_place(Scheme_Place *p);
 
 #endif /* __mzscheme_private__ */

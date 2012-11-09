@@ -53,16 +53,16 @@
       (cond
         [(eq? immutable #t)
          (unless (immutable? val)
-           (fail val '(expected "an immutable vector," given: "~e") val))]
+           (fail val '(expected "an immutable vector" given: "~e") val))]
         [(eq? immutable #f)
          (when (immutable? val)
-           (fail val '(expected "an mutable vector," given: "~e" val)))]
+           (fail val '(expected "an mutable vector" given: "~e" val)))]
         [else (void)])
       (when first-order?
         (for ([e (in-vector val)]
               [n (in-naturals)])
           (unless (contract-first-order-passes? elem-ctc e)
-            (fail val '(expected: "~s for element ~s," given "~e") (contract-name elem-ctc) n e))))
+            (fail val '(expected: "~s for element ~s" given: "~e") (contract-name elem-ctc) n e))))
       #t)))
 
 (define (vectorof-first-order ctc)
@@ -104,7 +104,7 @@
                                   (apply raise-blame-error blame val args)))
            (λ (val)
              (check val raise-blame #f)
-             (if (immutable? val)
+             (if (and (immutable? val) (not (chaperone? val)))
                  (apply vector-immutable
                         (for/list ([e (in-vector val)])
                           (elem-pos-proj e)))
@@ -182,22 +182,22 @@
   (define elem-ctcs (base-vector/c-elems ctc))
   (define immutable (base-vector/c-immutable ctc))
   (unless (vector? val)
-    (raise-blame-error blame val '(expected "a vector," given: "~e") val))
+    (raise-blame-error blame val '(expected: "a vector" given: "~e") val))
   (cond
     [(eq? immutable #t)
      (unless (immutable? val)
        (raise-blame-error blame val 
-                          '(expected "an immutable vector," given: "~e")
+                          '(expected: "an immutable vector" given: "~e")
                           val))]
     [(eq? immutable #f)
      (when (immutable? val)
        (raise-blame-error blame val 
-                          '(expected "a mutable vector," given: "~e")
+                          '(expected: "a mutable vector" given: "~e")
                           val))]
     [else (void)])
   (define elem-count (length elem-ctcs))
   (unless (= (vector-length val) elem-count)
-    (raise-blame-error blame val '(expected "a vector of ~a element~a," given: "~e")
+    (raise-blame-error blame val '(expected: "a vector of ~a element~a" given: "~e")
                        elem-count
                        (if (= elem-count 1) "" "s") 
                        val)))
@@ -249,7 +249,7 @@
                                   (blame-add-context blame (format "the ~a element of" (n->th i)) #:swap? #t)))])
            (λ (val)
              (check-vector/c ctc val blame)
-             (if (immutable? val)
+             (if (and (immutable? val) (not (chaperone? val)))
                  (apply vector-immutable
                         (for/list ([e (in-vector val)]
                                    [i (in-naturals)])

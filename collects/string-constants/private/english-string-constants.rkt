@@ -212,6 +212,11 @@ please adhere to these guidelines:
  (cs-unused-require "unused require")
  (cs-free-variable "free variable")
 
+  (cs-binder-count "~a binding occurrences")
+  (cs-zero-varrefs "no bound occurrences")
+  (cs-one-varref "1 bound occurrence")
+  (cs-n-varrefs "~a bound occurrences") ;; expected to have one ~a formatter that will accept a number
+  
   (cs-contract-my-obligation "Contract: this module's obligation")
   (cs-contract-their-obligation "Contract: clients modules' obligation")
   (cs-contract-both-obligation "Contract: both this module and client modules' obligation")
@@ -223,20 +228,24 @@ please adhere to these guidelines:
   (cs-mode-menu-show-client-obligations "Client Contract Obligations")
   (cs-mode-menu-show-syntax "Syntactic Categories")
   
+  ;; the documentation blue boxes in the upper-right corner of the drracket window
+  (sc-read-more... "read more ...")
+  (sc-f2-to-un/lock "f2 to (un)lock")
+  
  ;; the online check syntax status messages (mouse over the bottom right of drracket's window to see the messages during online expansion's various phases)
- (online-expansion-running "Online expansion running")
+ (online-expansion-running "Background expansion running")
  (online-expansion-only-raw-text-files-supported "Only pure text files supported")
- (online-expansion-abnormal-termination "Online expansion terminated abnormally")
- (online-expansion-finished-successfully "Online expansion finished successfully")
-
+ (online-expansion-abnormal-termination "Background expansion terminated abnormally")
+ (online-expansion-finished-successfully "Background expansion finished successfully")
+  
  (jump-to-error "Jump to Error")
- (online-expansion-is-disabled "Online expansion is disabled")
+ (online-expansion-is-disabled "Background expansion is disabled")
  ;; these next two show up in the bar along the bottom of the drracket window
- (online-expansion-pending "Online expansion pending ...")
- (online-expansion-finished "Online expansion finished") ;; note: there may still be errors in this case
+ (online-expansion-pending "Background expansion pending ...")
+ (online-expansion-finished "Background expansion finished") ;; note: there may still be errors in this case
   
  ;; the online expansion preferences pane
- (online-expansion "Online expansion") ;; title of prefs pane
+ (online-expansion "Background expansion") ;; title of prefs pane
  ; the different kinds of errors
  (online-expansion-show-read-errors-as "Show read-level errors")
  (online-expansion-show-variable-errors-as "Show unbound identifier errors")
@@ -431,6 +440,7 @@ please adhere to these guidelines:
  (install-plt-file-tab "File")
  (install-plt-filename "Filename:")
  (install-plt-url "URL:")
+ (install-plt-error-header "There was an error when checking the validity of the downloaded .plt file. Please check the url and try again.")
  
  ;; install plt file when opened in drscheme strings
  (install-plt-file "Install ~a or open for editing?")
@@ -490,7 +500,10 @@ please adhere to these guidelines:
  (show-line-and-column-numbers "Show Line && Column Numbers") ; used for popup menu; right click on line/column box in bottom of drs window
  (show-character-offsets "Show Character Offsets") ; used for popup menu; right click on line/column box in bottom of drs window
  (enable-keybindings-in-menus "Enable keybindings in menus")
- (automatically-to-ps "Automatically print to PostScript file")
+ (printing-mode "Printing Mode")
+ (print-using-platform-specific-mode "Platform-specific printing")
+ (print-to-ps "Print to PostScript File")
+ (print-to-pdf "Print to PDF File")
  (command-as-meta "Treat command key as meta") ;; macos/macos x only
  (reuse-existing-frames "Reuse existing frames when opening new files")
  (default-fonts "Default Fonts")
@@ -728,6 +741,7 @@ please adhere to these guidelines:
  (select-all-menu-item "Select A&ll")
  
   (find-menu-item "Find") ;; menu item
+  (find-from-selection-menu-item "Find From S&election")
   (find-info "Toggles the keyboard focus between the window being searched and the search bar")
   
  (find-next-info "Skip to the next occurrence of the string in the find window")
@@ -955,7 +969,7 @@ please adhere to these guidelines:
  (force-quit-menu-item-help-string "Uses custodian-shutdown-all to abort the current evaluation")
  (limit-memory-menu-item-label "Limit Memory...")
  (limit-memory-msg-1 "The limit will take effect the next time the program")
- (limit-memory-msg-2 "is Run, and it must be at least one megabyte.")
+ (limit-memory-msg-2 "is Run, and it must be at least eight megabytes.")
  (limit-memory-unlimited "Unlimited")
  (limit-memory-limited "Limited")
  (limit-memory-megabytes "Megabytes")
@@ -1661,5 +1675,11 @@ please adhere to these guidelines:
   ;; optimization coach
   (hide-optimization-coach "Hide Optimization Coach")
   (show-optimization-coach "Show Optimization Coach")
+
+  ;; labels used (in a big font) in the background of the definitions and interactions windows
+  (definitions-window-label "definitions")
+  (interactions-window-label "interactions")
+  (hide-defs/ints-label "Hide Definitions/Interactions Labels") ;; popup menu
+  (show-defs/ints-label "Show definitions/interactions labels") ;; preferences checkbox
   
   )

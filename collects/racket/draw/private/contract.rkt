@@ -1,8 +1,9 @@
-#lang racket
+#lang racket/base
 
 ;; Contracts for racket/draw
 
-(require racket/class
+(require racket/contract/base
+         racket/class
          "color.rkt"
          "point.rkt"
          "font.rkt"
@@ -57,9 +58,7 @@
             real? real? real? real? real?))
 
 (define make-color/c
-  (->* ((integer-in 0 255)
-        (integer-in 0 255)
-        (integer-in 0 255))
+  (->* (byte? byte? byte?)
        ((real-in 0 1))
        (is-a?/c color%)))
 
@@ -89,9 +88,9 @@
 (define color%/c
   (class/c
     (alpha (->m (real-in 0 1)))
-    (red  (->m (integer-in 0 255)))
-    (blue (->m (integer-in 0 255)))
-    (green (->m (integer-in 0 255)))
+    (red  (->m byte?))
+    (blue (->m byte?))
+    (green (->m byte?))
     (copy-from (->m (is-a?/c color%) (is-a?/c color%)))
     (ok? (->m boolean?))
     (set (->*m (byte? byte? byte?)
@@ -132,10 +131,7 @@
     (set-cap (->m pen-cap-style/c void?))
     (set-color (case->m
                  (-> (or/c (is-a?/c color%) string?) void?)
-                 (-> (integer-in 0 255)
-                     (integer-in 0 255)
-                     (integer-in 0 255)
-                     void?)))
+                 (-> byte? byte? byte? void?)))
     (set-join (->m pen-join-style/c void?))
     (set-stipple (->m (or/c (is-a?/c bitmap%) #f) void?))
     (set-style (->m pen-style/c void?))
@@ -158,10 +154,7 @@
     (get-style (->m brush-style/c))
     (set-color (case->m
                  (-> (or/c (is-a?/c color%) string?) void?)
-                 (-> (integer-in 0 255)
-                     (integer-in 0 255)
-                     (integer-in 0 255)
-                     void?)))
+                 (-> byte? byte? byte? void?)))
     (set-stipple (->*m ((or/c (is-a?/c bitmap%) #f))
                        ((or/c transformation-vector/c #f))
                        void?))

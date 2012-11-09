@@ -81,6 +81,7 @@ Keep documentation and tests up to date.
 @include-section["wrapc.scrbl"]
 @include-section["debug.scrbl"]
 @include-section["define.scrbl"]
+@include-section["error.scrbl"]
 @include-section["file.scrbl"]
 @include-section["find.scrbl"]
 @include-section["flonum.scrbl"]
@@ -93,11 +94,15 @@ Keep documentation and tests up to date.
 @include-section["logging.scrbl"]
 @include-section["markparam.scrbl"]
 @include-section["match.scrbl"]
+@include-section["open-place.scrbl"]
 @include-section["parameter-group.scrbl"]
 @include-section["pretty.scrbl"]
+@include-section["recontract.scrbl"]
+@include-section["sandbox.scrbl"]
 @include-section["sequence.scrbl"]
 @include-section["string.scrbl"]
 @include-section["struct.scrbl"]
+@include-section["custom-write.scrbl"] ;; Struct Printing
 @include-section["syntax.scrbl"]
 @include-section["../temp-c/scribblings/temp-c.scrbl"]
 

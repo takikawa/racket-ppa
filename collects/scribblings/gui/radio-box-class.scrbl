@@ -1,10 +1,12 @@
 #lang scribble/doc
 @(require "common.rkt")
 
+@centered{@image[#:suffixes @list[".png"]]{image/radio-box}}
+
 @defclass/title[radio-box% object% (control<%>)]{
 
 
-A @racket[radio-box%] control allows the user to select one of
+A @racket[radio-box%] control allows the user to select one of a
  number of mutually exclusive items. The items are displayed as a
  vertical column or horizontal row of labelled @defterm{radio
  buttons}. Unlike a @racket[list-control<%>], the set of items in a

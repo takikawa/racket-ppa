@@ -285,6 +285,48 @@
     (go-stream #t #f #t #t)
     (go-stream #t #t #t #t)))
 
+;; Check port shortcuts for `make-input-port' and `make-output-port' with
+;; pipes and specials
+(let-values ([(i o) (make-pipe-with-specials 5)])
+  (define i2 (make-input-port
+              (object-name i)
+              i
+              i
+              void))
+  (define o2 (make-output-port
+              (object-name o)
+              o
+              o
+              void
+              o))
+  (test #f sync/timeout 0 i2)
+  (test o2 sync/timeout 0 o2)
+  (write-bytes #"01234" o2)
+  (test #f sync/timeout 0 o2)
+  (test i2 sync/timeout 0 i2)
+  (test #"01234" read-bytes 5 i2)
+  (test 0 read-bytes-avail!* (make-bytes 3) i2)
+  (thread (lambda () 
+            (sync (system-idle-evt))
+            (write-bytes #"5" o2)))
+  (test #\5 read-char i2)
+  (let ([s (make-bytes 6)])
+    (thread (lambda () 
+              (sync (system-idle-evt))
+              (test 5 write-bytes-avail #"6789ab" o2)))
+    (test 5 read-bytes-avail! s i2)
+    (test #"6789a\0" values s))
+
+  (test #t port-writes-special? o2)
+  (write-special 'ok o2)
+  (test 'ok read-byte-or-special i2)
+
+  (test #t write-special-avail* 'ok-again o2)
+  (test i2 sync i2)
+  (test 'ok-again read-byte-or-special i2)
+
+  (void))
+
 ;; make-input-port/read-to-peek
 (define (make-list-port #:eof-as-special? [eof-as-special? #f] . l)
   (make-input-port/read-to-peek 
@@ -311,6 +353,14 @@
 	 (lambda (a b c d) v))]))
    #f
    void))
+
+(let ([p (make-input-port/read-to-peek 
+          'example
+          (lambda (bytes) (bytes-set! bytes 0 0) 1)
+          #f
+          void)])
+  (close-input-port p)
+  (test #t evt? (sync/timeout 0 (port-progress-evt p))))
 
 (let ([p (make-list-port #\h #\e #\l #\l #\o)])
   (test (char->integer #\h) peek-byte p)
@@ -750,6 +800,42 @@
 
 ;; --------------------------------------------------
 
+(let ([o (open-output-bytes)])
+  (port-count-lines! o)
+  (define o2 (transplant-output-port o
+                                     (lambda ()
+                                       (define-values (l c p) (port-next-location o))
+                                       (values (* 2 l) (* 2 c) (* 2 p)))
+                                     57))
+  (test 0 file-position o)
+  (test 56 file-position o2)
+  (port-count-lines! o2)
+  (test-values '(1 0 1) (lambda () (port-next-location o)))
+  (test-values '(2 0 2) (lambda () (port-next-location o2)))
+  (write-byte 45 o2)
+  (test-values '(1 1 2) (lambda () (port-next-location o)))
+  (test-values '(2 2 4) (lambda () (port-next-location o2)))
+  (test (file-stream-buffer-mode o) file-stream-buffer-mode o2))
+
+(let ([i (open-input-bytes #"x")])
+  (port-count-lines! i)
+  (define i2 (transplant-input-port i
+                                    (lambda ()
+                                      (define-values (l c p) (port-next-location i))
+                                      (values (* 2 l) (* 2 c) (* 2 p)))
+                                    57))
+  (test 0 file-position i)
+  (test 56 file-position i2)
+  (port-count-lines! i2)
+  (test-values '(1 0 1) (lambda () (port-next-location i)))
+  (test-values '(2 0 2) (lambda () (port-next-location i2)))
+  (test (char->integer #\x) read-byte i)
+  (test-values '(1 1 2) (lambda () (port-next-location i)))
+  (test-values '(2 2 4) (lambda () (port-next-location i2)))
+  (test (file-stream-buffer-mode i) file-stream-buffer-mode i2))
+
+;; --------------------------------------------------
+
 (let-values ([(in out) (make-pipe)])
   (let ([in2 (dup-input-port in #f)]
         [out2 (dup-output-port out #f)])
@@ -876,27 +962,36 @@
     (test #t list? r)))
 
 ;; check proper locking for concurrent access:
-(for ([i 100])
-  (let* ([p (make-limited-input-port
-             (open-input-string "A\nB\nC\nD\n") 
-             4)]
-         [N 6]
-         [chs (for/list ([i N])
-                (let ([ch (make-channel)])
-                  (thread
-                   (lambda ()
-                     (when (even? i) (sleep))
-                     (channel-put ch (list (sync (read-bytes-line-evt p))
-                                           (file-position p)))))
-                  ch))]
-         [rs (for/list ([ch chs])
-               (channel-get ch))])
-    (test 2 apply + (for/list ([r rs]) (if (bytes? (car r)) 1 0)))
-    (test #t values (for/and ([r rs]) 
-                      (if (eof-object? (car r))
-                          (eq? (cadr r) 4)
-                          (and (memq (cadr r) '(2 4)) #t))))))
-
+(for ([mk-p (list
+             (lambda ()
+               (open-input-string "A\nB\n"))
+             (lambda ()
+               (make-limited-input-port
+                (open-input-string "A\nB\nC\nD\n") 
+                4)))])
+  (for ([i 100])
+    (let* ([p (mk-p)]
+           [N 6]
+           [chs (for/list ([i N])
+                  (let ([ch (make-channel)])
+                    (thread
+                     (lambda ()
+                       (when (even? i) (sleep))
+                       (channel-put ch (list (sync (read-bytes-line-evt p))
+                                             (file-position p)
+                                             (let ()
+                                               (define-values (l c pos) (port-next-location p))
+                                               (sub1 pos))))))
+                    ch))]
+           [rs (for/list ([ch chs])
+                 (channel-get ch))])
+      (test 2 apply + (for/list ([r rs]) (if (bytes? (car r)) 1 0)))
+      (for ([r rs]) 
+        (if (eof-object? (car r))
+            (test 4 cadr r)
+            (let ([memq? (lambda (a l) (and (memq a l) #t))])
+              (test #t memq? (cadr r) '(2 4))
+              (test #t = (cadr r) (caddr r))))))))
 
 (let-values ([(in out) (make-pipe-with-specials)])
   (struct str (v)    

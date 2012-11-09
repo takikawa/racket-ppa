@@ -8,7 +8,7 @@
                      racket/gui
                      racket/pretty
                      racket/contract
-		     mrlib/graph
+                     mrlib/graph
                      (only-in slideshow/pict pict? text dc-for-text-size text-style/c
                               vc-append)
                      redex))
@@ -450,15 +450,25 @@ them.}
 produces the boolean or the string.}
 ]
 
-@defform[(term @#,tttterm)]{
+@defform*[[(term @#,tttterm) (term @#,tttterm #:lang lang-id)]]{
 
-This form is used for construction of a term.
+Used for construction of a term.
 
 It behaves similarly to @racket[quasiquote], except for a few special
 forms that are recognized (listed below) and that names bound by
 @racket[term-let] are implicitly substituted with the values that
 those names were bound to, expanding ellipses as in-place sublists (in
 the same manner as syntax-case patterns).
+
+The optional @racket[#:lang] keyword must supply an identifier bound
+by @racket[define-language], and adds a check that any symbol containing
+an underscore in @tttterm could have been bound by a pattern in the
+language referenced by @racket[lang-id].  In practice, this means that the
+underscore must be preceded by a non-terminal in that langauge or a
+built-in @ttpattern such as @racket[number].  This form of @racket[term]
+is used internally by default, so this check is applied to terms 
+that are constructed by Redex forms such as @racket[reduction-relation] 
+and @racket[define-metafunction].
 
 For example,
 
@@ -657,15 +667,15 @@ extended non-terminals. For example, this language:
   (define-extended-language lc-num-lang
     lc-lang
     (v ....     (code:comment "extend the previous `v' non-terminal")
-       +
-       number)
+       number
+       +)
     (x (variable-except λ +)))
 ]
 
-extends lc-lang with two new alternatives for the @racket[v]
-non-terminal, carries forward the @racket[e] and @racket[c]
-non-terminals, and replaces the @racket[x] non-terminal with a
-new one (which happens to be equivalent to the one that would 
+extends lc-lang with two new alternatives (@racket[+] and @racket[number])
+for the @racket[v] non-terminal, carries forward the @racket[e] 
+and @racket[c] non-terminals, and replaces the @racket[x] non-terminal 
+with a new one (which happens to be equivalent to the one that would 
 have been inherited).
 
 The four-period ellipses indicates that the new language's
@@ -730,7 +740,8 @@ otherwise.
 
 @declare-exporting[redex/reduction-semantics redex]
 
-@defform/subs[#:literals (--> fresh side-condition where with) 
+@defform/subs[#:literals (--> fresh side-condition side-condition/hidden
+                          where where/hidden judgment-holds with)
               (reduction-relation language domain base-arrow
                                   reduction-case ...
                                   shortcuts)
@@ -1137,18 +1148,22 @@ and @racket[#f] otherwise.
               [pos-use I
                        O]
               [rule [premise
-                     ...
-                     dashes
+                     ... 
+                     dashes rule-name
                      conclusion]
                     [conclusion 
                      premise 
-                     ...]]
+                     ...
+                     rule-name]]
               [conclusion (form-id pat/term ...)]
               [premise (code:line (judgment-form-id pat/term ...) maybe-ellipsis)
                        (where @#,ttpattern @#,tttterm)
                        (where/hidden @#,ttpattern @#,tttterm)
                        (side-condition @#,tttterm)
                        (side-condition/hidden @#,tttterm)]
+              [rule-name (code:line)
+                         string
+                         non-ellipsis-non-hypens-var]
               [pat/term @#,ttpattern
                         @#,tttterm]
               [maybe-ellipsis (code:line)
@@ -1177,11 +1192,11 @@ For example, the following defines addition on natural numbers:
        (define-judgment-form nats
          #:mode (sum I I O)
          #:contract (sum n n n)
-         [-----------
+         [-----------  "zero"
           (sum z n n)]
          
          [(sum n_1 n_2 n_3)
-          -------------------------
+          ------------------------- "add1"
           (sum (s n_1) n_2 (s n_3))])]
 
 The @racket[judgment-holds] form checks whether a relation holds for any 
@@ -1257,11 +1272,11 @@ one.
          #:mode (even I)
          #:contract (even n)
          
-         [--------
+         [-------- "evenz"
           (even z)]
          
          [(even n)
-          ----------------
+          ---------------- "even2"
           (even (s (s n)))])
        
        (define-judgment-form nats
@@ -1445,7 +1460,7 @@ then it is used to compare the expected and actual results.
 @defform/subs[(test--> rel-expr option ... e1-expr e2-expr ...)
               ([option (code:line #:equiv pred-expr)])
               #:contracts ([rel-expr reduction-relation?]
-                           [pred-expr (--> any/c any/c anyc)]
+                           [pred-expr (--> any/c any/c any/c)]
                            [e1-expr any/c]
                            [e2-expr any/c])]{
 
@@ -1893,7 +1908,7 @@ exploring reduction sequences.
                  [#:filter term-filter (-> any/c (or/c #f string?) any/c) (λ (x y) #t)]
                  [#:x-spacing x-spacing number? 15]
                  [#:y-spacing y-spacing number? 15]
-                 [#:layout layout (-> (listof term-node?) void) void]
+                 [#:layout layout (-> (listof term-node?) void?) void]
                  [#:edge-labels? edge-labels? boolean? #t]
                  [#:edge-label-font edge-label-font (or/c #f (is-a?/c font%)) #f]
                  [#:graph-pasteboard-mixin graph-pasteboard-mixin (make-mixin-contract graph-pasteboard<%>) values])
@@ -2008,7 +2023,7 @@ inserted into the editor by this library have a
                                               (λ (x) (<= 0 (length x) 6)))))
                               '()]
                     [#:filter term-filter (-> any/c (or/c #f string?) any/c) (λ (x y) #t)]
-                    [#:layout layout (-> (listof term-node?) void) void]
+                    [#:layout layout (-> (listof term-node?) void?) void]
                     [#:x-spacing x-spacing number? 15]
                     [#:y-spacing y-spacing number? 15]
                     [#:edge-labels? edge-labels? boolean? #t]
@@ -2078,7 +2093,7 @@ Note that this function does not return all terms that
 reduce to this one -- only those that are currently in the
 graph.
 }
-@defproc[(term-node-labels [tn term-node]) (listof (or/c false/c string?))]{
+@defproc[(term-node-labels [tn term-node?]) (listof (or/c false/c string?))]{
 
 Returns a list of the names of the reductions that led to
 the given node, in the same order as the result of
@@ -2119,13 +2134,13 @@ Returns the expression in this node.
 Sets the position of @racket[tn] in the graph to (@racket[x],@racket[y]). 
 }
 
-@defproc[(term-node-x [tn term-node?]) real]{
+@defproc[(term-node-x [tn term-node?]) real?]{
 Returns the @tt{x} coordinate of @racket[tn] in the window.
 }
-@defproc[(term-node-y [tn term-node?]) real]{
+@defproc[(term-node-y [tn term-node?]) real?]{
 Returns the @tt{y} coordinate of @racket[tn] in the window.
 }
-@defproc[(term-node-width [tn term-node?]) real]{
+@defproc[(term-node-width [tn term-node?]) real?]{
 Returns the width of @racket[tn] in the window.
 }
 @defproc[(term-node-height [tn term-node?]) real?]{
@@ -2263,14 +2278,30 @@ sets @racket[dc-for-text-size] and the latter does not.
 }
 
 
-@defproc[(term->pict [lang compiled-lang?] [term any/c]) pict?]{
+@defform[(term->pict lang term)]{
  Produces a pict like @racket[render-term], but without
  adjusting @racket[dc-for-text-size].
 
+ The first argument is expected to be a @racket[compiled-language?] and
+ the second argument is expected to be a term (without the
+ @racket[term] wrapper). The formatting in the @racket[term] argument
+ is used to determine how the resulting pict will look.
+ 
  This function is primarily designed to be used with
  Slideshow or with other tools that combine picts together.
 }
 
+@defproc[(render-term/pretty-write [lang compiled-lang?] [term any/c] [filename path-string?] [#:width width #f]) void?]{
+  Like @racket[render-term], except that the @racket[term] argument is evaluated,
+  and expected to return a term. Then, @racket[pretty-write] is used
+  to determine where the line breaks go, using the @racket[width] argument
+  as a maximum width (via @racket[pretty-print-columns]).
+}
+
+@defproc[(term->pict/pretty-write [lang compiled-lang?] [term any/c] [filename (or/c path-string? #f)] [#:width width #f]) pict?]{
+  Like @racket[term->pict], but with the same change that
+  @racket[render-term/pretty-write] has from @racket[render-term].
+}
 
 @defproc[(render-language [lang compiled-lang?]
                           [file (or/c false/c path-string?) #f]
@@ -2536,8 +2567,24 @@ precede ellipses that represent argument sequences; when it is
                                          (or/c zero? positive?)))
                           pair?))]{
 
-This parameter controls which cases in a metafunction are rendered. If it is @racket[#f] (the default), then all of the
+Controls which cases in a metafunction are rendered. If it is @racket[#f] (the default), then all of the
 cases appear. If it is a list of numbers, then only the selected cases appear (counting from @racket[0]).
+
+This parameter also controls how which clauses in judgment forms are rendered, but
+only in the case that @racket[judgment-form-cases] is @racket[#f].
+}
+                                  
+@defparam[judgment-form-cases 
+          cases
+          (or/c #f
+                (and/c (listof (or/c exact-nonnegative-integer?
+                                     string?))
+                       pair?))]{
+   Controls which clauses in a judgment form are rendered. If it is 
+   @racket[#f] (the default), then all of them are rendered. If
+   it is a list, then only the selected clauses appear (numbers
+   count from @racket[0], and strings correspond to the labels
+   in a judgment form).
 }
 
 @deftogether[[
@@ -2743,8 +2790,8 @@ its head.
 The result list is constrained to have at most 2 adjacent
 non-@racket[lw]s. That list is then transformed by adding
 @racket[lw] structs for each of the non-@racket[lw]s in the
-list (see the description of @racket[lw] below for an
-explanation of logical-space):
+list (see the text just below the description of @racket[lw] for a
+explanation of logical space):
 
 @itemize[
 @item{
@@ -2768,6 +2815,13 @@ explanation of logical-space):
     absorbed by a new @racket[lw] that renders using no
     actual space in the typeset version.
 }]
+
+One useful way to take advantage of @racket[with-compound-rewriters]
+is to return a list that begins and ends with @racket[""] (the
+empty string). In that situation, any extra logical space that
+would have been just outside the sequence is replaced with an 
+@racket[lw] that does not draw anything at all.
+
 }
 
 @defform[(with-compound-rewriters ([name-symbol proc] ...)

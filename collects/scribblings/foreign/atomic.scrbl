@@ -41,7 +41,7 @@ mode.
 
 When @racket[call-as-atomic] is used in the dynamic extent of
 @racket[call-as-atomic], then @racket[thunk] is simply called directly
-(as a tail call).}
+(as a non-tail call).}
 
 
 @defproc[(call-as-nonatomic [thunk (-> any)]) any]{
@@ -54,3 +54,8 @@ in which case the call never returns.
 When used not in the dynamic extent of @racket[call-as-atomic],
 @racket[call-as-nonatomic] raises @racket[exn:fail:contract].}
 
+
+@defproc[(in-atomic-mode?) boolean?]{
+
+Returns @racket[#t] if Racket context switches are disables,
+@racket[#f] otherwise.}

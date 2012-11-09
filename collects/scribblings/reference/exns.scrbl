@@ -22,7 +22,7 @@ particular required arity (e.g., @racket[call-with-input-file],
 @racket[exn:fail:contract] if the arity is incorrect.
 
 @;----------------------------------------------------------------------
-@section{Error Message Conventions}
+@section[#:tag "err-msg-conventions"]{Error Message Conventions}
 
 Racket's @deftech{error message convention} is to produce error
 messages with the following shape:
@@ -241,7 +241,8 @@ string describes the value for which the index is meant to select an element,
 and @racket[index-prefix] is a prefix for the word ``index.'' The @racket[index]
 argument is the rejected index. The @racket[in-value] argument is the value
 for which the index was meant. The @racket[lower-bound] and @racket[upper-bound]
-arguments specify the valid range of indices, inclusive. If @racket[alt-lower-bound]
+arguments specify the valid range of indices, inclusive; if @racket[upper-bound]
+is below @racket[lower-bound], the value is characterized as ``empty.'' If @racket[alt-lower-bound]
 is not @racket[#f], and if @racket[index] is between @racket[alt-lower-bound]
 and @racket[upper-bound], then the error is report as @racket[index] being less
 than the ``starting'' index @racket[lower-bound].
@@ -406,8 +407,13 @@ it returns, an exception is raised (to be handled by an exception
 handler that reports both the original and newly raised exception).
 
 The default uncaught-exception handler prints an error message using
-the current @tech{error display handler} (see @racket[error-display-handler])
-and then escapes by calling the current @tech{error escape handler} (see
+the current @tech{error display handler} (see @racket[error-display-handler]),
+unless the argument to the handler is an instance of @racket[exn:break:hang-up].
+If the argument to the handler is an instance of @racket[exn:break:hang-up]
+or @racket[exn:break:terminate], the default uncaught-exception handler
+then calls the @tech{exit handler} with @racket[1], which normally exits
+or escapes. For any argument, the default uncaught-exception handler
+then escapes by calling the current @tech{error escape handler} (see
 @racket[error-escape-handler]). The call to each handler is
 @racket[parameterize]d to set @racket[error-display-handler] to the
 default @tech{error display handler}, and it is @racket[parameterize-break]ed
@@ -530,7 +536,7 @@ after the first @racket[cnt] lines. A @racket[0] value for
                                                   . -> .
                                                   string?)]{
 
-A parameter that determines the @deftech{error value conversion
+A @tech{parameter} that determines the @deftech{error value conversion
 handler}, which is used to print a Racket value that is embedded in a
 primitive error message.
 
@@ -555,7 +561,7 @@ enable printing of unreadable values (see @racket[print-unreadable]).}
 
 @defboolparam[error-print-source-location include?]{
 
-A parameter that controls whether read and syntax error messages
+A @tech{parameter} that controls whether read and syntax error messages
 include source information, such as the source line and column or the
 expression.  This parameter also controls the error message when a
 module-defined variable is accessed before its definition is executed;
@@ -698,6 +704,20 @@ context when printing the error message.}
 Raised asynchronously (when enabled) in response to a break request.
 The @racket[continuation] field can be used by a handler to resume the
 interrupted computation.}
+
+@defstruct[(exn:break:hang-up exn:break) ()
+           #:inspector #f]{
+
+Raised asynchronously for hang-up breaks. The default
+ @tech{uncaught-exception handler} reacts to this exception type by
+ calling the @tech{exit handler}.}
+
+@defstruct[(exn:break:terminate exn:break) ()
+           #:inspector #f]{
+
+Raised asynchronously for termination-request breaks. The default
+ @tech{uncaught-exception handler} reacts to this exception type by
+ calling the @tech{exit handler}.}
 
 
 @defthing[prop:exn:srclocs struct-type-property?]{

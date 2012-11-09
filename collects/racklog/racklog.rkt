@@ -52,19 +52,28 @@
   (syntax-rules ()
     ((%rel (v ...) ((a ...) subgoal ...) ...)
      (lambda __fmls
-       (lambda (__fk)
-         (let/racklog-cc __sk
-           (let ((this-! (lambda (fk1) __fk)))
-             (syntax-parameterize 
-              ([! (make-rename-transformer #'this-!)])
-              (%let (v ...)
-                    (let/racklog-cc __fk
-                      (let* ((__fk ((%= __fmls (list a ...)) __fk))
-                             (__fk ((logic-var-val* subgoal) __fk))
-                             ...)
-                        (__sk __fk)))
-                    ...
-                    (__fk 'fail))))))))))
+       (lambda (fail-relation)
+         (let/racklog-cc 
+          __sk
+          (%let (v ...)
+                (let/racklog-cc 
+                 fail-case
+                 (define-values
+                   (unify-cleanup fail-unify)
+                   ((inner-unify __fmls (list a ...))
+                    fail-case))
+                 (define this-! 
+                   (lambda (fk1) 
+                     (λ (fk2)
+                       (unify-cleanup)
+                       (fail-relation 'fail))))
+                 (syntax-parameterize 
+                     ([! (make-rename-transformer #'this-!)])
+                   (__sk 
+                    ((%and subgoal ...) 
+                     fail-unify))))
+                ...
+                (fail-relation 'fail))))))))
 
 (define %fail
   (lambda (fk) (fk 'fail)))

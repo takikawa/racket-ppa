@@ -202,7 +202,7 @@ The @racket[style] argument must be one of the following:
 If both @racket['combine] and @racket['no-combine] are specified, the
 first one in @racket[style] takes precedence. Similarly, if both
 @racket['aligned] and @racket['unaligned] are specified, the first one
-in !racket[style] takes precedence. If @racket['caps] is specified,
+in @racket[style] takes precedence. If @racket['caps] is specified,
 the @racket[angle] must be zero.
 
 The given @racket[size] is in pixels, but it is ignored if a
@@ -543,6 +543,18 @@ Scales a pict drawing, as well as its @tech{bounding box}. The drawing
 is scaled by adjusting the destination @racket[dc<%>]'s scale while
 drawing the original @racket[pict].}
 
+@defproc*[([(scale-to-fit [pict pict?] [size-pict pict?]) pict?]
+           [(scale-to-fit [pict pict?] [width real?] [height real?]) pict?])]{
+  Scales @racket[pict] so that it fits within the bounding box of
+         @racket[size-pict] (if two arguments are supplied) or
+         into a box of size @racket[width] by @racket[height] 
+         (if three arguments are supplied).
+         
+         The aspect ratio of the pict is preserved, so the resulting pict
+         will have either the width or the height of the @racket[size-pict]
+         (or @racket[width] by @racket[height] box), but not necessarily
+         both.
+}
 
 @defproc[(rotate [pict pict?] [theta real?]) pict?]{
 
@@ -581,11 +593,9 @@ Selects a specific pen style for drawing, which applies to pen drawing
 for @racket[pict] that does not already use a specific pen style.}
 
 
-@defproc[(colorize [pict pict?] [color (or/c string? 
-                                             (is-a?/c color%)
-                                             (list (integer-in 0 255)
-                                                   (integer-in 0 255)
-                                                   (integer-in 0 255)))])
+@defproc[(colorize [pict pict?]
+                   [color (or/c string? (is-a?/c color%)
+                                (list byte? byte? byte?))])
          pict?]{
 
 Selects a specific color drawing, which applies to drawing in
@@ -1151,13 +1161,20 @@ repeated calls to @racket[draw-pict].}
 
 @defproc[(show-pict [pict pict?]
                     [w (or/c #f exact-nonnegative-integer?) #f] 
-                    [h (or/c #f exact-nonnegative-integer?) #f])
+                    [h (or/c #f exact-nonnegative-integer?) #f] 
+                    [#:frame-x frame-x (or/c (integer-in -10000 10000) #f)] 
+                    [#:frame-y frame-y (or/c (integer-in -10000 10000) #f)] 
+                    [#:frame-style frame-style (listof (or/c 'no-resize-border 'no-caption
+                                                             'no-system-menu 'hide-menu-bar
+                                                             'toolbar-button 'float 'metal))])
          void?]{
 
 Opens a frame that displays @racket[pict].  The frame adds one method,
 @racket[set-pict], which takes a pict to display. The optional
 @racket[w] and @racket[h] arguments specify a minimum size for the
-frame's drawing area.}
+frame's drawing area, and the @racket[frame-x], @racket[frame-y], 
+and @racket[frame-style] keyword arguments behave in the same manner as @racket[x], 
+@racket[y], and @racket[style] arguments for the @racket[frame%].}
 
 @defparam[current-expected-text-scale scales (list real? real?)]{
 

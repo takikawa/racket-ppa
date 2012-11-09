@@ -3,7 +3,7 @@
 
 (Section 'for)
 
-(require racket/mpair
+(require compatibility/mlist
          "for-util.rkt")
 
 (test-sequence [(0 1 2)] 3)
@@ -156,9 +156,42 @@
              #f
              (lambda (pos val1 val2) (not (string=? val2 "4")))))
 
+
+(test '(1 2 3)
+      'three
+      (for/list ([i 10])
+        #:break (= i 3)
+        (add1 i)))
+(test '(1 2 3 4)
+      'three
+      (for/list ([i 10])
+        #:final (= i 3)
+        (add1 i)))
+
+;; Make sure that breaking a sequence stops before consuming another element:
+(test '(("1" "2" "3" "4" "5" "6" "7" "8" "9") . 10)
+      'producer
+      (let ([c 0])
+        (cons
+         (for/list ([i (in-producer (lambda () (set! c (add1 c)) c) #f)]) 
+           #:break (= i 10)
+           (number->string i))
+         c)))
+(test '(("1" "2" "3" "4" "5" "6" "7" "8" "9") . 10)
+      'producer
+      (let ([c 0])
+        (cons
+         (for*/list ([j '(0)]
+                     [i (in-producer (lambda () (set! c (add1 c)) c) #f)])
+           #:break (= i 10)
+           (number->string i))
+         c)))
+
 ;; Basic sanity checks.
 (test '#(1 2 3 4) 'for/vector (for/vector ((i (in-range 4))) (+ i 1)))
 (test '#(1 2 3 4) 'for/vector-fast (for/vector #:length 4 ((i (in-range 4))) (+ i 1)))
+(test '#(1 2 3 4 0 0) 'for/vector-fast (for/vector #:length 6 ((i (in-range 4))) (+ i 1)))
+(test '#(1 2 3 4 #f #f) 'for/vector-fast (for/vector #:length 6 #:fill #f ((i (in-range 4))) (+ i 1)))
 
 (test '#(0 0 0 0 1 2 0 2 4) 'for*/vector (for*/vector ((i (in-range 3))
                                                        (j (in-range 3)))
@@ -198,6 +231,86 @@
              (vector-ref v i))))
   (test (vector 2.0 3.0 4.0) 'for/vector-many-body v2)
   (test (vector 3.0 4.0 5.0) 'for/vector-length-many-body v3))
+
+;; Stop when a length is specified, even if the sequence continues:
+(test '#(0 1 2 3 4 5 6 7 8 9)
+      'nat
+      (for/vector #:length 10 ([i (in-naturals)]) i))
+(test '#((0 . 0) (1 . 0) (2 . 0) (3 . 0) (4 . 0) (5 . 0) (6 . 0) (7 . 0) (8 . 0) (9 . 0))
+      'nats
+      (for*/vector #:length 10 ([i (in-naturals)] [j (in-naturals)]) (cons j i)))
+(test '#((0 . 0) (1 . 0) (2 . 0) (3 . 0) (4 . 0) (0 . 1) (1 . 1) (2 . 1) (3 . 1) (4 . 1))
+      'nat+5
+      (for*/vector #:length 10 ([i (in-naturals)] [j (in-range 5)]) (cons j i)))
+(test '#(1 3 5 7 9 11 13 15 17 19)
+      'parallel
+      (for*/vector #:length 10 ([(i j) (in-parallel (in-naturals)
+                                                    (in-naturals 1))])
+                   (+ i j)))
+
+;; Make sure the sequence stops at the length before consuming another element:
+(test '(#("1" "2" "3" "4" "5" "6" "7" "8" "9" "10") . 10)
+      'producer
+      (let ([c 0])
+        (cons
+         (for/vector #:length 10 ([i (in-producer (lambda () (set! c (add1 c)) c) #f)]) 
+                     (number->string i))
+         c)))
+(test '(#("1" "2" "3" "4" "5" "6" "7" "8" "9" "10") . 10)
+      'producer
+      (let ([c 0])
+        (cons
+         (for*/vector #:length 10 ([j '(0)]
+                                   [i (in-producer (lambda () (set! c (add1 c)) c) #f)])
+                      (number->string i))
+         c)))
+
+;; Check empty clauses
+(let ()
+  (define vector-iters 0)
+  (test (vector 3.4 0 0 0)
+        'no-clauses
+        (for/vector #:length 4 ()
+                    (set! vector-iters (+ 1 vector-iters))
+                    3.4))
+  (test 1 values vector-iters)
+  (test (vector 3.4 0 0 0)
+        'no-clauses
+        (for*/vector #:length 4 ()
+                     (set! vector-iters (+ 1 vector-iters))
+                     3.4))
+  (test 2 values vector-iters))
+
+;; Check #:when and #:unless:
+(test (vector 0 1 2 1 2)
+      'when-#t
+      (for/vector #:length 5
+                  ([x (in-range 3)]
+                   #:when #t
+                   [y (in-range 3)])
+        (+ x y)))
+(test (vector 0 1 2 2 3)
+      'when-...
+      (for/vector #:length 5
+                  ([x (in-range 3)]
+                   #:when (even? x)
+                   [y (in-range 3)])
+        (+ x y)))
+(test (vector 0 1 2 1 2)
+      'unless-#f
+      (for/vector #:length 5
+                  ([x (in-range 3)]
+                   #:unless #f
+                   [y (in-range 3)])
+        (+ x y)))
+(test (vector 1 2 3 -1 -1)
+      'unless-...
+      (for/vector #:length 5
+                  #:fill -1
+                  ([x (in-range 3)]
+                   #:unless (even? x)
+                   [y (in-range 3)])
+        (+ x y)))
 
 (test #hash((a . 1) (b . 2) (c . 3)) 'mk-hash
       (for/hash ([v (in-naturals)]

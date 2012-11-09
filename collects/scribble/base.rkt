@@ -8,6 +8,7 @@
          scheme/list
          scheme/class
          racket/contract/base
+         racket/contract/combinator
          setup/main-collects
          (for-syntax scheme/base))
 
@@ -249,10 +250,23 @@
 
 (define (item? x) (an-item? x))
 
+(define recur-items/c
+  (make-flat-contract 
+   #:name 'items/c
+   #:first-order (lambda (x)
+                   ((flat-contract-predicate items/c) x))))
+
+(define items/c (or/c item?
+                      block?
+                      (listof recur-items/c)
+                      (spliceof recur-items/c)))
+                       
+(provide items/c)
+
 (provide/contract 
  [itemlist (->* () 
                 (#:style (or/c style? string? symbol? #f)) 
-                #:rest (listof item?)
+                #:rest (listof items/c)
                 itemization?)]
  [item (->* () 
             () 
@@ -262,7 +276,18 @@
  [item? (any/c . -> . boolean?)])
 
 (define (itemlist #:style [style plain] . items)
-  (let ([flows (map an-item-flow items)])
+  (let ([flows (let loop ([items items])
+                 (cond
+                  [(null? items) null]
+                  [(item? (car items)) (cons (an-item-flow (car items))
+                                             (loop (cdr items)))]
+                  [(block? (car items)) (cons (list (car items))
+                                              (loop (cdr items)))]
+                  [(splice? (car items))
+                   (loop (append (splice-run (car items))
+                                 (cdr items)))]
+                  [else
+                   (loop (append (car items) (cdr items)))]))])
     (make-itemization (convert-block-style style) flows)))
 
 (define-struct an-item (flow))
@@ -401,7 +426,8 @@
                 #:rest (listof pre-flow?)
                 compound-paragraph?)]
  [tabular (->* ((listof (listof (or/c 'cont block? content?))))
-               (#:style (or/c style? string? symbol? #f ))
+               (#:style (or/c style? string? symbol? #f)
+                #:sep (or/c content? block? #f))
                table?)])
 
 (define (convert-block-style style)
@@ -422,7 +448,7 @@
   (make-compound-paragraph (convert-block-style style)
                            (decode-flow c)))
 
-(define (tabular #:style [style #f] cells)
+(define (tabular #:style [style #f] #:sep [sep #f] cells)
   (define (nth-str pos)
     (case (modulo pos 10)
       [(1) "st"]
@@ -451,12 +477,15 @@
        row)))
   (make-table (convert-block-style style)
               (map (lambda (row)
-                     (map (lambda (cell)
-                            (cond
-                             [(eq? cell 'cont) cell]
-                             [(block? cell) cell]
-                             [else (make-paragraph plain cell)]))
-                          row))
+                     (define (cvt cell)
+                       (cond
+                        [(eq? cell 'cont) cell]
+                        [(block? cell) cell]
+                        [else (make-paragraph plain cell)]))
+                     (define l (map cvt row))
+                     (if sep
+                         (add-between l (cvt sep))
+                         l))
                    cells)))
 
 ;; ----------------------------------------

@@ -141,7 +141,7 @@
 (define-png png_write_end (_fun _png_structp _png_infop -> _void))
 
 (define-png png_get_valid (_fun _png_structp _png_infop _uint32 -> _uint32))
-(define-png png_get_bKGD (_fun _png_structp _png_infop (p : (_ptr o _png_color_16-pointer/null)) -> (r : _bool) -> (and r p)))
+(define-png png_get_bKGD (_fun _png_structp _png_infop (p : (_ptr o _png_color_16)) -> (r : _bool) -> (and r p)))
 (define-png png_set_background (_fun _png_structp _png_color_16-pointer _int _int _double* -> _bool))
 (define-png png_get_gAMA (_fun _png_structp _png_infop (g : (_ptr o _double))
                                -> (ok? : _bool)
@@ -220,12 +220,13 @@
                      interlace-type compression-type filter-type)
                   (png_get_IHDR png info)])
       (let* ([tRNS? (positive? (png_get_valid png info PNG_INFO_tRNS))]
-             [alpha? (and keep-alpha?
-                          (or tRNS?
-                              (positive? (bitwise-ior color-type PNG_COLOR_MASK_ALPHA))))]
              [b&w? (and (= depth 1)
                         (= color-type PNG_COLOR_TYPE_GRAY)
-                        (not tRNS?))])
+                        (not tRNS?))]
+             [alpha? (and keep-alpha?
+                          (not b&w?)
+                          (or tRNS?
+                              (positive? (bitwise-ior color-type PNG_COLOR_MASK_ALPHA))))])
         (unless b&w?
           ;; Normalize formal of returned rows:
           (when (= color-type PNG_COLOR_TYPE_PALETTE)
