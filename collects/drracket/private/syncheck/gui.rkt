@@ -47,7 +47,8 @@ If the namespace does not, they are colored the unbound color.
          "colors.rkt"
          "traversals.rkt"
          "annotate.rkt"
-         "../tooltip.rkt")
+         "../tooltip.rkt"
+         "blueboxes-gui.rkt")
 (provide tool@)
 
 (define orig-output-port (current-output-port))
@@ -323,17 +324,21 @@ If the namespace does not, they are colored the unbound color.
          (extra (basic super%))]
         [else
          (basic super%)]))
-    
+                          
+    (struct tooltip-spec (strings x y w h) #:transparent)
+            
     (define make-syncheck-text%
       (λ (super%)
         (let* ([cursor-arrow (make-object cursor% 'arrow)])
-          (class* super% (syncheck-text<%>)
+          (class* (docs-text-mixin super%) (syncheck-text<%>)
             (inherit set-cursor get-admin invalidate-bitmap-cache set-position
-                     get-pos/text get-pos/text-dc-location position-location
+                     get-pos/text-dc-location position-location
                      get-canvas last-position dc-location-to-editor-location
                      find-position begin-edit-sequence end-edit-sequence
                      highlight-range unhighlight-range
-                     paragraph-end-position first-line-currently-drawn-specially?)
+                     paragraph-end-position first-line-currently-drawn-specially?
+                     line-end-position position-line
+                     syncheck:add-docs-range)
             
             ;; arrow-records : (U #f hash[text% => arrow-record])
             ;; arrow-record = interval-map[(listof arrow-entry)]
@@ -377,8 +382,37 @@ If the namespace does not, they are colored the unbound color.
                       (hash-set! bindings-table key (cons new priors))
                       #t]))]))
             
-            ;; for use in the automatic test suite
-            (define/public (syncheck:get-bindings-table) bindings-table)
+            ;; for use in the automatic test suite (both)
+            (define/public (syncheck:get-bindings-table [tooltips? #f])
+              (cond
+                [tooltips?
+                 (define unsorted
+                   (apply 
+                    append
+                    (for/list ([(k interval-map) (in-hash arrow-records)])
+                      (apply
+                       append
+                       (dict-map
+                        interval-map
+                        (λ (key x)
+                          (for/list ([x (in-list x)]
+                                     #:when (tooltip-info? x))
+                            (list (tooltip-info-pos-left x)
+                                  (tooltip-info-pos-right x)
+                                  (tooltip-info-msg x)))))))))
+                 (define (compare l1 l2)
+                   (cond
+                     [(equal? (list-ref l1 0) (list-ref l2 0))
+                      (cond
+                        [(equal? (list-ref l1 2) (list-ref l2 2))
+                         (string<=? (list-ref l1 2) (list-ref l2 2))]
+                        [else
+                         (< (list-ref l1 1) (list-ref l2 1))])]
+                     [else
+                      (< (list-ref l1 0) (list-ref l2 0))]))
+                 (sort unsorted compare)]
+                [else
+                 bindings-table]))
             
             (define/public (syncheck:sort-bindings-table)
               
@@ -396,10 +430,8 @@ If the namespace does not, they are colored the unbound color.
               
               ;; find-dc-location : text number -> (values number number)
               (define (find-dc-location text pos)
-                (let ([bx (box 0)]
-                      [by (box 0)])
-                  (send text position-location pos bx by)
-                  (send text editor-location-to-dc-location (unbox bx) (unbox by))))
+                (send text position-location pos xlb xrb)
+                (send text editor-location-to-dc-location (unbox xlb) (unbox xrb)))
               
               (hash-for-each
                bindings-table
@@ -412,21 +444,17 @@ If the namespace does not, they are colored the unbound color.
             ;; returns the bounding box (left, top, right, bottom) for the text range.
             ;; only works right if the text is on a single line.
             (define/private (find-char-box text left-pos right-pos)
-              (let ([xlb (box 0)]
-                    [ylb (box 0)]
-                    [xrb (box 0)]
-                    [yrb (box 0)])
-                (send text position-location left-pos xlb ylb #t)
-                (send text position-location right-pos xrb yrb #f)
-                (let*-values ([(xl-off yl-off) (send text editor-location-to-dc-location (unbox xlb) (unbox ylb))]
-                              [(xl yl) (dc-location-to-editor-location xl-off yl-off)]
-                              [(xr-off yr-off) (send text editor-location-to-dc-location (unbox xrb) (unbox yrb))]
-                              [(xr yr) (dc-location-to-editor-location xr-off yr-off)])
-                  (values 
-                   xl
-                   yl
-                   xr 
-                   yr))))
+              (send text position-location left-pos xlb ylb #t)
+              (send text position-location right-pos xrb yrb #f)
+              (let*-values ([(xl-off yl-off) (send text editor-location-to-dc-location (unbox xlb) (unbox ylb))]
+                            [(xl yl) (dc-location-to-editor-location xl-off yl-off)]
+                            [(xr-off yr-off) (send text editor-location-to-dc-location (unbox xrb) (unbox yrb))]
+                            [(xr yr) (dc-location-to-editor-location xr-off yr-off)])
+                (values 
+                 xl
+                 yl
+                 xr 
+                 yr)))
             
             (define/private (get-arrow-poss arrow)
               (cond
@@ -552,7 +580,21 @@ If the namespace does not, they are colored the unbound color.
                 (void))
               (syncheck:add-menu text start-pos end-pos #f (make-require-open-menu file)))
             
-            (define/public (syncheck:add-docs-menu text start-pos end-pos id the-label path tag)
+            (define/public (syncheck:add-docs-menu text start-pos end-pos id the-label path definition-tag tag)
+              (define (visit-docs-url)
+                (define url (path->url path))
+                (define url2 (if tag
+                                 (make-url (url-scheme url)
+                                           (url-user url)
+                                           (url-host url)
+                                           (url-port url)
+                                           (url-path-absolute? url)
+                                           (url-path url)
+                                           (url-query url)
+                                           tag)
+                                 url))
+                (send-url (url->string url2)))
+              (syncheck:add-docs-range start-pos end-pos definition-tag visit-docs-url)
               (syncheck:add-menu 
                text start-pos end-pos id
                (λ (menu)
@@ -561,18 +603,7 @@ If the namespace does not, they are colored the unbound color.
                    (label (gui-utils:format-literal-label "~a" the-label))
                    (callback
                     (λ (x y)
-                      (let* ([url (path->url path)]
-                             [url2 (if tag
-                                       (make-url (url-scheme url)
-                                                 (url-user url)
-                                                 (url-host url)
-                                                 (url-port url)
-                                                 (url-path-absolute? url)
-                                                 (url-path url)
-                                                 (url-query url)
-                                                 tag)
-                                       url)])
-                        (send-url (url->string url2)))))))))
+                      (visit-docs-url)))))))
             
             (define/public (syncheck:add-rename-menu id-as-sym to-be-renamed/poss name-dup?)
               (define (make-menu menu)
@@ -770,19 +801,19 @@ If the namespace does not, they are colored the unbound color.
             
             (define view-corner-hash (make-weak-hasheq))
             
-            (define (get-last-view-corner admin)
+            (define/private (get-last-view-corner admin)
               (hash-ref view-corner-hash admin (λ () (cons #f #f))))
             
-            (define (set-last-view-corner! admin corner)
+            (define/private (set-last-view-corner! admin corner)
               (hash-set! view-corner-hash admin corner))
             
-            (define (get-view-corner admin)
+            (define/private (get-view-corner admin)
               (define new-x (box #f))
               (define new-y (box #f))
               (send admin get-view new-x new-y #f #f)
               (cons (unbox new-x) (unbox new-y)))
             
-            (define (update-view-corner admin)
+            (define/private (update-view-corner admin)
               (define old-corner (get-last-view-corner admin))
               (define new-corner (get-view-corner admin))
               (define scrolled? (not (equal? old-corner new-corner)))
@@ -936,19 +967,19 @@ If the namespace does not, they are colored the unbound color.
             ;; this gives errors if constructed immediately
             (define arrow-draw-timer #f)
             ;; Starts or restarts a one-shot arrow draw timer
-            (define (start-arrow-draw-timer delay-ms)
+            (define/private (start-arrow-draw-timer delay-ms)
               (unless arrow-draw-timer
-                (set! arrow-draw-timer (make-object timer% maybe-update-drawn-arrows)))
+                (set! arrow-draw-timer (make-object timer% (λ () (maybe-update-drawn-arrows)))))
               (send arrow-draw-timer start delay-ms #t))
             
             ;; this will be set to a time in the future if arrows shouldn't be drawn until then
             (define arrow-draw-cooldown-time (current-milliseconds))
             ;; Starts an arrow draw cooldown
-            (define (start-arrow-draw-cooldown delay-ms)
+            (define/private (start-arrow-draw-cooldown delay-ms)
               (set! arrow-draw-cooldown-time (+ (current-milliseconds) delay-ms)))
             
             ;; The arrow-draw-timer proc
-            (define (maybe-update-drawn-arrows)
+            (define/private (maybe-update-drawn-arrows)
               (cond
                 [(arrow-draw-cooldown-time . > . (current-milliseconds))
                  ;; keep restarting the timer until we pass cooldown-time
@@ -957,35 +988,42 @@ If the namespace does not, they are colored the unbound color.
                 [else
                  (update-drawn-arrows)]))
             
+            (define tooltips-enabled? #f)
+            (define/public (enable-tooltips x?)
+              (set! tooltips-enabled? x?)
+              (when (update-latent-arrows mouse-x mouse-y)
+                (start-arrow-draw-timer syncheck-arrow-delay)))
+            
             ;; Given a mouse position, updates latent-* variables and tooltips
-            (define (update-latent-arrows x y)
+            (define/private (update-latent-arrows x y)
               (define-values (pos text eles tooltip)
                 (cond
                   ;; need to check this first so syncheck:clear-arrows will work
                   [(not arrow-records)
                    (values #f #f #f #f)]
-                  [(and popup-menu (send popup-menu get-popup-target))
-                   (values latent-pos latent-text latent-eles latent-tooltip)]
                   [(and x y)
                    (define-values (pos text) (get-pos/text-dc-location x y))
                    (define arrow-record (and text pos (hash-ref arrow-records text #f)))
                    (define eles (and arrow-record (interval-map-ref arrow-record pos null)))
-                   (define tooltip (cond [(equal? latent-eles eles) latent-tooltip]
+                   (define tooltip (cond [(not tooltips-enabled?) #f]
+                                         [(and (equal? latent-eles eles) latent-tooltip)
+                                          latent-tooltip]
                                          [else (get-tooltip eles)]))
                    (values pos text eles tooltip)]
                   [else
                    (values #f #f #f #f)]))
               (define text-changed? (not (eq? latent-text text)))
               (define eles-changed? (not (equal? latent-eles eles)))
+              (define tooltip-changed? (not (equal? latent-tooltip tooltip)))
               
               (set! latent-pos pos)
               (set! latent-text text)
               (set! latent-eles eles)
               (set! latent-tooltip tooltip)
               
-              (or text-changed? eles-changed?))
+              (or text-changed? eles-changed? tooltip-changed?))
             
-            (define (update-drawn-arrows)
+            (define/private (update-drawn-arrows)
               (set! cursor-pos latent-pos)
               (set! cursor-text latent-text)
               (set! cursor-eles latent-eles)
@@ -996,7 +1034,6 @@ If the namespace does not, they are colored the unbound color.
               
               (invalidate-bitmap-cache))
             
-            (define popup-menu #f)
             (define mouse-admin #f)  ; editor admin for the last mouse move
             (define mouse-x #f)      ; last known mouse position
             (define mouse-y #f)
@@ -1017,18 +1054,7 @@ If the namespace does not, they are colored the unbound color.
               (when (update-latent-arrows x y)
                 (start-arrow-draw-timer syncheck-arrow-delay))
               
-              (let/ec break
-                (when (and arrow-records (send event button-down? 'right))
-                  (define menu
-                    (let-values ([(pos text) (get-pos/text event)])
-                      (syncheck:build-popup-menu pos text)))
-                  (when menu
-                    (set! popup-menu menu)
-                    (send (get-canvas) popup-menu menu
-                          (+ 1 (inexact->exact (floor x)))
-                          (+ 1 (inexact->exact (floor y))))
-                    (break (void))))
-                (super on-event event)))
+              (super on-event event))
             
             (define/public (syncheck:update-drawn-arrows)
               ;; This will ensure on-paint is called, once for each canvas that
@@ -1038,94 +1064,86 @@ If the namespace does not, they are colored the unbound color.
               ;; If this were done more directly, the tooltip would show up in
               ;; the wrong canvas half the time - when the current admin isn't
               ;; the admin for the canvas the mouse is over.
-              (invalidate-bitmap-cache))
+              (invalidate-bitmap-cache 0 0 'display-end 'display-end))
             
-            (define/public (syncheck:build-popup-menu pos text)
-              (and pos
-                   (is-a? text text%)
-                   (let ([arrow-record (hash-ref arrow-records text #f)])
-                     (and arrow-record
-                          (let ([vec-ents (interval-map-ref arrow-record pos null)]
-                                [start-selection (send text get-start-position)]
-                                [end-selection (send text get-end-position)])
-                            (cond
-                              [(and (null? vec-ents) (= start-selection end-selection))
-                               #f]
-                              [else
-                               (let* ([menu (make-object popup-menu% #f)]
-                                      [arrows (filter arrow? vec-ents)]
-                                      [def-links (filter def-link? vec-ents)]
-                                      [var-arrows (filter var-arrow? arrows)]
-                                      [add-menus (append (map cdr (filter pair? vec-ents))
-                                                         (filter procedure? vec-ents))])
-                                 (unless (null? arrows)
-                                   (make-object menu-item%
-                                     (string-constant cs-tack/untack-arrow)
-                                     menu
-                                     (λ (item evt) (tack/untack-callback arrows))))
-                                 (unless (null? def-links)
-                                   (let ([def-link (car def-links)])
-                                     (make-object menu-item%
-                                       jump-to-definition
-                                       menu
-                                       (λ (item evt)
-                                         (jump-to-definition-callback def-link)))))
-                                 (unless (null? var-arrows)
-                                   (make-object menu-item%
-                                     jump-to-next-bound-occurrence
-                                     menu
-                                     (λ (item evt) (jump-to-next-callback pos text arrows)))
-                                   (make-object menu-item%
-                                     jump-to-binding
-                                     menu
-                                     (λ (item evt) (jump-to-binding-callback arrows))))
-                                 (unless (= start-selection end-selection)
-                                   (let ([arrows-menu
-                                          (make-object menu%
-                                            "Arrows crossing selection"
-                                            menu)]
-                                         [callback
-                                          (lambda (accept)
-                                            (tack-crossing-arrows-callback
-                                             arrow-record
-                                             start-selection
-                                             end-selection
-                                             text
-                                             accept))])
-                                     (make-object menu-item%
-                                       "Tack arrows"
-                                       arrows-menu
-                                       (lambda (item evt)
-                                         (callback
-                                          '(lexical top-level imported))))
-                                     (make-object menu-item%
-                                       "Tack non-import arrows"
-                                       arrows-menu
-                                       (lambda (item evt)
-                                         (callback
-                                          '(lexical top-level))))
-                                     (make-object menu-item%
-                                       "Untack arrows"
-                                       arrows-menu
-                                       (lambda (item evt)
-                                         (untack-crossing-arrows
-                                          arrow-record
-                                          start-selection
-                                          end-selection)))))
-                                 (for-each (λ (f) (f menu)) add-menus)
-                                 
-                                 (drracket:unit:add-search-help-desk-menu-item
-                                  text
-                                  menu
-                                  pos
-                                  (λ () (new separator-menu-item% [parent menu])))
-                               
-                                 menu)]))))))
-            
-            (struct tooltip-spec (strings x y w h) #:transparent)
+            (define/public (syncheck:build-popup-menu menu pos text)
+              (when arrow-records
+                (define arrow-record (hash-ref arrow-records text #f))
+                (when arrow-record
+                  (define added-sep? #f)
+                  (define (add-sep) 
+                    (unless added-sep? 
+                      (set! added-sep? #t)
+                      (new separator-menu-item% [parent menu])))
+                  (define vec-ents (interval-map-ref arrow-record pos null))
+                  (define start-selection (send text get-start-position))
+                  (define end-selection (send text get-end-position))
+                  (define arrows (filter arrow? vec-ents))
+                  (define def-links (filter def-link? vec-ents))
+                  (define var-arrows (filter var-arrow? arrows))
+                  (define add-menus (append (map cdr (filter pair? vec-ents))
+                                            (filter procedure? vec-ents)))
+                  (unless (null? arrows)
+                    (add-sep)
+                    (make-object menu-item%
+                      (string-constant cs-tack/untack-arrow)
+                      menu
+                      (λ (item evt) (tack/untack-callback arrows))))
+                  (unless (null? def-links)
+                    (add-sep)
+                    (let ([def-link (car def-links)])
+                      (make-object menu-item%
+                        jump-to-definition
+                        menu
+                        (λ (item evt)
+                          (jump-to-definition-callback def-link)))))
+                  (unless (null? var-arrows)
+                    (add-sep)
+                    (make-object menu-item%
+                      jump-to-next-bound-occurrence
+                      menu
+                      (λ (item evt) (jump-to-next-callback pos text arrows)))
+                    (make-object menu-item%
+                      jump-to-binding
+                      menu
+                      (λ (item evt) (jump-to-binding-callback arrows))))
+                  (unless (= start-selection end-selection)
+                    (add-sep)
+                    (define arrows-menu
+                      (make-object menu%
+                        "Arrows crossing selection"
+                        menu))
+                    (define (callback accept)
+                      (tack-crossing-arrows-callback
+                       arrow-record
+                       start-selection
+                       end-selection
+                       text
+                       accept))
+                    (make-object menu-item%
+                      "Tack arrows"
+                      arrows-menu
+                      (lambda (item evt)
+                        (callback
+                         '(lexical top-level imported))))
+                    (make-object menu-item%
+                      "Tack non-import arrows"
+                      arrows-menu
+                      (lambda (item evt)
+                        (callback
+                         '(lexical top-level))))
+                    (make-object menu-item%
+                      "Untack arrows"
+                      arrows-menu
+                      (lambda (item evt)
+                        (untack-crossing-arrows
+                         arrow-record
+                         start-selection
+                         end-selection))))
+                  (for-each (λ (f) (f menu)) add-menus))))
             
             (define tooltip-frame #f)
-            (define (update-tooltip-frame)
+            (define/private (update-tooltip-frame)
               (unless tooltip-frame (set! tooltip-frame (new tooltip-frame%)))
               (match cursor-tooltip
                 [(tooltip-spec strings x y w h)
@@ -1168,7 +1186,7 @@ If the namespace does not, they are colored the unbound color.
             
             ;; Given an editor, returns the canvas that the mouse is currently over,
             ;; as opposed to the one with keyboard focus (which get-canvas usually returns)
-            (define (find-mouse-canvas ed)
+            (define/private (find-mouse-canvas ed)
               (define current-admin (send ed get-admin))
               (let/ec return
                 (for ([canvas  (in-list (send ed get-canvases))])
@@ -1179,17 +1197,14 @@ If the namespace does not, they are colored the unbound color.
                 (send ed get-canvas)))
             
             (define/private (tooltip-info->ltrb tooltip)
-              (define xlb (box 0))
-              (define ylb (box 0))
-              (define xrb (box 0))
-              (define yrb (box 0))
               (define left-pos (tooltip-info-pos-left tooltip))
               (define right-pos (tooltip-info-pos-right tooltip))
               (define text (tooltip-info-text tooltip))
-              (send text position-location left-pos xlb ylb #t)
-              (send text position-location right-pos xrb yrb #f)
-              (define-values (xl-off yl-off) (send text editor-location-to-dc-location (unbox xlb) (unbox ylb)))
-              (define-values (xr-off yr-off) (send text editor-location-to-dc-location (unbox xrb) (unbox yrb)))
+              
+              (define eol-pos (line-end-position (position-line right-pos)))
+              
+              (send text position-location eol-pos xlb ylb #t #t)
+              (define-values (x-off y-off) (send text editor-location-to-dc-location (+ (unbox xlb) 4) (unbox ylb)))
               (define window
                 (let loop ([ed text])
                   (cond
@@ -1202,12 +1217,8 @@ If the namespace does not, they are colored the unbound color.
               (cond
                 [window
                  (define (c n) (inexact->exact (round n)))
-                 (define-values (glx gly) (send window client->screen (c xl-off) (c yl-off)))
-                 (define-values (grx gry) (send window client->screen (c xr-off) (c yr-off)))
-                 (values (min glx grx)
-                         (min gly gry)
-                         (max glx grx)
-                         (max gly gry))]
+                 (define-values (gx gy) (send window client->screen (c x-off) (c y-off)))
+                 (values gx gy gx gy)]
                 [else
                  (values #f #f #f #f)]))
             
@@ -1406,6 +1417,15 @@ If the namespace does not, they are colored the unbound color.
             
             (super-new)))))
     
+    (keymap:add-to-right-button-menu
+     (let ([old (keymap:add-to-right-button-menu)])
+       (λ (menu editor event)
+         (old menu editor event)
+         (when (is-a? editor syncheck-text<%>)
+           (define-values (pos text) (send editor get-pos/text event))
+           (when (and pos (is-a? text text%))
+             (send editor syncheck:build-popup-menu menu pos text))))))
+            
     (define syncheck-frame<%>
       (interface ()
         syncheck:button-callback
@@ -1481,6 +1501,8 @@ If the namespace does not, they are colored the unbound color.
         
         (define/augment (on-tab-change old-tab new-tab)
           (inner (void) on-tab-change old-tab new-tab)
+          (send (send old-tab get-defs) enable-tooltips #f)
+          (send (send new-tab get-defs) enable-tooltips #t)
           (send (send old-tab get-defs) syncheck:update-drawn-arrows)
           (send (send new-tab get-defs) syncheck:update-drawn-arrows)
           (if (send new-tab get-error-report-visible?)
@@ -1488,6 +1510,12 @@ If the namespace does not, they are colored the unbound color.
               (hide-error-report))
           (send report-error-canvas set-editor (send new-tab get-error-report-text))
           (update-button-visibility/tab new-tab))
+        
+        (define/override (on-activate active?)
+          (define defs (send (get-current-tab) get-defs))
+          (send defs enable-tooltips active?)
+          (send defs syncheck:update-drawn-arrows)
+          (super on-activate active?))
         
         (define/private (update-button-visibility/tab tab)
           (update-button-visibility/settings (send (send tab get-defs) get-next-settings)))
@@ -1547,7 +1575,8 @@ If the namespace does not, they are colored the unbound color.
             ;; reset any previous check syntax information
             (let ([tab (get-current-tab)])
               (send tab syncheck:clear-error-message)
-              (send tab syncheck:clear-highlighting))
+              (send tab syncheck:clear-highlighting)
+              (send defs-text syncheck:reset-docs-im))
             
             (send (send defs-text get-tab) add-bkg-running-color 'syncheck "orchid" cs-syncheck-running)
             (send defs-text syncheck:init-arrows)
@@ -1555,6 +1584,7 @@ If the namespace does not, they are colored the unbound color.
                        [i 0])
               (cond
                 [(null? val)
+                 (send defs-text syncheck:update-blue-boxes)
                  (send defs-text syncheck:update-drawn-arrows)
                  (send (send defs-text get-tab) remove-bkg-running-color 'syncheck)
                  (set-syncheck-running-mode #f)]
@@ -1589,8 +1619,8 @@ If the namespace does not, they are colored the unbound color.
              (send defs-text syncheck:add-jump-to-definition defs-text start end id filename)]
             [`(syncheck:add-require-open-menu ,text ,start-pos ,end-pos ,file)
              (send defs-text syncheck:add-require-open-menu defs-text start-pos end-pos file)]
-            [`(syncheck:add-docs-menu ,text ,start-pos ,end-pos ,key ,the-label ,path ,tag)
-             (send defs-text syncheck:add-docs-menu defs-text start-pos end-pos key the-label path tag)]
+            [`(syncheck:add-docs-menu ,text ,start-pos ,end-pos ,key ,the-label ,path ,definition-tag ,tag)
+             (send defs-text syncheck:add-docs-menu defs-text start-pos end-pos key the-label path definition-tag tag)]
             [`(syncheck:add-rename-menu ,id-as-sym ,to-be-renamed/poss ,name-dup-pc ,name-dup-id)
              (define other-side-dead? #f)
              (define (name-dup? name) 
@@ -1987,7 +2017,12 @@ If the namespace does not, they are colored the unbound color.
       (send keymap map-function "c:c;c:c" "check syntax")
       (send keymap map-function "c:x;b" "jump to binding occurrence")
       (send keymap map-function "c:x;n" "jump to next bound occurrence")
-      (send keymap map-function "c:x;d" "jump to definition (in other file)"))
+      (send keymap map-function "c:x;d" "jump to definition (in other file)")
+      
+      (send keymap add-function "show/hide blue boxes in upper-right corner"
+            (λ (txt evt)
+              (send txt toggle-syncheck-docs)))
+      (send keymap map-function "f2" "show/hide blue boxes in upper-right corner"))
     
     ;; find-syncheck-text : text% -> (union #f (is-a?/c syncheck-text<%>))
     (define (find-syncheck-text text)
@@ -2024,15 +2059,16 @@ If the namespace does not, they are colored the unbound color.
                                              syncheck-add-to-preferences-panel)
     (drracket:language:register-capability 'drscheme:check-syntax-button (flat-contract boolean?) #t)
     (drracket:get/extend:extend-definitions-text make-syncheck-text%)
+    (drracket:get/extend:extend-definitions-canvas docs-editor-canvas-mixin)
     (drracket:get/extend:extend-unit-frame unit-frame-mixin #f)
     (drracket:get/extend:extend-tab tab-mixin)
     
     (drracket:module-language-tools:add-online-expansion-handler
-     compile-comp.rkt
+     online-comp.rkt
      'go
      (λ (defs-text val) (send (send (send defs-text get-canvas) get-top-level-window)
                               replay-compile-comp-trace
                               defs-text 
                               val)))))
 
-(define-runtime-path compile-comp.rkt "online-comp.rkt")
+(define-runtime-path online-comp.rkt "online-comp.rkt")

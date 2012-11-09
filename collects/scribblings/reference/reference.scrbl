@@ -79,6 +79,11 @@ The @racketmodname[racket] library combines
 
 @(bibliography
 
+  (bib-entry #:key "C99"
+             #:author "ISO/IEC"
+             #:title "ISO/IEC 9899:1999 Cor. 3:2007(E))"
+             #:date "2007")
+
   (bib-entry #:key "Danvy90"
              #:author "Olivier Danvy and Andre Filinski"
              #:title "Abstracting Control"
@@ -115,6 +120,12 @@ The @racketmodname[racket] library combines
             #:title "A Generalization of Exceptions and Control in ML-like Languages"
             #:location "Functional Programming Languages and Computer Architecture"
             #:date "1995")
+
+ (bib-entry #:key "Haynes84"
+            #:author "Christopher T. Haynes and Daniel P. Friedman"
+            #:title "Engines Build Process Abstractions"
+            #:location "Symposium on LISP and Functional Programming"
+            #:date "1984")
  
  (bib-entry #:key "Hayes97"
             #:author "Barry Hayes"
@@ -171,12 +182,12 @@ The @racketmodname[racket] library combines
              #:url "http://srfi.schemers.org/srfi-42/"
              #:date "2003")
 
-  (bib-entry #:key "Waddell99"
-             #:author "Oscar Waddell and R. Kent Dybvig"
-             #:title "Extending the Scope of Syntactic Abstraction"
-             #:location "Principles of Programming Languages"
-             #:date "1999")
-
+  (bib-entry #:key "Strickland12"
+             #:title "Chaperones and Impersonators: Run-time Support for Reasonable Interposition"
+             #:author "T. Stephen Strickland, Sam Tobin-Hochstadt, Matthew Flatt, and Robert Bruce Findler"
+             #:location "Object-Oriented Programming, Systems, and Languages (OOPSLA"
+             #:url "http://www.eecs.northwestern.edu/~robby/pubs/papers/oopsla2012-stff.pdf"
+             #:date "2012")
   )
 
 @;------------------------------------------------------------------------

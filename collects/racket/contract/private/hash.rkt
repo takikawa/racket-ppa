@@ -82,22 +82,22 @@
   (define immutable (base-hash/c-immutable ctc))
   (define flat? (flat-hash/c? ctc))
   (unless (hash? val)
-    (raise-blame-error blame val '(expected "a hash," given: "~e") val))
+    (raise-blame-error blame val '(expected "a hash" given: "~e") val))
   (when (and (not flat?)
              (not (flat-contract? dom-ctc))
              (not (hash-equal? val)))
     (raise-blame-error blame val 
-                       '(expected "equal?-based hash table due to higher-order domain contract," given: "~e")
+                       '(expected "equal?-based hash table due to higher-order domain contract" given: "~e")
                        val))
   (case immutable
     [(#t) 
      (unless (immutable? val) 
        (raise-blame-error blame val
-                          '(expected "an immutable hash," given: "~e") val))]
+                          '(expected "an immutable hash" given: "~e") val))]
     [(#f)
      (when (immutable? val)
        (raise-blame-error blame val
-                          '(expected "a mutable hash," given: "~e") val))]
+                          '(expected "a mutable hash" given: "~e") val))]
     [(dont-care) (void)]))
 
 (define (hash/c-first-order ctc)
@@ -169,7 +169,7 @@
         (define neg-rng-proj (rng-proc (blame-add-context blame "the values of" #:swap? #t)))
         (λ (val)
           (check-hash/c ctc val blame)
-          (if (immutable? val)
+          (if (and (immutable? val) (not (chaperone? val)))
               (let ([hash-maker
                      (cond
                        [(hash-equal? val) make-immutable-hash]

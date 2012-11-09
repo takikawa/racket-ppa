@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require racket/mpair)
+(require compatibility/mlist)
 (define SIZE 10000)
 
 (define (sequence start stop)

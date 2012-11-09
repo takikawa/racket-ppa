@@ -1,18 +1,19 @@
 #lang racket/base
 
 (require (rename-in "../utils/utils.rkt" [infer infer-in]))
-(require (rename-in (types subtype convenience remove-intersect union)
+(require (rename-in (types subtype abbrev remove-intersect union)
                     [-> -->]
                     [->* -->*]
                     [one-of/c -one-of/c])
          (infer-in infer)
-         (rep type-rep object-rep)
+         (rep type-rep filter-rep object-rep)
          (utils tc-utils)
          (types resolve)
          (only-in (env type-env-structs lexical-env)
                   env? update-type/lexical env-map env-props replace-props)
          racket/contract racket/match
          unstable/struct
+         unstable/list
          "tc-metafunctions.rkt"
          (for-syntax racket/base))
 
@@ -38,7 +39,7 @@
      (make-Syntax (update t (-not-filter u x rst)))]
 
     ;; struct ops
-    [((Struct: nm par flds proc poly pred cert maker-id)
+    [((Struct: nm par flds proc poly pred)
       (TypeFilter: u (list rst ... (StructPE: (? (lambda (s) (subtype t s)) s) idx)) x))
      (make-Struct nm par
                   (list-update flds idx
@@ -47,8 +48,8 @@
                                             (update e (-filter u x rst))
                                             acc-id #f)]
                                           [_ (int-err "update on mutable struct field")]))
-                  proc poly pred cert maker-id)]
-    [((Struct: nm par flds proc poly pred cert maker-id)
+                  proc poly pred)]
+    [((Struct: nm par flds proc poly pred)
       (NotTypeFilter: u (list rst ... (StructPE: (? (lambda (s) (subtype t s)) s) idx)) x))
      (make-Struct nm par (list-update flds idx
                                       (match-lambda [(fld: e acc-id #f)
@@ -56,7 +57,7 @@
                                                       (update e (-not-filter u x rst))
                                                       acc-id #f)]
                                           [_ (int-err "update on mutable struct field")]))
-                  proc poly pred cert maker-id)]
+                  proc poly pred)]
 
     ;; otherwise
     [(t (TypeFilter: u (list) _))

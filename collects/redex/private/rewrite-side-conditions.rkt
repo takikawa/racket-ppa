@@ -3,6 +3,7 @@
   (require mzlib/list
            "underscore-allowed.rkt")
   (require "term.rkt"
+           "term-fn.rkt"
            setup/path-to-relative
            (for-template
             mzscheme
@@ -17,18 +18,6 @@
            language-id-nts)
   
   (provide (struct-out id/depth))
-  
-  (define-values (language-id make-language-id language-id? language-id-get language-id-set) (make-struct-type 'language-id #f 2 0 #f '() #f 0))
-  
-  (define (language-id-nts stx id) (language-id-getter stx id 1))
-  (define (language-id-getter stx id n)
-    (unless (identifier? stx)
-      (raise-syntax-error id "expected an identifier defined by define-language" stx))
-    (let ([val (syntax-local-value stx (λ () #f))])
-      (unless (and (set!-transformer? val)
-                   (language-id? (set!-transformer-procedure val)))
-        (raise-syntax-error id "expected an identifier defined by define-language" stx))
-      (language-id-get (set!-transformer-procedure val) n)))
   
   (define (rewrite-side-conditions/check-errs all-nts what bind-names? orig-stx)
     (define (expected-exact name n stx)
@@ -51,6 +40,7 @@
         (if (and par (not (eq? chd par))) (recur par (hash-ref sets par #f)) chd)))
     
     (define last-contexts (make-hasheq))
+    (define last-stx (make-hasheq)) ;; used for syntax error reporting
     (define assignments #hasheq())
     (define (record-binder pat-stx under)
       (define pat-sym (syntax->datum pat-stx))
@@ -58,11 +48,25 @@
             (if (null? under)
                 assignments
                 (let ([last (hash-ref last-contexts pat-sym #f)])
-                  (if last
-                      (foldl (λ (cur last asgns) (union cur last asgns)) assignments under last)
-                      (begin
-                        (hash-set! last-contexts pat-sym under)
-                        assignments))))))
+                  (hash-set! last-stx pat-sym (cons pat-stx (hash-ref last-stx pat-sym '())))
+                  (cond
+                    [last
+                     (unless (equal? (length last) (length under))
+                       (define stxs (hash-ref last-stx pat-sym))
+                       (raise-syntax-error what
+                                           (format "found ~a under ~a ellips~as in one place and ~a ellips~as in another"
+                                                   pat-sym
+                                                   (length last)
+                                                   (if (= 1 (length last)) "i" "e")
+                                                   (length under)
+                                                   (if (= 1 (length under)) "i" "e"))
+                                           orig-stx
+                                           (car stxs)
+                                           (cdr stxs)))
+                     (foldl (λ (cur last asgns) (union cur last asgns)) assignments under last)]
+                    [else
+                     (hash-set! last-contexts pat-sym under)
+                     assignments])))))
 
     (define ellipsis-number 0)
     

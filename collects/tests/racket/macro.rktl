@@ -762,8 +762,47 @@
                exn:fail?))
 
 ;; ----------------------------------------
+;; Check that the `syntax' macro adds a
+;; 'disappeared-use property that is
+;; original (if it should be):
+
+(parameterize ([current-namespace (make-base-namespace)])
+  (define stx (expand #'(with-syntax ([x 1]) #'x)))
+  (let sloop ([stx stx]
+              [in-prop? #f])
+    (cond
+     [(and (identifier? stx)
+           (eq? 'x (syntax-e stx)))
+      (when in-prop?
+        (test #t syntax-original? stx))]
+     [(syntax? stx)
+      (sloop (syntax-property stx 'disappeared-use) #t)
+      (sloop (syntax-e stx) in-prop?)]
+     [(pair? stx)
+      (sloop (car stx) in-prop?)
+      (sloop (cdr stx) in-prop?)])))
+
+;; ----------------------------------------
 
 (err/rt-test (syntax-local-lift-require 'abc #'def))
+
+;; ----------------------------------------
+
+(let ()
+  (define stx
+    (expand #'(module m racket
+                (require (only-in racket/list first)))))
+  
+  (define r/ls
+    (syntax-case stx ()
+      [(_mod _m _racket
+             (_mod-begin (_req (_just-meta _0 (_rename rl1 . _whatever))
+                               (_only rl2))))
+       (list #'rl1 #'rl2)]))
+  
+  (test (list #t #t) map syntax-original? r/ls)
+  (test (list #t #t) map number? (map syntax-position r/ls)))
+
 
 ;; ----------------------------------------
 

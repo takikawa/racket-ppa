@@ -14,15 +14,14 @@
           define lambda λ)
          (typecheck typechecker)
          (rep type-rep filter-rep object-rep)
-         (rename-in (types utils union convenience abbrev filter-ops)
+         (rename-in (types utils union numeric-tower abbrev filter-ops)
                     [Un t:Un]
                     [true-lfilter -true-lfilter]
                     [true-filter -true-filter]
                     [-> t:->])
-         (except-in (utils tc-utils utils) infer)
-         typed-racket/infer/infer-dummy typed-racket/infer/infer
+         (utils tc-utils utils)
          (utils mutated-vars)
-         (env type-name-env type-env-structs init-envs)
+         (env type-name-env type-env-structs init-envs mvar-env)
          rackunit rackunit/text-ui
          syntax/parse
          (for-syntax (utils tc-utils) racket/file racket/port
@@ -74,24 +73,20 @@
     [(_ e)
      #`(parameterize ([delay-errors? #f]
                       [current-namespace (namespace-anchor->namespace anch)]
-                      [custom-printer #t]
-                      [infer-param infer]
                       [orig-module-stx (quote-syntax e)])
          (let ([ex (expand 'e)])
-           (parameterize ([mutated-vars (find-mutated-vars ex)])
-             (values (lambda () (tc-expr ex)) ex))))]))
+	   (find-mutated-vars ex mvar-env)
+           (values (lambda () (tc-expr ex)) ex)))]))
 
 (define-syntax (tc-expr/expand stx)
   (syntax-case stx ()
     [(_ e)
      #`(parameterize ([delay-errors? #f]
                       [current-namespace (namespace-anchor->namespace anch)]
-                      [custom-printer #t]
-                      [infer-param infer]
                       [orig-module-stx (quote-syntax e)])
          (let ([ex (expand 'e)])
-           (parameterize ([mutated-vars (find-mutated-vars ex)])
-             (tc-expr ex))))]))
+           (find-mutated-vars ex mvar-env)
+           (tc-expr ex)))]))
 
 ;; check that an expression typechecks correctly
 (define-syntax (tc-e stx)
@@ -208,10 +203,14 @@
         (tc-e (lcm (ann 3 Integer) -1/2) -NonNegRat)
         (tc-e (expt 0.5 0.3) -PosFlonum)
         (tc-e (expt 0.5 2) -PosFlonum)
-        (tc-e (expt 0.5 0) -PosReal)
+        (tc-e (expt 0.5 0) -PosFlonum)
         (tc-e (flexpt 0.5 0.3) -NonNegFlonum)
         (tc-e (flexpt 0.00000000001 100000000000.0) -NonNegFlonum)
         (tc-e (flexpt -2.0 -0.5) -Flonum) ; NaN
+        (tc-e (angle -1) -Real)
+        (tc-e (angle 2.3) -Zero)
+        (tc-e (magnitude 3/4) -Rat)
+        (tc-e (magnitude 3+2i) -Real)
 
         [tc-e/t (lambda: () 3) (t:-> -PosByte : -true-lfilter)]
         [tc-e/t (lambda: ([x : Number]) 3) (t:-> N -PosByte : -true-lfilter)]
@@ -772,6 +771,11 @@
                        (if (number? x)
                            (begin (f) (add1 x))
                            12))]
+
+        [tc-err (ann 3 (Rec a a))]
+        [tc-err (ann 3 (Rec a (U a 3)))]
+        [tc-err (ann 3 (Rec a (Rec b a)))]
+
         #;
         [tc-err (lambda: ([x : Any])
                          (if (number? (not (not x)))
@@ -1501,6 +1505,10 @@
               Univ]
         [tc-e ((inst vector Index) 0)
               (-vec -Index)]
+        [tc-err ((inst list Void) 1 2 3)]
+        [tc-e ((inst list Any) 1 2 3)
+              (-lst Univ)]
+
         )
   (test-suite
    "check-type tests"

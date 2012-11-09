@@ -69,6 +69,7 @@
                          (cons/c (list/c 'main)
                                  (cons/c (list/c 'test)
                                          (listof (listof symbol?)))))
+(preferences:set-default 'drracket:defs/ints-labels #t boolean?)
 
 (drr:set-default 'drracket:language-dialog:hierlist-default #f (λ (x) (or (not x) (and (list? x) (andmap string? x)))))
 
@@ -115,8 +116,8 @@
 
 (drr:set-default 'drracket:child-only-memory-limit (* 1024 1024 128)
                          (λ (x) (or (boolean? x)
-                                    (integer? x)
-                                    (x . >= . (* 1024 1024 1)))))
+                                    (exact-integer? x)
+                                    (x . >= . (* 1024 1024 8)))))
 
 (drr:set-default 'drracket:recent-language-names 
                          null 
@@ -312,6 +313,10 @@
                      (string-constant show-line-numbers)
                      editor-panel)
      
+     (make-check-box 'drracket:defs/ints-labels
+                     (string-constant show-defs/ints-label)
+                     editor-panel)
+     
      ;; come back to this one.
      #;
      (letrec ([hp (new horizontal-panel% 
@@ -498,7 +503,7 @@
                   lang
                   (or settings (send lang default-settings)))))))))
 
-  (preferences:set-default 'drracket:online-compilation-default-off #f boolean?)
+  (preferences:set-default 'drracket:online-compilation-default-on #t boolean?)
   (preferences:set-default 'drracket:online-expansion:read-in-defs-errors 
                            'corner
                            (or/c 'margin 'gold 'corner))
@@ -545,17 +550,15 @@
                            (λ (x) (and (pair? x)
                                        (number? (car x))
                                        (number? (cdr x)))))
+  (drr:set-default 'drracket:multi-file-search:directories 
+                   '()
+                   (lambda (x) (and (list? x) (andmap string? x))))
   (drr:set-default 'drracket:multi-file-search:directory 
                            ;; The default is #f because
                            ;; filesystem-root-list is expensive under Windows
                            #f 
-                           (lambda (x) (or (not x) (path? x))))
-  (preferences:set-un/marshall 
-   'drracket:multi-file-search:directory
-   (λ (v) (and v (path->string v)))
-   (λ (p) (if (path-string? p)
-              (string->path p)
-              #f)))
+                           (lambda (x) (or (not x) (string? x))))
+
   
   (drr:set-default 'drracket:large-letters-font #f (λ (x)
                                                        (or (and (pair? x)

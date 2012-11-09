@@ -39,7 +39,7 @@ Scheme_Object *scheme_fsemaphore_p(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *futures_enabled(int argc, Scheme_Object *argv[])
 {
-#ifdef MZ_USE_FUTURESRACKET  
+#ifdef MZ_USE_FUTURES
   return scheme_true;
 #else 
   return scheme_false;
@@ -156,7 +156,7 @@ static Scheme_Object *processor_count(int argc, Scheme_Object *argv[])
   return scheme_make_integer(1);
 }
 
-int scheme_is_multiprocessor(int now)
+int scheme_is_multithreaded(int now)
 {
   return 0;
 }
@@ -966,9 +966,7 @@ static Scheme_Object *reset_future_logs_for_tracking(int argc, Scheme_Object **a
   Scheme_Future_State *fs;
   Scheme_Future_Thread_State *fts;
   Scheme_Future_Thread_State *rt_fts;
-  Scheme_Logger *logger;
 
-  logger = scheme_main_logger;
   fs = scheme_future_state;
   rt_fts = scheme_future_thread_state;
   if (fs) {
@@ -1073,13 +1071,13 @@ static void end_traversal(Fevent_Buffer *b)
 }
 
 static void log_future_event(Scheme_Future_State *fs, 
-                                         const char *msg_str, 
-                                         const char *extra_str, 
-                                         int which, 
-                                         int what, 
-                                         double timestamp, 
-                                         int fid, 
-                                         Scheme_Object *user_data) 
+                             const char *msg_str, 
+                             const char *extra_str, 
+                             int which, 
+                             int what, 
+                             double timestamp, 
+                             int fid, 
+                             Scheme_Object *user_data) 
 {
   Scheme_Object *data, *v;
 
@@ -1109,7 +1107,7 @@ static void log_future_event(Scheme_Future_State *fs,
 
   ((Scheme_Structure *)data)->slots[5] = user_data;
   
-  scheme_log_w_data(scheme_main_logger, SCHEME_LOG_DEBUG, 0,
+  scheme_log_w_data(scheme_get_future_logger(), SCHEME_LOG_DEBUG, 0,
                     data,                 
                     msg_str,
                     fid,
@@ -1125,7 +1123,7 @@ static Scheme_Object *mark_future_trace_end(int argc, Scheme_Object **argv)
   Scheme_Future_State *fs;
   fs = scheme_future_state;
   log_future_event(fs,
-                   "future %d, process %d: %s: %s; time: %f",
+                   "id %d, process %d: %s: %s; time: %f",
                    "tracing",
                    -1, 
                    FEVENT_STOP_TRACE, 
@@ -1139,7 +1137,7 @@ static Scheme_Object *mark_future_trace_end(int argc, Scheme_Object **argv)
 static void log_overflow_event(Scheme_Future_State *fs, int which, double timestamp)
 {
   log_future_event(fs,
-                   "future ??%-, process %d: %s%s; before time: %f",
+                   "id ??%-, process %d: %s%s; before time: %f",
                    "",
                    which, 
                    FEVENT_MISSING, 
@@ -1156,7 +1154,7 @@ static void flush_future_logs(Scheme_Future_State *fs)
   Fevent_Buffer *b, *min_b;
   Scheme_Object *data_val;
 
-  if (scheme_log_level_p(scheme_main_logger, SCHEME_LOG_DEBUG)) {
+  if (scheme_log_level_p(scheme_get_future_logger(), SCHEME_LOG_DEBUG)) {
     /* Hold lock while swapping buffers: */
     mzrt_mutex_lock(fs->future_mutex);
     for (i = 0; i < fs->thread_pool_size; i++) {
@@ -1225,7 +1223,7 @@ static void flush_future_logs(Scheme_Future_State *fs)
 
       data_val = scheme_make_integer(min_b->a[min_b->i].data);
       log_future_event(fs,
-                       "future %d, process %d: %s%s; time: %f",
+                       "id %d, process %d: %s%s; time: %f",
                        "",
                        min_which, 
                        min_b->a[min_b->i].what, 
@@ -2097,7 +2095,7 @@ Scheme_Object *touch(int argc, Scheme_Object *argv[])
       Scheme_Object *targid_obj;
       targid_obj = scheme_make_integer(targ_ft->id);
       log_future_event(fs,
-                       "future %d, process %d: %s: %s; time: %f",
+                       "id %d, process %d: %s: %s; time: %f",
                        "touch",
                        -1, 
                        FEVENT_RTCALL_TOUCH, 
@@ -2187,17 +2185,14 @@ static void init_cpucount(void)
 #endif
 }
 
-int scheme_is_multiprocessor(int now)
+int scheme_is_multithreaded(int now)
 {
-  if (cpucount > 1) {
-    if (!now) 
-      return 1;
-    else {
-      Scheme_Future_State *fs = scheme_future_state;
-      return (fs && fs->future_threads_created);
-    }
-  } else
-    return 0;
+  if (!now)
+    return 1;
+  else {
+    Scheme_Future_State *fs = scheme_future_state;
+    return (fs && fs->future_threads_created);
+  }
 }
 
 Scheme_Object *processor_count(int argc, Scheme_Object *argv[])
@@ -3354,7 +3349,7 @@ static void do_invoke_rtcall(Scheme_Future_State *fs, future_t *future)
   g_rtcall_count++;
 #endif
 
-  if (scheme_log_level_p(scheme_main_logger, SCHEME_LOG_DEBUG)) {
+  if (scheme_log_level_p(scheme_get_future_logger(), SCHEME_LOG_DEBUG)) {
     const char *src;
     Scheme_Object *userdata;
 
@@ -3398,7 +3393,7 @@ static void do_invoke_rtcall(Scheme_Future_State *fs, future_t *future)
       }
 
     log_future_event(fs,
-                      "future %d, process %d: %s: %s; time: %f",
+                      "id %d, process %d: %s: %s; time: %f",
                       src,
                       -1, 
                       (future->rt_prim_is_atomic ? FEVENT_HANDLE_RTCALL_ATOMIC : FEVENT_HANDLE_RTCALL),

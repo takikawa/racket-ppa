@@ -9,12 +9,40 @@
          setup/main-collects
          setup/path-relativize
          file/convertible
+         net/url-structs
          "render-struct.rkt")
 
-(provide render%)
+(provide render%
+         render<%>)
+
+(define render<%>
+  (interface ()
+    traverse
+    collect
+    resolve
+    render
+    serialize-info
+    deserialize-info
+    get-external
+    get-undefined
+    
+    ;; undocumented:
+    current-render-mode
+    get-substitutions
+    render-part
+    render-flow
+    render-intrapara-block
+    render-table
+    render-itemization
+    render-paragraph
+    render-content
+    render-nested-flow
+    render-block
+    render-other
+    get-dest-directory))
 
 (define render%
-  (class object%
+  (class* object% (render<%>)
 
     (init-field dest-dir
                 [refer-to-existing-files #f]
@@ -76,7 +104,9 @@
                            (unless (stop-at-part? p)
                              (loop p #f #f)))
                          (part-parts p)))))
-        (for/list ([k (in-hash-keys ht)]) (if (bytes? k) k (main-collects-relative->path k)))))
+        (for/list ([k (in-hash-keys ht)]) (if (or (bytes? k) (url? k))
+                                              k 
+                                              (main-collects-relative->path k)))))
 
     (define/private (extract-style-style-files s ht pred extract)
       (for ([v (in-list (style-properties s))])

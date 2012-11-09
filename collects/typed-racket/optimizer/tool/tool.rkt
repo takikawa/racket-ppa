@@ -15,17 +15,6 @@
 (define optimization-coach-bitmap
   (compiled-bitmap (stopwatch-icon #:height (toolbar-icon-height))))
 
-;; optimization-coach-callback : drracket:unit:frame<%> -> void
-(define (optimization-coach-callback drr-frame)
-  (with-handlers
-      ([(lambda (e) (and (exn? e) (not (exn:break? e))))
-        ;; typechecking failed, report in the interactions window
-        (lambda (e)
-          (define interactions (send drr-frame get-interactions-text))
-          (send interactions reset-console)
-          (send interactions run-in-evaluation-thread (lambda () (raise e))))])
-    (send (send drr-frame get-definitions-text) add-highlights)))
-
 (define check-boxes
   `(("Report Typed Racket optimizations?" .
      ,(match-lambda [(sub-report-entry s m 'typed-racket) #t]
@@ -34,22 +23,39 @@
      ,(match-lambda [(sub-report-entry s m 'mzc) #t]
                     [_ #f]))))
 
+(define (copy-definitions definitions)
+  ;; this code is from Robby
+  (define definitions-copy
+    (new (class text:basic%
+           ;; overriding get-port-name like this ensures
+           ;; that the resulting syntax objects are connected
+           ;; to the actual definitions-text, not this copy
+           (define/override (get-port-name)
+             (send definitions get-port-name))
+           (super-new))))
+  (send definitions-copy set-style-list
+        (send definitions get-style-list)) ;; speeds up the copy
+  (send definitions copy-self-to definitions-copy)
+  definitions-copy)
+
 (define-local-member-name
   get-optimization-coach-menu-item
-  highlighting-shown?
   add-highlights
   clear-highlights
-  show-optimization-coach-panel
-  hide-optimization-coach-panel
+  show-optimization-coach
+  hide-optimization-coach
   get-filters
   set-filters!
-  optimization-coach-visible?)
+  optimization-coach-visible?
+  build-optimization-coach-popup-menu
+  launch-optimization-coach
+  close-optimization-coach)
 
 (define optimization-coach-drracket-button
   (list
    "Optimization Coach"
    optimization-coach-bitmap
-   optimization-coach-callback))
+   (lambda (drr-frame) (send drr-frame launch-optimization-coach))))
 
 (define-unit tool@
 
@@ -63,7 +69,8 @@
     (mixin (text:basic<%> drracket:unit:definitions-text<%>) ()
       (inherit highlight-range unhighlight-range
                get-tab get-canvas get-pos/text
-               position-line line-end-position)
+               position-line line-end-position
+               begin-edit-sequence end-edit-sequence)
 
       (define highlights   '()) ; (listof `(,start ,end ,popup-fun))
       (define clear-thunks '()) ; list of thunks that clear highlights
@@ -105,14 +112,16 @@
                        (loop (add1 end-of-line)))])))
 
       (define on? #f)
-      (define/public (highlighting-shown?) on?)
+      (define/public (optimization-coach-visible?) on?)
 
       (define report-cache #f)
-      (define/public (add-highlights #:use-cache? [use-cache? #f])
+      ;; source is either a copy of the definitions text (we're not in the
+      ;; main thread, so operating on the definitions directly is a bad idea)
+      ;; or #f, in which case the report cache is used.
+      (define/public (add-highlights #:source [source #f])
         (clear-highlights)
-        (send (get-tab) show-optimization-coach-panel)
-        (unless (and report-cache use-cache?)
-          (set! report-cache (generate-report this)))
+        (unless (and report-cache (not source))
+          (set! report-cache (generate-report source)))
         (define report
           (collapse-report
            (for/list ([entry (in-list report-cache)]
@@ -124,104 +133,55 @@
           (apply max (cons 0 (map report-entry-badness report))))
         (unless (= max-badness 0) ; no missed opts, color table code would error
           (set! color-table (make-color-table max-badness)))
+        (begin-edit-sequence)
         (set! clear-thunks (for/fold ([res '()])
                                ([r (in-list report)])
                              (append (highlight-entry r) res)))
+        (end-edit-sequence)
         (set! on? #t))
 
       (define/public (clear-highlights)
         (for ([h (in-list clear-thunks)]) (h))
         (set! highlights '())
-        (send (get-tab) hide-optimization-coach-panel)
         (set! on? #f))
 
+      (define (clear-and-close)
+        (when on?
+          (send+ this (get-tab) (get-frame) (close-optimization-coach))))
       (define/augment (on-insert start len)
-        (clear-highlights))
+        (clear-and-close))
       (define/augment (on-delete start len)
-        (clear-highlights))
+        (clear-and-close))
 
-      (define/override (on-event event)
-        (if (send event button-down? 'right)
-            (let-values ([(pos text) (get-pos/text event)])
-              (define menu (build-optimization-coach-popup-menu pos text))
-              (if menu
-                  (send (get-canvas) popup-menu menu
-                        (+ 1 (inexact->exact (floor (send event get-x))))
-                        (+ 1 (inexact->exact (floor (send event get-y)))))
-                  ;; not for us, pass it on
-                  (super on-event event)))
-            ;; not a right click, pass it on
-            (super on-event event)))
-
-      (define (build-optimization-coach-popup-menu pos text)
+      (define/public (build-optimization-coach-popup-menu menu pos text)
         (and pos
              (is-a? text text%)
              ;; pos is in a highlight
-             (for/fold ([menu #f])
+             (for/fold ([new-item #f])
                  ([h (in-list highlights)])
                (match-define `(,start ,end ,popup-fun) h)
-               (or menu
+               (or new-item
                    (and (<= start pos end)
-                        (let ([menu (make-object popup-menu% #f)])
-                          (new menu-item%
-                               [label "Show Optimization Info"]
-                               [parent menu]
-                               [callback (lambda _ (popup-fun text start end))])
-                          menu))))))
+                        (new separator-menu-item% [parent menu])
+                        (new menu-item%
+                             [label "Show Optimization Info"]
+                             [parent menu]
+                             [callback (lambda _
+                                         (popup-fun text start end))]))))))
 
       (super-new)))
 
   (drracket:get/extend:extend-definitions-text highlights-mixin)
 
-  (define toolbar-mixin
-    (mixin (drracket:unit:tab<%>) ()
-      (super-new)
-
-      (inherit get-defs get-frame)
-
-      (define panel #f)
-      (define/public (optimization-coach-visible?) panel)
-
-      (define/public (show-optimization-coach-panel)
-        (set! panel
-              (new horizontal-panel%
-                   [parent (send (send this get-frame) get-area-container)]
-                   [stretchable-height #f]))
-        (define definitions (get-defs))
-        (new button%
-             [label "Clear"]
-             [parent panel]
-             [callback (lambda _ (send definitions clear-highlights))])
-        (define filters (send definitions get-filters))
-        (for ([(l f) (in-pairs check-boxes)])
-          (new check-box%
-               [label l]
-               [parent panel]
-               [callback
-                (lambda _
-                  (send definitions set-filters! (if (memq f filters)
-                                                     (remq f filters)
-                                                     (cons f filters)))
-                  ;; redraw
-                  (send definitions add-highlights #:use-cache? #t))]
-               [value (memq f filters)]))
-        panel) ; return panel, so that the other mixin can hide it
-
-      (define/public (hide-optimization-coach-panel [close #t])
-        (when panel
-          (send (send (get-frame) get-area-container) delete-child panel)
-          (when close ; if we just switch tabs, keep panel around to restore it
-            (set! panel #f))))))
-
-  (drracket:get/extend:extend-tab toolbar-mixin)
-
-  (define tab-switch-mixin
+  (define frame-mixin
     (mixin (drracket:unit:frame<%>) ()
-      (inherit set-show-menu-sort-key get-current-tab)
+      (inherit set-show-menu-sort-key get-current-tab
+               get-definitions-text get-interactions-text get-area-container)
 
+
+      ;; view menu
       (define/public (get-optimization-coach-menu-item)
         optimization-coach-menu-item)
-
       (define/override (add-show-menu-items show-menu)
         (super add-show-menu-items show-menu)
         (set! optimization-coach-menu-item
@@ -231,26 +191,110 @@
                    [demand-callback
                     (λ (item)
                       (send item set-label
-                            (if (send (get-current-tab)
+                            (if (send (get-definitions-text)
                                       optimization-coach-visible?)
                                 (string-constant hide-optimization-coach)
                                 (string-constant show-optimization-coach))))]
                    [callback
                     (λ (a b)
-                      (define tab (get-current-tab))
-                      (if (send tab optimization-coach-visible?)
-                          (send (send tab get-defs) clear-highlights)
-                          (optimization-coach-callback this)))]))
+                      (define defs (get-definitions-text))
+                      (if (send defs optimization-coach-visible?)
+                          (close-optimization-coach)
+                          (launch-optimization-coach)))]))
         (set-show-menu-sort-key optimization-coach-menu-item 403))
-
-      (define/augment (on-tab-change old-tab new-tab)
-        (send old-tab hide-optimization-coach-panel #f) ; don't close it
-        (when (send new-tab optimization-coach-visible?)
-          ;; if it was open before
-          (send new-tab show-optimization-coach-panel)))
-
       (define optimization-coach-menu-item #f)
+
+
+      ;; right-click menu
+      (keymap:add-to-right-button-menu
+       (let ([old (keymap:add-to-right-button-menu)])
+         (lambda (menu editor event)
+           (let-values ([(pos text) (send editor get-pos/text event)])
+             (when (is-a? editor drracket:unit:definitions-text<%>)
+               ;; has the optimization-coach mixin
+               (send editor build-optimization-coach-popup-menu
+                     menu pos text)))
+           (old menu editor event))))
+
+
+      ;; control panel
+      (define panel #f)
+      (define (create-panel)
+        (set! panel (new horizontal-panel%
+                         [parent (get-area-container)]
+                         [stretchable-height #f]))
+        (new button%
+             [label "Clear"]
+             [parent panel]
+             [callback (lambda _ (close-optimization-coach))])
+        (for ([(l f) (in-pairs check-boxes)])
+          (new check-box%
+               [label l]
+               [parent panel]
+               [callback
+                (lambda _
+                  (define definitions (get-definitions-text))
+                  (define filters (send definitions get-filters))
+                  (send definitions set-filters! (if (memq f filters)
+                                                     (remq f filters)
+                                                     (cons f filters)))
+                  ;; redraw
+                  (send definitions add-highlights))]
+               [value #f]))) ; will be updated in `show-optimization-coach'
+
+      (define/public (show-optimization-coach)
+        (define area-container (get-area-container))
+        (cond [panel (or (memq panel (send area-container get-children))
+                         (send area-container add-child panel))]
+              [else  (create-panel)])
+        ;; update check-boxes
+        (define filters (send (get-definitions-text) get-filters))
+        (for ([c (in-list (for/list ([c (in-list (send panel get-children))]
+                                     #:when (is-a? c check-box%))
+                            c))]
+              [(l f) (in-pairs check-boxes)])
+          (send c set-value (memq f filters))))
+
+      (define/public (hide-optimization-coach)
+        (send (get-area-container) delete-child panel))
+
+
+      ;; tab switching
+      (define/augment (on-tab-change old-tab new-tab)
+        (when (send (send old-tab get-defs) optimization-coach-visible?)
+          (hide-optimization-coach))
+        (when (send (send new-tab get-defs) optimization-coach-visible?)
+          ;; if it was open before
+          (show-optimization-coach)))
+
+
+      ;; entry point
+      (define/public (launch-optimization-coach)
+        (define definitions  (get-definitions-text))
+        (define interactions (get-interactions-text))
+        ;; copy contents of the definitions window before handing control back
+        ;; to the event loop
+        (define definitions-copy (copy-definitions definitions))
+        ;; launch OC proper
+        (show-optimization-coach)
+        (send this update-running #t)
+        (thread ; do the work in a separate thread, to avoid blocking the GUI
+           (lambda ()
+             (with-handlers
+                 ([(lambda (e) (and (exn? e) (not (exn:break? e))))
+                   ;; typechecking failed, report in the interactions window
+                   (lambda (e)
+                     (send interactions reset-console)
+                     (send interactions run-in-evaluation-thread
+                           (lambda () (raise e))))])
+               (send (get-definitions-text) add-highlights
+                     #:source definitions-copy))
+             (send this update-running #f))))
+
+      (define/public (close-optimization-coach)
+        (hide-optimization-coach)
+        (send (get-definitions-text) clear-highlights))
 
       (super-new)))
 
-  (drracket:get/extend:extend-unit-frame tab-switch-mixin))
+  (drracket:get/extend:extend-unit-frame frame-mixin))

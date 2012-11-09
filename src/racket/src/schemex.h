@@ -55,6 +55,7 @@ volatile int *scheme_fuel_counter_ptr;
 # endif
 #endif
 Scheme_Thread *(*scheme_get_current_thread)();
+int (*scheme_is_atomic)(void);
 void (*scheme_start_atomic)(void);
 void (*scheme_end_atomic)(void);
 void (*scheme_end_atomic_no_swap)(void);
@@ -72,8 +73,10 @@ Scheme_Object *(*scheme_thread_w_details)(Scheme_Object *thunk,
 						 int suspend_to_kill);
 void (*scheme_kill_thread)(Scheme_Thread *p);
 void (*scheme_break_thread)(Scheme_Thread *p);
+void (*scheme_break_kind_thread)(Scheme_Thread *p, int kind);
 void (*scheme_break_main_thread)();
 void (*scheme_break_main_thread_at)(void *);
+void (*scheme_break_kind_main_thread_at)(void *, int kind);
 void *(*scheme_get_main_thread_break_handle)();
 void (*scheme_set_break_main_target)(Scheme_Thread *p);
 void (*scheme_thread_block)(float sleep_time);
@@ -107,6 +110,8 @@ Scheme_Custodian *(*scheme_make_custodian)(Scheme_Custodian *);
 Scheme_Custodian_Reference *(*scheme_add_managed)(Scheme_Custodian *m, Scheme_Object *o,
 							 Scheme_Close_Custodian_Client *f, void *data,
 							 int strong);
+Scheme_Custodian_Reference *(*scheme_add_managed_close_on_exit)(Scheme_Custodian *m, Scheme_Object *o, 
+                                                                       Scheme_Close_Custodian_Client *f, void *data);
 void (*scheme_custodian_check_available)(Scheme_Custodian *m, const char *who, const char *what);
 int (*scheme_custodian_is_available)(Scheme_Custodian *m);
 void (*scheme_remove_managed)(Scheme_Custodian_Reference *m, Scheme_Object *o);
@@ -671,6 +676,7 @@ intptr_t (*scheme_get_char_string)(const char *who,
 intptr_t (*scheme_get_bytes)(Scheme_Object *port, intptr_t size, char *buffer, int offset);
 Scheme_Object *(*scheme_get_ready_special)(Scheme_Object *port, Scheme_Object *stxsrc, int peek);
 intptr_t (*scheme_tell)(Scheme_Object *port);
+intptr_t (*scheme_tell_can_redirect)(Scheme_Object *port, int not_via_loc);
 intptr_t (*scheme_output_tell)(Scheme_Object *port);
 intptr_t (*scheme_tell_line)(Scheme_Object *port);
 intptr_t (*scheme_tell_column)(Scheme_Object *port);

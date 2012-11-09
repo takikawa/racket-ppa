@@ -24,7 +24,8 @@
          "drsig.rkt"
          "rep.rkt"
          "eval-helpers.rkt"
-         "local-member-names.rkt")
+         "local-member-names.rkt"
+         "rectangle-intersect.rkt")
 
 (define-runtime-path expanding-place.rkt "expanding-place.rkt")
 
@@ -124,6 +125,7 @@
       
       (define/private (get-ns str)
         (define ev (make-evaluator 'racket/base))
+        (ev `(current-inspector ,(current-inspector)))
         (ev `(parameterize ([read-accept-reader #t])
                (define stx (read-syntax "here" (open-input-string ,str)))
                (define modname
@@ -1031,7 +1033,7 @@
       (define tooltip-frame #f)
       (define/private (show-tooltip)
         (define tooltip-labels-to-show
-          (if (preferences:get 'drracket:online-compilation-default-off)
+          (if (preferences:get 'drracket:online-compilation-default-on)
               tooltip-labels
               (list (string-constant online-expansion-is-disabled))))
         (cond
@@ -1050,7 +1052,7 @@
         (when tooltip-frame
           (cond
             [(or tooltip-labels
-                 (not (preferences:get 'drracket:online-compilation-default-off)))
+                 (not (preferences:get 'drracket:online-compilation-default-on)))
              (when (send tooltip-frame is-shown?)
                ;; just call this, as it updates the tooltip label already
                (show-tooltip))]
@@ -1083,7 +1085,7 @@
                      (define colors-to-draw
                        (cond
                          [(not (in-module-language tlw)) #f]
-                         [(preferences:get 'drracket:online-compilation-default-off)
+                         [(preferences:get 'drracket:online-compilation-default-on)
                           colors]
                          [else (list "red")]))
                      (when colors-to-draw
@@ -1114,13 +1116,13 @@
                  (define cb-proc (λ (sym new-val)
                                    (set! colors #f)
                                    (refresh)))
-                 (preferences:add-callback 'drracket:online-compilation-default-off cb-proc #t)
+                 (preferences:add-callback 'drracket:online-compilation-default-on cb-proc #t)
                  (define/override (on-event evt) 
                    (cond
                      [(not (in-module-language tlw)) (void)]
                      [(send evt button-down?)
                       (define menu (new popup-menu%))
-                      (define on? (preferences:get 'drracket:online-compilation-default-off))
+                      (define on? (preferences:get 'drracket:online-compilation-default-on))
                       (new menu-item% 
                            [parent menu]
                            [label (if on?
@@ -1128,7 +1130,7 @@
                                       "Enable online compilation")]
                            [callback
                             (λ args
-                              (preferences:set 'drracket:online-compilation-default-off (not on?)))])
+                              (preferences:set 'drracket:online-compilation-default-on (not on?)))])
                       (popup-menu menu (send evt get-x) (send evt get-y))]
                      [(send evt entering?)
                       (show-tooltip)]
@@ -1235,6 +1237,10 @@
 
   (define expanding-place #f)
   (define pending-thread #f)
+  (define pending-tell-the-tab-show-bkg-running #f)
+  (define (set-pending-thread tttsbr pt) 
+    (set! pending-thread pt)
+    (set! pending-tell-the-tab-show-bkg-running tttsbr))
   
   (define (send-to-place editor-contents 
                          filename 
@@ -1250,41 +1256,43 @@
        (for/list ([o-e-h (in-list (drracket:module-language-tools:get-online-expansion-handlers))])
          (list (drracket:module-language-tools:online-expansion-handler-mod-path o-e-h)
                (drracket:module-language-tools:online-expansion-handler-id o-e-h)))))
-    (set! pending-thread
-          (thread (λ () 
-                    (define-values (pc-in pc-out) (place-channel))
-                    (define-values (pc-status-drracket-place pc-status-expanding-place) (place-channel))
-                    (define to-send
-                      (vector-immutable editor-contents
-                                        filename
-                                        pc-in 
-                                        prefab-module-settings
-                                        pc-status-expanding-place))
-                    (place-channel-put expanding-place to-send)
-                    (define us (current-thread))
-                    (thread (λ () 
-                              (define got-status-update (place-channel-get pc-status-drracket-place))
-                              (queue-callback
-                               (λ ()
-                                 (when (eq? us pending-thread)
-                                   (tell-the-tab-show-bkg-running
-                                    'finished-expansion
-                                    sc-online-expansion-running))))))
-                    (define res (place-channel-get pc-out))
-                    (when res
-                      (queue-callback
-                       (λ ()
-                         (when (eq? us pending-thread)
-                           (set! pending-thread #f)
-                           (when (getenv "PLTDRPLACEPRINT")
-                             (printf "PLTDRPLACEPRINT: got results back from the place\n"))
-                           (show-results res)))))))))
+    (set-pending-thread
+     tell-the-tab-show-bkg-running
+     (thread (λ () 
+               (define-values (pc-in pc-out) (place-channel))
+               (define-values (pc-status-drracket-place pc-status-expanding-place) (place-channel))
+               (define to-send
+                 (vector-immutable editor-contents
+                                   filename
+                                   pc-in 
+                                   prefab-module-settings
+                                   pc-status-expanding-place))
+               (place-channel-put expanding-place to-send)
+               (define us (current-thread))
+               (thread (λ () 
+                         (define got-status-update (place-channel-get pc-status-drracket-place))
+                         (queue-callback
+                          (λ ()
+                            (when (and (eq? us pending-thread)
+                                       pending-tell-the-tab-show-bkg-running)
+                              (pending-tell-the-tab-show-bkg-running
+                               'finished-expansion
+                               sc-online-expansion-running))))))
+               (define res (place-channel-get pc-out))
+               (when res
+                 (queue-callback
+                  (λ ()
+                    (when (eq? us pending-thread)
+                      (set-pending-thread #f #f)
+                      (when (getenv "PLTDRPLACEPRINT")
+                        (printf "PLTDRPLACEPRINT: got results back from the place\n"))
+                      (show-results res)))))))))
   
   (define (stop-place-running)
     (when expanding-place
       (when pending-thread
         (place-channel-put expanding-place 'abort)
-        (set! pending-thread #f))))
+        (set-pending-thread #f #f))))
   
   (struct error-range (start end [clear-highlight #:mutable]))
   
@@ -1306,7 +1314,7 @@
       (define cb-proc (λ (sym new-val) 
                         (when new-val
                           (queue-callback (λ () (buffer-modified))))))
-      (preferences:add-callback 'drracket:online-compilation-default-off cb-proc #t)
+      (preferences:add-callback 'drracket:online-compilation-default-on cb-proc #t)
       
       ;; buffer-modified and restart-place
       ;; are the two entry points that might
@@ -1317,7 +1325,7 @@
       ;; before doing anything
 
       (define/private (buffer-modified)
-        (when (and (preferences:get 'drracket:online-compilation-default-off)
+        (when (and (preferences:get 'drracket:online-compilation-default-on)
                    (> (processor-count) 1))
           (clear-old-error)
           (reset-frame-expand-error #t)
@@ -1335,7 +1343,7 @@
                (hide-module-language-error-panel)]))))
       
       (define/public (restart-place)
-        (when (and (preferences:get 'drracket:online-compilation-default-off)
+        (when (and (preferences:get 'drracket:online-compilation-default-on)
                    (> (processor-count) 1))
           (stop-place-running)
           (when compilation-out-of-date?
@@ -1750,6 +1758,138 @@
                (loop (+ pos 1))]))))
       
       (super-new)))
+  
+  (define defs/ints-font 
+    (send the-font-list find-or-create-font 72 'swiss 'normal 'normal))
+  
+  (define big-defs/ints-label<%>
+    (interface ()
+      set-lang-wants-big-defs/ints-labels?))
+  
+  (define (mk-module-language-text-mixin id)
+    (mixin (editor<%>) (big-defs/ints-label<%>)
+      (inherit get-admin invalidate-bitmap-cache get-dc
+               dc-location-to-editor-location)
+      (define inside? #f)
+      (define recently-typed? #f)
+      (define fade-amount 1)
+      (define lang-wants-big-defs/ints-labels? #f)
+
+      (define recently-typed-timer 
+        (new timer%
+             [notify-callback
+              (λ ()
+                (update-recently-typed #f)
+                (unless (equal? fade-amount 1)
+                  (cond
+                    [inside? 
+                     (set! fade-amount (+ fade-amount 1/10))
+                     (send recently-typed-timer start 100 #t)]
+                    [else
+                     (set! fade-amount 1)])
+                  (invalidate-bitmap-cache 0 0 'display-end 'display-end)))]))
+      
+      (define/public (set-lang-wants-big-defs/ints-labels? w?) 
+        (unless (equal? lang-wants-big-defs/ints-labels? w?)
+          (set! lang-wants-big-defs/ints-labels? w?)
+
+          (send recently-typed-timer stop)  ;; reset the recently-typed timer so
+          (set! fade-amount 1)              ;; that changing the language makes the
+          (set! recently-typed? #f)         ;; labels appear immediately
+          
+          (invalidate-bitmap-cache 0 0 'display-end 'display-end)))
+      
+      (define/override (on-char evt)
+        (when inside?
+          (update-recently-typed #t)
+          (set! fade-amount 0)
+          (send recently-typed-timer stop)
+          (send recently-typed-timer start 10000 #t))
+        (super on-char evt))
+      
+      (define/private (update-recently-typed nv)
+        (unless (equal? recently-typed? nv)
+          (set! recently-typed? nv)
+          (invalidate-bitmap-cache 0 0 'display-end 'display-end)))
+      
+      (define/override (on-event evt)
+        (define new-inside?
+          (cond
+            [(send evt leaving?) #f]
+            [else (preferences:get 'drracket:defs/ints-labels)]))
+        (unless (equal? new-inside? inside?)
+          (set! inside? new-inside?)
+          (invalidate-bitmap-cache 0 0 'display-end 'display-end))
+        (cond
+          [(and lang-wants-big-defs/ints-labels?
+                (preferences:get 'drracket:defs/ints-labels)
+                (send evt button-down?)
+                (get-admin))
+           (define admin (get-admin))
+           (define dc (get-dc))
+           (define-values (tw th _1 _2) (send dc get-text-extent id defs/ints-font))
+           (define-values (mx my) (dc-location-to-editor-location 
+                                   (send evt get-x) (send evt get-y)))
+           (send admin get-view bx by bw bh)
+           (cond
+             [(and (<= (- (unbox bw) tw) mx (unbox bw))
+                   (<= (- (unbox bh) th) my (unbox bh)))
+              (define menu (new popup-menu%))
+              (new menu-item% 
+                   [label (string-constant hide-defs/ints-label)]
+                   [parent menu]
+                   [callback (λ (x y)
+                               (preferences:set 'drracket:defs/ints-labels #f))])
+              (send admin popup-menu menu (+ (send evt get-x) 1) (+ (send evt get-y) 1))]
+             [else
+              (super on-event evt)])]
+          [else (super on-event evt)]))
+      
+      (define/override (on-paint before? dc left top right bottom dx dy draw-caret)
+        (super on-paint before? dc left top right bottom dx dy draw-caret)
+        (unless before?
+          (when (and inside?
+                     (not recently-typed?)
+                     lang-wants-big-defs/ints-labels?)
+            (define admin (get-admin))
+            (when admin
+              (send admin get-view bx by bw bh)
+              (define α (send dc get-alpha))
+              (define fore (send dc get-text-foreground))
+              (send dc set-font defs/ints-font)
+              (define-values (tw th _1 _2) (send dc get-text-extent id))
+              (define tx (+ (unbox bx) (- (unbox bw) tw)))
+              (define ty (+ (unbox by) (- (unbox bh) th)))
+              (when (rectangles-intersect?
+                     left top right bottom
+                     tx ty (+ tx tw) (+ ty th))
+                (send dc set-text-foreground "black")
+                (send dc set-alpha (* fade-amount .5))
+                (send dc draw-text id (+ dx tx) (+ dy ty))
+                (send dc set-alpha α)
+                (send dc set-text-foreground fore))
+              (send dc set-font defs/ints-font)))))
+      (super-new)))
+  
+  (define (rectangles-intersect? l1 t1 r1 b1 l2 t2 r2 b2)
+    (or (point-in-rectangle? l1 t1 l2 t2 r2 b2)
+        (point-in-rectangle? r1 t1 l2 t2 r2 b2)
+        (point-in-rectangle? l1 b1 l2 t2 r2 b2)
+        (point-in-rectangle? r1 b1 l2 t2 r2 b2)))
+  
+  (define (point-in-rectangle? x y l t r b)
+    (and (<= l x r)
+         (<= t y b)))
+  
+  (define bx (box 0))
+  (define by (box 0))
+  (define bw (box 0))
+  (define bh (box 0))
+  
+  (define module-language-big-defs/ints-interactions-text-mixin
+    (mk-module-language-text-mixin (string-constant interactions-window-label)))
+  (define module-language-big-defs/ints-definitions-text-mixin
+    (mk-module-language-text-mixin (string-constant definitions-window-label)))
   
   (define module-language-compile-lock (make-compile-lock))
   

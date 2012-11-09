@@ -19,14 +19,15 @@
   ;; type test = (make-test string
   ;;                        (listof str/ann)
   ;;                        (listof (cons (list number number) (listof (list number number)))))
-  (define-struct test (line input expected arrows) #:transparent)
+  ;;                        (listof (list number number) (listof string)))
+  (define-struct test (line input expected arrows tooltips) #:transparent)
   (define-struct (dir-test test) () #:transparent)
   
   (define-struct rename-test (line input pos old-name new-name output) #:transparent)
   
   (define build-test/proc
-    (λ (line input expected [arrow-table '()])
-      (make-test line input expected arrow-table)))
+    (λ (line input expected [arrow-table '()] #:tooltips [tooltips #f])
+      (make-test line input expected arrow-table tooltips)))
   
   (define-syntax (build-test stx)
     (syntax-case stx ()
@@ -44,11 +45,12 @@
     (syntax-case stx ()
       [(_ args ...)
        (with-syntax ([line (syntax-line stx)])
-         #'(make-dir-test line args ...))]))
+         ;; #f is for the tooltip portion of the test, just skip 'em
+         #'(make-dir-test line args ... #f))]))
   
   ;; tests : (listof test)
   (define tests
-    (list 
+    (list
      (build-test "12345"
                 '(("12345" constant)))
      (build-test "'abcdef"
@@ -70,7 +72,8 @@
                   (") "     default-color)
                   ("x"      lexically-bound-variable)
                   (")"      default-color))
-                (list '((9 10) (12 13))))
+                (list '((9 10) (12 13)))
+                #:tooltips '((9 10 "1 bound occurrence")))
      (build-test "(lambda x x)"
                 '(("("      default-color)
                   ("lambda" imported-syntax)
@@ -203,7 +206,10 @@
                   (" "     default-color)
                   ("2"     constant)
                   ("))"    default-color))
-                (list '((7 8) (19 20))))
+                (list '((7 8) (19 20)))
+                #:tooltips '((7 8 "1 bound occurrence")
+                             (7 8 "set!’d variable")
+                             (19 20 "set!’d variable")))
      
      (build-test "object%"
                 '(("object%" imported-syntax))) ; used to be lexically-bound-variable
@@ -294,7 +300,54 @@
                        '((23 24) (39 40) (47 48))
                        '((25 26) (41 42))
                        '((27 28) (49 50))
-                       '((57 58) (59 60) (61 62))))
+                       '((57 58) (59 60) (61 62)))
+                 #:tooltips '((21 22 "1 bound occurrence")
+                              (23 24 "2 bound occurrences")
+                              (25 26 "1 bound occurrence")
+                              (27 28 "1 bound occurrence")
+                              (57 58 "2 bound occurrences")))
+     
+     (build-test "(define-syntax-rule (m x y z) (list (λ y x) (λ z x)))\n(m w w w)"
+                 '(("(" default-color)
+                   ("define-syntax-rule" imported)
+                   (" (" default-color)
+                   ("m" lexically-bound)
+                   (" " default-color)
+                   ("x" lexically-bound)
+                   (" " default-color)
+                   ("y" lexically-bound)
+                   (" " default-color)
+                   ("z" lexically-bound)
+                   (") (list (λ " default-color)
+                   ("y" lexically-bound)
+                   (" " default-color)
+                   ("x" lexically-bound)
+                   (") (λ " default-color)
+                   ("z" lexically-bound)
+                   (" " default-color)
+                   ("x" lexically-bound)
+                   (")))\n(" default-color)
+                   ("m" lexically-bound)
+                   (" " default-color)
+                   ("w" lexically-bound)
+                   (" " default-color)
+                   ("w" lexically-bound)
+                   (" " default-color)
+                   ("w" lexically-bound) 
+                   (")" default-color))
+                 (list '((21 22) (55 56)) 
+                       '((23 24) (41 42) (49 50))
+                       '((25 26) (39 40))
+                       '((27 28) (47 48))
+                       '((61 62) (57 58))
+                       '((59 60) (57 58)))
+                 #:tooltips '((21 22 "1 bound occurrence")
+                              (23 24 "2 bound occurrences")
+                              (25 26 "1 bound occurrence")
+                              (27 28 "1 bound occurrence")
+                              (57 58 "2 binding occurrences")
+                              (59 60 "1 bound occurrence") 
+                              (61 62 "1 bound occurrence")))
 
      (build-test "(module m mzscheme)"
                 '(("("            default-color)
@@ -677,7 +730,7 @@
                   ("x:foldl"                          imported-variable)
                   (")"                                default-color))
                 (list '((10 18) (20 27))
-                      '((28 50) (52 59))))
+                      '((39 49) (52 59))))
 
      (build-test "(module m mzscheme (require (prefix x: mzlib/list) mzlib/list) x:foldl foldl)"
                 '(("("                                    default-color)
@@ -690,7 +743,7 @@
                   ("foldl"                                imported-variable)
                   (")"                                    default-color))
                 (list '((10 18) (20 27))
-                      '((28 50) (63 70))
+                      '((39 49) (63 70))
                       '((51 61) (71 76))))
 
      (build-test "(module m mzscheme (require (only mzlib/list foldr) (only mzlib/list foldl)) foldl foldr)"
@@ -704,8 +757,8 @@
                    ("foldr"                                              imported-variable)
                    (")"                                                  default-color))
                  (list '((10 18) (20 27))
-                       '((28 51) (77 82) (83 88))
-                       '((52 75) (77 82) (83 88))))
+                       '((34 44) (83 88))
+                       '((58 68) (77 82))))
 
      (build-test "(module m mzscheme (require (prefix x: mzscheme)) x:+ +)"
                  '(("("                                                  default-color)
@@ -718,8 +771,8 @@
                    ("+"                                                  imported-variable)
                    (")"                                                  default-color))
                  (list '((10 18) (20 27) (54 55))
-                       '((28 48) (50 53))))
-
+                       '((39 47) (50 53))))
+     
      (build-test "(module m mzscheme (require mzlib/etc) (rec f 1))"
                 '(("("                     default-color)
                   ("module"                imported-syntax)
@@ -936,6 +989,17 @@
                        '((61 63) (65 67))
                        '((6 12) (14 21) (40 43) (49 54) (74 80))))
 
+     (build-test "#lang racket/base\n(define red 1)\n(module+ test red)"
+                 '(("#lang racket/base\n(" default-color)
+                   ("define"               imported)
+                   (" "                    default-color)
+                   ("red"                  lexically-bound)
+                   (" 1)\n(module+ test "  default-color)
+                   ("red"                  imported)
+                   (")"                    default-color))
+                 '(((26 29) (47 50))
+                   ((6 17) (19 25))))
+
      (build-rename-test "(lambda (x) x)"
                         9
                         "x"
@@ -1101,6 +1165,7 @@
          (let ([input (test-input test)]
                [expected (test-expected test)]
                [arrows (test-arrows test)]
+               [tooltips (test-tooltips test)]
                [relative (find-relative-path save-dir (collection-path "mzlib"))])
            (cond
              [(dir-test? test)
@@ -1123,7 +1188,11 @@
                              got
                              arrows 
                              (queue-callback/res (λ () (send defs syncheck:get-bindings-table)))
-                             input)))]
+                             input))
+           (when tooltips
+             (compare-tooltips (queue-callback/res (λ () (send defs syncheck:get-bindings-table #t)))
+                               tooltips
+                               (test-line test))))]
         [(rename-test? test)
          (insert-in-definitions drs (rename-test-input test))
          (click-check-syntax-and-check-errors drs test)
@@ -1131,7 +1200,8 @@
            (queue-callback/res
             (λ ()
               (define defs (send drs get-definitions-text))
-              (define menu (send defs syncheck:build-popup-menu (rename-test-pos test) defs))
+              (define menu (make-object popup-menu%))
+              (send defs syncheck:build-popup-menu menu (rename-test-pos test) defs)
               (define item-name (format "Rename ~a" (rename-test-old-name test)))
               (define menu-item
                 (for/or ([x (in-list (send menu get-items))])
@@ -1250,6 +1320,11 @@
         [else
          (eprintf "FAILED: ~s\n      expected: ~s\n           got: ~s\n"
                   input expected got)])))
+  
+  (define (compare-tooltips got expected line)
+    (unless (equal? got expected)
+      (eprintf "FAILED TOOLTIPS: line ~s \n      expected: ~s\n           got: ~s\n"
+               line expected got)))
   
   ;; get-annotate-output : drscheme-frame -> (listof str/ann)
   (define (get-annotated-output drs)

@@ -100,42 +100,48 @@
     (method-in-interface? 'get-execute-button (object-interface frame)))
   
   (define (wait-for-drracket-frame [print-message? #f])
-    (let ([wait-for-drracket-frame-pred
-           (lambda ()
-             (let ([active (fw:test:get-active-top-level-window)])
-               (if (and active
-                        (drracket-frame? active))
-                   active
-                   #f)))])
+    (define (wait-for-drracket-frame-pred)
+      (define active (fw:test:get-active-top-level-window))
+      (if (and active
+               (drracket-frame? active))
+          active
+          #f))
+    (define drr-fr
       (or (wait-for-drracket-frame-pred)
           (begin
             (when print-message?
               (printf "Select DrRacket frame\n"))
-            (poll-until wait-for-drracket-frame-pred)))))
+            (poll-until wait-for-drracket-frame-pred))))
+    (when drr-fr
+      (wait-for-events-in-frame-eventspace drr-fr))
+    drr-fr)
   
   ;; wait-for-new-frame : frame [(listof eventspace) = null] -> frame
   ;; returns the newly opened frame, waiting until old-frame
   ;; is no longer frontmost. Optionally checks other eventspaces
   ;; waits until the new frame has a focus'd window, too. 
-  (define wait-for-new-frame
-    (case-lambda
-     [(old-frame) (wait-for-new-frame old-frame null)]
-     [(old-frame extra-eventspaces)
-      (wait-for-new-frame old-frame extra-eventspaces 10)]
-     [(old-frame extra-eventspaces timeout)
-      (let ([wait-for-new-frame-pred
-	     (lambda ()
-	       (let ([active (or (fw:test:get-active-top-level-window)
-                                 (ormap
-				  (lambda (eventspace)
-                                    (parameterize ([current-eventspace eventspace])
-                                      (fw:test:get-active-top-level-window)))
-				  extra-eventspaces))])
-		 (if (and active
-                          (not (eq? active old-frame)))
-		     active
-		     #f)))])
-	(poll-until wait-for-new-frame-pred timeout))]))
+  (define (wait-for-new-frame old-frame [extra-eventspaces '()] [timeout 10])
+    (define (wait-for-new-frame-pred)
+      (define active (or (fw:test:get-active-top-level-window)
+                         (for/or ([eventspace (in-list extra-eventspaces)]) 
+                           (parameterize ([current-eventspace eventspace])
+                             (fw:test:get-active-top-level-window)))))
+      (if (and active
+               (not (eq? active old-frame)))
+          active
+          #f))
+    (define fr (poll-until wait-for-new-frame-pred timeout))
+    (when fr (wait-for-events-in-frame-eventspace fr))
+    (sleep 1)
+    fr)
+  
+  (define (wait-for-events-in-frame-eventspace fr)
+    (define sema (make-semaphore 0))
+    (parameterize ([current-eventspace (send fr get-eventspace)])
+      (queue-callback
+       (λ () (semaphore-post sema))
+       #f))
+    (semaphore-wait sema))
 
   ;; wait-for-computation : frame -> void
   ;; waits until the drracket frame finishes some computation.
@@ -377,8 +383,9 @@
                                            child)))
                                   (send list-item get-items))])
               (when (null? which)
-                (error 'set-language-level! "couldn't find language: ~e, no match at ~e"
-                       in-language-spec name))
+                (error 'set-language-level! "couldn't find language: ~e, no match at ~e, poss: ~s"
+                       in-language-spec name (map (λ (child) (send (send child get-editor) get-text))
+                                                  (send list-item get-items))))
               (unless (= 1 (length which))
                 (error 'set-language-level! "couldn't find language: ~e, double match ~e"
                        in-language-spec name))
@@ -601,12 +608,16 @@
   ;; but just to print and return.
   (define orig-display-handler (error-display-handler))
   
-  (define (fire-up-drracket-and-run-tests #:use-focus-table? [use-focus-table? #t] run-test)
+  (define (fire-up-drracket-and-run-tests
+           #:use-focus-table? [use-focus-table? #t] 
+           #:prefs [prefs '()]
+           run-test)
     (on-eventspace-handler-thread 'fire-up-drracket-and-run-tests)
     (let ()
       (use-hash-for-prefs fw:preferences:low-level-get-preference
                           fw:preferences:low-level-put-preferences
-                          fw:preferences:restore-defaults)
+                          fw:preferences:restore-defaults
+                          prefs)
       
       (parameterize ([current-command-line-arguments #()])
         (dynamic-require 'drracket #f))
@@ -654,7 +665,8 @@
            (λ ()
              (use-hash-for-prefs (dynamic-require 'framework 'preferences:low-level-get-preference)
                                  (dynamic-require 'framework 'preferences:low-level-put-preferences)
-                                 (dynamic-require 'framework 'preferences:restore-defaults))
+                                 (dynamic-require 'framework 'preferences:restore-defaults)
+                                 '())
              (dynamic-require 'drracket #f)
              (thread (λ ()
                        (run-test)
@@ -664,23 +676,37 @@
 
   (define (use-hash-for-prefs preferences:low-level-get-preference 
                               preferences:low-level-put-preferences
-                              preferences:restore-defaults)
+                              preferences:restore-defaults
+                              prefs)
     ;; change the preferences system so that it doesn't write to 
     ;; a file; partly to avoid problems of concurrency in drdr
     ;; but also to make the test suite easier for everyone to run.
     (let ([prefs-table (make-hash)])
       (preferences:low-level-put-preferences
-       (lambda (names vals)
-         (for-each (lambda (name val) (hash-set! prefs-table name val))
-                   names vals)))
+       (λ (names vals)
+         (for ([name (in-list names)]
+               [val (in-list vals)])
+           (hash-set! prefs-table name val))))
       (preferences:low-level-get-preference 
-       (lambda (name [fail (lambda () #f)])
+       (λ (name [fail (lambda () #f)])
          (hash-ref prefs-table name fail)))
       
       ;; set all preferences to their defaults (some pref values may have
       ;; been read by this point, but hopefully that won't affect the
       ;; startup of drracket)
-      (preferences:restore-defaults)))
+      (preferences:restore-defaults)
+      
+      ;; initialize some preferences to simulate these
+      ;; being saved already in the user's prefs file 
+      (for ([pref (in-list prefs)])
+        (define pref-key (list-ref pref 0))
+        (define pref-val (list-ref pref 1))
+        (unless (regexp-match #rx"^plt:framework-pref:" (symbol->string pref-key))
+          ;; this currently doesn't happen, and it is easy to forget
+          ;; that prefix, so print a message here to remind 
+          (printf "WARNING: setting a preference that isn't set via the framework: ~s\n" 
+                  pref-key))
+        (hash-set! prefs-table pref-key pref-val))))
   
 (define (not-on-eventspace-handler-thread fn)
   (when (eq? (current-thread) (eventspace-handler-thread (current-eventspace)))

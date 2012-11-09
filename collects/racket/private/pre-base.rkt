@@ -160,14 +160,15 @@
                               procedure->method procedure-rename
                               chaperone-procedure impersonate-procedure
                               assq assv assoc
-                              prop:incomplete-arity)
+                              prop:incomplete-arity prop:method-arity-error)
              (all-from "reqprov.rkt")
              (all-from-except "for.rkt"
                               define-in-vector-like
                               define-:vector-like-gen
                               make-in-vector-like
                               stream? stream-ref stream-empty? stream-first stream-rest
-                              prop:stream in-stream empty-stream make-do-stream)
+                              prop:stream in-stream empty-stream make-do-stream
+                              split-for-body)
              (all-from "kernstruct.rkt")
              #%top-interaction
 

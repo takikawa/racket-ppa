@@ -48,6 +48,7 @@ READ_ONLY static Scheme_Object *write_property;
 READ_ONLY static Scheme_Object *print_attribute_property;
 READ_ONLY static Scheme_Object *evt_property;
 READ_ONLY static Scheme_Object *proc_property;
+READ_ONLY static Scheme_Object *method_property;
 READ_ONLY static Scheme_Object *rename_transformer_property;
 READ_ONLY static Scheme_Object *set_transformer_property;
 READ_ONLY static Scheme_Object *not_free_id_symbol;
@@ -493,6 +494,12 @@ scheme_init_struct (Scheme_Env *env)
                                                                       NULL, 1);
   }
 
+  {
+    REGISTER_SO(method_property);
+    method_property = scheme_make_struct_type_property(scheme_intern_symbol("method-arity-error"));
+    scheme_add_global_constant("prop:method-arity-error", method_property, env);
+  }
+
   REGISTER_SO(not_free_id_symbol);
   not_free_id_symbol = scheme_intern_symbol("not-free-identifier=?");
 
@@ -542,7 +549,7 @@ scheme_init_struct (Scheme_Env *env)
   scheme_add_global_constant("make-struct-type-property", 
 			    scheme_make_prim_w_arity2(make_struct_type_property,
 						      "make-struct-type-property",
-						      1, 3,
+						      1, 4,
 						      3, 3),
 			    env);
 
@@ -1112,6 +1119,7 @@ static Scheme_Object *make_struct_type_property_from_c(int argc, Scheme_Object *
   char *name;
   int len;
   const char *who;
+  char can_impersonate = 0;
 
   if (type == scheme_struct_property_type)
     who = "make-struct-type-property";
@@ -1124,6 +1132,7 @@ static Scheme_Object *make_struct_type_property_from_c(int argc, Scheme_Object *
     if (SCHEME_SYMBOLP(argv[1])
         && !SCHEME_SYM_WEIRDP(argv[1])
         && !strcmp("can-impersonate", SCHEME_SYM_VAL(argv[1]))) {
+      can_impersonate = 1;
     } else if (SCHEME_TRUEP(argv[1])
                && !scheme_check_proc_arity(NULL, 2, 1, argc, argv))
       scheme_wrong_contract(who, "(or/c (any/c any/c . -> . any) #f 'can-impersonate)", 1, argc, argv);
@@ -1153,6 +1162,9 @@ static Scheme_Object *make_struct_type_property_from_c(int argc, Scheme_Object *
                               "(listof (cons struct-type-property? (any/c . -> . any)))", 
                               2, argc, argv);
       }
+
+      if (argc > 3)
+        can_impersonate = SCHEME_TRUEP(argv[3]);
     }
   }
 
@@ -1162,6 +1174,7 @@ static Scheme_Object *make_struct_type_property_from_c(int argc, Scheme_Object *
   if ((argc > 1) && SCHEME_TRUEP(argv[1]))
     p->guard = argv[1];
   p->supers = supers;
+  p->can_impersonate = can_impersonate;
 
   a[0] = (Scheme_Object *)p;
 
@@ -1312,7 +1325,7 @@ static Scheme_Object *guard_property(Scheme_Object *prop, Scheme_Object *v, Sche
     if (SCHEME_INTP(v)) {
       intptr_t pos;
       pos = SCHEME_INT_VAL(orig_v);
-      if (!t->immutables || !t->immutables[pos]) {
+      if (!t->immutables || !t->immutables[pos]) { 
         scheme_contract_error("make-struct-type", 
                               "field is not specified as immutable for a prop:procedure index", 
                               "index", 1, orig_v,
@@ -2614,18 +2627,8 @@ static Scheme_Object *check_type_and_inspector(const char *who, int always, int 
   return insp;
 }
 
-static void get_struct_type_info(int argc, Scheme_Object *argv[], Scheme_Object **a, int always)
+void scheme_force_struct_type_info(Scheme_Struct_Type *stype)
 {
-  Scheme_Struct_Type *stype, *parent;
-  Scheme_Object *insp, *ims;
-  int p, cnt;
-
-  insp = check_type_and_inspector("struct-type-info", always, argc, argv);
-  if (SCHEME_NP_CHAPERONEP(argv[0]))
-    stype = (Scheme_Struct_Type *)SCHEME_CHAPERONE_VAL(argv[0]);
-  else
-    stype = (Scheme_Struct_Type *)argv[0];
-
   /* Make sure generic accessor and mutator are created: */
   if (!stype->accessor) {
     Scheme_Object *p;
@@ -2638,6 +2641,21 @@ static void get_struct_type_info(int argc, Scheme_Object *argv[], Scheme_Object 
     p = make_struct_proc(stype, fn, SCHEME_GEN_SETTER, 0);
     stype->mutator = p;
   }
+}
+
+static void get_struct_type_info(int argc, Scheme_Object *argv[], Scheme_Object **a, int always)
+{
+  Scheme_Struct_Type *stype, *parent;
+  Scheme_Object *insp, *ims;
+  int p, cnt;
+
+  insp = check_type_and_inspector("struct-type-info", always, argc, argv);
+  if (SCHEME_NP_CHAPERONEP(argv[0]))
+    stype = (Scheme_Struct_Type *)SCHEME_CHAPERONE_VAL(argv[0]);
+  else
+    stype = (Scheme_Struct_Type *)argv[0];
+
+  scheme_force_struct_type_info(stype);
 
   if (stype->name_pos)
     parent = stype->parent_types[stype->name_pos - 1];
@@ -3027,7 +3045,8 @@ struct_setter_p(int argc, Scheme_Object *argv[])
   Scheme_Object *v = argv[0];
   if (SCHEME_CHAPERONEP(v)) v = SCHEME_CHAPERONE_VAL(v);
   return ((STRUCT_mPROCP(v, SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER)
-	   || STRUCT_mPROCP(v, SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_SETTER))
+	   || STRUCT_mPROCP(v, SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_SETTER)
+           || STRUCT_mPROCP(v, SCHEME_PRIM_STRUCT_TYPE_BROKEN_INDEXED_SETTER))
 	  ? scheme_true : scheme_false);
 }
 
@@ -3814,8 +3833,18 @@ make_struct_proc(Scheme_Struct_Type *struct_type,
 					   2 + need_pos, 2 + need_pos, 0);
       if (need_pos)
 	flags |= SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_SETTER;
-      else
-	flags |= SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER;
+      else {
+        flags |= SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER;
+
+        if (struct_type->immutables) {
+          if (struct_type->name_pos)
+            field_num -= struct_type->parent_types[struct_type->name_pos - 1]->num_slots;
+          if (struct_type->immutables[field_num]) {
+            flags -= SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER;
+            flags |= SCHEME_PRIM_STRUCT_TYPE_BROKEN_INDEXED_SETTER;
+          }
+        }
+      }
       /* See note above:
 	 if (need_pos) struct_type->mutator = p; */
     }
@@ -3831,7 +3860,8 @@ Scheme_Object *scheme_rename_struct_proc(Scheme_Object *p, Scheme_Object *sym)
   if (SCHEME_PRIMP(p)) {
     unsigned short flags = ((Scheme_Primitive_Proc *)p)->pp.flags;
     int is_getter = ((flags & SCHEME_PRIM_OTHER_TYPE_MASK) == SCHEME_PRIM_STRUCT_TYPE_INDEXED_GETTER);
-    int is_setter = ((flags & SCHEME_PRIM_OTHER_TYPE_MASK) == SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER);
+    int is_setter = (((flags & SCHEME_PRIM_OTHER_TYPE_MASK) == SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER)
+                     || ((flags & SCHEME_PRIM_OTHER_TYPE_MASK) == SCHEME_PRIM_STRUCT_TYPE_BROKEN_INDEXED_SETTER));
       
     if (is_getter || is_setter) {
       const char *func_name;
@@ -4915,6 +4945,11 @@ Scheme_Object *scheme_extract_struct_procedure(Scheme_Object *obj, int num_rands
       if (scheme_reduced_procedure_struct
 	  && scheme_is_struct_instance(scheme_reduced_procedure_struct, plain_obj))
 	meth_wrap = SCHEME_TRUEP(((Scheme_Structure *)obj)->slots[3]);
+      else {
+        a = do_prop_accessor(method_property, plain_obj);
+        if (a && SCHEME_TRUEP(a))
+          meth_wrap = 1;
+      }
 
       scheme_wrong_count_m((char *)obj,
 			   -1 /* means "name argument is really a proc struct" */, 0,
@@ -5243,9 +5278,8 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
       prop = SCHEME_PRIM_CLOSURE_ELS(proc)[0];
       pi = NULL;
 
-      if (is_impersonator 
-          && (!((Scheme_Struct_Property *)prop)->guard
-              || !SCHEME_SYMBOLP(((Scheme_Struct_Property *)prop)->guard)))
+      if (is_impersonator
+          && !((Scheme_Struct_Property *)prop)->can_impersonate)
         scheme_contract_error(name,
                               "operation cannot be impersonated",
                               "operation kind", 0, kind,
@@ -5361,7 +5395,7 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
           || !scheme_hash_tree_get(setter_positions, SCHEME_CAR(prop))) {
         scheme_contract_error(name,
                               "accessor redirection for a non-transparent field requires a mutator redirection",
-                              "explanaion", 0, "a mutator redirection acts as a witness that access is allowed",
+                              "explanation", 0, "a mutator redirection acts as a witness that access is allowed",
                               "accessor", 1, SCHEME_CDR(prop),
                               "value to impersonate", 1, argv[0],
                               NULL);
