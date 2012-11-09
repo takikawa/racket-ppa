@@ -117,6 +117,11 @@
  (cs-unused-require "unbenutztes require")
  (cs-free-variable "freie Variable")
 
+ (cs-binder-count "~a bindende Vorkommen")
+ (cs-zero-varrefs "keine gebundenen Vorkommen")
+ (cs-one-varref "Ein gebundenes Vorkommen")
+ (cs-n-varrefs "~a gebundene Vorkommen") ;; expected to have one ~a formatter that will accept a number
+
  (cs-contract-my-obligation "Vertrag: Obliation dieses Moduls")
  (cs-contract-their-obligation "Vertrag: Obligation des Klientenmoduls")
  (cs-contract-both-obligation "Vertrag: Obligation sowohl dieses Moduls als auch des Klientenmoduls")
@@ -128,20 +133,24 @@
  (cs-mode-menu-show-client-obligations "Vertragsobligationen des Klienten")
  (cs-mode-menu-show-syntax "Syntaktische Kategorien")
 
+  ;; the documentation blue boxes in the upper-right corner of the drracket window
+  (sc-read-more... "Mehr hier nachlesen ...")
+  (sc-f2-to-un/lock "f2 um zu (ent)blockieren")
+
  ;; the online check syntax status messages (mouse over the bottom right of drracket's window to see the messages during online expansion's various phases)
- (online-expansion-running "Online-Expansion läuft")
+ (online-expansion-running "Hintergrund-Expansion läuft")
  (online-expansion-only-raw-text-files-supported "Nur reine Text-Dateien sind unterstützt")
- (online-expansion-abnormal-termination "Online-Expansion unglücklich abgebrochen")
- (online-expansion-finished-successfully "Online-Expansion erfolgreich abgeschlossen")
+ (online-expansion-abnormal-termination "Hintergrund-Expansion unglücklich abgebrochen")
+ (online-expansion-finished-successfully "Hintergrund-Expansion erfolgreich abgeschlossen")
 
  (jump-to-error "Zum Fehler springen")
- (online-expansion-is-disabled "Online-Expansion ist deaktiviert")
+ (online-expansion-is-disabled "Hintergrund-Expansion ist deaktiviert")
  ;; these next two show up in the bar along the bottom of the drracket window
- (online-expansion-pending "Online-Expansion läuft ...")
- (online-expansion-finished "Online-Expansion fertig") ;; note: there may still be errors in this case
+ (online-expansion-pending "Hintergrund-Expansion läuft ...")
+ (online-expansion-finished "Hintergrund-Expansion fertig") ;; note: there may still be errors in this case
  
  ;; the online expansion preferences pane
- (online-expansion "Online-Expansion") ;; title of prefs pane
+ (online-expansion "Hintergrund-Expansion") ;; title of prefs pane
  ; the different kinds of errors
  (online-expansion-show-read-errors-as "Reader-Fehler anzeigen")
  (online-expansion-show-variable-errors-as "Ungebundene Bezeichner anzeigen")
@@ -198,7 +207,7 @@
  (error-erasing-log-directory "Fehler beim Löschen des Protokoll-Verzeichnisses.\n\n~a\n")
 
   ;; menu items connected to the logger -- also in a button in the planet status line in the drs frame
-  (show-log "&Log anzeigen")
+  (show-log "&Log einblenden")
   (hide-log "&Log ausblenden")
   (logging-all "Alle") ;; in the logging window in drscheme, shows all logs simultaneously
 
@@ -329,6 +338,7 @@
  (install-plt-file-tab "Datei")
  (install-plt-filename "Dateiname:")
  (install-plt-url "URL:")
+ (install-plt-error-header "Beim Überprüfen der heruntergeladenen .plt-Datei ist ein Fehler aufgetreten. Bitte überprüfen Sie die URL und versuchen Sie es noch einmal.")
   
  (install-plt-file "~a installieren oder editieren?")
  (install-plt-file/yes "Installieren")
@@ -387,7 +397,11 @@
  (show-line-and-column-numbers "Zeilen- && Spaltennummern anzeigen") ; used for popup menu; right click on line/column box in bottom of drs window
  (show-character-offsets "Zeichen-Offsets anzeigen") ; used for popup menu; right click on line/column box in bottom of drs window
  (enable-keybindings-in-menus "Tastenbelegung für Menüs")
- (automatically-to-ps "Automatisch in PostScript-Datei drucken")
+ (printing-mode "Druckmodus")
+ (print-using-platform-specific-mode "Plattformspezifisches Drucken")
+ (print-to-ps "Drucken in PostScript-Datei")
+ (print-to-pdf "Drucken in PDF-Datei")
+
  (command-as-meta "Command-Taste als Meta behandeln") ;; macos/macos x only
  (reuse-existing-frames "Existierende Fenster für neu geöffnete Dateien wiederverwenden")
  (default-fonts "Standard-Fonts")
@@ -630,6 +644,7 @@
  
  (find-info "Zum nächsten Vorkommen der Zeichenkette aus dem Such-Fenster springen")
  (find-menu-item "Suchen")
+ (find-from-selection-menu-item "Die Selektion suchen")
 
  (find-next-info "Zum nächsten Fundort der Zeichenkette im Suchfenster springen")
  (find-next-menu-item "Weitersuchen")
@@ -854,7 +869,7 @@
  (force-quit-menu-item-help-string "Benutzt custodian-shutdown-all, um die Auswertung abzubrechen")
  (limit-memory-menu-item-label "Speicherverbrauch einschränken...")
  (limit-memory-msg-1 "Das Limit wird beim nächsten Programmstart aktiv")
- (limit-memory-msg-2 "und muss mindestens ein Megabyte betragen.")
+ (limit-memory-msg-2 "und muss mindestens acht Megabyte betragen.") ;; minimum memory limit is now 8 megabytes
  (limit-memory-unlimited "nicht einschränken")
  (limit-memory-limited "einschränken")
  (limit-memory-megabytes "Megabytes")
@@ -1560,5 +1575,11 @@
   (hide-optimization-coach "Optimierungs-Coach ausblenden")
   (show-optimization-coach "Optimierungs-Coach einblenden")
   
+
+  ;; labels used (in a big font) in the background of the definitions and interactions windows
+  (definitions-window-label "Definitionen")
+  (interactions-window-label "Interaktionen")
+  (hide-defs/ints-label "Definitionen/Interaktionen-Beschriftung ausblenden") ;; popup menu
+  (show-defs/ints-label "Definitionen/Interaktionen-Beschriftung einblenden") ;; preferences checkbox
 
  )

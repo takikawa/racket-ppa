@@ -83,6 +83,8 @@
  [arrow-space (parameter/c natural-number/c)]
  [label-space (parameter/c natural-number/c)]
  [metafunction-cases (parameter/c (or/c #f (and/c pair? (listof (and/c integer? (or/c zero? positive?))))))]
+ [judgment-form-cases (parameter/c (or/c #f (and/c (listof (or/c exact-nonnegative-integer? string?))
+                                                   pair?)))]
  [metafunction-pict-style 
   (parameter/c (symbols 'left-right
                         'left-right/vertical-side-conditions
@@ -112,13 +114,6 @@
 (provide to-lw
          to-lw/stx
          (struct-out lw))
-
-(require (prefix-in lw/ct: "private/loc-wrapper-ct.rkt")
-         (prefix-in lw/rt: "private/loc-wrapper-rt.rkt"))
-(define (to-lw/stx stx)
-  (lw/rt:add-spans/interp-lws 
-   (syntax->datum 
-    (lw/ct:to-lw/proc stx #f))))
 
 (provide/contract
  [just-before (-> (or/c pict? string? symbol?) lw? lw?)]

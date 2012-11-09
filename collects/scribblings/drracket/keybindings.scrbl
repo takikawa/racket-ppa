@@ -48,9 +48,12 @@ On most keyboards, ``<'' and ``>'' are shifted characters. So, to
 get M->, you actually have to type Meta-Shift->. That is, press and
 hold down both the Meta and Shift keys, and then strike ``>''.
 
-On Windows, some of these keybindings are actually standard menu
+On Windows (and sometimes under Unix)
+some of these keybindings are actually standard menu
 items.  Those keybindings will behave according to the menus, unless
 the @onscreen{Enable keybindings in menus} preference is unchecked.
+For example, the C-e keybinding mentioned above actually toggles
+the visibility of the interactions window.
 
 @index['("Emacs keybindings")]{If} you are most familiar with
 Emacs-style key bindings (especially on windows or some linux installations
@@ -59,6 +62,14 @@ you should uncheck the @onscreen{Enable
 keybindings in menus} preference. Many of the keybindings below are
 inspired by Emacs. See also @secref["defining-shortcuts"] for suggestions
 on how to bind keys to menu items on a selective basis.
+
+And finally, the authoritative source for keybindings 
+is the @onscreen{Edit} menu's @onscreen{Show Active Keybindings}
+menu item. Keybindings in DrRacket are often sensitive to
+the window that has the keyboard focus, so the contents
+of the window that @onscreen{Show Active Keybindings} opens
+will depend where the keyboard focus was when the menu was
+selected.
 
 @section{Moving Around}
 
@@ -94,6 +105,12 @@ on how to bind keys to menu items on a selective basis.
 @keybinding["A-C-down"]{move down into an embedded editor}
 
 @keybinding["C-C C-Z"]{move the cursor to the interactions window}
+@keybinding["C-F6"]{move the cursor between different windows (usually
+                    the interactions and definitions windows, but also the
+                    search window and other editable portions of DrRacket).
+                    Also, search for ``shift-focus'' in the
+                    @onscreen{Show Active Keybindings} menu's window for more, 
+                    platform-specific keybindings that have this functionality}
 ]
 
 @section{Editing Operations}
@@ -159,6 +176,13 @@ on how to bind keys to menu items on a selective basis.
 @keybinding["F5"]{Run}
 ]
 
+@section{Documentation}
+@itemize[
+  @keybinding["f1"]{Search in the documentation for the words near the insertion point}
+  @keybinding["f2"]{Reveal the blue box for the identifier at the insertion point (requires
+                    background check syntax to be enabled, or normal check syntax to have been
+                    run).}
+]
 
 @section{Interactions}
 

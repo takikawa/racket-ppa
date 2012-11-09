@@ -18,14 +18,14 @@
   (define elem-ctc (base-box/c-content ctc))
   (define immutable (base-box/c-immutable ctc))
   (unless (box? val)
-    (raise-blame-error blame val '(expected "a box," given: "~e") val))
+    (raise-blame-error blame val '(expected "a box" given: "~e") val))
   (case immutable
     [(#t)
      (unless (immutable? val)
-       (raise-blame-error blame val '(expected "an immutable box," given: "~e") val))]
+       (raise-blame-error blame val '(expected "an immutable box" given: "~e") val))]
     [(#f)
      (when (immutable? val)
-       (raise-blame-error blame val '(expected "a mutable box," given: "~e") val))]
+       (raise-blame-error blame val '(expected "a mutable box" given: "~e") val))]
     [(dont-care) (void)]))
 
 (define (box/c-first-order ctc)
@@ -78,7 +78,7 @@
               [neg-elem-proj ((contract-projection elem-ctc) (blame-swap blame))])
           (λ (val)
             (check-box/c ctc val blame)
-            (if (immutable? val)
+            (if (and (immutable? val) (not (chaperone? val)))
                 (box-immutable (pos-elem-proj (unbox val)))
                 (box-wrapper val
                              (λ (b v) (pos-elem-proj v))

@@ -1,9 +1,11 @@
 #lang racket/base
-(require "../utils/utils.rkt"         
+(require "../utils/utils.rkt"
+         "../utils/print-struct.rkt"
          racket/match
          (contract-req)
          "free-variance.rkt"
          "interning.rkt" unstable/struct
+         unstable/lazy-require
          racket/stxparam
          (for-syntax
           racket/match
@@ -15,6 +17,11 @@
           (rename-in (except-in (utils stxclass-util) bytes byte-regexp regexp byte-pregexp pregexp)
                      [id* id]
                      [keyword* keyword])))
+
+
+(lazy-require
+  ["../types/printer.rkt" (print-type print-filter print-object print-pathelem)])
+
 
 (provide == defintern hash-id (for-syntax fold-target))
 
@@ -51,7 +58,7 @@
   ;; (construction prevents duplicates)
   (define (combiner f flds)
     (syntax-parse flds
-      [() #'#hasheq()]
+      [() #'empty-free-vars]
       [(e) #`(#,f e)]
       [(e ...) #`(combine-frees (list (#,f e) ...))]))
 
@@ -61,8 +68,8 @@
     (pattern (~seq f1:expr f2:expr))
     ;; [#:frees #f] pattern in e.g. def-type means no free vars or idxs.
     (pattern #f
-             #:with f1 #'#hasheq()
-             #:with f2 #'#hasheq())
+             #:with f1 #'empty-free-vars
+             #:with f2 #'empty-free-vars)
     ;; [#:frees (λ (f) ...)] should combine free variables or idxs accordingly
     ;; (given the respective accessor functions)
     (pattern e:expr
@@ -297,7 +304,7 @@
               define-id:id ;; e.g. def-type
               kw:keyword ;; e.g. #:Type
               case:id ;; e.g. type-case
-              printer:id ;; e.g. print-type*
+              printer:id ;; e.g. print-type
               hashtable:id ;; e.g. type-name-ht
               rec-id:id ;; e.g. type-rec-id
               (~optional (~and #:key ;; only given for Type.
@@ -311,7 +318,6 @@
     [(_ i:type-name ...)
      #'(begin
          (provide i.define-id ...
-                  i.printer ...
                   i.name ...
                   i.pred? ...
                   i.rec-id ...
@@ -323,8 +329,7 @@
          (define-syntax i.define-id
            (mk #'i.name #'i.hashtable i.key? #'i.rec-id)) ...
          (define-for-syntax i.hashtable (make-hasheq)) ...
-         (define-struct/printer (i.name Rep) (i.field-names ...)
-           (lambda (a b c) ((unbox i.printer) a b c))) ...
+         (define-struct/printer (i.name Rep) (i.field-names ...) i.printer) ...
          (define-syntax-parameter i.rec-id
            (λ (stx)
               (raise-syntax-error #f
@@ -343,45 +348,30 @@
                                     '(i.kw ...)))
                          (list i.hashtable ...))))))]))
 
-(make-prim-type [Type def-type #:Type type-case print-type* type-name-ht type-rec-id #:key]
-                [Filter def-filter #:Filter filter-case print-filter* filter-name-ht filter-rec-id]
-                [Object def-object #:Object object-case print-object* object-name-ht object-rec-id]
-                [PathElem def-pathelem #:PathElem pathelem-case print-pathelem* pathelem-name-ht pathelem-rec-id])
+(make-prim-type [Type def-type #:Type type-case print-type type-name-ht type-rec-id #:key]
+                [Filter def-filter #:Filter filter-case print-filter filter-name-ht filter-rec-id]
+                [Object def-object #:Object object-case print-object object-name-ht object-rec-id]
+                [PathElem def-pathelem #:PathElem pathelem-case print-pathelem pathelem-name-ht pathelem-rec-id])
 
-(provide PathElem? (rename-out [Rep-seq Type-seq]
-                               [Rep-free-vars free-vars*]
-                               [Rep-free-idxs free-idxs*]))
+(define (Rep-values rep)
+  (match rep
+    [(? (lambda (e) (or (Filter? e)
+                        (Object? e)
+                        (PathElem? e)))
+        (app (lambda (v) (vector->list (struct->vector v))) (list-rest tag seq fv fi stx vals)))
+     vals]
+    [(? Type?
+        (app (lambda (v) (vector->list (struct->vector v))) (list-rest tag seq fv fi stx key vals)))
+     vals]))
+
+
+(provide
+  Rep-values
+  (rename-out [Rep-seq Type-seq]
+              [Rep-free-vars free-vars*]
+              [Rep-free-idxs free-idxs*]))
 
 (provide/cond-contract (struct Rep ([seq exact-nonnegative-integer?]
                                     [free-vars (hash/c symbol? variance?)]
                                     [free-idxs (hash/c symbol? variance?)]
-                                    [stx (or/c #f syntax?)]))
-                       [replace-syntax (Rep? syntax? . -> . Rep?)])
-
-(define (replace-field val new-val idx)
-  (define-values (type skipped) (struct-info val))
-  (define maker (struct-type-make-constructor type))
-  (define flds (struct->list val))
-  (apply maker (list-set flds idx new-val)))
-
-(define (replace-syntax rep stx)
-  (replace-field rep stx 3))
-
-;; useful for debugging printing only
-(define (converter v basic sub)
-  (define (gen-constructor sym)
-    (string->symbol (string-append "make-" (substring (symbol->string sym) 7))))
-  (match v
-    [(? (lambda (e) (or (Filter? e)
-                        (Object? e)
-                        (PathElem? e)))
-        (app (lambda (v) (vector->list (struct->vector v)))
-             (list-rest tag seq fv fi stx vals)))
-     `(,(gen-constructor tag) ,@(map sub vals))]
-    [(? Type?
-        (app (lambda (v) (vector->list (struct->vector v))) (list-rest tag seq fv fi stx key vals)))
-     `(,(gen-constructor tag) ,@(map sub vals))]
-    [_ (basic v)]))
-
-;(require mzlib/pconvert)
-;(current-print-convert-hook converter)
+                                    [stx (or/c #f syntax?)])))

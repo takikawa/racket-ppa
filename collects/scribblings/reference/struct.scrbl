@@ -100,9 +100,7 @@ override the default @racket[equal?] definition through the
                            [immutables (listof exact-nonnegative-integer?)
                                        null]
                            [guard (or/c procedure? #f) #f]
-                           [constructor-name (or/c symbol? #f) #f]
-                           [generate (-> contract? (-> int? any/c))]
-                           [exercise (-> contract? (-> int? any/c any/c))])
+                           [constructor-name (or/c symbol? #f) #f])
           (values struct-type?
                   struct-constructor-procedure?
                   struct-predicate-procedure?
@@ -175,14 +173,6 @@ values produced by the subtype's guard procedure become the first
 If @racket[constructor-name] is not @racket[#f], it is used as the
 name of the generated @tech{constructor} procedure as returned by
 @racket[object-name] or in the printed form of the constructor value.
-
-The @racket[generate] argument is used to define a new generator for
-this structure type, which can be used to create random instances of
-the structure type. For more information see @racket[contract-generate].
-
-The @racket[exercise] argument allows you to define a function to verify
-that a given value is an instance of your contract. This will also be used
-for random generation.
 
 The result of @racket[make-struct-type] is five values:
 
@@ -304,7 +294,8 @@ A @deftech{structure type property} allows per-type information to be
                                     [guard (or/c procedure? #f 'can-impersonate) #f]
                                     [supers (listof (cons/c struct-type-property?
                                                             (any/c . -> . any/c)))
-                                            null])
+                                            null]
+                                    [can-impersonate? any/c #f])
          (values struct-type-property?
                  procedure?
                  procedure?)]{
@@ -355,9 +346,9 @@ returning a structure type descriptor.
 
 If @racket[guard] is @racket['can-impersonate], then the property's
 accessor can be redirected through
-@racket[impersonate-struct]. Otherwise, redirection of the property
-value through an @tech{impersonator} is disallowed, since redirection
-is tantamount to mutation.
+@racket[impersonate-struct]. This option is identical to supplying
+@racket[#t] as the @racket[can-impersonate?] argument and is provided
+for backwards compatibility.
 
 The optional @racket[supers] argument is a list of properties that are
 automatically associated with some structure type when the newly
@@ -366,6 +357,12 @@ created property is associated to the structure type. Each property in
 supplied for the new property (after it is processed by
 @racket[guard]) and returns a value for the associated property (which
 is then sent to that property's guard, of any).
+
+The optional @racket[can-impersonate?] argument determines if the
+structure type property can be redirected through @racket[impersonate-struct].
+If the argument is @racket[#f], then redirection is not allowed.
+Otherwise, the property accessor may be redirected by a struct
+impersonator.
 
 @examples[
 #:eval struct-eval

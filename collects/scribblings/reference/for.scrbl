@@ -13,16 +13,23 @@ The @racket[for] iteration forms are based on SRFI-42
 
 @section{Iteration and Comprehension Forms}
 
-@defform/subs[(for (for-clause ...) body ...+)
+@defform/subs[(for (for-clause ...) body-or-break ... body)
               ([for-clause [id seq-expr]
                            [(id ...) seq-expr]
                            (code:line #:when guard-expr)
-                           (code:line #:unless guard-expr)])
+                           (code:line #:unless guard-expr)
+                           break-clause]
+               [break-clause (code:line #:break guard-expr)
+                             (code:line #:final guard-expr)]
+               [body-or-break body
+                              bleak-clause])
               #:contracts ([seq-expr sequence?])]{
 
-Iteratively evaluates @racket[body]. The @racket[for-clause]s
+Iteratively evaluates @racket[body]s. The @racket[for-clause]s
 introduce bindings whose scope includes @racket[body] and that
 determine the number of times that @racket[body] is evaluated.
+A @racket[break-clause] either among the @racket[for-clause]s
+of @racket[body]s stops further iteration.
 
 In the simple case, each @racket[for-clause] has one of its first two
 forms, where @racket[[id seq-expr]] is a shorthand for @racket[[(id)
@@ -61,6 +68,19 @@ using the remaining @racket[for-clauses]. A @racket[for-clause] of
 the form @racket[#:unless guard-expr] corresponds to the same transformation
 with @racket[unless] in place of @racket[when].
 
+A @racket[#:break guard-expr] clause is similar to a
+@racket[#:unless guard-expr] clause, but when @racket[#:break]
+avoids evaluation of the @racket[body]s, it also effectively ends all
+sequences within the @racket[for] form.  A @racket[#:final
+guard-expr] clause is similar to @racket[#:break guard-expr], but
+instead of immediately ending sequences and skipping the
+@racket[body]s, it allows at most one more element from each later
+sequence and at most one more evaluation of the following
+@racket[body]s. Among the @racket[body]s, besides stopping the
+iteration and preventing later @racket[body] evaluations, a
+@racket[#:break guard-expr] or @racket[#:final guard-expr]
+clause starts a new internal-definition context.
+
 @examples[
 (for ([i '(1 2 3)]
       [j "abc"]
@@ -69,13 +89,28 @@ with @racket[unless] in place of @racket[when].
   (display (list i j k)))
 (for ([(i j) #hash(("a" . 1) ("b" . 20))])
   (display (list i j)))
+(for ([i '(1 2 3)]
+      [j "abc"]
+      #:break (not (odd? i))
+      [k #2(#t #f)])
+  (display (list i j k)))
+(for ([i '(1 2 3)]
+      [j "abc"]
+      #:final (not (odd? i))
+      [k #2(#t #f)])
+  (display (list i j k)))
+(for ([i '(1 2 3)]
+      [j "abc"]
+      [k #2(#t #f)])
+  #:break (not (or (odd? i) k))
+  (display (list i j k)))
 (for ()
   (display "here"))
 (for ([i '()])
   (error "doesn't get here"))
 ]}
 
-@defform[(for/list (for-clause ...) body ...+)]{ Iterates like
+@defform[(for/list (for-clause ...) body-or-break ... body)]{ Iterates like
 @racket[for], but that the last expression in the @racket[body]s must
 produce a single value, and the result of the @racket[for/list]
 expression is a list of the results in order.
@@ -89,30 +124,52 @@ element.
            #:when (odd? i)
            [k #2(#t #f)])
   (list i j k))
+(for/list ([i '(1 2 3)]
+           [j "abc"]
+           #:break (not (odd? i))
+           [k #2(#t #f)])
+  (list i j k))
 (for/list () 'any)
 (for/list ([i '()])
   (error "doesn't get here"))
 ]}
 
-@defform*[((for/vector (for-clause ...) body ...+)
-           (for/vector #:length length-expr (for-clause ...) body ...+))]{
+@defform/subs[(for/vector maybe-length (for-clause ...) body-or-break ... body)
+              ([maybe-length (code:line)
+                             (code:line #:length length-expr)
+                             (code:line #:length length-expr #:fill fill-expr)])
+              #:contracts ([length-expr exact-nonnegative-integer?])]{
 
-Iterates like @racket[for/list], but the result are accumulated into
-a vector instead of a list.  If the optional @racket[#:length]
-form is used, then @racket[length-expr] must evaluate to an
-@racket[exact-nonnegative-integer?], and the result vector is
-constructed with this length.  In this case, the iteration can be
-performed more efficiently, and terminates when the vector is full or
-the requested number of iterations have been performed, whichever
-comes first.  If the provided @racket[length-expr] evaluates to a
-length longer than the number of iterations then the remaining slots
-of the vector are initialized to the default argument of
-@racket[make-vector].}
+Iterates like @racket[for/list], but results are accumulated into
+a vector instead of a list. 
+
+If the optional @racket[#:length] clause is specified, the result of
+@racket[length-expr] determines the length of the result vector.  In
+that case, the iteration can be performed more efficiently, and it
+terminates when the vector is full or the requested number of
+iterations have been performed, whichever comes first. If
+@racket[length-expr] specifies a length longer than the number of
+iterations, then the remaining slots of the vector are initialized to
+the value of @racket[fill-expr], which defaults to @racket[0] (i.e.,
+the default argument of @racket[make-vector]).
+
+@examples[
+(for/vector ([i '(1 2 3)]) (number->string i))
+(for/vector #:length 2 ([i '(1 2 3)]) (number->string i))
+(for/vector #:length 4 ([i '(1 2 3)]) (number->string i))
+(for/vector #:length 4 #:fill "?" ([i '(1 2 3)]) (number->string i))
+]
+
+The @racket[for/vector] form may allocate a vector and mutate it after
+each iteration of @racket[body], which means that capturing a
+continuation during @racket[body] and applying it multiple times may
+mutate a shared vector.}
+
 
 @deftogether[(
-@defform[(for/hash (for-clause ...) body ...+)]
-@defform[(for/hasheq (for-clause ...) body ...+)]
-@defform[(for/hasheqv (for-clause ...) body ...+)]
+@defform[(for/hash (for-clause ...) body-or-break ... body)]
+@defform[(for/hasheq (for-clause ...) body-or-break ... body)]
+@defform[(for/hasheqv (for-clause ...) body-or-break ... body)]
 )]{
 
 Like @racket[for/list], but the result is an immutable @tech{hash
@@ -129,7 +186,7 @@ the iteration.
 ]}
 
 
-@defform[(for/and (for-clause ...) body ...+)]{ Iterates like
+@defform[(for/and (for-clause ...) body-or-break ... body)]{ Iterates like
 @racket[for], but when last expression of @racket[body] produces
 @racket[#f], then iteration terminates, and the result of the
 @racket[for/and] expression is @racket[#f]. If the @racket[body]
@@ -142,11 +199,14 @@ result from the last evaluation of @racket[body].
   (i . < . 3))
 (for/and ([i '(1 2 3 4)])
   i)
+(for/and ([i '(1 2 3 4)])
+  #:break (= i 3)
+  i)
 (for/and ([i '()])
   (error "doesn't get here"))
 ]}
 
-@defform[(for/or (for-clause ...) body ...+)]{ Iterates like
+@defform[(for/or (for-clause ...) body-or-break ... body)]{ Iterates like
 @racket[for], but when last expression of @racket[body] produces
 a value other than @racket[#f], then iteration terminates, and
 the result of the @racket[for/or] expression is the same
@@ -164,7 +224,7 @@ result of the @racket[for/or] expression is
 ]}
 
 @deftogether[(
-@defform[(for/sum (for-clause ...) body ...+)]
+@defform[(for/sum (for-clause ...) body-or-break ... body)]
 )]{
 
 Iterates like @racket[for], but each result of the last @racket[body]
@@ -176,7 +236,7 @@ is accumulated into a result with @racket[+].
 
 
 @deftogether[(
-@defform[(for/product (for-clause ...) body ...+)]
+@defform[(for/product (for-clause ...) body-or-break ... body)]
 )]{
 
 Iterates like @racket[for], but each result of the last @racket[body]
@@ -187,7 +247,7 @@ is accumulated into a result with @racket[*].
 ]}
 
 
-@defform[(for/lists (id ...) (for-clause ...) body ...+)]{
+@defform[(for/lists (id ...) (for-clause ...) body-or-break ... body)]{
 
 Similar to @racket[for/list], but the last @racket[body] expression
 should produce as many values as given @racket[id]s, and the result is
@@ -196,7 +256,7 @@ the lists accumulated so far in the @racket[for-clause]s and
 @racket[body]s.}
 
 
-@defform[(for/first (for-clause ...) body ...+)]{ Iterates like
+@defform[(for/first (for-clause ...) body-or-break ... body)]{ Iterates like
 @racket[for], but after @racket[body] is evaluated the first
 time, then the iteration terminates, and the @racket[for/first]
 result is the (single) result of @racket[body]. If the
@@ -211,7 +271,7 @@ result is the (single) result of @racket[body]. If the
   (error "doesn't get here"))
 ]}
 
-@defform[(for/last (for-clause ...) body ...+)]{ Iterates like
+@defform[(for/last (for-clause ...) body-or-break ... body)]{ Iterates like
 @racket[for], but the @racket[for/last] result is the (single)
 result of the last evaluation of @racket[body]. If the
 @racket[body] is never evaluated, then the result of the
@@ -225,7 +285,8 @@ result of the last evaluation of @racket[body]. If the
   (error "doesn't get here"))
 ]}
 
-@defform[(for/fold ([accum-id init-expr] ...) (for-clause ...) . body)]{
+@defform[(for/fold ([accum-id init-expr] ...) (for-clause ...)
+           body-or-break ... body)]{
 
 Iterates like @racket[for]. Before iteration starts, the
 @racket[init-expr]s are evaluated to produce initial accumulator
@@ -244,7 +305,7 @@ accumulator values.
   (values (+ sum i) (cons (sqrt i) rev-roots)))
 ]}
 
-@defform[(for* (for-clause ...) body ...+)]{
+@defform[(for* (for-clause ...) body-or-break ... body)]{
 Like @racket[for], but with an implicit @racket[#:when #t] between
 each pair of @racket[for-clauses], so that all sequence iterations are
 nested.
@@ -256,20 +317,20 @@ nested.
 ]}
 
 @deftogether[(
-@defform[(for*/list (for-clause ...) body ...+)]
-@defform[(for*/lists (id ...) (for-clause ...) body ...+)]
-@defform*[((for*/vector (for-clause ...) body ...+)
-           (for*/vector #:length length-expr (for-clause ...) body ...+))]
-@defform[(for*/hash (for-clause ...) body ...+)]
-@defform[(for*/hasheq (for-clause ...) body ...+)]
-@defform[(for*/hasheqv (for-clause ...) body ...+)]
-@defform[(for*/and (for-clause ...) body ...+)]
-@defform[(for*/or (for-clause ...) body ...+)]
-@defform[(for*/sum (for-clause ...) body ...+)]
-@defform[(for*/product (for-clause ...) body ...+)]
-@defform[(for*/first (for-clause ...) body ...+)]
-@defform[(for*/last (for-clause ...) body ...+)]
-@defform[(for*/fold ([accum-id init-expr] ...) (for-clause ...) body ...+)]
+@defform[(for*/list (for-clause ...) body-or-break ... body)]
+@defform[(for*/lists (id ...) (for-clause ...) body-or-break ... body)]
+@defform[(for*/vector maybe-length (for-clause ...) body-or-break ... body)]
+@defform[(for*/hash (for-clause ...) body-or-break ... body)]
+@defform[(for*/hasheq (for-clause ...) body-or-break ... body)]
+@defform[(for*/hasheqv (for-clause ...) body-or-break ... body)]
+@defform[(for*/and (for-clause ...) body-or-break ... body)]
+@defform[(for*/or (for-clause ...) body-or-break ... body)]
+@defform[(for*/sum (for-clause ...) body-or-break ... body)]
+@defform[(for*/product (for-clause ...) body-or-break ... body)]
+@defform[(for*/first (for-clause ...) body-or-break ... body)]
+@defform[(for*/last (for-clause ...) body-or-break ... body)]
+@defform[(for*/fold ([accum-id init-expr] ...) (for-clause ...)
+           body-or-break ... body)]
 )]{
 
 Like @racket[for/list], etc., but with the implicit nesting of
@@ -285,7 +346,8 @@ Like @racket[for/list], etc., but with the implicit nesting of
 @section{Deriving New Iteration Forms}
 
 @defform[(for/fold/derived orig-datum
-           ([accum-id init-expr] ...) (for-clause ...) body ...+)]{
+           ([accum-id init-expr] ...) (for-clause ...) 
+           body-or-break ... body)]{
 
 Like @racket[for/fold], but the extra @racket[orig-datum] is used as the
 source for all syntax errors.
@@ -315,7 +377,8 @@ source for all syntax errors.
 }
 
 @defform[(for*/fold/derived orig-datum
-           ([accum-id init-expr] ...) (for-clause ...) body ...+)]{
+           ([accum-id init-expr] ...) (for-clause ...) 
+           body-or-break ... body)]{
 Like @racket[for*/fold], but the extra @racket[orig-datum] is used as the source for all syntax errors.
 
 @mz-examples[#:eval for-eval

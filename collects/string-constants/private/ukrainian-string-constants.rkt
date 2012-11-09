@@ -431,7 +431,6 @@ please adhere to these guidelines:
  (show-line-and-column-numbers "Показувати номери рядків і стовбців") ; used for popup menu; right click on line/column box in bottom of drs window
  (show-character-offsets "Показувати зміщення символів") ; used for popup menu; right click on line/column box in bottom of drs window
  (enable-keybindings-in-menus "Дозволити комбінації клавіш в меню")
- (automatically-to-ps "Автоматично друкувати в PostScript-файлі")
  (command-as-meta "Вважати командний рядок мета-клавішою") ;; macos/macos x only
  (reuse-existing-frames "Використовувати існуючі вікна при відкритті нових файлів")
  (default-fonts "Шрифти за замовчуванням")
@@ -873,8 +872,8 @@ please adhere to these guidelines:
  (force-quit-menu-item-label "Примусово вийти з програми")
  (force-quit-menu-item-help-string "Перервати всі поточні обчислення")
  (limit-memory-menu-item-label "Обмеження по пам'яті...")
- (limit-memory-msg-1 "Обмеження стануть діяти після наступного виконання програми")
- (limit-memory-msg-2 "Для виконання необхідно, принаймні, 1 мегабайт.")
+ ;(limit-memory-msg-1 "Обмеження стануть діяти після наступного виконання програми")
+ ;(limit-memory-msg-2 "Для виконання необхідно, принаймні, 1 мегабайт.")  ;; minimum memory limit is now 8 megabytes
  (limit-memory-unlimited "Без обмежень")
  (limit-memory-limited "З обмеженнями")
  (limit-memory-megabytes "Мегабайт")

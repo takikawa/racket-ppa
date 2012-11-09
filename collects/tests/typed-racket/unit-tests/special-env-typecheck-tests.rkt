@@ -4,21 +4,20 @@
          (for-syntax scheme/base)
          (for-template scheme/base)
          (rep type-rep filter-rep object-rep)
-         (for-syntax (rename-in (types utils union convenience abbrev filter-ops)
+         (for-syntax (rename-in (types utils union numeric-tower abbrev filter-ops)
                                 [Un t:Un]
                                 [true-lfilter -true-lfilter]
                                 [true-filter -true-filter]
                                 [-> t:->]))
-         (except-in (utils tc-utils utils) infer)
-         typed-racket/infer/infer-dummy typed-racket/infer/infer
+         (utils tc-utils utils)
          (utils mutated-vars)
-         
+
          rackunit rackunit/text-ui
-         syntax/parse         
+         syntax/parse
          racket/file racket/port
          (for-syntax syntax/kerncase syntax/parse racket/syntax
-                     (types abbrev convenience utils)
-                     (utils mutated-vars)
+                     (types abbrev numeric-tower utils)
+                     (utils mutated-vars) (env mvar-env)
                      (utils tc-utils) (typecheck typechecker))
          typed-racket/base-env/prims
          typed-racket/base-env/base-types
@@ -35,8 +34,8 @@
      (quasisyntax/loc stx
        (check-tc-result-equal? (format "~a ~a" #,(syntax-line stx) 'a)
                                #,(let ([ex (local-expand #'a 'expression null)])
-                                   (parameterize ([mutated-vars (find-mutated-vars ex)])
-                                     (tc-expr ex))) 
+	                           (find-mutated-vars ex mvar-env)
+                                   (tc-expr ex))
                                #,(syntax-local-eval #'b)))]))
 
 (define (typecheck-special-tests)

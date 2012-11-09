@@ -812,7 +812,7 @@ TODO
              (user-break-parameterization #f)
              (user-logger (make-logger))
              
-             ;; user-exit-code (union #f (integer-in 0 255))
+             ;; user-exit-code (union #f byte?)
              ;; #f indicates that exit wasn't called. Integer indicates exit code
              (user-exit-code #f))
             
@@ -1113,9 +1113,29 @@ TODO
                              (parameterize ([pretty-print-columns pretty-print-width])
                                (for ([x (in-list results)])
                                  ((current-print) x)))
-                             (loop)])))))))
+                             (loop)])))))
+                   (default-continuation-prompt-tag)
+                   (letrec ([me
+                             (λ args
+                               (cond
+                                 [(and (pair? args)
+                                       (null? (cdr args))
+                                       (procedure? (car args))
+                                       (procedure-arity-includes? (car args) 0))
+                                  (call-with-continuation-prompt (car args) 
+                                                                 (default-continuation-prompt-tag)
+                                                                 me)]
+                                 [else
+                                  (call-with-continuation-prompt
+                                   (λ ()
+                                     (call-with-continuation-prompt
+                                      (λ ()
+                                        (apply
+                                         abort-current-continuation 
+                                         (default-continuation-prompt-tag)
+                                         args)))))]))])
+                     me)))
                 list))
-             
              (parameterize ([pretty-print-columns pretty-print-width])
                (for ([x (in-list last-results)])
                  ((current-print) x)))

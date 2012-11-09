@@ -13,8 +13,7 @@
          ;; end fixme
          (for-syntax syntax/parse racket/base (utils tc-utils))
          (private type-annotation)
-         (types utils abbrev union subtype resolve convenience type-table
-                substitute)
+         (types utils union subtype resolve abbrev type-table substitute)
          (utils tc-utils)
          (except-in (env type-env-structs tvar-env index-env) extend)
          (rep type-rep filter-rep rep-utils)
@@ -128,7 +127,7 @@
                        (and expected (tc-results->values expected))))
       t argtys expected)]
     ;; procedural structs
-    [((tc-result1: (and sty (Struct: _ _ _ (? Function? proc-ty) _ _ _ _))) _)
+    [((tc-result1: (and sty (Struct: _ _ _ (? Function? proc-ty) _ _))) _)
      (tc/funapp f-stx #`(#,(syntax/loc f-stx dummy) . #,args-stx) (ret proc-ty)
                 (cons ftype0 argtys) expected)]
     ;; parameters are functions too

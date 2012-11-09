@@ -485,7 +485,6 @@
   (show-line-and-column-numbers "Montrer les numéros de ligne et de colonne") ; used for popup menu; right click on line/column box in bottom of drs window
   (show-character-offsets "Montrer la distance depuis le début de l'éditeur") ; used for popup menu; right click on line/column box in bottom of drs window
   (enable-keybindings-in-menus "Raccourcis clavier dans les menus.")
-  (automatically-to-ps "Imprimer automatiquement dans un fichier postscript.")
   (command-as-meta "Utiliser la touche de commande comme touche meta") ;; macos/macos x only
   (reuse-existing-frames "Réutiliser les fenêtres existantes lors de l'ouverture de nouveaux fichiers")
   (default-fonts "Polices par défaut")
@@ -947,8 +946,8 @@
   (force-quit-menu-item-label "Forcer le programme à quitter")
   (force-quit-menu-item-help-string "Utilise custodian-shutdown-all pour terminer toute l'évaluation courante")
   (limit-memory-menu-item-label "Limiter la mémoire...")
-  (limit-memory-msg-1 "La limite prendra effet à la prochaine exécution du programme.")
-  (limit-memory-msg-2 "Elle doit être d'au moins un megaoctet.")
+  ;(limit-memory-msg-1 "La limite prendra effet à la prochaine exécution du programme.")
+  ;(limit-memory-msg-2 "Elle doit être d'au moins un megaoctet.")  ;; the minimum limit is now 8 megs
   (limit-memory-unlimited "Illimitée")
   (limit-memory-limited "Limitée à")
   (limit-memory-megabytes "megaoctets")
@@ -1270,7 +1269,7 @@
   (module-browser-font-size-gauge-label "Taille de la police")
   (module-browser-progress-label "Avancement du navigateur de modules")
   (module-browser-adding-file "Ajout du fichier : ~a...")
-  (module-browser-laying-out-graph-label "Tracer le graph")
+  (module-browser-laying-out-graph-label "Tracer le graphe")
   (module-browser-open-file-format "Ouvrir ~a")
   (module-browser "Navigateur de modules") ;; frame title
   (module-browser... "Navigateur de &modules...") ;; menu item title
@@ -1647,5 +1646,15 @@
   (ask-about-normalizing-strings "Demander à propos de la normalisation des chaînes de caractères")
 
   (always-use-platform-specific-linefeed-convention "Toujours utiliser la convention spécifique au système d'exploitation pour les fins de lignes")
-  
+
+  ;; optimization coach
+  (hide-optimization-coach "Cacher le Coach d'Optimisation")
+  (show-optimization-coach "Montrer le Coach d'Optimisation")
+
+  ;; labels used (in a big font) in the background of the definitions and interactions windows
+  (definitions-window-label "définitions")
+  (interactions-window-label "interactions")
+  (hide-defs/ints-label "Cacher les étiquettes Définitions/Interactions") ;; popup menu
+  (show-defs/ints-label "Montrer les étiquettes définitions/interactions") ;; preferences checkbox
+
   ); "aâàbcçdeéêèëfghiîïjklmnoôpqrstuûùüvwxyz" "AÂÀBCÇDEÉÊÈËFGHIÎÏJKLMNOÔPQRSTUÛÙÜVWXYZ"

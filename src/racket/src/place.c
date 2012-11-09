@@ -45,6 +45,7 @@ static mzrt_mutex *id_counter_mutex;
 
 SHARED_OK mz_proc_thread *scheme_master_proc_thread;
 THREAD_LOCAL_DECL(static struct Scheme_Place_Object *place_object);
+THREAD_LOCAL_DECL(static Scheme_Place *all_child_places);
 THREAD_LOCAL_DECL(static uintptr_t force_gc_for_place_accounting);
 static Scheme_Object *scheme_place(int argc, Scheme_Object *args[]);
 static Scheme_Object *place_pumper_threads(int argc, Scheme_Object *args[]);
@@ -134,7 +135,7 @@ void scheme_init_place(Scheme_Env *env)
   PLACE_PRIM_W_ARITY("place-sleep",           place_sleep,     1, 1, plenv);
   PLACE_PRIM_W_ARITY("place-wait",            place_wait,      1, 1, plenv);
   PLACE_PRIM_W_ARITY("place-kill",            place_kill,      1, 1, plenv);
-  PLACE_PRIM_W_ARITY("place-break",           place_break,     1, 1, plenv);
+  PLACE_PRIM_W_ARITY("place-break",           place_break,     1, 2, plenv);
   PLACE_PRIM_W_ARITY("place?",                place_p,         1, 1, plenv);
   PLACE_PRIM_W_ARITY("place-channel",         place_channel,   0, 0, plenv);
   PLACE_PRIM_W_ARITY("place-channel-put",     place_send,      2, 2, plenv);
@@ -144,6 +145,10 @@ void scheme_init_place(Scheme_Env *env)
   PLACE_PRIM_W_ARITY("place-dead-evt",        make_place_dead, 1, 1, plenv);
 
   scheme_finish_primitive_module(plenv);
+
+#ifdef MZ_USE_PLACES
+  REGISTER_SO(all_child_places);
+#endif
 }
 
 static Scheme_Object* scheme_place_enabled(int argc, Scheme_Object *args[]) {
@@ -196,6 +201,7 @@ typedef struct Place_Start_Data {
   Scheme_Object *function;
   Scheme_Object *channel;
   Scheme_Object *current_library_collection_paths;
+  Scheme_Object *compiled_roots;
   mzrt_sema *ready;  /* malloc'ed item */
   struct Scheme_Place_Object *place_obj;   /* malloc'ed item */
   struct NewGC *parent_gc;
@@ -356,6 +362,10 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
   collection_paths = places_deep_copy_to_master(collection_paths);
   place_data->current_library_collection_paths = collection_paths;
 
+  collection_paths = scheme_compiled_file_roots(0, NULL);
+  collection_paths = places_deep_copy_to_master(collection_paths);
+  place_data->compiled_roots = collection_paths;
+
   cust = scheme_get_current_custodian();
   mem_limit = GC_get_account_memory_limit(cust);
   place_data->cust_limit = scheme_make_integer(mem_limit);
@@ -457,6 +467,11 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
 
   place_data->ready = NULL;
   place_data->place_obj = NULL;
+
+  place->next = all_child_places;
+  if (place->next)
+    place->next->prev = place;
+  all_child_places = place;
   
   {
     Scheme_Custodian_Reference *mref;
@@ -528,13 +543,21 @@ static void do_place_kill(Scheme_Place *place)
   }
 
   scheme_remove_managed(place->mref, (Scheme_Object *)place);
+
+  if (place->next)
+    place->next->prev = place->prev;
+  if (place->prev)
+    place->prev->next = place->next;
+  else
+    all_child_places = place->next;
+
   if (!refcount) {
     destroy_place_object_locks(place_obj);
   }
   place->place_obj = NULL;
 }
 
-static int do_place_break(Scheme_Place *place) 
+static int do_place_break(Scheme_Place *place, int kind) 
 {
   Scheme_Place_Object *place_obj;
   place_obj = place->place_obj;
@@ -542,7 +565,7 @@ static int do_place_break(Scheme_Place *place)
   if (place_obj) {
     mzrt_mutex_lock(place_obj->lock);
 
-    place_obj->pbreak = 1;
+    place_obj->pbreak = kind;
 
     if (place_obj->signal_handle)
       scheme_signal_received_at(place_obj->signal_handle);
@@ -569,14 +592,30 @@ static Scheme_Object *place_kill(int argc, Scheme_Object *args[]) {
   return scheme_void;
 }
 
-static Scheme_Object *place_break(int argc, Scheme_Object *args[]) {
-  Scheme_Place          *place;
-  place = (Scheme_Place *) args[0];
+static Scheme_Object *place_break(int argc, Scheme_Object *args[]) 
+{
+  Scheme_Place *place = (Scheme_Place *) args[0];
+  int kind = MZEXN_BREAK;
 
   if (!SAME_TYPE(SCHEME_TYPE(args[0]), scheme_place_type))
     scheme_wrong_contract("place-break", "place?", 0, argc, args);
 
-  return scheme_make_integer(do_place_break(place));
+  if ((argc > 1) && SCHEME_TRUEP(args[1])) {
+    if (SCHEME_SYMBOLP(args[1]) 
+        && !SCHEME_SYM_WEIRDP(args[1]) 
+        && !strcmp(SCHEME_SYM_VAL(args[1]), "hang-up"))
+      kind = MZEXN_BREAK_HANG_UP;
+    else if (SCHEME_SYMBOLP(args[1]) 
+             && !SCHEME_SYM_WEIRDP(args[1]) 
+             && !strcmp(SCHEME_SYM_VAL(args[1]), "terminate"))
+      kind = MZEXN_BREAK_TERMINATE;
+    else
+      scheme_wrong_contract("place-break", "(or/c #f 'hang-up 'terminate)", 1, argc, args);
+  }
+
+  do_place_break(place, kind);
+
+  return scheme_void;
 }
 
 static int place_deadp(Scheme_Object *place) {
@@ -869,7 +908,7 @@ static void *mz_proc_thread_signal_worker(void *data) {
             if (prev_unused)
               prev_unused->next_unused = unused_status->next_unused;
             else
-              unused_pid_statuses = next;
+              unused_pid_statuses = unused_status->next_unused;
             free(unused_status);
             unused_status = NULL;
           }
@@ -2206,7 +2245,7 @@ static void *place_start_proc(void *data_arg) {
   return rc;
 }
 
-void scheme_pause_one_place(Scheme_Place *p)
+static void pause_one_place(Scheme_Place *p)
 {
   Scheme_Place_Object *place_obj = p->place_obj;
 
@@ -2234,7 +2273,7 @@ static void resume_one_place_with_lock(Scheme_Place_Object *place_obj)
   }
 }
 
-void scheme_resume_one_place(Scheme_Place *p)
+static void resume_one_place(Scheme_Place *p)
 {
   Scheme_Place_Object *place_obj = p->place_obj;
 
@@ -2242,6 +2281,24 @@ void scheme_resume_one_place(Scheme_Place *p)
     mzrt_mutex_lock(place_obj->lock);
     resume_one_place_with_lock(place_obj);
     mzrt_mutex_unlock(place_obj->lock);
+  }
+}
+
+static void pause_all_child_places()
+{
+  Scheme_Place *p = all_child_places;
+  while (p) {
+    pause_one_place(p);
+    p = p->next;
+  }
+}
+
+static void resume_all_child_places()
+{
+  Scheme_Place *p = all_child_places;
+  while (p) {
+    resume_one_place(p);
+    p = p->next;
   }
 }
 
@@ -2279,10 +2336,10 @@ void scheme_place_check_for_interruption()
     mzrt_mutex_unlock(place_obj->lock);
     
     if (local_pause) {
-      scheme_pause_all_places();
+      pause_all_child_places();
       mzrt_sema_wait(local_pause);
       mzrt_sema_destroy(local_pause);
-      scheme_resume_all_places();
+      resume_all_child_places();
     } else
       break;
   }
@@ -2290,7 +2347,7 @@ void scheme_place_check_for_interruption()
   if (local_die > 0)
     scheme_kill_thread(scheme_main_thread);
   if (local_break)
-    scheme_break_thread(NULL);
+    scheme_break_kind_thread(NULL, local_break);
 }
 
 void scheme_place_set_memory_use(intptr_t mem_use)
@@ -2311,7 +2368,7 @@ void scheme_place_set_memory_use(intptr_t mem_use)
          custodian limits that will kill this place; pause this
          place and its children to give the original place time 
          to kill this one */
-      scheme_pause_all_places();
+      pause_all_child_places();
       mzrt_ensure_max_cas(place_obj->parent_need_gc, 1);
       scheme_signal_received_at(place_obj->parent_signal_handle);
     } else if (mem_use > (1 + place_obj->use_factor) * place_obj->prev_notify_memory_use) {
@@ -2334,7 +2391,7 @@ void scheme_place_check_memory_use()
   if (force_gc_for_place_accounting) {
     force_gc_for_place_accounting = 0;
     scheme_collect_garbage();
-    scheme_resume_all_places();
+    resume_all_child_places();
   }
 }
 
@@ -2452,6 +2509,8 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
 
   a[0] = places_deep_uncopy(place_data->current_library_collection_paths);
   scheme_current_library_collection_paths(1, a);
+  a[0] = places_deep_uncopy(place_data->compiled_roots);
+  scheme_compiled_file_roots(1, a);
   scheme_seal_parameters();
 
   a[0] = places_deep_uncopy(place_data->module);
@@ -2462,7 +2521,7 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
   REGISTER_SO(place_object);
   place_object = place_obj;
   place_obj->refcount++;
-  
+
   {
     void *signal_handle;
     signal_handle = scheme_get_signal_handle();

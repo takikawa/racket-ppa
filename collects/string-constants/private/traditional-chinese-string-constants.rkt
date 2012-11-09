@@ -347,7 +347,6 @@
   (show-line-and-column-numbers "显示行号和列号") ; used for popup menu; right click on line/column box in bottom of drs window
   (show-character-offsets "显示字符在文件中的位置") ; used for popup menu; right click on line/column box in bottom of drs window
   (enable-keybindings-in-menus "允许使用菜单中的快捷键")
-  (automatically-to-ps "自动打印成postscript文件")
   (command-as-meta "将command键当作meta") ;; macos/macos x only
   (reuse-existing-frames "在打开新文件时，使用现有的视窗")
   (default-fonts "默认字体")
@@ -775,8 +774,8 @@
   (force-quit-menu-item-label "终止")
   (force-quit-menu-item-help-string "使用custodian-shutdown-all退出当前计算")
   (limit-memory-menu-item-label "限制内存使用...")
-  (limit-memory-msg-1 "内存限制会在下一次运行")
-  (limit-memory-msg-2 "时生效。内存限制最低值为1megabyte.")
+  ;(limit-memory-msg-1 "内存限制会在下一次运行")
+  ;(limit-memory-msg-2 "时生效。内存限制最低值为1megabyte.") ;; memory limit is now 8 megabytes
   (limit-memory-unlimited "无限制")
   (limit-memory-limited "限制")
   (limit-memory-megabytes "Megabytes")

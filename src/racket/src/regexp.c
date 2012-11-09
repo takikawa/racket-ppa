@@ -5391,8 +5391,10 @@ static Scheme_Object *gen_compare(char *name, int pos,
 	      startv, endv, &dropped, 
               prefix, prefix_len, prefix_offset);
 
-  if (lazy_string)
+  if (lazy_string) {
     full_s = lazy_string->s;
+    endset = lazy_string->end;
+  }
 
   if (iport) {
     minpos = -prefix_len;
@@ -5582,6 +5584,14 @@ static Scheme_Object *positions_end(int argc, Scheme_Object *argv[])
 static Scheme_Object *compare_bool(int argc, Scheme_Object *argv[])
 {
   return gen_compare("regexp-match?", 2, argc, argv, 0, 0, 0);
+}
+
+int scheme_regexp_match_p(Scheme_Object *regexp, Scheme_Object *target)
+{
+  Scheme_Object *a[2];
+  a[0] = regexp;
+  a[1] = target;
+  return SCHEME_TRUEP(compare_bool(2, a));
 }
 
 static Scheme_Object *compare_peek(int argc, Scheme_Object *argv[])

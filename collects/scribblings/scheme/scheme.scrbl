@@ -55,6 +55,9 @@ Racket was once called ``PLT Scheme,'' and a number of libraries with
 names starting @racketidfont{scheme} provide compatibility with the
 old name. A few @seclink["compat-exe"]{old executables} are also provided.
 
+Do not use @racketmodfont{#lang} @racketmodname[scheme] to start new projects;
+@racketmodfont{#lang} @racketmodname[racket] is the preferred language.
+
 @table-of-contents[]
 
 @compat-except[scheme racket]{, except based on @racketmodname[scheme/base]
@@ -194,7 +197,7 @@ See also @racketmodname[scheme/runtime-config].
 @compat[scheme/local racket/local]
 @compat[scheme/match racket/match]
 @compat[scheme/math racket/math]
-@compat[scheme/mpair racket/mpair]
+@compat[scheme/mpair compatibility/mlist]
 
 @;------------------------------------------------------------------------
 @section[#:tag "nest"]{@racketmodname[scheme/nest]}
@@ -246,7 +249,7 @@ than a precise prose description:
 
 @; ----------------------------------------
 
-@compat[scheme/package racket/package]
+@compat[scheme/package compatibility/package]
 @compat[scheme/path racket/path]
 @compat[scheme/port racket/port]
 
