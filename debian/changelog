@@ -1,8 +1,8 @@
-racket (5.3.1+dfsg1-1) UNRELEASED; urgency=low
+racket (5.3.1+dfsg1-1) unstable; urgency=low
 
   * New upstream version
 
- -- James McCoy <jamessan@debian.org>  Thu, 08 Nov 2012 21:28:11 -0500
+ -- James McCoy <jamessan@debian.org>  Fri, 16 Nov 2012 07:38:10 -0500
 
 racket (5.3+dfsg1-1) unstable; urgency=low
 
