@@ -1,3 +1,9 @@
+racket (5.3.1.12+20130104~aa5f2e7+dfsg1-1) experimental; urgency=low
+
+  * Upstream development snapshot.
+
+ -- David Bremner <bremner@debian.org>  Fri, 04 Jan 2013 15:48:05 -0400
+
 racket (5.3.1+dfsg1-1) unstable; urgency=low
 
   * New upstream version
