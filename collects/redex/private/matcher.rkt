@@ -116,10 +116,11 @@ See match-a-pattern.rkt for more details
 ;;                                     pict-builder
 ;;                                     (listof symbol)
 ;;                                     (listof (listof symbol))) -- keeps track of `primary' non-terminals
+;;                                     hash[sym -o> pattern]
 
 (define-struct compiled-lang (lang delayed-cclang ht list-ht raw-across-ht raw-across-list-ht
                                    has-hole-or-hide-hole-ht cache bind-names-cache pict-builder
-                                   literals nt-map))
+                                   literals nt-map collapsible-nts))
 (define (compiled-lang-cclang x) (force (compiled-lang-delayed-cclang x)))
 (define (compiled-lang-across-ht x)
   (compiled-lang-cclang x) ;; ensure this is computed
@@ -153,13 +154,15 @@ See match-a-pattern.rkt for more details
          [cache (make-hash)]
          [bind-names-cache (make-hash)]
          [literals (extract-literals lang)]
+         [collapsible-nts (extract-collapsible-nts lang)]
          [clang (make-compiled-lang lang #f clang-ht clang-list-ht 
                                     across-ht across-list-ht
                                     has-hole-or-hide-hole-ht 
                                     cache bind-names-cache
                                     pict-info
                                     literals
-                                    nt-map)]
+                                    nt-map
+                                    collapsible-nts)]
          [non-list-nt-table (build-non-list-nt-label lang)]
          [list-nt-table (build-list-nt-label lang)]
          [do-compilation
@@ -207,6 +210,22 @@ See match-a-pattern.rkt for more details
     (do-compilation clang-ht clang-list-ht lang)
     (struct-copy compiled-lang clang [delayed-cclang compatible-context-language])))
 
+;; extract-collapsible-nts : (listof nt) -> (listof any)
+(define (extract-collapsible-nts nts)
+  (define nt-hash (for/hasheq ([nt nts]) 
+                    (values (nt-name nt) (nt-rhs nt))))
+  (for/fold ([c-nts (hasheq)])
+    ([nt (in-hash-keys nt-hash)])
+    (let loop ([rhss (hash-ref nt-hash nt)])
+      (if (= (length rhss) 1)
+          (match (rhs-pattern (car rhss))
+            [`(nt ,next)
+             (loop (hash-ref nt-hash next))]
+            [else
+             (hash-set c-nts nt (rhs-pattern (car rhss)))])
+          c-nts))))
+
+
 ;; extract-literals : (listof nt) -> (listof symbol)
 (define (extract-literals nts)
   (let ([literals-ht (make-hasheq)]
@@ -228,6 +247,7 @@ See match-a-pattern.rkt for more details
       [`natural (void)]
       [`integer (void)]
       [`real (void)]
+      [`boolean (void)]
       [`variable (void)]
       [`(variable-except ,s ...) (void)]
       [`(variable-prefix ,s) (void)]
@@ -267,6 +287,7 @@ See match-a-pattern.rkt for more details
       [`natural pat]
       [`integer pat]
       [`real pat]
+      [`boolean pat]
       [`variable pat]
       [`(variable-except ,s ...) pat]
       [`(variable-prefix ,s) pat]
@@ -303,6 +324,7 @@ See match-a-pattern.rkt for more details
          [`natural #f]
          [`integer #f]
          [`real #f]
+         [`boolean #f]
          [`variable #f] 
          [`(variable-except ,vars ...) #f]
          [`(variable-prefix ,var) #f]
@@ -445,6 +467,7 @@ See match-a-pattern.rkt for more details
          [`natural untouched-pattern]
          [`integer untouched-pattern]
          [`real untouched-pattern]
+         [`boolean untouched-pattern]
          [`variable untouched-pattern] 
          [`(variable-except ,vars ...) untouched-pattern]
          [`(variable-prefix ,var) untouched-pattern]
@@ -550,7 +573,8 @@ See match-a-pattern.rkt for more details
       [`natural #f]
       [`integer #f]
       [`real #f]
-      [`variable #f] 
+      [`boolean #f]
+      [`variable #f]
       [`(variable-except ,vars ...) #f]
       [`(variable-prefix ,var) #f]
       [`variable-not-otherwise-mentioned #f]
@@ -584,6 +608,7 @@ See match-a-pattern.rkt for more details
       [`natural #t]
       [`integer #t]
       [`real #t]
+      [`boolean #t]
       [`variable #t]
       [`(variable-except ,vars ...) #t]
       [`(variable-prefix ,prefix) #t]
@@ -745,6 +770,7 @@ See match-a-pattern.rkt for more details
       [`natural (simple-match exact-nonnegative-integer?)]
       [`integer (simple-match exact-integer?)]
       [`real (simple-match real?)]
+      [`boolean (simple-match boolean?)]
       [`variable (simple-match symbol?)]
       [`(variable-except ,vars ...)
        (simple-match
@@ -978,11 +1004,12 @@ See match-a-pattern.rkt for more details
     (error 'convert-matcher 
            "not a unary proc: ~s" 
            boolean-based-matcher))
-  (λ (exp hole-info)
+  (define (match-boolean-to-record-converter exp hole-info)
     (and (boolean-based-matcher exp)
          (list (make-mtch empty-bindings
                           (build-flat-context exp)
-                          none)))))
+                          none))))
+  match-boolean-to-record-converter)
 
 ;; match-named-pat : symbol <compiled-pattern> -> <compiled-pattern>
 (define (match-named-pat name match-pat mismatch-bind?)
@@ -1796,6 +1823,7 @@ See match-a-pattern.rkt for more details
       [`natural ribs]
       [`integer ribs]
       [`real ribs]
+      [`boolean ribs]
       [`variable ribs]
       [`(variable-except ,vars ...) ribs]
       [`(variable-prefix ,vars) ribs]

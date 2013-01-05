@@ -2,6 +2,8 @@
   (require syntax/modcollapse
            unstable/struct
            racket/list
+           racket/flonum
+           racket/fixnum
            "serialize-structs.rkt")
 
   ;; This module implements the core serializer. The syntactic
@@ -43,6 +45,8 @@
 	(path-for-some-system? v)
 	(bytes? v)
 	(vector? v)
+	(flvector? v)
+	(fxvector? v)
 	(pair? v)
 	(mpair? v)
 	(hash? v)
@@ -50,7 +54,8 @@
 	(void? v)
 	(date? v)
 	(arity-at-least? v)
-        (module-path-index? v)))
+        (module-path-index? v)
+        (srcloc? v)))
 
   ;; If a module is dynamic-required through a path,
   ;;  then it can cause simplified module paths to be paths;
@@ -137,6 +142,8 @@
 		 (hash? o))
 	     (not (immutable? o)))
 	(serializable-struct? o)
+        (flvector? o)
+        (fxvector? o)
         (let ([k (prefab-struct-key o)])
           (and k
                ;; Check whether all fields are mutable:
@@ -185,7 +192,8 @@
 	      (char? v)
 	      (symbol? v)
 	      (null? v)
-	      (void? v))
+	      (void? v)
+              (srcloc? v))
 	  (void)]
 	 [(hash-ref cycle v #f)
 	  ;; We already know that this value is
@@ -226,6 +234,8 @@
 	    (void)]
 	   [(vector? v)
 	    (for-each loop (vector->list v))]
+           [(flvector? v) (void)] 
+           [(fxvector? v) (void)] 
 	   [(pair? v)
 	    (loop (car v)) 
 	    (loop (cdr v))]
@@ -256,6 +266,17 @@
 	  ;;  a cycle:
 	  (hash-remove! tmp-cycle v)
 	  (set! cycle-stack (cdr cycle-stack))]))))
+
+  (define (quotable? v)
+    (if (pair? v)
+        (eq? (car v) 'q)
+        (or (boolean? v)
+            (number? v)
+            (char? v)
+            (null? v)
+            (string? v)
+            (symbol? v)
+            (bytes? v))))
 
   (define (serialize-one v share check-share? mod-map mod-map-cache)
     (define ((serial check-share?) v)
@@ -297,13 +318,24 @@
        [(path-for-some-system? v)
 	(list* 'p+ (path->bytes v) (path-convention-type v))]
        [(vector? v)
-	(cons (if (immutable? v) 'v 'v!)
-	      (map (serial #t) (vector->list v)))]
+        (define elems (map (serial #t) (vector->list v)))
+        (if (and (immutable? v)
+                 (andmap quotable? elems))
+            (cons 'q v)
+            (cons (if (immutable? v) 'v 'v!) elems))]
+       [(flvector? v)
+        (cons 'vl (for/list ([i (in-flvector v)]) i))]
+       [(fxvector? v)
+        (cons 'vx (for/list ([i (in-fxvector v)]) i))]
        [(pair? v)
 	(let ([loop (serial #t)])
-	  (cons 'c
-		(cons (loop (car v)) 
-		      (loop (cdr v)))))]
+          (let ([a (loop (car v))]
+                [d (loop (cdr v))])
+            (cond
+             [(and (quotable? a) (quotable? d))
+              (cons 'q v)]
+             [else
+              (cons 'c (cons a d))])))]
        [(mpair? v)
 	(let ([loop (serial #t)])
 	  (cons 'm
@@ -337,6 +369,9 @@
           (cons 'mpi
                 (cons ((serial #t) path)
                       ((serial #t) base))))]
+       [(srcloc? v)
+        (cons 'srcloc
+              (map (serial #t) (take (struct->list v) 5)))]
        [else (error 'serialize "shouldn't get here")]))
     ((serial check-share?) v))
   
@@ -460,6 +495,7 @@
        [else
 	(case (car v)
 	  [(?) (lookup-shared! share (cdr v) mod-map module-path-index-join)]
+          [(q) (cdr v)]
           [(f) (apply make-prefab-struct (cadr v) (map loop (cddr v)))]
 	  [(void) (void)]
           [(su) (string->unreadable-symbol (cdr v))]
@@ -474,6 +510,8 @@
 	  [(m) (mcons (loop (cadr v)) (loop (cddr v)))]
 	  [(v) (apply vector-immutable (map loop (cdr v)))]
 	  [(v!) (list->vector (map loop (cdr v)))]
+          [(vl) (apply flvector (map loop (cdr v)))]
+          [(vx) (apply fxvector (map loop (cdr v)))]
 	  [(b) (box-immutable (loop (cdr v)))]
 	  [(b!) (box (loop (cdr v)))]
 	  [(h) (let ([al (map (lambda (p)
@@ -496,6 +534,7 @@
 	  [(arity-at-least) (make-arity-at-least (loop (cdr v)))]
 	  [(mpi) (module-path-index-join (loop (cadr v))
                                          (loop (cddr v)))]
+          [(srcloc) (apply make-srcloc (map loop (cdr v)))]
 	  [else (error 'serialize "ill-formed serialization")])])))
 
   (define (deserial-shell v mod-map fixup n)

@@ -37,12 +37,21 @@ module browser threading seems wrong.
          "get-defs.rkt"
          "local-member-names.rkt"
          "eval-helpers.rkt"
+         "parse-logger-args.rkt"
          (prefix-in drracket:arrow: "../arrow.rkt")
          (prefix-in icons: images/compile-time)
          mred
          (prefix-in mred: mred)
          
-         mzlib/date)
+         mzlib/date
+         
+         framework/private/aspell
+         framework/private/logging-timer
+         
+         scribble/xref
+         setup/xref
+         scribble/tag
+         (only-in scribble/base doc-prefix))
 
 (provide unit@)
 
@@ -51,8 +60,6 @@ module browser threading seems wrong.
 (define show-lib-paths (string-constant module-browser-show-lib-paths/short))
 (define show-planet-paths (string-constant module-browser-show-planet-paths/short))
 (define refresh (string-constant module-browser-refresh))
-
-(define define-button-long-label "(define ...)")
 
 (define oprintf
   (let ([op (current-output-port)])
@@ -891,8 +898,9 @@ module browser threading seems wrong.
           
           (inherit invalidate-bitmap-cache)
           (define/public (set-error-arrows arrows)
-            (set! error-arrows arrows)
-            (invalidate-bitmap-cache))
+            (unless (eq? arrows error-arrows)
+              (set! error-arrows arrows)
+              (invalidate-bitmap-cache)))
           
           (define error-arrows #f)
           
@@ -1213,6 +1221,10 @@ module browser threading seems wrong.
         (send frame enable-evaluation-in-tab this))
       (define/public (get-enabled) enabled?)
       
+      (define last-touched (current-inexact-milliseconds))
+      (define/public-final (touched) (set! last-touched (current-inexact-milliseconds)))
+      (define/public-final (get-last-touched) last-touched)
+      
       ;; current-execute-warning is a snapshot of the needs-execution-message
       ;; that is taken each time repl submission happens, and it gets reset
       ;; when "Run" is clicked.
@@ -1318,11 +1330,13 @@ module browser threading seems wrong.
       (define log-visible? #f)
       (define/public-final (toggle-log)
         (set! log-visible? (not log-visible?))
-        (send frame show/hide-log log-visible?))
+        (send frame show/hide-log log-visible?)
+        (send (get-ints) enable/disable-capture-log log-visible?))
       (define/public-final (hide-log)
         (when log-visible? (toggle-log)))
       (define/public-final (update-log)
-        (send frame show/hide-log log-visible?))
+        (send frame show/hide-log log-visible?)
+        (send frame set-logger-text-field-value (send (get-ints) get-user-log-receiver-args-str)))
       (define/public-final (update-logger-window command)
         (when (is-current-tab?)
           (send frame update-logger-window command)))
@@ -1349,10 +1363,11 @@ module browser threading seems wrong.
     enable-evaluation-in-tab
     update-toolbar-visibility
     show/hide-log
+    set-logger-text-field-value
     show-planet-status)
   
   (define frame-mixin
-    (mixin (drracket:frame:<%> frame:searchable-text<%> frame:delegate<%>)
+    (mixin (drracket:frame:<%> frame:searchable-text<%> frame:delegate<%> frame:size-pref<%>)
       (drracket:unit:frame<%>)
       (init filename)
       (inherit set-label-prefix get-show-menu
@@ -1367,7 +1382,8 @@ module browser threading seems wrong.
                file-menu:get-save-item
                file-menu:get-save-as-item
                file-menu:get-revert-item
-               file-menu:get-print-item)
+               file-menu:get-print-item
+               set-delegated-text)
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;
@@ -1453,13 +1469,16 @@ module browser threading seems wrong.
       (define logger-panel #f)
       (define logger-parent-panel #f)
       
-      ;; logger-gui-tab-panel: (or/c #f (is-a?/c tab-panel%))
+      ;; logger-gui-content-panel: (or/c #f (is-a?/c vertical-panel%))
       ;; this is #f when the GUI has not been built yet. After
-      ;; it becomes a tab-panel, it is always a tab-panel (altho the tab panel might not always be shown)
-      (define logger-gui-tab-panel #f)
+      ;; it becomes a panel, it is always a panel 
+      ;; (altho the panel might not always be shown)
+      (define logger-gui-content-panel #f)
       (define logger-gui-canvas #f)
+      (define logger-checkbox #f)
+      (define logger-text-field #f)
       
-      ;; logger-gui-text: (or/c #f (is-a?/c tab-panel%))
+      ;; logger-gui-text: (or/c #f (is-a?/c text%))
       ;; this is #f when the GUI has not been built or when the logging panel is hidden
       ;; in that case, the logging messages aren't begin saved in an editor anywhere
       (define logger-gui-text #f)
@@ -1470,7 +1489,7 @@ module browser threading seems wrong.
         (let ([p (preferences:get 'drracket:logging-size-percentage)])
           (begin-container-sequence)
           (cond
-            [logger-gui-tab-panel
+            [logger-gui-content-panel
              (send logger-parent-panel change-children
                    (λ (l)
                      (cond
@@ -1494,28 +1513,65 @@ module browser threading seems wrong.
                         (remq logger-panel l)])))]
             [else
              (when show? ;; if we want to hide and it isn't built yet, do nothing
-               (define logger-gui-tab-panel-parent (new horizontal-panel% 
-                                                        [parent logger-panel]
-                                                        [stretchable-height #f]))
-               (set! logger-gui-tab-panel
-                     (new tab-panel% 
-                          [choices (list (string-constant logging-all)
-                                         "fatal" "error" "warning" "info" "debug")]
-                          [parent logger-gui-tab-panel-parent]
-                          [stretchable-height #f]
-                          [style '(no-border)]
-                          [callback
-                           (λ (tp evt)
-                             (preferences:set 'drracket:logger-gui-tab-panel-level
-                                              (send logger-gui-tab-panel get-selection))
-                             (update-logger-window #f))]))
-               (new button% [label (string-constant hide-log)]
-                    [callback (λ (x y) (send current-tab hide-log))]
-                    [parent logger-gui-tab-panel-parent])
-               (send logger-gui-tab-panel set-selection (preferences:get 'drracket:logger-gui-tab-panel-level))
+               (define logger-gui-content-panel-parent (new vertical-panel%
+                                                            [style '(border)]
+                                                            [parent logger-panel]
+                                                            [stretchable-height #t]))
+               (set! logger-gui-content-panel
+                     (new horizontal-panel%
+                          [parent logger-gui-content-panel-parent]
+                          [stretchable-height #f]))
                (new-logger-text)
                (set! logger-gui-canvas 
-                     (new editor-canvas% [parent logger-panel] [editor logger-gui-text]))
+                     (new editor-canvas%
+                          [parent logger-gui-content-panel-parent]
+                          [style '(transparent no-border)]
+                          [editor logger-gui-text]))
+               (new message% [label (string-constant log-messages)] [parent logger-gui-content-panel])
+               (new button% 
+                    [label (string-constant help)]
+                    [callback (λ (x y) 
+                                (define-values (path tag) 
+                                  (xref-tag->path+anchor (load-collections-xref)
+                                                         (make-section-tag
+                                                          "follow-log"
+                                                          #:doc '(lib "scribblings/drracket/drracket.scrbl"))))
+                                (define url (path->url path))
+                                (define url2 (if tag
+                                                 (make-url (url-scheme url)
+                                                           (url-user url)
+                                                           (url-host url)
+                                                           (url-port url)
+                                                           (url-path-absolute? url)
+                                                           (url-path url)
+                                                           (url-query url)
+                                                           tag)
+                                                 url))
+                                (send-url (url->string url2)))]
+                    [parent logger-gui-content-panel])
+               (set! logger-text-field
+                     (new text-field% 
+                          [parent logger-gui-content-panel] 
+                          [label "‹level›@‹name› ..."]
+                          [init-value (send (get-interactions-text) get-user-log-receiver-args-str)]
+                          [callback
+                           (λ (tf evt)
+                             (define str (send (send tf get-editor) get-text))
+                             (define args (parse-logger-args str))
+                             (preferences:set 'drracket:logger-receiver-string str)
+                             (send (get-interactions-text) set-user-log-receiver-args str (if (null? args) #f args))
+                             (set-logger-text-field-bg-color args))]))
+               (set-logger-text-field-bg-color (parse-logger-args (send logger-text-field get-value)))
+               (set! logger-checkbox 
+                     (new check-box%
+                          [label (string-constant logger-scroll-on-output)]
+                          [callback (λ (a b) (preferences:set 'drracket:logger-scroll-to-bottom? (send logger-checkbox get-value)))]
+                          [parent logger-gui-content-panel]
+                          [value (preferences:get 'drracket:logger-scroll-to-bottom?)]))
+               (new button% 
+                    [label (string-constant hide-log)]
+                    [callback (λ (x y) (send current-tab hide-log))]
+                    [parent logger-gui-content-panel])
                (send logger-menu-item set-label (string-constant hide-log))
                (update-logger-window #f)
                (send logger-parent-panel change-children (lambda (l) (append l (list logger-panel)))))])
@@ -1524,74 +1580,83 @@ module browser threading seems wrong.
           (update-logger-button-label)
           (end-container-sequence)))
       
+      (define/public (set-logger-text-field-value str)
+        (when logger-text-field
+          (send logger-text-field set-value str)
+          (set-logger-text-field-bg-color (parse-logger-args str))))
+      
+      (define/private (set-logger-text-field-bg-color good?)
+        (send logger-text-field set-field-background 
+              (send the-color-database find-color (if good? "white" "pink"))))
+      
       (define/private (log-shown?)
-        (and logger-gui-tab-panel
+        (and logger-gui-content-panel
              (member logger-panel (send logger-parent-panel get-children))))
       
       (define/private (new-logger-text)
-        (set! logger-gui-text (new (text:hide-caret/selection-mixin text:line-spacing%)))
+        (set! logger-gui-text (new (text:hide-caret/selection-mixin 
+                                    (editor:standard-style-list-mixin
+                                     text:line-spacing%))))
         (send logger-gui-text lock #t))
       
       (define/public (update-logger-window command)
         (when logger-gui-text 
-          (let ([admin (send logger-gui-text get-admin)]
-                [canvas (send logger-gui-text get-canvas)])
-            (when (and canvas admin)
-              (let ([logger-messages (send interactions-text get-logger-messages)]
-                    [level (case (send logger-gui-tab-panel get-selection)
-                             [(0) #f]
-                             [(1) 'fatal]
-                             [(2) 'error]
-                             [(3) 'warning]
-                             [(4) 'info]
-                             [(5) 'debug])])
-                (cond
-                  [(and (pair? command)
-                        (pair? logger-messages)
-                        ;; just flush and redraw everything if there is one (or zero) logger messages
-                        (pair? (cdr logger-messages)))
-                   (let ([msg (cdr command)])
-                     (when (or (not level) 
-                               (eq? (vector-ref msg 0) level))
-                       (send logger-gui-text begin-edit-sequence)
-                       (send logger-gui-text lock #f)
-                       (case (car command)
-                         [(add-line) (void)]
-                         [(clear-last-and-add-line)
-                          (send logger-gui-text delete
-                                0
-                                (send logger-gui-text paragraph-start-position 1))]) 
-                       (send logger-gui-text insert
-                             "\n"
-                             (send logger-gui-text last-position)
-                             (send logger-gui-text last-position))
-                       (send logger-gui-text insert 
-                             (vector-ref msg 1) 
-                             (send logger-gui-text last-position)
-                             (send logger-gui-text last-position))
-                       (send logger-gui-text end-edit-sequence)
-                       (send logger-gui-text lock #t)))]
-                  [else
-                   (send logger-gui-text begin-edit-sequence)
-                   (send logger-gui-text lock #f)
-                   (send logger-gui-text erase)
-                   
-                   (let ([insert-one
-                          (λ (x newline?)
-                            (when (or (not level)
-                                      (eq? level (vector-ref x 0)))
-                              (when newline? (send logger-gui-text insert "\n" 0 0))
-                              (send logger-gui-text insert (vector-ref x 1) 0 0)))]) 
-                     
-                     (unless (null? logger-messages)
-                       ;; skip the last newline in the buffer
-                       (insert-one (car logger-messages) #f)
-                       (for-each
-                        (λ (x) (insert-one x #t))
-                        (cdr (send interactions-text get-logger-messages)))))
-                   
-                   (send logger-gui-text lock #t)
-                   (send logger-gui-text end-edit-sequence)]))))))
+          (define admin (send logger-gui-text get-admin))
+          (define canvas (send logger-gui-text get-canvas))
+          (when (and canvas admin)
+            (define logger-messages (send interactions-text get-logger-messages))
+            (cond
+              [(and (pair? command)
+                    (pair? logger-messages)
+                    ;; just flush and redraw everything if there is one (or zero) logger messages
+                    (pair? (cdr logger-messages)))
+               (define msg (cdr command))
+               (define scroll? (if (object? logger-checkbox)
+                                   (send logger-checkbox get-value)
+                                   #t))
+               (send logger-gui-text begin-edit-sequence)
+               (send logger-gui-text lock #f)
+               (case (car command)
+                 [(add-line) (void)]
+                 [(clear-last-and-add-line)
+                  (send logger-gui-text delete
+                        0
+                        (send logger-gui-text paragraph-start-position 1)
+                        #f)])
+               (send logger-gui-text insert
+                     "\n"
+                     (send logger-gui-text last-position)
+                     (send logger-gui-text last-position)
+                     #f)
+               (send logger-gui-text insert 
+                     msg 
+                     (send logger-gui-text last-position)
+                     (send logger-gui-text last-position)
+                     #f)
+               (when scroll?
+                 (send logger-gui-text scroll-to-position
+                       (send logger-gui-text
+                             paragraph-start-position
+                             (send logger-gui-text last-paragraph))))
+               (send logger-gui-text end-edit-sequence)
+               (send logger-gui-text lock #t)]
+              [else
+               (send logger-gui-text begin-edit-sequence)
+               (send logger-gui-text lock #f)
+               (send logger-gui-text erase)
+               
+               (define (insert-one msg)
+                 (send logger-gui-text insert msg 0 0)) 
+               
+               (unless (null? logger-messages)
+                 ;; skip the last newline in the buffer
+                 (insert-one (car logger-messages))
+                 (for ([msg (in-list (cdr (send interactions-text get-logger-messages)))])
+                   (insert-one "\n")
+                   (insert-one msg)))
+               
+               (send logger-gui-text lock #t)
+               (send logger-gui-text end-edit-sequence)]))))
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;
@@ -1817,6 +1882,7 @@ module browser threading seems wrong.
       (inherit show-info hide-info is-info-hidden?)
       (field [toolbar-state (preferences:get 'drracket:toolbar-state)]
              [toolbar-top-menu-item #f]
+             [toolbar-top-no-label-menu-item #f]
              [toolbar-left-menu-item #f]
              [toolbar-right-menu-item #f]
              [toolbar-hidden-menu-item #f]
@@ -1835,17 +1901,20 @@ module browser threading seems wrong.
       (define/private (set-toolbar-left) (change-toolbar-state (cons #f 'left)))
       (define/private (set-toolbar-right) (change-toolbar-state (cons #f 'right)))
       (define/private (set-toolbar-top) (change-toolbar-state (cons #f 'top)))
+      (define/private (set-toolbar-top-no-label) (change-toolbar-state (cons #f 'top-no-label)))
       (define/private (set-toolbar-hidden) (change-toolbar-state (cons #t (cdr toolbar-state))))
       
       (define/public (update-toolbar-visibility)
         (let* ([hidden? (toolbar-is-hidden?)]
                [left? (toolbar-is-left?)]
                [right? (toolbar-is-right?)]
-               [top? (toolbar-is-top?)])
+               [top? (toolbar-is-top?)]
+               [top-no-label? (toolbar-is-top-no-label?)])
           
           (send toolbar-left-menu-item check left?)
           (send toolbar-right-menu-item check right?)
           (send toolbar-top-menu-item check top?)
+          (send toolbar-top-no-label-menu-item check top-no-label?)
           (send toolbar-hidden-menu-item check hidden?)
           
           (cond
@@ -1854,6 +1923,7 @@ module browser threading seems wrong.
              (send top-outer-panel change-children (λ (l) '()))
              (send transcript-parent-panel change-children (λ (l) '()))]
             [top? (orient/show #t)]
+            [top-no-label? (orient/show #t)]
             [left? (orient/show #t)]
             [right? (orient/show #f)]))
         (update-defs/ints-resize-corner))
@@ -1872,6 +1942,10 @@ module browser threading seems wrong.
         (and (not (toolbar-is-hidden?))
              (eq? (cdr (preferences:get 'drracket:toolbar-state))
                   'left)))
+      (define/private (toolbar-is-top-no-label?)
+        (and (not (toolbar-is-hidden?))
+             (eq? (cdr (preferences:get 'drracket:toolbar-state))
+                  'top-no-label)))
       
       (define/private (orient/show bar-at-beginning?)
         (let ([vertical? (or (toolbar-is-left?) (toolbar-is-right?))])
@@ -1882,7 +1956,8 @@ module browser threading seems wrong.
           (let loop ([obj button-panel])
             (when (is-a? obj area-container<%>)
               (when (or (is-a? obj vertical-panel%)
-                        (is-a? obj horizontal-panel%))
+                        (is-a? obj horizontal-panel%)
+                        (is-a? obj panel:discrete-sizes<%>))
                 (unless (equal? (send obj get-orientation) (not vertical?))
                   (send obj set-orientation (not vertical?))))
               (for-each loop (send obj get-children))))
@@ -2001,9 +2076,9 @@ module browser threading seems wrong.
           (void)))
 
       (define/private (set-toolbar-label-visibilities/check-registered)
-        (let ([vertical? (or (toolbar-is-left?) (toolbar-is-right?))])
-          (for ([(button number) (in-hash toolbar-buttons)])
-            (send button set-label-visible (not vertical?))))
+        (define label-visible? (toolbar-is-top?))
+        (for ([(button number) (in-hash toolbar-buttons)])
+          (send button set-label-visible label-visible?))
         
         (let loop ([obj button-panel])
           (cond
@@ -2099,23 +2174,24 @@ module browser threading seems wrong.
           (update-tab-label current-tab)))
       
       (define/public (language-changed)
-        (let* ([settings (send definitions-text get-next-settings)]
-               [language (drracket:language-configuration:language-settings-language settings)])
-          (send func-defs-canvas language-changed language (or (toolbar-is-left?)
-                                                               (toolbar-is-right?)))
-          (send language-message set-yellow/lang
-                (not (send definitions-text this-and-next-language-the-same?))
-                (string-append (send language get-language-name)
-                               (if (send language default-settings? 
-                                         (drracket:language-configuration:language-settings-settings
-                                          settings))
-                                   ""
-                                   (string-append " " (string-constant custom)))))
-          (when (is-a? language-specific-menu menu%)
-            (let ([label (send language-specific-menu get-label)]
-                  [new-label (send language capability-value 'drscheme:language-menu-title)])
-              (unless (equal? label new-label)
-                (send language-specific-menu set-label new-label))))))
+        (define settings (send definitions-text get-next-settings))
+        (define language (drracket:language-configuration:language-settings-language settings))
+        (send func-defs-canvas language-changed language (or (toolbar-is-left?)
+                                                             (toolbar-is-right?)))
+        (send language-message set-yellow/lang
+              (not (send definitions-text this-and-next-language-the-same?))
+              (string-append (send language get-language-name)
+                             (if (send language default-settings? 
+                                       (drracket:language-configuration:language-settings-settings
+                                        settings))
+                                 ""
+                                 (string-append " " (string-constant custom)))))
+        (update-teachpack-menu)
+        (when (is-a? language-specific-menu menu%)
+          (define label (send language-specific-menu get-label))
+          (define new-label (send language capability-value 'drscheme:language-menu-title))
+          (unless (equal? label new-label)
+            (send language-specific-menu set-label new-label))))
       
       (define/public (get-language-menu) language-specific-menu)
       
@@ -2850,8 +2926,6 @@ module browser threading seems wrong.
         (unless definitions-canvas
           (set! definitions-canvas (create-definitions-canvas))))
       
-      (define/override (get-delegated-text) definitions-text)
-      
       ;; wire the definitions text to the interactions text and initialize it.
       (define/private (init-definitions-text tab)
         (let ([defs (send tab get-defs)]
@@ -2914,38 +2988,40 @@ module browser threading seems wrong.
       ;; to be the nth tab. Also updates the GUI to show the new tab
       (inherit begin-container-sequence end-container-sequence)
       (define/private (change-to-tab tab)
-        (let ([old-delegate (send definitions-text get-delegate)]
-              [old-tab current-tab])
-          (save-visible-tab-regions)
-          (set! current-tab tab)
-          (set! definitions-text (send current-tab get-defs))
-          (set! interactions-text (send current-tab get-ints))
-          
-          
-          (begin-container-sequence)
-          (for-each (λ (defs-canvas) (send defs-canvas set-editor definitions-text #f))
-                    definitions-canvases)
-          (for-each (λ (ints-canvas) (send ints-canvas set-editor interactions-text #f))
-                    interactions-canvases)
-          
-          (update-save-message)
-          (update-save-button)
-          (language-changed)
-          
-          (send definitions-text update-frame-filename)
-          (send definitions-text set-delegate old-delegate)
-          (update-running (send current-tab is-running?))
-          (on-tab-change old-tab current-tab)
-          (send tab update-log)
-          (send tab update-planet-status)
-          (send tab update-execute-warning-gui)
-          (restore-visible-tab-regions)
-          (for-each (λ (defs-canvas) (send defs-canvas refresh))
-                    definitions-canvases)
-          (for-each (λ (ints-canvas) (send ints-canvas refresh))
-                    interactions-canvases)
-          (set-color-status! (send definitions-text is-lexer-valid?))
-          (end-container-sequence)))
+        (unless (eq? current-tab tab)
+          (let ([old-tab current-tab])
+            (save-visible-tab-regions)
+            (set! current-tab tab)
+            (set! definitions-text (send current-tab get-defs))
+            (set! interactions-text (send current-tab get-ints))
+            
+            
+            (begin-container-sequence)
+            (for-each (λ (defs-canvas) (send defs-canvas set-editor definitions-text #f))
+                      definitions-canvases)
+            (for-each (λ (ints-canvas) (send ints-canvas set-editor interactions-text #f))
+                      interactions-canvases)
+            
+            (update-save-message)
+            (update-save-button)
+            (language-changed)
+            (set-delegated-text definitions-text)
+            
+            (send definitions-text update-frame-filename)
+            (update-running (send current-tab is-running?))
+            (when (eq? this (get-top-level-focus-window))
+              (send current-tab touched))
+            (on-tab-change old-tab current-tab)
+            (send tab update-log)
+            (send tab update-planet-status)
+            (send tab update-execute-warning-gui)
+            (restore-visible-tab-regions)
+            (for-each (λ (defs-canvas) (send defs-canvas refresh))
+                      definitions-canvases)
+            (for-each (λ (ints-canvas) (send ints-canvas refresh))
+                      interactions-canvases)
+            (set-color-status! (send definitions-text is-lexer-valid?))
+            (end-container-sequence))))
       
       (define/pubment (on-tab-change from-tab to-tab)
         (let ([old-enabled (send from-tab get-enabled)]
@@ -2954,12 +3030,6 @@ module browser threading seems wrong.
             (if new-enabled
                 (enable-evaluation)
                 (disable-evaluation))))
-        
-        (let ([from-defs (send from-tab get-defs)]
-              [to-defs (send to-tab get-defs)])
-          (let ([delegate (send from-defs get-delegate)])
-            (send from-defs set-delegate #f)
-            (send to-defs set-delegate delegate)))
         
         (inner (void) on-tab-change from-tab to-tab))
       
@@ -2986,10 +3056,9 @@ module browser threading seems wrong.
                         (set! tabs (remq tab tabs))
                         (send tabs-panel delete (send tab get-i))
                         (update-menu-bindings) 
-                        (change-to-tab (cond
-                                         [(< (send tab get-i) (length tabs))
-                                          (list-ref tabs (send tab get-i))]
-                                         [else (last tabs)])))
+                        (change-to-tab
+                         (argmax (λ (tab) (send tab get-last-touched)) 
+                                 tabs)))
                       (loop (cdr l-tabs))))]))]))
       
       ;; a helper private method for close-current-tab -- doesn't close an arbitrary tab.
@@ -3128,6 +3197,11 @@ module browser threading seems wrong.
                (update-close-tab-menu-item-shortcut this)]
               [else (super restore-keybinding)]))
           (super-new)))
+      
+      (define/override (on-activate active?)
+        (when active?
+          (send (get-current-tab) touched))
+        (super on-activate active?))
       
       (define/private (update-menu-bindings)
         (when close-tab-menu-item
@@ -3289,6 +3363,12 @@ module browser threading seems wrong.
                    [parent toolbar-menu]
                    [callback (λ (x y) (set-toolbar-top))]
                    [checked #f]))
+        (set! toolbar-top-no-label-menu-item
+              (new checkable-menu-item%
+                   [label (string-constant toolbar-on-top-no-label)]
+                   [parent toolbar-menu]
+                   [callback (λ (x y) (set-toolbar-top-no-label))]
+                   [checked #f]))
         (set! toolbar-right-menu-item
               (new checkable-menu-item%
                    [label (string-constant toolbar-on-right)]
@@ -3388,6 +3468,7 @@ module browser threading seems wrong.
         (when module-browser-panel
           (set! module-browser-shown? #f)
           (send module-browser-menu-item set-label (string-constant show-module-browser))
+          (set! module-browser-mouse-over-status-line-open? #f)
           (close-status-line 'plt:module-browser:mouse-over)
           (send module-browser-parent-panel change-children
                 (λ (l)
@@ -3407,8 +3488,10 @@ module browser threading seems wrong.
                          #:dialog-mixin frame:focus-table-mixin))
           can-browse?))
       
+      (define module-browser-mouse-over-status-line-open? #f)
       (define/private (update-module-browser-pane)
         (open-status-line 'plt:module-browser:mouse-over)
+        (set! module-browser-mouse-over-status-line-open? #t)
         (send module-browser-panel begin-container-sequence)
         (unless module-browser-ec 
           (set! module-browser-pb 
@@ -3481,16 +3564,17 @@ module browser threading seems wrong.
                 [(3) 'very-long])))
       
       (define/private (mouse-currently-over snips)
-        (if (null? snips)
-            (update-status-line 'plt:module-browser:mouse-over #f)
-            (let* ([snip (car snips)]
-                   [lines (send snip get-lines)]
-                   [name (or (send snip get-filename)
-                             (send snip get-word))]
-                   [str (if lines
-                            (format (string-constant module-browser-filename-format) name lines)
-                            name)])
-              (update-status-line 'plt:module-browser:mouse-over str))))
+        (when module-browser-mouse-over-status-line-open?
+          (if (null? snips)
+              (update-status-line 'plt:module-browser:mouse-over #f)
+              (let* ([snip (car snips)]
+                     [lines (send snip get-lines)]
+                     [name (or (send snip get-filename)
+                               (send snip get-word))]
+                     [str (if lines
+                              (format (string-constant module-browser-filename-format) name lines)
+                              name)])
+                (update-status-line 'plt:module-browser:mouse-over str)))))
       
       (define/private (calculate-module-browser)
         (let ([mod-tab current-tab])
@@ -3628,6 +3712,57 @@ module browser threading seems wrong.
       
       (define/override (edit-menu:between-find-and-preferences edit-menu)
         (super edit-menu:between-find-and-preferences edit-menu)
+        (new menu:can-restore-checkable-menu-item%
+             [label (string-constant spell-check-string-constants)]
+             [shortcut #\c]
+             [shortcut-prefix (cons 'shift (get-default-shortcut-prefix))]
+             [parent edit-menu]
+             [demand-callback
+              (λ (item)
+                (define ed (get-edit-target-object))
+                (define on? (and ed (is-a? ed color:text<%>)))
+                (send item enable ed)
+                (send item check (and on? (send ed get-spell-check-strings))))]
+             [callback
+              (λ (item evt)
+                (define problem (aspell-problematic?))
+                (cond
+                 [problem
+                  (message-box (string-constant drscheme)
+                               problem)
+                  (preferences:set 'framework:spell-check-on? #f)]
+                 [else
+                  (define ed (get-edit-target-object))
+                  (define old-val (send ed get-spell-check-strings))
+                  (preferences:set 'framework:spell-check-on? (not old-val))
+                  (send ed set-spell-check-strings (not old-val))]))])
+        (define dicts (get-aspell-dicts))
+        (when dicts
+          (define dicts-menu (new menu:can-restore-underscore-menu% 
+                                  [parent edit-menu]
+                                  [label (string-constant spelling-dictionaries)]))
+          (define (mk-item dict label)
+            (new menu:can-restore-checkable-menu-item%
+                 [parent dicts-menu]
+                 [label label]
+                 [callback
+                  (λ (item evt)
+                    (define ed (get-edit-target-object))
+                    (when (and ed (is-a? ed color:text<%>))
+                      (preferences:set 'framework:aspell-dict dict)
+                      (send ed set-spell-current-dict dict)))]
+                 [demand-callback 
+                  (λ (item)
+                    (define ed (get-edit-target-object))
+                    (send item enable (and ed (is-a? ed color:text<%>)))
+                    (send item check 
+                          (and ed 
+                               (is-a? ed color:text<%>)
+                               (equal? dict (send ed get-spell-current-dict)))))]))
+          (mk-item #f (string-constant default-spelling-dictionary))
+          (new separator-menu-item% [parent dicts-menu])
+          (for ([dict (in-list dicts)])
+            (mk-item dict dict)))
         (new menu:can-restore-menu-item%
              [label (string-constant complete-word)]
              [shortcut #\/]
@@ -3746,7 +3881,8 @@ module browser threading seems wrong.
                      (λ (settings)
                        (send (get-definitions-text) set-next-settings 
                              (drracket:language-configuration:language-settings language settings))
-                       (send (get-definitions-text) teachpack-changed))])
+                       (send (get-definitions-text) teachpack-changed)
+                       (update-teachpack-menu))])
                (set! teachpack-items
                      (list*
                       (make-object separator-menu-item% language-menu)
@@ -3766,7 +3902,6 @@ module browser threading seems wrong.
                                         (update-settings 
                                          ((teachpack-callbacks-remove-all tp-callbacks)
                                           settings)))])])
-                        
                         (send mi enable (not (null? tp-names)))
                         mi)
                       (map (λ (name)
@@ -3805,327 +3940,321 @@ module browser threading seems wrong.
                              #:dialog-mixin frame:focus-table-mixin))])))])))
       
       (define/private (initialize-menus)
-        (let* ([mb (get-menu-bar)]
-               [language-menu-on-demand (λ (menu-item) (update-teachpack-menu))]
-               [_ (set! language-menu (make-object (get-menu%) 
-                                        (string-constant language-menu-name)
-                                        mb
-                                        #f
-                                        language-menu-on-demand))]
-               [_ (set! language-specific-menu (new (get-menu%) 
-                                                    [label (drracket:language:get-capability-default
-                                                            'drscheme:language-menu-title)]
-                                                    [parent mb]))]
-               [send-method
-                (λ (method)
-                  (λ (_1 _2)
-                    (let ([text (get-focus-object)])
-                      (when (is-a? text racket:text<%>)
-                        (method text)))))]
-               [show/hide-capability-menus
-                (λ ()
-                  (for-each (λ (menu) (update-items/capability menu))
-                            (send (get-menu-bar) get-items)))])
-          
-          (make-object menu:can-restore-menu-item%
-            (string-constant choose-language-menu-item-label)
-            language-menu
-            (λ (_1 _2) (choose-language-callback))
-            #\l)
-          
-          (set! execute-menu-item
-                (make-object menu:can-restore-menu-item%
-                  (string-constant execute-menu-item-label)
-                  language-specific-menu
-                  (λ (_1 _2) (execute-callback))
-                  #\r
-                  (string-constant execute-menu-item-help-string)))
-          (make-object menu:can-restore-menu-item%
-            (string-constant ask-quit-menu-item-label)
-            language-specific-menu
-            (λ (_1 _2) (send current-tab break-callback))
-            #\b
-            (string-constant ask-quit-menu-item-help-string))
-          (make-object menu:can-restore-menu-item%
-            (string-constant force-quit-menu-item-label)
-            language-specific-menu
-            (λ (_1 _2) (send interactions-text kill-evaluation))
-            #\k
-            (string-constant force-quit-menu-item-help-string))
-          (when (custodian-memory-accounting-available?)
-            (new menu-item%
-                 [label (string-constant limit-memory-menu-item-label)]
-                 [parent language-specific-menu]
-                 [callback
-                  (λ (item b)
-                    (let ([num (get-mbytes this 
-                                           (let ([limit (send interactions-text get-custodian-limit)])
-                                             (and limit
-                                                  (floor (/ limit 1024 1024)))))])
-                      (when num
-                        (cond
-                          [(eq? num #t)
-                           (preferences:set 'drracket:child-only-memory-limit #f)
-                           (send interactions-text set-custodian-limit #f)]
-                          [else
-                           (preferences:set 'drracket:child-only-memory-limit 
-                                            (* 1024 1024 num))
-                           (send interactions-text set-custodian-limit
-                                 (* 1024 1024 num))]))))]))
-            
+        (define mb (get-menu-bar))
+        (set! language-menu (new (get-menu%) 
+                                 [label (string-constant language-menu-name)]
+                                 [parent mb]))
+        (set! language-specific-menu (new (get-menu%) 
+                                          [label (drracket:language:get-capability-default
+                                                  'drscheme:language-menu-title)]
+                                          [parent mb]))
+        (define ((send-method method) _1 _2)
+          (define text (get-focus-object))
+          (when (is-a? text racket:text<%>)
+            (method text)))
+        (define (show/hide-capability-menus)
+          (for ([menu (in-list (send (get-menu-bar) get-items))])
+            (update-items/capability menu)))
+        
+        (make-object menu:can-restore-menu-item%
+          (string-constant choose-language-menu-item-label)
+          language-menu
+          (λ (_1 _2) (choose-language-callback))
+          #\l)
+        
+        (set! execute-menu-item
+              (make-object menu:can-restore-menu-item%
+                (string-constant execute-menu-item-label)
+                language-specific-menu
+                (λ (_1 _2) (execute-callback))
+                #\r
+                (string-constant execute-menu-item-help-string)))
+        (make-object menu:can-restore-menu-item%
+          (string-constant ask-quit-menu-item-label)
+          language-specific-menu
+          (λ (_1 _2) (send current-tab break-callback))
+          #\b
+          (string-constant ask-quit-menu-item-help-string))
+        (make-object menu:can-restore-menu-item%
+          (string-constant force-quit-menu-item-label)
+          language-specific-menu
+          (λ (_1 _2) (send interactions-text kill-evaluation))
+          #\k
+          (string-constant force-quit-menu-item-help-string))
+        (when (custodian-memory-accounting-available?)
+          (new menu-item%
+               [label (string-constant limit-memory-menu-item-label)]
+               [parent language-specific-menu]
+               [callback
+                (λ (item b)
+                  (let ([num (get-mbytes this 
+                                         (let ([limit (send interactions-text get-custodian-limit)])
+                                           (and limit
+                                                (floor (/ limit 1024 1024)))))])
+                    (when num
+                      (cond
+                        [(eq? num #t)
+                         (preferences:set 'drracket:child-only-memory-limit #f)
+                         (send interactions-text set-custodian-limit #f)]
+                        [else
+                         (preferences:set 'drracket:child-only-memory-limit 
+                                          (* 1024 1024 num))
+                         (send interactions-text set-custodian-limit
+                               (* 1024 1024 num))]))))]))
+        
+        (new menu:can-restore-menu-item%
+             (label (string-constant clear-error-highlight-menu-item-label))
+             (parent language-specific-menu)
+             (callback
+              (λ (_1 _2) 
+                (let* ([tab  (get-current-tab)]
+                       [ints (send tab get-ints)]
+                       [defs (send tab get-defs)])
+                  (send ints reset-error-ranges)
+                  (send defs clear-test-coverage))))
+             (help-string (string-constant clear-error-highlight-item-help-string))
+             (demand-callback
+              (λ (item)
+                (let* ([tab (get-current-tab)]
+                       [ints (send tab get-ints)])
+                  (send item enable (or (send ints get-error-ranges)
+                                        (send tab get-test-coverage-info-visible?)))))))
+        
+        ;; find-before-and-after : nat -> (values (or/c srcloc #f) (or/c srcloc #f) (listof srcloc))
+        ;;
+        ;; returns the source locations from the error ranges that are before and
+        ;; after get-start-position, or #f if the insertion point is before 
+        ;; all of them or after all of them, respectively
+        ;; also returns the sorted list of all srclocs
+        ;;
+        ;; this doesn't work properly when the positions are in embedded editor
+        ;;  (but it doesn't crash; it just has a strange notion of before and after)
+        (define (find-before-and-after)
+          (define tab (get-current-tab))
+          (define pos (send (send tab get-defs) get-start-position))
+          (define ranges (send (send tab get-ints) get-error-ranges))
+          (define sorted (sort ranges < #:key srcloc-position))
+          (let loop ([before #f]
+                     [lst sorted])
+            (cond
+              [(null? lst)
+               (values before #f sorted)]
+              [else
+               (define fst (car lst))
+               (cond 
+                 [(= pos (- (srcloc-position fst) 1))
+                  (values before 
+                          (if (null? (cdr lst))
+                              #f
+                              (cadr lst))
+                          sorted)]
+                 [(< pos (- (srcloc-position fst) 1))
+                  (values before fst sorted)]
+                 [else (loop (car lst) (cdr lst))])])))
+        
+        (define (jump-to-source-loc srcloc)
+          (define ed (srcloc-source srcloc))
+          (send ed set-position (- (srcloc-position srcloc) 1))
+          (send ed set-caret-owner #f 'global))
+        
+        (new menu:can-restore-menu-item%
+             (label (string-constant jump-to-next-error-highlight-menu-item-label))
+             (parent language-specific-menu)
+             (shortcut #\.)
+             (callback (λ (_1 _2) (jump-to-next-error-loc)))
+             (demand-callback
+              (λ (item)
+                (let* ([tab (get-current-tab)]
+                       [ints (send tab get-ints)])
+                  (send item enable (send ints get-error-ranges))))))
+        (new menu:can-restore-menu-item%
+             (label (string-constant jump-to-prev-error-highlight-menu-item-label))
+             (parent language-specific-menu)
+             (shortcut (if (eq? (system-type) 'macosx) #\. #\,))
+             (shortcut-prefix (if (eq? (system-type) 'macosx)
+                                  (cons 'shift (get-default-shortcut-prefix))
+                                  (get-default-shortcut-prefix)))
+             (callback (λ (_1 _2) (jump-to-previous-error-loc)))
+             (demand-callback
+              (λ (item)
+                (let* ([tab (get-current-tab)]
+                       [ints (send tab get-ints)])
+                  (send item enable (send ints get-error-ranges))))))
+        (make-object separator-menu-item% language-specific-menu)
+        (make-object menu:can-restore-menu-item%
+          (string-constant create-executable-menu-item-label)
+          language-specific-menu
+          (λ (x y) (create-executable this)))
+        (make-object menu:can-restore-menu-item%
+          (string-constant module-browser...)
+          language-specific-menu
+          (λ (x y) (drracket:module-overview:module-overview this)))
+        (let ()
+          (define base-title (format (string-constant module-browser-in-file) ""))
+          (define (update-menu-item i)
+            (define fn (send definitions-text get-filename))
+            (send i set-label 
+                  (if fn
+                      (let* ([str (path->string fn)]
+                             [overage (- 200 
+                                         (+ (string-length str)
+                                            (string-length base-title)))])
+                        (format (string-constant module-browser-in-file)
+                                (if (overage . >= . 0)
+                                    str
+                                    (string-append "..."
+                                                   (substring str
+                                                              (+ (- (string-length str) (abs overage)) 3)
+                                                              (string-length str))))))
+                      (string-constant module-browser-no-file)))
+            (send i enable fn))
+          (define i (new menu:can-restore-menu-item%
+                         [label base-title]
+                         [parent language-specific-menu]
+                         [demand-callback update-menu-item]
+                         [callback (λ (x y) 
+                                     (define fn (send definitions-text get-filename))
+                                     (when fn
+                                       (drracket:module-overview:module-overview/file fn this)))]))
+          (update-menu-item i))
+        (make-object separator-menu-item% language-specific-menu)
+        
+        (let ([cap-val
+               (λ ()
+                 (let* ([tab (get-current-tab)]
+                        [defs (send tab get-defs)]
+                        [settings (send defs get-next-settings)]
+                        [language (drracket:language-configuration:language-settings-language settings)])
+                   (send language capability-value 'drscheme:tabify-menu-callback)))])
           (new menu:can-restore-menu-item%
-               (label (string-constant clear-error-highlight-menu-item-label))
-               (parent language-specific-menu)
-               (callback
-                (λ (_1 _2) 
-                  (let* ([tab  (get-current-tab)]
-                         [ints (send tab get-ints)]
-                         [defs (send tab get-defs)])
-                    (send ints reset-error-ranges)
-                    (send defs clear-test-coverage))))
-               (help-string (string-constant clear-error-highlight-item-help-string))
-               (demand-callback
-                (λ (item)
-                  (let* ([tab (get-current-tab)]
-                         [ints (send tab get-ints)])
-                    (send item enable (or (send ints get-error-ranges)
-                                          (send tab get-test-coverage-info-visible?)))))))
+               [label (string-constant reindent-menu-item-label)]
+               [parent language-specific-menu]
+               [demand-callback (λ (m) (send m enable (cap-val)))]
+               [callback (send-method 
+                          (λ (x)
+                            (let ([f (cap-val)])
+                              (when f
+                                (f x
+                                   (send x get-start-position)
+                                   (send x get-end-position))))))])
           
-          ;; find-before-and-after : nat -> (values (or/c srcloc #f) (or/c srcloc #f) (listof srcloc))
-          ;;
-          ;; returns the source locations from the error ranges that are before and
-          ;; after get-start-position, or #f if the insertion point is before 
-          ;; all of them or after all of them, respectively
-          ;; also returns the sorted list of all srclocs
-          ;;
-          ;; this doesn't work properly when the positions are in embedded editor
-          ;;  (but it doesn't crash; it just has a strange notion of before and after)
-          (define (find-before-and-after)
-            (define tab (get-current-tab))
-            (define pos (send (send tab get-defs) get-start-position))
-            (define ranges (send (send tab get-ints) get-error-ranges))
-            (define sorted (sort ranges < #:key srcloc-position))
-            (let loop ([before #f]
-                       [lst sorted])
-              (cond
-                [(null? lst)
-                 (values before #f sorted)]
-                [else
-                 (define fst (car lst))
-                 (cond 
-                   [(= pos (- (srcloc-position fst) 1))
-                    (values before 
-                            (if (null? (cdr lst))
-                                #f
-                                (cadr lst))
-                            sorted)]
-                   [(< pos (- (srcloc-position fst) 1))
-                    (values before fst sorted)]
-                   [else (loop (car lst) (cdr lst))])])))
-          
-          (define (jump-to-source-loc srcloc)
-            (define ed (srcloc-source srcloc))
-            (send ed set-position (- (srcloc-position srcloc) 1))
-            (send ed set-caret-owner #f 'global))
-                  
           (new menu:can-restore-menu-item%
-               (label (string-constant jump-to-next-error-highlight-menu-item-label))
-               (parent language-specific-menu)
-               (shortcut #\.)
-               (callback (λ (_1 _2) (jump-to-next-error-loc)))
-               (demand-callback
-                (λ (item)
-                  (let* ([tab (get-current-tab)]
-                         [ints (send tab get-ints)])
-                    (send item enable (send ints get-error-ranges))))))
-          (new menu:can-restore-menu-item%
-               (label (string-constant jump-to-prev-error-highlight-menu-item-label))
-               (parent language-specific-menu)
-               (shortcut (if (eq? (system-type) 'macosx) #\. #\,))
-               (shortcut-prefix (if (eq? (system-type) 'macosx)
-                                    (cons 'shift (get-default-shortcut-prefix))
-                                    (get-default-shortcut-prefix)))
-               (callback (λ (_1 _2) (jump-to-previous-error-loc)))
-               (demand-callback
-                (λ (item)
-                  (let* ([tab (get-current-tab)]
-                         [ints (send tab get-ints)])
-                    (send item enable (send ints get-error-ranges))))))
-          (make-object separator-menu-item% language-specific-menu)
-          (make-object menu:can-restore-menu-item%
-            (string-constant create-executable-menu-item-label)
-            language-specific-menu
-            (λ (x y) (create-executable this)))
-          (make-object menu:can-restore-menu-item%
-            (string-constant module-browser...)
-            language-specific-menu
-            (λ (x y) (drracket:module-overview:module-overview this)))
-          (let ()
-            (define base-title (format (string-constant module-browser-in-file) ""))
-            (define (update-menu-item i)
-              (define fn (send definitions-text get-filename))
-              (send i set-label 
-                    (if fn
-                        (let* ([str (path->string fn)]
-                               [overage (- 200 
-                                           (+ (string-length str)
-                                              (string-length base-title)))])
-                          (format (string-constant module-browser-in-file)
-                                  (if (overage . >= . 0)
-                                      str
-                                      (string-append "..."
-                                                     (substring str
-                                                                (+ (- (string-length str) (abs overage)) 3)
-                                                                (string-length str))))))
-                        (string-constant module-browser-no-file)))
-              (send i enable fn))
-            (define i (new menu:can-restore-menu-item%
-                           [label base-title]
-                           [parent language-specific-menu]
-                           [demand-callback update-menu-item]
-                           [callback (λ (x y) 
-                                       (define fn (send definitions-text get-filename))
-                                       (when fn
-                                         (drracket:module-overview:module-overview/file fn this)))]))
-            (update-menu-item i))
-          (make-object separator-menu-item% language-specific-menu)
+               [label (string-constant reindent-all-menu-item-label)]
+               [parent language-specific-menu]
+               [callback 
+                (send-method 
+                 (λ (x)
+                   (let ([f (cap-val)])
+                     (when f
+                       (f x 0 (send x last-position))))))]
+               [shortcut #\i]
+               [demand-callback (λ (m) (send m enable (cap-val)))]))
+        
+        (make-object menu:can-restore-menu-item%
+          (string-constant box-comment-out-menu-item-label)
+          language-specific-menu
+          (send-method (λ (x) (send x box-comment-out-selection))))
+        (make-object menu:can-restore-menu-item%
+          (string-constant semicolon-comment-out-menu-item-label)
+          language-specific-menu
+          (send-method (λ (x) (send x comment-out-selection))))
+        (make-object menu:can-restore-menu-item%
+          (string-constant uncomment-menu-item-label)
+          language-specific-menu
+          (λ (x y)
+            (let ([text (get-focus-object)])
+              (when (is-a? text text%)
+                (let ([admin (send text get-admin)])
+                  (cond
+                    [(is-a? admin editor-snip-editor-admin<%>)
+                     (let ([es (send admin get-snip)])
+                       (cond
+                         [(is-a? es comment-box:snip%)
+                          (let ([es-admin (send es get-admin)])
+                            (when es-admin
+                              (let ([ed (send es-admin get-editor)])
+                                (when (is-a? ed racket:text<%>)
+                                  (send ed uncomment-box/selection)))))]
+                         [else (send text uncomment-selection)]))]
+                    [else (send text uncomment-selection)]))))))
+        
+        (set! insert-menu
+              (new (get-menu%)
+                   [label (string-constant insert-menu)]
+                   [parent mb]
+                   [demand-callback
+                    (λ (insert-menu)
+                      ;; just here for convience -- it actually works on all menus, not just the special menu
+                      (show/hide-capability-menus))]))
+        
+        (let ([has-editor-on-demand
+               (λ (menu-item)
+                 (let ([edit (get-edit-target-object)])
+                   (send menu-item enable (and edit (is-a? edit editor<%>)))))]
+              [callback
+               (λ (menu evt)
+                 (let ([edit (get-edit-target-object)])
+                   (when (and edit
+                              (is-a? edit editor<%>))
+                     (let ([number (get-fraction-from-user this)])
+                       (when number
+                         (send edit insert
+                               (number-snip:make-fraction-snip number #f)))))
+                   #t))]
+              [insert-lambda
+               (λ ()
+                 (let ([edit (get-edit-target-object)])
+                   (when (and edit
+                              (is-a? edit editor<%>))
+                     (send edit insert "\u03BB")))
+                 #t)]
+              [insert-large-semicolon-letters
+               (λ ()
+                 (let ([edit (get-edit-target-object)])
+                   (when edit
+                     (define language-settings (send definitions-text get-next-settings))
+                     (define-values(comment-prefix comment-character)
+                       (if language-settings
+                           (send (drracket:language-configuration:language-settings-language
+                                  language-settings)
+                                 get-comment-character)
+                           (values ";" #\;)))
+                     (insert-large-letters comment-prefix comment-character edit this))))]
+              [c% (get-menu-item%)])
           
-          (let ([cap-val
-                 (λ ()
-                   (let* ([tab (get-current-tab)]
-                          [defs (send tab get-defs)]
-                          [settings (send defs get-next-settings)]
-                          [language (drracket:language-configuration:language-settings-language settings)])
-                     (send language capability-value 'drscheme:tabify-menu-callback)))])
-            (new menu:can-restore-menu-item%
-                 [label (string-constant reindent-menu-item-label)]
-                 [parent language-specific-menu]
-                 [demand-callback (λ (m) (send m enable (cap-val)))]
-                 [callback (send-method 
-                            (λ (x)
-                              (let ([f (cap-val)])
-                                (when f
-                                  (f x
-                                     (send x get-start-position)
-                                     (send x get-end-position))))))])
-            
-            (new menu:can-restore-menu-item%
-                 [label (string-constant reindent-all-menu-item-label)]
-                 [parent language-specific-menu]
-                 [callback 
-                  (send-method 
-                   (λ (x)
-                     (let ([f (cap-val)])
-                       (when f
-                         (f x 0 (send x last-position))))))]
-                 [shortcut #\i]
-                 [demand-callback (λ (m) (send m enable (cap-val)))]))
+          (frame:add-snip-menu-items 
+           insert-menu 
+           c%
+           (λ (item)
+             (let ([label (send item get-label)])
+               (cond
+                 [(equal? label (string-constant insert-comment-box-menu-item-label))
+                  (register-capability-menu-item 'drscheme:special:insert-comment-box insert-menu)]
+                 [(equal? label (string-constant insert-image-item))
+                  (register-capability-menu-item 'drscheme:special:insert-image insert-menu)]))))
           
-          (make-object menu:can-restore-menu-item%
-            (string-constant box-comment-out-menu-item-label)
-            language-specific-menu
-            (send-method (λ (x) (send x box-comment-out-selection))))
-          (make-object menu:can-restore-menu-item%
-            (string-constant semicolon-comment-out-menu-item-label)
-            language-specific-menu
-            (send-method (λ (x) (send x comment-out-selection))))
-          (make-object menu:can-restore-menu-item%
-            (string-constant uncomment-menu-item-label)
-            language-specific-menu
-            (λ (x y)
-              (let ([text (get-focus-object)])
-                (when (is-a? text text%)
-                  (let ([admin (send text get-admin)])
-                    (cond
-                      [(is-a? admin editor-snip-editor-admin<%>)
-                       (let ([es (send admin get-snip)])
-                         (cond
-                           [(is-a? es comment-box:snip%)
-                            (let ([es-admin (send es get-admin)])
-                              (when es-admin
-                                (let ([ed (send es-admin get-editor)])
-                                  (when (is-a? ed racket:text<%>)
-                                    (send ed uncomment-box/selection)))))]
-                           [else (send text uncomment-selection)]))]
-                      [else (send text uncomment-selection)]))))))
+          (make-object c% (string-constant insert-fraction-menu-item-label)
+            insert-menu callback 
+            #f #f
+            has-editor-on-demand)
+          (register-capability-menu-item 'drscheme:special:insert-fraction insert-menu)
           
-          (set! insert-menu
-                (new (get-menu%)
-                     [label (string-constant insert-menu)]
-                     [parent mb]
-                     [demand-callback
-                      (λ (insert-menu)
-                        ;; just here for convience -- it actually works on all menus, not just the special menu
-                        (show/hide-capability-menus))]))
+          (make-object c% (string-constant insert-large-letters...)
+            insert-menu
+            (λ (x y) (insert-large-semicolon-letters))
+            #f #f
+            has-editor-on-demand)
+          (register-capability-menu-item 'drscheme:special:insert-large-letters insert-menu)
           
-          (let ([has-editor-on-demand
-                 (λ (menu-item)
-                   (let ([edit (get-edit-target-object)])
-                     (send menu-item enable (and edit (is-a? edit editor<%>)))))]
-                [callback
-                 (λ (menu evt)
-                   (let ([edit (get-edit-target-object)])
-                     (when (and edit
-                                (is-a? edit editor<%>))
-                       (let ([number (get-fraction-from-user this)])
-                         (when number
-                           (send edit insert
-                                 (number-snip:make-fraction-snip number #f)))))
-                     #t))]
-                [insert-lambda
-                 (λ ()
-                   (let ([edit (get-edit-target-object)])
-                     (when (and edit
-                                (is-a? edit editor<%>))
-                       (send edit insert "\u03BB")))
-                   #t)]
-                [insert-large-semicolon-letters
-                 (λ ()
-                   (let ([edit (get-edit-target-object)])
-                     (when edit
-                       (define language-settings (send definitions-text get-next-settings))
-                       (define-values(comment-prefix comment-character)
-                         (if language-settings
-                             (send (drracket:language-configuration:language-settings-language
-                                    language-settings)
-                                   get-comment-character)
-                             (values ";" #\;)))
-                       (insert-large-letters comment-prefix comment-character edit this))))]
-                [c% (get-menu-item%)])
-            
-            (frame:add-snip-menu-items 
-             insert-menu 
-             c%
-             (λ (item)
-               (let ([label (send item get-label)])
-                 (cond
-                   [(equal? label (string-constant insert-comment-box-menu-item-label))
-                    (register-capability-menu-item 'drscheme:special:insert-comment-box insert-menu)]
-                   [(equal? label (string-constant insert-image-item))
-                    (register-capability-menu-item 'drscheme:special:insert-image insert-menu)]))))
-            
-            (make-object c% (string-constant insert-fraction-menu-item-label)
-              insert-menu callback 
-              #f #f
-              has-editor-on-demand)
-            (register-capability-menu-item 'drscheme:special:insert-fraction insert-menu)
-            
-            (make-object c% (string-constant insert-large-letters...)
-              insert-menu
-              (λ (x y) (insert-large-semicolon-letters))
-              #f #f
-              has-editor-on-demand)
-            (register-capability-menu-item 'drscheme:special:insert-large-letters insert-menu)
-            
-            (make-object c% (string-constant insert-lambda)
-              insert-menu
-              (λ (x y) (insert-lambda))
-              #\\
-              #f
-              has-editor-on-demand)
-            (register-capability-menu-item 'drscheme:special:insert-lambda insert-menu))
-          
-          (frame:reorder-menus this)))
+          (make-object c% (string-constant insert-lambda)
+            insert-menu
+            (λ (x y) (insert-lambda))
+            #\\
+            #f
+            has-editor-on-demand)
+          (register-capability-menu-item 'drscheme:special:insert-lambda insert-menu))
+        
+        (frame:reorder-menus this))
       
       (define/public (jump-to-previous-error-loc)
         (define-values (before after sorted) (find-before-and-after))
@@ -4207,11 +4336,17 @@ module browser threading seems wrong.
       
       (init-definitions-text (car tabs))
       
+      (define/override (adjust-size-when-monitor-setup-changes?) 
+        (= 1 (for/sum ([f (in-list (get-top-level-windows))])
+               (if (is-a? f drracket:unit:frame<%>)
+                   1
+                   0))))
+        
       (super-new
        [filename filename]
        [style '(toolbar-button)]
-       [size-preferences-key 'drracket:unit-window-size]
-       [position-preferences-key 'drracket:unit-window-position])
+       [size-preferences-key 'drracket:window-size]
+       [position-preferences-key 'drracket:window-position])
       
       (initialize-menus)
       
@@ -4306,7 +4441,10 @@ module browser threading seems wrong.
       [define teachpack-items null]
       [define break-button (void)]
       [define execute-button (void)]
-      [define button-panel (new horizontal-panel% [parent top-panel] [spacing 2])]
+      [define button-panel (new panel:horizontal-discrete-sizes% 
+                                [parent top-panel]
+                                [stretchable-width #t]
+                                [alignment '(right center)])]
       (define/public (get-execute-button) execute-button)
       (define/public (get-break-button) break-button)
       (define/public (get-button-panel) button-panel)
@@ -4388,14 +4526,9 @@ module browser threading seems wrong.
                  [label (string-constant break-button-label)]))
       (register-toolbar-button break-button #:number 101)
       
-      (send button-panel stretchable-height #f)
-      (send button-panel stretchable-width #f) 
-      
       (send top-panel change-children
             (λ (l)
-              (list name-panel save-button
-                    (make-object vertical-panel% top-panel) ;; spacer
-                    button-panel)))
+              (list name-panel save-button button-panel)))
       
       (send top-panel stretchable-height #f)
       (inherit get-label)
@@ -4419,6 +4552,7 @@ module browser threading seems wrong.
       (update-save-message)
       (update-save-button)
       (language-changed)
+      (set-delegated-text definitions-text)
       
       (cond
         [filename
@@ -4519,7 +4653,7 @@ module browser threading seems wrong.
       (define num-running-frames (vector-length running-frames))
       (define is-running? #f)
       (define frame 0)
-      (define timer (make-object timer% (λ () (refresh) (yield)) #f))
+      (define timer (make-object logging-timer% (λ () (refresh) (yield)) #f))
       
       (define/public (set-running r?)
         (cond [r?    (unless is-running? (set! frame 4))
@@ -4563,41 +4697,87 @@ module browser threading seems wrong.
                         [parent d]
                         [label (string-constant limit-memory-msg-2)]))
     
-    (define outer-hp (new horizontal-panel% [parent d] [alignment '(center bottom)]))
-    (define rb (new radio-box%
-                    [label #f]
-                    [choices (list (string-constant limit-memory-unlimited)
-                                   (string-constant limit-memory-limited))]
-                    [callback (λ (a b) (grayizie))]
-                    [parent outer-hp]))
+    (define top-hp (new horizontal-panel% [parent d] [stretchable-height #f] [alignment '(left center)]))
+    (define bot-hp (new horizontal-panel% [parent d] [stretchable-height #f] [alignment '(left bottom)]))
+    (define limited-rb
+      (new radio-box%
+           [label #f]
+           [choices (list (string-constant limit-memory-limited))]
+           [callback (λ (a b)
+                       (send unlimited-rb set-selection #f)
+                       (cb-checked))]
+           [parent top-hp]))
+    (define unlimited-rb
+      (new radio-box%
+           [label #f]
+           [choices (list (string-constant limit-memory-unlimited))]
+           [callback (λ (a b) 
+                       (send limited-rb set-selection #f)
+                       (cb-checked))]
+           [parent bot-hp]))
     
-    (define (grayizie)
-      (case (send rb get-selection)
-        [(0) 
-         (send tb enable #f)
-         (send msg2 enable #f)
-         (background gray-foreground-sd)]
-        [(1)
+    (define unlimited-warning-panel (new horizontal-panel%
+                                         [parent d]
+                                         [stretchable-width #t]
+                                         [stretchable-height #f]))
+    
+    (define (show-unlimited-warning)
+      (when (null? (send unlimited-warning-panel get-children))
+        (send d begin-container-sequence)
+        (define t (new text%))
+        (send t insert (string-constant limit-memory-warning-prefix))
+        (define between-pos (send t last-position))
+        (send t insert (string-constant limit-memory-warning))
+        
+        (define sdb (make-object style-delta% 'change-family 'system))
+        (send sdb set-delta-face (send normal-control-font get-face))
+        (send sdb set-size-mult 0)
+        (send sdb set-size-add (send normal-control-font get-point-size))
+        (send sdb set-size-in-pixels-off #t)
+        (send sdb set-weight-on 'bold)
+        (define sd (make-object style-delta%))
+        (send sd copy sdb)
+        (send sd set-weight-on 'normal)
+        
+        (send t change-style sdb 0 between-pos)
+        (send t change-style sd between-pos (send t last-position))
+        
+        (define ec (new editor-canvas% 
+                        [editor t]
+                        [parent unlimited-warning-panel]
+                        [style '(no-border no-focus hide-hscroll hide-vscroll transparent)]
+                        [horiz-margin 12]))
+        (send t auto-wrap #t)
+        (send d reflow-container)
+        (send ec set-line-count (+ 1 (send t position-line (send t last-position))))
+        (send t hide-caret #t)
+        (send t lock #t)
+        (send d end-container-sequence)
+        (send unlimited-rb focus)))
+    
+    (define (cb-checked)
+      (cond
+        [(send limited-rb get-selection)
          (send tb enable #t)
          (send msg2 enable #t)
          (background black-foreground-sd)
          (let ([e (send tb get-editor)])
            (send e set-position 0 (send e last-position)))
-         (send tb focus)])
+         (send tb focus)]
+        [else
+         (show-unlimited-warning)
+         (send tb enable #f)
+         (send msg2 enable #f)
+         (background gray-foreground-sd)])
       (update-ok-button-state))
-    
-    (define hp (new horizontal-panel% 
-                    [parent outer-hp] 
-                    [stretchable-height #f]
-                    [stretchable-width #f]))
     
     (define tb
       (new text-field%
            [label #f]
-           [parent hp]
+           [parent top-hp]
            [init-value (if current-limit
                            (format "~a" current-limit)
-                           "64")]
+                           "128")]
            [stretchable-width #f]
            [min-width 100]
            [callback
@@ -4611,19 +4791,23 @@ module browser threading seems wrong.
               (update-ok-button-state))]))
     
     (define (update-ok-button-state)
-      (case (send rb get-selection)
-        [(0) (send ok-button enable #t)]
-        [(1) (send ok-button enable (is-valid-number? (send tb get-editor)))]))
+      (cond
+        [(send limited-rb get-selection)
+         (send ok-button enable (is-valid-number? (send tb get-editor)))]
+        [else
+         (send ok-button enable #t)]))
     
-    (define msg2 (new message% [parent hp] [label (string-constant limit-memory-megabytes)]))
+    (define msg2 (new message% [parent top-hp] [label (string-constant limit-memory-megabytes)]))
     (define bp (new horizontal-panel% [parent d]))
     (define-values (ok-button cancel-button)
       (gui-utils:ok/cancel-buttons
        bp 
        (λ (a b) 
-         (case (send rb get-selection)
-           [(0) (set! result #t)]
-           [(1) (set! result (string->number (send (send tb get-editor) get-text)))])
+         (cond
+           [(send limited-rb get-selection)
+            (set! result (string->number (send (send tb get-editor) get-text)))]
+           [else
+            (set! result #t)])
          (send d show #f))
        (λ (a b) (send d show #f))))
     
@@ -4651,17 +4835,22 @@ module browser threading seems wrong.
     (send gray-foreground-sd set-delta-foreground "gray")
     (send d set-alignment 'left 'center)
     (send bp set-alignment 'right 'center)
-    (when current-limit
-      (send rb set-selection 1))
+    (cond
+      [current-limit
+       (send limited-rb set-selection 0)
+       (send unlimited-rb set-selection #f)]
+      [else
+       (send unlimited-rb set-selection 0)
+       (send limited-rb set-selection #f)])
     (update-ok-button-state)
-    (grayizie)
-    (send tb focus)
+    (cb-checked)
     (let ([e (send tb get-editor)])
       (send e set-position 0 (send e last-position)))
+    (cond 
+      [current-limit (send tb focus)]
+      [else (send unlimited-rb focus)])
     (send d show #t)
     result)
-  
-  
   
   (define (limit-length l n)
     (let loop ([l l]
@@ -4750,7 +4939,7 @@ module browser threading seems wrong.
                   (string-constant no-full-name-since-not-saved)])
       
       (inherit set-allow-shrinking)
-      (set-allow-shrinking 100)))
+      (set-allow-shrinking 50)))
   
   
   

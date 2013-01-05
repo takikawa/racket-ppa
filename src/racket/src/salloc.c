@@ -39,7 +39,11 @@
 # define MALLOC malloc
 #endif
 
-#ifdef MZ_JIT_USE_MPROTECT
+#if defined(MZ_JIT_USE_MPROTECT) || defined(HAVE_MMAP_MPROTECT)
+# define MZ_CODE_ALLOC_USE_MPROTECT
+#endif
+
+#ifdef MZ_CODE_ALLOC_USE_MPROTECT
 # include <unistd.h>
 # include <sys/mman.h>
 # ifndef MAP_ANON
@@ -113,7 +117,7 @@ void scheme_set_stack_base(void *base, int no_auto_statics) XFORM_SKIP_PROC
   GC_init_type_tags(_scheme_last_type_, 
                     scheme_pair_type, scheme_mutable_pair_type, scheme_weak_box_type, 
                     scheme_ephemeron_type, scheme_rt_weak_array,
-                    scheme_cust_box_type);
+                    scheme_cust_box_type, scheme_phantom_bytes_type);
   /* We want to be able to allocate symbols early. */
   scheme_register_traversers();
 #endif
@@ -281,8 +285,18 @@ void scheme_setup_thread_local_key_if_needed() XFORM_SKIP_PROC
   {
     void **base;
 
+# ifdef __MINGW32__
+#  ifdef _WIN64
+    asm("mov %%gs:(0x58), %0;"
+	:"=r"(base));        /* output */
+#  else
+    asm("mov %%fs:(0x2C), %0;"
+	:"=r"(base));        /* output */
+#  endif
+# else
     __asm { mov ecx, FS:[0x2C]
             mov base, ecx }
+# endif
     scheme_tls_delta -= (uintptr_t)base[scheme_tls_index];
     scheme_tls_index *= sizeof(void*);
   }
@@ -841,14 +855,14 @@ THREAD_LOCAL_DECL(static void *code_allocation_page_list);
 
 THREAD_LOCAL_DECL(intptr_t scheme_code_page_total);
 
-#if defined(MZ_JIT_USE_MPROTECT) && !defined(MAP_ANON)
+#if defined(MZ_CODE_ALLOC_USE_MPROTECT) && !defined(MAP_ANON)
 static int fd, fd_created;
 #endif
 
 #define LOG_CODE_MALLOC(lvl, s) /* if (lvl > 1) s */
 #define CODE_PAGE_OF(p) ((void *)(((uintptr_t)p) & ~(page_size - 1)))
 
-#if defined(MZ_JIT_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
+#if defined(MZ_CODE_ALLOC_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
 
 struct free_list_entry {
   intptr_t size; /* size of elements in this bucket */
@@ -1020,7 +1034,7 @@ static intptr_t free_list_find_bucket(intptr_t size)
 
 void *scheme_malloc_code(intptr_t size)
 {
-#if defined(MZ_JIT_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
+#if defined(MZ_CODE_ALLOC_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
 
   intptr_t size2, bucket, sz, page_size;
   void *p, *pg, *prev;
@@ -1099,7 +1113,7 @@ void *scheme_malloc_permanent_code(intptr_t size)
 /* allocate code that will never be freed and that can be used
    in multiple places */
 {
-#if defined(MZ_USE_PLACES) && (defined(MZ_JIT_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC))
+#if defined(MZ_USE_PLACES) && (defined(MZ_CODE_ALLOC_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC))
   void *p;
   intptr_t page_size;
 
@@ -1138,7 +1152,7 @@ void *scheme_malloc_permanent_code(intptr_t size)
 
 void scheme_free_code(void *p)
 {
-#if defined(MZ_JIT_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
+#if defined(MZ_CODE_ALLOC_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
   intptr_t size, size2, bucket, page_size;
   int per_page, n;
   void *prev;
@@ -1224,7 +1238,7 @@ void scheme_free_code(void *p)
 
 void scheme_free_all_code(void)
 {
-#if defined(MZ_JIT_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
+#if defined(MZ_CODE_ALLOC_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
   void *p, *next;
   intptr_t page_size;
 
@@ -1250,7 +1264,7 @@ void scheme_free_all_code(void)
    currently takes advantage of that combination, so we support it
    with scheme_malloc_gcable_code() --- but only in CGC mode. */
 
-#if defined(MZ_JIT_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
+#if defined(MZ_CODE_ALLOC_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
 static uintptr_t jit_prev_page = 0, jit_prev_length = 0;
 #endif
 
@@ -1259,7 +1273,7 @@ void *scheme_malloc_gcable_code(intptr_t size)
   void *p;
   p = scheme_malloc(size);
   
-#if defined(MZ_JIT_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
+#if defined(MZ_CODE_ALLOC_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
   {
     /* [This chunk of code moved from our copy of GNU lightning to here.] */
     uintptr_t page, length, page_size;
@@ -1314,7 +1328,7 @@ void *scheme_malloc_gcable_code(intptr_t size)
 
 void scheme_notify_code_gc()
 {
-#if defined(MZ_JIT_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
+#if defined(MZ_CODE_ALLOC_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
   jit_prev_page = 0;
   jit_prev_length = 0;
 #endif
@@ -1882,7 +1896,6 @@ static void count_managed(Scheme_Custodian *m, int *c, int *a, int *u, int *t,
 #endif
 
 #if MZ_PRECISE_GC_TRACE
-char *(*GC_get_xtagged_name)(void *p) = NULL;
 static Scheme_Object *cons_accum_result;
 static void cons_onto_list(void *p)
 {
@@ -1928,7 +1941,7 @@ static int check_home(Scheme_Object *o)
 }
 
 static void print_tagged_value(const char *prefix, 
-			       void *v, int xtagged, uintptr_t diff, int max_w,
+			       void *v, uintptr_t diff, int max_w,
 			       const char *suffix)
 {
   char buffer[256];
@@ -1940,7 +1953,7 @@ static void print_tagged_value(const char *prefix,
   
   scheme_check_print_is_obj = check_home;
 
-  if (!xtagged) {
+  {
     if (SCHEME_TYPE(v) > _scheme_compiled_values_types_) {
       sprintf(hashstr, "{%" PRIdPTR "}", scheme_hash_key(v));
       hash_code = hashstr;
@@ -2112,13 +2125,8 @@ static void print_tagged_value(const char *prefix,
     }
 
     sep = "=";
-  } else if (scheme_external_dump_type) {
-    type = scheme_external_dump_type(v);
-    if (*type)
-      sep = ":";
-  } else
-    type = "";
-  
+  }
+
   if (diff)
     sprintf(diffstr, "%lx", diff);
 
@@ -2160,7 +2168,6 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
 #  define path_length_limit 10000
 #  define for_each_found NULL
 #  define for_each_struct NULL
-#  define GC_get_xtagged_name NULL
 #  define print_tagged_value NULL
 # endif
 #endif
@@ -2508,7 +2515,6 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
       }
       GC_dump_variable_stack(var_stack, delta, limit, NULL,
                              scheme_get_type_name_or_null,
-                             GC_get_xtagged_name,
                              print_tagged_value);
     } else {
       scheme_console_printf(" done\n");
@@ -2532,7 +2538,6 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
 # ifdef MZ_PRECISE_GC
   GC_dump_with_traces(flags, 
 		      scheme_get_type_name_or_null,
-		      GC_get_xtagged_name,
 		      for_each_found,
 		      trace_for_tag, trace_for_tag,
 		      print_tagged_value,
@@ -2592,14 +2597,7 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
 	struct GC_Set *home;
 
 	home = GC_set(v);
-	if (home
-	    && ((home == real_tagged)
-		|| (home == tagged_atomic)
-		|| (home == tagged_uncollectable)
-		|| (home == tagged_eternal))) {
-	  print_tagged_value("\n  ->", v, 0, diff, max_w, "");
-	} else
-	  print_tagged_value("\n  ->", v, 1, diff, max_w, "");
+	print_tagged_value("\n  ->", v, diff, max_w, "");
       }
       scheme_console_printf("\n");
     }

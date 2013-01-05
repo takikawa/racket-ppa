@@ -66,11 +66,22 @@
 
  (proc-doc
   color:get-parenthesis-colors-table 
-  (-> (listof (list/c symbol? string? (vectorof (is-a?/c color%)))))
+  (-> (listof (list/c symbol? string? (vectorof (is-a?/c color%)) (or/c 'low 'high))))
   @{Returns a table of colors that get used for parenthesis highlighting.
     Each entry in the table consists of a symbolic name, a name to show
-    in a GUI, and the color to use. The colors are used to show the nesting
-    structure in the parens.})
+    in a GUI, the color to use, and the @racket[_priority] argument to
+    pass to @racket[text:basic<%> highlight-range] when highlighting the parens.
+    Generally the priority should be @racket['low] if the color is solid
+    (α=1) but can be @racket['high] if the α component is small.
+    
+    When an entry in the table has multiple colors, they are used to show the nesting
+    structure in the parentheses.})
+ 
+ (thing-doc
+  color:misspelled-text-color-style-name
+  string?
+  @{The name of the style used to color misspelled words. See also 
+    @method[color:text<%> get-spell-check-strings].})
  
  (proc-doc/names
   text:range? (-> any/c boolean?) (arg)
@@ -352,6 +363,25 @@
     them return @racket[#f], the dialog is not closed.
     
     See also @racket[preferences:add-on-close-dialog-callback].})
+ 
+ (proc-doc/names
+  preferences:add-check
+  (->* ((is-a?/c area-container<%>) symbol? string?)
+       ((-> boolean? any/c)
+        (-> any/c boolean?))
+       void?)
+  ((parent pref-key label) ((from-boolean values) (to-boolean values)))
+  @{Adds a @racket[radio-box%] object (with @racket[label] as its label)
+    to @racket[parent] that, when checked
+    adjusts the preference with the key @racket[pref-key].
+    
+    The @racket[to-boolean] and @racket[from-boolean] functions
+    are used to convert from the preferences value to a booleans
+    when checking/unchecking the @racket[radio-box%] object. 
+    The defaults amount to treating the preference as a boolean such
+    that checking the @racket[radio-box%] sets the preference to
+    @racket[#t] and unchecking it sets the preference to @racket[#f].
+    })
 
  (proc-doc/names
   autosave:register
@@ -480,8 +510,8 @@
   (parameter/c string?)
   extension
   @{This parameter controls the default extension for the framework's
-    @racket[finder:put-file] dialog.  Its value gets passed as the
-    @racket[default-extension] argument to @racket[put-file].
+    @racket[finder:put-file] and @racket[finder:get-file] dialog.  Its value gets passed as the
+    @racket[_extension] argument to @racket[put-file] and @racket[get-file].
     
     Its default value is @racket[""].})
 

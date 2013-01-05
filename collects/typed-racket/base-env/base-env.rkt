@@ -36,7 +36,11 @@
           make-ThreadCellTop
           make-Ephemeron
           make-CustodianBox
-          make-HeterogenousVector
+          make-HeterogeneousVector
+          make-Continuation-Mark-Keyof
+          make-Continuation-Mark-KeyTop
+          make-Prompt-Tagof
+          make-Prompt-TagTop
           make-ListDots))
 
 ;Section 9.2
@@ -246,7 +250,7 @@
 [boolean=? (B B . -> . B)]
 [symbol=? (Sym Sym . -> . B)]
 [false? (make-pred-ty (-val #f))]
-
+[xor (-> Univ Univ Univ)]
 
 
 
@@ -592,10 +596,6 @@
                        (make-ListDots a 'a)
                        (-values (list (-pair b (-val '())) -Nat -Nat -Nat)))))]
 
-[call/cc (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
-[call/ec (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
-[call-with-current-continuation (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
-[call-with-escape-continuation (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
 
 [struct->vector (Univ . -> . (-vec Univ))]
 [unsafe-struct-ref top-func]
@@ -1146,7 +1146,8 @@
   (-> (-val 'gc) (Un (-val 'cgc) (-val '3m)))
   (-> (-val 'link) (Un (-val 'static) (-val 'shared) (-val 'dll) (-val 'framework)))
   (-> (-val 'so-suffix) -Bytes)
-  (-> (-val 'machine) -String))]
+  (-> (-val 'machine) -String)
+  (-> (-val 'word) -PosInt))]
 [system-language+country (-> -String)]
 [system-library-subpath (->opt [(Un (-val #f) (-val 'cgc) (-val '3m))] -Path)]
 
@@ -1190,12 +1191,12 @@
                           (-opt -Integer)
                           (-opt -Integer)
                           (-opt -Integer)))]
-        [srcvec (make-HeterogenousVector (list
-                                          Univ
-                                          (-opt -Integer)
-                                          (-opt -Integer)
-                                          (-opt -Integer)
-                                          (-opt -Integer)))]
+        [srcvec (make-HeterogeneousVector (list
+                                           Univ
+                                           (-opt -Integer)
+                                           (-opt -Integer)
+                                           (-opt -Integer)
+                                           (-opt -Integer)))]
         [srcloc (Un S (-val #f) srclist srcvec)]
         [prop (-opt S)]
         [cert (-opt S)])
@@ -1903,7 +1904,7 @@
                                   (-val null)))))))))]
 [module-compiled-language-info
  (-> -Compiled-Module-Expression
-     (-opt (make-HeterogenousVector (list -Module-Path -Symbol Univ))))]
+     (-opt (make-HeterogeneousVector (list -Module-Path -Symbol Univ))))]
 
 ;Section 13.4.3
 [dynamic-require
@@ -1924,7 +1925,7 @@
 [module->language-info
  (->opt (Un -Module-Path -Path -Resolved-Module-Path)
         [Univ]
-        (-opt (make-HeterogenousVector (list -Module-Path -Symbol Univ))))]
+        (-opt (make-HeterogeneousVector (list -Module-Path -Symbol Univ))))]
 
 
 [module->imports (-> -Compiled-Module-Expression
@@ -2017,26 +2018,82 @@
 [stx->list (-> (-Syntax Univ) (-lst (-Syntax Univ)))]
 [stx-list? (-> (-Syntax Univ) -Boolean)]
 
-;Section 9.4 (Continuations)
-
+;; Section 9.4 (Continuations)
+[call-with-continuation-prompt
+ (-polydots (a b d c)
+   (cl->*
+    (-> (-> b) (make-Prompt-Tagof b (-> (-> d) d)) (Un b d))
+    (-> (-> b) (make-Prompt-Tagof b (->... '() (c c) d)) (->... '() (c c) d)
+        (Un b d))
+    (-> (-> b) Univ)))]
+[abort-current-continuation
+ (-polydots (a b d e c)
+   (->... (list (make-Prompt-Tagof b (->... '() (c c) d))) (c c) e))]
+[make-continuation-prompt-tag
+ (-poly (a b) (->opt [Sym] (make-Prompt-Tagof a b)))]
+;; default-continuation-prompt-tag is defined in "base-contracted.rkt"
+[call-with-current-continuation
+ (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
+[call/cc (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
+[call-with-composable-continuation
+ (-polydots (b c a)
+   (-> ;; takes a continuation and should return the same
+       ;; type as the continuation's input type
+       (-> (->... '() (a a) b) (make-ValuesDots '() a 'a))
+       (make-Prompt-Tagof b c)
+       ;; the continuation's input is the same as the
+       ;; return type here
+       (make-ValuesDots '() a 'a)))]
+[call-with-escape-continuation
+ (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
+[call/ec (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
 [call-with-continuation-barrier (-poly (a) (-> (-> a) a))]
-[continuation-prompt-available? (-> -Prompt-Tag B)]
-
-[make-continuation-prompt-tag (->opt [Sym] -Prompt-Tag)]
-[default-continuation-prompt-tag (-> -Prompt-Tag)]
-[continuation-prompt-tag? (make-pred-ty -Prompt-Tag)]
+[continuation-prompt-available? (-> (make-Prompt-TagTop) B)]
+[continuation?
+ (asym-pred Univ B (-FS (-filter top-func 0) -top))]
+[continuation-prompt-tag? (make-pred-ty (make-Prompt-TagTop))]
 [dynamic-wind (-poly (a) (-> (-> ManyUniv) (-> a) (-> ManyUniv) a))]
 
-;Section 9.5 (Continuation Marks)
-;continuation-marks needs type for continuations as other possible first argument
-[continuation-marks (->opt (Un (-val #f) -Thread) [-Prompt-Tag] -Cont-Mark-Set)]
-[current-continuation-marks (->opt [-Prompt-Tag]  -Cont-Mark-Set)]
-[continuation-mark-set->list (->opt -Cont-Mark-Set Univ [-Prompt-Tag] (-lst Univ))]
-[continuation-mark-set->list* (->opt -Cont-Mark-Set (-lst Univ) [Univ -Prompt-Tag] (-lst (-vec Univ)))]
-[continuation-mark-set-first (->opt (-opt -Cont-Mark-Set) Univ [Univ -Prompt-Tag] Univ)]
-[call-with-immediate-continuation-mark (-poly (a) (->opt Univ (-> Univ a) [Univ] a))]
+;; Section 9.5 (Continuation Marks)
+;; continuation-marks needs type for continuations as other
+;; possible first argument
+[continuation-marks
+ (->opt (Un (-val #f) -Thread) [(make-Prompt-TagTop)] -Cont-Mark-Set)]
+[current-continuation-marks (->opt [(make-Prompt-TagTop)] -Cont-Mark-Set)]
+[continuation-mark-set->list 
+ (-poly (a)
+        (cl->* 
+         (->opt -Cont-Mark-Set (make-Continuation-Mark-Keyof a)
+                [(make-Prompt-TagTop)] (-lst a))
+         (->opt -Cont-Mark-Set Univ [(make-Prompt-TagTop)] (-lst Univ))))]
+[continuation-mark-set->list* 
+ (-poly (a b)
+        (cl->* 
+         (->opt -Cont-Mark-Set
+                (-lst (make-Continuation-Mark-Keyof a))
+                [b (make-Prompt-TagTop)]
+                (-lst (-vec (Un a b))))
+         (->opt -Cont-Mark-Set
+                (-lst Univ)
+                [Univ (make-Prompt-TagTop)]
+                (-lst (-vec Univ)))))]
+[continuation-mark-set-first 
+ (-poly (a b)
+        (cl->*
+         (-> (-opt -Cont-Mark-Set) (make-Continuation-Mark-Keyof a)
+             (-opt a))
+         (->opt (-opt -Cont-Mark-Set) (make-Continuation-Mark-Keyof a)
+                [b (make-Prompt-TagTop)]
+                (Un a b))
+         (->opt (-opt -Cont-Mark-Set) Univ [Univ (make-Prompt-TagTop)] Univ)))]
+[call-with-immediate-continuation-mark
+ (-poly (a) (->opt Univ (-> Univ a) [Univ] a))]
+[continuation-mark-key? (make-pred-ty (make-Continuation-Mark-KeyTop))]
 [continuation-mark-set? (make-pred-ty -Cont-Mark-Set)]
-[continuation-mark-set->context (-> -Cont-Mark-Set (-lst (-pair (-opt Sym) Univ)))] ;TODO add srcloc
+[make-continuation-mark-key
+ (-poly (a) (->opt [-Symbol] (make-Continuation-Mark-Keyof a)))]
+[continuation-mark-set->context
+ (-> -Cont-Mark-Set (-lst (-pair (-opt Sym) Univ)))] ;TODO add srcloc
 
 
 ;Section 14.6 (Time)
@@ -2051,7 +2108,8 @@
 [logger-name (-> -Logger (-opt Sym))]
 [current-logger (-Param -Logger -Logger)]
 
-[log-message (-> -Logger -Log-Level -String Univ -Void)]
+[log-message (cl->* (-> -Logger -Log-Level -String Univ -Void)
+                    (-> -Logger -Log-Level (Un (-val #f) -Symbol) -String Univ -Void))]
 [log-level? (-> -Logger -Log-Level  B)]
 
 [log-receiver? (make-pred-ty -Log-Receiver)]
@@ -2087,11 +2145,11 @@
 [pseudo-random-generator? (make-pred-ty -Pseudo-Random-Generator)]
 [current-pseudo-random-generator (-Param -Pseudo-Random-Generator -Pseudo-Random-Generator)]
 [pseudo-random-generator->vector
- (-> -Pseudo-Random-Generator (make-HeterogenousVector (list -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt)))]
+ (-> -Pseudo-Random-Generator (make-HeterogeneousVector (list -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt)))]
 [vector->pseudo-random-generator
- (-> (make-HeterogenousVector (list -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt)) -Pseudo-Random-Generator)]
+ (-> (make-HeterogeneousVector (list -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt)) -Pseudo-Random-Generator)]
 [vector->pseudo-random-generator!
- (-> -Pseudo-Random-Generator (make-HeterogenousVector (list -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt)) -Void)]
+ (-> -Pseudo-Random-Generator (make-HeterogeneousVector (list -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt)) -Void)]
 
 [current-evt-pseudo-random-generator (-Param -Pseudo-Random-Generator -Pseudo-Random-Generator)]
 
@@ -2616,7 +2674,7 @@
 
 ;Section 9.3 (Delayed Evaluation)
 [promise? (make-pred-ty (-Promise Univ))]
-[force (-poly (a) (-> (-Promise a) a))]
+[force (-poly (a) (->acc (list (-Promise a)) a (list -force)))]
 [promise-forced? (-poly (a) (-> (-Promise a) B))]
 [promise-running? (-poly (a) (-> (-Promise a) B))]
 

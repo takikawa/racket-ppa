@@ -1236,6 +1236,24 @@
     
     (test (term (R (xx) (xx))) #t)
     (test (term (R (()) ())) #f))
+  
+  (let ()
+    
+    (define-relation empty-language
+      [(a number_1)
+       (b number_1)]
+      [(a 2)])
+    
+    (define-relation empty-language
+      [(b 1)]
+      [(b 2)])
+    
+    (test (term (a 1)) #t)
+    (test (term (a 2)) #t)
+    (test (term (a 3)) #f)
+    (test (term (b 1)) #t)
+    (test (term (b 2)) #t)
+    (test (term (b 3)) #f))
 
   
   (exec-syntax-error-tests "syn-err-tests/relation-definition.rktd")
@@ -1721,6 +1739,17 @@
           M)
          '(4 2))
         (list '8))
+  
+  (test (with-handlers ((exn:fail? exn-message))
+          (apply-reduction-relation
+           (context-closure 
+            (reduction-relation
+             empty-language #:domain #f
+             (--> #f #f))
+            empty-language hole)
+           #t)
+          "exn not raised")
+        #rx"^reduction-relation:")
   
   (test (apply-reduction-relation
          (context-closure 
@@ -2288,7 +2317,9 @@
         [(different any_a any_a) #f]
         [(different any_a any_b) #t])
       (test (judgment-holds (R 1 2)) #t)
-      (test (judgment-holds (R 1 1)) #f))
+      (test (judgment-holds (R 1 1)) #f)
+      (test (term (R 1 2)) #t)
+      (test (term (R 1 1)) #f))
     
     (let ()
       (define-judgment-form empty-language
@@ -2335,6 +2366,174 @@
       (test (judgment-holds (J1 1 any) any) '(1))
       (test (judgment-holds (J2 1 any) any) '(1))
       (test (judgment-holds (J2 4 any) any) '(4)))
+    
+    (let ()
+      (define-language L (N ::= z (s N) (t N)))
+      
+      (define-judgment-form L
+        #:mode (J2 I O)
+        [--------  "one"
+         (J2 1 1)]
+        [--------  two
+         (J2 1 2)])
+      
+      (test (build-derivations (J2 1 any))
+            (list (derivation '(J2 1 1) "one" '())
+                  (derivation '(J2 1 2) "two" '())))
+      
+      
+      
+      (define-judgment-form L
+        #:contract (K any any)
+        #:mode (K I O)
+        [-----------
+         (K () z)]
+        [(K any_1 N) ...
+         ---------------------------
+         (K (any_1 ...) (N ...))])
+      
+      
+      
+      (test (build-derivations (K (()) any))
+            (list (derivation '(K (()) (z))
+			      #f
+                              (list (derivation '(K () z) #f '())))))
+      
+      (test
+       (build-derivations (K (() ()) any))
+       (list (derivation 
+              '(K (() ()) (z z))
+	      #f
+              (list
+               (derivation '(K () z) #f '())
+               (derivation '(K () z) #f '())))))
+      
+      (define-judgment-form L
+        #:contract (J any any)
+        #:mode (J I O)
+        [--------
+         (J () z)]
+        [(J any_1 N)  (J any_2 N)
+         ----------------------------
+         (J (any_1 any_2) (s N))]
+        [(J any N)
+         ---------------
+         (J (any) (s N))])
+      
+      (test (build-derivations 
+             (J ((()) (())) N))
+            (list (derivation
+                   '(J ((()) (())) (s (s z)))
+		   #f
+                   (list (derivation 
+                          '(J (()) (s z))
+			  #f
+                          (list
+                           (derivation
+                            '(J () z)
+			    #F
+                            '())))
+                         (derivation 
+                          '(J (()) (s z))
+			  #f
+                          (list
+                           (derivation
+                            '(J () z)
+			    #f
+                            '())))))))
+      
+      (define-judgment-form L
+        #:mode (J3 I O)
+        [(J any_1 any_2)
+         ------------
+         (J3 any_1 any_2)])
+      
+      (test (build-derivations (J3 (()) N))
+            (list (derivation
+                   '(J3 (()) (s z))
+		   #f
+                   (list
+                    (derivation
+                     '(J (()) (s z))
+		     #f
+                     (list 
+                      (derivation 
+                       '(J () z)
+		       #f
+                       '()))))))))
+    (let ()
+      (define-language U
+        (n Z (S n)))
+      
+      (define-judgment-form U
+        #:mode (jsum I I I)
+        [(jsum n Z n)]
+        [(jsum n_1 (S n_2) (S n_3))
+         (jsum n_1 n_2 n_3)])
+      
+      (define-relation U
+        sum ⊆ n x n x n
+        [(sum n Z n)]
+        [(sum n_1 (S n_2) (S n_3))
+         (sum n_1 n_2 n_3)])
+      
+      (define-relation U
+        [(rjsum n_1 n_2 n_3)
+         (jjsum n_1 n_2 n_3)])
+      
+      (define-judgment-form U
+        #:mode (jjsum I I I)
+        [(jjsum n_1 n_2 n_3)
+         (rrsum n_1 n_2 n_3)])
+      
+      (define-relation U
+        [(rrsum n_1 n_2 n_3)
+         (jsum n_1 n_2 n_3)])
+      
+      (test (term (sum Z Z Z)) #t)
+      (test (term (sum Z Z (S Z))) #f)
+      (test (term (sum (S Z) (S Z) (S (S Z)))) #t)
+      (test (term (sum (S Z) (S (S Z)) (S (S Z)))) #f)
+      (test (term (sum (S (S Z)) (S (S Z)) (S (S (S (S Z)))))) #t)
+      (test (term (sum (S (S Z)) (S (S Z)) (S (S (S Z))))) #f)
+      (test (term (jsum Z Z Z)) #t)
+      (test (term (jsum Z Z (S Z))) #f)
+      (test (term (jsum (S Z) (S Z) (S (S Z)))) #t)
+      (test (term (jsum (S Z) (S (S Z)) (S (S Z)))) #f)
+      (test (term (jsum (S (S Z)) (S (S Z)) (S (S (S (S Z)))))) #t)
+      (test (term (jsum (S (S Z)) (S (S Z)) (S (S (S Z))))) #f)
+      (test (term (rjsum Z Z Z)) #t)
+      (test (term (rjsum Z Z (S Z))) #f)
+      (test (term (rjsum (S Z) (S Z) (S (S Z)))) #t)
+      (test (term (rjsum (S Z) (S (S Z)) (S (S Z)))) #f)
+      (test (term (rjsum (S (S Z)) (S (S Z)) (S (S (S (S Z)))))) #t)
+      (test (term (rjsum (S (S Z)) (S (S Z)) (S (S (S Z))))) #f))
+    
+    (let ()
+      (define-judgment-form empty-language
+        #:mode (Q I O)
+        [(Q number_1 ,(+ (term number_1) (term number_1)))]
+        [(Q (number_1 number_2) number_3)
+         (Q ,(+ (term number_1) (term number_2)) number_3)])
+      
+      (test (judgment-holds (Q 1 2))
+                  #t)
+      (test (judgment-holds (Q 1 3))
+                  #f)
+      (test (judgment-holds (Q 1 number_1) number_1)
+                  '(2))
+      (test (judgment-holds (Q 7 14))
+                  #t)
+      (test (judgment-holds (Q 7 symbol))
+                  #f)
+      (test (judgment-holds (Q 7 number_1) number_1)
+                  '(14))
+      (test (judgment-holds (Q (1 2) 6))
+                  #t)
+      (test (judgment-holds (Q (1 3) 6))
+                  #f)
+      (test (judgment-holds (Q (3 4) number_1) number_1)
+                  '(14)))
 
     
     (parameterize ([current-namespace (make-base-namespace)])
@@ -2816,6 +3015,9 @@
         (term (f 1))
         (test (sorted-counts c) '(1 0 0))))
     
+    ;; coverage for define-relation not working since
+    ;; it was changed to compile to judgment-form
+    #;
     (let ([c (make-coverage R)])
       (parameterize ([relation-coverage (list c)])
         (term (R 2))

@@ -282,6 +282,8 @@ Scheme_Env *scheme_engine_instance_init()
 
   scheme_init_logging_once();
 
+  scheme_init_compenv_symbol();
+
 #if defined(MZ_PLACES_WAITPID)
   scheme_places_start_child_signal_handler();
 #endif
@@ -1590,7 +1592,7 @@ namespace_variable_value(int argc, Scheme_Object *argv[])
   use_map = ((argc > 1) ? SCHEME_TRUEP(argv[1]) : 1);
   if ((argc > 2) && SCHEME_TRUEP(argv[2])
       && !scheme_check_proc_arity(NULL, 0, 2, argc, argv))
-    scheme_wrong_contract("namespace-variable-value", "(or/c (-> any) #f)", 1, argc, argv);
+    scheme_wrong_contract("namespace-variable-value", "(or/c (-> any) #f)", 2, argc, argv);
   if ((argc > 3) && !SCHEME_NAMESPACEP(argv[3]))
     scheme_wrong_contract("namespace-variable-value", "namespace?", 3, argc, argv);
 
@@ -2278,13 +2280,19 @@ local_get_shadower(int argc, Scheme_Object *argv[])
   uid = scheme_find_local_shadower(sym, sym_marks, env);
 
   if (!uid) {
-    /* No lexical shadower, but strip module context, if any */
-    sym = scheme_stx_strip_module_context(sym);
-    /* Add current module context, if any */
-    sym = local_module_introduce(1, &sym);
+    uid = scheme_tl_id_sym(env->genv, sym, NULL, 0, 
+                           scheme_make_integer(env->genv->phase), NULL);
+    if (!SAME_OBJ(uid, SCHEME_STX_VAL(sym))) {
+      /* has a toplevel biding via marks or context; keep it */
+    } else {
+      /* No lexical shadower, but strip module context, if any */
+      sym = scheme_stx_strip_module_context(sym);
+      /* Add current module context, if any */
+      sym = local_module_introduce(1, &sym);
 
-    if (!scheme_stx_is_clean(orig_sym))
-      sym = scheme_stx_taint(sym);
+      if (!scheme_stx_is_clean(orig_sym))
+        sym = scheme_stx_taint(sym);
+    }
 
     return sym;
   }

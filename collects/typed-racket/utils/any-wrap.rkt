@@ -1,12 +1,15 @@
 #lang racket/base
 
-(require racket/match racket/contract/base racket/contract/combinator racket/flonum racket/fixnum)
+(require racket/match racket/contract/base racket/contract/combinator
+         racket/promise)
 
 (define undef (letrec ([x x]) x))
 
 (define (traverse b)
   (define (fail v)
-    (raise-blame-error (blame-swap b) v "Attempted to use a higher-order value passed as `Any` in untyped code"))
+    (raise-blame-error 
+     (blame-swap b) v 
+     "Attempted to use a higher-order value passed as `Any` in untyped code"))
 
   (define (t v)
     (define (wrap-struct s)
@@ -44,8 +47,7 @@
       [(? (lambda (e)
             (or (number? e) (string? e) (char? e) (symbol? e)
                 (null? e) (regexp? e) (eq? undef e) (path? e)
-		(flvector? e) (flvector? e) (regexp? e)
-                (keyword? e) (bytes? e) (boolean? e) (void? e))))
+		(regexp? e) (keyword? e) (bytes? e) (boolean? e) (void? e))))
        v]
       [(cons x y) (cons (t x) (t y))]
       [(? vector? (? immutable?))
@@ -80,6 +82,10 @@
            (chaperone-procedure v (case-lambda [() (values)]
                                                [_ (fail v)]))
            (chaperone-procedure v (lambda args (fail v))))]
+      [(? promise?)
+       ;; for promises, just apply Any in the promise
+       (contract (promise/c any-wrap/c) v
+                 (blame-positive b) (blame-negative b))]
       [_ (fail v)]))
   t)
 

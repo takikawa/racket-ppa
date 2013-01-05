@@ -1,6 +1,7 @@
 #lang racket/base
 (require (for-syntax racket/base)
          racket/match
+         racket/format
          syntax/stx
          "../util/eomap.rkt"
          "deriv-util.rkt"
@@ -500,7 +501,17 @@
         ]]
     [(struct local-remark (contents))
      (R [#:reductions (list (walk/talk 'remark contents))])]
-
+    [(struct local-mess (events))
+     ;; FIXME: While it is not generally possible to parse tokens as one or more
+     ;; interrupted derivations (possibly interleaved with successful derivs),
+     ;; it should be possible to recover *some* information and display it.
+     (R [#:reductions
+         (let ([texts
+                (list (~a "Some expansion history has been lost due to a jump "
+                          "within expansion.")
+                      (~a "For example, a macro may have caught an "
+                          "exception coming from within a call to `local-expand'."))])
+           (list (walk/talk 'remark texts)))])]
     [#f
      (R)]))
 
@@ -710,12 +721,14 @@
           [#:set-syntax (append stxs old-forms)]
           [ModulePass ?forms rest]])]
     [(cons (Wrap mod:lift-end (stxs)) rest)
-     (R [#:pattern ?forms]
-        [#:when (pair? stxs)
-                [#:left-foot null]
-                [#:set-syntax (append stxs #'?forms)]
-                [#:step 'splice-module-lifts stxs]]
-        [ModulePass ?forms rest])]
+     ;; In pass2, stxs contains a mixture of terms and kind-tagged terms (pairs)
+     (let ([stxs (map (lambda (e) (if (pair? e) (car e) e)) stxs)])
+       (R [#:pattern ?forms]
+          [#:when (pair? stxs)
+                  [#:left-foot null]
+                  [#:set-syntax (append stxs #'?forms)]
+                  [#:step 'splice-module-lifts stxs]]
+          [ModulePass ?forms rest]))]
     [(cons (Wrap mod:skip ()) rest)
      (R [#:pattern (?firstS . ?rest)]
         [ModulePass ?rest rest])]

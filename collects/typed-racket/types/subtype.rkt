@@ -6,7 +6,7 @@
          (env type-name-env)
          racket/match unstable/match
          racket/function
-         unstable/lazy-require
+         racket/lazy-require
          (prefix-in c: racket/contract)
          (for-syntax racket/base syntax/parse))
 
@@ -287,7 +287,7 @@
                (subtype* A0 t t*)]
               [((List: ts) (Sequence: (list t*)))
                (subtypes* A0 ts (map (λ _ t*) ts))]
-              [((HeterogenousVector: ts) (Sequence: (list t*)))
+              [((HeterogeneousVector: ts) (Sequence: (list t*)))
                (subtypes* A0 ts (map (λ _ t*) ts))]
               [((Vector: t) (Sequence: (list t*)))
                (subtype* A0 t t*)]
@@ -416,11 +416,15 @@
               [((Set: t) (Set: t*)) (subtype* A0 t t*)]
               [((Channel: _) (ChannelTop:)) A0]
               [((Vector: _) (VectorTop:)) A0]
-              [((HeterogenousVector: _) (VectorTop:)) A0]
-              [((HeterogenousVector: (list e ...)) (Vector: e*))
+              [((HeterogeneousVector: _) (VectorTop:)) A0]
+              [((HeterogeneousVector: (list e ...)) (Vector: e*))
                (if (andmap (lambda (e0) (type-equal? e0 e*)) e) A0 (fail! s t))]
               [((MPair: _ _) (MPairTop:)) A0]
               [((Hashtable: _ _) (HashtableTop:)) A0]
+              ;; TODO: subtyping for two `Prompt-Tagof`s with recursive types
+              ;;       may be rejected unnecessarily
+              [((Prompt-Tagof: _ _) (Prompt-TagTop:)) A0]
+              [((Continuation-Mark-Keyof: _) (Continuation-Mark-KeyTop:)) A0]
               ;; subtyping on structs follows the declared hierarchy
               [((Struct: nm (? Type? parent) _ _ _ _) other)
                ;(dprintf "subtype - hierarchy : ~a ~a ~a\n" nm parent other)

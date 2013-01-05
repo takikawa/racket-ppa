@@ -3,6 +3,7 @@
           (except-in "utils.rkt" url)
           "struct-hierarchy.rkt" 
           (for-label scribble/manual-struct
+                     racket/serialize
                      file/convertible
                      setup/main-collects
                      scriblib/render-cond
@@ -258,6 +259,9 @@ full tag, where the symbol part is supplied automatically. For
 example, @racket[section] and @racket[secref] both accept a string
 ``tag'', where @racket['part] is implicit.
 
+The @racketmodname[scribble/tag] library provides functions for constructing
+@tech{tags}.
+
 @; ------------------------------------------------------------------------
 
 @section[#:tag "style"]{Styles}
@@ -400,7 +404,12 @@ The recognized @tech{style properties} are as follows:
        not @racket[""] may be used when rendering a document; at a
        minimum, a non-@racket[""] version is rendered when it is
        attached to a part representing the whole document. The default
-       version for a document is @racket[(version)].}
+       version for a document is @racket[(version)]. In rendered form,
+       the version is normally prefixed with the word ``Version,'' but
+       this formatting can be controlled by overriding
+       @tt{.version:before} and/or @tt{.versionNoNav:before} in CSS
+       for HTML rendering or by redefining the @tt{\SVersionBefore}
+       macro for Latex rendering (see @secref["config"]).}
 
  @item{@racket[document-date] structure --- A date for the part,
        normally used on a document's main part for for Latex
@@ -1152,8 +1161,8 @@ or @racket[style] structure.}
 
 Returns @racket[#t] if @racket[v] is acceptable as a link
 @techlink{tag}, which is a list containing a symbol and either a
-string, a @racket[generated-tag] instance, or a list (of arbitrary
-values).}
+string, a @racket[generated-tag] instance, or a non-empty list
+of @racket[serializable?] values.}
 
 
 @defstruct[generated-tag ()]{
@@ -1188,7 +1197,9 @@ Returns the width in characters of the given @tech{content}.
 Returns the width in characters of the given @tech{block}.}
 
 
-@defstruct[collect-info ([ht any/c] [ext-ht any/c] [parts any/c] 
+@defstruct[collect-info ([ht any/c] [ext-ht any/c] 
+                         [ext-demand (tag? collect-info? . -> . any/c)]
+                         [parts any/c] 
                          [tags any/c] [gen-prefix any/c] 
                          [relatives any/c] 
                          [parents (listof part?)])]{

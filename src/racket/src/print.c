@@ -64,6 +64,20 @@ ROSYM Scheme_Object *qq_ellipses;
 
 #define REASONABLE_QQ_DEPTH (1 << 29)
 
+
+/* notdisplay
+
+enum NOTDISPLAY {
+ NOTDISPLAY_DISPLAY = 0,
+ NOTDISPLAY_WRITE = 1,
+ NOTDISPLAY_PRINT = 2,
+ NOTDISPLAY_AS_EXPRESSION = 3,
+};
+
+*/
+
+
+
 /* locals */
 #define MAX_PRINT_BUFFER 500
 
@@ -121,6 +135,16 @@ static void print_vector(Scheme_Object *vec, int notdisplay, int compact,
                          Scheme_Marshal_Tables *mt,
 			 PrintParams *pp,
                          int as_prefab);
+static void print_flvector(Scheme_Object *vec, int notdisplay, int compact, 
+                           Scheme_Hash_Table *ht, 
+                           Scheme_Marshal_Tables *mt,
+                           PrintParams *pp,
+                           int as_prefab);
+static void print_fxvector(Scheme_Object *vec, int notdisplay, int compact, 
+                           Scheme_Hash_Table *ht, 
+                           Scheme_Marshal_Tables *mt,
+                           PrintParams *pp,
+                           int as_prefab);
 static void print_char(Scheme_Object *chobj, int notdisplay, PrintParams *pp);
 static char *print_to_string(Scheme_Object *obj, intptr_t * volatile len, int write,
 			     Scheme_Object *port, intptr_t maxl, 
@@ -145,6 +169,8 @@ static Scheme_Object *writable_struct_subs(Scheme_Object *s, int for_write, Prin
    (SCHEME_PAIRP(obj) \
     || SCHEME_MUTABLE_PAIRP(obj) \
     || SCHEME_CHAPERONE_VECTORP(obj) \
+    || SCHEME_FLVECTORP(obj) \
+    || SCHEME_FXVECTORP(obj) \
     || (qk(pp->print_box, 1) && SCHEME_CHAPERONE_BOXP(obj)) \
     || (qk(pp->print_struct  \
 	   && SCHEME_CHAPERONE_STRUCTP(obj) \
@@ -510,8 +536,9 @@ static int check_cycles(Scheme_Object *obj, int for_write, Scheme_Hash_Table *ht
       || SCHEME_MUTABLE_PAIRP(obj)
       || (pp->print_box && SCHEME_CHAPERONE_BOXP(obj))
       || SCHEME_CHAPERONE_VECTORP(obj)
-      || ((SAME_TYPE(t, scheme_structure_type)
-	   || SAME_TYPE(t, scheme_proc_struct_type))
+      || SCHEME_FLVECTORP(obj)
+      || SCHEME_FXVECTORP(obj)
+      || (SCHEME_CHAPERONE_STRUCTP(obj)
           && ((pp->print_struct 
 	       && PRINTABLE_STRUCT(obj, pp))
 	      || scheme_is_writable_struct(obj)))
@@ -566,8 +593,9 @@ static int check_cycles(Scheme_Object *obj, int for_write, Scheme_Hash_Table *ht
       if ((for_write < 3) && res)
 	return res;
     }
-  } else if (SAME_TYPE(t, scheme_structure_type)
-	     || SAME_TYPE(t, scheme_proc_struct_type)) {
+  } else if (SCHEME_FLVECTORP(obj) || SCHEME_FXVECTORP(obj)) {
+    res = 0x1; /* escape for qq printing */
+  } else if (SCHEME_CHAPERONE_STRUCTP(obj)) {
     if (scheme_is_writable_struct(obj)) {
       if (pp->print_unreadable) {
         res = check_cycles(writable_struct_subs(obj, for_write, pp), for_write, ht, pp);
@@ -589,7 +617,12 @@ static int check_cycles(Scheme_Object *obj, int for_write, Scheme_Hash_Table *ht
         res = 0;
     } else {
       /* got here => printable */
-      int i = SCHEME_STRUCT_NUM_SLOTS(obj);
+      int i;
+
+      if (SCHEME_CHAPERONEP(obj))
+        i = SCHEME_STRUCT_NUM_SLOTS(SCHEME_CHAPERONE_VAL(obj));
+      else
+        i = SCHEME_STRUCT_NUM_SLOTS(obj);
 
       if ((for_write >= 3) && !SCHEME_PREFABP(obj))
         res = 0x1;
@@ -597,7 +630,11 @@ static int check_cycles(Scheme_Object *obj, int for_write, Scheme_Hash_Table *ht
         res = 0;
       while (i--) {
 	if (scheme_inspector_sees_part(obj, pp->inspector, i)) {
-	  res2 = check_cycles(((Scheme_Structure *)obj)->slots[i], for_write, ht, pp);
+          if (SCHEME_CHAPERONEP(obj))
+            val = scheme_struct_ref(obj, i);
+          else
+            val = ((Scheme_Structure *)obj)->slots[i];
+	  res2 = check_cycles(val, for_write, ht, pp);
           res |= res2;
           if ((for_write < 3) && res)
             return res;
@@ -766,6 +803,8 @@ static int check_cycles_fast(Scheme_Object *obj, PrintParams *pp, int *fast_chec
       cycle = -1;
   } else if (SCHEME_CHAPERONEP(obj))
     cycle = -1; /* no fast checks for chaperones */
+  else if ((write >= 3) && (SCHEME_FLVECTORP(obj) || SCHEME_FXVECTORP(obj)))
+    cycle = -1; /* needs unquote */
   else
     cycle = 0;
 
@@ -867,7 +906,12 @@ static void setup_graph_table(Scheme_Object *obj, int for_write, Scheme_Hash_Tab
 	setup_graph_table(obj, for_write, ht, counter, pp);
       }
     } else {
-      int i = SCHEME_STRUCT_NUM_SLOTS(obj);
+      int i;
+
+      if (SCHEME_CHAPERONEP(obj))
+        i = SCHEME_STRUCT_NUM_SLOTS(SCHEME_CHAPERONE_VAL(obj));
+      else
+        i = SCHEME_STRUCT_NUM_SLOTS(obj);
 
       while (i--) {
 	if (scheme_inspector_sees_part(obj, pp->inspector, i))
@@ -1865,15 +1909,15 @@ static int compare_modules(const void *_am, const void *_bm)
   Scheme_Object *a = ((Module_And_Offset *)_am)->mod;
   Scheme_Object *b = ((Module_And_Offset *)_bm)->mod;
   intptr_t i, alen, blen;
-  char *as, *bs;
+  unsigned char *as, *bs;
 
   a = SCHEME_CAR(a);
   b = SCHEME_CAR(b);
 
   alen = SCHEME_BYTE_STRLEN_VAL(a);
-  blen = SCHEME_BYTE_STRLEN_VAL(a);
-  as = SCHEME_BYTE_STR_VAL(a);
-  bs = SCHEME_BYTE_STR_VAL(b);
+  blen = SCHEME_BYTE_STRLEN_VAL(b);
+  as = (unsigned char *)SCHEME_BYTE_STR_VAL(a);
+  bs = (unsigned char *)SCHEME_BYTE_STR_VAL(b);
 
   for (i = 0; (i < alen) && (i < blen); i++) {
     if (as[i] != bs[i])
@@ -2163,7 +2207,7 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 	  print_this_string(pp, (char *)s, 0, 1);
 	} else {
           /* Make sure it's a fixnum on all platforms... */
-          if ((v >= -1073741824) && (v <= 1073741823)) {
+          if (IN_FIXNUM_RANGE_ON_ALL_PLATFORMS(v)) {
             print_compact(pp, CPT_INT);
             print_compact_number(pp, v);
           } else {
@@ -2211,6 +2255,18 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
     {
       notdisplay = to_quoted(obj, pp, notdisplay);
       print_vector(obj, notdisplay, compact, ht, mt, pp, 0);
+      closed = 1;
+    }
+  else if (SCHEME_FLVECTORP(obj))
+    {
+      notdisplay = to_quoted(obj, pp, notdisplay);
+      print_flvector(obj, notdisplay, compact, ht, mt, pp, 0);
+      closed = 1;
+    }
+  else if (SCHEME_FXVECTORP(obj))
+    {
+      notdisplay = to_quoted(obj, pp, notdisplay);
+      print_fxvector(obj, notdisplay, compact, ht, mt, pp, 0);
       closed = 1;
     }
   else if ((compact || pp->print_box) && SCHEME_CHAPERONE_BOXP(obj))
@@ -2898,10 +2954,10 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
       if (idx) {
         print_symtab_ref(pp, idx);
       } else {
-	Module_Variable *mv;
+	Module_Variable *mv = (Module_Variable *)obj;
+        int flags = SCHEME_MODVAR_FLAGS(mv);
 
 	print_compact(pp, CPT_MODULE_VAR);
-	mv = (Module_Variable *)obj;
         if (SAME_TYPE(SCHEME_TYPE(mv->modidx), scheme_resolved_module_path_type)
             && SCHEME_SYMBOLP(SCHEME_PTR_VAL(mv->modidx))) {
           print(SCHEME_PTR_VAL(mv->modidx), notdisplay, 1, ht, mt, pp);
@@ -2909,7 +2965,11 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
           print(mv->modidx, notdisplay, 1, ht, mt, pp);
         }
 	print(mv->sym, notdisplay, 1, ht, mt, pp);
-        if (((Module_Variable *)obj)->mod_phase) {
+        print(mv->shape ? mv->shape : scheme_false, notdisplay, 1, ht, mt, pp);
+        if (flags & 0x3) {
+          print_compact_number(pp, -3-(flags&0x3));
+        }
+        if (mv->mod_phase) {
           print_compact_number(pp, -2);
           print_compact_number(pp, mv->mod_phase);
         }
@@ -3005,12 +3065,14 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 
       if (SCHEME_LET_EVAL_TYPE(lo) & LET_ONE_UNUSED)
         print_compact(pp, CPT_LET_ONE_UNUSED);
-      else if (SCHEME_LET_EVAL_TYPE(lo) & LET_ONE_FLONUM)
-        print_compact(pp, CPT_LET_ONE_FLONUM);
+      else if (SCHEME_LET_ONE_TYPE(lo))
+        print_compact(pp, CPT_LET_ONE_TYPED);
       else
         print_compact(pp, CPT_LET_ONE);
       print(scheme_protect_quote(lo->value), notdisplay, 1, NULL, mt, pp);
       closed = print(scheme_protect_quote(lo->body), notdisplay, 1, NULL, mt, pp);
+      if (SCHEME_LET_ONE_TYPE(lo))
+        print_compact_number(pp, SCHEME_LET_ONE_TYPE(lo));
     }
   else if (compact && SAME_TYPE(SCHEME_TYPE(obj), scheme_branch_type))
     {
@@ -3695,67 +3757,80 @@ print_pair(Scheme_Object *pair, int notdisplay, int compact,
   }
 }
 
-static void
-print_vector(Scheme_Object *vec, int notdisplay, int compact, 
-	     Scheme_Hash_Table *ht, 
-             Scheme_Marshal_Tables *mt,
-	     PrintParams *pp,
-             int as_prefab)
-{
-  int i, size, common = 0;
-  Scheme_Object **elems, *elem;
+#define FUNC_NAME print_vector
+#define DEFINEEXTRA
+#define ELMS_TYPE Scheme_Object **
+#define ELM_TYPE Scheme_Object *
+#define DO_COMPACT() do { \
+    print_compact(pp, CPT_VECTOR); \
+    print_compact_number(pp, size); \
+} while(0);
+#define DO_VEC_SIZE() do { \
+  if (SCHEME_VECTORP(vec)) \
+    size = SCHEME_VEC_SIZE(vec); \
+  else \
+    size = SCHEME_VEC_SIZE(SCHEME_CHAPERONE_VAL(vec)); \
+} while(0);
+#define DO_ELMS_SELECTOR() do { \
+    if (SCHEME_VECTORP(vec)) \
+      elems = SCHEME_VEC_ELS(vec); \
+    else \
+      elems = SCHEME_VEC_ELS(SCHEME_CHAPERONE_VAL(vec)); \
+} while(0);
+#define DO_ELM_SELECTOR() do { \
+    if (SCHEME_VECTORP(vec)) \
+      elem = SCHEME_VEC_ELS(vec)[i]; \
+    else \
+      elem = scheme_chaperone_vector_ref(vec, i); \
+} while(0);
+#define F_0 print_utf8_string(pp, "#0(", 0, 3)
+#define F_D sprintf(buffer, "#%d(", size)
+#define F_VECTOR print_utf8_string(pp, "(vector ", 0, 8)
+#define F_ print_utf8_string(pp, "#(", 0, 2)
+#define PRINT_ELM() do {\
+  print(elem, notdisplay, compact, ht, mt, pp); \
+} while(0);
+#include "print_vector.inc"
 
-  if (SCHEME_VECTORP(vec))
-    size = SCHEME_VEC_SIZE(vec);
-  else
-    size = SCHEME_VEC_SIZE(SCHEME_CHAPERONE_VAL(vec));
+#define FUNC_NAME print_flvector
+#define DEFINEEXTRA int used_buffer = 0; char buffer[100];
+#define ELMS_TYPE double *
+#define ELM_TYPE double
+#define DO_COMPACT() do { \
+    print_escaped(pp, notdisplay, vec, ht, mt, 1); \
+    return; \
+} while(0);
+#define DO_VEC_SIZE() size = SCHEME_FLVEC_SIZE(vec);
+#define DO_ELMS_SELECTOR() elems = SCHEME_FLVEC_ELS(vec);
+#define DO_ELM_SELECTOR()  elem = SCHEME_FLVEC_ELS(vec)[i];
+#define F_0 print_utf8_string(pp, "#fl0(", 0, 5)
+#define F_D sprintf(buffer, "#fl%d(", size)
+#define F_VECTOR print_utf8_string(pp, "(flvector ", 0, 10)
+#define F_ print_utf8_string(pp, "#fl(", 0, 4)
+#define PRINT_ELM() do {\
+  print_utf8_string(pp, scheme_double_to_string(elem, buffer, 100, 0, &used_buffer), 0, -1); \
+} while(0);
+#include "print_vector.inc"
 
-  if (compact) {
-    print_compact(pp, CPT_VECTOR);
-    print_compact_number(pp, size);
-  } else {
-    if (SCHEME_VECTORP(vec))
-      elems = SCHEME_VEC_ELS(vec);
-    else
-      elems = SCHEME_VEC_ELS(SCHEME_CHAPERONE_VAL(vec));
-    for (i = size; i--; common++) {
-      if (!i || (elems[i] != elems[i - 1]))
-	break;
-    }
-    elems = NULL; /* Precise GC: because VEC_ELS is not aligned */
-    
-    if (as_prefab) {
-      print_utf8_string(pp, "#s(", 0, 3);
-    } else if (notdisplay && pp->print_vec_shorthand && (notdisplay != 3)) {
-      if (size == 0) {
-	print_utf8_string(pp, "#0(", 0, 3);
-      } else {
-	char buffer[100];
-	sprintf(buffer, "#%d(", size);
-	print_utf8_string(pp, buffer, 0, -1);
-	size -= common;
-      }
-    } else if (notdisplay == 3)
-      print_utf8_string(pp, "(vector ", 0, 8);
-    else
-      print_utf8_string(pp, "#(", 0, 2);
-  }
-
-  for (i = 0; i < size; i++) {
-    if (SCHEME_VECTORP(vec))
-      elem = SCHEME_VEC_ELS(vec)[i];
-    else
-      elem = scheme_chaperone_vector_ref(vec, i);
-    print(elem, notdisplay, compact, ht, mt, pp);
-    if (i < (size - 1)) {
-      if (!compact)
-	print_utf8_string(pp, " ", 0, 1);
-    }
-  }
-
-  if (!compact)
-    print_utf8_string(pp, ")", 0, 1);
-}
+#define FUNC_NAME print_fxvector
+#define DEFINEEXTRA
+#define ELMS_TYPE Scheme_Object **
+#define ELM_TYPE Scheme_Object *
+#define DO_COMPACT() do { \
+    print_escaped(pp, notdisplay, vec, ht, mt, 1); \
+    return; \
+} while(0);
+#define DO_VEC_SIZE() size = SCHEME_FXVEC_SIZE(vec);
+#define DO_ELMS_SELECTOR() elems = SCHEME_FXVEC_ELS(vec);
+#define DO_ELM_SELECTOR()  elem = SCHEME_FXVEC_ELS(vec)[i];
+#define F_0 print_utf8_string(pp, "#fx0(", 0, 5)
+#define F_D sprintf(buffer, "#fx%d(", size)
+#define F_VECTOR print_utf8_string(pp, "(fxvector ", 0, 10)
+#define F_ print_utf8_string(pp, "#fx(", 0, 4)
+#define PRINT_ELM() do {\
+  print(elem, notdisplay, compact, ht, mt, pp); \
+} while(0);
+#include "print_vector.inc"
 
 static void
 print_char(Scheme_Object *charobj, int notdisplay, PrintParams *pp)

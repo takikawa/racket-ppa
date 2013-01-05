@@ -14,11 +14,11 @@
          ;; avoid the other dependencies of `racket/place`
          '#%place
          unstable/function
-         unstable/lazy-require
+         racket/lazy-require
          (except-in racket/contract/base ->* -> one-of/c)
          (prefix-in c: racket/contract/base)
          (for-syntax racket/base syntax/parse racket/list)
-         (for-template racket/base racket/contract/base racket/promise racket/tcp racket/flonum racket/udp)
+         (for-template racket/base racket/contract/base racket/promise racket/tcp racket/flonum racket/udp '#%place)
          racket/pretty racket/udp
          ;; for base type predicates
          racket/promise racket/tcp racket/flonum)
@@ -144,7 +144,6 @@
                (conjoin  compiled-expression? (negate compiled-module-expression?))
              #'-Compiled-Non-Module-Expression))
 (define -Compiled-Expression (Un -Compiled-Module-Expression -Compiled-Non-Module-Expression))
-(define -Prompt-Tag (make-Base 'Prompt-Tag #'continuation-prompt-tag? continuation-prompt-tag? #'-Prompt-Tag))
 (define -Cont-Mark-Set (make-Base 'Continuation-Mark-Set #'continuation-mark-set? continuation-mark-set? #'-Cont-Mark-Set))
 (define -Path (make-Base 'Path #'path? path? #'-Path))
 (define -OtherSystemPath (make-Base 'OtherSystemPath
@@ -214,7 +213,7 @@
 (define -Special-Comment
   (make-Base 'Special-Comment #'special-comment? special-comment? #'-Special-Comment))
 
-(define -Custodian (make-Base 'Custodian #'custodian? custodian? #'Custodian))
+(define -Custodian (make-Base 'Custodian #'custodian? custodian? #'-Custodian))
 
 (define -Parameterization (make-Base 'Parameterization #'parameterization? parameterization? #'-Parameterization))
 
@@ -285,6 +284,7 @@
 (define -car (make-CarPE))
 (define -cdr (make-CdrPE))
 (define -syntax-e (make-SyntaxPE))
+(define -force (make-ForcePE))
 
 
 ;; convenient syntax

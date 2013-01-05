@@ -3,6 +3,7 @@
                  define-namespace-anchor
                  namespace-anchor->empty-namespace
                  make-base-empty-namespace)
+           (only scheme/base) (only scheme/class) ; so that `make-gui-namespace' attaches them
            racket/class
            racket/draw racket/snip
            file/resource
@@ -116,6 +117,7 @@
 	     event-dispatch-handler
 	     eventspace?
 	     flush-display
+             get-current-mouse-state
 	     get-highlight-background-color
              get-highlight-text-color
 	     get-the-editor-data-class-list

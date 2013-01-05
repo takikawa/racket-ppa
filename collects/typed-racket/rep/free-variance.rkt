@@ -3,7 +3,7 @@
          racket/match
          racket/set
          (for-syntax racket/base)
-         unstable/lazy-require
+         racket/lazy-require
          (contract-req)) 
 
 ;; Ugly hack - should use units
@@ -46,7 +46,7 @@
   (match var
    ((== Covariant) #'Covariant)
    ((== Contravariant) #'Contravariant)
-   ((== Invariant) #'Contravariant)
+   ((== Invariant) #'Invariant)
    ((== Constant) #'Constant)
    ((== Dotted) #'Dotted)))
 

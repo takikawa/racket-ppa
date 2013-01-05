@@ -64,6 +64,9 @@
 
 (application:current-app-name (string-constant drscheme))
 
+(preferences:set-default 'drracket:logger-receiver-string "error debug@GC debug@PLaneT" string?)
+(preferences:set-default 'drracket:logger-scroll-to-bottom? #t boolean?)
+
 (preferences:set-default 'drracket:submodules-to-choose-from 
                          '((main) (test)) 
                          (cons/c (list/c 'main)
@@ -72,6 +75,7 @@
 (preferences:set-default 'drracket:defs/ints-labels #t boolean?)
 
 (drr:set-default 'drracket:language-dialog:hierlist-default #f (λ (x) (or (not x) (and (list? x) (andmap string? x)))))
+(preferences:set-default 'drracket:language-dialog:teaching-hierlist-default #f (λ (x) (or (not x) (and (list? x) (andmap string? x)))))
 
 (drr:set-default 'drracket:create-executable-gui-type 'stand-alone (λ (x) (memq x '(launcher stand-alone distribution))))
 (drr:set-default 'drracket:create-executable-gui-base 'racket (λ (x) (memq x '(racket gracket))))
@@ -97,10 +101,10 @@
 (drr:set-default 'drracket:show-line-numbers? #f boolean?)
 
 (drr:set-default 'drracket:toolbar-state 
-                         '(#f . top)
-                         (λ (x) (and (pair? x)
-                                     (boolean? (car x))
-                                     (memq (cdr x) '(left top right)))))
+                 '(#f . top)
+                 (λ (x) (and (pair? x)
+                             (boolean? (car x))
+                             (memq (cdr x) '(left top top-no-label right)))))
 
 (drr:set-default 'drracket:htdp:last-set-teachpacks
                          '() 
@@ -172,11 +176,11 @@
   (let-values ([(w h) (get-display-size)])
     (set! frame-width (min frame-width (- w window-trimming-upper-bound-width)))
     (set! frame-height (min frame-height (- h window-trimming-upper-bound-height))))
-  (frame:setup-size-pref 'drracket:unit-window-size 
+  (frame:setup-size-pref 'drracket:window-size 
                          frame-width
                          frame-height 
                          #:position-preferences
-                         'drracket:unit-window-position))
+                         'drracket:window-position))
 
 (drr:set-default 'drracket:backtrace-window-width 400 number?)
 (drr:set-default 'drracket:backtrace-window-height 300 number?)
@@ -505,8 +509,8 @@
 
   (preferences:set-default 'drracket:online-compilation-default-on #t boolean?)
   (preferences:set-default 'drracket:online-expansion:read-in-defs-errors 
-                           'corner
-                           (or/c 'margin 'gold 'corner))
+                           'margin
+                           (or/c 'margin 'gold))
   (preferences:set-default 'drracket:online-expansion:variable-errors 
                            'margin
                            (or/c 'margin 'gold))

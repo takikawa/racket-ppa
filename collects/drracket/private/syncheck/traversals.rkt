@@ -630,7 +630,7 @@
         [else (eq? var id)]))
     
     (define (phaseless-spec->raw-module-path stx)
-      (syntax-case* stx (only prefix all-expect prefix-all-except rename) symbolic-compare?
+      (syntax-case* stx (only prefix all-except prefix-all-except rename) symbolic-compare?
         [(only raw-module-path id ...) #'raw-module-path]
         [(prefix prefix-id raw-module-path) #'raw-module-path]
         [(all-except raw-module-path id ...) #'raw-module-path]
@@ -1134,10 +1134,22 @@
                                   (for/or ([(level id-set) (in-hash phase-to-map)])
                                     (get-ids id-set new-id))))))))
                       #t))
-               (send defs-text syncheck:add-rename-menu
-                     id-as-sym
-                     loc-lst
-                     name-dup?)))))))
+               (define max-to-send-at-once 30)
+               (let loop ([loc-lst loc-lst]
+                          [len (length loc-lst)])
+                 (cond
+                   [(<= len max-to-send-at-once)
+                    (send defs-text syncheck:add-rename-menu
+                          id-as-sym
+                          loc-lst
+                          name-dup?)]
+                   [else
+                    (send defs-text syncheck:add-rename-menu
+                          id-as-sym
+                          (take loc-lst max-to-send-at-once)
+                          name-dup?)
+                    (loop (drop loc-lst max-to-send-at-once)
+                          (- len max-to-send-at-once))]))))))))
     
     ;; remove-duplicates-stx : (listof syntax[original]) -> (listof syntax[original])
     ;; removes duplicates, based on the source locations of the identifiers

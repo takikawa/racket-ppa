@@ -67,3 +67,38 @@
 
 (test-case "heap random dense"
   (rand-test 20 100 50 100))
+
+(test-equal? "in-heap"
+  (for/list ([x (in-heap (mkheap))]) x)
+  '(2 4 6 8 10))
+(test-equal? "post in-heap count"
+   (let* ([h (mkheap)]
+          [lst (for/list ([x (in-heap h)]) x)])
+     (heap-count h))
+   (heap-count (mkheap)))
+(test-equal? "in-heap/consume!"
+  (for/list ([x (in-heap/consume! (mkheap))]) x)
+  '(2 4 6 8 10))
+(test-equal? "post in-heap/consume! count"
+   (let* ([h (mkheap)]
+          [lst (for/list ([x (in-heap/consume! h)]) x)])
+     (heap-count h))
+   0)
+
+(test-equal? "heap-sort"
+  (let ([v (vector 3 4 2 5 1)])
+    (heap-sort! v <=)
+    v)
+  '#(1 2 3 4 5))
+
+(test-equal? "heap-sort (old arg order)"
+  (let ([v (vector 3 4 2 5 1)])
+    (heap-sort! <= v)
+    v)
+  '#(1 2 3 4 5))
+
+(let* ([l (for/list ([i 1000]) (random 1000))]
+       [v (list->vector l)])
+  (test-equal? "heap-sort (random)"
+    (begin (heap-sort! v <=) (vector->list v))
+    (sort l <)))

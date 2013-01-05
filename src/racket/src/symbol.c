@@ -324,8 +324,8 @@ scheme_init_symbol (Scheme_Env *env)
   Scheme_Object *p;
 
   p = scheme_make_folding_prim(symbol_p_prim, "symbol?", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
-                                | SCHEME_PRIM_IS_OMITABLE);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
+                                                            | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("symbol?", p, env);
 
   p = scheme_make_folding_prim(symbol_unreadable_p_prim, "symbol-unreadable?", 1, 1, 1);
@@ -356,7 +356,7 @@ make_a_symbol(const char *name, uintptr_t len, int kind)
 {
   Scheme_Symbol *sym;
 
-  sym = (Scheme_Symbol *)scheme_malloc_atomic_tagged(sizeof(Scheme_Symbol) + len - 3);
+  sym = (Scheme_Symbol *)scheme_malloc_atomic_tagged(sizeof(Scheme_Symbol) + len + 1 - mzFLEX4_DELTA);
 
   sym->iso.so.type = scheme_symbol_type;
   MZ_OPT_HASH_KEY(&sym->iso) = kind;

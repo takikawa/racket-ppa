@@ -308,7 +308,10 @@
 (define-sequence-syntax *in-set
   (lambda () #'in-set)
   (lambda (stx)
-    (syntax-case stx ()
+    (syntax-case stx (set)
+      ;; Set construction is costly, so specialize empty/singleton cases
+      [[(id) (_ (set))] #'[(id) (:do-in ([(id) #f]) #t () #f () #f #f ())]]
+      [[(id) (_ (set expr))] #'[(id) (:do-in ([(id) expr]) #t () #t () #t #f ())]]
       [[(id) (_ st)]
        #`[(id)
           (:do-in

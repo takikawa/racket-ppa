@@ -1,7 +1,12 @@
-#lang racket
+#lang racket/base
 
-(require (for-syntax syntax/parse)
-         srfi/13 htdp/error
+(require racket/function
+         racket/file
+         racket/string
+         racket/local
+         (for-syntax racket/base
+                     syntax/parse)
+         htdp/error
          (rename-in lang/prim (first-order->higher-order f2h))
          "private/csv/csv.rkt")
 
@@ -29,6 +34,9 @@
  
  read-words/line ;; String -> [Listof [Listof String]]
  ;; read the specified file as a list of lines, each line as a list of words
+ 
+ read-words-and-numbers/line ;; String -> [Listof [Listof (Union Number String)]]
+ ;; read the specified file as a list of lines, each line as a list of words and numbers 
  
  read-csv-file ;; String -> [Listof [Listof (U Any)]]
  ;; -- f must be formated as a a file with comma-separated values (Any)
@@ -71,6 +79,12 @@
   ;; String -> [Listof [Listof String]]
   ;; read the specified file as a list of lines, each line as a list of words
   (read-words/line/internal f cons))
+
+(def-reader (read-words-and-numbers/line f)
+  ;; String -> [Listof [Listof (U String Number)]]
+  ;; read the specified file as a list of lines, each line as a list of words and numbers
+  (read-words/line/internal f (lambda (line1 r)
+                                (cons (for/list ((t (in-list line1))) (or (string->number t) t)) r))))
 
 (define (read-words/line/internal f combine)
   (define lines (read-chunks f *read-line (lambda (x) x)))
@@ -142,7 +156,7 @@
 
 ;; String (-> X) ([Listof X] -> [Listof X]) -> [Listof X]
 ;; read a file as a list of X where process-accu is applied to accu when eof
-(define (read-chunks f read-chunk process-accu)
+(define (read-chunks f read-chunk process-accu) 
   (with-input-from-file f 
     #:mode 'text
     (lambda ()
@@ -163,10 +177,13 @@
 ;; split : String [Regexp] -> [Listof String]
 ;; splits a string into a list of substrings using the given delimiter
 ;; (white space by default)
+;;ELI: This shouldn't be needed now, it can use `string-split' as is
+;; (also, the trimming doesn't make sense if the pattern is not a
+;; space--?)
 (define (split str [ptn #rx"[ ]+"])
-  (regexp-split ptn (string-trim-both str)))
+  (regexp-split ptn (string-trim str)))
 
 ;; split-lines : String -> Listof[String]
 ;; splits a string with newlines into a list of lines
 (define (split-lines str)
-  (map string-trim-both (split str "\r*\n")))
+  (map string-trim (split str "\r*\n")))

@@ -161,6 +161,7 @@ void (*scheme_log_w_data)(Scheme_Logger *logger, int level, int flags,
                                  Scheme_Object *data,
                                  const char *msg, ...);
 void (*scheme_log_message)(Scheme_Logger *logger, int level, char *buffer, intptr_t len, Scheme_Object *data);
+void (*scheme_log_name_message)(Scheme_Logger *logger, int level, Scheme_Object *name, char *buffer, intptr_t len, Scheme_Object *data);
 void (*scheme_log_abort)(char *buffer);
 void (*scheme_log_warning)(char *buffer);
 void (*scheme_glib_log_message)(const char *log_domain, int log_level, const char *message, void *user_data);
@@ -278,6 +279,7 @@ Scheme_Object *(*scheme_tail_eval_expr)(Scheme_Object *obj);
 void (*scheme_set_tail_buffer_size)(int s);
 Scheme_Object *(*scheme_force_value)(Scheme_Object *);
 Scheme_Object *(*scheme_force_one_value)(Scheme_Object *);
+void (*scheme_ignore_result)(Scheme_Object *);
 MZ_MARK_STACK_TYPE (*scheme_set_cont_mark)(Scheme_Object *key, Scheme_Object *val);
 void (*scheme_push_continuation_frame)(Scheme_Cont_Frame_Data *);
 void (*scheme_pop_continuation_frame)(Scheme_Cont_Frame_Data *);
@@ -453,6 +455,7 @@ Scheme_Object *(*scheme_make_closed_prim_w_everything)(Scheme_Closed_Prim *fun,
 void (*scheme_prim_is_method)(Scheme_Object *o);
 Scheme_Object *(*scheme_make_pair)(Scheme_Object *car, Scheme_Object *cdr);
 Scheme_Object *(*scheme_make_mutable_pair)(Scheme_Object *car, Scheme_Object *cdr);
+Scheme_Object *(*scheme_make_list_pair)(Scheme_Object *car, Scheme_Object *cdr);
 Scheme_Object *(*scheme_make_raw_pair)(Scheme_Object *, Scheme_Object *);
 Scheme_Object *(*scheme_make_byte_string)(const char *chars);
 Scheme_Object *(*scheme_make_sized_byte_string)(char *chars, intptr_t len, int copy);

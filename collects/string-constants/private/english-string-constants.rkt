@@ -120,6 +120,7 @@ please adhere to these guidelines:
  (stop "Stop")   
  (&stop "&Stop") ;; for use in button and menu item labels, with short cut.
  (are-you-sure-delete? "Are you sure you want to delete ~a?") ;; ~a is a filename or directory name
+ (are-you-sure-replace? "Are you sure you want to replace ~a?") ;; ~a is a filename or directory name
  (ignore "Ignore")
  (revert "Revert")
 
@@ -240,10 +241,12 @@ please adhere to these guidelines:
   
  (jump-to-error "Jump to Error")
  (online-expansion-is-disabled "Background expansion is disabled")
- ;; these next two show up in the bar along the bottom of the drracket window
+ ; these next two show up in the bar along the bottom of the drracket window
  (online-expansion-pending "Background expansion pending ...")
  (online-expansion-finished "Background expansion finished") ;; note: there may still be errors in this case
-  
+ ; the next two show up in a menu when you click on the circle in the bottom right corner
+ (disable-online-expansion "Disable background expansion")
+ (enable-online-expansion "Enable background expansion")
  ;; the online expansion preferences pane
  (online-expansion "Background expansion") ;; title of prefs pane
  ; the different kinds of errors
@@ -251,9 +254,10 @@ please adhere to these guidelines:
  (online-expansion-show-variable-errors-as "Show unbound identifier errors")
  (online-expansion-show-other-errors-as "Show other errors")
  ; locations the errors can be shown
- (online-expansion-error-in-corner "in the corner of the window")
  (online-expansion-error-gold-highlight "with gold highlighting")
  (online-expansion-error-margin "in the margin")
+ ; the label of a preference in the (string-constant online-expansion) section
+ (show-arrows-on-mouseover "Show binding and tail-position arrows on mouseover")
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "GC")
   (read-only "Read only")
@@ -307,7 +311,8 @@ please adhere to these guidelines:
   ;; menu items connected to the logger -- also in a button in the planet status line in the drs frame
   (show-log "Show &Log")
   (hide-log "Hide &Log")
-  (logging-all "All") ;; in the logging window in drscheme, shows all logs simultaneously
+  (logger-scroll-on-output "Scroll on output") ; a checkbox in the logger pane
+  (log-messages "Log Messages") ;; label for the drracket logging gui panel
   
  ;; modes
  (mode-submenu-label "Modes")
@@ -932,6 +937,7 @@ please adhere to these guidelines:
  (interactions-menu-item-help-string "Show/Hide the interactions window")
  (toolbar "Toolbar")
  (toolbar-on-top "Toolbar On Top")
+ (toolbar-on-top-no-label "Toolbar On Top With Small Buttons")
  (toolbar-on-left "Toolbar On Left")
  (toolbar-on-right "Toolbar On Right")
  (toolbar-hidden "Toolbar Hidden")
@@ -973,6 +979,12 @@ please adhere to these guidelines:
  (limit-memory-unlimited "Unlimited")
  (limit-memory-limited "Limited")
  (limit-memory-megabytes "Megabytes")
+ ; the next two constants are used together in the limit memory dialog; they are inserted
+ ; one after another. The first one is shown in a bold font and the second is not.
+ ; (the first can be the empty string)
+ (limit-memory-warning-prefix "Warning: ")
+ (limit-memory-warning "the unlimited memory setting is unsafe. With this setting, DrRacket cannot protect itself against programs that allocate too much, and DrRacket may crash.")
+ 
  (clear-error-highlight-menu-item-label "Clear Error Highlight")
  (clear-error-highlight-item-help-string "Removes the pink error highlighting")
  (jump-to-next-error-highlight-menu-item-label "Jump to Next Error Highlight")
@@ -995,7 +1007,8 @@ please adhere to these guidelines:
  (save-a-mzscheme-stand-alone-executable "Save a Racket Stand-alone Executable")
  (save-a-mred-distribution "Save a GRacket Distribution")
  (save-a-mzscheme-distribution "Save a Racket Distribution")
-
+ (error-creating-executable "Error creating executable:") ;; this is suffixed with an error message ala error-display-handler
+  
  (definitions-not-saved "The definitions window has not been saved. The executable will use the latest saved version of the definitions window. Continue?")
  ;; The "-explanatory-label" variants are the labels used for the radio buttons in
  ;;  the "Create Executable..." dialog for the "(module ...)" language.
@@ -1153,16 +1166,40 @@ please adhere to these guidelines:
  (experimental-languages "Experimental Languages")
   (initial-language-category "Initial language")
   (no-language-chosen "No language chosen")
- 
+ (other-languages "Other Languages")
+  
   (module-language-name "Determine language from source")
- (module-language-one-line-summary "Reads the #lang line to specify the actual language")
+ (module-language-one-line-summary "The #lang line specifies the actual language")
   (module-language-auto-text "Automatic #lang line") ;; shows up in the details section of the module language
    
   ;; for the upper portion of the language dialog
-  (use-language-in-source "Use the language declared in the source")
+  (the-racket-language "The Racket Language")
   (choose-a-language "Choose a language")
-  (lang-in-source-discussion
-   "The #lang line at the start of a program declares its language. This is the default and preferred mode for DrRacket.")
+  
+  ;; the next two string constants appear in the
+  ;; language dialog with a list
+  ;; of example languages appearing between them
+  (racket-language-discussion "Start your program with #lang to specify the desired dialect. For example:\n\n")
+  (racket-language-discussion-end "\n... and many more")
+  
+  ;; the next three string constants are put into a message-box dialog
+  ;; that appears when the user clicks on the example #lang languages
+  ;; in the language dialog. The first one always appears and then either
+  ;; the second or the third appears. The second one has the clicked
+  ;; on #lang line placed into the ~a, and third one has the 
+  ;; current #lang line in the first ~a and the clicked on in the second one.
+  ;; The two comments are separated by a blank line.
+  (racket-dialect-in-buffer-message "Racket dialects are generally chosen by editing the buffer directly, not by selecting these entries in the language dialog.")
+  (racket-dialect-add-new-#lang-line "That said, shall I add “~a” to the beginning of the definitions window?")
+  (racket-dialect-replace-#lang-line "That said, I see you have “~a” in your file; shall I replace it with “~a”?")
+  (racket-dialect-already-same-#lang-line "I see you already have “~a” in your file, however; so you should be all set to start programming!")
+  
+  ;; in the dialog containing the above strings, one of these is a button that appears
+  (add-#lang-line "Add #lang line")
+  (replace-#lang-line "Replace #lang line")
+  
+  ;; for the 'new drracket user' dialog
+  (use-language-in-source "Use the language declared in the source")
   
   ;;; from the `not a language language' used initially in drscheme.
   (must-choose-language "DrRacket cannot process programs until you choose a programming language.")
@@ -1681,5 +1718,15 @@ please adhere to these guidelines:
   (interactions-window-label "interactions")
   (hide-defs/ints-label "Hide Definitions/Interactions Labels") ;; popup menu
   (show-defs/ints-label "Show definitions/interactions labels") ;; preferences checkbox
-  
+
+  ;; menu item in the 'edit' menu; applies to editors with programs in them
+  ;; (technically, editors that implement color:text<%>)
+  (spell-check-string-constants "Spell Check String Constants")
+  (spelling-dictionaries "Spelling Dictionaries") ; (sub)menu whose items are the different possible dictionaries
+  (default-spelling-dictionary "Default Dictionary") ; first item in menu from previous line
+  (misspelled-text-color "Misspelled Text Color") ;; in the preferences dialog  
+  (cannot-find-ispell-or-aspell-path "Cannot find the aspell or ispell binary")
+  ; puts the path to the spell program in the ~a and then the error message
+  ; is put following this string (with a blank line in between)
+  (spell-program-wrote-to-stderr-on-startup "The spell program (~a) printed an error message:")
   )

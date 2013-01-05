@@ -203,14 +203,15 @@
         (tc-e (lcm (ann 3 Integer) -1/2) -NonNegRat)
         (tc-e (expt 0.5 0.3) -PosFlonum)
         (tc-e (expt 0.5 2) -PosFlonum)
-        (tc-e (expt 0.5 0) -PosFlonum)
+        (tc-e (expt 0.5 0) -One)
+        (tc-e (expt -1/2 -1/2) N)
         (tc-e (flexpt 0.5 0.3) -NonNegFlonum)
         (tc-e (flexpt 0.00000000001 100000000000.0) -NonNegFlonum)
         (tc-e (flexpt -2.0 -0.5) -Flonum) ; NaN
         (tc-e (angle -1) -Real)
         (tc-e (angle 2.3) -Zero)
-        (tc-e (magnitude 3/4) -Rat)
-        (tc-e (magnitude 3+2i) -Real)
+        (tc-e (magnitude 3/4) -NonNegRat)
+        (tc-e (magnitude 3+2i) -NonNegReal)
 
         [tc-e/t (lambda: () 3) (t:-> -PosByte : -true-lfilter)]
         [tc-e/t (lambda: ([x : Number]) 3) (t:-> N -PosByte : -true-lfilter)]
@@ -222,12 +223,12 @@
         [tc-e (void) -Void]
         [tc-e (void 3 4) -Void]
         [tc-e (void #t #f '(1 2 3)) -Void]
-        [tc-e/t #(3 4 5) (make-HeterogenousVector (list -Integer -Integer -Integer))]
+        [tc-e/t #(3 4 5) (make-HeterogeneousVector (list -Integer -Integer -Integer))]
         [tc-e/t '(2 3 4) (-lst* -PosByte -PosByte -PosByte)]
         [tc-e/t '(2 3 #t) (-lst* -PosByte -PosByte (-val #t))]
-        [tc-e/t #(2 3 #t) (make-HeterogenousVector (list -Integer -Integer -Boolean))]
-        [tc-e (vector 2 "3" #t) (make-HeterogenousVector (list -Integer -String -Boolean))]
-        [tc-e (vector-immutable 2 "3" #t) (make-HeterogenousVector (list -Integer -String -Boolean))]
+        [tc-e/t #(2 3 #t) (make-HeterogeneousVector (list -Integer -Integer -Boolean))]
+        [tc-e (vector 2 "3" #t) (make-HeterogeneousVector (list -Integer -String -Boolean))]
+        [tc-e (vector-immutable 2 "3" #t) (make-HeterogeneousVector (list -Integer -String -Boolean))]
         [tc-e (make-vector 4 1) (-vec -Integer)]
         [tc-e (build-vector 4 (lambda (x) 1)) (-vec -Integer)]
         [tc-e (range 4) (-lst -Byte)]
@@ -599,8 +600,9 @@
                   (set! x "foo")
                   x)]
         ;; w-c-m
-        [tc-e/t (with-continuation-mark 'key 'mark
-                3)
+        [tc-e/t (with-continuation-mark
+                  ((inst make-continuation-mark-key Symbol)) 'mark
+                  3)
               -PosByte]
         [tc-err (with-continuation-mark (5 4) 1
                   3)]
@@ -1350,8 +1352,10 @@
               #:ret (ret B (-FS -top -bot)))
 
         ;Continuation Prompt Tags ang Continuation Mark Sets
-        (tc-e (default-continuation-prompt-tag) -Prompt-Tag)
-        (tc-e (let: ((pt : Prompt-Tag (make-continuation-prompt-tag)))
+        ;; TODO: supporting default-continuation-prompt-tag means we need to
+        ;;       specially handle abort-current-continuation in the type system
+        ;(tc-e (default-continuation-prompt-tag) -Prompt-Tag)
+        (tc-e (let: ((pt : (Prompt-Tagof Integer Integer) (make-continuation-prompt-tag)))
                    (continuation-marks #f pt)) -Cont-Mark-Set)
         (tc-e (let: ((set : Continuation-Mark-Set (current-continuation-marks)))
                    (continuation-mark-set? set)) #:ret (ret B (-FS -top -bot)))
@@ -1370,7 +1374,7 @@
         ;Random Numbers
         (tc-e (make-pseudo-random-generator) -Pseudo-Random-Generator)
         (tc-e (let: ((pg : Pseudo-Random-Generator (make-pseudo-random-generator)))
-                (pseudo-random-generator->vector pg)) (make-HeterogenousVector (list -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt)))
+                (pseudo-random-generator->vector pg)) (make-HeterogeneousVector (list -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt)))
 
         ;Structure Type Properties
         (tc-e (make-struct-type-property 'prop) (list -Struct-Type-Property (t:-> Univ B) (t:-> Univ Univ)))
