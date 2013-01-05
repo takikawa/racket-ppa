@@ -110,8 +110,11 @@
 
   ;; test the characters that need to be encoded in paths vs those that do not need to
   ;; be encoded in paths
-  (test-s->u #("http" #f "www.drscheme.org" #f #t (#("a:@!$&'()*+,=z") #("/?#[];") #("")) () #f)
-             "http://www.drscheme.org/a:@!$&'()*+,=z/%2F%3F%23%5B%5D%3B/")
+  (test-s->u #("http" #f "www.drscheme.org" #f #t (#("a:@!$&'()*+,=z") #("/?#[];") #("")) () "@!$&'()*+,=z")
+             "http://www.drscheme.org/a:@!$&'()*+,=z/%2F%3F%23%5B%5D%3B/#%40!%24%26'()*%2B%2C%3Dz")
+  (parameterize ([current-url-encode-mode 'unreserved])
+    (test-s->u #("http" #f "www.drscheme.org" #f #t (#("a:@!$&'()*+,=z") #("/?#[];") #("")) () "@!$&'()*+,=z")
+               "http://www.drscheme.org/a:@%21$&%27%28%29%2A+,=z/%2F%3F%23%5B%5D%3B/#%40%21%24%26%27%28%29%2A%2B%2C%3Dz"))
 
   (test-s->u #("http" #f "www.drscheme.org" #f #t (#(".") #("..") #(same) #(up) #("...") #("abc.def")) () #f)
              "http://www.drscheme.org/%2e/%2e%2e/./../.../abc.def")
@@ -181,22 +184,40 @@
     (test (string->url/vec "http://foo:/abc/def.html")
           => #("http" #f "foo" #f #t (#("abc") #("def.html")) () #f)))
 
-  (test (url->string (path->url (bytes->path #"c:\\a\\b" 'windows)))
+  (test (url->string (path->url (bytes->path #"/a/b" 'unix)))
+        => "file:///a/b"
+        (url->string (path->url (bytes->path #"/a/b/" 'unix)))
+        => "file:///a/b/"
+        (url->string (path->url (bytes->path #"c:\\a\\b" 'windows)))
         => "file:///c:/a/b"
+        (url->string (path->url (bytes->path #"c:\\a\\b\\" 'windows)))
+        => "file:///c:/a/b/"
         (url->string (path->url (bytes->path #"\\\\?\\c:\\a\\b" 'windows)))
-        => "file:///c:/a/b")
+        => "file:///c:/a/b"
+        (url->string (path->url (bytes->path #"\\\\?\\c:\\a\\b\\" 'windows)))
+        => "file:///c:/a/b/")
 
   (test
    (path->bytes (url->path (path->url (bytes->path #"/a/b/c" 'unix)) 'unix))
    => #"/a/b/c"
+   (path->bytes (url->path (path->url (bytes->path #"/a/b/c/" 'unix)) 'unix))
+   => #"/a/b/c/."
    (path->bytes (url->path (path->url (bytes->path #"a/b/c" 'unix)) 'unix))
    => #"a/b/c"
+   (path->bytes (url->path (path->url (bytes->path #"a/b/c/" 'unix)) 'unix))
+   => #"a/b/c/."
    (path->bytes (url->path (path->url (bytes->path #"c:/a/b" 'windows)) 'windows))
    => #"c:\\a\\b"
+   (path->bytes (url->path (path->url (bytes->path #"c:/a/b/" 'windows)) 'windows))
+   => #"c:\\a\\b\\."
    (path->bytes (url->path (path->url (bytes->path #"a/b" 'windows)) 'windows))
    => #"a\\b"
+   (path->bytes (url->path (path->url (bytes->path #"a/b/" 'windows)) 'windows))
+   => #"a\\b\\."
    (path->bytes (url->path (path->url (bytes->path #"//d/c/a" 'windows)) 'windows))
    => #"\\\\d\\c\\a"
+   (path->bytes (url->path (path->url (bytes->path #"//d/c/a/" 'windows)) 'windows))
+   => #"\\\\d\\c\\a\\."
    (path->bytes (url->path (path->url (bytes->path #"\\\\?\\c:\\a\\b" 'windows)) 'windows))
    => #"c:\\a\\b"
    (path->bytes (url->path (path->url (bytes->path #"\\\\?\\UNC\\d\\c\\a\\b" 'windows)) 'windows))

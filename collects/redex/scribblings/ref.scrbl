@@ -99,6 +99,7 @@ in the grammar are terminals.
             integer
             real
             string 
+            boolean
             variable 
             (variable-except <id> ...)
             (variable-prefix <id>)
@@ -156,6 +157,14 @@ before the underscore.
 }
 
 @item{The @defpattech[string] @pattern matches any string. 
+This @pattern may also be suffixed with an underscore and another
+identifier, in which case they bind the full name (as if it
+were an implicit @pattech[name] @pattern) and match the portion
+before the underscore.
+}
+
+@item{The @defpattech[boolean] @pattern matches @racket[#true] and @racket[#false]
+(which are the same as @racket[#t] and @racket[#f], respectively).
 This @pattern may also be suffixed with an underscore and another
 identifier, in which case they bind the full name (as if it
 were an implicit @pattech[name] @pattern) and match the portion
@@ -342,6 +351,22 @@ match the pattern, using the language @racket[lang]. The
 procedures accepts a single expression and if the expresion
 matches, it returns a list of match structures describing the
 matches. If the match fails, the procedure returns @racket[#f].
+
+@examples[#:eval 
+          redex-eval
+          (define-language nums
+            (AE number
+                (+ AE AE)))
+          (redex-match nums
+                       (+ AE_1 AE_2)
+                       (term (+ (+ 1 2) 3)))
+          (redex-match nums
+                       (+ AE_1 (+ AE_2 AE_3))
+                       (term (+ (+ 1 2) 3)))
+          (redex-match nums
+                       (+ AE_1 AE_1)
+                       (term (+ (+ 1 2) 3)))]
+
 }
 
 @defform*[[(redex-match? lang @#,ttpattern any)
@@ -349,6 +374,19 @@ matches. If the match fails, the procedure returns @racket[#f].
           
 Like @racket[redex-match], except it returns only a boolean
 indicating if the match was successful.
+
+@examples[#:eval 
+          redex-eval
+          (define-language nums
+            (AE number
+                (+ AE AE)))
+          (redex-match? nums
+                        (+ AE_1 AE_2)
+                        (term (+ (+ 1 2) 3)))
+          (redex-match? nums
+                        (+ AE_1 AE_1)
+                        (term (+ (+ 1 2) 3)))]
+
 }
 
 @defproc[(match? [val any/c]) boolean?]{
@@ -1139,12 +1177,12 @@ and @racket[#f] otherwise.
 
 @defform/subs[#:literals (I O where where/hidden side-condition side-condition/hidden etc.)
              (define-judgment-form language
-               option ...
+               mode-spec
+               contract-spec
                rule rule ...)
-             ([option mode-spec
-                      contract-spec]
-              [mode-spec (code:line #:mode (form-id pos-use ...))]
-              [contract-spec (code:line #:contract (form-id @#,ttpattern ...))]
+             ([mode-spec (code:line #:mode (form-id pos-use ...))]
+              [contract-spec (code:line) 
+                             (code:line #:contract (form-id @#,ttpattern ...))]
               [pos-use I
                        O]
               [rule [premise
@@ -1177,9 +1215,8 @@ Each rule must be such that its premises can be evaluated left-to-right
 without ``guessing'' values for any of their pattern variables. Redex checks this
 property using the mandatory @racket[mode-spec] declaration, which partitions positions
 into inputs @racket[I] and outputs @racket[O]. Output positions in conclusions
-and input positions in premises must be @|tttterm|s with no uses of 
-@racket[unquote]; input positions in conclusions and output positions in 
-premises must be @|ttpattern|s. When the optional @racket[contract-spec] 
+and input positions in premises must be @|tttterm|s; input positions in conclusions and 
+output positions in premises must be @|ttpattern|s. When the optional @racket[contract-spec] 
 declaration is present, Redex dynamically checks that the terms flowing through
 these positions match the provided patterns, raising an exception recognized by 
 @racket[exn:fail:redex] if not.
@@ -1259,9 +1296,16 @@ A rule's @racket[where] and @racket[where/hidden] premises behave as in
 
 A rule's @racket[side-condition] and @racket[side-condition/hidden] premises are similar
 to those in @racket[reduction-relation] and @racket[define-metafunction], except that
-they do not implicitly unquote their right-hand sides. In other words, a premise
-of the form @racket[(side-condition exp)] is equivalent to the premise
-@racket[(where #t exp)], except it does not typeset with the ``#t = '', as that would.
+they do not implicitly unquote their right-hand sides. In other words, a premise 
+of the form @racket[(side-condition term)] is equivalent to the premise 
+@racket[(where #t term)], except it does not typeset with the ``#t = '', as that would.
+
+Judgments with exclusively @racket[I] mode positions may also be used in @|tttterm|s
+in a manner similar to metafunctions, and evaluate to a boolean.
+@examples[
+#:eval redex-eval
+       (term (le (s z) (s (s z))))
+       (term (le (s z) z))]
 
 A literal ellipsis may follow a judgment premise when a template in one of the
 judgment's input positions contains a pattern variable bound at ellipsis-depth
@@ -1349,6 +1393,26 @@ each satisfying assignment of pattern variables.
 See @racket[define-judgment-form] for examples.
 }
 
+@defform[(build-derivations judgment)]{
+  Constructs all of the @racket[derivation] trees
+  for @racket[judgment]. 
+  
+@examples[
+#:eval redex-eval
+       (build-derivations (even (s (s z))))]
+}
+
+@defstruct[derivation ([term any/c] [name (or/c string? #f)] [subs (listof derivation?)])]{
+  Represents a derivation from a judgment form. 
+
+  The @racket[term] field holds an s-expression based rendering of the
+  conclusion of the derivation, the @racket[name] field holds the name
+  of the clause with @racket[term] as the conclusion, and
+  @racket[subs] contains the sub-derivations.
+
+  See also @racket[build-derivations].
+}
+                                                            
 @defidform[I]{
 Recognized specially within @racket[define-judgment-form], the @racket[I] keyword
 is an error elsewhere.
@@ -1395,12 +1459,6 @@ the argument contracts.
        (term (subtype int num))
        (term (subtype (int → int) (num → num)))
        (term (subtype (num → int) (num → num)))]
-
-Note that relations are assumed to always return the same results for
-the same inputs, and their results are cached, unless
-@racket[caching-enable?] is set to @racket[#f]. Accordingly, if a
-relation is called with the same inputs twice, then its right-hand
-sides are evaluated only once.
 }
 
 @defparam[current-traced-metafunctions traced-metafunctions (or/c 'all (listof symbol?))]{
@@ -1583,6 +1641,8 @@ metafunctions or unnamed reduction-relation cases) to application counts.}
 @defform*/subs[[(generate-term term-spec size-expr kw-args ...)
                 (generate-term term-spec)]
               ([term-spec (code:line language @#,ttpattern)
+                          (code:line language #:satisfying (judgment-form-id @#,ttpattern ...))
+                          (code:line language #:satisfying (metafunction-id @#,ttpattern ...) = @#,ttpattern)
                           (code:line #:source metafunction)
                           (code:line #:source relation-expr)]
                [kw-args (code:line #:attempt-num attempts-expr)
@@ -1592,14 +1652,21 @@ metafunctions or unnamed reduction-relation cases) to application counts.}
                            [retries-expr natural-number/c])]{
 
 In its first form, @racket[generate-term] produces a random term according
-to @racket[term-spec], which is either a language and a pattern, the name
-of a metafunction, or an expression producing a reduction relation. In the
-first of these cases, the produced term matches the given pattern (interpreted 
-according to the definition of the given language). In the second and third cases, 
-the produced term matches one of the clauses of the specified metafunction or
-reduction relation.
+to @racket[term-spec]:
+@itemlist[@item{In the first @racket[term-spec] case, the produced 
+                term matches the given pattern (interpreted 
+                according to the definition of the given language).}
+           @item{In the second case,
+                 the expression produced is the quoted form of a use of the judgment-form or
+                 @racket[#f], if Redex cannot find one.}
+           @item{The third cases generates a random term that satsifies 
+                 the call to the metafunction with the given result 
+                 or @racket[#f], if Redex cannot find one.}
+           @item{In the last two cases, 
+                 the produced term matches one of the clauses of the specified metafunction or
+                 reduction relation.}]
 
-In its second form, @racket[generate-term] produces a procedure for constructing 
+In @racket[generate-term]'s second form, it produces a procedure for constructing 
 terms according to @racket[term-spec].
 This procedure expects @racket[size-expr] (below) as its sole positional
 argument and allows the same optional keyword arguments as the first form.
@@ -1758,6 +1825,27 @@ term that does not match @racket[pattern].}
                     (add1 (abs n)))
         #:attempts 3)]
 
+@defform/subs[(redex-generator language-id satisfying size-expr)
+              ([satisfying (judgment-form-id @#,ttpattern ...)
+                           (code:line (metafunction-id @#,ttpattern ...) = @#,ttpattern)])
+              #:contracts ([size-expr natural-number/c])]{
+  
+  @italic{WARNING: @racket[redex-generator] is a new, experimental form, 
+          and its API may change.}
+                                                     
+  Returns a thunk that, each time it is called, either generates a random
+  s-expression based on @racket[satisfying] or fails to (and returns @racket[#f]). 
+  The terms returned by a particular thunk are guaranteed to be distinct.
+  
+  @examples[#:eval
+            redex-eval
+            (define gen-sum (redex-generator nats (sum n_1 n_2 n_3) 5))
+            (gen-sum)
+            (gen-sum)
+            (gen-sum)
+            (gen-sum)]
+}
+
 @defstruct[counterexample ([term any/c]) #:inspector #f]{
 Produced by @racket[redex-check], @racket[check-reduction-relation], and 
 @racket[check-metafunction] when testing falsifies a property.}
@@ -1768,6 +1856,7 @@ Raised by @racket[redex-check], @racket[check-reduction-relation], and
 The @racket[exn:fail:redex:test-source] component contains the exception raised by the property,
 and the @racket[exn:fail:redex:test-term] component contains the term that induced the exception.}
 
+                                                         
 @defform/subs[(check-reduction-relation relation property kw-args ...)
               ([kw-arg (code:line #:attempts attempts-expr)
                        (code:line #:retries retries-expr)
@@ -2074,6 +2163,36 @@ Like @racket[stepper], this function opens a stepper window, but it
 seeds it with the reduction-sequence supplied in @racket[seed].
 }
 
+@defproc[(show-derivations [derivations (cons/c derivation? (listof derivation?))]
+                           [#:pp pp
+                                 (or/c (any -> string)
+                                       (any output-port number (is-a?/c text%) -> void))
+                                 default-pretty-printer]
+                           [#:racket-colors? racket-colors? boolean? #f]
+                           [#:init-derivation init-derivation exact-nonnegative-integer? 0])
+         any]{
+  Opens a window to show @racket[derivations]. 
+                         
+  The @racket[pp] and @racket[racket-colors?] arguments are like those to @racket[traces].
+  
+  The initial derivation shown in the window is chosen by @racket[init-derivation], used
+  as an index into @racket[derivations].
+}
+
+@defproc[(derivation/ps [derivation derivation?]
+                        [filename path-string?]
+                        [#:pp pp
+                              (or/c (any -> string)
+                                    (any output-port number (is-a?/c text%) -> void))
+                              default-pretty-printer]
+                        [#:racket-colors? racket-colors? boolean? #f]
+                        [#:post-process post-process (-> (is-a?/c pasteboard%) any)])
+         void?]{
+                
+  Like @racket[show-derivations], except it prints a single
+  derivation in PostScript to @racket[filename].
+}
+
 @defproc[(term-node-children [tn term-node?]) (listof term-node?)]{
 
 Returns a list of the children (ie, terms that this term
@@ -2084,6 +2203,7 @@ term reduces to -- only those that are currently in the
 graph.
 }
 
+               
 @defproc[(term-node-parents [tn term-node?]) (listof term-node?)]{
 
 Returns a list of the parents (ie, terms that reduced to the
@@ -2736,7 +2856,7 @@ single reduction relation.
 When reduction rules, a metafunction, or a grammar contains
 unquoted Racket code or side-conditions, they are rendered
 with a pink background as a guide to help find them and
-provide alternative typesettings for them. In general, a
+provide an alternative typesetting for them. In general, a
 good goal for a PLT Redex program that you intend to typeset
 is to only include such things when they correspond to
 standard mathematical operations, and the Racket code is an
@@ -3011,3 +3131,5 @@ just before or just after that argument. The line-span and
 column-span of the new lw is always zero.
 }
 
+
+@close-eval[redex-eval]

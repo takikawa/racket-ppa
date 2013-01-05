@@ -333,8 +333,13 @@ int scheme_get_serialized_fd_flags(Scheme_Object* p, Scheme_Serialized_File_FD *
 #endif
 
 #if defined(DOS_FILE_SYSTEM)
-# define fseeko _fseeki64
-# define ftello _ftelli64
+# if defined(__MINGW32__)
+#  define fseeko fseek
+#  define ftello ftell
+# else
+#  define fseeko _fseeki64
+#  define ftello _ftelli64
+# endif
 #endif
 
 
@@ -451,8 +456,8 @@ THREAD_LOCAL_DECL(void *scheme_break_semaphore;)
 #endif
 
 #ifdef MZ_FDS
-static Scheme_Object *make_fd_input_port(int fd, Scheme_Object *name, int regfile, int textmode, int *refcount, int internal);
-static Scheme_Object *make_fd_output_port(int fd, Scheme_Object *name, int regfile, int textmode, int read_too, int flush_mode,
+static Scheme_Object *make_fd_input_port(intptr_t fd, Scheme_Object *name, int regfile, int textmode, int *refcount, int internal);
+static Scheme_Object *make_fd_output_port(intptr_t fd, Scheme_Object *name, int regfile, int textmode, int read_too, int flush_mode,
 					  int *refcount);
 #endif
 #ifdef USE_OSKIT_CONSOLE
@@ -655,7 +660,7 @@ void scheme_init_port_places(void)
 #else
 # ifdef MZ_FDS
 #  ifdef WINDOWS_FILE_HANDLES
-			    : make_fd_input_port((int)GetStdHandle(STD_INPUT_HANDLE), scheme_intern_symbol("stdin"), 0, 0, 
+			    : make_fd_input_port((intptr_t)GetStdHandle(STD_INPUT_HANDLE), scheme_intern_symbol("stdin"), 0, 0, 
 						 stdin_refcount, 0)
 #  else
 			    : make_fd_input_port(0, scheme_intern_symbol("stdin"), 0, 0, stdin_refcount, 0)
@@ -670,7 +675,7 @@ void scheme_init_port_places(void)
 			     ? scheme_make_stdout()
 #ifdef MZ_FDS
 # ifdef WINDOWS_FILE_HANDLES
-			     : make_fd_output_port((int)GetStdHandle(STD_OUTPUT_HANDLE), 
+			     : make_fd_output_port((intptr_t)GetStdHandle(STD_OUTPUT_HANDLE), 
 						   scheme_intern_symbol("stdout"), 0, 0, 0,
                                                    -1, stdout_refcount)
 # else
@@ -686,7 +691,7 @@ void scheme_init_port_places(void)
 			     ? scheme_make_stderr()
 #ifdef MZ_FDS
 # ifdef WINDOWS_FILE_HANDLES
-			     : make_fd_output_port((int)GetStdHandle(STD_ERROR_HANDLE), 
+			     : make_fd_output_port((intptr_t)GetStdHandle(STD_ERROR_HANDLE), 
 						   scheme_intern_symbol("stderr"), 0, 0, 0,
                                                    MZ_FLUSH_ALWAYS, stderr_refcount)
 # else
@@ -4418,7 +4423,7 @@ Scheme_Object *scheme_file_identity(int argc, Scheme_Object *argv[])
   return scheme_get_fd_identity(p, fd, NULL);
 }
 
-static int is_fd_terminal(int fd)
+static int is_fd_terminal(intptr_t fd)
 {
 #if defined(WIN32_FD_HANDLES)
   if (GetFileType((HANDLE)fd) == FILE_TYPE_CHAR) {
@@ -4649,7 +4654,7 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
     return NULL;
   }
 
-  result = make_fd_input_port((int)fd, scheme_make_path(filename), regfile, mode[1] == 't', NULL, internal);
+  result = make_fd_input_port((intptr_t)fd, scheme_make_path(filename), regfile, mode[1] == 't', NULL, internal);
 # else
   if (scheme_directory_exists(filename)) {
     if (err) {
@@ -4980,7 +4985,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
       SetEndOfFile(fd);
   }
 
-  return make_fd_output_port((int)fd, scheme_make_path(filename), regfile, mode[1] == 't', and_read, 
+  return make_fd_output_port((intptr_t)fd, scheme_make_path(filename), regfile, mode[1] == 't', and_read, 
 			     -1, NULL);
 # else
   if (scheme_directory_exists(filename)) {
@@ -5106,7 +5111,7 @@ Scheme_Object *scheme_open_output_file_with_mode(const char *name, const char *w
 }
 
 #ifdef WINDOWS_FILE_HANDLES
-static int win_seekable(int fd)
+static int win_seekable(intptr_t fd)
 {
   /* SetFilePointer() requires " a file stored on a seeking device".
      I'm not sure how to test that, so we approximate as "regular
@@ -5514,7 +5519,7 @@ scheme_file_buffer(int argc, Scheme_Object *argv[])
   }
 }
 
-static int try_lock(int fd, int writer, int *_errid)
+static int try_lock(intptr_t fd, int writer, int *_errid)
 {
 #ifdef UNIX_FILE_SYSTEM
 # ifdef USE_FLOCK_FOR_FILE_LOCKS
@@ -6521,7 +6526,7 @@ static int fd_input_buffer_mode(Scheme_Port *p, int mode)
 }
 
 static Scheme_Object *
-make_fd_input_port(int fd, Scheme_Object *name, int regfile, int win_textmode, int *refcount, int internal)
+make_fd_input_port(intptr_t fd, Scheme_Object *name, int regfile, int win_textmode, int *refcount, int internal)
 {
   Scheme_Input_Port *ip;
   Scheme_FD *fip;
@@ -7788,7 +7793,7 @@ static int fd_output_buffer_mode(Scheme_Port *p, int mode)
 }
 
 static Scheme_Object *
-make_fd_output_port(int fd, Scheme_Object *name, int regfile, int win_textmode, int and_read,
+make_fd_output_port(intptr_t fd, Scheme_Object *name, int regfile, int win_textmode, int and_read,
                     int flush_mode, int *refcount)
 {
   Scheme_FD *fop;
@@ -8018,8 +8023,8 @@ static int MyPipe(intptr_t *ph, int near_index) {
       }
     }
 
-    ph[0] = (long)a[0];
-    ph[1] = (long)a[1];
+    ph[0] = (intptr_t)a[0];
+    ph[1] = (intptr_t)a[1];
 
     return 0;
   } else
@@ -8546,6 +8551,7 @@ static int subp_done(Scheme_Object *so)
         sp->done = 1;
         sp->status = status;
         child_mref_done(sp);
+        scheme_ended_child();
         return 1;
       }
       return 0;
@@ -8613,6 +8619,7 @@ static Scheme_Object *subprocess_status(int argc, Scheme_Object **argv)
       child_mref_done(sp);
       sp->done = 1;
       sp->status = status;
+      scheme_ended_child();
     }
   }
 # else
@@ -8702,6 +8709,7 @@ static Scheme_Object *do_subprocess_kill(Scheme_Object *_sp, Scheme_Object *kill
       sp->done = 1;
       child_mref_done(sp);
       scheme_wait_resume();
+      scheme_ended_child();
       return scheme_void;
     }
   }
@@ -8848,8 +8856,10 @@ static void unused_process_record(void *_sp, void *ignored)
   Scheme_Subprocess *sp = (Scheme_Subprocess *)_sp;
 
 # if defined(MZ_PLACES_WAITPID)
-  if (!sp->done)
+  if (!sp->done) {
     scheme_done_with_process_id(sp->pid, sp->is_group);
+    scheme_ended_child();
+  }
 # else
   if (!((System_Child *)sp->handle)->done) {
     void **unused_pid;
@@ -8961,9 +8971,9 @@ static intptr_t mz_spawnv(char *command, const char * const *argv,
 
   /* If none of the stdio handles are consoles, specifically
      create the subprocess without a console: */
-  if (!is_fd_terminal((int)startup.hStdInput)
-      && !is_fd_terminal((int)startup.hStdOutput)
-      && !is_fd_terminal((int)startup.hStdError))
+  if (!is_fd_terminal((intptr_t)startup.hStdInput)
+      && !is_fd_terminal((intptr_t)startup.hStdOutput)
+      && !is_fd_terminal((intptr_t)startup.hStdError))
     cr_flag = CREATE_NO_WINDOW;
   else
     cr_flag = 0;
@@ -9000,7 +9010,7 @@ static void CopyFileHandleForSubprocess(intptr_t *hs, int pos)
 		      0,
 		      TRUE,
 		      DUPLICATE_SAME_ACCESS)) {
-    hs[pos] = (int)h2;
+    hs[pos] = (intptr_t)h2;
     hs[alt_pos] = 1;
   } else {
     hs[alt_pos] = 0;
@@ -9057,7 +9067,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   int exact_cmdline = 0;
 #endif
 #if defined(WINDOWS_PROCESSES)
-  int spawn_status;
+  intptr_t spawn_status;
 #endif
 
   /*--------------------------------------------*/
@@ -9303,13 +9313,15 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
     init_sigchld();
 
     sc = MALLOC_ONE_RT(System_Child);
-#ifdef MZTAG_REQUIRED
+# ifdef MZTAG_REQUIRED
     sc->type = scheme_rt_system_child;
-#endif
+# endif
     sc->id = 0;
     sc->done = 0;
 
     scheme_block_child_signals(1);
+#else
+    scheme_starting_child();
 #endif
 
 #if !defined(__QNX__)
@@ -9383,6 +9395,8 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
 #else
     if (!pid)
       scheme_places_unblock_child_signal();
+    else if (pid == -1)
+      scheme_ended_child();
 #endif
   }
 

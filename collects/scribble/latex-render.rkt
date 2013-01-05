@@ -1,12 +1,12 @@
-#lang scheme/base
+#lang at-exp racket/base
 (require "core.rkt"
          "latex-properties.rkt"
          "private/render-utils.rkt"
-         scheme/class
-         scheme/runtime-path
-         scheme/port
-         scheme/string
-         scheme/list
+         racket/class
+         racket/runtime-path
+         racket/port
+         racket/string
+         racket/list
          setup/main-collects
          file/convertible)
 (provide render-mixin
@@ -324,7 +324,7 @@
                                                                (- (ceiling height) height)))]
                                               [fn (install-file (format "pict~a" suffix) bstr)])
                                          (if descent
-                                             (printf "\\raisebox{-~apx}{\\makebox[~apx][l]{\\includegraphics{~a}}}" 
+                                             (printf "\\raisebox{-~abp}{\\makebox[~abp][l]{\\includegraphics{~a}}}" 
                                                      descent
                                                      width 
                                                      fn)
@@ -391,12 +391,19 @@
                   (let ([v (car l)])
                     (cond
                      [(target-url? v)
-                      (printf "\\href{~a}{" (regexp-replace* #rx"%"
-                                                             (let ([p (target-url-addr v)])
-                                                               (if (path? p)
-                                                                   (path->string p)
-                                                                   p))
-                                                             "\\\\%"))
+                      (define target (regexp-replace* #rx"%"
+                                                      (let ([p (target-url-addr v)])
+                                                        (if (path? p)
+                                                            (path->string p)
+                                                            p))
+                                                      "\\\\%"))
+                      (if (regexp-match? #rx"^[^#]*#[^#]*$" target)
+                          ;; work around a problem with `\href' as an
+                          ;; argument to other macros, such as `\marginpar':
+                          (let ([l (string-split target "#")])
+                            (printf "\\Shref{~a}{~a}{" (car l) (cadr l)))
+                          ;; normal:
+                          (printf "\\href{~a}{" target))
                       (loop (cdr l) #t)
                       (printf "}")]
                      [(color-property? v)
@@ -753,8 +760,8 @@
           (let ([len (string-length s)])
             (let loop ([i 0])
               (unless (= i len)
-                (let ([c (string-ref s i)])
-                  (display
+                (display
+                 (let char-loop ([c (string-ref s i)])
                    (case c
                      [(#\\) (if (rendering-tt)
                                 "{\\char`\\\\}"
@@ -792,6 +799,7 @@
                           ;; Which parts are necessary may depend on the latex version,
                           ;; though, so we keep this table around to avoid regressions.
                           (case c
+                            [(#\╔ #\═ #\╗ #\║ #\╚ #\╝) (box-character c)]
                             [(#\u2011) "\\mbox{-}"] ; non-breaking hyphen
                             [(#\uB0) "$^{\\circ}$"] ; degree
                             [(#\uB2) "$^2$"]
@@ -846,6 +854,12 @@
                             [(#\♭) "$\\flat$"]
                             [(#\♮) "$\\natural$"]
                             [(#\√) "$\\surd$"]
+                            [(#\∆) "$\\Delta$"] ; no better mapping for than \Delta for "increment"
+                            [(#\u2211) "$\\sum$"] ; better than \Sigma, right?
+                            [(#\u220F) "$\\prod$"] ; better than \Pi, right?
+                            [(#\u2210) "$\\coprod$"]
+                            [(#\u222B) "$\\int$"]
+                            [(#\u222E) "$\\oint$"]
                             [(#\¬) "$\\neg$"]
                             [(#\△) "$\\triangle$"]
                             [(#\∀) "$\\forall$"]
@@ -868,7 +882,7 @@
                             [(#\ξ) "$\\xi$"]
                             [(#\Γ) "$\\Gamma$"]
                             [(#\Ψ) "$\\Psi$"]
-                            [(#\∆) "$\\Delta$"]
+                            [(#\Δ) "$\\Delta$"]
                             [(#\Ξ) "$\\Xi$"]
                             [(#\Υ) "$\\Upsilon$"]
                             [(#\Ω) "$\\Omega$"]
@@ -942,52 +956,10 @@
                             [(#\☺) "$\\smiley$"]
                             [(#\☻) "$\\blacksmiley$"]
                             [(#\☹) "$\\frownie$"]
-                            [(#\à) "\\`{a}"]
-                            [(#\À) "\\`{A}"]
-                            [(#\á) "\\'{a}"]
-                            [(#\â) "\\^{a}"]
-                            [(#\Â) "\\^{A}"]
-                            [(#\Á) "\\'{A}"]
-                            [(#\ç) "\\c{c}"]
-                            [(#\Ç) "\\c{C}"]
-                            [(#\è) "\\`{e}"]
-                            [(#\È) "\\`{E}"]
-                            [(#\é) "\\'{e}"]
-                            [(#\É) "\\'{E}"]
-                            [(#\ê) "\\^{e}"]
-                            [(#\Ê) "\\^{E}"]
-                            [(#\í) "\\'{i}"]
-                            [(#\Í) "\\'{I}"]
-                            [(#\î) "\\^{i}"]
-                            [(#\Î) "\\^{I}"]
-                            [(#\ô) "\\^{o}"]
-                            [(#\Ô) "\\^{O}"]
-                            [(#\û) "\\^{u}"]
-                            [(#\Û) "\\^{U}"]
-                            [(#\ā) "\\={a}"]
-                            [(#\ē) "\\={e}"]
-                            [(#\ī) "\\={i}"]
-                            [(#\ō) "\\={o}"]
-                            [(#\ū) "\\={u}"]
-                            [(#\Ā) "\\={A}"]
-                            [(#\Ē) "\\={E}"]
-                            [(#\Ī) "\\={I}"]
-                            [(#\Ō) "\\={O}"]
-                            [(#\Ū) "\\={U}"]
-                            [(#\ä) "\\\"a"]
-                            [(#\Ä) "\\\"A"]
-                            [(#\ü) "\\\"u"]
-                            [(#\Ü) "\\\"U"]
-                            [(#\ö) "\\\"o"]
-                            [(#\Ö) "\\\"O"]
                             [(#\ø) "{\\o}"]
                             [(#\Ø) "{\\O}"]
                             [(#\ł) "{\\l}"]
                             [(#\Ł) "{\\L}"]
-                            [(#\ř) "{\\v r}"]
-                            [(#\Ř) "{\\v R}"]
-                            [(#\š) "{\\v s}"]
-                            [(#\Š) "{\\v S}"]
                             [(#\uA7) "{\\S}"]
                             [(#\〚) "$[\\![$"]
                             [(#\〛) "$]\\!]$"]
@@ -1007,9 +979,89 @@
                             [(#\u2079) "$^9$"]
                             [(#\u207a) "$^+$"]
                             [(#\u207b) "$^-$"]
-                            [else c])
+                            [else
+                             (cond
+                              [(char<=? #\uAC00 c #\uD7AF) ; Korean Hangul
+                               (format "\\begin{CJK}{UTF8}{mj}~a\\end{CJK}" c)]
+                              [else
+                               ;; Detect characters that can be formed with combining characters
+                               ;; and translate them to Latex combinations:
+                               (define s (string-normalize-nfd (string c)))
+                               (define len (string-length s))
+                               (cond
+                                [(len . > . 1)
+                                 (define combiner (case (string-ref s (sub1 len))
+                                                    [(#\u300) "\\`{~a}"]
+                                                    [(#\u301) "\\'{~a}"]
+                                                    [(#\u302) "\\^{~a}"]
+                                                    [(#\u303) "\\~~{~a}"]
+                                                    [(#\u304) "\\={~a}"]
+                                                    [(#\u306) "\\u{~a}"]
+                                                    [(#\u307) "\\.{~a}"]
+                                                    [(#\u308) "\\\"{~a}"]
+                                                    [(#\u30a) "\\r{~a}"]
+                                                    [(#\u30b) "\\H{~a}"]
+                                                    [(#\u30c) "\\v{~a}"]
+                                                    [(#\u327) "\\c{~a}"]
+                                                    [(#\u328) "\\k{~a}"]
+                                                    [else #f]))
+                                 (define base (string-normalize-nfc (substring s 0 (sub1 len))))
+                                 (if (and combiner
+                                          (= 1 (string-length base)))
+                                     (format combiner (char-loop (string-ref base 0)))
+                                     c)]
+                                [else c])])])
                           c)])))
                 (loop (add1 i)))))))
+    
+    
+    (define/private (box-character c)
+      (define (combine . args) 
+        (apply string-append
+               (filter (λ (x) (not (regexp-match #rx"^[ \n]*$" x))) args)))
+      (define (adjust % v) 
+        (define num (* % (/ v 10) 10))
+        (define i-part (floor num))
+        (define d-part (floor (* 10 (- num i-part))))
+        (format "~a.~a" i-part d-part))
+      (define (x v) (adjust 4/10 v))
+      (define (y v) (adjust 6/10 v))
+      (case c
+        [(#\╔)
+         @combine{\begin{picture}(@x[10],@y[10])(0,0)
+                        \put(@x[2],@y[6]){\line(1,0){@x[8]}}
+                        \put(@x[4],@y[4]){\line(1,0){@x[7]}}
+                        \put(@x[2],@y[0]){\line(0,1){@y[6]}}
+                        \put(@x[4],@y[0]){\line(0,1){@y[4]}}
+                        \end{picture}}]
+        [(#\═) @combine{\begin{picture}(@x[10],@y[10])(0,0)
+                              \put(@x[0],@y[6]){\line(1,0){@x[10]}}
+                              \put(@x[0],@y[4]){\line(1,0){@x[10]}}
+                              \end{picture}}]
+        [(#\╗) @combine{\begin{picture}(@x[10],@y[10])(0,0)
+                              \put(@x[0],@y[6]){\line(1,0){@x[8]}}
+                              \put(@x[0],@y[4]){\line(1,0){@x[6]}}
+                              \put(@x[8],@y[0]){\line(0,1){@y[6]}}
+                              \put(@x[6],@y[0]){\line(0,1){@y[4]}}
+                              \end{picture}}]
+        [(#\║) @combine{\begin{picture}(@x[10],@y[10])(0,0)
+                              \put(@x[4],@y[10]){\line(0,-1){@y[10]}}
+                              \put(@x[2],@y[10]){\line(0,-1){@y[10]}}
+                              \end{picture}}]
+        [(#\╚) @combine{\begin{picture}(@x[10],@y[10])(0,0)
+                              \put(@x[2],@y[4]){\line(1,0){@x[8]}}
+                              \put(@x[4],@y[6]){\line(1,0){@x[6]}}
+                              \put(@x[4],@y[10]){\line(0,-1){@y[4]}}
+                              \put(@x[2],@y[10]){\line(0,-1){@y[6]}}
+                              \end{picture}}]
+        [(#\╝) @combine{\begin{picture}(@x[10],@y[10])(0,0)
+                              \put(@x[0],@y[4]){\line(1,0){@x[8]}}
+                              \put(@x[0],@y[6]){\line(1,0){@x[6]}}
+                              \put(@x[6],@y[10]){\line(0,-1){@y[4]}}
+                              \put(@x[8],@y[10]){\line(0,-1){@y[6]}}
+                              \end{picture}}]))
+
+
 
     ;; ----------------------------------------
 

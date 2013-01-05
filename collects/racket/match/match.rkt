@@ -7,7 +7,7 @@
                   define-match-expander)
          "define-forms.rkt"
          "struct.rkt"
-         (for-syntax unstable/lazy-require
+         (for-syntax racket/lazy-require
                      (only-in "stxtime.rkt"
                               match-...-nesting
                               prop:match-expander
@@ -27,4 +27,5 @@
   match match* match-lambda match-lambda* match-lambda** match-let match-let*
   match-let-values match-let*-values
   match-define match-define-values match-letrec match/values
-  match/derived match*/derived)
+  match/derived match*/derived
+  define/match)

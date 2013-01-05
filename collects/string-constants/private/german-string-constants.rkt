@@ -30,6 +30,7 @@
  (stop "Stop")
  (&stop "&Stop") ;; for use in button and menu item labels, with short cut.
  (are-you-sure-delete? "Sind Sie sicher, dass Sie ~a löschen wollen?") ;; ~a is a filename or directory name
+ (are-you-sure-replace? "Sind Sie sicher, dass Sie ~a ersetzen wollen?") ;; ~a is a filename or directory name
  (ignore "Ignorieren")
  (revert "Änderungen rückgängig machen")
 
@@ -61,12 +62,12 @@
  (bug-report-field-docs-installed "Installierte Dokumentation")
  (bug-report-field-collections "Collections")
  (bug-report-field-links "Links")  ;; from 'raco link'
- (bug-report-field-human-language "Interaktionssprache")	;
+ (bug-report-field-human-language "Interaktionssprache") ;
  (bug-report-field-memory-use "Speicherverbrauch")
  (bug-report-field-version "Version")
  (bug-report-synthesized-information "Generierte Information")  ;; dialog title
- (bug-report-show-synthesized-info "Generierte Informationen anzeigen")	; (an)zeigen
- (bug-report-submit "Abschicken")	
+ (bug-report-show-synthesized-info "Generierte Informationen anzeigen") ; (an)zeigen
+ (bug-report-submit "Abschicken")
  (close-and-save-bug-report "Schließen && Speichern") ;; button in bug report dialog, next to cancel and bug-report-submit
  (bug-report-submit-menu-item "Bug-Report abschicken...") ;; in Help Menu (drs & help desk)
  (saved-bug-reports-menu-item "Gepeicherte Bug-Reports") ;; in Help Menu, submenu title
@@ -149,6 +150,9 @@
  (online-expansion-pending "Hintergrund-Expansion läuft ...")
  (online-expansion-finished "Hintergrund-Expansion fertig") ;; note: there may still be errors in this case
  
+ ; the next two show up in a menu when you click on the circle in the bottom right corner
+ (disable-online-expansion "Hintergrund-Expansion deaktivieren")
+ (enable-online-expansion "Hintergrund-Expansion aktivieren")
  ;; the online expansion preferences pane
  (online-expansion "Hintergrund-Expansion") ;; title of prefs pane
  ; the different kinds of errors
@@ -156,9 +160,10 @@
  (online-expansion-show-variable-errors-as "Ungebundene Bezeichner anzeigen")
  (online-expansion-show-other-errors-as "Andere Fehler anzeigen")
  ; locations the errors can be shown
- (online-expansion-error-in-corner "in der Ecke des Fensters")
  (online-expansion-error-gold-highlight "mit goldener Markierung")
  (online-expansion-error-margin "am Rand")
+ ; the label of a preference in the (string-constant online-expansion) section
+ (show-arrows-on-mouseover "Bindungen und Tail-Positionen unter Mauszeiger anzeigen")
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "GC")
  (read-only "Nur Lesen")
@@ -209,7 +214,8 @@
   ;; menu items connected to the logger -- also in a button in the planet status line in the drs frame
   (show-log "&Log einblenden")
   (hide-log "&Log ausblenden")
-  (logging-all "Alle") ;; in the logging window in drscheme, shows all logs simultaneously
+  (logger-scroll-on-output "Bei Ausgabe scrollen") ; a checkbox in the logger pane
+  (log-messages "Log-Nachrichten") ;; label for the drracket logging gui panel
 
  ;; modes
  (mode-submenu-label "Modi")
@@ -830,6 +836,7 @@
  (interactions-menu-item-help-string "Interaktionsfenster ein-/ausblenden")
  (toolbar "Toolbar")
  (toolbar-on-top "Toolbar oben")
+ (toolbar-on-top-no-label "Toolbar oben mit kleinen Knöpfen")
  (toolbar-on-left "Toolbar links")
  (toolbar-on-right "Toolbar rechts")
  (toolbar-hidden "Toolbar ausblenden")
@@ -874,6 +881,12 @@
  (limit-memory-limited "einschränken")
  (limit-memory-megabytes "Megabytes")
 
+ ; the next two constants are used together in the limit memory dialog; they are inserted
+ ; one after another. The first one is shown in a bold font and the second is not.
+ ; (the first can be the empty string)
+ (limit-memory-warning-prefix "Warning: ")
+ (limit-memory-warning "Die Einstellung für uneingeschränkten Speicherverbrauch ist unsicher. Mit dieser Einstellung kann DrRacket sich nicht gegen Programme schützen, die zuviel Speicher allozieren - DrRacket könnte abstürzen.")
+ 
  (clear-error-highlight-menu-item-label "Fehlermarkierung entfernen")
  (clear-error-highlight-item-help-string "Entfernt die rosa Fehlermarkierung")
  (jump-to-next-error-highlight-menu-item-label "Zur nächsten Fehlermarkierung springen")
@@ -896,6 +909,8 @@
  (save-a-mzscheme-stand-alone-executable "Racket-Stand-Alone-Programmdatei speichern")
  (save-a-mred-distribution "GRacket-Distribution speichern")
  (save-a-mzscheme-distribution "Racket-Distribution speichern")
+
+ (error-creating-executable "Fehler beim Erzeugen der Stand-Alone-Programmdatei:") ;; this is suffixed with an error message ala error-display-handler
 
  (definitions-not-saved "Die Definitionen sind nicht gespeichert. Die Programmdatei wird von der letzten gespeicherten Version gezogen. Weitermachen?")
  (launcher "Launcher")
@@ -1054,17 +1069,41 @@
  (initial-language-category "Sprache am Anfang")
  (no-language-chosen "Keine Sprache ausgewählt")
 
+ (other-languages "Andere Sprachen")
+
  (module-language-name "Sprache aus Quelltext ermitteln")
- (module-language-one-line-summary "List die #lang-Zeile, um die tatsächliche Sprache zu ermitteln.")
+ (module-language-one-line-summary "Die #lang-Zeile spezifiziert die tatsächliche Sprache.")
   
  (module-language-auto-text "Automatisch Zeile mit #lang") ;; shows up in the details section of the module language
 
  ;; for the upper portion of the language dialog
- (use-language-in-source "Im Quelltext angegebene Sprache benutzen")
+ (the-racket-language "Die Sprache Racket")
  (choose-a-language "Sprache auswählen")
- (lang-in-source-discussion
- "Die Zeile mit \"#lang\" am Anfang eines Programms legt die Sprache fest. Das ist der präferierte Standard-Modus von DrRacket.")
- 
+
+ ;; the next two string constants appear in the
+ ;; language dialog with a list
+ ;; of example languages appearing between them
+ (racket-language-discussion "Am Anfang des Programms spezifiziert #lang den gewünschten Dialekt. Zum Beispiel:\n\n")
+ (racket-language-discussion-end "\n... und viele weitere")
+
+ ;; the next three string constants are put into a message-box dialog
+ ;; that appears when the user clicks on the example #lang languages
+ ;; in the language dialog. The first one always appears and then either
+ ;; the second or the third appears. The second one has the clicked
+ ;; on #lang line placed into the ~a, and third one has the 
+ ;; current #lang line in the first ~a and the clicked on in the second one.
+ ;; The two comments are separated by a blank line.
+ (racket-dialect-in-buffer-message "Racket-Dialekte werden normalerweise im Editor ausgewählt, nicht durch Auswahl eines Eintrags im Sprachendialog.")
+ (racket-dialect-add-new-#lang-line "Soll ich also “~a” am Anfang der Definitionen einfügen?")
+ (racket-dialect-replace-#lang-line "Ich sehe auch ein “~a” im Code; durch “~a” ersetzen?")
+ (racket-dialect-already-same-#lang-line "Es ist allerdings schon “~a” im Code; es ist also alles bereit fürs Programmieren!")
+
+ ;; in the dialog containing the above strings, one of these is a button that appears
+ (add-#lang-line "#lang-Zeile hinzufügen")
+ (replace-#lang-line "#lang-Zeile ersetzen")
+
+ ;; for the 'new drracket user' dialog
+ (use-language-in-source "Sprache, die im Code spezifiziert ist, benutzen")
 
   ;;; from the `not a language language' used initially in drscheme.
  (must-choose-language "DrRacket kann keine Programme verarbeiten, bis Sie eine Sprache auswählen.")
@@ -1582,4 +1621,14 @@
   (hide-defs/ints-label "Definitionen/Interaktionen-Beschriftung ausblenden") ;; popup menu
   (show-defs/ints-label "Definitionen/Interaktionen-Beschriftung einblenden") ;; preferences checkbox
 
+  ;; menu item in the 'edit' menu; applies to editors with programs in them
+  ;; (technically, editors that implement color:text<%>)
+  (spell-check-string-constants "String-Konstanten korrekturlesen")
+  (spelling-dictionaries "Wörterbücher für die Rechtschreibprüfung") ; (sub)menu whose items are the different possible dictionaries
+  (default-spelling-dictionary "Standard-Wörterbuch") ; first item in menu from previous line
+  (misspelled-text-color "Rechtschreibfehler in Textfarbe") ;; in the preferences dialog  
+  (cannot-find-ispell-or-aspell-path "aspell- bzw. ispell-Programm nicht gefunden")
+  ; puts the path to the spell program in the ~a and then the error message
+  ; is put following this string (with a blank line in between)
+  (spell-program-wrote-to-stderr-on-startup "Der Rechtschreibchecker (~a) hat eine Fehlermeldung ausgegeben:")
  )

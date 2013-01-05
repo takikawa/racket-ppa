@@ -48,7 +48,8 @@ If the namespace does not, they are colored the unbound color.
          "traversals.rkt"
          "annotate.rkt"
          "../tooltip.rkt"
-         "blueboxes-gui.rkt")
+         "blueboxes-gui.rkt"
+         framework/private/logging-timer)
 (provide tool@)
 
 (define orig-output-port (current-output-port))
@@ -86,6 +87,7 @@ If the namespace does not, they are colored the unbound color.
    'drracket:check-syntax-error-report-window-percentage 
    1/10
    number-between-zero-and-one?))
+(preferences:set-default 'drracket:syncheck:show-arrows? #t boolean?)
 
 (define (syncheck-add-to-preferences-panel parent)
   (color-prefs:build-color-selection-panel parent
@@ -725,7 +727,8 @@ If the namespace does not, they are colored the unbound color.
             (define/public (syncheck:add-arrow start-text start-pos-left start-pos-right
                                                end-text end-pos-left end-pos-right
                                                actual? level)
-              (when arrow-records
+              (when (and arrow-records
+                         (preferences:get 'drracket:syncheck:show-arrows?))
                 (when (add-to-bindings-table
                        start-text start-pos-left start-pos-right
                        end-text end-pos-left end-pos-right)
@@ -737,7 +740,8 @@ If the namespace does not, they are colored the unbound color.
             
             ;; syncheck:add-tail-arrow : text number text number -> void
             (define/public (syncheck:add-tail-arrow from-text from-pos to-text to-pos)
-              (when arrow-records
+              (when (and arrow-records
+                         (preferences:get 'drracket:syncheck:show-arrows?))
                 (let ([tail-arrow (make-tail-arrow to-text to-pos from-text from-pos)])
                   (add-to-range/key from-text from-pos (+ from-pos 1) tail-arrow #f #f)
                   (add-to-range/key to-text to-pos (+ to-pos 1) tail-arrow #f #f))))
@@ -969,7 +973,7 @@ If the namespace does not, they are colored the unbound color.
             ;; Starts or restarts a one-shot arrow draw timer
             (define/private (start-arrow-draw-timer delay-ms)
               (unless arrow-draw-timer
-                (set! arrow-draw-timer (make-object timer% (λ () (maybe-update-drawn-arrows)))))
+                (set! arrow-draw-timer (make-object logging-timer% (λ () (maybe-update-drawn-arrows)))))
               (send arrow-draw-timer start delay-ms #t))
             
             ;; this will be set to a time in the future if arrows shouldn't be drawn until then
@@ -1215,7 +1219,7 @@ If the namespace does not, they are colored the unbound color.
                          (loop (send (send admin get-snip) get-editor))
                          #f)])))
               (cond
-                [window
+                [(and window (< -10000 x-off 10000) (< -10000 y-off 10000))
                  (define (c n) (inexact->exact (round n)))
                  (define-values (gx gy) (send window client->screen (c x-off) (c y-off)))
                  (values gx gy gx gy)]
@@ -1437,6 +1441,7 @@ If the namespace does not, they are colored the unbound color.
       (mixin (drracket:unit:tab<%>) ()
         (inherit is-current-tab? get-defs get-frame)
         
+        (define report-error-text-has-something? #f)
         (define report-error-text (new (fw:text:ports-mixin fw:racket:text%)))
         (define error-report-visible? #f)
         (send report-error-text auto-wrap #t)
@@ -1446,7 +1451,13 @@ If the namespace does not, they are colored the unbound color.
         (define/public (get-error-report-text) report-error-text)
         (define/public (get-error-report-visible?) error-report-visible?)
         (define/public (turn-on-error-report) (set! error-report-visible? #t))
-        (define/public (turn-off-error-report) (set! error-report-visible? #f))
+        (define/public (turn-off-error-report) 
+          (when error-report-visible?
+            (send report-error-text clear-output-ports)
+            (send report-error-text lock #f)
+            (send report-error-text delete/io 0 (send report-error-text last-position))
+            (send report-error-text lock #t)
+            (set! error-report-visible? #f)))
         (define/augment (clear-annotations)
           (inner (void) clear-annotations)
           (syncheck:clear-error-message)
@@ -1456,18 +1467,13 @@ If the namespace does not, they are colored the unbound color.
           ;; this code is also run by syncheck:clear-arrows, which
           ;; used to be called here (indirectly by syncheck:clear-highlighting)
           (send (get-defs) syncheck:clear-coloring))
-        
+
         (define/public (syncheck:clear-error-message)
-          (send report-error-text clear-output-ports)
-          (send report-error-text lock #f)
-          (send report-error-text delete/io 0 (send report-error-text last-position))
-          (send report-error-text lock #t)
-          (when error-report-visible?
-            (cond
-              [(is-current-tab?)
-               (send (get-frame) hide-error-report)]
-              [else
-               (set! error-report-visible? #f)])))
+          (define old-error-report-visible? error-report-visible?)
+          (turn-off-error-report)
+          (when old-error-report-visible?
+            (when (is-current-tab?)
+              (send (get-frame) hide-error-report))))
         
         (define/public (syncheck:clear-highlighting)
           (let ([definitions (get-defs)])
@@ -1581,6 +1587,7 @@ If the namespace does not, they are colored the unbound color.
             (send (send defs-text get-tab) add-bkg-running-color 'syncheck "orchid" cs-syncheck-running)
             (send defs-text syncheck:init-arrows)
             (let loop ([val val]
+                       [start-time (current-inexact-milliseconds)]
                        [i 0])
               (cond
                 [(null? val)
@@ -1588,40 +1595,42 @@ If the namespace does not, they are colored the unbound color.
                  (send defs-text syncheck:update-drawn-arrows)
                  (send (send defs-text get-tab) remove-bkg-running-color 'syncheck)
                  (set-syncheck-running-mode #f)]
-                [(= i 500)
+                [(and (i . > . 0)  ;; check i just in case things are really strange
+                      (20 . <= . (- (current-inexact-milliseconds) start-time)))
                  (queue-callback
                   (λ ()
                     (when (unbox bx)
-                      (loop val 0)))
+                      (log-timeline "continuing replay-compile-comp-trace"
+                                    (loop val (current-inexact-milliseconds) 0))))
                   #f)]
                 [else
                  (process-trace-element defs-text (car val))
-                 (loop (cdr val) (+ i 1))]))))
+                 (loop (cdr val) start-time (+ i 1))]))))
         
         (define/private (process-trace-element defs-text x)
           ;; using 'defs-text' all the time is wrong in the case of embedded editors,
           ;; but they already don't work and we've arranged for them to not appear here ....
           (match x
-            [`(syncheck:add-arrow ,start-text ,start-pos-left ,start-pos-right
-                                  ,end-text ,end-pos-left ,end-pos-right
-                                  ,actual? ,level)
+            [`#(syncheck:add-arrow ,start-pos-left ,start-pos-right
+                                   ,end-pos-left ,end-pos-right
+                                   ,actual? ,level)
              (send defs-text syncheck:add-arrow
                    defs-text start-pos-left start-pos-right
                    defs-text end-pos-left end-pos-right 
                    actual? level)]
-            [`(syncheck:add-tail-arrow ,from-text ,from-pos ,to-text ,to-pos)
+            [`#(syncheck:add-tail-arrow ,from-pos ,to-pos)
              (send defs-text syncheck:add-tail-arrow defs-text from-pos defs-text to-pos)]
-            [`(syncheck:add-mouse-over-status ,text ,pos-left ,pos-right ,str)
+            [`#(syncheck:add-mouse-over-status ,pos-left ,pos-right ,str)
              (send defs-text syncheck:add-mouse-over-status defs-text pos-left pos-right str)]
-            [`(syncheck:add-background-color ,text ,color ,start ,fin)
+            [`#(syncheck:add-background-color ,color ,start ,fin)
              (send defs-text syncheck:add-background-color defs-text color start fin)]
-            [`(syncheck:add-jump-to-definition ,text ,start ,end ,id ,filename)
+            [`#(syncheck:add-jump-to-definition ,start ,end ,id ,filename)
              (send defs-text syncheck:add-jump-to-definition defs-text start end id filename)]
-            [`(syncheck:add-require-open-menu ,text ,start-pos ,end-pos ,file)
+            [`#(syncheck:add-require-open-menu ,start-pos ,end-pos ,file)
              (send defs-text syncheck:add-require-open-menu defs-text start-pos end-pos file)]
-            [`(syncheck:add-docs-menu ,text ,start-pos ,end-pos ,key ,the-label ,path ,definition-tag ,tag)
+            [`#(syncheck:add-docs-menu,start-pos ,end-pos ,key ,the-label ,path ,definition-tag ,tag)
              (send defs-text syncheck:add-docs-menu defs-text start-pos end-pos key the-label path definition-tag tag)]
-            [`(syncheck:add-rename-menu ,id-as-sym ,to-be-renamed/poss ,name-dup-pc ,name-dup-id)
+            [`#(syncheck:add-rename-menu ,id-as-sym ,to-be-renamed/poss ,name-dup-pc ,name-dup-id)
              (define other-side-dead? #f)
              (define (name-dup? name) 
                (cond
@@ -1639,7 +1648,7 @@ If the namespace does not, they are colored the unbound color.
                      #f])]))
              (define to-be-renamed/poss/fixed
                (for/list ([lst (in-list to-be-renamed/poss)])
-                 (list defs-text (list-ref lst 1) (list-ref lst 2))))
+                 (list defs-text (list-ref lst 0) (list-ref lst 1))))
              (send defs-text syncheck:add-rename-menu id-as-sym to-be-renamed/poss/fixed 
                    name-dup?)]))
         
@@ -2021,7 +2030,22 @@ If the namespace does not, they are colored the unbound color.
       
       (send keymap add-function "show/hide blue boxes in upper-right corner"
             (λ (txt evt)
-              (send txt toggle-syncheck-docs)))
+              (when (is-a? txt editor<%>)
+                (let loop ([ed txt])
+                  (define c (send ed get-canvas))
+                  (cond
+                    [c (let loop ([w c])
+                         (cond
+                           [(is-a? w drracket:unit:frame<%>)
+                            (send (send w get-definitions-text) toggle-syncheck-docs)]
+                           [(is-a? w area<%>)
+                            (loop (send w get-parent))]))]
+                    [else
+                     (define admin (send ed get-admin))
+                     (when (is-a? admin editor-snip-editor-admin<%>)
+                       (define admin2 (send (send admin get-snip) get-admin))
+                       (when admin2
+                         (loop (send admin2 get-editor))))])))))
       (send keymap map-function "f2" "show/hide blue boxes in upper-right corner"))
     
     ;; find-syncheck-text : text% -> (union #f (is-a?/c syncheck-text<%>))
@@ -2066,9 +2090,12 @@ If the namespace does not, they are colored the unbound color.
     (drracket:module-language-tools:add-online-expansion-handler
      online-comp.rkt
      'go
-     (λ (defs-text val) (send (send (send defs-text get-canvas) get-top-level-window)
-                              replay-compile-comp-trace
-                              defs-text 
-                              val)))))
+     (λ (defs-text val) 
+       (log-timeline
+        "replace-compile-comp-trace"
+        (send (send (send defs-text get-tab) get-frame)
+              replay-compile-comp-trace
+              defs-text 
+              val))))))
 
 (define-runtime-path online-comp.rkt "online-comp.rkt")

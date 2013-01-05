@@ -5,10 +5,14 @@
 (provide (all-from-out "ffi-constants.rkt")
          (protect-out (all-defined-out)))
 
-(define-ffi-definer define-sqlite
+(define sqlite-lib
   (case (system-type)
-    ((windows) (ffi-lib "sqlite3.dll"))
-    (else (ffi-lib "libsqlite3" '("0" #f)))))
+    [(windows) (ffi-lib "sqlite3.dll" #:fail (lambda () #f))]
+    [else (ffi-lib "libsqlite3" '("0" #f) #:fail (lambda () #f))]))
+
+(define-ffi-definer define-sqlite
+  sqlite-lib
+  #:default-make-fail make-not-available)
 
 ; Types
 (define-cpointer-type _sqlite3_database)
@@ -21,6 +25,13 @@
 (define-sqlite sqlite3_libversion_number
   (_fun -> _int))
 
+(define-sqlite sqlite3_open
+  (_fun (filename ignored-flags) ::
+        (filename : _bytes)
+        (db : (_ptr o _sqlite3_database))
+        -> (result : _int)
+        -> (values db result)))
+
 (define-sqlite sqlite3_open_v2
   (_fun (filename flags) ::
         (filename : _bytes)
@@ -28,7 +39,8 @@
         (flags : _int)
         (vfs : _pointer = #f)
         -> (result : _int)
-        -> (values db result)))
+        -> (values db result))
+  #:fail (lambda () sqlite3_open))
 
 (define-sqlite sqlite3_close
   (_fun _sqlite3_database
@@ -45,6 +57,16 @@
     (ptr-set! rawcopy _byte n 0)
     copy))
 
+(define-sqlite sqlite3_prepare
+  (_fun (db sql) ::
+        (db : _sqlite3_database)
+        (sql-buffer : _bytes = (copy-buffer sql))
+        ((bytes-length sql-buffer) : _int)
+        (statement : (_ptr o _sqlite3_statement/null))
+        (tail : (_ptr o _bytes)) ;; points into sql-buffer (atomic-interior)
+        -> (result : _int)
+        -> (values result statement (and tail (positive? (bytes-length tail))))))
+
 (define-sqlite sqlite3_prepare_v2
   (_fun (db sql) ::
         (db : _sqlite3_database)
@@ -54,11 +76,15 @@
         (statement : (_ptr o _sqlite3_statement/null))
         (tail : (_ptr o _bytes)) ;; points into sql-buffer (atomic-interior)
         -> (result : _int)
-        -> (values result statement (and tail (positive? (bytes-length tail))))))
+        -> (values result statement (and tail (positive? (bytes-length tail)))))
+  #:fail (lambda () sqlite3_prepare))
 
 (define-sqlite sqlite3_finalize
   (_fun _sqlite3_statement
-        -> _int))
+        -> _int
+        ;; sqlite3_finalize returns error code of last stmt execution,
+        ;; not of finalization; so just ignore
+        -> (void)))
 
 (define-sqlite sqlite3_bind_parameter_count
   (_fun _sqlite3_statement

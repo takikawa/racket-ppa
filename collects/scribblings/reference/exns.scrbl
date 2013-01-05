@@ -3,6 +3,8 @@
 
 @title[#:tag "exns"]{Exceptions}
 
+@guideintro["exns"]{exceptions}
+
 See @secref["exn-model"] for information on the Racket exception
 model. It is based on a proposal by Friedman, Haynes, and Dybvig
 @cite["Friedman95"].
@@ -247,10 +249,15 @@ is not @racket[#f], and if @racket[index] is between @racket[alt-lower-bound]
 and @racket[upper-bound], then the error is report as @racket[index] being less
 than the ``starting'' index @racket[lower-bound].
 
+Since @racket[upper-bound] is inclusive, a typical value is @emph{one
+less than} the size of a collection---for example, @racket[(sub1
+(vector-length _vec))], @racket[(sub1 (length _lst))], and so on.
+
 @examples[
-(raise-range-error 'vector-ref "vector" "starting " 5 #(1 2 3) 0 3)
-(raise-range-error 'vector-ref "vector" "ending " 5 #(1 2 3) 0 3)
-(raise-range-error 'vector-ref "vector" "ending " 1 #(1 2 3) 2 3 0)
+(raise-range-error 'vector-ref "vector" "starting " 5 #(1 2 3 4) 0 3)
+(raise-range-error 'vector-ref "vector" "ending " 5 #(1 2 3 4) 0 3)
+(raise-range-error 'vector-ref "vector" "" 3 #() 0 -1)
+(raise-range-error 'vector-ref "vector" "ending " 1 #(1 2 3 4) 2 3 0)
 ]}
 
 
@@ -463,7 +470,9 @@ predicate, because the @racket[exn:break] exception typically should
 not be caught (unless it will be re-raised to cooperatively
 break). Beware, also, of catching and discarding exceptions, because
 discarding an error message can make debugging unnecessarily
-difficult.}
+difficult; instead of discarding an error message, consider logging it
+via @racket[log-error] or a logging form created by
+@racket[define-logger].}
 
 @defform[(with-handlers* ([pred-expr handler-expr] ...)
            body ...+)]{
@@ -580,7 +589,37 @@ structure is affected by the parameter. The default is @racket[#t].}
 The base @tech{structure type} for exceptions. The @racket[message]
 field contains an error message, and the @racket[continuation-marks]
 field contains the value produced by @racket[(current-continuation-marks)]
-immediately before the exception was raised.}
+immediately before the exception was raised.
+
+Exceptions raised by Racket form a hierarchy under @racket[exn]:
+
+@racketblock[
+exn
+  exn:fail
+    exn:fail:contract
+      exn:fail:contract:arity
+      exn:fail:contract:divide-by-zero
+      exn:fail:contract:non-fixnum-result
+      exn:fail:contract:continuation
+      exn:fail:contract:variable
+    exn:fail:syntax
+      exn:fail:syntax:unbound
+    exn:fail:read
+      exn:fail:read:eof
+      exn:fail:read:non-char
+    exn:fail:filesystem
+      exn:fail:filesystem:exists
+      exn:fail:filesystem:version
+      exn:fail:filesystem:errno
+    exn:fail:network
+      exn:fail:network:errno
+    exn:fail:out-of-memory
+    exn:fail:unsupported
+    exn:fail:user
+  exn:break
+    exn:break:hang-up
+    exn:break:terminate
+]}
 
 @defstruct[(exn:fail exn) ()
            #:inspector #f]{
@@ -672,11 +711,30 @@ already.}
 
 Raised for a version-mismatch error when loading an extension.}
 
+@defstruct[(exn:fail:filesystem:errno exn:fail:filesystem) ([errno (cons/c exact-integer? (or/c 'posix 'windows 'gai))])
+           #:inspector #f]{
+
+Raised for a filesystem error for which a system error code is
+available. The symbol part of an @racket[errno] field indicates the
+category of the error code: @racket['posix] indicates a C/Posix
+@tt{errno} value, @racket['windows] indicates a Windows system error
+code (under Windows, only), and @racket['gai] indicates a
+@tt{getaddrinfo} error code (which shows up only in
+@racket[exn:fail:network:errno] exceptions for operations that resolve
+hostnames, but it allowed in @racket[exn:fail:filesystem:errno]
+instances for consistency).}
 
 @defstruct[(exn:fail:network exn:fail) ()
            #:inspector #f]{
 
 Raised for TCP and UDP errors.}
+
+@defstruct[(exn:fail:network:errno exn:fail:network) ([errno (cons/c exact-integer? (or/c 'posix 'windows 'gai))])
+           #:inspector #f]{
+
+Raised for a TCP or UDP error for which a system error code is
+available, where the @racket[errno] field is as for
+@racket[exn:fail:filesystem:errno].}
 
 
 @defstruct[(exn:fail:out-of-memory exn:fail) ()

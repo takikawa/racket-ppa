@@ -176,11 +176,11 @@ section.
 
 @; ----------------------------------------------------------------------
 
-@section{Continuations}
+@section[#:tag "conts"]{Continuations}
 
 
 A @deftech{continuation} is a value that encapsulates a piece of an
-expression context. The @racket[call-with-composable-continuation]
+expression's evaluation context. The @racket[call-with-composable-continuation]
 function captures the @deftech{current continuation} starting outside
 the current function call and running up to the nearest enclosing
 prompt. (Keep in mind that each @tech{REPL} interaction is implicitly

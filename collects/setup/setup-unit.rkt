@@ -297,10 +297,16 @@
                   maj
                   min)))
 
+  (define (skip-collection-directory? collection)
+    ;; Skiping ".git" or ".svn" makes it cleaner to use a git of subversion
+    ;; checkout as a collection directory
+    (regexp-match? #rx"[.](git|svn)$" (path->bytes collection)))
+
   ;; Add in all non-planet collections:
   (for ([cp (current-library-collection-paths)]
         #:when (directory-exists? cp)
         [collection (directory-list cp)]
+        #:unless (skip-collection-directory? collection)
         #:when (directory-exists? (build-path cp collection)))
     (collection-cc! (list collection)
                     #:path (build-path cp collection)))
@@ -317,6 +323,7 @@
     (for ([cp (in-list (links #:root? #t #:user? #f))]
           #:when (directory-exists? cp)
           [collection (directory-list cp)]
+          #:unless (skip-collection-directory? collection)
           #:when (directory-exists? (build-path cp collection)))
       (cc! (list collection)
            #:path (build-path cp collection))))
@@ -336,6 +343,7 @@
     (for ([cp (in-list (links #:root? #t))]
           #:when (directory-exists? cp)
           [collection (directory-list cp)]
+          #:unless (skip-collection-directory? collection)
           #:when (directory-exists? (build-path cp collection)))
       (cc! (list collection) #:path (build-path cp collection))))
 
@@ -641,7 +649,13 @@
         (define fn (build-path p "info-domain" "compiled" "cache.rktd"))
         (when (file-exists? fn)
           (with-handlers ([exn:fail:filesystem? (warning-handler (void))])
-            (with-output-to-file fn void #:exists 'truncate/replace))))))
+            (with-output-to-file fn void #:exists 'truncate/replace))))
+      (setup-printf #f "deleting documentation databases")
+      (for ([d (in-list (list (find-doc-dir) (find-user-doc-dir)))])
+        (when d
+          (define f (build-path d "docindex.sqlite"))
+          (when (file-exists? f)
+            (delete-file f))))))
 
   (define (do-install-part part)
     (when (if (eq? part 'post) (call-post-install) (call-install))
@@ -962,7 +976,9 @@
             (with-output-to-file p #:exists 'truncate/replace
               (lambda ()
                 (write (hash-map ht cons))
-                (newline))))))))
+                (newline)))))))
+    ;; Flush cached state in the current namespace:
+    (reset-relevant-directories-state!))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;                       Docs                    ;;
@@ -990,9 +1006,7 @@
     (set-doc:verbose)
     (with-handlers ([exn:fail?
                      (lambda (exn)
-                       (setup-printf #f "docs failure: ~a" (exn->string exn))
-                       (for ([x (in-list (continuation-mark-set->context (exn-continuation-marks exn)))])
-                         (setup-printf #f "~s" x)))])
+                       (setup-printf #f "docs failure: ~a" (exn->string exn)))])
       (define auto-start-doc?
         (and (not (null? (archives)))
              (archive-implies-reindex)))

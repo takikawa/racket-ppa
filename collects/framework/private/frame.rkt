@@ -253,7 +253,10 @@
 (define current-icon (make-parameter #f))
 
 (define size-pref<%>
-  (interface (basic<%>)))
+  (interface (basic<%>)
+    adjust-size-when-monitor-setup-changes?))
+
+(define-local-member-name monitor-setup-changed)
 
 (define size-pref-mixin
   (mixin (basic<%>) (size-pref<%>)
@@ -261,34 +264,65 @@
                 [position-preferences-key #f])
     (inherit is-maximized?)
     (define/override (on-size w h)
-      (cond
-        [(is-maximized?)
-         (define old (preferences:get size-preferences-key)) 
-         (preferences:set size-preferences-key (cons #t (cdr old)))]
-        [else
-         (preferences:set size-preferences-key (list #f w h))])
+      
+      ;; if the monitor state is currently fluxuating, then
+      ;; don't save preferences values, since the OS is doing
+      ;; some adjustments for us.
+      (when (or (equal? (compute-current-monitor-information)
+                        latest-monitor-information)
+                (not (adjust-size-when-monitor-setup-changes?)))
+        (define old-table (preferences:get size-preferences-key)) 
+        (define new-val
+          (cond
+            [(is-maximized?)
+             (define old (or (hash-ref old-table latest-monitor-information #f)
+                             (hash-ref old-table #f)))
+             (cons #t (cdr old))]
+            [else
+             (list #f w h)]))
+        (preferences:set size-preferences-key 
+                         (hash-set*
+                          old-table
+                          latest-monitor-information new-val
+                          #f new-val)))
       (super on-size w h))
-    
+      
     (define on-move-timer-arg-x #f)
     (define on-move-timer-arg-y #f)
     (define on-move-timer-arg-max? #f)
-    (define on-move-timer #f)
+    (define on-move-callback-running? #f)
     (define/override (on-move x y)
       (when position-preferences-key
-        (unless on-move-timer
-          (set! on-move-timer 
-                (new timer% 
-                     [notify-callback
-                      (λ () 
-                        (unless on-move-timer-arg-max?
-                          (define-values (monitor delta-x delta-y) (find-closest on-move-timer-arg-x on-move-timer-arg-y))
-                          (preferences:set position-preferences-key (list monitor delta-x delta-y))))])))
+        (unless on-move-callback-running?
+          (set! on-move-callback-running? #t)
+          (queue-callback
+           (λ () 
+             (set! on-move-callback-running? #f)
+             (unless on-move-timer-arg-max?
+               
+               ;; if the monitor state is currently fluxuating, then
+               ;; don't save preferences values, since the OS is doing
+               ;; some adjustments for us.
+               (when (or (equal? (compute-current-monitor-information)
+                                 latest-monitor-information)
+                         (not (adjust-size-when-monitor-setup-changes?)))
+                 (define-values (monitor delta-x delta-y) (find-closest on-move-timer-arg-x on-move-timer-arg-y))
+                 (define old-table (preferences:get position-preferences-key))
+                 (define val (list monitor delta-x delta-y))
+                 (preferences:set position-preferences-key
+                                  (hash-set*
+                                   old-table
+                                   latest-monitor-information val
+                                   #f val)))))
+           #f))
         (set! on-move-timer-arg-x x)
         (set! on-move-timer-arg-y y)
-        (set! on-move-timer-arg-max? (is-maximized?))
-        (send on-move-timer stop)
-        (send on-move-timer start 250 #t))
+        (set! on-move-timer-arg-max? (is-maximized?)))
       (super on-move x y))
+    
+    (define/augment (display-changed)
+      (restart-montior-information-timer)
+      (inner (void) display-changed))
     
     ;; if all of the offsets have some negative direction, then
     ;; just keep the thing relative to the original montior; otherwise
@@ -320,12 +354,16 @@
                        (* delta-y delta-y)))))
     
     (inherit maximize)
-    (let ()
-      (define-values (maximized? w h) (apply values (preferences:get size-preferences-key)))
+    (define/private (get-sizes/maximzed)
+      (define size-table (preferences:get size-preferences-key))
+      (define-values (maximized? w h) (apply values (or (hash-ref size-table latest-monitor-information #f)
+                                                        (hash-ref size-table #f))))
       (define-values (x y origin-still-visible?)
         (cond
           [position-preferences-key
-           (define-values (monitor delta-x delta-y) (apply values (preferences:get position-preferences-key)))
+           (define pos-table (preferences:get position-preferences-key))
+           (define-values (monitor delta-x delta-y) (apply values (or (hash-ref pos-table latest-monitor-information #f)
+                                                                      (hash-ref pos-table #f))))
            (define-values (l t) (get-display-left-top-inset #:monitor monitor))
            (define-values (mw mh) (get-display-size #:monitor monitor))
            (if (and l t mw mh)
@@ -353,21 +391,45 @@
                     [y 0])
            (cond
              [(zero? n)
-              (super-new)]
+              (values #f #f #f #f maximized?)]
              [(already-one-there? x y w h)
               (define-values (dw dh) (get-display-size #:monitor 0))
               (define sw (- dw w))
               (define sh (- dh h))
               (if (or (<= sw 0)
                       (<= sh 0))
-                (super-new)
+                (values #f #f #f #f maximized?)
                 (loop (- n 1) 
                       (modulo (+ x 20) (- dw w))
                       (modulo (+ y 20) (- dh h))))]
              [else
-              (super-new [width w] [height h] [x x] [y y])]))]
+              (values w h x y maximized?)]))]
         [else
-         (super-new [width w] [height h] [x x] [y y])])
+         (values w h x y maximized?)]))
+    
+    (define/public (adjust-size-when-monitor-setup-changes?) #f)
+    
+    (inherit begin-container-sequence
+             end-container-sequence
+             move
+             resize)
+    (define/public (monitor-setup-changed) 
+      (when (adjust-size-when-monitor-setup-changes?)
+        (define-values (w h x y maximized?) (get-sizes/maximzed))
+        (when (and w h x y)
+          (begin-container-sequence)
+          (move x y)
+          (resize w h)
+          (when maximized?
+            (maximize #t))
+          (end-container-sequence))))
+    
+    (let-values ([(w h x y maximized?) (get-sizes/maximzed)])
+      (cond
+        [(and w h x y)
+         (super-new [width w] [height h] [x x] [y y])]
+        [else
+         (super-new)])
       (when maximized?
         (maximize #t)))))
 
@@ -375,16 +437,64 @@
                          #:maximized? [maximized? #f]
                          #:position-preferences [position-preferences-key #f])
   (preferences:set-default size-preferences-key 
-                           (list maximized? w h)
-                           (list/c boolean?
-                                   exact-nonnegative-integer?
-                                   exact-nonnegative-integer?))
+                           (hash #f (list maximized? w h))
+                           (hash/c (or/c (listof (list/c any/c any/c any/c any/c))
+                                         #f)
+                                   (list/c boolean?
+                                           exact-nonnegative-integer?
+                                           exact-nonnegative-integer?)
+                                   #:immutable #t
+                                   #:flat? #t))
   (when position-preferences-key
     (preferences:set-default position-preferences-key 
-                             (list 0 0 0)
-                             (list/c exact-nonnegative-integer?
-                                     exact-integer?
-                                     exact-integer?))))
+                             (hash #f (list 0 0 0))
+                             (hash/c (or/c (listof (list/c any/c any/c any/c any/c))
+                                           #f)
+                                     (list/c exact-nonnegative-integer?
+                                             exact-integer?
+                                             exact-integer?)
+                                     #:immutable #t
+                                     #:flat? #t))))
+
+(define (compute-current-monitor-information)
+  (filter
+   values
+   (for/list ([m (in-range (get-display-count))])
+     (define-values (left top) (get-display-left-top-inset #:monitor m))
+     (define-values (width height) (get-display-size #:monitor m))
+     (and left top width height
+          (list left top width height)))))
+
+(define latest-monitor-information (compute-current-monitor-information))
+(define pending-monitor-information #f)
+(define montior-information-timer
+  (new timer%
+       [notify-callback
+        (λ ()
+          (define new-monitor-information (compute-current-monitor-information))
+          (cond
+            [pending-monitor-information
+             (cond
+               [(equal? pending-monitor-information new-monitor-information)
+                (set! pending-monitor-information #f)
+                (set! latest-monitor-information new-monitor-information)
+                (queue-callback
+                 (λ ()
+                   (for ([frame (in-list (get-top-level-windows))])
+                     (when (is-a? frame size-pref<%>)
+                       (send frame monitor-setup-changed)))
+                   #f))]
+               [else
+                (set! pending-monitor-information new-monitor-information)
+                (restart-montior-information-timer)])]
+            [else
+             (unless (equal? latest-monitor-information new-monitor-information)
+               (set! pending-monitor-information new-monitor-information)
+               (restart-montior-information-timer))]))]))
+(define (restart-montior-information-timer)
+  (send montior-information-timer stop)
+  (send montior-information-timer start 250 #t))
+
 
 (define register-group<%> (interface ()))
 (define register-group-mixin
@@ -796,9 +906,14 @@
              [ec (new position-canvas%
                       [parent panel]
                       [button-up
-                       (λ ()
-                         (collect-garbage)
-                         (update-memory-text))]
+                       (λ (evt)
+                         (cond
+                           [(or (send evt get-alt-down)
+                                (send evt get-control-down))
+                            (dynamic-require 'tests/drracket/follow-log #f)]
+                           [else
+                            (collect-garbage)
+                            (update-memory-text)]))]
                       [init-width "99.99 MB"])])
         (set! memory-canvases (cons ec memory-canvases))
         (update-memory-text)
@@ -890,6 +1005,7 @@
     (inherit min-client-height min-client-width get-dc get-client-size refresh)
     (init init-width)
     (init-field [button-up #f])
+    (init-field [char-typed void])
     (define str "")
     (define/public (set-str _str)
       (set! str _str)
@@ -913,7 +1029,11 @@
           (let-values ([(cw ch) (get-client-size)])
             (when (and (<= (send evt get-x) cw)
                        (<= (send evt get-y) ch))
-              (button-up))))))
+              (if (procedure-arity-includes? button-up 1)
+                  (button-up evt)
+                  (button-up)))))))
+    (define/override (on-char evt)
+      (char-typed evt))
     (super-new (style '(transparent no-focus)))
     (let ([dc (get-dc)])
       (let-values ([(_1 th _2 _3) (send dc get-text-extent str)])
@@ -1028,7 +1148,9 @@
     (define/private (update-macro-recording-icon)
       (unless (eq? (send macro-recording-message is-shown?)
                    macro-recording?)
-        (send macro-recording-message show macro-recording?)))
+        (if macro-recording?
+            (add-uncommon-child macro-recording-message)
+            (remove-uncommon-child macro-recording-message))))
     (define/public (set-macro-recording on?)
       (set! macro-recording? on?)
       (update-macro-recording-icon))
@@ -1039,16 +1161,16 @@
              (λ ()
                (unless (eq? anchor-last-state? #f)
                  (set! anchor-last-state? #f)
-                 (send anchor-message show #f)))])
+                 (remove-uncommon-child anchor-message)))])
         (cond
           [info-edit
            (let ([anchor-now? (send info-edit get-anchor)])
              (unless (eq? anchor-now? anchor-last-state?)
                (cond
                  [(object? anchor-message)
-                  (send anchor-message
-                        show
-                        anchor-now?)
+                  (if anchor-now?
+                      (add-uncommon-child anchor-message)
+                      (remove-uncommon-child anchor-message))
                   (set! anchor-last-state? anchor-now?)]
                  [else (failed)])))]
           [else
@@ -1062,16 +1184,16 @@
             [failed
              (λ ()
                (set! overwrite-last-state? #f)
-               (send overwrite-message show #f))])
+               (remove-uncommon-child overwrite-message))])
         (cond
           [info-edit
            (let ([overwrite-now? (send info-edit get-overwrite-mode)])
              (unless (eq? overwrite-now? overwrite-last-state?)
                (cond
                  [(object? overwrite-message)
-                  (send overwrite-message
-                        show
-                        overwrite-now?)
+                  (if overwrite-now?
+                      (add-uncommon-child overwrite-message)
+                      (remove-uncommon-child overwrite-message))
                   (set! overwrite-last-state? overwrite-now?)]
                  [else
                   (failed)])))]
@@ -1112,7 +1234,7 @@
                                  [extra-menu-items (λ (menu) (add-line-number-menu-items menu))]))
     (define position-canvas (new position-canvas% 
                                  [parent position-parent] 
-                                 [init-width "000:00-000:00"]))
+                                 [init-width "1:1"]))
     (define/private (change-position-edit-contents str)
       (send position-canvas set-str str))
     
@@ -1130,37 +1252,43 @@
           (λ (l)
             (cons file-text-mode-msg-parent (remq file-text-mode-msg-parent l))))
     
-    (define-values (anchor-message
-                    overwrite-message 
-                    macro-recording-message)
-      (let* ([anchor-message
-              (new message%
-                   [font small-control-font]
-                   [label (string-constant auto-extend-selection)]
-                   [parent (get-info-panel)])]
-             [overwrite-message 
-              (new message%
-                   [font small-control-font]
-                   [label (string-constant overwrite)]
-                   [parent (get-info-panel)])]
-             [macro-recording-message
-              (new message%
-                   [label "c-x;("]
-                   [font small-control-font]
-                   [parent (get-info-panel)])]
-             [msgs (list anchor-message
-                         overwrite-message
-                         macro-recording-message)])
-        (send (get-info-panel) change-children
-              (λ (l) (append msgs (remq* msgs l))))
-        (values anchor-message
-                overwrite-message 
-                macro-recording-message)))
+    (define uncommon-parent (new horizontal-panel%
+                                 [parent (get-info-panel)]
+                                 [stretchable-width #f]))
     
+    (send (get-info-panel) change-children
+          (λ (l) (cons uncommon-parent (remq uncommon-parent l))))
+    (define anchor-message
+      (new message%
+           [font small-control-font]
+           [label (string-constant auto-extend-selection)]
+           [parent uncommon-parent]))
+    (define overwrite-message 
+      (new message%
+           [font small-control-font]
+           [label (string-constant overwrite)]
+           [parent uncommon-parent]))
+    (define macro-recording-message
+      (new message%
+           [label "c-x;("]
+           [font small-control-font]
+           [parent uncommon-parent]))
+    (define/private (remove-uncommon-child c)
+      (send uncommon-parent change-children
+            (λ (l) (remq c l))))
+    (define/private (add-uncommon-child c)
+      (define (child->num c)
+        (cond
+          [(eq? c anchor-message) 0]
+          [(eq? c overwrite-message) 1]
+          [(eq? c macro-recording-message) 2]))
+      (send uncommon-parent change-children
+            (λ (l) (sort (cons c (remq c l))
+                         <
+                         #:key child->num))))
+
     (inherit determine-width)
-    (send macro-recording-message show #f)
-    (send anchor-message show #f)
-    (send overwrite-message show #f)
+    (send uncommon-parent change-children (λ (l) '()))
     (editor-position-changed)
     (use-file-text-mode-changed)))
 
@@ -1556,11 +1684,12 @@
 
 (define delegate<%>
   (interface (status-line<%> text<%>)
-    get-delegated-text
     delegated-text-shown?
     hide-delegated-text
     show-delegated-text
-    delegate-moved))
+    delegate-moved
+    set-delegated-text
+    get-delegated-text))
 
 (define delegatee-editor-canvas%
   (class (canvas:color-mixin canvas:basic%)
@@ -1595,12 +1724,12 @@
 
 (define delegatee-text%
   (class* text:basic% (delegatee-text<%>)
-    (inherit get-admin)
     (define start-para #f)
     (define end-para #f)
     (define view-x-b (box 0))
     (define view-width-b (box 0))
-    (inherit paragraph-start-position paragraph-end-position 
+    (inherit get-admin
+             paragraph-start-position paragraph-end-position 
              position-location invalidate-bitmap-cache scroll-to-position
              get-visible-position-range position-paragraph
              last-position)
@@ -1637,15 +1766,32 @@
                   [(v-end-para . <= . end-para)
                    (scroll-to-position (paragraph-end-position end-para))]
                   [else (void)]))))
-          
+          (define the-l #f)
+          (define the-t #f)
+          (define the-r #f)
+          (define the-b #f)
           (when (and old-start-para old-end-para)
             (let-values ([(x y w h) (get-rectangle old-start-para old-end-para)])
               (when x
-                (invalidate-bitmap-cache x y w h))))
+                (set! the-l x)
+                (set! the-t y)
+                (set! the-r (+ x w))
+                (set! the-b (+ y h)))))
           (when (and start-para end-para)
             (let-values ([(x y w h) (get-rectangle start-para end-para)])
-              (when x
-                (invalidate-bitmap-cache x y w h)))))))
+              (cond
+                [(and x the-l)
+                 (set! the-l (min x the-l))
+                 (set! the-t (min y the-t))
+                 (set! the-r (max the-r (+ x w)))
+                 (set! the-b (max the-b (+ y h)))]
+                [x
+                 (set! the-l x)
+                 (set! the-t y)
+                 (set! the-r (+ x w))
+                 (set! the-b (+ y h))])))
+          (when the-l
+            (invalidate-bitmap-cache the-l the-t (- the-r the-l) (- the-b the-t))))))
     
     (define/override (on-paint before? dc left top right bottom dx dy draw-caret)
       (when (and before?
@@ -1710,7 +1856,20 @@
 (define delegate-mixin
   (mixin (status-line<%> text<%>) (delegate<%>)
     
-    (define/public (get-delegated-text) (get-editor))
+    (define delegated-text #f)
+    (define/public-final (get-delegated-text) delegated-text)
+    (define/public-final (set-delegated-text t) 
+      (unless (or (not t) (is-a? t text:delegate<%>))
+        (error 'set-delegated-text 
+               "expected either #f or a text:delegate<%> object, got ~e" 
+               t))
+      (unless (eq? delegated-text t)
+        (set! delegated-text t)
+        (when shown?
+          (unless (send (get-delegated-text) get-delegate)
+            (send (get-delegated-text) set-delegate 
+                  (new delegatee-text%)))
+          (send delegate-ec set-editor (send (get-delegated-text) get-delegate)))))
     
     [define rest-panel 'uninitialized-root]
     [define super-root 'uninitialized-super-root]
@@ -1737,23 +1896,28 @@
     (inherit close-status-line open-status-line)
     (define/public (hide-delegated-text)
       (set! shown? #f)
-      (send (get-delegated-text) set-delegate #f)
+      (when delegated-text 
+        (send delegated-text set-delegate #f))
+      (send delegate-ec set-editor #f)
       (send super-root change-children
             (λ (l) (list rest-panel))))
     (define/public (show-delegated-text)
       (set! shown? #t)
-      (send (get-delegated-text) set-delegate delegatee)
+      (when delegated-text
+        (unless (send delegated-text get-delegate)
+          (send delegated-text set-delegate 
+                (new delegatee-text%)))
+        (send delegate-ec set-editor (send (get-delegated-text) get-delegate)))
       (send super-root change-children
             (λ (l) (list rest-panel delegate-ec))))
     
     (define/public (click-in-overview pos)
       (when shown?
-        (let* ([d-text (get-delegated-text)]
-               [d-canvas (send d-text get-canvas)]
+        (let* ([d-canvas (send delegated-text get-canvas)]
                [bx (box 0)]
                [by (box 0)])
           (let-values ([(cw ch) (send d-canvas get-client-size)])
-            (send d-text position-location pos bx by)
+            (send delegated-text position-location pos bx by)
             (send d-canvas focus)
             (send d-canvas scroll-to 
                   (- (unbox bx) (/ cw 2))
@@ -1761,37 +1925,31 @@
                   cw
                   ch
                   #t)
-            (send d-text set-position pos)))))
+            (send delegated-text set-position pos)))))
     
     (define/public (delegate-moved)
-      (let ([startb (box 0)]
-            [endb (box 0)]
-            [delegate-text (get-delegated-text)])
-        (send delegate-text get-visible-position-range startb endb #f)
-        (send delegatee set-start/end-para
-              (send delegate-text position-paragraph (unbox startb)) 
-              (send delegate-text position-paragraph (unbox endb)))))
+      (define delegatee (send delegate-ec get-editor))
+      (when delegatee
+        (let ([startb (box 0)]
+              [endb (box 0)])
+          (send delegated-text get-visible-position-range startb endb #f)
+          (send delegatee set-start/end-para
+                (send delegated-text position-paragraph (unbox startb)) 
+                (send delegated-text position-paragraph (unbox endb))))))
     
-    (define/public (get-delegatee) delegatee)
-    
+    (define/public (get-delegatee) (send delegate-ec get-editor))
+        
     (super-new)
     
-    (define delegatee (instantiate delegatee-text% ()))
-    (define delegate-ec (instantiate delegatee-editor-canvas% ()
-                          (editor delegatee)
-                          (parent super-root)
-                          (delegate-frame this)
-                          (min-width 150)
-                          (stretchable-width #f)))
+    (define delegate-ec (new delegatee-editor-canvas%
+                             [parent super-root]
+                             [delegate-frame this]
+                             [min-width 150]
+                             [stretchable-width #f]))
     (inherit get-editor)
     (if (preferences:get 'framework:show-delegate?)
-        (begin
-          (send (get-delegated-text) set-delegate delegatee)
-          (send super-root change-children
-                (λ (l) (list rest-panel delegate-ec))))
-        (begin
-          (send (get-delegated-text) set-delegate #f)
-          (send super-root change-children (λ (l) (list rest-panel)))))))
+        (show-delegated-text)
+        (hide-delegated-text))))
 
 (define searchable<%> (interface (basic<%>)
                         search
@@ -1881,28 +2039,18 @@
                 (send text-to-search set-search-anchor (send text-to-search get-start-position)))))))
       (super on-focus on?))
     
-    (define timer #f)
-    (define/private (update-search/trigger-jump/later)
-      (run-after-edit-sequence 
-       (λ () 
-         (unless timer
-           (set! timer (new timer%
-                            [notify-callback
-                             (λ ()
-                               (update-searching-str)
-                               (trigger-jump))])))
-         (send timer stop)
-         (send timer start 150 #t))
-       'framework:search-frame:changed-search-string))
-    
     (define/augment (after-insert x y)
-      (update-search/trigger-jump/later)
+      (update-searching-str/trigger-jump)
       (inner (void) after-insert x y))
     (define/augment (after-delete x y)
-      (update-search/trigger-jump/later)
+      (update-searching-str/trigger-jump)
       (inner (void) after-delete x y))
-    
-    (define/private (trigger-jump)
+    (define/private (update-searching-str/trigger-jump)
+      (let ([tlw (get-top-level-window)])
+        (when tlw
+          (send tlw search-string-changed)))
+      
+      ;; trigger-jump
       (when (preferences:get 'framework:anchored-search)
         (let ([frame (get-top-level-window)])
           (when frame
@@ -1915,6 +2063,7 @@
                        (send text-to-search set-position anchor-pos anchor-pos)]
                       [else
                        (search 'forward #t #t #f anchor-pos)])))))))))
+
     
     (define/private (get-searching-text)
       (let ([frame (get-top-level-window)])
@@ -2024,12 +2173,6 @@
                          (not-found found-edit #f))]
                     [else
                      (found found-edit first-pos)])))))))
-    
-    (define callback-queued? #f)
-    (define/private (update-searching-str)
-      (let ([tlw (get-top-level-window)])
-        (when tlw
-          (send tlw search-string-changed))))
 
     (define/override (on-paint before dc left top right bottom dx dy draw-caret?)
       (super on-paint before dc left top right bottom dx dy draw-caret?)
@@ -2203,7 +2346,7 @@
                 (string-constant hide-replace-menu-item)
                 (string-constant show-replace-menu-item))))
     
-    (define/override (edit-menu:replace-callback a b) (search-replace))
+    (define/override (edit-menu:replace-callback a b) (search-replace) #t)
     (define/override (edit-menu:create-replace?) #t)
     (define/override (edit-menu:replace-on-demand item) 
       (send item enable (and (not hidden?) replace-visible?)))
@@ -2240,12 +2383,13 @@
           (unless hidden?
             (when find-edit
               (when old
-                (send old set-searching-state #f #f #f)
+                (send old set-searching-state #f #f #f #f)
                 (send old set-search-anchor #f))
               (when new
                 (send new set-search-anchor (send new get-start-position))
                 (search-parameters-changed)))))))
     
+    ;; called by the text-to-search when it finishes the search
     (define/public-final (search-hits-changed)
       (when find-edit
         (when text-to-search
@@ -2256,15 +2400,13 @@
               (send find-canvas set-red is-red?))))))
 
     (define/public-final (search-string-changed) (search-parameters-changed))
-    (define/public-final (search-text-changed) (search-parameters-changed))
-    
     (define/private (search-parameters-changed)
       (let ([str (send find-edit get-text)])
         (send text-to-search set-searching-state
               (if (equal? str "") #f str)
               case-sensitive-search?
-              (and replace-visible? (send text-to-search get-start-position))))
-      (search-hits-changed))
+              replace-visible?
+              #t)))
     
     (define/public (search-hidden?) hidden?)
     
@@ -2272,7 +2414,7 @@
       (set! hidden? #t)
       (when search-gui-built?
         (when text-to-search
-          (send text-to-search set-searching-state #f #f #f))
+          (send text-to-search set-searching-state #f #f #f #f))
         (send super-root change-children
               (λ (l)
                 (remove search/replace-panel l)))
@@ -2339,28 +2481,8 @@
                 (send text-to-search set-position replacee-end replacee-end)
                 (send text-to-search delete replacee-start replacee-end)
                 (copy-over replace-edit 0 (send replace-edit last-position) text-to-search replacee-start)
-                (let ([str (send find-edit get-text)])
-                  (send text-to-search set-searching-state
-                        (if (equal? str "") #f str)
-                        case-sensitive-search?
-                        
-                        ;; the start position will have moved (but to the right place), 
-                        ;; if a relacement has happened.
-                        (send text-to-search get-start-position))
-                  
-
-                  ;; set the selection to the next place to replace
-                  (let-values ([(before-caret-hits hits) (send text-to-search get-search-hit-count)])
-                    (unless (zero? hits)
-                      (unless (send text-to-search get-replace-search-hit) 
-                        (send text-to-search set-position 0 0))
-                      (let ([next-start (send text-to-search get-replace-search-hit)])
-                        (when next-start ;; this shouldn't ever matter ...?
-                          (send text-to-search set-position next-start (+ next-start (send find-edit last-position)))))))
-                  
-                  (search-hits-changed))
-                (send text-to-search end-edit-sequence)
-                #t))))))
+                (search 'forward)
+                (send text-to-search end-edit-sequence)))))))
       
     (define/private (copy-over src-txt src-start src-end dest-txt dest-pos)
       (send src-txt split-snip src-start)
@@ -2453,135 +2575,133 @@
       (unless search-gui-built?
         (set! search-gui-built? #t)
         (begin-container-sequence)
-        (let ()
-          (define _-2 (set! find-edit (new find-text%)))
-          (define _-1 (set! replace-edit (new replace-text%)))
-          (define _0 (set! search/replace-panel (new horizontal-panel% 
-                                                     [parent super-root]
-                                                     [stretchable-height #f])))
-          (define search-panel
-            (new horizontal-panel% 
-                 [parent search/replace-panel]
-                 [stretchable-height #f]))
-          (define replace-panel
-            (new horizontal-panel%
-                 [parent search/replace-panel]
-                 [stretchable-height #f]))
-          (define _1 (set! find-canvas (new searchable-canvas%
-                                            [style '(hide-hscroll hide-vscroll)]
-                                            [vertical-inset 2]
-                                            [parent search-panel]
-                                            [editor find-edit]
-                                            [line-count 1]
-                                            [stretchable-height #f]
-                                            [stretchable-width #t])))
-
-          (define _3 (set! replace-canvas (new searchable-canvas%
-                                               [style '(hide-hscroll hide-vscroll)]
-                                               [vertical-inset 2]
-                                               [parent replace-panel]
-                                               [editor replace-edit]
-                                               [line-count 1]
-                                               [stretchable-height #f]
-                                               [stretchable-width #t])))
-          
-          (define search-button (new button% 
-                                     [label (string-constant search-next)]
-                                     [vert-margin 0]
-                                     [parent search-panel]
-                                     [callback (λ (x y) (search 'forward))]
-                                     [font small-control-font]))
-          (define search-prev-button (new button% 
-                                          [label (string-constant search-previous)]
-                                          [vert-margin 0]
-                                          [parent search-panel]
-                                          [callback (λ (x y) (search 'backward))]
-                                          [font small-control-font]))
-          
-          (define hits-panel (new vertical-panel%
-                                  [parent search-panel]
-                                  [alignment '(left center)]
+        (set! find-edit (new find-text%))
+        (set! replace-edit (new replace-text%))
+        (set! search/replace-panel (new horizontal-panel% 
+                                        [parent super-root]
+                                        [stretchable-height #f]))
+        (define search-panel
+          (new horizontal-panel% 
+               [parent search/replace-panel]
+               [stretchable-height #f]))
+        (define replace-panel
+          (new horizontal-panel%
+               [parent search/replace-panel]
+               [stretchable-height #f]))
+        (set! find-canvas (new searchable-canvas%
+                               [style '(hide-hscroll hide-vscroll)]
+                               [vertical-inset 2]
+                               [parent search-panel]
+                               [editor find-edit]
+                               [line-count 1]
+                               [stretchable-height #f]
+                               [stretchable-width #t]))
+        (set! replace-canvas (new searchable-canvas%
+                                  [style '(hide-hscroll hide-vscroll)]
+                                  [vertical-inset 2]
+                                  [parent replace-panel]
+                                  [editor replace-edit]
+                                  [line-count 1]
                                   [stretchable-height #f]
-                                  [stretchable-width #f]))
-          
-          (define num-msg (new message% 
-                               [label "0"] 
-                               [vert-margin 0]
-                               [auto-resize #t]
-                               [font tiny-control-font]
-                               [parent hits-panel]))
-          (define matches-msg (new message% 
-                                   [label (string-constant search-matches)]
+                                  [stretchable-width #t]))
+        
+        (define search-button (new button% 
+                                   [label (string-constant search-next)]
                                    [vert-margin 0]
-                                   [font tiny-control-font]
-                                   [parent hits-panel]))
-          
-          (define _6 (set! update-matches
-                           (λ (before-caret-m m) 
-                             (cond
-                               [(zero? m)
-                                (send num-msg set-label "0")]
-                               [else
-                                (let ([number (number->str/comma m)]
-                                      [bc-number (number->str/comma before-caret-m)])
-                                  (send num-msg set-label (format "~a/~a" bc-number number)))])
-                             (send matches-msg set-label (if (= m 1) 
-                                                             (string-constant search-match)
-                                                             (string-constant search-matches))))))
-          
-          (define replace-button
-            (new button% 
-                 [label (string-constant search-replace)]
-                 [vert-margin 0]
-                 [parent replace-panel]
-                 [font small-control-font]
-                 [callback (λ (x y) (search-replace))]))
-          (define skip-button
-            (new button% 
-                 [label (string-constant search-skip)]
-                 [vert-margin 0]
-                 [parent replace-panel]
-                 [font small-control-font]
-                 [callback (λ (x y) (search 'forward))]))
-          
-          (define show-replace-button
-            (new button%
-                 [label (string-constant search-show-replace)]
-                 [font small-control-font]
-                 [callback (λ (a b) (set-replace-visible? #t))]
-                 [parent replace-panel]))
-          (define hide-replace-button
-            (new button%
-                 [label (string-constant search-hide-replace)]
-                 [font small-control-font]
-                 [callback (λ (a b) (set-replace-visible? #f))]
-                 [parent replace-panel]))
-          
-          (set! show/hide-replace
-                (λ ()
-                  (send replace-panel begin-container-sequence)
-                  (cond
-                    [replace-visible?
-                     (send replace-panel change-children (λ (l) all-replace-children))
-                     (send replace-panel stretchable-width #t)]
-                    [else
-                     (send replace-panel change-children (λ (l) (list show-replace-button)))
-                     (send replace-panel stretchable-width #f)])
-                  (send replace-panel end-container-sequence)))
-          
-          (define all-replace-children
-            (list replace-canvas
-                  replace-button
-                  skip-button
-                  hide-replace-button))
-          
-          (define hide-button
-            (new close-icon%
-                 [callback (λ () (hide-search))]
-                 [vertical-pad 0]
-                 [parent search/replace-panel]))
-          
-          (show/hide-replace))
+                                   [parent search-panel]
+                                   [callback (λ (x y) (search 'forward))]
+                                   [font small-control-font]))
+        (define search-prev-button (new button% 
+                                        [label (string-constant search-previous)]
+                                        [vert-margin 0]
+                                        [parent search-panel]
+                                        [callback (λ (x y) (search 'backward))]
+                                        [font small-control-font]))
+        
+        (define hits-panel (new vertical-panel%
+                                [parent search-panel]
+                                [alignment '(left center)]
+                                [stretchable-height #f]
+                                [stretchable-width #f]))
+        
+        (define num-msg (new message% 
+                             [label "0"] 
+                             [vert-margin 0]
+                             [auto-resize #t]
+                             [font tiny-control-font]
+                             [parent hits-panel]))
+        (define matches-msg (new message% 
+                                 [label (string-constant search-matches)]
+                                 [vert-margin 0]
+                                 [font tiny-control-font]
+                                 [parent hits-panel]))
+        
+        (define _6 (set! update-matches
+                         (λ (before-caret-m m) 
+                           (cond
+                             [(zero? m)
+                              (send num-msg set-label "0")]
+                             [else
+                              (let ([number (number->str/comma m)]
+                                    [bc-number (number->str/comma before-caret-m)])
+                                (send num-msg set-label (format "~a/~a" bc-number number)))])
+                           (send matches-msg set-label (if (= m 1) 
+                                                           (string-constant search-match)
+                                                           (string-constant search-matches))))))
+        
+        (define replace-button
+          (new button% 
+               [label (string-constant search-replace)]
+               [vert-margin 0]
+               [parent replace-panel]
+               [font small-control-font]
+               [callback (λ (x y) (search-replace))]))
+        (define skip-button
+          (new button% 
+               [label (string-constant search-skip)]
+               [vert-margin 0]
+               [parent replace-panel]
+               [font small-control-font]
+               [callback (λ (x y) (search 'forward))]))
+        
+        (define show-replace-button
+          (new button%
+               [label (string-constant search-show-replace)]
+               [font small-control-font]
+               [callback (λ (a b) (set-replace-visible? #t))]
+               [parent replace-panel]))
+        (define hide-replace-button
+          (new button%
+               [label (string-constant search-hide-replace)]
+               [font small-control-font]
+               [callback (λ (a b) (set-replace-visible? #f))]
+               [parent replace-panel]))
+        
+        (set! show/hide-replace
+              (λ ()
+                (send replace-panel begin-container-sequence)
+                (cond
+                  [replace-visible?
+                   (send replace-panel change-children (λ (l) all-replace-children))
+                   (send replace-panel stretchable-width #t)]
+                  [else
+                   (send replace-panel change-children (λ (l) (list show-replace-button)))
+                   (send replace-panel stretchable-width #f)])
+                (send replace-panel end-container-sequence)))
+        
+        (define all-replace-children
+          (list replace-canvas
+                replace-button
+                skip-button
+                hide-replace-button))
+        
+        (define hide-button
+          (new close-icon%
+               [callback (λ () (hide-search))]
+               [vertical-pad 0]
+               [parent search/replace-panel]))
+        
+        (show/hide-replace)
         (end-container-sequence)))
     
     (super-new)))

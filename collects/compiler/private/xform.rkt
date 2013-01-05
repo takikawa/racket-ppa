@@ -418,6 +418,13 @@
 		(printf "xform-cpp: ~a\n" args)
 		(apply f args))))
 
+	(define (maybe-add-exe p)
+	  (cond
+	   [(and (eq? 'windows (system-type))
+		 (not (regexp-match? #rx"[.]exe$" p)))
+	    (format "~a.exe" p)]
+	   [else p]))
+
         ;; To run cpp:
         (define process2
           (if (eq? (system-type) 'windows)
@@ -427,7 +434,7 @@
                                  (if m
                                      (cons (cadr m) (loop (caddr m)))
                                      (list s))))])
-                  (apply (verbose process*) (find-executable-path (car split) #f)
+                  (apply (verbose process*) (find-executable-path (maybe-add-exe (car split)) #f)
                          (cdr split))))
               (verbose process)))
         
@@ -602,6 +609,9 @@
                       [(and (tok? e)
                             (eq? (tok-n e) 'XFORM_GC_VARIABLE_STACK_THROUGH_FUNCTION))
                        'function]
+                      [(and (tok? e)
+                            (eq? (tok-n e) 'XFORM_GC_VARIABLE_STACK_THROUGH_DIRECT_FUNCTION))
+                       'direct-function]
                       [(braces? e) (loop (seq->list (seq-in e)))]
                       [else #f]))
                    e-raw)))
@@ -624,7 +634,8 @@
                     "#define GC_VARIABLE_STACK ((&scheme_thread_locals)->GC_variable_stack_)\n"]
                    [else "#define GC_VARIABLE_STACK GC_variable_stack\n"]))
 
-          (if gc-variable-stack-through-funcs?
+          (if (or gc-variable-stack-through-funcs?
+		  (eq? gc-var-stack-mode 'direct-function))
 	      (begin
 		(printf "#define GET_GC_VARIABLE_STACK() GC_get_variable_stack()\n")
 		(printf "#define SET_GC_VARIABLE_STACK(v) GC_set_variable_stack(v)\n"))
@@ -875,7 +886,8 @@
                __get_errno_ptr ; QNX preprocesses errno to __get_errno_ptr
 
                strlen cos sin exp pow log sqrt atan2 
-               isnan isinf fpclass _fpclass _isnan __isfinited __isnanl __isnan
+               isnan isinf fpclass _fpclass __fpclassify __fpclassifyf __fpclassifyl
+	       _isnan __isfinited __isnanl __isnan
                __isinff __isinfl isnanf isinff __isinfd __isnanf __isnand __isinf
                floor ceil round fmod modf fabs __maskrune _errno __errno
                isalpha isdigit isspace tolower toupper
@@ -1635,6 +1647,7 @@
           (and (pair? e)
                (or (eq? 'XFORM_GC_VARIABLE_STACK_THROUGH_GETSPECIFIC (tok-n (car e)))
                    (eq? 'XFORM_GC_VARIABLE_STACK_THROUGH_FUNCTION (tok-n (car e)))
+                   (eq? 'XFORM_GC_VARIABLE_STACK_THROUGH_DIRECT_FUNCTION (tok-n (car e)))
                    (eq? 'XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL (tok-n (car e))))))
         
         (define (access-modifier? e)
@@ -1646,24 +1659,29 @@
         
         ;; recognize a function prototype:
         (define (proc-prototype? e)
-          (let ([l (length e)])
+          (let loop ([l (length e)])
             (and (> l 2)
                  ;; Ends in semicolon
                  (eq? semi (tok-n (list-ref e (sub1 l))))
-                 (or (and
-                      ;; next-to-last is parens
-                      (parens? (list-ref e (- l 2)))
-                      ;; Symbol before parens, not '=
-                      (let ([s (tok-n (list-ref e (- l 3)))])
-                        (and (symbol? s)
-                             (not (eq? '= s)))))
-                     (and
-                      ;; next-to-last is 0, then =, then parens
-                      (eq? 0 (tok-n (list-ref e (- l 2))))
-                      (eq? '= (tok-n (list-ref e (- l 3))))
-                      (parens? (list-ref e (- l 4)))
-                      ;; Symbol before parens
-                      (symbol? (tok-n (list-ref e (- l 5)))))))))
+                 (let loop ([l l])
+                   (or (and
+                        (> l 2)
+                        ;; next-to-last is parens
+                        (parens? (list-ref e (- l 2)))
+                        ;; Symbol before parens, not '= or '__attribute__
+                        (let ([s (tok-n (list-ref e (- l 3)))])
+                          (and (symbol? s)
+                               (not (eq? '= s))
+                               (not (eq? '__attribute__ s)))))
+                       (and
+                        ;; next-to-last is 0, then =, then parens
+                        (eq? 0 (tok-n (list-ref e (- l 2))))
+                        (eq? '= (tok-n (list-ref e (- l 3))))
+                        (loop (- l 2)))
+                       (and
+                        ;; next-to-last is 0, then =, then parens
+                        (eq? '__attribute__ (tok-n (list-ref e (- l 3))))
+                        (loop (- l 2))))))))
         
         ;; recognize a typedef:
         (define (typedef? e)
@@ -1790,8 +1808,13 @@
             (cond
               [(eq? '__declspec (tok-n (car e)))
                (loop (cddr e) type)]
+              [(eq? '__attribute__ (tok-n (car e)))
+               (loop (cddr e) type)]
               [(parens? (cadr e))
-               (let ([name (tok-n (car e))]
+               (let ([name (tok-n (let ([p (car e)])
+				    (if (parens? p)
+					(car (seq->list (seq-in p)))
+					p)))]
                      [type (let loop ([t (reverse type)])
                              (if (pair? t)
                                  (if (or (memq (tok-n (car t)) '(extern static virtual __stdcall __cdecl 

@@ -42,6 +42,11 @@ THREAD_LOCAL_DECL(static void *jit_buffer_cache);
 THREAD_LOCAL_DECL(static intptr_t jit_buffer_cache_size);
 THREAD_LOCAL_DECL(static int jit_buffer_cache_registered);
 
+#ifdef SET_DEFAULT_LONG_JUMPS
+static int default_long_jumps;
+static volatile uintptr_t code_low, code_high;
+#endif
+
 static void *get_end_pointer(mz_jit_state *jitter)
 {
   return jit_get_ip().ptr;
@@ -101,6 +106,51 @@ double *scheme_mz_retain_double(mz_jit_state *jitter, double d)
 }
 #endif
 
+#ifdef SET_DEFAULT_LONG_JUMPS
+static int check_long_mode(uintptr_t low, uintptr_t size) 
+{
+  uintptr_t high = low + size;
+
+  if (default_long_jumps)
+    return 1;
+  
+  if (!code_low)
+    code_low = low;
+  else if (low < code_low) {
+#ifdef MZ_USE_PLACES
+    while (!mzrt_cas(&code_low, code_low, low)) {
+      if (low >= code_low)
+        break;
+    }
+#else
+    code_low = low;
+#endif    
+  }
+
+  if (high > code_high) {
+#ifdef MZ_USE_PLACES
+    while (!mzrt_cas(&code_high, code_high, high)) {
+      if (high <= code_high)
+        break;
+    }
+#else
+    code_high = high;
+#endif
+  }
+
+  if ((code_high - code_low) >= ((uintptr_t)1 << 31)) {
+    if (!default_long_jumps) {
+      scheme_log_warning("warning: JIT switching to long-jump mode");
+      default_long_jumps = 1;
+    }
+    return 1;
+  }
+
+  return 0;
+}
+#endif
+
+
 void *scheme_generate_one(mz_jit_state *old_jitter, 
 			  Generate_Proc generate,
 			  void *data,
@@ -117,6 +167,9 @@ void *scheme_generate_one(mz_jit_state *old_jitter,
   intptr_t size_pre_retained = 0, size_pre_retained_double = 0, num_retained = 0, num_retained_double = 0, padding;
   int mappings_size = JIT_INIT_MAPPINGS_SIZE;
   int ok, max_extra_pushed = 0;
+#ifdef SET_DEFAULT_LONG_JUMPS
+  int use_long_jumps = default_long_jumps;
+#endif
 #ifdef MZ_PRECISE_GC
   Scheme_Object *fnl_obj;
 
@@ -139,8 +192,11 @@ void *scheme_generate_one(mz_jit_state *old_jitter,
 
   while (1) {
     memset(jitter, 0, sizeof(_jitter));
+#ifdef SET_DEFAULT_LONG_JUMPS
+    _jitl.long_jumps_default = use_long_jumps;
+#endif
 #ifdef NEED_LONG_JUMPS
-    _jitl.long_jumps = 1;
+    _jitl.long_jumps = LONG_JUMPS_DEFAULT(_jitl);
 #endif
 #ifdef USE_TINY_JUMPS
     _jitl.tiny_jumps = 0;
@@ -197,7 +253,21 @@ void *scheme_generate_one(mz_jit_state *old_jitter,
       size_pre_retained = size;
       size_pre_retained_double = size;
     }
-    
+
+#ifdef SET_DEFAULT_LONG_JUMPS
+    if (!use_long_jumps) {
+      /* In the case that we start allocating so much that the address
+         moves beyond the 32-bit half where code normally resides,
+         then switch over to long-jump mode. */
+      if (check_long_mode((uintptr_t)buffer, size)) {
+        /* start over */
+        known_size = 0;
+        use_long_jumps = 1;
+        continue;
+      }
+    }
+#endif
+
     (void)jit_set_ip(buffer).ptr;
     jitter->limit = (char *)buffer + size_pre_retained_double - padding;
     if (known_size) {
@@ -237,6 +307,19 @@ void *scheme_generate_one(mz_jit_state *old_jitter,
       scheme_mz_retain_it(jitter, (void *)scheme_make_integer(num_retained));
 
     ok = generate(jitter, data);
+
+#ifdef SET_DEFAULT_LONG_JUMPS
+    /* Check again after generate, because we may have
+       generated new code blocks along the way. */
+    if (!use_long_jumps) {
+      if (check_long_mode((uintptr_t)buffer, size)) {
+        /* start over */
+        known_size = 0;
+        use_long_jumps = 1;
+        continue;
+      }
+    }
+#endif
 
     if (save_ptr) {
       scheme_mz_retain_it(jitter, save_ptr);
@@ -569,7 +652,7 @@ void scheme_mz_flostack_restore(mz_jit_state *jitter, int space, int pos, int ge
   if (space != jitter->flostack_space) {
     if (gen) {
       int delta = jitter->flostack_space - space;
-      jit_addi_p(JIT_SP, JIT_SP, delta * sizeof(double));
+      jit_addi_p(JIT_SP, JIT_SP, delta);
     }
     if (adj) jitter->flostack_space = space;
   }
@@ -639,7 +722,7 @@ int scheme_mz_is_closure(mz_jit_state *jitter, int i, int arity, int *_flags)
 }
 
 #ifdef USE_FLONUM_UNBOXING
-int scheme_mz_flonum_pos(mz_jit_state *jitter, int i)
+int scheme_mz_flostack_pos(mz_jit_state *jitter, int i)
 {
   int j = i, p = jitter->num_mappings, c;
   while (p && (j >= 0)) {
@@ -679,11 +762,17 @@ int scheme_stack_safety(mz_jit_state *jitter, int cnt, int offset)
      that we make, so that whatever happens to be there isn't
      traversed in case of a GC. the value of JIT_RUNSTACK is
      handy to use as a "clear" value. */
-  int i;
+  int i, valid;
+
+  valid = mz_CURRENT_REG_STATUS_VALID();
+
   for (i = 0; i < cnt; i++) {
     mz_rs_stxi(i+offset, JIT_RUNSTACK);
     CHECK_LIMIT();
   }
+
+  if (valid) mz_SET_REG_STATUS_VALID(1);
+
   return 1;
 }
 

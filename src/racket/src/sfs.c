@@ -671,7 +671,7 @@ static Scheme_Object *sfs_let_one(Scheme_Object *o, SFS_Info *info)
          it might not because (1) it was introduced late by inlining,
          or (2) the rhs expression doesn't always produce a single
          value. */
-      if (scheme_omittable_expr(rhs, 1, -1, 1, NULL, -1, 0)) {
+      if (scheme_omittable_expr(rhs, 1, -1, 1, NULL, NULL, -1, 0)) {
         rhs = scheme_false;
       } else if ((ip < info->max_calls[pos])
                  && SAME_TYPE(SCHEME_TYPE(rhs), scheme_toplevel_type)) {
@@ -697,7 +697,7 @@ static Scheme_Object *sfs_let_one(Scheme_Object *o, SFS_Info *info)
 
   et = scheme_get_eval_type(lo->value);
   SCHEME_LET_EVAL_TYPE(lo) = (et 
-                              | (unused ? 0 : (SCHEME_LET_EVAL_TYPE(lo) & LET_ONE_FLONUM))
+                              | (unused ? 0 : (SCHEME_LET_EVAL_TYPE(lo) & LET_ONE_TYPE_MASK))
                               | (unused ? LET_ONE_UNUSED : 0));
 
   return o;
@@ -1188,7 +1188,7 @@ Scheme_Object *scheme_sfs_expr(Scheme_Object *expr, SFS_Info *info, int closure_
   case scheme_local_unbox_type:
     if (!info->pass)
       scheme_sfs_used(info, SCHEME_LOCAL_POS(expr));
-    else if (SCHEME_GET_LOCAL_FLAGS(expr) != SCHEME_LOCAL_FLONUM) {
+    else if (!SCHEME_GET_LOCAL_TYPE(expr)) {
       int pos, at_ip;
       pos = SCHEME_LOCAL_POS(expr);
       at_ip = info->max_used[info->stackpos + pos];

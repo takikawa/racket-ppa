@@ -10,7 +10,8 @@
             (for-label racket/base racket/gui)
             (for-label framework/framework)
             (for-label drracket/syncheck-drracket-button
-                       drracket/check-syntax)
+                       drracket/check-syntax
+                       string-constants/string-constant)
             scribble/eval
             scribble/extract)
    
@@ -318,6 +319,12 @@ This must be bound to a
   corresponds to the position of the language in language
   dialog. Each language position is a list of strings whose
   length must be at least two.
+  
+  If the first string is the same as 
+  @racket[(string-constant teaching-languages)], then
+  it is put into the ``Teaching Languages'' section
+  of the dialog. Otherwise, it goes into the ``Other Languages''
+  section of the dialog.
 }  
 @item/cap[drscheme-language-numbers]{
 This is optional. If
@@ -568,9 +575,9 @@ file based on the file's extension. If the file ends with
 @File{.txt}, DrRacket uses text mode. Otherwise, DrRacket
 uses Racket mode.
 
-@section{Language-specific capabilities}
+@section{Language-Specific Capabilities}
 
-@subsection[#:tag "drracket:lang-languages-customization"]{Customizing DrRacket's behavior}
+@subsection[#:tag "drracket:lang-languages-customization"]{Customizing DrRacket's Behavior}
 
 When using the language declared in the source, DrRacket queries  that
 language via @racket[module-compiled-language-info] to determine
@@ -779,15 +786,15 @@ Check Syntax is a part of the DrRacket collection, but is implemented via the to
                 (super-new)
                 (define/override (syncheck:find-source-object stx)
                   stx)
-                (define/override (syncheck:add-arrow start-source-obj	 
-                                                     start-left	 
-                                                     start-right	 
-                                                     end-source-obj	 
-                                                     end-left	 
-                                                     end-right	 
-                                                     actual?	 
+                (define/override (syncheck:add-arrow start-source-obj
+                                                     start-left
+                                                     start-right
+                                                     end-source-obj
+                                                     end-left
+                                                     end-right
+                                                     actual?
                                                      phase-level)
-                  (set! arrows 
+                  (set! arrows
                         (cons (list start-source-obj end-source-obj)
                               arrows)))
                 (define arrows '())
@@ -857,7 +864,7 @@ Check Syntax is a part of the DrRacket collection, but is implemented via the to
   The bitmap in the Check Syntax button on the DrRacket frame.
 }
 
-@subsection{Disappeared uses and bindings}
+@subsection{Disappeared Uses and Bindings}
 
 @section-index["disappeared-use" "disappeared-binding"]
 
@@ -919,9 +926,7 @@ not part of DrRacket proper, but one helper library is documented here.
 @include-section["module-language-tools.scrbl"]
 @include-section["module-language.scrbl"]
 
-@include-section["documentation-utils.scrbl"]
-
-@section{Backwards compatibility}
+@section{Backwards Compatibility}
 
 This section lists the bindings that begin with @tt{drscheme:} provided by the tools
 library; they are here for backwards compatibility and to provide links to the

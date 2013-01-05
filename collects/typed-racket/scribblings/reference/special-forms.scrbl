@@ -13,17 +13,25 @@
    (examples #:eval the-top-eval . args))
 
 
-@(define-syntax-rule (def-racket for-id for*-id with-handlers-id mod-beg-id lambda-id λ-id define-id)
+@(define-syntax-rule (def-racket for-id for*-id with-handlers-id
+                                 default-continuation-prompt-tag-id
+                                 mod-beg-id lambda-id λ-id define-id)
   (begin
-    (require (for-label (only-in racket/base for for* with-handlers #%module-begin lambda λ define)))
+    (require (for-label (only-in racket/base for for* with-handlers
+                                             default-continuation-prompt-tag
+                                             #%module-begin lambda λ define)))
     (define for-id (racket for))
     (define for*-id (racket for*))
     (define mod-beg-id (racket #%module-begin))
     (define with-handlers-id (racket with-handlers))
+    (define default-continuation-prompt-tag-id
+      (racket default-continuation-prompt-tag))
     (define lambda-id (racket lambda))
     (define λ-id (racket λ))
     (define define-id (racket define))))
-@(def-racket for-id for*-id with-handlers-id mod-beg-id lambda-id λ-id define-id)
+@(def-racket for-id for*-id with-handlers-id
+  default-continuation-prompt-tag-id
+  mod-beg-id lambda-id λ-id define-id)
 
 
 @title[#:tag "special-forms"]{Special Form Reference}
@@ -67,6 +75,11 @@ result of @racket[_loop] (and thus the result of the entire
               [(even? (car lst)) (loop (cons (car lst) accum) (cdr lst))]
               [else              (loop accum (cdr lst))])))
     (filter-even-loop (list 1 2 3 4))]}
+@defform[(plet: (a ...) ([v : t e] ...) . body)]{
+A polymorphic version of @racket[let:], abstracted over the type variables
+@racket[a]. The type variables @racket[a] are bound in both the types
+of the formal, and in any type expressions in the @racket[body].
+Does not support the looping form of let.}
 
 @deftogether[[
 @defform[(letrec: ([v : t e] ...) . body)]
@@ -216,17 +229,21 @@ annotations are optional.
 
 @defform*[[(define: v : t e)
            (define: (f . formals) : t . body)
+           (define: (a ...) v : t e)
            (define: (a ...) (f . formals) : t . body)]]{
 These forms define variables, with annotated types.  The first form
-defines @racket[v] with type @racket[t] and value @racket[e].  The
-second and third forms defines a function @racket[f] with appropriate
-types.  In most cases, use of @racket[:] is preferred to use of @racket[define:].
+defines @racket[v] with type @racket[t] and value @racket[e]. The third
+form does the same, but allows the specification of type variables.
+The second and fourth forms defines a function @racket[f] with appropriate
+types. In most cases, use of @racket[:] is preferred to use of @racket[define:].
 
 @ex[(define: foo : Integer 10)
 
     (define: (add [first : Integer]
                   [rest  : Integer]) : Integer
       (+ first rest))
+
+    (define: (A) mt-seq : (Sequenceof A) empty-sequence)
 
     (define: (A) (poly-app [func : (A A -> A)]
                            [first : A]
@@ -429,6 +446,33 @@ annotation.
              
 Note that unlike @|define-id|, @racket[define] does not bind functions with keyword arguments
 to static information about those functions.
+}
+
+@defproc[(default-continuation-prompt-tag) (-> (Prompt-Tagof Any (Any -> Any)))]{
+  Identical to @|default-continuation-prompt-tag-id|, but additionally protects
+  the resulting prompt tag with a contract that wraps
+  higher-order values, such as functions, that are communicated with that
+  prompt tag. If the wrapped value is used in untyped code, a contract error
+  will be raised.
+
+  @ex[
+    (module typed typed/racket
+      (provide do-abort)
+      (: do-abort (-> Void))
+      (define (do-abort)
+        (abort-current-continuation
+         (code:comment "typed, and thus contracted, prompt tag")
+         (default-continuation-prompt-tag)
+         (λ: ([x : Integer]) (+ 1 x)))))
+    (module untyped racket
+      (require 'typed)
+      (call-with-continuation-prompt
+        (λ () (do-abort))
+        (default-continuation-prompt-tag)
+        (code:comment "the function cannot be passed an argument")
+        (λ (f) (f 3))))
+    (require 'untyped)
+  ]
 }
 
 @defform[(#%module-begin form ...)]{

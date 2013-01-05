@@ -5,6 +5,8 @@
                      racket/contract
                      (except-in racket/base
                                 foldr)))
+@(define (racket-tech pre)
+   (tech #:doc '(lib "scribblings/reference/reference.scrbl") pre))
 
 @title[#:tag "integer-set"]{Integer Sets}
 
@@ -33,6 +35,8 @@ For example: @racket['((-1 . 2) (4 . 10))] is a well-formed-set as is
 @racket['((1 . 5) (-3 . -1))], @racket['((5 . 1))], and @racket['((1
 . 5) (3 . 6))] are not.
 
+An integer set implements the @racket-tech{stream} and
+@racket-tech{sequence} generic interfaces.
 
 @defproc[(make-integer-set [wfs well-formed-set?]) integer-set?]{
 
@@ -86,7 +90,8 @@ that are not in @racket[y]).}
 Returns the union of the given sets.}
 
 
-@defproc[(split [x integer-set?][y integer-set?]) integer-set?]{
+@defproc[(split [x integer-set?][y integer-set?])
+         (values integer-set? integer-set? integer-set?)]{
 
 Produces three values: the first is the intersection of @racket[x] and
 @racket[y], the second is the difference @racket[x] remove @racket[y],
@@ -95,9 +100,9 @@ and the third is the difference @racket[y] remove @racket[x].}
 
 @defproc[(complement [s integer-set?]
                      [start exact-integer?]
-                     [end exact-integer?]) any]
+                     [end exact-integer?]) integer-set?]{
 
-Returns the a set containing the elements between @racket[start] to
+Returns a set containing the elements between @racket[start] to
 @racket[end] inclusive that are not in @racket[s], where
 @racket[(start-k . <= . end-k)].}
 
@@ -114,10 +119,9 @@ Returns @racket[#t] if @racket[k] is in @racket[s], @racket[#f]
 otherwise.}
 
 
-@defproc[(get-integer [integer-set any/c]) (or/c exact-integer? false/c)]{
+@defproc[(get-integer [set integer-set?]) (or/c exact-integer? #f)]{
 
-Returns a member of @racket[integer-set], or @racket[#f] if
-@racket[integer-set] is empty.}
+Returns a member of @racket[set], or @racket[#f] if @racket[set] is empty.}
 
 
 @defproc[(foldr [proc (exact-integer? any/c . -> . any/c)]
@@ -132,7 +136,7 @@ example, @racket[(foldr cons null s)] returns a list of all the
 integers in @racket[s], sorted in increasing order.}
 
 
-@defproc[(partition [s integer-set-list?]) (listof integer-set?)]{
+@defproc[(partition [s (listof integer-set?)]) (listof integer-set?)]{
 
 Returns the coarsest refinement of the sets in @racket[s] such that
 the sets in the result list are pairwise disjoint.  For example,
@@ -151,3 +155,6 @@ Returns the number of integers in the given integer set.}
 
 Returns true if every integer in @racket[x] is also in
 @racket[y], otherwise @racket[#f].}
+
+
+@close-eval[the-eval]

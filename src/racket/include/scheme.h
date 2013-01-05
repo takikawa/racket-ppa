@@ -110,6 +110,9 @@ typedef long FILE;
 #ifndef MSC_IZE
 # define MSC_IZE(x) x
 #endif
+#ifndef M_MSC_IZE
+# define M_MSC_IZE(x) x
+#endif
 #ifndef MSCBOR_IZE
 # define MSCBOR_IZE(x) MSC_IZE(x)
 #endif
@@ -127,10 +130,14 @@ typedef long FILE;
    old way. */
 #ifdef MZ_USE_OLD_ARRAY_STYLE
 # define mzFLEX_ARRAY_DECL 1
+# define mzFLEX_ARRAY4_DECL 4
 # define mzFLEX_DELTA 1
+# define mzFLEX4_DELTA 4
 #else
 # define mzFLEX_ARRAY_DECL /* empty */
+# define mzFLEX_ARRAY4_DECL /* empty */
 # define mzFLEX_DELTA 0
+# define mzFLEX4_DELTA 0
 #endif
 
 #ifdef MZ_XFORM
@@ -237,8 +244,8 @@ typedef _int64 mzlonglong;
 typedef unsigned _int64 umzlonglong;
 #else
 # if defined(NO_LONG_LONG_TYPE) || defined(SIXTY_FOUR_BIT_INTEGERS)
-typedef long mzlonglong;
-typedef unsigned long umzlonglong;
+typedef intptr_t mzlonglong;
+typedef uintptr_t umzlonglong;
 # else
 typedef long long mzlonglong;
 typedef unsigned long long umzlonglong;
@@ -331,7 +338,7 @@ typedef struct {
 typedef struct Scheme_Symbol {
   Scheme_Inclhash_Object iso; /* 1 in low bit of keyex indicates uninterned */
   intptr_t len;
-  char s[4]; /* Really, a number of chars to match `len' */
+  char s[mzFLEX_ARRAY4_DECL];
 } Scheme_Symbol;
 
 typedef struct Scheme_Vector {
@@ -660,16 +667,14 @@ typedef struct Scheme_Offset_Cptr
    Do not use them directly. */
 #define SCHEME_PRIM_OPT_MASK (1 | 2)
 #define SCHEME_PRIM_IS_PRIMITIVE 4
-#define SCHEME_PRIM_IS_UNSAFE_OMITABLE 8
-#define SCHEME_PRIM_IS_OMITABLE 16
+#define SCHEME_PRIM_IS_MULTI_RESULT 8
+#define SCHEME_PRIM_IS_CLOSURE 16
 #define SCHEME_PRIM_OTHER_TYPE_MASK (32 | 64 | 128 | 256)
-#define SCHEME_PRIM_IS_MULTI_RESULT 512
-#define SCHEME_PRIM_IS_BINARY_INLINED 1024
-#define SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL 2048
-#define SCHEME_PRIM_IS_METHOD 4096
-#define SCHEME_PRIM_IS_CLOSURE 8192
-#define SCHEME_PRIM_IS_UNARY_INLINED 16384
-#define SCHEME_PRIM_IS_NARY_INLINED 32768
+#define SCHEME_PRIM_IS_METHOD 512
+
+#define SCHEME_PRIM_OPT_INDEX_SIZE 6
+#define SCHEME_PRIM_OPT_INDEX_SHIFT 10
+#define SCHEME_PRIM_OPT_INDEX_MASK ((1 << SCHEME_PRIM_OPT_INDEX_SIZE) - 1)
 
 /* Values with SCHEME_PRIM_OPT_MASK, earlier implies later: */
 #define SCHEME_PRIM_OPT_FOLDING    3
@@ -679,6 +684,7 @@ typedef struct Scheme_Offset_Cptr
 /* Values with SCHEME_PRIM_OTHER_TYPE_MASK */
 #define SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_GETTER (32 | 256)
 #define SCHEME_PRIM_STRUCT_TYPE_CONSTR           128
+#define SCHEME_PRIM_STRUCT_TYPE_SIMPLE_CONSTR    (32 | 64 | 128)
 #define SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_SETTER 256
 #define SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER   (128 | 256)
 #define SCHEME_PRIM_STRUCT_TYPE_BROKEN_INDEXED_SETTER   (32 | 128)
@@ -1900,7 +1906,7 @@ MZ_EXTERN Scheme_Object *scheme_register_parameter(Scheme_Prim *function, char *
 /*                              addrinfo                                  */
 /*========================================================================*/
 
-#ifdef HAVE_GETADDRINFO
+#if defined(HAVE_GETADDRINFO) || defined(__MINGW32__)
 # define mz_addrinfo addrinfo
 #else
 struct mz_addrinfo {

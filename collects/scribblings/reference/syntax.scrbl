@@ -13,7 +13,11 @@
                      racket/package
                      racket/splicing
                      racket/runtime-path
-                     racket/performance-hint))
+                     racket/lazy-require
+                     (only-in compiler/cm-accomplice
+                              register-external-module)
+                     racket/performance-hint
+                     syntax/parse))
 
 @(define require-eval (make-base-eval))
 @(define syntax-eval
@@ -2132,11 +2136,15 @@ position with respect to the original @racket[or] form.
 
 Evaluates @racket[val-expr] and uses the result to select a
 @racket[case-clause]. The selected clause is the first one with a
-@racket[datum] whose @racket[quote]d form is @racket[eqv?] to the
+@racket[datum] whose @racket[quote]d form is @racket[equal?] to the
 result of @racket[val-expr]. If no such @racket[datum] is present, the
 @racket[else] @racket[case-clause] is selected; if no @racket[else]
 @racket[case-clause] is present, either, then the result of the
-@racket[case] form is @|void-const|.
+@racket[case] form is @|void-const|.@margin-note{The @racket[case]
+form of @racketmodname[racket] differs from that of @other-manual['(lib
+"r6rs/scribblings/r6rs.scrbl")] or @other-manual['(lib
+"r5rs/r5rs.scrbl")] by being based @racket[equal?] instead of
+@racket[eqv?] (in addition to allowing internal definitions).}
 
 For the selected @racket[case-clause], the results of the last
 @racket[then-body], which is in tail position with respect to the
@@ -2152,6 +2160,18 @@ A @racket[case-clause] that starts with @racket[else] must be the last
 (case (- 7 5)
  [(1 2 3) 'small]
  [(10 11 12) 'big])
+(case (string-append "do" "g")
+ [("cat" "dog" "mouse") "animal"]
+ [else "mineral or vegetable"])
+(case (list 'y 'x)
+ [((a b) (x y)) 'forwards]
+ [((b a) (y x)) 'backwards])
+(case 'x
+ [(x) "ex"]
+ [('x) "quoted ex"])
+(case (list 'quote 'x)
+ [(x) "ex"]
+ [('x) "quoted ex"])
 ]
 @def+int[
 (define (classify c)
@@ -2709,12 +2729,19 @@ escape. An @racket[unquote-splicing] form as an expression is a syntax error.}
 
 @defform[(quote-syntax datum)]{
 
-Produces a @tech{syntax object} that preserves the @tech{lexical
-information} and source-location information attached to
-@racket[datum] at expansion time.
+Similar to @racket[quote], but produces a @tech{syntax object}
+that preserves the @tech{lexical information} and source-location
+information attached to @racket[datum] at expansion time.
+
+Unlike @racket[syntax] (@litchar{#'}), @racket[quote-syntax] does
+not substitute pattern variables bound by @racket[with-syntax],
+@racket[syntax-parse], or @racket[syntax-case].
 
 @mz-examples[
 (syntax? (quote-syntax x))
+(quote-syntax (1 2 3))
+(with-syntax ([a #'5])
+  (quote-syntax (a b c)))
 ]
 }
 
@@ -2761,3 +2788,47 @@ syntactic forms or languages that supply a more limited kind of
 Attaches a @racket['compiler-hint:cross-module-inline]
 @tech{syntax property} to each @racket[form], which is useful when a
 @racket[form] is a function definition. See @racket[define-values].}
+
+@defform*/subs[[(define-inline id expr)
+                (define-inline (head args) body ...+)]
+                ([head id
+                       (head args)]
+                 [args (code:line arg ...)
+                       (code:line arg ... @#,racketparenfont{.} rest-id)]
+                 [arg arg-id
+                      [arg-id default-expr]
+                      (code:line keyword arg-id)
+                      (code:line keyword [arg-id default-expr])])]{
+Like @racket[define], but ensures that the definition will be inlined at its
+call sites. Recursive calls are not inlined, to avoid infinite inlining.
+Higher-order uses are supported, but also not inlined.
+
+@racket[define-inline] may interfere with the Racket compiler's own inlining
+heuristics, and should only be used when other inlining attempts (such as
+@racket[begin-encourage-inline]) fail.
+}
+
+
+@;------------------------------------------------------------------------
+@section[#:tag "lazy-require"]{Importing Modules Lazily: @racket[lazy-require]}
+
+@note-lib-only[racket/lazy-require]
+
+@defform[(lazy-require [module-path (imported-fun-id ...)] ...)]{
+
+Defines each @racket[imported-fun-id] as a function that, when called,
+dynamically requires the export named @racket[imported-fun-id] from
+the module specified by @racket[module-path] and calls it with the
+same arguments.
+
+If the enclosing relative phase level is not 0, then
+@racket[module-path] is also placed in a submodule (with a use of
+@racket[define-runtime-module-path-index] at phase level 0 within the
+submodule). Introduced submodules have the names
+@racket[lazy-require-]@racket[_n]@racketidfont{-}@racket[_m], where
+@racket[_n] is a phase-level number and @racket[_m] is a number.
+
+When the use of a lazily-required function triggers module loading,
+@racket[register-external-module] declares a potential compilation
+dependency (in case the function is used in the process of compiling a
+module).}

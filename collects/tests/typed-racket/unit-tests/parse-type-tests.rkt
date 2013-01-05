@@ -1,5 +1,5 @@
-#lang scheme/base
-(require "test-utils.rkt" (for-syntax scheme/base)
+#lang racket/base
+(require "test-utils.rkt" (for-syntax racket/base)
          (utils tc-utils)
          (env type-alias-env type-env-structs tvar-env type-name-env init-envs)
          (rep type-rep)
@@ -8,7 +8,8 @@
          (base-env base-types base-types-extra colon)
          (for-template (base-env base-types base-types-extra base-env colon))
          (private parse-type)
-         rackunit)
+         rackunit
+         racket/dict)
 
 (provide parse-type-tests)
 
@@ -109,7 +110,7 @@
 
    [(Listof Number) (make-Listof  N)]
 
-   [a (-v a) (cons 'a initial-tvar-env)]
+   [a (-v a) (dict-set initial-tvar-env 'a (-v a))]
    [(All (a ...) (a ... -> Number))
     (-polydots (a) ((list) [a a] . ->... . N))]
 

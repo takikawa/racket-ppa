@@ -105,12 +105,6 @@ implement contracts @cite{Strickland12}.
 @section[#:tag "data-structure-contracts"]{Data-structure Contracts}
 @declare-exporting-ctc[racket/contract/base]
 
-@defproc[(flat-contract [predicate (any/c . -> . any/c)]) flat-contract?]{
-
-Constructs a @tech{flat contract} from @racket[predicate]. A value
-satisfies the contract if the predicate returns a true value.}
-
-
 @defproc[(flat-named-contract [type-name any/c]
                               [predicate (or/c flat-contract? (any/c . -> . any))]
                               [generator (or/c #f (-> contract (-> int? any))) #f])
@@ -520,7 +514,12 @@ to the input.  The result will be a copy for immutable hash tables, and either a
 }
 
 
-@defproc[(prompt-tag/c [contract contract?] ...) contract?]{
+@defform/subs[#:literals (values)
+  (prompt-tag/c contract ... maybe-call/cc)
+  ([maybe-call/cc (code:line)
+                  (code:line #:call/cc contract)
+                  (code:line #:call/cc (values contract ...))])
+   #:contracts ([contract contract?])]{
 Takes any number of contracts and returns a contract that recognizes
 continuation prompt tags and will check any aborts or prompt handlers that
 use the contracted prompt tag.
@@ -532,6 +531,10 @@ call to @racket[call-with-continuation-prompt].
 If all of the @racket[contract]s are chaperone contracts, the resulting
 contract will also be a @tech{chaperone} contract. Otherwise, the contract is
 an @tech{impersonator} contract.
+
+If @racket[maybe-call/cc] is provided, then the provided contracts
+are used to check the return values from a continuation captured with
+@racket[call-with-current-continuation].
 
 @examples[#:eval (contract-eval)
   (define/contract tag
@@ -616,6 +619,26 @@ multiple values.  It can only be used in a result position of contracts like
 Constructs a contract on a promise. The contract does not force the
 promise, but when the promise is forced, the contract checks that the
 result value meets the contract produced by @racket[expr].}
+
+@defproc[(flat-contract [predicate (any/c . -> . any/c)]) flat-contract?]{
+
+Constructs a @tech{flat contract} from @racket[predicate]. A value
+satisfies the contract if the predicate returns a true value.
+
+This function is a holdover from before flat contracts could be used
+directly as predicates. It exists today for backwards compatibilty.
+}
+
+
+@defproc[(flat-contract-predicate [v flat-contract?])
+         (any/c . -> . any/c)]{
+
+Extracts the predicate from a flat contract.
+
+This function is a holdover from before flat contracts could 
+be used directly as predicates. It exists today for backwards compatibility.
+}
+
 
 @; ------------------------------------------------------------------------
 
@@ -2154,11 +2177,6 @@ symbols, booleans, numbers, and other ordinary Racket values
 (that are defined as @tech{contracts}) are also
 flat contracts.}
 
-@defproc[(flat-contract-predicate [v flat-contract?])
-         (any/c . -> . any/c)]{
-
-Extracts the predicate from a flat contract.}
-
 @defproc[(contract-name [c contract?]) any/c]{
 Produces the name used to describe the contract in error messages.
 }
@@ -2328,3 +2346,6 @@ do not have corresponding generators (for example, not all predicates have
 generators) or because there is not enough fuel. In either case, the
 thunk @racket[fail] is invoked.
 }
+
+
+

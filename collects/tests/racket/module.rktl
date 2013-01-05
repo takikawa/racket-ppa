@@ -860,22 +860,26 @@
   (define am-s (compile-m (a-expr #t) '()))
   (define b-s (compile-m b-expr (list a-s)))
 
+  (define temp-dir (find-system-path 'temp-dir))
+  (define dir (build-path temp-dir "compiled"))
+  (define dir-existed? (directory-exists? dir))
+  (unless dir-existed? (make-directory dir))
+
   (define (go a-s)
-    (parameterize ([current-namespace (make-base-namespace)])
-      (parameterize ([read-accept-compiled #t])
-        (eval (read (open-input-bytes a-s)))
-        (define temp-dir (find-system-path 'temp-dir))
-        (define dir (build-path temp-dir "compiled"))
-        (make-directory* dir)
-        (with-output-to-file (build-path dir "check-gen_rkt.zo")
-          #:exists 'truncate
-          (lambda () (write-bytes b-s)))
-        ((dynamic-require (build-path temp-dir "check-gen.rkt") 'b) 10)
-        (delete-file (build-path dir "check-gen_rkt.zo")))))
+    (parameterize ([current-namespace (make-base-namespace)]
+                   [read-accept-compiled #t])
+      (eval (read (open-input-bytes a-s)))
+      (with-output-to-file (build-path dir "check-gen_rkt.zo")
+        #:exists 'truncate
+        (lambda () (write-bytes b-s)))
+      ((dynamic-require (build-path temp-dir "check-gen.rkt") 'b) 10)))
   ;; Triger JIT generation with constant function as `a':
   (go a-s)
   ;; Check that we don't crash when trying to use a different `a':
-  (err/rt-test (go am-s)))
+  (err/rt-test (go am-s) exn:fail?)
+  ;; Cleanup
+  (delete-file (build-path dir "check-gen_rkt.zo"))
+  (unless dir-existed? (delete-directory dir)))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -896,6 +900,56 @@
         (parameterize ([current-namespace (module->namespace ''n)])
           (eval '(procedure? ptr-set!)))))
 
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; check link checking and a constructor with auto fields:
+
+(module a-with-auto-field racket/base
+  (provide make-region)
+  (define-values (struct:region make-region region? region-get region-set!)
+    (make-struct-type 'region #f 6 6 #f)))
+
+(module use-a-with-auto-field racket/base
+  (require 'a-with-auto-field)
+  (void (make-region 1 2 3 4 5 6)))
+
+(require 'use-a-with-auto-field)
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; check that `require' inside `beging-for-syntax' sets up the right phase dependency
+
+(let ([o (open-output-bytes)])
+  (parameterize ([current-output-port o]
+                 [current-namespace (make-base-namespace)])
+    (eval
+     '(module m racket/base
+        (printf "~s\n" (variable-reference->phase (#%variable-reference)))))
+    (eval
+     '(module n racket/base
+        (require (for-syntax racket/base))
+        (begin-for-syntax
+         (require 'm))))
+    (eval '(require 'n)))
+  (test #"1\n1\n" get-output-bytes o))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; check re-expansion of a module with a macro-introduced `only-in'
+;; and a definition of the name that `only-in' switched away from:
+
+(parameterize ([current-namespace (make-base-namespace)])
+  (define src
+    '(module m racket
+       (define-syntax (req stx)
+         (syntax-case stx ()
+           [(_ spec)
+            (let ()
+              (with-syntax {[name (datum->syntax #'spec 'enqueue!)]}
+                #'(begin
+                    (require (rename-in spec [name temp]))
+                    (define-syntax name 10))))]))
+       
+       (req (only-in data/queue enqueue!))))
+  (expand-syntax (expand src)))
+  
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (report-errs)
