@@ -487,7 +487,7 @@ void scheme_init_futures(Scheme_Env *newenv)
                              newenv);
 
   p = scheme_make_prim_w_arity(scheme_future, "future", 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED);
   scheme_add_global_constant("future", p, newenv);
 
   scheme_add_global_constant(
@@ -500,7 +500,7 @@ void scheme_init_futures(Scheme_Env *newenv)
                              newenv);
 
   p = scheme_make_prim_w_arity(touch, "touch", 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED);
   scheme_add_global_constant("touch", p, newenv);
 
   p = scheme_make_immed_prim( 
@@ -508,7 +508,7 @@ void scheme_init_futures(Scheme_Env *newenv)
                               "current-future", 
                               0, 
                               0);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_NARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("current-future", p, newenv);
 
   p = scheme_make_immed_prim(
@@ -517,7 +517,7 @@ void scheme_init_futures(Scheme_Env *newenv)
                               1, 
                               1);
 
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED);
   scheme_add_global_constant("fsemaphore?", p, newenv);
 
   p = scheme_make_immed_prim(
@@ -525,7 +525,7 @@ void scheme_init_futures(Scheme_Env *newenv)
                               "make-fsemaphore", 
                               1, 
                               1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED);
   scheme_add_global_constant("make-fsemaphore", p, newenv);
 
   p = scheme_make_immed_prim(
@@ -533,7 +533,7 @@ void scheme_init_futures(Scheme_Env *newenv)
                               "fsemaphore-count", 
                               1, 
                               1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED);
   scheme_add_global_constant("fsemaphore-count", p, newenv);
   
   p = scheme_make_immed_prim(
@@ -541,7 +541,7 @@ void scheme_init_futures(Scheme_Env *newenv)
                               "fsemaphore-wait",
                               1, 
                               1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED);
   scheme_add_global_constant("fsemaphore-wait", p, newenv);
 
   p = scheme_make_immed_prim(
@@ -549,7 +549,7 @@ void scheme_init_futures(Scheme_Env *newenv)
                               "fsemaphore-post", 
                               1, 
                               1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED);
   scheme_add_global_constant("fsemaphore-post", p, newenv);
 
   p = scheme_make_immed_prim(
@@ -557,7 +557,7 @@ void scheme_init_futures(Scheme_Env *newenv)
                               "fsemaphore-try-wait?", 
                               1, 
                               1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED);
   scheme_add_global_constant("fsemaphore-try-wait?", p, newenv);  
 
   GLOBAL_PRIM_W_ARITY("would-be-future", would_be_future, 1, 1, newenv);
@@ -580,6 +580,12 @@ void scheme_init_futures_once()
 void scheme_init_futures_per_place()
 {
   futures_init();
+}
+
+static Scheme_Object *set_fts_thread(Scheme_Object *ignored)
+{
+  scheme_future_thread_state->thread = scheme_current_thread;
+  return ignored;
 }
 
 void futures_init(void)
@@ -607,7 +613,8 @@ void futures_init(void)
   rt_fts->is_runtime_thread = 1;
   rt_fts->gen0_size = 1;
   scheme_future_thread_state = rt_fts;
-  rt_fts->thread = scheme_current_thread;
+  scheme_add_swap_callback(set_fts_thread, scheme_false);
+  set_fts_thread(scheme_false);
 
   REGISTER_SO(fs->future_queue);
   REGISTER_SO(fs->future_queue_end);
@@ -692,6 +699,7 @@ static void init_future_thread(Scheme_Future_State *fs, int i)
   t = mz_proc_thread_create_w_stacksize(worker_thread_future_loop, &params, FUTURE_C_STACK_SIZE);
   mzrt_sema_wait(params.ready_sema);
   mzrt_sema_destroy(params.ready_sema);
+  params.ready_sema = NULL;
 
   fts->t = t;
 	
@@ -955,6 +963,12 @@ void scheme_future_check_custodians()
 {
   scheme_future_block_until_gc();
   scheme_future_continue_after_gc();
+}
+
+int scheme_future_is_runtime_thread()
+{
+  Scheme_Future_Thread_State *fts = scheme_future_thread_state;
+  return fts->is_runtime_thread;
 }
 
 /**********************************************************************/
@@ -1412,16 +1426,13 @@ static void run_would_be_future(future_t *ft)
   mz_jmp_buf newbuf, *savebuf;
   Scheme_Thread *p;
   Scheme_Future_State *fs;
-  Scheme_Future_Thread_State *fts;
   int aborted = 0;
   
   p = scheme_current_thread;
   fs = scheme_future_state;
-  fts = scheme_future_thread_state;
   
   /* Setup the future thread state */
-  fts->thread = p;
-  fts->thread->futures_slow_path_tracing++;
+  p->futures_slow_path_tracing++;
   scheme_use_rtcall++;
 
   savebuf = p->error_buf;
@@ -1435,7 +1446,7 @@ static void run_would_be_future(future_t *ft)
   }
 
   scheme_use_rtcall--;
-  fts->thread->futures_slow_path_tracing--;
+  p->futures_slow_path_tracing--;
   ft->in_tracing_mode = 0;
 
   p->error_buf = savebuf;
@@ -2775,6 +2786,18 @@ static void future_do_runtimecall(Scheme_Future_Thread_State *fts,
   /* Fetch the future descriptor for this thread */
   future = fts->thread->current_ft;
 
+  if (!for_overflow) {
+    /* Check if this prim in fact does have a 
+        safe C version */
+    if (func == scheme_even_p || func == scheme_odd_p) {
+      prim_iS_s f = (prim_iS_s)func;
+      Scheme_Object *ret;
+      ret = f(future->arg_i0, future->arg_S1);
+      future->retval_s = ret;
+      return;
+    }
+  }
+
   /* Check whether we are in slow-path trace mode */ 
   if (fts->is_runtime_thread) { 
     /* On runtime thread - must be slow-path tracing */ 
@@ -3018,8 +3041,9 @@ Scheme_Object *scheme_rtcall_make_fsemaphore(Scheme_Object *ready)
   future->source_of_request = "[make_fsemaphore]";
   future->source_type = FSRC_OTHER;
 
-  /* conservative check for when creation can succeed atomically: */
-  if (SCHEME_INT_VAL(ready) 
+  /* conservative check for when creation can succeed atomically 
+     (because it won't raise an error): */
+  if (SCHEME_INTP(ready) 
       && (SCHEME_INT_VAL(ready) >= 0)
       && (SCHEME_INT_VAL(ready) < 1024))
     is_atomic = 1;
@@ -3090,6 +3114,36 @@ void scheme_rtcall_allocate_values(int count, Scheme_Thread *t)
   future = fts->thread->current_ft;
 
   future->arg_s0 = NULL;
+}
+
+Scheme_Structure *scheme_rtcall_allocate_structure(int count, Scheme_Struct_Type *t)
+  XFORM_SKIP_PROC
+/* Called in future thread */
+{
+  Scheme_Future_Thread_State *fts = scheme_future_thread_state;
+  future_t *future = fts->thread->current_ft;
+  Scheme_Object *retval;
+
+  future->prim_protocol = SIG_ALLOC_STRUCT;
+
+  future->arg_i0 = count;
+  future->arg_s0 = (Scheme_Object *)t;
+
+  future->time_of_request = get_future_timestamp();
+  future->source_of_request = "[allocate_structure]";
+  future->source_type = FSRC_OTHER;
+
+  future_do_runtimecall(fts, NULL, 1, 0, 0);
+
+  /* Fetch the future again, in case moved by a GC */ 
+  future = fts->thread->current_ft;
+
+  future->arg_s0 = NULL;
+
+  retval = future->retval_s;
+  future->retval_s = NULL;
+
+  return (Scheme_Structure *)retval;
 }
 
 Scheme_Object *scheme_rtcall_tail_apply(Scheme_Object *rator, int argc, Scheme_Object **argv)
@@ -3455,7 +3509,7 @@ static void do_invoke_rtcall(Scheme_Future_State *fs, future_t *future)
       }
     case SIG_FUTURE: 
       {
-        Scheme_Object *s = future->arg_s1; 
+        GC_CAN_IGNORE Scheme_Object *s = future->arg_s1;
         future->arg_s1 = NULL;
         s = make_future(s, 1, future);
         future->retval_s = s;
@@ -3468,6 +3522,19 @@ static void do_invoke_rtcall(Scheme_Future_State *fs, future_t *future)
         future->arg_s0 = NULL;
 
         scheme_jit_allocate_values(future->arg_i0, (Scheme_Thread *)arg_s0);
+
+        break;
+      }
+    case SIG_ALLOC_STRUCT:
+      {
+        GC_CAN_IGNORE Scheme_Object *arg_s0 = future->arg_s0;
+        GC_CAN_IGNORE Scheme_Structure *res;
+
+        future->arg_s0 = NULL;
+
+        res = scheme_jit_allocate_structure(future->arg_i0, (Scheme_Struct_Type *)arg_s0);
+
+        future->retval_s = (Scheme_Object *)res;
 
         break;
       }
@@ -3531,7 +3598,7 @@ static void do_invoke_rtcall(Scheme_Future_State *fs, future_t *future)
           retval = _scheme_apply(arg_s0, future->arg_i0, arg_S0);
 
         future->retval_s = retval;
-        send_special_result(future, retval);        
+        send_special_result(future, retval);     
 
         break;
       }

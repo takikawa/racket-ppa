@@ -34,11 +34,11 @@ It does not interpret namespaces either.
 
 @section{Datatypes}
 
-@defstruct[location ([line exact-nonnegative-integer?]
-                     [char exact-nonnegative-integer?]
+@defstruct[location ([line (or/c false/c exact-nonnegative-integer?)]
+                     [char (or/c false/c exact-nonnegative-integer?)]
                      [offset exact-nonnegative-integer?])]{
 
-Represents a location in an input stream.}
+Represents a location in an input stream. The offset is a character offset unless @racket[xml-count-bytes] is @racket[#t], in which case it is a byte offset.}
 
 @defthing[location/c contract?]{
  Equivalent to @racket[(or/c location? symbol? false/c)].
@@ -312,13 +312,19 @@ are not named in the @racket[tags] list.  Using @racket[(lambda (x) #t)] as
 @racket[choose] filters all elements regardless of the @racket[tags]
 list.}
 
-@defproc[(validate-xexpr [v any/c]) (one-of/c #t)]{
+@defproc[(validate-xexpr [v any/c]) #t]{
 
-If @racket[v] is an @tech{X-expression}, the result
+If @racket[v] is an @tech{X-expression}, the result is
 @racket[#t]. Otherwise, @racket[exn:invalid-xexpr]s is raised, with
-the a message of the form ``Expected @nonterm{something}, given
-@nonterm{something-else}/'' The @racket[code] field of the exception
-is the part of @racket[v] that caused the exception.}
+a message of the form ``Expected @nonterm{something}, given
+@nonterm{something-else}''. The @racket[code] field of the exception
+is the part of @racket[v] that caused the exception.
+
+@examples[#:eval xml-eval
+  (validate-xexpr '(doc () "over " (em () "9000") "!"))
+  (validate-xexpr #\newline)
+]
+}
 
 @defproc[(correct-xexpr? [v any/c]
                          [success-k (-> any/c)]
@@ -328,7 +334,7 @@ is the part of @racket[v] that caused the exception.}
 Like @racket[validate-xexpr], except that @racket[success-k] is called
 on each valid leaf, and @racket[fail-k] is called on invalid leaves;
 the @racket[fail-k] may return a value instead of raising an exception
-of otherwise escaping. Results from the leaves are combined with
+or otherwise escaping. Results from the leaves are combined with
 @racket[and] to arrive at the final result.}
 
 @; ----------------------------------------------------------------------
@@ -377,6 +383,17 @@ by a single space.  CDATA sections are not affected. The default is
 A parameter that determines whether comments are preserved or
 discarded when reading XML.  The default is @racket[#f], which
 discards comments.}
+
+@defboolparam[xml-count-bytes count-bytes?]{
+
+A parameter that determines whether @racket[read-xml] counts
+characters or bytes in its location tracking. The default is
+@racket[#f], which counts characters.
+
+You may want to use @racket[#t] if, for example, you will be
+communicating these offsets to a C program that can more easily deal
+with byte offsets into the character stream, as opposed to UTF-8
+character offsets.}
 
 @defboolparam[xexpr-drop-empty-attributes drop?]{
 

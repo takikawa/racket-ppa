@@ -25,6 +25,14 @@ Please report bugs via one of the following:
 To compile with Microsoft Visual C, read the instructions in
 "racket\src\worksp\README".
 
+To compile with MinGW tools, follow the Unix instructions below; do not
+use `--enable-shared', because DLLs will be generated automatically.
+The result is a Windows-style build, but without MzCOM. If you are using
+a variant of MinGW without "libdelayimp.a", get the implementation of
+"delayimp.c" from MinGW-w64 and compile it to "libdelayimp.a". When
+compiling with MinGW-w64 for 64-bit mode, the `--enable-sgc' flag
+to `configure' is currently required.
+
 To compile with Cygwin tools, follow the Unix instructions below, and be
 sure to configure with `--enable-shared'.  The result is a Unix-style
 build, not a Windows-style build (e.g., Racket's `system-type' procedure
@@ -35,8 +43,13 @@ Win32).
  Compiling for Mac OS X
 ========================================================================
 
-First, install the Mac OS X Developer Tools from Apple.  Then, follow
-the Unix instructions below, but note the following:
+First, install developer command-line tools from Apple. As of this
+writing, install by getting "Xcode" from the AppStore; then, in
+Xcode's preferences window and in the "Downloads" panel, install
+"Command Line Tools".
+
+After installing developer tools, follow the Unix instructions below,
+but note the following:
 
  * The Racket build creates a framework, "Racket.framework", which is
    installed into "racket/lib".  This framework is used by the `racket'
@@ -72,7 +85,7 @@ the Unix instructions below, but note the following:
    use `--disable-mac64'.
 
 ========================================================================
- Compiling for supported Unix variants (including Linux) or Cygwin
+ Compiling for supported Unix variants (including Linux) or Cygwin/MinGW
 ========================================================================
 
 Quick instructions:

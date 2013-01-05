@@ -268,7 +268,7 @@
    [make-flvector (cl->* (-> index-type -FlVector)
                          (-> index-type -Flonum -FlVector))]
 
-   [flvector-length (-> -FlVector -NonNegFixnum)]
+   [flvector-length (-> -FlVector -Index)]
    [flvector-ref (cl->* (-> -FlVector -NonNegFixnum -Flonum)
                         (-> -FlVector -Fixnum -Flonum)
                         (-> -FlVector index-type -Flonum))]
@@ -279,7 +279,7 @@
                          (-> -FlVector index-type -FlVector)
                          (-> -FlVector index-type index-type -FlVector))]
 
-   [unsafe-flvector-length (-> -FlVector -NonNegFixnum)]
+   [unsafe-flvector-length (-> -FlVector -Index)]
    [unsafe-flvector-ref (cl->* (-> -FlVector -NonNegFixnum -Flonum)
                                (-> -FlVector -Fixnum -Flonum)
                                (-> -FlVector index-type -Flonum))]
@@ -325,10 +325,22 @@
    [real->decimal-string (-Real [index-type] . ->opt .  -String)]
 
 
+   [raise-argument-error
+    (cl->*
+     [-> Sym -String Univ (Un)]
+     [->* (list Sym -String index-type) Univ (Un)])]
    [raise-type-error
     (cl->*
      [-> Sym -String Univ (Un)]
      [->* (list Sym -String index-type) Univ (Un)])]
+   [raise-result-error
+    (cl->*
+     [->* (list Sym -String Univ) Univ (Un)]
+     [->* (list Sym -String index-type Univ) Univ (Un)])]
+   [raise-arguments-error
+    (->* (list Sym -String) Univ (Un))]
+   [raise-range-error
+    (-> Sym -String -String index-type Univ index-type index-type (Un index-type (-val #f)) (Un))]
 
    ))
 

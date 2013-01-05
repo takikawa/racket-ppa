@@ -4,11 +4,13 @@
          racket/class
          racket/math
          racket/runtime-path
+         racket/serialize
          data/interval-map
          setup/dirs
          images/icons/misc
          "../rectangle-intersect.rkt"
-         string-constants)
+         string-constants
+         framework/private/logging-timer)
 (provide docs-text-mixin
          docs-editor-canvas-mixin
          syncheck:add-docs-range
@@ -42,7 +44,7 @@
               (define pos (file-position port))
               (list x
                     (+ (string->number first-line) pos)
-                    (read port))))))))
+                    (deserialize (read port)))))))))
 
 (define files->tag->offset #f)
 
@@ -284,14 +286,20 @@
     (define bw (box 0))
     (define bh (box 0))
     
-    (define docs-im (make-interval-map))
+    (define docs-im #f)
     (define/public (syncheck:reset-docs-im)
-      (set! docs-im (make-interval-map)))
+      (set! docs-im #f)) 
+    (define (get/start-docs-im) 
+      (cond 
+        [docs-im docs-im]
+        [else
+         (set! docs-im (make-interval-map))
+         docs-im]))
     (define/public (syncheck:add-docs-range start end tag visit-docs-url) 
       ;; the +1 to end is effectively assuming that there
       ;; are no abutting identifiers with documentation
       (define rng (list start (+ end 1) tag visit-docs-url))
-      (interval-map-set! docs-im start (+ end 1) rng))
+      (interval-map-set! (get/start-docs-im) start (+ end 1) rng))
     
     (define/override (on-paint before? dc left top right bottom dx dy draw-caret)
       (super on-paint before? dc left top right bottom dx dy draw-caret)
@@ -341,9 +349,13 @@
             (define bmp-view-x (+ view-left blue-box-margin))
             (define bmp-view-y (- view-bottom blue-box-margin lock-height))
             (cond
-              [(or (bmp-bluebox-x . <= . bmp-view-x)
-                   (bmp-bluebox-y . >= . bmp-view-y))
+              [(and (bmp-bluebox-x . <= . bmp-view-x)
+                    (bmp-bluebox-y . >= . bmp-view-y))
                (values br bt bmp-view-x bmp-view-y)]
+              [(bmp-bluebox-y . >= . bmp-view-y)
+               (values br bt bmp-bluebox-x bmp-view-y)]
+              [(bmp-bluebox-x . <= . bmp-view-x)
+               (values br bt bmp-view-x bmp-bluebox-y)]
               [else
                (values br bt bmp-bluebox-x bmp-bluebox-y)])]
            [else
@@ -376,7 +388,7 @@
         [else
          (super on-event evt)]))
     
-    (define timer (new timer%
+    (define timer (new logging-timer%
                        [notify-callback
                         (λ () 
                           (set! timer-running? #f)
@@ -412,7 +424,7 @@
       (define/private (update-the-strs/maybe-invalidate before after)
         (define sp (get-start-position))
         (when (= sp (get-end-position))
-          (define tag+rng (interval-map-ref docs-im sp #f))
+          (define tag+rng (interval-map-ref (get/start-docs-im) sp #f))
           (when tag+rng
             (define ir-start (list-ref tag+rng 0))
             (define ir-end (list-ref tag+rng 1))
@@ -428,23 +440,25 @@
               (after)))))
     
     (define/augment (on-insert where len)
-      (clear-im-range where len)
-      (interval-map-expand! docs-im where (+ where len))
-      (possibly-clobber-strs where len #f)
-      (when the-strs-id-start
-        (when (<= where the-strs-id-start)
-          (set! the-strs-id-start (+ the-strs-id-start len))
-          (set! the-strs-id-end (+ the-strs-id-end len))))
+      (when docs-im
+        (clear-im-range where len)
+        (interval-map-expand! docs-im where (+ where len))
+        (possibly-clobber-strs where len #f)
+        (when the-strs-id-start
+          (when (<= where the-strs-id-start)
+            (set! the-strs-id-start (+ the-strs-id-start len))
+            (set! the-strs-id-end (+ the-strs-id-end len)))))
       (inner (void) on-insert where len))
     
     (define/augment (on-delete where len)
-      (clear-im-range where len)
-      (interval-map-contract! docs-im where (+ where len))
-      (possibly-clobber-strs where len #t)
-      (when the-strs-id-start
-        (when (<= where the-strs-id-start)
-          (set! the-strs-id-start (- the-strs-id-start len))
-          (set! the-strs-id-end (- the-strs-id-end len))))
+      (when docs-im
+        (clear-im-range where len)
+        (interval-map-contract! docs-im where (+ where len))
+        (possibly-clobber-strs where len #t)
+        (when the-strs-id-start
+          (when (<= where the-strs-id-start)
+            (set! the-strs-id-start (- the-strs-id-start len))
+            (set! the-strs-id-end (- the-strs-id-end len)))))
       (inner (void) on-delete where len))
     
     (define/private (possibly-clobber-strs where len delete?)
@@ -463,13 +477,14 @@
           (end-edit-sequence))))
 
     (define/private (clear-im-range where len)
-      (for ([x (in-range len)])
-        (define tag+rng (interval-map-ref docs-im (+ where x) #f))
-        (when tag+rng
-          (interval-map-remove! 
-           docs-im 
-           (list-ref tag+rng 0)
-           (list-ref tag+rng 1)))))
+      (when docs-im
+        (for ([x (in-range len)])
+          (define tag+rng (interval-map-ref docs-im (+ where x) #f))
+          (when tag+rng
+            (interval-map-remove! 
+             docs-im 
+             (list-ref tag+rng 0)
+             (list-ref tag+rng 1))))))
     
     (define/private (in-blue-box? evt)
       (cond
@@ -492,7 +507,7 @@
     (define/private (in-lock/in-read-more? evt)
       (cond
         [(send evt leaving?) (values #f #f)]
-        [(get-show-docs?)
+        [(and (get-show-docs?) (get-dc))
          (define dc-x (send evt get-x))
          (define dc-y (send evt get-y))
          (define-values (br bt bmp-x bmp-y) (get-box-upper-right-and-lock-coordinates))

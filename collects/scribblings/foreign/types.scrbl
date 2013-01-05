@@ -863,19 +863,19 @@ A @tech{custom function type} like @racket[_list], except that it uses
 Racket vectors instead of lists.}
 
 
-@defform*[#:literals (o)
-          [(_bytes o len-expr)
-           _bytes]]{
+@defform*[#:id _bytes
+          #:literals (o)
+          [_bytes
+           (_bytes o len-expr)]]{
 
 A @tech{custom function type} that can be used by itself as a simple
 type for a byte string as a C pointer.  Alternatively, the second form
 is for a pointer return value, where the size should be explicitly
 specified.
 
-There is no need for other modes: input or input/output would be just
-like @racket[_bytes], since the string carries its size information
-(there is no real need for the @racket[o] part of the syntax, but it
-is present for consistency with the above macros).}
+There is no need for other modes analogous to those of @racket[_ptr]:
+input or input/output would be just like @racket[_bytes], since the
+string carries its size information.}
 
 
 @; ------------------------------------------------------------
@@ -975,6 +975,10 @@ The resulting bindings are as follows:
   @racketidfont{list->}@racketvarfont{id}, but fields that are structs
   are recursively unpacked to lists or packed from lists.}
 
+ @item{@racketidfont{struct:}@racketvarfont{id}@racketidfont{:cpointer}:
+  only when a @racket[#:property] is specified --- a structure type that 
+  corresponds to a wrapper to reflect properties (see below).}
+
 ]
 
 Objects of the new type are actually C pointers, with a type tag that
@@ -994,7 +998,10 @@ then struct creation and coercions from @racket[_id] variants wrap a
 non-NULL C pointer representation in a Racket structure that has the
 specified properties. The wrapper Racket structure also has a
 @racket[prop:cpointer] property, so that wrapped C pointers can be
-treated the same as unwrapped C pointers.
+treated the same as unwrapped C pointers. If a @racket[super-id] is
+provided and it corresponds to a C struct type with a wrapper
+structure type, then the wrapper structure type is a subtype of
+@racket[super-id]'s wrapper structure type.
 
 If the first field is itself a C struct type, its tag will be used in
 addition to the new tag.  This feature supports common cases of object

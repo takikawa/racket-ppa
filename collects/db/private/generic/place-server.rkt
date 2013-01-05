@@ -4,7 +4,7 @@
          syntax/parse/private/minimatch
          racket/place
          racket/serialize
-         unstable/lazy-require
+         racket/lazy-require
          "interfaces.rkt"
          "prepared.rkt")
 (provide connection-server)
@@ -114,7 +114,7 @@ server -> client: (or (list boolean 'values result ...)
                  (forward-methods (connected?)
                                   (prepare w s m)
                                   (list-tables w s)
-                                  (start-transaction w m c)
+                                  (start-transaction w m o c)
                                   (end-transaction w m c)
                                   (transaction-status w))]))
           (lambda results

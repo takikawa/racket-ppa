@@ -512,7 +512,7 @@
   /* See the "worksp" directory for more MSVC details.       */
 
 #if (defined(__BORLANDC__) \
-     || (defined(_MSC_VER) \
+     || ((defined(_MSC_VER) || defined(__MINGW32__)) \
          && (defined(__WIN32__) || defined(WIN32) || defined(_WIN32))))
 
 # ifdef _WIN64
@@ -523,7 +523,7 @@
 
 # define SYSTEM_TYPE_NAME "windows"
 # define DOS_FILE_SYSTEM
-# if defined(_MSC_VER)
+# if defined(_MSC_VER) || defined(__MINGW32__)
 #  define NO_READDIR
 #  define USE_FINDFIRST
 #  define NO_READLINK
@@ -581,6 +581,10 @@
 # define TRIG_ZERO_NEEDS_SIGN_CHECK
 # define NEED_TO_DEFINE_MATHERR
 #endif
+#ifdef __MINGW32__
+# define USE_IEEE_FP_PREDS
+# define ATAN2_DOESNT_WORK_WITH_INFINITIES
+#endif
 
 # define IO_INCLUDE
 # define DONT_IGNORE_PIPE_SIGNAL
@@ -604,7 +608,14 @@
 /* MS Visual C++ likes underscore prefixes */
 #if defined(_MSC_VER)
 # define MSC_IZE(x) _ ## x
+# define M_MSC_IZE(x) MSC_IZE(x)
 # define DIRECT_INCLUDE
+# else
+# define M_MSC_IZE(x) x
+#endif
+
+#if defined(__MINGW32__)
+# define MSC_IZE(x) _ ## x
 #endif
 
 #ifdef __BORLANDC__
@@ -615,6 +626,9 @@
 
 #if defined(_MSC_VER)
 # define IGNORE_BY_MS_CONTROL_87
+#endif
+#if defined(__MINGW32__)
+# define ASM_DBLPREC_CONTROL_87
 #endif
 
 # define REGISTER_POOR_MACHINE
@@ -964,6 +978,8 @@
 # define FIXED_STACK_SIZE 524288
 
 # define FLAGS_ALREADY_SET
+
+# define USE_DYNAMIC_FDSET_SIZE
 
 #if defined(i386)
 # define MZ_USE_JIT_I386

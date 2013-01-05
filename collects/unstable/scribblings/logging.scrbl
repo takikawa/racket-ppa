@@ -13,7 +13,7 @@ This module provides tools for logging.
 
 @defproc[(with-logging-to-port
            [port output-port?] [proc (-> any)]
-	   [log-spec (or/c 'fatal 'error 'warning 'info 'debug symbol? #f)] ...)
+           [log-spec (or/c 'fatal 'error 'warning 'info 'debug symbol? #f)] ...)
          any]{
 
 Runs @racket[proc], outputting any logging that would be received by
@@ -35,8 +35,9 @@ Returns whatever @racket[proc] returns.
            [interceptor (-> (vector/c
                               (or/c 'fatal 'error 'warning 'info 'debug)
                               string?
-			      any/c)
-			     any)]
+                              any/c
+                              (or/c symbol? #f))
+                             any)]
            [proc (-> any)]
            [log-spec (or/c 'fatal 'error 'warning 'info 'debug symbol? #f)] ...)
          any]{
@@ -72,7 +73,8 @@ A lower-level interface to logging is also available.
   @defproc[(stop-recording [listener listener?])
            (listof (vector/c (or/c 'fatal 'error 'warning 'info 'debug)
                              string?
-                             any/c))]]]{
+                             any/c
+                             (or/c symbol? #f)))]]]{
 
 @racket[start-recording] starts recording log messages matching the given
 @racket[log-spec]. Messages will be recorded until stopped by passing the
@@ -86,3 +88,6 @@ will then return a list of the log messages that have been reported.
 (log-warning "2")
 (stop-recording l)
 ]}
+
+
+@close-eval[the-eval]

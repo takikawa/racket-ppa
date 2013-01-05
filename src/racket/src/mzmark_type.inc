@@ -42,6 +42,7 @@ static int module_var_MARK(void *p, struct NewGC *gc) {
   gcMARK2(mv->modidx, gc);
   gcMARK2(mv->sym, gc);
   gcMARK2(mv->insp, gc);
+  gcMARK2(mv->shape, gc);
 
   return
   gcBYTES_TO_WORDS(sizeof(Module_Variable));
@@ -53,6 +54,7 @@ static int module_var_FIXUP(void *p, struct NewGC *gc) {
   gcFIXUP2(mv->modidx, gc);
   gcFIXUP2(mv->sym, gc);
   gcFIXUP2(mv->insp, gc);
+  gcFIXUP2(mv->shape, gc);
 
   return
   gcBYTES_TO_WORDS(sizeof(Module_Variable));
@@ -246,6 +248,25 @@ static int small_object_FIXUP(void *p, struct NewGC *gc) {
 
 #define small_object_IS_ATOMIC 0
 #define small_object_IS_CONST_SIZE 1
+
+
+static int small_atomic_obj_SIZE(void *p, struct NewGC *gc) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Small_Object));
+}
+
+static int small_atomic_obj_MARK(void *p, struct NewGC *gc) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Small_Object));
+}
+
+static int small_atomic_obj_FIXUP(void *p, struct NewGC *gc) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Small_Object));
+}
+
+#define small_atomic_obj_IS_ATOMIC 1
+#define small_atomic_obj_IS_CONST_SIZE 1
 
 
 static int app_rec_SIZE(void *p, struct NewGC *gc) {
@@ -1191,25 +1212,6 @@ static int escaping_cont_proc_FIXUP(void *p, struct NewGC *gc) {
 #define escaping_cont_proc_IS_CONST_SIZE 1
 
 
-static int char_obj_SIZE(void *p, struct NewGC *gc) {
-  return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Small_Object));
-}
-
-static int char_obj_MARK(void *p, struct NewGC *gc) {
-  return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Small_Object));
-}
-
-static int char_obj_FIXUP(void *p, struct NewGC *gc) {
-  return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Small_Object));
-}
-
-#define char_obj_IS_ATOMIC 1
-#define char_obj_IS_CONST_SIZE 1
-
-
 static int bignum_obj_SIZE(void *p, struct NewGC *gc) {
   Scheme_Bignum *b = (Scheme_Bignum *)p;
 
@@ -1415,21 +1417,21 @@ static int symbol_obj_SIZE(void *p, struct NewGC *gc) {
   Scheme_Symbol *s = (Scheme_Symbol *)p;
 
   return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Symbol) + s->len - 3);
+  gcBYTES_TO_WORDS(sizeof(Scheme_Symbol) + s->len + 1 - mzFLEX4_DELTA);
 }
 
 static int symbol_obj_MARK(void *p, struct NewGC *gc) {
   Scheme_Symbol *s = (Scheme_Symbol *)p;
 
   return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Symbol) + s->len - 3);
+  gcBYTES_TO_WORDS(sizeof(Scheme_Symbol) + s->len + 1 - mzFLEX4_DELTA);
 }
 
 static int symbol_obj_FIXUP(void *p, struct NewGC *gc) {
   Scheme_Symbol *s = (Scheme_Symbol *)p;
 
   return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Symbol) + s->len - 3);
+  gcBYTES_TO_WORDS(sizeof(Scheme_Symbol) + s->len + 1 - mzFLEX4_DELTA);
 }
 
 #define symbol_obj_IS_ATOMIC 1
@@ -2362,7 +2364,6 @@ static int prefix_val_MARK(void *p, struct NewGC *gc) {
   int i;
   for (i = pf->num_slots; i--; )
     gcMARK2(pf->a[i], gc);
-  gcMARK2(pf->import_map, gc);
   return
   gcBYTES_TO_WORDS((sizeof(Scheme_Prefix) 
 		    + ((pf->num_slots-mzFLEX_DELTA) * sizeof(Scheme_Object *))
@@ -2375,7 +2376,6 @@ static int prefix_val_FIXUP(void *p, struct NewGC *gc) {
   int i;
   for (i = pf->num_slots; i--; )
     gcFIXUP2(pf->a[i], gc);
-  gcFIXUP2(pf->import_map, gc);
   return
   gcBYTES_TO_WORDS((sizeof(Scheme_Prefix) 
 		    + ((pf->num_slots-mzFLEX_DELTA) * sizeof(Scheme_Object *))
@@ -2918,6 +2918,7 @@ static int mark_logger_MARK(void *p, struct NewGC *gc) {
   Scheme_Logger *l = (Scheme_Logger *)p;
   gcMARK2(l->name, gc);
   gcMARK2(l->parent, gc);
+  gcMARK2(l->callback, gc);
   gcMARK2(l->timestamp, gc);
   gcMARK2(l->syslog_level, gc);
   gcMARK2(l->stderr_level, gc);
@@ -2930,6 +2931,7 @@ static int mark_logger_FIXUP(void *p, struct NewGC *gc) {
   Scheme_Logger *l = (Scheme_Logger *)p;
   gcFIXUP2(l->name, gc);
   gcFIXUP2(l->parent, gc);
+  gcFIXUP2(l->callback, gc);
   gcFIXUP2(l->timestamp, gc);
   gcFIXUP2(l->syslog_level, gc);
   gcFIXUP2(l->stderr_level, gc);

@@ -36,10 +36,16 @@
 ;; does t have a type name associated with it currently?
 ;; has-name : Type -> Maybe[Symbol]
 (define (has-name? t)
-  (and print-aliases
-       (for/first ([(n t*) (in-pairs (in-list (force (current-type-names))))]
-                   #:when (and (Type? t*) (type-equal? t t*)))
-         n)))
+  (cond 
+   [print-aliases
+    (define candidates 
+      (for/list ([(n t*) (in-pairs (in-list (force (current-type-names))))]
+		 #:when (and (Type? t*) (type-equal? t t*)))
+	 n))
+    (if (null? candidates)
+	#f
+	(car (sort candidates string>? #:key symbol->string)))]
+   [else #f]))
 
 (define (print-filter c port write?)
   (define (fp . args) (apply fprintf port args))
@@ -77,6 +83,7 @@
   (match c
     [(CarPE:) (fp "car")]
     [(CdrPE:) (fp "cdr")]
+    [(ForcePE:) (fp "force")]
     [(StructPE: t i) (fp "(~a ~a)" t i)]
     [else (fp "(Unknown Path Element: ~a)" (struct->vector c))]))
 
@@ -220,6 +227,8 @@
     [(ThreadCellTop:) (fp "ThreadCell")]
     [(VectorTop:) (fp "Vector")]
     [(MPairTop:) (fp "MPair")]
+    [(Prompt-TagTop:) (fp "Prompt-Tag")]
+    [(Continuation-Mark-KeyTop:) (fp "Continuation-Mark-Key")]
     [(App: rator rands stx)
      (fp "~a" (list* rator rands))]
     ;; special cases for lists
@@ -246,10 +255,10 @@
     [(Function: arities) (fp "~a" (print-case-lambda c))]
     [(arr: _ _ _ _ _) (fp "(arr ~a)" (format-arr c))]
     [(Vector: e) (fp "(Vectorof ~a)" e)]
-    [(HeterogenousVector: e) (fp "(Vector")
-                             (for ([i (in-list e)])
-                               (fp " ~a" i))
-                             (fp ")")]
+    [(HeterogeneousVector: e) (fp "(Vector")
+                              (for ([i (in-list e)])
+                                (fp " ~a" i))
+                              (fp ")")]
     [(Box: e) (fp "(Boxof ~a)" e)]
     [(Future: e) (fp "(Futureof ~a)" e)]
     [(Channel: e) (fp "(Channelof ~a)" e)]
@@ -273,7 +282,10 @@
          (fp "(Parameterof ~a)" in)
          (fp "(Parameterof ~a ~a)" in out))]
     [(Hashtable: k v) (fp "(HashTable ~a ~a)" k v)]
-
+    [(Continuation-Mark-Keyof: rhs)
+     (fp "(Continuation-Mark-Keyof ~a)" rhs)]
+    [(Prompt-Tagof: body handler)
+     (fp "(Prompt-Tagof ~a ~a)" body handler)]
     #;[(Poly-unsafe: n b) (fp "(unsafe-poly ~a ~a ~a)" (Type-seq c) n b)]
     [(Poly-names: names body)
      #;(eprintf "POLY SEQ: ~a\n" (Type-seq body))

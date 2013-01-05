@@ -113,6 +113,10 @@ if test "${enable_shared}" = "yes" ; then
        exit 1
     fi
   ;;
+  *mingw*)
+   echo "ERROR: don't use --enable-shared or --enable-dynlib with mingw"
+   exit 1
+  ;;
   esac
 fi
 
@@ -301,6 +305,7 @@ GCDIR=gc
 
 MZBINTARGET=normal-bin
 MZINSTALLTARGET=unix-install
+MZINSTALLBINDIR='$(bindir)'
 
 MZOPTIONS=
 CGCOPTIONS=
@@ -312,6 +317,12 @@ WXVARIANT="wx_xt"
 MROPTIONS=
 INCLUDEDEP="#"
 WX_MMD_FLAG=
+
+DIRCVTPRE=
+DIRCVTPOST=
+PWD=pwd
+WINDRES=windres
+DLLTOOL=dlltool
 
 PREFLAGS="$CPPFLAGS"
 
@@ -334,6 +345,9 @@ MAIN_VARIANT=3m
 INSTALL_SETUP_FLAGS=
 
 STRIP_DEBUG=":"
+
+use_flag_pthread=yes
+skip_iconv_check=no
 
 ###### OSKit stuff #######
 
@@ -451,6 +465,17 @@ if test "$CC_FOR_BUILD" = "" ; then
   CC_FOR_BUILD="$CC"
 fi
 
+if test "${enable_shared}" = "yes" ; then
+  LIBRACKET_DEP="${LIBRACKET_DEP} libmzgc.la"
+fi
+
+if test "${enable_foreign}" = "yes" ; then
+  check_for_mprotect=yes
+fi
+if test "${enable_jit}" = "yes" ; then
+  check_for_mprotect=yes
+fi
+
 ############## platform tests ################
 
 # for flags we don't want to use in config tests:
@@ -463,6 +488,8 @@ EXTRA_GMP_DEP=
 # For Racket targets:
 OSX=".osx"
 NOT_OSX=""
+MINGW=".mingw"
+NOT_MINGW=""
 CGC_X86_64=""
 
 case "$host_os" in
@@ -547,13 +574,39 @@ case "$host_os" in
     fi
     LIBS="$LIBS -Wl,-E"
     ;;
+  *mingw*)
+    enable_parallel_by_default=yes
+    use_flag_pthread=no
+    MZOPTIONS="$MZOPTIONS -fno-omit-frame-pointer" # to make JIT backtraces work
+    MINGW=""
+    NOT_MINGW=".other"
+    MZINSTALLTARGET=mingw-install
+    MZINSTALLBINDIR="${MZINSTALLBINDIR}/.."
+    EXE_SUFFIX=".exe"
+    COLLECTS_PATH="collects"
+    skip_iconv_check=yes
+    check_for_mprotect=no
+    AC_DEFINE(HAVE_STDINT_H,1,[Have stdint.h])
+    if `which ${host}-windres > /dev/null` ; then
+      WINDRES="${host}-windres"
+    fi
+    if `which ${host}-dlltool > /dev/null` ; then
+      DLLTOOL="${host}-dlltool"
+    fi
+    case "$build_os" in
+      *cygwin*)
+        PWD="cygpath -m \\\`pwd\\\`"
+        DIRCVTPRE="\`cygpath -m "
+        DIRCVTPOST="\`"
+        ;;
+    esac
+    ;;    
   cygwin*)
     enable_cgcdefault="yes"
     MZINSTALLTARGET=unix-cygwin-install
     if test "${enable_shared}" = "yes" ; then
       ar_libtool_no_undefined=" -no-undefined"
-      LIBRACKET_DEP="libmzgc.la -liconv"
-      LIBGRACKET_DEP="../racket/libmzgc.la ../racket/libgracket.la"
+      LIBRACKET_DEP="${LIBRACKET_DEP} -liconv"
     fi
     EXE_SUFFIX=".exe"
     ;;
@@ -641,6 +694,7 @@ case "$host_os" in
     ;;
   nto-qnx*)
     enable_sgc=yes
+    use_flag_pthread=no
     LIBS="$LIBS -lsocket -Wl,--export-dynamic"
     ;;
   *)
@@ -723,6 +777,11 @@ AC_TRY_RUN(
    }, using_gnu_cpp=yes, using_gnu_cpp=no, using_gnu_cpp=no)
 if test "$using_gnu_cpp" = "yes" ; then
   XFORMFLAGS="$XFORMFLAGS --keep-lines"
+  case "$build_os" in
+    *cygwin*)
+      XFORMFLAGS="$XFORMFLAGS --D-via-include"
+     ;;
+  esac
 fi
 AC_MSG_RESULT($using_gnu_cpp) 
 
@@ -745,7 +804,8 @@ AC_TRY_LINK([#include <sys/types.h>
 AC_MSG_RESULT($have_getaddrinfo)
 
 iconv_lib_flag=""
-if test "${enable_iconv}" = "yes" ; then
+if test "${skip_iconv_check}" = "no" ; then
+ if test "${enable_iconv}" = "yes" ; then
   AC_CHECK_HEADER(iconv.h, enable_iconv=yes, enable_iconv=no)
   if test "${enable_iconv}" = "yes" ; then  
     # Does it all work, now?
@@ -775,13 +835,14 @@ if test "${enable_iconv}" = "yes" ; then
       fi
     fi
   fi
-fi
-[ msg="iconv is usable" ]
-AC_MSG_CHECKING($msg)
-iconv_usage_result="$enable_iconv$iconv_lib_flag"
-AC_MSG_RESULT($iconv_usage_result)
-if test "${enable_iconv}" = "no" ; then
+ fi
+ [ msg="iconv is usable" ]
+ AC_MSG_CHECKING($msg)
+ iconv_usage_result="$enable_iconv$iconv_lib_flag"
+ AC_MSG_RESULT($iconv_usage_result)
+ if test "${enable_iconv}" = "no" ; then
   MZOPTIONS="$MZOPTIONS -DMZ_NO_ICONV"  
+ fi
 fi
 
 [ msg="for mbsrtowcs" ]
@@ -921,6 +982,24 @@ if test "${enable_libffi}" = "yes" ; then
     OWN_LIBFFI="OFF"
   fi
  fi
+fi
+
+if test "${check_for_mprotect}" = "yes" ; then
+  [ msg="for mmap and mprotect" ]
+  AC_MSG_CHECKING($msg)
+  AC_TRY_RUN(
+  [  #include <sys/mman.h> ]
+  [  #include <fcntl.h> ]
+     int main() {
+      void *p;
+      p = mmap(0, 2 << 16, PROT_READ | PROT_WRITE, MAP_PRIVATE, open("/dev/zero", O_RDWR), 0);
+      mprotect(p, 2 << 16, PROT_READ | PROT_WRITE | PROT_EXEC);
+      return 0;
+     }, use_mprotect=yes, use_mprotect=no, use_mprotect=no)
+  AC_MSG_RESULT($use_mprotect)
+  if test "${use_mprotect}" = "yes" ; then
+     AC_DEFINE(HAVE_MMAP_MPROTECT,1,[Have mmap and mprotect])
+  fi
 fi
 
 if test "${enable_backtrace}" = "yes" ; then
@@ -1071,9 +1150,10 @@ fi
 ############### pthread ###################
 
 if test "${enable_pthread}" = "yes" ; then
-  # FIXME: the following two flags are GCC-specific:
-  PREFLAGS="$PREFLAGS -pthread"
-  LDFLAGS="$LDFLAGS -pthread"
+  if test "${use_flag_pthread}" = "yes" ; then
+    PREFLAGS="$PREFLAGS -pthread"
+    LDFLAGS="$LDFLAGS -pthread"
+  fi
   AC_DEFINE(USE_PTHREAD_INSTEAD_OF_ITIMER, 1, [Pthread timer enabled])
 
 [ msg="whether pthread_rwlock is available"   ]
@@ -1263,10 +1343,13 @@ AC_SUBST(GCDIR)
 AC_SUBST(XFORMFLAGS)
 AC_SUBST(MZBINTARGET)
 AC_SUBST(MZINSTALLTARGET)
+AC_SUBST(MZINSTALLBINDIR)
 AC_SUBST(EXTRA_GMP_OBJ)
 AC_SUBST(EXTRA_GMP_DEP)
 AC_SUBST(OSX)
 AC_SUBST(NOT_OSX)
+AC_SUBST(MINGW)
+AC_SUBST(NOT_MINGW)
 AC_SUBST(FRAMEWORK_INSTALL_DIR)
 AC_SUBST(FRAMEWORK_REL_INSTALL)
 AC_SUBST(FRAMEWORK_PREFIX)
@@ -1291,6 +1374,12 @@ AC_SUBST(USE_WXPRECOMP)
 AC_SUBST(INCLUDEDEP)
 AC_SUBST(WX_MMD_FLAG)
 
+AC_SUBST(PWD)
+AC_SUBST(DIRCVTPRE)
+AC_SUBST(DIRCVTPOST)
+AC_SUBST(WINDRES)
+AC_SUBST(DLLTOOL)
+
 AC_SUBST(OSKHOME)
 AC_SUBST(EXTRA_OSK_LIBS)
 
@@ -1300,7 +1389,6 @@ AC_SUBST(FOREIGN_CONVENIENCE)
 AC_SUBST(FOREIGNTARGET)
 
 AC_SUBST(LIBRACKET_DEP)
-AC_SUBST(LIBGRACKET_DEP)
 
 AC_SUBST(LTO)
 AC_SUBST(LTA)

@@ -1576,10 +1576,35 @@
   (test-call supercall-tail-method))
 
 ;; ----------------------------------------
-;; Private field names
+;; names
 
 (let ([c% (class object% (define foo (lambda () 10)) (define/public (get) foo) (super-new))])
   (test 'foo object-name (send (new c%) get)))
+
+(let ([w-s (λ (x) 
+             (define sp (open-output-string))
+             (write x sp)
+             (get-output-string sp))])
+  
+  (test 'object% object-name object%)
+  (test "#<class:object%>" w-s object%)
+  
+  (test 'c% object-name (let ([c% (class object% (super-new))]) c%))
+  (test "#<class:c%>" w-s (let ([c% (class object% (super-new))]) c%))
+  
+  (test 'i<%> object-name (let ([i<%> (interface ())]) i<%>))
+  (test "#<interface:i<%>>" w-s (let ([i<%> (interface ())]) i<%>))
+  
+  (test 'interface:object% object-name (class->interface object%))
+  (test "#<interface:object%>" w-s (class->interface object%))
+  
+  (test 'interface:c% object-name (let ([c% (class object% (super-new))])
+                                    (class->interface c%)))
+  (test "#<interface:c%>" w-s (let ([c% (class object% (super-new))])
+                                (class->interface c%)))
+
+)
+
 
 ;; ----------------------------------------
 ;; Implementing printable<%>
@@ -1803,8 +1828,6 @@
         '(class object% (init-rest))
         #'init-rest))
 
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 ;; ----------------------------------------
 ;; Mixins
 
@@ -1823,6 +1846,46 @@
       (super-new)))
   (test 3 'mixin-with-local-member-names (send (new (mix c%)) x)))
   
+;; ----------------------------------------
+;; Class contracts & generics
 
+(module c%-class-contract-tests racket/base
+  (require racket/class
+           racket/contract)
+
+  (define c% (class object%
+               (super-new)
+               (define/public (m x) x)))
+  
+  (define c%/c
+    (class/c
+     (m (->m integer? integer?))))
+  
+  (provide
+   (contract-out
+    [c% c%/c])
+   is-c%?
+   c%-is?
+   is-a-c%?)
+  
+  (define (is-c%? c)
+    (c . subclass? . c%))
+  
+  (define (c%-is? c)
+    (c% . subclass? . c))
+
+  (define (is-a-c%? v)
+    (v . is-a? . c%)))
+
+(require 'c%-class-contract-tests)
+
+(test #t is-c%? c%)
+(test #t c%-is? c%)
+
+(test #t is-a-c%? (new c%))
+
+(test 5 'send-generic (send-generic (new c%) (generic c% m) 5))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (report-errs)

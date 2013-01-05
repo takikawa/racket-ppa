@@ -31,6 +31,7 @@
    (except for the garbage collector, which is in `gc', `sgc', or
    `gc2', depending on which one you're using). */
 
+#define __MINGW32_DELAY_LOAD__ 1
 #include "scheme.h"
 
 /*========================================================================*/
@@ -48,6 +49,10 @@
 # define DONT_PARSE_COMMAND_LINE
 # define DONT_RUN_REP
 # define DONT_LOAD_INIT_FILE
+#endif
+
+#if defined(MZ_XFORM) && defined(__MINGW32__) && !defined(USE_THREAD_LOCAL)
+XFORM_GC_VARIABLE_STACK_THROUGH_DIRECT_FUNCTION;
 #endif
 
 #ifdef MZ_XFORM
@@ -256,7 +261,11 @@ static BOOL WINAPI ConsoleBreakHandler(DWORD op)
 static void do_scheme_rep(Scheme_Env *, FinishArgs *f);
 static int cont_run(FinishArgs *f);
 
-#if defined(WINDOWS_UNICODE_SUPPORT) && !defined(__CYGWIN32__) && !defined(MZ_DEFINE_UTF8_MAIN)
+#if defined(__MINGW32__)
+# define MAIN zmain
+# define MAIN_char char
+# define MAIN_argv argv
+#elif defined(WINDOWS_UNICODE_SUPPORT) && !defined(__CYGWIN32__) && !defined(MZ_DEFINE_UTF8_MAIN)
 # define MAIN wmain
 # define MAIN_char wchar_t
 # define MAIN_argv wargv
@@ -277,14 +286,22 @@ static int main_after_stack(void *data);
 START_XFORM_SKIP;
 # endif
 
-#ifdef IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
-extern intptr_t _tls_index;
-static __declspec(thread) void *tls_space;
+#if defined(__MINGW32__) || defined(WINMAIN_ALREADY)
+# include "parse_cmdl.inc"
 #endif
 
-int MAIN(int argc, MAIN_char **MAIN_argv)
-{
+#ifdef IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
+extern intptr_t _tls_index;
+# ifdef __MINGW32__
+static __thread void *tls_space;
+# else
+static __declspec(thread) void *tls_space;
+# endif
+#endif
+
 #ifdef DOS_FILE_SYSTEM
+void load_delayed()
+{
   /* Order matters: load dependencies first */
 # ifndef MZ_PRECISE_GC
   load_delayed_dll(NULL, "libmzgcxxxxxxx.dll");
@@ -292,12 +309,51 @@ int MAIN(int argc, MAIN_char **MAIN_argv)
   load_delayed_dll(NULL, "libracket" DLL_3M_SUFFIX "xxxxxxx.dll");
   record_dll_path();
 # ifdef IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
+#  ifdef __MINGW32__
+  {
+    /* gcc declares space for the thread-local variable in a way that
+       the OS can set up, but its doesn't actually map variables
+       through the OS-supplied mechanism. Just assume that the first
+       thread-local variable is ours. */
+    void **base;
+#  ifdef _WIN64
+    asm("mov %%gs:(0x58), %0;" :"=r"(base));
+#  else
+    asm("mov %%fs:(0x2C), %0;" :"=r"(base));
+#  endif
+    scheme_register_tls_space(*base, _tls_index);
+  }
+#  else
   scheme_register_tls_space(&tls_space, _tls_index);
+#  endif
 # endif
+}
+#endif
+
+int MAIN(int argc, MAIN_char **MAIN_argv)
+{
+#if defined(DOS_FILE_SYSTEM) && !defined(__MINGW32__)
+  load_delayed();
 #endif
 
   return main_after_dlls(argc, MAIN_argv);
 }
+
+#if defined(__MINGW32__) && !defined(WINMAIN_ALREADY)
+int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR ignored, int nCmdShow)
+{
+  int argc;
+  char **argv;
+
+  load_delayed();
+
+  scheme_set_atexit(atexit);
+
+  argv = cmdline_to_argv(&argc, NULL);
+
+  return zmain(argc, argv);
+}
+#endif
 
 # ifdef MZ_PRECISE_GC
 END_XFORM_SKIP;

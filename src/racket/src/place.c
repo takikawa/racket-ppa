@@ -92,7 +92,7 @@ static void register_traversers(void);
 # endif
 
 static void *place_start_proc(void *arg);
-static void *place_start_proc_after_stack(void *data_arg, void *stack_base);
+MZ_DO_NOT_INLINE(static void *place_start_proc_after_stack(void *data_arg, void *stack_base));
 
 # define PLACE_PRIM_W_ARITY(name, func, a1, a2, env) GLOBAL_PRIM_W_ARITY(name, func, a1, a2, env)
 
@@ -454,16 +454,19 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
 
   if (!proc_thread) {
     mzrt_sema_destroy(ready);
+    ready = NULL;
     scheme_signal_error("place: place creation failed");
   }
 
   mz_proc_thread_detach(proc_thread);
+  proc_thread = NULL;
 
   /* wait until the place has started and grabbed the value
      from `place_data'; it's important that a GC doesn't happen
      here until the other place is far enough. */
   mzrt_sema_wait(ready);
   mzrt_sema_destroy(ready);
+  ready = NULL;
 
   place_data->ready = NULL;
   place_data->place_obj = NULL;
@@ -688,6 +691,8 @@ SHARED_OK static Child_Status *child_statuses = NULL;
 SHARED_OK static mzrt_mutex* child_status_lock = NULL;
 SHARED_OK static mzrt_mutex* child_wait_lock = NULL; /* ordered before status lock */
 
+SHARED_OK static int started_thread, pending_children;
+
 /* When the Racket process value for a process in a different group becomes 
    GC-unreachable before a waitpid() on the process, then we 
    need to keep waiting on the pid to let the OS gc the process.
@@ -861,11 +866,18 @@ static void *mz_proc_thread_signal_worker(void *data) {
         /* We wait only on processes in the same group as Racket,
            because detecting the termination of a group's main process
            disables our ability to terminate all processes in the group. */
-        check_pid = 0; /* => processes in the same group as Racket */
+        if (pending_children)
+          check_pid = 0; /* => processes in the same group as Racket */
+        else
+          check_pid = -1; /* don't check */
         is_group = 0;
       }
 
-      pid = waitpid(check_pid, &status, WNOHANG);
+      if (check_pid == -1) {
+        pid = -1;
+        errno = ECHILD;
+      } else
+        pid = waitpid(check_pid, &status, WNOHANG);
 
       if (pid == -1) {
         if (errno == EINTR) {
@@ -994,13 +1006,8 @@ void scheme_places_unblock_child_signal() XFORM_SKIP_PROC
 
 void scheme_places_start_child_signal_handler()
 {
-  mz_proc_thread *signal_thread;
-
   mzrt_mutex_create(&child_status_lock);
   mzrt_mutex_create(&child_wait_lock);
-
-  signal_thread = mz_proc_thread_create(mz_proc_thread_signal_worker, NULL);
-  mz_proc_thread_detach(signal_thread);
 }
 
 void scheme_wait_suspend()
@@ -1010,6 +1017,30 @@ void scheme_wait_suspend()
 
 void scheme_wait_resume()
 {
+  mzrt_mutex_unlock(child_wait_lock);
+}
+
+void scheme_starting_child()
+{
+  mzrt_mutex_lock(child_wait_lock);
+
+  if (!started_thread) {
+    mz_proc_thread *signal_thread;  
+
+    signal_thread = mz_proc_thread_create(mz_proc_thread_signal_worker, NULL);
+    mz_proc_thread_detach(signal_thread);
+    started_thread = 1;
+  }
+
+  pending_children++;
+
+  mzrt_mutex_unlock(child_wait_lock);
+}
+
+void scheme_ended_child()
+{
+  mzrt_mutex_lock(child_wait_lock);
+  --pending_children;
   mzrt_mutex_unlock(child_wait_lock);
 }
 
@@ -1393,14 +1424,18 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
           o->type = scheme_cpointer_type;
           SCHEME_CPTR_FLAGS(o) |= 0x1;
           SCHEME_CPTR_VAL(o) = SCHEME_CPTR_VAL(so);
-          o2 = shallow_types_copy(SCHEME_CPTR_TYPE(so), NULL, fd_accumulators, delayed_errno, mode, 
-                                  can_raise_exn, master_chain, invalid_object);
+          o2 = SCHEME_CPTR_TYPE(so);
+          if (o2)
+            o2 = shallow_types_copy(o2, NULL, fd_accumulators, delayed_errno, mode, 
+                                    can_raise_exn, master_chain, invalid_object);
           SCHEME_CPTR_TYPE(o) = o2;
 
           new_so = o;
         } else {
-          (void)shallow_types_copy(SCHEME_CPTR_TYPE(so), NULL, fd_accumulators, delayed_errno, mode, 
-                                   can_raise_exn, master_chain, invalid_object);
+          if (SCHEME_CPTR_TYPE(so)) {
+            (void)shallow_types_copy(SCHEME_CPTR_TYPE(so), NULL, fd_accumulators, delayed_errno, mode, 
+                                     can_raise_exn, master_chain, invalid_object);
+          }
         }
       }
       else {
@@ -2339,6 +2374,7 @@ void scheme_place_check_for_interruption()
       pause_all_child_places();
       mzrt_sema_wait(local_pause);
       mzrt_sema_destroy(local_pause);
+      local_pause = NULL;
       resume_all_child_places();
     } else
       break;
@@ -2786,6 +2822,7 @@ static void async_channel_finalize(void *p, void* data) {
   maybe_report_message_size(ch);
 
   mzrt_mutex_destroy(ch->lock);
+  ch->lock = NULL;
   for (i = 0; i < ch->size ; i++) {
     ht = NULL;
     if (ch->msgs[i]) {
@@ -2812,8 +2849,8 @@ static void async_channel_finalize(void *p, void* data) {
       place_obj = ((Scheme_Place_Object *) ch->wakeup_signal);
 
       mzrt_mutex_lock(place_obj->lock);
-        place_obj->refcount--;
-        refcount = place_obj->refcount;
+      place_obj->refcount--;
+      refcount = place_obj->refcount;
       mzrt_mutex_unlock(place_obj->lock);
       if (!refcount) {
         destroy_place_object_locks(place_obj);
@@ -3013,11 +3050,16 @@ static void place_async_send(Scheme_Place_Async_Channel *ch, Scheme_Object *uo) 
     /*wake up possibly sleeping multiple receiver */  
     else if (SCHEME_VECTORP(ch->wakeup_signal)) {
       Scheme_Object *v = ch->wakeup_signal;
-      int i;
+      int i, j, delta;
       int size = SCHEME_VEC_SIZE(v);
       int alive = 0;
-      for (i = 0; i < size; i++) {
+      /* Try to be fair by cycling through the available places
+         starting at `delta'. */
+      delta = ch->delta++;
+      if (delta < 0) delta = -delta;
+      for (j = 0; j < size; j++) {
         Scheme_Place_Object *o3;
+        i = (j + delta) % size;
         o3 = (Scheme_Place_Object *)SCHEME_VEC_ELS(v)[i];
         if (o3) {
           int refcount = 0;
@@ -3115,13 +3157,17 @@ static void register_place_object_with_channel(Scheme_Place_Async_Channel *ch, S
     int i = 0;
     Scheme_Object *v = ch->wakeup_signal;
     int size = SCHEME_VEC_SIZE(v);
-    /* look for unused slot in wakeup vector */
+    /* already registered? */
     for (i = 0; i < size; i++) {
       Scheme_Object *vo = SCHEME_VEC_ELS(v)[i];
       if (vo == o) { 
         return;
       }
-      else if (!vo) {
+    }
+    /* look for unused slot in wakeup vector */
+    for (i = 0; i < size; i++) {
+      Scheme_Object *vo = SCHEME_VEC_ELS(v)[i];
+      if (!vo) {
         place_object_inc_refcount(o);
         SCHEME_VEC_ELS(v)[i] = o;
         return;

@@ -1,5 +1,7 @@
 #lang racket/base
 
+;; Contract generation for Typed Racket
+
 (provide type->contract define/fixup-contract? change-contract-fixups)
 
 (require
@@ -142,26 +144,35 @@
                [_ #`(values #,@rngs*)]))
            (cond
             ;; To generate a single `->*', everything must be the same for all arrs, except for positional
-            ;; arguments which only need to be monotonically increasing.
+            ;; arguments which can increase by at most one each time.
+            ;; Note: optional arguments can only increase by 1 each time, to avoid problems with
+            ;;  functions that take, e.g., either 2 or 6 arguments. These functions shouldn't match,
+            ;;  since this code would generate contracts that accept any number of arguments between
+            ;;  2 and 6, which is wrong.
             ;; TODO sufficient condition, but may not be necessary
             [(and
               (> (length arrs) 1)
               ;; Keyword args, range and rest specs all the same.
-              (let ([xs (map (match-lambda [(arr: _ rng rest-spec _ kws)
-					    (list rng rest-spec kws)])
-			     arrs)])
-                (foldl equal? (first xs) (rest xs)))
-              ;; Positionals are monotonically increasing.
+              (let* ([xs (map (match-lambda [(arr: _ rng rest-spec _ kws)
+                                             (list rng rest-spec kws)])
+                              arrs)]
+                     [first-x (first xs)])
+                (for/and ([x (in-list (rest xs))])
+                  (equal? x first-x)))
+              ;; Positionals are monotonically increasing by at most one.
               (let-values ([(_ ok?)
-                            (for/fold ([positionals '()]
+                            (for/fold ([positionals (arr-dom (first arrs))]
                                        [ok-so-far?  #t])
-                                ([arr (in-list arrs)])
+                                ([arr (in-list (rest arrs))])
                               (match arr
                                 [(arr: dom _ _ _ _)
+                                 (define ldom         (length dom))
+                                 (define lpositionals (length positionals))
                                  (values dom
                                          (and ok-so-far?
-                                              (>= (length dom) (length positionals))
-                                              (equal? positionals (take dom (length positionals)))))]))])
+                                              (or (= ldom lpositionals)
+                                                  (= ldom (add1 lpositionals)))
+                                              (equal? positionals (take dom lpositionals))))]))])
                 ok?))
              (match* ((first arrs) (last arrs))
                [((arr: first-dom (Values: (list (Result: rngs (FilterSet: (Top:) (Top:)) (Empty:)) ...)) rst #f kws)
@@ -317,7 +328,7 @@
         [(Vector: t)
          (set-chaperone!)
          #`(vectorof #,(t->c t))]
-        [(HeterogenousVector: ts)
+        [(HeterogeneousVector: ts)
          (set-chaperone!)
          #`(vector/c #,@(map t->c ts))]
         [(Box: t)
@@ -330,6 +341,13 @@
          #`(promise/c #,(t->c t))]
         [(Opaque: p? cert)
          #`(flat-named-contract (quote #,(syntax-e p?)) #,(cert p?))]
+        [(Continuation-Mark-Keyof: t)
+         (set-chaperone!)
+         #`(continuation-mark-key/c #,(t->c t))]
+        ;; TODO: this is not quite right for case->
+        [(Prompt-Tagof: s (Function: (list (arr: (list ts ...) _ _ _ _))))
+         (set-chaperone!)
+         #`(prompt-tag/c #,@(map t->c ts) #:call/cc #,(t->c s))]
         ;; TODO
         [(F: v) (cond [(assoc v (vars)) => second]
                       [else (int-err "unknown var: ~a" v)])]

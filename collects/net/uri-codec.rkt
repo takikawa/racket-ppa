@@ -91,6 +91,10 @@ See more in PR8831.
          uri-path-segment-decode
          uri-userinfo-encode
          uri-userinfo-decode
+         uri-unreserved-encode
+         uri-unreserved-decode
+         uri-path-segment-unreserved-encode
+         uri-path-segment-unreserved-decode
          form-urlencoded-encode
          form-urlencoded-decode
          alist->form-urlencoded
@@ -113,15 +117,20 @@ See more in PR8831.
 (define uri-mapping (append alphanumeric-mapping safe-mapping))
 
 ;; The uri path segment mapping from RFC 3986
+(define path-segment-extra-mapping (self-map-chars "@+,=$&:"))
 (define uri-path-segment-mapping
-  (append alphanumeric-mapping
-          safe-mapping
-          (self-map-chars "@+,=$&:")))
+  (append uri-mapping
+          path-segment-extra-mapping))
 
 ;; from RFC 3986
 (define unreserved-mapping
   (append alphanumeric-mapping
           (self-map-chars "-._~")))
+
+;; The uri path segment mapping from RFC 3986
+(define uri-path-segment-unreserved-mapping
+  (append unreserved-mapping
+          path-segment-extra-mapping))
 
 ;; from RFC 3986
 (define sub-delims-mapping
@@ -141,9 +150,6 @@ See more in PR8831.
   (define (hex n) (string-ref "0123456789ABCDEF" n))
   (string #\% (hex (quotient number 16)) (hex (modulo number 16))))
 
-(define (hex-string->number hex-string)
-  (string->number (substring hex-string 1 3) 16))
-
 (define ascii-size 128)
 
 ;; (listof (cons char char)) -> (values (vectorof string) (vectorof string))
@@ -159,6 +165,7 @@ See more in PR8831.
                              (char->integer enc)
                              (char->integer orig))])
               alist)
+
     (values encoding-table decoding-table)))
 
 (define-values (uri-encoding-vector uri-decoding-vector)
@@ -172,6 +179,13 @@ See more in PR8831.
                 uri-userinfo-decoding-vector)
   (make-codec-tables uri-userinfo-mapping))
 
+(define-values (uri-unreserved-encoding-vector
+                uri-unreserved-decoding-vector)
+  (make-codec-tables unreserved-mapping))
+
+(define-values (uri-path-segment-unreserved-encoding-vector
+                uri-path-segment-unreserved-decoding-vector)
+  (make-codec-tables uri-path-segment-unreserved-mapping))
 
 (define-values (form-urlencoded-encoding-vector
                 form-urlencoded-decoding-vector)
@@ -198,6 +212,9 @@ See more in PR8831.
                    (cons (vector-ref table (char->integer char))
                          (internal-decode rest))]
                   [(cons char rest)
+                   ;; JBC : this appears to handle strings containing
+                   ;; non-ascii characters; shouldn't this just be an 
+                   ;; error?
                    (append
                     (bytes->list (string->bytes/utf-8 (string char)))
                     (internal-decode rest))]))
@@ -235,6 +252,21 @@ See more in PR8831.
 (define (uri-userinfo-decode str)
   (decode uri-userinfo-decoding-vector str))
 
+;; string -> string
+(define (uri-unreserved-encode str)
+  (encode uri-unreserved-encoding-vector str))
+
+;; string -> string
+(define (uri-unreserved-decode str)
+  (decode uri-unreserved-decoding-vector str))
+
+;; string -> string
+(define (uri-path-segment-unreserved-encode str)
+  (encode uri-path-segment-unreserved-encoding-vector str))
+
+;; string -> string
+(define (uri-path-segment-unreserved-decode str)
+  (decode uri-path-segment-unreserved-decoding-vector str))
 
 ;; string -> string
 (define (form-urlencoded-encode str)

@@ -87,7 +87,7 @@
         (combine-path-strings (url-path-absolute? url) path)
         ;; (if query (sa "?" (uri-encode query)) "")
         (if (null? query) "" (sa "?" (alist->form-urlencoded query)))
-        (if fragment (sa "#" (uri-encode fragment)) ""))))
+        (if fragment (sa "#" (uri-encode* fragment)) ""))))
 
 ;; url->default-port : url -> num
 (define (url->default-port url)
@@ -545,7 +545,7 @@
         [(eq?    p 'same) "."]
         [(equal? p "..")  "%2e%2e"]
         [(equal? p ".")   "%2e"]
-        [else (uri-path-segment-encode p)]))
+        [else (uri-path-segment-encode* p)]))
 
 (define (combine-path-strings absolute? path/params)
   (cond [(null? path/params) ""]
@@ -558,47 +558,53 @@
                ";"))
 
 (define (path->url path)
-  (let ([url-path
-         (let loop ([path (simplify-path path #f)][accum null])
-           (let-values ([(base name dir?) (split-path path)])
-             (cond
-               [(not base)
-                (append (map
-                         (lambda (s)
-                           (make-path/param s null))
-                         (if (eq? (path-convention-type path) 'windows)
-                           ;; For Windows, massage the root:
-                           (let ([s (regexp-replace
-                                     #rx"[/\\\\]$"
-                                     (bytes->string/utf-8 (path->bytes name))
-                                     "")])
-                             (cond
-                               [(regexp-match? #rx"^\\\\\\\\[?]\\\\[a-zA-Z]:" s)
-                                ;; \\?\<drive>: path:
-                                (regexp-split #rx"[/\\]+" (substring s 4))]
-                               [(regexp-match? #rx"^\\\\\\\\[?]\\\\UNC" s)
-                                ;; \\?\ UNC path:
-                                (regexp-split #rx"[/\\]+" (substring s 7))]
-                               [(regexp-match? #rx"^[/\\]" s)
-                                ;; UNC path:
-                                (regexp-split #rx"[/\\]+" s)]
-                               [else
-                                (list s)]))
-                           ;; On other platforms, we drop the root:
-                           null))
-                        accum)]
-               [else
-                (let ([accum (cons (make-path/param
-                                    (if (symbol? name)
-                                      name
-                                      (bytes->string/utf-8
-                                       (path-element->bytes name)))
-                                    null)
-                                   accum)])
-                  (if (eq? base 'relative)
-                    accum
-                    (loop base accum)))])))])
-    (make-url "file" #f "" #f (absolute-path? path) url-path '() #f)))
+  (let* ([spath (simplify-path path #f)]
+         [dir? (let-values ([(b n dir?) (split-path spath)]) dir?)]
+         ;; If original path is a directory the resulting URL
+         ;; should have a trailing forward slash
+         [url-tail (if dir? (list (make-path/param "" null)) null)]
+         [url-path
+          (let loop ([path spath][accum null])
+            (let-values ([(base name dir?) (split-path path)])
+              (cond
+                [(not base)
+                 (append (map
+                          (lambda (s)
+                            (make-path/param s null))
+                          (if (eq? (path-convention-type path) 'windows)
+                              ;; For Windows, massage the root:
+                              (let ([s (regexp-replace
+                                        #rx"[/\\\\]$"
+                                        (bytes->string/utf-8 (path->bytes name))
+                                        "")])
+                                (cond
+                                  [(regexp-match? #rx"^\\\\\\\\[?]\\\\[a-zA-Z]:" s)
+                                   ;; \\?\<drive>: path:
+                                   (regexp-split #rx"[/\\]+" (substring s 4))]
+                                  [(regexp-match? #rx"^\\\\\\\\[?]\\\\UNC" s)
+                                   ;; \\?\ UNC path:
+                                   (regexp-split #rx"[/\\]+" (substring s 7))]
+                                  [(regexp-match? #rx"^[/\\]" s)
+                                   ;; UNC path:
+                                   (regexp-split #rx"[/\\]+" s)]
+                                  [else
+                                   (list s)]))
+                              ;; On other platforms, we drop the root:
+                              null))
+                         accum)]
+                [else
+                 (let ([accum (cons (make-path/param
+                                     (if (symbol? name)
+                                         name
+                                         (bytes->string/utf-8
+                                          (path-element->bytes name)))
+                                     null)
+                                    accum)])
+                   (if (eq? base 'relative)
+                       accum
+                       (loop base accum)))])))])
+    (make-url "file" #f "" #f (absolute-path? path) (append url-path url-tail) '() #f)))
+
 
 (define (url->path url [kind (system-path-convention-type)])
   (file://->path url kind))
@@ -682,6 +688,18 @@
     (tcp-abandon-port client->server)
     server->client))
 
+(define current-url-encode-mode (make-parameter 'recommended))
+
+(define (uri-encode* str)
+  (case (current-url-encode-mode)
+    [(unreserved) (uri-unreserved-encode str)]
+    [(recommended) (uri-encode str)]))
+
+(define (uri-path-segment-encode* str)
+  (case (current-url-encode-mode)
+    [(unreserved) (uri-path-segment-unreserved-encode str)]
+    [(recommended) (uri-path-segment-encode str)]))
+
 (provide (struct-out url) (struct-out path/param))
 
 (provide/contract
@@ -722,4 +740,5 @@
  (current-proxy-servers
   (parameter/c (or/c false/c (listof (list/c string? string? number?)))))
  (file-url-path-convention-type
-  (parameter/c (one-of/c 'unix 'windows))))
+  (parameter/c (one-of/c 'unix 'windows)))
+ (current-url-encode-mode (parameter/c (one-of/c 'recommended 'unreserved))))

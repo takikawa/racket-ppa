@@ -29,7 +29,7 @@ LIBFFI_INCLUDE_OFF =
 
 ARLIBFLAGS = @LDFLAGS@ $(LIBS)
 
-DEF_COLLECTS_DIR = +D INITIAL_COLLECTS_DIRECTORY='"'"`cd $(srcdir)/../../../collects; pwd`"'"'
+DEF_COLLECTS_DIR = +D INITIAL_COLLECTS_DIRECTORY='"'"`cd $(srcdir)/../../../collects; @PWD@`"'"'
 
 # See ../../Makefile about RUN_RACKET_CGC, which 
 # typically redirects to RUN_THIS_RACKET_CGC:
@@ -283,7 +283,7 @@ $(XSRCDIR)/setjmpup.c: ../src/setjmpup.@LTO@ $(XFORMDEP)
 $(XSRCDIR)/sfs.c: ../src/sfs.@LTO@ $(XFORMDEP)
 	$(XFORM) $(XSRCDIR)/sfs.c $(SRCDIR)/sfs.c
 $(XSRCDIR)/string.c: ../src/string.@LTO@ $(XFORMDEP)
-	$(XFORM_SETUP) --cpp "$(CPP) -I../src $(CPPFLAGS)" -o $(XSRCDIR)/string.c $(SRCDIR)/string.c
+	$(XFORM_SETUP) --cpp "$(CPP) -I../src $(CPPFLAGS)" @XFORMFLAGS@ -o $(XSRCDIR)/string.c $(SRCDIR)/string.c
 $(XSRCDIR)/struct.c: ../src/struct.@LTO@ $(XFORMDEP)
 	$(XFORM) $(XSRCDIR)/struct.c $(SRCDIR)/struct.c
 $(XSRCDIR)/symbol.c: ../src/symbol.@LTO@ $(XFORMDEP) $(SRCDIR)/mzrt.h
@@ -299,7 +299,7 @@ $(XSRCDIR)/validate.c: ../src/validate.@LTO@ $(XFORMDEP)
 $(XSRCDIR)/vector.c: ../src/vector.@LTO@ $(XFORMDEP)
 	$(XFORM) $(XSRCDIR)/vector.c $(SRCDIR)/vector.c
 $(XSRCDIR)/foreign.c: ../../foreign/foreign.@LTO@ $(XFORMDEP)
-	$(XFORM_SETUP) --cpp "$(CPP) $(CPPFLAGS) $(LIBFFI_INCLUDE_@OWN_LIBFFI@) -I${SRCDIR}/../../racket/src" -o $(XSRCDIR)/foreign.c $(SRCDIR)/../../foreign/foreign.c
+	$(XFORM_SETUP) --cpp "$(CPP) $(CPPFLAGS) $(LIBFFI_INCLUDE_@OWN_LIBFFI@) -I${SRCDIR}/../../racket/src" @XFORMFLAGS@ -o $(XSRCDIR)/foreign.c $(SRCDIR)/../../foreign/foreign.c
 $(XSRCDIR)/main.c: ../main.@LTO@ $(XFORMDEP)
 	$(XFORM_NOPRECOMP) $(XSRCDIR)/main.c $(DEF_COLLECTS_DIR) $(srcdir)/../main.c
 
@@ -483,7 +483,7 @@ EXTRA_OBJS_L = ../src/gmp.@LTO@ $(EXTRA_GMP) ../src/unwind.@LTO@ $(@FOREIGN_IF_U
 	$(NICEAR) $(AR) $(ARFLAGS) ../libracket3m.@LIBSFX@ $(OBJS) $(EXTRA_OBJS_L) gc2.@LTO@
 	$(RANLIB) ../libracket3m.@LIBSFX@
 
-../racket@MMM@@NOT_OSX@: main.@LTO@ ../libracket3m.@LIBSFX@
+../racket@MMM@@NOT_OSX@@NOT_MINGW@: main.@LTO@ ../libracket3m.@LIBSFX@
 	cd ..; @MZLINKER@ -o racket@MMM@ @PROFFLAGS@ gc2/main.@LTO@ libracket3m.@LIBSFX@ @LDFLAGS@ $(LIBS)
 
 # The above "cd .." prevents a problem with libtool's generated script in --enable-shared mode,
@@ -503,6 +503,17 @@ $(MZFWMMM): ../libracket3m.@LIBSFX@
 	mkdir -p "../Racket.framework/Versions/$(FWVERSION)_3m"
 	cp "Racket.framework/Versions/$(FWVERSION)_3m/Racket" "../Racket.framework/Versions/$(FWVERSION)_3m/Racket"
 	/usr/bin/install_name_tool -change "Racket.framework/Versions/$(FWVERSION)_3m/Racket" "@executable_path/Racket.framework/Versions/$(FWVERSION)_3m/Racket" "../racket@MMM@"
+
+../lib/libracket3mxxxxxxx.dll: ../libracket3m.@LIBSFX@ ../mzsj86g.o
+	mkdir -p lib
+	@MZLINKER@ -shared -o ../lib/libracket3mxxxxxxx.dll ../mzsj86g.o -Wl,--output-def -Wl,libracket3m.def -Wl,--whole-archive ../libracket3m.@LIBSFX@ -Wl,--no-whole-archive -lshell32 -luser32 -lws2_32
+
+libracket3m.dll.a: ../lib/libracket3mxxxxxxx.dll
+	@DLLTOOL@ --def libracket3m.def -D libracket3mxxxxxxx.dll --output-delaylib libracket3m.dll.a
+
+../racket@MMM@@MINGW@: libracket3m.dll.a main.@LTO@ ../rres.o $(SPECIALIZINGOBJECTS)
+	cd ..; @MZLINKER@ -o racket@MMM@ gc2/main.@LTO@ rres.o $(SPECIALIZINGOBJECTS) gc2/libracket3m.dll.a @LDFLAGS@ @LIBS@ -ldelayimp
+
 
 clean:
 	/bin/rm -f ../racket@MMM@ *.@LTO@ $(XSRCDIR)/*

@@ -13,9 +13,12 @@
 #include <errno.h>
 
 #ifndef WINDOWS_DYNAMIC_LOAD
-
 # include <dlfcn.h>
+#else /* WINDOWS_DYNAMIC_LOAD defined */
+# include <windows.h>
+#endif /* WINDOWS_DYNAMIC_LOAD */
 
+#if !defined(WINDOWS_DYNAMIC_LOAD) || defined(__MINGW32__)
 # if SIZEOF_CHAR == 1
    typedef   signed char Tsint8;
    typedef unsigned char Tuint8;
@@ -53,9 +56,8 @@
 #  error "configuration error, please contact PLT (int64)"
 # endif
 
-#else /* WINDOWS_DYNAMIC_LOAD defined */
+#else /* !defined(WINDOWS_DYNAMIC_LOAD) || defined(__MINGW32__)  */
 
-# include <windows.h>
 # ifndef __CYGWIN32__
 #  include <wtypes.h>
    typedef          _int8  Tsint8;
@@ -68,7 +70,7 @@
    typedef unsigned _int64 Tuint64;
 # endif
 
-#endif /* WINDOWS_DYNAMIC_LOAD */
+#endif /* !defined(WINDOWS_DYNAMIC_LOAD) || defined(__MINGW32__) */
 
 #include "ffi.h"
 
@@ -1532,7 +1534,7 @@ static Scheme_Object *unwrap_cpointer_property(Scheme_Object *orig_v)
       if (val) {
         if (SCHEME_INTP(val))
           v = scheme_struct_ref(v, SCHEME_INT_VAL(val));
-        else if (SCHEME_PROCP(v)) {
+        else if (SCHEME_PROCP(val)) {
           Scheme_Object *a[1];
           a[0] = v;
           v = _scheme_apply(val, 1, a);
@@ -3041,9 +3043,10 @@ static void finish_ffi_call(ffi_cif *cif, void *c_func, intptr_t cfoff,
   ffi_call(cif, (VoidFun)W_OFFSET(c_func, cfoff), p, avalues);
 }
 
-Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
+Scheme_Object *ffi_do_call(int argc, Scheme_Object *argv[], Scheme_Object *self)
 /* data := {name, c-function, itypes, otype, cif} */
 {
+  Scheme_Object *data = SCHEME_PRIM_CLOSURE_ELS(self)[0];
   const char    *name = SCHEME_BYTE_STR_VAL(SCHEME_VEC_ELS(data)[0]);
   void          *c_func = (void*)(SCHEME_VEC_ELS(data)[1]);
   Scheme_Object *itypes = SCHEME_VEC_ELS(data)[2];
@@ -3174,7 +3177,7 @@ static Scheme_Object *foreign_ffi_call(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *itypes = argv[1];
   Scheme_Object *otype  = argv[2];
-  Scheme_Object *obj, *data, *p, *base, *cp, *name;
+  Scheme_Object *obj, *data, *p, *base, *cp, *name, *a[1];
   ffi_abi abi;
   intptr_t ooff;
   GC_CAN_IGNORE ffi_type *rtype, **atypes;
@@ -3247,9 +3250,11 @@ static Scheme_Object *foreign_ffi_call(int argc, Scheme_Object *argv[])
   SCHEME_VEC_ELS(data)[7] = (orig_place ? scheme_true : scheme_false);
 # endif /* MZ_USE_PLACES */
   scheme_register_finalizer(data, free_fficall_data, cif, NULL, NULL);
-  return scheme_make_closed_prim_w_arity(ffi_do_call, (void*)data,
-                                         SCHEME_BYTE_STR_VAL(name),
-                                         nargs, nargs);
+  a[0] = data;
+  return scheme_make_prim_closure_w_arity(ffi_do_call,
+                                          1, a,
+                                          SCHEME_BYTE_STR_VAL(name),
+                                          nargs, nargs);
 }
 #undef MYNAME
 

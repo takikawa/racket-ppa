@@ -1,5 +1,9 @@
-#lang racket
-(require compiler/zo-parse
+#lang racket/base
+
+(require racket/list
+         racket/match
+         racket/contract
+         compiler/zo-parse
          "util.rkt"
          "mpi.rkt"
          "nodep.rkt"
@@ -59,7 +63,7 @@
 
 (define (compute-new-modvar mv rw)
   (match mv
-    [(struct module-variable (modidx sym pos phase))
+    [(struct module-variable (modidx sym pos phase constantness))
      (match rw
        [(struct modvar-rewrite (self-modidx provide->toplevel))
         (log-debug (format "Rewriting ~a of ~S" pos (mpi->path* modidx)))
@@ -76,7 +80,7 @@
                [remap empty])
       ([tl (in-list mod-toplevels)])
       (match tl
-        [(and mv (struct module-variable (modidx sym pos phase)))
+        [(and mv (struct module-variable (modidx sym pos phase constantness)))
          (define rw ((current-get-modvar-rewrite) modidx))
          ; XXX We probably don't need to deal with #f phase
          (unless (or (not phase) (zero? phase))
@@ -156,12 +160,12 @@
                     (cond
                       [(mod-lift-start . <= . n)
                        ; This is a lift
-                       (local [(define which-lift (- n mod-lift-start))
-                               (define lift-tl (+ top-lift-start lift-offset which-lift))]
-                         (when (lift-tl . >= . max-toplevel)
-                           (error 'merge-module "[~S] lift error: orig(~a) which(~a) max(~a) lifts(~a) now(~a)" 
-                                  name n which-lift num-mod-toplevels mod-num-lifts lift-tl))
-                         lift-tl)]
+                       (define which-lift (- n mod-lift-start))
+                       (define lift-tl (+ top-lift-start lift-offset which-lift))
+                       (when (lift-tl . >= . max-toplevel)
+                         (error 'merge-module "[~S] lift error: orig(~a) which(~a) max(~a) lifts(~a) now(~a)" 
+                                name n which-lift num-mod-toplevels mod-num-lifts lift-tl))
+                       lift-tl]
                       [else
                        (list-ref toplevel-remap n)]))
                   (lambda (n)

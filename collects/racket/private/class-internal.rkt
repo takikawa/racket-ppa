@@ -1951,7 +1951,8 @@
                       abstract-ids   ; list of abstract method names
                       method-ictcs   ; list of indices of methods to fix for interface ctcs
 
-                      ictc-classes   ; concretized versions of this class keyed by blame
+                      [ictc-classes  ; #f or weak hash of cached classes keyed by blame
+                       #:mutable]
 
                       methods        ; vector of methods (for external dynamic dispatch)
                       super-methods  ; vector of methods (for subclass super calls)
@@ -2073,8 +2074,8 @@
                    (let ([s (class-name super)])
                      (and s 
                           (not (eq? super object%))
-                          (if (symbol? s)
-                              (format "derived-from-~a" s)
+                          (if (symbol? s) ;; how can 's' not be a symbol at this point?
+                              (string->symbol (format "derived-from-~a" s))
                               s))))]
          ;; Combine method lists
          [public-names (append pubment-names public-final-names public-normal-names abstract-names)]
@@ -2211,14 +2212,13 @@
           
           ;; ---- Make the class and its interface ----
           (let* ([class-make (if name
-                                 (make-naming-constructor 
-                                  struct:class
-                                  (string->symbol (format "class:~a" name)))
+                                 (make-naming-constructor struct:class name "class")
                                  make-class)]
                  [interface-make (if name
                                      (make-naming-constructor 
                                       struct:interface
-                                      (string->symbol (format "interface:~a" name)))
+                                      (string->symbol (format "interface:~a" name))
+                                      #f)
                                      make-interface)]
                  [method-names (append (reverse public-names) super-method-ids)]
                  [field-names (append public-field-names super-field-ids)]
@@ -2260,7 +2260,7 @@
                                   make-)
                                 method-width method-ht method-names remaining-abstract-names
                                 (interfaces->contracted-methods (list i))
-                                (make-weak-hasheq)
+                                #f
                                 methods super-methods int-methods beta-methods meth-flags
                                 inner-projs dynamic-idxs dynamic-projs
                                 field-width field-pub-width field-ht field-names
@@ -2903,9 +2903,7 @@ An example
                              (hash-copy (class-field-ht cls)))]
                [init (class-init cls)]
                [class-make (if name
-                               (make-naming-constructor 
-                                struct:class
-                                (string->symbol (format "class:~a" name)))
+                               (make-naming-constructor struct:class name "class")
                                make-class)]
                [c (class-make name
                               pos
@@ -2919,7 +2917,7 @@ An example
                               (class-abstract-ids cls)
                               (remq* ctc-methods method-ictcs)
 
-                              (make-weak-hasheq)
+                              #f
                               
                               methods
                               super-methods
@@ -2991,7 +2989,7 @@ An example
                   ;; value server) is taking responsibility for any interface-contracted
                   ;; methods)
                   (define info (replace-ictc-blame (cadr entry) #f (blame-positive blame)))
-                  (vector-set! methods i (concretize-ictc-method (car entry) info)))))
+                  (vector-set! methods i (concretize-ictc-method m (car entry) info)))))
             ;; Now apply projections
             (for ([m (in-list ctc-methods)]
                   [c (in-list (class/c-method-contracts ctc))])
@@ -3691,9 +3689,9 @@ An example
       ;; Check for [conflicting] implementation requirements
       (let ([class (get-implement-requirement supers 'interface #:intf-name name)]
             [interface-make (if name
-                                (make-naming-constructor 
-                                 struct:interface
-                                 (string->symbol (format "interface:~a" name)))
+                                (make-naming-constructor struct:interface 
+                                                         name
+                                                         "interface")
                                 make-interface)])
         ;; Add supervars to table:
         (for-each
@@ -3749,22 +3747,30 @@ An example
 ;;  object%
 ;;--------------------------------------------------------------------
 
-(define (make-naming-constructor type name)
-  (let-values ([(struct: make- ? -accessor -mutator)
-                (make-struct-type name type 0 0 #f null insp)])
-    make-))
+(define (make-naming-constructor type name prefix)
+  (define (writeer obj port mode)
+    (write-string "#<" port)
+    (when prefix
+      (write-string prefix port)
+      (write-string ":" port))
+    (write-string (symbol->string name) port)
+    (write-string ">" port))
+  (define props (list (cons prop:custom-write writeer)))
+  (define-values (struct: make- ? -accessor -mutator)
+    (make-struct-type name type 0 0 #f props insp))
+  make-)
 
-(define object<%> ((make-naming-constructor struct:interface 'interface:object%)
+(define object<%> ((make-naming-constructor struct:interface 'interface:object% #f)
                    'object% null #f null (make-immutable-hash) #f null))
 (setup-all-implemented! object<%>)
-(define object% ((make-naming-constructor struct:class 'class:object%)
+(define object% ((make-naming-constructor struct:class 'object% "class")
                  'object%
                  0 (vector #f) 
                  object<%>
                  void ; never inspectable
                  
                  0 (make-hasheq) null null null
-                 (make-weak-hasheq)
+                 #f
                  (vector) (vector) (vector) (vector) (vector)
 
                  (vector) (vector) (vector)
@@ -3888,7 +3894,9 @@ An example
 ;; takes a class and concretize interface ctc methods
 (define (fetch-concrete-class cls blame)
   (cond [(null? (class-method-ictcs cls)) cls]
-        [(hash-ref (class-ictc-classes cls) blame #f) => values]
+        [(and (class-ictc-classes cls)
+              (hash-ref (class-ictc-classes cls) blame #f))
+         => values]
         [else
          ;; if there are contracted methods to concretize, do so
          (let* ([name (class-name cls)]
@@ -3901,9 +3909,7 @@ An example
                 [field-pub-width (class-field-pub-width cls)]
                 [field-ht (class-field-ht cls)]
                 [class-make (if name
-                                (make-naming-constructor
-                                 struct:class
-                                 (string->symbol (format "class:~a" name)))
+                                (make-naming-constructor struct:class name "class")
                                 make-class)]
                 [c (class-make name
                                (class-pos cls)
@@ -3917,7 +3923,7 @@ An example
                                null
                                null
 
-                               (make-weak-hasheq)
+                               #f
 
                                meths
                                (class-super-methods cls)
@@ -3975,21 +3981,26 @@ An example
                (define entry (vector-ref meths index))
                (define meth (car entry))
                (define ictc-infos (replace-ictc-blame (cadr entry) #f blame))
-               (define wrapped-meth (concretize-ictc-method meth ictc-infos))
+               (define wrapped-meth (concretize-ictc-method m meth ictc-infos))
                (vector-set! meths index wrapped-meth)))
 
+           ;; initialize if not yet initialized
+           (unless (class-ictc-classes cls)
+             (set-class-ictc-classes! cls (make-weak-hasheq)))
+
+           ;; cache the concrete class
            (hash-set! (class-ictc-classes cls) blame c)
            c)]))
 
-;; method info -> method
+;; name method info -> method
 ;; appropriately wraps the method with interface contracts
-(define (concretize-ictc-method meth info)
+(define (concretize-ictc-method m meth info)
   (for/fold ([meth meth])
             ([info (in-list info)])
     (define ctc (car info))
     (define pos-blame (caddr info))
     (define neg-blame (cadddr info))
-    (contract ctc meth pos-blame neg-blame)))
+    (contract ctc meth pos-blame neg-blame m #f)))
 
 (define (do-make-object blame class by-pos-args named-args)
   (unless (class? class)
@@ -4354,7 +4365,7 @@ An example
                                         (obj-error 'make-generic "no such method"
                                                    "method name" (as-write name)
                                                    #:class-name (class-name class))))]
-                       [instance? (class-object? class)]
+                       [instance? (class-object? (class-orig-cls class))]
                        [dynamic-generic
                         (lambda (obj)
                           (unless (instance? obj)
@@ -4848,9 +4859,7 @@ An example
                        (class-field-ht cls)
                        (hash-copy (class-field-ht cls)))]
          [class-make (if name
-                         (make-naming-constructor 
-                          struct:class
-                          (string->symbol (format "class:~a" name)))
+                         (make-naming-constructor struct:class name "class")
                          make-class)]
          [c (class-make name
                         (class-pos cls)

@@ -703,10 +703,13 @@ GCDIR
 XFORMFLAGS
 MZBINTARGET
 MZINSTALLTARGET
+MZINSTALLBINDIR
 EXTRA_GMP_OBJ
 EXTRA_GMP_DEP
 OSX
 NOT_OSX
+MINGW
+NOT_MINGW
 FRAMEWORK_INSTALL_DIR
 FRAMEWORK_REL_INSTALL
 FRAMEWORK_PREFIX
@@ -727,6 +730,11 @@ WXPRECOMP
 USE_WXPRECOMP
 INCLUDEDEP
 WX_MMD_FLAG
+PWD
+DIRCVTPRE
+DIRCVTPOST
+WINDRES
+DLLTOOL
 OSKHOME
 EXTRA_OSK_LIBS
 FOREIGN_IF_USED
@@ -734,7 +742,6 @@ FOREIGN_OBJSLIB
 FOREIGN_CONVENIENCE
 FOREIGNTARGET
 LIBRACKET_DEP
-LIBGRACKET_DEP
 LTO
 LTA
 collectsdir
@@ -2180,6 +2187,10 @@ if test "${enable_shared}" = "yes" ; then
        exit 1
     fi
   ;;
+  *mingw*)
+   echo "ERROR: don't use --enable-shared or --enable-dynlib with mingw"
+   exit 1
+  ;;
   esac
 fi
 
@@ -2368,6 +2379,7 @@ GCDIR=gc
 
 MZBINTARGET=normal-bin
 MZINSTALLTARGET=unix-install
+MZINSTALLBINDIR='$(bindir)'
 
 MZOPTIONS=
 CGCOPTIONS=
@@ -2379,6 +2391,12 @@ WXVARIANT="wx_xt"
 MROPTIONS=
 INCLUDEDEP="#"
 WX_MMD_FLAG=
+
+DIRCVTPRE=
+DIRCVTPOST=
+PWD=pwd
+WINDRES=windres
+DLLTOOL=dlltool
 
 PREFLAGS="$CPPFLAGS"
 
@@ -2401,6 +2419,9 @@ MAIN_VARIANT=3m
 INSTALL_SETUP_FLAGS=
 
 STRIP_DEBUG=":"
+
+use_flag_pthread=yes
+skip_iconv_check=no
 
 ###### OSKit stuff #######
 
@@ -3913,6 +3934,17 @@ if test "$CC_FOR_BUILD" = "" ; then
   CC_FOR_BUILD="$CC"
 fi
 
+if test "${enable_shared}" = "yes" ; then
+  LIBRACKET_DEP="${LIBRACKET_DEP} libmzgc.la"
+fi
+
+if test "${enable_foreign}" = "yes" ; then
+  check_for_mprotect=yes
+fi
+if test "${enable_jit}" = "yes" ; then
+  check_for_mprotect=yes
+fi
+
 ############## platform tests ################
 
 # for flags we don't want to use in config tests:
@@ -3925,6 +3957,8 @@ EXTRA_GMP_DEP=
 # For Racket targets:
 OSX=".osx"
 NOT_OSX=""
+MINGW=".mingw"
+NOT_MINGW=""
 CGC_X86_64=""
 
 case "$host_os" in
@@ -4009,13 +4043,43 @@ case "$host_os" in
     fi
     LIBS="$LIBS -Wl,-E"
     ;;
+  *mingw*)
+    enable_parallel_by_default=yes
+    use_flag_pthread=no
+    MZOPTIONS="$MZOPTIONS -fno-omit-frame-pointer" # to make JIT backtraces work
+    MINGW=""
+    NOT_MINGW=".other"
+    MZINSTALLTARGET=mingw-install
+    MZINSTALLBINDIR="${MZINSTALLBINDIR}/.."
+    EXE_SUFFIX=".exe"
+    COLLECTS_PATH="collects"
+    skip_iconv_check=yes
+    check_for_mprotect=no
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_STDINT_H 1
+_ACEOF
+
+    if `which ${host}-windres > /dev/null` ; then
+      WINDRES="${host}-windres"
+    fi
+    if `which ${host}-dlltool > /dev/null` ; then
+      DLLTOOL="${host}-dlltool"
+    fi
+    case "$build_os" in
+      *cygwin*)
+        PWD="cygpath -m \\\`pwd\\\`"
+        DIRCVTPRE="\`cygpath -m "
+        DIRCVTPOST="\`"
+        ;;
+    esac
+    ;;
   cygwin*)
     enable_cgcdefault="yes"
     MZINSTALLTARGET=unix-cygwin-install
     if test "${enable_shared}" = "yes" ; then
       ar_libtool_no_undefined=" -no-undefined"
-      LIBRACKET_DEP="libmzgc.la -liconv"
-      LIBGRACKET_DEP="../racket/libmzgc.la ../racket/libgracket.la"
+      LIBRACKET_DEP="${LIBRACKET_DEP} -liconv"
     fi
     EXE_SUFFIX=".exe"
     ;;
@@ -4103,6 +4167,7 @@ case "$host_os" in
     ;;
   nto-qnx*)
     enable_sgc=yes
+    use_flag_pthread=no
     LIBS="$LIBS -lsocket -Wl,--export-dynamic"
     ;;
   *)
@@ -4324,6 +4389,11 @@ fi
 
 if test "$using_gnu_cpp" = "yes" ; then
   XFORMFLAGS="$XFORMFLAGS --keep-lines"
+  case "$build_os" in
+    *cygwin*)
+      XFORMFLAGS="$XFORMFLAGS --D-via-include"
+     ;;
+  esac
 fi
 { echo "$as_me:$LINENO: result: $using_gnu_cpp" >&5
 echo "${ECHO_T}$using_gnu_cpp" >&6; }
@@ -4437,7 +4507,8 @@ rm -f core conftest.err conftest.$ac_objext conftest_ipa8_conftest.oo \
 echo "${ECHO_T}$have_getaddrinfo" >&6; }
 
 iconv_lib_flag=""
-if test "${enable_iconv}" = "yes" ; then
+if test "${skip_iconv_check}" = "no" ; then
+ if test "${enable_iconv}" = "yes" ; then
 
 { echo "$as_me:$LINENO: checking for grep that handles long lines and -e" >&5
 echo $ECHO_N "checking for grep that handles long lines and -e... $ECHO_C" >&6; }
@@ -5088,15 +5159,16 @@ fi
       fi
     fi
   fi
-fi
- msg="iconv is usable"
-{ echo "$as_me:$LINENO: checking $msg" >&5
+ fi
+  msg="iconv is usable"
+ { echo "$as_me:$LINENO: checking $msg" >&5
 echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
-iconv_usage_result="$enable_iconv$iconv_lib_flag"
-{ echo "$as_me:$LINENO: result: $iconv_usage_result" >&5
+ iconv_usage_result="$enable_iconv$iconv_lib_flag"
+ { echo "$as_me:$LINENO: result: $iconv_usage_result" >&5
 echo "${ECHO_T}$iconv_usage_result" >&6; }
-if test "${enable_iconv}" = "no" ; then
+ if test "${enable_iconv}" = "no" ; then
   MZOPTIONS="$MZOPTIONS -DMZ_NO_ICONV"
+ fi
 fi
 
  msg="for mbsrtowcs"
@@ -5465,6 +5537,72 @@ echo "${ECHO_T}$have_libffi" >&6; }
     OWN_LIBFFI="OFF"
   fi
  fi
+fi
+
+if test "${check_for_mprotect}" = "yes" ; then
+   msg="for mmap and mprotect"
+  { echo "$as_me:$LINENO: checking $msg" >&5
+echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
+  if test "$cross_compiling" = yes; then
+  use_mprotect=no
+else
+  cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+  #include <sys/mman.h>
+    #include <fcntl.h>
+     int main() {
+      void *p;
+      p = mmap(0, 2 << 16, PROT_READ | PROT_WRITE, MAP_PRIVATE, open("/dev/zero", O_RDWR), 0);
+      mprotect(p, 2 << 16, PROT_READ | PROT_WRITE | PROT_EXEC);
+      return 0;
+     }
+_ACEOF
+rm -f conftest$ac_exeext
+if { (ac_try="$ac_link"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_link") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
+  { (case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  use_mprotect=yes
+else
+  echo "$as_me: program exited with status $ac_status" >&5
+echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+( exit $ac_status )
+use_mprotect=no
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
+fi
+
+
+  { echo "$as_me:$LINENO: result: $use_mprotect" >&5
+echo "${ECHO_T}$use_mprotect" >&6; }
+  if test "${use_mprotect}" = "yes" ; then
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_MMAP_MPROTECT 1
+_ACEOF
+
+  fi
 fi
 
 if test "${enable_backtrace}" = "yes" ; then
@@ -8611,9 +8749,10 @@ fi
 ############### pthread ###################
 
 if test "${enable_pthread}" = "yes" ; then
-  # FIXME: the following two flags are GCC-specific:
-  PREFLAGS="$PREFLAGS -pthread"
-  LDFLAGS="$LDFLAGS -pthread"
+  if test "${use_flag_pthread}" = "yes" ; then
+    PREFLAGS="$PREFLAGS -pthread"
+    LDFLAGS="$LDFLAGS -pthread"
+  fi
 
 cat >>confdefs.h <<\_ACEOF
 #define USE_PTHREAD_INSTEAD_OF_ITIMER 1
@@ -8862,6 +9001,14 @@ fi
 ############## final output ################
 
 LIBS="$LIBS $EXTRALIBS"
+
+
+
+
+
+
+
+
 
 
 
@@ -9739,14 +9886,14 @@ GCDIR!$GCDIR$ac_delim
 XFORMFLAGS!$XFORMFLAGS$ac_delim
 MZBINTARGET!$MZBINTARGET$ac_delim
 MZINSTALLTARGET!$MZINSTALLTARGET$ac_delim
+MZINSTALLBINDIR!$MZINSTALLBINDIR$ac_delim
 EXTRA_GMP_OBJ!$EXTRA_GMP_OBJ$ac_delim
 EXTRA_GMP_DEP!$EXTRA_GMP_DEP$ac_delim
 OSX!$OSX$ac_delim
 NOT_OSX!$NOT_OSX$ac_delim
+MINGW!$MINGW$ac_delim
+NOT_MINGW!$NOT_MINGW$ac_delim
 FRAMEWORK_INSTALL_DIR!$FRAMEWORK_INSTALL_DIR$ac_delim
-FRAMEWORK_REL_INSTALL!$FRAMEWORK_REL_INSTALL$ac_delim
-FRAMEWORK_PREFIX!$FRAMEWORK_PREFIX$ac_delim
-INSTALL_ORIG_TREE!$INSTALL_ORIG_TREE$ac_delim
 _ACEOF
 
   if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 97; then
@@ -9788,6 +9935,9 @@ _ACEOF
 ac_delim='%!_!# '
 for ac_last_try in false false false false false :; do
   cat >conf$$subs.sed <<_ACEOF
+FRAMEWORK_REL_INSTALL!$FRAMEWORK_REL_INSTALL$ac_delim
+FRAMEWORK_PREFIX!$FRAMEWORK_PREFIX$ac_delim
+INSTALL_ORIG_TREE!$INSTALL_ORIG_TREE$ac_delim
 EXE_SUFFIX!$EXE_SUFFIX$ac_delim
 SO_SUFFIX!$SO_SUFFIX$ac_delim
 OWN_LIBFFI!$OWN_LIBFFI$ac_delim
@@ -9804,6 +9954,11 @@ WXPRECOMP!$WXPRECOMP$ac_delim
 USE_WXPRECOMP!$USE_WXPRECOMP$ac_delim
 INCLUDEDEP!$INCLUDEDEP$ac_delim
 WX_MMD_FLAG!$WX_MMD_FLAG$ac_delim
+PWD!$PWD$ac_delim
+DIRCVTPRE!$DIRCVTPRE$ac_delim
+DIRCVTPOST!$DIRCVTPOST$ac_delim
+WINDRES!$WINDRES$ac_delim
+DLLTOOL!$DLLTOOL$ac_delim
 OSKHOME!$OSKHOME$ac_delim
 EXTRA_OSK_LIBS!$EXTRA_OSK_LIBS$ac_delim
 FOREIGN_IF_USED!$FOREIGN_IF_USED$ac_delim
@@ -9811,7 +9966,6 @@ FOREIGN_OBJSLIB!$FOREIGN_OBJSLIB$ac_delim
 FOREIGN_CONVENIENCE!$FOREIGN_CONVENIENCE$ac_delim
 FOREIGNTARGET!$FOREIGNTARGET$ac_delim
 LIBRACKET_DEP!$LIBRACKET_DEP$ac_delim
-LIBGRACKET_DEP!$LIBGRACKET_DEP$ac_delim
 LTO!$LTO$ac_delim
 LTA!$LTA$ac_delim
 collectsdir!$collectsdir$ac_delim
@@ -9835,7 +9989,7 @@ LIBOBJS!$LIBOBJS$ac_delim
 LTLIBOBJS!$LTLIBOBJS$ac_delim
 _ACEOF
 
-  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 45; then
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 52; then
     break
   elif $ac_last_try; then
     { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5

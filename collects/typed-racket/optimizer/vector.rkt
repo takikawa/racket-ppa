@@ -26,7 +26,7 @@
   #:commit
   (pattern e:expr
            #:when (match (type-of #'e)
-                    [(tc-result1: (HeterogenousVector: _)) #t]
+                    [(tc-result1: (HeterogeneousVector: _)) #t]
                     [_ #f])
            #:with opt ((optimize) #'e)))
 
@@ -43,7 +43,7 @@
                                     this-syntax)
                   (add-disappeared-use #'op)
                   (match (type-of #'v)
-                    [(tc-result1: (HeterogenousVector: es))
+                    [(tc-result1: (HeterogeneousVector: es))
                      #`(begin v.opt #,(length es))]))) ; v may have side effects
   ;; we can optimize vector-length on all vectors.
   ;; since the program typechecked, we know the arg is a vector.
@@ -63,7 +63,7 @@
   ;; the index is within bounds (for now, literal or singleton type)
   (pattern (#%plain-app op:vector-op v:known-length-vector-expr i:expr new:expr ...)
            #:when (let ((len (match (type-of #'v)
-                               [(tc-result1: (HeterogenousVector: es)) (length es)]
+                               [(tc-result1: (HeterogeneousVector: es)) (length es)]
                                [_ 0]))
                         (ival (or (syntax-parse #'i [((~literal quote) i:number) (syntax-e #'i)] [_ #f])
                                   (match (type-of #'i)
@@ -89,7 +89,7 @@
                             [new-v #,((optimize) #'v)])
                         ;; do the impersonator check up front, to avoid doing it twice (length and op)
                         (if (impersonator? new-v)
-                            (if #,(let ([one-sided #'(unsafe-fx< new-i (unsafe-vector*-length v))])
+                            (if #,(let ([one-sided #'(unsafe-fx< new-i (unsafe-vector*-length new-v))])
                                     (if i-known-nonneg?
                                         ;; we know it's nonnegative, one-sided check
                                         one-sided
@@ -98,7 +98,7 @@
                                 (op.unsafe new-v new-i #,@(syntax-map (optimize) #'(new ...)))
                                 #,safe-fallback) ; will error. to give the right error message
                             ;; not an impersonator, can use unsafe-vector* ops
-                            (if #,(let ([one-sided #'(unsafe-fx< new-i (unsafe-vector-length v))])
+                            (if #,(let ([one-sided #'(unsafe-fx< new-i (unsafe-vector-length new-v))])
                                     (if i-known-nonneg?
                                         one-sided
                                         #`(and (unsafe-fx>= new-i 0)
@@ -116,7 +116,7 @@
                         [i-known-nonneg? (subtypeof? #'i -NonNegFixnum)])
                     #`(let ([new-i #,((optimize) #'i)]
                             [new-v #,((optimize) #'v)])
-                        (if #,(let ([one-sided #'(unsafe-fx< new-i (unsafe-flvector-length v))])
+                        (if #,(let ([one-sided #'(unsafe-fx< new-i (unsafe-flvector-length new-v))])
                                 (if i-known-nonneg?
                                     one-sided
                                     #`(and (unsafe-fx>= new-i 0)

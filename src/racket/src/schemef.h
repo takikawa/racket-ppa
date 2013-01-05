@@ -222,6 +222,7 @@ MZ_EXTERN void scheme_log_w_data(Scheme_Logger *logger, int level, int flags,
                                  Scheme_Object *data,
                                  const char *msg, ...);
 MZ_EXTERN void scheme_log_message(Scheme_Logger *logger, int level, char *buffer, intptr_t len, Scheme_Object *data);
+MZ_EXTERN void scheme_log_name_message(Scheme_Logger *logger, int level, Scheme_Object *name, char *buffer, intptr_t len, Scheme_Object *data);
 MZ_EXTERN void scheme_log_abort(char *buffer);
 MZ_EXTERN void scheme_log_warning(char *buffer);
 MZ_EXTERN void scheme_glib_log_message(const char *log_domain, int log_level, const char *message, void *user_data);
@@ -360,6 +361,8 @@ MZ_EXTERN Scheme_Object *scheme_tail_eval_expr(Scheme_Object *obj);
 MZ_EXTERN void scheme_set_tail_buffer_size(int s);
 MZ_EXTERN Scheme_Object *scheme_force_value(Scheme_Object *);
 MZ_EXTERN Scheme_Object *scheme_force_one_value(Scheme_Object *);
+
+XFORM_NONGCING MZ_EXTERN void scheme_ignore_result(Scheme_Object *);
 
 MZ_EXTERN MZ_MARK_STACK_TYPE scheme_set_cont_mark(Scheme_Object *key, Scheme_Object *val);
 MZ_EXTERN void scheme_push_continuation_frame(Scheme_Cont_Frame_Data *);
@@ -566,6 +569,7 @@ MZ_EXTERN void scheme_prim_is_method(Scheme_Object *o);
 
 MZ_EXTERN Scheme_Object *scheme_make_pair(Scheme_Object *car, Scheme_Object *cdr);
 MZ_EXTERN Scheme_Object *scheme_make_mutable_pair(Scheme_Object *car, Scheme_Object *cdr);
+MZ_EXTERN Scheme_Object *scheme_make_list_pair(Scheme_Object *car, Scheme_Object *cdr);
 
 MZ_EXTERN Scheme_Object *scheme_make_raw_pair(Scheme_Object *, Scheme_Object *);
 

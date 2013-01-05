@@ -60,10 +60,18 @@ The @exec{raco setup} command performs two main services:
 
 @itemize[
 
- @item{@bold{Compiling and setting up all (or some of the)
-   collections:} When @exec{raco setup} is run without any arguments, it
-   finds all of the current collections (see @secref[#:doc
-   ref-src]{collects}) and compiles libraries in each collection.
+ @item{@bold{Compiling and setting up all or some collections:} 
+   When @exec{raco setup} is run without any arguments, it
+   finds all of the current collections---see @secref[#:doc
+   ref-src]{collects}---and compiles libraries in each collection.
+   (Directories that are named @filepath{.git} or @filepath{.svn} are 
+   not treated as collections.)
+
+   To restrict @exec{raco setup} to a set of collections, provide the
+   collection names as arguments. For example, @exec{raco setup
+   scribblings/raco} would only compile and render the documentation
+   for @exec{raco}, which is implemented in a
+   @filepath{scribblings/raco} collection.
 
    An optional @filepath{info.rkt} within the collection can indicate
    specifically how the collection's files are to be compiled and
@@ -82,9 +90,6 @@ The @exec{raco setup} command performs two main services:
    parallel processes.  The default value of @racket[_n] is
    @racket[(processor-count)], which typically uses all the machine's
    processing cores.
-
-   The @Flag{l} flag takes one or more collection names and restricts
-   @exec{raco setup}'s action to those collections.
 
    The @DFlag{mode} @nonterm{mode} flag causes @exec{raco setup} to use a
    @filepath{.zo} compiler other than the default compiler, and to put
@@ -107,7 +112,7 @@ The @exec{raco setup} command performs two main services:
  @item{@bold{Unpacking @filepath{.plt} files:} A
    @filepath{.plt} file is a platform-independent distribution archive
    for software based on Racket. When one or more file names are
-   provided as the command line arguments to @exec{raco setup}, the files
+   provided as the command line arguments to @exec{raco setup} with the @Flag{A} flag, the files
    contained in the @filepath{.plt} archive are unpacked (according to
    specifications embedded in the @filepath{.plt} file) and only
    collections specified by the @filepath{.plt} file are compiled and
@@ -149,7 +154,8 @@ Optional @filepath{info.rkt} fields trigger additional actions by
      [doc (list src-string)
           (list src-string flags)
           (list src-string flags category)
-          (list src-string flags category name-string)]
+          (list src-string flags category name-string)
+          (list src-string flags category name-string out-k)]
      [flags (list mode-symbol ...)]
      [category (list category-symbol)
                (list category-symbol sort-number)]
@@ -266,7 +272,13 @@ Optional @filepath{info.rkt} fields trigger additional actions by
    alphabetically. For a pair of manuals with sorting numbers
    @racket[_n] and @racket[_m], the groups for the manuals are
    separated by space if @racket[(truncate (/ _n 10))]and
-   @racket[(truncate (/ _m 10))] are different.}
+   @racket[(truncate (/ _m 10))] are different.
+
+   The @racket[_out-k] specification is a hint on whether to break the
+   document's cross-reference information into multiple parts, which
+   can reduce the time and memory use for resolving a cross-reference
+   into the document. It must be a positive, exact integer, and the
+   default is @racket[1].}
 
  @item{@racket[racket-launcher-names] : @racket[(listof string?)]
    --- @elemtag["racket-launcher-names"] A list of executable names
@@ -399,6 +411,55 @@ Optional @filepath{info.rkt} fields trigger additional actions by
 
 @section[#:tag "setup-plt-plt"]{API for Installation}
 
+@defmodule[setup/setup]
+
+@defproc[(setup [#:file file (or/c #f path-string?) #f]
+                [#:collections collections (or/c #f (listof (listof path-string?))) #f]
+                [#:planet-specs planet-specs (or/c #f 
+                                                   (listof (list/c string?
+                                                                   string?
+                                                                   exact-nonnegative-integer?
+                                                                   exact-nonnegative-integer?)))
+                                             #f]
+                [#:make-user? make-user? any/c #t]
+                [#:make-docs? make-docs? any/c #t]
+                [#:clean? clean? any/c #f]
+                [#:jobs jobs exact-nonnegative-integer? #f]
+                [#:get-target-dir get-target-dir (or/c #f (-> path-string?)) #f])
+          void?]{
+Runs @exec{raco setup} with various options:
+
+@itemlist[
+
+ @item{@racket[file] --- if not @racket[#f], installs @racket[file] as
+       a @filepath{.plt} archive.}
+
+ @item{@racket[collections] --- if not @racket[#f], constrains setup to
+       the named collections, along with @racket[planet-specs], if any}
+
+ @item{@racket[planet-spec] --- if not @racket[#f], constrains setup to
+       the named @|PLaneT| packages, along with @racket[collections], if any}
+
+ @item{@racket[make-docs?] --- if @racket[#f], disables any
+       documentation-specific setup actions}
+
+ @item{@racket[make-user?] --- if @racket[#f], disables any
+       user-specific setup actions}
+
+ @item{@racket[clean?] --- if true, enables cleaning mode instead of setup mode}
+
+ @item{@racket[jobs] --- if not @racket[#f], determines the maximum number of parallel
+       tasks used for setup}
+
+ @item{@racket[get-target-dir] --- if not @racket[#f], treated as a
+       value for @sigelem[setup-option^ current-target-directory-getter]}
+
+]}
+
+@subsection{@exec{raco setup} Unit}
+
+@defmodule[setup/setup-unit]
+
 The @racketmodname[setup/setup-unit] library provides @exec{raco setup} in unit
 form. The associated @racket[setup/option-sig] and
 @racket[setup/option-unit] libraries provides the interface for
@@ -421,10 +482,6 @@ initialized between them, e.g.:
     [() setup@ OPTIONS _...])
   _...)
 ]
-
-@subsection{@exec{raco setup} Unit}
-
-@defmodule[setup/setup-unit]
 
 @defthing[setup@ unit?]{
 
@@ -561,7 +618,7 @@ form.}
   documentation is built, then suitable documentation start pages, search pages,
   and master index pages are re-built. @defaults[@racket[#t]]}
 
-@defparam[current-target-directory-getter thunk (-> . path-string?)]{
+@defparam[current-target-directory-getter thunk (-> path-string?)]{
   A thunk that returns the target directory for unpacking a relative
   @filepath{.plt} archive; when unpacking an archive, either this or
   the procedure in @racket[current-target-plt-directory-getter] will
@@ -805,14 +862,14 @@ Imports @racket[mred^] and exports @racket[setup:plt-installer^]. }
    and calls @racket[get-info/full] with the full path corresponding to the
    named collection and the @racket[namespace] argument.}
 
-@defproc[(get-info/full [path path?]
-                         [#:namespace namespace (or/c namespace? #f) #f])
+@defproc[(get-info/full [path path-string?]
+                        [#:namespace namespace (or/c namespace? #f) #f])
          (or/c
           (symbol? [(-> any)] . -> . any)
           false/c)]{
 
    Accepts a path to a directory. If it finds either a well-formed
-   an @filepath{info.rkt} file or an @filepath{info.rkt} file (with
+   an @filepath{info.rkt} file or an @filepath{info.ss} file (with
    preference for the @filepath{info.rkt} file), 
    it returns an info procedure that accepts either one
    or two arguments. The first argument to the info procedure is

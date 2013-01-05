@@ -449,12 +449,12 @@
           [((List: ts) (Sequence: (list t*)))
            (cset-meet* (for/list ([t (in-list ts)])
                          (cg t t*)))]
-          [((HeterogenousVector: ts) (HeterogenousVector: ts*))
+          [((HeterogeneousVector: ts) (HeterogeneousVector: ts*))
            (cset-meet (cgen/list V X Y ts ts*) (cgen/list V X Y ts* ts))]
-          [((HeterogenousVector: ts) (Vector: s))
+          [((HeterogeneousVector: ts) (Vector: s))
            (define ts* (map (λ _ s) ts)) ;; invariant, everything has to match
            (cset-meet (cgen/list V X Y ts ts*) (cgen/list V X Y ts* ts))]
-          [((HeterogenousVector: ts) (Sequence: (list t*)))
+          [((HeterogeneousVector: ts) (Sequence: (list t*)))
            (cset-meet* (for/list ([t (in-list ts)])
                          (cg t t*)))]
           [((Vector: t) (Sequence: (list t*)))
@@ -535,6 +535,10 @@
            (cset-meet (cg e e*) (cg e* e))]
           [((ThreadCell: e) (ThreadCell: e*))
            (cset-meet (cg e e*) (cg e* e))]
+          [((Continuation-Mark-Keyof: e) (Continuation-Mark-Keyof: e*))
+           (cset-meet (cg e e*) (cg e* e))]
+          [((Prompt-Tagof: s t) (Prompt-Tagof: s* t*))
+           (cset-meet* (list (cg s s*) (cg s* s) (cg t t*) (cg t* t)))]
           [((Promise: e) (Promise: e*))
            (cg e e*)]
           [((Ephemeron: e) (Ephemeron: e*))

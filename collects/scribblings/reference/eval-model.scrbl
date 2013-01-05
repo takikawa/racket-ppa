@@ -62,8 +62,8 @@ Some simplifications require more than one step. For example:
 An expression that is not a @tech{value} can always be partitioned
 into two parts: a @deftech{redex}, which is the part that changed in a
 single-step simplification (highlighted), and the
-@deftech{continuation}, which is the surrounding expression
-context. In @racket[(- 4 (+ 1 1))], the redex is @racket[(+ 1 1)], and
+@deftech{continuation}, which is the evaluation
+context surrounding an expression. In @racket[(- 4 (+ 1 1))], the redex is @racket[(+ 1 1)], and
 the continuation is @racket[(- 4 @#,hole)], where @hole takes the
 place of the redex. That is, the continuation says how to ``continue''
 after the @tech{redex} is reduced to a @tech{value}.
@@ -683,13 +683,14 @@ the marks associated with the relevant frames are also captured.
 A @deftech{continuation barrier} is another kind of continuation frame
 that prohibits certain replacements of the current continuation with
 another. Specifically, a continuation can be replaced by another only
-when the replacement does not introduce any continuation barriers (but
-it may remove them). A continuation barrier thus prevents ``downward
-jumps'' into a continuation that is protected by a barrier. Certain operations
-install barriers automatically; in particular, when an exception
-handler is called, a continuation barrier prohibits the continuation
-of the handler from capturing the continuation past the exception
-point.
+when the replacement does not introduce any continuation barriers. It
+may remove continuation barriers only through jumps to continuations
+that are a tail of the current continuation.  A continuation barrier
+thus prevents ``downward jumps'' into a continuation that is protected
+by a barrier. Certain operations install barriers automatically; in
+particular, when an exception handler is called, a continuation
+barrier prohibits the continuation of the handler from capturing the
+continuation past the exception point.
 
 A @deftech{escape continuation} is essentially a derived concept. It
 combines a prompt for escape purposes with a continuation for
@@ -803,9 +804,9 @@ When a @tech{custodian} is shut down via
 @racket[custodian-shutdown-all], it forcibly and immediately closes
 the ports, TCP connections, @|etc|, that it manages, as well as
 terminating (or suspending) its threads. A custodian that has been
-shut down cannot manage new objects.  If the current custodian is shut
-down before a procedure is called to create a managed resource (e.g.,
-@racket[open-input-port], @racket[thread]), the
+shut down cannot manage new objects.  After the current custodian is shut
+down, if a procedure is called that attempts to create a managed resource (e.g.,
+@racket[open-input-port], @racket[thread]), then the
 @exnraise[exn:fail:contract].
 
 A thread can have multiple managing custodians, and a suspended thread

@@ -184,7 +184,7 @@
        (-Tuple* (map parse-type (syntax->list #'(ts ...))) (parse-type #'t))]
       [((~and kw t:Vector) ts ...)
        (add-disappeared-use #'kw)
-       (make-HeterogenousVector (map parse-type (syntax->list #'(ts ...))))]
+       (make-HeterogeneousVector (map parse-type (syntax->list #'(ts ...))))]
       [((~and kw cons) fst rst)
        (add-disappeared-use #'kw)
        (-pair (parse-type #'fst) (parse-type #'rst))]
@@ -324,7 +324,7 @@
        (cond
          ;; if it's a type variable, we just produce the corresponding reference (which is in the HT)
          [(bound-tvar? (syntax-e #'id))
-          (make-F (syntax-e #'id))]
+          (lookup-tvar (syntax-e #'id))]
          ;; if it was in current-indexes, produce a better error msg
          [(bound-index? (syntax-e #'id))
           (tc-error

@@ -27,8 +27,8 @@ extern "C" {
 
 #if defined(MZ_USE_PLACES) || defined(MZ_USE_FUTURES)
 # define USE_THREAD_LOCAL
-# if _MSC_VER
-#  ifdef _WIN64
+# ifdef _WIN32
+#  if defined(_WIN64) && !defined(__MINGW32__)
 #   define THREAD_LOCAL __declspec(thread)
 #   define MZ_THREAD_EXTERN extern
 #   define IMPLEMENT_THREAD_LOCAL_EXTERNALLY_VIA_PROC
@@ -54,7 +54,7 @@ extern "C" {
     && !defined(SCHEME_EMBEDDED_NO_DLL)
 # define MZ_DLLIMPORT __declspec(dllimport)
 # define MZ_DLLEXPORT __declspec(dllexport)
-# ifdef __mzscheme_private__
+# if defined(__mzscheme_private__) || defined(__MINGW32_DELAY_LOAD__)
 #  define MZ_DLLSPEC __declspec(dllexport)
 # else
 #  define MZ_DLLSPEC __declspec(dllimport)
@@ -418,6 +418,31 @@ MZ_EXTERN uintptr_t scheme_tls_delta;
 MZ_EXTERN int scheme_tls_index;
 #  endif
 static __inline Thread_Local_Variables **scheme_get_thread_local_variables_ptr(void) {
+# ifdef __MINGW32__
+  Thread_Local_Variables **x;
+#  ifdef _WIN64
+  asm (
+       "mov %%gs:(0x58), %%rax;"
+       "mov (%%rax), %%rax;"
+       "add %1, %%rax;"
+       "mov %%rax, %0;"
+       :"=r"(x)        /* output */
+       :"r"(scheme_tls_delta)
+       :"%rax"  /* clobbered register */
+       );
+#  else
+  asm (
+       "mov %%fs:(0x2C), %%eax;"
+       "mov (%%eax), %%eax;"
+       "add %1, %%eax;"
+       "mov %%eax, %0;"
+       :"=r"(x)        /* output */
+       :"r"(scheme_tls_delta)
+       :"%eax"  /* clobbered register */
+       );
+#  endif
+  return x;
+# else
   __asm { mov eax, FS:[0x2C]
 #  ifdef MZ_USE_WIN_TLS_VIA_DLL
           add eax, scheme_tls_index
@@ -425,6 +450,7 @@ static __inline Thread_Local_Variables **scheme_get_thread_local_variables_ptr(v
           mov eax, [eax]
           add eax, scheme_tls_delta }
   /* result is in eax */
+# endif
 }
 static __inline Thread_Local_Variables *scheme_get_thread_local_variables(void) {
   return *scheme_get_thread_local_variables_ptr();

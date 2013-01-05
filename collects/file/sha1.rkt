@@ -269,7 +269,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 (define (hash-value->bytes int)
   (let* ((len (vector-length hash-as-bytes-masks))
- 	 (bv (make-bytes len 0)))
+         (bv (make-bytes len 0)))
      (do ((i 0 (+ i 1)))
          ((>= i len) bv)
        (bytes-set!
@@ -290,7 +290,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
     (sha1-hash-bytes (get-output-bytes p))))
 
 (define (sha1 in)
-  (format "~x" (sha1-input in)))
+  (bytes->hex-string (hash-value->bytes (sha1-input in))))
 
 (define (sha1-bytes in)
   (hash-value->bytes (sha1-input in)))

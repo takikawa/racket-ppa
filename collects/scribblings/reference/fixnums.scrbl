@@ -93,7 +93,7 @@ Safe versions of @racket[unsafe-fx->fl] and @racket[unsafe-fl->fx].}
 
 @; ------------------------------------------------------------
 
-@section{Fixnum Vectors}
+@section[#:tag "fxvectors"]{Fixnum Vectors}
 
 A @deftech{fxvector} is like a @tech{vector}, but it holds only
 @tech{fixnums}. The only advantage of a @tech{fxvector} over a
@@ -200,3 +200,6 @@ For communication among @tech{places}, the new @tech{fxvector} is
 allocated in the @tech{shared memory space}.
 
 @mz-examples[#:eval flfx-eval (make-shared-fxvector 4 3)]}
+
+
+@close-eval[flfx-eval]

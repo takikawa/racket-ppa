@@ -16,12 +16,17 @@ This file defines two sorts of primitives. All of them are provided into any mod
    in order to protect the declarations, they are wrapped in `#%app void' so that local-expand of the module body
    will not expand them on the first pass of the macro expander (when the stop list is ignored)
 
+3. contracted versions of built-in racket values such as parameters and prompt tags
+   that are defined in "base-contracted.rkt"
+
 |#
 
 
 (provide (except-out (all-defined-out) dtsi* dtsi/exec* let-internal: define-for-variants define-for*-variants 
-                     with-handlers: for/annotation for*/annotation define-for/sum:-variants
+                     with-handlers: for/annotation for*/annotation define-for/sum:-variants base-for/flvector: base-for/vector
                      -lambda -define)
+         ;; provide the contracted bindings as primitives
+         (all-from-out "base-contracted.rkt")
          :
          (rename-out [define-typed-struct define-struct:]
                      [lambda: λ:]
@@ -37,11 +42,13 @@ This file defines two sorts of primitives. All of them are provided into any mod
          "colon.rkt"
          "../typecheck/internal-forms.rkt"
          (rename-in racket/contract/base [-> c->] [case-> c:case->])
+         ;; contracted bindings to replace built-in ones
+         (except-in "base-contracted.rkt" initialize-contracted)
          "base-types.rkt"
          "base-types-extra.rkt"
          racket/flonum ; for for/flvector and for*/flvector
          (for-syntax
-          unstable/lazy-require
+          racket/lazy-require
           syntax/parse
           racket/syntax
           racket/base
@@ -52,7 +59,9 @@ This file defines two sorts of primitives. All of them are provided into any mod
           "../utils/tc-utils.rkt"
           "../types/utils.rkt"
           "for-clauses.rkt")
-         "../types/numeric-predicates.rkt")
+         "../types/numeric-predicates.rkt"
+         racket/unsafe/ops
+         racket/vector)
 (provide index?) ; useful for assert, and racket doesn't have it
 
 (begin-for-syntax 
@@ -331,8 +340,9 @@ This file defines two sorts of primitives. All of them are provided into any mod
     [(pdefine: (tvars:id ...) (nm:id . formals:annotated-formals) : ret-ty . body)
      (with-syntax ([type (syntax/loc #'ret-ty (All (tvars ...) (formals.arg-ty ... -> ret-ty)))])
        (syntax/loc stx
-         (define: nm : type
-           (plambda: (tvars ...) formals . body))))]))
+         (begin
+          (: nm : type)
+          (define (nm . formals.ann-formals) . body))))]))
 
 (define-syntax (ann stx)
   (syntax-parse stx #:literals (:)
@@ -360,11 +370,18 @@ This file defines two sorts of primitives. All of them are provided into any mod
      (identifier? #'nm)
      (with-syntax ([new-nm (syntax-property #'nm 'type-label #'ty)])
        (syntax/loc stx (define new-nm body)))]
+    [(define: (tvars:id ...) nm:id : ty body)
+     (with-syntax ([type (syntax/loc #'ty (All (tvars ...) ty))])
+       (syntax/loc stx
+         (begin
+           (: nm : type)
+           (define nm body))))]
     [(define: (tvars:id ...) (nm:id . formals:annotated-formals) : ret-ty body ...)
      (with-syntax ([type (syntax/loc #'ret-ty (All (tvars ...) (formals.arg-ty ... -> ret-ty)))])
        (syntax/loc stx
-         (define: nm : type
-           (plambda: (tvars ...) formals body ...))))]))
+         (begin
+          (: nm : type)
+          (define (nm . formals.ann-formals) body ...))))]))
 
 (define-syntax (lambda: stx)
   (syntax-parse stx
@@ -399,10 +416,38 @@ This file defines two sorts of primitives. All of them are provided into any mod
 
 (define-syntax (let: stx)
   (syntax-parse stx #:literals (:)
-    [(let: nm:id ~! : ret-ty (bs:annotated-binding ...) . body)
-     (syntax/loc stx ((letrec: ([nm : (bs.ty ... -> ret-ty) (lambda (bs.ann-name ...) . body)]) nm) bs.rhs ...))]
+    [(let: nm:id ~! ; named let:
+           (~and (~seq rest ...)
+                 (~seq (~optional (~seq : ret-ty))
+                       (bs:optionally-annotated-binding ...) body ...)))
+     (quasisyntax/loc stx
+       (#,(syntax-parse #'(rest ...)
+            #:literals (:)
+            [(: ret-ty (bs:annotated-binding ...) . body)
+             (quasisyntax/loc stx
+               (letrec: ([nm : (bs.ty ... -> ret-ty)
+                             #,(quasisyntax/loc stx
+                                 (lambda (bs.ann-name ...) . #,(syntax/loc stx body)))])
+                        #,(quasisyntax/loc stx nm)))]
+            [(: ret-ty (bs:optionally-annotated-binding ...) . body)
+             (quasisyntax/loc stx
+               (letrec ([nm #,(quasisyntax/loc stx
+                                (lambda (bs.ann-name ...) . (ann #,(syntax/loc stx body) ret-ty)))])
+                 #,(quasisyntax/loc stx nm)))]
+            [((bs:optionally-annotated-binding ...) . body)
+             (quasisyntax/loc stx
+               (letrec ([nm #,(quasisyntax/loc stx
+                                (lambda (bs.ann-name ...) . #,(syntax/loc stx body)))])
+                 #,(quasisyntax/loc stx nm)))])
+        bs.rhs ...))]
     [(let: . rest)
      (syntax/loc stx (let-internal: . rest))]))
+
+(define-syntax (plet: stx)
+  (syntax-parse stx #:literals (:)
+    [(_ (A:id ...) ([bn:optionally-annotated-name e] ...) . body)
+     (syntax/loc stx
+       ((plambda: (A ...) (bn ...) . body) e ...))]))
 
 (define-syntax (define-type-alias stx)
   (syntax-parse stx
@@ -644,11 +689,13 @@ This file defines two sorts of primitives. All of them are provided into any mod
         ((var:optionally-annotated-name rest ...) ...)
         (stop?:expr ret ...)
         c:expr ...)
-     (syntax/loc
+     (quasisyntax/loc
          stx
-       (ann (do ((var.ann-name rest ...) ...)
-                (stop? ret ...)
-              c ...)
+       (ann #,(syntax/loc
+                  stx
+                (do ((var.ann-name rest ...) ...)
+                    (stop? ret ...)
+                  c ...))
             ty))]))
 
 ;; wrap the original for with a type annotation
@@ -670,44 +717,54 @@ This file defines two sorts of primitives. All of them are provided into any mod
     ;; the annotation is not necessary (always of Void type), but kept
     ;; for consistency with the other for: macros
     [(_ (~seq : Void) ...
-        clauses ; no need to annotate the type, it's always Void
-        c:expr ...)
-     (let ((body (syntax-property #'(c ...) 'type-ascription #'Void)))
+        ;; c is not always an expression, could be a break-clause
+        clauses c ...) ; no need to annotate the type, it's always Void
+     (let ((body #`(; break-clause ...
+                    #,@(syntax-property #'(c ...) 'type-ascription #'Void))))
        (let loop ((clauses #'clauses))
-         (define-syntax-class for-clause
+         (define-splicing-syntax-class for-clause
            ;; single-valued seq-expr
            ;; unlike the definitions in for-clauses.rkt, this does not include
            ;; #:when clauses, which are handled separately here
-           (pattern (var:optionally-annotated-name seq-expr:expr)
-                    #:with expand #'(var.ann-name seq-expr))
+           (pattern (~seq (var:optionally-annotated-name seq-expr:expr))
+                    #:with (expand ...) #'((var.ann-name seq-expr)))
            ;; multi-valued seq-expr
            ;; currently disabled because it triggers an internal error in the typechecker
-           #;(pattern ((v:optionally-annotated-name ...) seq-expr:expr)
-                    #:with expand #'((v.ann-name ...) seq-expr)))
+           ;; (pattern ((v:optionally-annotated-name ...) seq-expr:expr)
+           ;;          #:with (expand ...) #'(((v.ann-name ...) seq-expr)))
+           ;; break-clause, pass it directly
+           ;; Note: these don't ever typecheck
+           (pattern (~seq (~and kw (~or #:break #:final)) guard-expr:expr)
+                    #:with (expand ...) #'(kw guard-expr)))
+         (define-syntax-class for-kw
+           (pattern #:when
+                    #:with replace-with #'when)
+           (pattern #:unless
+                    #:with replace-with #'unless))
          (syntax-parse clauses
-           [(head:for-clause next:for-clause ... #:when rest ...)
+           [(head:for-clause next:for-clause ... kw:for-kw rest ...)
             (syntax-property
              (quasisyntax/loc stx
                (for
-                (head.expand next.expand ...)
-                #,(loop #'(#:when rest ...))))
+                (head.expand ... next.expand ... ...)
+                #,(loop #'(kw rest ...))))
              'type-ascription
              #'Void)]
            [(head:for-clause ...) ; we reached the end
             (syntax-property
              (quasisyntax/loc stx
                (for
-                (head.expand ...)
+                (head.expand ... ...)
                 #,@body))
              'type-ascription
              #'Void)]
-           [(#:when guard) ; we end on a #:when clause
+           [(kw:for-kw guard) ; we end on a keyword clause
             (quasisyntax/loc stx
-              (when guard
+              (kw.replace-with guard
                 #,@body))]
-           [(#:when guard rest ...)
+           [(kw:for-kw guard rest ...)
             (quasisyntax/loc stx
-              (when guard
+              (kw.replace-with guard
                 #,(loop #'(rest ...))))])))]))
 
 (define-for-syntax (maybe-annotate-body body ty)
@@ -726,7 +783,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
     (syntax-parse stx #:literals (:)
       [(_ a:optional-standalone-annotation
           (clause:for-clause ...)
-          c:expr ...)
+          c ...) ; c is not always an expression, can be a break-clause
        (maybe-annotate-body
         (quasisyntax/loc stx
           (#,name
@@ -741,19 +798,14 @@ This file defines two sorts of primitives. All of them are provided into any mod
      (quasisyntax/loc
          stx
        (begin (define-syntax name (define-for-variant #'untyped-name)) ...))]))
-;; for/hash{,eq,eqv}:, for/vector:, for/flvector:, for/and:, for/first: and
+;; for/vector:, for/flvector:, for/and:, for/first: and
 ;; for/last:'s expansions can't currently be handled by the typechecker.
 (define-for-variants
   (for/list: for/list)
-  (for/hash: for/hash)
-  (for/hasheq: for/hasheq)
-  (for/hasheqv: for/hasheqv)
   (for/and: for/and)
   (for/or: for/or)
   (for/first: for/first)
   (for/last: for/last)
-  (for/vector: for/vector)
-  (for/flvector: for/flvector)
   (for/product: for/product))
 
 ;; Unlike with the above, the inferencer can handle any number of #:when
@@ -763,7 +815,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
     [(_ : ty
         ((var:optionally-annotated-name) ...)
         (clause:for-clause ...)
-        c:expr ...)
+        c ...) ; c is not always an expression, can be a break-clause
      (syntax-property
       (quasisyntax/loc stx
         (for/lists (var.ann-name ...)
@@ -773,7 +825,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
       #'ty)]
     [(_ ((var:annotated-name) ...)
         (clause:for-clause ...)
-        c:expr ...)
+        c ...)
      (syntax-property
       (quasisyntax/loc stx
         (for/lists (var.ann-name ...)
@@ -786,7 +838,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
     [(_ : ty
         ((var:optionally-annotated-name init:expr) ...)
         (clause:for-clause ...)
-        c:expr ...)
+        c ...) ; c is not always an expression, can be a break-clause
      (syntax-property
       (quasisyntax/loc stx
         (for/fold ((var.ann-name init) ...)
@@ -796,7 +848,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
       #'ty)]
     [(_ ((var:annotated-name init:expr) ...)
         (clause:for-clause ...)
-        c:expr ...)
+        c ...)
      (syntax-property
       (quasisyntax/loc stx
         (for/fold ((var.ann-name init) ...)
@@ -809,10 +861,10 @@ This file defines two sorts of primitives. All of them are provided into any mod
 (define-syntax (for*: stx)
   (syntax-parse stx #:literals (:)
     [(_ (~seq : Void) ...
-        (clause:for*-clause ...)
-        c:expr ...)
+        (clause:for-clause ...)
+        c ...) ; c is not always an expression, can be a break-clause
      (quasisyntax/loc stx
-       (for: (clause.expand ... ...)
+       (for: (clause.expand* ... ...)
              c ...))]))
 
 ;; These currently only typecheck in very limited cases.
@@ -821,7 +873,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
     (syntax-parse stx #:literals (:)
       [(_ a:optional-standalone-annotation
           (clause:for-clause ...)
-          c:expr ...)
+          c ...) ; c is not always an expression, can be a break-clause
        (maybe-annotate-body
         (quasisyntax/loc stx
           (#,name (clause.expand ... ...)
@@ -836,15 +888,10 @@ This file defines two sorts of primitives. All of them are provided into any mod
               ...))]))
 (define-for*-variants
   (for*/list: for*/list)
-  (for*/hash: for*/hash)
-  (for*/hasheq: for*/hasheq)
-  (for*/hasheqv: for*/hasheqv)
   (for*/and: for*/and)
   (for*/or: for*/or)
   (for*/first: for*/first)
   (for*/last: for*/last)
-  (for*/vector: for*/vector)
-  (for*/flvector: for*/flvector)
   (for*/product: for*/product))
 
 ;; Like for/lists: and for/fold:, the inferencer can handle these correctly.
@@ -852,22 +899,22 @@ This file defines two sorts of primitives. All of them are provided into any mod
   (syntax-parse stx #:literals (:)
     [(_ : ty
         ((var:optionally-annotated-name) ...)
-        (clause:for*-clause ...)
-        c:expr ...)
+        (clause:for-clause ...)
+        c ...) ; c is not always an expression, can be a break-clause
      (syntax-property
       (quasisyntax/loc stx
         (for/lists (var.ann-name ...)
-          (clause.expand ... ...)
+          (clause.expand* ... ...)
           c ...))
       'type-ascription
       #'ty)]
     [(_ ((var:annotated-name) ...)
-        (clause:for*-clause ...)
-        c:expr ...)
+        (clause:for-clause ...)
+        c ...)
      (syntax-property
       (quasisyntax/loc stx
         (for/lists (var.ann-name ...)
-          (clause.expand ... ...)
+          (clause.expand* ... ...)
           c ...))
       'type-ascription
       #'(values var.ty ...))]))
@@ -875,22 +922,22 @@ This file defines two sorts of primitives. All of them are provided into any mod
   (syntax-parse stx #:literals (:)
     [(_ : ty
         ((var:optionally-annotated-name init:expr) ...)
-        (clause:for*-clause ...)
-        c:expr ...)
+        (clause:for-clause ...)
+        c ...) ; c is not always an expression, can be a break-clause
      (syntax-property
       (quasisyntax/loc stx
         (for/fold ((var.ann-name init) ...)
-          (clause.expand ... ...)
+          (clause.expand* ... ...)
           c ...))
       'type-ascription
       #'ty)]
     [(_ ((var:annotated-name init:expr) ...)
-        (clause:for*-clause ...)
-        c:expr ...)
+        (clause:for-clause ...)
+        c ...)
      (syntax-property
       (quasisyntax/loc stx
         (for/fold ((var.ann-name init) ...)
-          (clause.expand ... ...)
+          (clause.expand* ... ...)
           c ...))
       'type-ascription
       #'(values var.ty ...))]))
@@ -901,7 +948,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
     (syntax-parse stx #:literals (:)
       [(_ : ty
           (clause:for-clause ...)
-          c:expr ...)
+          c ...) ; c is not always an expression, can be a break-clause
        ;; ty has to include exact 0, the initial value of the accumulator
        ;; (to be consistent with Racket semantics).
        ;; We can't just change the initial value to be 0.0 if we expect a
@@ -919,6 +966,42 @@ This file defines two sorts of primitives. All of them are provided into any mod
        (begin (define-syntax name (define-for/sum:-variant #'for/folder))
               ...))]))
 (define-for/sum:-variants (for/sum: for/fold:) (for*/sum: for*/fold:))
+
+(define-for-syntax (define-for/hash:-variant hash-maker)
+  (lambda (stx)
+    (syntax-parse stx
+      #:literals (:)
+      ((_ (~seq : return-annotation:expr)
+          (bind:optionally-annotated-binding ...)
+          body ...) ; body is not always an expression, can be a break-clause
+       (quasisyntax/loc stx
+         (for/fold: : return-annotation
+           ((return-hash : return-annotation (ann (#,hash-maker null) return-annotation)))
+           (bind ...)
+           (let-values (((key val) (let () body ...)))
+             (hash-set return-hash key val))))))))
+
+(define-syntax for/hash:    (define-for/hash:-variant #'make-immutable-hash))
+(define-syntax for/hasheq:  (define-for/hash:-variant #'make-immutable-hasheq))
+(define-syntax for/hasheqv: (define-for/hash:-variant #'make-immutable-hasheqv))
+
+(define-for-syntax (define-for*/hash:-variant hash-maker)
+  (lambda (stx)
+    (syntax-parse stx
+      #:literals (:)
+      ((_ (~seq : return-annotation:expr)
+          (bind:optionally-annotated-binding ...)
+          body ...) ; body is not always an expression, can be a break-clause
+       (quasisyntax/loc stx
+         (for*/fold: : return-annotation
+           ((return-hash : return-annotation (ann (#,hash-maker null) return-annotation)))
+           (bind ...)
+           (let-values (((key val) (let () body ...)))
+             (hash-set return-hash key val))))))))
+
+(define-syntax for*/hash:    (define-for*/hash:-variant #'make-immutable-hash))
+(define-syntax for*/hasheq:  (define-for*/hash:-variant #'make-immutable-hasheq))
+(define-syntax for*/hasheqv: (define-for*/hash:-variant #'make-immutable-hasheqv))
 
 
 (define-syntax (provide: stx)
@@ -984,3 +1067,124 @@ This file defines two sorts of primitives. All of them are provided into any mod
      #'(quote-syntax (typecheck-fail-internal orig "Incomplete case coverage" var))]
     [(_ orig)
      #'(quote-syntax (typecheck-fail-internal orig "Incomplete case coverage" #f))]))
+
+(define-syntax (base-for/vector stx)
+  (syntax-case stx ()
+    [(name for ann T K #:length n-expr #:fill fill-expr (clauses ...) body-expr)
+     (syntax/loc stx
+       (call/ec
+        (ann (λ (break)
+               (define n n-expr)
+               (define vs (ann (make-vector n fill-expr) T))
+               (define i 0)
+               (for (clauses ...)
+                 (unsafe-vector-set! vs i body-expr)
+                 (set! i (unsafe-fx+ i 1))
+                 (when (i . unsafe-fx>= . n) (break vs)))
+               vs)
+             K)))]
+    [(name for ann T K #:length n-expr (clauses ...) body-expr)
+     (syntax/loc stx
+       (let ([n n-expr])
+         (define vs
+           (call/ec
+            (ann (λ (break)
+                   (define vs (ann (vector) T))
+                   (define i 0)
+                   (for (clauses ...)
+                     (define v body-expr)
+                     (cond [(unsafe-fx= i 0)  (define new-vs (ann (make-vector n v) T))
+                                              (set! vs new-vs)]
+                           [else  (unsafe-vector-set! vs i v)])
+                     (set! i (unsafe-fx+ i 1))
+                     (when (i . unsafe-fx>= . n) (break vs)))
+                   vs)
+                 K)))
+         (cond [(= (vector-length vs) n)  vs]
+               [else
+                ;; Only happens when n > 0 and vs = (vector)
+                (raise-result-error 'name (format "~e-element vector" n) vs)])))]
+    [(_ for ann T K (clauses ...) body-expr)
+     (syntax/loc stx
+       (let ()
+         (define n 0)
+         (define vs (ann (vector) T))
+         (define i 0)
+         (for (clauses ...)
+           (define v body-expr)
+           (cond [(unsafe-fx= i n)  (define new-n (max 4 (unsafe-fx* 2 n)))
+                                    (define new-vs (ann (make-vector new-n v) T))
+                                    (vector-copy! new-vs 0 vs)
+                                    (set! n new-n)
+                                    (set! vs new-vs)]
+                 [else  (unsafe-vector-set! vs i v)])
+           (set! i (unsafe-fx+ i 1)))
+         (vector-copy vs 0 i)))]))
+
+(define-for-syntax (base-for/vector: stx for:)
+  (syntax-parse stx #:literals (:)
+    [(name (~optional (~seq : T:expr))
+           (~optional (~seq #:length n-expr:expr))
+           (~optional (~seq #:fill fill-expr:expr))
+           (clauses ...)
+           (~optional (~seq : A:expr))
+           body ...+)
+     (let ([T  (attribute T)]
+           [A  (attribute A)])
+       (with-syntax ([(maybe-length ...)  (if (attribute n-expr) #'(#:length n-expr) #'())]
+                     [(maybe-fill ...)  (if (attribute fill-expr) #'(#:fill fill-expr) #'())]
+                     [body-expr  (if A #`(ann (let () body ...) #,A) #'(let () body ...))]
+                     [T  (cond [(and T A)  #`(U #,T (Vectorof #,A))]
+                               [T  T]
+                               [A  #`(Vectorof #,A)]
+                               [else  #'(Vectorof Any)])])
+         (quasisyntax/loc stx
+           (base-for/vector #,for: ann T ((T -> Nothing) -> T)
+                            maybe-length ... maybe-fill ... (clauses ...) body-expr))))]))
+
+(define-syntax (for/vector: stx)
+  (base-for/vector: stx #'for:))
+
+(define-syntax (for*/vector: stx)
+  (base-for/vector: stx #'for*:))
+
+(define-syntax (base-for/flvector: stx)
+  (syntax-parse stx
+    [(_ for: #:length n-expr:expr (clauses ...) body ...+)
+     (syntax/loc stx
+       (let: ([n : Integer  n-expr])
+         (cond [(n . > . 0)
+                (define xs (make-flvector n))
+                (define: i : Nonnegative-Fixnum 0)
+                (let/ec: break : Void
+                  (for: (clauses ...)
+                    (unsafe-flvector-set! xs i (let () body ...))
+                    (set! i (unsafe-fx+ i 1))
+                    (when (i . unsafe-fx>= . n) (break (void)))))
+                xs]
+               [else  (flvector)])))]
+    [(_ for: (clauses ...) body ...+)
+     (syntax/loc stx
+       (let ()
+         (define n 4)
+         (define xs (make-flvector 4))
+         (define i 0)
+         (for: (clauses ...)
+           (let: ([x : Float  (let () body ...)])
+             (cond [(unsafe-fx= i n)  (define new-n (unsafe-fx* 2 n))
+                                      (define new-xs (make-flvector new-n x))
+                                      (let: loop : Void ([i : Nonnegative-Fixnum 0])
+                                        (when (i . unsafe-fx< . n)
+                                          (unsafe-flvector-set! new-xs i (unsafe-flvector-ref xs i))
+                                          (loop (unsafe-fx+ i 1))))
+                                      (set! n new-n)
+                                      (set! xs new-xs)]
+                   [else  (unsafe-flvector-set! xs i x)]))
+           (set! i (unsafe-fx+ i 1)))
+         (flvector-copy xs 0 i)))]))
+
+(define-syntax-rule (for/flvector: e ...)
+  (base-for/flvector: for: e ...))
+
+(define-syntax-rule (for*/flvector: e ...)
+  (base-for/flvector: for*: e ...))

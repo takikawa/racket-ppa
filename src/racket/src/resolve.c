@@ -508,7 +508,7 @@ static Scheme_Object *look_for_letv_change(Scheme_Sequence *s)
     v = s->array[i];
     if (SAME_TYPE(SCHEME_TYPE(v), scheme_let_value_type)) {
       Scheme_Let_Value *lv = (Scheme_Let_Value *)v;
-      if (scheme_omittable_expr(lv->body, 1, -1, 0, NULL, -1, 0)) {
+      if (scheme_omittable_expr(lv->body, 1, -1, 0, NULL, NULL, -1, 0)) {
 	int esize = s->count - (i + 1);
 	int nsize = i + 1;
 	Scheme_Object *nv, *ev;
@@ -957,7 +957,7 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
   Scheme_Object *first = NULL, *body, *last_body = NULL, *last_seq = NULL;
   Scheme_Letrec *letrec;
   mzshort *skips, skips_fast[NUM_SKIPS_FAST];
-  char *flonums, flonums_fast[NUM_SKIPS_FAST];
+  char *local_types, local_types_fast[NUM_SKIPS_FAST];
   Scheme_Object **lifted, *lifted_fast[NUM_SKIPS_FAST], *boxes;
   int i, pos, opos, rpos, recbox, num_rec_procs = 0, extra_alloc;
   int rec_proc_nonapply = 0;
@@ -1052,24 +1052,28 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
       if (j <= NUM_SKIPS_FAST) {
 	skips = skips_fast; 
         lifted = lifted_fast;
-	flonums = flonums_fast; 
+	local_types = local_types_fast; 
       } else {
 	skips = MALLOC_N_ATOMIC(mzshort, j);
 	lifted = MALLOC_N(Scheme_Object*, j);
-	flonums = MALLOC_N_ATOMIC(char, j);
+	local_types = MALLOC_N_ATOMIC(char, j);
       }
 
       clv = (Scheme_Compiled_Let_Value *)head->body;
       for (i = 0; i < j; i++, clv = (Scheme_Compiled_Let_Value *)clv->body) {
+        int aty, pty;
+
 	if (!(clv->flags[0] & SCHEME_WAS_USED))
 	  skips[i] = 1;
 	else
 	  skips[i] = 0;
-        if ((clv->flags[0] & SCHEME_WAS_FLONUM_ARGUMENT)
-            && scheme_expr_produces_flonum(clv->value))
-          flonums[i] = SCHEME_INFO_FLONUM_ARG;
+
+        aty = SCHEME_WAS_TYPED_ARGUMENT(clv->flags[0]);
+        pty = scheme_expr_produces_local_type(clv->value);
+        if (pty && ((pty == aty) || ALWAYS_PREFER_UNBOX_TYPE(pty)))
+          local_types[i] = pty;
         else
-          flonums[i] = 0;
+          local_types[i] = 0;
         lifted[i] = NULL;
       }
 
@@ -1099,9 +1103,9 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
           for (j = i, k = 0; j >= 0; j--) {
             n = (rev_bind_order ? (head->count - j - 1) : j);
             if (skips[j])
-              resolve_info_add_mapping(linfo, n, -1, flonums[j], lifted[j]);
+              resolve_info_add_mapping(linfo, n, -1, local_types[j] << SCHEME_INFO_TYPED_VAL_SHIFT, lifted[j]);
             else
-              resolve_info_add_mapping(linfo, n, k++, flonums[j], lifted[j]);
+              resolve_info_add_mapping(linfo, n, k++, local_types[j] << SCHEME_INFO_TYPED_VAL_SHIFT, lifted[j]);
           }
         }
         lifts_frame_size = frame_size;
@@ -1143,8 +1147,8 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
 	  lo->value = le;
 
 	  et = scheme_get_eval_type(lo->value);
-          if (flonums[i])
-            et |= LET_ONE_FLONUM;
+          if (local_types[i])
+            et |= (local_types[i] << LET_ONE_TYPE_SHIFT);
 	  SCHEME_LET_EVAL_TYPE(lo) = et;
 
 	  if (last)
@@ -1170,9 +1174,9 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
         n = (rev_bind_order ? (head->count - i - 1) : i);
         if ((skips[i] != 0) && (skips[i] != 1)) scheme_signal_error("trashed\n");
 	if (skips[i])
-	  resolve_info_add_mapping(linfo, n, -1, flonums[i], lifted[i]);
+	  resolve_info_add_mapping(linfo, n, -1, local_types[i] << SCHEME_INFO_TYPED_VAL_SHIFT, lifted[i]);
 	else
-	  resolve_info_add_mapping(linfo, n, k++, flonums[i], lifted[i]);
+	  resolve_info_add_mapping(linfo, n, k++, local_types[i] << SCHEME_INFO_TYPED_VAL_SHIFT, lifted[i]);
       }
       
       body = scheme_resolve_expr(body, linfo);
@@ -1240,7 +1244,7 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
         }
         if (j >= 0)
           break;
-        if (!scheme_omittable_expr(clv->value, clv->count, -1, 0, NULL, -1, 0))
+        if (!scheme_omittable_expr(clv->value, clv->count, -1, 0, NULL, NULL, -1, 0))
           break;
       }
       if (i < 0) {
@@ -1666,7 +1670,7 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
 
 XFORM_NONGCING static int boxmap_size(int n)
 {
-  return ((2 * n) + (BITS_PER_MZSHORT - 1)) / BITS_PER_MZSHORT;
+  return ((CLOS_TYPE_BITS_PER_ARG * n) + (BITS_PER_MZSHORT - 1)) / BITS_PER_MZSHORT;
 }
 
 static mzshort *allocate_boxmap(int n)
@@ -1681,17 +1685,17 @@ static mzshort *allocate_boxmap(int n)
   return boxmap;
 }
 
-XFORM_NONGCING static void boxmap_set(mzshort *boxmap, int j, int bit, int delta)
+void scheme_boxmap_set(mzshort *boxmap, int j, int bit, int delta)
 {
-  boxmap[delta + ((2 * j) / BITS_PER_MZSHORT)] |= ((mzshort)bit << ((2 * j) & (BITS_PER_MZSHORT - 1)));
+  j *= CLOS_TYPE_BITS_PER_ARG;
+  boxmap[delta + (j / BITS_PER_MZSHORT)] |= ((mzshort)bit << (j & (BITS_PER_MZSHORT - 1)));
 }
 
-XFORM_NONGCING static int boxmap_get(mzshort *boxmap, int j, int bit, int delta)
+int scheme_boxmap_get(mzshort *boxmap, int j, int delta)
 {
-  if (boxmap[delta + ((2 * j) / BITS_PER_MZSHORT)] & ((mzshort)bit << ((2 * j) & (BITS_PER_MZSHORT - 1))))
-    return 1;
-  else
-    return 0;
+  j *= CLOS_TYPE_BITS_PER_ARG;
+  return (boxmap[delta + (j / BITS_PER_MZSHORT)] >> (j & (BITS_PER_MZSHORT - 1))
+          & ((1 << CLOS_TYPE_BITS_PER_ARG) - 1));
 }
 
 static int is_nonconstant_procedure(Scheme_Object *_data, Resolve_Info *info, int skip)
@@ -1734,14 +1738,17 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
                             Scheme_Object *precomputed_lift)
 {
   Scheme_Closure_Data *data;
-  int i, closure_size, offset, np, num_params, expanded_already = 0;
+  int i, closure_size, offset, np, num_params, expanded_already = 0, captured_typed;
+  int no_map_shift_needed;
   int has_tl, convert_size, need_lift;
   mzshort *oldpos, *closure_map, *new_closure_map;
   Closure_Info *cl;
   Resolve_Info *new_info;
   Scheme_Object *lifted, *result, *lifteds = NULL;
   Scheme_Hash_Table *captured = NULL;
-  mzshort *convert_map, *convert_boxes = NULL;
+  mzshort *convert_boxes = NULL; /* local type for captured (i.e,. first captured is at 0) */
+  mzshort *convert_map;  /* includes local type for args and captured (i.e,. first captured 
+                            is at data->num_params) */
 
   data = (Scheme_Closure_Data *)_data;
   cl = (Closure_Info *)data->closure_map;
@@ -1764,24 +1771,24 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
      closure. */
 
   closure_size = data->closure_size;
-  if (cl->flonum_map) {
+  if (cl->local_type_map) {
     int at_least_one = 0;
     for (i = data->num_params; i--; ) {
-      if (cl->flonum_map[i]) {
-        if (cl->local_flags[i] & SCHEME_WAS_FLONUM_ARGUMENT)
+      if (cl->local_type_map[i]) {
+        if (SCHEME_WAS_TYPED_ARGUMENT(cl->local_flags[i]) == cl->local_type_map[i])
           at_least_one = 1;
         else
-          cl->flonum_map[i] = 0;
+          cl->local_type_map[i] = 0;
       }
     }
     if (at_least_one) {
       closure_size += boxmap_size(data->num_params + closure_size);
       expanded_already = 1;
     } else
-      cl->flonum_map = NULL;
+      cl->local_type_map = NULL;
   }
   closure_map = (mzshort *)scheme_malloc_atomic(sizeof(mzshort) * closure_size);
-  if (cl->flonum_map)
+  if (cl->local_type_map)
     memset(closure_map, 0, sizeof(mzshort) * closure_size);
 
   has_tl = cl->has_tl;
@@ -1809,17 +1816,21 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
       }
     } else {
       closure_map[offset] = li;
-      if (convert && (flags & (SCHEME_INFO_BOXED | SCHEME_INFO_FLONUM_ARG))) {
-        /* The only problem with a boxed/flonum variable is that
+      if (convert && (flags & (SCHEME_INFO_BOXED | SCHEME_INFO_TYPED_VAL_MASK))) {
+        /* The only problem with a boxed/local_type variable is that
            it's more difficult to validate. We have to track
            which arguments are boxes. And the resulting procedure
            must be used only in application positions. */
         if (!convert_boxes)
           convert_boxes = allocate_boxmap(cl->base_closure_size);
-        boxmap_set(convert_boxes, offset, (flags & SCHEME_INFO_BOXED) ? 1 : 2, 0);
+        scheme_boxmap_set(convert_boxes, offset, 
+                          ((flags & SCHEME_INFO_BOXED) 
+                           ? CLOS_TYPE_BOXED 
+                           : CLOS_TYPE_TYPE_OFFSET + (flags >> SCHEME_INFO_TYPED_VAL_SHIFT)), 
+                          0);
       } else {
-        /* Currently, we only need flonum information as a closure type */
-        if (flags & SCHEME_INFO_FLONUM_ARG) {
+        /* Currently, we only need local_type information as a closure type */
+        if (flags & SCHEME_INFO_TYPED_VAL_MASK) {
           if (!expanded_already) {
             closure_size += boxmap_size(data->num_params + closure_size);
             new_closure_map = (mzshort *)scheme_malloc_atomic(sizeof(mzshort) * closure_size);
@@ -1828,7 +1839,9 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
             closure_map = new_closure_map;
             expanded_already = 1;
           }
-          boxmap_set(closure_map, data->num_params + offset, 2, data->closure_size);
+          scheme_boxmap_set(closure_map, data->num_params + offset, 
+                            CLOS_TYPE_TYPE_OFFSET + (flags >> SCHEME_INFO_TYPED_VAL_SHIFT), 
+                            data->closure_size);
         }
       }
       offset++;
@@ -1837,26 +1850,24 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
   
   /* Add bindings introduced by closure conversion. The `captured'
      table maps old positions to new positions. */
+  captured_typed = 0;
   while (lifteds) {
-    int j, cnt, boxed, flonumed;
+    int j, cnt, local_typed;
     Scheme_Object *vec, *loc;
 
     if (!captured) {
       captured = scheme_make_hash_table(SCHEME_hash_ptr);
       for (i = 0; i < offset; i++) {
-        int cp;
+        int cp, v;
         cp = i;
         if (convert_boxes) {
-          if (boxmap_get(convert_boxes, i, 1, 0))
-            cp = -((2 * cp) + 1);
-          else if (boxmap_get(convert_boxes, i, 2, 0))
-            cp = -((2 * cp) + 2);
+          v = scheme_boxmap_get(convert_boxes, i, 0);
         } else if (expanded_already) {
-          if (boxmap_get(closure_map, data->num_params + i, 1, data->closure_size))
-            cp = -((2 * cp) + 1);
-          else if (boxmap_get(closure_map, data->num_params + i, 2, data->closure_size))
-            cp = -((2 * cp) + 2);
-        }
+          v = scheme_boxmap_get(closure_map, data->num_params + i, data->closure_size);
+        } else 
+          v = 0;
+        if (v)
+          cp = -((cp << CLOS_TYPE_BITS_PER_ARG) + v);
         scheme_hash_set(captured, scheme_make_integer(closure_map[i]), scheme_make_integer(cp));
       }
     }
@@ -1869,25 +1880,22 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
       loc = SCHEME_VEC_ELS(vec)[j+1];
       if (SCHEME_BOXP(loc)) {
         loc = SCHEME_BOX_VAL(loc);
-        boxed = 1;
-        flonumed = 0;
+        local_typed = CLOS_TYPE_BOXED;
       } else if (SCHEME_VECTORP(loc)) {
+        local_typed = SCHEME_INT_VAL(SCHEME_VEC_ELS(loc)[1]);
         loc = SCHEME_VEC_ELS(loc)[0];
-        boxed = 0;
-        flonumed = 1;
       } else {
-        boxed = 0;
-        flonumed = 0;
+        local_typed = 0;
       }
       i = SCHEME_LOCAL_POS(loc);
       if (!scheme_hash_get(captured, scheme_make_integer(i))) {
         /* Need to capture an extra binding: */
         int cp;
         cp = captured->count;
-        if (boxed)
-          cp = -((2 * cp) + 1);
-        else if (flonumed)
-          cp = -((2 * cp) + 2);
+        if (local_typed) {
+          cp = -((cp << CLOS_TYPE_BITS_PER_ARG) + local_typed);
+          captured_typed = 1;
+        }
         scheme_hash_set(captured, scheme_make_integer(i), scheme_make_integer(cp));
       }
     }
@@ -1900,9 +1908,10 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
        is in captured, so just build it from scratch. */
     int old_pos, j, new_size, need_flags;
     new_size = (captured->count + (has_tl ? 1 : 0));
-    if (cl->flonum_map || expanded_already || convert_boxes) {
+    if (cl->local_type_map || expanded_already || convert_boxes || captured_typed) {
       need_flags = new_size;
       new_size += boxmap_size(data->num_params + new_size);
+      expanded_already = 1;
     } else
       need_flags = 0;
     closure_map = (mzshort *)scheme_malloc_atomic(sizeof(mzshort) * new_size);
@@ -1916,26 +1925,23 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
         cp = SCHEME_INT_VAL(captured->vals[j]);
         old_pos = SCHEME_INT_VAL(captured->keys[j]);
         if (cp < 0) {
-          /* Boxed or flonum */
+          /* Boxed or local_type */
           int bit;
           cp = -cp;
-          if (cp & 0x1) {
-            cp = (cp - 1) / 2;
-            bit = 1;
-          } else {
-            cp = (cp - 2) / 2;
-            bit = 2;
-          }
+          bit = cp & ((1 << CLOS_TYPE_BITS_PER_ARG) - 1);
+          cp >>= CLOS_TYPE_BITS_PER_ARG;
           if (!convert_boxes)
             convert_boxes = allocate_boxmap(offset);
-          boxmap_set(convert_boxes, cp, bit, 0);
-          if (need_flags)
-            boxmap_set(closure_map, cp, bit, need_flags);
+          scheme_boxmap_set(convert_boxes, cp, bit, 0);
+          if (need_flags && (bit > CLOS_TYPE_TYPE_OFFSET))
+            scheme_boxmap_set(closure_map, cp + data->num_params, bit, need_flags);
         }
         closure_map[cp] = old_pos;
       }
     }
-  }
+    no_map_shift_needed = 1;
+  } else
+    no_map_shift_needed = 0;
 
   if (convert
       && (offset || !has_tl) /* either need args, or treat as convert because it's fully closed */
@@ -1944,7 +1950,7 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
     convert_map = closure_map;
     convert_size = offset;
 
-    if (has_tl || convert_boxes || cl->flonum_map) {
+    if (has_tl || convert_boxes || cl->local_type_map) {
       int new_boxes_size;
       int sz;
       new_boxes_size = boxmap_size(convert_size + data->num_params + (has_tl ? 1 : 0));
@@ -1979,7 +1985,8 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
     offset++;
   }
 
-  if (!convert && !just_compute_lift && (offset < data->closure_size) && expanded_already) {
+  if (!convert && !just_compute_lift && (offset < data->closure_size) 
+      && expanded_already && !no_map_shift_needed) {
     /* shift boxmap down, since we're dropping closure elements */
     int bsz;
     bsz = boxmap_size(data->num_params + offset);
@@ -1995,7 +2002,7 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
   }
 
   /* Set up environment mapping, initialized for arguments: */
-
+  
   np = num_params = data->num_params;
   if ((data->num_params == 1)
       && (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_REST)
@@ -2014,12 +2021,14 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
                                (((cl->local_flags[i] & SCHEME_WAS_SET_BANGED)
                                  ? SCHEME_INFO_BOXED
                                  : 0)
-                                | ((cl->flonum_map && cl->flonum_map[i])
-                                   ? SCHEME_INFO_FLONUM_ARG
+                                | ((convert && (cl->local_type_map && cl->local_type_map[i]))
+                                   ? (cl->local_type_map[i] << SCHEME_INFO_TYPED_VAL_SHIFT)
                                    : 0)),
                                NULL);
-      if (cl->flonum_map && cl->flonum_map[i] && !just_compute_lift)
-        boxmap_set(closure_map, i + convert_size, 2, closure_size);
+      if (convert && cl->local_type_map && cl->local_type_map[i] && !just_compute_lift)
+        scheme_boxmap_set(closure_map, i + convert_size, 
+                          cl->local_type_map[i] + CLOS_TYPE_TYPE_OFFSET,
+                          closure_size);
     }
     if (expanded_already && !just_compute_lift)
       SCHEME_CLOSURE_DATA_FLAGS(data) |= CLOS_HAS_TYPED_ARGS;
@@ -2063,36 +2072,37 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
       --sz;
       cmap = MALLOC_N_ATOMIC(mzshort, sz);
       for (j = 0; j < sz; j++) {
-        int is_boxed = 0, is_flonum = 0;
+        int is_boxed = 0, is_local_type = 0;
         loc = SCHEME_VEC_ELS(vec)[j+1];
         if (SCHEME_BOXP(loc)) {
           if (!boxmap)
             boxmap = allocate_boxmap(sz);
-          boxmap_set(boxmap, j, 1, 0);
+          scheme_boxmap_set(boxmap, j, CLOS_TYPE_BOXED, 0);
           loc = SCHEME_BOX_VAL(loc);
           is_boxed = 1;
         } else if (SCHEME_VECTORP(loc)) {
           if (!boxmap)
             boxmap = allocate_boxmap(sz);
-          boxmap_set(boxmap, j, 2, 0);
+          scheme_boxmap_set(boxmap, j, SCHEME_INT_VAL(SCHEME_VEC_ELS(loc)[1]), 0);
           loc = SCHEME_VEC_ELS(loc)[0];
-          is_flonum = 1;
+          is_local_type = 1;
         }
         loc = scheme_hash_get(captured, scheme_make_integer(SCHEME_LOCAL_POS(loc)));
         cp = SCHEME_INT_VAL(loc);
         if (cp < 0) {
+          int v;
           cp = -cp;
-          if (cp & 0x1) {
-            cp = (cp - 1) / 2;
+          v = cp & ((1 << CLOS_TYPE_BITS_PER_ARG) - 1);
+          cp >>= CLOS_TYPE_BITS_PER_ARG;
+          if (v == CLOS_TYPE_BOXED) {
             if (convert && !is_boxed)
               scheme_signal_error("internal error: lift mismatch (boxed)");
           } else {
-            cp = (cp - 2) / 2;
-            if (convert && !is_flonum)
-              scheme_signal_error("internal error: lift mismatch (flonum)");
+            if (convert && !is_local_type)
+              scheme_signal_error("internal error: lift mismatch (local type) %d", v);
           }
         } else {
-          if (convert && (is_boxed || is_flonum))
+          if (convert && (is_boxed || is_local_type))
             scheme_signal_error("internal error: lift mismatch");
         }
         cmap[j] = cp + (has_tl && convert ? 1 : 0);
@@ -2239,7 +2249,7 @@ static Scheme_Object *
 module_expr_resolve(Scheme_Object *data, Resolve_Info *old_rslv)
 {
   Scheme_Module *m = (Scheme_Module *)data;
-  Scheme_Object *b, *lift_vec;
+  Scheme_Object *b, *lift_vec, *body = scheme_null;
   Resolve_Prefix *rp;
   Resolve_Info *rslv;
   int i, cnt;
@@ -2264,18 +2274,26 @@ module_expr_resolve(Scheme_Object *data, Resolve_Info *old_rslv)
   for (i = 0; i < cnt; i++) {
     Scheme_Object *e;
     e = scheme_resolve_expr(SCHEME_VEC_ELS(m->bodies[0])[i], rslv);
-    SCHEME_VEC_ELS(m->bodies[0])[i] = e;
+    
+    /* add lift just before the expression that introduced it;
+       this ordering is needed for bytecode validation of
+       constantness for top-level references */
+    lift_vec = rslv->lifts;
+    if (!SCHEME_NULLP(SCHEME_VEC_ELS(lift_vec)[0])) {
+      body = scheme_append(SCHEME_VEC_ELS(lift_vec)[0], body);
+      SCHEME_VEC_ELS(lift_vec)[0] = scheme_null;
+    }
+
+    body = scheme_make_pair(e, body);
   }
 
   m->max_let_depth = rslv->max_let_depth;
 
   lift_vec = rslv->lifts;
-  if (!SCHEME_NULLP(SCHEME_VEC_ELS(lift_vec)[0])) {
-    b = scheme_append(SCHEME_VEC_ELS(lift_vec)[0], scheme_vector_to_list(m->bodies[0]));
-    b = scheme_list_to_vector(b);
-    m->bodies[0] = b;
-  }
   rp->num_lifts = SCHEME_INT_VAL(SCHEME_VEC_ELS(lift_vec)[1]);
+
+  body = scheme_list_to_vector(scheme_reverse(body));
+  m->bodies[0] = body;
 
   rp = scheme_remap_prefix(rp, rslv);
 
@@ -2360,8 +2378,10 @@ Scheme_Object *scheme_resolve_expr(Scheme_Object *expr, Resolve_Info *info)
                                  ? scheme_local_unbox_type
                                  : scheme_local_type,
                                  pos,
-                                 ((flags & SCHEME_INFO_FLONUM_ARG) 
-                                  ? SCHEME_LOCAL_FLONUM
+                                 ((flags & SCHEME_INFO_TYPED_VAL_MASK) 
+                                  ? (SCHEME_LOCAL_TYPE_OFFSET
+                                     + ((flags & SCHEME_INFO_TYPED_VAL_MASK)
+                                        >> SCHEME_INFO_TYPED_VAL_SHIFT))
                                   : 0));
       }
     }
@@ -2497,7 +2517,7 @@ Resolve_Prefix *scheme_resolve_prefix(int phase, Comp_Prefix *cp, int simplify)
             m = ((Module_Variable *)m)->sym;
           }
         }
-	tls[SCHEME_TOPLEVEL_POS(ht->vals[i])] = m;
+        tls[SCHEME_TOPLEVEL_POS(ht->vals[i])] = m;
       }
     }
   }
@@ -2878,15 +2898,16 @@ static int do_resolve_info_lookup(Resolve_Info *info, int pos, int *flags, Schem
             boxmap = (mzshort *)ca[3];
             vec = scheme_make_vector(sz + 1, NULL);
             for (i = 0; i < sz; i++) {
-              int boxed = 0, flonumed = 0, flags = 0;
+              int boxed = 0, local_typed = 0, flags = 0;
 
               if (boxmap) {
-                int byte = boxmap[(2 * i) / BITS_PER_MZSHORT];
-                if (byte & ((mzshort)1 << ((2 * i) & (BITS_PER_MZSHORT - 1))))
+                int lt;
+                lt = scheme_boxmap_get(boxmap, i, 0);
+                if (lt == CLOS_TYPE_BOXED) {
                   boxed = 1;
-                if (byte & ((mzshort)2 << ((2 * i) & (BITS_PER_MZSHORT - 1)))) {
-                  flonumed = 1;
-                  flags = SCHEME_LOCAL_FLONUM;
+                } else if (lt) {
+                  local_typed = lt;
+                  flags = ((lt - CLOS_TYPE_TYPE_OFFSET) + SCHEME_LOCAL_TYPE_OFFSET);
                 }
               }
               
@@ -2896,8 +2917,10 @@ static int do_resolve_info_lookup(Resolve_Info *info, int pos, int *flags, Schem
               
               if (boxed)
                 loc = scheme_box(loc);
-              else if (flonumed)
-                loc = scheme_make_vector(1, loc);
+              else if (local_typed) {
+                loc = scheme_make_vector(2, loc);
+                SCHEME_VEC_ELS(loc)[1] = scheme_make_integer(local_typed);
+              }
               
               SCHEME_VEC_ELS(vec)[i+1] = loc;
             }

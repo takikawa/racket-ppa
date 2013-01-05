@@ -1,11 +1,12 @@
 
-
 (load-relative "loadtest.rktl")
 
 (Section 'serialization)
 
 (require racket/serialize
-         racket/file)
+         racket/file
+         racket/flonum
+         racket/fixnum)
 
 ;; ----------------------------------------
 
@@ -137,6 +138,8 @@
 (test-ser (mk-ht make-weak-hash))
 (test-ser #s(a 0 1 2))
 (test-ser #s((a q 2) 0 1 2))
+(test-ser (fxvector 1 2 30))
+(test-ser (flvector 0.1 2.0 30e3))
 
 (test-ser (set 'set 0 1 2))
 (test-ser (seteqv 'seteqv 0 1 2))
@@ -159,6 +162,9 @@
 (test-ser (make-b 1 2))
 (test-ser (make-c 30))
 (test-ser (make-d 100 200 300))
+
+(test-ser (make-srcloc 1 2 3 4 5))
+(test-ser (make-srcloc (string->path "/tmp/test.rkt") 2 3 4 5))
 
 ;; Simple sharing
 (let ([p (cons 1 2)])
@@ -485,7 +491,8 @@
   (define s (dynamic-require `(submod ,fn main) 's))
   (let ([o (open-output-bytes)])
     (write s o)
-    (test s read (open-input-string (get-output-string o)))))
+    (test s read (open-input-string (get-output-string o))))
+  (delete-file fn))
 
 
 ;; ----------------------------------------

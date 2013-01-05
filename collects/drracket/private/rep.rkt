@@ -30,6 +30,7 @@ TODO
          "drsig.rkt"
          "local-member-names.rkt"
          "stack-checkpoint.rkt"
+         "parse-logger-args.rkt"
          
          ;; the dynamic-require below loads this module, 
          ;; so we make the dependency explicit here, even
@@ -434,7 +435,6 @@ TODO
                insert
                insert-before
                insert-between
-               invalidate-bitmap-cache
                is-locked?
                last-position
                line-location
@@ -472,9 +472,9 @@ TODO
       (define/public (get-context) context)
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      ;;;				           ;;;
+      ;;;                                          ;;;
       ;;;            User -> Kernel                ;;;
-      ;;;				           ;;;
+      ;;;                                          ;;;
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       
       ;; =User= (probably doesn't matter)
@@ -775,8 +775,8 @@ TODO
         (unless inserting-prompt?
           (reset-highlighting))
         (when (and prompt-position 
-		   (ormap (λ (start) (< start prompt-position))
-			  starts))
+                   (ormap (λ (start) (< start prompt-position))
+                          starts))
           (set! prompt-position (get-unread-start-point))
           (reset-regions (append (all-but-last (get-regions))
                                  (list (list prompt-position 'end))))))
@@ -810,7 +810,7 @@ TODO
              (user-namespace-box (make-weak-box #f))
              (user-eventspace-main-thread #f)
              (user-break-parameterization #f)
-             (user-logger (make-logger))
+             (user-logger drracket:init:system-logger) ;; for now, just let all messages be everywhere
              
              ;; user-exit-code (union #f byte?)
              ;; #f indicates that exit wasn't called. Integer indicates exit code
@@ -1263,29 +1263,6 @@ TODO
                  
                  (current-logger user-logger)
                  
-                 (thread
-                  (λ ()
-                    ;; forward system events the user's logger, and record any
-                    ;; events that happen on the user's logger to show in the GUI
-                    (let ([sys-evt (make-log-receiver drracket:init:system-logger 'debug)]
-                          [user-evt (make-log-receiver user-logger 'debug)])
-                      (let loop ()
-                        (sync
-                         (handle-evt
-                          sys-evt
-                          (λ (logged)
-                            (log-message user-logger 
-                                         (vector-ref logged 0)
-                                         (vector-ref logged 1)
-                                         (vector-ref logged 2))
-                            (loop)))
-                         (handle-evt
-                          user-evt
-                          (λ (vec)
-                            (parameterize ([current-eventspace drracket:init:system-eventspace])
-                              (queue-callback (λ () (new-log-message vec))))
-                            (loop))))))))
-                 
                  (initialize-parameters snip-classes)
                  (let ([drracket-exit-handler
                         (λ (x)
@@ -1461,28 +1438,75 @@ TODO
       
       (define logger-editor #f)
       (define logger-messages '())
+      (define user-log-receiver-args-str (preferences:get 'drracket:logger-receiver-string))
+      (define/public (set-user-log-receiver-args str args) 
+        (set! user-log-receiver-args-str str)
+        (update-log-receiver-to-match-str))
+      (define/public (get-user-log-receiver-args-str) user-log-receiver-args-str)
+      (define/public (enable/disable-capture-log logging-on?)
+        (cond
+          [logging-on?
+           (update-log-receiver-to-match-str)]
+          [else
+           (channel-put user-log-receiver-changed #f)]))
+      (define/private (update-log-receiver-to-match-str)
+        (define args (parse-logger-args user-log-receiver-args-str))
+        (channel-put user-log-receiver-changed
+                     (and args
+                          (apply make-log-receiver user-logger args))))
+      (define user-log-receiver-changed (make-channel))
+      (thread
+       (λ ()
+         (struct gui-event (start end name) #:prefab)
+         (define callback-running? #f)
+         (define evts '())
+         (define sema (make-semaphore 1))
+         (define (user-event-handler-callback)
+           (semaphore-wait sema)
+           (define my-evts evts)
+           (set! evts '())
+           (set! callback-running? #f)
+           (semaphore-post sema)
+           (for ([vec (in-list (reverse my-evts))])
+             (new-log-message vec)))
+         (let loop ([user-log-receiver #f])
+           (sync
+            (handle-evt user-log-receiver-changed
+                        (λ (user-log-receiver) 
+                          (loop user-log-receiver)))
+            (if user-log-receiver
+                (handle-evt user-log-receiver
+                            (λ (vec)
+                              (unless (gui-event? (vector-ref vec 2))
+                                (semaphore-wait sema)
+                                (set! evts (cons vec evts))
+                                (unless callback-running?
+                                  (queue-callback user-event-handler-callback #f)
+                                  (set! callback-running? #t))
+                                (semaphore-post sema))
+                              (loop user-log-receiver)))
+                never-evt)))))
       (define/public (get-logger-messages) logger-messages)
       (define/private (new-log-message vec)
-        (let* ([level (vector-ref vec 0)]
-               [str (cond
-                      [(<= (string-length (vector-ref vec 1)) log-entry-max-size)
-                       (vector-ref vec 1)]
-                      [else
-                       (substring (vector-ref vec 1) 0 log-entry-max-size)])]
-               [msg (vector level str)])
+        (define str
           (cond
-            [(< (length logger-messages) log-max-size)
-             (set! logger-messages (cons msg logger-messages))
-             (update-logger-gui (cons 'add-line msg))]
+            [(<= (string-length (vector-ref vec 1)) log-entry-max-size)
+             (vector-ref vec 1)]
             [else
-             (set! logger-messages
-                   (cons
-                    msg
-                    (let loop ([msgs logger-messages])
-                      (cond
-                        [(null? (cdr msgs)) null]
-                        [else (cons (car msgs) (loop (cdr msgs)))]))))
-             (update-logger-gui (cons 'clear-last-line-and-add-line msg))])))
+             (substring (vector-ref vec 1) 0 log-entry-max-size)]))
+        (cond
+          [(< (length logger-messages) log-max-size)
+           (set! logger-messages (cons str logger-messages))
+           (update-logger-gui (cons 'add-line str))]
+          [else
+           (set! logger-messages
+                 (cons
+                  str
+                  (let loop ([msgs logger-messages])
+                    (cond
+                      [(null? (cdr msgs)) null]
+                      [else (cons (car msgs) (loop (cdr msgs)))]))))
+           (update-logger-gui (cons 'clear-last-line-and-add-line str))]))
       
       (define/private (reset-logger-messages) 
         (set! logger-messages '())

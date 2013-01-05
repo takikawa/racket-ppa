@@ -91,7 +91,8 @@ GC2_EXTERN void GC_add_roots(void *start, void *end);
    `start' (inclusive) and `end' (exclusive) contains pointers. */
 
 GC2_EXTERN void GC_init_type_tags(int count, int pair, int mutable_pair, int weakbox, 
-                                  int ephemeron, int weakarray, int custbox);
+                                  int ephemeron, int weakarray, int custbox,
+                                  int phantom);
 /*
    Called by Racket to indicate the number of different type tags it
    uses, starting from 0. `count' is always less than 256. The weakbox
@@ -203,19 +204,6 @@ GC2_EXTERN void *GC_malloc_pair(void *car, void *cdr);
    The main potential advantage is that `car' and `cdr' don't
    have to be retained by the callee in the case of a GC. */
 
-GC2_EXTERN void *GC_malloc_one_xtagged(size_t);
-/* 
-   Alloc an item, initially zeroed. Rather than having a specific tag,
-   all objects allocated this way are marked/fixedup via the function
-   in GC_mark_xtagged and GC_fixup_xtagged. Racket sets
-   GC_{mark,fixup}_xtagged. */
-
-GC2_EXTERN void (*GC_mark_xtagged)(void *obj);
-GC2_EXTERN void (*GC_fixup_xtagged)(void *obj);
-/* 
-  Mark and fixup functions for memory allocated with
-  GC_malloc_one_xtagged(). */
-
 GC2_EXTERN void *GC_malloc_array_tagged(size_t);
 /* 
    Alloc an array of tagged items. Racket sets the tag in the first
@@ -288,6 +276,11 @@ GC2_EXTERN int GC_is_on_allocated_page(void *p);
    Returns 1 if p refers to a page of memory on which
    the GC allocates objects (although p may or may not
    be a valid pointer to the start of an alloctaed object). */
+
+GC2_EXTERN int GC_allocate_phantom_bytes(intptr_t);
+/* 
+   Returns 0 if allocation should fail due to a memory limit, 
+   1 otherwise. */
 
 /***************************************************************************/
 /* Memory tracing                                                          */

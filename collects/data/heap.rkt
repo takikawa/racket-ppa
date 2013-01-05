@@ -160,17 +160,29 @@
   (in-heap/consume! (heap-copy h)))
 
 (define (in-heap/consume! h)
-  (lambda ()
-    (values (lambda () (heap-min h))
-            (lambda () (heap-remove-min! h) #t)
-            #t
-            (lambda (_) (> (heap-count h) 0))
-            (lambda _ #t)
-            (lambda _ #t))))
+  (make-do-sequence
+   (lambda ()
+     (values (lambda (_) (heap-min h))
+             (lambda (_) (heap-remove-min! h) #t)
+             #t
+             (lambda (_) (> (heap-count h) 0))
+             (lambda _ #t)
+             (lambda _ #t)))))
 
 ;; --------
 
-(define (heap-sort! <=? v)
+;; preferred order is (heap-sort vec <=?), but allow old order too
+(define (heap-sort! x y)
+  (cond [(and (vector? x) (procedure? y))
+         (heap-sort!* x y)]
+        [(and (vector? y) (procedure? x))
+         (heap-sort!* y x)]
+        [else
+         (unless (vector? x)
+           (raise-argument-error 'heap-sort! "vector?" x))
+         (raise-argument-error 'heap-sort! "procedure?" y)]))
+
+(define (heap-sort!* v <=?)
   ;; to get ascending order, need max-heap, so reverse comparison
   (define (>=? x y) (<=? y x))
   (define size (vector-length v))
@@ -186,7 +198,7 @@
   (match h
     [(heap vec size <=?)
      (let ([v (vector-copy vec 0 size)])
-       (heap-sort! <=? v)
+       (heap-sort!* v <=?)
        v)]))
 
 ;; --------
@@ -204,4 +216,7 @@
  [heap->vector (-> heap? vector?)]
  [heap-copy (-> heap? heap?)]
 
- [heap-sort! (-> procedure? vector? void?)])
+ [in-heap (-> heap? sequence?)]
+ [in-heap/consume! (-> heap? sequence?)])
+
+(provide heap-sort!)

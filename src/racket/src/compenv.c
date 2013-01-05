@@ -101,6 +101,12 @@ void scheme_init_compenv_places(void)
   }
 }
 
+void scheme_init_compenv_symbol(void)
+{
+  REGISTER_SO(unshadowable_symbol);
+  unshadowable_symbol = scheme_intern_symbol("unshadowable");
+}
+
 /*========================================================================*/
 /*                       compilation info management                      */
 /*========================================================================*/
@@ -855,16 +861,8 @@ Scheme_Object *scheme_make_local(Scheme_Type type, int pos, int flags)
   k = type - scheme_local_type;
   
   /* Helper for reading bytecode: make sure flags is a valid value */
-  switch (flags) {
-  case 0:
-  case SCHEME_LOCAL_CLEAR_ON_READ:
-  case SCHEME_LOCAL_OTHER_CLEARS:
-  case SCHEME_LOCAL_FLONUM:
-    break;
-  default:
-    flags  = SCHEME_LOCAL_OTHER_CLEARS;
-    break;
-  }
+  if ((flags < 0) || (flags > (SCHEME_MAX_LOCAL_TYPE + SCHEME_LOCAL_TYPE_OFFSET)))
+    flags = SCHEME_LOCAL_OTHER_CLEARS;
 
   if (pos < MAX_CONST_LOCAL_POS) {
     return scheme_local[pos][k][flags];
@@ -925,7 +923,8 @@ static Scheme_Local *get_frame_loc(Scheme_Comp_Env *frame,
 
 Scheme_Object *scheme_hash_module_variable(Scheme_Env *env, Scheme_Object *modidx, 
 					   Scheme_Object *stxsym, Scheme_Object *insp,
-					   int pos, intptr_t mod_phase, int is_constant)
+					   int pos, intptr_t mod_phase, int is_constant,
+                                           Scheme_Object *shape)
 /* is_constant == 2 => constant over all instantiations and phases */
 {
   Scheme_Object *val;
@@ -961,6 +960,7 @@ Scheme_Object *scheme_hash_module_variable(Scheme_Env *env, Scheme_Object *modid
       mv->insp = insp;
       mv->pos = pos;
       mv->mod_phase = (int)mod_phase;
+      mv->shape = shape;
 
       if (is_constant > 1)
         SCHEME_MODVAR_FLAGS(mv) |= SCHEME_MODVAR_CONST;
@@ -1169,13 +1169,15 @@ Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, Scheme_Objec
        simpify in "syntax.c") and submodules won't re-expand correctly.
        So, check for a context-determined existing rename. */
     if (!SCHEME_HASHTP((Scheme_Object *)env) && env->module && (mode <= 2)) {
-      Scheme_Object *mod, *nm = id;
+      Scheme_Object *mod, *nm = id, *nom_modix = scheme_false;
       int skipped;
-      mod = scheme_stx_module_name(NULL, &nm, scheme_make_integer(env->phase), NULL, NULL, NULL, 
+      mod = scheme_stx_module_name(NULL, &nm, scheme_make_integer(env->phase), &nom_modix, NULL, NULL, 
                                    NULL, NULL, NULL, NULL, NULL, &skipped);
-      if (mod /* must refer to env->module, otherwise there would
-		 have been an error before getting here */
+      if (mod
           && !SAME_OBJ(mod, scheme_undefined)
+          /* refers to env->module if nom_modix has #f path */
+          && (!SAME_TYPE(SCHEME_TYPE(nom_modix), scheme_module_index_type)
+              || SCHEME_FALSEP(((Scheme_Modidx *)nom_modix)->path))
           && ((skipped == 0) || (mode < 2))
 	  && NOT_SAME_OBJ(nm, sym))
 	/* It has a rename already! */
@@ -1669,6 +1671,11 @@ static void check_taint(Scheme_Object *find_id)
                         "cannot use identifier tainted by macro transformation");
 }
 
+static Scheme_Object *intern_struct_proc_shape(int shape) {
+  char buf[20];
+  sprintf(buf, "struct%d", shape);
+  return scheme_intern_symbol(buf);
+}
 
 /*********************************************************************/
 /* 
@@ -1703,7 +1710,7 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
   int j = 0, p = 0, modpos, skip_stops = 0, module_self_reference = 0, is_constant;
   Scheme_Bucket *b;
   Scheme_Object *val, *modidx, *modname, *src_find_id, *find_global_id, *mod_defn_phase;
-  Scheme_Object *find_id_sym = NULL, *rename_insp = NULL, *mod_constant = NULL;
+  Scheme_Object *find_id_sym = NULL, *rename_insp = NULL, *mod_constant = NULL, *shape;
   Scheme_Env *genv;
   intptr_t phase;
 
@@ -1987,7 +1994,8 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
         check_taint(src_find_id);
 	return scheme_hash_module_variable(genv, genv->module->self_modidx, find_id, 
 					   genv->module->insp,
-					   -1, genv->mod_phase, 0);
+					   -1, genv->mod_phase, 0,
+                                           NULL);
       }
     } else
       return NULL;
@@ -1995,15 +2003,25 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
 
   check_taint(src_find_id);
 
+  shape = NULL;
   if (mod_constant) {
     if (SAME_OBJ(mod_constant, scheme_constant_key))
       is_constant = 2;
     else if (SAME_OBJ(mod_constant, scheme_fixed_key))
       is_constant = 1;
-    else if (SAME_TYPE(SCHEME_TYPE(mod_constant), scheme_inline_variant_type)) {
+    else if (SAME_TYPE(SCHEME_TYPE(mod_constant), scheme_proc_shape_type)) {
+      is_constant = 2;
+      shape = SCHEME_PTR_VAL(mod_constant);
+    } else if (SAME_TYPE(SCHEME_TYPE(mod_constant), scheme_struct_proc_shape_type)) {
       if (_inline_variant)
         *_inline_variant = mod_constant;
       is_constant = 2;
+      shape = intern_struct_proc_shape(SCHEME_PROC_SHAPE_MODE(mod_constant));
+    } else if (SAME_TYPE(SCHEME_TYPE(mod_constant), scheme_inline_variant_type)) {
+      if (_inline_variant)
+        *_inline_variant = mod_constant;
+      is_constant = 2;
+      shape = scheme_get_or_check_procedure_shape(mod_constant, NULL);
     } else {
       if (flags & SCHEME_ELIM_CONST) 
         return mod_constant;
@@ -2024,7 +2042,7 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
     return scheme_hash_module_variable(env->genv, modidx, find_id, 
 				       (rename_insp ? rename_insp : genv->module->insp),
 				       modpos, SCHEME_INT_VAL(mod_defn_phase),
-                                       is_constant);
+                                       is_constant, shape);
   }
 
   if (!modname 
@@ -2035,7 +2053,7 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
     return scheme_hash_module_variable(env->genv, genv->module->self_modidx, find_global_id, 
 				       genv->module->insp,
 				       modpos, genv->mod_phase,
-                                       is_constant);
+                                       is_constant, shape);
   }
 
   b = scheme_bucket_from_table(genv->toplevel, (char *)find_global_id);
@@ -2410,11 +2428,6 @@ Scheme_Object *scheme_find_local_shadower(Scheme_Object *sym, Scheme_Object *sym
 {
   Scheme_Comp_Env *frame;
   Scheme_Object *esym, *uid = NULL, *env_marks, *prop;
-
-  if (!unshadowable_symbol) {
-    REGISTER_SO(unshadowable_symbol);
-    unshadowable_symbol = scheme_intern_symbol("unshadowable");
-  }
 
   /* Walk backward through the frames, looking for a renaming binding
      with the same marks as the given identifier, sym. Skip over
