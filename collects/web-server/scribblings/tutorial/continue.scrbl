@@ -227,7 +227,7 @@ the entire list, yielding the malformed expression
 "Moe")))].
 
 Instead, we must splice the list in, like so: @racket[`(ul ,@((li "Larry") (li "Curly") (li
-"Moe")))]. The unquote-splicing form, @racket[,@expression],
+"Moe")))]. The @racket[unquote-splicing] form, @racket[,@expression],
 allows us conveniently to splice a list of @|xexpr| fragments into a
 larger template list. To generalize the example, here are two helper
 functions that convert any list of @|xexpr|s into one @|xexpr|
@@ -699,7 +699,7 @@ Improve the presentation of the blog web application by writing
 an external style sheet that suits your tastes.  Adjust all of the HTML
 response handlers to include a link to the style sheet.
 
-@section{The Double Submit Bug}
+@section{The Double Submit Error}
 @declare-exporting[#:use-sources (web-server/scribblings/tutorial/examples/iteration-7
                                   web-server/servlet)]
 
@@ -735,12 +735,12 @@ below?
 
 @external-file["use-redirect.rkt"]
 
-So the double-submit bug is easy to prevent: whenever you have
+So the double-submit error is easy to prevent: whenever you have
 handlers that mutate the state of the system, use @racket[redirect/get] when
 sending back your response.
 
 @bold{Exercise.}
-Use @racket[redirect/get] to fix the double-submit bug in the blog
+Use @racket[redirect/get] to fix the double-submit error in the blog
 application.
 
 With these minor fixes, our blog application now looks like this:

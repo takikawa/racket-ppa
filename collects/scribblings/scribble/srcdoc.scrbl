@@ -63,7 +63,7 @@ to get core Racket forms and basic Scribble functions to use in
 documentation expressions.}
 
 @defform*/subs[#:literals (-> ->* case->)
-               [(proc-doc/names id contract arg-specs desc-expr)]
+               [(proc-doc/names id contract arg-specs (desc-expr ...))]
                ([arg-specs ((arg-id ...) ((arg-id default-expr) ...))
                            (arg-id ...)]
                 [contract (-> arg ... result)
@@ -87,7 +87,7 @@ pairs specify the names and default values of the optional arguments.
 If the contract supports optional arguments, then the first
 @racket[arg-spec]s form must be used, otherwise the second must be used.
 
-The @racket[desc-expr] is a documentation-time expression that
+The @racket[desc-expr] is a sequence of documentation-time expressions that
 produces prose to describe the exported binding---that is, the last
 part of the generated @racket[defproc], so the description can refer
 to the @racket[arg-id]s using @racket[racket].
@@ -101,23 +101,29 @@ can be referenced in documentation prose using the @racket[racket]
 form.}
 
 @defform/subs[#:literals (-> ->i ->d values)
-              (proc-doc id contract desc-expr)
+              (proc-doc id contract maybe-defs (desc-expr ...))
               ([contract (-> result)
-                         (->i (arg ...) () (values ress ...))
-                         (->i (arg ...) () #:pre (pre-id ...) condition (values ress ...))
-                         (->i (arg ...) () res)
-                         (->i (arg ...) () #:pre (pre-id ...) condition [name res])
-                         (->i (arg ...) () #:rest rest res)
+                         (->i (arg ...) (opt ...) maybe-pre [id res])
+                         (->i (arg ...) (opt ...) maybe-pre (values [id res] ...))
+                         (->i (arg ...) (opt ...) #:rest rest [id result-expr])
 
-                         (->d (arg ...) () (values [id result] ...))
-                         (->d (arg ...) () #:pre-cond expr (values [id result] ...))
-                         (->d (arg ...) () [id result])
-                         (->d (arg ...) () #:pre-cond expr [id result])
-                         (->d (arg ...) () #:rest id rest [id result])])]{
+                         (->d (arg ...) () maybe-precond (values [id result] ...))
+                         (->d (arg ...) () maybe-precond [id result])
+                         (->d (arg ...) () #:rest id rest [id result])]
+               [maybe-pre (code:line)
+                          (code:line #:pre (pre-id ...) condition)]
+               [maybe-defs (code:line)
+                           (default-expr default-expr ...)])]{
 
 Like @racket[proc-doc], but supporting contract forms that embed
-argument names. Only a subset of @racket[->i] and @racket[->d] forms are
-currently supported.}
+argument identifiers. Only a subset of @racket[->i] and @racket[->d] forms are
+currently supported.
+
+If the sequence of optional arguments, @racket[(opt ...)] is empty then
+the @racket[maybe-arg-desc] must be not be present. If it is non-empty,
+then it must have as many default expressions are there are optional
+arguments.
+}
 
 
 @defform[(thing-doc id contract-expr dec-expr)]{
@@ -126,9 +132,20 @@ Like @racket[proc-doc], but for an export of an arbitrary value.}
 
 
 @defform[#:literals (parameter/c)
-         (parameter-doc id (parameter/c contract-expr) arg-id desc-expr)]{
+         (parameter-doc id (parameter/c contract-expr) arg-id (desc-expr ...))]{
 
 Like @racket[proc-doc], but for exporting a parameter.}
+
+
+@defform[(begin-for-doc form ...)]{
+
+Like to @racket[begin-for-syntax], but for documentation time instead
+of expansion time. The @racket[form]s can refer to binding
+@racket[require]d with @racket[for-doc].
+
+For example, a definition in @racket[begin-for-doc]
+can be referenced by a @racket[_desc-expr] in
+@racket[proc-doc/names].}
 
 
 @defform[(generate-delayed-documents)]{

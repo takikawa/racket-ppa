@@ -59,12 +59,9 @@
      (with-syntax ([(ctc-id ...) (generate-temporaries (syntax (ctc ...)))]
                    [(pred-id ...) (generate-temporaries (syntax (ctc ...)))])
        (syntax 
-        (let* ([pred (λ (x) (error 'flat-rec-contract "applied too soon"))]
+        (let* ([pred flat-rec-contract/init]
                [name (flat-contract (let ([name (λ (x) (pred x))]) name))])
-          (let ([ctc-id (coerce-contract 'flat-rec-contract ctc)] ...)
-            (unless (flat-contract? ctc-id)
-              (error 'flat-rec-contract "expected flat contracts as arguments, got ~e" ctc-id))
-            ...
+          (let ([ctc-id (coerce-flat-contract 'flat-rec-contract ctc)] ...)
             (set! pred
                   (let ([pred-id (flat-contract-predicate ctc-id)] ...)
                     (λ (x)
@@ -72,6 +69,8 @@
             name))))]
     [(_ name ctc ...)
      (raise-syntax-error 'flat-rec-contract "expected first argument to be an identifier" stx (syntax name))]))
+
+(define (flat-rec-contract/init x) (error 'flat-rec-contract "applied too soon"))
 
 (define-syntax (flat-murec-contract stx)
   (syntax-case stx  ()
@@ -83,14 +82,9 @@
                    [((pred-arm-id ...) ...) (map generate-temporaries
                                                  (syntax->list (syntax ((ctc ...) ...))))])
        (syntax 
-        (let* ([pred-id (λ (x) (error 'flat-murec-contract "applied too soon"))] ...
+        (let* ([pred-id flat-murec-contract/init] ...
                [name (flat-contract (let ([name (λ (x) (pred-id x))]) name))] ...)
-          (let-values ([(ctc-id ...) (values (coerce-contract 'flat-rec-contract ctc) ...)] ...)
-            (begin
-              (void)
-              (unless (flat-contract? ctc-id)
-                (error 'flat-rec-contract "expected flat contracts as arguments, got ~e" ctc-id))
-              ...) ...
+          (let-values ([(ctc-id ...) (values (coerce-flat-contract 'flat-rec-contract ctc) ...)] ...)
             (set! pred-id
                   (let ([pred-arm-id (flat-contract-predicate ctc-id)] ...)
                     (λ (x)
@@ -105,6 +99,8 @@
                (syntax->list (syntax (name ...))))]
     [(_ ([name ctc ...] ...))
      (raise-syntax-error 'flat-rec-contract "expected at least one body expression" stx)]))
+
+(define (flat-murec-contract/init x) (error 'flat-murec-contract "applied too soon"))
 
 (define/subexpression-pos-prop or/c
   (case-lambda 
@@ -421,20 +417,23 @@
 (define false/c #f)
 
 (define/final-prop (string-len/c n)
-  (unless (number? n)
-    (error 'string-len/c "expected a number as argument, got ~e" n))
+  (unless (real? n)
+    (raise-argument-error 'string-len/c "real?" n))
   (flat-named-contract 
    `(string-len/c ,n)
    (λ (x)
      (and (string? x)
           ((string-length x) . < . n)))))
 
-(define/final-prop (symbols . ss)
-  (unless ((length ss) . >= . 1)
-    (error 'symbols "expected at least one argument"))
-  (unless (andmap symbol? ss)
-    (error 'symbols "expected symbols as arguments, given: ~a"
-           (apply string-append (map (λ (x) (format "~e " x)) ss))))
+(define/final-prop (symbols s1 . s2s)
+  (define ss (cons s1 s2s))
+  (for ([arg (in-list ss)]
+        [i (in-naturals)])
+    (unless (symbol? arg)
+      (raise-argument-error 'symbols
+                            "symbol?"
+                            i
+                            ss)))
   (apply or/c ss))
 
 (define atomic-value? 
@@ -445,54 +444,22 @@
           (void? x) (eq? x undefined)))))
 
 (define/final-prop (one-of/c . elems)
-  (unless (andmap atomic-value? elems)
-    (error 'one-of/c "expected chars, symbols, booleans, null, keywords, numbers, void, or undefined, got ~e"
-           elems))
-  (if (or (member (void) elems)
-          (member (letrec ([x x]) x) elems))
-      (make-one-of/c elems)
-      (apply or/c elems)))
-
-(define (one-of-pc x)
-  (cond
-    [(symbol? x)
-     `',x]
-    [(null? x)
-     ''()]
-    [(void? x)
-     '(void)]
-    [(or (char? x) 
-         (boolean? x)
-         (keyword? x)
-         (number? x))
-     x]
-    [(eq? x (letrec ([x x]) x))
-     '(letrec ([x x]) x)]
-    [else (error 'one-of-pc "undef ~s" x)]))
-
-
-(define-struct one-of/c (elems)
-  #:omit-define-syntaxes
-  #:property prop:flat-contract
-  (build-flat-contract-property
-   #:name
-   (λ (ctc) 
-      (let ([elems (one-of/c-elems ctc)])
-        `(one-of/c ,@(map one-of-pc elems))))
-
-   #:stronger
-   (λ (this that)
-      (and (one-of/c? that)
-           (let ([this-elems (one-of/c-elems this)]
-                 [that-elems (one-of/c-elems that)])
-             (and 
-              (andmap (λ (this-elem) (memv this-elem that-elems))
-                      this-elems)
-              #t))))
-   #:first-order 
-   (λ (ctc) 
-      (let ([elems (one-of/c-elems ctc)])
-        (λ (x) (memv x elems))))))
+  (for ([arg (in-list elems)]
+        [i (in-naturals)])
+    (unless (atomic-value? arg)
+      (raise-argument-error 'one-of/c
+                            "char, symbol, boolean, null, keyword, number, void, or undefined"
+                            i
+                            elems)))
+  (define (undefined? x) (eq? x (letrec ([x x]) x)))
+  (define or/c-args
+    (map (λ (x)
+           (cond
+             [(void? x) void?]
+             [(undefined? x) undefined?]
+             [else x]))
+         elems))
+  (apply or/c or/c-args))
 
 (define-struct between/c (low high)
   #:omit-define-syntaxes
@@ -537,13 +504,9 @@
            (+ (random (- upper lower))
               lower))))))
 
-(define-syntax (check-unary-between/c stx)
-  (syntax-case stx ()
-    [(_ 'sym x-exp)
-     (identifier? #'sym)
-     #'(let ([x x-exp])
-         (unless (real? x)
-           (error 'sym "expected a real number, got ~e" x)))]))
+(define (check-unary-between/c sym x)
+  (unless (real? x)
+    (raise-argument-error sym "real?" x)))
 
 (define/final-prop (=/c x) 
   (check-unary-between/c '=/c x)
@@ -555,14 +518,10 @@
   (check-unary-between/c '>=/c x)
   (make-between/c x +inf.0))
 (define (check-between/c x y)
-  (unless (real? x)
-    (error 'between/c "expected a real number as first argument, got ~e, other arg ~e" x y))
-  (unless (real? y)
-    (error 'between/c "expected a real number as second argument, got ~e, other arg ~e" y x)))
+  (check-two-args 'between/c x y real? real?))
 (define/final-prop (between/c x y)
   (check-between/c x y)
   (make-between/c x y))
-
 
 (define (</c x)
   (flat-named-contract
@@ -590,23 +549,27 @@
          (+ (random (- max-n lower))
             lower)))))
 
+(define (check-two-args name arg1 arg2 pred1? pred2?)
+  (unless (pred1? arg1)
+    (raise-argument-error name
+                          (format "~a" (object-name pred1?))
+                          0
+                          (list arg1 arg2)))
+  (unless (pred2? arg2)
+    (raise-argument-error name
+                          (format "~a" (object-name pred2?))
+                          1
+                          (list arg1 arg2))))
 (define/final-prop (integer-in start end)
-  (unless (and (integer? start)
-               (exact? start)
-               (integer? end)
-               (exact? end))
-    (error 'integer-in "expected two exact integers as arguments, got ~e and ~e" start end))
+  (check-two-args 'integer-in start end exact-integer? exact-integer?)
   (flat-named-contract 
    `(integer-in ,start ,end)
    (λ (x)
-     (and (integer? x)
-          (exact? x)
+     (and (exact-integer? x)
           (<= start x end)))))
 
 (define/final-prop (real-in start end)
-  (unless (and (real? start)
-               (real? end))
-    (error 'real-in "expected two real numbers as arguments, got ~e and ~e" start end))
+  (check-two-args 'real start end real? real?)
   (between/c start end))
 
 (define/final-prop (not/c f)
@@ -631,7 +594,7 @@
 
 (define-syntax (*-listof stx)
   (syntax-case stx ()
-    [(_ predicate? type-name name generate)
+    [(_ predicate? name generate)
      (identifier? (syntax predicate?))
      (syntax
       (λ (input)
@@ -647,8 +610,8 @@
               (λ (val)
                 (unless (predicate? val)
                   (raise-blame-error blame val
-                                     '(expected: "~s" given "~e")
-                                     'type-name 
+                                     '(expected: "~s" given: "~e")
+                                     'predicate? 
                                      val))
                 (check-all p-app val))))
           (cond
@@ -670,11 +633,11 @@
               #:first-order fo-check
               #:projection (ho-check (λ (p v) (map p v))))]))))]))
 
-(define listof-func (*-listof list? list listof listof-generate))
+(define listof-func (*-listof list? listof listof-generate))
 (define/subexpression-pos-prop (listof x) (listof-func x))
 
 (define (non-empty-list? x) (and (pair? x) (list? (cdr x))))
-(define non-empty-listof-func (*-listof non-empty-list? non-empty-list non-empty-listof (λ (ctc) (make-generate-ctc-fail))))
+(define non-empty-listof-func (*-listof non-empty-list? non-empty-listof (λ (ctc) (make-generate-ctc-fail))))
 (define/subexpression-pos-prop (non-empty-listof a) (non-empty-listof-func a))
 
 (define cons/c-main-function
@@ -814,7 +777,7 @@
    #:projection list/c-chaperone/other-projection))
 
 (define/subexpression-pos-prop (syntax/c ctc-in)
-  (let ([ctc (coerce-contract 'syntax/c ctc-in)])
+  (let ([ctc (coerce-flat-contract 'syntax/c ctc-in)])
     (flat-named-contract
      (build-compound-type-name 'syntax/c ctc)
      (let ([pred (flat-contract-predicate ctc)])
@@ -850,20 +813,33 @@
                                   (values p-app promise))))))))
        #:first-order promise?))))
 
-(define/subexpression-pos-prop (parameter/c x)
-  (make-parameter/c (coerce-contract 'parameter/c x)))
+;; (parameter/c in/out-ctc)
+;; (parameter/c in-ctc out-ctc)
+(define/subexpression-pos-prop parameter/c
+  (case-lambda
+    [(in-ctc)
+     (define ctc (coerce-contract 'parameter/c in-ctc))
+     (make-parameter/c ctc ctc #f)]
+    [(in-ctc out-ctc)
+     (make-parameter/c (coerce-contract 'parameter/c in-ctc)
+                       (coerce-contract 'parameter/c out-ctc)
+                       #t)]))
 
-(define-struct parameter/c (ctc)
+;; in - negative contract
+;; out - positive contract
+;; both-supplied? - for backwards compat printing
+(define-struct parameter/c (in out both-supplied?)
   #:omit-define-syntaxes
   #:property prop:contract
   (build-contract-property
    #:projection
    (λ (ctc)
-      (let ([c-proc (contract-projection (parameter/c-ctc ctc))])
+      (let* ([in-proc (contract-projection (parameter/c-in ctc))]
+             [out-proc (contract-projection (parameter/c-out ctc))])
         (λ (blame)
           (define blame/c (blame-add-context blame "the parameter of"))
-          (define partial-neg-contract (c-proc (blame-swap blame/c)))
-          (define partial-pos-contract (c-proc blame/c))
+          (define partial-neg-contract (in-proc (blame-swap blame/c)))
+          (define partial-pos-contract (out-proc blame/c))
           (λ (val)
             (cond
               [(parameter? val)
@@ -875,23 +851,25 @@
                (raise-blame-error blame val '(expected "a parameter"))])))))
 
    #:name
-   (λ (ctc) (build-compound-type-name 'parameter/c (parameter/c-ctc ctc)))
+   (λ (ctc) (apply build-compound-type-name
+                   `(parameter/c ,(parameter/c-in ctc)
+                                 ,@(if (parameter/c-both-supplied? ctc)
+                                       (list (parameter/c-out ctc))
+                                       (list)))))
    #:first-order
    (λ (ctc)
-      (let ([tst (contract-first-order (parameter/c-ctc ctc))])
+      (let ([tst (contract-first-order (parameter/c-out ctc))])
         (λ (x)
            (and (parameter? x)
                 (tst (x))))))
 
    #:stronger
    (λ (this that)
-      ;; must be invariant (because the library doesn't currently split out pos/neg contracts
-      ;; which could be tested individually ....)
       (and (parameter/c? that)
-           (contract-stronger? (parameter/c-ctc this) 
-                               (parameter/c-ctc that))
-           (contract-stronger? (parameter/c-ctc that) 
-                               (parameter/c-ctc this))))))
+           (and (contract-stronger? (parameter/c-out this)
+                                    (parameter/c-out that))
+                (contract-stronger? (parameter/c-in that)
+                                    (parameter/c-in this)))))))
 
 (define-struct procedure-arity-includes/c (n)
   #:omit-define-syntaxes
@@ -1151,9 +1129,11 @@
       [(flat-contract? predicate)
        (make-predicate-contract name (flat-contract-predicate predicate) generate)]
       [else
-       (error 'flat-named-contract 
-              "expected a flat contract or procedure of arity 1 as second argument, got ~e" 
-              predicate)])))
+       (raise-argument-error 'flat-named-contract
+                             (format "~s" `(or/c flat-contract?
+                                                 (and/c procedure?
+                                                        (λ (x) (procedure-arity-include? x 1)))))
+                             predicate)])))
 
 (define printable/c
   (flat-named-contract

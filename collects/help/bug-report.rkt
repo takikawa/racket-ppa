@@ -24,7 +24,10 @@
 (define (get-captcha-text)
   (let* ([s (port->string (get-pure-port captcha-text-url))]
          [s (regexp-replace #px"^\\s+" s "")]
-         [s (regexp-replace #px"\\s+$" s "")])
+         [s (regexp-replace #px"\\s+$" s "")]
+         [s (if (<= (string-length s) 200)
+                s
+                (substring s 0 200))])
     (and ((string-length s) . > . 0) s)))
 
 (preferences:set-default 'drracket:email "" string? #:aliases '(drscheme:email))
@@ -201,6 +204,7 @@
     (set! cancel-kill-cust (make-custodian))
     (define response-chan (make-channel))
     (define exn-chan (make-channel))
+    (define starter-query (get-query))
     (define worker-thread
       (parameterize ([current-custodian cancel-kill-cust]
                      [current-alist-separator-mode 'amp])
@@ -220,18 +224,18 @@
                (and captcha-question
                     (get-text-from-user
                      "Are you human?" ; FIXME: use string-constant
-                     captcha-question bug-frame)))
+                     captcha-question 
+                     bug-frame)))
              (define post-data
-               (let* ([q (get-query)]
-                      [q (if captcha-answer
+               (let* ([q (if captcha-answer
                              `([captcha . ,captcha-answer]
                                ;; send back the question too: if things get really
                                ;; bad, then the server can make up random captchas
                                ;; and check the reply against the challenge that
                                ;; was used
                                [captcha-question . ,captcha-question]
-                               ,@q)
-                             q)])
+                               ,@starter-query)
+                             starter-query)])
                  (string->bytes/utf-8 (alist->form-urlencoded q))))
 
              (call/input-url
@@ -266,7 +270,13 @@
         [(string? to-render)
          (let ([str (string-append "<pre>\n\nERROR:\n"to-render"\n</pre>\n")])
            (render-error (open-input-string str)))]
-        [(exn? to-render) (render-error (exn-message to-render))]
+        [(exn? to-render)
+         (define sp (open-output-string))
+         (fprintf sp "~a\n" (exn-message to-render))
+         (for ([x (in-list (continuation-mark-set->context
+                            (exn-continuation-marks to-render)))])
+           (fprintf sp "  ~s\n" x))
+         (render-error (get-output-string sp))]
         [(or (input-port? to-render) (not to-render))
          (queue-callback
           (λ ()

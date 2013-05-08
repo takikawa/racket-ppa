@@ -7,11 +7,14 @@
          racket/pretty ;; attached into new namespace via anchor
          racket/sandbox racket/promise racket/port
          racket/gui/dynamic
-         (for-syntax racket/base)
+         (for-syntax racket/base syntax/srcloc unstable/struct)
+         racket/stxparam
+         racket/splicing
          scribble/text/wrap)
 
 (provide interaction
          interaction0
+         interaction/no-prompt
          interaction-eval
          interaction-eval-show
          racketblock+eval (rename-out [racketblock+eval schemeblock+eval])
@@ -30,7 +33,9 @@
          make-eval-factory
          close-eval
 
-         scribble-eval-handler)
+         scribble-exn->string
+         scribble-eval-handler
+         with-eval-preserve-source-locations)
 
 (define scribble-eval-handler
   (make-parameter (lambda (ev c? x) (ev x))))
@@ -242,9 +247,7 @@
   (define (do-ev s)
     (with-handlers ([(lambda (x) (not (exn:break? x)))
                      (lambda (e)
-                       (cons (if (exn? e)
-                               (exn-message e)
-                               (format "uncaught exception: ~s" e))
+                       (cons ((scribble-exn->string) e)
                              (get-outputs)))])
       (cons (render-value (do-plain-eval ev s #t)) (get-outputs))))
   (define (do-ev/expect s expect)
@@ -263,6 +266,13 @@
           (if (nothing-to-eval? s)
               (list (list (void)) "" "")
               (do-ev/expect s expect))))))
+
+(define scribble-exn->string
+  (make-parameter
+   (λ (e)
+     (if (exn? e)
+         (exn-message e)
+         (format "uncaught exception: ~s" e)))))
 
 ;; Since we evaluate everything in an interaction before we typeset,
 ;;  copy each value to avoid side-effects.
@@ -332,13 +342,13 @@
       (namespace-attach-module ns 'racket/pretty)
       (current-print (dynamic-require 'racket/pretty 'pretty-print-handler)))))
 
-(define (make-base-eval #:pretty-print? [pretty-print? #t])
+(define (make-base-eval #:lang [lang '(begin)] #:pretty-print? [pretty-print? #t] . ips)
   (call-with-trusted-sandbox-configuration
    (lambda ()
      (parameterize ([sandbox-output 'string]
                     [sandbox-error-output 'string]
                     [sandbox-propagate-breaks #f])
-       (let ([e (make-evaluator '(begin))])
+       (let ([e (apply make-evaluator lang ips)])
          (let ([ns (namespace-anchor->namespace anchor)])
            (call-in-sandbox-context
             e
@@ -347,7 +357,8 @@
          e)))))
 
 (define (make-base-eval-factory mod-paths
-                                #:pretty-print? [pretty-print? #t])
+                                #:lang [lang '(begin)]
+                                #:pretty-print? [pretty-print? #t] . ips)
   (let ([ns (delay (let ([ns 
                           ;; This namespace-creation choice needs to be consistent
                           ;; with the sandbox (i.e., with `make-base-eval')
@@ -360,7 +371,7 @@
                        (when pretty-print? (dynamic-require 'racket/pretty #f)))
                      ns))])
     (lambda ()
-      (let ([ev (make-base-eval #:pretty-print? #f)]
+      (let ([ev (apply make-base-eval #:lang lang #:pretty-print? #f ips)]
             [ns (force ns)])
         (when pretty-print? (install-pretty-printer! ev ns))
         (call-in-sandbox-context
@@ -371,8 +382,9 @@
         ev))))
 
 (define (make-eval-factory mod-paths
-                           #:pretty-print? [pretty-print? #t])
-  (let ([base-factory (make-base-eval-factory mod-paths #:pretty-print? pretty-print?)])
+                           #:lang [lang '(begin)]
+                           #:pretty-print? [pretty-print? #t] . ips)
+  (let ([base-factory (apply make-base-eval-factory mod-paths #:lang lang #:pretty-print? pretty-print? ips)])
     (lambda ()
       (let ([ev (base-factory)])
         (call-in-sandbox-context
@@ -405,6 +417,15 @@
                    [else s]))))
         list)))
 
+(define-syntax-parameter quote-expr-preserve-source? #f)
+
+(define-syntax (with-eval-preserve-source-locations stx)
+  (syntax-case stx ()
+    [(with-eval-preserve-source-locations e ...)
+     (syntax/loc stx
+       (splicing-syntax-parameterize ([quote-expr-preserve-source? #t])
+         e ...))]))
+
 ;; Quote an expression to be evaluated or wrap as escaped:
 (define-syntax quote-expr
   (syntax-rules (eval:alts eval:result eval:results)
@@ -415,13 +436,63 @@
     [(_ (eval:results es)) (make-eval-results es "" "")]
     [(_ (eval:results es out)) (make-eval-results es out "")]
     [(_ (eval:results es out err)) (make-eval-results es out err)]
+    [(_ e) (base-quote-expr e)]))
+
+(define orig-stx (read-syntax 'orig (open-input-string "()")))
+
+(define-syntax (base-quote-expr stx)
+  (syntax-case stx ()
     [(_ e)
-     ;; Using quote means that sandbox evaluation works on
-     ;; sexprs; to get it to work on syntaxes, use
-     ;;   (strip-context (quote-syntax e)))
-     ;; while importing
-     ;;   (require syntax/strip-context)
-     'e]))
+     (cond [(syntax-parameter-value #'quote-expr-preserve-source?)
+            ;; Preserve source; produce an expression resulting in a
+            ;; syntax object with no lexical context (like strip-context)
+            ;; but with (quotable) source locations.
+            ;; Also preserve syntax-original?, since that seems important
+            ;; to some syntax-based code (eg redex term->pict).
+            (define (get-source-location e)
+              (let* ([src (build-source-location-list e)]
+                     [old-source (source-location-source src)]
+                     [new-source
+                      (cond [(path? old-source) ;; not quotable/writable
+                             ;;(path->string old-source) ;; don't leak build paths
+                             'eval]
+                            [(or (string? old-source)
+                                 (symbol? old-source))
+                             ;; Okay? Or should this be replaced also?
+                             old-source]
+                            [else #f])])
+                (update-source-location src #:source new-source)))
+            (let loop ([e #'e])
+              (cond [(syntax? e)
+                     (let ([src (get-source-location e)]
+                           [original? (syntax-original? (syntax-local-introduce e))])
+                       #`(syntax-property
+                          (datum->syntax #f
+                                         #,(loop (syntax-e e))
+                                         (quote #,src)
+                                         #,(if original? #'orig-stx #'#f))
+                          'paren-shape
+                          (quote #,(syntax-property e 'paren-shape))))]
+                    [(pair? e)
+                     #`(cons #,(loop (car e)) #,(loop (cdr e)))]
+                    [(vector? e)
+                     #`(list->vector #,(loop (vector->list e)))]
+                    [(box? e)
+                     #`(box #,(loop (unbox e)))]
+                    [(prefab-struct-key e)
+                     => (lambda (key)
+                          #`(apply make-prefab-struct
+                                   (quote #,key)
+                                   #,(loop (struct->list e))))]
+                    [else
+                     #`(quote #,e)]))]
+           [else
+            ;; Using quote means that sandbox evaluation works on
+            ;; sexprs; to get it to work on syntaxes, use
+            ;;   (strip-context (quote-syntax e)))
+            ;; while importing
+            ;;   (require syntax/strip-context)
+            #'(quote e)])]))
 
 (define (do-interaction-eval ev e)
   (let-values ([(e expect) (extract-to-evaluate e)])
@@ -453,6 +524,12 @@
     [(_ #:escape id (code:comment . rest)) (racketblock0 #:escape id (code:comment . rest))]
     [(_ #:escape id (eval:alts a b)) (racketinput* #:escape id a)]
     [(_ #:escape id e) (racketinput0 #:escape id e)]))
+
+(define-syntax racketblock*
+  (syntax-rules (eval:alts code:comment)
+    [(_ #:escape id (code:comment . rest)) (racketblock0 #:escape id (code:comment . rest))]
+    [(_ #:escape id (eval:alts a b)) (racketblock #:escape id a)]
+    [(_ #:escape id e) (racketblock0 #:escape id e)]))
 
 (define-code racketblock0+line (to-paragraph/prefix "" "" (list " ")))
 
@@ -499,6 +576,12 @@
 (define-syntax (interaction stx)
   (syntax-case stx ()
     [(H e ...) (syntax/loc stx (code-inset (-interaction H e ...)))]))
+
+(define-syntax (interaction/no-prompt stx)
+  (syntax-case stx ()
+    [(H e ...)
+     (syntax/loc stx
+       (code-inset (titled-interaction who #f #f racketblock* e ...)))]))
 
 (define-syntax (interaction0 stx)
   (syntax-case stx ()

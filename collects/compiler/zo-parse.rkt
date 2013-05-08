@@ -107,6 +107,7 @@
                                     (case n
                                       [(2) 'flonum]
                                       [(3) 'fixnum]
+                                      [(4) 'extflonum]
                                       [else (error "invaid type flag")]))]
                      [(arg-types) (let ([num-params ((if rest? sub1 values) num-params)])
                                     (for/list ([i (in-range num-params)]) 
@@ -250,7 +251,7 @@
 (define (read-module v)
   (match v
     [`(,submod-path 
-       ,name ,srcname ,self-modidx 
+       ,name ,srcname ,self-modidx ,cross-phase?
        ,pre-submods ,post-submods
        ,lang-info ,functional? ,et-functional?
        ,rename ,max-let-depth ,dummy
@@ -336,6 +337,7 @@
                     dummy
                     lang-info
                     rename
+                    (if cross-phase? '(cross-phase) '())
                     (map read-module pre-submods)
                     (map read-module post-submods))]))]))
 (define (read-module-wrap v)
@@ -373,8 +375,8 @@
     [(27) 'inline-variant-type]
     [(35) 'variable-type]
     [(36) 'module-variable-type]
-    [(113) 'resolve-prefix-type]
-    [(162) 'free-id-info-type]
+    [(114) 'resolve-prefix-type]
+    [(164) 'free-id-info-type]
     [else (error 'int->type "unknown type: ~e" i)]))
 
 (define type-readers
@@ -554,6 +556,7 @@
 
 (define SCHEME_LOCAL_TYPE_FLONUM 1)
 (define SCHEME_LOCAL_TYPE_FIXNUM 2)
+(define SCHEME_LOCAL_TYPE_EXTFLONUM 3)
 
 (define (make-local unbox? pos flags)
   (define SCHEME_LOCAL_CLEAR_ON_READ 1)
@@ -565,6 +568,7 @@
                  (let ([t (- flags SCHEME_LOCAL_TYPE_OFFSET)])
                    (cond
                     [(= t SCHEME_LOCAL_TYPE_FLONUM) 'flonum]
+                    [(= t SCHEME_LOCAL_TYPE_EXTFLONUM) 'extflonum]
                     [(= t SCHEME_LOCAL_TYPE_FIXNUM) 'fixnum]
                     [else #f]))))
 
@@ -856,6 +860,7 @@
                             (case (read-compact-number cp)
                               [(1) 'flonum]
                               [(2) 'fixnum]
+                              [(3) 'extflonum]
                               [else #f]))
                        (eq? cpt-tag 'let-one-unused))]
         [(branch)

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -2036,6 +2036,7 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
       && (!(scheme_is_kernel_modname(modname) 
             || scheme_is_unsafe_modname(modname)
             || scheme_is_flfxnum_modname(modname)
+            || scheme_is_extfl_modname(modname)
             || scheme_is_futures_modname(modname))
           || (flags & SCHEME_REFERENCING))) {
     /* Create a module variable reference, so that idx is preserved: */
@@ -2105,6 +2106,16 @@ Scheme_Object *scheme_extract_flfxnum(Scheme_Object *o)
   Scheme_Env *home;
   home = scheme_get_bucket_home((Scheme_Bucket *)o);
   if (home && home->module && scheme_is_flfxnum_modname(home->module->modname))
+    return (Scheme_Object *)((Scheme_Bucket *)o)->val;
+  else
+    return NULL;
+}
+
+Scheme_Object *scheme_extract_extfl(Scheme_Object *o)
+{
+  Scheme_Env *home;
+  home = scheme_get_bucket_home((Scheme_Bucket *)o);
+  if (home && home->module && scheme_is_extfl_modname(home->module->modname))
     return (Scheme_Object *)((Scheme_Bucket *)o)->val;
   else
     return NULL;
@@ -2355,6 +2366,10 @@ Scheme_Object *scheme_local_lift_require(Scheme_Object *form, Scheme_Object *ori
   form = scheme_add_remove_mark(form, local_mark);
 
   SCHEME_EXPAND_OBSERVE_LIFT_REQUIRE(scheme_get_expand_observe(), req_form, orig_form, form);
+
+  /* In a top-level context, may need to force compile-time evaluation: */
+  if (!env->genv->module)
+    scheme_prepare_compile_env(env->genv);
 
   return form;
 }

@@ -67,7 +67,7 @@
                              (let ([new-vec (if (eq? i (unsafe-fXvector-length vec))
                                                 (grow-fXvector vec)
                                                 vec)])
-                               (unsafe-fXvector-set! new-vec i (let () last-body ...))
+                               (fXvector-set! new-vec i (let () last-body ...))
                                (values new-vec (unsafe-fx+ i 1))))])
                 (shrink-fXvector vec i))))]
          [(for*/fXvector #:length length-expr #:fill fill-expr (for-clause ...) body ...)
@@ -117,9 +117,9 @@
                        (fXvector-set! v i (let () last-body ...))
                        (add1 i)))
                     v)))))]
-      [(_ #:length length-expr (for-clause ...) body ...)
-       (for_/fXvector #'(fv #:length length-expr #:fill fXzero (for-clause ...) body ...) 
-                      orig-stx for_/fXvector-stx for_/fold/derived-stx wrap-all?)]))
+         [(_ #:length length-expr (for-clause ...) body ...)
+          (for_/fXvector #'(fv #:length length-expr #:fill fXzero (for-clause ...) body ...) 
+                         orig-stx for_/fXvector-stx for_/fold/derived-stx wrap-all?)]))
 
      (define-syntax (for/fXvector stx)
        (for_/fXvector stx stx #'for/fXvector #'for/fold/derived #f))

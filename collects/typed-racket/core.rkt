@@ -60,7 +60,8 @@
                   #,(parameterize ([print-multi-line-case-> #t])
                       (format "~a\n" (match type
                                        [(tc-result1: t f o) t]
-                                       [(tc-results: t) (cons 'Values t)])))))]
+                                       [(tc-results: t) (cons 'Values t)]
+                                       [(tc-any-results:) ManyUniv])))))]
     ;; given a function and input types, display the result type
     [(_ . ((~literal :query-type/args) op:expr arg-type:expr ...))
      (with-syntax ([(dummy-arg ...) (generate-temporaries #'(arg-type ...))])
@@ -94,13 +95,16 @@
      (tc-setup
       stx #'form 'top-level body2 void tc-toplevel-form before type
       (with-syntax*
-       ([optimized-body (car (maybe-optimize #`(#,body2)))])
+       ([(optimized-body . _) (maybe-optimize #`(#,body2))])
        (syntax-parse body2
          ;; any of these do not produce an expression to be printed
          [(head:invis-kw . _) (arm #'optimized-body)]
          [_ (let ([ty-str (match type
                             ;; don't print results of type void
                             [(tc-result1: (== -Void type-equal?))
+                             #f]
+                            ;; don't print results of unknown type
+                            [(tc-any-results:)
                              #f]
                             [(tc-result1: t f o)
                              ;; Don't display the whole types at the REPL. Some case-lambda types

@@ -3,8 +3,25 @@
 (require racket/tcp)
 (provide do-download)
 
+(define-values (http-proxy-host http-proxy-port)
+  (let ([http-proxy (getenv "http_proxy")])
+    (if http-proxy
+        (let ((matched (regexp-match #rx"^(?:[Hh][Tt][Tt][Pp]://)?([^:]+)(?::([0-9]+))?$" http-proxy)))
+          (if matched
+              (values (list-ref matched 1)
+                      (or (and (list-ref matched 2)
+                               (string->number (list-ref matched 2)))
+                          80))
+              (begin
+                (printf "Could not parse `http_proxy' value: ~e\n" http-proxy)
+                (values #f #f))))
+        (values #f #f))))
+(when http-proxy-host
+  (printf ">> Proxy detected: host ~a port ~a\n" http-proxy-host http-proxy-port))
+
+
 (define url-host "download.racket-lang.org")
-(define url-path "/libs/10/")
+(define url-path "/libs/13/")
 (define url-base (string-append "http://" url-host url-path))
 (define architecture #f) ;; set in `do-download'
 
@@ -13,7 +30,20 @@
          (parameterize ([current-directory path])
            (for-each delete-path (directory-list)))
          (delete-directory path)]
-        [(or (file-exists? path) (link-exists? path)) (delete-file path)]))
+        [(or (file-exists? path) (link-exists? path)) 
+         (if (eq? (system-type) 'windows)
+             ;; Use a rename-and-delete dance that lets us replace
+             ;; a DLL that might be in use by the Racket process
+             ;; that is running the download:
+             (let ([new-path (path-add-suffix path #".del")])
+               (when (file-exists? new-path)
+                 (delete-file new-path))
+               (rename-file-or-directory path new-path)
+               (with-handlers ([exn:fail:filesystem? 
+                                (lambda (exn)
+                                  (log-error (exn-message exn)))])
+                 (delete-file new-path)))
+             (delete-file path))]))
 
 (define (purify-port port)
   (let ([m (regexp-match-peek-positions #rx#"^HTTP/.*?(?:\r\n\r\n|\n\n|\r\r)"
@@ -35,10 +65,15 @@
 
 (define (download* file target)
   (define src (format "~a~a/~a" url-path architecture file))
-  (define-values [i o] (tcp-connect url-host 80))
-  (fprintf o "GET ~a HTTP/1.0\r\nHost: ~a\r\n\r\n" src url-host)
+  (define-values [i o] (if http-proxy-host
+                           (tcp-connect http-proxy-host http-proxy-port)
+                           (tcp-connect url-host 80)))
+  (if http-proxy-host
+      (fprintf o "GET ~a~a~a HTTP/1.0\r\nHost: ~a\r\n\r\n" "http://" url-host src url-host)
+      (fprintf o "GET ~a HTTP/1.0\r\nHost: ~a\r\n\r\n" src url-host))
   (flush-output o) (tcp-abandon-port o)
   (purify-port i)
+  
   (call-with-output-file target #:exists 'truncate/replace
     (λ (out) (copy-port i out))))
 
@@ -52,6 +87,7 @@
       (when (> n 3) (raise-user-error 'download "could not retrieve ~a" file))
       (when (zero? n) (printf " timeout,"))
       (loop (add1 n))))
+  (when (file-exists? file) (delete-path file))
   (rename-file-or-directory tmp file #t)
   (define sz (file-size file))
   (unless (= size sz)
@@ -78,6 +114,7 @@
 (define (do-download needed really-needed arch)
   (set! architecture arch)
   (printf ">> Downloading files from\n>>   ~a~a\n" url-base architecture)
+  (printf ">> (set the `http_proxy' environment variable if  a proxy is needed)\n")
   (printf ">> If you don't want automatic download, download each file\n")
   (printf ">> yourself from there to\n")
   (printf ">>   ~a\n" (path->complete-path (current-directory)))

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -51,6 +51,7 @@ READ_ONLY static Scheme_Object *kernel_symbol;
 READ_ONLY static Scheme_Env    *kernel_env;
 READ_ONLY static Scheme_Env    *unsafe_env;
 READ_ONLY static Scheme_Env    *flfxnum_env;
+READ_ONLY static Scheme_Env    *extfl_env;
 READ_ONLY static Scheme_Env    *futures_env;
 
 THREAD_LOCAL_DECL(static int builtin_ref_counter);
@@ -238,6 +239,10 @@ Scheme_Env *scheme_engine_instance_init()
   printf("#if 0\nengine_instance_init @ %" PRIdPTR "\n", scheme_get_process_milliseconds());
 #endif
 
+#if defined(MZ_LONG_DOUBLE_API_IS_EXTERNAL) || defined(LONG_DOUBLE_STRING_OP_API_IS_EXTERNAL)
+  scheme_load_long_double_dll();
+#endif
+
   scheme_starting_up = 1;
 
   scheme_init_finalization();
@@ -323,6 +328,10 @@ static void init_unsafe(Scheme_Env *env)
   scheme_init_unsafe_list(unsafe_env);
   scheme_init_unsafe_vector(unsafe_env);
 
+  scheme_init_extfl_unsafe_number(unsafe_env);
+  scheme_init_extfl_unsafe_numarith(unsafe_env);
+  scheme_init_extfl_unsafe_numcomp(unsafe_env);
+
   scheme_finish_primitive_module(unsafe_env);
   pt = unsafe_env->module->me->rt;
   scheme_populate_pt_ht(pt);
@@ -365,6 +374,34 @@ static void init_flfxnum(Scheme_Env *env)
 #endif
 }
 
+static void init_extfl(Scheme_Env *env)
+{
+  Scheme_Module_Phase_Exports *pt;
+  REGISTER_SO(extfl_env);
+
+  extfl_env = scheme_primitive_module(scheme_intern_symbol("#%extfl"), env);
+
+  scheme_init_extfl_number(extfl_env);
+  scheme_init_extfl_numarith(extfl_env);
+  scheme_init_extfl_numcomp(extfl_env);
+  scheme_init_extfl_numstr(extfl_env);
+
+  scheme_finish_primitive_module(extfl_env);
+  pt = extfl_env->module->me->rt;
+  scheme_populate_pt_ht(pt);
+  scheme_protect_primitive_provide(extfl_env, NULL);
+  extfl_env->attached = 1;
+
+#if USE_COMPILED_STARTUP
+  if (builtin_ref_counter != (EXPECTED_PRIM_COUNT + EXPECTED_UNSAFE_COUNT + EXPECTED_FLFXNUM_COUNT + EXPECTED_EXTFL_COUNT)) {
+    printf("extfl count %d doesn't match expected count %d\n",
+	   builtin_ref_counter - EXPECTED_PRIM_COUNT - EXPECTED_UNSAFE_COUNT - EXPECTED_FLFXNUM_COUNT, 
+           EXPECTED_EXTFL_COUNT);
+    abort();
+  }
+#endif
+}
+
 static void init_futures(Scheme_Env *env)
 {
   Scheme_Module_Phase_Exports *pt;
@@ -381,9 +418,9 @@ static void init_futures(Scheme_Env *env)
   futures_env->attached = 1;
 
 #if USE_COMPILED_STARTUP
-  if (builtin_ref_counter != (EXPECTED_PRIM_COUNT + EXPECTED_UNSAFE_COUNT + EXPECTED_FLFXNUM_COUNT + EXPECTED_FUTURES_COUNT)) {
+  if (builtin_ref_counter != (EXPECTED_PRIM_COUNT + EXPECTED_UNSAFE_COUNT + EXPECTED_FLFXNUM_COUNT + EXPECTED_EXTFL_COUNT + EXPECTED_FUTURES_COUNT)) {
     printf("Futures count %d doesn't match expected count %d\n",
-	   builtin_ref_counter - EXPECTED_PRIM_COUNT - EXPECTED_UNSAFE_COUNT - EXPECTED_FLFXNUM_COUNT, EXPECTED_FUTURES_COUNT);
+	   builtin_ref_counter - EXPECTED_PRIM_COUNT - EXPECTED_UNSAFE_COUNT - EXPECTED_FLFXNUM_COUNT - EXPECTED_EXTFL_COUNT, EXPECTED_FUTURES_COUNT);
     abort();
   }
 #endif
@@ -395,6 +432,10 @@ Scheme_Env *scheme_get_unsafe_env() {
 
 Scheme_Env *scheme_get_flfxnum_env() {
   return flfxnum_env;
+}
+
+Scheme_Env *scheme_get_extfl_env() {
+  return extfl_env;
 }
 
 Scheme_Env *scheme_get_futures_env() {
@@ -517,6 +558,10 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
   printf("done @ %" PRIdPTR "\n#endif\n", scheme_get_process_milliseconds());
 #endif
 
+#if defined(MZ_USE_PLACES)
+  REGISTER_SO(place_channel_links);
+#endif
+
   return env;
 }
 
@@ -566,6 +611,7 @@ void scheme_place_instance_destroy(int force)
   scheme_end_futures_per_place();
 #if defined(MZ_USE_PLACES)
   scheme_kill_green_thread_timer();
+  scheme_free_place_bi_channels();
 #endif
 #if defined(MZ_PRECISE_GC) && defined(MZ_USE_PLACES)
   GC_destruct_child_gc();
@@ -730,6 +776,7 @@ static void make_kernel_env(void)
 
   init_unsafe(env);
   init_flfxnum(env);
+  init_extfl(env);
   init_futures(env);
   
   scheme_init_print_global_constants();
@@ -1383,13 +1430,15 @@ Scheme_Object **scheme_make_builtin_references_table(void)
     t[j] = scheme_false;
   }
 
-  for (j = 0; j < 4; j++) {
+  for (j = 0; j < 5; j++) {
     if (!j)
       kenv = kernel_env;
     else if (j == 1)
       kenv = unsafe_env;
     else if (j == 2)
       kenv = flfxnum_env;
+    else if (j == 3)
+      kenv = extfl_env;
     else
       kenv = futures_env;
     
@@ -1418,13 +1467,15 @@ Scheme_Hash_Table *scheme_map_constants_to_globals(void)
 
   result = scheme_make_hash_table(SCHEME_hash_ptr);
       
-  for (j = 0; j < 4; j++) {
+  for (j = 0; j < 5; j++) {
     if (!j)
       kenv = kernel_env;
     else if (j == 1)
       kenv = unsafe_env;
     else if (j == 2)
       kenv = flfxnum_env;
+    else if (j == 3)
+      kenv = extfl_env;
     else
       kenv = futures_env;
     
@@ -1450,13 +1501,15 @@ const char *scheme_look_for_primitive(void *code)
   intptr_t i;
   int j;
 
-  for (j = 0; j < 4; j++) {
+  for (j = 0; j < 5; j++) {
     if (!j)
       kenv = kernel_env;
     else if (j == 1)
       kenv = unsafe_env;
     else if (j == 2)
       kenv = flfxnum_env;
+    else if (j == 3)
+      kenv = extfl_env;
     else
       kenv = futures_env;
     
@@ -1994,8 +2047,7 @@ do_local_exp_time_value(const char *name, int argc, Scheme_Object *argv[], int r
     
     v = SCHEME_PTR_VAL(v);
     if (scheme_is_rename_transformer(v)) {
-      sym = scheme_rename_transformer_id(v);
-      sym = scheme_transfer_srcloc(sym, v);
+      sym = scheme_transfer_srcloc(scheme_rename_transformer_id(v), sym);
       renamed = 1;
       menv = NULL;
       SCHEME_USE_FUEL(1);
@@ -2118,7 +2170,7 @@ local_make_intdef_context(int argc, Scheme_Object *argv[])
   
   if (argc && SCHEME_TRUEP(argv[0])) {
     if (!SAME_TYPE(scheme_intdef_context_type, SCHEME_TYPE(argv[0])))
-      scheme_wrong_contract("syntax-local-bind-syntaxes", "(or/c internal-definition-context? #f)", 0, argc, argv);
+      scheme_wrong_contract("syntax-local-make-definition-context", "(or/c internal-definition-context? #f)", 0, argc, argv);
     senv = (Scheme_Comp_Env *)((void **)SCHEME_PTR1_VAL(argv[0]))[0];
     if (!scheme_is_sub_env(senv, env)) {
       scheme_contract_error("syntax-local-make-definition-context",
@@ -2478,14 +2530,20 @@ static Scheme_Object *local_submodules(int argc, Scheme_Object *argv[])
     not_currently_transforming("syntax-local-submodules");
 
   if (env->genv->module) {
-    l = env->genv->module->pre_submodules;
+    l = env->genv->module->pre_submodule_names;
+    if (!l)
+      l = env->genv->module->pre_submodules;
     if (l) {
       while (!SCHEME_NULLP(l)) {
-        n = scheme_resolved_module_path_value(((Scheme_Module *)SCHEME_CAR(l))->modname);
-        while (SCHEME_PAIRP(SCHEME_CDR(n))) {
-          n = SCHEME_CDR(n);
+        n = SCHEME_CAR(l);
+        if (!SCHEME_SYMBOLP(n)) {
+          n = scheme_resolved_module_path_value(((Scheme_Module *)n)->modname);
+          while (SCHEME_PAIRP(SCHEME_CDR(n))) {
+            n = SCHEME_CDR(n);
+          }
+          n = SCHEME_CAR(n);
         }
-        r = scheme_make_pair(SCHEME_CAR(n), r);
+        r = scheme_make_pair(n, r);
         l = SCHEME_CDR(l);
       }
     }

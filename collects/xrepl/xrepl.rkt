@@ -79,7 +79,7 @@
     [_ (or (with-handlers ([exn:fail? (λ (_) #f)])
              (define r
                (resolved-module-path-name
-                ((current-module-name-resolver) mod #f #f)))
+                ((current-module-name-resolver) mod #f #f #f)))
              (if (not mode)
                (and r mod)
                ;; sanity check that path results exists
@@ -89,7 +89,7 @@
            ;; for symbols, try also 'mod
            (and (symbol? mod) (known-top `',mod)))]))
 (define (module->path module)
-  (resolved-module-path-name ((current-module-name-resolver) module #f #f)))
+  (resolved-module-path-name ((current-module-name-resolver) module #f #f #f)))
 
 (define (mpi->name mpi)
   (resolved-module-path-name (module-path-index-resolve mpi)))
@@ -110,15 +110,18 @@
              [best (if (< (string-length best) (string-length x)) best x)])
         best)))
   (define (get-prefix* path)
-    (define x (path->string path))
+    (define x (if (string? path) path (path->string path)))
     (define y (->relname path))
     (if (equal? x y)
       (format "~s" (choose-path x))
       (regexp-replace #rx"[.]rkt$" y "")))
-  (match mod
-    [(? symbol?) (symbol->string mod)]
-    [(list 'quote (? symbol? s)) (format "'~a" s)]
-    [_ (get-prefix* mod)]))
+  (let loop ([mod mod])
+    (match mod
+      [(? symbol?)                 (symbol->string mod)]
+      [(list 'quote (? symbol? s)) (format "'~a" (loop s))]
+      [(list 'file (? string? s))  (loop (string->path s))]
+      [(or (? path?) (? string?))  (get-prefix* mod)]
+      [_ (error 'xrepl "internal error; ~v" mod)])))
 
 (define (here-source) ; returns a path, a symbol, or #f (= not in a module)
   (variable-reference->module-source
@@ -749,14 +752,15 @@
     (for ([mod (in-list last-rr-modules)])
       (define resolved ((current-module-name-resolver) mod #f #f #f))
       (define path     (resolved-module-path-name resolved))
+      (define disp     (module-displayable-name mod))
       (if (hash-ref rr-modules resolved #f)
         ;; reload
-        (begin (printf "; reloading ~a\n" path)
+        (begin (printf "; reloading ~a\n" disp)
                (parameterize ([current-module-declare-name resolved])
                  (load/use-compiled path)))
         ;; require
         (begin (hash-set! rr-modules resolved #t)
-               (printf "; requiring ~a\n" path)
+               (printf "; requiring ~a\n" disp)
                ;; (namespace-require mod)
                (eval #`(require #,mod)))))))
 
@@ -1063,7 +1067,7 @@
       (current-namespace-name name)
       (current-namespace (car (hash-ref namespaces name)))))
   (define (syntax-error)
-    (cmderror "syntax error, see ,help switch-namespace"))
+    (cmderror "syntax error, see \",help ~s\"" (current-command)))
   (match (getarg 'sexpr 'list)
     [(list) (cmderror "what do you want to do?")]
     [(list '?)           (list-namespaces)]
@@ -1189,7 +1193,7 @@
         (λ ()
           (let loop ()
             (match (sync r)
-              [(vector l m v)
+              [(vector l m v name)
                (display (format "; [~a] ~a~a\n"
                                 l m (if v (format " ~.s" v) "")))
                (flush-output)])

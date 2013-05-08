@@ -4,6 +4,7 @@
 (module define-struct '#%kernel
   (#%require "small-scheme.rkt" "define.rkt" "../stxparam.rkt"
              (for-syntax '#%kernel "define.rkt"
+                         "procedure-alias.rkt"
                          "stx.rkt" "stxcase-scheme.rkt" "small-scheme.rkt" 
                          "stxloc.rkt" "qqstx.rkt"
                          "struct-info.rkt"))
@@ -57,12 +58,21 @@
       (datum->syntax orig (syntax-e orig) stx orig))
     (syntax-case stx ()
       [(self arg ...) (datum->syntax stx
-                                     (cons (syntax-property (transfer-srcloc orig #'self)
-                                                            'constructor-for
-                                                            (syntax-local-introduce #'self))
-                                           (syntax-e (syntax (arg ...))))
+                                     (cons 
+                                      (syntax-property
+                                       (syntax-property (transfer-srcloc orig #'self)
+                                                        'constructor-for
+                                                        (syntax-local-introduce #'self))
+                                       alias-of (syntax-local-introduce #'self))
+                                      (syntax-e (syntax (arg ...))))
                                      stx
                                      stx)]
+      [self (identifier? #'self)
+       (syntax-property
+        (syntax-property (transfer-srcloc orig #'self)
+                         'constructor-for
+                         (syntax-local-introduce #'self))
+        alias-of (syntax-local-introduce #'self))]
       [_ (transfer-srcloc orig stx)]))
   
   (define-values-for-syntax (make-self-ctor-struct-info)
@@ -309,7 +319,13 @@
             (raise-syntax-error #f
                                 "not a name for a generics group"
                                 gen:foo gen:foo))
-          (unless (identifier? gen:foo) (bad-generics))
+          (unless (and (identifier? gen:foo)
+                       ;; at the top-level, it's not possible to check
+                       ;; if this `gen:foo` is bound, so we give up on the
+                       ;; error message in that case
+                       (or (eq? (syntax-local-context) 'top-level)
+                           (identifier-binding gen:foo)))
+            (bad-generics))
           (define gen:foo-val (syntax-local-value gen:foo))
           (unless (and (list? gen:foo-val)
                        (>= (length gen:foo-val) 1))

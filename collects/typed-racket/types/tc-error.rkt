@@ -2,13 +2,20 @@
 
 (require "../utils/utils.rkt"
          (rep type-rep filter-rep object-rep rep-utils)
-         (utils tc-utils)         
+         (utils tc-utils)
+         "base-abbrev.rkt"
+         (prefix-in c: (contract-req))
          racket/match)
 
-(provide tc-error/expr lookup-type-fail lookup-fail)
+(provide/cond-contract
+ [tc-error/expr ((string?) (#:return c:any/c #:stx syntax?) #:rest (c:listof c:any/c)
+                 . c:->* . c:any/c)]
+
+ [lookup-fail (identifier? . c:-> . Type/c)]
+ [lookup-type-fail (identifier? . c:-> . Type/c)])
 
 (define (tc-error/expr msg
-                       #:return [return (make-Union null)]
+                       #:return [return -Bottom]
                        #:stx [stx (current-orig-stx)]
                        . rest)
   (apply tc-error/delayed #:stx stx msg rest)

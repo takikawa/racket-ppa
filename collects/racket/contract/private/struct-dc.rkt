@@ -393,14 +393,14 @@
   (case (dep-type subcontract)
     [(#:flat)
      (unless (flat-contract? dep-ctc)
-       (error 'struct/dc "expected a flat contract for the field: ~a, got ~s" 
-              (subcontract-field-name subcontract)
-              (contract-name dep-ctc)))]
+       (raise-argument-error 'struct/dc
+                             (format "a flat-contract? for field ~a" (subcontract-field-name subcontract))
+                             dep-ctc))]
     [(#:chaperone)
      (unless (chaperone-contract? dep-ctc)
-       (error 'struct/dc "expected a chaperone contract for the field: ~a, got ~s" 
-              (subcontract-field-name subcontract)
-              (contract-name dep-ctc)))]))
+       (raise-argument-error 'struct/dc
+                             (format "a chaperone-contract? for field ~a" (subcontract-field-name subcontract))
+                             dep-ctc))]))
 
 (define (struct/dc-stronger? this that)
   (and (base-struct/dc? that)
@@ -463,9 +463,9 @@
     (when (and (indep? subcontract)
                (not (mutable? subcontract)))
       (unless (chaperone-contract? (indep-ctc subcontract))
-        (error 'struct/dc "expected chaperone contracts, but field ~a has ~e"
-               (subcontract-field-name subcontract)
-               (indep-ctc subcontract)))))
+        (raise-argument-error 'struct/dc
+                             (format "a chaperone-contract? for field ~a" (subcontract-field-name subcontract))
+                             (indep-ctc subcontract)))))
   (define (flat-subcontract? subcontract)
     (cond
       [(indep? subcontract) (flat-contract? (indep-ctc subcontract))]
@@ -533,6 +533,9 @@
            [sel-id
             (identifier? #'sel-id) 
             #t]
+           [(#:selector sel-id)
+            (identifier? #'sel-id)
+            #t]
            [(sel-id #:parent struct-id)
             (and (identifier? #'sel-id)
                  (identifier? #'struct-id))
@@ -547,8 +550,6 @@
              [(sel-name (dep-name ...) stuff1 . stuff) ;; need stuff1 here so that things like [a (>=/c x)] do not fall into this case
               (sel-name? #'sel-name)
               (let ()
-                (unless (sel-name? #'sel-name)
-                  (raise-syntax-error 'struct/dc not-field-name-str stx #'sel-name))
                 (for ([name (in-list (syntax->list #'(dep-name ...)))])
                   (unless (sel-name? name)
                     (raise-syntax-error 'struct/dc not-field-name-str stx name)))
@@ -668,6 +669,9 @@
     [x 
      (identifier? #'x)
      (combine struct-id id)]
+    [(#:selector sel-id)
+     (identifier? #'sel-id)
+     #'sel-id]
     [(sel-id #:parent parent-id)
      (combine #'parent-id #'sel-id)]))
 
@@ -1069,7 +1073,7 @@
                                        (string->symbol (regexp-replace strip-reg (symbol->string (syntax-e sel)) ""))))
                       (cond
                         [(free-identifier=? #'struct-name struct-id)
-                         field-name]
+                         #`(#:selector #,sel)]
                         [else
                          #`(#,field-name #:parent #,struct-id)])]
                      [else #f])])]
@@ -1085,8 +1089,8 @@
        (do-struct/dc
         #t
         (with-syntax ([(fields ...) (for/list ([selector-id (in-list selector-ids)]
-                                                     [i (in-naturals)])
-                                            (selector-id->field selector-id i))])
+                                               [i (in-naturals)])
+                                      (selector-id->field selector-id i))])
           #`(-struct/dc struct-name [fields args] ...))))]
     [(_ struct-name anything ...)
      (raise-syntax-error 'struct/c "expected a struct identifier" stx (syntax struct-name))]))

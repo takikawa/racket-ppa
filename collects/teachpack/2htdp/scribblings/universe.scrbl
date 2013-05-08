@@ -21,6 +21,9 @@
          #;(map flow* (map car stuff))
          #;(map flow* (map cadr stuff))))))
 
+@(define WorldState @tech[#:tag-prefixes '("world")]{WorldState})
+@(define S-expression @tech[#:tag-prefixes '("universe")]{S-expression})
+
 @; -----------------------------------------------------------------------------
 
 @teachpack["universe"]{Worlds and the Universe}
@@ -34,13 +37,13 @@
    datatypes are currently linked as technical terms --- which is a hack.
    Fix the paragraph when we have a better way to link datatype names.}
 
-This @tt{universe.rkt} teachpack implements and provides the functionality
+The @tt{universe.rkt} teachpack implements and provides the functionality
  for creating interactive, graphical programs that consist of plain
  mathematical functions. We refer to such programs as @deftech{world}
  programs. In addition, world programs can also become a part of a
  @deftech{universe}, a collection of worlds that can exchange messages.
 
-The purpose of this documentation is to give experienced Schemers and HtDP
+The purpose of this documentation is to give experienced Racketeers and HtDP
  teachers a concise overview for using the library. The first part of the
  documentation focuses on @tech{world} programs. Section
  @secref["world-example"] presents an illustration of how to design such
@@ -124,12 +127,12 @@ Example:
 @defproc[(run-movie [r (and/c real? positive?)] [m [Listof image?]])
          true]{
 
- @racket[run-movie] displays the list of images @racket[m] at the rate of
- @racket[r] images per second.}
+ @racket[run-movie] displays the list of images @racket[m], spending 
+ @racket[r] seconds per image.}
 
 
 @;-----------------------------------------------------------------------------
-@section[#:tag "interactive"]{Interactions}
+@section[#:tag "interactive" #:tag-prefix "world"]{Interactions}
 
 The step from simulations to interactive programs is relatively
  small. Roughly speaking, a simulation designates one function,
@@ -158,7 +161,7 @@ The following picture provides an intuitive overview of the workings of a
 
 @image["nuworld.png"]
 
- The @racket[big-bang] form installs @racket[World_0] as the initial @tech{WorldState}.w
+ The @racket[big-bang] form installs @racket[World_0] as the initial @tech{WorldState}.
  The handlers @racket[tock], @racket[react], and @racket[click] transform
  one world into another one; each time an event is handled, @racket[done] is
  used to check whether the world is final, in which case the program is
@@ -171,7 +174,7 @@ The design of a world program demands that you come up with a data
  definition of all possible states. We use @tech{WorldState} to refer to
  this collection of data, using a capital W to distinguish it from the
  program.  In principle, there are no constraints on this data
- definition though it mustn't be an instance of the @tech{Package}
+ definition though it mustn't be an instance of the @tech[#:tag-prefixes '("universe")]{Package}
  structure (see below). You can even keep it implicit, even if this
  violates the Design Recipe.
 
@@ -246,14 +249,17 @@ now.
 }
 
 ]
+All remaining clauses are optional. To introduce them, we need one more
+data definition: 
 
-All remaining clauses are optional:
+@deftech{HandlerResult} : is a synonym for @tech{WorldState} until @secref[#:tag-prefixes '("universe")]{world2}
+
 @itemize[
 
 @item{
 @defform[(on-tick tick-expr)
          #:contracts
-         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))])]{
+         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult}))])]{
 
 tells DrRacket to call the @racket[tick-expr] function on the current
 world every time the clock ticks. The result of the call becomes the
@@ -263,7 +269,7 @@ current world. The clock ticks at the rate of 28 times per second.}}
 @defform/none[#:literals(on-tick)
               (on-tick tick-expr rate-expr)
               #:contracts
-              ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))]
+              ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult}))]
                [rate-expr (and/c real? positive?)])]{
 tells DrRacket to call the @racket[tick-expr] function on the current
 world every time the clock ticks. The result of the call becomes the
@@ -273,7 +279,7 @@ current world. The clock ticks every @racket[rate-expr] seconds.}}
 @defform/none[#:literals(on-tick)
               (on-tick tick-expr rate-expr limit-expr)
               #:contracts
-              ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))]
+              ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult}))]
                [rate-expr (and/c real? positive?)]
                [limit-expr (and/c integer? positive?)])]{
 tells DrRacket to call the @racket[tick-expr] function on the current
@@ -411,7 +417,7 @@ physical events on some form of mouse:
 
 @defform[(on-key key-expr)
          #:contracts
-          ([key-expr (-> (unsyntax @tech{WorldState}) key-event? (unsyntax @tech{WorldState}))])]{
+          ([key-expr (-> (unsyntax @tech{WorldState}) key-event? (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult}))])]{
  tells DrRacket to call the @racket[key-expr] function on the current world and a
  @tech{KeyEvent} for every keystroke the user of the computer makes. The result
  of the call becomes the current world.
@@ -433,7 +439,7 @@ physical events on some form of mouse:
 
 @defform[(on-release release-expr)
          #:contracts
-          ([release-expr (-> (unsyntax @tech{WorldState}) key-event? (unsyntax @tech{WorldState}))])]{
+          ([release-expr (-> (unsyntax @tech{WorldState}) key-event? (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult}))])]{
  tells DrRacket to call the @racket[release-expr] function on the current world and a
  @tech{KeyEvent} for every release event on the keyboard. A release event
  occurs when a user presses the key and then releases it. The second argument
@@ -473,7 +479,7 @@ It is one of the following:
 
 @defform[(on-pad pad-expr)
          #:contracts
-          ([pad-expr (-> (unsyntax @tech{WorldState}) pad-event? (unsyntax @tech{WorldState}))])]{
+          ([pad-expr (-> (unsyntax @tech{WorldState}) pad-event? (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult}))])]{
  tells DrRacket to call the @racket[pad-expr] function on the current world and the
  @tech{KeyEvent} for every keystroke that is also a @tech{PadEvent}. The result
  of the call becomes the current world.
@@ -536,42 +542,42 @@ All clauses in a @racket[pad-handler] form are optional:
 @item{
 @defform[(up up-expr)
          #:contracts
-         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))])]{
+         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult}))])]{
  Creates a handler for @racket["up"] and @racket["w"] events.}
 }
 
 @item{
 @defform[(down down-expr)
          #:contracts
-         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))])]{
+         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult}))])]{
  Creates a handler for @racket["down"] and @racket["s"] events.}
 }
 
 @item{
 @defform[(left left-expr)
          #:contracts
-         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))])]{
+         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult}))])]{
  Creates a handler for @racket["left"] and @racket["a"] events.}
 }
 
 @item{
 @defform[(right right-expr)
          #:contracts
-         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))])]{
+         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult}))])]{
  Creates a handler for @racket["right"] and @racket["d"] events.}
 }
 
 @item{
 @defform[(space space-expr)
          #:contracts
-         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))])]{
+         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult}))])]{
  Creates a handler for space-bar events (@racket[" "]).}
 }
 
 @item{
 @defform[(shift shift-expr)
          #:contracts
-         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))])]{
+         ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult}))])]{
  Creates a handler for @racket["shift"] and @racket["rshift"] events.}
 }
 
@@ -639,7 +645,7 @@ All @tech{MouseEvent}s are represented via strings:
          ([mouse-expr
            (-> (unsyntax @tech{WorldState})
                integer? integer? (unsyntax @tech{MouseEvent})
-               (unsyntax @tech{WorldState}))])]{
+               (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult}))])]{
  tells DrRacket to call @racket[mouse-expr] on the current world, the current
  @racket[x] and @racket[y] coordinates of the mouse, and a
  @tech{MouseEvent} for every (noticeable) action of the mouse by the
@@ -692,10 +698,10 @@ All @tech{MouseEvent}s are represented via strings:
 
 @item{
 
-@defstruct*[stop-with ([w (unsyntax @tech{WorldState})])]{signals to
+@defstruct*[stop-with ([w (unsyntax @tech[#:tag-prefixes '("world")]{HandlerResult})])]{signals to
 DrRacket that the world program should shut down. That is, any
 handler may return @racket[(stop-with w)] provided @racket[w] is a
-@tech{WorldState}. If it does, the state of the world becomes @racket[w]
+@tech[#:tag-prefixes '("world")]{HandlerResult}. If it does, the state of the world becomes @racket[w]
 and @racket[big-bang] will close down all event handling.}
 
 }
@@ -821,7 +827,7 @@ Simulating any dynamic behavior via a @tech{world} program demands two
  different activities. First, we must tease out those portions of our
  domain that change over time or in reaction to actions, and we must
  develop a data representation for this information.  This is what we call
- @tech{WorldState}. Keep in
+ @|WorldState|. Keep in
  mind that a good data definition makes it easy for readers to map data to
  information in the real world and vice versa. For all others aspects of
  the world, we use global constants, including graphical or visual
@@ -832,7 +838,7 @@ Second, we must translate the actions in our domain---the arrows in the
  teachpack can deal with. Once we have decided to use the passing of time
  for one aspect, key presses for another, and mouse movements for a third,
  we must develop functions that map the current state of the
- world---represented as data from @tech{WorldState}---into the next state of the
+ world---represented as data from @|WorldState|---into the next state of the
  world. Put differently, we have just created a wish list with three
  handler functions that have the following general contract and purpose
  statements:
@@ -840,16 +846,16 @@ Second, we must translate the actions in our domain---the arrows in the
 @(begin
 #reader scribble/comment-reader
 (racketblock
-;; tick : WorldState -> WorldState
+;; tick : WorldState -> HandlerResult
 ;; deal with the passing of time
 (define (tick w) ...)
 
-;; click : WorldState @emph{Number} @emph{Number} @tech{MouseEvent} -> WorldState
+;; click : WorldState @emph{Number} @emph{Number} @tech{MouseEvent} -> @tech[#:tag-prefixes '("world")]{HandlerResult}
 ;; deal with a mouse click at @emph{(x,y)} of kind @emph{me}
 ;; in the current world @emph{w}
 (define (click w x y me) ...)
 
-;; control : WorldState @tech{KeyEvent} -> WorldState
+;; control : WorldState @tech{KeyEvent} -> @tech[#:tag-prefixes '("world")]{HandlerResult}
 ;; deal with a key event @emph{ke}
 ;; in the current world @emph{w}
 (define (control w ke) ...)
@@ -868,7 +874,7 @@ A typical program does not use all three of these functions. Furthermore,
  @link["http://www.ccs.neu.edu/home/matthias/HtDP2e/"]{How to Design Programs/2e}.}
 
 @; -----------------------------------------------------------------------------
-@section[#:tag "world2"]{The World is not Enough}
+@section[#:tag "world2" #:tag-prefix "universe"]{The World is not Enough}
 
 The library facilities covered so far are about designing individual
  programs with interactive graphical user interfaces (simulations,
@@ -914,11 +920,16 @@ Note the @racket[list] clause includes @racket[empty] of course.
 
 Each world-producing callback in a world program---those for handling clock
  tick events, keyboard events, and mouse events---may produce a
- @tech{Package} in addition to just a @tech{WorldState}.
+ @tech{Package} in addition to just a @|WorldState|:
 
-@deftech{Package} represents a pair consisting of a @tech{WorldState}
+@deftech{HandlerResult} is one of the following:
+@itemize[
+@item{@|WorldState|}
+@item{@tech{Package}}
+]
+ where @deftech{Package} represents a pair consisting of a @|WorldState|
  and a message from a @tech{world} program to the @tech{server}.  Because
- programs only send messages via @tech{Package}, the teachpack does not
+ programs send messages via @tech{Package}, the teachpack does not
  provide the selectors for the structure, only the constructor and a
  predicate.
 
@@ -926,57 +937,14 @@ Each world-producing callback in a world program---those for handling clock
  determine whether @racket[x] is a @tech{Package}.}
 
 @defproc[(make-package [w any/c][m sexp?]) package?]{
- create a @tech{Package} from a @tech{WorldState} and an @tech{S-expression}.}
+ create a @tech{Package} from a @|WorldState| and an @tech{S-expression}.}
 
-As mentioned, all event handlers may return @tech{WorldState}s or
-@tech{Package}s; here are the revised specifications:
-
-@defform/none[#:literals (on-tick)
-              (on-tick tick-expr)
-              #:contracts
-              ([tick-expr (-> (unsyntax @tech{WorldState}) (or/c (unsyntax @tech{WorldState}) package?))])]{
-}
-
-@defform/none[#:literals (on-tick)
-              (on-tick tick-expr rate-expr)
-              #:contracts
-              ([tick-expr (-> (unsyntax @tech{WorldState}) (or/c (unsyntax @tech{WorldState}) package?))]
-               [rate-expr (and/c real? positive?)])]{
-}
-
-@defform/none[#:literals (on-tick)
-              (on-tick tick-expr rate-expr limit-expr)
-              #:contracts
-              ([tick-expr (-> (unsyntax @tech{WorldState}) (or/c (unsyntax @tech{WorldState}) package?))]
-               [rate-expr (and/c real? positive?)]
-               [limit-expr (and/c integer? positive?)])]{
-}
-
-@defform/none[#:literals (on-key)
-              (on-key key-expr)
-              #:contracts
-              ([key-expr (-> (unsyntax @tech{WorldState}) key-event? (or/c (unsyntax @tech{WorldState}) package?))])]{
-}
-
-@defform/none[#:literals (on-release)
-              (on-release release-expr)
-              #:contracts
-              ([release-expr (-> (unsyntax @tech{WorldState}) key-event? (or/c (unsyntax @tech{WorldState}) package?))])]{
-}
-
-@defform/none[#:literals (on-mouse)
-              (on-mouse mouse-expr)
-              #:contracts
-              ([mouse-expr
-                (-> (unsyntax @tech{WorldState})
-                    integer? integer? (unsyntax @tech{MouseEvent})
-                    (or/c (unsyntax @tech{WorldState}) package?))])]{
-}
-
-If one of these event handlers produces a @tech{Package}, the content of the world
- field becomes the next world and the message field specifies what the
- world sends to the universe. This distinction also explains why the data
- definition for @tech{WorldState} may not include a @tech{Package}.
+Recall that event handlers return a @tech[#:tag-prefixes'("universe")]{HandlerResult},
+ and we have just refined this data definition. Hence, each handler may return either a
+ @|WorldState| or a @tech{Package}.  If an event handler produces a @tech{Package},
+ the content of the world field becomes the next world and the message field specifies
+ what the world sends to the universe. This distinction also explains why the data
+ definition for @|WorldState| may not include a @tech{Package}.
 
 @subsection{Connecting with the Universe}
 
@@ -1031,14 +999,14 @@ The @racket[on-receive] clause of a @racket[big-bang] specifies the event handle
 
 @defform[(on-receive receive-expr)
          #:contracts
-         ([receive-expr (-> (unsyntax @tech{WorldState}) sexp? (or/c (unsyntax @tech{WorldState}) package?))])]{
+         ([receive-expr (-> (unsyntax @|WorldState|) sexp? (unsyntax @tech[#:tag-prefixes '("universe")]{HandlerResult}))])]{
  tells DrRacket to call @racket[receive-expr] for every message receipt, on the current
- @tech{WorldState} and the received message. The result of the call becomes the current
- @tech{WorldState}.
+ @|WorldState| and the received message. The result of the call becomes the current
+ @|WorldState|.
 
  Because @racket[receive-expr] is (or evaluates to) a world-transforming
  function, it too can produce a @tech{Package} instead of just a
- @tech{WorldState}. If the result is a @tech{Package}, its message content is
+ @|WorldState|. If the result is a @tech{Package}, its message content is
  sent to the @tech{server}.}
 
 The diagram below summarizes the extensions of this section in graphical form.
@@ -1050,9 +1018,9 @@ A registered world program may send a message to the universe server
  message is transmitted to the server, which may forward it to some
  other world program as given or in some massaged form. The arrival of a
  message is just another event that a world program must deal with. Like
- all other event handlers @emph{receive} accepts a @tech{WorldState} and some
+ all other event handlers @emph{receive} accepts a @|WorldState| and some
  auxiliary arguments (a message in this case) and produces a
- @tech{WorldState} or a @tech{Package}.
+ @|WorldState| or a @tech{Package}.
 
 When messages are sent from any of the worlds to the universe or vice versa,
  there is no need for the sender and receiver to synchronize. Indeed, a sender
@@ -1160,7 +1128,7 @@ teachpack provides only a predicate and a constructor for these structures:
  determines whether @racket[x] is a @emph{mail}.}
 
 @defproc[(make-mail [to iworld?] [content sexp?]) mail?]{
- creates a @emph{mail} from a @emph{iworld} and an @tech{S-expression}.}
+ creates a @emph{mail} from a @emph{iworld} and an @|S-expression|.}
 }
 ]
 
@@ -1295,7 +1263,7 @@ optional handlers:
  is the current state of the universe server, while the second argument is
  the (representation of the) world that got disconnected. The resulting
  bundle usually includes this second argument in the third field, telling
- drscheme not to wait for messages from this world anymore.}
+ DrRacket not to wait for messages from this world anymore.}
 }
 
 @item{
@@ -1455,9 +1423,9 @@ From the perspective of the @tech{universe}, the design of a protocol is
  about the design of data representations for tracking universe information
  in the server and the participating worlds and the design of a data
  representation for messages. As for the latter, we know that they must be
- @tech{S-expression}s, but usually @tech{world} programs don't send all
- kinds of @tech{S-expression}s. The data definitions for messages must
- therefore select a subset of suitable @tech{S-expression}s. As for the
+ @|S-expression|s, but usually @tech{world} programs don't send all
+ kinds of @|S-expression|s. The data definitions for messages must
+ therefore select a subset of suitable @|S-expression|s. As for the
  state of the server and the worlds, they must reflect how they currently
  relate to the universe. Later, when we design their ``local'' behavior, we
  may add more components to their state space.
@@ -1780,7 +1748,7 @@ The final step is to design the ball @tech{world}. Recall that each world
 ))
  The definition says that initially a @tech{world} is passive.
 
-The communication protocol and the refined data definition of @tech{WorldState}
+The communication protocol and the refined data definition of @|WorldState|
  imply a number of contract and purpose statements:
 
 @(begin
@@ -1804,7 +1772,7 @@ The communication protocol and the refined data definition of @tech{WorldState}
 Let's design one function at a time, starting with @emph{receive}.  Since
  the protocol doesn't spell out what @emph{receive} is to compute, let's
  create a good set of functional examples, exploiting the structure of the
- data organization of @tech{WorldState}:
+ data organization of @|WorldState|:
 
 @(begin
 #reader scribble/comment-reader

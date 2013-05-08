@@ -40,7 +40,7 @@ means specifically @tech{@Spattern}.
                  (@#,ref[~var s-] id)
                  (@#,ref[~var s+] id syntax-class-id maybe-role)
                  (@#,ref[~var s+] id (syntax-class-id arg ...) maybe-role)
-                 (~literal literal-id)
+                 (~literal literal-id maybe-phase)
                  atomic-datum
                  (~datum datum)
                  (H-pattern . S-pattern)
@@ -218,7 +218,7 @@ An identifier can be either a @tech{pattern variable}, an
 @item{If @racket[id] is of the form @racket[_pvar-id:syntax-class-id]
   (that is, two names joined by a colon character), it is an
   @tech{annotated pattern variable}, and the pattern is equivalent to
-  @racket[(~var pvar-id syntax-class-id)].
+  @racket[(~var _pvar-id _syntax-class-id)].
 
   @myexamples[
     (syntax-parse #'a
@@ -235,6 +235,10 @@ An identifier can be either a @tech{pattern variable}, an
      #:declare t two
      (syntax->datum #'(t t.x t.y))])
   ]
+
+  Note that an @racket[id] of the form @racket[_:syntax-class-id] is
+  legal; see the discussion of a @ref[~var s+] form with a zero-length
+  @svar[pvar-id].
 }
 
 @item{Otherwise, @racket[id] is a @tech{pattern variable}, and the
@@ -256,16 +260,17 @@ like an @tech{annotated pattern variable} with the implicit syntax
 class inserted.
 }
 
-@specsubform/subs[(@#,def[~var s+] pvar-id syntax-class-use maybe-role)
-                  ([syntax-class-use syntax-class-id
-                                     (syntax-class-id arg ...)]
-                   [maybe-role (code:line)
-                               (code:line #:role role-expr)])
-                  #:contracts ([role-expr (or/c string? #f)])]{
+@specsubform[(@#,def[~var s+] pvar-id syntax-class-use maybe-role)
+             #:grammar
+             ([syntax-class-use syntax-class-id
+                                (syntax-class-id arg ...)]
+              [maybe-role (code:line)
+                          (code:line #:role role-expr)])
+             #:contracts ([role-expr (or/c string? #f)])]{
 
 An @deftech{annotated pattern variable}. The pattern matches only
 terms accepted by @svar[syntax-class-id] (parameterized by the
-@racket[arg-expr]s, if present).
+@racket[arg]s, if present).
 
 In addition to binding @svar[pvar-id], an annotated pattern
 variable also binds @deftech{nested attributes} from the syntax
@@ -273,7 +278,10 @@ class. The names of the nested attributes are formed by prefixing
 @svar[pvar-id.] (that is, @svar[pvar-id] followed by a ``dot''
 character) to the name of the syntax class's attribute.
 
-If @svar[pvar-id] is @racket[_], no attributes are bound.
+If @svar[pvar-id] is @racket[_], no attributes are bound.  If
+@svar[pvar-id] is the zero-length identifier (@racket[||]), then
+@svar[pvar-id] is not bound, but the nested attributes of
+@racket[syntax-class-use] are bound without prefixes.
 
 If @racket[role-expr] is given and evaluates to a string, it is
 combined with the syntax class's description in error messages.
@@ -298,7 +306,10 @@ combined with the syntax class's description in error messages.
 ]
 }
 
-@specsubform[(@#,defhere[~literal] literal-id)]{
+@specsubform[(@#,defhere[~literal] literal-id maybe-phase)
+             #:grammar
+             ([maybe-phase (code:line)
+                           (code:line #:phase phase-expr)])]{
 
 A @deftech{literal} identifier pattern. Matches any identifier
 @racket[free-identifier=?] to @racket[literal-id].
@@ -309,6 +320,10 @@ A @deftech{literal} identifier pattern. Matches any identifier
 (syntax-parse #'(lambda x 12)
   [((~literal define) var:id body:expr) 'ok])
 ]
+
+The identifiers are compared at the phase given by
+@racket[phase-expr], if it is given, or
+@racket[(syntax-local-phase-level)] otherwise.
 }
 
 @specsubform[atomic-datum]{
@@ -544,13 +559,14 @@ above).
 ]
 }
 
-@specsubform/subs[(@#,def[~describe s] maybe-opaque expr S-pattern)
-                  ([maybe-opaque (code:line)
-                                 (code:line #:opaque)]
-                   [maybe-role (code:line)
-                               (code:line #:role role-expr)])
-                  #:contracts ([expr (or/c string? #f)]
-                               [role-expr (or/c string? #f)])]{
+@specsubform[(@#,def[~describe s] maybe-opaque expr S-pattern)
+             #:grammar
+             ([maybe-opaque (code:line)
+                            (code:line #:opaque)]
+              [maybe-role (code:line)
+                          (code:line #:role role-expr)])
+             #:contracts ([expr (or/c string? #f)]
+                          [role-expr (or/c string? #f)])]{
 
 The @racket[~describe] pattern form annotates a pattern with a
 description, a string expression that is evaluated in the scope of all
@@ -634,12 +650,13 @@ Equivalent to @racket[(~var pvar-id splicing-syntax-class-id)].
 
 }
 
-@specsubform/subs[(@#,def[~var h] pvar-id splicing-syntax-class-use maybe-role)
-                  ([splicing-syntax-class-use splicing-syntax-class-id
-                                              (splicing-syntax-class-id arg ...)]
-                   [maybe-role (code:line)
-                               (code:line #:role role-expr)])
-                  #:contracts ([role-expr (or/c string? #f)])]{
+@specsubform[(@#,def[~var h] pvar-id splicing-syntax-class-use maybe-role)
+             #:grammar
+             ([splicing-syntax-class-use splicing-syntax-class-id
+                                         (splicing-syntax-class-id arg ...)]
+              [maybe-role (code:line)
+                          (code:line #:role role-expr)])
+             #:contracts ([role-expr (or/c string? #f)])]{
 
 Pattern variable annotated with a @tech{splicing syntax
 class}. Similar to a normal @tech{annotated pattern variable}, except
@@ -708,13 +725,14 @@ terms instead.
 ]
 }
 
-@specsubform/subs[(@#,def[~optional h] H-pattern maybe-optional-option)
-                  ([maybe-optional-option
-                    (code:line)
-                    (code:line #:defaults ([attr-arity-decl expr] ...))]
-                   [attr-arity-decl
-                    attr-id
-                    (attr-id depth)])]{
+@specsubform[(@#,def[~optional h] H-pattern maybe-optional-option)
+             #:grammar
+             ([maybe-optional-option
+                (code:line)
+                (code:line #:defaults ([attr-arity-decl expr] ...))]
+              [attr-arity-decl
+                attr-id
+                (attr-id depth)])]{
 
 Matches either the given head subpattern or an empty sequence of
 terms. If the @racket[#:defaults] option is given, the subsequent
@@ -834,13 +852,14 @@ Here are the variants of @elem{@EHpattern}:
 Matches if any of the inner @racket[EH-pattern] alternatives match.
 }
 
-@specsubform/subs[(@#,defhere[~once] H-pattern once-option ...)
-                  ([once-option (code:line #:name name-expr)
-                                (code:line #:too-few too-few-message-expr)
-                                (code:line #:too-many too-many-message-expr)])
-                  #:contracts ([name-expr (or/c string? #f)]
-                               [too-few-message-expr (or/c string? #f)]
-                               [too-many-message-expr (or/c string? #f)])]{
+@specsubform[(@#,defhere[~once] H-pattern once-option ...)
+             #:grammar
+             ([once-option (code:line #:name name-expr)
+                           (code:line #:too-few too-few-message-expr)
+                           (code:line #:too-many too-many-message-expr)])
+             #:contracts ([name-expr (or/c string? #f)]
+                          [too-few-message-expr (or/c string? #f)]
+                          [too-many-message-expr (or/c string? #f)])]{
 
 Matches if the inner @racket[H-pattern] matches. This pattern must be
 matched exactly once in the match of the entire repetition sequence.
@@ -856,12 +875,13 @@ then the ellipsis pattern fails with the message either
 of @racket[name-expr]"}.
 }
 
-@specsubform/subs[(@#,def[~optional eh] H-pattern optional-option ...)
-                  ([optional-option (code:line #:name name-expr)
-                                    (code:line #:too-many too-many-message-expr)
-                                    (code:line #:defaults ([attr-id expr] ...))])
-                  #:contracts ([name-expr (or/c string? #f)]
-                               [too-many-message-expr (or/c string? #f)])]{
+@specsubform[(@#,def[~optional eh] H-pattern optional-option ...)
+             #:grammar
+             ([optional-option (code:line #:name name-expr)
+                               (code:line #:too-many too-many-message-expr)
+                               (code:line #:defaults ([attr-id expr] ...))])
+             #:contracts ([name-expr (or/c string? #f)]
+                          [too-many-message-expr (or/c string? #f)])]{
 
 Matches if the inner @racket[H-pattern] matches. This pattern may be used at
 most once in the match of the entire repetition.
@@ -877,12 +897,13 @@ sequence. The default attributes must be a subset of the subpattern's
 attributes.
 }
 
-@specsubform/subs[(@#,defhere[~between] H-pattern min-number max-number between-option ...)
-                  ([reps-option (code:line #:name name-expr)
-                                (code:line #:too-few too-few-message-expr)
-                                (code:line #:too-many too-many-message-expr)])
-                  #:contracts ([name-expr (or/c syntax? #f)]
-                               [too-few-message-expr (or/c syntax? #f)])]{
+@specsubform[(@#,defhere[~between] H-pattern min-number max-number between-option ...)
+             #:grammar
+             ([reps-option (code:line #:name name-expr)
+                           (code:line #:too-few too-few-message-expr)
+                           (code:line #:too-many too-many-message-expr)])
+             #:contracts ([name-expr (or/c syntax? #f)]
+                          [too-few-message-expr (or/c syntax? #f)])]{
 
 Matches if the inner @racket[H-pattern] matches. This pattern must be
 matched at least @racket[min-number] and at most @racket[max-number]
@@ -953,22 +974,23 @@ within a @racket[~not] pattern unless there is an intervening
 @racket[~delimit-cut] or @racket[~commit] pattern.
 }
 
-@specsubform/subs[(@#,defhere[~bind] [attr-arity-decl expr] ...)
-                  ([attr-arity-decl
-                    attr-name-id
-                    (attr-name-id depth)])]{
+@specsubform[(@#,defhere[~bind] [attr-arity-decl expr] ...)
+             #:grammar
+             ([attr-arity-decl attr-name-id
+                               (attr-name-id depth)])]{
 
 Evaluates the @racket[expr]s and binds them to the given
 @racket[attr-id]s as attributes.
 }
 
-@specsubform/subs[(@#,defhere[~fail] maybe-fail-condition maybe-message-expr)
-                  ([maybe-fail-condition (code:line)
-                                         (code:line #:when condition-expr)
-                                         (code:line #:unless condition-expr)]
-                   [maybe-message-expr (code:line)
-                                       (code:line message-expr)])
-                  #:contracts ([message-expr (or/c string? #f)])]{
+@specsubform[(@#,defhere[~fail] maybe-fail-condition maybe-message-expr)
+             #:grammar
+             ([maybe-fail-condition (code:line)
+                                    (code:line #:when condition-expr)
+                                    (code:line #:unless condition-expr)]
+              [maybe-message-expr (code:line)
+                                  (code:line message-expr)])
+             #:contracts ([message-expr (or/c string? #f)])]{
 
 If the condition is absent, or if the @racket[#:when] condition
 evaluates to a true value, or if the @racket[#:unless] condition

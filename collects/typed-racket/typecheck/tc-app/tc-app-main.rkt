@@ -5,7 +5,7 @@
          "utils.rkt"
          syntax/parse racket/match 
          syntax/parse/experimental/reflect
-         (typecheck signatures check-below tc-funapp tc-app-helper)
+         (typecheck signatures tc-funapp tc-app-helper)
          (types utils abbrev)
          (rep type-rep filter-rep object-rep rep-utils)
          (for-template racket/base))
@@ -49,7 +49,7 @@
   tc/app-regular*)
 
 ;; the main dispatching function
-;; syntax tc-results? -> tc-results?
+;; syntax tc-results/c -> tc-results/c
 (define (tc/app/internal form expected)
   (syntax-parse form
     [(#%plain-app . (~var v (tc/app-special-cases expected)))
@@ -80,7 +80,5 @@
 ;; syntax -> tc-results
 (define (tc/app form) (tc/app/internal form #f))
 
-;; syntax tc-results? -> tc-results?
-(define (tc/app/check form expected)
-    (define t (tc/app/internal form expected))
-    (check-below t expected))
+;; syntax tc-results/c -> tc-results/c
+(define (tc/app/check form expected) (tc/app/internal form expected))

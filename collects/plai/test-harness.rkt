@@ -69,9 +69,8 @@
     (set! plai-all-test-results (cons result plai-all-test-results))
     (when print?
       (if (abridged-test-output)
-          (apply printf "(~s ~v ~v)" result)
-          (apply printf "(~s ~s ~v ~v ~s)" result))
-      (newline))
+          (apply (if error? eprintf printf) "(~s ~v ~v)\n" result)
+          (apply (if error? eprintf printf) "(~s ~s ~v ~v ~s)\n" result)))
     (when (and halt-on-errors? error?)
       (raise (make-exn:test (string->immutable-string (format "test failed: ~s" result))
                             (current-continuation-marks))))))
@@ -112,12 +111,12 @@
      (with-handlers
          ; Applying the predicate shouldn't raise an exception.
          ([exn+catching? (λ (exn) 
-                  (print-error
-                   'pred-exception
-                   test-sexp
-                   (exn-message exn)
-                   '<no-expected-value>
-                   loc))])
+                           (print-error
+                            'pred-exception
+                            test-sexp
+                            (exn-message exn)
+                            '<no-expected-value>
+                            loc))])
        (let ([test-result (return-exception (test-thunk))])
          (if (or (exn:plai? test-result)
                  (not (exn? test-result)))

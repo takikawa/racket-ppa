@@ -26,6 +26,8 @@ _Italic_. \_Just underlines\_.
 
 “Dobule quoted”. ‘Single quoted’.
 
+This should NOT be ‘code‘ in Markdown.
+
 Example of vebatim:
 
 `Hi, world.`  
@@ -49,13 +51,13 @@ Another example of verbatim, with ticks/quotes:
 
 Example of a defmodule:
 
-```scheme
+```racket
  (require racket/string)
 ```
 
 Example of a defproc:
 
-```scheme
+```racket
 (make-string k [char]) -> string?
   k : exact-nonnegative-integer? 
   char : char? = #\nul           
@@ -63,6 +65,28 @@ Example of a defproc:
 
 Returns a new mutable string of length `k` where each position in the
 string is initialized with the character `char`
+
+Blah blah `(or/c string? bytes?)`.
+
+Example of Scribble `examples`:
+
+```racket
+Examples:      
+> (define x 0) 
+               
+> (displayln x)
+0              
+               
+```
+
+Example of Scribble `interaction`:
+
+```racket
+> (define x 0)
+              
+> x           
+0             
+```
 
 > Note: This is a note. Let’s make it long enough that the markdown output
 > will have to line-wrap, to make sure the > mark starts each line

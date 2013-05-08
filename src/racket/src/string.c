@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -79,7 +79,6 @@ static int get_iconv_errno(void)
 # define HAVE_CODESET 1
 # define CODESET 0
 # define ICONV_errno get_iconv_errno()
-extern wchar_t *scheme_get_dll_path(wchar_t *s);
 static int iconv_ready = 0;
 static void init_iconv()
 {
@@ -342,6 +341,9 @@ static char *string_to_from_locale(int to_bytes,
 #define portable_isspace(x) (((x) < 128) && isspace(x))
 
 ROSYM static Scheme_Object *sys_symbol;
+ROSYM static Scheme_Object *link_symbol, *machine_symbol, *gc_symbol;
+ROSYM static Scheme_Object *so_suffix_symbol, *so_mode_symbol, *word_symbol;
+ROSYM static Scheme_Object *os_symbol;
 ROSYM static Scheme_Object *platform_3m_path, *platform_cgc_path;
 READ_ONLY static Scheme_Object *zero_length_char_string;
 READ_ONLY static Scheme_Object *zero_length_byte_string;
@@ -361,6 +363,21 @@ scheme_init_string (Scheme_Env *env)
 
   REGISTER_SO(sys_symbol);
   sys_symbol = scheme_intern_symbol(SYSTEM_TYPE_NAME);
+
+  REGISTER_SO(link_symbol);
+  REGISTER_SO(machine_symbol);
+  REGISTER_SO(gc_symbol);
+  REGISTER_SO(so_suffix_symbol);
+  REGISTER_SO(so_mode_symbol);
+  REGISTER_SO(word_symbol);
+  REGISTER_SO(os_symbol);
+  link_symbol = scheme_intern_symbol("link");
+  machine_symbol = scheme_intern_symbol("machine");
+  gc_symbol = scheme_intern_symbol("gc");
+  so_suffix_symbol = scheme_intern_symbol("so-suffix");
+  so_mode_symbol = scheme_intern_symbol("so-mode");
+  word_symbol = scheme_intern_symbol("word");
+  os_symbol = scheme_intern_symbol("os");
 
   REGISTER_SO(zero_length_char_string);
   REGISTER_SO(zero_length_byte_string);
@@ -2296,9 +2313,7 @@ static void machine_details(char *s);
 static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
 {
   if (argc) {
-    Scheme_Object *sym;
-    sym = scheme_intern_symbol("link");
-    if (SAME_OBJ(argv[0], sym)) {
+    if (SAME_OBJ(argv[0], link_symbol)) {
 #if defined(OS_X) && !defined(XONX)
       return scheme_intern_symbol("framework");
 #else
@@ -2314,8 +2329,7 @@ static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
 #endif
     }
 
-    sym = scheme_intern_symbol("machine");
-    if (SAME_OBJ(argv[0], sym)) {
+    if (SAME_OBJ(argv[0], machine_symbol)) {
       char buff[1024];
       
       machine_details(buff);
@@ -2323,8 +2337,7 @@ static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
       return scheme_make_utf8_string(buff);
     }
 
-    sym = scheme_intern_symbol("gc");
-    if (SAME_OBJ(argv[0], sym)) {
+    if (SAME_OBJ(argv[0], gc_symbol)) {
 #ifdef MZ_PRECISE_GC
       return scheme_intern_symbol("3m");
 #else
@@ -2332,8 +2345,7 @@ static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
 #endif
     }
 
-    sym = scheme_intern_symbol("so-suffix");
-    if (SAME_OBJ(argv[0], sym)) {
+    if (SAME_OBJ(argv[0], so_suffix_symbol)) {
 #ifdef DOS_FILE_SYSTEM
       return scheme_make_byte_string(".dll");
 #else
@@ -2349,14 +2361,21 @@ static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
 #endif
     }
 
-    sym = scheme_intern_symbol("word");
-    if (SAME_OBJ(argv[0], sym)) {
+    if (SAME_OBJ(argv[0], so_mode_symbol)) {
+#ifdef USE_DLOPEN_GLOBAL_BY_DEFAULT
+      return scheme_intern_symbol("global");
+#else
+      return scheme_intern_symbol("local");
+#endif
+    }
+
+
+    if (SAME_OBJ(argv[0], word_symbol)) {
       return scheme_make_integer(sizeof(void*)*8);
     }
 
-    sym = scheme_intern_symbol("os");
-    if (!SAME_OBJ(argv[0], sym)) {
-      scheme_wrong_contract("system-type", "(or/c 'os 'word 'link 'machine 'gc 'so-suffix 'word)", 0, argc, argv);
+    if (!SAME_OBJ(argv[0], os_symbol)) {
+      scheme_wrong_contract("system-type", "(or/c 'os 'word 'link 'machine 'gc 'so-suffix 'so-mode 'word)", 0, argc, argv);
       return NULL;
     }
   }
@@ -3891,8 +3910,8 @@ static Scheme_Object *normalize_c(Scheme_Object *o)
 
   s2[j] = 0;
   if (len - j > 16) {
-    s2 = (mzchar *)scheme_malloc_atomic((j + 1) * sizeof(mzchar));
-    memcpy(s2, s, (j + 1) * sizeof(mzchar));
+    s = (mzchar *)scheme_malloc_atomic((j + 1) * sizeof(mzchar));
+    memcpy(s, s2, (j + 1) * sizeof(mzchar));
     s2 = s;
   }
 
@@ -5389,6 +5408,7 @@ unsigned short *scheme_ucs4_to_utf16(const mzchar *text, intptr_t start, intptr_
   for (i = start, j = 0; i < end; i++) {
     v = text[i];
     if (v > 0xFFFF) {
+      v -= 0x10000;
       utf16[j++] = 0xD800 | ((v >> 10) & 0x3FF);
       utf16[j++] = 0xDC00 | (v & 0x3FF);
     } else

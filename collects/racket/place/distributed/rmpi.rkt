@@ -26,6 +26,7 @@
          rmpi-partition
          rmpi-build-default-config
          rmpi-make-localhost-config
+         rmpi-make-remote-config
          rmpi-launch
          rmpi-finish
          (struct-out rmpi-comm))
@@ -257,11 +258,12 @@
   (partit num cnt id))
 
 (define rmpi-build-default-config
-  (make-keyword-procedure (lambda (kws kw-args . rest)
-    (for/hash ([kw kws]
-               [kwa kw-args])
-;      (displayln (keyword? kw))
-      (values kw kwa)))))
+  (make-keyword-procedure
+   (lambda (kws kw-args . rest)
+     (for/hash ([kw kws]
+                [kwa kw-args])
+       ;; (displayln (keyword? kw))
+       (values kw kwa)))))
 
 (define (rmpi-launch default config #:no-wait [no-wait #f])
   (define (lookup-config-value rest key-str)
@@ -351,6 +353,12 @@
 (define (rmpi-make-localhost-config cnt start-port name)
   (for/list ([i cnt])
     (list "localhost" (+ start-port i) (string->symbol (format "~a_~a" (symbol->string name) (number->string i)))
+          i)))
+
+(define (rmpi-make-remote-config hostlist cnt start-port name)
+  (for/list ([i cnt]
+             [host hostlist])
+    (list host (+ start-port i) (string->symbol (format "~a_~a" (symbol->string name) (number->string i)))
           i)))
 
 (define (rmpi-alltoall comm outvec)

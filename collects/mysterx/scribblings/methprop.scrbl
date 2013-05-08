@@ -117,12 +117,19 @@ Like @racket[cocreate-instance-from-coclass], but using a ProgID.}
   property in @racket[obj/type]. See @secref["com-types"] for
   information on the symbols.}
 
-@defproc[(com-get-property [obj com-object?] [property string?] ...+)
+@defproc[(com-get-property [obj com-object?] 
+                           [property (or/c string?
+                                           (cons/c string? list?))]
+                           ...+)
          any/c]{
 
   Returns the value of the final property by following the indicated
-  path of @racket[property]s, where each intermediate property is a
-  COM object.}
+  path of @racket[property]s, where each intermediate property must be a
+  COM object.
+
+  Each @racket[property] is either a property-name string or a list
+  that starts with a property-name string and continues with arguments
+  for a parameterized property.}
 
 @defproc[(com-set-properties [obj/type (or/c com-object? com-type?)]) 
          (listof string?)]{
@@ -130,8 +137,8 @@ Like @racket[cocreate-instance-from-coclass], but using a ProgID.}
   Returns a list of strings indicating the names of writeable
   properties in @racket[obj/type].}
 
-@defproc[(com-set-property-type [obj/type (or/c com-object? com-type?)] 
-                                [property-name strig?])
+@defproc[(com-set-property-type [obj/type (or/c com-object? com-type?)]
+                                [property-name string?])
           (listof symbol?)]{
 
   Returns a list of symbols indicating the type of the specified
@@ -139,13 +146,16 @@ Like @racket[cocreate-instance-from-coclass], but using a ProgID.}
   information on the symbols.}
 
 @defproc[(com-set-property! [obj com-object?] 
-                            [string? property] ...+
+                            [property (or/c string?
+                                            (cons/c string? list?))] ...+
                             [v any/c])
          void?]{
 
    Sets the value of the final property in @racket[obj] to @racket[v]
    by following the @racket[property]s, where the value of each
-   intermediate property is a COM object.}
+   intermediate property is a COM object. A @racket[property]
+   can be a list instead of a string to represent a parameterized property
+   and its arguments.}
 
 @defproc[(com-help [obj/type (or/c com-object? com-type?)] 
                    [topic string? ""])

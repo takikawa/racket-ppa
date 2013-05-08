@@ -74,7 +74,7 @@
      (make-integer-set
       (if (= low hi)
           (cdr contents)
-          (cons (cons (+ 1 low) hi) contents))))])
+          (cons (cons (+ 1 low) hi) (cdr contents)))))])
 
 ;; well-formed-set? : X -> bool
 (define (well-formed-set? x)
@@ -416,13 +416,13 @@
                 (cons i (cons s2 rest)))))))))))
 
 (test-block ((->is (lambda (str)
-                   (foldr (lambda (c cs)
-                            (merge (make-range (char->integer c))
-                                   cs))
-                          (make-range)
-                          (string->list str))))
+                     (foldr (lambda (c cs)
+                              (merge (make-range (char->integer c))
+                                     cs))
+                            (make-range)
+                            (string->list str))))
              (->is2 (lambda (str)
-                    (integer-set-contents (->is str)))))
+                      (integer-set-contents (->is str)))))
             ((partition null) null)
             ((map integer-set-contents (partition (list (->is "1234")))) (list (->is2 "1234")))
             ((map integer-set-contents (partition (list (->is "1234") (->is "0235"))))

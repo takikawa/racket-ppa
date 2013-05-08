@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1640,7 +1640,7 @@ void scheme_enable_garbage_collection(int on)
 #endif
 }
 
-MZ_DO_NOT_INLINE(uintptr_t scheme_get_deeper_address(void))
+MZ_DO_NOT_INLINE(uintptr_t scheme_get_deeper_address(void));
 
 uintptr_t scheme_get_deeper_address(void)
 {
@@ -2869,6 +2869,11 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
   case scheme_double_type:
     s = sizeof(Scheme_Double);
     break;
+#ifdef MZ_LONG_DOUBLE
+  case scheme_long_double_type:
+    s = sizeof(Scheme_Long_Double);
+    break;
+#endif
   case scheme_float_type:
     break;
   case scheme_char_string_type:

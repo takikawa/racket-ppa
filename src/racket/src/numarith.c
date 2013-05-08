@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -64,6 +64,20 @@ static Scheme_Object *unsafe_fl_mult (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_fl_div (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_fl_abs (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_fl_sqrt (int argc, Scheme_Object *argv[]);
+
+static Scheme_Object *extfl_plus (int argc, Scheme_Object *argv[]);
+static Scheme_Object *extfl_minus (int argc, Scheme_Object *argv[]);
+static Scheme_Object *extfl_mult (int argc, Scheme_Object *argv[]);
+static Scheme_Object *extfl_div (int argc, Scheme_Object *argv[]);
+static Scheme_Object *extfl_abs (int argc, Scheme_Object *argv[]);
+static Scheme_Object *extfl_sqrt (int argc, Scheme_Object *argv[]);
+
+static Scheme_Object *unsafe_extfl_plus (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_extfl_minus (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_extfl_mult (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_extfl_div (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_extfl_abs (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_extfl_sqrt (int argc, Scheme_Object *argv[]);
 
 #define zeroi scheme_exact_zero
 
@@ -229,6 +243,73 @@ void scheme_init_flfxnum_numarith(Scheme_Env *env)
                                                             | SCHEME_PRIM_PRODUCES_FLONUM
                                                             | SCHEME_PRIM_WANTS_FLONUM_FIRST);
   scheme_add_global_constant("flsqrt", p, env);
+
+}
+
+void scheme_init_extfl_numarith(Scheme_Env *env)
+{
+  Scheme_Object *p;
+  int flags;
+
+  p = scheme_make_folding_prim(extfl_plus, "extfl+", 2, 2, 1);
+  if (MZ_LONG_DOUBLE_AVAIL_AND(scheme_can_inline_fp_op()))
+    flags = SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_PRODUCES_EXTFLONUM
+                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_BOTH);
+  scheme_add_global_constant("extfl+", p, env);
+
+  p = scheme_make_folding_prim(extfl_minus, "extfl-", 2, 2, 1);
+  if (MZ_LONG_DOUBLE_AVAIL_AND(scheme_can_inline_fp_op()))
+    flags = SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_PRODUCES_EXTFLONUM
+                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_BOTH);
+  scheme_add_global_constant("extfl-", p, env);
+
+  p = scheme_make_folding_prim(extfl_mult, "extfl*", 2, 2, 1);
+  if (MZ_LONG_DOUBLE_AVAIL_AND(scheme_can_inline_fp_op()))
+    flags = SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_PRODUCES_EXTFLONUM
+                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_BOTH);
+  scheme_add_global_constant("extfl*", p, env);
+
+  p = scheme_make_folding_prim(extfl_div, "extfl/", 2, 2, 1);
+  if (MZ_LONG_DOUBLE_AVAIL_AND(scheme_can_inline_fp_op()))
+    flags = SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_PRODUCES_EXTFLONUM
+                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_BOTH);
+  scheme_add_global_constant("extfl/", p, env);
+
+  p = scheme_make_folding_prim(extfl_abs, "extflabs", 1, 1, 1);
+  if (MZ_LONG_DOUBLE_AVAIL_AND(scheme_can_inline_fp_op()))
+    flags = SCHEME_PRIM_IS_UNARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_PRODUCES_EXTFLONUM
+                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_FIRST);
+  scheme_add_global_constant("extflabs", p, env);
+
+  p = scheme_make_folding_prim(extfl_sqrt, "extflsqrt", 1, 1, 1);
+  if (MZ_LONG_DOUBLE_AVAIL_AND(scheme_can_inline_fp_op() && SQRT_MACHINE_CODE_AVAILABLE))
+    flags = SCHEME_PRIM_IS_UNARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_PRODUCES_EXTFLONUM
+                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_FIRST);
+  scheme_add_global_constant("extflsqrt", p, env);
 }
 
 void scheme_init_unsafe_numarith(Scheme_Env *env)
@@ -344,6 +425,78 @@ void scheme_init_unsafe_numarith(Scheme_Env *env)
                                                             | SCHEME_PRIM_PRODUCES_FLONUM
                                                             | SCHEME_PRIM_WANTS_FLONUM_FIRST);
   scheme_add_global_constant("unsafe-flsqrt", p, env);
+}
+
+void scheme_init_extfl_unsafe_numarith(Scheme_Env *env)
+{
+  Scheme_Object *p;
+  int flags;
+
+  p = scheme_make_folding_prim(unsafe_extfl_plus, "unsafe-extfl+", 2, 2, 1);
+  if (MZ_LONG_DOUBLE_AVAIL_AND(scheme_can_inline_fp_op()))
+    flags = SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
+                                                            | SCHEME_PRIM_PRODUCES_EXTFLONUM
+                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_BOTH);
+  scheme_add_global_constant("unsafe-extfl+", p, env);
+
+  p = scheme_make_folding_prim(unsafe_extfl_minus, "unsafe-extfl-", 2, 2, 1);
+  if (MZ_LONG_DOUBLE_AVAIL_AND(scheme_can_inline_fp_op()))
+    flags = SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
+                                                            | SCHEME_PRIM_PRODUCES_EXTFLONUM
+                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_BOTH);
+  scheme_add_global_constant("unsafe-extfl-", p, env);
+
+  p = scheme_make_folding_prim(unsafe_extfl_mult, "unsafe-extfl*", 2, 2, 1);
+  if (MZ_LONG_DOUBLE_AVAIL_AND(scheme_can_inline_fp_op()))
+    flags = SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
+                                                            | SCHEME_PRIM_PRODUCES_EXTFLONUM
+                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_BOTH);
+  scheme_add_global_constant("unsafe-extfl*", p, env);
+
+  p = scheme_make_folding_prim(unsafe_extfl_div, "unsafe-extfl/", 2, 2, 1);
+  if (MZ_LONG_DOUBLE_AVAIL_AND(scheme_can_inline_fp_op()))
+    flags = SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
+                                                            | SCHEME_PRIM_PRODUCES_EXTFLONUM
+                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_BOTH);
+  scheme_add_global_constant("unsafe-extfl/", p, env);
+
+  p = scheme_make_folding_prim(unsafe_extfl_abs, "unsafe-extflabs", 1, 1, 1);
+  if (MZ_LONG_DOUBLE_AVAIL_AND(scheme_can_inline_fp_op()))
+    flags = SCHEME_PRIM_IS_UNARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
+                                                            | SCHEME_PRIM_PRODUCES_EXTFLONUM
+                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_FIRST);
+  scheme_add_global_constant("unsafe-extflabs", p, env);
+
+  p = scheme_make_folding_prim(unsafe_extfl_sqrt, "unsafe-extflsqrt", 1, 1, 1);
+  if (MZ_LONG_DOUBLE_AVAIL_AND(scheme_can_inline_fp_op() && SQRT_MACHINE_CODE_AVAILABLE))
+    flags = SCHEME_PRIM_IS_UNARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
+                                                            | SCHEME_PRIM_PRODUCES_EXTFLONUM
+                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_FIRST);
+  scheme_add_global_constant("unsafe-extflsqrt", p, env);
 }
 
 Scheme_Object *
@@ -1135,3 +1288,86 @@ SAFE_FL(fl_div, "fl/", /)
 
 SAFE_FL1(fl_abs, "flabs", fabs)
 SAFE_FL1(fl_sqrt, "flsqrt", sqrt)
+
+#ifdef MZ_LONG_DOUBLE
+# define UNSAFE_EXTFL(name, op)                                          \
+  static Scheme_Object *name(int argc, Scheme_Object *argv[])           \
+  {                                                                     \
+    long_double v;                                                      \
+    CHECK_MZ_LONG_DOUBLE_UNSUPPORTED("unsafe-extfl" #op);               \
+    v = op(SCHEME_LONG_DBL_VAL(argv[0]), SCHEME_LONG_DBL_VAL(argv[1]));   \
+    return scheme_make_long_double(v);                                  \
+  }
+#else
+# define UNSAFE_EXTFL(name, op)                                         \
+  static Scheme_Object * name (int argc, Scheme_Object *argv[])         \
+  {                                                                     \
+    scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,                            \
+                     "unsafe-extfl" #op ": " NOT_SUPPORTED_STR);        \
+    return NULL;                                                        \
+  }
+#endif
+
+UNSAFE_EXTFL(unsafe_extfl_plus, long_double_plus)
+UNSAFE_EXTFL(unsafe_extfl_minus, long_double_minus)
+UNSAFE_EXTFL(unsafe_extfl_mult, long_double_mult)
+UNSAFE_EXTFL(unsafe_extfl_div, long_double_div)
+
+#ifdef MZ_LONG_DOUBLE
+# define UNSAFE_EXTFL1(name, op)                                        \
+  static Scheme_Object *name(int argc, Scheme_Object *argv[])           \
+  {                                                                     \
+    long_double v;                                                      \
+    v = SCHEME_LONG_DBL_VAL(argv[0]);                                   \
+    v = op(v);                                                          \
+    return scheme_make_long_double(v);                                  \
+  }
+#else
+# define UNSAFE_EXTFL1(name, op) UNSAFE_EXTFL(name, op)
+#endif
+
+UNSAFE_EXTFL1(unsafe_extfl_abs, long_double_fabs)
+UNSAFE_EXTFL1(unsafe_extfl_sqrt, long_double_sqrt)
+
+#ifdef MZ_LONG_DOUBLE
+# define SAFE_EXTFL(name, sname, op)                                     \
+  static Scheme_Object *name(int argc, Scheme_Object *argv[])           \
+  {                                                                     \
+    long_double v;                                                      \
+    CHECK_MZ_LONG_DOUBLE_UNSUPPORTED(sname);                            \
+    if (!SCHEME_LONG_DBLP(argv[0])) scheme_wrong_contract(sname, "extflonum?", 0, argc, argv); \
+    if (!SCHEME_LONG_DBLP(argv[1])) scheme_wrong_contract(sname, "extflonum?", 1, argc, argv); \
+    v = op(SCHEME_LONG_DBL_VAL(argv[0]), SCHEME_LONG_DBL_VAL(argv[1]));   \
+    return scheme_make_long_double(v);                                  \
+  }
+#else
+# define SAFE_EXTFL(name, sname, op)                                   \
+  static Scheme_Object * name (int argc, Scheme_Object *argv[])         \
+  {                                                                     \
+    scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,                            \
+                     sname ": " NOT_SUPPORTED_STR);                     \
+    return NULL;                                                        \
+  }
+#endif
+
+SAFE_EXTFL(extfl_plus, "extfl+", long_double_plus)
+SAFE_EXTFL(extfl_minus, "extfl-", long_double_minus)
+SAFE_EXTFL(extfl_mult, "extfl*", long_double_mult)
+SAFE_EXTFL(extfl_div, "extfl/", long_double_div)
+
+#ifdef MZ_LONG_DOUBLE
+# define SAFE_EXTFL1(name, sname, op)                                    \
+  static Scheme_Object *name(int argc, Scheme_Object *argv[])           \
+  {                                                                     \
+   long_double v;                                                       \
+   if (!SCHEME_LONG_DBLP(argv[0])) scheme_wrong_contract(sname, "extflonum?", 0, argc, argv); \
+   v = SCHEME_LONG_DBL_VAL(argv[0]);                                    \
+   v = op(v);                                                           \
+   return scheme_make_long_double(v);                                   \
+   }
+#else
+# define SAFE_EXTFL1(name, sname, op) SAFE_EXTFL(name, sname, op)
+#endif
+
+SAFE_EXTFL1(extfl_abs, "extflabs", long_double_fabs)
+SAFE_EXTFL1(extfl_sqrt, "extflsqrt", long_double_sqrt)

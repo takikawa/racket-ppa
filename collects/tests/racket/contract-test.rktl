@@ -39,6 +39,17 @@
       [(_ a ...)
        (syntax (contract-eval `(,test a ...)))]))
 
+  (define-syntax (ctest-no-error stx)
+    (syntax-case stx ()
+      [(_ name e)
+       (syntax
+         (ctest
+           #t
+           name
+           (with-handlers ([exn:fail? (lambda (x) `(exn ,(exn-message x)))])
+             e
+             #t)))]))
+
   (define (contract-error-test name exp exn-ok?)
     (test #t
           name
@@ -3325,6 +3336,29 @@
       x)
    '(body ctc))
 
+  (test/pos-blame
+   '->i-bad-number-of-result-values1
+   '((contract (->i ((x any/c)) (result (x) any/c))
+               (λ (x) (values 1 2))
+               'pos
+               'neg)
+     1))
+
+  (test/pos-blame
+   '->i-bad-number-of-result-values2
+   '((contract (->i ((giraffe any/c)) (elephant any/c))
+               (λ (x) (values 1 2))
+               'pos
+               'neg)
+     1))
+  
+  ;; this used to cause a runtime error in the code that parses ->i
+  (ctest 'no-crash
+         '->i-no-vars-with-dep
+         (begin (->i ([x () any/c] [y (x) any/c]) any) 'no-crash))
+
+
+  
 ;
 ;
 ;
@@ -3593,7 +3627,78 @@
   (test/pos-blame
    'unconstrained-domain->7
    '((contract (unconstrained-domain-> number?) (λ (#:x x) x) 'pos 'neg) #:x #f))
+  
+  
+  
+;                                                                                                
+;                                                                                                
+;                                                                                                
+;                                                                                                
+;                                                     ;       ;;;                       ;        
+;                                                   ;;;                        ;        ;        
+;  ;;; ;;   ;;;;;  ;;; ;;;;;;;  ;;; ;; ;;;    ;;;;  ;;;; ;;; ;;;;   ;;;        ;;;;    ;   ;;;   
+;  ;;;;;;; ;;;;;;; ;;;;;;;;;;;; ;;;;;;;;;;;  ;; ;;; ;;;; ;;;;;;;;  ;;;;;        ;;;;;  ;  ;;;;;  
+;  ;;; ;;; ;;  ;;; ;;;  ;;  ;;; ;;; ;;; ;;; ;;; ;;; ;;;  ;;;  ;;; ;;;  ;;          ;;  ; ;;;  ;; 
+;  ;;; ;;;   ;;;;; ;;;    ;;;;; ;;; ;;; ;;; ;;;;;;; ;;;  ;;;  ;;; ;;;     ;;;;  ;;;;;  ; ;;;     
+;  ;;; ;;; ;;; ;;; ;;;  ;;; ;;; ;;; ;;; ;;; ;;;     ;;;  ;;;  ;;; ;;;  ;; ;;;; ;;;;    ; ;;;  ;; 
+;  ;;;;;;; ;;; ;;; ;;;  ;;; ;;; ;;; ;;; ;;;  ;;;;;; ;;;; ;;;  ;;;  ;;;;;       ;      ;   ;;;;;  
+;  ;;; ;;   ;;;;;; ;;;   ;;;;;; ;;; ;;; ;;;   ;;;;   ;;; ;;;  ;;;   ;;;               ;    ;;;   
+;  ;;;                                                                                           
+;  ;;;                                                                                           
+;                                                                                                
+;                                                                                                
 
+
+  (test/spec-passed/result
+   'parametric->/c1
+   '((contract (parametric->/c (A) (-> A A))
+               (λ (x) x)
+               'pos 'neg)
+     1)
+   1)
+  
+  (test/pos-blame
+   'parametric->/c2
+   '((contract (parametric->/c (A) (-> A A))
+               (λ (x) 1)
+               'pos 'neg)
+     1))
+  
+  (test/pos-blame
+   'parametric->/c3
+   '((contract (parametric->/c (A B) (-> A B))
+               (λ (x) x)
+               'pos 'neg)
+     1))
+  
+  ;; this should (probably) not require the
+  ;; application to 1, but parametric->/c
+  ;; currently checks only that its argument
+  ;; is a procedure and otherwise delays any
+  ;; checking until the first application of
+  ;; the wrapper
+  (test/pos-blame
+   'parametric->/c4
+   '((contract (parametric->/c (A) (-> A A))
+               (λ (x y) x)
+               'pos 'neg)
+     1))
+  
+  (test/pos-blame
+   'parametric->/c5
+   '(contract (parametric->/c (A) (-> A A))
+              5
+              'pos 'neg))
+  
+  (test/spec-passed/result
+   'parametric->/c6
+   '((contract (parametric->/c (A B) (-> A B (or/c A B)))
+               (λ (x y) x)
+               'pos 'neg)
+     1 "foo")
+   1)
+  
+  
 ;
 ;
 ;
@@ -3853,11 +3958,42 @@
      #f))
 
   (test/pos-blame
-   'parameter/c1
+   'parameter/c2
    '((contract (parameter/c integer?)
                (make-parameter 'not-an-int)
                'pos 'neg)))
 
+  (test/pos-blame
+   'parameter/c3
+   '((contract (parameter/c integer? string?)
+               (make-parameter 'not-an-int number->string)
+               'pos 'neg)))
+
+  (test/neg-blame
+   'parameter/c4
+   '((contract (parameter/c integer? string?)
+               (make-parameter 5 number->string)
+               'pos 'neg)
+     'not-an-int))
+
+  (test/spec-passed
+   'parameter/c5
+   '((contract (parameter/c integer? string?)
+               (make-parameter "foo" number->string)
+               'pos 'neg)))
+
+  (test/spec-passed
+   'parameter/c6
+   '((contract (parameter/c integer? string?)
+               (make-parameter "foo" number->string)
+               'pos 'neg)
+     5))
+
+  (test/pos-blame
+   'parameter/c7
+   '((contract (parameter/c integer? string?)
+               (make-parameter 5 values)
+               'pos 'neg)))
 
 ;
 ;
@@ -4639,7 +4775,6 @@
                              (λ (hash k) k))])
       (contract (hash/c any/c any/c) v 'pos 'neg)))
   
-  
 ;
 ;
 ;
@@ -4986,7 +5121,22 @@
       1)
    "top-level")
 
+  (test/spec-passed
+   'define/contract
+   '(let ()
+      (define/contract (f x #:y [y 3])
+        (->* (integer?) (#:y integer?) integer?)
+        x)
+      (f 3 #:y 7)))
 
+  (test/spec-failed
+   'define/contract
+   '(let ()
+      (define/contract (f x #:y [y 3])
+        (->* (integer?) (#:y integer?) integer?)
+        x)
+      (f 3 #:y #f))
+   "top-level")
 
 ;
 ;
@@ -5435,6 +5585,47 @@
       (eval '(require 'with-contract-#%app-client))
       (eval '(list with-contract-#%app-h with-contract-#%app-i)))
    (list 'apped 'apped))
+  
+  (test/spec-passed/result
+   'with-contract-one-contract-app-per-mutation-1
+   '(let* ([counter 0]
+           [ctc (λ (x) (set! counter (add1 counter)) (number? x))])
+      (with-contract foo ([x ctc])
+        (define x 3))
+      (+ x 4)
+      (+ x 6)
+      counter)
+   1)
+  
+  (test/spec-passed/result
+   'with-contract-one-contract-app-per-mutation-2
+   '(let* ([counter 0]
+           [ctc (λ (x) (set! counter (add1 counter)) (number? x))])
+      (with-contract foo ([x ctc])
+        (define x 3))
+      (+ x 4)
+      (+ x 6)
+      (set! x 6)
+      (+ x 6)
+      (+ x 2)
+      counter)
+   ;; 3 because of a double wrapping that occurs for outside mutations
+   ;; (that is, internal gets wrapped, then external gets wrapped again
+   ;; to fix blame.  Could be optimized away if we had blame collapsing,
+   ;; e.g., (contract ctc (contract ctc x n1 p1) n2 p2) =>
+   ;; (contract ctc x n2 p1), so if this breaks after adding such adjust it.
+   3)
+  
+  ;; Check to make sure that any non-delayed set!s within the region don't
+  ;; get overridden when accessing the external version.
+  (test/spec-passed/result
+   'with-contract-on-contract-app-per-mutation-3
+   '(let ()
+      (with-contract foo ([x number?])
+        (define x 3)
+        (set! x 4))
+      x)
+   4)
 
 ;
 ;
@@ -8376,6 +8567,20 @@
               (class object% (super-new) (define/public (m x) x))
               'pos
               'neg))
+  
+  (test/spec-passed
+   '->m-kwd-first-order-1
+   '(contract (class/c [m (->m #:x number? number?)])
+              (class object% (super-new) (define/public (m #:x x) x))
+              'pos
+              'neg))
+
+  (test/pos-blame
+   '->m-kwd-first-order-2
+   '(contract (class/c [m (->m #:y number? number?)])
+              (class object% (super-new) (define/public (m #:x x) x))
+              'pos
+              'neg))
 
   (test/spec-passed
    '->*m-first-order-1
@@ -9446,6 +9651,10 @@
               'pos
               'neg))
 
+  (test/no-error '(syntax/c (list/c #f)))
+  (contract-error-test 'syntax/c-non-flat '(syntax/c (vector/c #f))
+                       (λ (x) (regexp-match? #rx"flat-contract[?]" (exn-message x))))
+
 
 ;
 ;
@@ -10418,7 +10627,7 @@
        (struct/dc s [ernie integer?] [bert (new-∀/c 'α)]))
    (λ (x)
      (and (exn:fail? x)
-          (regexp-match #rx"expected chaperone" (exn-message x)))))
+          (regexp-match #rx"chaperone-contract[?]" (exn-message x)))))
 
   (contract-error-test
    'struct/dc-not-a-field
@@ -12056,6 +12265,7 @@ so that propagation occurs.
   (test-name '(unconstrained-domain-> number?) (unconstrained-domain-> number?))
 
   (test-name '(or/c) (or/c))
+  (test-name '(or/c '()) (or/c '()))
   (test-name '(or/c integer? gt0?) (or/c integer? (let ([gt0? (lambda (x) (> x 0))]) gt0?)))
   (test-name '(or/c integer? boolean?)
              (or/c (flat-contract integer?)
@@ -12108,7 +12318,7 @@ so that propagation occurs.
   (test-name 'printable/c printable/c)
   (test-name '(or/c 'a 'b 'c) (symbols 'a 'b 'c))
   (test-name '(or/c 1 2 3) (one-of/c 1 2 3))
-  (test-name '(one-of/c '() 'x 1 #f #\a (void) (letrec ([x x]) x))
+  (test-name '(or/c '() 'x 1 #f #\a void? undefined?)
              (one-of/c '() 'x 1 #f #\a (void) (letrec ([x x]) x)))
 
   (test-name '(or/c #f #t #\a "x") (or/c #f #t #\a "x"))
@@ -12170,6 +12380,7 @@ so that propagation occurs.
              (list/c (-> boolean? boolean?) integer?))
 
   (test-name '(parameter/c integer?) (parameter/c integer?))
+  (test-name '(parameter/c integer? string?) (parameter/c integer? string?))
 
   (test-name '(hash/c symbol? boolean?) (hash/c symbol? boolean?))
   (test-name '(hash/c symbol? boolean? #:immutable #t) (hash/c symbol? boolean? #:immutable #t))
@@ -12346,6 +12557,19 @@ so that propagation occurs.
   (ctest #t contract-stronger? (parameter/c (between/c 0 5)) (parameter/c (between/c 0 5)))
   (ctest #f contract-stronger? (parameter/c (between/c 0 5)) (parameter/c (between/c 1 4)))
   (ctest #f contract-stronger? (parameter/c (between/c 1 4)) (parameter/c (between/c 0 5)))
+
+  (ctest #f contract-stronger? (parameter/c (between/c 1 4) (between/c 0 5))
+                               (parameter/c (between/c 0 5)))
+  (ctest #t contract-stronger? (parameter/c (between/c 0 5) (between/c 1 4))
+                               (parameter/c (between/c 1 4)))
+  (ctest #t contract-stronger? (parameter/c (between/c 0 5))
+                               (parameter/c (between/c 1 4) (between/c 0 5)))
+  (ctest #f contract-stronger? (parameter/c (between/c 1 4))
+                               (parameter/c (between/c 0 5) (between/c 0 5)))
+  (ctest #t contract-stronger? (parameter/c (between/c 0 5) (between/c 1 4))
+                               (parameter/c (between/c 1 4) (between/c 0 5)))
+  (ctest #f contract-stronger? (parameter/c (between/c 1 4) (between/c 0 5))
+                               (parameter/c (between/c 0 5) (between/c 1 4)))
 
   (ctest #t contract-stronger? (symbols 'x 'y) (symbols 'x 'y 'z))
   (ctest #f contract-stronger? (symbols 'x 'y 'z) (symbols 'x 'y))
@@ -12789,7 +13013,7 @@ so that propagation occurs.
                                  'pos
                                  'neg))
                      (f 10)))
-
+  
 
 
 ;
@@ -13420,7 +13644,7 @@ so that propagation occurs.
             1 "a")))
 
 
-  (let* ([blame-pos (contract-eval '(make-blame #'here #f (λ () 'integer?) 'positive 'negative #t))]
+  (let* ([blame-pos (contract-eval '(make-blame (srcloc #f #f #f #f #f) #f (λ () 'integer?) 'positive 'negative #t))]
          [blame-neg (contract-eval `(blame-swap ,blame-pos))])
     (ctest "something ~a" blame-fmt->-string ,blame-neg "something ~a")
     (ctest "promised: ~s\n produced: ~e" blame-fmt->-string ,blame-pos '(expected: "~s" given: "~e"))
@@ -13474,18 +13698,23 @@ so that propagation occurs.
                       (racket/contract:positive-position b)))
   (test-obligations '(box/c a)
                     '((racket/contract:contract (box/c) ())
+                      (racket/contract:negative-position a)
                       (racket/contract:positive-position a)))
   (test-obligations '(box-immutable/c a)
                     '((racket/contract:contract (box-immutable/c) ())
                       (racket/contract:positive-position a)))
   (test-obligations '(vectorof a)
                     '((racket/contract:contract (vectorof) ())
+                      (racket/contract:negative-position a)
                       (racket/contract:positive-position a)))
   (test-obligations '(vector-immutableof a)
                     '((racket/contract:contract (vector-immutableof) ())
                       (racket/contract:positive-position a)))
   (test-obligations '(vector/c a b c)
                     '((racket/contract:contract (vector/c) ())
+                      (racket/contract:negative-position a)
+                      (racket/contract:negative-position b)
+                      (racket/contract:negative-position c)
                       (racket/contract:positive-position a)
                       (racket/contract:positive-position b)
                       (racket/contract:positive-position c)))
@@ -14337,6 +14566,45 @@ so that propagation occurs.
       (eval '(require 'provide/contract42-m2))
       (eval 'provide/contract42-x))
    10)
+  
+  (test/spec-passed/result
+   'provide/contract43
+   '(begin
+      (eval '(module provide/contract43-m1 racket/base
+               (require racket/contract)
+               (struct spider (legs))
+               (provide (contract-out (struct spider ([legs number?]))))))
+      
+      (eval '(module provide/contract43-m2 racket/base
+               (require racket/contract 'provide/contract43-m1)
+               (provide provide/contract43-x)
+               (define provide/contract43-x
+                 (spider-legs
+                  (contract (struct/c spider integer?)
+                            (spider 121)
+                            'pos
+                            'neg)))))
+
+      (eval '(require 'provide/contract43-m2))
+      (eval 'provide/contract43-x))
+   121)
+  
+  (test/spec-passed
+   'provide/contract44
+   '(begin
+      (eval '(module provide/contract44-m1 racket/base
+               (require racket/contract)
+                (struct heap (v) #:transparent)
+               (provide (rename-out (heap new-heap)))))
+      
+      (eval '(module provide/contract44-m2 racket/base
+               (require racket/contract 'provide/contract44-m1)
+               (contract (struct/c new-heap any/c)
+                         (new-heap 121)
+                         'pos
+                         'neg)))
+
+      (eval '(require 'provide/contract44-m2))))
 
   (contract-error-test
    'contract-error-test8
@@ -14703,6 +14971,182 @@ so that propagation occurs.
              (,get-last-part-of-path (blame-negative ,blame)))))
 
 
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;;
+  ;;  Blame Object properties
+  ;;
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+  (contract-eval
+    '(begin
+       (module blame-ok/c racket/base
+         (require racket/contract)
+         (define (blame-proj name)
+           (lambda (b)
+             (unless (blame? b)
+               (raise-type-error name "a blame object" b))
+             (define src (blame-source b))
+             (unless (srcloc? src)
+               (raise-type-error name "a srcloc" src))
+             (lambda (x) x)))
+         (define impersonator-blame-ok/c
+           (make-contract
+             #:name 'impersonator-blame-ok/c
+             #:projection (blame-proj 'impersonator-blame-ok/c)))
+         (define chaperone-blame-ok/c
+           (make-chaperone-contract
+             #:name 'chaperone-blame-ok/c
+             #:projection (blame-proj 'chaperone-blame-ok/c)))
+         (define flat-blame-ok/c
+           (make-flat-contract
+             #:name 'flat-blame-ok/c
+             #:projection (blame-proj 'flat-blame-ok/c)))
+         (provide
+           impersonator-blame-ok/c
+           chaperone-blame-ok/c
+           flat-blame-ok/c))
+       (require 'blame-ok/c)
+       (module blame-ok-dynamic racket/base
+         (require racket/contract 'blame-ok/c)
+         (define five 5)
+         (provide
+           (contract-out
+             [rename five impersonator-five impersonator-blame-ok/c]
+             [rename five chaperone-five chaperone-blame-ok/c]
+             [rename five flat-five flat-blame-ok/c])))))
+
+  (begin
+    (ctest-no-error
+      'blame-object/impersonator/contract-out
+      (dynamic-require ''blame-ok-dynamic 'impersonator-five))
+    (ctest-no-error
+      'blame-object/chaperone/contract-out
+      (dynamic-require ''blame-ok-dynamic 'chaperone-five))
+    (ctest-no-error
+      'blame-object/flat/contract-out
+      (dynamic-require ''blame-ok-dynamic 'flat-five)))
+
+  (begin
+    (ctest-no-error
+      'blame-object/impersonator/contract
+      (contract impersonator-blame-ok/c 5 'pos 'neg 'five #',#'location))
+    (ctest-no-error
+      'blame-object/chaperone/contract
+      (contract chaperone-blame-ok/c 5 'pos 'neg 'five #',#'location))
+    (ctest-no-error
+      'blame-object/flat/contract
+      (contract flat-blame-ok/c 5 'pos 'neg 'five #',#'location)))
+
+  (begin
+    (ctest-no-error
+      'blame-object/impersonator/define/contract
+      (let ()
+        (define/contract five impersonator-blame-ok/c 5)
+        five))
+    (ctest-no-error
+      'blame-object/chaperone/define/contract
+      (let ()
+        (define/contract five chaperone-blame-ok/c 5)
+        five))
+    (ctest-no-error
+      'blame-object/flat/define/contract
+      (let ()
+        (define/contract five flat-blame-ok/c 5)
+        five)))
+
+  (begin
+    (ctest-no-error
+      'blame-object/impersonator/with-contract-definition-export
+      (let ()
+        (with-contract internal-region ([five impersonator-blame-ok/c])
+          (define five 5))
+        five))
+    (ctest-no-error
+      'blame-object/chaperone/with-contract-definition-export
+      (let ()
+        (with-contract internal-region ([five chaperone-blame-ok/c])
+          (define five 5))
+        five))
+    (ctest-no-error
+      'blame-object/flat/with-contract-definition-export
+      (let ()
+        (with-contract internal-region ([five flat-blame-ok/c])
+          (define five 5))
+        five)))
+
+  (begin
+    (ctest-no-error
+      'blame-object/impersonator/with-contract-definition-import
+      (let ()
+        (define five 5)
+        (with-contract internal-region () #:freevar five impersonator-blame-ok/c
+          (define six (add1 five)))
+        six))
+    (ctest-no-error
+      'blame-object/chaperone/with-contract-definition-import
+      (let ()
+        (define five 5)
+        (with-contract internal-region () #:freevar five chaperone-blame-ok/c
+          (define six (add1 five)))
+        six))
+    (ctest-no-error
+      'blame-object/flat/with-contract-definition-import
+      (let ()
+        (define five 5)
+        (with-contract internal-region () #:freevar five flat-blame-ok/c
+          (define six (add1 five)))
+        six)))
+
+  (begin
+    (ctest-no-error
+      'blame-object/impersonator/with-contract-expression-result
+      (with-contract internal-region #:result impersonator-blame-ok/c
+        5))
+    (ctest-no-error
+      'blame-object/chaperone/with-contract-expression-result
+      (with-contract internal-region #:result chaperone-blame-ok/c
+        5))
+    (ctest-no-error
+      'blame-object/flat/with-contract-expression-result
+      (with-contract internal-region #:result flat-blame-ok/c
+        5)))
+
+  (begin
+    (ctest-no-error
+      'blame-object/impersonator/with-contract-expression-import
+      (let ()
+        (define five 5)
+        (with-contract internal-region #:result any/c #:freevar five impersonator-blame-ok/c
+          five)))
+    (ctest-no-error
+      'blame-object/chaperone/with-contract-expression-import
+      (let ()
+        (define five 5)
+        (with-contract internal-region #:result any/c #:freevar five chaperone-blame-ok/c
+          five)))
+    (ctest-no-error
+      'blame-object/flat/with-contract-expression-import
+      (let ()
+        (define five 5)
+        (with-contract internal-region #:result any/c #:freevar five flat-blame-ok/c
+          five))))
+
+  (begin
+    (ctest-no-error
+      'blame-object/impersonator/define-struct/contract
+      (let ()
+        (define-struct/contract thing ([stuff impersonator-blame-ok/c]))
+        (thing-stuff (thing 5))))
+    (ctest-no-error
+      'blame-object/chaperone/define-struct/contract
+      (let ()
+        (define-struct/contract thing ([stuff chaperone-blame-ok/c]))
+        (thing-stuff (thing 5))))
+    (ctest-no-error
+      'blame-object/flat/define-struct/contract
+      (let ()
+        (define-struct/contract thing ([stuff flat-blame-ok/c]))
+        (thing-stuff (thing 5)))))
 
 ;
 ;
@@ -14787,6 +15231,24 @@ so that propagation occurs.
    'make-proj-contract-4
    '((contract proj:add1->sub1 sqrt 'pos 'neg) 'dummy))
 
+  ;; errortrace test
+  (let ()
+    (define sp (open-input-string (format "~s\n" '(-> (λ (a b c) #f) any))))
+    (define stx (read-syntax 'whereitsat sp))
+    (define exn
+      (parameterize ([current-namespace (make-base-namespace)])
+        (namespace-require 'racket/contract)
+        (namespace-require 'errortrace)
+        (with-handlers ((exn:fail? values))
+          (eval stx))))
+    (define sp2 (open-output-string))
+    (parameterize ([current-error-port sp2])
+      ((error-display-handler) (exn-message exn) exn))
+    (test #t 
+          'checking-arrow-src-locs
+          (regexp-match? #rx"whereitsat" (get-output-string sp2))))
+
+  
   (report-errs)
 
 ))

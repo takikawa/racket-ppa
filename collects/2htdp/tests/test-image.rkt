@@ -55,6 +55,8 @@
          wxme
          rackunit
          file/convertible
+         slideshow/pict-convert
+         (only-in slideshow/pict pict?)
          (only-in lang/imageeq image=?)
          (prefix-in 1: htdp/image)
          (only-in lang/htdp-advanced equal~?)
@@ -1783,6 +1785,9 @@
       =>
       (list (color 1 1 1) (color 2 2 2) (color 3 3 3) 
             (color 4 4 4) (color 5 5 5) (color 6 6 6)))
+(test (image->color-list (empty-scene 0 0))
+      =>
+      '())
 
 (test (color-list->bitmap
        (list (color 1 1 1) (color 2 2 2) (color 3 3 3) 
@@ -1795,6 +1800,10 @@
              (beside (rectangle 1 1 'solid (color 4 4 4))
                      (rectangle 1 1 'solid (color 5 5 5))
                      (rectangle 1 1 'solid (color 6 6 6)))))
+
+(test (color-list->bitmap '() 0 0) => (empty-scene 0 0))
+(test (color-list->bitmap '() 0 10) => (empty-scene 0 10))
+(test (color-list->bitmap '() 4 0) => (empty-scene 4 0))
 
 (let ([has-color? 
        (λ (img) 
@@ -1840,6 +1849,18 @@
 (test (freeze 5 7 12 10 (rectangle 20 20 'solid 'blue))
       =>
       (rectangle 12 10 'solid 'blue))
+
+(test (freeze (rectangle 0 0 'solid 'blue))
+      =>
+      (rectangle 0 0 'solid 'blue))
+
+(test (freeze (rectangle 0 4 'solid 'blue))
+      =>
+      (rectangle 0 4 'solid 'blue))
+
+(test (freeze (rectangle 4 0 'solid 'blue))
+      =>
+      (rectangle 4 0 'solid 'blue))
 
 (let ()
   (define bkg (rectangle 12 12 'solid 'white))
@@ -2151,6 +2172,16 @@
 (test/exn (save-image "tri.png" (triangle 50 "solid" "purple"))
           =>
           #rx"^save-image:")
+(test/exn (save-image (rectangle 0 0 'solid 'blue) "sq.png")
+          =>
+          #rx"^save-image:")
+(test/exn (save-image (rectangle 10 0 'solid 'blue) "sq.png")
+          =>
+          #rx"^save-image:")
+(test/exn (save-image (rectangle 0 10 'solid 'blue) "sq.png")
+          =>
+          #rx"^save-image:")
+
 (test/exn (save-svg-image "tri.png" (triangle 50 "solid" "purple"))
           =>
           #rx"^save-svg-image:")
@@ -2255,6 +2286,10 @@
           =>
           #rx"^beside/align")
 
+(test/exn (beside (empty-scene 10 10) (empty-scene 10 10) '())
+          =>
+          #rx"^beside:")
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;;  testing the wxme connection for 2htdp/image images
@@ -2317,6 +2352,8 @@
 
 (test (convertible? (circle 20 "solid" "red")) => #t)
 (test (bytes? (convert (circle 20 "solid" "red") 'png-bytes)) => #t)
+(test (pict-convertible? (circle 20 "solid" "red")) => #t)
+(test (pict? (pict-convert (circle 20 "solid" "red"))) => #t)
 (let ()
   (define tmpfile (make-temporary-file "2htdpimage-test-~a"))
   (define i (circle 15 "solid" "red"))

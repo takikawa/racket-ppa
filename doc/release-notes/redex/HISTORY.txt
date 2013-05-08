@@ -1,3 +1,30 @@
+v5.3.4
+
+  * adjusted define-union-language to allow the unioned languages to
+    have overlapping non-terminals; in that case the productions are
+    combined
+
+  * Adjust check-metafunction and check-reduction-relation so that
+    they skip over randomly generated terms that don't match the
+    contract spec (or #:domain spec). This means that when there is a
+    case in the metafunction (or reduction-relation) whose nominal
+    pattern is more general than the contract would allow, that those
+    terms are discarded instead of used as inputs to the predicate.
+
+  * Added the #:pre keyword to define-metafunction. It allows
+    contracts that have to relate different arguments to a
+    metafunction.
+
+  * Fixed the way random generation for define-judgment-form works so
+    that it properly handles metafunctions (i.e., it properly takes
+    into account that previous patterns in a metafunction must not
+    match when generating a particular clause)
+
+
+v5.3.3
+
+No changes
+
 v5.3.2
 
   * added random-generation based on define-judgment-form
@@ -11,6 +38,11 @@ v5.3.2
 
   * added 'boolean' as a new pattern
 
+  * define-relation now compiles to judgment-form
+    (instead of a metafunction)
+  
+  * added show-derivations to visualize judgment form derivations
+    	     
 v5.3.1
 
   * added optional #:lang keyword to term

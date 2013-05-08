@@ -159,7 +159,8 @@
 (define (check generator property attempts retries show
                #:source [source #f]
                #:term-fix [term-fix #f]
-               #:term-match [term-match #f])
+               #:term-match [term-match #f]
+               #:skip-term? [skip-term? (λ (x) #f)])
   (let loop ([remaining attempts])
     (if (zero? remaining)
         #t
@@ -180,62 +181,72 @@
                                     term))))))])
             (let ([term (with-handlers ([exn:fail? (handler "fixing" term)])
                           (if term-fix (term-fix term) term))])
-              (if (if term-match
-                      (let ([bindings (make-bindings 
-                                       (match-bindings
-                                        (pick-from-list (term-match term))))])
-                        (with-handlers ([exn:fail? (handler "checking" term)])
-                          (match property
-                            [(term-prop pred) (pred term)]
-                            [(bind-prop pred) (pred bindings)])))
-                      (with-handlers ([exn:fail? (handler "checking" term)])
-                        (match (cons property term-fix)
-                          [(cons (term-prop pred) _) (pred term)]
-                          [(cons (bind-prop pred) #f) (pred bindings)])))
-                  (loop (sub1 remaining))
-                  (begin
-                    (when show
-                      (show
-                       (format "counterexample found after ~a~a:\n"
-                               (format-attempts attempt)
-                               (if source (format " with ~a" source) "")))
-                      (pretty-write term (current-output-port)))
-                    (make-counterexample term)))))))))
+              (cond
+                [(skip-term? term) (loop (- remaining 1))]
+                [else
+                 (if (if term-match
+                         (let ([bindings (make-bindings 
+                                          (match-bindings
+                                           (pick-from-list (term-match term))))])
+                           (with-handlers ([exn:fail? (handler "checking" term)])
+                             (match property
+                               [(term-prop pred) (pred term)]
+                               [(bind-prop pred) (pred bindings)])))
+                         (with-handlers ([exn:fail? (handler "checking" term)])
+                           (match (cons property term-fix)
+                             [(cons (term-prop pred) _) (pred term)]
+                             [(cons (bind-prop pred) #f) (pred bindings)])))
+                     (loop (sub1 remaining))
+                     (begin
+                       (when show
+                         (show
+                          (format "counterexample found after ~a~a:\n"
+                                  (format-attempts attempt)
+                                  (if source (format " with ~a" source) "")))
+                         (pretty-write term (current-output-port)))
+                       (make-counterexample term)))])))))))
 
 (define (check-lhs-pats lang mf/rr prop attempts retries what show term-fix
                         #:term-match [term-match #f])
-  (let ([lang-gen (compile lang what)])
-    (let-values ([(pats srcs)
-                  (cond [(metafunc-proc? mf/rr)
-                         (values (map (λ (case) ((metafunc-case-lhs+ case) lang)) 
-                                      (metafunc-proc-cases mf/rr))
-                                 (metafunction-srcs mf/rr))]
-                        [(reduction-relation? mf/rr)
-                         (values (map (λ (rwp) ((rewrite-proc-lhs rwp) lang)) (reduction-relation-make-procs mf/rr))
-                                 (reduction-relation-srcs mf/rr))])])
-      (let loop ([pats pats] [srcs srcs])
-        (if (and (null? pats) (null? srcs))
-            (if show
-                (show
-                 (format "no counterexamples in ~a (with each clause)\n"
-                         (format-attempts attempts)))
-                #t)
-            (let ([c (with-handlers ([exn:fail:redex:generation-failure?
-                                      ; Produce an error message that blames the LHS as a whole.
-                                      (λ (_)
-                                        (raise-gen-fail what (format "LHS of ~a" (car srcs)) retries))])
-                       (check
-                        (lang-gen (car pats))
-                        prop
-                        attempts
-                        retries
-                        show
-                        #:source (car srcs)
-                        #:term-match term-match
-                        #:term-fix term-fix))])
-              (if (counterexample? c)
-                  (unless show c)
-                  (loop (cdr pats) (cdr srcs)))))))))
+  (define lang-gen (compile lang what))
+  (define-values (pats srcs skip-term?)
+    (cond [(metafunc-proc? mf/rr)
+           (values (map (λ (case) ((metafunc-case-lhs+ case) lang)) 
+                        (metafunc-proc-cases mf/rr))
+                   (metafunction-srcs mf/rr)
+                   (compose not (metafunc-proc-in-dom? mf/rr)))]
+          [(reduction-relation? mf/rr)
+           (values (map (λ (rwp) ((rewrite-proc-lhs rwp) lang)) (reduction-relation-make-procs mf/rr))
+                   (reduction-relation-srcs mf/rr)
+                   (let ([pat (compile-pattern (reduction-relation-lang mf/rr)
+                                               (reduction-relation-domain-pat mf/rr)
+                                               #f)])
+                     (λ (x) (not (match-pattern? pat x)))))]))
+  
+  (let loop ([pats pats] [srcs srcs])
+    (if (and (null? pats) (null? srcs))
+        (if show
+            (show
+             (format "no counterexamples in ~a (with each clause)\n"
+                     (format-attempts attempts)))
+            #t)
+        (let ([c (with-handlers ([exn:fail:redex:generation-failure?
+                                  ; Produce an error message that blames the LHS as a whole.
+                                  (λ (_)
+                                    (raise-gen-fail what (format "LHS of ~a" (car srcs)) retries))])
+                   (check
+                    (lang-gen (car pats))
+                    prop
+                    attempts
+                    retries
+                    show
+                    #:skip-term? skip-term?
+                    #:source (car srcs)
+                    #:term-match term-match
+                    #:term-fix term-fix))])
+          (if (counterexample? c)
+              (unless show c)
+              (loop (cdr pats) (cdr srcs)))))))
 
 (define-syntax (check-metafunction stx)
   (syntax-case stx ()
@@ -377,9 +388,11 @@
                     => (λ (f)
                          #`(let* ([f #,f]
                                   [L (metafunc-proc-lang f)]
-                                  [compile-pat (compile L '#,form-name)])
+                                  [compile-pat (compile L '#,form-name)]
+                                  [cases (metafunc-proc-cases f)])
+                             (check-cases 'src cases)
                              (map (λ (c) (compile-pat ((metafunc-case-lhs+ c) L))) 
-                                  (metafunc-proc-cases f))))]
+                                  cases)))]
                    [else
                     #`(let* ([r #,(apply-contract #'reduction-relation?  #'src "#:source argument" form-name)]
                              [L (reduction-relation-lang r)]
@@ -402,6 +415,10 @@
          [(size . kw-args)
           (quasisyntax/loc stx
             (#,generator-syntax size . kw-args))]))]))
+
+(define (check-cases name cases)
+  (when (null? cases)
+    (raise-gen-fail 'generate-term (format "from ~a metafunction (it has no clauses)" name) 1)))
 
 (define-syntax (generate-mf-pat stx)
   (syntax-case stx ()
@@ -484,9 +501,9 @@
   (define gen (search/next (mk-clauses) pat size lang))
   (define (termify search-res)
     (cond
-      [search-res
+      [(not-failed? search-res)
        (define exp (pat->term lang (p*e-p search-res) (p*e-e search-res)))
-       (and exp
+       (and (not-failed? exp)
             (cons jf-id exp))]
       [else #f]))
   (λ ()
@@ -499,11 +516,11 @@
                            size
                            lang))
   (define (termify res)
-    (and res
+    (and (not-failed? res)
          (match res
            [(p*e lhs+rhs env)
             (define lhs+rhs-term (pat->term lang lhs+rhs env))
-            (and lhs+rhs-term
+            (and (not-failed? lhs+rhs-term)
                  (match lhs+rhs-term
                    [(list lhs-term rhs-term)
                     `((,fn ,@lhs-term) = ,rhs-term)]))])))

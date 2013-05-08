@@ -41,27 +41,10 @@
   (list))
 
 (define table (append binary/small-second-arg-table binary-table unary-table nary-table))
-
-(define (normalize-arity a)
-  (cond
-    [(list? a)
-     (let ([at-least (ormap (λ (x) (and (arity-at-least? x) x)) a)])
-       (if at-least
-           (let ([new-a
-                  (filter (λ (x) (or (not (number? x))
-                                     (< x (arity-at-least-value at-least))))
-                          a)])
-             (if (pair? (cdr new-a))
-                 new-a
-                 (car new-a)))
-           (if (pair? (cdr a))
-               a
-               (car a))))]
-    [else a]))
   
 (define (check-arity fx unsafe-fx)
-  (let ([same-arities? (λ (x y) (equal? (normalize-arity (procedure-arity x))
-                                        (normalize-arity (procedure-arity y))))])
+  (let ([same-arities? (λ (x y) (equal? (procedure-arity x)
+                                        (procedure-arity y)))])
     (test #t
           same-arities?
           fx
@@ -231,5 +214,13 @@
 (test-sequence [(8 6 4)] (in-fxvector (fxvector 1 2 3 4 5 6 7 8) 7 1 -2))
 (test-sequence [(2 4 6)] (in-fxvector (fxvector 1 2 3 4 5 6 7 8) 1 6 2))
 (test-sequence [(8 6 4)] (in-fxvector (fxvector 1 2 3 4 5 6 7 8) 7 2 -2))
+
+;; Check safety:
+(err/rt-test (for/fxvector ([i 5]) 8.0))
+(err/rt-test (for/fxvector #:length 5 ([i 5]) 8.0))
+(err/rt-test (for/fxvector #:length 5 #:fill 0 ([i 5]) 8.0))
+(err/rt-test (for/fxvector #:length 5 #:fill 0.0 ([i 5]) 8))
+(err/rt-test (for/fxvector #:length 10 #:fill 0.0 ([i 5]) 8))
+
 
 (report-errs)

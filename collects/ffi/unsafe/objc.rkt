@@ -307,12 +307,12 @@
               (as-atomic (hash-set! msgSends types m))
               m)))))
 
-(define msgSends (make-hash))
+(define msgSends (make-weak-hash))
 (define (objc_msgSend/typed types)
   (lookup-send types msgSends objc_msgSend objc_msgSend_fpret objc_msgSend_stret _id))
 (provide objc_msgSend/typed)
 
-(define msgSendSupers (make-hash))
+(define msgSendSupers (make-weak-hash))
 (define (objc_msgSendSuper/typed types)
   (lookup-send types msgSendSupers objc_msgSendSuper objc_msgSendSuper_fpret objc_msgSendSuper_stret _pointer))
 (provide objc_msgSendSuper/typed)
@@ -604,14 +604,15 @@
              (begin
                (define superclass-id superclass)
                (define id (allocate-class-pair superclass-id id-str))
-               (void (add-protocol id proto)) ...
-               (add-ivar id 'ivar) ...
-               (let-syntax ([ivar (make-ivar-form 'ivar)] ...)
-                 (add-method whole-stx id superclass-id method) ...
-                 (mixin id superclass-id '(ivar ...)) ...
-                 (add-method whole-stx id superclass-id dealloc-method) ...
-                 (void))
-               (register-class-pair id))))))]
+               (when id
+                 (void (add-protocol id proto)) ...
+                 (add-ivar id 'ivar) ...
+                 (let-syntax ([ivar (make-ivar-form 'ivar)] ...)
+                   (add-method whole-stx id superclass-id method) ...
+                   (mixin id superclass-id '(ivar ...)) ...
+                   (add-method whole-stx id superclass-id dealloc-method) ...
+                   (void))
+                 (register-class-pair id)))))))]
     [(_ id superclass (ivar ...) method ...)
      #'(define-objc-class id superclass #:mixins () #:protocols () (ivar ...) method ...)]
     [(_ id superclass #:mixins (mixin ...) (ivar ...) method ...)
@@ -663,7 +664,7 @@
          [(set! _ val)
           (syntax/loc stx (set-ivar! self sym val))]
          [(_ arg ...)
-          (quasisyntax/loc stx (#,(quasisyntax/loc #'sym #'(get-ivar self sym)) 
+          (quasisyntax/loc stx (#,(quasisyntax/loc #'sym (get-ivar self sym)) 
                                 arg ...))]
          [_ (quasisyntax/loc #'sym (get-ivar self sym))])))))
 

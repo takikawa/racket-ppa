@@ -377,34 +377,31 @@
       (define color (if (is-a? in-color color%)
                         in-color
                         (send the-color-database find-color in-color)))
-      (define found-one? #f)
       (unhighlight-ranges
        (λ (r-start r-end r-color r-caret-space? r-style r-adjust-on-insert/delete? r-key)
-         (cond
-           [found-one? #f]
-           [(and (equal? start r-start)
-                 (equal? end r-end)
-                 (equal? color r-color)
-                 (equal? caret-space? r-caret-space?)
-                 (equal? style r-style))
-            (set! found-one? #t)
-            #t]
-           [else #f]))))
+         (and (equal? start r-start)
+              (equal? end r-end)
+              (equal? color r-color)
+              (equal? caret-space? r-caret-space?)
+              (equal? style r-style)))
+       #t))
     
     (define/public (unhighlight-ranges/key key)
       (unhighlight-ranges
        (λ (r-start r-end r-color r-caret-space? r-style r-adjust-on-insert/delete? r-key)
          (equal? r-key key))))
     
-    (define/public (unhighlight-ranges pred)
+    (define/public (unhighlight-ranges pred [just-one? #f])
       (define left #f)
       (define top #f)
       (define right #f)
       (define bottom #f)
+      (define found-one? #f)
       (queue-filter! 
        ranges-deq
        (λ (a-range)
          (cond
+           [(and just-one? found-one?) #t]
            [(pred (range-start a-range)
                   (range-end a-range)
                   (range-color a-range)
@@ -412,6 +409,7 @@
                   (range-style a-range)
                   (range-adjust-on-insert/delete? a-range)
                   (range-key a-range))
+            (set! found-one? #t)
             (for ([rect (in-list (range-rectangles a-range))])
               (set!-values (left top right bottom)
                 (join-rectangles left top right bottom rect)))
@@ -924,7 +922,8 @@
              normalize?))]
         [else
          (preferences:get 'framework:do-paste-normalization)]))
-    (define/public (string-normalize s) (string-normalize-nfkc s))
+    (define/public (string-normalize s) 
+      (regexp-replace* #rx"\u200b" (string-normalize-nfkc s) ""))
     
     (define/override (do-paste start time)
       (dynamic-wind
@@ -1718,10 +1717,10 @@
     
     ;; only need to override this unhighlight-ranges, since 
     ;; all the other unhighlighting variants call this one
-    (define/override (unhighlight-ranges pred)
+    (define/override (unhighlight-ranges pred [just-one? #f])
       (when delegate 
-        (send delegate unhighlight-ranges pred))
-      (super unhighlight-ranges pred))
+        (send delegate unhighlight-ranges pred just-one?))
+      (super unhighlight-ranges pred just-one?))
     
     (inherit get-canvases get-active-canvas has-focus?)
     (define/override (on-paint before? dc left top right bottom dx dy draw-caret?)
@@ -1732,14 +1731,25 @@
             (when active-canvas
               (send (send active-canvas get-top-level-window) delegate-moved))))))
     
+    (define no-delegate-edit-sequence-depth 0)
+     
     (define/augment (on-edit-sequence)
-      (when delegate 
-        (send delegate begin-edit-sequence))
+      (cond
+        [delegate 
+         (send delegate begin-edit-sequence)]
+        [else
+         (set! no-delegate-edit-sequence-depth
+               (+ no-delegate-edit-sequence-depth 1))])
       (inner (void) on-edit-sequence))
 
     (define/augment (after-edit-sequence)
-      (when delegate 
-        (send delegate end-edit-sequence))
+      (cond
+        [(and delegate 
+              (= 0 no-delegate-edit-sequence-depth))
+         (send delegate end-edit-sequence)]
+        [else
+         (set! no-delegate-edit-sequence-depth
+               (- no-delegate-edit-sequence-depth 1))])
       (inner (void) after-edit-sequence))
     
     (define/override (resized snip redraw-now?)
@@ -1955,22 +1965,25 @@
     (define read-write? #t)
     (define/public (get-read-write?) read-write?)
     (define/private (check-lock)
-      (let* ([filename (get-filename)]
-             [can-edit? (if (and filename
-                                 (file-exists? filename))
-                            (and (member 'write (file-or-directory-permissions filename)) 
-                                 #t)
-                            #t)])
-        (set! read-write? can-edit?)))
+      (define filename (get-filename))
+      (define can-edit?
+        (if (and filename
+                 (file-exists? filename))
+            (and (member 'write 
+                         (with-handlers ([exn:fail:filesystem? (λ (x) '())])
+                           (file-or-directory-permissions filename)))
+                 #t)
+            #t))
+      (set! read-write? can-edit?))
     
     (define/public (while-unlocked t)
-      (let ([unlocked? 'unint])
-        (dynamic-wind
-         (λ () 
-           (set! unlocked? read-write?)
-           (set! read-write? #t))
-         (λ () (t))
-         (λ () (set! read-write? unlocked?)))))
+      (define unlocked? 'unint)
+      (dynamic-wind
+       (λ () 
+         (set! unlocked? read-write?)
+         (set! read-write? #t))
+       (λ () (t))
+       (λ () (set! read-write? unlocked?))))
     
     (define/augment (can-insert? x y)
       (and read-write? (inner #t can-insert? x y)))
@@ -4275,13 +4288,20 @@ designates the character that triggers autocompletion
          ;; when the line stays the same, don't invalidate anything
          (set! old-position (get-start-position))]
         [else
-         (when old-position
-           (invalidate-at-position old-position))
+         (define old-position-before old-position)
          (set! old-position (and (= (get-start-position)
                                     (get-end-position))
                                  (get-start-position)))
-         (when old-position
-           (invalidate-at-position old-position))])
+         (define single-edit-sequence?
+           (and old-position-before 
+                old-position
+                (<= (abs (- (position-paragraph old-position-before)
+                            (position-paragraph old-position)))
+                    1)))
+         (when single-edit-sequence? (begin-edit-sequence #f #f))
+         (when old-position-before (invalidate-at-position old-position-before))
+         (when old-position (invalidate-at-position old-position))
+         (when single-edit-sequence? (end-edit-sequence))])
       (inner (void) after-set-position))
     
     (define/private (invalidate-at-position pos)

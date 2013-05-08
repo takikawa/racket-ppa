@@ -72,19 +72,19 @@ v4 todo:
   #`(call-with-immediate-continuation-mark
      contract-key
      (λ (m)
-       (cond
-         [(tail-marks-match? m . #,rng-ctcs)
-          #,(call-gen #'())]
-         [else #,(call-gen rng-checkers)]))))
+       (if (tail-marks-match? m . #,rng-ctcs)
+           #,(call-gen #'())
+           #,(call-gen rng-checkers)))))
 
 (begin-encourage-inline
  (define tail-marks-match?
     (case-lambda
       [(m) (and m (null? m))]
-      [(m rng-ctc) (and m
-                        (not (null? m))
-                        (null? (cdr m))
-                        (procedure-closure-contents-eq? (car m) rng-ctc))]
+      [(m rng-ctc)
+       (and m
+            (not (null? m))
+            (null? (cdr m))
+            (procedure-closure-contents-eq? (car m) rng-ctc))]
       [(m rng-ctc1 rng-ctc2)
        (and m
             (= (length m) 2)
@@ -110,7 +110,7 @@ v4 todo:
                (λ (orig-blame)
                  (let ([rng-blame (blame-add-context orig-blame "the range of")])
                    (let* ([p-app-x (proj-x rng-blame)] ...
-                          [res-checker (λ (res-x ...) (values (p-app-x res-x) ...))])
+                          [res-checker (λ (res-x ...) (values/drop (p-app-x res-x) ...))])
                      (λ (val)
                        (unless (procedure? val)
                          (raise-blame-error orig-blame val '(expected: "a procedure" given: "~v") val))
@@ -241,7 +241,7 @@ v4 todo:
                                                  (with-syntax ([proj (car (syntax->list #'(rng-ctc ...)))]
                                                                [name (car (syntax->list #'(rng-x ...)))])
                                                    #'(proj name))
-                                                 #'(values (rng-ctc rng-x) ...))])
+                                                 #'(values/drop (rng-ctc rng-x) ...))])
                                 #'(case-lambda
                                     [(rng-x ...)
                                      post ...
@@ -293,13 +293,13 @@ v4 todo:
                                (tx s)))])
               (with-syntax ([kwd-lam-params
                              (if dom-rest
-                                 #'(dom-x ... [opt-dom-x unspecified-dom] ... kwd-param ... . rest-x)
-                                 #'(dom-x ... [opt-dom-x unspecified-dom] ... kwd-param ...))]
+                                 #'(this-param ... dom-x ... [opt-dom-x unspecified-dom] ... kwd-param ... . rest-x)
+                                 #'(this-param ... dom-x ... [opt-dom-x unspecified-dom] ... kwd-param ...))]
                             [basic-return
                              (let ([inner-stx-gen
                                     (if need-apply-values?
                                         (λ (s) #`(apply values #,@s this-param ... (dom-ctc dom-x) ... opt+rest-uses))
-                                        (λ (s) #`(values #,@s this-param ... (dom-ctc dom-x) ...)))])
+                                        (λ (s) #`(values/drop #,@s this-param ... (dom-ctc dom-x) ...)))])
                                (if no-rng-checking?
                                    (inner-stx-gen #'())
                                    (check-tail-contract #'(rng-ctc ...) #'(rng-checker-name ...) inner-stx-gen)))]
@@ -307,7 +307,7 @@ v4 todo:
                              (let* ([inner-stx-gen
                                      (if need-apply-values?
                                          (λ (s k) #`(apply values #,@s #,@k this-param ... (dom-ctc dom-x) ... opt+rest-uses))
-                                         (λ (s k) #`(values #,@s #,@k this-param ... (dom-ctc dom-x) ...)))]
+                                         (λ (s k) #`(values/drop #,@s #,@k this-param ... (dom-ctc dom-x) ...)))]
                                     [outer-stx-gen
                                      (if (null? req-keywords)
                                          (λ (s)
@@ -327,7 +327,7 @@ v4 todo:
                   (with-syntax ([(basic-checker-name) (generate-temporaries '(basic-checker))])
                     (cond
                       [(and (null? req-keywords) (null? opt-keywords))
-                       #`(let-values ([(rng-checker-name ...) (values rng-checker ...)])
+                       #`(let-values ([(rng-checker-name ...) (values/drop rng-checker ...)])
                            (let ([basic-lambda-name basic-lambda])
                              (arity-checking-wrapper val blame
                                                      basic-lambda-name
@@ -339,7 +339,7 @@ v4 todo:
                                                      '(req-kwd ...)
                                                      '(opt-kwd ...))))]
                       [(pair? req-keywords)
-                       #`(let-values ([(rng-checker-name ...) (values rng-checker ...)])
+                       #`(let-values ([(rng-checker-name ...) (values/drop rng-checker ...)])
                            (let ([kwd-lambda-name kwd-lambda])
                              (arity-checking-wrapper val blame
                                                      void
@@ -351,7 +351,7 @@ v4 todo:
                                                      '(req-kwd ...)
                                                      '(opt-kwd ...))))]
                       [else
-                       #`(let-values ([(rng-checker-name ...) (values rng-checker ...)])
+                       #`(let-values ([(rng-checker-name ...) (values/drop rng-checker ...)])
                            (let ([basic-lambda-name basic-lambda]
                                  [kwd-lambda-name kwd-lambda])
                              (arity-checking-wrapper val blame
@@ -573,7 +573,7 @@ v4 todo:
              (λ args
                 ; Make sure that the args match the contract
                 (begin (unless ((contract-struct-exercise ctc) args (/ fuel 2))
-                           (error "Arg(s) ~a do(es) not match contract ~a\n" ctc))
+                           (error '->-generate "Arg(s) ~a do(es) not match contract ~a\n" ctc))
                        ; Stash the valid value
                        ;(env-stash (generate-env) ctc args)
                        (apply values rngs-gens)))
@@ -778,7 +778,7 @@ v4 todo:
                             null
                             (if (syntax->datum #'use-any?) #f (syntax->list #'(rng-names ...)))))])
         (syntax-property
-         (syntax
+         (syntax/loc stx
           (build--> '->
                     #f #f
                     (list dom-ctcs ...) '() #f
@@ -915,7 +915,8 @@ v4 todo:
                              [(rng ...) (generate-temporaries (or rng-ctc '()))]
                              [(this-parameter ...)
                               (make-this-parameters (car (generate-temporaries '(this))))])
-                 #`(build-->
+                 (quasisyntax/loc stx
+                   (build-->
                     '->*
                     #,(if pre #`(λ () #,pre) #'#f)
                     #,(if post #`(λ () #,post) #'#f)
@@ -951,7 +952,7 @@ v4 todo:
                               (syntax->list #'(mandatory-dom-kwd-proj ...)))
                          (map list (syntax->list #'(optional-dom-kwd ...))
                               (syntax->list #'(optional-dom-kwd-proj ...)))
-                         (if rng-ctc (syntax->list #'(rng-proj ...)) #f))))))))))]))
+                         (if rng-ctc (syntax->list #'(rng-proj ...)) #f)))))))))))]))
 
 (define-syntax (->* stx) #`(syntax-parameterize ((making-a-method #f)) #,(->*/proc/main stx)))
 
@@ -1560,7 +1561,7 @@ v4 todo:
            (this-parameter ... dom-formals ... . #,(if rst #'rst-formal '()))
            #,(cond
                [rng
-                (let ([rng-checkers (list #'(λ (rng-id ...) (values (rng-proj-x rng-id) ...)))]
+                (let ([rng-checkers (list #'(λ (rng-id ...) (values/drop (rng-proj-x rng-id) ...)))]
                       [rng-length (length (syntax->list rng))])
                   (if rst
                       (check-tail-contract #'(rng-proj-x ...) rng-checkers
@@ -1570,12 +1571,12 @@ v4 todo:
                                                       (rst-proj-x rst-formal))))
                       (check-tail-contract #'(rng-proj-x ...) rng-checkers
                                            (λ (rng-checks)
-                                             #`(values #,@rng-checks this-parameter ...
-                                                       (dom-proj-x dom-formals) ...)))))]
+                                             #`(values/drop #,@rng-checks this-parameter ...
+                                                            (dom-proj-x dom-formals) ...)))))]
                [rst
                 #`(apply values this-parameter ... (dom-proj-x dom-formals) ... (rst-proj-x rst-formal))]
                [else
-                #`(values this-parameter ... (dom-proj-x dom-formals) ...)]))))))
+                #`(values/drop this-parameter ... (dom-proj-x dom-formals) ...)]))))))
 
 ;; Takes a list of (listof projection), and returns one of the
 ;; lists if all the lists contain the same projections. If the list is
@@ -1592,7 +1593,8 @@ v4 todo:
 (define-syntax (case-> stx)
   (syntax-case stx ()
     [(_ cases ...)
-     (begin 
+     (let ()
+       (define name (syntax-local-infer-name stx))
        (with-syntax ([(((dom-proj ...)
                         rst-proj
                         rng-proj
@@ -1623,7 +1625,11 @@ v4 todo:
                                       (λ (kwds kwd-args . args)
                                         (raise-blame-error blame f "expected no keywords, got keyword ~a" (car kwds)))
                                       (λ args
-                                        (apply (case-lambda [formals body] ...) args)))]
+                                        (apply #,(let ([case-lam (syntax/loc stx (case-lambda [formals body] ...))])
+                                                   (if name 
+                                                       #`(let ([#,name #,case-lam]) #,name)
+                                                       case-lam))
+                                               args)))]
                                     [same-rngs (same-range-projections (list (list rng-proj-x ...) ...))])
                                 (if same-rngs
                                     (wrapper
@@ -1648,7 +1654,7 @@ v4 todo:
   (λ (ctc)
     (define dom-ctcs (map contract-projection (get-case->-dom-ctcs ctc)))
     (define rng-ctcs (let ([rngs (get-case->-rng-ctcs ctc)])
-                       (and rngs (map contract-projection (get-case->-rng-ctcs ctc)))))
+                       (and rngs (map contract-projection rngs))))
     (define rst-ctcs (base-case->-rst-ctcs ctc))
     (define specs (base-case->-specs ctc))
     (λ (blame)
@@ -1728,15 +1734,19 @@ v4 todo:
         (make-impersonator-case-> dom-ctcs rst-ctcs rng-ctcs specs mctc? wrapper))))
 
 (define (get-case->-dom-ctcs ctc)
-  (apply append
-         (map (λ (doms rst) (if rst
-                                (append doms (list rst))
-                                doms))
-              (base-case->-dom-ctcs ctc)
-              (base-case->-rst-ctcs ctc))))
+  (for/fold ([acc '()])
+      ([doms (in-list (base-case->-dom-ctcs ctc))]
+       [rst  (in-list (base-case->-rst-ctcs ctc))])
+    (append acc
+            (if rst
+                (append doms (list rst))
+                doms))))
 
 (define (get-case->-rng-ctcs ctc)
-  (apply append (map (λ (x) (or x '())) (base-case->-rng-ctcs ctc))))
+  (for/fold ([acc '()])
+      ([x (in-list (base-case->-rng-ctcs ctc))]
+       #:when x)
+    (append acc x)))
 
 
 
@@ -1773,7 +1783,7 @@ v4 todo:
                   (thunk)
                   (let-values ([(x ...) (with-continuation-mark multiple-contract-key fs
                                           (thunk))])
-                    (values (f x) ...)))))))]))
+                    (values/drop (f x) ...)))))))]))
 
 
 (define multiple-contract-key (gensym 'multiple-contract-key))
@@ -2092,3 +2102,9 @@ v4 todo:
      #'-predicate/c]
     [_
      #`(syntax-parameterize ((making-a-method #f)) #,(->/proc/main stx))]))
+
+;; this is to make the expanded versions a little easier to read
+(define-syntax (values/drop stx)
+  (syntax-case stx ()
+    [(_ arg) #'arg]
+    [(_ args ...) #'(values args ...)]))

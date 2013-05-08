@@ -267,13 +267,16 @@ module browser threading seems wrong.
          ;; find-searchable-tokens : number number -> (or/c #f (list symbol number number))
          (define (find-searchable-tokens start end)
            (define tokens (get-tokens start end))
-           (define raw-tokens (map (λ (x) (list-ref x 0)) tokens))
-           (cond
-             [(equal? raw-tokens '(symbol))
-              (car tokens)]
-             [(equal? raw-tokens '(constant symbol))
-              (cadr tokens)]
-             [else #f]))
+           (for/or ([tok tokens])
+             (define type (list-ref tok 0))
+             (cond [(or (eq? type 'symbol)
+                        (eq? type 'hash-colon-keyword)
+                        ;; The token may have been categorized as a keyword due to
+                        ;; its presence in the tabification preferences:
+                        (eq? type 'keyword))
+                    tok]
+                   [else
+                    #f])))
          
          (define searchable-token 
            (or (and before before+ 
@@ -405,29 +408,35 @@ module browser threading seems wrong.
   
   ;; create-executable : (instanceof drracket:unit:frame<%>) -> void
   (define (create-executable frame)
-    (let* ([definitions-text (send frame get-definitions-text)]
-           [program-filename (send definitions-text get-filename)])
-      (cond
-        [(not program-filename)
-         (message-box (string-constant create-executable-title)
-                      (string-constant must-save-before-executable)
-                      frame
-                      #:dialog-mixin frame:focus-table-mixin)]
-        [else
-         (when (or (not (send definitions-text is-modified?))
-                   (gui-utils:get-choice
-                    (string-constant definitions-not-saved)
-                    (string-constant yes)
-                    (string-constant no)
-                    (string-constant drscheme)
-                    #f
-                    frame))
-           (let ([settings (send definitions-text get-next-settings)])
-             (send (drracket:language-configuration:language-settings-language settings)
-                   create-executable
-                   (drracket:language-configuration:language-settings-settings settings)
-                   frame
-                   program-filename)))])))
+    (define definitions-text (send frame get-definitions-text))
+    (define program-filename (send definitions-text get-filename))
+    (define settings (send definitions-text get-next-settings))
+    (cond
+      [(not (drracket:language-configuration:language-allows-executable-creation?
+             (drracket:language-configuration:language-settings-language settings)))
+       (message-box (string-constant drscheme)
+                    (string-constant drracket-creates-executables-only-in-some-languages)
+                    frame
+                    #:dialog-mixin frame:focus-table-mixin)]
+      [(not program-filename)
+       (message-box (string-constant create-executable-title)
+                    (string-constant must-save-before-executable)
+                    frame
+                    #:dialog-mixin frame:focus-table-mixin)]
+      [else
+       (when (or (not (send definitions-text is-modified?))
+                 (gui-utils:get-choice
+                  (string-constant definitions-not-saved)
+                  (string-constant yes)
+                  (string-constant no)
+                  (string-constant drscheme)
+                  #f
+                  frame))
+         (send (drracket:language-configuration:language-settings-language settings)
+               create-executable
+               (drracket:language-configuration:language-settings-settings settings)
+               frame
+               program-filename))]))
   
   (define-values (get-program-editor-mixin add-to-program-editor-mixin)
     (let* ([program-editor-mixin
@@ -2987,7 +2996,7 @@ module browser threading seems wrong.
       ;; updates current-tab, definitions-text, and interactactions-text
       ;; to be the nth tab. Also updates the GUI to show the new tab
       (inherit begin-container-sequence end-container-sequence)
-      (define/private (change-to-tab tab)
+      (define/public (change-to-tab tab)
         (unless (eq? current-tab tab)
           (let ([old-tab current-tab])
             (save-visible-tab-regions)
@@ -2995,8 +3004,9 @@ module browser threading seems wrong.
             (set! definitions-text (send current-tab get-defs))
             (set! interactions-text (send current-tab get-ints))
             
-            
             (begin-container-sequence)
+            (send definitions-text begin-edit-sequence)
+            (send interactions-text begin-edit-sequence)
             (for-each (λ (defs-canvas) (send defs-canvas set-editor definitions-text #f))
                       definitions-canvases)
             (for-each (λ (ints-canvas) (send ints-canvas set-editor interactions-text #f))
@@ -3021,7 +3031,17 @@ module browser threading seems wrong.
             (for-each (λ (ints-canvas) (send ints-canvas refresh))
                       interactions-canvases)
             (set-color-status! (send definitions-text is-lexer-valid?))
-            (end-container-sequence))))
+            (send definitions-text end-edit-sequence)
+            (send interactions-text end-edit-sequence)
+            (end-container-sequence)
+            
+            (case (send current-tab get-focus-d/i)
+              [(defs) 
+               (send (car definitions-canvases) focus)
+               (set-text-to-search (send (car definitions-canvases) get-editor))]
+              [(ints)
+               (send (car interactions-canvases) focus)
+               (set-text-to-search (send (car interactions-canvases) get-editor))]))))
       
       (define/pubment (on-tab-change from-tab to-tab)
         (let ([old-enabled (send from-tab get-enabled)]
@@ -3148,14 +3168,7 @@ module browser threading seems wrong.
           (fix-up-canvas-numbers interactions-text vi #t)
           (reflow-container)
           (set-visible-regions definitions-text vd)
-          (set-visible-regions interactions-text vi))
-        (case (send current-tab get-focus-d/i)
-          [(defs) 
-           (send (car definitions-canvases) focus)
-           (set-text-to-search (send (car definitions-canvases) get-editor))]
-          [(ints)
-           (send (car interactions-canvases) focus)
-           (set-text-to-search (send (car interactions-canvases) get-editor))]))
+          (set-visible-regions interactions-text vi)))
       
       (define/private (pathname-equal? p1 p2)
         (with-handlers ([exn:fail:filesystem? (λ (x) #f)])
@@ -3167,17 +3180,15 @@ module browser threading seems wrong.
           (when tab
             (change-to-tab tab))))
       
-      (define/private (find-matching-tab filename)
-        (let loop ([tabs tabs])
-          (cond
-            [(null? tabs) #f]
-            [else
-             (let* ([tab (car tabs)]
-                    [tab-filename (send (send tab get-defs) get-filename)])
-               (if (and tab-filename
-                        (pathname-equal? filename tab-filename))
-                   tab
-                   (loop (cdr tabs))))])))
+      (define/public (find-matching-tab filename)
+        (define fn-path (if (string? filename)
+                            (string->path filename)
+                            filename))
+        (for/or ([tab (in-list tabs)])
+          (define tab-filename (send (send tab get-defs) get-filename))
+          (and tab-filename
+               (pathname-equal? fn-path tab-filename)
+               tab)))
       
       (define/override (editing-this-file? filename)
         (ormap (λ (tab)
@@ -3391,8 +3402,6 @@ module browser threading seems wrong.
         (set-show-menu-sort-key logger-menu-item 205)
         
         
-        
-          
         (set! show-line-numbers-menu-item
               (new menu:can-restore-menu-item%
                    [label (if (show-line-numbers?)
@@ -3404,6 +3413,32 @@ module browser threading seems wrong.
                                (preferences:set 'drracket:show-line-numbers? (not value))
                                (show-line-numbers! (not value)))]))
         (set-show-menu-sort-key show-line-numbers-menu-item 302)
+        
+        (let ()
+          (define (font-adjust adj label key shortcut)
+            (define (adj-font _1 _2)
+              (preferences:set
+               'framework:standard-style-list:font-size
+               (adj (preferences:get
+                     'framework:standard-style-list:font-size))))
+            (define (on-demand item)
+              (define lab 
+                (format 
+                 label 
+                 (adj 
+                  (preferences:get
+                   'framework:standard-style-list:font-size))))
+              (send item set-label lab))
+            (define item
+             (new menu:can-restore-menu-item%
+                  (shortcut shortcut)
+                  (label "")
+                  (parent (get-show-menu))
+                  (callback adj-font)
+                  (demand-callback on-demand)))
+            (set-show-menu-sort-key item key))
+          (font-adjust add1 (string-constant increase-font-size) -2 #\=)
+          (font-adjust sub1 (string-constant decrease-font-size) -3 #\-))
         
         (let ([split
                (new menu:can-restore-menu-item%
@@ -5184,19 +5219,24 @@ module browser threading seems wrong.
                   (set! newest-frame #f))]
          [(and name ;; only open a tab if we have a filename
                (preferences:get 'drracket:open-in-tabs))
-          (let ([fr (let loop ([frs (cons (send (group:get-the-frame-group) get-active-frame)
-                                          (send (group:get-the-frame-group) get-frames))])
-                      (cond
-                        [(null? frs) #f]
-                        [else (let ([fr (car frs)])
-                                (or (and (is-a? fr drracket:unit:frame<%>)
-                                         fr)
-                                    (loop (cdr frs))))]))])
-            (if fr
-                (begin (send fr open-in-new-tab name)
-                       (send fr show #t)
-                       fr)
-                (create-new-drscheme-frame name)))]
+          (define frs (send (group:get-the-frame-group) get-frames))
+          (let ([ac (send (group:get-the-frame-group) get-active-frame)])
+            (when (and ac (send ac is-shown?))
+              (set! frs (cons ac (remove ac frs)))))
+          (define fr (let loop ([frs frs])
+                       (cond
+                         [(null? frs) #f]
+                         [else (let ([fr (car frs)])
+                                 (or (and (is-a? fr drracket:unit:frame<%>)
+                                          fr)
+                                     (loop (cdr frs))))])))
+          (cond
+            [fr
+             (send fr open-in-new-tab name)
+             (send fr show #t)
+             fr]
+            [else
+             (create-new-drscheme-frame name)])]
          [else
           (create-new-drscheme-frame name)])]))
   

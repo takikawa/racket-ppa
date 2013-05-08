@@ -56,6 +56,7 @@
              render-part
              install-file
              format-number
+             number-depth
              extract-part-style-files
              extract-version
              extract-date
@@ -88,7 +89,6 @@
                                     (append (extract-part-style-files
                                              d
                                              ri
-                                             'tex
                                              (lambda (p) #f)
                                              tex-addition?
                                              tex-addition-path)
@@ -148,32 +148,63 @@
             (for ([pre (in-list pres)])
               (printf "\n\n")
               (do-render-paragraph pre d ri #t #f)))
+          (define depth (+ (number-depth number) (or (render-part-depth) 0)))
+          (define grouper? (part-style? d 'grouper))
+          (define (inc-section-number)
+            (printf "\\Sinc~a" (case depth
+                                 [(0 1) (if grouper? "part" "section")]
+                                 [(2) "subsection"]
+                                 [(3) "subsubsection"]
+                                 [(4) "subsubsubsection"]
+                                 [else "subsubsubsubsection"])))
           (cond
            [completely-hidden?
-            (printf "\n\n\\notitlesection")]
+            (printf "\n\n\\notitlesection")
+            (unless (part-style? d 'unnumbered)
+              (inc-section-number))]
            [else
-            (let ([no-number? (and (pair? number) 
-                                   (or (not (car number))
-                                       ((length number) . > . 3)))])
-              (printf "\n\n\\~a~a~a"
-                      (case (+ (length number) (or (render-part-depth) 0))
-                        [(0 1) "sectionNewpage\n\n\\Ssection"]
-                        [(2) "Ssubsection"]
-                        [(3) "Ssubsubsection"]
-                        [(4) "Ssubsubsubsection"]
-                        [else "Ssubsubsubsubsection"])
-                      (if (and (part-style? d 'hidden) (not no-number?))
-                          "hidden" "")
-                      (if no-number? "star" ""))
-              (when (not (or (part-style? d 'hidden) no-number?))
-                (printf "{")
-                (parameterize ([disable-images #t]
-                               [escape-brackets #t])
-                  (render-content (part-title-content d) d ri))
-                (printf "}")))
+            (define no-number? (and (pair? number) 
+                                    (or (not (car number))
+                                        (equal? "" (car number))
+                                        ((length number) . > . 3))))
+            (define no-toc? (part-style? d 'toc-hidden))
+            (define (show-number)
+              (when (and (part-style? d 'grouper)
+                         (depth . > . 1)
+                         (not no-number?))
+                (printf "~a\\quad{}" (car (format-number number null)))))
+            (printf "\n\n\\~a~a~a"
+                    (case depth
+                      [(0 1) (if grouper?
+                                 "partNewpage\n\n\\Spart"
+                                 "sectionNewpage\n\n\\Ssection")]
+                      [(2) "Ssubsection"]
+                      [(3) "Ssubsubsection"]
+                      [(4) "Ssubsubsubsection"]
+                      [else "Ssubsubsubsubsection"])
+                    (if (and grouper?
+                             (depth . > . 1))
+                        "grouper"
+                        "")
+                    (if no-number? 
+                        (if no-toc?
+                            "star"
+                            "starx")
+                        ""))
+            (unless (and no-number? no-toc?)
+              (printf "{")
+              (show-number)
+              (parameterize ([disable-images #t]
+                             [escape-brackets #t])
+                (render-content (part-title-content d) d ri))
+              (printf "}"))
             (printf "{")
+            (show-number)
             (render-content (part-title-content d) d ri)
             (printf "}")
+            (when (and (part-style? d 'hidden-number)
+                       (not (part-style? d 'unnumbered)))
+              (inc-section-number))
             (when (eq? (style-name (part-style d)) 'index) (printf "\n\n"))]))
         (for ([t (part-tags d)])
           (printf "\\label{t:~a}~a" (t-encode (add-current-tag-prefix (tag-key t ri)))
@@ -261,9 +292,9 @@
             (let* ([dest (resolve-get part ri (link-element-tag e))]
                    [number (and dest (vector-ref dest 2))])
               (printf "\\~aRef~a{"
-                      (case (and dest (length number))
+                      (case (and dest (number-depth number))
                         [(0) "Book"]
-                        [(1) "Chap"]
+                        [(1) (if (string? (car number)) "Part" "Chap")]
                         [else "Sec"])
                       (if (let ([s (element-style e)])
                             (and (style? s) (memq 'uppercase (style-properties s))))
@@ -418,6 +449,10 @@
                               (color->string (background-color-property-color v)))
                       (loop (cdr l) tt?)
                       (printf "}")]
+                     [(command-extras? (car l))
+                      (loop (cdr l) tt?)
+                      (for ([l (in-list (command-extras-arguments (car l)))])
+                        (printf "{~a}" l))]
                      [else (loop (cdr l) tt?)]))))))
         (when part-label?
           (printf "}"))
@@ -799,7 +834,7 @@
                           ;; Which parts are necessary may depend on the latex version,
                           ;; though, so we keep this table around to avoid regressions.
                           (case c
-                            [(#\╔ #\═ #\╗ #\║ #\╚ #\╝) (box-character c)]
+                            [(#\╔ #\═ #\╗ #\║ #\╚ #\╝ #\╦ #\╠ #\╣ #\╬ #\╩) (box-character c)]
                             [(#\u2011) "\\mbox{-}"] ; non-breaking hyphen
                             [(#\uB0) "$^{\\circ}$"] ; degree
                             [(#\uB2) "$^2$"]
@@ -979,6 +1014,10 @@
                             [(#\u2079) "$^9$"]
                             [(#\u207a) "$^+$"]
                             [(#\u207b) "$^-$"]
+                            [(#\⋮) "\\vdots"]
+                            [(#\⋱) "$\\ddots$"]
+                            [(#\⋯) "$\\cdots$"]
+                            [(#\⋯) "\\hdots"]
                             [else
                              (cond
                               [(char<=? #\uAC00 c #\uD7AF) ; Korean Hangul
@@ -1018,50 +1057,93 @@
     (define/private (box-character c)
       (define (combine . args) 
         (apply string-append
-               (filter (λ (x) (not (regexp-match #rx"^[ \n]*$" x))) args)))
+               "\\setlength{\\unitlength}{0.05em}"
+               (filter (λ (x) (not (regexp-match #rx"^[ \n]*$" x)))
+                       (flatten args))))
       (define (adjust % v) 
         (define num (* % (/ v 10) 10))
         (define i-part (floor num))
         (define d-part (floor (* 10 (- num i-part))))
         (format "~a.~a" i-part d-part))
-      (define (x v) (adjust 4/10 v))
-      (define (y v) (adjust 6/10 v))
+      (define (x v) (adjust 1 v))
+      (define (y v) (adjust 6/4 v))
+      (define upper-horizontal @list{\put(@x[0],@y[6]){\line(1,0){@x[10]}}})
+      (define lower-horizontal @list{\put(@x[0],@y[4]){\line(1,0){@x[10]}}})
+      (define righter-vertical @list{\put(@x[6],@y[10]){\line(0,-1){@y[10]}}})
+      (define lefter-vertical @list{\put(@x[4],@y[10]){\line(0,-1){@y[10]}}})
+      (define bottom-right @list{\put(@x[6],@y[4]){\line(1,0){@x[4]}}
+                                 \put(@x[6],@y[0]){\line(0,1){@y[4]}}})
+      (define bottom-left @list{\put(@x[0],@y[4]){\line(1,0){@x[4]}}
+                                \put(@x[4],@y[0]){\line(0,1){@y[4]}}})
+      (define upper-right @list{\put(@x[6],@y[6]){\line(1,0){@x[4]}}
+                                \put(@x[6],@y[10]){\line(0,-1){@y[4]}}})
+      (define upper-left @list{\put(@x[0],@y[6]){\line(1,0){@x[4]}}
+                               \put(@x[4],@y[10]){\line(0,-1){@y[4]}}})
+      (define header @list{\begin{picture}(@x[10],@y[10])(0,0)})
+      (define footer @list{\end{picture}})
+                              
       (case c
         [(#\╔)
-         @combine{\begin{picture}(@x[10],@y[10])(0,0)
-                        \put(@x[2],@y[6]){\line(1,0){@x[8]}}
-                        \put(@x[4],@y[4]){\line(1,0){@x[7]}}
-                        \put(@x[2],@y[0]){\line(0,1){@y[6]}}
-                        \put(@x[4],@y[0]){\line(0,1){@y[4]}}
-                        \end{picture}}]
-        [(#\═) @combine{\begin{picture}(@x[10],@y[10])(0,0)
-                              \put(@x[0],@y[6]){\line(1,0){@x[10]}}
-                              \put(@x[0],@y[4]){\line(1,0){@x[10]}}
-                              \end{picture}}]
-        [(#\╗) @combine{\begin{picture}(@x[10],@y[10])(0,0)
-                              \put(@x[0],@y[6]){\line(1,0){@x[8]}}
-                              \put(@x[0],@y[4]){\line(1,0){@x[6]}}
-                              \put(@x[8],@y[0]){\line(0,1){@y[6]}}
-                              \put(@x[6],@y[0]){\line(0,1){@y[4]}}
-                              \end{picture}}]
-        [(#\║) @combine{\begin{picture}(@x[10],@y[10])(0,0)
-                              \put(@x[4],@y[10]){\line(0,-1){@y[10]}}
-                              \put(@x[2],@y[10]){\line(0,-1){@y[10]}}
-                              \end{picture}}]
-        [(#\╚) @combine{\begin{picture}(@x[10],@y[10])(0,0)
-                              \put(@x[2],@y[4]){\line(1,0){@x[8]}}
-                              \put(@x[4],@y[6]){\line(1,0){@x[6]}}
-                              \put(@x[4],@y[10]){\line(0,-1){@y[4]}}
-                              \put(@x[2],@y[10]){\line(0,-1){@y[6]}}
-                              \end{picture}}]
-        [(#\╝) @combine{\begin{picture}(@x[10],@y[10])(0,0)
-                              \put(@x[0],@y[4]){\line(1,0){@x[8]}}
-                              \put(@x[0],@y[6]){\line(1,0){@x[6]}}
-                              \put(@x[6],@y[10]){\line(0,-1){@y[4]}}
-                              \put(@x[8],@y[10]){\line(0,-1){@y[6]}}
-                              \end{picture}}]))
-
-
+         @combine{@header
+                   \put(@x[4],@y[6]){\line(1,0){@x[6]}}
+                   \put(@x[4],@y[0]){\line(0,1){@y[6]}}
+                   @bottom-right
+                   @footer}]
+        [(#\═) @combine{@header
+                         @upper-horizontal
+                         @lower-horizontal
+                         @footer}]
+        [(#\╗) @combine{@header
+                         \put(@x[0],@y[6]){\line(1,0){@x[6]}}
+                         \put(@x[6],@y[0]){\line(0,1){@y[6]}}
+                         @bottom-left
+                         @footer}]
+        [(#\║) @combine{@header
+                         @lefter-vertical
+                         @righter-vertical
+                         @footer}]
+        [(#\╚) @combine{@header
+                         @upper-right
+                         \put(@x[4],@y[4]){\line(1,0){@x[6]}}
+                         \put(@x[4],@y[10]){\line(0,-1){@y[6]}}
+                         @footer}]
+        [(#\╝)
+         @combine{@header
+                   @upper-left
+                   \put(@x[0],@y[4]){\line(1,0){@x[6]}}
+                   \put(@x[6],@y[10]){\line(0,-1){@y[6]}}
+                   @footer}]
+        [(#\╣)
+         @combine{@header
+                   @upper-left
+                   @bottom-left
+                   @righter-vertical
+                   @footer}]
+        [(#\╠)
+         @combine{@header
+                   @upper-right
+                   @bottom-right
+                   @lefter-vertical
+                   @footer}]
+        [(#\╩)
+         @combine{@header
+                   @upper-right
+                   @upper-left
+                   @lower-horizontal
+                   @footer}]
+        [(#\╦)
+         @combine{@header
+                   @bottom-right
+                   @bottom-left
+                   @upper-horizontal
+                   @footer}]
+        [(#\╬)
+          @combine{@header
+                   @upper-left
+                   @bottom-left
+                   @upper-right
+                   @bottom-right
+                   @footer}]))
 
     ;; ----------------------------------------
 

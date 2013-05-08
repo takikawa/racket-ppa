@@ -4,7 +4,7 @@
 @title{SIGPLAN Paper Format}
 
 @defmodulelang[scribble/sigplan]{The @racketmodname[scribble/sigplan]
-language is like @racketmodname[scribble/manual], but configured with
+language is like @racketmodname[scribble/base], but configured with
 Latex style defaults to use the @filepath{sigplanconf.cls} class
 file that is included with Scribble.}
 
@@ -86,6 +86,10 @@ Generates a @tech{nested flow} for a paper abstract.}
 Similar to @racket[include-section], but incorporates the document in the
 specified module as an abstract. The document must have no title or
 sub-parts.}
+
+@defproc[(subtitle [pre-content pre-content?] ...) element?]{
+
+Use as the last argument to @racket[title] to specify a subtitle.}
 
 @defproc[(authorinfo [name pre-content?]
                      [affiliation pre-content?]

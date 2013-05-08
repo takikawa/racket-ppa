@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -57,6 +57,7 @@ typedef struct Equal_Info {
   Scheme_Hash_Table *ht;
   Scheme_Object *recur;
   Scheme_Object *next, *next_next;
+  Scheme_Object *insp;
   int for_chaperone; /* 2 => for impersonator */
 } Equal_Info;
 
@@ -166,6 +167,7 @@ equal_prim (int argc, Scheme_Object *argv[])
   eql.recur = NULL;
   eql.next = NULL;
   eql.next_next = NULL;
+  eql.insp = NULL;
   eql.for_chaperone = 0;
 
   return (is_equal(argv[0], argv[1], &eql) ? scheme_true : scheme_false);
@@ -184,6 +186,7 @@ equalish_prim (int argc, Scheme_Object *argv[])
   eql.recur = NULL;
   eql.next = NULL;
   eql.next_next = argv[2];
+  eql.insp = NULL;
   eql.for_chaperone = 0;
 
   return (is_equal(argv[0], argv[1], &eql) ? scheme_true : scheme_false);
@@ -194,6 +197,43 @@ int scheme_eq (Scheme_Object *obj1, Scheme_Object *obj2)
   return SAME_OBJ(obj1, obj2);
 }
 
+#ifdef MZ_LONG_DOUBLE
+XFORM_NONGCING static MZ_INLINE int mz_long_double_eqv(long_double a, long_double b)
+{
+# ifndef NAN_EQUALS_ANYTHING
+  if (!long_double_eqv(a, b)) {
+# endif
+    /* Double-check for NANs: */
+    if (MZ_IS_LONG_NAN(a)) {
+      if (MZ_IS_LONG_NAN(b))
+        return 1;
+# ifdef NAN_EQUALS_ANYTHING
+      return 0;
+# endif
+    }
+# ifdef NAN_EQUALS_ANYTHING
+    if (MZ_IS_LONG_NAN(b))
+      return 0;
+    else {
+      if (long_double_eqv(a, get_long_double_zero()) {
+        if (long_double_eqv(b, get_long_double_zero()) {
+          return scheme_long_minus_zero_p(a) == scheme_long_minus_zero_p(b);
+        }
+      }
+      return long_double_eqv(a, b);
+    }
+# else
+    return 0;
+  }
+  if (long_double_eqv(a, get_long_double_zero())) {
+    if (long_double_eqv(b, get_long_double_zero())) {
+      return scheme_long_minus_zero_p(a) == scheme_long_minus_zero_p(b);
+    }
+  }
+  return 1;
+# endif
+}
+#endif
 XFORM_NONGCING static MZ_INLINE int double_eqv(double a, double b)
 {
 # ifndef NAN_EQUALS_ANYTHING
@@ -249,6 +289,10 @@ XFORM_NONGCING static int is_eqv(Scheme_Object *obj1, Scheme_Object *obj2)
       return double_eqv(SCHEME_DBL_VAL(obj1), SCHEME_FLT_VAL(obj2));
 #endif
     return -1;
+#ifdef MZ_LONG_DOUBLE
+  } else if (t1 == scheme_long_double_type) {
+    return mz_long_double_eqv(SCHEME_LONG_DBL_VAL(obj1), SCHEME_LONG_DBL_VAL(obj2));
+#endif
 #ifdef MZ_USE_SINGLE_FLOATS
   } else if (t1 == scheme_float_type) {
     return double_eqv(SCHEME_FLT_VAL(obj1), SCHEME_FLT_VAL(obj2));
@@ -284,6 +328,7 @@ int scheme_equal (Scheme_Object *obj1, Scheme_Object *obj2)
   eql.recur = NULL;
   eql.next_next = NULL;
   eql.next = NULL;
+  eql.insp = NULL;
   eql.for_chaperone = 0;
 
   return is_equal(obj1, obj2, &eql);
@@ -353,8 +398,15 @@ static Scheme_Object *equal_k(void)
 static Scheme_Object *equal_recur(int argc, Scheme_Object **argv, Scheme_Object *prim)
 {
   Equal_Info *eql = (Equal_Info *)SCHEME_PRIM_CLOSURE_ELS(prim)[0];
+  int is_eq;
 
-  return (is_equal(argv[0], argv[1], eql)
+  eql->insp = NULL; /* in case the inspector is changed by context */
+
+  is_eq = is_equal(argv[0], argv[1], eql);
+
+  eql->insp = NULL;
+
+  return (is_eq
           ? scheme_true
           : scheme_false);
 }
@@ -471,6 +523,21 @@ int is_equal (Scheme_Object *obj1, Scheme_Object *obj2, Equal_Info *eql)
       return 1;
     }
     return 0;
+#ifdef MZ_LONG_DOUBLE
+  } else if (t1 == scheme_extflvector_type) {
+    intptr_t l1, l2, i;
+    l1 = SCHEME_EXTFLVEC_SIZE(obj1);
+    l2 = SCHEME_EXTFLVEC_SIZE(obj2);
+    if (l1 == l2) {
+      for (i = 0; i < l1; i++) {
+        if (!mz_long_double_eqv(SCHEME_EXTFLVEC_ELS(obj1)[i],
+                             SCHEME_EXTFLVEC_ELS(obj2)[i]))
+          return 0;
+      }
+      return 1;
+    }
+    return 0;
+#endif
   } else if ((t1 == scheme_byte_string_type)
              || ((t1 >= scheme_unix_path_type) 
                  && (t1 <= scheme_windows_path_type))) {
@@ -579,9 +646,12 @@ int is_equal (Scheme_Object *obj1, Scheme_Object *obj2, Equal_Info *eql)
         /* Same types, but doesn't have an equality property
            (or checking for chaperone), so check transparency: */
         Scheme_Object *insp;
-        insp = scheme_get_param(scheme_current_config(), MZCONFIG_INSPECTOR);
-        if (scheme_inspector_sees_part(obj1, insp, -2)
-            && scheme_inspector_sees_part(obj2, insp, -2)) {
+        if (scheme_struct_is_transparent(obj1))
+          insp = NULL;
+        else {
+          insp = scheme_get_param(scheme_current_config(), MZCONFIG_INSPECTOR);
+        }
+        if (!insp || scheme_inspector_sees_part(obj1, insp, -2)) {
 #       include "mzeqchk.inc"
           if (union_check(obj1, obj2, eql))
             return 1;
@@ -632,8 +702,8 @@ int is_equal (Scheme_Object *obj1, Scheme_Object *obj2, Equal_Info *eql)
     Scheme_Place_Bi_Channel *bc1, *bc2;
     bc1 = (Scheme_Place_Bi_Channel *)obj1;
     bc2 = (Scheme_Place_Bi_Channel *)obj2;
-   return (SAME_OBJ(bc1->recvch, bc2->recvch)
-           && SAME_OBJ(bc1->sendch, bc2->sendch));
+   return (SAME_OBJ(bc1->link->recvch, bc2->link->recvch)
+           && SAME_OBJ(bc1->link->sendch, bc2->link->sendch));
   } else if (!eql->for_chaperone && ((t1 == scheme_chaperone_type)
                                      || (t1 == scheme_proc_chaperone_type))) {
     /* both chaperones */
@@ -734,6 +804,7 @@ int scheme_chaperone_of(Scheme_Object *obj1, Scheme_Object *obj2)
   eql.recur = NULL;
   eql.next = NULL;
   eql.next_next = NULL;
+  eql.insp = NULL;
   eql.for_chaperone = 1;
 
   return is_equal(obj1, obj2, &eql);
@@ -749,6 +820,7 @@ int scheme_impersonator_of(Scheme_Object *obj1, Scheme_Object *obj2)
   eql.recur = NULL;
   eql.next = NULL;
   eql.next_next = NULL;
+  eql.insp = NULL;
   eql.for_chaperone = 2;
 
   return is_equal(obj1, obj2, &eql);

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -122,6 +122,7 @@ static Scheme_Object *port_print_handler(int, Scheme_Object **args);
 static Scheme_Object *global_port_print_handler(int, Scheme_Object **args);
 static Scheme_Object *global_port_count_lines(int, Scheme_Object **args);
 static Scheme_Object *port_count_lines(int, Scheme_Object **args);
+static Scheme_Object *port_counts_lines_p(int, Scheme_Object **args);
 static Scheme_Object *port_next_location(int, Scheme_Object **args);
 static Scheme_Object *set_port_next_location(int, Scheme_Object **args);
 
@@ -316,11 +317,13 @@ scheme_init_port_fun(Scheme_Env *env)
   GLOBAL_NONCM_PRIM("flush-output",                   flush_output,                   0, 1, env);
   GLOBAL_NONCM_PRIM("file-position",                  scheme_file_position,           1, 2, env);
   GLOBAL_NONCM_PRIM("file-position*",                 scheme_file_position_star,      1, 1, env);
+  GLOBAL_NONCM_PRIM("file-truncate",                  scheme_file_truncate,           2, 2, env);
   GLOBAL_NONCM_PRIM("file-stream-buffer-mode",        scheme_file_buffer,             1, 2, env);
   GLOBAL_NONCM_PRIM("port-try-file-lock?",            scheme_file_try_lock,           2, 2, env);
   GLOBAL_NONCM_PRIM("port-file-unlock",               scheme_file_unlock,             1, 1, env);
   GLOBAL_NONCM_PRIM("port-file-identity",             scheme_file_identity,           1, 1, env);
   GLOBAL_NONCM_PRIM("port-count-lines!",              port_count_lines,               1, 1, env);
+  GLOBAL_NONCM_PRIM("port-counts-lines?",             port_counts_lines_p,            1, 1, env);
           
   p = scheme_make_folding_prim(eof_object_p, "eof-object?", 1, 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
@@ -4268,6 +4271,18 @@ static Scheme_Object *port_count_lines(int argc, Scheme_Object *argv[])
   scheme_count_lines(argv[0]);
 
   return scheme_void;
+}
+
+static Scheme_Object *port_counts_lines_p(int argc, Scheme_Object *argv[])
+{
+  Scheme_Port *ip;
+
+  if (!SCHEME_INPUT_PORTP(argv[0]) && !SCHEME_OUTPUT_PORTP(argv[0]))
+    scheme_wrong_contract("port-counts-lines?", "port?", 0, argc, argv);
+
+  ip = scheme_port_record(argv[0]);
+
+  return (ip->count_lines ? scheme_true : scheme_false);
 }
 
 static Scheme_Object *global_port_count_lines(int argc, Scheme_Object **argv)

@@ -8,6 +8,7 @@
            racket/class
            racket/list
            racket/file
+           racket/set
            mred
            framework
            mrlib/text-string-style-desc
@@ -972,7 +973,9 @@
                    ("f" lexically-bound)
                    (" (" default-color)
                    ("->i" imported)
-                   (" ((p? " default-color)
+                   (" ((" default-color)
+                   ("p?" lexically-bound)
+                   (" " default-color)
                    ("any/c" imported)
                    (")) (_ (" default-color)
                    ("p?" lexically-bound)
@@ -986,7 +989,7 @@
                    ("a" lexically-bound)
                    (") 1)" default-color))
                  (list '((82 83) (37 38))
-                       '((61 63) (65 67))
+                       '((46 48) (61 63) (65 67))
                        '((6 12) (14 21) (40 43) (49 54) (74 80))))
 
      (build-test "#lang racket/base\n(define red 1)\n(module+ test red)"
@@ -1008,8 +1011,36 @@
                  (list '((6 17) (19 26))
                        '((27 36) (38 43))))
 
-
-
+     (build-test "#lang racket\n(begin-for-syntax (module m racket/base (let ([x 1]) x)))"
+                 '(("#lang racket\n(" default-color)
+                   ("begin-for-syntax" imported)
+                   (" (" default-color)
+                   ("module" imported)
+                   (" m racket/base (" default-color)
+                   ("let" imported)
+                   (" ([" default-color)
+                   ("x" lexically-bound)
+                   (" 1]) " default-color)
+                   ("x" lexically-bound)
+                   (")))" default-color))
+                 (list '((60 61) (66 67))
+                       '((6 12) (14 30) (32 38))))
+     
+     (build-test "#lang racket\n(define-for-syntax x 1)\n(begin-for-syntax (module* m #f x))"
+                 '(("#lang racket\n(" default-color)
+                   ("define-for-syntax" imported)
+                   (" " default-color)
+                   ("x" lexically-bound)
+                   (" 1)\n(" default-color)
+                   ("begin-for-syntax" imported)
+                   (" (" default-color)
+                   ("module*" imported)
+                   (" m #f " default-color)
+                   ("x" imported)
+                   ("))" default-color))
+                 (list '((6 12) (14 31) (38 54) (56 63))
+                       '((32 33) (69 70))))
+     
      (build-rename-test "(lambda (x) x)"
                         9
                         "x"
@@ -1121,7 +1152,48 @@
                          "   (super-new)\n"
                          "\n"
                          "   (define/private (put t pl)\n"
-                         "     (set! tiles(remove t tiles)))))\n"))))
+                         "     (set! tiles(remove t tiles)))))\n"))
+     
+     (build-rename-test 
+      (string-append
+       "#lang racket/base\n"
+       "(define (f y)\n"
+       "  y y y y y y y y y y y y y y y y y y y y y y y y\n"
+       "  y y y y y y y y y y y y y y y y y y y y y y y y\n"
+       "  y y y y y y y y y y y y y y y y y y y y y y y y\n"
+       "  y y y y y y y y y y y y y y y y y y y y y y y y\n"
+       "  y y y y y y y y y y y y y y y y y y y y y y y y\n"
+       "  y y y y y y y y y y y y y y y y y y y y y y y y\n"
+       "  y y y y y y y y y y y y y y y y y y y y y y y y\n"
+       "  y y y y y y y y y y y y y y y y y y y y y y y y)\n")
+      29
+      "y"
+      "x"
+      (string-append
+       "#lang racket/base\n"
+       "(define (f x)\n"
+       "  x x x x x x x x x x x x x x x x x x x x x x x x\n"
+       "  x x x x x x x x x x x x x x x x x x x x x x x x\n"
+       "  x x x x x x x x x x x x x x x x x x x x x x x x\n"
+       "  x x x x x x x x x x x x x x x x x x x x x x x x\n"
+       "  x x x x x x x x x x x x x x x x x x x x x x x x\n"
+       "  x x x x x x x x x x x x x x x x x x x x x x x x\n"
+       "  x x x x x x x x x x x x x x x x x x x x x x x x\n"
+       "  x x x x x x x x x x x x x x x x x x x x x x x x)\n"))
+     (build-rename-test
+      (string-append
+       "#lang racket\n"
+       "(let ([x 1])\n"
+       "  x`1\n"
+       "  `2)\n")
+      20
+      "x"
+      "y"
+      (string-append
+       "#lang racket\n"
+       "(let ([y 1])\n"
+       "  y`1\n"
+       "  `2)\n"))))
                   
   
   (define (main)
@@ -1293,7 +1365,7 @@
           (hash-for-each raw-actual
             (lambda (k v)
               (hash-set! actual-ht (cdr k)
-                         (sort (map cdr v)
+                         (sort (map cdr (set->list v))
                                (lambda (x y) (< (car x) (car y))))))))
         (define expected-ht (make-hash))
         (define stupid-internal-define-syntax2

@@ -1,5 +1,7 @@
 #lang racket/base
-(require "core.rkt" "base-render.rkt"
+(require "core.rkt"
+         "base-render.rkt"
+         "private/render-utils.rkt"
          racket/class racket/port racket/list racket/string racket/match
          scribble/text/wrap)
 (provide render-mixin)
@@ -35,20 +37,28 @@
         (#rx"''" "\U201D")
         (#rx"'" "\U2019")))
 
-    (inherit render-block)
+    (inherit render-block
+             format-number
+             number-depth)
 
     (define/override (render-part d ht)
       (let ([number (collected-info-number (part-collected-info d ht))])
-        (unless (zero? (length number))
-          (printf (make-string (length number) #\#))
-          (printf " "))
-        (for ([n (in-list (reverse number))] #:when n) (printf "~s." n))
-        (when (part-title-content d)
-          (when (ormap values number) (printf " "))
-          (render-content (part-title-content d) d ht))
-        (when (or (ormap values number) (part-title-content d))
-          (newline)
-          (newline))
+        (unless (part-style? d 'hidden)
+          (unless (zero? (number-depth number))
+            (printf (make-string (number-depth number) #\#))
+            (printf " "))
+          (let ([s (format-number number '())])
+            (unless (null? s)
+              (printf "~a.~a" 
+                      (car s)
+                      (if (part-title-content d)
+                          " "
+                          "")))
+            (when (part-title-content d)
+              (render-content (part-title-content d) d ht))
+            (when (or (pair? number) (part-title-content d))
+              (newline)
+              (newline))))
         (render-flow (part-blocks d) d ht #f)
         (let loop ([pos 1]
                    [secs (part-parts d)]
@@ -78,6 +88,8 @@
         (define tick? (member (style-name (table-style i))
                               (list 'boxed "defmodule" "RktBlk")))
         (when tick?
+          (when (zero? (table-ticks-depth))
+            (displayln "```racket"))
           (table-ticks-depth (add1 (table-ticks-depth))))
         (define strs (map (lambda (flows)
                             (map (lambda (d)
@@ -101,8 +113,6 @@
                                     (apply max d (map string-length i)))))
                             (apply map list strs)))
         (define x-length (lambda (col) (if (eq? col 'cont) 0 (length col))))
-        (when tick?
-          (displayln (string-append "```scheme")))
         (for/fold ([indent? #f]) ([row (in-list strs)])
           (let ([h (apply max 0 (map x-length row))])
             (let ([row* (for/list ([i (in-range h)])
@@ -123,8 +133,9 @@
                 #t)))
           #t)
         (when tick?
-          (displayln "```")
-          (table-ticks-depth (sub1 (table-ticks-depth)))))
+          (table-ticks-depth (sub1 (table-ticks-depth)))
+          (when (zero? (table-ticks-depth))
+            (displayln "```"))))
       null)
 
     (define/override (render-itemization i part ht)
@@ -149,7 +160,17 @@
       (define o (open-output-string))
       (parameterize ([current-output-port o])
         (super render-paragraph p part ri))
-      (define to-wrap (regexp-replace* #rx"\n" (get-output-string o) " "))
+      ;; 1. Remove newlines so we can re-wrap the text.
+      ;;
+      ;; 2. Combine adjacent code spans into one. These result from
+      ;; something like @racket[(x y)] being treated as multiple
+      ;; RktXXX items rather than one. (Although it would be
+      ;; more-correct to handle them at that level, I don't easily see
+      ;; how. As a result I'm handling it after-the-fact, at the
+      ;; text/Markdown stage.)
+      (define to-wrap (regexp-replaces (get-output-string o)
+                                       '([#rx"\n" " "]   ;1
+                                         [#rx"``" ""]))) ;2
       (define lines (wrap-line (string-trim to-wrap) (- 72 (current-indent))))
       (write-note)
       (write-string (car lines))

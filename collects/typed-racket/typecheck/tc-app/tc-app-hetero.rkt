@@ -20,18 +20,18 @@
 
 
 
-
 (define (tc/index expr)
   (syntax-parse expr
    [((~literal quote) i:number)
     (let ((type (tc-literal #'i)))
       (add-typeof-expr expr (ret type))
-      (values type (syntax-e #'i)))]
+      (syntax-e #'i))]
    [_
     (match (tc-expr expr)
-     [(and type (tc-result1: (Value: (? number? i))))
-      (values type i)]
-     [type (values type #f)])]))
+     [(tc-result1: (Value: (? number? i))) i]
+     [type
+       (check-below type -Integer)
+       #f])]))
 
 (define (index-error i-val i-bound expr type expected name)
   (define return (or expected (ret (Un))))
@@ -49,30 +49,28 @@
 
 ;; FIXME - Do something with paths in the case that a structure/vector is not mutable
 (define (tc/hetero-ref i-e es-t vec-t expected name)
-  (define-values (i-t i-val) (tc/index i-e))
+  (define i-val (tc/index i-e))
   (define i-bound (length es-t))
   (cond
     [(valid-index? i-val i-bound)
-     (cond-check-below (ret (list-ref es-t i-val)) expected)]
+     (ret (list-ref es-t i-val))]
     [(not i-val)
-     (check-below i-t -Integer)
-     (cond-check-below (ret (apply Un es-t)) expected)]
+     (ret (apply Un es-t))]
     [else
      (index-error i-val i-bound i-e vec-t expected name)]))
 
 (define (tc/hetero-set! i-e es-t val-e vec-t expected name)
-  (define-values (i-t i-val) (tc/index i-e))
+  (define i-val (tc/index i-e))
   (define i-bound (length es-t))
   (cond 
     [(valid-index? i-val i-bound)
      (tc-expr/check val-e (ret (list-ref es-t i-val)))
-     (cond-check-below (ret -Void) expected)]
+     (ret -Void)]
     [(not i-val)
-     (single-value val-e)
-     (tc-error/expr
-       #:stx i-e #:return (or expected (ret -Void))
-       "expected statically known index for ~a mutation, but got ~a"
-       name (match i-t [(tc-result1: t) t]))]
+     (define val-t (single-value val-e))
+     (for ((es-type es-t))
+       (check-below val-t es-type))
+     (cond-check-below (ret -Void) expected)]
     [else
      (single-value val-e)
      (index-error i-val i-bound i-e vec-t expected name)]))
@@ -108,7 +106,11 @@
       [v-ty (tc/app-regular #'form expected)]))
   (pattern (~and form ((~or vector-immutable vector) args:expr ...))
     (match expected
-      [(tc-result1: (app resolve (Vector: t))) (tc/app-regular #'form expected)]
+      [(tc-result1: (app resolve (Vector: t)))
+       (define es (syntax->list #'(args ...)))
+       (for ([e (in-list es)])
+         (tc-expr/check e (ret t)))
+       (ret (make-HeterogeneousVector (map (λ (_) t) es)))]
       [(tc-result1: (app resolve (HeterogeneousVector: ts)))
        (unless (= (length ts) (length (syntax->list #'(args ...))))
          (tc-error/expr "expected vector with ~a elements, but got ~a"
@@ -130,7 +132,7 @@
          [(list t0) (tc/app/check #'(#%plain-app . form) (ret t0))]
          [_ (continue)])]
       ;; since vectors are mutable, if there is no expected type, we want to generalize the element type
-      [(or #f (tc-result1: _))
+      [(or #f (tc-any-results:) (tc-result1: _))
        (ret (make-HeterogeneousVector (map (lambda (x) (generalize (tc-expr/t x)))
                                            (syntax->list #'(args ...)))))]
       [_ (int-err "bad expected: ~a" expected)])))
