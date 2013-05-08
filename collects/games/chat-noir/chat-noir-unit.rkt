@@ -1,8 +1,8 @@
-#lang scheme/base
-(require scheme/unit
-         scheme/runtime-path
-         scheme/gui/base
-         scheme/class
+#lang racket/base
+(require racket/unit
+         racket/runtime-path
+         racket/gui/base
+         racket/class
          "../show-scribbling.rkt"
          string-constants/string-constant
          (prefix-in x: lang/htdp-intermediate-lambda)
@@ -38,7 +38,7 @@
                (o-loop (cdr objs))]))]))))
   
   ;; a hack.
-  ;; this adds a help button to the world.ss window
+  ;; this adds a help button to the world.rkt window
   (thread
    (λ ()
      (let loop ([n 0])
@@ -66,7 +66,6 @@
   
   (parameterize ([current-custodian sub-custodian])
     (parameterize ([current-namespace (make-base-namespace)])
-      (namespace-attach-module orig-namespace '(lib "mred.rkt" "mred"))
-      (namespace-attach-module orig-namespace '(lib "class.rkt" "scheme"))
+      (namespace-attach-module orig-namespace 'racket/gui)
+      (namespace-attach-module orig-namespace 'racket/class)
       ((dynamic-require chat-noir 'main)))))
-

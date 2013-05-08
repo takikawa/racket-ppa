@@ -1,7 +1,7 @@
 /*
  * @(#)regexp.c 1.3 of 18 April 87
  * Revised for PLT Racket, 1995-2001
- * Copyright (c) 2004-2012 PLT Scheme Inc.
+ * Copyright (c) 2004-2013 PLT Design Inc.
  *
  * Copyright (c) 1986 by University of Toronto.
  * Written by Henry Spencer.  Not derived from licensed software.
@@ -5386,7 +5386,7 @@ static Scheme_Object *gen_compare(char *name, int pos,
 
   if (lazy_string) {
     full_s = lazy_string->s;
-    endset = lazy_string->end;
+    endset = lazy_string->end - lazy_string->start;
   }
 
   if (iport) {

@@ -308,8 +308,8 @@ error is signaled in the evaluation of the @racket[class*] form,
 because implementing the @racket[fish-interface] interface requires
 those methods.
 
-The @racket[is-a?] predicate accepts either a class or interface as
-its first argument and an object as its second argument. When given a
+The @racket[is-a?] predicate accepts an object as its first argument
+and either a class or interface as its second argument. When given a
 class, @racket[is-a?] checks whether the object is an instance of that
 class or a derived class.  When given an interface, @racket[is-a?]
 checks whether the object's class implements the interface. In
@@ -555,7 +555,37 @@ first sequence of @racket[interface-expr]s and produces a class that
 implements the second sequence of @racket[interface-expr]s. Other
 requirements, such as the presence of @racket[inherit]ed methods in
 the superclass, are then checked for the @racket[class] expansion of
-the @racket[mixin] form.
+the @racket[mixin] form.  For example:
+
+@interaction[
+#:eval class-eval
+
+(define choosy-interface (interface () choose?))
+(define hungry-interface (interface () eat))
+(define choosy-eater-mixin
+  (mixin (choosy-interface) (hungry-interface)
+    (inherit choose?)
+    (super-new)
+    (define/public (eat x)
+      (cond
+        [(choose? x)
+         (printf "chomp chomp chomp on ~a.\n" x)]
+        [else
+         (printf "I'm not crazy about ~a.\n" x)]))))
+
+(define herring-lover% 
+  (class* object% (choosy-interface)
+    (super-new)
+    (define/public (choose? x)
+      (regexp-match #px"^herring" x))))
+
+(define herring-eater% (choosy-eater-mixin herring-lover%))
+(define eater (new herring-eater%))
+(send eater eat "elderberry")
+(send eater eat "herring")
+(send eater eat "herring ice cream")
+]
+
 
 Mixins not only override methods and introduce public methods, they
 can also augment methods, introduce augment-only methods, add an

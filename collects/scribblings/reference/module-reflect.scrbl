@@ -21,7 +21,7 @@ to another module.
 
 @defproc[(resolved-module-path? [v any/c]) boolean?]{
 
-Returns @racket[#f] if @racket[v] is a @tech{resolved module path},
+Returns @racket[#t] if @racket[v] is a @tech{resolved module path},
 @racket[#f] otherwise.}
 
 @defproc[(make-resolved-module-path [path (or/c symbol? 
@@ -394,6 +394,12 @@ should be the given default value.
 See also @racket[module->language-info] and
 @racketmodname[racket/language-info].}
 
+@defproc[(module-compiled-cross-phase-persistent?
+          [compiled-module-code compiled-module-expression?])
+         boolean?]{
+
+Return @racket[#t] if @racket[compiled-module-code] represents a
+@tech{cross-phase persistent} module, @racket[#f] otherwise.}
 
 @;------------------------------------------------------------------------
 @section[#:tag "dynreq"]{Dynamic Module Access}

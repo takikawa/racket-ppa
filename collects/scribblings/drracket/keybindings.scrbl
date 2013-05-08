@@ -170,6 +170,25 @@ selected.
                        mixed Unicode and ASCII, it will all be converted to 
                        the Unicode characters.
                        }
+
+@keybinding["C-x r w"]{Widen the nearby ASCII art rectangles.
+                       
+                       For example, if the insertion point is just to the left of
+                       the middle line of this rectangle:
+                       @tabular[(list (list @litchar{╔═╦══╗})
+                                      (list @litchar{║ ║  ║})
+                                      (list @litchar{╠═╬══╣})
+                                      (list @litchar{║ ║  ║})
+                                      (list @litchar{╚═╩══╝}))]
+                       then the keystroke will turn it into this one:
+                       @tabular[(list (list @litchar{╔══╦══╗})
+                                      (list @litchar{║  ║  ║})
+                                      (list @litchar{╠══╬══╣})
+                                      (list @litchar{║  ║  ║})
+                                      (list @litchar{╚══╩══╝}))]
+                       }
+@keybinding["C-x r c"]{Centers the contents of the current line inside the enclosing
+                       cell of the enclosing ASCII art rectangle.}
 ]
 
 @section{File Operations}
@@ -209,6 +228,7 @@ as the @tech{definitions window} plus a few more:
 @keybinding["M-p"]{bring the previously entered expression down to the prompt}
 @keybinding["M-n"]{bring the expression after the current expression in the
   expression history down to the prompt}
+@keybinding["M-h"]{Show the current expression history in a separate window}
 ]
 
 @section{LaTeX and TeX inspired keybindings}

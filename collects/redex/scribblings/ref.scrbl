@@ -32,6 +32,12 @@
      #'((tech (racketvarfont "pattern")) args ...)]
     [x (identifier? #'x) #'(tech (racketvarfont "pattern"))]))
 
+@(define-syntax (ttpattern-sequence stx)
+   (syntax-case stx ()
+    [(_ args ...)
+     #'((tech #:key "pattern" (racketvarfont "pattern-sequence")) args ...)]
+    [x (identifier? #'x) #'(tech #:key "pattern" (racketvarfont "pattern-sequence"))]))
+
 @(define-syntax (pattern stx)
    (syntax-case stx ()
     [(_ args ...)
@@ -737,11 +743,32 @@ extends all of them.
   Constructs a language that is the union of all of the
   languages listed in the @racket[base/prefix-lang].
   
+  If the two languages have non-terminals in common, then 
+  @racket[define-union-language] will combine all of the productions
+  of the common non-terminals. For example, this definition of @racket[L]:
+  @racketblock[(define-language L1
+                 (e ::=
+                    (+ e e) 
+                    number))
+               (define-language L2
+                 (e ::=
+                    (if e e e)
+                    true 
+                    false))
+               (define-union-language L L1 L2)]
+  is equivalent to this one:
+  @racketblock[(define-language L
+                 (e ::=
+                    (+ e e) 
+                    number
+                    (if e e e)
+                    true 
+                    false))]
+  
   If a language has a prefix, then all of the non-terminals
   from that language have the corresponding prefix in 
-  the union language. The prefix helps avoid collisions
-  between the constituent language's non-terminals
-  (which is illegal).
+  the union language. The prefix helps avoid unintended collisions
+  between the constituent language's non-terminals.
   
   For example, with two these two languages:
   @racketblock[(define-language UT
@@ -1061,7 +1088,10 @@ reduce it further).
                [(name @#,ttpattern ...) @#,tttterm metafunction-extras ...] 
                ...)
              ([metafunction-contract (code:line) 
-                                     (code:line id : @#,ttpattern ... -> range)]
+                                     (code:line id : @#,ttpattern-sequence ... -> range
+                                                maybe-pre-condition)]
+              [maybe-pre-condition (code:line #:pre @#,tttterm)
+                                   (code:line)]
               [range @#,ttpattern
                      (code:line @#,ttpattern or range)
                      (code:line @#,ttpattern ∨ range)
@@ -1071,7 +1101,8 @@ reduce it further).
                                    (where pat @#,tttterm)
                                    (where/hidden pat @#,tttterm)
                                    (judgment-holds 
-                                    (judgment-form-id pat/term ...))])]{
+                                    (judgment-form-id pat/term ...))
+                                   (clause-name name)])]{
 
 The @racket[define-metafunction] form builds a function on
 sexpressions according to the pattern and right-hand-side
@@ -1079,14 +1110,38 @@ expressions. The first argument indicates the language used
 to resolve non-terminals in the pattern expressions. Each of
 the rhs-expressions is implicitly wrapped in @|tttterm|. 
 
+The contract, if present, is matched against every input to
+the metafunction and, if the match fails, an exception is raised.
+If present, the term inside the @racket[maybe-pre-condition] is evaluated
+after a successful match to the input pattern in the contract (with
+any variables from the input contract bound). If
+it returns @racket[#f], then the input contract is considered to not
+have matched and an error is also raised.
+
 The @racket[side-condition], @racket[hidden-side-condition],
 @racket[where], and @racket[where/hidden] clauses behave as
 in the @racket[reduction-relation] form.
 
-Raises an exception recognized by @racket[exn:fail:redex?] if
-no clauses match, if one of the clauses matches multiple ways
-(and that leads to different results for the different matches),
-or if the contract is violated.
+The resulting metafunction raises an exception recognized by @racket[exn:fail:redex?] if
+no clauses match or if one of the clauses matches multiple ways
+(and that leads to different results for the different matches).
+
+The @racket[side-condition] extra is evaluated after a successful match
+to the corresponding argument pattern. If it returns @racket[#f],
+the clause is considered not to have matched, and the next one is tried.
+The @racket[side-condition/hidden] extra behaves the same, but is
+not typeset.
+
+The @racket[where] and @racket[where/hidden] extra are like
+@racket[side-condition] and @racket[side-condition/hidden],
+except the match guards the clause.
+
+The @racket[judgment-holds] clause is like @racket[side-condition]
+and @racket[where], except the given judgment must hold for the
+clause to be taken.
+
+The @racket[clause-name] is used only when typesetting. See
+@racket[metafunction-cases].
 
 Note that metafunctions are assumed to always return the same results
 for the same inputs, and their results are cached, unless
@@ -1182,7 +1237,7 @@ and @racket[#f] otherwise.
                rule rule ...)
              ([mode-spec (code:line #:mode (form-id pos-use ...))]
               [contract-spec (code:line) 
-                             (code:line #:contract (form-id @#,ttpattern ...))]
+                             (code:line #:contract (form-id @#,ttpattern-sequence ...))]
               [pos-use I
                        O]
               [rule [premise
@@ -1897,20 +1952,23 @@ Like @racket[check-reduction-relation] but for metafunctions.
 containing arguments to the metafunction. Similarly, @racket[prepare-expr]
 produces and consumes argument lists.}
 
+@(redex-eval '(random-seed 0))
 @examples[
 #:eval redex-eval
        (define-language empty-lang)
-       
-       (random-seed 0)
 
        (define-metafunction empty-lang
          Σ : number ... -> number
          [(Σ) 0]
          [(Σ number) number]
-         [(Σ number_1 number_2 number_3 ...) 
-          (Σ ,(+ (term number_1) (term number_2)) number_3 ...)])
+         [(Σ number_1 number_2) ,(+ (term number_1) (term number_2))]
+         [(Σ number_1 number_2 ...) (Σ number_1 (Σ number_2 ...))])
        
-       (check-metafunction Σ (λ (args) (printf "~s\n" args)) #:attempts 2)]
+       (check-metafunction Σ (λ (args) 
+                               (printf "trying ~s\n" args)
+                               (equal? (apply + args)
+                                       (term (Σ ,@args))))
+                           #:attempts 2)]
 
 @defproc[(default-attempt-size [n natural-number/c]) natural-number/c]{
 The default value of the @racket[#:attempt-size] argument to 
@@ -2683,15 +2741,18 @@ precede ellipses that represent argument sequences; when it is
 
 @defparam[metafunction-cases 
           cases
-          (or/c #f (and/c (listof (and/c integer?
-                                         (or/c zero? positive?)))
+          (or/c #f (and/c (listof (or/c exact-nonnegative-integer? 
+                                        string?))
                           pair?))]{
 
-Controls which cases in a metafunction are rendered. If it is @racket[#f] (the default), then all of the
-cases appear. If it is a list of numbers, then only the selected cases appear (counting from @racket[0]).
+Controls which cases in a metafunction are rendered. If it is @racket[#f]
+(the default), then all of the cases appear. If it is a list, then only 
+the selected cases appear. The numbers indicate the cases counting from
+@racket[0] and the strings indicate cases named with @racket[clause-name].
 
 This parameter also controls how which clauses in judgment forms are rendered, but
-only in the case that @racket[judgment-form-cases] is @racket[#f].
+only in the case that @racket[judgment-form-cases] is @racket[#f] (and in that
+case, only the numbers are used).
 }
                                   
 @defparam[judgment-form-cases 
@@ -2866,14 +2927,12 @@ To replace the pink code, use:
 
 @defform[(with-unquote-rewriter proc expression)]{
 
-It installs @racket[proc] the current unqoute rewriter and
-evaluates expression. If that expression computes any picts,
+Installs @racket[proc] as the current unquote rewriter and
+evaluates @racket[expression]. If that expression computes any picts,
 the unquote rewriter specified is used to remap them.
 
-The @racket[proc] should be a function of one argument. It receives
-a @racket[lw] struct as an argument and should return
-another @racket[lw] that contains a rewritten version of the
-code.
+The @racket[proc] must match the contract @racket[(-> lw? lw?)].
+Its result should be the rewritten version version of the input.
 }
 
 @defform[(with-atomic-rewriter name-symbol
@@ -2886,7 +2945,7 @@ string-or-pict-returning-thunk (applied, in the case of a
 thunk), during the evaluation of expression.
 
 @racket[name-symbol] is expected to evaluate to a symbol. The value
-of string-or-thunk-returning-pict is used whever the symbol
+of string-or-thunk-returning-pict is used whenever the symbol
 appears in a pattern.
 }
 

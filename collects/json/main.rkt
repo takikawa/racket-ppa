@@ -78,13 +78,13 @@
            (define first? #t)
            (for ([(k v) (in-hash x)])
              (unless (symbol? k)
-               (raise-type-error 'write-json "bad JSON key value" k))
+               (raise-type-error 'write-json "legal JSON key value" k))
              (if first? (set! first? #f) (write-bytes #"," o))
              (write (symbol->string k) o) ; no `printf' => proper escapes
              (write-bytes #":" o)
              (loop v))
            (write-bytes #"}" o)]
-          [else (raise-type-error 'write-json "bad JSON value" x)]))
+          [else (raise-type-error 'write-json "legal JSON value" x)]))
   (void))
 
 ;; ----------------------------------------------------------------------------
@@ -107,7 +107,7 @@
   (define (read-string)
     (let loop ([l* '()])
       ;; note: use a string regexp to extract utf-8-able text
-      (define m (cdr (or (regexp-try-match #rx"^(.*?)(\"|\\\\(.))" i)
+      (define m (cdr (or (regexp-try-match #rx"^([^\"\\]*)(\"|\\\\(.))" i)
                          (err "unterminated string"))))
       (define l (if ((bytes-length (car m)) . > . 0) (cons (car m) l*) l*))
       (define esc (caddr m))

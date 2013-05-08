@@ -14,6 +14,7 @@
          (for-syntax scheme/stxparam-exptime))
 
 (provide else require provide #%top
+         values
          test/location=? 
          test/value=?
          (rename-out
@@ -36,7 +37,7 @@
           [mutator-lambda λ]
           (mutator-app #%app)
           (mutator-datum #%datum)
-          (collector:cons cons)
+          (mutator-cons cons)
           (collector:first first)
           (collector:rest rest)
           (mutator-quote quote)
@@ -47,8 +48,11 @@
 (define-syntax-parameter mutator-tail-call? #t)
 (define-syntax-parameter mutator-env-roots empty)
 
+(define-syntax-parameter mutator-assignment-allowed? #t)
+(define-syntax-rule (no! e) (syntax-parameterize ([mutator-assignment-allowed? #f]) e))
+(define-syntax-rule (yes! e) (syntax-parameterize ([mutator-assignment-allowed? #t]) e))
+
 ; Sugar Macros
-(define-syntax-rule (->address e) e)
 (define-syntax mutator-and
   (syntax-rules ()
     [(_) (mutator-quote #t)]
@@ -112,68 +116,101 @@
     [(_ fe e ...)
      (let ([tmp 
             (syntax-parameterize ([mutator-tail-call? #f])
-                                 fe)])
+                                 (yes! fe))])
        (mutator-begin e ...))]))
+
+(define mutator-cons
+  (let ([cons 
+         (λ (hd tl)
+           (define roots (compute-current-roots))
+           (define-values (hd-roots no-hd-roots)
+             (partition (λ (x) (= hd (read-root x))) roots))
+           (define-values (tl-roots no-hd-no-tl-roots)
+             (partition (λ (x) (= tl (read-root x))) no-hd-roots))
+           (parameterize ([active-roots no-hd-no-tl-roots])
+             (collector:cons (make-root 'hd
+                                        (λ () hd)
+                                        (λ (v)
+                                          (set! hd v)
+                                          (for ([r (in-list hd-roots)])
+                                            (set-root! r v))))
+                             (make-root 'tl
+                                        (λ () tl)
+                                        (λ (v)
+                                          (set! tl v)
+                                          (for ([r (in-list tl-roots)])
+                                            (set-root! r v)))))))])
+    cons))
+
+(define (do-alloc-flat flat)
+  (parameterize ([active-roots (compute-current-roots)])
+    (collector:alloc-flat flat)))
 
 ; Real Macros
 (define-syntax-rule (mutator-define-values (id ...) e)
   (begin (define-values (id ...) 
            (syntax-parameterize ([mutator-tail-call? #f])
-                                (->address e)))
+                                e))
          (add-global-root! (make-env-root id))
          ...))
 (define-syntax-rule (mutator-if test true false)
   (if (syntax-parameterize ([mutator-tail-call? #f])
-                           (collector:deref (->address test)))
-      (->address true)
-      (->address false)))
-(define-syntax-rule (mutator-set! id e)
-  (begin
-    (set! id (->address e))
-    (mutator-app void)))
+                           (collector:deref (no! test)))
+      true
+      false))
+(define-syntax (mutator-set! stx)
+  (syntax-case stx ()
+    [(_ id e)
+     (let ()
+       (if (syntax-parameter-value #'mutator-assignment-allowed?)
+           #'(begin
+               (set! id (no! e))
+               (mutator-app void))
+           (raise-syntax-error 'set! "allowed only inside begin expressions and at the top-level" stx)))]))
 (define-syntax (mutator-let-values stx)
   (syntax-case stx ()
-    [(_ ([(id ...) expr]
-         ...)
-        body-expr)
+    [(_ ([(id ...) expr] ...) body-expr)
      (with-syntax ([((tmp ...) ...)
                     (map generate-temporaries (syntax->list #'((id ...) ...)))])
-       (let ([binding-list (syntax->list #'((tmp ...) ...))])
-         (with-syntax ([((previous-tmp ...) ...)
+       (let ([binding-list (syntax->list #'((id ...) ...))])
+         (with-syntax ([((previous-id ...) ...)
                         (build-list (length binding-list) 
                                     (λ (n) (append-map syntax->list (take binding-list n))))])
            (syntax/loc stx
              (let*-values ([(tmp ...) 
                             (syntax-parameterize ([mutator-env-roots 
                                                    (append
-                                                    (find-referenced-locals
-                                                     (list #'previous-tmp ...)
-                                                     #'expr)
+                                                    (switch-over
+                                                     (syntax->list #'(id ... ...))
+                                                     (syntax->list #'(tmp ... ...))
+                                                     (find-referenced-locals
+                                                      (list #'previous-id ...)
+                                                      #'body-expr))
                                                     (syntax-parameter-value #'mutator-env-roots))]
                                                   [mutator-tail-call? #f])
-                                                 expr)]
+                                                 (no! expr))]
                            ...)
-               (let-values ([(id ...) (values tmp ...)]
-                            ...)
+               (let-values ([(id ...) (values tmp ...)] ...)
                  (syntax-parameterize ([mutator-env-roots 
                                         (append (find-referenced-locals
                                                  (list #'id ... ...)
                                                  #'body-expr)
                                                 (syntax-parameter-value #'mutator-env-roots))])
-                                      (->address body-expr))))))))]
-    [(_ ([(id ...) expr]
-         ...)
-        body-expr ...)
+                                      body-expr)))))))]
+    [(_ ([(id ...) expr] ...) body-expr ...)
      (syntax/loc stx
        (mutator-let-values
-        ([(id ...) expr]
-         ...)
+        ([(id ...) expr] ...)
         (mutator-begin body-expr ...)))]))
 (define-syntax (mutator-lambda stx)
   (syntax-case stx ()
     [(_ (id ...) body)
      (let ([env-roots (syntax-parameter-value #'mutator-env-roots)])
-       (with-syntax ([(free-id ...) (map syntax-local-introduce (find-referenced-locals env-roots stx))]
+       (with-syntax ([(free-id ...) (map syntax-local-introduce 
+                                         (filter
+                                          (λ (x) (for/and ([id (in-list (syntax->list #'(id ...)))])
+                                                   (not (free-identifier=? id x))))
+                                          (find-referenced-locals env-roots stx)))]
                      [(env-id ...) env-roots]
                      [closure (or (syntax-parameter-value #'mutator-name)
                                   (syntax-local-name)
@@ -196,28 +233,54 @@
                                                      #'body)
                                                     (list #'free-id ...))]
                                                   [mutator-tail-call? #t])
-                                                 (->address body)))])
+                                                 (no! body)))])
                      closure))])
              #,(if (syntax-parameter-value #'mutator-tail-call?)
                    (syntax/loc stx
-                     (#%app collector:closure closure (vector free-id ...)))
+                     (#%app do-collector:closure closure 
+                            (list (λ () free-id) ...)
+                            (list (λ (v) (set! free-id v)) ...)))
                    (syntax/loc stx
                      (with-continuation-mark 
                       gc-roots-key 
                       (list (make-env-root env-id) ...)
-                      (#%app collector:closure closure (vector free-id ...)))))))))]
+                      (#%app do-collector:closure closure
+                             (list (λ () free-id) ...)
+                             (list (λ (v) (set! free-id v)) ...)))))))))]
     [(_ (id ...) body ...)
      (syntax/loc stx
        (mutator-lambda (id ...) (mutator-begin body ...)))]))
 
+(define (do-collector:closure closure getters setters)
+  (define-values (remaining-roots closure-roots)
+    (let loop ([getters getters]
+               [setters setters]
+               [remaining-roots (compute-current-roots)]
+               [closure-roots '()])
+      (cond
+        [(null? getters) (values remaining-roots closure-roots)]
+        [else
+         (define this-loc ((car getters)))
+         (define this-setter (car setters))
+         (define-values (this-other-roots leftovers) 
+           (partition (λ (x) (= (read-root x) this-loc)) remaining-roots))
+         (loop (cdr getters) (cdr setters)
+               leftovers
+               (cons (make-root 'closure-root
+                                (λ () this-loc)
+                                (λ (v) 
+                                  (set! this-loc v)
+                                  (this-setter v)
+                                  (for ([root (in-list this-other-roots)])
+                                    (set-root! v))))
+                     closure-roots))])))
+  (parameterize ([active-roots remaining-roots])
+    (collector:closure closure closure-roots)))
+  
 (define-syntax (mutator-app stx)
   (syntax-case stx ()
     [(_ e ...)
-     (local [(define (do-not-expand? exp)
-               (and (identifier? exp)
-                    (or (free-identifier=? exp #'empty)
-                        (ormap (λ (x) (free-identifier=? x exp))
-                               prim-ids))))
+     (local [(define (do-not-expand? exp) (identifier? exp))
              (define exps (syntax->list #'(e ...)))
              (define tmps
                (generate-temporaries #'(e ...)))]
@@ -238,9 +301,15 @@
      (let ()
        (define prim-app? (ormap (λ (x) (free-identifier=? x #'fe))
                                 prim-ids))
+       (define is-set-fst? (free-identifier=? #'collector:set-first! #'fe))
+       (when (or is-set-fst? (free-identifier=? #'collector:set-rest! #'fe))
+         (unless (syntax-parameter-value #'mutator-assignment-allowed?)
+           (raise-syntax-error (if is-set-fst? 'set-first! 'set-rest!)
+                               "can appear only at the top-level or in a begin"
+                               stx)))
        (with-syntax ([(env-id ...) (syntax-parameter-value #'mutator-env-roots)]
                      [app-exp (if prim-app?
-                                  (syntax/loc stx (collector:alloc-flat (fe (collector:deref ae) ...)))
+                                  (syntax/loc stx (do-alloc-flat (fe (collector:deref ae) ...)))
                                   (syntax/loc stx ((deref-proc fe) ae ...)))])
          (if (syntax-parameter-value #'mutator-tail-call?)
              ; If this call is in tail position, we will not need access
@@ -254,13 +323,13 @@
 (define-syntax mutator-quote
   (syntax-rules ()
     [(_ (a . d))
-     (mutator-app collector:cons (mutator-quote a) (mutator-quote d))]
+     (mutator-app mutator-cons (mutator-quote a) (mutator-quote d))]
     [(_ s) 
      (mutator-datum . s)]))
 (define-syntax (mutator-datum stx)
   (syntax-case stx ()
     [(_ . e) 
-     (quasisyntax/loc stx (mutator-anf-app collector:alloc-flat (#%datum . e)))]))
+     (quasisyntax/loc stx (mutator-anf-app do-alloc-flat (#%datum . e)))]))
 
 (define-syntax (mutator-top-interaction stx)
   (syntax-case stx (require provide mutator-define mutator-define-values test/value=? import-primitives)
@@ -287,62 +356,100 @@
        (call-with-values
         (lambda ()
           (syntax-parameterize ([mutator-tail-call? #f])
-                               (->address expr)))
+                               expr))
         (case-lambda
           [() (void)]
           [(result-addr)
+           (show-one-result result-addr)]
+          [result-addrs
+           (show-multiple-results result-addrs)])))]))
+
+(define (show-one-result result-addr)
+  (cond
+    [(procedure? result-addr)
+     (printf "Imported procedure:\n")
+     result-addr]
+    [(location? result-addr)
+     (printf "Value at location ~a:\n" result-addr)
+     (gc->scheme result-addr)]))
+
+(define (show-multiple-results results)
+  (define addrs
+    (for/list ([result-addr (in-list results)]
+               #:when (location? result-addr))
+      result-addr))
+  
+  (printf "Values at locations ")
+  (cond
+    [(= (length addrs) 2)
+     (printf "~a and ~a:\n" (car addrs) (cadr addrs))]
+    [else
+     (let loop ([addr (car addrs)]
+                [addrs (cdr addrs)])
+       (cond
+         [(null? addrs)
+          (printf "and ~a:\n" addr)]
+         [else
+          (printf "~a, " addr)
+          (loop (car addrs) (cdr addrs))]))])
+  (apply values 
+         (for/list ([result (in-list results)])
            (cond
-             [(procedure? result-addr)
-              (printf "Imported procedure:\n")
-              result-addr]
-             [(location? result-addr)
-              (printf "Value at location ~a:\n" result-addr)
-              (gc->scheme result-addr)])])))]))
+             [(procedure? result)
+              result]
+             [(location? result)
+              (gc->scheme result)]))))
+             
 
 ; Module Begin
 (define-for-syntax (allocator-setup-internal stx)
   (syntax-case stx ()
     [(collector-module heap-size)
-     (with-syntax ([(init-allocator gc:deref gc:alloc-flat gc:cons 
-                                    gc:closure gc:closure? gc:closure-code-ptr gc:closure-env-ref
-                                    gc:first gc:rest 
-                                    gc:flat? gc:cons?
-                                    gc:set-first! gc:set-rest!)
+     (with-syntax ([(args ...)
                     (map (λ (s) (datum->syntax stx s))
                          '(init-allocator gc:deref gc:alloc-flat gc:cons 
                                           gc:closure gc:closure? gc:closure-code-ptr gc:closure-env-ref
                                           gc:first gc:rest 
                                           gc:flat? gc:cons?
                                           gc:set-first! gc:set-rest!))]) 
-       (begin
-         #`(begin
-             #,(if (alternate-collector)
-                   #`(require #,(datum->syntax #'collector-module (alternate-collector)))
-                   #`(require collector-module))
-             
-             (set-collector:deref! gc:deref)
-             (set-collector:alloc-flat! gc:alloc-flat)
-             (set-collector:cons! gc:cons)
-             (set-collector:first! gc:first)
-             (set-collector:rest! gc:rest)
-             (set-collector:flat?! gc:flat?)
-             (set-collector:cons?! gc:cons?)
-             (set-collector:set-first!! gc:set-first!)
-             (set-collector:set-rest!! gc:set-rest!)
-             (set-collector:closure! gc:closure)
-             (set-collector:closure?! gc:closure?)
-             (set-collector:closure-code-ptr! gc:closure-code-ptr)
-             (set-collector:closure-env-ref! gc:closure-env-ref)
-             
-             (init-heap! (#%datum . heap-size))
-             (when (gui-available?) 
-               (if (<= (#%datum . heap-size) 500)
-                   (set-ui! (dynamic-require `plai/gc2/private/gc-gui 'heap-viz%))
-                   (printf "Large heap; the heap visualizer will not be displayed.\n")))
-             (init-allocator))))]
+       #`(begin
+           #,(if (alternate-collector)
+                 #`(require #,(datum->syntax #'collector-module (alternate-collector)))
+                 #`(require #,(syntax-case #'collector-module (mutator-quote)
+                                [(mutator-quote . x) 
+                                 (datum->syntax #'collector-module (cons #'quote #'x))]
+                                [else #'collector-module])))
+           (allocator-setup/proc args ... (#%datum . heap-size))))]
     [_ (raise-syntax-error 'mutator 
                            "Mutator must start with an 'allocator-setup' expression, such as: (allocator-setup <module-path> <literal-number>)"
                            stx)]))
+
+(define (allocator-setup/proc init-allocator gc:deref gc:alloc-flat gc:cons 
+                              gc:closure gc:closure? gc:closure-code-ptr gc:closure-env-ref
+                              gc:first gc:rest 
+                              gc:flat? gc:cons?
+                              gc:set-first! gc:set-rest!
+                              heap-size)
+  (set-collector:deref! gc:deref)
+  (set-collector:alloc-flat! gc:alloc-flat)
+  (set-collector:cons! gc:cons)
+  (set-collector:first! gc:first)
+  (set-collector:rest! gc:rest)
+  (set-collector:flat?! gc:flat?)
+  (set-collector:cons?! gc:cons?)
+  (set-collector:set-first!! gc:set-first!)
+  (set-collector:set-rest!! gc:set-rest!)
+  (set-collector:closure! gc:closure)
+  (set-collector:closure?! gc:closure?)
+  (set-collector:closure-code-ptr! gc:closure-code-ptr)
+  (set-collector:closure-env-ref! gc:closure-env-ref)
+  
+  (init-heap! heap-size)
+  (when (gui-available?) 
+    (if (<= heap-size 500)
+        (set-ui! (dynamic-require `plai/gc2/private/gc-gui 'heap-viz%))
+        (printf "Large heap; the heap visualizer will not be displayed.\n")))
+  (init-allocator))  
 
 (define-for-syntax allocator-setup-error-msg
   "Mutator must start with an 'allocator-setup' expression, such as: (allocator-setup <module-path> <literal-number>)")
@@ -392,7 +499,7 @@
                (let ([result (apply renamed-id (map collector:deref args))])
                  (cond
                    [(void? result) (void)]
-                   [(heap-value? result) (collector:alloc-flat result)]
+                   [(heap-value? result) (do-alloc-flat result)]
                    [else 
                     (error 'id (string-append "imported primitive must return <heap-value?>, "
                                               "received ~a" result))]))))
@@ -435,19 +542,29 @@
 (define (member? v l)
   (and (member v l) #t))
 (define (mutator-member? v l)
-  (collector:alloc-flat
+  (do-alloc-flat
    (member? (collector:deref v)
             (gc->scheme l))))
 
 (provide (rename-out (mutator-set-first! set-first!)))
-(define (mutator-set-first! x y)
-  (collector:set-first! x y)
-  (void))
+(define-syntax (mutator-set-first! stx)
+  (syntax-case stx ()
+    [x 
+     (identifier? #'x)
+     (raise-syntax-error 'set-first! "must appear immediately following an open paren" stx)]
+    [(_ args ...)
+     (begin
+       #'(mutator-app collector:set-first! args ...))]))
 
 (provide (rename-out (mutator-set-rest! set-rest!)))
-(define (mutator-set-rest! x y)
-  (collector:set-rest! x y)
-  (void))
+(define-syntax (mutator-set-rest! stx)
+  (syntax-case stx ()
+    [x 
+     (identifier? #'x)
+     (raise-syntax-error 'set-rest! "must appear immediately following an open paren" stx)]
+    [(_ args ...)
+     (begin
+       #'(mutator-app collector:set-rest! args ...))]))
 
 (provide (rename-out [mutator-empty empty]))
 (define-syntax mutator-empty
@@ -458,17 +575,17 @@
 (define (mutator-empty? loc)
   (cond
     [(collector:flat? loc) 
-     (collector:alloc-flat (empty? (collector:deref loc)))]
+     (do-alloc-flat (empty? (collector:deref loc)))]
     [else 
-     (collector:alloc-flat false)]))
+     (do-alloc-flat false)]))
 
 (provide (rename-out [mutator-cons? cons?]))
 (define (mutator-cons? loc)
-  (collector:alloc-flat (collector:cons? loc)))
+  (do-alloc-flat (collector:cons? loc)))
 
 (provide (rename-out [mutator-eq? eq?]))
 (define (mutator-eq? l1 l2)
-  (collector:alloc-flat (= l1 l2)))
+  (do-alloc-flat (= l1 l2)))
 
 (provide (rename-out [mutator-printf printf]))
 (define-syntax (mutator-printf stx)

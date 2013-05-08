@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1203,6 +1203,7 @@ set_syntax (Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec,
     var = scheme_register_toplevel_in_prefix(var, env, rec, drec, 0, NULL);
     if (env->genv->module)
       SCHEME_TOPLEVEL_FLAGS(var) |= SCHEME_TOPLEVEL_MUTATED;
+    env->prefix->non_phaseless = 1;
   }
 
   scheme_compile_rec_done_local(rec, drec);
@@ -1333,6 +1334,9 @@ ref_syntax (Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec,
   Scheme_Env *menv = NULL;
   Scheme_Object *var, *name, *rest, *dummy, *lex_id = NULL;
   int l, ok;
+
+  if (rec[drec].comp)
+    env->prefix->non_phaseless = 1;
 
   form = scheme_stx_taint_disarm(form, NULL);
 
@@ -3225,6 +3229,9 @@ quote_syntax_syntax(Scheme_Object *orig_form, Scheme_Comp_Env *env, Scheme_Compi
   int len;
   Scheme_Object *stx, *form;
 
+  if (rec[drec].comp)
+    env->prefix->non_phaseless = 1;
+
   form = scheme_stx_taint_disarm(orig_form, NULL);
 
   if (rec[drec].comp)
@@ -4145,7 +4152,7 @@ Scheme_App_Rec *scheme_malloc_application(int n)
     app = (Scheme_App_Rec *)scheme_malloc_tagged(size);
   }
 
-  app->so.type = scheme_application_type;
+  app->iso.so.type = scheme_application_type;
 
   app->num_args = n - 1;
 
@@ -4552,18 +4559,20 @@ scheme_compile_expand_expr(Scheme_Object *form, Scheme_Comp_Env *env,
 	
 	if (rec[drec].comp) {
 	  scheme_compile_rec_done_local(rec, drec);
+          if (SAME_TYPE(SCHEME_TYPE(var), scheme_variable_type)) {
+            if (scheme_extract_unsafe(var)) {
+              scheme_register_unsafe_in_prefix(env, rec, drec, menv);
+              return scheme_extract_unsafe(var);
+            } else if (scheme_extract_flfxnum(var)) {
+              return scheme_extract_flfxnum(var);
+            } else if (scheme_extract_extfl(var)) {
+              return scheme_extract_extfl(var);
+            } else if (scheme_extract_futures(var)) {
+              return scheme_extract_futures(var);
+            }
+          }
           if (SAME_TYPE(SCHEME_TYPE(var), scheme_variable_type)
-              && scheme_extract_unsafe(var)) {
-            scheme_register_unsafe_in_prefix(env, rec, drec, menv);
-            return scheme_extract_unsafe(var);
-          } else if (SAME_TYPE(SCHEME_TYPE(var), scheme_variable_type)
-                     && scheme_extract_flfxnum(var)) {
-            return scheme_extract_flfxnum(var);
-          } else if (SAME_TYPE(SCHEME_TYPE(var), scheme_variable_type)
-                     && scheme_extract_futures(var)) {
-            return scheme_extract_futures(var);
-          } else if (SAME_TYPE(SCHEME_TYPE(var), scheme_variable_type)
-                     || SAME_TYPE(SCHEME_TYPE(var), scheme_module_variable_type))
+              || SAME_TYPE(SCHEME_TYPE(var), scheme_module_variable_type))
 	    return scheme_register_toplevel_in_prefix(var, env, rec, drec, 
                                                       scheme_is_imported(var, env),
                                                       inline_variant);
@@ -5624,18 +5633,22 @@ compile_expand_block(Scheme_Object *forms, Scheme_Comp_Env *env,
 	int cnt;
 
         if (!SCHEME_NULLP(pre_exprs)) {
-          Scheme_Object *begin_stx, *values_app_stx;
+          Scheme_Object *begin_stx, *values_app_stx, *exp_mark;
 
           pre_exprs = scheme_reverse(pre_exprs);
+
+          exp_mark = scheme_new_mark();
 
           begin_stx = scheme_datum_to_syntax(begin_symbol, 
                                              scheme_false, 
                                              scheme_sys_wraps(env), 
                                              0, 0);
+          begin_stx = scheme_add_remove_mark(begin_stx, exp_mark);
           values_app_stx = scheme_datum_to_syntax(scheme_make_pair(values_symbol, scheme_null),
                                                   scheme_false, 
                                                   scheme_sys_wraps(env), 
                                                   0, 0);
+          values_app_stx = scheme_add_remove_mark(values_app_stx, exp_mark);
 
           while (SCHEME_PAIRP(pre_exprs)) {
             v = scheme_make_pair(scheme_null,

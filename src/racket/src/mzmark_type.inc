@@ -1334,6 +1334,50 @@ static int double_obj_FIXUP(void *p, struct NewGC *gc) {
 #define double_obj_IS_CONST_SIZE 1
 
 
+#ifdef MZ_LONG_DOUBLE
+static int long_double_obj_SIZE(void *p, struct NewGC *gc) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Long_Double));
+}
+
+static int long_double_obj_MARK(void *p, struct NewGC *gc) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Long_Double));
+}
+
+static int long_double_obj_FIXUP(void *p, struct NewGC *gc) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Long_Double));
+}
+
+#define long_double_obj_IS_ATOMIC 1
+#define long_double_obj_IS_CONST_SIZE 1
+
+#else
+static int long_double_obj_SIZE(void *p, struct NewGC *gc) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Long_Double));
+}
+
+static int long_double_obj_MARK(void *p, struct NewGC *gc) {
+  Scheme_Long_Double *ld = (Scheme_Long_Double *)p;
+  gcMARK2(ld->printed_form, gc);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Long_Double));
+}
+
+static int long_double_obj_FIXUP(void *p, struct NewGC *gc) {
+  Scheme_Long_Double *ld = (Scheme_Long_Double *)p;
+  gcFIXUP2(ld->printed_form, gc);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Long_Double));
+}
+
+#define long_double_obj_IS_ATOMIC 0
+#define long_double_obj_IS_CONST_SIZE 1
+
+#endif
+
 static int complex_obj_SIZE(void *p, struct NewGC *gc) {
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Complex));
@@ -1558,6 +1602,36 @@ static int flvector_obj_FIXUP(void *p, struct NewGC *gc) {
 #define flvector_obj_IS_ATOMIC 1
 #define flvector_obj_IS_CONST_SIZE 0
 
+
+#ifdef MZ_LONG_DOUBLE
+static int extflvector_obj_SIZE(void *p, struct NewGC *gc) {
+  Scheme_Long_Double_Vector *vec = (Scheme_Long_Double_Vector *)p;
+
+  return
+  gcBYTES_TO_WORDS((sizeof(Scheme_Long_Double_Vector) 
+		    + ((vec->size - mzFLEX_DELTA) * sizeof(long double))));
+}
+
+static int extflvector_obj_MARK(void *p, struct NewGC *gc) {
+  Scheme_Long_Double_Vector *vec = (Scheme_Long_Double_Vector *)p;
+
+  return
+  gcBYTES_TO_WORDS((sizeof(Scheme_Long_Double_Vector) 
+		    + ((vec->size - mzFLEX_DELTA) * sizeof(long double))));
+}
+
+static int extflvector_obj_FIXUP(void *p, struct NewGC *gc) {
+  Scheme_Long_Double_Vector *vec = (Scheme_Long_Double_Vector *)p;
+
+  return
+  gcBYTES_TO_WORDS((sizeof(Scheme_Long_Double_Vector) 
+		    + ((vec->size - mzFLEX_DELTA) * sizeof(long double))));
+}
+
+#define extflvector_obj_IS_ATOMIC 1
+#define extflvector_obj_IS_CONST_SIZE 0
+
+#endif
 
 static int input_port_SIZE(void *p, struct NewGC *gc) {
   return
@@ -2544,6 +2618,8 @@ static int module_val_SIZE(void *p, struct NewGC *gc) {
 static int module_val_MARK(void *p, struct NewGC *gc) {
   Scheme_Module *m = (Scheme_Module *)p;
 
+  gcMARK2(m->phaseless, gc);
+
   gcMARK2(m->code_key, gc);
 
   gcMARK2(m->modname, gc);
@@ -2580,6 +2656,7 @@ static int module_val_MARK(void *p, struct NewGC *gc) {
   gcMARK2(m->submodule_path, gc);
   gcMARK2(m->pre_submodules, gc);
   gcMARK2(m->post_submodules, gc);
+  gcMARK2(m->pre_submodule_names, gc);
   gcMARK2(m->supermodule, gc);
   gcMARK2(m->submodule_ancestry, gc);
 
@@ -2590,6 +2667,8 @@ static int module_val_MARK(void *p, struct NewGC *gc) {
 
 static int module_val_FIXUP(void *p, struct NewGC *gc) {
   Scheme_Module *m = (Scheme_Module *)p;
+
+  gcFIXUP2(m->phaseless, gc);
 
   gcFIXUP2(m->code_key, gc);
 
@@ -2627,6 +2706,7 @@ static int module_val_FIXUP(void *p, struct NewGC *gc) {
   gcFIXUP2(m->submodule_path, gc);
   gcFIXUP2(m->pre_submodules, gc);
   gcFIXUP2(m->post_submodules, gc);
+  gcFIXUP2(m->pre_submodule_names, gc);
   gcFIXUP2(m->supermodule, gc);
   gcFIXUP2(m->submodule_ancestry, gc);
 

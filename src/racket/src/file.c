@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -4158,6 +4158,12 @@ static Scheme_Object *resolve_path(int argc, Scheme_Object *argv[])
 	break;
     }
 
+#ifdef BROKEN_READLINK_NUL_TERMINATOR
+    while (len > 0 && buffer[len-1] == 0) {
+      len--;
+    }
+#endif
+
     if (len > 0)
       return scheme_make_sized_path(buffer, len, 1);
   }
@@ -6381,9 +6387,6 @@ Scheme_Object *scheme_find_links_path(int argc, Scheme_Object *argv[])
 #ifdef DOS_FILE_SYSTEM
 
 static wchar_t *dlldir;
-
-__declspec(dllexport) wchar_t *scheme_get_dll_path(wchar_t *s);
-__declspec(dllexport) void scheme_set_dll_path(wchar_t *p);
 
 wchar_t *scheme_get_dll_path(wchar_t *s)
 {

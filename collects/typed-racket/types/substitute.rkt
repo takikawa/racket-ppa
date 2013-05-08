@@ -5,6 +5,7 @@
          (utils tc-utils)
          (rep free-variance)
          (env index-env tvar-env)
+         (only-in (types base-abbrev) -lst* -result)
          racket/match
          racket/set
          racket/contract
@@ -33,11 +34,11 @@
   (for/hash ([v (in-list vs)] [t (in-list ts)])
     (values v (t-subst t))))
 
-
+;; TODO: Figure out if free var checking/short circuiting is actually a performance improvement.
 
 ;; substitute-many : Hash[Name,Type] Type -> Type
 (define/cond-contract (substitute-many subst target #:Un [Un (lambda (args) (apply Un args))])
-  ((simple-substitution/c Type/c) (#:Un procedure?) . ->* . Type/c)
+  ((simple-substitution/c (or/c Values/c arr?)) (#:Un procedure?) . ->* . (or/c Values/c arr?))
   (define (sb t) (substitute-many subst t #:Un Un))
   (define names (hash-keys subst))
   (define fvs (free-vars* target))
@@ -86,7 +87,7 @@
 ;; implements angle bracket substitution from the formalism
 ;; substitute-dots : Listof[Type] Option[type] Name Type -> Type
 (define/cond-contract (substitute-dots images rimage name target)
-  ((listof Type/c) (or/c #f Type/c) symbol? Type/c . -> . Type/c)
+  ((listof Type/c) (or/c #f Type/c) symbol? (or/c arr? Values/c) . -> . (or/c arr? Values/c))
   (define (sb t) (substitute-dots images rimage name t))
   (if (or (set-member? (free-vars-names (free-idxs* target)) name)
           (set-member? (free-vars-names (free-vars* target)) name))
@@ -131,39 +132,47 @@
                                       (map sb kws)))])
       target))
 
-;; implements curly brace substitution from the formalism
-;; substitute-dotted : Type Name Name Type -> Type
-(define (substitute-dotted image image-bound name target)
-  (define (sb t) (substitute-dotted image image-bound name t))
-  (if (set-member? (free-vars-names (free-idxs* target)) name)
+;; implements curly brace substitution from the formalism, with the addition
+;; that a substitution can include fixed args in addition to a different dotted arg
+;; substitute-dotted : Listof[Type] Type Name Name Type -> Type
+(define (substitute-dotted pre-image image image-bound name target)
+  (define (sb t) (substitute-dotted pre-image image image-bound name t))
+  ;; We do a quick check on the free variables to see if we can short circuit the substitution
+  (if (or (set-member? (free-vars-names (free-idxs* target)) name)
+          (set-member? (free-vars-names (free-vars* target)) name))
       (type-case (#:Type sb #:Filter (sub-f sb))
                  target
                  [#:ValuesDots types dty dbound
-                               (make-ValuesDots (map sb types)
-                                                (sb dty)
-                                                (if (eq? name dbound) image-bound dbound))]
+                               (let ([extra-types (if (eq? name dbound) pre-image null)])
+                                 (make-ValuesDots (append (map sb types) (map -result extra-types))
+                                                  (sb dty)
+                                                  (if (eq? name dbound) image-bound dbound)))]
                  [#:ListDots dty dbound
-                             (make-ListDots (sb dty)
-                                            (if (eq? name dbound) image-bound dbound))]
+                             (apply -lst*
+                               (if (eq? name dbound) pre-image null)
+                               #:tail
+                               (make-ListDots (sb dty)
+                                              (if (eq? name dbound) image-bound dbound)))]
                  [#:F name*
                       (if (eq? name* name)
                           image
                           target)]
                  [#:arr dom rng rest drest kws
-                        (make-arr (map sb dom)
-                                  (sb rng)
-                                  (and rest (sb rest))
-                                  (and drest
-                                       (cons (substitute image (cdr drest) (sb (car drest)))
-                                             (if (eq? name (cdr drest)) image-bound (cdr drest))))
-                                  (map sb kws))])
+                        (let ([extra-types (if (and drest (eq? name (cdr drest))) pre-image null)])
+                          (make-arr (append (map sb dom) extra-types)
+                                    (sb rng)
+                                    (and rest (sb rest))
+                                    (and drest
+                                         (cons (substitute image (cdr drest) (sb (car drest)))
+                                               (if (eq? name (cdr drest)) image-bound (cdr drest))))
+                                    (map sb kws)))])
        target))
 
 ;; substitute many variables
 ;; substitution = Listof[U List[Name,Type] List[Name,Listof[Type]]]
 ;; subst-all : substitution Type -> Type
 (define/cond-contract (subst-all s ty)
-  (substitution/c Type/c . -> . Type/c)
+  (substitution/c (or/c arr? Values/c) . -> . (or/c Values/c arr?))
 
   (define t-substs
     (for/fold ([acc (hash)]) ([(v r) (in-hash s)])
@@ -173,7 +182,6 @@
         [_ acc])))
   (define t-substed-ty (substitute-many t-substs ty))
 
-
   (for/fold ([t t-substed-ty]) ([(v r) (in-hash s)])
     (match r
       [(t-subst img) t]
@@ -181,9 +189,5 @@
        (substitute-dots imgs #f v t)]
       [(i-subst/starred imgs rest)
        (substitute-dots imgs rest v t)]
-      [(i-subst/dotted null dty dbound)
-       (substitute-dotted dty dbound v t)]
       [(i-subst/dotted imgs dty dbound)
-       (int-err "i-subst/dotted nyi")
-       #;
-       (substitute-dotted imgs rest v t)])))
+       (substitute-dotted imgs dty dbound v t)])))

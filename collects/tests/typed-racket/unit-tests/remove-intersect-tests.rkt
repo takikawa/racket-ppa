@@ -33,11 +33,14 @@
    [(Un -Number -String -Symbol -Boolean) -Number -Number]
 
    [(-lst -Number) (-pair Univ Univ) (-pair -Number (-lst -Number))]
+   [(-lst -Number) (-poly (a) (-lst a)) (-lst -Number)]
    ;; FIXME
    #;
    [-Listof -Sexp (-lst (Un B N -String Sym))]
    #;
    [-Sexp -Listof (-lst -Sexp)]
+   [(-val "one") -Fixnum (Un)]
+   [(Un (-val "one") (-val "two")) (Un (-val "one") (-val 1)) (-val "one")]
    ))
 
 (define-syntax (remo-tests stx)

@@ -100,10 +100,14 @@ uses an evaluator whose language is @racketmodname[typed/racket/base].}
 Like @racket[interaction], but without insetting the code via
 @racket[nested].}
 
+@defform[(interaction/no-prompt maybe-eval maybe-escape datum)]{
+  Like @racket[interaction], but does not render the output with a prompt.
+}
+
 @defform[(interaction-eval maybe-eval maybe-escape datum)]{
 
 Like @racket[interaction], evaluates the @racket[quote]d form of
-@racket[datum], but returns the empty string.}
+@racket[datum], but returns the empty string and does not catch errors.}
 
 
 @defform[(interaction-eval-show maybe-eval maybe-escape datum)]{
@@ -151,10 +155,16 @@ Like @racket[examples], but each definition using @racket[define] or
 prompt, and with line of space after it.}
 
 
-@defproc[(make-base-eval [#:pretty-print? pretty-print? any/c #t])
+@defproc[(make-base-eval [#:pretty-print? pretty-print? any/c #t]
+                         [#:lang lang
+                          (or/c module-path?
+                                (list/c 'special symbol?)
+                                (cons/c 'begin list?))
+                          '(begin)]
+                         [input-program any/c] ...)
          (any/c . -> . any)]{
 
-Creates an evaluator using @racket[(make-evaluator 'racket/base)],
+Creates an evaluator using @racket[(make-evaluator 'racket/base #:lang lang input-program ...)],
 setting sandbox parameters to disable limits, setting the outputs to
 @racket['string], and not adding extra security guards.
 
@@ -163,7 +173,12 @@ If @racket[pretty-print?] is true, the sandbox's printer is set to
 
 
 @defproc[(make-base-eval-factory [mod-paths (listof module-path?)]
-                                 [#:pretty-print? pretty-print? any/c #t])
+                                 [#:pretty-print? pretty-print? any/c #t]
+                                 [#:lang lang
+                                  (or/c module-path?
+                                        (list/c 'special symbol?)
+                                        (cons/c 'begin list?))
+                                  '(begin)])
          (-> (any/c . -> . any))]{
 
 Produces a function that is like @racket[make-base-eval], except that
@@ -174,7 +189,12 @@ time) and then attached to each evaluator that is created.}
 
 
 @defproc[(make-eval-factory [mod-paths (listof module-path?)]
-                            [#:pretty-print? pretty-print? any/c #t])
+                            [#:pretty-print? pretty-print? any/c #t]
+                            [#:lang lang
+                             (or/c module-path?
+                                   (list/c 'special symbol?)
+                                   (cons/c 'begin list?))
+                             '(begin)])
          (-> (any/c . -> . any))]{
 
 Like @racket[make-base-eval-factory], but each module in @racket[mod-paths] is
@@ -196,3 +216,22 @@ is supplied as the first argument to the parameter's value, and the
 second argument is the form to evaluate. The last argument is
 @racket[#t] if exceptions are being captured (to display exception
 results), @racket[#f] otherwise.}
+
+@defparam[scribble-exn->string handler (-> (or/c exn? any/c) string?)]{
+  A parameter that controls how exceptions are rendered by 
+  @racket[interaction]. Defaults to
+  @racketblock[(λ (e)
+                 (if (exn? e)
+                     (exn-message e)
+                     (format "uncaught exception: ~s" e)))]
+}
+
+@defform[(with-eval-preserve-source-locations expr ...)]{
+
+By default, the evaluation forms provided by this module, such as
+@racket[interaction] and @racket[examples], discard the source
+locations from the expressions they evaluate. Within a
+@racket[with-eval-preserve-source-locations] form, the source
+locations are preserved. This can be useful for documenting forms that
+depend on source locations, such as Redex's typesetting macros.
+}

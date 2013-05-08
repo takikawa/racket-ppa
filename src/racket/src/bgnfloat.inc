@@ -3,13 +3,20 @@
 START_XFORM_SKIP;
 #endif
 
-/* Optimization sometimes causes a problem: d is represented in an
-   extended format instead of a `double'. We don't want to turn off
-   floatng-point optimizations in the rest of the program, so we use a
-   little function to defeat the optimization: */
+#ifndef FP_ZEROx
+# define FP_ZEROx 0.0
+# define FP_ONEx 1.0
+# define FP_TWOx 2.0
+# define FP_POWx pow
+# define FP_MZ_IS_POS_INFINITY(x) MZ_IS_POS_INFINITY(x)
+# define FP_scheme_floating_point_nzero scheme_floating_point_nzero
+#endif
+
+/* Optimization sometimes causes a problem?
+   See note in "ratfloat.inc". */
 int IS_FLOAT_INF(FP_TYPE d)
 {
-  return MZ_IS_POS_INFINITY(d);
+  return FP_MZ_IS_POS_INFINITY(d);
 }
 
 /* Must not trigger GC! (Required by xform in number.c) */
@@ -26,16 +33,16 @@ FP_TYPE SCHEME_BIGNUM_TO_FLOAT_INFO(const Scheme_Object *n, intptr_t skip, intpt
 
   if (skip >= nl) {
     if (SCHEME_BIGPOS(n))
-      return 0.0;
+      return FP_ZEROx;
     else
-      return scheme_floating_point_nzero;
+      return FP_scheme_floating_point_nzero;
   } else
     nl -= skip;
 	
-  d = 0;
+  d = FP_ZEROx;
   while (nl--) {
-    d *= (FP_TYPE)BIG_RADIX;
-    d += *(--na);
+    d = FP_TYPE_MULT(d, FP_TYPE_FROM_DOUBLE(BIG_RADIX));
+    d = FP_TYPE_PLUS(d, FP_TYPE_FROM_UINTPTR(*(--na)));
     if (IS_FLOAT_INF(d))
       break;
     --skipped;
@@ -45,7 +52,7 @@ FP_TYPE SCHEME_BIGNUM_TO_FLOAT_INFO(const Scheme_Object *n, intptr_t skip, intpt
     *_skipped = skipped;
   
   if (!SCHEME_BIGPOS(n))
-    d = -d;
+    d = FP_TYPE_NEG(d);
 
   return d;
 }
@@ -66,46 +73,46 @@ Scheme_Object *SCHEME_BIGNUM_FROM_FLOAT(FP_TYPE d)
   FP_TYPE r;
   Scheme_Object *n, *m;
 
-  r = 1;
+  r = FP_ONEx;
 
   SCHEME_CHECK_FLOAT("inexact->exact", d, "integer");
 
-  if (d < 0) {
+  if (FP_TYPE_LESS(d, FP_ZEROx)) {
     negate = 1;
-    d = -d;
+    d = FP_TYPE_NEG(d);
   } else
     negate = 0;
 
-  if (d < 1.0)
+  if (FP_TYPE_LESS(d, FP_ONEx))
     return scheme_make_integer(0);
 
   log = 0;
-  while (r < d) {
+  while (FP_TYPE_LESS(r, d)) {
     log++;
-    r *= 2.0;
+    r = FP_TYPE_MULT(r, FP_TWOx);
   }
 
   if (log > USE_FLOAT_BITS) {
     times = log - USE_FLOAT_BITS;
     log = USE_FLOAT_BITS;
     for (i = 0; i < times; i++) {
-      d /= 2;
+      d = FP_TYPE_DIV(d, FP_TWOx);
     }
   } else
     times = 0;
 
-  r = pow(2.0, (FP_TYPE)log);
+  r = FP_POWx(FP_TWOx, FP_TYPE_FROM_INT(log));
 
   n = scheme_make_small_bignum(0, &s1);
 
   log++;
   while (log--) {
     bignum_double_inplace(&n);
-    if (d >= r) {
-      d -= r;
+    if (FP_TYPE_GREATER_OR_EQV(d, r)) {
+      d = FP_TYPE_MINUS(d, r);
       bignum_add1_inplace(&n);
     }
-    r /= 2;
+    r = FP_TYPE_DIV(r, FP_TWOx);
   }
 
   if (times) {
@@ -123,3 +130,28 @@ Scheme_Object *SCHEME_BIGNUM_FROM_FLOAT(FP_TYPE d)
 
   return n;
 }
+
+#undef USE_FLOAT_BITS
+#undef FP_TYPE
+#undef IS_FLOAT_INF
+#undef SCHEME_BIGNUM_TO_FLOAT_INFO
+#undef SCHEME_BIGNUM_TO_FLOAT
+#undef SCHEME_CHECK_FLOAT
+#undef SCHEME_BIGNUM_FROM_FLOAT
+#undef FP_ZEROx
+#undef FP_ONEx
+#undef FP_TWOx
+#undef FP_POWx
+#undef FP_MZ_IS_POS_INFINITY
+#undef FP_scheme_floating_point_nzero
+
+#undef FP_TYPE_FROM_DOUBLE
+#undef FP_TYPE_NEG
+#undef FP_TYPE_LESS
+#undef FP_TYPE_MULT
+#undef FP_TYPE_PLUS
+#undef FP_TYPE_DIV
+#undef FP_TYPE_FROM_INT
+#undef FP_TYPE_GREATER_OR_EQV
+#undef FP_TYPE_MINUS
+#undef FP_TYPE_FROM_UINTPTR

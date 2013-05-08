@@ -1226,6 +1226,26 @@
   (test (list 11 '(11)) j 10)
   (test '(12 #f 9 #f) values saved))
 
+;; Make sure that `impersonator-prop:application-mark'
+;; is not propagated to further wrapping chaperones:
+(let ()
+  (define msgs '())
+  (define f
+    (chaperone-procedure
+     (λ (x) 'wrong)
+     (λ (x)
+        (call-with-immediate-continuation-mark
+         'key
+         (λ (m)
+            (set! msgs (cons m msgs))
+            (values x))))
+     impersonator-prop:application-mark
+     (cons 'key 'skip-this-check)))
+  
+  (void ((chaperone-procedure f (lambda (x) x)) 42)
+        (f 42))
+  (test '(#f #f) values msgs))
+
 ;; ----------------------------------------
 
 ;; Check that supplying a procedure `to make-keyword-procedure' that 
@@ -1313,6 +1333,29 @@
                        a-x (lambda (s v) v))
      o)
     (test #"(a #0=(a #0#))" get-output-bytes o)))
+
+;; ----------------------------------------
+;; Impersonators and ephemerons:
+
+(let ()
+  (define stuff
+    (for/list ([n 100])
+      (define v (vector n))
+      (define c (chaperone-vector v
+                                  (lambda (b i v) v)
+                                  (lambda (b i v) v)))
+      (define e (impersonator-ephemeron c))
+      (test c ephemeron-value e)
+      ;; hold on to every other vector:
+      (cons e (if (even? n) v #f))))
+  (collect-garbage)
+  (define n (for/fold ([n 0]) ([p stuff])
+              (+ n
+                 ;; add 1 if should-retained != is-retained
+                 (if (ephemeron-value (car p))
+                     (if (vector? (cdr p)) 0 1)
+                     (if (vector? (cdr p)) 1 0)))))
+  (test #t < n 50))
 
 ;; ----------------------------------------
 

@@ -293,6 +293,8 @@ corresponding to @racket[trest], where @racket[bound]
 
 @ex[
 (list 'a 'b 'c)
+(plambda: (a ...) ([sym : Symbol] boxes : (Boxof a) ... a)
+  (ann (cons sym boxes) (List Symbol (Boxof a) ... a)))
 (map symbol->string (list 'a 'b 'c))
 ]
 
@@ -414,11 +416,15 @@ functions and continuation mark functions.
 
 @section{Other Type Constructors}
 
-@defform*[#:id -> #:literals (* ...)
+@defform*/subs[#:id -> #:literals (* ...)
 	       [(dom ... -> rng)
 	        (dom ... rest * -> rng)
 		(dom ... rest #,(racket ...) bound -> rng)
-                (dom -> rng : pred)]]{is the type of functions from the (possibly-empty)
+                (dom -> rng : pred)]
+               ([dom type
+                     (code:line keyword type)
+                     [keyword type]])]{
+  is the type of functions from the (possibly-empty)
   sequence @racket[dom ...] to the @racket[rng] type.  The second form
   specifies a uniform rest argument of type @racket[rest], and the
   third form specifies a non-uniform rest argument of type
@@ -426,12 +432,19 @@ functions and continuation mark functions.
   second occurrence of @racket[...] is literal, and @racket[bound]
   must be an identifier denoting a type variable. In the fourth form,
   there must be only one @racket[dom] and @racket[pred] is the type
-  checked by the predicate.
+  checked by the predicate. @racket[dom] can include both mandatory and
+  optional keyword arguments.
 
   @ex[(λ: ([x : Number]) x)
       (λ: ([x : Number] . [y : String *]) (length y))
       ormap
-      string?]}
+      string?
+      (:print-type file->string)
+      (: is-zero? : Number #:equality (Number Number -> Any) [#:zero Number] -> Any)
+      (define (is-zero? n #:equality equality #:zero [zero 0])
+        (equality n zero))
+      (is-zero? 2 #:equality =)
+      (is-zero? 2 #:equality eq? #:zero 2.0)]}
 
 @defidform[Procedure]{is the supertype of all function types.}
 

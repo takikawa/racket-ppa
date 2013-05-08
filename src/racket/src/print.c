@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -593,7 +593,8 @@ static int check_cycles(Scheme_Object *obj, int for_write, Scheme_Hash_Table *ht
       if ((for_write < 3) && res)
 	return res;
     }
-  } else if (SCHEME_FLVECTORP(obj) || SCHEME_FXVECTORP(obj)) {
+  } else if (SCHEME_FLVECTORP(obj) 
+             || SCHEME_FXVECTORP(obj)) {
     res = 0x1; /* escape for qq printing */
   } else if (SCHEME_CHAPERONE_STRUCTP(obj)) {
     if (scheme_is_writable_struct(obj)) {
@@ -678,7 +679,7 @@ static int check_cycles(Scheme_Object *obj, int for_write, Scheme_Hash_Table *ht
     /* got here => printable */
     Scheme_Hash_Tree *t;
     Scheme_Object *key, *val;
-    int i;
+    mzlonglong i;
 
     if (SCHEME_NP_CHAPERONEP(obj))
       t = (Scheme_Hash_Tree *)SCHEME_CHAPERONE_VAL(obj);
@@ -803,7 +804,8 @@ static int check_cycles_fast(Scheme_Object *obj, PrintParams *pp, int *fast_chec
       cycle = -1;
   } else if (SCHEME_CHAPERONEP(obj))
     cycle = -1; /* no fast checks for chaperones */
-  else if ((write >= 3) && (SCHEME_FLVECTORP(obj) || SCHEME_FXVECTORP(obj)))
+  else if ((write >= 3) && (SCHEME_FLVECTORP(obj) 
+                            || SCHEME_FXVECTORP(obj)))
     cycle = -1; /* needs unquote */
   else
     cycle = 0;
@@ -947,7 +949,7 @@ static void setup_graph_table(Scheme_Object *obj, int for_write, Scheme_Hash_Tab
     /* got here => printable */
     Scheme_Hash_Tree *t;
     Scheme_Object *key, *val;
-    int i;
+    mzlonglong i;
 
     if (SCHEME_NP_CHAPERONEP(obj))
       t = (Scheme_Hash_Tree *)SCHEME_CHAPERONE_VAL(obj);
@@ -2219,7 +2221,7 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 	print_utf8_string(pp, quick_buffer, 0, -1);
       }
     }
-  else if (SCHEME_NUMBERP(obj))
+  else if (SCHEME_NUMBERP(obj) || SCHEME_LONG_DBLP(obj))
     {
       if (compact) {
 	print_escaped(pp, notdisplay, obj, ht, mt, 1);
@@ -2299,7 +2301,9 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
       Scheme_Hash_Table *t;
       Scheme_Hash_Tree *tr;
       Scheme_Object **keys, **vals, *val, *key, *orig;
-      int i, size, did_one = 0;
+      intptr_t i, size;
+      int did_one = 0;
+      mzlonglong pos;
 
       orig = obj;
       if (SCHEME_NP_CHAPERONEP(obj))
@@ -2360,10 +2364,12 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
         vals = NULL;
         size = tr->count;
       }
+      pos = -1;
       for (i = 0; i < size; i++) {
 	if (!vals || vals[i]) {
           if (!vals) {
-            scheme_hash_tree_index(tr, i, &key, &val);
+            pos = scheme_hash_tree_next(tr, pos);
+            scheme_hash_tree_index(tr, pos, &key, &val);
             if (!SAME_OBJ(obj, orig))
               val = scheme_chaperone_hash_traversal_get(orig, key, &key);
           } else {

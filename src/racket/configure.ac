@@ -32,15 +32,17 @@ AC_ARG_ENABLE(foreign, [  --enable-foreign        support foreign calls (enabled
 AC_ARG_ENABLE(places,  [  --enable-places         support places (3m only; usually enabled by default)])
 AC_ARG_ENABLE(futures, [  --enable-futures        support futures (usually enabled by default)])
 AC_ARG_ENABLE(float,   [  --enable-float          support single-precision floats (enabled by default)], , enable_float=yes)
-AC_ARG_ENABLE(floatinstead, [  --enable-floatinstead   use single-precision by default])
+AC_ARG_ENABLE(floatinstead, [  --enable-floatinstead   use single-precision by default (NOT RECOMMENDED)])
+AC_ARG_ENABLE(extflonum,    [  --enable-extflonum      support extflonums (enabled by default, if available)], , enable_extflonum=yes)
 
 AC_ARG_ENABLE(racket,  [  --enable-racket=<path>  use <path> as Racket executable to build Racket])
 
 AC_ARG_ENABLE(origtree,[  --enable-origtree       install with original directory structure])
+AC_ARG_ENABLE(pkgscope,[  --enable-pkgscope=<s>   set `raco pkg' default: installation, user, or shared])
 
 AC_ARG_ENABLE(docs,    [  --enable-docs           build docs on install (enabled by default)], , enable_docs=yes)
 AC_ARG_ENABLE(usersetup, [  --enable-usersetup      setup user-specific files on install])
-AC_ARG_ENABLE(shared,  [  --enable-shared         create shared libraries])
+AC_ARG_ENABLE(shared,  [  --enable-shared         create shared libraries (ok, but not recommended)])
 AC_ARG_ENABLE(dynlib,  [  --enable-dynlib         same as --enable-shared])
 AC_ARG_ENABLE(lt,      [  --enable-lt=<prog>      use <prog> instead of libtool; disable to use bundled], LIBTOOLPROG="$enableval", enable_lt=default)
 
@@ -53,12 +55,12 @@ AC_ARG_ENABLE(libfw,   [  --enable-userfw         install Mac OS X frameworks to
 AC_ARG_ENABLE(macprefix, [  --enable-macprefix      allow --prefix with a Mac OS X install])
 AC_ARG_ENABLE(mac64,   [  --enable-mac64          allow 64-bit Mac OS X build (enabled by default)], , enable_mac64=yes)
 
-AC_ARG_ENABLE(cgcdefault, [  --enable-cgcdefault     use CGC (Boehm or Senora) as default build])
+AC_ARG_ENABLE(cgcdefault, [  --enable-cgcdefault     use CGC as default build (NOT RECOMMENDED)])
 AC_ARG_ENABLE(sgc,     [  --enable-sgc            use Senora GC instead of the Boehm GC])
 AC_ARG_ENABLE(sgcdebug,[  --enable-sgcdebug       use Senora GC for debugging])
-AC_ARG_ENABLE(backtrace, [  --enable-backtrace      3m: support GC backtrace dumps])
+AC_ARG_ENABLE(backtrace, [  --enable-backtrace      3m: support GC backtrace dumps (expensive debug mode)])
 
-AC_ARG_ENABLE(pthread, [  --enable-pthread        link with pthreads])
+AC_ARG_ENABLE(pthread, [  --enable-pthread        link with pthreads (usually auto-enabled if needed)])
 AC_ARG_ENABLE(stackup, [  --enable-stackup        assume "up" if stack direction cannot be determined])
 AC_ARG_ENABLE(bigendian, [  --enable-bigendian      assume "big" if endianness cannot be determined])
 
@@ -68,7 +70,7 @@ AC_ARG_ENABLE(bigendian, [  --enable-bigendian      assume "big" if endianness c
 AC_ARG_ENABLE(gprof,   [  --enable-gprof          compile for profiling with gprof (gcc only)])
 AC_ARG_ENABLE(gcov,    [  --enable-gcov           compile to gather gcov statistics (gcc3 only)])
 
-AC_ARG_ENABLE(noopt,   [  --enable-noopt          drop -O C flags])
+AC_ARG_ENABLE(noopt,   [  --enable-noopt          drop -O C flags (useful for low-level debugging)])
 
 ###### Some flags imply other flags #######
 
@@ -211,7 +213,7 @@ else
   libpltdir="${libdir}/racket"
   collectsdir="${libdir}/racket/collects"
   includepltdir="${includedir}/racket"
-  docdir="${datadir}/racket/doc"
+  docdir="${datadir}/doc/racket"
   MAKE_COPYTREE=copytree
   COLLECTS_PATH='${collectsdir}'
   INSTALL_ORIG_TREE=no
@@ -238,10 +240,13 @@ show_explicitly_enabled()
 {
   if test "$1" = "yes" ; then
     echo "=== $2 enabled"
+    if test "$3" != "" ; then
+      echo "  $3"
+    fi
   fi
 }
 
-show_explicitly_enabled "${enable_cgcdefault}" "CGC as default"
+show_explicitly_enabled "${enable_cgcdefault}" "CGC as default" "Note that this mode is NOT RECOMMENDED for normal Racket use"
 
 show_explicitly_disabled "${enable_docs}" "Documentation build"
 show_explicitly_enabled "${enable_usersetup}" "User-specific setup on install"
@@ -269,10 +274,11 @@ show_explicitly_disabled "${enable_futures}" Futures
 
 show_explicitly_enabled "${enable_sgc}" SGC
 show_explicitly_enabled "${enable_sgcdebug}" "SGC debug mode"
-show_explicitly_enabled "${enable_backtrace}" "3m GC backtraces"
+show_explicitly_enabled "${enable_backtrace}" "3m GC backtraces" "Note that this mode is not intended for normal Racket use"
 
 show_explicitly_disabled "${enable_float}" "Single-precision floats"
-show_explicitly_enabled "${enable_floatinstead}" "Single-precision default floats"
+show_explicitly_enabled "${enable_floatinstead}" "Single-precision default floats" "Note that this mode is NOT RECOMMENDED"
+show_explicitly_disabled "${enable_extflonum}" "Extflonums"
 
 show_explicitly_enabled "${enable_pthread}" "pthreads"
 show_explicitly_enabled "${enable_oskit}" "OSKit"
@@ -281,7 +287,7 @@ show_explicitly_enabled "${enable_smalloskit}" "OSKit small mode"
 show_explicitly_enabled "${enable_gprof}" "gprof"
 show_explicitly_enabled "${enable_gcov}" "gcov"
 
-show_explicitly_enabled "${enable_noopt}" "No-optimization"
+show_explicitly_enabled "${enable_noopt}" "No-optimization" "Note that this mode is intended only for debugging purposes"
 
 show_explicitly_disabled "${enable_mac64}" "64-bit Mac OS X"
 
@@ -294,6 +300,28 @@ fi
 
 if test "${enable_racket}" != "" ; then
    echo "=== Using Racket executable ${enable_racket}"
+fi
+
+INSTALL_PKGSCOPE=user
+MAKE_INSTALL_PKGSCOPE=preserve
+if test "${enable_pkgscope}" != "" ; then
+  case "${enable_pkgscope}" in
+   installation)
+     INSTALL_PKGSCOPE=installation
+     ;;
+   user)
+     INSTALL_PKGSCOPE=user
+     ;;
+   shared)
+     INSTALL_PKGSCOPE=shared
+     ;;
+   *)
+     echo "Unrecognized package scope: ${enable_pkgscope}"
+     exit 1
+     ;;
+  esac
+  echo "=== Package scope: " $INSTALL_PKGSCOPE
+  MAKE_INSTALL_PKGSCOPE=adjust
 fi
 
 ###### Some defaults #######
@@ -390,6 +418,10 @@ fi
 
 if test "${enable_float}" = "yes" ; then
   AC_DEFINE(USE_SINGLE_FLOATS,1,[Single-precision floats])
+fi
+
+if test "${enable_extflonum}" = "no" ; then
+  AC_DEFINE(MZ_NO_EXTFLONUMS,1,[Extflonums disabled])
 fi
 
 ###### Autoconfigure #######
@@ -511,7 +543,7 @@ case "$host_os" in
     try_kqueue_syscall=yes
     ;;
   openbsd*)
-    LIBS="$LIBS -rdynamic -Wl,--export-dynamic"
+    LIBS="$LIBS -Wl,--export-dynamic"
     enable_pthread=yes
     try_kqueue_syscall=yes
     ;;
@@ -741,12 +773,12 @@ AC_LANG_C
 
 [ msg="for inline keyword" ]
 AC_MSG_CHECKING($msg)
-AC_TRY_RUN(
+AC_COMPILE_IFELSE(
    static inline int foo() { return 0; }
    int main() {
       return foo();
    }, 
-  inline=yes, inline=no, inline=no)
+  inline=yes, inline=no)
 if test "$inline" = "no" ; then
   MZOPTIONS="$MZOPTIONS -DNO_INLINE_KEYWORD"
 fi
@@ -754,27 +786,27 @@ AC_MSG_RESULT($inline)
 
 [ msg="for noinline attribute" ]
 AC_MSG_CHECKING($msg)
-AC_TRY_RUN(
+AC_COMPILE_IFELSE(
    static int foo() __attribute__ ((noinline));
    static int foo() { return 0; }
    int main() {
       return foo();
-   }, noinline=yes, noinline=no, noinline=no)
+   }, noinline=yes, noinline=no)
 if test "$noinline" = "yes" ; then
   AC_DEFINE(MZ_USE_NOINLINE,1,[Have noinline attribute])
 fi
-AC_MSG_RESULT($inline) 
+AC_MSG_RESULT($noinline) 
 
 [ msg="for GNU preprocessor" ]
 AC_MSG_CHECKING($msg)
-AC_TRY_RUN(
+AC_COMPILE_IFELSE(
    int main () {
    #ifdef __GNUC__
     return 0;
    #else
-    return 1;
+    if; // should fail
    #endif
-   }, using_gnu_cpp=yes, using_gnu_cpp=no, using_gnu_cpp=no)
+   }, using_gnu_cpp=yes, using_gnu_cpp=no)
 if test "$using_gnu_cpp" = "yes" ; then
   XFORMFLAGS="$XFORMFLAGS --keep-lines"
   case "$build_os" in
@@ -847,7 +879,7 @@ fi
 
 [ msg="for mbsrtowcs" ]
 AC_MSG_CHECKING($msg)
-AC_TRY_RUN(
+AC_LINK_IFELSE(
 [  #include <wchar.h> ]
 [  #include <strings.h>]
    int main() {
@@ -856,7 +888,7 @@ AC_TRY_RUN(
 [    bzero(&state, sizeof(mbstate_t));]
 [    mbsrtowcs(0, &src, 0, &state);]
      return 0;
-   }, mbsrtowcs=yes, mbsrtowcs=no, mbsrtowcs=no)
+   }, mbsrtowcs=yes, mbsrtowcs=no)
 if test "$mbsrtowcs" = "no" ; then
   MZOPTIONS="$MZOPTIONS -DNO_MBTOWC_FUNCTIONS"
 fi
@@ -865,7 +897,7 @@ AC_MSG_RESULT($mbsrtowcs)
 if test "${try_poll_syscall}" = "yes" ; then
   [ msg="for poll" ]
   AC_MSG_CHECKING($msg)
-  AC_TRY_RUN(
+  AC_LINK_IFELSE(
   [  #include <poll.h> ]
      int main() {
       struct pollfd pfd;
@@ -874,7 +906,7 @@ if test "${try_poll_syscall}" = "yes" ; then
       pfd.events = POLLIN;
       r = poll(&pfd, 1, 0);
       return 0;
-     }, use_poll=yes, use_poll=no, use_poll=no)
+     }, use_poll=yes, use_poll=no)
   AC_MSG_RESULT($use_poll)
   if test "${use_poll}" = "yes" ; then
      AC_DEFINE(HAVE_POLL_SYSCALL,1,[Have poll])
@@ -884,7 +916,7 @@ fi
 if test "${try_epoll_syscall}" = "yes" ; then
   [ msg="for epoll" ]
   AC_MSG_CHECKING($msg)
-  AC_TRY_RUN(
+  AC_LINK_IFELSE(
   [  #include <sys/epoll.h> ]
     int main() {
       int fd;
@@ -893,7 +925,7 @@ if test "${try_epoll_syscall}" = "yes" ; then
       ev.events = EPOLLIN | EPOLLONESHOT;
       epoll_ctl(fd, EPOLL_CTL_ADD, 0, &ev);
       return 0;
-    }, use_epoll=yes, use_epoll=no, use_epoll=no)
+    }, use_epoll=yes, use_epoll=no)
   AC_MSG_RESULT($use_epoll)
   if test "${use_epoll}" = "yes" ; then
      AC_DEFINE(HAVE_EPOLL_SYSCALL,1,[Have epoll])
@@ -903,7 +935,7 @@ fi
 if test "${try_kqueue_syscall}" = "yes" ; then
   [ msg="for kqueue" ]
   AC_MSG_CHECKING($msg)
-  AC_TRY_RUN(
+  AC_LINK_IFELSE(
   [  #include <sys/types.h> ]
   [  #include <sys/event.h> ]
   [  #include <sys/time.h> ]
@@ -915,87 +947,25 @@ if test "${try_kqueue_syscall}" = "yes" ; then
         EV_SET(&kev, 0, EVFILT_READ, EV_ADD, 0, 0, NULL);
         kevent(kq, &kev, 1, NULL, 0, &timeout);
         return 0;
-     }, use_kqueue=yes, use_kqueue=no, use_kqueue=no)
+     }, use_kqueue=yes, use_kqueue=no)
   AC_MSG_RESULT($use_kqueue)
   if test "${use_kqueue}" = "yes" ; then
      AC_DEFINE(HAVE_KQUEUE_SYSCALL,1,[Have kqueue])
   fi
 fi
 
-if test "${enable_libffi}" = "default" ; then
-  case "$host_os" in
-  darwin*)
-        enable_libffi=no
-  ;;
-  *)
-        enable_libffi=yes
-  ;;
-  esac
-fi
-
-if test "${enable_libffi}" = "yes" ; then
- if test "${enable_foreign}" = "yes" ; then
-  AC_MSG_CHECKING([for libffi])
-
-  # Try to get flags form pkg-config:
-  libffi_config_prog="pkg-config libffi"
-  libffi_config_preflags=`$libffi_config_prog --cflags-only-I  2> /dev/null`
-  if test "$?" = 0 ; then
-    libffi_config_cflags=`$libffi_config_prog --cflags-only-other  2> /dev/null`
-    if test "$?" = 0 ; then
-      libffi_config_libs=`$libffi_config_prog --libs  2> /dev/null`
-      if test "$?" != 0 ; then
-        libffi_config_preflags=""
-        libffi_config_cflags=""
-        libffi_config_libs="-lffi"
-      fi
-    else
-      libffi_config_preflags=""
-      libffi_config_cflags=""
-      libffi_config_libs="-lffi"
-    fi
-  else
-    libffi_config_preflags=""
-    libffi_config_cflags=""
-    libffi_config_libs="-lffi"
-  fi
-
-  OLD_CFLAGS="${CFLAGS}"
-  OLD_LIBS="${LIBS}"
-  CFLAGS="${CFLAGS} ${libffi_config_preflags} ${libffi_config_cflags}"
-  LIBS="${LIBS} ${libffi_config_libs}"
-  AC_TRY_LINK([#include <ffi.h>],
-              [ffi_cif cif; ]
-              [ffi_prep_cif(&cif, FFI_DEFAULT_ABI, 0, &ffi_type_void, NULL);],
-             have_libffi=yes,
-             have_libffi=no)
-  AC_MSG_RESULT($have_libffi)
-  if test "${have_libffi}" = "no" ; then
-    CFLAGS="${OLD_CFLAGS}"
-    LIBS="${OLD_LIBS}"
-    echo "Building own libffi"
-  else
-    CFLAGS="${OLD_CFLAGS}"
-    PREFLAGS="${PREFLAGS} ${libffi_config_preflags}"
-    COMPFLAGS="${COMPFLAGS} ${libffi_config_cflags}"
-    echo "Using installed libffi"
-    OWN_LIBFFI="OFF"
-  fi
- fi
-fi
-
 if test "${check_for_mprotect}" = "yes" ; then
   [ msg="for mmap and mprotect" ]
   AC_MSG_CHECKING($msg)
-  AC_TRY_RUN(
+  AC_LINK_IFELSE(
   [  #include <sys/mman.h> ]
   [  #include <fcntl.h> ]
      int main() {
       void *p;
-      p = mmap(0, 2 << 16, PROT_READ | PROT_WRITE, MAP_PRIVATE, open("/dev/zero", O_RDWR), 0);
+      p = mmap(0, 2 << 16, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE, open("/dev/zero", O_RDWR), 0);
       mprotect(p, 2 << 16, PROT_READ | PROT_WRITE | PROT_EXEC);
       return 0;
-     }, use_mprotect=yes, use_mprotect=no, use_mprotect=no)
+     }, use_mprotect=yes, use_mprotect=no)
   AC_MSG_RESULT($use_mprotect)
   if test "${use_mprotect}" = "yes" ; then
      AC_DEFINE(HAVE_MMAP_MPROTECT,1,[Have mmap and mprotect])
@@ -1123,7 +1093,7 @@ fi
 if test "${enable_mzrt}" = "yes" ; then
   [ msg="for compare-and-swap" ]
   AC_MSG_CHECKING($msg)
-  AC_TRY_RUN(
+  AC_LINK_IFELSE(
    int check1(long *addr, long old, long new_val) {
      return __sync_bool_compare_and_swap(addr, old, new_val);
    }
@@ -1133,7 +1103,7 @@ if test "${enable_mzrt}" = "yes" ; then
    int main() {
       long l = 2; short s = 3;
       return !check1(&l, 2, 4) || !check2(&s, 3, 6);
-   }, cas_available=yes, cas_available=no, cas_available=no)
+   }, cas_available=yes, cas_available=no)
   AC_MSG_RESULT($cas_available)
   if test "${cas_available}" = "yes" ; then
     AC_DEFINE(MZ_CAS_AVAILABLE,1,[Compare-and-swap available])
@@ -1158,20 +1128,94 @@ if test "${enable_pthread}" = "yes" ; then
 
 [ msg="whether pthread_rwlock is available"   ]
   AC_MSG_CHECKING($msg)
-  AC_TRY_RUN(
+  AC_LINK_IFELSE(
 [  #include <pthread.h>]
    pthread_rwlock_t l;
    int main() {
      return pthread_rwlock_init(&l, NULL);
-   }, rwlockavail=yes, rwlockavail=no, rwlockavail=no)
+   }, rwlockavail=yes, rwlockavail=no)
   AC_MSG_RESULT($rwlockavail)
   if test "$rwlockavail" = "yes" ; then
     AC_DEFINE(HAVE_PTHREAD_RWLOCK,1,[Have pthread_rwlock])
   fi
 fi
 
+############## libffi ################
+
+# Depends on pthread on some platforms
+
 if test "${enable_pthread}" = "" ; then
   enable_pthread=no
+fi
+
+if test "${enable_libffi}" = "yes" ; then
+   complain_if_libffi_fails=yes
+fi
+
+if test "${enable_libffi}" = "default" ; then
+  case "$host_os" in
+  darwin*)
+        enable_libffi=no
+  ;;
+  *)
+        enable_libffi=yes
+  ;;
+  esac
+fi
+
+if test "${enable_libffi}" = "yes" ; then
+ if test "${enable_foreign}" = "yes" ; then
+  AC_MSG_CHECKING([for libffi])
+
+  # Try to get flags form pkg-config:
+  libffi_config_prog="pkg-config libffi"
+  libffi_config_preflags=`$libffi_config_prog --cflags-only-I  2> /dev/null`
+  if test "$?" = 0 ; then
+    libffi_config_cflags=`$libffi_config_prog --cflags-only-other  2> /dev/null`
+    if test "$?" = 0 ; then
+      libffi_config_libs=`$libffi_config_prog --libs  2> /dev/null`
+      if test "$?" != 0 ; then
+        libffi_config_preflags=""
+        libffi_config_cflags=""
+        libffi_config_libs="-lffi"
+      fi
+    else
+      libffi_config_preflags=""
+      libffi_config_cflags=""
+      libffi_config_libs="-lffi"
+    fi
+  else
+    libffi_config_preflags=""
+    libffi_config_cflags=""
+    libffi_config_libs="-lffi"
+  fi
+
+  OLD_CFLAGS="${CFLAGS}"
+  OLD_LIBS="${LIBS}"
+  CFLAGS="${CFLAGS} ${libffi_config_preflags} ${libffi_config_cflags}"
+  LIBS="${LIBS} ${libffi_config_libs}"
+  AC_TRY_LINK([#include <ffi.h>],
+              [ffi_cif cif; ]
+              [ffi_prep_cif(&cif, FFI_DEFAULT_ABI, 0, &ffi_type_void, NULL);],
+             have_libffi=yes,
+             have_libffi=no)
+  AC_MSG_RESULT($have_libffi)
+  if test "${have_libffi}" = "no" ; then
+    CFLAGS="${OLD_CFLAGS}"
+    LIBS="${OLD_LIBS}"
+    echo "Building own libffi"
+    if test "${complain_if_libffi_fails}" = "yes" ; then
+       echo configure: unable to link to libffi
+       exit 1
+    fi
+  else
+    CFLAGS="${OLD_CFLAGS}"
+    PREFLAGS="${PREFLAGS} ${libffi_config_preflags}"
+    COMPFLAGS="${COMPFLAGS} ${libffi_config_cflags}"
+    echo "Using installed libffi"
+    OWN_LIBFFI="OFF"
+  fi
+ fi
 fi
 
 ############## Solaris grunge ################
@@ -1184,10 +1228,10 @@ if test "$check_gcc_dash_e" = "yes" ; then
   # Can use -Wl,-E for linking because we're using GNU linker?
 [ msg="whether linker accepts -Wl,-E"   ]
   AC_MSG_CHECKING($msg)
-  AC_TRY_RUN(
+  AC_LINK_IFELSE(
    int main() {
       return 0;
-   }, linker_dash_e=yes, linker_dash_e=no, linker_dash_e=no)
+   }, linker_dash_e=yes, linker_dash_e=no)
   if test "$linker_dash_e" = "no" ; then
     LDFLAGS="${orig_ldflags}"
   fi
@@ -1354,6 +1398,8 @@ AC_SUBST(FRAMEWORK_INSTALL_DIR)
 AC_SUBST(FRAMEWORK_REL_INSTALL)
 AC_SUBST(FRAMEWORK_PREFIX)
 AC_SUBST(INSTALL_ORIG_TREE)
+AC_SUBST(INSTALL_PKGSCOPE)
+AC_SUBST(MAKE_INSTALL_PKGSCOPE)
 AC_SUBST(EXE_SUFFIX)
 AC_SUBST(SO_SUFFIX)
 AC_SUBST(OWN_LIBFFI)

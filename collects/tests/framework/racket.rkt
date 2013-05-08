@@ -111,6 +111,7 @@
       `(let* ([t (new racket:text%)]
               [f (new frame% [label ""] [width 600] [height 600])]
               [ec (new editor-canvas% [parent f] [editor t])])
+         (preferences:set 'framework:fixup-parens #t)
          (preferences:set 'framework:automatic-parens ,auto-parens?)
          (send f reflow-container)
          (send t insert ,initial-text)
@@ -319,6 +320,39 @@
                            #\|
                            '(["#| (123 abc|" "|# def 456)"]
                              ["#| (123 abc|#" " def 456)"]))
+
+(test-parens-behavior/full 'close-adjusts-properly-when-space-follows-paren
+                           "( x" "" ""
+                           #\]
+                           '(["( x)" "" ""]
+                             ["( x)" "" ""]))
+(test-parens-behavior/full 'close-adjusts-properly-when-inside-a-comment
+                           "[();" "" ""
+                           #\)
+                           '(["[();)" "" ""]
+                             ["[();)" "" ""]))
+(test-parens-behavior/full 'close-adjusts-properly-when-inside-a-comment.2
+                           "[;" "" "\n"
+                           #\)
+                           '(["[;)" "" "\n"]
+                             ["[;)" "" "\n"]))
+(test-parens-behavior/full 'close-adjusts-properly-when-inside-an-unclosed-string
+                           "[()\"" "" ""
+                           #\)
+                           '(["[()\")" "" ""]
+                             ["[()\")" "" ""]))
+(test-parens-behavior/full 'close-adjusts-properly-when-inside-a-string
+                           "[()\"" "" "\""
+                           #\)
+                           '(["[()\")" "" "\""]
+                             ["[()\")" "" "\""]))
+
+(test-parens-behavior/full 'close-adjusts-properly-when-no-containing-sexp
+                           ")" "" ""
+                           #\]
+                           '([")]" "" ""]
+                             [")]" "" ""]))
+
 
 #| for these, the key-event with meta-down doesn't seem to work... maybe a Mac OS
   issue; and may cause problems with these tests on another platform? .nah. |#

@@ -4,7 +4,7 @@
 (Section 'basic)
 
 (require scheme/flonum
-         racket/private/norm-arity)
+         racket/function)
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1314,15 +1314,16 @@
 ;; unmatched output to a port:
 (for ([succeed? '(#f #t)])
   (for ([N '(1 100 1000 1023 1024 10000)])
-    (define o (open-output-bytes))
-    (void (regexp-match-positions #rx"y" 
-                                  (string-append
-                                   (make-string N #\x) 
-                                   (if succeed? "y" ""))
-                                  0 
-                                  (+ N (if succeed? 1 0))
-                                  o))
-    (test N bytes-length (get-output-bytes o))))
+    (for ([M (list 0 (quotient N 2))])
+      (define o (open-output-bytes))
+      (void (regexp-match-positions #rx"y" 
+                                    (string-append
+                                     (make-string N #\x) 
+                                     (if succeed? "y" ""))
+                                    M
+                                    (+ N (if succeed? 1 0))
+                                    o))
+    (test (- N M) bytes-length (get-output-bytes o)))))
 
 (arity-test regexp 1 1)
 (arity-test regexp? 1 1)
@@ -1921,32 +1922,62 @@
 (test (make-arity-at-least 0) procedure-arity (lambda x x))
 (arity-test procedure-arity 1 1)
 
+;; Tests for normalize-arity without arity-at-least
 (test '() normalize-arity '())
 (test 1 normalize-arity 1)
 (test 1 normalize-arity '(1))
 (test '(1 2) normalize-arity '(1 2))
 (test '(1 2) normalize-arity '(2 1))
-(test (make-arity-at-least 2) normalize-arity (list (make-arity-at-least 2) 3))
-(test (list 1 (make-arity-at-least 2))
-      normalize-arity (list (make-arity-at-least 2) 1))
-(test (list 1 (make-arity-at-least 2)) 
-      normalize-arity (list (make-arity-at-least 2) 1 3))
-(test (list 0 1 (make-arity-at-least 2))
-      normalize-arity (list (make-arity-at-least 2) 1 0 3))
-(test (list 0 1 (make-arity-at-least 2))
-      normalize-arity (list (make-arity-at-least 2)
-                            (make-arity-at-least 4) 1 0 3))
-(test (list 0 1 (make-arity-at-least 2))
-      normalize-arity (list (make-arity-at-least 4)
-                            (make-arity-at-least 2) 1 0 3))
 (test (list 1 2) normalize-arity (list 1 1 2 2))
 (test 1 normalize-arity (list 1 1 1))
-(test (list 1 (make-arity-at-least 2))
+
+;; Tests for normalize-arity where everything collapses into arity-at-least
+(test (make-arity-at-least 2) normalize-arity (list (make-arity-at-least 2) 3))
+(test (make-arity-at-least 1)
+      normalize-arity (list (make-arity-at-least 2) 1))
+(test (make-arity-at-least 1)
+      normalize-arity (list (make-arity-at-least 2) 1 3))
+(test (make-arity-at-least 0)
+      normalize-arity (list (make-arity-at-least 2) 1 0 3))
+(test (make-arity-at-least 0)
+      normalize-arity (list (make-arity-at-least 2)
+                            (make-arity-at-least 4) 1 0 3))
+(test (make-arity-at-least 0)
+      normalize-arity (list (make-arity-at-least 4)
+                            (make-arity-at-least 2) 1 0 3))
+(test (make-arity-at-least 1)
       normalize-arity (list (make-arity-at-least 2) 1 1))
-(test (list 1 (make-arity-at-least 2))
+(test (make-arity-at-least 1)
       normalize-arity 
       (list (make-arity-at-least 2)
             (make-arity-at-least 2) 1 1))
+
+;; Tests for normalize-arity that result in a list with arity-at-least.
+(test (list 1 (make-arity-at-least 3))
+      normalize-arity (list (make-arity-at-least 3) 1))
+(test (list 1 (make-arity-at-least 3))
+      normalize-arity (list (make-arity-at-least 3) 1 4))
+(test (list 0 1 (make-arity-at-least 3))
+      normalize-arity (list (make-arity-at-least 3) 1 0 4))
+(test (list 0 1 (make-arity-at-least 3))
+      normalize-arity (list (make-arity-at-least 3)
+                            (make-arity-at-least 5) 1 0 4))
+(test (list 0 1 (make-arity-at-least 3))
+      normalize-arity (list (make-arity-at-least 5)
+                            (make-arity-at-least 3) 1 0 4))
+(test (list 1 (make-arity-at-least 3))
+      normalize-arity (list (make-arity-at-least 3) 1 1))
+(test (list 1 (make-arity-at-least 3))
+      normalize-arity 
+      (list (make-arity-at-least 3)
+            (make-arity-at-least 3) 1 1))
+(test (list 0 1 (make-arity-at-least 3))
+      normalize-arity (list 0 1 3 (make-arity-at-least 4)))
+(test (list 0 1 (make-arity-at-least 3))
+      normalize-arity (list (make-arity-at-least 4) 3 1 0))
+(test (list 0 1 (make-arity-at-least 3))
+      normalize-arity (list 0 1 3 (make-arity-at-least 4)
+                                5 (make-arity-at-least 6)))
 
 (let ()
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1954,70 +1985,22 @@
   ;; randomized testing
   ;; predicate: normalize-arity produces a normalized arity
   ;;
-  
-  (define (normalized-arity? a)
-    (or (null? a)
-        (arity? a)
-        (and (list? a)
-             ((length a) . >= . 2)
-             (andmap arity? a)
-             (if (arity-at-least? (last a))
-                 (non-empty-non-singleton-sorted-list-ending-with-arity? a)
-                 (non-singleton-non-empty-sorted-list? a)))))
-  
-  (define (arity? a)
-    (or (nat? a)
-        (and (arity-at-least? a)
-             (nat? (arity-at-least-value a)))))
-  
-  (define (nat? a)
-    (and (number? a)
-         (integer? a)
-         (a . >= . 0)))
-  
-  ;; non-empty-non-singleton-sorted-list-ending-with-arity? : xx -> boolean
-  ;; know that 'a' is a list of at least 2 elements
-  (define (non-empty-non-singleton-sorted-list-ending-with-arity? a)
-    (let loop ([bound (car a)]
-               [lst (cdr a)])
-      (cond
-        [(null? (cdr lst))
-         (and (arity-at-least? (car lst))
-              (> (arity-at-least-value (car lst)) bound))]
-        [else
-         (and (nat? (car lst))
-              ((car lst) . > . bound)
-              (loop (car lst)
-                    (cdr lst)))])))
-  
-  (define (non-empty-sorted-list? a)
-    (and (pair? a)
-         (sorted-list? a)))
-  
-  (define (non-singleton-non-empty-sorted-list? a)
-    (and (pair? a)
-         (pair? (cdr a))
-         (sorted-list? a)))
-  
-  (define (sorted-list? a)
-    (or (null? a)
-        (sorted/bounded-list? (cdr a) (car a))))
-  
-  (define (sorted/bounded-list? a bound)
-    (or (null? a)
-        (and (number? (car a))
-             (< bound (car a))
-             (sorted/bounded-list? (cdr a) (car a)))))
+
+  (define (normalized-arity=? original normalized)
+    (and
+      (normalized-arity? normalized)
+      (arity=? original normalized)))
   
   (for ((i (in-range 1 2000)))
-    (let* ([rand-bound (ceiling (/ i 10))]
-           [l (build-list (random rand-bound)
-                          (λ (i) (if (zero? (random 5))
-                                     (make-arity-at-least (random rand-bound))
-                                     (random rand-bound))))]
-           [res (normalize-arity l)])
-      (unless (normalized-arity? res)
-        (error 'normalize-arity-failed "input ~s; output ~s" l res)))))
+    (define rand-bound (ceiling (/ i 10)))
+    (define l
+      (build-list (random rand-bound)
+        (λ (i) (if (zero? (random 5))
+                   (make-arity-at-least (random rand-bound))
+                   (random rand-bound)))))
+    (define res (normalize-arity l))
+    #:final (not (normalized-arity=? l res))
+    (test #t normalized-arity=? l res)))
 
 (test #t procedure-arity-includes? cons 2)
 (test #f procedure-arity-includes? cons 0)
@@ -2560,6 +2543,46 @@
   (eq-hash-code ht)
   (equal-hash-code ht)
   (equal-secondary-hash-code ht))
+
+;; Check that an equal hash code on an
+;;  mutable, opaque structure does not
+;;  see mutation.
+(let ()
+  (struct a (x [y #:mutable]))
+  (define an-a (a 1 2))
+  (define v (equal-hash-code an-a))
+  (set-a-y! an-a 8)
+  (test v equal-hash-code an-a))
+
+
+;; Try to build a hash table whose indexes fonr't fit in 32 bits:
+(let ()
+  (struct a (x)
+    #:property 
+    prop:equal+hash
+    (list
+     (lambda (a b eql?) (eql? (a-x a) (a-x b)))
+     (lambda (a hash) (expt 2 15))
+     (lambda (b hash) 1)))
+  
+
+  (define (same-ish i) (a i))
+
+  ;; No collisions: min depth 17, tree might be as
+  ;; deep as 1.44 * 17 = 24
+  (define ht (for/hash ([i (in-range (expt 2 17))])
+               (values i i)))
+
+  ;; All collissions: subtree min depth is 11, might
+  ;; be as deep as 1.44*11 = 15
+  (define ht2 (for/fold ([ht ht]) ([i (in-range (expt 2 11))])
+                (hash-set ht (same-ish i) i)))
+
+  ;; `ht2' depth is between 28 and 39
+
+  ;; If the indexes go bad, this loop fails:
+  (for ([(k v) (in-hash ht2)])
+    v))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Misc

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -6636,8 +6636,8 @@ static Scheme_Object *do_sync(const char *name, int argc, Scheme_Object *argv[],
 
   if (syncing->result) {
     /* Apply wrap functions to the selected evt: */
-    Scheme_Object *o, *l, *a, *to_call = NULL, *args[1];
-    int to_call_is_handle = 0;
+    Scheme_Object *o, *l, *a, *to_call = NULL, *args[1], **mv = NULL;
+    int to_call_is_handle = 0, rc = 1;
 
     o = evt_set->argv[syncing->result - 1];
     if (SAME_TYPE(SCHEME_TYPE(o), scheme_channel_syncer_type)) {
@@ -6650,12 +6650,24 @@ static Scheme_Object *do_sync(const char *name, int argc, Scheme_Object *argv[],
 	for (; SCHEME_PAIRP(l); l = SCHEME_CDR(l)) {
 	  a = SCHEME_CAR(l);
 	  if (to_call) {
-	    args[0] = o;
+            if (rc == 1) {
+              mv = args;
+              args[0] = o;
+            }
 	    
 	    /* Call wrap proc with breaks disabled */
 	    scheme_push_break_enable(&cframe, 0, 0);
 	    
-	    o = scheme_apply(to_call, 1, args);
+	    o = scheme_apply_multi(to_call, rc, mv);
+
+            if (SAME_OBJ(o, SCHEME_MULTIPLE_VALUES)) {
+              rc = scheme_multiple_count;
+              mv = scheme_multiple_array;
+              scheme_detach_multple_array(mv);
+            } else {
+              rc = 1;
+              mv = NULL;
+            }
 	    
 	    scheme_pop_break_enable(&cframe, 0);
 
@@ -6668,14 +6680,20 @@ static Scheme_Object *do_sync(const char *name, int argc, Scheme_Object *argv[],
 	    }
 	    to_call = a;
 	  } else if (SAME_TYPE(scheme_thread_suspend_type, SCHEME_TYPE(a))
-		     || SAME_TYPE(scheme_thread_resume_type, SCHEME_TYPE(a)))
+		     || SAME_TYPE(scheme_thread_resume_type, SCHEME_TYPE(a))) {
 	    o = SCHEME_PTR2_VAL(a);
-	  else
+            rc = 1;
+          } else {
 	    o = a;
+            rc = 1;
+          }
 	}
 
 	if (to_call) {
-	  args[0] = o;
+          if (rc == 1) {
+            mv = args;
+            args[0] = o;
+          }
 	  
 	  /* If to_call is still a wrap-evt (not a handle-evt),
 	     then set the config one more time: */
@@ -6685,12 +6703,22 @@ static Scheme_Object *do_sync(const char *name, int argc, Scheme_Object *argv[],
 	  }
 
 	  if (tailok) {
-	    return _scheme_tail_apply(to_call, 1, args);
+	    return _scheme_tail_apply(to_call, rc, mv);
 	  } else {
-	    o = scheme_apply(to_call, 1, args);
-	    if (!to_call_is_handle)
-	      scheme_pop_break_enable(&cframe, 1);
-	    return o;
+	    o = scheme_apply_multi(to_call, rc, mv);
+
+            if (SAME_OBJ(o, SCHEME_MULTIPLE_VALUES)) {
+              rc = scheme_multiple_count;
+              mv = scheme_multiple_array;
+              scheme_detach_multple_array(mv);
+              if (!to_call_is_handle)
+                scheme_pop_break_enable(&cframe, 1);
+              return scheme_values(rc, mv);
+            } else {
+              if (!to_call_is_handle)
+                scheme_pop_break_enable(&cframe, 1);
+              return o;
+            }
 	  }
 	}
       }
@@ -6731,9 +6759,18 @@ Scheme_Object *scheme_sync_timeout(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *do_scheme_sync_enable_break(const char *who, int with_timeout, int tailok, int argc, Scheme_Object *argv[])
 {
-  if (argc == 2 && SCHEME_FALSEP(argv[0]) && SCHEME_SEMAP(argv[1])) {
-    scheme_wait_sema(argv[1], -1);
-    return scheme_void;
+  Scheme_Object *sema;
+
+  if (with_timeout && (argc == 2) && SCHEME_FALSEP(argv[0]) && SCHEME_SEMAP(argv[1]))
+    sema = argv[1];
+  else if (!with_timeout && (argc == 1) && SCHEME_SEMAP(argv[0]))
+    sema = argv[0];
+  else
+    sema = NULL;
+  
+  if (sema) {
+    scheme_wait_sema(sema, -1);
+    return sema;
   }
 
   return do_sync(who, argc, argv, 1, with_timeout, tailok);

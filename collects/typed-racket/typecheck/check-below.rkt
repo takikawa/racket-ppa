@@ -12,8 +12,10 @@
          (only-in srfi/1 split-at))
 
 (provide/cond-contract
- [check-below (-->d ([s (-or/c Type/c tc-results?)] [t (-or/c Type/c tc-results?)]) () [_ (if (Type/c s) Type/c tc-results?)])]
- [cond-check-below (-->d ([s (-or/c Type/c tc-results?)] [t (-or/c #f Type/c tc-results?)]) () [_ (if (Type/c s) Type/c tc-results?)])])
+ [check-below (-->d ([s (-or/c Type/c tc-results/c)] [t (-or/c Type/c tc-results/c)]) ()
+                    [_ (if (Type/c? s) Type/c tc-results/c)])]
+ [cond-check-below (-->d ([s (-or/c Type/c tc-results/c)] [t (-or/c #f Type/c tc-results/c)]) ()
+                         [_ (if (Type/c? s) Type/c tc-results/c)])])
 
 (define (print-object o)
   (match o
@@ -48,6 +50,7 @@
      (ret ts2)]
     [((tc-result1: (? (lambda (t) (type-equal? t (Un))))) _)
      expected]
+    [((or (tc-any-results:) (tc-results: _)) (tc-any-results:)) tr1]
 
     [((tc-results: ts fs os) (tc-results: ts2 (NoFilter:) (NoObject:)))
      (unless (= (length ts) (length ts2))
@@ -76,6 +79,22 @@
              (not (object-better? o1 o2)))
         (tc-error/expr "Expected result with filter ~a and ~a, got filter ~a and ~a" f2 (print-object o2) f1 (print-object o1))])
      expected]
+    ;; case where expected is like (Values a ... a) but got something else
+    [((tc-results: t1 f o) (tc-results: t2 f o dty dbound))
+     (unless (= (length t1) (length t2))
+       (tc-error/expr "Expected ~a values and ~a ..., but got ~a values"
+                      (length t2) dty (length t1)))
+     (unless (for/and ([t t1] [s t2]) (subtype t s))
+       (tc-error/expr "Expected ~a, but got ~a" (stringify t2) (stringify t1)))
+     expected]
+    ;; case where you have (Values a ... a) but expected something else
+    [((tc-results: t1 f o dty dbound) (tc-results: t2 f o))
+     (unless (= (length t1) (length t2))
+       (tc-error/expr "Expected ~a values, but got ~a values and ~a ..."
+                      (length t2) (length t1) dty))
+     (unless (for/and ([t t1] [s t2]) (subtype t s))
+       (tc-error/expr "Expected ~a, but got ~a" (stringify t2) (stringify t1)))
+     expected]
     [((tc-results: t1 f o dty dbound) (tc-results: t2 f o dty dbound))
      (unless (andmap subtype t1 t2)
        (tc-error/expr "Expected ~a, but got ~a" (stringify t2) (stringify t1)))
@@ -86,23 +105,33 @@
      (unless (for/and ([t t1] [s t2]) (subtype t s))
        (tc-error/expr "Expected ~a, but got ~a" (stringify t2) (stringify t1)))
      expected]
-    [((tc-result1: t1 f o) (? Type? t2))
+    [((tc-any-results:) (or (? Type/c? t) (tc-result1: t _ _)))
+     (tc-error/expr "Expected 1 value, but got unknown number")
+     expected]
+    [((tc-any-results:) (tc-results: t2 fs os))
+     (tc-error/expr "Expected ~a values, but got unknown number" (length t2))
+     expected]
+
+    [((tc-result1: t1 f o) (? Type/c? t2))
      (unless (subtype t1 t2)
        (tc-error/expr "Expected ~a, but got ~a" t2 t1))
      (ret t2 f o)]
-    [((? Type? t1) (tc-result1: t2 (FilterSet: (list) (list)) (Empty:)))
+
+
+    [((? Type/c? t1) (tc-any-results:)) t1]
+    [((? Type/c? t1) (tc-result1: t2 (FilterSet: (list) (list)) (Empty:)))
      (unless (subtype t1 t2)
        (tc-error/expr "Expected ~a, but got ~a" t2 t1))
      t1]
-    [((? Type? t1) (tc-result1: t2 f o))
+    [((? Type/c? t1) (tc-result1: t2 f o))
      (if (subtype t1 t2)
          (tc-error/expr "Expected result with filter ~a and ~a, got ~a" f (print-object o) t1)
          (tc-error/expr "Expected ~a, but got ~a" t2 t1))
      t1]
-    [((? Type? t1) (tc-results: ts2 fs os))
+    [((? Type/c? t1) (tc-results: ts2 fs os))
        (tc-error/expr "Expected one value, but got ~a" (length ts2))
        t1]
-    [((? Type? t1) (? Type? t2))
+    [((? Type/c? t1) (? Type/c? t2))
      (unless (subtype t1 t2)
        (tc-error/expr "Expected ~a, but got ~a" t2 t1))
      expected]

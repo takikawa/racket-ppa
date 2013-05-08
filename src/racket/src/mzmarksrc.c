@@ -517,6 +517,22 @@ double_obj {
   gcBYTES_TO_WORDS(sizeof(Scheme_Double));
 }
 
+#ifdef MZ_LONG_DOUBLE
+long_double_obj {
+ mark:
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Long_Double));
+}
+#else
+long_double_obj {
+ mark:
+  Scheme_Long_Double *ld = (Scheme_Long_Double *)p;
+  gcMARK2(ld->printed_form, gc);
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Long_Double));
+}
+#endif
+
 complex_obj {
  mark:
   Scheme_Complex *c = (Scheme_Complex *)p;
@@ -595,6 +611,17 @@ flvector_obj {
   gcBYTES_TO_WORDS((sizeof(Scheme_Double_Vector) 
 		    + ((vec->size - mzFLEX_DELTA) * sizeof(double))));
 }
+
+#ifdef MZ_LONG_DOUBLE
+extflvector_obj {
+  Scheme_Long_Double_Vector *vec = (Scheme_Long_Double_Vector *)p;
+
+ mark:
+ size:
+  gcBYTES_TO_WORDS((sizeof(Scheme_Long_Double_Vector) 
+		    + ((vec->size - mzFLEX_DELTA) * sizeof(long double))));
+}
+#endif
 
 input_port {
  mark:
@@ -1018,6 +1045,8 @@ module_val {
  mark:
   Scheme_Module *m = (Scheme_Module *)p;
 
+  gcMARK2(m->phaseless, gc);
+
   gcMARK2(m->code_key, gc);
 
   gcMARK2(m->modname, gc);
@@ -1054,6 +1083,7 @@ module_val {
   gcMARK2(m->submodule_path, gc);
   gcMARK2(m->pre_submodules, gc);
   gcMARK2(m->post_submodules, gc);
+  gcMARK2(m->pre_submodule_names, gc);
   gcMARK2(m->supermodule, gc);
   gcMARK2(m->submodule_ancestry, gc);
 
@@ -1453,7 +1483,6 @@ hash_tree_val {
   Scheme_Hash_Tree *ht = (Scheme_Hash_Tree *)p;
 
   gcMARK2(ht->root, gc);
-  gcMARK2(ht->elems_box, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Hash_Tree));
@@ -1486,8 +1515,7 @@ START place;
 place_bi_channel_val {
  mark:
   Scheme_Place_Bi_Channel *pbc = (Scheme_Place_Bi_Channel *)p;
-  gcMARK2(pbc->sendch, gc);
-  gcMARK2(pbc->recvch, gc);
+  gcMARK2(pbc->link, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Place_Bi_Channel));

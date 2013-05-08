@@ -1,53 +1,100 @@
 #lang racket/base
 
-(provide inline-matrix*
+(provide inline-matrix-multiply
+         inline-matrix*
          inline-matrix+
          inline-matrix-
          inline-matrix-scale
          inline-matrix-map
          matrix-map)
 
-(module syntax-defs racket/base
-  (require (for-syntax racket/base)
-           (only-in typed/racket/base λ: : inst Index)
+(module typed-multiply-defs typed/racket/base
+  (require racket/fixnum
            "matrix-types.rkt"
            "utils.rkt"
+           "../unsafe.rkt"
            "../array/array-struct.rkt"
-           "../array/array-fold.rkt"
            "../array/array-transform.rkt"
+           "../array/mutable-array.rkt"
            "../array/utils.rkt")
   
   (provide (all-defined-out))
   
-  ;(: matrix-multiply ((Matrix Number) (Matrix Number) -> (Matrix Number)))
-  ;; This is a macro so the result can have as precise a type as possible
-  (define-syntax-rule (inline-matrix-multiply arr-expr brr-expr)
-    (let ([arr  arr-expr]
-          [brr  brr-expr])
-      (let-values ([(m p n)  (matrix-multiply-shape arr brr)]
-                   ;; Make arr strict because its elements are reffed multiple times
-                   [(_)  (array-strict! arr)])
-        (let (;; Extend arr in the center dimension
-              [arr-proc  (unsafe-array-proc (array-axis-insert arr 1 n))]
-              ;; Transpose brr and extend in the leftmost dimension
-              [brr-proc  (unsafe-array-proc
-                          (array-axis-insert (array-strict (array-axis-swap brr 0 1)) 0 m))])
-          ;; The *transpose* of brr is traversed in row-major order when this result is traversed
-          ;; in row-major order (which is why the transpose is strict, not brr)
-          (array-axis-sum
-           (unsafe-build-array
-            ((inst vector Index) m n p)
-            (λ: ([js : Indexes])
-              (* (arr-proc js) (brr-proc js))))
-           2)))))
+  (: matrix-multiply-data (All (A) ((Matrix A) (Matrix A) -> (Values Index Index Index
+                                                                     (Vectorof A) (Vectorof A)
+                                                                     (-> (Boxof A))))))
+  (define (matrix-multiply-data arr brr)
+    (let-values ([(m p n)  (matrix-multiply-shape arr brr)])
+      (define arr-data (mutable-array-data (array->mutable-array arr)))
+      (define brr-data (mutable-array-data (array->mutable-array (parameterize ([array-strictness #f])
+                                                                   (array-axis-swap brr 0 1)))))
+      (define bx (make-thread-local-box (unsafe-vector-ref arr-data 0)))
+      (values m p n arr-data brr-data bx)))
   
-  (define-syntax (inline-matrix* stx)
+  (: make-matrix-multiply (All (A) (Index Index Index (Index Index -> A) -> (Matrix A))))
+  (define (make-matrix-multiply m p n sum-loop)
+    (array-default-strict
+     (unsafe-build-array
+      ((inst vector Index) m n)
+      (λ: ([ij : Indexes])
+        (sum-loop (assert (fx* (unsafe-vector-ref ij 0) p) index?)
+                  (assert (fx* (unsafe-vector-ref ij 1) p) index?))))))
+  )  ; module
+
+(module untyped-multiply-defs racket/base
+  (require (for-syntax racket/base)
+           racket/fixnum
+           racket/unsafe/ops
+           (only-in typed/racket/base λ: : Index let: Nonnegative-Fixnum)
+           (submod ".." typed-multiply-defs)
+           "matrix-types.rkt"
+           "utils.rkt"
+           "../array/array-struct.rkt")
+  
+  (provide (all-defined-out))
+  
+  ;; This is a macro so the result can have as precise a type as possible
+  (define-syntax-rule (inline-matrix-multiply arr brr)
+    (let-values ([(m p n arr-data brr-data bx)  (matrix-multiply-data arr brr)])
+      (make-matrix-multiply
+       m p n
+       (λ: ([i : Index] [j : Index])
+         (let ([bx  (bx)]
+               [v  (* (unsafe-vector-ref arr-data i)
+                      (unsafe-vector-ref brr-data j))])
+           (let: loop ([k : Nonnegative-Fixnum  1] [v v])
+             (cond [(k . fx< . p)
+                    (loop (fx+ k 1)
+                          (+ v (* (unsafe-vector-ref arr-data (fx+ i k))
+                                  (unsafe-vector-ref brr-data (fx+ j k)))))]
+                   [else  (set-box! bx v)]))
+           (unbox bx))))))
+  
+  (define-syntax (do-inline-matrix* stx)
     (syntax-case stx ()
       [(_ arr)
        (syntax/loc stx arr)]
       [(_ arr brr crrs ...)
-       (syntax/loc stx (inline-matrix* (inline-matrix-multiply arr brr) crrs ...))]))
+       (syntax/loc stx (do-inline-matrix* (inline-matrix-multiply arr brr) crrs ...))]))
   
+  (define-syntax-rule (inline-matrix* arr brrs ...)
+    (array-default-strict
+     (parameterize ([array-strictness #f])
+       (do-inline-matrix* arr brrs ...))))
+  
+  )  ; module
+
+(module syntax-defs racket/base
+  (require (for-syntax racket/base)
+           (only-in typed/racket/base λ: : inst Index)
+           (submod ".." typed-multiply-defs)
+           "matrix-types.rkt"
+           "utils.rkt"
+           "../array/array-struct.rkt"
+           "../array/utils.rkt")
+  
+  (provide (all-defined-out))
+    
   (define-syntax (inline-matrix-map stx)
     (syntax-case stx ()
       [(_ f arr-expr)
@@ -55,7 +102,8 @@
          (let*-values ([(arr)  arr-expr]
                        [(m n)  (matrix-shape arr)]
                        [(proc)  (unsafe-array-proc arr)])
-           (unsafe-build-array ((inst vector Index) m n) (λ: ([js : Indexes]) (f (proc js))))))]
+           (array-default-strict
+            (unsafe-build-array ((inst vector Index) m n) (λ: ([js : Indexes]) (f (proc js)))))))]
       [(_ f arr-expr brr-exprs ...)
        (with-syntax ([(brrs ...)  (generate-temporaries #'(brr-exprs ...))]
                      [(procs ...)  (generate-temporaries #'(brr-exprs ...))])
@@ -65,10 +113,11 @@
              (let-values ([(m n)  (matrix-shapes 'matrix-map arr brrs ...)]
                           [(proc)  (unsafe-array-proc arr)]
                           [(procs)  (unsafe-array-proc brrs)] ...)
-               (unsafe-build-array
-                ((inst vector Index) m n)
-                (λ: ([js : Indexes])
-                  (f (proc js) (procs js) ...)))))))]))
+               (array-default-strict
+                (unsafe-build-array
+                 ((inst vector Index) m n)
+                 (λ: ([js : Indexes])
+                   (f (proc js) (procs js) ...))))))))]))
   
   (define-syntax-rule (inline-matrix+ arr0 arrs ...) (inline-matrix-map + arr0 arrs ...))
   (define-syntax-rule (inline-matrix- arr0 arrs ...) (inline-matrix-map - arr0 arrs ...))
@@ -101,12 +150,14 @@
        (define g0 (unsafe-array-proc arr0))
        (define g1 (unsafe-array-proc arr1))
        (define gs (map (inst unsafe-array-proc A) arrs))
-       (unsafe-build-array
-        ((inst vector Index) m n)
-        (λ: ([js : Indexes]) (apply f (g0 js) (g1 js)
-                                    (map (λ: ([g : (Indexes -> A)]) (g js)) gs))))]))
+       (array-default-strict
+        (unsafe-build-array
+         ((inst vector Index) m n)
+         (λ: ([js : Indexes]) (apply f (g0 js) (g1 js)
+                                     (map (λ: ([g : (Indexes -> A)]) (g js)) gs)))))]))
   
   )  ; module
 
-(require 'syntax-defs
+(require 'untyped-multiply-defs
+         'syntax-defs
          'untyped-defs)

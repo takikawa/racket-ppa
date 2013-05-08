@@ -69,7 +69,8 @@
              (perror ip 'read-entry "Parsing string, expected }, got ~v; tag is ~v; string is ~v" c tag string)])]
          [c
           (perror ip 'read-entry "Parsing string, expected =, got ~v; tag is ~v" c tag)])]
-      [(app string-downcase "comment")
+      [(or (app string-downcase "comment")
+           (app string-downcase "preamble"))
        (read-char ip)
        (let loop ()
          (read-until (λ (c) (or (char=? c #\{) (char=? c #\}))) ip)
@@ -188,10 +189,19 @@
 
 (define-syntax-rule
   (define-bibtex-cite bib-pth
-    ~cite-id citet-id generate-bibliography-id)
+    ~cite-id citet-id generate-bibliography-id . options)
+  (begin
+    (define-cite autobib-cite autobib-citet generate-bibliography-id . options)
+    (define-bibtex-cite* bib-pth
+      autobib-cite autobib-citet
+      ~cite-id citet-id)))
+
+(define-syntax-rule
+  (define-bibtex-cite* bib-pth
+    autobib-cite autobib-citet
+    ~cite-id citet-id)
   (begin
     (define bibtex-db (path->bibdb bib-pth))
-    (define-cite autobib-cite autobib-citet generate-bibliography-id)
     (define ((make-citer citer) f . r)
       (apply citer
              (filter-map
@@ -261,6 +271,12 @@
                   (make-bib #:title (raw-attr "title")
                             #:author (parse-author (raw-attr "author"))
                             #:date (raw-attr "year")
+                            #:url (raw-attr "url"))]                 
+                 ["mastersthesis"
+                  (make-bib #:title (raw-attr "title")
+                            #:author (parse-author (raw-attr "author"))
+                            #:date (raw-attr "year")
+                            #:location (raw-attr "school")
                             #:url (raw-attr "url"))]
                  ["techreport"
                   (make-bib #:title (raw-attr "title")
@@ -279,4 +295,5 @@
 (provide (struct-out bibdb)
          path->bibdb
          bibtex-parse
-         define-bibtex-cite)
+         define-bibtex-cite
+         define-bibtex-cite*)

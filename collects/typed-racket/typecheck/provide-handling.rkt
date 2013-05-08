@@ -1,16 +1,16 @@
 #lang racket/base
 
 (require "../utils/utils.rkt"
-	 (only-in srfi/1/list s:member)
+         (only-in srfi/1/list s:member)
          syntax/kerncase syntax/boundmap
-         (env type-name-env type-alias-env)         
+         (env type-name-env type-alias-env)
          (only-in (private type-contract) type->contract)
          "renamer.rkt"
          (rep type-rep)
-	 (utils tc-utils)
+         (utils tc-utils)
          (for-syntax syntax/parse racket/base)
          racket/contract/private/provide unstable/list
-          syntax/id-table racket/dict
+         syntax/id-table syntax/location racket/dict
          racket/syntax racket/struct-info racket/match
          "def-binding.rkt" syntax/parse
          (for-template racket/base "def-export.rkt" racket/contract))
@@ -30,6 +30,11 @@
   (cond [(s:member i vd (lambda (i j) (free-identifier=? i (binding-name j)))) => car]
         [else #f]))
 
+(define new-id-introducer (make-syntax-introducer))
+(define cnt-id-introducer (make-syntax-introducer))
+(define error-id-introducer (make-syntax-introducer))
+(define untyped-id-introducer (make-syntax-introducer))
+
 ;; generate-contract-defs : dict[id -> def-binding] dict[id -> list[id]] id -> syntax
 ;; defs: defines in this module
 ;; provs: provides in this module
@@ -46,7 +51,7 @@
   (define mapping (make-free-id-table))
 
   ;; mk : id [id] -> (values syntax id aliases)
-  (define (mk internal-id [new-id (generate-temporary internal-id)])
+  (define (mk internal-id [new-id (new-id-introducer internal-id)])
     (define (mk-untyped-syntax b defn-id internal-id)
       (match b
         [(def-struct-stx-binding _ (? struct-info? si))
@@ -87,7 +92,7 @@
          [(def-binding _ (app (λ (ty) (type->contract ty (λ () #f) #:out #t)) (? values cnt)))
           (values
            (with-syntax* ([id internal-id]
-                          [cnt-id (generate-temporary #'id)]
+                          [cnt-id (cnt-id-introducer #'id)]
                           [export-id new-id]
                           [module-source pos-blame-id]
                           [the-contract (generate-temporary 'generated-contract)])
@@ -96,7 +101,15 @@
                  (define-syntax cnt-id
                    (make-provide/contract-transformer
                     (quote-syntax the-contract)
-                    (quote-syntax id)
+                    (datum->syntax ; preserve source location in expanded code
+                     (quote-syntax id)
+                     (syntax->datum (quote-syntax id))
+                     (list (quote-source-file id)
+                           (quote-line-number id)
+                           (quote-column-number id)
+                           (quote-character-position id)
+                           (quote-character-span id))
+                     (quote-syntax id))
                     (quote-syntax export-id)
                     (quote-syntax module-source)))
                  (def-export export-id id cnt-id)))
@@ -105,7 +118,7 @@
          [(def-binding id ty)
           (values
            (with-syntax* ([id internal-id]
-                          [error-id (generate-temporary #'id)]
+                          [error-id (error-id-introducer #'id)]
                           [export-id new-id])
                #'(begin
                    (define-syntax (error-id stx)
@@ -116,7 +129,7 @@
          [(and b (def-stx-binding _))
           (with-syntax* ([id internal-id]
                          [export-id new-id]
-                         [untyped-id (generate-temporary #'id)])
+                         [untyped-id (untyped-id-introducer #'id)])
             (define-values (d aliases)
               (mk-untyped-syntax b #'untyped-id internal-id))
             (define/with-syntax def d)

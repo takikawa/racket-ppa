@@ -1048,6 +1048,17 @@
                 #:attempts 1))))
           #rx"no counterexamples"))
   
+  ;; just check that this doesn't raise an errors.
+  (let ()
+    (define-language empty)
+    (define red (reduction-relation
+                 empty
+                 #:domain 1
+                 (--> any any)))
+    (check-reduction-relation 
+     red 
+     (λ (x) (apply-reduction-relation red x))))
+  
   (let ([U (reduction-relation L (--> (side-condition any #f) any))])
     (test (raised-exn-msg
            exn:fail:redex:generation-failure?
@@ -1227,7 +1238,29 @@
   (test (raised-exn-msg
          exn:fail:redex:generation-failure?
          (check-metafunction n (λ (_) #t) #:retries 42))
-        #rx"check-metafunction: unable .* in 42"))
+        #rx"check-metafunction: unable .* in 42")
+
+  
+  (let ()
+    (define-metafunction empty
+      mf : 1 -> 1
+      [(mf any) any])
+    
+    ;; just make sure no errors
+    (test (begin
+            (check-metafunction
+             mf
+             (λ (args) (term (mf ,@args))))
+            42)
+          42))
+  
+  (let ()
+    (define-metafunction empty bogo : any -> any)
+
+    (test (raised-exn-msg
+           exn:fail:redex:generation-failure?
+           (generate-term #:source bogo 5))
+          #rx"unable.*bogo")))
 
 (let ()
   (define-language lang (x variable))

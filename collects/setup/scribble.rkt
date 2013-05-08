@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 
 (require "getinfo.rkt"
          "dirs.rkt"
@@ -8,14 +8,14 @@
          "main-doc.rkt"
          "parallel-do.rkt"
          "doc-db.rkt"
-         scheme/class
-         scheme/list
-         scheme/file
-         scheme/fasl
-         scheme/match
-         scheme/serialize
+         racket/class
+         racket/list
+         racket/file
+         racket/fasl
+         racket/match
+         racket/serialize
+         racket/set
          compiler/cm
-         syntax/modread
          scribble/base-render
          scribble/core
          scribble/html-properties
@@ -70,33 +70,39 @@
   (setup-printf "error running" (module-path-prefix->string (doc-src-spec doc)))
   (eprintf errstr))
 
-;; We use a lock to control writing to the database, because
-;; the database or binding doesn't seem to deal well with concurrent
-;; writers within a process.
+;; We use a lock to control writing to the database. It's not
+;; strictly necessary, but place channels can deal with blocking
+;; more efficiently than the database connection.
 (define no-lock void)
 (define (lock-via-channel lock-ch)
-  (let ([saved-ch #f])
-    (lambda (mode)
-      (case mode
-        [(lock)
-         (define ch (sync lock-ch))
-         (place-channel-put ch 'lock)
-         (set! saved-ch ch)]
-        [(unlock)
-         (place-channel-put saved-ch 'done)
-         (set! saved-ch #f)]))))
+  (if lock-ch
+      (let ([saved-ch #f])
+        (lambda (mode)
+          (case mode
+            [(lock)
+             (define ch (sync lock-ch))
+             (place-channel-put ch 'lock)
+             (set! saved-ch ch)]
+            [(unlock)
+             (place-channel-put saved-ch 'done)
+             (set! saved-ch #f)])))
+      void))
 (define lock-ch #f)
 (define lock-ch-in #f)
 (define (init-lock-ch!)
   (unless lock-ch
-    (set!-values (lock-ch lock-ch-in) (place-channel))
-    (thread (lambda ()
-              (define-values (ch ch-in) (place-channel))
-              (let loop ()
-                (place-channel-put lock-ch-in ch)
-                (place-channel-get ch-in)
-                (place-channel-get ch-in)
-                (loop))))))
+    ;; If places are not available, then tasks will be run
+    ;; in separate OS processes, and we can do without an
+    ;; extra lock.
+    (when (place-enabled?)
+      (set!-values (lock-ch lock-ch-in) (place-channel))
+      (thread (lambda ()
+                (define-values (ch ch-in) (place-channel))
+                (let loop ()
+                  (place-channel-put lock-ch-in ch)
+                  (place-channel-get ch-in)
+                  (place-channel-get ch-in)
+                  (loop)))))))
 (define (call-with-lock lock thunk)
   (lock 'lock)
   (dynamic-wind
@@ -183,6 +189,30 @@
            [infos (map get-info/full (map directory-record-path recs))])
       (filter-user-docs (append-map (get-docs main-dirs) infos recs) make-user?)))
   (define-values (main-docs user-docs) (partition doc-under-main? docs))
+
+  (unless only-dirs
+    ;; Check for extra document directories that we should remove
+    ;; in the main installation:
+    (log-setup-info "checking installation document directories")
+    (define main-doc-dir (find-doc-dir))
+    (define extra-dirs (call-with-input-file*
+                        (build-path main-doc-dir "keep-dirs.rktd")
+                        (lambda (i) (read i))))
+    (define expected (set-union
+                      (for/set ([doc (in-list main-docs)])
+                        (doc-dest-dir doc))
+                      (for/set ([i (in-list extra-dirs)])
+                         (build-path main-doc-dir i))))
+    (for ([i (in-list (directory-list main-doc-dir))])
+      (define p (build-path main-doc-dir i))
+      (when (directory-exists? p)
+        (unless (set-member? expected (build-path p))
+          (setup-printf
+           "removing"
+           "~a (documentation directory)"
+           (path->relative-string/setup p))
+          (delete-directory/files p)))))
+
   (define (can-build*? docs) (can-build? only-dirs docs))
   (define auto-main? (and auto-start-doc? (ormap can-build*? main-docs)))
   (define auto-user? (and auto-start-doc? (ormap can-build*? user-docs)))
@@ -500,6 +530,7 @@
                           #:when (info-build? i))
                        (add1 count)))
           (make-loop #f (add1 iter))))))
+
   (when infos
     (make-loop #t 0)
     ;; cache info to disk
@@ -662,7 +693,11 @@
          [stamp-file  (sxref-path latex-dest doc "stamp.sxref")]
          [out-file (build-path (doc-dest-dir doc) "index.html")]
          [src-zo (let-values ([(base name dir?) (split-path (doc-src-file doc))])
-                   (build-path base "compiled" (path-add-suffix name ".zo")))]
+                   (define path (build-path base "compiled" (path-add-suffix name ".zo")))
+                   (or (for/or ([root (in-list (current-compiled-file-roots))])
+                         (define p (reroot-path* path root))
+                         (and (file-exists? p) p))
+                       path))]
          [renderer (make-renderer latex-dest doc)]
          [can-run? (can-build? only-dirs doc)]
          [stamp-time (file-or-directory-modify-seconds stamp-file #f (lambda () -inf.0))]
@@ -1106,3 +1141,11 @@
 
 (define (info-deps->doc info)
   (filter-map (lambda (i) (and (info? i) (info-doc i))) (info-deps info)))
+
+(define (reroot-path* base root)
+  (cond
+   [(eq? root 'same) base]
+   [(relative-path? root)
+    (build-path base root)]
+   [else
+    (reroot-path base root)]))

@@ -5,7 +5,7 @@
          "utils.rkt"
          syntax/parse racket/match
          syntax/parse/experimental/reflect
-         (typecheck signatures tc-funapp check-below)
+         (typecheck signatures tc-funapp)
          (types abbrev utils)
          (rep type-rep)
 
@@ -27,14 +27,19 @@
   ;; we just ignore the values, except that it forces arg to return one value
   (pattern (values arg)
     (match expected
-     [#f (single-value #'arg)]
+     [(or #f (tc-any-results:)) (single-value #'arg)]
      [(tc-result1: tp)
       (single-value #'arg expected)]
      [(tc-results: ts)
       (single-value #'arg) ;Type check the argument, to find other errors
       (tc-error/expr #:return expected
         "wrong number of values: expected ~a but got one"
-         (length ts))]))
+         (length ts))]
+     ;; match polydots case and error
+     [(tc-results: ts _ _ dty dbound)
+      (single-value #'arg)
+      (tc-error/expr #:return expected
+        "Expected ~a ..., but got only one value" dty)]))
   ;; handle `values' specially
   (pattern (values . args)
     (match expected

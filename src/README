@@ -39,6 +39,13 @@ build, not a Windows-style build (e.g., Racket's `system-type' procedure
 returns 'unix, not 'windows, and `racket/gui' uses Gtk instead of
 Win32).
 
+Beware that MinGW/Cygwin builds different from the MSVC build when
+SSE-based floating-point math is enabled in the C compiler. In that
+case, Racket includes sets the floating-point mode to extended
+precision to support extflonums, and changing precision may affect
+other libraries. To avoid the floating-point mode change, disable
+extflonum support with `--disable-extflonum'.
+
 ========================================================================
  Compiling for Mac OS X
 ========================================================================
@@ -100,7 +107,7 @@ Quick instructions:
    make install
 
  This will create an in-place installation of Racket and store the
- results of C/C++ compilation in a separate "build" subdirectory, which
+ results of C compilation in a separate "build" subdirectory, which
  is useful if you need to update your sources, delete the build, and
  start from scratch.
 
@@ -170,7 +177,7 @@ Detailed instructions:
     and/or GRacket.  The current directory at the time `configure' is
     run will be used as working space for building the executables
     (independent of `--prefix').  This build directory does not have to
-    be in the source tree, even for an "in-place" build.  It's ok to run
+    be in the source tree, even for an in-place build.  It's ok to run
     `configure' from its own directory (as in the first example above),
     but it's better to pick a separate build directory that is otherwise
     empty (as in the second example).
@@ -367,6 +374,25 @@ directory) has been modified slightly from Boehm's standard
 distribution.  Mostly, the change modify the way that object
 finalization is handled.
 
+Floating point, x87, SSE, Extflonums, and the JIT
+-------------------------------------------------
+
+Pre-processor tests in "sconfig.h" and "scheme.h" attempt to determine
+when the x87 floating-point processor needs to be configured for
+double-precision mode, when JIT can use SSE instructions, and when
+extflonums can be supported because both the JIT and C code use SSE
+for double-precision floating-point while `long double' is available
+for extflonums.
+
+In particular, "scheme.h" looks for __SSE_MATH__ to indicate that gcc
+is compiling floating-point operations as SSE, so be sure to include
+flags like "-mfpmath=sse" or "-mfpmath=387" in CPPFLAGS, and not just
+CFLAGS. See related configuration options below.
+
+The Windows build using MSVC enables extflonum support through a
+MinGW-compiled "longdouble.dll", since MSVC does not support `long
+double' as extended-precision floating point.
+
 Configuration Options
 ---------------------
 
@@ -379,6 +405,9 @@ Some CPP flags control default settings in "racket/sconfig.h":
 
  * MZ_USE_DETERMINSTIC_FUEL - disables use of itimer or pthread for
    Racket thread scheduling.
+
+ * C_COMPILER_USES_SSE - declares that the C compiler is using SSE
+   instructions to implement `double' floating-point operations.
 
 Modifying Racket
 ----------------

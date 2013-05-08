@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -2946,7 +2946,8 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
                       the chaperone may guard access to the function as a field inside
                       the struct. We'll need to keep track of the original object
                       as we unwrap to discover procedure chaperones. */
-                   && (SCHEME_VECTORP(((Scheme_Chaperone *)obj)->redirects)))
+                   && (SCHEME_VECTORP(((Scheme_Chaperone *)obj)->redirects))
+                   && !(SCHEME_VEC_SIZE(((Scheme_Chaperone *)obj)->redirects) & 1))
                /* A raw pair is from scheme_apply_chaperone(), propagating the
                   original object for an applicable structure. */
                || (type == scheme_raw_pair_type)) {
@@ -3016,7 +3017,8 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 
           goto apply_top;
         } else {
-          if (SCHEME_VECTORP(((Scheme_Chaperone *)obj)->redirects))
+          if (SCHEME_VECTORP(((Scheme_Chaperone *)obj)->redirects)
+              && !(SCHEME_VEC_SIZE(((Scheme_Chaperone *)obj)->redirects) & 1))
             obj = ((Scheme_Chaperone *)obj)->prev;
           else if (SAME_TYPE(SCHEME_TYPE(((Scheme_Chaperone *)obj)->redirects), scheme_nack_guard_evt_type))
             /* Chaperone is for evt, not function arguments */
@@ -3289,7 +3291,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 
 	  arg = app->rand;
 
-	  switch (flags >> 3) {
+	  switch ((flags >> 3) & 0x7) {
 	  case SCHEME_EVAL_CONSTANT:
 	    break;
 	  case SCHEME_EVAL_GLOBAL:
@@ -3388,7 +3390,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 
 	  arg = app->rand2;
 
-	  switch (SCHEME_APPN_FLAGS(app) >> 6) {
+	  switch ((SCHEME_APPN_FLAGS(app) >> 6) & 0x7) {
 	  case SCHEME_EVAL_CONSTANT:
 	    break;
 	  case SCHEME_EVAL_GLOBAL:

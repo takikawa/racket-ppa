@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1158,10 +1158,12 @@ void *scheme_top_level_do_worker(void *(*k)(void), int eb, int new_thread, Schem
 #ifdef MZ_PRECISE_GC
   void *external_stack;
 #endif
+  int num_vals = p->ku.k.i1;
+  void *val = p->ku.k.p1;
 
   if (scheme_active_but_sleeping)
     scheme_wake_up();
-
+  
   if (eb) {
     prompt = allocate_prompt(&available_prompt);
     initialize_prompt(p, prompt, PROMPT_STACK(prompt));
@@ -1178,59 +1180,75 @@ void *scheme_top_level_do_worker(void *(*k)(void), int eb, int new_thread, Schem
     external_stack = NULL;
 #endif
 
-  scheme_save_env_stack_w_thread(envss, p);
-  save_dynamic_state(p, &save_dyn_state);
-
-  if (dyn_state) {
-    restore_dynamic_state(dyn_state, p);
-    dyn_state = NULL;
-  }
-
   scheme_create_overflow(); /* needed even if scheme_overflow_jmp is already set */
 
-  if (prompt) {
-    scheme_push_continuation_frame(&cframe);
-    scheme_set_cont_mark(barrier_prompt_key, (Scheme_Object *)prompt);
-  }
-
   save = p->error_buf;
-  p->error_buf = &newbuf;
-
+    
   while (1) {
 
+    scheme_save_env_stack_w_thread(envss, p);
+    save_dynamic_state(p, &save_dyn_state);
+    
+    if (dyn_state) {
+      restore_dynamic_state(dyn_state, p);
+      dyn_state = NULL;
+    }
+    
+    if (prompt) {
+      scheme_push_continuation_frame(&cframe);
+      scheme_set_cont_mark(barrier_prompt_key, (Scheme_Object *)prompt);
+    }
+    
+    p->error_buf = &newbuf;
+
     if (scheme_setjmp(newbuf)) {
+      int again;
+
       p = scheme_current_thread;
+
       if (SAME_OBJ(p->cjs.jumping_to_continuation, (Scheme_Object *)original_default_prompt)) {
         /* an abort to the thread start; act like the default prompt handler,
            but remember to jump again */
-        p->ku.k.i1 = p->cjs.num_vals;
-        p->ku.k.p1 = p->cjs.val;
+        num_vals = p->cjs.num_vals;
+        val = p->cjs.val;
         reset_cjs(&p->cjs);
         k = apply_again_k;
         need_final_abort = 1;
+        again = 1;
       } else {
-        if (!new_thread) {
-          scheme_restore_env_stack_w_thread(envss, p);
+        num_vals = 0;
+        val = NULL;
+        again = 0;
+      }
+
+      if (!new_thread || again) {
+        scheme_restore_env_stack_w_thread(envss, p);
 #ifdef MZ_PRECISE_GC
-          if (scheme_set_external_stack_val)
-            scheme_set_external_stack_val(external_stack);
+        if (scheme_set_external_stack_val)
+          scheme_set_external_stack_val(external_stack);
 #endif
-          if (prompt) {
-            scheme_pop_continuation_frame(&cframe);
+        if (prompt) {
+          scheme_pop_continuation_frame(&cframe);
+          if (!again) {
             if (old_pcc == scheme_prompt_capture_count) {
               /* It wasn't used */
               available_prompt = prompt;
             }
           }
-          restore_dynamic_state(&save_dyn_state, p);
         }
-        scheme_longjmp(*save, 1);
+        restore_dynamic_state(&save_dyn_state, p);
       }
+
+      if (!again)
+        scheme_longjmp(*save, 1);
     } else {
       if (new_thread) {
         /* check for initial break before we do anything */
         scheme_check_break_now();
       }
+
+      p->ku.k.i1 = num_vals;
+      p->ku.k.p1 = val;
       
       v = k();
 
@@ -3219,7 +3237,7 @@ static Scheme_Object *do_chaperone_procedure(const char *name, const char *whati
                                              int is_impersonator, int argc, Scheme_Object *argv[])
 {
   Scheme_Chaperone *px;
-  Scheme_Object *val = argv[0], *orig, *naya, *r;
+  Scheme_Object *val = argv[0], *orig, *naya, *r, *app_mark;
   Scheme_Hash_Tree *props;
 
   if (SCHEME_CHAPERONEP(val))
@@ -3243,14 +3261,35 @@ static Scheme_Object *do_chaperone_procedure(const char *name, const char *whati
                      argv[0]);
 
   props = scheme_parse_chaperone_props(name, 2, argc, argv);
+  if (props) {
+    app_mark = scheme_hash_tree_get(props, scheme_app_mark_impersonator_property);
+    if (app_mark) {
+      /* don't need to keep the property */
+      if (props->count == 1)
+        props = NULL; 
+      else
+        props = scheme_hash_tree_set(props, scheme_app_mark_impersonator_property, NULL);
+      /* app_mark should be (cons mark val) */
+      if (!SCHEME_PAIRP(app_mark))
+        app_mark = scheme_false;
+    } else
+      app_mark = scheme_false;
+  } else
+    app_mark = scheme_false;
 
   px = MALLOC_ONE_TAGGED(Scheme_Chaperone);
   px->iso.so.type = scheme_proc_chaperone_type;
   px->val = val;
   px->prev = argv[0];
   px->props = props;
-  /* put procedure with known-good arity (to speed checking) in a mutable pair: */
-  r = scheme_make_mutable_pair(argv[1], scheme_make_integer(-1));
+
+  /* put procedure with known-good arity (to speed checking) in a vector: */
+  r = scheme_make_vector(3, scheme_make_integer(-1));
+  SCHEME_VEC_ELS(r)[0] = argv[1];
+  SCHEME_VEC_ELS(r)[2] = app_mark;
+
+  /* Vector of odd size for redirects means a procedure chaperone,
+     vector with even slots means a structure chaperone. */
   px->redirects = r;
 
   if (is_impersonator)
@@ -3354,7 +3393,7 @@ Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object 
   Scheme_Cont_Frame_Data cframe;
 
   if (argv == MZ_RUNSTACK) {
-    /* Pushing onto the runstack ensures that `(mcar px->redirects)' won't
+    /* Pushing onto the runstack ensures that `(vector-ref px->redirects 0)' won't
        modify argv. */
     if (MZ_RUNSTACK > MZ_RUNSTACK_START) {
       --MZ_RUNSTACK;
@@ -3386,7 +3425,7 @@ Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object 
     what = "impersonator";
 
   /* Ensure that the original procedure accepts `argc' arguments: */
-  if (argc != SCHEME_INT_VAL(SCHEME_CDR(px->redirects))) {
+  if (argc != SCHEME_INT_VAL(SCHEME_VEC_ELS(px->redirects)[1])) {
     a[0] = px->prev;
     if (!scheme_check_proc_arity(NULL, argc, 0, 0, a)) {
       /* Apply the original procedure, in case the chaperone would accept
@@ -3399,15 +3438,11 @@ Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object 
     }
     /* record that argc is ok, on the grounds that the function is likely
        to be applied to argc arguments again */
-    SCHEME_CDR(px->redirects) = scheme_make_integer(argc);
+    SCHEME_VEC_ELS(px->redirects)[1] = scheme_make_integer(argc);
   }
 
-  if (px->props) {
-    app_mark = scheme_hash_tree_get(px->props, scheme_app_mark_impersonator_property);
-    /* app_mark should be (cons mark val) */
-    if (app_mark && !SCHEME_PAIRP(app_mark))
-      app_mark = NULL;
-  } else
+  app_mark = SCHEME_VEC_ELS(px->redirects)[2];
+  if (SCHEME_FALSEP(app_mark))
     app_mark = NULL;
 
   if (app_mark) {
@@ -3422,7 +3457,7 @@ Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object 
   } else
     need_pop_mark = 0;
 
-  v = SCHEME_CAR(px->redirects);
+  v = SCHEME_VEC_ELS(px->redirects)[0];
   if (SAME_TYPE(SCHEME_TYPE(v), scheme_native_closure_type))
     v = _apply_native(v, argc, argv);
   else
@@ -3482,7 +3517,7 @@ Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object 
                      "  expected: %d or %d\n"
                      "  received: %d",
                      what,
-                     SCHEME_CAR(px->redirects),
+                     SCHEME_VEC_ELS(px->redirects)[0],
                      argc, argc + 1,
                      c);
     return NULL;
@@ -3538,7 +3573,7 @@ Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object 
                        "  wrapper: %V\n"
                        "  received: %V",
                        what,
-                       SCHEME_CAR(px->redirects),
+                       SCHEME_VEC_ELS(px->redirects)[0],
                        post);
 
     if (app_mark) {
@@ -8522,7 +8557,6 @@ Scheme_Lightweight_Continuation *scheme_restore_lightweight_continuation_marks(S
 
   cm_len = lw->saved_lwc->cont_mark_stack_end - lw->saved_lwc->cont_mark_stack_start;
   cm_pos_delta = MZ_CONT_MARK_POS + 2 - lw->saved_lwc->cont_mark_pos_start;
-  MZ_CONT_MARK_POS = lw->saved_lwc->cont_mark_pos_end + cm_pos_delta;
 
   if (cm_len) {
     /* install captured continuation marks, adjusting the pos
@@ -8539,6 +8573,8 @@ Scheme_Lightweight_Continuation *scheme_restore_lightweight_continuation_marks(S
 #endif      
     }
   }
+
+  MZ_CONT_MARK_POS = lw->saved_lwc->cont_mark_pos_end + cm_pos_delta;
 
   return lw;
 }

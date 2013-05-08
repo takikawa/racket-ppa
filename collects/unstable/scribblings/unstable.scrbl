@@ -91,9 +91,11 @@ Keep documentation and tests up to date.
 @include-section["lazy-require.scrbl"]
 @include-section["list.scrbl"]
 @include-section["logging.scrbl"]
+@include-section["macro-testing.scrbl"]
 @include-section["markparam.scrbl"]
 @include-section["match.scrbl"]
 @include-section["open-place.scrbl"]
+@include-section["options.scrbl"]
 @include-section["parameter-group.scrbl"]
 @include-section["pretty.scrbl"]
 @include-section["recontract.scrbl"]
@@ -104,6 +106,8 @@ Keep documentation and tests up to date.
 @include-section["custom-write.scrbl"] ;; Struct Printing
 @include-section["syntax.scrbl"]
 @include-section["../temp-c/scribblings/temp-c.scrbl"]
+@include-section["socket.scrbl"] ;; Unix Domain Sockets
+@include-section["2d.scrbl"]
 
 @;{--------}
 

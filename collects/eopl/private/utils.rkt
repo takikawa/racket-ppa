@@ -1,18 +1,16 @@
+#lang racket/base
 
-(module utils mzscheme
+;; Generative structure definitions:
+(define-struct dt (pred-stx variants) #:mutable)
+(define-struct vt (name-stx predicate-stx accessor-stx field-count) #:mutable)
 
-  ;; Generative structure definitions:
-  (define-struct dt (pred-stx variants))
-  (define-struct vt (name-stx predicate-stx accessor-stx field-count))
-  
-  ;; Helper function:
-  (define (variant-assq name-stx variants)
-    (let loop ([l variants])
-      (if (module-identifier=? name-stx 
-			       (vt-name-stx (car l)))
-	  (car l)
-	  (loop (cdr l)))))
-  
-  (provide (struct dt (pred-stx variants))
-	   (struct vt (name-stx predicate-stx accessor-stx field-count))
-	   variant-assq))
+;; Helper function:
+(define (variant-assq name-stx variants)
+  (let loop ([l variants])
+    (if (free-identifier=? name-stx (vt-name-stx (car l)))
+        (car l)
+        (loop (cdr l)))))
+
+(provide (struct-out dt)
+         (struct-out vt)
+         variant-assq)

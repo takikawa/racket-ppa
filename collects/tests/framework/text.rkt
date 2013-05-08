@@ -149,16 +149,39 @@
      (delete-file tmp-file)
      (equal? x 0))
    (λ ()
+     (queue-sexp-to-mred
+      `(let ([t (new text:basic%)])
+         (send t insert "abc")
+         (send t save-file ,tmp-file)
+         (send t highlight-range 0 3 "red")
+         (call-with-output-file ,tmp-file
+           (lambda (port) (display "x\n" port))
+           #:exists 'truncate)
+         (send t load-file)
+         (length (send t get-highlighted-ranges)))))))
+
+(test
+ 'highlight-range-delegate-1
+ (lambda (x) (equal? x 0))
+ (λ ()
    (queue-sexp-to-mred
-    `(let ([t (new text:basic%)])
+    `(let ([t (new text:delegate%)])
        (send t insert "abc")
-       (send t save-file ,tmp-file)
-       (send t highlight-range 0 3 "red")
-       (call-with-output-file ,tmp-file
-         (lambda (port) (display "x\n" port))
-         #:exists 'truncate)
-       (send t load-file)
-       (length (send t get-highlighted-ranges)))))))
+       (send t highlight-range 1 2 "red")
+       (send t unhighlight-range 1 2 "red")
+       (length (send t get-highlighted-ranges))))))
+
+(test
+ 'highlight-range-delegate-1
+ (lambda (x) (equal? x 0))
+ (λ ()
+   (queue-sexp-to-mred
+    `(let ([t (new text:delegate%)])
+       (send t set-delegate (new text:basic%))
+       (send t insert "abc")
+       (send t highlight-range 1 2 "red")
+       (send t unhighlight-range 1 2 "red")
+       (length (send t get-highlighted-ranges))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

@@ -381,12 +381,11 @@
 	       (if big-icon
 		   (list (bitmap->pixbuf big-icon))
 		   (cdr (car (force icon-pixbufs+glist))))])
-	(atomically
-	 (let ([l (for/fold ([l #f]) ([i (cons small-pixbuf
-					       big-pixbufs)])
-		    (g_list_insert l i -1))])
-	   (gtk_window_set_icon_list gtk l)
-	   (g_list_free l))))))
+          (atomically
+           (let ([l (for/fold ([l #f]) ([i (cons small-pixbuf big-pixbufs)])
+                      (g_list_insert l i -1))])
+             (gtk_window_set_icon_list gtk l)
+             (g_list_free l))))))
     
     (define child-has-focus? #f)
     (define reported-activate #f)
@@ -584,10 +583,12 @@
 (define (tell-all-frames-signal-changed n)
   (define frames (for/list ([f (in-hash-keys all-frames)]) f))
   (for ([f (in-hash-keys all-frames)])
-    (parameterize ([current-eventspace (send f get-eventspace)])
-      (queue-callback
-       (λ () 
-         (send f display-changed))))))
+    (define e (send f get-eventspace))
+    (unless (eventspace-shutdown? e)
+      (parameterize ([current-eventspace e])
+        (queue-callback
+         (λ () 
+           (send f display-changed)))))))
 
 (define-signal-handler 
   connect-monitor-changed-signal

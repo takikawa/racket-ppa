@@ -148,7 +148,7 @@ combination with @racket[author].}
 
 @section{Blocks}
 
-@defproc[(para [#:style style (or/c style? string? symbol? #f)] 
+@defproc[(para [#:style style (or/c style? string? symbol? #f) #f] 
                [pre-content pre-content?] ...) paragraph?]{
 
  Creates a @tech{paragraph} containing the @tech{decode}d
@@ -161,7 +161,7 @@ combination with @racket[author].}
   @racket[style] arguments.)}
 
 
-@defproc[(nested [#:style style (or/c style? string? symbol? #f)] 
+@defproc[(nested [#:style style (or/c style? string? symbol? #f) #f] 
                  [pre-flow pre-flow?] ...) nested-flow?]{
 
  Creates a @tech{nested flow} containing the @tech{decode}d
@@ -373,9 +373,10 @@ See also @racket[verbatim].}
  @racket[pre-content] serves as the alternate text for contexts where
  the image cannot be displayed.
 
- The path is relative to the current directory, which is set by
- @exec{setup-plt} and @exec{scribble} to the directory of the main
- document file. The @racket[path] argument also can be a result of
+ If @racket[path] is a relative path, it is relative to the current
+ directory, which is set by @exec{raco setup} and @exec{scribble} to
+ the directory of the main document file. Instead of a path or string,
+ the @racket[path] argument can be a result of
  @racket[path->main-collects-relative].
  
  The strings in @racket[suffixes] are filtered to those supported by

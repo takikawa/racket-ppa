@@ -220,6 +220,7 @@
              install-file
              get-dest-directory
              format-number
+             number-depth
              quiet-table-of-contents
              extract-part-style-files
              extract-version
@@ -280,7 +281,7 @@
       (map (lambda (d fn)
              (parameterize ([current-output-file fn]
                             [current-top-part d])
-               (collect-part d #f ci null)))
+               (collect-part d #f ci null 1)))
            ds
            fns))
 
@@ -516,11 +517,18 @@
     (define/public (nearly-top? d ri top)
       #f)
 
+    (define hidden-memo (make-weak-hasheq))
+    (define/public (all-toc-hidden? p)
+      (hash-ref hidden-memo
+                p
+                (lambda ()
+                  (define h? (and (part-style? p 'toc-hidden)
+                                  (andmap (lambda (s) (all-toc-hidden? s))
+                                          (part-parts p))))
+                  (hash-set! hidden-memo p h?)
+                  h?)))
+
     (define/private (render-onthispage-contents d ri top box-class sections-in-toc?)
-      (if (ormap (lambda (p) (or (part-whole-page? p ri)
-                                 (part-style? p 'toc-hidden)))
-                 (part-parts d))
-        null
         (let ([nearly-top? (lambda (d) 
                              ;; If ToC would be collapsed, then 
                              ;; no section is nearly the top
@@ -558,19 +566,23 @@
                            blocks))
              (table-blockss table)))
           (define ps
-            ((if (nearly-top? d) values cdr)
-             (let flatten ([d d][prefixes null][top? #t])
+            ((if (nearly-top? d) values (lambda (p) (if (pair? p) (cdr p) null)))
+             (let flatten ([d d] [prefixes null] [top? #t])
                (let ([prefixes (if (and (not top?) (part-tag-prefix d))
                                    (cons (part-tag-prefix d) prefixes)
                                    prefixes)])
                  (append*
                   ;; don't include the section if it's in the TOC
-                  (if (nearly-top? d) null (list (cons d prefixes)))
+                  (if (or (nearly-top? d) 
+                          (part-style? d 'toc-hidden))
+                      null 
+                      (list (cons d prefixes)))
                   ;; get internal targets:
                   (map (lambda (v) (cons v prefixes)) (append-map block-targets (part-blocks d)))
                   (map (lambda (p) (if (or (part-whole-page? p ri) 
-                                           (part-style? p 'toc-hidden))
-                                       null 
+                                           (and (part-style? p 'toc-hidden)
+                                                (all-toc-hidden? p)))
+                                       null
                                        (flatten p prefixes #f)))
                        (part-parts d)))))))
           (define any-parts? (ormap (compose part? car) ps))
@@ -623,7 +635,7 @@
                                                         "???")
                                                     (element-content p))
                                                 d ri)))))))))
-                         ps))))))))
+                         ps)))))))
 
     (define/public (extract-part-body-id d ri)
       (or (ormap (lambda (v)
@@ -655,7 +667,7 @@
                [title (cond [(part-title-content d)
                              => (lambda (c)
                                   `(title ,@(format-number number '(nbsp))
-                                          ,(content->string c this d ri)))]
+                                          ,(content->string (strip-aux c) this d ri)))]
                             [else `(title)])])
           (unless (bytes? style-file)
             (unless (lookup-path style-file alt-paths) 
@@ -687,7 +699,6 @@
                           (append (extract-part-style-files
                                    d
                                    ri
-                                   'css
                                    (lambda (p) (part-whole-page? p ri))
                                    css-addition?
                                    css-addition-path)
@@ -703,7 +714,6 @@
                           (extract-part-style-files
                            d
                            ri
-                           'css
                            (lambda (p) (part-whole-page? p ri))
                            js-addition?
                            js-addition-path))
@@ -916,7 +926,7 @@
                                                 (add-current-tag-prefix
                                                  (tag-key t ri))))))))
                     (part-tags d))]
-              [else `((,(case (length number)
+              [else `((,(case (number-depth number)
                           [(0) 'h2]
                           [(1) 'h3]
                           [(2) 'h4]
@@ -1395,12 +1405,12 @@
            (if m
              (list* (substring i 0 (cdar m))
                     ;; Most browsers wrap after a hyphen. The one that
-                    ;; doesn't, Firefox, pays attention to wbr. Some
+                    ;; doesn't, Firefox, pays attention to wbr.  Some
                     ;; browsers ignore wbr, but at least they don't do
                     ;; strange things with it.
                     (if (equal? #\- (string-ref i (caar m)))
-                      '(wbr)
-                      `(span ([class "mywbr"]) " "))
+                        '(wbr)
+                        '(span ([class "mywbr"]) " " nbsp))
                     (render-other (substring i (cdar m)) part ri))
              (ascii-ize i)))]
         [(symbol? i)
@@ -1465,7 +1475,8 @@
              part-whole-page?
              format-number
              install-extra-files
-             report-output?)
+             report-output?
+             all-toc-hidden?)
 
     (define/override (get-suffix) #"")
 
@@ -1542,7 +1553,7 @@
                  orig-s))
         (hash-set! (current-part-files) s #t)))
 
-    (define/override (collect-part d parent ci number)
+    (define/override (collect-part d parent ci number sub-init-number)
       (let ([prev-sub (collecting-sub)])
         (parameterize ([collecting-sub (if (part-style? d 'toc)
                                            1 
@@ -1555,8 +1566,8 @@
                                               filename)])
               (check-duplicate-filename full-filename)
               (parameterize ([current-output-file full-filename])
-                (super collect-part d parent ci number)))
-            (super collect-part d parent ci number)))))
+                (super collect-part d parent ci number sub-init-number)))
+            (super collect-part d parent ci number sub-init-number)))))
 
     (define/override (render ds fns ri)
       (map (lambda (d fn)
