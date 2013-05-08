@@ -21,8 +21,8 @@
 
 (provide/cond-contract [parse-type (syntax? . c:-> . Type/c)]
                        [parse-type/id (syntax? c:any/c . c:-> . Type/c)]
-                       [parse-tc-results (syntax? . c:-> . tc-results?)]
-                       [parse-tc-results/id (syntax? c:any/c . c:-> . tc-results?)])
+                       [parse-tc-results (syntax? . c:-> . tc-results/c)]
+                       [parse-tc-results/id (syntax? c:any/c . c:-> . tc-results/c)])
 
 (provide star ddd/bound)
 (define enable-mu-parsing (make-parameter #t))
@@ -51,6 +51,8 @@
   ;(printf "parse-all-type: ~a \n" (syntax->datum stx))
   (syntax-parse stx #:literals (t:All)
     [((~and kw t:All) (vars:id ... v:id dd:ddd) . t)
+     (when (check-duplicate-identifier (syntax->list #'(vars ... v)))
+       (tc-error "All: duplicate type variable or index"))
      (let* ([vars (map syntax-e (syntax->list #'(vars ...)))]
             [v (syntax-e #'v)])
        (add-disappeared-use #'kw)
@@ -58,6 +60,8 @@
          (extend-tvars vars
            (make-PolyDots (append vars (list v)) (parse-all-body #'t)))))]
     [((~and kw t:All) (vars:id ...) . t)
+     (when (check-duplicate-identifier (syntax->list #'(vars ...)))
+       (tc-error "All: duplicate type variable"))
      (let* ([vars (map syntax-e (syntax->list #'(vars ...)))])
        (add-disappeared-use #'kw)
        (extend-tvars vars
@@ -137,7 +141,7 @@
       #:literals (t:Class t:Refinement t:Instance t:List t:List* cons t:pred t:-> : case-lambda t:case->
                   t:Rec t:U t:All t:Opaque t:Parameter t:Vector quote t:Struct)
       [t
-       #:declare t (3d Type?)
+       #:declare t (3d Type/c?)
        (attribute t.datum)]
       [(fst . rst)
        #:fail-unless (not (syntax->list #'rst)) #f
@@ -374,7 +378,23 @@
            [(Error:) Err]
            [_ Err]))]
       [t:atom
-       (-val (syntax-e #'t))]
+       ;; Integers in a "grey area", that is, integers whose runtime type is
+       ;; platform-dependent, cannot be safely assigned singleton types.
+       ;; Short story: (subtype (-val 10000000000000) -Fixnum) has no safe
+       ;;   answer. It's not a fixnum on 32 bits, and saying it's not a fixnum
+       ;;   causes issues with type-dead code detection.
+       ;; Long story: See email trail for PR13501 and #racket IRC logs from
+       ;;   Feb 11 2013.
+       (let ([val (syntax-e #'t)])
+         (when (and (exact-integer? val)
+                    ;; [min-64bit-fixnum, min-portable-fixnum)
+                    (or (and (>= val (- (expt 2 62)))
+                             (<  val (- (expt 2 30))))
+                        ;; (max-portable-index, max-64bit-fixnum]
+                        (and (>  val (sub1 (expt 2 28)))
+                             (<= val (sub1 (expt 2 62))))))
+           (tc-error "non-portable fixnum singleton types are not valid types: ~a" val))
+         (-val val))]
       [_ (tc-error "not a valid type: ~a" (syntax->datum stx))])))
 
 (define (parse-list-type stx)
@@ -414,17 +434,17 @@
            (if (bound-tvar? var)
                (tc-error/stx #'bound "Used a type variable (~a) not bound with ... as a bound on a ..." var)
                (tc-error/stx #'bound "Type variable ~a is unbound" var)))
-         (make-ValuesDots (map parse-type (syntax->list #'(tys ...)))
-                          (extend-tvars (list var)
-                            (parse-type #'dty))
-                          var))]
+         (-values-dots (map parse-type (syntax->list #'(tys ...)))
+                       (extend-tvars (list var)
+                         (parse-type #'dty))
+                       var))]
       [((~and kw (~or t:Values values)) tys ... dty _:ddd)
        (add-disappeared-use #'kw)
        (let ([var (infer-index stx)])
-         (make-ValuesDots (map parse-type (syntax->list #'(tys ...)))
-                          (extend-tvars (list var)
-                              (parse-type #'dty))
-                            var))]
+         (-values-dots (map parse-type (syntax->list #'(tys ...)))
+                       (extend-tvars (list var)
+                         (parse-type #'dty))
+                       var))]
       [((~and kw (~or t:Values values)) tys ...)
        (add-disappeared-use #'kw)
        (-values (map parse-type (syntax->list #'(tys ...))))]

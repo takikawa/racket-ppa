@@ -285,8 +285,8 @@
 (define module-type-num 26)
 (define inline-variants-type-num 27)
 (define variable-type-num 35)
-(define prefix-type-num 113)
-(define free-id-info-type-num 162)
+(define prefix-type-num 114)
+(define free-id-info-type-num 164)
 
 (define-syntax define-enum
   (syntax-rules ()
@@ -584,6 +584,7 @@
   (case type
     [(flonum) 1]
     [(fixnum) 2]
+    [(extflonum) 3]
     [else (error 'type->index "unknown type: ~e" type)]))
 
 (define (out-anything v out)
@@ -994,7 +995,7 @@
 (define (convert-module mod-form)
   (match mod-form
     [(struct mod (name srcname self-modidx prefix provides requires body syntax-bodies unexported 
-                       max-let-depth dummy lang-info internal-context pre-submodules post-submodules))
+                       max-let-depth dummy lang-info internal-context flags pre-submodules post-submodules))
      (let* ([lookup-req (lambda (phase)
                           (let ([a (assq phase requires)])
                             (if a
@@ -1090,6 +1091,7 @@
             [l (cons lang-info l)] ; lang-info
             [l (cons (map convert-module post-submodules) l)]
             [l (cons (map convert-module pre-submodules) l)]
+            [l (cons (if (memq 'cross-phase flags) #t #f) l)]
             [l (cons self-modidx l)]
             [l (cons srcname l)]
             [l (cons (if (pair? name) (car name) name) l)]

@@ -69,8 +69,8 @@ and @racketvalfont{-nan.f} is the same as @racket[+nan.f].
 
 Calculations with infinites produce results consistent with IEEE
 double- or single-precision floating point where IEEE specifies the result; in
-cases where IEEE provides no specification, such as @racket[(angle
-+inf.0+inf.0i)], the result corresponds to the limit approaching
+cases where IEEE provides no specification,
+the result corresponds to the limit approaching
 infinity, or @racket[+nan.0] or @racket[+nan.f] if no such limit exists.
 
 A @deftech{fixnum} is an exact integer whose two's complement
@@ -511,11 +511,12 @@ Returns the principal @as-index{square root} of @racket[z].  The
 
 @defproc[(integer-sqrt [n integer?]) complex?]{
 
-Returns @racket[(floor (sqrt n))] for positive @racket[n]. For
+Returns @racket[(floor (sqrt n))] for positive @racket[n].  The
+ result is exact if @racket[n] is exact.  For
  negative @racket[n], the result is @racket[(* (integer-sqrt (- n))
  0+i)].
 
-@mz-examples[(integer-sqrt 4.0) (integer-sqrt 5)]}
+@mz-examples[(integer-sqrt 4.0) (integer-sqrt 5) (integer-sqrt -4.0) (integer-sqrt -4)]}
 
 
 @defproc[(integer-sqrt/remainder [n integer?])
@@ -1196,6 +1197,7 @@ Returns @racket[#t] if @racket[z] is @racket[+inf.0], @racket[-inf.0], @racket[+
 
 @include-section["flonums.scrbl"]
 @include-section["fixnums.scrbl"]
+@include-section["extflonums.scrbl"]
 
 @; ----------------------------------------------------------------------
 

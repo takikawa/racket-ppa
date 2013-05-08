@@ -13,8 +13,7 @@
 For information about TCP in general, see @italic{TCP/IP Illustrated,
  Volume 1} by W. Richard Stevens.
 
-@defproc[(tcp-listen [port-no (and/c exact-nonnegative-integer?
-                                     (integer-in 0 65535))]
+@defproc[(tcp-listen [port-no (integer-in 0 65535)]
                      [max-allow-wait exact-nonnegative-integer? 4]
                      [reuse? any/c #f]
                      [hostname (or/c string? #f) #f]) 
@@ -68,12 +67,9 @@ A TCP listener is @tech{ready for synchronization} when
 
 
 @defproc[(tcp-connect [hostname string?]
-                      [port-no (and/c exact-nonnegative-integer?
-                                     (integer-in 1 65535))]
+                      [port-no (integer-in 1 65535)]
                       [local-hostname (or/c string? #f) #f]
-                      [local-port-no (or/c (and/c exact-nonnegative-integer?
-                                                  (integer-in 1 65535))
-                                           #f)
+                      [local-port-no (or/c (integer-in 1 65535) #f)
                                      #f])
           (values input-port? output-port?)]{
 
@@ -125,12 +121,9 @@ If a connection cannot be established by @racket[tcp-connect], the
 @exnraise[exn:fail:network].}
 
 @defproc[(tcp-connect/enable-break [hostname string?]
-                      [port-no (and/c exact-nonnegative-integer?
-                                     (integer-in 1 65535))]
+                      [port-no (integer-in 1 65535)]
                       [local-hostname (or/c string? #f) #f]
-                      [local-port-no (or/c (and/c exact-nonnegative-integer?
-                                                  (integer-in 1 65535))
-                                           #f)])
+                      [local-port-no (or/c (integer-in 1 65535) #f)])
           (values input-port? output-port?)]{
 
 Like @racket[tcp-connect], but breaking is enabled (see
@@ -271,7 +264,7 @@ For information about UDP in general, see @italic{TCP/IP Illustrated,
 Volume 1} by W. Richard Stevens.
 
 @defproc[(udp-open-socket [family-hostname (or/c string? #f) #f]
-                          [family-port-no (or/c string? #f) #f])
+                          [family-port-no (or/c (integer-in 1 65535) #f) #f])
          udp?]{
 
 Creates and returns a @deftech{UDP socket} to send and receive
@@ -292,8 +285,8 @@ non-@racket[#f], then the socket's protocol family is IPv4.}
 
 @defproc[(udp-bind! [udp-socket udp?]
                     [hostname-string (or/c string? #f)]
-                    [port-no (and/c exact-nonnegative-integer?
-                                    (integer-in 0 65535))])
+                    [port-no (integer-in 0 65535)]
+		    [reuse? any/c #f])
          void?]{
 
 Binds an unbound @racket[udp-socket] to the local port number
@@ -325,13 +318,16 @@ socket is later used again in a send, then the later send may change
 the socket's automatic binding.
 
 If @racket[udp-socket] is already bound or closed, the
-@exnraise[exn:fail:network].}
+@exnraise[exn:fail:network].
 
+If the @racket[reuse?] argument is true, then @racket[udp-bind!] will
+set the @tt{SO_REUSEADDR} socket option before binding, permitting the
+sharing of access to a UDP port between many processes on a single
+machine when using UDP multicast.}
 
 @defproc[(udp-connect! [udp-socket udp?]
                        [hostname-string (or/c string? #f)]
-                       [port-no (or/c (and/c exact-nonnegative-integer?
-                                             (integer-in 1 65535))
+                       [port-no (or/c (integer-in 1 65535)
                                       #f)])
          void?]{
 
@@ -355,8 +351,7 @@ If @racket[udp-socket] is closed, the @exnraise[exn:fail:network].}
 
 @defproc[(udp-send-to [udp-socket udp?]
                       [hostname string?]
-                      [port-no (and/c exact-nonnegative-integer?
-                                      (integer-in 1 65535))]
+                      [port-no (integer-in 1 65535)]
                       [bstr bytes?]
                       [start-pos exact-nonnegative-integer? 0]
                       [end-pos exact-nonnegative-integer? (bytes-length bstr)]) 
@@ -390,8 +385,7 @@ connected, and the datagram goes to the connection target.  If
 
 @defproc[(udp-send-to* [udp-socket udp?]
                        [hostname string?]
-                       [port-no (and/c exact-nonnegative-integer?
-                                       (integer-in 1 65535))]
+                       [port-no (integer-in 1 65535)]
                        [bstr bytes?]
                        [start-pos exact-nonnegative-integer? 0]
                        [end-pos exact-nonnegative-integer? (bytes-length bstr)]) 
@@ -412,8 +406,7 @@ never blocks and returns @racket[#f] or @racket[#t].}
 
 @defproc[(udp-send-to/enable-break [udp-socket udp?]
                       [hostname string?]
-                      [port-no (and/c exact-nonnegative-integer?
-                                      (integer-in 1 65535))]
+                      [port-no (integer-in 1 65535)]
                       [bstr bytes?]
                       [start-pos exact-nonnegative-integer? 0]
                       [end-pos exact-nonnegative-integer? (bytes-length bstr)]) 
@@ -528,8 +521,7 @@ would block.}
 
 @defproc[(udp-send-to-evt [udp-socket udp?]
                       [hostname string?]
-                      [port-no (and/c exact-nonnegative-integer?
-                                      (integer-in 1 65535))]
+                      [port-no (integer-in 1 65535)]
                       [bstr bytes?]
                       [start-pos exact-nonnegative-integer? 0]
                       [end-pos exact-nonnegative-integer? (bytes-length bstr)]) 
@@ -596,3 +588,69 @@ string for the remote machine's address, and an exact integer between
 or @racket[0] if the socket is unconnected.
 
 If the given port has been closed, the @exnraise[exn:fail:network].}
+
+
+@deftogether[(
+@defproc[(udp-multicast-join-group! [udp-socket udp?]
+				    [multicast-addr string?]
+				    [hostname (or/c string? #f)]) void?]
+@defproc[(udp-multicast-leave-group! [udp-socket udp?]
+				     [multicast-addr string?]
+				     [hostname (or/c string? #f)]) void?]
+)]{
+Adds or removes @racket[udp-socket] to a named multicast group.
+
+The @racket[multicast-addr] argument must be a valid IPv4 multicast
+IP address; for example, @racket["224.0.0.251"] is the appropriate
+address for the mDNS protocol. The @racket[hostname] argument selects the
+interface that the socket uses to receive (not send) multicast datagrams;
+if @racket[hostname] is @racket[#f] or @racket["0.0.0.0"], the kernel
+selects an interface automatically.
+
+Leaving a group requires the same @racket[multicast-addr] and
+@racket[hostname] arguments that were used to join the group.}
+
+
+
+@deftogether[(
+@defproc[(udp-multicast-interface [udp-socket udp?]) string?]
+@defproc[(udp-multicast-set-interface! [udp-socket udp?]
+				       [hostname (or/c string? #f)])
+	void?]
+)]{
+
+Retrieves or sets the interface that @racket[udp-socket] uses to
+send (not receive) multicast datagrams. If the result or @racket[hostname] is either
+@racket[#f] or @racket["0.0.0.0"], the kernel automatically selects an
+interface when a multicast datagram is sent.}
+
+
+@deftogether[(
+@defproc[(udp-multicast-set-loopback! [udp-socket udp?] [loopback? any/c]) void?]
+@defproc[(udp-multicast-loopback? [udp-socket udp?]) boolean?]
+)]{
+
+@margin-note{Loopback settings correspond to the
+@as-index{@tt{IP_MULTICAST_LOOP}} setting of the socket.}
+
+Sets or checks whether @racket[udp-socket] receives its own multicast
+datagrams: a @racket[#t] result or a true value for @racket[loopback?]
+indicates that self-receipt is enabled, and @racket[#f] indicates that
+self-receipt is disabled.}
+
+
+@deftogether[(
+@defproc[(udp-multicast-set-ttl! [udp-socket udp?] [ttl byte?]) void?]
+@defproc[(udp-multicast-ttl [udp-socket udp?]) byte?]
+)]{
+
+@margin-note{Time-to-live settings correspond to the
+@as-index{@tt{IP_MULTICAST_TTL}} setting of the socket.}
+
+Sets or retrieves the current time-to-live setting of
+@racket[udp-socket].
+
+The time-to-live setting should almost always be 1, and it is
+important that this number is as low as possible. In fact, these
+functions seldom should be used at all. See the documentation for your
+platform's IP stack.}

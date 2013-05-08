@@ -14,7 +14,9 @@
            'horizontal-left-align
            'horizontal))
 
-(provide reduction-rule-style/c render-term term->pict)
+(provide reduction-rule-style/c render-term term->pict
+         term->pict/pretty-write
+         render-term/pretty-write)
 
 (provide/contract
  [render-reduction-relation
@@ -82,7 +84,7 @@
   (parameter/c reduction-rule-style/c)]
  [arrow-space (parameter/c natural-number/c)]
  [label-space (parameter/c natural-number/c)]
- [metafunction-cases (parameter/c (or/c #f (and/c pair? (listof (and/c integer? (or/c zero? positive?))))))]
+ [metafunction-cases (parameter/c (or/c #f (and/c pair? (listof (or/c exact-nonnegative-integer? string?)))))]
  [judgment-form-cases (parameter/c (or/c #f (and/c (listof (or/c exact-nonnegative-integer? string?))
                                                    pair?)))]
  [metafunction-pict-style 

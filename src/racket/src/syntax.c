@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -2879,7 +2879,7 @@ static Scheme_Object *stx_content(Scheme_Object *o, int add_taint, int keep)
     } else if (SCHEME_HASHTRP(v)) {
       Scheme_Hash_Tree *ht = (Scheme_Hash_Tree *)v, *ht2;
       Scheme_Object *key, *val;
-      int i;
+      mzlonglong i;
 
       ht2 = scheme_make_hash_tree(SCHEME_HASHTR_FLAGS(ht) & 0x3);
 
@@ -3161,7 +3161,7 @@ static Scheme_Object *get_old_module_env(Scheme_Object *stx)
 
 #define EXPLAIN_RESOLVE 0
 #if EXPLAIN_RESOLVE
-int scheme_explain_resolves = 0;
+int scheme_explain_resolves = 1;
 # define EXPLAIN(x) if (scheme_explain_resolves) { x; }
 # define EXPLAIN_FOR_ID "..."
 #else
@@ -4240,6 +4240,7 @@ static Scheme_Object *resolve_env(Scheme_Object *a, Scheme_Object *orig_phase,
 
       for (ri = istart; ri < iend; ri++) {
 	renamed = SCHEME_VEC_ELS(rename)[2+ri];
+        EXPLAIN(fprintf(stderr, " ? %s @ %p\n", SCHEME_SYM_VAL(SCHEME_STX_SYM(renamed)), rename));
 	if (SAME_OBJ(SCHEME_STX_VAL(a), SCHEME_STX_SYM(renamed))) {
 	  int same;
 
@@ -4257,7 +4258,7 @@ static Scheme_Object *resolve_env(Scheme_Object *a, Scheme_Object *orig_phase,
                 free_id_rename = scheme_void;
 	      same = 1;
               no_lexical = 1; /* simplified table always has final result */
-              EXPLAIN(fprintf(stderr, "%d Targes %s <- %s %p\n", depth,
+              EXPLAIN(fprintf(stderr, "%d Target %s <- %s %p\n", depth,
                               scheme_write_to_string(envname, 0),
                               scheme_write_to_string(other_env, 0),
                               free_id_rename));
@@ -5452,7 +5453,7 @@ static Scheme_Object *simplify_lex_renames(Scheme_Object *wraps, Scheme_Hash_Tab
   v2l = scheme_null;
   v2rdl = NULL;
 
-  EXPLAIN_S(fprintf(stderr, "[in simplify]\n"));
+  EXPLAIN_S(fprintf(stderr, "[in simplify %s]\n", scheme_write_to_string(stx_datum, NULL)));
 
   EXPLAIN_R(printf("Simplifying %p %s\n", lex_cache, scheme_write_to_string(stx_datum, NULL)));
 
@@ -5967,6 +5968,13 @@ static Scheme_Object *simplify_lex_renames(Scheme_Object *wraps, Scheme_Hash_Tab
           }
         }
 
+        EXPLAIN_S({
+            int k;
+            for (k = 2; k < SCHEME_VEC_SIZE(v2); k++) {
+              fprintf(stderr, " %p[%d]: %s\n", v2, k, scheme_write_to_string(SCHEME_VEC_ELS(v2)[k], NULL));
+            }
+          });
+
 	v2l = CONS(v2, v2l);
 	v2rdl = scheme_make_raw_pair((Scheme_Object *)v2_rib_delims, v2rdl);
       }
@@ -6395,6 +6403,7 @@ static Scheme_Object *wraps_to_datum(Scheme_Object *stx_datum,
               stack = CONS(la, stack);
             else
               stack = add_rename_to_stack((Module_Renames *)la, stack, mt, a);
+            stack_size++;
           }
         }
       }
@@ -6744,7 +6753,7 @@ static Scheme_Object *syntax_to_datum_inner(Scheme_Object *o,
   } else if (SCHEME_HASHTRP(v)) {
     Scheme_Hash_Tree *ht = (Scheme_Hash_Tree *)v, *ht2;
     Scheme_Object *key, *val;
-    int i;
+    mzlonglong i;
     
     ht2 = scheme_make_hash_tree(SCHEME_HASHTR_FLAGS(ht) & 0x3);
     
@@ -7627,7 +7636,7 @@ static Scheme_Object *datum_to_syntax_inner(Scheme_Object *o,
   } else if (SCHEME_CHAPERONE_HASHTRP(o)) {
     Scheme_Hash_Tree *ht1, *ht2;
     Scheme_Object *key, *val;
-    int i;
+    mzlonglong i;
 
     if (SCHEME_NP_CHAPERONEP(o))
       ht1 = (Scheme_Hash_Tree *)SCHEME_CHAPERONE_VAL(o);
@@ -7880,7 +7889,7 @@ static void simplify_syntax_inner(Scheme_Object *o,
   } else if (SCHEME_HASHTRP(v)) {
     Scheme_Hash_Tree *ht = (Scheme_Hash_Tree *)v;
     Scheme_Object *key, *val;
-    int i;
+    mzlonglong i;
     
     i = scheme_hash_tree_next(ht, -1);
     while (i != -1) {

@@ -114,7 +114,7 @@
   (match mod-form
     [(struct mod (name srcname self-modidx mod-prefix provides requires body syntax-bodies
                        unexported mod-max-let-depth dummy lang-info internal-context
-                       pre-submodules post-submodules))
+                       flags pre-submodules post-submodules))
      (define toplevel-offset (length (prefix-toplevels top-prefix)))
      (define topsyntax-offset (length (prefix-stxs top-prefix)))
      (define lift-offset (prefix-num-lifts top-prefix))
@@ -134,18 +134,18 @@
                   (list-ref toplevel-remap n)))
      (unless (= (length toplevel-remap)
                 (length mod-toplevels))
-       (error 'merge-module "Not remapping everything: ~S ~S" 
-              mod-toplevels toplevel-remap))    
+       (error 'merge-module "Not remapping everything: ~S ~S"
+              mod-toplevels toplevel-remap))
      (log-debug (format "[~S] Incrementing toplevels by ~a"
-              name
-              toplevel-offset))
+                        name
+                        toplevel-offset))
      (log-debug (format "[~S] Incrementing lifts by ~a"
-              name
-              lift-offset))
+                        name
+                        lift-offset))
      (log-debug (format "[~S] Filtered mod-vars from ~a to ~a" 
-              name
-              (length mod-toplevels)
-              (length new-mod-toplevels)))
+                        name
+                        (length mod-toplevels)
+                        (length new-mod-toplevels)))
      (values (max max-let-depth mod-max-let-depth)
              (merge-prefix top-prefix new-mod-prefix)
              (lambda (top-prefix)

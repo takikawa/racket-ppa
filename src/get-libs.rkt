@@ -16,11 +16,13 @@
        [win32/i386
         ["iconv.dll" 892928]
         ["libeay32.dll" 1099776]
-        ["ssleay32.dll" 239104]]
+        ["ssleay32.dll" 239104]
+        ["longdouble.dll" 114786]]
        [win32/x86_64
         ["libiconv-2.dll" 1378028]
         ["libeay32.dll" 1503232]
-        ["ssleay32.dll" 309760]]]
+        ["ssleay32.dll" 309760]
+        ["longdouble.dll" 125176]]]
      ;; Math Libraries
      '[math
        [i386-macosx
@@ -65,7 +67,7 @@
         ["libglib-2.0.0.dylib" 1689952]
         ["libpango-1.0.0.dylib" 392432]
         ["libgmodule-2.0.0.dylib" 19768]
-        ["libpangocairo-1.0.0.dylib" 96640]
+        ["libpangocairo-1.0.0.dylib" 97352]
         ["libgobject-2.0.0.dylib" 438192]
         ["libpixman-1.0.dylib" 633368]
         ["libgthread-2.0.0.dylib" 8592]
@@ -100,7 +102,7 @@
          ["libgobject-2.0-0.dll" 316586]
          ["libgmodule-2.0-0.dll" 31692]
          ["libpangocairo-1.0-0.dll" 94625]
-         ["libpangowin32-1.0-0.dll" 102210]
+         ["libpangowin32-1.0-0.dll" 143647]
          ["libpangoft2-1.0-0.dll" 679322]]
        (if (getenv "PLT_WIN_GTK")
            '(["libatk-1.0-0.dll" 153763]
@@ -126,7 +128,7 @@
         ["libgmodule-2.0-0.dll" 119538]
         ["libgthread-2.0-0.dll" 126615]
         ["libpangocairo-1.0-0.dll" 185168]
-        ["libpangowin32-1.0-0.dll" 192656]
+        ["libpangowin32-1.0-0.dll" 151879]
         ["libpangoft2-1.0-0.dll" 1188615]]]
      ;; Database libraries
      '[db

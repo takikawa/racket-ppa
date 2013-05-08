@@ -4,6 +4,7 @@
                        syntax/parse/private/keywords
                        syntax/parse/private/residual ;; keep abs. path
                        syntax/parse/private/runtime)
+         racket/list
          racket/contract/base
          "minimatch.rkt"
          syntax/private/id-table
@@ -61,6 +62,9 @@
  [check-conventions-rules
   (-> syntax? syntax?
       (listof (list/c regexp? any/c)))]
+ [check-datum-literals-list
+  (-> syntax? syntax?
+      (listof den:datum-lit?))]
  [check-attr-arity-list
   (-> syntax? syntax?
       (listof sattr?))])
@@ -220,11 +224,12 @@
 ;; get-decls : chunks -> (values DeclEnv (listof syntax))
 (define (get-decls chunks strict?)
   (define lits (options-select-value chunks '#:literals #:default null))
+  (define datum-lits (options-select-value chunks '#:datum-literals #:default null))
   (define litsets (options-select-value chunks '#:literal-sets #:default null))
   (define convs (options-select-value chunks '#:conventions #:default null))
   (define localconvs (options-select-value chunks '#:local-conventions #:default null))
   (define literals
-    (append-lits+litsets lits litsets))
+    (append/check-lits+litsets lits datum-lits litsets))
   (define-values (convs-rules convs-defs)
     (for/fold ([convs-rules null] [convs-defs null])
         ([conv-entry (in-list convs)])
@@ -260,10 +265,13 @@
   (match entry
     [(den:lit _i _e _ip _lp)
      (values entry null)]
+    [(den:datum-lit _i _e)
+     (values entry null)]
     [(den:magic-class name class argu role)
      (values entry null)]
     [(den:class name class argu)
      ;; FIXME: integrable syntax classes?
+     ;; FIXME: what if no-arity, no-args?
      (cond [(identifier? name)
             (let* ([pos-count (length (arguments-pargs argu))]
                    [kws (arguments-kws argu)]
@@ -288,14 +296,40 @@
     [(den:delayed _p _c)
      (values entry null)]))
 
-(define (append-lits+litsets lits litsets)
-  (define seen (make-bound-id-table lits))
-  (for ([litset (in-list litsets)])
-    (for ([lit (in-list litset)])
-      (when (bound-id-table-ref seen (car lit) #f)
-        (wrong-syntax (car lit) "duplicate literal declaration"))
-      (bound-id-table-set! seen (car lit) #t)))
-  (apply append lits litsets))
+;; append/check-lits+litsets : .... -> (listof (U den:lit den:datum-lit))
+(define (append/check-lits+litsets lits datum-lits litsets)
+  (define seen (make-bound-id-table))
+  (define (check-id id [blame-ctx id])
+    (if (bound-id-table-ref seen id #f)
+        (wrong-syntax blame-ctx "duplicate literal declaration: ~s" (syntax-e id))
+        (bound-id-table-set! seen id #t))
+    id)
+  (let* ([litsets*
+          (for/list ([entry (in-list litsets)])
+            (let ([litset-id (first entry)]
+                  [litset (second entry)]
+                  [lctx (third entry)]
+                  [input-phase (fourth entry)])
+              (define (get/check-id sym)
+                (check-id (datum->syntax lctx sym) litset-id))
+              (for/list ([lse (in-list (literalset-literals litset))])
+                (match lse
+                  [(lse:lit internal external lit-phase)
+                   (let ([internal (get/check-id internal)]
+                         [external (syntax-property external 'literal (gensym))])
+                     (make den:lit internal external input-phase lit-phase))]
+                  [(lse:datum-lit internal external)
+                   (let ([internal (get/check-id internal)])
+                     (make den:datum-lit internal external))]))))]
+         [lits*
+          (for/list ([lit (in-list lits)])
+            (check-id (den:lit-internal lit))
+            lit)]
+         [datum-lits*
+          (for/list ([datum-lit (in-list datum-lits)])
+            (check-id (den:datum-lit-internal datum-lit))
+            datum-lit)])
+    (apply append lits* datum-lits* litsets*)))
 
 ;; parse-variant : stx boolean DeclEnv #f/(listof Sattr) -> RHS
 (define (parse-variant stx splicing? decls0 expected-attrs)
@@ -554,9 +588,9 @@
        (for/list ([alt (in-list (eh-alternative-set-alts eh-alt-set))])
          (let* ([iattrs (id-pattern-attrs (eh-alternative-attrs alt) prefix)]
                 [attr-count (length iattrs)])
-           (list (make ehpat (repc-adjust-attrs iattrs (eh-alternative-repc alt))
-                       (create-hpat:var #f (eh-alternative-parser alt) no-arguments iattrs attr-count #f #f)
-                       (eh-alternative-repc alt))
+           (list (create-ehpat
+                  (create-hpat:var #f (eh-alternative-parser alt) no-arguments iattrs attr-count #f #f)
+                  (eh-alternative-repc alt))
                  (replace-eh-alternative-attrs
                   alt (iattrs->sattrs iattrs))))))]
     [(~or . _)
@@ -578,18 +612,7 @@
      (list (parse*-ehpat/bounds stx decls))]
     [_
      (let ([head (parse-head-pattern stx decls)])
-       (list (list (make ehpat (map increase-depth (pattern-attrs head))
-                         head
-                         #f)
-                   stx)))]))
-
-(define (repc-adjust-attrs iattrs repc)
-  (cond [(or (rep:once? repc) (rep:optional? repc))
-         iattrs]
-        [(or (rep:bounds? repc) (eq? #f repc))
-         (map increase-depth iattrs)]
-        [else
-         (error 'repc-adjust-attrs "INTERNAL ERROR: unexpected: ~e" repc)]))
+       (list (list (create-ehpat head #f) stx)))]))
 
 (define (replace-eh-alternative-attrs alt sattrs)
   (match alt
@@ -609,6 +632,8 @@
   (match entry
     [(den:lit internal literal input-phase lit-phase)
      (create-pat:literal literal input-phase lit-phase)]
+    [(den:datum-lit internal sym)
+     (create-pat:datum sym)]
     [(den:magic-class name class argu role)
      (let* ([pos-count (length (arguments-pargs argu))]
             [kws (arguments-kws argu)]
@@ -909,10 +934,7 @@
 (define (parse-pat:plus-dots stx head tail decls)
   (define headp (parse-head-pattern head decls))
   (define tailp (parse-single-pattern tail decls))
-  (define head/rep
-    (make-ehpat (map increase-depth (pattern-attrs headp))
-                headp
-                (make-rep:bounds 1 +inf.0 #f #f #f)))
+  (define head/rep (create-ehpat headp (make-rep:bounds 1 +inf.0 #f #f #f)))
   (create-pat:dots (list head/rep) tailp))
 
 (define (parse-pat:bind stx decls)
@@ -1044,9 +1066,7 @@
 (define (parse*-ehpat/optional stx decls)
   (define-values (head-stx head iattrs name too-many-msg defaults)
     (parse*-optional-pattern stx decls eh-optional-directive-table))
-  (list (make ehpat iattrs
-              head
-              (make rep:optional name too-many-msg defaults))
+  (list (create-ehpat head (make rep:optional name too-many-msg defaults))
         head-stx))
 
 ;; parse*-ehpat/once : stx DeclEnv -> (list EllipsisHeadPattern stx)
@@ -1066,9 +1086,7 @@
              (options-select-value chunks '#:too-many #:default #'#f)]
             [name
              (options-select-value chunks '#:name #:default #'#f)])
-       (list (make ehpat (pattern-attrs head)
-                   head
-                   (make rep:once name too-few-msg too-many-msg))
+       (list (create-ehpat head (make rep:once name too-few-msg too-many-msg))
              #'p))]))
 
 ;; parse*-ehpat/bounds : stx DeclEnv -> (list EllipsisHeadPattern stx)
@@ -1099,10 +1117,9 @@
                (options-select-value chunks '#:too-many #:default #'#f)]
               [name
                (options-select-value chunks '#:name #:default #'#f)])
-         (list (make ehpat (map increase-depth (pattern-attrs head))
-                     head
-                     (make rep:bounds #'min #'max
-                           name too-few-msg too-many-msg))
+         (list (create-ehpat head
+                             (make rep:bounds #'min #'max
+                                   name too-few-msg too-many-msg))
                #'p)))]))
 
 ;; -----
@@ -1222,24 +1239,21 @@
     [_
      (raise-syntax-error #f "expected attribute name with optional depth declaration" ctx stx)]))
 
-;; check-literals-list : stx stx -> (listof (list id id ct-phase ct-phase))
+;; check-literals-list : stx stx -> (listof den:lit)
 ;;  - txlifts defs of phase expressions
 ;;  - txlifts checks that literals are bound
 (define (check-literals-list stx ctx)
   (unless (stx-list? stx)
     (raise-syntax-error #f "expected literals list" ctx stx))
-  (let ([lits
-         (for/list ([x (in-list (stx->list stx))])
-           (check-literal-entry x ctx))])
-    (let ([dup (check-duplicate-identifier (map car lits))])
-      (when dup (raise-syntax-error #f "duplicate literal identifier" ctx dup)))
-    lits))
+  (for/list ([x (in-list (stx->list stx))])
+    (check-literal-entry x ctx)))
 
-;; check-literal-entry : stx stx -> (list id id ct-phase ct-phase)
+;; check-literal-entry : stx stx -> den:lit
 (define (check-literal-entry stx ctx)
   (define (go internal external phase)
     (txlift #`(check-literal #,external #,phase #,ctx))
-    (list internal external phase phase))
+    (let ([external (syntax-property external 'literal (gensym))])
+      (make den:lit internal external phase phase)))
   (syntax-case stx ()
     [(internal external #:phase phase)
      (and (identifier? #'internal) (identifier? #'external))
@@ -1251,32 +1265,44 @@
      (identifier? #'id)
      (go #'id #'id #'(syntax-local-phase-level))]
     [_
-     (raise-syntax-error #f "expected literal entry"
-                         ctx stx)]))
+     (raise-syntax-error #f "expected literal entry" ctx stx)]))
+
+;; check-datum-literals-list : stx stx -> (listof den:datum-lit)
+(define (check-datum-literals-list stx ctx)
+  (unless (stx-list? stx)
+    (raise-syntax-error #f "expected datum-literals list" ctx stx))
+  (for/list ([x (in-list (stx->list stx))])
+    (check-datum-literal-entry x ctx)))
+
+;; check-datum-literal-entry : stx stx -> den:datum-lit
+(define (check-datum-literal-entry stx ctx)
+  (syntax-case stx ()
+    [(internal external)
+     (and (identifier? #'internal) (identifier? #'external))
+     (make den:datum-lit #'internal (syntax-e #'external))]
+    [id
+     (identifier? #'id)
+     (make den:datum-lit #'id (syntax-e #'id))]
+    [_
+     (raise-syntax-error #f "expected datum-literal entry" ctx stx)]))
 
 ;; Literal sets - Import
 
-;; check-literal-sets-list : stx stx -> (listof (listof (list id id ct-phase^2)))
+;; check-literal-sets-list : stx stx -> (listof (list id literalset stx stx))
 (define (check-literal-sets-list stx ctx)
   (unless (stx-list? stx)
     (raise-syntax-error #f "expected literal-set list" ctx stx))
   (for/list ([x (in-list (stx->list stx))])
     (check-literal-set-entry x ctx)))
 
-;; check-literal-set-entry : stx stx -> (listof (list id id ct-phase^2))
+;; check-literal-set-entry : stx stx -> (list id literalset stx stx)
 (define (check-literal-set-entry stx ctx)
   (define (elaborate litset-id lctx phase)
     (let ([litset (syntax-local-value/record litset-id literalset?)])
       (unless litset
         (raise-syntax-error #f "expected identifier defined as a literal-set"
                             ctx litset-id))
-      (elaborate2 litset lctx phase)))
-  (define (elaborate2 litset lctx phase)
-    (for/list ([entry (in-list (literalset-literals litset))])
-      (list (datum->syntax lctx (car entry) stx)
-            (cadr entry)
-            phase
-            (caddr entry))))
+      (list litset-id litset lctx phase)))
   (syntax-case stx ()
     [(litset . more)
      (and (identifier? #'litset))
@@ -1483,6 +1509,7 @@
 (define common-parse-directive-table
   (list (list '#:disable-colon-notation)
         (list '#:literals check-literals-list)
+        (list '#:datum-literals check-datum-literals-list)
         (list '#:literal-sets check-literal-sets-list)
         (list '#:conventions check-conventions-list)
         (list '#:local-conventions check-conventions-rules)))

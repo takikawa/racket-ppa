@@ -1,14 +1,24 @@
 
-/* Optimization sometimes causes a problem: n or d is represented in an
-   extended format instead of a `double'. We don't want to turn off
-   floatng-point optimizations in the rest of the program, so we use a
-   little function to defeat the optimization: */
-
+/* Back when we didn't set force the FP mode to double-precision on
+   x87, compiler optimization would make n or d is represented in an
+   extended format instead of a `double'. We didn't want to turn off
+   floating-point optimizations in the rest of the program, so we used
+   a little function to defeat the optimization. This is almost
+   certainly not necessary anymore. */
+   
 FP_TYPE DO_FLOAT_DIV(FP_TYPE n, FP_TYPE d)
 {
-  return n / d;
+  return FP_DIV(n, d);
 }
 
+#ifndef FP_ZEROx
+# define FP_ZEROx 0
+# define FP_POWx pow
+# define FP_MODFx modf
+# define FP_FREXPx frexp
+# define FP_DOUBLE_TYPE double
+# define FP_LDEXP ldexp
+#endif
 
 FP_TYPE SCHEME_RATIONAL_TO_FLOAT(const Scheme_Object *o)
 {
@@ -17,13 +27,17 @@ FP_TYPE SCHEME_RATIONAL_TO_FLOAT(const Scheme_Object *o)
   intptr_t ns, ds;
 
   if (SCHEME_INTP(r->num)) {
-    n = (FP_TYPE)SCHEME_INT_VAL(r->num);
+  #ifdef CONVERT_INT_TO_FLOAT
+    n = CONVERT_INT_TO_FLOAT(SCHEME_INT_VAL(r->num));
+  #else
+    n = FP_TYPE_FROM_INT(SCHEME_INT_VAL(r->num));
+  #endif
     ns = 0;
   } else
     n = SCHEME_BIGNUM_TO_FLOAT_INF_INFO(r->num, 0, &ns);
 
   if (SCHEME_INTP(r->denom)) {
-    d = (FP_TYPE)SCHEME_INT_VAL(r->denom);
+    d = FP_TYPE_FROM_INT(SCHEME_INT_VAL(r->denom));
     ds = 0;
   } else
     d = SCHEME_BIGNUM_TO_FLOAT_INF_INFO(r->denom, 0, &ds);
@@ -78,17 +92,17 @@ FP_TYPE SCHEME_RATIONAL_TO_FLOAT(const Scheme_Object *o)
       n = scheme_rational_round(n);
     
     if (SCHEME_INTP(n))
-      res = (FP_TYPE)SCHEME_INT_VAL(n);
+      res = FP_TYPE_FROM_INT(SCHEME_INT_VAL(n));
     else
       res = SCHEME_BIGNUM_TO_FLOAT_INF_INFO(n, 0, NULL);
 
-    res = res * pow(2, p - shift);
+    res = FP_MULT(res, FP_TYPE_FROM_INT(FP_POWx(2, p - shift)));
 
     if (SCHEME_INTP(r->num)) {
       if (SCHEME_INT_VAL(r->num) < 0)
-        res = -res;
+        res = FP_NEG(res);
     } else if (!SCHEME_BIGPOS(r->num)) {
-      res = -res;
+      res = FP_NEG(res);
     }
 
     return res;
@@ -99,12 +113,12 @@ FP_TYPE SCHEME_RATIONAL_TO_FLOAT(const Scheme_Object *o)
 
 Scheme_Object *SCHEME_RATIONAL_FROM_FLOAT(FP_TYPE d)
 {
-  double frac, i;
+  FP_DOUBLE_TYPE frac, i;
   int count, exponent, is_neg;
   Scheme_Object *int_part, *frac_part, *frac_num, *frac_denom, *two, *result;
 #ifdef COMPUTE_NEG_INEXACT_TO_EXACT_AS_POS
   int negate;
-  if (d < 0) {
+  if (d < FP_ZEROx) {
     d = -d;
     negate = 1;
   } else
@@ -113,14 +127,14 @@ Scheme_Object *SCHEME_RATIONAL_FROM_FLOAT(FP_TYPE d)
 
   SCHEME_CHECK_FLOAT("inexact->exact", d, "exact");
 
-  is_neg = (d < 0);
+  is_neg = FP_LESS(d, FP_ZEROx);
 
-  frac = modf((double)d, &i);
-  (void)frexp(d, &exponent);
+  frac = FP_MODFx(d, &i);
+  (void)FP_FREXPx(d, &exponent);
 
   int_part = SCHEME_BIGNUM_FROM_FLOAT(i);
 
-  if (!frac) {
+  if (FP_EQV(frac, FP_ZEROx)) {
 #ifdef COMPUTE_NEG_INEXACT_TO_EXACT_AS_POS
    if (negate)
      return scheme_bin_minus(scheme_make_integer(0), int_part);
@@ -133,12 +147,12 @@ Scheme_Object *SCHEME_RATIONAL_FROM_FLOAT(FP_TYPE d)
   two = scheme_make_integer(2);
 
   count = 0;
-  while (frac) {
+  while (!FP_EQV(frac, FP_ZEROx)) {
     count++;
     frac_num = scheme_bin_mult(frac_num, two);
     frac_denom = scheme_bin_mult(frac_denom, two);    
-    frac = modf(ldexp(frac, 1), &i);
-    if (i) {
+    frac = FP_MODFx(FP_LDEXP(frac, 1), &i);
+    if (!FP_IS_ZERO(i)) {
       if (is_neg)	
 	frac_num = scheme_bin_minus(frac_num, one);
       else
@@ -157,3 +171,27 @@ Scheme_Object *SCHEME_RATIONAL_FROM_FLOAT(FP_TYPE d)
 
   return result;
 }
+
+#undef FP_TYPE
+#undef SCHEME_RATIONAL_TO_FLOAT
+#undef SCHEME_RATIONAL_FROM_FLOAT
+#undef SCHEME_BIGNUM_TO_FLOAT_INF_INFO
+#undef SCHEME_BIGNUM_FROM_FLOAT
+#undef SCHEME_CHECK_FLOAT
+#undef DO_FLOAT_DIV 
+#undef FLOAT_E_MIN
+#undef FLOAT_M_BITS
+#undef FP_ZEROx
+#undef FP_POWx
+#undef FP_MODFx
+#undef FP_FREXPx
+#undef FP_DOUBLE_TYPE
+
+#undef FP_MULT
+#undef FP_DIV
+#undef FP_NEG
+#undef FP_LESS
+#undef FP_TYPE_FROM_INT
+#undef FP_LDEXP
+#undef FP_EQV
+#undef FP_IS_ZERO

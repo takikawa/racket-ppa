@@ -21,7 +21,8 @@
              racket/syntax
              syntax/id-table
              racket/list
-             syntax/parse))
+             syntax/parse
+             syntax/stx))
 
 (require
  (for-template "term.rkt"))
@@ -387,18 +388,23 @@
 (define-syntax (define-relation stx)
   (syntax-case stx ()
     [(def-form-id lang . body)
-     (let-values ([(contract-name dom-ctcs codom-contracts pats)
-                   (split-out-contract stx (syntax-e #'def-form-id) #'body #t)])
+     (begin
+       (unless (identifier? #'lang)
+         (raise-syntax-error #f "expected an identifier in the language position" stx #'lang))
+       (define-values (contract-name dom-ctcs codom-contracts pats)
+         (split-out-contract stx (syntax-e #'def-form-id) #'body #t))
        (with-syntax* ([((name trms ...) rest ...) (car pats)]
                       [(mode-stx ...) #`(#:mode (name I))]
                       [(ctc-stx ...) (if dom-ctcs 
-                                         (with-syntax ([(d-ctc ...) dom-ctcs])
-                                           #`(#:contract (name (d-ctc ...)))) 
+                                         #`(#:contract (name #,dom-ctcs)) 
                                          #'())]
                       [(clauses ...) pats]
                       [new-body #`(mode-stx ... ctc-stx ... clauses ...)])
                      (do-extended-judgment-form #'lang (syntax-e #'def-form-id) #'new-body #f stx #t)))]))
 
+;; if relation? is true, then the contract is a list of redex patterns
+;; if relation? is false, then the contract is a single redex pattern
+;;   (meant to match the actual argument as a sequence)
 (define-for-syntax (split-out-contract stx syn-error-name rest relation?)
   ;; initial test determines if a contract is specified or not
   (cond
@@ -426,7 +432,7 @@
                [(null? more)
                 (raise-syntax-error syn-error-name "expected an ->" stx)]
                [(eq? (syntax-e (car more)) '->)
-                (define-values (raw-clauses rev-codomains)
+                (define-values (raw-clauses rev-codomains pre-condition)
                   (let loop ([prev (car more)]
                              [more (cdr more)]
                              [codomains '()])
@@ -437,7 +443,7 @@
                        (define after-this-one (cdr more))
                        (cond
                          [(null? after-this-one)
-                          (values null (cons (car more) codomains))]
+                          (values null (cons (car more) codomains) #t)]
                          [else
                           (define kwd (cadr more))
                           (cond
@@ -445,12 +451,26 @@
                              (loop kwd 
                                    (cddr more)
                                    (cons (car more) codomains))]
+                            [(and (not relation?) (equal? (syntax-e kwd) '#:pre))
+                             (when (null? (cddr more)) 
+                               (raise-syntax-error 'define-metafunction 
+                                                   "expected an expression to follow #:pre keyword"
+                                                   kwd))
+                             (values (cdddr more)
+                                     (cons (car more) codomains)
+                                     (caddr more))]
                             [else
                              (values (cdr more)
-                                     (cons (car more) codomains))])])])))
+                                     (cons (car more) codomains)
+                                     #t)])])])))
                 (let ([doms (reverse dom-pats)]
                       [clauses (check-clauses stx syn-error-name raw-clauses relation?)])
-                  (values #'id doms (reverse rev-codomains) clauses))]
+                  (values #'id 
+                          (if relation?
+                              doms
+                              #`(side-condition #,doms (term #,pre-condition)))
+                          (reverse rev-codomains)
+                          clauses))]
                [else
                 (loop (cdr more) (cons (car more) dom-pats))]))])]
        [_
@@ -490,7 +510,7 @@
 (define-for-syntax (do-extended-judgment-form lang syn-err-name body orig stx is-relation?)
   (define nts (definition-nts lang stx syn-err-name))
   (define-values (judgment-form-name dup-form-names mode position-contracts clauses rule-names)
-    (parse-judgment-form-body body syn-err-name stx (identifier? orig)))
+    (parse-judgment-form-body body syn-err-name stx (identifier? orig) is-relation?))
   (define definitions
     #`(begin
         (define-syntax #,judgment-form-name 
@@ -519,7 +539,7 @@
 (define-for-syntax (jf-is-relation? jf-id)
   (judgment-form-relation? (lookup-judgment-form-id jf-id)))
 
-(define-for-syntax (parse-judgment-form-body body syn-err-name full-stx extension?)
+(define-for-syntax (parse-judgment-form-body body syn-err-name full-stx extension? is-relation?)
   (define-syntax-class pos-mode
     #:literals (I O)
     (pattern I)
@@ -535,10 +555,11 @@
   (define-syntax-class horizontal-line
     (pattern x:id #:when (horizontal-line? #'x)))
   (define-syntax-class name
-    (pattern x #:when (or (and (symbol? (syntax-e #'x))
-                               (not (horizontal-line? #'x))
-                               (not (eq? '... (syntax-e #'x))))
-                          (string? (syntax-e #'x)))))
+    (pattern x #:when (and (not is-relation?)
+                           (or (and (symbol? (syntax-e #'x))
+                                    (not (horizontal-line? #'x))
+                                    (not (eq? '... (syntax-e #'x))))
+                               (string? (syntax-e #'x))))))
   (define (parse-rules rules)
     (define-values (backward-rules backward-names)
       (for/fold ([parsed-rules '()]
@@ -718,8 +739,10 @@
 
 (define-syntax (judgment-holds stx)
   (syntax-case stx ()
-    [(_  args ...)
-     #'(#%expression (judgment-holds/derivation judgment-holds #f args ...))]))
+    [(_  (jf-id . args))
+     #`(#%expression (judgment-holds/derivation judgment-holds #f #,(stx-car (stx-cdr stx))))]
+    [(_  (jf-id . args) trm)
+     #`(#%expression (judgment-holds/derivation judgment-holds #f #,(stx-car (stx-cdr stx)) trm))]))
 
 (define-syntax (build-derivations stx)
   (syntax-case stx ()
@@ -1291,11 +1314,13 @@
        (free-identifier=? stx (quote-syntax ...))))
 
 (define-for-syntax (where-keyword? id)
-  (or (free-identifier=? id #'where)
-      (free-identifier=? id #'where/hidden)))
+  (and (identifier? id)
+       (or (free-identifier=? id #'where)
+           (free-identifier=? id #'where/hidden))))
 (define-for-syntax (side-condition-keyword? id)
-  (or (free-identifier=? id #'side-condition)
-      (free-identifier=? id #'side-condition/hidden)))
+  (and (identifier? id)
+       (or (free-identifier=? id #'side-condition)
+           (free-identifier=? id #'side-condition/hidden))))
 ;                                                                        
 ;                                                                        
 ;                                                      ;                 
@@ -1355,10 +1380,14 @@
              (values (append mf-cs ps-rw)
                      (cons #`(eqn 'pat-rw '#,(car term-rws)) eqs)
                      (append (syntax->datum #'new-names) ns))))]
-        [(side-cond . rest)
+        [(side-cond rest)
          (side-condition-keyword? #'side-cond)
-         ;; TODO - side condition handling
-         (values ps-rw eqs ns)]
+         (if in-judgment-form?
+             (let-values ([(term-rws mf-cs) (rewrite-terms (list #'rest) ns)])
+               (values (append mf-cs ps-rw)
+                       (cons #`(dqn '() #f '#,(car term-rws)) eqs)
+                       ns))
+             (values ps-rw eqs ns))]
         [(prem-name . prem-body)
          (and (judgment-form-id? #'prem-name) in-judgment-form?)
          (rewrite-jf #'prem-name #'prem-body ns ps-rw eqs)]
@@ -1369,12 +1398,6 @@
          (eq? '... (syntax-e #'var))
          ;; TODO - fix when implementing ellipses
          (values ps-rw eqs ns)]
-        [term
-         (not in-judgment-form?) ;; in a relation
-         (let-values ([(term-rws mf-cs) (rewrite-terms (list #'term) ns)])
-           (values (append mf-cs ps-rw)
-                   eqs
-                   ns))]
         [else (raise-syntax-error what "malformed premise" prem)])))
   (values prems-rev new-eqs new-names))
 
@@ -1397,7 +1420,9 @@
                  [((mf-clauses ...) ...) (map (λ (fs) 
                                                 (map (λ (f-id)
                                                        (with-syntax ([f-id f-id])
-                                                         #'(metafunc-proc-gen-clauses f-id)))
+                                                         (if (judgment-form-id? #'f-id)
+                                                             #'(error 'generate-term "generation disabled for relations in term positions")
+                                                             #'(metafunc-proc-gen-clauses f-id))))
                                                      (syntax->list fs)))
                                               (syntax->list #'((f ...) ...)))])
                 (values (syntax->list #'(body-pat ...))

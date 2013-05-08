@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -516,6 +516,13 @@ Scheme_Object *scheme_rational_sqrt(const Scheme_Object *o)
 }
 
 #define FP_TYPE double
+#define FP_MULT(x, y) x*y
+#define FP_DIV(x, y) x/y
+#define FP_NEG(x) -x
+#define FP_EQV(x,y) x==y
+#define FP_LESS(x, y) x<y
+#define FP_IS_ZERO(x) x==0.0
+#define FP_TYPE_FROM_INT(x) (FP_TYPE)x
 #define SCHEME_RATIONAL_TO_FLOAT scheme_rational_to_double
 #define SCHEME_RATIONAL_FROM_FLOAT scheme_rational_from_double
 #define SCHEME_BIGNUM_TO_FLOAT_INF_INFO scheme_bignum_to_double_inf_info
@@ -527,17 +534,14 @@ Scheme_Object *scheme_rational_sqrt(const Scheme_Object *o)
 #include "ratfloat.inc"
 
 #ifdef MZ_USE_SINGLE_FLOATS
-# undef FP_TYPE
-# undef SCHEME_RATIONAL_TO_FLOAT
-# undef SCHEME_RATIONAL_FROM_FLOAT
-# undef SCHEME_BIGNUM_TO_FLOAT_INF_INFO
-# undef SCHEME_BIGNUM_FROM_FLOAT
-# undef SCHEME_CHECK_FLOAT
-# undef DO_FLOAT_DIV 
-# undef FLOAT_E_MIN
-# undef FLOAT_M_BITS
-
 #define FP_TYPE float
+#define FP_MULT(x, y) x*y
+#define FP_DIV(x, y) x/y
+#define FP_NEG(x) -x
+#define FP_EQV(x,y) x==y
+#define FP_LESS(x, y) x<y
+#define FP_TYPE_FROM_INT(x) (FP_TYPE)x
+#define FP_IS_ZERO(x) x==0.0
 #define SCHEME_RATIONAL_TO_FLOAT scheme_rational_to_float
 #define SCHEME_RATIONAL_FROM_FLOAT scheme_rational_from_float
 #define SCHEME_BIGNUM_TO_FLOAT_INF_INFO scheme_bignum_to_float_inf_info
@@ -549,3 +553,27 @@ Scheme_Object *scheme_rational_sqrt(const Scheme_Object *o)
 #include "ratfloat.inc"
 #endif
 
+#ifdef MZ_LONG_DOUBLE
+# define FP_TYPE long_double
+# define FP_MULT(x, y) long_double_mult(x,y)
+# define FP_DIV(x, y) long_double_div(x,y)
+# define FP_NEG(x) long_double_neg(x)
+# define FP_EQV(x,y) long_double_eqv(x,y)
+# define FP_LESS(x, y) long_double_less(x,y)
+# define FP_TYPE_FROM_INT(x) long_double_from_int(x)
+# define FP_IS_ZERO(x) long_double_is_zero(x)
+# define SCHEME_RATIONAL_TO_FLOAT scheme_rational_to_long_double
+# define SCHEME_RATIONAL_FROM_FLOAT scheme_rational_from_long_double
+# define SCHEME_BIGNUM_TO_FLOAT_INF_INFO scheme_bignum_to_long_double_inf_info
+# define SCHEME_CHECK_FLOAT scheme_check_long_double
+# define SCHEME_BIGNUM_FROM_FLOAT scheme_bignum_from_long_double
+# define FLOAT_E_MIN -16383
+# define FLOAT_M_BITS 64
+# define FP_ZEROx get_long_double_zero()
+# define FP_POWx pow
+# define FP_MODFx long_double_modf
+# define FP_FREXPx long_double_frexp
+# define FP_LDEXP long_double_ldexp
+# define FP_DOUBLE_TYPE FP_TYPE
+#include "ratfloat.inc"
+#endif

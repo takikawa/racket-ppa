@@ -230,12 +230,19 @@ argument.}
   symbols.}
 
 
-@defproc[(com-get-property [obj com-object?] [property string?] ...+)
+@defproc[(com-get-property [obj com-object?] 
+                           [property (or/c string?
+                                           (cons/c string? list?))]
+                           ...+)
          any/c]{
 
   Returns the value of the final property by following the indicated
   path of @racket[property]s, where each intermediate property must be a
-  COM object.}
+  COM object.
+
+  Each @racket[property] is either a property-name string or a list
+  that starts with a property-name string and continues with arguments
+  for a parameterized property.}
 
 @defproc[(com-get-property* [obj com-object?] [property string?] [v any/c] ...)
          any/c]{
@@ -262,14 +269,17 @@ argument.}
   information on the symbols.}
 
 
-@defproc[(com-set-property! [obj com-object?] 
-                            [string? property] ...+
+@defproc[(com-set-property! [obj com-object?]
+                            [property (or/c string?
+                                            (cons/c string? list?))] ...+
                             [v any/c])
          void?]{
 
    Sets the value of the final property in @racket[obj] to @racket[v]
    by following the @racket[property]s, where the value of each
-   intermediate property must be a COM object.
+   intermediate property must be a COM object. A @racket[property]
+   can be a list instead of a string to represent a parameterized property
+   and its arguments.
 
    The type of the property is determined via
    @racket[com-property-type], if possible, and
@@ -416,13 +426,13 @@ used to represent various atomic types:
 
  @item{@racket['unsigned-int] --- a 32-bit unsigned integer}
 
- @item{@racket['short] --- a 16-bit signed integer}
+ @item{@racket['short-int] --- a 16-bit signed integer}
 
  @item{@racket['unsigned-short] --- a 16-bit unsigned integer}
 
- @item{@racket['char] --- an 8-bit signed integer}
+ @item{@racket['signed-char] --- an 8-bit signed integer}
 
- @item{@racket['unsigned-char] --- an 8-bit unsigned integer}
+ @item{@racket['char] --- an 8-bit unsigned integer}
 
  @item{@racket['long-long] --- a 64-bit signed integer}
 

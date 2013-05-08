@@ -114,7 +114,8 @@
 (define-metafunction lang
   [(T x y)
    1
-   (side-condition (not (eq? (term x) (term y))))]
+   (side-condition (not (eq? (term x) (term y))))
+   (clause-name first-one)]
   [(T x x) 
    (any_1 any_2)
    (where any_1 2)
@@ -123,7 +124,9 @@
 ;; in this test, the metafunction has 2 clauses 
 ;; with a side-condition on the first clause
 ;; and a 'where' in the second clause
-(btest (render-metafunction T) "metafunction-T.png")
+(btest (parameterize ([metafunction-cases '("first-one" 1)])
+         (render-metafunction T))
+       "metafunction-T.png")
 
 ;; in this test, the `x' is italic and the 'z' is sf, since 'x' is in the grammar, and 'z' is not.
 (btest (render-lw 
@@ -150,7 +153,8 @@
   [(Name (name x-arg arg)) 
    ,(term-let ((x-term-let (term 1)))
               (term (x-where x-term-let)))
-   (where x-where 2)])
+   (where x-where 2)]
+  [(Name number) short])
 
 ;; this tests that the three variable bindings
 ;; (x-arg, x-term-let, and x-where) 
@@ -161,6 +165,40 @@
 (btest (parameterize ([metafunction-pict-style 'up-down/vertical-side-conditions])
          (render-metafunction Name))
        "metafunction-Name-vertical.png")
+
+;; compact turns out to be the same, since a line break is needed before
+;; each side-condition clause:
+(btest (parameterize ([metafunction-pict-style 'up-down/compact-side-conditions])
+         (render-metafunction Name))
+       "metafunction-Name-vertical.png")
+
+;; in horizontal mode:
+(btest (vl-append
+        (clip
+         (parameterize ([metafunction-pict-style 'left-right])
+           (render-metafunction Name)))
+        (clip
+         (parameterize ([metafunction-pict-style 'left-right/beside-side-conditions])
+           (render-metafunction Name)))
+        (clip
+         (parameterize ([metafunction-pict-style 'left-right/vertical-side-conditions])
+           (render-metafunction Name)))
+        (clip
+         (parameterize ([metafunction-pict-style 'left-right/compact-side-conditions])
+           (render-metafunction Name)))
+        (clip
+         (parameterize ([metafunction-pict-style 'left-right/compact-side-conditions]
+                        [linebreaks '(#t #f)])
+           (render-metafunction Name)))
+        (clip
+         (parameterize ([metafunction-pict-style 'left-right/compact-side-conditions]
+                        [linebreaks '(#f #t)])
+           (render-metafunction Name)))
+        (clip
+         (parameterize ([metafunction-pict-style 'left-right/beside-side-conditions]
+                        [linebreaks '(#t #f)])
+           (render-metafunction Name))))
+       "metafunction-Name-horizontal.png")
 
 ;; makes sure that there is no overlap inside or across metafunction calls  
 ;; or when there are unquotes involved
@@ -205,8 +243,11 @@
         (list-ref lws 4)
         "}"))
 
-(btest (with-compound-rewriter 'subst subst-rw
-                               (render-metafunction subst))
+(btest (with-atomic-rewriter
+        'number "number" ;; this rewriter has no effect; here to test that path in the code
+        (with-compound-rewriter
+         'subst subst-rw
+         (render-metafunction subst)))
        "metafunction-subst.png")
 
 

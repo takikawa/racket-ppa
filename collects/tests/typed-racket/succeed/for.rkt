@@ -159,6 +159,13 @@
                      (+ i j))
        185794560)
 
+;; for/product: had problems with Real due to an unannotated accumulator
+(check =
+       (for/product: : Real
+                     ([i (in-list (list 1.2 -1.0 0.5))])
+         i)
+       -0.6)
+
 ;; multiclause versions of these don't currently work properly
 (check =
        (for*/sum: : Integer
@@ -205,6 +212,26 @@
          (lambda ()
            (for: ([x 10] #:unless (> x 3)) (display x))))
        "0123")
+
+(check equal?
+       (for/hasheq: : (HashTable Integer String) ([k (list 2 3 4)]) (values k "val"))
+       #hasheq((2 . "val") (3 . "val") (4 . "val")))
+
+(check equal?
+       (for/vector: ([i : Natural (in-range 3)]) 5)
+       (vector 5 5 5))
+
+(check equal?
+       (for/vector: : (Vectorof Number) ([i : Natural (in-range 3)]) 5)
+       (vector 5 5 5))
+
+
+(check equal?
+       (for/list: : (Listof Natural)
+                  ((i : Natural (and (in-naturals)))
+                   (j : Natural (and (in-range 5))))
+             (+ i j))
+       (list 0 2 4 6 8))
 
 ;; break and final clauses
 ;; TODO typechecker can't handle these

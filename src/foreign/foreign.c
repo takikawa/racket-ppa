@@ -597,6 +597,9 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 /*****************************************************************************/
 /* Types */
 
+#define MZ_TYPE_CAST(t, e) (t)(e)
+#define MZ_NO_TYPE_CAST(t, e) (e)
+
 /***********************************************************************
  * The following are the only primitive types.
  * The tricky part is figuring out what width-ed types correspond to
@@ -780,8 +783,51 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
  * C->Racket:   scheme_make_double(<C>)
  */
 
+#ifdef _MSC_VER
+struct struct_align_slongdouble {
+  char c;
+  long_double x;
+};
+const ffi_type ffi_type_slongdouble = {
+  sizeof(long_double),
+  offsetof(struct struct_align_slongdouble, x),
+  FFI_TYPE_STRUCT, NULL
+};
+#else /* _MSC_VER undefined */
+#define ffi_type_slongdouble ffi_type_longdouble
+#endif /* _MSC_VER */
+#ifdef MZ_LONG_DOUBLE
+#define SCHEME_MAYBE_LONG_DBL_VAL(x) SCHEME_LONG_DBL_VAL(x)
+#else /* MZ_LONG_DOUBLE undefined */
+#define SCHEME_MAYBE_LONG_DBL_VAL(x) unsupported_long_double_val()
+static mz_long_double unsupported_long_double_val() {
+  scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED, "_longdouble: " NOT_SUPPORTED_STR);
+  return 0.0;
+}
+#endif /* MZ_LONG_DOUBLE */
+#ifdef MZ_LONG_DOUBLE
+#define scheme_make_maybe_long_double(x) scheme_make_long_double(x)
+#else /* MZ_LONG_DOUBLE undefined */
+#define scheme_make_maybe_long_double(x) unsupported_make_long_double()
+static Scheme_Object *unsupported_make_long_double() {
+  scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED, "_longdouble: " NOT_SUPPORTED_STR);
+  return NULL;
+}
+#endif /* MZ_LONG_DOUBLE */
+
+#define FOREIGN_longdouble (16)
+/* Type Name:   longdouble
+ * LibFfi type: ffi_type_slongdouble
+ * C type:      mz_long_double
+ * Predicate:   SCHEME_LONG_DBLP(<Scheme>)
+ * Racket->C:   SCHEME_MAYBE_LONG_DBL_VAL(<Scheme>)
+ * S->C offset: 0
+ * C->Racket:   scheme_make_maybe_long_double(<C>)
+ */
+
+
 /* A double that will coerce numbers to doubles: */
-#define FOREIGN_doubleS (16)
+#define FOREIGN_doubleS (17)
 /* Type Name:   double* (doubleS)
  * LibFfi type: ffi_type_double
  * C type:      double
@@ -792,7 +838,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
  */
 
 /* Booleans -- implemented as an int which is 1 or 0: */
-#define FOREIGN_bool (17)
+#define FOREIGN_bool (18)
 /* Type Name:   bool
  * LibFfi type: ffi_type_sint
  * C type:      int
@@ -806,7 +852,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
  * #f is not NULL only for byte-strings, for other strings it is
  * meaningless to use NULL. */
 
-#define FOREIGN_string_ucs_4 (18)
+#define FOREIGN_string_ucs_4 (19)
 /* Type Name:   string/ucs-4 (string_ucs_4)
  * LibFfi type: ffi_type_gcpointer
  * C type:      mzchar*
@@ -816,7 +862,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
  * C->Racket:   scheme_make_char_string_without_copying(<C>)
  */
 
-#define FOREIGN_string_utf_16 (19)
+#define FOREIGN_string_utf_16 (20)
 /* Type Name:   string/utf-16 (string_utf_16)
  * LibFfi type: ffi_type_gcpointer
  * C type:      unsigned short*
@@ -829,7 +875,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 /* Byte strings -- not copying C strings, #f is NULL.
  * (note: these are not like char* which is just a pointer) */
 
-#define FOREIGN_bytes (20)
+#define FOREIGN_bytes (21)
 /* Type Name:   bytes
  * LibFfi type: ffi_type_gcpointer
  * C type:      char*
@@ -839,7 +885,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
  * C->Racket:   (<C>==NULL)?scheme_false:scheme_make_byte_string_without_copying(<C>)
  */
 
-#define FOREIGN_path (21)
+#define FOREIGN_path (22)
 /* Type Name:   path
  * LibFfi type: ffi_type_gcpointer
  * C type:      char*
@@ -849,7 +895,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
  * C->Racket:   (<C>==NULL)?scheme_false:scheme_make_path_without_copying(<C>)
  */
 
-#define FOREIGN_symbol (22)
+#define FOREIGN_symbol (23)
 /* Type Name:   symbol
  * LibFfi type: ffi_type_pointer
  * C type:      char*
@@ -862,7 +908,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 /* This is for any C pointer: #f is NULL, cpointer values as well as
  * ffi-obj and string values pass their pointer.  When used as a return
  * value, either a cpointer object or #f is returned. */
-#define FOREIGN_pointer (23)
+#define FOREIGN_pointer (24)
 /* Type Name:   pointer
  * LibFfi type: ffi_type_pointer
  * C type:      void*
@@ -872,7 +918,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
  * C->Racket:   scheme_make_foreign_external_cpointer(<C>)
  */
 
-#define FOREIGN_gcpointer (24)
+#define FOREIGN_gcpointer (25)
 /* Type Name:   gcpointer
  * LibFfi type: ffi_type_gcpointer
  * C type:      void*
@@ -884,7 +930,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 
 /* This is used for passing and Scheme_Object* value as is.  Useful for
  * functions that know about Scheme_Object*s, like Racket's. */
-#define FOREIGN_scheme (25)
+#define FOREIGN_scheme (26)
 /* Type Name:   scheme
  * LibFfi type: ffi_type_gcpointer
  * C type:      Scheme_Object*
@@ -897,7 +943,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 /* Special type, not actually used for anything except to mark values
  * that are treated like pointers but not referenced.  Used for
  * creating function types. */
-#define FOREIGN_fpointer (26)
+#define FOREIGN_fpointer (27)
 /* Type Name:   fpointer
  * LibFfi type: ffi_type_pointer
  * C type:      void*
@@ -922,6 +968,7 @@ typedef union _ForeignAny {
   uintptr_t x_ufixnum;
   float x_float;
   double x_double;
+  mz_long_double x_longdouble;
   double x_doubleS;
   int x_bool;
   mzchar* x_string_ucs_4;
@@ -936,9 +983,9 @@ typedef union _ForeignAny {
 } ForeignAny;
 
 /* This is a tag that is used to identify user-made struct types. */
-#define FOREIGN_struct (27)
-#define FOREIGN_array (28)
-#define FOREIGN_union (29)
+#define FOREIGN_struct (28)
+#define FOREIGN_array (29)
+#define FOREIGN_union (30)
 
 XFORM_NONGCING static int is_gcable_pointer(Scheme_Object *o) {
   if (SCHEME_FFIOBJP(o)) return 0;
@@ -1069,6 +1116,7 @@ XFORM_NONGCING static intptr_t ctype_sizeof(Scheme_Object *type)
   case FOREIGN_ufixnum: return sizeof(uintptr_t);
   case FOREIGN_float: return sizeof(float);
   case FOREIGN_double: return sizeof(double);
+  case FOREIGN_longdouble: return sizeof(mz_long_double);
   case FOREIGN_doubleS: return sizeof(double);
   case FOREIGN_bool: return sizeof(int);
   case FOREIGN_string_ucs_4: return sizeof(mzchar*);
@@ -1667,6 +1715,7 @@ static Scheme_Object *C2SCHEME(Scheme_Object *already_ptr, Scheme_Object *type, 
     case FOREIGN_ufixnum: return scheme_make_integer_from_unsigned(REF_CTYPE(uintptr_t));
     case FOREIGN_float: return scheme_make_double(REF_CTYPE(float));
     case FOREIGN_double: return scheme_make_double(REF_CTYPE(double));
+    case FOREIGN_longdouble: return scheme_make_maybe_long_double(REF_CTYPE(mz_long_double));
     case FOREIGN_doubleS: return scheme_make_double(REF_CTYPE(double));
     case FOREIGN_bool: return (REF_CTYPE(int)?scheme_true:scheme_false);
     case FOREIGN_string_ucs_4: return scheme_make_char_string_without_copying(REF_CTYPE(mzchar*));
@@ -1821,7 +1870,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_INTP(val)) {
         Tsint32 tmp;
-        tmp = (Tsint32)(SCHEME_INT_VAL(val));
+        tmp = MZ_TYPE_CAST(Tsint32, SCHEME_INT_VAL(val));
         (((Tsint32*)W_OFFSET(dst,delta))[0]) = tmp; return NULL;
       } else {
         wrong_value(who, "_fixint", val);;
@@ -1836,7 +1885,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_INTP(val)) {
         Tuint32 tmp;
-        tmp = (Tuint32)(SCHEME_UINT_VAL(val));
+        tmp = MZ_TYPE_CAST(Tuint32, SCHEME_UINT_VAL(val));
         (((Tuint32*)W_OFFSET(dst,delta))[0]) = tmp; return NULL;
       } else {
         wrong_value(who, "_ufixint", val);;
@@ -1851,7 +1900,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_INTP(val)) {
         intptr_t tmp;
-        tmp = (intptr_t)(SCHEME_INT_VAL(val));
+        tmp = MZ_TYPE_CAST(intptr_t, SCHEME_INT_VAL(val));
         (((intptr_t*)W_OFFSET(dst,delta))[0]) = tmp; return NULL;
       } else {
         wrong_value(who, "_fixnum", val);;
@@ -1866,7 +1915,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_INTP(val)) {
         uintptr_t tmp;
-        tmp = (uintptr_t)(SCHEME_UINT_VAL(val));
+        tmp = MZ_TYPE_CAST(uintptr_t, SCHEME_UINT_VAL(val));
         (((uintptr_t*)W_OFFSET(dst,delta))[0]) = tmp; return NULL;
       } else {
         wrong_value(who, "_ufixnum", val);;
@@ -1881,7 +1930,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_FLOATP(val)) {
         float tmp;
-        tmp = (float)(SCHEME_FLOAT_VAL(val));
+        tmp = MZ_TYPE_CAST(float, SCHEME_FLOAT_VAL(val));
         (((float*)W_OFFSET(dst,delta))[0]) = tmp; return NULL;
       } else {
         wrong_value(who, "_float", val);;
@@ -1896,10 +1945,25 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_FLOATP(val)) {
         double tmp;
-        tmp = (double)(SCHEME_FLOAT_VAL(val));
+        tmp = MZ_TYPE_CAST(double, SCHEME_FLOAT_VAL(val));
         (((double*)W_OFFSET(dst,delta))[0]) = tmp; return NULL;
       } else {
         wrong_value(who, "_double", val);;
+        return NULL; /* hush the compiler */
+      }
+    case FOREIGN_longdouble:
+#     ifdef SCHEME_BIG_ENDIAN
+      if (sizeof(mz_long_double)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+        delta += (sizeof(intptr_t)-sizeof(mz_long_double));
+      }
+#     endif /* SCHEME_BIG_ENDIAN */
+      if (SCHEME_LONG_DBLP(val)) {
+        mz_long_double tmp;
+        tmp = MZ_NO_TYPE_CAST(mz_long_double, SCHEME_MAYBE_LONG_DBL_VAL(val));
+        (((mz_long_double*)W_OFFSET(dst,delta))[0]) = tmp; return NULL;
+      } else {
+        wrong_value(who, "_longdouble", val);;
         return NULL; /* hush the compiler */
       }
     case FOREIGN_doubleS:
@@ -1911,7 +1975,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_REALP(val)) {
         double tmp;
-        tmp = (double)(scheme_real_to_double(val));
+        tmp = MZ_TYPE_CAST(double, scheme_real_to_double(val));
         (((double*)W_OFFSET(dst,delta))[0]) = tmp; return NULL;
       } else {
         wrong_value(who, "_double*", val);;
@@ -1926,7 +1990,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (1) {
         int tmp;
-        tmp = (int)(SCHEME_TRUEP(val));
+        tmp = MZ_TYPE_CAST(int, SCHEME_TRUEP(val));
         (((int*)W_OFFSET(dst,delta))[0]) = tmp; return NULL;
       } else {
         wrong_value(who, "_bool", val);;
@@ -1941,7 +2005,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_FALSEP_OR_CHAR_STRINGP(val)) {
         mzchar* tmp;
-        tmp = (mzchar*)(ucs4_string_or_null_to_ucs4_pointer(val));
+        tmp = MZ_TYPE_CAST(mzchar*, ucs4_string_or_null_to_ucs4_pointer(val));
         if (basetype_p == NULL || tmp == NULL || 0) {
           (((mzchar**)W_OFFSET(dst,delta))[0]) = tmp;
           return NULL;
@@ -1962,7 +2026,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_FALSEP_OR_CHAR_STRINGP(val)) {
         unsigned short* tmp;
-        tmp = (unsigned short*)(ucs4_string_or_null_to_utf16_pointer(val));
+        tmp = MZ_TYPE_CAST(unsigned short*, ucs4_string_or_null_to_utf16_pointer(val));
         if (basetype_p == NULL || tmp == NULL || 0) {
           (((unsigned short**)W_OFFSET(dst,delta))[0]) = tmp;
           return NULL;
@@ -1983,7 +2047,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_FALSEP(val)||SCHEME_BYTE_STRINGP(val)) {
         char* tmp;
-        tmp = (char*)(SCHEME_FALSEP(val)?NULL:SCHEME_BYTE_STR_VAL(val));
+        tmp = MZ_TYPE_CAST(char*, SCHEME_FALSEP(val)?NULL:SCHEME_BYTE_STR_VAL(val));
         if (basetype_p == NULL || tmp == NULL || 0) {
           (((char**)W_OFFSET(dst,delta))[0]) = tmp;
           return NULL;
@@ -2004,7 +2068,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_FALSEP(val)||SCHEME_PATH_STRINGP(val)) {
         char* tmp;
-        tmp = (char*)(SCHEME_FALSEP(val)?NULL:SCHEME_PATH_VAL(TO_PATH(val)));
+        tmp = MZ_TYPE_CAST(char*, SCHEME_FALSEP(val)?NULL:SCHEME_PATH_VAL(TO_PATH(val)));
         if (basetype_p == NULL || tmp == NULL || 0) {
           (((char**)W_OFFSET(dst,delta))[0]) = tmp;
           return NULL;
@@ -2025,7 +2089,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_SYMBOLP(val)) {
         char* tmp;
-        tmp = (char*)(SCHEME_SYM_VAL(val));
+        tmp = MZ_TYPE_CAST(char*, SCHEME_SYM_VAL(val));
         if (basetype_p == NULL || tmp == NULL || !is_gcable_pointer(val)) {
           (((char**)W_OFFSET(dst,delta))[0]) = tmp;
           return NULL;
@@ -2046,7 +2110,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_FFIANYPTRP(val)) {
         void* tmp; intptr_t toff;
-        tmp = (void*)(SCHEME_FFIANYPTR_VAL(val));
+        tmp = MZ_TYPE_CAST(void*, SCHEME_FFIANYPTR_VAL(val));
         toff = SCHEME_FFIANYPTR_OFFSET(val);
         if (basetype_p == NULL || (tmp == NULL && toff == 0) || !is_gcable_pointer(val)) {
           if (_offset) *_offset = 0;
@@ -2071,7 +2135,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (SCHEME_FFIANYPTRP(val)) {
         void* tmp; intptr_t toff;
-        tmp = (void*)(SCHEME_FFIANYPTR_VAL(val));
+        tmp = MZ_TYPE_CAST(void*, SCHEME_FFIANYPTR_VAL(val));
         toff = SCHEME_FFIANYPTR_OFFSET(val);
         if (basetype_p == NULL || (tmp == NULL && toff == 0) || 0) {
           if (_offset) *_offset = 0;
@@ -2096,7 +2160,7 @@ static void* SCHEME2C(const char *who,
 #     endif /* SCHEME_BIG_ENDIAN */
       if (1) {
         Scheme_Object* tmp;
-        tmp = (Scheme_Object*)(val);
+        tmp = MZ_TYPE_CAST(Scheme_Object*, val);
         if (basetype_p == NULL || tmp == NULL || 0) {
           (((Scheme_Object**)W_OFFSET(dst,delta))[0]) = tmp;
           return NULL;
@@ -2273,7 +2337,7 @@ static Scheme_Object *foreign_compiler_sizeof(int argc, Scheme_Object *argv[])
     break;
   case 5: /* double */
     if (intsize==0) RETSIZE(double);
-    else if (intsize==1) RETSIZE(long double);
+    else if (intsize==1) RETSIZE(mz_long_double);
     else scheme_signal_error(MYNAME": bad qualifiers for 'double");
     break;
   default:
@@ -2687,6 +2751,21 @@ static Scheme_Object *foreign_flvector_to_cpointer(int argc, Scheme_Object *argv
   if (!SCHEME_FLVECTORP(argv[0]))
     scheme_wrong_contract(MYNAME, "flvector?", 0, argc, argv);
   return scheme_make_offset_cptr(argv[0], (intptr_t)SCHEME_FLVEC_ELS((Scheme_Object *)0x0), NULL);
+}
+#undef MYNAME
+
+#define MYNAME "extflvector->cpointer"
+static Scheme_Object *foreign_extflvector_to_cpointer(int argc, Scheme_Object *argv[])
+{
+# ifdef MZ_LONG_DOUBLE
+  if (!SCHEME_EXTFLVECTORP(argv[0]))
+    scheme_wrong_contract(MYNAME, "extflvector?", 0, argc, argv);
+  return scheme_make_offset_cptr(argv[0], (intptr_t)SCHEME_EXTFLVEC_ELS((Scheme_Object *)0x0), NULL);
+# else /* MZ_LONG_DOUBLE undefined */
+  scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
+                   MYNAME ": " NOT_SUPPORTED_STR);
+  return NULL;
+# endif /* MZ_LONG_DOUBLE */
 }
 #undef MYNAME
 
@@ -3886,6 +3965,8 @@ void scheme_init_foreign(Scheme_Env *env)
     scheme_make_prim_w_arity(foreign_vector_to_cpointer, "vector->cpointer", 1, 1), menv);
   scheme_add_global("flvector->cpointer",
     scheme_make_prim_w_arity(foreign_flvector_to_cpointer, "flvector->cpointer", 1, 1), menv);
+  scheme_add_global("extflvector->cpointer",
+    scheme_make_prim_w_arity(foreign_extflvector_to_cpointer, "extflvector->cpointer", 1, 1), menv);
   scheme_add_global("memset",
     scheme_make_prim_w_arity(foreign_memset, "memset", 3, 5), menv);
   scheme_add_global("memmove",
@@ -4019,6 +4100,13 @@ void scheme_init_foreign(Scheme_Env *env)
   t->scheme_to_c = ((Scheme_Object*)(void*)(&ffi_type_double));
   t->c_to_scheme = ((Scheme_Object*)FOREIGN_double);
   scheme_add_global("_double", (Scheme_Object*)t, menv);
+  s = scheme_intern_symbol("longdouble");
+  t = (ctype_struct*)scheme_malloc_tagged(sizeof(ctype_struct));
+  t->so.type = ctype_tag;
+  t->basetype = (s);
+  t->scheme_to_c = ((Scheme_Object*)(void*)(&ffi_type_slongdouble));
+  t->c_to_scheme = ((Scheme_Object*)FOREIGN_longdouble);
+  scheme_add_global("_longdouble", (Scheme_Object*)t, menv);
   s = scheme_intern_symbol("double*");
   t = (ctype_struct*)scheme_malloc_tagged(sizeof(ctype_struct));
   t->so.type = ctype_tag;
@@ -4211,6 +4299,8 @@ void scheme_init_foreign(Scheme_Env *env)
    scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "vector->cpointer", 1, 1), menv);
   scheme_add_global("flvector->cpointer",
    scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "flvector->cpointer", 1, 1), menv);
+  scheme_add_global("extflvector->cpointer",
+   scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "extflvector->cpointer", 1, 1), menv);
   scheme_add_global("memset",
    scheme_make_prim_w_arity((Scheme_Prim *)unimplemented, "memset", 3, 5), menv);
   scheme_add_global("memmove",
@@ -4254,6 +4344,7 @@ void scheme_init_foreign(Scheme_Env *env)
   scheme_add_global("_ufixnum", scheme_false, menv);
   scheme_add_global("_float", scheme_false, menv);
   scheme_add_global("_double", scheme_false, menv);
+  scheme_add_global("_longdouble", scheme_false, menv);
   scheme_add_global("_double*", scheme_false, menv);
   scheme_add_global("_bool", scheme_false, menv);
   scheme_add_global("_string/ucs-4", scheme_false, menv);

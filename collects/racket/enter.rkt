@@ -15,6 +15,8 @@
 
 (define orig-namespace (current-namespace))
 
+(define-logger enter!)
+
 (define (check-flags flags)
   ;; check that all flags are known, that at most one of the noise flags is
   ;; present, and add #:verbose-reload if none are (could be done at the macro
@@ -33,14 +35,28 @@
 (define (do-enter! mod flags)
   (let ([flags (check-flags flags)])
     (if mod
-      (let* ([none "none"]
-             [exn (with-handlers ([void values])
-                    (enter-require mod flags)
-                    none)]
-             [ns (module->namespace mod)])
-        (current-namespace ns)
-        (unless (memq '#:dont-re-require-enter flags)
-          (namespace-require 'racket/enter))
+      (let* ([none (gensym)]
+             [exn (with-handlers ([void (lambda (exn) exn)])
+                    (if (module-path? mod)
+                        (enter-require mod flags)
+                        (raise-argument-error 'enter! "module-path?" mod))
+                    none)])
+        ;; Try to switch to the module namespace,
+        ;; even if there was an exception, because the
+        ;; idea is to allow debugging from inside the
+        ;; module. If any excepiton happens in trying to
+        ;; switch to the declared module, log that as
+        ;; an internal exception.
+        (with-handlers ([void (lambda (exn)
+                                (if (exn? exn)
+                                    (log-enter!-error (exn-message exn))
+                                    (log-enter!-error "~s" exn)))])
+          (when (and (module-path? mod)
+                     (module-declared? mod #f))
+            (let ([ns (module->namespace mod)])
+              (current-namespace ns)
+              (unless (memq '#:dont-re-require-enter flags)
+                (namespace-require 'racket/enter)))))
         (unless (eq? none exn) (raise exn)))
       (current-namespace orig-namespace))))
 
@@ -64,30 +80,39 @@
         (eprintf "  [~aloading ~a]\n" (if re? "re-" "") path))
       void))
   (lambda (path name)
-    (if name
-      ;; Module load:
-      (let* ([code (get-module-code
-                    path "compiled"
-                    (lambda (e)
-                      (parameterize ([compile-enforce-module-constants #f])
-                        (compile e)))
-                    (lambda (ext loader?) (load-extension ext) #f)
-                    #:notify notify)]
-             [dir  (or (current-load-relative-directory) (current-directory))]
-             [path (path->complete-path path dir)]
-             [path (normal-case-path (simplify-path path))])
-        ;; Record module timestamp and dependencies:
-        (define-values (ts actual-path) (get-timestamp path))
-        (let ([a-mod (mod name
-                          ts
-                          (if code
-                            (append-map cdr (module-compiled-imports code))
-                            null))])
-          (hash-set! loaded path a-mod))
-        ;; Evaluate the module:
-        (parameterize ([current-module-declare-source actual-path])
-          (eval code)))
-      ;; Not a module:
+    (if (and name
+             (not (and (pair? name)
+                       (not (car name)))))
+        ;; Module load:
+        (with-handlers ([(lambda (exn)
+                           (and (pair? name)
+                                (exn:get-module-code? exn)))
+                         (lambda (exn) 
+                           ;; Load-handler protocol: quiet failure when a
+                           ;; submodule is not found
+                           (void))])
+          (let* ([code (get-module-code
+                        path "compiled"
+                        (lambda (e)
+                          (parameterize ([compile-enforce-module-constants #f])
+                            (compile e)))
+                        (lambda (ext loader?) (load-extension ext) #f)
+                        #:notify notify)]
+                 [dir  (or (current-load-relative-directory) (current-directory))]
+                 [path (path->complete-path path dir)]
+                 [path (normal-case-path (simplify-path path))])
+            ;; Record module timestamp and dependencies:
+            (define-values (ts actual-path) (get-timestamp path))
+            (let ([a-mod (mod name
+                              ts
+                              (if code
+                                  (append-map cdr (module-compiled-imports code))
+                                  null))])
+              (hash-set! loaded path a-mod))
+            ;; Evaluate the module:
+            (parameterize ([current-module-declare-source actual-path])
+              (eval code))))
+      ;; Not a module, or a submodule that we shouldn't load from source:
       (begin (notify path) (orig path name)))))
 
 (define (get-timestamp path)

@@ -13,9 +13,15 @@
         [prefix drracket:module-language-tools: drracket:module-language-tools^])
 (export drracket:get/extend^)
 
+(define re-extension-allowed? #f)
+(define (allow-re-extension!) (set! re-extension-allowed? #t))
+(define (disallow-re-extension!) (set! re-extension-allowed? #f))
+
 (define make-extender
   (λ (get-base% name [final-mixin values])
-    (let ([extensions (λ (x) x)]
+    (define extend-name (string->symbol (format "extend-~a" name)))
+    (let ([names-for-changes '()]
+          [extensions '()]
           [built-yet? #f]
           [built #f]
           [verify
@@ -25,26 +31,51 @@
                  (if (and (class? new%)
                           (subclass? new% %))
                      new%
-                     (error 'extend-% "expected output of extension to create a subclass of its input, got: ~a"
+                     (error extend-name "expected output of extension to create a subclass of its input, got: ~a"
                             new%)))))])
+      (define (add-extender extension [before? #t] #:name-for-changes [name-for-changes #f])
+        (cond
+          [(and (symbol? name-for-changes) (member name-for-changes names-for-changes))
+           (cond
+             [re-extension-allowed?
+              (set! extensions
+                    (for/list ([e-extension (in-list extensions)]
+                               [e-name (in-list names-for-changes)])
+                      (if (equal? e-name name-for-changes) 
+                          extension
+                          e-extension)))
+              (set! built-yet? #f)
+              (set! built #f)]
+             [else
+              (error extend-name 
+                     "attempted to use name ~s multiple times without first enabling re-extensions" 
+                     name-for-changes)])]
+          [else
+           (when built-yet?
+             (cond
+               [re-extension-allowed? 
+                (set! built-yet? #f)
+                (set! built #f)]
+               [else
+                (error extend-name 
+                       "cannot build a new extension of ~a after initialization"
+                       name-for-changes)]))
+           (set! extensions 
+                 (if before?
+                     (cons (verify extension) extensions)
+                     (append extensions (list (verify extension)))))
+           (set! names-for-changes
+                 (if before?
+                     (cons name-for-changes names-for-changes)
+                     (append names-for-changes (list name-for-changes))))]))
+      (define (get-built)
+        (unless built-yet?
+          (set! built-yet? #t)
+          (set! built (final-mixin ((apply compose extensions) (get-base%)))))
+        built)
       (values
-       (letrec ([add-extender
-                 (case-lambda
-                   [(extension) (add-extender extension #t)]
-                   [(extension before?)
-                    (when built-yet?
-                      (error 'extender "cannot build a new extension of ~a after initialization"
-                             name))
-                    (set! extensions 
-                          (if before?
-                              (compose (verify extension) extensions)
-                              (compose extensions (verify extension))))])])
-         add-extender)
-       (λ ()
-         (unless built-yet?
-           (set! built-yet? #t)
-           (set! built (final-mixin (extensions (get-base%)))))
-         built)))))
+       (procedure-rename add-extender extend-name)
+       (procedure-rename get-built (string->symbol (format "get-~a" name)))))))
 
 (define (get-base-tab%)
   (drracket:module-language:module-language-online-expand-tab-mixin

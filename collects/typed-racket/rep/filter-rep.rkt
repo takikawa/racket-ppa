@@ -19,12 +19,14 @@
 (def-filter Bot () [#:fold-rhs #:base])
 (def-filter Top () [#:fold-rhs #:base])
 
-(def-filter TypeFilter ([t Type/c] [p (listof PathElem?)] [v name-ref/c])
+;; TODO: t should only be a Type/c, but that leads to circular dependencies
+(def-filter TypeFilter ([t Type?] [p (listof PathElem?)] [v name-ref/c])
   [#:intern (list (Rep-seq t) (map Rep-seq p) (hash-name v))]
   [#:frees (λ (f) (combine-frees (map f (cons t p))))]
   [#:fold-rhs (*TypeFilter (type-rec-id t) (map pathelem-rec-id p) v)])
 
-(def-filter NotTypeFilter ([t Type/c] [p (listof PathElem?)] [v name-ref/c])
+;; TODO: t should only be a Type/c, but that leads to circular dependencies
+(def-filter NotTypeFilter ([t Type?] [p (listof PathElem?)] [v name-ref/c])
   [#:intern (list (Rep-seq t) (map Rep-seq p) (hash-name v))]
   [#:frees (λ (f) (combine-frees (map f (cons t p))))]
   [#:fold-rhs (*NotTypeFilter (type-rec-id t) (map pathelem-rec-id p) v)])
@@ -40,18 +42,7 @@
   [#:fold-rhs (*OrFilter (map filter-rec-id fs))]
   [#:frees (λ (f) (combine-frees (map f fs)))])
 
-(def-filter FilterSet (thn els)
-  [#:contract (->i ([t any/c]
-                    [e any/c])
-                   (#:syntax [stx #f])
-                   #:pre (t e)
-                   (and (cond [(Bot? t) #t]
-                              [(Bot? e) (Top? t)]
-                              [else (Filter/c-predicate? t)])
-                        (cond [(Bot? e) #t]
-                              [(Bot? t) (Top? e)]
-                              [else (Filter/c-predicate? e)]))
-                   [result FilterSet?])]
+(def-filter FilterSet ([thn Filter/c] [els Filter/c])
   [#:fold-rhs (*FilterSet (filter-rec-id thn) (filter-rec-id els))])
 
 ;; represents no info about the filters of this expression

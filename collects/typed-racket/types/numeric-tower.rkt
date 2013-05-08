@@ -2,7 +2,8 @@
 
 (require "../utils/utils.rkt")
 
-(require (types numeric-predicates)
+(require (rename-in (types numeric-predicates base-abbrev)
+                    [simple-Un *Un])
          (rename-in (rep type-rep) [make-Base make-Base*])
          racket/match
          racket/function
@@ -18,25 +19,13 @@
          -SingleFlonumPosZero -SingleFlonumNegZero -SingleFlonumZero -SingleFlonumNan -PosSingleFlonum -NonNegSingleFlonum -NegSingleFlonum -NonPosSingleFlonum -SingleFlonum
          -InexactRealPosZero -InexactRealNegZero -InexactRealZero -InexactRealNan -PosInexactReal -NonNegInexactReal -NegInexactReal -NonPosInexactReal -InexactReal
          -RealZero -PosReal -NonNegReal -NegReal -NonPosReal -Real
-         -ExactNumber -FloatComplex -SingleFlonumComplex -InexactComplex -Number
+         -ExactImaginary -FloatImaginary -SingleFlonumImaginary -InexactImaginary -Imaginary
+         -ExactNumber -ExactComplex -FloatComplex -SingleFlonumComplex -InexactComplex -Number
          (rename-out (-Int -Integer)))
 
 ;; all the types defined here are numeric
 (define (make-Base name contract predicate marshaled)
   (make-Base* name contract predicate marshaled #t))
-
-;; Simple union constructor.
-;; Flattens nested unions and sorts types, but does not check for
-;; overlapping subtypes.
-(define-syntax *Un
-  (syntax-rules ()
-    [(_ . args) (make-Union (remove-dups (sort (apply append (map flat (list . args))) type<?)))]))
-
-(define (flat t)
-  (match t
-    [(Union: es) es]
-    [_ (list t)]))
-
 
 
 ;; Numeric hierarchy
@@ -102,6 +91,9 @@
              #'-NegFixnum))
 (define -NonPosFixnum (*Un -NegFixnum -Zero))
 (define -Fixnum       (*Un -NegFixnum -Zero -PosFixnum))
+;; This type, and others like it, should *not* be exported, or used for
+;; anything but building unions. Especially, no literals should be given
+;; these types.
 (define -PosIntNotFixnum
   (make-Base 'Positive-Integer-Not-Fixnum
              #'(and/c exact-integer? positive? (not/c fixnum?))
@@ -182,16 +174,14 @@
 (define -SingleFlonumPosZero ; disjoint from Flonum 0s
   (make-Base 'Single-Flonum-Positive-Zero
              ;; eqv? equates 0.0f0 with itself, but not eq?
-             ;; we also need to check for single-flonum? since eqv? also equates
-             ;; 0.0f0 and 0.0e0
-             #'(and/c single-flonum? (lambda (x) (eqv? x 0.0f0)))
-             (lambda (x) #f) ; can't assign that type at compile-time. see tc-lit for more explanation
-	     #'-SingleFlonumPosZero))
+             #'(lambda (x) (eqv? x 0.0f0))
+             (lambda (x) (eqv? x 0.0f0))
+             #'-SingleFlonumPosZero))
 (define -SingleFlonumNegZero
   (make-Base 'Single-Flonum-Negative-Zero
-             #'(and/c single-flonum? (lambda (x) (eqv? x -0.0f0)))
-             (lambda (x) #f)
-	     #'-SingleFlonumNegZero))
+             #'(lambda (x) (eqv? x -0.0f0))
+             (lambda (x) (eqv? x -0.0f0))
+             #'-SingleFlonumNegZero))
 (define -SingleFlonumZero (*Un -SingleFlonumPosZero -SingleFlonumNegZero -SingleFlonumNan))
 (define -InexactRealNan     (*Un -FlonumNan -SingleFlonumNan))
 (define -InexactRealPosZero (*Un -SingleFlonumPosZero -FlonumPosZero))
@@ -202,8 +192,8 @@
 (define -PosSingleFlonumNoNan
   (make-Base 'Positive-Single-Flonum-No-Nan
              #'(and/c single-flonum? positive?)
-             (lambda (x) #f)
-	     #'-PosSingleFlonumNoNan))
+             (lambda (x) (and (single-flonum? x) (positive? x)))
+             #'-PosSingleFlonumNoNan))
 (define -PosSingleFlonum    (*Un -PosSingleFlonumNoNan -SingleFlonumNan))
 (define -PosInexactReal     (*Un -PosSingleFlonum -PosFlonum))
 (define -NonNegSingleFlonum (*Un -PosSingleFlonum -SingleFlonumZero))
@@ -211,8 +201,8 @@
 (define -NegSingleFlonumNoNan
   (make-Base 'Negative-Single-Flonum-No-Nan
              #'(and/c single-flonum? negative?)
-             (lambda (x) #f)
-	     #'-NegSingleFlonumNoNan))
+             (lambda (x) (and (single-flonum? x) (negative? x)))
+             #'-NegSingleFlonumNoNan))
 (define -NegSingleFlonum    (*Un -NegSingleFlonumNoNan -SingleFlonumNan))
 (define -NegInexactReal     (*Un -NegSingleFlonum -NegFlonum))
 (define -NonPosSingleFlonum (*Un -NegSingleFlonum -SingleFlonumZero))
@@ -235,23 +225,60 @@
 ;; real-part, imag-part and others.
 ;; We could have Complex be a 2-argument type constructor (although it
 ;; could construct uninhabitable types like (Complex Integer Float), which
-;; can't exist in Racket (parts must be both exact or both inexact)).
-;; Imaginaries could have their own type hierarchy as well.
-;; That's future work.
+;; can't exist in Racket (parts must be both exact, both inexact, or one is
+;; exact-zero)).  That's future work.
 
-;; Both parts of a complex number must be of the same exactness.
 ;; Thus, the only possible kinds of complex numbers are:
-;; Real/Real, Flonum/Flonum, SingleFlonum/SingleFlonum
-(define -ExactNumberNotReal
-  (make-Base 'Exact-Number-Not-Real
+;; Zero/Rat, Zero/Flonum, Zero/SingleFlonum.
+;; Rat/Rat, Flonum/Flonum, SingleFlonum/SingleFlonum.
+(define -ExactImaginary
+  (make-Base 'Exact-Imaginary
              #'(and/c number?
                       (not/c real?)
-                      (lambda (x) (exact? (imag-part x))))
+                      (lambda (x)
+                        (and
+                          (eqv? 0 (real-part x))
+                          (exact? (imag-part x)))))
              (lambda (x) (and (number? x)
                               (not (real? x))
+                              (eqv? 0 (real-part x))
                               (exact? (imag-part x))))
-             #'-ExactNumberNotReal))
-(define -ExactNumber (*Un -ExactNumberNotReal -Rat))
+             #'-ExactImaginary))
+(define -ExactComplex
+  (make-Base 'Exact-Complex
+             #'(and/c number?
+                      (not/c real?)
+                      (lambda (x)
+                        (and
+                          (not (eqv? 0 (real-part x)))
+                          (exact? (real-part x))
+                          (exact? (imag-part x)))))
+             (lambda (x) (and (number? x)
+                              (not (real? x))
+                              (not (eqv? 0 (real-part x)))
+                              (exact? (real-part x))
+                              (exact? (imag-part x))))
+             #'-ExactComplex))
+(define -FloatImaginary (make-Base 'Float-Imaginary
+                                   #'(and/c number?
+                                            (lambda (x)
+                                              (and (flonum? (imag-part x))
+                                                   (eqv? 0 (real-part x)))))
+                                   (lambda (x)
+                                     (and (number? x)
+                                          (flonum? (imag-part x))
+                                          (eqv? 0 (real-part x))))
+                                   #'-FloatImaginary))
+(define -SingleFlonumImaginary (make-Base 'Single-Flonum-Imaginary
+                                          #'(and/c number?
+                                                   (lambda (x)
+                                                     (and (single-flonum? (imag-part x))
+                                                          (eqv? 0 (real-part x)))))
+                                          (lambda (x)
+                                            (and (number? x)
+                                                 (single-flonum? (imag-part x))
+                                                 (eqv? 0 (real-part x))))
+                                          #'-SingleFlonumImaginary))
 (define -FloatComplex (make-Base 'Float-Complex
                                  #'(and/c number?
                                           (lambda (x)
@@ -272,6 +299,9 @@
                                              (single-flonum? (imag-part x))
                                              (single-flonum? (real-part x))))
                                       #'-SingleFlonumComplex))
+(define -ExactNumber (*Un -ExactImaginary -ExactComplex -Rat))
+(define -InexactImaginary (*Un -FloatImaginary -SingleFlonumImaginary))
+(define -Imaginary (*Un -ExactImaginary -InexactImaginary))
 (define -InexactComplex (*Un -FloatComplex -SingleFlonumComplex))
-(define -Complex (*Un -Real -InexactComplex -ExactNumberNotReal))
+(define -Complex (*Un -Real -Imaginary -ExactComplex -InexactComplex))
 (define -Number -Complex)

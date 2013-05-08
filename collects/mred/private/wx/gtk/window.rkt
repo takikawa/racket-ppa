@@ -70,6 +70,10 @@
 
 (define-gdk gdk_keyval_to_unicode (_fun _uint -> _uint32))
 
+(define-gtk gtk_widget_get_display (_fun _GtkWidget -> _GdkDisplay))
+(define-gtk gtk_widget_get_screen (_fun _GtkWidget -> _GdkScreen))
+(define-gdk gdk_display_warp_pointer (_fun _GdkDisplay _GdkScreen _int _int -> _void))
+
 (define-cstruct _GtkRequisition ([width _int]
                                  [height _int]))
 (define-cstruct _GtkAllocation ([x _int]
@@ -327,57 +331,58 @@
                                  (if crossing?
                                      (GdkEventCrossing-state event)
                                      (GdkEventButton-state event)))]
-                 [bit? (lambda (m v) (positive? (bitwise-and m v)))]
-                 [type (cond
-                        [(= type GDK_MOTION_NOTIFY)
-                         'motion]
-                        [(= type GDK_ENTER_NOTIFY)
-                         'enter]
-                        [(= type GDK_LEAVE_NOTIFY)
-                         'leave]
-                        [(= type GDK_BUTTON_PRESS)
-                         (case (GdkEventButton-button event)
-                           [(1) 'left-down]
-                           [(3) 'right-down]
-                           [else 'middle-down])]
-                        [else
-                         (case (GdkEventButton-button event)
-                           [(1) 'left-up]
-                           [(3) 'right-up]
-                           [else 'middle-up])])]
-                 [m (let-values ([(x y) (send wx
-                                              adjust-event-position
-                                              (->long ((if motion? 
-                                                           GdkEventMotion-x 
-                                                           (if crossing? GdkEventCrossing-x GdkEventButton-x))
-                                                       event))
-                                              (->long ((if motion? GdkEventMotion-y 
-                                                           (if crossing? GdkEventCrossing-y GdkEventButton-y))
-                                                       event)))])
-                      (new mouse-event%
-                           [event-type type]
-                           [left-down (case type
-                                        [(left-down) #t]
-                                        [(left-up) #f]
-                                        [else (bit? modifiers GDK_BUTTON1_MASK)])]
-                           [middle-down (case type
-                                          [(middle-down) #t]
-                                          [(middle-up) #f]
-                                          [else (bit? modifiers GDK_BUTTON2_MASK)])]
-                           [right-down (case type
-                                         [(right-down) #t]
-                                         [(right-up) #f]
-                                         [else (bit? modifiers GDK_BUTTON3_MASK)])]
-                           [x x]
-                           [y y]
-                           [shift-down (bit? modifiers GDK_SHIFT_MASK)]
-                           [control-down (bit? modifiers GDK_CONTROL_MASK)]
-                           [meta-down (bit? modifiers GDK_META_MASK)]
-                           [alt-down (bit? modifiers GDK_MOD1_MASK)]
-                           [time-stamp ((if motion? GdkEventMotion-time 
-                                            (if crossing? GdkEventCrossing-time GdkEventButton-time))
-                                        event)]
-                           [caps-down (bit? modifiers GDK_LOCK_MASK)]))])
+                  [bit? (lambda (m v) (positive? (bitwise-and m v)))]
+                  [type (cond
+                          [(= type GDK_MOTION_NOTIFY)
+                           'motion]
+                          [(= type GDK_ENTER_NOTIFY)
+                           'enter]
+                          [(= type GDK_LEAVE_NOTIFY)
+                           'leave]
+                          [(= type GDK_BUTTON_PRESS)
+                           (case (GdkEventButton-button event)
+                             [(1) 'left-down]
+                             [(3) 'right-down]
+                             [else 'middle-down])]
+                          [else
+                           (case (GdkEventButton-button event)
+                             [(1) 'left-up]
+                             [(3) 'right-up]
+                             [else 'middle-up])])]
+                  [m (let-values ([(x y)
+                                   (send wx
+                                         adjust-event-position
+                                         (->long ((if motion? 
+                                                      GdkEventMotion-x 
+                                                      (if crossing? GdkEventCrossing-x GdkEventButton-x))
+                                                  event))
+                                         (->long ((if motion? GdkEventMotion-y 
+                                                      (if crossing? GdkEventCrossing-y GdkEventButton-y))
+                                                  event)))])
+                       (new mouse-event%
+                            [event-type type]
+                            [left-down (case type
+                                         [(left-down) #t]
+                                         [(left-up) #f]
+                                         [else (bit? modifiers GDK_BUTTON1_MASK)])]
+                            [middle-down (case type
+                                           [(middle-down) #t]
+                                           [(middle-up) #f]
+                                           [else (bit? modifiers GDK_BUTTON2_MASK)])]
+                            [right-down (case type
+                                          [(right-down) #t]
+                                          [(right-up) #f]
+                                          [else (bit? modifiers GDK_BUTTON3_MASK)])]
+                            [x x]
+                            [y y]
+                            [shift-down (bit? modifiers GDK_SHIFT_MASK)]
+                            [control-down (bit? modifiers GDK_CONTROL_MASK)]
+                            [meta-down (bit? modifiers GDK_META_MASK)]
+                            [alt-down (bit? modifiers GDK_MOD1_MASK)]
+                            [time-stamp ((if motion? GdkEventMotion-time 
+                                             (if crossing? GdkEventCrossing-time GdkEventButton-time))
+                                         event)]
+                            [caps-down (bit? modifiers GDK_LOCK_MASK)]))])
              (if (send wx handles-events? gtk)
                  (begin
                    (queue-window-event wx (lambda ()
@@ -731,6 +736,15 @@
 
     (define/public (get-client-delta)
       (values 0 0))
+
+    (define/public (warp-pointer x y)
+      (define xb (box x))
+      (define yb (box y))
+      (client-to-screen xb yb)
+      (gdk_display_warp_pointer (gtk_widget_get_display gtk)
+                                (gtk_widget_get_screen gtk)
+                                (unbox xb)
+                                (unbox yb)))
 
     (define/public (gets-focus?) #t)))
 

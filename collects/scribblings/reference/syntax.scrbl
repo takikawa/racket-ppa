@@ -810,7 +810,14 @@ corresponds to the default @tech{module name resolver}.
 
 Like @racket[require], but for use in a @tech{internal-definition context} to
 import just into the local context. Only bindings from @tech{phase
-level} 0 are imported.}
+level} 0 are imported.
+
+@examples[
+  (let ()
+    (local-require racket/control)
+    fcontrol)
+  fcontrol
+]}
 
 
 @guideintro["module-provide"]{@racket[provide]}
@@ -2153,6 +2160,9 @@ For the selected @racket[case-clause], the results of the last
 A @racket[case-clause] that starts with @racket[else] must be the last
 @racket[case-clause].
 
+The @racket[case] form can dispatch to a matching @racket[case-clause]
+in @math{O(log N)} time for @math{N} @racket[datum]s.
+
 @mz-examples[
 (case (+ 7 5)
  [(1 2 3) 'small]
@@ -2467,12 +2477,12 @@ form.
  (list x y))
 ]}
 
-@defform[(begin0 expr body ...+)]{
+@defform[(begin0 expr ...+)]{
 
-Evaluates the @racket[expr], then evaluates the @racket[body]s,
-ignoring the @racket[body] results. The results of the @racket[expr]
-are the results of the @racket[begin0] form, but the @racket[expr] is
-in tail position only if no @racket[body]s are present.
+Evaluates the first @racket[expr], then evaluates the other @racket[exprs]s
+in order, ignoring their results. The results of the first @racket[expr]
+are the results of the @racket[begin0] form; the first @racket[expr] is
+in tail position only if no other @racket[expr]s are present.
 
 @mz-examples[
 (begin0
@@ -2623,12 +2633,12 @@ binding to an @tech{assignment transformer}.}
 
 @defform[(with-continuation-mark key-expr val-expr result-expr)]{
 
-The @racket[key-expr], @racket[mark-expr], and @racket[result-expr]
+The @racket[key-expr], @racket[val-expr], and @racket[result-expr]
 expressions are evaluated in order. After @racket[key-expr] is
-evaluated to obtain a key and @racket[mark-expr] is evaluated to
-obtain a mark, the key is mapped to the mark in the current
-continuation's initial frame. If the frame already has a mark for the
-key, it is replaced. Finally, the @racket[result-expr] is evaluated;
+evaluated to obtain a key and @racket[val-expr] is evaluated to
+obtain a value, the key is mapped to the value as a @tech{continuation mark} in the current
+continuation's initial @tech{continuation frame}. If the frame already has a mark for the
+key, the mark is replaced. Finally, the @racket[result-expr] is evaluated;
 the continuation for evaluating @racket[result-expr] is the
 continuation of the @racket[with-continuation-mark] expression (so the
 result of the @racket[result-expr] is the result of the
@@ -2814,12 +2824,19 @@ heuristics, and should only be used when other inlining attempts (such as
 
 @note-lib-only[racket/lazy-require]
 
-@defform[(lazy-require [module-path (imported-fun-id ...)] ...)]{
+@(define lazy-require-eval (make-base-eval))
+@(lazy-require-eval '(require racket/lazy-require))
 
-Defines each @racket[imported-fun-id] as a function that, when called,
-dynamically requires the export named @racket[imported-fun-id] from
-the module specified by @racket[module-path] and calls it with the
-same arguments.
+@defform[(lazy-require [module-path (fun-import ...)] ...)
+         #:grammar
+         ([fun-import fun-id
+                      (orig-fun-id fun-id)])]{
+
+Defines each @racket[fun-id] as a function that, when called,
+dynamically requires the export named @racket[orig-fun-id] from the
+module specified by @racket[module-path] and calls it with the same
+arguments. If @racket[orig-fun-id] is not given, it defaults to
+@racket[fun-id].
 
 If the enclosing relative phase level is not 0, then
 @racket[module-path] is also placed in a submodule (with a use of
@@ -2831,4 +2848,20 @@ submodule). Introduced submodules have the names
 When the use of a lazily-required function triggers module loading,
 @racket[register-external-module] declares a potential compilation
 dependency (in case the function is used in the process of compiling a
-module).}
+module).
+
+@examples[#:eval lazy-require-eval
+(lazy-require
+  [racket/list (partition)])
+(partition even? '(1 2 3 4 5))
+(module hello racket/base
+  (provide hello)
+  (printf "starting hello server\n")
+  (define (hello) (printf "hello!\n")))
+(lazy-require
+  ['hello ([hello greet])])
+(greet)
+]
+}
+
+@(close-eval lazy-require-eval)

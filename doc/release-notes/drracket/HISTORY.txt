@@ -1,6 +1,36 @@
 ------------------------------
+       Version 5.3.3
+------------------------------
+
+  . added the ability to dynamically add new mixins to the DrRacket
+    classes and to start up a REPL to evaluate expressions to change
+    DrRacket's behavior.
+
+  . added a simple "install package" tool via a menu
+
+  . more improvements to DrRacket's responsiveness
+
+------------------------------
+       Version 5.3.3
+------------------------------
+
+  . added esc;h key binding (to the interactions window) that shows
+    the history of expressions evaluated
+
+------------------------------
        Version 5.3.2
 ------------------------------
+
+  . fixed a flaw in interactions between
+    the contour window and highlighting
+
+------------------------------
+       Version 5.3.2
+------------------------------
+
+  . Removed 'Create Executable...' functionality from DrRacket,
+    except in the "The Racket Language" (#lang-based) language
+    and the teaching languages (HtDP and DMdA).
 
   . DrRacket is more responsive when editing
 

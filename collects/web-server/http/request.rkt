@@ -134,7 +134,7 @@
 
 ;; msie-from-local-machine? : table str str -> bool
 
-;; to work around a bug in MSIE for documents < 265 bytes when
+;; to work around an error in MSIE for documents < 265 bytes when
 ;; connecting from the local machine.  The server could pad the
 ;; response as MSIIS does, but closing the connection works, too.  We
 ;; do not check for version numbers since IE 6 under windows is 5.2
@@ -274,7 +274,17 @@
              [(string->number (bytes->string/utf-8 value))
               => (lambda (len)
                    (let ([raw-bytes (read-bytes len in)])
-                     (values (delay (append (parse-bindings raw-bytes) (force bindings-GET))) raw-bytes)))]
+                     (cond
+                       [(eof-object? raw-bytes)
+                        (network-error
+                         'read-bindings
+                         "Post data ended pre-maturely")]
+                       [else
+                        (values (delay 
+                                  (append
+                                   (parse-bindings raw-bytes)
+                                   (force bindings-GET)))
+                                raw-bytes)])))]
              [else 
               (network-error
                'read-bindings
@@ -288,7 +298,13 @@
         (cond [(string->number (bytes->string/utf-8 value))
                => (lambda (len)
                     (let ([raw-bytes (read-bytes len in)])
-                      (values (delay empty) raw-bytes)))]
+                      (cond
+                        [(eof-object? raw-bytes)
+                         (network-error
+                          'read-bindings
+                          "Post data ended pre-maturely")]
+                        [else
+                         (values (delay empty) raw-bytes)])))]
               [else
                (network-error 
                 'read-bindings

@@ -6,9 +6,9 @@
          "private/matrix/matrix-conversion.rkt"
          "private/matrix/matrix-syntax.rkt"
          "private/matrix/matrix-comprehension.rkt"
-         "private/matrix/matrix-expt.rkt"
          "private/matrix/matrix-types.rkt"
          "private/matrix/matrix-2d.rkt"
+         ;;"private/matrix/matrix-expt.rkt"  ; all use require/untyped-contract
          ;;"private/matrix/matrix-gauss-elim.rkt"  ; all use require/untyped-contract
          (except-in "private/matrix/matrix-solve.rkt"
                     matrix-determinant
@@ -17,6 +17,10 @@
          (except-in "private/matrix/matrix-constructors.rkt"
                     vandermonde-matrix)
          (except-in "private/matrix/matrix-basic.rkt"
+                    matrix-1norm
+                    matrix-2norm
+                    matrix-inf-norm
+                    matrix-norm
                     matrix-dot
                     matrix-cos-angle
                     matrix-angle
@@ -29,12 +33,20 @@
          (except-in "private/matrix/matrix-subspace.rkt"
                     matrix-col-space)
          (except-in "private/matrix/matrix-operator-norm.rkt"
+                    matrix-op-1norm
+                    matrix-op-2norm
+                    matrix-op-inf-norm
                     matrix-basis-cos-angle
                     matrix-basis-angle)
          ;;"private/matrix/matrix-qr.rkt"  ; all use require/untyped-contract
          ;;"private/matrix/matrix-lu.rkt"  ; all use require/untyped-contract
          ;;"private/matrix/matrix-gram-schmidt.rkt"  ; all use require/untyped-contract
          )
+
+(require/untyped-contract
+ (begin (require "private/matrix/matrix-types.rkt"))
+ "private/matrix/matrix-expt.rkt"
+ [matrix-expt  ((Matrix Number) Integer -> (Matrix Number))])
 
 (require/untyped-contract
  (begin (require "private/matrix/matrix-types.rkt"
@@ -72,6 +84,11 @@
 (require/untyped-contract
  (begin (require "private/matrix/matrix-types.rkt"))
  "private/matrix/matrix-basic.rkt"
+ [matrix-1norm  ((Matrix Number) -> Nonnegative-Real)]
+ [matrix-2norm  ((Matrix Number) -> Nonnegative-Real)]
+ [matrix-inf-norm  ((Matrix Number) -> Nonnegative-Real)]
+ [matrix-norm  (case-> ((Matrix Number) -> Nonnegative-Real)
+                       ((Matrix Number) Real -> Nonnegative-Real))]
  [matrix-dot
   (case-> ((Matrix Number) -> Nonnegative-Real)
           ((Matrix Number) (Matrix Number) -> Number))]
@@ -108,6 +125,9 @@
 (require/untyped-contract
  (begin (require "private/matrix/matrix-types.rkt"))
  "private/matrix/matrix-operator-norm.rkt"
+ [matrix-op-1norm  ((Matrix Number) -> Nonnegative-Real)]
+ [matrix-op-2norm  ((Matrix Number) -> Nonnegative-Real)]
+ [matrix-op-inf-norm  ((Matrix Number) -> Nonnegative-Real)]
  [matrix-basis-cos-angle
   ((Matrix Number) (Matrix Number) -> Number)]
  [matrix-basis-angle
@@ -148,9 +168,10 @@
           "private/matrix/matrix-solve.rkt"
           "private/matrix/matrix-operator-norm.rkt"
           "private/matrix/matrix-comprehension.rkt"
-          "private/matrix/matrix-expt.rkt"
           "private/matrix/matrix-types.rkt"
           "private/matrix/matrix-2d.rkt")
+         ;; matrix/matrix-expt.rkt
+         matrix-expt
          ;; matrix-gauss-elim.rkt
          matrix-gauss-elim
          matrix-row-echelon
@@ -161,6 +182,10 @@
          ;; matrix-constructors.rkt
          vandermonde-matrix
          ;; matrix-basic.rkt
+         matrix-1norm
+         matrix-2norm
+         matrix-inf-norm
+         matrix-norm
          matrix-dot
          matrix-cos-angle
          matrix-angle
@@ -173,6 +198,9 @@
          ;; matrix-subspace.rkt
          matrix-col-space
          ;; matrix-operator-norm.rkt
+         matrix-op-1norm
+         matrix-op-2norm
+         matrix-op-inf-norm
          matrix-basis-cos-angle
          matrix-basis-angle
          ;; matrix-qr.rkt

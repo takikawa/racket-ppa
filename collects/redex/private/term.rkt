@@ -44,7 +44,11 @@
                                                  stx
                                                  (syntax-e #'form))])
        (if (syntax->datum #'lang-stx)
-           (let ([lang-nts (language-id-nts #'lang-stx 'term)])
+           (let ([lang-nts (let loop ([ls #'lang-stx])
+                             (define slv (syntax-local-value ls (λ () #'lang-stx)))
+                             (if (term-id? slv)
+                                 (loop (term-id-prev-id slv))
+                                 (language-id-nts ls 'term)))])
              #`(term/nts t #,lang-nts))
            #'(term/nts t #f)))]))
 
@@ -70,16 +74,16 @@
     [(_ mf)
      #'(λ (x) (mf x))]))
 
-(define-syntax (mf-map stx)
-  (syntax-case stx ()
-    [(_ inner-apps)
-     #'(λ (l) (map inner-apps l))]))
-
 (define-syntax (jf-apply stx)
   (syntax-case stx ()
     [(_ jf)
      (judgment-form-id? #'jf)
      (judgment-form-term-proc (syntax-local-value #'jf (λ () #f)))]))
+
+(define-syntax (mf-map stx)
+  (syntax-case stx ()
+    [(_ inner-apps)
+     #'(λ (l) (map inner-apps l))]))
 
 (define-for-syntax currently-expanding-term-fn (make-parameter #f))
 
@@ -318,7 +322,11 @@
     [(mf-apply f)
      (and (identifier? #'mf-apply)
           (eq? (syntax-e #'mf-apply) 'mf-apply))
-     #'(metafunc f)]))
+     #'(metafunc f)]
+    [(jf-apply f)
+     (and (identifier? #'jf-apply)
+          (eq? (syntax-e #'jf-apply) 'jf-apply))
+     #'(jform f)]))
 
 (define-syntax (term-let-fn stx)
   (syntax-case stx ()
@@ -386,10 +394,7 @@
          (syntax
           (datum-case rhs1 ()
                       [new-x1
-                       ;; syntax local value on an id to check if it's bound correctly in
-                       ;; a term
-                       ;; term (term #:lang L (x_1 y_2)) term -> optional argument with lang
-                       (let-syntax ([orig-names (make-term-id #'new-names depths)] ...)
+                       (let-syntax ([orig-names (make-term-id #'new-names depths #'orig-names)] ...)
                          (term-let/error-name error-name ((x rhs) ...) body1 body2 ...))]
                       [_ no-match]))))]
     [(_ error-name () body1 body2 ...)

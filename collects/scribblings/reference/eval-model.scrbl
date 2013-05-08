@@ -78,7 +78,7 @@ its sub-expressions are evaluated, and then how the results are
 combined to reduce the form away.
 
 The @deftech{dynamic extent} of an expression is the sequence of
-evaluation steps during which an expression contains the @tech{redex}.
+evaluation steps during which the expression contains the @tech{redex}.
 
 @;------------------------------------------------------------------------
 @section{Tail Position}
@@ -599,7 +599,37 @@ top-level variables in higher @tech{phases}, while module
 top-levels are in corresponding higher @tech{phase}s.
 
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-@subsection[#:tag "module-redeclare"]{Module Re-declarations}
+@subsection[#:tag "cross-phase persistent-modules"]{Cross-Phase Persistent Modules}
+
+Module declarations that fit a highly constrained form create
+@deftech{cross-phase persistent} modules. A @tech{cross-phase persistent} module's
+instantiations across all phases and @tech{module registries} share
+the variables produced by the first instantiation of the module.
+
+The intent of a @tech{cross-phase persistent} module is to support values that are
+recognizable after @tech{phase} crossings. For example, when a macro
+transformer running in phase 1 raises a syntax error as represented by
+a @racket[exn:fail:syntax] instance, the instance is recognizable by a
+phase-0 exception handler wrapping a call to @racket[eval] or
+@racket[expand] that triggered the syntax error, because the
+@racket[exn:fail:syntax] structure type is defined by a
+@tech{cross-phase persistent} module.
+
+A @tech{cross-phase persistent} module imports only other @tech{cross-phase persistent} modules,
+and it contains only definitions that bind variables to functions,
+structure types and related functions, or structure-type properties
+and related functions. A @tech{cross-phase persistent} module never includes syntax
+literals (via @racket[quote-syntax]) or variable references (via
+@racket[#%variable-reference]). See @secref["cross-phase persistent-grammar"] for
+the syntactic specification of a @tech{cross-phase persistent} module
+declaration.
+
+A documented module should be assumed non-@tech{cross-phase persistent} unless it
+is specified as @tech{cross-phase persistent} (such as
+@racketmodname[racket/kernel]).
+
+@;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+@subsection[#:tag "module-redeclare"]{Module Redeclarations}
 
 @section-index["modules" "re-define"]
 
@@ -612,8 +642,16 @@ module body. If a new variable definition has a counterpart in the old
 declaration, it effectively assigns to the old variable.
 
 If a module is @tech{instantiate}d in any @tech{phase}s before it is
-re-declared, each re-declaration of the module is immediately
+redeclared, each redeclaration of the module is immediately
 @tech{instantiate}d in the same @tech{phase}s.
+
+If the current @tech{inspector} does not manage a module's declaration
+inspector (see @secref["modprotect"]), then the module cannot be
+redeclared. Similarly, a @tech{cross-phase persistent} module cannot be redeclared.
+Even if redeclrection succeeds, instantiation of a module that is
+previously instantiated may fail if instantiation for the
+redeclaration attempts to modify variables that are constant (see
+@racket[compile-enforce-module-constants]).
 
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 @subsection[#:tag "submodules"]{Submodules}

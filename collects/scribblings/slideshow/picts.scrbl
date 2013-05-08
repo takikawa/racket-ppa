@@ -227,6 +227,9 @@ The @racket[style] argument must be one of the following:
  @item{@racket[(cons 'unaligned style)] --- disables hinting (which is
        the default), so that metrics are scalable}
 
+ @item{@racket[(cons _color style)] --- where @racket[_color] is a @racket[color%] object,
+       @racket[colorize]s the text}
+
 ]
 
 If both @racket['combine] and @racket['no-combine] are specified, the
@@ -393,6 +396,7 @@ argument for consistency with the other functions.}
                       [#:end-pull end-pull real? 1/4]
                       [#:line-width line-width (or/c #f real?) #f]
                       [#:color color (or/c #f string? (is-a?/c color%)) #f]
+                      [#:alpha alpha (real-in 0.0 1.0)]
                       [#:style style (one-of/c 'transparent 'solid 'xor 'hilite 
                                                'dot 'long-dash 'short-dash 'dot-dash 
                                                'xor-dot 'xor-long-dash 'xor-short-dash 
@@ -411,6 +415,7 @@ argument for consistency with the other functions.}
                       [#:end-pull end-pull real? 1/4]
                       [#:line-width line-width (or/c #f real?) #f]
                       [#:color color (or/c #f string? (is-a?/c color%)) #f]
+                      [#:alpha alpha (real-in 0.0 1.0)]
                       [#:style style (one-of/c 'transparent 'solid 'xor 'hilite 
                                                'dot 'long-dash 'short-dash 'dot-dash 
                                                'xor-dot 'xor-long-dash 'xor-short-dash 
@@ -431,6 +436,7 @@ argument for consistency with the other functions.}
                       [#:end-pull end-pull real? 1/4]
                       [#:line-width line-width (or/c #f real?) #f]
                       [#:color color (or/c #f string? (is-a?/c color%)) #f]
+                      [#:alpha alpha (real-in 0.0 1.0)]
                       [#:style style (one-of/c 'transparent 'solid 'xor 'hilite 
                                                'dot 'long-dash 'short-dash 'dot-dash 
                                                'xor-dot 'xor-long-dash 'xor-short-dash 
@@ -466,7 +472,7 @@ defaults produce a straight line):
 
 ]
 
-The @racket[line-width], @racket[color], and @racket[style] arguments
+The @racket[line-width], @racket[color], @racket[alpha], and @racket[style] arguments
 apply to the added line.
 
 When the @racket[hide-arrowhead?] argument is a true value, then space
@@ -1125,6 +1131,10 @@ relative to the balloon's top-left corner.}
 
 The default background color for a balloon.
 
+@defboolparam[balloon-enable-3d on?]{
+
+A parameter that determines whether balloons are drawn with 3-D shading.}
+
 @; ----------------------------------------
 
 @subsection{Face}
@@ -1151,29 +1161,29 @@ follows:
 @tabular[#:sep @hspace[2]
   (list (list @para{@racket['unhappy] --- @racket[(face* 'none 'plain #t default-face-color 6)]}
               @(small-face 'unhappy))
-        (list @para{@racket['sortof-unhappy] --- @racket[(small-face* 'worried 'grimace #t default-face-color 6)]}
+        (list @para{@racket['sortof-unhappy] --- @racket[(face* 'worried 'grimace #t default-face-color 6)]}
               @(small-face 'sortof-unhappy))
-        (list @para{@racket['sortof-happy] --- @racket[(small-face* 'worried 'medium #f default-face-color 6)]}
+        (list @para{@racket['sortof-happy] --- @racket[(face* 'worried 'medium #f default-face-color 6)]}
                     @(small-face 'sortof-happy))
-        (list @para{@racket['happy] --- @racket[(small-face* 'none 'plain #f default-face-color 6)]}
+        (list @para{@racket['happy] --- @racket[(face* 'none 'plain #f default-face-color 6)]}
                     @(small-face 'happy))
-        (list @para{@racket['happier] --- @racket[(small-face* 'none 'large #f default-face-color 3)]}
+        (list @para{@racket['happier] --- @racket[(face* 'none 'large #f default-face-color 3)]}
                     @(small-face 'happier))
-        (list @para{@racket['embarrassed] --- @racket[(small-face* 'worried 'medium #f default-face-color 3)]}
+        (list @para{@racket['embarrassed] --- @racket[(face* 'worried 'medium #f default-face-color 3)]}
                     @(small-face 'embarrassed))
-        (list @para{@racket['badly-embarrassed] --- @racket[(small-face* 'worried 'medium #t default-face-color 3)]}
+        (list @para{@racket['badly-embarrassed] --- @racket[(face* 'worried 'medium #t default-face-color 3)]}
                     @(small-face 'badly-embarrassed))
-        (list @para{@racket['unhappier] --- @racket[(small-face* 'normal 'large #t default-face-color 3)]}
+        (list @para{@racket['unhappier] --- @racket[(face* 'normal 'large #t default-face-color 3)]}
                     @(small-face 'unhappier))
-        (list @para{@racket['happiest] --- @racket[(small-face* 'normal 'huge #f default-face-color 0 -3)]}
+        (list @para{@racket['happiest] --- @racket[(face* 'normal 'huge #f default-face-color 0 -3)]}
                     @(small-face 'happiest))
-        (list @para{@racket['unhappiest] --- @racket[(small-face* 'normal 'huge #t default-face-color 0 -3)]}
+        (list @para{@racket['unhappiest] --- @racket[(face* 'normal 'huge #t default-face-color 0 -3)]}
                     @(small-face 'unhappiest))
-        (list @para{@racket['mad] --- @racket[(small-face* 'angry 'grimace #t default-face-color 0)]}
+        (list @para{@racket['mad] --- @racket[(face* 'angry 'grimace #t default-face-color 0)]}
                     @(small-face 'mad))
-        (list @para{@racket['mean] --- @racket[(small-face* 'angry 'narrow #f default-face-color 0)]}
+        (list @para{@racket['mean] --- @racket[(face* 'angry 'narrow #f default-face-color 0)]}
                     @(small-face 'mean))
-        (list @para{@racket['surprised] --- @racket[(small-face* 'worried 'oh #t default-face-color -4 -3 2)]}
+        (list @para{@racket['surprised] --- @racket[(face* 'worried 'oh #t default-face-color -4 -3 2)]}
                     @(small-face 'surprised)))
 ]}
 

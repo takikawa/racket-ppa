@@ -159,9 +159,8 @@
 # if defined(i386)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-linux"
 #  define REGISTER_POOR_MACHINE
-#  ifndef MZ_USE_JIT_SSE
-#   define ASM_DBLPREC_CONTROL_87
-#  endif
+#  define MZ_TRY_EXTFLONUMS
+#  define ASM_DBLPREC_CONTROL_87
 # endif
 # if defined(powerpc)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-linux"
@@ -185,9 +184,8 @@
 # if defined(__x86_64__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "x86_64-linux"
 #  define REGISTER_POOR_MACHINE
-#  ifdef MZ_NO_JIT_SSE
-#   define ASM_DBLPREC_CONTROL_87
-#  endif
+#  define ASM_DBLPREC_CONTROL_87
+#  define MZ_TRY_EXTFLONUMS
 # endif
 # ifndef SCHEME_PLATFORM_LIBRARY_SUBPATH
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "unknown-linux"
@@ -297,14 +295,26 @@
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-openbsd"
 # endif
 
+# include <sys/param.h>
+# if OpenBSD < 201211
+/* This is needed for (pre-5.2) userspace threads: */
+#  define ASSUME_FIXED_STACK_SIZE
+#  define FIXED_STACK_SIZE 1048576
+# endif
+
 # include "uconfig.h"
 # undef HAS_STANDARD_IOB
-
 # define HAS_BSD_IOB
+
+/* Default UNIX_STACK_MAXIMUM is too big for a non-root user. */
+# undef UNIX_STACK_MAXIMUM
+# define UNIX_STACK_MAXIMUM 4194304
 
 #ifndef __ELF__
 # define UNDERSCORE_DYNLOAD_SYMBOL_PREFIX
 #endif
+
+# define USE_DLOPEN_GLOBAL_BY_DEFAULT
 
 # define USE_IEEE_FP_PREDS
 
@@ -320,9 +330,13 @@
 #if defined(__x86_64__)
 # define MZ_USE_JIT_X86_64
 # define MZ_JIT_USE_MPROTECT
-#else
+# define MZ_TRY_EXTFLONUMS
+#elif defined(__i386__)
 # define MZ_USE_JIT_I386
 # define MZ_JIT_USE_MPROTECT
+# define MZ_TRY_EXTFLONUMS
+#else
+# error Unported platform.
 #endif
 
 # define FLAGS_ALREADY_SET
@@ -337,21 +351,19 @@
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-freebsd"
 #  define REGISTER_POOR_MACHINE
 #  define MZ_USE_JIT_I386
-#  ifndef MZ_JIT_X86_SSE
-#    if defined(__FreeBSD_kernel__)
-#     define ASM_DBLPREC_CONTROL_87
-#    else
-#     define FREEBSD_CONTROL_387
-#    endif
+#  define MZ_TRY_EXTFLONUMS
+#  if defined(__FreeBSD_kernel__)
+#   define ASM_DBLPREC_CONTROL_87
+#  else
+#   define FREEBSD_CONTROL_387
 #  endif
 # elif defined(__amd64__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "amd64-freebsd"
 #  define REGISTER_POOR_MACHINE
 #  define MZ_USE_JIT_X86_64
-#  ifdef MZ_NO_JIT_SSE
-#    if defined(__FreeBSD_kernel__)
-#     define ASM_DBLPREC_CONTROL_87
-#    endif
+#  define MZ_TRY_EXTFLONUMS
+#  if defined(__FreeBSD_kernel__)
+#   define ASM_DBLPREC_CONTROL_87
 #  endif
 # elif defined(__sparc64__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "sparc64-freebsd"
@@ -360,7 +372,7 @@
 #  error Unported platform.
 # endif
 
-/* pthreads always enabled via configure', and
+/* pthreads always enabled via `configure', and
    initial pthread's stack size doesn't use rlimit: */
 # define ASSUME_FIXED_STACK_SIZE
 # define FIXED_STACK_SIZE 1048576
@@ -625,9 +637,12 @@
 #endif
 
 #if defined(_MSC_VER)
+# define MZ_LONG_DOUBLE
 # define IGNORE_BY_MS_CONTROL_87
+# define MZ_NEED_SET_EXTFL_MODE
 #endif
 #if defined(__MINGW32__)
+# define MZ_TRY_EXTFLONUMS
 # define ASM_DBLPREC_CONTROL_87
 #endif
 
@@ -642,6 +657,7 @@
 # else
 #  define MZ_USE_JIT_I386
 # endif
+
 # define MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC
 
 # define FLAGS_ALREADY_SET
@@ -751,6 +767,8 @@
 
 # define SIGSET_IS_SIGNAL
 
+# define MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
+
 # define USE_TM_GMTOFF_FIELD
 # define USE_TM_ZONE_FIELD
 
@@ -768,18 +786,16 @@
 
 #if defined(__POWERPC__)
 # define MZ_USE_JIT_PPC
-#elif defined(__x86_64__)
-# define MZ_USE_JIT_X86_64
 #else
-# define MZ_USE_JIT_I386
-# ifndef MZ_NO_JIT_SSE
-#  define MZ_USE_JIT_SSE
+# if defined(__x86_64__)
+#  define MZ_USE_JIT_X86_64
+# else
+#  define MZ_USE_JIT_I386
 # endif
+# define ASM_DBLPREC_CONTROL_87
+# define MZ_TRY_EXTFLONUMS
 #endif
 
-#ifdef MZ_NO_JIT_SSE
-# define ASM_DBLPREC_CONTROL_87
-#endif
 # define POW_HANDLES_CASES_CORRECTLY
 
 # define MZ_JIT_USE_MPROTECT
@@ -981,6 +997,8 @@
 
 # define USE_DYNAMIC_FDSET_SIZE
 
+# define BROKEN_READLINK_NUL_TERMINATOR
+
 #if defined(i386)
 # define MZ_USE_JIT_I386
 # define MZ_JIT_USE_MPROTECT
@@ -1001,21 +1019,19 @@
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-dragonfly"
 #  define REGISTER_POOR_MACHINE
 #  define MZ_USE_JIT_I386
-#  ifndef MZ_JIT_X86_SSE
-#     define ASM_DBLPREC_CONTROL_87
-#  endif
+#  define ASM_DBLPREC_CONTROL_87
+#  define MZ_TRY_EXTFLONUMS
 # elif defined(__amd64__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "amd64-dragonfly"
 #  define REGISTER_POOR_MACHINE
 #  define MZ_USE_JIT_X86_64
-#  ifdef MZ_NO_JIT_SSE
-#     define ASM_DBLPREC_CONTROL_87
-#  endif
+#  define ASM_DBLPREC_CONTROL_87
+#  define MZ_TRY_EXTFLONUMS
 # else
 #  error Unported platform.
 # endif
 
-/* pthreads always enabled via configure', and
+/* pthreads always enabled via `configure', and
    initial pthread's stack size doesn't use rlimit: */
 # define ASSUME_FIXED_STACK_SIZE
 # define FIXED_STACK_SIZE 1048576
@@ -1143,6 +1159,10 @@
  /* NO_MKDIR means that there is no mkdir() function. */
 
  /* NO_READLINK means that there is no readlink() function. */
+
+ /* BROKEN_READLINK_NUL_TERMINATOR means that readlink() may
+    report a length that includes trailing NUL terminators,
+    which should be stripped away. */
 
  /* USE_GETDISK uses getdisk() and setdisk() to implement the
      filesystem-root-list primitive under DOS. */
@@ -1342,9 +1362,31 @@
     converts (a == a) to TRUE, even if `a' is floating-point. Used
     only when USE_[SCO_]IEEE_FP_PREDS is not defined. */
 
+ /* C_COMPILER_USES_SSE indicates that the C compiler generates SSE
+    instructions for `double' arithmetic. This flag is turned on
+    automatically if __SSE_MATH__ is defined (usually by gcc). */
+
+ /* MZ_LONG_DOUBLE enables extflonum support. */
+
+ /* MZ_TRY_EXTFLONUMS turns on MZ_LONG_DOUBLE if C_COMPILER_USES_SSE. */
+
  /* ASM_DBLPREC_CONTROL_87 uses inline assembly to set Intel '387
     floating-point operations to double-precision instead of
+    extended-precision arithmetic. This definition is turned off if
+    C_COMPILER_USES_SSE, and ASM_EXTPREC_CONTROL_87 is turned on
+    instead if C_COMPILER_USES_SSE and MZ_LONG_DOUBLE. */
+
+ /* ASM_EXTPREC_CONTROL_87 uses inline assembly to set Intel '387
+    floating-point operations to double-precision instead of
     extended-precision arithmetic. */
+
+ /* MZ_NEED_SET_EXTFL_MODE causes JIT-generated extflonum instructions
+    to set the x87 control word to extended precision just before an
+    extflonum operation, and then set if back to double precision just
+    after. This is needed or Windows (where the default mode is double
+    precision, something about the x64 environment switches the mode
+    back if you try to change it permanently, and "longdouble.dll"
+    does the same switch for non-JITted operations). */
 
  /* IGNORE_BY_BORLAND_CONTROL_87 turns off floating-point error for
     Intel '387 with Borlad-style _control87. DONT_IGNORE_PIPE_SIGNAL
@@ -1483,6 +1525,9 @@
  /* UNDERSCORE_DYNLOAD_SYMBOL_PREFIX with UNIX_DYNAMIC_LOAD means that
     an extra underscore ("_") must be placed in front of the name passed 
     to dlopen(). */
+
+ /* USE_DLOPEN_GLOBAL_BY_DEFAULT opens shared libraries in "global"
+    mode by default, instead of "local" mode. */
 
  /* LINK_EXTENSIONS_BY_TABLE specifies that the Racket functions
     used by an extension must be manually linked via a table of

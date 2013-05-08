@@ -151,6 +151,15 @@ correspond to @racket[_int16]. The @racket[_int] aliases correspond to
 the @racket[_intptr] aliases correspond to either
 @racket[_int32] or @racket[_int64], depending on the platform.}
 
+@defthing*[([_size ctype?]
+            [_ssize ctype?]
+            [_ptrdiff ctype?]
+            [_intmax ctype?]
+            [_uintmax ctype?])]{
+
+More aliases for basic integer types. The @racket[_size] and
+@racket[_uintmax] types are aliases for @racket[_uintptr], and
+the rest are aliases for @racket[_intptr].}
 
 @defthing*[([_fixnum ctype?]
             [_ufixnum ctype?])]{
@@ -179,6 +188,13 @@ numbers are accepted for conversion via both @racket[_float] and
 coerce C values to double-precision Racket numbers.
 The type @racket[_double*]
 coerces any Racket real number to a C @cpp{double}.}
+
+@defthing[_longdouble ctype?]{
+
+Represents the @cpp{long double} type on platforms where it is
+supported, in which case Racket @tech[#:doc
+reference.scrbl]{extflonums} convert to and from @cpp{long double}
+values.}
 
 @; ------------------------------------------------------------
 
@@ -328,7 +344,9 @@ The reference is not traced or updated by the garbage collector.
 
 The @racket[equal?] predicate equates C pointers (including pointers
 for @racket[_gcpointer] and possibly containing an offset) when they
-refer to the same address.}
+refer to the same address---except for C pointers that are instances
+of structure types with the @racket[prop:cpointer] property, in which
+case the equality rules of the relevant structure types apply.}
 
 
 @defthing[_gcpointer ctype?]{
@@ -356,9 +374,15 @@ generates @racket[#f] for a cpointer generated via the
 )]{
 
 A type that can be used with any Racket object; it corresponds to the
-@cpp{Scheme_Object*} type of Racket's C API (see
-@|InsideRacket|).  It is useful only for libraries that are aware of
-Racket's C API.}
+@cpp{Scheme_Object*} type of Racket's C API (see @|InsideRacket|). The
+@racket[_racket] or @racket[_scheme] type is useful only for libraries
+that are aware of Racket's C API.
+
+As a result type with a function type, @racket[_racket] or
+@racket[_scheme] permits multiple values, but multiple values are not
+allowed in combination with a true value for
+@racket[#:in-original-place?] or @racket[#:async-apply] in
+@racket[_cprocedure] or @racket[_fun].}
 
 
 @defthing[_fpointer ctype?]{
@@ -918,7 +942,8 @@ below for a more efficient approach.}
               [(id/sup _id
                        (_id super-id))
                (property (code:line #:alignment alignment-expr)
-                         (code:line #:property prop-expr val-expr))]]{
+                         (code:line #:property prop-expr val-expr)
+                         #:no-equal)]]{
 
 Defines a new C struct type, but unlike @racket[_list-struct], the
 resulting type deals with C structs in binary form, rather than
@@ -975,7 +1000,7 @@ The resulting bindings are as follows:
   @racketidfont{list->}@racketvarfont{id}, but fields that are structs
   are recursively unpacked to lists or packed from lists.}
 
- @item{@racketidfont{struct:}@racketvarfont{id}@racketidfont{:cpointer}:
+ @item{@racketidfont{struct:cpointer:}@racketvarfont{id}:
   only when a @racket[#:property] is specified --- a structure type that 
   corresponds to a wrapper to reflect properties (see below).}
 
@@ -1001,7 +1026,11 @@ specified properties. The wrapper Racket structure also has a
 treated the same as unwrapped C pointers. If a @racket[super-id] is
 provided and it corresponds to a C struct type with a wrapper
 structure type, then the wrapper structure type is a subtype of
-@racket[super-id]'s wrapper structure type.
+@racket[super-id]'s wrapper structure type. If a @racket[#:property]
+modifier is specified, @racket[#:no-equal] is not specified,
+and if @racket[prop:equal+hash] is not specified as any @racket[#:property],
+then the @racket[prop:equal+hash] property is automatically implemented
+for the wrapper structure type to use @racket[ptr-equal?].
 
 If the first field is itself a C struct type, its tag will be used in
 addition to the new tag.  This feature supports common cases of object

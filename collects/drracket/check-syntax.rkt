@@ -9,8 +9,11 @@
  [make-traversal 
   (-> namespace?
       (or/c path-string? #f)
-      (values (->* (syntax?) ((-> syntax? void?)) void?)
+      (values (->* (syntax?) ((-> any/c void?)) void?)
               (-> void?)))]
+ 
+ [current-max-to-send-at-once
+  (parameter/c (or/c +inf.0 (and/c exact-integer? (>=/c 2))))]
  [syncheck-annotations<%>
   interface?]
  [current-annotations 
@@ -25,6 +28,7 @@
  syncheck:add-background-color
  syncheck:add-require-open-menu
  syncheck:add-docs-menu
+ syncheck:add-id-set
  syncheck:add-rename-menu
  syncheck:add-arrow
  syncheck:add-tail-arrow

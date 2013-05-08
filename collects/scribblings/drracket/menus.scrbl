@@ -10,7 +10,7 @@
 
 @title{Menus}
 
-@section{@onscreen{File}}
+@section[#:tag "menu:file"]{@onscreen{File}}
 
 @itemize[
   
@@ -259,19 +259,6 @@ appears at any time.
  @item{@defmenuitem{Hide Module Browser} Hides the module browser.
         
           See also @secref["module-browser"].}
- 
- @item{@defmenuitem{Show Optimization Coach} 
-        Shows information about opportunities for
-        optimizations.
-   
-   See also @secref[#:doc '(lib "ts-guide.scrbl" "typed-racket" "scribblings")
-                          "optimization-coach"].}
-
- @item{@defmenuitem{Hide Optimization Coach} Hides the optimization coach.
-        
-          See also @secref[#:doc '(lib "ts-guide.scrbl" "typed-racket" "scribblings")
-                                 "optimization-coach"].}
-
 
 ]
 

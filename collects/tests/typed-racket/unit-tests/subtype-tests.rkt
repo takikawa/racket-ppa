@@ -78,6 +78,7 @@
 
    [(-val 6) -Number]
    [(-val 'hello) -Symbol]
+   [(-set -Number) (make-Sequence (list -Number))]
    [((Un -Symbol -Number) . -> . -Number) (-> -Number -Number)]
    [(-poly (t) (-> -Number t)) (-mu t (-> -Number t))]
    ;; not subtypes
@@ -93,6 +94,7 @@
    [(Un (-val 'foo) (-val 6)) (Un (-val 'foo) (-val 6))]
    [(-poly (a) (make-Listof (-v a))) (make-Listof (-mu x (Un (make-Listof x) -Number)))]
    [FAIL (make-Listof (-mu x (Un (make-Listof x) -Number))) (-poly (a) (make-Listof a))]
+   [(-val -34.2f0) -NegSingleFlonum]
    ;; case-lambda
    [(cl-> [(-Number) -Number] [(-Boolean) -Boolean]) (-Number . -> . -Number)]
    ;; special case for unused variables
@@ -128,7 +130,17 @@
    [(-poly (a) (a . -> . (make-Listof a))) ((-v b) . -> . (make-Listof (-v b)))]
    [(-poly (a) (a . -> . (make-Listof a))) ((-pair -Number (-v b)) . -> . (make-Listof (-pair -Number (-v b))))]
 
-   (FAIL (-poly (a b) (-> a a)) (-poly (a b) (-> a b)))
+   [FAIL (-poly (a b) (-> a a)) (-poly (a b) (-> a b))]
+   [FAIL (-poly (a) (-poly (b) (-pair a b))) (-poly (a) (-poly (b) (-pair b a)))]
+
+   ;; The following currently are not subtypes, because they are not replacable
+   ;; in an instantiation context. It may be sound for them to be subtypes but
+   ;; the implications of that change are unknown.
+   [FAIL (-poly (x) (-lst x)) (-poly (x y) (-lst x))]
+   [FAIL (-poly (y z) (-lst y)) (-poly (z y) (-lst y))]
+   [FAIL (-poly (y) (-poly (z) (-pair y z))) (-poly (y z) (-pair y z))]
+   [FAIL (-poly (y z) (-pair y z)) (-poly (y) (-poly (z) (-pair y z)))]
+
 
    ;; polymorphic function types should be subtypes of the function top
    [(-poly (a) (a . -> . a)) top-func]
@@ -138,6 +150,79 @@
    [(-struct #'a #f null) (-struct #'a #f null)]
    [(-struct #'a #f (list (make-fld -String #'values #f))) (-struct #'a #f (list (make-fld -String #'values #f)))]
    [(-struct #'a #f (list (make-fld -String #'values #f))) (-struct #'a #f (list (make-fld Univ #'values #f)))]
+   [(-val 0.0f0) -SingleFlonum]
+   [(-val -0.0f0) -SingleFlonum]
+   [(-val 1.0f0) -SingleFlonum]
+   [(-pair -String (-lst -String)) (-seq -String)]
+   [FAIL (-pair -String (-lst -Symbol)) (-seq -String)]
+   [FAIL (-pair -String (-vec -String)) (-seq -String)]
+   [(-mpair -String (-mlst -String)) (-seq -String)]
+   [FAIL (-mpair -String (-mlst -Symbol)) (-seq -String)]
+   [FAIL (-mpair -String (-vec -String)) (-seq -String)]
+   [(-mpair -String (-mlst (-val "hello"))) (-seq -String)]
+
+   [(-Param -Byte -Byte) (-Param (-val 0) -Int)]
+   [FAIL (-Param -Byte -Byte) (-Param -Int -Int)]
+   [(-Param -String -Symbol) (cl->* (-> -Symbol) (-> -String -Void))]
+
+   [(-vec t1) (-vec t2)]
+   [(make-HeterogeneousVector (list t1)) (-vec t2)]
+   [(make-HeterogeneousVector (list t1 t2)) (make-HeterogeneousVector (list t2 t1))]
+   [(-box t1) (-box t2)]
+   [(-thread-cell t1) (-thread-cell t2)]
+   [(-channel t1) (-channel t2)]
+   [(-mpair t1 t2) (-mpair t2 t1)]
+   [(-HT t1 t2) (-HT t2 t1)]
+   [(make-Prompt-Tagof t1 t2) (make-Prompt-Tagof t2 t1)]
+   [(make-Continuation-Mark-Keyof t1) (make-Continuation-Mark-Keyof t2)]
+
+   [(-val 5) (-seq -Nat)]
+   [(-val 5) (-seq -Byte)]
+   [-Index (-seq -Index)]
+   [-NonNegFixnum (-seq -NonNegFixnum)]
+   [-Index (-seq -Nat)]
+   [FAIL (-val -5) (-seq -Nat)]
+   [FAIL -Fixnum (-seq -Fixnum)]
+   [FAIL -NonNegFixnum (-seq -Index)]
+   [FAIL (-val 5.0) (-seq -Nat)]
+
+   [(-polydots (a) (->... (list Univ) (a a) (make-ValuesDots null a 'a)))
+    (-polydots (a) (->... (list -String) (a a) (make-ValuesDots null a 'a)))]
+
+   [(-polydots (a) (->... null (Univ a) (make-ValuesDots (list (-result a)) a 'a)))
+    (-polydots (a) (->... null (-String a) (make-ValuesDots (list (-result a)) a 'a)))]
+
+   [(-polydots (a) (->... null (a a) (make-ValuesDots (list (-result -String)) -String 'a)))
+    (-polydots (a) (->... null (a a) (make-ValuesDots (list (-result Univ)) Univ 'a)))]
+
+   [(-polydots (a) (->... null (Univ a) (-values (list Univ))))
+    (->* null Univ Univ)]
+
+
+   [(-polydots (a) (->... null (a a) (make-ListDots a 'a)))
+    (-> -String -Symbol (-Tuple (list -String -Symbol)))]
+   [(-> -String -Symbol (-Tuple (list -String -Symbol)))
+    (-polydots (a) (-> -String -Symbol (-lst (Un -String -Symbol))))]
+
+   [(-polydots (a) (->... null (a a) (make-ListDots a 'a)))
+    (-poly (a b) (-> a b (-Tuple (list a b))))]
+
+   [(-polydots (b a) (-> (->... (list b) (a a) (make-ValuesDots (list (-result b)) a 'a)) Univ))
+    (-polydots (a) (-> (->... (list) (a a) (make-ValuesDots null a 'a)) Univ))]
+
+   [(-polydots (a) (->... (list) (a a) (make-ListDots a 'a)))
+    (-polydots (b a) (->... (list b) (a a) (-pair b (make-ListDots a 'a))))]
+
+   [(-> Univ -Boolean : (-FS (-filter -Symbol 0) (-not-filter -Symbol 0)))
+    (-> Univ -Boolean : (-FS -top -top))]
+   [(-> Univ -Boolean : (-FS -bot -bot))
+    (-> Univ -Boolean : (-FS (-filter -Symbol 0) (-not-filter -Symbol 0)))]
+   [(-> Univ -Boolean : (-FS (-filter -Symbol 0) (-not-filter -Symbol 0)))
+    (-> (Un -Symbol -String) -Boolean : (-FS (-filter -Symbol 0) (-not-filter -Symbol 0)))]
+   [FAIL
+    (-> Univ -Boolean : (-FS (-filter -Symbol 0) (-not-filter -Symbol 0)))
+    (-> Univ -Boolean : (-FS (-filter -String 0) (-not-filter -String 0)))]
+
    ))
 
 (define-go

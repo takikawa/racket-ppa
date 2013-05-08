@@ -10,12 +10,12 @@
          cpointer? cpointer-gcable? prop:cpointer
          ptr-equal? ptr-add ptr-ref ptr-set! (protect-out cast)
          ptr-offset ptr-add! offset-ptr? set-ptr-offset!
-         vector->cpointer flvector->cpointer saved-errno lookup-errno
+         vector->cpointer flvector->cpointer extflvector->cpointer saved-errno lookup-errno
          ctype? make-ctype make-cstruct-type make-array-type make-union-type
          make-sized-byte-string ctype->layout
          _void _int8 _uint8 _int16 _uint16 _int32 _uint32 _int64 _uint64
          _fixint _ufixint _fixnum _ufixnum
-         _float _double _double*
+         _float _double _longdouble _double*
          _bool _pointer _gcpointer _scheme (rename-out [_scheme _racket]) _fpointer function-ptr
          memcpy memmove memset
          malloc-immobile-cell free-immobile-cell
@@ -93,6 +93,12 @@
 (provide _intptr _uintptr _sintptr)
 (define-values (_intptr _uintptr _sintptr) (sizeof->3ints '(void *)))
 
+(define* _size _uintptr)
+(define* _ssize _intptr)
+(define* _ptrdiff _intptr)
+(define* _intmax _intptr)
+(define* _uintmax _uintptr)
+
 ;; ----------------------------------------------------------------------------
 ;; Getting and setting library objects
 
@@ -105,7 +111,7 @@
 (define (get-ffi-lib name [version/s ""]
 		     #:fail [fail #f]
 		     #:get-lib-dirs [get-lib-dirs get-lib-search-dirs]
-                     #:global? [global? #f])
+                     #:global? [global? (eq? (system-type 'so-mode) 'global)])
   (cond
    [(not name) (ffi-lib name)] ; #f => NULL => open this executable
    [(not (or (string? name) (path? name)))
@@ -522,7 +528,7 @@
   (define ((t-n-e clause) type name expr)
     (let ([keys (custom-type->keys type err)])
       (define (getkey key) (cond [(assq key keys) => cdr] [else #f]))
-      (define (arg x . no-expr?)
+      (define (arg x . no-expr?) ;; can mutate `name'
         (define use-expr?
           (and (list? x) (= 2 (length x)) (identifier? (car x))))
         ;; when the current expr is not used with a (x => ...) form,
@@ -533,7 +539,9 @@
             (err "got an expression for a custom type that do not use it"
                  clause)
             (set! expr (void))))
-        (when use-expr? (set! x (with-renamer (car x) name (cadr x))))
+        (when use-expr?
+          (unless name (set! name (car (generate-temporaries #'(ret)))))
+          (set! x (with-renamer (car x) name (cadr x))))
         (cond [(getkey '1st) =>
                (lambda (v)
                  (if 1st-arg
@@ -551,8 +559,10 @@
         (set! type (getkey 'type))
         (cond [(and (not expr) (getkey 'expr)) => (lambda (x) (set! expr x))])
         (cond [(getkey 'bind) => (lambda (x) (bind! #`[#,x #,name]))])
-        (cond [(getkey 'pre ) => (lambda (x) (pre!  #`[#,name #,(arg x #t)]))])
-        (cond [(getkey 'post) => (lambda (x) (post! #`[#,name #,(arg x)]))])
+        (cond [(getkey 'pre ) => (lambda (x) (pre!  (let ([a (arg x #t)])
+                                                      #`[#,name #,a])))])
+        (cond [(getkey 'post) => (lambda (x) (post! (let ([a (arg x)])
+                                                      #`[#,name #,a])))])
         (cond [(getkey 'keywords)
                => (lambda (ks)
                     (for ([k+v (in-list ks)])
@@ -615,18 +625,17 @@
     ;; when processing the output type, only the post code matters
     (set! pre! (lambda (x) #f))
     (set! output
-          (let ([temp (car (generate-temporaries #'(ret)))]
-                [t-n-e (t-n-e output-type)])
+          (let ([t-n-e (t-n-e output-type)])
             (syntax-case* output-type (: =) id=?
               [(name : type) (t-n-e #'type #'name output-expr)]
               [(type = expr) (if output-expr
                                (err "extraneous output expression" #'expr)
-                               (t-n-e #'type temp #'expr))]
+                               (t-n-e #'type #f #'expr))]
               [(name : type = expr)
                              (if output-expr
                                (err "extraneous output expression" #'expr)
                                (t-n-e #'type #'name #'expr))]
-              [type          (t-n-e #'type temp output-expr)])))
+              [type          (t-n-e #'type #f output-expr)])))
     (let ([make-cprocedure
            (lambda (wrapper)
              #`(_cprocedure* (list #,@(filter-map car inputs))
@@ -647,7 +656,7 @@
                                 inputs))]
                [output-expr
                 (let ([o (caddr output)])
-                  (or (and (not (void? o)) o) (cadr output)))]
+                  (and (not (void? o)) o))]
                [args
                 (filter-map (lambda (i)
                               (and (caddr i)
@@ -661,10 +670,17 @@
                        (lambda #,input-names
                          (let* (#,@args
                                 #,@bind
-                                #,@pre
-                                [#,(cadr output) (ffi #,@ffi-args)]
-                                #,@post)
-                           #,output-expr)))]
+                                #,@pre)
+                           #,(if (or output-expr
+                                     (cadr output))
+                                 (let ([res (or (cadr output)
+                                                (car (generate-temporaries #'(ret))))])
+                                   #`(let* ([#,res (ffi #,@ffi-args)]
+                                            #,@post)
+                                       #,(or output-expr res)))
+                                 #`(begin0
+                                    (ffi #,@ffi-args)
+                                    (let* (#,@post) (void)))))))]
                ;; if there is a string 'ffi-name property, use it as a name
                [body (let ([n (cond [(syntax-property stx 'ffi-name)
                                      => syntax->datum]
@@ -1323,7 +1339,8 @@
 (provide define-cstruct)
 (define-syntax (define-cstruct stx)
   (define (make-syntax _TYPE-stx has-super? slot-names-stx slot-types-stx 
-                       alignment-stx property-stxes property-binding-stxes)
+                       alignment-stx property-stxes property-binding-stxes
+                       no-equal?)
     (define name
       (cadr (regexp-match #rx"^_(.+)$" (symbol->string (syntax-e _TYPE-stx)))))
     (define slot-names (map (lambda (x) (symbol->string (syntax-e x)))
@@ -1383,7 +1400,10 @@
                            (lambda () (values #f '() #f #f #f #f #f values))))]
                     [define-wrapper-struct (if (null? property-stxes)
                                                #'(begin)
-                                               (with-syntax ([(prop ...) property-stxes])
+                                               (with-syntax ([(prop ...) property-stxes]
+                                                             [add-equality-property (if no-equal?
+                                                                                        #'values
+                                                                                        #'add-equality-property)])
                                                  #'(define-values (make-wrap-TYPE struct:cpointer:TYPE)
                                                      (let ()
                                                        (define-values (struct:cpointer:TYPE
@@ -1397,12 +1417,13 @@
                                                                                0
                                                                                1)
                                                                            0 #f
-                                                                           (append
-                                                                            (if struct:cpointer:super
-                                                                                null
-                                                                                (list
-                                                                                 (cons prop:cpointer 0)))
-                                                                            (list prop ...))
+                                                                           (add-equality-property
+                                                                            (append
+                                                                             (if struct:cpointer:super
+                                                                                 null
+                                                                                 (list
+                                                                                  (cons prop:cpointer 0)))
+                                                                             (list prop ...)))
                                                                            (current-inspector)
                                                                            #f
                                                                            (if struct:cpointer:super
@@ -1554,26 +1575,38 @@
                    (syntax-case #'type ()
                      [(t s) (values #'t #'s)]
                      [_ (values #'type #f)])]
-                  [(alignment properties property-bindings)
-                   (let loop ([more #'more] [alignment #f] [properties null] [property-bindings null])
+                  [(alignment properties property-bindings no-equal?)
+                   (let loop ([more #'more] 
+                              [alignment #f]
+                              [properties null] 
+                              [property-bindings null] 
+                              [no-equal? #f])
                      (define (head) (syntax-case more () [(x . _) #'x]))
                      (syntax-case more ()
-                       [() (values alignment (reverse properties) (reverse property-bindings))]
+                       [() (values alignment (reverse properties) (reverse property-bindings) no-equal?)]
                        [(#:alignment) (err "missing expression for #:alignment" (head))]
                        [(#:alignment a . rest) 
                         (not alignment)
-                        (loop #'rest #'a properties property-bindings)]
+                        (loop #'rest #'a properties property-bindings no-equal?)]
+                       [(#:alignment a . rest) 
+                        (err "multiple specifications of #:alignment" (head))]
                        [(#:property) (err "missing property expression for #:property" (head))]
                        [(#:property prop) (err "missing value expression for #:property" (head))]
                        [(#:property prop val . rest)
                         (let ()
                           (define prop-id (car (generate-temporaries '(prop))))
                           (define val-id (car (generate-temporaries '(prop-val))))
-                          (loop #'rest alignment 
+                          (loop #'rest 
+                                alignment 
                                 (list* #`(cons #,prop-id #,val-id) properties)
                                 (list* (list (list val-id) #'val) 
                                        (list (list prop-id) #'(check-is-property prop))
-                                       property-bindings)))]
+                                       property-bindings)
+                                no-equal?))]
+                       [(#:no-equal . rest)
+                        (if no-equal?
+                            (err "multiple specifications of #:no-equal" (head))
+                            (loop #'rest alignment properties property-bindings #t))]
                        [(x . _) (err (if (keyword? (syntax-e #'x))
                                          "unknown keyword" "unexpected form")
                                      #'x)]
@@ -1592,9 +1625,10 @@
                       #`(#,_SUPER slot-type ...)
                       alignment
                       properties
-                      property-bindings)
+                      property-bindings
+                      no-equal?)
          (make-syntax _TYPE #f #'(slot ...) #`(slot-type ...) 
-                      alignment properties property-bindings)))]
+                      alignment properties property-bindings no-equal?)))]
     ;; specific errors for bad slot specs, leave the rest for a generic error
     [(_ type (bad ...) . more)
      (err "bad slot specification, expecting [name ctype]"
@@ -1603,6 +1637,21 @@
     [(_ type bad . more)
      (err "bad slot specification, expecting a sequence of [name ctype]"
           #'bad)]))
+
+;; Add `prop:equal+hash' to use pointer equality
+;; if `props' does not already have `prop:equal+hash'
+;; property:
+(define (add-equality-property props)
+  (if (ormap (lambda (p) (equal? (car p) prop:equal+hash)) props)
+      props
+      (append props
+              (list (cons prop:equal+hash
+                          (list (lambda (a b eql?)
+                                  (ptr-equal? a b))
+                                (lambda (a hsh)
+                                  (hsh (cast a _pointer _pointer)))
+                                (lambda (a hsh)
+                                  (hsh (cast a _pointer _pointer)))))))))
 
 ;; helper for the above: keep runtime information on structs
 (define cstruct-info

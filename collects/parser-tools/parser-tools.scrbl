@@ -4,7 +4,8 @@
                      scheme/contract
                      parser-tools/lex
                      (prefix-in : parser-tools/lex-sre)
-                     parser-tools/yacc))
+                     parser-tools/yacc
+                     parser-tools/cfg-parser))
 
 @title{Parser Tools: @exec{lex} and @exec{yacc}-style Parsing}
 
@@ -53,7 +54,7 @@ style lexer and parser generators.
      @racket[re]'s against the buffer, and returns the result of
      executing the corresponding @racket[action-expr].
 
-     @margin-note{The implementation of @racketmodname[syntax-color/scheme-lexer]
+     @margin-note{The implementation of @racketmodname[syntax-color/racket-lexer]
                  contains a lexer for the @racketmodname[racket] language.
                  In addition, files in the @filepath{examples} sub-directory
                  of the @filepath{parser-tools} collection contain
@@ -485,7 +486,7 @@ the right choice when using @racket[lexer] in other situations.
 
 @; ----------------------------------------------------------------------
 
-@section{Parsers}
+@section{LALR(1) Parsers}
 
 @section-index["yacc"]
 
@@ -555,6 +556,10 @@ the right choice when using @racket[lexer] in other situations.
       @racketidfont{$}@math{i}@racketidfont{-start-pos} and
       @racketidfont{$}@math{i}@racketidfont{-end-pos}).
 
+      An @deftech{error production} can be defined by providing
+      a production of the form @racket[(error α)], where α is a
+      string of grammar symbols, possibly empty.
+      
       All of the productions for a given non-terminal must be grouped
       with it. That is, no @racket[non-terminal-id] may appear twice
       on the left hand side in a parser.}
@@ -662,7 +667,7 @@ the right choice when using @racket[lexer] in other situations.
     The @racket[_parse] function returns the value associated with the
     parse tree by the semantic actions.  If the parser encounters an
     error, after invoking the supplied error function, it will try to
-    use error productions to continue parsing.  If it cannot, it
+    use @tech{error production}s to continue parsing.  If it cannot, it
     raises @racket[exn:fail:read].
 
     If multiple non-terminals are provided in @racket[start], the
@@ -677,6 +682,48 @@ the right choice when using @racket[lexer] in other situations.
     place the parser into a module and compile the module to a
     @filepath{.zo} bytecode file.}
 
+                                            
+                                            
+                                            
+@section{Context-Free Parsers}
+
+@section-index["cfg-parser"]
+
+@defmodule[parser-tools/cfg-parser]{The @racketmodname[parser-tools/cfg-parser]
+library provides a parser generator that is an alternative to that of 
+@racketmodname[parser-tools/yacc].}
+
+@defform/subs[#:literals (grammar tokens start end precs src-pos
+                          suppress debug yacc-output prec)
+              (cfg-parser clause ...)
+              ([clause (grammar (non-terminal-id 
+                                 ((grammar-id ...) maybe-prec expr)
+                                 ...)
+                                ...)
+                       (tokens group-id ...)
+                       (start non-terminal-id ...)
+                       (end token-id ...)
+                       (@#,racketidfont{error} expr)
+                       (src-pos)])]{
+
+    Creates a parser similar to that of @racket[parser].  Unlike @racket[parser],
+    @racket[cfg-parser], can consume arbitrary and potentially ambiguous context-free
+    grammars. Its interface is a subset of @racketmodname[parser-tools/yacc], with
+    the following differences:
+                                        
+    @itemize[
+
+      @item{@racket[(start non-terminal-id)]
+      
+      Unlike @racket[parser], @racket[cfg-parser] only allows for
+      a single non-terminal-id.}
+                       
+      @item{The @racket[cfg-parser] form does not support the @racket[precs], 
+             @racket[suppress], @racket[debug], or @racket[yacc-output]
+             options of @racket[parser].}
+   ]
+}                                            
+                                            
 @; ----------------------------------------------------------------------
 
 @section{Converting @exec{yacc} or @exec{bison} Grammars}

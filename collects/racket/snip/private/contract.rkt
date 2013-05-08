@@ -1,5 +1,7 @@
 #lang racket/base
 
+;; Contract definitions for racket/snip
+
 (require racket/class
          racket/contract/base
          racket/draw
@@ -36,19 +38,6 @@
            any/c))))
 
 ;; contract utilities:
-(define font-family/c
-  (or/c 'base 'default 'decorative 'roman 'script
-        'swiss 'modern 'symbol 'system))
-
-(define font-smoothing/c
-  (or/c 'base 'default 'partly-smoothed 'smoothed 'unsmoothed))
-
-(define font-style/c
-  (or/c 'base 'normal 'italic 'slant))
-
-(define font-weight/c
-  (or/c 'base 'normal 'bold 'light))
-
 (define alignment/c
   (or/c 'base 'top 'center 'bottom))
 
@@ -68,22 +57,23 @@
     (get-background-add (->m (is-a?/c add-color<%>)))
     (get-background-mult (->m (is-a?/c mult-color<%>)))
     (get-face (->m (or/c string? false/c)))
-    (get-family (->m font-family/c))
+    (get-family (->m (or/c 'base font-family/c)))
     (get-foreground-add  (->m (is-a?/c add-color<%>)))
     (get-foreground-mult (->m (is-a?/c mult-color<%>)))
     (get-size-add (->m byte?))
     (get-size-in-pixels-off (->m boolean?))
     (get-size-in-pixels-on  (->m boolean?))
     (get-size-mult (->m real?))
-    (get-smoothing-off (->m font-smoothing/c))
-    (get-style-off (->m font-style/c))
-    (get-style-on  (->m font-style/c))
+    (get-smoothing-off (->m (or/c 'base font-smoothing/c)))
+    (get-smoothing-on (->m (or/c 'base font-smoothing/c)))
+    (get-style-off (->m (or/c 'base font-style/c)))
+    (get-style-on  (->m (or/c 'base font-style/c)))
     (get-transparent-text-backing-off (->m boolean?))
     (get-transparent-text-backing-on  (->m boolean?))
     (get-underlined-off (->m boolean?))
     (get-underlined-on  (->m boolean?))
-    (get-weight-off (->m font-weight/c))
-    (get-weight-on  (->m font-weight/c))
+    (get-weight-off (->m (or/c 'base font-weight/c)))
+    (get-weight-on  (->m (or/c 'base font-weight/c)))
     (set-alignment-off (->m alignment/c void?))
     (set-alignment-on  (->m alignment/c void?))
     (set-delta (case->m
@@ -113,25 +103,26 @@
                      (is-a?/c style-delta%))))
     (set-delta-background (->m (or/c string? (is-a?/c color%))
                                (is-a?/c style-delta%)))
-    (set-delta-face (->*m (string?) (font-family/c) (is-a?/c style-delta%)))
+    (set-delta-face (->*m (string?) ((or/c 'base font-family/c))
+                          (is-a?/c style-delta%)))
     (set-delta-foreground (->m (or/c string? (is-a?/c color%))
                                (is-a?/c style-delta%)))
     (set-face (->m (or/c string? false/c) void?))
-    (set-family (->m font-family/c void?))
+    (set-family (->m (or/c 'base font-family/c) void?))
     (set-size-add (->m byte? void?))
     (set-size-in-pixels-off (->m any/c void?))
     (set-size-in-pixels-on  (->m any/c void?))
     (set-size-mult (->m real? void?))
-    (set-smoothing-off (->m font-smoothing/c void?))
-    (set-smoothing-on  (->m font-smoothing/c void?))
-    (set-style-off (->m font-style/c void?))
-    (set-style-on  (->m font-style/c void?))
+    (set-smoothing-off (->m (or/c 'base font-smoothing/c) void?))
+    (set-smoothing-on  (->m (or/c 'base font-smoothing/c) void?))
+    (set-style-off (->m (or/c 'base font-style/c) void?))
+    (set-style-on  (->m (or/c 'base font-style/c) void?))
     (set-transparent-text-backing-off (->m any/c void?))
     (set-transparent-text-backing-on  (->m any/c void?))
     (set-underlined-off (->m any/c void?))
     (set-underlined-on  (->m any/c void?))
-    (set-weight-off (->m font-weight/c void?))
-    (set-weight-on  (->m font-weight/c void?))))
+    (set-weight-off (->m (or/c 'base font-weight/c) void?))
+    (set-weight-on  (->m (or/c 'base font-weight/c) void?))))
 
 (define style-list%/c
   (class/c
@@ -584,3 +575,4 @@
       (get-selected-text-color snip-admin%-get-selected-text-color/c)
       (call-with-busy-cursor snip-admin%-call-with-busy-cursor/c)
       (get-tabs snip-admin%-get-tabs/c))))
+

@@ -105,9 +105,9 @@ Here is an example typical of what you will find in many applications:
 
 @defmodule[web-server/http/bindings]{
 
-These functions, while convenient, could introduce subtle bugs into your
+These functions, while convenient, could introduce subtle errors into your
 application. Examples: that they are case-insensitive could introduce
-a bug; if the data submitted is not in UTF-8 format, then the conversion
+an error; if the data submitted is not in UTF-8 format, then the conversion
 to a string will fail; if an attacker submits a form field as if it were
 a file, when it is not, then the @racket[request-bindings] will hold a
 @racket[bytes?] object and your program will error; and, for file uploads
@@ -174,18 +174,45 @@ Here is an example typical of what you will find in many applications:
             [mime (or/c false/c bytes?)]
             [headers (listof header?)]
             [output (output-port? . -> . void)])]{
- An HTTP response where @racket[output] produces the body. @racket[code] is the response code,
- @racket[message] the message, @racket[seconds] the generation time, @racket[mime]
- the MIME type of the file, and @racket[headers] are the headers. If @racket[headers] does not include @litchar{Date}, @litchar{Last-Modified}, @litchar{Server}, or @litchar{Content-Type} headers, then the server will automatically add them. The server will always replace your @litchar{Connection} header if it needs to ensure the connection will be closed. (Typically with an HTTP/1.0 client.)
 
- Example:
+An HTTP response where @racket[output] produces the body by writing to
+the output port. @racket[code] is the response code, @racket[message]
+the message, @racket[seconds] the generation time, @racket[mime] the
+MIME type of the file, and @racket[headers] are the headers.
+
+If @racket[headers] does not include @litchar{Date},
+@litchar{Last-Modified}, or @litchar{Server} headers, then the server
+will automatically add them, where @litchar{Date} is based on
+@racket[current-seconds], @litchar{Last-Modified} is based on
+@racket[seconds], and @litchar{Server} is @litchar{Racket}.
+
+If @racket[headers] does not include @litchar{Content-Type} and
+@racket[mime] is not @racket[#f], then @racket[mime] is added as a
+@litchar{Content-Type} header.
+
+The server will always replace your @litchar{Connection} header if it
+needs to ensure the connection will be closed. (Typically with an
+HTTP/1.0 client.)
+
+Examples:
  @racketblock[
+  (response
+   301 #"OK"
+   (current-seconds) TEXT/HTML-MIME-TYPE
+   empty
+   (λ (op) (write-bytes #"<html><body>Hello, World!</body></html>" op)))
   (response
    301 #"Moved Permanently"
    (current-seconds) TEXT/HTML-MIME-TYPE
    (list (make-header #"Location"
                       #"http://racket-lang.org/download"))
    (λ (op) (write-bytes #"Moved" op)))
+  (response
+   304 #"Not Modified"
+   (current-seconds) #f
+   (list (make-header #"Location"
+                      #"http://racket-lang.org/download"))
+   void)
  ]
 }
 
@@ -207,6 +234,18 @@ Here is an example typical of what you will find in many applications:
          #"\">here</a> instead."
          #"</p></body></html>"))
  ]
+}
+                   
+@defproc[(response/output [output (-> output-port? void?)]
+                          [#:code code number? 200]
+                          [#:message message bytes? #"Okay"]
+                          [#:seconds seconds number? (current-seconds)]
+                          [#:mime-type mime-type (or/c bytes? #f) TEXT/HTML-MIME-TYPE]
+                          [#:headers headers (listof header?) '()]
+                          [#:cookies cookies (listof cookie?) '()])
+         response?]{
+Equivalent to
+@racketblock[(response code message seconds mime-type headers output)]
 }
 
 @defthing[TEXT/HTML-MIME-TYPE bytes?]{Equivalent to @racket[#"text/html; charset=utf-8"].}
@@ -235,6 +274,7 @@ transmission that the server @bold{will not catch}.}
                        [#:domain domain (or/c false/c valid-domain?) #f]
                        [#:max-age max-age (or/c false/c exact-nonnegative-integer?) #f]
                        [#:path path (or/c false/c string?) #f]
+                       [#:expires expires (or/c false/c string?) #f]
                        [#:secure? secure? (or/c false/c boolean?) #f])
           cookie?]{
   Constructs a cookie with the appropriate fields.
@@ -302,7 +342,8 @@ good entropy, if you care about that sort of thing.
  @defproc[(make-id-cookie
            [name cookie-name?]
            [secret-salt bytes?]
-           [value cookie-value?])
+           [value cookie-value?]
+           [#:path path (or/c false/c string?) #f])
           cookie?]{
   Generates an authenticated cookie named @racket[name] containing @racket[value], signed with @racket[secret-salt].
  }
@@ -317,7 +358,8 @@ good entropy, if you care about that sort of thing.
  }
 
  @defproc[(logout-id-cookie
-           [name cookie-name?])
+           [name cookie-name?]
+           [#:path path (or/c false/c string?) #f])
           cookie?]{
   Generates a cookie named @racket[name] that is not validly authenticated.
 

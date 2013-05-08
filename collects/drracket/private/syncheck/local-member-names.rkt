@@ -13,13 +13,13 @@
   syncheck:add-docs-menu
   syncheck:color-range
   syncheck:add-require-open-menu
-  syncheck:add-rename-menu
+  syncheck:add-id-set
   syncheck:add-arrow
+  syncheck:add-rename-menu
   syncheck:add-tail-arrow
   syncheck:add-mouse-over-status
   syncheck:add-jump-to-definition
   
-  syncheck:sort-bindings-table
   syncheck:jump-to-next-bound-occurrence
   syncheck:jump-to-binding-occurrence
   syncheck:jump-to-definition
@@ -29,6 +29,10 @@
   ;syncheck:error-report-visible? ;; test suite uses this one.
   ;syncheck:get-bindings-table    ;; test suite uses this one.
   syncheck:clear-error-message
+  
+  syncheck:find-definition-target
+  
+  jump-to
   
   hide-error-report
   get-error-report-text

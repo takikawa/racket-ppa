@@ -35,6 +35,9 @@ define_ts_iSi_s(scheme_build_list_offset, FSRC_OTHER)
 #ifdef JITARITH_TS_PROCS
 # if defined(INLINE_FP_OPS) && !defined(CAN_INLINE_ALLOC)
 define_ts__s(malloc_double, FSRC_OTHER)
+# ifdef MZ_LONG_DOUBLE
+   define_ts__s(malloc_long_double, FSRC_OTHER)
+# endif
 # endif
 #endif
 
@@ -74,11 +77,18 @@ define_ts_iS_s(scheme_checked_byte_string_ref, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_byte_string_set, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_flvector_ref, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_flvector_set, FSRC_MARKS)
+#ifdef MZ_LONG_DOUBLE
+define_ts_iS_s(scheme_checked_extflvector_ref, FSRC_MARKS)
+define_ts_iS_s(scheme_checked_extflvector_set, FSRC_MARKS)
+#endif
 define_ts_iS_s(scheme_checked_fxvector_ref, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_fxvector_set, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_syntax_e, FSRC_MARKS)
 define_ts_s_s(scheme_vector_length, FSRC_MARKS)
 define_ts_s_s(scheme_flvector_length, FSRC_MARKS)
+#ifdef MZ_LONG_DOUBLE
+define_ts_s_s(scheme_extflvector_length, FSRC_MARKS)
+#endif
 define_ts_s_s(scheme_fxvector_length, FSRC_MARKS)
 define_ts_s_s(scheme_unbox, FSRC_MARKS)
 define_ts_si_s(scheme_struct_ref, FSRC_MARKS)
@@ -92,6 +102,8 @@ define_ts_iSs_s(scheme_struct_getter, FSRC_MARKS)
 define_ts_iSs_s(scheme_struct_setter, FSRC_MARKS)
 define_ts_iS_s(scheme_box_cas, FSRC_MARKS)
 define_ts__v(chaperone_set_mark, FSRC_MARKS)
+define_ts_iS_s(scheme_checked_char_to_integer, FSRC_MARKS)
+define_ts_iS_s(scheme_checked_integer_to_char, FSRC_MARKS)
 #endif
 
 #ifdef JITCALL_TS_PROCS
@@ -134,6 +146,9 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_scheme_force_value_same_mark scheme_force_value_same_mark
 # define ts_scheme_force_one_value_same_mark scheme_force_one_value_same_mark
 # define ts_malloc_double malloc_double
+#ifdef MZ_LONG_DOUBLE
+# define ts_malloc_long_double malloc_long_double
+#endif
 # define ts_scheme_box scheme_box
 # define ts_scheme_make_mutable_pair scheme_make_mutable_pair
 # define ts_scheme_jit_make_list_star scheme_jit_make_list_star
@@ -182,6 +197,9 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_chaperone_set_mark chaperone_set_mark
 # define ts_scheme_vector_length scheme_vector_length
 # define ts_scheme_flvector_length scheme_flvector_length
+#ifdef MZ_LONG_DOUBLE
+# define ts_scheme_extflvector_length scheme_extflvector_length
+#endif
 # define ts_scheme_fxvector_length scheme_fxvector_length
 # define ts_scheme_struct_ref scheme_struct_ref
 # define ts_scheme_struct_set scheme_struct_set
@@ -199,6 +217,10 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_scheme_checked_byte_string_set scheme_checked_byte_string_set
 # define ts_scheme_checked_flvector_ref scheme_checked_flvector_ref
 # define ts_scheme_checked_flvector_set scheme_checked_flvector_set
+#ifdef MZ_LONG_DOUBLE
+# define ts_scheme_checked_extflvector_ref scheme_checked_extflvector_ref
+# define ts_scheme_checked_extflvector_set scheme_checked_extflvector_set
+#endif
 # define ts_scheme_checked_fxvector_ref scheme_checked_fxvector_ref
 # define ts_scheme_checked_fxvector_set scheme_checked_fxvector_set
 # define ts_scheme_checked_syntax_e scheme_checked_syntax_e
@@ -212,4 +234,6 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_scheme_checked_list_tail scheme_checked_list_tail
 # define ts_scheme_struct_getter scheme_struct_getter
 # define ts_scheme_struct_setter scheme_struct_setter
+# define ts_scheme_checked_char_to_integer scheme_checked_char_to_integer
+# define ts_scheme_checked_integer_to_char scheme_checked_integer_to_char
 #endif

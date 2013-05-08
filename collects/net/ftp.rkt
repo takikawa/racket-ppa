@@ -199,11 +199,11 @@
 
 (define (ftp-download-file ftp-ports folder filename
                            #:progress [progress-proc #f])
-  ;; Save the file under the name tmp.file, rename it once download is
+  ;; Save the file under a temporary name, rename it once download is
   ;; complete this assures we don't over write any existing file without
   ;; having a good file down
-  (let* ([tmpfile "file.tmp"]
-         [new-file (open-output-file tmpfile #:exists 'replace)]
+  (let* ([tmpfile (make-temporary-file "~a.download" #f folder)]
+         [new-file (open-output-file tmpfile #:exists 'truncate)]
          [tcp-data (establish-data-connection ftp-ports 'in)])
 
     (transfer-data ftp-ports 'download tcp-data new-file filename progress-proc)

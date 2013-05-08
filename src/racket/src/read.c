@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2012 PLT Scheme Inc.
+  Copyright (c) 2004-2013 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -2173,7 +2173,7 @@ static Scheme_Object *resolve_references(Scheme_Object *obj,
       obj = scheme_chaperone_hash_table_copy(obj);
 
     if (SCHEME_HASHTRP(obj)) {
-      int i;
+      mzlonglong i;
       if (scheme_is_hash_tree_equal(obj))
         kind = 1;
       else if (scheme_is_hash_tree_eqv(obj))
@@ -2182,7 +2182,7 @@ static Scheme_Object *resolve_references(Scheme_Object *obj,
         kind = 0;
       t = (Scheme_Hash_Tree *)obj;
       lst = scheme_null;
-      for (i = t->count; i--; ) {
+      for (i = scheme_hash_tree_next(t, -1); i != -1; i = scheme_hash_tree_next(t, i)) {
         scheme_hash_tree_index(t, i, &key, &val);
         lst = scheme_make_pair(scheme_make_pair(key, val), lst);
       }
@@ -2210,7 +2210,6 @@ static Scheme_Object *resolve_references(Scheme_Object *obj,
     
     t->count = base->count;
     t->root = base->root;
-    t->elems_box = base->elems_box;
   } else if (SCHEME_HASHTP(obj)) {
     int i;
     Scheme_Object *key, *val, *l = scheme_null, *orig_l;
@@ -4776,6 +4775,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
       RANGE_CHECK(l, < (EXPECTED_PRIM_COUNT 
                         + EXPECTED_UNSAFE_COUNT 
                         + EXPECTED_FLFXNUM_COUNT 
+                        + EXPECTED_EXTFL_COUNT 
                         + EXPECTED_FUTURES_COUNT));
       return variable_references[l];
       break;

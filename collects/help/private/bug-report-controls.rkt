@@ -7,6 +7,7 @@
          setup/dirs
          setup/link
          framework
+         (prefix-in pkg: pkg)
          (for-syntax racket/base
                      racket/list)
          "buginfo.rkt"
@@ -247,6 +248,12 @@
      #f
      #:top-panel synthesized-panel))
   
+  (define pkg-info
+    (make-big-text
+     (string-constant bug-report-field-pkg)
+     #:stretch? #t
+     #:top-panel synthesized-panel))
+  
   (define collections
     (make-big-text
      (string-constant bug-report-field-collections)
@@ -315,6 +322,7 @@
                    (format "Human Language: ~a\n" (send human-language get-value))
                    (format "(current-memory-use) ~a\n" (send memory-use get-value))
                    (format "Links: ~a\n" (send links-ctrl get-value))
+                   (format "raco pkg (show):\n~a\n" (send (send pkg-info get-editor) get-text))
                    "\n"
                    "\nCollections:\n"
                    (format "~a" (send (send collections get-editor) get-text))
@@ -431,6 +439,15 @@
                      (links #:user? #f)
                      (links #:root? #t)
                      (links #:user? #f #:root? #t)))
+  
+  (define pkg-info-sp (open-output-string))
+  (parameterize ([current-output-port pkg-info-sp])
+    (with-handlers ([exn:fail? (lambda (exn)
+                                 (printf "ERROR:\n~a" (exn-message exn)))])
+      (pkg:show)))
+  (send (send pkg-info get-editor)
+        insert
+        (get-output-string pkg-info-sp))
   
   (send human-language set-value (format "~a" (this-language)))
   (send memory-use set-value (format "~a" (current-memory-use)))

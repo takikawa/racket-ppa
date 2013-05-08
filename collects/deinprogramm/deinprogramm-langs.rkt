@@ -1084,12 +1084,12 @@
             [(send pre-installed-lb get-selection)
              =>
              (lambda (i) `(lib ,(send pre-installed-lb get-string i) 
-                          "teachpack"
-                          "deinprogramm"))]
+                               "teachpack"
+                               "deinprogramm"))]
             [(send user-installed-lb get-selection)
              =>
              (lambda (i) `(lib ,(send user-installed-lb get-string i)
-                          ,user-installed-teachpacks-collection))]
+                               ,user-installed-teachpacks-collection))]
             [else (error 'figure-out-answer "no selection!")]))
         
         
@@ -1350,7 +1350,9 @@
       
       ;; add-deinprogramm-language : (instanceof deinprogramm-language<%>) -> void
       (define (add-deinprogramm-language o)
-        (drscheme:language-configuration:add-language o))
+        (drscheme:language-configuration:add-language
+         o
+         #:allow-executable-creation? #t))
       
       (define (phase1) (void))
 

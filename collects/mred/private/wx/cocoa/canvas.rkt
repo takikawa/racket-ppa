@@ -308,6 +308,8 @@
        (get-cocoa-window))
 
      (define/private (refresh-one)
+       (when is-gl?
+         (tellv content-cocoa setNeedsDisplay: #:type _BOOL #t))
        (queue-paint))
      (define/override (refresh)
        ;; can be called from any thread, including the event-pump thread
@@ -315,8 +317,9 @@
        (refresh-all-children))
 
      (define/public (queue-backing-flush)
-       ;; called atomically (not expecting exceptions)
-       (tellv content-cocoa setNeedsDisplay: #:type _BOOL #t))
+       (unless is-gl?
+         ;; called atomically (not expecting exceptions)
+         (tellv content-cocoa setNeedsDisplay: #:type _BOOL #t)))
 
      (define/override (get-cocoa-content) content-cocoa)
 
@@ -786,8 +789,6 @@
          (when (x . >= . 0) (scroll-pos h-scroller (floor (* x (scroll-range h-scroller)))))
          (when (y . >= . 0) (scroll-pos v-scroller (floor (* y (scroll-range v-scroller)))))
          (refresh-for-autoscroll)))
-
-     (define/public (warp-pointer x y) (void))
 
      (define/override (get-virtual-h-pos)
        (scroll-pos h-scroller))

@@ -714,6 +714,8 @@ FRAMEWORK_INSTALL_DIR
 FRAMEWORK_REL_INSTALL
 FRAMEWORK_PREFIX
 INSTALL_ORIG_TREE
+INSTALL_PKGSCOPE
+MAKE_INSTALL_PKGSCOPE
 EXE_SUFFIX
 SO_SUFFIX
 OWN_LIBFFI
@@ -1340,12 +1342,14 @@ Optional Features:
   --enable-places         support places (3m only; usually enabled by default)
   --enable-futures        support futures (usually enabled by default)
   --enable-float          support single-precision floats (enabled by default)
-  --enable-floatinstead   use single-precision by default
+  --enable-floatinstead   use single-precision by default (NOT RECOMMENDED)
+  --enable-extflonum      support extflonums (enabled by default, if available)
   --enable-racket=<path>  use <path> as Racket executable to build Racket
   --enable-origtree       install with original directory structure
+  --enable-pkgscope=<s>   set `raco pkg' default: installation, user, or shared
   --enable-docs           build docs on install (enabled by default)
   --enable-usersetup      setup user-specific files on install
-  --enable-shared         create shared libraries
+  --enable-shared         create shared libraries (ok, but not recommended)
   --enable-dynlib         same as --enable-shared
   --enable-lt=<prog>      use <prog> instead of libtool; disable to use bundled
   --enable-libffi         use installed libffi (enabled by default for Unix)
@@ -1355,16 +1359,16 @@ Optional Features:
   --enable-userfw         install Mac OS X frameworks to ~/Library/Frameworks
   --enable-macprefix      allow --prefix with a Mac OS X install
   --enable-mac64          allow 64-bit Mac OS X build (enabled by default)
-  --enable-cgcdefault     use CGC (Boehm or Senora) as default build
+  --enable-cgcdefault     use CGC as default build (NOT RECOMMENDED)
   --enable-sgc            use Senora GC instead of the Boehm GC
   --enable-sgcdebug       use Senora GC for debugging
-  --enable-backtrace      3m: support GC backtrace dumps
-  --enable-pthread        link with pthreads
+  --enable-backtrace      3m: support GC backtrace dumps (expensive debug mode)
+  --enable-pthread        link with pthreads (usually auto-enabled if needed)
   --enable-stackup        assume "up" if stack direction cannot be determined
   --enable-bigendian      assume "big" if endianness cannot be determined
   --enable-gprof          compile for profiling with gprof (gcc only)
   --enable-gcov           compile to gather gcov statistics (gcc3 only)
-  --enable-noopt          drop -O C flags
+  --enable-noopt          drop -O C flags (useful for low-level debugging)
 
 Some influential environment variables:
   CC          C compiler command
@@ -2003,6 +2007,13 @@ if test "${enable_floatinstead+set}" = set; then
   enableval=$enable_floatinstead;
 fi
 
+# Check whether --enable-extflonum was given.
+if test "${enable_extflonum+set}" = set; then
+  enableval=$enable_extflonum;
+else
+  enable_extflonum=yes
+fi
+
 
 # Check whether --enable-racket was given.
 if test "${enable_racket+set}" = set; then
@@ -2013,6 +2024,11 @@ fi
 # Check whether --enable-origtree was given.
 if test "${enable_origtree+set}" = set; then
   enableval=$enable_origtree;
+fi
+
+# Check whether --enable-pkgscope was given.
+if test "${enable_pkgscope+set}" = set; then
+  enableval=$enable_pkgscope;
 fi
 
 
@@ -2285,7 +2301,7 @@ else
   libpltdir="${libdir}/racket"
   collectsdir="${libdir}/racket/collects"
   includepltdir="${includedir}/racket"
-  docdir="${datadir}/racket/doc"
+  docdir="${datadir}/doc/racket"
   MAKE_COPYTREE=copytree
   COLLECTS_PATH='${collectsdir}'
   INSTALL_ORIG_TREE=no
@@ -2312,10 +2328,13 @@ show_explicitly_enabled()
 {
   if test "$1" = "yes" ; then
     echo "=== $2 enabled"
+    if test "$3" != "" ; then
+      echo "  $3"
+    fi
   fi
 }
 
-show_explicitly_enabled "${enable_cgcdefault}" "CGC as default"
+show_explicitly_enabled "${enable_cgcdefault}" "CGC as default" "Note that this mode is NOT RECOMMENDED for normal Racket use"
 
 show_explicitly_disabled "${enable_docs}" "Documentation build"
 show_explicitly_enabled "${enable_usersetup}" "User-specific setup on install"
@@ -2343,10 +2362,11 @@ show_explicitly_disabled "${enable_futures}" Futures
 
 show_explicitly_enabled "${enable_sgc}" SGC
 show_explicitly_enabled "${enable_sgcdebug}" "SGC debug mode"
-show_explicitly_enabled "${enable_backtrace}" "3m GC backtraces"
+show_explicitly_enabled "${enable_backtrace}" "3m GC backtraces" "Note that this mode is not intended for normal Racket use"
 
 show_explicitly_disabled "${enable_float}" "Single-precision floats"
-show_explicitly_enabled "${enable_floatinstead}" "Single-precision default floats"
+show_explicitly_enabled "${enable_floatinstead}" "Single-precision default floats" "Note that this mode is NOT RECOMMENDED"
+show_explicitly_disabled "${enable_extflonum}" "Extflonums"
 
 show_explicitly_enabled "${enable_pthread}" "pthreads"
 show_explicitly_enabled "${enable_oskit}" "OSKit"
@@ -2355,7 +2375,7 @@ show_explicitly_enabled "${enable_smalloskit}" "OSKit small mode"
 show_explicitly_enabled "${enable_gprof}" "gprof"
 show_explicitly_enabled "${enable_gcov}" "gcov"
 
-show_explicitly_enabled "${enable_noopt}" "No-optimization"
+show_explicitly_enabled "${enable_noopt}" "No-optimization" "Note that this mode is intended only for debugging purposes"
 
 show_explicitly_disabled "${enable_mac64}" "64-bit Mac OS X"
 
@@ -2368,6 +2388,28 @@ fi
 
 if test "${enable_racket}" != "" ; then
    echo "=== Using Racket executable ${enable_racket}"
+fi
+
+INSTALL_PKGSCOPE=user
+MAKE_INSTALL_PKGSCOPE=preserve
+if test "${enable_pkgscope}" != "" ; then
+  case "${enable_pkgscope}" in
+   installation)
+     INSTALL_PKGSCOPE=installation
+     ;;
+   user)
+     INSTALL_PKGSCOPE=user
+     ;;
+   shared)
+     INSTALL_PKGSCOPE=shared
+     ;;
+   *)
+     echo "Unrecognized package scope: ${enable_pkgscope}"
+     exit 1
+     ;;
+  esac
+  echo "=== Package scope: " $INSTALL_PKGSCOPE
+  MAKE_INSTALL_PKGSCOPE=adjust
 fi
 
 ###### Some defaults #######
@@ -2474,6 +2516,14 @@ if test "${enable_float}" = "yes" ; then
 
 cat >>confdefs.h <<\_ACEOF
 #define USE_SINGLE_FLOATS 1
+_ACEOF
+
+fi
+
+if test "${enable_extflonum}" = "no" ; then
+
+cat >>confdefs.h <<\_ACEOF
+#define MZ_NO_EXTFLONUMS 1
 _ACEOF
 
 fi
@@ -3980,7 +4030,7 @@ case "$host_os" in
     try_kqueue_syscall=yes
     ;;
   openbsd*)
-    LIBS="$LIBS -rdynamic -Wl,--export-dynamic"
+    LIBS="$LIBS -Wl,--export-dynamic"
     enable_pthread=yes
     try_kqueue_syscall=yes
     ;;
@@ -4220,53 +4270,38 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
  msg="for inline keyword"
 { echo "$as_me:$LINENO: checking $msg" >&5
 echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
-if test "$cross_compiling" = yes; then
-  inline=no
-else
-  cat >conftest.$ac_ext <<_ACEOF
-/* confdefs.h.  */
-_ACEOF
-cat confdefs.h >>conftest.$ac_ext
-cat >>conftest.$ac_ext <<_ACEOF
-/* end confdefs.h.  */
+cat >conftest.$ac_ext <<_ACEOF
 static inline int foo() { return 0; }
    int main() {
       return foo();
    }
 _ACEOF
-rm -f conftest$ac_exeext
-if { (ac_try="$ac_link"
+rm -f conftest.$ac_objext
+if { (ac_try="$ac_compile"
 case "(($ac_try" in
   *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
   *) ac_try_echo=$ac_try;;
 esac
 eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_link") 2>&5
+  (eval "$ac_compile") 2>conftest.er1
   ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
   echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
-  { (case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_try") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); }; }; then
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest.$ac_objext; then
   inline=yes
 else
-  echo "$as_me: program exited with status $ac_status" >&5
-echo "$as_me: failed program was:" >&5
+  echo "$as_me: failed program was:" >&5
 sed 's/^/| /' conftest.$ac_ext >&5
 
-( exit $ac_status )
-inline=no
-fi
-rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
+	inline=no
 fi
 
-
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
 if test "$inline" = "no" ; then
   MZOPTIONS="$MZOPTIONS -DNO_INLINE_KEYWORD"
 fi
@@ -4276,54 +4311,39 @@ echo "${ECHO_T}$inline" >&6; }
  msg="for noinline attribute"
 { echo "$as_me:$LINENO: checking $msg" >&5
 echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
-if test "$cross_compiling" = yes; then
-  noinline=no
-else
-  cat >conftest.$ac_ext <<_ACEOF
-/* confdefs.h.  */
-_ACEOF
-cat confdefs.h >>conftest.$ac_ext
-cat >>conftest.$ac_ext <<_ACEOF
-/* end confdefs.h.  */
+cat >conftest.$ac_ext <<_ACEOF
 static int foo() __attribute__ ((noinline));
    static int foo() { return 0; }
    int main() {
       return foo();
    }
 _ACEOF
-rm -f conftest$ac_exeext
-if { (ac_try="$ac_link"
+rm -f conftest.$ac_objext
+if { (ac_try="$ac_compile"
 case "(($ac_try" in
   *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
   *) ac_try_echo=$ac_try;;
 esac
 eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_link") 2>&5
+  (eval "$ac_compile") 2>conftest.er1
   ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
   echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
-  { (case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_try") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); }; }; then
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest.$ac_objext; then
   noinline=yes
 else
-  echo "$as_me: program exited with status $ac_status" >&5
-echo "$as_me: failed program was:" >&5
+  echo "$as_me: failed program was:" >&5
 sed 's/^/| /' conftest.$ac_ext >&5
 
-( exit $ac_status )
-noinline=no
-fi
-rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
+	noinline=no
 fi
 
-
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
 if test "$noinline" = "yes" ; then
 
 cat >>confdefs.h <<\_ACEOF
@@ -4331,62 +4351,47 @@ cat >>confdefs.h <<\_ACEOF
 _ACEOF
 
 fi
-{ echo "$as_me:$LINENO: result: $inline" >&5
-echo "${ECHO_T}$inline" >&6; }
+{ echo "$as_me:$LINENO: result: $noinline" >&5
+echo "${ECHO_T}$noinline" >&6; }
 
  msg="for GNU preprocessor"
 { echo "$as_me:$LINENO: checking $msg" >&5
 echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
-if test "$cross_compiling" = yes; then
-  using_gnu_cpp=no
-else
-  cat >conftest.$ac_ext <<_ACEOF
-/* confdefs.h.  */
-_ACEOF
-cat confdefs.h >>conftest.$ac_ext
-cat >>conftest.$ac_ext <<_ACEOF
-/* end confdefs.h.  */
+cat >conftest.$ac_ext <<_ACEOF
 int main () {
    #ifdef __GNUC__
     return 0;
    #else
-    return 1;
+    if; // should fail
    #endif
    }
 _ACEOF
-rm -f conftest$ac_exeext
-if { (ac_try="$ac_link"
+rm -f conftest.$ac_objext
+if { (ac_try="$ac_compile"
 case "(($ac_try" in
   *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
   *) ac_try_echo=$ac_try;;
 esac
 eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_link") 2>&5
+  (eval "$ac_compile") 2>conftest.er1
   ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
   echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
-  { (case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_try") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); }; }; then
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest.$ac_objext; then
   using_gnu_cpp=yes
 else
-  echo "$as_me: program exited with status $ac_status" >&5
-echo "$as_me: failed program was:" >&5
+  echo "$as_me: failed program was:" >&5
 sed 's/^/| /' conftest.$ac_ext >&5
 
-( exit $ac_status )
-using_gnu_cpp=no
-fi
-rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
+	using_gnu_cpp=no
 fi
 
-
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
 if test "$using_gnu_cpp" = "yes" ; then
   XFORMFLAGS="$XFORMFLAGS --keep-lines"
   case "$build_os" in
@@ -5174,15 +5179,7 @@ fi
  msg="for mbsrtowcs"
 { echo "$as_me:$LINENO: checking $msg" >&5
 echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
-if test "$cross_compiling" = yes; then
-  mbsrtowcs=no
-else
-  cat >conftest.$ac_ext <<_ACEOF
-/* confdefs.h.  */
-_ACEOF
-cat confdefs.h >>conftest.$ac_ext
-cat >>conftest.$ac_ext <<_ACEOF
-/* end confdefs.h.  */
+cat >conftest.$ac_ext <<_ACEOF
   #include <wchar.h>
   #include <strings.h>
    int main() {
@@ -5192,308 +5189,6 @@ cat >>conftest.$ac_ext <<_ACEOF
     mbsrtowcs(0, &src, 0, &state);
      return 0;
    }
-_ACEOF
-rm -f conftest$ac_exeext
-if { (ac_try="$ac_link"
-case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_link") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
-  { (case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_try") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); }; }; then
-  mbsrtowcs=yes
-else
-  echo "$as_me: program exited with status $ac_status" >&5
-echo "$as_me: failed program was:" >&5
-sed 's/^/| /' conftest.$ac_ext >&5
-
-( exit $ac_status )
-mbsrtowcs=no
-fi
-rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
-fi
-
-
-if test "$mbsrtowcs" = "no" ; then
-  MZOPTIONS="$MZOPTIONS -DNO_MBTOWC_FUNCTIONS"
-fi
-{ echo "$as_me:$LINENO: result: $mbsrtowcs" >&5
-echo "${ECHO_T}$mbsrtowcs" >&6; }
-
-if test "${try_poll_syscall}" = "yes" ; then
-   msg="for poll"
-  { echo "$as_me:$LINENO: checking $msg" >&5
-echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
-  if test "$cross_compiling" = yes; then
-  use_poll=no
-else
-  cat >conftest.$ac_ext <<_ACEOF
-/* confdefs.h.  */
-_ACEOF
-cat confdefs.h >>conftest.$ac_ext
-cat >>conftest.$ac_ext <<_ACEOF
-/* end confdefs.h.  */
-  #include <poll.h>
-     int main() {
-      struct pollfd pfd;
-      int r;
-      pfd.fd = 0;
-      pfd.events = POLLIN;
-      r = poll(&pfd, 1, 0);
-      return 0;
-     }
-_ACEOF
-rm -f conftest$ac_exeext
-if { (ac_try="$ac_link"
-case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_link") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
-  { (case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_try") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); }; }; then
-  use_poll=yes
-else
-  echo "$as_me: program exited with status $ac_status" >&5
-echo "$as_me: failed program was:" >&5
-sed 's/^/| /' conftest.$ac_ext >&5
-
-( exit $ac_status )
-use_poll=no
-fi
-rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
-fi
-
-
-  { echo "$as_me:$LINENO: result: $use_poll" >&5
-echo "${ECHO_T}$use_poll" >&6; }
-  if test "${use_poll}" = "yes" ; then
-
-cat >>confdefs.h <<\_ACEOF
-#define HAVE_POLL_SYSCALL 1
-_ACEOF
-
-  fi
-fi
-
-if test "${try_epoll_syscall}" = "yes" ; then
-   msg="for epoll"
-  { echo "$as_me:$LINENO: checking $msg" >&5
-echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
-  if test "$cross_compiling" = yes; then
-  use_epoll=no
-else
-  cat >conftest.$ac_ext <<_ACEOF
-/* confdefs.h.  */
-_ACEOF
-cat confdefs.h >>conftest.$ac_ext
-cat >>conftest.$ac_ext <<_ACEOF
-/* end confdefs.h.  */
-  #include <sys/epoll.h>
-    int main() {
-      int fd;
-      struct epoll_event ev;
-      fd = epoll_create(5);
-      ev.events = EPOLLIN | EPOLLONESHOT;
-      epoll_ctl(fd, EPOLL_CTL_ADD, 0, &ev);
-      return 0;
-    }
-_ACEOF
-rm -f conftest$ac_exeext
-if { (ac_try="$ac_link"
-case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_link") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
-  { (case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_try") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); }; }; then
-  use_epoll=yes
-else
-  echo "$as_me: program exited with status $ac_status" >&5
-echo "$as_me: failed program was:" >&5
-sed 's/^/| /' conftest.$ac_ext >&5
-
-( exit $ac_status )
-use_epoll=no
-fi
-rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
-fi
-
-
-  { echo "$as_me:$LINENO: result: $use_epoll" >&5
-echo "${ECHO_T}$use_epoll" >&6; }
-  if test "${use_epoll}" = "yes" ; then
-
-cat >>confdefs.h <<\_ACEOF
-#define HAVE_EPOLL_SYSCALL 1
-_ACEOF
-
-  fi
-fi
-
-if test "${try_kqueue_syscall}" = "yes" ; then
-   msg="for kqueue"
-  { echo "$as_me:$LINENO: checking $msg" >&5
-echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
-  if test "$cross_compiling" = yes; then
-  use_kqueue=no
-else
-  cat >conftest.$ac_ext <<_ACEOF
-/* confdefs.h.  */
-_ACEOF
-cat confdefs.h >>conftest.$ac_ext
-cat >>conftest.$ac_ext <<_ACEOF
-/* end confdefs.h.  */
-  #include <sys/types.h>
-    #include <sys/event.h>
-    #include <sys/time.h>
-     int main() {
-        int kq;
-        struct kevent kev;
-      struct timespec timeout = {0, 0};
-        kq = kqueue();
-        EV_SET(&kev, 0, EVFILT_READ, EV_ADD, 0, 0, NULL);
-        kevent(kq, &kev, 1, NULL, 0, &timeout);
-        return 0;
-     }
-_ACEOF
-rm -f conftest$ac_exeext
-if { (ac_try="$ac_link"
-case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_link") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
-  { (case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_try") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); }; }; then
-  use_kqueue=yes
-else
-  echo "$as_me: program exited with status $ac_status" >&5
-echo "$as_me: failed program was:" >&5
-sed 's/^/| /' conftest.$ac_ext >&5
-
-( exit $ac_status )
-use_kqueue=no
-fi
-rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
-fi
-
-
-  { echo "$as_me:$LINENO: result: $use_kqueue" >&5
-echo "${ECHO_T}$use_kqueue" >&6; }
-  if test "${use_kqueue}" = "yes" ; then
-
-cat >>confdefs.h <<\_ACEOF
-#define HAVE_KQUEUE_SYSCALL 1
-_ACEOF
-
-  fi
-fi
-
-if test "${enable_libffi}" = "default" ; then
-  case "$host_os" in
-  darwin*)
-        enable_libffi=no
-  ;;
-  *)
-        enable_libffi=yes
-  ;;
-  esac
-fi
-
-if test "${enable_libffi}" = "yes" ; then
- if test "${enable_foreign}" = "yes" ; then
-  { echo "$as_me:$LINENO: checking for libffi" >&5
-echo $ECHO_N "checking for libffi... $ECHO_C" >&6; }
-
-  # Try to get flags form pkg-config:
-  libffi_config_prog="pkg-config libffi"
-  libffi_config_preflags=`$libffi_config_prog --cflags-only-I  2> /dev/null`
-  if test "$?" = 0 ; then
-    libffi_config_cflags=`$libffi_config_prog --cflags-only-other  2> /dev/null`
-    if test "$?" = 0 ; then
-      libffi_config_libs=`$libffi_config_prog --libs  2> /dev/null`
-      if test "$?" != 0 ; then
-        libffi_config_preflags=""
-        libffi_config_cflags=""
-        libffi_config_libs="-lffi"
-      fi
-    else
-      libffi_config_preflags=""
-      libffi_config_cflags=""
-      libffi_config_libs="-lffi"
-    fi
-  else
-    libffi_config_preflags=""
-    libffi_config_cflags=""
-    libffi_config_libs="-lffi"
-  fi
-
-  OLD_CFLAGS="${CFLAGS}"
-  OLD_LIBS="${LIBS}"
-  CFLAGS="${CFLAGS} ${libffi_config_preflags} ${libffi_config_cflags}"
-  LIBS="${LIBS} ${libffi_config_libs}"
-  cat >conftest.$ac_ext <<_ACEOF
-/* confdefs.h.  */
-_ACEOF
-cat confdefs.h >>conftest.$ac_ext
-cat >>conftest.$ac_ext <<_ACEOF
-/* end confdefs.h.  */
-#include <ffi.h>
-int
-main ()
-{
-ffi_cif cif;
-              ffi_prep_cif(&cif, FFI_DEFAULT_ABI, 0, &ffi_type_void, NULL);
-  ;
-  return 0;
-}
 _ACEOF
 rm -f conftest.$ac_objext conftest$ac_exeext
 if { (ac_try="$ac_link"
@@ -5513,87 +5208,229 @@ eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
 	 test ! -s conftest.err
        } && test -s conftest$ac_exeext &&
        $as_test_x conftest$ac_exeext; then
-  have_libffi=yes
+  mbsrtowcs=yes
 else
   echo "$as_me: failed program was:" >&5
 sed 's/^/| /' conftest.$ac_ext >&5
 
-	have_libffi=no
+	mbsrtowcs=no
 fi
 
 rm -f core conftest.err conftest.$ac_objext conftest_ipa8_conftest.oo \
       conftest$ac_exeext conftest.$ac_ext
-  { echo "$as_me:$LINENO: result: $have_libffi" >&5
-echo "${ECHO_T}$have_libffi" >&6; }
-  if test "${have_libffi}" = "no" ; then
-    CFLAGS="${OLD_CFLAGS}"
-    LIBS="${OLD_LIBS}"
-    echo "Building own libffi"
-  else
-    CFLAGS="${OLD_CFLAGS}"
-    PREFLAGS="${PREFLAGS} ${libffi_config_preflags}"
-    COMPFLAGS="${COMPFLAGS} ${libffi_config_cflags}"
-    echo "Using installed libffi"
-    OWN_LIBFFI="OFF"
-  fi
- fi
+if test "$mbsrtowcs" = "no" ; then
+  MZOPTIONS="$MZOPTIONS -DNO_MBTOWC_FUNCTIONS"
 fi
+{ echo "$as_me:$LINENO: result: $mbsrtowcs" >&5
+echo "${ECHO_T}$mbsrtowcs" >&6; }
 
-if test "${check_for_mprotect}" = "yes" ; then
-   msg="for mmap and mprotect"
+if test "${try_poll_syscall}" = "yes" ; then
+   msg="for poll"
   { echo "$as_me:$LINENO: checking $msg" >&5
 echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
-  if test "$cross_compiling" = yes; then
-  use_mprotect=no
-else
   cat >conftest.$ac_ext <<_ACEOF
-/* confdefs.h.  */
-_ACEOF
-cat confdefs.h >>conftest.$ac_ext
-cat >>conftest.$ac_ext <<_ACEOF
-/* end confdefs.h.  */
-  #include <sys/mman.h>
-    #include <fcntl.h>
+  #include <poll.h>
      int main() {
-      void *p;
-      p = mmap(0, 2 << 16, PROT_READ | PROT_WRITE, MAP_PRIVATE, open("/dev/zero", O_RDWR), 0);
-      mprotect(p, 2 << 16, PROT_READ | PROT_WRITE | PROT_EXEC);
+      struct pollfd pfd;
+      int r;
+      pfd.fd = 0;
+      pfd.events = POLLIN;
+      r = poll(&pfd, 1, 0);
       return 0;
      }
 _ACEOF
-rm -f conftest$ac_exeext
+rm -f conftest.$ac_objext conftest$ac_exeext
 if { (ac_try="$ac_link"
 case "(($ac_try" in
   *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
   *) ac_try_echo=$ac_try;;
 esac
 eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_link") 2>&5
+  (eval "$ac_link") 2>conftest.er1
   ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
   echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
-  { (case "(($ac_try" in
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest$ac_exeext &&
+       $as_test_x conftest$ac_exeext; then
+  use_poll=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+	use_poll=no
+fi
+
+rm -f core conftest.err conftest.$ac_objext conftest_ipa8_conftest.oo \
+      conftest$ac_exeext conftest.$ac_ext
+  { echo "$as_me:$LINENO: result: $use_poll" >&5
+echo "${ECHO_T}$use_poll" >&6; }
+  if test "${use_poll}" = "yes" ; then
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_POLL_SYSCALL 1
+_ACEOF
+
+  fi
+fi
+
+if test "${try_epoll_syscall}" = "yes" ; then
+   msg="for epoll"
+  { echo "$as_me:$LINENO: checking $msg" >&5
+echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
+  cat >conftest.$ac_ext <<_ACEOF
+  #include <sys/epoll.h>
+    int main() {
+      int fd;
+      struct epoll_event ev;
+      fd = epoll_create(5);
+      ev.events = EPOLLIN | EPOLLONESHOT;
+      epoll_ctl(fd, EPOLL_CTL_ADD, 0, &ev);
+      return 0;
+    }
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (ac_try="$ac_link"
+case "(($ac_try" in
   *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
   *) ac_try_echo=$ac_try;;
 esac
 eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_try") 2>&5
+  (eval "$ac_link") 2>conftest.er1
   ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
   echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); }; }; then
-  use_mprotect=yes
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest$ac_exeext &&
+       $as_test_x conftest$ac_exeext; then
+  use_epoll=yes
 else
-  echo "$as_me: program exited with status $ac_status" >&5
-echo "$as_me: failed program was:" >&5
+  echo "$as_me: failed program was:" >&5
 sed 's/^/| /' conftest.$ac_ext >&5
 
-( exit $ac_status )
-use_mprotect=no
-fi
-rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
+	use_epoll=no
 fi
 
+rm -f core conftest.err conftest.$ac_objext conftest_ipa8_conftest.oo \
+      conftest$ac_exeext conftest.$ac_ext
+  { echo "$as_me:$LINENO: result: $use_epoll" >&5
+echo "${ECHO_T}$use_epoll" >&6; }
+  if test "${use_epoll}" = "yes" ; then
 
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_EPOLL_SYSCALL 1
+_ACEOF
+
+  fi
+fi
+
+if test "${try_kqueue_syscall}" = "yes" ; then
+   msg="for kqueue"
+  { echo "$as_me:$LINENO: checking $msg" >&5
+echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
+  cat >conftest.$ac_ext <<_ACEOF
+  #include <sys/types.h>
+    #include <sys/event.h>
+    #include <sys/time.h>
+     int main() {
+        int kq;
+        struct kevent kev;
+      struct timespec timeout = {0, 0};
+        kq = kqueue();
+        EV_SET(&kev, 0, EVFILT_READ, EV_ADD, 0, 0, NULL);
+        kevent(kq, &kev, 1, NULL, 0, &timeout);
+        return 0;
+     }
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (ac_try="$ac_link"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_link") 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest$ac_exeext &&
+       $as_test_x conftest$ac_exeext; then
+  use_kqueue=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+	use_kqueue=no
+fi
+
+rm -f core conftest.err conftest.$ac_objext conftest_ipa8_conftest.oo \
+      conftest$ac_exeext conftest.$ac_ext
+  { echo "$as_me:$LINENO: result: $use_kqueue" >&5
+echo "${ECHO_T}$use_kqueue" >&6; }
+  if test "${use_kqueue}" = "yes" ; then
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_KQUEUE_SYSCALL 1
+_ACEOF
+
+  fi
+fi
+
+if test "${check_for_mprotect}" = "yes" ; then
+   msg="for mmap and mprotect"
+  { echo "$as_me:$LINENO: checking $msg" >&5
+echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
+  cat >conftest.$ac_ext <<_ACEOF
+  #include <sys/mman.h>
+    #include <fcntl.h>
+     int main() {
+      void *p;
+      p = mmap(0, 2 << 16, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE, open("/dev/zero", O_RDWR), 0);
+      mprotect(p, 2 << 16, PROT_READ | PROT_WRITE | PROT_EXEC);
+      return 0;
+     }
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (ac_try="$ac_link"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_link") 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest$ac_exeext &&
+       $as_test_x conftest$ac_exeext; then
+  use_mprotect=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+	use_mprotect=no
+fi
+
+rm -f core conftest.err conftest.$ac_objext conftest_ipa8_conftest.oo \
+      conftest$ac_exeext conftest.$ac_ext
   { echo "$as_me:$LINENO: result: $use_mprotect" >&5
 echo "${ECHO_T}$use_mprotect" >&6; }
   if test "${use_mprotect}" = "yes" ; then
@@ -8675,15 +8512,7 @@ if test "${enable_mzrt}" = "yes" ; then
    msg="for compare-and-swap"
   { echo "$as_me:$LINENO: checking $msg" >&5
 echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
-  if test "$cross_compiling" = yes; then
-  cas_available=no
-else
   cat >conftest.$ac_ext <<_ACEOF
-/* confdefs.h.  */
-_ACEOF
-cat confdefs.h >>conftest.$ac_ext
-cat >>conftest.$ac_ext <<_ACEOF
-/* end confdefs.h.  */
 int check1(long *addr, long old, long new_val) {
      return __sync_bool_compare_and_swap(addr, old, new_val);
    }
@@ -8695,39 +8524,34 @@ int check1(long *addr, long old, long new_val) {
       return !check1(&l, 2, 4) || !check2(&s, 3, 6);
    }
 _ACEOF
-rm -f conftest$ac_exeext
+rm -f conftest.$ac_objext conftest$ac_exeext
 if { (ac_try="$ac_link"
 case "(($ac_try" in
   *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
   *) ac_try_echo=$ac_try;;
 esac
 eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_link") 2>&5
+  (eval "$ac_link") 2>conftest.er1
   ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
   echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
-  { (case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_try") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); }; }; then
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest$ac_exeext &&
+       $as_test_x conftest$ac_exeext; then
   cas_available=yes
 else
-  echo "$as_me: program exited with status $ac_status" >&5
-echo "$as_me: failed program was:" >&5
+  echo "$as_me: failed program was:" >&5
 sed 's/^/| /' conftest.$ac_ext >&5
 
-( exit $ac_status )
-cas_available=no
-fi
-rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
+	cas_available=no
 fi
 
-
+rm -f core conftest.err conftest.$ac_objext conftest_ipa8_conftest.oo \
+      conftest$ac_exeext conftest.$ac_ext
   { echo "$as_me:$LINENO: result: $cas_available" >&5
 echo "${ECHO_T}$cas_available" >&6; }
   if test "${cas_available}" = "yes" ; then
@@ -8762,54 +8586,41 @@ _ACEOF
  msg="whether pthread_rwlock is available"
   { echo "$as_me:$LINENO: checking $msg" >&5
 echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
-  if test "$cross_compiling" = yes; then
-  rwlockavail=no
-else
   cat >conftest.$ac_ext <<_ACEOF
-/* confdefs.h.  */
-_ACEOF
-cat confdefs.h >>conftest.$ac_ext
-cat >>conftest.$ac_ext <<_ACEOF
-/* end confdefs.h.  */
   #include <pthread.h>
    pthread_rwlock_t l;
    int main() {
      return pthread_rwlock_init(&l, NULL);
    }
 _ACEOF
-rm -f conftest$ac_exeext
+rm -f conftest.$ac_objext conftest$ac_exeext
 if { (ac_try="$ac_link"
 case "(($ac_try" in
   *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
   *) ac_try_echo=$ac_try;;
 esac
 eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_link") 2>&5
+  (eval "$ac_link") 2>conftest.er1
   ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
   echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
-  { (case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_try") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); }; }; then
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest$ac_exeext &&
+       $as_test_x conftest$ac_exeext; then
   rwlockavail=yes
 else
-  echo "$as_me: program exited with status $ac_status" >&5
-echo "$as_me: failed program was:" >&5
+  echo "$as_me: failed program was:" >&5
 sed 's/^/| /' conftest.$ac_ext >&5
 
-( exit $ac_status )
-rwlockavail=no
-fi
-rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
+	rwlockavail=no
 fi
 
-
+rm -f core conftest.err conftest.$ac_objext conftest_ipa8_conftest.oo \
+      conftest$ac_exeext conftest.$ac_ext
   { echo "$as_me:$LINENO: result: $rwlockavail" >&5
 echo "${ECHO_T}$rwlockavail" >&6; }
   if test "$rwlockavail" = "yes" ; then
@@ -8821,8 +8632,123 @@ _ACEOF
   fi
 fi
 
+############## libffi ################
+
+# Depends on pthread on some platforms
+
 if test "${enable_pthread}" = "" ; then
   enable_pthread=no
+fi
+
+if test "${enable_libffi}" = "yes" ; then
+   complain_if_libffi_fails=yes
+fi
+
+if test "${enable_libffi}" = "default" ; then
+  case "$host_os" in
+  darwin*)
+        enable_libffi=no
+  ;;
+  *)
+        enable_libffi=yes
+  ;;
+  esac
+fi
+
+if test "${enable_libffi}" = "yes" ; then
+ if test "${enable_foreign}" = "yes" ; then
+  { echo "$as_me:$LINENO: checking for libffi" >&5
+echo $ECHO_N "checking for libffi... $ECHO_C" >&6; }
+
+  # Try to get flags form pkg-config:
+  libffi_config_prog="pkg-config libffi"
+  libffi_config_preflags=`$libffi_config_prog --cflags-only-I  2> /dev/null`
+  if test "$?" = 0 ; then
+    libffi_config_cflags=`$libffi_config_prog --cflags-only-other  2> /dev/null`
+    if test "$?" = 0 ; then
+      libffi_config_libs=`$libffi_config_prog --libs  2> /dev/null`
+      if test "$?" != 0 ; then
+        libffi_config_preflags=""
+        libffi_config_cflags=""
+        libffi_config_libs="-lffi"
+      fi
+    else
+      libffi_config_preflags=""
+      libffi_config_cflags=""
+      libffi_config_libs="-lffi"
+    fi
+  else
+    libffi_config_preflags=""
+    libffi_config_cflags=""
+    libffi_config_libs="-lffi"
+  fi
+
+  OLD_CFLAGS="${CFLAGS}"
+  OLD_LIBS="${LIBS}"
+  CFLAGS="${CFLAGS} ${libffi_config_preflags} ${libffi_config_cflags}"
+  LIBS="${LIBS} ${libffi_config_libs}"
+  cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+#include <ffi.h>
+int
+main ()
+{
+ffi_cif cif;
+              ffi_prep_cif(&cif, FFI_DEFAULT_ABI, 0, &ffi_type_void, NULL);
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (ac_try="$ac_link"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_link") 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest$ac_exeext &&
+       $as_test_x conftest$ac_exeext; then
+  have_libffi=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+	have_libffi=no
+fi
+
+rm -f core conftest.err conftest.$ac_objext conftest_ipa8_conftest.oo \
+      conftest$ac_exeext conftest.$ac_ext
+  { echo "$as_me:$LINENO: result: $have_libffi" >&5
+echo "${ECHO_T}$have_libffi" >&6; }
+  if test "${have_libffi}" = "no" ; then
+    CFLAGS="${OLD_CFLAGS}"
+    LIBS="${OLD_LIBS}"
+    echo "Building own libffi"
+    if test "${complain_if_libffi_fails}" = "yes" ; then
+       echo configure: unable to link to libffi
+       exit 1
+    fi
+  else
+    CFLAGS="${OLD_CFLAGS}"
+    PREFLAGS="${PREFLAGS} ${libffi_config_preflags}"
+    COMPFLAGS="${COMPFLAGS} ${libffi_config_cflags}"
+    echo "Using installed libffi"
+    OWN_LIBFFI="OFF"
+  fi
+ fi
 fi
 
 ############## Solaris grunge ################
@@ -8836,52 +8762,39 @@ if test "$check_gcc_dash_e" = "yes" ; then
  msg="whether linker accepts -Wl,-E"
   { echo "$as_me:$LINENO: checking $msg" >&5
 echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
-  if test "$cross_compiling" = yes; then
-  linker_dash_e=no
-else
   cat >conftest.$ac_ext <<_ACEOF
-/* confdefs.h.  */
-_ACEOF
-cat confdefs.h >>conftest.$ac_ext
-cat >>conftest.$ac_ext <<_ACEOF
-/* end confdefs.h.  */
 int main() {
       return 0;
    }
 _ACEOF
-rm -f conftest$ac_exeext
+rm -f conftest.$ac_objext conftest$ac_exeext
 if { (ac_try="$ac_link"
 case "(($ac_try" in
   *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
   *) ac_try_echo=$ac_try;;
 esac
 eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_link") 2>&5
+  (eval "$ac_link") 2>conftest.er1
   ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
   echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
-  { (case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
-  (eval "$ac_try") 2>&5
-  ac_status=$?
-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
-  (exit $ac_status); }; }; then
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest$ac_exeext &&
+       $as_test_x conftest$ac_exeext; then
   linker_dash_e=yes
 else
-  echo "$as_me: program exited with status $ac_status" >&5
-echo "$as_me: failed program was:" >&5
+  echo "$as_me: failed program was:" >&5
 sed 's/^/| /' conftest.$ac_ext >&5
 
-( exit $ac_status )
-linker_dash_e=no
-fi
-rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
+	linker_dash_e=no
 fi
 
-
+rm -f core conftest.err conftest.$ac_objext conftest_ipa8_conftest.oo \
+      conftest$ac_exeext conftest.$ac_ext
   if test "$linker_dash_e" = "no" ; then
     LDFLAGS="${orig_ldflags}"
   fi
@@ -9001,6 +8914,8 @@ fi
 ############## final output ################
 
 LIBS="$LIBS $EXTRALIBS"
+
+
 
 
 
@@ -9938,6 +9853,8 @@ for ac_last_try in false false false false false :; do
 FRAMEWORK_REL_INSTALL!$FRAMEWORK_REL_INSTALL$ac_delim
 FRAMEWORK_PREFIX!$FRAMEWORK_PREFIX$ac_delim
 INSTALL_ORIG_TREE!$INSTALL_ORIG_TREE$ac_delim
+INSTALL_PKGSCOPE!$INSTALL_PKGSCOPE$ac_delim
+MAKE_INSTALL_PKGSCOPE!$MAKE_INSTALL_PKGSCOPE$ac_delim
 EXE_SUFFIX!$EXE_SUFFIX$ac_delim
 SO_SUFFIX!$SO_SUFFIX$ac_delim
 OWN_LIBFFI!$OWN_LIBFFI$ac_delim
@@ -9989,7 +9906,7 @@ LIBOBJS!$LIBOBJS$ac_delim
 LTLIBOBJS!$LTLIBOBJS$ac_delim
 _ACEOF
 
-  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 52; then
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 54; then
     break
   elif $ac_last_try; then
     { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5

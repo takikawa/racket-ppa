@@ -201,7 +201,8 @@ the binding (according to @racket[free-identifier=?]) matters.}
 [module-level-form general-top-level-form
                    (#%provide raw-provide-spec ...)
                    (begin-for-syntax module-level-form ...)
-                   (module id module-path
+                   submodule-form]
+[submodule-form    (module id module-path
                      (#%plain-module-begin
                       module-level-form ...))
                    (module* id module-path 
@@ -986,6 +987,51 @@ When an inferred name is not available, but a source location is
 available, a name is constructed using the source location
 information. Inferred and property-assigned names are also available
 to syntax transformers, via @racket[syntax-local-name].
+
+@;----------------------------------------
+@section[#:tag "cross-phase persistent-grammar"]{Cross-Phase Persistent Module Declarations}
+
+A module is @tech{cross-phase persistent} only if it fits the following grammar,
+which uses non-terminals from @secref["fully-expanded"], only if
+it includes no uses of @racket[quote-syntax] or @racket[#%variable-reference], 
+and only if no module-level binding is @racket[set!]ed.
+
+@racketgrammar*[
+#:literals (module module* #%plain-module-begin begin #%provide
+            define-values #%require
+            #%plain-lambda case-lambda begin
+            set! quote-syntax quote with-continuation-mark
+            #%plain-app
+            cons list make-struct-type make-struct-type-property)
+[cross-module (module id module-path
+                (#%plain-module-begin
+                  cross-form ...))]
+[cross-form     (begin cross-form ...)                
+                (#%provide raw-provide-spec ...)
+                submodule-form
+                (define-values (id ...) cross-expr)
+                (#%require raw-require-spec ...)]
+[cross-expr id
+                (@#,racket[quote] cross-datum)
+                (#%plain-lambda formals expr ...+)
+                (case-lambda (formals expr ...+) ...)
+                (#%plain-app cons cross-expr ...+)
+                (#%plain-app list cross-expr ...+)
+                (#%plain-app make-struct-type cross-expr ...+)
+                (#%plain-app make-struct-type-property
+                             cross-expr ...+)]
+[cross-datum     number
+                 boolean
+                 identifier
+                 string
+                 bytes]
+]
+
+This grammar applies after @tech{expansion}, but because a @tech{cross-phase persistent}
+module imports only from other cross-phase persistent modules, the only relevant
+expansion steps are the implicit introduction of
+@racket[#%plain-module-begin], implicit introduction of @racket[#%plain-app],
+and implicit introduction and/or expansion of @racket[#%datum].
 
 @;----------------------------------------
 

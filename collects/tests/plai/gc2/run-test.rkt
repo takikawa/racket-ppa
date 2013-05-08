@@ -1,6 +1,7 @@
 #lang racket
 (require tests/eli-tester
-         racket/runtime-path)
+         racket/runtime-path
+         "../util.rkt")
 
 (define-runtime-path here ".")
 
@@ -11,7 +12,7 @@
                 (directory-list pth)))))
 
 (define (test-mutator m)
-  (printf "Running ~a\n" m)
+  (printf "Running ~a\n" (simplify-path m))
   (parameterize ([current-namespace (make-base-empty-namespace)])
     (dynamic-require m #f)))
 
@@ -23,7 +24,7 @@
 (define (drop-first-line e)
   (regexp-replace "^[^\n]+\n" e ""))
 (define-syntax-rule (capture-output e)
-  (drop-first-line (with-output-to-string (λ () e))))
+  (drop-first-line (with-both-output-to-string (λ () e))))
 
 (test
  (if (run-good?)
@@ -63,4 +64,23 @@ END
  
  (test-mutator (build-path here "other-mutators" "quote.rkt"))
  =error> "alloc: out of space"
- )
+ 
+ (when (run-good?)
+   (test
+    (capture-output (test-mutator (build-path here "good-mutators" "mv.rkt")))
+    =>
+    #<<END
+Value at location 23:
+31
+Values at locations 25 and 27:
+1
+2
+Values at locations 29, 31, 33, 35, and 37:
+3
+4
+5
+6
+7
+
+END
+    )))

@@ -27,6 +27,23 @@
          "rectangle-intersect.rkt"
          framework/private/logging-timer)
 
+;; submodule to make these accessible to the test suite
+(module oc-status-structs racket/base
+  ;; the online compilation state for individual tabs
+  ;; oc-state is either:
+  ;;   (clean symbol? string? (listof (vector number? number?)))
+  ;;   (dirty boolean?)
+  ;;   (running symbol? string?)
+  (struct clean (error-type error-message error-locs) #:transparent)
+  (struct dirty (timer-pending?) #:transparent)
+  (struct running (sym str) #:transparent)
+  
+  (provide (struct-out clean)
+           (struct-out dirty)
+           (struct-out running)))
+
+(require (submod "." oc-status-structs))
+
 #|
 ;; this code tracks which lines have been executed 
 ;; for use while (manually) testing the oc state machine
@@ -80,7 +97,8 @@
          (drracket:language:simple-module-based-language->module-based-language-mixin
           drracket:language:simple-module-based-language%)))))
     (drracket:language-configuration:add-language
-     (new module-language%)))
+     (new module-language%)
+     #:allow-executable-creation? #t))
   
   ;; collection-paths : (listof (union 'default string))
   ;; command-line-args : (vectorof string)
@@ -147,7 +165,8 @@
         (when ns (current-namespace ns)))
       
       (define/private (get-ns str)
-        (define ev (make-evaluator 'racket/base))
+        (define ev (parameterize ([sandbox-path-permissions (list (list 'exists #rx#""))])
+                     (make-evaluator 'racket/base)))
         (ev `(current-inspector ,(current-inspector)))
         (ev `(parameterize ([read-accept-reader #t])
                (define stx (read-syntax "here" (open-input-string ,str)))
@@ -882,23 +901,6 @@
                              filename))))))]
         [else #f])))
   
-  (define-local-member-name
-    frame-show-bkg-running
-    set-expand-error/status
-    update-frame-expand-error
-    expand-error-next
-    expand-error-prev
-    hide-module-language-error-panel
-    fetch-data-to-send
-    clear-old-error
-    set-bottom-bar-status
-    
-    get-oc-status
-    set-oc-status
-    
-    set-dep-paths
-    set-dirty-if-dep)
-  
   (define online-expansion-logger (make-logger 'online-expansion-state-machine (current-logger)))
   (define-syntax-rule
     (define/oc-log (id . args) . body)
@@ -1070,9 +1072,17 @@
         (update-little-dot))
       
       (define dep-paths (set))
-      (define/public (set-dep-paths d) (set! dep-paths d))
-      (define/public (set-dirty-if-dep path) 
-        (when (set-member? dep-paths path)
+      (define error-dep-paths (set))
+      (define/public (set-dep-paths d error?)
+        (cond
+          [error?
+           (set! error-dep-paths d)]
+          [else
+           (set! dep-paths d)
+           (set! error-dep-paths (set))]))
+      (define/public (set-dirty-if-dep path)
+        (when (or (set-member? dep-paths path)
+                  (set-member? error-dep-paths path))
           (oc-set-dirty this)))
       
       (super-new)))
@@ -1610,6 +1620,7 @@
       (define/public (set-msg _msg _err?) 
         (set! msg _msg)
         (set! err? _err?)
+        (set-the-height/dc-font (preferences:get 'framework:standard-style-list:font-size))
         (refresh))
       (define/override (on-event evt)
         (cond
@@ -1631,29 +1642,40 @@
       (define/override (on-paint)
         (define dc (get-dc))
         (define-values (cw ch) (get-client-size))
-        (send dc set-font (if err? error-font normal-control-font))
         (define-values (tw th td ta) (send dc get-text-extent msg))
         (send dc set-text-foreground (if err? "firebrick" "black"))
         (send dc draw-text msg 2 (- (/ ch 2) (/ th 2))))
       (super-new [style '(transparent)])
       
+      ;; need object to hold onto this function, so this is
+      ;; intentionally a private field, not a method
+      (define (font-size-changed-callback _ new-size)
+        (set-the-height/dc-font new-size)
+        (refresh))
+      (preferences:add-callback
+       'framework:standard-style-list:font-size
+       font-size-changed-callback
+       #t)
+      
+      (define/private (set-the-height/dc-font font-size)
+        (define dc (get-dc))
+        (send dc set-font 
+              (send the-font-list find-or-create-font
+                    font-size
+                    (send normal-control-font get-family)
+                    (if err? 
+                        'italic
+                        (send normal-control-font get-style))
+                    (send normal-control-font get-weight)
+                    (send normal-control-font get-underlined)
+                    (send normal-control-font get-smoothing)))
+        (define-values (tw th td ta) (send dc get-text-extent msg))
+        (min-height (inexact->exact (ceiling th))))
+      
       (inherit min-height)
-      (let ()
-        (send (get-dc) set-font (if err? error-font normal-control-font))
-        (define-values (tw th td ta) (send (get-dc) get-text-extent msg))
-        (min-height (inexact->exact (ceiling th))))))
+      (set-the-height/dc-font
+       (preferences:get 'framework:standard-style-list:font-size))))
   
-  (define error-font
-    (let ([base-font normal-control-font])
-      (send the-font-list find-or-create-font
-            (send normal-control-font get-point-size)
-            (send normal-control-font get-family)
-            'italic
-            (send normal-control-font get-weight)
-            (send normal-control-font get-underlined)
-            (send normal-control-font get-smoothing)
-            (send normal-control-font get-size-in-pixels))))
-        
   (define yellow-message%
     (class canvas%
       (inherit get-dc refresh get-client-size
@@ -1688,15 +1710,6 @@
           (send dc draw-text label 2 (+ 2 (* i th)))))
       (super-new [stretchable-width #f] [stretchable-height #f])))
 
-  
-  ;; the online compilation state for individual tabs
-  ;; oc-state is either:
-  ;;   (clean symbol? string? (listof (vector number? number?)))
-  ;;   (dirty boolean?)
-  ;;   (running symbol? string?)
-  (struct clean (error-type error-message error-locs) #:transparent)
-  (struct dirty (timer-pending?) #:transparent)
-  (struct running (sym str) #:transparent)
   
   ;; get-current-oc-state : -> (or/c tab #f) (or/c tab #f) (listof tab) (listof tab)
   ;; the tabs in the results are only those that are in the module language
@@ -1889,33 +1902,36 @@
                  (dirty-timer-pending? ts))
             (line-of-interest)
             (send tab set-oc-status (dirty #f))
-            (send oc-timer stop)])
+            (send oc-timer stop)]
+           [else
+            (send tab set-oc-status (dirty #f))])
          (oc-maybe-start-something)])))
 
   (define/oc-log (oc-timer-expired)
     (define-values (running-tab dirty/pending-tab dirty-tabs clean-tabs) (get-current-oc-state))
-    (define-values (editor-contents filename/loc) (send (send dirty/pending-tab get-defs) fetch-data-to-send))
-    (cond
-      [editor-contents
-       (line-of-interest)
-       (when running-tab
+    (when dirty/pending-tab
+      (define-values (editor-contents filename/loc) (send (send dirty/pending-tab get-defs) fetch-data-to-send))
+      (cond
+        [editor-contents
          (line-of-interest)
-         (stop-place-running)
-         (send running-tab set-oc-status (dirty #f)))
-       (send dirty/pending-tab set-oc-status (running 'running sc-online-expansion-running))
-       (define settings (tab-in-module-language dirty/pending-tab))
-       (send-to-place editor-contents
-                      filename/loc
-                      (module-language-settings->prefab-module-settings settings)
-                      (λ (res) (oc-finished res))
-                      (λ (a b) (oc-status-message a b)))]
-      [else
-       (line-of-interest)
-       (send dirty/pending-tab set-oc-status
-             (clean 'exn
-                    sc-only-raw-text-files-supported
-                    (list (vector (+ filename/loc 1) 1))))
-       (oc-maybe-start-something)]))
+         (when running-tab
+           (line-of-interest)
+           (stop-place-running)
+           (send running-tab set-oc-status (dirty #f)))
+         (send dirty/pending-tab set-oc-status (running 'running sc-online-expansion-running))
+         (define settings (tab-in-module-language dirty/pending-tab))
+         (send-to-place editor-contents
+                        filename/loc
+                        (module-language-settings->prefab-module-settings settings)
+                        (λ (res) (oc-finished res))
+                        (λ (a b) (oc-status-message a b)))]
+        [else
+         (line-of-interest)
+         (send dirty/pending-tab set-oc-status
+               (clean 'exn
+                      sc-only-raw-text-files-supported
+                      (list (vector (+ filename/loc 1) 1))))
+         (oc-maybe-start-something)])))
 
   (define/oc-log (oc-finished res)
     (define-values (running-tab dirty/pending-tab dirty-tabs clean-tabs) (get-current-oc-state))
@@ -1936,7 +1952,7 @@
                 val))))
          
          (send running-tab set-oc-status (clean #f #f '()))
-         (send running-tab set-dep-paths (vector-ref res 2))]
+         (send running-tab set-dep-paths (list->set (vector-ref res 2)) #f)]
         [else
          (line-of-interest)
          (send running-tab set-oc-status
@@ -1944,7 +1960,8 @@
                       (if (eq? (vector-ref res 0) 'abnormal-termination)
                           sc-abnormal-termination
                           (vector-ref res 1))
-                      (vector-ref res 2)))])
+                      (vector-ref res 2)))
+         (send running-tab set-dep-paths (list->set (vector-ref res 3)) #t)])
       (oc-maybe-start-something)))
   
   (define/oc-log (oc-status-message sym str)
@@ -2009,27 +2026,25 @@
                (define us (current-thread))
                (thread (λ () 
                          (define got-status-update (place-channel-get pc-status-drracket-place))
-                         (queue-callback
-                          (λ ()
-                            (when (and (eq? us pending-thread)
-                                       pending-tell-the-tab-show-bkg-running)
-                              (pending-tell-the-tab-show-bkg-running
-                               'finished-expansion
-                               sc-online-expansion-running))))))
+                         ;; when got-status-update isn't 'finished-expansion, then
+                         ;; that means that expansion won't ever finish (due to
+                         ;; an error or an aborted job)
+                         (when (equal? got-status-update 'finished-expansion)
+                           (queue-callback
+                            (λ ()
+                              (when (and (eq? us pending-thread)
+                                         pending-tell-the-tab-show-bkg-running)
+                                (pending-tell-the-tab-show-bkg-running
+                                 'finished-expansion
+                                 sc-online-expansion-running)))))))
                (define res (place-channel-get pc-out))
-               (define res/set 
-                 (if (eq? (vector-ref res 0) 'handler-results)
-                     (vector (vector-ref res 0)
-                             (vector-ref res 1)
-                             (list->set (vector-ref res 2)))
-                     res))
                (queue-callback
                 (λ ()
                   (when (eq? us pending-thread)
                     (set-pending-thread #f #f))
                   (when (getenv "PLTDRPLACEPRINT")
                     (printf "PLTDRPLACEPRINT: got results back from the place\n"))
-                  (show-results res/set)))))))
+                  (show-results res)))))))
   
   (define (stop-place-running)
     (when expanding-place
@@ -2316,7 +2331,6 @@
        (connect-to-prefs read-choice 'drracket:online-expansion:read-in-defs-errors)
        (connect-to-prefs var-choice 'drracket:online-expansion:variable-errors)
        (connect-to-prefs other-choice 'drracket:online-expansion:other-errors)
-       (preferences:add-check vp
-                              'drracket:syncheck:show-arrows?
-                              (string-constant show-arrows-on-mouseover))
+       (for ([f (in-list (drracket:module-language-tools:get-online-expansion-pref-funcs))])
+         (f vp))
        parent-vp))))
