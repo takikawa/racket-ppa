@@ -1,3 +1,9 @@
+racket (5.3.4+r2+dfsg1-1) unstable; urgency=low
+
+  * Upstream fix for doc building process
+
+ -- David Bremner <bremner@debian.org>  Fri, 10 May 2013 08:03:36 -0300
+
 racket (5.3.4+dfsg1-1) unstable; urgency=low
 
   * New upstream version.
