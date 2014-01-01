@@ -1,5 +1,8 @@
 #lang racket/base
 
+;; This module provides functions for printing types and related
+;; data structures such as filters and objects
+
 (require racket/require racket/match unstable/sequence racket/string racket/promise
          (prefix-in s: srfi/1)
          (path-up "rep/type-rep.rkt" "rep/filter-rep.rkt" "rep/object-rep.rkt"
@@ -20,7 +23,8 @@
       #'(provide print-type print-filter print-object print-pathelem)))
 (provide-printer)
 
-(provide print-multi-line-case-> special-dots-printing? print-complex-filters?)
+(provide print-multi-line-case-> special-dots-printing? print-complex-filters?
+         current-print-type-fuel current-print-unexpanded)
 
 
 ;; do we attempt to find instantiations of polymorphic types to print?
@@ -33,8 +37,18 @@
 (define special-dots-printing? (make-parameter #f))
 (define print-complex-filters? (make-parameter #f))
 
+;; this parameter controls how far down the type to expand type names
+;; interp. 0 -> don't expand
+;;         1 -> expand one level, etc.
+;;    +inf.0 -> expand always
+(define current-print-type-fuel (make-parameter 0))
+
+;; this parameter allows the printer to communicate unexpanded
+;; type aliases to its clients, which is used to cue the user
+(define current-print-unexpanded (make-parameter (box '())))
+
 ;; does t have a type name associated with it currently?
-;; has-name : Type -> Maybe[Symbol]
+;; has-name : Type -> Maybe[Listof<Symbol>]
 (define (has-name? t)
   (cond 
    [print-aliases
@@ -44,12 +58,14 @@
 	 n))
     (if (null? candidates)
 	#f
-	(car (sort candidates string>? #:key symbol->string)))]
+	(sort candidates string>? #:key symbol->string))]
    [else #f]))
 
-(define (print-filter c port write?)
+;; print-filter : Filter Port Boolean
+;; Print a Filter (see filter-rep.rkt) to the given port
+(define (print-filter filt port write?)
   (define (fp . args) (apply fprintf port args))
-  (match c
+  (match filt
     [(FilterSet: thn els) (fp "(~a | ~a)" thn els)]
     [(NoFilter:) (fp "-")]
     [(NotTypeFilter: type (list) (? syntax? id))
@@ -76,30 +92,35 @@
      (fp "(AndFilter") (for ([a0 a]) (fp " ~a" a0))  (fp ")")]
     [(OrFilter: a)
      (fp "(OrFilter") (for ([a0 a]) (fp " ~a" a0)) (fp ")")]
-    [else (fp "(Unknown Filter: ~a)" (struct->vector c))]))
+    [else (fp "(Unknown Filter: ~a)" (struct->vector filt))]))
 
-(define (print-pathelem c port write?)
+;; print-pathelem : PathElem Port Boolean
+;; Print a PathElem (see object-rep.rkt) to the given port
+(define (print-pathelem pathelem port write?)
   (define (fp . args) (apply fprintf port args))
-  (match c
+  (match pathelem
     [(CarPE:) (fp "car")]
     [(CdrPE:) (fp "cdr")]
     [(ForcePE:) (fp "force")]
     [(StructPE: t i) (fp "(~a ~a)" t i)]
-    [else (fp "(Unknown Path Element: ~a)" (struct->vector c))]))
+    [else (fp "(Unknown Path Element: ~a)" (struct->vector pathelem))]))
 
-(define (print-object c port write?)
+;; print-object : Object Port Boolean
+;; Print an Object (see object-rep.rkt) to the given port
+(define (print-object object port write?)
   (define (fp . args) (apply fprintf port args))
-  (match c
+  (match object
     [(NoObject:) (fp "-")]
     [(Empty:) (fp "-")]
     [(Path: pes i) (fp "~a" (append pes (list i)))]
-    [else (fp "(Unknown Object: ~a)" (struct->vector c))]))
+    [else (fp "(Unknown Object: ~a)" (struct->vector object))]))
 
+;; print-union : Type LSet<Type> -> Void
 ;; Unions are represented as a flat list of branches. In some cases, it would
 ;; be nicer to print them using higher-level descriptions instead.
 ;; We do set coverage, with the elements of the union being what we want to
 ;; cover, and all the names types we know about being the sets.
-(define (print-union t)
+(define (print-union t ignored-names)
   (match-define (Union: elems) t)
   (define valid-names
     ;; We keep only unions, and only those that are subtypes of t.
@@ -107,7 +128,8 @@
     (filter (lambda (p)
               (match p
                 [(cons name (and t* (Union: elts)))
-                 (subtype t* t)]
+                 (and (not (member name ignored-names))
+                      (subtype t* t))]
                 [_ #f]))
             (force (current-type-names))))
   ;; names and the sets themselves (not the union types)
@@ -124,7 +146,13 @@
              [candidates candidates]
              [coverage   '()])
     (cond [(null? to-cover) ; done
-           (append (map car coverage) uncoverable)] ; we want the names
+           (define coverage-names (map car coverage))
+           ;; to allow :type to cue the user on unexpanded aliases
+           (set-box! (current-print-unexpanded)
+                     ;; FIXME: this could be pickier about the names to
+                     ;;        report since, e.g., "String" can't be expanded
+                     (append coverage-names (unbox (current-print-unexpanded))))
+           (append coverage-names uncoverable)] ; we want the names
           [else
            ;; pick the candidate that covers the most uncovered types
            (define (covers-how-many? c)
@@ -132,7 +160,7 @@
            (define-values (next _)
              (for/fold ([next      (car candidates)]
                         [max-cover (covers-how-many? (car candidates))])
-                 ([c candidates])
+                 ([c (in-list candidates)])
                (let ([how-many? (covers-how-many? c)])
                  (if (> how-many? max-cover)
                      (values c how-many?)
@@ -141,8 +169,10 @@
                  (remove next candidates)
                  (cons next coverage))])))
 
-(define (format-arr a)
-  (match a
+;; format-arr : arr -> String
+;; Convert an arr (see type-rep.rkt) to its printable form
+(define (format-arr arr)
+  (match arr
     [(top-arr:) "Procedure"]
     [(arr: dom rng rest drest kws)
      (define out (open-output-string))
@@ -153,7 +183,7 @@
            (fp "-> ~a" ret)))
      (fp "(")
      (for-each (lambda (t) (fp "~a " t)) dom)
-     (for ([kw kws])
+     (for ([kw (in-list kws)])
        (match kw
          [(Keyword: k t req?)
           (if req?
@@ -176,7 +206,7 @@
         (if (null? pth)
             (fp "-> ~a : ~a" t ft)
             (begin (fp "-> ~a : ~a @" t ft)
-                   (for ([pe pth]) (fp " ~a" pe))))]
+                   (for ([pe (in-list pth)]) (fp " ~a" pe))))]
        [(Values: (list (Result: t fs (Empty:))))
         (fp/filter "-> ~a : ~a" t fs)]
        [(Values: (list (Result: t lf lo)))
@@ -185,10 +215,12 @@
         (fp "-> ~a" rng)])
      (fp ")")
      (get-output-string out)]
-    [else (format "(Unknown Function Type: ~a)" (struct->vector a))]))
+    [else (format "(Unknown Function Type: ~a)" (struct->vector arr))]))
 
-(define (print-case-lambda t)
-  (match t
+;; print-case-lambda : Type -> String
+;; Convert a case-> type to a string
+(define (print-case-lambda type)
+  (match type
     [(Function: arities)
      (let ()
        (match arities
@@ -202,8 +234,11 @@
 
 ;; print out a type
 ;; print-type : Type Port Boolean -> Void
-(define (print-type c port write?)
-  (define (fp . args) (apply fprintf port args))
+(define (print-type type port write? [ignored-names '()])
+  (define (fp . args)
+    (parameterize ([current-print-type-fuel
+                    (sub1 (current-print-type-fuel))])
+      (apply fprintf port args)))
   (define (tuple? t)
     (match t
       [(Pair: a (? tuple?)) #t]
@@ -213,15 +248,31 @@
     (match t
       [(Pair: a e) (cons a (tuple-elems e))]
       [(Value: '()) null]))
-  (match c
+  (match type
     ;; if we know how it was written, print that
     [(? Rep-stx a)
      (fp "~a" (syntax->datum (Rep-stx a)))]
     [(Univ:) (fp "Any")]
     ;; names are just the printed as the original syntax
     [(Name: stx) (fp "~a" (syntax-e stx))]
-    [(app has-name? (? values name))
-     (fp "~a" name)]
+    ;; If a type has a name, then print it with that name.
+    ;; However, we expand the alias in some cases
+    ;; (i.e., the fuel is > 0) for the :type form.
+    [(app has-name? (? values names))
+     (=> fail)
+     (when (not (null? ignored-names)) (fail))
+     (define fuel (current-print-type-fuel))
+     (cond [(> fuel 0)
+            (parameterize ([current-print-type-fuel (sub1 fuel)])
+              ;; if we still have fuel, print the expanded type and
+              ;; add the name to the ignored list so that the union
+              ;; printer does not try to print with the name.
+              (print-type type port write? (append names ignored-names)))]
+           [else
+            ;; to allow :type to cue the user on unexpanded aliases
+            (set-box! (current-print-unexpanded)
+                      (cons (car names) (unbox (current-print-unexpanded))))
+            (fp "~a" (car names))])]
     [(StructType: (Struct: nm _ _ _ _ _)) (fp "(StructType ~a)" (syntax-e nm))]
     [(StructTop: (Struct: nm _ _ _ _ _)) (fp "(Struct ~a)" (syntax-e nm))]
     [(BoxTop:) (fp "Box")]
@@ -254,8 +305,13 @@
      (when proc
        (fp " ~a" proc))
      (fp ")")]
-    [(Function: arities) (fp "~a" (print-case-lambda c))]
-    [(arr: _ _ _ _ _) (fp "(arr ~a)" (format-arr c))]
+    [(Function: arities)
+     (define fun-type
+       (parameterize ([current-print-type-fuel
+                       (sub1 (current-print-type-fuel))])
+         (print-case-lambda type)))
+     (fp "~a" fun-type)]
+    [(arr: _ _ _ _ _) (fp "(arr ~a)" (format-arr type))]
     [(Vector: e) (fp "(Vectorof ~a)" e)]
     [(HeterogeneousVector: e) (fp "(Vector")
                               (for ([i (in-list e)])
@@ -269,7 +325,7 @@
     [(Ephemeron: e) (fp "(Ephemeronof ~a)" e)]
     [(CustodianBox: e) (fp "(CustodianBoxof ~a)" e)]
     [(Set: e) (fp "(Setof ~a)" e)]
-    [(Union: elems) (fp "~a" (cons 'U (print-union c)))]
+    [(Union: elems) (fp "~a" (cons 'U (print-union type ignored-names)))]
     [(Pair: l r) (fp "(Pairof ~a ~a)" l r)]
     [(ListDots: dty dbound)
      (fp "(List ~a ...~a~a)" dty (if (special-dots-printing?) "" " ") dbound)]
@@ -332,7 +388,7 @@
      (fp ")")]
     [(Error:) (fp "Error")]
     [(fld: t a m) (fp "(fld ~a)" t)]
-    [else (fp "(Unknown Type: ~a)" (struct->vector c))]
+    [else (fp "(Unknown Type: ~a)" (struct->vector type))]
     ))
 
 

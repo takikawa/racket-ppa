@@ -313,10 +313,25 @@ corresponding to @racket[trest], where @racket[bound]
 @ex[(vector 1 2 3)
 #(a b c)]
 
+@defidform[VectorTop]{is the type of a @rtech{vector} with unknown length and
+  element types. Only read-only vector operations (e.g. @racket[vector-ref])
+  are allowed on values of this type. This type typically appears in programs
+  via the combination of occurrence typing and @racket[vector?].
+@ex[(lambda: ([x : Any]) (if (vector? x) x (error "not a vector!")))]
+}
+
+
 @defform[(HashTable k v)]{is the type of a @rtech{hash table} with key type
    @racket[k] and value type @racket[v].
 
 @ex[#hash((a . 1) (b . 2))]
+}
+@defidform[HashTableTop]{is the type of a @rtech{hash table} with unknown key
+  and value types. Only read-only hash table operations (e.g.
+  @racket[hash-ref]) are allowed on values of this type. This type typically
+  appears in programs via the combination of occurrence typing and
+  @racket[hash?].
+@ex[(lambda: ([x : Any]) (if (hash? x) x (error "not a hash table!")))]
 }
 
 @defform[(Setof t)]{is the type of a @rtech{set} of @racket[t].
@@ -417,19 +432,20 @@ functions and continuation mark functions.
 @section{Other Type Constructors}
 
 @defform*/subs[#:id -> #:literals (* ...)
-	       [(dom ... -> rng)
-	        (dom ... rest * -> rng)
-		(dom ... rest #,(racket ...) bound -> rng)
+               [(dom ... -> rng)
+                (dom ... rest * -> rng)
+                (dom ... rest ooo bound -> rng)
                 (dom -> rng : pred)]
-               ([dom type
+               ([ooo #,(racket ...)]
+                [dom type
                      (code:line keyword type)
                      [keyword type]])]{
-  is the type of functions from the (possibly-empty)
+  The type of functions from the (possibly-empty)
   sequence @racket[dom ...] to the @racket[rng] type.  The second form
   specifies a uniform rest argument of type @racket[rest], and the
   third form specifies a non-uniform rest argument of type
   @racket[rest] with bound @racket[bound].  In the third form, the
-  second occurrence of @racket[...] is literal, and @racket[bound]
+  @racket[...] introduced by @racket[ooo] is literal, and @racket[bound]
   must be an identifier denoting a type variable. In the fourth form,
   there must be only one @racket[dom] and @racket[pred] is the type
   checked by the predicate. @racket[dom] can include both mandatory and
@@ -461,7 +477,9 @@ functions and continuation mark functions.
 
 @defform/none[(t t1 t2 ...)]{is the instantiation of the parametric type
   @racket[t] at types @racket[t1 t2 ...]}
-@defform[(All (v ...) t)]{is a parameterization of type @racket[t], with
+@defform*[[(All (a ...) t)
+           (All (a ... a ooo) t)]]{
+  is a parameterization of type @racket[t], with
   type variables @racket[v ...].  If @racket[t] is a function type
       constructed with @racket[->], the outer pair of parentheses
       around the function type may be omitted.
@@ -498,6 +516,7 @@ argument.}
 @section{Other Types}
 
 @defform[(Option t)]{Either @racket[t] or @racket[#f]}
-@defform[(Opaque t)]{A type constructed using @racket[require-opaque-type].}
+@defform[(Opaque t)]{A type constructed using the @racket[#:opaque]
+clause of @racket[require/typed].}
 
 @(close-eval the-eval)

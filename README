@@ -1,7 +1,7 @@
 The Racket Programming Language
 ===============================
 
-This is the Racket v5.3.4 source package for Unix.
+This is the Racket v5.3.6 source package for Unix.
 
 See the build instructions in "src/README".
 

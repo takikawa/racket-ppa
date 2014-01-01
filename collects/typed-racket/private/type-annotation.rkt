@@ -1,11 +1,11 @@
 #lang racket/base
 
 (require "../utils/utils.rkt"
-	 (rep type-rep)
-	 (utils tc-utils)
-	 (env global-env mvar-env)
+         (rep type-rep)
+         (utils tc-utils)
+         (env global-env mvar-env scoped-tvar-env)
          (except-in (types subtype union resolve utils generalize))
-         (private parse-type)
+         (private parse-type syntax-properties)
          (contract-req)
          racket/match)
 
@@ -13,17 +13,11 @@
          get-type
          get-types
          get-type/infer
-         type-label-symbol
-         type-ascrip-symbol
-         type-dotted-symbol
          type-ascription
          remove-ascription
          check-type
          dotted?)
 
-(define type-label-symbol 'type-label)
-(define type-ascrip-symbol 'type-ascription)
-(define type-dotted-symbol 'type-dotted)
 
 ;; get the type annotation of this syntax
 ;; syntax -> Maybe[Type]
@@ -43,8 +37,8 @@
   ;(unless let-binding (error 'ohno))
   ;(printf "in type-annotation:~a\n" (syntax->datum stx))
   (cond
-    [(syntax-property stx type-label-symbol) => pt]
-    [(syntax-property stx type-ascrip-symbol) => pt]
+    [(type-label-property stx) => pt]
+    [(type-ascription-property stx) => pt]
     ;; this is so that : annotation works in internal def ctxts
     [(and (identifier? stx) (lookup-type stx (lambda () #f)))
      =>
@@ -57,11 +51,12 @@
 
 (define (type-ascription stx)
   (define (pt prop)
+    (add-scoped-tvars stx (parse-literal-alls prop))
     (if (syntax? prop)
         (parse-tc-results prop)
         (parse-tc-results/id stx prop)))
   (cond
-    [(syntax-property stx type-ascrip-symbol)
+    [(type-ascription-property stx)
      =>
      (lambda (prop)
        (let loop ((prop prop))
@@ -71,18 +66,19 @@
     [else #f]))
 
 (define (remove-ascription stx)
-  (syntax-property stx type-ascrip-symbol
-                   (cond
-                     [(syntax-property stx type-ascrip-symbol)
-                      =>
-                      (lambda (prop)
-                        (if (pair? prop)
-                            (let loop ((prop (cdr prop)) (last (car prop)))
-                              (if (pair? prop)
-                                  (cons last (loop (cdr prop) (car prop)))
-                                  last))
-                              #f))]
-                     [else #f])))
+  (type-ascription-property
+    stx 
+    (cond
+      [(type-ascription-property stx)
+       =>
+       (lambda (prop)
+         (if (pair? prop)
+             (let loop ((prop (cdr prop)) (last (car prop)))
+               (if (pair? prop)
+                   (cons last (loop (cdr prop) (car prop)))
+                   last))
+               #f))]
+      [else #f])))
 
 ;; get the type annotation of this identifier, otherwise error
 ;; if #:default is provided, return that instead of error
@@ -112,8 +108,8 @@
   ((listof identifier?) syntax? (syntax? . -> . tc-results/c) (syntax? tc-results/c . -> . tc-results/c) . -> . tc-results/c)
   (match stxs
     [(list stx ...)
-     (let ([anns (for/list ([s stxs]) (type-annotation s #:infer #t))])
-       (if (for/and ([a anns]) a)
+     (let ([anns (for/list ([s (in-list stxs)]) (type-annotation s #:infer #t))])
+       (if (for/and ([a (in-list anns)]) a)
            (tc-expr/check expr (ret anns))
            (let ([ty (tc-expr expr)])
              (match ty
@@ -130,7 +126,8 @@
                                       (length stxs) (length tys) (stringify tys))
                       (ret (map (lambda _ (Un)) stxs)))
                     (combine-results
-                     (for/list ([stx stxs] [ty tys] [a anns] [f fs] [o os])
+                     (for/list ([stx (in-list stxs)] [ty (in-list tys)]
+                                [a (in-list anns)] [f (in-list fs)] [o (in-list os)])
                        (cond [a (check-type stx ty a) (ret a f o)]
                              ;; mutated variables get generalized, so that we don't infer too small a type
                              [(is-var-mutated? stx) (ret (generalize ty) f o)]
@@ -146,5 +143,5 @@
       (tc-error "Body had type:\n~a\nVariable had type:\n~a\n" e-type ty))))
 
 (define (dotted? stx)
-  (cond [(syntax-property stx type-dotted-symbol) => syntax-e]
+  (cond [(type-dotted-property stx) => syntax-e]
         [else #f]))

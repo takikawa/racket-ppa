@@ -1,21 +1,18 @@
 #lang racket/unit
 
-(require (rename-in "../utils/utils.rkt" [infer r:infer])
-         "signatures.rkt" "tc-metafunctions.rkt" "tc-subst.rkt"
-         (types utils abbrev union)
-         (private type-annotation parse-type)
-         (env lexical-env type-alias-env global-env type-env-structs)
+(require "../utils/utils.rkt"
+         (only-in srfi/1/list s:member)
+         (except-in (types utils abbrev union) -> ->* one-of/c)
+         (only-in (types abbrev) (-> t:->))
+         (private type-annotation parse-type syntax-properties)
+         (env lexical-env type-alias-env global-env type-env-structs scoped-tvar-env)
          (rep type-rep filter-rep object-rep)
          syntax/free-vars
-         racket/match (prefix-in c: racket/contract)
-         (except-in racket/contract -> ->* one-of/c)
+         (typecheck signatures tc-metafunctions tc-subst check-below)
+         racket/match (contract-req)
          syntax/kerncase syntax/parse unstable/syntax
+         (for-template racket/base (typecheck internal-forms)))
 
-         (for-template
-          racket/base
-          "internal-forms.rkt"))
-
-(require (only-in srfi/1/list s:member))
 
 (import tc-expr^)
 (export tc-let^)
@@ -24,14 +21,14 @@
   (match tc
     [(tc-any-results:) tc]
     [(tc-results: ts _ _)
-     (ret ts (for/list ([f ts]) (make-NoFilter)) (for/list ([f ts]) (make-NoObject)))]))
+     (ret ts (for/list ([f (in-list ts)]) (make-NoFilter)) (for/list ([f (in-list ts)]) (make-NoObject)))]))
 
 (define/cond-contract (do-check expr->type namess results expected-results form exprs body clauses expected #:abstract [abstract null])
-     (((syntax? syntax? tc-results/c . c:-> . any/c)
+     (((syntax? syntax? tc-results/c . -> . any/c)
        (listof (listof identifier?)) (listof tc-results/c) (listof tc-results/c)
        syntax? (listof syntax?) syntax? (listof syntax?) (or/c #f tc-results/c))
       (#:abstract any/c)
-      . c:->* .
+      . ->* .
       tc-results/c)
      (with-cond-contract t/p ([types          (listof (listof Type/c))] ; types that may contain undefined (letrec)
                               [expected-types (listof (listof Type/c))] ; types that may not contain undefined (what we got from the user)
@@ -48,9 +45,9 @@
                  (values ts
                          e-ts
                          (apply append
-                                (for/list ([n names]
-                                           [f+ fs+]
-                                           [f- fs-])
+                                (for/list ([n (in-list names)]
+                                           [f+ (in-list fs+)]
+                                           [f- (in-list fs-)])
                                   (list (make-ImpFilter (-not-filter (-val #f) n) f+)
                                         (make-ImpFilter (-filter (-val #f) n) f-)))))]
                 [((tc-results: ts (NoFilter:) _) (tc-results: e-ts (NoFilter:) _))
@@ -115,15 +112,24 @@
          [exprs (syntax->list exprs)]
          ;; the clauses for error reporting
          [clauses (syntax-case form () [(lv cl . b) (syntax->list #'cl)])])
+    ;; collect the declarations, which are represented as definitions
     (for-each (lambda (names body)
                 (kernel-syntax-case* body #f (values :-internal define-type-alias-internal)
                   [(begin (quote-syntax (define-type-alias-internal nm ty)) (#%plain-app values))
                    (register-resolved-type-alias #'nm (parse-type #'ty))]
                   [(begin (quote-syntax (:-internal nm ty)) (#%plain-app values))
-                   (register-type-if-undefined #'nm (parse-type #'ty))]
+                   (register-type-if-undefined #'nm (parse-type #'ty))
+                   (register-scoped-tvars #'nm (parse-literal-alls #'ty))]
                   [_ (void)]))
               names
               exprs)
+    ;; add scoped type variables, before we get to typechecking
+    ;; FIXME: can this pass be fused with the one immediately above?
+    (for ([n (in-list names)] [b (in-list exprs)])
+      (syntax-case n ()
+        [(var) (add-scoped-tvars b (lookup-scoped-tvars #'var))]
+        [_ (void)]))
+
     (let loop ([names names] [exprs exprs] [flat-names orig-flat-names] [clauses clauses])
       (cond
         ;; after everything, check the body expressions
@@ -147,8 +153,8 @@
                     ([(safe-bindings _)
                       (for/fold ([safe-bindings              '()] ; includes transitively-safe
                                  [transitively-safe-bindings '()])
-                          ([names  names]
-                           [clause clauses])
+                          ([names  (in-list names)]
+                           [clause (in-list clauses)])
                         (case (safe-letrec-values-clause? clause transitively-safe-bindings flat-names)
                           ;; transitively safe -> safe to mention in a subsequent rhs
                           [(transitively-safe) (values (append names safe-bindings)
@@ -210,10 +216,10 @@
 (define ((tc-expr-t/maybe-expected expected) e)
   (syntax-parse e #:literals (#%plain-lambda)
     [(#%plain-lambda () _)
-     #:fail-unless (and expected (syntax-property e 'typechecker:called-in-tail-position)) #f
-     (tc-expr/check e (ret (-> (tc-results->values expected))))]
+     #:fail-unless (and expected (tail-position-property e)) #f
+     (tc-expr/check e (ret (t:-> (tc-results->values expected))))]
     [_
-     #:fail-unless (and expected (syntax-property e 'typechecker:called-in-tail-position)) #f
+     #:fail-unless (and expected (tail-position-property e)) #f
      (tc-expr/check e expected)]
     [_ (tc-expr e)]))
 
@@ -225,7 +231,7 @@
          ;; the types of the exprs
          #;[inferred-types (map (tc-expr-t/maybe-expected expected) exprs)]
          ;; the annotated types of the name (possibly using the inferred types)
-         [types (for/list ([name names] [e exprs])
+         [types (for/list ([name (in-list names)] [e (in-list exprs)])
                   (get-type/infer name e (tc-expr-t/maybe-expected expected)
                                          tc-expr/check))]
          ;; the clauses for error reporting

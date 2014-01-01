@@ -1,25 +1,28 @@
 #lang racket/base
 
-(require "../utils/utils.rkt")
-
-(require (rename-in (rep type-rep object-rep rep-utils) [make-Base make-Base*])
-         (utils tc-utils)
-         "base-abbrev.rkt" "match-expanders.rkt"
-         (types union numeric-tower)
+(require "../utils/utils.rkt"
          racket/list
          racket/match
          racket/function
-         racket/pretty
-         ;; avoid the other dependencies of `racket/place`
-         '#%place
          unstable/function
-         racket/lazy-require
-         (except-in racket/contract/base ->* -> one-of/c)
-         (prefix-in c: racket/contract/base)
-         (for-template racket/base racket/contract/base racket/promise racket/tcp racket/flonum racket/udp '#%place)
-         racket/pretty racket/udp
+
+         (prefix-in c: (contract-req))
+         (rename-in (rep type-rep object-rep rep-utils)
+                    [make-Base make-Base*])
+         (utils tc-utils)
+         (types union numeric-tower)
+         ;; Using this form so all-from-out works
+         "base-abbrev.rkt" "match-expanders.rkt"
+
+         (for-syntax racket/base syntax/parse racket/list)
+
+         ;; for base type contracts
+         (for-template racket/base racket/contract/base racket/promise
+                       racket/tcp racket/flonum racket/udp '#%place)
          ;; for base type predicates
-         racket/promise racket/tcp racket/flonum)
+         racket/pretty racket/udp
+         racket/promise racket/tcp racket/flonum
+         '#%place) ;; avoid the other dependencies of `racket/place`
 
 
 (provide (except-out (all-defined-out) make-Base)
@@ -64,17 +67,17 @@
 ;; convenient constructor for Values
 ;; (wraps arg types with Result)
 (define/cond-contract (-values args)
-  (c:-> (listof Type/c) (or/c Type/c Values?))
+  (c:-> (c:listof Type/c) (c:or/c Type/c Values?))
   (match args
     ;[(list t) t]
-    [_ (make-Values (for/list ([i args]) (-result i)))]))
+    [_ (make-Values (for/list ([i (in-list args)]) (-result i)))]))
 
 ;; convenient constructor for ValuesDots
 ;; (wraps arg types with Result)
 (define/cond-contract (-values-dots args dty dbound)
-  (c:-> (listof Type/c) Type/c (or/c symbol? natural-number/c)
+  (c:-> (c:listof Type/c) Type/c (c:or/c symbol? c:natural-number/c)
         ValuesDots?)
-  (make-ValuesDots (for/list ([i args]) (-result i))
+  (make-ValuesDots (for/list ([i (in-list args)]) (-result i))
                    dty dbound))
 
 ;; basic types
@@ -269,23 +272,6 @@
 (define -force (make-ForcePE))
 
 
-;; convenient syntax
-
-
-(define-syntax -poly
-  (syntax-rules ()
-    [(_ (vars ...) ty)
-     (let ([vars (-v vars)] ...)
-       (make-Poly (list 'vars ...) ty))]))
-
-(define-syntax -polydots
-  (syntax-rules ()
-    [(_ (vars ... dotted) ty)
-     (let ([dotted (-v dotted)]
-           [vars (-v vars)] ...)
-       (make-PolyDots (list 'vars ... 'dotted) ty))]))
-
-
 ;; function type constructors
 
 (define top-func (make-Function (list (make-top-arr))))
@@ -294,15 +280,14 @@
 (define (-struct name parent flds [proc #f] [poly #f] [pred #'dummy])
   (make-Struct name parent flds proc poly pred))
 
-
 (define (asym-pred dom rng filter)
   (make-Function (list (make-arr* (list dom) rng #:filters filter))))
 
 (define/cond-contract make-pred-ty
-  (case-> (c:-> Type/c Type/c)
-          (c:-> (listof Type/c) Type/c Type/c Type/c)
-          (c:-> (listof Type/c) Type/c Type/c integer? Type/c)
-          (c:-> (listof Type/c) Type/c Type/c integer? (listof PathElem?) Type/c))
+  (c:case-> (c:-> Type/c Type/c)
+            (c:-> (c:listof Type/c) Type/c Type/c Type/c)
+            (c:-> (c:listof Type/c) Type/c Type/c integer? Type/c)
+            (c:-> (c:listof Type/c) Type/c Type/c integer? (c:listof PathElem?) Type/c))
   (case-lambda
     [(in out t n p)
      (define xs (for/list ([(_ i) (in-indexed (in-list in))]) i))
