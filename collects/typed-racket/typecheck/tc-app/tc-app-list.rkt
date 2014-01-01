@@ -4,7 +4,7 @@
 (require "../../utils/utils.rkt"
          "signatures.rkt"
          "utils.rkt"
-         syntax/parse racket/match
+         syntax/parse racket/match unstable/sequence
          syntax/parse/experimental/reflect
          (only-in '#%kernel [reverse k:reverse])
          (typecheck signatures tc-funapp)
@@ -41,10 +41,20 @@
                                (and (Listof: t var) (app (λ _ #f) bound))))
               ...))
        (=> fail)
-       (unless (for/and ([b bound]) (or (not b) (eq? bound0 b))) (fail))
+       (unless (for/and ([b (in-list bound)]) (or (not b) (eq? bound0 b))) (fail))
+       (define expected-elem-type
+         (match expected
+           [(or #f (tc-any-results:)) #f]
+           [(tc-result1: (ListDots: elem-type (== bound0))) (ret elem-type)]
+           [(tc-result1: (Listof: elem-type)) (ret elem-type)]
+           [else (fail)]))
+       ;; Do not check this in an environment where bound0 is a type variable.
+       (define f-type (tc-expr #'f))
+       ;; Check that the function applies successfully to the element type
+       ;; We need the bound to be considered a type var here so that inference works
        (match (extend-tvars (list bound0)
-                ;; just check that the function applies successfully to the element type
-                (tc/funapp #'f #'(arg0 arg ...) (tc-expr #'f) (cons (ret t0) (map ret t)) expected))
+                (tc/funapp #'f #'(arg0 arg ...) f-type (cons (ret t0) (map ret t))
+                           expected-elem-type))
          [(tc-result1: t) (ret (make-ListDots t bound0))]
          [(tc-results: ts)
           (tc-error/expr #:return (ret (Un))
@@ -71,15 +81,15 @@
   (pattern (list . args)
     (match expected
       [(tc-result1: (Listof: elem-ty))
-       (for ([i (in-list (syntax->list #'args))])
-            (tc-expr/check i (ret elem-ty)))
+       (for ([i (in-syntax #'args)])
+         (tc-expr/check i (ret elem-ty)))
        expected]
       [(tc-result1: (List: (? (lambda (ts) (= (length (syntax->list #'args))
                                               (length ts)))
                               ts)))
-       (for ([ac (in-list (syntax->list #'args))]
+       (for ([ac (in-syntax #'args)]
              [exp (in-list ts)])
-            (tc-expr/check ac (ret exp)))
+         (tc-expr/check ac (ret exp)))
        expected]
       [_
        (let ([tys (map tc-expr/t (syntax->list #'args))])

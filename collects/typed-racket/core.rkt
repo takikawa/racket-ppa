@@ -3,9 +3,12 @@
 (require (rename-in "utils/utils.rkt")
          (for-syntax racket/base)
          (for-template racket/base)
-         (private with-types type-contract parse-type)
+         (private with-types type-contract parse-type syntax-properties)
          (except-in syntax/parse id)
          racket/match racket/syntax unstable/match racket/list syntax/stx
+         racket/format
+         racket/promise
+         (only-in racket/string string-join)
          (types utils abbrev generalize printer)
          (typecheck provide-handling tc-toplevel tc-app-helper)
          (rep type-rep)
@@ -48,11 +51,29 @@
 (define did-I-suggest-:print-type-already? #f)
 (define :print-type-message " ... [Use (:print-type <expr>) to see more.]")
 (define (ti-core stx init)
+  (current-type-names (init-current-type-names))
   (syntax-parse stx
     [(_ . ((~datum module) . rest))
      #'(module . rest)]
-    [(_ . ((~literal :type) ty:expr))
-     #`(display #,(format "~a\n" (parse-type #'ty)))]
+    [(_ . ((~literal :type)
+           (~optional (~and #:verbose verbose-kw))
+           ty:expr))
+     (parameterize ([current-print-type-fuel
+                     (if (attribute verbose-kw) +inf.0 1)]
+                    ;; This makes sure unions are totally flat for the
+                    ;; infinite fuel case. If fuel that's not 0, 1, or +inf.0
+                    ;; is ever used, more may need to be done.
+                    [current-type-names
+                     (if (attribute verbose-kw) '() (current-type-names))]
+                    [current-print-unexpanded (box '())])
+       (define type (format "~a" (parse-type #'ty)))
+       (define unexpanded
+         (remove-duplicates (unbox (current-print-unexpanded))))
+       (define cue (if (null? unexpanded)
+                       ""
+                       (format "[can expand further: ~a]"
+                               (string-join (map ~a unexpanded)))))
+       #`(display #,(format "~a\n~a" type cue)))]
     ;; Prints the _entire_ type. May be quite large.
     [(_ . ((~literal :print-type) e:expr))
      (tc-setup #'stx #'e 'top-level expanded init tc-toplevel-form before type
@@ -67,8 +88,7 @@
      (with-syntax ([(dummy-arg ...) (generate-temporaries #'(arg-type ...))])
        (tc-setup #'stx
                  ;; create a dummy function with the right argument types
-                 #`(lambda #,(stx-map (lambda (a t)
-                                        (syntax-property a 'type-label t))
+                 #`(lambda #,(stx-map type-label-property
                                       #'(dummy-arg ...) #'(arg-type ...))
                      (op dummy-arg ...))
                  'top-level expanded init tc-toplevel-form before type

@@ -28,7 +28,7 @@
                      (typecheck typechecker)
                      (env global-env)
                      (base-env base-env-indexing))
-         racket/file racket/port racket/flonum
+         racket/file racket/port racket/flonum racket/math
          (env global-env)
          (for-meta 2 (env global-env))
          (for-template
@@ -225,6 +225,8 @@
         (tc-e (flexpt 0.5 0.3) -NonNegFlonum)
         (tc-e (flexpt 0.00000000001 100000000000.0) -NonNegFlonum)
         (tc-e (flexpt -2.0 -0.5) -Flonum) ; NaN
+        (tc-e (tanh (ann 0 Nonnegative-Integer)) -NonNegReal)
+        (tc-e (sinh (ann 0 Nonpositive-Integer)) -NonPosReal)
         (tc-e (angle -1) -Real)
         (tc-e (angle 2.3) -Zero)
         (tc-e (magnitude 3/4) -PosRat)
@@ -1084,6 +1086,7 @@
         (tc-e (symbol-interned? (string->unreadable-symbol "bar")) B)
         (tc-e (symbol-interned? (string->uninterned-symbol "bar")) B)
         (tc-e (symbol-interned? (gensym 'foo)) B)
+        (tc-e (symbol-interned? (gensym "foo")) B)
 
         (tc-e (symbol-unreadable? (gensym)) B)
         (tc-e (symbol-unreadable? 'foo) B)
@@ -1626,7 +1629,12 @@
             (Listof Symbol))]
         [tc-e (filter values empty)
               (-lst -Bottom)]
+        [tc-e (lambda lst (map (plambda: (b) ([x : b]) x) lst))
+              (-polydots (a) (->... (list) (a a) (make-ListDots a 'a)))
+              #:expected (ret (-polydots (a) (->... (list) (a a) (make-ListDots a 'a))))]
 
+        [tc-e/t (ann (lambda (x) #t) (All (a) Any))
+                (-poly (a) Univ)]
         [tc-e
            ((inst filter Any Symbol) symbol? null)
            (-lst -Symbol)]

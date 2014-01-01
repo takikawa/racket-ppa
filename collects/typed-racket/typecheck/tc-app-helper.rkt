@@ -32,7 +32,7 @@
               (tc-error/expr #:return error-ret
                              "Wrong number of arguments, expected at least ~a and got ~a" (length dom) (length t-a))])
        (for ([dom-t (if rest (in-sequence-forever dom rest) (in-list dom))]
-             [a (in-list (syntax->list args-stx))]
+             [a (in-syntax args-stx)]
              [arg-t (in-list t-a)])
          (parameterize ([current-orig-stx a]) (check-below arg-t dom-t))))
      (let* ([dom-count (length dom)]
@@ -57,7 +57,7 @@
     [((arr: _ _ _ _
             ;; at least one mandatory keyword
             (app (λ (kws)
-                   (for/or ([keyword kws])
+                   (for/or ([keyword (in-list kws)])
                      (match keyword
                        [(Keyword: kw _ #t) kw]
                        [_ #f])))
@@ -74,6 +74,7 @@
   (match t
     [(tc-result1: t) t]
     [(tc-results: ts) (-values ts)]
+    [(tc-any-results:) ManyUniv]
     [_ t]))
 
 (define (stringify-domain dom rst drst [rng #f])

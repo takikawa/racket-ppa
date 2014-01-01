@@ -93,10 +93,11 @@
                        -RealZero -NonNegReal -NonPosReal -Real)))))
   
   (define (inexact-zero->exact-zero-type)
-    (for/list ([t  (list -FlonumPosZero -FlonumNegZero -FlonumZero
-                         -SingleFlonumPosZero -SingleFlonumNegZero -SingleFlonumZero
-                         -InexactRealPosZero -InexactRealNegZero -InexactRealZero
-                         -RealZero)])
+    (for/list ([t (in-list
+                    (list -FlonumPosZero -FlonumNegZero -FlonumZero
+                          -SingleFlonumPosZero -SingleFlonumNegZero -SingleFlonumZero
+                          -InexactRealPosZero -InexactRealNegZero -InexactRealZero
+                          -RealZero))])
       (-> t -Zero)))
   
   (define (exact-round-type) ; also used for exact-truncate
@@ -1892,8 +1893,9 @@
             (N . -> . N))]
 [sinh (from-cases
        (unop -Zero) ; only exact case
-       ((Un -NonNegRat -NonNegFlonum) . -> . -NonNegFlonum) ; possible underflow, no pos -> pos
-       ((Un -NonPosRat -NonPosFlonum) . -> . -NonPosFlonum)
+       ;; possible underflow, no pos -> pos. 0 -> 0, no -NonNegRat -> -NonNegFlonum
+       ((Un -PosRat -NonNegFlonum) . -> . -NonNegFlonum)
+       ((Un -NegRat -NonPosFlonum) . -> . -NonPosFlonum)
        (map unop (list -FlonumNan -Flonum
                        -SingleFlonumNan -NonNegSingleFlonum -NonPosSingleFlonum -SingleFlonum
                        -NonNegInexactReal -NonPosInexactReal -InexactReal
@@ -1908,8 +1910,9 @@
        (map unop (list -FloatComplex -SingleFlonumComplex -InexactComplex N)))]
 [tanh (from-cases ; same as sinh
        (unop -Zero) ; only exact case
-       ((Un -NonNegRat -NonNegFlonum) . -> . -NonNegFlonum) ; possible underflow, no pos -> pos
-       ((Un -NonPosRat -NonPosFlonum) . -> . -NonPosFlonum)
+       ;; possible underflow, no pos -> pos. 0 -> 0, no -NonNegRat -> -NonNegFlonum
+       ((Un -PosRat -NonNegFlonum) . -> . -NonNegFlonum)
+       ((Un -NegRat -NonPosFlonum) . -> . -NonPosFlonum)
        (map unop (list -FlonumNan -Flonum
                        -SingleFlonumNan -NonNegSingleFlonum -NonPosSingleFlonum -SingleFlonum
                        -NonNegInexactReal -NonPosInexactReal -InexactReal

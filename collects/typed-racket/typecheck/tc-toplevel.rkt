@@ -1,34 +1,28 @@
 #lang racket/base
 
 (require (rename-in "../utils/utils.rkt" [infer r:infer])
-         syntax/kerncase
-         unstable/list racket/syntax syntax/parse
-         mzlib/etc racket/list
-         racket/match
-         "signatures.rkt"
-         "tc-structs.rkt"
-         "typechecker.rkt"
-         ;; to appease syntax-parse
-         "internal-forms.rkt"
+         syntax/kerncase racket/syntax syntax/parse syntax/stx syntax/id-table
+         racket/list unstable/list racket/dict racket/match unstable/sequence
+         (prefix-in c: (contract-req))
          (rep type-rep free-variance)
          (types utils abbrev type-table)
-         (private parse-type type-annotation type-contract)
-         (env global-env init-envs type-name-env type-alias-env lexical-env env-req mvar-env)
-         syntax/id-table
+         (private parse-type type-annotation type-contract syntax-properties)
+         (env global-env init-envs type-name-env type-alias-env
+              lexical-env env-req mvar-env scoped-tvar-env)
          (utils tc-utils mutated-vars)
-         "provide-handling.rkt"
-         "def-binding.rkt"
-         (prefix-in c: racket/contract)
-         racket/dict
+         (typecheck provide-handling def-binding tc-structs typechecker)
+
+         ;; to appease syntax-parse in the tests
+         (typecheck internal-forms)
          syntax/location
+
          (for-template
           "internal-forms.rkt"
           syntax/location
-          mzlib/contract
           racket/base
-          "../env/env-req.rkt"))
+          (env env-req)))
 
-(c:provide/contract
+(provide/cond-contract
  [type-check (syntax? . c:-> . (values syntax? syntax?))]
  [tc-module (syntax? . c:-> . (values syntax? syntax?))]
  [tc-toplevel-form (syntax? . c:-> . (values #f c:any/c))])
@@ -74,19 +68,20 @@
       [(define-values () (begin (quote-syntax (define-typed-struct/exec-internal ~! nm ([fld : ty] ...) proc-ty)) (#%plain-app values)))
        (tc/struct null #'nm (syntax->list #'(fld ...)) (syntax->list #'(ty ...)) #:proc-ty #'proc-ty)])))
 
-(define (add-constant-variance! form)
+(define (type-vars-of-struct form)
   (parameterize ([current-orig-stx form])
     (syntax-parse form
       #:literals (values define-typed-struct-internal quote-syntax #%plain-app)
       ;; define-typed-struct
       [(define-values () (begin (quote-syntax (define-typed-struct-internal ~! . dts:define-typed-struct)) (#%plain-app values)))
-       ;; TODO make constant
-       (unless (null? (attribute dts.tvars))
-         (register-type-variance! #'dts.name (map (lambda (_) Covariant) (attribute dts.tvars))))]
+       (attribute dts.tvars)]
       [(define-values () (begin (quote-syntax (define-typed-struct/exec-internal ~! nm ([fld : ty] ...) proc-ty)) (#%plain-app values)))
        ;; Not polymorphic
-       (void)])))
+       null])))
 
+(define (add-constant-variance! name vars)
+  (unless (null? vars)
+    (register-type-variance! name (map (lambda (_) Constant) vars))))
 
 
 
@@ -103,8 +98,7 @@
 
       ;; forms that are handled in other ways
       [stx
-       #:when (or (syntax-property form 'typechecker:ignore)
-                  (syntax-property form 'typechecker:ignore-some))
+       #:when (or (ignore-property form) (ignore-some-property form))
        (list)]
 
       [((~literal module) n:id spec ((~literal #%plain-module-begin) body ...))
@@ -156,7 +150,8 @@
 
       ;; top-level type annotation
       [(define-values () (begin (quote-syntax (:-internal id:identifier ty)) (#%plain-app values)))
-       (register-type/undefined #'id (parse-type #'ty))]
+       (register-type/undefined #'id (parse-type #'ty))
+       (register-scoped-tvars #'id (parse-literal-alls #'ty))]
 
 
       ;; values definitions
@@ -164,7 +159,7 @@
        (let* ([vars (syntax->list #'(var ...))])
          (cond
            ;; if all the variables have types, we stick them into the environment
-           [(andmap (lambda (s) (syntax-property s 'type-label)) vars)
+           [(andmap type-label-property vars)
             (let ([ts (map (λ (x) (get-type x #:infer #f)) vars)])
               (for-each register-type-if-undefined vars ts)
               (map make-def-binding vars ts))]
@@ -206,12 +201,12 @@
                                    require/typed-internal values module module*)
       ;; these forms we have been instructed to ignore
       [stx
-       (syntax-property form 'typechecker:ignore)
+       (ignore-property form)
        (void)]
 
       ;; this is a form that we mostly ignore, but we check some interior parts
       [stx
-       (syntax-property form 'typechecker:ignore-some)
+       (ignore-some-property form)
        (check-subforms/ignore form)]
 
       ;; these forms should always be ignored
@@ -238,21 +233,19 @@
 
       ;; definitions just need to typecheck their bodies
       [(define-values (var ...) expr)
-       (let* ([vars (syntax->list #'(var ...))]
-              [ts (map lookup-type vars)])
-         (unless (for/and ([v (syntax->list #'(var ...))])
-                   (free-id-table-ref unann-defs v (lambda _ #f)))
-           (tc-expr/check #'expr (ret ts)))
-         (void))]
+       (unless (for/and ([v (in-syntax #'(var ...))])
+                 (free-id-table-ref unann-defs v (lambda _ #f)))
+         (let ([ts (map lookup-type (syntax->list #'(var ...)))])
+           (when (= 1 (length ts))
+             (add-scoped-tvars #'expr (lookup-scoped-tvars (stx-car #'(var ...)))))
+           (tc-expr/check #'expr (ret ts))))
+       (void)]
 
       ;; to handle the top-level, we have to recur into begins
       [(begin) (void)]
       [(begin . rest)
-       (let loop ([l (syntax->list #'rest)])
-         (if (null? (cdr l))
-             (tc-toplevel/pass2 (car l))
-             (begin (tc-toplevel/pass2 (car l))
-                    (loop (cdr l)))))]
+       (for/last ([form (in-syntax #'rest)])
+         (tc-toplevel/pass2 form))]
 
       ;; otherwise, the form was just an expression
       [_ (tc-expr/check form tc-any-results)])))
@@ -277,10 +270,6 @@
   (kernel-syntax-case x #f
     [(define-syntaxes (nm ...) . rest) (syntax->list #'(nm ...))]
     [_ #f]))
-
-
-(define (add-type-name! names)
-  (for-each register-type-name names))
 
 (define (parse-type-alias form)
   (kernel-syntax-case* form #f
@@ -309,14 +298,16 @@
   (for-each (compose register-type-alias parse-type-alias) type-aliases)
   ;; Add the struct names to the type table, but not with a type
   ;(printf "before adding type names~n")
-  (for-each (compose add-type-name! names-of-struct) struct-defs)
-  (for-each add-constant-variance! struct-defs)
+  (let ((names (map name-of-struct struct-defs))
+        (type-vars (map type-vars-of-struct struct-defs)))
+    (for-each register-type-name names)
+    (for-each add-constant-variance! names type-vars))
   ;(printf "after adding type names~n")
   ;; resolve all the type aliases, and error if there are cycles
   (resolve-type-aliases parse-type)
   ;; Parse and register the structure types
   (define parsed-structs
-    (for/list ((def struct-defs))
+    (for/list ((def (in-list struct-defs)))
       (define parsed (parse-define-struct-internal def))
       (register-parsed-struct-sty! parsed)
       parsed))
@@ -359,7 +350,7 @@
                     (~datum expand)))))
       (syntax-parse p #:literals (#%provide)
         [(#%provide form ...)
-         (for/fold ([h h]) ([f (syntax->list #'(form ...))])
+         (for/fold ([h h]) ([f (in-syntax #'(form ...))])
            (parameterize ([current-orig-stx f])
              (syntax-parse f
                [i:id
@@ -418,7 +409,31 @@
 ;; used only from #%top-interaction
 ;; syntax -> (values #f (or/c void? tc-results/c))
 (define (tc-toplevel-form form)
-  (tc-toplevel/pass1 form)
-  (begin0 (values #f (tc-toplevel/pass2 form))
-          (report-all-errors)))
+  (syntax-parse form
+    [((~literal begin) e ...)
+     ;; Don't open up `begin`s that are supposed to be ignored
+     #:when (not (or (ignore-property form) (ignore-some-property form)))
+     (define result
+       (for/last ([form (in-syntax #'(e ...))])
+         (define-values (_ result) (tc-toplevel-form form))
+         result))
+     (begin0 (values #f (or result (void)))
+             (report-all-errors))]
+    [_
+     ;; Handle type aliases
+     (when ((internal-syntax-pred define-type-alias-internal) form)
+       ((compose register-type-alias parse-type-alias) form))
+     ;; Handle struct definitions
+     (when ((internal-syntax-pred define-typed-struct-internal) form)
+       (define name (name-of-struct form))
+       (define tvars (type-vars-of-struct form))
+       (register-type-name name)
+       (add-constant-variance! name tvars)
+       (define parsed (parse-define-struct-internal form))
+       (register-parsed-struct-sty! parsed)
+       (refine-struct-variance! (list parsed))
+       (register-parsed-struct-bindings! parsed))
+     (tc-toplevel/pass1 form)
+     (begin0 (values #f (tc-toplevel/pass2 form))
+             (report-all-errors))]))
 
