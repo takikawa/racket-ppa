@@ -1,12 +1,14 @@
 #lang racket/base
 
+;; This module provides functions for parsing types written by the user
+
 (require "../utils/utils.rkt"
          (except-in (rep type-rep object-rep filter-rep) make-arr)
          (rename-in (types abbrev union utils printer filter-ops resolve)
                     [make-arr* make-arr])
          (utils tc-utils stxclass-util)
-         syntax/stx (prefix-in c: racket/contract)
-         syntax/parse racket/dict
+         syntax/stx (prefix-in c: (contract-req))
+         syntax/parse racket/dict unstable/sequence
          (env type-env-structs tvar-env type-name-env type-alias-env
               lexical-env index-env)
          racket/match
@@ -19,38 +21,55 @@
 
 (define-struct poly (name vars) #:prefab)
 
-(provide/cond-contract [parse-type (syntax? . c:-> . Type/c)]
+(provide/cond-contract ;; Parse the given syntax as a type
+                       [parse-type (syntax? . c:-> . Type/c)]
+                       ;; Parse the given identifier using the lexical
+                       ;; context of the given syntax object
                        [parse-type/id (syntax? c:any/c . c:-> . Type/c)]
                        [parse-tc-results (syntax? . c:-> . tc-results/c)]
-                       [parse-tc-results/id (syntax? c:any/c . c:-> . tc-results/c)])
+                       [parse-tc-results/id (syntax? c:any/c . c:-> . tc-results/c)]
+                       [parse-literal-alls (syntax? . c:-> . (values (listof identifier?)
+                                                                     (listof identifier?)))])
 
 (provide star ddd/bound)
-(define enable-mu-parsing (make-parameter #t))
 (print-complex-filters? #t)
 
+;; (Syntax -> Type) -> Syntax Any -> Syntax
+;; See `parse-type/id`. This is a curried generalization.
 (define ((parse/id p) loc datum)
   #;(printf "parse-type/id id : ~a\n ty: ~a\n" (syntax-object->datum loc) (syntax-object->datum stx))
   (let* ([stx* (datum->syntax loc datum loc loc)])
     (p stx*)))
 
-
-(define (parse-all-body s)
-  (syntax-parse s
-    [(ty)
-     (parse-type #'ty)]
-    [(x ...)
+;; The body of a Forall type
+(define-syntax-class all-body
+  #:attributes (type)
+  (pattern (type))
+  (pattern (x ...)
      #:fail-unless (= 1 (length
-                         (for/list ([i (syntax->list #'(x ...))]
+                         (for/list ([i (in-syntax #'(x ...))]
                                     #:when (and (identifier? i)
                                                 (free-identifier=? i #'t:->)))
-                                   i)))
-     #f
-     (parse-type s)]))
+                                   i))) #f
+     #:attr type #'(x ...)))
 
-(define (parse-all-type stx parse-type)
+(define (parse-literal-alls stx)
+  (syntax-parse stx #:literals (t:All)
+    [(t:All (~or (vars:id ... v:id dd:ddd) (vars:id ...)) . t:all-body)
+     (define vars-list (syntax->list #'(vars ...)))
+     (cons (if (attribute v)
+               (list vars-list #'v)
+               vars-list)
+           (parse-literal-alls #'t.type))]
+    [_ null]))
+
+
+;; Syntax -> Type
+;; Parse a Forall type
+(define (parse-all-type stx)
   ;(printf "parse-all-type: ~a \n" (syntax->datum stx))
   (syntax-parse stx #:literals (t:All)
-    [((~and kw t:All) (vars:id ... v:id dd:ddd) . t)
+    [((~and kw t:All) (vars:id ... v:id dd:ddd) . t:all-body)
      (when (check-duplicate-identifier (syntax->list #'(vars ... v)))
        (tc-error "All: duplicate type variable or index"))
      (let* ([vars (map syntax-e (syntax->list #'(vars ...)))]
@@ -58,14 +77,14 @@
        (add-disappeared-use #'kw)
        (extend-indexes v
          (extend-tvars vars
-           (make-PolyDots (append vars (list v)) (parse-all-body #'t)))))]
-    [((~and kw t:All) (vars:id ...) . t)
+           (make-PolyDots (append vars (list v)) (parse-type #'t.type)))))]
+    [((~and kw t:All) (vars:id ...) . t:all-body)
      (when (check-duplicate-identifier (syntax->list #'(vars ...)))
        (tc-error "All: duplicate type variable"))
      (let* ([vars (map syntax-e (syntax->list #'(vars ...)))])
        (add-disappeared-use #'kw)
        (extend-tvars vars
-         (make-Poly vars (parse-all-body #'t))))]
+         (make-Poly vars (parse-type #'t.type))))]
     [(t:All (_:id ...) _ _ _ ...) (tc-error "All: too many forms in body of All type")]
     [(t:All . rest) (tc-error "All: bad syntax")]))
 
@@ -153,10 +172,10 @@
         (map list
              (map syntax-e (syntax->list #'(fname ...)))
              (map parse-type (syntax->list #'(fty ...)))
-             (map (lambda (e) (syntax-case e ()
-                                [(#t) #t]
-                                [_ #f]))
-                  (syntax->list #'(rest ...))))
+             (for/list ((e (in-syntax #'(rest ...))))
+               (syntax-case e ()
+                 [(#t) #t]
+                 [_ #f])))
         (map list
              (map syntax-e (syntax->list #'(mname ...)))
              (map parse-type (syntax->list #'(mty ...)))))]
@@ -170,9 +189,9 @@
        (add-disappeared-use #'kw)
        (let ([v (parse-type #'t)])
          (match (resolve v)
-           [(and s Struct?) (make-StructTop s)]
+           [(and s (? Struct?)) (make-StructTop s)]
            [_ (tc-error/delayed "Argument to Struct must be a structure type, got ~a" v)
-              (make-Instance (Un))]))]
+              (make-StructTop (Un))]))]
       [((~and kw t:Instance) t)
        (add-disappeared-use #'kw)
        (let ([v (parse-type #'t)])
@@ -198,7 +217,7 @@
       [((~and kw (~or case-lambda t:case->)) tys ...)
        (add-disappeared-use #'kw)
        (make-Function
-        (for/list ([ty (syntax->list #'(tys ...))])
+        (for/list ([ty (in-syntax #'(tys ...))])
           (let ([t (parse-type ty)])
             (match t
               [(Function: (list arr)) arr]
@@ -209,7 +228,6 @@
        (add-disappeared-use #'kw)
        (make-Vector (parse-type #'t))]
       [((~and kw t:Rec) x:id t)
-       #:fail-unless (enable-mu-parsing) "Recursive types not allowed"
        (let* ([var (syntax-e #'x)]
               [tvar (make-F var)])
          (add-disappeared-use #'kw)
@@ -244,7 +262,7 @@
        (add-disappeared-use #'kw)
        (-val (syntax->datum #'t))]
       [((~and kw t:All) . rest)
-       (parse-all-type stx parse-type)]
+       (parse-all-type stx)]
       [((~and kw t:Opaque) p?)
        (add-disappeared-use #'kw)
        (make-Opaque #'p? (syntax-local-certifier))]
@@ -260,8 +278,8 @@
         (~and kw t:->)
         (~and (~seq rest-dom ...) (~seq (~or _ (~between t:-> 1 +inf.0)) ...)))
        (add-disappeared-use #'kw)
-       (let ([doms (for/list ([d (syntax->list #'(dom ...))])
-                    (parse-type d))])
+       (let ([doms (for/list ([d (in-syntax #'(dom ...))])
+                     (parse-type d))])
          (make-Function
           (list (make-arr
                  doms
@@ -316,7 +334,7 @@
       ;; use expr to rule out keywords
       [(dom:non-keyword-ty ... kws:keyword-tys ... (~and kw t:->) rng)
        (add-disappeared-use #'kw)
-      (let ([doms (for/list ([d (syntax->list #'(dom ...))])
+      (let ([doms (for/list ([d (in-syntax #'(dom ...))])
                     (parse-type d))])
          (make-Function
           (list (make-arr
@@ -397,6 +415,8 @@
          (-val val))]
       [_ (tc-error "not a valid type: ~a" (syntax->datum stx))])))
 
+;; Syntax -> Type
+;; Parse a (List ...) type
 (define (parse-list-type stx)
   (parameterize ([current-orig-stx stx])
     (syntax-parse stx #:literals (t:List)
@@ -424,6 +444,8 @@
        (add-disappeared-use #'kw)
        (-Tuple (map parse-type (syntax->list #'(tys ...))))])))
 
+;; Syntax -> Type
+;; Parse a (Values ...) type
 (define (parse-values-type stx)
   (parameterize ([current-orig-stx stx])
     (syntax-parse stx #:literals (values t:Values t:All)

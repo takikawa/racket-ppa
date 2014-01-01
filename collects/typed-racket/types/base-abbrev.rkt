@@ -35,7 +35,7 @@
 ;; -lst* Type is needed by substitute for ListDots
 (define -pair make-Pair)
 (define (-lst* #:tail [tail (-val null)] . args)
-  (for/fold ([tl tail]) ([a (reverse args)]) (-pair a tl)))
+  (for/fold ([tl tail]) ([a (in-list (reverse args))]) (-pair a tl)))
 
 
 ;; Simple union type, does not check for overlaps
@@ -201,19 +201,50 @@
 
 (define-syntax (->optkey stx)
   (syntax-parse stx
-                [(_ ty:expr ... [oty:expr ...] (~seq k:keyword kty:expr opt:boolean) ... rng)
-                 (let ([l (syntax->list #'(oty ...))])
-                   (with-syntax ([((extra ...) ...)
-                                  (for/list ([i (in-range (add1 (length l)))])
-                                    (take l i))])
-                     #'(make-Function
-                        (list
-                         (make-arr* (list ty ... extra ...)
-                                    rng
-                                    #:kws (sort #:key (match-lambda [(Keyword: kw _ _) kw])
-                                                (list (make-Keyword 'k kty opt) ...)
-                                                keyword<?))
-                         ...))))]))
+    [(_ ty:expr ... [oty:expr ...] #:rest rst:expr (~seq k:keyword kty:expr opt:boolean) ... rng)
+     (let ([l (syntax->list #'(oty ...))])
+       (with-syntax ([((extra ...) ...)
+		      (for/list ([i (in-range (add1 (length l)))])
+				(take l i))]
+		     [(rsts ...) (for/list ([i (in-range (add1 (length l)))]) #'rst)])
+		    #'(make-Function
+		       (list
+			(make-arr* (list ty ... extra ...)
+				   rng
+				   #:rest rsts
+				   #:kws (sort #:key (match-lambda [(Keyword: kw _ _) kw])
+					       (list (make-Keyword 'k kty opt) ...)
+					       keyword<?))
+			...))))]
+    [(_ ty:expr ... [oty:expr ...] (~seq k:keyword kty:expr opt:boolean) ... rng)
+     (let ([l (syntax->list #'(oty ...))])
+       (with-syntax ([((extra ...) ...)
+		      (for/list ([i (in-range (add1 (length l)))])
+				(take l i))])
+		    #'(make-Function
+		       (list
+			(make-arr* (list ty ... extra ...)
+				   rng
+				   #:rest #f
+				   #:kws (sort #:key (match-lambda [(Keyword: kw _ _) kw])
+					       (list (make-Keyword 'k kty opt) ...)
+					       keyword<?))
+			...))))]))
 
 (define (make-arr-dots dom rng dty dbound)
   (make-arr* dom rng #:drest (cons dty dbound)))
+
+
+;; convenient syntax
+(define-syntax -poly
+  (syntax-rules ()
+    [(_ (vars ...) ty)
+     (let ([vars (-v vars)] ...)
+       (make-Poly (list 'vars ...) ty))]))
+
+(define-syntax -polydots
+  (syntax-rules ()
+    [(_ (vars ... dotted) ty)
+     (let ([dotted (-v dotted)]
+           [vars (-v vars)] ...)
+       (make-PolyDots (list 'vars ... 'dotted) ty))]))

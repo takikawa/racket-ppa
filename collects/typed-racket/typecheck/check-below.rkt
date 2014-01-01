@@ -1,15 +1,10 @@
 #lang racket/base
 
-(require (rename-in "../utils/utils.rkt" [private private-in])
-         racket/match (prefix-in - racket/contract)
-         (types utils union subtype type-table filter-ops)
-         (private-in parse-type type-annotation)
-         (rep type-rep object-rep filter-rep)
-         (only-in (infer infer) restrict)
-         (except-in (utils tc-utils stxclass-util))
-         (env lexical-env type-env-structs tvar-env index-env)
-         (except-in syntax/parse id)
-         (only-in srfi/1 split-at))
+(require "../utils/utils.rkt"
+         racket/match (prefix-in - (contract-req))
+         (types utils union subtype filter-ops)
+         (utils tc-utils)
+         (rep type-rep object-rep filter-rep))
 
 (provide/cond-contract
  [check-below (-->d ([s (-or/c Type/c tc-results/c)] [t (-or/c Type/c tc-results/c)]) ()
@@ -55,7 +50,7 @@
     [((tc-results: ts fs os) (tc-results: ts2 (NoFilter:) (NoObject:)))
      (unless (= (length ts) (length ts2))
        (tc-error/expr "Expected ~a values, but got ~a" (length ts2) (length ts)))
-     (unless (for/and ([t ts] [s ts2]) (subtype t s))
+     (unless (for/and ([t (in-list ts)] [s (in-list ts2)]) (subtype t s))
        (tc-error/expr "Expected ~a, but got ~a" (stringify ts2) (stringify ts)))
      (if (= (length ts) (length ts2))
          (ret ts2 fs os)
@@ -84,7 +79,7 @@
      (unless (= (length t1) (length t2))
        (tc-error/expr "Expected ~a values and ~a ..., but got ~a values"
                       (length t2) dty (length t1)))
-     (unless (for/and ([t t1] [s t2]) (subtype t s))
+     (unless (for/and ([t (in-list t1)] [s (in-list t2)]) (subtype t s))
        (tc-error/expr "Expected ~a, but got ~a" (stringify t2) (stringify t1)))
      expected]
     ;; case where you have (Values a ... a) but expected something else
@@ -92,17 +87,21 @@
      (unless (= (length t1) (length t2))
        (tc-error/expr "Expected ~a values, but got ~a values and ~a ..."
                       (length t2) (length t1) dty))
-     (unless (for/and ([t t1] [s t2]) (subtype t s))
+     (unless (for/and ([t (in-list t1)] [s (in-list t2)]) (subtype t s))
        (tc-error/expr "Expected ~a, but got ~a" (stringify t2) (stringify t1)))
      expected]
-    [((tc-results: t1 f o dty dbound) (tc-results: t2 f o dty dbound))
+    [((tc-results: t1 f o dty1 dbound) (tc-results: t2 f o dty2 dbound))
+     (unless (= (length t1) (length t2))
+       (tc-error/expr "Expected ~a non dotted values, but got ~a" (length t2) (length t1)))
      (unless (andmap subtype t1 t2)
        (tc-error/expr "Expected ~a, but got ~a" (stringify t2) (stringify t1)))
+     (unless (subtype dty1 dty2)
+       (tc-error/expr "Expected ~a in ..., but got ~a" dty2 dty1))
      expected]
     [((tc-results: t1 fs os) (tc-results: t2 fs os))
      (unless (= (length t1) (length t2))
        (tc-error/expr "Expected ~a values, but got ~a" (length t2) (length t1)))
-     (unless (for/and ([t t1] [s t2]) (subtype t s))
+     (unless (for/and ([t (in-list t1)] [s (in-list t2)]) (subtype t s))
        (tc-error/expr "Expected ~a, but got ~a" (stringify t2) (stringify t1)))
      expected]
     [((tc-any-results:) (or (? Type/c? t) (tc-result1: t _ _)))
@@ -136,5 +135,5 @@
        (tc-error/expr "Expected ~a, but got ~a" t2 t1))
      expected]
     [((tc-results: ts fs os dty dbound) (tc-results: ts* fs* os* dty* dbound*))
-     (int-err "dotted types in check-below nyi: ~a ~a" dty dty*)]
+     (int-err "dotted types with different bounds/filters/objects in check-below nyi: ~a ~a" tr1 expected)]
     [(a b) (int-err "unexpected input for check-below: ~a ~a" a b)]))

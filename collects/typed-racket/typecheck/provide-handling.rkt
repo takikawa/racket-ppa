@@ -1,18 +1,15 @@
 #lang racket/base
 
 (require "../utils/utils.rkt"
+         unstable/list unstable/sequence syntax/id-table racket/dict racket/syntax
+         racket/struct-info racket/match syntax/parse syntax/location
          (only-in srfi/1/list s:member)
-         syntax/kerncase syntax/boundmap
-         (env type-name-env type-alias-env)
          (only-in (private type-contract) type->contract)
-         "renamer.rkt"
+         (env type-name-env type-alias-env)
+         (typecheck renamer def-binding)
          (rep type-rep)
          (utils tc-utils)
          (for-syntax syntax/parse racket/base)
-         racket/contract/private/provide unstable/list
-         syntax/id-table syntax/location racket/dict
-         racket/syntax racket/struct-info racket/match
-         "def-binding.rkt" syntax/parse
          (for-template racket/base "def-export.rkt" racket/contract))
 
 (provide remove-provides provide? generate-prov get-alternate)
@@ -24,7 +21,9 @@
     [_ #f]))
 
 (define (remove-provides forms)
-  (filter (lambda (e) (not (provide? e))) (syntax->list forms)))
+  (for/list ([e (in-syntax forms)]
+             #:unless (provide? e))
+    e))
 
 (define (mem? i vd)
   (cond [(s:member i vd (lambda (i j) (free-identifier=? i (binding-name j)))) => car]
@@ -64,7 +63,7 @@
                                        (values #'(begin) e null)))
                        (list* type-desc constr pred super accs)))
          (define/with-syntax (type-desc* constr* pred* super* accs* ...) 
-           (for/list ([i new-ids]) (if (identifier? i) #`(syntax #,i) i)))
+           (for/list ([i (in-list new-ids)]) (if (identifier? i) #`(syntax #,i) i)))
          (values 
           #`(begin
               #,@defns
@@ -89,7 +88,7 @@
       [(dict-ref defs internal-id #f)
        =>
        (match-lambda
-         [(def-binding _ (app (λ (ty) (type->contract ty (λ () #f) #:out #t)) (? values cnt)))
+         [(def-binding _ (app (λ (ty) (type->contract ty (λ () #f))) (? values cnt)))
           (values
            (with-syntax* ([id internal-id]
                           [cnt-id (cnt-id-introducer #'id)]

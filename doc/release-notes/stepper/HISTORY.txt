@@ -1,6 +1,10 @@
 Stepper
 -------
 
+Changes for 5.3.6:
+
+None.
+
 Changes for 5.3.4:
 
 None.

@@ -7,8 +7,12 @@
 ;; convert : [Listof Keyword] [Listof Type] [Listof Type] [Option Type] [Option Type] -> (values Type Type)
 (define (convert kw-t plain-t opt-t rng rest drest split?)
   (define-values (mand-kw-t opt-kw-t) (partition (match-lambda [(Keyword: _ _ m) m]) kw-t))
+
+  (when drest
+    (int-err "drest passed to kw-convert"))
+
   (define arities
-    (for/list ([i (length opt-t)])
+    (for/list ([i (in-range (length opt-t))])
       (make-arr* (append plain-t (take opt-t i))
                  rng
                  #:kws kw-t
@@ -17,7 +21,7 @@
   (define ts 
     (flatten
      (list
-      (for/list ([k mand-kw-t])
+      (for/list ([k (in-list mand-kw-t)])
         (match k
           [(Keyword: _ t _) t]))
       (for/list ([k (in-list opt-kw-t)])
@@ -25,11 +29,13 @@
           [(Keyword: _ t _) (list (-opt t) -Boolean)]))
       plain-t
       (for/list ([t (in-list opt-t)]) (-opt t))
-      (for/list ([t (in-list opt-t)]) -Boolean))))
+      (for/list ([t (in-list opt-t)]) -Boolean)
+      ;; the kw function protocol passes rest args as an explicit list
+      (if rest (-lst rest) empty))))
   (define ts/true
     (flatten
      (list
-      (for/list ([k mand-kw-t])
+      (for/list ([k (in-list mand-kw-t)])
         (match k
           [(Keyword: _ t _) t]))
       (for/list ([k (in-list opt-kw-t)])
@@ -37,11 +43,13 @@
           [(Keyword: _ t _) (list t (-val #t))]))
       plain-t
       (for/list ([t (in-list opt-t)]) t)
-      (for/list ([t (in-list opt-t)]) (-val #t)))))
+      (for/list ([t (in-list opt-t)]) (-val #t))
+      ;; the kw function protocol passes rest args as an explicit list
+      (if rest (-lst rest) empty))))
   (define ts/false
     (flatten
      (list
-      (for/list ([k mand-kw-t])
+      (for/list ([k (in-list mand-kw-t)])
         (match k
           [(Keyword: _ t _) t]))
       (for/list ([k (in-list opt-kw-t)])
@@ -49,11 +57,13 @@
           [(Keyword: _ t _) (list (-val #f) (-val #f))]))
       plain-t
       (for/list ([t (in-list opt-t)]) (-val #f))
-      (for/list ([t (in-list opt-t)]) (-val #f)))))
+      (for/list ([t (in-list opt-t)]) (-val #f))
+      ;; the kw function protocol passes rest args as an explicit list
+      (if rest (-lst rest) empty))))
   (if split?
-      (make-Function (list (make-arr* ts/true rng #:rest rest #:drest drest)
-                           (make-arr* ts/false rng #:rest rest #:drest drest)))
-      (make-Function (list (make-arr* ts rng #:rest rest #:drest drest)))))
+      (make-Function (list (make-arr* ts/true rng)
+                           (make-arr* ts/false rng)))
+      (make-Function (list (make-arr* ts rng)))))
 
 (define (prefix-of a b)
   (define (rest-equal? a b)
@@ -69,7 +79,7 @@
       [(_ _) #f]))
   (define (kw-equal? a b)
     (and (equal? (length a) (length b))
-         (for/and ([k1 a] [k2 b])
+         (for/and ([k1 (in-list a)] [k2 (in-list b)])
            (type-equal? k1 k2))))
   (match* (a b)
     [((arr: args result rest drest kws)
@@ -79,7 +89,7 @@
           (drest-equal? drest drest*)
           (type-equal? result result*)
           (kw-equal? kws kws*)
-          (for/and ([p args] [p* args*])
+          (for/and ([p (in-list args)] [p* (in-list args*)])
             (type-equal? p p*)))]))
 
 (define (arity-length a)
