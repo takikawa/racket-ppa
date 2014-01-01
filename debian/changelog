@@ -1,3 +1,9 @@
+racket (5.3.6+dfsg1-1) unstable; urgency=medium
+
+  * New upstream bug fix release
+
+ -- David Bremner <bremner@debian.org>  Wed, 01 Jan 2014 19:48:49 -0400
+
 racket (5.3.4+r2+dfsg1-2) unstable; urgency=low
 
   * Don't compress .sxref, .sqlite files, fix (help ...) in repl.
