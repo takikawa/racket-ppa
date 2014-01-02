@@ -1,1 +1,3 @@
 W: racket-doc: extra-license-file usr/share/racket/doc/doc-license.txt
+# this is merely quoted example link to adsense, not actual use
+racket-doc: privacy-breach-google-adsense usr/share/doc/racket/web-server/templates.html
