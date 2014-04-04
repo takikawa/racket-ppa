@@ -1,28 +1,22 @@
 The Racket Programming Language
 ===============================
 
-This is the Racket v5.3.6 source package for Unix.
+This is the
+  {1} Racket | {4} Source
+distribution for version 6.0.
 
-See the build instructions in "src/README".
+This distribution provides source for the Racket run-time system;
+for build and installation instructions, see "src/README".
+(The distribution also includes the core Racket collections and any
+installed packages in source form.)
 
-The main executables in this package:
+The distribution has been configured so that when you install or
+update packages, the package catalog at
+  http://download.racket-lang.org/releases/6.0/catalog/
+is consulted, first.
 
-* DrRacket: Racket's integrated development environment (start here!).
-
-* racket: command-line tool for running Racket programs.
-
-* raco: command-line tool for compilation, documentation, and more.
-
-
-More Information
-----------------
-
-For Racket documentation, use DrRacket's `Help' menu, run the `Racket
-Documentation' application (Windows or Mac OS X), or run `raco docs'
-from a command line.
-
-Visit us at
-   http://racket-lang.org/ 
+Visit
+   http://racket-lang.org/
 for more Racket resources.
 
 
@@ -38,4 +32,4 @@ applications, provided you follow the rules stated in the LGPL.  You can
 also modify Racket; if you distribute a modified version, you must
 distribute it under the terms of the LGPL, which in particular means
 that you must release the source code for the modified software.  See
-doc/release-notes/COPYING.txt for more information.
+share/COPYING_LESSER.txt for more information.

@@ -50,6 +50,15 @@ static void pre_filter_cmdline_arguments(int *argc, char ***argv);
 #define INITIAL_NAMESPACE_MODULE "racket/gui/init"
 #define GRAPHICAL_REPL
 
+#if WIN32
+# define DLL_RELATIVE_PATH L"."
+# define INITIAL_COLLECTS_DIRECTORY "../collects"
+#endif
+
+#ifndef INITIAL_CONFIG_DIRECTORY
+# define INITIAL_CONFIG_DIRECTORY "../etc"
+#endif
+
 # include "../racket/main.c"
 
 static char *get_gr_init_filename(Scheme_Env *env)

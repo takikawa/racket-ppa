@@ -13,6 +13,7 @@
          define-runtime-paths
          define-runtime-path-list
          define-runtime-module-path-index
+         runtime-require
          runtime-paths
          ;; from `racket/runtime-path`
          (for-syntax #%datum)
@@ -95,16 +96,41 @@
               [(string? p) (string->path p)]
               [(path? p) p]
               [(and (list? p)
-                    (= 2 (length p))
+                    (or (= 2 (length p))
+                        (= 3 (length p)))
                     (eq? 'so (car p))
-                    (string? (cadr p)))
-               (let ([f (path-replace-suffix (cadr p) (system-type 'so-suffix))])
-                 (or (ormap (lambda (p)
-                              (let ([p (build-path p f)])
-                                (and (file-exists? p)
-                                     p)))
-                            (get-lib-search-dirs))
-                     (cadr p)))]
+                    (string? (cadr p))
+                    (or (= 2 (length p))
+                        (let ([s (caddr p)])
+                          (define (vers? s) (or (not s) (string? s)))
+                          (or (vers? s)
+                              (and (list? s) (andmap vers? s))))))
+               (or (ormap (lambda (vers)
+                            (define (path-extra-suffix p sfx)
+                              (let-values ([(base name dir?) (split-path p)])
+                                (let ([name (bytes->path (bytes-append (path->bytes name) sfx))])
+                                  (if (path? base)
+                                      (build-path base name)
+                                      name))))
+                            (let ([f (if (eq? vers 'no-suffix)
+                                         (cadr p)
+                                         (path-extra-suffix (cadr p)
+                                                            (if vers
+                                                                (bytes-append #"."
+                                                                              (string->bytes/utf-8 vers)
+                                                                              (system-type 'so-suffix))
+                                                                (system-type 'so-suffix))))])
+                              (ormap (lambda (p)
+                                       (let ([p (build-path p f)])
+                                         (and (file-exists? p)
+                                              p)))
+                                     (get-lib-search-dirs))))
+                          (cons 'no-suffix
+                                (if (= (length p) 3)
+                                    (let ([s (caddr p)])
+                                      (if (list? s) s (list s)))
+                                    '(#f))))
+                   (cadr p))]
               [(and (list? p)
                     ((length p) . > . 1)
                     (eq? 'lib (car p))
@@ -114,12 +140,29 @@
                                             (if (regexp-match? #rx"[./]" s)
                                                 s
                                                 (string-append s "/main.rkt"))))])
-                 (apply collection-file-path
-                        (last strs)
-                        (if (and (null? (cddr p))
-                                 (null? (cdr strs)))
-                            (list "mzlib")
-                            (append (cddr p) (drop-right strs 1)))))]
+                 (let ([file (last strs)]
+                       [coll (if (and (null? (cddr p))
+                                      (null? (cdr strs)))
+                                 (list "mzlib")
+                                 (append (cddr p) (drop-right strs 1)))])
+                   (let ([file (if (regexp-match? #rx#"[.]ss$" file)
+                                   ;; normalize to ".rkt":
+                                   (path-replace-suffix file #".rkt")
+                                   file)])
+                     (let ([p (apply collection-file-path
+                                     file
+                                     coll)])
+                       (cond
+                        [(and (regexp-match? #rx#"[.]rkt$" file)
+                              (not (file-exists? p)))
+                         ;; Try ".ss":
+                         (define p2 (apply collection-file-path
+                                           (path-replace-suffix file #".ss")
+                                           coll))
+                         (if (file-exists? p2)
+                             p2
+                             p)]
+                        [else p])))))]
               [(and (list? p)
                     ((length p) . = . 3)
                     (eq? 'module (car p))
@@ -139,6 +182,10 @@
                        (module-path-index-join p base))))]
               [else (error 'runtime-path "unknown form: ~.s" p)])))
          paths)))
+
+(define (path-of p)
+  (let-values ([(base name dir?) (split-path p)])
+    base))
   
 (define-for-syntax (register-ext-files var-ref paths)
   (let ([modname (variable-reference->resolved-module-path var-ref)])
@@ -147,7 +194,7 @@
 
 (define-syntax (-define-runtime-path stx)
   (syntax-case stx ()
-    [(_ orig-stx (id ...) expr to-list to-values)
+    [(_ orig-stx (id ...) expr to-list to-values need-dir?)
      (let ([ids (syntax->list #'(id ...))])
        (unless (memq (syntax-local-context) '(module module-begin top-level))
          (raise-syntax-error #f "allowed only at the top level" #'orig-stx))
@@ -167,11 +214,14 @@
        #`(begin
            (define-values (id ...)
              (let-values ([(id ...) expr])
-               (let ([get-dir (lambda ()
-                                #,(datum->syntax
-                                   #'orig-stx
-                                   `(,#'this-expression-source-directory)
-                                   #'orig-stx))])
+               (let ([get-dir #,(if (syntax-e #'need-dir?)
+                                    #`(lambda ()
+                                        (path-of
+                                         #,(datum->syntax
+                                            #'orig-stx
+                                            `(,#'this-expression-source-file)
+                                            #'orig-stx)))
+                                    #'void)])
                  (apply to-values (resolve-paths (#%variable-reference)
                                                  get-dir
                                                  (to-list id ...))))))
@@ -183,19 +233,35 @@
 
 (define-syntax (define-runtime-path stx)
   (syntax-case stx ()
-    [(_ id expr) #`(-define-runtime-path #,stx (id) expr list values)]))
+    [(_ id expr) #`(-define-runtime-path #,stx (id) expr list values #t)]))
 
 (define-syntax (define-runtime-paths stx)
   (syntax-case stx ()
-    [(_ (id ...) expr) #`(-define-runtime-path #,stx (id ...) expr list values)]))
+    [(_ (id ...) expr) #`(-define-runtime-path #,stx (id ...) expr list values #t)]))
 
 (define-syntax (define-runtime-path-list stx)
   (syntax-case stx ()
-    [(_ id expr) #`(-define-runtime-path #,stx (id) expr values list)]))
+    [(_ id expr) #`(-define-runtime-path #,stx (id) expr values list #t)]))
 
 (define-syntax (define-runtime-module-path-index stx)
   (syntax-case stx ()
-    [(_ id expr) #`(-define-runtime-path #,stx (id) `(module ,expr ,(#%variable-reference)) list values)]))
+    [(_ id expr) #`(-define-runtime-path #,stx (id) `(module ,expr ,(#%variable-reference)) list values #f)]))
+
+(define-for-syntax required-module-paths (make-hash))
+(define-syntax (runtime-require stx)
+  (syntax-case stx ()
+    [(_ mod-path)
+     (let ([mp (syntax->datum #'mod-path)])
+       (unless (module-path? mp)
+         (raise-syntax-error #f "not a module path" stx  #'mod-path))
+       (if (hash-ref required-module-paths mp #f)
+           #'(begin)
+           (begin
+             (hash-set! required-module-paths mp #t)
+             #'(begin-for-syntax
+                (register-ext-files 
+                 (#%variable-reference)
+                 (list `(module mod-path ,(#%variable-reference))))))))]))
 
 (define-syntax (runtime-paths stx)
   (syntax-case stx ()

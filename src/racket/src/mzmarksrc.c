@@ -646,6 +646,9 @@ input_port {
   gcMARK2(ip->input_extras_ready, gc);
   gcMARK2(ip->unless, gc);
   gcMARK2(ip->unless_cache, gc);
+#ifdef WINDOWS_FILE_HANDLES
+  gcMARK2(ip->bufwidths, gc);
+#endif
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Input_Port));
@@ -784,6 +787,7 @@ thread_val {
   gcMARK2(pr->resumed_box, gc);
   gcMARK2(pr->dead_box, gc);
   gcMARK2(pr->running_box, gc);
+  gcMARK2(pr->sync_box, gc);
 
   gcMARK2(pr->mbox_first, gc);
   gcMARK2(pr->mbox_last, gc);
@@ -923,6 +927,8 @@ namespace_val {
   gcMARK2(e->instance_env, gc);
 
   gcMARK2(e->shadowed_syntax, gc);
+
+  gcMARK2(e->lift_key, gc);
 
   gcMARK2(e->link_midx, gc);
   gcMARK2(e->require_names, gc);
@@ -1119,9 +1125,6 @@ module_phase_exports_val {
   gcMARK2(m->provide_src_names, gc);
   gcMARK2(m->provide_nominal_srcs, gc);
   gcMARK2(m->provide_src_phases, gc);
-
-  gcMARK2(m->kernel_exclusion, gc);
-  gcMARK2(m->kernel_exclusion2, gc);
 
   gcMARK2(m->ht, gc);
 
@@ -1737,6 +1740,15 @@ mark_read_write_evt {
   gcBYTES_TO_WORDS(sizeof(Scheme_Read_Write_Evt));
 }
 
+mark_filesystem_change_evt {
+ mark:
+  Scheme_Filesystem_Change_Evt *fc = (Scheme_Filesystem_Change_Evt *)p;
+  gcMARK2(fc->sema, gc);
+  gcMARK2(fc->mref, gc);
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Filesystem_Change_Evt));
+}
+
 END port;
 
 /**********************************************************************/
@@ -1885,6 +1897,7 @@ mark_custodian_val {
   gcMARK2(m->mrefs, gc);
   gcMARK2(m->closers, gc);
   gcMARK2(m->data, gc);
+  gcMARK2(m->data_ptr, gc);
 
   gcMARK2(m->parent, gc);
   gcMARK2(m->sibling, gc);

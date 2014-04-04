@@ -251,6 +251,7 @@ scheme_lookup_in_table
 scheme_bucket_from_table
 scheme_bucket_table_equal
 scheme_clone_bucket_table
+scheme_clear_bucket_table
 scheme_make_hash_table
 scheme_make_hash_table_equal
 scheme_make_hash_table_eqv
@@ -263,6 +264,7 @@ scheme_hash_table_equal
 scheme_is_hash_table_equal
 scheme_is_hash_table_eqv
 scheme_clone_hash_table
+scheme_clear_hash_table
 scheme_make_hash_tree
 scheme_hash_tree_set
 scheme_hash_tree_get
@@ -363,6 +365,7 @@ scheme_ucs4_to_utf16
 scheme_utf16_to_ucs4
 scheme_open_converter
 scheme_close_converter
+scheme_getenv
 scheme_make_bignum
 scheme_make_bignum_from_unsigned
 scheme_make_bignum_from_long_long
@@ -544,6 +547,7 @@ scheme_install_macro
 scheme_save_initial_module_set
 scheme_primitive_module
 scheme_finish_primitive_module
+scheme_set_primitive_module_phaseless
 scheme_protect_primitive_provide
 scheme_make_modidx
 scheme_apply_for_syntax_in_env

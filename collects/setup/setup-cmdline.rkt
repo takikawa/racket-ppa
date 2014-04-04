@@ -33,6 +33,20 @@
      #:program long-name
      #:argv argv
      #:once-each
+     [("-j" "--jobs" "--workers") n "Use <n> parallel jobs"
+      (add-flags `((parallel-workers ,(string->number n))))]
+     [("--only") "Set up only specified <collection>s"
+      (add-flags '((make-only #t)))]
+     #:multi
+     [("-P") owner package-name maj min
+      "Setup specified PLaneT packages only"
+      (set! x-specific-planet-packages (cons (list owner package-name maj min)
+                                             x-specific-planet-packages))]
+     #:once-each
+     [("--tidy") "Clear references to removed, even if not a specified <collection>"
+      (add-flags '((make-tidy #t)))]
+     [("--doc-index") "Rebuild documentation indexes, along with specified <collection>s"
+      (add-flags '((make-doc-index #t)))]
      [("-c" "--clean") "Delete existing compiled files; implies -nxi"
       (add-flags '((clean #t)
                    (make-zo #f)
@@ -40,12 +54,14 @@
                    (make-launchers #f)
                    (make-info-domain #f)
                    (make-docs #f)))]
-     [("-j" "--workers") workers "Use <#> parallel-workers"
-      (add-flags `((parallel-workers ,(string->number workers))))]
      [("-n" "--no-zo") "Do not produce .zo files"
       (add-flags '((make-zo #f)))]
+     [("--trust-zos") "Trust existing .zos (use only with prepackaged .zos)"
+      (add-flags '((trust-existing-zos #t)))]
      [("-x" "--no-launcher") "Do not produce launcher programs"
       (add-flags '((make-launchers #f)))]
+     [("--no-foreign-libs") "Do not install foreign libraries"
+      (add-flags '((make-foreign-libs #f)))]
      [("-i" "--no-install") "Do not call collection-specific pre-installers"
       (add-flags '((call-install #f)))]
      [("-I" "--no-post-install") "Do not call collection-specific post-installers"
@@ -54,12 +70,24 @@
       (add-flags '((make-info-domain #f)))]
      [("-D" "--no-docs") "Do not compile .scrbl files and do not build documentation"
       (add-flags '((make-docs #f)))]
+     [("--doc-pdf") dir "Build doc PDFs, write to <dir>"
+      (add-flags `((doc-pdf-dest ,dir)))]
      [("-U" "--no-user") "Do not setup user-specific collections (implies --no-planet)"
       (add-flags '((make-user #f) (make-planet #f)))]
      [("--no-planet") "Do not setup PLaneT packages"
       (add-flags '((make-planet #f)))]
      [("--avoid-main") "Do not make main-installation files"
       (add-flags '((avoid-main-installation #t)))]
+     [("-K" "--no-pkg-deps") "Do not check package dependencies"
+      (add-flags '((check-dependencies #f)))]
+     [("--fix-pkg-deps") "Auto-repair package-dependency declarations"
+      (add-flags '((check-dependencies #t)
+                   (fix-dependencies #t)))]
+     [("--unused-pkg-deps") "Check for unused package-dependency declarations"
+      (add-flags '((check-dependencies #t)
+                   (check-unused-dependencies #t)))]
+     [("--mode") mode "Select a compilation mode"
+      (add-flags `((compile-mode ,mode)))]
      [("-v" "--verbose") "See names of compiled files and info printfs"
       (add-flags '((verbose #t)))]
      [("-m" "--make-verbose") "See make and compiler usual messages"
@@ -67,18 +95,8 @@
      [("-r" "--compile-verbose") "See make and compiler verbose messages"
       (add-flags '((make-verbose #t)
                    (compiler-verbose #t)))]
-     [("--trust-zos") "Trust existing .zos (use only with prepackaged .zos)"
-      (add-flags '((trust-existing-zos #t)))]
      [("-p" "--pause") "Pause at the end if there are any errors"
       (add-flags '((pause-on-errors #t)))]
-     [("--force") "Treat version mismatches for archives as mere warnings"
-      (add-flags '((force-unpacks #t)))]
-     [("-a" "--all-users") "Install archives to main (not user-specific) installation"
-      (add-flags '((all-users #t)))]
-     [("--mode") mode "Select a compilation mode"
-      (add-flags `((compile-mode ,mode)))]
-     [("--doc-pdf") dir "Build doc PDFs, write to <dir>"
-      (add-flags `((doc-pdf-dest ,dir)))]
      [("-l") => (lambda (flag . collections)
                   (check-collections short-name collections)
                   (cons 'collections (map list collections)))
@@ -86,11 +104,11 @@
      [("-A") => (λ (flag . archives)
                   (cons 'archives archives))
              '("Unpack and install <archive>s" "archive")]
-     #:multi
-     [("-P") owner package-name maj min
-      "Setup specified PLaneT packages only"
-      (set! x-specific-planet-packages (cons (list owner package-name maj min)
-                                             x-specific-planet-packages))]
+     [("--force") "Treat version mismatches for archives as mere warnings"
+      (add-flags '((force-unpacks #t)))]
+     [("-a" "--all-users") "Install archives to main (not user-specific) installation"
+      (add-flags '((all-users #t)))]
+     
      #:handlers
      (lambda (collections/archives . rest)
        (let ([pre-archives (if (and (pair? collections/archives)

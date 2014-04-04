@@ -2,30 +2,38 @@
 (require "prop.rkt"
          "misc.rkt"
          "blame.rkt"
+         "guts.rkt"
          racket/stxparam)
-(require (for-syntax racket/base)
-         (for-syntax "opt-guts.rkt")
-         (for-syntax racket/stxparam))
+(require (for-syntax racket/base 
+                     "helpers.rkt"
+                     "opt-guts.rkt"
+                     racket/stxparam))
 
 (provide opt/c define-opt/c define/opter
-         opt/direct
+         opt/direct 
          begin-lifted
+         raise-opt/pred-error
          (for-syntax
+          opt/pred
           define-opt/recursive-fn?
           define-opt/recursive-fn-neg-blame?-id))
 
-(define-syntax (define/opter stx)
-  (syntax-case stx ()
+(define-syntax (define/opter orig-stx)
+  (syntax-case orig-stx ()
     [(_ (for opt/i opt/info stx) expr ...)
      (if (identifier? #'for)
-         #'(begin
-             (begin-for-syntax
-               (reg-opter!
-                #'for
-                (λ (opt/i opt/info stx)
-                  expr ...)))
-             (void))
-         (error 'define/opter "expected opter name to be an identifier, got ~.s" (syntax-e #'for)))]))
+         (with-syntax ([for/name (datum->syntax #'for
+                                                (string->symbol (format "~a/opter" (syntax-e #'for))))])
+           #'(begin
+               (begin-for-syntax
+                 (reg-opter!
+                  #'for
+                  (let ([for/name (λ (opt/i opt/info stx) expr ...)])
+                    for/name)))
+               (void)))
+         (raise-syntax-error 'define/opter "expected opter name to be an identifier"
+                             orig-stx
+                             #'for))]))
 
 ;;
 ;; opt/recursive-call
@@ -94,7 +102,8 @@
    #:flat predicate
    #:opt #f
    #:stronger-ribs null
-   #:chaperone #t))
+   #:chaperone #t
+   #:name #`'#,konst))
 
 (define (opt-constant-contract-failure blame val compare should-be)
   (raise-blame-error blame val '(expected "a value ~a to ~e") compare should-be))
@@ -105,7 +114,8 @@
 
 ;; opt/i : id opt/info syntax ->
 ;;         syntax syntax-list syntax-list (union syntax #f) (union syntax #f)
-(define-for-syntax (opt/i opt/info stx)
+;;  if call-opt/unknown is #f, then this may just return #f instead of an optres
+(define-for-syntax (opt/i opt/info stx #:call-opt/unknown? [call-opt/unknown? #t])
   ;; the case dispatch here must match what top-level-unknown? is doing
   (syntax-case stx ()
     [(ctc arg ...)
@@ -114,6 +124,9 @@
     [argless-ctc
      (and (identifier? #'argless-ctc) (opter #'argless-ctc))
      ((opter #'argless-ctc) opt/i opt/info stx)]
+    [predicate?
+     (and (identifier? #'predicate?) (known-good-contract? #'predicate?))
+     (opt/pred opt/info #'predicate?)]
     [(f arg ...)
      (and (identifier? #'f) 
           (define-opt/recursive-fn? (syntax-local-value #'f (λ () #f))))
@@ -142,8 +155,13 @@
     [konst
      (coerecable-constant? #'konst)
      (opt-constant-contract (syntax->datum #'konst) opt/info)]
-    [else
-     (opt/unknown opt/i opt/info stx)]))
+    [_
+     (cond
+       [call-opt/unknown?
+        (opt/unknown opt/i opt/info stx)]
+       [else
+        (log-unknown-contract-warning stx)
+        #f])]))
 
 ;; top-level-unknown? : syntax -> boolean
 ;; this must match what opt/i is doing
@@ -155,6 +173,9 @@
     [argless-ctc
      (and (identifier? #'argless-ctc) (opter #'argless-ctc))
      #f]
+    [predicate?
+     (and (identifier? #'predicate?) (known-good-contract? #'predicate?))
+     #f]
     [konst
      (coerecable-constant? #'konst)
      #f]
@@ -165,31 +186,68 @@
     [else
      #t]))
 
+(define-for-syntax (opt/pred opt/info pred #:name [name (syntax-e pred)])
+  (with-syntax ((pred pred))
+    (build-optres
+     #:exp
+     (with-syntax ((val (opt/info-val opt/info))
+                   (ctc (opt/info-contract opt/info))
+                   (blame (opt/info-blame opt/info)))
+       (syntax (if (pred val)
+                   val
+                   (raise-opt/pred-error blame val 'pred))))
+     #:lifts null
+     #:superlifts null
+     #:partials null
+     #:flat (syntax (pred val))
+     #:opt #f
+     #:stronger-ribs null
+     #:chaperone #t
+     #:name #`'#,name)))
+
+(define (raise-opt/pred-error blame val pred-name)
+  (raise-blame-error
+   blame
+   val
+   '(expected: "~a")
+   pred-name))
+
+
+
 ;; opt/c : syntax -> syntax
 ;; opt/c is an optimization routine that takes in an sexp containing
 ;; contract combinators and attempts to "unroll" those combinators to save
 ;; on things such as closure allocation time.
 (define-syntax (opt/c stx)  
-  (syntax-case stx ()
-    [(_ e)
-     (let ()
-       (define info (make-opt/info #'ctc #'val #'blame #f '() #f #f #'this #'that))
-       (define an-optres (opt/i info #'e))
-       (bind-superlifts
-        (optres-superlifts an-optres)
-        (bind-lifts
-         (optres-lifts an-optres)
-         #`(make-opt-contract
-            (λ (ctc)
-              (λ (blame)
-                #,(bind-superlifts
-                   (optres-partials an-optres)
-                   #`(λ (val) #,(optres-exp an-optres)))))
-            (λ () e)
-            (λ (this that) #f)
-            (vector)
-            (begin-lifted (box #f))
-            #,(optres-chaperone an-optres)))))]))
+  (define-values (exp error-name-sym)
+    (syntax-case stx ()
+      [(_ e) (values #'e 'opt/c)]
+      [(_ e #:error-name x) 
+       (begin
+         (unless (identifier? #'x)
+           (raise-syntax-error 'opt/c "expected a name" stx #'x))
+         (values #'e (syntax-e #'x)))]))
+  
+  (parameterize ([opt-error-name error-name-sym])
+    (define info (build-opt/info #'ctc #'val #'blame '() #'this #'that))
+    (define an-optres (opt/i info exp #:call-opt/unknown? #f))
+    (if an-optres
+        (bind-superlifts
+         (optres-superlifts an-optres)
+         (bind-lifts
+          (optres-lifts an-optres)
+          #`(make-opt-contract
+             (λ (ctc)
+               (λ (blame)
+                 #,(bind-superlifts
+                    (optres-partials an-optres)
+                    #`(λ (val) #,(optres-exp an-optres)))))
+             #,(optres-name an-optres)
+             (λ (this that) #f)
+             (vector)
+             (begin-lifted (box #f))
+             #,(optres-chaperone an-optres))))
+        #`(coerce-contract '#,error-name-sym #,exp))))
 
 ;; this macro optimizes 'e' as a contract,
 ;; using otherwise-id if it does not recognize 'e'.
@@ -200,10 +258,9 @@
      (cond
        [(top-level-unknown? #'e) #'(otherwise-id e val-e blame-e)]
        [else
-        (define info (make-opt/info #'ctc #'val #'blame #f '() #f #f #'this #'that))
+        (define info (build-opt/info #'ctc #'val #'blame '() #'this #'that))
         (define an-optres (opt/i info #'e))
-        #`(let ([ctc e] ;;; hm... what to do about this?!
-                [val val-e]
+        #`(let ([val val-e]
                 [blame blame-e])
             #,(bind-superlifts
                (optres-superlifts an-optres)
@@ -245,9 +302,9 @@
   (syntax-case stx ()
     [(_ f1 f2 no-neg-blame? (id args ...) e)
      (let ()
-       (define info (make-opt/info #'ctc #'val #'blame #f 
+       (define info (build-opt/info #'ctc #'val #'blame 
                                    (syntax->list #'(args ...)) 
-                                   #f #f #'this #'that))
+                                   #'this #'that))
        ;; it seems like this syntax-local-value can fail when expand-once
        ;; is called, but otherwise I think it shouldn't fail
        (define bx (syntax-local-value #'no-neg-blame? (λ () #f)))
@@ -292,13 +349,13 @@
 ;; the stronger-vars don't seem to be used anymore for stronger; probably
 ;; they should be folded into the lifts and then there should be a separate
 ;; setup for consolidating stronger checks
-(define-struct opt-contract (proj orig-ctc stronger stronger-vars stamp chaperone?)
-  #:property orig-ctc-prop (λ (ctc) ((opt-contract-orig-ctc ctc)))
+(define-struct opt-contract (proj name stronger stronger-vars stamp chaperone?)
   #:property prop:opt-chaperone-contract (λ (ctc) (opt-contract-chaperone? ctc))
+  #:property prop:custom-write (λ (val port mode) (fprintf port "#<opt-contract: ~.s>" (opt-contract-name val)))
   #:property prop:contract
   (build-contract-property
    #:projection (λ (ctc) ((opt-contract-proj ctc) ctc))
-   #:name (λ (ctc) (contract-name ((orig-ctc-get ctc) ctc)))
+   #:name (λ (ctc) (opt-contract-name ctc))
    #:stronger
    (λ (this that)
       (and (opt-contract? that)

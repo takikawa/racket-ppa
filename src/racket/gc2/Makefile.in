@@ -1,10 +1,14 @@
+PACKAGE = racket
+
 srcdir = @srcdir@
 builddir = @builddir@
 prefix = @prefix@
 exec_prefix = @exec_prefix@
+datarootdir = @datarootdir@
 bindir = @bindir@
 libdir = @libdir@
 libpltdir = @libpltdir@
+sharepltdir = @sharepltdir@
 collectsdir = @collectsdir@
 
 # for version.mak:
@@ -30,12 +34,14 @@ LIBFFI_INCLUDE_OFF =
 ARLIBFLAGS = @LDFLAGS@ $(LIBS)
 
 DEF_COLLECTS_DIR = +D INITIAL_COLLECTS_DIRECTORY='"'"`cd $(srcdir)/../../../collects; @PWD@`"'"'
+DEF_CONFIG_DIR = +D INITIAL_CONFIG_DIRECTORY='"'"`cd $(srcdir)/../../..; @PWD@`/etc"'"'
+DEF_C_DIRS = $(DEF_COLLECTS_DIR) $(DEF_CONFIG_DIR)
 
 # See ../../Makefile about RUN_RACKET_CGC, which 
 # typically redirects to RUN_THIS_RACKET_CGC:
 RUN_THIS_RACKET_CGC = ../racket@CGC@
 
-XFORM_SETUP = @RUN_RACKET_CGC@ -cqu $(srcdir)/xform.rkt --setup .
+XFORM_SETUP = @RUN_RACKET_CGC@ $(SELF_RACKET_FLAGS) -cqu $(srcdir)/xform.rkt --setup .
 XFORM_NOPRECOMP = $(XFORM_SETUP) --cpp "$(CPP) $(CPPFLAGS)" @XFORMFLAGS@ -o
 XSRCDIR = xsrc
 XFORM = env XFORM_USE_PRECOMP=$(XSRCDIR)/precomp.h $(XFORM_NOPRECOMP)
@@ -301,7 +307,7 @@ $(XSRCDIR)/vector.c: ../src/vector.@LTO@ $(XFORMDEP)
 $(XSRCDIR)/foreign.c: ../../foreign/foreign.@LTO@ $(XFORMDEP)
 	$(XFORM_SETUP) --cpp "$(CPP) $(CPPFLAGS) $(LIBFFI_INCLUDE_@OWN_LIBFFI@) -I${SRCDIR}/../../racket/src" @XFORMFLAGS@ -o $(XSRCDIR)/foreign.c $(SRCDIR)/../../foreign/foreign.c
 $(XSRCDIR)/main.c: ../main.@LTO@ $(XFORMDEP)
-	$(XFORM_NOPRECOMP) $(XSRCDIR)/main.c $(DEF_COLLECTS_DIR) $(srcdir)/../main.c
+	$(XFORM_NOPRECOMP) $(XSRCDIR)/main.c $(DEF_C_DIRS) $(srcdir)/../main.c
 
 salloc.@LTO@: $(XSRCDIR)/salloc.c
 	$(CC) $(CFLAGS) -c $(XSRCDIR)/salloc.c -o salloc.@LTO@

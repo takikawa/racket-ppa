@@ -2,15 +2,14 @@
 (require syntax/modcode
          syntax/modresolve
          syntax/modread
-         setup/main-collects
          setup/dirs
-	 unstable/file
          racket/file
          racket/list
          racket/path
          racket/promise
          openssl/sha1
-         racket/place)
+         racket/place
+         setup/collects)
 
 (provide make-compilation-manager-load/use-compiled-handler
          managed-compile-zo
@@ -126,6 +125,18 @@
                 [else 
                  (c-loop (cdr paths))])]))]))))
 
+(define (path*->collects-relative p)
+  (if (bytes? p)
+      (let ([q (path->collects-relative (bytes->path p))])
+        (if (path? q)
+            (path->bytes q)
+            q))
+      (path->collects-relative p)))
+
+(define (collects-relative*->path p)
+  (if (bytes? p)
+      (bytes->path p)
+      (collects-relative->path p)))
 
 (define (reroot-path* base root)
   (cond
@@ -223,38 +234,12 @@
   (try-delete-file zo-name)
   (trace-printf "failure"))
 
-;; with-compile-output : path (output-port -> alpha) -> alpha
-;;  Open a temporary path for writing, automatically renames after,
-;;  and arranges to delete path if there's
-;;  an exception. Breaks are managed so that the port is reliably
-;;  closed and the file is reliably deleted if there's a break
+;; with-compile-output : path (output-port path -> alpha) -> alpha
 (define (with-compile-output path proc)
-  (let ([bp (current-break-parameterization)]
-        [tmp-path (with-compiler-security-guard (make-temporary-file "tmp~a" #f (path-only path)))]
-        [ok? #f])
-    (dynamic-wind
-     void
-     (lambda ()
-       (begin0
-         (let ([out (with-compiler-security-guard (open-output-file tmp-path #:exists 'truncate/replace))])
-           (dynamic-wind
-            void
-            (lambda ()
-              (call-with-break-parameterization bp (lambda () (proc out tmp-path))))
-            (lambda ()
-              (with-compiler-security-guard (close-output-port out)))))
-         (set! ok? #t)))
-     (lambda ()
-       (with-compiler-security-guard
-        (if ok?
-            (if (eq? (system-type) 'windows)
-                (let ([tmp-path2 (make-temporary-file "tmp~a" #f (path-only path))])
-                  (with-handlers ([exn:fail:filesystem? void])
-                    (rename-file-or-directory path tmp-path2 #t))
-                  (rename-file-or-directory tmp-path path #t)
-                  (try-delete-file tmp-path2))
-                (rename-file-or-directory tmp-path path #t))
-            (try-delete-file tmp-path)))))))
+  (call-with-atomic-output-file 
+   path
+   #:security-guard (pick-security-guard)
+   proc))
 
 (define-syntax-rule
   (with-compiler-security-guard expr)
@@ -279,7 +264,7 @@
                   ;; (cons 'ext rel-path) => a non-module file, check source
                   ;; rel-path => a module file name, check cache
                   (let* ([ext? (and (pair? dep) (eq? 'ext (car dep)))]
-                         [p (main-collects-relative->path (if ext? (cdr dep) dep))])
+                         [p (collects-relative*->path (if ext? (cdr dep) dep))])
                     (cond
                      [ext? (let ([v (get-source-sha1 p)])
                              (cond
@@ -321,9 +306,9 @@
     (with-compile-output dep-path
       (lambda (op tmp-path)
         (let ([deps (append
-                     (map path->main-collects-relative deps)
+                     (map path*->collects-relative deps)
                      (map (lambda (x)
-                            (cons 'ext (path->main-collects-relative x)))
+                            (cons 'ext (path*->collects-relative x)))
                           external-deps))])
         (write (list* (version)
                       (cons (or src-sha1 (get-source-sha1 path))
@@ -339,7 +324,7 @@
             (date-hour d) (date-minute d) (date-second d))))
 
 (define (verify-times ss-name zo-name)
-  (define ss-sec (try-file-time ss-name))
+  (define ss-sec (file-or-directory-modify-seconds ss-name))
   (define zo-sec (try-file-time zo-name))
   (cond [(not ss-sec) (error 'compile-zo "internal error")]
         [(not zo-sec) (error 'compile-zo "failed to create .zo file (~a) for ~a"
@@ -440,7 +425,7 @@
 
   ;; Write the code and dependencies:
   (when code
-    (with-compiler-security-guard (make-directory*/ignore-exists-exn code-dir))
+    (with-compiler-security-guard (make-directory* code-dir))
     (with-compile-output zo-name
       (lambda (out tmp-name)
         (with-handlers ([exn:fail?
@@ -597,8 +582,7 @@
   (or (try-file-time (build-path dir "native" (system-library-subpath)
                                  (path-add-suffix name (system-type
                                                         'so-suffix))))
-      (try-file-time (build-path dir (path-add-suffix name #".zo")))
-      -inf.0))
+      (try-file-time (build-path dir (path-add-suffix name #".zo")))))
 
 (define (try-file-sha1 path dep-path)
   (with-module-reading-parameterization
@@ -654,7 +638,7 @@
        [(not path-time)
         (trace-printf "~a does not exist" orig-path)
         (or (hash-ref up-to-date orig-path #f)
-            (let ([stamp (cons path-zo-time
+            (let ([stamp (cons (or path-zo-time +inf.0)
                                (delay (get-compiled-sha1 mode roots path)))])
               (hash-set! up-to-date main-path stamp)
               (unless (eq? main-path alt-path)
@@ -669,7 +653,7 @@
               (lambda ()
                 (trace-printf "newer version...")
                 (maybe-compile-zo #f #f mode roots path orig-path read-src-syntax up-to-date new-seen))]
-             [(> path-time path-zo-time)
+             [(> path-time (or path-zo-time -inf.0))
               (trace-printf "newer src...")
               ;; If `sha1-only?', then `maybe-compile-zo' returns a #f or thunk:
               (maybe-compile-zo sha1-only? deps mode roots path orig-path read-src-syntax up-to-date new-seen)]
@@ -678,14 +662,14 @@
                  ;; (cons 'ext rel-path) => a non-module file (check date)
                  ;; rel-path => a module file name (check transitive dates)
                  (define ext? (and (pair? p) (eq? 'ext (car p))))
-                 (define d (main-collects-relative->path (if ext? (cdr p) p)))
+                 (define d (collects-relative*->path (if ext? (cdr p) p)))
                  (define t
                    (if ext?
-                       (cons (try-file-time d) #f)
+                       (cons (or (try-file-time d) +inf.0) #f)
                        (compile-root mode roots d up-to-date read-src-syntax #f new-seen)))
                  (and t
                       (car t)
-                      (> (car t) path-zo-time)
+                      (> (car t) (or path-zo-time -inf.0))
                       (begin (trace-printf "newer: ~a (~a > ~a)..."
                                            d (car t) path-zo-time)
                              #t)))
@@ -697,7 +681,7 @@
            [(and build sha1-only?) #f]
            [else
             (when build (build))
-            (let ([stamp (cons (get-compiled-time mode roots path)
+            (let ([stamp (cons (or (get-compiled-time mode roots path) +inf.0)
                                (delay (get-compiled-sha1 mode roots path)))])
               (hash-set! up-to-date main-path stamp)
               (unless (eq? main-path alt-path)

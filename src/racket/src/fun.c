@@ -498,34 +498,34 @@ scheme_init_fun (Scheme_Env *env)
 						       4, 4),
 			     env);
   scheme_add_global_constant("current-milliseconds",
-			     scheme_make_prim_w_arity(current_milliseconds,
-						      "current-milliseconds",
-						      0, 0),
+			     scheme_make_immed_prim(current_milliseconds,
+                                                    "current-milliseconds",
+                                                    0, 0),
 			     env);
   scheme_add_global_constant("current-inexact-milliseconds",
-			     scheme_make_prim_w_arity(current_inexact_milliseconds,
-						      "current-inexact-milliseconds",
-						      0, 0),
+			     scheme_make_immed_prim(current_inexact_milliseconds,
+                                                    "current-inexact-milliseconds",
+                                                    0, 0),
 			     env);
   scheme_add_global_constant("current-process-milliseconds",
-			     scheme_make_prim_w_arity(current_process_milliseconds,
-						      "current-process-milliseconds",
-						      0, 1),
+			     scheme_make_immed_prim(current_process_milliseconds,
+                                                    "current-process-milliseconds",
+                                                    0, 1),
 			     env);
   scheme_add_global_constant("current-gc-milliseconds",
-			     scheme_make_prim_w_arity(current_gc_milliseconds,
-						      "current-gc-milliseconds",
-						      0, 0),
+			     scheme_make_immed_prim(current_gc_milliseconds,
+                                                    "current-gc-milliseconds",
+                                                    0, 0),
 			     env);
   scheme_add_global_constant("current-seconds",
-			     scheme_make_prim_w_arity(current_seconds,
-						      "current-seconds",
-						      0, 0),
+			     scheme_make_immed_prim(current_seconds,
+                                                    "current-seconds",
+                                                    0, 0),
 			     env);
   scheme_add_global_constant("seconds->date",
-			     scheme_make_prim_w_arity(seconds_to_date,
-						      "seconds->date",
-						      1, 2),
+			     scheme_make_immed_prim(seconds_to_date,
+                                                    "seconds->date",
+                                                    1, 2),
 			     env);
 #endif
 
@@ -4499,8 +4499,9 @@ static MZ_MARK_STACK_TYPE find_shareable_marks()
 static Scheme_Overflow *clone_overflows(Scheme_Overflow *overflow, void *limit, Scheme_Overflow *tail)
 {
   Scheme_Overflow *naya, *first = NULL, *prev = NULL;
+  int stop = 0;
 
-  for (; overflow && (!limit || (overflow->id != limit)); overflow = overflow->prev) {
+  for (; overflow && !stop; overflow = overflow->prev) {
     naya = MALLOC_ONE_RT(Scheme_Overflow);
     memcpy(naya, overflow, sizeof(Scheme_Overflow));
     if (prev)
@@ -4508,6 +4509,8 @@ static Scheme_Overflow *clone_overflows(Scheme_Overflow *overflow, void *limit, 
     else
       first = naya;
     prev = naya;
+    if (limit && overflow->id == limit)
+      stop = 1;
   }
 
   if (first) {
@@ -7293,7 +7296,7 @@ static Scheme_Object *continuation_marks(Scheme_Thread *p,
           cache = NULL;
         if (cache) {
           if (SCHEME_HASHTP(cache))
-            cache = scheme_hash_get((Scheme_Hash_Table *)cache, prompt_tag ? prompt_tag : scheme_false);
+            cache = scheme_eq_hash_get((Scheme_Hash_Table *)cache, prompt_tag ? prompt_tag : scheme_false);
           else if (prompt_tag != scheme_default_prompt_tag)
             cache = NULL;
         }
@@ -7344,7 +7347,7 @@ static Scheme_Object *continuation_marks(Scheme_Thread *p,
         if (cache && !SCHEME_FALSEP(cache)) {
           if (SCHEME_HASHTP(cache)) {
             Scheme_Hash_Table *ht = (Scheme_Hash_Table *)cache;
-            cache = scheme_hash_get(ht, prompt_tag ? prompt_tag : scheme_false);
+            cache = scheme_eq_hash_get(ht, prompt_tag ? prompt_tag : scheme_false);
             if (!cache) {
               scheme_hash_set(ht, prompt_tag ? prompt_tag : scheme_false, (Scheme_Object *)pr);
             } else {
@@ -7879,6 +7882,7 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
                                      MZ_MARK_POS_TYPE *_vpos)
 {
   Scheme_Object *key = key_arg;
+
   if (SCHEME_NP_CHAPERONEP(key)
       && SCHEME_CONTINUATION_MARK_KEYP(SCHEME_CHAPERONE_VAL(key))) {
     key = SCHEME_CHAPERONE_VAL(key);
@@ -7919,8 +7923,6 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
         bottom = 0;
       } else {
         startpos = (intptr_t)MZ_CONT_MARK_STACK;
-        if (!p->cont_mark_stack_segments)
-          findpos = 0;
         bottom = p->cont_mark_stack_bottom;
       }
 
@@ -7945,7 +7947,7 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
         } else {
           cache = seg[pos].cache;
           if (cache && SCHEME_HASHTP(cache))
-            cache = scheme_hash_get((Scheme_Hash_Table *)cache, 
+            cache = scheme_eq_hash_get((Scheme_Hash_Table *)cache, 
                                     prompt_tag ? prompt_tag : scheme_false);
           else if (prompt_tag)
             cache = NULL;
@@ -7961,7 +7963,7 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
             } else {
               Scheme_Hash_Table *ht;
               ht = (Scheme_Hash_Table *)SCHEME_VEC_ELS(cache)[2];
-              val = scheme_hash_get(ht, key);
+              val = scheme_eq_hash_get(ht, key);
               if (val) {
                 vpos = (MZ_MARK_POS_TYPE)SCHEME_CDR(val);
                 val = SCHEME_CAR(val);
@@ -7994,7 +7996,7 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
           Scheme_Hash_Table *cht;
           if (cache && SCHEME_HASHTP(cache)) {
             cht = (Scheme_Hash_Table *)cache;
-            cache = scheme_hash_get(cht, prompt_tag ? prompt_tag : scheme_false);
+            cache = scheme_eq_hash_get(cht, prompt_tag ? prompt_tag : scheme_false);
           } else if (prompt_tag) {
             cht = scheme_make_hash_table(SCHEME_hash_ptr);
             if (cache) {
@@ -8076,6 +8078,59 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
   return NULL;
 }
 
+XFORM_NONGCING static Scheme_Object *
+extract_one_cc_mark_fast(Scheme_Object *key)
+/* A non-GCing fast path for scheme_extract_one_cc_mark_with_meta()
+   where there are no complications. */
+{
+  intptr_t findpos, bottom, startpos, minbottom;
+  intptr_t pos;
+  Scheme_Object *val = NULL;
+  Scheme_Object *cache;
+  Scheme_Cont_Mark *seg;
+  Scheme_Thread *p = scheme_current_thread;
+
+  startpos = (intptr_t)MZ_CONT_MARK_STACK;
+ 
+  bottom = p->cont_mark_stack_bottom;
+  minbottom = startpos - 32;
+  if (bottom < minbottom) 
+    bottom = minbottom;
+  
+  findpos = startpos;
+  
+  /* Search mark stack, checking caches along the way: */
+  while (findpos-- > bottom) {
+    seg = p->cont_mark_stack_segments[findpos >> SCHEME_LOG_MARK_SEGMENT_SIZE];
+    pos = findpos & SCHEME_MARK_SEGMENT_MASK;
+
+    if (SAME_OBJ(seg[pos].key, key))
+      return seg[pos].val;
+    else {
+      cache = seg[pos].cache;
+      if (cache && SCHEME_HASHTP(cache))
+        cache = scheme_eq_hash_get((Scheme_Hash_Table *)cache, scheme_false);
+      if (cache && SCHEME_VECTORP(cache)) {
+        /* If slot 1 has a key, this cache has just one key--value
+           pair. Otherwise, slot 2 is a hash table. */
+        if (SCHEME_VEC_ELS(cache)[1]) {
+          if (SAME_OBJ(SCHEME_VEC_ELS(cache)[1], key))
+            return SCHEME_VEC_ELS(cache)[2];
+        } else {
+          Scheme_Hash_Table *ht;
+          ht = (Scheme_Hash_Table *)SCHEME_VEC_ELS(cache)[2];
+          val = scheme_eq_hash_get(ht, key);
+          if (val) {
+            return SCHEME_CAR(val);
+          }
+        }
+      }
+    }
+  }
+  
+  return NULL;
+}
+
 static Scheme_Object *get_set_cont_mark_by_pos(Scheme_Object *key,
                                                Scheme_Thread *p,
                                                Scheme_Meta_Continuation *mc,
@@ -8142,6 +8197,13 @@ static Scheme_Object *get_set_cont_mark_by_pos(Scheme_Object *key,
 Scheme_Object *
 scheme_extract_one_cc_mark(Scheme_Object *mark_set, Scheme_Object *key)
 {
+  Scheme_Object *v;
+  
+  if (!mark_set) {
+    v = extract_one_cc_mark_fast(key);
+    if (v) return v;
+  }
+
   return scheme_extract_one_cc_mark_with_meta(mark_set, key, NULL, NULL, NULL);
 }
 

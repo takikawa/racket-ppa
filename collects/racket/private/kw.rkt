@@ -7,10 +7,12 @@
                          "stx.rkt"
                          "small-scheme.rkt"
                          "stxcase-scheme.rkt"
+                         "member.rkt"
                          "name.rkt"
                          "norm-define.rkt"
                          "qqstx.rkt"
-                         "sort.rkt"))
+                         "sort.rkt"
+                         "kw-prop-key.rkt"))
 
   (#%provide new-lambda new-λ
              new-define
@@ -973,8 +975,6 @@
   (define-for-syntax kw-expander-impl (make-struct-field-accessor kw-expander-ref 1 'impl))
   (define-for-syntax kw-expander-proc (make-struct-field-accessor kw-expander-ref 2 'proc))
 
-  (define-for-syntax kw-converted-arguments-variant-of (gensym 'converted-arguments-variant-of))
-
   (define-for-syntax (syntax-procedure-converted-arguments-property stx) 
     (unless (syntax? stx)
       (raise-argument-error 'syntax-procedure-converted-arguments "syntax?" stx))
@@ -1267,7 +1267,7 @@
                            ;; Format arguments:
                            (apply
                             string-append
-                            "\n  given arguments:"
+                            "\n  arguments...:"
                             (append
                              (map (lambda (v)
                                     (format "\n   ~e" v))
@@ -1290,12 +1290,20 @@
                               "  given keyword: ~a"
                               "~a")
                              (proc-name p) extra-kw args-str)
-                            (format
-                             (string-append
-                              "application: procedure does not accept keyword arguments\n"
-                              "  procedure: ~a"
-                              "~a")
-                             (proc-name p) args-str))
+                            (if (procedure? p)
+                                (format
+                                 (string-append
+                                  "application: procedure does not accept keyword arguments\n"
+                                  "  procedure: ~a"
+                                  "~a")
+                                 (proc-name p) args-str)
+                                (format
+                                 (string-append
+                                  "application: not a procedure;\n"
+                                  " expected a procedure that can be applied to arguments\n"
+                                  "  given: ~e"
+                                  "~a")
+                                 p args-str)))
                         (if missing-kw
                             (format
                              (string-append

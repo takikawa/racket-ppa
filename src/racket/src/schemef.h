@@ -489,6 +489,7 @@ MZ_EXTERN void *scheme_lookup_in_table(Scheme_Bucket_Table *table, const char *k
 MZ_EXTERN Scheme_Bucket *scheme_bucket_from_table(Scheme_Bucket_Table *table, const char *key);
 MZ_EXTERN int scheme_bucket_table_equal(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *t2);
 MZ_EXTERN Scheme_Bucket_Table *scheme_clone_bucket_table(Scheme_Bucket_Table *bt);
+MZ_EXTERN void scheme_clear_bucket_table(Scheme_Bucket_Table *bt);
 
 MZ_EXTERN Scheme_Hash_Table *scheme_make_hash_table(int type);
 MZ_EXTERN Scheme_Hash_Table *scheme_make_hash_table_equal();
@@ -501,7 +502,8 @@ MZ_EXTERN Scheme_Object *scheme_hash_get_atomic(Scheme_Hash_Table *table, Scheme
 MZ_EXTERN int scheme_hash_table_equal(Scheme_Hash_Table *t1, Scheme_Hash_Table *t2);
 MZ_EXTERN int scheme_is_hash_table_equal(Scheme_Object *o);
 MZ_EXTERN int scheme_is_hash_table_eqv(Scheme_Object *o);
-MZ_EXTERN Scheme_Hash_Table *scheme_clone_hash_table(Scheme_Hash_Table *bt);
+MZ_EXTERN Scheme_Hash_Table *scheme_clone_hash_table(Scheme_Hash_Table *ht);
+MZ_EXTERN void scheme_clear_hash_table(Scheme_Hash_Table *ht);
 
 MZ_EXTERN Scheme_Hash_Tree *scheme_make_hash_tree(int kind);
 MZ_EXTERN Scheme_Hash_Tree *scheme_hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val);
@@ -695,6 +697,8 @@ MZ_EXTERN mzchar *scheme_utf16_to_ucs4(const unsigned short *text, intptr_t star
 
 MZ_EXTERN Scheme_Object *scheme_open_converter(const char *from_e, const char *to_e);
 MZ_EXTERN void scheme_close_converter(Scheme_Object *conv);
+
+MZ_EXTERN char *scheme_getenv(char *name);
 
 /*========================================================================*/
 /*                               bignums                                  */
@@ -1027,6 +1031,7 @@ MZ_EXTERN void scheme_install_macro(Scheme_Bucket *b, Scheme_Object *v);
 MZ_EXTERN void scheme_save_initial_module_set(Scheme_Env *env);
 MZ_EXTERN Scheme_Env *scheme_primitive_module(Scheme_Object *name, Scheme_Env *for_env);
 MZ_EXTERN void scheme_finish_primitive_module(Scheme_Env *env);
+MZ_EXTERN void scheme_set_primitive_module_phaseless(Scheme_Env *env, int phaseless);
 MZ_EXTERN void scheme_protect_primitive_provide(Scheme_Env *env, Scheme_Object *name);
 
 MZ_EXTERN Scheme_Object *scheme_make_modidx(Scheme_Object *path,

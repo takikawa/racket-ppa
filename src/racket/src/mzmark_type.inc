@@ -1872,6 +1872,7 @@ static int thread_val_MARK(void *p, struct NewGC *gc) {
   gcMARK2(pr->resumed_box, gc);
   gcMARK2(pr->dead_box, gc);
   gcMARK2(pr->running_box, gc);
+  gcMARK2(pr->sync_box, gc);
 
   gcMARK2(pr->mbox_first, gc);
   gcMARK2(pr->mbox_last, gc);
@@ -1986,6 +1987,7 @@ static int thread_val_FIXUP(void *p, struct NewGC *gc) {
   gcFIXUP2(pr->resumed_box, gc);
   gcFIXUP2(pr->dead_box, gc);
   gcFIXUP2(pr->running_box, gc);
+  gcFIXUP2(pr->sync_box, gc);
 
   gcFIXUP2(pr->mbox_first, gc);
   gcFIXUP2(pr->mbox_last, gc);
@@ -2284,6 +2286,8 @@ static int namespace_val_MARK(void *p, struct NewGC *gc) {
 
   gcMARK2(e->shadowed_syntax, gc);
 
+  gcMARK2(e->lift_key, gc);
+
   gcMARK2(e->link_midx, gc);
   gcMARK2(e->require_names, gc);
   gcMARK2(e->et_require_names, gc);
@@ -2326,6 +2330,8 @@ static int namespace_val_FIXUP(void *p, struct NewGC *gc) {
   gcFIXUP2(e->instance_env, gc);
 
   gcFIXUP2(e->shadowed_syntax, gc);
+
+  gcFIXUP2(e->lift_key, gc);
 
   gcFIXUP2(e->link_midx, gc);
   gcFIXUP2(e->require_names, gc);
@@ -2772,9 +2778,6 @@ static int module_phase_exports_val_MARK(void *p, struct NewGC *gc) {
   gcMARK2(m->provide_nominal_srcs, gc);
   gcMARK2(m->provide_src_phases, gc);
 
-  gcMARK2(m->kernel_exclusion, gc);
-  gcMARK2(m->kernel_exclusion2, gc);
-
   gcMARK2(m->ht, gc);
 
   return
@@ -2793,9 +2796,6 @@ static int module_phase_exports_val_FIXUP(void *p, struct NewGC *gc) {
   gcFIXUP2(m->provide_src_names, gc);
   gcFIXUP2(m->provide_nominal_srcs, gc);
   gcFIXUP2(m->provide_src_phases, gc);
-
-  gcFIXUP2(m->kernel_exclusion, gc);
-  gcFIXUP2(m->kernel_exclusion2, gc);
 
   gcFIXUP2(m->ht, gc);
 

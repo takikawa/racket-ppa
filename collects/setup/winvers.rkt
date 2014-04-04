@@ -1,9 +1,9 @@
 ;; This is a wrapper around "winvers-change.rkt" to patch binary files with the
 ;; current version number.
 
-#lang scheme/base
+#lang racket/base
 
-(require mzlib/file "main-collects.rkt" "dirs.rkt")
+(require racket/file "main-collects.rkt" "dirs.rkt")
 
 (define (make-copy)
   (let* ([tmpdir (find-system-path 'temp-dir)]

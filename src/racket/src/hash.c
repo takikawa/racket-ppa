@@ -51,6 +51,22 @@ static void register_traversers(void);
 #define to_signed_hash(v) ((intptr_t)v)
 #define to_unsigned_hash(v) ((uintptr_t)v)
 
+#ifdef OBJHEAD_HAS_HASH_BITS
+/* In 3m mode, we only have 14 bits of hash code in the
+   Scheme_Object header. But the GC-level object header has some
+   leftover bits (currently 9, 11, 41, or 43, depending on the
+   platform), so use those, too. That only works for GCable
+   objects, so we use 1 of our 14 bits to indicate whether the
+   other bits are present. */
+# define GCABLE_OBJ_HASH_BIT 0x0004
+# define OBJ_HASH_USELESS_BITS 3
+#else
+# define GCABLE_OBJ_HASH_BIT 0
+# define OBJ_HASH_USELESS_BITS 2
+#endif
+#define OBJ_HASH_USEFUL_BITS (16 - OBJ_HASH_USELESS_BITS)
+#define OBJ_HASH_USEFUL_MASK ((1 << OBJ_HASH_USEFUL_BITS)-1)
+
 #ifdef MZ_PRECISE_GC
 /* keygen race conditions below are "ok", because keygen is randomness
    used to create a hashkey. Technically, a race condition allows
@@ -59,7 +75,7 @@ static void register_traversers(void);
    that only one thread at a time sets a hash code in a specific
    object, though, and watch out for a race with JIT-generated code
    running in a future and setting flags on pairs. */
-SHARED_OK static uintptr_t keygen;
+SHARED_OK static uintptr_t keygen = GCABLE_OBJ_HASH_BIT;
 
 XFORM_NONGCING static MZ_INLINE
 uintptr_t PTR_TO_LONG(Scheme_Object *o)
@@ -76,17 +92,11 @@ uintptr_t PTR_TO_LONG(Scheme_Object *o)
     uintptr_t local_keygen = keygen;
     v |= (short)local_keygen;
 #ifdef OBJHEAD_HAS_HASH_BITS
-    /* In 3m mode, we only have 14 bits of hash code in the
-       Scheme_Object header. But the GC-level object header has some
-       leftover bits (currently 9, 11, 41, or 43, depending on the
-       platform), so use those, too. That only works for GCable
-       objects, so we use 1 of our 14 bits to indicate whether the
-       other bit are present. */
     if (GC_is_allocated(o)) {
       OBJHEAD_HASH_BITS(o) = (local_keygen >> 16);
-      v |= 0x4000;
+      v |= GCABLE_OBJ_HASH_BIT;
     } else
-      v &= ~0x4000;
+      v &= ~GCABLE_OBJ_HASH_BIT;
 #endif
     if (!v) v = 0x1AD0;
 #ifdef MZ_USE_FUTURES
@@ -99,11 +109,11 @@ uintptr_t PTR_TO_LONG(Scheme_Object *o)
     } else
 #endif
       o->keyex = v;
-    keygen += 4;
+    keygen += (1 << OBJ_HASH_USELESS_BITS);
   }
 
 #ifdef OBJHEAD_HAS_HASH_BITS
-  if (v & 0x4000)
+  if (v & GCABLE_OBJ_HASH_BIT)
     bits = OBJHEAD_HASH_BITS(o);
   else
 #endif
@@ -112,7 +122,7 @@ uintptr_t PTR_TO_LONG(Scheme_Object *o)
   /* We need to drop the low two bits of `v', which
      are used for non-hashing purposes in some types. */
 
-  return (bits << 14) | ((v >> 2) & 0x3FFF);
+  return (bits << OBJ_HASH_USEFUL_BITS) | ((v >> OBJ_HASH_USELESS_BITS) & OBJ_HASH_USEFUL_MASK);
 }
 #else
 # define PTR_TO_LONG(p) ((uintptr_t)(p)>>2)
@@ -195,6 +205,15 @@ Scheme_Hash_Table *scheme_make_hash_table(int type)
   }
 
   return table;
+}
+
+void scheme_clear_hash_table(Scheme_Hash_Table *ht)
+{
+  ht->size = 0;
+  ht->count = 0;
+  ht->keys = NULL;
+  ht->vals = NULL;
+  ht->mcount = 0;
 }
 
 static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int set, Scheme_Object *val)
@@ -289,7 +308,10 @@ static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int 
     Scheme_Object **oldkeys = table->keys;
     Scheme_Object **oldvals = table->vals;
 
-    size = oldsize << 1;
+    if (table->count << 1 >= table->mcount)
+      size = oldsize << 1;
+    else
+      size = oldsize;
     table->size = size;
     
     {
@@ -578,33 +600,62 @@ scheme_make_bucket_table (intptr_t size, int type)
   return table;
 }
 
-Scheme_Bucket_Table *scheme_clone_bucket_table(Scheme_Bucket_Table *bt)
+void scheme_clear_bucket_table(Scheme_Bucket_Table *bt)
 {
-  Scheme_Bucket_Table *table;
-  size_t asize;
+  Scheme_Bucket **ba;
 
-  table = MALLOC_ONE_TAGGED(Scheme_Bucket_Table);
-  table->so.type = scheme_bucket_table_type;
-  table->size = bt->size;
-  table->count = bt->count;
-  table->weak = bt->weak;
-  table->with_home = 0;
-  table->make_hash_indices = bt->make_hash_indices;
-  table->compare = bt->compare;
-  if (bt->mutex) {
-    Scheme_Object *sema;
-    sema = scheme_make_sema(1);
-    table->mutex = sema;
-  }
-  {
-    Scheme_Bucket **ba;
-    asize = (size_t)table->size * sizeof(Scheme_Bucket *);
-    ba = (Scheme_Bucket **)scheme_malloc(asize);
-    table->buckets = ba;
-    memcpy(ba, bt->buckets, asize);
+  bt->count = 0;
+  bt->size = 4;
+  ba = (Scheme_Bucket **)scheme_malloc(bt->size * sizeof(Scheme_Bucket **));
+  bt->buckets = ba;
+}
+
+static Scheme_Bucket *
+allocate_bucket (Scheme_Bucket_Table *table, const char *key, void *val)
+{
+  size_t bsize;
+  Scheme_Type type;
+  Scheme_Bucket *bucket;
+
+  if (table->with_home) {
+    bsize = sizeof(Scheme_Bucket_With_Home);
+    type = scheme_variable_type;
+  } else  {
+    bsize = sizeof(Scheme_Bucket);
+    type = scheme_bucket_type;
   }
 
-  return table;
+  bucket = (Scheme_Bucket *)scheme_malloc_tagged(bsize);
+
+  bucket->so.type = type;
+
+  if (type == scheme_variable_type)
+    ((Scheme_Bucket_With_Flags *)bucket)->flags = GLOB_HAS_HOME_PTR;
+
+  if (table->weak) {
+#ifdef MZ_PRECISE_GC
+    void *kb;
+    kb = GC_malloc_weak_box((void *)key, (void **)bucket, (void **)&bucket->val - (void **)bucket, 
+                            (table->weak > 1));
+    bucket->key = (char *)kb;
+#else
+    char *kb;
+    kb = (char *)MALLOC_ONE_WEAK(void *);
+    bucket->key = kb;
+    *(void **)bucket->key = (void *)key;
+    if (table->weak > 1) {
+      scheme_late_weak_reference_indirect((void **)bucket->key, (void *)key);
+      scheme_late_weak_reference_indirect((void **)&bucket->val, (void *)key);
+    } else {
+      scheme_weak_reference_indirect((void **)bucket->key, (void *)key);
+      scheme_weak_reference_indirect((void **)&bucket->val, (void *)key);
+    }
+#endif
+  } else
+    bucket->key = (char *)key;
+  bucket->val = val;
+
+  return bucket;
 }
 
 static Scheme_Bucket *
@@ -724,50 +775,10 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
     goto rehash_key;
   }
 
-  if (b) {
+  if (b)
     bucket = b;
-  } else {
-    size_t bsize;
-    Scheme_Type type;
-
-    if (table->with_home) {
-      bsize = sizeof(Scheme_Bucket_With_Home);
-      type = scheme_variable_type;
-    } else  {
-      bsize = sizeof(Scheme_Bucket);
-      type = scheme_bucket_type;
-    }
-
-    bucket = (Scheme_Bucket *)scheme_malloc_tagged(bsize);
-
-    bucket->so.type = type;
-
-    if (type == scheme_variable_type)
-      ((Scheme_Bucket_With_Flags *)bucket)->flags = GLOB_HAS_HOME_PTR;
-
-    if (table->weak) {
-#ifdef MZ_PRECISE_GC
-      void *kb;
-      kb = GC_malloc_weak_box((void *)key, (void **)bucket, (void **)&bucket->val - (void **)bucket, 
-                              (table->weak > 1));
-      bucket->key = (char *)kb;
-#else
-      char *kb;
-      kb = (char *)MALLOC_ONE_WEAK(void *);
-      bucket->key = kb;
-      *(void **)bucket->key = (void *)key;
-      if (table->weak > 1) {
-        scheme_late_weak_reference_indirect((void **)bucket->key, (void *)key);
-        scheme_late_weak_reference_indirect((void **)&bucket->val, (void *)key);
-      } else {
-        scheme_weak_reference_indirect((void **)bucket->key, (void *)key);
-        scheme_weak_reference_indirect((void **)&bucket->val, (void *)key);
-      }
-#endif
-    } else
-      bucket->key = (char *)key;
-    bucket->val = NULL;
-  }
+  else
+    bucket = allocate_bucket(table, key, NULL);
 
   table->buckets[h] = bucket;
 
@@ -901,6 +912,51 @@ int scheme_bucket_table_equal_rec(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *
 int scheme_bucket_table_equal(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *t2)
 {
   return scheme_equal((Scheme_Object *)t1, (Scheme_Object *)t2);
+}
+
+Scheme_Bucket_Table *scheme_clone_bucket_table(Scheme_Bucket_Table *bt)
+{
+  Scheme_Bucket_Table *table;
+  size_t asize;
+
+  table = MALLOC_ONE_TAGGED(Scheme_Bucket_Table);
+  table->so.type = scheme_bucket_table_type;
+  table->size = bt->size;
+  table->count = bt->count;
+  table->weak = bt->weak;
+  table->with_home = 0;
+  table->make_hash_indices = bt->make_hash_indices;
+  table->compare = bt->compare;
+  if (bt->mutex) {
+    Scheme_Object *sema;
+    sema = scheme_make_sema(1);
+    table->mutex = sema;
+  }
+  {
+    Scheme_Bucket **ba, *bucket;
+    int i;
+    asize = (size_t)table->size * sizeof(Scheme_Bucket *);
+    ba = (Scheme_Bucket **)scheme_malloc(asize);
+    table->buckets = ba;
+    memcpy(ba, bt->buckets, asize);
+    /* clone individual buckets */
+    for (i = table->size; i--; ) {
+      bucket = ba[i];
+      if (bucket) {
+        if (bucket->key) {
+          if (table->weak) {
+            void *hk = (void *)HT_EXTRACT_WEAK(bucket->key);
+            if (hk)
+              bucket = allocate_bucket(table, hk, bucket->val);
+          } else
+            bucket = allocate_bucket(table, bucket->key, bucket->val);
+          ba[i] = bucket;
+        }
+      }
+    }
+  }
+
+  return table;
 }
 
 /*========================================================================*/
@@ -1328,7 +1384,7 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
 	
           return k;
         } else
-          return k + (PTR_TO_LONG(o) >> 2);
+          return k + PTR_TO_LONG(o);
       }
     }
   case scheme_box_type:
@@ -1453,7 +1509,7 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
 	
 	return k + (MZ_OPT_HASH_KEY(&s->iso) & 0xFFFC);
       } else
-	return k + (PTR_TO_LONG(o) >> 2);
+	return k + PTR_TO_LONG(o);
     }
 # endif
   case scheme_resolved_module_path_type:
@@ -1461,6 +1517,18 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
     {
       k += 7;
       o = SCHEME_PTR_VAL(o);
+    }
+    break;
+  case scheme_module_index_type:
+    {
+      Scheme_Modidx *midx = (Scheme_Modidx *)o;
+#     include "mzhashchk.inc"
+      hi->depth += 2;
+      k++;
+      k = (k << 3) + k;
+      k += equal_hash_key(midx->path, 0, hi);
+      o = midx->base;
+      break;
     }
     break;
   case scheme_place_bi_channel_type:
@@ -1477,7 +1545,7 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
       if (h1)
         return h1(o, k, hi);
       else
-        return k + (PTR_TO_LONG(o) >> 2);
+        return k + PTR_TO_LONG(o);
     }
   }
 
@@ -1887,6 +1955,16 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
     /* Needed for interning */
     o = SCHEME_PTR_VAL(o);
     goto top;
+  case scheme_module_index_type:
+    {
+      Scheme_Modidx *midx = (Scheme_Modidx *)o;
+      uintptr_t v1, v2;
+#     include "mzhashchk.inc"
+      hi->depth += 2;
+      v1 = equal_hash_key2(midx->path, hi);
+      v2 = equal_hash_key2(midx->base, hi);
+      return v1 + v2;
+    }
   case scheme_place_bi_channel_type:
     /* a bi channel has sendch and recvch, but
        sends are the same iff recvs are the same: */
@@ -1930,10 +2008,28 @@ typedef struct AVLNode {
 #if 0
 # define AVL_ASSERT(p) if (p) { } else { scheme_signal_error("hash-tree assert failure %d", __LINE__); }
 # define AVL_ASSERT_ONLY(x) x
+# define AVL_CHECK_FORMS 1
 #else
 # define AVL_ASSERT(p) /* empty */
 # define AVL_ASSERT_ONLY(x) /* empty */
 #endif
+
+XFORM_NONGCING static int get_height(AVLNode* t)
+{
+  if (t == NULL)
+    return 0;
+  else
+    return t->height;
+}
+
+XFORM_NONGCING static void fix_height(AVLNode* t)
+{
+  int h;
+  h = get_height(t->left);
+  if (get_height(t->right) > h)
+    h = get_height(t->right);
+  t->height = h + 1;
+}
 
 static AVLNode *make_avl(AVLNode *left,
                          uintptr_t code, Scheme_Object *key, Scheme_Object *val,
@@ -1949,6 +2045,8 @@ static AVLNode *make_avl(AVLNode *left,
   avl->left = left;
   avl->right = right;
 
+  fix_height(avl);
+
   return avl;
 }
 
@@ -1960,26 +2058,9 @@ static AVLNode *avl_clone(AVLNode *avl)
   return naya;
 }
 
-XFORM_NONGCING static int get_height(AVLNode* t)
-{
-  if (t == NULL)
-    return 0;
-  else
-    return t->height;
-}
-
 XFORM_NONGCING static int get_balance(AVLNode* t)
 {
   return get_height(t->left) - get_height(t->right);
-}
-
-XFORM_NONGCING static void fix_height(AVLNode* t)
-{
-  int h;
-  h = get_height(t->left);
-  if (get_height(t->right) > h)
-    h = get_height(t->right);
-  t->height = h + 1;
 }
 
 XFORM_NONGCING static AVLNode *avl_find(uintptr_t code, AVLNode *s)
@@ -1997,11 +2078,28 @@ XFORM_NONGCING static AVLNode *avl_find(uintptr_t code, AVLNode *s)
   }
 }
 
+#ifdef AVL_CHECK_FORMS
 static AVLNode *AVL_CHK(AVLNode *avl, uintptr_t code)
 {
   AVL_ASSERT(avl_find(code, avl));
   return avl;
 }
+static void AVL_CHK_FORM(AVLNode *avl)
+{
+  if (avl) {
+    int h1, h2;
+    h1 = get_height(avl->left);
+    h2 = get_height(avl->right);
+    if (h2 > h1) h1 = h2;
+    AVL_ASSERT(avl->height == (h1 + 1));
+    AVL_CHK_FORM(avl->left);
+    AVL_CHK_FORM(avl->right);
+  }
+}
+#else
+# define AVL_CHK(avl, code) avl
+XFORM_NONGCING static void AVL_CHK_FORM(AVLNode *avl)  { }
+#endif
   
 AVLNode* check_rotate_right(AVLNode* t)
 {
@@ -2243,6 +2341,8 @@ static void *hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Ob
   AVLNode *added;
   int delta;
 
+  AVL_CHK_FORM(root);
+
   if (!val) {
     /* Removing ... */
     added = avl_find(h, root);
@@ -2261,6 +2361,8 @@ static void *hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Ob
         if (tree) {
           tree2 = MALLOC_ONE_TAGGED(Scheme_Hash_Tree);
           memcpy(tree2, tree, sizeof(Scheme_Hash_Tree));
+
+          AVL_CHK_FORM(root);
           
           tree2->root = root;
           --tree2->count;
@@ -2354,6 +2456,8 @@ static void *hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Ob
     added->val = val;
     delta = 1;
   }
+
+  AVL_CHK_FORM(root);
 
   if (tree) {
     tree2 = MALLOC_ONE_TAGGED(Scheme_Hash_Tree);

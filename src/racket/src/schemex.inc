@@ -282,6 +282,7 @@
   scheme_extension_table->scheme_bucket_from_table = scheme_bucket_from_table;
   scheme_extension_table->scheme_bucket_table_equal = scheme_bucket_table_equal;
   scheme_extension_table->scheme_clone_bucket_table = scheme_clone_bucket_table;
+  scheme_extension_table->scheme_clear_bucket_table = scheme_clear_bucket_table;
   scheme_extension_table->scheme_make_hash_table = scheme_make_hash_table;
   scheme_extension_table->scheme_make_hash_table_equal = scheme_make_hash_table_equal;
   scheme_extension_table->scheme_make_hash_table_eqv = scheme_make_hash_table_eqv;
@@ -294,6 +295,7 @@
   scheme_extension_table->scheme_is_hash_table_equal = scheme_is_hash_table_equal;
   scheme_extension_table->scheme_is_hash_table_eqv = scheme_is_hash_table_eqv;
   scheme_extension_table->scheme_clone_hash_table = scheme_clone_hash_table;
+  scheme_extension_table->scheme_clear_hash_table = scheme_clear_hash_table;
   scheme_extension_table->scheme_make_hash_tree = scheme_make_hash_tree;
   scheme_extension_table->scheme_hash_tree_set = scheme_hash_tree_set;
   scheme_extension_table->scheme_hash_tree_get = scheme_hash_tree_get;
@@ -406,6 +408,7 @@
   scheme_extension_table->scheme_utf16_to_ucs4 = scheme_utf16_to_ucs4;
   scheme_extension_table->scheme_open_converter = scheme_open_converter;
   scheme_extension_table->scheme_close_converter = scheme_close_converter;
+  scheme_extension_table->scheme_getenv = scheme_getenv;
   scheme_extension_table->scheme_make_bignum = scheme_make_bignum;
   scheme_extension_table->scheme_make_bignum_from_unsigned = scheme_make_bignum_from_unsigned;
   scheme_extension_table->scheme_make_bignum_from_long_long = scheme_make_bignum_from_long_long;
@@ -613,6 +616,7 @@
   scheme_extension_table->scheme_save_initial_module_set = scheme_save_initial_module_set;
   scheme_extension_table->scheme_primitive_module = scheme_primitive_module;
   scheme_extension_table->scheme_finish_primitive_module = scheme_finish_primitive_module;
+  scheme_extension_table->scheme_set_primitive_module_phaseless = scheme_set_primitive_module_phaseless;
   scheme_extension_table->scheme_protect_primitive_provide = scheme_protect_primitive_provide;
   scheme_extension_table->scheme_make_modidx = scheme_make_modidx;
   scheme_extension_table->scheme_apply_for_syntax_in_env = scheme_apply_for_syntax_in_env;

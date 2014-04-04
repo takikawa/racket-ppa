@@ -51,6 +51,9 @@
 # ifdef HAVE_POLL_SYSCALL
 #  include <poll.h>
 # endif
+# ifdef HAVE_INOTIFY_SYSCALL
+#  include <sys/inotify.h>
+# endif
 #endif
 #ifdef USE_ITIMER
 # include <sys/types.h>
@@ -310,7 +313,7 @@ int scheme_get_serialized_fd_flags(Scheme_Object* p, Scheme_Serialized_File_FD *
     so->name = ((Scheme_Output_Port *)p)->name;
   }
   so->regfile = fds->regfile;
-  so->textmode = fds->textmode;
+  so->textmode = (fds->textmode ? 1 : 0);
   so->flush_mode = fds->flush;
   return 1;
 }
@@ -354,6 +357,7 @@ THREAD_LOCAL_DECL(Scheme_Object *scheme_orig_stdin_port);
 THREAD_LOCAL_DECL(struct mz_fd_set *scheme_fd_set);
 THREAD_LOCAL_DECL(struct mz_fd_set *scheme_semaphore_fd_set);
 THREAD_LOCAL_DECL(Scheme_Hash_Table *scheme_semaphore_fd_mapping);
+THREAD_LOCAL_DECL(void *scheme_inotify_server);
 
 #ifdef USE_FCNTL_AND_FORK_FOR_FILE_LOCKS
 THREAD_LOCAL_DECL(Scheme_Hash_Table *locked_fd_process_map);
@@ -443,6 +447,14 @@ static void rw_evt_wakeup(Scheme_Object *rww, void *fds);
 
 static int progress_evt_ready(Scheme_Object *rww, Scheme_Schedule_Info *sinfo);
 static int closed_evt_ready(Scheme_Object *rww, Scheme_Schedule_Info *sinfo);
+static int filesystem_change_evt_ready(Scheme_Object *evt, Scheme_Schedule_Info *sinfo);
+
+#if defined(DOS_FILE_SYSTEM) || defined(HAVE_INOTIFY_SYSCALL)
+static void filesystem_change_evt_need_wakeup (Scheme_Object *port, void *fds);
+#else
+# define filesystem_change_evt_need_wakeup NULL
+#endif
+
 
 static Scheme_Object *
 _scheme_make_named_file_input_port(FILE *fp, Scheme_Object *name, int regfile);
@@ -482,6 +494,13 @@ THREAD_LOCAL_DECL(static char *read_string_byte_buffer);
 #define fail_err_symbol scheme_false
 
 #include "schwinfd.h"
+
+typedef struct Scheme_Filesystem_Change_Evt {
+  Scheme_Object so;
+  intptr_t fd;
+  Scheme_Object *sema;
+  Scheme_Custodian_Reference *mref;
+} Scheme_Filesystem_Change_Evt;
 
 /*========================================================================*/
 /*                             initialization                             */
@@ -606,8 +625,6 @@ scheme_init_port (Scheme_Env *env)
   }
 #endif
 
-  register_port_wait();
-
   scheme_add_global_constant("subprocess", scheme_make_prim_w_arity2(subprocess, "subprocess", 4, -1, 4, 4), env);
   scheme_add_global_constant("subprocess-status", scheme_make_prim_w_arity(subprocess_status, "subprocess-status", 1, 1), env);
   scheme_add_global_constant("subprocess-kill", scheme_make_prim_w_arity(subprocess_kill, "subprocess-kill", 2, 2), env);
@@ -618,13 +635,19 @@ scheme_init_port (Scheme_Env *env)
   GLOBAL_PARAMETER("subprocess-group-enabled", subproc_group_on, MZCONFIG_SUBPROC_GROUP_ENABLED, env);
   GLOBAL_PARAMETER("current-subprocess-custodian-mode", current_subproc_cust_mode, MZCONFIG_SUBPROC_CUSTODIAN_MODE, env);
 
-  register_subprocess_wait();
-
   scheme_add_global_constant("shell-execute", scheme_make_prim_w_arity(sch_shell_execute, "shell-execute", 5, 5), env);
+}
+
+void scheme_init_port_wait()
+{
+  register_port_wait();
+  register_subprocess_wait();
 
   scheme_add_evt(scheme_progress_evt_type, (Scheme_Ready_Fun)progress_evt_ready, NULL, NULL, 1);
   scheme_add_evt(scheme_write_evt_type, (Scheme_Ready_Fun)rw_evt_ready, rw_evt_wakeup, NULL, 1);
   scheme_add_evt(scheme_port_closed_evt_type, (Scheme_Ready_Fun)closed_evt_ready, NULL, NULL, 1);
+  scheme_add_evt(scheme_filesystem_change_evt_type, (Scheme_Ready_Fun)filesystem_change_evt_ready, 
+                 filesystem_change_evt_need_wakeup, NULL, 1);
 }
 
 void scheme_init_port_places(void)
@@ -1291,36 +1314,39 @@ int scheme_get_fd_limit(void *fds)
    It's constrained because it's used by default_sleep, which
    must not allocate on Mac OS X. */
 {
-  int limit, actual_limit;
+  int actual_limit;
   fd_set *rd, *wr, *ex;
 
-#  ifdef USE_WINSOCK_TCP
-  limit = 0;
-#  else
-#   ifdef USE_ULIMIT
-  limit = ulimit(4, 0);
-#   else
-#    ifdef FIXED_FD_LIMIT
-  limit = FIXED_FD_LIMIT;
-#    else
-  limit = getdtablesize();
-#    endif
-#   endif
-#  endif
-  
   rd = (fd_set *)fds;
   wr = (fd_set *)MZ_GET_FDSET(fds, 1);
   ex = (fd_set *)MZ_GET_FDSET(fds, 2);
-#  ifdef STORED_ACTUAL_FDSET_LIMIT
+# ifdef STORED_ACTUAL_FDSET_LIMIT
   actual_limit = FDSET_LIMIT(rd);
   if (FDSET_LIMIT(wr) > actual_limit)
     actual_limit = FDSET_LIMIT(wr);
   if (FDSET_LIMIT(ex) > actual_limit)
     actual_limit = FDSET_LIMIT(ex);
   actual_limit++;
+# else
+  {
+    int limit;
+#  ifdef USE_WINSOCK_TCP
+    limit = 0;
 #  else
-  actual_limit = limit;
+#   ifdef USE_ULIMIT
+    limit = ulimit(4, 0);
+#   else
+#    ifdef FIXED_FD_LIMIT
+    limit = FIXED_FD_LIMIT;
+#    else
+    limit = getdtablesize();
+#    endif
+#   endif
 #  endif
+  
+    actual_limit = limit;
+  }
+# endif
   
   return actual_limit;
 }
@@ -4420,7 +4446,7 @@ Scheme_Object *scheme_file_identity(int argc, Scheme_Object *argv[])
     return NULL;
   }
 
-  return scheme_get_fd_identity(p, fd, NULL);
+  return scheme_get_fd_identity(p, fd, NULL, 0);
 }
 
 static int is_fd_terminal(intptr_t fd)
@@ -4491,11 +4517,12 @@ Scheme_Object *scheme_terminal_port_p(int argc, Scheme_Object *argv[])
   return is_fd_terminal(fd) ? scheme_true : scheme_false;
 }
 
-static void filename_exn(char *name, char *msg, char *filename, int err)
+static void filename_exn(char *name, char *msg, char *filename, int err, int maybe_module_errno)
 {
   char *dir, *drive;
   int len;
   char *pre, *rel, *post;
+  Scheme_Object *mod_path, *mp;
 
   len = strlen(filename);
 
@@ -4514,6 +4541,43 @@ static void filename_exn(char *name, char *msg, char *filename, int err)
   rel = dir ? dir : (drive ? drive : "");
   post = dir ? "" : "";
 
+  if (maybe_module_errno && (err == maybe_module_errno)) {
+    mod_path = scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_MODULE_LOAD_PATH);
+    if (SCHEME_TRUEP(mod_path)) {
+      if (SCHEME_STXP(mod_path)) {
+        char *srcloc;
+        intptr_t srcloc_len;
+        mp = scheme_syntax_to_datum(mod_path, 0, NULL);
+        srcloc = scheme_make_srcloc_string(mod_path, &srcloc_len);
+        scheme_raise_exn(MZEXN_FAIL_SYNTAX_MISSING_MODULE,
+                         scheme_make_pair(mod_path, scheme_null),
+                         mp,
+                         "%t%s: %s\n"
+                         "  module path: %W\n"
+                         "  path: %q%s%q%s\n"
+                         "  system error: " FILENAME_EXN_E,
+                         srcloc, srcloc_len,
+                         srcloc_len ? "" : name,
+                         "cannot open module file", 
+                         mp, filename,
+                         pre, rel, post,
+                         err);
+      } else {
+        scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_MISSING_MODULE,
+                         mod_path,
+                         "%s: %s\n"
+                         "  module path: %W\n"
+                         "  path: %q%s%q%s\n"
+                         "  system error: " FILENAME_EXN_E,
+                         name, "cannot open module file", 
+                         mod_path, filename,
+                         pre, rel, post,
+                         err);
+      }
+      return;
+    }
+  }
+
   scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
 		   "%s: %s\n"
                    "  path: %q%s%q%s\n"
@@ -4525,7 +4589,7 @@ static void filename_exn(char *name, char *msg, char *filename, int err)
 
 Scheme_Object *
 scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[], 
-                          int internal, char **err, int *eerrno)
+                          int internal, char **err, int *eerrno, int for_module)
 {
 #ifdef USE_FD_PORTS
   int fd;
@@ -4601,7 +4665,7 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
       *err = "cannot open source file";
       *eerrno = errno;
     } else
-      filename_exn(name, "cannot open input file", filename, errno);
+      filename_exn(name, "cannot open input file", filename, errno, (for_module ? ENOENT : 0));
     return NULL;
   } else {
     int ok;
@@ -4619,7 +4683,7 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
         *err = "source is a directory";
         *eerrno = 0;
       } else
-        filename_exn(name, "cannot open directory as a file", filename, 0);
+        filename_exn(name, "cannot open directory as a file", filename, 0, 0);
       return NULL;
     } else {
       regfile = S_ISREG(buf.st_mode);
@@ -4643,14 +4707,14 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
       *err = "cannot open source file";
       *eerrno = errv;
     } else
-      filename_exn(name, "cannot open input file", filename, GetLastError());
+      filename_exn(name, "cannot open input file", filename, GetLastError(), (for_module ? ERROR_FILE_NOT_FOUND : 0));
     return NULL;
   } else
     regfile = (GetFileType(fd) == FILE_TYPE_DISK);
 
   if ((mode[1] == 't') && !regfile) {
     CloseHandle(fd);
-    filename_exn(name, "cannot use text-mode on a non-file device", filename, 0);
+    filename_exn(name, "cannot use text-mode on a non-file device", filename, 0, 0);
     return NULL;
   }
 
@@ -4661,7 +4725,7 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
       *err = "source is a directory";
       *eerrno = 0;
     } else
-      filename_exn(name, err, filename, 0);
+      filename_exn(name, err, filename, 0, 0);
     return NULL;
   }
 
@@ -4673,7 +4737,7 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
       *err = "cannot open source file";
       *eerrno = errno;
     } else
-      filename_exn(name, "cannot open input file", filename, errno);
+      filename_exn(name, "cannot open input file", filename, errno, (for_module ? ENOENT : 0));
     return NULL;
   }
 
@@ -4877,7 +4941,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
         *err = "cannot open destination file";
         *eerrno = errno;
       } else
-        filename_exn(name, "cannot open output file", filename, errno);
+        filename_exn(name, "cannot open output file", filename, errno, 0);
       return NULL;
     }
   }
@@ -4954,7 +5018,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
         *err = "cannot open destination";
         *eerrno = errv;
       } else
-        filename_exn(name, "cannot open output file", filename, errv);
+        filename_exn(name, "cannot open output file", filename, errv, 0);
       return NULL;
     }
   }
@@ -4974,7 +5038,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
 
   if ((mode[1] == 't') && !regfile) {
     CloseHandle(fd);
-    filename_exn(name, "cannot use text-mode on a non-file device", filename, 0);
+    filename_exn(name, "cannot use text-mode on a non-file device", filename, 0, 0);
     return NULL;
   }
 
@@ -4998,7 +5062,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
                        "  path: %q",
 		       name, filename);
     else
-      filename_exn(name, "cannot open directory as a file", filename, errno);
+      filename_exn(name, "cannot open directory as a file", filename, errno, 0);
     return NULL;
   }
 
@@ -5077,7 +5141,7 @@ Scheme_Object *scheme_open_input_file(const char *name, const char *who)
   Scheme_Object *a[1];
 
   a[0]= scheme_make_path(name);
-  return scheme_do_open_input_file((char *)who, 0, 1, a, 0, NULL, NULL);
+  return scheme_do_open_input_file((char *)who, 0, 1, a, 0, NULL, NULL, 0);
 }
 
 Scheme_Object *scheme_open_output_file(const char *name, const char *who)
@@ -5399,6 +5463,22 @@ do_file_position(const char *who, int argc, Scheme_Object *argv[], int can_false
           Scheme_Input_Port *ip;
           ip = scheme_input_port_record(argv[0]);
 	  pll -= ((Scheme_FD *)ip->port_data)->bufcount;
+# ifdef WINDOWS_FILE_HANDLES
+          if (((Scheme_FD *)ip->port_data)->textmode) {
+            int bp, bd;
+            bd = ((Scheme_FD *)ip->port_data)->buffpos;
+            for (bp = ((Scheme_FD *)ip->port_data)->bufcount; bp--; ) {
+              if (ip->bufwidths[bp + bd]) {
+                /* this is a LF converted from CRLF */
+                pll--;
+              }
+            }
+            if (((Scheme_FD *)ip->port_data)->textmode > 1) {
+              /* one more for leftover CR */
+              pll--;
+            }
+          }
+# endif
 	} else {
           Scheme_Output_Port *op;
           op = scheme_output_port_record(argv[0]);
@@ -5634,8 +5714,12 @@ static int try_lock(intptr_t fd, int writer, int *_errid)
       if (!pipe(ofds)) {
         int pid;
 
+#ifdef SUBPROCESS_USE_FORK1
+        pid = fork1();
+#else
         pid = fork();
-      
+#endif
+        
         if (pid > 0) {
           /* Original process: */
           int errid = 0;
@@ -5913,6 +5997,335 @@ Scheme_Object *scheme_file_unlock(int argc, Scheme_Object **argv)
 }
 
 /*========================================================================*/
+/*                        filesystem change events                        */
+/*========================================================================*/
+
+#if defined(HAVE_KQUEUE_SYSCALL)                \
+  || defined(DOS_FILE_SYSTEM)                   \
+  || defined(HAVE_INOTIFY_SYSCALL)		\
+  || defined(FILESYSTEM_NEVER_CHANGES)
+# define HAVE_FILESYSTEM_CHANGE_EVTS
+#else
+# define NO_FILESYSTEM_CHANGE_EVTS
+#endif
+
+#if defined(HAVE_INOTIFY_SYSCALL)
+# include "inotify.inc"
+#endif
+
+#if !defined(NO_FILESYSTEM_CHANGE_EVTS) && !defined(FILESYSTEM_NEVER_CHANGES)
+static void filesystem_change_evt_fnl(void *fc, void *data)
+{
+  scheme_filesystem_change_evt_cancel((Scheme_Object *)fc, NULL);
+}
+#endif
+
+Scheme_Object *scheme_filesystem_change_evt(Scheme_Object *path, int flags, int signal_errs)
+{
+  char *filename;
+  int ok = 0;
+#ifndef NO_FILESYSTEM_CHANGE_EVTS
+  int errid = 0;
+#endif
+  intptr_t fd;
+
+  filename = scheme_expand_string_filename(path,
+					   "filesystem-change-evt",
+					   NULL,
+					   SCHEME_GUARD_FILE_EXISTS);
+  fd = 0;
+
+#if defined(NO_FILESYSTEM_CHANGE_EVTS)
+  ok = 0;
+#elif defined(FILESYSTEM_NEVER_CHANGES)
+  ok = 1;
+#elif defined(HAVE_KQUEUE_SYSCALL)
+  do {
+    fd = open(filename, flags | MZ_BINARY, 0666);
+  } while ((fd == -1) && (errno == EINTR));
+  if (fd == -1)
+    errid = errno;
+  else
+    ok = 1;
+#elif defined(HAVE_INOTIFY_SYSCALL)
+  /* see "inotify.inc" */
+  mz_inotify_init();
+  if (!mz_inotify_ready())
+    errid = EAGAIN;
+  else {
+    fd = mz_inotify_add(filename);
+    if (fd == -1)
+      errid = errno;
+    else
+      ok = 1;
+  }
+#elif defined(DOS_FILE_SYSTEM)
+  {
+    HANDLE h;
+    char *try_filename = filename;
+    
+    while (1) {
+      h = FindFirstChangeNotification(try_filename, FALSE, 
+                                      (FILE_NOTIFY_CHANGE_FILE_NAME
+                                       | FILE_NOTIFY_CHANGE_DIR_NAME
+                                       | FILE_NOTIFY_CHANGE_SIZE
+                                       | FILE_NOTIFY_CHANGE_LAST_WRITE
+                                       | FILE_NOTIFY_CHANGE_ATTRIBUTES));
+      if (h == INVALID_HANDLE_VALUE) {
+        /* If `filename' refers to a file, then monitor its enclosing directory. */
+        errid = GetLastError();
+        if ((try_filename == filename) && scheme_file_exists(filename)) {
+          Scheme_Object *base, *name;
+          int is_dir;
+          name = scheme_split_path(filename, strlen(filename), &base, &is_dir, SCHEME_PLATFORM_PATH_KIND);
+          try_filename = scheme_expand_string_filename(base,
+                                                       "filesystem-change-evt",
+                                                       NULL,
+                                                       SCHEME_GUARD_FILE_EXISTS);
+        } else
+          break;
+      } else {
+        fd = (intptr_t)h;
+        ok = 1;
+        break;
+      }
+    }
+  }
+#endif
+
+  if (!ok) { 
+    if (signal_errs) {
+#ifdef NO_FILESYSTEM_CHANGE_EVTS
+      scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
+                       "filesystem-change-evt: " NOT_SUPPORTED_STR "\n"
+                       "  path: %q\n",
+                       filename);
+#else
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                       "filesystem-change-evt: error generating event\n"
+                       "  path: %q\n"
+                       "  system error: %E",
+                       filename,
+                       errid);
+#endif
+    }
+    
+    return NULL;
+  }
+
+#if defined(NO_FILESYSTEM_CHANGE_EVTS)
+  return NULL;
+#elif defined(FILESYSTEM_NEVER_CHANGES)
+  {
+    Scheme_Filesystem_Change_Evt *fc;
+
+    fc = MALLOC_ONE_TAGGED(Scheme_Filesystem_Change_Evt);
+    fc->so.type = scheme_filesystem_change_evt_type;
+
+    return (Scheme_Object *)fc;
+  }
+#elif defined(DOS_FILE_SYSTEM) || defined(HAVE_INOTIFY_SYSCALL)
+  {
+    Scheme_Filesystem_Change_Evt *fc;
+    Scheme_Custodian_Reference *mref;
+
+    fc = MALLOC_ONE_TAGGED(Scheme_Filesystem_Change_Evt);
+    fc->so.type = scheme_filesystem_change_evt_type;
+    fc->fd = fd;
+
+    mref = scheme_add_managed(NULL, (Scheme_Object *)fc, scheme_filesystem_change_evt_cancel, NULL, 1);
+    fc->mref = mref;
+    scheme_add_finalizer(fc, filesystem_change_evt_fnl, NULL);
+
+    return (Scheme_Object *)fc;
+  }
+#else
+  {
+    Scheme_Filesystem_Change_Evt *fc;
+    Scheme_Object *sema;
+    Scheme_Custodian_Reference *mref;
+
+    sema = scheme_fd_to_semaphore(fd, MZFD_CREATE_VNODE, 0);
+    if (!sema) {
+      const char *reason = "";
+
+#if defined(HAVE_KQUEUE_SYSCALL)
+      if (!scheme_fd_regular_file(fd, 1))
+        reason = ";\n not a regular file or directory";
+#endif
+
+      scheme_close_file_fd(fd);
+
+      if (signal_errs) {
+        scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                         "filesystem-change-evt: cannot generate event%s\n"
+                         "  path: %q",
+                         reason,
+                         filename);
+      }
+      return NULL;
+    }
+
+    fc = MALLOC_ONE_TAGGED(Scheme_Filesystem_Change_Evt);
+    fc->so.type = scheme_filesystem_change_evt_type;
+    fc->fd = fd;
+    fc->sema = sema;
+
+    mref = scheme_add_managed(NULL, (Scheme_Object *)fc, scheme_filesystem_change_evt_cancel, NULL, 1);
+    fc->mref = mref;
+
+    scheme_add_finalizer(fc, filesystem_change_evt_fnl, NULL);
+
+    return (Scheme_Object *)fc;
+  }
+#endif
+}
+
+void scheme_filesystem_change_evt_cancel(Scheme_Object *evt, void *ignored_data)
+{
+#ifndef NO_FILESYSTEM_CHANGE_EVTS
+  Scheme_Filesystem_Change_Evt *fc = (Scheme_Filesystem_Change_Evt *)evt;
+
+  if (fc->mref) {
+# if defined(FILESYSTEM_NEVER_CHANGES)
+    fc->mref = NULL;
+# else
+#  if defined(DOS_FILE_SYSTEM)
+    if (fc->fd) {
+      FindCloseChangeNotification((HANDLE)fc->fd);
+      fc->fd = 0;
+    }
+#  elif defined(HAVE_INOTIFY_SYSCALL)
+    if (fc->fd) {
+      mz_inotify_remove(fc->fd);
+      fc->fd = 0;
+    }
+#  else
+    (void)scheme_fd_to_semaphore(fc->fd, MZFD_REMOVE_VNODE, 0);
+    scheme_close_file_fd(fc->fd);
+    scheme_post_sema_all(fc->sema);
+#  endif
+    scheme_remove_managed(fc->mref, (Scheme_Object *)fc);
+    fc->mref = NULL;
+# endif
+  }
+#endif
+}
+
+static int filesystem_change_evt_ready(Scheme_Object *evt, Scheme_Schedule_Info *sinfo)
+{
+#ifndef NO_FILESYSTEM_CHANGE_EVTS
+  Scheme_Filesystem_Change_Evt *fc = (Scheme_Filesystem_Change_Evt *)evt;
+
+# if defined(DOS_FILE_SYSTEM)
+  if (fc->fd) {
+    if (WaitForSingleObject((HANDLE)fc->fd, 0) == WAIT_OBJECT_0)
+      scheme_filesystem_change_evt_cancel((Scheme_Object *)fc, NULL);
+  }
+  
+  return !fc->fd;
+# elif defined(HAVE_INOTIFY_SYSCALL)
+  if (fc->fd) {
+    if (mz_inotify_poll(fc->fd))
+      scheme_filesystem_change_evt_cancel((Scheme_Object *)fc, NULL);
+  }
+  
+  return !fc->fd;
+# elif defined(FILESYSTEM_NEVER_CHANGES)
+  return fc->fd; /* = 0 */
+# else
+  if (scheme_try_plain_sema(fc->sema))
+    scheme_filesystem_change_evt_cancel((Scheme_Object *)fc, NULL);
+  else
+    scheme_check_fd_semaphores();
+  scheme_set_sync_target(sinfo, fc->sema, evt, NULL, 0, 1, NULL);
+# endif
+
+#endif
+
+  return 0;
+}
+
+#if defined(DOS_FILE_SYSTEM) || defined(HAVE_INOTIFY_SYSCALL)
+static void filesystem_change_evt_need_wakeup (Scheme_Object *evt, void *fds)
+{
+  Scheme_Filesystem_Change_Evt *fc = (Scheme_Filesystem_Change_Evt *)evt;
+
+  if (fc->fd) {
+#ifdef DOS_FILE_SYSTEM
+    scheme_add_fd_handle((void *)fc->fd, fds, 0);
+#else
+    int fd;
+    fd = mz_inotify_fd();
+    if (fd >= 0) {
+      void *fds2;
+      fds2 = MZ_GET_FDSET(fds, 0);
+      MZ_FD_SET(fd, (fd_set *)fds2);
+      fds2 = MZ_GET_FDSET(fds, 2);
+      MZ_FD_SET(fd, (fd_set *)fds2);
+    } else if (fd == -2) {
+      scheme_cancel_sleep();
+    }
+#endif
+  }
+}
+#endif
+
+int scheme_fd_regular_file(intptr_t fd, int dir_ok)
+{
+#if defined(USE_FD_PORTS) && !defined(DOS_FILE_SYSTEM)
+  int ok;
+  struct stat buf;
+
+  do {
+    ok = fstat(fd, &buf);
+  } while ((ok == -1) && (errno == EINTR));
+
+  if (!S_ISREG(buf.st_mode)
+      && (!dir_ok || !S_ISDIR(buf.st_mode)))
+    return 0;
+  
+  return 1;
+#else
+  return 0;
+#endif
+}
+
+void scheme_release_inotify()
+{
+#ifdef HAVE_INOTIFY_SYSCALL
+  mz_inotify_stop();
+#endif
+}
+
+void scheme_fs_change_properties(int *_supported, int *_scalable, int *_low_latency, int *_file_level)
+{
+#ifdef NO_FILESYSTEM_CHANGE_EVTS
+  *_supported = 0;
+  *_scalable = 0;
+  *_low_latency = 0;
+  *_file_level = 0;
+#else
+  *_supported = 1;
+# if defined(HAVE_KQUEUE_SYSCALL)  
+  *_scalable = 0;
+# else
+  *_scalable = 1;
+# endif
+# if defined(HAVE_INOTIFY_SYSCALL)
+  *_low_latency = 0;
+# else
+  *_low_latency = 1;
+# endif
+# if defined(DOS_FILE_SYSTEM)
+  *_file_level = 0;
+# else
+  *_file_level = 1;
+# endif
+#endif
+}
+
+/*========================================================================*/
 /*                          FILE input ports                              */
 /*========================================================================*/
 
@@ -6065,7 +6478,7 @@ static CSI_proc get_csi(void)
   static int tried_csi = 0;
   static CSI_proc csi;
   
-  START_XFORM_SKIP;      
+  START_XFORM_SKIP;
   if (!tried_csi) {
     HMODULE hm;
     hm = LoadLibrary("kernel32.dll");
@@ -6302,7 +6715,7 @@ static intptr_t fd_get_string_slow(Scheme_Input_Port *port,
       rgot = target_size;
 
       /* Pending CR in text mode? */
-      if (fip->textmode == 2) {
+      if (fip->textmode > 1) {
         delta = 1;
         if (rgot > 1)
           rgot--;
@@ -6326,27 +6739,33 @@ static intptr_t fd_get_string_slow(Scheme_Input_Port *port,
         int i, j;
         unsigned char *buf;
 
-        if (fip->textmode == 2) {
+        if (fip->textmode > 1) {
           /* we had added a CR */
           bc++;
           fip->textmode = 1;
         }
 
-        /* If bc is only 1, then we've reached the end, and
+        /* If bc is only 1 in buffer mode, then we've reached the end, and
            any leftover CR there should stay. */
-        if (bc > 1) {
+        if ((bc > 1) || (bc && (target_size == 1))) {
           /* Collapse CR-LF: */
+          char *bufwidths = port->bufwidths; /* for file-position */
           buf = fip->buffer;
           for (i = 0, j = 0; i < bc - 1; i++) {
             if ((buf[i] == '\r')
                 && (buf[i+1] == '\n')) {
+              bufwidths[j] = 1;
               buf[j++] = '\n';
               i++;
-            } else
+            } else {
+              bufwidths[j] = 0;
               buf[j++] = buf[i];
+            }
           }
-          if (i < bc) /* common case: didn't end with CRLF */
+          if (i < bc) { /* common case: didn't end with CRLF */
+            bufwidths[j] = 0;
             buf[j++] = buf[i];
+          }
           bc = j;
           /* Check for CR at end; if there, save it to maybe get a
              LF on the next read: */
@@ -6420,8 +6839,14 @@ static intptr_t fd_get_string_slow(Scheme_Input_Port *port,
       }
 
       if (!fip->bufcount) {
-        fip->buffpos = 0;
-        return EOF;
+        if (fip->textmode > 1) {
+          /* have a CR pending, so maybe keep trying */
+          if (nonblock > 0)
+            return 0;
+        } else {
+          fip->buffpos = 0;
+          return EOF;
+        }
       } else {
         bc = ((size <= fip->bufcount)
               ? size
@@ -6626,7 +7051,7 @@ make_fd_input_port(intptr_t fd, Scheme_Object *name, int regfile, int win_textmo
   if (regfile || isatty(fd))
     fip->textmode = 1;
 #else
-  fip->textmode = win_textmode;  
+  fip->textmode = (win_textmode ? 1 : 0);
 #endif
 
   if (refcount) {
@@ -6655,6 +7080,14 @@ make_fd_input_port(intptr_t fd, Scheme_Object *name, int regfile, int win_textmo
   ip->p.buffer_mode_fun = fd_input_buffer_mode;
 
   ip->pending_eof = 1; /* means that pending EOFs should be tracked */
+
+#ifdef WINDOWS_FILE_HANDLES
+  if (fip->textmode) {
+    char *bw;
+    bw = (char *)scheme_malloc_atomic(MZPORT_FD_BUFFSIZE);
+    ip->bufwidths = bw;
+  }
+#endif
 
 #ifdef WINDOWS_FILE_HANDLES
   if (!regfile && !start_closed) {
@@ -8140,6 +8573,30 @@ int scheme_os_pipe(intptr_t *a, int nearh)
 
 /**************** Unix: signal stuff ******************/
 
+#if defined(UNIX_PROCESSES)
+
+void scheme_block_child_signals(int block)
+  XFORM_SKIP_PROC
+{
+#if defined(MZ_PLACES_WAITPID)
+  if (block)
+    scheme_wait_suspend();
+  else
+    scheme_wait_resume();
+#else
+  sigset_t sigs;
+
+  sigemptyset(&sigs);
+  sigaddset(&sigs, SIGCHLD);
+# ifdef USE_ITIMER
+  sigaddset(&sigs, SIGPROF);
+# endif
+  sigprocmask(block ? SIG_BLOCK : SIG_UNBLOCK, &sigs, NULL);
+#endif
+}
+
+#endif
+
 #if defined(UNIX_PROCESSES) && !defined(MZ_PLACES_WAITPID)
 
 #ifndef MZ_PRECISE_GC
@@ -8152,21 +8609,6 @@ int scheme_os_pipe(intptr_t *a, int nearh)
 SHARED_OK static void *unused_pids;
 
 static int need_to_check_children;
-
-void scheme_block_child_signals(int block)
-  XFORM_SKIP_PROC
-{
-#if !defined(MZ_PLACES_WAITPID)
-  sigset_t sigs;
-
-  sigemptyset(&sigs);
-  sigaddset(&sigs, SIGCHLD);
-# ifdef USE_ITIMER
-  sigaddset(&sigs, SIGPROF);
-# endif
-  sigprocmask(block ? SIG_BLOCK : SIG_UNBLOCK, &sigs, NULL);
-#endif
-}
 
 static void child_done(int ingored)
   XFORM_SKIP_PROC
@@ -8624,7 +9066,7 @@ static int subp_done(Scheme_Object *so)
   {
     int status;
     if (!sp->done) {
-      if (scheme_get_child_status(sp->pid, sp->is_group, &status)) {
+      if (scheme_get_child_status(sp->pid, sp->is_group, 1, &status)) {
         sp->done = 1;
         sp->status = status;
         child_mref_done(sp);
@@ -8690,7 +9132,7 @@ static Scheme_Object *subprocess_status(int argc, Scheme_Object **argv)
   if (sp->done)
     status = sp->status;
   else {
-    if (!scheme_get_child_status(sp->pid, sp->is_group, &status)) {
+    if (!scheme_get_child_status(sp->pid, sp->is_group, 1, &status)) {
       going = 1;
     } else {
       child_mref_done(sp);
@@ -8779,9 +9221,9 @@ static Scheme_Object *do_subprocess_kill(Scheme_Object *_sp, Scheme_Object *kill
 
     scheme_wait_suspend();
 
-    /* Don't pass sp->is_group, because we don't want to wait
+    /* Don't allow group checking, because we don't want to wait
        on a group if we haven't already: */
-    if (scheme_get_child_status(sp->pid, 0, &status)) {
+    if (scheme_get_child_status(sp->pid, 0, 0, &status)) {
       sp->status = status;
       sp->done = 1;
       child_mref_done(sp);
@@ -8915,9 +9357,9 @@ static Scheme_Object *subproc_cust_mode_p(int argc, Scheme_Object **argv)
 
 static Scheme_Object *current_subproc_cust_mode (int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-subprocess-custodian-mode", scheme_make_integer(MZCONFIG_SUBPROC_CUSTODIAN_MODE),
-			     argc, argv,
-			     -1, subproc_cust_mode_p, "'interrupt, 'kill, or #f", 1);
+  return scheme_param_config2("current-subprocess-custodian-mode", scheme_make_integer(MZCONFIG_SUBPROC_CUSTODIAN_MODE),
+                              argc, argv,
+                              -1, subproc_cust_mode_p, "(or/c 'interrupt 'kill #f)", 1);
 }
 
 static Scheme_Object *subproc_group_on (int argc, Scheme_Object *argv[])
@@ -9011,7 +9453,8 @@ static char *cmdline_protect(char *s)
 
 static intptr_t mz_spawnv(char *command, const char * const *argv,
 			  int exact_cmdline, intptr_t sin, intptr_t sout, intptr_t serr, int *pid,
-			  int new_process_group)
+			  int new_process_group,
+                          void *env, char *wd)
 {
   int i, l, len = 0;
   intptr_t cr_flag;
@@ -9056,10 +9499,11 @@ static intptr_t mz_spawnv(char *command, const char * const *argv,
     cr_flag = 0;
   if (new_process_group)
     cr_flag |= CREATE_NEW_PROCESS_GROUP;
+  cr_flag |= CREATE_UNICODE_ENVIRONMENT;
 
   if (CreateProcessW(WIDE_PATH_COPY(command), WIDE_PATH_COPY(cmdline), 
 		     NULL, NULL, 1 /*inherit*/,
-		     cr_flag, NULL, NULL,
+		     cr_flag, env, WIDE_PATH_COPY(wd),
 		     &startup, &info)) {
     CloseHandle(info.hThread);
     *pid = info.dwProcessId;
@@ -9129,6 +9573,8 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   System_Child *sc;
 # endif
   int fork_errno = 0;
+  char *env;
+  int need_free;
 #else
   void *sc = 0;
 #endif
@@ -9351,7 +9797,10 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   fflush(stderr);
 
   {
-    Scheme_Object *tcd;
+    Scheme_Object *tcd, *envvar;
+    Scheme_Config *config;
+    char *env;
+    int need_free;
 
     if (!exact_cmdline) {
       /* protect spaces, etc. in the arguments: */
@@ -9362,20 +9811,27 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
       }
     }
 
-    /* Set real CWD before spawn: */
-    tcd = scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_DIRECTORY);
-    scheme_os_setcwd(SCHEME_BYTE_STR_VAL(tcd), 0);
+    config = scheme_current_config();
+        
+    tcd = scheme_get_param(config, MZCONFIG_CURRENT_DIRECTORY);
 
+    envvar = scheme_get_param(config, MZCONFIG_CURRENT_ENV_VARS);
+
+    env = scheme_environment_variables_to_block(envvar, &need_free);
+    
     spawn_status = mz_spawnv(command, (const char * const *)argv,
 			     exact_cmdline,
 			     to_subprocess[0],
 			     from_subprocess[1],
 			     err_subprocess[1],
 			     &pid,
-                             new_process_group);
+                             new_process_group,
+                             env, SCHEME_BYTE_STR_VAL(tcd));
 
     if (spawn_status != -1)
       sc = (void *)spawn_status;
+
+    if (need_free) free(env);
   }
 
 #else
@@ -9401,10 +9857,12 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
     scheme_starting_child();
 #endif
 
-#if !defined(__QNX__)
-    pid = fork();
-#else
+#if defined(__QNX__)
     pid = vfork();
+#elif defined(SUBPROCESS_USE_FORK1)
+    pid = fork1();
+#else
+    pid = fork();
 #endif
 
     if (pid > 0) {
@@ -9539,10 +9997,17 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
 #endif
       }
 
-      /* Set real CWD */
+      /* Set real CWD and get envrionment variables */
       {
-	Scheme_Object *dir;
-	dir = scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_DIRECTORY);
+	Scheme_Object *dir, *envvar;
+        Scheme_Config *config;
+
+        config = scheme_current_config();
+        
+	envvar = scheme_get_param(config, MZCONFIG_CURRENT_ENV_VARS);
+        env = scheme_environment_variables_to_block(envvar, &need_free);
+
+	dir = scheme_get_param(config, MZCONFIG_CURRENT_DIRECTORY);
 	if (!scheme_os_setcwd(SCHEME_PATH_VAL(dir), 1)) {
           scheme_console_printf("racket: chdir failed to: %s\n", SCHEME_BYTE_STR_VAL(dir));
           _exit(1);
@@ -9564,9 +10029,12 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
 #endif
 	END_XFORM_SKIP;
 
-	err = MSC_IZE(execv)(command, argv);
+	err = MSC_IZE(execve)(command, argv, (char **)env);
         if (err)
           err = errno;
+        
+        if (need_free)
+          free(env);
 
 	/* If we get here it failed; give up */
 
@@ -9663,7 +10131,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
     else
       closer = interrupt_subproc;
 
-    mref = scheme_add_managed(NULL, (Scheme_Object *)subproc, closer, NULL, 1);
+    mref = scheme_add_managed_close_on_exit(NULL, (Scheme_Object *)subproc, closer, NULL);
     subproc->mref = mref;
   }
 
@@ -10795,6 +11263,8 @@ static void register_traversers(void)
 
   GC_REG_TRAV(scheme_subprocess_type, mark_subprocess);
   GC_REG_TRAV(scheme_write_evt_type, mark_read_write_evt);
+
+  GC_REG_TRAV(scheme_filesystem_change_evt_type, mark_filesystem_change_evt);
 }
 
 END_XFORM_SKIP;

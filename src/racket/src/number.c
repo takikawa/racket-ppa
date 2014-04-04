@@ -204,6 +204,8 @@ static Scheme_Object *unsafe_make_flrectangular (int argc, Scheme_Object *argv[]
 static Scheme_Object *unsafe_flreal_part (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_flimag_part (int argc, Scheme_Object *argv[]);
 
+static Scheme_Object *unsafe_flrandom (int argc, Scheme_Object *argv[]);
+
 #ifdef MZ_USE_SINGLE_FLOATS
 static Scheme_Object *TO_FLOAT(const Scheme_Object *n);
 #endif
@@ -815,7 +817,8 @@ void scheme_init_flfxnum_number(Scheme_Env *env)
     flags = SCHEME_PRIM_IS_UNARY_INLINED;
   else
     flags = SCHEME_PRIM_SOMETIMES_INLINED;
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_PRODUCES_FLONUM);
   scheme_add_global_constant("->fl", p, env);
 
   p = scheme_make_folding_prim(fl_to_integer, "fl->exact-integer", 1, 1, 1);
@@ -1437,6 +1440,15 @@ void scheme_init_unsafe_number(Scheme_Env *env)
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
                                                             | SCHEME_PRIM_PRODUCES_FLONUM);
   scheme_add_global_constant("unsafe-flimag-part", p, env);
+
+  p = scheme_make_immed_prim(unsafe_flrandom, "unsafe-flrandom", 1, 1);
+  if (scheme_can_inline_fp_op())
+    flags = SCHEME_PRIM_IS_UNARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_PRODUCES_FLONUM);
+  scheme_add_global_constant("unsafe-flrandom", p, env);
 }
 
 void scheme_init_extfl_unsafe_number(Scheme_Env *env)
@@ -2427,37 +2439,7 @@ sch_truncate (int argc, Scheme_Object *argv[])
   ESCAPED_BEFORE_HERE;
 }
 
-XFORM_NONGCING static double SCH_ROUND(double d)
-{
-  double i, frac;
-  int invert;
-
-#ifdef FMOD_CAN_RETURN_POS_ZERO
-  if ((d == 0.0) && minus_zero_p(d))
-    return d;
-#endif
-
-  if (d < 0) {
-    d = -d;
-    invert = 1;
-  } else
-    invert = 0;
-
-  frac = modf(d, &i);
-  if (frac < 0.5)
-    d = i;
-  else if (frac > 0.5)
-    d = i + 1;
-  else if (fmod(i, 2.0) != 0.0)
-    d = i + 1;
-  else
-    d = i;
-
-  if (invert)
-    d = -d;
-
-  return d;
-}
+#include "schround.inc"
 
 static Scheme_Object *
 sch_round (int argc, Scheme_Object *argv[])
@@ -4119,7 +4101,7 @@ scheme_bitwise_shift(int argc, Scheme_Object *argv[])
 
     if (i > 0) {
       if (shift < 0) {
-	int shft = -shift;
+	intptr_t shft = -shift;
 	if (shft < MAX_SHIFT_EVER) {
 	  i = i >> shft;
 	  return scheme_make_integer(i);
@@ -4136,6 +4118,9 @@ scheme_bitwise_shift(int argc, Scheme_Object *argv[])
 
     v = scheme_make_bignum(i);
   }
+
+  if (scheme_current_thread->constant_folding)
+    scheme_signal_error("too big");
 
   return scheme_bignum_shift(v, shift);
 }
@@ -5421,6 +5406,11 @@ static Scheme_Object *unsafe_flreal_part (int argc, Scheme_Object *argv[])
 static Scheme_Object *unsafe_flimag_part (int argc, Scheme_Object *argv[])
 {
   return ((Scheme_Complex *)argv[0])->i;
+}
+
+static Scheme_Object *unsafe_flrandom (int argc, Scheme_Object *argv[])
+{
+  return scheme_make_double(scheme_double_random(argv[0]));
 }
 
 static Scheme_Object *integer_to_extfl (int argc, Scheme_Object *argv[])

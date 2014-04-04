@@ -126,6 +126,10 @@ static Scheme_Object *port_counts_lines_p(int, Scheme_Object **args);
 static Scheme_Object *port_next_location(int, Scheme_Object **args);
 static Scheme_Object *set_port_next_location(int, Scheme_Object **args);
 
+static Scheme_Object *filesystem_change_evt(int, Scheme_Object **args);
+static Scheme_Object *filesystem_change_evt_p(int, Scheme_Object **args);
+static Scheme_Object *filesystem_change_evt_cancel(int, Scheme_Object **args);
+
 static Scheme_Object *sch_default_read_handler(void *ignore, int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_default_display_handler(int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_default_write_handler(int argc, Scheme_Object *argv[]);
@@ -259,6 +263,10 @@ scheme_init_port_fun(Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY2("make-pipe",             sch_pipe,               0, 3, 2,  2, env);
   GLOBAL_PRIM_W_ARITY2("port-next-location",    port_next_location,     1, 1, 3,  3, env);
   GLOBAL_PRIM_W_ARITY("set-port-next-location!",  set_port_next_location, 4, 4, env);
+
+  GLOBAL_PRIM_W_ARITY("filesystem-change-evt",  filesystem_change_evt,   1, 2, env);
+  GLOBAL_NONCM_PRIM("filesystem-change-evt?",   filesystem_change_evt_p, 1, 1, env);
+  GLOBAL_NONCM_PRIM("filesystem-change-evt-cancel",  filesystem_change_evt_cancel, 1, 1, env);
 
   GLOBAL_NONCM_PRIM("read",                           read_f,                         0, 1, env);
   GLOBAL_NONCM_PRIM("read/recursive",                 read_recur_f,                   0, 4, env);
@@ -1647,9 +1655,9 @@ int scheme_is_user_port(Scheme_Object *port)
 /*                               pipe ports                               */
 /*========================================================================*/
 
-static void pipe_did_read(Scheme_Input_Port *port, Scheme_Pipe *pipe)
+static void pipe_did_read(Scheme_Input_Port *port, Scheme_Pipe *pipe, int peek)
 {
-  if (port && port->progress_evt) {
+  if (port && port->progress_evt && !peek) {
     scheme_post_sema_all(port->progress_evt);
     port->progress_evt = NULL;
   }
@@ -1781,7 +1789,7 @@ static intptr_t pipe_get_or_peek_bytes(Scheme_Input_Port *p,
       else
 	pipe->bufmaxextra = 0;
     }
-    pipe_did_read(p, pipe);
+    pipe_did_read(p, pipe, 0);
   } else {
     if (!c) {
       if (size && pipe->eof)
@@ -1801,6 +1809,7 @@ static intptr_t pipe_get_or_peek_bytes(Scheme_Input_Port *p,
 	  pipe->bufmaxextra = c + skipped;
 	}
       }
+      pipe_did_read(p, pipe, 1);
     }
   }
 
@@ -1889,6 +1898,7 @@ static intptr_t pipe_write_bytes(Scheme_Output_Port *p,
       wrote += xavail;
       d += xavail;
       len -= xavail;
+      pipe_did_write(pipe);
 
       /* For non-blocking mode, that might be good enough.
 	 rarely_block == 2 means that even nothing is good enough. */
@@ -1896,34 +1906,33 @@ static intptr_t pipe_write_bytes(Scheme_Output_Port *p,
 	return wrote;
 
       /* Now, wait until we can write more, then start over. */
-      while (1) {
-	if (pipe->bufstart <= pipe->bufend) {
-	  avail = (pipe->buflen - pipe->bufend) + pipe->bufstart - 1;
-	} else {
-	  avail = pipe->bufstart - pipe->bufend - 1;
-	}
-	if (pipe->bufmax) {
-	  /* Again, it's possible that the port grew to accommodate
-	     past peeks... */
-	  intptr_t extra;
-	  extra = pipe->buflen - (pipe->bufmax + pipe->bufmaxextra);
-	  if (extra > 0)
-	    avail -= extra;
-	}
-
-	if (avail || pipe->eof || p->closed)
-	  goto try_again;
-
-	my_sema = scheme_make_sema(0);
-	{
-	  Scheme_Object *wp;
-	  wp = scheme_make_pair(my_sema, pipe->wakeup_on_read);
-	  pipe->wakeup_on_read = wp;
-	}
-
-	scheme_wait_sema(my_sema, enable_break ? -1 : 0);
+      if (pipe->bufstart <= pipe->bufend) {
+        avail = (pipe->buflen - pipe->bufend) + pipe->bufstart - 1;
+      } else {
+        avail = pipe->bufstart - pipe->bufend - 1;
       }
-      /* Doesn't get here */
+      if (pipe->bufmax) {
+        /* Again, it's possible that the port grew to accommodate
+           past peeks... */
+        intptr_t extra;
+        extra = pipe->buflen - (pipe->bufmax + pipe->bufmaxextra);
+        if (extra > 0)
+          avail -= extra;
+      }
+      
+      if (avail || pipe->eof || p->closed)
+        goto try_again;
+      
+      my_sema = scheme_make_sema(0);
+      {
+        Scheme_Object *wp;
+        wp = scheme_make_pair(my_sema, pipe->wakeup_on_read);
+        pipe->wakeup_on_read = wp;
+      }
+      
+      scheme_wait_sema(my_sema, enable_break ? -1 : 0);
+      
+      goto try_again;
     }
   }
 
@@ -1981,7 +1990,7 @@ static intptr_t pipe_write_bytes(Scheme_Output_Port *p,
   pipe->bufend = endpos;
 
   pipe_did_write(pipe);
-
+  
   return len + wrote;
 }
 
@@ -2006,7 +2015,7 @@ static void pipe_in_close(Scheme_Input_Port *p)
   pipe->eof = 1;
 
   /* to wake up any other threads blocked on pipe I/O: */
-  pipe_did_read(p, pipe);
+  pipe_did_read(p, pipe, 0);
   pipe_did_write(pipe);
 }
 
@@ -2019,7 +2028,7 @@ static void pipe_out_close(Scheme_Output_Port *p)
   pipe->eof = 1;
 
   /* to wake up any other threads blocked on pipe I/O: */
-  pipe_did_read(NULL, pipe);
+  pipe_did_read(NULL, pipe, 0);
   pipe_did_write(pipe);
 }
 
@@ -2240,23 +2249,23 @@ intptr_t scheme_port_closed_p (Scheme_Object *port) {
 
 static Scheme_Object *current_input_port(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-input-port", scheme_make_integer(MZCONFIG_INPUT_PORT),
-			     argc, argv,
-			     -1, input_port_p, "input-port", 0);
+  return scheme_param_config2("current-input-port", scheme_make_integer(MZCONFIG_INPUT_PORT),
+                              argc, argv,
+                              -1, input_port_p, "input-port?", 0);
 }
 
 static Scheme_Object *current_output_port(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-output-port", scheme_make_integer(MZCONFIG_OUTPUT_PORT),
-			     argc, argv,
-			     -1, output_port_p, "output-port", 0);
+  return scheme_param_config2("current-output-port", scheme_make_integer(MZCONFIG_OUTPUT_PORT),
+                              argc, argv,
+                              -1, output_port_p, "output-port?", 0);
 }
 
 static Scheme_Object *current_error_port(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-error-port", scheme_make_integer(MZCONFIG_ERROR_PORT),
-			     argc, argv,
-			     -1, output_port_p, "output-port", 0);
+  return scheme_param_config2("current-error-port", scheme_make_integer(MZCONFIG_ERROR_PORT),
+                              argc, argv,
+                              -1, output_port_p, "output-port?", 0);
 }
 
 static Scheme_Object *
@@ -2542,7 +2551,7 @@ make_output_port (int argc, Scheme_Object *argv[])
 static Scheme_Object *
 open_input_file (int argc, Scheme_Object *argv[])
 {
-  return scheme_do_open_input_file("open-input-file", 0, argc, argv, 0, NULL, NULL);
+  return scheme_do_open_input_file("open-input-file", 0, argc, argv, 0, NULL, NULL, 0);
 }
 
 static Scheme_Object *
@@ -2640,7 +2649,7 @@ Scheme_Object *do_get_output_string(const char *who, int is_byte,
         if (endpos < 0) 
           endpos = len+1;
       }
-      
+
       if (!(startpos <= len)) {
         scheme_out_of_range(who, "port", "starting ", argv[2], argv[0], 0, len);
         return NULL;
@@ -2649,8 +2658,13 @@ Scheme_Object *do_get_output_string(const char *who, int is_byte,
         scheme_out_of_range(who, "port", "ending ", argv[3], argv[0], startpos, len);
         return NULL;
       }
-    } else
+    } else {
+      if (!(startpos <= len)) {
+        scheme_out_of_range(who, "port", "starting ", argv[2], argv[0], 0, len);
+        return NULL;
+      }
       endpos = -1;
+    }
   } else {
     startpos = 0;
     endpos = -1;
@@ -2731,7 +2745,7 @@ call_with_input_file(int argc, Scheme_Object *argv[])
 
   scheme_check_proc_arity("call-with-input-file", 1, 1, argc, argv);
 
-  port = scheme_do_open_input_file("call-with-input-file", 1, argc, argv, 0, NULL, NULL);
+  port = scheme_do_open_input_file("call-with-input-file", 1, argc, argv, 0, NULL, NULL, 0);
 
   v = _scheme_apply_multi(argv[1], 1, &port);
 
@@ -2802,7 +2816,7 @@ with_input_from_file(int argc, Scheme_Object *argv[])
 
   scheme_check_proc_arity("with-input-from-file", 0, 1, argc, argv);
 
-  port = scheme_do_open_input_file("with-input-from-file", 1, argc, argv, 0, NULL, NULL);
+  port = scheme_do_open_input_file("with-input-from-file", 1, argc, argv, 0, NULL, NULL, 0);
 
   config = scheme_extend_config(scheme_current_config(),
 				MZCONFIG_INPUT_PORT,
@@ -4257,10 +4271,10 @@ static Scheme_Object *filter_print_handler(int argc, Scheme_Object **argv)
 
 static Scheme_Object *global_port_print_handler(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("global-port-print-handler",
-			     scheme_make_integer(MZCONFIG_PORT_PRINT_HANDLER),
-			     argc, argv,
-			     -1, filter_print_handler, "procedure (arity 2)", 1);
+  return scheme_param_config2("global-port-print-handler",
+                              scheme_make_integer(MZCONFIG_PORT_PRINT_HANDLER),
+                              argc, argv,
+                              -1, filter_print_handler, "(procedure-arity-includes/c 2)", 1);
 }
 
 static Scheme_Object *port_count_lines(int argc, Scheme_Object *argv[])
@@ -4316,6 +4330,40 @@ static Scheme_Object *set_port_next_location(int argc, Scheme_Object *argv[])
 
   scheme_set_port_location(argc, argv);
   
+  return scheme_void;
+}
+
+static Scheme_Object *filesystem_change_evt(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *e;
+
+  if (!SCHEME_PATH_STRINGP(argv[0]))
+    scheme_wrong_contract("filesystem-change-evt", "path-string?", 0, argc, argv);
+  if (argc > 1)
+    scheme_check_proc_arity("filesystem-change-evt", 0, 1, argc, argv);
+
+  e = scheme_filesystem_change_evt(argv[0], 0, (argc < 2));
+
+  if (!e)
+    return _scheme_tail_apply(argv[1], 0, NULL);
+  else
+    return e;
+}
+
+static Scheme_Object *filesystem_change_evt_p(int argc, Scheme_Object **argv)
+{
+  return (SAME_TYPE(scheme_filesystem_change_evt_type, SCHEME_TYPE(argv[0]))
+          ? scheme_true
+          : scheme_false);
+}
+
+static Scheme_Object *filesystem_change_evt_cancel(int argc, Scheme_Object **argv)
+{
+  if (!SAME_TYPE(scheme_filesystem_change_evt_type, SCHEME_TYPE(argv[0])))
+    scheme_wrong_contract("filesystem-change-evt-cancel", "filesystem-change-evt?", 0, argc, argv);
+
+  scheme_filesystem_change_evt_cancel(argv[0], NULL);
+
   return scheme_void;
 }
 
@@ -4724,7 +4772,7 @@ static Scheme_Object *default_load(int argc, Scheme_Object *argv[])
                           "(or/c #f symbol? (cons/c (or/c #f symbol?) (non-empty-listof symbol?)))",
                           1, argc, argv);
 
-  port = scheme_do_open_input_file("default-load-handler", 0, 1, argv, 0, NULL, NULL);
+  port = scheme_do_open_input_file("default-load-handler", 0, 1, argv, 0, NULL, NULL, SCHEME_TRUEP(expected_module));
 
   /* Turn on line/column counting, unless it's a .zo file: */
   if (SCHEME_PATHP(argv[0])) {
@@ -4901,10 +4949,12 @@ static Scheme_Object *lr_abs_directory_p(int argc, Scheme_Object **argv)
 static Scheme_Object *
 current_load_directory(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-load-relative-directory",
-			     scheme_make_integer(MZCONFIG_LOAD_DIRECTORY),
-			     argc, argv,
-			     -1, lr_abs_directory_p, "path, string, or #f", 1);
+  return scheme_param_config2("current-load-relative-directory",
+                              scheme_make_integer(MZCONFIG_LOAD_DIRECTORY),
+                              argc, argv,
+                              -1, lr_abs_directory_p, 
+                              "(or/c (and/c path-string? complete-path?) #f)",
+                              1);
 }
 
 static Scheme_Object *wr_abs_directory_p(int argc, Scheme_Object **argv)
@@ -4929,10 +4979,15 @@ static Scheme_Object *wr_abs_directory_p(int argc, Scheme_Object **argv)
 static Scheme_Object *
 current_write_directory(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-write-relative-directory",
-			     scheme_make_integer(MZCONFIG_WRITE_DIRECTORY),
-			     argc, argv,
-			     -1, wr_abs_directory_p, "path, string, or #f", 1);
+  return scheme_param_config2("current-write-relative-directory",
+                              scheme_make_integer(MZCONFIG_WRITE_DIRECTORY),
+                              argc, argv,
+                              -1, wr_abs_directory_p, 
+                              "(or/c (and/c path-string? complete-path?)"
+                              /**/ " (cons/c (and/c path-string? complete-path?)"
+                              /*        */ " (and/c path-string? complete-path?))"
+                              /**/ " #f)",
+                              1);
 }
 
 #ifdef LOAD_ON_DEMAND

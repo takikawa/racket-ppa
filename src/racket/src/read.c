@@ -787,26 +787,36 @@ static Scheme_Object *good_syntax_width(int c, Scheme_Object **argv)
 static Scheme_Object *
 print_syntax_width(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("print-syntax-width",
-			     scheme_make_integer(MZCONFIG_PRINT_SYNTAX_WIDTH),
-			     argc, argv,
-			     -1, good_syntax_width, "+inf.0, 0, or exact integer greater than three", 0);
+  return scheme_param_config2("print-syntax-width",
+                              scheme_make_integer(MZCONFIG_PRINT_SYNTAX_WIDTH),
+                              argc, argv,
+                              -1, good_syntax_width, 
+                              "(or/c +inf.0 0 (and/c exact-integer? (>=/c 3)))", 0);
 }
 
 #ifdef LOAD_ON_DEMAND
 static Scheme_Object *rdl_check(int argc, Scheme_Object **argv)
 {
-  return argv[0];
+  Scheme_Object *s = argv[0];
+
+  return ((SCHEME_FALSEP(s)
+           || SAME_OBJ(scheme_true, s)
+           || (SCHEME_PATHP(s)
+               && scheme_is_complete_path(SCHEME_PATH_VAL(s),
+                                          SCHEME_PATH_LEN(s),
+                                          SCHEME_PLATFORM_PATH_KIND)))
+          ? scheme_true : scheme_false);
 }
 
 static Scheme_Object *
 read_delay_load(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("read-on-demand-source",
-			     scheme_make_integer(MZCONFIG_DELAY_LOAD_INFO),
-			     argc, argv,
-			     -1, rdl_check, 
-			     "complete path or string, optionally paired with an exact integer", 1);
+  return scheme_param_config2("read-on-demand-source",
+                              scheme_make_integer(MZCONFIG_DELAY_LOAD_INFO),
+                              argc, argv,
+                              -1, rdl_check, 
+                              "(or/c #f #t (and/c path? complete-path?))",
+                              0);
 
 }
 #endif
@@ -3436,6 +3446,7 @@ char *scheme_extract_indentation_suggestions(Scheme_Object *indentation)
 #define ELMS_SELECTOR SCHEME_VEC_ELS
 #define ELM_SELECTOR
 #define ELM_MAKE_ZERO scheme_make_integer(0)
+#define ELM_STX(elm) scheme_make_stx_w_offset(elm, line, col, pos, SPAN(port, pos), stxsrc, STX_SRCTAG);
 #define VEC_SIZE SCHEME_VEC_SIZE
 #include "read_vector.inc"
 
@@ -3449,6 +3460,7 @@ char *scheme_extract_indentation_suggestions(Scheme_Object *indentation)
 #define ELMS_SELECTOR SCHEME_FXVEC_ELS
 #define ELM_SELECTOR
 #define ELM_MAKE_ZERO scheme_make_integer(0)
+#define ELM_STX(elm) elm
 #define VEC_SIZE SCHEME_FXVEC_SIZE
 #include "read_vector.inc"
 
@@ -3462,6 +3474,7 @@ char *scheme_extract_indentation_suggestions(Scheme_Object *indentation)
 #define ELMS_SELECTOR SCHEME_FLVEC_ELS
 #define ELM_SELECTOR SCHEME_DBL_VAL
 #define ELM_MAKE_ZERO 0.0
+#define ELM_STX(elm) elm
 #define VEC_SIZE SCHEME_FLVEC_SIZE
 #include "read_vector.inc"
 
@@ -5531,6 +5544,9 @@ static Scheme_Object *read_compiled(Scheme_Object *port,
         delay_info->shared_offsets = rp->shared_offsets;
         delay_info->relto = rp->relto;
 
+        if (SAME_OBJ(delay_info->path, scheme_true))
+          perma_cache = 1;
+
         if (perma_cache) {
           unsigned char *cache;
           cache = (unsigned char *)scheme_malloc_atomic(shared_size);
@@ -5715,7 +5731,7 @@ Scheme_Object *scheme_load_delayed_code(int _which, Scheme_Load_Delay *_delay_in
     scheme_release_file_descriptor();
 
     a[0] = delay_info->path;
-    port = scheme_do_open_input_file("on-demand-loader", 0, 1, a, 0, NULL, NULL);
+    port = scheme_do_open_input_file("on-demand-loader", 0, 1, a, 0, NULL, NULL, 0);
 
     savebuf = scheme_current_thread->error_buf;
     scheme_current_thread->error_buf = &newbuf;
@@ -6286,18 +6302,18 @@ static Scheme_Object *readtable_or_false_p(int argc, Scheme_Object **argv)
 
 static Scheme_Object *current_readtable(int argc, Scheme_Object **argv)
 {
-  return scheme_param_config("current-readtable", 
-			     scheme_make_integer(MZCONFIG_READTABLE),
-			     argc, argv,
-			     -1, readtable_or_false_p, "readtable", 0);
+  return scheme_param_config2("current-readtable", 
+                              scheme_make_integer(MZCONFIG_READTABLE),
+                              argc, argv,
+                              -1, readtable_or_false_p, "readtable?", 0);
 }
 
 static Scheme_Object *current_reader_guard(int argc, Scheme_Object **argv)
 {
-  return scheme_param_config("current-reader-guard", 
-			     scheme_make_integer(MZCONFIG_READER_GUARD),
-			     argc, argv,
-			     1, NULL, NULL, 0);
+  return scheme_param_config2("current-reader-guard", 
+                              scheme_make_integer(MZCONFIG_READER_GUARD),
+                              argc, argv,
+                              1, NULL, NULL, 0);
 }
 
 static Scheme_Object *no_val_thunk(void *d, int argc, Scheme_Object **argv)

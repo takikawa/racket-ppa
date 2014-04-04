@@ -207,7 +207,7 @@ typedef struct FSSpec mzFSSpec;
 #endif
 
 #ifndef MZ_DONT_USE_JIT
-# if defined(MZ_USE_JIT_PPC) || defined(MZ_USE_JIT_I386) || defined(MZ_USE_JIT_X86_64)
+# if defined(MZ_USE_JIT_PPC) || defined(MZ_USE_JIT_I386) || defined(MZ_USE_JIT_X86_64) || defined(MZ_USE_JIT_ARM)
 #  define MZ_USE_JIT
 # endif
 #endif
@@ -755,7 +755,7 @@ typedef struct Scheme_Offset_Cptr
 #define SCHEME_PRIM_TYPE_PARAMETER               64
 #define SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER      (64 | 128)
 #define SCHEME_PRIM_SOMETIMES_INLINED            (64 | 256)
-#define SCHEME_PRIM_STRUCT_TYPE_STRUCT_PROP_PRED        (64 | 128 | 256)
+#define SCHEME_PRIM_STRUCT_TYPE_STRUCT_PROP_PRED (64 | 128 | 256)
 #define SCHEME_PRIM_STRUCT_TYPE_INDEXED_GETTER   32
 #define SCHEME_PRIM_STRUCT_TYPE_PRED             (32 | 64)
 
@@ -1116,6 +1116,7 @@ typedef struct Scheme_Thread {
   Scheme_Object *resumed_box;   /* contains pointer to thread when it's resumed */
   Scheme_Object *dead_box;      /* contains non-zero when the thread is dead */
   Scheme_Object *running_box;   /* contains pointer to thread when it's running */
+  Scheme_Object *sync_box;      /* semaphore used for NACK events */
 
   struct Scheme_Thread *gc_prep_chain;
 
@@ -1359,18 +1360,23 @@ enum {
   MZCONFIG_WRITE_DIRECTORY,
 
   MZCONFIG_COLLECTION_PATHS,
+  MZCONFIG_COLLECTION_LINKS,
 
   MZCONFIG_PORT_PRINT_HANDLER,
 
   MZCONFIG_LOAD_EXTENSION_HANDLER,
 
   MZCONFIG_CURRENT_DIRECTORY,
+  MZCONFIG_CURRENT_ENV_VARS,
+
+  MZCONFIG_CURRENT_USER_DIRECTORY,
 
   MZCONFIG_RANDOM_STATE,
 
   MZCONFIG_CURRENT_MODULE_RESOLVER,
   MZCONFIG_CURRENT_MODULE_NAME,
   MZCONFIG_CURRENT_MODULE_SRC,
+  MZCONFIG_CURRENT_MODULE_LOAD_PATH,
 
   MZCONFIG_ERROR_PRINT_SRCLOC,
 
@@ -1478,6 +1484,9 @@ struct Scheme_Input_Port
   Scheme_Object *special, *ungotten_special;
   Scheme_Object *unless, *unless_cache;
   struct Scheme_Output_Port *output_half;
+#ifdef WINDOWS_FILE_HANDLES
+  char *bufwidths; /* to track CRLF => LF conversions in the buffer */
+#endif
 };
 
 struct Scheme_Output_Port
@@ -1902,9 +1911,9 @@ MZ_EXTERN void scheme_set_banner(char *s);
 MZ_EXTERN Scheme_Object *scheme_set_exec_cmd(char *s);
 MZ_EXTERN Scheme_Object *scheme_set_run_cmd(char *s);
 MZ_EXTERN void scheme_set_collects_path(Scheme_Object *p);
+MZ_EXTERN void scheme_set_config_path(Scheme_Object *p);
 MZ_EXTERN void scheme_set_original_dir(Scheme_Object *d);
 MZ_EXTERN void scheme_set_addon_dir(Scheme_Object *p);
-MZ_EXTERN void scheme_set_links_file(Scheme_Object *p);
 MZ_EXTERN void scheme_set_command_line_arguments(Scheme_Object *vec);
 MZ_EXTERN void scheme_set_compiled_file_paths(Scheme_Object *list);
 MZ_EXTERN void scheme_set_compiled_file_roots(Scheme_Object *list);
@@ -1960,8 +1969,13 @@ MZ_EXTERN int scheme_new_param(void);
 MZ_EXTERN Scheme_Object *scheme_param_config(char *name, Scheme_Object *pos,
 					     int argc, Scheme_Object **argv,
 					     int arity,
-					     Scheme_Prim *check, char *expected,
+					     Scheme_Prim *check, char *expected_type,
 					     int isbool);
+MZ_EXTERN Scheme_Object *scheme_param_config2(char *name, Scheme_Object *pos,
+                                              int argc, Scheme_Object **argv,
+                                              int arity,
+                                              Scheme_Prim *check, char *expected_contract,
+                                              int isbool);
 MZ_EXTERN Scheme_Object *scheme_register_parameter(Scheme_Prim *function, char *name, int which);
 
 #endif /* SCHEME_DIRECT_EMBEDDED */
@@ -2095,6 +2109,9 @@ extern Scheme_Extension_Table *scheme_extension_table;
 #define MZFD_CHECK_READ   3
 #define MZFD_CHECK_WRITE  4
 #define MZFD_REMOVE       5
+#define MZFD_CREATE_VNODE 6
+#define MZFD_CHECK_VNODE  7
+#define MZFD_REMOVE_VNODE 8
 
 /*========================================================================*/
 
