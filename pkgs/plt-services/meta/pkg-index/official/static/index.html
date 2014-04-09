@@ -1,0 +1,92 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN" "http://www.w3.org/TR/REC-html40/loose.dtd">
+<html>
+  <head>
+    <title>Packages</title>
+    <script src="/sorttable.js"></script>
+    <link rel="stylesheet" href="/plt-theme/jquery-ui-1.10.3.custom.min.css" />
+    <script src="//code.jquery.com/jquery-1.10.1.min.js"></script>
+    <script src="//code.jquery.com/ui/1.10.3/jquery-ui.js"></script>
+    <script src="/index.js"></script>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <div class="racketnav"><div class="navcontent"><table border="0" cellpadding="0" cellspacing="0" width="100%"><tbody><tr><td><a href="http://racket-lang.org/"><span class="navtitle" style="font-size: 100px; vertical-align: middle;">(</span><span class="navtitle" style="font-size: 80px; vertical-align: middle;">(</span><span class="navtitle" style="font-size: 60px; vertical-align: middle;">(</span><span class="navtitle" style="font-size: 40px; vertical-align: middle;">&nbsp;</span><img alt="[logo]" src="/logo.png" style="vertical-align: middle; margin: 13px 0.25em 0 0; border: 0;"><span class="navtitle" style="font-size: 80px; vertical-align: middle;">Racket</span><span class="navtitle" style="font-size: 40px; vertical-align: middle;">&nbsp;</span><span class="navtitle" style="font-size: 60px; vertical-align: middle;">)</span><span class="navtitle" style="font-size: 80px; vertical-align: middle;">)</span><span class="navtitle" style="font-size: 100px; vertical-align: middle;">)</span></a></td><td class="helpiconcell"><span class="helpicon"><a href="http://racket-lang.org/help.html">Need Help?</a></span></td></tr><tr><td colspan="2"><table width="100%"><tbody><tr><td class="navlinkcell"><span class="navitem"><span class="navlink"><a href="http://racket-lang.org/">About</a></span></span></td><td class="navlinkcell"><span class="navitem"><span class="navlink"><a href="http://racket-lang.org/download/">Download</a></span></span></td><td class="navlinkcell"><span class="navitem"><span class="navlink"><a href="http://docs.racket-lang.org/">Documentation</a></span></span></td><td class="navlinkcell"><span class="navitem"><span class="navcurlink"><a href="/">Packages</a></span></span></td><td class="navlinkcell"><span class="navitem"><span class="navlink"><a href="http://racket-lang.org/community.html">Community</a></span></span></td><td class="navlinkcell"><span class="navitem"><span class="navlink"><a href="http://racket-lang.org/learning.html">Learning</a></span></span></td></tr></tbody></table></td></tr></tbody></table></div></div>
+
+    <div class="breadcrumb">
+      <span><a href="/">Packages</a></span>
+      <span id="logout"></span>
+    </div>
+    <p id="search_menu"></p>
+
+    <div id="login" class="package">
+      <table>
+        <tr><td>Email Address:</td><td><input id="login_email_text" type="text"></td></tr>
+        <tr><td>Password:</td><td><input id="login_passwd_text" type="password"></td></tr>
+        <tr id="login_confirm_row"><td>Confirm Password:</td><td><input id="login_confirm_text" type="password"></td></tr>
+        <tr id="login_code_row"><td>Email Code:</td><td><input id="login_code_text" type="password"></td></tr>
+        <tr><td colspan="2" id="login_error"></td></tr>
+      </table>
+      <button id="login_button">Log In</button>
+      <p>If you enter an unclaimed email address, then we will email
+        you a code. If you type in that code and confirm the password
+        you typed in, then we will create an account for you with the
+        given password.</p>
+      <p>If you enter an claimed email address, but an incorrect
+        password, then we will email you a code. If you type in that
+        code and confirm the password you typed in, then we will change
+        your password to the one you typed in.</p>
+      <p>Passwords are transferred over an HTTPS connection, but not
+        the same connection you got this page from. The passwords are
+        transferred in plain-text, but stored on the server in the
+        delicious bcrypt format. This means that someone could hack
+        our server and watch you transmit your password live but not
+        be able to use our password database.</p>
+    </div>
+
+    <div id="package_info" class="package">
+      <table>
+        <tr><td>Package Name:</td><td><span id="pi_name"></span></td></tr>
+        <tr><td>Ring:</td><td><span id="pi_ring"></span></td></tr>
+        <tr><td>Authors:</td><td><span id="pi_authors"></span></td></tr>
+        <tr id="pi_add_author_row"><td></td><td><input type="text" id="pi_add_author_text" class="text ui-widget-content ui-corner-all" /><button id="pi_add_author_button">Add Author</button></td></tr>
+        <tr><td>Source:</td><td><span id="pi_source"></span></td></tr>
+        <tr><td>Checksum:</td><td><span id="pi_checksum"></span></td></tr>
+        <tr><td>Last Updated:</td><td><span id="pi_last_updated"></span></td></tr>
+        <tr><td>Last Checked:</td><td><span id="pi_last_checked"></span></td></tr>
+        <tr><td>Last Edit:</td><td><span id="pi_last_edit"></span></td></tr>
+        <tr><td>Description:</td><td><span id="pi_description"></span></td></tr>
+        <tr><td>Tags:</td><td><span id="pi_tags"></span></td></tr>
+        <tr><td></td><td><input type="text" id="pi_add_tag_text" class="text ui-widget-content ui-corner-all" /><button id="pi_add_tag_button">Add Tag</button></td></tr>
+        <tr id="pi_versions_row"><td>Versions Exceptions</td><td><table id="pi_versions"></table></td></tr>
+        <tr id="pi_add_version_row"><td></td><td><label>Version:</label> <input type="text" id="pi_add_version_text" class="text ui-widget-content ui-corner-all" /><br /><label>Source:</label> <input type="text" id="pi_add_version_source_text" class="text ui-widget-content ui-corner-all" /><button id="pi_add_version_button">Add Version Exception</button></td></tr>
+        <tr id="pi_dependencies_row"><td>Dependencies</td><td><span id="pi_dependencies"></span></td></tr>
+        <tr id="pi_conflicts_row"><td>Conflicts</td><td><span id="pi_conflicts"></span></td></tr>
+        <tr><td>Modules</td><td><span id="pi_modules"></span></td></tr>
+        <tr id="pi_delete_row"><td colspan="2"><button id="pi_delete_button">Delete
+        Package</button><br />(there is no undo!)</td></tr>
+      </table>
+
+      <div id="pi_install" class="install">Install this package with:<br><br><tt>raco pkg install <span id="pi_name_inst"></span></tt><br><br>or, with the 'File|Install Package...' menu option in DrRacket.</div>
+    </div>
+
+    <table class="packages sortable">
+      <thead>
+        <tr>
+          <th></th>
+          <th>Package</th>
+          <th>Authors</th>
+          <th>Description</th>
+          <th>Tags</th>
+        </tr>
+      </thead>
+      <tbody id="packages_table">
+      </tbody>
+    </table>
+    <div id="footer">
+      Powered by <a href="http://racket-lang.org">Racket</a> and a
+      mess of ugly JS. Written
+      by <a href="http://faculty.cs.byu.edu/~jay">Jay McCarthy</a>.
+      <a href="/atom.xml">Atom</a> feed available.
+    </div>
+  </body>
+</html>

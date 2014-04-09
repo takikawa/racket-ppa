@@ -1,0 +1,89 @@
+
+/* This file contains information that was gathered by the configure script. */
+
+#ifndef __MZSCHEME_CONFIGURATION_INFO__
+#define __MZSCHEME_CONFIGURATION_INFO__
+
+/* The size of a `char', as computed by sizeof. */
+#undef SIZEOF_CHAR
+
+/* The size of a `int', as computed by sizeof. */
+#undef SIZEOF_INT
+
+/* The size of a `short', as computed by sizeof. */
+#undef SIZEOF_SHORT
+
+/* The size of a `long', as computed by sizeof. */
+#undef SIZEOF_LONG
+
+/* The size of a `long long', as computed by sizeof. */
+#undef SIZEOF_LONG_LONG
+
+/* The size of a `void *', as computed by sizeof. */
+#undef SIZEOF_VOID_P
+
+/* Whether `intptr_t' is available. */
+#undef HAVE_INTPTR_T
+
+/* Whether `uintptr_t' is available. */
+#undef HAVE_UINTPTR_T
+
+#ifdef HAVE_INTPTR_T
+# include <inttypes.h>
+#endif
+#ifndef HAVE_INTPTR_T
+typedef long intptr_t;
+#endif
+#ifndef HAVE_UINTPTR_T
+typedef unsigned long uintptr_t;
+#endif
+
+/* Endianness. */
+#undef SCHEME_BIG_ENDIAN
+
+/* Direction of stack growth: 1 = up, -1 = down, 0 = unknown. */
+#undef STACK_DIRECTION
+
+/* Whether nl_langinfo works. */
+#undef HAVE_CODESET
+
+/* Whether getaddrinfo works. */
+#undef HAVE_GETADDRINFO
+
+/* Whether __attribute__ ((noinline)) works. */
+#undef MZ_USE_NOINLINE
+
+/* Whether pthread_rwlock is available. */
+#undef HAVE_PTHREAD_RWLOCK
+
+/* When poll(), epoll(), kqueue(), etc. is available: */
+#undef HAVE_POLL_SYSCALL
+#undef HAVE_EPOLL_SYSCALL
+#undef HAVE_INOTIFY_SYSCALL
+#undef HAVE_KQUEUE_SYSCALL
+
+/* When mmap() and mprotect() are available: */
+#undef HAVE_MMAP_MPROTECT
+
+/* Enable futures: */
+#undef MZ_USE_FUTURES
+
+/* Enable places --- 3m only: */
+#ifdef MZ_PRECISE_GC
+#undef MZ_USE_PLACES
+#endif
+
+/* Whether __sync_bool_compare_and_swap() works: */
+#undef MZ_CAS_AVAILABLE
+
+/* Configure use of pthreads for the user-thread timer. */
+#undef USE_PTHREAD_INSTEAD_OF_ITIMER
+
+/* Enable single-precision floats [as default]: */
+#undef USE_SINGLE_FLOATS
+#undef USE_SINGLE_FLOATS_AS_DEFAULT
+
+/* To disable extflonums when they would otherwise work: */
+#undef MZ_NO_EXTFLONUMS
+
+#endif

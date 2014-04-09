@@ -1,0 +1,1597 @@
+#!/bin/sh
+#| -*- scheme -*-
+exec racket -um "$0" "$@"
+|#
+#lang racket/base
+
+#|
+
+This file contains "properties" of various files and directories in the Racket
+tree.  Its format is briefly described below, but it is mainly intended to be
+used as a command-line script -- run it with `-h' to find out how to use it.
+In addition, you can make it work as a git command -- put this in a file
+called "git-prop" somewhere in your path (make sure to "chmod +x" it):
+
+  #!/bin/sh
+  top="$(git rev-parse --show-toplevel)" || exit 1
+  exec "$top/collects/meta/props" "$@"
+
+and use it as a git command: `git prop cmd args...'.  This will use the script
+from the work tree that you're now in, with any racket executable that happens
+to be on your $PATH.  This is fine, because the script reads and writes itself,
+unelated to the racket version that runs it.
+
+As described above, the format of this file makes it easy to edit manually, but
+it should be considered internal and mostly manipulated by running it as a
+script.  Specifically, when the script updates the contents, it will write
+things in a certain way regardless of how it was when the file was read in.
+
+The data is contained in a specially marked comment.  Its format is a
+sequence of path and properties for it:
+
+  <path> <prop> <val> <prop> <val> ...
+
+where <path> is a "/"-delimited string (relative to the racket root), <prop>
+is one of a few known property symbols, and <val> is the assigned value.  The
+value is should follow the predicate specification for the property, which is
+defined as `known-props' before the properties data block; note that it is
+assumed that the data in this file is all valid, so take care if you edit it
+manually.  Properties of a directory apply to all sub-paths in it (but this
+might not be the case for future properties).  A property can overwrite a
+previous value that was already set, which means that if you really want to set
+properties manually, you can just an appropriate line at the end but note that
+the data is expected to have the correct format (it is checked when properties
+are set by running this file as a script).
+
+Requiring this file builds the data table and provides an interface for
+properties, intended to be used by meta tools.  In these functions, `path' is a
+path argument that is given as a "/"-delimited and normalized path
+string (no ".", "..", "//", or a "/" suffix) relative to the racket root, and
+path/s is either such a string or a list of them.
+
+* (get-prop path/s prop [default]
+            #:strict? [strict? #f] #:as-string? [as-string? #f])
+
+  Returns the property value of a given path.  The `default' argument is used
+  similarly to `hash-ref' (can be a thunk, a value, or if not specified an
+  exception is raised).  If `strict?' is true, then the property value of the
+  path itself is returned, not inheriting values from parent paths.  If
+  `as-string?' is true, then the string form of the property is returned (but
+  note that if there is no property value, the default is used as is in either
+  case).  See the known-props for how properties translate to/from strings.
+
+* (set-prop! path/s prop value
+             #:warn? [warn? #t] #:as-string? [as-string? #f])
+
+  Sets the value of a (known) proprty for a given path or paths.  If `warn?' is
+  true, an exception is raised if the property is already set to the value for
+  the (any) path.  If `as-string?' is true, then the input `value' is expected
+  to be a string that will be parsed according to the property's spec (and
+  verified in the process) -- otherwise the value is used as is with no
+  verification.
+
+  Note that this function does not rewrite the file, use `write-props' for
+  that.
+
+* (del-prop! path/s prop #:warn? [warn? #t])
+
+  Similar to `set-prop!', except that it removes a property from the given
+  path (or paths).  The property is removed from the path itself, so this will
+  have no effect if a parent path has a value.  If `warn?' is true, an
+  exception is raised if the property is not directly set for path.
+
+* (write-props)
+
+  Writes all properties back into *this* file.  The properties are normalized:
+  paths and properties are sorted, redundant entries are removed.  This
+  minimizes the data (in case the file is edited manually), and minimizes
+  changes to the file when it is modified.
+
+|#
+
+;; ----------------------------------------------------------------------------
+
+(provide get-prop set-prop! del-prop! write-props)
+
+;; ----------------------------------------------------------------------------
+
+;; This could use `meta/tree/tree' in the future, it's pretty similar.
+(struct Tree (name [subs #:mutable] [props #:mutable] in-db?))
+(define (Tree-subs/sorted tree)
+  (sort (Tree-subs tree) string<?
+        #:key (λ (t) (symbol->string (Tree-name t))) #:cache-keys? #t))
+
+;; Descriptors for known properties
+(struct Prop (name description parse unparse))
+
+(define props-tree (Tree #f '() '() #f))
+(define known-props #f)
+
+;; used to throw an error message that fits uses as a program and when running
+;; as a script.
+(define running-as-script? #f)
+(define (script-name)
+  ((compose string->symbol path-element->string file-name-from-path)
+   (find-system-path 'run-file)))
+(define (error* who fmt . args)
+  (if (or running-as-script? (not who))
+    (apply raise-user-error (script-name) fmt args)
+    (apply error who fmt args)))
+
+(define (warn fmt . args)
+  ;; maybe it's better to use log-warning and make it show when used as a
+  ;; script?
+  (fprintf (current-error-port) "warning: ~a\n" (apply format fmt args)))
+
+(define (find-prop who pname [error-message "unknown property: ~.s"])
+  (if (Prop? pname)
+    pname ; might happen when `set-prop!' calls `get-prop'
+    (or (for/or ([p (in-list known-props)])
+          (and (eq? pname (Prop-name p)) p))
+        (error* who error-message pname))))
+
+(define (path->symbols path-string)
+  (if (equal? "" path-string)
+    '()
+    (map string->symbol (regexp-split #rx"/" path-string))))
+
+(define rx:bad-path
+  #rx"^/|/$|\\\\|(?:^|/)(|\\.\\.?)(?:/|$)")
+(define rx:bad-pathchar
+  ;; instead of checking `path-string?', just heavily restrict the set of
+  ;; allowed characters -- so not all paths can be used with this code, but
+  ;; such paths are mostly ones that we won't want in the code anyway so do
+  ;; this as a sanity check for adding such paths to the repository.  It may
+  ;; need updating if more characters are allowed in the future.
+  #rx"[^/.a-zA-Z0-9%_+-]")
+
+(define (validate-path-string path-string who [only-warn? #f])
+  (define (bad why)
+    (error* who "invalid path argument, expecting a ~a, got: ~e"
+            why path-string))
+  (unless (string? path-string) (bad "a string"))
+  (when (and ((string-length path-string) . > . 0)
+             (regexp-match? rx:bad-path path-string))
+    (bad "relative `/'-delimited string, no `/' suffix, `//', `.', or `..'"))
+  (when (regexp-match? rx:bad-pathchar path-string)
+    (if only-warn?
+      (warn "~s is a bad path argument" path-string)
+      (error* who "invalid path argument, ~s is not allowed, got: ~e\n~a~a"
+              (regexp-match rx:bad-pathchar path-string) path-string
+              "(note: if paths with this character are needed, then this"
+              " script needs to be exteded to allow them)"))))
+
+(define (parse-prop-string prop str who)
+  (with-handlers ([exn? (λ (e) (error* who "bad value for `~a', ~a: ~s"
+                                       (Prop-name prop) (exn-message e) str))])
+    ((Prop-parse prop) str)))
+
+(define (get-prop path-string prop-name [default get-prop]
+                  #:strict? [strict? #f] #:as-string? [as-string? #f])
+  (validate-path-string path-string 'get-prop #t) ; no errors
+  (define upchain
+    ;; take the chain going up from the most specific node, so that properties
+    ;; of a directory apply to subpaths
+    (let loop ([path (path->symbols path-string)]
+               [upchain (list props-tree)])
+      (define sub
+        (and (pair? path)
+             (let ([fst (car path)])
+               (ormap (λ (sub) (and (eq? (Tree-name sub) fst) sub))
+                      (Tree-subs (car upchain))))))
+      (cond [sub (loop (cdr path) (cons sub upchain))]
+            [(not strict?) upchain]
+            [(pair? path) '()]
+            [else (list (car upchain))])))
+  (define prop (find-prop 'get-prop prop-name))
+  (cond [(ormap (λ (tree) (assq prop-name (Tree-props tree))) upchain)
+         => (λ (x) ((if as-string? (Prop-unparse prop) values) (cdr x)))]
+        [(eq? get-prop default)
+         (error* 'get-prop "no `~s' property for \"~a\"" prop-name path-string)]
+        [(procedure? default) (default)]
+        [else default]))
+
+(define (single->list x) (if (list? x) x (list x)))
+
+(define (set-prop! path-string/s prop-name val/string
+                   #:warn [warn? #t] #:as-string? [as-string? #f])
+  (define prop (find-prop 'set-prop! prop-name))
+  (define val
+    (if as-string? (parse-prop-string prop val/string 'set-prop!) val))
+  (for ([path (in-list (single->list path-string/s))])
+    (validate-path-string path 'set-prop!)
+    (if (and warn? (equal? val (get-prop path prop (gensym))))
+      (warn "not setting `~s' for ~s to ~a" prop-name path
+            "a value it already has (possibly via a containing directory)")
+      ;; otherwise set it blindly (will be normalized away when written)
+      (let ([tree (tree-find path #t)])
+        (set-Tree-props! tree (cons (cons prop-name val)
+                                    (Tree-props tree)))))))
+
+(define (del-prop! path-string/s prop-name #:warn? [warn? #t])
+  (define prop (find-prop 'del-prop! prop-name))
+  (for ([path (in-list (single->list path-string/s))])
+    (validate-path-string path 'del-prop!)
+    (let* ([tree  (tree-find path #f)]
+           [props (if tree (Tree-props tree) '())])
+      (cond [(assq prop-name props)
+             (set-Tree-props! tree (filter (λ (p) (not (eq? prop-name (car p))))
+                                           props))]
+            [warn? (warn "no `~s' property on ~s" prop-name path)]))))
+
+(define (tree-find path-string create?)
+  (let loop ([path (path->symbols path-string)] [tree props-tree])
+    (if (null? path)
+      tree
+      (let* ([fst (car path)]
+             [rst (cdr path)]
+             [sub (or (ormap (λ (sub) (and (eq? (Tree-name sub) fst) sub))
+                             (Tree-subs tree))
+                      (and create?
+                           ;; keep track of properties that are actually in the
+                           ;; db, for verification
+                           (let ([new (Tree fst '() '()
+                                            (and (null? rst) create?))])
+                             (set-Tree-subs! tree (cons new (Tree-subs tree)))
+                             new)))])
+        (and sub (loop (cdr path) sub))))))
+
+(define (find-root)
+  (let loop ([p this-file] [n 5]) ; look only a few level up
+    (let-values ([(base _1 _2) (split-path p)])
+      (and base
+           (or (and (andmap (λ (d) (directory-exists? (build-path p d)))
+                            '("racket" "pkgs"))
+                    p)
+               (if (> n 0)
+                 (loop base (sub1 n))
+                 (error* #f "could not find the racket root from ~a"
+                         (path-only this-file))))))))
+
+;; ----------------------------------------------------------------------------
+;; Reading and writing
+
+(require racket/file racket/path racket/list racket/string
+         (for-syntax racket/base))
+
+(define-syntax (this-file stx)
+  (let ([src (syntax-source stx)])
+    (if (path? src)
+      (datum->syntax stx src stx)
+      (raise-syntax-error 'props "must be required from a file"))))
+
+(define rx:props-start #rx#"#\\|[ \r\n]+#:begin-props *\r?\n[ \r\n]+")
+(define props-end-token '#:end-props)
+
+(define (read-props* in)
+  (define (malformed why [line? #t])
+    (error* 'read-props "malformed props file: ~a~a" why
+            (if line?
+              (let-values ([(line col pos) (port-next-location in)])
+                (format "at line #~a" line))
+              "")))
+  (port-count-lines! in)
+  (unless (regexp-match? rx:props-start in)
+    (malformed "beginning markup not found" #f))
+  (let loop ([tree #f] [prop-name #f])
+    (define x (read in))
+    (cond [(eq? x props-end-token)
+           ;; done, check that there's no leftovers
+           (when prop-name (malformed "property with no value at the end"))
+           (unless (regexp-match? #rx#"[ \r\n]*\\|#[ \r\n]+$" in)
+             (malformed "unexpected text found at the end of the file"))]
+          [prop-name
+           ;; register a given property value
+           (set-Tree-props! tree (cons (cons prop-name x) (Tree-props tree)))
+           (loop tree #f)]
+          [(string? x)
+           ;; new path, find the node or create if none
+           (loop (tree-find x #t) #f)]
+          [(find-prop #f x "bad datum `~.s'")
+           ;; new prop
+           (loop (or tree (malformed "initial property has no path")) x)]
+          [else (malformed (format  x))])))
+
+(define (read-props) (call-with-input-file* this-file read-props*))
+
+(define (*write-props old new)
+  (let ([m (regexp-match rx:props-start old 0 #f new)])
+    (unless m
+      (error* 'write-props
+              "beginning markup not found while writing new file"))
+    (write-bytes (car m) new)
+    (let loop ([tree props-tree] [path ""])
+      (when (pair? (Tree-props tree))
+        (fprintf new "~s" path)
+        (for ([p (in-list (Tree-props tree))])
+          (fprintf new " ~s ~s" (car p) (cdr p)))
+        (newline new))
+      (for ([sub (in-list (Tree-subs tree))])
+        (loop sub (let ([s (symbol->string (Tree-name sub))])
+                    (if (equal? "" path) s (string-append path "/" s))))))
+    (fprintf new "\n~s |#\n" props-end-token)))
+
+(define (write-props)
+  (define known-prop-names (map Prop-name known-props))
+  ;; normalize the tree, to minimize changes to the file and remove redundant
+  ;; entries that could be added manually
+  (let loop ([tree props-tree] [up-props '()])
+    (define normalized-props
+      (for*/list ([p (in-list known-prop-names)]
+                  [p (in-value (let ([cur (assq p (Tree-props tree))])
+                                 (and cur (not (member cur up-props)) cur)))]
+                  #:when p)
+        p))
+    (set-Tree-props! tree normalized-props)
+    (when (pair? (Tree-subs tree))
+      (let ([up-props (append normalized-props up-props)]
+            [subs (Tree-subs/sorted tree)])
+        (set-Tree-subs! tree (for*/list ([sub (in-list subs)]
+                                         [sub (in-value (loop sub up-props))]
+                                         #:when sub)
+                               sub))))
+    (and (or (pair? (Tree-subs tree)) (pair? (Tree-props tree))) tree))
+  (let (;; temp file in the same directory => fail early if cannot write to it
+        ;; and make a rename possible; copy from this file to preserve being
+        ;; executable
+        [temp (make-temporary-file (format "~a~~a" this-file) this-file)])
+    (dynamic-wind
+      void
+      (λ () (call-with-output-file* temp #:exists 'truncate
+              (λ (new) (call-with-input-file* this-file
+                         (λ (old) (*write-props old new)))))
+            (delete-file this-file)
+            (rename-file-or-directory temp this-file))
+      (λ () (when (file-exists? temp) (delete-file temp))))))
+
+;; ----------------------------------------------------------------------------
+;; Verify this database
+
+(define no-props-needed
+  '(#rx"(?:~|[.]bak)$"
+    #rx"(?:^|/)(?:#|[.]git)"
+    #rx"/compiled$"
+    #rx"^(?:README|bin|lib|include|[.]mailmap|add-on|zos|house-calls)$"
+    #rx"^collects/info-domain$"
+    #rx"^doc/[^/]*$"
+    #rx"(?:^|/)[.]DS_Store$"
+    #rx"^[^/]*[.](?:app|exe)$"))
+
+(define (verify)
+  (define errors 0)
+  (define (path-warning path fmt . more)
+    (when (= 0 errors) (newline))
+    (set! errors (add1 errors))
+    (printf "  ~a: ~a\n" (or path "<ROOT>") (apply format fmt more)))
+  (define (uncovered-subs path/ subs)
+    (for*/list ([fn (in-list (directory-list (if (equal? path/ "") "." path/)))]
+                [str (in-value (path-element->string fn))]
+                #:unless (memq (string->symbol str) subs)
+                [subp (in-value (string-append path/ str))]
+                #:unless (for/or ([rx (in-list no-props-needed)])
+                           (regexp-match? rx subp)))
+      subp))
+  (define prop-names (map Prop-name known-props))
+  (define (merge-props propss path/ others)
+    ;; Used to detect collapsible properties, might be disabled, or
+    ;; maybe just output them to stderr if that leads to an email only
+    ;; when there are changes.
+    (filter
+     values
+     (for/list ([pname (in-list prop-names)])
+       (define values
+         (for*/list ([props (in-list propss)]
+                     [a (in-value (assq pname props))]
+                     #:when a)
+           (cdr a)))
+       (cond [(null? values) #f]
+             [(memq (void) values) (cons pname (void))]
+             [else
+              (define value (car values))
+              (define rest  (cdr values))
+              (define same? (andmap (λ (v) (equal? value v)) rest))
+              (when (and same? (pair? rest) (null? others))
+                (path-warning (string-append path/ "...")
+                              "all ~s sub-properties are ~s" pname value)
+                ;; Printing the others is usually too verbose.
+                ;; (define rx (regexp (string-append "^" (regexp-quote path/))))
+                ;; (define os (map (λ (o) (regexp-replace rx o "")) others))
+                ;; (define os*
+                ;;   (if (> (length os) 20) (append (take os 20) '("...")) os))
+                ;; (printf "   others: ~a\n" (string-join os* ", "))
+                )
+              (cons pname (if same? (car values) (void)))]))))
+  (define (loop tree base-path base-props)
+    (define name (Tree-name tree))
+    (define path (and name (string-append base-path (symbol->string name))))
+    (define props (Tree-props tree))
+    (define all-props (append props base-props))
+    (define subs (Tree-subs tree))
+    (when (eq? '|| name)
+      (path-warning base-path "empty name (trailing slash?)"))
+    (unless (equal? (reverse (Tree-subs tree)) (Tree-subs/sorted tree))
+      (path-warning path "unsorted sub-paths"))
+    (when (and (Tree-in-db? tree) (null? props))
+      (path-warning path "no properties"))
+    (for ([p (in-list props)] #:when (member p base-props))
+      (path-warning path "redundant property: ~s := ~s" (car p) (cdr p)))
+    (define path/ ; #f for a file, "" for the root
+      (cond [(not path) ""]
+            [(directory-exists? path) (string-append path "/")]
+            [(file-exists? path) #f]
+            [else (path-warning path "Missing file/directory")
+                  #f]))
+    (define others (if path/ (uncovered-subs path/ (map Tree-name subs)) '()))
+    (unless (assq 'responsible all-props)
+      (define (bad p) (path-warning p "no responsible"))
+      (if path/ (for-each bad others) (bad path)))
+    (if path/
+      (let* ([rs (for/list ([sub (in-list subs)]) (loop sub path/ all-props))]
+             [others (append others (map (λ (x) (string-append path/ x))
+                                         (append-map car rs)))])
+        (cons others (merge-props (cons props (map cdr rs)) path/ others)))
+      (cons others props)))
+  (define root (find-root))
+  (printf "Root: ~a..." root)
+  (parameterize ([current-directory root]) (loop props-tree #f '()))
+  (if (errors . > . 0)
+    (error* #f "~s path errors" errors)
+    (printf " no errors.\n")))
+
+;; ----------------------------------------------------------------------------
+;; Main
+
+(provide main)
+(define (main . args)
+  (define (usage what)
+    (error* #f "~a, use \"help\" for more info" what))
+  (define (help . _)
+    (define (para . lines)
+      (newline)
+      (for ([line lines]) (printf "  ~a\n" line)))
+    (printf "Usage: ~a subcommand args ...\n" (script-name))
+    (para
+     "This is a utility for manipulating properties in the PLT repository."
+     "Each of the following subcommands expects a property name from a set of"
+     "known properties.  The given paths are normalized to be relative to the"
+     "racket root for the tree holding this script *if* it is in such a tree"
+     "(determined by inspecting a few known directories), otherwise an error"
+     "is raised."
+     ""
+     "Note: this script holds the data that it changes, so you need to commit"
+     "it after changes are made."
+     ""
+     "Note: it does not depend on the racket installation that runs it -- you"
+     "just need to use the script from the work directory that you want to"
+     "deal with; if you add a git alias like:"
+     "  prop = \"!$(git rev-parse --show-toplevel)/collects/meta/props\""
+     "to your global git config file (usually ~/.gitconfig), then you'll be"
+     "able to run it as `git prop' (the first part of this finds the root of"
+     "your workdir)."
+     ""
+     "Path arguments can also be given via stdin (each on a line) if the"
+     "command-line path argument is a single `-'.  In this mode the paths are"
+     "not normalized, and it is intended for infrastructure scripts only.")
+    (printf "\nAvailable subcommands:\n")
+    (for ([v (in-list (verbs))]) (printf "  ~a\n" (cadr v)))
+    (printf "\nKnown properties:\n")
+    (for ([p (in-list known-props)])
+      (printf "  ~s: ~a\n" (Prop-name p) (Prop-description p)))
+    (para "See in-script comments for a racket interface"))
+  (define (verbs)
+    `([("help" "h" "-h" "--help") "help: show this help" ,help]
+      [("get") "get <prop> <path/s>" ,get]
+      [("set") "set <prop> <val> <path/s>" ,set]
+      [("del") "del <prop> <path/s>" ,del]
+      [("mv")  "mv  <path> <path>" ,mv]
+      [("verify") "verify: check that paths exist" ,verify]))
+  (define check-existing-paths? #t)
+  (define (paths->list path paths)
+    (if (and (equal? "-" path) (null? paths))
+      (for/list ([p (in-lines (current-input-port))]) p)
+      (let ([root (normalize-path (find-root))])
+        (define (norm p)
+          (unless (or (not check-existing-paths?)
+                      (file-exists? p)
+                      (directory-exists? p))
+            (error* #f "path does not exist: ~s" p))
+          (let ([n (find-relative-path root (normalize-path p))])
+            (if (equal? n root)
+              ""
+              (let* ([n (path->string n)]
+                     [n (case (system-type)
+                          [(windows) (regexp-replace* #rx"\\\\" n "/")]
+                          [else n])])
+                (if (regexp-match #rx"^\\.\\.(?:/|$)" n)
+                  (error* #f "path is not in the racket tree: ~s" p)
+                  n)))))
+        (if (null? paths) (norm path) (map norm (cons path paths))))))
+  (define (get prop path . paths)
+    (let ([prop (string->symbol prop)]
+          [seq  (paths->list path paths)])
+      (if (not (list? seq))
+        ;; single path: don't show it, and error if none
+        (printf "~a\n" (get-prop seq prop #:as-string? #t))
+        ;; multiple paths: show them, ignore errors
+        (for ([p (in-list seq)])
+          (let ([v (get-prop p prop (void) #:as-string? #t)])
+            (unless (void? v) (printf "~a: ~s\n" p v)))))))
+  (define (set prop val path . paths)
+    (let ([prop (string->symbol prop)])
+      (set-prop! (paths->list path paths) prop val #:as-string? #t)
+      (write-props)))
+  (define (del prop path . paths)
+    (set! check-existing-paths? #f)
+    (del-prop! (paths->list path paths) (string->symbol prop))
+    (write-props))
+  (define (mv from to)
+    (set! check-existing-paths? #f)
+    (let ([nonesuch (gensym 'none)]
+          [from (paths->list from null)]
+          [to (paths->list to null)])
+      (for ([p (in-list (map Prop-name known-props))])
+        (let ([v (get-prop from p nonesuch #:strict? #t)])
+          (unless (eq? v nonesuch)
+            (set-prop! to p v)
+            (del-prop! from p)))))
+    (write-props))
+  (set! running-as-script? #t)
+  ;; (perhaps add some `--force' flag to (set! check-existing-paths? #f))
+  (define verb (if (pair? args) (car args) (usage "missing subcommand")))
+  (define verb-args (cdr args))
+  (define proc
+    (or (for/or ([v (in-list (verbs))] #:when (member verb (car v))) (caddr v))
+        (usage (format "unknown subcommand ~s" verb))))
+  (if (procedure-arity-includes? proc (length verb-args))
+    (apply proc verb-args)
+    (usage (format "bad number of arguments for ~s" verb))))
+
+;; ----------------------------------------------------------------------------
+
+(set!
+ known-props
+ (list
+  ;; --------------------
+  (Prop
+   'responsible
+   "responsible person/people (comma separated names)"
+   (λ (str)
+     (let* ([strs (remove* '("") (regexp-split #rx" *, *" str))]
+            [syms (map string->symbol strs)])
+       (cond [(ormap (λ (s) (and (not (regexp-match? #rx"^[a-z]+" s)) s)) strs)
+              => (λ (s) (error (format "~s is an invalid name" s)))]
+             [(not (= (length syms) (length (remove-duplicates syms eq?))))
+              (error "repeated names")]
+             [else syms])))
+   (λ (syms) (string-join (map symbol->string syms) ",")))
+  ;; --------------------
+  (Prop
+   'drdr:command-line
+   (string-join
+    '("command-line string"
+      "space-separated with \"~s\" for the file, empty => no execution,"
+      "missing => use the default (\"racket ~s\" for *.rkt etc,"
+      "\"racket -f ~s\" for *.rktl)")
+    "\n      ")
+   (λ (str)
+     (define (bad) (error "expecting an empty string, or one with `~s'"))
+     (if (equal? str "")
+       #f
+       (let* ([str (regexp-replace #rx"^ +" str "")]
+              [str (regexp-replace #rx" +$" str "")]
+              [str (regexp-replace #rx"  +" str " ")])
+         (if (equal? str "")
+           #f
+           (let* ([xs (regexp-split #rx" " str)]
+                  [xs (cons (string->symbol (car xs))
+                            (map (λ (x) (if (equal? x "~s") '* x)) (cdr xs)))]
+                  [*-tail (memq '* xs)]
+                  [commands '(racket gracket gracket-text raco mzc)])
+             (unless (memq (car xs) commands)
+               (error
+                (format "unidentified command \"~s\", expecting one of ~s"
+                        (car xs) commands)))
+             (unless *-tail
+               (error "missing \"~s\" in the command"))
+             (when (memq '* (cdr *-tail))
+               (error "can't use more than a single `~s'"))
+             xs)))))
+   (λ (cmd)
+     (define (bad)
+       (error 'drdr:command-line "bad command-line value: ~.s" cmd))
+     (cond [(not cmd) ""]
+           [(not (list? cmd)) (bad)]
+           [else (string-join (for/list ([x (in-list cmd)])
+                                (cond [(eq? x '*) "~s"]
+                                      [(symbol? x) (symbol->string x)]
+                                      [(string? x) x]
+                                      [else (bad)]))
+                              " ")])))
+  ;; --------------------
+  (Prop
+   'drdr:timeout
+   "timeout in seconds"
+   (λ (str) (if (regexp-match? #rx"^ *[0-9]+ *$" str)
+              (string->number str)
+              (error "expecting an integer")))
+   number->string)
+   ;; --------------------
+  (Prop
+   'drdr:random
+   "is file output random?"
+   (λ (str) (cond [(equal? str "yes") #t]
+                  [(equal? str "no")  #f]
+                  [else (error "expecting \"yes\" or \"no\"")]))
+   (λ (b) (if b "yes" "no")))))
+
+;; read the arguments here, so just requiring this file verifies the data
+(read-props)
+
+;; ----------------------------------------------------------------------------
+
+#| #:begin-props
+
+".travis.yml" responsible (samth)
+"INSTALL.txt" responsible (mflatt)
+"Makefile" responsible (mflatt)
+"README.txt" responsible (mflatt)
+"build" responsible (mflatt)
+"native-pkgs" responsible (mflatt)
+"pkgs/algol60" responsible (mflatt robby)
+"pkgs/base" responsible (mflatt)
+"pkgs/cext-lib" responsible (mflatt)
+"pkgs/cext-lib/compiler/commands/ctool.rkt" drdr:command-line (mzc *)
+"pkgs/cext-lib/dynext/private/stdio.rkt" drdr:command-line #f
+"pkgs/compatibility-pkgs" responsible (eli mflatt robby samth)
+"pkgs/compatibility-pkgs/compatibility-doc/mzlib" responsible (mflatt)
+"pkgs/compatibility-pkgs/compatibility-lib/mzlib/contract.rkt" responsible (robby)
+"pkgs/compatibility-pkgs/compatibility-lib/mzlib/foreign.rkt" responsible (eli)
+"pkgs/compatibility-pkgs/compatibility-lib/mzlib/kw.rkt" responsible (eli)
+"pkgs/compatibility-pkgs/compatibility-lib/mzlib/match.rkt" responsible (samth)
+"pkgs/compatibility-pkgs/compatibility-lib/mzlib/plt-match.rkt" responsible (samth)
+"pkgs/compatibility-pkgs/compatibility-lib/mzlib/shared.rkt" responsible (robby)
+"pkgs/compatibility-pkgs/compatibility-lib/mzlib/traceld.rkt" drdr:command-line #f
+"pkgs/compatibility-pkgs/compatibility-test/tests/mzlib/awk.rktl" drdr:command-line #f
+"pkgs/compatibility-pkgs/compatibility-test/tests/mzlib/binc.rktl" drdr:command-line #f
+"pkgs/compatibility-pkgs/compatibility-test/tests/mzlib/contract-mzlib-test.rktl" responsible (robby) drdr:command-line (racket "-r" *)
+"pkgs/compatibility-pkgs/compatibility-test/tests/mzlib/pconvert.rktl" drdr:command-line #f
+"pkgs/compatibility-pkgs/compatibility-test/tests/mzlib/serialize.rktl" drdr:random #t
+"pkgs/compatibility-pkgs/compatibility-test/tests/mzlib/structlib.rktl" drdr:random #t
+"pkgs/compatibility-pkgs/compatibility-test/tests/mzlib/tests.rktl" drdr:command-line #f
+"pkgs/compatibility-pkgs/compatibility-test/tests/mzlib/threadlib.rktl" drdr:random #t
+"pkgs/compatibility-pkgs/compatibility-test/tests/mzlib/ttt/uinc4.rktl" drdr:command-line #f
+"pkgs/compatibility-pkgs/compatibility-test/tests/mzlib/uinc3.rktl" drdr:command-line #f
+"pkgs/compiler-pkgs" responsible (mflatt jay)
+"pkgs/compiler-pkgs/compiler-lib/compiler/commands/exe-dir.rkt" drdr:command-line #f
+"pkgs/compiler-pkgs/compiler-lib/compiler/commands/exe.rkt" drdr:command-line #f
+"pkgs/compiler-pkgs/compiler-lib/compiler/commands/make.rkt" drdr:command-line (mzc *)
+"pkgs/compiler-pkgs/compiler-lib/compiler/commands/pack.rkt" drdr:command-line #f
+"pkgs/compiler-pkgs/compiler-lib/compiler/commands/test.rkt" responsible (jay)
+"pkgs/compiler-pkgs/compiler-lib/compiler/demodularizer" responsible (jay)
+"pkgs/compiler-pkgs/compiler-lib/compiler/demodularizer/batch.rkt" drdr:command-line #f
+"pkgs/compiler-pkgs/compiler-test/tests/compiler" responsible (jay)
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/demodularizer/demod-test.rkt" drdr:timeout 600
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/embed" responsible (mflatt)
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/embed/embed-me4.rktl" drdr:command-line #f
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/embed/embed-me9.rkt" drdr:command-line #f
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/embed/embed-planet-1/alt.rkt" drdr:command-line #f
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/embed/embed-planet-1/dyn-sub.rkt" drdr:command-line #f
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/embed/embed-planet-1/main.rkt" drdr:command-line #f
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/embed/embed-planet-1/other.rkt" drdr:command-line #f
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/embed/embed-planet-2" drdr:command-line #f
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/embed/test.rkt" drdr:command-line #f
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/regression.rkt" responsible (mflatt)
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/test" drdr:command-line (raco "test" "-r" "--" *)
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/zo-test-worker.rkt" drdr:command-line #f
+"pkgs/compiler-pkgs/compiler-test/tests/compiler/zo-test.rkt" drdr:command-line (racket * "-I" "-S" "-t" "60" "-v" "-R")
+"pkgs/contract-profile" responsible (stamourv)
+"pkgs/data-pkgs" responsible (ryanc samth)
+"pkgs/datalog" responsible (jay)
+"pkgs/db-pkgs" responsible (ryanc)
+"pkgs/db-pkgs/db-lib/db/odbc.rkt" drdr:command-line #f
+"pkgs/db-pkgs/db-lib/db/private/odbc/connection.rkt" drdr:command-line #f
+"pkgs/db-pkgs/db-lib/db/private/odbc/dbsystem.rkt" drdr:command-line #f
+"pkgs/db-pkgs/db-lib/db/private/odbc/ffi.rkt" drdr:command-line #f
+"pkgs/db-pkgs/db-lib/db/private/odbc/main.rkt" drdr:command-line #f
+"pkgs/db-pkgs/db-test/tests/db/programs/web-test.rkt" drdr:command-line #f
+"pkgs/deinprogramm" responsible (sperber)
+"pkgs/deinprogramm/deinprogramm/convert-explicit.scm" drdr:command-line #f
+"pkgs/deinprogramm/deinprogramm/define-record-procedures.scm" drdr:command-line #f
+"pkgs/deinprogramm/deinprogramm/line3d.scm" drdr:command-line #f
+"pkgs/deinprogramm/deinprogramm/quickcheck/quickcheck.scm" drdr:command-line #f
+"pkgs/deinprogramm/deinprogramm/quickcheck/random.scm" drdr:command-line #f
+"pkgs/deinprogramm/deinprogramm/run-dmda-code.rkt" drdr:command-line (mzc *)
+"pkgs/distributed-places-pkgs" responsible (tewk)
+"pkgs/distributed-places-pkgs/distributed-places-lib/racket/place/distributed/examples/hello-world.rkt" drdr:command-line #f
+"pkgs/distro-build" responsible (mflatt)
+"pkgs/distro-build/add-catalog.rkt" drdr:command-line (mzc *)
+"pkgs/distro-build/assemble-site.rkt" drdr:command-line (mzc *)
+"pkgs/distro-build/drive-clients.rkt" drdr:command-line (mzc *)
+"pkgs/distro-build/install-for-docs.rkt" drdr:command-line (mzc *)
+"pkgs/distro-build/install-pkgs.rkt" drdr:command-line (mzc *)
+"pkgs/distro-build/installer.rkt" drdr:command-line (mzc *)
+"pkgs/distro-build/manage-snapshots.rkt" drdr:command-line (mzc *)
+"pkgs/distro-build/pack-and-catalog.rkt" drdr:command-line (mzc *)
+"pkgs/distro-build/pack-collects.rkt" drdr:command-line (mzc *)
+"pkgs/distro-build/serve-catalog.rkt" drdr:command-line (mzc *)
+"pkgs/distro-build/set-config.rkt" drdr:command-line (mzc *)
+"pkgs/distro-build/unpack-collects.rkt" drdr:command-line (mzc *)
+"pkgs/draw-pkgs" responsible (mflatt)
+"pkgs/drracket-pkgs" responsible (robby)
+"pkgs/drracket-pkgs/drracket/drracket/drracket.rkt" drdr:command-line (mzc *)
+"pkgs/drracket-pkgs/drracket/drracket/main.rkt" drdr:command-line (mzc *)
+"pkgs/drracket-pkgs/drracket/drracket/private/dock-icon.rkt" drdr:command-line (raco "make" *)
+"pkgs/drracket-pkgs/drracket/drracket/private/drracket-normal.rkt" drdr:command-line (mzc *)
+"pkgs/drracket-pkgs/drracket/drracket/private/launcher-mred-bootstrap.rkt" drdr:command-line (mzc *)
+"pkgs/drracket-pkgs/drracket/drracket/private/launcher-mz-bootstrap.rkt" drdr:command-line (mzc *)
+"pkgs/drracket-pkgs/drracket/drracket/private/stick-figures.rkt" drdr:command-line (mzc *)
+"pkgs/drracket-pkgs/drracket/drracket/tool-lib.rkt" drdr:command-line (mzc *)
+"pkgs/drracket-pkgs/drracket/drscheme/drscheme.rkt" drdr:command-line (mzc *)
+"pkgs/drracket-pkgs/drracket/drscheme/main.rkt" drdr:command-line (mzc *)
+"pkgs/drracket-pkgs/drracket/drscheme/tool-lib.rkt" drdr:command-line (mzc *)
+"pkgs/drracket-pkgs/drracket/gui-debugger" responsible (gmarceau mflatt)
+"pkgs/drracket-pkgs/drracket/lang" responsible (mflatt robby matthias)
+"pkgs/drracket-pkgs/drracket/repo-time-stamp" responsible (eli)
+"pkgs/drracket-pkgs/drracket/scribble/tools/drracket-buttons.rkt" drdr:command-line #f
+"pkgs/drracket-pkgs/drracket/scribble/tools/private/mk-drs-bitmaps.rkt" drdr:command-line (racket * "skip")
+"pkgs/drracket-pkgs/drracket/scribblings/drracket/incremental-keybindings.rkt" drdr:command-line #f
+"pkgs/drracket-pkgs/drracket-test/tests/drracket" drdr:random #t
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/easter-egg.rkt" drdr:timeout 480
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/example-tool.rkt" drdr:command-line (gracket *)
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/follow-log.rkt" drdr:command-line (raco "make" *)
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/hangman.rkt" responsible (robby matthias) drdr:command-line (gracket *)
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/io.rkt" drdr:command-line (gracket *) drdr:timeout 500
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/language-test.rkt" responsible (robby matthias) drdr:command-line (gracket *) drdr:timeout 1500
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/memory-log.rkt" drdr:command-line (gracket *)
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/module-lang-test.rkt" drdr:command-line (gracket "-j" "-e" "(void (putenv \"PLTDRDRTEST\" \"yes\"))" "-t" *) drdr:timeout 800
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/no-write-and-frame-leak.rkt" drdr:timeout 500
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/populate-compiled.rkt" drdr:command-line #f
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/randomly-click-language-dialog.rkt" drdr:command-line (mzc *)
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/randomly-click-preferences.rkt" drdr:command-line (mzc *)
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/repl-test-debug.rkt" drdr:command-line (gracket *) drdr:timeout 300
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/repl-test-debugprofile.rkt" drdr:command-line (gracket *) drdr:timeout 300
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/repl-test-misc.rkt" drdr:command-line (gracket *)
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/repl-test-raw.rkt" drdr:command-line (gracket *) drdr:timeout 300
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/snip/collapsed.rkt" drdr:command-line (racket "-l" "racket/gui/base" "-t" *)
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/snip/run-all.rkt" drdr:timeout 800
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/snips.rkt" drdr:command-line (gracket *)
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/syncheck-test.rkt" drdr:command-line (gracket *) drdr:timeout 200
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/teaching-lang-coverage.rkt" responsible (robby matthias) drdr:command-line (gracket *)
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/teaching-lang-save-file.rkt" responsible (robby matthias) drdr:command-line (gracket *)
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/teaching-lang-sharing-modules.rkt" drdr:timeout 800
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/teachpack.rkt" responsible (robby matthias) drdr:command-line (gracket *)
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/test-engine-test.rkt" responsible (sperber) drdr:command-line (gracket *) drdr:timeout 480
+"pkgs/drracket-pkgs/drracket-test/tests/drracket/tool-lib-and-sig.rkt" drdr:command-line (raco "make" *)
+"pkgs/drracket-pkgs/drracket-test/tests/jpr" responsible (mflatt)
+"pkgs/drracket-pkgs/drracket-test/tests/jpr/balle-grav-frot.ss" drdr:command-line (mzc "-k" *)
+"pkgs/drracket-pkgs/drracket-test/tests/jpr/dessine-arbre.ss" drdr:command-line (mzc "-k" *)
+"pkgs/drracket-pkgs/drracket-test/tests/jpr/foo.ss" drdr:command-line (mzc "-k" *)
+"pkgs/drracket-pkgs/drracket-test/tests/jpr/jeu-du-chaos.ss" drdr:command-line (mzc "-k" *)
+"pkgs/drracket-pkgs/drracket-test/tests/jpr/mon-script.ss" drdr:command-line (mzc "-k" *)
+"pkgs/drracket-pkgs/drracket-test/tests/jpr/monte-carlo.ss" drdr:command-line (mzc "-k" *)
+"pkgs/drracket-pkgs/drracket-test/tests/jpr/streams.ss" drdr:command-line (mzc "-k" *)
+"pkgs/drracket-pkgs/drracket-test/tests/jpr/valrose.ss" drdr:command-line (mzc "-k" *)
+"pkgs/ds-store-pkgs" responsible (mflatt)
+"pkgs/eli-tester" responsible (eli)
+"pkgs/eopl" responsible (dvanhorn)
+"pkgs/errortrace-pkgs" responsible (mflatt)
+"pkgs/errortrace-pkgs/errortrace-test/tests/errortrace/alert.rkt" responsible (eli)
+"pkgs/errortrace-pkgs/errortrace-test/tests/errortrace/main.rkt" drdr:command-line #f
+"pkgs/frtime" responsible (jay gcooper)
+"pkgs/frtime/animation.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/analog-clock.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/ball-on-string.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/delay-mouse.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/growing-points.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/mirror-lens.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/mouse.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/needles.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/orbit-mouse.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/piston.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/pong.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/push-pull-ball.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/rotation.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/tetris.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/tile-game.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/demos/ufo.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/gui/demo" drdr:command-line (mzc *)
+"pkgs/frtime/gui.rkt" drdr:command-line (mzc *)
+"pkgs/frtime/tests/time.rkt" drdr:random #t
+"pkgs/future-visualizer-pkgs" responsible (jamesswaine)
+"pkgs/games" responsible (mflatt robby)
+"pkgs/games/chat-noir" responsible (robby matthias)
+"pkgs/games/gobblet/check.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/games/gobblet/robot.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/games/gobblet/test-explore.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/games/gobblet/test-model.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/games/main.rkt" drdr:command-line (mzc *)
+"pkgs/games/paint-by-numbers/main.rkt" drdr:command-line #f
+"pkgs/games/paint-by-numbers/raw-problems/build-final.rkt" drdr:command-line (mzc *)
+"pkgs/games/paint-by-numbers/raw-problems/build-rows-cols.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/games/paint-by-numbers/raw-problems/build-solution-sets.rkt" drdr:command-line (gracket *)
+"pkgs/games/paint-by-numbers/raw-problems/size-calculation.rkt" drdr:command-line (mzc *)
+"pkgs/games/parcheesi/make-bitmap.rkt" drdr:command-line (mzc *)
+"pkgs/gui-pkg-manager-pkgs" responsible (mflatt)
+"pkgs/gui-pkg-manager-pkgs/gui-pkg-manager-lib/pkg/gui/main.rkt" drdr:command-line (mzc *)
+"pkgs/gui-pkgs" responsible (mflatt)
+"pkgs/gui-pkgs/gui-doc/mrlib" responsible (robby)
+"pkgs/gui-pkgs/gui-doc/scribblings/framework" responsible (robby)
+"pkgs/gui-pkgs/gui-lib/embedded-gui/private/tests" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/framework" responsible (robby)
+"pkgs/gui-pkgs/gui-lib/framework/private/encode.rkt" drdr:command-line (racket *)
+"pkgs/gui-pkgs/gui-lib/mred/edit-main.rkt" drdr:command-line (mzc *)
+"pkgs/gui-pkgs/gui-lib/mred/private/wx/cocoa" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mred/private/wx/win32" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib" responsible (mflatt robby)
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/actual-bigger.rkt" drdr:command-line (gracket *)
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/example-min.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/example.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/minimal.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/more-tests-margin-aligned.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/more-tests-margin.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/more-tests-min-stretchable.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/more-tests-min.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/more-tests-text.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/more-tests.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/old-bugs" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/stretchable-editor-snip-test-min.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/stretchable-editor-snip-test.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/test-locked-pasteboard.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/test-snip-lib.rkt" drdr:command-line (gracket *)
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/test.rkt" drdr:command-line (gracket *)
+"pkgs/gui-pkgs/gui-lib/mrlib/private/aligned-pasteboard/tests/test2.rkt" drdr:command-line (gracket *)
+"pkgs/gui-pkgs/gui-test/framework" responsible (robby)
+"pkgs/gui-pkgs/gui-test/framework/tests/canvas.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/debug.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/exit.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/frame.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/framework-test-engine.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/group-test.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/handler-test.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/keys.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/load.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/main.rkt" drdr:command-line (gracket *) drdr:timeout 360
+"pkgs/gui-pkgs/gui-test/framework/tests/mem.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/panel-single.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/panel.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/pasteboard.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/prefs.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/search.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/test-suite-utils.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/framework/tests/text.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/gui-pkgs/gui-test/tests/gracket/auto.rktl" drdr:command-line #f
+"pkgs/gui-pkgs/gui-test/tests/gracket/blits.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-test/tests/gracket/draw-mem.rkt" drdr:random #t
+"pkgs/gui-pkgs/gui-test/tests/gracket/draw.rkt" drdr:command-line (mzc *)
+"pkgs/gui-pkgs/gui-test/tests/gracket/flush-stress.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-test/tests/gracket/item.rkt" drdr:command-line (mzc *)
+"pkgs/gui-pkgs/gui-test/tests/gracket/mem.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-test/tests/gracket/paramz.rktl" drdr:command-line (gracket "-f" *) drdr:random #t
+"pkgs/gui-pkgs/gui-test/tests/gracket/png.rktl" drdr:command-line #f
+"pkgs/gui-pkgs/gui-test/tests/gracket/showkey.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-test/tests/gracket/text-scale.rktl" drdr:command-line #f
+"pkgs/gui-pkgs/gui-test/tests/gracket/unflushed-circle.rkt" drdr:command-line #f
+"pkgs/gui-pkgs/gui-test/tests/gracket/windowing.rktl" drdr:command-line (gracket "-f" *) drdr:random #t
+"pkgs/gui-pkgs/gui-test/tests/gracket/wxme-doc-random.rkt" drdr:command-line (mzc *)
+"pkgs/gui-pkgs/gui-test/tests/gracket/wxme-random.rkt" drdr:command-line #f
+"pkgs/honu" responsible (mflatt rafkind)
+"pkgs/htdp-pkgs" responsible (matthias mflatt robby)
+"pkgs/htdp-pkgs/htdp-doc/teachpack/2htdp/scribblings/image-util.rkt" responsible (robby)
+"pkgs/htdp-pkgs/htdp-doc/teachpack/2htdp/scribblings/image.scrbl" responsible (robby)
+"pkgs/htdp-pkgs/htdp-lib/2htdp" responsible (matthias)
+"pkgs/htdp-pkgs/htdp-lib/2htdp/image.rkt" responsible (robby)
+"pkgs/htdp-pkgs/htdp-lib/2htdp/private/image-core.rkt" responsible (robby)
+"pkgs/htdp-pkgs/htdp-lib/2htdp/private/image-more.rkt" responsible (robby)
+"pkgs/htdp-pkgs/htdp-lib/2htdp/private/img-err.rkt" responsible (robby)
+"pkgs/htdp-pkgs/htdp-lib/2htdp/uchat/chatter.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/htdp-pkgs/htdp-lib/2htdp/uchat/server.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/htdp-pkgs/htdp-lib/graphics" responsible (mflatt robby)
+"pkgs/htdp-pkgs/htdp-lib/graphics/tests/sixlib.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-lib/graphics/turtle-test.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/htdp-pkgs/htdp-lib/graphics/value-turtles-test.rkt" drdr:command-line (mzc *)
+"pkgs/htdp-pkgs/htdp-lib/htdp/graphing.rkt" drdr:command-line (mzc *)
+"pkgs/htdp-pkgs/htdp-lib/stepper" responsible (clements)
+"pkgs/htdp-pkgs/htdp-lib/teachpack" responsible (matthias)
+"pkgs/htdp-pkgs/htdp-lib/teachpack/balls.ss" drdr:command-line (mzc *)
+"pkgs/htdp-pkgs/htdp-lib/teachpack/htdp/graphing.rkt" drdr:command-line (mzc *)
+"pkgs/htdp-pkgs/htdp-lib/test-engine" responsible (kathyg)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/batch-io-xexpr.rkt" drdr:command-line (raco "make" *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/full-scene-visible.rkt" drdr:command-line (gracket *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/image-equality-performance-htdp.rkt" responsible (robby)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/image-equality-performance.rkt" responsible (robby)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/jpr-bug.rkt" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/mouse-evt.rkt" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/mp.rkt" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/on-release-no-key.rkt" drdr:command-line (raco "make" *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/on-tick-universe-with-limit.rkt" drdr:command-line (gracket *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/pad1.rkt" drdr:command-line (raco "make" *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/perform-record.rkt" drdr:command-line (gracket *) drdr:timeout 300
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/perform-robby.rkt" drdr:command-line (gracket *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/perform-whack.rkt" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/profile-robby.rkt" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/record-stop-when.rkt" drdr:command-line (gracket *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/record.rkt" drdr:command-line (gracket *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/release.rkt" drdr:command-line (gracket *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/struct-universe.rkt" drdr:command-line (gracket *) drdr:random #t
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/test-image.rkt" responsible (robby)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/ufo-rename.rkt" drdr:command-line (gracket *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/universe-receive.rkt" drdr:command-line (raco "make" *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/universe-restart.rkt" drdr:command-line (gracket *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/tests/world0-stops.rkt" drdr:command-line (gracket *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/utest/balls.rkt" drdr:command-line (mzc *)
+"pkgs/htdp-pkgs/htdp-test/2htdp/utest/sam.rkt" drdr:command-line (mzc *)
+"pkgs/htdp-pkgs/htdp-test/htdp/tests/convert.rkt" drdr:command-line (mzc *)
+"pkgs/htdp-pkgs/htdp-test/htdp/tests/dir.rkt" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/htdp/tests/elevator.rkt" drdr:command-line (mzc *)
+"pkgs/htdp-pkgs/htdp-test/htdp/tests/graphing.rkt" drdr:command-line (mzc *)
+"pkgs/htdp-pkgs/htdp-test/htdp/tests/gui.rkt" responsible (robby) drdr:command-line (mzc *)
+"pkgs/htdp-pkgs/htdp-test/htdp/tests/hangman-error.rkt" drdr:command-line (mzc *)
+"pkgs/htdp-pkgs/htdp-test/htdp/tests/matrix-client.rkt" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/htdp/tests/matrix-example.rkt" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/htdp/tests/world-mouse.rkt" drdr:command-line (mzc *)
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang" responsible (robby mflatt matthias)
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/advanced.rktl" drdr:timeout 360
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/beg-adv.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/beg-bega.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/beg-intm.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/beg-intml.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/bega-adv.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/beginner-abbr.rktl" drdr:timeout 300
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/htdp-image.rktl" responsible (robby)
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/htdp.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/intermediate-lambda.rktl" drdr:timeout 360
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/intermediate.rktl" drdr:timeout 360
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/intm-adv.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/intm-intml.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/htdp-lang/intmlam-adv.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper" responsible (clements)
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/already-defined.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/automatic-tests.rkt" drdr:timeout 600
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/bad-letrec-test.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/big-bang-test.rkt" drdr:command-line (mzc *)
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/constructor-redexes.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/global-prim-reduction.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/image-test.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/intermediate-y.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/jump-to-ui-test.rkt" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/lambda-test.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/let-test.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/letrec-test.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/local-define-struct.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/local-test-2.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/local-test.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/long-error-message.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/multiply-defined.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/name-chaining.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/no-else-clause.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/non-procedure.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/print-convert-test.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/printing-reducing-test.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/procedure-display.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/right-redex.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/structures.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/symbol-identifier.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/symbols.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/syntax-error-ordering.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/test-or.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/two-tests.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/unannotated.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/undefined.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/world-test.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/stepper/write-display.rktl" drdr:command-line #f
+"pkgs/htdp-pkgs/htdp-test/tests/test-engine" responsible (kathyg)
+"pkgs/html-pkgs" responsible (jay mflatt)
+"pkgs/icons" responsible (ntoronto)
+"pkgs/images-pkgs" responsible (ntoronto)
+"pkgs/images-pkgs/images-test/images/tests/effects-tests.rkt" drdr:command-line #f
+"pkgs/lazy" responsible (eli stchang)
+"pkgs/lazy/tests/main.rkt" drdr:command-line #f
+"pkgs/macro-debugger-pkgs" responsible (ryanc)
+"pkgs/macro-debugger-pkgs/macro-debugger/tests/macro-debugger/all-tests.rkt" drdr:command-line (racket * "--text")
+"pkgs/main-distribution" responsible (eli jay matthias mflatt robby)
+"pkgs/main-distribution-test" responsible (eli jay matthias mflatt robby)
+"pkgs/make" responsible (mflatt)
+"pkgs/math-pkgs" responsible (ntoronto)
+"pkgs/math-pkgs/math-test/math/tests/bigfloat-custodian.rkt" drdr:random #t
+"pkgs/math-pkgs/math-test/math/tests/matrix-tests.rkt" drdr:timeout 120
+"pkgs/mysterx" responsible (mflatt)
+"pkgs/mysterx/main.rkt" drdr:command-line (mzc *)
+"pkgs/mysterx/mysterx.rkt" drdr:command-line (mzc *)
+"pkgs/mzcom" responsible (mflatt)
+"pkgs/mzcom/tests/test.rktl" drdr:command-line #f
+"pkgs/mzscheme-pkgs" responsible (mflatt)
+"pkgs/mzscheme-pkgs/mzscheme-lib/mzscheme/examples/cfile.rkt" drdr:command-line #f
+"pkgs/mzscheme-pkgs/mzscheme-lib/mzscheme/examples/curses-demo.rkt" drdr:command-line #f
+"pkgs/mzscheme-pkgs/mzscheme-lib/mzscheme/examples/fmod-ez.rkt" drdr:command-line #f
+"pkgs/mzscheme-pkgs/mzscheme-lib/mzscheme/examples/msgbox.rkt" drdr:command-line #f
+"pkgs/mzscheme-pkgs/mzscheme-lib/mzscheme/examples/tree-finish.rkt" drdr:command-line #f
+"pkgs/net-pkgs" responsible (eli jay mflatt robby)
+"pkgs/net-pkgs/net-test/tests/net/main.rkt" drdr:command-line #f
+"pkgs/net-pkgs/net-test/tests/net/stress" responsible (jay)
+"pkgs/net-pkgs/net-test/tests/net/stress/websocket.rkt" drdr:random #t
+"pkgs/net-pkgs/net-test/tests/net/url-port.rkt" responsible (jay) drdr:timeout 300
+"pkgs/net-pkgs/net-test/tests/net/websocket" responsible (jay)
+"pkgs/net-pkgs/net-test/tests/net/websocket/example.rkt" drdr:command-line #f
+"pkgs/net-pkgs/net-test/tests/net/websocket.rkt" responsible (jay)
+"pkgs/parser-tools-pkgs" responsible (mflatt)
+"pkgs/parser-tools-pkgs/parser-tools-lib/parser-tools/private-lex/error-tests.rkt" drdr:command-line #f
+"pkgs/pconvert-lib" responsible (robby)
+"pkgs/pict-pkgs" responsible (mflatt robby)
+"pkgs/picturing-programs" responsible (sbloch)
+"pkgs/plai" responsible (jay)
+"pkgs/plai/tests/gc/bad-mutators" drdr:command-line #f
+"pkgs/plai/tests/gc/other-mutators" drdr:command-line #f
+"pkgs/plai/tests/gc/run-test.rkt" drdr:command-line (racket * "-g")
+"pkgs/plai/tests/gc2/bad-mutators" drdr:command-line #f
+"pkgs/plai/tests/gc2/other-mutators" drdr:command-line #f
+"pkgs/plai/tests/gc2/run-test.rkt" drdr:command-line (racket * "-g")
+"pkgs/plai/tests/test-random-mutator.rkt" responsible (jay robby)
+"pkgs/plai/tests/web.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/planet-pkgs" responsible (robby mflatt)
+"pkgs/planet-pkgs/planet-test/tests/planet" responsible (robby jay)
+"pkgs/planet-pkgs/planet-test/tests/planet/cmdline-tool.rkt" drdr:command-line (raco "make" *)
+"pkgs/planet-pkgs/planet-test/tests/planet/docs-build.rkt" drdr:command-line (raco "make" *)
+"pkgs/planet-pkgs/planet-test/tests/planet/examples/dummy-module.rkt" drdr:command-line #f
+"pkgs/planet-pkgs/planet-test/tests/planet/examples/scribblings-package" drdr:command-line #f
+"pkgs/planet-pkgs/planet-test/tests/planet/lang.rkt" drdr:command-line (raco "make" *)
+"pkgs/planet-pkgs/planet-test/tests/planet/run-all.rkt" drdr:timeout 500 drdr:random #t
+"pkgs/planet-pkgs/planet-test/tests/planet/submod.rkt" drdr:command-line #f
+"pkgs/planet-pkgs/planet-test/tests/planet/test-docs-complete.rkt" drdr:command-line (raco "make" *)
+"pkgs/planet-pkgs/planet-test/tests/planet/thread-safe-resolver.rkt" drdr:command-line (raco "make" *) drdr:timeout 1000
+"pkgs/planet-pkgs/planet-test/tests/planet/version.rkt" drdr:command-line (raco "make" *)
+"pkgs/plot-pkgs" responsible (ntoronto)
+"pkgs/plot-pkgs/plot-doc/plot/scribblings/plot.scrbl" drdr:timeout 180
+"pkgs/plot-pkgs/plot-test/plot/tests/extreme-bounds-tests.rkt" drdr:timeout 150
+"pkgs/plot-pkgs/plot-test/plot/tests/slideshow-test.rkt" drdr:command-line #f
+"pkgs/plt-services" responsible (eli mflatt)
+"pkgs/plt-services/meta" responsible (eli)
+"pkgs/plt-services/meta/build" drdr:command-line #f
+"pkgs/plt-services/meta/check-dists.rkt" drdr:command-line #f
+"pkgs/plt-services/meta/drdr" responsible (jay) drdr:command-line #f
+"pkgs/plt-services/meta/drdr2" responsible (jay) drdr:command-line #f
+"pkgs/plt-services/meta/images/mkheart.rkt" drdr:command-line #f
+"pkgs/plt-services/meta/images/taking-screenshots/racket-widget.scm" drdr:command-line #f
+"pkgs/plt-services/meta/pkg-index" responsible (jay)
+"pkgs/plt-services/meta/pkg-index/official" drdr:command-line #f
+"pkgs/plt-services/meta/pkg-index/planet-compat" drdr:command-line #f
+"pkgs/plt-services/meta/pkg-push/push-catalog.rkt" drdr:command-line #f
+"pkgs/plt-services/meta/props" responsible (eli jay) drdr:command-line (racket "-um" * "verify")
+"pkgs/plt-services/meta/web" drdr:command-line #f
+"pkgs/preprocessor" responsible (eli)
+"pkgs/profile-pkgs" responsible (eli samth stamourv)
+"pkgs/profile-pkgs/profile-lib/analyzer.rkt" drdr:command-line (raco "test" *)
+"pkgs/r5rs-pkgs" responsible (mflatt)
+"pkgs/r6rs-pkgs" responsible (mflatt)
+"pkgs/r6rs-pkgs/r6rs-lib/r6rs/run.rkt" drdr:command-line (mzc *)
+"pkgs/racket-pkgs" responsible (eli jay matthias mflatt robby ryanc samth)
+"pkgs/racket-pkgs/at-exp-lib" responsible (eli mflatt)
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/auto.rkt" drdr:command-line (racket * "--" "racket" "earley") drdr:random #t
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/mk-bigloo.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/mk-chicken.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/mk-gambit.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed" responsible (stamourv samth)
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/collatz-q.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/collatz.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/cpstak.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/ctak.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/dderiv.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/deriv.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/div.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/fft.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/graphs.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/lattice2.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/maze2.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/mazefun.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/nestedloop.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/nfa.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/nothing.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/nqueens.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/nucleic3.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/paraffins.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/puzzle.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/ray.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/tak.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/takl.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/takr.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/takr2.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/common/typed/triangle.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/mz/redsem.rktl" drdr:command-line (racket "-f" * "--" "--skip-struct-test")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/mz/ssax.rktl" drdr:timeout 900
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/places" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/rx/auto.rkt" drdr:command-line (racket * "racket" "simple") drdr:timeout 600 drdr:random #t
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/ackermann.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/auto.rkt" drdr:command-line (racket * "hello") drdr:random #t
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/binarytrees-normal.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/binarytrees-places.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/binarytrees.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/chameneos.rkt" drdr:command-line (racket * "10") drdr:random #t
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/cheapconcurrency.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/fannkuch-redux.rkt" drdr:command-line (racket * "4")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/fannkuch.rkt" drdr:command-line (racket * "4")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/fasta-new.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/fasta.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/hash.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/hash2.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/mandelbrot-futures.rkt" drdr:command-line (racket * "15")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/mandelbrot-generic.rkt" drdr:command-line (racket * "15")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/mandelbrot.rkt" drdr:command-line (racket * "15")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/meteor.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/nbody-generic.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/nbody-vec-generic.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/nbody-vec.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/nbody.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/nestedloop.rkt" drdr:command-line (racket * "2")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/nsieve.rkt" drdr:command-line (racket * "2")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/nsievebits.rkt" drdr:command-line (racket * "2")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/partialsums.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/pidigits-gmp.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/pidigits.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/random.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/recursive.rkt" drdr:command-line (racket * "2")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/run.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/spectralnorm-generic.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/spectralnorm-par.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/spectralnorm.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/spellcheck.rkt" drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/strcat.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/thread-ring.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed" responsible (stamourv samth)
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/ackermann-non-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/ackermann-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/ackermann.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/ary.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/binarytrees-non-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/binarytrees-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/binarytrees.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/chameneos-non-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/chameneos-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/chameneos.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/cheapconcurrency-non-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/cheapconcurrency-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/cheapconcurrency.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/echo.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/except.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/fannkuch-non-optimizing.rkt" drdr:command-line (racket * "4")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/fannkuch-optimizing.rkt" drdr:command-line (racket * "4")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/fannkuch-redux-non-optimizing.rkt" drdr:command-line (racket * "4")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/fannkuch-redux-optimizing.rkt" drdr:command-line (racket * "4")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/fannkuch-redux.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/fannkuch.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/fasta-non-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/fasta-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/fasta.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/fibo.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/hash-non-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/hash-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/hash.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/hash2-non-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/hash2-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/hash2.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/heapsort.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/hello.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/k-nucleotide.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/lists.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/mandelbrot-generic-non-optimizing.rkt" drdr:command-line (racket * "15")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/mandelbrot-generic-optimizing.rkt" drdr:command-line (racket * "15")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/mandelbrot-generic.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/mandelbrot-non-optimizing.rkt" drdr:command-line (racket * "15")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/mandelbrot-optimizing.rkt" drdr:command-line (racket * "15")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/mandelbrot.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/matrix.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/meteor-non-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/meteor-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/meteor.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/moments.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nbody-generic-non-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nbody-generic-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nbody-generic.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nbody-non-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nbody-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nbody-vec-generic-non-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nbody-vec-generic-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nbody-vec-generic.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nbody-vec-non-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nbody-vec-optimizing.rkt" drdr:command-line (racket * "10")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nbody-vec.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nbody.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nestedloop-non-optimizing.rkt" drdr:command-line (racket * "2")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nestedloop-optimizing.rkt" drdr:command-line (racket * "2")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nestedloop.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nsieve-non-optimizing.rkt" drdr:command-line (racket * "2")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nsieve-optimizing.rkt" drdr:command-line (racket * "2")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nsieve.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nsievebits-non-optimizing.rkt" drdr:command-line (racket * "2")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nsievebits-optimizing.rkt" drdr:command-line (racket * "2")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/nsievebits.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/partialsums-non-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/partialsums-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/partialsums.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/pidigits-non-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/pidigits-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/pidigits.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/pidigits1.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/random-non-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/random-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/random.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/recursive-non-optimizing.rkt" drdr:command-line (racket * "2")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/recursive-optimizing.rkt" drdr:command-line (racket * "2")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/recursive.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/regexmatch.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/regexpdna.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/reversecomplement-non-optimizing.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/reversecomplement-optimizing.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/reversecomplement.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/reversefile.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/sieve.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/spectralnorm-generic-non-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/spectralnorm-generic-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/spectralnorm-generic.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/spectralnorm-non-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/spectralnorm-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/spectralnorm.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/spellcheck-non-optimizing.rkt" drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/spellcheck-optimizing.rkt" drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/spellcheck.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/strcat-non-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/strcat-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/strcat.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/sumcol.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/thread-ring-non-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/thread-ring-optimizing.rkt" drdr:command-line (racket * "25")
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/thread-ring.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/wc-non-optimizing.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/wc-optimizing.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/wc.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/wordfreq-non-optimizing.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/wordfreq-optimizing.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/typed/wordfreq.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-doc/compatibility" responsible (asumu stamourv)
+"pkgs/racket-pkgs/racket-doc/dynext" responsible (mflatt)
+"pkgs/racket-pkgs/racket-doc/ffi/examples" responsible (eli)
+"pkgs/racket-pkgs/racket-doc/ffi/examples/c-printf.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/racket-pkgs/racket-doc/ffi/examples/esd.rkt" drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-doc/ffi/examples/magick.rkt" drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-doc/ffi/examples/sndfile.rkt" responsible (clements) drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-doc/ffi/examples/tcl.rkt" drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-doc/ffi/examples/use-c-printf.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/racket-pkgs/racket-doc/ffi/examples/use-esd.rkt" drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-doc/ffi/examples/use-magick.rkt" drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-doc/ffi/examples/use-sndfile.rkt" drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-doc/ffi/examples/use-tcl.rkt" drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-doc/ffi/examples/use-xmmsctrl.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-doc/ffi/examples/use-xosd.rkt" drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-doc/ffi/examples/xmmsctrl.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-doc/ffi/examples/xosd.rkt" drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-doc/file" responsible (mflatt)
+"pkgs/racket-pkgs/racket-doc/help" responsible (robby)
+"pkgs/racket-pkgs/racket-doc/json" responsible (eli)
+"pkgs/racket-pkgs/racket-doc/openssl" responsible (mflatt)
+"pkgs/racket-pkgs/racket-doc/pkg" responsible (jay)
+"pkgs/racket-pkgs/racket-doc/scribblings" responsible (mflatt eli robby matthias)
+"pkgs/racket-pkgs/racket-doc/scribblings/raco" responsible (jay mflatt)
+"pkgs/racket-pkgs/racket-doc/scribblings/reference/generic.scrbl" responsible (asumu stamourv cce)
+"pkgs/racket-pkgs/racket-doc/scribblings/style" responsible (matthias)
+"pkgs/racket-pkgs/racket-doc/syntax" responsible (mflatt)
+"pkgs/racket-pkgs/racket-doc/syntax/scribblings/parse" responsible (ryanc)
+"pkgs/racket-pkgs/racket-doc/syntax/scribblings/parse.scrbl" responsible (ryanc)
+"pkgs/racket-pkgs/racket-doc/version" responsible (eli)
+"pkgs/racket-pkgs/racket-doc/xml" responsible (jay)
+"pkgs/racket-pkgs/racket-test/tests/file" responsible (eli mflatt)
+"pkgs/racket-pkgs/racket-test/tests/file/main.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/future" responsible (jamesswaine mflatt robby)
+"pkgs/racket-pkgs/racket-test/tests/future/future.rkt" drdr:timeout 200 drdr:random #t
+"pkgs/racket-pkgs/racket-test/tests/future/random-future.rkt" drdr:timeout 480 drdr:random #t
+"pkgs/racket-pkgs/racket-test/tests/generic" responsible (asumu stamourv cce)
+"pkgs/racket-pkgs/racket-test/tests/generic/benchmark.rkt" drdr:timeout 300 drdr:random #t
+"pkgs/racket-pkgs/racket-test/tests/info.rkt" responsible (eli)
+"pkgs/racket-pkgs/racket-test/tests/match" responsible (samth)
+"pkgs/racket-pkgs/racket-test/tests/openssl" responsible (mflatt)
+"pkgs/racket-pkgs/racket-test/tests/openssl/basic.rkt" drdr:random #t
+"pkgs/racket-pkgs/racket-test/tests/pkg" responsible (jay) drdr:command-line (mzc *)
+"pkgs/racket-pkgs/racket-test/tests/pkg/test-pkgs" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/pkg/test.rkt" drdr:command-line (raco "test" *)
+"pkgs/racket-pkgs/racket-test/tests/racket" responsible (mflatt)
+"pkgs/racket-pkgs/racket-test/tests/racket/all.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/basic.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/chaperone.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/cm.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/contmark.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/contract" responsible (robby)
+"pkgs/racket-pkgs/racket-test/tests/racket/contract/all.rkt" drdr:command-line (raco "make" *)
+"pkgs/racket-pkgs/racket-test/tests/racket/contract-opt-tests.rkt" responsible (robby) drdr:command-line (racket "-r" *)
+"pkgs/racket-pkgs/racket-test/tests/racket/contract-stress-argmin.rkt" responsible (robby) drdr:command-line (racket "-r" *)
+"pkgs/racket-pkgs/racket-test/tests/racket/contract-stress-take-right.rkt" responsible (robby) drdr:command-line (racket "-r" *)
+"pkgs/racket-pkgs/racket-test/tests/racket/core-tests.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/date.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/embed-in-c.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/expand.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/file.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/filelib.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/fixnum.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/foreign-test.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/format.rkt" drdr:random #t
+"pkgs/racket-pkgs/racket-test/tests/racket/iostream.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/link.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/list.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/module.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/number.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/object.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/optimize.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/pack.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/parallel-build.rkt" drdr:random #t
+"pkgs/racket-pkgs/racket-test/tests/racket/parallel-plot.rkt" drdr:timeout 400
+"pkgs/racket-pkgs/racket-test/tests/racket/parallel.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/path.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/place-chan-rand-help.rkt" responsible (tewk)
+"pkgs/racket-pkgs/racket-test/tests/racket/place-chan-rand.rkt" responsible (tewk)
+"pkgs/racket-pkgs/racket-test/tests/racket/place-channel-fd.rkt" responsible (tewk) drdr:random #t
+"pkgs/racket-pkgs/racket-test/tests/racket/place-channel-fd2.rkt" responsible (tewk)
+"pkgs/racket-pkgs/racket-test/tests/racket/place-channel-ffi.rkt" responsible (tewk)
+"pkgs/racket-pkgs/racket-test/tests/racket/place-channel-socket.rkt" responsible (tewk) drdr:random #t
+"pkgs/racket-pkgs/racket-test/tests/racket/place-channel.rkt" responsible (tewk) drdr:timeout 300 drdr:random #t
+"pkgs/racket-pkgs/racket-test/tests/racket/place-parallel.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/place.rktl" responsible (tewk)
+"pkgs/racket-pkgs/racket-test/tests/racket/places.rkt" responsible (tewk)
+"pkgs/racket-pkgs/racket-test/tests/racket/port.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/portlib.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/procs.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/prompt-sfs.rkt" drdr:random #t
+"pkgs/racket-pkgs/racket-test/tests/racket/prompt-tests.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/prompt.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/quiet.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/read.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/resource.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/runaway-place.rkt" drdr:random #t
+"pkgs/racket-pkgs/racket-test/tests/racket/rx.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/scheme-tests.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/sequence.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/serialize.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/set.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/setup.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/shared-tests.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/srcloc.rktl" responsible (cce)
+"pkgs/racket-pkgs/racket-test/tests/racket/stress" responsible (jay) drdr:random #t
+"pkgs/racket-pkgs/racket-test/tests/racket/stress/contract-lifting.rkt" responsible (robby sstrickl)
+"pkgs/racket-pkgs/racket-test/tests/racket/stress/dict.rkt" drdr:timeout 180
+"pkgs/racket-pkgs/racket-test/tests/racket/stress/fuzz.rkt" responsible (samth mflatt) drdr:command-line (racket * "-c") drdr:timeout 600
+"pkgs/racket-pkgs/racket-test/tests/racket/stress/module-stack.rkt" drdr:timeout 500
+"pkgs/racket-pkgs/racket-test/tests/racket/stx.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/submodule.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/subprocess.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/sync.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/syntax.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/test.rkt" drdr:timeout 600
+"pkgs/racket-pkgs/racket-test/tests/racket/thread.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/thrport.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/trace.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/udp.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/uni-norm.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/unicode.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/unsafe.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/vector.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/racket/will.rktl" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/run-automated-tests.rkt" responsible (eli) drdr:command-line (mzc "-k" *) drdr:timeout 600
+"pkgs/racket-pkgs/racket-test/tests/stress.rkt" responsible (jay)
+"pkgs/racket-pkgs/racket-test/tests/stxparse" responsible (ryanc)
+"pkgs/racket-pkgs/racket-test/tests/stxparse/stress-template.rkt" drdr:command-line #f
+"pkgs/racket-pkgs/racket-test/tests/syntax" responsible (stamourv mflatt)
+"pkgs/racket-pkgs/racket-test/tests/units" responsible (sstrickl)
+"pkgs/racket-pkgs/racket-test/tests/utils/sexp-diff.rkt" responsible (clements)
+"pkgs/racket-pkgs/racket-test/tests/xml" responsible (jay)
+"pkgs/racket-pkgs/racket-test/tests/xml/test-clark.rkt" drdr:command-line #f drdr:timeout 300
+"pkgs/racket-pkgs/racket-test/tests/zo-path.rkt" responsible (mflatt)
+"pkgs/racket-pkgs/racket-test/tests/zo-size.rkt" responsible (jay) drdr:random #t
+"pkgs/racklog" responsible (jay)
+"pkgs/rackunit-pkgs" responsible (ryanc noel)
+"pkgs/rackunit-pkgs/rackunit-doc/rackunit" responsible (jay noel ryanc)
+"pkgs/rackunit-pkgs/rackunit-doc/rackunit/scribblings/file-test.rkt" drdr:command-line #f
+"pkgs/rackunit-pkgs/rackunit-test/tests/rackunit" responsible (jay noel)
+"pkgs/rackunit-pkgs/rackunit-test/tests/rackunit/log.rkt" drdr:command-line (racket "-t" *)
+"pkgs/rackunit-pkgs/rackunit-test/tests/rackunit/pr10950.rkt" drdr:command-line (racket "-t" *)
+"pkgs/rackunit-pkgs/rackunit-test/tests/rackunit/run-tests.rkt" drdr:command-line (racket "-t" *)
+"pkgs/rackunit-pkgs/rackunit-test/tests/rackunit/standalone-check-test.rkt" drdr:command-line #f
+"pkgs/rackunit-pkgs/rackunit-test/tests/rackunit/standalone-test-case-test.rkt" drdr:command-line #f
+"pkgs/rackunit-pkgs/rackunit-test/tests/rackunit/standalone.rkt" drdr:command-line (racket "-jt" *)
+"pkgs/rackunit-pkgs/rackunit-test/tests/rackunit/tl.rkt" drdr:command-line (racket "-t" *)
+"pkgs/readline-pkgs" responsible (mflatt)
+"pkgs/realm" responsible (matthias)
+"pkgs/redex-pkgs" responsible (robby bfetscher)
+"pkgs/redex-pkgs/redex-doc/redex/redex.scrbl" drdr:timeout 300
+"pkgs/redex-pkgs/redex-doc/redex/scribblings/tut.scrbl" drdr:timeout 300
+"pkgs/redex-pkgs/redex-examples/redex/examples/arithmetic.rkt" drdr:command-line (racket * "--no-print")
+"pkgs/redex-pkgs/redex-examples/redex/examples/church.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/combinators.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/compatible-closure.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/delim-cont/randomized-tests-test.rkt" drdr:timeout 240
+"pkgs/redex-pkgs/redex-examples/redex/examples/delim-cont/randomized-tests.rkt" drdr:command-line (racket * "--rules" "2250" "--size" "3") drdr:timeout 240 drdr:random #t
+"pkgs/redex-pkgs/redex-examples/redex/examples/delim-cont/test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/letrec.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/list-machine/slides.rkt" drdr:command-line (raco "make" *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/omega.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/r6rs/r6rs-tests.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/r6rs/racket-vs-redex.rkt" drdr:timeout 180
+"pkgs/redex-pkgs/redex-examples/redex/examples/r6rs/show-examples.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/racket-machine/examples.rkt" drdr:command-line (racket * "--no-pop-ups")
+"pkgs/redex-pkgs/redex-examples/redex/examples/racket-machine/impl-exec.rkt" drdr:command-line (raco "make" *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/racket-machine/randomized-tests.rkt" drdr:timeout 300
+"pkgs/redex-pkgs/redex-examples/redex/examples/racket-machine/reduction-test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/racket-machine/verification-test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/semaphores.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/subject-reduction.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/threads.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-examples/redex/examples/types.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-lib/redex/private/compiler" drdr:command-line #f
+"pkgs/redex-pkgs/redex-test/redex/tests/bitmap-test.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/redex-pkgs/redex-test/redex/tests/check-syntax-test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-test/redex/tests/color-test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-test/redex/tests/compiler" drdr:command-line #f
+"pkgs/redex-pkgs/redex-test/redex/tests/core-layout-test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-test/redex/tests/enum-test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-test/redex/tests/hole-test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-test/redex/tests/keyword-macros-test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-test/redex/tests/matcher-test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-test/redex/tests/pict-test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-test/redex/tests/rg-test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-test/redex/tests/run-tests.rkt" drdr:command-line (racket * "--examples" "--no-bitmap-gui") drdr:timeout 360
+"pkgs/redex-pkgs/redex-test/redex/tests/ryr-test.rkt" drdr:timeout 200 drdr:random #t
+"pkgs/redex-pkgs/redex-test/redex/tests/stepper-test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-test/redex/tests/term-test.rkt" drdr:command-line (mzc *)
+"pkgs/redex-pkgs/redex-test/redex/tests/test-docs-complete.rkt" drdr:command-line (raco "make" *)
+"pkgs/redex-pkgs/redex-test/redex/tests/tl-test.rkt" drdr:command-line (mzc *)
+"pkgs/sandbox-lib" responsible (eli)
+"pkgs/scheme-lib" responsible (mflatt)
+"pkgs/scheme-lib/scheme/match.rkt" responsible (samth)
+"pkgs/schemeunit" responsible (jay)
+"pkgs/scribble-pkgs" responsible (mflatt eli)
+"pkgs/scribble-pkgs/scribble-lib/help/help.rkt" drdr:command-line (mzc *)
+"pkgs/scribble-pkgs/scribble-lib/scribble/html" responsible (eli)
+"pkgs/scribble-pkgs/scribble-lib/scribble/html.rkt" responsible (eli)
+"pkgs/scribble-pkgs/scribble-lib/scribble/jfp/lang.rkt" drdr:command-line (mzc *)
+"pkgs/scribble-pkgs/scribble-lib/scribble/lncs/lang.rkt" drdr:command-line (mzc *)
+"pkgs/scribble-pkgs/scribble-lib/scribble/run.rkt" drdr:command-line (mzc *)
+"pkgs/scribble-pkgs/scribble-test/tests/scribble/main.rkt" drdr:command-line #f
+"pkgs/scribble-pkgs/scribble-test/tests/scriblib" responsible (mflatt)
+"pkgs/scribble-pkgs/scribble-text-lib/scribble/text.rkt" responsible (eli)
+"pkgs/serialize-cstruct-lib" responsible (mflatt)
+"pkgs/sgl" responsible (jay)
+"pkgs/sgl/examples/alpha.rkt" drdr:command-line (mzc *)
+"pkgs/sgl/examples/gears.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/shell-completion" responsible (samth sstrickl stamourv)
+"pkgs/shell-completion/racket-completion.bash" drdr:command-line #f
+"pkgs/shell-completion/racket-completion.zsh" responsible (eli)
+"pkgs/slatex" responsible (sstrickl)
+"pkgs/slatex/pdf-slatex-launcher.rkt" drdr:command-line (mzc *)
+"pkgs/slatex/slatex-launcher.rkt" drdr:command-line (mzc *)
+"pkgs/slideshow-pkgs" responsible (mflatt robby)
+"pkgs/slideshow-pkgs/slideshow-exe/slideshow/examples/interlocking-components.scm" drdr:command-line (mzc *)
+"pkgs/slideshow-pkgs/slideshow-exe/slideshow/start.rkt" drdr:command-line (mzc *)
+"pkgs/slideshow-pkgs/slideshow-exe/slideshow/tutorial-show.rkt" drdr:command-line (mzc *)
+"pkgs/slideshow-pkgs/slideshow-plugin/texpict/face-demo.rkt" drdr:command-line (mzc *)
+"pkgs/snip-pkgs" responsible (mflatt)
+"pkgs/srfi-pkgs" responsible (mflatt noel chongkai jay)
+"pkgs/srfi-pkgs/srfi-lib/srfi/25/arlib.scm" drdr:command-line #f
+"pkgs/srfi-pkgs/srfi-lib/srfi/25/ix-ctor.scm" drdr:command-line #f
+"pkgs/srfi-pkgs/srfi-lib/srfi/25/op-ctor.scm" drdr:command-line #f
+"pkgs/srfi-pkgs/srfi-lib/srfi/67/compare-reference.scm" drdr:command-line #f
+"pkgs/srfi-pkgs/srfi-lib/srfi/74/blob.scm" drdr:command-line #f
+"pkgs/srfi-pkgs/srfi-lib/srfi/78/check-reference.scm" drdr:command-line #f
+"pkgs/srfi-pkgs/srfi-lib/srfi/78/examples-78.scm" drdr:command-line #f
+"pkgs/string-constants-pkgs" responsible (robby)
+"pkgs/swindle" responsible (eli)
+"pkgs/syntax-color-pkgs" responsible (mflatt)
+"pkgs/trace" responsible (mflatt robby)
+"pkgs/typed-racket-pkgs" responsible (samth stamourv asumu endobson)
+"pkgs/typed-racket-pkgs/typed-racket-lib/typed-racket/base-env/base-special-env.rkt" drdr:command-line (raco "make" *)
+"pkgs/typed-racket-pkgs/typed-racket-lib/unstable/logging.rkt" responsible (stamourv)
+"pkgs/typed-racket-pkgs/typed-racket-lib/unstable/match.rkt" responsible (samth)
+"pkgs/typed-racket-pkgs/typed-racket-more/typed/rackunit" responsible (jay)
+"pkgs/typed-racket-pkgs/typed-racket-test/tests/typed-racket/fail" drdr:command-line #f
+"pkgs/typed-racket-pkgs/typed-racket-test/tests/typed-racket/fail/with-type3.rkt" responsible (sstrickl samth stamourv asumu endobson)
+"pkgs/typed-racket-pkgs/typed-racket-test/tests/typed-racket/nightly-run.rkt" drdr:command-line #f
+"pkgs/typed-racket-pkgs/typed-racket-test/tests/typed-racket/optimizer/run.rkt" drdr:timeout 1200
+"pkgs/typed-racket-pkgs/typed-racket-test/tests/typed-racket/optimizer/transform.rkt" drdr:command-line #f
+"pkgs/typed-racket-pkgs/typed-racket-test/tests/typed-racket/run.rkt" drdr:command-line (racket * "--nightly") drdr:timeout 1800
+"pkgs/typed-racket-pkgs/typed-racket-test/tests/typed-racket/succeed/submodules.rkt" drdr:command-line (racket * "1")
+"pkgs/typed-racket-pkgs/typed-racket-test/tests/typed-racket/tr-random-testing.rkt" drdr:timeout 300 drdr:random #t
+"pkgs/typed-racket-pkgs/typed-racket-test/tests/typed-racket/xfail" drdr:command-line #f
+"pkgs/unstable-2d" responsible (robby)
+"pkgs/unstable-contract-lib" responsible (robby ryanc)
+"pkgs/unstable-debug-lib" responsible (samth)
+"pkgs/unstable-flonum-pkgs" responsible (ntoronto)
+"pkgs/unstable-latent-contract-lib" responsible (mflatt ntoronto)
+"pkgs/unstable-list-lib" responsible (ryanc samth)
+"pkgs/unstable-macro-testing-lib" responsible (ryanc)
+"pkgs/unstable-options-lib" responsible (chrdimo robby)
+"pkgs/unstable-parameter-group-lib" responsible (mflatt ntoronto)
+"pkgs/unstable-pkgs" responsible (jay samth cce ryanc)
+"pkgs/unstable-pkgs/unstable-doc/automata" responsible (jay)
+"pkgs/unstable-pkgs/unstable-doc/scribblings/debug.scrbl" responsible (samth)
+"pkgs/unstable-pkgs/unstable-doc/scribblings/hash.scrbl" responsible (samth)
+"pkgs/unstable-pkgs/unstable-doc/scribblings/logging.scrbl" responsible (stamourv)
+"pkgs/unstable-pkgs/unstable-doc/scribblings/match.scrbl" responsible (samth)
+"pkgs/unstable-pkgs/unstable-doc/scribblings/sequence.scrbl" responsible (samth)
+"pkgs/unstable-pkgs/unstable-doc/scribblings/utils.rkt" responsible (samth)
+"pkgs/unstable-pkgs/unstable-doc/temp-c" responsible (jay)
+"pkgs/unstable-pkgs/unstable-lib/automata" responsible (jay)
+"pkgs/unstable-pkgs/unstable-lib/temp-c" responsible (jay)
+"pkgs/unstable-pkgs/unstable-test/tests/unstable/2d" responsible (robby)
+"pkgs/unstable-pkgs/unstable-test/tests/unstable/automata" responsible (jay)
+"pkgs/unstable-pkgs/unstable-test/tests/unstable/list.rkt" responsible (jay)
+"pkgs/unstable-pkgs/unstable-test/tests/unstable/logging.rkt" responsible (stamourv)
+"pkgs/unstable-pkgs/unstable-test/tests/unstable/temp-c" responsible (jay)
+"pkgs/unstable-pkgs/unstable-test/tests/unstable/temp-c/bench-affine.rkt" drdr:random #t
+"pkgs/unstable-pkgs/unstable-test/tests/unstable/temp-c/bench.rkt" drdr:random #t
+"pkgs/unstable-pkgs/unstable-test/tests/unstable/temp-c/id-bench.rkt" drdr:random #t
+"pkgs/unstable-pkgs/unstable-test/tests/unstable/temp-c/ttt-bench.rkt" drdr:random #t
+"pkgs/unstable-pkgs/unstable-test/tests/unstable/temp-c/ttt-players.rkt" drdr:random #t
+"pkgs/unstable-pretty-lib" responsible (cce)
+"pkgs/unstable-redex" responsible (ryanc)
+"pkgs/web-server-pkgs" responsible (jay)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/dummy-10.rkt" drdr:command-line #f
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/dummy-3.rkt" drdr:command-line #f
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/iteration-1.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/iteration-10.rkt" drdr:command-line #f
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/iteration-11.rkt" drdr:command-line #f
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/iteration-2.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/iteration-3.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/iteration-4.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/iteration-5.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/iteration-6.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/iteration-7.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/iteration-8.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/iteration-9.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/model-3.rkt" drdr:command-line #f
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/no-use-redirect.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/send-suspend-1.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/send-suspend-2.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/test-static.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-doc/web-server/scribblings/tutorial/examples/use-redirect.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-lib/web-server/default-web-root/configuration-table.rkt" drdr:command-line #f
+"pkgs/web-server-pkgs/web-server-lib/web-server/default-web-root/htdocs/servlets/examples/add-dispatch.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-lib/web-server/default-web-root/htdocs/servlets/examples/bad-xexpr.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-lib/web-server/default-web-root/htdocs/servlets/examples/basic.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-lib/web-server/default-web-root/htdocs/servlets/examples/cookie.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-lib/web-server/default-web-root/htdocs/servlets/examples/cookie2.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-lib/web-server/default-web-root/htdocs/servlets/examples/digest.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-lib/web-server/default-web-root/htdocs/servlets/examples/english-measure-questions.rkt" drdr:command-line #f
+"pkgs/web-server-pkgs/web-server-lib/web-server/main.rkt" drdr:command-line #f
+"pkgs/web-server-pkgs/web-server-test/tests/web-server/pr/length.rkt" drdr:command-line #f
+"pkgs/web-server-pkgs/web-server-test/tests/web-server/pr/methods.rkt" drdr:command-line #f
+"pkgs/web-server-pkgs/web-server-test/tests/web-server/run-all-tests.rkt" drdr:timeout 300
+"pkgs/web-server-pkgs/web-server-test/tests/web-server/servlet-env/env.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-test/tests/web-server/servlet-env/insta.rkt" drdr:command-line (mzc "-k" *)
+"pkgs/web-server-pkgs/web-server-test/tests/web-server/stress" drdr:command-line #f
+"pkgs/web-server-pkgs/web-server-test/tests/web-server/template/examples/blog-xexpr.rkt" drdr:command-line (mzc *)
+"pkgs/web-server-pkgs/web-server-test/tests/web-server/template/examples/blog.rkt" drdr:command-line (mzc *)
+"pkgs/wxme-pkgs" responsible (mflatt)
+"pkgs/wxme-pkgs/wxme-lib/wxme/xml.rkt" responsible (jay)
+"pkgs/xrepl-pkgs" responsible (eli)
+"pkgs/xrepl-pkgs/xrepl-test/tests/xrepl/main.rkt" drdr:command-line #f
+"racket" responsible (mflatt)
+"racket/collects/ffi" responsible (eli mflatt)
+"racket/collects/ffi/objc.rkt" drdr:command-line (mzc *)
+"racket/collects/ffi/unsafe/objc.rkt" drdr:command-line (mzc *)
+"racket/collects/racket/contract" responsible (robby)
+"racket/collects/racket/generic.rkt" responsible (asumu stamourv cce)
+"racket/collects/racket/match" responsible (samth)
+"racket/collects/racket/match.rkt" responsible (samth)
+"racket/collects/racket/performance-hint.rkt" responsible (stamourv) drdr:command-line (raco "test" *)
+"racket/collects/racket/place" responsible (tewk)
+"racket/collects/racket/private/generic-interfaces.rkt" responsible (asumu stamourv cce)
+"racket/collects/racket/private/generic-methods.rkt" responsible (asumu stamourv cce)
+"racket/collects/racket/private/generic.rkt" responsible (asumu stamourv cce)
+"racket/collects/racket/private/shared-body.rktl" drdr:command-line #f
+"racket/collects/raco/main.rkt" drdr:command-line #f
+"racket/collects/raco/raco.rkt" drdr:command-line #f
+"racket/collects/s-exp" responsible (eli mflatt)
+"racket/collects/setup/main.rkt" drdr:command-line #f
+"racket/collects/setup/setup-go.rkt" drdr:command-line #f
+"racket/collects/setup/unixstyle-install.rkt" drdr:command-line (mzc *)
+"racket/collects/setup/winstrip.rkt" drdr:command-line (mzc *)
+"racket/collects/setup/winvers.rkt" drdr:command-line (mzc *)
+"racket/collects/syntax/parse" responsible (ryanc)
+"racket/collects/syntax/parse.rkt" responsible (ryanc)
+"racket/collects/unstable/sequence.rkt" responsible (samth)
+"racket/src/foreign" responsible (eli)
+
+#:end-props |#
