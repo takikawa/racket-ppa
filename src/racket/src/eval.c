@@ -144,6 +144,11 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #endif
+#ifdef PTHREAD_STACKSEG_FIND_STACK_BOUNDS
+# include <sys/signal.h>
+# include <pthread.h>
+# include <pthread_np.h>
+#endif
 #ifdef WINDOWS_FIND_STACK_BOUNDS
 #include <windows.h>
 #endif
@@ -595,9 +600,6 @@ void scheme_init_stack_check()
 {
   int *v, stack_grows_up;
   uintptr_t deeper;
-#ifdef UNIX_FIND_STACK_BOUNDS
-  struct rlimit rl;
-#endif
   
   deeper = scheme_get_deeper_address();
   stack_grows_up = (deeper > (uintptr_t)&v);
@@ -665,11 +667,13 @@ void scheme_init_stack_check()
 # endif
 
 # ifdef UNIX_FIND_STACK_BOUNDS
-    getrlimit(RLIMIT_STACK, &rl);
-  
     {
+      struct rlimit rl;
       uintptr_t bnd, lim;
+
       bnd = (uintptr_t)scheme_get_current_os_thread_stack_base();
+
+      getrlimit(RLIMIT_STACK, &rl);
 
 #  ifdef LINUX_FIND_STACK_BASE
       bnd = adjust_stack_base(bnd);
@@ -687,6 +691,14 @@ void scheme_init_stack_check()
         bnd += (STACK_SAFETY_MARGIN - lim);
 
       scheme_stack_boundary = bnd;
+    }
+# endif
+
+# ifdef PTHREAD_STACKSEG_FIND_STACK_BOUNDS
+    {
+      stack_t stack;
+      pthread_stackseg_np(pthread_self(), &stack);
+      scheme_stack_boundary = (uintptr_t)((char *)stack.ss_sp - (stack.ss_size - STACK_SAFETY_MARGIN));
     }
 # endif
   }
@@ -3390,7 +3402,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 
 	  arg = app->rand2;
 
-	  switch ((SCHEME_APPN_FLAGS(app) >> 6) & 0x7) {
+	  switch ((flags >> 6) & 0x7) {
 	  case SCHEME_EVAL_CONSTANT:
 	    break;
 	  case SCHEME_EVAL_GLOBAL:
@@ -3967,7 +3979,7 @@ static void *compile_k(void)
 	 before the rest. */
       while (1) {
 	scheme_frame_captures_lifts(cenv, scheme_make_lifted_defn, scheme_sys_wraps(cenv), 
-                                    scheme_false, scheme_false, scheme_null, scheme_false);
+                                    scheme_false, scheme_top_level_lifts_key(cenv), scheme_null, scheme_false);
 	form = scheme_check_immediate_macro(form, 
 					    cenv, &rec, 0,
 					    0, &gval, NULL, NULL);
@@ -4009,7 +4021,7 @@ static void *compile_k(void)
 
       while (1) {
 	scheme_frame_captures_lifts(cenv, scheme_make_lifted_defn, scheme_sys_wraps(cenv), 
-                                    scheme_false, scheme_false, scheme_null, scheme_false);
+                                    scheme_false, scheme_top_level_lifts_key(cenv), scheme_null, scheme_false);
 
 	scheme_init_compile_recs(&rec, 0, &rec2, 1);
 
@@ -4406,6 +4418,9 @@ static void *expand_k(void)
   p->ku.k.p3 = NULL;
   p->ku.k.p4 = NULL;
 
+  if (SCHEME_FALSEP(catch_lifts_key))
+    catch_lifts_key = scheme_top_level_lifts_key(env);
+
   if (!SCHEME_STXP(obj))
     obj = scheme_datum_to_syntax(obj, scheme_false, scheme_false, 1, 0);
 
@@ -4510,7 +4525,7 @@ static Scheme_Object *r_expand(Scheme_Object *obj, Scheme_Comp_Env *env,
 Scheme_Object *scheme_expand(Scheme_Object *obj, Scheme_Env *env)
 {
   return r_expand(obj, scheme_new_expand_env(env, NULL, SCHEME_TOPLEVEL_FRAME), 
-		  -1, 1, 0, scheme_true, -1, 0);
+		  -1, 1, 0, scheme_false, -1, 0);
 }
 
 Scheme_Object *scheme_tail_eval_expr(Scheme_Object *obj)
@@ -4707,6 +4722,16 @@ Scheme_Object *scheme_generate_lifts_key(void)
   return scheme_make_symbol(buf); /* uninterned */
 }
 
+Scheme_Object *scheme_top_level_lifts_key(Scheme_Comp_Env *env)
+{
+  if (!env->genv->lift_key) {
+    Scheme_Object *o;
+    o = scheme_generate_lifts_key();
+    env->genv->lift_key = o;
+  }
+  return env->genv->lift_key;
+}
+
 Scheme_Object *
 scheme_make_lifted_defn(Scheme_Object *sys_wraps, Scheme_Object **_ids, Scheme_Object *expr, Scheme_Comp_Env *env)
 {
@@ -4799,19 +4824,22 @@ do_local_expand(const char *name, int for_stx, int catch_lifts, int for_expr, in
 
   if (for_expr)
     kind = 0; /* expression */
-  else if (SAME_OBJ(argv[1], module_symbol))
+  else if (!for_stx && SAME_OBJ(argv[1], module_symbol))
     kind = SCHEME_MODULE_BEGIN_FRAME; /* name is backwards compared to symbol! */
-  else if (SAME_OBJ(argv[1], module_begin_symbol))
+  else if (!for_stx && SAME_OBJ(argv[1], module_begin_symbol))
     kind = SCHEME_MODULE_FRAME; /* name is backwards compared to symbol! */
-  else if (SAME_OBJ(argv[1], top_level_symbol))
+  else if (SAME_OBJ(argv[1], top_level_symbol)) {
     kind = SCHEME_TOPLEVEL_FRAME;
-  else if (SAME_OBJ(argv[1], expression_symbol))
+    if (catch_lifts < 0) catch_lifts = 0;
+  } else if (SAME_OBJ(argv[1], expression_symbol))
     kind = 0;
   else if (scheme_proper_list_length(argv[1]) > 0)
     kind = SCHEME_INTDEF_FRAME;
   else  {
     scheme_wrong_contract(name,
-                          "(or/c 'expression 'module 'module-begin 'top-level (and/c pair? list?))",
+                          (for_stx
+                           ? "(or/c 'expression 'top-level (and/c pair? list?))"
+                           : "(or/c 'expression 'module 'module-begin 'top-level (and/c pair? list?))"),
                           1, argc, argv);
     return NULL;
   }
@@ -4993,7 +5021,7 @@ do_local_expand(const char *name, int for_stx, int catch_lifts, int for_expr, in
       scheme_frame_captures_lifts(env, 
                                   (catch_lifts < 0) ? scheme_pair_lifted : scheme_make_lifted_defn, 
                                   data,
-                                  scheme_false, 
+                                  scheme_top_level_lifts_key(env),
                                   catch_lifts_key, NULL,
                                   scheme_false);
     }
@@ -5308,6 +5336,14 @@ void scheme_init_collection_paths_post(Scheme_Env *global_env, Scheme_Object *ex
   p->error_buf = &newbuf;
   if (!scheme_setjmp(newbuf)) {
     Scheme_Object *clcp, *flcp, *a[2];
+
+    clcp = scheme_builtin_value("current-library-collection-links");
+    flcp = scheme_builtin_value("find-library-collection-links");
+
+    if (clcp && flcp) {
+      a[0] = _scheme_apply(flcp, 0, NULL);
+      _scheme_apply(clcp, 1, a);
+    }
 
     clcp = scheme_builtin_value("current-library-collection-paths");
     flcp = scheme_builtin_value("find-library-collection-paths");

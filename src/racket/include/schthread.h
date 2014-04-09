@@ -284,7 +284,6 @@ typedef struct Thread_Local_Variables {
   int env_uid_counter_;
   int scheme_overflow_count_;
   struct Scheme_Object *original_pwd_;
-  struct Scheme_Object *inst_links_path_;
   void *file_path_wc_buffer_;
   intptr_t scheme_hash_request_count_;
   intptr_t scheme_hash_iteration_count_;
@@ -355,6 +354,8 @@ typedef struct Thread_Local_Variables {
   Scheme_On_Atomic_Timeout_Proc on_atomic_timeout_;
   int atomic_timeout_auto_suspend_;
   int atomic_timeout_atomic_level_;
+  void *scheme_inotify_server_;
+  struct Scheme_Object *configuration_callback_cache_[2];
 } Thread_Local_Variables;
 
 #if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS)
@@ -664,7 +665,6 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define env_uid_counter XOA (scheme_get_thread_local_variables()->env_uid_counter_)
 #define scheme_overflow_count XOA (scheme_get_thread_local_variables()->scheme_overflow_count_)
 #define original_pwd XOA (scheme_get_thread_local_variables()->original_pwd_)
-#define inst_links_path XOA (scheme_get_thread_local_variables()->inst_links_path_)
 #define file_path_wc_buffer XOA (scheme_get_thread_local_variables()->file_path_wc_buffer_)
 #define scheme_hash_request_count XOA (scheme_get_thread_local_variables()->scheme_hash_request_count_)
 #define scheme_hash_iteration_count XOA (scheme_get_thread_local_variables()->scheme_hash_iteration_count_)
@@ -735,6 +735,9 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define on_atomic_timeout XOA (scheme_get_thread_local_variables()->on_atomic_timeout_)
 #define atomic_timeout_auto_suspend XOA (scheme_get_thread_local_variables()->atomic_timeout_auto_suspend_)
 #define atomic_timeout_atomic_level XOA (scheme_get_thread_local_variables()->atomic_timeout_atomic_level_)
+#define scheme_inotify_server XOA (scheme_get_thread_local_variables()->scheme_inotify_server_)
+#define configuration_callback_cache XOA (scheme_get_thread_local_variables()->configuration_callback_cache_)
+
 
 /* **************************************** */
 

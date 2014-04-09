@@ -190,10 +190,14 @@
              collection-path
              collection-file-path
              find-library-collection-paths
+             find-library-collection-links
              path-list-string->path-list
              find-executable-path
              load/use-compiled
-             embedded-load)
+             embedded-load
+             call-with-default-reading-parameterization
+             find-main-collects
+             find-main-config)
 
   (define-values (path-string?)
     (lambda (s)
@@ -316,13 +320,15 @@
 	(if (and (relative-path? program)
 		 (let-values ([(base name dir?) (split-path program)])
 		   (eq? base 'relative)))
-	    (let ([paths-str (getenv "PATH")]
+	    (let ([paths-str (environment-variables-ref (current-environment-variables)
+                                                        #"PATH")]
 		  [win-add (lambda (s) (if (eq? (system-type) 'windows) 
 					   (cons (bytes->path #".") s) 
 					   s))])
 	      (let loop ([paths (win-add 
-                                 (if paths-str 
-                                     (path-list-string->path-list paths-str null)
+                                 (if paths-str
+                                     (path-list-string->path-list (bytes->string/locale paths-str #\?)
+                                                                  null)
                                      null))])
 		(if (null? paths)
 		    #f
@@ -364,6 +370,30 @@
 		(cons-path default (cadr m) (loop (caddr m)))
 		(cons-path default s null)))))))
 
+  ;; ------------------------------ Reading ------------------------------
+  
+  (define (call-with-default-reading-parameterization thunk)
+    (if (and (procedure? thunk)
+             (procedure-arity-includes? thunk 0))
+        (parameterize ([read-case-sensitive #t]
+                       [read-square-bracket-as-paren #t]
+                       [read-curly-brace-as-paren #t]
+                       [read-accept-box #t]
+                       [read-accept-compiled #f]
+                       [read-accept-bar-quote #t]
+                       [read-accept-graph #t]
+                       [read-decimal-as-inexact #t]
+                       [read-accept-dot #t]
+                       [read-accept-infix-dot #t]
+                       [read-accept-quasiquote #t]
+                       [read-accept-reader #f]
+                       [read-accept-lang #t]
+                       [current-readtable #f])
+          (thunk))
+        (raise-argument-error 'call-with-default-reading-parameterization
+                              "(procedure-arity-includes/c 0)"
+                              thunk)))
+
   ;; ------------------------------ Collections ------------------------------
 
   (define-values (-check-relpath)
@@ -403,28 +433,187 @@
                      collection collection-path
                      file-name)))
 
-  (define-values (user-links-path) (find-system-path 'links-file))
-  (define-values (user-links-cache) (make-hasheq))
-  (define-values (user-links-timestamp) -inf.0)
+  (define-values (find-main-collects)
+    (lambda ()
+      ;; Recorded once and for all (per place), which helps avoid
+      ;; sandbox problems:
+      (cache-configuration
+       0
+       (lambda ()
+         (exe-relative-path->complete-path (find-system-path 'collects-dir))))))
 
-  (define-values (links-path) (find-links-path!
-                               ;; This thunk is called once per place, and the result
-                               ;; is remembered for later invocations. Otherwise, the
-                               ;; search for the config file can trip over filesystem
-                               ;; restrictions imposed by security guards.
-                               (lambda ()
-                                 (let ([d (let ([c (find-system-path 'collects-dir)])
-                                            (if (absolute-path? c)
-                                                c
-                                                (parameterize ([current-directory (find-system-path 'orig-dir)])
-                                                  (find-executable-path (find-system-path 'exec-file) c))))])
-                                   (and d
-                                        (build-path d "config" "links.rktd"))))))
-  (define-values (links-cache) (make-hasheq))
-  (define-values (links-timestamp) -inf.0)
+  (define-values (find-main-config)
+    (lambda ()
+      ;; Also recorded once and for all (per place):
+      (cache-configuration
+       1
+       (lambda ()
+         (exe-relative-path->complete-path (find-system-path 'config-dir))))))
 
+  (define-values (get-config-table)
+    (lambda (d)
+      (let ([p (and d (build-path d "config.rktd"))])
+        (or (and p
+                 (file-exists? p)
+                 (with-input-from-file p
+                   (lambda ()
+                     (let ([v (call-with-default-reading-parameterization read)])
+                       (and (hash? v)
+                            v)))))
+            #hash()))))
+
+  (define-values (get-installation-name)
+    (lambda (config-table)
+      (hash-ref config-table
+                'installation-name 
+                (version))))
+
+  (define-values (coerce-to-path)
+    (lambda (p)
+      (cond
+       [(string? p) (collects-relative-path->complete-path (string->path p))]
+       [(bytes? p) (collects-relative-path->complete-path (bytes->path p))]
+       [(path? p) (collects-relative-path->complete-path p)]
+       [else p])))
+
+  (define-values (collects-relative-path->complete-path)
+    (lambda (p)
+      (cond
+       [(complete-path? p) p]
+       [else
+        (path->complete-path p (or (find-main-collects)
+                                   ;; If we get here, then something is configured wrong,
+                                   ;; and making up paths relative to the current directory
+                                   ;; is not great --- but we have to come up with some
+                                   ;; path at this point.
+                                   (current-directory)))])))
+
+  (define-values (exe-relative-path->complete-path)
+    (lambda (collects-path)
+      (cond
+       [(complete-path? collects-path) (simplify-path collects-path)]
+       [(absolute-path? collects-path)
+        ;; This happens only under Windows; add a drive
+        ;;  specification to make the path complete
+        (let ([exec (path->complete-path
+                     (find-executable-path (find-system-path 'exec-file))
+                     (find-system-path 'orig-dir))])
+          (let-values ([(base name dir?) (split-path exec)])
+            (simplify-path (path->complete-path collects-path base))))]
+       [else
+        (let ([p (find-executable-path (find-system-path 'exec-file) collects-path #t)])
+          (and p (simplify-path p)))])))
+
+  (define-values (add-config-search)
+    (lambda (ht key orig-l)
+      (let ([l (hash-ref ht key #f)])
+        (if l
+            (let loop ([l l])
+              (cond
+               [(null? l) null]
+               [(not (car l)) (append orig-l (loop (cdr l)))]
+               [else (cons (coerce-to-path (car l)) (loop (cdr l)))]))
+            orig-l))))
+
+  (define-values (find-library-collection-links)
+    (lambda ()
+      (let* ([ht (get-config-table (find-main-config))]
+             [lf (coerce-to-path
+                  (or (hash-ref ht 'links-file #f)
+                      (build-path (or (hash-ref ht 'share-dir #f)
+                                      (build-path 'up "share"))
+                                  "links.rktd")))])
+        (append
+         ;; `#f' means `current-library-collection-paths':
+         (list #f)
+         ;; user-specific
+         (if (and (use-user-specific-search-paths)
+                  (use-collection-link-paths))
+             (list (build-path (find-system-path 'addon-dir)
+                               (get-installation-name ht)
+                               "links.rktd"))
+             null)
+         ;; installation-wide:
+         (if (use-collection-link-paths)
+             (add-config-search
+              ht
+              'links-search-files
+              (list lf))
+             null)))))
+
+  ;; map from link-file names to cached information:
+  (define-values (links-cache) (make-weak-hash))
+
+  ;; used for low-level except abort below:
+  (define-values (stamp-prompt-tag) (make-continuation-prompt-tag 'stamp))
+
+  (define-values (file->stamp)
+    (lambda (path old-stamp)
+      ;; Using just the file's modification date almost works as a stamp,
+      ;; but 1-second granularity isn't fine enough. A stamp is therefore
+      ;; the file content paired with a filesystem-change event (where
+      ;; supported), and the event lets us recycle the old stamp almost
+      ;; always.
+      (cond
+       [(and old-stamp
+             (cdr old-stamp)
+             (not (sync/timeout 0 (cdr old-stamp))))
+        old-stamp]
+       [else
+        (call-with-continuation-prompt
+         (lambda ()
+           (with-continuation-mark
+               exception-handler-key
+               (lambda (exn)
+                 (abort-current-continuation 
+                  stamp-prompt-tag
+                  (if (exn:fail:filesystem? exn)
+                      (lambda () #f)
+                      (lambda () (raise exn)))))
+             (let ([dir-evt
+                    (and (vector-ref (system-type 'fs-change) 2) ; 'low-latency ?
+                         (let loop ([path path])
+                           (let-values ([(base name dir?) (split-path path)])
+                             (and (path? base)
+                                  (if (directory-exists? base)
+                                      (filesystem-change-evt base (lambda () #f))
+                                      (loop base))))))])
+               (if (not (file-exists? path))
+                   (cons #f dir-evt)
+                   (let ([evt (and (vector-ref (system-type 'fs-change) 2) ; 'low-latency ?
+                                   (filesystem-change-evt path (lambda () #f)))])
+                     (when dir-evt (filesystem-change-evt-cancel dir-evt))
+                     (cons
+                      (let ([p (open-input-file path)])
+                        (dynamic-wind
+                            void
+                            (lambda ()
+                              (let ([bstr (read-bytes 8192 p)])
+                                (if (and (bytes? bstr)
+                                         ((bytes-length bstr) . >= . 8192))
+                                    (apply
+                                     bytes-append
+                                     (cons
+                                      bstr
+                                      (let loop ()
+                                        (let ([bstr (read-bytes 8192 p)])
+                                          (if (eof-object? bstr)
+                                              null
+                                              (cons bstr (loop)))))))
+                                    bstr)))
+                            (lambda () (close-input-port p))))
+                      evt))))))
+         stamp-prompt-tag)])))
+  
+  (define-values (no-file-stamp?)
+    (lambda (a)
+      (or (not a)
+          (not (car a)))))
+  
   (define-values (get-linked-collections)
-    (lambda (user?)
+    (lambda (links-path)
+      ;; Use/save information in `links-cache', relying on filesystem-change events
+      ;; or a copy of the file to detect when the cache is stale.
       (call/ec (lambda (esc)
                  (define-values (make-handler)
                    (lambda (ts)
@@ -432,21 +621,15 @@
                        (if (exn:fail? exn)
                            (let ([l (current-logger)])
                              (when (log-level? l 'error)
-                               (log-message l 'error 
+                               (log-message l 'error
                                             (format
                                              "error reading collection links file ~s: ~a"
-                                             (if user? user-links-path links-path)
+                                             links-path
                                              (exn-message exn))
                                             (current-continuation-marks))))
                            (void))
                        (when ts
-                         (if user?
-                             (begin
-                               (set! user-links-cache (make-hasheq))
-                               (set! user-links-timestamp ts))
-                             (begin
-                               (set! links-cache (make-hasheq))
-                               (set! links-timestamp ts))))
+                         (hash-set! links-cache links-path (cons #hasheq() ts)))
                        (if (exn:fail? exn)
                            (esc (make-hasheq))
                            ;; re-raise the exception (which is probably a break)
@@ -454,94 +637,82 @@
                  (with-continuation-mark
                      exception-handler-key
                      (make-handler #f)
-                   (let ([ts (file-or-directory-modify-seconds (if user?
-                                                                   user-links-path
-                                                                   links-path)
-                                                               #f 
-                                                               (lambda () -inf.0))])
-                     (if (ts . > . (if user? user-links-timestamp links-timestamp))
+                   (let* ([links-stamp+cache (hash-ref links-cache links-path '(#f . #hasheq()))]
+                          [a-links-stamp (car links-stamp+cache)]
+                          [ts (file->stamp links-path a-links-stamp)])
+                     (if (not (equal? ts a-links-stamp))
                          (with-continuation-mark
                              exception-handler-key
                              (make-handler ts)
-                           (parameterize ([read-case-sensitive #t]
-                                          [read-square-bracket-as-paren #t]
-                                          [read-curly-brace-as-paren #t]
-                                          [read-accept-box #t]
-                                          [read-accept-compiled #t]
-                                          [read-accept-bar-quote #t]
-                                          [read-accept-graph #t]
-                                          [read-decimal-as-inexact #t]
-                                          [read-accept-dot #t]
-                                          [read-accept-infix-dot #t]
-                                          [read-accept-quasiquote #t]
-                                          [read-accept-reader #t]
-                                          [read-accept-lang #f]
-                                          [current-readtable #f])
-                             (let ([v (let ([p (open-input-file (if user? user-links-path links-path)
-                                                                'binary)])
-                                        (dynamic-wind
-                                            void
-                                            (lambda () 
-                                              (begin0
-                                               (read p)
-                                               (unless (eof-object? (read p))
-                                                 (error "expected a single S-expression"))))
-                                            (lambda () (close-input-port p))))])
-                               (unless (and (list? v)
-                                            (andmap (lambda (p)
-                                                      (and (list? p)
-                                                           (or (= 2 (length p))
-                                                               (= 3 (length p)))
-                                                           (or (string? (car p))
-                                                               (eq? 'root (car p)))
-                                                           (path-string? (cadr p))
-                                                           (or (null? (cddr p))
-                                                               (regexp? (caddr p)))))
-                                                    v))
-                                 (error "ill-formed content"))
-                               (let ([ht (make-hasheq)]
-                                     [dir (let-values ([(base name dir?) (split-path (if user?
-                                                                                         user-links-path
-                                                                                         links-path))])
-                                            base)])
-                                 (for-each
-                                  (lambda (p)
-                                    (when (or (null? (cddr p))
-                                              (regexp-match? (caddr p) (version)))
-                                      (let ([dir (simplify-path
-                                                  (path->complete-path (cadr p) dir))])
-                                        (if (symbol? (car p))
-                                            ;; add to every table element (to keep
-                                            ;; the choices in order); need a better
-                                            ;; data structure
-                                            (begin
-                                              (unless (hash-ref ht #f #f)
-                                                (hash-set! ht #f null))
-                                              (hash-for-each
-                                               ht
-                                               (lambda (k v)
-                                                 (hash-set! ht k (cons dir v)))))
-                                            ;; single collection:
-                                            (let ([s (string->symbol (car p))])
-                                              (hash-set! ht s (cons (box dir)
-                                                                    (hash-ref ht s null))))))))
-                                  v)
-                                 ;; reverse all lists:
-                                 (hash-for-each
-                                  ht
-                                  (lambda (k v) (hash-set! ht k (reverse v))))
-                                 ;; save table & timestamp:
-                                 (if user?
-                                     (begin
-                                       (set! user-links-cache ht)
-                                       (set! user-links-timestamp ts))
-                                     (begin
-                                       (set! links-cache ht)
-                                       (set! links-timestamp ts)))
-                                 ht))))
-                         (if user?
-                             user-links-cache
-                             links-cache))))))))
+                           (call-with-default-reading-parameterization
+                            (lambda ()
+                              (let ([v (if (no-file-stamp? ts)
+                                           null
+                                           (let ([p (open-input-file links-path 'binary)])
+                                             (dynamic-wind
+                                                 void
+                                                 (lambda () 
+                                                   (begin0
+                                                    (read p)
+                                                    (unless (eof-object? (read p))
+                                                      (error "expected a single S-expression"))))
+                                                 (lambda () (close-input-port p)))))])
+                                (unless (and (list? v)
+                                             (andmap (lambda (p)
+                                                       (and (list? p)
+                                                            (or (= 2 (length p))
+                                                                (= 3 (length p)))
+                                                            (or (string? (car p))
+                                                                (eq? 'root (car p))
+                                                                (eq? 'static-root (car p)))
+                                                            (path-string? (cadr p))
+                                                            (or (null? (cddr p))
+                                                                (regexp? (caddr p)))))
+                                                     v))
+                                  (error "ill-formed content"))
+                                (let ([ht (make-hasheq)]
+                                      [dir (let-values ([(base name dir?) (split-path links-path)])
+                                             base)])
+                                  (for-each
+                                   (lambda (p)
+                                     (when (or (null? (cddr p))
+                                               (regexp-match? (caddr p) (version)))
+                                       (let ([dir (simplify-path
+                                                   (path->complete-path (cadr p) dir))])
+                                         (cond
+                                          [(eq? (car p) 'static-root)
+                                           ;; multi-collection, constant content:
+                                           (for-each
+                                            (lambda (sub)
+                                              (when (directory-exists? (build-path dir sub))
+                                                (let ([k (string->symbol (path->string sub))])
+                                                  (hash-set! ht k (cons dir (hash-ref ht k null))))))
+                                            (directory-list dir))]
+                                          [(eq? (car p) 'root)
+                                           ;; multi-collection, dynamic content:
+                                           ;; Add directory to the #f mapping, and also
+                                           ;; add to every existing table element (to keep
+                                           ;; the choices in order)
+                                           (unless (hash-ref ht #f #f)
+                                             (hash-set! ht #f null))
+                                           (hash-for-each
+                                            ht
+                                            (lambda (k v)
+                                              (hash-set! ht k (cons dir v))))]
+                                          [else
+                                           ;; single collection:
+                                           (let ([s (string->symbol (car p))])
+                                             (hash-set! ht s (cons (box dir)
+                                                                   (hash-ref ht s null))))]))))
+                                   v)
+                                  ;; reverse all lists:
+                                  (hash-for-each
+                                   ht
+                                   (lambda (k v) (hash-set! ht k (reverse v))))
+                                  ;; save table & file content:
+                                  (hash-set! links-cache links-path (cons ts ht))
+                                  ht)))))
+                         (cdr links-stamp+cache))))))))
 
   (define-values (normalize-collection-reference)
     (lambda (collection collection-path)
@@ -568,25 +739,38 @@
     (lambda (fail collection collection-path file-name)
       (let-values ([(collection collection-path)
                     (normalize-collection-reference collection collection-path)])
-        (let ([all-paths (let ([sym (string->symbol (if (path? collection)
-                                                        (path->string collection)
-                                                        collection))]
-                               [links? (use-collection-link-paths)])
-                           (append
-                            ;; list of paths and (box path)s:
-                            (if (and links? (use-user-specific-search-paths))
-                                (let ([ht (get-linked-collections #t)])
-                                  (or (hash-ref ht sym #f)
-                                      (hash-ref ht #f null)))
-                                null)
-                            ;; list of paths and (box path)s:
-                            (if (and links? links-path)
-                                (let ([ht (get-linked-collections #f)])
-                                  (or (hash-ref ht sym #f)
-                                      (hash-ref ht #f null)))
-                                null)
-                            ;; list of paths:
-                            (current-library-collection-paths)))])
+        (let ([all-paths (let ([sym (string->symbol 
+                                     (if (path? collection)
+                                         (path->string collection)
+                                         collection))])
+                           (let loop ([l (current-library-collection-links)])
+                             (cond
+                              [(null? l) null]
+                              [(not (car l))
+                               ;; #f is the point where we try the old parameter:
+                               (append 
+                                (current-library-collection-paths)
+                                (loop (cdr l)))]
+                              [(hash? (car l))
+                               ;; A hash table maps a collection-name symbol
+                               ;; to a list of paths. We need to wrap each path
+                               ;; in a box, because that's how the code below
+                               ;; knows that it's a single collection's directory.
+                               ;; A hash table can also map #f to a list of paths
+                               ;; for directories that hold collections.
+                               (append
+                                (map box (hash-ref (car l) sym null))
+                                (hash-ref (car l) #f null)
+                                (loop (cdr l)))]
+                              [else
+                               (let ([ht (get-linked-collections (car l))])
+                                 (append 
+                                  ;; Table values are lists of paths and (box path)s,
+                                  ;; where a (box path) is a collection directory
+                                  ;; (instead of a directory containing collections).
+                                  (hash-ref ht sym null)
+                                  (hash-ref ht #f null)
+                                  (loop (cdr l))))])))])
           (define-values (done)
             (lambda (p)
               (if file-name (build-path p file-name) p)))
@@ -631,8 +815,14 @@
                                (apply
                                 string-append
                                 (map (lambda (p)
-                                       (format "\n   ~a" p))
-                                     (filter path? all-paths)))
+                                       (format "\n ~a ~a" " " p))
+                                     (let ([len (length all-paths)]
+                                           [clen (length (current-library-collection-paths))])
+                                       (if ((- len clen) . < . 5)
+                                           all-paths
+                                           (append (current-library-collection-paths)
+                                                   (list (format "... [~a additional linked and package directories]"
+                                                                 (- len clen))))))))
                                (if (ormap box? all-paths)
                                    (format "\n   sub-collection: ~s\n  in parent directories:~a"
                                            rest-coll 
@@ -682,80 +872,89 @@
         (when (not base)
           (raise-mismatch-error who "cannot add a suffix to a root path: " s))
         (values base name))))
-        
+
+  (define-values (path-adjust-suffix)
+    (lambda (name sep rest-bytes s sfx)
+      (let-values ([(base name) (check-suffix-call s sfx name)])
+        (define bs (path-element->bytes name))
+        (define finish
+          (lambda (i sep i2)
+            (bytes->path-element
+             (let ([res (bytes-append
+                         (subbytes bs 0 i)
+                         sep
+                         (rest-bytes bs i2)
+                         (if (string? sfx)
+                             (string->bytes/locale sfx (char->integer #\?))
+                             sfx))])
+               (if (zero? (bytes-length res))
+                   (raise-arguments-error 'path-replace-suffix
+                                          "removing suffix makes path element empty"
+                                          "given path" s)
+                   res))
+             (if (path-for-some-system? s)
+                 (path-convention-type s)
+                 (system-path-convention-type)))))
+        (let ([new-name (letrec-values ([(loop)
+                                         (lambda (i)
+                                           (if (zero? i)
+                                               (finish (bytes-length bs) #"" (bytes-length bs))
+                                               (let-values ([(i) (sub1 i)])
+                                                 (if (eq? (char->integer #\.) (bytes-ref bs i))
+                                                     (finish i sep (add1 i))
+                                                     (loop i)))))])
+                          (loop (bytes-length bs)))])
+          (if (path-for-some-system? base)
+              (build-path base new-name)
+              new-name)))))
 
   (define-values (path-replace-suffix)
     (lambda (s sfx)
-      (let-values ([(base name) (check-suffix-call s sfx 'path-replace-suffix)])
-        (let ([new-name (bytes->path-element
-                         (regexp-replace #rx#"(?:[.][^.]*|)$"
-                                         (path-element->bytes name)
-                                         (if (string? sfx)
-                                             (string->bytes/locale sfx (char->integer #\?))
-                                             sfx))
-                         (if (path-for-some-system? s)
-                             (path-convention-type s)
-                             (system-path-convention-type)))])
-          (if (path? base)
-              (build-path base new-name)
-              new-name)))))
+      (path-adjust-suffix 'path-replace-suffix #"" (lambda (bs i) #"") s sfx)))
 
   (define-values (path-add-suffix)
     (lambda (s sfx)
-      (let-values ([(base name) (check-suffix-call s sfx 'path-add-suffix)])
-        (let ([new-name (bytes->path-element
-                         (bytes-append
-                          (regexp-replace* #rx#"[.]"
-                                           (path-element->bytes name)
-                                           "_")
-                          (if (string? sfx)
-                              (string->bytes/locale sfx (char->integer #\?))
-                              sfx))
-                         (if (path-for-some-system? s)
-                             (path-convention-type s)
-                             (system-path-convention-type)))])
-          (if (path? base)
-              (build-path base new-name)
-              new-name)))))
+      (path-adjust-suffix 'path-replace-suffix #"_" subbytes s sfx)))
 
   (define-values (load/use-compiled)
     (lambda (f) ((current-load/use-compiled) f #f)))
-    
+      
   (define-values (find-library-collection-paths)
     (case-lambda
      [() (find-library-collection-paths null null)]
      [(extra-collects-dirs) (find-library-collection-paths extra-collects-dirs null)]
      [(extra-collects-dirs post-collects-dirs)
       (let ([user-too? (use-user-specific-search-paths)]
-	    [cons-if (lambda (f r) (if f (cons f r) r))])
-	(path-list-string->path-list
-	 (if user-too?
-	     (or (getenv "PLTCOLLECTS") "")
-	     "")
-	 (cons-if
-	  (and user-too?
-	       (build-path (find-system-path 'addon-dir)
-			   (version)
-			   "collects"))
-	  (let loop ([l (append
-			 extra-collects-dirs
-			 (list (find-system-path 'collects-dir))
-                         post-collects-dirs)])
-	    (if (null? l)
-		null
-		(let* ([collects-path (car l)]
-		       [v
-			(cond
-			 [(complete-path? collects-path) collects-path]
-			 [(absolute-path? collects-path)
-			  (path->complete-path collects-path
-					       (find-executable-path (find-system-path 'exec-file) #f #t))]
-			 [else
-			  (find-executable-path (find-system-path 'exec-file) collects-path #t)])])
-		  (if v
-		      (cons (simplify-path (path->complete-path v (current-directory)))
-			    (loop (cdr l)))
-		      (loop (cdr l)))))))))]))
+            [cons-if (lambda (f r) (if f (cons f r) r))]
+            [config-table (get-config-table (find-main-config))])
+        (path-list-string->path-list
+         (if user-too?
+             (let ([c (environment-variables-ref (current-environment-variables)
+                                                 #"PLTCOLLECTS")])
+               (if c
+                   (bytes->string/locale c #\?)
+                   ""))
+             "")
+         (add-config-search
+          config-table
+          'collects-search-dirs
+          (cons-if
+           (and user-too?
+                (build-path (find-system-path 'addon-dir)
+                            (get-installation-name config-table)
+                            "collects"))
+           (let loop ([l (append
+                          extra-collects-dirs
+                          (list (find-system-path 'collects-dir))
+                          post-collects-dirs)])
+             (if (null? l)
+                 null
+                 (let* ([collects-path (car l)]
+                        [v (exe-relative-path->complete-path collects-path)])
+                   (if v
+                       (cons (simplify-path (path->complete-path v (current-directory)))
+                             (loop (cdr l)))
+                       (loop (cdr l))))))))))]))
 
   ;; used for the -k command-line argument:
   (define (embedded-load start end str)
@@ -773,12 +972,12 @@
       (let loop ()
         (let ([e (parameterize ([read-accept-compiled #t]
                                 [read-accept-reader #t]
-                                [read-accept-lang #t])
+                                [read-accept-lang #t]
+                                [read-on-demand-source #t])
                    (read p))])
           (unless (eof-object? e)
             (eval e)
             (loop)))))))
-
 
 ;; ----------------------------------------
 ;; When places are implemented by plain old threads,
@@ -995,12 +1194,14 @@
 
   (define (split-relative-string s coll-mode?)
     (let ([l (let loop ([s s])
-               (cond
-                [(regexp-match #rx"^(.*?)/(.*)$" s)
-                 => (lambda (m)
-                      (cons (cadr m)
-                            (loop (caddr m))))]
-                [else (list s)]))])
+               (let ([len (string-length s)])
+                 (let iloop ([i 0])
+                   (cond
+                    [(= i len) (list s)]
+                    [(char=? #\/ (string-ref s i))
+                     (cons (substring s 0 i)
+                           (loop (substring s (add1 i))))]
+                    [else (iloop (add1 i))]))))])
       (if coll-mode?
           l
           (let loop ([l l])
@@ -1009,6 +1210,13 @@
                 (let-values ([(c f) (loop (cdr l))])
                   (values (cons (car l) c) f)))))))
 
+  (define (format-source-location stx)
+    (srcloc->string (srcloc (syntax-source stx)
+                            (syntax-line stx)
+                            (syntax-column stx)
+                            (syntax-position stx)
+                            (syntax-span stx))))
+    
   (define-values (orig-paramz) #f)
 
   (define-values (standard-module-name-resolver)
@@ -1062,13 +1270,21 @@
          [(s relto stx load?)
           ;; If stx is not #f, raise syntax error for ill-formed paths
           (unless (module-path? s)
-            (if stx
+            (if (syntax? stx)
                 (raise-syntax-error #f
                                     "bad module path"
                                     stx)
                 (raise-argument-error 'standard-module-name-resolver
                                       "module-path?"
                                       s)))
+          (unless (or (not relto) (resolved-module-path? relto))
+            (raise-argument-error 'standard-module-name-resolver
+                                  "(or/c #f resolved-module-path?)"
+                                  relto))
+          (unless (or (not stx) (syntax? stx))
+            (raise-argument-error 'standard-module-name-resolver
+                                  "(or/c #f syntax?)"
+                                  stx))
           (define (flatten-sub-path base orig-l)
             (let loop ([a null] [l orig-l])
               (cond
@@ -1133,14 +1349,28 @@
                                                      base))))))
                                  (current-load-relative-directory)
                                  (current-directory)))]
-                  [show-collection-err (lambda (s)
-                                         (let ([s (string-append "standard-module-name-resolver: " s)])
-                                           (if stx
-                                               (raise-syntax-error
-                                                #f
-                                                s
-                                                stx)
-                                               (error s))))]
+                  [show-collection-err (lambda (msg)
+                                         (let ([msg (string-append
+                                                     (or (and stx
+                                                              (error-print-source-location)
+                                                              (format-source-location stx))
+                                                         "standard-module-name-resolver")
+                                                     ": "
+                                                     (regexp-replace #rx"\n" 
+                                                                     msg
+                                                                     (format "\n  for module path: ~s\n"
+                                                                             s)))])
+                                           (raise
+                                            (if stx
+                                                (exn:fail:syntax:missing-module
+                                                 msg
+                                                 (current-continuation-marks)
+                                                 (list stx)
+                                                 s)
+                                                (exn:fail:filesystem:missing-module
+                                                 msg
+                                                 (current-continuation-marks)
+                                                 s)))))]
                   [ss->rkt (lambda (s)
                              (let ([len (string-length s)])
                                (if (and (len . >= . 3)
@@ -1332,7 +1562,24 @@
                                                                                     (namespace-module-registry (current-namespace))
                                                                                     normal-filename)
                                                                                    loading)
-                                     (parameterize ([current-module-declare-name root-modname])
+                                     (parameterize ([current-module-declare-name root-modname]
+                                                    [current-module-path-for-load
+                                                     ;; If `s' is an absolute module path, then
+                                                     ;; keep it as-is, the better to let a tool
+                                                     ;; recommend how to get an unavailable module;
+                                                     ;; also, propagate the source location.
+                                                     ((if stx
+                                                          (lambda (p) (datum->syntax #f p stx))
+                                                          values)
+                                                      (cond
+                                                       [(symbol? s) s]
+                                                       [(and (pair? s) (eq? (car s) 'lib)) s]
+                                                       [else (if (resolved-module-path? root-modname)
+                                                                 (let ([src (resolved-module-path-name root-modname)])
+                                                                   (if (symbol? src)
+                                                                       (list 'quote src)
+                                                                       src))
+                                                                 root-modname)]))])
                                        ((current-load/use-compiled) 
                                         filename 
                                         (let ([sym (string->symbol (path->string no-sfx))])

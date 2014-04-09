@@ -114,7 +114,13 @@
 # define USE_ON_EXIT_FOR_ATEXIT
 # endif
 
+# define PREFER_MMAP_LARGE_BLOCKS
+
 # define FMOD_CAN_RETURN_POS_ZERO
+
+# ifdef _POSIX_PTHREAD_SEMANTICS
+#  define SUBPROCESS_USE_FORK1
+# endif
 
 # ifdef i386
 #  define MZ_USE_JIT_I386
@@ -156,39 +162,49 @@
 
 #if defined(linux)
 
+# ifdef __ANDROID__
+#  define SPLS_LINUX "android"
+# else
+#  define SPLS_LINUX "linux"
+# endif
+
 # if defined(i386)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-"SPLS_LINUX
 #  define REGISTER_POOR_MACHINE
 #  define MZ_TRY_EXTFLONUMS
 #  define ASM_DBLPREC_CONTROL_87
 # endif
 # if defined(powerpc)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-"SPLS_LINUX
 # endif
 # if defined(__mc68000__)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "m68k-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "m68k-"SPLS_LINUX
 # endif
 # if defined(mips)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "mips-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "mips-"SPLS_LINUX
 # endif
 # if defined(__alpha__)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "alpha-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "alpha-"SPLS_LINUX
 # endif
 # if defined(__hppa__)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "hppa-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "hppa-"SPLS_LINUX
 # endif
 # if defined(__sparc__)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "sparc-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "sparc-"SPLS_LINUX
 #  define FLUSH_SPARC_REGISTER_WINDOWS
 # endif
+# if defined(__arm__) || defined(__thumb__)
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "arm-"SPLS_LINUX
+#  define FFI_CALLBACK_NEED_INT_CLEAR
+# endif
 # if defined(__x86_64__)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "x86_64-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "x86_64-"SPLS_LINUX
 #  define REGISTER_POOR_MACHINE
 #  define ASM_DBLPREC_CONTROL_87
 #  define MZ_TRY_EXTFLONUMS
 # endif
 # ifndef SCHEME_PLATFORM_LIBRARY_SUBPATH
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "unknown-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "unknown-"SPLS_LINUX
 # endif
 
 # include "uconfig.h"
@@ -215,6 +231,10 @@
 
 # define MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
 
+# ifdef __ANDROID__
+#  define USE_FCNTL_O_NONBLOCK
+# endif
+
 # define FLAGS_ALREADY_SET
 
 #if defined(i386)
@@ -228,6 +248,12 @@
 #endif
 #if defined(powerpc)
 # define MZ_USE_JIT_PPC
+#endif
+# if defined(__arm__)
+# define MZ_USE_JIT_ARM
+# ifndef __ANDROID__
+#  define MZ_USE_DWARF_LIBUNWIND
+# endif
 #endif
 
 #endif
@@ -295,16 +321,11 @@
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-openbsd"
 # endif
 
-# include <sys/param.h>
-# if OpenBSD < 201211
-/* This is needed for (pre-5.2) userspace threads: */
-#  define ASSUME_FIXED_STACK_SIZE
-#  define FIXED_STACK_SIZE 1048576
-# endif
-
 # include "uconfig.h"
 # undef HAS_STANDARD_IOB
 # define HAS_BSD_IOB
+# undef UNIX_FIND_STACK_BOUNDS
+# define PTHREAD_STACKSEG_FIND_STACK_BOUNDS
 
 /* Default UNIX_STACK_MAXIMUM is too big for a non-root user. */
 # undef UNIX_STACK_MAXIMUM
@@ -563,9 +584,6 @@
 /* Default stack size is 1MB, but we try to read
    the actual size from the executable on startup: */
 # define WINDOWS_DEFAULT_STACK_SIZE 1048576
-# ifdef _WIN64
-#  define STACK_SAFETY_MARGIN 100000
-# endif
 
 # ifndef _WIN64
 #  define USE_MZ_SETJMP
@@ -1214,6 +1232,8 @@
     should be closed after performing a fork() for `process'
     and `system' calls. */
 
+ /* SUBPROCESS_USE_FORK1 uses fork1() instead of fork(). */
+
  /* USE_UNIX_SOCKETS_TCP means that the tcp- procedures can be implemented
     with the standard Unix socket functions. */
 
@@ -1490,6 +1510,8 @@
      line.
     ASSUME_FIXED_STACK_SIZE assumes that the main stack size is
      always FIXED_STACK_SIZE.
+    PTHREAD_STACKSEG_FIND_STACK_BOUNDS finds stack bounds using
+     pthread_stackseg_np().
     Use only one of these if DO_STACK_CHECK is used, or none otherwise. */
 
  /* FIXED_STACK_SIZE <X> sets the stack size to <X> when the
@@ -1497,7 +1519,8 @@
 
  /* STACK_SAFETY_MARGIN <X> sets the number of bytes that should be
      available on the stack for "safety" to <X>. Used only if
-     DO_STACK_CHECK is used. STACK_SAFETY_MARGIN defaults to 50000. */
+     DO_STACK_CHECK is used. STACK_SAFETY_MARGIN defaults to 50000
+     for a 32-bit platform, twice as much for a 64-bit platform. */
 
  /* UNIX_LIMIT_STACK <X> limits stack usage to <X> bytes. This may
      be necessary to avoid GC-setup traversal over too much memory
@@ -1590,8 +1613,13 @@
  /*    Miscellaneous    */
 /***********************/
 
- /* USE_MAP_ANON indicates that mmap should use BSD's MAP_ANON flag
+ /* USE_MAP_ANON indicates that mmap() should use BSD's MAP_ANON flag
     rather than trying to open /dev/zero */
+
+ /* PREFER_MMAP_LARGE_BLOCKS indicates that mmap() should be called with
+    large block sizes as much as possible, because the actual allocated
+    size for small requests (on the order of the page size) is much
+    larger than the request. */
 
  /* REGISTER_POOR_MACHINE guides a hand optimization that seems to
     be work best one way for Sparc machines, and better the other
@@ -1664,6 +1692,10 @@
 
  /* WIN32S_HACK uses a special hack to implement threads under Win32s
     with some compilers. Obsolete. */
+
+ /* FFI_CALLBACK_NEED_INT_CLEAR indiates thet libffi callback results
+    that are smaller than an `int' should clear `int'-sized space
+    in the result area. */
 
 #endif  /* FLAGS_ALREADY_SET */
 

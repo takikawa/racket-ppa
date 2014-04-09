@@ -23,6 +23,15 @@
     (define -db db)
     (define saved-tx-status #f) ;; set by with-lock, only valid while locked
 
+    (sqlite3_extended_result_codes db #t)
+
+    ;; Must finalize all stmts before closing db, but also want stmts to be
+    ;; independently finalizable. So db needs strong refs to stmts (but no
+    ;; strong refs to prepared-statement% wrappers). Actually, sqlite3 maintains
+    ;; stmt list internally, but sqlite3_next_stmt is not available on Mac OS X
+    ;; 10.5.* versions of libsqlite3.
+    (define stmt-table (make-hasheq)) ;; hasheq[_sqlite3_statement => #t]
+
     (inherit call-with-lock*
              add-delayed-call!
              get-tx-status
@@ -185,21 +194,25 @@
     (define/override (classify-stmt sql) (classify-sl-sql sql))
 
     (define/override (prepare1* fsym sql close-on-exec? stmt-type)
-      ;; no time between sqlite3_prepare and table entry
       (dprintf "  >> prepare ~e~a\n" sql (if close-on-exec? " close-on-exec" ""))
       (let*-values ([(db) (get-db fsym)]
                     [(prep-status stmt)
                      (HANDLE fsym
-                      (let-values ([(prep-status stmt tail?)
-                                    (sqlite3_prepare_v2 db sql)])
-                        (when tail?
-                          (when stmt (sqlite3_finalize stmt))
-                          (raise-misc-error fsym "multiple statements given"
-                                            '("given" value) sql))
-                        (values prep-status stmt)))])
+                      (call-as-atomic
+                       ;; Do not allow break/kill between prepare and
+                       ;; entry of stmt in table.
+                       (lambda ()
+                         (let-values ([(prep-status stmt tail?)
+                                       (sqlite3_prepare_v2 db sql)])
+                           (when tail?
+                             (when stmt (sqlite3_finalize stmt))
+                             (error* fsym "multiple statements given"
+                                     '("given" value) sql))
+                           (when stmt (hash-set! stmt-table stmt #t))
+                           (values prep-status stmt)))))])
         (when DEBUG?
           (dprintf "  << prepared statement #x~x\n" (cast stmt _pointer _uintptr)))
-        (unless stmt (raise-misc-error fsym "SQL syntax error" '("given" value) sql))
+        (unless stmt (error* fsym "SQL syntax error" '("given" value) sql))
         (let* ([param-typeids
                 (for/list ([i (in-range (sqlite3_bind_parameter_count stmt))])
                   'any)]
@@ -226,11 +239,9 @@
              ;; Free all of connection's prepared statements. This will leave
              ;; pst objects with dangling foreign objects, so don't try to free
              ;; them again---check that -db is not-#f.
-             (let loop ()
-               (let ([stmt (sqlite3_next_stmt db #f)])
-                 (when stmt
-                   (sqlite3_finalize stmt)
-                   (loop))))
+             (let ([stmts (hash-keys stmt-table)])
+               (hash-clear! stmt-table)
+               (for-each sqlite3_finalize stmts))
              (HANDLE 'disconnect (sqlite3_close db))
              (void))))))
 
@@ -248,6 +259,7 @@
          (let ([stmt (send pst get-handle)])
            (send pst set-handle #f)
            (when (and stmt -db)
+             (hash-remove! stmt-table stmt)
              (sqlite3_finalize stmt))
            (void)))))
 
@@ -292,10 +304,15 @@
                 (internal-query1 fsym "COMMIT TRANSACTION")]))
         ((rollback)
          (cond [savepoint
+                ;; FIXME: if nested tx is invalid, enclosing tx might be invalid too
+                ;; (eg, IOERR). Add way to communicate back enclosing tx validity.
                 (internal-query1 fsym (format "ROLLBACK TO SAVEPOINT ~a" savepoint))
                 (internal-query1 fsym (format "RELEASE SAVEPOINT ~a" savepoint))]
+               [(read-tx-status)
+                (internal-query1 fsym "ROLLBACK TRANSACTION")]
                [else
-                (internal-query1 fsym "ROLLBACK TRANSACTION")])
+                ;; underlying tx already closed due to auto-rollback error
+                (void)])
          ;; remove 'invalid status, if necessary
          (set-tx-status! fsym (read-tx-status))))
       (void))
@@ -327,7 +344,8 @@
 
     (define/private (handle* who thunk iteration)
       (call-with-values thunk
-        (lambda (s . rest)
+        (lambda (full-s . rest)
+          (define s (simplify-status full-s))
           (cond [(and (= s SQLITE_BUSY) (< iteration busy-retry-limit))
                  (sleep busy-retry-delay)
                  (handle* who thunk (add1 iteration))]
@@ -337,17 +355,17 @@
                                  who
                                  (if (= s SQLITE_BUSY) "SQLITE_BUSY" s)
                                  iteration))
-                 (apply values (handle-status who s) rest)]))))
+                 (apply values (handle-status who full-s) rest)]))))
 
     ;; Some errors can cause whole transaction to rollback;
     ;; (see http://www.sqlite.org/lang_transaction.html)
     ;; So when those errors occur, compare current tx-status w/ saved.
     ;; Can't figure out how to test...
-    (define/private (handle-status who s)
-      (when (memv s maybe-rollback-status-list)
+    (define/private (handle-status who full-s)
+      (when (memv (simplify-status full-s) maybe-rollback-status-list)
         (when (and saved-tx-status -db (not (read-tx-status))) ;; was in trans, now not
           (set-tx-status! who 'invalid)))
-      (handle-status* who s -db))
+      (handle-status* who full-s -db))
 
     ;; ----
 
@@ -366,7 +384,8 @@
 ;; handle-status : symbol integer -> integer
 ;; Returns the status code if no error occurred, otherwise
 ;; raises an exception with an appropriate message.
-(define (handle-status* who s db)
+(define (handle-status* who full-s db)
+  (define s (simplify-status full-s))
   (cond [(or (= s SQLITE_OK)
              (= s SQLITE_ROW)
              (= s SQLITE_DONE))
@@ -388,6 +407,15 @@
                                        (message . ,message)
                                        (errcode . ,s)))))]))
 
+(define (simplify-status s)
+  (cond
+   [(or (= SQLITE_IOERR_BLOCKED s)
+        (= SQLITE_IOERR_LOCK s))
+    ;; Kept in extended form, because these indicate
+    ;; cases where retry is appropriate
+    s]
+   [else (bitwise-and s 255)]))
+
 (define error-table
   `([,SQLITE_ERROR       error      "unknown error"]
     [,SQLITE_INTERNAL    internal   "an internal logic error in SQLite"]
@@ -399,6 +427,8 @@
     [,SQLITE_READONLY    readonly   "attempt to write a readonly database"]
     [,SQLITE_INTERRUPT   interrupt  "operation terminated by sqlite3_interrupt()"]
     [,SQLITE_IOERR       ioerr      "some kind of disk I/O error occurred"]
+    [,SQLITE_IOERR_BLOCKED ioerr-blocked "some kind of disk I/O error occurred (blocked)"]
+    [,SQLITE_IOERR_LOCK  ioerr-lock "some kind of disk I/O error occurred (lock)"]
     [,SQLITE_CORRUPT     corrupt    "the database disk image is malformed"]
     [,SQLITE_NOTFOUND    notfound   "(internal only) table or record not found"]
     [,SQLITE_FULL        full       "insertion failed because database is full"]
@@ -418,4 +448,5 @@
 
 ;; http://www.sqlite.org/lang_transaction.html
 (define maybe-rollback-status-list
-  (list SQLITE_FULL SQLITE_IOERR SQLITE_BUSY SQLITE_NOMEM SQLITE_INTERRUPT))
+  (list SQLITE_FULL SQLITE_IOERR SQLITE_BUSY SQLITE_NOMEM SQLITE_INTERRUPT
+        SQLITE_IOERR_BLOCKED SQLITE_IOERR_LOCK))

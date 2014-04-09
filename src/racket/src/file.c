@@ -187,6 +187,7 @@ static Scheme_Object *make_directory(int argc, Scheme_Object *argv[]);
 static Scheme_Object *delete_directory(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_link(int argc, Scheme_Object *argv[]);
 static Scheme_Object *split_path(int argc, Scheme_Object **argv);
+static Scheme_Object *explode_path(int argc, Scheme_Object **argv);
 static Scheme_Object *relative_path_p(int argc, Scheme_Object **argv);
 static Scheme_Object *absolute_path_p(int argc, Scheme_Object **argv);
 static Scheme_Object *complete_path_p(int argc, Scheme_Object **argv);
@@ -200,6 +201,7 @@ static Scheme_Object *file_or_dir_permissions(int argc, Scheme_Object *argv[]);
 static Scheme_Object *file_identity(int argc, Scheme_Object *argv[]);
 static Scheme_Object *file_size(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_library_collection_paths(int argc, Scheme_Object *argv[]);
+static Scheme_Object *current_library_collection_links(int argc, Scheme_Object *argv[]);
 static Scheme_Object *use_compiled_kind(int, Scheme_Object *[]);
 static Scheme_Object *compiled_file_roots(int, Scheme_Object *[]);
 static Scheme_Object *use_user_paths(int, Scheme_Object *[]);
@@ -209,6 +211,7 @@ static Scheme_Object *find_system_path(int argc, Scheme_Object **argv);
 
 #ifdef DIR_FUNCTION
 static Scheme_Object *current_directory(int argc, Scheme_Object *argv[]);
+static Scheme_Object *current_user_directory(int argc, Scheme_Object *argv[]);
 #endif
 
 static int has_null(const char *s, intptr_t l);
@@ -231,15 +234,13 @@ READ_ONLY static Scheme_Object *doc_dir_symbol, *desk_dir_symbol;
 READ_ONLY static Scheme_Object *init_dir_symbol, *init_file_symbol, *sys_dir_symbol;
 READ_ONLY static Scheme_Object *exec_file_symbol, *run_file_symbol, *collects_dir_symbol;
 READ_ONLY static Scheme_Object *pref_file_symbol, *orig_dir_symbol, *addon_dir_symbol;
-READ_ONLY static Scheme_Object *links_file_symbol;
+READ_ONLY static Scheme_Object *config_dir_symbol;
 
 SHARED_OK static Scheme_Object *exec_cmd;
 SHARED_OK static Scheme_Object *run_cmd;
-SHARED_OK static Scheme_Object *collects_path;
+SHARED_OK static Scheme_Object *collects_path, *config_path;
 THREAD_LOCAL_DECL(static Scheme_Object *original_pwd);
 SHARED_OK static Scheme_Object *addon_dir;
-SHARED_OK static Scheme_Object *links_file;
-THREAD_LOCAL_DECL(static Scheme_Object *inst_links_path);
 
 #endif
 READ_ONLY static Scheme_Object *windows_symbol, *unix_symbol;
@@ -280,9 +281,9 @@ void scheme_init_file(Scheme_Env *env)
   REGISTER_SO(exec_file_symbol);
   REGISTER_SO(run_file_symbol);
   REGISTER_SO(collects_dir_symbol);
+  REGISTER_SO(config_dir_symbol);
   REGISTER_SO(orig_dir_symbol);
   REGISTER_SO(addon_dir_symbol);
-  REGISTER_SO(links_file_symbol);
 #endif
   REGISTER_SO(windows_symbol);
   REGISTER_SO(unix_symbol);
@@ -308,15 +309,15 @@ void scheme_init_file(Scheme_Env *env)
   exec_file_symbol = scheme_intern_symbol("exec-file");
   run_file_symbol = scheme_intern_symbol("run-file");
   collects_dir_symbol = scheme_intern_symbol("collects-dir");
+  config_dir_symbol = scheme_intern_symbol("config-dir");
   orig_dir_symbol = scheme_intern_symbol("orig-dir");
   addon_dir_symbol = scheme_intern_symbol("addon-dir");
-  links_file_symbol = scheme_intern_symbol("links-file");
 #endif
 
   windows_symbol = scheme_intern_symbol("windows");
   unix_symbol = scheme_intern_symbol("unix");
 
-  p = scheme_make_prim_w_arity(path_p, "path?", 1, 1);
+  p = scheme_make_immed_prim(path_p, "path?", 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("path?", p, env);
@@ -332,49 +333,49 @@ void scheme_init_file(Scheme_Env *env)
                                                       1, 1, 1), 
 			     env);
   scheme_add_global_constant("system-path-convention-type", 
-			     scheme_make_prim_w_arity(platform_path_kind, 
-                                                      "system-path-convention-type", 
-                                                      0, 0),
+			     scheme_make_immed_prim(platform_path_kind, 
+                                                    "system-path-convention-type", 
+                                                    0, 0),
 			     env);
   scheme_add_global_constant("path->string", 
-			     scheme_make_prim_w_arity(path_to_string, 
-						      "path->string", 
-						      1, 1), 
+			     scheme_make_immed_prim(path_to_string, 
+                                                    "path->string", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("path->bytes", 
-			     scheme_make_prim_w_arity(path_to_bytes, 
-						      "path->bytes", 
-						      1, 1), 
+			     scheme_make_immed_prim(path_to_bytes, 
+                                                    "path->bytes", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("path-element->bytes", 
-			     scheme_make_prim_w_arity(path_element_to_bytes, 
-						      "path-element->bytes", 
-						      1, 1), 
+			     scheme_make_immed_prim(path_element_to_bytes, 
+                                                    "path-element->bytes", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("path-element->string", 
-			     scheme_make_prim_w_arity(path_element_to_string, 
-						      "path-element->string", 
-						      1, 1), 
+			     scheme_make_immed_prim(path_element_to_string, 
+                                                    "path-element->string", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("string->path", 
-			     scheme_make_prim_w_arity(string_to_path, 
-						      "string->path", 
-						      1, 1), 
+			     scheme_make_immed_prim(string_to_path, 
+                                                    "string->path", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("bytes->path", 
-			     scheme_make_prim_w_arity(bytes_to_path, 
-						      "bytes->path", 
-						      1, 2), 
+			     scheme_make_immed_prim(bytes_to_path, 
+                                                    "bytes->path", 
+                                                    1, 2), 
 			     env);
   scheme_add_global_constant("bytes->path-element", 
-			     scheme_make_prim_w_arity(bytes_to_path_element, 
-						      "bytes->path-element", 
-						      1, 2), 
+			     scheme_make_immed_prim(bytes_to_path_element, 
+                                                    "bytes->path-element", 
+                                                    1, 2), 
 			     env);
   scheme_add_global_constant("string->path-element", 
-			     scheme_make_prim_w_arity(string_to_path_element, 
-						      "string->path-element", 
-						      1, 1), 
+			     scheme_make_immed_prim(string_to_path_element, 
+                                                    "string->path-element", 
+                                                    1, 1), 
 			     env);
 
   scheme_add_global_constant("file-exists?", 
@@ -409,19 +410,19 @@ void scheme_init_file(Scheme_Env *env)
 						      2, 3), 
 			     env);
   scheme_add_global_constant("build-path", 
-			     scheme_make_prim_w_arity(scheme_build_path,
-						      "build-path", 
-						      1, -1), 
+			     scheme_make_immed_prim(scheme_build_path,
+                                                    "build-path", 
+                                                    1, -1), 
 			     env);
   scheme_add_global_constant("build-path/convention-type", 
-			     scheme_make_prim_w_arity(build_path_kind,
-						      "build-path/convention-type", 
-						      2, -1), 
+			     scheme_make_immed_prim(build_path_kind,
+                                                    "build-path/convention-type", 
+                                                    2, -1), 
 			     env);
   scheme_add_global_constant("path->directory-path",
-			     scheme_make_prim_w_arity(path_to_directory_path,
-						      "path->directory-path",
-						      1, 1), 
+			     scheme_make_immed_prim(path_to_directory_path,
+                                                    "path->directory-path",
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("split-path", 
 			     scheme_make_prim_w_arity2(split_path,
@@ -429,25 +430,30 @@ void scheme_init_file(Scheme_Env *env)
 						       1, 1,
 						       3, 3), 
 			     env);
+  scheme_add_global_constant("explode-path", 
+			     scheme_make_immed_prim(explode_path,
+                                                    "explode-path",
+                                                    1, 1), 
+			     env);
   scheme_add_global_constant("relative-path?", 
-			     scheme_make_prim_w_arity(relative_path_p,
-						      "relative-path?",
-						      1, 1), 
+			     scheme_make_immed_prim(relative_path_p,
+                                                    "relative-path?",
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("absolute-path?", 
-			     scheme_make_prim_w_arity(absolute_path_p,
-						      "absolute-path?",
-						      1, 1), 
+			     scheme_make_immed_prim(absolute_path_p,
+                                                    "absolute-path?",
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("complete-path?", 
-			     scheme_make_prim_w_arity(complete_path_p,
-						      "complete-path?",
-						      1, 1), 
+			     scheme_make_immed_prim(complete_path_p,
+                                                    "complete-path?",
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("path->complete-path",
-			     scheme_make_prim_w_arity(path_to_complete_path,
-						      "path->complete-path",
-						      1, 2), 
+			     scheme_make_immed_prim(path_to_complete_path,
+                                                    "path->complete-path",
+                                                    1, 2), 
 			     env);
   scheme_add_global_constant("resolve-path",
 			     scheme_make_prim_w_arity(resolve_path,
@@ -535,6 +541,11 @@ void scheme_init_file(Scheme_Env *env)
 						       "current-directory", 
 						       MZCONFIG_CURRENT_DIRECTORY),
 			     env);
+  scheme_add_global_constant("current-directory-for-user",
+			     scheme_register_parameter(current_user_directory,
+						       "current-directory-for-user", 
+						       MZCONFIG_CURRENT_USER_DIRECTORY),
+			     env);
 #endif
 
 #ifndef NO_FILE_SYSTEM_UTILS
@@ -542,6 +553,11 @@ void scheme_init_file(Scheme_Env *env)
 			     scheme_register_parameter(current_library_collection_paths,
 						       "current-library-collection-paths",
 						       MZCONFIG_COLLECTION_PATHS),
+			     env);
+  scheme_add_global_constant("current-library-collection-links",
+			     scheme_register_parameter(current_library_collection_links,
+						       "current-library-collection-links",
+						       MZCONFIG_COLLECTION_LINKS),
 			     env);
 #endif
   scheme_add_global_constant("use-compiled-file-paths",
@@ -677,7 +693,7 @@ static Scheme_Object *make_protected_path(char *chars)
 }
 #endif
 
-Scheme_Object *make_exposed_sized_offset_path(int already_protected, 
+Scheme_Object *make_exposed_sized_offset_path(int *optional, int already_protected, 
 					      char *chars, intptr_t d, intptr_t len, int copy,
                                               int kind)
   /* Called to make a directory path where the end has been removed.
@@ -714,7 +730,7 @@ Scheme_Object *make_exposed_sized_offset_path(int already_protected,
         memcpy(s2+9, chars + i + 1, l);
         s2[l + 9] = 0;
         last = scheme_make_sized_offset_kind_path(s2, 0, l+9, 0, SCHEME_WINDOWS_PATH_KIND);
-        first = make_exposed_sized_offset_path(0, chars, d, i-d+1, 1, SCHEME_WINDOWS_PATH_KIND);
+        first = make_exposed_sized_offset_path(NULL, 0, chars, d, i-d+1, 1, SCHEME_WINDOWS_PATH_KIND);
         a[0] = first;
         a[1] = last;
         return scheme_build_path(2, a);
@@ -732,6 +748,11 @@ Scheme_Object *make_exposed_sized_offset_path(int already_protected,
       len--;
       copy = 1;
     }
+  }
+
+  if (optional) {
+    *optional = len;
+    return NULL;
   }
 
   return scheme_make_sized_offset_kind_path(chars, d, len, copy, kind);
@@ -1015,19 +1036,24 @@ static Scheme_Object *do_bytes_to_path_element(const char *name, Scheme_Object *
     }
   }
 
-  if (i >= len)
-    p = make_protected_sized_offset_path(1, SCHEME_BYTE_STR_VAL(s),
-                                         0, len,
-                                         SCHEME_MUTABLEP(s), 0,
-                                         kind);
-  else
+  if (i >= len) {
+    if (len == 0)
+      p = NULL;
+    else
+      p = make_protected_sized_offset_path(1, SCHEME_BYTE_STR_VAL(s),
+                                           0, len,
+                                           SCHEME_MUTABLEP(s), 0,
+                                           kind);
+  } else
     p = NULL;
   
   if (!p || !is_path_element(p))
     scheme_contract_error(name,
                           "cannot be converted to a path element",
                           "path", 1, argv[0],
-                          "explanation", 0, "path can be split, is not relative, or names a special element",
+                          "explanation", 0, (len 
+                                             ? "path can be split, is not relative, or names a special element"
+                                             : "path element cannot be empty"),
                           NULL);
 
   return p;
@@ -1247,7 +1273,7 @@ Scheme_Object *scheme_remove_current_directory_prefix(Scheme_Object *fn)
   Scheme_Object *cwd;
   intptr_t len;
 
-  cwd = scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_DIRECTORY);
+  cwd = scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_USER_DIRECTORY);
 
   fn = TO_PATH(fn);
 
@@ -2391,7 +2417,7 @@ static Scheme_Object *link_exists(int argc, Scheme_Object **argv)
 #endif
 }
 
-Scheme_Object *scheme_get_fd_identity(Scheme_Object *port, intptr_t fd, char *path)
+Scheme_Object *scheme_get_fd_identity(Scheme_Object *port, intptr_t fd, char *path, int noerr)
 /* If path is supplied, then fd is 0 for stat, 1 for lstat */
 {
   int errid = 0;
@@ -2476,18 +2502,20 @@ Scheme_Object *scheme_get_fd_identity(Scheme_Object *port, intptr_t fd, char *pa
     return scheme_bin_plus(devn, inon);
   }
 
-  if (!path) {
-    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-                     "port-file-identity: error obtaining identity\n"
-                     "  system error: %)",
-                     errid);
-  } else {
-    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-                     "file-or-directory-identity: error obtaining identity for path\n"
-                     "  path: %q\n"
-                     "  system error: %E", 
-                     path, 
-                     errid);
+  if (!noerr) {
+    if (!path) {
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                       "port-file-identity: error obtaining identity\n"
+                       "  system error: %)",
+                       errid);
+    } else {
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                       "file-or-directory-identity: error obtaining identity for path\n"
+                       "  path: %q\n"
+                       "  system error: %E", 
+                       path, 
+                       errid);
+    }
   }
 
   return NULL;
@@ -3261,15 +3289,18 @@ static Scheme_Object *path_to_directory_path(int argc, Scheme_Object **argv)
   return scheme_path_to_directory_path(inpath);
 }
 
-static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **base_out, int *id_out,
-                                    int *cleaned_slashes, int kind)
+static Scheme_Object *do_split_path(const char *path, int len, 
+                                    Scheme_Object **base_out, char **base_str_out, int *base_len_out,
+                                    int *id_out,
+                                    int *cleaned_slashes, int kind,
+                                    int check_repeats)
 {
   char *s;
   int p, last_was_sep = 0, is_dir, no_up = 0, not_same;
   Scheme_Object *file;
   int allow_double_before = 0, drive_end, no_slash_sep = 0;
 
-#define MAKE_SPLIT(x, y, z) (*base_out = x, *id_out = z, y)
+#define MAKE_SPLIT(x, x_str, x_len, y, z) (*base_out = x, *base_str_out = x_str, *base_len_out = x_len, *id_out = z, y)
 
   s = (char *)path;
 
@@ -3295,7 +3326,6 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
                 {
                   int len2, nsep;
                   char *s2;
-                  Scheme_Object *dir;
                   len2 = len - p - 1 + 9;
                   s2 = scheme_malloc_atomic(len2 + 1);
                   memcpy(s2, "\\\\?\\REL\\\\", 9);
@@ -3316,9 +3346,8 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
                         nsep = 1;
                     }
                   }
-                  dir = scheme_make_sized_offset_kind_path(s, 0, p + nsep, 1, SCHEME_WINDOWS_PATH_KIND);
                   file = scheme_make_sized_offset_kind_path(s2, 0, len2, 0, SCHEME_WINDOWS_PATH_KIND);
-                  return MAKE_SPLIT(dir, file, is_dir);
+                  return MAKE_SPLIT(NULL, s, p + nsep, file, is_dir);
                 }
               }
             }
@@ -3327,15 +3356,14 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
           if (dots_end > 0) {
             /* There are dots (so no literals) */
             if (dots_end - 3 > 8) {
-              file = scheme_make_sized_offset_kind_path(s, 0, dots_end - 3, 1, SCHEME_WINDOWS_PATH_KIND);
-              return MAKE_SPLIT(file, up_symbol, 1);
+              return MAKE_SPLIT(NULL, s, dots_end - 3, up_symbol, 1);
             } else
-              return MAKE_SPLIT(relative_symbol, up_symbol, 1);
+              return MAKE_SPLIT(relative_symbol, NULL, 0, up_symbol, 1);
           } else {
             /* No dots, so there must be one element. */
             if (s[6] == 'L') {
               /* keep \\?\REL\ on path, and report 'relative as base */
-              return MAKE_SPLIT(relative_symbol, 
+              return MAKE_SPLIT(relative_symbol, NULL, 0,
                                 scheme_make_sized_offset_kind_path(s, 0, len, 1,
                                                                    SCHEME_WINDOWS_PATH_KIND), 
                                 is_dir);
@@ -3355,7 +3383,7 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
               }
               dir = scheme_make_sized_offset_kind_path("\\", 0, 1, 0,
                                                        SCHEME_WINDOWS_PATH_KIND);
-              return MAKE_SPLIT(dir, 
+              return MAKE_SPLIT(dir, NULL, 0,
                                 scheme_make_sized_offset_kind_path(naya, 0, len, 0,
                                                                    SCHEME_WINDOWS_PATH_KIND), 
                                 is_dir);
@@ -3385,30 +3413,32 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
   }
 
   /* Look for confusing repeated separators (e.g. "x//y") */
-  for (p = len; p--; ) {
-    if (p > allow_double_before) {
-      if (IS_A_SEP(kind, s[p]) && IS_A_SEP(kind, s[p - 1])) {
-	/* Found it; copy without repeats */
-	int q;
-	char *old = s;
+  if (check_repeats) {
+    for (p = len; p--; ) {
+      if (p > allow_double_before) {
+        if (IS_A_SEP(kind, s[p]) && IS_A_SEP(kind, s[p - 1])) {
+          /* Found it; copy without repeats */
+          int q;
+          char *old = s;
 
-        if (cleaned_slashes)
-          *cleaned_slashes = 1;
+          if (cleaned_slashes)
+            *cleaned_slashes = 1;
 
-	s = (char *)scheme_malloc_atomic(len);
-	--len;
+          s = (char *)scheme_malloc_atomic(len);
+          --len;
 
-	for (p = 0, q = 0; p < allow_double_before; p++) {
-	  s[q++] = old[p];
-	}
+          for (p = 0, q = 0; p < allow_double_before; p++) {
+            s[q++] = old[p];
+          }
 
-	for (; p < len; p++) {
-	  if (!IS_A_SEP(kind, old[p]) || !IS_A_SEP(kind, old[p + 1]))
-	    s[q++] = old[p];
-	}
-	s[q++] = old[len];
-	len = q;
-	break;
+          for (; p < len; p++) {
+            if (!IS_A_SEP(kind, old[p]) || !IS_A_SEP(kind, old[p + 1]))
+              s[q++] = old[p];
+          }
+          s[q++] = old[len];
+          len = q;
+          break;
+        }
       }
     }
   }
@@ -3454,19 +3484,22 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
        For Mac, it is relative or root with trailing sep. */
     if (kind == SCHEME_UNIX_PATH_KIND) {
       if (s[0] == '/')
-        return MAKE_SPLIT(scheme_false, scheme_make_sized_offset_kind_path(s, 0, len, 1, kind), 1);
+        return MAKE_SPLIT(scheme_false, NULL, 0,
+                          scheme_make_sized_offset_kind_path(s, 0, len, 1, kind), 1);
 #ifdef TILDE_IS_ABSOLUTE
       if (s[0] == '~') {
         /* Strip ending slashes, if any. */
         while (IS_A_UNIX_SEP(s[len - 1])) {
           --len;
         }
-        return MAKE_SPLIT(scheme_false, scheme_make_sized_offset_kind_path(s, 0, len, 1, kind), 1);
+        return MAKE_SPLIT(scheme_false, NULL, 0,
+                          scheme_make_sized_offset_kind_path(s, 0, len, 1, kind), 1);
       }
 #endif
     } else {
       if (IS_A_DOS_SEP(s[0]) || drive_end)
-        return MAKE_SPLIT(scheme_false, scheme_make_sized_offset_kind_path(s, 0, len, 1, kind), 1);
+        return MAKE_SPLIT(scheme_false, NULL, 0,
+                          scheme_make_sized_offset_kind_path(s, 0, len, 1, kind), 1);
     }
 
     dir = relative_symbol;
@@ -3488,7 +3521,7 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
                                               kind);
     }
     
-    return MAKE_SPLIT(dir, file, is_dir);
+    return MAKE_SPLIT(dir, NULL, 0, file, is_dir);
   }
   
   /* Check for 'up and 'same: */
@@ -3517,27 +3550,52 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
   /* Check directory */
   if (p > 0) {
     Scheme_Object *ss;
-    ss = make_exposed_sized_offset_path(no_up, s, 0, p + 1, 1, kind);
-    return MAKE_SPLIT(ss, 
-		      file, 
-		      is_dir);
+    int new_len;
+    ss = make_exposed_sized_offset_path(&new_len, no_up, s, 0, p + 1, 1, kind);
+    if (ss) {
+      s = SCHEME_PATH_VAL(ss);
+      new_len = SCHEME_PATH_LEN(ss);
+    }
+    return MAKE_SPLIT(NULL, s, new_len, file, is_dir);
   }
 	
   /* p = 0; this means root dir. */
   {
     Scheme_Object *ss;
-    ss = scheme_make_sized_offset_kind_path(s, 0, 1, 1, kind);
-    return MAKE_SPLIT(ss, file, is_dir);
+    if (s[0] == '/')
+      ss = scheme_make_sized_offset_kind_path("/", 0, 1, 0, kind);
+    else
+      ss = scheme_make_sized_offset_kind_path(s, 0, 1, 1, kind);
+    return MAKE_SPLIT(ss, NULL, 0, file, is_dir);
   }
+}
+
+static Scheme_Object *do_split_path_once(const char *path, int len, 
+                                         Scheme_Object **base_out,
+                                         int *id_out,
+                                         int *cleaned_slashes, int kind)
+{
+  Scheme_Object *name, *base;
+  char *base_str;
+  int base_len;
+
+  name = do_split_path(path, len, base_out, &base_str, &base_len, id_out, cleaned_slashes, kind, 1);
+
+  if (!*base_out) {
+    base = scheme_make_sized_offset_kind_path(base_str, 0, base_len, 1, kind);
+    *base_out = base;
+  }
+
+  return name;
 }
 
 Scheme_Object *scheme_split_path(const char *path, int len, Scheme_Object **base_out, int *id_out, int kind)
 {
-  return do_split_path(path, len, base_out, id_out, NULL, kind);
+  return do_split_path_once(path, len, base_out, id_out, NULL, kind);
 }
 
 #ifndef NO_FILE_SYSTEM_UTILS
-static Scheme_Object *split_path(int argc, Scheme_Object **argv)
+static Scheme_Object *_split_path(const char *who, int argc, Scheme_Object **argv, int multi)
 {
   char *s;
   int is_dir, len;
@@ -3546,7 +3604,7 @@ static Scheme_Object *split_path(int argc, Scheme_Object **argv)
   inpath = argv[0];
 
   if (!SCHEME_GENERAL_PATH_STRINGP(inpath))
-    scheme_wrong_contract("split-path", "(or/c path-for-some-system? path-string?)", 0, argc, argv);
+    scheme_wrong_contract(who, "(or/c path-for-some-system? path-string?)", 0, argc, argv);
 
   inpath = TO_PATH(inpath);
 
@@ -3554,19 +3612,50 @@ static Scheme_Object *split_path(int argc, Scheme_Object **argv)
   len = SCHEME_PATH_LEN(inpath);
 
   if (!len) {
-    scheme_contract_error("split-path",
+    scheme_contract_error(who,
                           "path is an empty string",
                           NULL);
   }
 
   if (has_null(s, len))
-    raise_null_error("split-path", inpath, "");
+    raise_null_error(who, inpath, "");
 
-  three[1] = scheme_split_path(s, len, &three[0], &is_dir, SCHEME_PATH_KIND(inpath));
+  if (multi) {
+    Scheme_Object *l = scheme_null, *name, *base;
+    char *next_s;
+    int next_len;
+    int kind = SCHEME_PATH_KIND(inpath), check = 1;
 
-  three[2] = is_dir ? scheme_true : scheme_false;
+    while (1) {
+      name = do_split_path(s, len, &base, &next_s, &next_len, &is_dir, NULL, kind, check);
+      l = scheme_make_pair(name, l);
+      if (base) {
+        if (SCHEME_FALSEP(base) || SAME_OBJ(base, relative_symbol)) return l;
+        return scheme_make_pair(base, l);
+      } else {
+        s = next_s;
+        len = next_len;
+      }
+      check = 0;
+      SCHEME_USE_FUEL(1);
+    }
+  } else {
+    three[1] = scheme_split_path(s, len, &three[0], &is_dir, SCHEME_PATH_KIND(inpath));
+    
+    three[2] = is_dir ? scheme_true : scheme_false;
+    
+    return scheme_values(3, three);
+  }
+}
 
-  return scheme_values(3, three);
+static Scheme_Object *split_path(int argc, Scheme_Object **argv)
+{
+  return _split_path("split-path", argc, argv, 0);
+}
+
+static Scheme_Object *explode_path(int argc, Scheme_Object **argv)
+{
+  return _split_path("explode-path", argc, argv, 1);
 }
 #endif
 
@@ -3937,7 +4026,7 @@ static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
     Scheme_Object *a[2], * volatile in, * volatile out;
 
     reason = NULL;
-    in = scheme_do_open_input_file("copy-file", 0, 1, argv, 1, &reason, &err_val);
+    in = scheme_do_open_input_file("copy-file", 0, 1, argv, 1, &reason, &err_val, 0);
     if (!in) {
       has_err_val = !!err_val;
       goto failed;
@@ -4511,7 +4600,7 @@ static Scheme_Object *do_simplify_path(Scheme_Object *path, Scheme_Object *cycle
       len = SCHEME_PATH_LEN(base);
       if (len <= skip)
         break;
-      file = do_split_path(s, len, &base, &isdir, &cleaned_slashes, kind);
+      file = do_split_path_once(s, len, &base, &isdir, &cleaned_slashes, kind);
       if (kind == SCHEME_WINDOWS_PATH_KIND) {
         if (force_rel_up) {
           file = convert_literal_relative(file);
@@ -5128,21 +5217,9 @@ char *scheme_find_completion(char *fn)
   return SCHEME_PATH_VAL(f);
 }
 
-static Scheme_Object *explode_path(Scheme_Object *p)
+static Scheme_Object *do_explode_path(Scheme_Object *p)
 {
-  Scheme_Object *l = scheme_null, *base, *name;
-  int isdir;
-
-  while (1) {
-    name = scheme_split_path(SCHEME_PATH_VAL(p), SCHEME_PATH_LEN(p), &base, &isdir, SCHEME_PATH_KIND(p));
-    l = scheme_make_pair(name, l);
-
-    if (!SCHEME_PATHP(base)) {
-      l = scheme_make_pair(base, l);
-      return l;
-    }
-    p = base;
-  }
+  return explode_path(1, &p);
 }
 
 Scheme_Object *scheme_extract_relative_to(Scheme_Object *obj, Scheme_Object *dir)
@@ -5150,13 +5227,13 @@ Scheme_Object *scheme_extract_relative_to(Scheme_Object *obj, Scheme_Object *dir
   Scheme_Object *de, *be, *oe;
 
   if (SCHEME_PAIRP(dir)) {
-    be = explode_path(SCHEME_CAR(dir));
-    de = explode_path(SCHEME_CDR(dir));
+    be = do_explode_path(SCHEME_CAR(dir));
+    de = do_explode_path(SCHEME_CDR(dir));
   } else {
-    be = explode_path(dir);
+    be = do_explode_path(dir);
     de = be;
   }
-  oe = explode_path(obj);
+  oe = do_explode_path(obj);
 
   while (SCHEME_PAIRP(de)
 	 && SCHEME_PAIRP(oe)) {
@@ -5549,7 +5626,7 @@ static Scheme_Object *file_or_dir_permissions(int argc, Scheme_Object *argv[])
         new_bits = SCHEME_INT_VAL(l);
       } else
         scheme_wrong_contract("file-or-directory-permissions", 
-                              "(or/c #f 'bits (integer-in 0 65535)",
+                              "(or/c #f 'bits (integer-in 0 65535))",
                               1, argc, argv);
     }
   }
@@ -5761,7 +5838,7 @@ static Scheme_Object *file_identity(int argc, Scheme_Object *argv[])
   if (argc > 1)
     as_link = SCHEME_TRUEP(argv[1]);
 
-  return scheme_get_fd_identity(NULL, as_link, filename);
+  return scheme_get_fd_identity(NULL, as_link, filename, 0);
 }
 
 static Scheme_Object *file_size(int argc, Scheme_Object *argv[])
@@ -5842,18 +5919,59 @@ static Scheme_Object *current_directory(int argc, Scheme_Object **argv)
   if (!argc)
     scheme_security_check_file("current-directory", NULL, SCHEME_GUARD_FILE_EXISTS);
 
-  return scheme_param_config("current-directory",
-			     scheme_make_integer(MZCONFIG_CURRENT_DIRECTORY),
-			     argc, argv,
-			     -1, cwd_check, 
-			     "complete path or string", 1);
+  return scheme_param_config2("current-directory",
+                              scheme_make_integer(MZCONFIG_CURRENT_DIRECTORY),
+                              argc, argv,
+                              -1, cwd_check, 
+                              "path-string?", 1);
+}
+
+static Scheme_Object *current_user_directory(int argc, Scheme_Object **argv)
+{
+  if (!argc)
+    scheme_security_check_file("current-directory-for-user", NULL, SCHEME_GUARD_FILE_EXISTS);
+
+  return scheme_param_config2("current-directory-for-user",
+                              scheme_make_integer(MZCONFIG_CURRENT_USER_DIRECTORY),
+                              argc, argv,
+                              -1, cwd_check, 
+                              "path-string?", 1);
 }
 
 #endif
 
-static Scheme_Object *collpaths_gen_p(int argc, Scheme_Object **argv, int rel_ok, int abs_ok, int sym_ok)
+static Scheme_Object *check_link_key_val(Scheme_Object *key, Scheme_Object *val)
+{
+  Scheme_Object *new_val = scheme_null, *a;
+
+  if (!SCHEME_FALSEP(key)
+      && (!SCHEME_SYMBOLP(key)
+          || !scheme_is_module_path(key)))
+    return NULL;
+  
+  while (SCHEME_PAIRP(val)) {
+    a = SCHEME_CAR(val);
+    if (!SCHEME_PATH_STRINGP(a))
+      return NULL;
+    a = TO_PATH(a);
+    if (!scheme_is_complete_path(SCHEME_PATH_VAL(a),
+                                 SCHEME_PATH_LEN(a),
+                                 SCHEME_PLATFORM_PATH_KIND))
+      return NULL;
+    new_val = scheme_make_pair(a, new_val);
+    val = SCHEME_CDR(val);
+  }
+
+  if (!SCHEME_NULLP(val))
+    return NULL;
+
+  return scheme_reverse(new_val);
+}
+
+static Scheme_Object *collpaths_gen_p(int argc, Scheme_Object **argv, int rel_ok, int abs_ok, int sym_ok, int links_ok)
 {
   Scheme_Object *v = argv[0];
+  Scheme_Object *new_hts = scheme_null;
 
   if (scheme_proper_list_length(v) < 0)
     return NULL;
@@ -5866,6 +5984,36 @@ static Scheme_Object *collpaths_gen_p(int argc, Scheme_Object **argv, int rel_ok
     s = SCHEME_CAR(v);
     if (sym_ok && SAME_OBJ(s, same_symbol)) {
       /* ok */
+    } else if (links_ok && SCHEME_FALSEP(s)) {
+      /* ok */
+    } else if (links_ok && (SCHEME_CHAPERONE_HASHTP(s)
+                            || SCHEME_CHAPERONE_HASHTRP(s)
+                            || SCHEME_CHAPERONE_BUCKTP(s))) {
+      Scheme_Hash_Tree *new_ht;
+      Scheme_Object *key, *val, *idx, *a[2];
+
+      new_ht = scheme_make_hash_tree(0);
+
+      a[0] = s;
+      idx = scheme_hash_table_iterate_start(1, a);
+      while (SCHEME_TRUEP(idx)) {
+        a[0] = s;
+        a[1] = idx;
+        key = scheme_hash_table_iterate_key(2, a);
+        
+        val = scheme_chaperone_hash_get(s, key);
+        if (val) {
+          val = check_link_key_val(key, val);
+          if (!val) return NULL;
+          new_ht = scheme_hash_tree_set(new_ht, key, val);
+        }
+
+        a[0] = s;
+        a[1] = idx;
+        idx = scheme_hash_table_iterate_next(2, a);
+      }
+
+      new_hts = scheme_make_pair((Scheme_Object *)new_ht, new_hts);
     } else {
       if (!SCHEME_PATH_STRINGP(s))
         return NULL;
@@ -5885,14 +6033,24 @@ static Scheme_Object *collpaths_gen_p(int argc, Scheme_Object **argv, int rel_ok
   if (!SCHEME_NULLP(v))
     return NULL;
 
+  new_hts = scheme_reverse(new_hts);
+
   /* Convert to list of paths: */
   {
     Scheme_Object *last = NULL, *first = NULL, *p, *s;
     v = argv[0];
     while (SCHEME_PAIRP(v)) {
       s = SCHEME_CAR(v);
-      if (!SCHEME_SYMBOLP(s))
+      if (SCHEME_SYMBOLP(s)) {
+        /* ok */
+      } else if (SCHEME_FALSEP(s)) {
+        /* ok */
+      } else if (SCHEME_PATH_STRINGP(s)) {
         s = TO_PATH(s);
+      } else {
+        s = SCHEME_CAR(new_hts);
+        new_hts = SCHEME_CDR(new_hts);
+      }
       
       p = scheme_make_pair(s, scheme_null);
       if (!first)
@@ -5912,7 +6070,7 @@ static Scheme_Object *collpaths_gen_p(int argc, Scheme_Object **argv, int rel_ok
 
 static Scheme_Object *collpaths_p(int argc, Scheme_Object **argv)
 {
-  return collpaths_gen_p(argc, argv, 0, 1, 0);
+  return collpaths_gen_p(argc, argv, 0, 1, 0, 0);
 }
 
 Scheme_Object *scheme_current_library_collection_paths(int argc, Scheme_Object *argv[]) {
@@ -5921,30 +6079,51 @@ Scheme_Object *scheme_current_library_collection_paths(int argc, Scheme_Object *
 
 static Scheme_Object *current_library_collection_paths(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-library-collection-paths", 
-			     scheme_make_integer(MZCONFIG_COLLECTION_PATHS),
-			     argc, argv,
-			     -1, collpaths_p, "list of complete paths and strings", 1);
+  return scheme_param_config2("current-library-collection-paths", 
+                              scheme_make_integer(MZCONFIG_COLLECTION_PATHS),
+                              argc, argv,
+                              -1, collpaths_p, "(listof (and/c path-string? complete-path?))", 1);
+}
+
+static Scheme_Object *colllinks_p(int argc, Scheme_Object **argv)
+{
+  return collpaths_gen_p(argc, argv, 0, 1, 0, 1);
+}
+
+Scheme_Object *scheme_current_library_collection_links(int argc, Scheme_Object *argv[]) {
+  return current_library_collection_links(argc, argv);
+}
+
+static Scheme_Object *current_library_collection_links(int argc, Scheme_Object *argv[])
+{
+  return scheme_param_config2("current-library-collection-links", 
+                              scheme_make_integer(MZCONFIG_COLLECTION_LINKS),
+                              argc, argv,
+                              -1, colllinks_p, 
+                              "(listof (or/c #f (and/c path-string? complete-path?)"
+                              /**/         " (hash/c (or/c (and/c symbol? module-path?) #f)"
+                              /**/                 " (listof (and/c path-string? complete-path?)))))", 
+                              1);
 }
 
 #endif
 
 static Scheme_Object *compiled_kind_p(int argc, Scheme_Object **argv)
 {
-  return collpaths_gen_p(argc, argv, 1, 0, 0);
+  return collpaths_gen_p(argc, argv, 1, 0, 0, 0);
 }
 
 static Scheme_Object *use_compiled_kind(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("use-compiled-file-paths",
-			     scheme_make_integer(MZCONFIG_USE_COMPILED_KIND),
-			     argc, argv,
-			     -1, compiled_kind_p, "list of relative paths and strings", 1);
+  return scheme_param_config2("use-compiled-file-paths",
+                              scheme_make_integer(MZCONFIG_USE_COMPILED_KIND),
+                              argc, argv,
+                              -1, compiled_kind_p, "(listof (and/c path-string? relative-path?))", 1);
 }
 
 static Scheme_Object *compiled_roots_p(int argc, Scheme_Object **argv)
 {
-  return collpaths_gen_p(argc, argv, 1, 1, 1);
+  return collpaths_gen_p(argc, argv, 1, 1, 1, 0);
 }
 
 Scheme_Object *scheme_compiled_file_roots(int argc, Scheme_Object *argv[])
@@ -5954,10 +6133,10 @@ Scheme_Object *scheme_compiled_file_roots(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *compiled_file_roots(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-compiled-file-roots",
-			     scheme_make_integer(MZCONFIG_USE_COMPILED_ROOTS),
-			     argc, argv,
-			     -1, compiled_roots_p, "list of paths, string, and 'same", 1);
+  return scheme_param_config2("current-compiled-file-roots",
+                              scheme_make_integer(MZCONFIG_USE_COMPILED_ROOTS),
+                              argc, argv,
+                              -1, compiled_roots_p, "(listof (or/c path-string? 'same))", 1);
 }
 
 static Scheme_Object *use_user_paths(int argc, Scheme_Object *argv[])
@@ -5990,8 +6169,7 @@ enum {
   id_init_dir,
   id_init_file,
   id_sys_dir,
-  id_addon_dir,
-  id_links_file
+  id_addon_dir
 };
 
 Scheme_Object *scheme_get_run_cmd(void)
@@ -6037,26 +6215,22 @@ find_system_path(int argc, Scheme_Object **argv)
       return scheme_make_path("collects");
     }
     return collects_path;
+  } else if (argv[0] == config_dir_symbol) {
+    if (!config_path) {
+      return scheme_make_path("lib");
+    }
+    return config_path;
   } else if (argv[0] == orig_dir_symbol) {
     return original_pwd;
   } else if (argv[0] == addon_dir_symbol) {
     if (addon_dir) return addon_dir;
     which = id_addon_dir;
-  } else if (argv[0] == links_file_symbol) {
-    if (links_file) return links_file;
-    if (addon_dir) {
-      Scheme_Object *pa[2];
-      pa[0] = addon_dir;
-      pa[1] = scheme_make_path("links.rktd");
-      return scheme_build_path(2, pa);
-    }
-    which = id_links_file;
   } else {
     scheme_wrong_contract("find-system-path", 
                           "(or/c 'home-dir 'pref-dir 'pref-file 'temp-dir\n"
-                          "       'init-dir 'init-file 'links-file 'addon-dir\n"
+                          "       'init-dir 'init-file 'addon-dir\n"
                           "       'doc-dir 'desk-dir 'sys-dir 'exec-file 'run-file\n"
-                          "       'collects-dir 'orig-dir)",
+                          "       'collects-dir 'config-dir 'orig-dir)",
                           0, argc, argv);
     return NULL;
   }
@@ -6097,11 +6271,9 @@ find_system_path(int argc, Scheme_Object **argv)
 
     if ((which == id_pref_dir) 
 	|| (which == id_pref_file)
-	|| (which == id_addon_dir)
-	|| (which == id_links_file)) {
+	|| (which == id_addon_dir)) {
 #if defined(OS_X) && !defined(XONX)
-      if ((which == id_addon_dir)
-          || (which == id_links_file))
+      if (which == id_addon_dir)
 	home_str = "~/Library/Racket/";
       else
 	home_str = "~/Library/Preferences/";
@@ -6148,8 +6320,6 @@ find_system_path(int argc, Scheme_Object **argv)
       return append_path(home, scheme_make_path("/racket-prefs.rktd" + ends_in_slash));
 #endif
     }
-    if (which == id_links_file)
-      return append_path(home, scheme_make_path("/links.rktd" + ends_in_slash));
   }
 #endif
 
@@ -6187,8 +6357,7 @@ find_system_path(int argc, Scheme_Object **argv)
 
       if ((which == id_addon_dir)
 	  || (which == id_pref_dir)
-	  || (which == id_pref_file)
-	  || (which == id_links_file)) 
+	  || (which == id_pref_file)) 
 	which_folder = CSIDL_APPDATA;
       else if (which == id_doc_dir) {
 #       ifndef CSIDL_PERSONAL
@@ -6292,8 +6461,6 @@ find_system_path(int argc, Scheme_Object **argv)
       return append_path(home, scheme_make_path("\\racketrc.rktl" + ends_in_slash));
     if (which == id_pref_file)
       return append_path(home, scheme_make_path("\\racket-prefs.rktd" + ends_in_slash));
-    if (which == id_links_file)
-      return append_path(home, scheme_make_path("\\links.rktd" + ends_in_slash));
     return home;
   }
 #endif
@@ -6347,6 +6514,15 @@ void scheme_set_collects_path(Scheme_Object *p)
   collects_path = p;
 }
 
+/* should only called from main */
+void scheme_set_config_path(Scheme_Object *p)
+{
+  if (!config_path) {
+    REGISTER_SO(config_path);
+  }
+  config_path = p;
+}
+
 
 void scheme_set_original_dir(Scheme_Object *d)
 {
@@ -6360,26 +6536,6 @@ void scheme_set_addon_dir(Scheme_Object *p)
     REGISTER_SO(addon_dir);
   }
   addon_dir = p;
-}
-
-/* should only called from main */
-void scheme_set_links_file(Scheme_Object *p)
-{
-  if (!links_file) {
-    REGISTER_SO(links_file);
-  }
-  links_file = p;
-}
-
-Scheme_Object *scheme_find_links_path(int argc, Scheme_Object *argv[])
-{
-  if (inst_links_path)
-    return inst_links_path;
-
-  REGISTER_SO(inst_links_path);
-  inst_links_path = scheme_apply(argv[0], 0, NULL);
-
-  return inst_links_path;
 }
 
 /********************************************************************************/

@@ -208,6 +208,7 @@ typedef struct Place_Start_Data {
   Scheme_Object *function;
   Scheme_Object *channel;
   Scheme_Object *current_library_collection_paths;
+  Scheme_Object *current_library_collection_links;
   Scheme_Object *compiled_roots;
   mzrt_sema *ready;  /* malloc'ed item */
   struct Scheme_Place_Object *place_obj;   /* malloc'ed item */
@@ -274,6 +275,7 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
   Place_Start_Data      *place_data;
   mz_proc_thread        *proc_thread;
   Scheme_Object         *collection_paths;
+  Scheme_Object         *collection_links;
   Scheme_Place_Object   *place_obj;
   mzrt_sema             *ready;
   struct NewGC          *parent_gc;
@@ -319,8 +321,6 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
   place_data->parent_gc = parent_gc;
   
   {
-    Scheme_Object *so;
-
     in_arg = args[2];
     out_arg = args[3];
     err_arg = args[4];
@@ -365,6 +365,9 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
 
   collection_paths = scheme_current_library_collection_paths(0, NULL);
   place_data->current_library_collection_paths = collection_paths;
+
+  collection_links = scheme_current_library_collection_links(0, NULL);
+  place_data->current_library_collection_links = collection_links;
 
   collection_paths = scheme_compiled_file_roots(0, NULL);
   place_data->compiled_roots = collection_paths;
@@ -453,6 +456,7 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
   }
 
   places_prepare_direct(place_data->current_library_collection_paths);
+  places_prepare_direct(place_data->current_library_collection_links);
   places_prepare_direct(place_data->compiled_roots);
   places_prepare_direct(place_data->channel);
   places_prepare_direct(place_data->module);
@@ -749,7 +753,7 @@ static void add_child_status(int pid, int status) {
   if (st->signal_fd)
     scheme_signal_received_at(st->signal_fd);
   if (st->unneeded)
-    (void)scheme_get_child_status(st->pid, 0, NULL);
+    (void)scheme_get_child_status(st->pid, 0, 0, NULL);
 }
 
 static int raw_get_child_status(int pid, int *status, int done_only, int do_remove, int do_free) {
@@ -778,12 +782,12 @@ static int raw_get_child_status(int pid, int *status, int done_only, int do_remo
   return found;
 }
 
-int scheme_get_child_status(int pid, int is_group, int *status) {
+int scheme_get_child_status(int pid, int is_group, int can_check_group, int *status) {
   int found = 0;
 
   /* Check specific pid, in case the child has its own group
      (either given by Racket or given to itself): */
-  {
+  if (can_check_group) {
     pid_t pid2;
     int status;
 
@@ -991,15 +995,18 @@ static void got_sigchld() XFORM_SKIP_PROC
 void scheme_places_block_child_signal() XFORM_SKIP_PROC
 {
   sigset_t set;
-  sigemptyset(&set);
-  sigaddset(&set, SIGCHLD);
-  sigprocmask(SIG_BLOCK, &set, NULL);
 
   /* Mac OS X seems to need a handler installed for SIGCHLD to be
      delivered, since the default is to drop the signal. Also, this
      handler serves as a back-up alert if some thread is created that
-     does not block SIGCHLD. */
+     does not block SIGCHLD.
+     Solaris, meanwhile, seems to unmask SIGCHLD as a result of
+     setting a handler, so do this before masking the signal. */
   MZ_SIGSET(SIGCHLD, got_sigchld);
+
+  sigemptyset(&set);
+  sigaddset(&set, SIGCHLD);
+  sigprocmask(SIG_BLOCK, &set, NULL);
 }
 
 void scheme_places_unblock_child_signal() XFORM_SKIP_PROC
@@ -1423,6 +1430,33 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
         }
       } else if (mode != mzPDC_CLEAN) {
         scheme_log_abort("encountered serialized symbol in bad mode");
+        abort();
+      }
+      break;
+    case scheme_keyword_type:
+      if (mode == mzPDC_COPY) {
+        new_so = scheme_make_sized_offset_byte_string((char *)so, SCHEME_SYMSTR_OFFSET(so), SCHEME_SYM_LEN(so), 1);
+        new_so->type = scheme_serialized_keyword_type;
+      } else if (mode == mzPDC_DIRECT_UNCOPY) {
+        char *str, buf[64];
+        intptr_t len;
+        len = SCHEME_SYM_LEN(so);
+        if (len < 64)
+          str = buf;
+        else
+          str = (char *)scheme_malloc_atomic(len);
+        memcpy(str, SCHEME_SYM_VAL(so), len);
+        new_so = scheme_intern_exact_keyword(str, len);
+      } else if (mode != mzPDC_CHECK) {
+        scheme_log_abort("encountered keyword in bad mode");
+        abort();
+      }
+      break;
+    case scheme_serialized_keyword_type:
+      if ((mode == mzPDC_UNCOPY) || (mode == mzPDC_DESER)) {
+        new_so = scheme_intern_exact_keyword(SCHEME_BYTE_STR_VAL(so), SCHEME_BYTE_STRLEN_VAL(so));
+      } else if (mode != mzPDC_CLEAN) {
+        scheme_log_abort("encountered serialized keyword in bad mode");
         abort();
       }
       break;
@@ -2608,6 +2642,8 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
 
   a[0] = places_deep_direct_uncopy(place_data->current_library_collection_paths);
   scheme_current_library_collection_paths(1, a);
+  a[0] = places_deep_direct_uncopy(place_data->current_library_collection_links);
+  scheme_current_library_collection_links(1, a);
   a[0] = places_deep_direct_uncopy(place_data->compiled_roots);
   scheme_compiled_file_roots(1, a);
   scheme_seal_parameters();
@@ -2735,7 +2771,7 @@ Scheme_Object *scheme_places_deserialize(Scheme_Object *so, void *msg_memory)
   if (new_so) return new_so;
 
   /* small messages are deemed to be < 1k, this could be tuned in either direction */
-  if (GC_message_objects_size(msg_memory) < 1024) {
+  if (GC_message_small_objects_size(msg_memory, 1024)) {
     new_so = do_places_deep_copy(so, mzPDC_UNCOPY, 1, NULL, NULL);
     GC_dispose_short_message_allocator(msg_memory);
     /* from this point, we must return immediately, so that any
@@ -2959,7 +2995,7 @@ static void async_channel_refcount(Scheme_Place_Async_Channel *ch, int for_send,
 {
   if (!ch->lock) {
     /* can happen via finalization, where the channel is already finalized
-       (due to the lack of ordering on finalization) */
+       m(due to the lack of ordering on finalization) */
     return;
   }
   mzrt_mutex_lock(ch->lock);

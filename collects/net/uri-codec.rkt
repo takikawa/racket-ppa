@@ -46,7 +46,7 @@ See more in PR8831.
 ;; differences between the two encodings.
 
 ;; The URI encoding uses allows a few characters to be represented `as
-;; is': a-Z, A-Z, 0-9, -, _, ., !, ~, *, ', ( and ).  The remaining
+;; is': a-z, A-Z, 0-9, -, _, ., !, ~, *, ', ( and ).  The remaining
 ;; characters are encoded as %xx, where xx is the hex representation
 ;; of the integer value of the character (where the mapping
 ;; character<->integer is determined by US-ASCII if the integer is
@@ -184,7 +184,7 @@ See more in PR8831.
                 ;; and not properly encoded -- similar justification to
                 ;; browsers accepting unencoded chars in manually entered URLs.
                 [else (append (bytes->list (string->bytes/utf-8 (string c)))
-                              (internal-decode l))]))))
+                              rest)]))))
   (bytes->string/utf-8 (apply bytes (internal-decode (string->list str)))))
 
 ;; Utility for defining codecs

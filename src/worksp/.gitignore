@@ -1,0 +1,15 @@
+# MSVC build directories:
+*/Release
+*/Debug
+*/Win32
+*/x64
+*/3m
+*/SGC
+*/*.user
+
+# DevStudio generated files
+*/*.ncb
+*/*.suo
+
+rbuildmode.obj
+rbuildmode.exe

@@ -1,6 +1,5 @@
 #lang racket/base
 (require (for-syntax racket/base)
-         mzlib/etc
          racket/contract/base
          racket/contract/combinator
          (only-in racket/contract/region current-contract-region)
@@ -9,6 +8,7 @@
          racket/stxparam
          racket/unsafe/ops
          "serialize-structs.rkt"
+         racket/runtime-path
          (for-syntax racket/stxparam
                      syntax/kerncase
                      syntax/stx
@@ -1302,11 +1302,8 @@
                                                                       (append local-public-dynamic-names
                                                                               (map car all-inherits)))]
                                     [(method-accessor ...) (generate-temporaries
-                                                            (map car
-                                                                 (append publics overrides augrides
-                                                                         overments augments
-                                                                         override-finals augment-finals
-                                                                         all-inherits abstracts)))]
+                                                            (append local-public-dynamic-names
+                                                                    (map car all-inherits)))]
                                     [(inherit-field-accessor ...) (generate-temporaries
                                                                    (map (lambda (id)
                                                                           (format "get-~a"
@@ -1715,7 +1712,8 @@
           #'orig-stx))
        (with-syntax ([deserialize-name-info deserialize-name-info]
                      [(provision ...) (if (eq? (syntax-local-context) 'module)
-                                          #`((provide #,deserialize-name-info))
+                                          #`((runtime-require (submod "." deserialize-info))
+                                             (module+ deserialize-info (provide #,deserialize-name-info)))
                                           #'())])
          #'(begin
              (define-values (name deserialize-name-info)
@@ -2432,7 +2430,7 @@
                               (append new-normal-indices replace-normal-indices refine-normal-indices
                                       replace-augonly-indices refine-augonly-indices
                                       replace-final-indices refine-final-indices
-                                      inherit-indices new-abstract-indices))])
+                                      new-abstract-indices inherit-indices))])
                     
                     ;; -- Get new methods and initializers --
                     (let-values ([(new-methods override-methods augride-methods init)
@@ -2458,9 +2456,9 @@
                                   (vector-set! super-methods index method)
                                   (vector-set! int-methods index (vector method))
                                   (vector-set! beta-methods index (vector))
-                                  (vector-set! inner-projs index identity)
+                                  (vector-set! inner-projs index values)
                                   (vector-set! dynamic-idxs index 0)
-                                  (vector-set! dynamic-projs index (vector identity)))
+                                  (vector-set! dynamic-projs index (vector values)))
                                 (append new-augonly-indices new-final-indices
                                         new-abstract-indices new-normal-indices)
                                 new-methods)
@@ -2520,7 +2518,7 @@
                                     (let ([v (list->vector (append (vector->list (vector-ref beta-methods index))
                                                                    (list #f)))])
                                       ;; Since this starts a new part of the chain, reset the projection.
-                                      (vector-set! inner-projs index identity)
+                                      (vector-set! inner-projs index values)
                                       (vector-set! beta-methods index v))))
                                 augonly-names)
                       ;; Mark final methods:
@@ -2762,7 +2760,7 @@ An example
 
 (define (class/c-check-first-order ctc cls fail)
   (unless (class? cls)
-    (fail "not a class"))
+    (fail '(expected: "a class" given: "~v") cls))
   (let ([method-ht (class-method-ht cls)]
         [beta-methods (class-beta-methods cls)]
         [meth-flags (class-meth-flags cls)]) 
@@ -3117,7 +3115,7 @@ An example
                            [old-int-vec (vector-ref int-methods i)])
                       (vector-set! dynamic-idxs i new-idx)
                       (vector-copy! new-proj-vec 0 old-proj-vec)
-                      (vector-set! new-proj-vec new-idx identity)
+                      (vector-set! new-proj-vec new-idx values)
                       (vector-set! dynamic-projs i new-proj-vec)
                       (vector-copy! new-int-vec 0 old-int-vec)
                       ;; Just copy over the last entry here.  We'll
@@ -3496,13 +3494,10 @@ An example
                                 [else #f]))
                             (syntax-local-name))])
            (syntax/loc stx
-             (let* ([inits+contracts (sort (list (cons i i-c) ...)
-                                           (lambda (s1 s2) 
-                                             (string<? (symbol->string s1) (symbol->string s2)))
-                                           #:key car)])
+             (let-values ([(inits init-ctcs) (sort-inits+contracts (list (cons i i-c) ...))])
                (make-class/c methods method-ctcs
                              fields field-ctcs
-                             (map car inits+contracts) (map cdr inits+contracts)
+                             inits init-ctcs
                              inherits inherit-ctcs
                              inherit-fields inherit-field-ctcs
                              supers super-ctcs
@@ -3514,9 +3509,16 @@ An example
                              opaque?
                              'name))))))]))
 
+(define (sort-inits+contracts lst)
+  (define sorted
+    (sort lst
+          string<?
+          #:key (compose symbol->string car)))
+  (values (map car sorted) (map cdr sorted)))
+
 (define (check-object-contract obj methods fields fail)
   (unless (object? obj)
-    (fail "not a object"))
+    (fail '(expected: "an object" given: "~e") obj))
   (let ([cls (object-ref obj)])
     (let ([method-ht (class-method-ht cls)])
       (for ([m methods])
@@ -3580,7 +3582,7 @@ An example
       (let ([p (proj blame)])
         (λ (val)
           (unless (object? val)
-            (raise-blame-error blame val "expected an object, got ~v" val))
+            (raise-blame-error blame val '(expected: "an object" given: "~e") val))
           (let ([original-obj (if (has-original-object? val) (original-object val) val)]
                 [new-cls (p (object-ref val))])
             (impersonate-struct val object-ref (λ (o c) new-cls)
@@ -4650,9 +4652,8 @@ An example
 
 (define (is-a? v c)
   (cond
-    [(not (object? v)) #f]
-    [(class? c) ((class-object? (class-orig-cls c)) v)]
-    [(interface? c) (implementation? (object-ref v) c)]
+    [(class? c) (and (object? v) ((class-object? (class-orig-cls c)) v))]
+    [(interface? c) (and (object? v) (implementation? (object-ref v) c))]
     [else (raise-argument-error 'is-a? "(or/c class? interface?)" 1 v c)]))
 
 (define (subclass? v c)
@@ -4760,7 +4761,7 @@ An example
                              "class" c)))
 
 (define object->vector
-  (opt-lambda (in-o [opaque-v '...])
+  (lambda (in-o [opaque-v '...])
     (unless (object? in-o)
       (raise-argument-error 'object->vector "object?" in-o))
     (let ([o in-o])
@@ -4984,19 +4985,21 @@ An example
             [c (in-list method-contracts)])
         (when c
           (let ([i (hash-ref method-ht m)]
-                [p ((contract-projection c) blame)])
+                [p ((contract-projection c) (blame-add-context blame (format "the ~a method in" m)
+                                                               #:important m))])
             (vector-set! meths i (make-method (p (vector-ref meths i)) m))))))
     
     ;; Handle external field contracts
     (unless (null? fields)
-      (let ([bset (blame-swap blame)])
-        (for ([f (in-list fields)]
-              [c (in-list field-contracts)])
-          (when c
-            (let ([fi (hash-ref field-ht f)]
-                  [p-pos ((contract-projection c) blame)]
-                  [p-neg ((contract-projection c) bset)])
-              (hash-set! field-ht f (field-info-extend-external fi p-pos p-neg)))))))
+      (for ([f (in-list fields)]
+            [c (in-list field-contracts)])
+        (when c
+          (define fld-context (format "the ~a field in" f))
+          (define bset (blame-add-context blame fld-context #:swap? #t))
+          (let ([fi (hash-ref field-ht f)]
+                [p-pos ((contract-projection c) (blame-add-context blame fld-context))]
+                [p-neg ((contract-projection c) bset)])
+            (hash-set! field-ht f (field-info-extend-external fi p-pos p-neg))))))
     
     c))
 
@@ -5007,7 +5010,9 @@ An example
 (define (make-wrapper-object ctc obj blame methods method-contracts fields field-contracts)
   (check-object-contract obj methods fields (λ args (apply raise-blame-error blame obj args)))
   (let ([original-obj (if (has-original-object? obj) (original-object obj) obj)]
-        [new-cls (make-wrapper-class (object-ref obj) blame methods method-contracts fields field-contracts)])
+        [new-cls (make-wrapper-class (object-ref obj) 
+                                     blame
+                                     methods method-contracts fields field-contracts)])
     (impersonate-struct obj object-ref (λ (o c) new-cls)
                         impersonator-prop:contracted ctc
                         impersonator-prop:original-object original-obj)))

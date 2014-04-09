@@ -8,14 +8,15 @@
 ;; No-contract version.
 
 (define-struct id-table (hash phase))
-;; where hash maps symbol => (listof (cons identifier value))
+;; where hash maps symbol => (nonempty-listof (cons identifier value))
 ;;       phase is a phase-level (integer or #f)
 
 (define (make-id-table-hash-code identifier->symbol)
   (lambda (d hash-code)
-    (+ (hash-code (id-table-phase d))
-       (for/sum (((k v) (in-dict d)))
-         (* (hash-code (identifier->symbol k)) (hash-code v))))))
+    (let ([phase (id-table-phase d)])
+      (+ (hash-code phase)
+         (for/sum (((k v) (in-dict d)))
+           (* (hash-code (identifier->symbol k phase)) (hash-code v)))))))
 
 (define (make-id-table-equal? idtbl-count idtbl-ref)
   (lambda (left right equal?)
@@ -402,10 +403,7 @@ Notes (FIXME?):
            bound-identifier=?)
 
 (define (free-identifier->symbol id phase)
-  (let ([binding (identifier-binding id phase)])
-    (if (pair? binding)
-        (cadr binding)
-        (syntax-e id))))
+  (identifier-binding-symbol id phase))
 
 (make-code free-id-table
            free-identifier->symbol

@@ -18,6 +18,12 @@
 # Note: we use CPPFLAGS for configure-time testing only because
 # it used to include C++ flags that we didn't want for Racket.
 # hence PREFLAGS, which is initialized to the original CPPFLAGS.
+#
+# CC_FOR_BUILD is used for the Boehm GC build. In contrast to some
+# other build processes, CC_FOR_BUILD needs to be consistent with CC
+# in terms of its platform selection, and so it receives CFLAGS,
+# PREFLAGS, and COMPFLAGS, too. If that doesn't work out, use
+# `--enable-sgc', instead.
 
 AC_INIT([Racket])
 AC_CONFIG_SRCDIR(racket/src/bignum.c)
@@ -45,10 +51,12 @@ AC_ARG_ENABLE(usersetup, [  --enable-usersetup      setup user-specific files on
 AC_ARG_ENABLE(shared,  [  --enable-shared         create shared libraries (ok, but not recommended)])
 AC_ARG_ENABLE(dynlib,  [  --enable-dynlib         same as --enable-shared])
 AC_ARG_ENABLE(lt,      [  --enable-lt=<prog>      use <prog> instead of libtool; disable to use bundled], LIBTOOLPROG="$enableval", enable_lt=default)
+AC_ARG_ENABLE(dynlib,  [  --enable-libs           install Racket static libraries, if any])
 
 AC_ARG_ENABLE(libffi,  [  --enable-libffi         use installed libffi (enabled by default for Unix)], , enable_libffi=default)
 
 AC_ARG_ENABLE(sdk,     [  --enable-sdk=<path>     use Mac OS X 10.4 SDK directory])
+AC_ARG_ENABLE(sdk,     [  --enable-sdk6=<path>    use Mac OS X 10.6 SDK directory])
 AC_ARG_ENABLE(xonx,    [  --enable-xonx           use Unix style (e.g., use Gtk) for Mac OS X])
 AC_ARG_ENABLE(libfw,   [  --enable-libfw          install Mac OS X frameworks to /Library/Frameworks])
 AC_ARG_ENABLE(libfw,   [  --enable-userfw         install Mac OS X frameworks to ~/Library/Frameworks])
@@ -70,6 +78,7 @@ AC_ARG_ENABLE(bigendian, [  --enable-bigendian      assume "big" if endianness c
 AC_ARG_ENABLE(gprof,   [  --enable-gprof          compile for profiling with gprof (gcc only)])
 AC_ARG_ENABLE(gcov,    [  --enable-gcov           compile to gather gcov statistics (gcc3 only)])
 
+AC_ARG_ENABLE(noopt,   [  --enable-strip          strip debug on install (usually enabled by default)])
 AC_ARG_ENABLE(noopt,   [  --enable-noopt          drop -O C flags (useful for low-level debugging)])
 
 ###### Some flags imply other flags #######
@@ -188,6 +197,16 @@ if test "${mandir}" != '${prefix}/man' ; then
    unixstyle=yes
  fi
 fi
+if test "${docdir}" != '${datarootdir}/doc/${PACKAGE}' ; then
+  unixstyle=yes
+fi
+if test "${collectsdir}" != '${exec_prefix}/share/${PACKAGE}/collects' ; then
+  unixstyle=yes
+fi
+if test "${appsdir}" != '${exec_prefix}/share/applications' ; then
+  unixstyle=yes
+fi
+
 
 MAKE_COPYTREE=no
 if test "${unixstyle}" = "no" ; then
@@ -199,23 +218,28 @@ if test "${unixstyle}" = "no" ; then
   fi
   bindir='${prefix}/bin'
   libpltdir='${prefix}/lib'
-  collectsdir='${prefix}/collects'
+  sharepltdir='${prefix}/share'
+  etcpltdir='${prefix}/etc'
   includepltdir='${prefix}/include'
   docdir='${prefix}/doc'
   mandir='${prefix}/man'
+  collectsdir='${prefix}/collects'
+  appsdir='${prefix}/share/applications'
   COLLECTS_PATH="../collects"
+  CONFIG_PATH="../etc"
   INSTALL_ORIG_TREE=yes
 else
   if test "${prefix}" = "NONE" ; then
     # Set prefix explicitly so we can use it during configure
     prefix="${ac_default_prefix}"
   fi
-  libpltdir="${libdir}/racket"
-  collectsdir="${libdir}/racket/collects"
-  includepltdir="${includedir}/racket"
-  docdir="${datadir}/doc/racket"
+  libpltdir="${libdir}/"'${PACKAGE}'
+  sharepltdir="${datadir}/"'${PACKAGE}'
+  etcpltdir="${sysconfdir}/"'${PACKAGE}'
+  includepltdir="${includedir}/"'${PACKAGE}'
   MAKE_COPYTREE=copytree
   COLLECTS_PATH='${collectsdir}'
+  CONFIG_PATH='${etcpltdir}'
   INSTALL_ORIG_TREE=no
 fi
 
@@ -288,6 +312,10 @@ show_explicitly_enabled "${enable_gprof}" "gprof"
 show_explicitly_enabled "${enable_gcov}" "gcov"
 
 show_explicitly_enabled "${enable_noopt}" "No-optimization" "Note that this mode is intended only for debugging purposes"
+show_explicitly_enabled "${enable_strip}" "Debug-symbol stripping"
+show_explicitly_disabled "${enable_strip}" "Debug-symbol stripping"
+
+show_explicitly_enabled "${enable_libs}" "Installation of static libraries (if any)"
 
 show_explicitly_disabled "${enable_mac64}" "64-bit Mac OS X"
 
@@ -295,7 +323,13 @@ show_explicitly_enabled "${enable_libfw}" "Frameworks-to-system"
 show_explicitly_enabled "${enable_userfw}" "Frameworks-to-user"
 
 if test "${enable_sdk}" != "" ; then
-   echo "=== Using Mac OS X SDK directory ${enable_sdk}"
+   if test "${enable_sdk6}" != "" ; then
+     echo "ERROR: cannot specify both --enable-sdk and --enable-sdk6"
+   fi
+   echo "=== Using Mac OS X 10.4 SDK directory ${enable_sdk}"
+fi
+if test "${enable_sdk6}" != "" ; then
+   echo "=== Using Mac OS X 10.6 SDK directory ${enable_sdk6}"
 fi
 
 if test "${enable_racket}" != "" ; then
@@ -372,9 +406,13 @@ MAIN_VARIANT=3m
 
 INSTALL_SETUP_FLAGS=
 
+INSTALL_LIBS_ENABLE=no-install
+
 STRIP_DEBUG=":"
+enable_strip_by_default=yes
 
 use_flag_pthread=yes
+use_flag_posix_pthread=no
 skip_iconv_check=no
 
 ###### OSKit stuff #######
@@ -430,13 +468,14 @@ COMPFLAGS=""
 
 ORIG_CC="${CC}"
 ORIG_CPP="${CPP}"
-SUB_CONFIGURE_EXTRAS=""
+# Include `--enable-portable-binary' by default for libffi
+SUB_CONFIGURE_EXTRAS=" --enable-portable-binary"
 
 if test "${enable_oskit}" = "no" ; then
   AC_PROG_CC
   AC_PROG_CPP
   if test "$AS" = '' ; then 
-    AS=as
+    AS="${ac_tool_prefix}as"
     as_was_set=no
   else
     as_was_set=yes
@@ -444,7 +483,11 @@ if test "${enable_oskit}" = "no" ; then
 fi
 AC_PROG_RANLIB
 if test "$AR" = '' ; then 
-  AR=ar
+  AR="${ac_tool_prefix}ar"
+  AC_CHECK_PROG(platform_ar_found, $AR, yes, no)
+  if test "$platform_ar_found" = 'no' ; then
+    AR="ar"
+  fi
 fi
 if test "$ARFLAGS" = '' ; then 
   ARFLAGS=ruv
@@ -499,6 +542,7 @@ fi
 
 if test "${enable_shared}" = "yes" ; then
   LIBRACKET_DEP="${LIBRACKET_DEP} libmzgc.la"
+  INSTALL_LIBS_ENABLE=install
 fi
 
 if test "${enable_foreign}" = "yes" ; then
@@ -506,6 +550,10 @@ if test "${enable_foreign}" = "yes" ; then
 fi
 if test "${enable_jit}" = "yes" ; then
   check_for_mprotect=yes
+fi
+
+if test "${enable_libs}" = "yes" ; then
+  INSTALL_LIBS_ENABLE=install
 fi
 
 ############## platform tests ################
@@ -531,6 +579,8 @@ case "$host_os" in
     need_gcc_static_libgcc="yes"
     check_gcc_dash_e="yes"
     try_poll_syscall="yes"
+    use_flag_pthread="no"
+    use_flag_posix_pthread="yes"
     ;;
   aix*)
     enable_cgcdefault="yes"
@@ -543,6 +593,11 @@ case "$host_os" in
     try_kqueue_syscall=yes
     ;;
   openbsd*)
+    LIBS="$LIBS -Wl,--export-dynamic"
+    enable_pthread=yes
+    try_kqueue_syscall=yes
+    ;;
+  dragonfly*)
     LIBS="$LIBS -Wl,--export-dynamic"
     enable_pthread=yes
     try_kqueue_syscall=yes
@@ -562,9 +617,9 @@ case "$host_os" in
   linux*)
     LIBS="$LIBS -ldl -lm -rdynamic"
     DYN_CFLAGS="-fPIC"
-    STRIP_DEBUG="strip -S"
     try_poll_syscall=yes
     try_epoll_syscall=yes
+    try_inotify_syscall=yes
     case "$host_cpu" in
       #Required for CentOS 4.6
       x86_64)
@@ -616,6 +671,7 @@ case "$host_os" in
     MZINSTALLBINDIR="${MZINSTALLBINDIR}/.."
     EXE_SUFFIX=".exe"
     COLLECTS_PATH="collects"
+    CONFIG_PATH="lib"
     skip_iconv_check=yes
     check_for_mprotect=no
     AC_DEFINE(HAVE_STDINT_H,1,[Have stdint.h])
@@ -662,6 +718,15 @@ case "$host_os" in
       fi
       SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS} ${PREFLAGS}"'"'
       need_cc_in_extras=yes
+      if test "$ORIG_CC_FOR_BUILD" = "" ; then
+        CC_FOR_BUILD="$CC"
+      fi
+    fi
+    
+    if test "${enable_sdk6}" != "" ; then 
+      PREFLAGS="$PREFLAGS -isysroot ${enable_sdk6} -mmacosx-version-min=10.6"
+      LDFLAGS="$LDFLAGS -isysroot ${enable_sdk6} -mmacosx-version-min=10.6"
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS} ${PREFLAGS}"'"'
     fi
     
     case "$host_cpu" in
@@ -674,8 +739,6 @@ case "$host_os" in
 
     PREFLAGS="$PREFLAGS -DOS_X -D_DARWIN_UNLIMITED_SELECT"
     try_kqueue_syscall=yes
-
-    STRIP_DEBUG="/usr/bin/strip -S"
 
     SO_SUFFIX=.dylib
 
@@ -765,6 +828,20 @@ fi
 if test "${enable_sgc}" = "yes" ; then
   GCDIR=sgc
   OPTIONS="$OPTIONS -DUSE_SENORA_GC"
+fi
+
+############## Strip tool ################
+
+if test "${enable_strip}" = "" ; then
+  if test "${enable_strip_by_default}" = "yes" ; then
+    enable_strip=yes
+  fi
+fi
+
+if test "${enable_strip}" = "yes" ; then
+  AC_CHECK_TOOL([STRIP], [strip])
+  # Used to add -S flag, but not all `strip' variants support it:
+  STRIP_DEBUG="$STRIP"
 fi
 
 ############## C flags ################
@@ -929,6 +1006,26 @@ if test "${try_epoll_syscall}" = "yes" ; then
   AC_MSG_RESULT($use_epoll)
   if test "${use_epoll}" = "yes" ; then
      AC_DEFINE(HAVE_EPOLL_SYSCALL,1,[Have epoll])
+  fi
+fi
+
+if test "${try_inotify_syscall}" = "yes" ; then
+  [ msg="for inotify" ]
+  AC_MSG_CHECKING($msg)
+  AC_LINK_IFELSE(
+  [  #include <sys/inotify.h> ]
+    int main() {
+      int fd;
+      int wd;
+      fd = inotify_init();
+      wd = inotify_add_watch(fd, "/tmp", 
+                             (IN_CREATE | IN_DELETE | IN_DELETE_SELF
+                              | IN_MODIFY | IN_MOVE_SELF | IN_MOVED_TO));
+      return 0;
+    }, use_inotify=yes, use_inotify=no)
+  AC_MSG_RESULT($use_inotify)
+  if test "${use_inotify}" = "yes" ; then
+     AC_DEFINE(HAVE_INOTIFY_SYSCALL,1,[Have inotify])
   fi
 fi
 
@@ -1124,6 +1221,9 @@ if test "${enable_pthread}" = "yes" ; then
     PREFLAGS="$PREFLAGS -pthread"
     LDFLAGS="$LDFLAGS -pthread"
   fi
+  if test "${use_flag_posix_pthread}" = "yes" ; then
+    PREFLAGS="$PREFLAGS -D_POSIX_PTHREAD_SEMANTICS -D_REENTRANT"
+  fi
   AC_DEFINE(USE_PTHREAD_INSTEAD_OF_ITIMER, 1, [Pthread timer enabled])
 
 [ msg="whether pthread_rwlock is available"   ]
@@ -1242,7 +1342,7 @@ fi
 ############## drop optimization flags ################
 
 if test "${enable_noopt}" = "yes" ; then
-  AWKPRG='BEGIN { FS = "(^| )-O(0|1|2|3|4|5|6|7|8|9|())( |$)" } /.*/ { for (i = 1; i < NF; i++) printf "%s ", $i; print $NF }'
+  AWKPRG='BEGIN { FS = "(^| )-O(0|1|2|3|4|5|6|7|8|9)?( |$)" } /.*/ { for (i = 1; i < NF; i++) printf "%s ", $i; print $NF }'
   CFLAGS=`echo "$CFLAGS" | awk "$AWKPRG"`
 fi
 
@@ -1440,10 +1540,14 @@ AC_SUBST(LTO)
 AC_SUBST(LTA)
 
 AC_SUBST(collectsdir)
+AC_SUBST(appsdir)
 AC_SUBST(libpltdir)
+AC_SUBST(sharepltdir)
+AC_SUBST(etcpltdir)
 AC_SUBST(includepltdir)
 AC_SUBST(docdir)
 AC_SUBST(COLLECTS_PATH)
+AC_SUBST(CONFIG_PATH)
 
 AC_SUBST(MMM)
 AC_SUBST(MMM_INSTALLED)
@@ -1454,6 +1558,8 @@ AC_SUBST(CGC_CAP_INSTALLED)
 AC_SUBST(MAIN_VARIANT)
 
 AC_SUBST(INSTALL_SETUP_FLAGS)
+
+AC_SUBST(INSTALL_LIBS_ENABLE)
 
 AC_SUBST(RUN_RACKET_CGC)
 AC_SUBST(RUN_RACKET_MMM)
@@ -1492,7 +1598,27 @@ else
   MZOPTIONS="$MZOPTIONS -DDONT_USE_FOREIGN"
 fi
 makefiles="$makefiles foreign/Makefile"
-ac_configure_args="$ac_configure_args$SUB_CONFIGURE_EXTRAS"
+
+# Remove any --enable or --disable arguments from `ac_configure_args':
+new_configure_args=
+fixup_prev=
+eval "set x $ac_configure_args"
+shift
+for fixup_arg
+do
+  case $fixup_arg in
+  # Strip away all feature choices
+  -enable* | --enable* | -disable* | --disable*)
+    ;;
+  *)
+    case $fixup_arg in
+    *\'*) fixup_arg=`echo "$fixup_arg" | sed "s/'/'\\\\\\\\''/g"` ;;
+    esac
+    new_configure_args="$new_configure_args '$fixup_arg'" ;;
+  esac
+done
+# Add in `SUB_CONFIGURE_EXTRAS'
+ac_configure_args="$new_configure_args$SUB_CONFIGURE_EXTRAS"
 
 if test "${enable_gracket}" = "yes" ; then
   makefiles="$makefiles
@@ -1517,16 +1643,20 @@ if test "${inplacebuild}" = "yes" ; then
   fi
 else
   echo ">>> Installation targets:"
-  echo " executables  : ${bindir}/..."
-  echo " Racket code  : ${collectsdir}/..."
-  echo " core docs    : ${docdir}/..."
-  echo " C libraries  : ${libdir}/..."
-  echo " C headers    : ${includepltdir}/..."
-  echo " extra C objs : ${libpltdir}/..."
-  echo " man pages    : ${mandir}/..."
+  echo " executables        : ${bindir}/..."
+  echo " core docs          : ${docdir}/..."
+  echo " C libraries        : ${libdir}/..."
+  echo " C headers          : ${includepltdir}/..."
+  echo " platform libraries : ${libpltdir}/..."
+  echo " common libraries   : ${sharepltdir}/..."
+  echo " base collections   : ${collectsdir}/..."
+  echo " configuration      : ${etcpltdir}/..."
+  echo " .desktop files     : ${appsdir}/..."
+  echo " man pages          : ${mandir}/..."
   echo "     where prefix = ${prefix}"
   echo "  and datarootdir = ${datarootdir}"
   if test "${unixstyle}" = "yes" ; then
     echo "  and exec_prefix = ${exec_prefix}"
+    echo "  and PACKAGE = racket"
   fi
 fi

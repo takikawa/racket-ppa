@@ -75,6 +75,7 @@
         (check val (λ _ (return #f)) #t)))))
 
 (define-struct (flat-vectorof base-vectorof) ()
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:flat-contract
   (build-flat-contract-property
    #:name vectorof-name
@@ -101,8 +102,14 @@
        (λ (blame)
          (let ([elem-pos-proj ((contract-projection elem-ctc) (blame-add-context blame "an element of"))]
                [elem-neg-proj ((contract-projection elem-ctc) (blame-add-context blame "an element of" #:swap? #t))])
-           (define checked-ref (λ (vec i val) (elem-pos-proj val)))
-           (define checked-set (λ (vec i val) (elem-neg-proj val)))
+           (define checked-ref (λ (vec i val)
+                                 (with-continuation-mark
+                                  contract-continuation-mark-key blame
+                                  (elem-pos-proj val))))
+           (define checked-set (λ (vec i val)
+                                 (with-continuation-mark
+                                  contract-continuation-mark-key blame
+                                  (elem-neg-proj val))))
            (define raise-blame (λ (val . args)
                                   (apply raise-blame-error blame val args)))
            (λ (val)
@@ -118,6 +125,7 @@
                   impersonator-prop:contracted ctc))))))))
 
 (define-struct (chaperone-vectorof base-vectorof) ()
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:chaperone-contract
   (build-chaperone-contract-property
    #:name vectorof-name
@@ -125,6 +133,7 @@
    #:projection (vectorof-ho-projection chaperone-vector)))
 
 (define-struct (impersonator-vectorof base-vectorof) ()
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:contract
   (build-contract-property
    #:name vectorof-name
@@ -166,7 +175,8 @@
 (define/subexpression-pos-prop (vector-immutableof c)
   (vectorof c #:immutable #t))
 
-(define-struct base-vector/c (elems immutable))
+(define-struct base-vector/c (elems immutable)
+  #:property prop:custom-write custom-write-property-proc)
 
 (define (vector/c-name c)
   (let ([immutable (base-vector/c-immutable c)])
@@ -211,9 +221,9 @@
   (λ (val)
     (and (vector? val)
          (cond
-           [(eq? immutable #t) (immutable? val)]
-           [(eq? immutable #f) (not (immutable? val))]
-           [else #t])
+          [(eq? immutable #t) (immutable? val)]
+          [(eq? immutable #f) (not (immutable? val))]
+          [else #t])
          (= (vector-length val) (length elem-ctcs))
          (for/and ([e (in-vector val)]
                    [c (in-list elem-ctcs)])
@@ -229,11 +239,14 @@
      (λ (blame) 
        (define blame+ctxt (blame-add-context blame "an element of"))
        (λ (val)
-         (check-vector/c ctc val blame)
-         (for ([e (in-vector val)]
-               [c (in-list (base-vector/c-elems ctc))])
-           (((contract-projection c) blame+ctxt) e))
-         val)))))
+         (with-continuation-mark
+          contract-continuation-mark-key blame
+          (begin
+            (check-vector/c ctc val blame)
+            (for ([e (in-vector val)]
+                  [c (in-list (base-vector/c-elems ctc))])
+              (((contract-projection c) blame+ctxt) e))
+            val)))))))
 
 (define (vector/c-ho-projection vector-wrapper)
   (λ (ctc)
@@ -260,9 +273,13 @@
                  (vector-wrapper
                   val
                   (λ (vec i val)
-                    ((vector-ref elem-pos-projs i) val))
+                    (with-continuation-mark
+                     contract-continuation-mark-key blame
+                     ((vector-ref elem-pos-projs i) val)))
                   (λ (vec i val)
-                    ((vector-ref elem-neg-projs i) val))
+                    (with-continuation-mark
+                     contract-continuation-mark-key blame
+                     ((vector-ref elem-neg-projs i) val)))
                   impersonator-prop:contracted ctc))))))))
 
 (define-struct (chaperone-vector/c base-vector/c) ()

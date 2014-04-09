@@ -1,5 +1,5 @@
 #lang racket/base
-(require db
+(require db/private/pre
          racket/format
          racket/serialize
          "main-doc.rkt")
@@ -7,6 +7,8 @@
 (provide doc-db-available?
          doc-db-clear-provides
          doc-db-add-provides
+         doc-db-set-provides-timestamp
+         doc-db-get-provides-timestamp
          doc-db-clear-dependencies
          doc-db-add-dependencies
          doc-db-clear-searches
@@ -27,10 +29,10 @@
 (define (doc-db-available?)
   (sqlite3-available?))
 
-(define (doc-db-file->connection db-file)
+(define (doc-db-file->connection db-file [write? #f])
   (define exists? (file-exists? db-file))
   (define db (sqlite3-connect #:database db-file 
-                              #:mode 'create
+                              #:mode (if write? 'create 'read-only)
                               #:busy-retry-limit 0))
   (unless exists?
     (call-with-retry/transaction
@@ -72,7 +74,7 @@
                             #:teardown [teardown void])
   (define db (if (connection? db-file)
                  db-file
-                 (doc-db-file->connection db-file)))
+                 (doc-db-file->connection db-file write?)))
   (setup db)
   (begin0
    (call-with-retry/transaction
@@ -134,6 +136,31 @@
   (clear 'doc-db-clear-provides
          db-file filename
          "DELETE FROM documented WHERE pathid=$1"))
+
+(define (doc-db-set-provides-timestamp db-file filename seconds)
+  (call-with-database
+   'doc-db-set-provides-timestamp
+   db-file
+   #:write? #t
+   (lambda (db)
+     (prepare-tables db)
+     (define pathid (filename->pathid db filename))
+     (query-exec db "DELETE FROM timestamps WHERE pathid=$1"
+                 pathid)
+     (query-exec db "INSERT INTO timestamps VALUES ($1, $2)"
+                 pathid seconds))))
+
+(define (doc-db-get-provides-timestamp db-file filename)
+  (call-with-database
+   'doc-db-get-provides-timestamp
+   db-file
+   (lambda (db)
+     (define pathid (filename->pathid db filename #f))
+     (define row
+       (query-maybe-row db (~a "SELECT seconds FROM timestamps"
+                               " WHERE pathid=$1")
+                        pathid))
+     (and row (vector-ref row 0)))))
 
 (define (doc-db-add-dependencies db-file depends filename)
   (add 'doc-db-add-dependencies
@@ -244,7 +271,7 @@
    #:setup (maybe-attach attach-db-path)
    #:teardown (maybe-detach attach-db-path)
    (lambda (db)
-     (define pathid (filename->pathid db filename))
+     (define pathid (filename->pathid db filename #f))
      ;; Items with no `searches' entries:
      (define rows
        (query-rows db (~a "SELECT P.stag "
@@ -307,7 +334,7 @@
    #:setup (maybe-attach attach-db-path)
    #:teardown (maybe-detach attach-db-path)
    (lambda (db)
-     (define pathid (filename->pathid db filename))
+     (define pathid (filename->pathid db filename #f))
      (define ((rows->paths in-other?) rows)
        (for/list ([row (in-list rows)])
          (pathid->filename db (vector-ref row 0) in-other? main-doc-relative-ok?)))
@@ -318,16 +345,16 @@
                           " WHERE P.pathid = $1"
                           "   AND D.stag = P.stag"
                           " GROUP BY D.pathid")
-                   pathid)))
-     (if attach-db-path
-         ((rows->paths #t)
-          (query-rows db (~a "SELECT D.pathid "
-                             " FROM dependencies P, other.documented D"
-                             " WHERE P.pathid = $1"
-                             "   AND D.stag = P.stag"
-                             " GROUP BY D.pathid")
-                      pathid))
-         null))))
+                   pathid))
+      (if attach-db-path
+          ((rows->paths #t)
+           (query-rows db (~a "SELECT D.pathid "
+                              " FROM dependencies P, other.documented D"
+                              " WHERE P.pathid = $1"
+                              "   AND D.stag = P.stag"
+                              " GROUP BY D.pathid")
+                       pathid))
+          null)))))
 
 (define (doc-db-clean-files db-file ok-files)
   (call-with-database
@@ -355,6 +382,8 @@
          (define pathid (vector-ref row 2))
          (query-exec db "DELETE FROM documented WHERE pathid=$1"
                      pathid)
+         (query-exec db "DELETE FROM timestamps WHERE pathid=$1"
+                     pathid)
          (query-exec db "DELETE FROM searches WHERE pathid=$1"
                      pathid)
          (query-exec db "DELETE FROM searchSets WHERE pathid=$1"
@@ -367,7 +396,7 @@
                      pathid))))))
          
 
-(define (filename->pathid db filename)
+(define (filename->pathid db filename [write? #t])
   (define filename* (path->main-doc-relative filename))
   (define filename-bytes (cond
                           [(pair? filename*)
@@ -382,10 +411,13 @@
   (cond
    [(not id)
     (define num (vector-ref (query-row db "SELECT COUNT(pathid) FROM pathids") 0))
-    (query-exec db "INSERT INTO pathids VALUES ($1, $2, $3)"
-                (add1 num)
-                (if (pair? filename*) "y" "n")
-                filename-bytes)
+    (when write?
+      (query-exec db "INSERT INTO pathids VALUES ($1, $2, $3)"
+                  (add1 num)
+                  (if (pair? filename*) "y" "n")
+                  filename-bytes))
+    ;; If we can't write, then this result is bogus, but it should lead
+    ;; to empty query results in a transaction:
     (add1 num)]
    [else (vector-ref id 0)]))
 
@@ -441,13 +473,21 @@
     (query-exec db (~a "CREATE INDEX searchesTag "
                        "on searches (stag)"))
     (query-exec db (~a "CREATE INDEX searchesPathId "
-                       "on searches (pathid, setid)"))))
+                       "on searches (pathid, setid)")))
+  (when (null? 
+         (query-rows db (~a "SELECT name FROM sqlite_master"
+                            " WHERE type='table' AND name='timestamps'")))
+    (query-exec db (~a "CREATE TABLE timestamps "
+                       "(pathid SMALLINT,"
+                       " seconds BIGINT,"
+                       " PRIMARY KEY (pathid))"))))
 
 (define (exn:fail:retry? v)
   (and (exn:fail:sql? v)
        (let ([s (exn:fail:sql-sqlstate v)])
          (or (eq? s 'busy)
-             (and (string? s) (regexp-match? s #rx"^40...$"))))))
+             (eq? s 'ioerr-blocked)
+             (eq? s 'ioerr-lock)))))
 
 (define (call-with-lock-handler handler thunk)
   (with-handlers* ([exn:fail:retry?

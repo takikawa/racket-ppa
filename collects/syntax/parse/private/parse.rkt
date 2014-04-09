@@ -392,7 +392,8 @@ Conventions:
                                                   #'ctx clause)]))
                         (else
                          (raise-syntax-error #f "internal error: unknown body mode" #'ctx #'body-mode)))])
-                 (values pattern body-expr defs2)))]))
+                 (values pattern body-expr defs2)))]
+            [_ (raise-syntax-error #f "expected clause" #'ctx clause)]))
         (unless (stx-list? clauses-stx)
           (raise-syntax-error #f "expected sequence of clauses" #'ctx))
         (define-values (patterns body-exprs defs2s)
@@ -448,7 +449,7 @@ Conventions:
      #'(parse:S x cx pat1 pr es (parse:pk ins #s(pk1 pats k)))]
     [(parse:pk ((x cx pr es) . ins) #s(pk/same pat1 inner))
      #'(parse:S x cx pat1 pr es (parse:matrix ins inner))]
-    [(parse:pk ((x cx pr es) . ins) #s(pk/pair inner))
+    [(parse:pk ((x cx pr es) . ins) #s(pk/pair proper? inner))
      #'(let-values ([(datum tcx)
                      (if (syntax? x)
                          (values (syntax-e x) x)
@@ -460,9 +461,20 @@ Conventions:
                    [tx (cdr datum)]
                    [tpr (ps-add-cdr pr)])
                (parse:matrix ((hx hcx hpr es) (tx tcx tpr es) . ins) inner))
-             (fail (failure pr es))))]
+             (let ([es* (if (and 'proper? (null? datum))
+                            (es-add-proper-pair (first-desc:matrix inner) es)
+                            es)])
+               (fail (failure pr es*)))))]
     [(parse:pk (in1 . ins) #s(pk/and inner))
      #'(parse:matrix (in1 in1 . ins) inner)]))
+
+(define-syntax (first-desc:matrix stx)
+  (syntax-case stx ()
+    [(fdm (#s(pk (pat1 . pats) k)))
+     #'(first-desc:S pat1)]
+    [(fdm (pk ...))
+     ;; FIXME
+     #'#f]))
 
 ;; ----
 
@@ -567,7 +579,7 @@ Conventions:
                    [cut-prompt fail-to-succeed]) ;; to be safe
               (parse:S x cx subpattern pr es
                        (fh0 (failure pr0 es0)))))]
-       [#s(pat:pair _attrs head tail)
+       [#s(pat:pair _attrs proper? head tail)
         #`(let-values ([(datum cx)
                         (if (syntax? x)
                             (values (syntax-e x) x)
@@ -580,7 +592,8 @@ Conventions:
                       [tpr (ps-add-cdr pr)])
                   (parse:S hx hcx head hpr es
                            (parse:S tx cx tail tpr es k)))
-                (fail (failure pr es))))]
+                (let ([es* (if (and 'proper? (null? datum)) (es-add-proper-pair (first-desc:S head) es) es)])
+                  (fail (failure pr es*)))))]
        [#s(pat:vector _attrs subpattern)
         #`(let ([datum (if (syntax? x) (syntax-e x) x)])
             (if (vector? datum)
@@ -636,6 +649,33 @@ Conventions:
                   (let ([es* (es-add-thing pr 'description #t role es)])
                     (fail (failure pr es*))))))])]))
 
+;; (first-desc:S S-pattern) : expr[FirstDesc]
+(define-syntax (first-desc:S stx)
+  (syntax-case stx ()
+    [(fds p)
+     (syntax-case #'p ()
+       [#s(pat:any _as)
+        #''(any)]
+       [#s(pat:var _as name #f _ () _ _ _)
+        #''(any)]
+       [#s(pat:var _ ...)
+        #'#f] ;; FIXME: need access to (constant) description as field
+       [#s(pat:datum _as d)
+        #''(datum d)]
+       [#s(pat:literal _as id _ip _lp)
+        #''(literal id)]
+       [#s(pat:describe _as _p description _t? _role)
+        #'description] ;; FIXME??? only constants?
+       [#s(pat:delimit _a pattern)
+        #'(first-desc:S pattern)]
+       [#s(pat:commit _a pattern)
+        #'(first-desc:S pattern)]
+       [#s(pat:post _a pattern)
+        #'(first-desc:S pattern)]
+       [#s(pat:integrated _as _name _pred description _role)
+        #''description]
+       [_ #'#f])]))
+
 ;; (disjunct ???-pattern success (pre:expr ...) (id:id ...)) : expr[Ans]
 (define-syntax (disjunct stx)
   (syntax-case stx ()
@@ -678,7 +718,7 @@ Conventions:
                   (fail (failure pr* es*)))
                 k))]
        [#s(action:parse _ pattern expr)
-        #`(let* ([y (datum->syntax #f (wrap-user-code expr) #f)]
+        #`(let* ([y (datum->syntax/with-clause (wrap-user-code expr))]
                  [cy y]
                  [pr* (ps-add-stx pr y)])
             (parse:S y cy pattern pr* es k))]
@@ -696,7 +736,7 @@ Conventions:
      (for/fold ([k #'k]) ([side (in-list (reverse (syntax->list #'(side ...))))])
        (syntax-case side ()
          [#s(clause:attr a expr)
-            #`(let-attributes ([a (wrap-user-code (check-list^depth a expr))])
+            #`(let-attributes ([a (wrap-user-code expr)])
                 #,k)]))]))
 
 (begin-for-syntax
@@ -716,9 +756,9 @@ Conventions:
      [#s(pat:dots attrs head tail)
       (with-syntax ([tail (convert-list-pattern #'tail end-pattern)])
         #'#s(pat:dots attrs head tail))]
-     [#s(pat:pair attrs head-part tail-part)
+     [#s(pat:pair attrs proper? head-part tail-part)
       (with-syntax ([tail-part (convert-list-pattern #'tail-part end-pattern)])
-        #'#s(pat:pair attrs head-part tail-part))])))
+        #'#s(pat:pair attrs proper? head-part tail-part))])))
 
 ;; (parse:H x cx rest-x rest-cx rest-pr H-pattern pr es k)
 ;; In k: rest, rest-pr, attrs(H-pattern) are bound.
@@ -856,7 +896,8 @@ Conventions:
        [_
         (with-syntax ([attrs (pattern-attrs (wash #'head))])
           #'(parse:S x cx
-                     #s(pat:pair attrs head #s(internal-rest-pattern rest-x rest-cx rest-pr))
+                     ;; FIXME: consider proper-list-pattern? (yes is consistent with ~seq)
+                     #s(pat:pair attrs #t head #s(internal-rest-pattern rest-x rest-cx rest-pr))
                      pr es k))])]))
 
 ;; (parse:dots x cx EH-pattern S-pattern pr es k) : expr[Ans]
@@ -1082,23 +1123,26 @@ Conventions:
                        [(alt-expr ...)
                         (for/list ([alt (in-list eh-alts)])
                           (with-syntax ([repc-expr
-                                         (match (eh-alternative-repc alt)
-                                           ['#f
-                                            #'(quote #f)]
-                                           [(rep:once n u o)
-                                            #`(rep:once (quote-syntax #,n)
-                                                        (quote-syntax #,u)
-                                                        (quote-syntax #,o))]
-                                           [(rep:optional n o d)
-                                            #`(rep:optional (quote-syntax #,n)
-                                                            (quote-syntax #,o)
-                                                            (quote-syntax #,d))]
-                                           [(rep:bounds min max n u o)
-                                            #`(rep:bounds (quote #,min)
-                                                          (quote #,max)
-                                                          (quote-syntax #,n)
-                                                          (quote-syntax #,u)
-                                                          (quote-syntax #,o))])]
+                                         ;; repc structs are prefab; recreate using prefab
+                                         ;; quasiquote exprs to avoid moving constructors
+                                         ;; to residual module
+                                         (syntax-case (eh-alternative-repc alt) ()
+                                           [#f
+                                            #''#f]
+                                           [#s(rep:once n u o)
+                                            #'`#s(rep:once ,(quote-syntax n)
+                                                           ,(quote-syntax u)
+                                                           ,(quote-syntax o))]
+                                           [#s(rep:optional n o d)
+                                            #'`#s(rep:optional ,(quote-syntax n)
+                                                               ,(quote-syntax o)
+                                                               ,(quote-syntax d))]
+                                           [#s(rep:bounds min max n u o)
+                                            #'`#s(rep:bounds ,(quote min)
+                                                             ,(quote max)
+                                                             ,(quote-syntax n)
+                                                             ,(quote-syntax u)
+                                                             ,(quote-syntax o))])]
                                         [attrs-expr
                                          #`(quote #,(eh-alternative-attrs alt))]
                                         [parser-expr

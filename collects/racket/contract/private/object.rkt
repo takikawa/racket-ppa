@@ -4,6 +4,9 @@
          "guts.rkt"
          "prop.rkt"
          "misc.rkt"
+         "opt.rkt"
+         "blame.rkt"
+         (for-syntax "opt-guts.rkt")
          racket/private/class-internal
          racket/stxparam)
 
@@ -35,6 +38,7 @@
                (raise-syntax-error #f "malformed object-contract clause" stx (car args))])])))
 
 (define-struct object-contract (methods method-ctcs fields field-ctcs)
+  #:property prop:custom-write custom-write-property-proc
   #:omit-define-syntaxes
   #:property prop:contract
   (build-contract-property
@@ -116,11 +120,7 @@
       %/<%>)]))
 
 (define (is-a?/c <%>)
-  (unless (or (interface? <%>) (class? <%>))
-    (raise-argument-error
-     'is-a?/c
-     (format "~s" '(or/c interface? class?))
-     <%>))
+  (check-is-a?/c <%>)
   (define name (object-name <%>))
   (flat-named-contract
    (cond
@@ -132,3 +132,43 @@
    (lambda (x) (is-a? x <%>))))
 
 (define mixin-contract (->i ([c% class?]) [res (c%) (subclass?/c c%)]))
+
+
+(define/opter (is-a?/c opt/i opt/info stx)
+  (syntax-case stx ()
+    [(_ cls) 
+     (let ()
+       (define-values (lift-cls lifts1) (lift/binding #'cls 'is-a?/c-cls empty-lifts))
+       (with-syntax ([cls-x lift-cls])
+         (define lifts2 (lift/effect #'(check-is-a?/c cls-x) lifts1))
+         (with-syntax ([val (opt/info-val opt/info)]
+                       [ctc (opt/info-contract opt/info)]
+                       [blame (opt/info-blame opt/info)]
+                       [this (opt/info-this opt/info)]
+                       [that (opt/info-that opt/info)])
+           (build-optres
+            #:exp #'(if (is-a? val cls-x)
+                        val
+                        (raise-is-a?/c-error val cls-x blame))
+            #:lifts lifts2
+            #:superlifts null
+            #:partials null
+            #:flat #'(is-a? val cls-x)
+            #:opt #f
+            #:stronger-ribs '()
+            #:chaperone #t
+            #:name #'`(is-a?/c ,(object-name cls-x))))))]
+    [_ (opt/unknown opt/i opt/info stx)]))
+
+(define (raise-is-a?/c-error val cls-x blame)
+  (raise-blame-error blame val
+                     '(expected: "a class matching ~e" given: "~e")
+                     cls-x val))
+
+(define (check-is-a?/c <%>)
+  (unless (or (interface? <%>) (class? <%>))
+    (raise-argument-error
+     'is-a?/c
+     (format "~s" '(or/c interface? class?))
+     <%>)))
+  

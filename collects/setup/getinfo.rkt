@@ -1,9 +1,10 @@
-#lang scheme/base
+#lang racket/base
 
-(require scheme/match 
-         scheme/contract 
+(require racket/match 
+         racket/contract 
          planet/cachepath 
          syntax/modread
+         "dirs.rkt"
          "path-relativize.rkt")
 
 ;; in addition to infodomain/compiled/cache.rktd, getinfo will look in this 
@@ -12,29 +13,30 @@
 (define user-infotable (get-planet-cache-path))
 
 ;; get-info : (listof path-or-string) -> info/#f
-(define (get-info coll-path #:namespace [ns #f])
+(define (get-info coll-path #:namespace [ns #f] #:bootstrap? [bootstrap? #f])
   (get-info/full (apply collection-path
                         (map (lambda (x) (if (path? x) (path->string x) x))
                              coll-path))
-                 #:namespace ns))
+                 #:namespace ns
+                 #:bootstrap? bootstrap?))
 
-;; HACK:
-;; This require is not used.  It just requires the file, since
-;; otherwise the reader guard below will be invoked on it too, and
-;; that will make it throw up.  One possible solution for this would
-;; be for the security guard to be provided with the file in question.
-;; Another would be to force all info files to use `#lang' which means
-;; that we'll be able to query their module-language via the
-;; `get-info' protocol.
-(require (prefix-in !!!HACK!!! setup/infotab/lang/reader))
+;; These `require's ensure that the `#lang info' readers
+;; are loaded, so that no reader guard will be invoked for the reader
+;; intself when checking a language via a reader guard, and 
+(require (only-in setup/infotab)
+         (only-in info)
+         (only-in setup/infotab/lang/reader)
+         (only-in (submod info reader)))
 
 ;; get-info/full : path -> info/#f
-(define (get-info/full dir #:namespace [ns #f])
-  (or (get-info/full/ext dir "rkt" ns)
-      (get-info/full/ext dir "ss" ns)))
+(define (get-info/full dir #:namespace [ns #f] #:bootstrap? [bootstrap? #f])
+  (or (get-info/full/ext dir "rkt" ns bootstrap?)
+      (get-info/full/ext dir "ss" ns bootstrap?)))
 
-(define (get-info/full/ext dir ext ns)
+(define (get-info/full/ext dir ext ns bootstrap?)
   (define file (build-path dir (format "info.~a" ext)))
+  (define enclosing-ns (variable-reference->namespace
+                        (#%variable-reference)))
   (define (err fmt . args)
     (apply error 'get-info (string-append "info file " fmt " in ~a")
            (append args (list file))))
@@ -42,9 +44,15 @@
     (parameterize ([current-reader-guard
                     (lambda (x)
                       (if (or (eq? x 'setup/infotab/lang/reader)
-                              (equal? x '(submod setup/infotab reader)))
+                              (eq? x 'info/lang/reader)
+                              (equal? x '(submod setup/infotab reader))
+                              (equal? x '(submod info reader)))
                         x
-                        (err "has illegal #lang or #reader")))])
+                        (err "has illegal #lang or #reader")))]
+                   [current-namespace
+                    ;; Use this module's namespace; see the `only-in'
+                    ;; `require's above.
+                    enclosing-ns])
       (with-input-from-file file
         (lambda ()
           (begin0 
@@ -58,15 +66,55 @@
                     '(lib "infotab.ss" "setup")
                     '(lib "setup/infotab.rkt")
                     '(lib "setup/infotab.ss")
-                    'setup/infotab)
+                    '(lib "main.rkt" "info")
+                    'setup/infotab
+                    'info)
                 expr ...)
           ;; No need to set a reader-guard, since we checked it
           ;; above (a guard will see other uses of #lang for stuff
           ;; that is required).
           ;; We are, however, trusting that the bytecode form of the
           ;; file (if any) matches the source.
-          (parameterize ([current-namespace (or ns (info-namespace))])
-            (dynamic-require file '#%info-lookup))]
+          (let ([ns (or ns (info-namespace))])
+            (if (and bootstrap?
+                     (parameterize ([current-namespace ns])
+                       (not (module-declared? file))))
+                ;; Attach `info' language modules to target namespace, and
+                ;; disable the use of compiled bytecode if it fails; we
+                ;; need a trial namespace to try loading bytecode, since
+                ;; the use of bytecode "sticks" for later attempts.
+                (let ([attach!
+                       (lambda (ns)
+                         (namespace-attach-module enclosing-ns 'setup/infotab ns)
+                         (namespace-attach-module enclosing-ns 'setup/infotab/lang/reader ns)
+                         (namespace-attach-module enclosing-ns 'info ns)
+                         (namespace-attach-module enclosing-ns '(submod info reader) ns))]
+                      [try
+                       (lambda (ns)
+                         (parameterize ([current-namespace ns])
+                           (dynamic-require file '#%info-lookup)))])
+                  (define ns-id (namespace-module-registry ns))
+                  ((with-handlers ([exn:fail? (lambda (exn)
+                                                ;; Trial namespace is damaged, so uncache:
+                                                (hash-set! trial-namespaces ns-id #f)
+                                                ;; Try again from source:
+                                                (lambda ()
+                                                  (attach! ns)
+                                                  (parameterize ([use-compiled-file-paths null])
+                                                    (try ns))))])
+                     ;; To reduce the cost of the trial namespace, try to used a cached
+                     ;; one previously generated for the `ns':
+                     (define try-ns (or (hash-ref trial-namespaces ns-id #f)
+                                        (let ([try-ns (make-base-empty-namespace)])
+                                          (attach! try-ns)
+                                          try-ns)))
+                     (define v (try try-ns))
+                     (hash-set! trial-namespaces ns-id try-ns)
+                     (namespace-attach-module try-ns file ns)
+                     (lambda () v))))
+                ;; Can use compiled bytecode, etc.:
+                (parameterize ([current-namespace ns])
+                  (dynamic-require file '#%info-lookup))))]
          [else (err "does not contain a module of the right shape")])))
 
 (define info-namespace
@@ -79,6 +127,10 @@
           (let ([ns (make-base-empty-namespace)])
             (set! ns-box (make-weak-box ns))
             ns)))))
+
+;; Weak map from a namespace registry to a trial-loading namespace for
+;; bootstrap mode:
+(define trial-namespaces (make-weak-hasheq))
 
 ;; directory-record = (make-directory-record nat nat key path (listof symbol))
 ;; eg: (make-directory-record 1 0 '(lib "mzlib") #"mzlib" '(name))
@@ -94,14 +146,15 @@
 (define preferred-table #f)
 (define all-available-table #f)
 (define no-planet-table #f)
+(define no-user-table #f)
 
 ;; reset-relevant-directories-state! : -> void
 (define (reset-relevant-directories-state!)
   (set! preferred-table
         (make-table
-         (lambda (i l)
-           (if (null? l)
-             (list i)
+         (lambda (root-dir i l)
+           (if (or root-dir (null? l))
+             (cons i l)
              (match-let ([(struct directory-record (my-maj my-min _ _ _)) i]
                          [(struct directory-record (their-maj their-min _ _ _))
                           (car l)])
@@ -110,8 +163,10 @@
                 (list i)
                 l))))
          #f #f))
-  (set! all-available-table (make-table cons #f #f))
-  (set! no-planet-table (make-table cons #f #f)))
+  (define (always root-dir i l) (cons i l))
+  (set! all-available-table (make-table always #f #f))
+  (set! no-planet-table (make-table always #f #f))
+  (set! no-user-table (make-table always #f #f)))
 
 (reset-relevant-directories-state!)
 
@@ -119,6 +174,12 @@
 (define (populate-table! t)
   ;; Use the colls ht because a collection might be in multiple
   ;; collection paths, and we only want one
+  (define-values (path->main-share-relative
+                  main-share-relative->path)
+    (make-relativize find-share-dir
+                     'share
+                     'path->main-share-relative
+                     'main-share-relative->path))
   (let ([colls (make-hash)])
     (for ([f+root-dir (reverse (table-paths t))])
       (let ([f (car f+root-dir)]
@@ -136,7 +197,7 @@
                            [else (error 'find-relevant-directories
                                         "bad info-domain cache file: ~a" f)]))])
             (match i
-              [(list (and pathbytes (or (? bytes?) (list 'info (? bytes?) ...)))
+              [(list (and pathbytes (or (? bytes?) (list (or 'info 'share) (? bytes?) ...)))
                      (list (? symbol? fields) ...)
                      key ;; anything is okay here
                      (? integer? maj)
@@ -150,12 +211,14 @@
                              (if (and (relative-path? p) root-dir)
                                  ;; `raco setup' doesn't generate relative paths anyway,
                                  ;; but it's ok to support them:
-                                 (build-path root-dir p)
+                                 (simplify-path (build-path root-dir p))
                                  p))
-                           (info-relative->path pathbytes))
+                           (if (eq? (car pathbytes) 'info)
+                               (info-relative->path pathbytes)
+                               (main-share-relative->path pathbytes)))
                        fields)])
                  (hash-set! colls key
-                            ((table-insert t) new-item old-items)))]
+                            ((table-insert t) root-dir new-item old-items)))]
               [_ (error 'find-relevant-directories
                         "bad info-domain cache entry: ~e in: ~a" i f)])))))
     ;; For each coll, invert the mapping, adding the col name to the list
@@ -178,17 +241,32 @@
     (cond [(eq? key 'preferred) preferred-table]
           [(eq? key 'all-available) all-available-table]
           [(eq? key 'no-planet) no-planet-table]
+          [(eq? key 'no-user) no-user-table]
           [else (error 'find-relevant-directories "Invalid key: ~s" key)]))
   ;; A list of (cons cache.rktd-path root-dir-path)
   ;;  If root-dir-path is not #f, then paths in the cache.rktd
   ;;  file are relative to it. #f is used for the planet cache.rktd file.
   (define search-path
-    ((if (eq? key 'no-planet) (lambda (a l) l) cons)
+    ((if (or (eq? key 'no-planet) 
+             (eq? key 'no-user))
+         (lambda (a l) l) 
+         cons)
      (cons user-infotable #f)
-     (map (lambda (coll)
-            (cons (build-path coll "info-domain" "compiled" "cache.rktd")
-                  coll))
-          (current-library-collection-paths))))
+     (append
+      (map (lambda (coll)
+             (cons (build-path coll "info-domain" "compiled" "cache.rktd")
+                   coll))
+           (if (eq? key 'no-user)
+               (get-main-collects-search-dirs)
+               (current-library-collection-paths)))
+      (map (lambda (base)
+             (cons (build-path base "info-cache.rktd") 
+                   base))
+           (filter
+            values
+            (if (eq? key 'no-user)
+                (list (find-share-dir))
+                (list (find-share-dir) (find-user-share-dir))))))))
   (when t
     (unless (equal? (table-paths t) search-path)
       (set-table-ht! t (make-hasheq))
@@ -221,11 +299,15 @@
 
 (provide/contract
  (reset-relevant-directories-state! (-> any))
- (get-info (((listof path-or-string?)) (#:namespace (or/c namespace? #f)) . ->* . (or/c info? boolean?)))
- (get-info/full ((path-string?) (#:namespace (or/c namespace? #f)) . ->* . (or/c info? boolean?)))
+ (get-info (((listof path-or-string?))
+            (#:namespace (or/c namespace? #f) #:bootstrap? any/c)
+            . ->* . (or/c info? boolean?)))
+ (get-info/full ((path-string?)
+                 (#:namespace (or/c namespace? #f) #:bootstrap? any/c)
+                 . ->* . (or/c info? boolean?)))
  (find-relevant-directories
   (->* [(listof symbol?)]
-       [(lambda (x) (memq x '(preferred all-available no-planet)))]
+       [(or/c 'preferred 'all-available 'no-planet 'no-user)]
        (listof path?)))
  (struct directory-record
          ([maj integer?]
@@ -235,5 +317,5 @@
           [syms (listof symbol?)]))
  (find-relevant-directory-records
   (->* [(listof symbol?)]
-       [(or/c 'preferred 'all-available 'no-planet)]
+       [(or/c 'preferred 'all-available 'no-planet 'no-user)]
        (listof directory-record?))))

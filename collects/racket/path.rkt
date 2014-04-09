@@ -1,7 +1,6 @@
 #lang racket/base
 
 (provide find-relative-path
-         explode-path
          simple-form-path
          normalize-path
          filename-extension
@@ -9,7 +8,8 @@
          path-only
          some-system-path->string
          string->some-system-path
-         path-element?)
+         path-element?
+         shrink-path-wrt)
 
 (define (simple-form-path p)
   (unless (path-string? p)
@@ -111,30 +111,19 @@
                        [else (path->complete-path resolved base)]))]))))])
     normalize-path))
 
-;; Argument must be in simple form
-(define (do-explode-path who orig-path simple?)
-  (let loop ([path orig-path] [rest '()])
-    (let-values ([(base name dir?) (split-path path)])
-      (when simple?
-        (when (or (and base (not (path-for-some-system? base)))
-                  (not (path-for-some-system? name)))
-          (raise-argument-error who 
-                                "(and/c path-for-some-system? simple-form?)"
-                                orig-path)))
-      (if (path-for-some-system? base)
-          (loop base (cons name rest))
-          (cons name rest)))))
-
-(define (explode-path orig-path)
-  (unless (or (path-string? orig-path)
-              (path-for-some-system? orig-path))
-    (raise-argument-error 'explode-path "(or/c path-string? path-for-some-system?)" orig-path))
-  (do-explode-path 'explode-path orig-path #f))
+(define (do-explode-path who orig-path)
+  (define l (explode-path orig-path))
+  (for ([p (in-list l)])
+    (when (not (path-for-some-system? p))
+      (raise-argument-error who 
+                            "(and/c path-for-some-system? simple-form?)"
+                            orig-path)))
+  l)
 
 ;; Arguments must be in simple form
 (define (find-relative-path directory filename #:more-than-root? [more-than-root? #f])
-  (let ([dir (do-explode-path 'find-relative-path directory #t)]
-        [file (do-explode-path 'find-relative-path filename #t)])
+  (let ([dir (do-explode-path 'find-relative-path directory)]
+        [file (do-explode-path 'find-relative-path filename)])
     (if (and (equal? (car dir) (car file))
              (or (not more-than-root?)
                  (not (eq? 'unix (path-convention-type directory)))
@@ -196,3 +185,55 @@
   (and (path-for-some-system? path)
        (let-values ([(base name d?) (split-path path)])
          (eq? base 'relative))))
+
+
+
+(define (shrink-path-wrt fn other-fns)
+  (unless (path? fn)
+    (raise-argument-error
+     'shrink-path-wrt
+     "path?"
+     0 fn other-fns))
+  (unless (and (list? other-fns) (andmap path? other-fns))
+    (raise-argument-error
+     'shrink-path-wrt
+     "(listof path?)"
+     1 fn other-fns))
+  (define exp (reverse (explode-path fn)))
+  (define other-exps
+    (filter
+     (λ (x) (not (equal? exp x)))
+     (map (λ (fn) (reverse (explode-path fn)))
+          other-fns)))
+  (cond
+    [(null? other-exps) #f]
+    [else
+     (define size
+       (let loop ([other-exps other-exps]
+                  [size 1])
+         (cond
+           [(null? other-exps) size]
+           [else (let ([new-size (find-exp-diff (car other-exps) exp)])
+                   (loop (cdr other-exps)
+                         (max new-size size)))])))
+     (apply build-path (reverse (take-n size exp)))]))
+  
+(define (take-n n lst)
+  (let loop ([n n]
+             [lst lst])
+    (cond
+      [(zero? n) null]
+      [(null? lst) null]
+      [else (cons (car lst) (loop (- n 1) (cdr lst)))])))
+
+(define (find-exp-diff p1 p2)
+  (let loop ([p1 p1]
+             [p2 p2]
+             [i 1])
+    (cond
+      [(or (null? p1) (null? p2)) i]
+      [else (let ([f1 (car p1)]
+                  [f2 (car p2)])
+              (if (equal? f1 f2)
+                  (loop (cdr p1) (cdr p2) (+ i 1))
+                  i))])))

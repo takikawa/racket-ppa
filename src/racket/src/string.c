@@ -27,6 +27,11 @@
 #include "schvers.h"
 #include <string.h>
 #include <ctype.h>
+#ifdef NO_ERRNO_GLOBAL
+# define errno -1
+#else
+# include <errno.h>
+#endif
 #ifndef DONT_USE_LOCALE
 # include <locale.h>
 # ifdef MZ_NO_ICONV
@@ -38,7 +43,6 @@
 # endif
 # include <wchar.h>
 # include <wctype.h>
-# include <errno.h>
 # ifdef MACOS_UNICODE_SUPPORT
 #  include <CoreFoundation/CFString.h>
 #  include <CoreFoundation/CFLocale.h>
@@ -301,8 +305,13 @@ static Scheme_Object *sch_printf(int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_eprintf(int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_fprintf(int argc, Scheme_Object *argv[]);
 static Scheme_Object *banner(int argc, Scheme_Object *argv[]);
+static Scheme_Object *env_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_getenv(int argc, Scheme_Object *argv[]);
+static Scheme_Object *sch_getenv_names(int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_putenv(int argc, Scheme_Object *argv[]);
+static Scheme_Object *env_copy(int argc, Scheme_Object *argv[]);
+static Scheme_Object *env_make(int argc, Scheme_Object *argv[]);
+static Scheme_Object *current_environment_variables(int argc, Scheme_Object *argv[]);
 static Scheme_Object *system_type(int argc, Scheme_Object *argv[]);
 static Scheme_Object *system_library_subpath(int argc, Scheme_Object *argv[]);
 static Scheme_Object *cmdline_args(int argc, Scheme_Object *argv[]);
@@ -315,6 +324,8 @@ static Scheme_Object *byte_string_close_converter(int argc, Scheme_Object *argv[
 static Scheme_Object *byte_string_convert(int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string_convert_end(int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_converter_p(int argc, Scheme_Object *argv[]);
+
+static Scheme_Object *path_lt (int argc, Scheme_Object *argv[]);
 
 #ifdef MZ_PRECISE_GC
 static void register_traversers(void);
@@ -343,7 +354,7 @@ static char *string_to_from_locale(int to_bytes,
 ROSYM static Scheme_Object *sys_symbol;
 ROSYM static Scheme_Object *link_symbol, *machine_symbol, *gc_symbol;
 ROSYM static Scheme_Object *so_suffix_symbol, *so_mode_symbol, *word_symbol;
-ROSYM static Scheme_Object *os_symbol;
+ROSYM static Scheme_Object *os_symbol, *fs_change_symbol;
 ROSYM static Scheme_Object *platform_3m_path, *platform_cgc_path;
 READ_ONLY static Scheme_Object *zero_length_char_string;
 READ_ONLY static Scheme_Object *zero_length_byte_string;
@@ -353,6 +364,8 @@ SHARED_OK static Scheme_Hash_Table *putenv_str_table;
 SHARED_OK static char *embedding_banner;
 SHARED_OK static Scheme_Object *vers_str;
 SHARED_OK static Scheme_Object *banner_str;
+
+SHARED_OK static Scheme_Object *fs_change_props;
 
 READ_ONLY static Scheme_Object *complete_symbol, *continues_symbol, *aborts_symbol, *error_symbol;
 
@@ -371,6 +384,7 @@ scheme_init_string (Scheme_Env *env)
   REGISTER_SO(so_mode_symbol);
   REGISTER_SO(word_symbol);
   REGISTER_SO(os_symbol);
+  REGISTER_SO(fs_change_symbol);
   link_symbol = scheme_intern_symbol("link");
   machine_symbol = scheme_intern_symbol("machine");
   gc_symbol = scheme_intern_symbol("gc");
@@ -378,6 +392,7 @@ scheme_init_string (Scheme_Env *env)
   so_mode_symbol = scheme_intern_symbol("so-mode");
   word_symbol = scheme_intern_symbol("word");
   os_symbol = scheme_intern_symbol("os");
+  fs_change_symbol = scheme_intern_symbol("fs-change");
 
   REGISTER_SO(zero_length_char_string);
   REGISTER_SO(zero_length_byte_string);
@@ -413,6 +428,31 @@ scheme_init_string (Scheme_Env *env)
   REGISTER_SO(embedding_banner);
   REGISTER_SO(vers_str);
   REGISTER_SO(banner_str);
+
+  REGISTER_SO(fs_change_props);
+  {
+    int supported, scalable, low_latency, file_level;
+    Scheme_Object *s;
+    scheme_fs_change_properties(&supported, &scalable, &low_latency, &file_level);
+    fs_change_props = scheme_make_vector(4, scheme_false);
+    if (supported) {
+      s = scheme_intern_symbol("supported");
+      SCHEME_VEC_ELS(fs_change_props)[0] = s;
+    }
+    if (scalable) {
+      s = scheme_intern_symbol("scalable");
+      SCHEME_VEC_ELS(fs_change_props)[1] = s;
+    }
+    if (low_latency) {
+      s = scheme_intern_symbol("low-latency");
+      SCHEME_VEC_ELS(fs_change_props)[2] = s;
+    }
+    if (file_level) {
+      s = scheme_intern_symbol("file-level");
+      SCHEME_VEC_ELS(fs_change_props)[3] = s;
+    }
+    SCHEME_SET_IMMUTABLE(fs_change_props);
+  }
 
   vers_str = scheme_make_utf8_string(scheme_version());
   SCHEME_SET_CHAR_STRING_IMMUTABLE(vers_str);
@@ -849,15 +889,48 @@ scheme_init_string (Scheme_Env *env)
 						    0, 0),
 			     env);
 
-  scheme_add_global_constant("getenv",
+  /* Environment variables */
+
+  scheme_add_global_constant("environment-variables?",
+			     scheme_make_folding_prim(env_p,
+                                                      "environment-variables?",
+                                                      1, 1, 1),
+			     env);
+
+  scheme_add_global_constant("current-environment-variables",
+			     scheme_register_parameter(current_environment_variables,
+						       "current-environment-variables",
+						       MZCONFIG_CURRENT_ENV_VARS),
+			     env);  
+
+  scheme_add_global_constant("environment-variables-ref",
 			     scheme_make_immed_prim(sch_getenv,
-						    "getenv",
+						    "environment-variables-ref",
+						    2, 2),
+			     env);
+
+  scheme_add_global_constant("environment-variables-set!",
+			     scheme_make_prim_w_arity(sch_putenv,
+                                                      "environment-variables-set!",
+                                                      3, 4),
+			     env);
+
+  scheme_add_global_constant("environment-variables-names",
+			     scheme_make_immed_prim(sch_getenv_names,
+						    "environment-variables-names",
 						    1, 1),
 			     env);
-  scheme_add_global_constant("putenv",
-			     scheme_make_immed_prim(sch_putenv,
-						    "putenv",
-						    2, 2),
+
+  scheme_add_global_constant("environment-variables-copy",
+			     scheme_make_immed_prim(env_copy,
+						    "environment-variables-copy",
+						    1, 1),
+			     env);
+
+  scheme_add_global_constant("make-environment-variables",
+			     scheme_make_immed_prim(env_make,
+						    "make-environment-variables",
+						    0, -1),
 			     env);
 
   /* Don't make these folding, since they're platform-specific: */
@@ -877,6 +950,13 @@ scheme_init_string (Scheme_Env *env)
 			     scheme_register_parameter(cmdline_args,
 						       "current-command-line-arguments",
 						       MZCONFIG_CMDLINE_ARGS),
+			     env);
+
+
+  scheme_add_global_constant("path<?",
+			     scheme_make_immed_prim(path_lt,
+						    "path<?",
+						    2, -1),
 			     env);
 
 #ifdef MZ_PRECISE_GC
@@ -1139,15 +1219,15 @@ byte_p(int argc, Scheme_Object *argv[])
 
 /* comparisons */
 
-#define GEN_BYTE_STRING_COMP(name, scheme_name, comp, op) \
+#define GEN_BYTE_STRING_PATH_COMP(name, scheme_name, comp, op, PRED, contract)     \
 static Scheme_Object * name (int argc, Scheme_Object *argv[]) \
 {  char *s, *prev; int i, sl, pl; int falz = 0;\
-   if (!SCHEME_BYTE_STRINGP(argv[0])) \
-    scheme_wrong_contract(scheme_name, "bytes?", 0, argc, argv); \
+  if (!PRED(argv[0])) \
+    scheme_wrong_contract(scheme_name, contract, 0, argc, argv); \
    prev = SCHEME_BYTE_STR_VAL(argv[0]); pl = SCHEME_BYTE_STRTAG_VAL(argv[0]); \
    for (i = 1; i < argc; i++) { \
-     if (!SCHEME_BYTE_STRINGP(argv[i])) \
-      scheme_wrong_contract(scheme_name, "bytes?", i, argc, argv); \
+     if (!PRED(argv[i])) \
+      scheme_wrong_contract(scheme_name, contract, i, argc, argv); \
      s = SCHEME_BYTE_STR_VAL(argv[i]); sl = SCHEME_BYTE_STRTAG_VAL(argv[i]); \
      if (!falz) if (!(comp(scheme_name, \
                            (unsigned char *)prev, pl, \
@@ -1157,9 +1237,14 @@ static Scheme_Object * name (int argc, Scheme_Object *argv[]) \
   return falz ? scheme_false : scheme_true; \
 }
 
+#define GEN_BYTE_STRING_COMP(name, scheme_name, comp, op) \
+  GEN_BYTE_STRING_PATH_COMP(name, scheme_name, comp, op, SCHEME_BYTE_STRINGP, "bytes?") \
+
 GEN_BYTE_STRING_COMP(byte_string_eq, "bytes=?", mz_strcmp, ==)
 GEN_BYTE_STRING_COMP(byte_string_lt, "bytes<?", mz_strcmp, <)
 GEN_BYTE_STRING_COMP(byte_string_gt, "bytes>?", mz_strcmp, >)
+
+GEN_BYTE_STRING_PATH_COMP(path_lt, "path<?", mz_strcmp, <, SCHEME_PATHP, "path?")
 
 /**********************************************************************/
 /*                   byte string <-> char string                      */
@@ -2052,6 +2137,48 @@ int scheme_any_string_has_null(Scheme_Object *o)
 /* Environment Variables                                               */
 /***********************************************************************/
 
+#ifdef OS_X
+# include <crt_externs.h>
+# define GET_ENVIRON_ARRAY *_NSGetEnviron()
+#endif
+
+#if !defined(DOS_FILE_SYSTEM) && !defined(GET_ENVIRON_ARRAY)
+extern char **environ;
+# define GET_ENVIRON_ARRAY environ
+#endif
+
+#define SCHEME_ENVVARS_TABLE(ev) ((Scheme_Hash_Tree *)SCHEME_PTR_VAL(ev))
+
+Scheme_Object *scheme_make_environment_variables(Scheme_Hash_Tree *ht)
+{
+  Scheme_Object *ev;
+
+  ev = scheme_alloc_small_object();
+  ev->type = scheme_environment_variables_type;
+  SCHEME_PTR_VAL(ev) = (Scheme_Object *)ht;
+
+  return ev;
+}
+
+static Scheme_Object *env_p(int argc, Scheme_Object *argv[])
+{
+  return (SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_environment_variables_type)
+          ? scheme_true
+          : scheme_false);
+}
+
+static Scheme_Object *current_environment_variables(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *v;
+
+  v = scheme_param_config2("current-environment-variables",
+                           scheme_make_integer(MZCONFIG_CURRENT_ENV_VARS),
+                           argc, argv,
+                           -1, env_p, "environment-variables?", 0);
+
+  return v;
+}
+
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
 static char* clone_str_with_gc(const char* buffer) {
   int length;
@@ -2070,51 +2197,28 @@ static void create_putenv_str_table_if_needed() {
 }
 
 #ifndef DOS_FILE_SYSTEM
-static void putenv_str_table_put_name(Scheme_Object *name, Scheme_Object *value) {
+static void putenv_str_table_put_name(const char *name, char *value) {
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
   void *original_gc;
-  Scheme_Object *name_copy;
+  const char *name_copy;
   original_gc = GC_switch_to_master_gc();
   scheme_start_atomic();
 
-  name_copy = (Scheme_Object *) clone_str_with_gc((const char *) name);
+  name_copy = clone_str_with_gc(name);
   create_putenv_str_table_if_needed();
-  scheme_hash_set(putenv_str_table, name_copy, value);
+  scheme_hash_set(putenv_str_table, (Scheme_Object *)name_copy, (Scheme_Object *)value);
 
   scheme_end_atomic_no_swap();
   GC_switch_back_from_master(original_gc);
 #else
   create_putenv_str_table_if_needed();
-  scheme_hash_set(putenv_str_table, name, value);
+  scheme_hash_set(putenv_str_table, (Scheme_Object *)name, (Scheme_Object *)value);
 #endif
 }
 #endif
 
-#ifndef GETENV_FUNCTION
-static void putenv_str_table_put_name_value(Scheme_Object *name, Scheme_Object *value) {
-#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
-  void *original_gc;
-  Scheme_Object *name_copy;
-  Scheme_Object *value_copy;
-  original_gc = GC_switch_to_master_gc();
-  scheme_start_atomic();
-
-  name_copy = (Scheme_Object *) clone_str_with_gc((const char *) name);
-  value_copy = (Scheme_Object *) clone_str_with_gc((const char *) value);
-  create_putenv_str_table_if_needed();
-  scheme_hash_set(putenv_str_table, name_copy, value_copy);
-
-  scheme_end_atomic_no_swap();
-  GC_switch_back_from_master(original_gc);
-#else
-  create_putenv_str_table_if_needed();
-  scheme_hash_set(putenv_str_table, name, value);
-#endif
-}
-#endif
-
-#if !defined(GETENV_FUNCTION) || defined(MZ_PRECISE_GC)
-static Scheme_Object *putenv_str_table_get(Scheme_Object *name) {
+#if defined(MZ_PRECISE_GC)
+static Scheme_Object *putenv_str_table_get(const char *name) {
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
   void *original_gc;
   Scheme_Object *value; 
@@ -2122,14 +2226,14 @@ static Scheme_Object *putenv_str_table_get(Scheme_Object *name) {
   scheme_start_atomic();
 
   create_putenv_str_table_if_needed();
-  value = scheme_hash_get(putenv_str_table, name);
+  value = scheme_hash_get(putenv_str_table, (Scheme_Object *)name);
 
   scheme_end_atomic_no_swap();
   GC_switch_back_from_master(original_gc);
   return value;
 #else
   create_putenv_str_table_if_needed();
-  return scheme_hash_get(putenv_str_table, name);
+  return scheme_hash_get(putenv_str_table, (Scheme_Object *)name);
 #endif
 }
 #endif
@@ -2140,40 +2244,6 @@ static int sch_bool_getenv(const char* name);
 void
 scheme_init_getenv(void)
 {
-#ifndef GETENV_FUNCTION
-  FILE *f = fopen("Environment", "r");
-  if (f) {
-    Scheme_Object *p = scheme_make_file_input_port(f);
-    mz_jmp_buf *savebuf, newbuf;
-    savebuf = scheme_current_thread->error_buf;
-    scheme_current_thread->error_buf = &newbuf;
-    if (!scheme_setjmp(newbuf)) {
-      while (1) {
-        Scheme_Object *v = scheme_read(p);
-        if (SCHEME_EOFP(v))
-          break;
-
-        if (SCHEME_PAIRP(v) && SCHEME_PAIRP(SCHEME_CDR(v))
-            && SCHEME_NULLP(SCHEME_CDR(SCHEME_CDR(v)))) {
-          Scheme_Object *key = SCHEME_CAR(v);
-          Scheme_Object *val = SCHEME_CADR(v);
-          if (SCHEME_STRINGP(key) && SCHEME_STRINGP(val)) {
-            Scheme_Object *a[2];
-            a[0] = key;
-            a[1] = val;
-            sch_putenv(2, a);
-            v = NULL;
-          }
-        }
-
-        if (v)
-          scheme_signal_error("bad environment specification: %V", v);
-      }
-    }
-    scheme_current_thread->error_buf = savebuf;
-    scheme_close_input_port(p);
-  }
-#endif
   if (sch_bool_getenv("PLTNOMZJIT")) {
       scheme_set_startup_use_jit(0);
   }
@@ -2183,61 +2253,95 @@ scheme_init_getenv(void)
 # include <windows.h>
 static char *dos_win_getenv(const char *name) {
   int value_size;
-  value_size = GetEnvironmentVariable(name, NULL, 0);
+  value_size = GetEnvironmentVariableW(WIDE_PATH(name), NULL, 0);
   if (value_size) {
-    char *value;
+    wchar_t *value;
     int got;
-    value = scheme_malloc_atomic(value_size);
-    got = GetEnvironmentVariable(name, value, value_size);
+    value = scheme_malloc_atomic(sizeof(wchar_t) * value_size);
+    got = GetEnvironmentVariableW(WIDE_PATH(name), value, value_size);
     if (got < value_size)
       value[got] = 0;
-    return value;
+    return NARROW_PATH(value);
   }
   return NULL;
 }
 #endif
 
-static int sch_bool_getenv(const char* name) {
+static int sch_bool_getenv(const char* name)
+{
   int rc = 0;
-#ifdef GETENV_FUNCTION
-# ifdef DOS_FILE_SYSTEM
+
+#ifdef DOS_FILE_SYSTEM
   if (GetEnvironmentVariable(name, NULL, 0)) rc = 1;
-# else
-  if (getenv(name)) rc = 1;
-# endif
 #else
-  if (putenv_str_table_get(name))  rc = 1;
+  if (getenv(name)) rc = 1;
 #endif
+
   return rc;
+}
+
+int byte_string_ok_name(Scheme_Object *o)
+{
+  const char *s = SCHEME_BYTE_STR_VAL(o);
+  int i = SCHEME_BYTE_STRTAG_VAL(o);
+#ifdef DOS_FILE_SYSTEM
+  if (!i) return 0;
+#endif  
+  while (i--) {
+    if (!s[i] || s[i] == '=')
+      return 0;
+  }
+  return 1;
+}
+
+static Scheme_Object *normalize_env_case(Scheme_Object *bs)
+{
+#ifdef DOS_FILE_SYSTEM
+  bs = scheme_byte_string_to_char_string(bs);
+  bs = string_locale_downcase(1, &bs);
+  bs = scheme_char_string_to_byte_string(bs);
+#endif
+  return bs;
+}
+
+char *scheme_getenv(char *name)
+{
+#ifdef DOS_FILE_SYSTEM
+  return dos_win_getenv(name);
+#else
+  return getenv(name);
+#endif
 }
 
 static Scheme_Object *sch_getenv(int argc, Scheme_Object *argv[])
 {
   char *name;
   char *value;
-  Scheme_Object *bs;
+  Scheme_Object *bs, *ev, *val;
+  Scheme_Hash_Tree *ht;
 
-  if (!SCHEME_CHAR_STRINGP(argv[0]) || scheme_any_string_has_null(argv[0]))
-    scheme_wrong_contract("getenv", CHAR_STRING_W_NO_NULLS, 0, argc, argv);
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_environment_variables_type))
+    scheme_wrong_contract("environment-variables-ref", "environment-variables?", 0, argc, argv);
 
-  bs = scheme_char_string_to_byte_string_locale(argv[0]);
-  name = SCHEME_BYTE_STR_VAL(bs);
+  bs = argv[1];
+  if (!SCHEME_BYTE_STRINGP(bs)
+      || !byte_string_ok_name(bs))
+    scheme_wrong_contract("environment-variables-ref", "bytes-environment-variable-name?", 1, argc, argv);
 
-#ifdef GETENV_FUNCTION
-# ifdef DOS_FILE_SYSTEM
-  value = dos_win_getenv(name);
-# else
-  value = getenv(name);
-# endif
-#else
-  {
-    Scheme_Object *hash_value;
-    hash_value = putenv_str_table_get(name); 
-    return hash_value ? hash_value : scheme_false;
+  ev = argv[0];
+  ht = SCHEME_ENVVARS_TABLE(ev);
+
+  if (!ht) {
+    name = SCHEME_BYTE_STR_VAL(bs);
+
+    value = scheme_getenv(name);
+
+    return value ? scheme_make_byte_string(value) : scheme_false;
+  } else {
+    bs = normalize_env_case(bs);
+    val = scheme_hash_tree_get(ht, bs);
+    return val ? val : scheme_false;
   }
-#endif
-
-  return value ? scheme_make_locale_string(value) : scheme_false;
 }
 
 #ifndef DOS_FILE_SYSTEM
@@ -2246,21 +2350,26 @@ static int sch_unix_putenv(const char *var, const char *val, const intptr_t varl
   intptr_t total_length;
   total_length = varlen + vallen + 2;
 
+  if (val) {
 #ifdef MZ_PRECISE_GC
-  /* Can't put moveable string into array. */
-  buffer = malloc(total_length);
+    /* Can't put moveable string into array. */
+    buffer = malloc(total_length);
 #else
-  buffer = (char *)scheme_malloc_atomic(total_length);
+    buffer = (char *)scheme_malloc_atomic(total_length);
 #endif
-  memcpy(buffer, var, varlen);
-  buffer[varlen] = '=';
-  memcpy(buffer + varlen + 1, val, vallen + 1);
+
+    memcpy(buffer, var, varlen);
+    buffer[varlen] = '=';
+    memcpy(buffer + varlen + 1, val, vallen + 1);
+  } else {
+    buffer = NULL;
+  }
 
 #ifdef MZ_PRECISE_GC
   {
     /* Free old, if in table: */
     char *oldbuffer;
-    oldbuffer = (char *)putenv_str_table_get((Scheme_Object *)var);
+    oldbuffer = (char *)putenv_str_table_get(var);
     if (oldbuffer)
       free(oldbuffer);
   }
@@ -2268,40 +2377,311 @@ static int sch_unix_putenv(const char *var, const char *val, const intptr_t varl
 
   /* if precise the buffer needs to be remembered so it can be freed */
   /* if not precise the buffer needs to be rooted so it doesn't get collected prematurely */
-  putenv_str_table_put_name((Scheme_Object *)var, (Scheme_Object *)buffer);
-  return putenv(buffer);
-} 
+  putenv_str_table_put_name(var, buffer);
+
+  if (buffer)
+    return putenv(buffer);
+  else {
+    /* on some platforms, unsetenv() returns void */
+    unsetenv(var);
+    return 0;
+  }
+}
 #endif
 
 static Scheme_Object *sch_putenv(int argc, Scheme_Object *argv[])
 {
-  Scheme_Object *varbs;
-  Scheme_Object *valbs;
+  Scheme_Object *varbs, *valbs, *ev;
+  Scheme_Hash_Tree *ht;
   char *var;
   char *val;
-  int rc = 0;
+  int rc = 0, errid = 0;
 
-  if (!SCHEME_CHAR_STRINGP(argv[0]) || scheme_any_string_has_null(argv[0]))
-    scheme_wrong_contract("putenv", CHAR_STRING_W_NO_NULLS, 0, argc, argv);
-  if (!SCHEME_CHAR_STRINGP(argv[1]) || scheme_any_string_has_null(argv[1]))
-    scheme_wrong_contract("putenv", CHAR_STRING_W_NO_NULLS, 1, argc, argv);
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_environment_variables_type))
+    scheme_wrong_contract("environment-variables-set!", "environment-variables?", 0, argc, argv);
+  
+  varbs = argv[1];
+  if (!SCHEME_BYTE_STRINGP(varbs)
+      || !byte_string_ok_name(varbs))
+    scheme_wrong_contract("environment-variables-set!", "bytes-environment-variable-name?", 1, argc, argv);
 
-  varbs = scheme_char_string_to_byte_string_locale(argv[0]);
-  var = SCHEME_BYTE_STR_VAL(varbs);
+  valbs = argv[2];
+  if (!SCHEME_FALSEP(valbs)
+      && (!SCHEME_BYTE_STRINGP(valbs)
+          || scheme_byte_string_has_null(valbs)))
+    scheme_wrong_contract("environment-variables-set!", "(or/c bytes-no-nuls? #f)", 2, argc, argv);
+  if (argc > 3)
+    scheme_check_proc_arity("environment-variables-set!", 0, 3, argc, argv);
 
-  valbs = scheme_char_string_to_byte_string_locale(argv[1]);
-  val = SCHEME_BYTE_STR_VAL(valbs);
+  ev = argv[0];
+  ht = SCHEME_ENVVARS_TABLE(ev);
 
-#ifdef GETENV_FUNCTION
-# ifdef DOS_FILE_SYSTEM
-  rc = !SetEnvironmentVariable(var, val);
-# else
-  rc = sch_unix_putenv(var, val, SCHEME_BYTE_STRLEN_VAL(varbs), SCHEME_BYTE_STRLEN_VAL(valbs));
-# endif
+  if (ht) {
+    varbs = normalize_env_case(varbs);
+
+    if (SCHEME_FALSEP(valbs)) {
+      ht = scheme_hash_tree_set(ht, varbs, NULL);
+    } else {
+      varbs = byte_string_to_immutable(1, &varbs);
+      valbs = byte_string_to_immutable(1, &valbs);
+      ht = scheme_hash_tree_set(ht, varbs, valbs);
+    }
+
+    SCHEME_PTR_VAL(ev) = (Scheme_Object *)ht;
+
+    return scheme_void;
+  } else {
+    var = SCHEME_BYTE_STR_VAL(varbs);
+
+    if (SCHEME_FALSEP(valbs)) {
+      val = NULL;
+    } else {
+      val = SCHEME_BYTE_STR_VAL(valbs);
+    }
+
+#ifdef DOS_FILE_SYSTEM
+    rc = !SetEnvironmentVariable(var, val);
+    if (rc)
+      errid = GetLastError();
 #else
-  putenv_str_table_put_name_value(argv[0], argv[1]);
+    rc = sch_unix_putenv(var, val, SCHEME_BYTE_STRLEN_VAL(varbs), (val ? SCHEME_BYTE_STRLEN_VAL(valbs) : 0));
+    errid = errno;
 #endif
-  return rc ? scheme_false : scheme_true;
+
+    if (rc) {
+      if (argc > 3)
+        return _scheme_tail_apply(argv[3], 0, NULL);
+      else {
+        scheme_raise_exn(MZEXN_FAIL,
+                         "environment-variables-set!: change failed\n"
+                         "  system error: %e",
+                         errid);
+      }
+    }
+
+    return scheme_void;
+  }
+}
+
+static Scheme_Object *env_copy(int argc, Scheme_Object *argv[])
+{
+  Scheme_Hash_Tree *ht;
+
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_environment_variables_type))
+    scheme_wrong_contract("environment-variables-copy", "environment-variables?", 0, argc, argv);
+
+  ht = SCHEME_ENVVARS_TABLE(argv[0]);
+  if (ht)
+    return scheme_make_environment_variables(ht);
+  
+  /* copy system environment variables into a hash table: */
+  ht = scheme_make_hash_tree(1);
+
+#ifdef DOS_FILE_SYSTEM
+  {
+    char *p;
+    GC_CAN_IGNORE wchar_t *e;
+    int i, start, j;
+    Scheme_Object *var, *val;
+
+    e = GetEnvironmentStringsW();
+
+    for (i = 0; e[i]; ) {
+      start = i;
+      while (e[i]) { i++; }
+      p = NARROW_PATH(e XFORM_OK_PLUS start);
+      for (j = 0; p[j] && p[j] != '='; j++) {
+      }
+      if (j && p[j]) {
+        var = scheme_make_immutable_sized_byte_string(p, j, 1);
+        val = scheme_make_immutable_sized_byte_string(p XFORM_OK_PLUS j + 1, -1, 1);
+        var = normalize_env_case(var);
+        ht = scheme_hash_tree_set(ht, var, val);
+      }
+      i++;
+    }
+
+    FreeEnvironmentStringsW(e);
+  }
+#else
+  {
+    int i, j;
+    char **ea, *p;
+    Scheme_Object *var, *val;
+
+    ea = GET_ENVIRON_ARRAY;
+
+    for (i = 0; ea[i]; i++) {
+      p = ea[i];
+      for (j = 0; p[j] && p[j] != '='; j++) {
+      }
+      if (p[j]) {
+        var = scheme_make_immutable_sized_byte_string(p, j, 1);
+        val = scheme_make_immutable_sized_byte_string(p XFORM_OK_PLUS j + 1, -1, 1);
+        ht = scheme_hash_tree_set(ht, var, val);
+      }
+    }
+  }
+#endif
+
+  return scheme_make_environment_variables(ht);
+}
+
+static Scheme_Object *env_make(int argc, Scheme_Object *argv[])
+{
+  Scheme_Hash_Tree *ht;
+  Scheme_Object *varbs, *valbs;
+  int i;
+
+  ht = scheme_make_hash_tree(1);
+
+  for (i = 0; i < argc; i += 2) {
+    varbs = argv[i];
+    if (!SCHEME_BYTE_STRINGP(varbs)
+        || !byte_string_ok_name(varbs))
+      scheme_wrong_contract("make-environment-variables", "bytes-environment-variable-name?", i, argc, argv);
+
+    if (i+1 >= argc) {
+      scheme_contract_error("make-environment-variables",
+                            "key does not have a value (i.e., an odd number of arguments were provided)",
+                            "key", 1, argv[i],
+                            NULL);
+      return NULL;
+    }
+
+    valbs = argv[i+1];
+    if (!SCHEME_FALSEP(valbs)
+        && (!SCHEME_BYTE_STRINGP(valbs)
+            || scheme_byte_string_has_null(valbs)))
+      scheme_wrong_contract("make-environment-variables", "(or/c bytes-no-nuls? #f)", i+1, argc, argv);
+
+    varbs = normalize_env_case(varbs);
+
+    varbs = byte_string_to_immutable(1, &varbs);
+    valbs = byte_string_to_immutable(1, &valbs);
+    ht = scheme_hash_tree_set(ht, varbs, valbs);
+  }
+
+  return scheme_make_environment_variables(ht);
+}
+
+static Scheme_Object *sch_getenv_names(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *ev, *r = scheme_null, *key, *val;
+  Scheme_Hash_Tree *ht;
+  mzlonglong i;
+
+  ev = argv[0];
+  if (!SAME_TYPE(SCHEME_TYPE(ev), scheme_environment_variables_type))
+    scheme_wrong_contract("environment-variables-names", "environment-variables?", 0, argc, argv);
+
+  ht = SCHEME_ENVVARS_TABLE(ev);
+  if (!ht) {
+    ev = env_copy(1, argv);
+    ht = SCHEME_ENVVARS_TABLE(ev);
+  }
+
+  for (i = scheme_hash_tree_next(ht, -1); i != -1; i = scheme_hash_tree_next(ht, i)) {
+    scheme_hash_tree_index(ht, i, &key, &val);
+    r = scheme_make_pair(key, r);
+  }
+
+  return r;
+}
+
+#ifdef DOS_FILE_SYSTEM
+static int wc_strlen(const wchar_t *ws)
+{
+  int l;
+  for (l =0; ws[l]; l++) { }
+  return l;
+}
+#endif
+
+void *scheme_environment_variables_to_block(Scheme_Object *ev, int *_need_free)
+{
+  Scheme_Hash_Tree *ht;
+  Scheme_Object *key, *val;
+  
+  ht = SCHEME_ENVVARS_TABLE(ev);
+  if (!ht) {
+    *_need_free = 0;
+#ifdef DOS_FILE_SYSTEM
+    return NULL;
+#else
+    return GET_ENVIRON_ARRAY;
+#endif
+  }
+
+  *_need_free = 1;
+
+#ifdef DOS_FILE_SYSTEM
+  {
+    mzlonglong i;
+    int len = 0, slen;
+    GC_CAN_IGNORE wchar_t *r, *s;
+
+    for (i = scheme_hash_tree_next(ht, -1); i != -1; i = scheme_hash_tree_next(ht, i)) {
+      scheme_hash_tree_index(ht, i, &key, &val);
+      len += wc_strlen(WIDE_PATH(SCHEME_BYTE_STR_VAL(key)));
+      len += wc_strlen(WIDE_PATH(SCHEME_BYTE_STR_VAL(val)));
+      len += 2;
+    }
+
+    r = (wchar_t *)malloc((len + 1) * sizeof(wchar_t));
+
+    len = 0;
+
+    for (i = scheme_hash_tree_next(ht, -1); i != -1; i = scheme_hash_tree_next(ht, i)) {
+      scheme_hash_tree_index(ht, i, &key, &val);
+      s = WIDE_PATH(SCHEME_BYTE_STR_VAL(key));
+      slen = wc_strlen(s);
+      memcpy(r XFORM_OK_PLUS len, s, slen * sizeof(wchar_t));
+      len += slen;
+      r[len++] = '=';
+      s = WIDE_PATH(SCHEME_BYTE_STR_VAL(val));
+      slen = wc_strlen(s);
+      memcpy(r XFORM_OK_PLUS len, s, slen * sizeof(wchar_t));
+      len += slen;
+      r[len++] = 0;
+    }
+    r[len] = 0;
+
+    return r;
+  }
+#else
+  {
+    GC_CAN_IGNORE char **r, *s;
+    mzlonglong i;
+    intptr_t len = 0, slen, c;
+
+    for (i = scheme_hash_tree_next(ht, -1); i != -1; i = scheme_hash_tree_next(ht, i)) {
+      scheme_hash_tree_index(ht, i, &key, &val);
+      len += SCHEME_BYTE_STRLEN_VAL(key);
+      len += SCHEME_BYTE_STRLEN_VAL(val);
+      len += 2;
+    }
+
+    r = (char **)malloc((ht->count+1) * sizeof(char*) + len);
+    s = (char *)(r + (ht->count+1));
+    c = 0;
+    for (i = scheme_hash_tree_next(ht, -1); i != -1; i = scheme_hash_tree_next(ht, i)) {
+      scheme_hash_tree_index(ht, i, &key, &val);
+      r[c++] = s;
+      slen = SCHEME_BYTE_STRLEN_VAL(key);
+      memcpy(s, SCHEME_BYTE_STR_VAL(key), slen);
+      s[slen] = '=';
+      s = s XFORM_OK_PLUS (slen + 1);
+      slen = SCHEME_BYTE_STRLEN_VAL(val);
+      memcpy(s, SCHEME_BYTE_STR_VAL(val), slen);
+      s[slen] = 0;
+      s = s XFORM_OK_PLUS (slen + 1);
+    }
+    r[c] = NULL;
+
+    return r;
+  }
+#endif
 }
 
 /***********************************************************************/
@@ -2374,8 +2754,12 @@ static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
       return scheme_make_integer(sizeof(void*)*8);
     }
 
+    if (SAME_OBJ(argv[0], fs_change_symbol)) {
+      return fs_change_props;
+    }
+
     if (!SAME_OBJ(argv[0], os_symbol)) {
-      scheme_wrong_contract("system-type", "(or/c 'os 'word 'link 'machine 'gc 'so-suffix 'so-mode 'word)", 0, argc, argv);
+      scheme_wrong_contract("system-type", "(or/c 'os 'word 'link 'machine 'gc 'so-suffix 'so-mode 'word 'fs-change)", 0, argc, argv);
       return NULL;
     }
   }
@@ -2467,10 +2851,10 @@ static Scheme_Object *ok_cmdline(int argc, Scheme_Object **argv)
 
 static Scheme_Object *cmdline_args(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-command-line-arguments",
-			     scheme_make_integer(MZCONFIG_CMDLINE_ARGS),
-			     argc, argv,
-			     -1, ok_cmdline, "vector of strings", 1);
+  return scheme_param_config2("current-command-line-arguments",
+                              scheme_make_integer(MZCONFIG_CMDLINE_ARGS),
+                              argc, argv,
+                              -1, ok_cmdline, "(vectorof string?)", 1);
 }
 
 /**********************************************************************/
@@ -2498,10 +2882,10 @@ static Scheme_Object *current_locale(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *v;
 
-  v = scheme_param_config("current-locale",
-			  scheme_make_integer(MZCONFIG_LOCALE),
-			  argc, argv,
-			  -1, ok_locale, "#f or string", 1);
+  v = scheme_param_config2("current-locale",
+                           scheme_make_integer(MZCONFIG_LOCALE),
+                           argc, argv,
+                           -1, ok_locale, "(or/c #f string?)", 1);
 
   return v;
 }
@@ -3514,7 +3898,7 @@ char *scheme_push_c_numeric_locale()
 #ifndef DONT_USE_LOCALE
   GC_CAN_IGNORE char *prev;
   prev = setlocale(LC_NUMERIC, NULL);
-  if (!strcmp(prev, "C"))
+  if (!prev || !strcmp(prev, "C"))
     return NULL;
   else
     return setlocale(LC_NUMERIC, "C");

@@ -1,6 +1,6 @@
-#lang scheme/base
+#lang racket/base
 
-(require (prefix-in config: config) setup/dirs scheme/promise)
+(require setup/dirs racket/promise)
 
 (provide variant-suffix)
 
@@ -20,9 +20,9 @@
 
 (define (variant-suffix variant cased?)
   (let ([r (case variant
-             [(3m script-3m)   (or (force config:3m-suffix)
+             [(3m script-3m)   (or (get-3m-suffix)
                                    (if (force plain-mz-is-cgc?) "3m" ""))]
-             [(cgc script-cgc) (or (force config:cgc-suffix)
+             [(cgc script-cgc) (or (get-cgc-suffix)
                                    (if (force plain-mz-is-cgc?) "" "CGC"))]
              [else (error 'variant-suffix "unknown variant: ~e" variant)])])
     (if cased? r (string-downcase r))))
