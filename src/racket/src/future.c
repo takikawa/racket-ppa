@@ -608,11 +608,18 @@ void futures_init(void)
   fs->pool_threads = ftss;
   fs->thread_pool_size = pool_size;
 
+  mzrt_mutex_create(&fs->future_mutex);
+  mzrt_sema_create(&fs->future_pending_sema, 0);
+  mzrt_sema_create(&fs->gc_ok_c, 0);
+  mzrt_sema_create(&fs->gc_done_c, 0);
+  fs->gc_counter_ptr = &scheme_did_gc_count;
+
   /* Create a 'dummy' FTS for the RT thread */
   rt_fts = alloc_future_thread_state();
   rt_fts->is_runtime_thread = 1;
   rt_fts->gen0_size = 1;
   scheme_future_thread_state = rt_fts;
+
   scheme_add_swap_callback(set_fts_thread, scheme_false);
   set_fts_thread(scheme_false);
 
@@ -624,13 +631,6 @@ void futures_init(void)
   REGISTER_SO(fs->fevent_syms);
   REGISTER_SO(fs->fevent_prefab);
   REGISTER_SO(jit_future_storage);
-
-  mzrt_mutex_create(&fs->future_mutex);
-  mzrt_sema_create(&fs->future_pending_sema, 0);
-  mzrt_sema_create(&fs->gc_ok_c, 0);
-  mzrt_sema_create(&fs->gc_done_c, 0);
-
-  fs->gc_counter_ptr = &scheme_did_gc_count;
 
   hand = scheme_get_signal_handle();
   fs->signal_handle = hand;
@@ -2164,7 +2164,7 @@ Scheme_Object *touch(int argc, Scheme_Object *argv[])
   }
 }
 
-#if defined(linux)
+#if defined(linux) || defined(__QNX__)
 # include <unistd.h>
 #elif defined(OS_X)
 # include <sys/param.h>
@@ -2176,7 +2176,7 @@ Scheme_Object *touch(int argc, Scheme_Object *argv[])
 static void init_cpucount(void)
 /* Called in runtime thread */
 {
-#if defined(linux)
+#if defined(linux) || defined(__QNX__)
   cpucount = sysconf(_SC_NPROCESSORS_ONLN);
 #elif defined(OS_X)
   size_t size = sizeof(cpucount);

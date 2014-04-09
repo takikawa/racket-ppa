@@ -1,7 +1,7 @@
 #lang racket/base
 
 ;; Foreign Racket interface
-(require '#%foreign setup/dirs racket/unsafe/ops
+(require '#%foreign setup/dirs racket/unsafe/ops racket/private/for
          (for-syntax racket/base racket/list syntax/stx
                      racket/struct-info))
 
@@ -828,23 +828,25 @@
 ;; the above with '= -- but the numbers have to be specified in some way.  The
 ;; generated type will convert a list of these symbols into the logical-or of
 ;; their values and back.
-(define (_bitmask name orig-symbols->integers . base?)
+(define (_bitmask name orig-s->i . base?)
   (define basetype (if (pair? base?) (car base?) _uint))
   (define s->c
     (if name (string->symbol (format "bitmask:~a->int" name)) 'bitmask->int))
   (define symbols->integers
-    (let loop ([s->i orig-symbols->integers])
+    (let loop ([s->i orig-s->i] [last 0])
       (cond
        [(null? s->i)
         null]
        [(and (pair? (cdr s->i)) (eq? '= (cadr s->i)) (pair? (cddr s->i)))
         (cons (list (car s->i) (caddr s->i))
-              (loop (cdddr s->i)))]
+              (loop (cdddr s->i) (integer-length (caddr s->i))))]
        [(and (pair? (car s->i)) (pair? (cdar s->i)) (null? (cddar s->i))
              (symbol? (caar s->i)) (integer? (cadar s->i)))
-        (cons (car s->i) (loop (cdr s->i)))]
+        (cons (car s->i) (loop (cdr s->i) (integer-length (cadar s->i))))]
+       [(symbol? (car s->i))
+        (cons (list (car s->i) (arithmetic-shift 1 last)) (loop (cdr s->i) (add1 last)))]
        [else
-        (error '_bitmask "bad spec in ~e" orig-symbols->integers)])))
+        (error '_bitmask "bad spec in ~e" orig-s->i)])))
   (make-ctype basetype
     (lambda (symbols)
       (if (null? symbols) ; probably common
@@ -998,8 +1000,9 @@
 
 ;; (_array <type> <len> ...+)
 (provide _array
-         array? array-length array-ptr
-         (protect-out array-ref array-set!))
+         array? array-length array-ptr array-type
+         (protect-out array-ref array-set!)
+         (rename-out [*in-array in-array]))
 
 (define _array
   (case-lambda
@@ -1038,6 +1041,22 @@
         (if (null? is)
             (array-set! a i v)
             (loop (array-ref a (car is)) (cdr is)))))]))
+
+;; (in-aray array [start stop step])
+;; in-vector like sequence over array
+(define-:vector-like-gen :array-gen array-ref)
+
+(define-in-vector-like in-array
+  "array" array? array-length :array-gen)
+
+(define-sequence-syntax *in-array
+  (lambda () #'in-array)
+  (make-in-vector-like 'in-array
+                       "array"
+                       #'array?
+                       #'array-length
+                       #'in-array
+                       #'array-ref))
 
 ;; (_array/list <type> <len> ...+)
 ;; Like _list, but for arrays instead of pointers at the C level.
@@ -1298,10 +1317,11 @@
 
 ;; Simple structs: call this with a list of types, and get a type that marshals
 ;; C structs to/from Scheme lists.
-(define* (_list-struct #:alignment [alignment #f] . types)
-  (let ([stype   (make-cstruct-type types #f alignment)]
-        [offsets (compute-offsets types alignment)]
-        [len     (length types)])
+(define* (_list-struct #:alignment [alignment #f] type . types)
+  (let* ([types   (cons type types)]
+         [stype   (make-cstruct-type types #f alignment)]
+         [offsets (compute-offsets types alignment)]
+         [len     (length types)])
     (make-ctype stype
       (lambda (vals)
         (unless (list? vals)
@@ -1571,6 +1591,8 @@
            stx xs))
   (syntax-case stx ()
     [(_ type ([slot slot-type] ...) . more)
+     (or (stx-pair? #'type)
+         (stx-pair? #'(slot ...)))
      (let-values ([(_TYPE _SUPER)
                    (syntax-case #'type ()
                      [(t s) (values #'t #'s)]
@@ -1612,13 +1634,13 @@
                                      #'x)]
                        [else (err "bad syntax")]))])
        (unless (identifier? _TYPE)
-         (err "bad type, expecting a _name identifier or (_name super-ctype)"
+         (err "expecting a `_name' identifier or `(_name _super-name)'"
               _TYPE))
        (unless (regexp-match? #rx"^_." (symbol->string (syntax-e _TYPE)))
          (err "cstruct name must begin with a `_'" _TYPE))
        (for ([s (in-list (syntax->list #'(slot ...)))])
          (unless (identifier? s)
-           (err "bad field name, expecting an identifier identifier" s)))
+           (err "bad field name, expecting an identifier" s)))
        (if _SUPER
          (make-syntax _TYPE #t
                       #`(#,(datum->syntax _TYPE 'super _TYPE) slot ...)
@@ -1629,13 +1651,16 @@
                       no-equal?)
          (make-syntax _TYPE #f #'(slot ...) #`(slot-type ...) 
                       alignment properties property-bindings no-equal?)))]
+    [(_ type () . more)
+     (identifier? #'type)
+     (err "must have either a supertype or at least one field")]
     ;; specific errors for bad slot specs, leave the rest for a generic error
     [(_ type (bad ...) . more)
-     (err "bad slot specification, expecting [name ctype]"
+     (err "bad field specification, expecting `[name ctype]'"
           (ormap (lambda (s) (syntax-case s () [[n ct] #t] [_ s]))
                  (syntax->list #'(bad ...))))]
     [(_ type bad . more)
-     (err "bad slot specification, expecting a sequence of [name ctype]"
+     (err "bad field specification, expecting a sequence of `[name ctype]'"
           #'bad)]))
 
 ;; Add `prop:equal+hash' to use pointer equality

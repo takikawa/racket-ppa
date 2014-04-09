@@ -7,8 +7,8 @@
          racket/bool
          net/base64
          setup/getinfo
-         "dirs.rkt"
-         (only-in mzscheme make-namespace))
+         racket/match
+         "dirs.rkt")
 
 (provide unpack
          fold-plt-archive)
@@ -276,11 +276,34 @@
                       (eq? #\L (read-char p))
                       (eq? #\T (read-char p)))
            (error "not an unpackable distribution archive"))
-         (let* ([n (make-namespace)]
-                [info (let ([orig (current-namespace)])
-                        (parameterize ([current-namespace n])
-                          (namespace-require '(lib "mzlib/unit200.ss"))
-                          (eval (read p))))])
+         (let* ([info (let ([v (read p)])
+                        (match v
+                          [`(lambda (request failure)
+                              (case request
+                                [(name) ,name]
+                                [(unpacker) 'mzscheme]
+                                [(requires) ',requires]
+                                [(conflicts) ',conflicts]
+                                [(plt-relative?) ,plt-relative?]
+                                [(plt-home-relative?) ,plt-home-relative?]
+                                . ,(or `([(test-plt-dirs) ,test-dirs] ; #f or `(quote ,dirs)
+                                         [else (failure)])
+                                       `([,(and 'else test-dirs) (failure)]))))
+                           (lambda (request failure)
+                             (case request
+                               [(name) name]
+                               [(unpacker) 'mzscheme]
+                               [(requires) requires]
+                               [(conflicts) conflicts]
+                               [(plt-relative?) plt-relative?]
+                               [(plt-home-relative?) plt-home-relative?]
+                               [(test-plt-dirs) (and test-dirs
+                                                     (not (eq? test-dirs 'else))
+                                                     (cadr test-dirs))]
+                               [else (failure)]))]
+                          [else
+                           (error "info-procedure S-expression did not have the expected shape: "
+                                  v)]))])
            (unless (and (procedure? info)
                         (procedure-arity-includes? info 2))
              (error "expected a procedure of arity 2, got" info))
@@ -421,18 +444,22 @@
                    (unless (and name unpacker)
                      (error "bad name or unpacker"))
                    (print-status (format "Unpacking ~a from ~a" name archive))
-                   (let ([u (eval (read p) n)])
-                     (unless (eval `(unit? ,u) n)
-                       (error "expected a v200 unit, got" u))
-                     (make-directory* (car target-dir-info))
-                     (let ([unmztar (lambda (filter)
-                                      (unmztar p filter 
-                                               (car target-dir-info) 
-                                               (lambda (a b)
-                                                 ((cadr target-dir-info) a b))
-                                               ((length target-dir-info) . > . 1)
-                                               print-status))])
-                       (eval `(invoke-unit ,u ,(car target-dir-info) ,unmztar) n))))
+                   (let ([u (read p)])
+                     (match u
+                       [`(unit (import ,(? symbol?) mzuntar) 
+                               (export)
+                               (mzuntar void)
+                               (quote ,collections))
+                        (make-directory* (car target-dir-info))
+                        (unmztar p void
+                                 (car target-dir-info) 
+                                 (lambda (a b)
+                                   ((cadr target-dir-info) a b))
+                                 ((length target-dir-info) . > . 1)
+                                 print-status)
+                        collections]
+                       [else
+                        (error "expected a `unit' pattern, got" u)])))
 
                  ;; Cancelled: no collections
                  null))))

@@ -5,7 +5,7 @@
 
 (define (find-exe [mred? #f] [variant (system-type 'gc)])
   (let* ([base (if mred?
-                   (find-gui-bin-dir)
+                   (find-lib-dir)
                    (find-console-bin-dir))]
          [fail
           (lambda ()

@@ -9,7 +9,7 @@
 (provide get-opter reg-opter! opter
          interleave-lifts
          
-         make-opt/info
+         build-opt/info
          opt/info-contract
          opt/info-val
          opt/info-blame
@@ -20,9 +20,12 @@
          opt/info-that
          
          opt/info-swap-blame
+         opt/info-add-blame-context
          opt/info-change-val
+         opt/info-positive-blame
          
          opt/unknown
+         opt-error-name
          
          optres-exp
          optres-lifts
@@ -33,16 +36,18 @@
          optres-stronger-ribs
          optres-chaperone
          optres-no-negative-blame?
+         optres-name
          build-optres
          
          combine-two-chaperone?s
-         combine-two-no-negative-blame)
+         combine-two-no-negative-blame
+         log-unknown-contract-warning)
 
 ;; (define/opter (<contract-combinator> opt/i opt/info stx) body)
 ;;
-;; An opter is to a function with the following signature: 
+;; An opter is a function with the following signature: 
 ;;
-;; opter : (syntax opt/info -> <opter-results>) opt/info list-of-ids -> opt-res
+;; opter : (syntax opt/info -> optres) opt/info list-of-ids -> optres
 ;;
 ;; The first argument can be used to recursively process sub-contracts
 ;; It returns what an opter returns and its results should be accumulated
@@ -90,7 +95,8 @@
                 opt
                 stronger-ribs
                 chaperone
-                no-negative-blame?))
+                no-negative-blame?
+                name))
 (define (build-optres #:exp exp
                       #:lifts lifts
                       #:superlifts superlifts
@@ -99,7 +105,8 @@
                       #:opt opt
                       #:stronger-ribs stronger-ribs
                       #:chaperone chaperone
-                      #:no-negative-blame? [no-negative-blame? (syntax? flat)])
+                      #:no-negative-blame? [no-negative-blame? (syntax? flat)]
+                      #:name [name #''unknown-name])
   (optres exp 
           lifts
           superlifts
@@ -108,7 +115,8 @@
           opt
           stronger-ribs
           chaperone
-          no-negative-blame?))
+          no-negative-blame?
+          name))
 
 ;; a hash table of opters
 (define opters-table
@@ -141,12 +149,21 @@
 
 ;; struct for color-keeping across opters
 (define-struct opt/info
-  (contract val blame-id swap-blame? free-vars recf base-pred this that))
+  (contract val blame-original-id blame-stx swap-blame? free-vars recf base-pred this that))
+(define (build-opt/info contract val blame-id free-vars this that)
+  (make-opt/info contract val blame-id blame-id #f free-vars #f #f this that))
 
 (define (opt/info-blame oi)
   (if (opt/info-swap-blame? oi)
-    #`(blame-swap #,(opt/info-blame-id oi))
-    (opt/info-blame-id oi)))
+    #`(blame-swap #,(opt/info-blame-stx oi))
+    (opt/info-blame-stx oi)))
+
+;; returns syntax that, when evaluated, computes
+;; the name of the positive blame party
+(define (opt/info-positive-blame oi)
+  (if (opt/info-swap-blame? oi)
+      #`(blame-positive #,(opt/info-blame-original-id oi))
+      #`(blame-negative #,(opt/info-blame-original-id oi))))
 
 ;; opt/info-swap-blame : opt/info -> opt/info
 ;; swaps pos and neg
@@ -158,6 +175,14 @@
 (define (opt/info-change-val val info)
   (struct-copy opt/info info [val val]))
 
+
+;; opt/info-add-blame-context : opt/info (stx -> stx) -> opt/info
+;; calls 'f' on the current blame syntax to build a new one
+;; (presumably wrapping it with a call to (blame-add-context ...),
+;;  possibly via a helper function) and returns an adjusted opt/info record
+(define (opt/info-add-blame-context info f)
+  (struct-copy opt/info info
+               [blame-stx (f (opt/info-blame-stx info))]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -243,13 +268,7 @@
 ;; opt/unknown : opt/i id id syntax
 ;;
 (define (opt/unknown opt/i opt/info uctc [extra-warning ""])
-  (log-warning (string-append (format "warning in ~a:~a: opt/c doesn't know the contract ~s" 
-                                      (syntax-source uctc)
-                                      (if (syntax-line uctc)
-                                          (format "~a:~a" (syntax-line uctc) (syntax-column uctc))
-                                          (format ":~a" (syntax-position uctc)))
-                                      (syntax->datum uctc))
-                              extra-warning))
+  (log-unknown-contract-warning uctc extra-warning)
   (with-syntax ([(lift-var partial-var partial-flat-var)
                  (generate-temporaries '(lift partial partial-flat))]
                 [val (opt/info-val opt/info)]
@@ -258,7 +277,7 @@
     (build-optres
      #:exp #'(partial-var val)
      #:lifts (list (cons #'lift-var 
-                         #'(coerce-contract 'opt/c uctc)))
+                         #`(coerce-contract '#,(opt-error-name) uctc)))
      #:superlifts null
      #:partials
      (list (cons
@@ -274,7 +293,26 @@
      #:flat #f
      #:opt #'lift-var
      #:stronger-ribs null
-     #:chaperone #'(chaperone-contract? lift-var))))
+     #:chaperone #'(chaperone-contract? lift-var)
+     #:name #'(contract-name lift-var))))
+
+(define unknown-contract-logger (make-logger 'racket/contract (current-logger)))
+(define (log-unknown-contract-warning exp [extra-warning ""])
+  (when (log-level? unknown-contract-logger 'warning)
+    (define datum (syntax->datum exp))
+    (log-message unknown-contract-logger
+                 'warning 
+                 (string-append (format "warning in ~a:~a: opt/c doesn't know the contract ~s" 
+                                        (syntax-source exp)
+                                        (if (syntax-line exp)
+                                            (format "~a:~a" (syntax-line exp) (syntax-column exp))
+                                            (format ":~a" (syntax-position exp)))
+                                        datum)
+                                extra-warning)
+                 datum)))
+
+
+(define opt-error-name (make-parameter 'opt/c))
 
 ;; combine-two-chaperone?s : (or/c boolean? syntax?) (or/c boolean? syntax?) -> (or/c boolean? syntax?)
 (define (combine-two-chaperone?s chaperone-a? chaperone-b?)

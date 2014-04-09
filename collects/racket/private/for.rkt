@@ -4,12 +4,14 @@
              "misc.rkt"
              "define.rkt"
              "letstx-scheme.rkt"
+             "member.rkt"
              "reverse.rkt"
              '#%unsafe
              (for-syntax '#%kernel
                          "stx.rkt"
                          "qqstx.rkt"
                          "define.rkt"
+                         "member.rkt"
                          "small-scheme.rkt"
                          "stxcase-scheme.rkt"))
 
@@ -30,6 +32,7 @@
 
              for/fold/derived for*/fold/derived
              (for-syntax split-for-body)
+             (for-syntax (rename expand-clause expand-for-clause))
 
              (rename *in-range in-range)
              (rename *in-naturals in-naturals)
@@ -66,7 +69,7 @@
              stream-first
              stream-rest
              prop:stream
-             stream-ref ; only provided for racket/stream
+             stream-ref stream-via-prop? ; only provided for racket/stream
              sequence->stream
              empty-stream make-do-stream
 
@@ -170,6 +173,9 @@
       ;; of pieces that are no treated as sub-expressions. We have to push the
       ;; taints down to all the relevant identifiers and expressions:
       (arm-for-clause clause syntax-arm))
+
+    (define sequence-specialization-logger
+      (make-logger 'sequence-specialization (current-logger)))
 
     (define (expand-clause orig-stx clause)
       (define (unpack stx)
@@ -294,7 +300,17 @@
                 (and post-guard (not (pred id ...)))
                 (loop-arg ...)))]
           [[(id ...) rhs]
+           #t
            (let ([introducer (make-syntax-introducer)])
+             ;; log non-specialized clauses, for performance tuning
+             (when (log-level? sequence-specialization-logger 'debug)
+               (log-message sequence-specialization-logger
+                            'debug
+                            (format "non-specialized for clause: ~a:~a:~a"
+                                    (syntax-source #'rhs)
+                                    (syntax-line   #'rhs)
+                                    (syntax-column #'rhs))
+                            #'rhs))
              (with-syntax ([[(id ...) rhs] (introducer (syntax-local-introduce clause))])
                (arm-for-clause
                 (syntax-local-introduce
@@ -1032,21 +1048,26 @@
                                                   poses
                                                   vals)))))))))
 
-  (define (in-producer producer stop . more)
-    (make-do-sequence
-     (lambda ()
-       (values (if (null? more)
-                 (lambda (_) (producer))
-                 (lambda (_) (apply producer more)))
-               void
-               (void)
-               #f
-               (if (procedure? stop)
-                 (if (equal? 1 (procedure-arity stop))
-                   (lambda (x) (not (stop x)))
-                   (lambda xs (not (apply stop xs))))
-                 (lambda (x) (not (eq? x stop))))
-               #f))))
+  (define in-producer
+    (case-lambda
+      [(producer)
+       ;; simple stop-less version
+       (make-do-sequence (lambda () (values (λ _ (producer)) void (void) #f #f #f)))]
+      [(producer stop . more)
+       (define produce!
+         (if (null? more)
+           (lambda (_) (producer))
+           (lambda (_) (apply producer more))))
+       (define stop?
+         (cond [(not (procedure? stop))
+                (lambda (x) (not (eq? x stop)))]
+               [(equal? 1 (procedure-arity stop))
+                (lambda (x) (not (stop x)))]
+               [else
+                (lambda xs (not (apply stop xs)))]))
+       (make-do-sequence
+        (lambda ()
+          (values produce! void (void) #f stop? #f)))]))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;  running sequences outside of a loop:
@@ -1497,10 +1518,10 @@
                            [i 0])
                           (for-clause ...) 
                           middle-body ...
-                          (let ([new-vec (if (eq? i (unsafe-vector-length vec))
+                          (let ([new-vec (if (eq? i (unsafe-vector*-length vec))
                                              (grow-vector vec)
                                              vec)])
-                            (unsafe-vector-set! new-vec i (let () last-body ...))
+                            (unsafe-vector*-set! new-vec i (let () last-body ...))
                             (values new-vec (unsafe-fx+ i 1))))])
              (shrink-vector vec i))))]
       [(_ #:length length-expr #:fill fill-expr (for-clause ...) body ...)
@@ -1546,8 +1567,8 @@
                   ([i 0])
                   (limited-for-clause ...)
                   middle-body ...
-                  (vector-set! v i (let () last-body ...))
-                  (add1 i)))
+                  (unsafe-vector*-set! v i (let () last-body ...))
+                  (unsafe-fx+ 1 i)))
                v))))]
       [(_ #:length length-expr (for-clause ...) body ...)
        (for_/vector #'(fv #:length length-expr #:fill 0 (for-clause ...) body ...) 
@@ -1597,7 +1618,7 @@
     (lambda (x) x))
 
   (define-for-variants (for/first for*/first)
-    ([val #f][stop? #f])
+    ([val #f] [stop? #f])
     (lambda (x) #`(let-values ([(val _) #,x]) val))
     (lambda (rhs) #`(stop-after #,rhs (lambda x stop?)))
     (lambda (x) #`(values #,x #t)))
@@ -1821,67 +1842,27 @@
     (lambda () #'in-producer)
     (lambda (stx)
       (syntax-case stx ()
-        [[(id) (_ producer stop more ...)]
-         (with-syntax ([(more* ...) (generate-temporaries #'(more ...))])
-           #'[(id)
-              (:do-in
-               ;;outer bindings
-               ([(producer*) producer] [(more*) more] ...
-                [(stop?) (let ([s stop])
-                           (if (procedure? s) s (lambda (x) (eq? x s))))])
-               ;; outer check
-               #t
-               ;; loop bindings
-               ()
-               ;; pos check
-               #t
-               ;; inner bindings
-               ([(id) (producer* more* ...)])
-               ;; pre guard
-               (not (stop? id))
-               ;; post guard
-               #t
-               ;; loop args
-               ())])]
-        [[() (_ producer stop more ...)]
-         (with-syntax ([(more* ...) (generate-temporaries #'(more ...))])
-           #'[()
-              (:do-in
-                ([(producer*) producer] [(more*) more] ...
-                 [(stop?) (let ([s stop])
-                           (if (procedure? s)
-                             s
-                             (lambda (args)
-                               (and (not (null? args))
-                                    (eq? (car args) s)))))])
-               ;; outer check
-               #t
-               ;; loop bindings
-               ()
-               ;; pos check
-               #t
-               ;; inner bindings
-               ([(check) (call-with-values (lambda () (producer* more* ...))
-                                           (lambda vs vs))])
-               ;; pre guard
-               (not (stop? check))
-               ;; post guard
-               #t
-               ;; loop args
-               ())])]
-        ;; multiple-values version
+        ;; cheap & simple stop-less and arg-less version
+        [[(id ...) (_ producer)]
+         #'[(id ...)
+            (:do-in ([(producer*) producer]) #t () #t ([(id ...) (producer*)])
+                    #t #t ())]]
+        ;; full version
         [[(id ...) (_ producer stop more ...)]
-         (with-syntax ([(more* ...) (generate-temporaries #'(more ...))])
+         (with-syntax ([(more* ...) (generate-temporaries #'(more ...))]
+                       [single? (= 1 (length (syntax->list #'(id ...))))])
            #'[(id ...)
               (:do-in
-               ;;outer bindings
-               ([(producer*) producer] [(more*) more] ...
-                [(stop?) (let ([s stop])
-                           (if (procedure? s)
-                             s
-                             (error 'in-producer
-                                    "stop condition for ~a, got: ~e"
-                                    "multiple values must be a predicate" s)))])
+               ;; outer bindings
+               ([(producer*) producer]
+                [(more*) more] ...
+                [(stop?)
+                 (let ([s stop])
+                   (cond [(procedure? s) s]
+                         ['single? (lambda (x) (eq? x s))]
+                         [else (error 'in-producer
+                                      "stop condition for ~a, got: ~e"
+                                      "multiple values must be a predicate" s)]))])
                ;; outer check
                #t
                ;; loop bindings
@@ -1961,46 +1942,58 @@
                     (lambda () (read-char p*)))
                   eof)]])))
 
-  (define in-directory-tag (make-continuation-prompt-tag 'in-directory))
+  (define (dir-list full-d d acc)
+    (for/fold ([acc acc]) ([f (in-list (directory-list full-d))])
+	      (cons (build-path d f) acc)))
 
-  (define in-directory
-    (case-lambda
-      [(dir)
-       (when dir
-         (unless (path-string? dir)
-           (raise-argument-error 'in-directory "(or/c #f path-string?)" dir)))
-       (let ([make-gen (lambda ()
-                         (call-with-continuation-prompt
-                          (lambda ()
-                            (define (reply v)
-                              (call/cc 
-                               (lambda (k)
-                                (abort-current-continuation
-                                 in-directory-tag
-                                 (lambda () (cons (lambda () v) k))))
-                               in-directory-tag))
-                            (let loop ([dir (path->complete-path (or dir (current-directory)))]
-                                       [prefix dir])
-                              (for ([i (in-list (directory-list dir))])
-                                (let ([p (if prefix (build-path prefix i) i)]
-                                      [fp (build-path dir i)])
-                                  (reply p)
-                                  (when (directory-exists? fp)
-                                    (loop fp p)))))
-                            (reply eof))
-                          in-directory-tag))])
-         (make-do-sequence
-          (lambda ()
-            (values
-             (lambda (gen) ((car gen)))
-             (lambda (gen) (call-with-continuation-prompt
-                            (lambda ()
-                              ((cdr gen)))
-                            in-directory-tag))
-             (make-gen)
-             (lambda (gen) (not (eof-object? ((car gen)))))
-             (lambda (val) #t)
-             (lambda (gen val) #t)))))]
-      [() (in-directory #f)]))
+  (define (next-body l d init-dir)
+    (let ([full-d (path->complete-path d init-dir)])
+      (if (directory-exists? full-d)
+	  (dir-list full-d d (cdr l))
+	  (cdr l))))
+
+  (define (initial-state orig-dir init-dir)
+    (if orig-dir
+	(dir-list (path->complete-path orig-dir init-dir)
+		  orig-dir null)
+	(directory-list init-dir)))
+
+  (define *in-directory
+    (case-lambda 
+     [() (*in-directory #f)]
+     [(orig-dir)
+      (define init-dir (current-directory))
+      ;; current state of the sequence is a list of paths to produce; when
+      ;; incrementing past a directory, add the directory's immediate
+      ;; content to the front of the list:
+      (define (next l)
+	(define d (car l))
+	(next-body l d init-dir))
+      (make-do-sequence
+       (lambda ()
+	 (values
+	  car
+	  next
+	  (initial-state orig-dir init-dir)
+	  pair?
+	  #f
+	  #f)))]))
+     
+  (define-sequence-syntax in-directory
+    (λ () #'*in-directory)
+    (λ (stx)
+       (syntax-case stx ()
+	 [((d) (_)) #'[(d) (*in-directory #f)]]
+	 [((d) (_ dir))
+	  #'[(d) 
+	     (:do-in
+	      ([(orig-dir) (or dir #f)] [(init-dir) (current-directory)])
+	      #true
+	      ([l (initial-state orig-dir init-dir)])
+	      (pair? l)
+	      ([(d) (car l)])
+	      #true
+	      #true
+	      [(next-body l d init-dir)])]])))
 
   )

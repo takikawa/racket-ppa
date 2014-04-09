@@ -5,7 +5,39 @@
          unstable/error
          "interfaces.rkt"
          (only-in "sql-data.rkt" sql-null sql-null?))
-(provide (all-defined-out))
+(provide connected?
+         disconnect
+         connection-dbsystem
+         dbsystem-name
+         dbsystem-supported-types
+         prop:statement
+         statement?
+         bind-prepared-statement
+         prepared-statement-parameter-types
+         prepared-statement-result-types
+         virtual-statement?
+         (rename-out [virtual-statement* virtual-statement])
+         query-rows
+         query-list
+         query-row
+         query-maybe-row
+         query-value
+         query-maybe-value
+         query-exec
+         query
+         in-query
+         in-query-helper ;; for contracted in-query macro in db/base
+         prepare
+         start-transaction
+         commit-transaction
+         rollback-transaction
+         call-with-transaction
+         in-transaction?
+         needs-rollback?
+         list-tables
+         table-exists?
+         group-rows
+         rows->dict)
 
 ;; == Administrative procedures
 
@@ -291,7 +323,8 @@
                      (with-handlers ([exn?
                                       (lambda (e2)
                                         (error/exn-in-rollback 'call-with-transaction e1 e2))])
-                       (send c end-transaction '|call-with-transaction (rollback)| 'rollback #t))
+                       (when (send c connected?)
+                         (send c end-transaction '|call-with-transaction (rollback)| 'rollback #t)))
                      (raise e1))])
     (begin0 (call-with-continuation-barrier proc)
       (send c end-transaction '|call-with-transaction (commit)| 'commit #t))))
@@ -525,9 +558,9 @@
                     (eq? (hash-ref table key not-given) not-given)
                     ;; FIXME: okay to coalesce values if equal?
                     (equal? value old-value))
-          (raise-misc-error who "duplicate value for key"
-                            '("key" value) key
-                            '("values" multi value) (list old-value value)))
+          (error* who "duplicate value for key"
+                  '("key" value) key
+                  '("values" multi value) (list old-value value)))
         (if value-list?
             (hash-set table key
                       (if (ok-value? value)

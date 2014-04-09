@@ -1,5 +1,6 @@
 #lang racket/base
 (require "path.rkt"
+         setup/dirs
          (for-syntax racket/base
                      setup/path-to-relative))
 
@@ -14,6 +15,8 @@
          make-handle-get-preference-locked
          make-lock-file-name
          call-with-file-lock/timeout
+
+         call-with-atomic-output-file
 
          fold-files
          find-files
@@ -49,32 +52,46 @@
          [ps (map cdr ps)])
     ps))
 
-(define (delete-directory/files path)
+(define (delete-directory/files path
+                                #:must-exist? [must-exist? #t])
   (unless (path-string? path)
     (raise-argument-error 'delete-directory/files "path-string?" path))
-  (cond
-   [(or (link-exists? path) (file-exists? path))
-    (delete-file path)]
-   [(directory-exists? path)
-    (for-each (lambda (e) (delete-directory/files (build-path path e)))
-              (sorted-dirlist path))
-    (delete-directory path)]
-   [else (error 'delete-directory/files
-                "encountered ~a, neither a file nor a directory"
-                path)]))
+  (let loop ([path path])
+    (cond
+     [(or (link-exists? path) (file-exists? path))
+      (delete-file path)]
+     [(directory-exists? path)
+      (for-each (lambda (e) (loop (build-path path e)))
+                (sorted-dirlist path))
+      (delete-directory path)]
+     [else
+      (when must-exist?
+        (raise-not-a-file-or-directory 'delete-directory/files path))])))
 
-(define (copy-directory/files src dest)
-  (cond [(file-exists? src)
-         (copy-file src dest)]
-        [(directory-exists? src)
-         (make-directory dest)
-         (for-each (lambda (e)
-                     (copy-directory/files (build-path src e)
-                                           (build-path dest e)))
-                   (sorted-dirlist src))]
-        [else (error 'copy-directory/files
-                     "encountered ~a, neither a file nor a directory"
-                     src)]))
+(define (raise-not-a-file-or-directory who path)
+  (raise
+   (make-exn:fail:filesystem
+    (format "~a: encountered ~a, neither a file nor a directory"
+            who
+            path)
+    (current-continuation-marks))))
+
+(define (copy-directory/files src dest 
+                              #:keep-modify-seconds? [keep-modify-seconds? #f])
+  (let loop ([src src] [dest dest])
+    (cond [(file-exists? src)
+           (copy-file src dest)
+           (when keep-modify-seconds?
+             (file-or-directory-modify-seconds
+              dest
+              (file-or-directory-modify-seconds src)))]
+          [(directory-exists? src)
+           (make-directory dest)
+           (for-each (lambda (e)
+                       (loop (build-path src e)
+                             (build-path dest e)))
+                     (sorted-dirlist src))]
+          [else (raise-not-a-file-or-directory 'copy-directory/files src)])))
 
 (define (make-directory* dir)
   (let-values ([(base name dir?) (split-path dir)])
@@ -82,7 +99,8 @@
                (not (directory-exists? base)))
       (make-directory* base))
     (unless (directory-exists? dir)
-      (make-directory dir))))
+      (with-handlers ([exn:fail:filesystem:exists? void])
+        (make-directory dir)))))
 
 (define-syntax (make-temporary-file stx)
   (with-syntax ([app (datum->syntax stx #'#%app stx)])
@@ -160,6 +178,56 @@
               name)))))
     make-temporary-file))
 
+;;  Open a temporary path for writing, automatically renames after,
+;;  and arranges to delete path if there's an exception. Uses the an
+;;  extra rename dance as needed under Windows to ensure that any
+;;  existing readers of the file do not prevent updating the
+;;  file. Breaks are managed so that the port is reliably closed and
+;;  the file is reliably deleted if there's a break.
+(define (call-with-atomic-output-file path 
+                                      proc
+                                      #:security-guard [guard #f])
+  (unless (path-string? path)
+    (raise-argument-error 'call-with-atomic-output-file "path-string?" path))
+  (unless (and (procedure? proc)
+               (procedure-arity-includes? proc 2))
+    (raise-argument-error 'call-with-atomic-output-file "(procedure-arity-includes/c 2)" proc))
+  (unless (or (not guard)
+              (security-guard? guard))
+    (raise-argument-error 'call-with-atomic-output-file "(or/c #f security-guard?)" guard))
+  (define (try-delete-file path [noisy? #t])
+    ;; Attempt to delete, but give up if it doesn't work:
+    (with-handlers ([exn:fail:filesystem? void])
+      (delete-file path)))
+  (let ([bp (current-break-parameterization)]
+        [tmp-path (parameterize ([current-security-guard (or guard (current-security-guard))])
+                    (make-temporary-file "tmp~a" #f (path-only path)))]
+        [ok? #f])
+    (dynamic-wind
+     void
+     (lambda ()
+       (begin0
+         (let ([out (parameterize ([current-security-guard (or guard (current-security-guard))])
+                      (open-output-file tmp-path #:exists 'truncate/replace))])
+           (dynamic-wind
+            void
+            (lambda ()
+              (call-with-break-parameterization bp (lambda () (proc out tmp-path))))
+            (lambda ()
+              (close-output-port out))))
+         (set! ok? #t)))
+     (lambda ()
+       (parameterize ([current-security-guard (or guard (current-security-guard))])
+         (if ok?
+             (if (eq? (system-type) 'windows)
+                 (let ([tmp-path2 (make-temporary-file "tmp~a" #f (path-only path))])
+                   (with-handlers ([exn:fail:filesystem? void])
+                     (rename-file-or-directory path tmp-path2 #t))
+                   (rename-file-or-directory tmp-path path #t)
+                   (try-delete-file tmp-path2))
+                 (rename-file-or-directory tmp-path path #t))
+             (try-delete-file tmp-path)))))))
+
 (define (with-pref-params thunk)
   (parameterize ([read-case-sensitive #f]
                  [read-square-bracket-as-paren #t]
@@ -236,9 +304,9 @@
     (raise-argument-error 'call-with-file-lock/timeout "(or/c path-string? #f)" fn))
   (unless (or (eq? kind 'shared) (eq? kind 'exclusive))
     (raise-argument-error 'call-with-file-lock/timeout "(or/c 'shared 'exclusive)" kind))
-  (unless (and (procedure? thunk) (= (procedure-arity thunk) 0))
+  (unless (and (procedure? thunk) (procedure-arity-includes? thunk 0))
     (raise-argument-error 'call-with-file-lock/timeout "(-> any)" thunk))
-  (unless (and (procedure? thunk) (= (procedure-arity failure-thunk) 0))
+  (unless (and (procedure? thunk) (procedure-arity-includes? failure-thunk 0))
     (raise-argument-error 'call-with-file-lock/timeout "(-> any)" failure-thunk))
   (unless (or (not lock-file) (path-string? lock-file))
     (raise-argument-error 'call-with-file-lock/timeout "(or/c path-string? #f)" lock-file))
@@ -289,18 +357,20 @@
         (with-handlers ([exn:fail:filesystem:exists? (lambda (exn) 'ok)])
           (close-output-port (open-output-file lock-file #:exists 'error))))
       (((if (eq? kind 'exclusive)
-            (lambda (fn proc) (call-with-output-file fn proc #:exists 'update))
+            (lambda (fn proc) (call-with-output-file* fn proc #:exists 'update))
             call-with-input-file*)
         lock-file
         (lambda (p)
           (if (port-try-file-lock? p kind)
               ;; got lock:
-              (let ([v (dynamic-wind
-                           void
-                           thunk
-                           (lambda ()
-                             (port-file-unlock p)))])
-                (lambda () v))
+              (call-with-values
+               (lambda ()
+                 (dynamic-wind
+                     void
+                     thunk
+                     (lambda ()
+                       (port-file-unlock p))))
+               (lambda vs (lambda () (apply values vs))))
               ;; didn't get lock:
               (lambda () (failure-thunk))))))]
     [else ; = 'exists
@@ -345,12 +415,15 @@
                                         (expand-user-path "~/.plt-scheme/plt-prefs.ss")])])
                                 (if (file-exists? alt-f)
                                     (values alt-f #f)
-                                    ;; Last chance: check for a "defaults" collection:
-                                    ;; (error here in case there's no "defaults"
-                                    ;;  bails out through above `with-handlers')
+                                    ;; Last chance: check for a "racket-prefs.rtkd" file
+                                    ;; in the configuration directory:
                                     (values
-                                     (collection-file-path "racket-prefs.rktd"
-                                                           "defaults")
+                                     (let* ([d (find-config-dir)]
+                                            [f (and d (build-path d "racket-prefs.rktd"))])
+                                       (if (file-exists? f)
+                                           f
+                                           ;; Trigger a filesystem error:
+                                           (call-with-input-file* f void)))
                                      #f))))))])
         (let ([prefs (with-pref-params
                       (lambda ()
@@ -551,16 +624,18 @@
   (define (to-path s) (if (path? s) s (string->path s)))
   (if path (do-path (to-path path) init) (do-paths (sorted-dirlist) init)))
 
-(define (find-files f [path #f])
+(define (find-files f [path #f] #:follow-links? [follow-links? #t])
   (reverse
    (fold-files (lambda (path kind acc) (if (f path) (cons path acc) acc))
-               null path)))
+               null path
+               follow-links?)))
 
-(define (pathlist-closure paths)
+(define (pathlist-closure paths #:follow-links? [follow-links? #f])
   (let loop ([paths
               (map (lambda (p)
                      (simplify-path
-                      (if (link-exists? p)
+                      (if (and follow-links?
+                               (link-exists? p))
                         (let ([p2 (resolve-path p)])
                           (if (relative-path? p2)
                             (let-values ([(base name dir?) (split-path p)])
@@ -573,10 +648,13 @@
     (if (null? paths)
       (reverse r)
       (let loop2 ([path (car paths)]
-                  [new (cond [(file-exists? (car paths))
+                  [new (cond [(and (not follow-links?)
+                                   (link-exists? (car paths)))
+                              (list (car paths))]
+                             [(file-exists? (car paths))
                               (list (car paths))]
                              [(directory-exists? (car paths))
-                              (find-files void (car paths))]
+                              (find-files void (car paths) #:follow-links? follow-links?)]
                              [else (error 'pathlist-closure
                                           "file/directory not found: ~a"
                                           (car paths))])])

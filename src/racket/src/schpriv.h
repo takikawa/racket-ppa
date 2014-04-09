@@ -262,6 +262,9 @@ void scheme_init_optimize();
 void scheme_init_resolve();
 void scheme_init_sfs();
 void scheme_init_validate();
+void scheme_init_port_wait();
+void scheme_init_logger_wait();
+void scheme_init_struct_wait();
 void scheme_init_list(Scheme_Env *env);
 void scheme_init_unsafe_list(Scheme_Env *env);
 void scheme_init_stx(Scheme_Env *env);
@@ -636,6 +639,8 @@ void *scheme_win32_get_break_semaphore(void *th);
 
 Scheme_Object *scheme_get_thread_dead(Scheme_Thread *p);
 Scheme_Object *scheme_get_thread_suspend(Scheme_Thread *p);
+Scheme_Object *scheme_get_thread_sync(Scheme_Thread *p);
+void scheme_clear_thread_sync(Scheme_Thread *p);
 
 void scheme_zero_unneeded_rands(Scheme_Thread *p);
 
@@ -660,6 +665,7 @@ struct Scheme_Custodian {
   Scheme_Custodian_Reference **mrefs;
   Scheme_Close_Custodian_Client **closers;
   void **data;
+  void ***data_ptr; /* points to `data`, registered as finalizer data for strong retention */
 
   /* weak indirections: */
   Scheme_Custodian_Reference *parent;
@@ -899,6 +905,7 @@ Scheme_Object *scheme_print_attribute_ref(Scheme_Object *s);
 #define SCHEME_STRUCT_INSPECTOR(obj) (((Scheme_Structure *)obj)->stype->inspector)
 
 extern Scheme_Object *scheme_source_property;
+extern Scheme_Object *scheme_module_path_property;
 
 Scheme_Struct_Type *scheme_lookup_prefab_type(Scheme_Object *key, int field_count);
 Scheme_Object *scheme_make_blank_prefab_struct_instance(Scheme_Struct_Type *stype);
@@ -1487,6 +1494,7 @@ typedef struct Scheme_Object *(Scheme_Native_Proc)(void *d, int argc, struct Sch
 /*========================================================================*/
 
 Scheme_Object *scheme_handle_stack_overflow(Scheme_Object *(*k)(void));
+int scheme_is_stack_too_shallow();
 
 THREAD_LOCAL_DECL(extern struct Scheme_Overflow_Jmp *scheme_overflow_jmp);
 THREAD_LOCAL_DECL(extern void *scheme_overflow_stack_start);
@@ -1697,7 +1705,7 @@ typedef struct Scheme_Overflow {
 #if defined(UNIX_FIND_STACK_BOUNDS) || defined(WINDOWS_FIND_STACK_BOUNDS) \
     || defined(MACOS_FIND_STACK_BOUNDS) || defined(ASSUME_FIXED_STACK_SIZE) \
     || defined(BEOS_FIND_STACK_BOUNDS) || defined(OSKIT_FIXED_STACK_BOUNDS) \
-    || defined(PALM_FIND_STACK_BOUNDS)
+    || defined(PALM_FIND_STACK_BOUNDS) || defined(PTHREAD_STACKSEG_FIND_STACK_BOUNDS)
 # define USE_STACK_BOUNDARY_VAR
 THREAD_LOCAL_DECL(extern uintptr_t scheme_stack_boundary);
 /* Same as scheme_stack_boundary, but set to an extreme value when feul auto-expires,
@@ -1842,6 +1850,8 @@ Scheme_Object *scheme_make_sema_repost(Scheme_Object *sema);
 
 Scheme_Object *scheme_wrap_evt(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_poll_evt(int argc, Scheme_Object *argv[]);
+
+Scheme_Object *scheme_do_chaperone_evt(const char*, int, int, Scheme_Object *argv[]);
 
 extern Scheme_Object *scheme_always_ready_evt;
 
@@ -2166,6 +2176,8 @@ extern Scheme_Object *scheme_long_inf_object, *scheme_long_minus_inf_object, *sc
 extern Scheme_Object *scheme_zerof, *scheme_nzerof, *scheme_single_scheme_pi;
 extern Scheme_Object *scheme_single_inf_object, *scheme_single_minus_inf_object, *scheme_single_nan_object;
 #endif
+
+XFORM_NONGCING double scheme_double_random(Scheme_Object *rand_state);
 
 /****** General numeric ******/
 
@@ -2572,6 +2584,11 @@ typedef struct Scheme_Native_Closure_Data {
 #ifdef MZ_PRECISE_GC
   void **retained; /* inside code */
 #endif
+#if defined(MZ_USE_JIT_ARM) && !defined(MZ_PRECISE_GC)
+# define NEED_RETAIN_CODE_POINTERS
+  /* Thumb code is off by one, need real start for GC */
+  void *retain_code;
+#endif
 } Scheme_Native_Closure_Data;
 
 #define SCHEME_NATIVE_CLOSURE_DATA_FLAGS(obj) MZ_OPT_HASH_KEY(&(obj)->iso)
@@ -2666,7 +2683,7 @@ Scheme_Comp_Env *scheme_new_expand_env(Scheme_Env *genv, Scheme_Object *insp, in
 Scheme_Object *scheme_namespace_lookup_value(Scheme_Object *sym, Scheme_Env *genv, 
                                              Scheme_Object **_id, int *_use_map);
 Scheme_Object *scheme_find_local_shadower(Scheme_Object *sym, Scheme_Object *sym_marks, 
-                                          Scheme_Comp_Env *env);
+                                          Scheme_Comp_Env *env, Scheme_Object **_free_id);
 Scheme_Object *scheme_do_local_lift_expr(const char *who, int stx_pos, 
                                          int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_local_lift_context(Scheme_Comp_Env *env);
@@ -2733,6 +2750,7 @@ Scheme_Object *scheme_frame_get_end_statement_lifts(Scheme_Comp_Env *env);
 Scheme_Object *scheme_frame_get_require_lifts(Scheme_Comp_Env *env);
 Scheme_Object *scheme_frame_get_provide_lifts(Scheme_Comp_Env *env);
 Scheme_Object *scheme_generate_lifts_key(void);
+Scheme_Object *scheme_top_level_lifts_key(Scheme_Comp_Env *env);
 
 Scheme_Object *scheme_toplevel_require_for_expand(Scheme_Object *module_path, 
                                                   intptr_t phase,
@@ -2793,12 +2811,15 @@ int scheme_is_sub_env(Scheme_Comp_Env *stx_env, Scheme_Comp_Env *env);
 typedef struct SFS_Info {
   MZTAG_IF_REQUIRED  
   int for_mod, pass;
-  int tail_pos;
-  int depth, stackpos, tlpos;
-  int selfpos, selfstart, selflen;
-  int ip, seqn, max_nontail;
-  int min_touch, max_touch;
-  int *max_used, *max_calls;
+  int tail_pos; /* in tail position? */
+  int depth, stackpos, tlpos; /* stack shape */
+  int selfpos, selfstart, selflen; /* tracks self calls */
+  int ip; /* "instruction pointer" --- counts up during traversal of expressions */
+  int seqn; /* tracks nesting */
+  int max_nontail; /* ip of last non-tail call in the body */
+  int min_touch, max_touch; /* tracks range of `macx_used' values changed */
+  int *max_used; /* maps stack position (i.e., variable) to ip of the variable's last use */
+  int *max_calls; /* maps stack position to ip of last non-tail call in variable's scope */
   Scheme_Object *saved;
 } SFS_Info;
 
@@ -3234,6 +3255,8 @@ struct Scheme_Env {
 
   Scheme_Hash_Table *shadowed_syntax; /* top level only */
 
+  Scheme_Object *lift_key; /* for `syntax-local-lift-context' */
+
   /* Per-instance: */
   intptr_t phase, mod_phase;
   Scheme_Object *link_midx;
@@ -3349,9 +3372,6 @@ typedef struct Scheme_Module_Phase_Exports
   int *provide_src_phases;          /* NULL, or src phase for for-syntax import */
   int num_provides;
   int num_var_provides;              /* non-syntax listed first in provides */
-
-  Scheme_Object *kernel_exclusion;   /* we allow up to two exns, but they must be shadowed */
-  Scheme_Object *kernel_exclusion2;
 
   Scheme_Hash_Table *ht;             /* maps external names to array indices; created lazily */
 } Scheme_Module_Phase_Exports;
@@ -3557,6 +3577,8 @@ void scheme_non_fixnum_result(const char *name, Scheme_Object *o);
 
 void scheme_raise_out_of_memory(const char *where, const char *msg, ...);
 
+char *scheme_make_srcloc_string(Scheme_Object *stx, intptr_t *len);
+
 uintptr_t scheme_get_max_symbol_length();
 
 char *scheme_make_arity_expect_string(const char *map_name,
@@ -3702,7 +3724,7 @@ int scheme_is_special_filename(const char *_f, int not_nul);
 char *scheme_get_exec_path(void);
 Scheme_Object *scheme_get_run_cmd(void);
 
-Scheme_Object *scheme_get_fd_identity(Scheme_Object *port, intptr_t fd, char *path);
+Scheme_Object *scheme_get_fd_identity(Scheme_Object *port, intptr_t fd, char *path, int noerr);
 
 Scheme_Object *scheme_extract_relative_to(Scheme_Object *obj, Scheme_Object *dir);
 
@@ -3789,7 +3811,7 @@ void scheme_flush_orig_outputs(void);
 Scheme_Object *scheme_file_stream_port_p(int, Scheme_Object *[]);
 Scheme_Object *scheme_terminal_port_p(int, Scheme_Object *[]);
 Scheme_Object *scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[], 
-                                         int internal, char **err, int *eerrno);
+                                         int internal, char **err, int *eerrno, int for_module);
 Scheme_Object *scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv[], int and_read, 
                                           int internal, char **err, int *eerrno);
 Scheme_Object *scheme_file_position(int argc, Scheme_Object *argv[]);
@@ -3805,6 +3827,9 @@ void scheme_release_file_descriptor(void);
 
 void scheme_init_kqueue(void);
 void scheme_release_kqueue(void);
+void scheme_release_inotify(void);
+
+void scheme_fs_change_properties(int *_supported, int *_scalable, int *_low_latency, int *_file_level);
 
 THREAD_LOCAL_DECL(extern struct mz_fd_set *scheme_semaphore_fd_set);
 THREAD_LOCAL_DECL(extern Scheme_Hash_Table *scheme_semaphore_fd_mapping);
@@ -3840,7 +3865,7 @@ intptr_t scheme_port_closed_p (Scheme_Object *port);
 #define CURRENT_OUTPUT_PORT(config) scheme_get_param(config, MZCONFIG_OUTPUT_PORT)
 #define CHECK_PORT_CLOSED(who, kind, port, closed) if (closed) scheme_raise_exn(MZEXN_FAIL, "%s: " kind " port is closed", who);
 
-#ifdef USE_FCNTL_O_NONBLOCK
+#if defined(USE_FCNTL_O_NONBLOCK)
 # define MZ_NONBLOCKING O_NONBLOCK
 #else
 # define MZ_NONBLOCKING FNDELAY
@@ -3859,6 +3884,12 @@ intptr_t scheme_redirect_get_or_peek_bytes(Scheme_Input_Port *orig_port,
                                            int peek, Scheme_Object *peek_skip,
                                            Scheme_Object *unless,
                                            Scheme_Schedule_Info *sinfo);
+
+Scheme_Object *scheme_filesystem_change_evt(Scheme_Object *path, int flags, int report_errs);
+void scheme_filesystem_change_evt_cancel(Scheme_Object *evt, void *ignored_data);
+
+int scheme_fd_regular_file(intptr_t fd, int dir_ok);
+void scheme_check_fd_semaphores(void);
 
 /*========================================================================*/
 /*                         memory debugging                               */
@@ -3979,6 +4010,7 @@ Scheme_Object *scheme_symbol_to_string(Scheme_Object *sym);
 #define SCHEME_SYM_WEIRDP(o) (MZ_OPT_HASH_KEY(&((Scheme_Symbol *)(o))->iso) & 0x3)
 
 Scheme_Object *scheme_current_library_collection_paths(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_current_library_collection_links(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_compiled_file_roots(int argc, Scheme_Object *argv[]);
 
 #ifdef MZ_USE_JIT
@@ -3994,6 +4026,9 @@ void scheme_unused_object(Scheme_Object*);
 void scheme_unused_intptr(intptr_t);
 
 intptr_t scheme_check_overflow(intptr_t n, intptr_t m, intptr_t a);
+
+Scheme_Object *scheme_make_environment_variables(Scheme_Hash_Tree *ht);
+void *scheme_environment_variables_to_block(Scheme_Object *env, int *_need_free);
 
 /*========================================================================*/
 /*                           places                                       */
@@ -4015,7 +4050,7 @@ void scheme_spawn_master_place();
 void scheme_places_block_child_signal();
 void scheme_places_unblock_child_signal();
 void scheme_places_start_child_signal_handler();
-int scheme_get_child_status(int pid, int is_group, int *status);
+int scheme_get_child_status(int pid, int is_group, int can_check_group, int *status);
 int scheme_places_register_child(int pid, int is_group, void *signal_fd, int *status);
 void scheme_wait_suspend();
 void scheme_wait_resume();

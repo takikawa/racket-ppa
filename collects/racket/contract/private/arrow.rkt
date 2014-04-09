@@ -1,24 +1,5 @@
 #lang racket/base
 
-#|
-
-v4 todo:
-
-- add case-> to object-contract
-
-- test object-contract with keywords (both optional and mandatory)
-
-- change mzlib/contract to rewrite into scheme/contract (maybe?)
-
-- raise-syntax-errors
-  . multiple identical keywords syntax error, sort-keywords
-  . split-doms
-
-- note timing/size tests at the end of the file.
-
-|#
-
-
 (require "guts.rkt"
          "blame.rkt"
          "prop.rkt"
@@ -118,15 +99,19 @@ v4 todo:
                         val
                         (make-keyword-procedure
                          (λ (kwds kwd-vals . args)
-                           #,(check-tail-contract
-                              #'(p-app-x ...)
-                              (list #'res-checker)
-                              (λ (s) #`(apply values #,@s kwd-vals args))))
+                           (with-continuation-mark
+                            contract-continuation-mark-key orig-blame
+                            #,(check-tail-contract
+                               #'(p-app-x ...)
+                               (list #'res-checker)
+                               (λ (s) #`(apply values #,@s kwd-vals args)))))
                          (λ args
-                           #,(check-tail-contract
-                              #'(p-app-x ...)
-                              (list #'res-checker)
-                              (λ (s) #`(apply values #,@s args)))))
+                           (with-continuation-mark
+                            contract-continuation-mark-key orig-blame
+                            #,(check-tail-contract
+                               #'(p-app-x ...)
+                               (list #'res-checker)
+                               (λ (s) #`(apply values #,@s args))))))
                         impersonator-prop:contracted ctc
                         impersonator-prop:application-mark (cons contract-key (list p-app-x ...))))))))
              (define ctc
@@ -244,8 +229,11 @@ v4 todo:
                                                  #'(values/drop (rng-ctc rng-x) ...))])
                                 #'(case-lambda
                                     [(rng-x ...)
-                                     post ...
-                                     rng-results]
+                                     (with-continuation-mark
+                                      contract-continuation-mark-key blame
+                                      (let ()
+                                        post ...
+                                        rng-results))]
                                     [args
                                      (bad-number-of-results blame val rng-len args)]))))
                            null)])
@@ -321,9 +309,26 @@ v4 todo:
                                          (outer-stx-gen #'())
                                          (check-tail-contract #'(rng-ctc ...) #'(rng-checker-name ...) outer-stx-gen))))])
                 (with-syntax ([basic-lambda-name (gensym 'basic-lambda)]
-                              [basic-lambda #'(λ basic-params pre ... basic-return)]
+                              [basic-lambda #'(λ basic-params
+                                                ;; Arrow contract domain checking is instrumented
+                                                ;; both here, and in `arity-checking-wrapper'.
+                                                ;; We need to instrument here, because sometimes
+                                                ;; a-c-w doesn't wrap, and just returns us.
+                                                ;; We need to instrument in a-c-w to count arity
+                                                ;; checking time.
+                                                ;; Overhead of double-wrapping has not been
+                                                ;; noticeable in my measurements so far.
+                                                ;;  - stamourv
+                                                (with-continuation-mark
+                                                 contract-continuation-mark-key blame
+                                                 (let ()
+                                                   pre ... basic-return)))]
                               [kwd-lambda-name (gensym 'kwd-lambda)]
-                              [kwd-lambda #`(λ kwd-lam-params pre ... kwd-return)])
+                              [kwd-lambda #`(λ kwd-lam-params
+                                              (with-continuation-mark
+                                               contract-continuation-mark-key blame
+                                               (let ()
+                                                 pre ... kwd-return)))])
                   (with-syntax ([(basic-checker-name) (generate-temporaries '(basic-checker))])
                     (cond
                       [(and (null? req-keywords) (null? opt-keywords))
@@ -391,6 +396,9 @@ v4 todo:
              (raise-blame-error (blame-swap blame) val
                                 '(expected: "no keywords")))
            (λ (kwds kwd-args . args)
+             (with-continuation-mark
+              contract-continuation-mark-key blame
+              (let ()
              (define args-len (length args))
              (unless (valid-number-of-args? args)
                (raise-blame-error (blame-swap blame) val
@@ -409,16 +417,19 @@ v4 todo:
                  (raise-blame-error (blame-swap blame) val
                                     "received unexpected keyword argument ~a"
                                     k)))
-             (keyword-apply kwd-lambda kwds kwd-args args))))
+             (keyword-apply kwd-lambda kwds kwd-args args))))))
      (define basic-checker-name 
        (if (null? req-kwd)
            (λ args
+             (with-continuation-mark
+              contract-continuation-mark-key blame
+              (let ()
              (unless (valid-number-of-args? args)
                (define args-len (length args))
                (raise-blame-error (blame-swap blame) val
                                   '("received ~a argument~a" expected: "~a")
                                   args-len (if (= args-len 1) "" "s") arity-string))
-             (apply basic-lambda args))
+             (apply basic-lambda args))))
            (λ args
              (raise-blame-error (blame-swap blame) val
                                 "expected required keyword ~a"
@@ -560,7 +571,15 @@ v4 todo:
        (andmap contract-stronger? (base->-optional-kwds/c that) (base->-optional-kwds/c this))
        
        (= (length (base->-rngs/c that)) (length (base->-rngs/c this)))
-       (andmap contract-stronger? (base->-rngs/c this) (base->-rngs/c that))))
+       (andmap contract-stronger? (base->-rngs/c this) (base->-rngs/c that))
+       
+       ;; these procs might be based on state; only 
+       ;; allow stronger to be true when #:pre and
+       ;; #:post aren't specified at all
+       (not (base->-pre this))
+       (not (base->-pre that))
+       (not (base->-post this))
+       (not (base->-post that))))
 
 (define (->-generate ctc)
   (let ([doms-l (length (base->-doms/c ctc))])
@@ -600,6 +619,7 @@ v4 todo:
        (andmap gen-if-fun (base->-doms/c ctc) args))))
 
 (define-struct (chaperone-> base->) ()
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:chaperone-contract
   (parameterize ([skip-projection-wrapper? #t])
     (build-chaperone-contract-property
@@ -611,6 +631,7 @@ v4 todo:
      #:exercise ->-exercise)))
 
 (define-struct (impersonator-> base->) ()
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:contract
   (build-contract-property
    #:projection (->-proj impersonate-procedure)
@@ -1226,7 +1247,9 @@ v4 todo:
            val
            (make-keyword-procedure
             (λ (kwd-args kwd-arg-vals . raw-orig-args)
-              (let* ([orig-args (if (base-->d-mtd? ->d-stct)
+              (with-continuation-mark
+               contract-continuation-mark-key blame
+               (let* ([orig-args (if (base-->d-mtd? ->d-stct)
                                     (cdr raw-orig-args)
                                     raw-orig-args)]
                      [this (and (base-->d-mtd? ->d-stct) (car raw-orig-args))]
@@ -1254,7 +1277,9 @@ v4 todo:
                         [rng-underscore? (box? (base-->d-range ->d-stct))])
                     (if rng
                         (list (λ orig-results
-                                (let* ([range-count (length rng)]
+                                (with-continuation-mark
+                                 contract-continuation-mark-key blame
+                                 (let* ([range-count (length rng)]
                                        [post-args (append orig-results raw-orig-args)]
                                        [post-non-kwd-arg-count (+ non-kwd-ctc-count range-count)]
                                        [dep-post-args (build-dep-ctc-args post-non-kwd-arg-count
@@ -1290,7 +1315,7 @@ v4 todo:
                                                          (car results)
                                                          blame
                                                          #f)
-                                         (loop (cdr results) (cdr result-contracts)))]))))))
+                                         (loop (cdr results) (cdr result-contracts)))])))))))
                         null))
                   
                   ;; contracted keyword arguments
@@ -1332,7 +1357,7 @@ v4 todo:
                            (error 'shouldnt\ happen))]
                       [else (cons (invoke-dep-ctc (car non-kwd-ctcs) dep-pre-args (car args) blame #t)
                                   (loop (cdr args)
-                                        (cdr non-kwd-ctcs)))])))))))
+                                        (cdr non-kwd-ctcs)))]))))))))
            impersonator-prop:contracted ->d-stct)))))
 
 (define (build-values-string desc dep-pre-args)
@@ -1499,6 +1524,7 @@ v4 todo:
 ;; it first.  At the very least, the projection function would
 ;; need to add checks in the appropriate places.
 (define-struct (impersonator-->d base-->d) ()
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:contract
   (build-contract-property
    #:projection (->d-proj impersonate-procedure)
@@ -1540,7 +1566,7 @@ v4 todo:
     [_
      (raise-syntax-error #f "expected ->" stx case)]))
 
-(define-for-syntax (parse-out-case stx case)
+(define-for-syntax (parse-out-case stx case n)
   (let-values ([(doms rst rng) (separate-out-doms/rst/rng stx case)])
     (with-syntax ([(dom-proj-x  ...) (generate-temporaries doms)]
                   [(rst-proj-x) (generate-temporaries '(rest-proj-x))]
@@ -1561,7 +1587,13 @@ v4 todo:
            (this-parameter ... dom-formals ... . #,(if rst #'rst-formal '()))
            #,(cond
                [rng
-                (let ([rng-checkers (list #'(λ (rng-id ...) (values/drop (rng-proj-x rng-id) ...)))]
+                (let ([rng-checkers (list #`(case-lambda
+                                              [(rng-id ...) (values/drop (rng-proj-x rng-id) ...)]
+                                              [args 
+                                               (bad-number-of-results blame f 
+                                                                      #,(length (syntax->list #'(rng-id ...)))
+                                                                      args
+                                                                      #,n)]))]
                       [rng-length (length (syntax->list rng))])
                   (if rst
                       (check-tail-contract #'(rng-proj-x ...) rng-checkers
@@ -1603,7 +1635,9 @@ v4 todo:
                         (rng-proj-x ...)
                         formals
                         body) ...)
-                      (map (λ (x) (parse-out-case stx x)) (syntax->list #'(cases ...)))]
+                      (for/list ([x (in-list (syntax->list #'(cases ...)))]
+                                 [n (in-naturals)])
+                        (parse-out-case stx x n))]
                      [mctc? (and (syntax-parameter-value #'method-contract?) #t)])
          #`(syntax-parameterize 
             ((making-a-method #f)) 
@@ -1625,11 +1659,13 @@ v4 todo:
                                       (λ (kwds kwd-args . args)
                                         (raise-blame-error blame f "expected no keywords, got keyword ~a" (car kwds)))
                                       (λ args
-                                        (apply #,(let ([case-lam (syntax/loc stx (case-lambda [formals body] ...))])
-                                                   (if name 
-                                                       #`(let ([#,name #,case-lam]) #,name)
-                                                       case-lam))
-                                               args)))]
+                                        (with-continuation-mark
+                                         contract-continuation-mark-key blame
+                                         (apply #,(let ([case-lam (syntax/loc stx (case-lambda [formals body] ...))])
+                                                    (if name
+                                                        #`(let ([#,name #,case-lam]) #,name)
+                                                        case-lam))
+                                                args))))]
                                     [same-rngs (same-range-projections (list (list rng-proj-x ...) ...))])
                                 (if same-rngs
                                     (wrapper
@@ -1652,7 +1688,7 @@ v4 todo:
 
 (define (case->-proj wrapper)
   (λ (ctc)
-    (define dom-ctcs (map contract-projection (get-case->-dom-ctcs ctc)))
+    (define dom-ctcs+case-nums (get-case->-dom-ctcs+case-nums ctc))
     (define rng-ctcs (let ([rngs (get-case->-rng-ctcs ctc)])
                        (and rngs (map contract-projection rngs))))
     (define rst-ctcs (base-case->-rst-ctcs ctc))
@@ -1660,8 +1696,30 @@ v4 todo:
     (λ (blame)
       (define dom-blame (blame-add-context blame "the domain of" #:swap? #t))
       (define rng-blame (blame-add-context blame "the range of"))
-      (define projs (append (map (λ (f) (f dom-blame)) dom-ctcs)
-                            (map (λ (f) (f rng-blame)) rng-ctcs)))
+      (define projs (append (map (λ (f) ((cdr f) 
+                                         (blame-add-context 
+                                          (blame-add-context 
+                                           blame 
+                                           (format "the ~a case of" (n->th (+ (car f) 1)))) 
+                                          "the domain of" 
+                                          #:swap? #t)))
+                                 dom-ctcs+case-nums)
+                            (map (let ([memo '()])
+                                   ;; to preserve procedure-closure-contents-eq?ness of the
+                                   ;; wrapped procedures, memoize with f as the key.
+                                   (λ (f)
+                                     (define target
+                                       (assoc f memo procedure-closure-contents-eq?))
+                                     (if target
+                                         (cdr target)
+                                         (let* ([p   (f rng-blame)]
+                                                [new (lambda args
+                                                       (with-continuation-mark
+                                                        contract-continuation-mark-key blame
+                                                        (apply p args)))])
+                                           (set! memo (cons (cons f new) memo))
+                                           new))))
+                                 rng-ctcs)))
       (define (chk val mtd?) 
         (cond
           [(null? specs)
@@ -1708,6 +1766,7 @@ v4 todo:
 (define (case->-stronger? this that) #f)
 
 (define-struct (chaperone-case-> base-case->) ()
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:chaperone-contract
   (build-chaperone-contract-property
    #:projection (case->-proj chaperone-procedure)
@@ -1716,6 +1775,7 @@ v4 todo:
    #:stronger case->-stronger?))
 
 (define-struct (impersonator-case-> base-case->) ()
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:contract
   (build-contract-property
    #:projection (case->-proj impersonate-procedure)
@@ -1733,78 +1793,24 @@ v4 todo:
         (make-chaperone-case-> dom-ctcs rst-ctcs rng-ctcs specs mctc? wrapper)
         (make-impersonator-case-> dom-ctcs rst-ctcs rng-ctcs specs mctc? wrapper))))
 
-(define (get-case->-dom-ctcs ctc)
+(define (get-case->-dom-ctcs+case-nums ctc)
   (for/fold ([acc '()])
       ([doms (in-list (base-case->-dom-ctcs ctc))]
-       [rst  (in-list (base-case->-rst-ctcs ctc))])
+       [rst  (in-list (base-case->-rst-ctcs ctc))]
+       [i (in-naturals)])
+    (define dom+case-nums 
+      (map (λ (dom) (cons i (contract-projection dom))) doms))
     (append acc
             (if rst
-                (append doms (list rst))
-                doms))))
+                (append dom+case-nums
+                        (list (cons i (contract-projection rst))))
+                dom+case-nums))))
 
 (define (get-case->-rng-ctcs ctc)
   (for/fold ([acc '()])
       ([x (in-list (base-case->-rng-ctcs ctc))]
        #:when x)
     (append acc x)))
-
-
-
-;                       
-;                       
-;                       
-;                       
-;    ;          ;;; ;;; 
-;  ;;;              ;;; 
-;  ;;;;  ;;;;;  ;;; ;;; 
-;  ;;;; ;;;;;;; ;;; ;;; 
-;  ;;;  ;;  ;;; ;;; ;;; 
-;  ;;;    ;;;;; ;;; ;;; 
-;  ;;;  ;;; ;;; ;;; ;;; 
-;  ;;;; ;;; ;;; ;;; ;;; 
-;   ;;;  ;;;;;; ;;; ;;; 
-;                       
-;                       
-;                       
-;                       
-
-(define-syntax (apply-projections stx)
-  (syntax-case stx ()
-    [(_ ((x f) ...) e) 
-     (with-syntax ([count (length (syntax->list #'(x ...)))])
-       #'(let ([fs (list f ...)]
-               [thunk (λ () e)])
-           (call-with-immediate-continuation-mark
-            multiple-contract-key
-            (λ (first-mark)
-              (if (and first-mark
-                       (= (length first-mark) count)
-                       (andmap procedure-closure-contents-eq? fs first-mark))
-                  (thunk)
-                  (let-values ([(x ...) (with-continuation-mark multiple-contract-key fs
-                                          (thunk))])
-                    (values/drop (f x) ...)))))))]))
-
-
-(define multiple-contract-key (gensym 'multiple-contract-key))
-
-(define-syntax (apply-projection stx)
-  (syntax-case stx ()
-    [(_ ctc arg)
-     #'(apply-projection/proc ctc (λ () arg))]))
-
-(define single-contract-key (gensym 'single-contract-key))
-
-(define (apply-projection/proc ctc thnk)
-  (call-with-immediate-continuation-mark
-   single-contract-key
-   (λ (first-mark)  ;; note this is #f if there is no mark (so if #f can be a contract, something must change)
-     (if (and first-mark (procedure-closure-contents-eq? first-mark ctc))
-         (thnk)
-         (ctc
-          (with-continuation-mark single-contract-key ctc
-            (thnk)))))))
-
 
 
 ;                                                                                 
@@ -1852,7 +1858,7 @@ v4 todo:
                                           (loop (cdr ars) acc)]))]))])
          (and min-at-least
               (begin
-                (let loop ([counts (sort (filter number? arity) >=)])
+                (let loop ([counts (sort (filter number? arity) >)])
                   (unless (null? counts)
                     (let ([count (car counts)])
                       (cond
@@ -1972,9 +1978,12 @@ v4 todo:
     [else
      passes?]))
 
-(define (bad-number-of-results blame val rng-len args)
+(define (bad-number-of-results blame val rng-len args [case-context #f])
   (define num-values (length args))
-  (raise-blame-error (blame-add-context blame "the range of")
+  (define blame-case (if case-context 
+                         (blame-add-context blame (format "the ~a case of" (n->th (+ case-context 1))))
+                         blame))
+    (raise-blame-error (blame-add-context blame-case "the range of")
                      val 
                      "expected ~a value~a, returned ~a value~a"
                      rng-len (if (= rng-len 1) "" "s")
@@ -2072,6 +2081,7 @@ v4 todo:
       predicate/c)))
 
 (struct predicate/c ()
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:chaperone-contract
   (build-chaperone-contract-property
    #:projection (let ([pc (contract-struct-projection predicate/c-private->ctc)])
@@ -2093,15 +2103,22 @@ v4 todo:
     [(_ any/c ... any)
      (not (syntax-parameter-value #'making-a-method))
      ;; special case the (-> any/c ... any) contracts to be first-order checks only
-     (with-syntax ([dom-len (- (length (syntax->list stx)) 2)]
-                   [name (syntax->datum stx)])
-       #'(flat-named-contract 'name (λ (x) (and (procedure? x) (procedure-arity-includes? x dom-len #t)))))]
+     (let ([dom-len (- (length (syntax->list stx)) 2)])
+       #`(flat-named-contract 
+          '(-> #,@(build-list dom-len (λ (x) 'any/c)) any)
+          (λ (x) (procedure-arity-includes?/no-kwds x #,dom-len))))]
     [(_ any/c boolean?)
      ;; special case (-> any/c boolean?) to use predicate/c
      (not (syntax-parameter-value #'making-a-method))
      #'-predicate/c]
     [_
      #`(syntax-parameterize ((making-a-method #f)) #,(->/proc/main stx))]))
+
+(define (procedure-arity-includes?/no-kwds val dom-len)
+  (and (procedure? val)
+       (procedure-arity-includes? val dom-len)
+       (let-values ([(man opt) (procedure-keywords val)])
+         (null? man))))
 
 ;; this is to make the expanded versions a little easier to read
 (define-syntax (values/drop stx)

@@ -1,8 +1,8 @@
-(module to-string mzscheme
-  (require mzlib/contract
+(module to-string racket/base
+  (require racket/contract/base
            syntax/stx)
   
-  (require mzlib/list)
+  (require racket/list)
 
   (define (syntax->string c)
     (let* ([s (open-output-string)]

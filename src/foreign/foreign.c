@@ -99,7 +99,7 @@ static void overflow_error(const char *who, const char *op, intptr_t a, intptr_t
                         NULL);
 }
 
-intptr_t mult_check_overflow(const char *who, intptr_t a, intptr_t b)
+static intptr_t mult_check_overflow(const char *who, intptr_t a, intptr_t b)
 {
   Scheme_Object *c;
   c = scheme_bin_mult(scheme_make_integer(a), scheme_make_integer(b));
@@ -108,7 +108,7 @@ intptr_t mult_check_overflow(const char *who, intptr_t a, intptr_t b)
   return SCHEME_INT_VAL(c);
 }
 
-intptr_t add_check_overflow(const char *who, intptr_t a, intptr_t b)
+static intptr_t add_check_overflow(const char *who, intptr_t a, intptr_t b)
 {
   Scheme_Object *c;
   c = scheme_bin_plus(scheme_make_integer(a), scheme_make_integer(b));
@@ -137,8 +137,8 @@ typedef BOOL (WINAPI *EnumProcessModules_t)(HANDLE hProcess,
 EnumProcessModules_t _EnumProcessModules;
 #include <tlhelp32.h>
 
-BOOL mzEnumProcessModules(HANDLE hProcess, HMODULE* lphModule,
-                          DWORD cb, LPDWORD lpcbNeeded)
+static BOOL mzEnumProcessModules(HANDLE hProcess, HMODULE* lphModule,
+                                 DWORD cb, LPDWORD lpcbNeeded)
 {
   if (!epm_tried) {
     HMODULE hm;
@@ -257,6 +257,9 @@ static Scheme_Object *foreign_ffi_lib(int argc, Scheme_Object *argv[])
     } else
       handle = LoadLibraryW(WIDE_PATH(name));
 #   else /* WINDOWS_DYNAMIC_LOAD undefined */
+#   ifdef __ANDROID__
+    if (!name) handle = RTLD_DEFAULT; else
+#   endif /* __ANDROID__ */
     handle = dlopen(name, RTLD_NOW | (as_global ? RTLD_GLOBAL : RTLD_LOCAL));
 #   endif /* WINDOWS_DYNAMIC_LOAD */
     if (handle == NULL && !null_ok) {
@@ -335,6 +338,11 @@ int ffi_obj_FIXUP(void *p) {
 END_XFORM_SKIP;
 #endif
 
+#ifdef __ANDROID__
+static int adjustment_set;
+static uintptr_t adjustment;
+#endif /* __ANDROID__ */
+
 /* (ffi-obj objname ffi-lib-or-libname) -> ffi-obj */
 #define MYNAME "ffi-obj"
 static Scheme_Object *foreign_ffi_obj(int argc, Scheme_Object *argv[])
@@ -393,6 +401,18 @@ static Scheme_Object *foreign_ffi_obj(int argc, Scheme_Object *argv[])
     }
 #   else /* WINDOWS_DYNAMIC_LOAD undefined */
     dlobj = dlsym(lib->handle, dlname);
+#   ifdef __ANDROID__
+    if (dlobj && (lib->handle == RTLD_DEFAULT)) {
+      /* Compensate for a bug in dlsym() that gets the address wrong by
+         an offset (incorrect use of `link_bias'?): */
+      if (!adjustment_set) {
+        adjustment = ((uintptr_t)scheme_start_atomic_no_break
+                      - (uintptr_t)dlsym(RTLD_DEFAULT, "scheme_start_atomic_no_break"));
+        adjustment_set = 1;
+      }
+      dlobj = (char *)dlobj XFORM_OK_PLUS adjustment;
+    }
+#   endif /* __ANDROID__ */
     if (!dlobj && lib->is_global) {
       /* Try every handle in the table of opened libraries. */
       int i;
@@ -471,7 +491,7 @@ static Scheme_Object *foreign_ffi_obj_name(int argc, Scheme_Object *argv[])
 
 /* These will make sense in Racket when longs are longer than ints (needed
  * for libffi's int32 types).  There is no need to deal with bignums because
- * mzscheme's fixnums are longs. */
+ * racket's fixnums are longs. */
 XFORM_NONGCING MZ_INLINE int scheme_get_realint_val(Scheme_Object *o, int *v)
 {
   if (SCHEME_INTP(o)) {
@@ -583,7 +603,7 @@ static unsigned short *ucs4_string_or_null_to_utf16_pointer(Scheme_Object *ucs)
   return ucs4_string_to_utf16_pointer(ucs);
 }
 
-Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
+static Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 {
   intptr_t ulen, end;
   mzchar *res;
@@ -1162,13 +1182,13 @@ static Scheme_Object *foreign_make_ctype(int argc, Scheme_Object *argv[])
 #undef MYNAME
 
 /* see below */
-void free_libffi_type(void *ignored, void *p)
+static void free_libffi_type(void *ignored, void *p)
 {
   free(((ffi_type*)p)->elements);
   free(p);
 }
 
-void free_libffi_type_with_alignment(void *ignored, void *p)
+static void free_libffi_type_with_alignment(void *ignored, void *p)
 {
   int i;
 
@@ -1185,7 +1205,7 @@ static Scheme_Object *default_sym;
 static Scheme_Object *stdcall_sym;
 static Scheme_Object *sysv_sym;
 
-ffi_abi sym_to_abi(char *who, Scheme_Object *sym)
+static ffi_abi sym_to_abi(char *who, Scheme_Object *sym)
 {
   if (SCHEME_FALSEP(sym) || SAME_OBJ(sym, default_sym))
     return FFI_DEFAULT_ABI;
@@ -1261,7 +1281,7 @@ static Scheme_Object *foreign_make_cstruct_type(int argc, Scheme_Object *argv[])
   int i, nargs, with_alignment;
   ffi_abi abi;
   nargs = scheme_proper_list_length(argv[0]);
-  if (nargs < 0) scheme_wrong_contract(MYNAME, "list?", 0, argc, argv);
+  if (nargs <= 0) scheme_wrong_contract(MYNAME, "(non-empty-listof ctype?)", 0, argc, argv);
   abi = GET_ABI(MYNAME,1);
   if (argc > 2) {
     if (!SCHEME_FALSEP(argv[2])) {
@@ -1281,7 +1301,7 @@ static Scheme_Object *foreign_make_cstruct_type(int argc, Scheme_Object *argv[])
   elements[nargs] = NULL;
   for (i=0, p=argv[0]; i<nargs; i++, p=SCHEME_CDR(p)) {
     if (NULL == (base = get_ctype_base(SCHEME_CAR(p))))
-      scheme_wrong_contract(MYNAME, "(listof ctype?)", 0, argc, argv);
+      scheme_wrong_contract(MYNAME, "(non-empty-listof ctype?)", 0, argc, argv);
     if (CTYPE_PRIMLABEL(base) == FOREIGN_void)
       wrong_void(MYNAME, SCHEME_CAR(p), 1, 0, argc, argv);
     elements[i] = CTYPE_PRIMTYPE(base);
@@ -1796,6 +1816,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(Tsint8));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(Tsint8)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (!(get_byte_val(val,&(((Tsint8*)W_OFFSET(dst,delta))[0])))) wrong_value(who, "_int8", val);;
       return NULL;
     case FOREIGN_uint8:
@@ -1805,6 +1830,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(Tuint8));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(Tuint8)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (!(get_ubyte_val(val,&(((Tuint8*)W_OFFSET(dst,delta))[0])))) wrong_value(who, "_uint8", val);;
       return NULL;
     case FOREIGN_int16:
@@ -1814,6 +1844,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(Tsint16));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(Tsint16)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (!(get_short_val(val,&(((Tsint16*)W_OFFSET(dst,delta))[0])))) wrong_value(who, "_int16", val);;
       return NULL;
     case FOREIGN_uint16:
@@ -1823,6 +1858,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(Tuint16));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(Tuint16)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (!(get_ushort_val(val,&(((Tuint16*)W_OFFSET(dst,delta))[0])))) wrong_value(who, "_uint16", val);;
       return NULL;
     case FOREIGN_int32:
@@ -1832,6 +1872,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(Tsint32));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(Tsint32)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (!(scheme_get_realint_val(val,&(((Tsint32*)W_OFFSET(dst,delta))[0])))) wrong_value(who, "_int32", val);;
       return NULL;
     case FOREIGN_uint32:
@@ -1841,6 +1886,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(Tuint32));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(Tuint32)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (!(scheme_get_unsigned_realint_val(val,&(((Tuint32*)W_OFFSET(dst,delta))[0])))) wrong_value(who, "_uint32", val);;
       return NULL;
     case FOREIGN_int64:
@@ -1850,6 +1900,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(Tsint64));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(Tsint64)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (!(scheme_get_long_long_val(val,&(((Tsint64*)W_OFFSET(dst,delta))[0])))) wrong_value(who, "_int64", val);;
       return NULL;
     case FOREIGN_uint64:
@@ -1859,6 +1914,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(Tuint64));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(Tuint64)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (!(scheme_get_unsigned_long_long_val(val,&(((Tuint64*)W_OFFSET(dst,delta))[0])))) wrong_value(who, "_uint64", val);;
       return NULL;
     case FOREIGN_fixint:
@@ -1868,6 +1928,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(Tsint32));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(Tsint32)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_INTP(val)) {
         Tsint32 tmp;
         tmp = MZ_TYPE_CAST(Tsint32, SCHEME_INT_VAL(val));
@@ -1883,6 +1948,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(Tuint32));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(Tuint32)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_INTP(val)) {
         Tuint32 tmp;
         tmp = MZ_TYPE_CAST(Tuint32, SCHEME_UINT_VAL(val));
@@ -1898,6 +1968,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(intptr_t));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(intptr_t)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_INTP(val)) {
         intptr_t tmp;
         tmp = MZ_TYPE_CAST(intptr_t, SCHEME_INT_VAL(val));
@@ -1913,6 +1988,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(uintptr_t));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(uintptr_t)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_INTP(val)) {
         uintptr_t tmp;
         tmp = MZ_TYPE_CAST(uintptr_t, SCHEME_UINT_VAL(val));
@@ -1928,6 +2008,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(float));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(float)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_FLOATP(val)) {
         float tmp;
         tmp = MZ_TYPE_CAST(float, SCHEME_FLOAT_VAL(val));
@@ -1943,6 +2028,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(double));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(double)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_FLOATP(val)) {
         double tmp;
         tmp = MZ_TYPE_CAST(double, SCHEME_FLOAT_VAL(val));
@@ -1958,6 +2048,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(mz_long_double));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(mz_long_double)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_LONG_DBLP(val)) {
         mz_long_double tmp;
         tmp = MZ_NO_TYPE_CAST(mz_long_double, SCHEME_MAYBE_LONG_DBL_VAL(val));
@@ -1973,6 +2068,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(double));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(double)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_REALP(val)) {
         double tmp;
         tmp = MZ_TYPE_CAST(double, scheme_real_to_double(val));
@@ -1988,6 +2088,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(int));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(int)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (1) {
         int tmp;
         tmp = MZ_TYPE_CAST(int, SCHEME_TRUEP(val));
@@ -2003,6 +2108,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(mzchar*));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(mzchar*)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_FALSEP_OR_CHAR_STRINGP(val)) {
         mzchar* tmp;
         tmp = MZ_TYPE_CAST(mzchar*, ucs4_string_or_null_to_ucs4_pointer(val));
@@ -2024,6 +2134,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(unsigned short*));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(unsigned short*)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_FALSEP_OR_CHAR_STRINGP(val)) {
         unsigned short* tmp;
         tmp = MZ_TYPE_CAST(unsigned short*, ucs4_string_or_null_to_utf16_pointer(val));
@@ -2045,6 +2160,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(char*));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(char*)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_FALSEP(val)||SCHEME_BYTE_STRINGP(val)) {
         char* tmp;
         tmp = MZ_TYPE_CAST(char*, SCHEME_FALSEP(val)?NULL:SCHEME_BYTE_STR_VAL(val));
@@ -2066,6 +2186,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(char*));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(char*)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_FALSEP(val)||SCHEME_PATH_STRINGP(val)) {
         char* tmp;
         tmp = MZ_TYPE_CAST(char*, SCHEME_FALSEP(val)?NULL:SCHEME_PATH_VAL(TO_PATH(val)));
@@ -2087,6 +2212,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(char*));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(char*)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_SYMBOLP(val)) {
         char* tmp;
         tmp = MZ_TYPE_CAST(char*, SCHEME_SYM_VAL(val));
@@ -2108,6 +2238,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(void*));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(void*)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_FFIANYPTRP(val)) {
         void* tmp; intptr_t toff;
         tmp = MZ_TYPE_CAST(void*, SCHEME_FFIANYPTR_VAL(val));
@@ -2133,6 +2268,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(void*));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(void*)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (SCHEME_FFIANYPTRP(val)) {
         void* tmp; intptr_t toff;
         tmp = MZ_TYPE_CAST(void*, SCHEME_FFIANYPTR_VAL(val));
@@ -2158,6 +2298,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(Scheme_Object*));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(Scheme_Object*)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (1) {
         Scheme_Object* tmp;
         tmp = MZ_TYPE_CAST(Scheme_Object*, val);
@@ -2179,6 +2324,11 @@ static void* SCHEME2C(const char *who,
         delta += (sizeof(intptr_t)-sizeof(void*));
       }
 #     endif /* SCHEME_BIG_ENDIAN */
+#     ifdef FFI_CALLBACK_NEED_INT_CLEAR
+      if (sizeof(void*)<sizeof(intptr_t) && ret_loc) {
+        ((int*)W_OFFSET(dst,delta))[0] = 0;
+      }
+#     endif /* FFI_CALLBACK_NEED_INT_CLEAR */
       if (!(ret_loc)) wrong_value(who, "_fpointer", val);;
       break;
     case FOREIGN_struct:
@@ -3122,7 +3272,7 @@ static void finish_ffi_call(ffi_cif *cif, void *c_func, intptr_t cfoff,
   ffi_call(cif, (VoidFun)W_OFFSET(c_func, cfoff), p, avalues);
 }
 
-Scheme_Object *ffi_do_call(int argc, Scheme_Object *argv[], Scheme_Object *self)
+static Scheme_Object *ffi_do_call(int argc, Scheme_Object *argv[], Scheme_Object *self)
 /* data := {name, c-function, itypes, otype, cif} */
 {
   Scheme_Object *data = SCHEME_PRIM_CLOSURE_ELS(self)[0];
@@ -3244,6 +3394,34 @@ Scheme_Object *ffi_do_call(int argc, Scheme_Object *argv[], Scheme_Object *self)
   return C2SCHEME(NULL, otype, p, 0, 1, 1);
 }
 
+static Scheme_Object *ffi_do_call_k()
+{
+  Scheme_Thread *p = scheme_current_thread;
+  Scheme_Object **argv, *self;
+
+  argv = (Scheme_Object **)p->ku.k.p1;
+  self = (Scheme_Object *)p->ku.k.p2;
+
+  p->ku.k.p1 = NULL;
+  p->ku.k.p2 = NULL;
+
+  return ffi_do_call(p->ku.k.i1, argv, self);
+}
+
+static Scheme_Object *ffi_do_call_after_stack_check(int argc, Scheme_Object *argv[], Scheme_Object *self)
+{
+  /* Make sure we have an extra-comfortable amount of space on the
+     stack before calling into foreign code: */
+  if (!scheme_no_stack_overflow && scheme_is_stack_too_shallow()) {
+    Scheme_Thread *p = scheme_current_thread;
+    p->ku.k.i1 = argc;
+    p->ku.k.p1 = argv;
+    p->ku.k.p2 = self;
+    return scheme_handle_stack_overflow(ffi_do_call_k);
+  } else
+    return ffi_do_call(argc, argv, self);
+}
+
 /* see below */
 void free_fficall_data(void *data, void *p)
 {
@@ -3335,7 +3513,7 @@ static Scheme_Object *foreign_ffi_call(int argc, Scheme_Object *argv[])
 # endif /* MZ_USE_PLACES */
   scheme_register_finalizer(data, free_fficall_data, cif, NULL, NULL);
   a[0] = data;
-  return scheme_make_prim_closure_w_arity(ffi_do_call,
+  return scheme_make_prim_closure_w_arity(ffi_do_call_after_stack_check,
                                           1, a,
                                           SCHEME_BYTE_STR_VAL(name),
                                           nargs, nargs);
@@ -3366,7 +3544,7 @@ static ffi_callback_struct *extract_ffi_callback(void *userdata)
   return data;
 }
 
-void ffi_do_callback(ffi_cif* cif, void* resultp, void** args, void *userdata)
+static void ffi_do_callback(ffi_cif* cif, void* resultp, void** args, void *userdata)
 {
   ffi_callback_struct *data;
   Scheme_Object *argv_stack[MAX_QUICK_ARGS];
@@ -3511,7 +3689,7 @@ void scheme_check_foreign_work(void)
 
 #endif
 
-void ffi_queue_callback(ffi_cif* cif, void* resultp, void** args, void *userdata)
+static void ffi_queue_callback(ffi_cif* cif, void* resultp, void** args, void *userdata)
   XFORM_SKIP_PROC
 {
 #ifdef MZ_USE_MZRT
@@ -3519,36 +3697,44 @@ void ffi_queue_callback(ffi_cif* cif, void* resultp, void** args, void *userdata
      temporarily, because a GC may occur concurrent to this
      function if it's in another thread. */
   FFI_Sync_Queue *queue;
+  void **data = (void **)userdata;
 
-  queue = (FFI_Sync_Queue *)((void **)userdata)[1];
-  userdata = ((void **)userdata)[0];
+  queue = (FFI_Sync_Queue *)(data)[1];
+  userdata = (data)[0];
 
   if (queue->orig_thread != mz_proc_thread_self()) {
-    Queued_Callback *qc;
-    mzrt_sema *sema;
+    if (data[2]) {
+      /* constant result */
+      memcpy(resultp, data[2], (intptr_t)data[3]);
+      return;
+    } else {
+      /* queue  a callback and wait: */
+      Queued_Callback *qc;
+      mzrt_sema *sema;
 
-    mzrt_sema_create(&sema, 0);
+      mzrt_sema_create(&sema, 0);
 
-    qc = (Queued_Callback *)malloc(sizeof(Queued_Callback));
-    qc->cif = cif;
-    qc->resultp = resultp;
-    qc->args = args;
-    qc->userdata = userdata;
-    qc->sema = sema;
-    qc->called = 0;
+      qc = (Queued_Callback *)malloc(sizeof(Queued_Callback));
+      qc->cif = cif;
+      qc->resultp = resultp;
+      qc->args = args;
+      qc->userdata = userdata;
+      qc->sema = sema;
+      qc->called = 0;
 
-    mzrt_mutex_lock(queue->lock);
-    qc->next = queue->callbacks;
-    queue->callbacks = qc;
-    mzrt_mutex_unlock(queue->lock);
-    scheme_signal_received_at(queue->sig_hand);
+      mzrt_mutex_lock(queue->lock);
+      qc->next = queue->callbacks;
+      queue->callbacks = qc;
+      mzrt_mutex_unlock(queue->lock);
+      scheme_signal_received_at(queue->sig_hand);
 
-    /* wait for the callback to be invoked in the main thread */
-    mzrt_sema_wait(sema);
+      /* wait for the callback to be invoked in the main thread */
+      mzrt_sema_wait(sema);
 
-    mzrt_sema_destroy(sema);
-    free(qc);
-    return;
+      mzrt_sema_destroy(sema);
+      free(qc);
+      return;
+    }
   }
 #endif
 
@@ -3567,7 +3753,7 @@ typedef struct closure_and_cif_struct {
 } closure_and_cif;
 
 /* free the above */
-void free_cl_cif_args(void *ignored, void *p)
+static void free_cl_cif_args(void *ignored, void *p)
 {
   /*
   scheme_warning("Releasing cl+cif+args %V %V (%d)",
@@ -3582,12 +3768,14 @@ void free_cl_cif_args(void *ignored, void *p)
 }
 
 #ifdef MZ_USE_MZRT
-void free_cl_cif_queue_args(void *ignored, void *p)
+static void free_cl_cif_queue_args(void *ignored, void *p)
 {
-  void *data = ((closure_and_cif*)p)->data;
+  void *data = ((closure_and_cif*)p)->data, *constant_result;
   void **q = (void **)data;
   data = q[0];
+  constant_result = q[2];
   free(q);
+  if (constant_result) free(constant_result);
 #ifdef MZ_PRECISE_GC
   GC_free_immobile_box((void**)data);
 #endif
@@ -3646,6 +3834,8 @@ static Scheme_Object *foreign_ffi_callback(int argc, Scheme_Object *argv[])
   GC_CAN_IGNORE void *callback_data;
 # ifdef MZ_USE_MZRT
   int keep_queue = 0;
+  void *constant_reply = NULL;
+  int constant_reply_size = 0;
 # endif /* MZ_USE_MZRT */
 
   if (!SCHEME_PROCP(argv[0]))
@@ -3659,8 +3849,10 @@ static Scheme_Object *foreign_ffi_callback(int argc, Scheme_Object *argv[])
   abi = GET_ABI(MYNAME,3);
   is_atomic = ((argc > 4) && SCHEME_TRUEP(argv[4]));
   sync = (is_atomic ? scheme_true : NULL);
-  if (argc > 5)
-    (void)scheme_check_proc_arity2(MYNAME, 1, 5, argc, argv, 1);
+  if ((argc > 5)
+      && !SCHEME_BOXP(argv[5])
+      && !scheme_check_proc_arity2(NULL, 1, 5, argc, argv, 1))
+    scheme_wrong_contract(MYNAME, "(or/c #f (procedure-arity-includes/c 0) box?)", 5, argc, argv);
   if (((argc > 5) && SCHEME_TRUEP(argv[5]))) {
 #   ifdef MZ_USE_MZRT
     if (!ffi_sync_queue) {
@@ -3675,8 +3867,24 @@ static Scheme_Object *foreign_ffi_callback(int argc, Scheme_Object *argv[])
       ffi_sync_queue->sig_hand = sig_hand;
       ffi_sync_queue->callbacks = NULL;
     }
-    sync = argv[5];
-    if (is_atomic) sync = scheme_box(sync);
+    if (SCHEME_BOXP(argv[5])) {
+      /* when called in a foreign thread, return a constant */
+      constant_reply_size = ctype_sizeof(otype);
+      if (!constant_reply_size && SCHEME_VOIDP(SCHEME_BOX_VAL(argv[5]))) {
+        /* void result */
+        constant_reply = scheme_malloc_atomic(1);
+      } else {
+        /* non-void result */
+        constant_reply = scheme_malloc_atomic(constant_reply_size);
+        SCHEME2C(MYNAME, otype, constant_reply, 0, SCHEME_BOX_VAL(argv[5]), NULL, NULL, 0);
+      }
+    } else {
+      /* when called in a foreign thread, queue a reply back here */
+      sync = argv[5];
+      if (is_atomic) sync = scheme_box(sync);
+      constant_reply = NULL;
+      constant_reply_size = 0;
+    }
     keep_queue = 1;
 #   endif /* MZ_USE_MZRT */
     do_callback = ffi_queue_callback;
@@ -3718,11 +3926,18 @@ static Scheme_Object *foreign_ffi_callback(int argc, Scheme_Object *argv[])
   if (keep_queue) {
     /* For ffi_queue_callback(), add a level of indirection in `data' to
        hold the place-specific `ffi_sync_queue'.  Use
-       `free_cl_cif_data_args' to clean up this extra level. */
-    GC_CAN_IGNORE void **tmp;
-    tmp = (void **)malloc(sizeof(void*) * 2);
+       `free_cl_cif_queue_args' to clean up this extra level. */
+    GC_CAN_IGNORE void **tmp, *cr;
+    if (constant_reply) {
+      cr = malloc(constant_reply_size);
+      memcpy(cr, constant_reply, constant_reply_size);
+      constant_reply = cr;
+    }
+    tmp = (void **)malloc(sizeof(void*) * 4);
     tmp[0] = callback_data;
     tmp[1] = ffi_sync_queue;
+    tmp[2] = constant_reply;
+    tmp[3] = (void *)(intptr_t)constant_reply_size;
     callback_data = (void *)tmp;
   }
 # endif /* MZ_USE_MZRT */

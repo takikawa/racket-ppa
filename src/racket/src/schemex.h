@@ -383,6 +383,7 @@ void *(*scheme_lookup_in_table)(Scheme_Bucket_Table *table, const char *key);
 Scheme_Bucket *(*scheme_bucket_from_table)(Scheme_Bucket_Table *table, const char *key);
 int (*scheme_bucket_table_equal)(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *t2);
 Scheme_Bucket_Table *(*scheme_clone_bucket_table)(Scheme_Bucket_Table *bt);
+void (*scheme_clear_bucket_table)(Scheme_Bucket_Table *bt);
 Scheme_Hash_Table *(*scheme_make_hash_table)(int type);
 Scheme_Hash_Table *(*scheme_make_hash_table_equal)();
 Scheme_Hash_Table *(*scheme_make_hash_table_eqv)();
@@ -394,7 +395,8 @@ Scheme_Object *(*scheme_hash_get_atomic)(Scheme_Hash_Table *table, Scheme_Object
 int (*scheme_hash_table_equal)(Scheme_Hash_Table *t1, Scheme_Hash_Table *t2);
 int (*scheme_is_hash_table_equal)(Scheme_Object *o);
 int (*scheme_is_hash_table_eqv)(Scheme_Object *o);
-Scheme_Hash_Table *(*scheme_clone_hash_table)(Scheme_Hash_Table *bt);
+Scheme_Hash_Table *(*scheme_clone_hash_table)(Scheme_Hash_Table *ht);
+void (*scheme_clear_hash_table)(Scheme_Hash_Table *ht);
 Scheme_Hash_Tree *(*scheme_make_hash_tree)(int kind);
 Scheme_Hash_Tree *(*scheme_hash_tree_set)(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val);
 Scheme_Object *(*scheme_hash_tree_get)(Scheme_Hash_Tree *tree, Scheme_Object *key);
@@ -561,6 +563,7 @@ mzchar *(*scheme_utf16_to_ucs4)(const unsigned short *text, intptr_t start, intp
 				       intptr_t *ulen, intptr_t term_size);
 Scheme_Object *(*scheme_open_converter)(const char *from_e, const char *to_e);
 void (*scheme_close_converter)(Scheme_Object *conv);
+char *(*scheme_getenv)(char *name);
 /*========================================================================*/
 /*                               bignums                                  */
 /*========================================================================*/
@@ -843,6 +846,7 @@ void (*scheme_install_macro)(Scheme_Bucket *b, Scheme_Object *v);
 void (*scheme_save_initial_module_set)(Scheme_Env *env);
 Scheme_Env *(*scheme_primitive_module)(Scheme_Object *name, Scheme_Env *for_env);
 void (*scheme_finish_primitive_module)(Scheme_Env *env);
+void (*scheme_set_primitive_module_phaseless)(Scheme_Env *env, int phaseless);
 void (*scheme_protect_primitive_provide)(Scheme_Env *env, Scheme_Object *name);
 Scheme_Object *(*scheme_make_modidx)(Scheme_Object *path,
 				  Scheme_Object *base,

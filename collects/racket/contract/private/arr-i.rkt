@@ -518,14 +518,16 @@
      (list
       #`(case-lambda
           [#,(vector->list wrapper-ress)
-           #,(add-wrapper-let 
-              (add-post-cond an-istx arg/res-to-indy-var #`(values #,@(vector->list wrapper-ress)))
-              #f
-              ordered-ress res-indices
-              res-proj-vars indy-res-proj-vars 
-              wrapper-ress indy-res-vars
-              arg/res-to-indy-var
-              blame-var-table)]
+           (with-continuation-mark
+            contract-continuation-mark-key blame
+            #,(add-wrapper-let 
+               (add-post-cond an-istx arg/res-to-indy-var #`(values #,@(vector->list wrapper-ress)))
+               #f
+               ordered-ress res-indices
+               res-proj-vars indy-res-proj-vars 
+               wrapper-ress indy-res-vars
+               arg/res-to-indy-var
+               blame-var-table))]
           [args
            (bad-number-of-results blame val
                                   #,(vector-length wrapper-ress)
@@ -645,7 +647,7 @@
        (set! blame-ids (cons (cons (build-blame-identifier indy? dom? id)
                                    (vector (syntax-e id) indy? dom?))
                              blame-ids)))))
-  (set! blame-ids (sort blame-ids string<=? #:key (λ (x) (symbol->string (syntax-e (car x))))))
+  (set! blame-ids (sort blame-ids symbol<? #:key (λ (x) (syntax-e (car x)))))
   
   (values
    (map cdr blame-ids)
@@ -694,8 +696,13 @@
            val
            (make-keyword-procedure
             (λ (kwds kwd-args . args)
-              (keyword-apply arg-checker kwds kwd-args args))
-            (λ args (apply arg-checker args)))
+              (with-continuation-mark
+               contract-continuation-mark-key blame
+               (keyword-apply arg-checker kwds kwd-args args)))
+            (λ args
+              (with-continuation-mark
+               contract-continuation-mark-key blame
+               (apply arg-checker args))))
            impersonator-prop:contracted ctc))))))
 
 (begin-encourage-inline

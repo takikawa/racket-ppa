@@ -466,6 +466,8 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
   printf("pre-process @ %" PRIdPTR "\n", scheme_get_process_milliseconds());
 #endif
 
+  scheme_init_file_places();
+
   scheme_make_thread(stack_base);
 
 #if defined(MZ_PRECISE_GC) && defined(MZ_USE_PLACES)
@@ -503,7 +505,6 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
   scheme_init_gmp_places();
   scheme_init_kqueue();
   scheme_alloc_global_fdset();
-  scheme_init_file_places();
 #ifndef DONT_USE_FOREIGN
   scheme_init_foreign_places();
 #endif
@@ -543,6 +544,10 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
   literal_number_table = scheme_make_weak_eqv_table();
 
   scheme_starting_up = 1; /* in case it's not set already */
+
+#ifdef TIME_STARTUP_PROCESS
+  printf("pre-embedded @ %" PRIdPTR "\n", scheme_get_process_milliseconds());
+#endif
 
   scheme_add_embedded_builtins(env);
 
@@ -619,6 +624,7 @@ void scheme_place_instance_destroy(int force)
   scheme_free_all_code();
   scheme_free_ghbn_data();
   scheme_release_kqueue();
+  scheme_release_inotify();
 }
 
 static void make_kernel_env(void)
@@ -668,13 +674,16 @@ static void make_kernel_env(void)
   MZTIMEIT(bool, scheme_init_bool(env));
   MZTIMEIT(syntax, scheme_init_compile(env));
   MZTIMEIT(eval, scheme_init_eval(env));
-  MZTIMEIT(error, scheme_init_error(env));
   MZTIMEIT(struct, scheme_init_struct(env));
+  MZTIMEIT(error, scheme_init_error(env));
 #ifndef NO_SCHEME_EXNS
   MZTIMEIT(exn, scheme_init_exn(env));
 #endif
   MZTIMEIT(process, scheme_init_thread(env));
+  scheme_init_port_wait();
   scheme_init_inspector();
+  scheme_init_logger_wait();
+  scheme_init_struct_wait();
   MZTIMEIT(reduced, scheme_init_reduced_proc_struct(env));
 #ifndef NO_SCHEME_THREADS
   MZTIMEIT(sema, scheme_init_sema(env));
@@ -919,6 +928,7 @@ scheme_new_module_env(Scheme_Env *env, Scheme_Module *m, int new_exp_module_tree
 
   scheme_prepare_label_env(env);
   menv->label_env = env->label_env;
+  menv->label_env->module_pre_registry = menv->module_pre_registry;
   menv->instance_env = env;
 
   if (new_exp_module_tree) {
@@ -1241,9 +1251,13 @@ Scheme_Env *scheme_get_bucket_home(Scheme_Bucket *b)
 void scheme_set_bucket_home(Scheme_Bucket *b, Scheme_Env *e)
 {
   if (!((Scheme_Bucket_With_Home *)b)->home_link) {
-    Scheme_Object *link;
-    link = scheme_get_home_weak_link(e);
-    ((Scheme_Bucket_With_Home *)b)->home_link = link;
+    if (((Scheme_Bucket_With_Flags *)b)->flags & GLOB_STRONG_HOME_LINK)
+      ((Scheme_Bucket_With_Home *)b)->home_link = (Scheme_Object *)e;
+    else {
+      Scheme_Object *link;
+      link = scheme_get_home_weak_link(e);
+      ((Scheme_Bucket_With_Home *)b)->home_link = link;
+    }
   }
 }
 
@@ -1302,11 +1316,11 @@ scheme_do_add_global_symbol(Scheme_Env *env, Scheme_Object *sym,
     b = scheme_bucket_from_table(env->toplevel, (const char *)sym);
     b->val = obj;
     ASSERT_IS_VARIABLE_BUCKET(b);
-    scheme_set_bucket_home(b, env);
     if (constant && scheme_defining_primitives) {
       ((Scheme_Bucket_With_Flags *)b)->id = builtin_ref_counter++;
-      ((Scheme_Bucket_With_Flags *)b)->flags |= (GLOB_HAS_REF_ID | GLOB_IS_CONST);
+      ((Scheme_Bucket_With_Flags *)b)->flags |= (GLOB_HAS_REF_ID | GLOB_IS_CONST | GLOB_STRONG_HOME_LINK);
     }
+    scheme_set_bucket_home(b, env);
   } else
     scheme_add_to_table(env->syntax, (const char *)sym, obj, constant);
 }
@@ -2315,7 +2329,7 @@ static Scheme_Object *
 local_get_shadower(int argc, Scheme_Object *argv[])
 {
   Scheme_Comp_Env *env;
-  Scheme_Object *sym, *sym_marks = NULL, *orig_sym, *uid = NULL;
+  Scheme_Object *sym, *sym_marks = NULL, *orig_sym, *uid = NULL, *free_id = NULL;
 
   env = scheme_current_thread->current_local_env;
   if (!env)
@@ -2329,7 +2343,7 @@ local_get_shadower(int argc, Scheme_Object *argv[])
 
   sym_marks = scheme_stx_extract_marks(sym);
 
-  uid = scheme_find_local_shadower(sym, sym_marks, env);
+  uid = scheme_find_local_shadower(sym, sym_marks, env, &free_id);
 
   if (!uid) {
     uid = scheme_tl_id_sym(env->genv, sym, NULL, 0, 
@@ -2354,11 +2368,14 @@ local_get_shadower(int argc, Scheme_Object *argv[])
 
     result = scheme_datum_to_syntax(SCHEME_STX_VAL(sym), orig_sym, sym, 0, 0);
     ((Scheme_Stx *)result)->props = ((Scheme_Stx *)orig_sym)->props;
-    
+
     rn = scheme_make_rename(uid, 1);
     scheme_set_rename(rn, 0, result);
 
     result = scheme_add_rename(result, rn);
+
+    if (free_id)
+      scheme_install_free_id_rename(result, free_id, NULL, scheme_make_integer(0));
 
     if (!scheme_stx_is_clean(orig_sym))
       result = scheme_stx_taint(result);

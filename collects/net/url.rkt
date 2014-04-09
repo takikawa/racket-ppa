@@ -1,6 +1,11 @@
 #lang racket/base
-(require racket/port racket/string racket/contract/base
-         "url-connect.rkt"
+(require racket/port
+         racket/string
+         racket/contract/base
+         racket/list
+         racket/match
+         (prefix-in hc: "http-client.rkt")
+         (only-in "url-connect.rkt" current-https-protocol)
          "url-structs.rkt"
          "uri-codec.rkt")
 
@@ -8,6 +13,8 @@
 ;;   Handle HTTP/file errors.
 ;;   Not throw away MIME headers.
 ;;     Determine file type.
+
+(define-logger net/url)
 
 ;; ----------------------------------------------------------------------
 
@@ -18,7 +25,7 @@
 (define-struct (url-exception exn:fail) ())
 (define (-url-exception? x)
   (or (url-exception? x)
-      
+
       ;; two of the errors that string->url can raise are
       ;; now contract violations instead of url-expcetion
       ;; structs. since only the url-exception? predicate
@@ -31,25 +38,25 @@
 
 (define current-proxy-servers
   (make-parameter null
-    (lambda (v)
-      (unless (and (list? v)
-                   (andmap (lambda (v)
-                             (and (list? v)
-                                  (= 3 (length v))
-                                  (equal? (car v) "http")
-                                  (string? (car v))
-                                  (exact-integer? (caddr v))
-                                  (<= 1 (caddr v) 65535)))
-                           v))
-        (raise-type-error
-         'current-proxy-servers
-         "list of list of scheme, string, and exact integer in [1,65535]"
-         v))
-      (map (lambda (v)
-             (list (string->immutable-string (car v))
-                   (string->immutable-string (cadr v))
-                   (caddr v)))
-           v))))
+                  (lambda (v)
+                    (unless (and (list? v)
+                                 (andmap (lambda (v)
+                                           (and (list? v)
+                                                (= 3 (length v))
+                                                (equal? (car v) "http")
+                                                (string? (car v))
+                                                (exact-integer? (caddr v))
+                                                (<= 1 (caddr v) 65535)))
+                                         v))
+                      (raise-type-error
+                       'current-proxy-servers
+                       "list of list of scheme, string, and exact integer in [1,65535]"
+                       v))
+                    (map (lambda (v)
+                           (list (string->immutable-string (car v))
+                                 (string->immutable-string (cadr v))
+                                 (caddr v)))
+                         v))))
 
 (define (url-error fmt . args)
   (raise (make-url-exception
@@ -66,28 +73,37 @@
         [path   (url-path url)]
         [query  (url-query url)]
         [fragment (url-fragment url)]
-        [sa string-append])
+        [sa list]
+        [sa* (lambda (l)
+               (apply string-append
+                      (let loop ([l l])
+                        (cond
+                          [(null? l) l]
+                          [(pair? (car l))
+                           (append (loop (car l))
+                                   (loop (cdr l)))]
+                          [(null? (car l)) (loop (cdr l))]
+                          [else (cons (car l) (loop (cdr l)))]))))])
     (when (and (equal? scheme "file")
                (not (url-path-absolute? url)))
       (raise-mismatch-error 'url->string
                             "cannot convert relative file URL to a string: "
                             url))
-    (sa (if scheme (sa scheme ":") "")
-        (if (or user host port)
-          (sa "//"
-              (if user (sa (uri-userinfo-encode user) "@") "")
-              (if host host "")
-              (if port (sa ":" (number->string port)) "")
-              ;; There used to be a "/" here, but that causes an
-              ;; extra leading slash -- wonder why it ever worked!
-              )
-          (if (equal? "file" scheme) ; always need "//" for "file" URLs
-            "//"
-            ""))
-        (combine-path-strings (url-path-absolute? url) path)
-        ;; (if query (sa "?" (uri-encode query)) "")
-        (if (null? query) "" (sa "?" (alist->form-urlencoded query)))
-        (if fragment (sa "#" (uri-encode* fragment)) ""))))
+    (sa*
+     (append
+      (if scheme (sa scheme ":") null)
+      (if (or user host port)
+        (sa "//"
+            (if user (sa (uri-userinfo-encode user) "@") null)
+            (if host host null)
+            (if port (sa ":" (number->string port)) null))
+        (if (equal? "file" scheme) ; always need "//" for "file" URLs
+          '("//")
+          null))
+      (combine-path-strings (url-path-absolute? url) path)
+      ;; (if query (sa "?" (uri-encode query)) "")
+      (if (null? query) null (sa "?" (alist->form-urlencoded query)))
+      (if fragment (sa "#" (uri-encode* fragment)) null)))))
 
 ;; url->default-port : url -> num
 (define (url->default-port url)
@@ -97,19 +113,24 @@
           [(string=? scheme "https") 443]
           [else (url-error "URL scheme ~s not supported" scheme)])))
 
-;; make-ports : url -> in-port x out-port
+;; make-ports : url -> hc
 (define (make-ports url proxy)
   (let ([port-number (if proxy
                        (caddr proxy)
                        (or (url-port url) (url->default-port url)))]
         [host (if proxy (cadr proxy) (url-host url))])
-    (parameterize ([current-connect-scheme (url-scheme url)])
-      (tcp-connect host port-number))))
+    (hc:http-conn-open host
+                       #:port port-number
+                       #:ssl? (if (equal? "https" (url-scheme url))
+                                (current-https-protocol)
+                                #f))))
 
-;; http://getpost-impure-port : bool x url x union (str, #f) x list (str) -> in-port
-(define (http://getpost-impure-port get? url post-data strings)
+;; http://getpost-impure-port : bool x url x union (str, #f) x list (str)
+;;                               -> hc
+(define (http://getpost-impure-port get? url post-data strings
+                                    make-ports 1.1?)
   (define proxy (assoc (url-scheme url) (current-proxy-servers)))
-  (define-values (server->client client->server) (make-ports url proxy))
+  (define hc (make-ports url proxy))
   (define access-string
     (url->string
      (if proxy
@@ -122,19 +143,13 @@
                        (values #t (list (make-path/param "" '())))
                        (values (url-path-absolute? url) (url-path url)))])
          (make-url #f #f #f #f abs? path (url-query url) (url-fragment url))))))
-  (define (println . xs)
-    (for-each (lambda (x) (display x client->server)) xs)
-    (display "\r\n" client->server))
-  (println (if get? "GET " "POST ") access-string " HTTP/1.0")
-  (println "Host: " (url-host url)
-           (let ([p (url-port url)]) (if p (format ":~a" p) "")))
-  (when post-data (println "Content-Length: " (bytes-length post-data)))
-  (for-each println strings)
-  (println)
-  (when post-data (display post-data client->server))
-  (flush-output client->server)
-  (tcp-abandon-port client->server)
-  server->client)
+
+  (hc:http-conn-send! hc access-string
+                      #:method (if get? "GET" "POST")
+                      #:headers strings
+                      #:content-decode '()
+                      #:data post-data)
+  hc)
 
 (define (file://->path url [kind (system-path-convention-type)])
   (let ([strs (map path/param-path (url-path url))]
@@ -181,10 +196,25 @@
     (cond [(not scheme)
            (schemeless-url url)]
           [(or (string=? scheme "http") (string=? scheme "https"))
-           (http://getpost-impure-port get? url post-data strings)]
+           (define hc (http://getpost-impure-port get? url post-data strings make-ports #f))
+           (http-conn-impure-port hc)]
           [(string=? scheme "file")
            (url-error "There are no impure file: ports")]
           [else (url-error "Scheme ~a unsupported" scheme)])))
+
+(define (http-conn-impure-port hc)
+  (define-values (in out) (make-pipe 4096))
+  (define-values (status headers response-port)
+    (hc:http-conn-recv! hc #:close? #t #:content-decode '()))
+  (fprintf out "~a\r\n" status)
+  (for ([h (in-list headers)])
+    (fprintf out "~a\r\n" h))
+  (fprintf out "\r\n")
+  (thread
+   (λ ()
+     (copy-port response-port out)
+     (close-output-port out)))
+  in)
 
 ;; get-impure-port : url [x list (str)] -> in-port
 (define (get-impure-port url [strings '()])
@@ -202,71 +232,79 @@
           [(or (string=? scheme "http")
                (string=? scheme "https"))
            (cond
-             [(or (not get?) 
+             [(or (not get?)
                   ;; do not follow redirections for POST
                   (zero? redirections))
-              (let ([port (http://getpost-impure-port
-                           get? url post-data strings)])
-                (purify-http-port port))]
+              (define-values (status headers response-port)
+                (hc:http-conn-recv!
+                 (http://getpost-impure-port
+                  get? url post-data strings
+                  make-ports #f)
+                  #:content-decode '()
+                 #:close? #t))
+              response-port]
              [else
-              (define-values (port header) 
+              (define-values (port header)
                 (get-pure-port/headers url strings #:redirections redirections))
               port])]
           [(string=? scheme "file")
            (file://get-pure-port url)]
           [else (url-error "Scheme ~a unsupported" scheme)])))
 
-(define (get-pure-port/headers url [strings '()] 
+(define (make-http-connection)
+  (hc:http-conn))
+
+(define (http-connection-close hc)
+  (hc:http-conn-close! hc))
+
+(define (get-pure-port/headers url [strings '()]
                                #:redirections [redirections 0]
-                               #:status? [status? #f])
-  (let redirection-loop ([redirections redirections] [url url])
-    (define ip
-      (http://getpost-impure-port #t url #f strings))
-    (define status (read-line ip 'return-linefeed))
-    (define-values (new-url chunked? headers)
-      (let loop ([new-url #f] [chunked? #f] [headers '()])
-        (define line (read-line ip 'return-linefeed))
-        (when (eof-object? line)
-          (error 'getpost-pure-port 
-                 "connection ended before headers ended (when trying to follow a redirection)"))
-        (cond
-          [(equal? line "") (values new-url chunked? headers)]
-          [(equal? chunked-header-line line) (loop new-url #t (cons line headers))]
-          [(regexp-match #rx"^Location: (.*)$" line)
-           =>
-           (λ (m) 
-             (define m1 (list-ref m 1))
-             (define next-url 
-               (with-handlers ((exn:fail? (λ (x) #f)))
-                 (define next-url (string->url m1))
-                 (make-url
-                  (or (url-scheme next-url) (url-scheme url))
-                  (or (url-user next-url) (url-user url))
-                  (or (url-host next-url) (url-host url))
-                  (or (url-port next-url) (url-port url))
-                  (url-path-absolute? next-url)
-                  (url-path next-url)
-                  (url-query next-url)
-                  (url-fragment next-url))))
-             (loop (or next-url new-url) chunked? (cons line headers)))]
-          [else (loop new-url chunked? (cons line headers))])))
+                               #:status? [status? #f]
+                               #:connection [conn #f])
+  (let redirection-loop ([redirections redirections] [url url] [use-conn conn])
+    (define hc
+      (http://getpost-impure-port #t url #f strings
+                                  (if (and use-conn
+                                           (hc:http-conn-live? use-conn))
+                                    (lambda (url proxy)
+                                      (log-net/url-debug "reusing connection")
+                                      use-conn)
+                                    make-ports)
+                                  (and conn #t)))
+    (define-values (status headers response-port)
+      (hc:http-conn-recv! hc #:close? (not conn) #:content-decode '()))
+
+    (define new-url
+      (ormap (λ (h)
+               (match (regexp-match #rx#"^Location: (.*)$" h)
+                 [#f #f]
+                 [(list _ m1b)
+                  (define m1 (bytes->string/utf-8 m1b))
+                  (with-handlers ((exn:fail? (λ (x) #f)))
+                    (define next-url (string->url m1))
+                    (make-url
+                     (or (url-scheme next-url) (url-scheme url))
+                     (or (url-user next-url) (url-user url))
+                     (or (url-host next-url) (url-host url))
+                     (or (url-port next-url) (url-port url))
+                     (url-path-absolute? next-url)
+                     (url-path next-url)
+                     (url-query next-url)
+                     (url-fragment next-url)))]))
+             headers))
     (define redirection-status-line?
-      (regexp-match #rx"^HTTP/[0-9]+[.][0-9]+ 3[0-9][0-9]" status))
+      (regexp-match #rx#"^HTTP/[0-9]+[.][0-9]+ 3[0-9][0-9]" status))
     (cond
-      [(and redirection-status-line? new-url (not (zero? redirections))) 
-       (close-input-port ip)
-       (redirection-loop (- redirections 1) new-url)]
+      [(and redirection-status-line? new-url (not (zero? redirections)))
+       (log-net/url-info "redirection: ~a" (url->string new-url))
+       (redirection-loop (- redirections 1) new-url #f)]
       [else
-       (define-values (in-pipe out-pipe) (make-pipe))
-       (thread
-        (λ ()
-          (http-pipe-data chunked? ip out-pipe)
-          (close-input-port ip)))
-       (values in-pipe
-               (apply string-append (map (λ (x) (string-append x "\r\n"))
-                                         (if status?
-                                           (cons status (reverse headers))
-                                           (reverse headers)))))])))
+       (values response-port
+               (apply string-append
+                      (map (λ (x) (format "~a\r\n" x))
+                           (if status?
+                             (cons status headers)
+                             headers))))])))
 
 ;; get-pure-port : url [x list (str)] -> in-port
 (define (get-pure-port url [strings '()] #:redirections [redirections 0])
@@ -370,8 +408,8 @@
   (let ([handle-port
          (lambda (server->client handler)
            (dynamic-wind (lambda () 'do-nothing)
-             (lambda () (handler server->client))
-             (lambda () (close-input-port server->client))))])
+               (lambda () (handler server->client))
+               (lambda () (close-input-port server->client))))])
     (case-lambda
       [(url getter handler)
        (handle-port (getter url) handler)]
@@ -385,63 +423,9 @@
     (if m (read-string (cdar m) port) "")))
 
 ;; purify-http-port : in-port -> in-port
-;; returns a new port, closes the old one when done pumping
 (define (purify-http-port in-port)
-  (define-values (in-pipe out-pipe) (make-pipe))
-  (thread
-   (λ ()
-     (define status (http-read-status in-port))
-     (define chunked? (http-read-headers in-port))
-     (http-pipe-data chunked? in-port out-pipe)
-     (close-input-port in-port)))
-  in-pipe)
-
-(define (http-read-status ip)
-  (read-line ip 'return-linefeed))
-
-(define (http-read-headers ip)
-  (define l (read-line ip 'return-linefeed))
-  (when (eof-object? l)
-    (error 'purify-http-port "Connection ended before headers ended"))
-  (if (string=? l "")
-      #f
-      (if (string=? l chunked-header-line)
-          (begin (http-read-headers ip)
-                 #t)
-          (http-read-headers ip))))
-
-(define chunked-header-line "Transfer-Encoding: chunked")
-
-(define (http-pipe-data chunked? ip op)
-  (if chunked?
-      (http-pipe-chunk ip op)
-      (begin
-        (copy-port ip op)
-        (flush-output op)
-        (close-output-port op))))
-
-(define (http-pipe-chunk ip op)
-  (define crlf-bytes (make-bytes 2))
-  (let loop ([last-bytes #f])
-    (define size-str (read-line ip 'return-linefeed))
-    (define chunk-size (string->number size-str 16))
-    (unless chunk-size
-      (error 'http-pipe-chunk "Could not parse ~S as hexadecimal number" size-str))
-    (define use-last-bytes?
-      (and last-bytes (<= chunk-size (bytes-length last-bytes))))
-    (if (zero? chunk-size)
-        (begin (flush-output op)
-               (close-output-port op))
-        (let* ([bs (if use-last-bytes?
-                       (begin
-                         (read-bytes! last-bytes ip 0 chunk-size)
-                         last-bytes)
-                       (read-bytes chunk-size ip))]
-               [crlf (read-bytes! crlf-bytes ip 0 2)])
-          (write-bytes bs op 0 chunk-size)
-          (loop bs)))))
-
-(define character-set-size 256)
+  (purify-port in-port)
+  in-port)
 
 ;; netscape/string->url : str -> url
 (define (netscape/string->url string)
@@ -450,7 +434,7 @@
           [(string=? string "")
            (url-error "Can't resolve empty string as URL")]
           [else (set-url-scheme! url
-                  (if (char=? (string-ref string 0) #\/) "file" "http"))
+                                 (if (char=? (string-ref string 0) #\/) "file" "http"))
                 url])))
 
 ;; URL parsing regexp
@@ -548,14 +532,16 @@
         [else (uri-path-segment-encode* p)]))
 
 (define (combine-path-strings absolute? path/params)
-  (cond [(null? path/params) ""]
-        [else (let ([p (string-join (map join-params path/params) "/")])
-                (if absolute? (string-append "/" p) p))]))
+  (cond [(null? path/params) null]
+        [else (let ([p (add-between (map join-params path/params) "/")])
+                (if absolute? (cons "/" p) p))]))
 
 (define (join-params s)
-  (string-join (map path-segment-encode
-                    (cons (path/param-path s) (path/param-param s)))
-               ";"))
+  (if (null? (path/param-param s))
+    (path-segment-encode (path/param-path s))
+    (string-join (map path-segment-encode
+                      (cons (path/param-path s) (path/param-param s)))
+                 ";")))
 
 (define (path->url path)
   (let* ([spath (simplify-path path #f)]
@@ -568,42 +554,44 @@
             (let-values ([(base name dir?) (split-path path)])
               (cond
                 [(not base)
-                 (append (map
-                          (lambda (s)
-                            (make-path/param s null))
-                          (if (eq? (path-convention-type path) 'windows)
-                              ;; For Windows, massage the root:
-                              (let ([s (regexp-replace
-                                        #rx"[/\\\\]$"
-                                        (bytes->string/utf-8 (path->bytes name))
-                                        "")])
-                                (cond
-                                  [(regexp-match? #rx"^\\\\\\\\[?]\\\\[a-zA-Z]:" s)
-                                   ;; \\?\<drive>: path:
-                                   (regexp-split #rx"[/\\]+" (substring s 4))]
-                                  [(regexp-match? #rx"^\\\\\\\\[?]\\\\UNC" s)
-                                   ;; \\?\ UNC path:
-                                   (regexp-split #rx"[/\\]+" (substring s 7))]
-                                  [(regexp-match? #rx"^[/\\]" s)
-                                   ;; UNC path:
-                                   (regexp-split #rx"[/\\]+" s)]
-                                  [else
-                                   (list s)]))
-                              ;; On other platforms, we drop the root:
-                              null))
-                         accum)]
+                 (if (eq? (path-convention-type path) 'windows)
+                   ;; For Windows, massage the root:
+                   (append (map
+                            (lambda (s)
+                              (make-path/param s null))
+                            (let ([s (regexp-replace
+                                      #rx"[/\\\\]$"
+                                      (bytes->string/utf-8 (path->bytes name))
+                                      "")])
+                              (cond
+                                [(regexp-match? #rx"^\\\\\\\\[?]\\\\[a-zA-Z]:" s)
+                                 ;; \\?\<drive>: path:
+                                 (regexp-split #rx"[/\\]+" (substring s 4))]
+                                [(regexp-match? #rx"^\\\\\\\\[?]\\\\UNC" s)
+                                 ;; \\?\ UNC path:
+                                 (regexp-split #rx"[/\\]+" (substring s 7))]
+                                [(regexp-match? #rx"^[/\\]" s)
+                                 ;; UNC path:
+                                 (regexp-split #rx"[/\\]+" s)]
+                                [else
+                                 (list s)])))
+                           accum)
+                   ;; On other platforms, we drop the root:
+                   accum)]
                 [else
                  (let ([accum (cons (make-path/param
                                      (if (symbol? name)
-                                         name
-                                         (bytes->string/utf-8
-                                          (path-element->bytes name)))
+                                       name
+                                       (bytes->string/utf-8
+                                        (path-element->bytes name)))
                                      null)
                                     accum)])
                    (if (eq? base 'relative)
-                       accum
-                       (loop base accum)))])))])
-    (make-url "file" #f "" #f (absolute-path? path) (append url-path url-tail) '() #f)))
+                     accum
+                     (loop base accum)))])))])
+    (make-url "file" #f "" #f (absolute-path? path)
+              (if (null? url-tail) url-path (append url-path url-tail))
+              '() #f)))
 
 
 (define (url->path url [kind (system-path-convention-type)])
@@ -659,14 +647,13 @@
 
 ;; http://metod-impure-port : symbol x url x union (str, #f) x list (str) -> in-port
 (define (http://method-impure-port method url data strings)
-  (let*-values
-      ([(method) (case method
+  (let* ([method (case method
                    [(get) "GET"] [(post) "POST"] [(head) "HEAD"]
                    [(put) "PUT"] [(delete) "DELETE"]
                    [else (url-error "unsupported method: ~a" method)])]
-       [(proxy) (assoc (url-scheme url) (current-proxy-servers))]
-       [(server->client client->server) (make-ports url proxy)]
-       [(access-string) (url->string
+         [proxy (assoc (url-scheme url) (current-proxy-servers))]
+         [hc (make-ports url proxy)]
+         [access-string (url->string
                          (if proxy
                            url
                            (make-url #f #f #f #f
@@ -674,19 +661,12 @@
                                      (url-path url)
                                      (url-query url)
                                      (url-fragment url))))])
-    (define (println . xs)
-      (for-each (lambda (x) (display x client->server)) xs)
-      (display "\r\n" client->server))
-    (println method " " access-string " HTTP/1.0")
-    (println "Host: " (url-host url)
-             (let ([p (url-port url)]) (if p (format ":~a" p) "")))
-    (when data (println "Content-Length: " (bytes-length data)))
-    (for-each println strings)
-    (println)
-    (when data (display data client->server))
-    (flush-output client->server)
-    (tcp-abandon-port client->server)
-    server->client))
+    (hc:http-conn-send! hc access-string
+                        #:method method
+                        #:headers strings
+                        #:content-decode '()
+                        #:data data)
+    (http-conn-impure-port hc)))
 
 (define current-url-encode-mode (make-parameter 'recommended))
 
@@ -723,8 +703,15 @@
  (put-impure-port (->* (url? bytes?) ((listof string?)) input-port?))
  (display-pure-port (input-port? . -> . void?))
  (purify-port (input-port? . -> . string?))
- (get-pure-port/headers (->* (url?) ((listof string?) #:redirections exact-nonnegative-integer? #:status? boolean?) 
+ (get-pure-port/headers (->* (url?)
+                             ((listof string?)
+                              #:redirections exact-nonnegative-integer?
+                              #:status? boolean?
+                              #:connection (or/c #f hc:http-conn?))
                              (values input-port? string?)))
+ (rename hc:http-conn? http-connection? (any/c . -> . boolean?))
+ (make-http-connection (-> hc:http-conn?))
+ (http-connection-close (hc:http-conn? . -> . void?))
  (netscape/string->url (string? . -> . url?))
  (call/input-url (case-> (-> url?
                              (-> url? input-port?)
@@ -742,3 +729,47 @@
  (file-url-path-convention-type
   (parameter/c (one-of/c 'unix 'windows)))
  (current-url-encode-mode (parameter/c (one-of/c 'recommended 'unreserved))))
+
+(define (http-sendrecv/url u
+                           #:method [method-bss #"GET"]
+                           #:headers [headers-bs empty]
+                           #:data [data-bsf #f]
+                           #:content-decode [decodes '(gzip)])
+  (unless (member (url-scheme u) '(#f "http" "https"))
+    (error 'http-sendrecv/url "URL scheme ~e not supported" (url-scheme u)))
+  (define ssl?
+    (equal? (url-scheme u) "https"))
+  (define port
+    (or (url-port u)
+        (if ssl?
+          443
+          80)))
+  (unless (url-host u)
+    (error 'http-sendrecv/url "Host required: ~e" u))
+  (hc:http-sendrecv
+   (url-host u)
+   (url->string
+    (make-url #f #f #f #f
+              (url-path-absolute? u)
+              (url-path u)
+              (url-query u)
+              (url-fragment u)))
+   #:ssl?
+   (if (equal? "https" (url-scheme u))
+     (current-https-protocol)
+     #f)
+   #:port port
+   #:method method-bss
+   #:headers headers-bs
+   #:data data-bsf
+   #:content-decode decodes))
+
+(provide
+ (contract-out
+  [http-sendrecv/url
+   (->* (url?)
+        (#:method (or/c bytes? string? symbol?)
+                  #:headers (listof (or/c bytes? string?))
+                  #:data (or/c false/c bytes? string?)
+                  #:content-decode (listof symbol?))
+        (values bytes? (listof bytes?) input-port?))]))

@@ -94,9 +94,9 @@ SHARED_OK static Scheme_Object *num_limits[3];
 void scheme_init_numstr(Scheme_Env *env)
 {
   scheme_add_global_constant("number->string", 
-			     scheme_make_prim_w_arity(number_to_string,
-						      "number->string",
-						      1, 2),
+			     scheme_make_immed_prim(number_to_string,
+                                                    "number->string",
+                                                    1, 2),
 			     env);
   scheme_add_global_constant("string->number", 
 			     scheme_make_folding_prim(string_to_number,
@@ -105,70 +105,70 @@ void scheme_init_numstr(Scheme_Env *env)
 			     env);
 
   scheme_add_global_constant("integer-bytes->integer", 
-			     scheme_make_prim_w_arity(bytes_to_integer,
-						      "integer-bytes->integer", 
-						      2, 5),
+			     scheme_make_immed_prim(bytes_to_integer,
+                                                    "integer-bytes->integer", 
+                                                    2, 5),
 			     env);
   scheme_add_global_constant("integer->integer-bytes", 
-			     scheme_make_prim_w_arity(integer_to_bytes,
-						      "integer->integer-bytes", 
-						      3, 6),
+			     scheme_make_immed_prim(integer_to_bytes,
+                                                    "integer->integer-bytes", 
+                                                    3, 6),
 			     env);
   scheme_add_global_constant("floating-point-bytes->real", 
-			     scheme_make_prim_w_arity(bytes_to_real,
-						      "floating-point-bytes->real",
-						      1, 4),
+			     scheme_make_immed_prim(bytes_to_real,
+                                                    "floating-point-bytes->real",
+                                                    1, 4),
 			     env);
   scheme_add_global_constant("real->floating-point-bytes",
-			     scheme_make_prim_w_arity(real_to_bytes,
-						      "real->floating-point-bytes",
-						      2, 5),
+			     scheme_make_immed_prim(real_to_bytes,
+                                                    "real->floating-point-bytes",
+                                                    2, 5),
 			     env);
   scheme_add_global_constant("system-big-endian?",
-			     scheme_make_prim_w_arity(system_big_endian_p,
-						      "system-big-endian?",
-						      0, 0),
+			     scheme_make_immed_prim(system_big_endian_p,
+                                                    "system-big-endian?",
+                                                    0, 0),
 			     env);
 
   scheme_add_global_constant("random", 
-			     scheme_make_prim_w_arity(sch_random,
-						      "random",
-						      0, 2),
+			     scheme_make_immed_prim(sch_random,
+                                                    "random",
+                                                    0, 2),
 			     env);
   scheme_add_global_constant("random-seed", 
-			     scheme_make_prim_w_arity(random_seed,
-						      "random-seed",
-						      1, 1),
+			     scheme_make_immed_prim(random_seed,
+                                                    "random-seed",
+                                                    1, 1),
 			     env);
   scheme_add_global_constant("make-pseudo-random-generator", 
-			     scheme_make_prim_w_arity(make_pseudo_random_generator,
-						      "make-pseudo-random-generator", 
-						      0, 0), 
+			     scheme_make_immed_prim(make_pseudo_random_generator,
+                                                    "make-pseudo-random-generator", 
+                                                    0, 0), 
 			     env);
   scheme_add_global_constant("vector->pseudo-random-generator",
-			     scheme_make_prim_w_arity(sch_pack,
-						      "vector->pseudo-random-generator", 
-						      1, 1), 
+			     scheme_make_immed_prim(sch_pack,
+                                                    "vector->pseudo-random-generator", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("vector->pseudo-random-generator!",
-			     scheme_make_prim_w_arity(sch_pack_bang,
-						      "vector->pseudo-random-generator!", 
-						      2, 2), 
+			     scheme_make_immed_prim(sch_pack_bang,
+                                                    "vector->pseudo-random-generator!", 
+                                                    2, 2), 
 			     env);
   scheme_add_global_constant("pseudo-random-generator->vector",
-			     scheme_make_prim_w_arity(sch_unpack,
-						      "pseudo-random-generator->vector", 
-						      1, 1), 
+			     scheme_make_immed_prim(sch_unpack,
+                                                    "pseudo-random-generator->vector", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("pseudo-random-generator-vector?",
-                             scheme_make_prim_w_arity(sch_check_pack,
-						      "pseudo-random-generator-vector?", 
-						      1, 1), 
+                             scheme_make_immed_prim(sch_check_pack,
+                                                    "pseudo-random-generator-vector?", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("pseudo-random-generator?", 
-			     scheme_make_prim_w_arity(pseudo_random_generator_p,
-						      "pseudo-random-generator?", 
-						      1, 1), 
+			     scheme_make_immed_prim(pseudo_random_generator_p,
+                                                    "pseudo-random-generator?", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("current-pseudo-random-generator", 
 			     scheme_register_parameter(current_pseudo_random_generator,
@@ -205,14 +205,14 @@ void scheme_init_numstr(Scheme_Env *env)
 void scheme_init_extfl_numstr(Scheme_Env *env)
 {
   scheme_add_global_constant("floating-point-bytes->extfl", 
-			     scheme_make_prim_w_arity(bytes_to_long_double,
-						      "floating-point-bytes->extfl",
-						      1, 4),
+			     scheme_make_immed_prim(bytes_to_long_double,
+                                                    "floating-point-bytes->extfl",
+                                                    1, 4),
 			     env);
   scheme_add_global_constant("extfl->floating-point-bytes",
-        		     scheme_make_prim_w_arity(long_double_to_bytes,
-        					      "extfl->floating-point-bytes",
-        					      1, 4),
+        		     scheme_make_immed_prim(long_double_to_bytes,
+                                                    "extfl->floating-point-bytes",
+                                                    1, 4),
         		     env);
 }
 
@@ -1264,7 +1264,7 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     if (is_long_double && is_float)  {
       if (report)
         scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-                        "read: can convert extflonum to inexact: %u",
+                        "read: cannot convert extflonum to inexact: %u",
                         str, len);
       return scheme_false;
     }
@@ -1437,7 +1437,7 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
       if (is_long_double && is_float)  {
         if (report)
           scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-                          "read: can convert extflonum to inexact: %u",
+                          "read: cannot convert extflonum to inexact: %u",
                           str, len);
         return scheme_false;
       }
@@ -2712,12 +2712,21 @@ sch_random(int argc, Scheme_Object *argv[])
     Scheme_Object *o, *rand_state;
 
     o = argv[0];
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+    if (SCHEME_INTP(o)) {
+      i = (uintptr_t)SCHEME_INT_VAL(o);
+      if (i > 4294967087UL)
+        i = 0;
+    } else
+      i = 0;
+#else
     if (scheme_get_unsigned_int_val(o,  &i)) {
       if (i > 4294967087UL)
 	i = 0;
     } else
       i = 0;
-    
+#endif
+
     if (!i) {
       scheme_wrong_contract("random", 
                             ((argc == 1)
@@ -2739,8 +2748,17 @@ sch_random(int argc, Scheme_Object *argv[])
 
     v = sch_int_rand(i, (Scheme_Random_State *)rand_state);
     
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+    return scheme_make_integer(v);
+#else
     return scheme_make_integer_value_from_unsigned(v);
+#endif
   }
+}
+
+double scheme_double_random(Scheme_Object *rand_state)
+{
+  return sch_double_rand((Scheme_Random_State *)rand_state);
 }
 
 static Scheme_Object *
@@ -2814,18 +2832,18 @@ sch_unpack(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *current_pseudo_random_generator(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-pseudo-random-generator", 
-			     scheme_make_integer(MZCONFIG_RANDOM_STATE),
-			     argc, argv,
-			     -1, pseudo_random_generator_p, "pseudo-random-generator", 0);
+  return scheme_param_config2("current-pseudo-random-generator", 
+                              scheme_make_integer(MZCONFIG_RANDOM_STATE),
+                              argc, argv,
+                              -1, pseudo_random_generator_p, "pseudo-random-generator?", 0);
 }
 
 static Scheme_Object *current_sched_pseudo_random_generator(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-evt-pseudo-random-generator", 
-			     scheme_make_integer(MZCONFIG_SCHEDULER_RANDOM_STATE),
-			     argc, argv,
-			     -1, pseudo_random_generator_p, "pseudo-random-generator", 0);
+  return scheme_param_config2("current-evt-pseudo-random-generator", 
+                              scheme_make_integer(MZCONFIG_SCHEDULER_RANDOM_STATE),
+                              argc, argv,
+                              -1, pseudo_random_generator_p, "pseudo-random-generator?", 0);
 }
 
 static Scheme_Object *make_pseudo_random_generator(int argc, Scheme_Object **argv)
