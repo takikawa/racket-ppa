@@ -1,4 +1,8 @@
 usr/include
 usr/share/racket/collects
+usr/share/racket/pkgs
+usr/share/racket/links.rktd
+usr/share/racket/shares.rktd
+usr/share/racket/info-cache.rktd
 usr/share/man
-usr/share/doc/racket/release-notes
+etc/racket
