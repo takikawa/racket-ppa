@@ -1,3 +1,9 @@
+racket (6.0+dfsg1-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Asumu Takikawa <asumu@ccs.neu.edu>  Wed, 08 Apr 2014 23:41:45 -0400
+
 racket (5.3.6+dfsg1-1) unstable; urgency=medium
 
   * New upstream bug fix release
