@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2014 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -414,7 +414,7 @@ static int define_values_validate(Scheme_Object *data, Mz_CPort *port,
   result = validate_expr(port, val, stack, tls, 
                          depth, letlimit, delta, 
                          num_toplevels, num_stxes, num_lifts, tl_use_map,
-                         tl_state, tl_timestamp + (stinfo.uses_super ? 1 : 0),
+                         tl_state, tl_timestamp + ((is_struct && stinfo.uses_super) ? 1 : 0),
                          NULL, !!only_var, 0, vc, 0, 0, NULL,
                          size-1, _st_ht);
 
@@ -1209,8 +1209,8 @@ static int validate_join_const(int result, int expected_results)
                             : 0));
 }
 
-static int is_functional_rator(Scheme_Object *rator, int num_args, int expected_results,
-                               Scheme_Hash_Table **_st_ht)
+static int is_functional_nonfailing_rator(Scheme_Object *rator, int num_args, int expected_results,
+                                          Scheme_Hash_Table **_st_ht)
 {
   if (_st_ht && *_st_ht && SAME_TYPE(SCHEME_TYPE(rator), scheme_toplevel_type)) {
     int flags = (SCHEME_TOPLEVEL_FLAGS(rator) & SCHEME_TOPLEVEL_FLAGS_MASK);
@@ -1232,7 +1232,7 @@ static int is_functional_rator(Scheme_Object *rator, int num_args, int expected_
     }
   }
 
-  return scheme_is_functional_primitive(rator, num_args, expected_results);
+  return scheme_is_functional_nonfailing_primitive(rator, num_args, expected_results);
 }
 
 #define CAN_RESET_STACK_SLOT 0
@@ -1539,7 +1539,7 @@ static int validate_expr(Mz_CPort *port, Scheme_Object *expr,
         check_self_call_valid(app->args[0], port, vc, delta, stack);
 
       if (result) {
-        r = is_functional_rator(app->args[0], app->num_args, expected_results, _st_ht);
+        r = is_functional_nonfailing_rator(app->args[0], app->num_args, expected_results, _st_ht);
         result = validate_join(result, r);
       }
     }
@@ -1571,7 +1571,7 @@ static int validate_expr(Mz_CPort *port, Scheme_Object *expr,
         check_self_call_valid(app->rator, port, vc, delta, stack);
 
       if (result) {
-        r = is_functional_rator(app->rator, 1, expected_results, _st_ht);
+        r = is_functional_nonfailing_rator(app->rator, 1, expected_results, _st_ht);
         result = validate_join(result, r);
       }
     }
@@ -1609,7 +1609,7 @@ static int validate_expr(Mz_CPort *port, Scheme_Object *expr,
         check_self_call_valid(app->rator, port, vc, delta, stack);
 
       if (result) {
-        r = is_functional_rator(app->rator, 2, expected_results, _st_ht);
+        r = is_functional_nonfailing_rator(app->rator, 2, expected_results, _st_ht);
         result = validate_join(r, result);
       }
     }
@@ -1621,7 +1621,8 @@ static int validate_expr(Mz_CPort *port, Scheme_Object *expr,
       int cnt;
       int i, r;
 
-      no_typed(need_local_type, port);
+      if (type != scheme_sequence_type)
+        no_typed(need_local_type, port);
       
       cnt = seq->count;
 	  
@@ -1642,8 +1643,6 @@ static int validate_expr(Mz_CPort *port, Scheme_Object *expr,
       Scheme_Branch_Rec *b;
       int vc_pos, vc_ncpos, r;
 
-      no_typed(need_local_type, port);
-
       b = (Scheme_Branch_Rec *)expr;
       r = validate_expr(port, b->test, stack, tls, depth, letlimit, delta, 
                         num_toplevels, num_stxes, num_lifts, tl_use_map,
@@ -1660,7 +1659,7 @@ static int validate_expr(Mz_CPort *port, Scheme_Object *expr,
       r = validate_expr(port, b->tbranch, stack, tls, depth, letlimit, delta, 
                         num_toplevels, num_stxes, num_lifts, tl_use_map,
                         tl_state, tl_timestamp,
-                        NULL, 0, result_ignored, vc, tailpos, 0, procs,
+                        NULL, 0, result_ignored, vc, tailpos, need_local_type, procs,
                         expected_results, NULL);
       result = validate_join_seq(result, r);
       
@@ -1812,6 +1811,7 @@ static int validate_expr(Mz_CPort *port, Scheme_Object *expr,
   case scheme_letrec_type:
     {
       Scheme_Letrec *l = (Scheme_Letrec *)expr;
+      Scheme_Closure_Data *data;
       int i, c;
 
       c = l->count;
@@ -1830,10 +1830,20 @@ static int validate_expr(Mz_CPort *port, Scheme_Object *expr,
           scheme_ill_formed_code(port);
 #endif
 	stack[delta + i] = VALID_VAL;
-        if (SCHEME_CLOSURE_DATA_FLAGS(((Scheme_Closure_Data *)l->procs[i])) & CLOS_HAS_TYPED_ARGS) {
-          procs = scheme_hash_tree_set(as_nonempty_procs(procs),
-                                       scheme_make_integer(delta + i),
-                                       l->procs[i]);
+        data = (Scheme_Closure_Data *)l->procs[i];
+        if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_TYPED_ARGS) {
+          /* If any arguments (as opposed to closure slots) are typed, then
+             add the procedure to `procs': */
+          int j;
+          for (j = data->num_params; j--; ) {
+            if (scheme_boxmap_get(data->closure_map, j, data->closure_size))
+              break;
+          }
+          if (j >= 0) {
+            procs = scheme_hash_tree_set(as_nonempty_procs(procs),
+                                         scheme_make_integer(delta + i),
+                                         l->procs[i]);
+          }
         }
       }
 
@@ -1982,11 +1992,15 @@ static int validate_expr(Mz_CPort *port, Scheme_Object *expr,
        Such a closure can refer back to itself, so we use a flag
        to track cycles. Also check need_local_type. */
     result = validate_join_const(result, expected_results);
-    if (SAME_TYPE(type, scheme_closure_type)) {
+    if (SAME_TYPE(type, scheme_closure_type)
+        /* If the closure is not empty, then it must be from 3-D code
+           (where PLT_VALIDATE_COMPILE is set), and validation is not
+           our responsibility here: */
+        && (SCHEME_COMPILED_CLOS_CODE(expr)->closure_size == 0)) {
       Scheme_Closure_Data *data;
       no_typed(need_local_type, port);
       expr = (Scheme_Object *)SCHEME_COMPILED_CLOS_CODE(expr);
-      data = (Scheme_Closure_Data *)expr;        
+      data = (Scheme_Closure_Data *)expr;
       if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_VALIDATED) {
         /* Done with this one. */
       } else {

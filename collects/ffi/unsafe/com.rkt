@@ -1447,13 +1447,18 @@
                 (define s (make-SYSTEMTIME 0 0 0 0 0 0 0 0))
                 (unless (not (zero? (VariantTimeToSystemTime d s)))
                   (error 'date "error converting date from COM date"))
-                (seconds->date
-                 (find-seconds (SYSTEMTIME-wSecond s)
-                               (SYSTEMTIME-wMinute s)
-                               (SYSTEMTIME-wHour s)
-                               (SYSTEMTIME-wDay s)
-                               (SYSTEMTIME-wMonth s)
-                               (SYSTEMTIME-wYear s))))))
+                (date* (SYSTEMTIME-wSecond s)
+                       (SYSTEMTIME-wMinute s)
+                       (SYSTEMTIME-wHour s)
+                       (SYSTEMTIME-wDay s)
+                       (SYSTEMTIME-wMonth s)
+                       (SYSTEMTIME-wYear s)
+                       (SYSTEMTIME-wDayOfWeek s)
+                       0
+                       #f
+                       0
+                       (* 1000 (SYSTEMTIME-wMilliseconds s))
+                       "UTC"))))
 
 (define _currency
   (make-ctype _CY
@@ -1461,7 +1466,13 @@
                 (* s CY-factor))
               (lambda (s)
                 (/ s CY-factor))))
-              
+
+(define _bool16
+  (make-ctype _uint16
+	      (lambda (s)
+		(if s #xFFFF #x0000))
+	      (lambda (s)
+		(positive? s))))
 
 (define (unsigned-int? v n)
   (and (exact-integer? v)
@@ -1761,7 +1772,7 @@
       [(string) (_system-string/utf-16 mode)]
       [(currency) _currency]
       [(date) _date]
-      [(boolean) _bool]
+      [(boolean) _bool16]
       [(scode) _SCODE]
       [(iunknown) (_IUnknown-pointer-or-com-object mode)]
       [(com-object) (_com-object mode)]

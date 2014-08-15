@@ -185,6 +185,43 @@
 
   ;; -------------------------------------------------------------------------
 
+  (define (string-no-nuls? s)
+    (and (string? s)
+         (not (regexp-match? #rx"\0" s))))
+
+  (define (bytes-environment-variable-name? s)
+    (and (bytes? s)
+         (if (eq? 'windows (system-type))
+             (regexp-match? #rx#"^[^\0=]+$" s)
+             (regexp-match? #rx#"^[^\0=]*$" s))))
+
+  (define (string-environment-variable-name? s)
+    (and (string? s)
+         (bytes-environment-variable-name?
+          (string->bytes/locale s (char->integer #\?)))))
+
+  (define (getenv s)
+    (unless (string-environment-variable-name? s)
+      (raise-argument-error 'getenv "string-environment-variable-name?" s))
+    (let ([v (environment-variables-ref (current-environment-variables)
+                                        (string->bytes/locale s (char->integer #\?)))])
+      (and v
+           (bytes->string/locale v #\?))))
+
+  (define (putenv s t)
+    (unless (string-no-nuls? s)
+      (raise-argument-error 'putenv "string-environment-variable-name?" 0 s t))
+    (unless (string-no-nuls? t)
+      (raise-argument-error 'putenv "string-no-nuls?" 1 s t))
+    (and
+     (environment-variables-set! (current-environment-variables)
+                                 (string->bytes/locale s (char->integer #\?))
+                                 (string->bytes/locale t (char->integer #\?))
+                                 (lambda () #f))
+     #t))
+
+  ;; -------------------------------------------------------------------------
+
   (#%provide define-syntax-rule
              rationalize 
              path-string? path-replace-suffix path-add-suffix 
@@ -196,4 +233,9 @@
              collection-path collection-file-path load/use-compiled
              guard-evt channel-get channel-try-get channel-put
              port? displayln
-             find-library-collection-paths))
+             find-library-collection-paths
+             find-library-collection-links
+             bytes-environment-variable-name?
+             string-environment-variable-name?
+             getenv putenv
+             call-with-default-reading-parameterization))

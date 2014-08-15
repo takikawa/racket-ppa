@@ -8,10 +8,16 @@
 ;; .zo file. Do not `require' this module from anywhere, not even 
 ;; `for-label', otherwise it could get a .zo anyway.
 
+;; Also, do not `require' any module that is compiled. That constraint
+;; essentially restrcts this module to `require's of '#%... modules.
+
 (module main '#%kernel
   (#%require '#%min-stx
+             '#%utils ; for find-main-collects
              ;; Need to make sure they're here:
              '#%builtin)
+
+  (module test '#%kernel)
 
   (when (file-stream-port? (current-output-port))
     (file-stream-buffer-mode (current-output-port) 'line))
@@ -54,6 +60,14 @@
 
   (define-values (flags) (filter-flags (vector->list (current-command-line-arguments))))
 
+  (define-values (member)
+    (lambda (a l)
+      (if (null? l)
+          #f
+          (if (equal? a (car l))
+              l
+              (member a (cdr l))))))
+
   ;; Checks whether a flag is present:
   (define-values (on?)
     (lambda (flag-name)
@@ -66,9 +80,8 @@
   (define-values (main-collects-relative->path)
     (let ([main-collects #f])
       (lambda (p)
-        ;; At this point, it's safe to try to load 'setup/private/main-collects
         (unless main-collects
-          (set! main-collects ((dynamic-require 'setup/private/main-collects 'find-main-collects))))
+          (set! main-collects (find-main-collects)))
         (if (and (pair? p)
                  (eq? 'collects (car p)))
             (apply build-path main-collects

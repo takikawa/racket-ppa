@@ -1,7 +1,10 @@
 #lang racket/base
 (require racket/list
+         racket/format
          syntax/stx
          unstable/struct
+         unstable/error
+         syntax/srcloc
          "minimatch.rkt"
          (except-in syntax/parse/private/residual
                     syntax-patterns-fail)
@@ -9,9 +12,6 @@
 (provide syntax-patterns-fail
          current-failure-handler
          maximal-failures
-
-         exn:syntax-parse?
-         exn:syntax-parse-info
 
          invert-ps
          ps->stx+index
@@ -46,16 +46,6 @@ broken by a lazy-require of this module into residual.rkt
 ;; Hack: alternative to new (primitive) phase-crossing exn type is to
 ;; store extra information in exn continuation marks.
 
-(define (exn:syntax-parse? x)
-  (and (exn:fail:syntax? x)
-       (pair? (continuation-mark-set-first
-               (exn-continuation-marks x)
-               'exn:syntax-parse))))
-
-;; exn:syntax-parse-info : exn:syntax-parse -> (cons syntax failureset)
-(define (exn:syntax-parse-info x)
-  (continuation-mark-set-first (exn-continuation-marks x) 'exn:syntax-parse))
-
 #|
 Reporting
 ---------
@@ -71,12 +61,11 @@ complicated.
 (define (report-failureset stx0 fs)
   (let* ([classes (maximal-failures fs)]
          [reports (apply append (map report/class classes))])
-    (with-continuation-mark 'exn:syntax-parse (cons stx0 fs)
-      (raise-syntax-error/reports stx0 reports))))
+    (raise-syntax-error/reports stx0 reports)))
 
 ;; A Report is
-;;   - (report string stx)
-(define-struct report (message stx) #:prefab)
+;;   - (report string (listof string) stx stx)
+(define-struct report (message context stx within-stx) #:prefab)
 
 ;; report/class : (non-empty-listof Failure) -> (listof Report)
 (define (report/class fs)
@@ -90,31 +79,39 @@ complicated.
 
 ;; report/expectstack : ExpectStack syntax nat -> Report
 (define (report/expectstack es stx index)
-  (let ([frame-expect (and (pair? es) (car es))])
+  (let ([frame-expect (and (pair? es) (car es))]
+        [context (append* (map context-prose-for-expect (if (pair? es) (cdr es) null)))])
     (cond [(not frame-expect)
-           (report "bad syntax" #f)]
+           (report "bad syntax" context #f #f)]
           [else
-           (let ([frame-stx
-                  (let-values ([(x cx) (stx-list-drop/cx stx stx index)])
-                    (datum->syntax cx x cx))])
+           (let-values ([(frame-stx within-stx)
+                         (let-values ([(x cx) (stx-list-drop/cx stx stx index)])
+                           (values (datum->syntax cx x cx)
+                                   (if (syntax? x) #f cx)))])
              (cond [(equal? frame-expect (expect:atom '() #f))
                     (syntax-case frame-stx ()
                       [(one . more)
-                       (report "unexpected term" #'one)]
+                       (report "unexpected term" context #'one #f)]
                       [_
-                       (report/expects (list frame-expect) frame-stx)])]
+                       (report (prose-for-expect frame-expect) context frame-stx within-stx)])]
                    [(expect:disj? frame-expect)
-                    (report/expects (expect:disj-expects frame-expect) frame-stx)]
+                    (report (prose-for-expects (expect:disj-expects frame-expect))
+                            context frame-stx within-stx)]
                    [else
-                    (report/expects (list frame-expect) frame-stx)]))])))
+                    (report (prose-for-expects (list frame-expect))
+                            context frame-stx within-stx)]))])))
 
-;; report/expects : (listof Expect) syntax -> Report
+;; prose-for-expects : (listof Expect) -> string
 ;; FIXME: partition by role first?
-(define (report/expects expects frame-stx)
-  (report (join-sep (for/list ([expect expects])
+(define (prose-for-expects expects)
+  (join-sep (append (for/list ([expect expects]
+                               #:when (not (expect:proper-pair? expect)))
                       (prose-for-expect expect))
-                    ";" "or")
-          frame-stx))
+                    (let ([proper-pair-expects (filter expect:proper-pair? expects)])
+                      (if (pair? proper-pair-expects)
+                          (list (prose-for-proper-pair-expects proper-pair-expects))
+                          null)))
+            ";" "or"))
 
 ;; prose-for-expect : Expect -> string
 (define (prose-for-expect e)
@@ -131,25 +128,62 @@ complicated.
     [(expect:literal literal _)
      (format "expected the identifier `~s'" (syntax-e literal))]
     [(expect:message message _)
-     (format "~a" message)]))
+     (format "~a" message)]
+    [(expect:proper-pair '#f _)
+     "expected more terms"]))
+
+;; prose-for-proper-pair-expects : (listof expect:proper-pair) -> string
+(define (prose-for-proper-pair-expects es)
+  (define descs (remove-duplicates (map expect:proper-pair-first-desc es)))
+  (cond [(for/or ([desc descs]) (equal? desc #f))
+         ;; FIXME: better way to indicate unknown ???
+         "expected more terms"]
+        [else
+         (format "expected more terms starting with ~a"
+                 (join-sep (map prose-for-first-desc descs)
+                           "," "or"))]))
+
+;; prose-for-first-desc : FirstDesc -> string
+(define (prose-for-first-desc desc)
+  (match desc
+    [(? string?) desc]
+    [(list 'any) "any term"] ;; FIXME: maybe should cancel out other descs ???
+    [(list 'literal id) (format "the literal symbol `~s'" id)]
+    [(list 'datum d) (format "the literal ~s" d)]))
+
+;; context-prose-for-expect : expect:thing -> (listof string)
+(define (context-prose-for-expect e)
+  (match e
+    [(expect:thing stx+index description transparent? role _)
+     (let ([stx (stx+index->stx stx+index)])
+       (cons (~a "while parsing " description
+                 (if role (~a " for " role) ""))
+             (if (error-print-source-location)
+                 (list (~a " term: "
+                           (~s (syntax->datum stx)
+                               #:limit-marker "..."
+                               #:max-width 50))
+                       (~a " location: "
+                           (or (source-location->string stx) "not available")))
+                 null)))]))
+
+(define (stx+index->stx stx+index)
+  (let*-values ([(stx) (car stx+index)]
+                [(index) (cdr stx+index)]
+                [(x cx) (stx-list-drop/cx stx stx index)])
+    (datum->syntax cx x cx)))
 
 ;; == Do Report ==
 
 (define (raise-syntax-error/reports stx0 reports)
-  (cond [(= (length reports) 1)
-         (raise-syntax-error/report stx0 (car reports))]
-        [else
-         (raise-syntax-error/report* stx0 (car reports))]))
-
-(define (raise-syntax-error/report stx0 report)
-  (raise-syntax-error #f (report-message report) stx0 (report-stx report)))
-
-(define (raise-syntax-error/report* stx0 report)
-  (let ([message
-         (string-append
-          "There were multiple syntax errors. The first error follows:\n"
-          (report-message report))])
-    (raise-syntax-error #f message stx0 (report-stx report))))
+  (let* ([report (car reports)]
+         [more? (pair? (cdr reports))]
+         [message0 (report-message report)]
+         [context (report-context report)])
+    (raise-syntax-error* message0 stx0 (report-stx report)
+                         #:within (report-within-stx report)
+                         '("parsing context" multi maybe) context
+                         '("note" maybe) (and more? "additional errors omitted"))))
 
 ;; ====
 
@@ -201,7 +235,9 @@ complicated.
         [(expect:atom atom rest-es)
          (cons (expect:atom atom #f) (loop rest-es))]
         [(expect:literal literal rest-es)
-         (cons (expect:literal literal #f) (loop rest-es))]))))
+         (cons (expect:literal literal #f) (loop rest-es))]
+        [(expect:proper-pair first-desc rest-es)
+         (cons (expect:proper-pair first-desc #f) (loop rest-es))]))))
 
 #|
 Simplification dilemma

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2014 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -45,6 +45,8 @@ ROSYM static Scheme_Object *lexical_symbol;
 ROSYM static Scheme_Object *protected_symbol;
 ROSYM static Scheme_Object *nominal_id_symbol;
 
+READ_ONLY Scheme_Object *scheme_syntax_p_proc;
+
 READ_ONLY static Scheme_Stx_Srcloc *empty_srcloc;
 READ_ONLY static Scheme_Object *empty_simplified;
 
@@ -88,6 +90,7 @@ static Scheme_Object *module_binding(int argc, Scheme_Object **argv);
 static Scheme_Object *module_trans_binding(int argc, Scheme_Object **argv);
 static Scheme_Object *module_templ_binding(int argc, Scheme_Object **argv);
 static Scheme_Object *module_label_binding(int argc, Scheme_Object **argv);
+static Scheme_Object *module_binding_symbol(int argc, Scheme_Object **argv);
 static Scheme_Object *identifier_prune(int argc, Scheme_Object **argv);
 static Scheme_Object *identifier_prune_to_module(int argc, Scheme_Object **argv);
 static Scheme_Object *syntax_src_module(int argc, Scheme_Object **argv);
@@ -406,11 +409,17 @@ XFORM_NONGCING static void DO_WRAP_POS_REVINIT(Wrap_Pos *w, Scheme_Object *k)
 
 void scheme_init_stx(Scheme_Env *env)
 {
+  Scheme_Object *o;
+
 #ifdef MZ_PRECISE_GC
   register_traversers();
 #endif
 
-  GLOBAL_FOLDING_PRIM_UNARY_INLINED("syntax?", syntax_p, 1, 1, 1, env);
+  REGISTER_SO(scheme_syntax_p_proc);
+  o = scheme_make_folding_prim(syntax_p, "syntax?", 1, 1, 1);
+  scheme_syntax_p_proc = o;
+  SCHEME_PRIM_PROC_FLAGS(o) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED);
+  scheme_add_global_constant("syntax?", o, env);
 
   GLOBAL_FOLDING_PRIM("syntax->datum", syntax_to_datum, 1, 1, 1, env);
   GLOBAL_FOLDING_PRIM("datum->syntax", datum_to_syntax, 2, 5, 1, env);
@@ -445,6 +454,8 @@ void scheme_init_stx(Scheme_Env *env)
   GLOBAL_IMMED_PRIM("identifier-label-binding"         , module_label_binding      , 1, 1, env);
   GLOBAL_IMMED_PRIM("identifier-prune-lexical-context" , identifier_prune          , 1, 2, env);
   GLOBAL_IMMED_PRIM("identifier-prune-to-source-module", identifier_prune_to_module, 1, 1, env);
+
+  GLOBAL_IMMED_PRIM("identifier-binding-symbol"        , module_binding_symbol     , 1, 2, env);
 
   GLOBAL_NONCM_PRIM("syntax-source-module"             , syntax_src_module         , 1, 2, env);
 
@@ -2042,6 +2053,7 @@ static Scheme_Object *extract_module_free_id_binding(Scheme_Object *mrn,
   Scheme_Object *rename_insp;
 
   if (scheme_hash_get(free_id_recur, id)) {
+    *_sealed = 1;
     return id;
   }
   scheme_hash_set(free_id_recur, id, id);
@@ -3954,7 +3966,7 @@ static Scheme_Object *resolve_env(Scheme_Object *a, Scheme_Object *orig_phase,
                       mrn ? SCHEME_INT_VAL(mrn->set_identity) : -1,
                       mrn ? mrn->kind : -1));
 
-      if (mrn && (!is_in_module || (mrn->kind != mzMOD_RENAME_TOPLEVEL)) 
+      if (mrn && (!is_in_module || (mrn->kind != mzMOD_RENAME_TOPLEVEL))
           && !skip_other_mods) {
 	if (mrn->kind != mzMOD_RENAME_TOPLEVEL)
 	  is_in_module = 1;
@@ -4041,7 +4053,7 @@ static Scheme_Object *resolve_env(Scheme_Object *a, Scheme_Object *orig_phase,
           EXPLAIN(fprintf(stderr, "%d  search result: %p\n", depth, rename));
             	  
 	  if (rename) {
-            if (mrn->sealed < STX_SEAL_BOUND)
+            if ((mrn->sealed < STX_SEAL_BOUND) && is_in_module)
               mresult_depends_unsealed = 1;
 
 	    if (mrn->kind == mzMOD_RENAME_MARKED) {
@@ -4159,7 +4171,7 @@ static Scheme_Object *resolve_env(Scheme_Object *a, Scheme_Object *orig_phase,
               get_names[6] = (mrn->insp ? mrn->insp : mresult_insp);
             EXPLAIN(fprintf(stderr, "%d  mresult_insp %p %p\n", depth, mresult_insp, mrn->insp));
           } else {
-            if (mrn->sealed < STX_SEAL_ALL)
+            if ((mrn->sealed < STX_SEAL_ALL) && is_in_module)
               mresult_depends_unsealed = 1;
 	    mresult = scheme_false;
             mresult_skipped = -1;
@@ -4437,8 +4449,9 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
   Scheme_Object *bdg = NULL;
 
   result = ((Scheme_Stx *)a)->u.modinfo_cache;
-  if (result && SAME_OBJ(phase, scheme_make_integer(0)))
+  if (result && SAME_OBJ(phase, scheme_make_integer(0))) {
     return result;
+  }
 
   WRAP_POS_INIT(wraps, ((Scheme_Stx *)a)->wraps);
 
@@ -4458,7 +4471,7 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
 	result = SCHEME_STX_VAL(a);
 
 #if 0
-      printf("%p %p %s (%d) %d %p\n", 
+      printf("%p %p %s (%d) %d %p\n",
              a, orig_phase, SCHEME_SYMBOLP(result) ? SCHEME_SYM_VAL(result) : "!?", 
              can_cache, sealed, free_id_recur);
 #endif 
@@ -4563,7 +4576,10 @@ static Scheme_Object *get_module_src_name(Scheme_Object *a, Scheme_Object *orig_
             if (SCHEME_BOXP(rename)) {
               /* only happens with free_id_renames */
               rename = SCHEME_BOX_VAL(rename);
-              result = SCHEME_CAR(rename);
+              if (no_lexical || SCHEME_TRUEP(SCHEME_CDR(rename)))
+                result = SCHEME_CAR(rename);
+              else
+                rename = NULL;
             } else if (SCHEME_PAIRP(rename)) {
 	      if (nom_mod_p(rename)) {
 		result = glob_id;
@@ -4699,6 +4715,7 @@ int scheme_stx_module_eq3(Scheme_Object *a, Scheme_Object *b,
 {
   Scheme_Object *bsym;
   Scheme_Hash_Table *free_id_recur;
+  int must_be_lex;
 
   if (!a || !b)
     return (a == b);
@@ -4722,9 +4739,18 @@ int scheme_stx_module_eq3(Scheme_Object *a, Scheme_Object *b,
       asym = a;
   }
 
+  must_be_lex = 0;
+
   /* Same name? */
-  if (!SAME_OBJ(asym, bsym))
-    return 0;
+  if (!SAME_OBJ(asym, bsym)) {
+    /* It's ok to have different names if they have
+       the same symbolic name and the same lexical binding,
+       so double-check that our shortcut worked... */
+    if (SAME_OBJ(SCHEME_STX_VAL(a), SCHEME_STX_VAL(b)))
+      must_be_lex = 1;
+    else
+      return 0;
+  }
 
   if ((a == asym) || (b == bsym))
     return 1;
@@ -4732,6 +4758,9 @@ int scheme_stx_module_eq3(Scheme_Object *a, Scheme_Object *b,
   free_id_recur = make_recur_table();
   a = resolve_env(a, a_phase, 1, NULL, NULL, NULL, NULL, 0, free_id_recur);
   release_recur_table(free_id_recur);
+
+  if (must_be_lex && !SCHEME_SYMBOLP(a))
+    return 0;
 
   free_id_recur = make_recur_table();
   b = resolve_env(b, b_phase, 1, NULL, NULL, NULL, NULL, 0, free_id_recur);
@@ -4748,7 +4777,7 @@ int scheme_stx_module_eq3(Scheme_Object *a, Scheme_Object *b,
 
 int scheme_stx_module_eq2(Scheme_Object *a, Scheme_Object *b, Scheme_Object *phase, Scheme_Object *asym)
 {
-  return scheme_stx_module_eq3(a, b, phase, phase, NULL);
+  return scheme_stx_module_eq3(a, b, phase, phase, asym);
 }
 
 int scheme_stx_module_eq(Scheme_Object *a, Scheme_Object *b, intptr_t phase)
@@ -5365,7 +5394,7 @@ static Scheme_Object *simplify_lex_renames(Scheme_Object *wraps, Scheme_Hash_Tab
   /* Although it makes no sense to simplify the rename table itself,
      we can simplify it in the context of a particular wrap suffix.
      (But don't mutate the wrap list, because that will stomp on
-     tables that might be needed by a propoagation.)
+     tables that might be needed by a propagation.)
 
      A lex_cache maps wrap starts within `w' to lists of simplified
      tables. This helps avoid re-simplifying when the result is
@@ -6310,6 +6339,12 @@ static Scheme_Object *wraps_to_datum(Scheme_Object *stx_datum,
                                                          free_id_recur);
                       release_recur_table(free_id_recur);
                       if (!sealed) {
+                        free_id_recur = make_recur_table();
+                        extract_module_free_id_binding((Scheme_Object *)mrn,
+                                                       mrn->free_id_renames->keys[i],
+                                                       mrn->free_id_renames->vals[i],
+                                                       &sealed,
+                                                       free_id_recur);
                         scheme_signal_error("write: unsealed local-definition or module context"
                                             " found in syntax object");
                       }
@@ -6339,16 +6374,14 @@ static Scheme_Object *wraps_to_datum(Scheme_Object *stx_datum,
            identity. */
         WRAP_POS l;
         Scheme_Object *la, *this_set_identity, *set_identity;
-        int kind, sealed;
+        int kind;
 
         if (SCHEME_RENAMESP(a)) {
           this_set_identity = ((Module_Renames *)a)->set_identity;
           kind = ((Module_Renames *)a)->kind;
-          sealed = ((Module_Renames *)a)->sealed;
         } else {
           this_set_identity = ((Module_Renames_Set *)a)->set_identity;
           kind = ((Module_Renames_Set *)a)->kind;
-          sealed = ((Module_Renames_Set *)a)->sealed;
         }
         
         if (kind != mzMOD_RENAME_TOPLEVEL) {
@@ -6388,14 +6421,12 @@ static Scheme_Object *wraps_to_datum(Scheme_Object *stx_datum,
               scheme_hash_set(rns, scheme_eof, (Scheme_Object *)identity_map);
             }
 
-            key = scheme_make_pair(scheme_make_integer(kind), 
-                                   scheme_make_pair(scheme_make_integer(sealed),
-                                                    this_set_identity));
-
+            key = scheme_make_pair(scheme_make_integer(kind), this_set_identity);
+            
             la = scheme_hash_get(identity_map, key);
             if (!la) {
               la = scheme_make_module_rename(scheme_make_integer(0), kind, NULL, NULL, this_set_identity);
-              ((Module_Renames *)la)->sealed = sealed;
+              ((Module_Renames *)la)->sealed = STX_SEAL_ALL;
               scheme_hash_set(identity_map, key, la);
             }
 
@@ -6580,7 +6611,7 @@ static Scheme_Object *extract_for_common_wrap(Scheme_Object *a, int get_mark, in
         else
           return SCHEME_CDR(v);
       }
-    } else if (!SCHEME_BOXP(v) && !SCHEME_VECTORP(v) && !prefab_p(v)) {
+    } else if (!SCHEME_BOXP(v) && !SCHEME_VECTORP(v) && !SCHEME_HASHTRP(v) && !prefab_p(v)) {
       /* It's atomic. */
       if (get_mark)
         return SCHEME_CDR(a);
@@ -8556,7 +8587,8 @@ static Scheme_Object *module_label_eq(int argc, Scheme_Object **argv)
   return do_module_eq("free-label-identifier=?", MZ_LABEL_PHASE, argc, argv);
 }
 
-static Scheme_Object *do_module_binding(char *name, int argc, Scheme_Object **argv, Scheme_Object *dphase)
+static Scheme_Object *do_module_binding(char *name, int argc, Scheme_Object **argv, 
+                                        Scheme_Object *dphase, int get_symbol)
 {
   Scheme_Object *a, *m, *nom_mod, *nom_a, *phase;
   Scheme_Object *src_phase_index, *mod_phase, *nominal_src_phase;
@@ -8597,6 +8629,14 @@ static Scheme_Object *do_module_binding(char *name, int argc, Scheme_Object **ar
                              NULL,
                              NULL);
 
+  if (get_symbol) {
+    if ((!m || SAME_OBJ(m, scheme_undefined)) && nom_a) 
+      a = nom_a;
+    if (SCHEME_STXP(a))
+      a = SCHEME_STX_VAL(a);
+    return a;
+  }
+
   if (!m)
     return scheme_false;
   else if (SAME_OBJ(m, scheme_undefined)) {
@@ -8612,22 +8652,27 @@ static Scheme_Object *do_module_binding(char *name, int argc, Scheme_Object **ar
 
 static Scheme_Object *module_binding(int argc, Scheme_Object **argv)
 {
-  return do_module_binding("identifier-binding", argc, argv, scheme_make_integer(0));
+  return do_module_binding("identifier-binding", argc, argv, scheme_make_integer(0), 0);
 }
 
 static Scheme_Object *module_trans_binding(int argc, Scheme_Object **argv)
 {
-  return do_module_binding("identifier-transformer-binding", argc, argv, scheme_make_integer(1));
+  return do_module_binding("identifier-transformer-binding", argc, argv, scheme_make_integer(1), 0);
 }
 
 static Scheme_Object *module_templ_binding(int argc, Scheme_Object **argv)
 {
-  return do_module_binding("identifier-template-binding", argc, argv, scheme_make_integer(-1));
+  return do_module_binding("identifier-template-binding", argc, argv, scheme_make_integer(-1), 0);
 }
 
 static Scheme_Object *module_label_binding(int argc, Scheme_Object **argv)
 {
-  return do_module_binding("identifier-label-binding", argc, argv, scheme_false);
+  return do_module_binding("identifier-label-binding", argc, argv, scheme_false, 0);
+}
+
+static Scheme_Object *module_binding_symbol(int argc, Scheme_Object **argv)
+{
+  return do_module_binding("identifier-binding-symbol", argc, argv, scheme_make_integer(0), 1);
 }
 
 static Scheme_Object *identifier_prune(int argc, Scheme_Object **argv)

@@ -31,14 +31,15 @@
          count
          partition
 
-         argmin
-         argmax
-
          ;; convenience
+         range
          append-map
          filter-not
          shuffle
-         range)
+         permutations
+         in-permutations
+         argmin
+         argmax)
 
 (define (first x)
   (if (and (pair? x) (list? x))
@@ -88,8 +89,8 @@
     (cdr l)
     (raise-argument-error 'rest "(and/c list? (not/c empty?))" l)))
 
-(define cons? (lambda (l) (pair? l)))
-(define empty? (lambda (l) (null? l)))
+(define (cons? l) (pair? l))
+(define (empty? l) (null? l))
 (define empty '())
 
 (define (make-list n x)
@@ -137,7 +138,7 @@
 
 (define (takef list pred)
   (unless (procedure? pred)
-    (raise-argument-error 'takef "procedure?" 0 list pred))
+    (raise-argument-error 'takef "procedure?" 1 list pred))
   (let loop ([list list])
     (if (pair? list)
       (let ([x (car list)])
@@ -151,7 +152,7 @@
 
 (define (dropf list pred)
   (unless (procedure? pred)
-    (raise-argument-error 'dropf "procedure?" 0 list pred))
+    (raise-argument-error 'dropf "procedure?" 1 list pred))
   (let loop ([list list])
     (if (and (pair? list) (pred (car list)))
       (loop (cdr list))
@@ -159,7 +160,7 @@
 
 (define (splitf-at list pred)
   (unless (procedure? pred)
-    (raise-argument-error 'splitf-at "procedure?" 0 list pred))
+    (raise-argument-error 'splitf-at "procedure?" 1 list pred))
   (let loop ([list list] [pfx '()])
     (if (and (pair? list) (pred (car list)))
       (loop (cdr list) (cons (car list) pfx))
@@ -317,7 +318,7 @@
        ;; and for equalities other than `eq?' or `equal?'  The length threshold
        ;; above (40) was determined by trying it out with lists of length n
        ;; holding (random n) numbers.
-       (let ([key (or key (lambda (x) x))])
+       (let ([key (or key (λ(x) x))])
          (let-syntax ([loop (syntax-rules ()
                               [(_ search)
                                (let loop ([l l] [seen null])
@@ -330,8 +331,7 @@
            (cond [(eq? =? equal?) (loop member)]
                  [(eq? =? eq?)    (loop memq)]
                  [(eq? =? eqv?)   (loop memv)]
-                 [else (loop (lambda (x seen)
-                               (ormap (lambda (y) (=? x y)) seen)))])))]
+                 [else (loop (λ(x seen) (ormap (λ(y) (=? x y)) seen)))])))]
       [else
        ;; Use a hash for long lists with simple hash tables.
        (let-syntax ([loop
@@ -351,19 +351,19 @@
   (unless (procedure? f)
     (raise-argument-error who "procedure?" f))
   (unless (procedure-arity-includes? f (add1 (length ls)))
-    (raise-arguments-error who "mismatch between procedure arity and argument count"
-                           "procedure" f
-                           "expected arity" (add1 (length ls))))
+    (raise-arguments-error
+     who "mismatch between procedure arity and argument count"
+     "procedure" f
+     "expected arity" (add1 (length ls))))
   (unless (and (list? l) (andmap list? ls))
-    (raise-argument-error
-     who "list?"
-     (ormap (lambda (x) (and (not (list? x)) x)) (cons l ls)))))
+    (for ([x (in-list (cons l ls))])
+      (unless (list? x) (raise-argument-error who "list?" x)))))
 
 (define (filter-map f l . ls)
   (check-filter-arguments 'filter-map f l ls)
   (if (pair? ls)
     (let ([len (length l)])
-      (if (andmap (lambda (l) (= len (length l))) ls)
+      (if (andmap (λ(l) (= len (length l))) ls)
         (let loop ([l l] [ls ls])
           (if (null? l)
             null
@@ -383,7 +383,7 @@
   (check-filter-arguments 'count f l ls)
   (if (pair? ls)
     (let ([len (length l)])
-      (if (andmap (lambda (l) (= len (length l))) ls)
+      (if (andmap (λ(l) (= len (length l))) ls)
         (let loop ([l l] [ls ls] [c 0])
           (if (null? l)
             c
@@ -418,9 +418,16 @@
       (let ([x (car l)] [l (cdr l)])
         (if (pred x) (loop l (cons x i) o) (loop l i (cons x o)))))))
 
+;; similar to in-range, but returns a list
+(define range
+  (case-lambda
+    [(end)            (for/list ([i (in-range end)])            i)]
+    [(start end)      (for/list ([i (in-range start end)])      i)]
+    [(start end step) (for/list ([i (in-range start end step)]) i)]))
+
 (define append-map
-  (case-lambda [(f l) (apply append (map f l))]
-               [(f l1 l2) (apply append (map f l1 l2))]
+  (case-lambda [(f l)      (apply append (map f l))]
+               [(f l1 l2)  (apply append (map f l1 l2))]
                [(f l . ls) (apply append (apply map f l ls))]))
 
 ;; this is an exact copy of `filter' in racket/private/list, with the
@@ -439,7 +446,83 @@
       (loop (cdr l) (if (f (car l)) result (cons (car l) result))))))
 
 (define (shuffle l)
-  (sort l < #:key (lambda (_) (random)) #:cache-keys? #t))
+  (sort l < #:key (λ(_) (random)) #:cache-keys? #t))
+
+;; This implements an algorithm known as "Ord-Smith".  (It is described in a
+;; paper called "Permutation Generation Methods" by Robert Sedgewlck, listed as
+;; Algorithm 8.)  It has a number of good properties: it is very fast, returns
+;; a list of results that has a maximum number of shared list tails, and it
+;; returns a list of reverses of permutations in lexical order of the input,
+;; except that the list itself is reversed so the first permutation is equal to
+;; the input and the last is its reverse.  In other words, (map reverse
+;; (permutations (reverse l))) is a list of lexicographically-ordered
+;; permutations (but of course has no shared tails at all -- I couldn't find
+;; anything that returns sorted results with shared tails efficiently).  I'm
+;; not listing these features in the documentation, since I'm not sure that
+;; there is a need to expose them as guarantees -- but if there is, then just
+;; revise the docs.  (Note that they are tested.)
+;;
+;; In addition to all of this, it has just one loop, so it is easy to turn it
+;; into a "streaming" version that spits out the permutations one-by-one, which
+;; could be used with a "callback" argument as in the paper, or can implement
+;; an efficient `in-permutations'.  It uses a vector to hold state -- it's easy
+;; to avoid this and use a list instead (in the loop, the part of the c vector
+;; that is before i is all zeros, so just use a list of the c values from i and
+;; on) -- but that makes it slower (by about 70% in my timings).
+(define (swap+flip l i j)
+  ;; this is the main helper for the code: swaps the i-th and j-th items, then
+  ;; reverses items 0 to j-1; with special cases for 0,1,2 (which are
+  ;; exponentially more frequent than others)
+  (case j
+    [(0) `(,(cadr l) ,(car l) ,@(cddr l))]
+    [(1) (let ([a (car l)] [b (cadr l)] [c (caddr l)] [l (cdddr l)])
+           (case i [(0)  `(,b ,c ,a ,@l)]
+                 [else `(,c ,a ,b ,@l)]))]
+    [(2) (let ([a (car l)] [b (cadr l)] [c (caddr l)] [d (cadddr l)]
+               [l (cddddr l)])
+           (case i [(0)  `(,c ,b ,d ,a ,@l)]
+                   [(1)  `(,c ,d ,a ,b ,@l)]
+                   [else `(,d ,b ,a ,c ,@l)]))]
+    [else (let loop ([n i] [l1 '()] [r1 l])
+            (if (> n 0) (loop (sub1 n) (cons (car r1) l1) (cdr r1))
+                (let loop ([n (- j i)] [l2 '()] [r2 (cdr r1)])
+                  (if (> n 0) (loop (sub1 n) (cons (car r2) l2) (cdr r2))
+                      `(,@l2 ,(car r2) ,@l1 ,(car r1) ,@(cdr r2))))))]))
+(define (permutations l)
+  (cond [(not (list? l)) (raise-argument-error 'permutations "list?" 0 l)]
+        [(or (null? l) (null? (cdr l))) (list l)]
+        [else
+         (define N (- (length l) 2))
+         ;; use a byte-string instead of a vector -- doesn't matter much for
+         ;; speed, but permutations of longer lists are impractical anyway
+         (when (> N 254) (error 'permutations "input list too long: ~e" l))
+         (define c (make-bytes (add1 N) 0))
+         (let loop ([i 0] [acc (list (reverse l))])
+           (define ci (bytes-ref c i))
+           (cond [(<= ci i) (bytes-set! c i (add1 ci))
+                            (loop 0 (cons (swap+flip (car acc) ci i) acc))]
+                 [(< i N)   (bytes-set! c i 0)
+                            (loop (add1 i) acc)]
+                 [else      acc]))]))
+(define (in-permutations l)
+  (cond [(not (list? l)) (raise-argument-error 'in-permutations "list?" 0 l)]
+        [(or (null? l) (null? (cdr l))) (in-value l)]
+        [else
+         (define N (- (length l) 2))
+         (when (> N 254) (error 'permutations "input list too long: ~e" l))
+         (define c (make-bytes (add1 N) 0))
+         (define i 0)
+         (define cur (reverse l))
+         (define (next)
+           (define r cur)
+           (define ci (bytes-ref c i))
+           (cond [(<= ci i) (bytes-set! c i (add1 ci))
+                            (begin0 (swap+flip cur ci i) (set! i 0))]
+                 [(< i N)   (bytes-set! c i 0)
+                            (set! i (add1 i))
+                            (next)]
+                 [else      #f]))
+         (in-producer (λ() (begin0 cur (set! cur (next)))) #f)]))
 
 ;; mk-min : (number number -> boolean) symbol (X -> real) (listof X) -> X
 (define (mk-min cmp name f xs)
@@ -466,13 +549,5 @@
               (loop (car xs) new-min (cdr xs))]
              [else
               (loop min min-var (cdr xs))]))]))))
-
 (define (argmin f xs) (mk-min < 'argmin f xs))
 (define (argmax f xs) (mk-min > 'argmax f xs))
-
-;; similar to in-range, but returns a list
-(define range
-  (case-lambda
-    [(end)            (for/list ([i (in-range end)])            i)]
-    [(start end)      (for/list ([i (in-range start end)])      i)]
-    [(start end step) (for/list ([i (in-range start end step)]) i)]))

@@ -1,7 +1,7 @@
 #lang racket/base
 
 ;; Foreign Racket interface
-(require '#%foreign setup/dirs racket/unsafe/ops
+(require '#%foreign setup/dirs racket/unsafe/ops racket/private/for
          (for-syntax racket/base racket/list syntax/stx
                      racket/struct-info))
 
@@ -16,7 +16,7 @@
          _void _int8 _uint8 _int16 _uint16 _int32 _uint32 _int64 _uint64
          _fixint _ufixint _fixnum _ufixnum
          _float _double _longdouble _double*
-         _bool _pointer _gcpointer _scheme (rename-out [_scheme _racket]) _fpointer function-ptr
+         _bool _stdbool _pointer _gcpointer _scheme (rename-out [_scheme _racket]) _fpointer function-ptr
          memcpy memmove memset
          malloc-immobile-cell free-immobile-cell
          make-late-weak-box make-late-weak-hasheq)
@@ -828,23 +828,25 @@
 ;; the above with '= -- but the numbers have to be specified in some way.  The
 ;; generated type will convert a list of these symbols into the logical-or of
 ;; their values and back.
-(define (_bitmask name orig-symbols->integers . base?)
+(define (_bitmask name orig-s->i . base?)
   (define basetype (if (pair? base?) (car base?) _uint))
   (define s->c
     (if name (string->symbol (format "bitmask:~a->int" name)) 'bitmask->int))
   (define symbols->integers
-    (let loop ([s->i orig-symbols->integers])
+    (let loop ([s->i orig-s->i] [last 0])
       (cond
        [(null? s->i)
         null]
        [(and (pair? (cdr s->i)) (eq? '= (cadr s->i)) (pair? (cddr s->i)))
         (cons (list (car s->i) (caddr s->i))
-              (loop (cdddr s->i)))]
+              (loop (cdddr s->i) (integer-length (caddr s->i))))]
        [(and (pair? (car s->i)) (pair? (cdar s->i)) (null? (cddar s->i))
              (symbol? (caar s->i)) (integer? (cadar s->i)))
-        (cons (car s->i) (loop (cdr s->i)))]
+        (cons (car s->i) (loop (cdr s->i) (integer-length (cadar s->i))))]
+       [(symbol? (car s->i))
+        (cons (list (car s->i) (arithmetic-shift 1 last)) (loop (cdr s->i) (add1 last)))]
        [else
-        (error '_bitmask "bad spec in ~e" orig-symbols->integers)])))
+        (error '_bitmask "bad spec in ~e" orig-s->i)])))
   (make-ctype basetype
     (lambda (symbols)
       (if (null? symbols) ; probably common
@@ -998,8 +1000,9 @@
 
 ;; (_array <type> <len> ...+)
 (provide _array
-         array? array-length array-ptr
-         (protect-out array-ref array-set!))
+         array? array-length array-ptr array-type
+         (protect-out array-ref array-set!)
+         (rename-out [*in-array in-array]))
 
 (define _array
   (case-lambda
@@ -1038,6 +1041,22 @@
         (if (null? is)
             (array-set! a i v)
             (loop (array-ref a (car is)) (cdr is)))))]))
+
+;; (in-aray array [start stop step])
+;; in-vector like sequence over array
+(define-:vector-like-gen :array-gen array-ref)
+
+(define-in-vector-like in-array
+  "array" array? array-length :array-gen)
+
+(define-sequence-syntax *in-array
+  (lambda () #'in-array)
+  (make-in-vector-like 'in-array
+                       "array"
+                       #'array?
+                       #'array-length
+                       #'in-array
+                       #'array-ref))
 
 ;; (_array/list <type> <len> ...+)
 ;; Like _list, but for arrays instead of pointers at the C level.
@@ -1298,10 +1317,13 @@
 
 ;; Simple structs: call this with a list of types, and get a type that marshals
 ;; C structs to/from Scheme lists.
-(define* (_list-struct #:alignment [alignment #f] . types)
-  (let ([stype   (make-cstruct-type types #f alignment)]
-        [offsets (compute-offsets types alignment)]
-        [len     (length types)])
+(define* (_list-struct #:alignment [alignment #f]
+                       #:malloc-mode [malloc-mode 'atomic]
+                       type . types)
+  (let* ([types   (cons type types)]
+         [stype   (make-cstruct-type types #f alignment)]
+         [offsets (compute-offsets types alignment)]
+         [len     (length types)])
     (make-ctype stype
       (lambda (vals)
         (unless (list? vals)
@@ -1311,7 +1333,7 @@
                                  "expected length" len
                                  "list length" (length vals)
                                  "list" vals))
-        (let ([block (malloc stype)])
+        (let ([block (malloc stype malloc-mode)])
           (for-each (lambda (type ofs val) (ptr-set! block type 'abs ofs val))
                     types offsets vals)
           block))
@@ -1339,7 +1361,7 @@
 (provide define-cstruct)
 (define-syntax (define-cstruct stx)
   (define (make-syntax _TYPE-stx has-super? slot-names-stx slot-types-stx 
-                       alignment-stx property-stxes property-binding-stxes
+                       alignment-stx malloc-mode-stx property-stxes property-binding-stxes
                        no-equal?)
     (define name
       (cadr (regexp-match #rx"^_(.+)$" (symbol->string (syntax-e _TYPE-stx)))))
@@ -1390,7 +1412,8 @@
          [(set-TYPE-SLOT! ...) (ids (lambda (s) `("set-",name"-",s"!")))]
          [(offset ...) (generate-temporaries
                                (ids (lambda (s) `(,s"-offset"))))]
-         [alignment            alignment-stx])
+         [alignment            alignment-stx]
+         [malloc-mode          (or malloc-mode-stx #'(quote atomic))])
       (with-syntax ([get-super-info
                      ;; the 1st-type might be a pointer to this type
                      (if (or (safe-id=? 1st-type #'_TYPE-pointer/null)
@@ -1504,7 +1527,7 @@
                       ;; init using all slots
                       (lambda vals
                         (if (= (length vals) (length all-types))
-                            (let ([block (make-wrap-TYPE (malloc _TYPE*))])
+                            (let ([block (make-wrap-TYPE (malloc _TYPE* malloc-mode))])
                               (set-cpointer-tag! block all-tags)
                               (for-each (lambda (type ofs value)
                                           (ptr-set! block type 'abs ofs value))
@@ -1514,7 +1537,7 @@
                                    (length all-types) (length vals) vals)))
                       ;; normal initializer
                       (lambda (slot ...)
-                        (let ([block (make-wrap-TYPE (malloc _TYPE*))])
+                        (let ([block (make-wrap-TYPE (malloc _TYPE* malloc-mode))])
                           (set-cpointer-tag! block all-tags)
                           (ptr-set! block stype 'abs offset slot)
                           ...
@@ -1525,7 +1548,7 @@
                   (cond
                    [(TYPE? vals) vals]
                    [(= (length vals) (length all-types))
-                    (let ([block (malloc _TYPE*)])
+                    (let ([block (malloc _TYPE* malloc-mode)])
                       (set-cpointer-tag! block all-tags)
                       (for-each
                        (lambda (type ofs value)
@@ -1571,25 +1594,38 @@
            stx xs))
   (syntax-case stx ()
     [(_ type ([slot slot-type] ...) . more)
+     (or (stx-pair? #'type)
+         (stx-pair? #'(slot ...)))
      (let-values ([(_TYPE _SUPER)
                    (syntax-case #'type ()
                      [(t s) (values #'t #'s)]
                      [_ (values #'type #f)])]
-                  [(alignment properties property-bindings no-equal?)
+                  [(alignment malloc-mode properties property-bindings no-equal?)
                    (let loop ([more #'more] 
                               [alignment #f]
+                              [malloc-mode #f]
                               [properties null] 
                               [property-bindings null] 
                               [no-equal? #f])
                      (define (head) (syntax-case more () [(x . _) #'x]))
                      (syntax-case more ()
-                       [() (values alignment (reverse properties) (reverse property-bindings) no-equal?)]
+                       [() (values alignment
+                                   malloc-mode 
+                                   (reverse properties)
+                                   (reverse property-bindings)
+                                   no-equal?)]
                        [(#:alignment) (err "missing expression for #:alignment" (head))]
                        [(#:alignment a . rest) 
                         (not alignment)
-                        (loop #'rest #'a properties property-bindings no-equal?)]
+                        (loop #'rest #'a malloc-mode properties property-bindings no-equal?)]
                        [(#:alignment a . rest) 
                         (err "multiple specifications of #:alignment" (head))]
+                       [(#:malloc-mode) (err "missing expression for #:malloc-mode" (head))]
+                       [(#:malloc-mode m . rest) 
+                        (not malloc-mode)
+                        (loop #'rest alignment #'m properties property-bindings no-equal?)]
+                       [(#:alignment m . rest) 
+                        (err "multiple specifications of #:malloc-mode" (head))]
                        [(#:property) (err "missing property expression for #:property" (head))]
                        [(#:property prop) (err "missing value expression for #:property" (head))]
                        [(#:property prop val . rest)
@@ -1598,6 +1634,7 @@
                           (define val-id (car (generate-temporaries '(prop-val))))
                           (loop #'rest 
                                 alignment 
+                                malloc-mode
                                 (list* #`(cons #,prop-id #,val-id) properties)
                                 (list* (list (list val-id) #'val) 
                                        (list (list prop-id) #'(check-is-property prop))
@@ -1606,36 +1643,40 @@
                        [(#:no-equal . rest)
                         (if no-equal?
                             (err "multiple specifications of #:no-equal" (head))
-                            (loop #'rest alignment properties property-bindings #t))]
+                            (loop #'rest alignment malloc-mode properties property-bindings #t))]
                        [(x . _) (err (if (keyword? (syntax-e #'x))
                                          "unknown keyword" "unexpected form")
                                      #'x)]
                        [else (err "bad syntax")]))])
        (unless (identifier? _TYPE)
-         (err "bad type, expecting a _name identifier or (_name super-ctype)"
+         (err "expecting a `_name' identifier or `(_name _super-name)'"
               _TYPE))
        (unless (regexp-match? #rx"^_." (symbol->string (syntax-e _TYPE)))
          (err "cstruct name must begin with a `_'" _TYPE))
        (for ([s (in-list (syntax->list #'(slot ...)))])
          (unless (identifier? s)
-           (err "bad field name, expecting an identifier identifier" s)))
+           (err "bad field name, expecting an identifier" s)))
        (if _SUPER
          (make-syntax _TYPE #t
                       #`(#,(datum->syntax _TYPE 'super _TYPE) slot ...)
                       #`(#,_SUPER slot-type ...)
                       alignment
+                      malloc-mode
                       properties
                       property-bindings
                       no-equal?)
          (make-syntax _TYPE #f #'(slot ...) #`(slot-type ...) 
-                      alignment properties property-bindings no-equal?)))]
+                      alignment malloc-mode properties property-bindings no-equal?)))]
+    [(_ type () . more)
+     (identifier? #'type)
+     (err "must have either a supertype or at least one field")]
     ;; specific errors for bad slot specs, leave the rest for a generic error
     [(_ type (bad ...) . more)
-     (err "bad slot specification, expecting [name ctype]"
+     (err "bad field specification, expecting `[name ctype]'"
           (ormap (lambda (s) (syntax-case s () [[n ct] #t] [_ s]))
                  (syntax->list #'(bad ...))))]
     [(_ type bad . more)
-     (err "bad slot specification, expecting a sequence of [name ctype]"
+     (err "bad field specification, expecting a sequence of `[name ctype]'"
           #'bad)]))
 
 ;; Add `prop:equal+hash' to use pointer equality

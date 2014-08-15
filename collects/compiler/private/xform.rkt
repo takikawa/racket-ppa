@@ -1,7 +1,7 @@
-(module xform mzscheme
-  (require mzlib/list
-	   mzlib/etc
-	   mzlib/process)
+(module xform racket/base
+  (require racket/list
+  	   (for-syntax racket/base)
+	   racket/system)
   
   (provide xform)
   
@@ -17,7 +17,7 @@
     (parameterize ([current-output-port (current-output-port)] ; because we mutate these...
                    [error-escape-handler (error-escape-handler)]
                    [current-inspector (current-inspector)])
-      (begin-with-definitions
+      (let ()
         (define power-inspector (current-inspector))
         (current-inspector (make-inspector))
         
@@ -43,10 +43,10 @@
         ;; "AST" structures
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         
-        (define-struct tok (n line file) (make-inspector))
+        (define-struct tok (n line file) #:inspector (make-inspector))
         (define-struct (sysheader-tok tok) ())
-        (define-struct (seq tok) (close in) (make-inspector))
-        (define-struct (parens seq) () (make-inspector))
+        (define-struct (seq tok) (close in) #:inspector (make-inspector))
+        (define-struct (parens seq) () #:inspector (make-inspector))
         (define-struct (brackets seq) ())
         (define-struct (braces seq) ())
         (define-struct (callstage-parens parens) ())
@@ -72,28 +72,28 @@
         (define seqce vector)
         
         ;; A cheap way of getting rid of unneeded prototypes:
-        (define used-symbols (make-hash-table))
-        (hash-table-put! used-symbols (string->symbol "GC_variable_stack") 1)
-        (hash-table-put! used-symbols (string->symbol "GC_cpp_delete") 1)
-	(hash-table-put! used-symbols (string->symbol "GC_get_variable_stack") 1)
-	(hash-table-put! used-symbols (string->symbol "GC_set_variable_stack") 1)
-        (hash-table-put! used-symbols (string->symbol "memset") 1)
-	(hash-table-put! used-symbols (string->symbol "scheme_thread_local_key") 1)
-	(hash-table-put! used-symbols (string->symbol "scheme_thread_locals") 1)
-	(hash-table-put! used-symbols (string->symbol "pthread_getspecific") 1)
+        (define used-symbols (make-hasheq))
+        (hash-set! used-symbols (string->symbol "GC_variable_stack") 1)
+        (hash-set! used-symbols (string->symbol "GC_cpp_delete") 1)
+	(hash-set! used-symbols (string->symbol "GC_get_variable_stack") 1)
+	(hash-set! used-symbols (string->symbol "GC_set_variable_stack") 1)
+        (hash-set! used-symbols (string->symbol "memset") 1)
+	(hash-set! used-symbols (string->symbol "scheme_thread_local_key") 1)
+	(hash-set! used-symbols (string->symbol "scheme_thread_locals") 1)
+	(hash-set! used-symbols (string->symbol "pthread_getspecific") 1)
         
         ;; For dependency tracking:
-        (define depends-files (make-hash-table 'equal))
+        (define depends-files (make-hash))
         
         (define (make-triple v src line sysheader?)
           (when (symbol? v)
-            (hash-table-put! used-symbols v
-                             (add1 (hash-table-get
+            (hash-set! used-symbols v
+                             (add1 (hash-ref
                                     used-symbols
                                     v
                                     (lambda () 0)))))
           (when (and src output-depends-info?)
-            (hash-table-put! depends-files src #t))
+            (hash-set! depends-files src #t))
           (if sysheader?
               (make-sysheader-tok v line src)
               (make-tok v line src)))
@@ -479,7 +479,7 @@
         
         (define recorded-cpp-out
           (and precompiling-header?
-               (open-output-file (change-suffix file-out #".e") 'truncate)))
+               (open-output-file (change-suffix file-out #".e") #:exists 'truncate)))
         (define recorded-cpp-in
           (and precompiled-header
                (open-input-file (change-suffix precompiled-header #".e"))))
@@ -557,7 +557,7 @@
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         
         (current-output-port (if file-out
-                                 (open-output-file file-out 'truncate)
+                                 (open-output-file file-out #:exists 'truncate)
                                  (make-output-port 'dev/null
                                                    always-evt
                                                    (lambda (s st ed f?)
@@ -585,7 +585,7 @@
         
         (define map-port
           (if palm-out
-              (open-output-file palm-out 'truncate)
+              (open-output-file palm-out #:exists 'truncate)
               #f))
         
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -808,10 +808,10 @@
                                       nonempty-calls?))
         
         ;; A function prototype record:
-        (define-struct prototype (type args static? pointer? pointer?-determined?))
+        (define-struct prototype (type args static? pointer? pointer?-determined?) #:mutable)
         
         ;; A C++ class record:
-        (define-struct c++-class (parent parent-name prototyped top-vars))
+        (define-struct c++-class (parent parent-name prototyped top-vars) #:mutable)
         
         ;; Symbol constants:
         (define semi (string->symbol ";"))
@@ -889,13 +889,15 @@
                isnan isinf fpclass _fpclass __fpclassify __fpclassifyf __fpclassifyl
 	       _isnan __isfinited __isnanl __isnan
                __isinff __isinfl isnanf isinff __isinfd __isnanf __isnand __isinf
+               __inline_isnanl __inline_isnan
+               __inline_isinff __inline_isinfl __inline_isinfd __inline_isnanf __inline_isnand __inline_isinf
                floor floorl ceil ceill round roundl fmod fmodl modf modfl fabs fabsl __maskrune _errno __errno
                isalpha isdigit isspace tolower toupper
                fread fwrite socket fcntl setsockopt connect send recv close
                __builtin_next_arg __builtin_saveregs 
-               __builtin_constant_p
+               __builtin_constant_p __builtin_choose_expr __builtin_types_compatible_p
                __builtin___CFStringMakeConstantString
-               __error __errno_location __toupper __tolower
+               __error __errno_location __toupper __tolower ___errno
                __attribute__ __mode__ ; not really functions in gcc
                __iob_func ; VC 8
                |GetStdHandle| |__CFStringMakeConstantString|
@@ -903,17 +905,17 @@
                
                scheme_make_small_bignum scheme_make_small_rational scheme_make_small_complex))
         (define non-functions-table
-          (let ([ht (make-hash-table)])
+          (let ([ht (make-hasheq)])
             (for-each (lambda (s)
-                        (hash-table-put! ht s #f))
+                        (hash-set! ht s #f))
                       non-functions)
             ht))
 
 	(define args-unevaled '(sizeof __typeof __builtin_object_size))
 	(define args-unevaled-table
-          (let ([ht (make-hash-table)])
+          (let ([ht (make-hasheq)])
             (for-each (lambda (s)
-                        (hash-table-put! ht s #t))
+                        (hash-set! ht s #t))
                       args-unevaled)
             ht))
 
@@ -936,9 +938,9 @@
             '("XTextExtents" "XTextExtents16" 
                              "XDrawImageString16" "XDrawImageString"
                              "XDrawString16" "XDrawString"))))
-	(define non-gcing-functions (make-hash-table))
+	(define non-gcing-functions (make-hasheq))
 	(for-each (lambda (name)
-		    (hash-table-put! non-gcing-functions name #t))
+		    (hash-set! non-gcing-functions name #t))
 		  non-gcing-builtin-functions)
         
         (define non-returning-functions
@@ -990,7 +992,13 @@
                            (apply + (map get-variable-size
                                          (map cdr (cdr m)))))])
                (if (struct-array-type? vtype)
-                   (* size (struct-array-type-count vtype))
+                   (* size
+                      (let ([c (struct-array-type-count vtype)])
+                        (cond
+                         [(eq? c 'unknown)
+                          (log-error "[STRUCT ARRAY]: Can't get size of unknown-sized array")
+                          1]
+                         [else c])))
                    size))]
             [(vtype? vtype) 1]
             [else (error 'get-variable-size "not a vtype: ~e"
@@ -1038,49 +1046,50 @@
         ;; Marhsaling and unmarshaling
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         
-        (define makers (make-hash-table))
-        (hash-table-put! makers 'struct:tok (cons 'make-tok make-tok))
-        (hash-table-put! makers 'struct:sysheader-tok (cons 'make-sysheader-tok make-sysheader-tok))
-        (hash-table-put! makers 'struct:seq (cons 'make-a-seq make-a-seq))
-        (hash-table-put! makers 'struct:parens (cons 'make-parens make-parens))
-        (hash-table-put! makers 'struct:brackets (cons 'make-brackets make-brackets))
-        (hash-table-put! makers 'struct:braces (cons 'make-braces make-braces))
-        (hash-table-put! makers 'struct:callstage-parens (cons 'make-callstage-parens make-callstage-parens))
-        (hash-table-put! makers 'struct:creation-parens (cons 'make-creation-parens make-creation-parens))
-        (hash-table-put! makers 'struct:nosrc-parens (cons 'make-nosrc-parens make-nosrc-parens))
-        (hash-table-put! makers 'struct:call (cons 'make-call make-call))
-        (hash-table-put! makers 'struct:block-push (cons 'make-block-push make-block-push))
-        (hash-table-put! makers 'struct:note (cons 'make-note make-note))
-        (hash-table-put! makers 'struct:vtype (cons 'make-vtype make-vtype))
-        (hash-table-put! makers 'struct:pointer-type (cons 'make-pointer-type make-pointer-type))
-        (hash-table-put! makers 'struct:array-type (cons 'make-array-type make-array-type))
-        (hash-table-put! makers 'struct:struc-type (cons 'make-struc-type make-struc-type))
-        (hash-table-put! makers 'struct:struct-array-type (cons 'make-struct-array-type make-struct-array-type))
-        (hash-table-put! makers 'struct:union-type (cons 'make-union-type make-union-type))
-        (hash-table-put! makers 'struct:non-pointer-type (cons 'make-non-pointer-type make-non-pointer-type))
-        (hash-table-put! makers 'struct:live-var-info (cons 'make-live-var-info make-live-var-info))
-        (hash-table-put! makers 'struct:prototype (cons 'make-prototype make-prototype))
-        (hash-table-put! makers 'struct:c++-class (cons 'make-c++-class make-c++-class))
+        (define makers (make-hasheq))
+        (hash-set! makers 'struct:tok (cons 'make-tok make-tok))
+        (hash-set! makers 'struct:sysheader-tok (cons 'make-sysheader-tok make-sysheader-tok))
+        (hash-set! makers 'struct:seq (cons 'make-a-seq make-a-seq))
+        (hash-set! makers 'struct:parens (cons 'make-parens make-parens))
+        (hash-set! makers 'struct:brackets (cons 'make-brackets make-brackets))
+        (hash-set! makers 'struct:braces (cons 'make-braces make-braces))
+        (hash-set! makers 'struct:callstage-parens (cons 'make-callstage-parens make-callstage-parens))
+        (hash-set! makers 'struct:creation-parens (cons 'make-creation-parens make-creation-parens))
+        (hash-set! makers 'struct:nosrc-parens (cons 'make-nosrc-parens make-nosrc-parens))
+        (hash-set! makers 'struct:call (cons 'make-call make-call))
+        (hash-set! makers 'struct:block-push (cons 'make-block-push make-block-push))
+        (hash-set! makers 'struct:note (cons 'make-note make-note))
+        (hash-set! makers 'struct:vtype (cons 'make-vtype make-vtype))
+        (hash-set! makers 'struct:pointer-type (cons 'make-pointer-type make-pointer-type))
+        (hash-set! makers 'struct:array-type (cons 'make-array-type make-array-type))
+        (hash-set! makers 'struct:struc-type (cons 'make-struc-type make-struc-type))
+        (hash-set! makers 'struct:struct-array-type (cons 'make-struct-array-type make-struct-array-type))
+        (hash-set! makers 'struct:union-type (cons 'make-union-type make-union-type))
+        (hash-set! makers 'struct:non-pointer-type (cons 'make-non-pointer-type make-non-pointer-type))
+        (hash-set! makers 'struct:live-var-info (cons 'make-live-var-info make-live-var-info))
+        (hash-set! makers 'struct:prototype (cons 'make-prototype make-prototype))
+        (hash-set! makers 'struct:c++-class (cons 'make-c++-class make-c++-class))
         
         (define (make-short-tok l) (make-tok l #f #f))
         
         ;; A precompiled header saves the above state variables.
         (when precompiled-header
           (let ([orig (current-namespace)])
-            (parameterize ([current-namespace (make-namespace)])
-              (namespace-attach-module orig 'mzscheme)
-              (namespace-require 'mzscheme)
+            (parameterize ([current-namespace (make-base-empty-namespace)])
+	      (namespace-require/copy 'racket/base)
+              (namespace-attach-module orig 'racket/base)
+              (namespace-require 'racket/base)
               ;; Put constructors into the namespace:
-              (hash-table-for-each makers
+              (hash-for-each makers
                                    (lambda (k v)
                                      (namespace-set-variable-value! (car v) (cdr v))))
               (namespace-set-variable-value! 'make-short-tok make-short-tok)
               ;; Load the pre-compiled-header-as-.zo:
               (let ([l (load (change-suffix precompiled-header #".zo"))])
                 (for-each (lambda (x)
-                            (hash-table-put! used-symbols (car x) 
+                            (hash-set! used-symbols (car x) 
                                              (+
-                                              (hash-table-get
+                                              (hash-ref
                                                used-symbols (car x)
                                                (lambda () 0))
                                               (cdr x))))
@@ -1094,7 +1103,7 @@
                 (set! non-pointer-types (list-ref l 5))
                 (set! struct-defs (list-ref l 6))
                 
-                (set! non-gcing-functions (hash-table-copy (list-ref l 7)))
+                (set! non-gcing-functions (hash-copy (list-ref l 7)))
 
                 (set! gc-var-stack-mode (list-ref l 8))))))
         
@@ -1127,7 +1136,10 @@
                          (printf "~aPUSHUNION(~a, ~a~a)" comma full-name n plus)
                          (add1 n)]
                         [(array-type? vtype)
-                         (printf "~aPUSHARRAY(~a, ~a, ~a~a)" comma full-name (array-type-count vtype) n plus)
+                         (define c (array-type-count vtype))
+                         (when (eq? c 'unknown)
+                           (log-error "[ARRAY]: Can't push unknown array size onto mark stack: ~a." full-name))
+                         (printf "~aPUSHARRAY(~a, ~a, ~a~a)" comma full-name (if (eq? c 'unknown) 0 c) n plus)
                          (+ 3 n)]
                         [(struc-type? vtype)
                          (let aloop ([array-index 0][n n][comma comma])
@@ -1135,7 +1147,14 @@
                            (let loop ([n n][l (cdr (lookup-struct-def (struc-type-struct vtype)))][comma comma])
                              (if (null? l)
                                  (if (and (struct-array-type? vtype)
-                                          (< (add1 array-index) (struct-array-type-count vtype)))
+                                          (< (add1 array-index)
+                                             (let ([c (struct-array-type-count vtype)])
+                                               (cond
+                                                [(eq? c 'unknown)
+                                                 (log-error "[STRUCT ARRAY]: Can't push with unknown array size: ~a."
+                                                            full-name)
+                                                 1]
+                                                [else c]))))
                                      ;; Next in array
                                      (aloop (add1 array-index) n comma)
                                      ;; All done
@@ -1434,6 +1453,9 @@
           (cond
             [(pragma? (car e))
              (list (car e))]
+
+	    [(compiler-pragma? e)
+	     e]
             
             ;; START_XFORM_SKIP and END_XFORM_SKIP:
             [(end-skip? e)
@@ -1519,11 +1541,11 @@
             [(proc-prototype? e)
              (let ([name (register-proto-information e)])
                (when (eq? (tok-n (car e)) '__xform_nongcing__)
-		 (hash-table-put! non-gcing-functions name #t))
+		 (hash-set! non-gcing-functions name #t))
 	       (when show-info?
                  (printf "/* PROTO ~a */\n" name))
                (if (or precompiling-header?
-                       (> (hash-table-get used-symbols name) 1)
+                       (> (hash-ref used-symbols name) 1)
                        (ormap (lambda (v) (eq? (tok-n v) 'virtual)) e))  ; can't drop virtual methods!
                    (if palm?
                        (add-segment-label name e)
@@ -1553,7 +1575,7 @@
             [(function? e)
              (let ([name (register-proto-information e)])
                (when (eq? (tok-n (car e)) '__xform_nongcing__)
-                 (hash-table-put! non-gcing-functions name #t))
+                 (hash-set! non-gcing-functions name #t))
                (if (skip-function? e)
                    e
                    (begin
@@ -1612,6 +1634,13 @@
         (define (empty-decl? e)
           (and (= 1 (length e))
                (eq? '|;| (tok-n (car e)))))
+
+	(define (compiler-pragma? e)
+	  ;; MSVC uses __pragma() to control compiler warnings
+	  (and (pair? e)
+	       (eq? '__pragma (tok-n (car e)))
+	       (pair? (cdr e))
+	       (parens? (cadr e))))
         
         (define (start-skip? e)
           (and (pair? e)
@@ -1698,7 +1727,7 @@
                (andmap (lambda (x) (and (symbol? (tok-n x))
                                         (not (eq? '|,| (tok-n x)))))
                        e)
-               (= 1 (hash-table-get used-symbols
+               (= 1 (hash-ref used-symbols
                                     (let loop ([e e])
                                       (if (null? (cddr e))
                                           (tok-n (car e))
@@ -1710,7 +1739,7 @@
         (define (unused-struc-typedef? e)
           (let ([once (lambda (s)
                         (and (not precompiling-header?)
-                             (= 1 (hash-table-get used-symbols 
+                             (= 1 (hash-ref used-symbols 
                                                   (tok-n s)))))]
                 [seps (list '|,| '* semi)])
             (let ([e (if (eq? '__extension__ (car e))
@@ -1920,8 +1949,10 @@
                              0)]
                  [non-ptr-base (cond
                                  [(eq? 'unsigned  (tok-n (car e)))
-                                  (if (memq (tok-n (cadr e)) '(int long char intptr_t))
-                                      (list 'unsigned (tok-n (cadr e))))]
+                                  (if (memq (tok-n (cadr e))
+					    '(int long char intptr_t))
+                                      (list 'unsigned (tok-n (cadr e)))
+				      (void))]
                                  [(lookup-non-pointer-type (tok-n (car e)))
                                   (list (tok-n (car e)))]
                                  [else #f])])
@@ -1950,11 +1981,14 @@
                                 ;; Array decl:
                                 (loop (sub1 l)
                                       (let ([inner (seq->list (seq-in (list-ref e l)))])
-                                        (if (null? inner)
-                                            (if empty-array-is-ptr?
-                                                'pointer
-                                                0)
-                                            (tok-n (car inner))))
+                                        (cond
+                                         [(null? inner)
+                                          (if empty-array-is-ptr?
+                                              'pointer
+                                              0)]
+                                         [(= 1 (length inner))
+                                          (tok-n (car inner))]
+                                         [else 'unknown]))
                                       pointers non-pointers)]
                                [(braces? v) 
                                 ;; No more variable declarations
@@ -1987,13 +2021,14 @@
                                                           (union-type? (cdr base-is-ptr?))))]
                                          [struct-array? (or (and base-struct (not pointer?) (number? array-size))
                                                             (and base-is-ptr? (struct-array-type? (cdr base-is-ptr?))))]
-                                         [array-size (if (number? array-size)
+                                         [array-size (if (or (number? array-size) (eq? array-size 'unknown))
                                                          array-size
                                                          (and struct-array?
                                                               (struct-array-type-count (cdr base-is-ptr?))))])
                                     (when (and struct-array?
                                                (not union-ok?)
-                                               (> array-size 16))
+                                               (and (number? array-size)
+                                                    (> array-size 16)))
                                       (log-error "[SIZE] ~a in ~a: Large array of structures at ~a."
                                                  (tok-line v) (tok-file v) name))
                                     (when (and (not union-ok?)
@@ -2027,7 +2062,7 @@
                                                     (cond
                                                       [struct-array?
                                                        (format "struct ~a[~a] " base-struct array-size)]
-                                                      [(number? array-size)
+                                                      [(or (number? array-size) (eq? array-size 'unknown))
                                                        (format "[~a] " array-size)]
                                                       [(and base-struct (not pointer?))
                                                        (format "struct ~a " base-struct)]
@@ -2040,7 +2075,7 @@
                                                             (cond
                                                               [struct-array?
                                                                (make-struct-array-type base-struct array-size)]
-                                                              [(number? array-size)
+                                                              [(or (number? array-size) (eq? array-size 'unknown))
                                                                (make-array-type array-size)]
                                                               [pointer? (make-pointer-type (or (and base (list base))
                                                                                                non-ptr-base)
@@ -2488,7 +2523,7 @@
                                             e
                                             (lambda (name class-name type args static?)
                                               type)))])
-		 (if (hash-table-get non-gcing-functions name (lambda () #f))
+		 (if (hash-ref non-gcing-functions name (lambda () #f))
 		     (when saw-gcing-call
 		       (log-error "[GCING] ~a in ~a: Function ~a declared __xform_nongcing__, but includes a function call."
 				  (tok-line saw-gcing-call) (tok-file saw-gcing-call)
@@ -2871,15 +2906,15 @@
                                                    (convert-function-calls (car el) extra-vars &-vars c++-class live-vars "decls" #f #t)])
                                        (dloop (cdr el) live-vars))))))])
                     ;; Calculate vars to push in this block. Make sure there are no duplicates.
-                    (let ([newly-pushed (let ([ht (make-hash-table)])
+                    (let ([newly-pushed (let ([ht (make-hasheq)])
                                           (for-each (lambda (x)
                                                       (when (or (assq (car x) local-vars)
                                                                 (assq (car x) pushable-vars)
                                                                 (and setup-stack-return-type
                                                                      (is-generated? x)))
-                                                        (hash-table-put! ht (car x) x)))
+                                                        (hash-set! ht (car x) x)))
                                                     (live-var-info-pushed-vars live-vars))
-                                          (hash-table-map ht (lambda (k v) v)))])
+                                          (hash-map ht (lambda (k v) v)))])
                       (values (apply
                                append
                                pragmas
@@ -2955,7 +2990,9 @@
                                                 null]
                                                [(array-type? vtype)
                                                 (let ([c (array-type-count vtype)])
-                                                  (if (<= c 3)
+                                                  (when (eq? c 'unknown)
+                                                    (log-error "[ARRAY]: Can't initialize array of unknown: ~a." full-name))
+                                                  (if (and (number? c) (<= c 3))
                                                       (let loop ([n 0])
                                                         (if (= n c)
                                                             null
@@ -2974,7 +3011,14 @@
                                                   (let loop ([l (cdr (lookup-struct-def (struc-type-struct vtype)))])
                                                     (if (null? l)
                                                         (if (and (struct-array-type? vtype)
-                                                                 (< (add1 array-index) (struct-array-type-count vtype)))
+                                                                 (< (add1 array-index)
+                                                                    (let ([c (struct-array-type-count vtype)])
+                                                                      (cond
+                                                                       [(eq? c 'unknown)
+                                                                        (log-error "[STRUCT ARRAY]: Can't initialize with unknown array size: ~a."
+                                                                                   full-name)
+                                                                        1]
+                                                                       [else c]))))
                                                             ;; Next in array
                                                             (aloop (add1 array-index))
                                                             ;; All done
@@ -3035,7 +3079,7 @@
                ;; Something precedes
                (not (null? (cdr e-)))
                ;; Not an assignment, sizeof, if, string
-               (or nf? (hash-table-get non-functions-table (tok-n (cadr e-)) #t))
+               (or nf? (hash-ref non-functions-table (tok-n (cadr e-)) #t))
                (not (string? (tok-n (cadr e-))))
                ;; Look back one more for if, etc. if preceding is paren
                (not (and (parens? (cadr e-))
@@ -3433,7 +3477,7 @@
                                     [(sub-memcpy?)
                                      ;; memcpy, etc. call?
                                      (and (pair? (cdr e-))
-                                          (hash-table-get non-gcing-functions (tok-n (cadr e-)) #f))]
+                                          (hash-ref non-gcing-functions (tok-n (cadr e-)) #f))]
                                     [(args live-vars)
                                      (convert-paren-interior args vars &-vars
                                                              c++-class
@@ -3507,7 +3551,7 @@
                                          (live-var-info-nonempty-calls? live-vars)))])
 			  (let ([non-gcing-call?
 				 (and (null? (cdr func))
-				      (hash-table-get non-gcing-functions (tok-n (car func)) (lambda () #f)))]
+				      (hash-ref non-gcing-functions (tok-n (car func)) (lambda () #f)))]
                                 [setjmp-call?
                                  (memq (tok-n (car func)) setjmp-functions)])
 			    (loop rest-
@@ -3566,7 +3610,7 @@
 				      (null? rest-)
 				      (not (memq (tok-n (car rest-)) '(return else)))))))))))]
 		[(and (looks-like-call? e- #t)
-		      (hash-table-get args-unevaled-table (tok-n (cadr e-)) #f))
+		      (hash-ref args-unevaled-table (tok-n (cadr e-)) #f))
 		 (loop (cddr e-) (cons (cadr e-) (cons (car e-) result)) live-vars converted-sub?)]
                 [(eq? 'goto (tok-n (car e-)))
                  ;; Goto - assume all vars are live
@@ -3957,6 +4001,10 @@
                         (pragma-s (car e))
                         (pragma-file (car e)) (pragma-line (car e))))
                (values (list (car e)) (cdr e))]
+              [(compiler-pragma? e)
+               (unless (null? result)
+                 (error 'pragma "unexpected MSVC compiler pragma"))
+               (values (list (car e) (cadr e)) (cddr e))]
               [(eq? semi (tok-n (car e)))
                (values (reverse (cons (car e) result)) (cdr e))]
               [(and (eq? '|,| (tok-n (car e))) comma-sep?)
@@ -4027,7 +4075,7 @@
                              (if (eq? 'struct:tok (vector-ref vec 0))
                                  (list 'make-short-tok (loop (vector-ref vec 1)))
                                  (cons
-                                  (car (hash-table-get makers (vector-ref vec 0)))
+                                  (car (hash-ref makers (vector-ref vec 0)))
                                   (map loop (cdr (vector->list vec))))))]
               [(list? v) (cons 'list (map loop v))]
               [(pair? v) (list 'cons (loop (car v)) (loop (cdr v)))]
@@ -4043,7 +4091,7 @@
                    (list
                     'list
                     
-                    (list 'quote (hash-table-map used-symbols cons))
+                    (list 'quote (hash-map used-symbols cons))
                     
                     (marshall c++-classes)
                     (marshall (prototyped))
@@ -4057,12 +4105,15 @@
               (with-output-to-file (change-suffix file-out #".zo")
                 (lambda ()
                   (let ([orig (current-namespace)])
-                    (parameterize ([current-namespace (make-namespace)])
-                      (namespace-attach-module orig 'mzscheme)
-                      (namespace-require 'mzscheme)
+                    (parameterize ([current-namespace (make-base-namespace)])
+		      (namespace-require/copy 'racket/base)
+                      (namespace-attach-module orig 'racket/base)
+                      (namespace-require 'racket/base)
+		      (namespace-require '(for-syntax racket/base))
+		      (namespace-require/copy '(for-syntax racket/base))
                       (eval #'(define-syntaxes (#%top-interaction) (lambda (stx) (cdr (syntax-e stx)))))
                       (write (compile e)))))
-                'truncate))))
+                #:exists 'truncate))))
         
         (when precompiling-header?
           (let loop ([i 1])
@@ -4079,6 +4130,6 @@
         (when output-depends-info?
           (with-output-to-file (change-suffix file-out #".sdep")
             (lambda ()
-              (write (hash-table-map depends-files (lambda (k v) k)))
+              (write (hash-map depends-files (lambda (k v) k)))
               (newline))
-            'truncate/replace))))))
+            #:exists 'truncate/replace))))))

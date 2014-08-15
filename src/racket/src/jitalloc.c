@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2013 PLT Design Inc.
+  Copyright (c) 2006-2014 PLT Design Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -126,36 +126,54 @@ int scheme_inline_alloc(mz_jit_state *jitter, int amt, Scheme_Type ty, int flags
    Save FP0 when FP ops are enabled. */
 {
   GC_CAN_IGNORE jit_insn *ref, *reffail;
+#ifdef MZ_GC_STRESS_TESTING
+  GC_CAN_IGNORE jit_insn *refstress;
+#endif
   intptr_t a_word, sz, algn;
 
   sz = GC_compute_alloc_size(amt);
   algn = GC_alloc_alignment();
 
   __START_TINY_JUMPS__(1);
-  reffail = _jit.x.pc;
+#ifdef MZ_GC_STRESS_TESTING
+  refstress = jit_jmpi(jit_forward());
+#endif
+  reffail = jit_get_ip();
   mz_tl_ldi_p(JIT_V1, tl_GC_gen0_alloc_page_ptr);
   jit_subi_l(JIT_R2, JIT_V1, 1);
   jit_andi_l(JIT_R2, JIT_R2, (algn - 1));
   ref = jit_blti_l(jit_forward(), JIT_R2, (algn - sz));
+#ifdef MZ_GC_STRESS_TESTING
+  mz_patch_ucbranch(refstress);
+#endif
   CHECK_LIMIT();
   __END_TINY_JUMPS__(1);
 
   /* Failure handling */
-  if (keep_r0_r1) {
-    if (inline_retry) {
-      scheme_generate_alloc_retry(jitter, 1);
-      CHECK_LIMIT();
-    } else {
-      (void)jit_calli(sjc.retry_alloc_code_keep_r0_r1);
-    }
-  } else if (keep_fpr1) {
-    (void)jit_calli(sjc.retry_alloc_code_keep_fpr1);
-#ifdef MZ_LONG_DOUBLE
-  } else if (keep_extfpr1) {
-    (void)jit_calli(sjc.retry_alloc_code_keep_extfpr1);
-#endif
+  if (inline_retry) {
+    int mode;
+    if (keep_r0_r1)
+      mode = 1;
+    else if (keep_fpr1)
+      mode = 2;
+    else if (keep_extfpr1)
+      mode = 3;
+    else
+      mode = 0;
+    scheme_generate_alloc_retry(jitter, mode);
+    CHECK_LIMIT();
   } else {
-    (void)jit_calli(sjc.retry_alloc_code);
+    if (keep_r0_r1) {
+      (void)jit_calli(sjc.retry_alloc_code_keep_r0_r1);
+    } else if (keep_fpr1) {
+      (void)jit_calli(sjc.retry_alloc_code_keep_fpr1);
+#ifdef MZ_LONG_DOUBLE
+    } else if (keep_extfpr1) {
+      (void)jit_calli(sjc.retry_alloc_code_keep_extfpr1);
+#endif
+    } else {
+      (void)jit_calli(sjc.retry_alloc_code);
+    }
   }
   __START_TINY_JUMPS__(1);
   (void)jit_jmpi(reffail);
@@ -300,7 +318,7 @@ long_double ld1;
 
 int scheme_generate_alloc_retry(mz_jit_state *jitter, int i)
 {
-  GC_CAN_IGNORE jit_insn *refr;
+  GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
 
 #ifdef JIT_USE_FP_OPS
   if (i == 2) {

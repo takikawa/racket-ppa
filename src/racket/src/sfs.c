@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2014 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -689,7 +689,7 @@ static Scheme_Object *sfs_let_one(Scheme_Object *o, SFS_Info *info)
          it might not because (1) it was introduced late by inlining,
          or (2) the rhs expression doesn't always produce a single
          value. */
-      if (scheme_omittable_expr(rhs, 1, -1, 1, NULL, NULL, -1, 0)) {
+      if (scheme_omittable_expr(rhs, 1, -1, 1, NULL, NULL, 0, 0, 0)) {
         rhs = scheme_false;
       } else if ((ip < info->max_calls[pos])
                  && SAME_TYPE(SCHEME_TYPE(rhs), scheme_toplevel_type)) {

@@ -106,6 +106,7 @@ static int mark_custodian_val_MARK(void *p, struct NewGC *gc) {
   gcMARK2(m->mrefs, gc);
   gcMARK2(m->closers, gc);
   gcMARK2(m->data, gc);
+  gcMARK2(m->data_ptr, gc);
 
   gcMARK2(m->parent, gc);
   gcMARK2(m->sibling, gc);
@@ -127,6 +128,7 @@ static int mark_custodian_val_FIXUP(void *p, struct NewGC *gc) {
   gcFIXUP2(m->mrefs, gc);
   gcFIXUP2(m->closers, gc);
   gcFIXUP2(m->data, gc);
+  gcFIXUP2(m->data_ptr, gc);
 
   gcFIXUP2(m->parent, gc);
   gcFIXUP2(m->sibling, gc);
@@ -422,5 +424,34 @@ static int mark_thread_cell_FIXUP(void *p, struct NewGC *gc) {
 
 #define mark_thread_cell_IS_ATOMIC 0
 #define mark_thread_cell_IS_CONST_SIZE 1
+
+
+static int mark_plumber_SIZE(void *p, struct NewGC *gc) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Plumber));
+}
+
+static int mark_plumber_MARK(void *p, struct NewGC *gc) {
+  Scheme_Plumber *pl = (Scheme_Plumber *)p;
+ 
+  gcMARK2(pl->handles, gc);
+  gcMARK2(pl->weak_handles, gc);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Plumber));
+}
+
+static int mark_plumber_FIXUP(void *p, struct NewGC *gc) {
+  Scheme_Plumber *pl = (Scheme_Plumber *)p;
+ 
+  gcFIXUP2(pl->handles, gc);
+  gcFIXUP2(pl->weak_handles, gc);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Plumber));
+}
+
+#define mark_plumber_IS_ATOMIC 0
+#define mark_plumber_IS_CONST_SIZE 1
 
 

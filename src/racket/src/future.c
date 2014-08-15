@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2013 PLT Design Inc.
+  Copyright (c) 2006-2014 PLT Design Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -608,11 +608,18 @@ void futures_init(void)
   fs->pool_threads = ftss;
   fs->thread_pool_size = pool_size;
 
+  mzrt_mutex_create(&fs->future_mutex);
+  mzrt_sema_create(&fs->future_pending_sema, 0);
+  mzrt_sema_create(&fs->gc_ok_c, 0);
+  mzrt_sema_create(&fs->gc_done_c, 0);
+  fs->gc_counter_ptr = &scheme_did_gc_count;
+
   /* Create a 'dummy' FTS for the RT thread */
   rt_fts = alloc_future_thread_state();
   rt_fts->is_runtime_thread = 1;
   rt_fts->gen0_size = 1;
   scheme_future_thread_state = rt_fts;
+
   scheme_add_swap_callback(set_fts_thread, scheme_false);
   set_fts_thread(scheme_false);
 
@@ -624,13 +631,6 @@ void futures_init(void)
   REGISTER_SO(fs->fevent_syms);
   REGISTER_SO(fs->fevent_prefab);
   REGISTER_SO(jit_future_storage);
-
-  mzrt_mutex_create(&fs->future_mutex);
-  mzrt_sema_create(&fs->future_pending_sema, 0);
-  mzrt_sema_create(&fs->gc_ok_c, 0);
-  mzrt_sema_create(&fs->gc_done_c, 0);
-
-  fs->gc_counter_ptr = &scheme_did_gc_count;
 
   hand = scheme_get_signal_handle();
   fs->signal_handle = hand;
@@ -1094,6 +1094,11 @@ static void log_future_event(Scheme_Future_State *fs,
                              Scheme_Object *user_data) 
 {
   Scheme_Object *data, *v;
+  Scheme_Logger *fl;
+
+  fl = scheme_get_future_logger();
+  if (!scheme_log_level_p(fl, SCHEME_LOG_DEBUG))
+    return;
 
   data = scheme_make_blank_prefab_struct_instance(fs->fevent_prefab);
   if (what == FEVENT_MISSING || fid == NO_FUTURE_ID)
@@ -1121,7 +1126,7 @@ static void log_future_event(Scheme_Future_State *fs,
 
   ((Scheme_Structure *)data)->slots[5] = user_data;
   
-  scheme_log_w_data(scheme_get_future_logger(), SCHEME_LOG_DEBUG, 0,
+  scheme_log_w_data(fl, SCHEME_LOG_DEBUG, 0,
                     data,                 
                     msg_str,
                     fid,
@@ -1314,8 +1319,7 @@ static Scheme_Object *make_future(Scheme_Object *lambda, int enqueue, future_t *
    
   /* JIT the code if not already JITted */
   if (ncd) {
-    if (ncd->start_code == scheme_on_demand_jit_code)
-      scheme_on_demand_generate_lambda(nc, 0, NULL, 0);
+    scheme_jit_now(lambda);
   
     if (ncd->max_let_depth > FUTURE_RUNSTACK_SIZE * sizeof(void*)) {
       /* Can't even call it in a future thread */
@@ -2164,7 +2168,7 @@ Scheme_Object *touch(int argc, Scheme_Object *argv[])
   }
 }
 
-#if defined(linux)
+#if defined(linux) || defined(__QNX__)
 # include <unistd.h>
 #elif defined(OS_X)
 # include <sys/param.h>
@@ -2176,7 +2180,7 @@ Scheme_Object *touch(int argc, Scheme_Object *argv[])
 static void init_cpucount(void)
 /* Called in runtime thread */
 {
-#if defined(linux)
+#if defined(linux) || defined(__QNX__)
   cpucount = sysconf(_SC_NPROCESSORS_ONLN);
 #elif defined(OS_X)
   size_t size = sizeof(cpucount);
@@ -2369,9 +2373,8 @@ void *worker_thread_future_loop(void *arg)
           scheme_fill_lwc_start();
           jitcode = ((Scheme_Native_Closure *)rator)->code->start_code;
           v = scheme_call_as_lightweight_continuation(jitcode, rator, argc, argv);
-          if (SAME_OBJ(v, SCHEME_TAIL_CALL_WAITING)) {
-            v = scheme_ts_scheme_force_value_same_mark(v);
-          }
+          if (SAME_OBJ(v, SCHEME_TAIL_CALL_WAITING))
+            v = scheme_force_value_same_mark_as_lightweight_continuation(v);
         }
       }
 
@@ -2464,7 +2467,10 @@ static Scheme_Object *_apply_future_lw(future_t *ft)
                                             FUTURE_RUNSTACK_SIZE);
   
   if (SAME_OBJ(v, SCHEME_TAIL_CALL_WAITING)) {
-    v = scheme_ts_scheme_force_value_same_mark(v);
+    if (scheme_future_thread_state->is_runtime_thread)
+      v = scheme_force_value_same_mark(v);
+    else
+      v = scheme_force_value_same_mark_as_lightweight_continuation(v);
   }
 
   return v;

@@ -2,15 +2,15 @@
 (require syntax/modcode
          syntax/modresolve
          syntax/modread
-         setup/main-collects
          setup/dirs
-	 unstable/file
          racket/file
          racket/list
          racket/path
          racket/promise
          openssl/sha1
-         racket/place)
+         racket/place
+         setup/collects
+         compiler/compilation-path)
 
 (provide make-compilation-manager-load/use-compiled-handler
          managed-compile-zo
@@ -126,6 +126,18 @@
                 [else 
                  (c-loop (cdr paths))])]))]))))
 
+(define (path*->collects-relative p)
+  (if (bytes? p)
+      (let ([q (path->collects-relative (bytes->path p))])
+        (if (path? q)
+            (path->bytes q)
+            q))
+      (path->collects-relative p)))
+
+(define (collects-relative*->path p cache)
+  (if (bytes? p)
+      (bytes->path p)
+      (hash-ref! cache p (lambda () (collects-relative->path p)))))
 
 (define (reroot-path* base root)
   (cond
@@ -161,46 +173,9 @@
         (loop subcode ht))))
   (for/list ([k (in-hash-keys ht)]) k))
 
-(define (get-compilation-dir+name mode roots path)
-  (define (get-one root)
-    (let-values ([(base name must-be-dir?) (split-path path)])
-      (values 
-       (cond
-        [(eq? 'relative base) 
-         (cond
-          [(eq? root 'same) mode]
-          [else (build-path root mode)])]
-        [else (build-path (cond
-                           [(eq? root 'same) base]
-                           [(relative-path? root) (build-path base root)]
-                           [else (reroot-path base root)])
-                          mode)])
-       name)))
-  ;; Try first root:
-  (define-values (p n) (get-one (car roots)))
-  (if (or (null? (cdr roots))
-          (file-exists? (path-add-suffix (build-path p n) #".zo")))
-      ;; Only root or first has a ".zo" file:
-      (values p n)
-      (let loop ([roots (cdr roots)])
-        (cond
-         [(null? roots) 
-          ;; No roots worked, so assume the first root:
-          (values p n)]
-         [else
-          ;; Check next root:
-          (define-values (p n) (get-one (car roots)))
-          (if (file-exists? (path-add-suffix (build-path p n) #".zo"))
-              (values p n)
-              (loop (cdr roots)))]))))
-
 (define (get-compilation-path mode roots path)
-  (let-values ([(dir name) (get-compilation-dir+name mode roots path)])
+  (let-values ([(dir name) (get-compilation-dir+name path #:modes (list mode) #:roots roots)])
     (build-path dir name)))
-
-(define (get-compilation-dir mode roots path)
-  (let-values ([(dir name) (get-compilation-dir+name mode roots path)])
-    dir))
 
 (define (touch path)
   (with-compiler-security-guard
@@ -223,38 +198,12 @@
   (try-delete-file zo-name)
   (trace-printf "failure"))
 
-;; with-compile-output : path (output-port -> alpha) -> alpha
-;;  Open a temporary path for writing, automatically renames after,
-;;  and arranges to delete path if there's
-;;  an exception. Breaks are managed so that the port is reliably
-;;  closed and the file is reliably deleted if there's a break
+;; with-compile-output : path (output-port path -> alpha) -> alpha
 (define (with-compile-output path proc)
-  (let ([bp (current-break-parameterization)]
-        [tmp-path (with-compiler-security-guard (make-temporary-file "tmp~a" #f (path-only path)))]
-        [ok? #f])
-    (dynamic-wind
-     void
-     (lambda ()
-       (begin0
-         (let ([out (with-compiler-security-guard (open-output-file tmp-path #:exists 'truncate/replace))])
-           (dynamic-wind
-            void
-            (lambda ()
-              (call-with-break-parameterization bp (lambda () (proc out tmp-path))))
-            (lambda ()
-              (with-compiler-security-guard (close-output-port out)))))
-         (set! ok? #t)))
-     (lambda ()
-       (with-compiler-security-guard
-        (if ok?
-            (if (eq? (system-type) 'windows)
-                (let ([tmp-path2 (make-temporary-file "tmp~a" #f (path-only path))])
-                  (with-handlers ([exn:fail:filesystem? void])
-                    (rename-file-or-directory path tmp-path2 #t))
-                  (rename-file-or-directory tmp-path path #t)
-                  (try-delete-file tmp-path2))
-                (rename-file-or-directory tmp-path path #t))
-            (try-delete-file tmp-path)))))))
+  (call-with-atomic-output-file 
+   path
+   #:security-guard (pick-security-guard)
+   proc))
 
 (define-syntax-rule
   (with-compiler-security-guard expr)
@@ -269,17 +218,17 @@
 
 (define (get-source-sha1 p)
   (with-handlers ([exn:fail:filesystem? (lambda (exn)
-                                          (and (regexp-match? #rx#"[.]rkt$" (path->bytes p))
+                                          (and (regexp-match? #rx#"[.]rkt$" p)
                                                (get-source-sha1 (path-replace-suffix p #".ss"))))])
     (call-with-input-file* p sha1)))
 
-(define (get-dep-sha1s deps up-to-date read-src-syntax mode roots must-exist? seen)
+(define (get-dep-sha1s deps up-to-date collection-cache read-src-syntax mode roots must-exist? seen)
   (let ([l (for/fold ([l null]) ([dep (in-list deps)])
              (and l
                   ;; (cons 'ext rel-path) => a non-module file, check source
                   ;; rel-path => a module file name, check cache
                   (let* ([ext? (and (pair? dep) (eq? 'ext (car dep)))]
-                         [p (main-collects-relative->path (if ext? (cdr dep) dep))])
+                         [p (collects-relative*->path (if ext? (cdr dep) dep) collection-cache)])
                     (cond
                      [ext? (let ([v (get-source-sha1 p)])
                              (cond
@@ -288,7 +237,7 @@
                               [else #f]))]
                      [(or (hash-ref up-to-date (simple-form-path p) #f)
                           ;; Use `compile-root' with `sha1-only?' as #t:
-                          (compile-root mode roots p up-to-date read-src-syntax #t seen))
+                          (compile-root mode roots p up-to-date collection-cache read-src-syntax #t seen))
                       => (lambda (sh)
                            (cons (cons (cdr sh) dep) l))]
                      [must-exist?
@@ -312,7 +261,7 @@
 
 (define (write-deps code mode roots path src-sha1 
                     external-deps external-module-deps reader-deps 
-                    up-to-date read-src-syntax)
+                    up-to-date collection-cache read-src-syntax)
   (let ([dep-path (path-add-suffix (get-compilation-path mode roots path) #".dep")]
         [deps (remove-duplicates (append (get-deps code path)
                                          external-module-deps ; can create cycles if misused!
@@ -321,13 +270,13 @@
     (with-compile-output dep-path
       (lambda (op tmp-path)
         (let ([deps (append
-                     (map path->main-collects-relative deps)
+                     (map path*->collects-relative deps)
                      (map (lambda (x)
-                            (cons 'ext (path->main-collects-relative x)))
+                            (cons 'ext (path*->collects-relative x)))
                           external-deps))])
         (write (list* (version)
                       (cons (or src-sha1 (get-source-sha1 path))
-                            (get-dep-sha1s deps up-to-date read-src-syntax mode roots #t #hash()))
+                            (get-dep-sha1s deps up-to-date collection-cache read-src-syntax mode roots #t #hash()))
                       deps)
                op)
         (newline op))))))
@@ -339,7 +288,7 @@
             (date-hour d) (date-minute d) (date-second d))))
 
 (define (verify-times ss-name zo-name)
-  (define ss-sec (try-file-time ss-name))
+  (define ss-sec (file-or-directory-modify-seconds ss-name))
   (define zo-sec (try-file-time zo-name))
   (cond [(not ss-sec) (error 'compile-zo "internal error")]
         [(not zo-sec) (error 'compile-zo "failed to create .zo file (~a) for ~a"
@@ -357,7 +306,7 @@
   #:property prop:procedure (struct-field-index proc))
 (define-struct file-dependency (path module?) #:prefab)
 
-(define (compile-zo* mode roots path src-sha1 read-src-syntax zo-name up-to-date)
+(define (compile-zo* mode roots path src-sha1 read-src-syntax zo-name up-to-date collection-cache)
   ;; The `path' argument has been converted to .rkt or .ss form,
   ;;  as appropriate.
   ;; External dependencies registered through reader guard and
@@ -394,8 +343,11 @@
                                (path? (file-dependency-path (vector-ref l 2))))
                         (external-dep! (file-dependency-path (vector-ref l 2))
                                        (file-dependency-module? (vector-ref l 2)))
-                        (log-message orig-log (vector-ref l 0) (vector-ref l 1)
-                                     (vector-ref l 2)))
+                        (log-message orig-log
+                                     (vector-ref l 0) (vector-ref l 3)
+                                     (vector-ref l 1)
+                                     (vector-ref l 2)
+                                     #f))
                       (loop))))))))
 
   ;; Compile the code:
@@ -432,7 +384,7 @@
                        (lambda (a b) #f) ; extension handler
                        #:source-reader read-src-syntax)))
   (define dest-roots (list (car roots)))
-  (define code-dir (get-compilation-dir mode dest-roots path))
+  (define code-dir (get-compilation-dir path #:modes (list mode) #:roots dest-roots))
 
   ;; Wait for accomplice logging to finish:
   (log-message accomplice-logger 'info "stop" done-key)
@@ -440,7 +392,7 @@
 
   ;; Write the code and dependencies:
   (when code
-    (with-compiler-security-guard (make-directory*/ignore-exists-exn code-dir))
+    (with-compiler-security-guard (make-directory* code-dir))
     (with-compile-output zo-name
       (lambda (out tmp-name)
         (with-handlers ([exn:fail?
@@ -481,7 +433,7 @@
         (verify-times path tmp-name)
         (write-deps code mode dest-roots path src-sha1 
                     external-deps external-module-deps reader-deps 
-                    up-to-date read-src-syntax)))))
+                    up-to-date collection-cache read-src-syntax)))))
 
 (define (install-module-hashes! s start len)
   (define vlen (bytes-ref s (+ start 2)))
@@ -522,7 +474,7 @@
             alt-path
             path))))
 
-(define (maybe-compile-zo sha1-only? deps mode roots path orig-path read-src-syntax up-to-date seen)
+(define (maybe-compile-zo sha1-only? deps mode roots path orig-path read-src-syntax up-to-date collection-cache seen)
   (let ([actual-path (actual-source-path orig-path)])
     (unless sha1-only?
       ((manager-compile-notify-handler) actual-path)
@@ -547,7 +499,7 @@
                (if (and zo-exists?
                         src-sha1
                         (equal? src-sha1 (caadr deps))
-                        (equal? (get-dep-sha1s (cddr deps) up-to-date read-src-syntax mode roots #f seen)
+                        (equal? (get-dep-sha1s (cddr deps) up-to-date collection-cache read-src-syntax mode roots #f seen)
                                 (cdadr deps)))
                    (begin
                      (log-info (format "cm: ~ahash-equivalent ~a" 
@@ -580,7 +532,7 @@
                                                              (exn:get-module-code-path ex)
                                                              (exn-message ex))
                                         (raise ex))])
-                                  (compile-zo* mode roots path src-sha1 read-src-syntax zo-name up-to-date)))
+                                  (compile-zo* mode roots path src-sha1 read-src-syntax zo-name up-to-date collection-cache)))
                               (log-info (format "cm: ~acompiled  ~a" 
                                                 (build-string 
                                                  (depth)
@@ -593,12 +545,11 @@
        (trace-printf "end compile: ~a" actual-path)))))
 
 (define (get-compiled-time mode roots path)
-  (define-values (dir name) (get-compilation-dir+name mode roots path))
+  (define-values (dir name) (get-compilation-dir+name path #:modes (list mode) #:roots roots))
   (or (try-file-time (build-path dir "native" (system-library-subpath)
                                  (path-add-suffix name (system-type
                                                         'so-suffix))))
-      (try-file-time (build-path dir (path-add-suffix name #".zo")))
-      -inf.0))
+      (try-file-time (build-path dir (path-add-suffix name #".zo")))))
 
 (define (try-file-sha1 path dep-path)
   (with-module-reading-parameterization
@@ -610,7 +561,7 @@
           (call-with-input-file* dep-path (lambda (p) (cdadr (read p))))))))))
 
 (define (get-compiled-sha1 mode roots path)
-  (define-values (dir name) (get-compilation-dir+name mode roots path))
+  (define-values (dir name) (get-compilation-dir+name path #:modes (list mode) #:roots roots))
   (let ([dep-path (build-path dir (path-add-suffix name #".dep"))])
     (or (try-file-sha1 (build-path dir "native" (system-library-subpath)
                                    (path-add-suffix name (system-type
@@ -621,12 +572,11 @@
         "")))
 
 (define (rkt->ss p)
-  (let ([b (path->bytes p)])
-    (if (regexp-match? #rx#"[.]rkt$" b)
-        (path-replace-suffix p #".ss")
-        p)))
+  (if (regexp-match? #rx#"[.]rkt$" p)
+      (path-replace-suffix p #".ss")
+      p))
 
-(define (compile-root mode roots path0 up-to-date read-src-syntax sha1-only? seen)
+(define (compile-root mode roots path0 up-to-date collection-cache read-src-syntax sha1-only? seen)
   (define orig-path (simple-form-path path0))
   (define (read-deps path)
     (with-handlers ([exn:fail:filesystem? (lambda (ex) (list (version) '#f))])
@@ -654,7 +604,7 @@
        [(not path-time)
         (trace-printf "~a does not exist" orig-path)
         (or (hash-ref up-to-date orig-path #f)
-            (let ([stamp (cons path-zo-time
+            (let ([stamp (cons (or path-zo-time +inf.0)
                                (delay (get-compiled-sha1 mode roots path)))])
               (hash-set! up-to-date main-path stamp)
               (unless (eq? main-path alt-path)
@@ -668,42 +618,42 @@
              [(not (and (pair? deps) (equal? (version) (car deps))))
               (lambda ()
                 (trace-printf "newer version...")
-                (maybe-compile-zo #f #f mode roots path orig-path read-src-syntax up-to-date new-seen))]
-             [(> path-time path-zo-time)
+                (maybe-compile-zo #f #f mode roots path orig-path read-src-syntax up-to-date collection-cache new-seen))]
+             [(> path-time (or path-zo-time -inf.0))
               (trace-printf "newer src...")
               ;; If `sha1-only?', then `maybe-compile-zo' returns a #f or thunk:
-              (maybe-compile-zo sha1-only? deps mode roots path orig-path read-src-syntax up-to-date new-seen)]
+              (maybe-compile-zo sha1-only? deps mode roots path orig-path read-src-syntax up-to-date collection-cache new-seen)]
              [(ormap
                (lambda (p)
                  ;; (cons 'ext rel-path) => a non-module file (check date)
                  ;; rel-path => a module file name (check transitive dates)
                  (define ext? (and (pair? p) (eq? 'ext (car p))))
-                 (define d (main-collects-relative->path (if ext? (cdr p) p)))
+                 (define d (collects-relative*->path (if ext? (cdr p) p) collection-cache))
                  (define t
                    (if ext?
-                       (cons (try-file-time d) #f)
-                       (compile-root mode roots d up-to-date read-src-syntax #f new-seen)))
+                       (cons (or (try-file-time d) +inf.0) #f)
+                       (compile-root mode roots d up-to-date collection-cache read-src-syntax #f new-seen)))
                  (and t
                       (car t)
-                      (> (car t) path-zo-time)
+                      (> (car t) (or path-zo-time -inf.0))
                       (begin (trace-printf "newer: ~a (~a > ~a)..."
                                            d (car t) path-zo-time)
                              #t)))
                (cddr deps))
               ;; If `sha1-only?', then `maybe-compile-zo' returns a #f or thunk:
-              (maybe-compile-zo sha1-only? deps mode roots path orig-path read-src-syntax up-to-date new-seen)]
+              (maybe-compile-zo sha1-only? deps mode roots path orig-path read-src-syntax up-to-date collection-cache new-seen)]
              [else #f]))
           (cond
            [(and build sha1-only?) #f]
            [else
             (when build (build))
-            (let ([stamp (cons (get-compiled-time mode roots path)
+            (let ([stamp (cons (or (get-compiled-time mode roots path) +inf.0)
                                (delay (get-compiled-sha1 mode roots path)))])
               (hash-set! up-to-date main-path stamp)
               (unless (eq? main-path alt-path)
                 (hash-set! up-to-date alt-path stamp))
               stamp)]))])))
-  (or (and up-to-date (hash-ref up-to-date orig-path #f))
+  (or (hash-ref up-to-date orig-path #f)
       (let ([v ((manager-skip-file-handler) orig-path)])
         (and v
              (hash-set! up-to-date orig-path v)
@@ -715,17 +665,20 @@
   ((make-caching-managed-compile-zo read-src-syntax #:security-guard security-guard) zo))
 
 (define (make-caching-managed-compile-zo [read-src-syntax read-syntax] #:security-guard [security-guard #f])
-  (let ([cache (make-hash)])
+  (let ([cache (make-hash)]
+        [collection-cache (make-hash)])
     (lambda (src)
       (parameterize ([current-load/use-compiled
                       (make-compilation-manager-load/use-compiled-handler/table
                        cache
+                       collection-cache
                        #f
                        #:security-guard security-guard)])
         (compile-root (car (use-compiled-file-paths))
                       (current-compiled-file-roots)
                       (path->complete-path src)
                       cache
+                      collection-cache
                       read-src-syntax
                       #f
                       #hash())
@@ -734,10 +687,12 @@
 (define (make-compilation-manager-load/use-compiled-handler [delete-zos-when-rkt-file-does-not-exist? #f]
                                                             #:security-guard 
                                                             [security-guard #f])
-  (make-compilation-manager-load/use-compiled-handler/table (make-hash) delete-zos-when-rkt-file-does-not-exist?
+  (make-compilation-manager-load/use-compiled-handler/table (make-hash) (make-hash)
+                                                            delete-zos-when-rkt-file-does-not-exist?
                                                             #:security-guard security-guard))
 
-(define (make-compilation-manager-load/use-compiled-handler/table cache delete-zos-when-rkt-file-does-not-exist?
+(define (make-compilation-manager-load/use-compiled-handler/table cache collection-cache
+                                                                  delete-zos-when-rkt-file-does-not-exist?
                                                                   #:security-guard [security-guard #f])
   (let ([orig-eval (current-eval)]
         [orig-load (current-load)]
@@ -792,7 +747,7 @@
             [else
              (trace-printf "processing: ~a" path)
              (parameterize ([compiler-security-guard security-guard])
-               (compile-root (car modes) roots path cache read-syntax #f #hash()))
+               (compile-root (car modes) roots path cache collection-cache read-syntax #f #hash()))
              (trace-printf "done: ~a" path)])
       (default-handler path mod-name))
     (when (null? modes)

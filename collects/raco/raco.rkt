@@ -2,6 +2,8 @@
 (require "command-name.rkt"
          "all-tools.rkt")
 
+(module test racket/base)
+
 (define (find-by-prefix hash str)
   (let ([trie (make-hash)])
     (for ([key (in-hash-keys hash)])
@@ -20,6 +22,10 @@
              (if (string? s)
                  (hash-ref hash s)
                  'ambiguous))))))
+
+(define (done [result 0])
+  ((executable-yield-handler) result) ; to enable GUI commands
+  (exit result))
 
 (let* ([cmdline (vector->list (current-command-line-arguments))]
        [cmdline (if (and (pair? cmdline)
@@ -53,7 +59,7 @@
                                    (list->vector (cdr cmdline))]
                                   [current-command-name (car tool)])
                      (dynamic-require (cadr tool) #f)
-                     (exit))))]
+                     (done))))]
          [(equal? (car cmdline) "help") #t]
          [else
           (eprintf "~a: Unrecognized command: ~a\n\n"
@@ -84,4 +90,4 @@
     (printf "\nSee `raco help' for a complete list of commands."))
   (printf "\nSee `raco help <command>' for help on a command.")
   (newline)
-  (exit (if show-all? 0 1)))
+  (done (if show-all? 0 1)))

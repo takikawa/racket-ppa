@@ -1,5 +1,5 @@
-#lang scheme/base
-(require file/gzip scheme/file)
+#lang racket/base
+(require file/gzip racket/file)
 
 (define tar-block-size 512)
 (define tar-name-length 100)
@@ -43,14 +43,16 @@
 
 (define 0-byte (char->integer #\0))
 
-(define ((tar-one-entry buf) path)
-  (let* ([path    (resolve-path path)]
-         [dir?    (directory-exists? path)]
-         [size    (if dir? 0 (file-size path))]
+(define ((tar-one-entry buf prefix get-timestamp) path)
+  (let* ([link?   (link-exists? path)]
+         [dir?    (and (not link?) (directory-exists? path))]
+         [size    (if (or dir? link?) 0 (file-size path))]
          [p       0] ; write pointer
          [cksum   0]
          [cksum-p #f])
-    (define-values (file-name file-prefix) (split-tar-name path))
+    (define-values (file-name file-prefix) (split-tar-name (if prefix
+                                                               (build-path prefix path)
+                                                               path)))
     (define-syntax advance (syntax-rules () [(_ l) (set! p (+ p l))]))
     (define (write-block* len bts) ; no padding required
       (when bts
@@ -80,11 +82,19 @@
     (write-octal   8 0)          ; always root (uid)
     (write-octal   8 0)          ; always root (gid)
     (write-octal  12 size)
-    (write-octal  12 (file-or-directory-modify-seconds path))
+    (write-octal  12 (get-timestamp path))
     ;; set checksum later, consider it "all blanks" for cksum
     (set! cksum-p p) (set! cksum (+ cksum (* 8 32))) (advance 8)
-    (write-block*  1 (if dir? #"5" #"0")) ; type-flag: dir/file (no symlinks)
-    (advance     100)            ; no link-name
+    (write-block*  1 (if link? #"2" (if dir? #"5" #"0"))) ; type-flag: dir/file (no symlinks)
+    (if link?
+        (let* ([p (path->bytes (resolve-path path))]
+               [len (bytes-length p)])
+          (if (len . < . 100)
+              (begin
+                (write-block* len p)
+                (advance (- 100 len)))
+              (error 'tar "soft-link target too long")))
+        (advance     100))       ; no link-name
     (write-block   6 #"ustar")   ; magic
     (write-block*  2 #"00")      ; version
     (write-block  32 #"root")    ; always root (user-name)
@@ -95,7 +105,7 @@
     (set! p cksum-p)
     (write-octal   8 cksum)      ; patch checksum
     (write-bytes buf)
-    (if dir?
+    (if (or dir? link?)
       (zero-block! buf) ; must clean buffer for re-use
       ;; write the file
       (with-input-from-file path
@@ -119,34 +129,47 @@
 ;; tar-write : (listof relative-path) ->
 ;; writes a tar file to current-output-port
 (provide tar->output)
-(define (tar->output files [out (current-output-port)])
+(define (tar->output files [out (current-output-port)]
+                     #:get-timestamp [get-timestamp file-or-directory-modify-seconds]
+                     #:path-prefix [prefix #f])
   (parameterize ([current-output-port out])
-    (let* ([buf (new-block)] [entry (tar-one-entry buf)])
+    (let* ([buf (new-block)] [entry (tar-one-entry buf prefix get-timestamp)])
       (for-each entry files)
       ;; two null blocks end-marker
       (write-bytes buf) (write-bytes buf))))
 
 ;; tar : output-file paths ->
 (provide tar)
-(define (tar tar-file . paths)
+(define (tar tar-file
+             #:path-prefix [prefix #f]
+             #:get-timestamp [get-timestamp file-or-directory-modify-seconds]
+             . paths)
   (when (null? paths) (error 'tar "no paths specified"))
   (with-output-to-file tar-file
-    (lambda () (tar->output (pathlist-closure paths)))))
+    (lambda () (tar->output (pathlist-closure paths #:follow-links? #f)
+                            #:get-timestamp get-timestamp
+                            #:path-prefix prefix))))
 
 ;; tar-gzip : output-file paths ->
 (provide tar-gzip)
-(define (tar-gzip tgz-file . paths)
+(define (tar-gzip tgz-file
+                  #:path-prefix [prefix #f]
+                  #:get-timestamp [get-timestamp file-or-directory-modify-seconds]
+                  . paths)
   (when (null? paths) (error 'tar-gzip "no paths specified"))
   (with-output-to-file tgz-file
     (lambda ()
-      (let-values ([(i o) (make-pipe)])
+      (let-values ([(i o) (make-pipe (* 1024 1024 32))])
         (thread (lambda ()
-                  (tar->output (pathlist-closure paths) o)
+                  (tar->output (pathlist-closure paths #:follow-links? #f) o
+                               #:path-prefix prefix
+                               #:get-timestamp get-timestamp)
                   (close-output-port o)))
         (gzip-through-ports
          i (current-output-port)
          (cond [(regexp-match #rx"^(.*[.])(?:tar[.]gz|tgz)$"
                               (if (path? tgz-file)
                                 (path->string tgz-file) tgz-file))
-                => (lambda (m) (string-append (car m) "tar"))])
+                => (lambda (m) (string-append (car m) "tar"))]
+               [else #f])
          (current-seconds))))))

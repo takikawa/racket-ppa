@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2014 PLT Design Inc.
   Copyright (c) 1995 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -228,10 +228,12 @@ static MZ_INLINE rettype name ## __big_dbl(const Scheme_Object *n1, const Scheme
 static MZ_INLINE rettype name ## __big_rat(const Scheme_Object *n1, const Scheme_Object *n2) { \
   return rop(scheme_integer_to_rational(n1), (n2)); \
 } \
+complexwrap(\
 static MZ_INLINE rettype name ## __big_comp(const Scheme_Object *n1, const Scheme_Object *n2) { \
   Small_Complex sc; \
   return cxop((scheme_make_small_complex(n1, &sc)), (n2)); \
 } \
+) \
 static MZ_INLINE rettype name ## __rat_int(const Scheme_Object *n1, const Scheme_Object *n2) { \
   Small_Rational sr8; \
   check_exact_zero2(n2, n1); \

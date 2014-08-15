@@ -1,5 +1,5 @@
-This is the source code distribution for Racket.  For license
-information, please see the file racket/doc/release-notes/COPYING.txt.
+This is the source code distribution for minimal Racket. For license
+information, please see the file "COPYING_LESSER.txt".
 
 Compiled binaries, documentation, and up-to-date information are
 available at http://racket-lang.org/; pre-compiled nightly builds are
@@ -124,7 +124,10 @@ Detailed instructions:
     To run `racket/draw' and `racket/gui' programs, you will need
     Cairo, Pango, and GTk install.  These libraries are not
     distributed with Racket, and they are not needed for compilation,
-    except for building documentation that uses `racket/draw'.
+    except for building documentation that uses `racket/draw'. More
+    info about required libs is available at
+    http://docs.racket-lang.org/draw/libs.html and
+    http://docs.racket-lang.org/gui/libs.html.
 
     The content of the "foreign" subdirectory may require GNU `make'
     if no installed "libffi" is detected.  If the build fails with
@@ -253,7 +256,7 @@ Detailed instructions:
     "add-ons" directory, which you can most easily find by evaluating
       (find-system-path 'addon-dir)
     in Racket.  In addition, if you configure with `--enabled-shared',
-    you may accumlate many unused versions of the dynamic libraries in
+    you may accumulate many unused versions of the dynamic libraries in
     your installation target.
 
 After an "in-place" install without git, the "racket/src" directory is
@@ -270,20 +273,55 @@ file references within the installation are relative.
 
 Cross-compilation requires at least two flags to `configure':
 
- * `--host=OS', where OS is something like `i386-gnu-linux'
+ * `--host=OS', where OS is something like `i386-gnu-linux' to
+   indicate the target platform.
+
+   The `configure' script uses OS to find suitable compilation tools,
+   such as `OS-gcc' and `OS-strip'.
 
  * `--enable-racket=RACKET', where RACKET is a path to a Racket
-   executable for the version being compiled that runs on the build 
-   (i.e., you must compile on the build machine to cross-compile)
+   executable for the version being compiled that runs on the build
+   platform.
 
-The `--enable-racket' flag is needed because building and installing
-Racket requires running (an intermediate version of) Racket.
+   This flag is needed because building and installing Racket requires
+   running (an intermediate version of) Racket.
 
-You may also need to set CC_FOR_BUILD to a compiler for the host
-platform (for building binaries to execute during the build process).
-If the target machine's stack grows up, you may have to supply
-`--enable-stackup'; if the target machine is big-endian, you may have
-to supply `--enable-bigendian'.
+A third `configure' flag is typical:
+
+ * `--enable-sgc', which uses a simpler garbage collector for the
+   intermediate variant of Racket that is normally used only to build
+   the final variant (see CGC vs 3m below).
+
+   Otherwise, you may need to set CC_FOR_BUILD to a compiler for the
+   build platform, so that helper executables can be created in the
+   process of building the intermediate Racket that is used to build
+   the final Racket.
+
+Some less commonly needed `configure' flags:
+
+ * `--enable-stackup', if the target platform's stack grows up.
+
+ * `--enable-bigendian', if target platform is big-endian.
+
+========================================================================
+ Cross-compiling for Android
+========================================================================
+
+As an example of cross-compiling, to compile for Android on ARM using
+the NDK, use (all on one line)
+
+  configure --host=arm-linux-androideabi 
+            --enable-sysroot="[ndk]/platforms/android-[N]/arch-arm"
+            --enable-sgc
+            --enable-racket=racket
+
+where [ndk] is the path to the installed NDK, [N] is a target version
+of Android (such as 14), and
+
+ [ndk]/toolchains/arm-linux-androideabi-[comp]/prebuilt/[platform]/bin
+
+is in your PATH (so that a suitable `gcc', `ar', etc., are found) for
+the [comp] of your choice and the [platform] used to compile.
 
 ========================================================================
  CGC versus 3m
@@ -294,11 +332,12 @@ older, and it cooperates more easily with extensions written in C.  The
 3m variant is the default: it is more robust and usually provides better
 overall performance.
 
-The default build mode creates 3m binaries only.  To create CGC binaries
+The default build mode creates 3m binaries only (except for a CGC
+binary that is used to build the 3m binary).  To create CGC binaries
 in addition, run `make cgc' in addition to `make', or run `make both'.
-To install both variants, use `make install-both' instead of just `make
-install'.  Alternately, use just `make cgc' and `make install-cgc' to
-build and install just the CGC variants.
+To install both variants, use `make install-both' instead of just
+`make install'.  Alternately, use just `make cgc' and `make
+install-cgc' to build and install just the CGC variants.
 
 CGC variants are installed with a "cgc" suffix.  To swap the default
 build and install mode, supply `--enable-cgcdefault' to `configure'.  In
@@ -322,7 +361,7 @@ The paths are embedded in the binary immediately after a special
 list of paths must end with an additional NUL terminator, and the
 overall list must be less than 1024 bytes long.
 
-As an alternative to editing an exeuctable directly, the
+As an alternative to editing an executable directly, the
 `create-embedding-executable' procedure from `compiler/embed' can be
 used to change the embedded path.  For example, the following program
 clones the Racket executable to "/tmp/mz" and changes the embedded path
@@ -345,7 +384,7 @@ documentation for "config search paths" for more information.
  Porting to New Platforms
 ========================================================================
 
-At a mininum, to port Racket to a new platform, edit "racket/sconfig.h"
+At a minimum, to port Racket to a new platform, edit "racket/sconfig.h"
 to provide a platform-specific compilation information.  As distributed,
 "racket/sconfig.h" contains configurations for the following platforms:
 
@@ -358,7 +397,7 @@ to provide a platform-specific compilation information.  As distributed,
               OpenBSD (x86)
               NetBSD (x86)
 
-If your platfrom is not supported by the Boehm garbage collector
+If your platform is not supported by the Boehm garbage collector
 (distributed with Racket source), provide the `--enable-sgc' flag to
 `configure'.
 
@@ -396,7 +435,7 @@ double' as extended-precision floating point.
 Configuration Options
 ---------------------
 
-Athough `configure' flags control most options, some configrations
+Although `configure' flags control most options, some configurations
 options can be modified by setting flags in "racket/sconfig.h".
 
 Some CPP flags control default settings in "racket/sconfig.h":

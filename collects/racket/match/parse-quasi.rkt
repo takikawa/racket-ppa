@@ -32,14 +32,15 @@
   (syntax-case stx (quasiquote unquote quote unquote-splicing)
     [(unquote p) (parse #'p)]
     [((unquote-splicing p) . rest)
-     (let ([pat (parse #'p)]
+     (let ([pat (parameterize ([in-splicing? #t]) (parse #'p))]
            [rpat (pq #'rest)])
        (if (null-terminated? pat)
-         (append-pats pat rpat)
-         (raise-syntax-error 'match "non-list pattern inside unquote-splicing"
-                             stx #'p)))]
+           (append-pats pat rpat)
+           (raise-syntax-error 'match "non-list pattern inside unquote-splicing"
+                               stx #'p)))]
     [(p dd . rest)
      (ddk? #'dd)
+     ;; FIXME: parameterize dd-parse so that it can be used here
      (let* ([count (ddk? #'dd)]
             [min (and (number? count) count)])
        (make-GSeq
@@ -60,7 +61,7 @@
            [pats (cdr (vector->list (struct->vector (syntax-e #'struct))))])
        (make-And (list (make-Pred #`(struct-type-make-predicate (prefab-key->struct-type '#,key #,(length pats))))
                        (make-App #'struct->vector
-                                 (make-Vector (cons (make-Dummy #f) (map pq pats))))))
+                                 (list (make-Vector (cons (make-Dummy #f) (map pq pats)))))))
        #;
        (make-PrefabStruct key (map pq pats)))]
     ;; the hard cases
@@ -73,7 +74,7 @@
             (syntax->list #'(p ...)))
      (make-And (list (make-Pred #'vector?)
                      (make-App #'vector->list
-                               (pq (quasisyntax/loc stx (p ...))))))]
+                               (list (pq (quasisyntax/loc stx (p ...)))))))]
     [#(p ...)
      (make-Vector (map pq (syntax->list #'(p ...))))]
     [bx

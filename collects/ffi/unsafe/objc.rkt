@@ -390,10 +390,11 @@
 (define-for-syntax method-sels (make-hash))
 
 (define-for-syntax (register-selector sym)
-  (or (hash-ref method-sels (cons (syntax-local-lift-context) sym) #f)
+  (define key (cons (syntax-local-lift-context) sym))
+  (or (hash-ref method-sels key #f)
       (let ([id (syntax-local-lift-expression
                  #`(sel_registerName #,(symbol->string sym)))])
-        (hash-set! method-sels sym id)
+        (hash-set! method-sels key id)
         id)))
 
 (provide selector)
@@ -750,9 +751,9 @@
 (define-syntax (add-method stx)
   (syntax-case stx ()
     [(_ whole-stx cls superclass-id m)
-     (let ([stx #'whole-stx])
-       (syntax-case #'m ()
-         [(kind result-type (id arg ...) body0 body ...)
+     (let loop ([stx #'whole-stx] [m #'m])
+       (syntax-case m ()
+         [(kind #:async-apply async result-type (id arg ...) body0 body ...)
           (or (free-identifier=? #'kind #'+)
               (free-identifier=? #'kind #'-)
               (free-identifier=? #'kind #'+a)
@@ -786,11 +787,6 @@
                                          (super-tell #:type _void dealloc)))]
                                    [_ (error "oops")])
                                  '())]
-                            [(async ...)
-                             (if (eq? (syntax-e id) 'dealloc)
-                                 ;; so that objects can be destroyed in foreign threads:
-                                 #'(#:async-apply apply-directly)
-                                 #'())]
                             [in-cls (if in-class?
                                         #'(object-get-class cls)
                                         #'cls)]
@@ -801,16 +797,27 @@
                         [arg-id arg-type] ...)
                     (void (class_addMethod in-cls
                                            (sel_registerName id-str)
-                                           #,(syntax/loc #'m
+                                           #,(syntax/loc m
                                                (lambda (self-id cmd arg-id ...)
                                                  (syntax-parameterize ([self (make-id-stx #'self-id)]
                                                                        [super-class (make-id-stx #'superclass-id)]
                                                                        [super-tell do-super-tell])
                                                    body0 body ...
                                                    dealloc-body ...)))
-                                           (_fun #:atomic? atomic? #:keep save-method! async ...
+                                           (_fun #:atomic? atomic? 
+                                                 #:keep save-method! 
+                                                 #:async-apply async
                                                  _id _id arg-type ... -> rt)
                                            (generate-layout rt (list arg-id ...)))))))))]
+         [(kind result-type (id arg ...) body0 body ...)
+          (loop stx 
+                (with-syntax ([async
+                               (if (eq? (syntax-e #'id) 'dealloc)
+                                   ;; so that objects can be destroyed in foreign threads:
+                                   #'apply-directly
+                                   #'#f)])
+                  (syntax/loc m 
+                    (kind #:async-apply async result-type (id arg ...) body0 body ...))))]
          [else (raise-syntax-error #f
                                    "bad method form"
                                    stx

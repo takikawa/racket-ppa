@@ -1,8 +1,5 @@
 #lang racket/base
 (require racket/promise
-         racket/match
-         racket/list
-         racket/function
          racket/contract/base)
 
 (provide/contract
@@ -186,32 +183,10 @@
 
 (define (one-entry b)
   (string-append
-   (number->string (first b))
+   (number->string (car b))
    " "
-   (second b)
-   (if (= 1 (first b)) "" "s")))
-(define (date-offset->string date [seconds? #f])
-  (define fields 
-    (list (list (date-offset-year date) "year")
-          (list (date-offset-day date) "day")
-          (list (date-offset-hour date) "hour")
-          (list (date-offset-minute date) "minute")
-          (list (if seconds? (date-offset-second date) 0) "second")))
-  (define non-zero-fields 
-    (filter (negate (compose (curry = 0) first)) fields))
-  (match non-zero-fields
-    [(list) ""]
-    [(list one) (one-entry one)]
-    [_
-     (for/fold ([string ""])
-       ([b (in-list non-zero-fields)])
-       (cond
-         [(= 0 (first b)) string]
-         [(string=? string "")
-          (string-append "and "
-                         (one-entry b)
-                         string)]
-         [else (string-append (one-entry b) ", " string)]))]))
+   (cadr b)
+   (if (= 1 (car b)) "" "s")))
 
 (define (days-per-month year month)
   (cond
@@ -246,11 +221,11 @@
           (loop hi (* 2 offset)))))))
 
 (define get-min-seconds
-  (let ([d (delay (find-extreme-date-seconds (current-seconds) -1))])
+  (let ([d (delay/sync (find-extreme-date-seconds (current-seconds) -1))])
     (lambda ()
       (force d))))
 (define get-max-seconds
-  (let ([d (delay (find-extreme-date-seconds (current-seconds) 1))])
+  (let ([d (delay/sync (find-extreme-date-seconds (current-seconds) 1))])
     (lambda ()
       (force d))))
 
@@ -271,24 +246,39 @@
       s))
 
 (define (find-seconds sec min hour day month year [local-time? #t])
-  (define (signal-error msg)
-    (error 'find-seconds (string-append 
-                          msg 
-                          " (inputs: ~a ~a ~a ~a ~a ~a)")
-           sec min hour day month year))
+  (define wanted (list year month day hour min sec))
+  (define-values (secs found?) (find-seconds* wanted local-time?))
+  (unless found?
+    (error 'find-seconds
+           (string-append "non-existent date"
+                          "\n  wanted: ~s"
+                          "\n  nearest below: ~s is ~s"
+                          "\n  nearest above: ~s is ~s")
+           (reverse wanted)
+           secs
+           (reverse (date->list (seconds->date secs local-time?)))
+           (add1 secs)
+           (reverse (date->list (seconds->date (add1 secs) local-time?)))))
+  secs)
+
+;; find-seconds* : list-of-6-nat boolean -> (values nat boolean)
+;; Returns (values secs found?) s.t.
+;;  - if found? is true: (seconds->date secs local-time?) = wanted
+;;  - if found? is false: secs is glb for wanted
+;; Note: seconds->date is non-monotonic (eg, DST), but should be
+;; well-behaved enough for binary search to work.
+(define (find-seconds* wanted local-time?)
   (let loop ([below-secs (get-min-seconds)]
-             [secs (floor (/ (+ (get-min-seconds) (get-max-seconds)) 2))]
              [above-secs (get-max-seconds)])
-    (let* ([date (seconds->date secs local-time?)]
+    ;; Inv: below-secs < above-secs
+    ;; Inv: (seconds->date below-secs local-time?)
+    ;;      < inputs
+    ;;      < (seconds->date above-secs local-time?)
+    (let* ([secs (floor (/ (+ below-secs above-secs) 2))]
+           [date (seconds->date secs local-time?)]
            [compare
-            (let loop ([inputs (list year month day 
-                                     hour min sec)]
-                       [tests (list (date-year date)
-                                    (date-month date)
-                                    (date-day date)
-                                    (date-hour date)
-                                    (date-minute date)
-                                    (date-second date))])
+            (let loop ([inputs wanted]
+                       [tests (date->list date)])
               (cond
                 [(null? inputs) 'equal]
                 [else (let ([input (car inputs)]
@@ -300,13 +290,23 @@
                                 'test-smaller)))]))])
       ; (printf "~a ~a ~a\n" compare secs (date->string date))
       (cond
-        [(eq? compare 'equal) secs]
+        [(eq? compare 'equal)
+         (values secs #t)]
         [(or (= secs below-secs) (= secs above-secs))
-         (signal-error "non-existent date")]
+         (values below-secs #f)]
         [(eq? compare 'input-smaller) 
-         (loop below-secs (floor (/ (+ secs below-secs) 2)) secs)]
+         (loop below-secs secs)]
         [(eq? compare 'test-smaller) 
-         (loop secs (floor (/ (+ above-secs secs) 2)) above-secs)]))))
+         (loop secs above-secs)]))))
+
+;; returns components in order for lexicographic comparison
+(define (date->list d)
+  (list (date-year d)
+        (date-month d)
+        (date-day d)
+        (date-hour d)
+        (date-minute d)
+        (date-second d)))
 
 ;; date->julian/scalinger :
 ;; date -> number [julian-day]

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2013 PLT Design Inc.
+  Copyright (c) 2006-2014 PLT Design Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -26,6 +26,15 @@
 #ifdef MZ_USE_JIT
 
 #include "jit.h"
+
+#ifdef USE_FLONUM_UNBOXING
+static int generate_argument_boxing(mz_jit_state *jitter, Scheme_Closure_Data *data, 
+                                    int num_rands, int args_already_in_place,
+                                    int offset, int direct_flostack_offset,
+                                    int save_reg,
+                                    /* used only to skip unneeded checks: */
+                                    Scheme_App_Rec *app, Scheme_Object **alt_rands);
+#endif
 
 int scheme_direct_call_count, scheme_indirect_call_count;
 
@@ -138,16 +147,11 @@ Scheme_Object *scheme_prim_indirect(Scheme_Primitive_Closure_Proc proc, int argc
     return proc(argc, MZ_RUNSTACK, self);
 }
 
+#endif
+
 /* Various specific 'futurized' versions of primitives that may 
    be invoked directly from JIT code and are not considered thread-safe 
    (are not invoked via apply_multi_from_native, etc.) */
-
-Scheme_Object *scheme_ts_scheme_force_value_same_mark(Scheme_Object *v)
-{
-  return ts_scheme_force_value_same_mark(v);
-}
-
-#endif
 
 #ifdef MZ_USE_FUTURES
 static Scheme_Object *ts__scheme_tail_apply_from_native(Scheme_Object *rator, int argc, Scheme_Object **argv)
@@ -332,12 +336,15 @@ static int generate_direct_prim_tail_call(mz_jit_state *jitter, int num_rands)
 static const int direct_arg_regs[] = { JIT_V1, JIT_R1, JIT_R0 };
 
 int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_native, int need_set_rs, 
-                              int is_inline, Scheme_Native_Closure *direct_to_code, jit_direct_arg *direct_args)
+                              int is_inline, Scheme_Native_Closure *direct_to_code, jit_direct_arg *direct_args,
+                              Scheme_Closure_Data *direct_data)
 /* Proc is in V1 unless direct_to_code, args are at RUNSTACK.
    If num_rands < 0, then argc is in LOCAL2 and arguments are already below RUNSTACK_BASE.
    If direct_native == 2, then some arguments are already in place (shallower in the runstack
    than the arguments to move).
-   If direct_args, then R0, R1, V1 hold arguments. */
+   If direct_args, then R0, R1, V1 hold arguments.
+   If direct data in unboxing mode, slow path needs to box flonum arguments; num_rands
+     must be >= 0 */
 {
   int i, r2_has_runstack = 0;
   GC_CAN_IGNORE jit_insn *refagain, *ref, *ref2, *ref4, *ref5;
@@ -355,7 +362,7 @@ int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
     ref = ref2 = NULL;
   }
 
-  refagain = _jit.x.pc;
+  refagain = jit_get_ip();
 
   /* Right kind of function. Extract data and check stack depth: */
   if (!direct_to_code) {
@@ -487,6 +494,23 @@ int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
   if (ref4)
     mz_patch_branch(ref4);
   CHECK_LIMIT();
+#ifdef USE_FLONUM_UNBOXING
+  if (direct_data) {
+    if (SCHEME_CLOSURE_DATA_FLAGS(direct_data) & CLOS_HAS_TYPED_ARGS) {
+      /* Need to box flonum arguments. Flonums are currently in the place where
+         the target function expects them unpacked from arguments. We need to save
+         JIT_V1. */
+      generate_argument_boxing(jitter, direct_data, 
+                               num_rands, 0,
+                               0, 0,
+                               JIT_V1,
+                               NULL, NULL);
+      CHECK_LIMIT();
+      mz_rs_sync();
+      scheme_mz_flostack_restore(jitter, 0, 0, 1, 0);
+    }
+  }
+#endif
   if (need_set_rs) {
     JIT_UPDATE_THREAD_RSPTR();
   }
@@ -518,23 +542,34 @@ int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
   return 1;
 }
 
+int scheme_generate_force_value_same_mark(mz_jit_state *jitter)
+{
+  GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
+  jit_movi_p(JIT_R0, SCHEME_TAIL_CALL_WAITING);
+  mz_prepare(1);
+  jit_pusharg_p(JIT_R0);
+  (void)mz_finish_lwe(ts_scheme_force_value_same_mark, refr);
+  jit_retval(JIT_R0);
+  return 1;
+}
+
 int scheme_generate_finish_apply(mz_jit_state *jitter)
 {
-  GC_CAN_IGNORE jit_insn *refr;
+  GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
   (void)mz_finish_lwe(ts__scheme_apply_from_native, refr);
   return 1;
 }
 
 int scheme_generate_finish_tail_apply(mz_jit_state *jitter)
 {
-  GC_CAN_IGNORE jit_insn *refr;
-  (void)mz_finish_lwe(_scheme_tail_apply_from_native, refr);
+  GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
+  (void)mz_finish_lwe(ts__scheme_tail_apply_from_native, refr);
   return 1;
 }
 
 int scheme_generate_finish_multi_apply(mz_jit_state *jitter)
 {
-  GC_CAN_IGNORE jit_insn *refr;
+  GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
   (void)mz_finish_lwe(ts__scheme_apply_multi_from_native, refr);
   return 1;
 }
@@ -547,10 +582,10 @@ int scheme_generate_finish_tail_call(mz_jit_state *jitter, int direct_native)
   jit_pusharg_i(JIT_R0);
   jit_pusharg_p(JIT_V1);
   if (direct_native > 1) { /* => some_args_already_in_place */
-    GC_CAN_IGNORE jit_insn *refr;
+    GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
     (void)mz_finish_lwe(_scheme_tail_apply_from_native_fixup_args, refr);
   } else {
-    GC_CAN_IGNORE jit_insn *refr;
+    GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
     (void)mz_finish_lwe(ts__scheme_tail_apply_from_native, refr);
   }
   CHECK_LIMIT();
@@ -644,7 +679,7 @@ static int generate_retry_call(mz_jit_state *jitter, int num_rands, int multi_ok
   jit_ldxi_p(JIT_V1, JIT_R1, &((Scheme_Thread *)0x0)->ku.apply.tail_rands);
   jit_lshi_l(JIT_R2, JIT_R2, JIT_LOG_WORD_SIZE);
   CHECK_LIMIT();
-  refloop = _jit.x.pc;
+  refloop = jit_get_ip();
   ref2 = jit_blei_l(jit_forward(), JIT_R2, 0);
   jit_subi_l(JIT_R2, JIT_R2, JIT_WORD_SIZE);
   jit_ldxr_p(JIT_R0, JIT_V1, JIT_R2);
@@ -667,7 +702,7 @@ static int generate_retry_call(mz_jit_state *jitter, int num_rands, int multi_ok
   
   /* Slow path; restore R0 to SCHEME_TAIL_CALL_WAITING */
   mz_patch_branch(ref);
-  jit_movi_l(JIT_R0, SCHEME_TAIL_CALL_WAITING);
+  (void)jit_movi_p(JIT_R0, SCHEME_TAIL_CALL_WAITING);
 
   return 1;
 }
@@ -730,7 +765,8 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
      If num_rands < 0, then argc is in R0, and need to pop runstack before returning.
      If num_rands == -1, skip prolog. */
   GC_CAN_IGNORE jit_insn *ref, *ref2, *ref4, *ref5, *ref6, *ref7, *ref8, *ref9;
-  GC_CAN_IGNORE jit_insn *ref10, *reftop = NULL, *refagain, *refrts;
+  GC_CAN_IGNORE jit_insn *ref10, *reftop = NULL, *refagain;
+  GC_CAN_IGNORE jit_insn *refrts USED_ONLY_FOR_FUTURES;
 #ifndef FUEL_AUTODECEREMENTS
   GC_CAN_IGNORE jit_insn *ref11;
 #endif
@@ -741,7 +777,7 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
     if (num_rands != -1) {
       mz_prolog(JIT_R1);
     } else {
-      reftop = _jit.x.pc;
+      reftop = jit_get_ip();
     }
   }
 
@@ -756,7 +792,7 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
     ref = ref2 = NULL;
   }
 
-  refagain = _jit.x.pc;
+  refagain = jit_get_ip();
       
   /* Before inlined native, check max let depth */
   if (!nontail_self) {
@@ -784,7 +820,10 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
   /* Fast inlined-native jump ok (proc will check argc, if necessary) */
   {
     GC_CAN_IGNORE jit_insn *refr;
-#ifdef MZ_USE_JIT_I386
+#if defined(MZ_USE_JIT_I386) || defined(MZ_USE_JIT_ARM)
+# define KEEP_CALL_AND_RETURN_PAIRED
+#endif
+#ifdef KEEP_CALL_AND_RETURN_PAIRED
     GC_CAN_IGNORE jit_insn *refxr;
 #endif
     if (num_rands < 0) {
@@ -797,11 +836,11 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
       jit_movr_p(JIT_R2, JIT_FP); /* save old FP */
     }
     jit_shuffle_saved_regs(); /* maybe copies V registers to be restored */
-#ifdef MZ_USE_JIT_I386
-    /* keep call & ret paired by jumping to where we really 
-       want to return,then back here: */
+#ifdef KEEP_CALL_AND_RETURN_PAIRED
+    /* keep call & ret paired (for branch prediction) by jumping to where
+       we really want to return, then back here: */
     refr = jit_jmpi(jit_forward());
-    refxr = _jit.x.pc;
+    refxr = jit_get_ip();
     jit_base_prolog();
 #else
     refr = jit_patchable_movi_p(JIT_R1, jit_forward());
@@ -837,7 +876,7 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
       GC_CAN_IGNORE jit_insn *refrr;
       refrr = jit_patchable_movi_p(JIT_R1, jit_forward());
       jit_jmpr(JIT_V1);
-      jit_patch_movi(refrr, _jit.x.pc);
+      jit_patch_movi(refrr, jit_get_ip());
       jit_movi_i(JIT_R1, num_rands); /* argc */
       jit_movr_p(JIT_R2, JIT_RUNSTACK); /* argv */
     }
@@ -857,11 +896,11 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
       /* self-call function pointer is in R1 */
       jit_jmpr(JIT_R1);
     }
-#ifdef MZ_USE_JIT_I386
+#ifdef KEEP_CALL_AND_RETURN_PAIRED
     mz_patch_ucbranch(refr);
     (void)jit_short_calli(refxr);
 #else
-    jit_patch_movi(refr, (_jit.x.pc));
+    jit_patch_movi(refr, jit_get_ip());
 #endif
     jit_unshuffle_saved_regs(); /* maybe uncopies V registers */
     /* If num_rands < 0, then V1 has argc */
@@ -1070,13 +1109,91 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
   return 1;
 }
 
+#ifdef USE_FLONUM_UNBOXING
+static int generate_argument_boxing(mz_jit_state *jitter, Scheme_Closure_Data *data, 
+                                    int num_rands, int args_already_in_place,
+                                    int offset, int direct_flostack_offset,
+                                    int save_reg,
+                                    /* used only to skip unneeded checks: */
+                                    Scheme_App_Rec *app, Scheme_Object **alt_rands)
+{
+  int i, arg_tmp_offset;
+  Scheme_Object *rand;
+  
+  arg_tmp_offset = offset - direct_flostack_offset;
+  for (i = num_rands; i--; ) {
+    int extfl;
+    extfl = CLOSURE_ARGUMENT_IS_EXTFLONUM(data, i + args_already_in_place);
+    if (extfl || CLOSURE_ARGUMENT_IS_FLONUM(data, i + args_already_in_place)) {
+      rand = (alt_rands 
+              ? alt_rands[i+1+args_already_in_place] 
+              : (app 
+                 ? app->args[i+1+args_already_in_place]
+                 : NULL));
+      arg_tmp_offset += MZ_FPUSEL(extfl, 2*sizeof(double), sizeof(double));
+      /* Boxing definitely isn't needed if the value was from a local that doesn't hold
+         an unboxed value, otherwise we generate code to check dynamically. */
+      if (!rand
+          || !SAME_TYPE(SCHEME_TYPE(rand), scheme_local_type)
+          || (!extfl && (SCHEME_GET_LOCAL_TYPE(rand) == SCHEME_LOCAL_TYPE_FLONUM))
+          || (extfl && (SCHEME_GET_LOCAL_TYPE(rand) == SCHEME_LOCAL_TYPE_EXTFLONUM))) {
+        GC_CAN_IGNORE jit_insn *iref;
+        int aoffset;
+        aoffset = JIT_FRAME_FLOSTACK_OFFSET - arg_tmp_offset;
+        if (save_reg == JIT_R0) {
+          if (i != num_rands - 1)
+            mz_pushr_p(JIT_R0);
+        } else {
+          mz_pushr_p(JIT_V1);
+        }
+        if (!rand || SAME_TYPE(SCHEME_TYPE(rand), scheme_local_type)) {
+          /* assert: !rand or SCHEME_GET_LOCAL_TYPE(rand) == SCHEME_LOCAL_TYPE_FLONUM
+             or SCHEME_GET_LOCAL_TYPE(rand) == SCHEME_LOCAL_TYPE_EXTFLONUM */
+          /* So, we have to check for an existing box */
+          if ((save_reg != JIT_R0) || (i != num_rands - 1))
+            mz_rs_ldxi(JIT_R0, i+1);
+          mz_rs_sync();
+          __START_TINY_JUMPS__(1);
+          iref = jit_bnei_p(jit_forward(), JIT_R0, NULL);
+          __END_TINY_JUMPS__(1);
+        } else
+          iref = NULL;
+        jit_movi_l(JIT_R0, aoffset);
+        mz_rs_sync();
+        MZ_FPUSEL_STMT(extfl,
+                       (void)jit_calli(sjc.box_extflonum_from_stack_code),
+                       (void)jit_calli(sjc.box_flonum_from_stack_code));
+        if ((save_reg != JIT_R0) || (i != num_rands - 1))
+          mz_rs_stxi(i+1, JIT_R0);
+        if (iref) {
+          __START_TINY_JUMPS__(1);
+          mz_patch_branch(iref);
+          __END_TINY_JUMPS__(1);
+        }
+        CHECK_LIMIT();
+        if (save_reg == JIT_R0) {
+          if (i != num_rands - 1)
+            mz_popr_p(JIT_R0);
+        } else {
+          mz_popr_p(JIT_V1);
+        }
+      }
+    }
+  }
+
+  return 1;
+}
+#endif
+
 static int generate_self_tail_call(Scheme_Object *rator, mz_jit_state *jitter, int num_rands, GC_CAN_IGNORE jit_insn *slow_code,
                                    int args_already_in_place, int direct_flostack_offset,
                                    Scheme_App_Rec *app, Scheme_Object **alt_rands)
 /* Last argument is in R0 */
 {
   GC_CAN_IGNORE jit_insn *refslow, *refagain;
-  int i, jmp_tiny, jmp_short;
+  int i;
+  int jmp_tiny USED_ONLY_SOMETIMES;
+  int jmp_short USED_ONLY_SOMETIMES;
   int closure_size = jitter->self_closure_size;
   int space, offset;
 #ifdef USE_FLONUM_UNBOXING
@@ -1093,7 +1210,7 @@ static int generate_self_tail_call(Scheme_Object *rator, mz_jit_state *jitter, i
 
   __START_TINY_OR_SHORT_JUMPS__(jmp_tiny, jmp_short);
 
-  refagain = _jit.x.pc;
+  refagain = jit_get_ip();
 
   /* Check for thread swap: */
   (void)mz_tl_ldi_i(JIT_R2, tl_scheme_fuel_counter);
@@ -1177,63 +1294,29 @@ static int generate_self_tail_call(Scheme_Object *rator, mz_jit_state *jitter, i
 #ifdef USE_FLONUM_UNBOXING
   /* Need to box any arguments that we have only in flonum form */
   if (SCHEME_CLOSURE_DATA_FLAGS(jitter->self_data) & CLOS_HAS_TYPED_ARGS) {
-    arg_tmp_offset = offset - direct_flostack_offset;
-    for (i = num_rands; i--; ) {
-      int extfl;
-      extfl = CLOSURE_ARGUMENT_IS_EXTFLONUM(jitter->self_data, i + args_already_in_place);
-      if (extfl || CLOSURE_ARGUMENT_IS_FLONUM(jitter->self_data, i + args_already_in_place)) {
-        rand = (alt_rands 
-                ? alt_rands[i+1+args_already_in_place] 
-                : app->args[i+1+args_already_in_place]);
-        /* Boxing definitely isn't needed if the value was from a local that doesn't hold
-           an unboxed value, otherwise we generate code to check dynamically. */
-        if (!SAME_TYPE(SCHEME_TYPE(rand), scheme_local_type)
-            || (!extfl && (SCHEME_GET_LOCAL_TYPE(rand) == SCHEME_LOCAL_TYPE_FLONUM))
-            || (extfl && (SCHEME_GET_LOCAL_TYPE(rand) == SCHEME_LOCAL_TYPE_EXTFLONUM))) {
-          GC_CAN_IGNORE jit_insn *iref;
-          int aoffset;
-          arg_tmp_offset += MZ_FPUSEL(extfl, 2*sizeof(double), sizeof(double));
-          aoffset = JIT_FRAME_FLOSTACK_OFFSET - arg_tmp_offset;
-          if (i != num_rands - 1)
-            mz_pushr_p(JIT_R0);
-          if (SAME_TYPE(SCHEME_TYPE(rand), scheme_local_type)) {
-            /* assert: SCHEME_GET_LOCAL_TYPE(rand) == SCHEME_LOCAL_TYPE_FLONUM
-               or SCHEME_GET_LOCAL_TYPE(rand) == SCHEME_LOCAL_TYPE_EXTFLONUM */
-            /* So, we have to check for an existing box */
-            if (i != num_rands - 1)
-              mz_rs_ldxi(JIT_R0, i+1);
-            mz_rs_sync();
-            __START_TINY_JUMPS__(1);
-            iref = jit_bnei_p(jit_forward(), JIT_R0, NULL);
-            __END_TINY_JUMPS__(1);
-          } else
-            iref = NULL;
-          jit_movi_l(JIT_R0, aoffset);
-          mz_rs_sync();
-          MZ_FPUSEL_STMT(extfl,
-                         (void)jit_calli(sjc.box_extflonum_from_stack_code),
-                         (void)jit_calli(sjc.box_flonum_from_stack_code));
-          if (i != num_rands - 1)
-            mz_rs_stxi(i+1, JIT_R0);
-          if (iref) {
-            __START_TINY_JUMPS__(1);
-            mz_patch_branch(iref);
-            __END_TINY_JUMPS__(1);
-          }
-          CHECK_LIMIT();
-          if (i != num_rands - 1)
-            mz_popr_p(JIT_R0);
-        }
-      }
-    }
+    generate_argument_boxing(jitter, jitter->self_data, 
+                             num_rands, args_already_in_place,
+                             offset, direct_flostack_offset,
+                             JIT_R0,
+                             app, alt_rands);
+    CHECK_LIMIT();
 
     /* Arguments already in place may also need to be boxed. */
     arg_tmp_offset = jitter->self_restart_offset;
+    for (i = jitter->self_data->closure_size; i--; ) {
+      /* Skip over flonums unpacked from the closure. I think this never
+         happens, because I think that a self-call with already-in-place
+         flonum arguments will only happen when the closure is empty. */
+      if (CLOSURE_CONTENT_IS_FLONUM(jitter->self_data, i))
+        arg_tmp_offset -= sizeof(double);
+      else if (CLOSURE_CONTENT_IS_EXTFLONUM(jitter->self_data, i))
+        arg_tmp_offset -= 2*sizeof(double);
+    }
     for (i = 0; i < args_already_in_place; i++) {
       if (CLOSURE_ARGUMENT_IS_FLONUM(jitter->self_data, i)
           || CLOSURE_ARGUMENT_IS_EXTFLONUM(jitter->self_data, i)) {
         GC_CAN_IGNORE jit_insn *iref;
-        int extfl;
+        int extfl USED_ONLY_IF_LONG_DOUBLE;
         extfl = CLOSURE_ARGUMENT_IS_EXTFLONUM(jitter->self_data, i);
         mz_pushr_p(JIT_R0);
         mz_ld_runstack_base_alt(JIT_R2);
@@ -1306,24 +1389,32 @@ typedef struct {
   int direct_prim, direct_native, nontail_self, unboxed_args;
 } Generate_Call_Data;
 
-void scheme_jit_register_sub_func(mz_jit_state *jitter, void *code, Scheme_Object *protocol)
+static void jit_register_sub_func(mz_jit_state *jitter, void *code, Scheme_Object *protocol, int gcable)
 /* protocol: #f => normal lightweight call protocol
              void => next return address is in LOCAL2
              eof => name to use is in LOCAL2 */
 {
   void *code_end;
 
-  code_end = jit_get_ip().ptr;
+  code_end = jit_get_ip();
   if (jitter->retain_start)
-    scheme_jit_add_symbol((uintptr_t)code, (uintptr_t)code_end - 1, protocol, 0);
+    scheme_jit_add_symbol((uintptr_t)jit_unadjust_ip(code),
+                          (uintptr_t)jit_unadjust_ip(code_end) - 1,
+                          protocol,
+                          gcable);
 }
 
-void scheme_jit_register_helper_func(mz_jit_state *jitter, void *code)
+void scheme_jit_register_sub_func(mz_jit_state *jitter, void *code, Scheme_Object *protocol)
+{
+  jit_register_sub_func(jitter, code, protocol, 0);
+}
+
+void scheme_jit_register_helper_func(mz_jit_state *jitter, void *code, int gcable)
 {
 #if defined(MZ_USE_DWARF_LIBUNWIND) || defined(_WIN64)
   /* Null indicates that there's no function name to report, but the
      stack should be unwound manually using the JJIT-generated convention. */
-  scheme_jit_register_sub_func(jitter, code, scheme_null);
+  jit_register_sub_func(jitter, code, scheme_null, gcable);
 #endif  
 }
 
@@ -1339,22 +1430,22 @@ static int do_generate_shared_call(mz_jit_state *jitter, void *_data)
     int ok;
     void *code;
 
-    code = jit_get_ip().ptr;
+    code = jit_get_ip();
 
     if (data->direct_prim)
       ok = generate_direct_prim_tail_call(jitter, data->num_rands);
     else
       ok = scheme_generate_tail_call(jitter, data->num_rands, data->direct_native, 1, 0, 
-                                     NULL, NULL);
+                                     NULL, NULL, NULL);
 
-    scheme_jit_register_helper_func(jitter, code);
+    scheme_jit_register_helper_func(jitter, code, 0);
 
     return ok;
   } else {
     int ok;
     void *code;
 
-    code = jit_get_ip().ptr;
+    code = jit_get_ip();
 
     if (data->direct_prim)
       ok = generate_direct_prim_non_tail_call(jitter, data->num_rands, data->multi_ok, 1);
@@ -1374,6 +1465,7 @@ void *scheme_generate_shared_call(int num_rands, mz_jit_state *old_jitter, int m
                                   int unboxed_args)
 {
   Generate_Call_Data data;
+  void *ip;
 
   data.num_rands = num_rands;
   data.old_jitter = old_jitter;
@@ -1385,7 +1477,8 @@ void *scheme_generate_shared_call(int num_rands, mz_jit_state *old_jitter, int m
   data.nontail_self = nontail_self;
   data.unboxed_args = unboxed_args;
 
-  return scheme_generate_one(old_jitter, do_generate_shared_call, &data, 0, NULL, NULL);
+  ip = scheme_generate_one(old_jitter, do_generate_shared_call, &data, 0, NULL, NULL);
+  return jit_adjust_ip(ip);
 }
 
 void scheme_ensure_retry_available(mz_jit_state *jitter, int multi_ok, int result_ignored)
@@ -1566,7 +1659,7 @@ static int generate_call_path_with_unboxes(mz_jit_state *jitter, int direct_flos
   int i, k, offset;
 
   refgo = jit_jmpi(jit_forward());
-  refcopy = _jit.x.pc;
+  refcopy = jit_get_ip();
 
   /* Callback code to copy unboxed arguments.
      R1 has the return address, R2 holds the old FP */
@@ -1628,6 +1721,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
   int i, offset, need_safety = 0, apply_to_list = 0;
   int direct_prim = 0, need_non_tail = 0, direct_native = 0, direct_self = 0, nontail_self = 0;
   Scheme_Native_Closure *inline_direct_native = NULL;
+  int almost_inline_direct_native = 0;
 #ifdef USE_FLONUM_UNBOXING
   Scheme_Closure_Data *direct_data = NULL;
 #endif
@@ -1726,7 +1820,8 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
           if (ZERO_SIZED_CLOSUREP(c)) {
             /* If we're calling a constant function in tail position, then
                there's a good chance that this function is a wrapper to
-               get to a loop. Inline the jump to the potential loop,
+               get to a loop, a nested loop, or a mutually recursive call.
+               Inline the jump to the potential loop,
                absorbing the runstack and C stack checks into the check
                for this function --- only works if we can JIT the target
                of the call. */
@@ -1735,6 +1830,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
             if (nc->code->start_code == scheme_on_demand_jit_code) {
               if (nc->code->arity_code != sjc.in_progress_on_demand_jit_arity_code) {
                 scheme_on_demand_generate_lambda(nc, 0, NULL, 0);
+                CHECK_NESTED_GENERATE();
               }
             }
             if (nc->code->start_code != scheme_on_demand_jit_code) {
@@ -1752,6 +1848,16 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
 #endif
                   unboxed_non_tail_args = 1;
                 }
+              }
+            } else {
+              if (is_tail) {
+                /* To tie a mutally recursive loop, we've leave an indirection
+                   and a runstack-space check, but we can still handle unboxed
+                   arguments. */
+#ifdef USE_FLONUM_UNBOXING
+                direct_data = data;
+#endif
+                almost_inline_direct_native = 1;
               }
             }
           }
@@ -1775,8 +1881,10 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
       reorder_ok = 0; /* superceded by direct_self */
   }
 
+  FOR_LOG(if (direct_native) { LOG_IT((" [direct]\n")); } )
+
   /* Direct native tail with same number of args as just received? */
-  if (direct_native && is_tail && num_rands
+  if (direct_native && is_tail && num_rands && !almost_inline_direct_native
       && (num_rands == jitter->self_data->num_params)
       && !(SCHEME_CLOSURE_DATA_FLAGS(jitter->self_data) & CLOS_HAS_REST)) {
     /* Check whether the actual arguments refer to Scheme-stack 
@@ -1803,6 +1911,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
       mz_runstack_skipped(jitter, args_already_in_place);
       num_rands -= args_already_in_place;
     }
+    LOG_IT((" [args in place: %d]\n", args_already_in_place));
   }
 
   if (inline_direct_native) {
@@ -1886,6 +1995,10 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
 #ifdef USE_FLONUM_UNBOXING
   if (direct_self && is_tail)
     direct_data = jitter->self_data;
+#endif
+
+#ifdef JIT_PRECISE_GC
+  FOR_LOG(if (direct_data) { LOG_IT((" [typed]\n")); } )
 #endif
 
 #ifdef USE_FLONUM_UNBOXING
@@ -2021,6 +2134,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
     /* leave actual call to inlining code */
   } else if (!(direct_self && is_tail)
              && !inline_direct_native
+             && !almost_inline_direct_native
              && (num_rands >= MAX_SHARED_CALL_RANDS)) {
     LOG_IT(("<-many args\n"));
     if (is_tail) {
@@ -2033,7 +2147,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
           mz_set_local_p(JIT_R2, JIT_LOCAL2);
         }
 	scheme_generate_tail_call(jitter, num_rands, direct_native, jitter->need_set_rs, 1, 
-                                  NULL, NULL);
+                                  NULL, NULL, NULL);
       }
     } else {
       if (direct_prim)
@@ -2059,12 +2173,13 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
 	sjc.shared_tail_code[dp][num_rands] = code;
       }
       code = sjc.shared_tail_code[dp][num_rands];
+      CHECK_NESTED_GENERATE();
       if (direct_self) {
         LOG_IT(("<-self\n"));
 	generate_self_tail_call(rator, jitter, num_rands, code, args_already_in_place, direct_flostack_offset, 
                                 app, alt_rands);
 	CHECK_LIMIT();
-      } else if (inline_direct_native) {
+      } else if (inline_direct_native || almost_inline_direct_native) {
         LOG_IT(("<-native-tail\n"));
 #ifdef USE_FLONUM_UNBOXING
         /* Copy unboxed flonums into place where the target code expects them: */
@@ -2082,7 +2197,13 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
           mz_set_local_p(JIT_R2, JIT_LOCAL2);
         }
         scheme_generate_tail_call(jitter, num_rands, direct_native, jitter->need_set_rs, 1,
-                                  inline_direct_native, inline_direct_args);
+                                  inline_direct_native, inline_direct_args, 
+#ifdef USE_FLONUM_UNBOXING
+                                  almost_inline_direct_native ? direct_data : NULL
+#else
+                                  NULL
+#endif
+                                  );
         CHECK_LIMIT();
       } else {
         scheme_mz_flostack_restore(jitter, 0, 0, 1, 1);
@@ -2118,6 +2239,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
           sjc.shared_non_tail_code[4][num_rands][mo] = code;
         }
         unboxed_code = sjc.shared_non_tail_code[4][num_rands][mo];
+        CHECK_NESTED_GENERATE();
       } else
         unboxed_code = NULL;
 #endif
@@ -2130,6 +2252,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
       }
       LOG_IT(("<-non-tail %d %d %d\n", dp, num_rands, mo));
       code = sjc.shared_non_tail_code[dp][num_rands][mo];
+      CHECK_NESTED_GENERATE();
 
       if (nontail_self) {
         generate_nontail_self_setup(jitter);

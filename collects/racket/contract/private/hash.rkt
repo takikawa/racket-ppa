@@ -138,7 +138,7 @@
 
 (define-struct (flat-hash/c base-hash/c) ()
   #:omit-define-syntaxes
-  
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:flat-contract
   (build-flat-contract-property
    #:name hash/c-name
@@ -192,10 +192,12 @@
                  (neg-dom-proj k))
                (λ (h k)
                  (pos-dom-proj k))
-               impersonator-prop:contracted ctc)))))))
+               impersonator-prop:contracted ctc
+               impersonator-prop:blame blame)))))))
 
 (define-struct (chaperone-hash/c base-hash/c) ()
   #:omit-define-syntaxes
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:chaperone-contract
   (build-chaperone-contract-property
    #:name hash/c-name
@@ -204,6 +206,7 @@
 
 (define-struct (impersonator-hash/c base-hash/c) ()
   #:omit-define-syntaxes
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:contract
   (build-contract-property
    #:name hash/c-name

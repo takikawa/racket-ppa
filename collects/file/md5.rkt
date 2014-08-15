@@ -1,8 +1,8 @@
-#lang scheme/base
+#lang racket/base
 
 (provide md5)
 
-;;; Copyright (c) 2005-2013, PLT Design Inc.
+;;; Copyright (c) 2005-2014, PLT Design Inc.
 ;;; Copyright (c) 2002, Jens Axel Soegaard
 ;;;
 ;;; Distributed under the same terms as Racket, by permission.
@@ -72,7 +72,7 @@
 ;; - moved from mzlib/md5 to file/md5
 ;; - made it work on strings again
 
-(require (for-syntax scheme/base))
+(require (for-syntax racket/base))
 
 ;;; Word arithmetic (32 bit)
 ;; Terminology

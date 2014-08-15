@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2014 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -86,12 +86,14 @@ READ_ONLY Scheme_Object *scheme_values_func; /* the function bound to `values' *
 READ_ONLY Scheme_Object *scheme_procedure_p_proc;
 READ_ONLY Scheme_Object *scheme_procedure_arity_includes_proc;
 READ_ONLY Scheme_Object *scheme_void_proc;
+READ_ONLY Scheme_Object *scheme_check_not_undefined_proc;
+READ_ONLY Scheme_Object *scheme_check_assign_not_undefined_proc;
 READ_ONLY Scheme_Object *scheme_apply_proc;
 READ_ONLY Scheme_Object *scheme_call_with_values_proc; /* the function bound to `call-with-values' */
 READ_ONLY Scheme_Object *scheme_reduced_procedure_struct;
 READ_ONLY Scheme_Object *scheme_tail_call_waiting;
-READ_ONLY Scheme_Object *scheme_inferred_name_symbol;
 READ_ONLY Scheme_Object *scheme_default_prompt_tag;
+READ_ONLY Scheme_Object *scheme_chaperone_undefined_property;
 
 /* READ ONLY SHARABLE GLOBALS */
 
@@ -189,9 +191,10 @@ static Scheme_Object *current_prompt_read(int, Scheme_Object **);
 static Scheme_Object *current_read(int, Scheme_Object **);
 static Scheme_Object *current_get_read_input_port(int, Scheme_Object **);
 
-
 static Scheme_Object *chaperone_wrap_cc_guard(Scheme_Object *obj, Scheme_Object *proc);
 static Scheme_Object *do_cc_guard(Scheme_Object *v, Scheme_Object *cc_guard, Scheme_Object *chaperone);
+
+static Scheme_Object *chaperone_unsafe_undefined(int argc, Scheme_Object **argv);
 
 static Scheme_Object *
 scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key, 
@@ -498,34 +501,34 @@ scheme_init_fun (Scheme_Env *env)
 						       4, 4),
 			     env);
   scheme_add_global_constant("current-milliseconds",
-			     scheme_make_prim_w_arity(current_milliseconds,
-						      "current-milliseconds",
-						      0, 0),
+			     scheme_make_immed_prim(current_milliseconds,
+                                                    "current-milliseconds",
+                                                    0, 0),
 			     env);
   scheme_add_global_constant("current-inexact-milliseconds",
-			     scheme_make_prim_w_arity(current_inexact_milliseconds,
-						      "current-inexact-milliseconds",
-						      0, 0),
+			     scheme_make_immed_prim(current_inexact_milliseconds,
+                                                    "current-inexact-milliseconds",
+                                                    0, 0),
 			     env);
   scheme_add_global_constant("current-process-milliseconds",
-			     scheme_make_prim_w_arity(current_process_milliseconds,
-						      "current-process-milliseconds",
-						      0, 1),
+			     scheme_make_immed_prim(current_process_milliseconds,
+                                                    "current-process-milliseconds",
+                                                    0, 1),
 			     env);
   scheme_add_global_constant("current-gc-milliseconds",
-			     scheme_make_prim_w_arity(current_gc_milliseconds,
-						      "current-gc-milliseconds",
-						      0, 0),
+			     scheme_make_immed_prim(current_gc_milliseconds,
+                                                    "current-gc-milliseconds",
+                                                    0, 0),
 			     env);
   scheme_add_global_constant("current-seconds",
-			     scheme_make_prim_w_arity(current_seconds,
-						      "current-seconds",
-						      0, 0),
+			     scheme_make_immed_prim(current_seconds,
+                                                    "current-seconds",
+                                                    0, 0),
 			     env);
   scheme_add_global_constant("seconds->date",
-			     scheme_make_prim_w_arity(seconds_to_date,
-						      "seconds->date",
-						      1, 2),
+			     scheme_make_immed_prim(seconds_to_date,
+                                                    "seconds->date",
+                                                    1, 2),
 			     env);
 #endif
 
@@ -642,12 +645,10 @@ scheme_init_fun (Scheme_Env *env)
   none_symbol                = scheme_intern_symbol("none");
 
   REGISTER_SO(is_method_symbol);
-  REGISTER_SO(scheme_inferred_name_symbol);
   REGISTER_SO(cont_key);
   REGISTER_SO(barrier_prompt_key);
   REGISTER_SO(prompt_cc_guard_key);
   is_method_symbol = scheme_intern_symbol("method-arity-error");
-  scheme_inferred_name_symbol = scheme_intern_symbol("inferred-name");
   cont_key = scheme_make_symbol("k"); /* uninterned */
   barrier_prompt_key = scheme_make_symbol("bar"); /* uninterned */
   prompt_cc_guard_key = scheme_make_symbol("cc"); /* uninterned */
@@ -664,6 +665,34 @@ scheme_init_fun (Scheme_Env *env)
   original_default_prompt = MALLOC_ONE_TAGGED(Scheme_Prompt);
   original_default_prompt->so.type = scheme_prompt_type;
   original_default_prompt->tag = scheme_default_prompt_tag;
+}
+
+void
+scheme_init_unsafe_fun (Scheme_Env *env)
+{
+  Scheme_Object *o;
+
+  REGISTER_SO(scheme_check_not_undefined_proc);
+  o = scheme_make_prim_w_arity(scheme_check_not_undefined, "check-not-unsafe-undefined", 2, 2);
+  scheme_check_not_undefined_proc = o;
+  SCHEME_PRIM_PROC_FLAGS(o) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED);
+  scheme_add_global_constant("check-not-unsafe-undefined", o, env);
+
+  REGISTER_SO(scheme_check_assign_not_undefined_proc);
+  o = scheme_make_prim_w_arity(scheme_check_assign_not_undefined, "check-not-unsafe-undefined/assign", 2, 2);
+  scheme_check_assign_not_undefined_proc = o;
+  SCHEME_PRIM_PROC_FLAGS(o) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED);
+  scheme_add_global_constant("check-not-unsafe-undefined/assign", o, env);
+
+  scheme_add_global_constant("unsafe-undefined", scheme_undefined, env);
+
+  REGISTER_SO(scheme_chaperone_undefined_property);
+  o = scheme_make_struct_type_property(scheme_intern_symbol("chaperone-unsafe-undefined"));
+  scheme_chaperone_undefined_property = o;
+  scheme_add_global_constant("prop:chaperone-unsafe-undefined", o, env);
+
+  o = scheme_make_prim_w_arity(chaperone_unsafe_undefined, "chaperone-struct-unsafe-undefined", 1, 1);
+  scheme_add_global_constant("chaperone-struct-unsafe-undefined", o, env);
 }
 
 void
@@ -772,19 +801,6 @@ scheme_make_prim_w_arity(Scheme_Prim *fun, const char *name,
 }
 
 Scheme_Object *
-scheme_make_folding_prim(Scheme_Prim *fun, const char *name,
-			 mzshort mina, mzshort maxa,
-			 short folding)
-{
-  return make_prim_closure(fun, 1, name, mina, maxa,
-			   (folding 
-			    ? SCHEME_PRIM_OPT_FOLDING
-			    : 0),
-			   1, 1,
-			   0, 0, NULL);
-}
-
-Scheme_Object *
 scheme_make_noncm_prim(Scheme_Prim *fun, const char *name,
 		       mzshort mina, mzshort maxa)
 {
@@ -802,10 +818,26 @@ scheme_make_immed_prim(Scheme_Prim *fun, const char *name,
 		       mzshort mina, mzshort maxa)
 {
   /* An immediate primitive is a non-cm primitive, and it doesn't
-     extend the continuation in a way that interacts with space safety, except
-     maybe to raise an exception. */
+     capture a continuation or extend the continuation in a way that
+     interacts with space safety (which implies no interposition via
+     chaperones), except maybe to raise an exception. */
   return make_prim_closure(fun, 1, name, mina, maxa,
 			   SCHEME_PRIM_OPT_IMMEDIATE,
+			   1, 1,
+			   0, 0, NULL);
+}
+
+Scheme_Object *
+scheme_make_folding_prim(Scheme_Prim *fun, const char *name,
+			 mzshort mina, mzshort maxa,
+			 short folding)
+{
+  /* A folding primitive is an immediate primitive, and for constant
+     arguments the result must be the same on all runs and platforms. */
+  return make_prim_closure(fun, 1, name, mina, maxa,
+			   (folding 
+			    ? SCHEME_PRIM_OPT_FOLDING
+			    : 0),
 			   1, 1,
 			   0, 0, NULL);
 }
@@ -1744,8 +1776,6 @@ cert_with_specials(Scheme_Object *code,
         name = SCHEME_STX_CAR(name);
 	if (SCHEME_STX_SYMBOLP(name)) {
 	  if (scheme_stx_module_eq_x(scheme_begin_stx, name, phase)
-              || scheme_stx_module_eq_x(scheme_module_stx, name, phase)
-              || scheme_stx_module_eq_x(scheme_modulestar_stx, name, phase)
               || scheme_stx_module_eq_x(scheme_module_begin_stx, name, phase)) {
 	    trans = 1;
 	    next_cadr_deflt = 0;
@@ -1783,7 +1813,7 @@ cert_with_specials(Scheme_Object *code,
     if (SCHEME_PAIRP(code))
       return v;
 
-    return scheme_datum_to_syntax(v, code, code, 0, 1);
+    return scheme_datum_to_syntax(v, code, scheme_false, 0, 1);
   } else if (SCHEME_STX_NULLP(code))
     return code;
 
@@ -2336,12 +2366,17 @@ static Scheme_Object *get_or_check_arity(Scheme_Object *p, intptr_t a, Scheme_Ob
   }
 
   if ((a == -1) || (a == -3)) {
-    if (mina < drop)
-      return scheme_null;
-    else
+    if (mina < drop) {
+      if ((maxa >= 0) && (maxa < drop))
+        return scheme_null;
+      else
+        mina = 0;
+    } else
       mina -= drop;
-    if (maxa > 0)
+    if (maxa > 0) {
+      /* assert: maxa >= drop, or else would have returned in `mina < drop` test */
       maxa -= drop;
+    }
 
     return make_arity(mina, maxa, a);
   }
@@ -2513,6 +2548,46 @@ static Scheme_Object *
 void_p (int argc, Scheme_Object *argv[])
 {
   return SAME_OBJ(argv[0], scheme_void) ? scheme_true : scheme_false;
+}
+
+Scheme_Object *
+scheme_check_not_undefined (int argc, Scheme_Object *argv[])
+{
+  if (!SCHEME_SYMBOLP(argv[1]))
+    scheme_wrong_contract("check-not-unsafe-undefined", "symbol?", 1, argc, argv);
+
+  if (SAME_OBJ(argv[0], scheme_undefined)) {
+    scheme_raise_exn(MZEXN_FAIL_CONTRACT_VARIABLE,
+                     argv[1],
+                     "%S: undefined;\n cannot use before initialization",
+                     argv[1]);
+  }
+
+  return argv[0];
+}
+
+Scheme_Object *
+scheme_check_assign_not_undefined (int argc, Scheme_Object *argv[])
+{
+  if (!SCHEME_SYMBOLP(argv[1]))
+    scheme_wrong_contract("check-not-unsafe-undefined/assign", "symbol?", 1, argc, argv);
+
+  if (SAME_OBJ(argv[0], scheme_undefined)) {
+    scheme_raise_exn(MZEXN_FAIL_CONTRACT_VARIABLE,
+                     argv[1],
+                     "%S: assignment disallowed;\n cannot assign before initialization",
+                     argv[1]);
+  }
+
+  return argv[0];
+}
+
+static Scheme_Object *chaperone_unsafe_undefined(int argc, Scheme_Object **argv)
+{
+  if (SCHEME_CHAPERONE_STRUCTP(argv[0]))
+    return scheme_chaperone_not_undefined(argv[0]);
+  else
+    return argv[0];
 }
 
 static Scheme_Object *
@@ -3062,9 +3137,43 @@ static int is_subarity(Scheme_Object *req, Scheme_Object *orig)
   return 1;
 }
 
+static int proc_is_method(Scheme_Object *proc)
+{
+  if (SCHEME_CHAPERONEP(proc))
+    proc = SCHEME_CHAPERONE_VAL(proc);
+
+  if (SCHEME_STRUCTP(proc)
+      && scheme_is_struct_instance(scheme_reduced_procedure_struct, proc))
+    return SCHEME_TRUEP(((Scheme_Structure *)proc)->slots[3]);
+
+  if (SAME_TYPE(SCHEME_TYPE(proc), scheme_case_closure_type)) {
+    Scheme_Case_Lambda *cl = (Scheme_Case_Lambda *)proc;
+    if (cl->count)
+      proc = cl->array[0];
+    else
+      return 0;
+  }
+
+  if (SAME_TYPE(SCHEME_TYPE(proc), scheme_closure_type)) {
+    return ((SCHEME_CLOSURE_DATA_FLAGS(SCHEME_COMPILED_CLOS_CODE(proc)) & CLOS_IS_METHOD)
+            ? 1
+            : 0);
+  }
+
+#ifdef MZ_USE_JIT
+  if (SAME_TYPE(SCHEME_TYPE(proc), scheme_native_closure_type)) {
+    Scheme_Object *pa;
+    pa = scheme_get_native_arity(proc, -1);
+    return SCHEME_BOXP(pa);
+  }
+#endif
+
+  return 0;
+}
+
 static Scheme_Object *procedure_reduce_arity(int argc, Scheme_Object *argv[])
 {
-  Scheme_Object *orig, *aty;
+  Scheme_Object *orig, *aty, *is_meth = NULL;
 
   if (!SCHEME_PROCP(argv[0]))
     scheme_wrong_contract("procedure-reduce-arity", "procedure?", 0, argc, argv);
@@ -3091,8 +3200,11 @@ static Scheme_Object *procedure_reduce_arity(int argc, Scheme_Object *argv[])
     return NULL;
   }
 
+  if (proc_is_method(argv[0]))
+    is_meth = scheme_true;
+
   /* Construct a procedure that has the given arity. */
-  return make_reduced_proc(argv[0], aty, NULL, NULL);
+  return make_reduced_proc(argv[0], aty, NULL, is_meth);
 }
 
 static Scheme_Object *procedure_rename(int argc, Scheme_Object *argv[])
@@ -4499,8 +4611,9 @@ static MZ_MARK_STACK_TYPE find_shareable_marks()
 static Scheme_Overflow *clone_overflows(Scheme_Overflow *overflow, void *limit, Scheme_Overflow *tail)
 {
   Scheme_Overflow *naya, *first = NULL, *prev = NULL;
+  int stop = 0;
 
-  for (; overflow && (!limit || (overflow->id != limit)); overflow = overflow->prev) {
+  for (; overflow && !stop; overflow = overflow->prev) {
     naya = MALLOC_ONE_RT(Scheme_Overflow);
     memcpy(naya, overflow, sizeof(Scheme_Overflow));
     if (prev)
@@ -4508,6 +4621,8 @@ static Scheme_Overflow *clone_overflows(Scheme_Overflow *overflow, void *limit, 
     else
       first = naya;
     prev = naya;
+    if (limit && overflow->id == limit)
+      stop = 1;
   }
 
   if (first) {
@@ -7293,7 +7408,7 @@ static Scheme_Object *continuation_marks(Scheme_Thread *p,
           cache = NULL;
         if (cache) {
           if (SCHEME_HASHTP(cache))
-            cache = scheme_hash_get((Scheme_Hash_Table *)cache, prompt_tag ? prompt_tag : scheme_false);
+            cache = scheme_eq_hash_get((Scheme_Hash_Table *)cache, prompt_tag ? prompt_tag : scheme_false);
           else if (prompt_tag != scheme_default_prompt_tag)
             cache = NULL;
         }
@@ -7344,7 +7459,7 @@ static Scheme_Object *continuation_marks(Scheme_Thread *p,
         if (cache && !SCHEME_FALSEP(cache)) {
           if (SCHEME_HASHTP(cache)) {
             Scheme_Hash_Table *ht = (Scheme_Hash_Table *)cache;
-            cache = scheme_hash_get(ht, prompt_tag ? prompt_tag : scheme_false);
+            cache = scheme_eq_hash_get(ht, prompt_tag ? prompt_tag : scheme_false);
             if (!cache) {
               scheme_hash_set(ht, prompt_tag ? prompt_tag : scheme_false, (Scheme_Object *)pr);
             } else {
@@ -7879,6 +7994,7 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
                                      MZ_MARK_POS_TYPE *_vpos)
 {
   Scheme_Object *key = key_arg;
+
   if (SCHEME_NP_CHAPERONEP(key)
       && SCHEME_CONTINUATION_MARK_KEYP(SCHEME_CHAPERONE_VAL(key))) {
     key = SCHEME_CHAPERONE_VAL(key);
@@ -7919,8 +8035,6 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
         bottom = 0;
       } else {
         startpos = (intptr_t)MZ_CONT_MARK_STACK;
-        if (!p->cont_mark_stack_segments)
-          findpos = 0;
         bottom = p->cont_mark_stack_bottom;
       }
 
@@ -7945,7 +8059,7 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
         } else {
           cache = seg[pos].cache;
           if (cache && SCHEME_HASHTP(cache))
-            cache = scheme_hash_get((Scheme_Hash_Table *)cache, 
+            cache = scheme_eq_hash_get((Scheme_Hash_Table *)cache, 
                                     prompt_tag ? prompt_tag : scheme_false);
           else if (prompt_tag)
             cache = NULL;
@@ -7961,7 +8075,7 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
             } else {
               Scheme_Hash_Table *ht;
               ht = (Scheme_Hash_Table *)SCHEME_VEC_ELS(cache)[2];
-              val = scheme_hash_get(ht, key);
+              val = scheme_eq_hash_get(ht, key);
               if (val) {
                 vpos = (MZ_MARK_POS_TYPE)SCHEME_CDR(val);
                 val = SCHEME_CAR(val);
@@ -7994,7 +8108,7 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
           Scheme_Hash_Table *cht;
           if (cache && SCHEME_HASHTP(cache)) {
             cht = (Scheme_Hash_Table *)cache;
-            cache = scheme_hash_get(cht, prompt_tag ? prompt_tag : scheme_false);
+            cache = scheme_eq_hash_get(cht, prompt_tag ? prompt_tag : scheme_false);
           } else if (prompt_tag) {
             cht = scheme_make_hash_table(SCHEME_hash_ptr);
             if (cache) {
@@ -8076,6 +8190,59 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
   return NULL;
 }
 
+XFORM_NONGCING static Scheme_Object *
+extract_one_cc_mark_fast(Scheme_Object *key)
+/* A non-GCing fast path for scheme_extract_one_cc_mark_with_meta()
+   where there are no complications. */
+{
+  intptr_t findpos, bottom, startpos, minbottom;
+  intptr_t pos;
+  Scheme_Object *val = NULL;
+  Scheme_Object *cache;
+  Scheme_Cont_Mark *seg;
+  Scheme_Thread *p = scheme_current_thread;
+
+  startpos = (intptr_t)MZ_CONT_MARK_STACK;
+ 
+  bottom = p->cont_mark_stack_bottom;
+  minbottom = startpos - 32;
+  if (bottom < minbottom) 
+    bottom = minbottom;
+  
+  findpos = startpos;
+  
+  /* Search mark stack, checking caches along the way: */
+  while (findpos-- > bottom) {
+    seg = p->cont_mark_stack_segments[findpos >> SCHEME_LOG_MARK_SEGMENT_SIZE];
+    pos = findpos & SCHEME_MARK_SEGMENT_MASK;
+
+    if (SAME_OBJ(seg[pos].key, key))
+      return seg[pos].val;
+    else {
+      cache = seg[pos].cache;
+      if (cache && SCHEME_HASHTP(cache))
+        cache = scheme_eq_hash_get((Scheme_Hash_Table *)cache, scheme_false);
+      if (cache && SCHEME_VECTORP(cache)) {
+        /* If slot 1 has a key, this cache has just one key--value
+           pair. Otherwise, slot 2 is a hash table. */
+        if (SCHEME_VEC_ELS(cache)[1]) {
+          if (SAME_OBJ(SCHEME_VEC_ELS(cache)[1], key))
+            return SCHEME_VEC_ELS(cache)[2];
+        } else {
+          Scheme_Hash_Table *ht;
+          ht = (Scheme_Hash_Table *)SCHEME_VEC_ELS(cache)[2];
+          val = scheme_eq_hash_get(ht, key);
+          if (val) {
+            return SCHEME_CAR(val);
+          }
+        }
+      }
+    }
+  }
+  
+  return NULL;
+}
+
 static Scheme_Object *get_set_cont_mark_by_pos(Scheme_Object *key,
                                                Scheme_Thread *p,
                                                Scheme_Meta_Continuation *mc,
@@ -8142,6 +8309,13 @@ static Scheme_Object *get_set_cont_mark_by_pos(Scheme_Object *key,
 Scheme_Object *
 scheme_extract_one_cc_mark(Scheme_Object *mark_set, Scheme_Object *key)
 {
+  Scheme_Object *v;
+  
+  if (!mark_set) {
+    v = extract_one_cc_mark_fast(key);
+    if (v) return v;
+  }
+
   return scheme_extract_one_cc_mark_with_meta(mark_set, key, NULL, NULL, NULL);
 }
 
@@ -9231,7 +9405,7 @@ static int VALID_TIME_RANGE(UNBUNDLE_TIME_TYPE lnow)
     sysctl(a, 2, vers, &len, NULL, 0);
 
     if ((vers[0] == '1') && (vers[1] == '0') && (vers[2] == '.')) {
-      /* localtime() in 10.7.x (= 10.x at the kernel layer) doesn't seem
+      /* localtime() in 10.6.x (= 10.x at the kernel layer) doesn't seem
          to work right with negative numbers that don't fit into 32 bits */
       return 0;
     }
@@ -9240,11 +9414,23 @@ static int VALID_TIME_RANGE(UNBUNDLE_TIME_TYPE lnow)
   return 1;
 }
 #else
+
 # ifdef MIN_VALID_DATE_SECONDS
-#  define VALID_TIME_RANGE(x) ((x) >= MIN_VALID_DATE_SECONDS)
+#  define VALID_TIME_RANGE_MIN(x) ((x) >= MIN_VALID_DATE_SECONDS)
 # else
-#  define VALID_TIME_RANGE(x) 1
+#  define VALID_TIME_RANGE_MIN(x) 1
 # endif
+
+# if defined(MAX_VALID_DATE_SECONDS_BITS) && defined(SIXTY_FOUR_BIT_INTEGERS)
+#  define VALID_TIME_RANGE_BITS(x) (((x) >= 0)                          \
+                                    ? ((x) == ((x) & (((intptr_t)1 << MAX_VALID_DATE_SECONDS_BITS) - 1))) \
+                                    : ((-(x)) == ((-(x)) & (((intptr_t)1 << MAX_VALID_DATE_SECONDS_BITS) - 1))))
+# else
+#  define VALID_TIME_RANGE_BITS(x) 1
+# endif
+
+# define VALID_TIME_RANGE(x) (VALID_TIME_RANGE_MIN(x) && VALID_TIME_RANGE_BITS(x))
+
 #endif
 
 static Scheme_Object *seconds_to_date(int argc, Scheme_Object **argv)

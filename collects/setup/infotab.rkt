@@ -16,6 +16,7 @@
                             (loop (cdr defns)
                                   (syntax-case (car defns) (define)
                                     [(define var val)
+                                     (identifier? #'var)
                                      (cons (syntax var) r)]
                                     ;; In case it gets expanded:
                                     [(define-values (var) val)
@@ -51,18 +52,18 @@
 
   (define-syntax (limited-require stx)
     (syntax-case stx ()
-      [(_ lib) (member (syntax->datum #'lib)
-                       '((lib "string-constant.ss" "string-constants")
-                         (lib "string-constants/string-constant.ss")
-                         string-constants/string-constant
-                         string-constants))
+      [(_ lib) 
+       (member (syntax->datum #'lib)
+               ;; No `require's are allowed, currently:
+               '())
        (syntax/loc stx (require lib))]))
 
   (provide (rename-out [info-module-begin #%module-begin])
            #%app #%datum #%top
            define quote
            list cons car cdr quasiquote unquote unquote-splicing
-           list* append reverse
+           list* append reverse 
+           make-immutable-hash hash hash-set hash-set* hash-remove hash-clear hash-update
            string-append
            path->string build-path collection-path
            system-library-subpath
