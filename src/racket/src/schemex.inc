@@ -81,6 +81,9 @@
   scheme_extension_table->scheme_close_managed = scheme_close_managed;
   scheme_extension_table->scheme_schedule_custodian_close = scheme_schedule_custodian_close;
   scheme_extension_table->scheme_add_custodian_extractor = scheme_add_custodian_extractor;
+  scheme_extension_table->scheme_flush_managed = scheme_flush_managed;
+  scheme_extension_table->scheme_add_flush = scheme_add_flush;
+  scheme_extension_table->scheme_remove_flush = scheme_remove_flush;
   scheme_extension_table->scheme_add_atexit_closer = scheme_add_atexit_closer;
   scheme_extension_table->scheme_add_evt = scheme_add_evt;
   scheme_extension_table->scheme_add_evt_through_sema = scheme_add_evt_through_sema;
@@ -113,6 +116,7 @@
   scheme_extension_table->scheme_log_w_data = scheme_log_w_data;
   scheme_extension_table->scheme_log_message = scheme_log_message;
   scheme_extension_table->scheme_log_name_message = scheme_log_name_message;
+  scheme_extension_table->scheme_log_name_pfx_message = scheme_log_name_pfx_message;
   scheme_extension_table->scheme_log_abort = scheme_log_abort;
   scheme_extension_table->scheme_log_warning = scheme_log_warning;
   scheme_extension_table->scheme_glib_log_message = scheme_glib_log_message;
@@ -282,6 +286,7 @@
   scheme_extension_table->scheme_bucket_from_table = scheme_bucket_from_table;
   scheme_extension_table->scheme_bucket_table_equal = scheme_bucket_table_equal;
   scheme_extension_table->scheme_clone_bucket_table = scheme_clone_bucket_table;
+  scheme_extension_table->scheme_clear_bucket_table = scheme_clear_bucket_table;
   scheme_extension_table->scheme_make_hash_table = scheme_make_hash_table;
   scheme_extension_table->scheme_make_hash_table_equal = scheme_make_hash_table_equal;
   scheme_extension_table->scheme_make_hash_table_eqv = scheme_make_hash_table_eqv;
@@ -294,6 +299,7 @@
   scheme_extension_table->scheme_is_hash_table_equal = scheme_is_hash_table_equal;
   scheme_extension_table->scheme_is_hash_table_eqv = scheme_is_hash_table_eqv;
   scheme_extension_table->scheme_clone_hash_table = scheme_clone_hash_table;
+  scheme_extension_table->scheme_clear_hash_table = scheme_clear_hash_table;
   scheme_extension_table->scheme_make_hash_tree = scheme_make_hash_tree;
   scheme_extension_table->scheme_hash_tree_set = scheme_hash_tree_set;
   scheme_extension_table->scheme_hash_tree_get = scheme_hash_tree_get;
@@ -392,6 +398,7 @@
   scheme_extension_table->scheme_is_cpointer = scheme_is_cpointer;
   scheme_extension_table->scheme_get_proc_name = scheme_get_proc_name;
   scheme_extension_table->scheme_utf8_decode = scheme_utf8_decode;
+  scheme_extension_table->scheme_utf8_decode_offset_prefix = scheme_utf8_decode_offset_prefix;
   scheme_extension_table->scheme_utf8_decode_as_prefix = scheme_utf8_decode_as_prefix;
   scheme_extension_table->scheme_utf8_decode_all = scheme_utf8_decode_all;
   scheme_extension_table->scheme_utf8_decode_prefix = scheme_utf8_decode_prefix;
@@ -406,6 +413,7 @@
   scheme_extension_table->scheme_utf16_to_ucs4 = scheme_utf16_to_ucs4;
   scheme_extension_table->scheme_open_converter = scheme_open_converter;
   scheme_extension_table->scheme_close_converter = scheme_close_converter;
+  scheme_extension_table->scheme_getenv = scheme_getenv;
   scheme_extension_table->scheme_make_bignum = scheme_make_bignum;
   scheme_extension_table->scheme_make_bignum_from_unsigned = scheme_make_bignum_from_unsigned;
   scheme_extension_table->scheme_make_bignum_from_long_long = scheme_make_bignum_from_long_long;
@@ -613,6 +621,7 @@
   scheme_extension_table->scheme_save_initial_module_set = scheme_save_initial_module_set;
   scheme_extension_table->scheme_primitive_module = scheme_primitive_module;
   scheme_extension_table->scheme_finish_primitive_module = scheme_finish_primitive_module;
+  scheme_extension_table->scheme_set_primitive_module_phaseless = scheme_set_primitive_module_phaseless;
   scheme_extension_table->scheme_protect_primitive_provide = scheme_protect_primitive_provide;
   scheme_extension_table->scheme_make_modidx = scheme_make_modidx;
   scheme_extension_table->scheme_apply_for_syntax_in_env = scheme_apply_for_syntax_in_env;
@@ -715,3 +724,5 @@
   scheme_extension_table->scheme_register_process_global = scheme_register_process_global;
   scheme_extension_table->scheme_malloc_key = scheme_malloc_key;
   scheme_extension_table->scheme_free_key = scheme_free_key;
+  scheme_extension_table->scheme_jit_find_code_end = scheme_jit_find_code_end;
+  scheme_extension_table->scheme_jit_now = scheme_jit_now;

@@ -235,6 +235,7 @@ comp_let_value {
   gcMARK2(c->flags, gc);
   gcMARK2(c->value, gc);
   gcMARK2(c->body, gc);
+  gcMARK2(c->names, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Compiled_Let_Value));
@@ -646,6 +647,9 @@ input_port {
   gcMARK2(ip->input_extras_ready, gc);
   gcMARK2(ip->unless, gc);
   gcMARK2(ip->unless_cache, gc);
+#ifdef WINDOWS_FILE_HANDLES
+  gcMARK2(ip->bufwidths, gc);
+#endif
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Input_Port));
@@ -784,6 +788,7 @@ thread_val {
   gcMARK2(pr->resumed_box, gc);
   gcMARK2(pr->dead_box, gc);
   gcMARK2(pr->running_box, gc);
+  gcMARK2(pr->sync_box, gc);
 
   gcMARK2(pr->mbox_first, gc);
   gcMARK2(pr->mbox_last, gc);
@@ -923,6 +928,8 @@ namespace_val {
   gcMARK2(e->instance_env, gc);
 
   gcMARK2(e->shadowed_syntax, gc);
+
+  gcMARK2(e->lift_key, gc);
 
   gcMARK2(e->link_midx, gc);
   gcMARK2(e->require_names, gc);
@@ -1119,9 +1126,6 @@ module_phase_exports_val {
   gcMARK2(m->provide_src_names, gc);
   gcMARK2(m->provide_nominal_srcs, gc);
   gcMARK2(m->provide_src_phases, gc);
-
-  gcMARK2(m->kernel_exclusion, gc);
-  gcMARK2(m->kernel_exclusion2, gc);
 
   gcMARK2(m->ht, gc);
 
@@ -1321,6 +1325,43 @@ mark_sfs_info {
 }
 
 END sfs;
+
+/**********************************************************************/
+
+START letrec_check;
+
+mark_letrec_check_frame {
+ mark:
+  Letrec_Check_Frame *frame = (Letrec_Check_Frame *)p;
+  
+  gcMARK2(frame->def, gc);
+  gcMARK2(frame->next, gc);
+  gcMARK2(frame->ref, gc);
+  gcMARK2(frame->checked, gc);
+  gcMARK2(frame->head, gc);
+  gcMARK2(frame->deferred_with_rhs_ref, gc);
+  gcMARK2(frame->deferred_with_body_ref, gc);
+  gcMARK2(frame->deferred_with_no_ref, gc);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Letrec_Check_Frame));
+}
+
+mark_scheme_deferred_expr {
+ mark:
+  Scheme_Deferred_Expr *clos = (Scheme_Deferred_Expr *)p;
+  
+  gcMARK2(clos->expr, gc);
+  gcMARK2(clos->frame, gc);
+  gcMARK2(clos->uvars, gc);
+  gcMARK2(clos->pvars, gc);
+  gcMARK2(clos->subexpr_ls, gc);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Deferred_Expr));
+}
+
+END letrec_check;
 
 /**********************************************************************/
 
@@ -1551,7 +1592,8 @@ place_async_channel_val {
   gcMARK2(pac->msg_chains, gc);
   gcMARK2(pac->wakeup_signal, gc);
 
-  /* mark master-allocated objects within each messages: */
+  /* mark master-allocated objects within each messages; the
+     raw pairs that form the list are embedded in each message block */
   j = pac->out;
   sz = pac->size;
   for (i = pac->count; i--; ) {
@@ -1560,7 +1602,7 @@ place_async_channel_val {
       gcMARK2(SCHEME_CAR(pr), gc);
       pr = SCHEME_CDR(pr);
     }
-    j = ((j + 1) & sz);
+    j = ((j + 1) % sz);
   }
 
  size:
@@ -1685,6 +1727,7 @@ mark_input_fd {
 
   gcMARK2(fd->buffer, gc);
   gcMARK2(fd->refcount, gc);
+  gcMARK2(fd->flush_handle, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_FD));
@@ -1737,6 +1780,15 @@ mark_read_write_evt {
   gcBYTES_TO_WORDS(sizeof(Scheme_Read_Write_Evt));
 }
 
+mark_filesystem_change_evt {
+ mark:
+  Scheme_Filesystem_Change_Evt *fc = (Scheme_Filesystem_Change_Evt *)p;
+  gcMARK2(fc->sema, gc);
+  gcMARK2(fc->mref, gc);
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Filesystem_Change_Evt));
+}
+
 END port;
 
 /**********************************************************************/
@@ -1783,6 +1835,7 @@ END print;
 
 START network;
 
+#ifdef USE_TCP
 mark_listener {
   listener_t *l = (listener_t *)p;
 
@@ -1797,7 +1850,6 @@ mark_listener {
   gcBYTES_TO_WORDS(sizeof(listener_t) + ((l->count - mzFLEX_DELTA) * sizeof(tcp_t)));
 }
 
-#ifdef USE_TCP
 mark_tcp {
  mark:
   Scheme_Tcp *tcp = (Scheme_Tcp *)p;
@@ -1885,6 +1937,7 @@ mark_custodian_val {
   gcMARK2(m->mrefs, gc);
   gcMARK2(m->closers, gc);
   gcMARK2(m->data, gc);
+  gcMARK2(m->data_ptr, gc);
 
   gcMARK2(m->parent, gc);
   gcMARK2(m->sibling, gc);
@@ -2005,6 +2058,17 @@ mark_thread_cell {
 
  size:
   gcBYTES_TO_WORDS(sizeof(Thread_Cell));
+}
+
+mark_plumber {
+ mark:
+  Scheme_Plumber *pl = (Scheme_Plumber *)p;
+ 
+  gcMARK2(pl->handles, gc);
+  gcMARK2(pl->weak_handles, gc);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Plumber));
 }
 
 END thread;

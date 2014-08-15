@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2014 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -94,9 +94,9 @@ SHARED_OK static Scheme_Object *num_limits[3];
 void scheme_init_numstr(Scheme_Env *env)
 {
   scheme_add_global_constant("number->string", 
-			     scheme_make_prim_w_arity(number_to_string,
-						      "number->string",
-						      1, 2),
+			     scheme_make_immed_prim(number_to_string,
+                                                    "number->string",
+                                                    1, 2),
 			     env);
   scheme_add_global_constant("string->number", 
 			     scheme_make_folding_prim(string_to_number,
@@ -105,70 +105,70 @@ void scheme_init_numstr(Scheme_Env *env)
 			     env);
 
   scheme_add_global_constant("integer-bytes->integer", 
-			     scheme_make_prim_w_arity(bytes_to_integer,
-						      "integer-bytes->integer", 
-						      2, 5),
+			     scheme_make_immed_prim(bytes_to_integer,
+                                                    "integer-bytes->integer", 
+                                                    2, 5),
 			     env);
   scheme_add_global_constant("integer->integer-bytes", 
-			     scheme_make_prim_w_arity(integer_to_bytes,
-						      "integer->integer-bytes", 
-						      3, 6),
+			     scheme_make_immed_prim(integer_to_bytes,
+                                                    "integer->integer-bytes", 
+                                                    3, 6),
 			     env);
   scheme_add_global_constant("floating-point-bytes->real", 
-			     scheme_make_prim_w_arity(bytes_to_real,
-						      "floating-point-bytes->real",
-						      1, 4),
+			     scheme_make_immed_prim(bytes_to_real,
+                                                    "floating-point-bytes->real",
+                                                    1, 4),
 			     env);
   scheme_add_global_constant("real->floating-point-bytes",
-			     scheme_make_prim_w_arity(real_to_bytes,
-						      "real->floating-point-bytes",
-						      2, 5),
+			     scheme_make_immed_prim(real_to_bytes,
+                                                    "real->floating-point-bytes",
+                                                    2, 5),
 			     env);
   scheme_add_global_constant("system-big-endian?",
-			     scheme_make_prim_w_arity(system_big_endian_p,
-						      "system-big-endian?",
-						      0, 0),
+			     scheme_make_immed_prim(system_big_endian_p,
+                                                    "system-big-endian?",
+                                                    0, 0),
 			     env);
 
   scheme_add_global_constant("random", 
-			     scheme_make_prim_w_arity(sch_random,
-						      "random",
-						      0, 2),
+			     scheme_make_immed_prim(sch_random,
+                                                    "random",
+                                                    0, 2),
 			     env);
   scheme_add_global_constant("random-seed", 
-			     scheme_make_prim_w_arity(random_seed,
-						      "random-seed",
-						      1, 1),
+			     scheme_make_immed_prim(random_seed,
+                                                    "random-seed",
+                                                    1, 1),
 			     env);
   scheme_add_global_constant("make-pseudo-random-generator", 
-			     scheme_make_prim_w_arity(make_pseudo_random_generator,
-						      "make-pseudo-random-generator", 
-						      0, 0), 
+			     scheme_make_immed_prim(make_pseudo_random_generator,
+                                                    "make-pseudo-random-generator", 
+                                                    0, 0), 
 			     env);
   scheme_add_global_constant("vector->pseudo-random-generator",
-			     scheme_make_prim_w_arity(sch_pack,
-						      "vector->pseudo-random-generator", 
-						      1, 1), 
+			     scheme_make_immed_prim(sch_pack,
+                                                    "vector->pseudo-random-generator", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("vector->pseudo-random-generator!",
-			     scheme_make_prim_w_arity(sch_pack_bang,
-						      "vector->pseudo-random-generator!", 
-						      2, 2), 
+			     scheme_make_immed_prim(sch_pack_bang,
+                                                    "vector->pseudo-random-generator!", 
+                                                    2, 2), 
 			     env);
   scheme_add_global_constant("pseudo-random-generator->vector",
-			     scheme_make_prim_w_arity(sch_unpack,
-						      "pseudo-random-generator->vector", 
-						      1, 1), 
+			     scheme_make_immed_prim(sch_unpack,
+                                                    "pseudo-random-generator->vector", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("pseudo-random-generator-vector?",
-                             scheme_make_prim_w_arity(sch_check_pack,
-						      "pseudo-random-generator-vector?", 
-						      1, 1), 
+                             scheme_make_immed_prim(sch_check_pack,
+                                                    "pseudo-random-generator-vector?", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("pseudo-random-generator?", 
-			     scheme_make_prim_w_arity(pseudo_random_generator_p,
-						      "pseudo-random-generator?", 
-						      1, 1), 
+			     scheme_make_immed_prim(pseudo_random_generator_p,
+                                                    "pseudo-random-generator?", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("current-pseudo-random-generator", 
 			     scheme_register_parameter(current_pseudo_random_generator,
@@ -205,14 +205,14 @@ void scheme_init_numstr(Scheme_Env *env)
 void scheme_init_extfl_numstr(Scheme_Env *env)
 {
   scheme_add_global_constant("floating-point-bytes->extfl", 
-			     scheme_make_prim_w_arity(bytes_to_long_double,
-						      "floating-point-bytes->extfl",
-						      1, 4),
+			     scheme_make_immed_prim(bytes_to_long_double,
+                                                    "floating-point-bytes->extfl",
+                                                    1, 4),
 			     env);
   scheme_add_global_constant("extfl->floating-point-bytes",
-        		     scheme_make_prim_w_arity(long_double_to_bytes,
-        					      "extfl->floating-point-bytes",
-        					      1, 4),
+        		     scheme_make_immed_prim(long_double_to_bytes,
+                                                    "extfl->floating-point-bytes",
+                                                    1, 4),
         		     env);
 }
 
@@ -999,14 +999,16 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 				  stxsrc, line, col, pos, span,
 				  indentation);
 
-      if (!SCHEME_LONG_DBLP(n2))
+      if (!SCHEME_LONG_DBLP(n2)) {
         n2 = scheme_exact_to_inexact(1, &n2); /* uses default conversion: float or double */
 
-      d2 = SCHEME_FLOAT_VAL(n2);
-      
-      /* This +nan.0 test looks unnecessary  -- Matthew, 08/14/01 */
-      if (MZ_IS_NAN(d2))
-	return scheme_false;
+        d2 = SCHEME_FLOAT_VAL(n2);
+
+        /* This +nan.0 test looks unnecessary  -- Matthew, 08/14/01 */
+        if (MZ_IS_NAN(d2))
+          return scheme_false;
+      } else
+        d2 = 0.0; /* not used; will signal error later */
 
       n1 = scheme_read_number(first, has_at - delta, 
 			      is_float, is_not_float, decimal_means_float,
@@ -1264,7 +1266,7 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     if (is_long_double && is_float)  {
       if (report)
         scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-                        "read: can convert extflonum to inexact: %u",
+                        "read: cannot convert extflonum to inexact: %u",
                         str, len);
       return scheme_false;
     }
@@ -1437,7 +1439,7 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
       if (is_long_double && is_float)  {
         if (report)
           scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-                          "read: can convert extflonum to inexact: %u",
+                          "read: cannot convert extflonum to inexact: %u",
                           str, len);
         return scheme_false;
       }
@@ -2036,6 +2038,130 @@ int scheme_check_long_double(const char *where, long_double d, const char *dest)
 /*                      native representations                            */
 /*========================================================================*/
 
+Scheme_Object *scheme_bytes_to_integer(char *str, int slen, int sgned, int rshft, int mask)
+{
+  switch(slen) {
+  case 2:
+    if (sgned) {
+      short val;
+      memcpy(&val, str, sizeof(short));
+      return scheme_make_integer(val);
+    } else {
+      unsigned short val;
+      memcpy(&val, str, sizeof(unsigned short));
+      val >>= rshft;
+      if (mask < 16) { val &= (((unsigned short)1 << mask) - 1); }
+      return scheme_make_integer(val);
+    }
+    break;
+  case 4:
+    if (sgned) {
+      int val;
+      memcpy(&val, str, sizeof(int));
+      return scheme_make_integer_value(val);
+    } else {
+      unsigned int val;
+      memcpy(&val, str, sizeof(unsigned int));
+      val >>= rshft;
+      if (mask < 32) { val &= (((unsigned int)1 << mask) - 1); }
+      return scheme_make_integer_value_from_unsigned(val);
+    }
+    break;
+  default:
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+    if (sgned) {
+      intptr_t val;
+      memcpy(&val, str, sizeof(intptr_t));
+      return scheme_make_integer_value(val);
+      }
+    else {
+      uintptr_t val;
+      memcpy(&val, str, sizeof(uintptr_t));
+      val >>= rshft;
+      if (mask < 64) { val &= (((uintptr_t)1 << mask) - 1); }
+      return scheme_make_integer_value_from_unsigned(val);
+      }
+    break;
+#else
+# ifndef NO_LONG_LONG_TYPE
+    {
+      if (sgned) {
+        mzlonglong lv;
+        memcpy(&lv, str, sizeof(mzlonglong));
+	return scheme_make_integer_value_from_long_long(lv);
+      } else {
+        umzlonglong lv;
+        memcpy(&lv, str, sizeof(umzlonglong));
+        lv >>= rshft;
+        if (mask < 64) { lv &= (((umzlonglong)1 << mask) - 1); }
+	return scheme_make_integer_value_from_unsigned_long_long(lv);
+      }
+      break;
+    }
+# else
+    {
+      Scheme_Object *h, *l, *a[2];
+      unsigned int val;
+
+#  if MZ_IS_BIG_ENDIAN
+      /* make little-endian at int level: */
+      {
+	int v;
+	v = ((int *)str)[0];
+	buf[0] = ((int *)str)[1];
+	buf[1] = v;
+	str = (char *)buf;
+      }
+#  endif
+
+      if (rshft >= 32) {
+        
+      }
+
+      if (sgned)
+	h = scheme_make_integer_value(((int *)str)[1]);
+      else {
+        memcpy(&val, str + sizeof(unsigned int), sizeof(unsigned int));
+        if (rshft >= 32) {
+          rshft -= 32;
+          val >>= rshft;
+          if (mask < 64) { val &= (((umzlonglong)1 << mask) - 1); }
+          return scheme_make_integer_value_from_unsigned(val);
+        } else {
+          h = scheme_make_integer_value_from_unsigned(val);
+        }
+      }
+      
+      memcpy(&val, str, sizeof(unsigned int));
+      val >>= rshft;
+      l = scheme_make_integer_value_from_unsigned(val);      
+
+      a[0] = h;
+      a[1] = scheme_make_integer(32-rshft);
+      h = scheme_bitwise_shift(2, a);
+
+      l = scheme_bin_plus(h, l);
+
+      if (mask < 64) {
+        a[0] = scheme_make_integer(1);
+        a[1] = scheme_make_integer(mask);
+        h = scheme_bitwise_shift(2, a);
+        h = scheme_bin_minus(h, scheme_make_integer(1));
+        a[0] = h;
+        a[1] = l;
+        l = scheme_bitwise_and(2, a);
+      }
+
+      return l;
+    }
+# endif
+#endif
+    break;
+  }
+
+  ESCAPED_BEFORE_HERE;
+}
+
 static Scheme_Object *bytes_to_integer (int argc, Scheme_Object *argv[])
 {
   intptr_t strlen, slen;
@@ -2086,86 +2212,7 @@ static Scheme_Object *bytes_to_integer (int argc, Scheme_Object *argv[])
     str = (char *)buf;
   }
 
-  switch(slen) {
-  case 2:
-    if (sgned) {
-      short val;
-      memcpy(&val, str, sizeof(short));
-      return scheme_make_integer(val);
-      }
-    else {
-      unsigned short val;
-      memcpy(&val, str, sizeof(unsigned short));
-      return scheme_make_integer(val);
-      }
-    break;
-  case 4:
-    if (sgned) {
-      int val;
-      memcpy(&val, str, sizeof(int));
-      return scheme_make_integer_value(val);
-      }
-    else {
-      unsigned int val;
-      memcpy(&val, str, sizeof(unsigned int));
-      return scheme_make_integer_value_from_unsigned(val);
-      }
-    break;
-  default:
-#ifdef SIXTY_FOUR_BIT_INTEGERS
-    if (sgned) {
-      intptr_t val;
-      memcpy(&val, str, sizeof(intptr_t));
-      return scheme_make_integer_value(val);
-      }
-    else {
-      uintptr_t val;
-      memcpy(&val, str, sizeof(uintptr_t));
-      return scheme_make_integer_value_from_unsigned(val);
-      }
-    break;
-#else
-# ifndef NO_LONG_LONG_TYPE
-    {
-      mzlonglong lv;
-      memcpy(&lv, str, sizeof(mzlonglong));
-      if (sgned)
-	return scheme_make_integer_value_from_long_long(lv);
-      else
-	return scheme_make_integer_value_from_unsigned_long_long((umzlonglong)lv);
-      break;
-    }
-# else
-    {
-      Scheme_Object *h, *l, *a[2];
-
-#  if MZ_IS_BIG_ENDIAN
-      /* make little-endian at int level: */
-      {
-	int v;
-	v = ((int *)str)[0];
-	buf[0] = ((int *)str)[1];
-	buf[1] = v;
-	str = (char *)buf;
-      }
-#  endif
-
-      if (sgned)
-	h = scheme_make_integer_value(((int *)str)[1]);
-      else
-	h = scheme_make_integer_value_from_unsigned(((unsigned int *)str)[1]);
-      l = scheme_make_integer_value_from_unsigned(((unsigned int *)str)[0]);
-      a[0] = h;
-      a[1] = scheme_make_integer(32);
-      h = scheme_bitwise_shift(2, a);
-      return scheme_bin_plus(h, l);
-    }
-# endif
-#endif
-    break;
-  }
-
-  /* throw an error here */
+  return scheme_bytes_to_integer(str, slen, sgned, 0, slen*8);
 }
 
 #define MZ_U8HI 0
@@ -2712,12 +2759,21 @@ sch_random(int argc, Scheme_Object *argv[])
     Scheme_Object *o, *rand_state;
 
     o = argv[0];
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+    if (SCHEME_INTP(o)) {
+      i = (uintptr_t)SCHEME_INT_VAL(o);
+      if (i > 4294967087UL)
+        i = 0;
+    } else
+      i = 0;
+#else
     if (scheme_get_unsigned_int_val(o,  &i)) {
       if (i > 4294967087UL)
 	i = 0;
     } else
       i = 0;
-    
+#endif
+
     if (!i) {
       scheme_wrong_contract("random", 
                             ((argc == 1)
@@ -2739,8 +2795,17 @@ sch_random(int argc, Scheme_Object *argv[])
 
     v = sch_int_rand(i, (Scheme_Random_State *)rand_state);
     
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+    return scheme_make_integer(v);
+#else
     return scheme_make_integer_value_from_unsigned(v);
+#endif
   }
+}
+
+double scheme_double_random(Scheme_Object *rand_state)
+{
+  return sch_double_rand((Scheme_Random_State *)rand_state);
 }
 
 static Scheme_Object *
@@ -2814,18 +2879,18 @@ sch_unpack(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *current_pseudo_random_generator(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-pseudo-random-generator", 
-			     scheme_make_integer(MZCONFIG_RANDOM_STATE),
-			     argc, argv,
-			     -1, pseudo_random_generator_p, "pseudo-random-generator", 0);
+  return scheme_param_config2("current-pseudo-random-generator", 
+                              scheme_make_integer(MZCONFIG_RANDOM_STATE),
+                              argc, argv,
+                              -1, pseudo_random_generator_p, "pseudo-random-generator?", 0);
 }
 
 static Scheme_Object *current_sched_pseudo_random_generator(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-evt-pseudo-random-generator", 
-			     scheme_make_integer(MZCONFIG_SCHEDULER_RANDOM_STATE),
-			     argc, argv,
-			     -1, pseudo_random_generator_p, "pseudo-random-generator", 0);
+  return scheme_param_config2("current-evt-pseudo-random-generator", 
+                              scheme_make_integer(MZCONFIG_SCHEDULER_RANDOM_STATE),
+                              argc, argv,
+                              -1, pseudo_random_generator_p, "pseudo-random-generator?", 0);
 }
 
 static Scheme_Object *make_pseudo_random_generator(int argc, Scheme_Object **argv)

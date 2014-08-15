@@ -1,6 +1,44 @@
 #lang racket/base
 (require racket/contract/base
-         "private/dict.rkt")
+         "private/dict.rkt"
+         "private/custom-hash.rkt")
+
+(define (dict-implements/c . syms)
+  (if (null? syms)
+      dict?
+      (flat-named-contract
+        `(dict-implements/c . ,syms)
+        (lambda (x)
+          (and (dict? x)
+               (for/and ([sym (in-list syms)])
+                 (dict-implements? x sym)))))))
+
+(define dict-method-name/c
+  (or/c 'dict-ref
+        'dict-set!
+        'dict-set
+        'dict-remove!
+        'dict-remove
+        'dict-count
+        'dict-iterate-first
+        'dict-iterate-next
+        'dict-iterate-key
+        'dict-iterate-value
+        'dict-has-key?
+        'dict-ref!
+        'dict-set*!
+        'dict-set*
+        'dict-update!
+        'dict-update
+        'dict-map
+        'dict-for-each
+        'dict-keys
+        'dict-values
+        'dict->list
+        'dict-copy
+        'dict-empty?
+        'dict-clear
+        'dict-clear!))
 
 ;; ----------------------------------------
 
@@ -68,21 +106,21 @@
        ([default any/c])
        any)) ;; because default can be multi-valued procedure
 (define dict-set!-contract
-  (->i ([d (and/c dict? dict-mutable?)]
+  (->i ([d (dict-implements/c 'dict-set!)]
         [k (d) (dict-key-contract d)]
         [value (d) (dict-value-contract d)])
        [_r void?]))
 (define dict-set-contract
-  (->i ([d (and/c dict? dict-can-functional-set?)]
+  (->i ([d (dict-implements/c 'dict-set)]
         [k (d) (dict-key-contract d)]
         [value (d) (dict-value-contract d)])
        [_r dict?]))
 (define dict-remove!-contract
-  (->i ([d (and/c dict? dict-mutable? dict-can-remove-keys?)]
+  (->i ([d (dict-implements/c 'dict-remove!)]
         [k (d) (dict-key-contract d)])
        [_r void?]))
 (define dict-remove-contract
-  (->i ([d (and/c dict? dict-can-functional-set? dict-can-remove-keys?)]
+  (->i ([d (dict-implements/c 'dict-remove)]
         [k (d) (dict-key-contract d)])
        [_r dict?]))
 (define dict-count-contract
@@ -143,7 +181,7 @@
  [dict-ref
   dict-ref-contract]
  [dict-ref!
-  (->i ([d (and/c dict? dict-mutable?)]
+  (->i ([d (dict-implements/c 'dict-set!)]
         [k (d) (dict-key-contract d)]
         [default (d) (or/c (dict-value-contract d) (-> (dict-value-contract d)))]) ;; use if/c ?
        [_r (d) (dict-value-contract d)])]
@@ -152,7 +190,7 @@
  [dict-set
   dict-set-contract]
  [dict-set*!
-  (->i ([d (and/c dict? dict-mutable?)])
+  (->i ([d (dict-implements/c 'dict-set!)])
        #:rest [rst (d) (let ([key/c (dict-key-contract d)]
                              [val/c (dict-value-contract d)])
                          (letrec ([args/c
@@ -163,7 +201,7 @@
                                   args/c)))]
        [_r void?])]
  [dict-set*
-  (->i ([d (and/c dict? dict-can-functional-set?)])
+  (->i ([d (dict-implements/c 'dict-set)])
        #:rest [rst (d) (let ([key/c (dict-key-contract d)]
                              [val/c (dict-value-contract d)])
                          (letrec ([args/c
@@ -174,13 +212,13 @@
                                   args/c)))]
        [_r dict?])]
  [dict-update!
-  (->i ([d (and/c dict? dict-mutable?)]
+  (->i ([d (dict-implements/c 'dict-set!)]
         [k (d) (dict-key-contract d)]
         [update (d) (-> (dict-value-contract d) (dict-value-contract d))])
        ([default (d) (or/c (dict-value-contract d) (-> (dict-value-contract d)))]) ;; use if/c
        [_r void?])]
  [dict-update
-  (->i ([d (and/c dict? dict-can-functional-set?)]
+  (->i ([d (dict-implements/c 'dict-set)]
         [k (d) (dict-key-contract d)]
         [update (d) (-> (dict-value-contract d) (dict-value-contract d))])
        ([default (d) (or/c (dict-value-contract d) (-> (dict-value-contract d)))]) ;; use if/c ?
@@ -215,7 +253,25 @@
        [_r (d) (listof (dict-value-contract d))])]
  [dict->list
   (->i ([d dict?])
-       [_r (d) (listof (cons/c (dict-key-contract d) (dict-value-contract d)))])])
+       [_r (d) (listof (cons/c (dict-key-contract d) (dict-value-contract d)))])]
+
+ [dict-empty? (-> dict? boolean?)]
+ [dict-copy (-> dict? dict?)]
+ [dict-clear
+  (->i ([d dict?])
+       [_r (d) (apply dict-implements/c
+                      (for/list ([sym (in-list '(dict-set dict-set!))]
+                                 #:when (dict-implements? d sym))
+                        sym))])]
+ [dict-clear!
+  (->i ([d (dict-implements/c 'dict-remove!)])
+       [_r void?]
+       #:post (d) (dict-empty? d))]
+
+ [dict-implements?
+  (->* [dict?] [] #:rest (listof dict-method-name/c) boolean?)]
+ [dict-implements/c
+  (->* [] [] #:rest (listof dict-method-name/c) flat-contract?)])
 
 (provide gen:dict
          prop:dict
@@ -223,6 +279,8 @@
          make-custom-hash
          make-immutable-custom-hash
          make-weak-custom-hash
+         make-custom-hash-types
+         define-custom-hash-types
 
          in-dict
          in-dict-keys

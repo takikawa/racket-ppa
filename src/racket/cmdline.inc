@@ -52,6 +52,37 @@ char * volatile scheme_coldir = "coLLECTs dIRECTORy:" /* <- this tag stays, so w
                        "****************************************************************";
 static int _coldir_offset = 19; /* Skip permanent tag */
 
+#ifndef INITIAL_CONFIG_DIRECTORY
+# ifdef DOS_FILE_SYSTEM
+#  define INITIAL_CONFIG_DIRECTORY "etc"
+# else
+#  define INITIAL_CONFIG_DIRECTORY "../etc"
+# endif
+#endif
+
+char * volatile scheme_configdir = "coNFIg dIRECTORy:" /* <- this tag stays, so we can find it again */
+                       INITIAL_CONFIG_DIRECTORY
+                       "\0"
+                       /* Pad with at least 1024 bytes: */
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************";
+static int _configdir_offset = 17; /* Skip permanent tag */
+
+
 #ifndef MZ_PRECISE_GC
 # define XFORM_OK_PLUS +
 #endif
@@ -65,7 +96,9 @@ static int _coldir_offset = 19; /* Skip permanent tag */
 #ifdef DOS_FILE_SYSTEM
 # include <Windows.h>
 
-#define DLL_RELATIVE_PATH L"lib"
+#ifndef DLL_RELATIVE_PATH
+# define DLL_RELATIVE_PATH L"lib"
+#endif
 #include "delayed.inc"
 
 #ifdef NEED_CONSOLE_PRINTF
@@ -224,6 +257,44 @@ typedef void (*Repl_Proc)(Scheme_Env *, FinishArgs *f);
 static void configure_environment(Scheme_Object *mod)
 {
   Scheme_Object *mli, *dyreq, *a[3], *gi, *v, *vs;
+  Scheme_Object *submod, *cr, *mdp, *mpij;
+
+  cr = scheme_intern_symbol("configure-runtime");
+
+  /* Modern style: look for `runtime-configure' submodule to initialize
+     the configuration: */
+
+  submod = scheme_intern_symbol("submod");
+  cr = scheme_intern_symbol("configure-runtime");
+
+  if (SAME_TYPE(SCHEME_TYPE(mod), scheme_module_index_type)) {
+    mpij = scheme_builtin_value("module-path-index-join");
+    a[0] = scheme_make_pair(submod, 
+                            scheme_make_pair(scheme_make_utf8_string("."),
+                                             scheme_make_pair(cr, scheme_make_null())));
+    a[1] = mod;
+    submod = scheme_apply(mpij, 2, a);
+  } else if (SCHEME_PAIRP(mod) && SAME_OBJ(SCHEME_CAR(mod), submod))
+    submod = scheme_append(mod, scheme_make_pair(cr, scheme_make_null()));
+  else
+    submod = scheme_make_pair(submod, 
+                              scheme_make_pair(mod,
+                                               scheme_make_pair(cr, scheme_make_null())));
+  mdp = scheme_builtin_value("module-declared?");
+
+  a[0] = submod;
+  a[1] = scheme_make_true();
+  v = scheme_apply(mdp, 2, a);
+  if (!SAME_OBJ(scheme_make_false(), v)) {
+    dyreq = scheme_builtin_value("dynamic-require");
+
+    a[0] = submod;
+    a[1] = scheme_make_false();
+    (void)scheme_apply(dyreq, 2, a);
+  }
+
+  /* Old style: use `module->language-info' (after new style, for 
+     compatibility): */
 
   mli = scheme_builtin_value("module->language-info");
 
@@ -240,7 +311,7 @@ static void configure_environment(Scheme_Object *mod)
     a[0] = SCHEME_VEC_ELS(v)[2];
     gi = scheme_apply(gi, 1, a);
 
-    a[0] = scheme_intern_symbol("configure-runtime");
+    a[0] = cr;
     a[1] = scheme_make_null();
     vs = scheme_apply(gi, 2, a);
     a[0] = vs;
@@ -531,6 +602,9 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
   }
 #endif
 
+  if (scheme_flush_managed(NULL, 1))
+    exit_val = 1;
+
   return exit_val;
 }
 
@@ -590,8 +664,10 @@ static Scheme_Object *get_log_level(char *prog, char *real_switch, const char *e
     } else if (!strncmp(str, "debug", 5)) {
       k  = SCHEME_LOG_DEBUG;
       len = 5;
-    } else 
+    } else {
       k = -1;
+      len = 0;
+    }
 
     str += len;
 
@@ -680,8 +756,8 @@ static int run_from_cmd_line(int argc, char *_argv[],
   Scheme_Object *sch_argv;
   int skip_coll_dirs = 0;
   Scheme_Object *collects_path = NULL, *collects_extra = NULL, *addon_dir = NULL;
+  Scheme_Object *config_path = NULL;
   char *compiled_paths = NULL;
-  Scheme_Object *links_file = NULL;
 #ifndef NO_FILE_SYSTEM_UTILS
   Scheme_Object *collects_paths_l, *collects_paths_r;
 #endif
@@ -959,8 +1035,8 @@ static int run_from_cmd_line(int argc, char *_argv[],
       argv[0] = "-R";
     else if (!strcmp("--addon", argv[0]))
       argv[0] = "-A";
-    else if (!strcmp("--links", argv[0]))
-      argv[0] = "-C";
+    else if (!strcmp("--config", argv[0]))
+      argv[0] = "-G";
 # ifdef CMDLINE_STDIO_FLAG
     else if (!strcmp("--stdio", argv[0]))
       argv[0] = "-z";
@@ -1012,6 +1088,17 @@ static int run_from_cmd_line(int argc, char *_argv[],
             collects_path = check_make_path(prog, real_switch, argv[0]);
           was_config_flag = 1;
 	  break;
+	case 'G':
+	  if (argc < 2) {
+	    PRINTF("%s: missing path after %s switch\n", 
+		   prog, real_switch);
+	    goto show_need_help;
+	  }
+	  argv++;
+	  --argc;
+          config_path = check_make_path(prog, real_switch, argv[0]);
+          was_config_flag = 1;
+	  break;
         case 'R':
           if (argc < 2) {
 	    PRINTF("%s: missing path after %s switch\n", 
@@ -1032,17 +1119,6 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  argv++;
 	  --argc;
 	  addon_dir = check_make_path(prog, real_switch, argv[0]);
-          was_config_flag = 1;
-	  break;
-	case 'C':
-	  if (argc < 2) {
-	    PRINTF("%s: missing path after %s switch\n", 
-		   prog, real_switch);
-	    goto show_need_help;
-	  }
-	  argv++;
-	  --argc;
-	  links_file = check_make_path(prog, real_switch, argv[0]);
           was_config_flag = 1;
 	  break;
 	case 'U':
@@ -1367,6 +1443,22 @@ static int run_from_cmd_line(int argc, char *_argv[],
   }
   scheme_set_collects_path(collects_path);
 
+# ifdef GETENV_FUNCTION
+  if (!config_path) {
+    char *s;
+    s = getenv("PLTCONFIGDIR");
+    if (s) {
+      s = scheme_expand_filename(s, -1, NULL, NULL, 0);
+      if (s) config_path = scheme_make_path(s);
+    }
+  }
+# endif
+  if (!config_path)
+    config_path = scheme_make_path(scheme_configdir XFORM_OK_PLUS _configdir_offset);   
+  else
+    config_path = scheme_path_to_complete_path(config_path, NULL);
+  scheme_set_config_path(config_path);
+
   /* Make list of additional collection paths: */
   if (collects_extra)
     collects_paths_r = reverse_path_list(collects_extra, 1);
@@ -1428,24 +1520,6 @@ static int run_from_cmd_line(int argc, char *_argv[],
   if (addon_dir) {
     addon_dir = scheme_path_to_complete_path(addon_dir, NULL);
     scheme_set_addon_dir(addon_dir);
-  }
-#endif /* NO_FILE_SYSTEM_UTILS */
-
-#ifndef NO_FILE_SYSTEM_UTILS
-  /* Setup path for "links" file: */
-# ifdef GETENV_FUNCTION
-  if (!links_file) {
-    char *s;
-    s = getenv("PLTLINKSFILE");
-    if (s) {
-      s = scheme_expand_filename(s, -1, NULL, NULL, 0);
-      if (s) links_file = scheme_make_path(s);
-    }
-  }
-# endif
-  if (links_file) {
-    links_file = scheme_path_to_complete_path(links_file, NULL);
-    scheme_set_links_file(links_file);
   }
 #endif /* NO_FILE_SYSTEM_UTILS */
 
@@ -1539,9 +1613,9 @@ static int run_from_cmd_line(int argc, char *_argv[],
          "  -I <path> : Set <init-lib> to <path> (sets language)\n"
 	 "  -X <dir>, --collects <dir> : Main collects at <dir> (or \"\" disables all)\n"
 	 "  -S <dir>, --search <dir> : More collects at <dir> (after main collects)\n"
+	 "  -G <dir>, --config <dir> : Main configuration directory at <dir>\n"
 	 "  -A <dir>, --addon <dir> : Addon directory at <dir>\n"
          "  -R <paths>, --compiled <paths> : Set compiled-file search roots to <paths>\n"
-	 "  -C <file>, --links <file> : User-specific collection links at <file>\n"
 	 "  -U, --no-user-path : Ignore user-specific collects, etc.\n"
 	 "  -N <file>, --name <file> : Sets `(find-system-path 'run-file)' to <file>\n"
 # ifdef CMDLINE_STDIO_FLAG

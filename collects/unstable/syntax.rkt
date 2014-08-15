@@ -1,11 +1,11 @@
 #lang racket/base
 ;; owner: ryanc (and cce and stamourv, where noted)
 (require racket/syntax
-         syntax/stx
          (for-syntax racket/base)
          (for-template racket/base))
 
-(provide (rename-out [stx-map syntax-map])
+(provide ;; by endobson
+         syntax-length
 
          ;; by cce:
          syntax-source-file-name
@@ -103,3 +103,9 @@
        [(id . args)
         (let ([stx* (cons #'(#%expression id) (cdr (syntax-e stx)))])
           (datum->syntax stx stx* stx))]))))
+
+;; by endobson
+
+(define (syntax-length stx)
+  (let ((list (syntax->list stx)))
+    (and list (length list))))

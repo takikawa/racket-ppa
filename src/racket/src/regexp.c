@@ -1,7 +1,7 @@
 /*
  * @(#)regexp.c 1.3 of 18 April 87
  * Revised for PLT Racket, 1995-2001
- * Copyright (c) 2004-2013 PLT Design Inc.
+ * Copyright (c) 2004-2014 PLT Design Inc.
  *
  * Copyright (c) 1986 by University of Toronto.
  * Written by Henry Spencer.  Not derived from licensed software.
@@ -2360,6 +2360,7 @@ static MZ_INLINE rxpos l_strchr_ci(char *str, rxpos a, int l, int c)
   return -1;
 }
 
+#if 0
 static MZ_INLINE int in_ranges(char *str, rxpos a, int l, int c)
 {
   int i;
@@ -2389,6 +2390,7 @@ static MZ_INLINE int in_ranges_ci(char *str, rxpos a, int l, int c)
 
   return 0;
 }
+#endif
 
 /*
  * regexec and friends

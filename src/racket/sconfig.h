@@ -114,7 +114,13 @@
 # define USE_ON_EXIT_FOR_ATEXIT
 # endif
 
+# define PREFER_MMAP_LARGE_BLOCKS
+
 # define FMOD_CAN_RETURN_POS_ZERO
+
+# ifdef _POSIX_PTHREAD_SEMANTICS
+#  define SUBPROCESS_USE_FORK1
+# endif
 
 # ifdef i386
 #  define MZ_USE_JIT_I386
@@ -156,39 +162,49 @@
 
 #if defined(linux)
 
+# ifdef __ANDROID__
+#  define SPLS_LINUX "android"
+# else
+#  define SPLS_LINUX "linux"
+# endif
+
 # if defined(i386)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-"SPLS_LINUX
 #  define REGISTER_POOR_MACHINE
 #  define MZ_TRY_EXTFLONUMS
 #  define ASM_DBLPREC_CONTROL_87
 # endif
 # if defined(powerpc)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-"SPLS_LINUX
 # endif
 # if defined(__mc68000__)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "m68k-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "m68k-"SPLS_LINUX
 # endif
 # if defined(mips)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "mips-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "mips-"SPLS_LINUX
 # endif
 # if defined(__alpha__)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "alpha-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "alpha-"SPLS_LINUX
 # endif
 # if defined(__hppa__)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "hppa-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "hppa-"SPLS_LINUX
 # endif
 # if defined(__sparc__)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "sparc-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "sparc-"SPLS_LINUX
 #  define FLUSH_SPARC_REGISTER_WINDOWS
 # endif
+# if defined(__arm__) || defined(__thumb__)
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "arm-"SPLS_LINUX
+#  define FFI_CALLBACK_NEED_INT_CLEAR
+# endif
 # if defined(__x86_64__)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "x86_64-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "x86_64-"SPLS_LINUX
 #  define REGISTER_POOR_MACHINE
 #  define ASM_DBLPREC_CONTROL_87
 #  define MZ_TRY_EXTFLONUMS
 # endif
 # ifndef SCHEME_PLATFORM_LIBRARY_SUBPATH
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "unknown-linux"
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "unknown-"SPLS_LINUX
 # endif
 
 # include "uconfig.h"
@@ -215,11 +231,17 @@
 
 # define MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
 
+# ifdef __ANDROID__
+#  define USE_FCNTL_O_NONBLOCK
+#  define PROTOENT_IS_INT IPPROTO_TCP
+# endif
+
 # define FLAGS_ALREADY_SET
 
 #if defined(i386)
 # define MZ_USE_JIT_I386
 # define MZ_JIT_USE_MPROTECT
+# define MZ_USE_DWARF_LIBUNWIND
 #endif
 #if defined(__x86_64__)
 # define MZ_USE_JIT_X86_64
@@ -228,6 +250,12 @@
 #endif
 #if defined(powerpc)
 # define MZ_USE_JIT_PPC
+#endif
+# if defined(__arm__)
+# define MZ_USE_JIT_ARM
+# ifndef __ANDROID__
+#  define MZ_USE_DWARF_LIBUNWIND
+# endif
 #endif
 
 #endif
@@ -287,24 +315,29 @@
   /************** x86/OpenBSD with gcc ****************/
               /* Thanks to Bengt Kleberg */
 
-#if defined(__OpenBSD__) && (defined(__i386__) || defined(i386) || defined(__x86_64__))
+#if defined(__OpenBSD__)
 
 # if defined(__x86_64__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "x86_64-openbsd"
-# else
+# elif defined(__i386__) || defined(i386)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-openbsd"
-# endif
-
-# include <sys/param.h>
-# if OpenBSD < 201211
-/* This is needed for (pre-5.2) userspace threads: */
-#  define ASSUME_FIXED_STACK_SIZE
-#  define FIXED_STACK_SIZE 1048576
+# elif defined(__mips64__)
+#  if defined(__MIPSEL__)
+#   define SCHEME_PLATFORM_LIBRARY_SUBPATH "mips64el-openbsd"
+#  else
+#   define SCHEME_PLATFORM_LIBRARY_SUBPATH "mips64-openbsd"
+#  endif
+# elif defined(__hppa__)
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "hppa-openbsd"
+# else
+#  error Unported platform.
 # endif
 
 # include "uconfig.h"
 # undef HAS_STANDARD_IOB
 # define HAS_BSD_IOB
+# undef UNIX_FIND_STACK_BOUNDS
+# define PTHREAD_STACKSEG_FIND_STACK_BOUNDS
 
 /* Default UNIX_STACK_MAXIMUM is too big for a non-root user. */
 # undef UNIX_STACK_MAXIMUM
@@ -335,8 +368,6 @@
 # define MZ_USE_JIT_I386
 # define MZ_JIT_USE_MPROTECT
 # define MZ_TRY_EXTFLONUMS
-#else
-# error Unported platform.
 #endif
 
 # define FLAGS_ALREADY_SET
@@ -396,6 +427,7 @@
 
 # define USE_TM_GMTOFF_FIELD
 # define USE_TM_ZONE_FIELD
+# define MAX_VALID_DATE_SECONDS_BITS 51
 
 # define MZ_JIT_USE_MPROTECT
 
@@ -406,7 +438,7 @@
   /************** SGI/IRIX with SGI cc ****************/
 
 #if  (defined(mips) || defined(__mips)) \
-     && !(defined(ultrix) || defined(__ultrix) || defined(linux))
+     && !(defined(ultrix) || defined(__ultrix) || defined(linux) || defined(__OpenBSD__))
 
 # define SCHEME_PLATFORM_LIBRARY_SUBPATH "mips-irix"
 
@@ -450,7 +482,8 @@
 
   /************** ALPHA/OSF1 with gcc ****************/
 
-# if (defined(__alpha) || defined(__alpha__)) && !defined(linux) && !defined(__NetBSD__)
+# if (defined(__alpha) || defined(__alpha__)) \
+    && !defined(linux) && !defined(__NetBSD__) && !defined(__OpenBSD__)
 
 # define SCHEME_PLATFORM_LIBRARY_SUBPATH "alpha-osf1"
 
@@ -538,12 +571,10 @@
 # if defined(_MSC_VER) || defined(__MINGW32__)
 #  define NO_READDIR
 #  define USE_FINDFIRST
-#  define NO_READLINK
 #  define MKDIR_NO_MODE_FLAG
 # endif
 # if defined(__BORLANDC__)
 #  define DIRENT_NO_NAMLEN
-#  define NO_READLINK
 #  define MKDIR_NO_MODE_FLAG
 # endif
 
@@ -563,9 +594,6 @@
 /* Default stack size is 1MB, but we try to read
    the actual size from the executable on startup: */
 # define WINDOWS_DEFAULT_STACK_SIZE 1048576
-# ifdef _WIN64
-#  define STACK_SAFETY_MARGIN 100000
-# endif
 
 # ifndef _WIN64
 #  define USE_MZ_SETJMP
@@ -831,151 +859,6 @@
 
 # endif
 
-  /************ Macintosh with CodeWarrior (not OS X) *************/
-
-#if ((defined(__MWERKS__) && !defined(__BEOS__) && !defined(__palmos__) && !defined(OS_X))  \
-     || defined(MPW_C) || defined(MPW_CPLUS))
-
-# if defined(__POWERPC__)
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-mac"
-# else
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "68k-mac"
-# endif
-
-# define SYSTEM_TYPE_NAME "macos"
-# define MAC_FILE_SYSTEM
-
-# define NO_READDIR
-# define NO_READLINK
-# define USE_MAC_FILE_TOOLBOX
-
-# define MACINTOSH_EVENTS
-# define MAC_MZ_GUI_ENABLED
-# define MAC_CLASSIC_PROCESS_CONTROL
-//# define NEVER_EVER_SLEEP
-# define MACINTOSH_GIVE_TIME
-# define MACINTOSH_SIOUX
-
-# if !defined(__POWERPC__)
-#  define MACINTOSH_SET_STACK
-#  define COMPUTE_NEG_INEXACT_TO_EXACT_AS_POS
-#  define NAN_LT_COMPARISON_WRONG
-#  define SQRT_NAN_IS_WRONG
-#  define ATAN2_DOESNT_WORK_WITH_INFINITIES
-# else
-#  define CODEFRAGMENT_DYNAMIC_LOAD
-# endif
-
-# ifndef MZSCHEME_IS_CODEFRAGMENT
-#  define LINK_EXTENSIONS_BY_TABLE
-# endif
-
-# define DO_STACK_CHECK
-# define MACOS_FIND_STACK_BOUNDS
-# define STACK_SAFETY_MARGIN 10000
-
-# define TIME_SYNTAX
-# define USE_MACTIME
-# define DIR_FUNCTION
-# define TIME_TYPE_IS_UNSIGNED
-
-# define NO_SYS_INCLUDE_SUBDIR
-# define NO_SLEEP
-# define NO_USLEEP
-# define NO_STAT_PROC
-# define DONT_IGNORE_PIPE_SIGNAL
-
-# define TRIG_ZERO_NEEDS_SIGN_CHECK
-
-# define MACOS_UNICODE_SUPPORT
-
-# define USE_MAC_TCP
-
-# define SIGSET_IS_SIGNAL
-
-# ifdef MPW_C
-#  define NO_INLINE_KEYWORD
-# endif
-
-# define FLAGS_ALREADY_SET
-
-#endif
-
-  /************** DOS with Borland C++ ****************/
-  /*          (Never successfully supported)          */
-
-#if defined(__BORLANDC__) && defined(__MSDOS__)
-
-# define SCHEME_PLATFORM_LIBRARY_SUBPATH "dos\\i386"
-
-# define USE_SENORA_GC
-# define DOS_FAR_POINTERS
-# define SMALL_HASH_TABLES
-
-# define SYSTEM_TYPE_NAME "dos"
-# define DOS_FILE_SYSTEM
-# define USE_GETDISK
-# define DIRENT_NO_NAMLEN
-# define NO_READLINK
-# define MKDIR_NO_MODE_FLAG
-
-# define TIME_SYNTAX
-# define USE_FTIME
-# define GETENV_FUNCTION
-# define DIR_FUNCTION
-
-# define DO_STACK_CHECK
-# define USE_STACKAVAIL
-# define STACK_SAFETY_MARGIN 15000
-
-# define IGNORE_BY_CONTROL_87
-
-# define DIR_INCLUDE
-# define IO_INCLUDE
-# define NO_SLEEP
-# define DONT_IGNORE_PIPE_SIGNAL
-
-# define REGISTER_POOR_MACHINE
-
-# define FLAGS_ALREADY_SET
-
-#endif
-
-  /************ PalmOS *************/
-
-#if defined(__palmos__)
-
-# define SCHEME_PLATFORM_LIBRARY_SUBPATH "68k-palm"
-
-# define SYSTEM_TYPE_NAME "palm"
-
-# define NO_FILE_SYSTEM_UTILS
-# define NO_TCP_SUPPORT
-# define MZSCHEME_SOMETHING_OMITTED
-
-# define PALMOS_STUFF
-# define NO_STAT_PROC
-# define NO_USER_BREAK_HANDLER
-# define NO_USLEEP
-
-# define DO_STACK_CHECK
-# define PALM_FIND_STACK_BOUNDS
-# define STACK_SAFETY_MARGIN 1000
-
-# define TIME_SYNTAX
-# define USE_PALMTIME
-# define USER_TIME_IS_CLOCK
-# define TIME_TYPE_IS_UNSIGNED
-
-# define DONT_IGNORE_PIPE_SIGNAL
-# define DONT_IGNORE_FPE_SIGNAL
-
-# define USE_PALM_INF_TESTS
-
-# define FLAGS_ALREADY_SET
-
-#endif
-
   /************ QNX *************/
 
 #if defined(__QNX__)
@@ -1002,6 +885,7 @@
 #if defined(i386)
 # define MZ_USE_JIT_I386
 # define MZ_JIT_USE_MPROTECT
+# define MZ_USE_DWARF_LIBUNWIND
 #endif
 #if defined(__x86_64__)
 # define MZ_USE_JIT_X86_64
@@ -1054,6 +938,7 @@
 
 # define USE_TM_GMTOFF_FIELD
 # define USE_TM_ZONE_FIELD
+# define MAX_VALID_DATE_SECONDS_BITS 51
 
 # define MZ_JIT_USE_MPROTECT
 
@@ -1112,6 +997,9 @@
 
  /* TIME_TYPE_IS_UNSIGNED converts time_t values as unsigned. */
 
+ /* MAX_VALID_DATE_SECONDS_BITS sets a maximum number of bits for
+    seconds to pass to localtime() ro gmtime(). */
+
  /* MIN_VALID_DATE_SECONDS sets a minimum vald time in seconds. */
 
  /* PROCESS_FUNCTION adds (process ...) and (system ...) functions */
@@ -1157,8 +1045,6 @@
  /* NO_STAT_PROC means that there is no stat() function. */
 
  /* NO_MKDIR means that there is no mkdir() function. */
-
- /* NO_READLINK means that there is no readlink() function. */
 
  /* BROKEN_READLINK_NUL_TERMINATOR means that readlink() may
     report a length that includes trailing NUL terminators,
@@ -1213,6 +1099,8 @@
  /* CLOSE_ALL_FDS_AFTER_FORK means that all fds except 0, 1, and 2
     should be closed after performing a fork() for `process'
     and `system' calls. */
+
+ /* SUBPROCESS_USE_FORK1 uses fork1() instead of fork(). */
 
  /* USE_UNIX_SOCKETS_TCP means that the tcp- procedures can be implemented
     with the standard Unix socket functions. */
@@ -1327,6 +1215,9 @@
   /**********************/
  /* Inexact Arithmetic */
 /**********************/
+
+ /* FLOATING_POINT_IS_NOT_IEEE disables inexact->exact conversion via
+    parsing of IEEE-format bits. */
 
  /* USE_SINGLE_FLOATS turns on support for single-precision
     floating point numbers. Otherwise, floating point numbers
@@ -1490,6 +1381,8 @@
      line.
     ASSUME_FIXED_STACK_SIZE assumes that the main stack size is
      always FIXED_STACK_SIZE.
+    PTHREAD_STACKSEG_FIND_STACK_BOUNDS finds stack bounds using
+     pthread_stackseg_np().
     Use only one of these if DO_STACK_CHECK is used, or none otherwise. */
 
  /* FIXED_STACK_SIZE <X> sets the stack size to <X> when the
@@ -1497,7 +1390,8 @@
 
  /* STACK_SAFETY_MARGIN <X> sets the number of bytes that should be
      available on the stack for "safety" to <X>. Used only if
-     DO_STACK_CHECK is used. STACK_SAFETY_MARGIN defaults to 50000. */
+     DO_STACK_CHECK is used. STACK_SAFETY_MARGIN defaults to 50000
+     for a 32-bit platform, twice as much for a 64-bit platform. */
 
  /* UNIX_LIMIT_STACK <X> limits stack usage to <X> bytes. This may
      be necessary to avoid GC-setup traversal over too much memory
@@ -1590,8 +1484,13 @@
  /*    Miscellaneous    */
 /***********************/
 
- /* USE_MAP_ANON indicates that mmap should use BSD's MAP_ANON flag
+ /* USE_MAP_ANON indicates that mmap() should use BSD's MAP_ANON flag
     rather than trying to open /dev/zero */
+
+ /* PREFER_MMAP_LARGE_BLOCKS indicates that mmap() should be called with
+    large block sizes as much as possible, because the actual allocated
+    size for small requests (on the order of the page size) is much
+    larger than the request. */
 
  /* REGISTER_POOR_MACHINE guides a hand optimization that seems to
     be work best one way for Sparc machines, and better the other
@@ -1664,6 +1563,10 @@
 
  /* WIN32S_HACK uses a special hack to implement threads under Win32s
     with some compilers. Obsolete. */
+
+ /* FFI_CALLBACK_NEED_INT_CLEAR indiates thet libffi callback results
+    that are smaller than an `int' should clear `int'-sized space
+    in the result area. */
 
 #endif  /* FLAGS_ALREADY_SET */
 

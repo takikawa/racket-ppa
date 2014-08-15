@@ -1,14 +1,16 @@
 #lang racket/base
 (require (for-syntax racket/base)
-         mzlib/etc
-         racket/contract/base
-         racket/contract/combinator
-         (only-in racket/contract/region current-contract-region)
-         (only-in racket/contract/private/arrow making-a-method method-contract?)
          (only-in racket/list remove-duplicates)
          racket/stxparam
          racket/unsafe/ops
          "serialize-structs.rkt"
+         "class-wrapped.rkt"
+         racket/runtime-path
+         (only-in "../contract/region.rkt" current-contract-region)
+         "../contract/base.rkt"
+         "../contract/combinator.rkt"
+         racket/unsafe/undefined
+         "class-undef.rkt"
          (for-syntax racket/stxparam
                      syntax/kerncase
                      syntax/stx
@@ -31,7 +33,7 @@
 (define-syntax-rule (provide-public-names)
   (provide class class* class/derived
            define-serializable-class define-serializable-class*
-           class?
+           class? 
            mixin
            interface interface* interface?
            object% object? externalizable<%> printable<%> writable<%> equal<%>
@@ -70,7 +72,6 @@
            this this% super inner
            super-make-object super-instantiate super-new
            inspect absent abstract))
-
 
 ;;--------------------------------------------------------------------
 ;;  keyword setup
@@ -1194,9 +1195,21 @@
                                           [(d-v (id ...) expr)
                                            (and (identifier? #'d-v)
                                                 (free-identifier=? #'d-v #'define-values))
-                                           (syntax-track-origin (syntax/loc e (set!-values (id ...) expr))
-                                                                e
-                                                                #'d-v)]
+                                           (let* ([ids (syntax->list #'(id ...))]
+                                                  [assignment
+                                                   (if (= 1 (length ids))
+                                                       ;; Special-case single variable in case the RHS
+                                                       ;; uses the name:
+                                                       (syntax/loc e
+                                                         (set! id ... (field-initialization-value expr)))
+                                                       ;; General case:
+                                                       (with-syntax ([(temp ...) (generate-temporaries ids)])
+                                                         (syntax/loc e
+                                                           (let-values ([(temp ...) expr])
+                                                             (set! id (field-initialization-value temp))
+                                                             ...
+                                                             (void)))))])
+                                             (syntax-track-origin assignment e #'d-v))]
                                           [(_init orig idp ...)
                                            (and (identifier? (syntax _init))
                                                 (ormap (lambda (it) 
@@ -1216,12 +1229,14 @@
                                                                        (with-syntax ([defexp (stx-car (stx-cdr norm))])
                                                                          (syntax (lambda () defexp)))))
                                                                  norms)]
-                                                           [class-name class-name])
+                                                           [class-name class-name]
+                                                           [wrapper (if (free-identifier=? #'_init #'-init-field)
+                                                                        #'field-initialization-value
+                                                                        #'begin)])
                                                (syntax-track-origin
                                                 (syntax/loc e 
-                                                  (begin 
-                                                    1 ; to ensure a non-empty body
-                                                    (set! id (extract-arg 'class-name `idpos init-args defval))
+                                                  (begin
+                                                    (set! id (wrapper (extract-arg 'class-name `idpos init-args defval)))
                                                     ...))
                                                 e
                                                 #'_init)))]
@@ -1232,8 +1247,7 @@
                                                           (map normalize-init/field (syntax->list #'(idp ...)))])
                                              (syntax-track-origin
                                               (syntax/loc e (begin 
-                                                              1 ; to ensure a non-empty body
-                                                              (set! iid expr)
+                                                              (set! iid (field-initialization-value expr))
                                                               ...))
                                               e
                                               #'-fld))]
@@ -1247,7 +1261,8 @@
                                                                  #'id/rename
                                                                  (stx-car #'id/rename))])
                                              (syntax-track-origin
-                                              (syntax/loc e (set! id (extract-rest-args n init-args)))
+                                              (syntax/loc e
+                                                (set! id (extract-rest-args n init-args)))
                                               e
                                               #'-i-r))]
                                           [(-i-r)
@@ -1271,7 +1286,7 @@
                           [definify (lambda (l)
                                       (map bind-local-id l)
                                       l)])
-                      
+
                       ;; ---- set up field and method mappings ----
                       (with-syntax ([(rename-super-orig ...) (definify (map car rename-supers))]
                                     [(rename-super-orig-localized ...) (map lookup-localize (map car rename-supers))]
@@ -1302,11 +1317,8 @@
                                                                       (append local-public-dynamic-names
                                                                               (map car all-inherits)))]
                                     [(method-accessor ...) (generate-temporaries
-                                                            (map car
-                                                                 (append publics overrides augrides
-                                                                         overments augments
-                                                                         override-finals augment-finals
-                                                                         all-inherits abstracts)))]
+                                                            (append local-public-dynamic-names
+                                                                    (map car all-inherits)))]
                                     [(inherit-field-accessor ...) (generate-temporaries
                                                                    (map (lambda (id)
                                                                           (format "get-~a"
@@ -1351,14 +1363,16 @@
                                      public-final-name ...
                                      pubment-name ...)
                                     (values
-                                     (make-field-map (quote-syntax the-finder)
+                                     (make-field-map #t
+                                                     (quote-syntax the-finder)
                                                      (quote the-obj)
                                                      (quote-syntax inherit-field-name)
                                                      (quote-syntax inherit-field-name-localized)
                                                      (quote-syntax inherit-field-accessor)
                                                      (quote-syntax inherit-field-mutator))
                                      ...
-                                     (make-field-map (quote-syntax the-finder)
+                                     (make-field-map #f
+                                                     (quote-syntax the-finder)
                                                      (quote the-obj)
                                                      (quote-syntax local-field)
                                                      (quote-syntax local-field-localized)
@@ -1489,18 +1503,22 @@
                                           [inspector (if (pair? inspect-decls)
                                                          (stx-car (stx-cdr (car inspect-decls)))
                                                          #'(current-inspector))]
-                                          [deserialize-id-expr deserialize-id-expr])
+                                          [deserialize-id-expr deserialize-id-expr]
+                                          [private-field-names private-field-names])
                               (add-decl-props
                               (quasisyntax/loc stx
-                                (let ([superclass super-expression]
-                                      [interfaces (list interface-expression ...)])
-                                  (compose-class 
-                                   'name superclass interfaces inspector deserialize-id-expr #,any-localized?
+                                (detect-field-unsafe-undefined
+                                 compose-class
+                                   'name 
+                                   super-expression
+                                   (list interface-expression ...)
+                                   inspector deserialize-id-expr #,any-localized?
                                    ;; Field count:
                                    num-fields
                                    ;; Field names:
                                    `field-names
                                    `inherit-field-names
+                                   `private-field-names ; for undefined-checking property
                                    ;; Method names:
                                    `(rename-super-name ... rename-super-extra-name ...)
                                    `(rename-inner-name ... rename-inner-extra-name ...)
@@ -1623,42 +1641,54 @@
                                                           (syntax-case stx () 
                                                             [(_ (arg (... ...)) (kw kwarg) (... ...))
                                                              (with-syntax ([stx stx])
-                                                               (syntax (-instantiate super-go stx #f (the-obj si_c si_inited? 
-                                                                                                           si_leftovers)
-                                                                                     (list arg (... ...)) 
-                                                                                     (kw kwarg) (... ...))))]))]
+                                                               (syntax
+                                                                (begin
+                                                                  `(declare-super-new)
+                                                                  (-instantiate super-go stx #f (the-obj si_c si_inited? 
+                                                                                                         si_leftovers)
+                                                                                (list arg (... ...)) 
+                                                                                (kw kwarg) (... ...)))))]))]
                                                        [super-new-param
                                                         (lambda (stx)
                                                           (syntax-case stx () 
                                                             [(_ (kw kwarg) (... ...))
                                                              (with-syntax ([stx stx])
-                                                               (syntax (-instantiate super-go stx #f (the-obj si_c si_inited? 
-                                                                                                           si_leftovers)
-                                                                                     null
-                                                                                     (kw kwarg) (... ...))))]))]
+                                                               (syntax
+                                                                (begin
+                                                                  `(declare-super-new)
+                                                                  (-instantiate super-go stx #f (the-obj si_c si_inited? 
+                                                                                                         si_leftovers)
+                                                                                null
+                                                                                (kw kwarg) (... ...)))))]))]
                                                        [super-make-object-param
                                                         (lambda (stx)
                                                           (let ([code 
                                                                  (quote-syntax
                                                                   (lambda args
                                                                     (super-go the-obj si_c si_inited? si_leftovers args null)))])
-                                                            (if (identifier? stx)
-                                                                code
-                                                                (datum->syntax
-                                                                 code
-                                                                 (cons code
-                                                                       (cdr (syntax-e stx)))))))])
+                                                            #`(begin
+                                                                `(declare-super-new)
+                                                                #,(if (identifier? stx)
+                                                                      code
+                                                                      (datum->syntax
+                                                                       code
+                                                                       (cons code
+                                                                             (cdr (syntax-e stx))))))))])
                                                       (letrec-syntaxes+values
                                                           ([(plain-init-name) (make-init-redirect 
                                                                                (quote-syntax set!)
                                                                                (quote-syntax #%plain-app)
                                                                                (quote-syntax local-plain-init-name)
                                                                                (quote-syntax plain-init-name-localized))] ...)
-                                                        ([(local-plain-init-name) undefined] ...)
+                                                        ([(local-plain-init-name) unsafe-undefined] ...)
                                                         (void) ; in case the body is empty
-                                                        . exprs)))))))))))))
+                                                        (begin
+                                                          '(declare-field-use-start) ; see "class-undef.rkt"
+                                                          . exprs))))))))))))))
+                                   ;; Extra argument added here by `detect-field-unsafe-undefined`
+                                   #; check-undef?
                                    ;; Not primitive:
-                                   #f)))))))))))))))))
+                                   #f))))))))))))))))
     
     ;; The class* and class entry points:
     (values
@@ -1715,7 +1745,8 @@
           #'orig-stx))
        (with-syntax ([deserialize-name-info deserialize-name-info]
                      [(provision ...) (if (eq? (syntax-local-context) 'module)
-                                          #`((provide #,deserialize-name-info))
+                                          #`((runtime-require (submod "." deserialize-info))
+                                             (module+ deserialize-info (provide #,deserialize-name-info)))
                                           #'())])
          #'(begin
              (define-values (name deserialize-name-info)
@@ -1747,7 +1778,6 @@
                                      super-expression
                                      ()
                                      defn-or-expr ...))]))
-
 
 (define-syntaxes (private* public* pubment* override* overment* augride* augment*
                            public-final* override-final* augment-final*)
@@ -1955,6 +1985,7 @@
                        #:mutable]
 
                       methods        ; vector of methods (for external dynamic dispatch)
+                                     ; vector might also contain lists; see comment below from Stevie
                       super-methods  ; vector of methods (for subclass super calls)
                       int-methods    ; vector of vector of methods (for internal dynamic dispatch)
                       beta-methods   ; vector of vector of methods
@@ -1970,6 +2001,7 @@
                       field-pub-width ; total number of public fields
                       field-ht       ; maps public field names to field-infos (see make-field-info above)
                       field-ids      ; list of public field names
+                      all-field-ids  ; list of field names in reverse order, used for `undefined` error reporting
                       
                       [struct:object ; structure type for instances
                        #:mutable]
@@ -2001,14 +2033,44 @@
                        #:mutable]
                       [fixup         ; for deserialization
                        #:mutable]
+
+                      check-undef?   ; objects need an unsafe-undefined guarding chaperone?
                       
                       no-super-init?); #t => no super-init needed
   #:inspector insp)
 
+#|
+
+From Stevie, explaining the shape of the elements of the vector in the 'methods' field:
+
+For each level of interface, we build up the following structure:
+
+(list <contract> <name of interface that contains this contract> <pos blame or #f> <neg blame or #f>)
+
+The second part of the list is used for certain types of failure reporting, I think, 
+whereas the other parts are what we need to build the correct contract forms (once we
+have the method implementation to contract).  In the interface contract info returned
+from a list of contracts, the info for the leaves contains #f negative blame (which 
+will be filled in with the class that implements the interface) and the info for the
+"roots" (more on that later) contains #f positive blame (which is filled in with the 
+info for the client of the class).
+
+When we have a particular class, we can fill in the neg. blame for the leaves in the hierarchy, and
+then we also apply as much of these structures have complete data to the method implementation
+ (that is, non-#f pos and neg blames so we can appropriately construct the correct `contract' forms).
+
+What's left is a list of non-complete data for the root(s) of the hierarchy (by roots, I mean
+the first interfaces where this method is mentioned in the interface hierarchy).  We store that
+list along with the method implementation, so that once we have the neg. blame (the blame region
+that instantiates the class in question), we can complete this data and apply those 
+last few projections.
+
+|#
+
 ;; compose-class: produces one result if `deserialize-id' is #f, two
 ;;                results if `deserialize-id' is not #f
 (define (compose-class name                ; symbol
-                       super               ; class
+                       super               ; class, possibly with contract impersonator properties
                        interfaces          ; list of interfaces
                        inspector           ; inspector or #f
                        deserialize-id      ; identifier or #f
@@ -2017,6 +2079,7 @@
                        num-fields          ; total fields (public & private)
                        public-field-names  ; list of symbols (shorter than num-fields)
                        inherit-field-names ; list of symbols (not included in num-fields)
+                       private-field-names ; list of symbols (the rest of num-fields)
                        
                        rename-super-names  ; list of symbols
                        rename-inner-names
@@ -2036,6 +2099,9 @@
                        init-mode           ; 'normal, 'stop, or 'list
                        
                        make-methods        ; takes field and method accessors
+                       
+                       check-undef?
+                       
                        make-struct:prim)   ; see "primitive classes", below
   (define (make-method proc meth-name)
     (procedure-rename
@@ -2057,11 +2123,8 @@
                         init-args
                         "initialization argument names")
     ;; We intentionally leave inherited names out of the lists below,
-    ;;  on the threory that it's ok to decide to inherit from
-    ;;  yourself:
-    (check-still-unique name
-                        (append public-field-names)
-                        "field names")
+    ;;  on the theory that it's ok to decide to inherit from yourself:
+    (check-still-unique name public-field-names "field names")
     (check-still-unique name
                         (append pubment-names public-final-names public-normal-names
                                 overment-names override-final-names override-normal-names
@@ -2264,11 +2327,15 @@
                                 methods super-methods int-methods beta-methods meth-flags
                                 inner-projs dynamic-idxs dynamic-projs
                                 field-width field-pub-width field-ht field-names
+                                (append (reverse private-field-names)
+                                        (reverse public-field-names)
+                                        (class-all-field-ids super))
                                 'struct:object 'object? 'make-object 'field-ref 'field-set!
                                 init-args
                                 init-mode
                                 'init
                                 #f #f #f ; serializer is set later
+                                (or check-undef? (class-check-undef? super))
                                 (and make-struct:prim #t))]
                  [obj-name (if name
                                (string->symbol (format "object:~a" name))
@@ -2284,6 +2351,28 @@
             (setup-all-implemented! i)
             (vector-set! (class-supers c) (add1 (class-pos super)) c)
             (set-class-orig-cls! c c)
+
+            
+            ;; --- Make the new external method contract records ---
+            ;; (they are just copies of the super at this point, updated below)
+            (define wci-neg-extra-arg-vec 
+              (if (impersonator-prop:has-wrapped-class-neg-party? super)
+                  (let* ([the-info (impersonator-prop:get-wrapped-class-info super)]
+                         [ov (wrapped-class-info-neg-extra-arg-vec the-info)])
+                    (if no-method-changes?
+                        ov
+                        (let ([v (make-vector method-width #f)])
+                          (vector-copy! v 0 ov)
+                          v)))
+                  #f))
+            (define wci-neg-acceptors-ht
+              (if (impersonator-prop:has-wrapped-class-neg-party? super)
+                  (let* ([the-info (impersonator-prop:get-wrapped-class-info super)]
+                         [oh (wrapped-class-info-neg-acceptors-ht the-info)])
+                    (if no-method-changes?
+                        oh
+                        (hash-copy oh)))
+                  #f))
             
             ;; --- Make the new object struct ---
             (let*-values ([(prim-object-make prim-object? struct:prim-object)
@@ -2301,10 +2390,14 @@
                                                  (add-properties (class-struct:object super) interfaces)
                                                  0 ;; No init fields
                                                  ;; Fields for new slots:
-                                                 num-fields undefined
+                                                 num-fields unsafe-undefined
                                                  ;; Map object property to class:
                                                  (append
                                                   (list (cons prop:object c))
+                                                  (if (class-check-undef? c)
+                                                      (list (cons prop:chaperone-unsafe-undefined
+                                                                  (class-all-field-ids c)))
+                                                      null)
                                                   (if deserialize-id
                                                       (list
                                                        (cons prop:serializable
@@ -2432,7 +2525,7 @@
                               (append new-normal-indices replace-normal-indices refine-normal-indices
                                       replace-augonly-indices refine-augonly-indices
                                       replace-final-indices refine-final-indices
-                                      inherit-indices new-abstract-indices))])
+                                      new-abstract-indices inherit-indices))])
                     
                     ;; -- Get new methods and initializers --
                     (let-values ([(new-methods override-methods augride-methods init)
@@ -2458,9 +2551,9 @@
                                   (vector-set! super-methods index method)
                                   (vector-set! int-methods index (vector method))
                                   (vector-set! beta-methods index (vector))
-                                  (vector-set! inner-projs index identity)
+                                  (vector-set! inner-projs index values)
                                   (vector-set! dynamic-idxs index 0)
-                                  (vector-set! dynamic-projs index (vector identity)))
+                                  (vector-set! dynamic-projs index (vector values)))
                                 (append new-augonly-indices new-final-indices
                                         new-abstract-indices new-normal-indices)
                                 new-methods)
@@ -2499,8 +2592,13 @@
                                                        ;; Apply current inner contract projection
                                                        (make-method ((vector-ref inner-projs index) method) id))
                                           (vector-set! beta-methods index v))))
-                                  (when (not (vector-ref meth-flags index))
-                                    (vector-set! meth-flags index (not make-struct:prim))))
+                                  (unless (vector-ref meth-flags index)
+                                    (vector-set! meth-flags index (not make-struct:prim)))
+                                  
+                                  ;; clear out external contracts for methods that are overriden
+                                  (when wci-neg-extra-arg-vec
+                                    (vector-set! wci-neg-extra-arg-vec index #f)
+                                    (hash-remove! wci-neg-acceptors-ht method)))
                                 (append replace-augonly-indices replace-final-indices replace-normal-indices
                                         refine-augonly-indices refine-final-indices refine-normal-indices)
                                 (append override-methods augride-methods)
@@ -2520,7 +2618,7 @@
                                     (let ([v (list->vector (append (vector->list (vector-ref beta-methods index))
                                                                    (list #f)))])
                                       ;; Since this starts a new part of the chain, reset the projection.
-                                      (vector-set! inner-projs index identity)
+                                      (vector-set! inner-projs index values)
                                       (vector-set! beta-methods index v))))
                                 augonly-names)
                       ;; Mark final methods:
@@ -2585,31 +2683,88 @@
                                    (loop (add1 i))))))))
                       
                       ;; --- Install initializer into class ---
-                      (set-class-init! c init)
+                      ;;     and create contract-wrapped subclass
+                      (define c+ctc
+                        (cond
+                          [wci-neg-extra-arg-vec
+                           (define neg-party (impersonator-prop:get-wrapped-class-neg-party super))
+                           (define info (impersonator-prop:get-wrapped-class-info super))
+                           (define blame (wrapped-class-info-blame info))
+                           (define sub-init-proj-pairs
+                             (let loop ([proj-pairs (wrapped-class-info-init-proj-pairs info)])
+                               (cond
+                                 [(null? proj-pairs) '()]
+                                 [else
+                                  (define pr (car proj-pairs))
+                                  (if (member (list-ref pr 0) init-args)
+                                      (loop (cdr proj-pairs))
+                                      (cons pr (loop (cdr proj-pairs))))])))
+                           (define super-init-proj-pairs (wrapped-class-info-init-proj-pairs info))
+                           
+                           ;; use an init that checks the super contracts on a super call
+                           (set-class-init!
+                            c
+                            (λ (o continue-make-super c inited? leftovers named-args)
+                              (define (contract-checking-continue-make-super o c inited?
+                                                                             leftovers
+                                                                             by-pos-args
+                                                                             new-named-args)
+                                (check-arg-contracts blame neg-party c
+                                                     super-init-proj-pairs
+                                                     new-named-args)
+                                (continue-make-super o c inited?
+                                                     leftovers
+                                                     by-pos-args
+                                                     new-named-args))
+                              (init o contract-checking-continue-make-super
+                                    c inited? leftovers named-args)))
+                           
+                           ;; add properties to the subclass that
+                           ;; check the residual external contracts
+                           (impersonate-struct
+                            c
+                            
+                            set-class-orig-cls! (λ (a b) b)
+                            
+                            impersonator-prop:wrapped-class-neg-party
+                            neg-party
+                            
+                            impersonator-prop:wrapped-class-info
+                            (wrapped-class-info 
+                             blame
+                             wci-neg-extra-arg-vec
+                             wci-neg-acceptors-ht
+                             (wrapped-class-info-pos-field-projs info)
+                             (wrapped-class-info-neg-field-projs info)
+                             sub-init-proj-pairs))]
+                          [else
+                           (set-class-init! c init)
+                           c]))
                       
                       ;; -- result is the class, and maybe deserialize-info ---
                       (if deserialize-id
-                          (values c (make-deserialize-info
-                                     (if (interface-extension? i externalizable<%>)
-                                         (lambda (args)
-                                           (let ([o (make-object c)])
-                                             (send o internalize args)
-                                             o))
-                                         (lambda (args)
-                                           (let ([o (object-make)])
-                                             ((class-fixup c) o args)
-                                             o)))
-                                     (if (interface-extension? i externalizable<%>)
-                                         (lambda ()
-                                           (obj-error 'deserialize 
-                                                      "cannot deserialize instance with cycles"
-                                                      #:class-name name))
-                                         (lambda ()
-                                           (let ([o (object-make)])
-                                             (values o
-                                                     (lambda (o2)
-                                                       ((class-fixup c) o o2))))))))
-                          c))))))))))))
+                          (values c+ctc
+                                  (make-deserialize-info
+                                   (if (interface-extension? i externalizable<%>)
+                                       (lambda (args)
+                                         (let ([o (make-object c)])
+                                           (send o internalize args)
+                                           o))
+                                       (lambda (args)
+                                         (let ([o (object-make)])
+                                           ((class-fixup c) o args)
+                                           o)))
+                                   (if (interface-extension? i externalizable<%>)
+                                       (lambda ()
+                                         (obj-error 'deserialize 
+                                                    "cannot deserialize instance with cycles"
+                                                    #:class-name name))
+                                       (lambda ()
+                                         (let ([o (object-make)])
+                                           (values o
+                                                   (lambda (o2)
+                                                     ((class-fixup c) o o2))))))))
+                          c+ctc))))))))))))
 
 ;; (listof interface?) -> (listof symbol?)
 ;; traverse the interfaces and figure out contracted methods
@@ -2740,871 +2895,20 @@ An example
                       (make-struct-type 'props struct-type 0 0 #f props #f)])
           struct:))))
 
-(define-values (prop:object object? object-ref) (make-struct-type-property 'object 'can-impersonate))
-
-;;--------------------------------------------------------------------
-;;  class/c
-;;--------------------------------------------------------------------
-
-;; Shorthand contracts that treat the implicit object argument as if it were
-;; contracted with any/c.
-(define-syntax-rule (->m . stx)
-  (syntax-parameterize ([making-a-method #t] [method-contract? #t]) (-> . stx)))
-
-(define-syntax-rule (->*m . stx)
-  (syntax-parameterize ([making-a-method #t] [method-contract? #t]) (->* . stx)))
-
-(define-syntax-rule (case->m . stx)
-  (syntax-parameterize ([making-a-method #t] [method-contract? #t]) (case-> . stx)))
-
-(define-syntax-rule (->dm . stx)
-  (syntax-parameterize ([making-a-method #'this-param] [method-contract? #t]) (->d . stx)))
-
-(define (class/c-check-first-order ctc cls fail)
-  (unless (class? cls)
-    (fail "not a class"))
-  (let ([method-ht (class-method-ht cls)]
-        [beta-methods (class-beta-methods cls)]
-        [meth-flags (class-meth-flags cls)]) 
-    (for ([m (class/c-methods ctc)])
-      (unless (hash-ref method-ht m #f)
-        (fail "no public method ~a" m)))
-    (unless (class/c-opaque? ctc)
-      (for ([m (class/c-absents ctc)])
-        (when (hash-ref method-ht m #f)
-          (fail "class already contains public method ~a" m))))
-    (when (class/c-opaque? ctc)
-      (for ([m (in-hash-keys method-ht)])
-        (unless (memq m (class/c-methods ctc))
-          (if (not (symbol-interned? m))
-              (fail "some local member not specified in contract")
-              (fail "method ~a not specified in contract" m)))))
-    (for ([m (class/c-inherits ctc)])
-      (unless (hash-ref method-ht m #f)
-        (fail "no public method ~a" m)))
-    (for ([m (class/c-overrides ctc)])
-      (let ([index (hash-ref method-ht m #f)])
-        (unless index
-          (fail "no public method ~a" m))
-        (let ([vec (vector-ref beta-methods index)])
-          (unless (zero? (vector-length vec))
-            (fail "method ~a was previously augmentable" m)))
-        (let ([flag (vector-ref meth-flags index)])
-          (when (eq? flag 'final)
-            (fail "method ~a is final" m)))))
-    (for ([m (class/c-augments ctc)])
-      (let ([index (hash-ref method-ht m #f)])
-        (unless index
-          (fail "no public method ~a" m))
-        (let* ([vec (vector-ref beta-methods index)])
-          (when (zero? (vector-length vec))
-            (fail "method ~a has never been augmentable" m))
-          (when (vector-ref vec (sub1 (vector-length vec)))
-            (fail "method ~a is currently overrideable, not augmentable" m)))))
-    (for ([m (class/c-augrides ctc)])
-      (let ([index (hash-ref method-ht m #f)])
-        (unless index
-          (fail "no public method ~a" m))
-        (let ([vec (vector-ref beta-methods index)])
-          (when (zero? (vector-length vec))
-            (fail "method ~a has never been augmentable" m))
-          (unless (vector-ref vec (sub1 (vector-length vec)))
-            (fail "method ~a is currently augmentable, not overrideable" m)))))
-    (for ([s (class/c-supers ctc)])
-      (let ([index (hash-ref method-ht s #f)])
-        (unless index
-          (fail "no public method ~a" s))
-        (let ([flag (vector-ref meth-flags index)])
-          (when (eq? flag 'final)
-            (fail "method ~a is final" s))
-          (when (eq? flag 'augmentable)
-            (fail "method ~a is augmentable, not overrideable" s)))))
-    (for ([i (class/c-inners ctc)])
-      (let ([index (hash-ref method-ht i #f)])
-        (unless index
-          (fail "no public method ~a" i))
-        (let ([vec (vector-ref beta-methods index)])
-          (when (zero? (vector-length vec))
-            (fail "method ~a has never been augmentable" i)))
-        (let ([flag (vector-ref meth-flags index)])
-          (when (eq? flag 'final)
-            (fail "method ~a is final" i)))))
-    (let ([field-ht (class-field-ht cls)])
-      (for ([f (class/c-fields ctc)])
-        (unless (hash-ref field-ht f #f)
-          (fail "no public field ~a" f)))
-      (unless (class/c-opaque? ctc)
-        (for ([f (class/c-absent-fields ctc)])
-          (when (hash-ref field-ht f #f)
-            (fail "class already contains public field ~a" f))))
-      (when (class/c-opaque? ctc)
-        (for ([f (in-hash-keys field-ht)])
-          (unless (memq f (class/c-fields ctc))
-            (if (not (symbol-interned? f))
-                (fail "some local member not specified in contract")
-                (fail "field ~a not specified in contract" f)))))
-      (for ([f (class/c-inherit-fields ctc)])
-        (unless (hash-ref field-ht f #f)
-          (fail "no public field ~a" f)))))
-  #t)
-
-(define (class/c-proj ctc)
-  (define ctc-methods (class/c-methods ctc))
-  (define dynamic-features
-    (append (class/c-overrides ctc)
-            (class/c-augments ctc)
-            (class/c-augrides ctc)
-            (class/c-inherits ctc)))
-  (define dynamic-contracts
-    (append (class/c-override-contracts ctc)
-            (class/c-augment-contracts ctc)
-            (class/c-augride-contracts ctc)
-            (class/c-inherit-contracts ctc)))
-  (λ (blame)
-    (define bswap (blame-swap blame))
-    (define public-method-projections
-      (for/list ([name (in-list ctc-methods)]
-                 [c (in-list (class/c-method-contracts ctc))])
-        (and c
-             ((contract-projection c) (blame-add-method-context blame name)))))
-    (define super-projections
-      (for/list ([name (in-list (class/c-supers ctc))]
-                 [c (in-list (class/c-super-contracts ctc))])
-        (and c
-             ((contract-projection c) (blame-add-method-context blame name)))))
-    (define inner-projections
-      (for/list ([name (in-list (class/c-inners ctc))]
-                 [c (in-list (class/c-inner-contracts ctc))])
-        (and c
-             ((contract-projection c) (blame-add-method-context bswap name)))))
-    
-    (define internal-field-projections
-      (for/list ([f (in-list (class/c-fields ctc))]
-                 [c (in-list (class/c-field-contracts ctc))])
-        (and c
-             (let ([p-pos ((contract-projection c) (blame-add-context blame (format "the ~a field in" f)))]
-                   [p-neg ((contract-projection c) (blame-add-context bswap (format "the ~a field in" f)))])
-               (cons p-pos p-neg)))))
-    (define external-field-projections
-      (for/list ([f (in-list (class/c-inherit-fields ctc))]
-                 [c (in-list (class/c-inherit-field-contracts ctc))])
-        (and c
-             (let ([p-pos ((contract-projection c) blame)]
-                   [p-neg ((contract-projection c) bswap)])
-               (cons p-pos p-neg)))))
-    
-    (define override-projections
-      (for/list ([m (in-list (class/c-overrides ctc))]
-                 [c (in-list (class/c-override-contracts ctc))])
-        (and c
-             ((contract-projection c) (blame-add-method-context bswap m)))))
-    
-    (define augment/augride-projections
-      (for/list ([m (in-list (append (class/c-augments ctc)
-                                     (class/c-augrides ctc)))]
-                 [c (in-list (append (class/c-augment-contracts ctc)
-                                     (class/c-augride-contracts ctc)))])
-        (and c
-             ((contract-projection c) (blame-add-method-context blame m)))))
-    
-    (define inherit-projections
-      (for/list ([m (in-list (class/c-inherits ctc))]
-                 [c (in-list (class/c-inherit-contracts ctc))])
-        (and c
-             ((contract-projection c) (blame-add-method-context blame m)))))
-    
-    ;; zip the inits and contracts together for ordered selection
-    (define inits+contracts 
-      (for/list ([init (in-list (class/c-inits ctc))]
-                 [ctc (in-list (class/c-init-contracts ctc))])
-        (list init ((contract-projection ctc) bswap))))
-    
-    (λ (cls)
-      (class/c-check-first-order ctc cls (λ args (apply raise-blame-error blame cls args)))
-      (let* ([name (class-name cls)]
-             [never-wrapped? (eq? (class-orig-cls cls) cls)]
-             ;; Only add a new slot if we're not projecting an already contracted class.
-             [supers (if never-wrapped?
-                         (list->vector (append (vector->list (class-supers cls))
-                                               (list #f)))                           
-                         (list->vector (vector->list (class-supers cls))))]
-             [pos (if never-wrapped?
-                      (add1 (class-pos cls))
-                      (class-pos cls))]
-             [method-width (class-method-width cls)]
-             [method-ht (class-method-ht cls)]
-             [method-ictcs (class-method-ictcs cls)]
-             [methods (if (null? ctc-methods)
-                          (class-methods cls)
-                          (make-vector method-width))]
-             [super-methods (if (null? (class/c-supers ctc))
-                                (class-super-methods cls)
-                                (make-vector method-width))]
-             [int-methods (if (null? dynamic-features)
-                              (class-int-methods cls)
-                              (make-vector method-width))]
-             [inner-projs (if (null? (class/c-inners ctc))
-                              (class-inner-projs cls)
-                              (make-vector method-width))]
-             [dynamic-idxs (if (null? dynamic-features)
-                               (class-dynamic-idxs cls)
-                               (make-vector method-width))]
-             [dynamic-projs (if (null? dynamic-features)
-                                (class-dynamic-projs cls)
-                                (make-vector method-width))]
-             [field-pub-width (class-field-pub-width cls)]
-             [no-field-ctcs? (and (null? (class/c-fields ctc))
-                                  (null? (class/c-inherit-fields ctc)))]
-             [field-ht (if no-field-ctcs?
-                           (class-field-ht cls)
-                           (hash-copy (class-field-ht cls)))]
-             [init (class-init cls)]
-             [class-make (if name
-                             (make-naming-constructor struct:class name "class")
-                             make-class)]
-             [c (class-make name
-                            pos
-                            supers
-                            (class-self-interface cls)
-                            void ;; No inspecting
-                            
-                            method-width
-                            method-ht
-                            (class-method-ids cls)
-                            (class-abstract-ids cls)
-                            (remq* ctc-methods method-ictcs)
-                            
-                            #f
-                            
-                            methods
-                            super-methods
-                            int-methods
-                            (class-beta-methods cls)
-                            (class-meth-flags cls)
-                            
-                            inner-projs
-                            dynamic-idxs
-                            dynamic-projs
-                            
-                            (class-field-width cls)
-                            field-pub-width
-                            field-ht
-                            (class-field-ids cls)
-                            
-                            'struct:object 'object? 'make-object
-                            'field-ref 'field-set!
-                            
-                            ;; class/c introduced subclasses do not consume init args
-                            null
-                            'normal
-                            #f
-                            
-                            (class-orig-cls cls)
-                            #f #f ; serializer is never set
-                            #f)]
-             [obj-name (if name
-                           (string->symbol (format "object:~a" name))
-                           'object)])
-        (define (make-method proc meth-name)
-          (procedure-rename
-           (procedure->method proc)
-           (string->symbol
-            (format "~a method~a~a"
-                    meth-name
-                    (if name " in " "")
-                    (or name "")))))
-        
-        (vector-set! supers pos c)
-        
-        ;; --- Make the new object struct ---
-        (let-values ([(struct:object object-make object? object-field-ref object-field-set!)
-                      (make-struct-type obj-name
-                                        (class-struct:object cls)
-                                        0 ;; No init fields
-                                        0 ;; No new fields in this class replacement
-                                        undefined
-                                        ;; Map object property to class:
-                                        (list (cons prop:object c)))])
-          (set-class-struct:object! c struct:object)
-          (set-class-object?! c object?)
-          (set-class-make-object! c object-make)
-          (set-class-field-ref! c object-field-ref)
-          (set-class-field-set!! c object-field-set!))
-        
-        ;; Handle public method contracts
-        (unless (null? ctc-methods)
-          ;; First, fill in from old methods
-          (vector-copy! methods 0 (class-methods cls))
-          ;; Concretize any interface contracts handled by this ctc
-          (unless (null? (class-method-ictcs cls))
-            (for ([m (in-list (class-method-ictcs cls))])
-              ;; only concretize if class/c takes responsibility for it
-              (when (memq m ctc-methods)
-                (define i (hash-ref method-ht m))
-                (define entry (vector-ref methods i))
-                ;; we're passing through a contract boundary, so the positive blame (aka
-                ;; value server) is taking responsibility for any interface-contracted
-                ;; methods)
-                (define info (replace-ictc-blame (cadr entry) #f (blame-positive blame)))
-                (vector-set! methods i (concretize-ictc-method m (car entry) info)))))
-          ;; Now apply projections
-          (for ([m (in-list ctc-methods)]
-                [p (in-list public-method-projections)])
-            (when p
-              (define i (hash-ref method-ht m))
-              (define mp (vector-ref methods i))
-              (vector-set! methods i (make-method (p mp) m)))))
-        
-        ;; Handle super contracts
-        (unless (null? (class/c-supers ctc))
-          ;; First, fill in from old (possibly contracted) super methods
-          (vector-copy! super-methods 0 (class-super-methods cls))
-          ;; Now apply projections.
-          (for ([m (in-list (class/c-supers ctc))]
-                [p (in-list super-projections)])
-            (when p
-              (define i (hash-ref method-ht m))
-              (define mp (vector-ref super-methods i))
-              (vector-set! super-methods i (make-method (p mp) m)))))
-        
-        ;; Add inner projections
-        (unless (null? (class/c-inners ctc))
-          (vector-copy! inner-projs 0 (class-inner-projs cls))
-          (for ([m (in-list (class/c-inners ctc))]
-                [p (in-list inner-projections)])
-            (when p
-              (define i (hash-ref method-ht m))
-              (define old-proj (vector-ref inner-projs i))
-              (vector-set! inner-projs i (λ (v) (old-proj (p v)))))))
-        
-        ;; Handle both internal and external field contracts
-        (unless no-field-ctcs?
-          (for ([f (in-list (class/c-fields ctc))]
-                [p-pr (in-list internal-field-projections)])
-            (when p-pr
-              (define fi (hash-ref field-ht f))
-              (define p-pos (car p-pr))
-              (define p-neg (cdr p-pr))
-              (hash-set! field-ht f (field-info-extend-external fi p-pos p-neg))))
-          (for ([f (in-list (class/c-inherit-fields ctc))]
-                [p-pr (in-list external-field-projections)])
-            (when p-pr
-              (define fi (hash-ref field-ht f))
-              (define p-pos (car p-pr))
-              (define p-neg (cdr p-pr))
-              (hash-set! field-ht f (field-info-extend-internal fi p-pos p-neg)))))
-        
-        ;; Now the trickiest of them all, internal dynamic dispatch.
-        ;; First we update any dynamic indexes, as applicable.
-        (let ([old-idxs (class-dynamic-idxs (class-orig-cls cls))])
-          (unless (null? dynamic-features)
-            ;; Go ahead and do all the copies here.
-            (vector-copy! dynamic-projs 0 (class-dynamic-projs cls))
-            (vector-copy! int-methods 0 (class-int-methods cls))
-            (vector-copy! dynamic-idxs 0 (class-dynamic-idxs cls))
-            (for ([m (in-list dynamic-features)]
-                  [c (in-list dynamic-contracts)])
-              (when c
-                (let* ([i (hash-ref method-ht m)]
-                       [old-idx (vector-ref old-idxs i)]
-                       [new-idx (vector-ref dynamic-idxs i)])
-                  ;; We need to extend all the vectors, so let's do that here.
-                  (when (= old-idx new-idx)
-                    (let* ([new-idx (add1 old-idx)]
-                           [new-proj-vec (make-vector (add1 new-idx))]
-                           [old-proj-vec (vector-ref dynamic-projs i)]
-                           [new-int-vec (make-vector (add1 new-idx))]
-                           [old-int-vec (vector-ref int-methods i)])
-                      (vector-set! dynamic-idxs i new-idx)
-                      (vector-copy! new-proj-vec 0 old-proj-vec)
-                      (vector-set! new-proj-vec new-idx identity)
-                      (vector-set! dynamic-projs i new-proj-vec)
-                      (vector-copy! new-int-vec 0 old-int-vec)
-                      ;; Just copy over the last entry here.  We'll
-                      ;; update it appropriately later.
-                      (vector-set! new-int-vec new-idx
-                                   (vector-ref old-int-vec old-idx))
-                      (vector-set! int-methods i new-int-vec)))))))
-          
-          ;; Now we handle updating override contracts... here we just
-          ;; update the projections, and not the methods (which we must
-          ;; do during class composition).
-          (unless (null? (class/c-overrides ctc))
-            (for ([m (in-list (class/c-overrides ctc))]
-                  [p (in-list override-projections)])
-              (when p
-                (let* ([i (hash-ref method-ht m)]
-                       [old-idx (vector-ref old-idxs i)]
-                       [proj-vec (vector-ref dynamic-projs i)]
-                       [old-proj (vector-ref proj-vec old-idx)])
-                  (vector-set! proj-vec old-idx (λ (v) (old-proj (p v))))))))
-          
-          ;; For augment and augride contracts, we both update the projection
-          ;; and go ahead and apply the projection to the last slot (which will
-          ;; only be used by later classes).
-          (unless (and (null? (class/c-augments ctc))
-                       (null? (class/c-augrides ctc)))
-            (for ([m (in-list (append (class/c-augments ctc)
-                                      (class/c-augrides ctc)))]
-                  [p (in-list augment/augride-projections)])
-              (when p
-                (let* ([i (hash-ref method-ht m)]
-                       [old-idx (vector-ref old-idxs i)]
-                       [new-idx (vector-ref dynamic-idxs i)]
-                       [proj-vec (vector-ref dynamic-projs i)]
-                       [int-vec (vector-ref int-methods i)]
-                       [old-proj (vector-ref proj-vec old-idx)])
-                  (vector-set! proj-vec old-idx (λ (v) (p (old-proj v))))
-                  (vector-set! int-vec new-idx
-                               (make-method (p (vector-ref int-vec new-idx)) m))))))
-          
-          ;; Now (that things have been extended appropriately) we handle
-          ;; inherits.
-          (unless (null? (class/c-inherits ctc))
-            (for ([m (in-list (class/c-inherits ctc))]
-                  [p (in-list inherit-projections)])
-              (when p
-                (let* ([i (hash-ref method-ht m)]
-                       [new-idx (vector-ref dynamic-idxs i)]
-                       [int-vec (vector-ref int-methods i)])
-                  (vector-set! int-vec new-idx
-                               (make-method (p (vector-ref int-vec new-idx)) m)))))))
-        
-        ;; Unlike the others, we always want to do this, even if there are no init contracts,
-        ;; since we still need to handle either calling the previous class/c's init or
-        ;; calling continue-make-super appropriately.
-        (let ()
-          ;; grab all the inits+contracts that involve the same init arg
-          ;; (assumes that inits and contracts were sorted in class/c creation)
-          (define (grab-same-inits lst)
-            (if (null? lst)
-                (values null null)
-                (let loop ([inits/c (cdr lst)]
-                           [prefix (list (car lst))])
-                  (cond
-                    [(null? inits/c) 
-                     (values (reverse prefix) inits/c)]
-                    [(eq? (list-ref (car inits/c) 0) (list-ref (car prefix) 0))
-                     (loop (cdr inits/c)
-                           (cons (car inits/c) prefix))]
-                    [else (values (reverse prefix) inits/c)]))))
-          ;; run through the list of init-args and apply contracts for same-named
-          ;; init args
-          (define (apply-contracts inits/c init-args)
-            (let loop ([init-args init-args]
-                       [inits/c inits/c]
-                       [handled-args null])
-              (cond
-                [(null? init-args)
-                 (reverse handled-args)]
-                [(null? inits/c)
-                 (append (reverse handled-args) init-args)]
-                [(eq? (list-ref (car inits/c) 0) (car (car init-args)))
-                 (let ([init-arg (car init-args)]
-                       [p (list-ref (car inits/c) 1)])
-                   (loop (cdr init-args)
-                         (cdr inits/c)
-                         (cons (cons (car init-arg) (p (cdr init-arg)))
-                               handled-args)))]
-                [else (loop (cdr init-args)
-                            inits/c
-                            (cons (car init-args) handled-args))])))
-          (set-class-init! 
-           c
-           (lambda (the-obj super-go si_c si_inited? si_leftovers init-args)
-             (let ([init-args
-                    (let loop ([inits/c inits+contracts]
-                               [handled-args init-args])
-                      (if (null? inits/c)
-                          handled-args
-                          (let-values ([(prefix suffix) (grab-same-inits inits/c)])
-                            (loop suffix
-                                  (apply-contracts prefix init-args)))))])
-               ;; Since we never consume init args, we can ignore si_leftovers
-               ;; since init-args is the same.
-               (if never-wrapped?
-                   (super-go the-obj si_c si_inited? init-args null null)
-                   (init the-obj super-go si_c si_inited? init-args init-args))))))
-        
-        c))))
-
-(define (blame-add-method-context blame name)
+(define-values (prop:object _object? object-ref) 
+  (make-struct-type-property 'object 'can-impersonate))
+(define (object? o)
+  (or (_object? o)
+      (wrapped-object? o)))
+(define (object-ref/unwrap o)
   (cond
-    [(symbol? name)
-     (blame-add-context blame 
-                        (format "the ~a method in" name)
-                        #:important
-                        name)]
-    [(not name)
-     (blame-add-context blame "an unnamed method in")]
-    [else (error 'blame-add-method-context "uhoh ~s" name)]))
+    [(_object? o) (object-ref o)]
+    [(wrapped-object? o) (object-ref/unwrap (wrapped-object-object o))]
+    [else 
+     ;; error case
+     (object-ref o)]))
 
-(define-struct class/c 
-  (methods method-contracts fields field-contracts inits init-contracts
-   inherits inherit-contracts inherit-fields inherit-field-contracts
-   supers super-contracts inners inner-contracts
-   overrides override-contracts augments augment-contracts
-   augrides augride-contracts absents absent-fields opaque? name)
-  #:omit-define-syntaxes
-  #:property prop:contract
-  (build-contract-property
-   #:projection class/c-proj
-   #:name 
-   (λ (ctc)
-     (or (class/c-name ctc)
-         (let* ([pair-ids-ctcs
-                 (λ (is ctcs)
-                   (for/list ([i (in-list is)]
-                              [ctc (in-list ctcs)])
-                     (if (not ctc)
-                         i
-                         (build-compound-type-name i ctc))))]
-                [handle-optional
-                 (λ (name is ctcs)
-                   (if (null? is)
-                       null
-                       (list (cons name (pair-ids-ctcs is ctcs)))))]
-                [handle-absents
-                 (λ (meths fields)
-                   (cond
-                     [(and (null? meths) (null? fields))
-                      null]
-                     [(null? fields)
-                      (list (cons 'absent meths))]
-                     [else
-                      (list (list* 'absent (cons 'field fields) meths))]))]
-                [handled-methods
-                 (for/list ([i (in-list (class/c-methods ctc))]
-                            [ctc (in-list (class/c-method-contracts ctc))])
-                   (cond
-                     [ctc (build-compound-type-name i ctc)]
-                     [else i]))])
-           (apply build-compound-type-name
-                  'class/c 
-                  (append
-                   handled-methods
-                   (handle-optional 'init (class/c-inits ctc) (class/c-init-contracts ctc))
-                   (handle-optional 'field (class/c-fields ctc) (class/c-field-contracts ctc))
-                   (handle-optional 'inherit (class/c-inherits ctc) (class/c-inherit-contracts ctc))
-                   (handle-optional 'inherit-field (class/c-inherit-fields ctc) (class/c-inherit-field-contracts ctc))
-                   (handle-optional 'super (class/c-supers ctc) (class/c-super-contracts ctc))
-                   (handle-optional 'inner (class/c-inners ctc) (class/c-inner-contracts ctc))
-                   (handle-optional 'override (class/c-overrides ctc) (class/c-override-contracts ctc))
-                   (handle-optional 'augment (class/c-augments ctc) (class/c-augment-contracts ctc))
-                   (handle-optional 'augride (class/c-augrides ctc) (class/c-augride-contracts ctc))
-                   (handle-absents (class/c-absents ctc) (class/c-absent-fields ctc)))))))
-   #:first-order
-   (λ (ctc)
-     (λ (cls)
-       (let/ec ret
-         (class/c-check-first-order ctc cls (λ args (ret #f))))))))
 
-(define-for-syntax (parse-class/c-specs forms object/c?)
-  (define parsed-forms (make-hasheq))
-  (define form-name (if object/c? 'object/c 'class/c))
-  (define (parse-name-ctc stx)
-    (syntax-case stx ()
-      [x
-       (identifier? #'x)
-       (with-syntax ([id (localize #'x)])
-         (values #'`id #f))]
-      [(x ctc)
-       (identifier? #'x)
-       (with-syntax ([id (localize #'x)])
-         (values #'`id
-                 #`(coerce-contract '#,form-name (let ([x ctc]) x))))]
-      [_
-       (raise-syntax-error form-name "expected identifier or (id contract)" stx)]))
-  (define (parse-names-ctcs stx)
-    (for/fold ([names null]
-               [ctcs null])
-      ([stx (in-list (syntax->list stx))])
-      (let-values ([(name ctc) (parse-name-ctc stx)])
-        (values (cons name names) (cons ctc ctcs)))))
-  (define (parse-absents stx)
-    (for/fold ([meths null]
-               [fields null])
-      ([stx (in-list (syntax->list stx))])
-      (syntax-case stx (field)
-        [(field f-id ...)
-         (let ([symbols (for/list ([id (in-list (syntax->list #'(f-id ...)))])
-                          (unless (identifier? id)
-                            (raise-syntax-error 'class/c "expected identifier" stx))
-                          (with-syntax ([id (localize id)])
-                            #'`id))])
-           (values meths (append (reverse symbols) fields)))]
-        [id
-         (identifier? #'id)
-         (with-syntax ([id (localize #'id)])
-           (values (cons #'`id meths) fields))]
-        [_
-         (raise-syntax-error 'class/c "expected identifier or (field id ...)" stx)])))
-  (define (parse-spec stx)
-    (syntax-case stx (field inherit inherit-field init init-field super inner override augment augride absent)
-      [(field f-spec ...)
-       (let-values ([(names ctcs) (parse-names-ctcs #'(f-spec ...))])
-         (hash-set! parsed-forms 'fields
-                    (append names (hash-ref parsed-forms 'fields null)))
-         (hash-set! parsed-forms 'field-contracts
-                    (append ctcs (hash-ref parsed-forms 'field-contracts null))))]
-      [(init i-spec ...)
-       (let-values ([(names ctcs) (parse-names-ctcs #'(i-spec ...))])
-         (hash-set! parsed-forms 'inits
-                    (append names (hash-ref parsed-forms 'inits null)))
-         (hash-set! parsed-forms 'init-contracts
-                    (append ctcs (hash-ref parsed-forms 'init-contracts null))))]
-      [(init-field i-spec ...)
-       (let-values ([(names ctcs) (parse-names-ctcs #'(i-spec ...))])
-         (hash-set! parsed-forms 'inits
-                    (append names (hash-ref parsed-forms 'inits null)))
-         (hash-set! parsed-forms 'init-contracts
-                    (append ctcs (hash-ref parsed-forms 'init-contracts null)))
-         (hash-set! parsed-forms 'fields
-                    (append names (hash-ref parsed-forms 'fields null)))
-         (hash-set! parsed-forms 'field-contracts
-                    (append ctcs (hash-ref parsed-forms 'field-contracts null))))]
-      [(inherit m-spec ...)
-       (begin
-         (when object/c?
-           (raise-syntax-error 'object/c "inherit contract not allowed in object/c" stx))
-         (let-values ([(names ctcs) (parse-names-ctcs #'(m-spec ...))])
-           (hash-set! parsed-forms 'inherits
-                      (append names (hash-ref parsed-forms 'inherits null)))
-           (hash-set! parsed-forms 'inherit-contracts
-                      (append ctcs (hash-ref parsed-forms 'inherit-contracts null)))))]
-      [(inherit-field f-spec ...)
-       (begin
-         (when object/c?
-           (raise-syntax-error 'object/c "inherit-field contract not allowed in object/c" stx))
-         (let-values ([(names ctcs) (parse-names-ctcs #'(f-spec ...))])
-           (hash-set! parsed-forms 'inherit-fields
-                      (append names (hash-ref parsed-forms 'inherit-fields null)))
-           (hash-set! parsed-forms 'inherit-field-contracts
-                      (append ctcs (hash-ref parsed-forms 'inherit-field-contracts null)))))]
-      [(super s-spec ...)
-       (begin
-         (when object/c?
-           (raise-syntax-error 'object/c "super contract not allowed in object/c" stx))
-         (let-values ([(names ctcs) (parse-names-ctcs #'(s-spec ...))])
-           (hash-set! parsed-forms 'supers
-                      (append names (hash-ref parsed-forms 'supers null)))
-           (hash-set! parsed-forms 'super-contracts
-                      (append ctcs (hash-ref parsed-forms 'super-contracts null)))))]
-      [(inner i-spec ...)
-       (begin
-         (when object/c?
-           (raise-syntax-error 'object/c "inner contract not allowed in object/c" stx))
-         (let-values ([(names ctcs) (parse-names-ctcs #'(i-spec ...))])
-           (hash-set! parsed-forms 'inners
-                      (append names (hash-ref parsed-forms 'inners null)))
-           (hash-set! parsed-forms 'inner-contracts
-                      (append ctcs (hash-ref parsed-forms 'inner-contracts null)))))]
-      [(override o-spec ...)
-       (begin
-         (when object/c?
-           (raise-syntax-error 'object/c "override contract not allowed in object/c" stx))
-         (let-values ([(names ctcs) (parse-names-ctcs #'(o-spec ...))])
-           (hash-set! parsed-forms 'overrides
-                      (append names (hash-ref parsed-forms 'overrides null)))
-           (hash-set! parsed-forms 'override-contracts
-                      (append ctcs (hash-ref parsed-forms 'override-contracts null)))))]
-      [(augment a-spec ...)
-       (begin
-         (when object/c?
-           (raise-syntax-error 'object/c "augment contract not allowed in object/c" stx))
-         (let-values ([(names ctcs) (parse-names-ctcs #'(a-spec ...))])
-           (hash-set! parsed-forms 'augments
-                      (append names (hash-ref parsed-forms 'augments null)))
-           (hash-set! parsed-forms 'augment-contracts
-                      (append ctcs (hash-ref parsed-forms 'augment-contracts null)))))]
-      [(augride a-spec ...)
-       (begin
-         (when object/c?
-           (raise-syntax-error 'object/c "augride contract not allowed in object/c" stx))
-         (let-values ([(names ctcs) (parse-names-ctcs #'(a-spec ...))])
-           (hash-set! parsed-forms 'augrides
-                      (append names (hash-ref parsed-forms 'augrides null)))
-           (hash-set! parsed-forms 'augride-contracts
-                      (append ctcs (hash-ref parsed-forms 'augride-contracts null)))))]
-      [(absent a-spec ...)
-       (begin
-         (when object/c?
-           (raise-syntax-error 'object/c "absent specification not allowed in object/c" stx))
-         (let-values ([(meths fields) (parse-absents #'(a-spec ...))])
-           (hash-set! parsed-forms 'absents
-                      (append meths (hash-ref parsed-forms 'absents null)))
-           (hash-set! parsed-forms 'absent-fields
-                      (append fields (hash-ref parsed-forms 'absent-fields null)))))]
-      [m-spec
-       (let-values ([(name ctc1) (parse-name-ctc #'m-spec)])
-         (hash-set! parsed-forms 'methods
-                    (cons name (hash-ref parsed-forms 'methods null)))
-         (hash-set! parsed-forms 'method-contracts
-                    (cons ctc1 (hash-ref parsed-forms 'method-contracts null))))]
-      [else
-       (raise-syntax-error form-name "expected class/c subform" stx)]))
-  (for ([form (in-list forms)])
-    (parse-spec form))
-  parsed-forms)
-
-;; check keyword and pass off to -class/c
-(define-syntax (class/c stx)
-
-  (define-splicing-syntax-class opaque-keyword
-    (pattern (~seq #:opaque) #:with opaque? #'#t)
-    (pattern (~seq) #:with opaque? #'#f))
-
-  (syntax-parse stx
-    [(_ kwd:opaque-keyword form ...)
-     (syntax/loc stx (-class/c kwd.opaque? form ...))]))
-
-(define-syntax (-class/c stx)
-  (syntax-case stx ()
-    [(_ opaque? form ...)
-     (let ([parsed-forms (parse-class/c-specs (syntax->list #'(form ...)) #f)])
-       (with-syntax ([methods #`(list #,@(reverse (hash-ref parsed-forms 'methods null)))]
-                     [method-ctcs #`(list #,@(reverse (hash-ref parsed-forms 'method-contracts null)))]
-                     [fields #`(list #,@(reverse (hash-ref parsed-forms 'fields null)))]
-                     [field-ctcs #`(list #,@(reverse (hash-ref parsed-forms 'field-contracts null)))]
-                     [(i ...) (reverse (hash-ref parsed-forms 'inits null))]
-                     [(i-c ...) (reverse (hash-ref parsed-forms 'init-contracts null))]
-                     [inherits #`(list #,@(reverse (hash-ref parsed-forms 'inherits null)))]
-                     [inherit-ctcs #`(list #,@(reverse (hash-ref parsed-forms 'inherit-contracts null)))]
-                     [inherit-fields #`(list #,@(reverse (hash-ref parsed-forms 'inherit-fields null)))]
-                     [inherit-field-ctcs #`(list #,@(reverse (hash-ref parsed-forms 'inherit-field-contracts null)))]
-                     [supers #`(list #,@(reverse (hash-ref parsed-forms 'supers null)))]
-                     [super-ctcs #`(list #,@(reverse (hash-ref parsed-forms 'super-contracts null)))]
-                     [inners #`(list #,@(reverse (hash-ref parsed-forms 'inners null)))]
-                     [inner-ctcs #`(list #,@(reverse (hash-ref parsed-forms 'inner-contracts null)))]
-                     [overrides #`(list #,@(reverse (hash-ref parsed-forms 'overrides null)))]
-                     [override-ctcs #`(list #,@(reverse (hash-ref parsed-forms 'override-contracts null)))]
-                     [augments #`(list #,@(reverse (hash-ref parsed-forms 'augments null)))]
-                     [augment-ctcs #`(list #,@(reverse (hash-ref parsed-forms 'augment-contracts null)))]
-                     [augrides #`(list #,@(reverse (hash-ref parsed-forms 'augrides null)))]
-                     [augride-ctcs #`(list #,@(reverse (hash-ref parsed-forms 'augride-contracts null)))]
-                     [absents #`(list #,@(reverse (hash-ref parsed-forms 'absents null)))]
-                     [absent-fields #`(list #,@(reverse (hash-ref parsed-forms 'absent-fields null)))])
-         (with-syntax ([name 
-                        ;; same as syntax-local-infer-name, except doesn't
-                        ;; make a name up from the src loc; in that case,
-                        ;; we just use the big ole (class/c  ...)-based name
-                        (or (let loop ([prop (syntax-property stx 'inferred-name)])
-                              (cond
-                                [(symbol? prop) prop]
-                                [(pair? prop) (or (loop (car prop))
-                                                  (loop (cdr prop)))]
-                                [else #f]))
-                            (syntax-local-name))])
-           (syntax/loc stx
-             (let* ([inits+contracts (sort (list (cons i i-c) ...)
-                                           (lambda (s1 s2) 
-                                             (string<? (symbol->string s1) (symbol->string s2)))
-                                           #:key car)])
-               (make-class/c methods method-ctcs
-                             fields field-ctcs
-                             (map car inits+contracts) (map cdr inits+contracts)
-                             inherits inherit-ctcs
-                             inherit-fields inherit-field-ctcs
-                             supers super-ctcs
-                             inners inner-ctcs
-                             overrides override-ctcs
-                             augments augment-ctcs
-                             augrides augride-ctcs
-                             absents absent-fields
-                             opaque?
-                             'name))))))]))
-
-(define (check-object-contract obj methods fields fail)
-  (unless (object? obj)
-    (fail "not a object"))
-  (let ([cls (object-ref obj)])
-    (let ([method-ht (class-method-ht cls)])
-      (for ([m methods])
-        (unless (hash-ref method-ht m #f)
-          (fail "no public method ~a" m))))
-    (let ([field-ht (class-field-ht cls)])
-      (for ([m fields])
-        (unless (hash-ref field-ht m #f)
-          (fail "no public field ~a" m)))))
-  #t)
-
-(define (object/c-proj ctc)
-  (λ (blame)
-    (λ (obj)
-      (make-wrapper-object ctc obj blame 
-                           (base-object/c-methods ctc) (base-object/c-method-contracts ctc)
-                           (base-object/c-fields ctc) (base-object/c-field-contracts ctc)))))
-
-(define (object/c-first-order ctc)
-  (λ (obj)
-    (let/ec ret
-      (check-object-contract obj (base-object/c-methods ctc) (base-object/c-fields ctc) (λ args (ret #f))))))
-
-(define-struct base-object/c (methods method-contracts fields field-contracts)
-  #:property prop:contract
-  (build-contract-property 
-   #:projection object/c-proj
-   #:name
-   (λ (ctc)
-     (let* ([pair-ids-ctcs
-             (λ (is ctcs)
-               (map (λ (i ctc)
-                      (build-compound-type-name i ctc))
-                    is ctcs))]
-            [handle-optional
-             (λ (name is ctcs)
-               (if (null? is)
-                   null
-                   (list (cons name (pair-ids-ctcs is ctcs)))))])
-       (apply build-compound-type-name
-              'object/c 
-              (append
-               (pair-ids-ctcs (base-object/c-methods ctc) (base-object/c-method-contracts ctc))
-               (handle-optional 'field (base-object/c-fields ctc) (base-object/c-field-contracts ctc))))))
-   #:first-order object/c-first-order))
-
-(define-syntax (object/c stx)
-  (syntax-case stx ()
-    [(_ form ...)
-     (let ([parsed-forms (parse-class/c-specs (syntax->list #'(form ...)) #t)])
-       (with-syntax ([methods #`(list #,@(reverse (hash-ref parsed-forms 'methods null)))]
-                     [method-ctcs #`(list #,@(reverse (hash-ref parsed-forms 'method-contracts null)))]
-                     [fields #`(list #,@(reverse (hash-ref parsed-forms 'fields null)))]
-                     [field-ctcs #`(list #,@(reverse (hash-ref parsed-forms 'field-contracts null)))])
-         (syntax/loc stx
-           (make-base-object/c methods method-ctcs fields field-ctcs))))]))
-
-(define (instanceof/c-proj ctc)
-  (let ([proj (contract-projection (base-instanceof/c-class-ctc ctc))])
-    (λ (blame)
-      (let ([p (proj blame)])
-        (λ (val)
-          (unless (object? val)
-            (raise-blame-error blame val "expected an object, got ~v" val))
-          (let ([original-obj (if (has-original-object? val) (original-object val) val)]
-                [new-cls (p (object-ref val))])
-            (impersonate-struct val object-ref (λ (o c) new-cls)
-                                impersonator-prop:contracted ctc
-                                impersonator-prop:original-object original-obj)))))))
-
-(define (instanceof/c-first-order ctc)
-  (let ([cls-ctc (base-instanceof/c-class-ctc ctc)])
-    (λ (val)
-      (and (object? val)
-           (contract-first-order-passes? cls-ctc (object-ref val))))))
-
-(define-struct base-instanceof/c (class-ctc)
-  #:property prop:contract
-  (build-contract-property 
-   #:projection instanceof/c-proj
-   #:name
-   (λ (ctc)
-     (build-compound-type-name 'instanceof/c (base-instanceof/c-class-ctc ctc)))
-   #:first-order instanceof/c-first-order))
-
-(define (instanceof/c cctc)
-  (let ([ctc (coerce-contract 'instanceof/c cctc)])
-    (make-base-instanceof/c ctc)))
 
 ;;--------------------------------------------------------------------
 ;;  interfaces
@@ -3821,7 +3125,7 @@ An example
 
                  (vector) (vector) (vector)
                  
-                 0 0 (make-hasheq) null
+                 0 0 (make-hasheq) null null
                  
                  'struct:object object? 'make-object
                  'field-ref-not-needed 'field-set!-not-needed
@@ -3837,6 +3141,8 @@ An example
                  #f
                  (lambda (obj) #(()))        ; serialize
                  (lambda (obj args) (void))  ; deserialize-fixup
+
+                 #f   ; no chaperone to guard against unsafe-undefined
                  
                  #t)) ; no super-init
 
@@ -3985,6 +3291,7 @@ An example
                                field-pub-width
                                field-ht
                                (class-field-ids cls)
+                               (class-all-field-ids cls)
 
                                'struct:object 'object? 'make-object
                                'field-ref 'field-set!
@@ -3995,6 +3302,8 @@ An example
 
                                (class-orig-cls cls)
                                #f #f    ; serializer is never set
+
+                               (class-check-undef? cls)
                                #f)]
                 [obj-name (if name
                               (string->symbol (format "wrapper-object:~a" name))
@@ -4008,7 +3317,7 @@ An example
                                            (class-struct:object cls)
                                            0 ;; No init fields
                                            0 ;; No new fields in this class replacement
-                                           undefined
+                                           unsafe-undefined
                                            ;; Map object property to class:
                                            (list (cons prop:object c)))])
              (set-class-struct:object! c struct:object)
@@ -4049,8 +3358,28 @@ An example
     (contract ctc meth pos-blame neg-blame m #f)))
 
 (define (do-make-object blame class by-pos-args named-args)
-  (unless (class? class)
-    (raise-argument-error 'instantiate "class?" class))
+  (cond
+    [(impersonator-prop:has-wrapped-class-neg-party? class)
+     (define the-info (impersonator-prop:get-wrapped-class-info class))
+     (define neg-party (impersonator-prop:get-wrapped-class-neg-party class))
+     (define unwrapped-o 
+       (do-make-object/real-class blame class by-pos-args named-args
+                                  (wrapped-class-info-blame the-info)
+                                  neg-party
+                                  (wrapped-class-info-init-proj-pairs the-info)))
+     (wrapped-object
+      unwrapped-o
+      (wrapped-class-info-neg-extra-arg-vec the-info)
+      (wrapped-class-info-pos-field-projs the-info)
+      (wrapped-class-info-neg-field-projs the-info)
+      neg-party)]
+    [(class? class)
+     (do-make-object/real-class blame class by-pos-args named-args #f #f '())]
+    [else
+     (raise-argument-error 'instantiate "class?" class)]))
+
+(define (do-make-object/real-class blame class by-pos-args named-args 
+                                   wrapped-blame wrapped-neg-party init-proj-pairs)
   ;; make sure the class isn't abstract
   (unless (null? (class-abstract-ids class))
     (obj-error 'instantiate
@@ -4058,16 +3387,18 @@ An example
                "class" class
                "abstract methods" (as-write-list (class-abstract-ids class))))
   ;; Generate correct class by concretizing methods w/interface ctcs
-  (let* ([class (fetch-concrete-class class blame)]
-         [o ((class-make-object class))])
-    (continue-make-object o class by-pos-args named-args #t)
-    o))
+  (define concrete-class (fetch-concrete-class class blame))
+  (define o ((class-make-object concrete-class)))
+  (continue-make-object o concrete-class by-pos-args named-args #t 
+                        wrapped-blame wrapped-neg-party init-proj-pairs)
+  o)
 
 (define (get-field-alist obj)
   (map (lambda (id) (cons id (get-field/proc id obj)))
        (field-names obj)))
 
-(define (continue-make-object o c by-pos-args named-args explict-named-args?)
+(define (continue-make-object o c by-pos-args named-args explict-named-args? 
+                              wrapped-blame wrapped-neg-party init-proj-pairs)
   (let ([by-pos-only? (not (class-init-args c))])
     ;; When a superclass has #f for init-args (meaning "by-pos args with no names"),
     ;; some propagated named args may have #f keys; move them to by-position args.
@@ -4106,17 +3437,19 @@ An example
             (unused-args-error o (filter car leftovers))))
         (unless (and (eq? c object%)
                      (null? named-args))
-          (let ([inited? (box (class-no-super-init? c))])
-            ;; ----- Execute the class body -----
-            ((class-init c)
-             o 
-             continue-make-super
-             c inited? leftovers ; merely passed through to continue-make-super
-             named-args)
-            (unless (unbox inited?)
-              (obj-error 'instantiate 
-                         "superclass initialization not invoked by initialization"
-                         #:class-name (class-name c)))))))))
+          (let ([named-args (check-arg-contracts wrapped-blame wrapped-neg-party
+                                                 c init-proj-pairs named-args)])
+            (let ([inited? (box (class-no-super-init? c))])
+              ;; ----- Execute the class body -----
+              ((class-init c)
+               o 
+               continue-make-super
+               c inited? leftovers ; merely passed through to continue-make-super
+               named-args)
+              (unless (unbox inited?)
+                (obj-error 'instantiate 
+                           "superclass initialization not invoked by initialization"
+                           #:class-name (class-name c))))))))))
 
 (define (continue-make-super o c inited? leftovers by-pos-args new-named-args)
   (when (unbox inited?)
@@ -4135,7 +3468,8 @@ An example
                           (vector-ref (class-supers c) (sub1 (class-pos c))) 
                           by-pos-args 
                           named-args
-                          (pair? new-named-args))))
+                          (pair? new-named-args)
+                          #f #f '())))
 
 (define (do-merge al nl ic named-args by-pos-args c)
   (cond
@@ -4219,7 +3553,7 @@ An example
   (let ([arg-string (make-named-arg-string args)])
     (obj-error 'instantiate "unused initialization arguments" 
                "unused arguments" (as-lines arg-string)
-               #:class-name (class-name (object-ref this))
+               #:class-name (class-name (object-ref/unwrap this))
                #:which-class "instantiated ")))
 
 (define (missing-argument-error class-name name)
@@ -4238,20 +3572,40 @@ An example
     
     (define (do-method stx form obj name args rest-arg? kw-args)
       (with-syntax ([(sym method receiver)
-                     (generate-temporaries (syntax (1 2 3)))])
-        (quasisyntax/loc stx
+                     (generate-temporaries (syntax (1 2 3)))]
+                    [(kw-arg-tmp) (generate-temporaries '(kw-vals-x))])
+        (define kw-args/var (and kw-args
+                                 (list (car kw-args) #'kw-arg-tmp)))
+        (define arg-list '())
+        (define let-bindings '())
+        (for ([x (in-list (if (list? args)
+                              args
+                              (syntax->list args)))])
+          (cond
+            [(keyword? (syntax-e x))
+             (set! arg-list (cons x arg-list))]
+            [else
+             (define var (car (generate-temporaries '(send-arg))))
+             (set! arg-list (cons var arg-list))
+             (set! let-bindings (cons #`[#,var #,x] let-bindings))]))
+        (set! arg-list (reverse arg-list))
+        (set! let-bindings (reverse let-bindings))
+        
+        (syntax-property
+         (quasisyntax/loc stx
           (let*-values ([(sym) (quasiquote (unsyntax (localize name)))]
                         [(receiver) (unsyntax obj)]
                         [(method) (find-method/who '(unsyntax form) receiver sym)])
-            (unsyntax
-             (make-method-call
-              stx
-              (syntax/loc stx receiver)
-              (syntax/loc stx method)
-              (syntax/loc stx sym)
-              args
-              rest-arg?
-              kw-args))))))
+            (let (#,@(if kw-args
+                         (list #`[kw-arg-tmp #,(cadr kw-args)])
+                         (list))
+                  #,@let-bindings)
+              (unsyntax
+               (make-method-call-to-possibly-wrapped-object
+                stx kw-args/var arg-list rest-arg?
+                #'sym #'method #'receiver
+                (quasisyntax/loc stx (find-method/who '(unsyntax form) receiver sym)))))))
+         'feature-profile:send-dispatch #t)))
     
     (define (core-send apply? kws?)
       (lambda (stx)
@@ -4303,7 +3657,20 @@ An example
    (lambda (kws kw-vals obj method-name . args)
      (unless (object? obj) (raise-argument-error 'dynamic-send "object?" obj))
      (unless (symbol? method-name) (raise-argument-error 'dynamic-send "symbol?" method-name))
-     (keyword-apply (find-method/who 'dynamic-send obj method-name) kws kw-vals obj args))))
+     (define mtd (find-method/who 'dynamic-send obj method-name))
+     (cond
+       [(wrapped-object? obj)
+        (if mtd
+            (keyword-apply mtd kws kw-vals 
+                           (wrapped-object-neg-party obj) 
+                           (wrapped-object-object obj)
+                           args)
+            (keyword-apply dynamic-send kws kw-vals
+                           (wrapped-object-object obj)
+                           method-name
+                           args))]
+       [else
+        (keyword-apply mtd kws kw-vals obj args)]))))
 
 ;; imperative chained send
 (define-syntax (send* stx)
@@ -4339,44 +3706,100 @@ An example
 ;;                   symbol[method-name] 
 ;;               -> method-proc
 ;; returns the method's procedure
+
 (define (find-method/who who in-object name)
-  (let ([cls (object-ref in-object #f)])
-    (if cls
-        (let ([pos (hash-ref (class-method-ht cls) name #f)])
-          (if pos
-              (vector-ref (class-methods cls) pos)
-              (obj-error who 
-                         "no such method"
-                         "method name" (as-write name)
-                         #:class-name (class-name cls))))
-        (obj-error who "target is not an object"
-                   "target" in-object 
-                   "method name" (as-write name)))))
+  (cond
+    [(object-ref in-object #f) ; non-#f result implies `_object?`
+     => (lambda (cls)
+          (define mth-idx (hash-ref (class-method-ht cls) name #f))
+          (if mth-idx
+              (vector-ref (class-methods cls) mth-idx)
+              (no-such-method who name cls)))]
+    [(wrapped-object? in-object)
+     (define cls
+       (let loop ([obj in-object])
+         (cond
+           [(wrapped-object? obj) (loop (wrapped-object-object obj))]
+           [else 
+            (object-ref obj #f)])))
+     (define mth-idx (hash-ref (class-method-ht cls) name #f))
+     (unless mth-idx (no-such-method who name (object-ref in-object)))
+     (vector-ref (wrapped-object-neg-extra-arg-vec in-object) mth-idx)]
+    [else
+     (obj-error who "target is not an object"
+                "target" in-object 
+                "method name" (as-write name))]))
+
+(define (no-such-method who name cls)
+  (obj-error who 
+             "no such method"
+             "method name" (as-write name)
+             #:class-name (class-name cls)))
 
 (define-values (make-class-field-accessor make-class-field-mutator)
-  (let ([check-and-get-index
-         (λ (who class name)
-           (unless (class? class)
-             (raise-argument-error who "class?" class))
-           (unless (symbol? name)
-             (raise-argument-error who "symbol?" name))
-           (hash-ref (class-field-ht class) name
-                     (lambda ()
-                       (obj-error who "no such field"
-                                  "field-name" (as-write name)
-                                  #:class-name (class-name class)))))])
+  (let ()
+    (define (check-and-get-proc who class name get?)
+      (unless (class? class)
+        (raise-argument-error who "class?" class))
+      (unless (symbol? name)
+        (raise-argument-error who "symbol?" name))
+      (define field-info-external-X (if get? field-info-external-ref field-info-external-set!))
+      (define wrapped-class-info-X-field-projs
+        (if get? 
+            wrapped-class-info-pos-field-projs
+            wrapped-class-info-neg-field-projs))
+      (define (get-accessor)
+        (field-info-external-X
+         (hash-ref (class-field-ht class) name
+                   (lambda ()
+                     (obj-error who "no such field"
+                                "field-name" (as-write name)
+                                #:class-name (class-name class))))))
+      (cond
+        [(impersonator-prop:has-wrapped-class-neg-party? class)
+         (define the-info (impersonator-prop:get-wrapped-class-info class))
+         (define projs (hash-ref (wrapped-class-info-X-field-projs the-info) name #f))
+         (define np (impersonator-prop:get-wrapped-class-neg-party class))
+         (cond
+           [projs 
+            (if get?
+                (let loop ([projs projs])
+                  (cond
+                    [(pair? projs)
+                     (define f-rest (loop (cdr projs)))
+                     (define f-this (car projs))
+                     (λ (val) ((f-this (f-rest val)) np))]
+                    [else projs]))
+                (let loop ([projs projs])
+                  (cond
+                    [(pair? projs)
+                     (define f-rest (loop (cdr projs)))
+                     (define f-this (car projs))
+                     (λ (o val) ((f-this (f-rest o val)) np))]
+                    [else projs])))]
+           [else (get-accessor)])]
+        [else
+         (get-accessor)]))
     (values (λ (class name)
-              (let* ([fi (check-and-get-index 'class-field-accessor class name)]
-                     [ref (field-info-external-ref fi)])
-                (λ (o) (if (object? o)
-                           (ref o)
-                           (raise-argument-error 'class-field-accessor "object?" o)))))
+              (define ref (check-and-get-proc 'class-field-accessor class name #t))
+              (λ (o)
+                (cond
+                  [(_object? o)
+                   (ref o)]
+                  [(wrapped-object? o)
+                   (ref (wrapped-object-object o))]
+                  [else
+                   (raise-argument-error 'class-field-accessor "object?" o)])))
             (λ (class name)
-              (let* ([fi (check-and-get-index 'class-field-mutator class name)]
-                     [setter! (field-info-external-set! fi)])
-                (λ (o v) (if (object? o)
-                             (setter! o v)
-                             (raise-argument-error 'class-field-mutator "object?" o))))))))
+              (define setter! (check-and-get-proc 'class-field-mutator class name #f))
+              (λ (o v) 
+                (cond
+                  [(_object? o)
+                   (setter! o v)]
+                  [(wrapped-object? o)
+                   (setter! (unwrap-object o) v)]
+                  [else
+                   (raise-argument-error 'class-field-mutator "object?" o)]))))))
 
 (define-struct generic (name applicable))
 
@@ -4412,20 +3835,24 @@ An example
                                                    "method name" (as-write name)
                                                    #:class-name (class-name class))))]
                        [instance? (class-object? (class-orig-cls class))]
+                       [fail (λ (obj)
+                               (obj-error 
+                                (string->symbol (format "generic:~a" name))
+                                "target is not an instance of the generic's class"
+                                "target" obj
+                                #:class-name (class-name class)))]
                        [dynamic-generic
                         (lambda (obj)
-                          (unless (instance? obj)
-                            (obj-error 
-                             (string->symbol (format "generic:~a" name))
-                             "target is not an instance of the generic's class"
-                             "target" obj
-                             #:class-name (class-name class)))
-                          (vector-ref (class-methods (object-ref obj)) pos))])
+                          (cond
+                            [(wrapped-object? obj)
+                             (vector-ref (wrapped-object-neg-extra-arg-vec obj) pos)]
+                            [(instance? obj)
+                             (vector-ref (class-methods (object-ref obj)) pos)]
+                            [else (fail obj)]))])
                   (if (eq? 'final (vector-ref (class-meth-flags class) pos))
                       (let ([method (vector-ref (class-methods class) pos)])
                         (lambda (obj)
-                          (unless (instance? obj)
-                            (dynamic-generic obj))
+                          (unless (instance? obj) (fail obj))
                           method))
                       dynamic-generic)))))])
     make-generic))
@@ -4441,15 +3868,18 @@ An example
          (quasisyntax/loc stx
            (let* ([obj object]
                   [gen generic])
+             ;(check-generic gen)
              (unsyntax
-              (make-method-call
-               stx
-               (syntax obj)
-               (syntax/loc stx ((generic-applicable gen) obj))
-               (syntax/loc stx (generic-name gen))
-               flat-stx
-               (not proper?)
-               #f))))))]))
+              (make-method-call-to-possibly-wrapped-object
+               stx #f flat-stx (not proper?)
+               #'(generic-name gen) 
+               #'((generic-applicable gen) obj) 
+               #'obj
+               #'((generic-applicable gen) obj)))))))]))
+
+(define (check-generic gen)
+  (unless (generic? gen)
+    (raise-argument-error 'send-generic "generic?" gen)))
 
 (define-syntaxes (class-field-accessor class-field-mutator generic/form)
   (let ([mk
@@ -4493,22 +3923,43 @@ An example
   (do-set-field! 'set-field! id obj val))
 
 (define (do-set-field! who id obj val)
-  (unless (object? obj)
-    (raise-argument-error 'set-field!
-                          "object?"
-                          obj))
-  (let* ([cls (object-ref obj)]
-          [field-ht (class-field-ht cls)]
-          [fi (hash-ref field-ht id #f)])
-     (if fi
-         ((field-info-external-set! fi) obj val)
-         (obj-error 'get-field
-                    "given object does not have the requested field"
-                    "field name" (as-write id)
-                    "object" obj))))
+  (cond
+    [(_object? obj) 
+     (do-set-field!/raw-object who id obj val)]
+    [(wrapped-object? obj)
+     (define projs+set! (hash-ref (wrapped-object-neg-field-projs obj) id #f))
+     (cond
+       [projs+set! 
+        (define np (wrapped-object-neg-party obj))
+        (let loop ([projs+set! projs+set!]
+                   [val val])
+          (cond
+            [(pair? projs+set!)
+             (define the-proj (car projs+set!))
+             (loop (cdr projs+set!)
+                   ((the-proj val) np))]
+            [else
+             (projs+set! (wrapped-object-object obj) val)]))]
+       [else
+        (do-field-get/raw-object who id (wrapped-object-object obj))])]    
+    [else
+     (raise-argument-error who
+                           "object?"
+                           obj)]))
+
+(define (do-set-field!/raw-object who id obj val)
+  (define cls (object-ref obj))
+  (define field-ht (class-field-ht cls))
+  (define fi (hash-ref field-ht id #f))
+  (if fi
+      ((field-info-external-set! fi) obj val)
+      (obj-error who
+                 "given object does not have the requested field"
+                 "field name" (as-write id)
+                 "object" obj)))
 
 (define (dynamic-set-field! id obj val)
-  (unless (symbol? id) (raise-argument-error 'dynamic-get-field "symbol?" id))
+  (unless (symbol? id) (raise-argument-error 'dynamic-set-field! "symbol?" id))
   (do-set-field! 'dynamic-set-field! id obj val))
 
 (define-syntax (get-field stx)
@@ -4526,19 +3977,40 @@ An example
   (do-get-field 'get-field id obj))
 
 (define (do-get-field who id obj)
-  (unless (object? obj)
-    (raise-argument-error who
-                          "object?"
-                          obj))
-  (let* ([cls (object-ref obj)]
-          [field-ht (class-field-ht cls)]
-          [fi (hash-ref field-ht id #f)])
-     (if fi
-         ((field-info-external-ref fi) obj)
-         (obj-error who
-                    "given object does not have the requested field"
-                    "field name" (as-write id)
-                    "object" obj))))
+  (cond
+    [(_object? obj)
+     (do-field-get/raw-object who id obj)]
+    [(wrapped-object? obj)
+     (define projs+ref (hash-ref (wrapped-object-pos-field-projs obj) id #f))
+     (cond
+       [projs+ref
+        (define np (wrapped-object-neg-party obj))
+        (let loop ([projs+ref projs+ref])
+          (cond
+            [(pair? projs+ref)
+             (define the-proj (car projs+ref))
+             (define field-val-with-other-contracts (loop (cdr projs+ref)))
+             ((the-proj field-val-with-other-contracts) np)]
+            [else
+             ;; projs+ref is the struct field accessor
+             (projs+ref (wrapped-object-object obj))]))]
+       [else
+        (do-field-get/raw-object who id (wrapped-object-object obj))])]
+    [else 
+     (raise-argument-error who
+                           "object?"
+                           obj)]))
+
+(define (do-field-get/raw-object who id obj)
+  (define cls (object-ref obj))
+  (define field-ht (class-field-ht cls))
+  (define fi (hash-ref field-ht id #f))
+  (if fi
+      ((field-info-external-ref fi) obj)
+      (obj-error who
+                 "given object does not have the requested field"
+                 "field name" (as-write id)
+                 "object" obj)))
 
 (define (dynamic-get-field id obj)
   (unless (symbol? id) (raise-argument-error 'dynamic-get-field "symbol?" id))
@@ -4561,7 +4033,7 @@ An example
                           "object?"
                           obj))
   (let loop ([obj obj])
-     (let* ([cls (object-ref obj)]
+     (let* ([cls (object-ref/unwrap obj)]
             [field-ht (class-field-ht cls)])
        (and (hash-ref field-ht id #f)
             #t)))) ;; ensure that only #t and #f leak out, not bindings in ht
@@ -4572,7 +4044,7 @@ An example
                           "object?"
                           obj))
   (let loop ([obj obj])
-     (let* ([cls (object-ref obj)]
+     (let* ([cls (object-ref/unwrap obj)]
             [field-ht (class-field-ht cls)]
             [flds (filter interned? (hash-map field-ht (lambda (x y) x)))])
        flds)))
@@ -4650,9 +4122,9 @@ An example
 
 (define (is-a? v c)
   (cond
-    [(not (object? v)) #f]
-    [(class? c) ((class-object? (class-orig-cls c)) v)]
-    [(interface? c) (implementation? (object-ref v) c)]
+    [(class? c) 
+     (and (object? v) ((class-object? (class-orig-cls c)) (unwrap-object v)))]
+    [(interface? c) (and (object? v) (implementation? (object-ref/unwrap v) c))]
     [else (raise-argument-error 'is-a? "(or/c class? interface?)" 1 v c)]))
 
 (define (subclass? v c)
@@ -4668,7 +4140,7 @@ An example
 (define (object-interface o)
   (unless (object? o)
     (raise-argument-error 'object-interface "object?" o))
-  (class-self-interface (object-ref o)))
+  (class-self-interface (object-ref/unwrap o)))
 
 (define (object-method-arity-includes? o name cnt)
   (unless (object? o)
@@ -4679,13 +4151,12 @@ An example
                (exact? cnt)
                (not (negative? cnt)))
     (raise-argument-error 'object-method-arity-includes? "exact-nonnegative-integer?" cnt))
-  (let loop ([o o])
-     (let* ([c (object-ref o)]
-            [pos (hash-ref (class-method-ht c) name #f)])
-       (cond
-         [pos (procedure-arity-includes? (vector-ref (class-methods c) pos) 
-                                         (add1 cnt))]
-         [else #f]))))
+  (define c (object-ref/unwrap o))
+  (define pos (hash-ref (class-method-ht c) name #f))
+  (cond
+    [pos (procedure-arity-includes? (vector-ref (class-methods c) pos) 
+                                    (add1 cnt))]
+    [else #f]))
 
 (define (implementation? v i)
   (unless (interface? i)
@@ -4724,7 +4195,7 @@ An example
   (unless (object? o)
     (raise-argument-error 'object-info "object?" o))
   (let ([o* (if (has-original-object? o) (original-object o) o)])
-    (let loop ([c (object-ref o*)]
+    (let loop ([c (object-ref/unwrap o*)]
                [skipped? #f])
       (if (struct? ((class-insp-mk c)))
           ;; current objec can inspect this object
@@ -4760,13 +4231,13 @@ An example
                              "class" c)))
 
 (define object->vector
-  (opt-lambda (in-o [opaque-v '...])
+  (lambda (in-o [opaque-v '...])
     (unless (object? in-o)
       (raise-argument-error 'object->vector "object?" in-o))
     (let ([o in-o])
       (list->vector
        (cons
-        (string->symbol (format "object:~a" (class-name (object-ref o))))
+        (string->symbol (format "object:~a" (class-name (object-ref/unwrap o))))
         (reverse
          (let-values ([(c skipped?) (object-info o)])
            (let loop ([c c][skipped? skipped?])
@@ -4787,12 +4258,18 @@ An example
 
 (define (object=? o1 o2)
   (unless (object? o1)
-    (raise-argument-error 'object=? "object?" o1))
+    (raise-argument-error 'object=? "object?" 0 o1 o2))
   (unless (object? o2)
-    (raise-argument-error 'object=? "object?" o2))
-  (let ([orig-o1 (if (has-original-object? o1) (original-object o1) o1)]
-        [orig-o2 (if (has-original-object? o2) (original-object o2) o2)])
-    (eq? orig-o1 orig-o2)))
+    (raise-argument-error 'object=? "object?" 1 o1 o2))
+  (let* ([orig-o1 (if (has-original-object? o1) (original-object o1) o1)]
+         [orig-o2 (if (has-original-object? o2) (original-object o2) o2)]
+         [orig-orig-o1 (if (wrapped-object? orig-o1)
+                           (wrapped-object-object orig-o1)
+                           orig-o1)]
+         [orig-orig-o2 (if (wrapped-object? orig-o2)
+                           (wrapped-object-object orig-o2)
+                           orig-o2)])
+    (eq? orig-orig-o1 orig-orig-o2)))
 
 ;;--------------------------------------------------------------------
 ;;  primitive classes
@@ -4838,7 +4315,7 @@ An example
                  #f
                  #f
                  
-                 0 null null ; no fields
+                 0 null null null ; no fields
                  
                  null ; no rename-supers
                  null ; no rename-inners
@@ -4866,6 +4343,8 @@ An example
                              (if init-arg-names
                                  (extract-primitive-args this name init-arg-names init-args)
                                  init-args)))))
+
+                 #f
                  
                  make-struct:prim))
 
@@ -4893,130 +4372,65 @@ An example
 ;;  wrapper for contracts
 ;;--------------------------------------------------------------------
 
-(define (make-wrapper-class cls blame methods method-contracts fields field-contracts)
-  (let* ([name (class-name cls)]
-         [method-width (class-method-width cls)]
-         [method-ht (class-method-ht cls)]
-         [meths (if (null? methods)
-                    (class-methods cls)
-                    (make-vector method-width))]
-         [field-pub-width (class-field-pub-width cls)]
-         [field-ht (if (null? fields)
-                       (class-field-ht cls)
-                       (hash-copy (class-field-ht cls)))]
-         [class-make (if name
-                         (make-naming-constructor struct:class name "class")
-                         make-class)]
-         [c (class-make name
-                        (class-pos cls)
-                        (list->vector (vector->list (class-supers cls)))
-                        (class-self-interface cls)
-                        void ;; No inspecting
-                        
-                        method-width
-                        method-ht
-                        (class-method-ids cls)
-                        (class-abstract-ids cls)
-                        (class-method-ictcs cls)
-
-                        (class-ictc-classes cls)
-                        
-                        meths
-                        (class-super-methods cls)
-                        (class-int-methods cls)
-                        (class-beta-methods cls)
-                        (class-meth-flags cls)
-                        
-                        (class-inner-projs cls)
-                        (class-dynamic-idxs cls)
-                        (class-dynamic-projs cls)
-                        
-                        (class-field-width cls)
-                        field-pub-width
-                        field-ht
-                        (class-field-ids cls)
-                        
-                        'struct:object 'object? 'make-object
-                        'field-ref 'field-set!
-                        
-                        (class-init-args cls)
-                        (class-init-mode cls)
-                        (class-init cls)
-                        
-                        (class-orig-cls cls)
-                        #f #f ; serializer is never set
-                        #f)]
-         [obj-name (if name
-                       (string->symbol (format "wrapper-object:~a" name))
-                       'object)])
-    (define (make-method proc meth-name)
-      (procedure-rename
-       (procedure->method proc)
-       (string->symbol
-        (format "~a method~a~a"
-                meth-name
-                (if name " in " "")
-                (or name "")))))
-
-    (vector-set! (class-supers c) (class-pos c) c)
-    
-    ;; --- Make the new object struct ---
-    (let-values ([(struct:object object-make object? object-field-ref object-field-set!)
-                  (make-struct-type obj-name
-                                    (class-struct:object cls)
-                                    0 ;; No init fields
-                                    0 ;; No new fields in this class replacement
-                                    undefined
-                                    ;; Map object property to class:
-                                    (list (cons prop:object c)))])
-      (set-class-struct:object! c struct:object)
-      (set-class-object?! c object?)
-      (set-class-make-object! c object-make)
-      (set-class-field-ref! c object-field-ref)
-      (set-class-field-set!! c object-field-set!))
-    
-    ;; Handle public method contracts
-    (unless (null? methods)
-      ;; First, fill in from old methods
-      (vector-copy! meths 0 (class-methods cls))
-      ;; Now apply projections
-      (for ([m (in-list methods)]
-            [c (in-list method-contracts)])
-        (when c
-          (let ([i (hash-ref method-ht m)]
-                [p ((contract-projection c) blame)])
-            (vector-set! meths i (make-method (p (vector-ref meths i)) m))))))
-    
-    ;; Handle external field contracts
-    (unless (null? fields)
-      (let ([bset (blame-swap blame)])
-        (for ([f (in-list fields)]
-              [c (in-list field-contracts)])
-          (when c
-            (let ([fi (hash-ref field-ht f)]
-                  [p-pos ((contract-projection c) blame)]
-                  [p-neg ((contract-projection c) bset)])
-              (hash-set! field-ht f (field-info-extend-external fi p-pos p-neg)))))))
-    
-    c))
-
 (define-values (impersonator-prop:original-object has-original-object? original-object)
   (make-impersonator-property 'impersonator-prop:original-object))
 
-;; make-wrapper-object: contract object blame (listof symbol) (listof contract?) (listof symbol) (listof contract?)
-(define (make-wrapper-object ctc obj blame methods method-contracts fields field-contracts)
-  (check-object-contract obj methods fields (λ args (apply raise-blame-error blame obj args)))
-  (let ([original-obj (if (has-original-object? obj) (original-object obj) obj)]
-        [new-cls (make-wrapper-class (object-ref obj) blame methods method-contracts fields field-contracts)])
-    (impersonate-struct obj object-ref (λ (o c) new-cls)
-                        impersonator-prop:contracted ctc
-                        impersonator-prop:original-object original-obj)))
+
+(define (check-arg-contracts wrapped-blame wrapped-neg-party val init-proj-pairs orig-named-args)
+  ;; blame will be #f only when init-ctc-pairs is '()
+  (define arg-blame (and wrapped-blame (blame-swap wrapped-blame)))
+  
+  (define (missing-one init-ctc-pair)
+    (raise-blame-error arg-blame #:missing-party wrapped-neg-party val
+                       '(expected: "an init arg named ~a" 
+                                   given: 
+                                   "~a")
+                       (car init-ctc-pair)
+                       (case (length orig-named-args)
+                         [(0) "no init args"]
+                         [(1) "an init arg named ~a"
+                              (car (car orig-named-args))]
+                         [(2) "init args named~a"
+                              (apply string-append
+                                     (map (λ (x) (format " ~a" (car x)))
+                                          orig-named-args))])))
+  ;; this loop optimizes for the case where the init-ctc-pairs
+  ;; and the named-args are in the same order, making extra
+  ;; passes over the named-args when they aren't.
+  (let loop ([init-proj-pairs init-proj-pairs]
+             [named-args orig-named-args]
+             [named-skipped-args '()]
+             [progress? #f])
+    (cond
+      [(null? init-proj-pairs)
+       (append named-args named-skipped-args)]
+      [(and (null? named-args) (null? named-skipped-args))
+       '()]
+      [(null? named-args) 
+       (if progress?
+           (loop init-proj-pairs named-skipped-args '() #f)
+           (loop (cdr init-proj-pairs) named-skipped-args '() #f))]
+      [else
+       (define proj-pair (car init-proj-pairs))
+       (define named-arg (car named-args))
+       (cond
+         [(equal? (list-ref proj-pair 0) (list-ref named-arg 0))
+          (define value-with-contracts-added
+            (for/fold ([val (cdr named-arg)]) ([proj (in-list (cdr proj-pair))])
+              ((proj val) wrapped-neg-party)))
+          (define new-ele (cons (car named-arg) value-with-contracts-added))
+          (cons new-ele
+                (loop (cdr init-proj-pairs) (cdr named-args) named-skipped-args #t))]
+         [else
+          (loop init-proj-pairs 
+                (cdr named-args) 
+                (cons (car named-args) named-skipped-args)
+                progress?)])])))
+                          
 
 ;;--------------------------------------------------------------------
 ;;  misc utils
 ;;--------------------------------------------------------------------
-
-(define undefined (letrec ([x x]) x))
 
 (define-struct (exn:fail:object exn:fail) () #:inspector insp)
 
@@ -5237,9 +4651,17 @@ An example
               equal-to? equal-hash-code-of equal-secondary-hash-code-of))
 
 ;; Providing normal functionality:
-(provide (protect-out make-wrapper-object
-                      check-object-contract
-                      get-field/proc)
+(provide (protect-out get-field/proc)
+         
+         ;; for class-c-old.rkt:
+         (protect-out
+          make-naming-constructor prop:object _object? object-ref replace-ictc-blame
+          concretize-ictc-method field-info-extend-external field-info-extend-internal this-param
+          object-ref/unwrap impersonator-prop:original-object has-original-object? original-object)
+         ;; end class-c-old.rkt requirements
+
+         field-info-internal-ref
+         field-info-internal-set!
          
          (rename-out [_class class]) class* class/derived
          define-serializable-class define-serializable-class*
@@ -5268,5 +4690,8 @@ An example
          object-method-arity-includes?
          method-in-interface? interface->method-names class->interface class-info
          (struct-out exn:fail:object)
-         make-primitive-class
-         class/c ->m ->*m ->dm case->m object/c instanceof/c)
+         make-primitive-class 
+         (for-syntax localize) 
+         (except-out (struct-out class) class class?)
+         (rename-out [class? class-struct-predicate?])
+         (struct-out wrapped-object))

@@ -196,10 +196,10 @@ See the scribble documentation on the planet/resolver module.
          net/url
          net/head
 
-         "../config.rkt"
-         "planet-shared.rkt"
+         planet/config
+         planet/private/planet-shared
          "linkage.rkt"
-         "parsereq.rkt"
+         planet/private/parsereq
 
          "../terse-info.rkt"
          compiler/cm)
@@ -449,7 +449,7 @@ See the scribble documentation on the planet/resolver module.
 
 ;; get/uninstalled-cache : pkg-getter
 ;; note: this does not yet work with minimum-required-version specifiers if you
-;; install a package and then use an older mzscheme
+;; install a package and then use an older racket
 (define (get/uninstalled-cache _ pkg-spec load? success-k failure-k)
   (let ([p (lookup-package pkg-spec (UNINSTALLED-PACKAGE-CACHE))])
     (if (and p (file-exists? (build-path (pkg-path p)
@@ -762,7 +762,9 @@ See the scribble documentation on the planet/resolver module.
 
       (with-handlers ([exn:fail:network? (λ (e) (return (exn-message e)))])
         (let* ([target            (pkg->download-url pkg)]
-               [ip                (get-impure-port target)]
+               [ip                (get-impure-port 
+                                   target
+                                   (list "Accept-Encoding: identity"))]
                [head              (purify-port ip)]
                [response-code/str (get-http-response-code head)]
                [response-code     (and response-code/str 

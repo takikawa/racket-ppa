@@ -68,6 +68,34 @@
             (fail val '(expected: "~s for element ~s" given: "~e") (contract-name elem-ctc) n e))))
       #t)))
 
+(define (check-val-first-vectorof c) 
+  (define immutable (base-vectorof-immutable c))
+  (λ (val blame)
+    (cond
+      [(vector? val) 
+       (cond
+         [(eq? immutable #t)
+          (cond
+            [(immutable? val) #f]
+            [else
+             (λ (neg-party)
+               (raise-blame-error blame #:missing-party neg-party
+                                  val '(expected "an immutable vector" given: "~e") val))])]
+         [(eq? immutable #f)
+          (cond
+            [(immutable? val) 
+             (λ (neg-party)
+               (raise-blame-error blame #:missing-party neg-party
+                                  val '(expected "an mutable vector" given: "~e" val)))]
+            [else #f])]
+         [else #f])]
+      [else
+       (λ (neg-party)
+         (raise-blame-error blame #:missing-party neg-party
+                            val
+                            '(expected "a vector," given: "~e") 
+                            val))])))
+
 (define (vectorof-first-order ctc)
   (let ([check (check-vectorof ctc)])
     (λ (val)
@@ -75,10 +103,23 @@
         (check val (λ _ (return #f)) #t)))))
 
 (define-struct (flat-vectorof base-vectorof) ()
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:flat-contract
   (build-flat-contract-property
    #:name vectorof-name
    #:first-order vectorof-first-order
+   #:val-first-projection (λ (ctc) 
+                            (define check (check-val-first-vectorof ctc))
+                            (define vfp (get/build-val-first-projection (base-vectorof-elem ctc)))
+                            (λ (blame)
+                              (define ele-blame (blame-add-element-of-context blame))
+                              (define vfp+blame (vfp ele-blame))
+                              (λ (val) 
+                                (or (check val blame)
+                                    (λ (neg-party)
+                                      (for ([x (in-vector val)])
+                                        ((vfp+blame x) neg-party))
+                                      val)))))
    #:projection 
    (λ (ctc) 
      (define check (check-vectorof ctc))
@@ -93,16 +134,73 @@
              (p e)))
          val)))))
 
+(define (blame-add-element-of-context blame #:swap? [swap? #f])
+  (blame-add-context blame "an element of" #:swap? swap?))
+
+(define (vectorof-val-first-ho-projection chaperone-or-impersonate-vector)
+  (λ (ctc)
+    (define elem-ctc (base-vectorof-elem ctc))
+    (define immutable (base-vectorof-immutable ctc))
+    (define check (check-vectorof ctc))
+    (λ (blame)
+      (define pos-blame (blame-add-element-of-context blame))
+      (define neg-blame (blame-add-element-of-context blame #:swap? #t))
+      (define vfp (get/build-val-first-projection elem-ctc))
+      (define elem-pos-proj (vfp pos-blame))
+      (define elem-neg-proj (vfp neg-blame))
+      (define checked-ref (λ (neg-party)
+                            (λ (vec i val)
+                              (with-continuation-mark
+                               contract-continuation-mark-key
+                               (cons pos-blame neg-party)
+                               ((elem-pos-proj val) neg-party)))))
+      (define checked-set (λ (neg-party)
+                            (λ (vec i val)
+                              (with-continuation-mark
+                               contract-continuation-mark-key
+                               (cons neg-blame neg-party)
+                               ((elem-neg-proj val) neg-party)))))
+      
+      (λ (val)
+        (let/ec k
+          (define (raise-blame val . args) 
+            (k
+             (λ (neg-party)
+               (apply raise-blame-error blame #:missing-party neg-party val args))))
+          (check val raise-blame #f)
+          (λ (neg-party)
+            (if (and (immutable? val) (not (chaperone? val)))
+                 (apply vector-immutable
+                        (for/list ([e (in-vector val)])
+                          ((elem-pos-proj e) neg-party)))
+                 (chaperone-or-impersonate-vector
+                  val
+                  (checked-ref neg-party)
+                  (checked-set neg-party)
+                  impersonator-prop:contracted ctc
+                  impersonator-prop:blame (blame-add-missing-party blame neg-party)))))))))
+
+(define-values (prop:neg-blame-party prop:neg-blame-party? prop:neg-blame-party-get)
+  (make-impersonator-property 'prop:neg-blame-party))
+
 (define (vectorof-ho-projection vector-wrapper)
   (λ (ctc)
      (let ([elem-ctc (base-vectorof-elem ctc)]
            [immutable (base-vectorof-immutable ctc)]
            [check (check-vectorof ctc)])
        (λ (blame)
-         (let ([elem-pos-proj ((contract-projection elem-ctc) (blame-add-context blame "an element of"))]
-               [elem-neg-proj ((contract-projection elem-ctc) (blame-add-context blame "an element of" #:swap? #t))])
-           (define checked-ref (λ (vec i val) (elem-pos-proj val)))
-           (define checked-set (λ (vec i val) (elem-neg-proj val)))
+         (let ([elem-pos-proj ((contract-projection elem-ctc) 
+                               (blame-add-element-of-context blame))]
+               [elem-neg-proj ((contract-projection elem-ctc)
+                               (blame-add-element-of-context blame #:swap? #t))])
+           (define checked-ref (λ (vec i val)
+                                 (with-continuation-mark
+                                  contract-continuation-mark-key blame
+                                  (elem-pos-proj val))))
+           (define checked-set (λ (vec i val)
+                                 (with-continuation-mark
+                                  contract-continuation-mark-key blame
+                                  (elem-neg-proj val))))
            (define raise-blame (λ (val . args)
                                   (apply raise-blame-error blame val args)))
            (λ (val)
@@ -115,20 +213,25 @@
                   val
                   checked-ref
                   checked-set
-                  impersonator-prop:contracted ctc))))))))
+                  impersonator-prop:contracted ctc
+                  impersonator-prop:blame blame))))))))
 
 (define-struct (chaperone-vectorof base-vectorof) ()
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:chaperone-contract
   (build-chaperone-contract-property
    #:name vectorof-name
    #:first-order vectorof-first-order
+   #:val-first-projection (vectorof-val-first-ho-projection chaperone-vector)
    #:projection (vectorof-ho-projection chaperone-vector)))
 
 (define-struct (impersonator-vectorof base-vectorof) ()
+  #:property prop:custom-write custom-write-property-proc
   #:property prop:contract
   (build-contract-property
    #:name vectorof-name
    #:first-order vectorof-first-order
+   #:val-first-projection (vectorof-val-first-ho-projection chaperone-vector)
    #:projection (vectorof-ho-projection impersonate-vector)))
 
 (define-syntax (wrap-vectorof stx)
@@ -149,24 +252,26 @@
           'racket/contract:contract
           (vector this-one (list #'vecof) null))))]))
 
-(define (vectorof c #:immutable [immutable 'dont-care] #:flat? [flat? #f])
-  (let ([ctc (if flat?
-                 (coerce-flat-contract 'vectorof c)
-                 (coerce-contract 'vectorof c))])
-    (cond
-      [(or flat?
-           (and (eq? immutable #t)
-                (flat-contract? ctc)))
-       (make-flat-vectorof ctc immutable)]
-      [(chaperone-contract? ctc)
-       (make-chaperone-vectorof ctc immutable)]
-      [else
-       (make-impersonator-vectorof ctc immutable)])))
+(define/subexpression-pos-prop (vectorof c #:immutable [immutable 'dont-care] #:flat? [flat? #f])
+  (define ctc
+    (if flat?
+        (coerce-flat-contract 'vectorof c)
+        (coerce-contract 'vectorof c)))
+  (cond
+    [(or flat?
+         (and (equal? immutable #t)
+              (flat-contract? ctc)))
+     (make-flat-vectorof ctc immutable)]
+    [(chaperone-contract? ctc)
+     (make-chaperone-vectorof ctc immutable)]
+    [else
+     (make-impersonator-vectorof ctc immutable)]))
 
 (define/subexpression-pos-prop (vector-immutableof c)
   (vectorof c #:immutable #t))
 
-(define-struct base-vector/c (elems immutable))
+(define-struct base-vector/c (elems immutable)
+  #:property prop:custom-write custom-write-property-proc)
 
 (define (vector/c-name c)
   (let ([immutable (base-vector/c-immutable c)])
@@ -211,9 +316,9 @@
   (λ (val)
     (and (vector? val)
          (cond
-           [(eq? immutable #t) (immutable? val)]
-           [(eq? immutable #f) (not (immutable? val))]
-           [else #t])
+          [(eq? immutable #t) (immutable? val)]
+          [(eq? immutable #f) (not (immutable? val))]
+          [else #t])
          (= (vector-length val) (length elem-ctcs))
          (for/and ([e (in-vector val)]
                    [c (in-list elem-ctcs)])
@@ -227,13 +332,16 @@
    #:projection 
    (λ (ctc) 
      (λ (blame) 
-       (define blame+ctxt (blame-add-context blame "an element of"))
+       (define blame+ctxt (blame-add-element-of-context blame))
        (λ (val)
-         (check-vector/c ctc val blame)
-         (for ([e (in-vector val)]
-               [c (in-list (base-vector/c-elems ctc))])
-           (((contract-projection c) blame+ctxt) e))
-         val)))))
+         (with-continuation-mark
+          contract-continuation-mark-key blame
+          (begin
+            (check-vector/c ctc val blame)
+            (for ([e (in-vector val)]
+                  [c (in-list (base-vector/c-elems ctc))])
+              (((contract-projection c) blame+ctxt) e))
+            val)))))))
 
 (define (vector/c-ho-projection vector-wrapper)
   (λ (ctc)
@@ -249,7 +357,8 @@
                                  ([c (in-list elem-ctcs)]
                                   [i (in-naturals)])
                                  ((contract-projection c)
-                                  (blame-add-context blame (format "the ~a element of" (n->th i)) #:swap? #t)))])
+                                  (blame-add-context blame (format "the ~a element of" (n->th i))
+                                                     #:swap? #t)))])
            (λ (val)
              (check-vector/c ctc val blame)
              (if (and (immutable? val) (not (chaperone? val)))
@@ -260,10 +369,15 @@
                  (vector-wrapper
                   val
                   (λ (vec i val)
-                    ((vector-ref elem-pos-projs i) val))
+                    (with-continuation-mark
+                     contract-continuation-mark-key blame
+                     ((vector-ref elem-pos-projs i) val)))
                   (λ (vec i val)
-                    ((vector-ref elem-neg-projs i) val))
-                  impersonator-prop:contracted ctc))))))))
+                    (with-continuation-mark
+                     contract-continuation-mark-key blame
+                     ((vector-ref elem-neg-projs i) val)))
+                  impersonator-prop:contracted ctc
+                  impersonator-prop:blame blame))))))))
 
 (define-struct (chaperone-vector/c base-vector/c) ()
   #:property prop:chaperone-contract

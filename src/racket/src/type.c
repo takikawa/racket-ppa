@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2014 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -163,7 +163,7 @@ scheme_init_type ()
   set_name(scheme_double_type, "<inexact-number>");
   set_name(scheme_long_double_type, "<extflonum>");
   set_name(scheme_float_type, "<inexact-number*>");
-  set_name(scheme_undefined_type, "<undefined>");
+  set_name(scheme_undefined_type, "<unsafe-undefined>");
   set_name(scheme_eof_type, "<eof>");
   set_name(scheme_input_port_type, "<input-port>");
   set_name(scheme_output_port_type, "<output-port>");
@@ -209,6 +209,7 @@ scheme_init_type ()
   set_name(scheme_struct_type_type, "<struct-type>");
   set_name(scheme_listener_type, "<tcp-listener>");
   set_name(scheme_tcp_accept_evt_type, "<tcp-accept-evt>");
+  set_name(scheme_filesystem_change_evt_type, "<filesystem-change-evt>");
   set_name(scheme_namespace_type, "<namespace>");
   set_name(scheme_config_type, "<parameterization>");
   set_name(scheme_will_executor_type, "<will-executor>");
@@ -226,6 +227,8 @@ scheme_init_type ()
 
   set_name(scheme_custodian_type, "<custodian>");
   set_name(scheme_cust_box_type, "<custodian-box>");
+  set_name(scheme_plumber_type, "<plumber>");
+  set_name(scheme_plumber_handle_type, "<plumber-flush-handle>");
   set_name(scheme_cont_mark_set_type, "<continuation-mark-set>");
   set_name(scheme_cont_mark_chain_type, "<chain>");
 
@@ -310,6 +313,8 @@ scheme_init_type ()
   set_name(scheme_resolved_module_path_type, "<resolve-module-path>");
 
   set_name(scheme_phantom_bytes_type, "<phantom-bytes>");
+
+  set_name(scheme_environment_variables_type, "<environment-variables>");
 
 #ifdef MZ_GC_BACKTRACE
   set_name(scheme_rt_meta_cont, "<meta-continuation>");
@@ -611,8 +616,9 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_unix_path_type, bstring_obj);
   GC_REG_TRAV(scheme_windows_path_type, bstring_obj);
   GC_REG_TRAV(scheme_symbol_type, symbol_obj);
-#ifdef MZ_USE_PLACES  
+#ifdef MZ_USE_PLACES
   GC_REG_TRAV(scheme_serialized_symbol_type, bstring_obj);
+  GC_REG_TRAV(scheme_serialized_keyword_type, bstring_obj);
   GC_REG_TRAV(scheme_place_dead_type, small_object);
 #endif
   GC_REG_TRAV(scheme_keyword_type, symbol_obj);
@@ -720,6 +726,10 @@ void scheme_register_traversers(void)
 
   GC_REG_TRAV(scheme_proc_shape_type, small_object);
   GC_REG_TRAV(scheme_struct_proc_shape_type, small_atomic_obj);
+
+  GC_REG_TRAV(scheme_environment_variables_type, small_object);
+
+  GC_REG_TRAV(scheme_plumber_handle_type, twoptr_obj);
 }
 
 END_XFORM_SKIP;

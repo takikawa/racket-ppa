@@ -11,8 +11,12 @@
 ;;     installation in the given paths (used by the shell installers)
 ;;     (interactive, undo-on-error, create-uninstaller)
 ;;   - `copy': similar to `move', but copies instead of moving
+;;   - `bundle': like `copy', but no uninstall script
+;;   - `post-adjust': adjust an existing bundle after package installs;
+;;     two extra arguments determine whether to strip build
+;;     artifacts
 ;;   - `make-install-copytree': copies some toplevel directories, skips ".*"
-;;     and "compiled" subdirs, and rewrites "config.rkt", but no uninstaller
+;;     subdirs, and rewrites "config.rkt", but no uninstaller
 ;;     (used by `make install') (requires an additional `origtree' argument)
 ;;   - `make-install-destdir-fix': fixes paths in binaries, laucnhers, and
 ;;     config.rkt (used by `make install' to fix a DESTDIR) (requires exactly
@@ -20,8 +24,12 @@
 ;;     DESTDIR setting)
 ;; * rktdir: The source racket directory
 ;; * Path names that should be moved/copied (bin, collects, doc, lib, ...)
+;;   or a sigle path that is used to automatically build the set of
+;;   path names.
 
 #lang racket/base
+
+(module test racket/base)
 
 (define args (vector->list (current-command-line-arguments)))
 
@@ -30,9 +38,28 @@
   (begin0 (car args) (set! args (cdr args))))
 
 (define op (string->symbol (get-arg)))
+(define adjust-mode
+  (and (eq? op 'post-adjust)
+       (list (get-arg) (get-arg))))
 (define rktdir (get-arg))
-(define dirs (map (lambda (name) (list name (get-arg)))
-                  '(bin collects doc lib includerkt librkt man #|src|#)))
+(define base-destdir (and (pair? args)
+                          (null? (cdr args))
+                          (path->complete-path (get-arg))))
+(define (build-dest-arg name)
+  (build-path base-destdir
+              (case name
+                [(includerkt) "include"]
+                [(librkt) "lib"]
+                [(sharerkt) "share"]
+                [(config) "etc"]
+                [(collects) "collects"]
+                [(apps) "share/applications"]
+                [else (symbol->string name)])))
+(define dirs (map (lambda (name) (list name 
+                                       (if base-destdir
+                                           (build-dest-arg name)
+                                           (get-arg))))
+		  '(bin collects doc lib includerkt librkt sharerkt config apps man #|src|#)))
 
 (define (dir: name)
   (cadr (or (assq name dirs) (error 'getdir "unknown dir name: ~e" name))))
@@ -56,7 +83,10 @@
       ;; if shared libraries are used, then these files should be moved
       ;; independently, as if they had a level of #f
       [(lib)      1]
+      [(share)    1]
+      [(etc)      1]
       [(man)      #f]
+      [(applications) #f]
       [(src)      1]
       [(README)   #f] ; moved last
       [else (error 'level-of "internal-error -- unknown dir: ~e" dir)])))
@@ -75,6 +105,9 @@
 ;; deterministic way)
 (define (ls . dir)
   (sort (map path->string (apply directory-list dir)) string<?))
+
+(define (ls* dir)
+  (if (directory-exists? dir) (ls dir) null))
 
 ;; convenient wrapper for a simple subprocess
 (define (run cmd . args)
@@ -97,12 +130,29 @@
          (delete-directory path)]
         [else #t])) ; shouldn't happen
 
+;; removes "compiled" subdirectories recursively
+(define (rm-compiled path)
+  (define (loop path)
+    (cond [(equal? path "compiled") (rm path)]
+          [(directory-exists? path)
+           (parameterize ([current-directory path]) (for-each loop (ls)))]
+          [else (void)]))
+  (parameterize ([current-directory path])
+    (for-each loop (ls))))
+
 ;; used for filtering files when copying (and moving toplevels)
-(define skip-filter (lambda (p) #f))
+(define current-skip-filter (make-parameter (lambda (p) #f)))
+
+(define (make-apps-skip)
+  (let ([skip-filter (current-skip-filter)])
+    (lambda (f)
+      (or (equal? f "share/applications")
+          (skip-filter f)))))
 
 ;; copy a file or a directory (recursively), preserving time stamps
 ;; (racket's copy-file preservs permission bits)
 (define (cp src dst)
+  (define skip-filter (current-skip-filter))
   (let loop ([src src] [dst dst])
     (let ([time! (lambda ()
                    (file-or-directory-modify-seconds
@@ -111,7 +161,7 @@
             [(link-exists? src)
              (make-file-or-directory-link (resolve-path src) dst)]
             [(directory-exists? src)
-             (make-directory dst) (time!)
+             (make-directory dst)
              (parameterize ([current-directory src])
                (for-each (lambda (p) (loop p (make-path dst p))) (ls)))]
             [(file-exists? src) (copy-file src dst) (time!)]
@@ -152,32 +202,41 @@
 
 (define (fix-executable file)
   (define (fix-binary file)
-    (let-values ([(i o) (open-input-output-file file #:exists 'update)])
-      (let ([m (regexp-match-positions #rx#"coLLECTs dIRECTORy:" i)])
-        (unless m
-          (error
-           (format "could not find collection-path label in executable: ~a"
-                   file)))
-        (file-position o (cdar m))
-        (display (dir: 'collects) o)
-        (write-byte 0 o)
-        (write-byte 0 o)
-        (close-input-port i)
-        (close-output-port o))))
+    (define (fix-one tag dir)
+      (let-values ([(i o) (open-input-output-file file #:exists 'update)])
+        (let ([m (regexp-match-positions tag i)])
+          (unless m
+            (error
+             (format "could not find collection-path label in executable: ~a"
+                     file)))
+          (file-position o (cdar m))
+          (display dir o)
+          (write-byte 0 o)
+          (write-byte 0 o)
+          (close-input-port i)
+          (close-output-port o))))
+    (fix-one #rx#"coLLECTs dIRECTORy:" (dir: 'collects))
+    (fix-one #rx#"coNFIg dIRECTORy:" (dir: 'config)))
   (define (fix-script file)
     (let* ([size (file-size file)]
            [buf (with-input-from-file file (lambda () (read-bytes size)))]
            [m (or (regexp-match-positions
                    #rx#"\n# {{{ bindir\n(.*?\n)# }}} bindir\n" buf)
                   (error (format "could not find binpath block in script: ~a"
-                                 file)))])
+                                 file)))]
+           [m2 (regexp-match-positions
+                #rx#"\n# {{{ librktdir\n(.*?\n)# }}} librktdir\n" buf)])
       ;; 'truncate file to keep it executable
       (with-output-to-file file #:exists 'truncate
         (lambda ()
           (write-bytes buf (current-output-port) 0 (caadr m))
-          (printf "bindir=\"~a\"\n"
-                  (regexp-replace* #rx"[\"`'$\\]" (dir: 'bin) "\\\\&"))
-          (write-bytes buf (current-output-port) (cdadr m))))))
+          (define (escaped-dir: sym)
+            (regexp-replace* #rx"[\"`'$\\]" (dir: sym) "\\\\&"))
+          (printf "bindir=\"~a\"\n" (escaped-dir: 'bin))
+          (when m2
+            (write-bytes buf (current-output-port) (cdadr m) (caadr m2))
+            (printf "librktdir=\"~a\"\n" (escaped-dir: 'librkt)))
+          (write-bytes buf (current-output-port) (cdadr (or m2 m)))))))
   (let ([magic (with-input-from-file file (lambda () (read-bytes 10)))])
     (cond [(or (regexp-match #rx#"^\177ELF" magic)
                (regexp-match #rx#"^\316\372\355\376" magic)
@@ -199,9 +258,38 @@
   (parameterize ([current-directory bindir])
     (for ([f (in-list (or binfiles (ls)))] #:when (file-exists? f))
       (fix-executable f)))
-  ;; fix the starter executable too
+  ;; fix the gracket & starter executables too
   (parameterize ([current-directory librktdir])
+    (when (file-exists? "gracket") (fix-executable "gracket"))
     (when (file-exists? "starter") (fix-executable "starter"))))
+
+(define (fix-desktop-files appsdir bindir sharerktdir [appfiles #f])
+  ;; For absolute mode, change `Exec' and `Icon' lines to
+  ;; have absolute paths:
+  (define (fixup-path at-dir orig-path)
+    (build-path at-dir (let-values ([(base name dir?) (split-path orig-path)])
+                         name)))
+  (for ([d (in-list (or appfiles (directory-list appsdir)))])
+    (when (regexp-match? #rx"[.]desktop$" d)
+      (define ls (call-with-input-file (build-path appsdir d)
+                   (lambda (i)
+                     (for/list ([l (in-lines i)]) l))))
+      (define new-ls (for/list ([l (in-list ls)])
+                       (cond
+                        [(regexp-match? #rx"^Exec=" l)
+                         ;; Assume anything after a space is the argument spec:
+                         (let ([m (regexp-match #rx"Exec=([^ ]*)(.*)" l)])
+                           (format "Exec=~a~a" 
+                                   (fixup-path bindir (cadr m))
+                                   (caddr m)))]
+                        [(regexp-match? #rx"^Icon=" l)
+                         (format "Icon=~a" (fixup-path sharerktdir (substring l 5)))]
+                        [else l])))
+      (unless (equal? ls new-ls)
+        (call-with-output-file (build-path appsdir d)
+          #:exists 'truncate/replace
+          (lambda (o)
+            (map (lambda (s) (displayln s o)) new-ls)))))))
 
 ;; remove and record all empty dirs
 (define (remove-empty-dirs dir)
@@ -269,49 +357,40 @@
 
 (define write-config
   (case-lambda
-    [()  (write-config #t (dir: 'collects))]
-    [(x) (if (boolean? x)
-           (write-config x (dir: 'collects))
-           (write-config #t x))]
-    [(compile? collectsdir)
+    [()  (write-config (dir: 'config))]
+    [(configdir)
      (define (cpath . xs)
-       (apply make-path collectsdir "config" xs))
+       (apply make-path configdir xs))
      (define (ftime file)
        (and (file-exists? file) (file-or-directory-modify-seconds file)))
-     (let* ([src (cpath "config.rkt")]
-            [zo  (cpath "compiled" "config_rkt.zo")]
-            ;; [dep (cpath "compiled" "config_rkt.dep")] ; not needed
-            [src-time (ftime src)]
-            [zo-time  (ftime zo)])
+     (let* ([src (cpath "config.rktd")])
        (printf "Rewriting configuration file at: ~a...\n" src)
-       (parameterize ([current-namespace base-ns] ; to compile (see above)
-                      [current-library-collection-paths ; for configtab.rkt
-                       (list collectsdir)])
-         (with-output-to-file src #:exists 'truncate/replace
-           (lambda ()
-             (printf ";; automatically generated by unixstyle-install\n")
-             (printf "(module config setup/configtab\n")
-             (printf "  (define doc-dir ~s)\n" (dir: 'doc))
-             (when (eq? 'shared (system-type 'link)) ; never true for now
-               (printf "  (define dll-dir ~s)\n" (dir: 'lib)))
-             (printf "  (define lib-dir ~s)\n" (dir: 'librkt))
-             (printf "  (define include-dir ~s)\n" (dir: 'includerkt))
-             (printf "  (define bin-dir ~s)\n" (dir: 'bin))
-             (printf "  (define absolute-installation? #t))\n")))
-         ;; recompile & set times as if nothing happened (don't remove .dep)
-         ;; this requires the file to look the same on all compilations, and
-         ;; configtab.rkt generates bindings unhygienically for that reason.
-         (when compile?
-           (when src-time (file-or-directory-modify-seconds src src-time))
-           (if (not zo-time)
-             (printf "WARNING: skipping recompilation, no zo file at ~a\n" zo)
-             (begin
-               (printf "Recompiling to ~a...\n" zo)
-               (with-input-from-file src
-                 (lambda ()
-                   (with-output-to-file zo #:exists 'truncate/replace
-                     (lambda () (write (compile (read-syntax)))))))
-               (file-or-directory-modify-seconds zo zo-time))))))]))
+       (define old (or (and (file-exists? src)
+                            (call-with-input-file src read))
+                       (hash)))
+       (with-output-to-file src #:exists 'truncate/replace
+         (lambda ()
+           (define handled (make-hash))
+           (define (out! key val)
+             (printf "      (~a . ~s)\n" key val)
+             (hash-set! handled key #t))
+           (printf ";; generated by unixstyle-install\n")
+           (printf "#hash(\n")
+           (out! 'doc-dir (dir: 'doc))
+           (when (eq? 'shared (system-type 'link)) ; never true for now
+             (out! 'dll-dir (dir: 'lib)))
+           (out! 'lib-dir (dir: 'librkt))
+           (out! 'share-dir (dir: 'sharerkt))
+           (out! 'include-dir (dir: 'includerkt))
+           (out! 'bin-dir (dir: 'bin))
+           (out! 'apps-dir (dir: 'apps))
+           (out! 'man-dir (dir: 'man))
+           (out! 'absolute-installation? #t)
+           ;; Preserve all other keys:
+           (for ([(key val) (in-hash old)])
+             (unless (hash-ref handled key #f)
+               (out! key val)))
+           (printf ")\n"))))]))
 
 ;; creates a directory including its ancestors when needed
 (define (make-dir* dir)
@@ -338,6 +417,7 @@
                  [else (loop)]))))))
 
 (define ((move/copy-tree move?) src dst* #:missing [missing 'error])
+  (define skip-filter (current-skip-filter))
   (define dst (if (symbol? dst*) (dir: dst*) dst*))
   (define src-exists?
     (or (directory-exists? src) (file-exists? src) (link-exists? src)))
@@ -361,7 +441,7 @@
              (set! dst-d? #t) (set! dst-l? #f) (set! dst-f? #f))
            (cond [dst-l? (ask-overwrite "symlink" dst) (doit)]
                  [dst-d? (if (and src-d? (or (not lvl) (< 0 lvl)))
-                           ;; recurse only when source is dir, & not too deep
+                           ;; recur only when source is dir, & not too deep
                            (for-each (lambda (name)
                                        (loop (make-path src name)
                                              (make-path dst name)
@@ -379,20 +459,31 @@
 
 ;; --------------------------------------------------------------------------
 
-(define (move/copy-distribution move?)
+(define (move/copy-distribution move? bundle?)
   (define do-tree (move/copy-tree move?))
   (current-directory rktdir)
   (when (ormap (lambda (p) (regexp-match #rx"libracket.*[.]so" p)) (ls "lib"))
     (error "Cannot handle distribution of shared-libraries (yet)"))
   (with-handlers ([exn? (lambda (e) (undo-changes) (raise e))])
-    (define binfiles (ls "bin")) ; see below
-    (do-tree "bin"      'bin)
+    (define binfiles (ls* "bin"))
+    (if (eq? 'windows (system-type))
+        ;; Windows executables appear in the immediate directory:
+        (for ([f (in-list (directory-list))])
+          (when (and (file-exists? f)
+                     (regexp-match? #rx#"(?i:[.]exe)$" (path-element->bytes f)))
+            (cp* f (build-path base-destdir f))))
+        ;; All other platforms use "bin":
+        (do-tree "bin"      'bin))
     (do-tree "collects" 'collects)
     (do-tree "doc"      'doc #:missing 'skip) ; not included in text distros
-    ;; (do-tree ??? 'lib) ; shared stuff goes here
-    (do-tree "include"  'includerkt)
     (do-tree "lib"      'librkt)
-    (do-tree "man"      'man)
+    (do-tree "include"  'includerkt)
+    (define appfiles (ls* "share/applications"))
+    (do-tree "share/applications" 'apps #:missing 'skip) ; Unix only
+    (parameterize ([current-skip-filter (make-apps-skip)])
+      (do-tree "share" 'sharerkt))
+    (do-tree "etc"      'config)
+    (do-tree "man"      'man #:missing 'skip) ; not included for Windows
     ;; (when (and (not (equal? (dir: 'src) "")) (directory-exists? "src"))
     ;;   (do-tree "src" 'src))
     ;; don't use the above -- it would be pointless to put the source tree in
@@ -405,9 +496,11 @@
     (when (and move? (not (null? (ls))))
       (error (format "leftovers in source tree: ~s" (ls))))
     ;; we need to know which files need fixing
-    (fix-executables (dir: 'bin) (dir: 'librkt) binfiles)
-    (write-uninstaller)
-    (write-config))
+    (unless bundle?
+      (fix-executables (dir: 'bin) (dir: 'librkt) binfiles)
+      (fix-desktop-files (dir: 'apps) (dir: 'bin) (dir: 'sharerkt) appfiles)
+      (write-uninstaller)
+      (write-config)))
   (when move?
     (current-directory (dirname rktdir))
     (delete-directory rktdir)))
@@ -416,14 +509,15 @@
   (define copytree (move/copy-tree #f))
   (define origtree? (equal? "yes" (get-arg)))
   (current-directory rktdir)
-  (set! skip-filter ; skip all dot-names and compiled subdirs
-        (lambda (p) (regexp-match? #rx"^(?:[.].*|compiled)$" (basename p))))
+  (current-skip-filter ; skip all dot-names
+   (lambda (p) (regexp-match? #rx"^(?:[.].*)$" (basename p))))
   (with-handlers ([exn? (lambda (e) (undo-changes) (raise e))])
     (set! yes-to-all? #t) ; non-interactive
     (copytree "collects" 'collects)
-    (copytree "doc"      'doc)
-    (copytree "man"      'man)
-    (unless origtree? (write-config #f)))) ; don't recompile
+    (copytree "share"    'sharerkt #:missing 'skip)
+    (copytree "doc"      'doc      #:missing 'skip)
+    (copytree "etc"      'config   #:missing 'skip)
+    (unless origtree? (write-config))))
 
 (define (make-install-destdir-fix)
   (define destdir
@@ -434,7 +528,9 @@
   ;; grab paths before we change them
   (define bindir      (dir: 'bin))
   (define librktdir   (dir: 'librkt))
-  (define collectsdir (dir: 'collects))
+  (define sharerktdir   (dir: 'sharerkt))
+  (define configdir   (dir: 'config))
+  (define appsdir   (dir: 'apps))
   (define (remove-dest p)
     (let ([pfx (and (< destdirlen (string-length p))
                     (substring p 0 destdirlen))])
@@ -446,14 +542,37 @@
   ;; only when DESTDIR is present, so we're installing to a directory that
   ;; has only our binaries
   (fix-executables bindir librktdir)
-  (unless origtree? (write-config collectsdir)))
+  (fix-desktop-files appsdir bindir sharerktdir)
+  (unless origtree? (write-config configdir)))
+
+(define (post-adjust)
+  (when (regexp-match? #rx"--source" (car adjust-mode))
+    (define do-tree (move/copy-tree #f))
+    (current-directory rktdir)
+    ;; Copy source into place:
+    (current-skip-filter ; skip src/build
+     (lambda (p) (regexp-match? #rx"^build$" p)))
+    (do-tree "src" (build-path base-destdir "src"))
+    ;; Remove directories that get re-created:
+    (define (remove! dst*) (rm (dir: dst*)))
+    (remove! 'bin)
+    (remove! 'lib)
+    (remove! 'apps)
+    (remove! 'man)
+    (remove! 'config) ; may be recreated by a later bundle step
+    (remove! 'includerkt)
+    (when (regexp-match? #rx"--source" (cadr adjust-mode))
+      ;; strip "compiled" directories back out of "collects"
+      (rm-compiled (dir: 'collects)))))
 
 ;; --------------------------------------------------------------------------
 
 (module+ main
   (case op
-    [(move) (move/copy-distribution #t)]
-    [(copy) (move/copy-distribution #f)]
+    [(move) (move/copy-distribution #t #f)]
+    [(copy) (move/copy-distribution #f #f)]
+    [(bundle) (move/copy-distribution #f #t)]
+    [(post-adjust) (post-adjust)]
     [(make-install-copytree)    (make-install-copytree)]
     [(make-install-destdir-fix) (make-install-destdir-fix)]
     [else   (error (format "unknown operation: ~e" op))]))

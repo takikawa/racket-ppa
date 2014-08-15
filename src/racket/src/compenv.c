@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2014 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -28,6 +28,10 @@
 
 #define TABLE_CACHE_MAX_SIZE 2048
 
+/* Pre-allocate local variable reference objects.
+   first dimension: position in the current stack frame
+   second dimension: 0 for local variables, 1 for unboxed local variables
+   third dimension: flags. TODO has to do with whether something is an unboxed fixnum, flonum, or extnum */
 READ_ONLY static Scheme_Object *scheme_local[MAX_CONST_LOCAL_POS][MAX_CONST_LOCAL_TYPES][MAX_CONST_LOCAL_FLAG_VAL + 1];
 READ_ONLY static Scheme_Object *toplevels[MAX_CONST_TOPLEVEL_DEPTH][MAX_CONST_TOPLEVEL_POS][SCHEME_TOPLEVEL_FLAGS_MASK + 1];
 
@@ -853,11 +857,14 @@ static Scheme_Object *alloc_local(short type, int pos)
   return (Scheme_Object *)v;
 }
 
+/* type should be either scheme_local_type or scheme_local_unbox_type
+   TODO: double check that */
 Scheme_Object *scheme_make_local(Scheme_Type type, int pos, int flags)
 {
   int k;
   Scheme_Object *v, *key;
 
+  /* k is 0 if type is scheme_local_type and 1 if type is scheme_local_unbox_type */
   k = type - scheme_local_type;
   
   /* Helper for reading bytecode: make sure flags is a valid value */
@@ -899,7 +906,9 @@ static Scheme_Local *get_frame_loc(Scheme_Comp_Env *frame,
   int cnt, u;
 
   u = COMPILE_DATA(frame)->use[i];
-  
+
+  // flags -= (flags & SCHEME_APP_POS);
+
   u |= (((flags & (SCHEME_APP_POS | SCHEME_SETTING))
 	 ? CONSTRAINED_USE
 	 : ((u & (ARBITRARY_USE | ONE_ARBITRARY_USE)) ? ARBITRARY_USE : ONE_ARBITRARY_USE))
@@ -1777,7 +1786,7 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
               *_lexical_binding_id = val;
             }
 	    if (flags & SCHEME_DONT_MARK_USE)
-	      return scheme_make_local(scheme_local_type, 0, 0);
+	      return scheme_make_local(scheme_local_type, p+i, 0);
 	    else
 	      return (Scheme_Object *)get_frame_loc(frame, i, j, p, flags);
 	  }
@@ -1900,22 +1909,33 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
     modname = NULL;
 
     if (genv->module && genv->disallow_unbound) {
-      if (genv->disallow_unbound > 0) {
-        /* Free identifier. Maybe don't continue. */
-        if (flags & (SCHEME_SETTING | SCHEME_REFERENCING)) {
-          scheme_unbound_syntax(((flags & SCHEME_SETTING) 
-                                 ? scheme_set_stx_string
-                                 : scheme_var_ref_string),
-                                NULL, src_find_id, "unbound identifier in module");
-          return NULL;
-        }
-        if (flags & SCHEME_NULL_FOR_UNBOUND)
-          return NULL;
+      /* double-check for a local-module binding that's not in find_id's context;
+         see a similar test in scheme_check_top_identifier_bound() */
+      if (SCHEME_STXP(find_id))
+        find_global_id = scheme_tl_id_sym(genv, find_id, NULL, 0, NULL, NULL);
+      else
+        find_global_id = NULL;
+      if (find_global_id && !SAME_OBJ(find_global_id, SCHEME_STX_SYM(find_id))) {
+        /* it's defined after all; fall through below assumes a binding
+           in the enclosing module */
       } else {
-        if (flags & (SCHEME_SETTING | SCHEME_REFERENCING)) {
-          scheme_register_unbound_toplevel(env, src_find_id);
+        if (genv->disallow_unbound > 0) {
+          /* Free identifier. Maybe don't continue. */
+          if (flags & (SCHEME_SETTING | SCHEME_REFERENCING)) {
+            scheme_unbound_syntax(((flags & SCHEME_SETTING)
+                                   ? scheme_set_stx_string
+                                   : scheme_var_ref_string),
+                                  NULL, src_find_id, "unbound identifier in module");
+            return NULL;
+          }
+          if (flags & SCHEME_NULL_FOR_UNBOUND)
+            return NULL;
+        } else {
+          if (flags & (SCHEME_SETTING | SCHEME_REFERENCING)) {
+            scheme_register_unbound_toplevel(env, src_find_id);
+          }
+          /* continue, for now */
         }
-        /* continue, for now */
       }
     }
   }
@@ -2037,7 +2057,8 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
             || scheme_is_unsafe_modname(modname)
             || scheme_is_flfxnum_modname(modname)
             || scheme_is_extfl_modname(modname)
-            || scheme_is_futures_modname(modname))
+            || scheme_is_futures_modname(modname)
+            || scheme_is_foreign_modname(modname))
           || (flags & SCHEME_REFERENCING))) {
     /* Create a module variable reference, so that idx is preserved: */
     return scheme_hash_module_variable(env->genv, modidx, find_id, 
@@ -2126,6 +2147,16 @@ Scheme_Object *scheme_extract_futures(Scheme_Object *o)
   Scheme_Env *home;
   home = scheme_get_bucket_home((Scheme_Bucket *)o);
   if (home && home->module && scheme_is_futures_modname(home->module->modname))
+    return (Scheme_Object *)((Scheme_Bucket *)o)->val;
+  else
+    return NULL;
+}
+
+Scheme_Object *scheme_extract_foreign(Scheme_Object *o)
+{
+  Scheme_Env *home;
+  home = scheme_get_bucket_home((Scheme_Bucket *)o);
+  if (home && home->module && scheme_is_foreign_modname(home->module->modname))
     return (Scheme_Object *)((Scheme_Bucket *)o)->val;
   else
     return NULL;
@@ -2228,8 +2259,9 @@ scheme_do_local_lift_expr(const char *who, int stx_pos, int argc, Scheme_Object 
     scheme_contract_error("syntax-local-lift-expression",
                           "no lift target",
                           NULL);
-  
-  expr = scheme_add_remove_mark(expr, local_mark);
+
+  if (local_mark)
+    expr = scheme_add_remove_mark(expr, local_mark);
 
   /* We don't really need a new symbol each time, since the mark
      will generate new bindings. But lots of things work better or faster
@@ -2263,7 +2295,8 @@ scheme_do_local_lift_expr(const char *who, int stx_pos, int argc, Scheme_Object 
   rev_ids = scheme_null;
   for (; !SCHEME_NULLP(ids); ids = SCHEME_CDR(ids)) {
     id = SCHEME_CAR(ids);
-    id = scheme_add_remove_mark(id, local_mark);
+    if (local_mark)
+      id = scheme_add_remove_mark(id, local_mark);
     rev_ids = scheme_make_pair(id, rev_ids);
   }
   ids = scheme_reverse(rev_ids);
@@ -2310,7 +2343,8 @@ scheme_local_lift_end_statement(Scheme_Object *expr, Scheme_Object *local_mark, 
                           " an expression within a module declaration",
                           NULL);
   
-  expr = scheme_add_remove_mark(expr, local_mark);
+  if (local_mark)
+    expr = scheme_add_remove_mark(expr, local_mark);
   orig_expr = expr;
 
   pr = scheme_make_pair(expr, SCHEME_VEC_ELS(COMPILE_DATA(env)->lifts)[3]);
@@ -2326,6 +2360,7 @@ Scheme_Object *scheme_local_lift_require(Scheme_Object *form, Scheme_Object *ori
 {
   Scheme_Object *mark, *data, *pr;
   Scheme_Object *req_form;
+  int need_prepare = 0;
 
   data = NULL;
 
@@ -2352,8 +2387,10 @@ Scheme_Object *scheme_local_lift_require(Scheme_Object *form, Scheme_Object *ori
 
   if (SCHEME_RPAIRP(data))
     form = scheme_parse_lifted_require(form, phase, mark, SCHEME_CAR(data));
-  else
+  else {
     form = scheme_toplevel_require_for_expand(form, phase, env, mark);
+    need_prepare = 1;
+  }
   
   pr = scheme_make_pair(form, SCHEME_VEC_ELS(COMPILE_DATA(env)->lifts)[6]);
   SCHEME_VEC_ELS(COMPILE_DATA(env)->lifts)[6] = pr;
@@ -2361,14 +2398,16 @@ Scheme_Object *scheme_local_lift_require(Scheme_Object *form, Scheme_Object *ori
   req_form = form;
 
   form = orig_form;
-  form = scheme_add_remove_mark(form, local_mark);
+  if (local_mark)
+    form = scheme_add_remove_mark(form, local_mark);
   form = scheme_add_remove_mark(form, mark);
-  form = scheme_add_remove_mark(form, local_mark);
+  if (local_mark)
+    form = scheme_add_remove_mark(form, local_mark);
 
   SCHEME_EXPAND_OBSERVE_LIFT_REQUIRE(scheme_get_expand_observe(), req_form, orig_form, form);
 
   /* In a top-level context, may need to force compile-time evaluation: */
-  if (!env->genv->module)
+  if (need_prepare)
     scheme_prepare_compile_env(env->genv);
 
   return form;
@@ -2392,7 +2431,8 @@ Scheme_Object *scheme_local_lift_provide(Scheme_Object *form, Scheme_Object *loc
                           "not expanding in a module run-time body",
                           NULL);
   
-  form = scheme_add_remove_mark(form, local_mark);
+  if (local_mark)
+    form = scheme_add_remove_mark(form, local_mark);
   form = scheme_datum_to_syntax(scheme_make_pair(scheme_datum_to_syntax(scheme_intern_symbol("#%provide"), 
                                                                         scheme_false, scheme_sys_wraps(env), 
                                                                         0, 0),
@@ -2439,10 +2479,11 @@ Scheme_Object *scheme_namespace_lookup_value(Scheme_Object *sym, Scheme_Env *gen
   return v;
 }
 
-Scheme_Object *scheme_find_local_shadower(Scheme_Object *sym, Scheme_Object *sym_marks, Scheme_Comp_Env *env)
+Scheme_Object *scheme_find_local_shadower(Scheme_Object *sym, Scheme_Object *sym_marks, Scheme_Comp_Env *env,
+                                          Scheme_Object **_free_id)
 {
   Scheme_Comp_Env *frame;
-  Scheme_Object *esym, *uid = NULL, *env_marks, *prop;
+  Scheme_Object *esym, *uid = NULL, *env_marks, *prop, *val;
 
   /* Walk backward through the frames, looking for a renaming binding
      with the same marks as the given identifier, sym. Skip over
@@ -2482,12 +2523,19 @@ Scheme_Object *scheme_find_local_shadower(Scheme_Object *sym, Scheme_Object *sym
             prop = scheme_stx_property(esym, unshadowable_symbol, NULL);
             if (SCHEME_FALSEP(prop)) {
               env_marks = scheme_stx_extract_marks(esym);
-              if (scheme_equal(env_marks, sym_marks)) { /* This used to have 1 || --- why? */
+              if (scheme_equal(env_marks, sym_marks)) {
                 sym = esym;
                 if (COMPILE_DATA(frame)->const_uids)
                   uid = COMPILE_DATA(frame)->const_uids[i];
                 else
                   uid = frame->uid;
+                val = COMPILE_DATA(frame)->const_vals[i];
+                if (val && SAME_TYPE(SCHEME_TYPE(val), scheme_macro_type)) {
+                  if (scheme_is_binding_rename_transformer(SCHEME_PTR_VAL(val))) {
+                    val = scheme_rename_transformer_id(SCHEME_PTR_VAL(val));
+                    *_free_id = val;
+                  }
+                }
                 break;
               }
             }

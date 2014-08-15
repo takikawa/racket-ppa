@@ -237,6 +237,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Thread *gc_prep_thread_chain_;
   struct Scheme_Thread_Set *scheme_thread_set_top_;
   struct Scheme_Current_LWC *scheme_current_lwc_;
+  intptr_t process_time_at_swap_;
   int num_running_threads_;
   int swap_no_setjmp_;
   int thread_swap_count_;
@@ -251,6 +252,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Custodian *main_custodian_;
   struct Scheme_Custodian *last_custodian_;
   struct Scheme_Hash_Table *limited_custodians_;
+  struct Scheme_Plumber *initial_plumber_;
   struct Scheme_Config *initial_config_;
   struct Scheme_Thread *swap_target_;
   struct Scheme_Object *scheduled_kills_;
@@ -279,12 +281,12 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Logger *scheme_main_logger_;
   struct Scheme_Logger *scheme_gc_logger_;
   struct Scheme_Logger *scheme_future_logger_;
+  struct Scheme_Logger *scheme_place_logger_;
   int intdef_counter_;
   int builtin_ref_counter_;
   int env_uid_counter_;
   int scheme_overflow_count_;
   struct Scheme_Object *original_pwd_;
-  struct Scheme_Object *inst_links_path_;
   void *file_path_wc_buffer_;
   intptr_t scheme_hash_request_count_;
   intptr_t scheme_hash_iteration_count_;
@@ -314,6 +316,7 @@ typedef struct Thread_Local_Variables {
   double start_this_gc_real_time_;
   double end_this_gc_real_time_;
   struct Scheme_Struct_Type *gc_info_prefab_;
+  struct Scheme_Struct_Type *place_event_prefab_;
   volatile short delayed_break_ready_;
   struct Scheme_Thread *main_break_target_thread_;
   intptr_t scheme_code_page_total_;
@@ -355,6 +358,8 @@ typedef struct Thread_Local_Variables {
   Scheme_On_Atomic_Timeout_Proc on_atomic_timeout_;
   int atomic_timeout_auto_suspend_;
   int atomic_timeout_atomic_level_;
+  void *scheme_inotify_server_;
+  struct Scheme_Object *configuration_callback_cache_[2];
 } Thread_Local_Variables;
 
 #if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS)
@@ -620,6 +625,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define num_running_threads XOA (scheme_get_thread_local_variables()->num_running_threads_)
 #define swap_no_setjmp XOA (scheme_get_thread_local_variables()->swap_no_setjmp_)
 #define thread_swap_count XOA (scheme_get_thread_local_variables()->thread_swap_count_)
+#define process_time_at_swap XOA (scheme_get_thread_local_variables()->process_time_at_swap_)
 #define scheme_did_gc_count XOA (scheme_get_thread_local_variables()->scheme_did_gc_count_)
 #define scheme_future_state XOA (scheme_get_thread_local_variables()->scheme_future_state_)
 #define scheme_future_thread_state XOA (scheme_get_thread_local_variables()->scheme_future_thread_state_)
@@ -631,6 +637,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define main_custodian XOA (scheme_get_thread_local_variables()->main_custodian_)
 #define last_custodian XOA (scheme_get_thread_local_variables()->last_custodian_)
 #define limited_custodians XOA (scheme_get_thread_local_variables()->limited_custodians_)
+#define initial_plumber XOA (scheme_get_thread_local_variables()->initial_plumber_)
 #define initial_config XOA (scheme_get_thread_local_variables()->initial_config_)
 #define swap_target XOA (scheme_get_thread_local_variables()->swap_target_)
 #define scheduled_kills XOA (scheme_get_thread_local_variables()->scheduled_kills_)
@@ -659,12 +666,12 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define scheme_main_logger XOA (scheme_get_thread_local_variables()->scheme_main_logger_)
 #define scheme_gc_logger XOA (scheme_get_thread_local_variables()->scheme_gc_logger_)
 #define scheme_future_logger XOA (scheme_get_thread_local_variables()->scheme_future_logger_)
+#define scheme_place_logger XOA (scheme_get_thread_local_variables()->scheme_place_logger_)
 #define intdef_counter XOA (scheme_get_thread_local_variables()->intdef_counter_)
 #define builtin_ref_counter XOA (scheme_get_thread_local_variables()->builtin_ref_counter_)
 #define env_uid_counter XOA (scheme_get_thread_local_variables()->env_uid_counter_)
 #define scheme_overflow_count XOA (scheme_get_thread_local_variables()->scheme_overflow_count_)
 #define original_pwd XOA (scheme_get_thread_local_variables()->original_pwd_)
-#define inst_links_path XOA (scheme_get_thread_local_variables()->inst_links_path_)
 #define file_path_wc_buffer XOA (scheme_get_thread_local_variables()->file_path_wc_buffer_)
 #define scheme_hash_request_count XOA (scheme_get_thread_local_variables()->scheme_hash_request_count_)
 #define scheme_hash_iteration_count XOA (scheme_get_thread_local_variables()->scheme_hash_iteration_count_)
@@ -694,6 +701,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define start_this_gc_real_time XOA (scheme_get_thread_local_variables()->start_this_gc_real_time_)
 #define end_this_gc_real_time XOA (scheme_get_thread_local_variables()->end_this_gc_real_time_)
 #define gc_info_prefab XOA (scheme_get_thread_local_variables()->gc_info_prefab_)
+#define place_event_prefab XOA (scheme_get_thread_local_variables()->place_event_prefab_)
 #define delayed_break_ready XOA (scheme_get_thread_local_variables()->delayed_break_ready_)
 #define main_break_target_thread XOA (scheme_get_thread_local_variables()->main_break_target_thread_)
 #define scheme_code_page_total XOA (scheme_get_thread_local_variables()->scheme_code_page_total_)
@@ -735,6 +743,9 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define on_atomic_timeout XOA (scheme_get_thread_local_variables()->on_atomic_timeout_)
 #define atomic_timeout_auto_suspend XOA (scheme_get_thread_local_variables()->atomic_timeout_auto_suspend_)
 #define atomic_timeout_atomic_level XOA (scheme_get_thread_local_variables()->atomic_timeout_atomic_level_)
+#define scheme_inotify_server XOA (scheme_get_thread_local_variables()->scheme_inotify_server_)
+#define configuration_callback_cache XOA (scheme_get_thread_local_variables()->configuration_callback_cache_)
+
 
 /* **************************************** */
 

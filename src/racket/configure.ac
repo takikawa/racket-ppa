@@ -18,6 +18,12 @@
 # Note: we use CPPFLAGS for configure-time testing only because
 # it used to include C++ flags that we didn't want for Racket.
 # hence PREFLAGS, which is initialized to the original CPPFLAGS.
+#
+# CC_FOR_BUILD is used for the Boehm GC build. In contrast to some
+# other build processes, CC_FOR_BUILD needs to be consistent with CC
+# in terms of its platform selection, and so it receives CFLAGS,
+# PREFLAGS, and COMPFLAGS, too. If that doesn't work out, use
+# `--enable-sgc', instead.
 
 AC_INIT([Racket])
 AC_CONFIG_SRCDIR(racket/src/bignum.c)
@@ -33,7 +39,7 @@ AC_ARG_ENABLE(places,  [  --enable-places         support places (3m only; usual
 AC_ARG_ENABLE(futures, [  --enable-futures        support futures (usually enabled by default)])
 AC_ARG_ENABLE(float,   [  --enable-float          support single-precision floats (enabled by default)], , enable_float=yes)
 AC_ARG_ENABLE(floatinstead, [  --enable-floatinstead   use single-precision by default (NOT RECOMMENDED)])
-AC_ARG_ENABLE(extflonum,    [  --enable-extflonum      support extflonums (enabled by default, if available)], , enable_extflonum=yes)
+AC_ARG_ENABLE(extflonum,    [  --enable-extflonum      support extflonums (enabled by default, if available)], , enable_extflonum=default)
 
 AC_ARG_ENABLE(racket,  [  --enable-racket=<path>  use <path> as Racket executable to build Racket])
 
@@ -45,10 +51,14 @@ AC_ARG_ENABLE(usersetup, [  --enable-usersetup      setup user-specific files on
 AC_ARG_ENABLE(shared,  [  --enable-shared         create shared libraries (ok, but not recommended)])
 AC_ARG_ENABLE(dynlib,  [  --enable-dynlib         same as --enable-shared])
 AC_ARG_ENABLE(lt,      [  --enable-lt=<prog>      use <prog> instead of libtool; disable to use bundled], LIBTOOLPROG="$enableval", enable_lt=default)
+AC_ARG_ENABLE(dynlib,  [  --enable-libs           install Racket static libraries, if any])
 
 AC_ARG_ENABLE(libffi,  [  --enable-libffi         use installed libffi (enabled by default for Unix)], , enable_libffi=default)
 
 AC_ARG_ENABLE(sdk,     [  --enable-sdk=<path>     use Mac OS X 10.4 SDK directory])
+AC_ARG_ENABLE(sdk,     [  --enable-sdk5=<path>    use Mac OS X 10.5 SDK directory])
+AC_ARG_ENABLE(sdk,     [  --enable-sdk6=<path>    use Mac OS X 10.6 SDK directory])
+AC_ARG_ENABLE(sdk,     [  --enable-sysroot=<path> use sysroot directory (e.g., for Android)])
 AC_ARG_ENABLE(xonx,    [  --enable-xonx           use Unix style (e.g., use Gtk) for Mac OS X])
 AC_ARG_ENABLE(libfw,   [  --enable-libfw          install Mac OS X frameworks to /Library/Frameworks])
 AC_ARG_ENABLE(libfw,   [  --enable-userfw         install Mac OS X frameworks to ~/Library/Frameworks])
@@ -70,6 +80,7 @@ AC_ARG_ENABLE(bigendian, [  --enable-bigendian      assume "big" if endianness c
 AC_ARG_ENABLE(gprof,   [  --enable-gprof          compile for profiling with gprof (gcc only)])
 AC_ARG_ENABLE(gcov,    [  --enable-gcov           compile to gather gcov statistics (gcc3 only)])
 
+AC_ARG_ENABLE(noopt,   [  --enable-strip          strip debug on install (usually enabled by default)])
 AC_ARG_ENABLE(noopt,   [  --enable-noopt          drop -O C flags (useful for low-level debugging)])
 
 ###### Some flags imply other flags #######
@@ -188,6 +199,16 @@ if test "${mandir}" != '${prefix}/man' ; then
    unixstyle=yes
  fi
 fi
+if test "${docdir}" != '${datarootdir}/doc/${PACKAGE}' ; then
+  unixstyle=yes
+fi
+if test "${collectsdir}" != '${exec_prefix}/share/${PACKAGE}/collects' ; then
+  unixstyle=yes
+fi
+if test "${appsdir}" != '${exec_prefix}/share/applications' ; then
+  unixstyle=yes
+fi
+
 
 MAKE_COPYTREE=no
 if test "${unixstyle}" = "no" ; then
@@ -199,23 +220,28 @@ if test "${unixstyle}" = "no" ; then
   fi
   bindir='${prefix}/bin'
   libpltdir='${prefix}/lib'
-  collectsdir='${prefix}/collects'
+  sharepltdir='${prefix}/share'
+  etcpltdir='${prefix}/etc'
   includepltdir='${prefix}/include'
   docdir='${prefix}/doc'
   mandir='${prefix}/man'
+  collectsdir='${prefix}/collects'
+  appsdir='${prefix}/share/applications'
   COLLECTS_PATH="../collects"
+  CONFIG_PATH="../etc"
   INSTALL_ORIG_TREE=yes
 else
   if test "${prefix}" = "NONE" ; then
     # Set prefix explicitly so we can use it during configure
     prefix="${ac_default_prefix}"
   fi
-  libpltdir="${libdir}/racket"
-  collectsdir="${libdir}/racket/collects"
-  includepltdir="${includedir}/racket"
-  docdir="${datadir}/doc/racket"
+  libpltdir="${libdir}/"'${PACKAGE}'
+  sharepltdir="${datadir}/"'${PACKAGE}'
+  etcpltdir="${sysconfdir}/"'${PACKAGE}'
+  includepltdir="${includedir}/"'${PACKAGE}'
   MAKE_COPYTREE=copytree
   COLLECTS_PATH='${collectsdir}'
+  CONFIG_PATH='${etcpltdir}'
   INSTALL_ORIG_TREE=no
 fi
 
@@ -278,6 +304,7 @@ show_explicitly_enabled "${enable_backtrace}" "3m GC backtraces" "Note that this
 
 show_explicitly_disabled "${enable_float}" "Single-precision floats"
 show_explicitly_enabled "${enable_floatinstead}" "Single-precision default floats" "Note that this mode is NOT RECOMMENDED"
+show_explicitly_enabled "${enable_extflonum}" "Extflonums"
 show_explicitly_disabled "${enable_extflonum}" "Extflonums"
 
 show_explicitly_enabled "${enable_pthread}" "pthreads"
@@ -288,6 +315,10 @@ show_explicitly_enabled "${enable_gprof}" "gprof"
 show_explicitly_enabled "${enable_gcov}" "gcov"
 
 show_explicitly_enabled "${enable_noopt}" "No-optimization" "Note that this mode is intended only for debugging purposes"
+show_explicitly_enabled "${enable_strip}" "Debug-symbol stripping"
+show_explicitly_disabled "${enable_strip}" "Debug-symbol stripping"
+
+show_explicitly_enabled "${enable_libs}" "Installation of static libraries (if any)"
 
 show_explicitly_disabled "${enable_mac64}" "64-bit Mac OS X"
 
@@ -295,7 +326,26 @@ show_explicitly_enabled "${enable_libfw}" "Frameworks-to-system"
 show_explicitly_enabled "${enable_userfw}" "Frameworks-to-user"
 
 if test "${enable_sdk}" != "" ; then
-   echo "=== Using Mac OS X SDK directory ${enable_sdk}"
+   if test "${enable_sdk5}" != "" ; then
+     echo "ERROR: cannot specify both --enable-sdk and --enable-sdk5"
+   fi
+   if test "${enable_sdk6}" != "" ; then
+     echo "ERROR: cannot specify both --enable-sdk and --enable-sdk6"
+   fi
+   echo "=== Using Mac OS X 10.4 SDK directory ${enable_sdk}"
+fi
+if test "${enable_sdk5}" != "" ; then
+   if test "${enable_sdk6}" != "" ; then
+     echo "ERROR: cannot specify both --enable-sdk5 and --enable-sdk6"
+   fi
+   echo "=== Using Mac OS X 10.5 SDK directory ${enable_sdk}"
+fi
+if test "${enable_sdk6}" != "" ; then
+   echo "=== Using Mac OS X 10.6 SDK directory ${enable_sdk6}"
+fi
+
+if test "${enable_sysroot}" != "" ; then
+   echo "=== Using sysroot directory ${enable_sysroot}"
 fi
 
 if test "${enable_racket}" != "" ; then
@@ -372,10 +422,15 @@ MAIN_VARIANT=3m
 
 INSTALL_SETUP_FLAGS=
 
+INSTALL_LIBS_ENABLE=no-install
+
 STRIP_DEBUG=":"
+enable_strip_by_default=yes
 
 use_flag_pthread=yes
+use_flag_posix_pthread=no
 skip_iconv_check=no
+check_page_size=yes
 
 ###### OSKit stuff #######
 
@@ -430,13 +485,22 @@ COMPFLAGS=""
 
 ORIG_CC="${CC}"
 ORIG_CPP="${CPP}"
-SUB_CONFIGURE_EXTRAS=""
+# Include `--enable-portable-binary' by default for libffi
+SUB_CONFIGURE_EXTRAS=" --enable-portable-binary"
+
+if test "${enable_sysroot}" != "" ; then
+   PREFLAGS="--sysroot=${enable_sysroot} ${PREFLAGS}"
+   CPPFLAGS="--sysroot=${enable_sysroot} ${CPPFLAGS}"
+   LDFLAGS="--sysroot=${enable_sysroot} ${LDFLAGS}"
+   SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CPPFLAGS="'"'"${PREFLAGS}"'"'
+   SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} LDFLAGS="'"'"${LDFLAGS}"'"'
+fi
 
 if test "${enable_oskit}" = "no" ; then
   AC_PROG_CC
   AC_PROG_CPP
   if test "$AS" = '' ; then 
-    AS=as
+    AS="${ac_tool_prefix}as"
     as_was_set=no
   else
     as_was_set=yes
@@ -444,7 +508,11 @@ if test "${enable_oskit}" = "no" ; then
 fi
 AC_PROG_RANLIB
 if test "$AR" = '' ; then 
-  AR=ar
+  AR="${ac_tool_prefix}ar"
+  AC_CHECK_PROG(platform_ar_found, $AR, yes, no)
+  if test "$platform_ar_found" = 'no' ; then
+    AR="ar"
+  fi
 fi
 if test "$ARFLAGS" = '' ; then 
   ARFLAGS=ruv
@@ -499,6 +567,7 @@ fi
 
 if test "${enable_shared}" = "yes" ; then
   LIBRACKET_DEP="${LIBRACKET_DEP} libmzgc.la"
+  INSTALL_LIBS_ENABLE=install
 fi
 
 if test "${enable_foreign}" = "yes" ; then
@@ -506,6 +575,10 @@ if test "${enable_foreign}" = "yes" ; then
 fi
 if test "${enable_jit}" = "yes" ; then
   check_for_mprotect=yes
+fi
+
+if test "${enable_libs}" = "yes" ; then
+  INSTALL_LIBS_ENABLE=install
 fi
 
 ############## platform tests ################
@@ -531,6 +604,8 @@ case "$host_os" in
     need_gcc_static_libgcc="yes"
     check_gcc_dash_e="yes"
     try_poll_syscall="yes"
+    use_flag_pthread="no"
+    use_flag_posix_pthread="yes"
     ;;
   aix*)
     enable_cgcdefault="yes"
@@ -539,12 +614,17 @@ case "$host_os" in
   *freebsd*)
     LIBS="$LIBS -rdynamic"
     DYN_CFLAGS="-fPIC"
-    enable_pthread=yes
+    enable_pthread_by_default=yes
     try_kqueue_syscall=yes
     ;;
   openbsd*)
     LIBS="$LIBS -Wl,--export-dynamic"
-    enable_pthread=yes
+    enable_pthread_by_default=yes
+    try_kqueue_syscall=yes
+    ;;
+  dragonfly*)
+    LIBS="$LIBS -Wl,--export-dynamic"
+    enable_pthread_by_default=yes
     try_kqueue_syscall=yes
     ;;
   netbsd*)
@@ -562,9 +642,9 @@ case "$host_os" in
   linux*)
     LIBS="$LIBS -ldl -lm -rdynamic"
     DYN_CFLAGS="-fPIC"
-    STRIP_DEBUG="strip -S"
     try_poll_syscall=yes
     try_epoll_syscall=yes
+    try_inotify_syscall=yes
     case "$host_cpu" in
       #Required for CentOS 4.6
       x86_64)
@@ -616,6 +696,7 @@ case "$host_os" in
     MZINSTALLBINDIR="${MZINSTALLBINDIR}/.."
     EXE_SUFFIX=".exe"
     COLLECTS_PATH="collects"
+    CONFIG_PATH="lib"
     skip_iconv_check=yes
     check_for_mprotect=no
     AC_DEFINE(HAVE_STDINT_H,1,[Have stdint.h])
@@ -656,12 +737,35 @@ case "$host_os" in
       fi
       if test "${CPP}" = "gcc -E" ; then
         CPP="gcc-4.0 -E"
+        need_cpp_in_extras=yes
       fi
       if test "${LD}" = "gcc" ; then
         LD=gcc-4.0
+        need_ld_in_extras=yes
       fi
-      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS} ${PREFLAGS}"'"'
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS}"'"'
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CPPFLAGS="'"'"${PREFLAGS}"'"'
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} LDFLAGS="'"'"${LDFLAGS}"'"'
       need_cc_in_extras=yes
+      if test "$ORIG_CC_FOR_BUILD" = "" ; then
+        CC_FOR_BUILD="$CC"
+      fi
+    fi
+    
+    if test "${enable_sdk5}" != "" ; then 
+      PREFLAGS="$PREFLAGS -isysroot ${enable_sdk5} -mmacosx-version-min=10.5"
+      LDFLAGS="$LDFLAGS -isysroot ${enable_sdk5} -mmacosx-version-min=10.5"
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS}"'"'
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CPPFLAGS="'"'"${PREFLAGS}"'"'
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} LDFLAGS="'"'"${LDFLAGS}"'"'
+    fi
+    
+    if test "${enable_sdk6}" != "" ; then 
+      PREFLAGS="$PREFLAGS -isysroot ${enable_sdk6} -mmacosx-version-min=10.6"
+      LDFLAGS="$LDFLAGS -isysroot ${enable_sdk6} -mmacosx-version-min=10.6"
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS}"'"'
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CPPFLAGS="'"'"${PREFLAGS}"'"'
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} LDFLAGS="'"'"${LDFLAGS}"'"'
     fi
     
     case "$host_cpu" in
@@ -674,8 +778,6 @@ case "$host_os" in
 
     PREFLAGS="$PREFLAGS -DOS_X -D_DARWIN_UNLIMITED_SELECT"
     try_kqueue_syscall=yes
-
-    STRIP_DEBUG="/usr/bin/strip -S"
 
     SO_SUFFIX=.dylib
 
@@ -696,6 +798,12 @@ case "$host_os" in
 
     if test "${need_cc_in_extras}" = "yes" ; then
       SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CC="'"'"${CC}"'"'
+    fi
+    if test "${need_cpp_in_extras}" = "yes" ; then
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CPP="'"'"${CPP}"'"'
+    fi
+    if test "${need_ld_in_extras}" = "yes" ; then
+      SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} LD="'"'"${LD}"'"'
     fi
 
     if test "${enable_quartz}" = "yes" ; then
@@ -767,17 +875,31 @@ if test "${enable_sgc}" = "yes" ; then
   OPTIONS="$OPTIONS -DUSE_SENORA_GC"
 fi
 
+############## Strip tool ################
+
+if test "${enable_strip}" = "" ; then
+  if test "${enable_strip_by_default}" = "yes" ; then
+    enable_strip=yes
+  fi
+fi
+
+if test "${enable_strip}" = "yes" ; then
+  AC_CHECK_TOOL([STRIP], [strip])
+  # Used to add -S flag, but not all `strip' variants support it:
+  STRIP_DEBUG="$STRIP"
+fi
+
 ############## C flags ################
 
 AC_LANG_C
 
 [ msg="for inline keyword" ]
 AC_MSG_CHECKING($msg)
-AC_COMPILE_IFELSE(
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([
    static inline int foo() { return 0; }
    int main() {
       return foo();
-   }, 
+   }])], 
   inline=yes, inline=no)
 if test "$inline" = "no" ; then
   MZOPTIONS="$MZOPTIONS -DNO_INLINE_KEYWORD"
@@ -786,12 +908,12 @@ AC_MSG_RESULT($inline)
 
 [ msg="for noinline attribute" ]
 AC_MSG_CHECKING($msg)
-AC_COMPILE_IFELSE(
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([
    static int foo() __attribute__ ((noinline));
    static int foo() { return 0; }
    int main() {
       return foo();
-   }, noinline=yes, noinline=no)
+   }])], noinline=yes, noinline=no)
 if test "$noinline" = "yes" ; then
   AC_DEFINE(MZ_USE_NOINLINE,1,[Have noinline attribute])
 fi
@@ -799,14 +921,14 @@ AC_MSG_RESULT($noinline)
 
 [ msg="for GNU preprocessor" ]
 AC_MSG_CHECKING($msg)
-AC_COMPILE_IFELSE(
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([
    int main () {
    #ifdef __GNUC__
     return 0;
    #else
     if; // should fail
    #endif
-   }, using_gnu_cpp=yes, using_gnu_cpp=no)
+   }])], using_gnu_cpp=yes, using_gnu_cpp=no)
 if test "$using_gnu_cpp" = "yes" ; then
   XFORMFLAGS="$XFORMFLAGS --keep-lines"
   case "$build_os" in
@@ -879,16 +1001,16 @@ fi
 
 [ msg="for mbsrtowcs" ]
 AC_MSG_CHECKING($msg)
-AC_LINK_IFELSE(
-[  #include <wchar.h> ]
-[  #include <strings.h>]
+AC_LINK_IFELSE([AC_LANG_SOURCE([
+   #include <wchar.h>
+   #include <strings.h>
    int main() {
      mbstate_t state;
-[    char *src = "X";]
-[    bzero(&state, sizeof(mbstate_t));]
-[    mbsrtowcs(0, &src, 0, &state);]
+     char *src = "X";
+     bzero(&state, sizeof(mbstate_t));
+     mbsrtowcs(0, &src, 0, &state);
      return 0;
-   }, mbsrtowcs=yes, mbsrtowcs=no)
+   }])], mbsrtowcs=yes, mbsrtowcs=no)
 if test "$mbsrtowcs" = "no" ; then
   MZOPTIONS="$MZOPTIONS -DNO_MBTOWC_FUNCTIONS"
 fi
@@ -897,8 +1019,8 @@ AC_MSG_RESULT($mbsrtowcs)
 if test "${try_poll_syscall}" = "yes" ; then
   [ msg="for poll" ]
   AC_MSG_CHECKING($msg)
-  AC_LINK_IFELSE(
-  [  #include <poll.h> ]
+  AC_LINK_IFELSE([AC_LANG_SOURCE([
+     #include <poll.h>
      int main() {
       struct pollfd pfd;
       int r;
@@ -906,7 +1028,7 @@ if test "${try_poll_syscall}" = "yes" ; then
       pfd.events = POLLIN;
       r = poll(&pfd, 1, 0);
       return 0;
-     }, use_poll=yes, use_poll=no)
+     }])], use_poll=yes, use_poll=no)
   AC_MSG_RESULT($use_poll)
   if test "${use_poll}" = "yes" ; then
      AC_DEFINE(HAVE_POLL_SYSCALL,1,[Have poll])
@@ -916,8 +1038,8 @@ fi
 if test "${try_epoll_syscall}" = "yes" ; then
   [ msg="for epoll" ]
   AC_MSG_CHECKING($msg)
-  AC_LINK_IFELSE(
-  [  #include <sys/epoll.h> ]
+  AC_LINK_IFELSE([AC_LANG_SOURCE([
+    #include <sys/epoll.h>
     int main() {
       int fd;
       struct epoll_event ev;
@@ -925,29 +1047,49 @@ if test "${try_epoll_syscall}" = "yes" ; then
       ev.events = EPOLLIN | EPOLLONESHOT;
       epoll_ctl(fd, EPOLL_CTL_ADD, 0, &ev);
       return 0;
-    }, use_epoll=yes, use_epoll=no)
+    }])], use_epoll=yes, use_epoll=no)
   AC_MSG_RESULT($use_epoll)
   if test "${use_epoll}" = "yes" ; then
      AC_DEFINE(HAVE_EPOLL_SYSCALL,1,[Have epoll])
   fi
 fi
 
+if test "${try_inotify_syscall}" = "yes" ; then
+  [ msg="for inotify" ]
+  AC_MSG_CHECKING($msg)
+  AC_LINK_IFELSE([AC_LANG_SOURCE([
+    #include <sys/inotify.h> 
+    int main() {
+      int fd;
+      int wd;
+      fd = inotify_init();
+      wd = inotify_add_watch(fd, "/tmp", 
+                             (IN_CREATE | IN_DELETE | IN_DELETE_SELF
+                              | IN_MODIFY | IN_MOVE_SELF | IN_MOVED_TO));
+      return 0;
+    }])], use_inotify=yes, use_inotify=no)
+  AC_MSG_RESULT($use_inotify)
+  if test "${use_inotify}" = "yes" ; then
+     AC_DEFINE(HAVE_INOTIFY_SYSCALL,1,[Have inotify])
+  fi
+fi
+
 if test "${try_kqueue_syscall}" = "yes" ; then
   [ msg="for kqueue" ]
   AC_MSG_CHECKING($msg)
-  AC_LINK_IFELSE(
-  [  #include <sys/types.h> ]
-  [  #include <sys/event.h> ]
-  [  #include <sys/time.h> ]
+  AC_LINK_IFELSE([AC_LANG_SOURCE([
+     #include <sys/types.h>
+     #include <sys/event.h>
+     #include <sys/time.h>
      int main() {
         int kq;
         struct kevent kev;
-  [    struct timespec timeout = {0, 0}; ]
+        struct timespec timeout = {0, 0};
         kq = kqueue();
         EV_SET(&kev, 0, EVFILT_READ, EV_ADD, 0, 0, NULL);
         kevent(kq, &kev, 1, NULL, 0, &timeout);
         return 0;
-     }, use_kqueue=yes, use_kqueue=no)
+     }])], use_kqueue=yes, use_kqueue=no)
   AC_MSG_RESULT($use_kqueue)
   if test "${use_kqueue}" = "yes" ; then
      AC_DEFINE(HAVE_KQUEUE_SYSCALL,1,[Have kqueue])
@@ -957,18 +1099,32 @@ fi
 if test "${check_for_mprotect}" = "yes" ; then
   [ msg="for mmap and mprotect" ]
   AC_MSG_CHECKING($msg)
-  AC_LINK_IFELSE(
-  [  #include <sys/mman.h> ]
-  [  #include <fcntl.h> ]
+  AC_LINK_IFELSE([AC_LANG_SOURCE([
+     #include <sys/mman.h>
+     #include <fcntl.h>
      int main() {
       void *p;
       p = mmap(0, 2 << 16, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE, open("/dev/zero", O_RDWR), 0);
       mprotect(p, 2 << 16, PROT_READ | PROT_WRITE | PROT_EXEC);
       return 0;
-     }, use_mprotect=yes, use_mprotect=no)
+     }])], use_mprotect=yes, use_mprotect=no)
   AC_MSG_RESULT($use_mprotect)
   if test "${use_mprotect}" = "yes" ; then
      AC_DEFINE(HAVE_MMAP_MPROTECT,1,[Have mmap and mprotect])
+  fi
+fi
+
+if test "${check_page_size}" = "yes" ; then
+  [ msg="for large page size" ]
+  AC_MSG_CHECKING($msg)
+  AC_TRY_RUN(
+[     #include <unistd.h>]
+     int main() {
+      return !(getpagesize() > (1 << 14));
+     }, use_large_page_size=yes, use_large_page_size=no, use_large_page_size=no)
+  AC_MSG_RESULT($use_large_page_size)
+  if test "${use_large_page_size}" = "yes" ; then
+     AC_DEFINE(MZ_USE_LARGE_PAGE_SIZE,1,[Use large page size])
   fi
 fi
 
@@ -990,6 +1146,7 @@ AC_CHECK_SIZEOF(int)
 AC_CHECK_SIZEOF(long)
 AC_CHECK_SIZEOF(long long)
 AC_CHECK_SIZEOF([void *])
+AC_CHECK_SIZEOF(bool, unused, [#include <stdbool.h>])
 
 AC_TYPE_INTPTR_T
 AC_TYPE_UINTPTR_T
@@ -1093,7 +1250,7 @@ fi
 if test "${enable_mzrt}" = "yes" ; then
   [ msg="for compare-and-swap" ]
   AC_MSG_CHECKING($msg)
-  AC_LINK_IFELSE(
+  AC_LINK_IFELSE([AC_LANG_SOURCE([
    int check1(long *addr, long old, long new_val) {
      return __sync_bool_compare_and_swap(addr, old, new_val);
    }
@@ -1103,7 +1260,7 @@ if test "${enable_mzrt}" = "yes" ; then
    int main() {
       long l = 2; short s = 3;
       return !check1(&l, 2, 4) || !check2(&s, 3, 6);
-   }, cas_available=yes, cas_available=no)
+   }])], cas_available=yes, cas_available=no)
   AC_MSG_RESULT($cas_available)
   if test "${cas_available}" = "yes" ; then
     AC_DEFINE(MZ_CAS_AVAILABLE,1,[Compare-and-swap available])
@@ -1119,24 +1276,54 @@ fi
 
 ############### pthread ###################
 
+if test "${enable_pthread}" = "" ; then
+  if test "${enable_pthread_by_default}" = "yes" ; then
+    enable_pthread=yes
+  fi
+fi
+
 if test "${enable_pthread}" = "yes" ; then
   if test "${use_flag_pthread}" = "yes" ; then
     PREFLAGS="$PREFLAGS -pthread"
     LDFLAGS="$LDFLAGS -pthread"
   fi
+  if test "${use_flag_posix_pthread}" = "yes" ; then
+    PREFLAGS="$PREFLAGS -D_POSIX_PTHREAD_SEMANTICS -D_REENTRANT"
+  fi
   AC_DEFINE(USE_PTHREAD_INSTEAD_OF_ITIMER, 1, [Pthread timer enabled])
 
 [ msg="whether pthread_rwlock is available"   ]
   AC_MSG_CHECKING($msg)
-  AC_LINK_IFELSE(
-[  #include <pthread.h>]
+  AC_LINK_IFELSE([AC_LANG_SOURCE([
+   #include <pthread.h>
    pthread_rwlock_t l;
    int main() {
      return pthread_rwlock_init(&l, NULL);
-   }, rwlockavail=yes, rwlockavail=no)
+   }])], rwlockavail=yes, rwlockavail=no)
   AC_MSG_RESULT($rwlockavail)
   if test "$rwlockavail" = "yes" ; then
     AC_DEFINE(HAVE_PTHREAD_RWLOCK,1,[Have pthread_rwlock])
+  fi
+fi
+
+############## extflonum ################
+
+if test "${enable_extflonum}" = "default" ; then
+  [ msg="for powl for extflonums" ]
+  AC_MSG_CHECKING($msg)
+  AC_LINK_IFELSE([AC_LANG_SOURCE([
+     #include <math.h>
+     #include <stdlib.h>
+     int main(int argc, char **argv) {
+      char *p;
+      long double x = 2.0, y = strtod(*(argv+1), &p);
+      if (powl(x, y) == 8.0)
+        return 0;
+      return 1;
+     }])], use_extflonums=yes, use_extflonums=no)
+  AC_MSG_RESULT($use_extflonums)
+  if test "${use_extflonums}" = "no" ; then
+    AC_DEFINE(MZ_NO_EXTFLONUMS,1,[Extflonums disabled])
   fi
 fi
 
@@ -1228,10 +1415,10 @@ if test "$check_gcc_dash_e" = "yes" ; then
   # Can use -Wl,-E for linking because we're using GNU linker?
 [ msg="whether linker accepts -Wl,-E"   ]
   AC_MSG_CHECKING($msg)
-  AC_LINK_IFELSE(
+  AC_LINK_IFELSE([AC_LANG_SOURCE([
    int main() {
       return 0;
-   }, linker_dash_e=yes, linker_dash_e=no)
+   }])], linker_dash_e=yes, linker_dash_e=no)
   if test "$linker_dash_e" = "no" ; then
     LDFLAGS="${orig_ldflags}"
   fi
@@ -1242,7 +1429,7 @@ fi
 ############## drop optimization flags ################
 
 if test "${enable_noopt}" = "yes" ; then
-  AWKPRG='BEGIN { FS = "(^| )-O(0|1|2|3|4|5|6|7|8|9|())( |$)" } /.*/ { for (i = 1; i < NF; i++) printf "%s ", $i; print $NF }'
+  AWKPRG='BEGIN { FS = "(^| )-O(0|1|2|3|4|5|6|7|8|9)?( |$)" } /.*/ { for (i = 1; i < NF; i++) printf "%s ", $i; print $NF }'
   CFLAGS=`echo "$CFLAGS" | awk "$AWKPRG"`
 fi
 
@@ -1440,10 +1627,14 @@ AC_SUBST(LTO)
 AC_SUBST(LTA)
 
 AC_SUBST(collectsdir)
+AC_SUBST(appsdir)
 AC_SUBST(libpltdir)
+AC_SUBST(sharepltdir)
+AC_SUBST(etcpltdir)
 AC_SUBST(includepltdir)
 AC_SUBST(docdir)
 AC_SUBST(COLLECTS_PATH)
+AC_SUBST(CONFIG_PATH)
 
 AC_SUBST(MMM)
 AC_SUBST(MMM_INSTALLED)
@@ -1454,6 +1645,8 @@ AC_SUBST(CGC_CAP_INSTALLED)
 AC_SUBST(MAIN_VARIANT)
 
 AC_SUBST(INSTALL_SETUP_FLAGS)
+
+AC_SUBST(INSTALL_LIBS_ENABLE)
 
 AC_SUBST(RUN_RACKET_CGC)
 AC_SUBST(RUN_RACKET_MMM)
@@ -1492,7 +1685,27 @@ else
   MZOPTIONS="$MZOPTIONS -DDONT_USE_FOREIGN"
 fi
 makefiles="$makefiles foreign/Makefile"
-ac_configure_args="$ac_configure_args$SUB_CONFIGURE_EXTRAS"
+
+# Remove any --enable or --disable arguments from `ac_configure_args':
+new_configure_args=
+fixup_prev=
+eval "set x $ac_configure_args"
+shift
+for fixup_arg
+do
+  case $fixup_arg in
+  # Strip away all feature choices
+  -enable* | --enable* | -disable* | --disable*)
+    ;;
+  *)
+    case $fixup_arg in
+    *\'*) fixup_arg=`echo "$fixup_arg" | sed "s/'/'\\\\\\\\''/g"` ;;
+    esac
+    new_configure_args="$new_configure_args '$fixup_arg'" ;;
+  esac
+done
+# Add in `SUB_CONFIGURE_EXTRAS'
+ac_configure_args="$new_configure_args$SUB_CONFIGURE_EXTRAS"
 
 if test "${enable_gracket}" = "yes" ; then
   makefiles="$makefiles
@@ -1517,16 +1730,20 @@ if test "${inplacebuild}" = "yes" ; then
   fi
 else
   echo ">>> Installation targets:"
-  echo " executables  : ${bindir}/..."
-  echo " Racket code  : ${collectsdir}/..."
-  echo " core docs    : ${docdir}/..."
-  echo " C libraries  : ${libdir}/..."
-  echo " C headers    : ${includepltdir}/..."
-  echo " extra C objs : ${libpltdir}/..."
-  echo " man pages    : ${mandir}/..."
+  echo " executables        : ${bindir}/..."
+  echo " core docs          : ${docdir}/..."
+  echo " C libraries        : ${libdir}/..."
+  echo " C headers          : ${includepltdir}/..."
+  echo " platform libraries : ${libpltdir}/..."
+  echo " common libraries   : ${sharepltdir}/..."
+  echo " base collections   : ${collectsdir}/..."
+  echo " configuration      : ${etcpltdir}/..."
+  echo " .desktop files     : ${appsdir}/..."
+  echo " man pages          : ${mandir}/..."
   echo "     where prefix = ${prefix}"
   echo "  and datarootdir = ${datarootdir}"
   if test "${unixstyle}" = "yes" ; then
     echo "  and exec_prefix = ${exec_prefix}"
+    echo "  and PACKAGE = racket"
   fi
 fi

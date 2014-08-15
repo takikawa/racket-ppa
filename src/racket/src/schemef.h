@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2014 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -166,6 +166,10 @@ MZ_EXTERN void scheme_close_managed(Scheme_Custodian *m);
 MZ_EXTERN void scheme_schedule_custodian_close(Scheme_Custodian *c);
 MZ_EXTERN void scheme_add_custodian_extractor(Scheme_Type t, Scheme_Custodian_Extractor e);
 
+MZ_EXTERN int scheme_flush_managed(Scheme_Plumber *p, int catch_errors);
+MZ_EXTERN Scheme_Object *scheme_add_flush(Scheme_Plumber *p, Scheme_Object *proc_or_port, int weak_flush);
+MZ_EXTERN void scheme_remove_flush(Scheme_Object *h);
+
 MZ_EXTERN void scheme_add_atexit_closer(Scheme_Exit_Closer_Func f);
 
 MZ_EXTERN void scheme_add_evt(Scheme_Type type,
@@ -222,7 +226,11 @@ MZ_EXTERN void scheme_log_w_data(Scheme_Logger *logger, int level, int flags,
                                  Scheme_Object *data,
                                  const char *msg, ...);
 MZ_EXTERN void scheme_log_message(Scheme_Logger *logger, int level, char *buffer, intptr_t len, Scheme_Object *data);
-MZ_EXTERN void scheme_log_name_message(Scheme_Logger *logger, int level, Scheme_Object *name, char *buffer, intptr_t len, Scheme_Object *data);
+MZ_EXTERN void scheme_log_name_message(Scheme_Logger *logger, int level, Scheme_Object *name,
+                                       char *buffer, intptr_t len, Scheme_Object *data);
+MZ_EXTERN void scheme_log_name_pfx_message(Scheme_Logger *logger, int level, Scheme_Object *name,
+                                           char *buffer, intptr_t len, Scheme_Object *data,
+                                           int prefix_message);
 MZ_EXTERN void scheme_log_abort(char *buffer);
 MZ_EXTERN void scheme_log_warning(char *buffer);
 MZ_EXTERN void scheme_glib_log_message(const char *log_domain, int log_level, const char *message, void *user_data);
@@ -489,6 +497,7 @@ MZ_EXTERN void *scheme_lookup_in_table(Scheme_Bucket_Table *table, const char *k
 MZ_EXTERN Scheme_Bucket *scheme_bucket_from_table(Scheme_Bucket_Table *table, const char *key);
 MZ_EXTERN int scheme_bucket_table_equal(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *t2);
 MZ_EXTERN Scheme_Bucket_Table *scheme_clone_bucket_table(Scheme_Bucket_Table *bt);
+MZ_EXTERN void scheme_clear_bucket_table(Scheme_Bucket_Table *bt);
 
 MZ_EXTERN Scheme_Hash_Table *scheme_make_hash_table(int type);
 MZ_EXTERN Scheme_Hash_Table *scheme_make_hash_table_equal();
@@ -501,7 +510,8 @@ MZ_EXTERN Scheme_Object *scheme_hash_get_atomic(Scheme_Hash_Table *table, Scheme
 MZ_EXTERN int scheme_hash_table_equal(Scheme_Hash_Table *t1, Scheme_Hash_Table *t2);
 MZ_EXTERN int scheme_is_hash_table_equal(Scheme_Object *o);
 MZ_EXTERN int scheme_is_hash_table_eqv(Scheme_Object *o);
-MZ_EXTERN Scheme_Hash_Table *scheme_clone_hash_table(Scheme_Hash_Table *bt);
+MZ_EXTERN Scheme_Hash_Table *scheme_clone_hash_table(Scheme_Hash_Table *ht);
+MZ_EXTERN void scheme_clear_hash_table(Scheme_Hash_Table *ht);
 
 MZ_EXTERN Scheme_Hash_Tree *scheme_make_hash_tree(int kind);
 MZ_EXTERN Scheme_Hash_Tree *scheme_hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val);
@@ -662,6 +672,9 @@ MZ_EXTERN const char *scheme_get_proc_name(Scheme_Object *p, int *len, int for_e
 MZ_EXTERN intptr_t scheme_utf8_decode(const unsigned char *s, intptr_t start, intptr_t end, 
 				      unsigned int *us, intptr_t dstart, intptr_t dend,
 				      intptr_t *ipos, char utf16, int permissive);
+MZ_EXTERN intptr_t scheme_utf8_decode_offset_prefix(const unsigned char *s, intptr_t start, intptr_t end, 
+                                                    unsigned int *us, intptr_t dstart, intptr_t dend,
+                                                    intptr_t *ipos, char utf16, int permissive);
 MZ_EXTERN intptr_t scheme_utf8_decode_as_prefix(const unsigned char *s, intptr_t start, intptr_t end, 
 						unsigned int *us, intptr_t dstart, intptr_t dend,
 						intptr_t *ipos, char utf16, int permissive);
@@ -695,6 +708,8 @@ MZ_EXTERN mzchar *scheme_utf16_to_ucs4(const unsigned short *text, intptr_t star
 
 MZ_EXTERN Scheme_Object *scheme_open_converter(const char *from_e, const char *to_e);
 MZ_EXTERN void scheme_close_converter(Scheme_Object *conv);
+
+MZ_EXTERN char *scheme_getenv(char *name);
 
 /*========================================================================*/
 /*                               bignums                                  */
@@ -1027,6 +1042,7 @@ MZ_EXTERN void scheme_install_macro(Scheme_Bucket *b, Scheme_Object *v);
 MZ_EXTERN void scheme_save_initial_module_set(Scheme_Env *env);
 MZ_EXTERN Scheme_Env *scheme_primitive_module(Scheme_Object *name, Scheme_Env *for_env);
 MZ_EXTERN void scheme_finish_primitive_module(Scheme_Env *env);
+MZ_EXTERN void scheme_set_primitive_module_phaseless(Scheme_Env *env, int phaseless);
 MZ_EXTERN void scheme_protect_primitive_provide(Scheme_Env *env, Scheme_Object *name);
 
 MZ_EXTERN Scheme_Object *scheme_make_modidx(Scheme_Object *path,
@@ -1212,3 +1228,6 @@ MZ_EXTERN void *scheme_register_process_global(const char *key, void *val);
 
 MZ_EXTERN Scheme_Object *scheme_malloc_key(void);
 MZ_EXTERN void scheme_free_key(Scheme_Object *k);
+
+MZ_EXTERN void* scheme_jit_find_code_end(void *p);
+MZ_EXTERN void scheme_jit_now(Scheme_Object *f);

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2009-2013 PLT Design Inc.
+  Copyright (c) 2009-2014 PLT Design Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -47,6 +47,7 @@ SHARED_OK mz_proc_thread *scheme_master_proc_thread;
 THREAD_LOCAL_DECL(static struct Scheme_Place_Object *place_object);
 THREAD_LOCAL_DECL(static Scheme_Place *all_child_places);
 THREAD_LOCAL_DECL(static uintptr_t force_gc_for_place_accounting);
+THREAD_LOCAL_DECL(static Scheme_Struct_Type *place_event_prefab);
 static Scheme_Object *scheme_place(int argc, Scheme_Object *args[]);
 static Scheme_Object *place_pumper_threads(int argc, Scheme_Object *args[]);
 static Scheme_Object *place_wait(int argc, Scheme_Object *args[]);
@@ -93,6 +94,7 @@ static Scheme_Object *places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
 #endif
 
 static void places_prepare_direct(Scheme_Object *so);
+static void log_place_event(const char *what, const char *tag, int has_amount, intptr_t amount);
 
 # ifdef MZ_PRECISE_GC
 static void register_traversers(void);
@@ -155,6 +157,9 @@ void scheme_init_place(Scheme_Env *env)
 
 #ifdef MZ_USE_PLACES
   REGISTER_SO(all_child_places);
+  
+  REGISTER_SO(place_event_prefab);
+  place_event_prefab = scheme_lookup_prefab_type(scheme_intern_symbol("place-event"), 4);
 #endif
 }
 
@@ -208,6 +213,7 @@ typedef struct Place_Start_Data {
   Scheme_Object *function;
   Scheme_Object *channel;
   Scheme_Object *current_library_collection_paths;
+  Scheme_Object *current_library_collection_links;
   Scheme_Object *compiled_roots;
   mzrt_sema *ready;  /* malloc'ed item */
   struct Scheme_Place_Object *place_obj;   /* malloc'ed item */
@@ -216,6 +222,7 @@ typedef struct Place_Start_Data {
   intptr_t in;
   intptr_t out;
   intptr_t err;
+  Scheme_Object *new_id;
 } Place_Start_Data;
 
 static void null_out_runtime_globals() {
@@ -274,6 +281,7 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
   Place_Start_Data      *place_data;
   mz_proc_thread        *proc_thread;
   Scheme_Object         *collection_paths;
+  Scheme_Object         *collection_links;
   Scheme_Place_Object   *place_obj;
   mzrt_sema             *ready;
   struct NewGC          *parent_gc;
@@ -319,8 +327,6 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
   place_data->parent_gc = parent_gc;
   
   {
-    Scheme_Object *so;
-
     in_arg = args[2];
     out_arg = args[3];
     err_arg = args[4];
@@ -365,6 +371,9 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
 
   collection_paths = scheme_current_library_collection_paths(0, NULL);
   place_data->current_library_collection_paths = collection_paths;
+
+  collection_links = scheme_current_library_collection_links(0, NULL);
+  place_data->current_library_collection_links = collection_links;
 
   collection_paths = scheme_compiled_file_roots(0, NULL);
   place_data->compiled_roots = collection_paths;
@@ -453,6 +462,7 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
   }
 
   places_prepare_direct(place_data->current_library_collection_paths);
+  places_prepare_direct(place_data->current_library_collection_links);
   places_prepare_direct(place_data->compiled_roots);
   places_prepare_direct(place_data->channel);
   places_prepare_direct(place_data->module);
@@ -476,6 +486,8 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
   mzrt_sema_wait(ready);
   mzrt_sema_destroy(ready);
   ready = NULL;
+
+  log_place_event("id %d: create %" PRIdPTR, "create", 1, place_data->place_obj->id);
 
   place_data->ready = NULL;
   place_data->place_obj = NULL;
@@ -531,6 +543,7 @@ static void do_place_kill(Scheme_Place *place)
 {
   Scheme_Place_Object *place_obj;
   intptr_t refcount;
+  int old_id;
 
   place_obj = place->place_obj;
 
@@ -563,10 +576,14 @@ static void do_place_kill(Scheme_Place *place)
   else
     all_child_places = place->next;
 
+  old_id = place_obj->id;
+
   if (!refcount) {
     destroy_place_object_locks(place_obj);
   }
   place->place_obj = NULL;
+
+  log_place_event("id %d: reap %" PRIdPTR, "reap", 1, old_id);
 }
 
 static int do_place_break(Scheme_Place *place, int kind) 
@@ -749,7 +766,7 @@ static void add_child_status(int pid, int status) {
   if (st->signal_fd)
     scheme_signal_received_at(st->signal_fd);
   if (st->unneeded)
-    (void)scheme_get_child_status(st->pid, 0, NULL);
+    (void)scheme_get_child_status(st->pid, 0, 0, NULL);
 }
 
 static int raw_get_child_status(int pid, int *status, int done_only, int do_remove, int do_free) {
@@ -778,12 +795,12 @@ static int raw_get_child_status(int pid, int *status, int done_only, int do_remo
   return found;
 }
 
-int scheme_get_child_status(int pid, int is_group, int *status) {
+int scheme_get_child_status(int pid, int is_group, int can_check_group, int *status) {
   int found = 0;
 
   /* Check specific pid, in case the child has its own group
      (either given by Racket or given to itself): */
-  {
+  if (can_check_group) {
     pid_t pid2;
     int status;
 
@@ -991,15 +1008,18 @@ static void got_sigchld() XFORM_SKIP_PROC
 void scheme_places_block_child_signal() XFORM_SKIP_PROC
 {
   sigset_t set;
-  sigemptyset(&set);
-  sigaddset(&set, SIGCHLD);
-  sigprocmask(SIG_BLOCK, &set, NULL);
 
   /* Mac OS X seems to need a handler installed for SIGCHLD to be
      delivered, since the default is to drop the signal. Also, this
      handler serves as a back-up alert if some thread is created that
-     does not block SIGCHLD. */
+     does not block SIGCHLD.
+     Solaris, meanwhile, seems to unmask SIGCHLD as a result of
+     setting a handler, so do this before masking the signal. */
   MZ_SIGSET(SIGCHLD, got_sigchld);
+
+  sigemptyset(&set);
+  sigaddset(&set, SIGCHLD);
+  sigprocmask(SIG_BLOCK, &set, NULL);
 }
 
 void scheme_places_unblock_child_signal() XFORM_SKIP_PROC
@@ -1426,6 +1446,33 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
         abort();
       }
       break;
+    case scheme_keyword_type:
+      if (mode == mzPDC_COPY) {
+        new_so = scheme_make_sized_offset_byte_string((char *)so, SCHEME_SYMSTR_OFFSET(so), SCHEME_SYM_LEN(so), 1);
+        new_so->type = scheme_serialized_keyword_type;
+      } else if (mode == mzPDC_DIRECT_UNCOPY) {
+        char *str, buf[64];
+        intptr_t len;
+        len = SCHEME_SYM_LEN(so);
+        if (len < 64)
+          str = buf;
+        else
+          str = (char *)scheme_malloc_atomic(len);
+        memcpy(str, SCHEME_SYM_VAL(so), len);
+        new_so = scheme_intern_exact_keyword(str, len);
+      } else if (mode != mzPDC_CHECK) {
+        scheme_log_abort("encountered keyword in bad mode");
+        abort();
+      }
+      break;
+    case scheme_serialized_keyword_type:
+      if ((mode == mzPDC_UNCOPY) || (mode == mzPDC_DESER)) {
+        new_so = scheme_intern_exact_keyword(SCHEME_BYTE_STR_VAL(so), SCHEME_BYTE_STRLEN_VAL(so));
+      } else if (mode != mzPDC_CLEAN) {
+        scheme_log_abort("encountered serialized keyword in bad mode");
+        abort();
+      }
+      break;
     case scheme_fxvector_type:
       /* not allocated as shared, since that's covered above */
       if (copy_mode) {
@@ -1511,6 +1558,7 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
       {
         intptr_t fd;
         if (scheme_get_port_socket(so, &fd)) {
+#ifdef USE_TCP
           if (mode == mzPDC_COPY) {
             Scheme_Object *tmp;
             Scheme_Object *portname;
@@ -1538,6 +1586,9 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
             ssfd->name = tmp;
             return (Scheme_Object *)ssfd;
           }
+#else
+          scheme_signal_error("sockets aren't supported");
+#endif
         }
         else if (SCHEME_TRUEP(scheme_file_stream_port_p(1, &so))) {
           if (scheme_get_port_file_descriptor(so, &fd)) {
@@ -2334,6 +2385,36 @@ Scheme_Struct_Type *scheme_make_prefab_struct_type_in_master(Scheme_Object *base
 }
 #endif
 
+static void log_place_event(const char *what, const char *tag, int has_amount, intptr_t amount)
+{
+  int id;
+  Scheme_Logger *pl;
+  Scheme_Object *data, *tag_sym, *t;
+
+  pl = scheme_get_place_logger();
+  if (!scheme_log_level_p(pl, SCHEME_LOG_DEBUG))
+    return;
+
+  id = scheme_current_place_id;
+  tag_sym = scheme_intern_symbol(tag);
+
+  data = scheme_make_blank_prefab_struct_instance(place_event_prefab);
+  ((Scheme_Structure *)data)->slots[0] = scheme_make_integer(id);
+  ((Scheme_Structure *)data)->slots[1] = tag_sym;
+  ((Scheme_Structure *)data)->slots[2] = (has_amount 
+                                          ? scheme_make_integer(amount)
+                                          : scheme_false);
+  t = scheme_make_double(scheme_get_inexact_milliseconds());
+  ((Scheme_Structure *)data)->slots[3] = t;
+
+  if (has_amount)
+    scheme_log_w_data(pl, SCHEME_LOG_DEBUG, 0, data,
+                      what, id, amount);
+  else
+    scheme_log_w_data(pl, SCHEME_LOG_DEBUG, 0, data,
+                      what, id);
+}
+
 static void *place_start_proc(void *data_arg) {
   void *stack_base;
   void *rc;
@@ -2494,7 +2575,7 @@ void scheme_place_check_memory_use()
   }
 }
 
-static void place_set_result(Scheme_Object *result)
+static void place_set_result(struct Scheme_Place_Object *place_obj, Scheme_Object *result)
 /* always called as a place terminates */
 {
   intptr_t status;
@@ -2506,26 +2587,44 @@ static void place_set_result(Scheme_Object *result)
   } else
     status = 0;
 
-  mzrt_mutex_lock(place_object->lock);
-  place_object->result = status;
-  scheme_signal_received_at(place_object->parent_signal_handle);
-  place_object->parent_signal_handle = NULL;
-  place_object->signal_handle = NULL;
-  place_object->dead = 1;
-  mzrt_mutex_unlock(place_object->lock);
+  mzrt_mutex_lock(place_obj->lock);
+  place_obj->result = status;
+  scheme_signal_received_at(place_obj->parent_signal_handle);
+  place_obj->parent_signal_handle = NULL;
+  place_obj->signal_handle = NULL;
+  place_obj->dead = 1;
+  mzrt_mutex_unlock(place_obj->lock);
 }
 
-static void terminate_current_place()
+static void terminate_current_place(Scheme_Object *result)
 {
   intptr_t place_obj_die;
   intptr_t refcount;
   Scheme_Place_Object *place_obj;
-  
+
   place_obj = place_object;
 
   mzrt_mutex_lock(place_obj->lock);
-  
   place_obj_die = place_obj->die;
+  mzrt_mutex_unlock(place_obj->lock);
+  
+  if (!place_obj_die) {
+    if (scheme_flush_managed(NULL, 1))
+      result = scheme_make_integer(1);
+  }
+
+  place_object = NULL;
+
+  /*printf("Leavin place: proc thread id%u\n", ptid);*/
+
+  /* Beware that the destroy operation might trigger a GC to cooperate
+     with the master GC: */
+  scheme_place_instance_destroy(place_obj_die);
+
+  place_set_result(place_obj, result);
+  
+  mzrt_mutex_lock(place_obj->lock);
+  
   place_obj->refcount--;
   refcount = place_obj->refcount;
   
@@ -2533,23 +2632,13 @@ static void terminate_current_place()
   
   if (!refcount)
     destroy_place_object_locks(place_obj);
-  
-  place_object = NULL;
-  
-  /*printf("Leavin place: proc thread id%u\n", ptid);*/
-
-  /* Beware that the destroy operation might trigger a GC to cooperate
-     with the master GC: */
-  scheme_place_instance_destroy(place_obj_die);
 }
 
 static Scheme_Object *def_place_exit_handler_proc(int argc, Scheme_Object *argv[])
 {
-  scheme_log(NULL, SCHEME_LOG_DEBUG, 0, "place %d: exiting via (exit)", scheme_current_place_id);
+  log_place_event("id %d: exit (via `exit')", "exit", 0, 0);
 
-  place_set_result(argv[0]);
-
-  terminate_current_place();
+  terminate_current_place(argv[0]);
 
   mz_proc_thread_exit(NULL);
 
@@ -2586,7 +2675,7 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
   Place_Start_Data *place_data;
   Scheme_Place_Object *place_obj;
   Scheme_Object *place_main;
-  Scheme_Object *a[2], *channel;
+  Scheme_Object *a[2], *channel, *result;
   intptr_t mem_limit;
   
   place_data = (Place_Start_Data *) data_arg;
@@ -2602,12 +2691,14 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
   mzrt_mutex_unlock(id_counter_mutex);
 
   mem_limit = SCHEME_INT_VAL(place_data->cust_limit);
-  
+
   /* scheme_make_thread behaves differently if the above global vars are not null */
   scheme_place_instance_init(stack_base, place_data->parent_gc, mem_limit);
 
   a[0] = places_deep_direct_uncopy(place_data->current_library_collection_paths);
   scheme_current_library_collection_paths(1, a);
+  a[0] = places_deep_direct_uncopy(place_data->current_library_collection_links);
+  scheme_current_library_collection_links(1, a);
   a[0] = places_deep_direct_uncopy(place_data->compiled_roots);
   scheme_compiled_file_roots(1, a);
   scheme_seal_parameters();
@@ -2621,6 +2712,8 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
   place_object = place_obj;
   place_obj->refcount++;
 
+  place_obj->id = scheme_current_place_id;
+  
   {
     void *signal_handle;
     signal_handle = scheme_get_signal_handle();
@@ -2666,7 +2759,7 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
 
   scheme_set_root_param(MZCONFIG_EXIT_HANDLER, scheme_def_place_exit_proc);
 
-  scheme_log(NULL, SCHEME_LOG_DEBUG, 0, "place %d: started", scheme_current_place_id);
+  log_place_event("id %d: enter", "enter", 0, 0);
 
   if (do_embedded_load()) {
     Scheme_Thread * volatile p;
@@ -2692,14 +2785,14 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
     }
     p->error_buf = saved_error_buf;
     
-    place_set_result(rc);
+    result = rc;
   } else {
-    place_set_result(scheme_make_integer(1));
+    result = scheme_make_integer(1);
   }
 
-  scheme_log(NULL, SCHEME_LOG_DEBUG, 0, "place %d: exiting", scheme_current_place_id);
+  log_place_event("id %d: exit", "exit", 0, 0);
 
-  terminate_current_place();
+  terminate_current_place(result);
 
   return NULL;
 }
@@ -2735,7 +2828,7 @@ Scheme_Object *scheme_places_deserialize(Scheme_Object *so, void *msg_memory)
   if (new_so) return new_so;
 
   /* small messages are deemed to be < 1k, this could be tuned in either direction */
-  if (GC_message_objects_size(msg_memory) < 1024) {
+  if (GC_message_small_objects_size(msg_memory, 1024)) {
     new_so = do_places_deep_copy(so, mzPDC_UNCOPY, 1, NULL, NULL);
     GC_dispose_short_message_allocator(msg_memory);
     /* from this point, we must return immediately, so that any
@@ -2929,11 +3022,12 @@ Scheme_Place_Async_Channel *place_async_channel_create() {
 #endif
 
   ch = GC_master_malloc_tagged(sizeof(Scheme_Place_Async_Channel));
+  ch->so.type = scheme_place_async_channel_type;
+
   msgs = GC_master_malloc(sizeof(Scheme_Object*) * 8);
   msg_memory = GC_master_malloc(sizeof(void*) * 8);
   msg_chains = GC_master_malloc(sizeof(Scheme_Object*) * 8);
 
-  ch->so.type = scheme_place_async_channel_type;
   ch->in = 0;
   ch->out = 0;
   ch->count = 0;
@@ -2959,7 +3053,7 @@ static void async_channel_refcount(Scheme_Place_Async_Channel *ch, int for_send,
 {
   if (!ch->lock) {
     /* can happen via finalization, where the channel is already finalized
-       (due to the lack of ordering on finalization) */
+       m(due to the lack of ordering on finalization) */
     return;
   }
   mzrt_mutex_lock(ch->lock);
@@ -3103,6 +3197,8 @@ static void place_async_send(Scheme_Place_Async_Channel *ch, Scheme_Object *uo) 
   int cnt;
 
   o = places_serialize(uo, &msg_memory, &master_chain, &invalid_object);
+  /* uo needs to stay live until `master_chain` is registered in `ch` */
+
   if (!o) {
     if (invalid_object) {
       scheme_contract_error("place-channel-put",
@@ -3160,6 +3256,15 @@ static void place_async_send(Scheme_Place_Async_Channel *ch, Scheme_Object *uo) 
     ch->mem_size += sz;
 
     maybe_report_message_size(ch);
+  }
+
+  /* make sure `uo` is treated as live until here: */
+  if (!uo) scheme_signal_error("?");
+
+  {
+    intptr_t msg_size;
+    msg_size = GC_message_allocator_size(msg_memory);
+    log_place_event("id %d: put message of %" PRIdPTR " bytes", "put", 1, msg_size);
   }
 
   if (!cnt && ch->wakeup_signal) {
@@ -3366,6 +3471,12 @@ static Scheme_Object *scheme_place_async_try_receive_raw(Scheme_Place_Async_Chan
     *_no_writers = 1;
   mzrt_mutex_unlock(ch->lock);
 
+  if (msg) {
+    intptr_t msg_size;
+    msg_size = GC_message_allocator_size(msg_memory);
+    log_place_event("id %d: get message of %" PRIdPTR " bytes", "get", 1, msg_size);
+  }
+
   *msg_memory_ptr = msg_memory;
   return msg;
 }
@@ -3453,8 +3564,12 @@ static int place_channel_ready(Scheme_Object *so, Scheme_Schedule_Info *sinfo) {
     return 1;
   }
 
-  if (no_writers)
-    return 1; /* wake up to discover that we can give up */
+  if (no_writers) {
+    /* block on a semaphore that is not accessible, which may allow the thread
+       to be GCed */
+    scheme_set_sync_target(sinfo, scheme_make_sema(0), scheme_void, NULL, 0, 0, NULL);
+    return 0;
+  }
 
   return 0;
 }

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2014 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -2028,9 +2028,11 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
   if (compact && (SCHEME_PROCP(obj) 
 		  || SCHEME_STRUCT_TYPEP(obj) 
 		  || SCHEME_EOFP(obj)
+                  || SAME_OBJ(scheme_undefined, obj)
 		  || SAME_TYPE(scheme_always_evt_type, SCHEME_TYPE(obj))
 		  || SAME_TYPE(scheme_never_evt_type, SCHEME_TYPE(obj))
 		  || SAME_TYPE(scheme_struct_property_type, SCHEME_TYPE(obj))
+		  || SAME_TYPE(scheme_ctype_type, SCHEME_TYPE(obj))
                   || SAME_OBJ(scheme_app_mark_impersonator_property, obj))) {
     /* Check whether this is a global constant */
     Scheme_Object *val;

@@ -60,7 +60,7 @@
                   (error 'xexpr->xml
                          "expected a list of xexprs for the body in ~e"
                          x))
-                (make-element 'scheme 'scheme (car x)
+                (make-element 'racket 'racket (car x)
                               atts
                               (map xexpr->xml body)))])
        (if (and (pair? (cdr x))
@@ -68,9 +68,9 @@
                     (and (pair? (cadr x)) (pair? (caadr x)))))
            (f (map srep->attribute (cadr x)) (cddr x))
            (f null (cdr x))))]
-    [(string? x) (make-pcdata 'scheme 'scheme x)]
+    [(string? x) (make-pcdata 'racket 'racket x)]
     [(or (symbol? x) (exact-nonnegative-integer? x))
-     (make-entity 'scheme 'scheme x)]
+     (make-entity 'racket 'racket x)]
     [(or (comment? x) (p-i? x) (cdata? x) (pcdata? x)) x]
     [else ;(error 'xexpr->xml "malformed xexpr ~e" x)
      x]))
@@ -101,9 +101,13 @@
  [xml->xexpr (content/c . -> . xexpr/c)]
  [xexpr->xml (xexpr/c . -> . content/c)]
  [xexpr-drop-empty-attributes (parameter/c boolean?)]
- [write-xexpr (->* (xexpr/c) (output-port?) void)] )
+ [write-xexpr (->* (xexpr/c)
+                   (output-port?
+                    #:insert-newlines? any/c)
+                   void?)])
 
-(define (write-xexpr x [out (current-output-port)])
+(define (write-xexpr x [out (current-output-port)]
+                     #:insert-newlines? [insert-newlines? #f])
   (define short (empty-tag-shorthand))
   (let loop ([x x])
     (cond
@@ -126,13 +130,15 @@
          (write-string "=\"" out)
          (write-string/escape (cadr att) escape-attribute-table out)
          (write-string "\"" out))
+       (when insert-newlines?
+         (newline))
        ; Write end of opening tag
        (if (and (null? content)
                 (case short
                     [(always) #t]
                     [(never) #f]
                     [else (memq (lowercase-symbol name) short)]))
-           (write-string " />" out)
+           (write-string "/>" out)
            (begin
              (write-string ">" out)
              ; Write body
@@ -160,4 +166,5 @@
       [(comment? x)
        (write-xml-comment x 0 void out)]
       [(p-i? x)
-       (write-xml-p-i x 0 void out)])))
+       (write-xml-p-i x 0 void out)]))
+  (void))

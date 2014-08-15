@@ -120,7 +120,8 @@ typedef struct NewGCMasterInfo {
   uintptr_t ready;
   void **signal_fds;
   mzrt_rwlock *cangc;
-  mzrt_sema *wait_sema;
+  mzrt_sema *wait_go_sema;
+  mzrt_sema *wait_done_sema;
 } NewGCMasterInfo;
 #endif
 
@@ -141,8 +142,8 @@ typedef struct NewGC {
   /* All non-gen0 pages are held in the following structure. */
   struct mpage *gen1_pages[PAGE_TYPES];
 
-  struct mpage *med_pages[NUM_MED_PAGE_SIZES];
-  struct mpage *med_freelist_pages[NUM_MED_PAGE_SIZES];
+  struct mpage *med_pages[MED_PAGE_TYPES][NUM_MED_PAGE_SIZES];
+  struct mpage *med_freelist_pages[MED_PAGE_TYPES][NUM_MED_PAGE_SIZES];
 
   MarkSegment *mark_stack;
 
@@ -165,7 +166,7 @@ typedef struct NewGC {
 
   mpage *release_pages;
   uintptr_t stack_base;
-  int dumping_avoid_collection; /* dumping coutner flag */
+  int avoid_collection;
 
   unsigned char generations_available        :1;
   unsigned char in_unsafe_allocation_mode    :1;
@@ -225,7 +226,7 @@ typedef struct NewGC {
   int num_fnls;
 
   void *park[2];
-  void *park_save[2];
+  void *park_fsave[2];
   void *park_isave[2];
 
   unsigned short weak_array_tag;

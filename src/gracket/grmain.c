@@ -3,7 +3,7 @@
  * Purpose:     GRacket main file, including a hodge-podge of global stuff
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2013 PLT Design Inc.
+ * Copyright:   (c) 2004-2014 PLT Design Inc.
  * Copyright:   (c) 1995-2000, Matthew Flatt
  */
 
@@ -49,6 +49,15 @@ static void pre_filter_cmdline_arguments(int *argc, char ***argv);
 #define CMDLINE_STDIO_FLAG
 #define INITIAL_NAMESPACE_MODULE "racket/gui/init"
 #define GRAPHICAL_REPL
+
+#if WIN32
+# define DLL_RELATIVE_PATH L"."
+# define INITIAL_COLLECTS_DIRECTORY "../collects"
+#endif
+
+#ifndef INITIAL_CONFIG_DIRECTORY
+# define INITIAL_CONFIG_DIRECTORY "../etc"
+#endif
 
 # include "../racket/main.c"
 

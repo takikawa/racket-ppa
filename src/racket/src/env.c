@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2014 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -249,6 +249,7 @@ Scheme_Env *scheme_engine_instance_init()
 
   scheme_init_portable_case();
   scheme_init_compenv();
+  scheme_init_letrec_check();
   scheme_init_optimize();
   scheme_init_resolve();
   scheme_init_sfs();
@@ -327,6 +328,7 @@ static void init_unsafe(Scheme_Env *env)
   scheme_init_unsafe_numcomp(unsafe_env);
   scheme_init_unsafe_list(unsafe_env);
   scheme_init_unsafe_vector(unsafe_env);
+  scheme_init_unsafe_fun(unsafe_env);
 
   scheme_init_extfl_unsafe_number(unsafe_env);
   scheme_init_extfl_unsafe_numarith(unsafe_env);
@@ -393,7 +395,8 @@ static void init_extfl(Scheme_Env *env)
   extfl_env->attached = 1;
 
 #if USE_COMPILED_STARTUP
-  if (builtin_ref_counter != (EXPECTED_PRIM_COUNT + EXPECTED_UNSAFE_COUNT + EXPECTED_FLFXNUM_COUNT + EXPECTED_EXTFL_COUNT)) {
+  if (builtin_ref_counter != (EXPECTED_PRIM_COUNT + EXPECTED_UNSAFE_COUNT + EXPECTED_FLFXNUM_COUNT
+                              + EXPECTED_EXTFL_COUNT)) {
     printf("extfl count %d doesn't match expected count %d\n",
 	   builtin_ref_counter - EXPECTED_PRIM_COUNT - EXPECTED_UNSAFE_COUNT - EXPECTED_FLFXNUM_COUNT, 
            EXPECTED_EXTFL_COUNT);
@@ -418,9 +421,34 @@ static void init_futures(Scheme_Env *env)
   futures_env->attached = 1;
 
 #if USE_COMPILED_STARTUP
-  if (builtin_ref_counter != (EXPECTED_PRIM_COUNT + EXPECTED_UNSAFE_COUNT + EXPECTED_FLFXNUM_COUNT + EXPECTED_EXTFL_COUNT + EXPECTED_FUTURES_COUNT)) {
+  if (builtin_ref_counter != (EXPECTED_PRIM_COUNT + EXPECTED_UNSAFE_COUNT + EXPECTED_FLFXNUM_COUNT
+                              + EXPECTED_EXTFL_COUNT + EXPECTED_FUTURES_COUNT)) {
     printf("Futures count %d doesn't match expected count %d\n",
-	   builtin_ref_counter - EXPECTED_PRIM_COUNT - EXPECTED_UNSAFE_COUNT - EXPECTED_FLFXNUM_COUNT - EXPECTED_EXTFL_COUNT, EXPECTED_FUTURES_COUNT);
+	   builtin_ref_counter - EXPECTED_PRIM_COUNT - EXPECTED_UNSAFE_COUNT - EXPECTED_FLFXNUM_COUNT
+           - EXPECTED_EXTFL_COUNT, 
+           EXPECTED_FUTURES_COUNT);
+    abort();
+  }
+#endif
+}
+
+static void init_foreign(Scheme_Env *env)
+{
+  Scheme_Env *ffi_env;
+
+  scheme_init_foreign(env);
+
+  ffi_env = scheme_get_foreign_env();
+  scheme_populate_pt_ht(ffi_env->module->me->rt);
+  ffi_env->attached = 1;
+
+#if USE_COMPILED_STARTUP
+  if (builtin_ref_counter != (EXPECTED_PRIM_COUNT + EXPECTED_UNSAFE_COUNT + EXPECTED_FLFXNUM_COUNT
+                              + EXPECTED_EXTFL_COUNT + EXPECTED_FUTURES_COUNT + EXPECTED_FOREIGN_COUNT)) {
+    printf("Foreign count %d doesn't match expected count %d\n",
+	   builtin_ref_counter - EXPECTED_PRIM_COUNT - EXPECTED_UNSAFE_COUNT - EXPECTED_FLFXNUM_COUNT
+           - EXPECTED_EXTFL_COUNT - EXPECTED_FUTURES_COUNT,
+           EXPECTED_FOREIGN_COUNT);
     abort();
   }
 #endif
@@ -466,6 +494,8 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
   printf("pre-process @ %" PRIdPTR "\n", scheme_get_process_milliseconds());
 #endif
 
+  scheme_init_file_places();
+
   scheme_make_thread(stack_base);
 
 #if defined(MZ_PRECISE_GC) && defined(MZ_USE_PLACES)
@@ -503,7 +533,6 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
   scheme_init_gmp_places();
   scheme_init_kqueue();
   scheme_alloc_global_fdset();
-  scheme_init_file_places();
 #ifndef DONT_USE_FOREIGN
   scheme_init_foreign_places();
 #endif
@@ -535,14 +564,16 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
 #endif
   scheme_init_futures_per_place();
 
-  scheme_init_foreign(env);
-
   REGISTER_SO(literal_string_table);
   REGISTER_SO(literal_number_table);
   literal_string_table = scheme_make_weak_equal_table();
   literal_number_table = scheme_make_weak_eqv_table();
 
   scheme_starting_up = 1; /* in case it's not set already */
+
+#ifdef TIME_STARTUP_PROCESS
+  printf("pre-embedded @ %" PRIdPTR "\n", scheme_get_process_milliseconds());
+#endif
 
   scheme_add_embedded_builtins(env);
 
@@ -619,6 +650,7 @@ void scheme_place_instance_destroy(int force)
   scheme_free_all_code();
   scheme_free_ghbn_data();
   scheme_release_kqueue();
+  scheme_release_inotify();
 }
 
 static void make_kernel_env(void)
@@ -668,13 +700,16 @@ static void make_kernel_env(void)
   MZTIMEIT(bool, scheme_init_bool(env));
   MZTIMEIT(syntax, scheme_init_compile(env));
   MZTIMEIT(eval, scheme_init_eval(env));
-  MZTIMEIT(error, scheme_init_error(env));
   MZTIMEIT(struct, scheme_init_struct(env));
+  MZTIMEIT(error, scheme_init_error(env));
 #ifndef NO_SCHEME_EXNS
   MZTIMEIT(exn, scheme_init_exn(env));
 #endif
   MZTIMEIT(process, scheme_init_thread(env));
+  scheme_init_port_wait();
   scheme_init_inspector();
+  scheme_init_logger_wait();
+  scheme_init_struct_wait();
   MZTIMEIT(reduced, scheme_init_reduced_proc_struct(env));
 #ifndef NO_SCHEME_THREADS
   MZTIMEIT(sema, scheme_init_sema(env));
@@ -756,7 +791,7 @@ static void make_kernel_env(void)
 
   DONE_TIME(env);
 
-  register_network_evts();
+  scheme_register_network_evts();
 
   REGISTER_SO(kernel_symbol);
   kernel_symbol = scheme_intern_symbol("#%kernel");
@@ -778,6 +813,7 @@ static void make_kernel_env(void)
   init_flfxnum(env);
   init_extfl(env);
   init_futures(env);
+  init_foreign(env);
   
   scheme_init_print_global_constants();
   scheme_init_variable_references_constants();
@@ -901,14 +937,15 @@ static Scheme_Env *make_env(Scheme_Env *base, int toplevel_size)
 }
 
 Scheme_Env *
-scheme_new_module_env(Scheme_Env *env, Scheme_Module *m, int new_exp_module_tree)
+scheme_new_module_env(Scheme_Env *env, Scheme_Module *m,
+                      int new_exp_module_tree, int new_pre_registry)
 {
   Scheme_Env *menv;
   Scheme_Module_Registry *reg;
 
   menv = make_env(env, 7);
 
-  if (new_exp_module_tree && !menv->module_pre_registry) {
+  if (new_pre_registry) {
     /* pre_registry is for declarations to be used by submodules */
     reg = MALLOC_ONE_TAGGED(Scheme_Module_Registry);
     reg->so.type = scheme_module_registry_type;
@@ -916,10 +953,19 @@ scheme_new_module_env(Scheme_Env *env, Scheme_Module *m, int new_exp_module_tree
   }
 
   menv->module = m;
-
-  scheme_prepare_label_env(env);
-  menv->label_env = env->label_env;
   menv->instance_env = env;
+
+  if (new_exp_module_tree) {
+    /* It would be nice to share the label env with `env`, but we need
+       to set `module_pre_registry` in `menv->label_env` and not shared
+       it with `env->label_env`: */
+    menv->label_env = NULL;
+    scheme_prepare_label_env(menv);
+    menv->instance_env = menv;
+  } else {
+    scheme_prepare_label_env(env);
+    menv->label_env = env->label_env;
+  }
 
   if (new_exp_module_tree) {
     Scheme_Object *p;
@@ -1241,9 +1287,13 @@ Scheme_Env *scheme_get_bucket_home(Scheme_Bucket *b)
 void scheme_set_bucket_home(Scheme_Bucket *b, Scheme_Env *e)
 {
   if (!((Scheme_Bucket_With_Home *)b)->home_link) {
-    Scheme_Object *link;
-    link = scheme_get_home_weak_link(e);
-    ((Scheme_Bucket_With_Home *)b)->home_link = link;
+    if (((Scheme_Bucket_With_Flags *)b)->flags & GLOB_STRONG_HOME_LINK)
+      ((Scheme_Bucket_With_Home *)b)->home_link = (Scheme_Object *)e;
+    else {
+      Scheme_Object *link;
+      link = scheme_get_home_weak_link(e);
+      ((Scheme_Bucket_With_Home *)b)->home_link = link;
+    }
   }
 }
 
@@ -1302,11 +1352,11 @@ scheme_do_add_global_symbol(Scheme_Env *env, Scheme_Object *sym,
     b = scheme_bucket_from_table(env->toplevel, (const char *)sym);
     b->val = obj;
     ASSERT_IS_VARIABLE_BUCKET(b);
-    scheme_set_bucket_home(b, env);
     if (constant && scheme_defining_primitives) {
       ((Scheme_Bucket_With_Flags *)b)->id = builtin_ref_counter++;
-      ((Scheme_Bucket_With_Flags *)b)->flags |= (GLOB_HAS_REF_ID | GLOB_IS_CONST);
+      ((Scheme_Bucket_With_Flags *)b)->flags |= (GLOB_HAS_REF_ID | GLOB_IS_CONST | GLOB_STRONG_HOME_LINK);
     }
+    scheme_set_bucket_home(b, env);
   } else
     scheme_add_to_table(env->syntax, (const char *)sym, obj, constant);
 }
@@ -1430,7 +1480,7 @@ Scheme_Object **scheme_make_builtin_references_table(void)
     t[j] = scheme_false;
   }
 
-  for (j = 0; j < 5; j++) {
+  for (j = 0; j < 6; j++) {
     if (!j)
       kenv = kernel_env;
     else if (j == 1)
@@ -1439,8 +1489,10 @@ Scheme_Object **scheme_make_builtin_references_table(void)
       kenv = flfxnum_env;
     else if (j == 3)
       kenv = extfl_env;
-    else
+    else if (j == 4)
       kenv = futures_env;
+    else
+      kenv = scheme_get_foreign_env();
     
     ht = kenv->toplevel;
     
@@ -1467,7 +1519,7 @@ Scheme_Hash_Table *scheme_map_constants_to_globals(void)
 
   result = scheme_make_hash_table(SCHEME_hash_ptr);
       
-  for (j = 0; j < 5; j++) {
+  for (j = 0; j < 6; j++) {
     if (!j)
       kenv = kernel_env;
     else if (j == 1)
@@ -1476,8 +1528,10 @@ Scheme_Hash_Table *scheme_map_constants_to_globals(void)
       kenv = flfxnum_env;
     else if (j == 3)
       kenv = extfl_env;
-    else
+    else if (j == 4)
       kenv = futures_env;
+    else
+      kenv = scheme_get_foreign_env();
     
     ht = kenv->toplevel;
     bs = ht->buckets;
@@ -1501,7 +1555,7 @@ const char *scheme_look_for_primitive(void *code)
   intptr_t i;
   int j;
 
-  for (j = 0; j < 5; j++) {
+  for (j = 0; j < 6; j++) {
     if (!j)
       kenv = kernel_env;
     else if (j == 1)
@@ -1510,8 +1564,10 @@ const char *scheme_look_for_primitive(void *code)
       kenv = flfxnum_env;
     else if (j == 3)
       kenv = extfl_env;
-    else
+    else if (j == 4)
       kenv = futures_env;
+    else
+      kenv = scheme_get_foreign_env();
     
     ht = kenv->toplevel;
     bs = ht->buckets;
@@ -2315,7 +2371,7 @@ static Scheme_Object *
 local_get_shadower(int argc, Scheme_Object *argv[])
 {
   Scheme_Comp_Env *env;
-  Scheme_Object *sym, *sym_marks = NULL, *orig_sym, *uid = NULL;
+  Scheme_Object *sym, *sym_marks = NULL, *orig_sym, *uid = NULL, *free_id = NULL;
 
   env = scheme_current_thread->current_local_env;
   if (!env)
@@ -2329,7 +2385,7 @@ local_get_shadower(int argc, Scheme_Object *argv[])
 
   sym_marks = scheme_stx_extract_marks(sym);
 
-  uid = scheme_find_local_shadower(sym, sym_marks, env);
+  uid = scheme_find_local_shadower(sym, sym_marks, env, &free_id);
 
   if (!uid) {
     uid = scheme_tl_id_sym(env->genv, sym, NULL, 0, 
@@ -2354,11 +2410,14 @@ local_get_shadower(int argc, Scheme_Object *argv[])
 
     result = scheme_datum_to_syntax(SCHEME_STX_VAL(sym), orig_sym, sym, 0, 0);
     ((Scheme_Stx *)result)->props = ((Scheme_Stx *)orig_sym)->props;
-    
+
     rn = scheme_make_rename(uid, 1);
     scheme_set_rename(rn, 0, result);
 
     result = scheme_add_rename(result, rn);
+
+    if (free_id)
+      scheme_install_free_id_rename(result, free_id, NULL, scheme_make_integer(0));
 
     if (!scheme_stx_is_clean(orig_sym))
       result = scheme_stx_taint(result);

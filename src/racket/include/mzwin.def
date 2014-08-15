@@ -75,6 +75,9 @@ EXPORTS
  scheme_close_managed
  scheme_schedule_custodian_close
  scheme_add_custodian_extractor
+ scheme_flush_managed
+ scheme_add_flush
+ scheme_remove_flush
  scheme_add_atexit_closer
  scheme_add_evt
  scheme_add_evt_through_sema
@@ -107,6 +110,7 @@ EXPORTS
  scheme_log_w_data
  scheme_log_message
  scheme_log_name_message
+ scheme_log_name_pfx_message
  scheme_log_abort
  scheme_log_warning
  scheme_glib_log_message
@@ -234,6 +238,7 @@ EXPORTS
  scheme_bucket_from_table
  scheme_bucket_table_equal
  scheme_clone_bucket_table
+ scheme_clear_bucket_table
  scheme_make_hash_table
  scheme_make_hash_table_equal
  scheme_make_hash_table_eqv
@@ -246,6 +251,7 @@ EXPORTS
  scheme_is_hash_table_equal
  scheme_is_hash_table_eqv
  scheme_clone_hash_table
+ scheme_clear_hash_table
  scheme_make_hash_tree
  scheme_hash_tree_set
  scheme_hash_tree_get
@@ -332,6 +338,7 @@ EXPORTS
  scheme_is_cpointer
  scheme_get_proc_name
  scheme_utf8_decode
+ scheme_utf8_decode_offset_prefix
  scheme_utf8_decode_as_prefix
  scheme_utf8_decode_all
  scheme_utf8_decode_prefix
@@ -346,6 +353,7 @@ EXPORTS
  scheme_utf16_to_ucs4
  scheme_open_converter
  scheme_close_converter
+ scheme_getenv
  scheme_make_bignum
  scheme_make_bignum_from_unsigned
  scheme_make_bignum_from_long_long
@@ -527,6 +535,7 @@ EXPORTS
  scheme_save_initial_module_set
  scheme_primitive_module
  scheme_finish_primitive_module
+ scheme_set_primitive_module_phaseless
  scheme_protect_primitive_provide
  scheme_make_modidx
  scheme_apply_for_syntax_in_env
@@ -626,3 +635,5 @@ EXPORTS
  scheme_register_process_global
  scheme_malloc_key
  scheme_free_key
+ scheme_jit_find_code_end
+ scheme_jit_now

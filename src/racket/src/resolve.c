@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2014 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -26,9 +26,9 @@
 /* This file implements the bytecode "resolve" pass, which converts
    the optimization IR to the evaluation IR --- where the main
    difference between the IRs is a change in stack addresses. This
-   pass is also reponsible for closure conversion (in the sense of
-   lifting closures that are used only in application positions were
-   all variabes captured by the closure can be converted to arguments
+   pass is also responsible for closure conversion (in the sense of
+   lifting closures that are used only in application positions where
+   all variables captured by the closure can be converted to arguments
    at all call sites).
 
    See "eval.c" for an overview of compilation passes. */
@@ -512,7 +512,7 @@ static Scheme_Object *look_for_letv_change(Scheme_Sequence *s)
     v = s->array[i];
     if (SAME_TYPE(SCHEME_TYPE(v), scheme_let_value_type)) {
       Scheme_Let_Value *lv = (Scheme_Let_Value *)v;
-      if (scheme_omittable_expr(lv->body, 1, -1, 0, NULL, NULL, -1, 0)) {
+      if (scheme_omittable_expr(lv->body, 1, -1, 0, NULL, NULL, 0, 0, 0)) {
 	int esize = s->count - (i + 1);
 	int nsize = i + 1;
 	Scheme_Object *nv, *ev;
@@ -999,7 +999,7 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
         else if (SCHEME_CLV_FLAGS(clv) & SCHEME_CLV_NO_GROUP_USES)
           is_lift = 1;
         else
-          is_lift = scheme_is_liftable(clv->value, head->count, 5, 1);
+          is_lift = scheme_is_liftable(clv->value, head->count, 5, 1, 0);
       
         if (!is_proc && !is_lift) {
           recbox = 1;
@@ -1248,7 +1248,7 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
         }
         if (j >= 0)
           break;
-        if (!scheme_omittable_expr(clv->value, clv->count, -1, 0, NULL, NULL, -1, 0))
+        if (!scheme_omittable_expr(clv->value, clv->count, -1, 0, NULL, NULL, 0, 0, 0))
           break;
       }
       if (i < 0) {
@@ -1690,9 +1690,19 @@ static mzshort *allocate_boxmap(int n)
 }
 
 void scheme_boxmap_set(mzshort *boxmap, int j, int bit, int delta)
+/* assumes that existing bits are cleared */
 {
   j *= CLOS_TYPE_BITS_PER_ARG;
   boxmap[delta + (j / BITS_PER_MZSHORT)] |= ((mzshort)bit << (j & (BITS_PER_MZSHORT - 1)));
+}
+
+static void boxmap_clear(mzshort *boxmap, int j, int delta)
+{
+  mzshort v;
+  j *= CLOS_TYPE_BITS_PER_ARG;
+  v = boxmap[delta + (j / BITS_PER_MZSHORT)];
+  v ^= (v & ((mzshort)(((1 << CLOS_TYPE_BITS_PER_ARG) - 1) << (j & (BITS_PER_MZSHORT - 1)))));
+  boxmap[delta + (j / BITS_PER_MZSHORT)] = v;
 }
 
 int scheme_boxmap_get(mzshort *boxmap, int j, int delta)
@@ -2015,8 +2025,17 @@ resolve_closure_compilation(Scheme_Object *_data, Resolve_Info *info,
     /* (lambda args E) where args is not in E => drop the argument */
     new_info = resolve_info_extend(info, 0, 1, cl->base_closure_size);
     num_params = 0;
-    if (!just_compute_lift)
+    if (!just_compute_lift) {
       data->num_params = 0;
+      if (expanded_already) {
+        /* shift type map down: */
+        for (i = 0; i < closure_size; i++) {
+          boxmap_clear(closure_map, i, closure_size);
+          scheme_boxmap_set(closure_map, i, scheme_boxmap_get(closure_map, i + 1, closure_size), closure_size);
+        }
+        SCHEME_CLOSURE_DATA_FLAGS(data) |= CLOS_HAS_TYPED_ARGS;
+      }
+    }
   } else {
     new_info = resolve_info_extend(info, data->num_params, data->num_params,
                                    cl->base_closure_size + data->num_params);

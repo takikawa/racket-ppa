@@ -92,6 +92,11 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.  */
 
 #define ARRAY_SIZE(a)	(sizeof (a) / sizeof ((a)[0]))
 
+#define UNWI_OBJ(fn)	  UNW_PASTE(UNW_PREFIX,UNW_PASTE(I,fn))
+#define UNWI_ARCH_OBJ(fn) UNW_PASTE(UNW_PASTE(UNW_PASTE(_UI,UNW_TARGET),_), fn)
+
+#ifndef UW_NO_SYNC
+
 /* Make it easy to write thread-safe code which may or may not be
    linked against libpthread.  The macros below can be used
    unconditionally and if -lpthread is around, they'll call the
@@ -152,9 +157,6 @@ cmpxchg_ptr (void *addr, void *old, void *new)
 #endif
 #define atomic_read(ptr)	(*(ptr))
 
-#define UNWI_OBJ(fn)	  UNW_PASTE(UNW_PREFIX,UNW_PASTE(I,fn))
-#define UNWI_ARCH_OBJ(fn) UNW_PASTE(UNW_PASTE(UNW_PASTE(_UI,UNW_TARGET),_), fn)
-
 #define unwi_full_mask    UNWI_ARCH_OBJ(full_mask)
 
 /* Type of a mask that can be used to inhibit preemption.  At the
@@ -178,6 +180,11 @@ do {						\
   mutex_unlock (l);				\
   sigprocmask (SIG_SETMASK, &(m), NULL);	\
 } while (0)
+
+#else  /* UW_NO_SYNC */
+# define atomic_read(ptr)	(*(ptr))
+typedef int intrmask_t;
+#endif /* UW_NO_SYNC */
 
 #define GET_MEMORY(mem, size_in_bytes)				    \
 do {									    \
@@ -205,14 +212,14 @@ do {									\
       fprintf (stderr, format);						\
     }									\
 } while (0)
-# define dprintf(format...) 	    fprintf (stderr, format)
+# define Dprintf(format...) 	    fprintf (stderr, format)
 # ifdef __GNUC__
 #  undef inline
 #  define inline	UNUSED
 # endif
 #else
 # define Debug(level,format...)
-# define dprintf(format...)
+# define Dprintf(format...)
 #endif
 
 static ALWAYS_INLINE int
@@ -530,6 +537,7 @@ typedef struct dwarf_reg_state
     unsigned short lru_chain;	  /* used for least-recently-used chain */
     unsigned short coll_chain;	/* used for hash collisions */
     unsigned short hint;	      /* hint for next rs to try (or -1) */
+    char valid, signal_frame;
   }
 dwarf_reg_state_t;
 
@@ -549,6 +557,7 @@ typedef struct dwarf_cie_info
     uint8_t lsda_encoding;
     unsigned int sized_augmentation : 1;
     unsigned int have_abi_marker : 1;
+    unsigned int signal_frame : 1;
   }
 dwarf_cie_info_t;
 
@@ -581,6 +590,8 @@ typedef struct dwarf_cursor
 
     short hint; /* faster lookup of the rs cache */
     short prev_rs;
+
+    int use_prev_instr;
   }
 dwarf_cursor_t;
 
@@ -637,6 +648,7 @@ HIDDEN int dwarf_extract_proc_info_from_fde (unw_addr_space_t as,
 					     unw_word_t *fde_addr,
 					     unw_proc_info_t *pi,
 					     int need_unwind_info,
+                                             unw_word_t base,
 					     void *arg);
 HIDDEN int dwarf_find_save_locs (struct dwarf_cursor *c);
 HIDDEN int dwarf_read_encoded_pointer (unw_addr_space_t as,
@@ -649,6 +661,23 @@ HIDDEN int dwarf_step (struct dwarf_cursor *c);
 
 /*XXXXXXXXXXXXXXXXXXXXXXXXX End dwarf.h XXXXXXXXXXXXXXXXXXXXXXXXXX*/
 
+#ifdef CONFIG_DEBUG_FRAME
+struct unw_debug_frame_list
+  {
+    /* The start (inclusive) and end (exclusive) of the described region.  */
+    unw_word_t start;
+    unw_word_t end;
+    /* The debug frame itself.  */
+    char *debug_frame;
+    size_t debug_frame_size;
+    /* Index (for binary search).  */
+    struct table_entry *index;
+    size_t index_size;
+    /* Pointer to next descriptor.  */
+    struct unw_debug_frame_list *next;
+  };
+#endif
+
 struct unw_addr_space
   {
     void *mem_pool;
@@ -660,6 +689,13 @@ struct unw_addr_space
     uint32_t cache_generation;
 #endif
     struct dwarf_rs_cache global_cache;
+#ifdef CONFIG_DEBUG_FRAME
+    struct unw_debug_frame_list *debug_frames;
+#endif
+    unw_word_t safe_start_address, safe_end_address;
+    long num_safe_addresses;
+    unw_word_t *safe_start_addresses, *safe_end_addresses;
+    int saw_bad_ptr;
    };
 
 struct cursor
@@ -672,7 +708,8 @@ struct cursor
       {
 	X86_SCF_NONE,			/* no signal frame encountered */
 	X86_SCF_LINUX_SIGFRAME,		/* classic x86 sigcontext */
-	X86_SCF_LINUX_RT_SIGFRAME	/* POSIX ucontext_t */
+	X86_SCF_LINUX_RT_SIGFRAME,	/* POSIX ucontext_t */
+        ARM_SCF_NONE
       }
     sigcontext_format;
     unw_word_t sigcontext_addr;
@@ -690,14 +727,14 @@ struct cursor
 # define DWARF_FPREG_LOC(c,r)	(DWARF_LOC((unw_word_t)			     \
 				 tdep_uc_addr((c)->as_arg, (r)), 0))
 
-static void *safe_pointer(unw_word_t);
+static void *safe_pointer(unw_addr_space_t, unw_word_t);
 
 static inline int
 dwarf_getfp (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t *val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
-  *val = *(unw_fpreg_t *) safe_pointer(DWARF_GET_LOC (loc));
+  *val = *(unw_fpreg_t *) safe_pointer(c->as, DWARF_GET_LOC (loc));
   return 0;
 }
 
@@ -706,7 +743,7 @@ dwarf_putfp (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
-  *(unw_fpreg_t *) safe_pointer(DWARF_GET_LOC (loc)) = val;
+  *(unw_fpreg_t *) safe_pointer(c->as, DWARF_GET_LOC (loc)) = val;
   return 0;
 }
 
@@ -715,7 +752,7 @@ dwarf_get (struct dwarf_cursor *c, dwarf_loc_t loc, unw_word_t *val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
-  *val = *(unw_word_t *) safe_pointer(DWARF_GET_LOC (loc));
+  *val = *(unw_word_t *) safe_pointer(c->as, DWARF_GET_LOC (loc));
   return 0;
 }
 
@@ -724,7 +761,7 @@ dwarf_put (struct dwarf_cursor *c, dwarf_loc_t loc, unw_word_t val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
-  *(unw_word_t *) safe_pointer(DWARF_GET_LOC (loc)) = val;
+  *(unw_word_t *) safe_pointer(c->as, DWARF_GET_LOC (loc)) = val;
   return 0;
 }
 
@@ -756,7 +793,7 @@ extern void tdep_init (void);
 extern int tdep_search_unwind_table (unw_addr_space_t as, unw_word_t ip,
 				     unw_dyn_info_t *di, unw_proc_info_t *pi,
 				     int need_unwind_info, void *arg);
-extern void *tdep_uc_addr (ucontext_t *uc, int reg);
+extern void *tdep_uc_addr (unw_context_t *uc, int reg);
 extern int tdep_get_elf_image (struct elf_image *ei, pid_t pid, unw_word_t ip,
 			       unsigned long *segbase, unsigned long *mapoff);
 extern int tdep_access_reg (struct cursor *c, unw_regnum_t reg,
@@ -793,7 +830,7 @@ static inline int
 dwarf_reads8 (unw_addr_space_t as, unw_accessors_t *a, unw_word_t *addr,
 	      int8_t *val, void *arg)
 {
-  dwarf_misaligned_value_t *mvp = (void *) *addr;
+  dwarf_misaligned_value_t *mvp = (void *)safe_pointer(as, *addr);
 
   *val = mvp->s8;
   *addr += sizeof (mvp->s8);
@@ -804,7 +841,7 @@ static inline int
 dwarf_reads16 (unw_addr_space_t as, unw_accessors_t *a, unw_word_t *addr,
 	       int16_t *val, void *arg)
 {
-  dwarf_misaligned_value_t *mvp = (void *) *addr;
+  dwarf_misaligned_value_t *mvp = (void *)safe_pointer(as, *addr);
 
   *val = mvp->s16;
   *addr += sizeof (mvp->s16);
@@ -815,7 +852,7 @@ static inline int
 dwarf_reads32 (unw_addr_space_t as, unw_accessors_t *a, unw_word_t *addr,
 	       int32_t *val, void *arg)
 {
-  dwarf_misaligned_value_t *mvp = (void *) *addr;
+  dwarf_misaligned_value_t *mvp = (void *)safe_pointer(as, *addr);
 
   *val = mvp->s32;
   *addr += sizeof (mvp->s32);
@@ -826,7 +863,7 @@ static inline int
 dwarf_reads64 (unw_addr_space_t as, unw_accessors_t *a, unw_word_t *addr,
 	       int64_t *val, void *arg)
 {
-  dwarf_misaligned_value_t *mvp = (void *) *addr;
+  dwarf_misaligned_value_t *mvp = (void *)safe_pointer(as, *addr);
 
   *val = mvp->s64;
   *addr += sizeof (mvp->s64);
@@ -837,7 +874,7 @@ static inline int
 dwarf_readu8 (unw_addr_space_t as, unw_accessors_t *a, unw_word_t *addr,
 	      uint8_t *val, void *arg)
 {
-  dwarf_misaligned_value_t *mvp = (void *) *addr;
+  dwarf_misaligned_value_t *mvp = (void *)safe_pointer(as, *addr);
 
   *val = mvp->u8;
   *addr += sizeof (mvp->u8);
@@ -848,7 +885,7 @@ static inline int
 dwarf_readu16 (unw_addr_space_t as, unw_accessors_t *a, unw_word_t *addr,
 	       uint16_t *val, void *arg)
 {
-  dwarf_misaligned_value_t *mvp = (void *) *addr;
+  dwarf_misaligned_value_t *mvp = (void *)safe_pointer(as, *addr);
 
   *val = mvp->u16;
   *addr += sizeof (mvp->u16);
@@ -859,7 +896,7 @@ static inline int
 dwarf_readu32 (unw_addr_space_t as, unw_accessors_t *a, unw_word_t *addr,
 	       uint32_t *val, void *arg)
 {
-  dwarf_misaligned_value_t *mvp = (void *) *addr;
+  dwarf_misaligned_value_t *mvp = (void *)safe_pointer(as, *addr);
 
   *val = mvp->u32;
   *addr += sizeof (mvp->u32);
@@ -870,7 +907,7 @@ static inline int
 dwarf_readu64 (unw_addr_space_t as, unw_accessors_t *a, unw_word_t *addr,
 	       uint64_t *val, void *arg)
 {
-  dwarf_misaligned_value_t *mvp = (void *) *addr;
+  dwarf_misaligned_value_t *mvp = (void *)safe_pointer(as, *addr);
 
   *val = mvp->u64;
   *addr += sizeof (mvp->u64);
@@ -881,7 +918,7 @@ static inline int
 dwarf_readw (unw_addr_space_t as, unw_accessors_t *a, unw_word_t *addr,
 	     unw_word_t *val, void *arg)
 {
-  dwarf_misaligned_value_t *mvp = (void *) *addr;
+  dwarf_misaligned_value_t *mvp = (void *)safe_pointer(as, *addr);
 
   *val = mvp->w;
   *addr += sizeof (mvp->w);

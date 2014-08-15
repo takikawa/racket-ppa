@@ -22,6 +22,9 @@
 /* The size of a `void *', as computed by sizeof. */
 #undef SIZEOF_VOID_P
 
+/* The size of a `bool' with <stdbool.h>, as computed by sizeof. */
+#undef SIZEOF_BOOL
+
 /* Whether `intptr_t' is available. */
 #undef HAVE_INTPTR_T
 
@@ -56,13 +59,17 @@ typedef unsigned long uintptr_t;
 /* Whether pthread_rwlock is available. */
 #undef HAVE_PTHREAD_RWLOCK
 
-/* When poll(), epoll(), and/or kqueue() is available: */
+/* When poll(), epoll(), kqueue(), etc. is available: */
 #undef HAVE_POLL_SYSCALL
 #undef HAVE_EPOLL_SYSCALL
+#undef HAVE_INOTIFY_SYSCALL
 #undef HAVE_KQUEUE_SYSCALL
 
 /* When mmap() and mprotect() are available: */
 #undef HAVE_MMAP_MPROTECT
+
+/* To enable 2^16 page size instead of 2^14: */
+#undef MZ_USE_LARGE_PAGE_SIZE
 
 /* Enable futures: */
 #undef MZ_USE_FUTURES

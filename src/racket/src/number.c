@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2014 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -50,9 +50,11 @@
 #ifdef SIXTY_FOUR_BIT_INTEGERS
 # define MAX_SHIFT_TRY 61
 # define MAX_SHIFT_EVER 64
+# define MAX_FIXNUM_SQRT 3037000498
 #else
 # define MAX_SHIFT_TRY 29
 # define MAX_SHIFT_EVER 32
+# define MAX_FIXNUM_SQRT 46339
 #endif
 
 /* locals */
@@ -204,6 +206,8 @@ static Scheme_Object *unsafe_make_flrectangular (int argc, Scheme_Object *argv[]
 static Scheme_Object *unsafe_flreal_part (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_flimag_part (int argc, Scheme_Object *argv[]);
 
+static Scheme_Object *unsafe_flrandom (int argc, Scheme_Object *argv[]);
+
 #ifdef MZ_USE_SINGLE_FLOATS
 static Scheme_Object *TO_FLOAT(const Scheme_Object *n);
 #endif
@@ -217,6 +221,11 @@ static Scheme_Object *exact_to_extfl(int argc, Scheme_Object *argv[]);
 #endif
 
 /* globals */
+READ_ONLY Scheme_Object *scheme_unsafe_fxand_proc;
+READ_ONLY Scheme_Object *scheme_unsafe_fxior_proc;
+READ_ONLY Scheme_Object *scheme_unsafe_fxxor_proc;
+READ_ONLY Scheme_Object *scheme_unsafe_fxrshift_proc;
+
 READ_ONLY double scheme_infinity_val;
 READ_ONLY double scheme_minus_infinity_val;
 READ_ONLY double scheme_floating_point_zero = 0.0;
@@ -419,7 +428,7 @@ scheme_init_number (Scheme_Env *env)
 
 #ifdef MZ_LONG_DOUBLE
   scheme_long_floating_point_zero = get_long_double_zero();
-#if defined(HUGE_VALL) && !defined(USE_DIVIDE_MAKE_INFINITY)
+#if defined(HUGE_VALL) && !defined(USE_DIVIDE_MAKE_INFINITY) && !defined(MZ_LONG_DOUBLE_API_IS_EXTERNAL)
   scheme_long_infinity_val = HUGE_VALL;
 #else
 #ifndef USE_LONG_INFINITY_FUNC
@@ -815,7 +824,8 @@ void scheme_init_flfxnum_number(Scheme_Env *env)
     flags = SCHEME_PRIM_IS_UNARY_INLINED;
   else
     flags = SCHEME_PRIM_SOMETIMES_INLINED;
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_PRODUCES_FLONUM);
   scheme_add_global_constant("->fl", p, env);
 
   p = scheme_make_folding_prim(fl_to_integer, "fl->exact-integer", 1, 1, 1);
@@ -1282,18 +1292,24 @@ void scheme_init_unsafe_number(Scheme_Env *env)
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
                                                             | SCHEME_PRIM_PRODUCES_FIXNUM);
   scheme_add_global_constant("unsafe-fxand", p, env);
+  REGISTER_SO(scheme_unsafe_fxand_proc);
+  scheme_unsafe_fxand_proc = p;
 
   p = scheme_make_folding_prim(unsafe_fx_or, "unsafe-fxior", 2, 2, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
                                                             | SCHEME_PRIM_PRODUCES_FIXNUM);
   scheme_add_global_constant("unsafe-fxior", p, env);
+  REGISTER_SO(scheme_unsafe_fxior_proc);
+  scheme_unsafe_fxior_proc = p;
 
   p = scheme_make_folding_prim(unsafe_fx_xor, "unsafe-fxxor", 2, 2, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
                                                             | SCHEME_PRIM_PRODUCES_FIXNUM);
   scheme_add_global_constant("unsafe-fxxor", p, env);
+  REGISTER_SO(scheme_unsafe_fxxor_proc);
+  scheme_unsafe_fxxor_proc = p;
 
   p = scheme_make_folding_prim(unsafe_fx_not, "unsafe-fxnot", 1, 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
@@ -1312,6 +1328,8 @@ void scheme_init_unsafe_number(Scheme_Env *env)
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
                                                             | SCHEME_PRIM_PRODUCES_FIXNUM);
   scheme_add_global_constant("unsafe-fxrshift", p, env);
+  REGISTER_SO(scheme_unsafe_fxrshift_proc);
+  scheme_unsafe_fxrshift_proc = p;
 
   p = scheme_make_folding_prim(unsafe_fx_to_fl, "unsafe-fx->fl", 1, 1, 1);
   if (scheme_can_inline_fp_op())
@@ -1437,6 +1455,15 @@ void scheme_init_unsafe_number(Scheme_Env *env)
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
                                                             | SCHEME_PRIM_PRODUCES_FLONUM);
   scheme_add_global_constant("unsafe-flimag-part", p, env);
+
+  p = scheme_make_immed_prim(unsafe_flrandom, "unsafe-flrandom", 1, 1);
+  if (scheme_can_inline_fp_op())
+    flags = SCHEME_PRIM_IS_UNARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
+                                                            | SCHEME_PRIM_PRODUCES_FLONUM);
+  scheme_add_global_constant("unsafe-flrandom", p, env);
 }
 
 void scheme_init_extfl_unsafe_number(Scheme_Env *env)
@@ -1787,7 +1814,7 @@ int scheme_long_minus_zero_p(long_double d)
 long_double scheme_real_to_long_double(Scheme_Object *r)
 {
   if (SCHEME_INTP(r))
-    return long_double_from_int(SCHEME_INT_VAL(r));
+    return long_double_from_intptr(SCHEME_INT_VAL(r));
   else if (SCHEME_DBLP(r))
     return long_double_from_double(SCHEME_DBL_VAL(r));
   else if (SCHEME_LONG_DBLP(r))
@@ -2427,37 +2454,7 @@ sch_truncate (int argc, Scheme_Object *argv[])
   ESCAPED_BEFORE_HERE;
 }
 
-XFORM_NONGCING static double SCH_ROUND(double d)
-{
-  double i, frac;
-  int invert;
-
-#ifdef FMOD_CAN_RETURN_POS_ZERO
-  if ((d == 0.0) && minus_zero_p(d))
-    return d;
-#endif
-
-  if (d < 0) {
-    d = -d;
-    invert = 1;
-  } else
-    invert = 0;
-
-  frac = modf(d, &i);
-  if (frac < 0.5)
-    d = i;
-  else if (frac > 0.5)
-    d = i + 1;
-  else if (fmod(i, 2.0) != 0.0)
-    d = i + 1;
-  else
-    d = i;
-
-  if (invert)
-    d = -d;
-
-  return d;
-}
+#include "schround.inc"
 
 static Scheme_Object *
 sch_round (int argc, Scheme_Object *argv[])
@@ -3235,31 +3232,43 @@ static Scheme_Object *fixnum_expt(intptr_t x, intptr_t y)
 
   if ((x == 2) && (y <= MAX_SHIFT_TRY))
     return scheme_make_integer((intptr_t)1 << y);
-  else
-  {
+  else {
     intptr_t result = 1;
-    int odd_result = (x < 0) && (y & 0x1);
+    int neg_result = (x < 0) && (y & 0x1);
 
     if (x < 0)
       x = -x;
-    while (y > 0)
-    {
+
+    while (y > 0) {
       /* x^y*result is invariant and result <= x */
-      if (x > 46339 && y > 1) /* x * x won't fit in 31 bits */
-        return scheme_generic_integer_power(scheme_make_integer_value(orig_x), scheme_make_integer_value(orig_y));
+      if (x > MAX_FIXNUM_SQRT && y > 1) /* x * x won't fit in fixnum */
+        return scheme_generic_integer_power(scheme_make_integer_value(orig_x),
+                                            scheme_make_integer_value(orig_y));
 
       if (y & 0x1) /* if (odd?) */
       {
-        intptr_t next_result = x * result;
-        if (y == 1 && x > 46339 && !(next_result / x == result))
-          return scheme_generic_integer_power(scheme_make_integer_value(orig_x), scheme_make_integer_value(orig_y));
-        else
-          result = next_result;
+        uintptr_t next_result = (uintptr_t)x * (uintptr_t)result;
+        if ((y == 1)
+            && (x > MAX_FIXNUM_SQRT)
+            && (((intptr_t)next_result < 0)
+                || !(next_result / (uintptr_t)x == (uintptr_t)result)))
+          return scheme_generic_integer_power(scheme_make_integer_value(orig_x),
+                                              scheme_make_integer_value(orig_y));
+        else {
+          result = (intptr_t)next_result;
+          if (y == 1) {
+            /* Don't allow another x * x, because it could overflow
+               (and if it overflows, then a compiler is technically
+               free to make it do anything at all): */
+            break;
+          }
+        }
       }
       y = y >> 1;
       x = x * x;
     }
-    return scheme_make_integer_value(odd_result ? -result : result);
+
+    return scheme_make_integer_value(neg_result ? -result : result);
   }
 }
 
@@ -3726,7 +3735,11 @@ Scheme_Object *scheme_checked_flreal_part (int argc, Scheme_Object *argv[])
 
   if (!SCHEME_COMPLEXP(o)
       || !SCHEME_DBLP(((Scheme_Complex *)o)->r))
-    scheme_wrong_contract("flreal-part", "(and/c complex? (lambda (c) (flonum? (real-part c))))", 0, argc, argv);
+    scheme_wrong_contract("flreal-part",
+                          "(and/c complex?"
+                          /* */ " (lambda (c) (flonum? (real-part c)))"
+                          /* */ " (lambda (c) (flonum? (imag-part c))))",
+                          0, argc, argv);
 
   return _scheme_complex_real_part(o);
 }
@@ -3737,7 +3750,11 @@ Scheme_Object *scheme_checked_flimag_part (int argc, Scheme_Object *argv[])
 
   if (!SCHEME_COMPLEXP(o)
       || !SCHEME_DBLP(((Scheme_Complex *)o)->r))
-    scheme_wrong_contract("flimag-part", "(and/c complex? (lambda (c) (flonum? (real-part c))))", 0, argc, argv);
+    scheme_wrong_contract("flimag-part",
+                          "(and/c complex?"
+                          /* */ " (lambda (c) (flonum? (real-part c)))"
+                          /* */ " (lambda (c) (flonum? (imag-part c))))",
+                          0, argc, argv);
 
   return scheme_complex_imaginary_part(o);
 }
@@ -3973,7 +3990,7 @@ static Scheme_Object *exact_to_extfl (int argc, Scheme_Object *argv[])
   Scheme_Type t;
 
   if (SCHEME_INTP(o))
-    return scheme_make_long_double(long_double_from_int(SCHEME_INT_VAL(o)));
+    return scheme_make_long_double(long_double_from_intptr(SCHEME_INT_VAL(o)));
 
   t = _SCHEME_TYPE(o);
   if (t == scheme_float_type)
@@ -4119,7 +4136,7 @@ scheme_bitwise_shift(int argc, Scheme_Object *argv[])
 
     if (i > 0) {
       if (shift < 0) {
-	int shft = -shift;
+	intptr_t shft = -shift;
 	if (shft < MAX_SHIFT_EVER) {
 	  i = i >> shft;
 	  return scheme_make_integer(i);
@@ -4136,6 +4153,9 @@ scheme_bitwise_shift(int argc, Scheme_Object *argv[])
 
     v = scheme_make_bignum(i);
   }
+
+  if (scheme_current_thread->constant_folding)
+    scheme_signal_error("too big");
 
   return scheme_bignum_shift(v, shift);
 }
@@ -4256,9 +4276,9 @@ static Scheme_Object *bitwise_bit_field (int argc, Scheme_Object *argv[])
             if (v2 < (sizeof(intptr_t) * 8)) {
               if (SCHEME_INTP(so)) {
                 if (v1 < (sizeof(intptr_t) * 8)) {
-                  intptr_t res;
-                  res = ((SCHEME_INT_VAL(so) >> v1) & (((intptr_t)1 << v2) - 1));
-                  return scheme_make_integer(res);
+                  uintptr_t res;
+                  res = ((uintptr_t)(SCHEME_INT_VAL(so) >> v1) & (((uintptr_t)1 << v2) - 1));
+                  return scheme_make_integer_value_from_unsigned(res);
                 } else if (SCHEME_INT_VAL(so) > 0) 
                   return scheme_make_integer(0);
               } else if (SCHEME_BIGPOS(so)) {
@@ -4277,7 +4297,7 @@ static Scheme_Object *bitwise_bit_field (int argc, Scheme_Object *argv[])
                   d |= (((Scheme_Bignum *)so)->digits[vd + 1] << avail);
                 }
                 d = (d & (((bigdig)1 << v2) - 1));
-                return scheme_make_integer(d);
+                return scheme_make_integer_value_from_unsigned(d);
               }
             }
           }
@@ -5098,7 +5118,7 @@ static Scheme_Object *fx_to_extfl (int argc, Scheme_Object *argv[])
   WHEN_LONG_DOUBLE_UNSUPPORTED(unsupported("fx->extfl"));
   if (!SCHEME_INTP(argv[0])) scheme_wrong_contract("fx->extfl", "fixnum?", 0, argc, argv);
   v = SCHEME_INT_VAL(argv[0]);
-  return scheme_make_long_double(long_double_from_int(v));
+  return scheme_make_long_double(long_double_from_intptr(v));
 #else
   return unsupported("fx->extfl");
 #endif
@@ -5271,7 +5291,7 @@ static Scheme_Object *unsafe_fx_to_extfl (int argc, Scheme_Object *argv[])
   intptr_t v;
   if (scheme_current_thread->constant_folding) return exact_to_extfl(argc, argv);
   v = SCHEME_INT_VAL(argv[0]);
-  return scheme_make_long_double(long_double_from_int(v));
+  return scheme_make_long_double(long_double_from_intptr(v));
 #else
   return fx_to_extfl(argc, argv);
 #endif
@@ -5421,6 +5441,11 @@ static Scheme_Object *unsafe_flreal_part (int argc, Scheme_Object *argv[])
 static Scheme_Object *unsafe_flimag_part (int argc, Scheme_Object *argv[])
 {
   return ((Scheme_Complex *)argv[0])->i;
+}
+
+static Scheme_Object *unsafe_flrandom (int argc, Scheme_Object *argv[])
+{
+  return scheme_make_double(scheme_double_random(argv[0]));
 }
 
 static Scheme_Object *integer_to_extfl (int argc, Scheme_Object *argv[])

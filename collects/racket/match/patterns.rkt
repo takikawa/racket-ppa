@@ -50,8 +50,8 @@
 (define-struct (Null Atom) () #:transparent)
 
 ;; expr is an expression
-;; p is a pattern
-(define-struct (App Pat) (expr p) #:transparent)
+;; ps is a list of patterns
+(define-struct (App Pat) (expr ps) #:transparent)
 
 ;; pred is an expression
 (define-struct (Pred Pat) (pred) #:transparent)
@@ -173,7 +173,7 @@
     [(Struct? p)
      (merge (map bound-vars (Struct-ps p)))]
     [(App? p)
-     (bound-vars (App-p p))]
+     (merge (map bound-vars (App-ps p)))]
     [(Not? p) null]
     [(And? p)
      (merge (map bound-vars (And-ps p)))]
