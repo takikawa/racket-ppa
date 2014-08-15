@@ -1,5 +1,6 @@
-racket (5.3.6+dfsg1-2) UNRELEASED; urgency=medium
+racket (6.1-1) UNRELEASED; urgency=medium
 
+  * New upstream release
   * d/watch: Remove intermediate racket/ in URL.  Sources have been moved
     directly into versioned directory.  Also remove “-unix” from URL.
 
