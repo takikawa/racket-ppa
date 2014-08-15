@@ -1,4 +1,4 @@
 # Site		Directory		Pattern			Version	Script
 version=3
 opts=filenamemangle=s/.*-([0-9.]+)-.*/racket-$1.tar.gz/,dversionmangle=s/\+dfsg\d+// \
-http://download.racket-lang.org/installers/([0-9]\.[0-9.]+)/racket-([0-9]\.[0-9.]+)-src-unix.tgz
+http://download.racket-lang.org/installers/([0-9]\.[0-9.]+)/racket-([0-9]\.[0-9.]+)-src.tgz
