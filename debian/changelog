@@ -1,6 +1,6 @@
 racket (6.1-1) UNRELEASED; urgency=medium
 
-  * New upstream release
+  * New upstream release  (Closes: #741305)
     + Remove patch pkg/collects-path, merged upstream.
   * d/watch: Remove intermediate racket/ in URL.  Sources have been moved
     directly into versioned directory.  Also remove “-unix” from URL.
