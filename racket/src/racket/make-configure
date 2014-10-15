@@ -1,0 +1,72 @@
+#!/bin/sh
+#|
+cd "`dirname \"$0\"`"
+src="configure.ac"
+tgt="../configure"
+if [ ! -e "$src" ]; then echo "abort: did not find $src"; exit 1; fi
+echo "Creating $tgt from $src"
+if [ -e "$tgt" ]; then
+  /bin/echo -n "overwriting $tgt, Ctrl-C to abort, enter to continue "; read R;
+fi
+autoconf "$src" | racket "$0" > "$tgt"
+chmod +x "$tgt"
+exit 0
+|#
+#lang racket/base
+
+;; When autoconf produces `configure', it includes many
+;;  options that do not apply to Racket.  We want to
+;;  get rid of them, so that `configure --help' produces
+;;  valid information.
+;; In addition, we want none of the feature-selection flags
+;;  (such as --enable-mac64) to be passed to sub-configures,
+;;  so we adjust the script to strip them away.
+
+(define skip-rxs
+  (map (lambda (s)
+	 (regexp (format "^  --~a=DIR" s)))
+       '(sbindir 
+	 libexecdir 
+	 sharedstatedir
+	 localstatedir
+	 oldincludedir
+	 infodir
+         htmldir
+         ;; dvidir - converted to "collectsdir"
+         ;; pdfdir - converted to "appsdir"
+         psdir
+         localedir)))
+
+(let loop ()
+  (let ([l (read-line)])
+    (unless (eof-object? l)
+      (cond
+       [(ormap (lambda (rx)
+                 (regexp-match rx l))
+               skip-rxs)
+        ;; Skip
+        (loop)]
+       [(regexp-match #rx"dvidir" l)
+        ;; Hack: take over "dvidir" for "collectsdir":
+        (cond
+         [(equal? l "dvidir='${docdir}'")
+          (displayln "collectsdir='${exec_prefix}/share/${PACKAGE}/collects'")]
+         [(equal? l "  --dvidir=DIR           dvi documentation [DOCDIR]")
+          (displayln "  --collectsdir=DIR      base collections [EPREFIX/share/PACKAGE/collects]")]
+         [else
+          (displayln (regexp-replace* "pdf" (regexp-replace* #rx"dvi" l "collects") "apps"))])
+        (loop)]
+       [(regexp-match #rx"pdfdir" l)
+        ;; Hack: take over "pdfdir" for "appsdir":
+        (cond
+         [(equal? l "pdfdir='${docdir}'")
+          (displayln "appsdir='${exec_prefix}/share/applications'")]
+         [(equal? l "  --pdfdir=DIR           pdf documentation [DOCDIR]")
+          (displayln "  --appsdir=DIR          .desktop files [EPREFIX/share/applications]")]
+         [else
+          (displayln (regexp-replace* #rx"pdf" l "apps"))])
+        (loop)]
+       [else
+        ;; Copy
+        (displayln l)
+        (loop)]))))

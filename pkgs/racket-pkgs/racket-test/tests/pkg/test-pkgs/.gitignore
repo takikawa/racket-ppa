@@ -1,0 +1,9 @@
+MANIFEST
+*tgz
+*zip
+*plt
+*CHECKSUM
+pkg-test1b*
+/src-pkgs/
+/built-pkgs/
+pkg-add-base/doc
