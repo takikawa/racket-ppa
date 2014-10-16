@@ -1106,9 +1106,12 @@ reduce it further).
                ...)
              ([metafunction-contract (code:line) 
                                      (code:line id : @#,ttpattern-sequence ... -> range
-                                                maybe-pre-condition)]
+                                                maybe-pre-condition
+                                                maybe-post-condition)]
               [maybe-pre-condition (code:line #:pre @#,tttterm)
                                    (code:line)]
+              [maybe-post-condition (code:line #:post @#,tttterm)
+                                    (code:line)]
               [range @#,ttpattern
                      (code:line @#,ttpattern or range)
                      (code:line @#,ttpattern ∨ range)
@@ -1133,7 +1136,10 @@ If present, the term inside the @racket[maybe-pre-condition] is evaluated
 after a successful match to the input pattern in the contract (with
 any variables from the input contract bound). If
 it returns @racket[#f], then the input contract is considered to not
-have matched and an error is also raised.
+have matched and an error is also raised. When a metafunction
+returns, the expression in the @racket[maybe-post-condition] is
+evaluated (if present), with any variables from the input or output 
+contract bound.
 
 The @racket[side-condition], @racket[hidden-side-condition],
 @racket[where], and @racket[where/hidden] clauses behave as
@@ -1213,6 +1219,8 @@ ensures that there is a unique match for that case. Without
 it, @racket[(term (- (x x) x))] would lead to an ambiguous
 match.
 
+@history[#:changed "1.4" @list{Added @racket[#:post] conditions.}]
+
 }
 
 @defform[(define-metafunction/extension f language 
@@ -1251,10 +1259,13 @@ and @racket[#f] otherwise.
              (define-judgment-form language
                mode-spec
                contract-spec
+               invariant-spec
                rule rule ...)
              ([mode-spec (code:line #:mode (form-id pos-use ...))]
               [contract-spec (code:line) 
                              (code:line #:contract (form-id @#,ttpattern-sequence ...))]
+              [invariant-spec (code:line #:inv @#,tttterm)
+                                   (code:line)]
               [pos-use I
                        O]
               [rule [premise
@@ -1291,7 +1302,10 @@ and input positions in premises must be @|tttterm|s; input positions in conclusi
 output positions in premises must be @|ttpattern|s. When the optional @racket[contract-spec] 
 declaration is present, Redex dynamically checks that the terms flowing through
 these positions match the provided patterns, raising an exception recognized by 
-@racket[exn:fail:redex] if not.
+@racket[exn:fail:redex] if not. The term in the optional @racket[invariant-spec] is
+evaluated after the output positions have been computed and the contract has matched
+successfully, with variables from the contract bound; a result of @racket[#f] is
+considered to be a contract violation and an exception is raised.
 
 For example, the following defines addition on natural numbers:
 @interaction[
@@ -1461,8 +1475,13 @@ The @(examples-link "" #t "examples") directory demonstrates three use cases:
 In its first form, checks whether @racket[judgment] holds for any assignment of
 the pattern variables in @racket[judgment-id]'s output positions. In its second
 form, produces a list of terms by instantiating the supplied term template with
-each satisfying assignment of pattern variables. 
-See @racket[define-judgment-form] for examples.
+each satisfying assignment of pattern variables.
+
+@interaction[#:eval 
+             redex-eval
+             (judgment-holds (sum (s (s z)) (s z) n))
+             (judgment-holds (sum (s (s z)) (s z) n) n)]
+See @racket[define-judgment-form] for more examples.
 }
 
 @defform[(build-derivations judgment)]{
@@ -2180,6 +2199,21 @@ with @racket[#:satisfying].}
                     (sum nat_1 nat_2 nat_3)
                     (equal? (term nat_1) (term nat_2)))]
 
+@defparam[depth-dependent-order? depth-dependent boolean?
+                                 #:value #t]{
+
+Toggles whether or not redex will dynamically adjust the
+chance that more recursive clauses of judgment forms or metafunctions 
+are chosen earlier when attempting to generate terms 
+with forms that use @racket[#:satisfying]. It is @racket[#t] by
+default, which causes redex to favor more recursive clauses at
+lower depths and less recursive clauses at depths closer to the
+limit, in an attempt to generate larger terms. When it is
+@racket[#f], all clause orderings have equal probability
+above the bound.
+
+}
+
 @defform/subs[(redex-generator language-id satisfying size-expr)
               ([satisfying (judgment-form-id @#,ttpattern ...)
                            (code:line (metafunction-id @#,ttpattern ...) = @#,ttpattern)])
@@ -2363,8 +2397,8 @@ exploring reduction sequences.
                  [#:racket-colors? racket-colors? boolean? #t]
                  [#:scheme-colors? scheme-colors? boolean? racket-colors?]
                  [#:filter term-filter (-> any/c (or/c #f string?) any/c) (λ (x y) #t)]
-                 [#:x-spacing x-spacing number? 15]
-                 [#:y-spacing y-spacing number? 15]
+                 [#:x-spacing x-spacing real? 15]
+                 [#:y-spacing y-spacing real? 15]
                  [#:layout layout (-> (listof term-node?) void?) void]
                  [#:edge-labels? edge-labels? boolean? #t]
                  [#:edge-label-font edge-label-font (or/c #f (is-a?/c font%)) #f]
@@ -2446,7 +2480,7 @@ The @racket[term-filter] function is called each time a new node is
 about to be inserted into the graph. If the filter returns false, the
 node is not inserted into the graph.
 
-The @racket[x-spacing] and @racket[y-spacing] control the amount of
+The @racket[x-spacing] and @racket[y-spacing] arguments control the amount of
 space put between the snips in the default layout.
 
 The @racket[layout] argument is called (with all of the terms) when

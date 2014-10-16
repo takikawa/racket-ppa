@@ -848,6 +848,10 @@ static Scheme_Object *link_module_variable(Scheme_Object *modidx,
     menv = scheme_module_access(modname, env, mod_phase);
     
     if (!menv) {
+      Scheme_Object *modsrc;
+      modsrc = (env->module
+                ? scheme_get_modsrc(env->module)
+                : scheme_false);
       scheme_wrong_syntax("link", NULL, varname,
 			  "namespace mismatch;\n"
                           " reference to a module that is not available\n"
@@ -858,7 +862,7 @@ static Scheme_Object *link_module_variable(Scheme_Object *modidx,
 			  env->phase,
                           modname,
                           mod_phase,
-                          env->module ? env->module->modsrc : scheme_false);
+                          modsrc);
       return NULL;
     }
 
@@ -911,6 +915,10 @@ static Scheme_Object *link_module_variable(Scheme_Object *modidx,
     }
 
     if (bad_reason) {
+      Scheme_Object *modsrc;
+      modsrc = (env->module
+                ? scheme_get_modsrc(env->module)
+                : scheme_false);
       scheme_wrong_syntax("link", NULL, varname,
                           "bad variable linkage;\n"
                           " reference to a variable that %s\n"
@@ -922,7 +930,7 @@ static Scheme_Object *link_module_variable(Scheme_Object *modidx,
                           env->phase,
                           modname,
                           mod_phase,
-                          env->module ? env->module->modsrc : scheme_false);
+                          modsrc);
     }
 
     if (!(((Scheme_Bucket_With_Flags *)bkt)->flags & (GLOB_IS_IMMUTATED | GLOB_IS_LINKED)))
@@ -1351,12 +1359,7 @@ static void unbound_global(Scheme_Object *obj)
 
 static void make_tail_buffer_safe()
 {
-  Scheme_Thread *p = scheme_current_thread;
-
-  GC_CAN_IGNORE Scheme_Object **tb;
-  p->tail_buffer = NULL; /* so args aren't zeroed */
-  tb = MALLOC_N(Scheme_Object *, p->tail_buffer_size);
-  p->tail_buffer = tb;
+  scheme_realloc_tail_buffer(scheme_current_thread);
 }
 
 static Scheme_Object **evacuate_runstack(int num_rands, Scheme_Object **rands, Scheme_Object **runstack)
@@ -1370,6 +1373,12 @@ static Scheme_Object **evacuate_runstack(int num_rands, Scheme_Object **rands, S
     return rands;
   } else
     return rands;
+}
+
+static Scheme_Object *do_eval_k_readjust_mark(void)
+{
+  MZ_CONT_MARK_POS -= 2; /* undo increment in do_eval_stack_overflow() */
+  return do_eval_k();
 }
 
 static Scheme_Object *do_eval_stack_overflow(Scheme_Object *obj, int num_rands, Scheme_Object **rands, 
@@ -1395,7 +1404,14 @@ static Scheme_Object *do_eval_stack_overflow(Scheme_Object *obj, int num_rands, 
   } else
     p->ku.k.p2 = (void *)rands;
   p->ku.k.i2 = get_value;
-  return scheme_handle_stack_overflow(do_eval_k);
+
+  /* In case we got here via scheme_force_value_same_mark(), in case
+     overflow handling causes the thread to sleep, and in case another
+     thread tries to get this thread's continuation marks: ensure tha
+     the mark pos is not below any current mark. */
+  MZ_CONT_MARK_POS += 2;
+
+  return scheme_handle_stack_overflow(do_eval_k_readjust_mark);
 }
 
 static Scheme_Dynamic_Wind *intersect_dw(Scheme_Dynamic_Wind *a, Scheme_Dynamic_Wind *b, 
@@ -1884,7 +1900,7 @@ void scheme_set_global_bucket(char *who, Scheme_Bucket *b, Scheme_Object *val,
                            : "constant")
 			: "variable"),
 		       (Scheme_Object *)b->key,
-		       home->module->modsrc);
+		       scheme_get_modsrc(home->module));
     } else {
       scheme_raise_exn(MZEXN_FAIL_CONTRACT_VARIABLE, b->key,
 		       "%s: " CANNOT_SET_ERROR_STR ";\n"
@@ -5636,15 +5652,6 @@ Scheme_Object **scheme_push_prefix(Scheme_Env *genv, Resolve_Prefix *rp,
   int i, j, tl_map_len;
 
   rs_save = rs = MZ_RUNSTACK;
-
-  if (rp->uses_unsafe) {
-    scheme_check_unsafe_accessible((SCHEME_FALSEP(rp->uses_unsafe)
-                                    ? (insp
-                                       ? insp
-                                       : genv->access_insp)
-                                    : rp->uses_unsafe),
-                                   genv);
-  }
 
   if (rp->num_toplevels || rp->num_stxes || rp->num_lifts) {
     i = rp->num_toplevels;
