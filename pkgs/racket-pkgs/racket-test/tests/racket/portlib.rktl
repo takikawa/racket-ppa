@@ -428,6 +428,29 @@
     (test 200 peek-byte p)
     (test 200 read-byte p)))
 
+;; Tests for `peeking-input-port`
+(let ()
+  (define (try-peeking buffer-mode)
+    (define an-original-port (open-input-string "123456789abc"))
+    (define a-peeking-port (peeking-input-port an-original-port))
+    (file-stream-buffer-mode a-peeking-port buffer-mode)
+    (test "123" read-string 3 a-peeking-port)
+    (test "456" read-string 3 a-peeking-port)
+
+    (test "123" read-string 3 an-original-port)
+
+    ;; It's not well defined what will happen now when buffering is
+    ;; enabled, but we can predict given the current implementation:
+    (test (if (eq? 'block buffer-mode) "789" "abc") read-string 3 a-peeking-port)
+
+    (test #f file-stream-buffer-mode an-original-port)
+    (test buffer-mode file-stream-buffer-mode a-peeking-port)
+    (test (void) file-stream-buffer-mode a-peeking-port 'none)
+    (test 'none file-stream-buffer-mode a-peeking-port))
+
+  (try-peeking 'none)
+  (try-peeking 'block))
+
 ;; read synchronization events
 (define (go mk-hello sync atest btest)
   (test #t list? (list mk-hello sync atest btest))
@@ -626,6 +649,18 @@
       (test 2 peek-bytes-avail!* b 0 #f s)
       (test 1 peek-bytes-avail!* b 1 #f s)
       (test 2 read-bytes-avail!* b s))))
+
+;; Make sure that blocking on a limited input port doesn't
+;; block in the case of a peek after available bytes:
+(let ()
+  (define-values (i o) (make-pipe))
+  (write-char #\a o)
+  (write-char #\a o)
+  
+  (thread (lambda ()
+            (sync (system-idle-evt))
+            (write-char #\b o)))
+  (test 1 peek-bytes-avail! (make-bytes 1) 2 #f (make-limited-input-port i 10)))
 	     
 ;; ----------------------------------------
 ;; Conversion wrappers

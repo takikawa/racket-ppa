@@ -749,6 +749,31 @@ for @nonterm{key}.
  @history[#:added "6.0.17"]
 }
 
+@subcommand{@command/toc{archive} @nonterm{option} ... @nonterm{dest-dir} @nonterm{pkg} ...
+--- Copies information from installed packages named by @nonterm{pkgs}s
+    to a @filepath{catalog} directory catalog in @nonterm{dest-dir}, and also copies
+    all package sources to a @filepath{pkgs} directory in @nonterm{dest-dir}.
+
+    Packages sources are copied and repacked as needed, so that
+    all packages are written to the @filepath{pkgs} directory as
+    @filepath{.zip} archives. This conversion may change the checksum
+    on each archived package.
+
+    The @exec{archive} sub-command accepts
+    the following @nonterm{option}s:
+
+ @itemlist[
+ @item{@DFlag{include-deps} --- Includes the dependencies of the specified packages
+        in the resulting catalog.}
+ @item{@DFlag{exclude} @nonterm{pkg} --- Omits the specified @nonterm{pkg} from the
+        resulting catalog. This also causes the dependencies of @nonterm{pkg} to be
+        omitted if @DFlag{include-deps} is specified. This flag can be provided multiple times.}
+ @item{@DFlag{relative} --- Write package sources to @nonterm{dest-catalog} in relative-path form.}
+ ]
+
+ @history[#:added "6.1.0.8"]
+}
+
 @; ----------------------------------------
 
 @section[#:tag "metadata"]{Package Metadata}
@@ -849,7 +874,7 @@ The following @filepath{info.rkt} fields are used by the package manager:
        @DFlag{binary} mode.}
 
  @item{@racketidfont{implies} --- a list of strings and
-       @racket['core]. Each string refers to a package listed in the
+       @racket['core]. Each string refers to a package listed in
        @racketidfont{deps} and indicates that a dependency on the
        current package counts as a dependency on the named package;
        for example, the @pkgname{gui} package is defined to ensure
@@ -863,6 +888,12 @@ The following @filepath{info.rkt} fields are used by the package manager:
        @pkgname{base} package to declare it as the representative of
        core Racket libraries.}
 
+ @item{@racketidfont{update-implies} --- a list of strings. Each
+       string refers to a package listed in @racketidfont{deps}
+       or @racketidfont{build-deps}
+       and indicates that the implied packages are automatically updated
+       whenever the implying package is updated.}
+
  @item{@racketidfont{setup-collects} --- a list of path strings and/or
        lists of path strings, which are used as collection names to
        set up via @exec{raco setup} after the package is installed, or
@@ -871,7 +902,20 @@ The following @filepath{info.rkt} fields are used by the package manager:
        set up (plus collections for global documentation indexes and
        links).}
 
+ @item{@racketidfont{package-content-state} --- a list of two items;
+       the first item is @racket['binary], @racket['binary-lib], or
+       @racket['built], and the second item is either @racket[#f] or a
+       string to represent a Racket version for compiled content. This
+       information is used by @exec{raco pkg install} or @exec{raco
+       pkg update} witj @DFlag{source}, @DFlag{binary}, or
+       @DFlag{binary-lib} to ensure that the package content is
+       consistent with the requested conversion; see also
+       @secref["strip"]. Absence of this definition is treated the
+       same as @racket[(list 'source #f)].}
+
 ]
+
+@history[#:changed "6.1.0.5" @elem{Added @racketidfont{update-implies}.}]
 
 @; ----------------------------------------
 
@@ -1028,6 +1072,42 @@ You can go even further with
 which not only takes a snapshot of the catalog, but also takes a
 snapshot of all package sources (so that you do not depend on the
 original sources).
+
+
+@subsection{How can I install a package without its documentation?}
+
+If package is available in the form of a @tech{built package}, then
+you can use @exec{raco pkg install --binary-lib} to strip source,
+tests, and documentation from a package before installing it.
+
+@tech{Built packages} are typically provided by a snapshot or release
+site (where a Racket distribution downloaded from the site is
+configured to consult the site for packages), at least for packages
+associated with the distribution. Beware that
+@url{http://pkgs.racket-lang.org/} generally refers to @tech{source
+packages}, not @tech{built packages}. In the near future, built
+variants of the @url{http://pkgs.racket-lang.org/} packages will be
+provided at @url{http://pkg-build.racket-lang.org/catalog/}.
+
+Some packages have been split at the source level into separate
+library, test, and documentation packages. For example,
+@pkgname{net-lib} provides modules such as @racketmodname[net/cookie]
+without documentation, while @pkgname{net-doc} provides documentation
+and @pkgname{net-test} provides tests. The @pkgname{net} package
+depends on @pkgname{net-lib} and @pkgname{net-doc}, and it implies
+@pkgname{net-lib}, so you can install @pkgname{net} in a minimal
+Racket distribution to get the libraries with documentation (and lots
+of additional packages to support documentation), or install
+@pkgname{net-lib} to get just the libraries.
+
+If you develop a package that is especially widely used or is
+especially useful in a constrained installation environment, then
+splitting your package into @pkgname{-lib}, @pkgname{-doc}, and
+@pkgname{-test} components may be worthwhile. Most likely, you should
+keep the packages together in a single source-code repository and use
+metedata such as @racketidfont{implies} and
+@racketidfont{update-implies} (see @secref["metadata"]) so that the
+packages are updated in sync.
 
 
 @subsection{Why is the package manager so different than @|Planet1|?}

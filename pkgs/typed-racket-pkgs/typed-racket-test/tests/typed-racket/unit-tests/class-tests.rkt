@@ -640,6 +640,35 @@
              (m 5))
            (void))
          -Void]
+   ;; test inherit method in another method (next 3)
+   [tc-e (let ()
+           (class (class object% (super-new)
+                    (: m (-> String String))
+                    (define/public (m x) (string-append x "m")))
+             (super-new)
+             (inherit m)
+             (: n (-> String))
+             (define/public (n) (m "foo")))
+           (void))
+         -Void]
+   [tc-e (let ()
+           (class (class object% (super-new)
+                    (: m (-> String String))
+                    (define/public (m x) (string-append x "m")))
+             (super-new)
+             (inherit m)
+             (define/public (n) (m "foo")))
+           (void))
+         -Void]
+   [tc-e (let ()
+           (class (class object% (super-new)
+                    (: m (-> String String))
+                    (define/public (m x) (string-append x "m")))
+             (super-new)
+             (inherit m)
+             (define/private (n) (m "foo")))
+           (void))
+         -Void]
    ;; test internal name with inherit
    [tc-e (let ()
            (class (class object% (super-new)
@@ -706,6 +735,12 @@
            (define x (new c%))
            (void))
          -Void]
+   ;; failing instance subtyping
+   [tc-err (let ()
+             (define x (new (class object% (super-new) (define/public (m) "m"))))
+             (ann x (Object [n (-> String)]))
+             (error "foo"))
+           #:msg #rx"expected: .*n.*given:.*m.*"]
    ;; test use of `this` in field default
    [tc-e (let ()
            (class object%
@@ -1464,4 +1499,26 @@
    [tc-err (make-object (ann object% ClassTop))
            #:msg #rx"cannot instantiate.*ClassTop"]
    [tc-err (make-object 3)
-           #:msg #rx"value of a non-class type"]))
+           #:msg #rx"value of a non-class type"]
+   ;; PR 14726
+   ;; test opt-arg but non-keyword method
+   [tc-e (let ()
+           (define-type-alias A%
+             (Class [foo (->* [Integer] Void)]))
+           (: a% A%)
+           (define a%
+             (class object%
+               (super-new)
+               (define/public (foo [i #f]) (void))))
+           (new a%))
+         (-object #:method ([foo (t:-> -Integer -Void)]))]
+   [tc-e (let ()
+           (define-type-alias A%
+             (Class [foo (->* [] [Integer] Void)]))
+           (: a% A%)
+           (define a%
+             (class object%
+               (super-new)
+               (define/public (foo [i #f]) (void))))
+           (new a%))
+         (-object #:method ([foo (cl->* (t:-> -Void) (t:-> -Integer -Void))]))]))

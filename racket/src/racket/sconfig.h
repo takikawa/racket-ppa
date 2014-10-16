@@ -579,9 +579,7 @@
 # endif
 
 # define TIME_SYNTAX
-# define USE_FTIME
-# define USE_TIMEZONE_VAR_W_DLS
-# define USE_TZNAME_VAR
+# define USE_WIN32_TIME
 # define WINDOWS_GET_PROCESS_TIMES
 # define GETENV_FUNCTION
 # define DIR_FUNCTION
@@ -595,7 +593,7 @@
    the actual size from the executable on startup: */
 # define WINDOWS_DEFAULT_STACK_SIZE 1048576
 
-# ifndef _WIN64
+# if !defined(_WIN64) || (_MSC_VER >= 1600)
 #  define USE_MZ_SETJMP
 # endif
 
@@ -885,7 +883,6 @@
 #if defined(i386)
 # define MZ_USE_JIT_I386
 # define MZ_JIT_USE_MPROTECT
-# define MZ_USE_DWARF_LIBUNWIND
 #endif
 #if defined(__x86_64__)
 # define MZ_USE_JIT_X86_64
@@ -990,6 +987,8 @@
  /* USE_PLAIN_TIME uses time; only for TIME_SYNTAX */
  
  /* USE_MACTIME uses the Mac toolbox to implement time functions. */
+
+ /* USE_WIN32_TIME uses the Win32 API to implement time functions. */
 
  /* CLOCK_IS_USER_TIME uses the system time for user milliseconds. */
 

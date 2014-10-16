@@ -2,11 +2,12 @@
 @(require scribble/manual
           scribble/bnf
           scribble/struct
-          scribble/eval)
+          scribble/eval
+          "scribblings/cite.rkt")
 
 @title{Redex: Practical Semantics Engineering}
 
-@author["Robert Bruce Findler" "Casey Klein"]
+@author["Robert Bruce Findler" "Casey Klein" "Burke Fetscher"]
 
 PLT Redex consists of a domain-specific language for specifying
 reduction semantics, plus a suite of tools for working with the
@@ -23,6 +24,7 @@ and the @tt{examples} subdirectory in the @tt{redex} collection.
 @include-section["scribblings/ref.scrbl"]
 @include-section["scribblings/benchmark.scrbl"]
 
+@generate-bibliography[]
 @index-section[]
 
 

@@ -84,6 +84,10 @@
 
 (check-exn exn:fail? (λ () ((test-contract-generation (-> char? integer?)) 0)))
 (check-not-exn (λ () ((test-contract-generation (-> integer? integer?)) 1)))
+(check-not-exn (λ () ((test-contract-generation (-> integer? any)) 1)))
+(check-not-exn (λ () ((test-contract-generation (-> integer? (-> integer? any))) 1)))
+(check-not-exn (λ () ((test-contract-generation (-> (-> integer? any) integer?))
+                      (λ (i) (values 1 2 3)))))
 (check-not-exn (λ () ((test-contract-generation (-> (-> integer? integer?) boolean?)) +)))
 (check-not-exn 
  (λ () ((test-contract-generation (-> some-crazy-predicate? some-crazy-predicate?)) 11)))
@@ -202,6 +206,20 @@
            (λ (x) 'not-a-string)
            'pos
            'neg))
+
+(check-exercise
+ 1
+ pos-exn?
+ (contract (->i ([i integer?] [b boolean?]) [result string?])
+           (λ (i b) 'not-a-string)
+           'pos 'neg))
+
+(check-exercise
+ 1
+ pos-exn?
+ (contract (->i ([i integer?] [b boolean?]) [result number?] #:post (result) (zero? result))
+           (λ (i b) 11)
+           'pos 'neg))
 
 ;; the tests below that use pos-exn? have a
 ;; (vanishingly small) probability of not passing. 

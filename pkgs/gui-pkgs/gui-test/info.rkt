@@ -15,7 +15,8 @@
                      "pconvert-lib"
                      "compatibility-lib"
                      "sandbox-lib"))
+(define update-implies '("gui-lib"))
 
 (define pkg-desc "tests for \"gui\"")
 
-(define pkg-authors '(mflatt))
+(define pkg-authors '(mflatt robby))
