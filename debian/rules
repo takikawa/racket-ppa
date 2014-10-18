@@ -31,7 +31,7 @@ DEB_MAKE_ENVVARS += HOME=/nonexistant PLT_SETUP_OPTIONS="-j $(NUMJOBS) $(PLT_EXT
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
 
 DEB_DH_INSTALL_ARGS_racket-common := -X${RACKET_ARCH} -X$(MZDYN) -X/tests/
-DEB_DH_INSTALL_ARGS_racket-doc := -Xrelease-notes
+DEB_DH_INSTALL_ARGS_racket-doc := -Xrelease
 DEB_DH_COMPRESS_ARGS := -X.sxref -X.sqlite
 
 DEB_DH_BUILDDEB_ARGS := -- -Zxz
