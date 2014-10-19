@@ -3,11 +3,6 @@ Fri, 4 Feb 2000 22:10:09 -0700.
 
 It was downloaded from http://racket-lang.org/download
 
-The following were removed from the upstream tarball because of licensing
-concerns
-
-	collects/tests/xml/xmltest.zip
-
 readline collection notes:
 GNU's readline library is covered by the GPL (found at
 /usr/share/common-licenses/GPL on Debian systems), and that applies to
@@ -32,7 +27,7 @@ Files: src/racket/src/gmp/*
 Copyright: © 1992, 1993, 1994, 1996  Free Software Foundation, Inc.
 License: LGPL2.1+
 
-Files: src/racket/src/unbwind/*
+Files: src/racket/src/unwind/*
 Copyright: © 2003-2005 Hewlett-Packard Development Company, L.P.
 License: MIT
   see below for license text
@@ -49,7 +44,7 @@ File: collects/gui-debugger/icons/clanbomber-*.png, collects/icons/stop*.png
 Copyright: © 2008 Everaldo Coelho
 License: LGPL2.1+
 
-Files: collects/mzlib/deflate.rkt: 
+Files: .share/pkgs/compatibility-lib/mzlib/deflate.rkt
 Copyright © 1992-1993 Jean-loup Gailly
 License: DFSG. If GPL versus LGPL matters, contact PLT Scheme team.
     *** The original version that this code was taken from was
@@ -58,7 +53,7 @@ License: DFSG. If GPL versus LGPL matters, contact PLT Scheme team.
     LGPL-compatible license.  I (Eli Barzilay) have tried to contact the
     author, but no reply yet.
 
-File: collects/icons/save.png
+File: share/pkgs/icons/save.png
 Copyright: © 2008  David Vignoni
 License: LGPL 2.1
 
@@ -77,41 +72,11 @@ License:
     provided the above notices are retained, and a notice that the code was
     modified is included with the above copyright notice.
 
-Files: src/racket/gc/libatomic_ops/*
-Copyright: © 1991-2005 Hewlett-Packard Development Company, and others.
-License: MIT
-
-Files: src/racket/gc/libatomic_ops/sysdeps/{armcc,gcc}/*
-Copyright: © 1991-2005 Hewlett-Packard Development Company, and others.
-License: MIT-like
-    THIS MATERIAL IS PROVIDED AS IS, WITH ABSOLUTELY NO WARRANTY EXPRESSED
-    OR IMPLIED.  ANY USE IS AT YOUR OWN RISK.
-
-    Permission is hereby granted to use or copy this program
-    for any purpose,  provided the above notices are retained on all copies.
-    Permission to modify the code and to distribute modified code is granted,
-    provided the above notices are retained, and a notice that the code was
-    modified is included with the above copyright notice.
-
-Files: src/racket/gc/libatomic_ops/{tests/*, src/atomic_ops_malloc.[ch], src/atomic_ops_stack.[ch]}
-Copyright: © 2003-2005 Hewlett-Packard Company.
-License: GPL2+
-    This file may be redistributed and/or modified under the
-    terms of the GNU General Public License as published by the Free Software
-    Foundation; either version 2, or (at your option) any later version.
-
-    It is distributed in the hope that it will be useful, but WITHOUT ANY
-    WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-    FOR A PARTICULAR PURPOSE.  See the GNU General Public License in the
-    file doc/COPYING for more details.
-
-These files don't seem to be compiled/linked to by racket.
-
 Files: src/foreign/libffi/*
 Copyright: © 1996-2009  Anthony Green, Red Hat, Inc and others.  
 License: MIT
 
-Files: doc/r6rs-std/*
+Files: share/pkgs/r6rs-doc/r6rs/scribblings/r6rs-std/*
 Copyright: © 2007 William D Clinger, Richard Kelsey, Jonathan A Rees.
 License:
 
@@ -121,7 +86,7 @@ License:
     this report as a starting point for manuals and other
     documentation, modifying it as necessary.
 
-Files: doc/r5rs-std/*
+Files:  share/pkgs/r5rs-doc/r5rs/scribblings/r5rs-std/*
 Copyright: © 1998 William D Clinger, Richard Kelsey, Jonathan A Rees.
 License:
 
@@ -162,11 +127,11 @@ On Jul  6, Jonathan A Rees wrote:
 Barzilay did the actual questioning and collecting of answers, with the
 question provided by Ari).
 
-Files: doc/srfi-std/*
+Files: share/pkgs/srfi-doc/scribblings/srfi-std/*
 Copyright: SRFI contributors
 License: MIT
 
-Files: 2htdp/private/csv/csv.rkt
+Files: share/pkgs/htdp-lib/2htdp/private/csv/csv.rkt
 Copyright: ©  2004-2009 Neil Van Dyke
 License: LGPL3+
 
@@ -183,27 +148,27 @@ Files: collects/net/*
 Copyright: 2001-2004 by Francisco Solsona, Noel Walsh
 License: LGPL2.1+
 
-Files: collects/r6rs/records-{core|explicit}
+Files: share/pkgs/r6rs/records-{core|explicit}
 Copyright: © 2005 Michael Sperber 
 License: MIT
 
-Files: racket/draw/private/lzw.rkt
+Files: share/pkgs/draw-lib/draw/private/lzw.rkt
 Copyright: © 2006 Zachary Beane
 License: MIT
 
-Files: collects/rackunit/*
+Files: share/pkgs/rackunit/*
 Copyright: © 2005 by Noel Welsh. 
 License: LGPL2.1+
 
-Files: rnrs/records/syntactic-6.rkt
+Files: share/pkgs/r6rs-lib/rnrs/records/syntactic-6.rkt
 Copyright: © 2005 Michael Sperber
 License: MIT 
 
-Files: collects/sgl/sgl.rkt
+Files: share/pkgs/sgl/sgl.rkt
 Copyright: ©  2003-2011  Scott Owens
 License: LGPL 2.1+
 
-Files: collects/sgl/examples/gears.rkt
+Files: share/pkgs/sgl/examples/gears.rkt
 Copyright: ©  2003-2011  Scott Owens, © 1999-2001
 License: 
     Permission is hereby granted, free of charge, to any person obtaining a
@@ -217,52 +182,52 @@ License:
     The above copyright notice and this permission notice shall be included
     in all copies or substantial portions of the Software.
 
-Files: collects/srfi/*
+Files: share/pkgs/srfi-lib/srfi/*
 Copyright: (c) 1998, 1999 by Olin Shivers, 2002 Noel Walsh
 License: LGPL 2.1+
 
-Files: collects/srfi/41/derived.rkt
+Files: share/pkgs/srfi-lib/srfi/41/derived.rkt
 Copyright (C) 2007 by Philip L. Bewig of Saint Louis, Missouri, USA.  
 License: MIT
 
-Files: collects/srfi/60/60.rkt
+Files: share/pkgs/srfi-lib/srfi/60/60.rkt
 Copyright: (C) 2005 David Van Horn
 Copyright: (C) 1991, 1993, 2001, 2003, 2005 Aubrey Jaffer
 License: SRFI
 
-Files: collects/srfi/63/63.rkt
+Files: share-pkgs/srfi-lib/srfi/63/63.rkt
 Copyright: © 2007-2011 Chongkai Zhu, © 2001, 2003, 2005, 2006 Aubrey Jaffer
 License: SRFI
 
-Files: collects/srfi/64/testing.rkt
+Files: share/pkgs/srfi-lib/srfi/64/testing.rkt
 Copyright: © 2005, 2006 Per Bothner
 License: MIT
 
-Files: collects/srfi/67/compare-reference.scm
+Files: share/pkgs/srfi-lib/srfi/67/compare-reference.scm
 Copyright: © 2005 Sebastian Egner and Jens Axel S{\o}gaard.
 License: MIT
 
-Files: srfi/74/blob.scm
+Files: share/pkgs/srfi-lib/srfi/74/blob.scm
 Copyright: © 2005 Michael Sperber 
 License: MIT
 
-Files: collects/srfi/78/{check-reference.scm, examples-78.scm}
+Files: share/pkgs/srfi-lib/srfi/78/{check-reference.scm, examples-78.scm}
 Copyright: © 2005-2006 Sebastian Egner.
 License: MIT
 
-Files: collects/srfi/98.rkt
+Files: share/pkgs/srfi-lib/srfi/98.rkt
 Copyright: © 2009-2011 Derick Eddington.  All rights reserved.
 License: MIT
 
-Files: collects/srfi/optional.rkt
+Files: share/pkgs/srfi-lib/srfi/optional.rkt
 Copyright: © 1993-1999 Richard Kelsey and Jonathan Rees, © 1994-1999 by Olin Shivers and Brian D. Carlstrom.
 License: BSD3
 
-Files: collects/swindle/*
+Files: share/pkgs/swindle/*
 Copyright: © 1998-2011 Eli Barzilay (eli@barzilay.org)
 License: LGPL 2.1+
 
-Files: collects/swindle/tiny-clos.rkt
+Files: share/pkgs/swindle/tiny-clos.rkt
 Copyright: © 1992 Xerox Corporation, © 1998-2011 Eli Barzilay (eli@barzilay.org)
 License: LGPL2.1+, and the following:
     Use, reproduction, and preparation of derivative works are permitted.  Any
@@ -280,7 +245,7 @@ License: LGPL2.1+, and the following:
     DAMAGES.
 
 
-Files: collects/srfi/19/time.rkt
+Files: share/pkgs/srfi-lib/srfi/19/time.rkt
 Copyright: (C) I/NET, Inc. (2000, 2002, 2003). 
 Copyright: (C) Neodesic Corporation (2000). All Rights Reserved. 
 License:
@@ -352,20 +317,7 @@ License:
     INFORMATION HEREIN WILL NOT INFRINGE ANY RIGHTS OR ANY IMPLIED WARRANTIES OF 
     MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE. 
 
-
-
-Files: collects/tests/rackunit/*, tests/srfi/1/*
-Copyright: © 2005 by Noel Welsh. 
-License: LGPL2.1+
-
-Files: collects/tests/srfi/13/string-test.rkt, 
-       collects/tests/srfi/2/and-let-test.rkt,
-       collects/tests/srfi/14/char-set-test.rkt	      
-Copyright: © 2002 by Francisco Solsona.
-License: LGPL 2.1+
-
-
-Files: collects/scribble/sigplan/sigplanconf.cls
+Files: share/pkgs/scribble/sigplan/sigplanconf.cls
 Copyright: © 2004 by Paul C. Anagnostopoulos
 License: CC-BY-3.0
     This work is licensed under the Creative Commons Attribution License.
