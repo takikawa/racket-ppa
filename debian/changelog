@@ -1,11 +1,14 @@
-racket (6.1-1) UNRELEASED; urgency=medium
+racket (6.1-1) unstable; urgency=medium
 
+  [ James McCoy ]
   * New upstream release  (Closes: #741305)
     + Remove patch pkg/collects-path, merged upstream.
   * d/watch: Remove intermediate racket/ in URL.  Sources have been moved
     directly into versioned directory.  Also remove “-unix” from URL.
+  [ David Bremner ]
+  * Borrow some changes from Asumu Takikawa to get 6.x packaged.
 
- -- James McCoy <jamessan@debian.org>  Sun, 04 May 2014 20:30:02 -0400
+ -- David Bremner <bremner@debian.org>  Sun, 19 Oct 2014 09:24:21 +0200
 
 racket (5.3.6+dfsg1-1) unstable; urgency=medium
 
