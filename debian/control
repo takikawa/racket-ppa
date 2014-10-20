@@ -38,8 +38,8 @@ Package: racket-common
 Architecture: all
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Recommends: racket (>= ${source:Upstream-Version}), racket-doc (>= ${source:Upstream-Version})
-Breaks: plt-scheme (<<5.0~)
-Replaces: plt-scheme (<<5.0~)
+Breaks: plt-scheme (<<5.0~), racket-doc (<<6.1~)
+Replaces: plt-scheme (<<5.0~), racket-doc (<<6.1~)
 Description: extensible programming language in the Scheme family (shared files)
  This package includes the architecture independent files for Racket
  (but not the documentation, see racket-doc for that).

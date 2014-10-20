@@ -1,3 +1,10 @@
+racket (6.1-2) unstable; urgency=medium
+
+  * Add Breaks/Replaces for documentation reorganization.  Thanks to
+    Vincent Cheng for the report (Closes: #766011).
+
+ -- David Bremner <bremner@debian.org>  Mon, 20 Oct 2014 11:42:13 +0200
+
 racket (6.1-1) unstable; urgency=medium
 
   [ James McCoy ]
