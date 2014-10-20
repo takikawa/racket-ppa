@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: David Bremner <bremner@debian.org>
 Uploaders: James McCoy <jamessan@debian.org>
 Standards-Version: 3.9.3
-Build-Depends: cdbs, debhelper (>= 7.0.0), patchutils, libffi-dev,
+Build-Depends: autotools-dev, cdbs, debhelper (>= 7.0.0), patchutils, libffi-dev,
  libfreetype6-dev, libjpeg-dev, libpango1.0-dev, libpng-dev, libssl-dev,
  libxaw7-dev, xbitmaps, libxft-dev, libgl1-mesa-dev | libgl-dev,
  libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev,
