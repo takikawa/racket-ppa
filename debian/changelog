@@ -1,9 +1,10 @@
-racket (6.1-3) UNRELEASED; urgency=medium
+racket (6.1-3) experimental; urgency=medium
 
+  [ James McCoy ]
   * d/control: Add autotools-dev Build-Depends to let CDBS' config.{sub,guess}
     updating do its work.  (Closes: #765248)
 
- -- James McCoy <jamessan@debian.org>  Sun, 19 Oct 2014 20:12:09 -0400
+ -- David Bremner <bremner@debian.org>  Wed, 22 Oct 2014 08:57:36 +0200
 
 racket (6.1-2) unstable; urgency=medium
 
