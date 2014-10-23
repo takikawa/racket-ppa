@@ -85,6 +85,6 @@
   
   (define bm (make-bitmap (max w 1) (max h 1)))
   (define dc (make-object bitmap-dc% bm))
-  (send dc set-smoothing 'smoothed)
+  (send dc set-smoothing 'unsmoothed)
   (draw-proc dc)
   (flomap-inset (bitmap->flomap bm) 0 0 (if (= w 0) -1 0) (if (= h 0) -1 0)))

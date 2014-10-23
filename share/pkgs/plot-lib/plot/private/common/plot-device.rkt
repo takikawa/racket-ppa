@@ -126,7 +126,7 @@
       (send dc set-origin
             (+ old-origin-x (* old-scale-x dc-x-min))
             (+ old-origin-y (* old-scale-y dc-y-min)))
-      (send dc set-smoothing 'smoothed)
+      #;(send dc set-smoothing 'smoothed)
       (send dc set-text-mode 'transparent)
       (when clipping-rect?
         (send dc set-clipping-rect 0 0 dc-x-size dc-y-size))
@@ -288,13 +288,13 @@
           (cond [(eq? pen-style 'transparent)
                  (send dc set-smoothing 'unsmoothed)
                  (send dc draw-polygon vs 0 0 'winding)
-                 (send dc set-smoothing 'smoothed)]
+                 #;(send dc set-smoothing 'smoothed)]
                 [else
                  (define old-pen (send dc get-pen))
                  (send dc set-pen transparent-pen)
                  (send dc set-smoothing 'unsmoothed)
                  (send dc draw-polygon vs 0 0 'winding)
-                 (send dc set-smoothing 'smoothed)
+                 #;(send dc set-smoothing 'smoothed)
                  (send dc set-pen old-pen)
                  (draw-lines/pen-style dc (cons (last vs) vs) pen-style)]))))
     
