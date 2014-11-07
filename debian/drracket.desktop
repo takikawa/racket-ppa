@@ -5,5 +5,5 @@ Exec=drracket
 Terminal=false
 Type=Application
 Categories=Development;
-Icon=plt
+Icon=plt-48x48.png
 StartupNotify=true
