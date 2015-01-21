@@ -20,7 +20,7 @@
  "base-structs.rkt"
  racket/file
  (only-in racket/private/pre-base new-apply-proc)
- (only-in (types abbrev) [-Boolean B] [-Symbol Sym])
+ (only-in (types abbrev) [-Boolean B] [-Symbol Sym] -Flat)
  (only-in (types numeric-tower) [-Number N])
  (only-in (rep type-rep)
           make-ClassTop
@@ -657,11 +657,11 @@
  (-poly (a b c d)
         (cl-> [((a b . -> . b) b (-lst a)) b]
               [((a b c . -> . c) c (-lst a) (-lst b)) c]
-              [((a b c d . -> . d) d (-lst a) (-lst b) (-lst d)) d]))]
+              [((a b c d . -> . d) d (-lst a) (-lst b) (-lst c)) d]))]
 [foldr  (-poly (a b c d)
                (cl-> [((a b . -> . b) b (-lst a)) b]
                      [((a b c . -> . c) c (-lst a) (-lst b)) c]
-                     [((a b c d . -> . d) d (-lst a) (-lst b) (-lst d)) d]))]
+                     [((a b c d . -> . d) d (-lst a) (-lst b) (-lst c)) d]))]
 [filter (-poly (a b) (cl->*
                       ((asym-pred a Univ (-FS (-filter b 0) -top))
                        (-lst a)
@@ -915,10 +915,10 @@
                                [(-HashTop) (-lst (-pair Univ Univ))]))]
 
 [hash-copy (-poly (a b) (-> (-HT a b) (-HT a b)))]
-[eq-hash-code (-poly (a) (-> a -Integer))]
-[eqv-hash-code (-poly (a) (-> a -Integer))]
-[equal-hash-code (-poly (a) (-> a -Integer))]
-[equal-secondary-hash-code (-poly (a) (-> a -Integer))]
+[eq-hash-code (-> Univ -Fixnum)]
+[eqv-hash-code (-> Univ -Fixnum)]
+[equal-hash-code (-> Univ -Fixnum)]
+[equal-secondary-hash-code (-> Univ -Fixnum)]
 [hash-iterate-first (-poly (a b)
                            ((-HT a b) . -> . (Un (-val #f) -Integer)))]
 [hash-iterate-next (-poly (a b)
@@ -1024,6 +1024,10 @@
 [procedure? (make-pred-ty top-func)]
 [compose (-poly (a b c) (-> (-> b c) (-> a b) (-> a c)))]
 [compose1 (-poly (a b c) (-> (-> b c) (-> a b) (-> a c)))]
+[procedure-rename (-> top-func -Symbol top-func)]
+[procedure->method (-> top-func top-func)]
+[procedure-closure-contents-eq? (-> top-func top-func -Boolean)]
+;; keyword-apply - hard to give a type
 [procedure-arity (-> top-func (Un -Nat -Arity-At-Least (-lst (Un -Nat -Arity-At-Least))))]
 [procedure-arity? (make-pred-ty (Un -Nat -Arity-At-Least (-lst (Un -Nat -Arity-At-Least))))]
 [procedure-arity-includes? (->opt top-func -Nat [Univ] B)]
@@ -1142,8 +1146,8 @@
      ((-> ManyUniv) ((list) Univ . ->* . b) . -> . b)))]
 
 ;; Section 10.2
-[raise (cl->* (Univ . -> . (Un))
-              (Univ Univ . -> . (Un)))]
+[raise (cl->* ((Un -Flat -Exn) . -> . (Un))
+              ((Un -Flat -Exn) Univ . -> . (Un)))]
 [error
  (cl->* (-> Sym (Un))
         (->* (list -String) Univ (Un))
@@ -1196,8 +1200,17 @@
  (-poly (a b) (->opt [Sym] (make-Prompt-Tagof a b)))]
 ;; default-continuation-prompt-tag is defined in "base-contracted.rkt"
 [call-with-current-continuation
- (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
-[call/cc (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
+ (-polydots (a b c)
+   (cl->* (-> (-> (-> (Un)) (-values null)) (-values null))
+          (-> (-> (->... (list a) (c c) (Un))
+                  (make-ValuesDots (list (-result b)) c 'c))
+              (make-ValuesDots (list (-result (Un a b))) c 'c))))]
+[call/cc
+ (-polydots (a b c)
+   (cl->* (-> (-> (-> (Un)) (-values null)) (-values null))
+          (-> (-> (->... (list a) (c c) (Un))
+                  (make-ValuesDots (list (-result b)) c 'c))
+              (make-ValuesDots (list (-result (Un a b))) c 'c))))]
 [call-with-composable-continuation
  (-polydots (b c a)
    (-> ;; takes a continuation and should return the same
@@ -1208,8 +1221,17 @@
        ;; return type here
        (make-ValuesDots '() a 'a)))]
 [call-with-escape-continuation
- (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
-[call/ec (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
+ (-polydots (a b c)
+   (cl->* (-> (-> (-> (Un)) (-values null)) (-values null))
+          (-> (-> (->... (list a) (c c) (Un))
+                  (make-ValuesDots (list (-result b)) c 'c))
+              (make-ValuesDots (list (-result (Un a b))) c 'c))))]
+[call/ec
+ (-polydots (a b c)
+   (cl->* (-> (-> (-> (Un)) (-values null)) (-values null))
+          (-> (-> (->... (list a) (c c) (Un))
+                  (make-ValuesDots (list (-result b)) c 'c))
+              (make-ValuesDots (list (-result (Un a b))) c 'c))))]
 [call-with-continuation-barrier (-poly (a) (-> (-> a) a))]
 [continuation-prompt-available? (-> (make-Prompt-TagTop) B)]
 [continuation?
@@ -1327,6 +1349,10 @@
 [poll-guard-evt
  (-poly (a) (-> (-> -Boolean (-evt a)) (-evt a)))]
 [always-evt (-mu x (-evt x))]
+[replace-evt (-poly (a b)
+               (cl->*
+                 (-> (-evt a) (-> a (-evt b)) (-evt b))
+                 (-> (-evt a) (-> a b) (-mu x (-evt x)))))]
 [never-evt (-evt (Un))]
 [system-idle-evt (-> (-evt -Void))]
 [alarm-evt (-> -Real (-mu x (-evt x)))]
@@ -1429,7 +1455,7 @@
 [syntax-original? (-poly (a) (-> (-Syntax a) B))]
 [syntax-source-module (->opt (-Syntax Univ) [Univ] (Un (-val #f) -Path Sym -Module-Path-Index))]
 [syntax-e (-poly (a) (->acc (list (-Syntax a)) a (list -syntax-e)))]
-[syntax->list (-poly (a) (-> (-Syntax (-lst a)) (-lst (-Syntax a))))]
+[syntax->list (-poly (a) (-> (-Syntax (-lst a)) (-lst a)))]
 [syntax->datum (cl->* (-> Any-Syntax -Sexp)
                       (-> (-Syntax Univ) Univ))]
 
@@ -1952,7 +1978,7 @@
 [read-syntax (->opt [Univ -Input-Port] (Un (-Syntax Univ) (-val eof)))]
 [read/recursive (->opt [-Input-Port (-opt -Char) (-opt -Read-Table) Univ] Univ)]
 [read-syntax/recursive (->opt [Univ -Input-Port (-opt -Char) (-opt -Read-Table) Univ] Univ)]
-[read-language (->opt [-Input-Port (-> ManyUniv)] (-> Univ Univ ManyUniv))]
+[read-language (->opt [-Input-Port (-> ManyUniv)] (-opt (-> Univ Univ ManyUniv)))]
 
 [read-case-sensitive (-Param Univ B)]
 [read-square-bracket-as-paren (-Param Univ B)]

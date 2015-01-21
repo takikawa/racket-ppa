@@ -25,6 +25,8 @@
  [tc-module (syntax? . c:-> . (values syntax? syntax?))]
  [tc-toplevel-form (syntax? . c:-> . c:any/c)])
 
+(define-logger online-check-syntax)
+
 (define unann-defs (make-free-id-table))
 
 (define (parse-typed-struct form)

@@ -3261,6 +3261,8 @@ do_read_line (int as_bytes, const char *who, int argc, Scheme_Object *argv[])
     }
     buf[i++] = ch;
     if (ch > 127) ascii = 0;
+
+    SCHEME_USE_FUEL(1);
   }
 
   if (as_bytes) {
@@ -4544,7 +4546,7 @@ static Scheme_Object *do_load_handler(void *data)
     }
   }
 
-  if (scheme_module_code_cache) {
+  if (scheme_module_code_cache && SCHEME_TRUEP(modname)) {
     intptr_t got;
     int vers_size, hash_header_size;
 #   define HASH_HEADER_SIZE (4 + 20 + 16)
@@ -4578,7 +4580,11 @@ static Scheme_Object *do_load_handler(void *data)
 
 
     if (obj) {
-      obj = scheme_make_pair(obj, scheme_get_param(config, MZCONFIG_LOAD_DIRECTORY));
+      Scheme_Object *dir;
+      dir = scheme_get_param(config, MZCONFIG_LOAD_DIRECTORY);
+      if (SCHEME_TRUEP(dir))
+        dir = scheme_path_to_directory_path(dir);
+      obj = scheme_make_pair(obj, dir);
       obj = scheme_lookup_in_table(scheme_module_code_cache, (const char *)obj);
       if (obj)
         obj = scheme_ephemeron_value(obj);
