@@ -1,10 +1,1 @@
-#lang info
-
-(define collection "profile")
-(define deps '("base" "errortrace-lib"))
-(define build-deps '("at-exp-lib"
-                     "rackunit-lib"))
-
-(define pkg-desc "implementation (no documentation) part of \"profile\"")
-
-(define pkg-authors '(eli stamourv))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "profile") (define deps (quote ("base" "errortrace-lib"))) (define build-deps (quote ("at-exp-lib" "rackunit-lib"))) (define pkg-desc "implementation (no documentation) part of \"profile\"") (define pkg-authors (quote (eli stamourv)))))

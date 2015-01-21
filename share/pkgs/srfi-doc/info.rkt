@@ -1,17 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define build-deps '("mzscheme-doc"
-                     "scheme-lib"
-                     "base"
-                     "scribble-lib"
-                     "srfi-lib"
-                     "racket-doc"
-                     "r5rs-doc"
-                     "r6rs-doc"
-                     "compatibility-lib"))
-
-(define pkg-desc "documentation part of \"srfi\"")
-
-(define pkg-authors '(mflatt noel chongkai jay))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define build-deps (quote ("mzscheme-doc" "scheme-lib" "base" "scribble-lib" "srfi-lib" "racket-doc" "r5rs-doc" "r6rs-doc" "compatibility-lib"))) (define update-implies (quote ("srfi-lib"))) (define pkg-desc "documentation part of \"srfi\"") (define pkg-authors (quote (mflatt noel chongkai jay)))))

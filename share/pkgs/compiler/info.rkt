@@ -1,10 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("compiler-lib"))
-(define implies '("compiler-lib"))
-
-(define pkg-desc "Racket compilation tools, such as `raco exe'")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("compiler-lib"))) (define implies (quote ("compiler-lib"))) (define pkg-desc "Racket compilation tools, such as `raco exe'") (define pkg-authors (quote (mflatt)))))

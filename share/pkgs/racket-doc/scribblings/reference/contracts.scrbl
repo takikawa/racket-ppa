@@ -116,21 +116,18 @@ implement contracts~@cite{Strickland12}.
 @section[#:tag "data-structure-contracts"]{Data-structure Contracts}
 @declare-exporting-ctc[racket/contract/base]
 
-@defproc[(flat-named-contract [type-name any/c]
-                              [predicate flat-contract?]
+@defproc[(flat-named-contract [name any/c]
+                              [flat-contract flat-contract?]
                               [generator (or/c #f (-> contract (-> int? any))) #f])
          flat-contract?]{
+Produces a contract like @racket[flat-contract], but with the name @racket[name].
 
-On predicates, behaves like @racket[flat-contract], but the first argument must be the
-(quoted) name of a contract used for error reporting.
 For example,
-@racketblock[(flat-named-contract
-              'odd-integer
-              (lambda (x) (and (integer? x) (odd? x))))]
-turns the predicate into a contract with the name @tt{odd-integer}.
-
-On flat contracts, the new flat contract is the same as the old except for
-the name.
+@racketblock[(define/contract i
+               (flat-named-contract
+                'odd-integer
+                (lambda (x) (and (integer? x) (odd? x))))
+               2)]
 
 The generator argument adds a generator for the flat-named-contract. See
 @racket[contract-generate] for more information.
@@ -954,7 +951,7 @@ introduced with the @racket[#:pre] keyword followed by the list of names on
 which it depends. If the @racket[#:pre/name] keyword is used, the string
 supplied is used as part of the error message; similarly with @racket[#:post/name].
 
-The @racket[dep-range] non-terminal specifies the possible result
+The @racket[dependent-range] non-terminal specifies the possible result
 contracts. If it is @racket[any], then any value is allowed. Otherwise, the
 result contract pairs a name and a contract or a multiple values return
 with names and contracts. In the last two cases, the range contract may be
@@ -977,6 +974,14 @@ empty sequence is (nearly) equivalent to not adding
 a sequence at all except that the former is more expensive than the latter.}
 Since the contract for @racket[x] does not depend on anything else, it does
 not come with any dependency sequence, not even @racket[()].
+
+This example is like the previous one, except the @racket[x] and @racket[y]
+arguments are now optional keyword arguments, instead of mandatory, by-position
+arguments:
+@racketblock[(->i ()
+                  (#:x [x number?]
+                   #:y [y (x) (>=/c x)])
+                  [result (x y) (and/c number? (>=/c (+ x y)))])]
 
 The contract expressions are not always evaluated in
 order. First, if there is no dependency for a given contract expression,

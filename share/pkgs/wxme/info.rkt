@@ -1,11 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("wxme-lib"
-               "gui-doc"))
-(define implies '("wxme-lib"))
-
-(define pkg-desc "Decoding the WXME graphical file format in a text-only environment")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("wxme-lib" "gui-doc"))) (define implies (quote ("wxme-lib"))) (define pkg-desc "Decoding the WXME graphical file format in a text-only environment") (define pkg-authors (quote (mflatt)))))

@@ -1,13 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("base"
-               "scheme-lib"
-               "rackunit-lib"))
-
-(define pkg-desc "implementation (no documentation) part of \"compiler\"")
-
-(define pkg-authors '(mflatt))
-
-(define version "1.2")
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base" "scheme-lib" "rackunit-lib"))) (define pkg-desc "implementation (no documentation) part of \"compiler\"") (define pkg-authors (quote (mflatt))) (define version "1.2")))

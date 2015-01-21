@@ -1,10 +1,1 @@
-#lang setup/infotab
-
-(define collection 'multi)
-
-(define deps '("redex-doc" "redex-examples" "redex-lib" "redex-gui-lib"))
-(define implies '("redex-doc" "redex-examples" "redex-lib" "redex-gui-lib"))
-
-(define pkg-desc "PLT Redex libraries for practical semantics engineering")
-
-(define pkg-authors '(robby bfetscher))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("redex-doc" "redex-examples" "redex-lib" "redex-gui-lib"))) (define implies (quote ("redex-doc" "redex-examples" "redex-lib" "redex-gui-lib"))) (define pkg-desc "PLT Redex libraries for practical semantics engineering") (define pkg-authors (quote (robby bfetscher)))))

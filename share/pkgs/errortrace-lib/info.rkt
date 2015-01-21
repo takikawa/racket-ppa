@@ -1,7 +1,1 @@
-#lang info
-(define collection 'multi)
-(define deps '("base" "source-syntax"))
-
-(define pkg-desc "implementation (no documentation) part of \"errortrace\"")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base" "source-syntax"))) (define pkg-desc "implementation (no documentation) part of \"errortrace\"") (define pkg-authors (quote (mflatt)))))

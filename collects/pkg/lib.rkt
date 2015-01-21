@@ -277,8 +277,8 @@
                    "  specification: ~e")
                deps)))
 
-(define (get-all-deps metadata-ns pkg-dir)
-  (append
+(define (get-all-deps* metadata-ns pkg-dir)
+  (values
    (get-metadata metadata-ns pkg-dir 
                  'deps (lambda () empty)
                  #:checker (check-dependencies 'deps))
@@ -286,9 +286,13 @@
                  'build-deps (lambda () empty)
                  #:checker (check-dependencies 'build-deps))))
 
-(define (get-all-implies metadata-ns pkg-dir deps)
+(define (get-all-deps metadata-ns pkg-dir)
+  (define-values (deps build-deps) (get-all-deps* metadata-ns pkg-dir))
+  (append deps build-deps))
+
+(define (get-all-deps-subset key metadata-ns pkg-dir deps)
   (get-metadata metadata-ns pkg-dir 
-                'implies (lambda () empty)
+                key (lambda () empty)
                 #:checker (lambda (l)
                             (unless (null? l)
                               (define deps-set (list->set
@@ -298,16 +302,24 @@
                                                      (or (string? v)
                                                          (eq? v 'core)))
                                                    l))
-                                (pkg-error (~a "invalid `implies' specification\n"
+                                (pkg-error (~a "invalid `~a' specification\n"
                                                "  specification: ~e")
+                                           key
                                            l))
                               (unless (andmap (lambda (i)
                                                 (or (eq? i 'core)
                                                     (set-member? deps-set i)))
                                               l)
-                                (pkg-error (~a "`implies' is not a subset of dependencies\n"
+                                (pkg-error (~a "`~a' is not a subset of dependencies\n"
                                                "  specification: ~e")
+                                           key
                                            l))))))
+
+(define (get-all-implies metadata-ns pkg-dir deps)
+  (get-all-deps-subset 'implies metadata-ns pkg-dir deps))
+
+(define (get-all-update-implies metadata-ns pkg-dir deps)
+  (get-all-deps-subset 'update-implies metadata-ns pkg-dir deps))
 
 (define (dependency->name dep)
   (package-source->name
@@ -1007,6 +1019,55 @@
         ;; This file would be redundant, so drop it
         (delete-file pkg-file)))))
 
+(define (disallow-package-path-overlaps pkg-name
+                                        pkg-path
+                                        path-pkg-cache
+                                        simultaneous-installs)
+  (define simple-pkg-path (simple-form-path pkg-path))
+  (define (one-in-the-other? p1 p2)
+    (define pe (explode-path p1))
+    (define e (explode-path p2))
+    (if ((length e) . < . (length pe))
+        (equal? (take pe (length e)) e)
+        (equal? (take e (length pe)) pe)))
+  ;; Check collects:
+  (for ([c (in-list (current-library-collection-paths))])
+    (when (one-in-the-other? simple-pkg-path
+                             (simple-form-path c))
+      (pkg-error (~a "cannot link a directory that overlaps with a collection path\n"
+                     "  collection path: ~a\n"
+                     "  link path: ~a\n"
+                     "  as package: ~a")
+                 c
+                 pkg-path
+                 pkg-name)))
+  ;; Check installed packages:
+  (for ([f (in-directory simple-pkg-path)])
+    (define found-pkg (path->pkg f #:cache path-pkg-cache))
+    (when (and found-pkg
+               (not (equal? found-pkg pkg-name)))
+      (pkg-error (~a "cannot link a directory that overlaps with existing packages\n"
+                     "  existing package: ~a\n"
+                     "  overlapping path: ~a\n"
+                     "  a package: ~a")
+                 found-pkg
+                 f
+                 pkg-name)))
+  ;; Check simultaneous installs:
+  (for ([(other-pkg other-dir) (in-hash simultaneous-installs)])
+    (unless (equal? other-pkg pkg-name)
+      (when (one-in-the-other? simple-pkg-path
+                               (simple-form-path other-dir))
+        (pkg-error (~a "cannot link directories that overlap for different packages\n"
+                       "  package: ~a\n"
+                       "  path: ~a\n"
+                       "  overlapping package: ~a\n"
+                       "  overlapping path: ~a")
+                   pkg-name
+                   pkg-path
+                   other-pkg
+                   other-dir)))))
+
 ;; Downloads a package (if needed) and unpacks it (if needed) into a  
 ;; temporary directory.
 (define (stage-package/info pkg
@@ -1019,6 +1080,7 @@
                             download-printf
                             metadata-ns
                             #:strip [strip-mode #f]
+                            #:force-strip? [force-strip? #f]
                             #:in-place? [in-place? #f]
                             #:in-place-clean? [in-place-clean? #f]
                             #:link-dirs? [link-dirs? #f])
@@ -1052,7 +1114,8 @@
                         #:use-cache? use-cache?
                         check-sums? download-printf
                         metadata-ns
-                        #:strip strip-mode)]
+                        #:strip strip-mode
+                        #:force-strip? force-strip?)]
    [(or (eq? type 'file-url) (eq? type 'dir-url) (eq? type 'github))
     (define pkg-url (string->url pkg))
     (define scheme (url-scheme pkg-url))
@@ -1134,6 +1197,7 @@
                                              download-printf
                                              metadata-ns
                                              #:strip strip-mode
+                                             #:force-strip? force-strip?
                                              #:in-place? #t
                                              #:in-place-clean? #t)
                          (set! staged? #t)))
@@ -1222,7 +1286,8 @@
                                       check-sums?
                                       download-printf
                                       metadata-ns
-                                      #:strip strip-mode)
+                                      #:strip strip-mode
+                                      #:force-strip? force-strip?)
                   (set! staged? #t)))
               (λ ()
                  (when (or (file-exists? package-path)
@@ -1324,6 +1389,7 @@
                                   download-printf
                                   metadata-ns
                                   #:strip strip-mode
+                                  #:force-strip? force-strip?
                                   #:in-place? (not strip-mode)
                                   #:in-place-clean? #t)
               `(file ,(simple-form-path* pkg-path)))
@@ -1365,6 +1431,8 @@
                 (delete-directory pkg-dir)
                 (if strip-mode
                     (begin
+                      (unless force-strip?
+                        (check-strip-compatible strip-mode pkg-name pkg pkg-error))
                       (make-directory* pkg-dir)
                       (generate-stripped-directory strip-mode pkg pkg-dir))
                     (begin
@@ -1394,7 +1462,8 @@
                                      check-sums?
                                      download-printf
                                      metadata-ns
-                                     #:strip strip-mode))
+                                     #:strip strip-mode
+                                     #:force-strip? force-strip?))
     (when check-sums?
       (check-checksum given-checksum checksum "unexpected" pkg #f)
       (check-checksum checksum (install-info-checksum info) "incorrect" pkg #f))
@@ -1410,6 +1479,7 @@
                    #:namespace [metadata-ns (make-metadata-namespace)] 
                    #:in-place? [in-place? #f]
                    #:strip [strip-mode #f]
+                   #:force-strip? [force-strip? #f]
                    #:use-cache? [use-cache? #f]
                    #:quiet? [quiet? #t])
   (define i (stage-package/info (pkg-desc-source desc)
@@ -1421,7 +1491,8 @@
                                 (if quiet? void printf)
                                 metadata-ns
                                 #:in-place? in-place?
-                                #:strip strip-mode))
+                                #:strip strip-mode
+                                #:force-strip? force-strip?))
   (values (install-info-name i)
           (install-info-directory i)
           (install-info-checksum i)
@@ -1477,6 +1548,7 @@
          #:from-command-line? from-command-line?
          #:conversation conversation
          #:strip strip-mode
+         #:force-strip? force-strip?
          #:link-dirs? link-dirs?
          #:local-docs-ok? local-docs-ok?
          #:ai-cache ai-cache
@@ -1518,6 +1590,14 @@
     (define simultaneous-installs
       (for/hash ([i (in-list infos)])
         (values (install-info-name i) (install-info-directory i))))
+
+    (when (and (pair? orig-pkg)
+               (or (eq? (car orig-pkg) 'link)
+                   (eq? (car orig-pkg) 'static-link)))
+      (disallow-package-path-overlaps pkg-name
+                                      pkg-dir
+                                      path-pkg-cache
+                                      simultaneous-installs))
     (cond
       [(and (not updating?)
             (hash-ref all-db pkg-name #f)
@@ -1706,9 +1786,12 @@
         (or do-update-deps?
             update-implies?)
         (let ()
-          (define deps (get-all-deps metadata-ns pkg-dir))
+          (define-values (run-deps build-deps) (get-all-deps* metadata-ns pkg-dir))
+          (define deps (append run-deps build-deps))
           (define implies (list->set
-                           (get-all-implies metadata-ns pkg-dir deps)))
+                           (append
+                            (get-all-implies metadata-ns pkg-dir run-deps)
+                            (get-all-update-implies metadata-ns pkg-dir deps))))
           (define update-pkgs
             (append-map (λ (dep)
                            (define name (dependency->name dep))
@@ -1900,6 +1983,7 @@
                           check-sums? download-printf
                           metadata-ns
                           #:strip strip-mode
+                          #:force-strip? force-strip?
                           #:link-dirs? link-dirs?)))
   ;; For the top-level call, we need to double-check that all provided packages
   ;; were distinct:
@@ -2078,6 +2162,7 @@
                      #:from-command-line? [from-command-line? #f]
                      #:conversation [conversation #f]
                      #:strip [strip-mode #f]
+                     #:force-strip? [force-strip? #f]
                      #:link-dirs? [link-dirs? #f]
                      #:summary-deps [summary-deps empty])
   (define new-descs
@@ -2114,6 +2199,7 @@
                        #:updating? updating?
                        #:conversation conv
                        #:strip strip-mode
+                       #:force-strip? force-strip?
                        (for/list ([dep (in-list deps)])
                          (if (pkg-desc? dep)
                              dep
@@ -2137,6 +2223,7 @@
        #:from-command-line? from-command-line?
        #:conversation conversation
        #:strip strip-mode
+       #:force-strip? force-strip?
        #:link-dirs? link-dirs?
        #:local-docs-ok? (not strict-doc-conflicts?)
        #:ai-cache (box #f)
@@ -2344,6 +2431,7 @@
                     #:quiet? [quiet? #f]
                     #:from-command-line? [from-command-line? #f]
                     #:strip [strip-mode #f]
+                    #:force-strip? [force-strip? #f]
                     #:link-dirs? [link-dirs? #f])
   (define download-printf (if quiet? void printf))
   (define metadata-ns (make-metadata-namespace))
@@ -2394,6 +2482,7 @@
       #:quiet? quiet?
       #:from-command-line? from-command-line?
       #:strip strip-mode
+      #:force-strip? force-strip?
       #:all-platforms? all-platforms?
       #:force? force?
       #:ignore-checksums? ignore-checksums?
@@ -2465,7 +2554,8 @@
                      #:strict-doc-conflicts? [strict-doc-conflicts? #f]
                      #:use-cache? [use-cache? #t]
                      #:dep-behavior [dep-behavior #f]
-                     #:strip [strip-mode #f])
+                     #:strip [strip-mode #f]
+                     #:force-strip? [force-strip? #f])
   (define from-db
     (parameterize ([current-pkg-scope-version from-version])
       (installed-pkg-table #:scope 'user)))
@@ -2510,7 +2600,8 @@
                     #:dep-behavior (or dep-behavior 'search-auto)
                     #:quiet? quiet? 
                     #:from-command-line? from-command-line?
-                    #:strip strip-mode)
+                    #:strip strip-mode
+                    #:force-strip? force-strip?)
        (unless quiet?
          (printf "Packages migrated\n")))))
 
@@ -2564,14 +2655,10 @@
         (update-pkg-cfg! 'installation-name val)]
        [(list (and key "download-cache-dir")
               val)
-        (unless (complete-path? val)
-          (pkg-error (~a "invalid value for config key\n"
-                         " not an absolute path\n"
-                         "  config key: ~a\n"
-                         "  given value: ~a")
-                     key
-                     val))
-        (update-pkg-cfg! (string->symbol key) val)]
+        (update-pkg-cfg! (string->symbol key) (if (complete-path? val)
+                                                  val
+                                                  (path->string
+                                                   (path->complete-path val))))]
        [(list (and key (or "download-cache-max-files"
                            "download-cache-max-bytes"))
               val)
@@ -3553,6 +3640,15 @@
             installation
             default))))
 
+(define (get-all-pkg-scopes)
+  (append (let ([main (find-pkgs-dir)])
+            (reverse
+             (for/list ([d (get-pkgs-search-dirs)])
+               (if (equal? d main)
+                   'installation
+                   (simple-form-path d)))))
+          '(user)))
+
 (define (pkg-catalog-suggestions-for-module module-path
                                             #:catalog-file [catalog-file (choose-catalog-file)])
   (if (file-exists? catalog-file)
@@ -3572,6 +3668,164 @@
                   (map db:pkg-name (append pkgs more-pkgs)))) 
                 string<?)))
       null))
+
+
+(define (pkg-archive-pkgs dest-dir pkg-names
+                          #:include-deps? [include-deps? #f]
+                          #:exclude [exclude null]
+                          #:relative-sources? [relative-sources? #f]
+                          #:quiet? [quiet? #f]
+                          #:package-exn-handler [package-exn-handler
+                                                         (λ (name exn) (raise exn))])
+  (struct pkg (deps build-deps) #:transparent)
+  (define (extract-pkg p) (if (string? p) p (car p)))
+
+  (define (add-package-from-dir src-f f-name pkgs)
+    (define i (get-info/full src-f))
+    (cond
+      [i
+       (hash-set pkgs f-name (pkg (map extract-pkg (i 'deps (lambda () null)))
+                                  (map extract-pkg (i 'build-deps (lambda () null)))))]
+      [else pkgs]))
+
+  (define unfiltered-pkgs
+    (for/fold ([pkgs (hash)]) ([pkg-scope (in-list (get-all-pkg-scopes))])
+      (define pkg-names (installed-pkg-names #:scope pkg-scope))
+      (parameterize ([current-pkg-scope pkg-scope])
+        (for/fold ([pkgs pkgs]) ([pkg (in-list pkg-names)])
+          (define dir (pkg-directory pkg))
+          (cond [dir (add-package-from-dir dir pkg pkgs)]
+                [else pkgs])))))
+
+  (define exclude+ (list* "base" "racket" exclude))
+
+  (for ([p (in-list pkg-names)])
+    (unless (hash-ref unfiltered-pkgs p #f)
+      (pkg-error "cannot archive package \"~a\" because it is not installed" p)))
+
+  ;; Filter to roots:
+  (define pkgs/deps
+    (cond
+     [(not include-deps?)
+      (for/hash ([(k v) (in-hash unfiltered-pkgs)]
+                 #:when (member k pkg-names))
+        (values k v))]
+     [else
+      (define seen (make-hash))
+      (define (loop pkg)
+        (cond
+          [(member pkg exclude+)  (void)]
+          [(hash-ref seen pkg #f) (void)]
+          [else
+           (define p (hash-ref unfiltered-pkgs pkg #f))
+           (when p
+             (hash-set! seen pkg #t)
+             (for-each loop (pkg-deps p))
+             (for-each loop (pkg-build-deps p)))]))
+      (for-each loop pkg-names)
+      (for/hash ([(k v) (in-hash unfiltered-pkgs)]
+                 #:when (hash-ref seen k #f))
+        (values k v))]))
+
+  (define all-pkg-names (hash-keys pkgs/deps))
+
+  ;; The temporary catalog we'll create, simulating the current install
+  (define temp-catalog-file (make-temporary-file "pkg~a.sqlite"))
+  ;; all the current installed packages
+  (define all-installed-pkgs
+    (for*/hash ([scope (in-list (get-all-pkg-scopes))]
+                [(k v) (in-hash (read-pkgs-db scope))])
+      (values k v)))
+
+  ;; get the pkg descriptions we want
+  (define pkgs
+    (for/hash ([p (in-list all-pkg-names)])
+      (values p
+              (hash-ref all-installed-pkgs p
+                        (λ _ (pkg-error
+                              "cannot archive package \"~a\" because it is not installed" p))))))
+
+  ;; set up temporary catalog with the right packages
+  (parameterize ([db:current-pkg-catalog-file temp-catalog-file])
+    (db:set-catalogs! '("local"))
+    (db:set-pkgs! "local" all-pkg-names))
+
+  ;; Remove any package not in `pkgs`:
+  (define pkgs-dir (build-path dest-dir "pkgs"))
+  (when (directory-exists? pkgs-dir)
+    (define keep-pkgs (list->set all-pkg-names))
+    (for ([f (in-list (directory-list pkgs-dir))])
+      (cond
+       [(regexp-match #rx"^(.*)[.]zip(?:[.]CHECKSUM)?$" f)
+        => (lambda (m)
+             (unless (set-member? keep-pkgs (cadr m))
+               (unless quiet?
+                 (printf/flush "Removing old package file ~a\n" f))
+               (delete-file (build-path pkgs-dir f))))])))
+
+  (define (pkg->deps p)
+    (match-define (pkg deps build-deps) (hash-ref pkgs/deps p))
+    ;; NOTE: This include deps that don't get archived. It's not
+    ;;       obvious which is the right decision but I've gone with
+    ;;       including them since for "base" keeping but not archiving
+    ;;       seems like the right choice.
+    (remove-duplicates (append deps build-deps)))
+
+  ;; Check on each new package:
+  (for ([(name pkg-i) (in-hash pkgs)])
+    (match-define (pkg-info _ checksum _) pkg-i)
+    (with-handlers ([exn:fail? (λ (exn) (package-exn-handler name exn))])
+      (define pkg-file (build-path dest-dir "pkgs" (format "~a.zip" name)))
+      (define pkg-checksum-file (path-replace-suffix pkg-file #".zip.CHECKSUM"))
+      (define pkg-dir (pkg-directory name))
+
+      (unless pkg-dir
+        (pkg-error "no directory found for package \"~a\"" name))
+
+      (unless quiet?
+        (printf/flush "== Archiving ~a ==\nchecksum: ~a\n" name checksum))
+      ;; Download/unpack existing package:
+      (define-values (staged-name staged-dir staged-checksum clean? staged-mods)
+        (pkg-stage
+         (pkg-desc (path->string pkg-dir) 'dir name checksum #f)
+         #:in-place? #f
+         #:use-cache? #t
+         #:quiet? quiet?))
+      (make-directory* (build-path dest-dir "pkgs"))
+      ;; Repack:
+      (pkg-create 'zip
+                  staged-dir
+                  #:pkg-name name
+                  #:dest (build-path dest-dir "pkgs")
+                  #:quiet? quiet?)
+      (when clean? (delete-directory/files staged-dir))
+
+      ;; Record packed result:
+      (define new-checksum (file->string pkg-checksum-file))
+      (parameterize ([db:current-pkg-catalog-file temp-catalog-file])
+        (db:set-pkg! name "local"
+                     ""
+                     (path->string (path->complete-path pkg-file))
+                     new-checksum
+                     "")
+        (db:set-pkg-dependencies! name "local"
+                                  new-checksum
+                                  (pkg->deps name))
+        (db:set-pkg-modules! name "local"
+                             new-checksum
+                             (set->list staged-mods)))))
+
+  (define dest-catalog (build-path dest-dir "catalog"))
+  (unless quiet?
+    (printf/flush "Creating catalog ~a\n" dest-catalog))
+
+
+  (pkg-catalog-copy (list temp-catalog-file)
+                    (build-path dest-dir "catalog")
+                    #:force? #t
+                    #:override? #t
+                    #:relative-sources? relative-sources?)
+  (delete-file temp-catalog-file))
   
 (define dep-behavior/c
   (or/c #f 'fail 'force 'search-ask 'search-auto))
@@ -3620,7 +3874,7 @@
          path-string?)
         (#:source (or/c 'dir 'name)
                   #:pkg-name (or/c #f string?)
-                  #:mode (or/c 'as-is 'source 'binary 'built)
+                  #:mode (or/c 'as-is 'source 'binary 'binary-lib 'built)
                   #:quiet? boolean?
                   #:from-command-line? boolean?
                   #:dest (or/c (and/c path-string? complete-path?) #f))
@@ -3638,7 +3892,8 @@
                         #:ignore-checksums? boolean?
                         #:strict-doc-conflicts? boolean?
                         #:use-cache? boolean?
-                        #:strip (or/c #f 'source 'binary)
+                        #:strip (or/c #f 'source 'binary 'binary-lib)
+                        #:force-strip? boolean?
                         #:link-dirs? boolean?)
         (or/c #f 'skip (listof (or/c path-string? (non-empty-listof path-string?)))))]
   [pkg-remove
@@ -3667,7 +3922,8 @@
                         #:skip-installed? boolean?
                         #:quiet? boolean?
                         #:from-command-line? boolean?
-                        #:strip (or/c #f 'source 'binary)
+                        #:strip (or/c #f 'source 'binary 'binary-lib)
+                        #:force-strip? boolean?
                         #:link-dirs? boolean?)
         (or/c #f 'skip (listof (or/c path-string? (non-empty-listof path-string?)))))]
   [pkg-migrate
@@ -3680,7 +3936,8 @@
                         #:use-cache? boolean?
                         #:quiet? boolean?
                         #:from-command-line? boolean?
-                        #:strip (or/c #f 'source 'binary))
+                        #:strip (or/c #f 'source 'binary 'binary-lib)
+                        #:force-strip? boolean?)
         (or/c #f 'skip (listof (or/c path-string? (non-empty-listof path-string?)))))]
   [pkg-catalog-show
    (->* ((listof string?))
@@ -3704,6 +3961,14 @@
                         #:quiet? boolean?
                         #:package-exn-handler (string? exn:fail? . -> . any))
         void?)]
+  [pkg-archive-pkgs
+   (->* (path-string? (listof string?))
+        (#:include-deps? boolean?
+                         #:exclude (listof string?)
+                         #:relative-sources? boolean?
+                         #:quiet? boolean?
+                         #:package-exn-handler (string? exn:fail? . -> . any))
+        void?)]
   [default-pkg-scope
    (-> package-scope/c)]
   [installed-pkg-names
@@ -3717,7 +3982,8 @@
   [pkg-stage (->* (pkg-desc?)
                   (#:namespace namespace?
                                #:in-place? boolean?
-                               #:strip (or/c #f 'source 'binary)
+                               #:strip (or/c #f 'source 'binary 'binary-lib)
+                               #:force-strip? boolean?
                                #:use-cache? boolean?
                                #:quiet? boolean?)
                   (values string?
@@ -3739,6 +4005,8 @@
    (->* (module-path?)
         (#:catalog-file path-string?)
         (listof string?))]
+  [get-all-pkg-scopes
+   (-> (listof package-scope/c))]
   [get-all-pkg-names-from-catalogs
    (-> (listof string?))]
   [get-all-pkg-details-from-catalogs

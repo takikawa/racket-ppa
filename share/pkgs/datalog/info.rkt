@@ -1,15 +1,1 @@
-#lang info
-
-(define collection "datalog")
-
-(define scribblings '(["scribblings/datalog.scrbl" (multi-page) (language)]))
-
-(define compile-omit-paths '("tests"))
-(define deps '("base"
-               "parser-tools-lib"))
-(define build-deps '("racket-doc"
-                     "scribble-lib"))
-
-(define pkg-desc "An implementation of the Datalog language")
-
-(define pkg-authors '(jay))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "datalog") (define scribblings (quote (("scribblings/datalog.scrbl" (multi-page) (language))))) (define compile-omit-paths (quote ("tests"))) (define deps (quote ("base" "parser-tools-lib"))) (define build-deps (quote ("racket-doc" "scribble-lib"))) (define pkg-desc "An implementation of the Datalog language") (define pkg-authors (quote (jay)))))

@@ -1,10 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("base"
-               "draw-lib"))
-
-(define pkg-desc "implementation (no documentation) part of \"snip\"")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base" "draw-lib"))) (define pkg-desc "implementation (no documentation) part of \"snip\"") (define pkg-authors (quote (mflatt))) (define version "1.1")))

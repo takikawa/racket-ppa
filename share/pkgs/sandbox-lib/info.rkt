@@ -1,11 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("scheme-lib"
-               "base"
-               "errortrace-lib"))
-
-(define pkg-desc "Library for sandboxing Racket programs")
-
-(define pkg-authors '(eli))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("scheme-lib" "base" "errortrace-lib"))) (define pkg-desc "Library for sandboxing Racket programs") (define pkg-authors (quote (eli)))))

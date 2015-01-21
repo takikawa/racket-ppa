@@ -4078,6 +4078,21 @@ static int foldable_body(Scheme_Object *f)
   return (SCHEME_TYPE(d->code) > _scheme_values_types_);
 }
 
+int scheme_is_foldable_prim(Scheme_Object *f)
+{
+  if (SCHEME_PRIMP(f)
+      && ((((Scheme_Primitive_Proc *)f)->pp.flags & SCHEME_PRIM_OPT_MASK)
+          == SCHEME_PRIM_OPT_FOLDING))
+    return 1;
+
+  if (SCHEME_CLSD_PRIMP(f)
+      && ((((Scheme_Closed_Primitive_Proc *)f)->pp.flags & SCHEME_PRIM_OPT_MASK)
+          == SCHEME_PRIM_OPT_FOLDING))
+    return 1;
+
+  return 0;
+}
+
 Scheme_Object *scheme_make_application(Scheme_Object *v, Optimize_Info *info)
 {
   Scheme_Object *o;
@@ -4103,11 +4118,7 @@ Scheme_Object *scheme_make_application(Scheme_Object *v, Optimize_Info *info)
 
     f = SCHEME_CAR(v);
 
-    if ((SCHEME_PRIMP(f) && ((((Scheme_Primitive_Proc *)f)->pp.flags & SCHEME_PRIM_OPT_MASK)
-                             == SCHEME_PRIM_OPT_FOLDING))
-	|| (SCHEME_CLSD_PRIMP(f) 
-	    && ((((Scheme_Closed_Primitive_Proc *)f)->pp.flags & SCHEME_PRIM_OPT_MASK)
-                == SCHEME_PRIM_OPT_FOLDING))
+    if (scheme_is_foldable_prim(f)
 	|| (SAME_TYPE(SCHEME_TYPE(f), scheme_closure_type)
 	    && (foldable_body(f)))) {
       f = scheme_try_apply(f, SCHEME_CDR(v), info);
@@ -4586,7 +4597,6 @@ scheme_compile_expand_expr(Scheme_Object *form, Scheme_Comp_Env *env,
 	  scheme_compile_rec_done_local(rec, drec);
           if (SAME_TYPE(SCHEME_TYPE(var), scheme_variable_type)) {
             if (scheme_extract_unsafe(var)) {
-              scheme_register_unsafe_in_prefix(env, rec, drec, menv);
               return scheme_extract_unsafe(var);
             } else if (scheme_extract_flfxnum(var)) {
               return scheme_extract_flfxnum(var);
@@ -4816,9 +4826,16 @@ scheme_compile_expand_expr(Scheme_Object *form, Scheme_Comp_Env *env,
       }
       return f(form, env, rec, drec);
     } else {
-      name = scheme_stx_taint_disarm(form, NULL);
-      form = scheme_datum_to_syntax(scheme_make_pair(stx, name), form, form, 0, 2);
-      SCHEME_EXPAND_OBSERVE_TAG(rec[drec].observer, form);
+      if (!rec[drec].comp
+          && (rec[drec].depth == -2) /* local-expand */
+          && SAME_OBJ(var, normal)
+          && SAME_OBJ(SCHEME_STX_VAL(stx), top_symbol)) {
+        rec[drec].pre_unwrapped = 1;
+      } else {
+        name = scheme_stx_taint_disarm(form, NULL);
+        form = scheme_datum_to_syntax(scheme_make_pair(stx, name), form, form, 0, 2);
+        SCHEME_EXPAND_OBSERVE_TAG(rec[drec].observer, form);
+      }
 
       if (SAME_TYPE(SCHEME_TYPE(var), scheme_syntax_compiler_type)) {
 	if (rec[drec].comp) {
@@ -5330,7 +5347,7 @@ top_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_Info *erec, 
   SCHEME_EXPAND_OBSERVE_PRIM_TOP(erec[drec].observer);
   c = check_top(form, env, erec, drec, &need_bound_check);
 
-  if (need_bound_check)
+  if (env->genv->module)
     return c; /* strip `#%top' prefix */
 
   return form;

@@ -1,11 +1,1 @@
-#lang info
-
-(define collection "syntax")
-
-(define deps '("base"))
-
-(define pkg-desc "find mappings from expanded to source syntax")
-
-(define pkg-authors '(samth stamourv eli))
-
-(define version "1.1")
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "syntax") (define deps (quote ("base"))) (define pkg-desc "find mappings from expanded to source syntax") (define pkg-authors (quote (samth stamourv eli))) (define version "1.1")))

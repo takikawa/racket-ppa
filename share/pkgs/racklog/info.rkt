@@ -1,16 +1,1 @@
-#lang info
-
-(define collection "racklog")
-
-(define scribblings
-  '(("racklog.scrbl" (multi-page) (tool))))
-(define deps '("base"
-               "datalog"))
-(define build-deps '("eli-tester"
-                     "rackunit-lib"
-                     "racket-doc"
-                     "scribble-lib"))
-
-(define pkg-desc "The implementation of the Racklog (embedded Prolog) language")
-
-(define pkg-authors '(jay))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "racklog") (define scribblings (quote (("racklog.scrbl" (multi-page) (tool))))) (define deps (quote ("base" "datalog"))) (define build-deps (quote ("eli-tester" "rackunit-lib" "racket-doc" "scribble-lib"))) (define pkg-desc "The implementation of the Racklog (embedded Prolog) language") (define pkg-authors (quote (jay)))))

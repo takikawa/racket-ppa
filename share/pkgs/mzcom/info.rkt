@@ -1,17 +1,1 @@
-#lang info
-
-(define collection "mzcom")
-
-(define post-install-collection "installer.rkt")
-
-(define scribblings '(("mzcom.scrbl" () (interop))))
-(define deps '("base"
-               "compatibility-lib"))
-(define build-deps '("scheme-lib"
-                     "racket-doc"
-                     "mysterx"
-                     "scribble-lib"))
-
-(define pkg-desc "COM control to instantate a Racket instance")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "mzcom") (define post-install-collection "installer.rkt") (define scribblings (quote (("mzcom.scrbl" () (interop))))) (define deps (quote ("base" "compatibility-lib"))) (define build-deps (quote ("scheme-lib" "racket-doc" "mysterx" "scribble-lib"))) (define pkg-desc "COM control to instantate a Racket instance") (define pkg-authors (quote (mflatt)))))

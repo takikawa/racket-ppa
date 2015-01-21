@@ -1,12 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("html-lib"
-               "html-doc"))
-(define implies '("html-lib"
-                  "html-doc"))
-
-(define pkg-desc "HTML parsing and generation")
-
-(define pkg-authors '(jay mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("html-lib" "html-doc"))) (define implies (quote ("html-lib" "html-doc"))) (define pkg-desc "HTML parsing and generation") (define pkg-authors (quote (jay mflatt)))))

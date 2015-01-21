@@ -1,12 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("parser-tools-lib"
-               "parser-tools-doc"))
-(define implies '("parser-tools-lib"
-                  "parser-tools-doc"))
-
-(define pkg-desc "Lex- and Yacc-style parsing tools")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("parser-tools-lib" "parser-tools-doc"))) (define implies (quote ("parser-tools-lib" "parser-tools-doc"))) (define pkg-desc "Lex- and Yacc-style parsing tools") (define pkg-authors (quote (mflatt)))))

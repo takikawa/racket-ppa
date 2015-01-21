@@ -1,16 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("rackunit-lib"
-               "rackunit-doc"
-               "rackunit-gui"
-               "rackunit-plugin-lib"))
-(define implies '("rackunit-lib"
-                  "rackunit-doc"
-                  "rackunit-gui"
-                  "rackunit-plugin-lib"))
-
-(define pkg-desc "RackUnit testing framework")
-
-(define pkg-authors '(ryanc noel))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("rackunit-lib" "rackunit-doc" "rackunit-gui" "rackunit-plugin-lib"))) (define implies (quote ("rackunit-lib" "rackunit-doc" "rackunit-gui" "rackunit-plugin-lib"))) (define pkg-desc "RackUnit testing framework") (define pkg-authors (quote (ryanc noel)))))

@@ -1,9 +1,1 @@
-#lang setup/infotab
-
-(define collection 'multi)
-(define deps '("srfi-lite-lib"
-               "base"))
-
-(define pkg-desc "implementation (no documentation) part of \"db\"")
-
-(define pkg-authors '(ryanc))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("srfi-lite-lib" "base"))) (define pkg-desc "implementation (no documentation) part of \"db\"") (define pkg-authors (quote (ryanc)))))

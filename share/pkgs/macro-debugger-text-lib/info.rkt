@@ -1,10 +1,1 @@
-#lang info
-
-(define collection 'multi)
-(define deps '("base"
-               "parser-tools-lib"
-               "unstable-list-lib"))
-
-(define pkg-desc "The macro debugger tool with a console interface")
-
-(define pkg-authors '(ryanc))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base" "parser-tools-lib" "unstable-list-lib"))) (define pkg-desc "The macro debugger tool with a console interface") (define pkg-authors (quote (ryanc)))))

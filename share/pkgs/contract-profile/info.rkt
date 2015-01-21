@@ -1,14 +1,1 @@
-#lang info
-
-(define collection "contract-profile")
-(define deps '("base"
-               "profile-lib"
-               "unstable-list-lib"))
-(define build-deps '("racket-doc"
-                     "scribble-lib"
-                     "rackunit-lib"
-                     "math-lib"))
-
-(define pkg-desc "Profiling tool for contracts")
-
-(define pkg-authors '(stamourv))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "contract-profile") (define deps (quote ("base" "profile-lib" "unstable-list-lib"))) (define build-deps (quote ("racket-doc" "scribble-lib" "rackunit-lib" "math-lib"))) (define pkg-desc "Profiling tool for contracts") (define pkg-authors (quote (stamourv)))))

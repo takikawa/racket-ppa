@@ -1,12 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps
-  '("db-lib" "db-doc" "base"))
-(define implies
-  '("db-lib" "db-doc"))
-
-(define pkg-desc "Database connectivity")
-
-(define pkg-authors '(ryanc))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("db-lib" "db-doc" "base"))) (define implies (quote ("db-lib" "db-doc"))) (define pkg-desc "Database connectivity") (define pkg-authors (quote (ryanc)))))

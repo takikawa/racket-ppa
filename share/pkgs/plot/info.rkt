@@ -1,10 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("plot-lib" "plot-gui-lib" "plot-doc"))
-(define implies '("plot-lib" "plot-gui-lib" "plot-doc"))
-
-(define pkg-desc "Functions (and docs and tests) for plotting")
-
-(define pkg-authors '(ntoronto))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("plot-lib" "plot-gui-lib" "plot-doc"))) (define implies (quote ("plot-lib" "plot-gui-lib" "plot-doc"))) (define pkg-desc "Functions (and docs and tests) for plotting") (define pkg-authors (quote (ntoronto)))))

@@ -1,10 +1,1 @@
-#lang info
-(define collection 'multi)
-(define build-deps '("racket-doc"
-                     "base"
-                     "errortrace-lib"
-                     "scribble-lib"))
-
-(define pkg-desc "documentation part of \"errortrace\"")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define build-deps (quote ("racket-doc" "base" "errortrace-lib" "scribble-lib"))) (define update-implies (quote ("errortrace-lib"))) (define pkg-desc "documentation part of \"errortrace\"") (define pkg-authors (quote (mflatt)))))

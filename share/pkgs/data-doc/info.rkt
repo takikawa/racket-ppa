@@ -1,12 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("base"))
-
-(define pkg-desc "documentation part of \"data\"")
-
-(define pkg-authors '(ryanc))
-(define build-deps '("data-lib"
-                     "racket-doc"
-                     "scribble-lib"))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "documentation part of \"data\"") (define pkg-authors (quote (ryanc))) (define build-deps (quote ("data-lib" "racket-doc" "scribble-lib"))) (define update-implies (quote ("data-lib")))))

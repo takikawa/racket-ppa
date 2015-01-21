@@ -1,13 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("rackunit-lib"
-               "data-lib"
-               "gui-lib"
-               "unstable-list-lib" ; for class-iop
-               "base"))
-
-(define pkg-desc "RackUnit test runner GUI")
-
-(define pkg-authors '(ryanc))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("rackunit-lib" "data-lib" "gui-lib" "unstable-list-lib" "base"))) (define pkg-desc "RackUnit test runner GUI") (define pkg-authors (quote (ryanc)))))

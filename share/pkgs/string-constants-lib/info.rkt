@@ -1,8 +1,1 @@
-#lang info
-
-(define collection 'multi)
-(define deps '("base"))
-
-(define pkg-desc "String constants to support internationalization, especially in DrRacket")
-
-(define pkg-authors '(robby))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "String constants to support internationalization, especially in DrRacket") (define pkg-authors (quote (robby)))))

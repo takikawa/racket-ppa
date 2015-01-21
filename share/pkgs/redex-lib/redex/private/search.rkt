@@ -6,6 +6,8 @@
          racket/list
          racket/contract
          racket/set
+         math/distributions
+         (except-in math/number-theory permutations)
          (for-syntax racket/base))
 
 (provide (struct-out clause)
@@ -22,7 +24,8 @@
          get-most-recent-trace
          update-gen-trace!
          generation-logger
-         gen-state)
+         gen-state
+         depth-dependent-order?)
 
 ;; clause : head-pat eq/dqs (listof prem)
 (define-struct clause (head-pat eq/dqs prems lang name) #:transparent)
@@ -43,6 +46,8 @@
 
 (define-struct fail-cont (env fringe bound)
   #:transparent)
+
+(define depth-dependent-order? (make-parameter #t))
 
 (define-struct gen-trace (tr-loc clause input state bound env) #:prefab)
 
@@ -72,10 +77,12 @@
                         (fresh-pat-vars input (make-hash))
                         (set! name-nums (unique-name-nums)))))
   (define fs (list (fail-cont empty-env
-                              (list (make-partial-rule fresh-pat (if (shuffle-clauses?)
-                                                                     (shuffle clauses)
-                                                                     (order-clauses clauses))
-                                                       '() bound))
+                              (list (make-partial-rule 
+                                     fresh-pat 
+                                     (if (shuffle-clauses?)
+                                         (shuffle-clauses clauses 0 bound)
+                                         (order-clauses clauses))
+                                     '() bound))
                               bound)))
   (define v-locs (make-hash))
   (λ ()
@@ -134,6 +141,7 @@
   (inc-pushdown-count)
   (match-define (partial-rule pat clauses tr-loc bound) a-partial-rule)
   (check-depth-limits bound tr-loc fail)
+  (define depth (length tr-loc))
   (cond
     [(null? clauses)
      (fail-back fail)]
@@ -159,7 +167,7 @@
             (make-partial-rule (prem-pat prem) 
                                (if (positive? bound)
                                    (if (shuffle-clauses?)
-                                       (shuffle prem-cls)
+                                       (shuffle-clauses prem-cls depth bound)
                                        (order-clauses prem-cls))
                                    (order-clauses prem-cls))
                                (cons n tr-loc)
@@ -170,22 +178,62 @@
                      new-fringe
                      (cons (fail-cont env failure-fringe bound) fail))])]))
 
+(define (shuffle-clauses cs depth bound)
+  (if (depth-dependent-order?)
+      (shuffle/binomial cs depth bound)
+      (shuffle cs)))
+
+(define (shuffle/binomial clauses depth bound)
+  (random-order clauses depth (+ depth bound) 
+                #:key (λ (cls) (length (clause-prems cls)))))
+
+(define (random-order l depth max-depth #:key [key values])
+  (define bd (get-dist l depth max-depth))
+  (define n (round ((distribution-sample bd))))
+  (define perm (nth-lexico-perm (length l) 
+                                (inexact->exact n)))
+  (define l-sorted (reverse (sort (shuffle l) < #:key key)))
+  (for/list ([i (in-list perm)])
+    (list-ref l-sorted i)))
+
+(define get-dist
+  (let ([cache (make-hash)])
+    (λ (l depth max-depth)
+      (hash-ref cache (list (length l) depth max-depth)
+                (λ ()
+                  (define nperms (factorial (length l)))
+                  (define d (binomial-dist (sub1 nperms) 
+                                           (+ (/ depth max-depth) 
+                                              (* 0.05 (- 0.5 (/ depth max-depth))))))
+                  (hash-set! cache (list (length l) depth max-depth) d)
+                  d)))))
+
+(define (nth-lexico-perm len n)
+  (let recur ([indices (build-list len values)]
+              [n n])
+    (cond
+      [(= (length indices) 1)
+       indices]
+      [else
+       (define-values (q r)
+         (quotient/remainder n (factorial (- (length indices) 1))))
+       (define index (list-ref indices q))
+       (cons index
+             (recur (remove index indices) r))])))
+
 (define (order-clauses cs)
-  (define num-prems->cs (hash))
-  (for ([c cs])
-    (set! num-prems->cs
-          (hash-set num-prems->cs
-                    (length (clause-prems c))
-                    (set-add
-                     (hash-ref num-prems->cs
-                               (length (clause-prems c))
-                               (λ () (set)))
-                     c))))
+  (define num-prems->cs (make-hash))
+  (for ([c (in-list cs)])
+    (hash-set! num-prems->cs
+               (length (clause-prems c))
+               (set-add
+                (hash-ref num-prems->cs
+                          (length (clause-prems c))
+                          (set))
+                c)))
   (apply append
-         (for/list ([k (sort (hash-keys num-prems->cs) <)])
+         (for/list ([k (in-list (sort (hash-keys num-prems->cs) <))])
            (shuffle (set->list (hash-ref num-prems->cs k))))))
-
-
 
 (define (do-unification clse input env)
   (match-define (clause head-pat eq/dqs prems lang name) clse)

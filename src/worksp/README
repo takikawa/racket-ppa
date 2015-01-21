@@ -68,7 +68,7 @@ racket\src\README if you don't know about the two variants.)
 
 
 If you can't run "build.bat" or don't want to, you have to perform
-several steps: first builg RacketCGC, then build Racket3m, etc.
+several steps: first build RacketCGC, then build Racket3m, etc.
 
 Building RacketCGC and GRacketCGC
 ---------------------------------
@@ -77,22 +77,27 @@ The CGC source code for RacketCGC and GRacketCGC is split into several
 projects that are grouped into a few solutions.  To build the `X'
 solution with Visual Studio, open the file racket\src\worksp\X\X.sln,
 but add `9' before ".sln" if you're using Visual Studio 2008 (i.e.,
-version 9.0).
+version 9.0). The solution files without a number are for Visual
+Studio 2010, but they should upgrade immediately for later versions.
 
  [The .vcproj files are used by the ...9.sln solutions, while the
-  .vcxproj files are used by the other .sln solutions. The latter
-  are compatible with Visual Studio 2010 and up.]
+  .vcxproj files are used by the other .sln solutions. The latter are
+  compatible with Visual Studio 2010. For Visual Studio versions later
+  than 2010, "build.bat" script auto-upgrades projects in a copy whose
+  file name ends with a literal "X" to match the current tool version,
+  but you can also just upgrade them within your version of Visual
+  Studio.]
 
 To build RacketCGC, build the Racket solution in
   racket\src\worksp\racket - makes racket\RacketCGC.exe
 
-  [When you open the solution, it may default to "Debug"
-   configuration.  Switch to "Release" before building.]
+  [When you open the solution, switch to a "Release" configuration
+   before building.]
 
 To build GRacketCGC, build the GRacket solution:
   racket\src\worksp\gracket - makes racket\GRacketCGC.exe
 
-  [Again, switch to the "Release" configuration if necessary.]
+  [Again, switch to a "Release" configuration if necessary.]
 
 The build processes for RacketCGC and GRacketCGC automatically builds
   libmzgc    - makes racket\lib\libmzgcxxxxxxx.dll and
@@ -271,3 +276,16 @@ libraries to embed Racket in an application.
 If you need Racket to link to a DLL-based C library (instead of
 statically linking to the C library within the Racket DLL), then compile
 Racket with the /MD flag.
+
+----------------------------
+SenoraGC versus the Boehm GC
+----------------------------
+
+The "Release" and "Debug" solution configurations use SenoraGC (SGC),
+while the "AltGCRelease" and "AltGCDebug" configurations use the
+variant of the Boehm GC that is included with Racket.
+
+In project files, "SRelease" and "SDebug" (as used by the "Release"
+and "Debug" solution configurations) build against SGC, while
+"BRelease" and "BDebug" (as used by the "AltGCRelease" and
+"AltGCDebug" solution configurations) build against the Boehm GC.

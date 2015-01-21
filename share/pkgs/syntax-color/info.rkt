@@ -1,12 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("syntax-color-lib"
-               "syntax-color-doc"))
-(define implies '("syntax-color-lib"
-                  "syntax-color-doc"))
-
-(define pkg-desc "Program syntax coloring for editors and typesetting")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("syntax-color-lib" "syntax-color-doc"))) (define implies (quote ("syntax-color-lib" "syntax-color-doc"))) (define pkg-desc "Program syntax coloring for editors and typesetting") (define pkg-authors (quote (mflatt)))))

@@ -1,10 +1,1 @@
-#lang info
-
-(define collection 'multi)
-(define deps '("base"
-               "future-visualizer"
-               "typed-racket-lib"))
-
-(define pkg-desc "type declarations for \"future-visualizer\"")
-
-(define pkg-authors '(jamesswaine))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base" "future-visualizer" "typed-racket-lib"))) (define pkg-desc "type declarations for \"future-visualizer\"") (define pkg-authors (quote (jamesswaine)))))

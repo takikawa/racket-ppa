@@ -1,8 +1,1 @@
-#lang info
-
-(define collection 'multi)
-(define deps '("base"))
-
-(define pkg-desc "Libraries for @-expressions")
-
-(define pkg-authors '(eli mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Libraries for @-expressions") (define pkg-authors (quote (eli mflatt))) (define version "1.1")))

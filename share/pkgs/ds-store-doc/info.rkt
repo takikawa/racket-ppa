@@ -1,14 +1,1 @@
-#lang info
-
-(define collection "ds-store")
-(define deps '("base"
-               "scribble-lib"
-               "racket-doc"
-               "ds-store-lib"))
-
-(define scribblings '(("ds-store.scrbl")))
-
-
-(define pkg-desc "documentation part of \"ds-store\"")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "ds-store") (define deps (quote ("base" "scribble-lib" "racket-doc" "ds-store-lib"))) (define update-implies (quote ("ds-store-lib"))) (define scribblings (quote (("ds-store.scrbl")))) (define pkg-desc "documentation part of \"ds-store\"") (define pkg-authors (quote (mflatt)))))

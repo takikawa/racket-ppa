@@ -1,10 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("compatibility-lib" "compatibility-doc"))
-(define implies '("compatibility-lib" "compatibility-doc"))
-
-(define pkg-desc "Libraries that implement legacy interfaces")
-
-(define pkg-authors '(eli mflatt robby samth))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("compatibility-lib" "compatibility-doc"))) (define implies (quote ("compatibility-lib" "compatibility-doc"))) (define pkg-desc "Libraries that implement legacy interfaces") (define pkg-authors (quote (eli mflatt robby samth)))))

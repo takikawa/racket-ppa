@@ -1,8 +1,1 @@
-#lang info
-(define collection 'multi)
-(define deps '("base"))
-(define build-deps '("rackunit-lib"))
-
-(define pkg-desc "implementation (no documentation) part of \"data\"")
-
-(define pkg-authors '(ryanc))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base"))) (define build-deps (quote ("rackunit-lib"))) (define pkg-desc "implementation (no documentation) part of \"data\"") (define pkg-authors (quote (ryanc)))))

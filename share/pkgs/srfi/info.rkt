@@ -1,12 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("srfi-lib"
-               "srfi-doc"))
-(define implies '("srfi-lib"
-                  "srfi-doc"))
-
-(define pkg-desc "Legacy SRFI (Scheme) libraries")
-
-(define pkg-authors '(mflatt noel chongkai jay))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("srfi-lib" "srfi-doc"))) (define implies (quote ("srfi-lib" "srfi-doc"))) (define pkg-desc "Legacy SRFI (Scheme) libraries") (define pkg-authors (quote (mflatt noel chongkai jay)))))

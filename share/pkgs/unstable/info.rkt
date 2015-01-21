@@ -1,12 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("unstable-lib"
-               "unstable-doc"))
-(define implies '("unstable-lib"
-                  "unstable-doc"))
-
-(define pkg-desc "Experimental libraries")
-
-(define pkg-authors '(jay samth cce ryanc))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("unstable-lib" "unstable-doc"))) (define implies (quote ("unstable-lib" "unstable-doc"))) (define pkg-desc "Experimental libraries") (define pkg-authors (quote (jay samth cce ryanc)))))
