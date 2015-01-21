@@ -1,10 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("planet-lib" "planet-doc"))
-(define implies '("planet-lib" "planet-doc"))
-
-(define pkg-desc "Legacy support for automatic package distribution")
-
-(define pkg-authors '(mflatt robby))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("planet-lib" "planet-doc"))) (define implies (quote ("planet-lib" "planet-doc"))) (define pkg-desc "Legacy support for automatic package distribution") (define pkg-authors (quote (mflatt robby)))))

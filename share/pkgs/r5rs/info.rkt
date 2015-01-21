@@ -1,12 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("r5rs-lib"
-               "r5rs-doc"))
-(define implies '("r5rs-lib"
-                  "r5rs-doc"))
-
-(define pkg-desc "Legacy R5RS (Scheme) language")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("r5rs-lib" "r5rs-doc"))) (define implies (quote ("r5rs-lib" "r5rs-doc"))) (define pkg-desc "Legacy R5RS (Scheme) language") (define pkg-authors (quote (mflatt)))))

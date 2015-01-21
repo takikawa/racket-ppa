@@ -1,17 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("base"
-               "compiler-lib"
-               "rackunit-lib"
-               "redex-lib"
-               "redex-examples"
-               "math-lib"
-               "plot-lib"))
-
-(define build-deps '())
-
-(define pkg-desc "PLT Redex Benchmark")
-
-(define pkg-authors '(robby bfetscher))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base" "compiler-lib" "rackunit-lib" "redex-lib" "redex-examples" "math-lib" "plot-lib"))) (define build-deps (quote ())) (define pkg-desc "PLT Redex Benchmark") (define pkg-authors (quote (robby bfetscher)))))

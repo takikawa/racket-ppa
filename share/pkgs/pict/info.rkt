@@ -1,12 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("pict-lib"
-               "pict-doc"))
-(define implies '("pict-lib"
-                  "pict-doc"))
-
-(define pkg-desc "Building pictures with functional combinators")
-
-(define pkg-authors '(mflatt robby))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("pict-lib" "pict-doc"))) (define implies (quote ("pict-lib" "pict-doc"))) (define pkg-desc "Building pictures with functional combinators") (define pkg-authors (quote (mflatt robby)))))

@@ -1,18 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define build-deps '("gui-doc"
-                     "pict-doc"
-                     "at-exp-lib"
-                     "base"
-                     "gui-lib"
-                     "pict-lib"
-                     "scribble-lib"
-                     "draw-lib"
-                     "racket-doc"))
-(define update-implies '("draw-lib"))
-
-(define pkg-desc "documentation part of \"draw\"")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define build-deps (quote ("gui-doc" "pict-doc" "at-exp-lib" "base" "gui-lib" "pict-lib" "scribble-lib" "draw-lib" "racket-doc"))) (define update-implies (quote ("draw-lib"))) (define pkg-desc "documentation part of \"draw\"") (define pkg-authors (quote (mflatt)))))

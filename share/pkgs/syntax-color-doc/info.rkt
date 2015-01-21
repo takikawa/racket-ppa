@@ -1,16 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define build-deps '("gui-doc"
-                     "scribble-doc"
-                     "gui-lib"
-                     "scribble-lib"
-                     "racket-doc"
-                     "syntax-color-lib"))
-(define deps '("base"))
-(define update-implies '("syntax-color-lib"))
-
-(define pkg-desc "documentation part of \"syntax-color\"")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define build-deps (quote ("gui-doc" "scribble-doc" "gui-lib" "scribble-lib" "racket-doc" "syntax-color-lib"))) (define deps (quote ("base"))) (define update-implies (quote ("syntax-color-lib"))) (define pkg-desc "documentation part of \"syntax-color\"") (define pkg-authors (quote (mflatt)))))

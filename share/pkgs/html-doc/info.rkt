@@ -1,13 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define build-deps '("scribble-lib"
-                     "html-lib"
-                     "racket-doc"))
-(define deps '("base"))
-(define update-implies '("html-lib"))
-
-(define pkg-desc "documentation part of \"html\"")
-
-(define pkg-authors '(jay mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define build-deps (quote ("scribble-lib" "html-lib" "racket-doc"))) (define deps (quote ("base"))) (define update-implies (quote ("html-lib"))) (define pkg-desc "documentation part of \"html\"") (define pkg-authors (quote (jay mflatt)))))

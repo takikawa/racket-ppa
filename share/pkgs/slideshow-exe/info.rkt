@@ -1,14 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("base"
-               "compatibility-lib"
-               "gui-lib"
-               "pict-lib"
-               "slideshow-lib"))
-(define implies '("slideshow-lib"))
-
-(define pkg-desc "executables for \"slideshow\"")
-
-(define pkg-authors '(mflatt robby))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base" "compatibility-lib" "gui-lib" "pict-lib" "slideshow-lib"))) (define implies (quote ("slideshow-lib"))) (define pkg-desc "executables for \"slideshow\"") (define pkg-authors (quote (mflatt robby)))))

@@ -1,10 +1,1 @@
-#lang info
-
-(define collection "shell-completion")
-(define deps '("base"))
-
-(define pkg-desc "Completion scribpts for bash and zsh")
-
-(define pkg-authors '(samth sstrickl stamourv))
-
-(define test-responsibles '(("racket-completion.zsh" eli)))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "shell-completion") (define deps (quote ("base"))) (define pkg-desc "Completion scribpts for bash and zsh") (define pkg-authors (quote (samth sstrickl stamourv))) (define test-responsibles (quote (("racket-completion.zsh" eli))))))

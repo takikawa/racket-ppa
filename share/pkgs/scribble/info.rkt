@@ -1,12 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("scribble-lib"
-               "scribble-doc"))
-(define implies '("scribble-lib"
-                  "scribble-doc"))
-
-(define pkg-desc "Racket documentatation and typesetting tool")
-
-(define pkg-authors '(mflatt eli))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("scribble-lib" "scribble-doc"))) (define implies (quote ("scribble-lib" "scribble-doc"))) (define pkg-desc "Racket documentatation and typesetting tool") (define pkg-authors (quote (mflatt eli)))))

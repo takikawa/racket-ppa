@@ -1,13 +1,1 @@
-#lang info
-
-(define collection "eopl")
-(define deps '("base"
-               "compatibility-lib"))
-(define scribblings '(("eopl.scrbl" () (teaching -20))))
-(define build-deps '("rackunit-lib"
-                     "racket-doc"
-                     "scribble-lib"))
-
-(define pkg-desc "Teaching language for _Essentials of Programming Languages_")
-
-(define pkg-authors '(dvanhorn))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "eopl") (define deps (quote ("base" "compatibility-lib"))) (define scribblings (quote (("eopl.scrbl" () (teaching -20))))) (define build-deps (quote ("rackunit-lib" "racket-doc" "scribble-lib"))) (define pkg-desc "Teaching language for _Essentials of Programming Languages_") (define pkg-authors (quote (dvanhorn)))))

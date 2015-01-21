@@ -1,9 +1,1 @@
-#lang info
-
-(define collection 'multi)
-(define deps '("base"
-               "unstable-pretty-lib"))
-
-(define pkg-desc "Experimental libraries for debugging")
-
-(define pkg-authors '(samth))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base" "unstable-pretty-lib"))) (define pkg-desc "Experimental libraries for debugging") (define pkg-authors (quote (samth)))))

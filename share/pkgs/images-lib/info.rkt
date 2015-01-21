@@ -1,15 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("base"
-               "draw-lib"
-               "unstable-latent-contract-lib"
-               "unstable-parameter-group-lib"
-               "typed-racket-lib"))
-
-(define pkg-desc "Functions for constructing icons and logos")
-
-(define pkg-authors '(ntoronto))
-
-(define version "1.1")
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base" "draw-lib" "unstable-latent-contract-lib" "unstable-parameter-group-lib" "typed-racket-lib"))) (define pkg-desc "Functions for constructing icons and logos") (define pkg-authors (quote (ntoronto))) (define version "1.1")))

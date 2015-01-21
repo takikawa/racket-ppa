@@ -1,11 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("scheme-lib"
-               "base" "at-exp-lib"
-               "scribble-text-lib"))
-
-(define pkg-desc "Language for HTML with embedded Racket code")
-
-(define pkg-authors '(mflatt eli))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("scheme-lib" "base" "at-exp-lib" "scribble-text-lib"))) (define pkg-desc "Language for HTML with embedded Racket code") (define pkg-authors (quote (mflatt eli)))))

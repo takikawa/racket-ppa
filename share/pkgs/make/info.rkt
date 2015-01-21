@@ -1,16 +1,1 @@
-#lang info
-
-(define collection "make")
-
-(define scribblings '(("make.scrbl" (multi-page) (tool-library))))
-(define deps '("scheme-lib"
-               "base"
-               "cext-lib"
-               "compiler-lib"
-               "compatibility-lib"))
-(define build-deps '("racket-doc"
-                     "scribble-lib"))
-
-(define pkg-desc "Simple timestamp- and dependency-triggered actions")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "make") (define scribblings (quote (("make.scrbl" (multi-page) (tool-library))))) (define deps (quote ("scheme-lib" "base" "cext-lib" "compiler-lib" "compatibility-lib"))) (define build-deps (quote ("racket-doc" "scribble-lib"))) (define pkg-desc "Simple timestamp- and dependency-triggered actions") (define pkg-authors (quote (mflatt)))))

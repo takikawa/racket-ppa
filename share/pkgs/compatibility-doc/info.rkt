@@ -1,18 +1,1 @@
-#lang info
-(define collection 'multi)
-(define deps '("base"
-               "scribble-lib"
-               "compatibility-lib"
-               "pconvert-lib"
-               "sandbox-lib"
-	       "compiler-lib"
-               "gui-lib"
-               "racket-doc"))
-
-(define pkg-desc "documentation part of \"compatibility\"")
-
-(define pkg-authors '(eli mflatt robby samth))
-(define build-deps '("data-doc"
-                     "mzscheme-doc"
-                     "scheme-lib"))
-(define update-implies '("compatibility-lib"))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base" "scribble-lib" "compatibility-lib" "pconvert-lib" "sandbox-lib" "compiler-lib" "gui-lib" "racket-doc"))) (define pkg-desc "documentation part of \"compatibility\"") (define pkg-authors (quote (eli mflatt robby samth))) (define build-deps (quote ("data-doc" "mzscheme-doc" "scheme-lib"))) (define update-implies (quote ("compatibility-lib")))))

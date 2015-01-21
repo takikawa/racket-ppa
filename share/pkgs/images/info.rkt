@@ -1,10 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("images-lib" "images-gui-lib" "images-doc"))
-(define implies '("images-lib" "images-gui-lib" "images-doc"))
-
-(define pkg-desc "Functions (and docs and tests) for constructing icons and logos")
-
-(define pkg-authors '(ntoronto))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("images-lib" "images-gui-lib" "images-doc"))) (define implies (quote ("images-lib" "images-gui-lib" "images-doc"))) (define pkg-desc "Functions (and docs and tests) for constructing icons and logos") (define pkg-authors (quote (ntoronto)))))

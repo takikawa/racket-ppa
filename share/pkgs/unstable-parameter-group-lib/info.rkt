@@ -1,8 +1,1 @@
-#lang info
-
-(define collection 'multi)
-(define deps '("base"))
-
-(define pkg-desc "Experimental libraries for parameter groups")
-
-(define pkg-authors '(mflatt ntoronto))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Experimental libraries for parameter groups") (define pkg-authors (quote (mflatt ntoronto)))))

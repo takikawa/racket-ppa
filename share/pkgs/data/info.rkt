@@ -1,10 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("data-lib" "data-doc"))
-(define implies '("data-lib" "data-doc"))
-
-(define pkg-desc "Data strucutures")
-
-(define pkg-authors '(ryanc))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("data-lib" "data-doc"))) (define implies (quote ("data-lib" "data-doc"))) (define pkg-desc "Data strucutures") (define pkg-authors (quote (ryanc)))))

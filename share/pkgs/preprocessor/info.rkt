@@ -1,17 +1,1 @@
-#lang info
-
-(define collection "preprocessor")
-
-(define mzscheme-launcher-names     '("mzpp"         "mztext"))
-(define mzscheme-launcher-libraries '("mzpp-run.rkt" "mztext-run.rkt"))
-
-(define scribblings '(("scribblings/preprocessor.scrbl" (multi-page) (legacy))))
-(define deps '("scheme-lib"
-               "base"
-               "compatibility-lib"))
-(define build-deps '("racket-doc"
-                     "scribble-lib"))
-
-(define pkg-desc "Preprocessors for text with embedded Racket code (mostly replaced by scribble/text)")
-
-(define pkg-authors '(eli))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "preprocessor") (define mzscheme-launcher-names (quote ("mzpp" "mztext"))) (define mzscheme-launcher-libraries (quote ("mzpp-run.rkt" "mztext-run.rkt"))) (define scribblings (quote (("scribblings/preprocessor.scrbl" (multi-page) (legacy))))) (define deps (quote ("scheme-lib" "base" "compatibility-lib"))) (define build-deps (quote ("racket-doc" "scribble-lib"))) (define pkg-desc "Preprocessors for text with embedded Racket code (mostly replaced by scribble/text)") (define pkg-authors (quote (eli)))))

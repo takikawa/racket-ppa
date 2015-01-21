@@ -1,17 +1,1 @@
-#lang info
-
-(define collection "unstable")
-
-(define deps '("base"
-               "draw-lib"
-               "gui-lib"
-               "pict-lib"
-               "scribble-lib"
-               "slideshow-lib"
-               "unstable-macro-testing-lib"))
-(define implies '("unstable-macro-testing-lib"))
-(define build-deps '("rackunit-lib"))
-
-(define pkg-desc "implementation (no documentation) part of \"unstable\"")
-
-(define pkg-authors '(jay samth cce ryanc))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "unstable") (define deps (quote ("base" "draw-lib" "gui-lib" "pict-lib" "scribble-lib" "slideshow-lib" "unstable-macro-testing-lib"))) (define implies (quote ("unstable-macro-testing-lib"))) (define build-deps (quote ("rackunit-lib"))) (define pkg-desc "implementation (no documentation) part of \"unstable\"") (define pkg-authors (quote (jay samth cce ryanc)))))

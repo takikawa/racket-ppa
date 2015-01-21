@@ -1,13 +1,1 @@
-#lang info
-
-(define collection "ds-store")
-
-(define deps '("ds-store-lib"
-               "ds-store-doc"
-               "base"))
-(define implies '("ds-store-lib"
-                  "ds-store-doc"))
-
-(define pkg-desc "Libraries for manipulating \".DS_Store\" files")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "ds-store") (define deps (quote ("ds-store-lib" "ds-store-doc" "base"))) (define implies (quote ("ds-store-lib" "ds-store-doc"))) (define pkg-desc "Libraries for manipulating \".DS_Store\" files") (define pkg-authors (quote (mflatt)))))

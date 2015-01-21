@@ -1,8 +1,1 @@
-#lang info
-(define deps '("base"
-               "compatibility-lib")) ;; for mlist
-(define collection 'multi)
-
-(define pkg-desc "Legacy library for printing Racket values")
-
-(define pkg-authors '(robby))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define deps (quote ("base" "compatibility-lib"))) (define collection (quote multi)) (define pkg-desc "Legacy library for printing Racket values") (define pkg-authors (quote (robby)))))

@@ -1,10 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("htdp-lib" "htdp-doc"))
-(define implies '("htdp-lib" "htdp-doc"))
-
-(define pkg-desc "Teaching languages for _How to Design Programs_")
-
-(define pkg-authors '(matthias mflatt robby))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("htdp-lib" "htdp-doc"))) (define implies (quote ("htdp-lib" "htdp-doc"))) (define pkg-desc "Teaching languages for _How to Design Programs_") (define pkg-authors (quote (matthias mflatt robby)))))

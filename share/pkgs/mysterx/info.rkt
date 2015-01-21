@@ -1,14 +1,1 @@
-#lang info
-
-(define collection "mysterx")
-
-(define scribblings '(("scribblings/mysterx.scrbl" (multi-page) (legacy))))
-(define deps '("scheme-lib"
-               "base"))
-(define build-deps '("racket-doc"
-                     "at-exp-lib"
-                     "scribble-lib"))
-
-(define pkg-desc "Legacy library for working with COM on Windows")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "mysterx") (define scribblings (quote (("scribblings/mysterx.scrbl" (multi-page) (legacy))))) (define deps (quote ("scheme-lib" "base"))) (define build-deps (quote ("racket-doc" "at-exp-lib" "scribble-lib"))) (define pkg-desc "Legacy library for working with COM on Windows") (define pkg-authors (quote (mflatt)))))

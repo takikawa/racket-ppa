@@ -1,16 +1,1 @@
-#lang info
-
-(define collection "trace")
-
-(define name "Calltrace")
-
-(define deps '("scheme-lib"
-               "base"
-               "compatibility-lib"
-               ))
-(define build-deps '("scribble-lib"
-                     "racket-doc"))
-
-(define pkg-desc "Instrumentation to show function calls")
-
-(define pkg-authors '(mflatt robby))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "trace") (define name "Calltrace") (define deps (quote ("scheme-lib" "base" "compatibility-lib"))) (define build-deps (quote ("scribble-lib" "racket-doc"))) (define pkg-desc "Instrumentation to show function calls") (define pkg-authors (quote (mflatt robby)))))

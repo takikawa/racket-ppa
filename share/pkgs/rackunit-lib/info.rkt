@@ -1,11 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("srfi-lite-lib"
-               "base"
-               "data-lib"))
-
-(define pkg-desc "RackUnit testing framework")
-
-(define pkg-authors '(ryanc noel))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("srfi-lite-lib" "base" "data-lib"))) (define pkg-desc "RackUnit testing framework") (define pkg-authors (quote (ryanc noel)))))

@@ -1,14 +1,1 @@
-#lang info
-
-(define collection 'multi)
-(define deps '("base"))
-(define build-deps '("scheme-lib"
-                     "racket-doc"
-                     "syntax-color-doc"
-                     "parser-tools-lib"
-                     "scribble-lib"))
-(define update-implies '("parser-tools-lib"))
-
-(define pkg-desc "documentation part of \"parser-tools\"")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base"))) (define build-deps (quote ("scheme-lib" "racket-doc" "syntax-color-doc" "parser-tools-lib" "scribble-lib"))) (define update-implies (quote ("parser-tools-lib"))) (define pkg-desc "documentation part of \"parser-tools\"") (define pkg-authors (quote (mflatt)))))

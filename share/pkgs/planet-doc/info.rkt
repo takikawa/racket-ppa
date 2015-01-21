@@ -1,14 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("planet-lib"
-               "scribble-lib"
-               "base"))
-
-(define pkg-desc "documentation part of \"planet\"")
-
-(define pkg-authors '(mflatt robby))
-(define build-deps '("racket-doc"
-                     "scribble-doc"))
-(define update-implies '("planet-lib"))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("planet-lib" "scribble-lib" "base"))) (define pkg-desc "documentation part of \"planet\"") (define pkg-authors (quote (mflatt robby))) (define build-deps (quote ("racket-doc" "scribble-doc"))) (define update-implies (quote ("planet-lib")))))

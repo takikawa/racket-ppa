@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("draw-lib" "snip-lib" "pict-lib" "wxme-lib" "base"))) (define build-deps (quote ("rackunit-lib" "gui-lib"))) (define pkg-desc "implementation (no documentation) part of \"pict-snip\"") (define pkg-authors (quote (robby)))))

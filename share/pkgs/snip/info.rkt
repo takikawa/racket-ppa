@@ -1,10 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("snip-lib"
-               "gui-doc"))
-
-(define pkg-desc "Text and graphics editor extension protocol")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("snip-lib" "gui-doc"))) (define pkg-desc "Text and graphics editor extension protocol") (define pkg-authors (quote (mflatt)))))

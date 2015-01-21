@@ -1,14 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("typed-racket-lib"
-               "typed-racket-doc"))
-(define implies '("typed-racket-lib"
-                  "typed-racket-doc"))
-
-(define pkg-desc "The implementation of the Typed Racket language")
-
-(define pkg-authors '(samth stamourv))
-
-(define version "1.1")
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("typed-racket-lib" "typed-racket-doc"))) (define implies (quote ("typed-racket-lib" "typed-racket-doc"))) (define pkg-desc "The implementation of the Typed Racket language") (define pkg-authors (quote (samth stamourv))) (define version "1.1")))

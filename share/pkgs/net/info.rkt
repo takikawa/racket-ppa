@@ -1,10 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("net-lib" "net-doc"))
-(define implies '("net-lib" "net-doc"))
-
-(define pkg-desc "Networking libraries")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("net-lib" "net-doc"))) (define implies (quote ("net-lib" "net-doc"))) (define pkg-desc "Networking libraries") (define pkg-authors (quote (mflatt)))))

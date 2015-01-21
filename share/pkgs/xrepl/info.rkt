@@ -1,12 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("xrepl-lib"
-               "xrepl-doc"))
-(define implies '("xrepl-lib"
-                  "xrepl-doc"))
-
-(define pkg-desc "Console-oriented extended REPL for Racket")
-
-(define pkg-authors '(eli))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("xrepl-lib" "xrepl-doc"))) (define implies (quote ("xrepl-lib" "xrepl-doc"))) (define pkg-desc "Console-oriented extended REPL for Racket") (define pkg-authors (quote (eli)))))

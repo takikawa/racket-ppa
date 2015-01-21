@@ -1,14 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("base"
-               "data-lib"
-               "rackunit-lib"
-               "rackunit-gui"
-               "gui-lib"
-               "drracket-plugin-lib"))
-
-(define pkg-desc "RackUnit testing framework DrRacket plugin")
-
-(define pkg-authors '(ryanc noel))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base" "data-lib" "rackunit-lib" "rackunit-gui" "gui-lib" "drracket-plugin-lib"))) (define pkg-desc "RackUnit testing framework DrRacket plugin") (define pkg-authors (quote (ryanc noel)))))

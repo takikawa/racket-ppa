@@ -1,9 +1,1 @@
-#lang info
-
-(define collection "ds-store")
-(define deps '("base"))
-
-
-(define pkg-desc "implementation (no documentation) part of \"ds-store\"")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection "ds-store") (define deps (quote ("base"))) (define pkg-desc "implementation (no documentation) part of \"ds-store\"") (define pkg-authors (quote (mflatt)))))

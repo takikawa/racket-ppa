@@ -1,15 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define build-deps '("base"
-                     "scribble-lib"
-                     "profile-lib"
-                     "errortrace-doc"
-                     "errortrace-lib"
-                     "racket-doc"))
-(define update-implies '("profile-lib"))
-
-(define pkg-desc "documentation part of \"profile\"")
-
-(define pkg-authors '(eli))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define build-deps (quote ("base" "scribble-lib" "profile-lib" "errortrace-doc" "errortrace-lib" "racket-doc"))) (define update-implies (quote ("profile-lib"))) (define pkg-desc "documentation part of \"profile\"") (define pkg-authors (quote (eli)))))

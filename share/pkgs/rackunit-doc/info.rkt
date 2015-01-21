@@ -1,15 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("base"))
-
-(define pkg-desc "RackUnit documentation")
-
-(define pkg-authors '(noel ryanc))
-(define build-deps '("racket-index"
-                     "racket-doc"
-                     "rackunit-gui"
-                     "rackunit-lib"
-                     "scribble-lib"))
-(define update-implies '("rackunit-lib"))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "RackUnit documentation") (define pkg-authors (quote (noel ryanc))) (define build-deps (quote ("racket-index" "racket-doc" "rackunit-gui" "rackunit-lib" "scribble-lib"))) (define update-implies (quote ("rackunit-lib")))))

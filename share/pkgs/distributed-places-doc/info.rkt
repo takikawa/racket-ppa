@@ -1,14 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("base"
-               "distributed-places-lib"
-               "racket-doc"
-               "sandbox-lib"
-               "scribble-lib"))
-(define update-implies '("distributed-places-lib"))
-
-(define pkg-desc "documentation part of \"distributed-places\"")
-
-(define pkg-authors '(tewk))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("base" "distributed-places-lib" "racket-doc" "sandbox-lib" "scribble-lib"))) (define update-implies (quote ("distributed-places-lib"))) (define pkg-desc "documentation part of \"distributed-places\"") (define pkg-authors (quote (tewk)))))

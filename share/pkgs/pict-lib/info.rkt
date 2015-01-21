@@ -1,15 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define deps '("scheme-lib"
-               "base"
-               "compatibility-lib"
-               "draw-lib"))
-(define build-deps '("rackunit-lib"))
-
-(define pkg-desc "implementation (no documentation) part of \"pict\"")
-
-(define pkg-authors '(mflatt robby))
-
-(define version "1.3")
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define deps (quote ("scheme-lib" "base" "compatibility-lib" "draw-lib"))) (define build-deps (quote ("rackunit-lib"))) (define pkg-desc "implementation (no documentation) part of \"pict\"") (define pkg-authors (quote (mflatt robby))) (define version "1.3")))

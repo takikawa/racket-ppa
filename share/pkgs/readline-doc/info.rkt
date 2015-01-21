@@ -1,13 +1,1 @@
-#lang info
-
-(define collection 'multi)
-
-(define build-deps '("scribble-lib"
-                     "readline-lib"
-                     "racket-doc"))
-(define deps '("base"))
-(define update-implies '("readline-lib"))
-
-(define pkg-desc "documentation part of \"readline\"")
-
-(define pkg-authors '(mflatt))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.1.1"))) (define collection (quote multi)) (define build-deps (quote ("scribble-lib" "readline-lib" "racket-doc"))) (define deps (quote ("base"))) (define update-implies (quote ("readline-lib"))) (define pkg-desc "documentation part of \"readline\"") (define pkg-authors (quote (mflatt)))))
