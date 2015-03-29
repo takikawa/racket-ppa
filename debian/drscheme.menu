@@ -2,4 +2,4 @@
 	section="Applications/Programming" title="DrScheme"		\
   	command="/usr/bin/drscheme"                		\
 	hints="Development Environment"				\
-	icon="/usr/lib/plt/collects/icons/plt.xpm"
+	icon="/usr/share/racket/pkgs/icons/plt.xpm"

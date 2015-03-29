@@ -40,7 +40,7 @@ Files: src/racket/src/lightning/i386/fp-sse.h
 Copyright: © 2006, 2010 Free Software Foundation, Inc.
 License: LGPL3+
 
-File: collects/gui-debugger/icons/clanbomber-*.png, collects/icons/stop*.png
+File: share/pkgs/drracket/gui-debugger/icons/clanbomber-*.png, share/pkgs/icons/stop*.png
 Copyright: © 2008 Everaldo Coelho
 License: LGPL2.1+
 
