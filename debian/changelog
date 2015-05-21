@@ -1,3 +1,9 @@
+racket (6.1.1-2) unstable; urgency=medium
+
+  * upload to unstable
+
+ -- David Bremner <bremner@debian.org>  Thu, 21 May 2015 22:02:23 +0200
+
 racket (6.1.1-1) experimental; urgency=medium
 
   * New upstream release
